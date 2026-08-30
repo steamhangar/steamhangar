@@ -451,13 +451,18 @@ otherwise:
 - **Instrumented Android tests.** All 578 Android tests run on the JVM;
   none have run yet against a real device or emulator, including the
   release-signing path.
-- **A settings switch for "keep the cache current."** The backend half —
-  the sweep mode named throughout this README, on by default since
-  [ADR-0014](docs/adr/0014-sweep-cached-and-auto-gc-default-on.md) — already
-  ships; the same gap the manifest oracle has above: no toggle for it exists
-  in either frontend yet, so turning it back *off* today means `PATCH
-  /v1/settings` (from a `curl`, or the API directly) or an `.env` edit, not
-  clicking anything.
+- **Download speed throttling, possibly time-dependent.** Nothing in the
+  stack limits how fast SteamHangar pulls from Steam today; the shipped
+  night window (03:00-07:00 local, [ADR-0014](docs/adr/0014-sweep-cached-and-auto-gc-default-on.md))
+  confines *when* the bulk downloads run, not *how fast*. Planned: a
+  bandwidth cap on the upstream (Steam → vault) direction — the WAN side
+  is the scarce resource; serving the LAN should stay at wire speed —
+  optionally varying by time of day (full speed inside the night window,
+  capped outside it, e.g. for a daytime "I want this game tonight"
+  prefill). Open design questions: whether SteamPrefill exposes a native
+  concurrency/rate knob or the limit belongs at the container level, and
+  how a cap interacts with the window scheduler. Until then, per-device
+  QoS on the router covers the same need without any code.
 - **The web UI's own still-open validation list:** real screen-reader
   testing, how cover art actually renders on a phone browser, and
   performance at a much larger library size than has been tested so far —

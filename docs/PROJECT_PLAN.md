@@ -2468,3 +2468,19 @@ Phases 1–3 plus 4a shipped. Rewritten 2026-08-17 to reflect the real state.
    surface. Four review rounds; the durable outcome is recorded in
    docs/LEARNINGS.md (the guarantee-vs-mechanism ceiling of name-based
    isolation scans). Real-device residuals listed in app/README.md.
+10. [ ] **Download throttling, possibly time-dependent** (operator request
+    2026-08-30, roadmap entry — not yet a scoped work package). Cap the
+    upstream (Steam → vault) bandwidth; LAN serving stays uncapped. The
+    time-dependent shape ties into the shipped schedule window: full
+    speed inside 03:00-07:00, capped outside it, so a daytime manual
+    prefill ("I want this game tonight") does not saturate the WAN while
+    people use it. Scoping questions to answer before briefing: does
+    SteamPrefill expose a native concurrency/rate option (check upstream
+    before building anything); if not, container-level shaping in
+    compose vs. documenting router QoS as the supported answer; and how
+    a cap interacts with the window scheduler (a capped sweep takes
+    longer than its window — does it stop at the window edge or run
+    over?). Interim answer that works today with zero code: per-device
+    QoS on the operator's router (Omada), which throttles exactly the
+    Steam-facing direction. README Roadmap carries the user-facing
+    version of this entry.
