@@ -467,6 +467,17 @@ otherwise:
   testing, how cover art actually renders on a phone browser, and
   performance at a much larger library size than has been tested so far —
   none blocking, all honestly unverified rather than assumed fine.
+- **A macvlan deploy example for hosts whose port 80 is already taken.**
+  Steam clients require plain HTTP on port 80, so on a server where a
+  reverse proxy (Traefik, Nginx Proxy Manager) already owns that port,
+  the cache needs a second LAN address. Today that means a host-side IP
+  alias plus pinning the proxy to the primary address — which works and
+  is the established pattern for cache setups on a single host, but
+  involves platform-specific network clicks. Planned: a documented
+  compose override giving the cache container its own LAN IP via a
+  macvlan network, shipped as an example with its trade-offs stated
+  (the host itself cannot reach a macvlan container directly, which
+  affects same-host health probes and DNS targets).
 - **External integrations beyond the generic webhook already shipped:**
   delivering to several webhook targets at once instead of exactly one,
   native Discord/Slack payload formats (Discord currently needs a relay in

@@ -2484,3 +2484,20 @@ Phases 1–3 plus 4a shipped. Rewritten 2026-08-17 to reflect the real state.
     QoS on the operator's router (Omada), which throttles exactly the
     Steam-facing direction. README Roadmap carries the user-facing
     version of this entry.
+11. [ ] **Macvlan deploy example — vault-core on its own LAN IP** (operator
+    request 2026-08-30, roadmap entry — not yet a scoped work package).
+    Steam clients require plain HTTP on port 80 (Steam's choice), so on
+    a host whose port 80 is already owned by a reverse proxy (Traefik,
+    NPM — the homelab default) vault-core needs a second address. Today
+    that means a host-side IP alias created in the platform's own UI
+    (TrueNAS middleware, so it survives reboots). The comfortable
+    shipped answer: a documented compose override giving vault-core its
+    own LAN IP via a macvlan network — Docker-native, no host network
+    clicks, the established lancache pattern. Must ship as an EXAMPLE
+    with its caveats stated, not as a silent default: the host cannot
+    reach a macvlan container directly (affects the host-side health
+    probes and any same-host DNS rewrite target), the parent interface
+    and address range are operator-specific, and Dockge/TrueNAS
+    interaction needs a real test on the deployment this was requested
+    for. Belongs in deploy/examples/ beside minimal-lan and tuned-setup,
+    with a verify recipe; footprint deploy/ + docs only.
