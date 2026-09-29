@@ -12,9 +12,10 @@ what may run in parallel and what must stay serial — and why.
 2. Start a session whose brief is the package section below, verbatim, plus:
    read `docs/LEARNINGS.md` and the listed ADRs BEFORE writing code.
 3. Pipeline inside the session is unchanged and mandatory:
-   coder implements → reviewer (Opus) reviews → FAIL loops back → PASS.
-   Packages marked **[Fable]** additionally get a second pass at the
-   irreversible boundary before merge.
+   coder implements → reviewer reviews → FAIL loops back → PASS.
+   Packages marked **[Fable]** additionally get a second review pass with
+   the strongest available model at the irreversible boundary before merge
+   — the marker names the boundary, not a model.
 4. One package = one branch = one conventional commit (squash if needed).
    Update `docs/PROJECT_PLAN.md` checkboxes (with evidence notes) and
    append distilled findings to `docs/LEARNINGS.md` in the same commit.

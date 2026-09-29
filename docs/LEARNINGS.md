@@ -610,6 +610,17 @@ These are not style preferences; each entry cost a review round to learn.
   order, so a hardcoded `eth0` inside a multi-network container may be the
   wrong interface (WP EG-1: picked the internal net with no gateway); find
   the gateway-bearing interface via /proc/net/route instead.
+- A model name hard-coded in an agent definition (`model: sonnet`/`opus`)
+  or in the working agreement pins a TIER by name regardless of the
+  session's model, and nothing fails loudly when that tier is weaker or
+  outdated — the coder ran one tier below the session model and no file
+  showed it. (Family aliases do track the newest model of their family;
+  the defect is the fixed tier, not a stale generation.) Fix: `model:
+  inherit` in every agent frontmatter so delegation rides the session's
+  current model, plus call-time selection ("strongest available")
+  wherever the working agreement asks for a stronger second pass — never
+  a model name in a file or brief. Basis: user decision 2026-09-29, not a
+  failed review round (WP R-0).
 
 ## 2026-08-22 — the defaults-flip wave (SWEEP-1, APP-DEMO, 4d-web, AG-0, CI-3/AGENT-BIN)
 
