@@ -125,6 +125,11 @@ value.
 
 ## 2. Part B — does `proxy_limit_rate $var` cap the proxy_store MISS path?
 
+> Erratum (2026-09-30, WP TH-0b): nginx parses `200k` as 200 × 1024 =
+> 204,800 B/s, so the percentages in 2.2 are 96.4-97.6 % of the cap (not
+> 98.7-99.9 % of 200,000) and the 2.5 ratio is 3.88× (not 3.97×); the
+> conclusions stand — see `poc/throttle/RESULTS-THROTTLE-DYNAMIC-20260930.md`.
+
 ### 2.0 Setup facts
 
 - Test object: `/depot/70403/chunk/773d10050d99b2544665873ec2125b3bf273e8b2`
