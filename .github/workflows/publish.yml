@@ -818,11 +818,20 @@ jobs:
           CERTS="$RUNNER_TEMP/apksigner-certs.txt"
           "$APKSIGNER" verify --print-certs "$APK_PATH" > "$CERTS"
           cat "$CERTS"
-          CERT_SHA256="$(sed -n 's/^Signer #1 certificate SHA-256 digest: \([0-9a-f]\{64\}\)$/\1/p' "$CERTS")"
-          if [ -z "$CERT_SHA256" ] || grep -q '^Signer #2 ' "$CERTS"; then
-            echo "::error::expected exactly one signer with a SHA-256 certificate digest -- refusing to publish this APK." >&2
+          # The label in front of the digest varies by build-tools version
+          # and signature scheme ("Signer #1", or "Signer (minSdkVersion=..,
+          # maxSdkVersion=..)" for a v3.x block), and one certificate may be
+          # listed once per block. What must hold: every listed digest is the
+          # SAME certificate. First tag run (v0.1.0-rc1) failed on the old
+          # "Signer #1"-only pattern.
+          tr -d '\r' < "$CERTS" \
+            | sed -n 's/^Signer.* certificate SHA-256 digest: \([0-9a-fA-F]\{64\}\)$/\1/p' \
+            | tr 'A-F' 'a-f' | sort -u > "$CERTS.digests"
+          if [ "$(wc -l < "$CERTS.digests")" -ne 1 ]; then
+            echo "::error::expected exactly one signing certificate (SHA-256), found $(wc -l < "$CERTS.digests") -- refusing to publish this APK." >&2
             exit 1
           fi
+          CERT_SHA256="$(cat "$CERTS.digests")"
           echo "cert_sha256=${CERT_SHA256}" >> "$GITHUB_OUTPUT"
           {
             echo "### Android release APK -- signed and verified"
