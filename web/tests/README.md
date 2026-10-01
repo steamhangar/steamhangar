@@ -2437,3 +2437,57 @@ rewritten. Re-checked after the refactor: notice render removed, Reload
 unwired, relay polled on games ticks — all still killed.
 
 Suite: **908 tests, 908 pass, 0 fail**.
+
+### WP WEB-FEAT-2 — onboarding step 2 saves the SteamID64
+
+- `onboarding-steamid.test.js` — `onboarding.js` step 2 through fake-dom
+  and the real `api.js` against a recording fetch fake: a lookup the relay
+  answered PATCHes the RAW body `{"steam_library_steamid":"<17 digits>"}`
+  and confirms it in a `role="status"` span; the same id again sends no
+  second PATCH; relay 409 / 422 / 504 send no PATCH and show the shared
+  strings; an invalid typed id reaches neither relay nor settings; 0 games
+  still saves and shows the private hint; read-only settings and an older
+  vault-api without the setting send no PATCH and say "Not saved"; the
+  input is pre-filled from the stored value, a typed id is not overwritten,
+  and a fresh open clears both input and saved line.
+- The save goes through `lib/owned-library.js`'s `saveLibrarySteamId`,
+  which Settings' "Save SteamID64" now uses too, so
+  `steam-library-setting.test.js` pins the shared helper from that side.
+
+Mutation evidence (each applied alone, then restored), all killed: the
+save call after a lookup removed; a save added to the failure path; the
+private hint removed; the read-only guard removed; the absent-setting guard
+removed; the prefill removed; the id sent as `Number(...)`; the settings
+snapshot not replaced by the PATCH answer; the input not cleared on open;
+Settings not taking the PATCH answer from the shared helper.
+
+Review fix round (FAIL on test gaps; production code judged correct):
+- `onboarding-steamid.test.js` gained: failed PATCH 500 ("Not saved:
+  <detail>.", snapshot kept so the next Look up PATCHes again) and 422
+  (invalid-id text plus detail, one period); env-only setting (no PATCH,
+  "set by the server environment"); double click while the relay call is
+  gated (one relay call, one PATCH); input edited mid-flight (the looked-up
+  id is saved); "Go to library" during a running save (waits, PATCH before
+  the one reload, a second press does not reload twice); a later failed
+  lookup clears "Saved"; the status `<p>` is never hidden; the input is
+  `aria-describedby` its hint; the Saved line names the id.
+- `owned-library.test.js` gained direct `saveLibrarySteamId` cases (SAVED,
+  INVALID, UNCHANGED, READONLY, ABSENT, ENV_ONLY, blank override, ERROR
+  500/422, the "Request failed." fallback) and `describeLookupError`.
+- `keyboard-pointer-model.test.js`: `.btn[aria-disabled="true"]` joins the
+  order-dependent pairs (must follow `.btn:hover`).
+
+Mutation evidence for the round (each applied alone in the real tree, full
+suite run, then restored), all killed: ERROR reported as Saved; the
+in-flight guard removed; the in-flight promise never stored; the live input
+value saved instead of the looked-up id; `finish()` not awaiting the
+lookup; the `finish()` re-entry guard removed; the clear of the save line
+removed; the busy CSS rule removed; an optimistic snapshot update on a
+failed save; the period rule accepting `)`; the env-only branch removed;
+the fallback without a period; `aria-describedby` removed; the id dropped
+from the Saved line; the status `<p>` hidden when empty; the helper's
+validation removed.
+
+Final round: "Go to library" shows "Saving…" (aria-disabled, never `disabled`) while a save runs and restores label and aria state when the overlay stays open; an unexpected Look up error is logged with `console.error` (never rejects). Mutations killed: label, aria-disabled, `disabled` instead, aria restore, label restore, the log.
+
+Suite: **934 tests, 934 pass, 0 fail**.

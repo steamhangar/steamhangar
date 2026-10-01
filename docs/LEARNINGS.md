@@ -839,3 +839,10 @@ These are not style preferences; each entry cost a review round to learn.
 - An empty relay result is not a count: a private Steam profile returns
   0 games, so "0 owned" is false. Fall back to the vault wording and
   explain in the notice (WP WEB-FEAT-1).
+- A page reload in a finish handler aborts any save still in flight.
+  Keep the in-flight promise (with a never-reject catch that logs), await
+  it in finish behind a synchronous re-entry guard, and show the wait on
+  the button (WP WEB-FEAT-2).
+- Pin race guarantees with a gated fake fetch: hold the response, act
+  (double click, edit the input, press finish), then release. Fixed
+  sleeps cannot show the order (WP WEB-FEAT-2).

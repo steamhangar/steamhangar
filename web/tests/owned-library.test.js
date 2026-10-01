@@ -35,6 +35,12 @@ import {
   NO_STEAM_KEY_MESSAGE,
   INVALID_STEAMID64_MESSAGE,
   PRIVATE_PROFILE_MESSAGE,
+  LIBRARY_SETTING_ABSENT_MESSAGE,
+  LIBRARY_SETTING_ENV_ONLY_MESSAGE,
+  SETTINGS_READONLY_MESSAGE,
+  SAVE_OUTCOME,
+  saveLibrarySteamId,
+  describeLookupError,
 } from "../js/lib/owned-library.js";
 import { statusAction, dispKind, KIND } from "../js/lib/game-status.js";
 import { classifyBulkSelection, buildBulkDownloadPlan, classifyBulkDeleteEligibility } from "../js/lib/bulk-plan.js";
@@ -425,4 +431,75 @@ test("G6 MUTATION PIN: an OLDER load whose settings read lands after a newer loa
   assert.equal(loader.current().status, OWNED_STATUS.READY, "the stale blank setting must not flip the state to UNSET");
   assert.deepEqual(loader.current().games.map((g) => g.appid), [2]);
   assert.deepEqual(ownedCalls, [STEAMID], "the superseded load never reached the relay");
+});
+
+// --- WP WEB-FEAT-2: saveLibrarySteamId / describeLookupError -------------
+
+function settingsWith(entry, readonly = false) {
+  const settings = [{ key: "vault_name", effective: "vault-01", source: "default", env_only: false }];
+  if (entry) settings.push({ key: "steam_library_steamid", effective: "", source: "default", env_only: false, ...entry });
+  return { readonly, settings };
+}
+function recordingApi(answer = (body) => ({ readonly: false, settings: [{ key: "steam_library_steamid", effective: body.steam_library_steamid }] })) {
+  const bodies = [];
+  return {
+    bodies,
+    async patchSettings(body) {
+      bodies.push(JSON.stringify(body));
+      return answer(body);
+    },
+  };
+}
+
+test("saveLibrarySteamId: SAVED sends the trimmed id as a STRING and returns the PATCH answer", async () => {
+  const api = recordingApi();
+  const r = await saveLibrarySteamId(api, settingsWith({}), `  ${STEAMID} `);
+  assert.equal(r.outcome, SAVE_OUTCOME.SAVED);
+  assert.deepEqual(api.bodies, [`{"steam_library_steamid":"${STEAMID}"}`]);
+  assert.equal(r.settingsResponse.settings[0].effective, STEAMID);
+});
+
+test("saveLibrarySteamId: INVALID never PATCHes", async () => {
+  const api = recordingApi();
+  const r = await saveLibrarySteamId(api, settingsWith({}), "1234");
+  assert.deepEqual(r, { outcome: SAVE_OUTCOME.INVALID, error: INVALID_STEAMID64_MESSAGE });
+  assert.deepEqual(api.bodies, [], "MUTATION TARGET: the validation guard");
+});
+
+test("saveLibrarySteamId: UNCHANGED, READONLY, ABSENT, ENV_ONLY send nothing; blank is an empty-string override", async () => {
+  const api = recordingApi();
+  assert.deepEqual(await saveLibrarySteamId(api, settingsWith({ effective: STEAMID, source: "db" }), STEAMID), {
+    outcome: SAVE_OUTCOME.UNCHANGED,
+  });
+  assert.deepEqual(await saveLibrarySteamId(api, settingsWith({}, true), STEAMID), {
+    outcome: SAVE_OUTCOME.READONLY,
+    error: SETTINGS_READONLY_MESSAGE,
+  });
+  assert.deepEqual(await saveLibrarySteamId(api, settingsWith(null), STEAMID), {
+    outcome: SAVE_OUTCOME.ABSENT,
+    error: LIBRARY_SETTING_ABSENT_MESSAGE,
+  });
+  assert.deepEqual(await saveLibrarySteamId(api, settingsWith({ env_only: true }), STEAMID), {
+    outcome: SAVE_OUTCOME.ENV_ONLY,
+    error: LIBRARY_SETTING_ENV_ONLY_MESSAGE,
+  });
+  assert.deepEqual(api.bodies, []);
+  await saveLibrarySteamId(api, settingsWith({ effective: STEAMID, source: "db" }), "");
+  assert.deepEqual(api.bodies, ['{"steam_library_steamid":""}']);
+});
+
+test("saveLibrarySteamId: ERROR keeps the server detail; a 422 leads with the invalid-id text; fallback ends with a period", async () => {
+  const failing = (err) => ({ async patchSettings() { throw err; } });
+  const e500 = await saveLibrarySteamId(failing({ status: 500, detail: "database is locked" }), settingsWith({}), STEAMID);
+  assert.deepEqual(e500, { outcome: SAVE_OUTCOME.ERROR, error: "database is locked" });
+  const e422 = await saveLibrarySteamId(failing({ status: 422, detail: "must be a string" }), settingsWith({}), STEAMID);
+  assert.deepEqual(e422, { outcome: SAVE_OUTCOME.ERROR, error: `${INVALID_STEAMID64_MESSAGE} (must be a string)` });
+  const bare = await saveLibrarySteamId(failing({}), settingsWith({}), STEAMID);
+  assert.equal(bare.error, "Request failed.", "same fallback as the views' errorText()");
+});
+
+test("describeLookupError: 409 / 422 shared strings, anything else the detail", () => {
+  assert.equal(describeLookupError({ status: 409, detail: "no key" }), NO_STEAM_KEY_MESSAGE);
+  assert.equal(describeLookupError({ status: 422, detail: "bad id" }), INVALID_STEAMID64_MESSAGE);
+  assert.equal(describeLookupError({ status: 504, detail: "Steam upstream timed out" }), "Steam upstream timed out");
 });

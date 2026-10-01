@@ -12,10 +12,21 @@
  *     vault-api and the WP 4a.1 CSP is same-origin-only — see api.js's
  *     module header for the removed `getServerUrl`/`setServerUrl`.
  *   Step 2 Steam identity — OPTIONAL: the Steam Web API relay's key
- *     (WP 4a.6r) plus a SteamID64, with a live library-preview lookup. This
+ *     (WP 4a.6r) plus a SteamID64, with a live library lookup. This
  *     is a key-entry form, NOT Valve OpenID — that stays the native
  *     Android app's device-local path (ADR-0004 decision 2). "Continue
  *     without one" is simply the unconditional Continue button.
+ *     WP WEB-FEAT-2: a lookup the relay answered also STORES the id as the
+ *     vault's library SteamID64 (`steam_library_steamid`, the setting the
+ *     Settings "Steam library" block edits), through the same helper as
+ *     Settings' Save (`lib/owned-library.js`'s `saveLibrarySteamId`: JSON
+ *     string, only a real change is sent). A failed lookup saves nothing;
+ *     0 games (a private profile) still saves, since the id is valid. A
+ *     read-only vault or an older vault-api without the setting keeps the
+ *     lookup-only behaviour and says the id was not saved. The input is
+ *     pre-filled from the stored value in the step-1 settings snapshot.
+ *     The Library reads the setting on every open, and `finish()` reloads
+ *     anyway, so the next library open lists the owned games.
  *   Step 3 Ready — summary, then reload the app so every module
  *     (store-singleton, app.js) re-initializes against the now-real
  *     localStorage/API state instead of trying to hot-patch it in place.
@@ -68,6 +79,14 @@ import {
 } from "./lib/onboarding-steps.js";
 import { validSteamId64 } from "./lib/steamid.js";
 import { submitSteamKey } from "./lib/steam-key-form.js";
+import {
+  INVALID_STEAMID64_MESSAGE,
+  PRIVATE_PROFILE_MESSAGE,
+  SAVE_OUTCOME,
+  describeLookupError,
+  saveLibrarySteamId,
+  steamIdFromSettings,
+} from "./lib/owned-library.js";
 import { api, checkVaultApiKey, getStoredApiKey, setStoredApiKey, isDemoMode, setDemoMode } from "./api.js";
 import { showToast } from "./components/toast.js";
 import { pushModal, popModal } from "./lib/modal-stack.js";
@@ -138,6 +157,12 @@ let els = {};
  * cleared immediately after use, so a stale reference is never refocused
  * twice. */
 let invokerEl = null;
+/** Step 2's running Look up (relay call plus save), or null. Guards a
+ * second click and is awaited by `finish()`. */
+let pendingLookup = null;
+/** True while `finish()` runs, so a second "Go to library" press cannot
+ * start a second save/reload. */
+let finishing = false;
 
 // ---------------------------------------------------------------------
 // Step 1 — Connect
@@ -231,6 +256,10 @@ function buildStep1() {
       if (!nameInput.value && vaultNameEntry && vaultNameEntry.effective) {
         nameInput.value = vaultNameEntry.effective;
       }
+      // WP WEB-FEAT-2: same pre-fill rule for step 2's SteamID64 — the
+      // stored library id, never over something already typed.
+      const storedSteamId = steamIdFromSettings(settings);
+      if (!els.step2.idInput.value && storedSteamId) els.step2.idInput.value = storedSteamId;
       // WP WEB-FIX-1 (N3): no version suffix — `GET /v1/health` is a fixed
       // `{"status":"ok"}` (api/vault_api/routers/health.py); the server
       // version lives on `GET /v1/settings`'s `server_version`, which the
@@ -295,6 +324,7 @@ function renderLookupResult() {
     );
   }
   lookupBody.appendChild(el("p", "foot-note", `${state.lookup.gameCount} games found.`));
+  if (state.lookup.gameCount === 0) lookupBody.appendChild(el("p", "foot-note", PRIVATE_PROFILE_MESSAGE));
   const list = el("ul", "bullets");
   for (const g of state.lookup.preview) {
     const li = document.createElement("li");
@@ -395,7 +425,7 @@ function buildStep2() {
   keyRow.append(saveBtn, removeBtn);
   section.append(keyField, keyRow, keyErr, statusLine);
 
-  section.append(el("h4", "sec", "Preview your library"));
+  section.append(el("h4", "sec", "Your Steam library"));
   const idField = el("div", "field");
   const idLabel = el("label", null, "SteamID64");
   idLabel.htmlFor = "onb-steam-steamid";
@@ -406,44 +436,110 @@ function buildStep2() {
   idInput.type = "text";
   idInput.inputMode = "numeric";
   idInput.placeholder = "76561198042117903";
+  idInput.autocomplete = "off";
+  idInput.spellcheck = false;
   idField.appendChild(idInput);
+  const idHint = el("p", "foot-note", "Look up checks this SteamID64 and saves it, so the Library lists every game it owns.");
+  idHint.id = "onb-steam-steamid-hint";
+  idInput.setAttribute("aria-describedby", idHint.id);
+  idField.appendChild(idHint);
   const lookupBtn = el("button", "btn sm", "Look up");
   lookupBtn.type = "button";
+  lookupBtn.dataset.role = "steamid-lookup";
+  // aria-disabled + a click guard, not `disabled`: a disabled button drops
+  // keyboard focus to <body> (LEARNINGS, WP WEB-FEAT-1).
+  lookupBtn.setAttribute("aria-disabled", "false");
   const lookupBody = el("div");
+  // Whether the id was stored. Built once and never hidden (an empty
+  // <p> renders nothing visible); role=status sits on its text-only span,
+  // so a screen reader never misses text that appears in the same render
+  // as the region (LEARNINGS, WP WEB-FEAT-1).
+  const saveNote = el("p", "foot-note");
+  saveNote.dataset.role = "steamid-save-note";
+  const saveText = el("span");
+  saveText.setAttribute("role", "status");
+  saveNote.appendChild(saveText);
 
-  lookupBtn.addEventListener("click", async () => {
+  lookupBtn.addEventListener("click", () => {
+    if (pendingLookup) return; // a lookup (and its save) is already running
+    setSaveNote("");
     const steamid = validSteamId64(idInput.value.trim());
     if (!steamid) {
-      state.lookup = { error: "That does not look like a valid SteamID64 (17 digits)." };
+      state.lookup = { error: INVALID_STEAMID64_MESSAGE };
       renderLookupResult();
       return;
     }
-    lookupBtn.disabled = true;
-    try {
-      const [owned, players] = await Promise.all([
-        api.steamOwnedGames(steamid),
-        api.steamPlayerSummaries(steamid).catch(() => null),
-      ]);
-      state.lookup = {
-        gameCount: owned.game_count,
-        preview: owned.games.slice(0, 8),
-        persona: players && players.players && players.players[0],
-      };
-    } catch (err) {
-      state.lookup = { error: errorText(err) };
-    } finally {
-      lookupBtn.disabled = false;
-      renderLookupResult();
-    }
+    // The id is fixed here: editing the input while the request runs does
+    // not change what gets saved. `finish()` awaits this promise, so the
+    // reload never cuts a running save short.
+    pendingLookup = runLookup(steamid)
+      // Every expected failure is already shown in step 2; anything else is
+      // a bug worth seeing in the console. Never rejects, so finish() is
+      // never blocked by it.
+      .catch((err) => {
+        console.error("onboarding: Look up failed unexpectedly", err);
+      })
+      .finally(() => {
+        pendingLookup = null;
+      });
   });
 
-  section.append(idField, lookupBtn, lookupBody);
+  async function runLookup(steamid) {
+    lookupBtn.setAttribute("aria-disabled", "true");
+    try {
+      let owned;
+      let players;
+      try {
+        [owned, players] = await Promise.all([
+          api.steamOwnedGames(steamid),
+          api.steamPlayerSummaries(steamid).catch(() => null),
+        ]);
+      } catch (err) {
+        // Nothing is saved for a lookup the relay refused (409 no key,
+        // 422 invalid id, anything else).
+        state.lookup = { error: describeLookupError(err) };
+        return;
+      }
+      const games = Array.isArray(owned && owned.games) ? owned.games : [];
+      state.lookup = {
+        gameCount: owned && typeof owned.game_count === "number" ? owned.game_count : games.length,
+        preview: games.slice(0, 8),
+        persona: players && players.players && players.players[0],
+      };
+      renderLookupResult();
+      setSaveNote(await saveLookedUpSteamId(steamid));
+    } finally {
+      lookupBtn.setAttribute("aria-disabled", "false");
+      renderLookupResult();
+    }
+  }
+
+  function setSaveNote(text) {
+    if (saveText.textContent !== text) saveText.textContent = text;
+  }
+
+  section.append(idField, lookupBtn, lookupBody, saveNote);
   section.append(
     el("p", "foot-note", "Not ready to link an account? Continue without one — you can set this up later under Settings."),
   );
 
-  els.step2 = { section, heading, keyInput, statusLine, removeBtn, lookupBody };
+  els.step2 = { section, heading, keyInput, statusLine, removeBtn, lookupBody, idInput, setSaveNote };
   return section;
+}
+
+/** Store a looked-up SteamID64 as the vault's library id (WP WEB-FEAT-2)
+ * and return the sentence saying whether that happened. Uses the step-1
+ * settings snapshot (step 2 is only reachable after a verified key test)
+ * and replaces it with the PATCH answer, so a second lookup compares
+ * against the stored value. */
+async function saveLookedUpSteamId(steamid) {
+  const result = await saveLibrarySteamId(api, state.settings, steamid);
+  if (result.outcome === SAVE_OUTCOME.SAVED || result.outcome === SAVE_OUTCOME.UNCHANGED) {
+    if (result.settingsResponse) state.settings = result.settingsResponse;
+    return `Saved ${steamid} — your library will show the games this SteamID64 owns.`;
+  }
+  const reason = /[.!?]$/.test(result.error) ? result.error : `${result.error}.`;
+  return `Not saved: ${reason} The lookup above still worked.`;
 }
 
 // ---------------------------------------------------------------------
@@ -640,19 +736,40 @@ function pendingVaultName() {
  * at key-test time (B1, step 1's handler); `setDemoMode(false)` here is the
  * belt to that suspenders, so a verified connect can never reload into demo. */
 async function finish() {
+  if (finishing) return;
+  finishing = true;
+  // Busy feedback while a step-2 save or the vault-name save runs:
+  // aria-disabled + the `finishing` guard, never `disabled` (which drops
+  // focus to <body>; LEARNINGS, WP WEB-FEAT-1). Restored on every path that
+  // leaves the overlay open (a failed name save waits for a retry).
+  const btn = els.nextBtn;
+  const label = btn.textContent;
+  btn.setAttribute("aria-disabled", "true");
+  btn.textContent = "Saving…";
+  try {
+    await finishOnce();
+  } finally {
+    finishing = false;
+    btn.setAttribute("aria-disabled", "false");
+    btn.textContent = label;
+  }
+}
+
+async function finishOnce() {
   const { errLine } = els.step3;
   errLine.hidden = true;
+  // WP WEB-FEAT-2: a step-2 lookup may still be saving the SteamID64; the
+  // reload below would abort that PATCH. It never rejects (runLookup
+  // reports every failure in step 2's lines).
+  if (pendingLookup) await pendingLookup;
   const name = pendingVaultName();
   if (name !== null) {
-    els.nextBtn.disabled = true;
     try {
       await api.patchSettings({ vault_name: name });
     } catch (err) {
       errLine.hidden = false;
       errLine.textContent = `Vault name not saved: ${errorText(err)} — try again, or go Back and clear the name to continue without it.`;
       return;
-    } finally {
-      els.nextBtn.disabled = false;
     }
   }
   if (state.tested) setDemoMode(false);
@@ -688,6 +805,9 @@ export function openOnboarding({ mode = "first-run", notice = "" } = {}) {
   els.step1.nameInput.value = "";
   els.step1.errLine.hidden = !notice;
   els.step1.errLine.textContent = notice;
+  els.step2.idInput.value = "";
+  els.step2.setSaveNote("");
+  renderLookupResult();
   els.step3.errLine.hidden = true;
   render();
   if (getStoredApiKey()) {
