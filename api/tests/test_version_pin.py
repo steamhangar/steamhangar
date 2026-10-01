@@ -20,7 +20,7 @@ only ``deploy/compose.yaml`` and both this module's own docstring and
 | Site | Pinned here? | Why |
 |---|---|---|
 | ``api/vault_api/__init__.py``'s ``__version__`` | n/a (the source of truth) | Everything else is compared AGAINST this |
-| ``deploy/compose.yaml`` (5x ``image:`` lines, one per service — WP S-2 added ``vault-runner``'s, WP EG-1 added ``vault-proxy``'s) | YES | in this pin's footprint, checked at startup-config time |
+| ``deploy/compose.yaml`` (5x ``image:`` lines, one per service — WP S-2 added ``vault-runner``'s, WP EG-1 added ``vault-proxy``'s; all ``ghcr.io/steamhangar/...`` since the pre-freeze review's S1 fix) | YES | in this pin's footprint, checked at startup-config time |
 | ``api/Dockerfile``'s ``org.opencontainers.image.version`` LABEL | YES | in ``api/``, this pin's footprint; a build-time literal that cannot read a Python module |
 | ``deploy/proxy/Dockerfile``'s ``org.opencontainers.image.version`` LABEL (WP EG-1) | YES | in ``deploy/``, this pin's footprint — unlike the two **NO** rows below, this component was introduced BY this WP, so it never gets to be an acknowledged gap |
 | ``deploy/tests/verify-stack.sh``'s ``TAG=${VAULT_IMAGE_TAG:-...}`` | YES | in ``deploy/``, same conceptual value as compose's default |
@@ -44,9 +44,10 @@ side of which comparison drifted.
 **Review round 2, WP S-2 blocker B1.** ``deploy/compose.yaml`` gained a
 FOURTH ``image:`` line (``vault-runner``, ADR-0012's runner split) that
 deliberately reuses the exact same image name as ``vault-api``
-(``steamhangar/vault-api`` — same codebase, same tag, different ``command:``,
-no separate build). The pre-fix version of this file's extraction keyed its
-result dict by IMAGE NAME (the value inside ``steamhangar/<name>:...``), not
+(``ghcr.io/steamhangar/vault-api`` — same codebase, same tag, different
+``command:``, no separate build). The pre-fix version of this file's
+extraction keyed its result dict by IMAGE NAME (the ``<name>`` segment of
+the image reference), not
 by which COMPOSE SERVICE the line lives under — so with two lines both
 naming the image ``vault-api``, a plain ``{image_name: default}`` dict
 comprehension let vault-runner's occurrence silently overwrite vault-api's
@@ -80,17 +81,25 @@ ENV_EXAMPLE_PATH = REPO_ROOT / "deploy" / ".env.example"
 #: than joining the two acknowledged-gap rows in this module's docstring.
 PROXY_DOCKERFILE_PATH = REPO_ROOT / "deploy" / "proxy" / "Dockerfile"
 
-#: Matches `image: steamhangar/<name>:${VAULT_IMAGE_TAG:-<default>}` lines
-#: exactly as they appear in deploy/compose.yaml today -- deliberately
+#: Matches `image: ghcr.io/steamhangar/<name>:${VAULT_IMAGE_TAG:-<default>}`
+#: lines exactly as they appear in deploy/compose.yaml today -- deliberately
 #: narrow, like test_p1_compose_env_defaults.py's `_parsed_env_defaults`
 #: regex, so a line that does not match this exact `${VAR:-default}` shape
 #: is correctly absent rather than misparsed. Applied to ONE SERVICE's
 #: block text at a time (see `_service_blocks`/`_compose_service_image_tags`
 #: below) -- never to the whole file at once, which is the B1 fix: the
 #: captured group here is the IMAGE NAME, which is NOT unique per service
-#: since WP S-2 (vault-runner intentionally reuses `steamhangar/vault-api`).
+#: since WP S-2 (vault-runner intentionally reuses `vault-api`'s image).
+#:
+#: The registry host is part of the pin (pre-freeze project review, finding
+#: S1): compose used to name the bare Docker Hub namespace
+#: `steamhangar/vault-*`, which nobody publishes to, while
+#: .github/workflows/publish.yml pushes `ghcr.io/steamhangar/vault-*` -- so
+#: `docker compose pull` could never have found the published images. The
+#: literal `ghcr.io/steamhangar/` prefix here is what makes that parity a
+#: tested fact rather than a comment in publish.yml.
 _IMAGE_TAG_PATTERN = re.compile(
-    r"^\s*image:\s*steamhangar/([a-z-]+):\$\{VAULT_IMAGE_TAG:-([^}]+)\}\s*$",
+    r"^\s*image:\s*ghcr\.io/steamhangar/([a-z-]+):\$\{VAULT_IMAGE_TAG:-([^}]+)\}\s*$",
     re.MULTILINE,
 )
 
@@ -218,6 +227,12 @@ def test_compose_has_the_expected_image_tag_lines() -> None:
     expected set. Its `image:` line is a real, independent hand-typed
     occurrence of the exact same string as vault-api's — reusing the same
     image name is WHY the B1 blocker existed (see this module's docstring).
+
+    Also the registry-parity pin (finding S1, see `_IMAGE_TAG_PATTERN`): a
+    line that drops or changes the `ghcr.io/steamhangar/` prefix simply
+    stops matching, so its service goes missing from `found` and fails
+    here BY NAME -- mutation-verified by reverting one line to the old bare
+    `steamhangar/vault-core` shape.
     """
     found = _compose_service_image_tags()
     assert set(found) == {
@@ -229,9 +244,11 @@ def test_compose_has_the_expected_image_tag_lines() -> None:
     }, (
         f"deploy/compose.yaml: expected exactly the vault-core/vault-api/"
         f"vault-runner/vault-proxy/vault-dns image lines to carry a "
-        f"${{VAULT_IMAGE_TAG:-...}} default, found {sorted(found)} -- the "
-        "extraction regex in this test file and compose.yaml's actual "
-        "layout have diverged."
+        f"ghcr.io/steamhangar/<image>:${{VAULT_IMAGE_TAG:-...}} reference, "
+        f"found {sorted(found)} -- either the extraction regex in this test "
+        "file and compose.yaml's actual layout have diverged, or an image: "
+        "line no longer points at the ghcr.io/steamhangar namespace "
+        "publish.yml pushes to (finding S1)."
     )
 
 

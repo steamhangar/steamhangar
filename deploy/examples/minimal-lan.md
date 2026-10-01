@@ -25,8 +25,15 @@ minimal path through it.
 cd deploy
 cp .env.example .env
 $EDITOR .env      # set VAULT_API_KEY -- the only value you must change
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
+
+`pull` fetches the published release images from `ghcr.io/steamhangar/`
+(the `image:` lines in `compose.yaml` name exactly what the release
+workflow pushes); building from this checkout instead is
+`docker compose up -d --build` — `deploy/README.md` "Quickstart" has the
+one paragraph on when to prefer which.
 
 That's it for Compose. `vault-dns` is defined behind the `dns` Compose
 profile (`profiles: ["dns"]` in `deploy/compose.yaml`) and a plain

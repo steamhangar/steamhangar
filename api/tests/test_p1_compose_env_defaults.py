@@ -149,6 +149,24 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     # NOT the true-spellings/rejects-anything-else siblings, which set the
     # env var explicitly and would not notice a default change.
     "VAULT_SETTINGS_READONLY": "false",
+    # Pre-freeze project review, finding S3: the five remaining settings-API
+    # keys (settings_store.OVERRIDABLE_SPECS), forwarded with the no-colon
+    # form and an EMPTY default -- `${VAULT_NAME-}` etc. -- so vault-api's
+    # own config.py default applies for unset AND blank alike and there is
+    # no compose-side copy of DEFAULT_SCHEDULE_INTERVAL_MINUTES /
+    # DEFAULT_SCHEDULE_CLIENT_STALE_DAYS to drift (the same "no derivable
+    # env default, literal empty string" precedent as VAULT_EVENT_LOG_PATH /
+    # VAULT_EGRESS_ALLOW above). Why they are forwarded at all: under
+    # VAULT_SETTINGS_READONLY=1 PATCH /v1/settings is refused, and before
+    # this these five had NO reachable path in the shipped stack -- the
+    # exact hole ADR-0014 closed for VAULT_SWEEP_INCLUDE_CACHED. The
+    # substitution FORM is pinned separately by
+    # test_readonly_reachable_settings_keys_use_the_no_colon_form below.
+    "VAULT_NAME": "",
+    "VAULT_SCHEDULE_INTERVAL_MINUTES": "",
+    "VAULT_SCHEDULE_CLIENT_STALE_DAYS": "",
+    "VAULT_WEBHOOK_URL": "",
+    "VAULT_WEBHOOK_EVENTS": "",
     # WP EG-1 (ADR-0011). Empty by default -- the egress lock ships
     # default-on with an empty allowlist, not a wide-open one. No
     # DEFAULT_EGRESS_ALLOW constant exists in config.py (an empty frozenset
@@ -588,6 +606,74 @@ def test_new_wp_sweep1_vars_are_documented_in_env_example(env_var: str) -> None:
         "discover this variable exists from a bare mention in a neighbouring "
         "comment alone. Restore its documentation stanza in "
         "deploy/.env.example."
+    )
+
+
+#: Pre-freeze project review, finding S3 -- see EXPECTED_DEFAULTS_VAULT_API's
+#: comment on these five for why they are forwarded at all.
+READONLY_REACHABLE_SETTINGS_VARS = (
+    "VAULT_NAME",
+    "VAULT_SCHEDULE_INTERVAL_MINUTES",
+    "VAULT_SCHEDULE_CLIENT_STALE_DAYS",
+    "VAULT_WEBHOOK_URL",
+    "VAULT_WEBHOOK_EVENTS",
+)
+
+
+@pytest.mark.parametrize("env_var", READONLY_REACHABLE_SETTINGS_VARS)
+def test_readonly_reachable_settings_vars_are_documented_in_env_example(env_var: str) -> None:
+    """Same mutation target and same anchored-assignment-line reasoning as
+    `test_new_wp_s2_vars_are_documented_in_env_example` above: each of the
+    five S3 keys needs an operator-findable `#VAR=` stanza in
+    deploy/.env.example, not only a compose passthrough line -- and
+    deploy/.env.example used to say in so many words that two of them
+    (VAULT_WEBHOOK_URL/VAULT_WEBHOOK_EVENTS) were "DELIBERATELY NOT in this
+    file", which this test would have failed on had it existed then.
+    """
+    text = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    pattern = re.compile(rf"^#?{re.escape(env_var)}=", re.MULTILINE)
+    assert pattern.search(text), (
+        f"deploy/.env.example has no {env_var}=... or #{env_var}=... "
+        "assignment line, but deploy/compose.yaml forwards it (see "
+        "SERVICE_EXPECTED_DEFAULTS above) -- an operator has no way to "
+        "discover this variable exists from a bare mention in a neighbouring "
+        "comment alone. Restore its documentation stanza in "
+        "deploy/.env.example."
+    )
+
+
+@pytest.mark.parametrize("env_var", READONLY_REACHABLE_SETTINGS_VARS)
+def test_readonly_reachable_settings_keys_use_the_no_colon_form(
+    env_var: str, compose_text: str
+) -> None:
+    """Structural pin of the substitution FORM for the five S3 keys, same
+    reasoning as `test_schedule_window_uses_the_no_colon_substitution_form`
+    below (docs/LEARNINGS.md: "pin the substitution FORM structurally").
+
+    With an EMPTY default the two forms render identically today (unset ->
+    "", blank -> ""), so no value-level test can tell them apart -- which is
+    exactly why the form must be pinned by text: the moment a future edit
+    adds a default to one of these lines (`${VAULT_SCHEDULE_INTERVAL_MINUTES-180}`
+    say), the no-colon form keeps "blank in .env means blank reaches
+    vault-api" true, and the colon form silently turns a deliberately blank
+    line into that default (review round 2's measured R2-B1 trap). The
+    expected-value row in EXPECTED_DEFAULTS_VAULT_API would ALSO have to
+    change in that case, so the drift is caught either way; this test is
+    the one that names the trap.
+    """
+    api_block = _extract_service_environment_block(compose_text, "vault-api")
+    lines = [
+        line.strip()
+        for line in api_block.splitlines()
+        if re.match(rf"^\s{{6}}{re.escape(env_var)}:", line)
+    ]
+    assert lines == [f"{env_var}: ${{{env_var}-}}"], (
+        f"deploy/compose.yaml's vault-api service forwards {env_var} as "
+        f"{lines!r}, expected exactly ['{env_var}: ${{{env_var}-}}'] -- the "
+        "no-colon form with an empty default. A colon (`${VAR:-...}`) would "
+        "reintroduce the R2-B1 trap the moment a default is added; a "
+        "non-empty default would duplicate config.py's own (see the comment "
+        "on these keys in EXPECTED_DEFAULTS_VAULT_API)."
     )
 
 

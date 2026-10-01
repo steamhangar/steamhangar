@@ -1,8 +1,9 @@
 #!/bin/sh
 # SteamHangar WP 1.9 -- container verification suite.
 #
-# Proves that the three images and deploy/compose.yaml actually deliver what the
-# Phase-0 PoC and WP 1.1-1.8 established, INSIDE Linux containers: the cache
+# Proves that the five images (four builds -- vault-runner reuses vault-api's)
+# and deploy/compose.yaml actually deliver what the Phase-0 PoC and WP 1.1-1.8
+# established, INSIDE Linux containers: the cache
 # stores and serves real Steam CDN bytes, the API answers and authenticates, the
 # DNS container redirects A and NODATAs AAAA, and every fail-fast guard fails.
 #
@@ -28,8 +29,8 @@
 set -u
 
 # --- where things are --------------------------------------------------------
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
 compose_file="$repo_root/deploy/compose.yaml"
 
 PROJECT=steamhangar-verify
@@ -94,7 +95,16 @@ dc() {
 
 cleanup() {
     section "Cleanup"
-    say 'Test containers and TEST volumes are removed; the three images are kept (they are the artifact).'
+    say 'Test containers and TEST volumes are removed; the images are kept (they are the artifact).'
+    # Pre-freeze review N3: the step-6l host-side listener used to be killed
+    # only on the straight-line path, so an abort (INT/TERM, or a `set -e`-
+    # style early exit added later) between its start and that kill left a
+    # `python3 -m http.server` bound to 0.0.0.0:18089 on the HOST. Killed
+    # here too, BEFORE $work is removed (the pid file lives there); a pid
+    # file that was never written, or a listener already gone, is a no-op.
+    if [ -f "$work/b2-listener.pid" ]; then
+        kill "$(cat "$work/b2-listener.pid")" >/dev/null 2>&1 || true
+    fi
     run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns down -v --remove-orphans"
     docker volume rm -f "$PROJECT-split-cache" "$PROJECT-scratch" >/dev/null 2>&1
     rm -rf "$work"
@@ -152,7 +162,7 @@ for svc in core api proxy dns; do
         # SIBLING of api/, not a child of it -- an api/-only context can no
         # longer reach it. core and dns are UNCHANGED, still built from their
         # own directories below.
-        docker build -t "steamhangar/vault-api:$TAG" -f "$repo_root/api/Dockerfile" "$repo_root" \
+        docker build -t "ghcr.io/steamhangar/vault-api:$TAG" -f "$repo_root/api/Dockerfile" "$repo_root" \
             > "$work/build-$svc.log" 2>&1 || build_failed=1
     elif [ "$svc" = "proxy" ]; then
         # WP EG-1 (ADR-0011), round-2 review B4: this WAS missing entirely --
@@ -160,15 +170,15 @@ for svc in core api proxy dns; do
         # vault-proxy" while this loop only ever built core/api/dns, so a real
         # Dockerfile break here (e.g. Alpine dropping the pinned tinyproxy
         # version) was never caught here, and step 6l further down would have
-        # gone on to test whatever STALE `steamhangar/vault-proxy:$TAG` image
+        # gone on to test whatever STALE `ghcr.io/steamhangar/vault-proxy:$TAG` image
         # happened to already exist locally, silently. deploy/proxy/ is its
         # own build context (not $repo_root/proxy, which does not exist --
         # this service's Dockerfile lives under deploy/, unlike the three
         # components above which each own a repo-root-level directory).
-        docker build -t "steamhangar/vault-proxy:$TAG" "$repo_root/deploy/proxy" \
+        docker build -t "ghcr.io/steamhangar/vault-proxy:$TAG" "$repo_root/deploy/proxy" \
             > "$work/build-$svc.log" 2>&1 || build_failed=1
     else
-        docker build -t "steamhangar/vault-$svc:$TAG" "$repo_root/$svc" \
+        docker build -t "ghcr.io/steamhangar/vault-$svc:$TAG" "$repo_root/$svc" \
             > "$work/build-$svc.log" 2>&1 || build_failed=1
     fi
     if [ "$build_failed" -eq 0 ]; then
@@ -189,8 +199,8 @@ step "2.sp  SteamPrefill binary in the vault-api image"
 say 'Checked by inspection only. This work package deliberately does NOT execute'
 say 'SteamPrefill in a container: it has no Steam session, and creating one is the'
 say "operator's one-time interactive step (deploy/README.md 'First run')."
-run "docker run --rm --entrypoint sh steamhangar/vault-api:$TAG -c 'ls -l /opt/steamprefill/SteamPrefill; sha256sum /opt/steamprefill/SteamPrefill; head -c 4 /opt/steamprefill/SteamPrefill | od -c | head -1'"
-sp_deps=$(docker run --rm --entrypoint sh "steamhangar/vault-api:$TAG" -c 'ldd /opt/steamprefill/SteamPrefill 2>&1' )
+run "docker run --rm --entrypoint sh ghcr.io/steamhangar/vault-api:$TAG -c 'ls -l /opt/steamprefill/SteamPrefill; sha256sum /opt/steamprefill/SteamPrefill; head -c 4 /opt/steamprefill/SteamPrefill | od -c | head -1'"
+sp_deps=$(docker run --rm --entrypoint sh "ghcr.io/steamhangar/vault-api:$TAG" -c 'ldd /opt/steamprefill/SteamPrefill 2>&1' )
 say ''
 say 'Dynamic libraries the binary needs, resolved inside the image (no "not found"):'
 printf '%s\n' "$sp_deps" | sed 's/^/    /'
@@ -202,22 +212,22 @@ say 'documented gap since WP 4a.1) into the image itself -- api/Dockerfile now'
 say 'COPYs web/ in at /app/web and sets VAULT_WEB_DIR=/app/web explicitly.'
 say 'Checked here at the IMAGE layer (docker run, no compose stack needed yet),'
 say 'so a broken COPY path is caught even before section 6 exercises it over HTTP.'
-web_ls=$(docker run --rm --entrypoint sh "steamhangar/vault-api:$TAG" -c 'ls -la /app/web /app/web/css /app/web/js 2>&1')
+web_ls=$(docker run --rm --entrypoint sh "ghcr.io/steamhangar/vault-api:$TAG" -c 'ls -la /app/web /app/web/css /app/web/js 2>&1')
 printf '%s\n' "$web_ls" | sed 's/^/    /'
 assert_contains "$web_ls" "index.html" "/app/web/index.html exists in the image"
 assert_contains "$web_ls" "app.css" "/app/web/css/app.css (an app-shell asset) exists in the image"
 assert_contains "$web_ls" "app.js" "/app/web/js/app.js (an app-shell asset) exists in the image"
-webdir_env=$(docker run --rm --entrypoint sh "steamhangar/vault-api:$TAG" -c 'printf %s "$VAULT_WEB_DIR"')
+webdir_env=$(docker run --rm --entrypoint sh "ghcr.io/steamhangar/vault-api:$TAG" -c 'printf %s "$VAULT_WEB_DIR"')
 assert_eq "/app/web" "$webdir_env" "VAULT_WEB_DIR is baked into the image and points at the actual COPY target"
 
 step "2.home  HOME for uid 101 exists, is owned by it, and both definitions agree"
 say 'Regression guard for the WP 1.9 review blocker: with HOME unwritable,'
 say "SteamPrefill's AppConfig static constructor throws before parsing any"
 say 'argument, so the documented login and every prefill job die identically.'
-run "docker run --rm --entrypoint sh steamhangar/vault-api:$TAG -c 'getent passwd 101; echo \"ENV HOME=\$HOME\"; stat -c \"%n %u:%g %a\" \$HOME'"
-home_passwd=$(docker run --rm --entrypoint sh "steamhangar/vault-api:$TAG" -c 'getent passwd 101 | cut -d: -f6')
-home_env=$(docker run --rm --entrypoint sh "steamhangar/vault-api:$TAG" -c 'printf %s "$HOME"')
-home_own=$(docker run --rm --entrypoint sh "steamhangar/vault-api:$TAG" -c 'stat -c "%u:%g" /opt/steamprefill/home')
+run "docker run --rm --entrypoint sh ghcr.io/steamhangar/vault-api:$TAG -c 'getent passwd 101; echo \"ENV HOME=\$HOME\"; stat -c \"%n %u:%g %a\" \$HOME'"
+home_passwd=$(docker run --rm --entrypoint sh "ghcr.io/steamhangar/vault-api:$TAG" -c 'getent passwd 101 | cut -d: -f6')
+home_env=$(docker run --rm --entrypoint sh "ghcr.io/steamhangar/vault-api:$TAG" -c 'printf %s "$HOME"')
+home_own=$(docker run --rm --entrypoint sh "ghcr.io/steamhangar/vault-api:$TAG" -c 'stat -c "%u:%g" /opt/steamprefill/home')
 assert_eq "/opt/steamprefill/home" "$home_passwd" "passwd entry for uid 101 has a real home"
 assert_eq "$home_passwd" "$home_env"             "ENV HOME agrees with the passwd entry"
 assert_eq "101:101" "$home_own"                  "HOME is owned by the container user"
@@ -234,7 +244,7 @@ say 'NO CREDENTIALS ARE ENTERED HERE, EVER. Logging in is the operator step.'
 # Steam<esc>[0m account is required"), so raw substring matching is unreliable.
 strip_ansi() { sed -e 's/\x1B\[[0-9;]*[A-Za-z]//g'; }
 sp_smoke=$(docker run --rm --entrypoint /opt/steamprefill/SteamPrefill \
-             "steamhangar/vault-api:$TAG" select-apps < /dev/null 2>&1 | strip_ansi | head -12)
+             "ghcr.io/steamhangar/vault-api:$TAG" select-apps < /dev/null 2>&1 | strip_ansi | head -12)
 printf '%s\n' "$sp_smoke" | sed 's/^/    /'
 assert_not_contains "$sp_smoke" "TypeInitializationException" "no TypeInitializationException (the blocker signature)"
 assert_not_contains "$sp_smoke" "UnauthorizedAccessException" "no UnauthorizedAccessException reaching for HOME"
@@ -885,10 +895,10 @@ if [ -z "$evline" ]; then
     # The line count and tail below let a reader tell the two apart at a
     # glance: 0 lines means nothing was written, N lines means something was
     # written that does not carry this chunk id.
-    ev_lines=$(dc exec -T vault-core sh -c "wc -l < /vault/logs/event.log 2>/dev/null || echo '?'" | tr -d '')
+    ev_lines=$(dc exec -T vault-core sh -c "wc -l < /vault/logs/event.log 2>/dev/null || echo '?'" | tr -d '\r')
     say "    event-log line: (no line matching the chunk after waiting ${max_wait}s; event.log has ${ev_lines} line(s))"
     if [ "${ev_lines:-0}" != "0" ]; then
-        dc exec -T vault-core sh -c "tail -3 /vault/logs/event.log 2>/dev/null" | tr -d '' | sed 's/^/      last: /' || true
+        dc exec -T vault-core sh -c "tail -3 /vault/logs/event.log 2>/dev/null" | tr -d '\r' | sed 's/^/      last: /' || true
     fi
     never_arrived="no event-log line matching this MISS's chunk id arrived within ${max_wait}s; event.log has ${ev_lines} line(s). 0 lines ==> nothing reached VAULT_EVENT_LOG (the write path). Non-zero ==> something was written but does not carry the chunk id, i.e. suspect the log_format, not the write path. A malformed-but-present matching line takes the other branch and reports expected-vs-got per field."
     bad "the event-log line has exactly 9 tab-separated fields (core/README.md format) -- $never_arrived"
@@ -1309,6 +1319,7 @@ except OSError as exc:
 PYEOF
 )
 kill "$(cat "$work/b2-listener.pid")" >/dev/null 2>&1 || true
+rm -f "$work/b2-listener.pid"  # cleanup() must not kill a reused pid later
 say "    $host_reach_probe"
 assert_contains "$host_reach_probe" "REACHED" "the Docker host's own address is directly reachable from vault-api without HTTP_PROXY (the documented, open channel)"
 
@@ -1402,14 +1413,14 @@ section "7. vault-dns (--profile dns)"
 step "7a. Fail-fast: no CACHE_IP"
 say 'dns/README.md makes CACHE_IP required with no default; the entrypoint must'
 say 'refuse to start rather than emit address=/steamcontent.com/ with no address.'
-nocacheip=$(docker run --rm "steamhangar/vault-dns:$TAG" 2>&1; echo "exit=$?")
+nocacheip=$(docker run --rm "ghcr.io/steamhangar/vault-dns:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$nocacheip" | sed 's/^/    /'
 assert_contains "$nocacheip" "FATAL" "vault-dns refuses to start without CACHE_IP"
 assert_not_contains "$nocacheip" "exit=0" "...and exits non-zero"
 
 step "7b. Fail-fast: CACHE_IP that is not a plain IPv4 address"
 badip=$(docker run --rm -e 'CACHE_IP=1.2.3.4
-log-queries' "steamhangar/vault-dns:$TAG" 2>&1; echo "exit=$?")
+log-queries' "ghcr.io/steamhangar/vault-dns:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$badip" | sed 's/^/    /'
 assert_contains "$badip" "FATAL" "a CACHE_IP carrying an injected config line is refused"
 
@@ -1461,23 +1472,23 @@ step "8a. cache/ and tmp/ split across two filesystems"
 say 'Simulated with a tmpfs over /vault/tmp (a different st_dev), which is exactly'
 say 'what a second volume mount would look like to the preflight.'
 docker volume create "$PROJECT-scratch" >/dev/null
-split=$(docker run --rm -v "$PROJECT-scratch:/vault" --tmpfs /vault/tmp "steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
+split=$(docker run --rm -v "$PROJECT-scratch:/vault" --tmpfs /vault/tmp "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$split" | grep -E 'FATAL|st_dev|exit=' | sed 's/^/    /'
 assert_contains "$split" "DIFFERENT" "a split cache//tmp mount is refused at boot"
 assert_not_contains "$split" "exit=0" "...and exits non-zero"
 
 step "8b. An empty VAULT_RESOLVER"
-emptyres=$(docker run --rm -v "$PROJECT-scratch:/vault" -e VAULT_RESOLVER= "steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
+emptyres=$(docker run --rm -v "$PROJECT-scratch:/vault" -e VAULT_RESOLVER= "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$emptyres" | grep -E 'FATAL|exit=' | sed 's/^/    /'
 assert_contains "$emptyres" "VAULT_RESOLVER is empty" "an empty resolver is refused"
 
 step "8c. A VAULT_RESOLVER carrying an nginx-config injection"
-inj=$(docker run --rm -v "$PROJECT-scratch:/vault" -e 'VAULT_RESOLVER=1.1.1.1; return 200 "pwned";' "steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
+inj=$(docker run --rm -v "$PROJECT-scratch:/vault" -e 'VAULT_RESOLVER=1.1.1.1; return 200 "pwned";' "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$inj" | grep -E 'FATAL|exit=' | sed 's/^/    /'
 assert_contains "$inj" "refusing" "a resolver value with config-injection characters is refused"
 
 step "8d. A misconfigured envsubst filter leaves a placeholder unrendered"
-unrendered=$(docker run --rm -v "$PROJECT-scratch:/vault" -e 'NGINX_ENVSUBST_FILTER=^NOTHING_' "steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
+unrendered=$(docker run --rm -v "$PROJECT-scratch:/vault" -e 'NGINX_ENVSUBST_FILTER=^NOTHING_' "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$unrendered" | grep -E 'FATAL|unsubstituted|exit=' | sed 's/^/    /'
 assert_contains "$unrendered" "unsubstituted" "an unrendered \${VAULT_...} placeholder is caught before nginx starts"
 
@@ -1486,7 +1497,7 @@ mkdir -p "$work/rootonly/cache/depot" "$work/rootonly/tmp"
 chmod 0755 "$work/rootonly" "$work/rootonly/cache" "$work/rootonly/tmp"
 chown -R 0:0 "$work/rootonly" 2>/dev/null
 chmod 0555 "$work/rootonly/cache" "$work/rootonly/tmp"
-ro=$(docker run --rm -v "$work/rootonly:/vault" "steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
+ro=$(docker run --rm -v "$work/rootonly:/vault" "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$ro" | grep -E 'FATAL|chown|exit=' | sed 's/^/    /'
 assert_contains "$ro" "not writable" "a cache directory the nginx worker cannot write is refused"
 

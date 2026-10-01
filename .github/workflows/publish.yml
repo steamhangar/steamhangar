@@ -301,15 +301,21 @@ jobs:
       #     mechanism specifically (it would apply the same way under the
       #     old `github.repository`-derived path too).
       #
-      # Parity, correctly this time: `deploy/compose.yaml` (WP RN-1, landed
-      # in `ffa4542`) resolves its own local build tags as
-      # `steamhangar/vault-core` etc. (`deploy/compose.yaml:125` and
-      # siblings, read directly from the current tree, not asserted in
-      # advance of it). Stripping the registry host `ghcr.io/` off the
-      # front of this job's own `ghcr.io/steamhangar/vault-core` reproduces
-      # that local tag exactly -- the property that makes the published
-      # path guessable from the compose file alone, now actually true
-      # rather than merely argued.
+      # Parity, literally (pre-freeze project review, finding S1): every
+      # `image:` line in `deploy/compose.yaml` now reads
+      # `ghcr.io/steamhangar/<image>:${VAULT_IMAGE_TAG:-<release>}` -- the
+      # exact reference this job pushes under the literal fallback below,
+      # so `docker compose pull` on a stock checkout fetches what a tag push
+      # published, with no name translation in between. Before S1 the
+      # compose file named the bare `steamhangar/vault-*` (Docker Hub's
+      # namespace, which nobody publishes to) and the "parity" claimed here
+      # was "strip `ghcr.io/` and you get compose's tag" -- a guessing rule,
+      # not a pull that works. Pinned by api/tests/test_version_pin.py,
+      # whose image-line regex requires the `ghcr.io/steamhangar/` prefix.
+      # An operator who overrides `GHCR_NAMESPACE` (a fork) must edit the
+      # compose `image:` lines to match, or set them via a
+      # compose.override.yaml -- there is deliberately no second variable
+      # for the registry on the compose side.
       # Round 4 nitpick: normalised through `tr` rather than documented as
       # "must be lowercase" -- GHCR rejects any uppercase byte in the image
       # path, and an operator typing `ghcr.io/SteamHangar` into the
@@ -599,6 +605,38 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # App S5 (pre-freeze project review), workflow half. The APK's
+      # versionName/versionCode no longer have to be hand-bumped in
+      # app/app/build.gradle.kts for every release: that file reads
+      # VAULT_RELEASE_VERSION_NAME / VAULT_RELEASE_VERSION_CODE from the
+      # environment, falling back to its own literals when they are unset
+      # (a local `gradlew assembleRelease` keeps working unchanged). Here:
+      #   - VAULT_RELEASE_VERSION_NAME = the tag with the leading `v`
+      #     stripped, so tag `v0.1.0-rc1` ships as versionName `0.1.0-rc1`
+      #     -- the same value the `publish` job's `type=semver,
+      #     pattern={{version}}` image tag resolves to, so the APK and the
+      #     images an operator pulls agree on one version string. Same
+      #     `/` -> `-` sanitisation as agent-binaries' own version step
+      #     below (a workflow_dispatch off a slashed branch ref must not
+      #     put a path separator into a filename).
+      #   - VAULT_RELEASE_VERSION_CODE = `github.run_number`: strictly
+      #     increasing per workflow run on this repository, never reused,
+      #     so every published APK installs as an UPDATE over the previous
+      #     one (Android refuses a same-or-lower versionCode). A re-run of
+      #     the same tag gets a higher code, which is correct: it is a
+      #     different build.
+      # `tag` (with the `v`, sanitised) is what the APK's release-asset
+      # filename below uses, matching the `vault-agent-v1.2.3-...` naming
+      # on the same release page.
+      - name: Compute release version (sanitized)
+        if: steps.signing_check.outputs.configured == 'true'
+        id: version
+        run: |
+          set -eu
+          tag="${GITHUB_REF_NAME//\//-}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
       - name: Set up JDK 17 (temurin)
         if: steps.signing_check.outputs.configured == 'true'
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -647,6 +685,9 @@ jobs:
           VAULT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           VAULT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           VAULT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # App S5, see the "Compute release version" step above.
+          VAULT_RELEASE_VERSION_NAME: ${{ steps.version.outputs.version }}
+          VAULT_RELEASE_VERSION_CODE: ${{ github.run_number }}
         # bash, not `./gradlew` -- ci.yml's own android-tests job comment
         # documents why: the checked-out gradlew file carries no executable
         # bit (git blob mode 100644), so `./gradlew` alone fails with
@@ -713,31 +754,94 @@ jobs:
       # a mismatch -- not implemented in this package, since there is no
       # first real release yet to pin against.
       #
+      # Pre-freeze project review, N4: the asset is named after the
+      # release, not after Gradle's build variant. `app-release.apk` says
+      # nothing about which version a user downloaded, and a release page
+      # that already carries `vault-agent-v1.2.3-linux-amd64` next to it
+      # should carry `steamhangar-app-v1.2.3.apk`, not a file that is
+      # byte-different on every release under an identical name. Renamed
+      # IN PLACE (same directory, still inside the workspace) rather than
+      # via softprops' own naming (which has none -- `files:` uploads under
+      # the basename it finds). The verify step above already proved the
+      # file exists and is signed; this only changes its name.
+      - name: Rename APK to its release-asset name
+        if: steps.signing_check.outputs.configured == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -eu
+          mv app/app/build/outputs/apk/release/app-release.apk \
+             "app/app/build/outputs/apk/release/steamhangar-app-${TAG}.apk"
+
+      # Pre-freeze project review, P2: does this tag's release already
+      # exist? Read from the GitHub API (not inferred from which job ran
+      # first), so that RE-pushing the same tag -- a rehearsal tag is
+      # exactly the thing that gets re-pushed -- does not re-enter
+      # `softprops/action-gh-release`'s update path with
+      # `generate_release_notes: true` and append a second copy of the
+      # generated notes to the existing body. `gh` and `GH_TOKEN` are the
+      # runner's preinstalled CLI and this job's own GITHUB_TOKEN. Only
+      # HTTP 404 means "no release yet"; any other failure (rate limit,
+      # outage, a token without `contents` scope) fails this step loudly
+      # rather than being read as "does not exist" and quietly producing
+      # the duplicate this step exists to prevent. Same tag-push-only gate
+      # as the attach step below -- a branch-ref workflow_dispatch has no
+      # release tag to look up.
+      - name: Check whether this tag's release already exists
+        if: steps.signing_check.outputs.configured == 'true' && github.event_name == 'push'
+        id: release_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -u
+          # Actions runs this as `bash -e`: a bare `out="$(gh api ...)"` would
+          # abort the step on the 404 path (first push of every tag) before
+          # `rc` is read. The `|| rc=$?` keeps the failing exit code out of
+          # errexit's reach so the branches below decide.
+          rc=0
+          out="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id 2>&1)" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "release for ${GITHUB_REF_NAME} exists (id ${out}) -- notes will not be regenerated"
+          elif printf '%s' "$out" | grep -q 'HTTP 404'; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "no release for ${GITHUB_REF_NAME} yet -- it will be created with generated notes"
+          else
+            echo "::error::could not determine whether a release for ${GITHUB_REF_NAME} exists: ${out}" >&2
+            exit 1
+          fi
+
       # Only on an actual tag push (not a branch-ref workflow_dispatch run,
       # which has no release tag to attach to). `github.ref_name` is the
       # tag itself (e.g. "v1.2.3") on a `refs/tags/v1.2.3` push.
+      #
+      # `prerelease` / `make_latest` (pre-freeze project review, B2): a tag
+      # with a `-` in it (`v0.1.0-rc1`, `v1.2.0-beta.2` -- semver's
+      # pre-release separator) is published as a PRE-RELEASE and does NOT
+      # become the repository's "Latest release"; a plain `vX.Y.Z` is a
+      # full release and does. Without these two lines the action's
+      # defaults (`prerelease: false`, `make_latest: true`) would have put
+      # the first rc on the front page as the latest stable release.
+      # Deliberately the same two expressions on BOTH release-writing steps
+      # in this file (agent-binaries' below too): the action's update path
+      # re-applies these fields, so a step that omitted them would flip a
+      # pre-release back to latest on its own later run.
       - name: Attach signed APK to the GitHub Release
         if: steps.signing_check.outputs.configured == 'true' && github.event_name == 'push'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          # Known follow-up, recorded rather than fixed here (out of scope
-          # for the package that added `agent-binaries` and its
-          # `needs.android-release.outputs.configured`-gated
-          # `generate_release_notes` below): this is unconditionally `true`,
-          # so RE-pushing the SAME tag while the signing secret is
-          # configured re-enters `softprops/action-gh-release`'s update
-          # path and appends freshly generated notes to the release body a
-          # second time, rather than leaving it alone. Harmless for a normal
-          # one-shot tag push, but a real risk the first time this workflow
-          # actually runs -- a throwaway rehearsal tag is exactly the kind
-          # of thing that gets re-pushed. Not a per-tag duplicate-job race
-          # (that invariant -- exactly one JOB generates notes per tag --
-          # still holds); this is the same job re-entering its own update
-          # path on a second run against an already-created release.
-          generate_release_notes: true
-          files: app/app/build/outputs/apk/release/app-release.apk
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
+          # P2: generate notes only when this step is the one CREATING the
+          # release (see the pre-check step above). The earlier "known
+          # follow-up" note that used to sit here -- an unconditional
+          # `true` re-appending notes on every re-push of the same tag --
+          # is what that step closes.
+          generate_release_notes: ${{ steps.release_check.outputs.exists != 'true' }}
+          fail_on_unmatched_files: true
+          files: app/app/build/outputs/apk/release/steamhangar-app-${{ steps.version.outputs.tag }}.apk
 
       # Runs on every outcome, including a failed verify/build step above
       # (`if: always()`), so the decoded private keystore never survives
@@ -919,33 +1023,65 @@ jobs:
       # sanitization above exists only to keep filenames on the filesystem
       # sane, never to change which tag this attaches to.
       #
-      # `generate_release_notes` (S2 fix, reviewer round 1): reading the
-      # pinned action's own source, its update path is
-      # `body = workflowBody || existingReleaseBody`, and then -- when
-      # `generate_release_notes` is truthy and `body` is non-empty -- it
-      # APPENDS the generated notes to whatever body it just resolved. If
-      # `android-release` already created this release (the keystore-
-      # configured case) and this job unconditionally passed `true` too,
-      # the release would end up with the auto-generated notes duplicated.
-      # `needs.android-release.outputs.configured` (added to that job above)
-      # tells us which case we're in: pass `true` here only when
-      # android-release did NOT already create the release (`configured !=
-      # 'true'`), so exactly one of the two jobs ever generates notes for a
-      # given tag, matching the "exactly one of them ever creates the
-      # release" invariant `needs: android-release` already establishes.
+      # `generate_release_notes` (S2 fix, reviewer round 1; extended by the
+      # pre-freeze review's P2): reading the pinned action's own source, its
+      # update path is `body = workflowBody || existingReleaseBody`, and
+      # then -- when `generate_release_notes` is truthy and `body` is
+      # non-empty -- it APPENDS the generated notes to whatever body it
+      # just resolved. Two ways to hit that append: (1) `android-release`
+      # already created this release in this same run (the keystore-
+      # configured case) -- `needs.android-release.outputs.configured`
+      # tells us that; (2) a RE-push of the same tag, where the release
+      # exists from an earlier run whichever job created it then -- the
+      # pre-check step below asks the GitHub API. Notes are generated only
+      # when NEITHER applies, so exactly one step ever generates notes for
+      # a given tag, across runs, matching the "exactly one of them ever
+      # creates the release" invariant `needs: android-release` already
+      # establishes within a run.
       #
       # `fail_on_unmatched_files: true`: without it, a glob that stops
       # matching anything (e.g. a future rename of the `dist/` naming
       # convention that nobody updated here) attaches nothing and this step
       # still reports success -- exactly the silent-success failure class
       # this project's own review history keeps flagging elsewhere.
+      #
+      # `prerelease` / `make_latest`: same two expressions as
+      # android-release's attach step, for the reason given there (B2).
+      - name: Check whether this tag's release already exists
+        if: github.event_name == 'push'
+        id: release_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Same script as android-release's own pre-check (see the comment
+        # there for the HTTP-404-only reading of "does not exist").
+        run: |
+          set -u
+          # Actions runs this as `bash -e`: a bare `out="$(gh api ...)"` would
+          # abort the step on the 404 path (first push of every tag) before
+          # `rc` is read. The `|| rc=$?` keeps the failing exit code out of
+          # errexit's reach so the branches below decide.
+          rc=0
+          out="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id 2>&1)" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "release for ${GITHUB_REF_NAME} exists (id ${out}) -- notes will not be regenerated"
+          elif printf '%s' "$out" | grep -q 'HTTP 404'; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "no release for ${GITHUB_REF_NAME} yet -- it will be created with generated notes"
+          else
+            echo "::error::could not determine whether a release for ${GITHUB_REF_NAME} exists: ${out}" >&2
+            exit 1
+          fi
+
       - name: Attach vault-agent binaries to the GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          generate_release_notes: ${{ needs.android-release.outputs.configured != 'true' }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
+          generate_release_notes: ${{ needs.android-release.outputs.configured != 'true' && steps.release_check.outputs.exists != 'true' }}
           fail_on_unmatched_files: true
           files: |
             dist/vault-agent-*

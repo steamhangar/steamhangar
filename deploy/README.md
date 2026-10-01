@@ -98,8 +98,38 @@ deploy/
 cd deploy
 cp .env.example .env
 $EDITOR .env                      # set VAULT_API_KEY (only mandatory value)
-docker compose up -d --build
+docker compose pull               # fetch the published release images from ghcr.io
+docker compose up -d              # no --build: run what was just pulled
 ```
+
+**Pulling the published images is the default path.** Every `image:` line
+in `compose.yaml` names `ghcr.io/steamhangar/<service>:${VAULT_IMAGE_TAG}`
+(default: the release baked into this checkout, `0.1.0`), which is exactly
+where `.github/workflows/publish.yml` pushes on a release tag -- so
+`docker compose pull` fetches three images (`vault-core`, `vault-api`,
+`vault-proxy`; four with `--profile dns`, which adds `vault-dns`;
+`vault-runner` runs `vault-api`'s image with a different command, so it needs no image of its own) and `up -d` runs them
+as published, multi-arch where the component supports it (`vault-api` is
+amd64-only, see publish.yml's matrix comment). Set `VAULT_IMAGE_TAG` in
+`.env` to pin a different release. No local toolchain, no build context,
+and the digest you run is the digest the release page lists. The
+published ghcr.io packages must be public: until the maintainer flips their
+visibility, an unauthenticated pull fails -- build locally instead (below).
+
+**Building locally instead** is the other supported path -- for a checkout
+ahead of the latest release, a fork, or an offline host:
+
+```bash
+docker compose up -d --build      # builds the same three images (four with --profile dns) from this checkout
+```
+
+`--build` stores the results under the SAME `ghcr.io/steamhangar/...` tags
+the `image:` lines name, which is deliberate: the compose file has one set
+of image references, not one per deployment style, and a later
+`docker compose pull` simply replaces the local builds with the published
+layers for that tag. Do not mix the two casually on one host without
+bumping `VAULT_IMAGE_TAG` -- the tag says which release, not where the
+bytes came from.
 
 Check it:
 
@@ -598,7 +628,18 @@ setting, not Phase 3, and it stays DB-overridable at runtime via `PATCH
 /v1/settings` exactly as before (ADR-0009) — this is only a NEW env
 fallback path, added specifically so a `VAULT_SETTINGS_READONLY=1`
 deployment (which refuses every `PATCH`) has a way to turn the now-default-on
-cached sweep back off at all. `api/README.md`'s "Sweep target set" section
+cached sweep back off at all. **The same readonly argument now covers every
+settings-API key** (pre-freeze project review, finding S3): `VAULT_NAME`,
+`VAULT_SCHEDULE_INTERVAL_MINUTES`, `VAULT_SCHEDULE_CLIENT_STALE_DAYS`,
+`VAULT_WEBHOOK_URL` and `VAULT_WEBHOOK_EVENTS` were the five keys
+`compose.yaml` still left unforwarded on the "PATCH is the supported path"
+reasoning, which left a hard-locked deployment with no way to name its
+vault, tune the sweep cadence or configure a webhook at all. All five now
+pass through (no-colon form, empty default — unset or blank both leave
+vault-api on its own built-in default, nothing compose-side to drift) and
+have stanzas in `.env.example` under "Settings-API keys reachable from this
+file"; `PATCH /v1/settings` still wins over them on a read-write deployment
+(db > env > default). `api/README.md`'s "Sweep target set" section
 has the full cost model and the auto-GC coupling. To keep the exact
 pre-2026-08-22 behavior, set all three (see the seventh/eighth note just
 below for why the window line is required too — without it the scheduler
@@ -692,6 +733,19 @@ browsing-metadata-level history for every device. See `dns/README.md`
 ---
 
 ## Upgrading
+
+Running the published images (the Quickstart default):
+
+```bash
+cd deploy
+git pull                          # picks up compose.yaml/.env.example changes
+docker compose pull               # fetches the release VAULT_IMAGE_TAG now resolves to
+docker compose up -d              # recreates only the containers whose image changed
+```
+
+`git pull` moves the `image:` lines' baked-in default tag to the new
+release; an explicit `VAULT_IMAGE_TAG=` in your `.env` overrides that and
+must be bumped by hand. Building locally instead:
 
 ```bash
 cd deploy
