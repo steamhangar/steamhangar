@@ -146,3 +146,15 @@ server at all.
   Steam login, driven by vault-api with stdin closed) is entirely
   untouched by this addendum — it was never part of decision 2's asymmetry
   to begin with.
+
+## Addendum 3 (2026-09-30): where the promised SECURITY.md sections live
+
+Decision 3 above, and the first addendum's last bullet, promise SECURITY.md
+sections documenting both credential flows and the relay's added data
+path. The community release (WP 5.3) put that material into the threat
+model instead, where each claim is checked against the code:
+`docs/security/threat-model.md` §3 ("Credentials — ADR-0004's claim,
+checked against the code", including the web relay and the Android
+identity flow) and §5 ("Outbound data flows — what leaves the LAN").
+`SECURITY.md` carries a pointer paragraph to those two sections rather
+than a copy. Read the two promises above as fulfilled there.

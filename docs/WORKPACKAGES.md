@@ -1,5 +1,12 @@
 # Remaining work packages — branch-dispatch handbook
 
+> **Historical handbook (note added 2026-09-30).** This file was the
+> dispatch structure for the Phase-3 close-out and the Phase 4/5 packages
+> as of 2026-08-09; most packages here have since shipped. It is kept as a
+> record of how the work was cut and why, not as a live backlog. The
+> current state, open items and next steps live in `docs/PROJECT_PLAN.md`
+> (§7 checkboxes, §11 Next Steps).
+
 Written 2026-08-09 at the Phase-3 close-out so remaining work can be
 dispatched as parallel work packages on branches, each in its own session.
 Canonical scope stays in `docs/PROJECT_PLAN.md`; this file adds the
@@ -1271,7 +1278,9 @@ OpenID in a Custom Tab; the PHONE fetches the library from Valve
 - **WP 5.4 — CONTRIBUTING.md, issue templates, example configs** — parallel.
 - **WP 5.5 — Multi-arch images to ghcr.io** — **DECIDED (user,
   2026-08-09): move to a GitHub organization.** Target naming:
-  `ghcr.io/steamvault/{core,api,dns}` (public). Prerequisite the USER
+  `ghcr.io/steamvault/{core,api,dns}` (public) — as shipped after the
+  rename (ADR-0013) and the org move: `ghcr.io/steamhangar/vault-{core,
+  api,dns,proxy}` (see `deploy/compose.yaml`). Prerequisite the USER
   performs (account-level, never autonomous): create the org — name
   availability decides the final slug — and move the repo into it
   (GitHub auto-redirects the old URL). After the move: update the git
@@ -1281,19 +1290,21 @@ OpenID in a Custom Tab; the PHONE fetches the library from Valve
   complement-not-killer framing) — **with the user only. DECIDED gate
   (user, 2026-08-09): no announcement until the user has personally
   tested the stack end-to-end WITH the Android app** — i.e. after the
-  Zeus rollout AND Phase 4b are usable; the post carries the user's own
+  first real-world rollout AND Phase 4b are usable; the post carries the user's own
   real-world numbers.
 
 ---
 
 ## Deployment (not a branch package)
 
-Zeus rollout is a joint interactive session (SSH, Dockge stack, IP alias on
-eno1, AdGuard rewrite, `zfs create -o recordsize=1M -o atime=off
--o compression=off hdd_pool/steamvault-cache`, `VAULT_CACHE_PATH`). Two
-user-side blockers noted earlier: the HADES Tailscale route still advertises
-the stale subnet, and the Fritz!Box announces itself as IPv6 DNS via RA
-(live IPv6 bypass) — fix both before measuring hit rates.
+The first real-world rollout is a joint interactive session with the
+operator (SSH, the host's container-manager stack, an IP alias on
+`<lan-interface>`, a DNS rewrite in the LAN resolver, a dedicated dataset
+such as `zfs create -o recordsize=1M -o atime=off -o compression=off
+<pool>/<cache-dataset>`, `VAULT_CACHE_PATH`). Two operator-side network
+blockers noted earlier: a VPN subnet router still advertises a stale
+subnet route, and the router announces itself as IPv6 DNS via RA (live
+IPv6 bypass) — fix both before measuring hit rates.
 
 ## Parallelism map (what can be in flight at once)
 
@@ -1316,10 +1327,11 @@ merged first, and 4a.7 wants 3.11.
    vault-api relay, key entered in the web UI, stored server-side —
    ADR-0004 addendum).
 2. **5.5** ghcr/repo home: **move to a GitHub organization**
-   (`ghcr.io/steamvault/*`; org creation + repo move are user-performed
+   (decided as `ghcr.io/steamvault/*`, shipped as `ghcr.io/steamhangar/*`
+   after the rename; org creation + repo move are user-performed
    account actions).
 3. **5.6** announcement: **only after the user has personally tested
-   end-to-end with the Android app** (post-Zeus, post-4b).
+   end-to-end with the Android app** (post-rollout, post-4b).
 
 Post-v1 backlog (documented, undispatched): embedded tailscale (tsnet),
 iOS app, queue reordering, drag-to-reorder, server-side notification
@@ -1342,8 +1354,11 @@ every later phase's history.
    `otherOwners`/`hasCacheContent` helpers to module scope and change
    `selectCachedAppids()`'s filter to "exclusive or last-cached-remnant",
    matching `deletion.appids_with_cache_content`'s real predicate. Not
-   fixed by WP 4f itself — `web/` was occupied by WP 4e.1 at review time, and
-   the reviewer is closing this once 4e.1 merges.
+   fixed by WP 4f itself — `web/` was occupied by WP 4e.1 at review time.
+   WP 4e.1 merged (commit 07865a3) without picking it up. **Closed
+   2026-10-01 by WP WEB-FIX-1 (commit 9572e6f)**, a fix package from the
+   pre-freeze project review (`docs/PROJECT_PLAN.md` §11 item 12) — open
+   since 2026-08-18.
 
 ### D-17 — header art in the detail card (WP 4h.3, 2026-08-19; superseded by WP 4h.5, 2026-08-19)
 

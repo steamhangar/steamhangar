@@ -306,3 +306,17 @@ not happen."
   (`agent/go`, WSL2): all six packages green, module resolved as
   `github.com/Riviera822/steamhangar/agent`, zero stale
   `Riviera822/steamvault` imports.
+
+## Addendum (2026-09-30): the remote moved to the `steamhangar` organization
+
+The "REAL remote" recorded above (`https://github.com/Riviera822/steamhangar`,
+and the Go module path `github.com/Riviera822/steamhangar/agent`) was
+accurate on 2026-08-16. The repository has since moved into a GitHub
+organization and lives at `https://github.com/steamhangar/steamhangar`
+(`docs/PROJECT_PLAN.md` §11 item 7; GitHub redirects the old URL). The
+issue-template Discussions link and the OCI `image.source` labels in the
+Dockerfiles point at the organization; images publish as
+`ghcr.io/steamhangar/*`. The Go module path is still
+`github.com/Riviera822/steamhangar/agent` (`agent/go/go.mod`) — an
+internal identifier, not a second remote; moving it is an agent-side
+change for its own package, not part of this addendum.

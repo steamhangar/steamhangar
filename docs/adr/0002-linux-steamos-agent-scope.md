@@ -33,3 +33,18 @@ their installed libraries would be invisible to the prefill scheduler.
 - The hosts-file mode remains Windows-only and opt-in; SteamOS devices are
   served by vault-dns (validated in Phase 0, WP 0.6 Scenario B).
 - No change to the v1 scope cut (Steam only, no multi-service support).
+
+## Addendum (2026-09-30): the Windows-only premise did not survive Phase 0
+
+The context above cites the upstream claim that the Linux Steam client
+does not perform the `lancache.steamcontent.com` lookup. WP 0.6 (same day
+as this ADR, `poc/linux-client-test/RESULTS-20260805-083353.md`) showed
+the current client DOES perform lancache discovery, so the hosts-file mode
+is usable on Linux/SteamOS as well, and Phase 2 shipped it that way
+(`agent/README.md`, "The Linux-client finding": only the default hosts
+path and the elevation wording differ per platform). The decision itself
+stands unchanged — a Linux/SteamOS agent variant, full-list reporting —
+only its motivation narrows: SteamOS devices need the agent so their
+libraries are visible to the scheduler, not because hosts mode is closed
+to them. Multi-device LANs still belong on the DNS path; hosts mode is the
+single-PC answer on either platform.

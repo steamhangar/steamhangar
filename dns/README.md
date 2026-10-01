@@ -263,12 +263,13 @@ recursive resolver is a well-known abuse vector for DNS
 amplification/reflection attacks against third parties, using your
 homelab's bandwidth and IP reputation.
 
-**Binding requirement for WP 1.9's Compose file:** port 53 must be
+**Binding requirement, honoured by WP 1.9's Compose file:** port 53 must be
 published on a specific LAN-only host IP, e.g. `"192.168.1.50:53:53/udp"`
 (+ the matching `/tcp` line) -- **never** a bare `"53:53/udp"`, which
 Docker maps to `0.0.0.0` on the host, i.e. every interface including any
-WAN-facing one. This must be stated explicitly in WP 1.9's own
-compose/README, not left as an implicit assumption.
+WAN-facing one. WP 1.9 states this explicitly in `deploy/compose.yaml`
+(the `vault-dns` ports comment, `VAULT_DNS_BIND`) and `deploy/README.md`,
+rather than leaving it as an implicit assumption.
 
 Container-networking caveat worth understanding: in a bridge-network
 container, inbound connections are DNAT'd to the container's internal
@@ -293,8 +294,8 @@ template ships it commented out.
 
 To debug requirement A12's "is my client even asking vault-dns" question,
 uncomment the `log-queries` line in the rendered/template config for the
-duration of the debugging session only, then comment it back out (or, once
-WP 1.9 wires the container, redeploy without it). There is no partial
+duration of the debugging session only, then comment it back out (with
+the WP 1.9 container: rebuild/redeploy without it). There is no partial
 option to log only `*.steamcontent.com` queries and nothing else in
 dnsmasq -- it's an all-or-nothing switch, which is exactly why it defaults
 to nothing.
@@ -319,17 +320,18 @@ to a specific box.
 `dns/dnsmasq.conf.template` is not consumed directly. It contains `${VAR}`
 placeholders that must be substituted (this project uses `envsubst`,
 already available in essentially any Linux base image) into a real config
-file before dnsmasq starts. **Wiring this substitution into an actual
-container entrypoint is WP 1.9's job** -- this work package only defines
-the contract those wiring choices must satisfy:
+file before dnsmasq starts. **WP 1.9 wired this substitution into the
+container entrypoint, `dns/docker-entrypoint.sh`** -- WP 1.8 defined the
+contract that wiring satisfies:
 
 | Placeholder | Meaning | Required? | Documented default |
 |---|---|---|---|
-| `${CACHE_IP}` | IP address of the SteamHangar cache server (vault-core) that `*.steamcontent.com` should resolve to | Required, no sensible default -- every deployment's cache IP is different | none -- WP 1.9's entrypoint should fail fast (like `api/.env.example`'s `VAULT_API_KEY` convention) if this is unset, rather than silently emitting a broken `address=/steamcontent.com/` line |
+| `${CACHE_IP}` | IP address of the SteamHangar cache server (vault-core) that `*.steamcontent.com` should resolve to | Required, no sensible default -- every deployment's cache IP is different | none -- WP 1.9's entrypoint fails fast (like `api/.env.example`'s `VAULT_API_KEY` convention) if this is unset, rather than silently emitting a broken `address=/steamcontent.com/` line |
 | `${UPSTREAM_DNS_1}` | Primary upstream forwarder for everything outside `*.steamcontent.com` | Optional | `1.1.1.1` (Cloudflare) |
 | `${UPSTREAM_DNS_2}` | Secondary upstream forwarder | Optional | `8.8.8.8` (Google) |
 
-Notes for whoever implements WP 1.9's entrypoint:
+Notes WP 1.9's entrypoint was built against (kept as the contract it
+implements):
 
 - `envsubst` has no built-in "use this default if unset" syntax by itself
   -- the entrypoint script is responsible for exporting the documented
@@ -344,7 +346,7 @@ Notes for whoever implements WP 1.9's entrypoint:
   there isn't any elsewhere in the file.
 - Follow the `.env`/`.env.example` convention already established by
   `api/.env.example` (committed example, real `.env` gitignored,
-  never hold secrets in the compose file itself) when WP 1.9 adds the
+  never hold secrets in the compose file itself) as WP 1.9 did for the
   Compose service and its env wiring -- none of these three values are
   secrets, but the convention should stay consistent project-wide.
 
@@ -371,7 +373,7 @@ in WSL2 on port 53.
 
 - The actual container/Dockerfile and Compose service definition, the
   `--profile dns` wiring, and the entrypoint script that performs the
-  `envsubst` substitution described above -- all WP 1.9.
+  `envsubst` substitution described above -- all shipped later by WP 1.9.
 - Changes to `core/` or `api/` (owned by parallel work packages).
 - Changes to `poc/` (frozen as Phase-0 evidence; `poc/linux-client-test`'s
   live scenario-B dnsmasq instance is read-only context for this work

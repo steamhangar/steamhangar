@@ -78,3 +78,15 @@ requests (plan §9).
 - The Linux-client quirk documented upstream is outdated (current clients
   perform lancache discovery); hosts-file mode remains Windows-only in
   docs, DNS mode stays the recommended path for multi-device LANs.
+
+## Addendum (2026-09-30): hosts-file mode is not Windows-only
+
+The last consequence above was written before its own evidence was drawn
+through: the same WP 0.6 finding that retired the Linux-client quirk also
+removes the reason hosts-file mode was scoped to Windows. The current
+Linux/SteamOS Steam client performs the `lancache.steamcontent.com`
+lookup, so a hosts entry works there too, and vault-agent's hosts mode
+shipped platform-neutral in Phase 2 (`agent/README.md`, "The Linux-client
+finding"). Read "hosts-file mode remains Windows-only in docs" as
+superseded: the mode is for a single gaming PC, Windows or Linux/SteamOS;
+DNS mode stays the recommended path for multi-device LANs.

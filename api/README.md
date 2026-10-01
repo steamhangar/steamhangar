@@ -138,6 +138,11 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_MANIFEST_ORACLE_URL`     | no       | `https://api.steamcmd.net/v1/info` | Base URL the oracle asks (`<base>/<appid>`). Point it at your own mirror to keep the queries on your network. Must be `http`/`https`; redirects away from it are never followed |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | no       | `10`         | Socket timeout (seconds) for one oracle request; **must be > 0**. A timeout is an ordinary "no data" outcome, never an error the API surfaces |
 | `VAULT_EGRESS_ALLOW`            | no       | *(empty)*    | WP EG-1 (ADR-0011). Comma-separated bare hostnames the egress-lock proxy (`deploy/proxy`) may additionally reach on vault-api's behalf, beyond the one host baked into that proxy's image unconditionally (`api.steampowered.com`, the Steam Web API relay). **Enabling `VAULT_MANIFEST_ORACLE` with its host missing from this list refuses to boot** — see "Egress lock" below. Each entry must look like a plausible hostname (letters, digits, `.`, `-` only; no leading/trailing `.`/`-`) or vault-api refuses to boot |
+| `VAULT_SWEEP_INCLUDE_CACHED`    | no       | `true` (**was `false` through WP 4d; flipped by WP SWEEP-1 / ADR-0014, 2026-08-22**) | Strict boolean (`true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`, case-insensitive). Widens the scheduler's target set from "installed on a fresh agent" to installed PLUS everything holding cache content. Runtime-editable via `PATCH /v1/settings`. See "Sweep target set — installed PLUS cached" |
+| `VAULT_RELAY_EXPOSE_PLAYTIME`   | no       | `false`      | Strict boolean. Privacy gate for the Steam Web API relay: off = `GET /v1/steam/owned-games` omits `playtime_forever`. Env-only. See "The privacy gate" (WP 4h.0, ADR-0010) |
+| `VAULT_RELAY_EXPOSE_LAST_PLAYED` | no      | `false`      | Strict boolean. Same gate for `rtime_last_played`, independent of the playtime switch. Env-only. See "The privacy gate" |
+| `VAULT_SETTINGS_READONLY`       | no       | `false`      | Strict boolean. Operator hard-lock: on = `PATCH /v1/settings` answers `403` (`GET` still works; the `/v1/steam/key` routes are not covered). Env-only by construction. See "`VAULT_SETTINGS_READONLY` — the operator hard-lock" |
+| `VAULT_WEB_DIR`                 | no       | the repo's `web/` directory (resolved relative to the package) outside the image; the image sets `/app/web` (api/Dockerfile) | Directory the web UI's static files are served from. Blank = the default. Env-only. See "Web UI static serving" |
 
 **All nineteen numeric settings are parsed strictly (WP 3.12).** Twelve take a
 whole number (`VAULT_PREFILL_TIMEOUT_SECONDS`, `VAULT_AGENT_REPORT_KEEP`,
@@ -177,7 +182,7 @@ rule below exists to prevent, reintroduced through the back door; a `nan`
 A grammatically valid but absurdly long digit string (400 digits) also
 overflows to `inf` in `float()` and is refused explicitly.
 
-**For these sixteen numeric settings** (and every other blank-means-off switch
+**For these nineteen numeric settings** (and every other blank-means-off switch
 in the table above — `VAULT_SCHEDULE_WINDOW`, `VAULT_EVENT_LOG_PATH`,
 `VAULT_WEBHOOK_URL`, `VAULT_MANIFEST_ORACLE`, `VAULT_STEAMPREFILL_PATH`), a
 **blank** value still means "not configured" and falls back to the default (a
@@ -511,8 +516,9 @@ is now `INSERT OR IGNORE` plus a conditional name `UPDATE`, pinned by
 ## Endpoints (WP 1.3 + 1.4 + 1.5 + 1.6 + 2.4 + 3.5 + 3.8 + 3.9 + 3.11 + 3.12 + 4a.6r + settings-API/ADR-0009 + 4h.1 + AG-1)
 
 All routes below require `X-Api-Key` (see "Auth"). Full API table:
-`docs/PROJECT_PLAN.md` §6; the games, mapping, prefill, jobs, cache, agent,
-clients, schedule and stats rows are implemented so far.
+`docs/PROJECT_PLAN.md` §6; every row there is implemented, and every
+authenticated one is listed below (`GET /v1/health` is the one public
+route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
@@ -2320,7 +2326,7 @@ here, in any game — the same way it would be excluded from a sweep. This was
 a deliberate choice between the two options on the table: expose the raw
 timestamp and let the frontend guess at staleness, or reuse the scheduler's
 own trust boundary. The second was chosen because a UI badge reading
-"installed on Zeus" from a report the scheduler itself refuses to act on
+"installed on the operator's server" from a report the scheduler itself refuses to act on
 would be the same dishonesty in a different place, and because
 `docs/LEARNINGS.md`'s "two call sites computing the same predicate diverge"
 entry (WP 4f) is exactly the failure mode a second, independently-written
@@ -2383,7 +2389,7 @@ list at the per-app level, and that is being kept, deliberately.**
 `_fresh_snapshots_now` already computes the excluded clients (the
 `_excluded` return value of `fresh_client_snapshots`) and the router
 currently discards it — a game nobody has ever installed and a game
-Zeus reported two months ago (now past the stale window) both render
+the operator's server reported two months ago (now past the stale window) both render
 `installed_on: []`, with nothing in the response distinguishing "no signal"
 from "stale signal". The field shape stays additive and app-scoped as
 shipped; the fix is NOT a bigger `installed_on` payload. AG-2's badge
@@ -4874,7 +4880,7 @@ the fact entirely or offering a toggle that would `422`. `PATCH
   `rtime_last_played` were checked against the Steamworks Web API's public
   documentation and community reports, not against a real `GetOwnedGames`
   response — no Steam Web API key was available in this coding session. This
-  belongs on the Zeus/device real-world verification list alongside the other
+  belongs on the real-world/device verification list alongside the other
   documented "checked against docs, not against a live account" gaps in this
   file (e.g. the manifest oracle's shape assumption, "Manifest oracle"
   section above).
@@ -5471,7 +5477,7 @@ cd api
 .venv\Scripts\python -m pytest
 ```
 
-262 tests, no network and no Steam login required.
+CI-gated (the CI run shows the count); no network and no Steam login required.
 
 Covers: health returns `ok` without a key and leaks nothing else; every
 registered route requires `require_api_key` except `/v1/health` (route-walk

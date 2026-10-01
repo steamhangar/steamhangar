@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Ask a question / discuss an idea
-    url: https://github.com/Riviera822/steamhangar/discussions
+    url: https://github.com/steamhangar/steamhangar/discussions
     about: >
       For open-ended questions, deployment help, or an idea you'd like to
       talk through before writing it up as a feature request.
