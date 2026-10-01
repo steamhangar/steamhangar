@@ -18,11 +18,16 @@
  *     worker claims it asynchronously). The "brand-new job is queued" test
  *     below pins `deduplicated: false` only, deliberately not the status
  *     string, for exactly this reason.
- *   - N2: this demo model's `selectCachedAppids()` keys on `depots.length >
- *     0`, while the real grid (`hasVisibleCacheContent`, `web/js/lib/
- *     game-status.js`) keys on `size_bytes > 0`. The two agree for every
- *     fixture in `buildGames()` below (no zero-byte depot exists), but they
- *     are not the same predicate.
+ *   - N2 (CLOSED by WP WEB-FIX-1, S1 — the WP 4f carry-over recorded in
+ *     docs/WORKPACKAGES.md "Carry-overs" #1): `selectCachedAppids()` used
+ *     to key on `depots.length > 0`, the pre-WP-4f "any mapped depot with
+ *     bytes" rule. It now applies the real `deletion.appids_with_cache_
+ *     content` rule — a game counts iff it maps at least one depot that is
+ *     EXCLUSIVE to it or a LAST-CACHED REMNANT (every other owner uncached
+ *     by the ADR-0003 status predicate); a depot some other owner still
+ *     holds cached content for does not count. See the S1 tests below for
+ *     the scenario that motivated it (a demo delete followed by "Check &
+ *     update all cached games" re-queued the deleted game).
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -32,28 +37,75 @@ beforeEach(() => {
   resetDemoData();
 });
 
-// Seed ids from demo-data.js's buildGames()/buildJobs() — all five games
-// with a non-empty `depots` array count as "cached" in this demo model
-// (makeGame()'s header: mapping and on-disk size are one list here):
-//   2010010 Aurora Cascade    — cached, job-free
-//   2010020 Copper Horizon    — NOT cached (depots: [])
-//   2010030 Driftwood Signal  — cached, has a RUNNING job (900001) already
-//   2010040 Emberreach        — cached (shares a depot with Frostline)
-//   2010050 Frostline Convoy  — cached (shares the same depot)
-//   2010070 Glass Meridian    — cached, needs_force already true
+// Seed ids from demo-data.js's buildGames()/buildJobs(), classified by the
+// real WP 4f rule (exclusive-or-remnant depot, see the header):
+//   2010010 Aurora Cascade    — selected (exclusive depot), job-free
+//   2010020 Copper Horizon    — NOT selected (depots: [])
+//   2010030 Driftwood Signal  — selected (exclusive depot), RUNNING job 900001
+//   2010040 Emberreach        — selected: one exclusive depot + one SHARED
+//                               with Frostline
+//   2010050 Frostline Convoy  — NOT selected: its ONLY depot is the one it
+//                               shares with Emberreach, which holds cached
+//                               content, so that depot is `shared` on the
+//                               real side, neither exclusive nor remnant.
+//                               (Updating Emberreach refreshes that depot
+//                               anyway.) Pre-WP-4f the demo selected it.
+//   2010070 Glass Meridian    — selected (exclusive depot), needs_force true
 const AURORA = 2010010;
 const COPPER = 2010020;
 const DRIFTWOOD = 2010030;
 const EMBERREACH = 2010040;
 const FROSTLINE = 2010050;
 const GLASS_MERIDIAN = 2010070;
-const ALL_CACHED_SORTED = [AURORA, DRIFTWOOD, EMBERREACH, FROSTLINE, GLASS_MERIDIAN];
+const ALL_CACHED_SORTED = [AURORA, DRIFTWOOD, EMBERREACH, GLASS_MERIDIAN];
 const DRIFTWOOD_RUNNING_JOB_ID = 900001;
 
 test("selects every cached app, sorted ascending by appid, excludes the uncached one", async () => {
   const result = await demoRequest("POST", "/v1/prefill/cached");
   assert.deepEqual(result.map((r) => r.appid), ALL_CACHED_SORTED);
   assert.ok(!result.some((r) => r.appid === COPPER), "an app with no depots must never be selected");
+});
+
+// ---------------------------------------------------------------------
+// WP WEB-FIX-1 (S1): the real WP 4f predicate, exclusive OR remnant.
+// ---------------------------------------------------------------------
+
+test("S1: a game whose ONLY depot is shared with a co-owner that holds cached content is NOT selected (DeletionPlan.shared)", async () => {
+  const result = await demoRequest("POST", "/v1/prefill/cached");
+  assert.ok(!result.some((r) => r.appid === FROSTLINE), "Frostline's one depot is `shared` on the real side — neither exclusive nor remnant");
+  assert.ok(result.some((r) => r.appid === EMBERREACH), "Emberreach still has an exclusive depot");
+});
+
+test("MUTATION PIN (S1, the WP 4f carry-over scenario): after deleting a game whose shared depot was protected, 'Check & update all cached games' must NOT re-queue it", async () => {
+  // DELETE Emberreach: its exclusive depot goes, the depot it shares with
+  // Frostline (still cached) is skipped_shared and STAYS in Emberreach's
+  // depots array — exactly the state the old `depots.length > 0` filter
+  // mis-read as "has cache content".
+  const deletion = await demoRequest("DELETE", `/v1/cache/${EMBERREACH}`);
+  assert.equal(deletion.skipped_shared.length, 1, "precondition: the shared depot was protected, not deleted");
+  const emberreach = await demoRequest("GET", `/v1/games/${EMBERREACH}`);
+  assert.ok(emberreach.depots.length > 0, "precondition: the deleted game still maps the protected shared depot");
+
+  const result = await demoRequest("POST", "/v1/prefill/cached");
+  assert.ok(
+    !result.some((r) => r.appid === EMBERREACH),
+    "reverting selectCachedAppids() to `g.depots.length > 0` re-queues the just-deleted game — the re-download-after-delete outcome ADR-0003 exists to prevent",
+  );
+  // ...and the co-owner is now the LAST CACHED owner of that depot: the
+  // depot is a remnant from Frostline's point of view, so Frostline — which
+  // the seed state did NOT select — is selected now.
+  assert.ok(result.some((r) => r.appid === FROSTLINE), "Frostline's depot became a last-cached remnant, which counts");
+});
+
+test("S1: once BOTH co-owners are deleted the shared remnant is freed and neither game is selected any more", async () => {
+  // Delete Frostline first: Emberreach still holds content, so the shared
+  // depot is skipped and Frostline is left idle/null with that one mapping.
+  await demoRequest("DELETE", `/v1/cache/${FROSTLINE}`);
+  // Now delete Emberreach's content too — the shared depot becomes a
+  // remnant (Frostline is uncached) and is actually removed from both.
+  await demoRequest("DELETE", `/v1/cache/${EMBERREACH}`);
+  const after = await demoRequest("POST", "/v1/prefill/cached");
+  assert.ok(!after.some((r) => r.appid === FROSTLINE) && !after.some((r) => r.appid === EMBERREACH), "nothing left to select for either");
 });
 
 test("response shape matches PrefillJobRef exactly, one entry per selected app", async () => {

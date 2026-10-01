@@ -106,3 +106,25 @@ test("sweep_include_cached: a draft string that flips the current boolean effect
   const body = buildSettingsPatch(ENTRIES, { sweep_include_cached: { value: "false" } });
   assert.deepEqual(body, { sweep_include_cached: "false" });
 });
+
+// WP WEB-FIX-1 (S3): `valueChanged` compares TRIMMED text, but the body used
+// to carry the RAW field value — `"90 "` was correctly judged a change and
+// then sent with its trailing space, which PATCH /v1/settings 422s.
+test("MUTATION PIN (S3): a string draft is sent TRIMMED — what was compared is what is sent", () => {
+  const body = buildSettingsPatch(ENTRIES, {
+    schedule_interval_minutes: { value: "90 " },
+    vault_name: { value: "  vault-02\t" },
+  });
+  assert.deepEqual(body, { schedule_interval_minutes: "90", vault_name: "vault-02" });
+});
+
+test("S3: whitespace-only is a real blank override for schedule_window (sent as \"\"), not dropped and not sent raw", () => {
+  const withWindow = ENTRIES.map((e) => (e.key === "schedule_window" ? { ...e, effective: "22:00-06:00", source: "db" } : e));
+  const body = buildSettingsPatch(withWindow, { schedule_window: { value: "   " } });
+  assert.deepEqual(body, { schedule_window: "" });
+});
+
+test("S3: an array draft (webhook_events as a list) is still passed through verbatim", () => {
+  const body = buildSettingsPatch(ENTRIES, { webhook_events: { value: ["job.done"] } });
+  assert.deepEqual(body, { webhook_events: ["job.done"] });
+});

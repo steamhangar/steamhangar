@@ -600,10 +600,10 @@ for what changed and how each fix was mutation-verified.
     mutation-verified: removing the guard now fails this test in under 1ms
     (`calls === 1` assertion, `2 !== 1`) with no `--test-timeout` needed.
 - `demo-data-cached-prefill.test.js` extends `demo-data.js`'s coverage with
-  the new `POST /v1/prefill/cached` route: selects every game whose `depots`
-  array is non-empty (this demo model's stand-in for "has cache content on
-  disk", `makeGame()`'s header), sorted ascending, excluding the one seed
-  game with no depots at all; response shape matches `PrefillJobRef`
+  the new `POST /v1/prefill/cached` route: selects every game that maps at
+  least one EXCLUSIVE or LAST-CACHED-REMNANT depot (the real
+  `deletion.appids_with_cache_content` rule since WP 4f, applied to the
+  demo by WP WEB-FIX-1 S1 — see that section below), sorted ascending; response shape matches `PrefillJobRef`
   exactly; a brand-new job dedupes `false`; the seed data's already-`running`
   job dedupes onto itself with no second job created; pausing that job first
   and re-calling the route dedupes onto it with `status: "paused"` — the job
@@ -625,9 +625,8 @@ for what changed and how each fix was mutation-verified.
   neither a two-line change):** a brand-new demo job flips straight to
   `"running"` on creation (the real contract allows `deduplicated: false`
   to arrive as `"queued"`, which this demo model never produces at that
-  moment); demo selection keys on `depots.length > 0` while the real grid
-  keys on `size_bytes > 0` (agree on every current fixture, but are not the
-  same predicate).
+  moment). (The second nitpick, demo selection keying on
+  `depots.length > 0`, was closed by WP WEB-FIX-1 S1.)
 
 ### WP 4e.1 — Desktop layout foundation (Phase 4e)
 
@@ -2104,14 +2103,10 @@ module and is tested here.
   itself wrong for a reformatting-shaped failure) — VALUE drift (the regex
   still matches, but resolves to a different value: fix `demo-data.js`)
   from GRAMMAR drift (the regex no longer matches `config.py` at all: fix
-  THIS file's regex, `demo-data.js` may be innocent). **Currently 2
-  intentional failures** (the `node --test` totals quoted in the coder's
-  report reflect this): this worktree's own `api/vault_api/config.py`
-  still carries the pre-ADR-0014 values — the sibling package that flips
-  them has not merged into this tree yet — and the guard is correctly
-  reporting that disagreement; it is expected to go green once that merge
-  lands, per the coordinator's stated merge order (sibling first, then
-  this package).
+  THIS file's regex, `demo-data.js` may be innocent). Green since the
+  sibling package that flipped `api/vault_api/config.py` to the ADR-0014
+  defaults merged (the "2 intentional failures" this paragraph used to
+  record are gone; WP WEB-FIX-1, N2).
 
 **Not covered, by design:** everything below needs a real rendered page,
 which neither `node --test` nor a pure `lib/` module can exercise — checked
@@ -2146,3 +2141,59 @@ timeout is a real, app-wide mechanism (every call site in `api.js` would
 need it, not just this screen's three) and is correctly out of scope for
 this package — noted here so it is found the next time a client timeout
 actually lands, rather than rediscovered from scratch.
+
+### WP WEB-FIX-1 — review findings B1/B2/S1/S2/S3/P2/N2-N5
+
+Suite at the end of this package: **812 tests, 812 pass, 0 fail**
+(`node --test "web/tests/*.test.js"`; 772 before it).
+
+New files:
+- `onboarding-wiring.test.js` — fake-dom drive of `onboarding.js`: B1
+  (a verified key test writes `steamvault.demoMode = "0"`; finish never
+  reloads into demo), N3 (OK line carries no `health.version`), N5
+  ("Test connection" sends no PATCH; `finish()` sends the changed
+  `vault_name`, skips it when unchanged or read-only, shows a failed save
+  on step 3 without reloading and retries on the next press), and the B2
+  surface (`openOnboarding({notice})`, `isOnboardingOpen()`). Error lines
+  are looked up per step section (`section.ostep[data-step]`), never by
+  document position — step 2 has its own `p.errline`.
+- `settings-view-wiring.test.js` — `views/settings.js`: B2 (a 401 on
+  `GET /v1/settings` still renders the Connection section and its button
+  opens the reconnect overlay), B1 (demo notice + "Connect to a vault"
+  row, through the real `api.js` → `demo-data.js` path, zero fetches),
+  P2 (a response missing one of the eight keys lands on the error line
+  naming it). Compares TEXT, never nodes: a failed node assertion makes
+  `node:assert` dump the whole fake-DOM graph and the process was
+  OOM-killed (SIGKILL) during development.
+- `auth-recovery.test.js` — `components/auth-recovery.js` (B2): the first
+  AUTH-kind store error opens reconnect once; NETWORK/SERVER never;
+  no stored key never; an already-open overlay neither re-opens nor
+  consumes the one-shot; plus a source pin that `app.js` wires it.
+- `store-singleton-gate.test.js` — N4: no key and no demo starts no loop
+  (zero requests); a key or demo mode starts them.
+- `view-announcer.test.js` — S2: literal `VIEW_TITLES` pin + router twin
+  pin, `<main id="view-root">` has no `aria-live` (HTML comments stripped
+  before the scan), static `#view-announcer` (`.sr-only`, `role="status"`),
+  and the announcer write lives inside `renderView`.
+
+Extended: `settings-diff.test.js` (S3 trimmed string body, arrays
+verbatim), `settings-presentation.test.js` (P2 `missingSettingKeys`),
+`demo-data-cached-prefill.test.js` (S1: shared-with-cached-co-owner not
+selected; the delete-then-check-all carry-over scenario; remnant after
+both co-owners deleted), `fake-dom.js` (DocumentFragment move semantics,
+text nodes, a tag-only `innerHTML` shim that THROWS on non-markup input).
+
+Mutation evidence (each applied alone, full suite run, then restored):
+Connection section moved back below the load-error return → 2 fail;
+`setDemoMode(false)` removed from the key test → 2 fail; `aria-live`
+restored on `<main>` → 1 fail; announcer write removed → 1 fail; S3 trim
+reverted → 2 fail; P2 guard disabled → 1 fail; auth-recovery once-guard
+removed → 1 fail; `createAuthRecovery` call removed from `app.js` → 1
+fail; N4 gate forced to `return true` → 1 fail (it HUNG the suite until the
+first test moved `store.stop()` into `finally`); S1 filter reverted to
+`depots.length > 0` → 3 fail; demo notice disabled → 1 fail; N3
+`health.version` suffix restored → 5 fail.
+
+Not covered: a real screen reader actually speaking the announcer, and the
+demo notice's painted look (it reuses the existing `.hint` class only).
+

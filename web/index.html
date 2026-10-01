@@ -111,7 +111,12 @@
     </div>
   </nav>
 
-  <main id="view-root" class="view-root" aria-live="polite"></main>
+  <!-- WP WEB-FIX-1 (S2): NO aria-live on <main> — a live region spanning
+       the whole view root would announce every navigation's full DOM
+       swap AND every poll tick's patched values (job progress, sizes) to
+       a screen reader. Navigation is announced once, by title, through
+       #view-announcer below (js/app.js renderView). -->
+  <main id="view-root" class="view-root"></main>
 
   <!-- Suggestions panel (WP 4h.2, js/components/decision-panel.js): a
        right-hand column at BP-XL (>=1800px), a collapsible card below that
@@ -150,6 +155,13 @@
   </aside>
 </div>
 
+<!-- Navigation announcer (WP WEB-FIX-1, S2): same role="status"/polite
+     pattern as #toast below, but visually hidden (.sr-only, css/theme.css)
+     — js/app.js writes the new view's title here once per navigation, so
+     assistive tech hears "Downloads", not the whole re-rendered view. Must
+     exist in the static markup (not be created by JS) so the live region
+     is registered before its first update. -->
+<div id="view-announcer" class="sr-only" role="status" aria-live="polite"></div>
 <div id="toast" class="toast" role="status" aria-live="polite">
   <span class="toast-key" aria-hidden="true"></span>
   <span id="toast-text" class="toast-text"></span>

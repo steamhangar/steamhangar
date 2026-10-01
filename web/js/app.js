@@ -31,8 +31,14 @@ import { createRailPanel } from "./components/rail-panel.js";
 // import's comment): decision-panel.js has no import-time side effects, so
 // it needs the real DOM/store/router handed in here.
 import { createDecisionPanel } from "./components/decision-panel.js";
+// WP WEB-FIX-1 (B2): a rotated/revoked vault API key used to leave the UI
+// dead with no recovery surface — every store `{error}` payload is dropped
+// by every view. Same DI-factory posture as rail-panel/decision-panel above.
+import { createAuthRecovery } from "./components/auth-recovery.js";
 import { store } from "./store-singleton.js";
 import { api, getStoredApiKey, isDemoMode } from "./api.js";
+import { openOnboarding, isOnboardingOpen } from "./onboarding.js";
+import { viewTitle } from "./lib/view-title.js";
 
 const RENDERERS = {
   library: renderLibrary,
@@ -42,10 +48,23 @@ const RENDERERS = {
 
 const viewRoot = document.getElementById("view-root");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
+// WP WEB-FIX-1 (S2): the visually-hidden role="status" node index.html
+// declares next to #toast. `<main>` itself carries NO aria-live any more —
+// see index.html's comment on why a live region over the whole view root
+// was wrong (every poll tick would be announced).
+const viewAnnouncer = document.getElementById("view-announcer");
+let announcedView = null;
 
 function renderView(view) {
   const render = RENDERERS[view] || RENDERERS[DEFAULT_VIEW];
   viewRoot.replaceChildren(render());
+
+  // Announce the new view by title, once per navigation. The very first
+  // paint (page load) is deliberately NOT announced: the document title and
+  // the view's own <h1> already carry it, and a live-region update racing
+  // page load is noise, not information.
+  if (announcedView !== null) viewAnnouncer.textContent = viewTitle(view);
+  announcedView = view;
 
   for (const btn of navButtons) {
     if (btn.dataset.view === view) {
@@ -91,6 +110,7 @@ createDecisionPanel({
   getCurrentView: currentView,
   storage: window.localStorage,
 });
+createAuthRecovery({ store, openOnboarding, isOnboardingOpen, getStoredApiKey });
 renderView(currentView());
 // WP 4a.6: shows the 3-step onboarding overlay on top of whatever view just
 // rendered when no vault API key is stored yet and demo mode was not

@@ -76,7 +76,14 @@ export function buildSettingsPatch(entries, drafts) {
     }
     if (!draft || !("value" in draft)) continue;
     if (!valueChanged(key, draft.value, entry.effective)) continue;
-    body[key] = draft.value;
+    // WP WEB-FIX-1 (S3): `valueChanged` compares TRIMMED text, but the body
+    // used to carry the raw field value — so `"90 "` was correctly judged a
+    // change from `180` and then sent with its trailing space, which
+    // `PATCH /v1/settings` rejects with a 422 the user cannot see the cause
+    // of. Send what was compared. Arrays (`webhook_events` as a list) are
+    // passed through verbatim; a string `webhook_events` draft is trimmed
+    // like any other string, which the server's comma-split tolerates.
+    body[key] = typeof draft.value === "string" ? draft.value.trim() : draft.value;
   }
 
   return body;
