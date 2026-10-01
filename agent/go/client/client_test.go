@@ -357,8 +357,12 @@ func TestReportInstalled_CancelDuringBackoffSleepReturnsQuickly(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want it to wrap context.Canceled", err)
 	}
-	if elapsed >= 100*time.Millisecond {
-		t.Fatalf("elapsed = %v, want < 100ms - the 2s backoff sleep must be interrupted "+
+	// 1s, not 100ms (AGENT-TEST-FIX-1): elapsed includes the 20ms cancel
+	// delay (rounded up to Windows' ~15.6ms timer tick) and the first
+	// real HTTP round trip on a possibly loaded CI runner. Half the forced
+	// 2s backoff still proves the sleep was interrupted, not slept out.
+	if elapsed >= 1*time.Second {
+		t.Fatalf("elapsed = %v, want < 1s - the forced 2s backoff sleep must be interrupted "+
 			"by ctx cancellation, not slept out in full", elapsed)
 	}
 }
@@ -387,15 +391,26 @@ func TestReportInstalled_MalformedResponseJSONIsNotRetried(t *testing.T) {
 
 func TestReportInstalled_TimeoutIsRetried(t *testing.T) {
 	var requestCount int32
+	// Never answer while the client is running: every handler blocks until
+	// release is closed (after ReportInstalled returned, before srv.Close,
+	// thanks to defer order). A fixed sleep only raced the client timer.
+	// r.Context() is not usable here - net/http notices the client's
+	// disconnect only after the handler has consumed the request body.
+	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requestCount, 1)
-		time.Sleep(50 * time.Millisecond) // longer than the client's timeout below
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"client_id":"test-pc","received":0,"added":[],"removed":[],"first_report":false}`))
+		<-release
 	}))
 	defer srv.Close()
+	defer close(release)
 
-	c := New(srv.URL, "key", testBackoff(), WithMaxRetries(2), WithTimeout(5*time.Millisecond))
+	// 200ms, not 5ms (AGENT-TEST-FIX-1): http.Client.Timeout also covers
+	// dial + request write, so a 5ms budget could expire before the
+	// handler ever ran on a loaded / coarse-timer runner - the attempt
+	// would still be retried, but the server-side count below would come
+	// up short. 200ms reliably reaches the handler; the handler never
+	// answers, so every attempt still deterministically times out.
+	c := New(srv.URL, "key", testBackoff(), WithMaxRetries(2), WithTimeout(200*time.Millisecond))
 	_, err := c.ReportInstalled(context.Background(), testPayload())
 	if err == nil {
 		t.Fatal("expected a timeout error")

@@ -823,3 +823,11 @@ These are not style preferences; each entry cost a review round to learn.
 - nginx 1.29.8 rejects `?@#\` and space in Host with 400 before any map
   runs, but `%` and `_` pass. A status-only Host test cannot tell refusal
   from relay, so check the logs too (WP SEC-FIX-1).
+- windows-latest failed `go test` on a commit with no Go change. Fixed
+  sleeps and tight wall-clock bounds (80ms, <100ms, a 5ms client
+  timeout) do not survive Windows' ~15.6ms timer tick: poll for the
+  condition with a generous deadline, and keep bounds at a fraction of
+  the forced delay. In Go, a handler's `r.Context()` does not see a
+  client disconnect before the body is read; block a test handler on an
+  explicit release channel closed before `srv.Close()` (WP
+  AGENT-TEST-FIX-1).

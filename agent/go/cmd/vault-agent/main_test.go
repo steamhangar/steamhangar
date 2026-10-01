@@ -458,19 +458,40 @@ func TestRunLoop_ContinuesAfterFailureAndExitsCleanlyOnCancel(t *testing.T) {
 		close(done)
 	}()
 
-	// Let the loop run through the first (failing) report and at least
-	// one subsequent (succeeding) one before asking it to stop.
-	time.Sleep(80 * time.Millisecond)
+	// Wait (bounded, polling) until the server has seen a THIRD request
+	// instead of sleeping a fixed time: a fixed 80ms sleep flaked on
+	// Windows' coarse timer (AGENT-TEST-FIX-1). runLoop is sequential -
+	// reportOnce returns (and has written its stdout line) before the next
+	// iteration sends anything - so request 3 implies report 2 succeeded
+	// and printed. stdout is still only read after <-done below, which is
+	// the happens-before edge that keeps this free of a data race (the
+	// TCP hop between loop and handler is invisible to the race detector).
+	// If the loop stopped after the first failed report, request 3 never
+	// arrives: runLoop returning early or the deadline both fail the test.
+	const wantRequests = 3
+	deadline := time.Now().Add(10 * time.Second)
+	for atomic.LoadInt32(&requestCount) < wantRequests {
+		select {
+		case <-done:
+			cancel()
+			t.Fatalf("runLoop returned on its own after %d request(s), want it to keep looping past the first failure (stderr=%q)",
+				atomic.LoadInt32(&requestCount), stderr.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatalf("server received %d request(s) within 10s, want at least %d (a failure followed by the loop continuing)",
+				atomic.LoadInt32(&requestCount), wantRequests)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	cancel()
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("runLoop did not return within 2s of ctx being canceled")
-	}
-
-	if got := atomic.LoadInt32(&requestCount); got < 2 {
-		t.Fatalf("server received %d request(s), want at least 2 (a failure followed by the loop continuing)", got)
+	case <-time.After(10 * time.Second):
+		t.Fatal("runLoop did not return within 10s of ctx being canceled")
 	}
 	if !strings.Contains(stdout.String(), "reported") {
 		t.Errorf("stdout = %q, want at least one successful report despite the first failure", stdout.String())
