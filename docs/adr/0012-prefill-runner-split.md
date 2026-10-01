@@ -230,6 +230,34 @@ specifically because that case never calls it; the original snapshot the
 reattach path relies on is simply never touched by a second hand-off it
 never receives.
 
+**Addendum 2026-10-01 (WP API-FIX-1).** The text above is kept as decided;
+four points in it are superseded by the following:
+
+- **The lease for a never-claimed run starts at the hand-off**, not at the
+  claim or at `started_at` (the "if never claimed, since the claim, or since
+  the job started running" clause above). `started_at` is stamped by
+  `claim_next_job`, before vault-api's own pre-hand-off depot scan, which on
+  a cold, large cache can outlast the whole lease; every job then failed as
+  `runner_lost` before any runner could claim it.
+- **`handoff_run` stamps `run_heartbeat_at` with the hand-off time instead
+  of resetting it to `NULL`** (the reset list above). This is the mechanism
+  for the previous point: `run_is_stale` reads `run_heartbeat_at` first, and
+  the runner overwrites it with its own heartbeats once it claims the job.
+- **`find_active_run` also returns completed-but-uncollected runs**
+  (`run_completed_at` set, job still `running`). The runner finishing while
+  vault-api is down (`compose up -d` recreating both containers) is the
+  ordinary shape of the "worker dies while runner runs" case; filtering
+  those rows out left the job `running` forever, since `recover_stale_jobs`
+  skips handed-off rows by design.
+- **`resume_job` resets every `run_*` column to `NULL`** when it re-queues
+  a paused job. Because `find_active_run` now returns completed rows, the
+  paused attempt's leftovers (`run_use_force` set, a `paused` result
+  recorded) would otherwise turn a vault-api death between `claim_next_job`
+  and `handoff_run` of the resumed attempt into a reattach that delivers the
+  OLD `paused` result. With the reset, such a row has `run_use_force IS
+  NULL` and `recover_stale_jobs` fails it as a single-process orphan.
+  `resume_job` is the only transition back to `queued`.
+
 ### 5. The interactive login path (ADR-0004 decision 1) moves containers
 
 ADR-0004 decision 1: "Login happens once, interactively, in SteamPrefill's

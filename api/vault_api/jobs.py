@@ -984,6 +984,20 @@ def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
     it is the timestamp of the most recent pause, which stays true after a
     resume and gives a UI something honest to show ("resumed, was paused at
     …"). ``status`` is the authority on whether the job is paused right now.
+
+    **The queue-mode hand-off columns are reset to NULL (WP API-FIX-1, S1).**
+    A paused queue-mode job still carries the paused attempt's ``run_*``
+    columns — ``run_use_force`` set, ``run_completed_at`` set,
+    ``run_result_json`` = the ``paused`` result. Left in place, a vault-api
+    death in the window between ``claim_next_job`` and ``handoff_run`` of the
+    resumed attempt would make that row look like a handed-off,
+    already-completed run: ``recover_stale_jobs`` would skip it (it skips
+    ``run_use_force IS NOT NULL``) and ``find_active_run`` would hand the OLD
+    ``paused`` result to ``await_run_result``, parking the job straight back
+    at ``paused``. Clearing them here makes a resumed job indistinguishable
+    from a never-handed-off one until its own ``handoff_run`` writes a fresh
+    attempt. ``resume_job`` is the only transition back to ``queued`` (there
+    is no retry path), so this is the one place that needs it.
     """
     with immediate_transaction(conn):
         row = conn.execute(
@@ -1005,7 +1019,11 @@ def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
 
         conn.execute(
             """
-            UPDATE jobs SET status = ?, stop_request = NULL
+            UPDATE jobs SET status = ?, stop_request = NULL,
+                run_use_force = NULL, run_before_json = NULL,
+                run_claimed_by = NULL, run_claimed_at = NULL,
+                run_heartbeat_at = NULL, run_completed_at = NULL,
+                run_result_json = NULL
             WHERE id = ? AND status = ?
             """,
             (STATUS_QUEUED, job_id, STATUS_PAUSED),
@@ -1081,8 +1099,9 @@ def recover_stale_jobs(conn: sqlite3.Connection, queue_mode: bool = False) -> in
     there" — deliberately not duplicated here, so a stale-lease bug only has
     one place to hide instead of two disagreeing ones.
     A ``running`` prefill job that was never handed off (``run_use_force IS
-    NULL`` — the narrow window between ``claim_next_job`` and ``handoff_run``)
-    is a genuine single-process orphan even in queue mode, exactly like every
+    NULL`` — the narrow window between ``claim_next_job`` and ``handoff_run``;
+    this holds for a resumed job too, because ``resume_job`` clears the
+    paused attempt's ``run_*`` columns) is a genuine single-process orphan even in queue mode, exactly like every
     other job type, and is failed here as before. GC jobs never go through the
     runner split at all (worker.py still runs them in-process, ADR-0012 is
     prefill-only) and are always covered by the blanket rule regardless of
@@ -1107,9 +1126,15 @@ def recover_stale_jobs(conn: sqlite3.Connection, queue_mode: bool = False) -> in
                 # Handed off to a runner that may still be alive in a
                 # separate process — not this function's call to make.
                 continue
+            # stop_request = NULL (WP API-FIX-1, P3): this is a terminal
+            # transition like every other, and db.py's column comment
+            # promises the one-shot flag is cleared at each of them. A
+            # cancel/pause that raced the dead process would otherwise
+            # survive on an 'error' row forever.
             conn.execute(
                 """
-                UPDATE jobs SET status = ?, finished_at = ?, log_excerpt = ?
+                UPDATE jobs SET status = ?, finished_at = ?, log_excerpt = ?,
+                    stop_request = NULL
                 WHERE id = ?
                 """,
                 (STATUS_ERROR, finished_at, STALE_JOB_MESSAGE, int(row["id"])),
@@ -1192,24 +1217,45 @@ def handoff_run(
 
     **The fix.** Every hand-off — first attempt or Nth, after a pause/resume
     or not — is a full fresh-attempt write: besides ``run_use_force``/
-    ``run_before_json``, it explicitly resets every RUNNER-OWNED column
-    (``run_claimed_by``, ``run_claimed_at``, ``run_heartbeat_at``,
-    ``run_completed_at``, ``run_result_json``) to ``NULL`` in the SAME
-    statement, so ``claim_run`` sees a genuinely unclaimed job again and
-    ``await_run_result`` can never observe a stale result left over from a
-    previous attempt at this job id. This is safe for the restart-reattach
+    ``run_before_json``, it explicitly resets the RUNNER-OWNED columns
+    (``run_claimed_by``, ``run_claimed_at``, ``run_completed_at``,
+    ``run_result_json``) to ``NULL`` in the SAME statement, so ``claim_run``
+    sees a genuinely unclaimed job again and the ``await_run_result`` call
+    that follows this hand-off cannot observe a stale result left over from
+    a previous attempt at this job id. The window BEFORE this call (between
+    ``claim_next_job`` and here) is covered by ``resume_job``, which clears
+    the paused attempt's ``run_*`` columns when the job is re-queued — so a
+    vault-api death in that window leaves a row with ``run_use_force IS
+    NULL`` that ``recover_stale_jobs`` fails as an orphan, and
+    ``find_active_run`` never sees it. This is safe for the restart-reattach
     case specifically because that case never calls this function.
+
+    **``run_heartbeat_at`` is stamped with NOW, not NULL (WP API-FIX-1,
+    B2): the hand-off is where the runner lease starts.** ``run_is_stale``
+    consults ``run_heartbeat_at`` first and only falls back to
+    ``started_at`` when it is NULL — but ``started_at`` is stamped by
+    ``claim_next_job``, BEFORE vault-api's own pre-hand-off work
+    (``prefill.scan_depots`` — a full cache walk that on a cold, large cache
+    can take longer than the whole lease). Measured from ``started_at``, an
+    unclaimed job's lease could therefore already be spent by the time this
+    function ran, and ``await_run_result`` failed EVERY job as
+    ``runner_lost`` before any runner had a chance to claim it. Writing the
+    hand-off time here means "no runner claimed this within the lease" is
+    measured from the moment a runner COULD have claimed it, which is the
+    only reading of that timeout that makes sense. The runner overwrites
+    the value with its own heartbeats once it owns the job (``claim_run``
+    stamps it too), so nothing about the claimed-job semantics changes.
     """
     conn.execute(
         """
         UPDATE jobs
         SET run_use_force = ?, run_before_json = ?,
             run_claimed_by = NULL, run_claimed_at = NULL,
-            run_heartbeat_at = NULL, run_completed_at = NULL,
+            run_heartbeat_at = ?, run_completed_at = NULL,
             run_result_json = NULL
         WHERE id = ?
         """,
-        (int(use_force), before_json, job_id),
+        (int(use_force), before_json, utcnow_iso(), job_id),
     )
     conn.commit()
 
@@ -1314,18 +1360,32 @@ def record_run_result(
 
 
 def find_active_run(conn: sqlite3.Connection) -> dict[str, object] | None:
-    """The one queue-mode prefill job still awaiting a runner's result.
+    """The one queue-mode prefill job vault-api still has to finalize.
 
     Read-only reattachment lookup for ``PrefillWorker._run`` after a vault-api
     restart (ADR-0012's "worker dies while runner runs" crash-semantics case):
-    a job that was handed off (``run_use_force IS NOT NULL``) and has not yet
-    completed (``run_completed_at IS NULL``) is still ``status = 'running'``
-    from before the restart — ``claim_next_job`` alone would never see it
-    again (it only claims ``'queued'`` rows), so without this the worker would
-    silently abandon it and go claim something else while the runner keeps
-    working unheard. Staleness is judged by the CALLER (via ``run_is_stale``),
-    not here — this function only answers "is there one", not "is it still
-    alive", so there is exactly one place that decides that.
+    a job that was handed off (``run_use_force IS NOT NULL``) and is still
+    ``status = 'running'`` from before the restart — ``claim_next_job`` alone
+    would never see it again (it only claims ``'queued'`` rows), so without
+    this the worker would silently abandon it and go claim something else
+    while the runner keeps working unheard. Staleness is judged by the CALLER
+    (via ``run_is_stale``), not here — this function only answers "is there
+    one", not "is it still alive", so there is exactly one place that decides
+    that.
+
+    **A row with ``run_completed_at`` already set IS returned (WP API-FIX-1,
+    B1).** The runner finishing while vault-api was down is the ordinary
+    shape of this crash case (``compose up -d`` recreates both containers;
+    the runner's SIGTERM handler records an ``aborted`` result within
+    seconds, while vault-api is still booting). Such a row is still
+    ``running`` — only vault-api's ``_finalize_prefill_result`` can move it
+    on — so it is exactly what the reattach path exists to collect;
+    ``prefill_queue.await_run_result`` returns the recorded result on its
+    first poll. An earlier version filtered ``run_completed_at IS NULL``
+    here, which left that job ``running`` forever: ``recover_stale_jobs``
+    skips handed-off rows by design, ``enqueue_prefill`` deduped every new
+    request onto the dead id, and ``DELETE /v1/cache/{appid}`` answered 409
+    until an operator edited the database by hand.
 
     At most one row can exist under the project's one-job-at-a-time invariant;
     ``LIMIT 1`` is defensive, not load-bearing.
@@ -1334,7 +1394,7 @@ def find_active_run(conn: sqlite3.Connection) -> dict[str, object] | None:
         f"""
         SELECT {_RUN_COLUMNS} FROM jobs
         WHERE status = ? AND type = ?
-          AND run_use_force IS NOT NULL AND run_completed_at IS NULL
+          AND run_use_force IS NOT NULL
         ORDER BY id
         LIMIT 1
         """,
@@ -1356,17 +1416,22 @@ def run_is_stale(
     Falls back through THREE timestamps, in order of trust:
 
     1. ``run_heartbeat_at`` — the runner is actively executing and refreshing
-       it (the common case once claimed).
+       it (the common case once claimed). Since WP API-FIX-1 (B2) it is
+       also stamped by ``handoff_run`` itself, so for an UNCLAIMED job it
+       is the hand-off time: "is a runner even running" is then measured
+       from the moment a runner could first have claimed the job, not from
+       ``started_at`` (which predates vault-api's own pre-hand-off cache
+       walk and made every job on a cold cache fail as ``runner_lost``
+       before a runner got to see it).
     2. ``run_claimed_at`` — the runner claimed the job but died before its
        first heartbeat tick (a crash in the gap between claim and the first
-       poll of ``prefill.run_prefill``'s subprocess loop).
-    3. ``started_at`` — the job has not been claimed by any runner at all yet
-       (``run_claimed_by IS NULL``). This is the "is a runner even running"
-       case: if nothing has claimed a handed-off job within the lease window
-       of when it started running, that is exactly as actionable as a dead
-       runner — an operator needs to know either way, and a job with no
-       runner talking to it should not wait forever any more than one with a
-       dead one should.
+       poll of ``prefill.run_prefill``'s subprocess loop). Unreachable in
+       practice since ``claim_run`` stamps both columns together; kept as
+       a fallback for rows written by older code.
+    3. ``started_at`` — nothing else is set. Only rows handed off by a
+       vault-api older than WP API-FIX-1 can look like this; the reasoning
+       is unchanged: a job with no runner talking to it should not wait
+       forever any more than one with a dead one should.
 
     A completed run (``run_completed_at`` set) is never stale — it has a
     result waiting to be collected, not a dead runner. A row with none of the

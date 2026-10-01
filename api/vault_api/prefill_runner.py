@@ -39,6 +39,7 @@ import logging
 import os
 import signal
 import socket
+import sqlite3
 import threading
 import time
 import uuid
@@ -48,6 +49,20 @@ from vault_api.config import Settings
 from vault_api.db import get_connection
 
 logger = logging.getLogger(__name__)
+
+#: What an ``'aborted'`` result says in THIS process (WP API-FIX-1, P4):
+#: ``run_prefill``'s ``should_abort`` here is the runner's own stop event
+#: (SIGTERM from ``docker stop``/``compose up -d``), not vault-api's — the
+#: default wording would send an operator to the wrong container's logs.
+ABORT_REASON_RUNNER = "prefill_runner is shutting down"
+
+#: How often ``_record_result`` tries to store a finished result before it
+#: gives up (WP API-FIX-1, S2), and how long it sleeps between attempts.
+#: Deliberately a plain ``time.sleep``, not ``self._stop.wait``: the most
+#: common caller during shutdown is the SIGTERM ``aborted`` result, which
+#: must still get its retries.
+RESULT_WRITE_ATTEMPTS = 5
+RESULT_WRITE_RETRY_SECONDS = 1.0
 
 
 def make_runner_id() -> str:
@@ -96,7 +111,16 @@ class PrefillRunner:
         )
         try:
             while not self._stop.is_set():
-                job = jobs.claim_run(conn, self._runner_id)
+                try:
+                    job = jobs.claim_run(conn, self._runner_id)
+                except sqlite3.Error:
+                    # Same net vault-api's worker has around claim_next_job
+                    # (WP API-FIX-1, P2): a locked/failed claim must not
+                    # kill the runner; the job stays handed-off and the next
+                    # poll retries.
+                    logger.exception("Failed to claim a run; retrying after a poll")
+                    self._stop.wait(self._settings.runner_poll_seconds)
+                    continue
                 if job is None:
                     self._stop.wait(self._settings.runner_poll_seconds)
                     continue
@@ -124,13 +148,41 @@ class PrefillRunner:
             write to the shared database several times a second for no
             benefit (``jobs.run_is_stale``'s margin is measured in whole
             heartbeat intervals, not sub-second ticks).
+
+            **A database error here is logged and read as "no stop request"
+            (WP API-FIX-1, P2).** This callback runs INSIDE
+            ``prefill.run_prefill``'s wait loop, with SteamPrefill live
+            underneath it; letting a ``sqlite3.Error`` (a busy-timeout
+            overrun, a transient I/O error on the shared volume) escape
+            would abandon a download over a bookkeeping hiccup. A missed
+            heartbeat costs one interval of lease margin (the runner retries
+            at the next one, not on the next 0.2s tick); a missed
+            stop-request read is answered on the next tick. If the database
+            stays broken past the lease, vault-api fails the job as
+            ``runner_lost`` — the same outcome as a dead runner, which from
+            vault-api's side is exactly what this looks like.
             """
             nonlocal last_heartbeat
             now = time.monotonic()
             if now - last_heartbeat >= self._settings.runner_heartbeat_seconds:
-                jobs.record_run_heartbeat(conn, job_id, self._runner_id)
                 last_heartbeat = now
-            return jobs.read_stop_request(conn, job_id)
+                try:
+                    jobs.record_run_heartbeat(conn, job_id, self._runner_id)
+                except sqlite3.Error:
+                    logger.exception(
+                        "prefill_runner %s: heartbeat for job %s failed; "
+                        "retrying at the next interval.",
+                        self._runner_id, job_id,
+                    )
+            try:
+                return jobs.read_stop_request(conn, job_id)
+            except sqlite3.Error:
+                logger.exception(
+                    "prefill_runner %s: could not read job %s's stop request; "
+                    "treating it as none until the next tick.",
+                    self._runner_id, job_id,
+                )
+                return None
 
         result = prefill.run_prefill(
             appid=appid,
@@ -139,11 +191,12 @@ class PrefillRunner:
             should_abort=self._stop.is_set,
             use_force=use_force,
             stop_request=stop_request_with_heartbeat,
+            abort_reason=ABORT_REASON_RUNNER,
         )
 
-        applied = jobs.record_run_result(
-            conn, job_id, self._runner_id, prefill_queue.encode_result(result)
-        )
+        applied = self._record_result(conn, job_id, prefill_queue.encode_result(result))
+        if applied is None:
+            return
         if applied:
             logger.info(
                 "prefill_runner %s: job %s (appid %s) finished, success=%s "
@@ -162,6 +215,40 @@ class PrefillRunner:
                 "output is not lost, only this row's bookkeeping is).",
                 self._runner_id, job_id, appid,
             )
+
+    def _record_result(
+        self, conn: sqlite3.Connection, job_id: int, result_json: str
+    ) -> bool | None:
+        """``jobs.record_run_result`` with a retry net (WP API-FIX-1, S2).
+
+        Returns what ``record_run_result`` returned, or ``None`` if every
+        attempt raised ``sqlite3.Error``. A transient lock or I/O error on
+        the shared volume right after SteamPrefill exits must neither kill
+        the runner loop nor silently drop a finished download's outcome, so
+        it is retried a few times. If the database stays broken, the error is
+        logged loudly and the runner moves on: the job's lease then expires
+        (no more heartbeats) and vault-api fails it as ``runner_lost`` — the
+        bytes SteamPrefill wrote stay in the cache either way.
+        """
+        for attempt in range(1, RESULT_WRITE_ATTEMPTS + 1):
+            try:
+                return jobs.record_run_result(conn, job_id, self._runner_id, result_json)
+            except sqlite3.Error:
+                logger.exception(
+                    "prefill_runner %s: storing job %s's result failed "
+                    "(attempt %s/%s).",
+                    self._runner_id, job_id, attempt, RESULT_WRITE_ATTEMPTS,
+                )
+                if attempt < RESULT_WRITE_ATTEMPTS:
+                    time.sleep(RESULT_WRITE_RETRY_SECONDS)
+        logger.error(
+            "prefill_runner %s: GAVE UP storing job %s's result after %s "
+            "attempts; the result is lost and vault-api will fail the job as "
+            "runner_lost once its lease expires. The downloaded bytes stay "
+            "in the cache.",
+            self._runner_id, job_id, RESULT_WRITE_ATTEMPTS,
+        )
+        return None
 
 
 def main() -> None:
