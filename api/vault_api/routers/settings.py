@@ -157,6 +157,17 @@ def _coerce_patch_value(key: str, value: Any) -> str:
         )
     if isinstance(value, str):
         return value
+    if isinstance(value, (int, float)) and key == "steam_library_steamid":
+        # WP API-FEAT-1 S1: a JSON number for a 17-digit id is already
+        # rounded by any JavaScript sender, so refuse it instead of storing a
+        # possibly different account.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{key!r}: send the SteamID64 as a JSON string (17 digits "
+                "exceed JavaScript's safe integer range)."
+            ),
+        )
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, list) and key == "webhook_events":

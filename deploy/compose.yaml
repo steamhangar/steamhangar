@@ -560,6 +560,10 @@ services:
       VAULT_SCHEDULE_CLIENT_STALE_DAYS: ${VAULT_SCHEDULE_CLIENT_STALE_DAYS-}
       VAULT_WEBHOOK_URL: ${VAULT_WEBHOOK_URL-}
       VAULT_WEBHOOK_EVENTS: ${VAULT_WEBHOOK_EVENTS-}
+      # WP API-FEAT-1: the library SteamID64 (settings key
+      # steam_library_steamid). Same reasoning and same no-colon, empty-
+      # default form as the five keys above: unset or blank = not set.
+      VAULT_STEAM_LIBRARY_STEAMID: ${VAULT_STEAM_LIBRARY_STEAMID-}
       # --- WP EG-1 (ADR-0011): the egress lock. See the big banner comment
       # above the top-level `networks:` block for the full mechanism; these
       # four lines are that mechanism's vault-api-side half. ---

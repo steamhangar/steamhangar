@@ -104,3 +104,15 @@ three places — this addendum, `docs/security/threat-model.md` §7 and
 3 above. Gating the key routes together with a `VAULT_STEAM_RELAY_KEY` env
 source is post-release work; when it lands, decision 3's wording becomes
 true without qualification.
+
+## Addendum 2026-10-01 — `steam_library_steamid` (WP API-FEAT-1)
+
+One more overridable key, under the ADR-0016 freeze exception. It follows
+decisions 1-7 unchanged: db > env > default, `null` deletes the row,
+`VAULT_SETTINGS_READONLY=1` refuses the PATCH with `403`, and PATCH and
+startup share one grammar (`config.parse_steam_library_steamid`, which
+delegates to `steam_relay.valid_steamid64`). Blank is a valid override that
+means "not set", like `webhook_url`. It is not secret (decision 7 does not
+apply), because a SteamID64 is a public identifier. `applies` is
+`immediately`, since vault-api caches nothing for it; the frontends read it
+per request from `GET /v1/settings`.

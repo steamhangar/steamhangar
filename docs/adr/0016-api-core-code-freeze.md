@@ -40,3 +40,28 @@ connection-lost indicator (WP WEB-FIX-2). All of them have passed review.
   a user decision and a note here.
 - Features for web/app/agent/deploy wait until after `v0.1.0-rc1` unless
   the user decides otherwise.
+
+## Addendum 2026-10-01 — freeze exception: `steam_library_steamid` (WP API-FEAT-1)
+
+User decision, 2026-10-01: the api/ freeze opens for exactly one new
+setting, `steam_library_steamid`, and nothing else. Why: there should be one
+SteamID per vault, not one per device. The web library (WP WEB-FEAT-1) reads
+it now, and the app reads it later, both from `GET /v1/settings`, instead of
+each device storing its own.
+
+Scope of the exception, all in WP API-FEAT-1:
+
+- one `OVERRIDABLE_SPECS` entry (`api/vault_api/settings_store.py`) and one
+  `Settings` field with its env source `VAULT_STEAM_LIBRARY_STEAMID`
+  (`api/vault_api/config.py`);
+- no new grammar: the value must pass `steam_relay.valid_steamid64`, the
+  relay's existing check (17 ASCII digits, individual-account range);
+- the forwarding line in `deploy/compose.yaml` and the stanza in
+  `deploy/.env.example` (deploy/ is not frozen; listed for completeness).
+
+`PATCH` accepts the value only as a JSON string: a JSON number gets `422`,
+because a JavaScript sender has already rounded a 17-digit id to a
+different account.
+
+No route, schema or relay behaviour changed. Every other frozen-path change
+still needs its own user decision and note here.

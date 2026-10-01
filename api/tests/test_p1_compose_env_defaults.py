@@ -167,6 +167,8 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     "VAULT_SCHEDULE_CLIENT_STALE_DAYS": "",
     "VAULT_WEBHOOK_URL": "",
     "VAULT_WEBHOOK_EVENTS": "",
+    # WP API-FEAT-1: the library SteamID64, same S3 reasoning and form.
+    "VAULT_STEAM_LIBRARY_STEAMID": "",
     # WP EG-1 (ADR-0011). Empty by default -- the egress lock ships
     # default-on with an empty allowlist, not a wide-open one. No
     # DEFAULT_EGRESS_ALLOW constant exists in config.py (an empty frozenset
@@ -645,6 +647,8 @@ READONLY_REACHABLE_SETTINGS_VARS = (
     "VAULT_SCHEDULE_CLIENT_STALE_DAYS",
     "VAULT_WEBHOOK_URL",
     "VAULT_WEBHOOK_EVENTS",
+    # WP API-FEAT-1.
+    "VAULT_STEAM_LIBRARY_STEAMID",
 )
 
 
