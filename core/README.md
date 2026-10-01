@@ -14,7 +14,8 @@ container image arrived with WP 1.9 -- see "The Docker image" below.
 ```
 core/
 ├── nginx/
-│   └── nginx.conf                        # the config itself
+│   ├── nginx.conf                        # the config itself
+│   └── vault-upstream-rate.conf          # static "no cap" include (see "Upstream rate cap")
 ├── tests/
 │   ├── test-core.ps1                     # automated suite, runs against the real Steam CDN
 │   ├── fixtures/
@@ -663,6 +664,7 @@ core/
 └── docker/
     ├── nginx.conf.template          # what actually runs in the container
     ├── 25-vault-eventlog.sh         # VAULT_EVENT_LOG on/off + validation
+    ├── 27-vault-upstream-rate.sh    # VAULT_UPSTREAM_RATE(_WINDOW) -> rate include
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
     └── check-config-drift.sh        # keeps the template honest
 ```
@@ -677,8 +679,8 @@ with expected counts, is in `check-config-drift.sh`). Everything else (every map
 guard, the Host allowlist, the Range/Accept-Encoding stripping, the nocache
 bypass, the log format) is byte-identical, and that is **machine-checked**
 by `core/docker/check-config-drift.sh`: it normalises both files, un-applies
-the enumerated deltas, and diffs. 114 normalised directive lines (as of
-the pre-freeze review), verified identical; it also asserts that the
+the enumerated deltas, and diffs. 118 normalised directive lines (as of
+WP TH-1a), verified identical; it also asserts that the
 `vault_event` log_format line keeps all 8 of its LITERAL tabs in both files
 (review P7) -- the normaliser would otherwise hide a tab -> space edit that
 breaks vault-api's tab-split parser -- and verified to actually catch an injected difference (a
@@ -715,6 +717,115 @@ touching either file.
   the probe are not pinned by any automated test).
 - Deployment, volumes, ports and the port-80/dedicated-IP guidance:
   `deploy/README.md`.
+
+## Upstream rate cap (WP TH-1a)
+
+Caps the **upstream** read of a cache MISS (Steam CDN -> vault-core). HITs
+never reach `@miss` and are served at LAN speed. Off by default.
+
+| Variable | Meaning | Empty / unset |
+|---|---|---|
+| `VAULT_UPSTREAM_RATE` | ONE aggregate limit in bytes per second, nginx size syntax: digits with an optional `k` (x1024) or `m` (x1048576) suffix. `800k` = 819,200 B/s, not 800,000. | no cap |
+| `VAULT_UPSTREAM_RATE_WINDOW` | `HH:MM-HH:MM`, the exact grammar of `VAULT_SCHEDULE_WINDOW` (`api/vault_api/schedule_window.py`): start inclusive, end exclusive, whole minutes, `22:00-06:00` wraps midnight, `24:00` only as the end. **Full speed inside the window, capped outside it.** | the cap applies around the clock |
+
+**Mechanism.** nginx has no arithmetic, so
+`/docker-entrypoint.d/27-vault-upstream-rate.sh` precomputes the division
+at container start into `/etc/nginx/vault-upstream-rate.conf`, which
+`nginx.conf` includes:
+
+- a map from `$connections_writing` to a per-request share: bucket 1 = the
+  total, bucket N = total/N (integer floor) up to N = 1024, `default` =
+  total/1024 (only reached by a count of 0, e.g. in the log phase);
+- with a window, a map from `$time_iso8601` (one line per hour touched by
+  the window, minute ranges at the edges) and a third map choosing `0`
+  (unlimited) inside the window, the share outside it;
+- with no cap, a single `default 0;` map, so `proxy_limit_rate
+  $vault_upstream_rate;` is always present.
+
+`proxy_limit_rate` takes that value once per request, when the upstream
+response headers arrive (TH-0b section 1.1). It only acts on buffered
+responses, so `proxy_buffering on;` is explicit in `@miss` and the upstream
+cannot switch it off with `X-Accel-Buffering: no` (`proxy_ignore_headers`;
+a reasoned guard, not measured against an upstream that sends the header).
+Both lines and `proxy_limit_rate` are pinned by `check-config-drift.sh`
+and the CI gate, by count AND by position inside the `location @miss`
+block (a named location inherits nothing from `/depot/`).
+
+**Why `$connections_writing`, not `$connections_active`** (measured,
+`poc/throttle/RESULTS-TH1-20261001.md`, 800k target): 8 parallel MISSes
+gave 0.981x of the target with `_writing` and 0.967x with `_active`; with 8
+idle keep-alive connections open as well, `_writing` stayed at 0.981x
+while `_active` fell to 0.496x, because `_active` counts idle keep-alives.
+
+**What the cap is, stated honestly:**
+
+- **It is per request, divided by the live count.** Each MISS gets
+  total/N, N being the number of requests nginx is processing at that
+  moment. The aggregate equals the total only while those N are all MISSes.
+- **HIT, `/health` and other in-flight requests dilute the share.** They
+  count in N but take no WAN bandwidth, so the WAN is under-used (never
+  over the cap from this). Idle keep-alive connections do NOT count
+  (measured above). A request's share is fixed when it starts: when other
+  requests finish, the remaining ones do not speed up.
+- **Slow-ramp overshoot is bounded and unmeasured.** A client that opens
+  its connections more slowly than one upstream round-trip leaves the
+  first MISSes at the larger share they saw (worst case: the total) until
+  their chunk ends -- at most one chunk per request already in flight.
+  Measured only for a burst inside ~20 ms (no overshoot, TH-0b).
+- **One bucket per possible connection.** nginx.conf pins
+  `worker_processes 1` and `worker_connections 1024`, so
+  `$connections_writing` can never exceed 1024 and every live count has
+  its own exact bucket; no count falls through to the default.
+  `check-config-drift.sh` asserts BUCKETS >= worker_processes x
+  worker_connections, so raising either without raising BUCKETS in
+  `27-vault-upstream-rate.sh` fails CI.
+- **The LAN client that triggers a MISS is capped too.** The chunk streams
+  through to it at the capped pace; there is no nginx-native way to slow
+  the upstream read without slowing the one client waiting on it.
+- **The window edge stops nothing.** The value is chosen per request, so a
+  sweep or prefill running past the end of the window continues, capped,
+  chunk by chunk. Stopping at the edge would be the scheduler's decision.
+- **Container local time.** `$time_iso8601` is nginx's local time, so the
+  window means the operator's clock only if `TZ` reaches vault-core
+  (tzdata is in the image, measured). `deploy/compose.yaml` does not
+  forward `TZ` to vault-core yet (WP TH-1b), so today the window is
+  evaluated in UTC.
+- **Env-only, baked at container start.** Neither value is a vault-api
+  setting; a change needs a container restart (recreate). Neither is
+  forwarded by `deploy/compose.yaml` yet (WP TH-1b); until then they reach
+  vault-core only through a `compose.override.yaml` `environment:` block.
+
+**Fail-closed.** nginx reads an empty or unparseable `proxy_limit_rate`
+value as 0 = **unlimited** (TH-0b, measured), so: an invalid
+`VAULT_UPSTREAM_RATE` (anything but 1-9 digits with an optional suffix, a
+leading zero, `0`, below 1024 B/s so a share would round to 0) or an invalid
+`VAULT_UPSTREAM_RATE_WINDOW` stops the boot with
+`27-vault-upstream-rate.sh: FATAL`; the script re-reads its own output
+and refuses to start on a map that could evaluate to empty or 0; and
+`40-vault-preflight.sh` takes a second look and refuses to boot if the
+include is missing or not wired in, or if `VAULT_UPSTREAM_RATE` is set but
+the file holds no connection-count map with a positive default. That is a
+presence check, not a full independent re-derivation of the render. A
+window with no rate is validated and then has nothing to lift. One
+deliberate divergence from vault-api's parser: Python's `strip()` also
+removes non-ASCII whitespace, this script only ASCII whitespace -- such a
+value stops vault-core's boot instead of being reinterpreted.
+
+**Native rig.** `core/nginx/nginx.conf` carries the identical `include`
+and `@miss` lines; its `core/nginx/vault-upstream-rate.conf` is the static
+cap-off form (`check-config-drift.sh` asserts it equals the script's
+cap-off render). The divisor map needs the stub_status module
+(`--with-http_stub_status_module` -- confirmed in the container image's
+`nginx -V`) and nginx >= 1.27.0; for the native Windows binary both are
+unverified here and checked by `test-core.ps1` test 15 when it runs.
+
+**Tests.** `.github/scripts/verify-core-nginx.sh` renders cap off, cap on
+without a window and cap on with a midnight-wrapping window (22:30-06:15)
+through the real entrypoint, runs `nginx -t` on each and asserts the map
+contents; refuses 18 invalid rate/window values; checks the preflight's
+cross-check; and starts a throwaway server that returns the evaluated
+`$vault_upstream_rate` inside and outside a window built around the
+current minute.
 
 ## What this work package does NOT cover
 

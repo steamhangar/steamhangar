@@ -34,6 +34,7 @@ LABEL org.opencontainers.image.title="SteamHangar vault-core" \
 # this template in sync with core/nginx/nginx.conf.
 COPY docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
 COPY docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
+COPY docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
 COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
 
 # Shipped for auditability: the running image can prove its own config matches
@@ -44,7 +45,7 @@ COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
 COPY docker/check-config-drift.sh /opt/vault/check-config-drift.sh
 
 RUN set -eux; \
-    chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
+    chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
     # image honest about what it serves.
@@ -77,7 +78,14 @@ RUN set -eux; \
     # core/docker/check-config-drift.sh "delta 6"), each carrying the
     # trailing marker comment 25-vault-eventlog.sh depends on to find it.
     grep -q '\${VAULT_EVENT_LOG}' /etc/nginx/templates/nginx.conf.template; \
-    [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "2" ]
+    [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "2" ]; \
+    # WP TH-1a: the upstream rate cap is wired in exactly once (include at
+    # http level, proxy_limit_rate in @miss), and the hook renders its cap-off
+    # form in this image's own shell.
+    [ "$(grep -c '^[[:space:]]*include vault-upstream-rate\.conf;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
+    [ "$(grep -c '^[[:space:]]*proxy_limit_rate[[:space:]]*\$vault_upstream_rate;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
+    VAULT_UPSTREAM_RATE= VAULT_UPSTREAM_RATE_WINDOW= sh /docker-entrypoint.d/27-vault-upstream-rate.sh /tmp/vault-upstream-rate.build-check.conf; \
+    rm -f /tmp/vault-upstream-rate.build-check.conf
 
 # Declared so that a plain `docker run` without -v cannot silently fill the
 # container's writable layer with depot chunks, and so that the default is one
@@ -124,7 +132,17 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     # enable it once a consumer exists. /docker-entrypoint.d/25-vault-eventlog.sh
     # validates the value and either strips the feature entirely (empty) or
     # prepares the target directory (non-empty) before nginx starts.
-    VAULT_EVENT_LOG=
+    VAULT_EVENT_LOG= \
+    # WP TH-1a: aggregate upstream (Steam -> vault) cap in bytes/s, nginx size
+    # syntax (k = 1024, m = 1048576), e.g. 800k. DEFAULT EMPTY = no cap.
+    # /docker-entrypoint.d/27-vault-upstream-rate.sh divides it by the live
+    # number of in-flight requests and refuses to boot on an invalid value.
+    # Env-only, read once at container start (core/README.md "Upstream rate
+    # cap").
+    VAULT_UPSTREAM_RATE= \
+    # HH:MM-HH:MM (VAULT_SCHEDULE_WINDOW's grammar): full speed inside, the
+    # cap outside, in the container's local time (TZ). Empty = cap always.
+    VAULT_UPSTREAM_RATE_WINDOW=
 
 WORKDIR /vault
 

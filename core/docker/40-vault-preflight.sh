@@ -76,6 +76,34 @@ if printf '%s\n' "$CONF_DIRECTIVES" | grep -q '\${VAULT_'; then
   must match those variable names, and they must be present in the environment."
 fi
 
+# --- 1b. the upstream rate include matches VAULT_UPSTREAM_RATE (WP TH-1a) --
+# 27-vault-upstream-rate.sh validates the env and self-checks its render;
+# this is a second look, not a full re-derivation: the include and the
+# proxy_limit_rate line are wired in, and with VAULT_UPSTREAM_RATE set the
+# file holds a connection-count map with a positive default. It exists
+# because the failure it guards is
+# silent: nginx reads an empty or unparseable proxy_limit_rate as 0 =
+# UNLIMITED (TH-0b, measured). A cap that is configured but not rendered --
+# hook missing, renamed, or out of order -- must stop the boot, not ship an
+# uncapped vault.
+RATE_CONF="/etc/nginx/vault-upstream-rate.conf"
+[ -f "$RATE_CONF" ] || die "$RATE_CONF is missing. nginx.conf includes it for the upstream rate cap;
+  /docker-entrypoint.d/27-vault-upstream-rate.sh renders it at start. Refusing to start."
+printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*include[[:space:]][[:space:]]*vault-upstream-rate\.conf;' \
+    || die "$CONF has no 'include vault-upstream-rate.conf;' -- the upstream rate cap is not wired in."
+printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*proxy_limit_rate[[:space:]][[:space:]]*\$vault_upstream_rate;' \
+    || die "$CONF has no 'proxy_limit_rate \$vault_upstream_rate;' -- the upstream rate cap is not wired in."
+if [ -n "${VAULT_UPSTREAM_RATE:-}" ]; then
+    grep -q '^map \$connections_[a-z]* \$vault_upstream_rate[_a-z]* {$' "$RATE_CONF" \
+        && grep -qE '^    default [1-9][0-9]*;$' "$RATE_CONF" \
+        || die "VAULT_UPSTREAM_RATE='$VAULT_UPSTREAM_RATE' is set but $RATE_CONF holds no capped
+  connection-share map with a positive default -- the cap would not apply.
+  Refusing to start an uncapped vault-core."
+    log "upstream rate cap rendered ($RATE_CONF, VAULT_UPSTREAM_RATE=$VAULT_UPSTREAM_RATE)"
+else
+    log "upstream rate cap off ($RATE_CONF renders 0 = unlimited)"
+fi
+
 # --- 2. VAULT_RESOLVER is a plain IP-address list ---------------------------
 # Substituted verbatim into nginx.conf, so anything that could terminate a
 # directive (';') or open a block ('{') would be config injection. Allowed

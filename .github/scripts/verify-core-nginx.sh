@@ -50,6 +50,8 @@ dockerfile="$core_dir/Dockerfile"
 for f in "$dockerfile" \
          "$core_dir/docker/nginx.conf.template" \
          "$core_dir/docker/25-vault-eventlog.sh" \
+         "$core_dir/docker/27-vault-upstream-rate.sh" \
+         "$core_dir/nginx/vault-upstream-rate.conf" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/check-config-drift.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
@@ -99,7 +101,7 @@ done
 echo "docker pull $IMAGE"
 docker pull "$IMAGE"
 
-# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards]
+# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window]
 #
 # A non-empty 4th argument additionally STARTS the rendered nginx and probes
 # the location /depot/ request guards over loopback (once is enough; the
@@ -111,9 +113,17 @@ docker pull "$IMAGE"
 # vs. keep-and-validate them), and core/Dockerfile's own default is the OFF
 # state, so both need their own `nginx -t` pass rather than trusting one to
 # imply the other.
+#
+# Args 5-7 (WP TH-1a): the upstream rate cap env and which render shape the
+# include must have -- "off" (no cap: one map, default 0), "cap" (800k
+# around the clock: the 1024-bucket share map IS $vault_upstream_rate) or
+# "window" (800k outside 22:30-06:15, a window that wraps midnight and has
+# minute boundaries on both edges). The bucket/window assertions below are
+# written for exactly those two inputs.
 render_and_test() {
     local label="$1" event_log="$2" expected_directives="$3"
-    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log') ---"
+    local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}"
+    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window') ---"
     docker run --rm \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
         -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
@@ -123,6 +133,9 @@ render_and_test() {
         -e VAULT_EVENT_LOG="$event_log" \
         -e EXPECTED_DIRECTIVES="$expected_directives" \
         -e PROBE_GUARDS="${4:-}" \
+        -e VAULT_UPSTREAM_RATE="$rate" \
+        -e VAULT_UPSTREAM_RATE_WINDOW="$window" \
+        -e RATE_MODE="$rate_mode" \
         --entrypoint sh \
         "$IMAGE" -c '
             set -eu
@@ -141,8 +154,9 @@ render_and_test() {
             # RUN step, reproduced here instead of via a build).
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
+            cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh
 
             # The REAL stock entrypoint: runs every /docker-entrypoint.d/*.sh
             # hook in sorted order (stock 10-/15-/20-envsubst, our 25-, stock
@@ -224,6 +238,88 @@ render_and_test() {
                 fi
             fi
 
+            # --- WP TH-1a: the upstream rate cap, structurally ----------
+            # proxy_limit_rate only acts on buffered responses; pin the
+            # wiring in the RENDERED config (not just the template), then
+            # the include 27-vault-upstream-rate.sh rendered for this
+            # scenario env.
+            for want in "include vault-upstream-rate.conf;" "proxy_buffering on;" \
+                        "proxy_ignore_headers X-Accel-Buffering;" "proxy_limit_rate \$vault_upstream_rate;"; do
+                n=$(grep -v "^[[:space:]]*#" "$conf" | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]][[:space:]]*/ /g" | grep -c -x -F "$want" || true)
+                if [ "$n" != "1" ]; then
+                    echo "FAIL: expected exactly 1 \"$want\" in the rendered $conf, found $n"
+                    status=1
+                fi
+            done
+            # ... and all three INSIDE location @miss: a named location
+            # inherits nothing from /depot/, so the counts above would still
+            # be 1 with the lines moved one block up and the cap gone.
+            miss=$(grep -v "^[[:space:]]*#" "$conf" | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]][[:space:]]*/ /g" \
+                | awk "/^location @miss [{]\$/ { f = 1 } f { print; d += gsub(/[{]/, \"&\") - gsub(/[}]/, \"&\"); if (d <= 0) exit }")
+            [ -n "$miss" ] || { echo "FAIL: no location @miss block in the rendered $conf"; status=1; }
+            for want in "proxy_buffering on;" "proxy_ignore_headers X-Accel-Buffering;" "proxy_limit_rate \$vault_upstream_rate;"; do
+                n=$(printf "%s\n" "$miss" | grep -c -x -F "$want" || true)
+                if [ "$n" != "1" ]; then
+                    echo "FAIL: \"$want\" is not inside location @miss in the rendered $conf (found $n there)"
+                    status=1
+                fi
+            done
+            if grep -q "^[[:space:]]*proxy_buffering[[:space:]][[:space:]]*off" "$conf"; then
+                echo "FAIL: proxy_buffering off in $conf -- the upstream cap would not apply"
+                status=1
+            fi
+            rc=/etc/nginx/vault-upstream-rate.conf
+            rate_ok() {
+                if grep -qx -F -- "$1" "$rc"; then :; else echo "FAIL ($RATE_MODE): \"$1\" missing from $rc"; status=1; fi
+            }
+            rate_absent() {
+                if grep -q -F -- "$1" "$rc"; then echo "FAIL ($RATE_MODE): \"$1\" must not be in $rc"; status=1; fi
+            }
+            if [ ! -f "$rc" ]; then
+                echo "FAIL: $rc was never rendered"
+                status=1
+            else
+                buckets=$(grep -cE "^    [0-9]+ [1-9][0-9]*;$" "$rc" || true)
+                patterns=$(grep -c "^    \"~" "$rc" || true)
+                case "$RATE_MODE" in
+                    off)
+                        rate_ok "map \$time_iso8601 \$vault_upstream_rate {"
+                        rate_ok "    default 0;"
+                        rate_absent "connections_"
+                        [ "$buckets" = "0" ] || { echo "FAIL (off): $buckets bucket lines rendered"; status=1; } ;;
+                    cap)
+                        rate_ok "map \$connections_writing \$vault_upstream_rate {"
+                        rate_ok "    1 819200;"
+                        rate_ok "    8 102400;"
+                        rate_ok "    1024 800;"
+                        rate_ok "    default 800;"
+                        rate_absent "time_iso8601"
+                        [ "$buckets" = "1024" ] || { echo "FAIL (cap): expected 1024 bucket lines, found $buckets"; status=1; } ;;
+                    window)
+                        rate_ok "map \$connections_writing \$vault_upstream_rate_share {"
+                        rate_ok "    1 819200;"
+                        rate_ok "    8 102400;"
+                        rate_ok "    1024 800;"
+                        rate_ok "    default 800;"
+                        rate_ok "map \$time_iso8601 \$vault_upstream_in_window {"
+                        rate_ok "    default 0;"
+                        # 22:30-06:15: minute edge at 22:30 (inclusive) and
+                        # 06:15 (exclusive), whole hours 23 and 00-05 between,
+                        # across midnight.
+                        P="^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+                        rate_ok "    \"~${P}22:(?:3[0-9]|4[0-9]|5[0-9])\" 1;"
+                        for hh in 23 00 01 02 03 04 05; do rate_ok "    \"~${P}${hh}:\" 1;"; done
+                        rate_ok "    \"~${P}06:(?:0[0-9]|1[0-4])\" 1;"
+                        [ "$patterns" = "9" ] || { echo "FAIL (window): expected 9 time patterns, found $patterns"; status=1; }
+                        rate_ok "map \$vault_upstream_in_window \$vault_upstream_rate {"
+                        rate_ok "    1 0;"
+                        rate_ok "    default \$vault_upstream_rate_share;"
+                        [ "$buckets" = "1024" ] || { echo "FAIL (window): expected 1024 bucket lines, found $buckets"; status=1; } ;;
+                    *) echo "FAIL: unknown RATE_MODE $RATE_MODE"; status=1 ;;
+                esac
+                echo "upstream rate include ($RATE_MODE): $buckets bucket line(s), $patterns time pattern(s)"
+            fi
+
             # --- Pre-freeze review S1/S2/P3/N5: request guards, LIVE -------
             # nginx -t proves the directives parse, not that they answer.
             # Start the rendered config for real and probe the guards in
@@ -299,8 +395,9 @@ render_must_fail() {
             fi
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
+            cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh
             /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf
         ' 2>&1) || rc=$?
     if [ "$rc" = "0" ]; then
@@ -318,6 +415,11 @@ render_must_fail() {
 
 render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guards
 render_and_test "cache-event log ON" "/vault/logs/event.log" 2
+
+# WP TH-1a: the three upstream-cap render shapes (cap off is the two runs
+# above), each through the real entrypoint chain and nginx -t.
+render_and_test "upstream cap ON, no window" "" 0 "" "800k" "" cap
+render_and_test "upstream cap ON, window wrapping midnight" "" 0 "" "800k" "22:30-06:15" window
 
 render_must_fail "relative path"            "logs/event.log"
 render_must_fail "injection character"      "/vault/logs/e;vent.log"
@@ -345,8 +447,187 @@ if [ "$stock_rc" = "0" ] || ! printf '%s\n' "$stock_out" | grep -qF "40-vault-pr
 fi
 echo "refused as expected (exit $stock_rc): $(printf '%s\n' "$stock_out" | grep -F 'FATAL' | head -n1)"
 
+# --- WP TH-1a: invalid VAULT_UPSTREAM_RATE / _WINDOW must stop the boot ------
+# nginx reads an unparseable proxy_limit_rate as 0 = UNLIMITED (TH-0b,
+# measured), so every bad value must abort the REAL entrypoint chain, and
+# the abort must come from 27-vault-upstream-rate.sh itself. One container,
+# one entrypoint run per case. Cases are "rate|window".
+echo "--- must refuse: invalid VAULT_UPSTREAM_RATE / VAULT_UPSTREAM_RATE_WINDOW ---"
+rate_cases='0|
+0800k|
+800kb|
+8.5m|
+ 800k|
+63|
+1023|
+1234567890|
+2g|
+abc|
+800k|25:00-03:00
+800k|03:00-03:00
+800k|24:00-03:00
+800k|3:00-07:00
+800k|03:00-07:00-08:00
+800k|03:60-07:00
+800k|03:00-24:01
+800k|03:00
+|25:00-03:00'
+docker run --rm \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    -e VAULT_EVENT_LOG="" \
+    -e RATE_CASES="$rate_cases" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+        chown -R nginx:nginx /vault
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 40-vault-preflight.sh; do
+            cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+            chmod 0755 "/docker-entrypoint.d/$h"
+        done
+        status=0
+        n=0
+        printf "%s\n" "$RATE_CASES" > /tmp/cases
+        while IFS="|" read -r r w; do
+            n=$((n + 1))
+            rc=0
+            out=$(VAULT_UPSTREAM_RATE="$r" VAULT_UPSTREAM_RATE_WINDOW="$w" \
+                  /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf 2>&1) || rc=$?
+            if [ "$rc" = "0" ]; then
+                echo "FAIL: rate=\"$r\" window=\"$w\" was accepted (exit 0)"
+                status=1
+            elif ! printf "%s\n" "$out" | grep -qF "27-vault-upstream-rate.sh: FATAL"; then
+                printf "%s\n" "$out"
+                echo "FAIL: rate=\"$r\" window=\"$w\" failed (exit $rc), but not in 27-vault-upstream-rate.sh"
+                status=1
+            else
+                echo "refused (exit $rc): rate=\"$r\" window=\"$w\": $(printf "%s\n" "$out" | grep -F "27-vault-upstream-rate.sh: FATAL" | head -n1 | cut -c1-110)"
+            fi
+        done < /tmp/cases
+        [ "$n" = "19" ] || { echo "FAIL: ran $n rate/window cases, expected 19"; status=1; }
+        exit $status
+    '
+
+# --- WP TH-1a: 40-vault-preflight.sh re-checks the include independently -----
+# A cap configured but not rendered (hook missing/out of order) must stop the
+# boot. Render with NO cap through the real chain, then run the preflight
+# with VAULT_UPSTREAM_RATE set (stale cap-off include) and with the include
+# deleted; both must hit the preflight's own FATAL.
+echo "--- must refuse: 40-vault-preflight.sh against a missing / cap-off include ---"
+docker run --rm \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    -e VAULT_EVENT_LOG="" \
+    -e VAULT_UPSTREAM_RATE="" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+        chown -R nginx:nginx /vault
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 40-vault-preflight.sh; do
+            cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+            chmod 0755 "/docker-entrypoint.d/$h"
+        done
+        /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf >/dev/null 2>&1
+        status=0
+        expect_preflight_fatal() {
+            what=$1; shift
+            rc=0
+            out=$("$@" sh /docker-entrypoint.d/40-vault-preflight.sh 2>&1) || rc=$?
+            if [ "$rc" != "0" ] && printf "%s\n" "$out" | grep -qF "40-vault-preflight.sh: FATAL"; then
+                echo "refused as expected ($what): $(printf "%s\n" "$out" | grep -F FATAL | head -n1 | cut -c1-110)"
+            else
+                printf "%s\n" "$out"
+                echo "FAIL: 40-vault-preflight.sh did not refuse ($what), exit $rc"
+                status=1
+            fi
+        }
+        expect_preflight_fatal "cap set, include rendered without it" env VAULT_UPSTREAM_RATE=800k
+        rm /etc/nginx/vault-upstream-rate.conf
+        expect_preflight_fatal "include missing" env VAULT_UPSTREAM_RATE=
+        exit $status
+    '
+
+# --- WP TH-1a: the rendered value, LIVE (offline) -----------------------------
+# Map contents prove the shape; this proves what nginx actually evaluates.
+# A throwaway server includes the rendered file and returns
+# $vault_upstream_rate for one loopback request ($connections_writing = 1,
+# i.e. bucket 1 = the total). Window cases are built around the container's
+# CURRENT local minute, so both "inside" (expect 0 = full speed) and
+# "outside" (expect the cap) run against the real $time_iso8601. Needs no
+# DNS and no CDN. The probe config is written with printf (no here-doc) so
+# no line of it can ever terminate an enclosing here-doc.
+echo "--- upstream cap: evaluated value of \$vault_upstream_rate (live, loopback) ---"
+docker run --rm \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        command -v curl >/dev/null 2>&1 || { echo "FAIL: curl missing in the base image"; exit 1; }
+        mkdir -p /tmp/probe/logs
+        printf "%s\n" \
+            "worker_processes 1;" \
+            "pid /tmp/probe/nginx.pid;" \
+            "error_log /dev/stderr warn;" \
+            "events { worker_connections 16; }" \
+            "http {" \
+            "    access_log off;" \
+            "    include /tmp/probe/vault-upstream-rate.conf;" \
+            "    server {" \
+            "        listen 127.0.0.1:8099;" \
+            "        location / { return 200 \"\$vault_upstream_rate\"; }" \
+            "    }" \
+            "}" > /tmp/probe/nginx.conf
+        hhmm() { printf "%02d:%02d" $(( ($1 % 1440) / 60 )) $(( ($1 % 1440) % 60 )); }
+        now_h=$(date +%H); now_m=$(date +%M)
+        now_h=${now_h#0}; now_m=${now_m#0}
+        now=$(( ${now_h:-0} * 60 + ${now_m:-0} ))
+        inside="$(hhmm $((now + 1440 - 2)))-$(hhmm $((now + 3)))"
+        outside="$(hhmm $((now + 3)))-$(hhmm $((now + 6)))"
+        echo "container local time $(date +%H:%M) (TZ=${TZ:-unset}); inside window $inside, outside window $outside"
+        status=0
+        probe_value() {
+            label=$1 rate=$2 window=$3 want=$4
+            VAULT_UPSTREAM_RATE="$rate" VAULT_UPSTREAM_RATE_WINDOW="$window" \
+                sh /workspace/core-docker/27-vault-upstream-rate.sh /tmp/probe/vault-upstream-rate.conf >/dev/null
+            nginx -p /tmp/probe -c /tmp/probe/nginx.conf
+            got=$(curl -s -m 5 http://127.0.0.1:8099/ || echo curl-error)
+            nginx -p /tmp/probe -c /tmp/probe/nginx.conf -s quit || true
+            i=0; while [ -f /tmp/probe/nginx.pid ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+            if [ "$got" = "$want" ]; then
+                echo "rate OK: $label -> $got"
+            else
+                echo "FAIL: $label -> \"$got\", expected \"$want\""
+                status=1
+            fi
+        }
+        probe_value "no cap"                       ""   ""         0
+        probe_value "800k, no window, 1 request"   800k ""         819200
+        probe_value "800k, inside the window"      800k "$inside"  0
+        probe_value "800k, outside the window"     800k "$outside" 819200
+        # 24:00 as the END value: [now+3min, end of day) excludes now --
+        # unless now+3 already crossed midnight, when that window is empty
+        # territory for this probe; skip it then rather than build a wrong
+        # expectation.
+        if [ $((now + 3)) -lt 1440 ]; then
+            probe_value "2m, outside a window ending 24:00" 2m "$(hhmm $((now + 3)))-24:00" 2097152
+        fi
+        exit $status
+    '
+
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \
      "the event log is owned 101:101; the /depot/ request guards answer live;" \
      "four bad VAULT_EVENT_LOG values and two planted symlinks are refused;" \
-     "the preflight refuses the stock nginx.conf."
+     "the preflight refuses the stock nginx.conf; the upstream cap renders in" \
+     "all three shapes, refuses invalid rates/windows, is re-checked by the" \
+     "preflight and evaluates to the expected value live."

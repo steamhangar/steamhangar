@@ -25,6 +25,21 @@
 #      each one was present EXACTLY the expected number of times (so a delta
 #      that silently disappears is also a failure, not just an unexpected
 #      extra line)
+#   2b. pin the WP TH-1a upstream rate cap, which is NOT a textual delta:
+#      both files carry the identical `include vault-upstream-rate.conf;`
+#      and the identical @miss directives (proxy_buffering on,
+#      proxy_ignore_headers X-Accel-Buffering, proxy_limit_rate
+#      $vault_upstream_rate). What differs is the INCLUDED FILE: the
+#      container renders /etc/nginx/vault-upstream-rate.conf at start
+#      (27-vault-upstream-rate.sh), the native rig uses the static
+#      core/nginx/vault-upstream-rate.conf. Asserted here: each pinned line
+#      exactly once in each file AND inside the location @miss block (awk
+#      brace-depth extraction; @miss inherits nothing from /depot/), BUCKETS
+#      in the hook >= worker_processes x worker_connections of the template,
+#      no `proxy_buffering off` anywhere, and the
+#      static native include identical (comments aside) to the script's
+#      cap-off render -- so "native = container with no cap configured"
+#      stays true by machine check
 #   3. diff. Any remaining difference fails with a unified diff.
 #
 # Usage:  sh core/docker/check-config-drift.sh   [from anywhere]
@@ -127,6 +142,80 @@ expect_once "$work/native.norm" "resolver 1.1.1.1 ipv6=off valid=30s;"         "
 expect_count "$work/native.norm" 3 "access_log logs/access.log vault;"         "native: access log to a file (http level + re-stated in /depot/ and @miss)"
 expect_count "$work/native.norm" 2 "access_log logs/event.log vault_event buffer=64k flush=5s;" \
     "native: WP 3.10 cache-event log, hardcoded ON, one per location (/depot/, @miss)"
+
+# --- 2b. WP TH-1a upstream rate cap: shared lines + the native include ----
+# Identical in both files (so step 3's diff alone would also pass if BOTH
+# lost them) -- hence explicit presence pins, in both normalised files.
+for f in "$work/native.norm" "$work/template.norm"; do
+    expect_count "$f" 1 "include vault-upstream-rate.conf;"         "TH-1a: upstream rate include (http level)"
+    expect_count "$f" 1 "proxy_buffering on;"                       "TH-1a: buffering on, required by proxy_limit_rate and proxy_store"
+    expect_count "$f" 1 "proxy_ignore_headers X-Accel-Buffering;"   "TH-1a: the upstream may not switch buffering off"
+    expect_count "$f" 1 'proxy_limit_rate $vault_upstream_rate;'    "TH-1a: the cap itself, in @miss"
+    if grep -q '^proxy_buffering off' "$f"; then
+        echo "check-config-drift: FAIL: 'proxy_buffering off' in $f -- proxy_limit_rate (the upstream cap) only acts on buffered responses" >&2
+        fail=1
+    fi
+done
+
+# The three cap lines must sit INSIDE location @miss: a named location
+# inherits nothing from location /depot/, so moving them one block up would
+# keep every count above at 1 and still drop the cap. miss_block prints the
+# normalised @miss block, from its opening line to its matching brace.
+miss_block() {
+    awk '/^location @miss [{]$/ { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }' "$1"
+}
+for f in "$work/native.norm" "$work/template.norm"; do
+    miss_block "$f" > "$work/miss.block"
+    if [ ! -s "$work/miss.block" ]; then
+        echo "check-config-drift: FAIL: no 'location @miss {' block in $f" >&2
+        fail=1
+        continue
+    fi
+    for want in "proxy_buffering on;" "proxy_ignore_headers X-Accel-Buffering;" 'proxy_limit_rate $vault_upstream_rate;'; do
+        n=$(grep -F -c -x -- "$want" "$work/miss.block" || true)
+        if [ "$n" != "1" ]; then
+            echo "check-config-drift: FAIL: '$want' must be inside location @miss in $f (found $n there) -- @miss does not inherit it from /depot/" >&2
+            fail=1
+        fi
+    done
+done
+
+RATE_HOOK="$core_dir/docker/27-vault-upstream-rate.sh"
+NATIVE_RATE="$core_dir/nginx/vault-upstream-rate.conf"
+
+# The share map has one bucket per possible connection, so $connections_writing
+# never falls through to the (overshooting) default. That only holds while
+# BUCKETS >= worker_processes x worker_connections of the template; a later
+# bump of either must also raise BUCKETS in the hook.
+wp=$(sed -n 's/^worker_processes \([0-9][0-9]*\);$/\1/p' "$work/template.norm")
+wc_=$(sed -n 's/^worker_connections \([0-9][0-9]*\);$/\1/p' "$work/template.norm")
+bk=$(sed -n 's/^BUCKETS=\([0-9][0-9]*\)$/\1/p' "$RATE_HOOK" 2>/dev/null || true)
+case "$wp:$wc_:$bk" in
+    *[!0-9:]*|:*|*::*|*:)
+        echo "check-config-drift: FAIL: need numeric worker_processes, worker_connections (template) and BUCKETS= (27-vault-upstream-rate.sh); got '$wp', '$wc_', '$bk'" >&2
+        fail=1 ;;
+    *)
+        if [ "$bk" -lt $((wp * wc_)) ]; then
+            echo "check-config-drift: FAIL: BUCKETS=$bk in 27-vault-upstream-rate.sh is below worker_processes x worker_connections = $wp x $wc_ = $((wp * wc_)); counts above $bk would hit the default and overshoot the cap" >&2
+            fail=1
+        fi ;;
+esac
+if [ ! -f "$RATE_HOOK" ] || [ ! -f "$NATIVE_RATE" ]; then
+    echo "check-config-drift: FAIL: missing $RATE_HOOK or $NATIVE_RATE (WP TH-1a)" >&2
+    fail=1
+elif ! VAULT_UPSTREAM_RATE= VAULT_UPSTREAM_RATE_WINDOW= sh "$RATE_HOOK" "$work/rate-off.conf" > "$work/rate-off.log" 2>&1; then
+    echo "check-config-drift: FAIL: $RATE_HOOK could not render the cap-off include:" >&2
+    cat "$work/rate-off.log" >&2
+    fail=1
+else
+    normalise "$NATIVE_RATE"        > "$work/rate-native.norm"
+    normalise "$work/rate-off.conf" > "$work/rate-off.norm"
+    if ! diff -u "$work/rate-native.norm" "$work/rate-off.norm" > "$work/rate.diff" 2>&1; then
+        echo "check-config-drift: FAIL: core/nginx/vault-upstream-rate.conf is not the cap-off render of 27-vault-upstream-rate.sh (left = native, right = render):" >&2
+        cat "$work/rate.diff" >&2
+        fail=1
+    fi
+fi
 
 [ "$fail" = "0" ] || exit 1
 

@@ -26,6 +26,12 @@
 #   5. access_log /dev/stdout vault;  <-  access_log logs/access.log vault;
 #   6. access_log ${VAULT_EVENT_LOG} vault_event ...  <-  access_log logs/event.log vault_event ...
 #
+# NOT a delta (WP TH-1a): `include vault-upstream-rate.conf;` is the same
+# line in both files. What differs is the FILE it names -- rendered at start
+# by 27-vault-upstream-rate.sh here, static and uncapped natively; the
+# drift check pins the line and asserts the static file equals the cap-off
+# render.
+#
 # --- Rendering (${VAULT_RESOLVER}) ------------------------------------------
 # This file is NOT read by nginx directly. It is installed at
 # /etc/nginx/templates/nginx.conf.template and rendered to /etc/nginx/nginx.conf
@@ -242,6 +248,17 @@ http {
         ""      "-";
         default $upstream_status;
     }
+
+    # --- Upstream rate cap (WP TH-1a, core/README.md "Upstream rate cap") ---
+    # Defines $vault_upstream_rate, consumed by proxy_limit_rate in @miss.
+    # Relative include = resolved against this file's own directory (nginx's
+    # conf prefix): core/nginx/vault-upstream-rate.conf natively (a static
+    # "no cap" file), /etc/nginx/vault-upstream-rate.conf in the container,
+    # rendered at start by /docker-entrypoint.d/27-vault-upstream-rate.sh from
+    # VAULT_UPSTREAM_RATE / VAULT_UPSTREAM_RATE_WINDOW. The line itself is
+    # identical in both files; check-config-drift.sh pins it and asserts the
+    # native file equals the script's cap-off render.
+    include vault-upstream-rate.conf;
 
     # --- Cache-event log (WP 3.10, ADR-0008) --------------------------------
     # A second, dedicated, machine-readable access_log alongside the existing
@@ -642,6 +659,26 @@ http {
             # empirical verification of this guard.
             proxy_store        $vault_store_path;
             proxy_store_access user:rw group:r all:r;
+
+            # WP TH-1a: cap the upstream READ of a miss (Steam -> vault). The
+            # value is the per-request share of the operator's aggregate
+            # VAULT_UPSTREAM_RATE (total / live $connections_writing), or 0 =
+            # unlimited -- see the include above and core/README.md "Upstream
+            # rate cap". Evaluated once per request, when the upstream
+            # response headers arrive (TH-0b section 1.1). The client that
+            # triggered the miss receives the chunk at the same pace: the
+            # body streams through.
+            #
+            # proxy_limit_rate only acts on BUFFERED responses, and
+            # proxy_store needs buffering too -- so buffering is stated
+            # explicitly (it is nginx's default) and pinned by
+            # check-config-drift.sh and the CI gate, and the upstream may
+            # not switch it off per response with "X-Accel-Buffering: no"
+            # (nginx honours that header by default; ignoring it is a
+            # reasoned guard, not measured against a header-sending upstream).
+            proxy_buffering      on;
+            proxy_ignore_headers X-Accel-Buffering;
+            proxy_limit_rate     $vault_upstream_rate;
         }
 
         # S3 defense-in-depth (found in review): temp files already live
