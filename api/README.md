@@ -89,11 +89,82 @@ api/
 │       ├── schedule.py   # GET /v1/schedule (read-only, env-only config)
 │       └── oracle.py     # GET/POST/DELETE /v1/oracle/{appid} (WP 3.9)
 ├── tests/                # pytest (incl. tests/stub_prefill.py — fake CLI)
-├── requirements.txt      # pinned, runtime only
+├── requirements.txt      # pinned, runtime only, full transitive set
 ├── requirements-dev.txt  # pinned, adds test-only deps (pytest, httpx)
 ├── .env.example          # committed template — never commit a real .env
 └── pytest.ini
 ```
+
+## Dependencies
+
+`requirements.txt` is the **complete** resolved runtime set: every
+transitive dependency is pinned with `==` (WP SEC-FIX-3). Before that WP only
+the four direct dependencies were pinned and everything below them floated,
+so two image builds from the same commit could install different code. The
+Dockerfile is unchanged; it still runs `pip install -r requirements.txt`,
+which now has nothing left to choose. `requirements-dev.txt` adds pytest and
+httpx on top of it. Their own transitive dependencies (iniconfig, pluggy,
+packaging, httpcore, certifi) are still unpinned. They are test-only and
+never reach the image.
+
+Direct dependencies: `fastapi`, `starlette`, `uvicorn[standard]`,
+`python-dotenv`. starlette is pinned directly, not only through fastapi,
+because the security fixes live in starlette.
+
+**Regenerating.** Edit the direct pins, then resolve universally so that the
+native Windows path ("Running natively" below) keeps its `colorama` /
+`uvloop` markers:
+
+```
+printf 'fastapi==X\nstarlette==Y\nuvicorn[standard]==Z\npython-dotenv==W\n' > top.in
+uv pip compile --universal --python-version 3.13 --no-header --no-annotate top.in
+```
+
+Then paste the output under the file's header comment, keep `uvicorn[standard]`
+as written, run the full suite in a fresh venv, and re-run `pip-audit -r
+requirements.txt`.
+
+### Security audit, 2026-10-01 (WP SEC-FIX-3)
+
+Tool: `pip-audit 2.10.1` (PyPI/OSV advisory data), Python 3.13.15.
+
+**Before** (`fastapi==0.115.6`, which caps `starlette<0.47`, so it resolved to
+`starlette 0.41.3`; `python-dotenv==1.0.1`): 8 distinct advisories in 2
+packages.
+
+| Package | Advisory | Fixed in | Applies to vault-api? |
+|---|---|---|---|
+| starlette 0.41.3 | CVE-2025-62727 / GHSA-7f5h-v6xp-fcq8: quadratic-time `Range` header parsing in `FileResponse`, an unauthenticated CPU DoS | 0.49.1 | **Yes.** `webui.py` serves `/css` and `/js` through `StaticFiles` and `index.html` through `FileResponse`, all without authentication |
+| starlette 0.41.3 | CVE-2025-54121 / GHSA-2c2j-9gv5-cj73: multipart spool rollover blocks the event loop | 0.47.2 | No. vault-api parses no multipart forms |
+| starlette 0.41.3 | CVE-2026-48710 / GHSA-86qp-5c8j-p5mr: unvalidated `Host` header used to rebuild `request.url` | 1.0.1 | Indirectly (the framework builds `request.url` for every request) |
+| starlette 0.41.3 | CVE-2026-54282 / GHSA-jp82-jpqv-5vv3: unvalidated path used to rebuild `request.url` | 1.3.0 | Indirectly (same as above) |
+| starlette 0.41.3 | CVE-2026-54283 / GHSA-82w8-qh3p-5jfq: `max_fields`/`max_part_size` ignored for urlencoded forms | 1.3.1 | No. There is no `request.form()` |
+| starlette 0.41.3 | CVE-2026-48818 / GHSA-wqp7-x3pw-xc5r: `StaticFiles` UNC-path SSRF on Windows | 1.1.0 | Native Windows only |
+| starlette 0.41.3 | CVE-2026-48817 / GHSA-x746-7m8f-x49c: `HTTPEndpoint` method lookup via `getattr` | 1.1.0 | No. There is no `HTTPEndpoint` |
+| python-dotenv 1.0.1 | CVE-2026-28684 / GHSA-mf9w-mj56-hr94: `set_key`/`unset_key` follow symlinks | 1.2.2 | No. `config.py` only calls `load_dotenv()`. Bumped anyway because the fix is a minor bump |
+
+**Bumps.** Each package moved to the smallest version that fixes all of its
+advisories:
+
+- `starlette 0.41.3 -> 1.3.1`. 1.3.1 is the highest fix version across all
+  seven starlette advisories.
+- `fastapi 0.115.6 -> 0.133.0`. This is the first fastapi release that allows
+  `starlette>=1.0` (0.130-0.132 cap it at `<1.0.0`, 0.115.x at `<0.47`).
+  Measured against PyPI metadata.
+- `python-dotenv 1.0.1 -> 1.2.2`.
+- `uvicorn[standard]` stays at 0.32.1, which has no advisory.
+
+The full suite passed unchanged in a fresh Python 3.13 venv built from these
+pins: 1959 passed, 6 skipped, the same counts as before the bump. Starlette 1.x
+emits `StarletteDeprecationWarning` for `HTTP_422_UNPROCESSABLE_ENTITY`
+(renamed `HTTP_422_UNPROCESSABLE_CONTENT`) and for httpx in its TestClient.
+These are warnings only. The rename is left for a later WP.
+
+**After:** `pip-audit -r requirements.txt` reports "No known vulnerabilities
+found". `pip-audit -r requirements-dev.txt` still reports
+CVE-2025-71176 / GHSA-6w46-j5rx-g56g in **pytest 8.3.4** (predictable
+`/tmp/pytest-of-<user>` directory, fixed in 9.0.3). pytest is test-only and
+never installed in the image. The major bump is left open on purpose.
 
 ## Configuration
 
