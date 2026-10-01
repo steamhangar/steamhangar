@@ -51,7 +51,10 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Riviera822/steamhangar/agent/report"
 )
@@ -403,7 +406,7 @@ func redirectTarget(resp *http.Response) string {
 	if err != nil {
 		return ""
 	}
-	return loc.String()
+	return sanitizeForLog(loc.String())
 }
 
 // retryableStatus reports whether an HTTP status code should be retried:
@@ -417,12 +420,37 @@ func retryableStatus(code int) bool {
 // vault-api's error bodies are small JSON objects, but this guards against
 // an unexpected huge body (e.g. from a misconfigured reverse proxy in
 // front of vault-api) bloating a log line.
+//
+// The excerpt is server-controlled text that ends up in error messages and
+// therefore in the operator's terminal and logs: control characters (ESC,
+// CR, LF, ...) are escaped by sanitizeForLog so a hostile or broken server
+// cannot inject terminal escape sequences or fake log lines.
 func excerpt(body []byte) string {
 	const maxLen = 500
 	if len(body) <= maxLen {
-		return string(body)
+		return sanitizeForLog(string(body))
 	}
-	return string(body[:maxLen]) + "...[truncated]"
+	return sanitizeForLog(string(body[:maxLen])) + "...[truncated]"
+}
+
+// sanitizeForLog makes server-controlled text safe for an error message or
+// a log line: every control rune (C0, DEL, C1 - unicode.IsControl) is
+// replaced by a visible Go-style escape (\x1b, \r, \u0085, ...), and
+// invalid UTF-8 (e.g. a body cut mid-rune by excerpt's byte limit) becomes
+// U+FFFD. Printable text, including non-ASCII, is kept as is.
+func sanitizeForLog(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.IsControl(r) {
+			b.WriteRune(r)
+			continue
+		}
+		q := strconv.QuoteRune(r) // e.g. '\x1b', '\r', '\u0085'
+		b.WriteString(q[1 : len(q)-1])
+	}
+	return b.String()
 }
 
 // backoffDelay computes a "full jitter" capped-exponential backoff delay:

@@ -107,9 +107,24 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # WP SEC-FIX-2: same Go selection as publish.yml's agent-binaries
+      # (see the comment there): newest patch of go.mod's minor line, so CI
+      # tests with the stdlib the release binaries are built with.
+      - name: Derive Go release line from go.mod
+        id: gover
+        shell: bash
+        run: |
+          set -eu
+          line="$(sed -n 's/^go[[:space:]]\{1,\}\([0-9]\{1,\}\.[0-9]\{1,\}\).*/\1/p' agent/go/go.mod)"
+          if [ -z "$line" ]; then
+            echo "::error::no go directive found in agent/go/go.mod" >&2
+            exit 1
+          fi
+          echo "line=${line}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: agent/go/go.mod
+          go-version: ${{ steps.gover.outputs.line }}.x
+          check-latest: true
       - name: go build ./...
         working-directory: agent/go
         run: go build ./...
@@ -200,7 +215,7 @@ jobs:
           # be this exact build today (actions/runner-images Ubuntu 24.04
           # readme, Java section: Temurin 17.0.20+8) but `java-version: "17"`
           # itself only floats within the 17.x line, same looseness as this
-          # file's own python-version/go-version-file/node-version pins --
+          # file's own python-version/go-version (go.mod-derived)/node-version pins --
           # pinned explicitly anyway so a future runner-image default bump
           # can't silently change what this job builds with.
           distribution: temurin

@@ -620,3 +620,55 @@ func TestReportInstalled_URLUserinfoIsSentAsBasicAuth(t *testing.T) {
 		t.Errorf("basic auth = (%q, %q, %v), want (alice, s3cret, true)", gotUser, gotPass, ok)
 	}
 }
+
+// WP SEC-FIX-2 (N2): the response body is server-controlled and ends up in
+// the error text (and so in the operator's terminal and logs). ESC and CR
+// must arrive escaped, never raw: a raw ESC starts a terminal escape
+// sequence, a raw CR lets the server overwrite the visible log line.
+func TestReportInstalled_ErrorBodyControlCharsAreEscaped(t *testing.T) {
+	for _, code := range []int{http.StatusUnprocessableEntity, http.StatusFound} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if code == http.StatusFound {
+					w.Header().Set("Location", "/elsewhere")
+				}
+				w.WriteHeader(code)
+				_, _ = w.Write([]byte("bad\x1b[2J\rFAKE LOG LINE\nnext"))
+			}))
+			defer srv.Close()
+
+			c := New(srv.URL, "key", testBackoff())
+			_, err := c.ReportInstalled(context.Background(), testPayload())
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("error = %v (%T), want *APIError", err, err)
+			}
+			msg := err.Error()
+			for _, raw := range []string{"\x1b", "\r", "\n"} {
+				if strings.Contains(msg, raw) || strings.Contains(apiErr.Body, raw) {
+					t.Errorf("error = %q contains a raw %q", msg, raw)
+				}
+			}
+			if !strings.Contains(msg, `bad\x1b[2J\rFAKE LOG LINE\nnext`) {
+				t.Errorf("error = %q, want the body with visible escapes", msg)
+			}
+		})
+	}
+}
+
+func TestSanitizeForLog(t *testing.T) {
+	cases := map[string]string{
+		"plain ascii":            "plain ascii",
+		"umlaut ä kept":          "umlaut ä kept",
+		"esc\x1b[31m":            `esc\x1b[31m`,
+		"cr\rlf\ntab\t":          `cr\rlf\ntab\t`,
+		"del\x7f c1\u009b":       `del\x7f c1\u009b`,
+		"cut rune \xc3":          "cut rune �",
+		"https://h.example/\x1b": `https://h.example/\x1b`,
+	}
+	for in, want := range cases {
+		if got := sanitizeForLog(in); got != want {
+			t.Errorf("sanitizeForLog(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -509,10 +509,13 @@ class MainActivity : ComponentActivity() {
      * Intent (`intent.data = null`) once it has been read, because the
      * Activity's current Intent is re-delivered to `onCreate` on a
      * configuration-change recreation (rotation) -- without this, the same
-     * callback URL would be re-processed after a rotation and burn the next
-     * pending login attempt via `PendingLoginState.consume()`'s single-use
-     * rule (fail closed, but a needless "expired" error on the user's NEXT
-     * sign-in). The same applies to a notification tap's extras, see
+     * callback URL would be re-processed after a rotation. Since WP
+     * SEC-FIX-2 (N1) `PendingLoginState.consume()` only clears on a MATCHING
+     * callback, so a replayed (already consumed) one no longer burns the
+     * next pending attempt -- it is simply rejected and leaves any new
+     * pending state alone. The strip still saves a pointless second
+     * verification round-trip and a spurious error shown to the user after
+     * every rotation. The same applies to a notification tap's extras, see
      * [handleNotificationTap]. After process death the strip does not
      * survive: Android hands back the ORIGINAL launch Intent, which is
      * harmless -- the process-scoped pending state is empty then, and a
@@ -545,13 +548,14 @@ class MainActivity : ComponentActivity() {
                     // Review fix (N2): neither screen is currently active to
                     // route this into (e.g. the connection was disconnected
                     // between launching the Custom Tab and the redirect
-                    // arriving) -- still consume the pending login state
-                    // directly through the repository, ignoring the result,
-                    // so a dropped/unroutable callback cannot leave
-                    // PendingLoginState holding a value forever. This is
-                    // what makes "single-use" literally true regardless of
-                    // which screen happens to be showing when the redirect
-                    // lands, not just when a controller is listening.
+                    // arriving) -- still hand the callback to the repository
+                    // directly, ignoring the result. Since WP SEC-FIX-2 (N1)
+                    // this clears PendingLoginState only when the callback
+                    // MATCHES the pending attempt (so a genuine sign-in still
+                    // completes single-use regardless of which screen is
+                    // showing); a mismatched or fake callback leaves the
+                    // pending state untouched until the next start()
+                    // replaces it.
                     //
                     // WP APP-DEMO residual (S1, not fixed -- documented):
                     // this still calls SteamIdentityRepository.completeLogin,

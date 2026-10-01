@@ -2141,27 +2141,25 @@ after-thought).
 **Distribution (WP CI-3, `.github/workflows/publish.yml`): download the
 signed APK from the GitHub Release for the version tag, not a manual
 transfer.** The steps above (`assembleRelease` + `apksigner verify`) are
-what CI itself runs, driven by the same repository secrets an operator
-sets once: `ANDROID_KEYSTORE_B64` (base64 of the release `.jks` file's raw
-bytes), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and
+what CI itself runs, driven by four secrets an operator sets once in the
+`release` Environment (see "CI signing secrets" below):
+`ANDROID_KEYSTORE_B64` (base64 of the release `.jks` file's raw bytes),
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and
 `ANDROID_KEY_PASSWORD` (the CI-side names for the same four values
 `storeFile`/`storePassword`/`keyAlias`/`keyPassword` above — see that
 workflow file's own comments for the exact env-var wiring). Pushing a git
 tag matching `v*` builds, signs, `apksigner`-verifies, and attaches
-`app-release.apk` to that tag's GitHub Release — a plain, no-account-needed
-download from the repository's Releases page. Running the workflow
-manually via `workflow_dispatch` performs the same build-sign-verify steps
-(useful for confirming the pipeline still works, or exercising a
-newly-set secret, without cutting a release) but deliberately does **not**
-attach anything anywhere: the workflow's own release-attach step guards on
-`github.event_name == 'push'` specifically, so a manual dispatch run never
-carries a release to attach to, even if it happens to target an existing
-tag ref. An operator expecting a new release asset from a manual dispatch
-alone will not get one — push a real tag for that. If `ANDROID_KEYSTORE_B64`
-is not configured, the job skips
-the build entirely (a documented, green skip, not a failure) rather than
-ever publishing an unsigned artefact; if it IS set but one of the other
-three secrets is missing or wrong, this project's own signing guard
+`steamhangar-app-<tag>.apk` (e.g. `steamhangar-app-v1.2.3.apk`) to that
+tag's GitHub Release — a plain, no-account-needed download from the
+repository's Releases page. A manual `workflow_dispatch` run never
+attaches anything (the release-attach step guards on
+`github.event_name == 'push'`), and from a branch it cannot sign either:
+the job only requests the `release` Environment on a `v*` tag ref, so a
+branch run sees no keystore and takes the green skip. If
+`ANDROID_KEYSTORE_B64` is not available to the run, the job skips the
+build entirely (a documented, green skip, not a failure) rather than ever
+publishing an unsigned artefact; if it IS set but one of the other three
+secrets is missing or wrong, this project's own signing guard
 (`gradle.taskGraph.whenReady` above) turns that into a loud CI failure
 instead — the same `GradleException` a local build with an incomplete
 `keystore.properties` would hit, not a silent partial success. Side-loading
@@ -2171,6 +2169,38 @@ documented distribution path for a tagged release; "install unknown apps"
 still needs to be allowed for whichever source (a browser download, ADB)
 delivers the APK to the device, the standard side-load flow for any
 Android app outside a store.
+
+#### CI signing secrets (one-time setup in GitHub settings)
+
+The keystore is the one secret whose loss or leak cannot be repaired for
+existing installs, so it must be reachable only by a release tag, not by
+any branch that can start the workflow. The workflow side is done
+(`environment:` on the `android-release` job); the repository side is a
+maintainer task in **Settings**:
+
+1. **Environments → New environment `release`.** Under *Deployment
+   branches and tags*, choose *Selected branches and tags* and add one
+   **tag** rule with the pattern `v*`, no branch rules. A job on any
+   other ref is then refused entry to the Environment and never receives
+   its secrets.
+2. **Put the four `ANDROID_*` secrets in that Environment** (*Environment
+   secrets*), and **delete them from Secrets and variables → Actions →
+   Repository secrets** if they were set there earlier — a repository
+   secret is visible to every workflow run on every branch, which is
+   exactly what the Environment rule exists to prevent.
+3. **Rules → Rulesets → New tag ruleset**, target `v*`, restrict
+   *creations* (and updates and deletions) and add only the maintainers
+   to the bypass list. Without it, anyone with write access could push a
+   `v*` tag on an arbitrary commit and the Environment rule would admit it.
+
+**Verifying a downloaded APK.** Each signed release lists the signing
+certificate's SHA-256 in the release body ("Verify this release") and in
+the workflow run summary. Compare it with
+`apksigner verify --print-certs steamhangar-app-<tag>.apk` (line
+`Signer #1 certificate SHA-256 digest`). The fingerprint will be
+published here after the first signed release; every later release must
+show the same value — a different one means a different key, and Android
+will refuse it as an update.
 
 ### Carry-over cleanup (`docs/WORKPACKAGES.md` Phase 4b header)
 

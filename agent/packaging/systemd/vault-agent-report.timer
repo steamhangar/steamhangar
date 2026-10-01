@@ -15,7 +15,7 @@
 
 [Unit]
 Description=Periodic timer for vault-agent-report.service
-Documentation=https://github.com/Riviera822/steamhangar/blob/main/agent/README.md
+Documentation=https://github.com/steamhangar/steamhangar/blob/main/agent/README.md
 
 [Timer]
 # Every 30 minutes on the clock (:00 and :30) — matches

@@ -23,7 +23,7 @@
 
 [Unit]
 Description=SteamHangar vault-agent: report installed Steam apps to vault-api
-Documentation=https://github.com/Riviera822/steamhangar/blob/main/agent/README.md
+Documentation=https://github.com/steamhangar/steamhangar/blob/main/agent/README.md
 # No After=/Wants=network-online.target: that target is a system-manager
 # concept and is not reliably present/orderable against from a systemd
 # USER unit (no system-level network-online service to depend on in this

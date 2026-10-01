@@ -111,8 +111,25 @@ where `.github/workflows/publish.yml` pushes on a release tag -- so
 `vault-runner` runs `vault-api`'s image with a different command, so it needs no image of its own) and `up -d` runs them
 as published, multi-arch where the component supports it (`vault-api` is
 amd64-only, see publish.yml's matrix comment). Set `VAULT_IMAGE_TAG` in
-`.env` to pin a different release. No local toolchain, no build context,
-and the digest you run is the digest the release page lists. The
+`.env` to pin a different release. No local toolchain, no build context.
+A tag can be moved; a digest cannot. Each release body lists, under
+"Verify this release", the exact `ghcr.io/steamhangar/<service>@sha256:...`
+digests its workflow run pushed. To run exactly those bytes, pin them in a
+`deploy/compose.override.yaml` (`vault-runner` runs the vault-api image,
+so it gets the same digest):
+
+```yaml
+services:
+  vault-core:   { image: "ghcr.io/steamhangar/vault-core@sha256:<from the release body>" }
+  vault-api:    { image: "ghcr.io/steamhangar/vault-api@sha256:<from the release body>" }
+  vault-runner: { image: "ghcr.io/steamhangar/vault-api@sha256:<from the release body>" }
+  vault-proxy:  { image: "ghcr.io/steamhangar/vault-proxy@sha256:<from the release body>" }
+  # with --profile dns only:
+  # vault-dns:  { image: "ghcr.io/steamhangar/vault-dns@sha256:<from the release body>" }
+```
+
+or compare what a tag pull gave you against the list with
+`docker inspect --format '{{index .RepoDigests 0}}' <image>`. The
 published ghcr.io packages must be public: until the maintainer flips their
 visibility, an unauthenticated pull fails -- build locally instead (below).
 
@@ -1143,6 +1160,15 @@ What this deployment assumes, stated plainly so it can be checked:
   Publish it on one specific LAN IP (`VAULT_DNS_BIND=192.168.1.50`), never on
   `0.0.0.0`. If you leave the variable unset it publishes on `127.0.0.1`, i.e.
   it fails *closed* — visibly broken rather than invisibly dangerous.
+- **A host firewall does not protect published ports.** Docker writes its
+  own iptables/nftables rules for every `ports:` entry, ahead of the
+  chains `ufw` and `firewalld` manage, so a `ufw deny 8080` does not stop
+  LAN (or WAN, on a host with a public interface) access to a published
+  port. Restrict exposure where Docker honours it: bind each published
+  port to one LAN IP with the `VAULT_*_BIND` variables in `deploy/.env`
+  (`VAULT_CORE_BIND`, `VAULT_API_BIND`, `VAULT_DNS_BIND`), or put your
+  filter rules in the `DOCKER-USER` chain, which Docker evaluates before
+  its own forwarding rules.
 - **No secrets in `compose.yaml`.** `VAULT_API_KEY` appears only as a required
   `${…}` reference; the real value lives in `deploy/.env`, which is gitignored.
 - All five services run with `no-new-privileges`; vault-api, vault-runner
@@ -1152,7 +1178,7 @@ What this deployment assumes, stated plainly so it can be checked:
   never runs as root at any point (its listen port, 8888, is unprivileged),
   so unlike vault-core it has no privilege-drop dance to do at all.
 - **vault-api has no default route to the internet** (WP EG-1, ADR-0011) —
-  see [Egress lock](#egress-lock-vault-api-cannot-reach-the-internet-except-through-vault-proxy)
+  see [Egress lock](#egress-lock-vault-api-loses-its-default-route-out)
   above for the full mechanism and how to verify it yourself.
 
 ---

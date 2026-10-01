@@ -155,8 +155,12 @@ gitignored.
 AGENT-BIN, `.github/workflows/publish.yml`'s `agent-binaries` job runs
 exactly this cross-compile matrix on every `v*` tag and attaches the three
 binaries — named `vault-agent-<tag>-<os>-<arch>` (`.exe` on Windows), e.g.
-`vault-agent-v1.2.3-windows-amd64.exe` — plus a `SHA256SUMS` file to that
-tag's GitHub Release. Building it yourself from this section is only
+`vault-agent-v1.2.3-windows-amd64.exe` — to that tag's GitHub Release,
+together with the packaging files (`install-task.ps1`,
+`uninstall-task.ps1`, `run-vault-agent.ps1`, `vault-agent-report.service`,
+`vault-agent-report.timer`) and one `SHA256SUMS` file covering all of
+them (`sha256sum -c --ignore-missing SHA256SUMS`, or `Get-FileHash -Algorithm SHA256` on
+Windows). Building it yourself from this section is only
 needed for a version that hasn't been tagged yet, or if you'd rather not
 trust a prebuilt binary. See "Windows Scheduled Task (WP 2.6)" below for
 what to do with the downloaded `.exe` (including the SmartScreen note).
@@ -1461,13 +1465,30 @@ wide and needs no admin rights:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-task.ps1 `
-    -AgentPath C:\Tools\vault-agent.exe -ServerUrl http://100.64.0.5:8080 -ApiKeyFile C:\secrets\key.txt
+    -AgentPath $env:LOCALAPPDATA\VaultAgent\vault-agent.exe `
+    -ServerUrl http://100.64.0.5:8080 -ApiKeyFile $env:USERPROFILE\vault-key.txt
+Remove-Item $env:USERPROFILE\vault-key.txt
 ```
 
-If the scripts came out of the release zip, they carry the mark-of-the-web
-too; `Unblock-File .\install-task.ps1, .\uninstall-task.ps1,
-.\run-vault-agent.ps1` removes it once (after you have verified the
-release checksum, same as for the `.exe` above). **The installed task
+**Where to put the binary and the key file.** Put `vault-agent.exe` in
+`%LOCALAPPDATA%\VaultAgent\` (the same folder `install-task.ps1` uses
+as its default `-ConfigDir`), and the key file somewhere under your user
+profile, deleted once the install has run (the task never reads it again —
+the key is copied into the owner-only `env.txt`). The reason is the ACL a
+folder inherits: a folder you create directly under `C:\` (`C:\Tools`,
+`C:\secrets`) inherits `C:\`'s rules, which give every **Authenticated
+User** modify rights on its contents. Any other local account could then
+replace `vault-agent.exe`, which the scheduled task runs as you, or read
+the key file. Folders under your profile inherit an ACL that only you,
+SYSTEM and Administrators can use. `install-task.ps1` checks this with
+`Get-Acl` and prints a warning (it does not abort) when the binary or its
+folder is modifiable, or the key file readable, by Everyone,
+Authenticated Users or BUILTIN\Users.
+
+The scripts downloaded from the release carry the mark-of-the-web too;
+`Unblock-File .\install-task.ps1, .\uninstall-task.ps1,
+.\run-vault-agent.ps1` removes it once, after you have checked them
+against the release's `SHA256SUMS`, same as for the `.exe` above. **The installed task
 keeps working regardless of either setting:** `install-task.ps1`
 registers the action as `powershell.exe -NoProfile -NonInteractive
 -ExecutionPolicy Bypass -WindowStyle Hidden -File <ConfigDir>\run-vault-

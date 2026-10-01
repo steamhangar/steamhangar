@@ -158,6 +158,16 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # WP SEC-FIX-2 (S2): one output PER IMAGE, read by agent-binaries to
+    # append the digests to the release body. A matrix job's outputs are not
+    # merged across legs; with a distinct name per leg each one survives
+    # (GitHub's documented pattern for matrix outputs). Empty on any run
+    # that is not a v* tag push, because nothing is pushed then.
+    outputs:
+      pin_vault_core: ${{ steps.pin.outputs.pin_vault_core }}
+      pin_vault_api: ${{ steps.pin.outputs.pin_vault_api }}
+      pin_vault_dns: ${{ steps.pin.outputs.pin_vault_dns }}
+      pin_vault_proxy: ${{ steps.pin.outputs.pin_vault_proxy }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -199,7 +209,13 @@ jobs:
             dockerfile: deploy/proxy/Dockerfile
             platforms: linux/amd64,linux/arm64
     steps:
+      # WP SEC-FIX-2 (P1): this job holds a write token, so the checkout
+      # must not leave it in .git/config for every later step (and every
+      # third-party action) to read. No step here pushes via git: releases
+      # go through the REST API (softprops, gh), images through buildx.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # QEMU cross-build, not a native arm64 runner: GitHub-hosted Linux
       # arm64 runners exist but are not available to every account tier for
@@ -373,7 +389,12 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
-          push: true
+          # WP SEC-FIX-2 (P2): only a v* tag publishes. workflow_dispatch
+          # from a branch still builds every platform -- the rehearsal stays
+          # useful -- but pushes nothing, so a branch can never overwrite or
+          # add a sha-* tag on ghcr.io. Dispatching on a v* tag ref
+          # (github.ref = refs/tags/v...) publishes exactly like a tag push.
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
@@ -405,7 +426,11 @@ jobs:
       #      file or directory` -- NOT the more commonly quoted `Exec
       #      format error`; a guard grepping for the latter would miss this
       #      exact failure).
+      # Both registry checks below read the PUSHED image back by digest, so
+      # they share the push gate above: on a dispatch build there is
+      # nothing in the registry to verify (WP SEC-FIX-2, P2).
       - name: Verify pushed manifest matches declared platforms
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           set -eu
           REF="${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
@@ -449,7 +474,7 @@ jobs:
           echo "Manifest platforms verified against the registry: $ACTUAL"
 
       - name: Smoke-run SteamPrefill inside the pushed image (vault-api only)
-        if: matrix.image == 'vault-api'
+        if: matrix.image == 'vault-api' && startsWith(github.ref, 'refs/tags/v')
         run: |
           set -eu
           REF="${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
@@ -472,6 +497,7 @@ jobs:
       # publishes is a real version or a commit-derived sha, never a
       # no-information floating tag -- a narrower, but true, claim.
       - name: Record published digest
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           {
             echo "### ${{ matrix.image }} (${{ matrix.platforms }})"
@@ -480,6 +506,34 @@ jobs:
             echo "- digest: \`${{ steps.build.outputs.digest }}\`"
             echo "- pin by digest: \`${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record build (dispatch -- nothing pushed)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          {
+            echo "### ${{ matrix.image }} (${{ matrix.platforms }}) -- built, NOT pushed"
+            echo ""
+            echo "Not a v* tag ref, so the image was built for every declared"
+            echo "platform and discarded. Only a tag push publishes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # WP SEC-FIX-2 (S2): hand this leg's digest pin to agent-binaries,
+      # which appends all four to the release body. Output name derived
+      # from the image (vault-core -> pin_vault_core), matching the job's
+      # `outputs:` block above.
+      - name: Export digest pin for the release body
+        id: pin
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          IMAGE: ${{ matrix.image }}
+          PIN: ${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          case "$PIN" in
+            *@sha256:?*) ;;
+            *) echo "::error::no sha256 digest for ${IMAGE}: ${PIN}" >&2; exit 1 ;;
+          esac
+          echo "pin_$(printf '%s' "$IMAGE" | tr '-' '_')=${PIN}" >> "$GITHUB_OUTPUT"
 
   # --- Second deliverable: the signed Android release APK ---------------------
   # See this file's header for why this job shares the `publish` job's file
@@ -526,6 +580,20 @@ jobs:
     # file that widens beyond `publish`'s grant, just the first of two.)
     permissions:
       contents: write
+    # WP SEC-FIX-2 (S1): the four ANDROID_* signing secrets live in the
+    # `release` Environment, not in repository secrets (setup:
+    # app/README.md, "CI signing secrets"). That Environment's deployment
+    # rule admits only v* tags, so a job running on any other ref is not
+    # allowed to enter it and never receives its secrets. The job only
+    # ASKS for the environment on a v* tag ref: on a workflow_dispatch from
+    # a branch it runs without one, sees no ANDROID_KEYSTORE_B64, and takes
+    # the green "not configured" skip below -- instead of failing on the
+    # protection rule and taking agent-binaries' rehearsal down with it.
+    # Either way a branch run cannot read the keystore: requesting
+    # `release` from a branch fails the rule before any step runs, and
+    # not requesting it means its secrets are never in scope. This holds
+    # only once the secrets are REMOVED from repository secrets.
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
     # Exposes whether a real (secret-backed) signed build ran, for
     # `agent-binaries` to read via `needs.android-release.outputs.configured`
     # -- see that job's own "Attach vault-agent binaries" step for why it
@@ -535,11 +603,20 @@ jobs:
     # otherwise append rather than skip).
     outputs:
       configured: ${{ steps.signing_check.outputs.configured }}
+      # WP SEC-FIX-2 (S5): the signing certificate's SHA-256, for the
+      # release body (agent-binaries). Empty when no APK was built.
+      cert_sha256: ${{ steps.verify.outputs.cert_sha256 }}
     timeout-minutes: 30
     steps:
+      # WP SEC-FIX-2 (P1): this job holds a write token, so the checkout
+      # must not leave it in .git/config for every later step (and every
+      # third-party action) to read. No step here pushes via git: releases
+      # go through the REST API (softprops, gh), images through buildx.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # Four repository secrets back the four build.gradle.kts env vars
+      # Four `release` Environment secrets back the four build.gradle.kts env vars
       # above (the operator creates these; this job only consumes them):
       #   ANDROID_KEYSTORE_B64      -- base64 of the release .jks/.keystore
       #                                file's raw bytes (there is no
@@ -555,7 +632,7 @@ jobs:
       #                                ends up inside the APK's own
       #                                certificate, readable by anyone who
       #                                downloads the release -- but it is
-      #                                still a repository secret rather
+      #                                still an Environment secret rather
       #                                than a literal in this file, so
       #                                nothing about which alias this
       #                                project signs with is hardcoded here)
@@ -592,16 +669,18 @@ jobs:
             {
               echo "### Android release APK -- SKIPPED"
               echo ""
-              echo "\`ANDROID_KEYSTORE_B64\` is not set on this repository, so"
+              echo "\`ANDROID_KEYSTORE_B64\` is not available to this run, so"
               echo "no release keystore is available. No APK was built, signed,"
               echo "or attached to this release -- this is the intended"
               echo "fail-closed behaviour (app/README.md, \"Release build,"
               echo "signing, distribution\", WP 4b.9): an unsigned APK is never"
               echo "published as a release asset."
               echo ""
-              echo "To enable this job, set these four repository secrets:"
-              echo "\`ANDROID_KEYSTORE_B64\`, \`ANDROID_KEYSTORE_PASSWORD\`,"
-              echo "\`ANDROID_KEY_ALIAS\`, \`ANDROID_KEY_PASSWORD\`."
+              echo "Signed builds run only on a v* tag push. To enable them, set"
+              echo "these four secrets in the \`release\` Environment (not as"
+              echo "repository secrets): \`ANDROID_KEYSTORE_B64\`,"
+              echo "\`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_ALIAS\`,"
+              echo "\`ANDROID_KEY_PASSWORD\` (app/README.md, \"CI signing secrets\")."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -681,7 +760,7 @@ jobs:
         working-directory: app
         env:
           # The file PATH is not a secret -- only the bytes at that path
-          # are. The three values below ARE the repository secrets, mapped
+          # are. The three values below ARE the Environment secrets, mapped
           # 1:1 onto the env-var names app/app/build.gradle.kts's
           # `releaseSigningValue` already reads.
           VAULT_RELEASE_STORE_FILE: ${{ runner.temp }}/vault-android-release.jks
@@ -733,11 +812,24 @@ jobs:
             echo "::error::apksigner did not confirm the v2 signing scheme -- refusing to publish this APK." >&2
             exit 1
           fi
+          # WP SEC-FIX-2 (S5): publish WHICH certificate signed the APK, so
+          # users can check a download (and a keystore swap between
+          # releases is visible). Exactly one signer is expected.
+          CERTS="$RUNNER_TEMP/apksigner-certs.txt"
+          "$APKSIGNER" verify --print-certs "$APK_PATH" > "$CERTS"
+          cat "$CERTS"
+          CERT_SHA256="$(sed -n 's/^Signer #1 certificate SHA-256 digest: \([0-9a-f]\{64\}\)$/\1/p' "$CERTS")"
+          if [ -z "$CERT_SHA256" ] || grep -q '^Signer #2 ' "$CERTS"; then
+            echo "::error::expected exactly one signer with a SHA-256 certificate digest -- refusing to publish this APK." >&2
+            exit 1
+          fi
+          echo "cert_sha256=${CERT_SHA256}" >> "$GITHUB_OUTPUT"
           {
             echo "### Android release APK -- signed and verified"
             echo ""
             echo "- \`Verifies\`"
             echo "- \`Verified using v2 scheme (APK Signature Scheme v2): true\`"
+            echo "- signing certificate SHA-256: \`${CERT_SHA256}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Review round 2 (N4) -- recorded as a follow-up, deliberately NOT
@@ -756,6 +848,9 @@ jobs:
       # fingerprint pinned from the FIRST real release, failing loudly on
       # a mismatch -- not implemented in this package, since there is no
       # first real release yet to pin against.
+      # WP SEC-FIX-2 (S5) did the first half: the verify step now extracts
+      # that fingerprint and publishes it (run summary + release body). The
+      # pinned COMPARISON is still open until the first signed release.
       #
       # Pre-freeze project review, N4: the asset is named after the
       # release, not after Gradle's build variant. `app-release.apk` says
@@ -870,7 +965,10 @@ jobs:
   agent-binaries:
     name: agent-binaries / cross-compiled vault-agent -> GitHub Release
     runs-on: ubuntu-latest
-    needs: android-release
+    # `publish` is listed only so its per-image digest outputs are readable
+    # here (WP SEC-FIX-2, S2); the ordering still comes from android-release,
+    # which itself needs publish.
+    needs: [publish, android-release]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     # WIDER than the default `contents: read` at the workflow level, scoped
     # to this job alone -- same shape as `android-release`'s own override,
@@ -879,11 +977,35 @@ jobs:
       contents: write
     timeout-minutes: 15
     steps:
+      # WP SEC-FIX-2 (P1): this job holds a write token, so the checkout
+      # must not leave it in .git/config for every later step (and every
+      # third-party action) to read. No step here pushes via git: releases
+      # go through the REST API (softprops, gh), images through buildx.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
+      # WP SEC-FIX-2: go.mod's `go 1.25.0` is a MINIMUM, but handed to
+      # setup-go via go-version-file it is an exact version, and
+      # check-latest cannot lift an exact pin. Release binaries would ship
+      # 1.25.0's stdlib without the later 1.25.x security fixes. Derive the
+      # minor line from go.mod (still the single source) and ask for the
+      # newest patch of it.
+      - name: Derive Go release line from go.mod
+        id: gover
+        shell: bash
+        run: |
+          set -eu
+          line="$(sed -n 's/^go[[:space:]]\{1,\}\([0-9]\{1,\}\.[0-9]\{1,\}\).*/\1/p' agent/go/go.mod)"
+          if [ -z "$line" ]; then
+            echo "::error::no go directive found in agent/go/go.mod" >&2
+            exit 1
+          fi
+          echo "line=${line}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: agent/go/go.mod
+          go-version: ${{ steps.gover.outputs.line }}.x
+          check-latest: true
 
       # Reviewer round 1 (S4): `github.ref_name` is safe to use RAW only on
       # an actual tag push -- this file's own `on.push.tags: ["v*"]` filter
@@ -1001,7 +1123,17 @@ jobs:
         working-directory: dist
         run: |
           set -eu
-          sha256sum vault-agent-* > SHA256SUMS
+          # WP SEC-FIX-2 (S3): the packaging scripts and systemd units are
+          # release assets too (agent/README.md verifies them against this
+          # file), so they are copied flat into dist/ and checksummed with
+          # the binaries. The two units are named vault-agent-report.*, so
+          # the vault-agent-* glob (here and in the attach step's `files:`)
+          # already covers them.
+          cp "$GITHUB_WORKSPACE"/agent/packaging/windows/*.ps1 .
+          cp "$GITHUB_WORKSPACE"/agent/packaging/systemd/vault-agent-report.service \
+             "$GITHUB_WORKSPACE"/agent/packaging/systemd/vault-agent-report.timer .
+          sha256sum vault-agent-* ./*.ps1 > SHA256SUMS
+          sed -i 's#  \./#  #' SHA256SUMS
           cat SHA256SUMS
 
       - name: Record build summary
@@ -1088,4 +1220,69 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist/vault-agent-*
+            dist/*.ps1
             dist/SHA256SUMS
+
+      # WP SEC-FIX-2 (S2/S5): deploy/README.md promises that the digest you
+      # run is the digest the release page lists. This step makes the page
+      # list them: the four image pins (from `publish`'s per-image outputs)
+      # and the APK signing certificate (from android-release) are APPENDED
+      # to the existing body -- generated notes and anything a maintainer
+      # wrote stay untouched. The block is fenced by two HTML comment
+      # markers; a re-run of the same tag (which rebuilds and may produce
+      # new digests) drops only the earlier fenced block before appending
+      # the current one, so the page never lists stale digests twice.
+      # Runs last, after every attach step, so the release exists.
+      - name: Append image digests and APK certificate to the release body
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PIN_CORE: ${{ needs.publish.outputs.pin_vault_core }}
+          PIN_API: ${{ needs.publish.outputs.pin_vault_api }}
+          PIN_DNS: ${{ needs.publish.outputs.pin_vault_dns }}
+          PIN_PROXY: ${{ needs.publish.outputs.pin_vault_proxy }}
+          APK_CERT: ${{ needs.android-release.outputs.cert_sha256 }}
+        run: |
+          set -eu
+          for pin in "$PIN_CORE" "$PIN_API" "$PIN_DNS" "$PIN_PROXY"; do
+            case "$pin" in
+              */*@sha256:?*) ;;
+              *) echo "::error::missing or malformed image digest pin: '${pin}'" >&2; exit 1 ;;
+            esac
+          done
+          notes="$RUNNER_TEMP/release-notes.md"
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' > "$notes"
+          # Re-run safe: drop the previous verify block, but only when the
+          # markers are balanced (0/0 or 1/1) -- an unbalanced pair would
+          # make the sed range delete eat the rest of a hand-edited body.
+          n_start="$(grep -c '^<!-- steamhangar:verify:start -->$' "$notes" || true)"
+          n_end="$(grep -c '^<!-- steamhangar:verify:end -->$' "$notes" || true)"
+          if [ "$n_start" != "$n_end" ] || [ "$n_start" -gt 1 ]; then
+            echo "::error::release body has unbalanced or duplicated verify markers (start=${n_start}, end=${n_end}); fix the release notes by hand" >&2
+            exit 1
+          fi
+          sed -i '/^<!-- steamhangar:verify:start -->$/,/^<!-- steamhangar:verify:end -->$/d' "$notes"
+          # Strip trailing blank lines so re-runs don't pile up empty lines.
+          sed -i -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' "$notes"
+          {
+            echo ""
+            echo "<!-- steamhangar:verify:start -->"
+            echo "## Verify this release"
+            echo ""
+            echo "Image digests pushed by this release's workflow run. Pin one in"
+            echo "compose with \`image: <line>\` to run exactly this build:"
+            echo ""
+            echo '```'
+            printf '%s\n' "$PIN_CORE" "$PIN_API" "$PIN_DNS" "$PIN_PROXY"
+            echo '```'
+            echo ""
+            if [ -n "$APK_CERT" ]; then
+              echo "Android APK signing certificate SHA-256: \`${APK_CERT}\`"
+            else
+              echo "No signed Android APK in this release."
+            fi
+            echo ""
+            echo "vault-agent binaries, packaging scripts and systemd units: \`SHA256SUMS\`."
+            echo "<!-- steamhangar:verify:end -->"
+          } >> "$notes"
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file "$notes"
