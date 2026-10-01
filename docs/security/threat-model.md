@@ -861,8 +861,10 @@ the `Host` header, and the HTTP status code.
 
 **Where it lands:** under `/vault/logs/` inside the same shared Docker
 volume both `vault-core` and `vault-api` mount
-(the identical `${VAULT_CACHE_PATH:-vault-cache}:/vault` mount on both
-services in `deploy/compose.yaml`), only when the operator sets
+(`${VAULT_CACHE_PATH:-vault-cache}:/vault` on vault-core and the same
+source with `:nocopy` on vault-api in `deploy/compose.yaml`, so only
+vault-core seeds a fresh named volume and the two cannot race on copy-up),
+only when the operator sets
 `VAULT_EVENT_LOG`/`VAULT_EVENT_LOG_PATH` (both empty/off by default: the
 `${VAULT_EVENT_LOG:-}` and `${VAULT_EVENT_LOG_PATH:-}` forwards). It is off
 by default in `core/Dockerfile` per the comment above vault-core's

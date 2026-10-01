@@ -596,6 +596,13 @@ volume; see `core/Dockerfile`'s `VOLUME ["/vault"]` step). Skipping this
 step is not silent: vault-core's preflight will refuse to start with
 `/vault/cache is missing`.
 
+In the default named-volume mode only vault-core seeds the volume: vault-api
+mounts it with `:nocopy`, because two containers created at the same moment
+on a fresh volume would otherwise race on Docker's copy-up and one fails
+with `mkdir .../_data/tmp: file exists`. In bind-mount mode there is no
+copy-up; Compose ignores the option and prints a harmless warning
+("mount of type `bind` should not define `volume` option").
+
 ```bash
 sudo mkdir -p /srv/steamhangar-cache/cache/depot /srv/steamhangar-cache/tmp
 sudo chown -R 101:101 /srv/steamhangar-cache
@@ -1157,9 +1164,8 @@ sudo sh deploy/tests/verify-stack.sh
 ```
 
 Builds every image (`vault-core`, `vault-api`, `vault-proxy`, `vault-dns` —
-`vault-runner` reuses `vault-api`'s) and runs **203 checks** (a static
-count of the assertions in the script after WP TH-1b, not yet confirmed by a
-run; the last measured total is 193) against real
+`vault-runner` reuses `vault-api`'s) and runs **204 checks** (measured
+2026-10-01) against real
 containers: the config-drift contract (both directions), **the web UI baked
 into the vault-api image and served from it with no bind mount involved**
 (packaging work package), all twelve env-forwarding-audit keys
@@ -1246,7 +1252,9 @@ present once plus expected value each, same mechanics as 3e-bis. Step
 6i-core (2) checks the VALUES of `TZ` (`UTC`) and
 `VAULT_UPSTREAM_RATE_WINDOW` (`03:00-07:00`) inside the running vault-core
 container; presence alone proves nothing there, because `core/Dockerfile`
-sets both rate variables blank as image `ENV`. Not yet run.
+sets both rate variables blank as image `ENV`. Plus 1 in step 1b: the
+drift-copy completeness check. 193 + 10 + 1 = **204 total**, measured
+2026-10-01 in a real run: **204/204 pass**, 0 failed.
 
 It never enters credentials — reaching the login prompt is the pass condition.
 

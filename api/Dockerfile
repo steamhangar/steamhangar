@@ -175,11 +175,12 @@ COPY web /app/web
 #                                "back this up" and "you may delete this" stay
 #                                separable advice (deploy/README.md).
 #   /vault                    -> the shared depot cache volume (same volume
-#                                vault-core mounts). cache/depot is pre-created
-#                                with the same layout vault-core's image uses so
-#                                that whichever service happens to seed the empty
-#                                named volume first produces the same result, and
-#                                so vault-api's deletion guard (which refuses a
+#                                vault-core mounts). Only vault-core seeds an
+#                                empty named volume: vault-api's mount is
+#                                :nocopy (deploy/compose.yaml). cache/depot is
+#                                still pre-created here, same layout as
+#                                vault-core's image, for bind-mount/standalone
+#                                use, and so vault-api's deletion guard (which refuses a
 #                                cache root with no depot/ dir) is satisfied on a
 #                                fresh install.
 RUN set -eux; \

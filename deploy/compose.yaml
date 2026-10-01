@@ -214,8 +214,10 @@ services:
       # single /vault mount point that is being redirected, not a sub-path
       # underneath it. This is deliberate: the same-filesystem constraint above
       # is only satisfiable by moving both at once, never one at a time.
-      # vault-api mounts the identical expression a few lines down -- both
-      # services must resolve to the SAME location, named-volume or bind-mount.
+      # vault-api mounts the identical expression a few lines down (plus
+      # `:nocopy`, so this service is the volume's only seeder; see there) --
+      # both services must resolve to the SAME location, named-volume or
+      # bind-mount.
       # See deploy/README.md "Using a dedicated cache mount" for the required
       # host-side `mkdir` + `chown 101:101` before first start.
       - ${VAULT_CACHE_PATH:-vault-cache}:/vault
@@ -586,7 +588,7 @@ services:
       # Same VAULT_CACHE_PATH expression as vault-core above -- see the comment
       # there. Both services must agree on named-volume vs. bind-mount and on the
       # exact path; this line is kept textually identical to vault-core's on
-      # purpose.
+      # purpose, except for the `:nocopy` suffix explained below.
       #
       # This is ALSO where the cache-event log lives when VAULT_EVENT_LOG is
       # set on vault-core above: core/Dockerfile pre-creates /vault/logs/
@@ -599,7 +601,21 @@ services:
       # here: WP 3.11 owns the cursor/truncation contract (core/README.md
       # "Rotation and the USR1 contract") and decided its own access shape
       # (read, never truncate) rather than one imposed by the mount.
-      - ${VAULT_CACHE_PATH:-vault-cache}:/vault
+      #
+      # `:nocopy` (the ONE deliberate textual difference from vault-core's
+      # line): both images carry /vault/cache/depot and /vault/tmp, and Docker
+      # copies image content into an EMPTY named volume when a container is
+      # created with it. Compose creates vault-core and vault-api concurrently,
+      # so on a fresh volume both copied at once and one create failed with
+      # "mkdir .../_data/tmp: file exists" (observed in a verify run). With
+      # nocopy, vault-core is the only seeder (layout + 101:101 ownership come
+      # from core/Dockerfile), whatever the creation order: Docker seeds only
+      # an empty volume, and a nocopy mount leaves it empty. vault-api needs
+      # nothing under /vault at boot (VAULT_CACHE_ROOT is read per request).
+      # Bind-mount mode (VAULT_CACHE_PATH set): there is no copy-up for a bind,
+      # Compose ignores the option and prints a one-line warning ("mount of
+      # type `bind` should not define `volume` option"); harmless.
+      - ${VAULT_CACHE_PATH:-vault-cache}:/vault:nocopy
       # SQLite database (mapping, jobs, agent reports). Small; back this up.
       - vault-db:/data
       # SteamPrefill's Config/ (the Steam SESSION) is NOT mounted here anymore

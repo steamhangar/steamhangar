@@ -145,12 +145,24 @@ mkdir -p "$work/drift/nginx" "$work/drift/docker"
 cp "$repo_root/core/nginx/nginx.conf" "$work/drift/nginx/nginx.conf"
 cp "$repo_root/core/docker/nginx.conf.template" "$work/drift/docker/nginx.conf.template"
 cp "$repo_root/core/docker/check-config-drift.sh" "$work/drift/docker/check-config-drift.sh"
+# TH-1a: the drift script also reads these two (resolved from its own dir/..).
+cp "$repo_root/core/docker/27-vault-upstream-rate.sh" "$work/drift/docker/27-vault-upstream-rate.sh"
+cp "$repo_root/core/nginx/vault-upstream-rate.conf" "$work/drift/nginx/vault-upstream-rate.conf"
+# The unmutated copy must pass first, else a later FAIL could stem from an
+# incomplete copy rather than from the injected difference.
+if sh "$work/drift/docker/check-config-drift.sh" >/dev/null 2>&1; then
+    ok "unmutated drift copy passes (the copy is complete)"
+else
+    bad "unmutated drift copy already fails (copy incomplete?)"
+fi
 sed -i 's/proxy_connect_timeout      3s;/proxy_connect_timeout      30s;/' "$work/drift/docker/nginx.conf.template"
 run "sh '$work/drift/docker/check-config-drift.sh' 2>&1 | tail -12"
-if sh "$work/drift/docker/check-config-drift.sh" >/dev/null 2>&1; then
+if drift_out=$(sh "$work/drift/docker/check-config-drift.sh" 2>&1); then
     bad "drift check did NOT catch an injected difference"
+elif printf '%s\n' "$drift_out" | grep -q 'proxy_connect_timeout'; then
+    ok "drift check catches the injected difference (exit non-zero, names proxy_connect_timeout)"
 else
-    ok "drift check catches an injected difference (exit non-zero)"
+    bad "drift check failed but did not name proxy_connect_timeout (wrong failure reason)"
 fi
 
 # =============================================================================
