@@ -53,6 +53,8 @@
  */
 
 import { dispKind, KIND } from "./game-status.js";
+import { buildSettingsPatch } from "./settings-diff.js";
+import { validSteamId64 } from "./steamid.js";
 
 /** Existing app strings, reused verbatim (the Settings Steam section's
  * no-key status line and the SteamID64 validation line). */
@@ -62,6 +64,14 @@ export const PRIVATE_PROFILE_MESSAGE =
   "Steam returned no games for this SteamID64. The profile or its game details are probably private.";
 
 export const STEAM_LIBRARY_SETTING_KEY = "steam_library_steamid";
+
+/** An older vault-api (before WP API-FEAT-1) has no such setting. Shared by
+ * the Settings caption and onboarding step 2's "not saved" line. */
+export const LIBRARY_SETTING_ABSENT_MESSAGE =
+  "This vault-api does not store a library SteamID64 yet (it needs a newer version).";
+export const SETTINGS_READONLY_MESSAGE = "This vault's settings are read-only.";
+export const LIBRARY_SETTING_ENV_ONLY_MESSAGE =
+  "The library SteamID64 is set by the server environment; change it there.";
 
 export const OWNED_STATUS = Object.freeze({
   /** Before the first load finished. */
@@ -175,7 +185,7 @@ export function librarySubtitle({ games, liveJobsByAppid, owned }) {
 
 function detailText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
-  return (err && err.message) || "Request failed";
+  return (err && err.message) || "Request failed.";
 }
 
 /**
@@ -189,6 +199,71 @@ export function describeOwnedLoadError(err) {
   if (status === 409) return NO_STEAM_KEY_MESSAGE;
   if (status === 422) return `The stored library SteamID64 was rejected. ${INVALID_STEAMID64_MESSAGE}`;
   return `Could not load your Steam library: ${detailText(err)}`;
+}
+
+/**
+ * A failed lookup of a TYPED SteamID64 (Settings' Preview, onboarding
+ * step 2's Look up) -> its sentence. Unlike `describeOwnedLoadError`, a 422
+ * is about the typed id, not the stored one.
+ * @param {unknown} err ApiError-shaped
+ */
+export function describeLookupError(err) {
+  const status = err && typeof err.status === "number" ? err.status : null;
+  if (status === 409) return NO_STEAM_KEY_MESSAGE;
+  if (status === 422) return INVALID_STEAMID64_MESSAGE;
+  return detailText(err);
+}
+
+/** `saveLibrarySteamId` outcomes. */
+export const SAVE_OUTCOME = Object.freeze({
+  SAVED: "saved",
+  /** The stored value already equals the typed one: no PATCH was sent. */
+  UNCHANGED: "unchanged",
+  /** The vault's settings are read-only: no PATCH was sent. */
+  READONLY: "readonly",
+  /** Older vault-api without the setting: no PATCH was sent. */
+  ABSENT: "absent",
+  /** The setting is env-only on this server: no PATCH was sent. */
+  ENV_ONLY: "env-only",
+  /** The typed text is neither blank nor a valid SteamID64: no PATCH. */
+  INVALID: "invalid",
+  /** The PATCH failed. */
+  ERROR: "error",
+});
+
+/**
+ * Store the library SteamID64 (WP WEB-FEAT-2; shared by Settings' Save and
+ * onboarding step 2's Look up). The PATCH body comes from the same builder
+ * as the Settings form (`buildSettingsPatch`): only a real change is sent,
+ * and the value is the trimmed STRING, never a Number (17 digits exceed
+ * JavaScript's safe integers; the API answers a number with 422). A blank
+ * `typed` is an explicit "" override (= not set).
+ *
+ * @param {{patchSettings: (body: object) => Promise<any>}} apiClient
+ * @param {{readonly?: boolean, settings?: object[]} | null | undefined} settingsResponse
+ *   the last `GET`/`PATCH /v1/settings` answer
+ * @param {string} typed
+ * @returns {Promise<{outcome: string, settingsResponse?: object, error?: string}>}
+ */
+export async function saveLibrarySteamId(apiClient, settingsResponse, typed) {
+  const entries = settingsResponse && Array.isArray(settingsResponse.settings) ? settingsResponse.settings : [];
+  const entry = entries.find((e) => e && e.key === STEAM_LIBRARY_SETTING_KEY);
+  if (!entry) return { outcome: SAVE_OUTCOME.ABSENT, error: LIBRARY_SETTING_ABSENT_MESSAGE };
+  if (entry.env_only) return { outcome: SAVE_OUTCOME.ENV_ONLY, error: LIBRARY_SETTING_ENV_ONLY_MESSAGE };
+  if (settingsResponse.readonly) return { outcome: SAVE_OUTCOME.READONLY, error: SETTINGS_READONLY_MESSAGE };
+  const value = typeof typed === "string" ? typed.trim() : "";
+  if (value && !validSteamId64(value)) return { outcome: SAVE_OUTCOME.INVALID, error: INVALID_STEAMID64_MESSAGE };
+  const body = buildSettingsPatch(entries, { [STEAM_LIBRARY_SETTING_KEY]: { value } });
+  if (Object.keys(body).length === 0) return { outcome: SAVE_OUTCOME.UNCHANGED };
+  try {
+    return { outcome: SAVE_OUTCOME.SAVED, settingsResponse: await apiClient.patchSettings(body) };
+  } catch (err) {
+    const status = err && typeof err.status === "number" ? err.status : null;
+    return {
+      outcome: SAVE_OUTCOME.ERROR,
+      error: status === 422 ? `${INVALID_STEAMID64_MESSAGE} (${detailText(err)})` : detailText(err),
+    };
+  }
 }
 
 /** Which follow-up the notice line offers. */

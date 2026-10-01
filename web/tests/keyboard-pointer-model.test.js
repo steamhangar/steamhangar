@@ -298,6 +298,7 @@ const ORDER_DEPENDENT_PAIRS = [
   { hover: ".segs button:hover", state: '.segs button[aria-pressed="true"]' },
   { hover: ".chip:hover", state: '.chip[aria-pressed="true"]' },
   { hover: ".btn:hover", state: ".btn:disabled" },
+  { hover: ".btn:hover", state: '.btn[aria-disabled="true"]' },
   { hover: ".notif:hover", state: ".notif.unread" },
 ];
 

@@ -55,9 +55,13 @@ import { validSteamId64 } from "../lib/steamid.js";
 import { submitSteamKey } from "../lib/steam-key-form.js";
 import {
   INVALID_STEAMID64_MESSAGE,
+  LIBRARY_SETTING_ABSENT_MESSAGE,
   NO_STEAM_KEY_MESSAGE,
   PRIVATE_PROFILE_MESSAGE,
+  SAVE_OUTCOME,
   STEAM_LIBRARY_SETTING_KEY,
+  describeLookupError,
+  saveLibrarySteamId,
 } from "../lib/owned-library.js";
 import { onViewChange } from "../router.js";
 
@@ -665,7 +669,7 @@ function buildSteamLibraryBlock() {
     const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
     caption.textContent = current
       ? `${sourceLabel(current.source)} · ${appliesText(current.applies)}`
-      : "This vault-api does not store a library SteamID64 yet (it needs a newer version). Preview still works.";
+      : `${LIBRARY_SETTING_ABSENT_MESSAGE} Preview still works.`;
     // Same rule as every other setting's Reset (settings-presentation.js's
     // canReset): only a `db` override has anything to clear.
     resetBtn.hidden = readonly || !current || !canReset(current);
@@ -680,28 +684,25 @@ function buildSteamLibraryBlock() {
   saveBtn.addEventListener("click", async () => {
     showIdError(null);
     const typed = idInput.value.trim();
+    // Shared with onboarding step 2 (WP WEB-FEAT-2): validation, the same
+    // body builder as the shared Save bar (only a real change is sent, the
+    // value is the trimmed STRING — never a Number()), and the 422 wording.
     if (typed && !validSteamId64(typed)) {
       showIdError(INVALID_STEAMID64_MESSAGE);
       return;
     }
-    // Same body builder as the shared Save bar: only a real change is sent,
-    // and the value is the trimmed STRING from the input — never a Number().
-    const body = buildSettingsPatch(state.settingsResponse.settings, {
-      [STEAM_LIBRARY_SETTING_KEY]: { value: typed },
-    });
-    if (Object.keys(body).length === 0) {
-      showToast("SteamID64 unchanged.");
-      return;
-    }
     saveBtn.disabled = true;
     try {
-      state.settingsResponse = await api.patchSettings(body);
-      paintCaption();
-      showToast(typed ? "Library SteamID64 saved." : "Library SteamID64 cleared.");
-    } catch (err) {
-      showIdError(
-        err && err.status === 422 ? `${INVALID_STEAMID64_MESSAGE} (${errorText(err)})` : errorText(err),
-      );
+      const result = await saveLibrarySteamId(api, state.settingsResponse, typed);
+      if (result.outcome === SAVE_OUTCOME.UNCHANGED) {
+        showToast("SteamID64 unchanged.");
+      } else if (result.outcome === SAVE_OUTCOME.SAVED) {
+        state.settingsResponse = result.settingsResponse;
+        paintCaption();
+        showToast(typed ? "Library SteamID64 saved." : "Library SteamID64 cleared.");
+      } else {
+        showIdError(result.error);
+      }
     } finally {
       saveBtn.disabled = false;
     }
@@ -752,10 +753,7 @@ function buildSteamLibraryBlock() {
       // Preview checks the TYPED id, so a 422 is about that id, not the
       // stored one; 409 is the shared no-key text; anything else stays the
       // plain server error, as before this WP.
-      const status = err && err.status;
-      state.lookup = {
-        error: status === 409 ? NO_STEAM_KEY_MESSAGE : status === 422 ? INVALID_STEAMID64_MESSAGE : errorText(err),
-      };
+      state.lookup = { error: describeLookupError(err) };
     } finally {
       lookupBtn.disabled = false;
       renderLookupResult();
