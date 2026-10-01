@@ -1806,11 +1806,28 @@ def test_two_racing_deletes_do_not_5xx_or_double_delete(tmp_path: Path) -> None:
     responses = asyncio.run(run())
 
     assert [r.status_code for r in responses] == [200, 200, 200, 200]
-    # Whoever got there first freed the bytes; the losers report a clean empty
-    # result. In total each depot's bytes are freed exactly once.
-    assert sum(r.json()["total_bytes_freed"] for r in responses) == 35
+    # No double count: across all racing requests each depot's bytes are
+    # claimed at most once. NOT "exactly once": total_bytes_freed is a
+    # documented floor (CacheDeletionOut, deletion.delete_app_depots), and a
+    # race can legitimately report a depot's bytes as 0 everywhere. Measured
+    # (~1% of runs, identical at eea667d and with SEC-FIX-4): request A sizes
+    # the depot (10 bytes) and unlinks its chunk file, request B sizes it
+    # after the unlink (0 bytes), then B's rmtree wins the final rmdir of the
+    # now-empty depot directory -> B reports removed_here with 0 bytes, A's
+    # rmdir hits FileNotFoundError -> A reports "removed concurrently", 0
+    # bytes. The exact sequential count is pinned by the test above.
+    for depotid, size in ((441, 10), (442, 25)):
+        claimed = sum(
+            depot["size_bytes_freed"]
+            for r in responses
+            for depot in r.json()["deleted_depots"]
+            if depot["depotid"] == depotid
+        )
+        assert claimed in (0, size), (depotid, claimed)
     for response in responses:
-        assert response.json()["failed"] == []
+        body = response.json()
+        assert body["failed"] == []
+        assert sorted(d["depotid"] for d in body["deleted_depots"]) == [441, 442]
     assert not (cache_root / "depot" / "441").exists()
     assert not (cache_root / "depot" / "442").exists()
 
