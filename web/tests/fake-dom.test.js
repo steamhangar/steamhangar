@@ -80,3 +80,13 @@ test("textContent set, then append, keeps the text in document order", () => {
   assert.equal(p.textContent, "xB");
   assert.equal(p.childNodes.length, 2);
 });
+
+test("append(string) inserts a text node, as in a real DOM (WP WEB-FIX-2)", () => {
+  const h = document.createElement("h4");
+  const n = document.createElement("span");
+  n.textContent = "3";
+  h.append("Queue ", n);
+  assert.equal(h.textContent, "Queue 3");
+  assert.equal(h.childNodes.length, 2);
+  assert.equal(h.children.length, 1, "the text node is not an element child");
+});

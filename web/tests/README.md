@@ -2221,3 +2221,75 @@ half was mutation-checked (getter reverted to own-text-only → 1 fail; setter
 no longer clearing → 1 fail; setter not creating the `#text` node → 3 fail).
 Suite: **824 tests, 824 pass, 0 fail**.
 
+
+### WP WEB-FIX-2 — connection-lost indicator
+
+The review's P1: every store subscriber drops `{error}` payloads, so a
+vault-api restart or a dropped network left a frozen snapshot with
+live-looking Downloads controls and no word about it. Now one app-level
+banner, in the bypass banner's shell slot and styles, says "Lost connection
+to the vault — showing the last data received (last update HH:MM).
+Retrying…" (the suffix is omitted when no poll has succeeded yet in this
+page load).
+
+Threshold (`lib/connection-watch.js`, `LOST_AFTER_MS`): only NETWORK and
+SERVER errors count. The banner shows on a counting failure that arrives at
+least **20 s** after the first failure of the current streak, with no
+successful poll of any resource in between. That means at least two
+failures spanning 20 s. A bare count of two would not work, because
+backoff.js retries after about 1 s, so two failures can be a single blip.
+A real outage shows within about 20-37 s of the first failed poll (one
+16 s backoff step past the threshold, +/-20 % jitter; review simulation
+of backoff.js: 20.0-35.5 s). Known limits: an endpoint that fails while
+the others succeed never shows the banner (by design: the vault answers),
+and a silently dropped connection hangs fetch until the browser gives up,
+because api.js sets no fetch timeout.
+Any successful poll clears it. AUTH (owned by `auth-recovery.js`) and the
+other kinds are ignored, so they neither start nor end a streak. Demo mode
+subscribes to nothing. Each transition announces once through
+`#view-announcer` (shown: the banner text; cleared: "Connection to the vault
+restored."). While the banner is shown, Downloads disables every job-control
+button (Pause/Resume/Cancel/Remove) and gives each the title "Not available
+while the connection to the vault is lost."
+
+Markup: the two banners now share ONE `.banner-wrap` (`#banner-wrap`),
+because at BP-L that element owns the single "banner" grid area. Each
+banner has its own `[hidden]`-toggled `.banner-slot`, and
+`lib/banner-wrap.js` shows the wrap while any slot is shown. The only new
+CSS is a margin between two slots that are both shown (no colour, no
+`display`).
+
+- `connection-banner.test.js`: subscribes to all four resources; one failure
+  stays silent; a blip under 20 s stays silent; it shows past 20 s with the
+  exact text and "last update 14:05"; there is no suffix before the first
+  success; any success clears it; AUTH never shows it and does not break a
+  NETWORK streak; demo mode makes no subscription; it announces once per
+  transition; the shared wrap stays visible while the bypass slot is shown.
+  Wiring pins: app.js calls the factory at top level with the three shell
+  ids, the `#view-announcer` write and `setConnectionLost`; index.html has
+  one wrap containing the connection slot and then the bypass slot.
+- `connection-downloads-wiring.test.js`: the real `views/downloads.js`
+  against the real store and a fake fetch. All five controls are live, then
+  disabled with the title on loss (both repainted and freshly built), then
+  live again on restore. The real `bypass-banner.js` still un-hides the
+  shared wrap.
+- `fake-dom.js`: `append()` now accepts strings as text nodes, as the real
+  DOM does (Downloads' `queueHeading.append("Queue ")`). This is pinned in
+  `fake-dom.test.js`.
+
+Mutation evidence (each applied alone, full suite run, then restored):
+20 s threshold removed → 1 fail; first failure shows → 2; success does not
+clear → 3; AUTH counted → 1; last-update suffix dropped → 1; demo gate
+removed → 1; once-per-transition guard removed → 6; announce call removed →
+1; `setConnectionLost` publish removed → 3; factory wrap sync removed → 3;
+app.js call removed → 1; app.js announce turned into a no-op → 1; Downloads
+gate call removed → 1; Downloads transition repaint removed → 1; Pause's own
+`disabled` overriding the gate → 1; same for Cancel → 1; bypass-banner wrap
+sync removed → 1; gate title dropped → 1; fake-dom `append(string)` reverted
+→ 2.
+
+Not covered: the banner's painted look at each breakpoint (no browser
+here; it reuses `.banner`), a real screen reader speaking the announcement,
+and the clicked-while-dropping case (`withButtonBusy` re-enables a button
+after a failed click until the next repaint).
+Suite: **840 tests, 840 pass, 0 fail**.

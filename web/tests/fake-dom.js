@@ -309,8 +309,19 @@ class FakeElement {
   removeAttribute(name) {
     this._attrs.delete(name);
   }
+  // WP WEB-FIX-2 (connection-downloads-wiring.test.js): real `append`
+  // accepts strings and inserts them as text nodes (views/downloads.js's
+  // `queueHeading.append("Queue ")`). `appendChild` itself still takes
+  // nodes only, as in a real DOM.
   append(...nodes) {
-    for (const n of nodes) this.appendChild(n);
+    for (const n of nodes) {
+      if (typeof n === "string") {
+        if (!this._ownerDoc) throw new Error("fake-dom.js: append(string) needs an owner document");
+        this.appendChild(this._ownerDoc.createTextNode(n));
+      } else {
+        this.appendChild(n);
+      }
+    }
   }
   // WP AG-2 (game-detail-sheet-installed.test.js): spec-correct MOVE
   // semantics — `Node.appendChild` on a node that is already someone's

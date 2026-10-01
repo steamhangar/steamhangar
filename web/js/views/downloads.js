@@ -48,6 +48,8 @@ import { planJobsUpdate } from "../lib/downloads-render-plan.js";
 import { selectExcerptDisplay, EXCERPT_STATE } from "../lib/log-excerpt.js";
 import { formatTimestamp } from "../lib/format.js";
 import { onViewChange } from "../router.js";
+import { isConnectionLost, onConnectionChange } from "../connection-status.js";
+import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
 
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
@@ -194,7 +196,18 @@ function actionButton(label, variant, handler) {
   btn.className = "btn sm" + (variant ? " " + variant : "");
   btn.textContent = label;
   btn.addEventListener("click", () => withButtonBusy(btn, handler));
+  gateOffline(btn);
   return btn;
+}
+
+/** WP WEB-FIX-2: while the connection banner is shown, every job-control
+ * button (Pause/Resume/Cancel/Remove — all built by actionButton) is
+ * disabled with an explanatory title instead of looking live and failing
+ * on click. Callers that compute their own `disabled` OR into it. */
+function gateOffline(btn) {
+  if (!isConnectionLost()) return;
+  btn.disabled = true;
+  btn.title = OFFLINE_CONTROL_TITLE;
 }
 
 // ---------------------------------------------------------------------
@@ -222,13 +235,13 @@ function paintJobActions(card, job) {
   } else if (job.status === "running") {
     if (job.type === "prefill") {
       const pauseBtn = actionButton(pausing ? "Pausing…" : "Pause", "", () => onPause(job.id));
-      pauseBtn.disabled = pausing || cancelling;
+      pauseBtn.disabled = pauseBtn.disabled || pausing || cancelling;
       acts.appendChild(pauseBtn);
     }
     const cancelBtn = actionButton(cancelling ? "Cancelling…" : "Cancel", "danger", () =>
       onCancel(job.id),
     );
-    cancelBtn.disabled = cancelling;
+    cancelBtn.disabled = cancelBtn.disabled || cancelling;
     acts.appendChild(cancelBtn);
   }
 
@@ -730,6 +743,13 @@ store.subscribe("games", ({ items }) => {
   if (!Array.isArray(items)) return;
   state.games = items;
   patchNames();
+});
+
+// WP WEB-FIX-2: repaint the job controls on a connection transition. A full
+// rebuild, not a patch: transitions are rare, and every button's disabled
+// state (including Pausing…/Cancelling…) is re-derived from scratch.
+onConnectionChange(() => {
+  fullRender();
 });
 
 onViewChange((view) => {

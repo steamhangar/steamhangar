@@ -32,20 +32,40 @@
     </button>
   </header>
 
-  <!-- Bypass banner (WP 4a.7, web/js/components/bypass-banner.js). Same
-       app-shell placement reasoning as the bell above; hidden by default,
-       shown/toggled purely via the `hidden` attribute so it takes no
-       layout space at all when nobody is bypass_suspected. -->
-  <div class="banner-wrap" id="bypass-banner-wrap" hidden>
-    <div class="banner">
-      <span class="glyph" aria-hidden="true">
-        <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 2.6 18.4 17H1.6L10 2.6Z"/><path d="M10 8v3.6M10 14.1v.1"/></svg>
-      </span>
-      <div class="body">
-        <span id="bypass-banner-text"></span>
-        <div class="acts">
-          <button type="button" id="bypass-details">Details</button>
-          <button type="button" class="mute" id="bypass-dismiss">Dismiss</button>
+  <!-- Shell banners. ONE .banner-wrap holds both banners because at BP-L
+       it owns the single "banner" grid area (css/app.css); each banner
+       toggles its own .banner-slot and js/lib/banner-wrap.js shows the
+       wrap while any slot is shown (WP WEB-FIX-2). -->
+  <div class="banner-wrap" id="banner-wrap" hidden>
+    <!-- Connection-lost banner (WP WEB-FIX-2, web/js/components/
+         connection-banner.js): shown after a NETWORK/SERVER poll-failure
+         streak of >= 20 s, cleared by the next successful poll. Not a live
+         region itself; transitions are announced once via #view-announcer. -->
+    <div class="banner-slot" id="conn-banner" hidden>
+      <div class="banner">
+        <span class="glyph" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 2.6 18.4 17H1.6L10 2.6Z"/><path d="M10 8v3.6M10 14.1v.1"/></svg>
+        </span>
+        <div class="body">
+          <span id="conn-banner-text"></span>
+        </div>
+      </div>
+    </div>
+    <!-- Bypass banner (WP 4a.7, web/js/components/bypass-banner.js). Same
+         app-shell placement reasoning as the bell above; hidden by default,
+         shown/toggled purely via the `hidden` attribute so it takes no
+         layout space at all when nobody is bypass_suspected. -->
+    <div class="banner-slot" id="bypass-banner-wrap" hidden>
+      <div class="banner">
+        <span class="glyph" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 2.6 18.4 17H1.6L10 2.6Z"/><path d="M10 8v3.6M10 14.1v.1"/></svg>
+        </span>
+        <div class="body">
+          <span id="bypass-banner-text"></span>
+          <div class="acts">
+            <button type="button" id="bypass-details">Details</button>
+            <button type="button" class="mute" id="bypass-dismiss">Dismiss</button>
+          </div>
         </div>
       </div>
     </div>

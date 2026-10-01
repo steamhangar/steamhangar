@@ -35,6 +35,9 @@ import { createDecisionPanel } from "./components/decision-panel.js";
 // dead with no recovery surface — every store `{error}` payload is dropped
 // by every view. Same DI-factory posture as rail-panel/decision-panel above.
 import { createAuthRecovery } from "./components/auth-recovery.js";
+// WP WEB-FIX-2: the connection-lost banner, same DI-factory posture.
+import { createConnectionBanner } from "./components/connection-banner.js";
+import { setConnectionLost } from "./connection-status.js";
 import { store } from "./store-singleton.js";
 import { api, getStoredApiKey, isDemoMode } from "./api.js";
 import { openOnboarding, isOnboardingOpen } from "./onboarding.js";
@@ -111,6 +114,19 @@ createDecisionPanel({
   storage: window.localStorage,
 });
 createAuthRecovery({ store, openOnboarding, isOnboardingOpen, getStoredApiKey });
+createConnectionBanner({
+  store,
+  isDemoMode,
+  elements: {
+    wrapEl: document.getElementById("banner-wrap"),
+    slotEl: document.getElementById("conn-banner"),
+    textEl: document.getElementById("conn-banner-text"),
+  },
+  announce: (text) => {
+    viewAnnouncer.textContent = text;
+  },
+  setConnectionLost,
+});
 renderView(currentView());
 // WP 4a.6: shows the 3-step onboarding overlay on top of whatever view just
 // rendered when no vault API key is stored yet and demo mode was not

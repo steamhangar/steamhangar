@@ -28,13 +28,17 @@ import { showToast } from "./toast.js";
 import { openClientsSheet } from "./clients-sheet.js";
 import { bypassBannerVisible, nextBypassDismissState } from "../lib/bypass-banner.js";
 import { bypassBannerText } from "../lib/clients-view.js";
+import { syncBannerWrap } from "../lib/banner-wrap.js";
 
 const state = {
   clients: store.snapshot("clients") || [],
   dismissed: false,
 };
 
+// WP WEB-FIX-2: #bypass-banner-wrap is now this banner's own .banner-slot
+// inside the shell's shared #banner-wrap (shared with the connection banner).
 const wrap = document.getElementById("bypass-banner-wrap");
+const sharedWrap = document.getElementById("banner-wrap");
 const textEl = document.getElementById("bypass-banner-text");
 const detailsBtn = document.getElementById("bypass-details");
 const dismissBtn = document.getElementById("bypass-dismiss");
@@ -42,6 +46,7 @@ const dismissBtn = document.getElementById("bypass-dismiss");
 function render() {
   const visible = bypassBannerVisible(state.clients) && !state.dismissed;
   wrap.hidden = !visible;
+  syncBannerWrap(sharedWrap);
   if (visible) textEl.textContent = bypassBannerText(state.clients);
 }
 
