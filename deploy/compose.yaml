@@ -94,8 +94,20 @@ networks:
   # container on a network configured exactly like this one). Inbound stays
   # unaffected: Docker's published-port DNAT is a completely separate
   # iptables rule from the masquerade one this switch disables.
+  #
+  # enable_ipv6: false on vault-lan AND vault-egress, explicitly (WP
+  # DEPLOY-FIX-2, ADR-0011 addendum 2026-10-01): a Docker daemon may give new
+  # networks an IPv6 subnet by default (measured on a real host: vault-egress
+  # got a ULA /64 next to its IPv4 /24). The masquerade switch above only
+  # removes IPv4 NAT; IPv6 has no NAT to remove, so on a host with a routed
+  # IPv6 prefix and IPv6 forwarding vault-api could reach the internet over
+  # IPv6 directly, bypassing the proxy. No IPv6 on these two networks means
+  # vault-api has no IPv6 address to send from at all. The `default` network
+  # (vault-proxy's, vault-runner's and vault-core's real route out) is left
+  # as the daemon configures it: those services are allowed out anyway.
   vault-lan:
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
   # internal: true is Docker's own, stronger guarantee: no route out of this
@@ -106,12 +118,22 @@ networks:
   # `deploy/proxy/tinyproxy.conf`'s own `Allow` directive (who may USE the
   # proxy -- a different allowlist from the destination one) can name an
   # exact, auditable CIDR instead of a guessed RFC1918 range.
+  #
+  # Configurable since WP DEPLOY-FIX-2 (ADR-0011 addendum 2026-10-01): the
+  # project `name:` scopes this network's NAME, but not its subnet, so a second
+  # SteamHangar stack (or anything else) on the same host that already holds
+  # 172.30.238.0/24 makes `up -d` fail with "Pool overlaps". Set
+  # VAULT_EGRESS_SUBNET in deploy/.env to another private /24 in that case.
+  # The colon form `:-` is deliberate: a BLANK value must fall back to the
+  # default too, because a blank subnet is invalid. vault-proxy gets the same
+  # expression below and renders its client `Allow` line from it.
   vault-egress:
     internal: true
+    enable_ipv6: false
     ipam:
       driver: default
       config:
-        - subnet: 172.30.238.0/24
+        - subnet: ${VAULT_EGRESS_SUBNET:-172.30.238.0/24}
 
 services:
 
@@ -974,6 +996,13 @@ services:
       # not a reason this one could be dropped: this is the copy that
       # actually enforces anything.
       VAULT_EGRESS_ALLOW: ${VAULT_EGRESS_ALLOW:-}
+      # The vault-egress subnet, with the SAME expression as the top-level
+      # `networks:` block's ipam config (WP DEPLOY-FIX-2): the entrypoint
+      # renders tinyproxy's client `Allow` line from it, so the proxy always
+      # admits exactly the range vault-api actually sits in. Strictly
+      # validated as IPv4 CIDR (prefix 8-30) at start; anything else refuses
+      # to start. Colon form for the same reason as above.
+      VAULT_EGRESS_SUBNET: ${VAULT_EGRESS_SUBNET:-172.30.238.0/24}
     networks:
       # vault-egress: talks to vault-api (the only other container ever on
       # this network -- `internal: true`, see the top-level banner comment).

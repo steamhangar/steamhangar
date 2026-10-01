@@ -999,6 +999,25 @@ Two real cases, both documented in `deploy/.env.example`:
   HOST's own address (rather than a separate device) is reachable directly
   regardless of any of this — see "Two channels this does NOT close".
 
+### Running two stacks on one host
+
+`vault-egress` has a fixed subnet, `172.30.238.0/24` by default, so that
+`vault-proxy` can admit exactly that range. A Compose project name keeps
+container, volume and network *names* apart, but not subnets: a second
+SteamHangar stack on the same host (a test instance next to production, say),
+or anything else already holding that range, makes `docker compose up -d`
+fail with "Pool overlaps with other one on this address space". Give the
+second stack its own private /24 in its `deploy/.env`, for example
+`VAULT_EGRESS_SUBNET=172.30.239.0/24`, and pick one that overlaps no
+existing Docker network on the host. Compose uses the value for the network
+and forwards it to `vault-proxy`, which renders its client `Allow` line from
+it at every start. `vault-proxy` accepts only a strict IPv4 CIDR (prefix
+8-30, host bits zero) and refuses to start on anything else; a blank value
+in `.env` means the default (compose substitutes it).
+`deploy/tests/verify-stack.sh` runs on `172.30.239.0/24` for this
+reason, so do not give a long-lived stack that range if you run the suite
+on the same host.
+
 ### Verify it yourself in five minutes
 
 Trust none of the words above — check the running containers directly.
@@ -1015,6 +1034,24 @@ docker compose exec vault-api sh -c 'curl -v --max-time 8 --noproxy "*" https://
 # whichever allowlisted host you point this at instead; example.com is not
 # allowlisted by default, so expect "403 Filtered" for it specifically:
 docker compose exec vault-api sh -c 'curl -v --max-time 8 https://example.com/'
+```
+
+See exactly what the proxy enforces right now. Both files are rendered at
+every start into `/run/tinyproxy/` from a root-owned, read-only template in
+`/etc/tinyproxy/`, which the proxy itself cannot change:
+
+```bash
+docker compose exec vault-proxy cat /run/tinyproxy/filter
+docker compose exec vault-proxy grep -i '^allow' /run/tinyproxy/tinyproxy.conf
+# Expect: Allow 127.0.0.1 and Allow <your VAULT_EGRESS_SUBNET>, nothing else.
+```
+
+The lock is IPv4-only by construction, so vault-api must have no IPv6
+address on its two networks (`enable_ipv6: false` in `deploy/compose.yaml`).
+Expect an empty line for each:
+
+```bash
+docker inspect steamhangar-vault-api-1 --format '{{range .NetworkSettings.Networks}}{{.GlobalIPv6Address}}{{println}}{{end}}'
 ```
 
 **2. Watch it with `tcpdump` on the host, not just from inside a container.**
@@ -1281,6 +1318,21 @@ container; presence alone proves nothing there, because `core/Dockerfile`
 sets both rate variables blank as image `ENV`. Plus 1 in step 1b: the
 drift-copy completeness check. 193 + 10 + 1 = **204 total**, measured
 2026-10-01 in a real run: **204/204 pass**, 0 failed.
+
+**WP DEPLOY-FIX-2 (2026-10-01):** 5 more checks, and a failed build or
+`up -d` now aborts the run with `FATAL` and exit 2 instead of cascading into
+dozens of FAILs (the cleanup trap still runs). The suite runs on its own
+`VAULT_EGRESS_SUBNET=172.30.239.0/24`, so it can run beside a test or
+production stack. Step 3k (+2): the network and vault-proxy's environment
+render this run's subnet, and a blank `VAULT_EGRESS_SUBNET=` renders the
+default. Step 6l (+3): the live network has exactly that subnet,
+vault-proxy's rendered `tinyproxy.conf` allows exactly loopback plus that
+subnet, and vault-api's vault-egress address lies inside it. A live run on
+2026-10-01 counted **216** checks (215 pass; the one FAIL was the IPv4
+subnet check tripping over an IPv6 ULA the daemon had added). Round 2 adds
+4 more in step 6l: vault-lan and vault-egress each have IPv6 disabled, and
+vault-api has no IPv6 address on either. 216 + 4 = **220 total** (expected;
+not yet measured in a real run when this was written).
 
 It never enters credentials — reaching the login prompt is the pass condition.
 

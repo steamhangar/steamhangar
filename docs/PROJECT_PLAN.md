@@ -2494,10 +2494,15 @@ below carry their own later dates, item 12 is the current one).
    `deploy/tests/verify-stack.sh` extended and run for real. What follows is
    unchanged by it: next up is item 2 below.
 2. [ ] **First real-world rollout** — joint interactive session with the
-   operator (see the Deployment section of `docs/WORKPACKAGES.md`). Two
-   operator-side network blockers first: a stale VPN subnet route, and a
-   router announcing itself as IPv6 DNS server via RA (a live cache
-   bypass). This session is also
+   operator (see the Deployment section of `docs/WORKPACKAGES.md`). The two
+   operator-side network blockers are cleared (measured by the operator,
+   2026-10-01): the VPN subnet router advertises only the current networks,
+   and LAN clients get no IPv6 DNS server. One check stays for the rollout
+   itself: with the DNS rewrite active, the AAAA answer for the cache name
+   must not be a public address. Precondition decided 2026-10-01: the
+   egress subnet becomes configurable (WP DEPLOY-FIX-2) so a production
+   stack can run next to a test stack; the rollout then uses tag
+   v0.1.0-rc3. This session is also
    where the honest still-open lists in `web/tests/README.md` and
    `app/README.md` get verified — real screen reader, phone browser cover
    art, GC against real on-disk chunks, real multi-client bypass detection.

@@ -30,7 +30,9 @@ set -u
 # Compose gives the caller's shell environment precedence over --env-file;
 # steps 3e/3e-bis/3e-ter/6i-core assert compose DEFAULTS, so a TZ or window
 # exported in the calling shell must not leak in.
-unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW
+# VAULT_EGRESS_SUBNET (WP DEPLOY-FIX-2) for the same reason: this run's own
+# subnet must come from the generated env file, never from the caller.
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_EGRESS_SUBNET
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -59,6 +61,14 @@ DEPOT_URI="/depot/$DEPOT/chunk/$CHUNK"
 TEST_API_KEY="verify-only-not-a-real-key-$$"
 TEST_CACHE_IP=192.168.222.50
 
+# WP DEPLOY-FIX-2: the project name scopes container, volume and network
+# NAMES, but not the vault-egress SUBNET -- with compose's default
+# (172.30.238.0/24) this run's `up -d` fails with "Pool overlaps" on any host
+# that already runs a test or production stack. Its own /24 lets it run beside
+# them. Must not overlap any other Docker network on the host.
+VERIFY_EGRESS_SUBNET=172.30.239.0/24
+DEFAULT_EGRESS_SUBNET=172.30.238.0/24
+
 work=$(mktemp -d)
 env_file="$work/verify.env"
 
@@ -73,6 +83,33 @@ run()     { printf '$ %s\n' "$*"; sh -c "$*" 2>&1 | sed 's/^/    /'; }
 
 ok()   { pass=$((pass + 1)); printf 'PASS  %s\n' "$*"; }
 bad()  { fail=$((fail + 1)); printf 'FAIL  %s\n' "$*"; }
+
+# fatal <reason>: WP DEPLOY-FIX-2. A failed build or `up -d` leaves nothing
+# meaningful to check -- every later step would only cascade into FAILs that
+# hide the one real cause. Stop here, non-zero; the EXIT trap still cleans up.
+fatal() {
+    fail=$((fail + 1))
+    printf '\nFATAL %s\n' "$*"
+    say "checks passed so far: $pass, failed: $fail -- aborting, no further checks run."
+    exit 2
+}
+
+# compose_up_or_die <env-file> <compose args...>: runs `docker compose ...`
+# for an `up -d` with this run's project, prints its output like run(), and
+# aborts via fatal() if it fails. run() pipes through sed and loses the exit
+# status, which is how a failed `up -d` used to cascade.
+compose_up_or_die() {
+    up_env=$1
+    shift
+    printf '$ docker compose --env-file %s -f %s -p %s %s\n' "$up_env" "$compose_file" "$PROJECT" "$*"
+    if docker compose --env-file "$up_env" -f "$compose_file" -p "$PROJECT" "$@" > "$work/compose-up.log" 2>&1; then
+        sed 's/^/    /' "$work/compose-up.log"
+    else
+        up_rc=$?
+        sed 's/^/    /' "$work/compose-up.log"
+        fatal "docker compose $* failed (exit $up_rc) -- see the output above"
+    fi
+}
 
 # assert_eq <expected> <actual> <description>
 assert_eq() {
@@ -200,8 +237,9 @@ for svc in core api proxy dns; do
     if [ "$build_failed" -eq 0 ]; then
         ok "vault-$svc image built"
     else
-        bad "vault-$svc build FAILED"
         tail -30 "$work/build-$svc.log" | sed 's/^/    /'
+        # fatal() counts this failure once; no separate bad() here.
+        fatal "vault-$svc image build failed -- every later check would test a missing or stale image"
     fi
 done
 
@@ -281,6 +319,7 @@ VAULT_API_PORT=$API_PORT
 VAULT_DNS_BIND=127.0.0.1
 VAULT_DNS_PORT=$DNS_PORT
 CACHE_IP=$TEST_CACHE_IP
+VAULT_EGRESS_SUBNET=$VERIFY_EGRESS_SUBNET
 EOF
 say 'Test .env used for this run (ports moved off 80/8080/53 because this WSL host'
 say 'already has services there; bind kept on loopback so nothing is LAN-visible):'
@@ -635,7 +674,7 @@ say 'sharing this host -- exactly the isolation this script promises in its own'
 say 'header comment.'
 assert_contains "$rendered_default" "container_name: $PROJECT-vault-runner" "rendered config's vault-runner container_name is project-scoped to $PROJECT"
 
-step "3k. WP EG-1 (ADR-0011): the egress-lock networks render, with the pinned subnet and masquerade disabled"
+step "3k. WP EG-1 (ADR-0011): the egress-lock networks render, with the configured subnet and masquerade disabled"
 say 'The top-level networks: block (distinct from any SERVICE'"'"'s own 4-indent'
 say 'networks: sub-key -- see this section'"'"'s own extraction comment) must'
 say 'show vault-lan with masquerade OFF and vault-egress as internal:true with'
@@ -644,7 +683,18 @@ say 'names (api/tests/test_eg1_egress_lock.py has the static, no-Docker-needed'
 say 'cross-file pin for that pairing; this is the Docker-rendered counterpart).'
 assert_contains "$networks_block" 'com.docker.network.bridge.enable_ip_masquerade: "false"' "rendered networks: vault-lan disables IP masquerade"
 assert_contains "$networks_block" "internal: true" "rendered networks: vault-egress is internal: true"
-assert_contains "$networks_block" "subnet: 172.30.238.0/24" "rendered networks: vault-egress pins the expected subnet"
+say ''
+say 'WP DEPLOY-FIX-2: the subnet is ${VAULT_EGRESS_SUBNET:-172.30.238.0/24}. This'
+say "run's env file sets $VERIFY_EGRESS_SUBNET, which must reach BOTH the network and"
+say "vault-proxy's environment; a BLANK value must render the default (colon form)."
+assert_contains "$networks_block" "subnet: $VERIFY_EGRESS_SUBNET" "rendered networks: vault-egress uses this run's VAULT_EGRESS_SUBNET"
+assert_contains "$proxy_block" "VAULT_EGRESS_SUBNET: $VERIFY_EGRESS_SUBNET" "rendered vault-proxy environment carries the same VAULT_EGRESS_SUBNET"
+blank_subnet_env_file="$work/verify-blank-subnet.env"
+sed '/^VAULT_EGRESS_SUBNET=/d' "$env_file" > "$blank_subnet_env_file"
+printf 'VAULT_EGRESS_SUBNET=\n' >> "$blank_subnet_env_file"
+rendered_blank_subnet=$(docker compose --env-file "$blank_subnet_env_file" -f "$compose_file" -p "$PROJECT" config 2>/dev/null)
+networks_block_blank_subnet=$(printf '%s\n' "$rendered_blank_subnet" | awk '/^networks:/{f=1;next} f && /^[A-Za-z]/{exit} f')
+assert_contains "$networks_block_blank_subnet" "subnet: $DEFAULT_EGRESS_SUBNET" "a BLANK VAULT_EGRESS_SUBNET= renders the default $DEFAULT_EGRESS_SUBNET (colon form), not an empty subnet"
 
 step "3l. WP EG-1: vault-api is attached to vault-lan + vault-egress ONLY -- never default"
 say 'The mutation this package'"'"'s own bar names by name: reattaching vault-api'
@@ -705,7 +755,7 @@ done
 # =============================================================================
 section "4. Stack up (vault-core + vault-api + vault-proxy + vault-runner)"
 # =============================================================================
-run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' up -d"
+compose_up_or_die "$env_file" up -d
 
 say ''
 say 'Waiting for both healthchecks to report healthy...'
@@ -933,7 +983,7 @@ say 'deploy/ wiring (compose.yaml passthrough + the shared /vault volume) actual
 say 'produces a usable line end to end, not just that the variable is plumbed.'
 
 printf '\nVAULT_EVENT_LOG=/vault/logs/event.log\n' >> "$env_file"
-run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' up -d vault-core"
+compose_up_or_die "$env_file" up -d vault-core
 i=0
 while [ "$i" -lt 30 ]; do
     core_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-core)" 2>/dev/null || echo starting)
@@ -1004,7 +1054,7 @@ say 'Reverting: strip VAULT_EVENT_LOG back out of the test .env and recreate'
 say 'vault-core so section 8'"'"'s fail-fast guards below run against the shipped'
 say 'feature-off default, not this check'"'"'s override.'
 sed -i '/^VAULT_EVENT_LOG=/d' "$env_file"
-run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' up -d vault-core"
+compose_up_or_die "$env_file" up -d vault-core
 i=0
 while [ "$i" -lt 30 ]; do
     core_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-core)" 2>/dev/null || echo starting)
@@ -1274,6 +1324,38 @@ say "    vault-proxy health: $proxy_h"
 assert_eq "healthy" "$proxy_h" "vault-proxy container healthcheck"
 
 say ''
+say '--- WP DEPLOY-FIX-2: the client allowlist follows VAULT_EGRESS_SUBNET, live ---'
+say "This run uses $VERIFY_EGRESS_SUBNET, not the default. The real network must have"
+say "that subnet, vault-proxy's rendered tinyproxy.conf must allow exactly it (plus"
+say "loopback), and vault-api's vault-egress address must lie inside it."
+egress_net="${PROJECT}_vault-egress"
+lan_net="${PROJECT}_vault-lan"
+# IPv4 entries only: a daemon that adds IPv6 by default would list a ULA /64
+# here too (measured 2026-10-01). compose.yaml disables IPv6 on this network,
+# which the IPv6 checks below assert separately.
+egress_net_subnet=$(docker network inspect "$egress_net" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>&1 | tr ' ' '\n' | grep -v ':' | grep -v '^$' | tr '\n' ' ' | sed 's/ $//')
+assert_eq "$VERIFY_EGRESS_SUBNET" "$egress_net_subnet" "network $egress_net has exactly this run's IPv4 subnet"
+proxy_allow=$(dc exec -T vault-proxy sh -c "grep -Ei '^[[:space:]]*allow[[:space:]]' /run/tinyproxy/tinyproxy.conf" 2>&1 | tr -d '\r' | tr '\n' ';')
+assert_eq "Allow 127.0.0.1;Allow $VERIFY_EGRESS_SUBNET;" "$proxy_allow" "vault-proxy's rendered tinyproxy.conf allows exactly loopback + VAULT_EGRESS_SUBNET"
+api_egress_ip=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$egress_net\"}}{{.IPAddress}}{{end}}" "$(dc ps -q vault-api)" 2>/dev/null)
+api_ip_in_subnet=$(python3 -c 'import ipaddress, sys; print("inside" if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2]) else "outside")' "$api_egress_ip" "$VERIFY_EGRESS_SUBNET" 2>&1)
+say "    vault-api on $egress_net: ${api_egress_ip:-<none>}"
+assert_eq "inside" "$api_ip_in_subnet" "vault-api's vault-egress address ($api_egress_ip) lies inside $VERIFY_EGRESS_SUBNET"
+
+say ''
+say '--- WP DEPLOY-FIX-2: no IPv6 on vault-lan / vault-egress ---'
+say 'The IPv4 lock rests on masquerade being off on vault-lan; IPv6 has no NAT to'
+say 'turn off. compose.yaml sets enable_ipv6: false on both lock networks, so'
+say 'vault-api must have no IPv6 address on either, whatever the daemon default.'
+for net in "$lan_net" "$egress_net"; do
+    net_v6=$(docker network inspect "$net" --format '{{.EnableIPv6}}' 2>&1)
+    assert_eq "false" "$net_v6" "network $net has IPv6 disabled"
+    api_v6=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$net\"}}v6=[{{.GlobalIPv6Address}}]{{end}}" "$(dc ps -q vault-api)" 2>&1)
+    # "v6=[]" also proves vault-api IS attached there (empty output would not).
+    assert_eq "v6=[]" "$api_v6" "vault-api is on $net with no IPv6 address"
+done
+
+say ''
 say '--- env forwarding (round-2 review S4): HTTP_PROXY/HTTPS_PROXY/NO_PROXY actually reach the RUNNING vault-api process ---'
 say 'Same printenv-exit-code pattern as step 6i above (present-even-if-empty'
 say 'is exit 0; absent is exit 1) -- section 3n already proved these three'
@@ -1429,7 +1511,7 @@ say 'allowlist'"'"'s actual content -- this is what proves it was.'
 widened_env="$work/widened.env"
 cp "$env_file" "$widened_env"
 echo "VAULT_EGRESS_ALLOW=example.com" >> "$widened_env"
-run "docker compose --env-file '$widened_env' -f '$compose_file' -p '$PROJECT' up -d --force-recreate vault-proxy"
+compose_up_or_die "$widened_env" up -d --force-recreate vault-proxy
 i=0
 proxy_h2=starting
 while [ "$i" -lt 15 ]; do
@@ -1452,7 +1534,7 @@ assert_contains "$widened_probe" "OK" "the SAME host, previously denied, now suc
 
 say ''
 say '--- restoring the narrow allowlist (leaves the stack in the state every later step expects) ---'
-run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' up -d --force-recreate vault-proxy"
+compose_up_or_die "$env_file" up -d --force-recreate vault-proxy
 i=0
 proxy_h3=starting
 while [ "$i" -lt 15 ]; do
@@ -1522,7 +1604,7 @@ printf '%s\n' "$badip" | sed 's/^/    /'
 assert_contains "$badip" "FATAL" "a CACHE_IP carrying an injected config line is refused"
 
 step "7c. Start the dns profile"
-run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns up -d vault-dns"
+compose_up_or_die "$env_file" --profile dns up -d vault-dns
 sleep 3
 run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' logs vault-dns"
 

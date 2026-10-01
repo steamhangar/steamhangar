@@ -207,6 +207,12 @@ EXPECTED_DEFAULTS_VAULT_RUNNER: dict[str, str] = {
 # cross-references against VAULT_MANIFEST_ORACLE.
 EXPECTED_DEFAULTS_VAULT_PROXY: dict[str, str] = {
     "VAULT_EGRESS_ALLOW": "",
+    # WP DEPLOY-FIX-2 (ADR-0011 addendum 2026-10-01): the vault-egress subnet,
+    # same expression as the top-level network's ipam config; the entrypoint
+    # renders tinyproxy's client Allow line from it. Literal, not a config.py
+    # constant: vault-api never reads it. The colon form is pinned separately
+    # by test_egress_subnet_uses_the_colon_form.
+    "VAULT_EGRESS_SUBNET": "172.30.238.0/24",
 }
 
 # WP TH-1b (ADR-0015). vault-core's own `environment:` block. None of these
@@ -574,7 +580,7 @@ def test_new_wp_s2_vars_are_documented_in_env_example(env_var: str) -> None:
 #: forwarded on BOTH vault-api and vault-proxy (SERVICE_EXPECTED_DEFAULTS
 #: above), but it is documented ONCE in `.env.example` (an operator sets it
 #: in one place; both services read the same value).
-NEW_WP_EG1_ENV_VARS = ("VAULT_EGRESS_ALLOW",)
+NEW_WP_EG1_ENV_VARS = ("VAULT_EGRESS_ALLOW", "VAULT_EGRESS_SUBNET")
 
 
 @pytest.mark.parametrize("env_var", NEW_WP_EG1_ENV_VARS)
@@ -851,4 +857,40 @@ def test_config_volume_is_mounted_on_vault_runner_only(compose_text: str) -> Non
         "/opt/steamprefill/Config -- the one-time interactive SteamPrefill "
         "login (deploy/README.md \"First run\") would have nowhere "
         "persistent to store the Steam session."
+    )
+
+
+# ==========================================================================
+# WP DEPLOY-FIX-2 (ADR-0011 addendum 2026-10-01): VAULT_EGRESS_SUBNET must use
+# the COLON form on both of its uses. Opposite reasoning to the no-colon keys
+# above: a blank subnet is never meaningful (Docker rejects it, and the proxy
+# entrypoint refuses to start on it), so a blank `.env` value must fall back to
+# the default exactly like an unset one.
+# ==========================================================================
+
+EGRESS_SUBNET_EXPR = "${VAULT_EGRESS_SUBNET:-172.30.238.0/24}"
+
+
+def test_egress_subnet_uses_the_colon_form(compose_text: str) -> None:
+    proxy_block = _extract_service_environment_block(compose_text, "vault-proxy")
+    lines = [
+        line.strip()
+        for line in proxy_block.splitlines()
+        if re.match(r"^\s{6}VAULT_EGRESS_SUBNET:", line)
+    ]
+    assert lines == [f"VAULT_EGRESS_SUBNET: {EGRESS_SUBNET_EXPR}"], (
+        f"deploy/compose.yaml's vault-proxy forwards VAULT_EGRESS_SUBNET as "
+        f"{lines!r}, expected exactly ['VAULT_EGRESS_SUBNET: {EGRESS_SUBNET_EXPR}']. "
+        "Without the colon a blank .env value reaches the proxy as '' and it "
+        "refuses to start; a missing line does the same."
+    )
+    subnet_lines = [
+        line.strip()
+        for line in compose_text.splitlines()
+        if re.match(r"^\s*-?\s*subnet:", line)
+    ]
+    assert subnet_lines == [f"- subnet: {EGRESS_SUBNET_EXPR}"], (
+        f"deploy/compose.yaml's ipam subnet lines are {subnet_lines!r}, expected "
+        f"exactly one '- subnet: {EGRESS_SUBNET_EXPR}' (vault-egress). Without "
+        "the colon a blank .env value renders an empty, invalid subnet."
     )
