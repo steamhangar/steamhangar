@@ -48,14 +48,21 @@ function busyAppidsFromJobs(jobs) {
  *   picked appid set — callers own that lookup).
  * @param {object[] | null | undefined} jobs `GET /v1/jobs` snapshot.
  * @returns {{
- *   busy: object[], needsDownload: object[], current: object[],
+ *   busy: object[], needsDownload: object[], current: object[], notOnVault: object[],
  * }}
  */
 export function classifyBulkSelection(games, jobs) {
   const busyAppids = busyAppidsFromJobs(jobs);
   const busy = [];
   const rest = [];
-  for (const g of games) (busyAppids.has(g.appid) ? busy : rest).push(g);
+  // WP WEB-FEAT-1 (user decision): an owned game the vault does not know
+  // (`owned_only`, lib/owned-library.js) is downloadable from its detail
+  // sheet only, never in bulk — its own bucket, never `needsDownload`.
+  const notOnVault = [];
+  for (const g of games) {
+    if (g && g.owned_only === true) notOnVault.push(g);
+    else (busyAppids.has(g.appid) ? busy : rest).push(g);
+  }
 
   const needsDownload = [];
   const current = [];
@@ -68,7 +75,7 @@ export function classifyBulkSelection(games, jobs) {
     const kind = dispKind(g, undefined);
     (kind === KIND.CACHED ? current : needsDownload).push(g);
   }
-  return { busy, needsDownload, current };
+  return { busy, needsDownload, current, notOnVault };
 }
 
 /**
@@ -107,14 +114,22 @@ const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
  *   3. Nothing needs downloading, everything is `current` -> primary
  *      disabled ("All cached"), secondary offers an explicit re-download.
  *
- * @param {{busy: object[], needsDownload: object[], current: object[]}} classification
+ * @param {{busy: object[], needsDownload: object[], current: object[], notOnVault?: object[]}} classification
+ *   `notOnVault` (WP WEB-FEAT-1): picked owned-only games, never a target.
  * @param {number} totalPicked
  */
 export function buildBulkDownloadPlan(classification, totalPicked) {
   const { busy, needsDownload, current } = classification;
+  const notOnVault = classification.notOnVault || [];
+  // WP WEB-FEAT-1: appended to whichever note applies, so a picked owned-only
+  // game is never silently counted as "already cached".
+  const notOnVaultNote = notOnVault.length
+    ? `${plural(notOnVault.length, "game")} not on the vault yet — open ${notOnVault.length === 1 ? "it" : "each one"} to download.`
+    : "";
+  const withNotOnVault = (note) => [note, notOnVaultNote].filter(Boolean).join(" ");
 
   if (needsDownload.length) {
-    const skipped = totalPicked - needsDownload.length;
+    const skipped = totalPicked - needsDownload.length - notOnVault.length;
     return {
       primaryEnabled: true,
       primaryLabel:
@@ -122,11 +137,13 @@ export function buildBulkDownloadPlan(classification, totalPicked) {
           ? `Download ${needsDownload.length} of ${totalPicked}`
           : `Download ${plural(needsDownload.length, "game")}`,
       primaryTargets: needsDownload.map((g) => g.appid),
-      note: skipped
-        ? `${skipped} already cached — not re-downloaded.`
-        : needsDownload.length > 1
-          ? `All ${needsDownload.length} are new to the cache.`
-          : "",
+      note: withNotOnVault(
+        skipped
+          ? `${skipped} already cached — not re-downloaded.`
+          : needsDownload.length > 1 && !notOnVault.length
+            ? `All ${needsDownload.length} are new to the cache.`
+            : "",
+      ),
       secondaryLabel: null,
       secondaryTargets: [],
     };
@@ -135,11 +152,26 @@ export function buildBulkDownloadPlan(classification, totalPicked) {
   if (current.length) {
     return {
       primaryEnabled: false,
-      primaryLabel: "All cached — nothing to download",
+      primaryLabel: notOnVault.length ? "Nothing to download here" : "All cached — nothing to download",
       primaryTargets: [],
-      note: "Every selected game is current. Re-download only if you need to refetch from Steam.",
+      note: withNotOnVault(
+        notOnVault.length
+          ? `${current.length} cached — re-download only if you need to refetch from Steam.`
+          : "Every selected game is current. Re-download only if you need to refetch from Steam.",
+      ),
       secondaryLabel: `Re-download ${current.length}`,
       secondaryTargets: current.map((g) => g.appid),
+    };
+  }
+
+  if (notOnVault.length) {
+    return {
+      primaryEnabled: false,
+      primaryLabel: "Nothing to download here",
+      primaryTargets: [],
+      note: withNotOnVault(busy.length ? `${busy.length} already downloading.` : ""),
+      secondaryLabel: null,
+      secondaryTargets: [],
     };
   }
 

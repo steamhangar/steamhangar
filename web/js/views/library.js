@@ -69,13 +69,23 @@
  * derived from viewport width, not fixed by this control — see the D-3
  * comment at `LAYOUT_LABEL`'s definition and `docs/WORKPACKAGES.md`'s
  * Phase 4a divergence register.
+ *
+ * **WP WEB-FEAT-1 (owned Steam games).** The grid shows the vault's games
+ * PLUS every game the stored library SteamID64 owns
+ * (`lib/owned-library.js`: merge, header wording, error text, loader). The
+ * owned list is fetched on library open and on the notice line's "Reload
+ * Steam library" button only, never on a poll tick (the relay hits Steam).
+ * Owned games the vault does not know show as "Not cached" with no card
+ * quick action and are never a bulk-download target; their download lives
+ * in the detail sheet (its existing "not tracked" branch). A relay failure
+ * leaves the vault games on screen and says why in the notice line.
  */
 
 import { store } from "../store-singleton.js";
 import { api } from "../api.js";
 import { showToast } from "../components/toast.js";
 import { buildCard, cardStructuralKey, patchCardVolatile } from "../components/game-card.js";
-import { dispKind, indexLiveJobsByAppid, isJobStateTransition, KIND } from "../lib/game-status.js";
+import { indexLiveJobsByAppid, isJobStateTransition } from "../lib/game-status.js";
 import { chipCounts, normalizeQuery, visibleGames } from "../lib/library-filters.js";
 import {
   classifyBulkSelection,
@@ -90,8 +100,16 @@ import {
 } from "../lib/cached-prefill-outcome.js";
 import { planGamesUpdate } from "../lib/render-plan.js";
 import { formatBytesGB } from "../lib/format.js";
-import { onViewChange } from "../router.js";
+import { onViewChange, navigateTo } from "../router.js";
 import { openDetail } from "../components/game-detail-sheet.js";
+import {
+  createOwnedLibraryLoader,
+  librarySubtitle,
+  mergeOwnedLibrary,
+  ownedNotice,
+  NOTICE_ACTION,
+  OWNED_STATUS,
+} from "../lib/owned-library.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
@@ -162,6 +180,11 @@ function namesFor(appids, gamesByAppid) {
 // nav-dismisses-transient-surfaces rule.
 // ---------------------------------------------------------------------
 const state = {
+  // `vaultGames` is the raw `GET /v1/games` list; `games` is what the grid
+  // shows: vault rows plus the owned-only rows (WP WEB-FEAT-1,
+  // lib/owned-library.js's mergeOwnedLibrary). Every reader below uses
+  // `games`; only the merge itself reads `vaultGames`.
+  vaultGames: store.snapshot("games") || [],
   games: store.snapshot("games") || [],
   jobs: store.snapshot("jobs") || [],
   query: "",
@@ -173,6 +196,38 @@ const state = {
 };
 
 let liveJobsByAppid = indexLiveJobsByAppid(state.jobs);
+
+// ---------------------------------------------------------------------
+// Owned Steam games (WP WEB-FEAT-1). The loader has no timer: `load()` runs
+// on library open (renderLibrary) and on the notice line's "Reload" button,
+// never from a store subscription — the relay hits Steam, the poll interval
+// must not. Module-level like `state`, so the last owned list survives a
+// navigate-away-and-back until the reload that the re-open triggers lands.
+// ---------------------------------------------------------------------
+// After a SteamID change (Settings), the previous owned list stays on screen
+// until the new load lands — accepted: it is replaced, not merged, then.
+let mergedOwnedGames = null; // the owned list `state.games` was last merged with
+const ownedLoader = createOwnedLibraryLoader({
+  apiClient: api,
+  onChange: (owned) => {
+    if (owned.games === mergedOwnedGames) {
+      // Only the status changed (a reload started): header + notice, no
+      // grid rebuild.
+      if (mounted()) {
+        updateSubtitle();
+        renderOwnedNotice();
+      }
+      return;
+    }
+    remerge();
+    fullRender();
+  },
+});
+
+function remerge() {
+  mergedOwnedGames = ownedLoader.current().games;
+  state.games = mergeOwnedLibrary(state.vaultGames, mergedOwnedGames);
+}
 
 // Module-level, not per-mount: an in-flight "Check & update" call must stay
 // locked across a navigate-away-and-back (buildSection() reads
@@ -533,15 +588,69 @@ function syncBulk() {
 }
 
 function updateSubtitle() {
-  const cachedCount = state.games.filter(
-    (g) => dispKind(g, liveJobsByAppid.get(g.appid)) === KIND.CACHED,
-  ).length;
-  els.sub.textContent = `${state.games.length} owned · ${cachedCount} on the cache`;
+  // WP WEB-FEAT-1: "owned" only when the owned list really loaded — see
+  // lib/owned-library.js's header for both wordings and the count choice.
+  els.sub.textContent = librarySubtitle({
+    games: state.games,
+    liveJobsByAppid,
+    owned: ownedLoader.current(),
+  });
+}
+
+const NOTICE_BUTTON_LABEL = {
+  [NOTICE_ACTION.SETTINGS]: "Open Settings",
+  [NOTICE_ACTION.RELOAD]: "Reload Steam library",
+};
+
+function renderOwnedNotice() {
+  const owned = ownedLoader.current();
+  const notice = ownedNotice(owned);
+  const { ownedNote, ownedText, ownedSettingsBtn, ownedReloadBtn } = els;
+  // The nodes are built once per mount (buildSection) and only UPDATED
+  // here — never replaced — so a focused "Reload" button keeps focus across
+  // its own reload cycle. The live region is the text span alone, and its
+  // text is written only when it changes, so a re-render (search keystroke,
+  // chip click, loading flip) announces nothing new.
+  const text = notice ? notice.text : "";
+  // The span itself is NEVER hidden (an empty span renders nothing): a
+  // screen reader may ignore a live region that becomes visible in the same
+  // render as its new text (e.g. loaded OK -> reload fails). Only the outer
+  // <p> is hidden.
+  if (ownedText.textContent !== text) ownedText.textContent = text;
+  ownedNote.classList.toggle("warn", !!(notice && notice.warn));
+
+  const actions = notice ? notice.actions : owned.status === OWNED_STATUS.READY ? [NOTICE_ACTION.RELOAD] : [];
+  ownedSettingsBtn.hidden = !actions.includes(NOTICE_ACTION.SETTINGS);
+  ownedReloadBtn.hidden = !actions.includes(NOTICE_ACTION.RELOAD);
+  // aria-disabled, not `disabled`: a disabled button drops focus to <body>.
+  // The click handler checks the loader state itself.
+  ownedReloadBtn.setAttribute("aria-disabled", String(!!owned.loading));
+  ownedNote.hidden = !text && ownedSettingsBtn.hidden && ownedReloadBtn.hidden;
+}
+
+function noticeButton(action) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "linkbtn";
+  btn.dataset.action = action;
+  btn.textContent = NOTICE_BUTTON_LABEL[action];
+  btn.hidden = true;
+  if (action === NOTICE_ACTION.RELOAD) {
+    btn.setAttribute("aria-disabled", "false");
+    btn.addEventListener("click", () => {
+      if (ownedLoader.current().loading) return; // a reload is already in flight
+      ownedLoader.load();
+    });
+  } else {
+    btn.addEventListener("click", () => navigateTo("settings"));
+  }
+  return btn;
 }
 
 function fullRender() {
   if (!mounted()) return;
   updateSubtitle();
+  renderOwnedNotice();
   renderChips();
   renderGrid();
   syncBulk();
@@ -829,6 +938,21 @@ function buildSection() {
   checkUpdateBtn.disabled = startsBusy;
   checkUpdateBtn.textContent = startsBusy ? CHECK_UPDATE_BUSY_LABEL : CHECK_UPDATE_LABEL;
   checkRow.appendChild(checkUpdateBtn);
+  // WP WEB-FEAT-1: the owned-list status line (and its Reload / Open
+  // Settings buttons) lives INSIDE `.lib-checkrow`, not as a new child of
+  // the section: `.view-library`'s BP-L grid assigns its six in-flow
+  // children an area each, by class (css/app.css), and a seventh would land
+  // in an implicit row.
+  const ownedNote = document.createElement("p");
+  ownedNote.className = "lib-owned";
+  ownedNote.hidden = true;
+  const ownedText = document.createElement("span");
+  ownedText.className = "lib-owned-text";
+  ownedText.setAttribute("role", "status");
+  const ownedSettingsBtn = noticeButton(NOTICE_ACTION.SETTINGS);
+  const ownedReloadBtn = noticeButton(NOTICE_ACTION.RELOAD);
+  ownedNote.append(ownedText, ownedSettingsBtn, ownedReloadBtn);
+  checkRow.appendChild(ownedNote);
 
   const searchWrap = document.createElement("div");
   searchWrap.className = "search";
@@ -911,6 +1035,10 @@ function buildSection() {
 
   els = {
     sub,
+    ownedNote,
+    ownedText,
+    ownedSettingsBtn,
+    ownedReloadBtn,
     layoutSegs,
     selectBtn,
     checkUpdateBtn,
@@ -967,9 +1095,12 @@ function buildSection() {
     const skipped = state.picked.size - targets.length;
     try {
       await api.prefill(targets);
+      // "skipped", not "already cached" (WP WEB-FEAT-1): the skipped picks
+      // can be busy or owned-only games too — the bulk note above already
+      // said which.
       showToast(
         `${targets.length} job${targets.length > 1 ? "s" : ""} queued` +
-          (skipped ? ` · ${skipped} already cached` : ""),
+          (skipped ? ` · ${skipped} skipped` : ""),
       );
       exitSelect();
       store.refreshNow();
@@ -1127,7 +1258,10 @@ function applyGamesTick(diff) {
 
 store.subscribe("games", ({ items, diff }) => {
   if (!Array.isArray(items)) return; // {error} payload — nothing to render
-  state.games = items;
+  state.vaultGames = items;
+  // Re-merge with the owned list the loader already holds — a games tick
+  // never re-fetches it (WP WEB-FEAT-1, no relay polling).
+  remerge();
   if (!mounted()) return;
   applyGamesTick(diff);
 });
@@ -1185,5 +1319,8 @@ export function renderLibrary() {
   const section = buildSection();
   sectionEl = section;
   fullRender();
+  // WP WEB-FEAT-1: the one "view open" fetch of the stored SteamID64 and its
+  // owned list. The other caller of load() is the Reload button.
+  ownedLoader.load();
   return section;
 }

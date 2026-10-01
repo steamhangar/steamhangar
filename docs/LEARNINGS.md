@@ -831,3 +831,11 @@ These are not style preferences; each entry cost a review round to learn.
   client disconnect before the body is read; block a test handler on an
   explicit release channel closed before `srv.Close()` (WP
   AGENT-TEST-FIX-1).
+- A status line that rebuilds its children on every state change drops
+  keyboard focus from its own button and re-announces the whole line.
+  Build the nodes once per mount, put `role=status` on a text-only span
+  that is never `hidden`, and mark a busy button `aria-disabled` plus a
+  click guard instead of `disabled` (WP WEB-FEAT-1).
+- An empty relay result is not a count: a private Steam profile returns
+  0 games, so "0 owned" is false. Fall back to the vault wording and
+  explain in the notice (WP WEB-FEAT-1).

@@ -39,12 +39,14 @@
 // (added for `game-detail-sheet.js`'s `row.querySelector('[data-role="
 // iwhen"]')` — WP AG-2) since that idiom already existed in this component
 // before this WP (`[data-role="size"]` etc.) and needed to keep working.
+// WP WEB-FEAT-1 added the bare presence form `[attr]` (still one clause per
+// compound) for `views/library.js`'s `.card[data-appid]`.
 //
 // **THROWS on anything outside that grammar (WP AG-2 review round 2), on
 // purpose.** The original stub's "no match, never throws" posture is
 // exactly the silent-no-op class this whole fix round exists to kill one
 // layer up: a future consumer reaching for `#id`, a `>`/sibling combinator,
-// or a bare `[attr]` (no value) would get an empty result indistinguishable
+// or another attribute operator (`^=`, `~=`) would get an empty result indistinguishable
 // from "selector matched nothing" instead of "this harness doesn't support
 // that yet" — the identical failure mode `patchCardVolatile`'s badge sync
 // silently no-opped under before this WP added real selector support at
@@ -56,11 +58,15 @@
 // ---------------------------------------------------------------------
 
 function parseCompoundToken(token) {
-  const attrMatch = /\[([\w-]+)=["']([^"']*)["']\]/.exec(token);
+  // `[attr="value"]` (exact match) or, WP WEB-FEAT-1, a bare `[attr]`
+  // (presence): `views/library.js`'s `currentCardKeys()` queries
+  // `.card[data-appid]` on every games poll tick, the first test to drive
+  // that view through this harness. Still ONE clause per compound.
+  const attrMatch = /\[([\w-]+)(?:=["']([^"']*)["'])?\]/.exec(token);
   let rest = token;
   let attr = null;
   if (attrMatch) {
-    attr = { name: attrMatch[1], value: attrMatch[2] };
+    attr = { name: attrMatch[1], value: attrMatch[2] === undefined ? null : attrMatch[2] };
     rest = token.slice(0, attrMatch.index) + token.slice(attrMatch.index + attrMatch[0].length);
   }
   const m = /^([a-zA-Z][\w-]*)?(\.[\w-]+)*$/.exec(rest);
@@ -78,7 +84,9 @@ function matchesCompound(el, compound) {
   }
   if (compound.attr) {
     if (typeof el.getAttribute !== "function") return false;
-    if (el.getAttribute(compound.attr.name) !== compound.attr.value) return false;
+    if (compound.attr.value === null) {
+      if (!el.hasAttribute(compound.attr.name)) return false;
+    } else if (el.getAttribute(compound.attr.name) !== compound.attr.value) return false;
   }
   return true;
 }
@@ -112,8 +120,8 @@ function queryAllSingle(root, selector) {
     throw new Error(
       `fake-dom.js's minimal selector engine does not support "${parts[badIndex]}" (in selector "${selector}"). ` +
         `Supported grammar: whitespace-chained tag[.class[.class...]] compounds, each optionally carrying ONE ` +
-        `[attr="value"] exact-match clause — no ID selectors, no combinators other than descendant (space), no ` +
-        `bare [attr] without a value. Extend parseCompoundToken/matchesCompound in web/tests/fake-dom.js if a ` +
+        `[attr="value"] exact-match or bare [attr] presence clause — no ID selectors, no combinators other than ` +
+        `descendant (space), no other attribute operators. Extend parseCompoundToken/matchesCompound in web/tests/fake-dom.js if a ` +
         `real consumer now genuinely needs more, rather than letting it silently match nothing.`,
     );
   }
