@@ -124,7 +124,7 @@ flowchart LR
 
 | Component | Role |
 |---|---|
-| **vault-core** | nginx with `proxy_store` — the cache itself. Path-faithful depot storage, no LRU/eviction (deletion is explicit, by design). |
+| **vault-core** | nginx with `proxy_store` — the cache itself. Path-faithful depot storage, no LRU/eviction (deletion is explicit, by design). Optional upstream rate cap: one aggregate Steam → vault limit, divided across the requests in flight and by default lifted during the schedule window, while cache hits stay at LAN speed ([ADR-0015](docs/adr/0015-upstream-rate-cap.md), [`deploy/README.md`](deploy/README.md) "Upstream rate cap"). |
 | **vault-dns** | Optional bundled dnsmasq container for LANs with no existing DNS server. Not needed if you already run AdGuard Home, Pi-hole, dnsmasq, or Unbound. |
 | **vault-api** | FastAPI + SQLite control plane: depot→app mapping, per-game size/deletion, scheduler, manifest-based garbage collection, settings, webhooks. Hands prefill work off to vault-runner rather than running it itself, and — see "Your keys, and where they stop" below — has no direct route to the internet. |
 | **vault-runner** | Claims prefill jobs handed off by vault-api and actually runs [SteamPrefill](https://github.com/tpill90/steam-lancache-prefill) against the real Steam CDN. Splitting this out of vault-api is what makes the egress lock on vault-api possible: this is the one component that genuinely needs an ordinary route to the internet. |
@@ -452,22 +452,6 @@ otherwise:
 - **Instrumented Android tests.** The whole Android suite runs on the JVM;
   none of it has run yet against a real device or emulator, including the
   release-signing path.
-- **Download speed throttling, time-dependent — scoped, implementation
-  in progress.** Nothing in the shipped stack limits how fast SteamHangar
-  pulls from Steam today; the night window (03:00-07:00 local,
-  [ADR-0014](docs/adr/0014-sweep-cached-and-auto-gc-default-on.md))
-  confines *when* the bulk downloads run, not *how fast*. The design
-  questions are answered (spike WP TH-0,
-  [`poc/throttle/`](poc/throttle/)): SteamPrefill 3.7.1 has no rate
-  option, only a hidden `--max-threads` concurrency flag, so the cap lives
-  in vault-core — nginx's `proxy_limit_rate` fed by a time-of-day map
-  caps the Steam → vault direction on the miss path, per connection, while
-  cache hits keep serving the LAN at wire speed. The operator sets ONE
-  aggregate limit; it is divided at download time by the live number of
-  parallel downloads (user decision 2026-09-30) — measured by a second
-  spike (WP TH-0b) as an nginx map on the live connection count. The
-  implementation package (WP TH-1) is next. Until it ships,
-  per-device QoS on the router covers the same need without any code.
 - **The web UI's own still-open validation list:** real screen-reader
   testing, how cover art actually renders on a phone browser, and
   performance at a much larger library size than has been tested so far —

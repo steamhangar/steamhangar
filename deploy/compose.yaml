@@ -146,6 +146,35 @@ services:
       # vault-api's /vault mount below for why no extra mount is needed here
       # for vault-api to read it later.
       VAULT_EVENT_LOG: ${VAULT_EVENT_LOG:-}
+      # Container local time (WP TH-1b). nginx evaluates
+      # VAULT_UPSTREAM_RATE_WINDOW below against `$time_iso8601`, i.e. this
+      # container's local clock, so vault-core must see the same TZ the
+      # scheduler in vault-api uses. Same `:-` form as vault-api and
+      # vault-runner, for the same reason (blank TZ == UTC, see vault-api).
+      TZ: ${TZ:-UTC}
+      # Optional upstream (Steam CDN -> vault) rate cap (WP TH-1a/TH-1b,
+      # ADR-0015, core/README.md "Upstream rate cap"). ONE aggregate limit in
+      # bytes/s, nginx size syntax (k = 1024, m = 1048576), divided per
+      # request by the live request count. Empty or unset = no cap. An
+      # invalid value stops vault-core's boot (fail-closed). Env-only:
+      # recreate vault-core after a change.
+      VAULT_UPSTREAM_RATE: ${VAULT_UPSTREAM_RATE-}
+      # Full speed INSIDE this HH:MM-HH:MM window, capped outside it.
+      # DELIBERATELY THE NO-COLON FORM, twice (docs/LEARNINGS.md, the
+      # `${VAR-}` vs `${VAR:-}` entry): UNSET follows VAULT_SCHEDULE_WINDOW
+      # (with the same `03:00-07:00` default as vault-api's line, so the
+      # cap lifts exactly when the scheduler's window opens); explicitly
+      # BLANK passes through as "" = the cap applies around the clock. A
+      # blank VAULT_SCHEDULE_WINDOW (scheduler disabled) with this one unset
+      # therefore also caps around the clock. Only the ENV window is
+      # followed: a window stored via `PATCH /v1/settings` is invisible to
+      # vault-core. Nested interpolation `${A-${B-c}}` is part of the
+      # Compose specification; verified on Compose 2.40.3, older Compose v2
+      # releases may not support nested defaults. The deploy-static CI job
+      # only checks that this file is accepted; the resolved values (unset,
+      # blank, set, for both variables) are checked by verify-stack.sh step
+      # 3e-ter.
+      VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}
     ports:
       # PORT 80 IS NOT NEGOTIABLE FOR REAL CLIENTS. Steam CDN traffic is plain
       # HTTP and the Steam client will only ever ask for port 80 -- a cache on

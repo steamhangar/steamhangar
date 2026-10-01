@@ -209,12 +209,29 @@ EXPECTED_DEFAULTS_VAULT_PROXY: dict[str, str] = {
     "VAULT_EGRESS_ALLOW": "",
 }
 
+# WP TH-1b (ADR-0015). vault-core's own `environment:` block. None of these
+# is a vault_api/config.py setting (vault-core is nginx), so every expected
+# value is a literal, same class as TZ/VAULT_LOG_LEVEL above.
+# VAULT_UPSTREAM_RATE_WINDOW's default is itself a substitution: unset follows
+# vault-api's VAULT_SCHEDULE_WINDOW forwarding (same `03:00-07:00` default,
+# cross-checked by test_upstream_rate_window_follows_the_schedule_window_default
+# below). Both rate keys use the no-colon form (pinned separately by
+# test_upstream_rate_keys_use_the_no_colon_form).
+EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
+    "VAULT_RESOLVER": "1.1.1.1",
+    "VAULT_EVENT_LOG": "",
+    "TZ": "UTC",  # nginx's $time_iso8601 is local time; same `:-` form as vault-api
+    "VAULT_UPSTREAM_RATE": "",
+    "VAULT_UPSTREAM_RATE_WINDOW": "${VAULT_SCHEDULE_WINDOW-03:00-07:00}",
+}
+
 #: One row per Compose service this file checks, in the sense used
 #: throughout: 'the exact set of `${VAR:-default}` keys this service's
 #: `environment:` block should forward, and what each one's default should
 #: be'. Adding a new checked service means adding one entry here and nothing
 #: else — every test function below is parametrized over this mapping.
 SERVICE_EXPECTED_DEFAULTS: dict[str, dict[str, str]] = {
+    "vault-core": EXPECTED_DEFAULTS_VAULT_CORE,
     "vault-api": EXPECTED_DEFAULTS_VAULT_API,
     "vault-runner": EXPECTED_DEFAULTS_VAULT_RUNNER,
     "vault-proxy": EXPECTED_DEFAULTS_VAULT_PROXY,
@@ -332,7 +349,12 @@ def _parsed_env_defaults(block_text: str) -> dict[str, str]:
     the result, not misread as an empty default.
     """
     found: dict[str, str] = {}
-    pattern = re.compile(r"^\s{6}([A-Z0-9_]+):\s*\$\{[A-Z0-9_]+:?-([^}]*)\}\s*$")
+    # The default may itself contain ONE nested `${...}` (WP TH-1b:
+    # VAULT_UPSTREAM_RATE_WINDOW's default is `${VAULT_SCHEDULE_WINDOW-...}`,
+    # Compose-spec nested interpolation); it is returned verbatim.
+    pattern = re.compile(
+        r"^\s{6}([A-Z0-9_]+):\s*\$\{[A-Z0-9_]+:?-((?:[^${}]|\$\{[A-Z0-9_]+:?[-?][^${}]*\})*)\}\s*$"
+    )
     for line in block_text.splitlines():
         m = pattern.match(line)
         if m:
@@ -711,6 +733,51 @@ def test_schedule_window_uses_the_no_colon_substitution_form(compose_text: str) 
         "with BOTH a colon-form and a no-colon-form substitution somehow -- "
         "this should be structurally impossible (one line, one key) but if "
         "it happens the colon form wins the trap this test exists to catch."
+    )
+
+
+#: WP TH-1b (ADR-0015): the exact forwarding lines on vault-core. The
+#: substitution FORM is the contract (docs/LEARNINGS.md, `${VAR-}` vs
+#: `${VAR:-}`): for both rate keys unset and blank must stay distinguishable
+#: (a blank window = cap around the clock), TZ keeps the `:-` form because
+#: blank TZ == UTC.
+UPSTREAM_RATE_CORE_LINES = (
+    "TZ: ${TZ:-UTC}",
+    "VAULT_UPSTREAM_RATE: ${VAULT_UPSTREAM_RATE-}",
+    "VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}",
+)
+
+
+@pytest.mark.parametrize("expected_line", UPSTREAM_RATE_CORE_LINES)
+def test_upstream_rate_keys_use_the_no_colon_form(expected_line: str, compose_text: str) -> None:
+    key = expected_line.split(":", 1)[0]
+    core_block = _extract_service_environment_block(compose_text, "vault-core")
+    lines = [line.strip() for line in core_block.splitlines() if re.match(rf"^\s{{6}}{key}:", line)]
+    assert lines == [expected_line], (
+        f"deploy/compose.yaml's vault-core service forwards {key} as {lines!r}, "
+        f"expected exactly [{expected_line!r}]. A colon on either rate key makes "
+        "an explicitly blank .env value indistinguishable from unset (the "
+        "R2-B1 trap); a missing line leaves the cap off or the window in UTC."
+    )
+
+
+def test_upstream_rate_window_follows_the_schedule_window_default(
+    env_defaults_by_service: dict[str, dict[str, str]],
+) -> None:
+    """The cap window's fallback must be vault-api's own schedule-window
+    forwarding, default included, so an operator who sets neither gets the
+    cap lifted exactly while the scheduler runs."""
+    api_window_default = env_defaults_by_service["vault-api"]["VAULT_SCHEDULE_WINDOW"]
+    core_window_default = env_defaults_by_service["vault-core"]["VAULT_UPSTREAM_RATE_WINDOW"]
+    assert core_window_default == f"${{VAULT_SCHEDULE_WINDOW-{api_window_default}}}"
+
+
+@pytest.mark.parametrize("env_var", ("VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_RATE_WINDOW"))
+def test_upstream_rate_vars_are_documented_in_env_example(env_var: str) -> None:
+    text = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    assert re.search(rf"^#?{re.escape(env_var)}=", text, re.MULTILINE), (
+        f"deploy/.env.example has no {env_var}= or #{env_var}= assignment line, "
+        "but deploy/compose.yaml forwards it to vault-core."
     )
 
 

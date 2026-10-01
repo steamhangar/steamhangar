@@ -117,7 +117,16 @@ ADR that describes it:
   or MISS via a live fetch from Steam's real CDN followed by
   `proxy_store`-ing the result (the `location @miss` block). There is no
   `limit_req`/`limit_conn` request limiting anywhere in this config — its
-  absence was verified by reading the entire file, not assumed.
+  absence was verified by reading the entire file, not assumed. What does
+  exist, optional and off by default, is an upstream bandwidth cap
+  (`VAULT_UPSTREAM_RATE`, `proxy_limit_rate` in `location @miss`, WP
+  TH-1a/ADR-0015): it slows how fast MISSes are read from Steam, it is
+  not a request limit and not a DoS control — it limits no request count,
+  no connection count and no disk use. With the cap on, a LAN client that
+  opens many requests (HITs included) lowers every other client's share of
+  it, because the divisor counts all requests vault-core is serving. That
+  is a contention effect, not a bypass: the aggregate upstream rate still
+  never exceeds the cap.
 - **Use vault-core as a scoped, unauthenticated HTTP relay to Steam's CDN.**
   The one guard on the miss path is the Host-header allowlist
   (the `$vault_host_allowed` map under "Host-header allowlist" in
@@ -133,7 +142,9 @@ ADR that describes it:
   *where* the relay can point. Concretely: any LAN device, trusted or not,
   can drive real Steam CDN egress traffic through your server and fill your
   disk with real (large) game content it requests, with no login and no
-  rate limit — and the requester picks both ends of that transaction: which
+  request rate limit (the optional upstream bandwidth cap above, when set,
+  only stretches the same download over more time) — and the requester
+  picks both ends of that transaction: which
   upstream edge gets contacted (`$host` becomes `$vault_upstream_host`
   verbatim for anything outside the one hardcoded hosts-file fallback in
   the `$vault_upstream_host` map, actually dialed by the `proxy_pass` in
@@ -1085,9 +1096,11 @@ Named plainly, as out of scope, rather than implied to be covered:
   about BLAST RADIUS, not about identity: it does not make the vault
   multi-user").
 - **Denial of service from inside the LAN.** Covered concretely in §1 (the
-  unauthenticated relay-and-store path) and §7 (no rate limiting on the API
-  key check) — both are real, unmitigated vectors available to any LAN
-  device, named here rather than left to be discovered.
+  unauthenticated relay-and-store path; the optional upstream bandwidth cap
+  of ADR-0015 is not a request limit and does not mitigate it) and §7 (no
+  rate limiting on the API key check) — both are real, unmitigated vectors
+  available to any LAN device, named here rather than left to be
+  discovered.
 - **Vulnerabilities in Valve's Steam infrastructure, or in SteamPrefill**,
   the third-party tool this project subprocess-drives. Both are outside
   this repository's code and this document's scope (see `SECURITY.md`

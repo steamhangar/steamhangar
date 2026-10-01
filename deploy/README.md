@@ -696,7 +696,9 @@ recipe above. `deploy/compose.yaml` uses the no-colon form for exactly this
 reason; `TZ` deliberately keeps the colon form (blank and `UTC` are the
 same thing for that one variable, so the distinction does not matter
 there). Still DB-overridable at runtime via `PATCH /v1/settings`
-(`schedule_window`, ADR-0009) exactly as before.
+(`schedule_window`, ADR-0009) exactly as before. A window changed that way
+moves the scheduler only, not the upstream rate cap's window, which stays
+env-only (see "Upstream rate cap" below).
 
 **The cache-event log is now the feed for a real feature, and needs no extra
 volume.** `VAULT_EVENT_LOG` writes into `/vault/logs/`, which lives on the
@@ -722,6 +724,51 @@ read the file but not truncate it, so rotation is on the operator.
 Start with `dry-run` and read a few job logs (`GET /v1/jobs/{id}`) before
 trusting `execute` on a deployment you care about — `api/README.md` "Auto-GC"
 has the full decision tree for when it fires.
+
+---
+
+## Upstream rate cap
+
+Optional, off by default (WP TH-1a/TH-1b,
+[ADR-0015](../docs/adr/0015-upstream-rate-cap.md)). Caps how fast vault-core
+downloads cache MISSes from Steam; HITs keep serving the LAN at full speed.
+
+```bash
+# deploy/.env
+VAULT_UPSTREAM_RATE=800k          # ONE aggregate limit, bytes/s; empty = no cap
+#VAULT_UPSTREAM_RATE_WINDOW=      # see below
+```
+
+- **`VAULT_UPSTREAM_RATE`**: nginx size syntax, digits with an optional
+  `k` (x1024) or `m` (x1048576). `800k` is 819,200 B/s (about 6.5 Mbit/s),
+  not 800,000. Empty = off. The total is divided at download time by the
+  number of requests vault-core is serving.
+- **`VAULT_UPSTREAM_RATE_WINDOW`**: `HH:MM-HH:MM`, the
+  `VAULT_SCHEDULE_WINDOW` grammar. Full speed **inside** the window, capped
+  outside. Unset (the line commented out) = it follows
+  `VAULT_SCHEDULE_WINDOW`, default `03:00-07:00`, so the cap lifts while
+  the scheduler runs. Set it explicitly blank (`VAULT_UPSTREAM_RATE_WINDOW=`)
+  to cap around the clock. Only the env window is followed, not one stored
+  via `PATCH /v1/settings`. `VAULT_SCHEDULE_WINDOW=` (blank, scheduler
+  off) together with a set rate and this line unset also means the cap
+  applies around the clock.
+- **Time zone:** the window is evaluated in vault-core's local time, which
+  is `TZ` (forwarded to vault-core too, default `UTC`). Set `TZ` once in
+  `.env` and the scheduler and the cap agree.
+- **An invalid value refuses to boot.** vault-core stops with
+  `27-vault-upstream-rate.sh: FATAL` rather than run uncapped by accident
+  (`docker compose logs vault-core`).
+- **Recreate vault-core after changing either variable**; the cap is baked
+  at container start:
+  `docker compose up -d --force-recreate vault-core`.
+- **Zero-code alternative:** per-device QoS on your router throttles the
+  same Steam-facing direction and needs no SteamHangar setting at all.
+
+The cap is per request, divided by the live count, and has stated limits
+(HITs in flight dilute the share and leave WAN bandwidth unused, the LAN
+client that triggers a MISS is slowed too, the window edge stops nothing): see
+[`core/README.md` "Upstream rate cap"](../core/README.md).
+It is a bandwidth cap, not a request limit or DoS control.
 
 ---
 
@@ -1110,7 +1157,9 @@ sudo sh deploy/tests/verify-stack.sh
 ```
 
 Builds every image (`vault-core`, `vault-api`, `vault-proxy`, `vault-dns` —
-`vault-runner` reuses `vault-api`'s) and runs **193 checks** against real
+`vault-runner` reuses `vault-api`'s) and runs **203 checks** (a static
+count of the assertions in the script after WP TH-1b, not yet confirmed by a
+run; the last measured total is 193) against real
 containers: the config-drift contract (both directions), **the web UI baked
 into the vault-api image and served from it with no bind mount involved**
 (packaging work package), all twelve env-forwarding-audit keys
@@ -1188,6 +1237,16 @@ by switching to the no-colon form, see the seventh/eighth `.env.example`
 note above) — bringing the suite from 187 to **193 total**. Measured
 twice, both real runs: **193/193 pass**, exit 0, clean teardown, against
 Docker Engine 29.1.3 / Compose 2.40.3.
+
+**WP TH-1b (2026-10-01):** 10 more checks. Step 3e-ter (8) renders
+vault-core's `VAULT_UPSTREAM_RATE_WINDOW` under four `.env` variants
+(nothing set, `VAULT_SCHEDULE_WINDOW=` blank, `VAULT_SCHEDULE_WINDOW=01:00-02:00`,
+and `VAULT_UPSTREAM_RATE_WINDOW=` blank with that schedule window), key
+present once plus expected value each, same mechanics as 3e-bis. Step
+6i-core (2) checks the VALUES of `TZ` (`UTC`) and
+`VAULT_UPSTREAM_RATE_WINDOW` (`03:00-07:00`) inside the running vault-core
+container; presence alone proves nothing there, because `core/Dockerfile`
+sets both rate variables blank as image `ENV`. Not yet run.
 
 It never enters credentials — reaching the login prompt is the pass condition.
 

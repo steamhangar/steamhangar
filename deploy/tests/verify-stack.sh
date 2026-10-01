@@ -27,6 +27,10 @@
 # Exit code 0 = every check passed.
 
 set -u
+# Compose gives the caller's shell environment precedence over --env-file;
+# steps 3e/3e-bis/3e-ter/6i-core assert compose DEFAULTS, so a TZ or window
+# exported in the calling shell must not leak in.
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -421,6 +425,40 @@ blank_window_key_count=$(printf '%s\n' "$api_block_blank_window" | grep -c 'VAUL
 assert_eq "1" "$blank_window_key_count" "vault-api: VAULT_SCHEDULE_WINDOW key is present exactly once in the rendered block against the blank-window .env (precondition)"
 blank_window_val=$(printf '%s\n' "$api_block_blank_window" | grep 'VAULT_SCHEDULE_WINDOW:' | head -1 | sed -e 's/^[[:space:]]*VAULT_SCHEDULE_WINDOW:[[:space:]]*//' -e 's/"//g')
 assert_eq "" "$blank_window_val" "vault-api: an explicitly blank VAULT_SCHEDULE_WINDOW= renders EMPTY, not the 03:00-07:00 default -- the scheduler-disable path documented in deploy/README.md and deploy/.env.example actually works"
+
+step "3e-ter. vault-core's VAULT_UPSTREAM_RATE_WINDOW nested default resolves per case (WP TH-1b, ADR-0015)"
+say 'The line is ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}:'
+say 'unset follows the schedule window (and its default), explicitly blank'
+say 'stays blank (= cap around the clock). The static pins in'
+say 'api/tests/test_p1_compose_env_defaults.py check the SYNTAX; this step'
+say 'renders four .env variants (section 3'"'"'s .env plus the lines named) and'
+say 'checks what Compose actually resolves. Same mechanics as 3e-bis. The'
+say 'image itself sets VAULT_UPSTREAM_RATE_WINDOW= (core/Dockerfile), so only'
+say 'a rendered value proves the compose line, not presence in the container.'
+# Each case: <label>|<extra .env lines, \n-separated, may be empty>|<expected>
+for rate_window_case in \
+    'nothing set||03:00-07:00' \
+    'VAULT_SCHEDULE_WINDOW= (blank)|VAULT_SCHEDULE_WINDOW=\n|' \
+    'VAULT_SCHEDULE_WINDOW=01:00-02:00|VAULT_SCHEDULE_WINDOW=01:00-02:00\n|01:00-02:00' \
+    'VAULT_UPSTREAM_RATE_WINDOW= (blank) with VAULT_SCHEDULE_WINDOW=01:00-02:00|VAULT_SCHEDULE_WINDOW=01:00-02:00\nVAULT_UPSTREAM_RATE_WINDOW=\n|'
+do
+    rw_label=${rate_window_case%%|*}
+    rw_rest=${rate_window_case#*|}
+    rw_lines=${rw_rest%%|*}
+    rw_expected=${rw_rest#*|}
+    rate_window_env_file="$work/verify-rate-window.env"
+    cp "$env_file" "$rate_window_env_file"
+    # shellcheck disable=SC2059 # the case table's \n escapes are the format
+    printf "$rw_lines" >> "$rate_window_env_file"
+    say "case: $rw_label"
+    run "docker compose --env-file '$rate_window_env_file' -f '$compose_file' -p '$PROJECT' --profile dns config"
+    rendered_rate_window=$(docker compose --env-file "$rate_window_env_file" -f "$compose_file" -p "$PROJECT" --profile dns config 2>/dev/null)
+    core_block_rate_window=$(printf '%s\n' "$rendered_rate_window" | awk '/^  vault-core:/{f=1;next} f && (/^  [A-Za-z0-9_-]+:/ || /^[A-Za-z]/){exit} f')
+    rate_window_key_count=$(printf '%s\n' "$core_block_rate_window" | grep -c 'VAULT_UPSTREAM_RATE_WINDOW:')
+    assert_eq "1" "$rate_window_key_count" "vault-core: VAULT_UPSTREAM_RATE_WINDOW key is present exactly once in the rendered block [$rw_label] (precondition)"
+    rate_window_val=$(printf '%s\n' "$core_block_rate_window" | grep 'VAULT_UPSTREAM_RATE_WINDOW:' | head -1 | sed -e 's/^[[:space:]]*VAULT_UPSTREAM_RATE_WINDOW:[[:space:]]*//' -e 's/"//g')
+    assert_eq "$rw_expected" "$rate_window_val" "vault-core: VAULT_UPSTREAM_RATE_WINDOW renders '$rw_expected' [$rw_label]"
+done
 
 # Packaging WP regression guard (docs/PROJECT_PLAN.md §7 Phase 5): these two
 # keys existed in config.py well before they were ever forwarded in
@@ -1041,6 +1079,21 @@ settings_readonly_defined=$(dc exec -T vault-api sh -c 'printenv VAULT_SETTINGS_
 assert_contains "$evpath_defined" "exit=0" "VAULT_EVENT_LOG_PATH is a defined env var inside the running vault-api container"
 assert_contains "$oracle_defined" "exit=0" "VAULT_MANIFEST_ORACLE is a defined env var inside the running vault-api container"
 assert_contains "$settings_readonly_defined" "exit=0" "VAULT_SETTINGS_READONLY is a defined env var inside the running vault-api container"
+
+step "6i-core. Env-forwarding guard (WP TH-1b): TZ and VAULT_UPSTREAM_RATE_WINDOW reach vault-core's process environment WITH their compose values"
+say 'VALUES, not presence: core/Dockerfile sets VAULT_UPSTREAM_RATE= and'
+say 'VAULT_UPSTREAM_RATE_WINDOW= as image ENV, so a printenv exit code would'
+say 'pass even with the compose lines deleted. The test .env sets neither TZ'
+say 'nor either window variable, so the compose defaults must arrive: TZ=UTC'
+say '(the image sets no TZ) and the window 03:00-07:00 (the image default is'
+say 'blank). VAULT_UPSTREAM_RATE is not checked here: its compose default and'
+say 'the image ENV are both blank, so no value can tell them apart; 3e-ter and'
+say 'the static pins cover its line.'
+run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' exec -T vault-core sh -c 'printenv TZ; echo \"exit=\$?\"; printenv VAULT_UPSTREAM_RATE_WINDOW; echo \"exit=\$?\"'"
+core_tz_val=$(dc exec -T vault-core printenv TZ 2>/dev/null | tr -d '\r')
+core_rate_window_val=$(dc exec -T vault-core printenv VAULT_UPSTREAM_RATE_WINDOW 2>/dev/null | tr -d '\r')
+assert_eq "UTC" "$core_tz_val" "vault-core: TZ inside the running container is the compose default"
+assert_eq "03:00-07:00" "$core_rate_window_val" "vault-core: VAULT_UPSTREAM_RATE_WINDOW inside the running container is the compose default (follows VAULT_SCHEDULE_WINDOW's default), not the image's blank ENV"
 
 step "6j. Regression guard: /v1/health and an authed route still behave after the build-context change"
 say '6a/6b above already exercise these for auth-contract reasons; restated'

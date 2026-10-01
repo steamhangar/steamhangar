@@ -787,13 +787,13 @@ while `_active` fell to 0.496x, because `_active` counts idle keep-alives.
   chunk by chunk. Stopping at the edge would be the scheduler's decision.
 - **Container local time.** `$time_iso8601` is nginx's local time, so the
   window means the operator's clock only if `TZ` reaches vault-core
-  (tzdata is in the image, measured). `deploy/compose.yaml` does not
-  forward `TZ` to vault-core yet (WP TH-1b), so today the window is
-  evaluated in UTC.
+  (tzdata is in the image, measured). Since WP TH-1b `deploy/compose.yaml`
+  forwards `TZ` to vault-core (default `UTC`), so the window is evaluated
+  in vault-core's `TZ`, the same zone the scheduler in vault-api uses.
 - **Env-only, baked at container start.** Neither value is a vault-api
-  setting; a change needs a container restart (recreate). Neither is
-  forwarded by `deploy/compose.yaml` yet (WP TH-1b); until then they reach
-  vault-core only through a `compose.override.yaml` `environment:` block.
+  setting; a change needs a container restart (recreate). Since WP TH-1b
+  `deploy/compose.yaml` forwards both variables to vault-core (see
+  `deploy/README.md` "Upstream rate cap").
 
 **Fail-closed.** nginx reads an empty or unparseable `proxy_limit_rate`
 value as 0 = **unlimited** (TH-0b, measured), so: an invalid

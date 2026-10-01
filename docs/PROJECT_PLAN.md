@@ -1091,6 +1091,10 @@ so the same package also ships `VAULT_SCHEDULE_WINDOW=03:00-07:00` /
 `TZ=UTC` as the default Compose configuration (WP SWEEP-1 follow-up,
 2026-08-22) — see that ADR's "Shipping an enabled nightly schedule" section
 for the full argument.
+The same window, by default, also lifts the optional upstream rate cap
+(WP TH-1a/TH-1b, ADR-0015, §11 item 10): `VAULT_UPSTREAM_RATE_WINDOW`
+falls back to `VAULT_SCHEDULE_WINDOW` in `deploy/compose.yaml`, and `TZ`
+is forwarded to vault-core so both are read on the same clock.
 
 - [x] New target-set mode adding every cached app to the sweep. Cheap by
       construction: ~3 s and zero bytes per app that is already current
@@ -2562,39 +2566,33 @@ below carry their own later dates, item 12 is the current one).
    surface. Four review rounds; the durable outcome is recorded in
    docs/LEARNINGS.md (the guarantee-vs-mechanism ceiling of name-based
    isolation scans). Real-device residuals listed in app/README.md.
-10. [ ] **Download throttling, time-dependent — scoped; implementation in
-    progress** (operator request 2026-08-30). Cap the upstream (Steam →
-    vault) bandwidth; LAN serving stays uncapped. The time-dependent shape
-    ties into the shipped schedule window: full speed inside 03:00-07:00,
-    capped outside it, so a daytime manual prefill ("I want this game
-    tonight") does not saturate the WAN while people use it. The scoping
-    questions were answered by the WP TH-0 spike (commit 9865237,
-    `poc/throttle/RESULTS-THROTTLE-20260929.md`, measured on the live test
-    stack): SteamPrefill 3.7.1 has NO rate option, only a hidden
-    `--max-threads` concurrency override (default 30 in flight, no
-    connection limit); nginx-native `proxy_limit_rate $var` fed by a
-    `map $time_iso8601` caps the `proxy_store` miss path exactly, flips per
-    request with the live clock, stores the full object and leaves HITs at
-    LAN speed — GO, no new module, version floor nginx 1.27.0 (the image
-    is well above it). Limits to state, not paper over: the cap is
-    PER CONNECTION (4 requests ≈ 4 × cap), the LAN client that triggers a
-    miss is slowed too, vault-core needs the operator's `TZ`, the window
-    edge is per request and the cap stops nothing (a job running past the
-    window finishes slower — stopping would be the scheduler's call), and
-    the map is baked at container start (env-only setting first). User
-    decision 2026-09-30: the operator sets ONE aggregate limit; it is
-    divided at download time by the live number of parallel downloads.
-    The WP TH-0b spike (commit e3f3f65,
-    `poc/throttle/RESULTS-THROTTLE-DYNAMIC-20260930.md`) measured two
-    shapes of that division; the chosen one is an nginx `map` on the live
-    connection count (`$connections_active`, generated at container start
-    from the one aggregate value) — no module, no state, delivers the
-    aggregate on the wall clock, errs toward under-using the WAN when idle
-    keep-alive connections exist. Next: WP TH-1 (the implementation, core
-    + deploy + docs). Interim answer that works today
-    with zero code: per-device QoS on the operator's router, which
-    throttles exactly the Steam-facing direction. README Roadmap carries
-    the user-facing version of this entry.
+10. [x] **Download throttling, time-dependent — done (WP TH-1a/TH-1b,
+    TH-1a committed as 6aa4c0c, TH-1b this WP; ADR-0015)** (operator request 2026-08-30). Caps the
+    upstream (Steam → vault) bandwidth; LAN serving stays uncapped. Scoping
+    by the WP TH-0 spike (commit 9865237,
+    `poc/throttle/RESULTS-THROTTLE-20260929.md`): SteamPrefill 3.7.1 has
+    no rate option, nginx-native `proxy_limit_rate $var` caps the
+    `proxy_store` miss path exactly, per request, HITs at LAN speed. User
+    decision 2026-09-30: the operator sets ONE aggregate limit, divided at
+    download time by the live number of parallel requests. WP TH-0b
+    (commit e3f3f65, `poc/throttle/RESULTS-THROTTLE-DYNAMIC-20260930.md`)
+    chose Option A (an nginx `map` on the live connection count) over Option B
+    (njs counter: burst overshoot, leak on abort). WP TH-1a
+    (`poc/throttle/RESULTS-TH1-20261001.md`) switched the divisor to
+    `$connections_writing`, not `$connections_active` (measured: `_writing`
+    0.98× of target with 8 idle keep-alives open, `_active` 0.50×). The map
+    is generated at container start with buckets 1..1024 =
+    `worker_connections` (worker_processes 1), so no live count reaches the
+    default; the bound is pinned by `check-config-drift.sh`. Fail-closed:
+    an invalid value refuses to boot. Env-only: `VAULT_UPSTREAM_RATE`
+    (empty = off) and `VAULT_UPSTREAM_RATE_WINDOW` (full speed inside;
+    unset follows `VAULT_SCHEDULE_WINDOW`, blank caps around the clock),
+    evaluated in vault-core's `TZ`, which `deploy/compose.yaml` now
+    forwards (WP TH-1b). Limits stated in `core/README.md` "Upstream rate
+    cap": per request divided by the live count (HITs dilute the share),
+    the LAN client of a MISS is slowed too, the window edge stops nothing,
+    slow-ramp overshoot unmeasured. Router QoS stays the zero-code
+    alternative.
 11. [ ] **Macvlan deploy example — vault-core on its own LAN IP** (operator
     request 2026-08-30, roadmap entry — not yet a scoped work package).
     Steam clients require plain HTTP on port 80 (Steam's choice), so on
