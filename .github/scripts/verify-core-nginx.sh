@@ -99,7 +99,11 @@ done
 echo "docker pull $IMAGE"
 docker pull "$IMAGE"
 
-# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count>
+# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards]
+#
+# A non-empty 4th argument additionally STARTS the rendered nginx and probes
+# the location /depot/ request guards over loopback (once is enough; the
+# guards do not depend on the event-log state).
 #
 # Renders and validates once per VAULT_EVENT_LOG state -- the ADR-0008
 # feature has two materially different code paths in
@@ -118,6 +122,7 @@ render_and_test() {
         -e VAULT_RESOLVER="1.1.1.1" \
         -e VAULT_EVENT_LOG="$event_log" \
         -e EXPECTED_DIRECTIVES="$expected_directives" \
+        -e PROBE_GUARDS="${4:-}" \
         --entrypoint sh \
         "$IMAGE" -c '
             set -eu
@@ -198,12 +203,150 @@ render_and_test() {
                 echo "FAIL: $marker_count VAULT_EVENT_LOG_LINE marker(s) survived -- half-rendered config"
                 status=1
             fi
+
+            # --- Pre-freeze review S3/P6: event-log file ownership ---------
+            # nginx -t (like a real start) opens every access_log from the
+            # root master process. 25-vault-eventlog.sh must have created
+            # the file first and owned it to uid/gid 101 -- the numeric
+            # identity vault-api runs as (api/Dockerfile), whose sweeper
+            # truncates this file. A root:root file here is the regression.
+            if [ -n "$VAULT_EVENT_LOG" ]; then
+                nginx_ids="$(id -u nginx):$(id -g nginx)"
+                if [ "$nginx_ids" != "101:101" ]; then
+                    echo "FAIL: nginx user is $nginx_ids in this image, expected 101:101 (api/Dockerfile pins vault-api to 101)"
+                    status=1
+                fi
+                owner=$(stat -c %u:%g "$VAULT_EVENT_LOG" 2>/dev/null || echo missing)
+                echo "event log owner=$owner (expected 101:101)"
+                if [ "$owner" != "101:101" ]; then
+                    echo "FAIL: $VAULT_EVENT_LOG owner is $owner, expected 101:101 -- vault-api could not truncate it"
+                    status=1
+                fi
+            fi
+
+            # --- Pre-freeze review S1/S2/P3/N5: request guards, LIVE -------
+            # nginx -t proves the directives parse, not that they answer.
+            # Start the rendered config for real and probe the guards in
+            # location /depot/ over loopback. Every probe below is answered
+            # locally by a `return` in the rewrite phase, so none of them
+            # needs DNS or the Steam CDN -- this runs offline.
+            if [ -n "${PROBE_GUARDS:-}" ] && [ "$nginx_t_status" = "0" ]; then
+                command -v curl >/dev/null 2>&1 || { echo "FAIL: curl missing in the base image, cannot probe guards"; exit 1; }
+                nginx -p /vault -c "$conf"
+                obj=http://127.0.0.1/depot/70403/chunk/773d10050d99b2544665873ec2125b3bf273e8b2
+                probe() {
+                    want=$1; what=$2; shift 2
+                    got=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "$@" || echo curl-error)
+                    if [ "$got" = "$want" ]; then
+                        echo "guard OK: $what -> $got"
+                    else
+                        echo "FAIL: $what -> $got, expected $want"
+                        status=1
+                    fi
+                }
+                probe 508 "S1 hop header (self-proxy loop)" -H "X-SteamHangar-Hop: 1" "$obj"
+                probe 405 "P3 POST"                          -X POST "$obj"
+                probe 405 "P3 HEAD"                          -I "$obj"
+                probe 404 "S2 trailing slash (cached-depot oracle)" http://127.0.0.1/depot/70403/chunk/
+                probe 404 "S2 trailing slash, depot root"   http://127.0.0.1/depot/70403/
+                probe 200 "/health still answers"           http://127.0.0.1/health
+                server_hdr=$(curl -s -m 5 -o /dev/null -D - http://127.0.0.1/health | tr -d "\r" | sed -n "s/^[Ss]erver:[[:space:]]*//p")
+                if [ "$server_hdr" = "nginx" ]; then
+                    echo "guard OK: N5 Server header carries no version ($server_hdr)"
+                else
+                    echo "FAIL: N5 Server header is '"'"'$server_hdr'"'"', expected bare '"'"'nginx'"'"'"
+                    status=1
+                fi
+                nginx -p /vault -c "$conf" -s quit || true
+            fi
             exit $status
         '
 }
 
-render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0
+# render_must_fail <label> <VAULT_EVENT_LOG value>
+#
+# Pre-freeze review P6: the VAULT_EVENT_LOG validation in
+# core/docker/25-vault-eventlog.sh guards config injection and a chown of
+# arbitrary directories, but only the two happy paths were ever rendered.
+# Each bad value below must abort the entrypoint chain (non-zero) AND the
+# abort must come from 25-vault-eventlog.sh itself -- a failure anywhere
+# else (pull, a later hook, nginx -t) would otherwise pass for the wrong
+# reason.
+#
+# Optional 3rd/4th args (pre-freeze review S5): plant a symlink at <link>
+# pointing to <target> before the entrypoint runs, to prove the hook refuses
+# to create/chown through it instead of following it as root.
+render_must_fail() {
+    local label="$1" event_log="$2" link="${3:-}" target="${4:-}" out rc=0
+    echo "--- must refuse: $label (VAULT_EVENT_LOG='$event_log') ---"
+    out=$(docker run --rm \
+        -v "$core_dir/docker:/workspace/core-docker:ro" \
+        -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+        -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+        -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+        -e VAULT_RESOLVER="1.1.1.1" \
+        -e VAULT_EVENT_LOG="$event_log" \
+        -e SYMLINK_AT="$link" \
+        -e SYMLINK_TO="$target" \
+        --entrypoint sh \
+        "$IMAGE" -c '
+            set -eu
+            mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+            chown -R nginx:nginx /vault
+            if [ -n "$SYMLINK_AT" ]; then
+                mkdir -p "$(dirname "$SYMLINK_AT")"
+                ln -s "$SYMLINK_TO" "$SYMLINK_AT"
+            fi
+            cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+            cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
+            cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/40-vault-preflight.sh
+            /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf
+        ' 2>&1) || rc=$?
+    if [ "$rc" = "0" ]; then
+        printf '%s\n' "$out"
+        echo "FAIL: VAULT_EVENT_LOG='$event_log' was accepted (exit 0), expected a refusal" >&2
+        return 1
+    fi
+    if ! printf '%s\n' "$out" | grep -qF "25-vault-eventlog.sh: FATAL"; then
+        printf '%s\n' "$out"
+        echo "FAIL: VAULT_EVENT_LOG='$event_log' failed (exit $rc), but not in 25-vault-eventlog.sh's validation" >&2
+        return 1
+    fi
+    echo "refused as expected (exit $rc): $(printf '%s\n' "$out" | grep -F '25-vault-eventlog.sh: FATAL' | head -n1)"
+}
+
+render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guards
 render_and_test "cache-event log ON" "/vault/logs/event.log" 2
 
+render_must_fail "relative path"            "logs/event.log"
+render_must_fail "injection character"      "/vault/logs/e;vent.log"
+render_must_fail "outside /vault"           "/etc/nginx/event.log"
+render_must_fail "'..' escape out of /vault" "/vault/../etc/event.log"
+render_must_fail "symlinked log directory"  "/vault/logs/event.log" /vault/logs /etc/nginx
+render_must_fail "symlinked log file"       "/vault/logs/event.log" /vault/logs/event.log /etc/passwd
+
+# Pre-freeze review S5: 40-vault-preflight.sh must refuse the base image's
+# STOCK /etc/nginx/nginx.conf (what is left at that path when the envsubst
+# hook soft-fails and never renders the template). Run the hook directly
+# against the untouched image -- no template copied, no envsubst -- and
+# require its specific FATAL, so an abort for any other reason fails here.
+echo "--- must refuse: 40-vault-preflight.sh against the stock nginx.conf ---"
+stock_rc=0
+stock_out=$(docker run --rm \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    --entrypoint sh \
+    "$IMAGE" -c 'sh /workspace/core-docker/40-vault-preflight.sh' 2>&1) || stock_rc=$?
+if [ "$stock_rc" = "0" ] || ! printf '%s\n' "$stock_out" | grep -qF "40-vault-preflight.sh: FATAL: /etc/nginx/nginx.conf is NOT the SteamHangar config"; then
+    printf '%s\n' "$stock_out"
+    echo "FAIL: 40-vault-preflight.sh did not refuse the stock nginx.conf (exit $stock_rc)" >&2
+    exit 1
+fi
+echo "refused as expected (exit $stock_rc): $(printf '%s\n' "$stock_out" | grep -F 'FATAL' | head -n1)"
+
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
-     "access_log/vault_event invariant for both VAULT_EVENT_LOG states."
+     "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \
+     "the event log is owned 101:101; the /depot/ request guards answer live;" \
+     "four bad VAULT_EVENT_LOG values and two planted symlinks are refused;" \
+     "the preflight refuses the stock nginx.conf."

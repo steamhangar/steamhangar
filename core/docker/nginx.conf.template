@@ -3,25 +3,28 @@
 # ############################################################################
 # # THIS FILE IS A NEAR-VERBATIM COPY OF core/nginx/nginx.conf.              #
 # #                                                                          #
-# # Exactly FIVE directive lines may differ, and they are all container-     #
-# # runtime plumbing (log destinations, pid file, worker user, resolver      #
-# # placeholder). Every other directive MUST stay byte-identical to          #
+# # Only the directive lines enumerated in core/docker/check-config-drift.sh #
+# # may differ (six kinds today), and they are all container-runtime         #
+# # plumbing (log destinations, pid file, worker user, resolver and event-   #
+# # log placeholders). Every other directive MUST stay byte-identical to     #
 # # core/nginx/nginx.conf, which is the reviewed, test-covered source of     #
 # # truth for the cache behaviour (ADR-0001 requirements 1-4).               #
 # #                                                                          #
 # # That contract is MACHINE-CHECKED, not a promise:                         #
 # #     core/docker/check-config-drift.sh                                    #
-# # strips comments/blank lines from both files, un-applies the five allowed #
+# # strips comments/blank lines from both files, un-applies the enumerated   #
 # # substitutions, and diffs the result. Any other divergence fails.         #
 # # Run it after touching either file.                                       #
 # ############################################################################
 #
-# The five allowed differences (container form  <-  native dev form):
+# The allowed differences (container form  <-  native dev form); the list
+# in check-config-drift.sh is authoritative, this one is for the reader:
 #   1. user nginx;                    <-  (absent; nginx's compile-time default)
 #   2. pid /var/run/nginx.pid;        <-  pid logs/nginx.pid;
 #   3. error_log /dev/stderr warn;    <-  error_log logs/error.log warn;
 #   4. resolver ${VAULT_RESOLVER} ... <-  resolver 1.1.1.1 ...
 #   5. access_log /dev/stdout vault;  <-  access_log logs/access.log vault;
+#   6. access_log ${VAULT_EVENT_LOG} vault_event ...  <-  access_log logs/event.log vault_event ...
 #
 # --- Rendering (${VAULT_RESOLVER}) ------------------------------------------
 # This file is NOT read by nginx directly. It is installed at
@@ -81,6 +84,11 @@ http {
     default_type  application/octet-stream;
     sendfile      on;
 
+    # Pre-freeze review N5: no nginx version in the Server header or on
+    # error pages. Costs nothing, removes a free fingerprint for anyone
+    # probing port 80 on the LAN.
+    server_tokens off;
+
     # nginx initializes all of these standard temp paths at startup
     # regardless of whether the corresponding module is actually exercised
     # by this config (same as the PoC) -- they must exist under the prefix.
@@ -134,6 +142,12 @@ http {
     # vault-core proxy every miss back into itself (an infinite loop). Use a
     # real upstream resolver here. This is documented in deploy/README.md.
     resolver ${VAULT_RESOLVER} ipv6=off valid=30s;
+    # Pre-freeze review P1: nginx's default resolver_timeout is 30s. With
+    # an unreachable resolver every MISS would hang the client for that
+    # long before the 502 -- longer than the whole proxy_connect_timeout /
+    # proxy_next_upstream_timeout budget below. 5s keeps a resolver outage
+    # in the same "fast, bounded failure" class as an upstream outage.
+    resolver_timeout 5s;
 
     # One of the map value strings below (the upstream-edge fallback
     # hostname) is longer than nginx's default map_hash_bucket_size on this
@@ -427,6 +441,57 @@ http {
 
         location /depot/ {
             set $vault_cache_status HIT;
+
+            # --- Request guards (pre-freeze project review S1, S2, P3) ------
+            # Three `if` blocks, each containing ONLY a `return` -- the one
+            # `if` pattern the nginx documentation calls safe (same rule as
+            # the Host-allowlist `if` in @miss). They run in the rewrite
+            # phase, i.e. BEFORE try_files, so a rejected request never
+            # touches the disk or @miss. They sit after the `set` above on
+            # purpose: a rejected request is logged with cache_status HIT
+            # plus its 4xx/5xx status, which vault-api's sweeper filters on
+            # HTTP status; a bare "-" there would be counted as a malformed
+            # line instead.
+            #
+            # S1 -- self-proxy loop breaker. If a LAN router transparently
+            # intercepts port 53 (DNAT to a Pi-hole/AdGuard that rewrites
+            # *.steamcontent.com to THIS server), the `resolver` above no
+            # longer reaches the real upstream resolver: @miss resolves the
+            # edge hostname to vault-core's own address and proxy_pass dials
+            # itself. Without this guard the recursion eats every worker
+            # connection, proxy_next_upstream retries it three times over,
+            # and HITs and /health fail with it. @miss stamps every
+            # outbound request with X-SteamHangar-Hop: 1 (see there); a
+            # request ARRIVING with that header can only be our own
+            # proxied request coming back, so answer 508 Loop Detected
+            # immediately. 508 is not in proxy_next_upstream's retry list
+            # and the store guard only writes a 200, so the loop ends after
+            # exactly one hop with nothing stored. 40-vault-preflight.sh
+            # additionally probes the resolver at boot for this condition.
+            if ($http_x_steamhangar_hop) {
+                return 508;
+            }
+            # P3 -- GET only. Primary reason: @miss is a proxy_store path, and
+            # a HEAD that misses would be relayed upstream and could store an
+            # EMPTY object (a HEAD response has no body) under the chunk's
+            # name; any other method would be relayed to Valve verbatim for
+            # no reason. That depot traffic is GET-only is reasoned, not
+            # measured (the PoC log_format never recorded the method): no
+            # in-repo client issues anything but GET.
+            if ($request_method != GET) {
+                return 405;
+            }
+            # S2 -- no directory probing. try_files resolves a trailing-slash
+            # URI against the DIRECTORY on disk: /depot/<id>/chunk/ answered
+            # 403 (local, directory exists) once that depot had ever been
+            # cached and an upstream 404 otherwise -- an unauthenticated
+            # "is this depot cached here" oracle, contradicting the threat
+            # model. No real depot object URI ends in "/", so refuse them all
+            # locally with one answer, before try_files can look.
+            if ($uri ~ /$) {
+                return 404;
+            }
+
             # ADR req 3: $vault_try_target is $uri normally, but resolves to
             # a guaranteed-nonexistent path when ?nocache=1 is present, so
             # nocache requests always fall through to @miss below.
@@ -515,6 +580,15 @@ http {
             proxy_http_version 1.1;
             proxy_set_header   Connection "";
             proxy_set_header   Host $vault_upstream_host;
+
+            # S1 (pre-freeze review): mark every outbound request so that,
+            # should DNS interception ever route it back to this server, the
+            # guard in location /depot/ recognises it and answers 508 instead
+            # of recursing. A real Steam CDN edge is expected to ignore the
+            # header (unmeasured against the live CDN). Privacy cost: the
+            # header goes upstream, in plain HTTP, on EVERY miss, so Valve and
+            # any on-path observer can identify this cache as SteamHangar.
+            proxy_set_header   X-SteamHangar-Hop "1";
 
             # ADR req 2: strip the client's own Range header before ever
             # forwarding to upstream. Setting a proxy_set_header value to

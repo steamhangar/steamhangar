@@ -66,8 +66,12 @@ EXPOSE 53/udp 53/tcp
 # requires the answer to be the configured cache IP. This proves the thing that
 # actually matters (the redirect is live), not merely that a process is running.
 # The synthetic subdomain exists only for this probe -- the wildcard covers it.
+# Exact-line, fixed-string match (review N4): a bare `grep -q "$CACHE_IP"`
+# treated the dots as regex wildcards and matched any longer address with the
+# same prefix (192.168.1.5 inside 192.168.1.50), so a wrong answer could read
+# as healthy. busybox nslookup prints each A answer as "Address: <ip>".
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD nslookup -type=a healthcheck.steamcontent.com 127.0.0.1 2>/dev/null | grep -q "$CACHE_IP" || exit 1
+    CMD nslookup -type=a healthcheck.steamcontent.com 127.0.0.1 2>/dev/null | grep -qxF -- "Address: $CACHE_IP" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/vault-dns-entrypoint.sh"]
 

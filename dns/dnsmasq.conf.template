@@ -81,6 +81,21 @@ no-resolv
 server=${UPSTREAM_DNS_1}
 server=${UPSTREAM_DNS_2}
 
+# --- Forwarding hygiene: deliberately ABSENT options -------------------------
+# domain-needed and bogus-priv are standard dnsmasq hardening for a resolver
+# that forwards to PUBLIC upstreams, and they are deliberately NOT set here
+# (pre-freeze review P4 added them, review S4 removed them). The documented
+# "point the upstream DNS at your router" mode (deploy/.env.example) makes
+# the router the upstream, and the router is what answers the LAN's own
+# names: domain-needed would answer bare names ("nas", "printer") locally
+# with NXDOMAIN instead of forwarding them to the router, and bogus-priv
+# would answer every LAN reverse lookup (192.168.x.x, 10.x.x.x, ...) with
+# NXDOMAIN instead of the router's PTR record. Both silently break name
+# resolution that works without vault-dns in the path.
+# stop-dns-rebind is absent too: this resolver's entire purpose is to answer
+# a public name (steamcontent.com) with a private address -- rebind
+# protection would refuse exactly that answer.
+
 # --- Listen configuration (container-appropriate) ---------------------------
 # 0.0.0.0: unlike scenario-b.sh's 127.0.0.1-only WSL2 test instance, this
 # daemon runs inside a container and must be reachable from LAN clients

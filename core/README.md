@@ -5,8 +5,9 @@ Phase-0 PoC (`poc/conf/nginx.conf`, frozen as evidence) plus the four
 binding production requirements discovered there and recorded in
 [`docs/adr/0001-proxy-store-feasibility.md`](../docs/adr/0001-proxy-store-feasibility.md).
 
-No Docker yet -- that's WP 1.9. This work package is the config itself,
-runnable natively on Windows for development exactly like the PoC was.
+This file started as the WP 1.1 config README; the config is still
+runnable natively on Windows for development exactly like the PoC was. The
+container image arrived with WP 1.9 -- see "The Docker image" below.
 
 ## Files
 
@@ -16,8 +17,11 @@ core/
 │   └── nginx.conf                        # the config itself
 ├── tests/
 │   ├── test-core.ps1                     # automated suite, runs against the real Steam CDN
-│   └── fixtures/
-│       └── retry-regression.conf         # local throwaway rig for the B1 retry regression (test 7)
+│   ├── fixtures/
+│   │   ├── retry-regression.conf         # local throwaway rig for the B1 retry regression
+│   │   └── eventlog-off.conf             # cache-event log OFF rig (WP 3.10 test group)
+│   └── mvp/                              # MVP run script + recorded results (evidence)
+├── Dockerfile, docker/                   # the container image -- see "The Docker image"
 └── README.md                              # this file
 ```
 
@@ -75,12 +79,16 @@ core\tests\test-core.ps1
 Runs against the real Steam CDN (known-good test object: depot `70403`,
 chunk `773d10050d99b2544665873ec2125b3bf273e8b2`, the same one used
 throughout `poc/`). Exit code 0 = pass, 1 = fail. As of the review-fix pass,
-all 9 test groups pass: health, heartbeat, smoke MISS/HIT, Range-strip
-guard, nocache bypass, Host allowlist reject + pass-through, plus three
-regressions added for the review findings -- B1 retry-list storage (own
-local fixture, `core/tests/fixtures/retry-regression.conf`), S2
-Accept-Encoding/gzip MISS+HIT byte-identity, and S3 `/tmp/proxy/...`
-returning 404.
+the suite has 15 test groups: health, heartbeat, smoke MISS/HIT,
+Range-strip guard, nocache bypass, Host allowlist reject + pass-through,
+three regressions added for the WP 1.1 review findings -- B1 retry-list
+storage (own local fixture, `core/tests/fixtures/retry-regression.conf`),
+S2 Accept-Encoding/gzip MISS+HIT byte-identity, and S3 `/tmp/proxy/...`
+returning 404 -- plus five cache-event-log groups (WP 3.10: MISS/HIT
+lines, nocache BYPASS, no heartbeat line, hostile URI escaping, feature OFF
+via `core/tests/fixtures/eventlog-off.conf`). CI only parse-checks this
+suite (it needs the real CDN); the pre-freeze request guards below are
+exercised live, offline, by `.github/scripts/verify-core-nginx.sh`.
 
 **Every `/depot/` request in the suite sends an explicit `Host` header**
 naming a real Steam CDN hostname. This isn't incidental: it mirrors how
@@ -304,6 +312,43 @@ it is harmless, it matches the ADR's documented intent, and there is no
 guarantee Valve keeps that CNAME indefinitely (historically it was
 documented as absent). If it disappears again, this config already handles
 it without a change.
+
+## Request guards in `location /depot/` (pre-freeze review)
+
+Three `if { return; }` blocks (the only `if` form the nginx docs call
+safe) run in the rewrite phase, before `try_files`, so a rejected request
+never touches the disk or `@miss`:
+
+- **Self-proxy loop breaker (S1).** `@miss` stamps every outbound request
+  with `X-SteamHangar-Hop: 1`; a request *arriving* with that header can
+  only be our own proxied request coming back -- e.g. a router that DNATs
+  all port-53 traffic to a Pi-hole/AdGuard rewriting `*.steamcontent.com`
+  to this server, so `resolver` no longer reaches a truthful upstream. It
+  is answered `508 Loop Detected` at once. 508 is not in
+  `proxy_next_upstream`'s retry list and the store guard only writes a
+  200, so the loop ends after one hop with nothing stored. Belt to these
+  braces: `40-vault-preflight.sh` asks the configured resolver for
+  `cache2-ams1.steamcontent.com` at boot and refuses to start on a
+  private/loopback/link-local/CGNAT answer (an unreachable resolver only
+  logs a note -- it never fails the boot). Cost of the header: it goes
+  upstream, in plain HTTP, on **every** miss, so Valve and any on-path
+  observer can identify the cache as SteamHangar. A real Steam CDN edge is
+  expected to ignore it (unmeasured against the live CDN).
+- **GET only (P3).** Primary reason: `@miss` is a `proxy_store` path, and a
+  relayed HEAD miss could store an empty object (a HEAD response has no
+  body) under the chunk's name; any other method would be relayed to Valve
+  for nothing. Any non-GET is `405` locally; HEAD is included. That depot
+  traffic is GET-only is reasoned, not measured (the PoC `log_format` never
+  recorded the method): no in-repo client issues anything but GET.
+- **No directory probing (S2).** A URI ending in `/` is `404` locally.
+  Before, `try_files` resolved it against the directory on disk: `403` once
+  that depot had ever been cached, an upstream `404` otherwise -- an
+  unauthenticated "is this depot cached here" oracle.
+
+Two `http`-level hardening directives ship with them: `resolver_timeout
+5s` (P1; nginx's default 30s would hang every MISS that long when the
+resolver is down) and `server_tokens off` (N5; no version in `Server:` or
+on error pages).
 
 ## `proxy_next_upstream` caveat (honesty note)
 
@@ -549,7 +594,9 @@ a small additional entrypoint hook,
   so anything outside it is refused with a clear message rather than acted
   on. The marker comment is stripped (cosmetic only) once both checks pass,
   and the target directory is `mkdir -p`'d and `chown`'d to the `nginx`
-  user.
+  user. The hook runs as root and `/vault` is shared with vault-api, so a
+  symlink anywhere on the path below `/vault/` (directory or file) is
+  refused instead of followed, and the `chown`s use `-h`.
 
 `core/docker/check-config-drift.sh` was extended with a 6th recognized
 delta for the two event-log lines (native: hardcoded ON at
@@ -558,8 +605,16 @@ and is never the deployed target anyway; container: the `${VAULT_EVENT_LOG}`
 placeholder) -- everything else about the two lines must stay
 byte-identical, same contract as the other five deltas.
 
-**Known gap, honestly flagged:** this work package's environment has no
-Docker available (dev-machine constraint) and could not run the actual
+**Since closed:** `.github/scripts/verify-core-nginx.sh` (CI, and locally
+via the dev wrapper) now renders the real image for both states, asserts
+the event-log file is created and owned 101:101 before nginx's root master
+opens it (pre-freeze review S3: a root-owned file made vault-api's
+truncating sweeper fail with EPERM), and asserts four bad values (relative
+path, injection character, outside `/vault`, a `..` escape -- review S4)
+plus a planted symlinked log directory and a symlinked log file are
+refused by `25-vault-eventlog.sh`, and that `40-vault-preflight.sh` refuses
+the image's stock `nginx.conf`. Historical note from WP 3.10: that
+work package's environment had no Docker and could not run the actual
 image end-to-end. The `25-vault-eventlog.sh` sed/validation logic was
 verified directly against synthetic rendered-config fixtures under
 `sh` (both the empty and non-empty paths, plus rejecting a relative path
@@ -607,20 +662,26 @@ core/
 ├── Dockerfile                       # nginx:1.29.8-alpine3.23, pinned by digest
 └── docker/
     ├── nginx.conf.template          # what actually runs in the container
+    ├── 25-vault-eventlog.sh         # VAULT_EVENT_LOG on/off + validation
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
     └── check-config-drift.sh        # keeps the template honest
 ```
 
-**The container does NOT run `core/nginx/nginx.conf`.** Five directives
-cannot be shared with the native dev config -- the log destinations, the
-pid path, an explicit worker user, and the resolver becoming an env
-placeholder -- so `core/docker/nginx.conf.template` is a near-verbatim copy
-carrying exactly those five deltas. Everything else (every map, the store
+**The container does NOT run `core/nginx/nginx.conf`.** Six kinds of
+directive line cannot be shared with the native dev config -- the log
+destinations, the pid path, an explicit worker user, the resolver becoming
+an env placeholder, and the two cache-event-log lines becoming a
+`${VAULT_EVENT_LOG}` placeholder -- so `core/docker/nginx.conf.template` is
+a near-verbatim copy carrying exactly those deltas (the authoritative list,
+with expected counts, is in `check-config-drift.sh`). Everything else (every map, the store
 guard, the Host allowlist, the Range/Accept-Encoding stripping, the nocache
 bypass, the log format) is byte-identical, and that is **machine-checked**
 by `core/docker/check-config-drift.sh`: it normalises both files, un-applies
-the five deltas, and diffs. 83 normalised directive lines, verified
-identical -- and verified to actually catch an injected difference (a
+the enumerated deltas, and diffs. 114 normalised directive lines (as of
+the pre-freeze review), verified identical; it also asserts that the
+`vault_event` log_format line keeps all 8 of its LITERAL tabs in both files
+(review P7) -- the normaliser would otherwise hide a tab -> space edit that
+breaks vault-api's tab-split parser -- and verified to actually catch an injected difference (a
 negative test in `deploy/tests/verify-stack.sh`, step 1b). Run it after
 touching either file.
 
@@ -642,10 +703,16 @@ touching either file.
   `$uri` and friends -- unfiltered, envsubst would replace the nginx variable
   with that env var's **value**, `nginx -t` would still pass, and the cache
   would silently misbehave. See the comment in `core/Dockerfile`.
-- Other preflight guards, all exercised in `deploy/VERIFICATION-*.md`
+- Other preflight guards, exercised in `deploy/VERIFICATION-*.md`
   (step 8): an unrendered `${VAULT_...}` placeholder, an empty resolver, a
   resolver value containing nginx-config-injection characters, and a cache
-  directory the worker user (uid 101) cannot write.
+  directory the worker user (uid 101) cannot write. Added in the pre-freeze
+  review and NOT part of any recorded `deploy/VERIFICATION-*.md` run: a
+  stock (never rendered) `nginx.conf` is refused (S5; pinned by a negative
+  in `.github/scripts/verify-core-nginx.sh`); the resolver allowlist admits
+  `[` `]` so a bracketed IPv6 `[addr]:port` value actually works (N3); and
+  the resolver loop probe described under "Request guards" above (N3 and
+  the probe are not pinned by any automated test).
 - Deployment, volumes, ports and the port-80/dedicated-IP guidance:
   `deploy/README.md`.
 
@@ -674,4 +741,4 @@ explicit scope boundary (this work package touches `core/` only):
   first thing that would actually consume the file).
 - A real end-to-end Docker build/run of the container template + the new
   `25-vault-eventlog.sh` hook (no Docker available in this work package's
-  environment -- see "Known gap, honestly flagged" above).
+  environment at the time; since closed -- see "Since closed" above).
