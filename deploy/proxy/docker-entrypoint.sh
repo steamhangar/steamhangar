@@ -1,13 +1,16 @@
 #!/bin/sh
 # SteamHangar vault-proxy container entrypoint (WP EG-1, ADR-0011).
 #
-# Renders /etc/tinyproxy/filter -- the destination allowlist tinyproxy.conf's
-# `Filter` + `FilterDefaultDeny Yes` enforce -- from VAULT_EGRESS_ALLOW plus
-# ONE baked-in host, then execs tinyproxy. Runs entirely as the unprivileged
-# `tinyproxy` account (Dockerfile's `USER tinyproxy:tinyproxy`, no root phase
-# at any point in this container's life), which is also why /etc/tinyproxy is
-# chowned to that account at image build time: this script has to be able to
-# write the rendered file without ever calling anything as root.
+# Renders /run/tinyproxy/tinyproxy.conf (from the read-only template in
+# /etc/tinyproxy/) and /run/tinyproxy/filter -- the destination allowlist
+# tinyproxy.conf's `Filter` + `FilterDefaultDeny Yes` enforce -- from
+# VAULT_EGRESS_SUBNET, VAULT_EGRESS_ALLOW and ONE baked-in host, then execs
+# tinyproxy. Runs entirely as the unprivileged `tinyproxy` account
+# (Dockerfile's `USER tinyproxy:tinyproxy`, no root phase at any point in
+# this container's life), which is why only /run/tinyproxy is chowned to that
+# account at image build time. /etc/tinyproxy stays root-owned, so this
+# process can rewrite its running config but never the template it is
+# rebuilt from at each start.
 #
 # Pattern shape: each allowed host becomes an ANCHORED, dot-escaped POSIX
 # basic regular expression (tinyproxy.conf's `FilterType bre`) -- e.g.
@@ -31,6 +34,10 @@ die() { echo "$ME: FATAL: $*" >&2; exit 1; }
 # header comment for the three real disagreements this fixed.
 # shellcheck source=./validate-hostname.sh
 . "$(dirname "$0")/validate-hostname.sh"
+# Strict IPv4 CIDR check for VAULT_EGRESS_SUBNET (WP DEPLOY-FIX-2), same
+# extraction pattern and the same reason.
+# shellcheck source=./validate-subnet.sh
+. "$(dirname "$0")/validate-subnet.sh"
 
 # Overridable ONLY so api/tests/test_eg1_egress_lock.py can run this ENTIRE
 # script end to end (rendering into a throwaway temp file, then a harmless
@@ -39,9 +46,47 @@ die() { echo "$ME: FATAL: $*" >&2; exit 1; }
 # pinned as the REAL artifact, not a Python reimplementation of it, applies
 # to the whole rendering loop (including the `set -f` fix below), not just
 # the character-validation function `validate-hostname.sh` already isolates.
-# The shipped container never sets this variable, so `/etc/tinyproxy/filter`
+# The shipped container never sets this variable, so `/run/tinyproxy/filter`
 # is what every real deployment actually gets.
-FILTER_FILE="${VAULT_PROXY_FILTER_FILE_FOR_TESTS:-/etc/tinyproxy/filter}"
+FILTER_FILE="${VAULT_PROXY_FILTER_FILE_FOR_TESTS:-/run/tinyproxy/filter}"
+# Same test-only override rule for the rendered tinyproxy config and the
+# read-only template it is rendered from (WP DEPLOY-FIX-2).
+CONF_TEMPLATE="${VAULT_PROXY_CONF_TEMPLATE_FOR_TESTS:-/etc/tinyproxy/tinyproxy.conf.template}"
+CONF_FILE="${VAULT_PROXY_CONF_FILE_FOR_TESTS:-/run/tinyproxy/tinyproxy.conf}"
+
+# --- client allowlist: render tinyproxy.conf's `Allow <cidr>` line -----------
+# WP DEPLOY-FIX-2 (ADR-0011 addendum 2026-10-01). vault-egress's subnet is
+# configurable (deploy/compose.yaml, VAULT_EGRESS_SUBNET, default
+# 172.30.238.0/24) so two stacks can share one host; compose forwards the SAME
+# expression here, so the proxy admits exactly the range vault-api sits in.
+# Fail closed at every step: an unset/blank value, or anything that is not a
+# strict IPv4 CIDR with prefix 8-30, refuses to start -- there is no fallback
+# here, because compose always supplies a value and a silent default would
+# reintroduce the drift this replaced. The template's ONE static `Allow
+# a.b.c.d/n` line is replaced (deterministically: the template is read-only
+# and never this script's own previous output), then the result is checked.
+egress_subnet=${VAULT_EGRESS_SUBNET-}
+[ -n "$egress_subnet" ] || die "VAULT_EGRESS_SUBNET is unset or blank -- deploy/compose.yaml forwards it to this container (default 172.30.238.0/24); a container started without it is misconfigured."
+validate_egress_subnet "$egress_subnet" || die "VAULT_EGRESS_SUBNET '$egress_subnet' is not a strict IPv4 CIDR (a.b.c.d/n, octets 0-255 without leading zeros, prefix 8-30) -- fix deploy/.env's VAULT_EGRESS_SUBNET."
+[ -r "$CONF_TEMPLATE" ] || die "tinyproxy config template '$CONF_TEMPLATE' is missing or unreadable."
+
+# The value is validated above to contain only digits, '.' and '/', so it is
+# safe inside a sed replacement with '|' as the delimiter.
+sed -E "s|^Allow[[:space:]]+[0-9.]+/[0-9]+[[:space:]]*\$|Allow $egress_subnet|" \
+    "$CONF_TEMPLATE" > "$CONF_FILE.tmp" || die "could not render $CONF_FILE"
+
+# Post-render assertion: the Allow lines must be EXACTLY the loopback line and
+# one line naming the validated subnet -- no second CIDR, no missing line, no
+# leftover default. tinyproxy directives are case-insensitive and may be
+# indented, so count them the same way.
+allow_lines=$(grep -Ei '^[[:space:]]*allow[[:space:]]' "$CONF_FILE.tmp" || true)
+expected_allow=$(printf 'Allow 127.0.0.1\nAllow %s' "$egress_subnet")
+if [ "$allow_lines" != "$expected_allow" ]; then
+    rm -f "$CONF_FILE.tmp"
+    die "rendered tinyproxy config does not have exactly one client Allow line equal to VAULT_EGRESS_SUBNET ($egress_subnet) next to the loopback line; got: $(printf '%s' "$allow_lines" | tr '\n' ';')"
+fi
+mv -f "$CONF_FILE.tmp" "$CONF_FILE" || die "could not move the rendered config into place at $CONF_FILE"
+log "client allowlist rendered: Allow $egress_subnet (VAULT_EGRESS_SUBNET) + loopback"
 
 # --- baked-in mandatory host --------------------------------------------------
 # api.steampowered.com: the ONE outbound host the shipped PRODUCT ITSELF

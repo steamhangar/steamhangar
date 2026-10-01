@@ -514,3 +514,61 @@ narrowing specifically.
   per outbound flow, whether it is now proxy-gated, baked-in, or
   unaffected; §8 gains a note that `deploy/proxy/Dockerfile`'s base-image
   pin follows the same digest-pinning discipline as every other component.
+
+## Addendum 2026-10-01 (WP DEPLOY-FIX-2): the vault-egress subnet is configurable
+
+Context: a production stack and a test stack must run side by side on one
+host (maintainer decision 2026-10-01, precondition for v0.1.0-rc3). The
+Compose project name scopes network *names*, not subnets, so the second
+stack's `up -d` failed with "Pool overlaps" on the literal
+`172.30.238.0/24`, and `deploy/tests/verify-stack.sh` cascaded into dozens
+of FAILs instead of stopping.
+
+Decision:
+
+- `deploy/compose.yaml` states the subnet as
+  `${VAULT_EGRESS_SUBNET:-172.30.238.0/24}`. **The default is unchanged**, so
+  a single-stack deployment needs no action. The colon form is deliberate: a
+  blank value is never meaningful for a subnet, so blank falls back to the
+  default exactly like unset.
+- The same expression is forwarded into `vault-proxy`'s environment.
+  `deploy/proxy/docker-entrypoint.sh` now renders
+  `/run/tinyproxy/tinyproxy.conf` and `/run/tinyproxy/filter` at every start
+  from a template (the shipped `tinyproxy.conf`, installed as
+  `/etc/tinyproxy/tinyproxy.conf.template`; the package's stock config is
+  deleted at build time), replacing the template's one static
+  `Allow 172.30.238.0/24` line with the value. Only `/run/tinyproxy/` is
+  owned by the `tinyproxy` account; `/etc/tinyproxy/` stays root:root 0755
+  and the template root:root 0444. So the proxy can change its running
+  config, but never the source that config is rebuilt from at each start. §1's "exact,
+  auditable CIDR" property holds: the client allowlist is still one exact
+  CIDR, now the one the network actually has.
+- Fail closed: unset or blank in the container, or anything that is not a
+  strict IPv4 CIDR (four octets 0-255 without leading zeros, prefix 8-30,
+  nothing else; `deploy/proxy/validate-subnet.sh`), is FATAL and the proxy
+  does not start. After rendering, the entrypoint asserts the Allow lines
+  are exactly `Allow 127.0.0.1` plus one line equal to the value; a template
+  drift (no CIDR line, a second one, an extra host line) is FATAL too. There
+  is no fallback inside the container, because compose always supplies a
+  value and a silent default would reintroduce the drift this replaces.
+- `verify-stack.sh` runs on its own `172.30.239.0/24`, aborts with FATAL on a
+  failed build or `up -d`, and checks live that the proxy's rendered Allow
+  line and vault-api's vault-egress address match that subnet.
+
+Consequences: operators running two stacks set `VAULT_EGRESS_SUBNET` in the
+second stack's `deploy/.env` (`deploy/.env.example`, `deploy/README.md`
+"Running two stacks on one host"). The value is not checked for overlap with
+other Docker networks; Docker itself refuses an overlapping pool at `up -d`,
+which is loud. Host bits must be zero (`172.30.239.5/24` is refused), so
+Docker and tinyproxy always receive a plain network address.
+
+IPv6 (added 2026-10-01, found by a live `verify-stack.sh` run): the host's
+Docker daemon gave new networks an IPv6 ULA subnet as well
+(`172.30.239.0/24 fdd0:0:0:b::/64` on vault-egress). The IPv4 lock relies on
+masquerade being off on `vault-lan`, and IPv6 has no NAT to turn off, so on a
+host with a routed IPv6 prefix and IPv6 forwarding `vault-api` might egress
+over IPv6 past the proxy. `vault-lan` and `vault-egress` now set
+`enable_ipv6: false` explicitly, so `vault-api` has no IPv6 address at all;
+`verify-stack.sh` step 6l checks both networks and both of vault-api's
+attachments live. The `default` network, used only by services that are
+allowed out anyway, is left as the daemon configures it.

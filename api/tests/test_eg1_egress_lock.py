@@ -11,9 +11,11 @@ directly (no Docker, no network, plain pytest, runs in CI on every commit),
 never hand-copy a fact this repository already states once elsewhere, and
 fail BY NAME in the specific direction that regressed.
 
-Two files each state the `vault-egress` subnet independently
-(`deploy/compose.yaml`'s `ipam.config` and `deploy/proxy/tinyproxy.conf`'s
-`Allow` directive) with no YAML/config anchor tying them together — a hand-
+Two files each state the `vault-egress` subnet's DEFAULT independently
+(`deploy/compose.yaml`'s `ipam.config`, `${VAULT_EGRESS_SUBNET:-...}` since
+WP DEPLOY-FIX-2, and `deploy/proxy/tinyproxy.conf`'s static `Allow`
+directive, which the entrypoint replaces with the env value at start) with
+no YAML/config anchor tying them together — a hand-
 edit to one that misses the other is a *silent* regression, not a loud one:
 tinyproxy would still start, still render a filter file, and simply reject
 every request from vault-api's real (now-unlisted) subnet with an `Allow`-
@@ -45,6 +47,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -57,6 +60,7 @@ PROXY_DOCKERFILE_PATH = REPO_ROOT / "deploy" / "proxy" / "Dockerfile"
 PROXY_TINYPROXY_CONF_PATH = REPO_ROOT / "deploy" / "proxy" / "tinyproxy.conf"
 PROXY_ENTRYPOINT_PATH = REPO_ROOT / "deploy" / "proxy" / "docker-entrypoint.sh"
 PROXY_VALIDATOR_PATH = REPO_ROOT / "deploy" / "proxy" / "validate-hostname.sh"
+PROXY_SUBNET_VALIDATOR_PATH = REPO_ROOT / "deploy" / "proxy" / "validate-subnet.sh"
 
 #: Round-2 review N4/S2: the api-tests CI job (`.github/workflows/ci.yml`,
 #: `runs-on: ubuntu-latest`) always has a POSIX `sh` (dash) on PATH, and so
@@ -68,12 +72,16 @@ PROXY_VALIDATOR_PATH = REPO_ROOT / "deploy" / "proxy" / "validate-hostname.sh"
 _SH = shutil.which("sh")
 requires_sh = pytest.mark.skipif(_SH is None, reason="no POSIX 'sh' on PATH")
 
-#: Same subnet compose.yaml's `vault-egress` network pins (see this module's
-#: own docstring for why the two are checked against EACH OTHER, not just
-#: each against a hand-typed literal here — a literal here would only catch
-#: one of the two ever drifting, not the pair drifting apart from each
-#: other while each individually still "matches" this constant).
+#: The DEFAULT of compose.yaml's `vault-egress` subnet. Configurable since WP
+#: DEPLOY-FIX-2 (`${VAULT_EGRESS_SUBNET:-<default>}`), default unchanged. See
+#: this module's own docstring for why compose's default and tinyproxy.conf's
+#: static default are also checked against EACH OTHER, not just each against
+#: this literal.
 _EXPECTED_VAULT_EGRESS_SUBNET = "172.30.238.0/24"
+#: The exact interpolation expression, colon form: a BLANK value must fall back
+#: to the default too, because a blank subnet is invalid (docs/LEARNINGS.md,
+#: `${VAR-}` vs `${VAR:-}`).
+_EXPECTED_SUBNET_EXPR = "${VAULT_EGRESS_SUBNET:-" + _EXPECTED_VAULT_EGRESS_SUBNET + "}"
 
 
 @pytest.fixture(scope="module")
@@ -202,9 +210,10 @@ def test_vault_egress_network_is_internal(compose_text: str) -> None:
 
 def test_vault_egress_subnet_is_pinned(compose_text: str) -> None:
     networks_block = _top_level_block(compose_text, "networks")
-    assert f"subnet: {_EXPECTED_VAULT_EGRESS_SUBNET}" in networks_block, (
+    assert f"subnet: {_EXPECTED_SUBNET_EXPR}" in networks_block, (
         f"deploy/compose.yaml's vault-egress network no longer pins the "
-        f"subnet {_EXPECTED_VAULT_EGRESS_SUBNET} -- "
+        f"subnet as {_EXPECTED_SUBNET_EXPR} (configurable, colon form, "
+        f"default {_EXPECTED_VAULT_EGRESS_SUBNET}) -- "
         "deploy/proxy/tinyproxy.conf's own Allow directive names this exact "
         "CIDR; changing one without the other silently breaks the proxy's "
         "client-allowlist stage for real traffic (see this module's "
@@ -399,14 +408,44 @@ def test_tinyproxy_conf_allow_subnet_matches_compose_vault_egress_subnet() -> No
     compose_text = COMPOSE_PATH.read_text(encoding="utf-8")
     conf_text = PROXY_TINYPROXY_CONF_PATH.read_text(encoding="utf-8")
     networks_block = _top_level_block(compose_text, "networks")
-    compose_match = re.search(r"subnet:\s*(\S+)", networks_block)
-    assert compose_match, "deploy/compose.yaml: could not find vault-egress's subnet: line at all"
+    # WP DEPLOY-FIX-2: compose states the subnet as
+    # ${VAULT_EGRESS_SUBNET:-<default>}; the DEFAULT is what tinyproxy.conf's
+    # static line (the template the entrypoint renders from) must equal.
+    compose_match = re.search(
+        r"subnet:\s*\$\{VAULT_EGRESS_SUBNET:-([^}]+)\}", networks_block
+    )
+    assert compose_match, (
+        "deploy/compose.yaml: could not find vault-egress's "
+        "subnet: ${VAULT_EGRESS_SUBNET:-<default>} line at all"
+    )
+    proxy_env_match = re.search(
+        r"^\s+VAULT_EGRESS_SUBNET:\s*\$\{VAULT_EGRESS_SUBNET:-([^}]+)\}\s*$",
+        _service_block(compose_text, "vault-proxy"),
+        re.MULTILINE,
+    )
+    assert proxy_env_match, (
+        "deploy/compose.yaml: vault-proxy does not forward "
+        "VAULT_EGRESS_SUBNET: ${VAULT_EGRESS_SUBNET:-<default>} -- the "
+        "entrypoint renders the client Allow line from it and refuses to "
+        "start without it."
+    )
+    assert proxy_env_match.group(1) == compose_match.group(1), (
+        f"vault-proxy's VAULT_EGRESS_SUBNET default ({proxy_env_match.group(1)}) "
+        f"differs from the vault-egress network's ({compose_match.group(1)}) "
+        "-- with the variable unset, the proxy would admit a range vault-api "
+        "is not in."
+    )
     # Specifically the CIDR-shaped Allow line (contains "/") -- tinyproxy.conf
     # also has a plain `Allow 127.0.0.1` loopback line with no such shape,
     # which a bare `^Allow\s+(\S+)$` search would find FIRST and wrongly
     # compare against compose's subnet.
+    conf_matches = re.findall(r"^Allow\s+(\d[\d.]*/\d+)\s*$", conf_text, re.MULTILINE)
+    assert len(conf_matches) == 1, (
+        "deploy/proxy/tinyproxy.conf must have exactly ONE Allow <cidr>/<bits> "
+        f"line (the static default the entrypoint replaces); found {conf_matches!r}"
+    )
     conf_match = re.search(r"^Allow\s+(\d[\d.]*/\d+)\s*$", conf_text, re.MULTILINE)
-    assert conf_match, "deploy/proxy/tinyproxy.conf: could not find an Allow <cidr>/<bits> line at all"
+    assert conf_match
     assert compose_match.group(1) == conf_match.group(1), (
         f"deploy/compose.yaml's vault-egress subnet ({compose_match.group(1)}) "
         f"and deploy/proxy/tinyproxy.conf's Allow CIDR "
@@ -497,24 +536,38 @@ def _run_shell_validator(raw_entry: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout.strip()
 
 
+_UNSET = object()
+
+
 def _run_entrypoint(
-    egress_allow: str, tmp_path: Path
+    egress_allow: str,
+    tmp_path: Path,
+    egress_subnet: object = _EXPECTED_VAULT_EGRESS_SUBNET,
+    conf_template: Path = PROXY_TINYPROXY_CONF_PATH,
 ) -> tuple[int, str, Path]:
     """Run the REAL `docker-entrypoint.sh` end to end (rendering into a
-    throwaway filter file, then a harmless final command instead of
-    tinyproxy — `VAULT_PROXY_FILTER_FILE_FOR_TESTS`, added specifically for
-    this test, see that script's own comment on the variable). No Docker,
-    no root, no `/etc` involved. Returns
+    throwaway filter file and a throwaway tinyproxy.conf, then a harmless
+    final command instead of tinyproxy — the `VAULT_PROXY_*_FOR_TESTS`
+    overrides, see that script's own comment on them). No Docker, no root,
+    no `/etc` involved. ``egress_subnet=_UNSET`` leaves VAULT_EGRESS_SUBNET
+    out of the environment entirely. The rendered config lands at
+    ``tmp_path / "tinyproxy.conf"``. Returns
     ``(exit_code, combined_stdout_stderr, filter_file_path)``.
     """
     filter_file = tmp_path / "filter"
+    env = {
+        "VAULT_EGRESS_ALLOW": egress_allow,
+        "VAULT_PROXY_FILTER_FILE_FOR_TESTS": str(filter_file),
+        "VAULT_PROXY_CONF_TEMPLATE_FOR_TESTS": str(conf_template),
+        "VAULT_PROXY_CONF_FILE_FOR_TESTS": str(tmp_path / "tinyproxy.conf"),
+        "PATH": "/usr/bin:/bin",
+    }
+    if egress_subnet is not _UNSET:
+        assert isinstance(egress_subnet, str)
+        env["VAULT_EGRESS_SUBNET"] = egress_subnet
     proc = subprocess.run(
         [_SH, str(PROXY_ENTRYPOINT_PATH), "true"],
-        env={
-            "VAULT_EGRESS_ALLOW": egress_allow,
-            "VAULT_PROXY_FILTER_FILE_FOR_TESTS": str(filter_file),
-            "PATH": "/usr/bin:/bin",
-        },
+        env=env,
         capture_output=True,
         text=True,
         timeout=10,
@@ -671,9 +724,253 @@ def test_tinyproxy_conf_has_filter_default_deny_yes() -> None:
 
 def test_tinyproxy_conf_has_the_filter_directive() -> None:
     conf_text = PROXY_TINYPROXY_CONF_PATH.read_text(encoding="utf-8")
-    assert re.search(r'^Filter\s+"/etc/tinyproxy/filter"\s*$', conf_text, re.MULTILINE), (
+    assert re.search(r'^Filter\s+"/run/tinyproxy/filter"\s*$', conf_text, re.MULTILINE), (
         "deploy/proxy/tinyproxy.conf is missing the 'Filter "
-        '"/etc/tinyproxy/filter"\' directive -- without it, '
+        '"/run/tinyproxy/filter"\' directive -- without it, '
         "FilterDefaultDeny has nothing to consult and tinyproxy behaves as "
         "an unrestricted forward proxy."
+    )
+
+
+# ==========================================================================
+# 9. WP DEPLOY-FIX-2: the client `Allow` line is rendered from
+#    VAULT_EGRESS_SUBNET, strictly validated, fail closed. Every test below
+#    runs the REAL shell artifacts under `sh` (validate-subnet.sh directly,
+#    docker-entrypoint.sh end to end), same rule as section 7.
+# ==========================================================================
+
+
+def _run_subnet_validator(value: str) -> int:
+    """Source `validate-subnet.sh` and call `validate_egress_subnet` with
+    ``value`` passed through the environment (same reason as
+    `_run_shell_validator`). Returns the exit code."""
+    script = f'. "{PROXY_SUBNET_VALIDATOR_PATH}"\nvalidate_egress_subnet "$VALUE_UNDER_TEST"\n'
+    proc = subprocess.run(
+        [_SH, "-c", script],
+        env={"VALUE_UNDER_TEST": value, "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return proc.returncode
+
+
+_SUBNET_CASES: list[tuple[str, str, bool]] = [
+    ("default", "172.30.238.0/24", True),
+    ("verify-stack's subnet", "172.30.239.0/24", True),
+    ("prefix 8 (lower bound)", "10.0.0.0/8", True),
+    ("prefix 30 (upper bound)", "192.168.77.0/30", True),
+    ("octets 0 and 255", "0.255.0.0/16", True),
+    ("empty", "", False),
+    ("wildcard", "*", False),
+    ("all addresses", "0.0.0.0/0", False),
+    ("prefix 7", "10.0.0.0/7", False),
+    ("prefix 31", "10.0.0.0/31", False),
+    ("prefix 32", "10.0.0.1/32", False),
+    ("prefix leading zero", "10.0.0.0/08", False),
+    ("prefix three digits", "10.0.0.0/024", False),
+    ("no prefix", "172.30.238.0", False),
+    ("empty prefix", "172.30.238.0/", False),
+    ("two slashes", "172.30.238.0/24/24", False),
+    ("octet 256", "172.30.256.0/24", False),
+    ("octet leading zero", "172.030.238.0/24", False),
+    ("four-digit octet", "1720.30.238.0/24", False),
+    ("three octets", "172.30.238/24", False),
+    ("five octets", "172.30.238.0.1/24", False),
+    ("empty octet", "172..238.0/24", False),
+    ("trailing dot", "172.30.238.0./24", False),
+    ("leading dot", ".172.30.238.0/24", False),
+    ("trailing space", "172.30.238.0/24 ", False),
+    ("leading space", " 172.30.238.0/24", False),
+    ("two CIDRs", "172.30.238.0/24 10.0.0.0/8", False),
+    ("comma list", "172.30.238.0/24,10.0.0.0/8", False),
+    ("newline injection", "172.30.238.0/24\nAllow 0.0.0.0/0", False),
+    ("IPv6", "fd00::/64", False),
+    ("hostname", "localhost/24", False),
+    ("negative prefix", "10.0.0.0/-8", False),
+    ("plus sign", "+10.0.0.0/8", False),
+    ("host bits set", "172.30.239.5/24", False),
+    ("host bits set, /30", "192.168.77.1/30", False),
+    ("host bits set, /8", "10.0.0.1/8", False),
+    ("network address, /20", "172.30.224.0/20", True),
+    ("host bit inside /20", "172.30.225.0/20", False),
+]
+
+
+@requires_sh
+@pytest.mark.parametrize(
+    "description,value,expect_valid", _SUBNET_CASES, ids=[c[0] for c in _SUBNET_CASES]
+)
+def test_subnet_validator_accepts_only_strict_ipv4_cidr(
+    description: str, value: str, expect_valid: bool
+) -> None:
+    rc = _run_subnet_validator(value)
+    assert (rc == 0) == expect_valid, (
+        f"[{description}] validate_egress_subnet {'accepted' if rc == 0 else 'rejected'} "
+        f"{value!r} (exit {rc}), expected {'accept' if expect_valid else 'reject'}"
+    )
+
+
+def _allow_lines(conf_text: str) -> list[str]:
+    return [
+        line.strip()
+        for line in conf_text.splitlines()
+        if re.match(r"^\s*allow\s", line, re.IGNORECASE)
+    ]
+
+
+@requires_sh
+def test_entrypoint_renders_the_allow_line_from_vault_egress_subnet(tmp_path: Path) -> None:
+    """A NON-default value proves the line comes from the variable, not from
+    the template's static default."""
+    rc, output, _ = _run_entrypoint("", tmp_path, egress_subnet="172.30.239.0/24")
+    assert rc == 0, f"entrypoint failed on a valid subnet. Output:\n{output}"
+    rendered = (tmp_path / "tinyproxy.conf").read_text(encoding="utf-8")
+    assert _allow_lines(rendered) == ["Allow 127.0.0.1", "Allow 172.30.239.0/24"], (
+        f"rendered tinyproxy.conf Allow lines are {_allow_lines(rendered)!r}; expected "
+        "exactly the loopback line plus 'Allow 172.30.239.0/24' (the env value, "
+        "replacing the template's static default)."
+    )
+    assert "client allowlist rendered: Allow 172.30.239.0/24" in output
+    # Everything but the Allow line is carried over verbatim from the template.
+    template = PROXY_TINYPROXY_CONF_PATH.read_text(encoding="utf-8")
+    assert rendered == template.replace(
+        f"Allow {_EXPECTED_VAULT_EGRESS_SUBNET}\n", "Allow 172.30.239.0/24\n"
+    ), "rendered tinyproxy.conf differs from the template by more than the one Allow line"
+
+
+@requires_sh
+@pytest.mark.parametrize(
+    "description,value",
+    [
+        ("unset", _UNSET),
+        ("blank", ""),
+        ("wildcard", "*"),
+        ("all addresses", "0.0.0.0/0"),
+        ("newline injection", "172.30.239.0/24\nAllow 0.0.0.0/0"),
+        ("trailing space", "172.30.239.0/24 "),
+    ],
+    ids=["unset", "blank", "wildcard", "all-addresses", "newline-injection", "trailing-space"],
+)
+def test_entrypoint_refuses_to_start_on_a_bad_subnet(
+    description: str, value: object, tmp_path: Path
+) -> None:
+    rc, output, filter_file = _run_entrypoint("", tmp_path, egress_subnet=value)
+    assert rc != 0, f"[{description}] entrypoint exited 0. Output:\n{output}"
+    assert "FATAL: VAULT_EGRESS_SUBNET" in output, (
+        f"[{description}] failure does not name VAULT_EGRESS_SUBNET. Output:\n{output}"
+    )
+    assert not (tmp_path / "tinyproxy.conf").exists(), (
+        f"[{description}] a tinyproxy.conf was rendered despite the refusal"
+    )
+    assert not filter_file.exists(), (
+        f"[{description}] the filter file was rendered: the subnet check must run first"
+    )
+
+
+@requires_sh
+@pytest.mark.parametrize(
+    "description,mutate",
+    [
+        ("no CIDR Allow line", lambda t: t.replace("Allow 172.30.238.0/24\n", "")),
+        (
+            "second CIDR Allow line",
+            lambda t: t.replace("Allow 172.30.238.0/24\n", "Allow 172.30.238.0/24\nAllow 10.0.0.0/8\n"),
+        ),
+        (
+            "extra non-CIDR Allow line",
+            lambda t: t.replace("Allow 127.0.0.1\n", "Allow 127.0.0.1\nallow 10.1.2.3\n"),
+        ),
+    ],
+    ids=["no-cidr-line", "second-cidr-line", "extra-host-line"],
+)
+def test_entrypoint_post_render_check_refuses_a_template_drift(
+    description: str, mutate: Callable[[str], str], tmp_path: Path
+) -> None:
+    """The post-render assertion: whatever the template drifts into, the
+    rendered config must have exactly the loopback line plus ONE line equal
+    to the env value, or the container refuses to start."""
+    template = tmp_path / "tinyproxy.conf.template"
+    template.write_text(mutate(PROXY_TINYPROXY_CONF_PATH.read_text(encoding="utf-8")), encoding="utf-8")
+    rc, output, _ = _run_entrypoint("", tmp_path, egress_subnet="172.30.239.0/24", conf_template=template)
+    assert rc != 0, f"[{description}] entrypoint exited 0. Output:\n{output}"
+    assert "does not have exactly one client Allow line" in output, output
+    assert not (tmp_path / "tinyproxy.conf").exists()
+
+
+def test_proxy_dockerfile_ships_the_template_and_the_subnet_validator() -> None:
+    """The entrypoint's defaults must point at what the image actually ships:
+    the conf as a template, the stock conf deleted (fail closed if the render
+    is bypassed), and validate-subnet.sh next to the entrypoint."""
+    dockerfile = PROXY_DOCKERFILE_PATH.read_text(encoding="utf-8")
+    entrypoint = PROXY_ENTRYPOINT_PATH.read_text(encoding="utf-8")
+    assert re.search(
+        r"^COPY tinyproxy\.conf /etc/tinyproxy/tinyproxy\.conf\.template\s*$", dockerfile, re.MULTILINE
+    )
+    assert re.search(
+        r"^COPY validate-subnet\.sh /usr/local/bin/validate-subnet\.sh\s*$", dockerfile, re.MULTILINE
+    )
+    assert "rm -f /etc/tinyproxy/tinyproxy.conf;" in dockerfile
+    assert ":-/etc/tinyproxy/tinyproxy.conf.template}" in entrypoint
+    assert ":-/run/tinyproxy/tinyproxy.conf}" in entrypoint
+    assert ":-/run/tinyproxy/filter}" in entrypoint
+    assert '"-c", "/run/tinyproxy/tinyproxy.conf"' in dockerfile
+
+
+def _dockerfile_run_lines(dockerfile: str) -> list[str]:
+    """Every shell command inside the Dockerfile's RUN instructions, one per
+    `;`-separated step, with line continuations joined and comments dropped."""
+    joined = re.sub(r"\\\n", " ", "\n".join(
+        line for line in dockerfile.splitlines() if not line.lstrip().startswith("#")
+    ))
+    steps: list[str] = []
+    for line in joined.splitlines():
+        if line.startswith("RUN "):
+            steps.extend(part.strip() for part in line[4:].split(";") if part.strip())
+    return steps
+
+
+def test_proxy_template_directory_is_never_owned_by_the_proxy_account() -> None:
+    """WP DEPLOY-FIX-2 round 2 (B1): the rendered config and filter live in
+    /run/tinyproxy/; /etc/tinyproxy/ (the template's directory) stays
+    root-owned. If it were chowned to `tinyproxy`, the running proxy could
+    replace the template it is re-rendered from at every start."""
+    dockerfile = PROXY_DOCKERFILE_PATH.read_text(encoding="utf-8")
+    steps = _dockerfile_run_lines(dockerfile)
+    for step in steps:
+        if step.startswith("chown") and "tinyproxy:" in step:
+            assert "/etc/tinyproxy" not in step, (
+                f"deploy/proxy/Dockerfile chowns /etc/tinyproxy to the proxy account: {step!r}"
+            )
+    assert "chown -R tinyproxy:tinyproxy /run/tinyproxy" in steps
+    assert "chown -R root:root /etc/tinyproxy" in steps
+    assert "chmod 0755 /etc/tinyproxy" in steps
+    assert "chmod 0444 /etc/tinyproxy/tinyproxy.conf.template" in steps
+    # The template path the entrypoint reads must be in that root-owned dir,
+    # and nothing the entrypoint writes may be.
+    entrypoint = PROXY_ENTRYPOINT_PATH.read_text(encoding="utf-8")
+    assert ":-/etc/tinyproxy/tinyproxy.conf.template}" in entrypoint
+    for var in ("FILTER_FILE", "CONF_FILE"):
+        match = re.search(rf'^{var}="\$\{{[A-Z_]+:-([^}}]+)\}}"$', entrypoint, re.MULTILINE)
+        assert match, f"docker-entrypoint.sh: no {var}= default found"
+        assert match.group(1).startswith("/run/tinyproxy/"), (
+            f"docker-entrypoint.sh's {var} default {match.group(1)!r} is outside /run/tinyproxy/"
+        )
+
+
+@pytest.mark.parametrize("network", ["vault-lan", "vault-egress"])
+def test_lock_networks_disable_ipv6(compose_text: str, network: str) -> None:
+    """WP DEPLOY-FIX-2 round 2: the IPv4 lock rests on masquerade being off
+    on vault-lan; IPv6 has no NAT to turn off. A daemon that gives new
+    networks IPv6 by default (measured 2026-10-01) would hand vault-api an
+    IPv6 address and, on a host with routed IPv6, a path past the proxy."""
+    networks_block = _top_level_block(compose_text, "networks")
+    block = re.search(
+        rf"^  {re.escape(network)}:\s*\n((?:^(?:    |  #).*\n?)*)",
+        networks_block,
+        re.MULTILINE,
+    )
+    assert block, f"deploy/compose.yaml: top-level networks: block has no {network}: entry"
+    assert re.search(r"^    enable_ipv6:\s*false\s*$", block.group(1), re.MULTILINE), (
+        f"deploy/compose.yaml's {network} network does not set `enable_ipv6: false`"
     )

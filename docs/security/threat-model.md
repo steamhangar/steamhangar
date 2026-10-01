@@ -1161,6 +1161,15 @@ Named plainly, as out of scope, rather than implied to be covered:
   host to a container needs no masquerade either way — both are
   structural properties of the network topology existing at all, not
   omissions this package chose to leave unfixed in application code.
+- **The egress lock is IPv4 by construction, so IPv6 is switched off on
+  its networks (WP DEPLOY-FIX-2, 2026-10-01).** The lock relies on
+  masquerade being off on `vault-lan`; IPv6 has no NAT to switch off. A
+  Docker daemon that gives new networks IPv6 by default (measured on the
+  test host: `vault-egress` received an `fdd0:…/64` subnet) could otherwise
+  hand vault-api a direct IPv6 route past vault-proxy on a host with routed
+  IPv6. `vault-lan` and `vault-egress` therefore set `enable_ipv6: false`;
+  `deploy/tests/verify-stack.sh` step 6l checks live that both networks
+  have IPv6 disabled and that vault-api holds no IPv6 address on either.
 - **The egress proxy filters by host, not by port (WP 5.3 review P-1).**
   `deploy/proxy/tinyproxy.conf` restricts ports for neither request kind.
   It has no `ConnectPort` line, and with none tinyproxy permits `CONNECT`

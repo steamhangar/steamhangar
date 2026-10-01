@@ -38,7 +38,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # wp/** = work-package branches: the maintainer merges them into main
+    # only after this workflow is green on the branch itself (2026-10-01),
+    # so the gate must run on the branch push, not only on a pull request.
+    branches: [main, "wp/**"]
   pull_request:
   schedule:
     # 04:00 UTC -- outside US/EU business hours, when both the real Steam

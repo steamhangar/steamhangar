@@ -40,7 +40,14 @@ RUN set -eux; \
         tinyproxy=1.11.3-r0; \
     tinyproxy -v
 
-COPY tinyproxy.conf /etc/tinyproxy/tinyproxy.conf
+# Shipped as a TEMPLATE (WP DEPLOY-FIX-2): the entrypoint renders
+# /run/tinyproxy/tinyproxy.conf from it at every start, replacing the static
+# default client `Allow <cidr>` line with VAULT_EGRESS_SUBNET. The template
+# lives in /etc/tinyproxy/, which stays root:root 0755 with the template
+# root:root 0444 (below): the running proxy, as the unprivileged `tinyproxy`
+# account, can change its own RUNNING config in /run/tinyproxy/, but never
+# the source that config is rebuilt from at each start.
+COPY tinyproxy.conf /etc/tinyproxy/tinyproxy.conf.template
 COPY docker-entrypoint.sh /usr/local/bin/vault-proxy-entrypoint.sh
 # Sourced by the entrypoint above (round-2 review S2/N4) via
 # `. "$(dirname "$0")/validate-hostname.sh"` -- MUST land in the same
@@ -48,18 +55,29 @@ COPY docker-entrypoint.sh /usr/local/bin/vault-proxy-entrypoint.sh
 # resolve, which is why this is a second COPY into the same target
 # directory rather than a subdirectory.
 COPY validate-hostname.sh /usr/local/bin/validate-hostname.sh
+# Same rule for the subnet check (WP DEPLOY-FIX-2).
+COPY validate-subnet.sh /usr/local/bin/validate-subnet.sh
 
-# The apk package ships tinyproxy.conf owned by root, mode 0644 -- overwritten
-# above by our own reviewed copy, then re-chowned (with the rest of
-# /etc/tinyproxy/) to the `tinyproxy` account the package also creates
-# (uid 100, gid 101), because the entrypoint below renders the filter file
-# into this SAME directory and runs as that uid for its entire life -- there
-# is no root step at container start to chown it for a first write the way
-# core/Dockerfile's preflight does for vault-core's bind mount.
+# The apk package ships its own stock tinyproxy.conf (root, 0644). It is
+# DELETED here (WP DEPLOY-FIX-2): the entrypoint renders the real config from
+# our template at every start, and if that render is ever bypassed, tinyproxy
+# must fail to start for lack of a config rather than run the stock one (fail
+# closed). Only /run/tinyproxy/ is chowned to the `tinyproxy` account the
+# package also creates (uid 100, gid 101): the entrypoint renders the config
+# and the filter file there, and the pid file lives there too. That process
+# runs as that uid for its entire life -- there is no root step at container
+# start to chown anything for a first write the way core/Dockerfile's
+# preflight does for vault-core's bind mount. /etc/tinyproxy/ is deliberately
+# NOT chowned: root:root 0755, template root:root 0444, so nothing running in
+# this container can replace the reviewed source.
 RUN set -eux; \
-    chmod 0755 /usr/local/bin/vault-proxy-entrypoint.sh /usr/local/bin/validate-hostname.sh; \
+    rm -f /etc/tinyproxy/tinyproxy.conf; \
+    chmod 0755 /usr/local/bin/vault-proxy-entrypoint.sh /usr/local/bin/validate-hostname.sh /usr/local/bin/validate-subnet.sh; \
     mkdir -p /run/tinyproxy; \
-    chown -R tinyproxy:tinyproxy /etc/tinyproxy /run/tinyproxy
+    chown -R tinyproxy:tinyproxy /run/tinyproxy; \
+    chown -R root:root /etc/tinyproxy; \
+    chmod 0755 /etc/tinyproxy; \
+    chmod 0444 /etc/tinyproxy/tinyproxy.conf.template
 
 EXPOSE 8888
 
@@ -80,4 +98,4 @@ ENTRYPOINT ["/usr/local/bin/vault-proxy-entrypoint.sh"]
 # -d: stay in the foreground (see core/Dockerfile-style containers -- a
 # daemonizing default would make the container's lifetime detached from
 # tinyproxy's own, and `docker stop` would have nothing left to signal).
-CMD ["tinyproxy", "-d", "-c", "/etc/tinyproxy/tinyproxy.conf"]
+CMD ["tinyproxy", "-d", "-c", "/run/tinyproxy/tinyproxy.conf"]
