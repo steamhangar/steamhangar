@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
+from vault_api import manifest_archive
 from vault_api.manifest_archive import archive_filename, archive_manifest, prune_archive
 
 
@@ -135,3 +138,118 @@ def test_prune_archive_on_a_missing_directory_returns_empty_and_does_not_raise(
 ) -> None:
     removed = prune_archive(str(tmp_path / "never-created"), depotid=441, keep=3)
     assert removed == []
+
+
+def test_prune_archive_survives_an_entry_that_cannot_be_stated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """WP API-FIX-2, N2: the docstring promises "never raises", but the sort
+    key called ``entry.stat()`` outside the try -- an entry vanishing between
+    scandir and the sort raised ``OSError`` out of an ingestion pass."""
+    archive_dir = tmp_path / "archive"
+    _archive_n(archive_dir, depotid=441, manifestids=["1", "2", "3"])
+
+    class _Vanished:
+        name = "441_9.bin"
+        path = str(archive_dir / "441_9.bin")
+
+        def is_file(self) -> bool:
+            return True
+
+        def stat(self):
+            raise FileNotFoundError(self.path)
+
+    real_scandir = os.scandir
+
+    def fake_scandir(path):
+        return list(real_scandir(path)) + [_Vanished()]
+
+    monkeypatch.setattr(manifest_archive.os, "scandir", fake_scandir)
+    with caplog.at_level("WARNING", logger="vault_api.manifest_archive"):
+        removed = prune_archive(str(archive_dir), depotid=441, keep=2)
+
+    assert removed == ["441_1.bin"]
+    assert sorted(os.listdir(archive_dir)) == ["441_2.bin", "441_3.bin"]
+    assert any("could not stat" in r.getMessage() for r in caplog.records)
+
+
+# -- mtime ties (WP API-FIX-2) ------------------------------------------------
+# Kernel file timestamps come from a coarse clock tick, so archives written
+# in quick succession can share one st_mtime_ns; ranking then must not fall
+# back to scandir order (which is hash order, not insertion order).
+
+
+def _archive_with_equal_mtimes(archive_dir: Path, depotid: int, manifestids: list[str]) -> None:
+    for manifestid in manifestids:
+        src = archive_dir.parent / f"src-{depotid}-{manifestid}.bin"
+        src.write_bytes(f"payload-{manifestid}".encode())
+        dest = archive_manifest(
+            str(archive_dir), depotid=depotid, manifestid=manifestid, src_path=str(src)
+        )
+        os.utime(dest, ns=(1_000_000_000, 1_000_000_000))
+
+
+def test_prune_archive_always_keeps_current_on_an_mtime_tie(tmp_path: Path) -> None:
+    archive_dir = tmp_path / "archive"
+    # "1" sorts lowest by name, so only the explicit current pin can save it.
+    _archive_with_equal_mtimes(archive_dir, depotid=441, manifestids=["3", "2", "1"])
+
+    removed = prune_archive(str(archive_dir), depotid=441, keep=1, current="441_1.bin")
+
+    assert sorted(os.listdir(archive_dir)) == ["441_1.bin"]
+    assert set(removed) == {"441_2.bin", "441_3.bin"}
+
+
+def test_prune_archive_keeps_current_even_when_its_mtime_is_older(tmp_path: Path) -> None:
+    archive_dir = tmp_path / "archive"
+    _archive_n(archive_dir, depotid=441, manifestids=["1", "2", "3"])
+
+    prune_archive(str(archive_dir), depotid=441, keep=1, current="441_1.bin")
+
+    assert sorted(os.listdir(archive_dir)) == ["441_1.bin"]
+
+
+def test_prune_archive_breaks_remaining_ties_deterministically(tmp_path: Path) -> None:
+    for run in range(5):
+        archive_dir = tmp_path / f"archive-{run}"
+        _archive_with_equal_mtimes(archive_dir, depotid=441, manifestids=["a", "b", "c", "d"])
+
+        prune_archive(str(archive_dir), depotid=441, keep=2)
+
+        assert sorted(os.listdir(archive_dir)) == ["441_c.bin", "441_d.bin"]
+
+
+def test_archive_manifest_stamps_strictly_increasing_mtimes(tmp_path: Path) -> None:
+    archive_dir = tmp_path / "archive"
+    src = tmp_path / "src.bin"
+    src.write_bytes(b"payload")
+
+    mtimes = [
+        os.stat(
+            archive_manifest(str(archive_dir), depotid=441, manifestid=str(i), src_path=str(src))
+        ).st_mtime_ns
+        for i in range(5)
+    ]
+
+    assert mtimes == sorted(mtimes)
+    assert len(set(mtimes)) == len(mtimes)
+
+
+def test_archive_manifest_survives_a_utime_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    src = tmp_path / "source.bin"
+    src.write_bytes(b"payload")
+    archive_dir = tmp_path / "archive"
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("utime not permitted")
+
+    monkeypatch.setattr(manifest_archive.os, "utime", _boom)
+
+    with caplog.at_level("WARNING", logger="vault_api.manifest_archive"):
+        dest = archive_manifest(str(archive_dir), depotid=441, manifestid="123", src_path=str(src))
+
+    assert Path(dest).read_bytes() == b"payload"
+    assert sorted(os.listdir(archive_dir)) == ["441_123.bin"]
+    assert "could not stamp mtime" in caplog.text

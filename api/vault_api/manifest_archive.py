@@ -22,6 +22,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +80,24 @@ def archive_manifest(archive_dir: str, *, depotid: int, manifestid: str, src_pat
         except OSError:  # pragma: no cover - best effort cleanup
             pass
         raise
+    # Stamp a fine-grained mtime (WP API-FIX-2): the kernel sets file
+    # timestamps from a coarse clock (one tick, typically 1-4 ms), so
+    # archives written in quick succession share an st_mtime_ns and
+    # prune_archive's "newest" ranking would fall back to scandir order.
+    # time.time_ns() is not tick-coarse, so ingestion order survives.
+    # The archive is already complete here, so a utime failure only costs
+    # ranking precision -- logged, never reported as an archive failure.
+    now_ns = time.time_ns()
+    try:
+        os.utime(dest_path, ns=(now_ns, now_ns))
+    except OSError as exc:
+        logger.warning("manifest-archive: could not stamp mtime on %s: %s", dest_path, exc)
     return dest_path
 
 
-def prune_archive(archive_dir: str, *, depotid: int, keep: int) -> list[str]:
+def prune_archive(
+    archive_dir: str, *, depotid: int, keep: int, current: str | None = None
+) -> list[str]:
     """Delete archived manifests for ``depotid`` beyond the newest ``keep``.
 
     "Newest" is decided by the archived file's own mtime (set the moment
@@ -96,6 +111,14 @@ def prune_archive(archive_dir: str, *, depotid: int, keep: int) -> list[str]:
     matching a stored ``441_...bin``) because the delimiter is the literal
     underscore immediately after the digits: ``"44_"`` is not a prefix of
     ``"441_123.bin"``.
+
+    ``current`` (optional) names the archive file this ingestion pass just
+    wrote; it always ranks newest, whatever the timestamps say -- the
+    manifest just ingested is by definition the newest one and must never be
+    the one pruned. Remaining mtime ties (two files stamped in the same
+    nanosecond, or older files written before ``archive_manifest`` stamped
+    fine-grained mtimes) are broken by filename, so the result is
+    deterministic rather than dependent on scandir order.
 
     Never raises: a missing/unreadable archive directory or an unremovable
     stale file is logged and otherwise ignored — pruning is best-effort
@@ -113,9 +136,22 @@ def prune_archive(archive_dir: str, *, depotid: int, keep: int) -> list[str]:
         logger.warning("manifest-archive: could not list %s for pruning: %s", archive_dir, exc)
         return []
 
-    entries.sort(key=lambda entry: entry.stat().st_mtime_ns, reverse=True)
+    # stat() inside the try as well (WP API-FIX-2, N2): the "never raises"
+    # promise above used to stop at the listing, but an entry can vanish or
+    # become unreadable between scandir and the sort key. An entry that
+    # cannot be stat'ed is logged and left alone -- it cannot be ranked, so
+    # it is neither kept-by-age nor pruned; the next pass sees it again.
+    dated: list[tuple[int, os.DirEntry[str]]] = []
+    for entry in entries:
+        try:
+            dated.append((entry.stat().st_mtime_ns, entry))
+        except OSError as exc:
+            logger.warning("manifest-archive: could not stat %s for pruning: %s", entry.path, exc)
+    dated.sort(
+        key=lambda item: (item[1].name == current, item[0], item[1].name), reverse=True
+    )
     removed: list[str] = []
-    for stale in entries[keep:]:
+    for _mtime, stale in dated[keep:]:
         try:
             os.unlink(stale.path)
             removed.append(stale.name)

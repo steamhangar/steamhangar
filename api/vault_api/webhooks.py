@@ -106,6 +106,18 @@ does NOT do this on its own; a userinfo-carrying URL handed to it directly
 fails to resolve, measured) and is redacted from every LOG line
 (``redact_url``) — that is about not leaking a secret into ``docker logs``,
 not about distrusting the operator.
+
+**Redirects are refused** (WP API-FIX-2, S1; docs/LEARNINGS.md "urllib
+follows redirects by default"). Delivery goes through ``_OPENER``, built
+with ``_RefuseRedirects`` exactly like ``oracle.py`` and ``steam_relay.py``:
+a ``3xx`` from the receiver is a failed attempt, never a second request to
+whatever ``Location`` named. The reason is the ``Authorization`` header
+above — ``urllib``'s stock redirect handler re-sends the original headers
+to the new host, so following would hand the operator's Basic-Auth
+credentials to a host the operator never configured. ``build_opener`` keeps
+the stock ``ProxyHandler`` (``_RefuseRedirects`` replaces only the redirect
+handler), so ADR-0011's "honours ``HTTP_PROXY``/``HTTPS_PROXY``" fact stays
+true.
 """
 
 from __future__ import annotations
@@ -176,6 +188,30 @@ def redact_url(url: str) -> str:
         return url
     host_part = parts.netloc.rsplit("@", 1)[1]
     return urlunsplit((parts.scheme, f"***@{host_part}", parts.path, parts.query, parts.fragment))
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Turn any redirect into an error instead of following it — same
+    reasoning as ``oracle._RefuseRedirects``, plus one more: this module's
+    requests carry an ``Authorization`` header built from the configured
+    URL's userinfo, and following a redirect would forward that header to a
+    host the operator never named.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+#: Module-level like ``oracle._OPENER``: ``build_opener`` adds every stock
+#: handler (including ``ProxyHandler``, which is what makes ADR-0011's
+#: ``HTTP_PROXY`` egress lock apply to webhooks) and swaps in only the
+#: redirect handler. ``ProxyHandler`` reads ``HTTP_PROXY``/``HTTPS_PROXY``
+#: when it is constructed, i.e. at import time here (measured: without a
+#: proxy in the environment it registers nothing and is not even listed in
+#: the opener's handlers) -- fine for the container, where compose sets the
+#: variables before Python starts, and the same shape the other two openers
+#: already have.
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
 
 
 def _build_request(url: str, body: bytes) -> urllib.request.Request:
@@ -334,7 +370,8 @@ class WebhookNotifier:
 
         Runs entirely on the background thread — the only place an HTTP call
         happens in this module. Any failure (connection refused, timeout, a
-        non-2xx status raised by ``urlopen`` as ``HTTPError``, a malformed
+        non-2xx status raised by the opener as ``HTTPError`` — which includes
+        every ``3xx``, since ``_OPENER`` refuses redirects — a malformed
         URL) is treated identically: try again, and after the last attempt,
         log once at WARNING with the event name and the reason. Never a
         traceback at ERROR — a receiver being down is an operational fact
@@ -347,7 +384,7 @@ class WebhookNotifier:
         for attempt in range(1, DELIVERY_ATTEMPTS + 1):
             try:
                 request = _build_request(url, item.body)
-                with urllib.request.urlopen(request, timeout=timeout):
+                with _OPENER.open(request, timeout=timeout):
                     pass
                 return
             except Exception as exc:  # noqa: BLE001 - any failure just means "retry"

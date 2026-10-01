@@ -906,6 +906,20 @@ their own, unrelated dependency chains (§1). A reader who assumes
 broadly" would be wrong: it locks exactly one settings-write endpoint and
 nothing about the trust model in §1 changes because of it.
 
+**One more write route that looks like a setting and is NOT under the
+lock:** `PUT /v1/steam/key` and `DELETE /v1/steam/key`
+(both routes in `api/vault_api/routers/steam.py`) store and clear the Steam Web
+API relay key in the database and stay writable with
+`VAULT_SETTINGS_READONLY=1` (verified by reading the router: it has no
+dependency on `settings_readonly`). This is deliberate for now, not an
+oversight (pre-freeze review, WP API-FIX-2): there is no environment
+variable for the relay key, so the key has no env source the lock could
+"restore pure env semantics" to -- gating those routes would make the relay
+unconfigurable in every readonly deployment. Gating them together with a
+`VAULT_STEAM_RELAY_KEY` env source is post-release work (ADR-0009
+addendum 2026-09-30). Until then, "read-only" means: `PATCH /v1/settings`
+is locked; the relay key is not.
+
 ### What the bypass banner means
 
 This is unrelated to authentication or "bypass" in the security sense —

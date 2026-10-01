@@ -136,6 +136,19 @@ DEFAULT_SCHEDULE_INTERVAL_MINUTES = 180
 #: without the Steam Deck dropping out of the set.
 DEFAULT_SCHEDULE_CLIENT_STALE_DAYS = 7
 
+#: Upper bounds for every integer setting that ends up inside a
+#: ``datetime.timedelta`` (WP API-FIX-2, review finding S2). ``timedelta``
+#: raises ``OverflowError`` past ~999 999 999 days, and a digits-only grammar
+#: with no ceiling let an operator (or a ``PATCH /v1/settings`` typo) store a
+#: value that made ``GET /v1/games``, ``GET /v1/games/{appid}`` and
+#: ``GET /v1/schedule`` answer ``500`` and every scheduler tick log a
+#: traceback -- the exact "fails hours later in a thread" failure the strict
+#: grammar exists to prevent. The caps are generous operational maxima, not
+#: tuning knobs: one leap year of minutes, ten years of days.
+MAX_INTERVAL_MINUTES = 527_040  # 366 * 24 * 60
+MAX_COOLDOWN_MINUTES = MAX_INTERVAL_MINUTES
+MAX_DAYS = 3_650
+
 
 #: WP 3.12. ``VAULT_AUTO_GC`` — should a successful prefill that actually
 #: updated something queue a garbage-collection job for that app?
@@ -408,11 +421,48 @@ def validate_webhook_url(raw: str) -> str:
         return ""
     scheme = urlsplit(text).scheme.lower()
     if scheme not in ("http", "https"):
+        # Deliberately no ``Got {raw!r}`` echo here (WP API-FIX-2, P2): a
+        # webhook URL can carry Basic-Auth userinfo, and this message ends up
+        # verbatim in a 422 response body and in the effective_settings log
+        # line for a corrupt stored override.
+        # The parsed scheme is not echoed either (WP API-FIX-2, N1): for a
+        # scheme-less ``admin:s3cr3t@host`` urlsplit reports ``admin`` as the
+        # "scheme", i.e. the username.
         raise ValueError(
-            f"must be an http:// or https:// URL (got scheme {scheme!r}), or "
-            f"blank to disable webhooks. Got {raw!r}."
+            "must be an http:// or https:// URL (the scheme must be http or "
+            "https), or blank to disable webhooks."
         )
     return text
+
+
+#: ``vault_name`` is a label that ends up in every webhook envelope and in
+#: log lines, so it gets the same "printable, bounded" rule ``client_id`` has
+#: (``routers/agent.py::_validate_client_id``). Shared by ``Settings.from_env``
+#: (``VAULT_NAME``) and ``PATCH /v1/settings`` (WP API-FIX-2, P3/S2).
+MAX_VAULT_NAME_LENGTH = 64
+
+
+def parse_vault_name(raw: str) -> str:
+    """Strip, then refuse anything over 64 characters or non-printable."""
+    text = raw.strip()
+    if len(text) > MAX_VAULT_NAME_LENGTH:
+        raise ValueError(
+            f"must be at most {MAX_VAULT_NAME_LENGTH} characters after "
+            f"trimming whitespace, got {len(text)}"
+        )
+    if not text.isprintable():
+        raise ValueError(
+            "must be printable (no control or non-printing characters); "
+            "use a plain label such as a hostname"
+        )
+    return text
+
+
+def _env_vault_name(name: str = "VAULT_NAME") -> str:
+    try:
+        return parse_vault_name(os.environ.get(name, ""))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} {exc}") from exc
 
 
 #: Accepted spellings for :func:`_env_bool`, case-insensitive.
@@ -546,8 +596,11 @@ def _default_manifest_archive_dir(db_path: str) -> str:
     return os.path.join(parent, "manifests")
 
 
-def _env_int(name: str, default: int, minimum: int = 1) -> int:
-    """Read an integer env var >= ``minimum``, falling back to ``default``.
+def _env_int(
+    name: str, default: int, minimum: int = 1, maximum: int | None = None
+) -> int:
+    """Read an integer env var >= ``minimum`` (and <= ``maximum`` when one is
+    given), falling back to ``default``.
 
     **Strict by house rule (WP 3.12, docs/LEARNINGS.md "Parsers"):** Python's
     ``int()`` is far more permissive than anybody configuring a service
@@ -582,12 +635,14 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
     if not raw.strip():
         return default
     try:
-        return parse_strict_int(raw, minimum=minimum)
+        return parse_strict_int(raw, minimum=minimum, maximum=maximum)
     except ValueError as exc:
         raise RuntimeError(f"{name} {exc}") from exc
 
 
-def parse_strict_int(raw: str, *, minimum: int = 1) -> int:
+def parse_strict_int(
+    raw: str, *, minimum: int = 1, maximum: int | None = None
+) -> int:
     """Pure grammar half of :func:`_env_int` (ADR-0009 decision 4).
 
     Everything above this function's docstring is the RATIONALE for the
@@ -602,7 +657,14 @@ def parse_strict_int(raw: str, *, minimum: int = 1) -> int:
     path. ``raw`` must already be known non-blank (blank has a different
     meaning — "unset" at startup, "invalid" at PATCH time — that only the
     caller knows how to handle).
+
+    ``maximum`` (WP API-FIX-2, S2) is the ceiling for values that feed a
+    ``timedelta``: see ``MAX_INTERVAL_MINUTES``/``MAX_DAYS``. ``None`` means
+    "no ceiling", which is right for pure counts (``VAULT_MANIFEST_KEEP``,
+    ``VAULT_EVENT_LOG_MAX_BYTES``) that overflow nothing.
     """
+    if maximum is not None and maximum < minimum:
+        raise ValueError("parse_strict_int cannot validate a maximum below the minimum")
     if minimum < 0:
         # A programming error in a CALLER (every call site in this codebase
         # passes a literal >= 0), not something ``raw`` can trigger — but a
@@ -631,6 +693,8 @@ def parse_strict_int(raw: str, *, minimum: int = 1) -> int:
         # way it has always been phrased so existing messages don't change.
         limit = "> 0" if minimum == 1 else f">= {minimum}"
         raise ValueError(f"must be {limit}, got {value}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"must be <= {maximum}, got {value}")
     return value
 
 
@@ -1250,6 +1314,22 @@ class Settings:
             )
 
         db_path = os.environ.get("VAULT_DB_PATH", "./vault.db")
+        # Same present-but-blank gap as VAULT_CACHE_ROOT below (WP API-FIX-2,
+        # P1), with a nastier consequence: ``sqlite3.connect("")`` opens a
+        # PRIVATE temporary database per connection, so every request and
+        # every background thread would see its own empty schema and nothing
+        # would ever persist -- no error, just a vault-api that forgets
+        # everything between two calls.
+        if not db_path.strip():
+            raise RuntimeError(
+                "VAULT_DB_PATH must not be blank. An absent variable falls back "
+                "to './vault.db'; a present-but-empty one (e.g. a compose key "
+                "forwarded via ${VAULT_DB_PATH} interpolation with nothing set "
+                "in .env) does not, and sqlite3 would then open a private "
+                "in-memory-like temporary database per connection -- nothing "
+                "would persist. Set VAULT_DB_PATH to a real path, or unset it "
+                "entirely to accept the './vault.db' default."
+            )
 
         # WP 4f. `.get(..., "./cache")` only supplies that default when the
         # key is ABSENT from the environment. A key that is simply not
@@ -1368,13 +1448,21 @@ class Settings:
             # feature. A negative value or anything non-integer is still
             # refused at startup — a typo must not silently become "protect
             # nothing" on a deletion path.
-            gc_grace_days=_env_int("VAULT_GC_GRACE_DAYS", DEFAULT_GC_GRACE_DAYS, minimum=0),
+            gc_grace_days=_env_int(
+                "VAULT_GC_GRACE_DAYS", DEFAULT_GC_GRACE_DAYS, minimum=0, maximum=MAX_DAYS
+            ),
             schedule_window=schedule_window,
+            # maximum= on every timedelta-fed key (WP API-FIX-2, S2): see
+            # MAX_INTERVAL_MINUTES/MAX_DAYS for the OverflowError this closes.
             schedule_interval_minutes=_env_int(
-                "VAULT_SCHEDULE_INTERVAL_MINUTES", DEFAULT_SCHEDULE_INTERVAL_MINUTES
+                "VAULT_SCHEDULE_INTERVAL_MINUTES",
+                DEFAULT_SCHEDULE_INTERVAL_MINUTES,
+                maximum=MAX_INTERVAL_MINUTES,
             ),
             schedule_client_stale_days=_env_int(
-                "VAULT_SCHEDULE_CLIENT_STALE_DAYS", DEFAULT_SCHEDULE_CLIENT_STALE_DAYS
+                "VAULT_SCHEDULE_CLIENT_STALE_DAYS",
+                DEFAULT_SCHEDULE_CLIENT_STALE_DAYS,
+                maximum=MAX_DAYS,
             ),
             auto_gc=_env_auto_gc(),
             # WP 4d / WP SWEEP-1 (ADR-0014). Blank/unset = on (see
@@ -1395,6 +1483,7 @@ class Settings:
             event_sweep_interval_minutes=_env_int(
                 "VAULT_EVENT_SWEEP_INTERVAL_MINUTES",
                 DEFAULT_EVENT_SWEEP_INTERVAL_MINUTES,
+                maximum=MAX_INTERVAL_MINUTES,
             ),
             # minimum=0 because 0 is a meaningful value here: it is the ONE
             # documented way to run the sweep (statistics, bypass detection,
@@ -1403,13 +1492,14 @@ class Settings:
                 "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES",
                 DEFAULT_MISS_TRIGGER_COOLDOWN_MINUTES,
                 minimum=0,
+                maximum=MAX_COOLDOWN_MINUTES,
             ),
             miss_trigger_max_per_sweep=_env_int(
                 "VAULT_MISS_TRIGGER_MAX_PER_SWEEP",
                 DEFAULT_MISS_TRIGGER_MAX_PER_SWEEP,
             ),
             bypass_window_days=_env_int(
-                "VAULT_BYPASS_WINDOW_DAYS", DEFAULT_BYPASS_WINDOW_DAYS
+                "VAULT_BYPASS_WINDOW_DAYS", DEFAULT_BYPASS_WINDOW_DAYS, maximum=MAX_DAYS
             ),
             client_stats_keep=_env_int(
                 "VAULT_CLIENT_STATS_KEEP", DEFAULT_CLIENT_STATS_KEEP
@@ -1430,7 +1520,7 @@ class Settings:
             webhook_timeout_seconds=_env_float(
                 "VAULT_WEBHOOK_TIMEOUT_SECONDS", DEFAULT_WEBHOOK_TIMEOUT_SECONDS
             ),
-            vault_name=os.environ.get("VAULT_NAME", "").strip(),
+            vault_name=_env_vault_name(),
             # WP 3.9. Unset/blank = no oracle, no outbound third-party request
             # — the default, and the reason the URL and timeout below are
             # harmless to have a default for.

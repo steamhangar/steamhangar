@@ -84,3 +84,23 @@ chosen over env-only).
 - The Phase 4a settings screen builds on `GET`/`PATCH /v1/settings`
   (WP 4a.6) instead of displaying "set this env var" hints.
 - Phase 4d's sweep-mode switch is one more overridable key when it lands.
+
+## Addendum 2026-09-30 — what decision 3's lock does not cover (WP API-FIX-2)
+
+Decision 3 says `VAULT_SETTINGS_READONLY=1` "disables `PATCH` entirely" and
+"restores pure env semantics". The pre-freeze project review found one
+settings-shaped write path outside it: `PUT /v1/steam/key` and
+`DELETE /v1/steam/key` (`api/vault_api/routers/steam.py`, ADR-0010's relay)
+persist the Steam Web API key in the database and are not gated by the
+flag.
+
+Decision, taken as a documentation fix rather than a code change: the
+routes stay outside the lock for the release. There is no environment
+source for the relay key, so "pure env semantics" has nothing to fall back
+to; gating the routes without one would make the relay unconfigurable in
+every readonly deployment. The honest statement is therefore recorded in
+three places — this addendum, `docs/security/threat-model.md` §7 and
+`api/README.md` "`VAULT_SETTINGS_READONLY`" — instead of rewriting decision
+3 above. Gating the key routes together with a `VAULT_STEAM_RELAY_KEY` env
+source is post-release work; when it lands, decision 3's wording becomes
+true without qualification.

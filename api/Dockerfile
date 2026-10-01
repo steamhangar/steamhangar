@@ -232,5 +232,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # startup; a second process would fail the first one's genuinely running job and
 # run two prefill workers against one SQLite file (api/README.md "Worker
 # lifecycle"). Do not add --workers.
+# --no-proxy-headers (WP API-FIX-2, N4): uvicorn defaults to trusting
+# X-Forwarded-For from 127.0.0.1 and rewriting request.client from it.
+# routers/agent.py records request.client as the agent's identity address and
+# promises it is NEVER header-derived; this flag is what makes that true.
 CMD ["python", "-m", "uvicorn", "vault_api.main:create_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8080"]
+     "--host", "0.0.0.0", "--port", "8080", "--no-proxy-headers"]

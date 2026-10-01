@@ -133,7 +133,7 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_WEBHOOK_URL`             | no       | *(empty — webhooks OFF)* | Generic JSON webhook target (WP 3.13). Unset/blank = the whole feature is off. See "Webhooks" |
 | `VAULT_WEBHOOK_EVENTS`          | no       | *(all five)* | Comma list of events to send: `job.done`, `job.error`, `job.cancelled`, `client.bypass_suspected`, `client.bypass_resolved`. Unknown names or empty entries fail at startup |
 | `VAULT_WEBHOOK_TIMEOUT_SECONDS` | no       | `5`          | Per-attempt HTTP timeout for one delivery try; **must be > 0** |
-| `VAULT_NAME`                    | no       | *(empty)*    | Optional label carried as `"vault_name"` in every webhook payload — omitted entirely when unset. Purely cosmetic, for an operator running more than one SteamHangar instance |
+| `VAULT_NAME`                    | no       | *(empty)*    | Optional label carried as `"vault_name"` in every webhook payload — omitted entirely when unset. Purely cosmetic, for an operator running more than one SteamHangar instance. Validated: at most 64 characters after trimming surrounding whitespace, printable characters only (no tab, newline or other control character inside the name); anything else refuses startup with a clear `RuntimeError` naming `VAULT_NAME`, and is answered `422` on `PATCH /v1/settings`. **Upgrade caveat:** a deployment whose existing `VAULT_NAME` is longer than 64 characters or contains a tab stops booting until the value is shortened or cleaned |
 | `VAULT_MANIFEST_ORACLE`         | no       | *(empty — oracle OFF)* | Third-party manifest oracle. Only `steamcmd_api` is implemented. **Enabling it makes vault-api send app ids to a service outside your LAN** — see "Manifest oracle" below before setting it. Any other value is refused at startup |
 | `VAULT_MANIFEST_ORACLE_URL`     | no       | `https://api.steamcmd.net/v1/info` | Base URL the oracle asks (`<base>/<appid>`). Point it at your own mirror to keep the queries on your network. Must be `http`/`https`; redirects away from it are never followed |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | no       | `10`         | Socket timeout (seconds) for one oracle request; **must be > 0**. A timeout is an ordinary "no data" outcome, never an error the API surfaces |
@@ -3862,6 +3862,13 @@ requests from one vault-api process.
   reason — **never** a full traceback at ERROR for what is usually just "the
   receiver is down right now", an operational fact about the other end, not
   a bug in this code.
+- **Redirects are never followed; a 3xx is a failed delivery.** The
+  receiver must answer the configured URL directly with a 2xx. A `3xx`
+  counts as a failed attempt (retried, then dropped with the usual WARNING)
+  and its `Location` is never contacted, so a Basic-Auth header can never be
+  handed to a different host. A receiver that redirects (e.g. `http://` ->
+  `https://`, or a trailing-slash redirect) must be configured with its final
+  URL.
 - **Drops are counted, never silent.** A full queue means delivery is
   falling behind the rate events are produced; `enqueue` drops the OLDEST
   queued event (not the newest) to make room, logs it at WARNING, and counts
@@ -5970,7 +5977,7 @@ place rather than duplicated here.
 
 | Key | Env var | `applies` | Why |
 |---|---|---|---|
-| `vault_name` | `VAULT_NAME` | `restart-required` | Only read by `WebhookNotifier._build_body`, which holds a fixed `Settings` snapshot for the notifier's lifetime — see "The honest gap" below |
+| `vault_name` | `VAULT_NAME` | `restart-required` | Only read by `WebhookNotifier._build_body`, which holds a fixed `Settings` snapshot for the notifier's lifetime — see "The honest gap" below. Value rule (shared with the env var): at most 64 characters after trimming, printable only — anything else is `422` here and a startup refusal for `VAULT_NAME` |
 | `schedule_window` | `VAULT_SCHEDULE_WINDOW` | `next_sweep` | `vault_api/scheduler.py`'s tick loop resolves `effective_settings` fresh every ~60s tick, using the connection the tick already opened |
 | `schedule_interval_minutes` | `VAULT_SCHEDULE_INTERVAL_MINUTES` | `next_sweep` | Same tick-loop resolution as `schedule_window` |
 | `schedule_client_stale_days` | `VAULT_SCHEDULE_CLIENT_STALE_DAYS` | `next_sweep` | Same tick-loop resolution |
@@ -6074,6 +6081,16 @@ works, since it never goes through the API at all. Accepted spellings:
 `1`/`true`/`yes`/`on` (true), `0`/`false`/`no`/`off`/blank (false,
 case-insensitive) — anything else is refused at startup like every other
 enum-shaped setting in `config.py`.
+
+**Not covered by the lock: `PUT`/`DELETE /v1/steam/key`.** The Steam Web
+API relay key (see "Steam Web API relay") is stored through its own routes
+in `routers/steam.py`, and those stay writable with
+`VAULT_SETTINGS_READONLY=1`. The lock exists to "restore pure env
+semantics", and the relay key has no env source to restore to (there is no
+`VAULT_STEAM_RELAY_KEY`); gating the routes today would leave a readonly
+deployment with no way to configure the relay at all. Gating them together
+with an env source for the key is post-release work (ADR-0009 addendum
+2026-09-30, `docs/security/threat-model.md` §7).
 
 ### Redaction
 

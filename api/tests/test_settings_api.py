@@ -35,6 +35,7 @@ from fastapi.testclient import TestClient
 from tests import stub_prefill
 from tests.conftest import TEST_API_KEY
 from vault_api import __version__ as VAULT_API_VERSION
+from vault_api import config
 from vault_api import scheduler as scheduler_module
 from vault_api import settings_store
 from vault_api.config import Settings
@@ -1152,3 +1153,169 @@ def test_worker_auto_gc_override_applies_to_the_next_completed_job(
 
     assert len(gc_rows) == 1
     assert gc_rows[0]["gc_execute"] == 1
+
+
+# ==========================================================================
+# WP API-FIX-2
+# ==========================================================================
+
+
+@pytest.mark.parametrize(
+    ("key", "cap"),
+    [
+        ("schedule_interval_minutes", config.MAX_INTERVAL_MINUTES),
+        ("schedule_client_stale_days", config.MAX_DAYS),
+    ],
+)
+def test_patch_over_the_timedelta_cap_is_422_and_not_persisted(
+    client: TestClient, key: str, cap: int
+) -> None:
+    """S2: before the cap, a huge digit string was stored and every consumer
+    that fed it into ``timedelta`` (GET /v1/games, GET /v1/schedule, the
+    scheduler tick) raised ``OverflowError``."""
+    response = client.patch("/v1/settings", json={key: str(cap + 1)}, headers=AUTH)
+    assert response.status_code == 422
+    assert f"must be <= {cap}" in response.json()["detail"]
+
+    conn = get_connection(client.app.state.settings.db_path)
+    try:
+        assert settings_store.get_override(conn, key) is None
+    finally:
+        conn.close()
+
+
+def test_patch_at_the_cap_keeps_games_and_schedule_answering(client: TestClient) -> None:
+    response = client.patch(
+        "/v1/settings",
+        json={
+            "schedule_interval_minutes": str(config.MAX_INTERVAL_MINUTES),
+            "schedule_client_stale_days": str(config.MAX_DAYS),
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert find(response.json(), "schedule_interval_minutes")["effective"] == (
+        config.MAX_INTERVAL_MINUTES
+    )
+
+    assert client.get("/v1/games", headers=AUTH).status_code == 200
+    assert client.get("/v1/schedule", headers=AUTH).status_code == 200
+
+
+def test_a_stored_overflowing_interval_no_longer_breaks_reads(client: TestClient) -> None:
+    """The escape-hatch path: a value written straight into the settings
+    table (or stored before the cap existed) is re-validated on every read
+    and treated as absent -- so the routes above answer 200, not 500."""
+    conn = get_connection(client.app.state.settings.db_path)
+    try:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("schedule_interval_minutes", "9" * 30, "2026-08-09T12:00:00Z"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert client.get("/v1/games", headers=AUTH).status_code == 200
+    assert client.get("/v1/schedule", headers=AUTH).status_code == 200
+    body = client.get("/v1/settings", headers=AUTH).json()
+    assert find(body, "schedule_interval_minutes")["effective"] == (
+        config.DEFAULT_SCHEDULE_INTERVAL_MINUTES
+    )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "x" * (settings_store.MAX_VAULT_NAME_LENGTH + 1),
+        "home\nlab",
+        "home\tlab",
+        "home\x00lab",
+    ],
+)
+def test_patch_vault_name_is_bounded_and_printable(client: TestClient, bad: str) -> None:
+    """P3: vault_name lands in every webhook envelope and in log lines; it
+    gets client_id's rule (64 chars, printable)."""
+    response = client.patch("/v1/settings", json={"vault_name": bad}, headers=AUTH)
+    assert response.status_code == 422
+
+    conn = get_connection(client.app.state.settings.db_path)
+    try:
+        assert settings_store.get_override(conn, "vault_name") is None
+    finally:
+        conn.close()
+
+
+def test_patch_vault_name_accepts_the_maximum_length(client: TestClient) -> None:
+    name = "h" * settings_store.MAX_VAULT_NAME_LENGTH
+    response = client.patch("/v1/settings", json={"vault_name": f"  {name}  "}, headers=AUTH)
+    assert response.status_code == 200
+    assert find(response.json(), "vault_name")["effective"] == name
+
+
+def test_patch_bad_webhook_url_detail_never_echoes_userinfo(client: TestClient) -> None:
+    """P2, response side: the 422 detail used to end in ``Got '<raw>'``."""
+    response = client.patch(
+        "/v1/settings", json={"webhook_url": "ftp://user:s3cr3t@host/path"}, headers=AUTH
+    )
+    assert response.status_code == 422
+    assert "s3cr3t" not in response.text
+
+
+def test_effective_settings_redacts_a_corrupt_secret_override_in_the_log(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """P2, log side: a stored webhook_url that no longer validates was logged
+    RAW, userinfo included -- into docker logs."""
+    db_path = str(tmp_path / "vault.db")
+    init_db(db_path)
+    base = Settings(
+        vault_api_key=TEST_API_KEY, db_path=db_path, cache_root=str(tmp_path), log_level="INFO"
+    )
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("webhook_url", "ftp://user:s3cr3t@hooks.example/x", "2026-08-09T12:00:00Z"),
+        )
+        conn.commit()
+        with caplog.at_level("ERROR", logger="vault_api.settings_store"):
+            effective = settings_store.effective_settings(conn, base)
+    finally:
+        conn.close()
+
+    assert effective.webhook_url == ""
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "webhook_url" in text
+    assert "s3cr3t" not in text
+    assert "<redacted>" in text
+
+
+def test_effective_settings_redacts_a_corrupt_scheme_less_secret_override(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """S1: redact_url leaves scheme-less ``admin:s3cr3t@host/x`` unchanged,
+    so a secret key's corrupt value is logged as a fixed placeholder."""
+    db_path = str(tmp_path / "vault.db")
+    init_db(db_path)
+    base = Settings(
+        vault_api_key=TEST_API_KEY, db_path=db_path, cache_root=str(tmp_path), log_level="INFO"
+    )
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("webhook_url", "admin:s3cr3t@hooks.example/x", "2026-08-09T12:00:00Z"),
+        )
+        conn.commit()
+        with caplog.at_level("ERROR", logger="vault_api.settings_store"):
+            effective = settings_store.effective_settings(conn, base)
+    finally:
+        conn.close()
+
+    assert effective.webhook_url == ""
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "webhook_url" in text
+    assert "s3cr3t" not in text
+    assert "admin" not in text
+    assert "<redacted>" in text

@@ -187,9 +187,20 @@ def ingest_after_prefill(
     - ``depot_manifests.containing_appid`` (this work package) is the
       **durable** record of "which app this depot's manifest said it belongs
       to", written fresh on every ingest of the ORIGINAL app and never
-      touched by any OTHER app's prefill job. This is what ADR-0007's future
-      GC keep-set is expected to read for shared-depot attribution, precisely
-      because it doesn't have this flicker.
+      touched by any OTHER app's prefill job. It does NOT have the flicker --
+      but as of WP API-FIX-2 nothing reads it for attribution: the shipped
+      GC (``vault_api/gc.py::load_gc_inputs`` -> ``deletion.load_mapping_rows``
+      and ``deletion.other_owner_ids``) derives co-owners from
+      ``depot_app_map`` only, and ``gc.load_recorded_manifests`` reads
+      ``depot_manifests`` for manifest IDs, never for ``containing_appid``.
+      Consequence: while a co-owner's additive row is flickered out, GC for
+      the other app cannot see that co-owner and may delete chunks the
+      co-owner still needs. That is a re-download for the co-owner's next
+      prefill, never data loss -- exactly the bound ADR-0007 sets for every
+      GC mistake -- and the row comes back on the original app's next
+      ingest. Making GC read ``containing_appid`` is the obvious follow-up;
+      it is not what ships today, and this docstring says so rather than
+      describing the intended design as the implemented one.
     """
     cache_dir = settings.steamprefill_cache_dir
     try:
@@ -279,6 +290,7 @@ def ingest_after_prefill(
                 settings.manifest_archive_dir,
                 depotid=manifest.depot_id,
                 keep=settings.manifest_keep,
+                current=os.path.basename(archived_path),
             )
         except OSError as exc:
             # The DB row is already recorded even if the archive copy fails —

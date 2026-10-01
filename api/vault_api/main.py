@@ -189,11 +189,36 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         webhook_notifier.stop()
 
 
+def resolve_log_level(name: str) -> int:
+    """``VAULT_LOG_LEVEL`` -> a numeric level, validated against the names
+    ``logging`` itself knows (WP API-FIX-2, N3).
+
+    The previous ``getattr(logging, name.upper(), logging.INFO)`` had two
+    quiet failure modes: an unknown level (``VAULT_LOG_LEVEL=verbose``)
+    silently became INFO with no hint, and a name that IS a ``logging``
+    attribute but not a level (``disable``, ``config``, ``root``) reached
+    ``basicConfig(level=<function>)`` and crashed startup with a
+    ``TypeError`` from deep inside the logging module. Unknown names now log
+    one WARNING (at INFO, so it is visible) and fall back to INFO.
+    """
+    known = logging.getLevelNamesMapping()
+    level = known.get(name.strip().upper())
+    if level is None:
+        logging.getLogger(__name__).warning(
+            "VAULT_LOG_LEVEL=%r is not a logging level (expected one of %s); "
+            "using INFO.",
+            name,
+            ", ".join(sorted(known)),
+        )
+        return logging.INFO
+    return level
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI app. Pass `settings` explicitly in tests; omit it to read from env."""
     settings = settings or Settings.from_env()
 
-    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    logging.basicConfig(level=resolve_log_level(settings.log_level))
 
     init_db(settings.db_path)
 

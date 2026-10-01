@@ -145,7 +145,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from vault_api import agent_reports, jobs, webhooks
+from vault_api import agent_reports, deletion, jobs, webhooks
 from vault_api.config import (
     WEBHOOK_EVENT_BYPASS_RESOLVED,
     WEBHOOK_EVENT_BYPASS_SUSPECTED,
@@ -822,12 +822,36 @@ def aggregate_lines(
 
 
 def _appids_for_depot(conn: sqlite3.Connection, depotid: int) -> list[int]:
-    """Every app this depot is mapped to (plan §4: a depot can map to many)."""
+    """Every app this depot is mapped to (plan §4: a depot can map to many).
+
+    Rows are coerced with ``deletion.coerce_positive_id`` and unusable ones
+    are skipped, never raised on (WP API-FIX-2, data-path P1). SQLite's
+    INTEGER affinity does not enforce the column type, and a hand-edited or
+    corrupted ``depot_app_map`` row with a non-numeric ``appid`` used to
+    raise ``ValueError`` out of ``aggregate_lines`` -- before ``commit_batch``
+    ever ran, so the cursor never advanced and every later sweep re-read the
+    same batch and failed the same way, forever. A broken mapping row is the
+    same "no honest target" case as no row at all; the sweep logs it and
+    carries on.
+    """
     rows = conn.execute(
         "SELECT appid FROM depot_app_map WHERE depotid = ? ORDER BY appid",
         (depotid,),
     ).fetchall()
-    return [int(row["appid"]) for row in rows]
+    appids: list[int] = []
+    for row in rows:
+        appid = deletion.coerce_positive_id(row["appid"])
+        if appid is None:
+            logger.warning(
+                "event-sweep: depot_app_map row for depot %d has an unusable "
+                "appid %r; ignoring that row (fix or delete it -- it can never "
+                "be a prefill target).",
+                depotid,
+                row["appid"],
+            )
+            continue
+        appids.append(appid)
+    return appids
 
 
 # --------------------------------------------------------------------------

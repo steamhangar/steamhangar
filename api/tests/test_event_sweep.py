@@ -1423,3 +1423,46 @@ def test_depot_miss_statistics_are_bounded(
     event_sweep.sweep_once(db, settings, moment())
 
     assert db.execute("SELECT COUNT(*) FROM depot_miss_stats").fetchone()[0] == 3
+
+
+# ---------------------------------------------------------------------------
+# WP API-FIX-2, data-path P1: an unusable depot_app_map row must not stall
+# the sweep forever
+# ---------------------------------------------------------------------------
+
+
+def test_a_non_numeric_mapping_row_does_not_stall_the_sweep(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``_appids_for_depot`` used to ``int()`` the column; SQLite's INTEGER
+    affinity lets a string sit there, ``ValueError`` escaped ``aggregate_lines``
+    BEFORE ``commit_batch``, and the cursor never advanced -- every later sweep
+    re-read the same batch and failed the same way."""
+    settings = make_settings(tmp_path)
+    log_path = Path(settings.event_log_path)
+    write_log(log_path, event_line(depot="70403"), event_line(depot="70403"))
+    # Raw SQL on purpose: mapping.upsert_mapping validates its input, and the
+    # whole point is a row that bypassed validation (hand edit, corruption).
+    db.execute(
+        "INSERT INTO depot_app_map (depotid, appid) VALUES (?, ?)", (70403, "abc")
+    )
+    map_depot(db, 70403, 440)
+    db.commit()
+
+    with caplog.at_level("WARNING", logger="vault_api.event_sweep"):
+        outcome = event_sweep.sweep_once(db, settings, moment())
+
+    assert outcome.swept is True
+    assert outcome.cursor == log_path.stat().st_size, "the cursor must advance"
+    assert any("unusable appid 'abc'" in r.getMessage() for r in caplog.records)
+    # The usable co-mapping still yields the honest single target.
+    assert queued_appids(db) == [440]
+
+
+def test_appids_for_depot_skips_every_unusable_shape(db: sqlite3.Connection) -> None:
+    for bad in ("abc", "", "1_0", "-5", 0, -3):
+        db.execute("INSERT OR IGNORE INTO depot_app_map (depotid, appid) VALUES (?, ?)", (9, bad))
+    db.execute("INSERT INTO depot_app_map (depotid, appid) VALUES (?, ?)", (9, 730))
+    db.commit()
+
+    assert event_sweep._appids_for_depot(db, 9) == [730]
