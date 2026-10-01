@@ -288,6 +288,16 @@
    the container's own clip, which is load-bearing for the rounded seam
    between adjacent segmented buttons / list rows. */
 .segs button:focus-visible{ outline-offset:-2px; }
+/* WP WEB-FIX-3: Settings reuses `.segs` for TEXT segments ("Off | Dry run |
+   Execute", settings.js), always as a direct child of a `.field`; the 28px
+   icon-button width above wrapped "Dry run" onto two lines. Text segments
+   size to their label and never wrap; on a screen too narrow for all of
+   them the control scrolls sideways instead of widening the page. */
+.field > .segs{ display:flex; width:max-content; max-width:100%; overflow-x:auto; scrollbar-width:none; }
+.field > .segs button{
+  width:auto; height:auto; min-height:32px; flex:none;
+  padding:6px 12px; font-size:12.5px; white-space:nowrap;
+}
 
 /* ---------- search ---------- */
 .search{
@@ -301,7 +311,7 @@
 .search:focus-within .mag{ color:var(--accent); }
 .search input{
   flex:1; min-width:0; background:none; border:0; outline:none;
-  font-family:var(--ui); font-size:13px; color:var(--text);
+  font-family:var(--ui); font-size:16px; color:var(--text);
 }
 .search input::placeholder{ color:var(--dim-2); }
 .qx{ display:none; color:var(--dim-2); flex:none; }
@@ -367,8 +377,16 @@
 .chip[aria-pressed="true"] .n{ opacity:.85; }
 
 /* ---------- capsule grid ---------- */
-.grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:13px 12px; }
-.card{ position:relative; text-align:left; display:flex; flex-direction:column; gap:7px; }
+.grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 12px; }
+/* WP WEB-FIX-3 hardening against horizontal overflow (NOT the cause of
+   the 2026-10-01 zoom-out report, whose Library was empty; that stays open
+   until a device diagnosis — leading hypothesis: Chrome desktop-site mode,
+   a 980px layout). `1fr` is `minmax(auto,1fr)`, so a track never shrinks
+   below its card's min-content width, and `.instbadge`/`.rowname` are
+   `white-space:nowrap`: a long badge line or list-layout game name could
+   widen the track past the viewport. `minmax(0,1fr)` above (and in
+   .cols3/.list below) plus `min-width:0` here let the ellipsis work. */
+.card{ position:relative; text-align:left; display:flex; flex-direction:column; gap:7px; min-width:0; }
 .cap{
   position:relative; width:100%; aspect-ratio:2/3;
   border-radius:var(--r-m); overflow:hidden;
@@ -484,7 +502,7 @@ button.cappill:active{ transform:scale(.93); }
 .rowname{ display:none; }
 
 /* ---------- library layouts (2 cols / 3 cols / list) ---------- */
-.grid.cols3{ grid-template-columns:repeat(3,1fr); gap:11px 9px; }
+.grid.cols3{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px 9px; }
 .grid.cols3 .cap{ border-radius:9px; }
 .grid.cols3 .cap .name{ left:6px; right:6px; bottom:6px; font-size:11px; letter-spacing:.25px; }
 .grid.cols3 .cappill{ left:5px; top:5px; min-height:20px; padding:2px 6px 2px 2px; gap:4px; font-size:9px; }
@@ -502,7 +520,7 @@ button.cappill:active{ transform:scale(.93); }
 .grid.cols3 .instbadge .ibfull{ display:none; }
 .grid.cols3 .instbadge .ibcompact{ display:inline; }
 
-.grid.list{ grid-template-columns:1fr; gap:7px; }
+.grid.list{ grid-template-columns:minmax(0,1fr); gap:7px; }
 .grid.list .card{
   flex-direction:row; align-items:center; gap:10px; padding:6px 10px;
   background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m);
@@ -516,6 +534,10 @@ button.cappill:active{ transform:scale(.93); }
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .grid.list .meta{ flex:none; gap:8px; }
+/* WP WEB-FIX-3: still max-content wide whenever it fits (flex-basis auto,
+   no grow), but allowed to shrink and wrap instead of pushing the row past
+   the viewport when the client summary is long. */
+.grid.list .meta{ flex-shrink:1; min-width:0; }
 /* WP AG-2 review round 2: `.meta{flex:none}` above sizes this box to its
    OWN max-content width, and `.instbadge`'s full-wording line was the
    widest thing in it — measured live: a two-client NOT_CACHED row's
@@ -748,6 +770,7 @@ h4.sec[hidden]{ display:none; }
 .jobcard.held{ border-color:var(--line); background:var(--surface); }
 .jobtop{ display:flex; gap:11px; align-items:flex-start; justify-content:space-between; }
 .jobtop .nm{ font-size:13.5px; font-weight:600; letter-spacing:-.1px; }
+.jobtop > div{ min-width:0; } /* WP WEB-FIX-3: the name column may shrink beside the nowrap badge */
 .jobtop .sm{ font-size:11px; color:var(--dim-2); font-family:var(--mono); margin-top:2px; font-variant-numeric:tabular-nums; }
 .badge{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; flex:none; white-space:nowrap; }
 .jobacts{ display:flex; gap:8px; justify-content:flex-end; margin-top:11px; flex-wrap:wrap; }
@@ -827,8 +850,10 @@ h4.sec[hidden]{ display:none; }
 @media (hover:hover) and (pointer:fine){
   .inp button:hover{ color:var(--accent); }
 }
+/* WP WEB-FIX-3: 16px below BP-M (no focus zoom, legible on a phone); the
+   BP-M block restores the desktop 12.5px. Same for `.search input`. */
 input.inp, .inp input{
-  font-family:var(--mono); font-size:12.5px; color:var(--text);
+  font-family:var(--mono); font-size:16px; color:var(--text);
   background:transparent; border:0; outline:none; width:100%; min-width:0; padding:0;
 }
 input.inp.txt{ background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px 11px; width:100%; }
@@ -844,6 +869,15 @@ input.inp.txt:disabled{ opacity:.55; }
 .srow .desc{ display:block; font-size:11.5px; color:var(--dim-2); line-height:1.45; margin-top:3px; }
 .srow .grow{ flex:1; min-width:0; }
 .srow input[type="checkbox"]{ width:17px; height:17px; flex:none; accent-color:var(--accent); }
+/* WP WEB-FIX-3: the webhook event rows are `<label class="srow">` inside a
+   `.field`, so `.field label` (0,1,1) beat `.srow` (0,1,0) and turned the
+   row into an uppercase block with the checkbox ABOVE its label. Restore
+   the .srow row: checkbox inline, left of the label, one line. */
+.field label.srow{
+  display:flex; margin-bottom:8px;
+  font-size:inherit; font-weight:inherit; letter-spacing:normal;
+  text-transform:none; color:inherit;
+}
 
 .opt{
   display:flex; gap:11px; align-items:flex-start; padding:12px;
@@ -1021,7 +1055,7 @@ body.onboarding .nav{ display:none; }
   border:1px solid rgba(239,143,60,.34);
 }
 .banner .glyph{ color:var(--stale); flex:none; margin-top:1px; }
-.banner .body{ flex:1; font-size:12.3px; line-height:1.42; color:#F6DCC4; }
+.banner .body{ flex:1; min-width:0; font-size:12.3px; line-height:1.42; color:#F6DCC4; }
 .banner .acts{ display:flex; gap:14px; margin-top:7px; }
 .banner .acts button{ font-size:11.5px; font-weight:600; letter-spacing:.3px; text-transform:uppercase; color:var(--stale); }
 .banner .acts button.mute{ color:rgba(246,220,196,.55); }
@@ -1215,6 +1249,14 @@ body.onboarding .nav{ display:none; }
   white-space:pre-wrap; word-break:break-word; margin-top:2px;
 }
 
+/* WP WEB-FIX-3: long unbreakable strings (URLs, paths such as
+   "api/README.md", digit runs joined by commas, error text echoing a value)
+   break inside these text blocks instead of widening their box past a
+   phone viewport. Only changes rendering when a word does not fit. */
+.hint, .foot-note, .errline, .settings-warn, .notif .nx, .dp-row, .banner .body, .jobtop .nm{
+  overflow-wrap:anywhere;
+}
+
 /* ============================================================
    Desktop layout foundation (WP 4e.1)
    ------------------------------------------------------------
@@ -1263,6 +1305,9 @@ body.onboarding .nav{ display:none; }
 @media (min-width:720px){
   :root{ --w-text:760px; }
   .chips{ flex-wrap:wrap; overflow-x:visible; padding-bottom:0; }
+  /* WP WEB-FIX-3: the pre-fix desktop values, unchanged from BP-M up. */
+  .search input{ font-size:13px; }
+  input.inp, .inp input{ font-size:12.5px; }
 }
 
 /* ---------- BP-L (>= 1024px) — bottom nav becomes a left rail -----------

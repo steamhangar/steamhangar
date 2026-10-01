@@ -307,6 +307,17 @@ html, body{
   background:var(--bg);
   color:var(--text);
   font-family:var(--ui);
+  /* WP WEB-FIX-3: defence in depth ONLY. An element wider than the layout
+     viewport would make Android Chrome zoom the page out; the per-element
+     min-width:0 / minmax(0,1fr) / overflow-wrap rules in app.css are the
+     hardening. Neither is the cause of the 2026-10-01 Pixel zoom-out
+     report, which stays open until a device diagnosis is done (leading
+     hypothesis: Chrome desktop-site mode, a 980px layout). `clip`,
+     never `hidden`: `hidden` on body would turn it into a scroll container
+     and break the sticky topbar/bottom nav, `clip` creates no scroll
+     container. Every engine this CSS already targets (aspect-ratio,
+     text-wrap:balance) supports `clip`, so no `hidden` fallback. */
+  overflow-x:clip;
 }
 
 button{ font:inherit; color:inherit; background:none; border:0; cursor:pointer; padding:0; }
@@ -400,7 +411,9 @@ a{ color:var(--accent); }
 .toast{
   position:fixed; left:50%; bottom:16px; z-index:100;
   transform:translate(-50%, 20px);
-  min-width:220px; max-width:min(480px, calc(100vw - 32px));
+  /* WP WEB-FIX-3: 100%, not 100vw — a fixed box's percentage resolves
+     against the viewport WITHOUT the scrollbar, 100vw includes it. */
+  min-width:220px; max-width:min(480px, calc(100% - 32px));
   background:var(--raised-2); border:1px solid var(--line);
   border-radius:11px; padding:11px 13px; font-size:12.5px; color:var(--text);
   box-shadow:0 12px 26px -10px rgba(0,0,0,.8);
@@ -411,4 +424,4 @@ a{ color:var(--accent); }
 .toast.on{ transform:translate(-50%, 0); opacity:1; }
 .toast-key{ width:3px; align-self:stretch; border-radius:2px; background:var(--accent); flex:none; }
 .toast.warn .toast-key{ background:var(--stale); }
-.toast-text{ flex:1 1 auto; }
+.toast-text{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
