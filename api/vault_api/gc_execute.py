@@ -587,7 +587,21 @@ def orphans_to_delete(
 # --------------------------------------------------------------------------
 
 
-def remove_one_file(path: str, *, name: str) -> FileRemoval:
+def expected_real_dir(depot_root: str, depotid: object, *parts: str) -> str:
+    """``realpath(depot_root)/<depotid>/<parts...>`` — where a GC unlink may land.
+
+    WP SEC-FIX-4 (S-2). Only the BASE is resolved: everything below it is
+    joined lexically, so if any of ``<depotid>``, ``chunk``, ``manifest``,
+    ``<mid>`` or ``5`` is a symlink planted on the shared volume, the
+    ``realpath`` of the file's actual parent differs from this and the unlink
+    is refused (``remove_one_file(expected_parent=...)``).
+    """
+    return os.path.join(os.path.realpath(depot_root), str(depotid), *parts)
+
+
+def remove_one_file(
+    path: str, *, name: str, expected_parent: str | None = None
+) -> FileRemoval:
     """Remove one regular, non-link file. Never raises, never follows a link.
 
     Order of checks, each of which can only make the outcome *less*
@@ -612,7 +626,29 @@ def remove_one_file(path: str, *, name: str) -> FileRemoval:
     4. size — read from the ``lstat`` above, *before* the unlink, so the bytes
        reported freed are the bytes that were there.
     5. ``deletion.remove_file_settling`` — the WP 1.6 settle-and-recheck path.
+
+    ``expected_parent`` (WP SEC-FIX-4, S-2): when given, the ``realpath`` of
+    the file's directory must equal it, checked FIRST. Steps 1-3 only look at
+    the last component; this is what refuses a symlinked directory *above*
+    the file (``chunk/`` -> /data), which ``lstat`` would happily traverse.
+
+    Known residual TOCTOU window (docs/security/threat-model.md §9): between
+    the ``realpath`` check and the unlink, ``chunk/`` or ``5/`` can be swapped
+    for a link. It needs code execution in vault-core and the window is
+    narrow. The proper fix (``O_DIRECTORY|O_NOFOLLOW`` per level plus
+    ``unlink(dir_fd=)``) is post-release.
     """
+    if expected_parent is not None and (
+        os.path.realpath(os.path.dirname(path)) != expected_parent
+    ):
+        return FileRemoval(
+            name=name,
+            outcome=REFUSED_LINK,
+            detail=(
+                "a directory on the way to this file is a symlink or junction "
+                f"(it does not resolve to {expected_parent})"
+            ),
+        )
     try:
         st = os.lstat(path)
     except FileNotFoundError:
@@ -815,9 +851,12 @@ def execute_depot(
 
     to_delete, held_back = orphans_to_delete(depot_plan, exclusions=exclusions)
 
+    real_chunk_dir = expected_real_dir(
+        depot_root, depot_plan.depotid, gc.CHUNK_DIRNAME
+    )
     removals: list[FileRemoval] = []
     for chunk_id in sorted(to_delete):
-        removals.append(_remove_planned_chunk(chunk_dir, chunk_id))
+        removals.append(_remove_planned_chunk(chunk_dir, chunk_id, real_chunk_dir))
 
     dedupe_removals = execute_dedupe(depot_plan, depot_dir=depot_dir)
 
@@ -873,7 +912,9 @@ def _held_back_bytes(
     return sum(depot_plan.orphan_chunks.get(chunk_id, 0) for chunk_id in held_back)
 
 
-def _remove_planned_chunk(chunk_dir: str, chunk_id: str) -> FileRemoval:
+def _remove_planned_chunk(
+    chunk_dir: str, chunk_id: str, real_chunk_dir: str
+) -> FileRemoval:
     """Re-validate one planned chunk id and remove its file.
 
     The re-validation is not ceremony. ``gc.plan_gc`` guarantees every id in
@@ -896,7 +937,7 @@ def _remove_planned_chunk(chunk_dir: str, chunk_id: str) -> FileRemoval:
         return FileRemoval(
             name=chunk_id, outcome=REFUSED_UNSAFE_NAME, detail=str(exc)
         )
-    return remove_one_file(path, name=chunk_id)
+    return remove_one_file(path, name=chunk_id, expected_parent=real_chunk_dir)
 
 
 def execute_dedupe(
@@ -933,9 +974,12 @@ def execute_dedupe(
 
     Every path is rebuilt from validated components
     (``depot/<id>/manifest/<manifestid>/5/<name>``) and cross-checked against
-    the path the scan recorded; a mismatch is refused. The scan's paths come
-    from ``os.scandir`` and cannot escape the tree, so this is belt-and-braces
-    — the same reason ``_remove_planned_chunk`` re-validates chunk ids.
+    the path the scan recorded; a mismatch is refused. That cross-check is
+    lexical, and a lexical path CAN escape the tree when a directory on it is
+    a symlink planted on the shared volume — so, since WP SEC-FIX-4 (S-2), the
+    request directory must also ``realpath`` to
+    ``realpath(depot_root)/<id>/manifest/<mid>/5`` before anything in it is
+    compared or unlinked, and every unlink re-checks its parent the same way.
     """
     results: list[FileRemoval] = []
     for candidate in depot_plan.dedupe:
@@ -953,6 +997,28 @@ def execute_dedupe(
                     name=candidate.manifestid,
                     outcome=REFUSED_UNSAFE_NAME,
                     detail=str(exc),
+                )
+            )
+            continue
+
+        real_request_dir = expected_real_dir(
+            os.path.dirname(depot_dir),
+            os.path.basename(depot_dir),
+            gc.MANIFEST_DIRNAME,
+            candidate.manifestid,
+            gc.MANIFEST_REQUEST_DIR,
+        )
+        if os.path.realpath(request_dir) != real_request_dir:
+            # S-2: some directory on the way (depot/<id>, manifest/, <mid>/,
+            # 5/) is a link. Nothing is compared, nothing is unlinked.
+            results.append(
+                FileRemoval(
+                    name=candidate.manifestid,
+                    outcome=REFUSED_LINK,
+                    detail=(
+                        f"{request_dir} does not resolve to {real_request_dir}: "
+                        "a directory on the way is a symlink or junction"
+                    ),
                 )
             )
             continue
@@ -1011,7 +1077,11 @@ def execute_dedupe(
                 )
                 continue
 
-            results.append(remove_one_file(dup_path, name=name))
+            results.append(
+                remove_one_file(
+                    dup_path, name=name, expected_parent=real_request_dir
+                )
+            )
     return results
 
 

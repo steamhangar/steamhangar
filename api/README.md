@@ -4089,6 +4089,7 @@ neither of which GC has.
 | `skipped_unreadable_owner` | a mapping row has an unreadable app id ⇒ the claim set is incomplete |
 | `skipped_no_counting_apps` | every mapped app is verifiably uncached with no recorded manifest |
 | `skipped_no_manifest` | ADR-0007's readiness gate: a counting app's manifest could not be resolved |
+| `skipped_link_like_dir` | `depot/<id>/` is a symlink or junction — GC never descends through a link (threat model §9, S-2) |
 
 ### Guarantees (each pinned by a named test, each mutation-tested)
 
@@ -4963,6 +4964,20 @@ Every endpoint requires the header `X-Api-Key: <VAULT_API_KEY>`, checked
 with a constant-time comparison (`hmac.compare_digest`) in the
 `require_api_key` FastAPI dependency (`vault_api/auth.py`). Missing or
 wrong key → `401`.
+
+**Checked before routing (WP SEC-FIX-4, S-3):** FastAPI parses a JSON body
+before a router dependency runs, so `vault_api/body_guard.py` (a pure-ASGI
+middleware) checks the key first for every `/v1` path except exactly
+`/v1/health`, with the same comparison (`auth.api_key_matches`). A keyless
+request is answered `401` without a body byte being read — also for a path
+that does not exist (`401`, not `404`) and for malformed JSON (`401`, not
+`422`). Every request body is capped at 1 MiB (`body_guard.MAX_BODY_BYTES`):
+a larger `Content-Length` is `413` up front, a chunked body is `413` once it
+passes the cap. The largest legitimate body (a 10 000-appid agent report) is
+~110 KB. The dependency stays on every router as defence in depth.
+Because the public exception is exactly `/v1/health`, a keyless
+`/v1/health/` (trailing slash) now gets `401` rather than Starlette's
+`307` redirect.
 
 **Non-ASCII keys (WP 1.3 fix):** `hmac.compare_digest` raises `TypeError`
 for a non-ASCII `str` argument (confirmed empirically — a key containing

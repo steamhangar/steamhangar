@@ -198,6 +198,17 @@ ADR that describes it:
   `main.py` registers every one of those routers (the
   `app.include_router(...)` calls in `api/vault_api/main.py::create_app`;
   `routers/health.py` is the one router built without the dependency).
+  Since WP SEC-FIX-4 (S-3) the key is also checked BEFORE routing: FastAPI
+  reads and parses a JSON body while resolving a route's parameters, ahead
+  of the router dependency, so a keyless 40 MB body used to cost ~1.7 GB
+  RSS and malformed keyless JSON answered `422` (a pre-auth parser oracle)
+  instead of `401`. `api/vault_api/body_guard.py::PreAuthBodyGuard`, a
+  pure-ASGI middleware, now answers `401` for every `/v1` path except
+  exactly `/v1/health` without reading a body byte (same constant-time
+  comparison, `auth.py::api_key_matches`), and caps every body at 1 MiB
+  (`413` on a larger `Content-Length`, or once a chunked body passes the
+  cap). The largest legitimate body, a 10 000-appid agent report, is
+  ~110 KB. The router dependency stays as defence in depth.
   See §7 for exactly what that
   key does and does not protect.
 - **Reach the web UI's static files without a key** (`index.html`,
@@ -1133,7 +1144,9 @@ Named plainly, as out of scope, rather than implied to be covered:
   of ADR-0015 is not a request limit and does not mitigate it) and §7 (no
   rate limiting on the API key check) — both are real, unmitigated vectors
   available to any LAN device, named here rather than left to be
-  discovered.
+  discovered. What IS bounded since WP SEC-FIX-4 (S-3) is pre-auth body
+  handling: no body is read for a keyless `/v1` request, and every body is
+  capped at 1 MiB (§1).
 - **Vulnerabilities in Valve's Steam infrastructure, or in SteamPrefill**,
   the third-party tool this project subprocess-drives. Both are outside
   this repository's code and this document's scope (see `SECURITY.md`
@@ -1174,6 +1187,45 @@ Named plainly, as out of scope, rather than implied to be covered:
   Documented, not fixed: POSIX sh cannot open or chown through a file
   descriptor with `O_NOFOLLOW`. Closing it means doing that step in a
   small program, or moving the log off the shared volume.
+- **Planted symlinks on the shared `/vault` volume, as seen by vault-api
+  (WP 5.3 pass-2 review S-1/S-2) — fixed in WP SEC-FIX-4, recorded here
+  because the attacker model is the same as P-2's.** vault-core and
+  vault-api both run as uid 101 and share `/vault`; vault-api resolves a
+  link in its OWN mount namespace, where `/data` and
+  `/opt/steamprefill/home` exist. Before the fix, a uid-101 attacker in
+  vault-core could (S-1) replace `event.log` with a link and have the
+  event sweep read through it and rotation `truncate` its target, or (S-2)
+  link `depot/<id>`, `chunk/`, `manifest/` or `manifest/<mid>/5` into
+  `/data` and have GC unlink files there as orphans or duplicates. Now the
+  event log is opened `O_NOFOLLOW|O_NONBLOCK`, must be `S_ISREG` on the
+  log directory's device, and is rotated with `ftruncate` on that verified
+  fd (`api/vault_api/event_sweep.py::open_event_log`); a refusal is a
+  WARNING plus `truncate_denied_count`, never a crash. GC's planner skips
+  a link-like `depot/<id>` (`skipped_link_like_dir`) and refuses link-like
+  `chunk/`, `manifest/` and `manifest/<mid>/5`; at execute time every
+  unlink first requires `realpath(dirname(file))` to equal
+  `realpath(depot_root)/<id>/chunk` (or `.../manifest/<mid>/5`)
+  (`api/vault_api/gc_execute.py::remove_one_file`). `DELETE
+  /v1/cache/{appid}` keeps its own behaviour of unlinking a linked
+  `depot/<id>` itself without following it.
+- **Known limit: no cap on the number of agent clients (WP 5.3 pass-2
+  review P-2, not fixed in SEC-FIX-4).** Any key holder can report under
+  arbitrarily many `client_id`s, and nothing caps how many distinct
+  clients are stored. Bounded only by the key requirement.
+- **Known limit: the depot base itself is not `realpath`'d at startup
+  (WP 5.3 pass-2 review P-3, not fixed in SEC-FIX-4).** The S-2 check
+  resolves `depot_root` per GC run and trusts whatever it resolves to; a
+  `cache/depot` that is itself a link (planted before vault-api starts)
+  moves the whole base. Closing it means resolving and pinning the base
+  once at startup and refusing a base that later resolves elsewhere.
+- **Known limit: a TOCTOU window in GC removal (SEC-FIX-4 review,
+  post-release).** `remove_one_file` checks `realpath(dirname(file))`
+  and then unlinks by path. Between the two, `chunk/` or
+  `manifest/<mid>/5` can be swapped for a link, and the unlink then
+  lands in the link target. Exploiting it needs code execution in
+  vault-core and hitting a narrow window. The proper fix is to open each
+  level with `O_DIRECTORY|O_NOFOLLOW` and remove with
+  `unlink(name, dir_fd=...)`; that is planned after the first release.
 
 ---
 

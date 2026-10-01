@@ -118,7 +118,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from vault_api import deletion, jobs
 from vault_api.config import (
@@ -385,6 +385,26 @@ def app_info_url(base_url: str, appid: int) -> str:
     return f"{base_url.rstrip('/')}/{appid}"
 
 
+def url_for_log(url: str) -> str:
+    """``url`` as it may appear in a log line or an ``OracleError`` (N-1).
+
+    WP SEC-FIX-4: the oracle base URL is operator-configured and may carry
+    userinfo or a token query parameter. Userinfo becomes ``***@``; the query
+    and fragment are dropped. Never raises.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "<unparsable url>"
+    netloc = parts.netloc
+    if "@" in netloc:
+        netloc = "***@" + netloc.rsplit("@", 1)[1]
+    elif "@" in parts.path:
+        # An unencoded '/' in a password pushes the userinfo into the path.
+        return f"{parts.scheme}://***"
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+
+
 def http_fetch(url: str, *, timeout: float = DEFAULT_FETCH_TIMEOUT_SECONDS) -> bytes:
     """GET ``url`` and return at most ``MAX_RESPONSE_BYTES`` of body.
 
@@ -396,8 +416,10 @@ def http_fetch(url: str, *, timeout: float = DEFAULT_FETCH_TIMEOUT_SECONDS) -> b
     scheme = urlsplit(url).scheme.lower()
     if scheme not in ("http", "https"):
         raise OracleError(
-            f"refusing to fetch {url!r}: only http/https URLs are allowed "
-            f"(got scheme {scheme!r})"
+            # No URL or scheme echo: for a scheme-less "user:pw@host" urlsplit
+            # reports the username as the scheme (the WP API-FIX-2 N1 trap).
+            "refusing to fetch the configured oracle URL: only http/https "
+            "URLs are allowed"
         )
 
     request = urllib.request.Request(
@@ -410,22 +432,23 @@ def http_fetch(url: str, *, timeout: float = DEFAULT_FETCH_TIMEOUT_SECONDS) -> b
         with _OPENER.open(request, timeout=timeout) as response:
             status = getattr(response, "status", None)
             if status is not None and status != 200:
-                raise OracleError(f"{url} answered HTTP {status}")
+                raise OracleError(f"{url_for_log(url)} answered HTTP {status}")
             body = response.read(MAX_RESPONSE_BYTES + 1)
     except OracleError:
         raise
     except urllib.error.HTTPError as exc:
-        raise OracleError(f"{url} answered HTTP {exc.code}") from exc
+        raise OracleError(f"{url_for_log(url)} answered HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
-        raise OracleError(f"{url} is unreachable: {exc.reason}") from exc
+        raise OracleError(f"{url_for_log(url)} is unreachable: {exc.reason}") from exc
     except socket.timeout as exc:  # pragma: no cover - timing dependent
-        raise OracleError(f"{url} timed out after {timeout}s") from exc
+        raise OracleError(f"{url_for_log(url)} timed out after {timeout}s") from exc
     except (OSError, ValueError) as exc:
-        raise OracleError(f"{url} could not be fetched: {exc}") from exc
+        raise OracleError(f"{url_for_log(url)} could not be fetched: {exc}") from exc
 
     if len(body) > MAX_RESPONSE_BYTES:
         raise OracleError(
-            f"{url} returned more than the {MAX_RESPONSE_BYTES}-byte bound"
+            f"{url_for_log(url)} returned more than the "
+            f"{MAX_RESPONSE_BYTES}-byte bound"
         )
     return body
 
@@ -772,7 +795,7 @@ def _configured_fetcher(settings: Settings) -> Fetcher:
         logger.info(
             "manifest oracle: querying %s (this request LEAVES the LAN — see "
             "api/README.md 'Manifest oracle')",
-            url,
+            url_for_log(url),
         )
         return http_fetch(url, timeout=timeout)
 

@@ -432,6 +432,16 @@ def validate_webhook_url(raw: str) -> str:
             "must be an http:// or https:// URL (the scheme must be http or "
             "https), or blank to disable webhooks."
         )
+    after_scheme = text.split("://", 1)[1] if "://" in text else ""
+    if "@" in after_scheme and "@" not in urlsplit(text).netloc:
+        # WP SEC-FIX-4 (P-1): an unencoded '/', '?' or '#' in the password
+        # ends the authority early, so urlsplit puts the userinfo in the
+        # path/query/fragment — where redact_url never looks, and the secret
+        # would be logged. No echo of the value, for the reason above.
+        raise ValueError(
+            "the userinfo (user:password@) is not parsed as such: a '/', '?' "
+            "or '#' in the password must be percent-encoded (%2F, %3F, %23)."
+        )
     return text
 
 

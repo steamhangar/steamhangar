@@ -185,6 +185,12 @@ def redact_url(url: str) -> str:
     except ValueError:
         return url
     if "@" not in parts.netloc:
+        after_scheme = url.split("://", 1)[1] if "://" in url else ""
+        if "@" in after_scheme:
+            # WP SEC-FIX-4 (P-1), defence in depth for VAULT_WEBHOOK_URL (not
+            # validated at startup): an unencoded '/', '?' or '#' in the
+            # password moved the userinfo out of netloc. Over-redact.
+            return f"{url.split('://', 1)[0]}://***@{after_scheme.rsplit('@', 1)[1]}"
         return url
     host_part = parts.netloc.rsplit("@", 1)[1]
     return urlunsplit((parts.scheme, f"***@{host_part}", parts.path, parts.query, parts.fragment))

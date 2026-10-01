@@ -139,9 +139,11 @@ break if the log goes unread for the 16 hours a day the window is shut.
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import sqlite3
+import stat
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -435,6 +437,68 @@ class ReadBatch:
     file_size: int = 0
 
 
+class UnsafeEventLogError(OSError):
+    """The event-log path is not a regular file on the log directory's volume.
+
+    Threat model §9 (WP SEC-FIX-4, S-1): vault-core shares ``/vault`` with
+    vault-api and runs as the same uid, so code execution in vault-core can
+    replace ``event.log`` with a symlink or a FIFO. vault-api resolves
+    paths in ITS OWN mount namespace, where ``/data`` and the runner home are
+    reachable, so following such a link would read — and on rotation
+    truncate — a file vault-core could never touch itself.
+    """
+
+
+def open_event_log(path: str, flags: int) -> int:
+    """Open the event log without following a planted link. Returns an fd.
+
+    * ``O_NOFOLLOW`` refuses a symlink in the LAST component (ELOOP);
+    * ``O_NONBLOCK`` keeps a planted FIFO from hanging the sweep in open();
+    * the log's own directory (``logs/``) must not be a symlink
+      (``lstat`` + ``S_ISLNK``). The st_dev check below cannot catch a link
+      to a same-device target, and the default compose puts every named
+      volume on one device. Only ``logs/`` itself is checked, not a full
+      ``realpath`` comparison: ancestors above it may legitimately be links
+      or bind mounts (a linked cache base);
+    * the fd must be ``S_ISREG`` and live on the same device as the log
+      directory (``lstat``, so a ``logs/`` mount pointing at another volume
+      is refused too).
+
+    Raises ``UnsafeEventLogError`` (an ``OSError``) on refusal, and lets the
+    ordinary ``OSError`` family (missing file, EACCES) through unchanged.
+    """
+    try:
+        fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise UnsafeEventLogError(
+                errno.ELOOP, "refusing a symlinked event log", path
+            ) from exc
+        raise
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise UnsafeEventLogError(
+                errno.EINVAL, "refusing an event log that is not a regular file", path
+            )
+        parent = os.path.dirname(path) or "."
+        parent_info = os.lstat(parent)
+        if stat.S_ISLNK(parent_info.st_mode):
+            raise UnsafeEventLogError(
+                errno.ELOOP, "refusing an event log in a symlinked directory", path
+            )
+        if info.st_dev != parent_info.st_dev:
+            raise UnsafeEventLogError(
+                errno.EXDEV,
+                "refusing an event log on another device than its directory",
+                path,
+            )
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def read_batch(path: str, cursor: int) -> ReadBatch:
     """Read complete lines from ``cursor`` onward. Never raises.
 
@@ -446,10 +510,15 @@ def read_batch(path: str, cursor: int) -> ReadBatch:
     degrade one line's text, never abort a sweep).
     """
     try:
-        size = os.path.getsize(path)
+        fd = open_event_log(path, os.O_RDONLY)
     except FileNotFoundError:
         return ReadBatch(new_cursor=cursor, missing=True)
     except OSError as exc:
+        return ReadBatch(new_cursor=cursor, error=str(exc))
+    try:
+        size = os.fstat(fd).st_size
+    except OSError as exc:
+        os.close(fd)
         return ReadBatch(new_cursor=cursor, error=str(exc))
 
     start = cursor
@@ -463,7 +532,10 @@ def read_batch(path: str, cursor: int) -> ReadBatch:
         rotated = True
 
     try:
-        with open(path, "rb") as handle:
+        # The fd is the one that passed open_event_log's checks; reading it
+        # (never re-opening the path) is what keeps a symlink swapped in after
+        # the check from being read through.
+        with os.fdopen(fd, "rb") as handle:
             handle.seek(start)
             chunk = handle.read(MAX_BATCH_BYTES)
     except OSError as exc:
@@ -532,7 +604,7 @@ def _skip_oversized(
     """
     scan_from = start + batch_len
     try:
-        with open(path, "rb") as handle:
+        with os.fdopen(open_event_log(path, os.O_RDONLY), "rb") as handle:
             handle.seek(scan_from)
             offset = scan_from
             while True:
@@ -1202,6 +1274,7 @@ TRUNCATE_DISABLED = "disabled"
 TRUNCATE_NOT_DUE = "not-due"
 TRUNCATE_INCOMPLETE = "not-fully-swept"
 TRUNCATE_DENIED = "permission-denied"
+TRUNCATE_REFUSED = "unsafe-path-refused"
 TRUNCATE_FAILED = "failed"
 
 
@@ -1228,10 +1301,18 @@ def maybe_truncate(
     -------------------------------------------------------------------------
     ADR-0008 assigns rotation to this sweeper, but the containers it assigns it
     to do not, as shipped, permit it: vault-api runs as uid/gid ``101:101``
-    (``api/Dockerfile``) while ``/vault/logs`` is the ``nginx`` user's ``0755``
-    directory and the event log nginx creates there is ``0644`` and not owned
-    by 101. The sweeper can open it for reading and cannot truncate it —
-    ``os.truncate`` raises ``PermissionError`` (EPERM/EACCES).
+    (``api/Dockerfile``) and so does vault-core's nginx since the non-root
+    hardening, so in the shipped stack the log usually IS writable. Where it
+    is not (a root-run or differently-owned vault-core, the event log ``0644``
+    and owned by someone else), the sweeper can open it for reading but not
+    for writing — the write ``open`` raises ``PermissionError``
+    (EPERM/EACCES).
+
+    Since WP SEC-FIX-4 both opens go through ``open_event_log`` (no symlink,
+    regular file, same device as the log directory) and rotation is an
+    ``os.ftruncate`` on that verified fd, never a path-based
+    ``os.truncate``. A refused path is reported like a denial — WARNING plus
+    the persisted counter — and never breaks the sweep.
 
     That asymmetry is a *fail-soft* condition, deliberately, and it is worth
     being precise about why it is safe:
@@ -1266,9 +1347,15 @@ def maybe_truncate(
 
     path = settings.event_log_path
     try:
-        size = os.path.getsize(path)
+        read_fd = open_event_log(path, os.O_RDONLY)
+    except UnsafeEventLogError as exc:
+        return _refuse_truncate(conn, path, exc, now_iso)
     except OSError:
         return TruncateResult(reason=TRUNCATE_NOT_DUE)
+    try:
+        size = os.fstat(read_fd).st_size
+    finally:
+        os.close(read_fd)
 
     if size < limit:
         return TruncateResult(reason=TRUNCATE_NOT_DUE)
@@ -1279,7 +1366,10 @@ def maybe_truncate(
         return TruncateResult(reason=TRUNCATE_INCOMPLETE)
 
     try:
-        os.truncate(path, 0)
+        if not _ftruncate_if_unchanged(path, cursor):
+            return TruncateResult(reason=TRUNCATE_INCOMPLETE)
+    except UnsafeEventLogError as exc:
+        return _refuse_truncate(conn, path, exc, now_iso)
     except PermissionError as exc:
         _record_truncate_denied(conn, now_iso)
         state = read_state(conn)
@@ -1324,6 +1414,38 @@ def maybe_truncate(
         size,
     )
     return TruncateResult(truncated=True, reason=TRUNCATE_DONE)
+
+
+def _ftruncate_if_unchanged(path: str, cursor: int) -> bool:
+    """Truncate via a verified write fd; False if the size moved meanwhile.
+
+    The size is re-checked on the SAME fd that is truncated: nginx may have
+    appended (or the file been swapped) since the read-side fstat.
+    """
+    fd = open_event_log(path, os.O_WRONLY)
+    try:
+        if os.fstat(fd).st_size != cursor:
+            return False
+        os.ftruncate(fd, 0)
+        return True
+    finally:
+        os.close(fd)
+
+
+def _refuse_truncate(
+    conn: sqlite3.Connection, path: str, exc: OSError, now_iso: str
+) -> TruncateResult:
+    """An unsafe event-log path (S-1): loud, counted, never a crash."""
+    _record_truncate_denied(conn, now_iso)
+    logger.warning(
+        "event-sweep: REFUSING to rotate %r (%s). The path is a symlink, not a "
+        "regular file, or on another device than its directory -- something "
+        "on the shared /vault volume replaced the event log. Nothing was read "
+        "through it or truncated. Inspect /vault/logs on the vault-core side.",
+        path,
+        exc,
+    )
+    return TruncateResult(denied=True, reason=TRUNCATE_REFUSED)
 
 
 def _record_truncate_denied(conn: sqlite3.Connection, now_iso: str) -> None:

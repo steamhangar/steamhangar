@@ -32,22 +32,28 @@ def require_api_key(request: Request, x_api_key: str | None = Header(default=Non
     bytes containing an invalid sequence).
     """
     settings = request.app.state.settings
-
-    if x_api_key is None:
+    if not api_key_matches(x_api_key, settings.vault_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid X-Api-Key header",
+            detail=UNAUTHORIZED_DETAIL,
         )
 
+
+#: The one 401 body text, shared with ``body_guard`` so both layers answer alike.
+UNAUTHORIZED_DETAIL = "Missing or invalid X-Api-Key header"
+
+
+def api_key_matches(provided_key: str | None, expected_key: str) -> bool:
+    """The constant-time key comparison (see ``require_api_key`` for why bytes).
+
+    Shared by the router dependency and ``body_guard.PreAuthBodyGuard``
+    (WP SEC-FIX-4, S-3), which runs it BEFORE FastAPI reads or parses a body.
+    """
+    if provided_key is None:
+        return False
     try:
-        provided = x_api_key.encode("utf-8", "surrogateescape")
+        provided = provided_key.encode("utf-8", "surrogateescape")
     except UnicodeEncodeError:
-        provided = None
-
-    expected = settings.vault_api_key.encode("utf-8", "surrogateescape")
-
-    if provided is None or not hmac.compare_digest(provided, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid X-Api-Key header",
-        )
+        return False
+    expected = expected_key.encode("utf-8", "surrogateescape")
+    return hmac.compare_digest(provided, expected)

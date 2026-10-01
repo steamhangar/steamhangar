@@ -108,6 +108,7 @@ from __future__ import annotations
 import os
 import struct
 import zipfile
+import zlib
 from dataclasses import dataclass
 
 #: Ceiling on any single buffer this module parses as one unit: a whole
@@ -674,6 +675,18 @@ def _read_zip_entry(path: str) -> bytes:
         raise ManifestParseError(f"{path!r}: not a valid zip file: {exc}") from exc
     except OSError as exc:
         raise ManifestParseError(f"cannot read {path!r}: {exc}") from exc
+    except (
+        zlib.error,  # corrupt deflate stream
+        EOFError,  # truncated compressed stream (bz2/lzma)
+        NotImplementedError,  # unsupported compression method
+        RuntimeError,  # encrypted entry ("password required")
+        ValueError,  # e.g. lzma/bz2 decoder errors on a lying header
+    ) as exc:
+        # WP SEC-FIX-4 (S-4): these escaped the documented catch contract and
+        # crashed a whole GC run on one bad file planted in the cache.
+        raise ManifestParseError(
+            f"{path!r}: unreadable zip entry ({type(exc).__name__}: {exc})"
+        ) from exc
 
     if len(data) > MAX_MESSAGE_SIZE:
         raise ManifestParseError(

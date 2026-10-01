@@ -188,7 +188,7 @@ from vault_api.manifests import (
     parse_cache_manifest,
 )
 from vault_api.manifest_archive import archive_filename
-from vault_api.sizes import entry_is_link_like
+from vault_api.sizes import entry_is_link_like, is_link_like
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +271,12 @@ STATUS_NO_COUNTING_APPS = "skipped_no_counting_apps"
 #: manifest could not be resolved from any source.
 STATUS_NO_MANIFEST = "skipped_no_manifest"
 
+#: ``depot/<depotid>/`` itself is a symlink or junction (WP SEC-FIX-4, S-2).
+#: vault-core shares the volume and could have planted it to point GC at a
+#: directory only vault-api can reach. GC never descends through it.
+#: (``DELETE /v1/cache/{appid}`` keeps its own unlink-the-link behaviour.)
+STATUS_LINKED_DIR = "skipped_link_like_dir"
+
 #: Every status a depot report can carry. Anything that is not
 #: ``STATUS_PLANNED`` guarantees an empty orphan set.
 ALL_STATUSES = (
@@ -281,6 +287,7 @@ ALL_STATUSES = (
     STATUS_UNREADABLE_OWNER,
     STATUS_NO_COUNTING_APPS,
     STATUS_NO_MANIFEST,
+    STATUS_LINKED_DIR,
 )
 
 #: ``ManifestResolution.source`` for a manifest read out of vault-api's own
@@ -386,6 +393,17 @@ def scan_depot_chunks(depot_dir: str) -> DepotChunkScan:
     unrecognized: list[str] = []
     vanished = 0
 
+    if is_link_like(chunk_dir):
+        # S-2: a planted ``chunk -> /data`` would make every file there look
+        # like an unclaimed orphan. Refused as "no chunk dir", loudly.
+        logger.warning(
+            "cache-gc: REFUSING %s -- it is a symlink or junction, not a "
+            "directory; nothing in it is scanned or deleted", chunk_dir,
+        )
+        return DepotChunkScan(
+            chunks={}, unrecognized=[], vanished_count=0, chunk_dir_exists=False
+        )
+
     try:
         entries = os.scandir(chunk_dir)
     except OSError:
@@ -450,7 +468,10 @@ def scan_stored_manifests(depot_dir: str) -> dict[str, list[StoredManifestCopy]]
     """``{manifestid: [copies, newest first]}`` for one depot.
 
     Directory names that are not valid manifest ids are ignored entirely
-    (``valid_manifest_id``); so are link-like entries, at both levels. Copies
+    (``valid_manifest_id``); so are link-like entries at every level —
+    ``manifest/`` itself, ``manifest/<mid>/``, ``manifest/<mid>/5/`` and the
+    copies inside (WP SEC-FIX-4 added the first and third; before it, a
+    planted ``5 -> /data`` made files there dedupe candidates). Copies
     are sorted by mtime descending, with the filename descending as a
     deterministic tie-break so two runs over the same tree never disagree
     about which copy is "newest".
@@ -469,6 +490,13 @@ def scan_stored_manifests(depot_dir: str) -> dict[str, list[StoredManifestCopy]]
     manifest_root = os.path.join(depot_dir, MANIFEST_DIRNAME)
     found: dict[str, list[StoredManifestCopy]] = {}
 
+    if is_link_like(manifest_root):
+        logger.warning(
+            "cache-gc: REFUSING %s -- it is a symlink or junction; no stored "
+            "manifest under it is scanned or deduplicated", manifest_root,
+        )
+        return found
+
     try:
         manifest_entries = list(os.scandir(manifest_root))
     except OSError:
@@ -482,6 +510,12 @@ def scan_stored_manifests(depot_dir: str) -> dict[str, list[StoredManifestCopy]]
             if manifestid is None or not manifest_entry.is_dir():
                 continue
             request_dir = os.path.join(manifest_entry.path, MANIFEST_REQUEST_DIR)
+            if is_link_like(request_dir):
+                logger.warning(
+                    "cache-gc: REFUSING %s -- it is a symlink or junction",
+                    request_dir,
+                )
+                continue
             copy_entries = list(os.scandir(request_dir))
         except OSError:
             continue
@@ -1434,6 +1468,19 @@ def _plan_one_depot(
     except deletion.UnsafeDepotTargetError as exc:  # pragma: no cover - see guard
         logger.warning("cache-gc depot=%s REFUSED by the path guard: %s", depotid, exc)
         return DepotGcPlan(depotid=depotid, status=STATUS_UNUSABLE_DEPOTID, note=str(exc))
+
+    if is_link_like(depot_dir):
+        logger.warning(
+            "cache-gc depot=%s REFUSED: %s is a symlink or junction", depotid, depot_dir
+        )
+        return DepotGcPlan(
+            depotid=depotid,
+            status=STATUS_LINKED_DIR,
+            note=(
+                f"{depot_dir} is a symlink or junction, not a directory; GC "
+                "never descends through a link on the shared cache volume."
+            ),
+        )
 
     if not os.path.isdir(depot_dir):
         return DepotGcPlan(
