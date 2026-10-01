@@ -1029,9 +1029,12 @@ def _env_prefill_mode(name: str = "VAULT_PREFILL_MODE") -> str:
 #: heartbeat is at most this old when it stops updating.
 DEFAULT_RUNNER_HEARTBEAT_SECONDS = 5.0
 
-#: How stale ``run_heartbeat_at`` (or, if never claimed, ``run_claimed_at`` /
-#: the job's own ``started_at``) must be before vault-api's worker treats a
-#: queue-mode job's runner as dead (``jobs.run_is_stale``). Several multiples
+#: How stale ``run_heartbeat_at`` must be before vault-api's worker treats a
+#: queue-mode job's runner as dead (``jobs.run_is_stale``). The lease starts
+#: at the hand-off: ``handoff_run`` stamps ``run_heartbeat_at`` itself, so an
+#: unclaimed job is measured from the moment a runner could first claim it,
+#: not from ``started_at`` (WP API-FIX-1 B2; ``run_claimed_at``/``started_at``
+#: remain fallbacks only for rows written by older code). Several multiples
 #: of the heartbeat interval on purpose: a single missed heartbeat (a GC
 #: pause, a slow disk fsync under WAL) must not read as a dead process — see
 #: ADR-0012 §4 for the margin reasoning and §3 for the measured WAL

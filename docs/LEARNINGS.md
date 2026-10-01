@@ -754,3 +754,46 @@ These are not style preferences; each entry cost a review round to learn.
   kdoc asserting the shipped defaults produce it. Every platform that
   restates a server default needs its own config-drift guard the day
   the fixture is born, not after the first drift.
+
+## 2026-09-30/10-01 — pre-freeze review (the *-FIX-1/2 packages, TH-0b)
+
+- In fake-dom tests, assert on TEXT, never on nodes: a failing node
+  assertion makes `node:assert` dump the whole fake-DOM graph, and the
+  test process was OOM-killed (SIGKILL) instead of reporting a failure
+  (WP WEB-FIX-1).
+- Polling/loop tests must stop their loops in `finally`. A broken gate
+  then fails the test instead of HANGING the whole suite — measured when
+  a mutation forced the N4 store gate open (WP WEB-FIX-1).
+- A lease timeout must be measured from the moment the counterparty could
+  first act (the hand-off), not from an earlier lifecycle stamp:
+  `started_at` predates vault-api's own pre-hand-off cache walk, so every
+  job on a cold cache failed as `runner_lost` before a runner saw it. Same
+  package: a reattach lookup filtered on "not yet complete" excludes
+  exactly the row a restart most commonly leaves behind (WP API-FIX-1).
+- A live redirect test whose recording server only implements POST cannot
+  see a POST→GET redirect being followed — it passed against the
+  vulnerable code. Mutation-check every security test against the OLD
+  code before trusting it (WP API-FIX-2).
+- Asserting a raw path against a `%q`-formatted log line passes on Linux
+  and fails on Windows (`%q` escapes the backslashes). Format the
+  expectation the same way the code does (WP AGENT-FIX-1).
+- nginx facts measured in the throttling spike: `load_module` relative
+  paths resolve against `-p`, not the config file; a `js_set` error fails
+  OPEN on `proxy_limit_rate` (no cap, no error); `$connections_active`
+  counts idle keep-alive connections too; nginx's `k` suffix is 1024, not
+  1000 (WP TH-0b).
+- Linux file mtimes are tick-coarse (kernel 6.12): two files written in
+  quick succession can share an mtime, so never rank files by mtime alone;
+  in tests force the times with `os.utime`. A pre-existing retention bug
+  hid behind this and failed 5 of 6 runs at HEAD (WP API-FIX-2).
+- Process: delegating to more than ~3 parallel agents hit the session
+  limit repeatedly during this review cycle. Queue packages instead of
+  fanning out wider; the throughput gained by a fourth parallel agent was
+  lost to restarts (WP pre-freeze review, cross-package).
+- Process: review-then-fix with mutation checks caught six tests that
+  pinned nothing — the webhook redirect test (API-FIX-2, above), the
+  AGENT Windows `%q` assertion (above), three APP wiring pins, and the WEB
+  OOM-ing node assertion. Each was green against the code it claimed to
+  guard. A test that has never been seen failing for the right reason is
+  not yet evidence; mutate its subject once before counting it (WP
+  pre-freeze review, cross-package).

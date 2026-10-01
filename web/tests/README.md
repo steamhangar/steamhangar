@@ -2144,8 +2144,9 @@ actually lands, rather than rediscovered from scratch.
 
 ### WP WEB-FIX-1 — review findings B1/B2/S1/S2/S3/P2/N2-N5
 
-Suite at the end of this package: **812 tests, 812 pass, 0 fail**
-(`node --test "web/tests/*.test.js"`; 772 before it).
+Suite at the end of this package: **820 tests, 820 pass, 0 fail**
+(`node --test "web/tests/*.test.js"`; 772 before it, 812 after review
+round 1 — round 2 added `fake-dom.test.js` and four onboarding tests).
 
 New files:
 - `onboarding-wiring.test.js` — fake-dom drive of `onboarding.js`: B1
@@ -2169,6 +2170,10 @@ New files:
   AUTH-kind store error opens reconnect once; NETWORK/SERVER never;
   no stored key never; an already-open overlay neither re-opens nor
   consumes the one-shot; plus a source pin that `app.js` wires it.
+- `fake-dom.test.js` (round 2, N1/N2) — self-tests for the shared shim:
+  the `innerHTML` setter accepts exactly ONE top-level element and throws
+  otherwise, reading `innerHTML` throws "unsupported", and text nodes live
+  in `childNodes` but never in `children`.
 - `store-singleton-gate.test.js` — N4: no key and no demo starts no loop
   (zero requests); a key or demo mode starts them.
 - `view-announcer.test.js` — S2: literal `VIEW_TITLES` pin + router twin
@@ -2181,7 +2186,10 @@ verbatim), `settings-presentation.test.js` (P2 `missingSettingKeys`),
 `demo-data-cached-prefill.test.js` (S1: shared-with-cached-co-owner not
 selected; the delete-then-check-all carry-over scenario; remnant after
 both co-owners deleted), `fake-dom.js` (DocumentFragment move semantics,
-text nodes, a tag-only `innerHTML` shim that THROWS on non-markup input).
+text nodes; round 2: `childNodes` is now the backing list of elements AND
+text nodes with `children` as the element-only view, and `innerHTML` is
+strict — the setter takes ONE top-level element and throws on anything
+else, the getter throws instead of returning a guess).
 
 Mutation evidence (each applied alone, full suite run, then restored):
 Connection section moved back below the load-error return → 2 fail;
@@ -2196,4 +2204,20 @@ first test moved `store.stop()` into `finally`); S1 filter reverted to
 
 Not covered: a real screen reader actually speaking the announcer, and the
 demo notice's painted look (it reuses the existing `.hint` class only).
+
+### WP DOCS-FIX-2 — fake-dom `textContent`
+
+Closes the harness gap recorded after WEB-FIX-1 round 2: `textContent` was
+a plain property, so an element built from child nodes read back as
+`undefined` and setting it left the old children in place. It is now a
+real-DOM getter/setter pair — the getter joins the children's text when
+`childNodes` is non-empty (own text otherwise, `""` by default); only a
+`#text` node stores its own text. On an element the setter detaches the old
+children and, for a non-empty string, leaves exactly one new `#text` child
+(an empty string leaves none), so `p.textContent = "x"; p.append(b)` reads
+back `"xB"`. Four cases in `fake-dom.test.js` pin this (getter join; setter
+→ one `#text` child; `""` → no children; set-then-append → `"xB"`); each
+half was mutation-checked (getter reverted to own-text-only → 1 fail; setter
+no longer clearing → 1 fail; setter not creating the `#text` node → 3 fail).
+Suite: **824 tests, 824 pass, 0 fail**.
 

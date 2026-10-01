@@ -1098,14 +1098,15 @@ def recover_stale_jobs(conn: sqlite3.Connection, queue_mode: bool = False) -> in
     the ONE reconciliation path this project has for "is the runner still
     there" — deliberately not duplicated here, so a stale-lease bug only has
     one place to hide instead of two disagreeing ones.
+
     A ``running`` prefill job that was never handed off (``run_use_force IS
     NULL`` — the narrow window between ``claim_next_job`` and ``handoff_run``;
-    this holds for a resumed job too, because ``resume_job`` clears the
-    paused attempt's ``run_*`` columns) is a genuine single-process orphan even in queue mode, exactly like every
-    other job type, and is failed here as before. GC jobs never go through the
-    runner split at all (worker.py still runs them in-process, ADR-0012 is
-    prefill-only) and are always covered by the blanket rule regardless of
-    ``queue_mode``.
+    this holds for a resumed job too, because ``resume_job`` clears the paused
+    attempt's ``run_*`` columns) is a genuine single-process orphan even in
+    queue mode, exactly like every other job type, and is failed here as
+    before. GC jobs never go through the runner split at all (worker.py still
+    runs them in-process, ADR-0012 is prefill-only) and are always covered by
+    the blanket rule regardless of ``queue_mode``.
     """
     with immediate_transaction(conn):
         rows = conn.execute(

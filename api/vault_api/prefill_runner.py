@@ -229,6 +229,14 @@ class PrefillRunner:
         logged loudly and the runner moves on: the job's lease then expires
         (no more heartbeats) and vault-api fails it as ``runner_lost`` — the
         bytes SteamPrefill wrote stay in the cache either way.
+
+        With a locked database every attempt can block for the full
+        ``busy_timeout`` (5 s, ``db.get_connection``) before it raises, so the
+        retries (up to ``RESULT_WRITE_ATTEMPTS`` x 5 s plus the sleeps
+        between them) can outlast the container's 20 s ``stop_grace_period``
+        during a shutdown. The resulting SIGKILL has the same outcome as
+        giving up here: no result is stored, the lease expires and the job
+        is failed as ``runner_lost``.
         """
         for attempt in range(1, RESULT_WRITE_ATTEMPTS + 1):
             try:

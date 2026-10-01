@@ -128,7 +128,9 @@ services:
       # Upstream DNS resolver nginx uses to resolve Steam CDN hostnames at
       # request time (ADR-0001 req 4). MUST NOT point at vault-dns: vault-dns
       # answers *.steamcontent.com with vault-core's own address, which would
-      # make every cache miss proxy back into this container forever.
+      # make every cache miss proxy back into this container: the boot
+      # preflight then refuses to start, and a rewrite that appears after
+      # boot gets every miss answered 508 Loop Detected after one hop.
       VAULT_RESOLVER: ${VAULT_RESOLVER:-1.1.1.1}
       # Optional cache-event log (WP 3.10, ADR-0008; core/README.md
       # "Cache-event log"). Empty (the default from core/Dockerfile) means
@@ -840,6 +842,11 @@ services:
     # push the real number past it), so a SIGKILL could arrive mid-teardown
     # and turn a clean "aborted" result into a hard kill with nothing
     # recorded. 20s gives roughly 2x the computed worst case.
+    # Not covered by that budget: with a LOCKED database each result-write
+    # attempt can block for the full busy_timeout (5s per attempt), so
+    # prefill_runner._record_result's retries can outlast the 20s grace. The
+    # SIGKILL then has the same outcome as the runner giving up on its own
+    # (no result stored, lease expires, job failed as runner_lost).
     stop_grace_period: 20s
     # The image's baked HEALTHCHECK (api/Dockerfile) probes
     # http://127.0.0.1:8080/v1/health -- this process never listens on that

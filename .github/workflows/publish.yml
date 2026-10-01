@@ -622,9 +622,12 @@ jobs:
       #   - VAULT_RELEASE_VERSION_CODE = `github.run_number`: strictly
       #     increasing per workflow run on this repository, never reused,
       #     so every published APK installs as an UPDATE over the previous
-      #     one (Android refuses a same-or-lower versionCode). A re-run of
-      #     the same tag gets a higher code, which is correct: it is a
-      #     different build.
+      #     one (Android refuses a same-or-lower versionCode). Caveat:
+      #     renaming this workflow, or deleting and recreating it, restarts
+      #     run_number at 1 and the next APK is then rejected as a downgrade
+      #     (app/README.md "Release version comes from the environment").
+      #     A re-run of the same tag gets a higher code, which is correct:
+      #     it is a different build.
       # `tag` (with the `v`, sanitised) is what the APK's release-asset
       # filename below uses, matching the `vault-agent-v1.2.3-...` naming
       # on the same release page.

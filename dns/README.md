@@ -243,13 +243,20 @@ that resolver. Two ways to make that happen:
   network settings. Works, but has to be repeated on every device and
   redone if the DNS host's IP ever changes.
 
-Either way, keep a secondary/upstream DNS configured on the router or
-device pointing at a real public resolver as a fallback **only if** your
-DNS host (vault-dns or otherwise) going down should not take your whole
-LAN's internet DNS down with it -- for vault-dns specifically, the
-container itself already forwards non-`steamcontent.com` queries upstream
-(`${UPSTREAM_DNS_1}`/`${UPSTREAM_DNS_2}`), so this is a resilience
-choice, not a functional requirement.
+Either way, hand out **only** that one resolver:
+
+- **IPv6 can bypass the redirect.** If your router advertises itself (or
+  any other resolver) as a DNS server over IPv6, via RA RDNSS or DHCPv6,
+  clients may ask that resolver instead of vault-dns and download straight
+  from Valve. Disable the router's "advertise router as DNS server" option
+  for IPv6, or set RDNSS/DHCPv6 DNS to the same rewriting resolver you
+  configured for IPv4.
+- **No public resolver as secondary or fallback DNS**, on the router or on
+  devices. Clients use secondary resolvers freely, not only on failure, so
+  any lookup that reaches a public resolver silently bypasses the cache.
+  vault-dns already forwards every non-Steam query upstream itself
+  (`${UPSTREAM_DNS_1}`/`${UPSTREAM_DNS_2}`); if you need resilience, run a
+  second rewriting instance instead of a public fallback.
 
 ## Operational notes: exposure, logging, and TTL
 

@@ -1991,8 +1991,9 @@ now reads `VAULT_RELEASE_VERSION_NAME` and `VAULT_RELEASE_VERSION_CODE`
 blank, so a local `assembleDebug` is unchanged. A code that is not a
 positive integer fails Gradle configuration with the offending value in
 the message — never a silent `1`. `.github/workflows/publish.yml` sets
-both in its `Compute release version` step: the name from the release tag,
-the code from `github.run_number`. Caveat: `github.run_number` restarts if
+both in the `env:` of its `gradlew assembleRelease (signed)` step: the name
+from the release tag (computed by the `Compute release version (sanitized)`
+step, which only computes it), the code from `github.run_number`. Caveat: `github.run_number` restarts if
 the workflow is renamed or recreated, and Android rejects the lower
 `versionCode` as a downgrade — bump past the old value before that happens.
 
@@ -3646,7 +3647,12 @@ Unconfirmed by sight, all real for this WP specifically:
 Nine findings from the pre-freeze project review, all `app/`-only; no
 build environment exists here (Gradle/JVM tests run in GitHub CI only), so
 every Kotlin change is minimal and mirrors an existing pattern in this
-tree. Per finding:
+tree. **Test count:** the JVM suite is CI-gated — `main` is green by
+construction and the `android-tests` job's run shows the current count.
+The numbers quoted in the sections above (the last one, 611, at the end of
+WP APP-DEMO round 4) are historical measurements of their own package, not
+the current total; this package added tests and recorded no new count by
+hand. Per finding:
 
 - **S1 — API key masked.** `ui/onboarding/OnboardingScreen.kt`'s API-key
   field now uses `PasswordVisualTransformation()` by default with a

@@ -466,9 +466,30 @@ shows exactly what to add and how to verify it with `dig`.
 > `*.steamcontent.com` rewrite there instead (mode 1 above; a very common
 > homelab layout — AdGuard Home/Pi-hole and this stack side by side on a NAS
 > or a small server). Point `VAULT_RESOLVER` at that resolver and vault-core
-> would proxy every cache miss back into itself, indistinguishable from a
-> hung upstream from the outside. `deploy/.env.example` carries the same
-> warning next to the setting itself.
+> would resolve Valve's CDN names to its own address: `40-vault-preflight.sh`
+> then refuses to boot (it probes the first resolver in `VAULT_RESOLVER` for a Steam CDN name and
+> stops on a private answer), and should the resolver start rewriting after
+> boot, every cache MISS is answered `508 Loop Detected` after one hop with
+> nothing cached — the cache stops filling, it does not hang.
+> `deploy/.env.example` carries the same warning next to the setting itself.
+
+**Router port-53 DNAT.** If your router transparently redirects all port-53
+traffic (DNAT) to a Pi-hole/AdGuard that rewrites `*.steamcontent.com` to
+vault-core, vault-core's own upstream lookups are rewritten too and every
+cache MISS would be proxied back into itself. vault-core detects this two
+ways: at boot, `40-vault-preflight.sh` refuses to start if `VAULT_RESOLVER`
+answers a Steam CDN name with a private address, and at runtime any request
+that comes back carrying its own `X-SteamHangar-Hop` header is answered `508
+Loop Detected` after one hop, with nothing cached. The fix is to exempt the
+vault-core host from the router's port-53 redirect, or to point
+`VAULT_RESOLVER` at a resolver that answers Steam's CDN names truthfully.
+
+**What `/depot/` accepts.** Depot requests are GET-only: any other method,
+including `HEAD`, is answered `405` locally and never relayed to Valve. A URI
+ending in `/` is answered `404` locally before any cache lookup (no real depot
+object URI ends in `/`). Use `GET` when probing the cache by hand, e.g.
+`curl -s -o /dev/null -w '%{http_code}\n' http://<cache>/depot/...` rather
+than `curl -I`.
 
 ---
 

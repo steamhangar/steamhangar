@@ -231,7 +231,8 @@ reattach path relies on is simply never touched by a second hand-off it
 never receives.
 
 **Addendum 2026-10-01 (WP API-FIX-1).** The text above is kept as decided;
-four points in it are superseded by the following:
+three points in it are superseded, and one rule is added (the last
+bullet), by the following:
 
 - **The lease for a never-claimed run starts at the hand-off**, not at the
   claim or at `started_at` (the "if never claimed, since the claim, or since

@@ -265,6 +265,38 @@ class FakeElement {
   get children() {
     return this.childNodes.filter((c) => c.tagName !== "#TEXT");
   }
+  // WP DOCS-FIX-2 (follow-up to WEB-FIX-1 round 2): `textContent` follows
+  // the real DOM. Only a "#text" node stores its own text (`_text`). The
+  // getter joins the children's text in document order, so
+  // `p.append(text, b)` reads back as the visible text; a node with no
+  // children reads its own `_text` ("" for an empty element). The setter on
+  // an element detaches every old child and, for a non-empty string, puts a
+  // single new "#text" child in their place (an empty string leaves no
+  // children), exactly as `el.textContent = "..."` does in a browser — so a
+  // later `append` keeps the text: `p.textContent = "x"; p.append(b)` reads
+  // back "xB".
+  get textContent() {
+    if (this.childNodes.length > 0) {
+      return this.childNodes.map((c) => c.textContent).join("");
+    }
+    return this._text ?? "";
+  }
+  set textContent(value) {
+    const text = value == null ? "" : String(value);
+    if (this.tagName === "#TEXT") {
+      this._text = text;
+      return;
+    }
+    for (const c of this.childNodes) c.parentNode = null;
+    this.childNodes = [];
+    if (text !== "") {
+      const node = new FakeElement("#text");
+      node._text = text;
+      node._ownerDoc = this._ownerDoc;
+      node.parentNode = this;
+      this.childNodes = [node];
+    }
+  }
   setAttribute(name, value) {
     this._attrs.set(name, String(value));
   }

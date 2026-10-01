@@ -133,7 +133,7 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_WEBHOOK_URL`             | no       | *(empty — webhooks OFF)* | Generic JSON webhook target (WP 3.13). Unset/blank = the whole feature is off. See "Webhooks" |
 | `VAULT_WEBHOOK_EVENTS`          | no       | *(all five)* | Comma list of events to send: `job.done`, `job.error`, `job.cancelled`, `client.bypass_suspected`, `client.bypass_resolved`. Unknown names or empty entries fail at startup |
 | `VAULT_WEBHOOK_TIMEOUT_SECONDS` | no       | `5`          | Per-attempt HTTP timeout for one delivery try; **must be > 0** |
-| `VAULT_NAME`                    | no       | *(empty)*    | Optional label carried as `"vault_name"` in every webhook payload — omitted entirely when unset. Purely cosmetic, for an operator running more than one SteamHangar instance. Validated: at most 64 characters after trimming surrounding whitespace, printable characters only (no tab, newline or other control character inside the name); anything else refuses startup with a clear `RuntimeError` naming `VAULT_NAME`, and is answered `422` on `PATCH /v1/settings`. **Upgrade caveat:** a deployment whose existing `VAULT_NAME` is longer than 64 characters or contains a tab stops booting until the value is shortened or cleaned |
+| `VAULT_NAME`                    | no       | *(empty)*    | Optional label carried as `"vault_name"` in every webhook payload — omitted entirely when unset. Purely cosmetic, for an operator running more than one SteamHangar instance. Validated: at most 64 characters after trimming surrounding whitespace, printable characters only (no tab, newline or other control character inside the name); anything else refuses startup with a clear `RuntimeError` naming `VAULT_NAME`, and is answered `422` on `PATCH /v1/settings`. **Upgrade caveat:** a deployment whose existing `VAULT_NAME` is longer than 64 characters or contains a non-printable character such as a tab stops booting until the value is shortened or cleaned |
 | `VAULT_MANIFEST_ORACLE`         | no       | *(empty — oracle OFF)* | Third-party manifest oracle. Only `steamcmd_api` is implemented. **Enabling it makes vault-api send app ids to a service outside your LAN** — see "Manifest oracle" below before setting it. Any other value is refused at startup |
 | `VAULT_MANIFEST_ORACLE_URL`     | no       | `https://api.steamcmd.net/v1/info` | Base URL the oracle asks (`<base>/<appid>`). Point it at your own mirror to keep the queries on your network. Must be `http`/`https`; redirects away from it are never followed |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | no       | `10`         | Socket timeout (seconds) for one oracle request; **must be > 0**. A timeout is an ordinary "no data" outcome, never an error the API surfaces |
@@ -3905,9 +3905,10 @@ security theatre rather than a real mitigation.
 ### What this work package deliberately did NOT do
 
 - **No `deploy/` changes.** `VAULT_WEBHOOK_URL`/`VAULT_WEBHOOK_EVENTS`/
-  `VAULT_WEBHOOK_TIMEOUT_SECONDS`/`VAULT_NAME` are documented in
-  `api/.env.example`; wiring them through `deploy/compose.yaml` is a
-  follow-up, same pattern as WP 3.11's event-log path.
+  `VAULT_WEBHOOK_TIMEOUT_SECONDS`/`VAULT_NAME` were documented only in
+  `api/.env.example` by this package. Since then all four are wired through
+  `deploy/compose.yaml`'s `vault-api` environment and documented in
+  `deploy/.env.example` (pre-freeze review S3).
 - **No persistent delivery queue / outbox.** At-most-once, in-process only —
   see "Delivery semantics" above.
 - **No vendor-specific templates.** One schema; a receiver that wants a
@@ -5983,7 +5984,7 @@ place rather than duplicated here.
 
 | Key | Env var | `applies` | Why |
 |---|---|---|---|
-| `vault_name` | `VAULT_NAME` | `restart-required` | Only read by `WebhookNotifier._build_body`, which holds a fixed `Settings` snapshot for the notifier's lifetime — see "The honest gap" below. Value rule (shared with the env var): at most 64 characters after trimming, printable only — anything else is `422` here and a startup refusal for `VAULT_NAME` |
+| `vault_name` | `VAULT_NAME` | `restart-required` | Only read by `WebhookNotifier._build_body`, which holds a fixed `Settings` snapshot for the notifier's lifetime — see "The honest gap" below. Value rule (shared with the env var): at most 64 characters after trimming, printable only — anything else is `422` here and a startup refusal for `VAULT_NAME`. Upgrade caveat: an existing value longer than 64 characters or containing a non-printable character such as a tab stops vault-api booting until it is fixed |
 | `schedule_window` | `VAULT_SCHEDULE_WINDOW` | `next_sweep` | `vault_api/scheduler.py`'s tick loop resolves `effective_settings` fresh every ~60s tick, using the connection the tick already opened |
 | `schedule_interval_minutes` | `VAULT_SCHEDULE_INTERVAL_MINUTES` | `next_sweep` | Same tick-loop resolution as `schedule_window` |
 | `schedule_client_stale_days` | `VAULT_SCHEDULE_CLIENT_STALE_DAYS` | `next_sweep` | Same tick-loop resolution |
