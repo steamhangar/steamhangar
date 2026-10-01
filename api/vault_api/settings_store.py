@@ -219,6 +219,16 @@ def _parse_webhook_events_override(raw: str) -> frozenset[str]:
         raise SettingValidationError(str(exc)) from exc
 
 
+def _parse_steam_library_steamid_override(raw: str) -> str:
+    """WP API-FEAT-1. Blank is a valid override (stored ``""`` = explicitly
+    not set, shadowing an env value), same convention as ``webhook_url``;
+    ``null`` deletes the row instead."""
+    try:
+        return config.parse_steam_library_steamid(raw)
+    except ValueError as exc:
+        raise SettingValidationError(str(exc)) from exc
+
+
 def _window_to_json(window: ScheduleWindow | None) -> str | None:
     return None if window is None else window.raw
 
@@ -227,9 +237,10 @@ def _events_to_json(events: frozenset[str]) -> list[str]:
     return sorted(events)
 
 
-#: The eight keys overridable today (ADR-0009 named the first seven; WP 4d
+#: The nine keys overridable today (ADR-0009 named the first seven; WP 4d
 #: added ``sweep_include_cached`` as "one more overridable key when it
-#: lands", per the ADR's own consequences section), in the order they are
+#: lands", per the ADR's own consequences section; WP API-FEAT-1 added
+#: ``steam_library_steamid`` under the ADR-0016 addendum), in the order they are
 #: documented in api/README.md and returned by GET /v1/settings. Keyed by
 #: ``Settings`` attribute name, which is also the JSON key both endpoints use.
 OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
@@ -309,6 +320,21 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
         default=frozenset(config.WEBHOOK_EVENTS_ALL),
         parse=_parse_webhook_events_override,
         to_json=_events_to_json,
+    ),
+    "steam_library_steamid": SettingSpec(
+        key="steam_library_steamid",
+        env_var="VAULT_STEAM_LIBRARY_STEAMID",
+        # Nothing in vault-api caches it: the frontends read it from GET
+        # /v1/settings, which resolves effective_settings per request.
+        applies="immediately",
+        # Not secret: a SteamID64 is a public Steam identifier (it is in
+        # every public profile URL), so GET returns it unredacted.
+        secret=False,
+        default="",
+        parse=_parse_steam_library_steamid_override,
+        # A JSON string, never a number: 17 digits exceed JavaScript's
+        # 2**53 safe-integer range and would be rounded by the web UI.
+        to_json=lambda v: v,
     ),
 }
 
@@ -483,7 +509,14 @@ def effective_settings(conn: sqlite3.Connection, base: Settings) -> Settings:
             # URL (scheme-less ``admin:s3cr3t@host/x`` passes redact_url
             # unchanged), and this line lands in `docker logs`
             # (WP API-FIX-2, P2/S1).
-            shown = "<redacted>" if spec.secret else raw
+            # steam_library_steamid (WP API-FEAT-1 N3): a malformed stored
+            # value is arbitrary text, so it is not echoed either.
+            if spec.secret:
+                shown = "<redacted>"
+            elif key == "steam_library_steamid":
+                shown = "<invalid>"
+            else:
+                shown = raw
             logger.error(
                 "settings: stored override for %r is %r, which no longer "
                 "passes validation; falling back to the env/default value "

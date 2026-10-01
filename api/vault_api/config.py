@@ -475,6 +475,40 @@ def _env_vault_name(name: str = "VAULT_NAME") -> str:
         raise RuntimeError(f"{name} {exc}") from exc
 
 
+def parse_steam_library_steamid(raw: str) -> str:
+    """WP API-FEAT-1. The vault's one SteamID64 for the web/app library.
+
+    Strip surrounding whitespace; blank means "not set" and returns ``""``.
+    Anything else must pass ``steam_relay.valid_steamid64`` -- the relay's
+    own strict grammar (17 ASCII digits, individual-account range), reused
+    here, not restated. It is looked up on the module at call time so there
+    is exactly one grammar and a test can prove the reuse by patching it.
+    Shared by ``VAULT_STEAM_LIBRARY_STEAMID`` at startup and ``PATCH
+    /v1/settings``. The error never echoes the value (house rule for
+    validation messages, even though a SteamID64 is not a secret).
+    """
+    from vault_api import steam_relay  # local: config stays a leaf module at import time
+
+    text = raw.strip()
+    if not text:
+        return ""
+    if steam_relay.valid_steamid64(text) is None:
+        raise ValueError(
+            "must be a SteamID64: exactly "
+            f"{steam_relay.STEAM_ID64_DIGITS} ASCII digits between "
+            f"{steam_relay.STEAM_ID64_BASE} and {steam_relay.STEAM_ID64_MAX}; "
+            "blank (or null over the API) clears it"
+        )
+    return text
+
+
+def _env_steam_library_steamid(name: str = "VAULT_STEAM_LIBRARY_STEAMID") -> str:
+    try:
+        return parse_steam_library_steamid(os.environ.get(name, ""))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} {exc}") from exc
+
+
 #: Accepted spellings for :func:`_env_bool`, case-insensitive.
 _BOOL_TRUE_VALUES = ("1", "true", "yes", "on")
 _BOOL_FALSE_VALUES = ("0", "false", "no", "off")
@@ -1162,6 +1196,10 @@ class Settings:
     # several installs can tell them apart. Blank = the field is omitted
     # entirely (see webhooks.py) rather than sent as "".
     vault_name: str = ""
+    # WP API-FEAT-1. The one SteamID64 whose library the web UI (and later
+    # the app) shows, stored per vault instead of per device. "" = not set.
+    # A public identifier, not a secret. DB-overridable (settings_store).
+    steam_library_steamid: str = ""
     # WP 3.9 / ADR-0006 decision 4. Which third-party manifest oracle to use.
     # "" (the default) = none, and that default is load-bearing: it is the
     # difference between a vault-api that talks only to the LAN and one that
@@ -1534,6 +1572,9 @@ class Settings:
                 "VAULT_WEBHOOK_TIMEOUT_SECONDS", DEFAULT_WEBHOOK_TIMEOUT_SECONDS
             ),
             vault_name=_env_vault_name(),
+            # WP API-FEAT-1. Blank/unset = not set; a malformed id refuses
+            # startup (same grammar as PATCH /v1/settings).
+            steam_library_steamid=_env_steam_library_steamid(),
             # WP 3.9. Unset/blank = no oracle, no outbound third-party request
             # — the default, and the reason the URL and timeout below are
             # harmless to have a default for.

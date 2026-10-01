@@ -205,6 +205,7 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_WEBHOOK_EVENTS`          | no       | *(all five)* | Comma list of events to send: `job.done`, `job.error`, `job.cancelled`, `client.bypass_suspected`, `client.bypass_resolved`. Unknown names or empty entries fail at startup |
 | `VAULT_WEBHOOK_TIMEOUT_SECONDS` | no       | `5`          | Per-attempt HTTP timeout for one delivery try; **must be > 0** |
 | `VAULT_NAME`                    | no       | *(empty)*    | Optional label carried as `"vault_name"` in every webhook payload — omitted entirely when unset. Purely cosmetic, for an operator running more than one SteamHangar instance. Validated: at most 64 characters after trimming surrounding whitespace, printable characters only (no tab, newline or other control character inside the name); anything else refuses startup with a clear `RuntimeError` naming `VAULT_NAME`, and is answered `422` on `PATCH /v1/settings`. **Upgrade caveat:** a deployment whose existing `VAULT_NAME` is longer than 64 characters or contains a non-printable character such as a tab stops booting until the value is shortened or cleaned |
+| `VAULT_STEAM_LIBRARY_STEAMID`   | no       | *(empty — not set)* | WP API-FEAT-1. The one SteamID64 whose library the web UI and the app show, stored per vault instead of per device. Both frontends read it from `GET /v1/settings` (key `steam_library_steamid`). Public identifier, not a secret. Validated with the Steam relay's own grammar (`steam_relay.valid_steamid64`: exactly 17 ASCII digits in the individual-account range, surrounding whitespace trimmed); anything else refuses startup with a `RuntimeError` naming the variable, and is answered `422` on `PATCH /v1/settings` |
 | `VAULT_MANIFEST_ORACLE`         | no       | *(empty — oracle OFF)* | Third-party manifest oracle. Only `steamcmd_api` is implemented. **Enabling it makes vault-api send app ids to a service outside your LAN** — see "Manifest oracle" below before setting it. Any other value is refused at startup |
 | `VAULT_MANIFEST_ORACLE_URL`     | no       | `https://api.steamcmd.net/v1/info` | Base URL the oracle asks (`<base>/<appid>`). Point it at your own mirror to keep the queries on your network. Must be `http`/`https`; redirects away from it are never followed |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | no       | `10`         | Socket timeout (seconds) for one oracle request; **must be > 0**. A timeout is an ordinary "no data" outcome, never an error the API surfaces |
@@ -6078,10 +6079,12 @@ place rather than duplicated here.
 | `sweep_include_cached` | `VAULT_SWEEP_INCLUDE_CACHED` | `next_sweep` | Same tick-loop resolution as the other `schedule_*` keys — see "Sweep target set — installed PLUS cached" above (WP 4d) |
 | `webhook_url` | `VAULT_WEBHOOK_URL` | `restart-required` | See "The honest gap" below |
 | `webhook_events` | `VAULT_WEBHOOK_EVENTS` | `restart-required` | Same as `webhook_url` |
+| `steam_library_steamid` | `VAULT_STEAM_LIBRARY_STEAMID` | `immediately` | WP API-FEAT-1 (ADR-0016 freeze exception). Nothing in vault-api caches it: the web library (WP WEB-FEAT-1) and, later, the app read it per request from `GET /v1/settings`, so every device shows the same account. Returned as a JSON **string** (17 digits exceed JavaScript's safe-integer range); `PATCH` accepts it only as a JSON string too: a JSON number gets `422`, since a JavaScript sender may already have rounded it and the API cannot tell. Same grammar as the env var (`steam_relay.valid_steamid64`). Not secret, not redacted |
 
-**Blank is a valid override value for `schedule_window` and `webhook_url`**
-(mirroring `Settings.from_env`'s own handling of both): it means "disabled",
-which is what makes "force the scheduler or the webhook off via the API even
+**Blank is a valid override value for `schedule_window`, `webhook_url` and `steam_library_steamid`**
+(mirroring `Settings.from_env`'s own handling of all three): it means
+"disabled" (or, for the SteamID, "not set"), which is what makes "force the
+scheduler or the webhook off, or the SteamID empty, via the API even
 though the env var still configures one" expressible at all, rather than a
 gap where only `null` (revert to env) is available and env itself cannot be
 overridden downward. Every other numeric/enum key requires an explicit,
