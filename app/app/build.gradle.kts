@@ -211,7 +211,13 @@ android {
         // otherwise fail the build every time upstream ships a release,
         // regardless of whether it is actually compatible here — that is
         // a human upgrade decision (a future WP), not a lint-fixable defect.
-        disable += setOf("AndroidGradlePluginVersion", "GradleDependency")
+        //
+        // OldTargetApi joins them for the same reason (first CI compile,
+        // 2026-10-01): lint's "latest API level" moved past 35 by the
+        // calendar, not by any change here. Raising targetSdk switches on
+        // new platform behaviour (e.g. enforced edge-to-edge) and needs a
+        // real-device pass, so it is a planned upgrade WP, not a lint fix.
+        disable += setOf("AndroidGradlePluginVersion", "GradleDependency", "OldTargetApi")
     }
 }
 
