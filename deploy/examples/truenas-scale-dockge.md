@@ -143,10 +143,13 @@ zfs set reservation=50G <pool>/steamhangar-cache   # guaranteed floor (optional)
 ### 4.2 Ownership
 
 `compression=off`/`recordsize=1M` are ZFS properties on the dataset;
-ownership of the *mount point* is a plain POSIX chown, same as any bind mount
-(`deploy/README.md` "Using a bind mount for the cache"):
+the layout and ownership of the *mount point* are plain POSIX, same as any
+bind mount (`deploy/README.md` "Using a dedicated cache mount"). Both
+`cache/depot` and `tmp` must exist and belong to 101:101 before the first
+start -- a bind mount is not seeded the way a fresh named volume is:
 
 ```bash
+mkdir -p /mnt/<pool>/steamhangar-cache/cache/depot /mnt/<pool>/steamhangar-cache/tmp
 chown -R 101:101 /mnt/<pool>/steamhangar-cache
 ```
 
@@ -356,7 +359,8 @@ may not control what the Docker daemon's own resolver is doing.
 |---|---|
 | `vault-core` exits at boot: `... is not writable by the nginx worker user` | `chown -R 101:101` on the dataset's mount point was skipped or ran before the dataset existed. |
 | `vault-core` exits at boot: `... DIFFERENT filesystems` | Something (a snapshot mount, an unrelated bind mount) is layered inside `/mnt/<pool>/steamhangar-cache` on a different device than the dataset root. `VAULT_CACHE_PATH` must point at one filesystem boundary, not a directory with something else mounted inside it. |
-| `docker compose up` starts but nothing ever gets cached, and there's no ownership error | Check `VAULT_CACHE_PATH` was actually picked up (Dockge/`docker compose config | grep -A3 /vault`) -- a value without a leading `/` is parsed as a *named volume reference*, not a bind path, and Compose refuses with `refers to undefined volume ...: invalid compose project` if it doesn't match `vault-cache` exactly. |
+| `docker compose up` fails with `invalid mount config for type "bind": field VolumeOptions must not be specified` | `VAULT_CACHE_PATH` is set and your `compose.yaml` still carries `nocopy` on vault-api's `/vault` bind (releases up to v0.1.0-rc4). Docker 28 (observed 28.3.1) refuses that. Update `compose.yaml`; the current one drops `nocopy` in bind mode. |
+| `docker compose up` starts but nothing ever gets cached, and there's no ownership error | Check `VAULT_CACHE_PATH` was actually picked up (Dockge/`docker compose config | grep -B2 /vault`) -- a value without a leading `/` is parsed as a *named volume reference*, not a bind path, and Compose refuses with `refers to undefined volume ...: invalid compose project` if it doesn't match `vault-cache` exactly. |
 | Every request is a cache MISS at internet speed, cache empty | DNS redirection isn't reaching the client, or the AAAA/RA bypass (§6) is open. `dig A` and `dig AAAA` against your resolver from an actual client, not just the NAS. |
 | Port 80 already answers something else (a Traefik/NPM welcome page) | You bound `vault-core` to the host's primary address instead of the alias from §5 -- double-check `VAULT_CORE_BIND` in `.env` against `ip addr show` on the TrueNAS host. |
 | Prefill jobs finish `done` but `zfs list -o space <pool>/steamhangar-cache` never grows | SteamPrefill inside the container isn't finding the cache via any of its four detection candidates (§7.1 above -- this is the expected risk of the §5 dedicated-alias layout specifically). Check with `docker compose exec vault-api python3 -c "import urllib.request as u; r=u.urlopen('http://<your §5 alias IP>/lancache-heartbeat',timeout=5); print(r.status, r.headers.get('X-LanCache-Processed-By'))"` (`curl` is not in the `vault-api` image), looking for `200 steamhangar`, and fix with the `extra_hosts` override in `deploy/README.md`. |

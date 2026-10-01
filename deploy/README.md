@@ -63,7 +63,8 @@ deploy/
 
 - Docker Engine with Compose v2 (`docker compose`, not `docker-compose`).
   Verified against **Docker Engine 29.1.3 / Compose 2.40.3** on Ubuntu 26.04
-  (WSL2) — and, as of the 2026-08-17 packaging work package, `deploy/tests/
+  (WSL2), also verified on **Docker 28.3.1 / Compose 2.38.1** (WP
+  DEPLOY-FIX-3, including the `VAULT_CACHE_PATH` bind mode) — and, as of the 2026-08-17 packaging work package, `deploy/tests/
   verify-stack.sh` has now actually run against that real host: 105/109
   checks passed on the final run, across three total runs spanning two
   review rounds. **The 4 failures were a genuine pre-existing bug in step
@@ -595,30 +596,35 @@ You do not have to remember this: vault-core compares the two directories'
 To put the cache on a specific disk -- a second drive, a NAS's own storage
 pool, anything other than wherever Docker keeps its named volumes -- set
 `VAULT_CACHE_PATH` in `deploy/.env` (`.env.example` documents it in full).
-No `compose.yaml` edit needed: both services' `/vault` mount is already
-`${VAULT_CACHE_PATH:-vault-cache}:/vault`, and Compose's volume short-syntax
-resolves a bare name (the default, unset case) as the named volume declared
-under `volumes:` and an absolute path as a bind mount to that path instead --
-so leaving the variable unset is byte-for-byte what this line always was.
+No `compose.yaml` edit needed: both services' `/vault` mount source is
+already driven by this variable, and Compose's volume short-syntax resolves
+a bare name (the default, unset case) as the named volume declared under
+`volumes:` and an absolute path as a bind mount to that path instead -- so
+leaving the variable unset (or blank) renders exactly what these lines
+always were.
 
 ```bash
 # deploy/.env
 VAULT_CACHE_PATH=/srv/steamhangar-cache
 ```
 
-Prepare the directory **before the first start** -- a bind mount, unlike a
-fresh named volume, does not get seeded with the image's pre-created
+Prepare the directory **before the first start**: `<path>/cache/depot` and
+`<path>/tmp` must both exist and be owned by `101:101`. A bind mount, unlike
+a fresh named volume, does not get seeded with the image's pre-created
 `cache/depot/` and `tmp/` (that seeding only happens for an empty named
 volume; see `core/Dockerfile`'s `VOLUME ["/vault"]` step). Skipping this
 step is not silent: vault-core's preflight will refuse to start with
 `/vault/cache is missing`.
 
 In the default named-volume mode only vault-core seeds the volume: vault-api
-mounts it with `:nocopy`, because two containers created at the same moment
+mounts it with `nocopy`, because two containers created at the same moment
 on a fresh volume would otherwise race on Docker's copy-up and one fails
 with `mkdir .../_data/tmp: file exists`. In bind-mount mode there is no
-copy-up; Compose ignores the option and prints a harmless warning
-("mount of type `bind` should not define `volume` option").
+copy-up, so vault-api's line drops `nocopy` by itself when `VAULT_CACHE_PATH`
+is set. That is a requirement, not tidiness: Docker 28 (observed 28.3.1)
+refuses a bind that carries it (`invalid mount config for type "bind": field VolumeOptions must
+not be specified`). If you see that error, your `compose.yaml` predates this
+fix; update it.
 
 ```bash
 sudo mkdir -p /srv/steamhangar-cache/cache/depot /srv/steamhangar-cache/tmp
@@ -632,7 +638,9 @@ get this right automatically; bind mounts do not. If you get it wrong,
 vault-core refuses to start and tells you the exact `chown` to run.
 
 **`VAULT_CACHE_PATH` must be an absolute path** (start with `/`). Compose
-treats anything else as a *named-volume reference* rather than a bind path;
+treats `./` and `~/` paths as binds too, but relative to the compose
+project directory or your home, which is rarely what you mean here; anything
+else (a bare name) is a *named-volume reference* rather than a bind path;
 since only `vault-cache` is declared under the top-level `volumes:` key, a
 typo here fails loudly at `docker compose config`/`up` time (`refers to
 undefined volume ...: invalid compose project`), not silently.
@@ -1367,7 +1375,8 @@ steamcontent.com` resolves to.
 | vault-core exits at boot with `FATAL: … DIFFERENT filesystems` | `cache/` and `tmp/` were split across two mounts. Mount one volume at `/vault`. |
 | vault-core exits with `FATAL: … not writable by the nginx worker user` | bind-mounted cache directory not owned by `101:101`. |
 | vault-core exits with `FATAL: /vault/cache is missing` | `VAULT_CACHE_PATH` is set but `<path>/cache/depot` and `<path>/tmp` weren't created first — a bind mount isn't seeded the way a fresh named volume is. See ["Using a dedicated cache mount"](#using-a-dedicated-cache-mount). |
-| `docker compose config`/`up` fails with `refers to undefined volume ...: invalid compose project` | `VAULT_CACHE_PATH` doesn't start with `/` — Compose parsed it as a named-volume reference instead of a bind path. Use an absolute path. |
+| `up` fails with `invalid mount config for type "bind": field VolumeOptions must not be specified` | `VAULT_CACHE_PATH` is set and your `compose.yaml` still carries `nocopy` on vault-api's `/vault` bind (releases up to v0.1.0-rc4). Docker 28 (observed 28.3.1) refuses that. Update `compose.yaml`; the current one drops `nocopy` in bind mode. |
+| `docker compose config`/`up` fails with `refers to undefined volume ...: invalid compose project` | `VAULT_CACHE_PATH` doesn't start with `/`, `./` or `~/` — Compose parsed it as a named-volume reference instead of a bind path. Use an absolute path. |
 | vault-dns exits with `FATAL: CACHE_IP is not set` | the `dns` profile is enabled but `CACHE_IP` is empty in `.env`. |
 | Clients download at internet speed and the cache stays empty | DNS redirection isn't reaching them, or the AAAA leak is open. Check with `dig A` **and** `dig AAAA` against your resolver (`dns/README.md`). |
 | Prefill jobs fail with "A Steam account is required" | the one-time interactive login hasn't been done — see [First run](#first-run-the-one-time-steamprefill-login). |

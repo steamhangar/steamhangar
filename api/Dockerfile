@@ -177,7 +177,9 @@ COPY web /app/web
 #   /vault                    -> the shared depot cache volume (same volume
 #                                vault-core mounts). Only vault-core seeds an
 #                                empty named volume: vault-api's mount is
-#                                :nocopy (deploy/compose.yaml). cache/depot is
+#                                nocopy in named-volume mode only; a
+#                                VAULT_CACHE_PATH bind carries no options
+#                                (deploy/compose.yaml). cache/depot is
 #                                still pre-created here, same layout as
 #                                vault-core's image, for bind-mount/standalone
 #                                use, and so vault-api's deletion guard (which refuses a

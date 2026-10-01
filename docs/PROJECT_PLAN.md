@@ -2501,8 +2501,11 @@ below carry their own later dates, item 12 is the current one).
    itself: with the DNS rewrite active, the AAAA answer for the cache name
    must not be a public address. Precondition decided 2026-10-01: the
    egress subnet becomes configurable (WP DEPLOY-FIX-2) so a production
-   stack can run next to a test stack; the rollout then uses tag
-   v0.1.0-rc3. This session is also
+   stack can run next to a test stack; the rollout started with tag
+   v0.1.0-rc3. Gate (b) found that a bind-mounted cache
+   (VAULT_CACHE_PATH) fails on Docker 28 because of vault-api's
+   `:nocopy` (fixed in WP DEPLOY-FIX-3, verify now runs bind mode too);
+   production moves to v0.1.0-rc5, which carries the fix. This session is also
    where the honest still-open lists in `web/tests/README.md` and
    `app/README.md` get verified — real screen reader, phone browser cover
    art, GC against real on-disk chunks, real multi-client bypass detection.

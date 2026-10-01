@@ -148,9 +148,19 @@ cleanup() {
     fi
     run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns down -v --remove-orphans"
     docker volume rm -f "$PROJECT-split-cache" "$PROJECT-scratch" >/dev/null 2>&1
+    # WP DEPLOY-FIX-3: section 9's bind dir holds files owned by uid 101
+    # (nginx wrote them); hand them back to the caller so rm -rf works
+    # without root. The containers are gone by now.
+    if [ -n "${bind_dir:-}" ] && [ -d "$bind_dir" ]; then
+        docker run --rm --user 0:0 --entrypoint sh -v "$bind_dir:/vault" \
+            "ghcr.io/steamhangar/vault-core:$TAG" -c "chown -R $(id -u):$(id -g) /vault" >/dev/null 2>&1
+    fi
     rm -rf "$work"
 }
-trap cleanup EXIT INT TERM
+# INT/TERM: clean up once (drop the EXIT trap first so it does not run a
+# second time) and exit non-zero, instead of resuming the script.
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT TERM
 
 printf '# SteamHangar WP 1.9 -- container verification transcript\n\n'
 say "date:            $(date -u '+%Y-%m-%dT%H:%M:%SZ') (UTC)"
@@ -751,6 +761,74 @@ for pair in "vault-core:$core_block" "vault-runner:$runner_block" "vault-dns:$dn
     nets=$(printf '%s\n' "$svc_block" | awk '/^    networks:/{f=1;next} f && !/^      /{exit} f' | sed -e 's/^      //' -e 's/:.*$//' | tr -d ' ')
     assert_eq "default" "$nets" "$svc_name is attached to exactly {default} -- unaffected by the egress lock"
 done
+
+step "3p. WP DEPLOY-FIX-3: the /vault mount renders as nocopy volume (VAULT_CACHE_PATH unset) or plain bind (set)"
+say 'vault-api'"'"'s /vault mount carries nocopy so vault-core stays the only seeder'
+say 'of a fresh named volume (docs/LEARNINGS.md, copy-up race). A bind mount'
+say 'must NOT carry it: Docker 28 / Compose 2.38 pass the short-syntax string'
+say 'to the daemon, which refuses "/path:/vault:rw,nocopy" with "field'
+say 'VolumeOptions must not be specified". Checked on the Docker-rendered'
+say 'config, in both modes, for both services that mount /vault.'
+# vault_mount_entry <service block>: the one rendered long-syntax volume entry
+# whose target is /vault (from its "      - type:" line to the next entry or
+# the end of the service's volumes: list).
+vault_mount_entry() {
+    printf '%s\n' "$1" | awk '
+        function flush() { if (hit) print e; e = ""; hit = 0 }
+        /^    volumes:/ { inv = 1; next }
+        inv && !/^      / { flush(); inv = 0 }
+        inv && /^      - / { flush(); e = $0; next }
+        inv { e = e "\n" $0; if ($0 ~ /^        target: \/vault$/) hit = 1 }
+        END { flush() }'
+}
+# The bind dir section 9 really mounts; for this render it need not exist yet.
+bind_dir="$work/cache-bind"
+bind_env_file="$work/verify-bind.env"
+cp "$env_file" "$bind_env_file"
+printf 'VAULT_CACHE_PATH=%s\n' "$bind_dir" >> "$bind_env_file"
+blank_cache_env_file="$work/verify-blank-cache-path.env"
+cp "$env_file" "$blank_cache_env_file"
+printf 'VAULT_CACHE_PATH=\n' >> "$blank_cache_env_file"
+rendered_bind=$(docker compose --env-file "$bind_env_file" -f "$compose_file" -p "$PROJECT" --profile dns config 2>/dev/null)
+rendered_blank_cache=$(docker compose --env-file "$blank_cache_env_file" -f "$compose_file" -p "$PROJECT" --profile dns config 2>/dev/null)
+for mode in named blank bind; do
+    case "$mode" in
+        named) mode_render=$rendered_default ;;
+        blank) mode_render=$rendered_blank_cache ;;
+        bind)  mode_render=$rendered_bind ;;
+    esac
+    for svc_name in vault-core vault-api; do
+        svc_block=$(printf '%s\n' "$mode_render" | awk -v s="  $svc_name:" '$0 == s {f=1;next} f && (/^  [A-Za-z0-9_-]+:/ || /^[A-Za-z]/){exit} f')
+        entry=$(vault_mount_entry "$svc_block")
+        say ''
+        say "    $svc_name /vault mount, $mode mode:"
+        printf '%s\n' "${entry:-<none>}" | sed 's/^/      /'
+        if [ "$mode" = bind ]; then
+            assert_contains "$entry" "type: bind" "$svc_name ($mode): /vault is a bind mount"
+            assert_contains "$entry" "source: $bind_dir" "$svc_name ($mode): /vault binds VAULT_CACHE_PATH"
+            assert_not_contains "$entry" "nocopy" "$svc_name ($mode): the bind mount carries no nocopy"
+            assert_not_contains "$entry" "volume:" "$svc_name ($mode): the bind mount carries no volume options at all"
+        else
+            assert_contains "$entry" "type: volume" "$svc_name ($mode): /vault is a named volume"
+            assert_contains "$entry" "source: vault-cache" "$svc_name ($mode): /vault is the vault-cache volume"
+            if [ "$svc_name" = vault-api ]; then
+                assert_contains "$entry" "nocopy: true" "$svc_name ($mode): nocopy is kept (vault-core stays the only seeder)"
+            else
+                assert_not_contains "$entry" "nocopy" "$svc_name ($mode): no nocopy (it IS the seeder)"
+            fi
+        fi
+    done
+done
+say ''
+say 'Rendered config, unset vs. VAULT_CACHE_PATH set (diff -u):'
+printf '%s\n' "$rendered_default" > "$work/render-named.yaml"
+printf '%s\n' "$rendered_bind" > "$work/render-bind.yaml"
+diff -u "$work/render-named.yaml" "$work/render-bind.yaml" | sed 's/^/    /'
+if [ "$rendered_default" = "$rendered_blank_cache" ]; then
+    ok "a BLANK VAULT_CACHE_PATH= renders byte-identically to an unset one"
+else
+    bad "a BLANK VAULT_CACHE_PATH= renders differently from an unset one"
+fi
 
 # =============================================================================
 section "4. Stack up (vault-core + vault-api + vault-proxy + vault-runner)"
@@ -1681,7 +1759,84 @@ printf '%s\n' "$ro" | grep -E 'FATAL|chown|exit=' | sed 's/^/    /'
 assert_contains "$ro" "not writable" "a cache directory the nginx worker cannot write is refused"
 
 # =============================================================================
-section "9. Result"
+section "9. Dedicated cache mount: VAULT_CACHE_PATH bind mode, live (WP DEPLOY-FIX-3)"
+# =============================================================================
+say 'Every section above ran on the default named volume. This one follows'
+say 'deploy/README.md "Using a dedicated cache mount" to the letter: create'
+say '<path>/cache/depot and <path>/tmp, owned 101:101, set VAULT_CACHE_PATH,'
+say 'bring the stack up. A first rollout on Docker 28 failed exactly here'
+say '("field VolumeOptions must not be specified") while this suite was green.'
+say ''
+say 'Ownership: this script may run as a non-root user (CI, a devbox), so the'
+say 'chown 101:101 the README asks for runs in a throwaway root container of'
+say 'the vault-core image -- the same effect as the operator'"'"'s own chown.'
+run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns down"
+
+step "9a. Host directory prepared as the README demands"
+mkdir -p "$bind_dir/cache/depot" "$bind_dir/tmp"
+docker run --rm --user 0:0 --entrypoint sh -v "$bind_dir:/vault" \
+    "ghcr.io/steamhangar/vault-core:$TAG" -c 'chown -R 101:101 /vault' 2>&1 | sed 's/^/    /'
+bind_own=$(stat -c '%u:%g' "$bind_dir" "$bind_dir/cache" "$bind_dir/cache/depot" "$bind_dir/tmp" | sort -u | tr '\n' ' ' | sed 's/ $//')
+assert_eq "101:101" "$bind_own" "bind dir, cache/, cache/depot and tmp are owned 101:101 (precondition)"
+
+step "9b. Stack up with VAULT_CACHE_PATH=$bind_dir"
+say 'With the cache-event log ON, as deploy/.env.example ships it: vault-core'
+say 'must create <path>/logs/ itself, nothing beyond cache/depot and tmp is'
+say 'asked of the operator.'
+bind_live_env_file="$work/verify-bind-live.env"
+cp "$bind_env_file" "$bind_live_env_file"
+printf 'VAULT_EVENT_LOG=/vault/logs/event.log\nVAULT_EVENT_LOG_PATH=/vault/logs/event.log\n' >> "$bind_live_env_file"
+printf '$ docker compose --env-file %s -f %s -p %s up -d\n' "$bind_live_env_file" "$compose_file" "$PROJECT"
+if docker compose --env-file "$bind_live_env_file" -f "$compose_file" -p "$PROJECT" up -d > "$work/compose-up-bind.log" 2>&1; then
+    sed 's/^/    /' "$work/compose-up-bind.log"
+    ok "docker compose up -d succeeds with VAULT_CACHE_PATH set to an absolute host path"
+    bind_up=yes
+else
+    sed 's/^/    /' "$work/compose-up-bind.log"
+    bad "docker compose up -d with VAULT_CACHE_PATH set failed -- see the output above"
+    bind_up=no
+fi
+assert_not_contains "$(cat "$work/compose-up-bind.log")" "VolumeOptions" "the daemon did not reject the /vault bind for carrying volume options"
+
+if [ "$bind_up" = yes ]; then
+    i=0
+    while [ "$i" -lt 60 ]; do
+        core_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-core)" 2>/dev/null || echo starting)
+        api_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-api)" 2>/dev/null || echo starting)
+        [ "$core_h" = "healthy" ] && [ "$api_h" = "healthy" ] && break
+        i=$((i + 1))
+        sleep 2
+    done
+    say "vault-core health: $core_h    vault-api health: $api_h"
+    assert_eq "healthy" "$core_h" "vault-core is healthy on the bind-mounted cache"
+    assert_eq "healthy" "$api_h"  "vault-api is healthy on the bind-mounted cache"
+
+    step "9c. Both services really mount the host directory, and it is the same one"
+    for svc_name in vault-core vault-api; do
+        m=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/vault"}}{{.Type}} {{.Source}}{{end}}{{end}}' "$(dc ps -q "$svc_name")" 2>/dev/null)
+        assert_eq "bind $bind_dir" "$m" "$svc_name: /vault is a bind of VAULT_CACHE_PATH"
+    done
+
+    step "9d. A real MISS lands on the host directory (proxy_store rename tmp/ -> cache/ works on the bind)"
+    bmiss=$(curl -s -o "$work/miss-bind.bin" -w '%{http_code}' --max-time 120 -H "Host: $CDN_HOST" "$CORE_URL$DEPOT_URI")
+    assert_eq "200" "$bmiss" "cold request through the bind-mounted cache returns 200"
+    sleep 1
+    if [ -f "$bind_dir/cache/depot/$DEPOT/chunk/$CHUNK" ]; then
+        ok "the chunk is stored at <VAULT_CACHE_PATH>/cache/depot/$DEPOT/chunk/$CHUNK on the host"
+    else
+        bad "the chunk is not at <VAULT_CACHE_PATH>/cache/depot/$DEPOT/chunk/$CHUNK on the host"
+    fi
+    api_sees=$(dc exec -T vault-api sh -c "test -f /vault/cache/depot/$DEPOT/chunk/$CHUNK && echo present || echo absent" 2>&1)
+    assert_eq "present" "$api_sees" "vault-api sees the chunk vault-core stored (one shared bind)"
+    if [ -d "$bind_dir/logs" ]; then
+        ok "vault-core created <VAULT_CACHE_PATH>/logs/ for the event log itself"
+    else
+        bad "<VAULT_CACHE_PATH>/logs/ is missing although VAULT_EVENT_LOG is on"
+    fi
+fi
+
+# =============================================================================
+section "10. Result"
 # =============================================================================
 say "checks passed: $pass"
 say "checks failed: $fail"

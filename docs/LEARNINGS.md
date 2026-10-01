@@ -801,7 +801,11 @@ These are not style preferences; each entry cost a review round to learn.
   that populate that path, race on Docker's copy-up ("mkdir … file
   exists"). A green first run proves nothing; the race needs a fresh
   volume to show. Fix: `:nocopy` on every consumer but the one seeder
-  (WP TH-1-FIX).
+  (WP TH-1-FIX). Named-volume mode only: a bind mount must carry no
+  volume options, and Docker 28 refuses `:nocopy` on a bind outright. A
+  green verify on named volumes said nothing about bind mode; the first
+  real rollout with VAULT_CACHE_PATH broke on it. Every mode a doc
+  promises needs its own live run (WP DEPLOY-FIX-3).
 - A self-test that copies a subset of files for a mutation check
   silently starts failing for the wrong reason once the checked script
   gains a dependency outside the subset. Assert the unmutated copy passes

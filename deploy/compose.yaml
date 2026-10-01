@@ -236,10 +236,10 @@ services:
       # single /vault mount point that is being redirected, not a sub-path
       # underneath it. This is deliberate: the same-filesystem constraint above
       # is only satisfiable by moving both at once, never one at a time.
-      # vault-api mounts the identical expression a few lines down (plus
-      # `:nocopy`, so this service is the volume's only seeder; see there) --
-      # both services must resolve to the SAME location, named-volume or
-      # bind-mount.
+      # vault-api mounts the same source a few lines down (plus `nocopy` in
+      # named-volume mode only, so this service is the volume's only seeder;
+      # see there) -- both services must resolve to the SAME location,
+      # named-volume or bind-mount.
       # See deploy/README.md "Using a dedicated cache mount" for the required
       # host-side `mkdir` + `chown 101:101` before first start.
       - ${VAULT_CACHE_PATH:-vault-cache}:/vault
@@ -652,10 +652,10 @@ services:
       # sizes and deletes depot directories from it. Both containers use uid 101
       # so this works without loosening permissions.
       #
-      # Same VAULT_CACHE_PATH expression as vault-core above -- see the comment
+      # Same VAULT_CACHE_PATH source as vault-core above -- see the comment
       # there. Both services must agree on named-volume vs. bind-mount and on the
-      # exact path; this line is kept textually identical to vault-core's on
-      # purpose, except for the `:nocopy` suffix explained below.
+      # exact path; the only deliberate difference is the `nocopy` option
+      # explained below, which this line carries in named-volume mode only.
       #
       # This is ALSO where the cache-event log lives when VAULT_EVENT_LOG is
       # set on vault-core above: core/Dockerfile pre-creates /vault/logs/
@@ -669,20 +669,36 @@ services:
       # "Rotation and the USR1 contract") and decided its own access shape
       # (read, never truncate) rather than one imposed by the mount.
       #
-      # `:nocopy` (the ONE deliberate textual difference from vault-core's
-      # line): both images carry /vault/cache/depot and /vault/tmp, and Docker
-      # copies image content into an EMPTY named volume when a container is
-      # created with it. Compose creates vault-core and vault-api concurrently,
-      # so on a fresh volume both copied at once and one create failed with
-      # "mkdir .../_data/tmp: file exists" (observed in a verify run). With
-      # nocopy, vault-core is the only seeder (layout + 101:101 ownership come
-      # from core/Dockerfile), whatever the creation order: Docker seeds only
-      # an empty volume, and a nocopy mount leaves it empty. vault-api needs
-      # nothing under /vault at boot (VAULT_CACHE_ROOT is read per request).
-      # Bind-mount mode (VAULT_CACHE_PATH set): there is no copy-up for a bind,
-      # Compose ignores the option and prints a one-line warning ("mount of
-      # type `bind` should not define `volume` option"); harmless.
-      - ${VAULT_CACHE_PATH:-vault-cache}:/vault:nocopy
+      # `nocopy`, named-volume mode: both images carry /vault/cache/depot and
+      # /vault/tmp, and Docker copies image content into an EMPTY named volume
+      # when a container is created with it. Compose creates vault-core and
+      # vault-api concurrently, so on a fresh volume both copied at once and
+      # one create failed with "mkdir .../_data/tmp: file exists" (observed in
+      # a verify run). With nocopy, vault-core is the only seeder (layout +
+      # 101:101 ownership come from core/Dockerfile), whatever the creation
+      # order: Docker seeds only an empty volume, and a nocopy mount leaves it
+      # empty. vault-api needs nothing under /vault at boot (VAULT_CACHE_ROOT
+      # is read per request).
+      #
+      # Bind-mount mode (VAULT_CACHE_PATH set): there is no copy-up for a
+      # bind, and the option must be ABSENT, not ignored. Docker 28.3 /
+      # Compose 2.38 pass this short-syntax string to the daemon as a legacy
+      # bind, which refuses "/path:/vault:rw,nocopy" with 'invalid mount
+      # config for type "bind": field VolumeOptions must not be specified'
+      # (WP DEPLOY-FIX-3, found by a real rollout).
+      #
+      # How one line does both, with only the two operators every Compose v2
+      # release and POSIX sh agree on (no nesting):
+      #   unset/blank: ${..:-vault-cache:/vault:nocopy} -> the whole default,
+      #                ${..:+:/vault}                    -> ""
+      #                = "vault-cache:/vault:nocopy" (unchanged from before)
+      #   set to P:    ${..:-...}                        -> "P",
+      #                ${..:+:/vault}                    -> ":/vault"
+      #                = "P:/vault" (a plain bind, no options)
+      # api/tests/test_compose_volume_race.py renders both modes statically;
+      # deploy/tests/verify-stack.sh 3p (Docker-rendered) and 9 (live bind)
+      # prove them against a real daemon.
+      - ${VAULT_CACHE_PATH:-vault-cache:/vault:nocopy}${VAULT_CACHE_PATH:+:/vault}
       # SQLite database (mapping, jobs, agent reports). Small; back this up.
       - vault-db:/data
       # SteamPrefill's Config/ (the Steam SESSION) is NOT mounted here anymore
@@ -1092,7 +1108,7 @@ services:
 
 volumes:
   # This entry stays declared even when VAULT_CACHE_PATH is set: it is what the
-  # "${VAULT_CACHE_PATH:-vault-cache}:/vault" mount lines above fall back to by
+  # VAULT_CACHE_PATH-driven /vault mount lines above fall back to by
   # name when the variable is empty. Named volumes (not bind mounts) are the
   # default because Docker creates them with the right ownership for uid 101
   # automatically (the image seeds a fresh one -- see core/Dockerfile). To put
