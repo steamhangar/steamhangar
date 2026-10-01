@@ -2263,12 +2263,26 @@ surface (playtime and last-played now flow through the API response).
       explicitly could not be substantiated from code alone and are listed
       as open gaps in the document's own closing section rather than
       asserted anyway.
-- [ ] **Pre-release security review (WP 5.3 review half, Fable mandatory)**
-      — after an api/core code freeze. **Unblocked 2026-10-01:** the
-      freeze is declared ([ADR-0016](adr/0016-api-core-code-freeze.md),
-      freeze commit 92e95be) after the pre-freeze project review and its
-      fix packages (§11 item 12). Not started yet; it is next. See §11
-      item 6.
+- [x] **Pre-release security review (WP 5.3 review half, Fable mandatory)**
+      — DONE 2026-10-01, after the api/core code freeze
+      ([ADR-0016](adr/0016-api-core-code-freeze.md), freeze commit
+      92e95be). Two passes on the strongest available model (Opus 5.5):
+      pass 1 with two reviewers (server; clients/release), pass 2 over the
+      remaining server areas. Fix packages, each reviewed to PASS:
+      SEC-FIX-1 (9aef5f4, full-match Host allowlist; vault-core
+      `cap_drop: ALL` plus five caps), SEC-FIX-2 (eea667d, signing secrets
+      in a tag-only Environment, verifiable release assets, client
+      hardening), SEC-FIX-3 (c20a33a, starlette 1.3.1 for CVE-2025-62727
+      and others, every runtime dependency pinned), SEC-FIX-4 (901368e, no
+      symlink following on the shared volume, pre-auth body guard, bounded
+      zip errors), plus test fix 907de53 (the racing-delete test asserts
+      the documented byte floor). Evidence: api suite 2000 passed /
+      6 skipped; `verify-stack.sh` 211/211. Known limits recorded in
+      threat-model §9: tinyproxy ConnectPort, event-log boot TOCTOU, GC
+      unlink TOCTOU, no client-count cap, depot base resolved per request,
+      plain-HTTP misses. Post-release items: web "forget key", removal of
+      the per-level `O_NOFOLLOW` GC walk, the deletion byte-count lock.
+      See §11 item 6.
 - [ ] Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
       frame as a complement/alternative, not a "LanCache killer")
 
@@ -2507,22 +2521,22 @@ below carry their own later dates, item 12 is the current one).
    in the same commit range plus a false §5 exhaustiveness claim) —
    findings addressed in the WP 5.3-fix follow-up commit; round 3: PASS
    (2026-08-18).
-6. [ ] **WP 5.3 review half, still open** — pre-release security review
-   (Fable mandatory), after an api/core code freeze. **Freeze precondition
-   met 2026-10-01** ([ADR-0016](adr/0016-api-core-code-freeze.md): api/,
-   core/ and dns/ frozen at commit 92e95be); the security review starts
-   next, its second pass on Opus 5.5 (Fable unavailable, user decided not
-   to wait). Since WP R-0 (commit 80f750f, user decision 2026-09-29) the
-   "[Fable]" marker names a boundary, not a model: a second review pass
-   with the strongest available model, chosen at call time; coder and
-   reviewer ride the session's model (`model: inherit`) instead of a
-   pinned name.
+6. [x] **WP 5.3 review half** — pre-release security review, DONE
+   2026-10-01 after the api/core/dns freeze
+   ([ADR-0016](adr/0016-api-core-code-freeze.md), commit 92e95be). Two
+   passes on Opus 5.5 (Fable unavailable, user decided not to wait; since
+   WP R-0, commit 80f750f, "[Fable]" names a boundary — the strongest
+   available model at call time — not a model). Fix packages SEC-FIX-1..4
+   (9aef5f4, eea667d, c20a33a, 901368e) plus test fix 907de53, each
+   reviewed to PASS; api 2000 passed / 6 skipped, `verify-stack.sh`
+   211/211. Known limits in threat-model §9, post-release items in §7
+   Phase 5's evidence note.
 7. [ ] **User-gated:** WP 5.5 — the machinery is no longer the gate. The
    GitHub org exists, the repo lives at `steamhangar/steamhangar`, and the
    full publish path is built and reviewed (WP CI-3 + WP AGENT-BIN, see §7
    Phase 5's CI bullet): images, signed APK, agent binaries, checksums.
-   What remains is exactly one user action — pushing the first tag — and
-   review's standing advice is a throwaway pre-release first, named
+   What remains are user actions only (steps (a)-(d) at the end of this
+   item), and review's standing advice is a throwaway pre-release first, named
    `v0.1.0-rc1`: three things in the tree bake `0.1.0` —
    `vault_api.__version__` (served as `server_version` by the
    authenticated `GET /v1/settings`; `/v1/health` returns only
@@ -2540,6 +2554,16 @@ below carry their own later dates, item 12 is the current one).
    at the site). WP 5.6
    (announcement) stays gated on the user's own end-to-end test with the
    Android app. Phase 6 integrations are deliberately post-release.
+   **Remaining release steps (2026-10-01, all user actions):**
+   (a) merge PR `wp/pre-freeze-review` once its CI is green — the first
+   android-tests run there is the first compile of the APP changes;
+   (b) one-time GitHub settings BEFORE setting the signing secrets: an
+   Environment `release` with a `v*`-tag deployment rule, the four
+   `ANDROID_*` secrets placed in it (not as repo secrets), and a `v*` tag
+   ruleset (see app/README "CI signing secrets"); (c) push the tag
+   `v0.1.0-rc1` from main; (d) check the release page's "Verify this
+   release" block. After the first push, the GHCR packages must be made
+   public.
 8. [x] **The AG series — agents become first-class residents** — COMPLETE
    2026-08-22, four packages in one day (user's go for the full chain).
    AG-0 (commit 74e7727): client identity visible and attributed at

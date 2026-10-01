@@ -810,3 +810,16 @@ These are not style preferences; each entry cost a review round to learn.
 - A presence check on an env var the image already sets via `ENV KEY=`
   pins nothing: the key is present whether or not compose forwards it.
   Check values (WP TH-1b).
+- FastAPI parses the request body before router-level dependencies run,
+  so an auth check that must precede body handling belongs in an ASGI
+  layer, not a `Depends` (WP SEC-FIX-4).
+- `O_NOFOLLOW` guards only the last path component. A symlinked parent
+  directory on the same device passes an `st_dev` check, so `lstat` the
+  parent too (WP SEC-FIX-4).
+- A concurrent-delete test asserting an exact byte sum failed about 1% of
+  runs: whoever wins the final `rmdir` gets the credit. Assert the
+  documented contract (a floor), and measure flake rates in-process at
+  1000 runs rather than calling a test flaky (WP SEC-FIX-4 follow-up).
+- nginx 1.29.8 rejects `?@#\` and space in Host with 400 before any map
+  runs, but `%` and `_` pass. A status-only Host test cannot tell refusal
+  from relay, so check the logs too (WP SEC-FIX-1).
