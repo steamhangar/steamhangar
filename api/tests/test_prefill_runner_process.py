@@ -546,3 +546,99 @@ def test_app_lifespan_wires_queue_mode_into_startup_recovery(tmp_path: Path) -> 
     assert finished["status"] == jobs.STATUS_ERROR, finished
     assert "presumed dead" in finished["log_excerpt"]
     assert jobs.STALE_JOB_MESSAGE not in finished["log_excerpt"]
+
+
+def test_queue_mode_collects_a_run_that_finished_while_vault_api_was_down(tmp_path: Path) -> None:
+    """WP API-FIX-1 (B1), end to end. The realistic restart shape:
+    ``compose up -d`` recreates BOTH containers, the runner records its
+    result (here the stub simply finishes; in production it is the SIGTERM
+    handler's ``aborted``) while vault-api is not there to see it, and
+    vault-api comes back to a row that is still 'running' but already
+    complete. Before the fix ``find_active_run`` filtered that row out and
+    the job stayed 'running' forever. Steps: worker A hands off; the runner
+    claims; worker A is stopped mid-wait; the runner FINISHES with nobody
+    listening; worker B starts and must finalize the job as 'done'."""
+    bindir = tmp_path / "bin"
+    cache_root = tmp_path / "cache"
+    executable = stub_prefill.make_stub(
+        bindir, cache_root=str(cache_root), depots_by_app={440: [441]}, sleep_seconds=2.0
+    )
+    settings = _queue_settings(tmp_path, steamprefill_path=executable, cache_root=str(cache_root))
+    init_db(settings.db_path)
+
+    worker_a = PrefillWorker(settings)
+    runner = PrefillRunner(settings, runner_id="test-runner-b1")
+    worker_a.start()
+    runner_thread = threading.Thread(target=runner.run_forever, daemon=True)
+    runner_thread.start()
+
+    def _run_row() -> dict[str, object] | None:
+        check_conn = get_connection(settings.db_path)
+        try:
+            return jobs.get_run_row(check_conn, job_id)
+        finally:
+            check_conn.close()
+
+    try:
+        conn = get_connection(settings.db_path)
+        try:
+            job, _created = jobs.enqueue_prefill(conn, 440)
+            job_id = int(job["id"])
+        finally:
+            conn.close()
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            row = _run_row()
+            if row is not None and row["run_claimed_by"] is not None:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("runner never claimed the job")
+
+        # vault-api goes away while the runner is mid-run ...
+        worker_a.stop(timeout=5)
+
+        # ... and the runner finishes with nobody listening.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            row = _run_row()
+            if row is not None and row["run_completed_at"] is not None:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("runner never recorded a result")
+
+        # The defect's resting state, pinned: complete, yet still 'running',
+        # and startup recovery correctly leaves it alone (the runner's row
+        # is not its call). Only the reattach path can collect it.
+        conn = get_connection(settings.db_path)
+        try:
+            parked = jobs.get_job(conn, job_id)
+            assert parked is not None and parked["status"] == jobs.STATUS_RUNNING
+            assert jobs.recover_stale_jobs(conn, queue_mode=True) == 0
+            assert jobs.find_active_run(conn) is not None
+        finally:
+            conn.close()
+
+        worker_b = PrefillWorker(settings)
+        worker_b.start()
+        try:
+            finished = _wait_for_job(settings.db_path, job_id, timeout=10)
+        finally:
+            worker_b.stop(timeout=5)
+    finally:
+        runner.stop()
+        runner_thread.join(timeout=5)
+
+    assert finished["status"] == jobs.STATUS_DONE, finished
+    conn = get_connection(settings.db_path)
+    try:
+        app = conn.execute("SELECT status FROM apps WHERE appid = 440").fetchone()
+        mapping = conn.execute(
+            "SELECT depotid FROM depot_app_map WHERE appid = 440"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert app["status"] == jobs.STATUS_DONE
+    assert {int(r["depotid"]) for r in mapping} == {441}

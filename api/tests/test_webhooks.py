@@ -14,6 +14,7 @@ in a 20-40x loop") these were run standalone, repeatedly, before being trusted
 
 from __future__ import annotations
 
+import base64
 import http.server
 import json
 import threading
@@ -941,3 +942,147 @@ def test_bypass_webhook_needs_a_notifier(tmp_path: Path) -> None:
         conn.close()
 
     assert result == ()
+
+
+# --------------------------------------------------------------------------
+# Redirects are refused (WP API-FIX-2, S1): a 3xx is a failed attempt, and
+# the Authorization header built from the URL's userinfo never reaches the
+# host the redirect pointed at. Two real local servers, like the Android
+# two-server redirect test docs/LEARNINGS.md describes.
+# --------------------------------------------------------------------------
+
+
+class _RecordingHandler(http.server.BaseHTTPRequestHandler):
+    """Records every request's headers; answers with the server's status and,
+    for a 3xx, a ``Location`` pointing at ``server.redirect_to``."""
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib method name
+        length = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(length)
+        self._record_and_answer()
+
+    # Stock urllib follows a POST 302 as GET (and a HEAD as HEAD), so hop 2
+    # must record those too -- with only do_POST it answered 501 and recorded
+    # nothing, and the redirect test passed against code that followed.
+    def do_GET(self) -> None:  # noqa: N802 - stdlib method name
+        self._record_and_answer()
+
+    def do_HEAD(self) -> None:  # noqa: N802 - stdlib method name
+        self._record_and_answer()
+
+    def _record_and_answer(self) -> None:
+        server: "_HopServer" = self.server  # type: ignore[assignment]
+        with server.lock:
+            seen = {k: v for k, v in self.headers.items()}
+            seen["__method__"] = self.command
+            server.seen_headers.append(seen)
+        self.send_response(server.status_code)
+        if 300 <= server.status_code < 400 and server.redirect_to:
+            self.send_header("Location", server.redirect_to)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        pass
+
+
+class _HopServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.seen_headers: list[dict[str, str]] = []
+        self.lock = threading.Lock()
+        self.status_code = 200
+        self.redirect_to = ""
+
+
+@pytest.fixture
+def two_hops():
+    hop1 = _HopServer(("127.0.0.1", 0), _RecordingHandler)
+    hop2 = _HopServer(("127.0.0.1", 0), _RecordingHandler)
+    threads = [
+        threading.Thread(target=hop1.serve_forever, daemon=True),
+        threading.Thread(target=hop2.serve_forever, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        yield hop1, hop2
+    finally:
+        for server in (hop1, hop2):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=5)
+
+
+def test_webhook_opener_refuses_redirects_and_never_forwards_basic_auth(
+    tmp_path: Path, two_hops, caplog: pytest.LogCaptureFixture
+) -> None:
+    hop1, hop2 = two_hops
+    hop2_port = hop2.server_address[1]
+    hop1.status_code = 302
+    hop1.redirect_to = f"http://127.0.0.1:{hop2_port}/elsewhere"
+    hop1_port = hop1.server_address[1]
+
+    settings = make_settings(
+        tmp_path,
+        webhook_url=f"http://user:s3cr3t@127.0.0.1:{hop1_port}/hook",
+        webhook_timeout_seconds=1.0,
+    )
+    notifier = WebhookNotifier(settings)
+    notifier.start()
+    try:
+        with caplog.at_level("WARNING", logger="vault_api.webhooks"):
+            webhooks.notify_job_event(
+                notifier, {"id": 1, "type": "prefill", "appid": 1, "status": "done"}
+            )
+            assert _wait_until(lambda: len(hop1.seen_headers) >= webhooks.DELIVERY_ATTEMPTS)
+            time.sleep(0.3)
+    finally:
+        notifier.stop()
+
+    # The 302 counted as a FAILED attempt: every retry went to hop 1 ...
+    assert len(hop1.seen_headers) == webhooks.DELIVERY_ATTEMPTS
+    assert all(
+        h.get("Authorization") == "Basic " + base64.b64encode(b"user:s3cr3t").decode()
+        for h in hop1.seen_headers
+    )
+    # ... and hop 2 was never contacted at all, so the header could not leak.
+    assert hop2.seen_headers == []
+    assert any("failed after 3 attempt" in r.getMessage() for r in caplog.records)
+    assert "s3cr3t" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+def test_webhook_opener_keeps_the_stock_proxy_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0011 rests on webhooks honouring HTTP_PROXY through urllib's stock
+    ProxyHandler; swapping in the redirect handler must not have dropped it.
+
+    Measured while writing this test: ``ProxyHandler`` only registers an
+    ``http_open``/``https_open`` method per proxy it finds in the environment
+    at construction, and ``OpenerDirector.add_handler`` only keeps a handler
+    that registered SOMETHING -- so with no ``HTTP_PROXY`` set the stock
+    handler is silently absent from ``.handlers``. The module-level
+    ``_OPENER`` therefore snapshots the proxy environment at import, which is
+    exactly the container case (compose sets ``HTTP_PROXY`` before Python
+    starts) and the same shape ``oracle._OPENER``/``steam_relay._OPENER``
+    already have. The assertion below builds the opener the way
+    ``webhooks._OPENER`` is built, under a configured proxy."""
+    import urllib.request
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8888")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:8888")
+    opener = urllib.request.build_opener(webhooks._RefuseRedirects)
+    handler_types = {type(h) for h in opener.handlers}
+    assert urllib.request.ProxyHandler in handler_types
+    assert webhooks._RefuseRedirects in handler_types
+    assert urllib.request.HTTPRedirectHandler not in handler_types
+
+    # And the module-level opener itself carries the refusing handler, not
+    # the stock one -- regardless of proxy environment.
+    live_types = {type(h) for h in webhooks._OPENER.handlers}
+    assert webhooks._RefuseRedirects in live_types
+    assert urllib.request.HTTPRedirectHandler not in live_types

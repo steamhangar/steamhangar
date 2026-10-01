@@ -139,16 +139,38 @@ object SteamOpenIdCallback {
      *
      * **Scope, stated honestly (WP brief: "document what is and isn't
      * checked").** This function checks ONLY that `claimed_id` is a member
-     * of the signed set -- the one field this app actually trusts (it is
-     * the sole source of the SteamID64). It deliberately does NOT also
-     * require `return_to`, `response_nonce`, `op_endpoint`, or `identity`
-     * to be signed: those fields matter for a fully general OpenID relying
-     * party (replay protection, trust-root matching) but this app never
-     * branches on their VALUES for anything security-relevant -- only
-     * `claimed_id` is extracted into persisted state ([SteamId64]).
+     * of the signed set -- the field the persisted SteamID64 comes from.
+     * Its sibling [signedCoversReturnTo] covers the SECOND field this app
+     * branches on for a security decision since WP 4b.7: `return_to`
+     * carries the per-login `state` that [stateFromReturnTo] feeds into
+     * [PendingLoginState.consume] (WP APP-FIX-1 S4a -- until then the kdoc
+     * here claimed this app "never branches on return_to's value", which
+     * stopped being true the day the state check landed). Neither function
+     * requires `response_nonce`, `op_endpoint`, or `identity` to be signed:
+     * those matter for a fully general OpenID relying party (nonce replay
+     * windows, trust-root matching) but this app never reads their values
+     * for anything security-relevant.
      */
     fun signedCoversClaimedId(signedFieldList: String): Boolean =
-        signedFieldList.split(',').any { it.trim() == "claimed_id" }
+        signedCovers(signedFieldList, "claimed_id")
+
+    /**
+     * WP APP-FIX-1 (S4a): `return_to` must be inside `openid.signed` for the
+     * same reason `claimed_id` must -- a field outside the signed set was
+     * never covered by `check_authentication` at all, and `return_to` is
+     * where the per-login `state` this app's replay defence trusts lives
+     * (see [signedCoversClaimedId]'s kdoc). OpenID 2.0 (section 10.1) lists
+     * `return_to` among the fields an OP MUST sign, so a genuine Valve
+     * assertion always passes; this check exists for the downgraded or
+     * forged response that omits it.
+     */
+    fun signedCoversReturnTo(signedFieldList: String): Boolean =
+        signedCovers(signedFieldList, "return_to")
+
+    /** Exact-member test over the comma-separated `openid.signed` list --
+     * never a substring match (`not_claimed_id` must not count). */
+    private fun signedCovers(signedFieldList: String, field: String): Boolean =
+        signedFieldList.split(',').any { it.trim() == field }
 
     /**
      * Extracts and validates the SteamID64 out of `openid.claimed_id`.

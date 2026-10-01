@@ -110,7 +110,7 @@ def test_stats_surfaces_a_denied_rotation(tmp_path: Path, monkeypatch) -> None:
     def denied(*args, **kwargs):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(event_sweep.os, "truncate", denied)
+    monkeypatch.setattr(event_sweep.os, "ftruncate", denied)
     init_db(settings.db_path)
     conn = get_connection(settings.db_path)
     try:

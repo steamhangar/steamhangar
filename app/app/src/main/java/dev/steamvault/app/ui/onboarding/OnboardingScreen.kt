@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -24,9 +25,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
 import dev.steamvault.app.ui.onboarding.logic.OnboardingStep
@@ -219,11 +226,31 @@ private fun ConnectStep(controller: OnboardingController, scope: kotlinx.corouti
         modifier = Modifier.fillMaxWidth(),
     )
 
+    // WP APP-FIX-1 (S1): the vault API key is a secret and is masked like a
+    // password by default -- shoulder-surfing and screen recording were
+    // the reviewer's concern, not storage (CredentialStore already encrypts
+    // it). `rememberSaveable` keeps the user's show/hide choice across a
+    // rotation only; the key text itself lives in the controller. No eye
+    // glyph ships with material-icons-core (NavIcons.kt's kdoc: the extended
+    // pack is deliberately not a dependency), so the toggle is a plain text
+    // button -- same "no icon pack for one glyph" call as WP 4b.4.
+    var apiKeyVisible by rememberSaveable { mutableStateOf(false) }
     OutlinedTextField(
         value = controller.apiKeyText,
         onValueChange = { controller.apiKeyText = it },
         label = { Text(stringResource(R.string.onboarding_api_key_label)) },
         singleLine = true,
+        visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        trailingIcon = {
+            TextButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                Text(
+                    stringResource(
+                        if (apiKeyVisible) R.string.onboarding_api_key_hide else R.string.onboarding_api_key_show,
+                    ),
+                )
+            }
+        },
         modifier = Modifier.fillMaxWidth(),
     )
 

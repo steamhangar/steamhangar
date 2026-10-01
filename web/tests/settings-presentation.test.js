@@ -55,3 +55,42 @@ test("effectiveAsInputValue: numbers and plain strings pass through as strings",
 test("effectiveAsInputValue: empty list becomes empty string, not '[]' or a stray comma", () => {
   assert.equal(effectiveAsInputValue({ key: "webhook_events", effective: [] }), "");
 });
+
+// WP WEB-FIX-1 (P2): views/settings.js dereferences `entryByKey(key).key`
+// for eight keys unguarded; a response missing one used to throw AFTER
+// loadSettings()'s try/catch and leave "Loading settings…" forever.
+import { REQUIRED_SETTING_KEYS, missingSettingKeys } from "../js/lib/settings-presentation.js";
+
+const FULL = {
+  readonly: false,
+  settings: REQUIRED_SETTING_KEYS.map((key) => ({ key, effective: null, source: "default", applies: "immediately", env_only: false })),
+};
+
+test("REQUIRED_SETTING_KEYS is the literal eight keys the Settings view builds controls for", () => {
+  assert.deepEqual([...REQUIRED_SETTING_KEYS], [
+    "vault_name",
+    "schedule_window",
+    "schedule_interval_minutes",
+    "schedule_client_stale_days",
+    "sweep_include_cached",
+    "auto_gc",
+    "webhook_url",
+    "webhook_events",
+  ]);
+});
+
+test("missingSettingKeys: a complete response reports nothing missing; extra keys are fine", () => {
+  assert.deepEqual(missingSettingKeys(FULL), []);
+  assert.deepEqual(missingSettingKeys({ ...FULL, settings: [...FULL.settings, { key: "db_path" }] }), []);
+});
+
+test("missingSettingKeys: names each absent key, in REQUIRED order", () => {
+  const partial = { ...FULL, settings: FULL.settings.filter((e) => e.key !== "auto_gc" && e.key !== "vault_name") };
+  assert.deepEqual(missingSettingKeys(partial), ["vault_name", "auto_gc"]);
+});
+
+test("missingSettingKeys: a malformed response (no settings array, null, entries without key) reports every key rather than throwing", () => {
+  assert.deepEqual(missingSettingKeys({ readonly: false }), [...REQUIRED_SETTING_KEYS]);
+  assert.deepEqual(missingSettingKeys(null), [...REQUIRED_SETTING_KEYS]);
+  assert.deepEqual(missingSettingKeys({ settings: [null, {}] }), [...REQUIRED_SETTING_KEYS]);
+});

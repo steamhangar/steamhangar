@@ -67,7 +67,12 @@ was run against a real container, not assumed from documentation:
   `ProxyHandler`, and that handler is what reads these two environment
   variables. `_RefuseRedirects` subclasses `HTTPRedirectHandler`, which has
   nothing to do with proxying, so it replaces only the redirect handler,
-  never the proxy one.
+  never the proxy one. (Fixed since, WP API-FIX-2 2026-09-30: `webhooks.py`
+  now uses the same `build_opener(_RefuseRedirects)` shape as the other two
+  — the direct-`urlopen` fact above described a client that followed
+  redirects and forwarded its Basic-Auth header to the redirect target;
+  the proxy claim stays true, since `build_opener` still adds the stock
+  `ProxyHandler`.)
 
 **Round-2 review found two more measured facts, both real and both left
 open by design** (§4 and "What this ADR does NOT claim to defend against"

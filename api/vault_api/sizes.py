@@ -190,7 +190,11 @@ def scan_depot_signatures(cache_root: str) -> dict[int, DepotSignature]:
         return signatures
 
     for entry in entries:
-        if not entry.name.isdigit():
+        # isascii() AND isdigit() (docs/LEARNINGS.md "Parsers"): isdigit()
+        # alone is True for "²" and Arabic-Indic digits, and int() on those
+        # either raises (crashing the whole scan on one odd directory name)
+        # or silently normalises. Neither is a depot id anything here wrote.
+        if not (entry.name.isascii() and entry.name.isdigit()):
             continue
         try:
             # follow_symlinks defaults to True here ON PURPOSE — see the

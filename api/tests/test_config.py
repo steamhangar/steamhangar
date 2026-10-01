@@ -994,6 +994,30 @@ def test_vault_name_defaults_to_empty_and_is_stripped(
     assert Settings.from_env().vault_name == "homelab"
 
 
+@pytest.mark.parametrize(
+    "bad",
+    ["x" * (config.MAX_VAULT_NAME_LENGTH + 1), "home\tlab", "home\x1blab"],
+)
+def test_vault_name_is_validated_at_startup(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    """S2: VAULT_NAME gets the same bounded/printable rule as PATCH."""
+    _webhook_env(monkeypatch)
+    monkeypatch.setenv("VAULT_NAME", bad)
+
+    with pytest.raises(RuntimeError, match="VAULT_NAME"):
+        Settings.from_env()
+
+
+def test_vault_name_accepts_the_maximum_length_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _webhook_env(monkeypatch)
+    monkeypatch.setenv("VAULT_NAME", "h" * config.MAX_VAULT_NAME_LENGTH)
+
+    assert Settings.from_env().vault_name == "h" * config.MAX_VAULT_NAME_LENGTH
+
+
 # ==========================================================================
 # Settings-API work package (ADR-0009): VAULT_SETTINGS_READONLY
 # ==========================================================================
@@ -1380,3 +1404,87 @@ def test_bad_runner_tuning_knobs_fail_loudly(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(RuntimeError, match="VAULT_RUNNER_LEASE_TIMEOUT_SECONDS"):
         Settings.from_env()
+
+
+# --------------------------------------------------------------------------
+# WP API-FIX-2
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("blank_value", ["", "   ", "\t"])
+def test_from_env_raises_when_db_path_is_blank(
+    monkeypatch: pytest.MonkeyPatch, blank_value: str
+) -> None:
+    """P1: ``sqlite3.connect("")`` is a private per-connection temp database,
+    so a present-but-blank VAULT_DB_PATH would boot a vault-api that persists
+    nothing -- refuse it like VAULT_CACHE_ROOT."""
+    monkeypatch.setenv("VAULT_API_KEY", "some-key")
+    monkeypatch.setenv("VAULT_DB_PATH", blank_value)
+
+    with pytest.raises(RuntimeError, match="VAULT_DB_PATH must not be blank"):
+        Settings.from_env()
+
+
+@pytest.mark.parametrize(
+    ("var", "cap"),
+    [
+        ("VAULT_SCHEDULE_INTERVAL_MINUTES", config.MAX_INTERVAL_MINUTES),
+        ("VAULT_SCHEDULE_CLIENT_STALE_DAYS", config.MAX_DAYS),
+        ("VAULT_EVENT_SWEEP_INTERVAL_MINUTES", config.MAX_INTERVAL_MINUTES),
+        ("VAULT_MISS_TRIGGER_COOLDOWN_MINUTES", config.MAX_COOLDOWN_MINUTES),
+        ("VAULT_BYPASS_WINDOW_DAYS", config.MAX_DAYS),
+        ("VAULT_GC_GRACE_DAYS", config.MAX_DAYS),
+    ],
+)
+def test_from_env_refuses_a_timedelta_fed_int_over_its_cap(
+    monkeypatch: pytest.MonkeyPatch, var: str, cap: int
+) -> None:
+    """S2: a digits-only grammar with no ceiling let ``timedelta`` overflow
+    inside request handlers and the scheduler tick."""
+    monkeypatch.setenv("VAULT_API_KEY", "some-key")
+    monkeypatch.setenv(var, str(cap + 1))
+
+    with pytest.raises(RuntimeError, match=rf"{var} must be <= {cap}, got {cap + 1}"):
+        Settings.from_env()
+
+    # The cap itself is accepted -- a ceiling, not an off-by-one.
+    monkeypatch.setenv(var, str(cap))
+    Settings.from_env()
+
+
+def test_parse_strict_int_maximum() -> None:
+    assert config.parse_strict_int("10", maximum=10) == 10
+    with pytest.raises(ValueError, match="must be <= 10, got 11"):
+        config.parse_strict_int("11", maximum=10)
+    # No maximum = the historical behaviour, unbounded.
+    assert config.parse_strict_int("9" * 300) == int("9" * 300)
+    with pytest.raises(ValueError, match="maximum below the minimum"):
+        config.parse_strict_int("5", minimum=6, maximum=5)
+
+
+def test_timedelta_caps_are_finite_for_the_stdlib() -> None:
+    """The caps exist to keep every consumer's ``timedelta(...)`` finite."""
+    from datetime import timedelta
+
+    timedelta(minutes=config.MAX_INTERVAL_MINUTES)
+    timedelta(minutes=config.MAX_COOLDOWN_MINUTES)
+    timedelta(days=config.MAX_DAYS)
+
+
+def test_validate_webhook_url_does_not_echo_the_raw_value() -> None:
+    """P2: the 422 detail for a bad webhook URL must not carry userinfo."""
+    with pytest.raises(ValueError) as excinfo:
+        config.validate_webhook_url("ftp://user:s3cr3t@host/path")
+    assert "s3cr3t" not in str(excinfo.value)
+    assert "http or https" in str(excinfo.value)
+
+
+def test_validate_webhook_url_does_not_echo_the_parsed_scheme() -> None:
+    """N1: for scheme-less ``admin:s3cr3t@host`` urlsplit's "scheme" is the
+    username, so the parsed scheme must not be echoed either."""
+    with pytest.raises(ValueError) as excinfo:
+        config.validate_webhook_url("admin:s3cr3t@host/x")
+    message = str(excinfo.value)
+    assert "admin" not in message
+    assert "s3cr3t" not in message
+    assert "http or https" in message

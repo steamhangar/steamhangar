@@ -364,8 +364,8 @@ def fresh_client_snapshots(
     same predicate diverge" entry (WP 4f) is precisely the failure class this
     avoids: a UI badge built from an independently-written staleness check
     could disagree with the scheduler about which reports it trusts, and
-    "installed on Zeus" from a report the scheduler itself would refuse to
-    act on is the same dishonesty in a different place.
+    "installed on the operator's server" from a report the scheduler itself
+    would refuse to act on is the same dishonesty in a different place.
 
     ``compute_targets`` is UNCHANGED in behaviour — it now builds its
     ``appids``/``included_clients`` from this function's result instead of

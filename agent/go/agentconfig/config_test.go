@@ -274,6 +274,24 @@ func TestParse_LoopFlag(t *testing.T) {
 	}
 }
 
+func TestParse_AllowEmptyFlagDefaultsOff(t *testing.T) {
+	base := []string{"--server-url", "http://h:1", "--api-key", "k", "--client-id", "pc"}
+	cfg, err := parseDiscard(base, emptyEnv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AllowEmpty {
+		t.Error("AllowEmpty = true by default, want false (a wrong library root must not post an empty report silently)")
+	}
+	cfg, err = parseDiscard(append([]string{"--allow-empty"}, base...), emptyEnv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.AllowEmpty {
+		t.Error("AllowEmpty = false with --allow-empty given, want true")
+	}
+}
+
 func TestParse_MultipleErrorsAreAllReported(t *testing.T) {
 	_, err := parseDiscard([]string{"--client-id", ".."}, emptyEnv)
 	if err == nil {
@@ -293,6 +311,91 @@ func TestConfig_RedactedNeverExposesAPIKey(t *testing.T) {
 	red := cfg.Redacted()
 	if red.APIKey == "top-secret" || strings.Contains(red.APIKey, "top-secret") {
 		t.Errorf("Redacted().APIKey = %q, still contains the real key", red.APIKey)
+	}
+}
+
+// --- S2 (WP AGENT-FIX-1): Redacted() must also strip userinfo from the
+// server URL - cmd/vault-agent logs it at every start. Cases: an "@"
+// INSIDE the password (Go's parser splits the authority at the LAST "@",
+// so this is a real, valid input), an IPv6 host (the bracketed host must
+// survive intact), a plain URL that must come back byte-identical, and a
+// path/query that must not be lost.
+
+func TestConfig_RedactedStripsServerURLUserinfo(t *testing.T) {
+	cases := []struct {
+		name       string
+		in         string
+		want       string
+		mustNotSee []string
+	}{
+		{
+			name:       "password containing @",
+			in:         "http://alice:p@ss:w0rd@100.64.0.5:8080",
+			want:       "http://<redacted>@100.64.0.5:8080",
+			mustNotSee: []string{"alice", "p@ss", "w0rd"},
+		},
+		{
+			name:       "ipv6 host with userinfo",
+			in:         "https://bob:hunter2@[fd00::1]:8443/api",
+			want:       "https://<redacted>@[fd00::1]:8443/api",
+			mustNotSee: []string{"bob", "hunter2"},
+		},
+		{
+			name:       "username only",
+			in:         "https://token@vault.example.internal",
+			want:       "https://<redacted>@vault.example.internal",
+			mustNotSee: []string{"token"},
+		},
+		{
+			name: "no userinfo is byte-identical",
+			in:   "http://127.0.0.1:8080",
+			want: "http://127.0.0.1:8080",
+		},
+		{
+			name: "no userinfo with path and query is byte-identical",
+			in:   "https://vault.example/prefix?x=1",
+			want: "https://vault.example/prefix?x=1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Config{ServerURL: tc.in, APIKey: "k"}.Redacted().ServerURL
+			if got != tc.want {
+				t.Errorf("Redacted().ServerURL = %q, want %q", got, tc.want)
+			}
+			for _, secret := range tc.mustNotSee {
+				if strings.Contains(got, secret) {
+					t.Errorf("Redacted().ServerURL = %q still contains %q", got, secret)
+				}
+			}
+		})
+	}
+}
+
+func TestRedactURL_UnparseableIsNotEchoed(t *testing.T) {
+	// A colon-in-port form url.Parse rejects outright; the raw value must
+	// not be echoed since it could still carry a password.
+	got := redactURL("http://u:SECRET@host:notaport")
+	if strings.Contains(got, "SECRET") {
+		t.Errorf("redactURL echoed an unparseable URL verbatim: %q", got)
+	}
+}
+
+// The config-error log line is built from these messages - a rejected
+// URL must not be quoted back with its password in it.
+func TestParse_InvalidServerURLNeverEchoesUserinfo(t *testing.T) {
+	for _, raw := range []string{
+		"ftp://u:SECRET-SCHEME@host",     // scheme branch
+		"http://u:SECRET-NOHOST@",        // no-host branch
+		"http://u:SECRET-PARSE@host:xyz", // url.Parse failure branch
+	} {
+		_, err := parseDiscard([]string{"--server-url", raw, "--api-key", "k", "--client-id", "pc"}, emptyEnv)
+		if err == nil {
+			t.Fatalf("%q: expected a config error", raw)
+		}
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("%q: error %q echoes the password", raw, err.Error())
+		}
 	}
 }
 

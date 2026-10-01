@@ -99,6 +99,29 @@ gradle.taskGraph.whenReady {
     }
 }
 
+// ---------------------------------------------------------------------
+// Release version (WP APP-FIX-1, S5/S7). versionName/versionCode were
+// hard-wired literals, so every published APK carried 0.1.0 / 1 no matter
+// which tag built it. Both now come from the environment with the old
+// literals as the fallback (a local `assembleDebug` with nothing set keeps
+// building exactly as before). .github/workflows/publish.yml sets both
+// (name from the release tag, code = github.run_number; see app/README.md
+// "Release build ...") -- and a code that is not a positive integer fails
+// CONFIGURATION with the offending value, never a silent 1. Caveat:
+// run_number restarts if the workflow is renamed or recreated, and Android
+// rejects the lower versionCode as a downgrade.
+// ---------------------------------------------------------------------
+val releaseVersionName: String =
+    System.getenv("VAULT_RELEASE_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "0.1.0"
+
+val releaseVersionCode: Int =
+    System.getenv("VAULT_RELEASE_VERSION_CODE")?.takeIf { it.isNotBlank() }?.let { raw ->
+        raw.toIntOrNull()?.takeIf { it > 0 }
+            ?: throw GradleException(
+                "VAULT_RELEASE_VERSION_CODE must be a positive integer (Android versionCode), got '$raw'.",
+            )
+    } ?: 1
+
 android {
     // Application id is PROVISIONAL — see app/README.md "Provisional
     // decisions". Final naming (and therefore the id) is a user/release
@@ -110,8 +133,8 @@ android {
         applicationId = "dev.steamvault.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -188,7 +211,13 @@ android {
         // otherwise fail the build every time upstream ships a release,
         // regardless of whether it is actually compatible here — that is
         // a human upgrade decision (a future WP), not a lint-fixable defect.
-        disable += setOf("AndroidGradlePluginVersion", "GradleDependency")
+        //
+        // OldTargetApi joins them for the same reason (first CI compile,
+        // 2026-10-01): lint's "latest API level" moved past 35 by the
+        // calendar, not by any change here. Raising targetSdk switches on
+        // new platform behaviour (e.g. enforced edge-to-edge) and needs a
+        // real-device pass, so it is a planned upgrade WP, not a lint fix.
+        disable += setOf("AndroidGradlePluginVersion", "GradleDependency", "OldTargetApi")
     }
 }
 

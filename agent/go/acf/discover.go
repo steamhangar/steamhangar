@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -24,8 +25,42 @@ type Warning struct {
 
 func (w Warning) String() string { return w.Message }
 
+// Discovery is Discover's full result. Apps and Warnings are exactly what
+// DiscoverInstalled returns; the two library counters exist so a caller
+// can tell "Steam was found and has nothing installed" apart from "no
+// Steam library could be read at all" (WP AGENT-FIX-1 S1) - before this
+// type existed both produced the same empty Apps slice, and a wrong
+// --library-root therefore posted a legitimate-looking empty report that
+// made vault-api drop every one of the client's games from the prefill
+// set.
+type Discovery struct {
+	Apps     []InstalledApp
+	Warnings []Warning
+
+	// LibrariesProbed lists every distinct library path whose steamapps/
+	// directory Discover tried to list, in discovery order - the paths
+	// from libraryfolders.vdf, or just libraryRoot when that file was
+	// missing/corrupt/empty. Meant for an actionable "checked X, Y, Z"
+	// error message, never empty.
+	LibrariesProbed []string
+
+	// LibrariesRead is how many of LibrariesProbed had a steamapps/
+	// directory that was actually listed successfully. Zero means Steam
+	// was not found under libraryRoot at all (or every listed library is
+	// currently unreadable) - NOT that nothing is installed.
+	LibrariesRead int
+}
+
 // DiscoverInstalled discovers all installed apps across every Steam
-// library.
+// library. It is Discover with the library counters dropped, kept for
+// callers that only need the app list.
+func DiscoverInstalled(libraryRoot string) ([]InstalledApp, []Warning) {
+	d := Discover(libraryRoot)
+	return d.Apps, d.Warnings
+}
+
+// Discover discovers all installed apps across every Steam library and
+// reports how many libraries were actually readable (see Discovery).
 //
 // libraryRoot is the main Steam install directory (the one that contains
 // steamapps/libraryfolders.vdf — e.g. C:\Steam on Windows,
@@ -44,8 +79,10 @@ func (w Warning) String() string { return w.Message }
 //
 // Returns the list of InstalledApp in discovery order (an unreadable
 // libraryRoot itself still returns an empty list and no crash, only
-// warnings — mirroring the Python spec's resilience contract).
-func DiscoverInstalled(libraryRoot string) ([]InstalledApp, []Warning) {
+// warnings — mirroring the Python spec's resilience contract — with
+// LibrariesRead == 0 so the caller can decide whether an empty list is
+// trustworthy).
+func Discover(libraryRoot string) Discovery {
 	var warnings []Warning
 
 	libraryFoldersPath := filepath.Join(libraryRoot, "steamapps", "libraryfolders.vdf")
@@ -67,18 +104,26 @@ func DiscoverInstalled(libraryRoot string) ([]InstalledApp, []Warning) {
 	}
 
 	// De-duplicate while preserving order (libraryfolders.vdf shouldn't
-	// list the same path twice, but tolerate it).
+	// list the same path twice, but tolerate it). Keyed on the NORMALISED
+	// path (libraryKey), not the bytes: "D:\Games\" vs "D:\Games" or
+	// "d:\games" name the same library, and a byte-exact compare used to
+	// let such a pair through as two libraries, producing a "duplicate
+	// appid" warning per installed game (WP AGENT-FIX-1 N3). The ORIGINAL
+	// string of the first occurrence is what gets reported as
+	// InstalledApp.LibraryPath - only the comparison is normalised.
 	seenLibraries := map[string]bool{}
 	var orderedLibraries []string
 	for _, lib := range libraryPaths {
-		if !seenLibraries[lib] {
-			seenLibraries[lib] = true
+		key := libraryKey(lib, runtime.GOOS)
+		if !seenLibraries[key] {
+			seenLibraries[key] = true
 			orderedLibraries = append(orderedLibraries, lib)
 		}
 	}
 
 	var apps []InstalledApp
 	seenAppIDs := map[string]string{} // appid -> library path that won
+	librariesRead := 0
 
 	for _, lib := range orderedLibraries {
 		steamappsDir := filepath.Join(lib, "steamapps")
@@ -111,6 +156,7 @@ func DiscoverInstalled(libraryRoot string) ([]InstalledApp, []Warning) {
 			}
 			continue
 		}
+		librariesRead++
 
 		// Case-insensitive "appmanifest_*.acf" match: real Windows
 		// production is the primary target (ADR-0005), and Windows
@@ -132,6 +178,18 @@ func DiscoverInstalled(libraryRoot string) ([]InstalledApp, []Warning) {
 		for _, manifestPath := range manifestPaths {
 			app, parseErr := ParseAppManifestFile(manifestPath, lib)
 			if parseErr != nil {
+				// *ParseError wraps the OS error (Unwrap), so a manifest
+				// that vanished between the directory listing above and
+				// this read - Steam mid-uninstall/move, or a dangling
+				// link - is told apart from a genuinely corrupt file: the
+				// two call for different operator action (none vs. look
+				// at the file). Pinned by
+				// TestDiscoverWarnsVanishedManifestDistinctlyFromCorrupt.
+				if errors.Is(parseErr, fs.ErrNotExist) {
+					warnings = append(warnings, Warning{fmt.Sprintf(
+						"manifest %s vanished between listing and reading it (Steam uninstalling/moving?), skipping", manifestPath)})
+					continue
+				}
 				warnings = append(warnings, Warning{fmt.Sprintf(
 					"skipping corrupt manifest %s: %s", manifestPath, parseErr)})
 				continue
@@ -149,5 +207,25 @@ func DiscoverInstalled(libraryRoot string) ([]InstalledApp, []Warning) {
 		}
 	}
 
-	return apps, warnings
+	return Discovery{
+		Apps:            apps,
+		Warnings:        warnings,
+		LibrariesProbed: orderedLibraries,
+		LibrariesRead:   librariesRead,
+	}
+}
+
+// libraryKey normalises a library path for duplicate detection only:
+// filepath.Clean removes trailing separators and "." segments, and on
+// Windows - whose filesystems are case-insensitive, and where Steam
+// itself writes drive letters in whichever case the user typed - the
+// comparison is additionally case-folded. goos is a parameter (not
+// runtime.GOOS read inside) so both branches are unit-testable on any
+// host.
+func libraryKey(path, goos string) string {
+	key := filepath.Clean(path)
+	if goos == "windows" {
+		key = strings.ToLower(key)
+	}
+	return key
 }

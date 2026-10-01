@@ -14,8 +14,9 @@
          kdoc. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- allowBackup is deliberately false: a later WP (4b.2) stores a
-         vault-api key in this app's private storage. Auto Backup
+    <!-- allowBackup is deliberately false: this app stores the vault-api
+         key (and the Steam identity) in its private storage —
+         storage/EncryptedCredentialStore.kt, since WP 4b.2. Auto Backup
          (android:allowBackup="true", the default) would ship that key to
          the user's cloud backup / off-device on uninstall+reinstall — the
          same class of leak the WP 4b.1 review flagged before any secret

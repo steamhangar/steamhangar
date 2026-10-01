@@ -27,8 +27,10 @@
 //
 //	0  the report was sent and accepted (one-shot); or --loop exited
 //	   cleanly on SIGTERM/CTRL-C; or -h/--help was requested
-//	1  a runtime failure: local report validation failed, or the HTTP
-//	   client gave up (network error, 401, 422, malformed response, ...)
+//	1  a runtime failure: no readable Steam library under --library-root
+//	   (refused without --allow-empty), local report validation failed,
+//	   or the HTTP client gave up (network error, 401, 422, redirect,
+//	   malformed response, ...)
 //	2  a configuration/usage error (missing/invalid flag, no subcommand)
 package main
 
@@ -157,12 +159,31 @@ func runReport(args []string, stdout, stderr io.Writer) int {
 // reportOnce discovers + reports exactly once and prints a human-readable
 // result line to stdout. Returns true on success.
 func reportOnce(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg agentconfig.Config, c *client.Client) bool {
-	apps, warnings := acf.DiscoverInstalled(cfg.LibraryRoot)
-	for _, w := range warnings {
+	discovered := acf.Discover(cfg.LibraryRoot)
+	for _, w := range discovered.Warnings {
 		logger.Printf("discover warning=%q", w.Message)
 	}
 
-	payload, err := report.BuildReport(apps, cfg.ClientID)
+	// WP AGENT-FIX-1 S1: zero READABLE libraries means Steam was not found
+	// under library_root (wrong --library-root, Steam moved, drive not
+	// mounted) - not that nothing is installed. Posting {"appids": []}
+	// here would be a legitimate-looking snapshot that makes vault-api
+	// diff every previously reported game as REMOVED and drop this client
+	// from the prefill set. So: refuse, name what was probed, exit
+	// non-zero. --allow-empty keeps the ADR-0002 empty-report path
+	// available as an explicit choice. A readable library with no
+	// manifests (Steam installed, nothing installed in it) is NOT this
+	// case - LibrariesRead >= 1 and the empty report is posted as before.
+	if discovered.LibrariesRead == 0 && !cfg.AllowEmpty {
+		logger.Printf("report refused error=%q probed=%q hint=%q",
+			"no readable Steam library under library_root - refusing to post an empty installed list",
+			strings.Join(discovered.LibrariesProbed, ", "),
+			"check --library-root / "+agentconfig.EnvLibraryRoot+" (the directory containing steamapps/), "+
+				"or pass --allow-empty to post an empty report anyway")
+		return false
+	}
+
+	payload, err := report.BuildReport(discovered.Apps, cfg.ClientID)
 	if err != nil {
 		logger.Printf("report build failed error=%q", err)
 		return false
@@ -220,11 +241,19 @@ func runLoop(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg agen
 		delay := jitteredInterval(cfg.ReportInterval, rng)
 		logger.Printf("sleeping until next report in=%s", delay)
 
+		// time.NewTimer + Stop rather than time.After: a time.After
+		// channel is not collected until it fires, so a shutdown early in
+		// a long (30 min) sleep would leave the timer pending for the
+		// rest of the interval - harmless in practice, but the same
+		// pattern client.go's backoff wait already uses (WP AGENT-FIX-1
+		// N4).
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			logger.Printf("shutdown signal received, exiting cleanly")
 			return
-		case <-time.After(delay):
+		case <-timer.C:
 		}
 	}
 }

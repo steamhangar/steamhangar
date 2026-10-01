@@ -34,11 +34,17 @@
  * protect from a naive rebuild.
  */
 
-import { api } from "../api.js";
+import { api, isDemoMode } from "../api.js";
 import { showToast } from "../components/toast.js";
 import { openOnboarding } from "../onboarding.js";
 import { buildSettingsPatch } from "../lib/settings-diff.js";
-import { appliesText, sourceLabel, canReset, effectiveAsInputValue } from "../lib/settings-presentation.js";
+import {
+  appliesText,
+  sourceLabel,
+  canReset,
+  effectiveAsInputValue,
+  missingSettingKeys,
+} from "../lib/settings-presentation.js";
 import { sweepTargetsMessage, cachedSweepGcRiskWarning } from "../lib/schedule-presentation.js";
 import { validSteamId64 } from "../lib/steamid.js";
 import { submitSteamKey } from "../lib/steam-key-form.js";
@@ -633,17 +639,43 @@ function buildSteamSection() {
 // Connection + About sections
 // ---------------------------------------------------------------------
 
+/**
+ * Connection section — the ONLY manual way back into the connect flow, so
+ * (WP WEB-FIX-1, B2) it renders in the load-error state too, not just under
+ * a successful `GET /v1/settings` (a 401 from a rotated key is exactly when
+ * it is needed). In demo mode (B1) it says so, in plain words, and offers
+ * the connect action instead of a "reconnect" that would suggest a vault
+ * is already attached — until this WP nothing in the UI ever cleared the
+ * demo flag, so this was the door out of a one-way room.
+ */
 function buildConnectionSection() {
   const wrap = document.createDocumentFragment();
   wrap.append(el("h4", "sec", "Connection"));
+  const demo = isDemoMode();
+  if (demo) {
+    const notice = el(
+      "p",
+      "hint",
+      "Demo mode — every screen shows built-in sample data, not a vault. Connect to a vault to manage a real cache.",
+    );
+    notice.dataset.role = "demo-notice";
+    wrap.append(notice);
+  }
   const row = el("div", "srow");
   const grow = el("span", "grow");
   grow.append(
-    el("span", "ttl", "Reconnect / switch account"),
-    el("span", "desc", "Run the first-launch flow again to change the vault API key or the Steam relay identity."),
+    el("span", "ttl", demo ? "Connect to a vault" : "Reconnect / switch account"),
+    el(
+      "span",
+      "desc",
+      demo
+        ? "Enter your vault's API key to leave demo mode."
+        : "Run the first-launch flow again to change the vault API key or the Steam relay identity.",
+    ),
   );
-  const btn = el("button", "btn ghost sm", "Start");
+  const btn = el("button", "btn ghost sm", demo ? "Connect" : "Start");
   btn.type = "button";
+  btn.dataset.role = "connect";
   btn.addEventListener("click", () => openOnboarding({ mode: "reconnect" }));
   row.append(grow, btn);
   wrap.append(row);
@@ -677,6 +709,10 @@ function fullRender() {
   }
   if (state.loadError) {
     els.body.appendChild(el("p", "errline", `Could not load settings: ${state.loadError}`));
+    // WP WEB-FIX-1 (B2): the reconnect entry must survive a failed load —
+    // before this line the early return hid the one control that fixes the
+    // most likely cause (a 401 from a rotated key).
+    els.body.append(buildConnectionSection());
     return;
   }
 
@@ -739,6 +775,15 @@ async function loadSettings() {
       api.getSteamKey(),
       api.schedule().catch(() => null),
     ]);
+    // WP WEB-FIX-1 (P2): every section below dereferences `entryByKey(k).key`
+    // unguarded. A response lacking one of the eight keys used to throw
+    // INSIDE fullRender(), after this try/catch had already passed — an
+    // uncaught error and "Loading settings…" on screen forever. Fail into
+    // the same error path a rejected fetch takes, naming the gap.
+    const missing = missingSettingKeys(settingsResponse);
+    if (missing.length > 0) {
+      throw new Error(`the server's settings response is missing: ${missing.join(", ")}`);
+    }
     state.settingsResponse = settingsResponse;
     state.steamStatus = steamStatus;
     state.schedule = schedule;

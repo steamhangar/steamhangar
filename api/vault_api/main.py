@@ -18,6 +18,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from vault_api import __version__ as VAULT_API_VERSION
+from vault_api.body_guard import PreAuthBodyGuard
 from vault_api.config import Settings
 from vault_api.db import get_connection, init_db
 from vault_api.jobs import recover_stale_jobs
@@ -189,11 +190,36 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         webhook_notifier.stop()
 
 
+def resolve_log_level(name: str) -> int:
+    """``VAULT_LOG_LEVEL`` -> a numeric level, validated against the names
+    ``logging`` itself knows (WP API-FIX-2, N3).
+
+    The previous ``getattr(logging, name.upper(), logging.INFO)`` had two
+    quiet failure modes: an unknown level (``VAULT_LOG_LEVEL=verbose``)
+    silently became INFO with no hint, and a name that IS a ``logging``
+    attribute but not a level (``disable``, ``config``, ``root``) reached
+    ``basicConfig(level=<function>)`` and crashed startup with a
+    ``TypeError`` from deep inside the logging module. Unknown names now log
+    one WARNING (at INFO, so it is visible) and fall back to INFO.
+    """
+    known = logging.getLevelNamesMapping()
+    level = known.get(name.strip().upper())
+    if level is None:
+        logging.getLogger(__name__).warning(
+            "VAULT_LOG_LEVEL=%r is not a logging level (expected one of %s); "
+            "using INFO.",
+            name,
+            ", ".join(sorted(known)),
+        )
+        return logging.INFO
+    return level
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI app. Pass `settings` explicitly in tests; omit it to read from env."""
     settings = settings or Settings.from_env()
 
-    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    logging.basicConfig(level=resolve_log_level(settings.log_level))
 
     init_db(settings.db_path)
 
@@ -211,6 +237,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=VAULT_API_VERSION,
         openapi_url=None,
         lifespan=_lifespan,
+    )
+    # WP SEC-FIX-4 (S-3): auth and the body cap run before routing, so no
+    # body is read or parsed for a request without a valid key. Added BEFORE
+    # the security-headers middleware so that one stays outermost and its
+    # headers are on this guard's 401/413 answers too.
+    app.add_middleware(
+        PreAuthBodyGuard, expected_key=lambda: app.state.settings.vault_api_key
     )
     # WP 4a.1. Installed before any route exists: the middleware wraps
     # every response regardless of registration order, but doing it first

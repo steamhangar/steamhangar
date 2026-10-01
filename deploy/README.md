@@ -98,8 +98,55 @@ deploy/
 cd deploy
 cp .env.example .env
 $EDITOR .env                      # set VAULT_API_KEY (only mandatory value)
-docker compose up -d --build
+docker compose pull               # fetch the published release images from ghcr.io
+docker compose up -d              # no --build: run what was just pulled
 ```
+
+**Pulling the published images is the default path.** Every `image:` line
+in `compose.yaml` names `ghcr.io/steamhangar/<service>:${VAULT_IMAGE_TAG}`
+(default: the release baked into this checkout, `0.1.0`), which is exactly
+where `.github/workflows/publish.yml` pushes on a release tag -- so
+`docker compose pull` fetches three images (`vault-core`, `vault-api`,
+`vault-proxy`; four with `--profile dns`, which adds `vault-dns`;
+`vault-runner` runs `vault-api`'s image with a different command, so it needs no image of its own) and `up -d` runs them
+as published, multi-arch where the component supports it (`vault-api` is
+amd64-only, see publish.yml's matrix comment). Set `VAULT_IMAGE_TAG` in
+`.env` to pin a different release. No local toolchain, no build context.
+A tag can be moved; a digest cannot. Each release body lists, under
+"Verify this release", the exact `ghcr.io/steamhangar/<service>@sha256:...`
+digests its workflow run pushed. To run exactly those bytes, pin them in a
+`deploy/compose.override.yaml` (`vault-runner` runs the vault-api image,
+so it gets the same digest):
+
+```yaml
+services:
+  vault-core:   { image: "ghcr.io/steamhangar/vault-core@sha256:<from the release body>" }
+  vault-api:    { image: "ghcr.io/steamhangar/vault-api@sha256:<from the release body>" }
+  vault-runner: { image: "ghcr.io/steamhangar/vault-api@sha256:<from the release body>" }
+  vault-proxy:  { image: "ghcr.io/steamhangar/vault-proxy@sha256:<from the release body>" }
+  # with --profile dns only:
+  # vault-dns:  { image: "ghcr.io/steamhangar/vault-dns@sha256:<from the release body>" }
+```
+
+or compare what a tag pull gave you against the list with
+`docker inspect --format '{{index .RepoDigests 0}}' <image>`. The
+published ghcr.io packages must be public: until the maintainer flips their
+visibility, an unauthenticated pull fails -- build locally instead (below).
+
+**Building locally instead** is the other supported path -- for a checkout
+ahead of the latest release, a fork, or an offline host:
+
+```bash
+docker compose up -d --build      # builds the same three images (four with --profile dns) from this checkout
+```
+
+`--build` stores the results under the SAME `ghcr.io/steamhangar/...` tags
+the `image:` lines name, which is deliberate: the compose file has one set
+of image references, not one per deployment style, and a later
+`docker compose pull` simply replaces the local builds with the published
+layers for that tag. Do not mix the two casually on one host without
+bumping `VAULT_IMAGE_TAG` -- the tag says which release, not where the
+bytes came from.
 
 Check it:
 
@@ -436,9 +483,30 @@ shows exactly what to add and how to verify it with `dig`.
 > `*.steamcontent.com` rewrite there instead (mode 1 above; a very common
 > homelab layout — AdGuard Home/Pi-hole and this stack side by side on a NAS
 > or a small server). Point `VAULT_RESOLVER` at that resolver and vault-core
-> would proxy every cache miss back into itself, indistinguishable from a
-> hung upstream from the outside. `deploy/.env.example` carries the same
-> warning next to the setting itself.
+> would resolve Valve's CDN names to its own address: `40-vault-preflight.sh`
+> then refuses to boot (it probes the first resolver in `VAULT_RESOLVER` for a Steam CDN name and
+> stops on a private answer), and should the resolver start rewriting after
+> boot, every cache MISS is answered `508 Loop Detected` after one hop with
+> nothing cached — the cache stops filling, it does not hang.
+> `deploy/.env.example` carries the same warning next to the setting itself.
+
+**Router port-53 DNAT.** If your router transparently redirects all port-53
+traffic (DNAT) to a Pi-hole/AdGuard that rewrites `*.steamcontent.com` to
+vault-core, vault-core's own upstream lookups are rewritten too and every
+cache MISS would be proxied back into itself. vault-core detects this two
+ways: at boot, `40-vault-preflight.sh` refuses to start if `VAULT_RESOLVER`
+answers a Steam CDN name with a private address, and at runtime any request
+that comes back carrying its own `X-SteamHangar-Hop` header is answered `508
+Loop Detected` after one hop, with nothing cached. The fix is to exempt the
+vault-core host from the router's port-53 redirect, or to point
+`VAULT_RESOLVER` at a resolver that answers Steam's CDN names truthfully.
+
+**What `/depot/` accepts.** Depot requests are GET-only: any other method,
+including `HEAD`, is answered `405` locally and never relayed to Valve. A URI
+ending in `/` is answered `404` locally before any cache lookup (no real depot
+object URI ends in `/`). Use `GET` when probing the cache by hand, e.g.
+`curl -s -o /dev/null -w '%{http_code}\n' http://<cache>/depot/...` rather
+than `curl -I`.
 
 ---
 
@@ -545,6 +613,13 @@ volume; see `core/Dockerfile`'s `VOLUME ["/vault"]` step). Skipping this
 step is not silent: vault-core's preflight will refuse to start with
 `/vault/cache is missing`.
 
+In the default named-volume mode only vault-core seeds the volume: vault-api
+mounts it with `:nocopy`, because two containers created at the same moment
+on a fresh volume would otherwise race on Docker's copy-up and one fails
+with `mkdir .../_data/tmp: file exists`. In bind-mount mode there is no
+copy-up; Compose ignores the option and prints a harmless warning
+("mount of type `bind` should not define `volume` option").
+
 ```bash
 sudo mkdir -p /srv/steamhangar-cache/cache/depot /srv/steamhangar-cache/tmp
 sudo chown -R 101:101 /srv/steamhangar-cache
@@ -598,7 +673,18 @@ setting, not Phase 3, and it stays DB-overridable at runtime via `PATCH
 /v1/settings` exactly as before (ADR-0009) — this is only a NEW env
 fallback path, added specifically so a `VAULT_SETTINGS_READONLY=1`
 deployment (which refuses every `PATCH`) has a way to turn the now-default-on
-cached sweep back off at all. `api/README.md`'s "Sweep target set" section
+cached sweep back off at all. **The same readonly argument now covers every
+settings-API key** (pre-freeze project review, finding S3): `VAULT_NAME`,
+`VAULT_SCHEDULE_INTERVAL_MINUTES`, `VAULT_SCHEDULE_CLIENT_STALE_DAYS`,
+`VAULT_WEBHOOK_URL` and `VAULT_WEBHOOK_EVENTS` were the five keys
+`compose.yaml` still left unforwarded on the "PATCH is the supported path"
+reasoning, which left a hard-locked deployment with no way to name its
+vault, tune the sweep cadence or configure a webhook at all. All five now
+pass through (no-colon form, empty default — unset or blank both leave
+vault-api on its own built-in default, nothing compose-side to drift) and
+have stanzas in `.env.example` under "Settings-API keys reachable from this
+file"; `PATCH /v1/settings` still wins over them on a read-write deployment
+(db > env > default). `api/README.md`'s "Sweep target set" section
 has the full cost model and the auto-GC coupling. To keep the exact
 pre-2026-08-22 behavior, set all three (see the seventh/eighth note just
 below for why the window line is required too — without it the scheduler
@@ -634,7 +720,9 @@ recipe above. `deploy/compose.yaml` uses the no-colon form for exactly this
 reason; `TZ` deliberately keeps the colon form (blank and `UTC` are the
 same thing for that one variable, so the distinction does not matter
 there). Still DB-overridable at runtime via `PATCH /v1/settings`
-(`schedule_window`, ADR-0009) exactly as before.
+(`schedule_window`, ADR-0009) exactly as before. A window changed that way
+moves the scheduler only, not the upstream rate cap's window, which stays
+env-only (see "Upstream rate cap" below).
 
 **The cache-event log is now the feed for a real feature, and needs no extra
 volume.** `VAULT_EVENT_LOG` writes into `/vault/logs/`, which lives on the
@@ -660,6 +748,51 @@ read the file but not truncate it, so rotation is on the operator.
 Start with `dry-run` and read a few job logs (`GET /v1/jobs/{id}`) before
 trusting `execute` on a deployment you care about — `api/README.md` "Auto-GC"
 has the full decision tree for when it fires.
+
+---
+
+## Upstream rate cap
+
+Optional, off by default (WP TH-1a/TH-1b,
+[ADR-0015](../docs/adr/0015-upstream-rate-cap.md)). Caps how fast vault-core
+downloads cache MISSes from Steam; HITs keep serving the LAN at full speed.
+
+```bash
+# deploy/.env
+VAULT_UPSTREAM_RATE=800k          # ONE aggregate limit, bytes/s; empty = no cap
+#VAULT_UPSTREAM_RATE_WINDOW=      # see below
+```
+
+- **`VAULT_UPSTREAM_RATE`**: nginx size syntax, digits with an optional
+  `k` (x1024) or `m` (x1048576). `800k` is 819,200 B/s (about 6.5 Mbit/s),
+  not 800,000. Empty = off. The total is divided at download time by the
+  number of requests vault-core is serving.
+- **`VAULT_UPSTREAM_RATE_WINDOW`**: `HH:MM-HH:MM`, the
+  `VAULT_SCHEDULE_WINDOW` grammar. Full speed **inside** the window, capped
+  outside. Unset (the line commented out) = it follows
+  `VAULT_SCHEDULE_WINDOW`, default `03:00-07:00`, so the cap lifts while
+  the scheduler runs. Set it explicitly blank (`VAULT_UPSTREAM_RATE_WINDOW=`)
+  to cap around the clock. Only the env window is followed, not one stored
+  via `PATCH /v1/settings`. `VAULT_SCHEDULE_WINDOW=` (blank, scheduler
+  off) together with a set rate and this line unset also means the cap
+  applies around the clock.
+- **Time zone:** the window is evaluated in vault-core's local time, which
+  is `TZ` (forwarded to vault-core too, default `UTC`). Set `TZ` once in
+  `.env` and the scheduler and the cap agree.
+- **An invalid value refuses to boot.** vault-core stops with
+  `27-vault-upstream-rate.sh: FATAL` rather than run uncapped by accident
+  (`docker compose logs vault-core`).
+- **Recreate vault-core after changing either variable**; the cap is baked
+  at container start:
+  `docker compose up -d --force-recreate vault-core`.
+- **Zero-code alternative:** per-device QoS on your router throttles the
+  same Steam-facing direction and needs no SteamHangar setting at all.
+
+The cap is per request, divided by the live count, and has stated limits
+(HITs in flight dilute the share and leave WAN bandwidth unused, the LAN
+client that triggers a MISS is slowed too, the window edge stops nothing): see
+[`core/README.md` "Upstream rate cap"](../core/README.md).
+It is a bandwidth cap, not a request limit or DoS control.
 
 ---
 
@@ -692,6 +825,19 @@ browsing-metadata-level history for every device. See `dns/README.md`
 ---
 
 ## Upgrading
+
+Running the published images (the Quickstart default):
+
+```bash
+cd deploy
+git pull                          # picks up compose.yaml/.env.example changes
+docker compose pull               # fetches the release VAULT_IMAGE_TAG now resolves to
+docker compose up -d              # recreates only the containers whose image changed
+```
+
+`git pull` moves the `image:` lines' baked-in default tag to the new
+release; an explicit `VAULT_IMAGE_TAG=` in your `.env` overrides that and
+must be bumped by hand. Building locally instead:
 
 ```bash
 cd deploy
@@ -1014,6 +1160,15 @@ What this deployment assumes, stated plainly so it can be checked:
   Publish it on one specific LAN IP (`VAULT_DNS_BIND=192.168.1.50`), never on
   `0.0.0.0`. If you leave the variable unset it publishes on `127.0.0.1`, i.e.
   it fails *closed* — visibly broken rather than invisibly dangerous.
+- **A host firewall does not protect published ports.** Docker writes its
+  own iptables/nftables rules for every `ports:` entry, ahead of the
+  chains `ufw` and `firewalld` manage, so a `ufw deny 8080` does not stop
+  LAN (or WAN, on a host with a public interface) access to a published
+  port. Restrict exposure where Docker honours it: bind each published
+  port to one LAN IP with the `VAULT_*_BIND` variables in `deploy/.env`
+  (`VAULT_CORE_BIND`, `VAULT_API_BIND`, `VAULT_DNS_BIND`), or put your
+  filter rules in the `DOCKER-USER` chain, which Docker evaluates before
+  its own forwarding rules.
 - **No secrets in `compose.yaml`.** `VAULT_API_KEY` appears only as a required
   `${…}` reference; the real value lives in `deploy/.env`, which is gitignored.
 - All five services run with `no-new-privileges`; vault-api, vault-runner
@@ -1023,7 +1178,7 @@ What this deployment assumes, stated plainly so it can be checked:
   never runs as root at any point (its listen port, 8888, is unprivileged),
   so unlike vault-core it has no privilege-drop dance to do at all.
 - **vault-api has no default route to the internet** (WP EG-1, ADR-0011) —
-  see [Egress lock](#egress-lock-vault-api-cannot-reach-the-internet-except-through-vault-proxy)
+  see [Egress lock](#egress-lock-vault-api-loses-its-default-route-out)
   above for the full mechanism and how to verify it yourself.
 
 ---
@@ -1035,7 +1190,8 @@ sudo sh deploy/tests/verify-stack.sh
 ```
 
 Builds every image (`vault-core`, `vault-api`, `vault-proxy`, `vault-dns` —
-`vault-runner` reuses `vault-api`'s) and runs **193 checks** against real
+`vault-runner` reuses `vault-api`'s) and runs **204 checks** (measured
+2026-10-01) against real
 containers: the config-drift contract (both directions), **the web UI baked
 into the vault-api image and served from it with no bind mount involved**
 (packaging work package), all twelve env-forwarding-audit keys
@@ -1113,6 +1269,18 @@ by switching to the no-colon form, see the seventh/eighth `.env.example`
 note above) — bringing the suite from 187 to **193 total**. Measured
 twice, both real runs: **193/193 pass**, exit 0, clean teardown, against
 Docker Engine 29.1.3 / Compose 2.40.3.
+
+**WP TH-1b (2026-10-01):** 10 more checks. Step 3e-ter (8) renders
+vault-core's `VAULT_UPSTREAM_RATE_WINDOW` under four `.env` variants
+(nothing set, `VAULT_SCHEDULE_WINDOW=` blank, `VAULT_SCHEDULE_WINDOW=01:00-02:00`,
+and `VAULT_UPSTREAM_RATE_WINDOW=` blank with that schedule window), key
+present once plus expected value each, same mechanics as 3e-bis. Step
+6i-core (2) checks the VALUES of `TZ` (`UTC`) and
+`VAULT_UPSTREAM_RATE_WINDOW` (`03:00-07:00`) inside the running vault-core
+container; presence alone proves nothing there, because `core/Dockerfile`
+sets both rate variables blank as image `ENV`. Plus 1 in step 1b: the
+drift-copy completeness check. 193 + 10 + 1 = **204 total**, measured
+2026-10-01 in a real run: **204/204 pass**, 0 failed.
 
 It never enters credentials — reaching the login prompt is the pass condition.
 

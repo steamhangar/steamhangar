@@ -104,7 +104,11 @@ def test_handoff_run_resets_every_runner_owned_column_on_a_second_call(conn) -> 
     assert after is not None
     assert after["run_claimed_by"] is None
     assert after["run_claimed_at"] is None
-    assert after["run_heartbeat_at"] is None
+    # WP API-FIX-1 (B2): the heartbeat column is no longer cleared but
+    # restamped -- it is the lease clock for the NEW attempt (see
+    # test_handoff_run_stamps_the_lease_clock below), so "reset" here means
+    # "not the previous runner's value", not NULL.
+    assert after["run_heartbeat_at"] is not None
     assert after["run_completed_at"] is None
     assert after["run_result_json"] is None
 
@@ -269,11 +273,34 @@ def test_find_active_run_ignores_a_job_never_handed_off(conn) -> None:
     assert jobs.find_active_run(conn) is None
 
 
-def test_find_active_run_ignores_a_completed_job(conn) -> None:
+def test_find_active_run_returns_a_completed_but_uncollected_job(conn) -> None:
+    """WP API-FIX-1 (B1) -- the INVERSE of the pin that shipped with S-1.
+    A runner that finished while vault-api was down leaves a row that is
+    still 'running' with ``run_completed_at`` set; nothing but the reattach
+    path can ever finalize it, so the reattach lookup must return it.
+    The old ``run_completed_at IS NULL`` filter left such a job 'running'
+    forever (dedupe onto a dead id, 409 on cache delete)."""
     job_id = _make_running_prefill_job(conn)
     jobs.handoff_run(conn, job_id, True, "{}")
     jobs.claim_run(conn, "runner-a")
     jobs.record_run_result(conn, job_id, "runner-a", '{"success": true}')
+
+    found = jobs.find_active_run(conn)
+
+    assert found is not None
+    assert int(found["id"]) == job_id
+    assert found["run_completed_at"] is not None
+
+
+def test_find_active_run_ignores_a_job_vault_api_already_finalized(conn) -> None:
+    """The boundary the B1 fix must not cross: once vault-api has moved the
+    row out of 'running', it is not 'active' any more even though its
+    run_* columns are fully populated."""
+    job_id = _make_running_prefill_job(conn)
+    jobs.handoff_run(conn, job_id, True, "{}")
+    jobs.claim_run(conn, "runner-a")
+    jobs.record_run_result(conn, job_id, "runner-a", '{"success": true}')
+    jobs.finish_job(conn, job_id, jobs.STATUS_DONE, "collected")
 
     assert jobs.find_active_run(conn) is None
 
@@ -401,3 +428,120 @@ def test_recover_stale_jobs_queue_mode_still_respects_the_paused_exemption(conn)
     assert recovered == 0
     row = jobs.get_job(conn, job_id)
     assert row is not None and row["status"] == jobs.STATUS_PAUSED
+
+
+# -- WP API-FIX-1 (B2): the lease starts at hand-off, not at claim_next_job --
+
+
+def test_run_is_stale_measures_an_unclaimed_job_from_the_handoff_stamp() -> None:
+    """The unit shape of B2: ``started_at`` is 60s old (vault-api spent that
+    long in its pre-hand-off cache walk), the hand-off stamped
+    ``run_heartbeat_at`` 1s ago, no runner has claimed yet -- NOT stale."""
+    now = datetime.now(timezone.utc)
+    row = {
+        "run_heartbeat_at": _iso(now - timedelta(seconds=1)),
+        "run_claimed_at": None,
+        "run_claimed_by": None,
+        "started_at": _iso(now - timedelta(seconds=60)),
+    }
+
+    assert jobs.run_is_stale(row, lease_timeout_seconds=30, now=now) is False
+
+
+def test_handoff_run_stamps_the_lease_clock(conn) -> None:
+    """DB-level pin of B2: a job whose ``started_at`` already predates the
+    lease window is handed off, and the row as written is NOT stale --
+    because ``handoff_run`` wrote ``run_heartbeat_at`` = now. Reverting the
+    stamp to NULL makes ``run_is_stale`` fall back to ``started_at`` and
+    this test fails."""
+    job_id = _make_running_prefill_job(conn)
+    long_ago = _iso(datetime.now(timezone.utc) - timedelta(seconds=60))
+    conn.execute("UPDATE jobs SET started_at = ? WHERE id = ?", (long_ago, job_id))
+    conn.commit()
+
+    jobs.handoff_run(conn, job_id, True, "{}")
+
+    row = jobs.get_run_row(conn, job_id)
+    assert row is not None
+    assert row["run_claimed_by"] is None
+    assert row["run_heartbeat_at"] is not None
+    assert row["run_heartbeat_at"] != long_ago
+    assert jobs.run_is_stale(row, lease_timeout_seconds=30) is False
+
+
+def test_handoff_stamp_still_goes_stale_when_no_runner_ever_claims(conn) -> None:
+    """B2 must not turn the lease off: an unclaimed hand-off older than the
+    lease is still presumed to have no runner behind it."""
+    job_id = _make_running_prefill_job(conn)
+    jobs.handoff_run(conn, job_id, True, "{}")
+    row = jobs.get_run_row(conn, job_id)
+    assert row is not None
+
+    later = datetime.now(timezone.utc) + timedelta(seconds=31)
+
+    assert jobs.run_is_stale(row, lease_timeout_seconds=30, now=later) is True
+
+
+# -- WP API-FIX-1 (P3): recover_stale_jobs is a terminal transition too -----
+
+
+def test_recover_stale_jobs_clears_a_pending_stop_request(conn) -> None:
+    """db.py promises ``stop_request`` is cleared at EVERY terminal
+    transition; the crash-recovery path is one and used to skip it, leaving
+    a 'pause'/'cancel' flag on an 'error' row forever."""
+    job_id = _make_running_prefill_job(conn)
+    jobs.request_pause(conn, job_id)
+    before = jobs.get_job(conn, job_id)
+    assert before is not None and before["stop_request"] == "pause"
+
+    assert jobs.recover_stale_jobs(conn) == 1
+
+    after = jobs.get_job(conn, job_id)
+    assert after is not None
+    assert after["status"] == jobs.STATUS_ERROR
+    assert after["stop_request"] is None
+
+
+# -- resume_job resets the hand-off columns (WP API-FIX-1, S1) ---------------
+
+
+def _paused_queue_job(conn) -> int:
+    """A queue-mode job whose runner recorded a 'paused' result and which
+    vault-api then parked at 'paused' — every run_* column is populated."""
+    job_id = _make_running_prefill_job(conn)
+    jobs.handoff_run(conn, job_id, True, '{"441": [1, 2, 3]}')
+    assert jobs.claim_run(conn, "runner-x") is not None
+    assert jobs.record_run_result(conn, job_id, "runner-x", '{"paused": true}')
+    assert jobs.park_paused(conn, job_id, "paused")["status"] == jobs.STATUS_PAUSED
+    return job_id
+
+
+def test_resume_job_clears_every_run_column(conn) -> None:
+    job_id = _paused_queue_job(conn)
+
+    assert jobs.resume_job(conn, job_id).outcome == jobs.CONTROL_RESUMED
+
+    row = jobs.get_run_row(conn, job_id)
+    assert row is not None and row["status"] == jobs.STATUS_QUEUED
+    for column in (
+        "run_use_force", "run_before_json", "run_claimed_by", "run_claimed_at",
+        "run_heartbeat_at", "run_completed_at", "run_result_json",
+    ):
+        assert row[column] is None, column
+
+
+def test_restart_between_resume_claim_and_handoff_fails_the_orphan(conn) -> None:
+    """The S1 window: resume -> claim_next_job -> vault-api dies before
+    handoff_run. The row must look never-handed-off: recovery fails it, and
+    find_active_run must not deliver the paused attempt's stale result."""
+    job_id = _paused_queue_job(conn)
+    jobs.resume_job(conn, job_id)
+    claimed = jobs.claim_next_job(conn)
+    assert claimed is not None and int(claimed["id"]) == job_id
+
+    # Simulated restart: startup recovery runs before the worker's first tick.
+    assert jobs.recover_stale_jobs(conn, queue_mode=True) == 1
+    assert jobs.find_active_run(conn) is None
+    after = jobs.get_job(conn, job_id)
+    assert after is not None and after["status"] == jobs.STATUS_ERROR
+    assert after["log_excerpt"] == jobs.STALE_JOB_MESSAGE

@@ -9,9 +9,15 @@ The main session (orchestrator) plans, decomposes, and delegates. It writes
 no production code and performs no reviews itself. Two subagents exist in
 `.claude/agents/` and must be used consistently:
 
-- **coder** (Sonnet): implements one clearly scoped work package at a time
-- **reviewer** (Opus): reviews every completed work package before it counts
+- **coder**: implements one clearly scoped work package at a time
+- **reviewer**: reviews every completed work package before it counts
   as done; read-only
+
+Agent definitions use `model: inherit` so delegation always rides the
+session's current model instead of one pinned by name; where the working
+agreement asks for a stronger second pass (the `[Fable]` marker in
+`docs/WORKPACKAGES.md`), the orchestrator picks the strongest available
+model at call time — never by name in a file or brief.
 
 ## Shared learnings (mandatory)
 

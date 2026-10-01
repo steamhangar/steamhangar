@@ -1067,6 +1067,54 @@ function findJob(id) {
   return jobs.find((j) => j.id === id);
 }
 
+// ADR-0003 shared-depot vocabulary, at MODULE scope so both consumers share
+// one definition (WP WEB-FIX-1, closing the WP 4f carry-over recorded in
+// docs/WORKPACKAGES.md "Carry-overs" #1): the DELETE /v1/cache/{appid}
+// handler's per-depot protection check, and `selectCachedAppids()`'s
+// "which apps hold cache content" selection. Until this WP the two helpers
+// were function-scoped inside the DELETE branch and the selection used a
+// different, more generous predicate — the exact two-callers-two-answers
+// drift the real backend's `deletion.appids_with_cache_content` (WP 4f)
+// exists to remove.
+//
+// "Has cache content" mirrors the real predicate exactly
+// (`deletion._has_cache_content`): it is a STATUS check
+// (status/last_prefill_at/active-job), not a live disk scan — a depot's
+// bytes being physically still present on a co-owner's shared mapping does
+// NOT by itself count, because `DELETE /v1/cache/{appid}` unconditionally
+// resets that app's own status to 'idle' and last_prefill_at to null even
+// when everything it mapped was protected shared content. This is what
+// actually lets a shared depot become a "last cached remnant" on a LATER
+// call — a depots-array-only proxy (a co-owner's own retained mapping to
+// the very depot being evaluated) can never reach that state, since it is
+// trivially always "true" for the depot in question.
+function hasCacheContent(g) {
+  const hasActiveJob = jobs.some(
+    (j) => j.appid === g.appid && ["queued", "running", "paused"].includes(j.status),
+  );
+  const idle = g.status === "idle";
+  const neverPrefilled = g.last_prefill_at === null;
+  return !(idle && neverPrefilled && !hasActiveJob);
+}
+
+/** Every game OTHER than `appid` that currently maps `depotid`. */
+function otherOwners(appid, depotid) {
+  return games.filter((g) => g.appid !== appid && g.depots.some((d) => d.depotid === depotid));
+}
+
+/** The real `deletion.appids_with_cache_content` rule (WP 4f: "exclusive +
+ * remnant, not exclusive alone"), expressed against this demo's
+ * depots-array model: `g` holds cache content iff at least one depot it
+ * maps is either EXCLUSIVE to it (no other current owner) or a LAST-CACHED
+ * REMNANT (every other current owner is itself uncached by
+ * `hasCacheContent`). A depot that at least one OTHER owner still holds
+ * cached content for — `DeletionPlan.shared` on the real side — does not
+ * count, which is what keeps a just-deleted game out of the selection when
+ * its only surviving mapping is a depot a co-owner protected. */
+function hasSelectableCacheContent(g) {
+  return g.depots.some((d) => otherOwners(g.appid, d.depotid).every((o) => !hasCacheContent(o)));
+}
+
 /** Enqueue-or-dedupe ONE appid — the single enqueue mechanism shared by both
  * `POST /v1/prefill` and `POST /v1/prefill/cached` (WP 4c-web), mirroring
  * the real `jobs.enqueue_prefill` being the one function BOTH real routes
@@ -1112,19 +1160,25 @@ function enqueuePrefillForAppid(appid) {
 }
 
 /** Every appid that currently "has cache content" in this demo model —
- * `POST /v1/prefill/cached`'s selection (WP 4c-web). The real route selects
- * from disk-and-mapping truth: any app mapping at least one depot with
- * bytes on disk right now (api/README.md "Selection: disk-and-mapping
- * truth, one query"). This demo model keeps "mapping" and "on-disk size" as
- * ONE list per game (`makeGame()`'s header) rather than the real schema's
- * two separate facts, so the equivalent truth here is simply "this game's
- * `depots` array is non-empty" — an app with no depots (never cached, or
- * fully deleted) contributes nothing, exactly like an app whose every depot
- * has zero bytes contributes nothing on the real endpoint. Sorted ascending
- * by appid, matching the real route's deterministic order. */
+ * `POST /v1/prefill/cached`'s selection (WP 4c-web; predicate corrected in
+ * WP WEB-FIX-1). The real route calls `deletion.appids_with_cache_content`
+ * (WP 4f — the ONE definition the keep-current sweep and this button share;
+ * api/README.md "Sweep target set" / "Check & update all cached games"):
+ * an app counts iff it maps at least one depot with bytes on disk that is
+ * exclusive to it or a last-cached remnant — never a depot some OTHER
+ * owner still holds cached content for. `hasSelectableCacheContent` above
+ * is that rule against this demo's one-list-per-game model (`makeGame()`'s
+ * header: mapping and on-disk size are one `depots` array here, so
+ * "maps it AND has bytes" collapses to "is in `depots`"). The pre-WP-4f
+ * filter this replaced (`g.depots.length > 0`) re-selected a game the
+ * operator had just deleted whenever its only surviving mapping was a depot
+ * a co-owner protected — one button press away from the re-download-after-
+ * delete outcome ADR-0003 exists to prevent (docs/WORKPACKAGES.md
+ * "Carry-overs" #1). Sorted ascending by appid, matching the real route's
+ * deterministic order. */
 function selectCachedAppids() {
   return games
-    .filter((g) => g.depots.length > 0)
+    .filter(hasSelectableCacheContent)
     .map((g) => g.appid)
     .sort((a, b) => a - b);
 }
@@ -1437,38 +1491,16 @@ export async function demoRequest(method, path, { body, params } = {}) {
     // request-start) state, same as the real endpoint's execute-time
     // recheck (`current_co_owners` there).
     //
-    // "Has cache content" mirrors the real predicate exactly
-    // (`deletion._has_cache_content`): it is a STATUS check
-    // (status/last_prefill_at/active-job), not a live disk scan — a
-    // depot's bytes being physically still present on a co-owner's shared
-    // mapping does NOT by itself count, because `DELETE /v1/cache/{appid}`
-    // unconditionally resets that app's own status to 'idle' and
-    // last_prefill_at to null even when everything it mapped was
-    // protected shared content. This is what actually lets a shared depot
-    // become a "last cached remnant" on a LATER call — a depots-array-only
-    // proxy (a co-owner's own retained mapping to the very depot being
-    // evaluated) can never reach that state, since it is trivially always
-    // "true" for the depot in question.
-    function hasCacheContent(g) {
-      const hasActiveJob = jobs.some(
-        (j) => j.appid === g.appid && ["queued", "running", "paused"].includes(j.status),
-      );
-      const idle = g.status === "idle";
-      const neverPrefilled = g.last_prefill_at === null;
-      return !(idle && neverPrefilled && !hasActiveJob);
-    }
-    function otherOwners(depotid) {
-      return games.filter(
-        (g) => g.appid !== appid && g.depots.some((d) => d.depotid === depotid),
-      );
-    }
+    // `hasCacheContent`/`otherOwners` live at module scope (see their
+    // header near `findGame`) — WP WEB-FIX-1 hoisted them out of this
+    // branch so `selectCachedAppids()` applies the SAME definition.
 
     const deletedDepots = [];
     const skippedShared = [];
     const remnantCoOwnerAppids = new Set();
 
     for (const depot of game.depots) {
-      const others = otherOwners(depot.depotid);
+      const others = otherOwners(appid, depot.depotid);
       const cachedOthers = others.filter(hasCacheContent);
       if (cachedOthers.length > 0) {
         skippedShared.push({ depotid: depot.depotid, shared_with: others.map((g) => g.appid) });

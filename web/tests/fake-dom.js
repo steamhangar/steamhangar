@@ -150,6 +150,26 @@ function queryAll(root, selectorList) {
   return out;
 }
 
+/** Number of top-level elements in `markup` (round 2, N1): walks open/close
+ * tags with a depth counter; self-closing tags (`<x/>`) and comments are
+ * handled, void HTML elements are not (no consumer passes them). */
+function countTopLevelElements(markup) {
+  let depth = 0;
+  let count = 0;
+  const re = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w-]*)[^>]*?(\/?)>/g;
+  let m;
+  while ((m = re.exec(markup))) {
+    if (!m[2]) continue; // comment
+    if (m[1]) {
+      depth--;
+    } else {
+      if (depth === 0) count++;
+      if (!m[3]) depth++;
+    }
+  }
+  return count;
+}
+
 class FakeClassList {
   constructor(el) {
     this._el = el;
@@ -177,7 +197,9 @@ class FakeElement {
     this.tagName = String(tag || "").toUpperCase();
     this._classes = new Set();
     this.classList = new FakeClassList(this);
-    this.children = [];
+    // WP WEB-FIX-1 round 2 (N2): `childNodes` is the backing list (elements
+    // AND text nodes); `children` is the element-only view, as in a real DOM.
+    this.childNodes = [];
     this.parentNode = null;
     this._attrs = new Map();
     this._listeners = new Map();
@@ -238,7 +260,42 @@ class FakeElement {
   // `card.firstChild` right after appending the cover — a real DOM
   // property this shim never had, since no earlier consumer needed it.
   get firstChild() {
-    return this.children[0] || null;
+    return this.childNodes[0] || null;
+  }
+  get children() {
+    return this.childNodes.filter((c) => c.tagName !== "#TEXT");
+  }
+  // WP DOCS-FIX-2 (follow-up to WEB-FIX-1 round 2): `textContent` follows
+  // the real DOM. Only a "#text" node stores its own text (`_text`). The
+  // getter joins the children's text in document order, so
+  // `p.append(text, b)` reads back as the visible text; a node with no
+  // children reads its own `_text` ("" for an empty element). The setter on
+  // an element detaches every old child and, for a non-empty string, puts a
+  // single new "#text" child in their place (an empty string leaves no
+  // children), exactly as `el.textContent = "..."` does in a browser — so a
+  // later `append` keeps the text: `p.textContent = "x"; p.append(b)` reads
+  // back "xB".
+  get textContent() {
+    if (this.childNodes.length > 0) {
+      return this.childNodes.map((c) => c.textContent).join("");
+    }
+    return this._text ?? "";
+  }
+  set textContent(value) {
+    const text = value == null ? "" : String(value);
+    if (this.tagName === "#TEXT") {
+      this._text = text;
+      return;
+    }
+    for (const c of this.childNodes) c.parentNode = null;
+    this.childNodes = [];
+    if (text !== "") {
+      const node = new FakeElement("#text");
+      node._text = text;
+      node._ownerDoc = this._ownerDoc;
+      node.parentNode = this;
+      this.childNodes = [node];
+    }
   }
   setAttribute(name, value) {
     this._attrs.set(name, String(value));
@@ -252,8 +309,19 @@ class FakeElement {
   removeAttribute(name) {
     this._attrs.delete(name);
   }
+  // WP WEB-FIX-2 (connection-downloads-wiring.test.js): real `append`
+  // accepts strings and inserts them as text nodes (views/downloads.js's
+  // `queueHeading.append("Queue ")`). `appendChild` itself still takes
+  // nodes only, as in a real DOM.
   append(...nodes) {
-    for (const n of nodes) this.appendChild(n);
+    for (const n of nodes) {
+      if (typeof n === "string") {
+        if (!this._ownerDoc) throw new Error("fake-dom.js: append(string) needs an owner document");
+        this.appendChild(this._ownerDoc.createTextNode(n));
+      } else {
+        this.appendChild(n);
+      }
+    }
   }
   // WP AG-2 (game-detail-sheet-installed.test.js): spec-correct MOVE
   // semantics — `Node.appendChild` on a node that is already someone's
@@ -264,22 +332,74 @@ class FakeElement {
   // making a real "did this actually reorder" test pass on the OLD
   // (wrong) order without ever throwing.
   appendChild(node) {
+    // WP WEB-FIX-1 (settings-view-wiring.test.js): spec-correct fragment
+    // semantics — appending a DocumentFragment moves its CHILDREN into this
+    // node and leaves the fragment empty; the fragment itself never becomes
+    // a child. views/settings.js builds every section as a fragment and
+    // `els.body.append(...)`s them, so without this the section contents
+    // would sit one level too deep and every `querySelector` in the test
+    // would still find them — a silently-wrong tree, not a failing one.
+    if (node._isFragment) {
+      for (const child of node.childNodes.slice()) this.appendChild(child);
+      return node;
+    }
     if (node.parentNode) {
       const oldParent = node.parentNode;
-      const idx = oldParent.children.indexOf(node);
-      if (idx !== -1) oldParent.children.splice(idx, 1);
+      const idx = oldParent.childNodes.indexOf(node);
+      if (idx !== -1) oldParent.childNodes.splice(idx, 1);
     }
-    this.children.push(node);
+    this.childNodes.push(node);
     node.parentNode = this;
     return node;
+  }
+  // WP WEB-FIX-1 (onboarding-wiring.test.js): onboarding.js's `staticIcon`
+  // does `span.innerHTML = "<svg ...>...</svg>"; return span.firstElementChild`
+  // to turn an SVG string constant into a node. This shim does not parse
+  // markup; it creates ONE child element named after the FIRST tag in the
+  // string (attributes and nested markup are dropped) — enough for a call
+  // site that only wants "an element to append", and honest about the
+  // rest. Throws on a string that does not start with a tag, or that holds
+  // more than one top-level element (round 2, N1 — everything after the
+  // first would otherwise be dropped silently), per this file's "throw on
+  // unsupported input instead of silently no-opping" rule.
+  set innerHTML(markup) {
+    const text = String(markup);
+    if (text === "") {
+      this.replaceChildren();
+      return;
+    }
+    const m = /^\s*<([a-zA-Z][\w-]*)/.exec(text);
+    if (!m) {
+      throw new Error(
+        `fake-dom.js's innerHTML setter only understands markup starting with an element tag (got ${JSON.stringify(text.slice(0, 40))}). ` +
+          `Extend it in web/tests/fake-dom.js if a real consumer now needs more.`,
+      );
+    }
+    if (countTopLevelElements(text) > 1) {
+      throw new Error(
+        `fake-dom.js's innerHTML setter only understands ONE top-level element (got ${JSON.stringify(text.slice(0, 40))}). ` +
+          `Extend it in web/tests/fake-dom.js if a real consumer now needs more.`,
+      );
+    }
+    const child = new FakeElement(m[1]);
+    child._ownerDoc = this._ownerDoc;
+    this.replaceChildren(child);
+  }
+  // Round 2 (N2): reading markup back would need a serializer this shim
+  // does not have — throw rather than return something plausible.
+  get innerHTML() {
+    throw new Error("fake-dom.js: reading innerHTML is unsupported. Extend web/tests/fake-dom.js if a real consumer now needs it.");
+  }
+  get firstElementChild() {
+    return this.children[0] || null;
   }
   // WP 4e.6 (rail-panel-wiring.test.js): rail-content rendering clears and
   // rebuilds its container on every tick the same way notifications.js's
   // log list already does in production — added here rather than assuming
   // a DOM shim only needs what existed before this WP.
   replaceChildren(...nodes) {
-    for (const c of this.children) c.parentNode = null;
-    this.children = [];
+    for (const c of this.childNodes) c.parentNode = null;
+    this.childNodes = [];
     this.append(...nodes);
   }
   contains(node) {
@@ -295,8 +415,8 @@ class FakeElement {
   // — added here per this file's own "grows just far enough" policy.
   remove() {
     if (!this.parentNode) return;
-    const idx = this.parentNode.children.indexOf(this);
-    if (idx !== -1) this.parentNode.children.splice(idx, 1);
+    const idx = this.parentNode.childNodes.indexOf(this);
+    if (idx !== -1) this.parentNode.childNodes.splice(idx, 1);
     this.parentNode = null;
   }
   addEventListener(type, handler) {
@@ -353,6 +473,27 @@ export function createFakeDom() {
     },
     createElementNS(_ns, tag) {
       return document.createElement(tag);
+    },
+    // WP WEB-FIX-1 (settings-view-wiring.test.js / onboarding-wiring.test.js):
+    // views/settings.js builds each section as a DocumentFragment;
+    // onboarding.js's step 2 appends a text node. Both are real DOM APIs
+    // this shim never needed before. A fragment is a FakeElement flagged
+    // `_isFragment` so `appendChild` above can apply move-the-children
+    // semantics; a text node is a FakeElement tagged "#text" carrying
+    // `textContent` — it participates in the tree (parentNode/childNodes)
+    // but, as in a real DOM, never appears in `children` (round 2, N2) and
+    // can never match a tag or class selector.
+    createDocumentFragment() {
+      const frag = new FakeElement("#document-fragment");
+      frag._isFragment = true;
+      frag._ownerDoc = document;
+      return frag;
+    },
+    createTextNode(text) {
+      const node = new FakeElement("#text");
+      node.textContent = String(text);
+      node._ownerDoc = document;
+      return node;
     },
     addEventListener(type, handler) {
       if (!docListeners.has(type)) docListeners.set(type, new Set());

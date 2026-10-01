@@ -3,9 +3,10 @@ name: CI
 # WP 5.1 (Phase 5, release track) + WP CI-1 + WP CI-2. Two tiers:
 #
 #   1. Fast build/test gates on every push/PR: api-tests, agent-go,
-#      core-nginx-config, powershell-syntax, web-tests, android-tests. NO
-#      image publishing and NO ghcr.io here -- that is WP 5.5, user-gated
-#      (docs/WORKPACKAGES.md).
+#      core-nginx-config, powershell-syntax, web-tests, android-tests,
+#      deploy-static (shellcheck + `docker compose config`, pre-freeze
+#      project review S4). NO image publishing and NO ghcr.io pushes here
+#      -- that is publish.yml (WP CI-3), tag-gated.
 #
 #   2. verify-stack: the real-Docker, real-Steam-CDN integration suite
 #      (deploy/tests/verify-stack.sh -- see its own header for the full
@@ -56,11 +57,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The six jobs below are the fast PR gate: push, pull_request, and a
+  # The seven jobs below are the fast PR gate: push, pull_request, and a
   # manual workflow_dispatch run all trigger them (unchanged from before
   # WP CI-1 for push/pull_request; workflow_dispatch is new -- it lets a
   # human re-run the whole fast suite on demand). The nightly `schedule`
-  # event does NOT match this guard, so these six do not re-run overnight
+  # event does NOT match this guard, so these seven do not re-run overnight
   # -- every push/PR already exercises them, so a nightly re-run would add
   # no signal, only cost. android-tests (WP CI-2) belongs here, not with
   # verify-stack below: it is a deterministic JVM unit-test + lint run (no
@@ -106,9 +107,24 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # WP SEC-FIX-2: same Go selection as publish.yml's agent-binaries
+      # (see the comment there): newest patch of go.mod's minor line, so CI
+      # tests with the stdlib the release binaries are built with.
+      - name: Derive Go release line from go.mod
+        id: gover
+        shell: bash
+        run: |
+          set -eu
+          line="$(sed -n 's/^go[[:space:]]\{1,\}\([0-9]\{1,\}\.[0-9]\{1,\}\).*/\1/p' agent/go/go.mod)"
+          if [ -z "$line" ]; then
+            echo "::error::no go directive found in agent/go/go.mod" >&2
+            exit 1
+          fi
+          echo "line=${line}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: agent/go/go.mod
+          go-version: ${{ steps.gover.outputs.line }}.x
+          check-latest: true
       - name: go build ./...
         working-directory: agent/go
         run: go build ./...
@@ -199,7 +215,7 @@ jobs:
           # be this exact build today (actions/runner-images Ubuntu 24.04
           # readme, Java section: Temurin 17.0.20+8) but `java-version: "17"`
           # itself only floats within the 17.x line, same looseness as this
-          # file's own python-version/go-version-file/node-version pins --
+          # file's own python-version/go-version (go.mod-derived)/node-version pins --
           # pinned explicitly anyway so a future runner-image default bump
           # can't silently change what this job builds with.
           distribution: temurin
@@ -250,6 +266,46 @@ jobs:
         # (no keystore.properties present, no prompt or failure).
         working-directory: app
         run: bash gradlew assembleDebug testDebugUnitTest testReleaseUnitTest lintDebug --console=plain
+
+  # Pre-freeze project review, S4: until this job existed the PR gate
+  # never rendered deploy/compose.yaml at all and shellcheck'd exactly one
+  # shell script (core-nginx-config's own helper). A YAML typo or an
+  # interpolation error in compose.yaml -- the file every operator runs --
+  # was caught only by the nightly verify-stack run, i.e. after merge.
+  deploy-static:
+    name: deploy / shellcheck + compose config
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: shellcheck (every shell script the stack ships or tests with)
+        # `--severity=warning`: the info/style tier is dominated by SC2016
+        # ("expressions don't expand in single quotes") on grep patterns
+        # that deliberately match a literal `${`, and by SC1091 on sourced
+        # files -- all reviewed, all intentional, and the two of those files
+        # outside this package's footprint could not be annotated in-line.
+        # `-e SC1007`: core/docker/check-config-drift.sh uses the portable
+        # `CDPATH= cd` idiom (a real POSIX idiom, shellcheck's warning is a
+        # false positive) and core/ is not this package's to edit;
+        # deploy/tests/verify-stack.sh's own two occurrences were rewritten
+        # to `CDPATH='' cd`, which shellcheck accepts. Drop the exclusion
+        # once core/'s copy is rewritten the same way.
+        run: |
+          shellcheck --severity=warning -e SC1007 \
+            deploy/tests/verify-stack.sh \
+            deploy/proxy/*.sh \
+            dns/docker-entrypoint.sh \
+            core/docker/*.sh
+      - name: docker compose config (render the shipped compose file, dns profile included)
+        # `-q`: exit status only -- a rendered config is not a useful log
+        # line, a refused one is. VAULT_API_KEY=x satisfies the file's own
+        # `${VAULT_API_KEY:?...}` guard (the one required variable; it is
+        # never used for anything here). `--profile dns` pulls vault-dns's
+        # block into the render too, so a mistake there is not hidden by
+        # the profile. No `.env` exists on the runner, so this is exactly
+        # the "stock checkout, every default" render.
+        run: VAULT_API_KEY=x docker compose -f deploy/compose.yaml --profile dns config -q
 
   verify-stack:
     name: deploy / verify-stack

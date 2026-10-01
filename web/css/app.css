@@ -1008,6 +1008,11 @@ body.onboarding .nav{ display:none; }
    `[hidden]{display:none}` already works correctly here precisely because
    no rule below ever overrides it. */
 .banner-wrap{ width:100%; max-width:var(--w-text); margin:0 auto; padding:12px 16px 0; }
+/* WP WEB-FIX-2: the wrap now holds two [hidden]-toggled `.banner-slot`s
+   (connection, bypass — index.html). The only new rule: a gap between two
+   slots that are BOTH shown. No `display` on `.banner-slot` (same
+   [hidden]-vs-author-display reason as above), no new colour. */
+.banner-slot:not([hidden]) ~ .banner-slot:not([hidden]){ margin-top:8px; }
 .banner{
   display:flex; gap:10px; align-items:flex-start;
   padding:11px 12px;

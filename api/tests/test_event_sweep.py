@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -587,7 +588,7 @@ def test_an_unreadable_log_does_not_move_the_cursor(
     def boom(*args, **kwargs):
         raise OSError("device on fire")
 
-    monkeypatch.setattr(event_sweep.os.path, "getsize", boom)
+    monkeypatch.setattr(event_sweep.os, "fstat", boom)
     outcome = event_sweep.sweep_once(db, settings, moment())
 
     assert outcome.swept is False
@@ -1127,7 +1128,7 @@ def test_a_denied_truncation_keeps_sweeping_correctly_and_is_recorded(
     def denied(*args, **kwargs):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(event_sweep.os, "truncate", denied)
+    monkeypatch.setattr(event_sweep.os, "ftruncate", denied)
     with caplog.at_level(logging.WARNING):
         outcome = event_sweep.sweep_once(db, settings, moment())
 
@@ -1157,7 +1158,7 @@ def test_repeated_denials_keep_counting_and_never_break_the_sweep(
     def denied(*args, **kwargs):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(event_sweep.os, "truncate", denied)
+    monkeypatch.setattr(event_sweep.os, "ftruncate", denied)
     for index in range(3):
         append_log(log, *[event_line(cache_status="HIT") for _ in range(4)])
         outcome = event_sweep.sweep_once(db, settings, moment(minute=index * 5))
@@ -1179,7 +1180,7 @@ def test_another_oserror_during_truncation_is_not_reported_as_denied(
     def boom(*args, **kwargs):
         raise OSError("I/O error")
 
-    monkeypatch.setattr(event_sweep.os, "truncate", boom)
+    monkeypatch.setattr(event_sweep.os, "ftruncate", boom)
     outcome = event_sweep.sweep_once(db, settings, moment())
 
     assert outcome.swept is True
@@ -1423,3 +1424,217 @@ def test_depot_miss_statistics_are_bounded(
     event_sweep.sweep_once(db, settings, moment())
 
     assert db.execute("SELECT COUNT(*) FROM depot_miss_stats").fetchone()[0] == 3
+
+
+# ---------------------------------------------------------------------------
+# WP API-FIX-2, data-path P1: an unusable depot_app_map row must not stall
+# the sweep forever
+# ---------------------------------------------------------------------------
+
+
+def test_a_non_numeric_mapping_row_does_not_stall_the_sweep(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``_appids_for_depot`` used to ``int()`` the column; SQLite's INTEGER
+    affinity lets a string sit there, ``ValueError`` escaped ``aggregate_lines``
+    BEFORE ``commit_batch``, and the cursor never advanced -- every later sweep
+    re-read the same batch and failed the same way."""
+    settings = make_settings(tmp_path)
+    log_path = Path(settings.event_log_path)
+    write_log(log_path, event_line(depot="70403"), event_line(depot="70403"))
+    # Raw SQL on purpose: mapping.upsert_mapping validates its input, and the
+    # whole point is a row that bypassed validation (hand edit, corruption).
+    db.execute(
+        "INSERT INTO depot_app_map (depotid, appid) VALUES (?, ?)", (70403, "abc")
+    )
+    map_depot(db, 70403, 440)
+    db.commit()
+
+    with caplog.at_level("WARNING", logger="vault_api.event_sweep"):
+        outcome = event_sweep.sweep_once(db, settings, moment())
+
+    assert outcome.swept is True
+    assert outcome.cursor == log_path.stat().st_size, "the cursor must advance"
+    assert any("unusable appid 'abc'" in r.getMessage() for r in caplog.records)
+    # The usable co-mapping still yields the honest single target.
+    assert queued_appids(db) == [440]
+
+
+def test_appids_for_depot_skips_every_unusable_shape(db: sqlite3.Connection) -> None:
+    for bad in ("abc", "", "1_0", "-5", 0, -3):
+        db.execute("INSERT OR IGNORE INTO depot_app_map (depotid, appid) VALUES (?, ?)", (9, bad))
+    db.execute("INSERT INTO depot_app_map (depotid, appid) VALUES (?, ?)", (9, 730))
+    db.commit()
+
+    assert event_sweep._appids_for_depot(db, 9) == [730]
+
+
+# --------------------------------------------------------------------------
+# WP SEC-FIX-4 S-1: a planted symlink / FIFO is never read through or truncated
+# --------------------------------------------------------------------------
+
+
+def _planted_link(tmp_path: Path) -> tuple[Path, Path]:
+    """vault-core (same uid) replaced event.log with a link into /data."""
+    private = tmp_path / "private"
+    private.mkdir()
+    target = private / "precious.txt"
+    target.write_bytes(b"important line\n" * 100)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    link = logs / "event.log"
+    link.symlink_to(target)
+    return link, target
+
+
+def test_a_symlinked_event_log_is_not_read_through(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    link, target = _planted_link(tmp_path)
+
+    batch = event_sweep.read_batch(str(link), 0)
+    assert batch.lines == ()
+    assert batch.new_cursor == 0
+    assert "symlink" in batch.error
+
+    settings = make_settings(tmp_path, log_path=str(link), max_bytes=100)
+    outcome = event_sweep.sweep_once(db, settings, moment())
+    assert outcome.swept is False
+    assert outcome.skipped_reason == "read-error"
+    assert event_sweep.read_state(db).cursor_offset == 0
+
+
+def test_a_symlinked_event_log_is_never_truncated(
+    db: sqlite3.Connection, tmp_path: Path, caplog
+) -> None:
+    """The cursor may already sit at the target's size (persisted earlier)."""
+    link, target = _planted_link(tmp_path)
+    size = target.stat().st_size
+    # A real sweep first, so the state row exists (as it does in production).
+    real = make_settings(tmp_path)
+    write_log(Path(real.event_log_path), event_line(cache_status="HIT"))
+    assert event_sweep.sweep_once(db, real, moment()).swept is True
+    settings = make_settings(tmp_path, log_path=str(link), max_bytes=100)
+
+    with caplog.at_level(logging.WARNING):
+        result = event_sweep.maybe_truncate(db, settings, size, "2026-10-01T00:00:00Z")
+
+    assert result.truncated is False
+    assert result.reason == event_sweep.TRUNCATE_REFUSED
+    assert target.stat().st_size == size
+    assert link.is_symlink()
+    assert "REFUSING" in caplog.text
+    assert event_sweep.read_state(db).truncate_denied_count == 1
+
+
+def test_a_fifo_event_log_is_refused_without_hanging(tmp_path: Path) -> None:
+    fifo = tmp_path / "event.log"
+    os.mkfifo(fifo)
+
+    def hung(*_args) -> None:
+        raise AssertionError("open() blocked on a FIFO (O_NONBLOCK missing)")
+
+    # A regression must FAIL this test, not hang the whole suite.
+    previous = signal.signal(signal.SIGALRM, hung)
+    signal.alarm(5)
+    try:
+        batch = event_sweep.read_batch(str(fifo), 0)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+    assert batch.lines == ()
+    assert "regular file" in batch.error
+
+
+def test_an_event_log_on_another_device_than_its_directory_is_refused(
+    db: sqlite3.Connection, tmp_path: Path, monkeypatch
+) -> None:
+    """A symlinked logs/ directory pointing at another volume (st_dev differs)."""
+    settings = make_settings(tmp_path, max_bytes=100)
+    log = Path(settings.event_log_path)
+    write_log(log, *[event_line(cache_status="HIT") for _ in range(4)])
+    size = log.stat().st_size
+    real_lstat = os.lstat
+
+    class _OtherDev:
+        def __init__(self, info: os.stat_result) -> None:
+            self.st_mode = info.st_mode
+            self.st_dev = info.st_dev + 1
+
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        return _OtherDev(info) if str(path) == str(tmp_path) else info
+
+    monkeypatch.setattr(event_sweep.os, "lstat", lstat)
+    assert "another device" in event_sweep.read_batch(str(log), 0).error
+    result = event_sweep.maybe_truncate(db, settings, size, "2026-10-01T00:00:00Z")
+    assert result.reason == event_sweep.TRUNCATE_REFUSED
+    assert log.stat().st_size == size
+
+
+def test_a_symlinked_logs_dir_on_the_same_device_is_refused(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """Review S1: logs/ -> a same-device dir; the st_dev check alone misses it."""
+    private = tmp_path / "private"
+    private.mkdir()
+    target = private / "event.log"
+    write_log(target, *[event_line(cache_status="HIT") for _ in range(4)])
+    size = target.stat().st_size
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "logs").symlink_to(private)
+    log = vault / "logs" / "event.log"
+    assert os.stat(log).st_dev == os.lstat(vault / "logs").st_dev
+
+    batch = event_sweep.read_batch(str(log), 0)
+    assert batch.lines == ()
+    assert "symlinked directory" in batch.error
+
+    # A real sweep first, so the state row exists.
+    real = make_settings(tmp_path)
+    write_log(Path(real.event_log_path), event_line(cache_status="HIT"))
+    assert event_sweep.sweep_once(db, real, moment()).swept is True
+    settings = make_settings(tmp_path, log_path=str(log), max_bytes=10)
+    result = event_sweep.maybe_truncate(db, settings, size, "2026-10-01T00:00:00Z")
+    assert result.reason == event_sweep.TRUNCATE_REFUSED
+    assert target.stat().st_size == size
+
+
+def test_a_linked_ancestor_above_logs_is_still_accepted(tmp_path: Path) -> None:
+    """Only logs/ itself is checked: a linked base above it (bind mount) works."""
+    real = tmp_path / "realbase"
+    (real / "logs").mkdir(parents=True)
+    write_log(real / "logs" / "event.log", event_line(cache_status="HIT"))
+    (tmp_path / "linkbase").symlink_to(real)
+
+    batch = event_sweep.read_batch(str(tmp_path / "linkbase" / "logs" / "event.log"), 0)
+    assert batch.error == ""
+    assert len(batch.lines) == 1
+
+
+def test_rotation_rechecks_the_size_on_the_write_fd(
+    db: sqlite3.Connection, tmp_path: Path, monkeypatch
+) -> None:
+    """Review S3: nginx appends between the read-side check and the truncate."""
+    sweep_settings = make_settings(tmp_path)  # truncation off for the sweep
+    log = Path(sweep_settings.event_log_path)
+    write_log(log, *[event_line(cache_status="HIT") for _ in range(4)])
+    assert event_sweep.sweep_once(db, sweep_settings, moment()).swept is True
+    settings = make_settings(tmp_path, max_bytes=10)
+    size = log.stat().st_size
+    real_open = event_sweep.open_event_log
+
+    def open_then_append(path: str, flags: int) -> int:
+        if flags & os.O_WRONLY:
+            with open(path, "ab") as handle:
+                handle.write(b"appended\n")
+        return real_open(path, flags)
+
+    monkeypatch.setattr(event_sweep, "open_event_log", open_then_append)
+    result = event_sweep.maybe_truncate(db, settings, size, "2026-10-01T00:00:00Z")
+
+    assert result.truncated is False
+    assert result.reason == event_sweep.TRUNCATE_INCOMPLETE
+    assert log.stat().st_size == size + len(b"appended\n")
+    assert event_sweep.read_state(db).cursor_offset == size

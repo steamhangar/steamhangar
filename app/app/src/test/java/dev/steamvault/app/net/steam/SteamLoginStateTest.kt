@@ -83,11 +83,15 @@ class SteamLoginStateTest {
     }
 
     @Test
-    fun `MUTATION PIN -- a consumed (mismatched) attempt also clears -- no second guess allowed`() {
+    fun `MUTATION PIN -- a mismatched (fake) callback does not kill the pending sign-in`() {
+        // WP SEC-FIX-2 (N1): any co-installed app can send a callback with a
+        // made-up state; it must fail without clearing the real attempt.
         val pending = PendingLoginState()
         pending.start("s1")
-        assertFalse(pending.consume("wrong")) // first attempt: wrong guess, but still consumes
-        assertFalse(pending.consume("s1")) // second attempt with the RIGHT value: too late, already cleared
+        assertFalse(pending.consume("wrong")) // fake callback: rejected
+        assertFalse(pending.consume(null)) // stateless fake: rejected
+        assertTrue(pending.consume("s1")) // the genuine callback still completes
+        assertFalse(pending.consume("s1")) // and is still single-use afterwards
     }
 
     @Test

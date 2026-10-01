@@ -57,6 +57,15 @@
                                   stays `nginx -t` green and creates no
                                   event.log file
 
+    Plus one group for the WP TH-1a upstream rate cap (core/README.md
+    "Upstream rate cap"); the cap itself is container-only, this checks the
+    native build can carry it:
+      15. cap prerequisites      - `nginx -V` lists the stub_status module
+                                  ($connections_writing, the divisor) and
+                                  the version is >= 1.27.0 (variables in
+                                  proxy_limit_rate); the static native
+                                  include is present and uncapped
+
     IMPORTANT -- port 80 contention: a live Steam client may be using the
     Phase-0 PoC's nginx on port 80. This script:
       1. Stops whatever nginx is currently running (poc/stop.ps1 -- safe/
@@ -964,6 +973,55 @@ try {
     }
     finally {
         Stop-NginxInstance $offRigRoot "`"$offFixtureConf`"" (Join-Path $offRigRoot "logs\nginx.pid")
+    }
+
+    # --- 15. WP TH-1a upstream rate cap: native build prerequisites ----------
+    # The container renders a map on $connections_writing (a stub_status
+    # variable) feeding `proxy_limit_rate $vault_upstream_rate` (variables
+    # there need nginx >= 1.27.0). Verified for the container image
+    # (poc/throttle/RESULTS-TH1-20261001.md); for THIS native binary it is
+    # verified only when this suite runs. The native config itself carries
+    # the identical directives with an uncapped static include, so the
+    # Start-CoreNginx above already proves the include resolves.
+    Write-Host ""
+    Write-Host "-- Test: upstream rate cap prerequisites (WP TH-1a) -- stub_status, version floor, static include --"
+    # nginx -V writes to stderr; see test 14 for why only a locally restored
+    # "Continue" (not a redirect under Stop) is safe on PowerShell 5.1.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $nginxV = (& $NginxExe -V 2>&1 | ForEach-Object { "$_" }) -join "`n"
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($nginxV -match '--with-http_stub_status_module') {
+        Pass "nginx -V lists --with-http_stub_status_module (`$connections_writing is available for the cap's divisor map)"
+    }
+    else {
+        Fail "nginx -V does not list --with-http_stub_status_module -- a capped vault-upstream-rate.conf (map on `$connections_writing) would fail to load on this build"
+    }
+    if ($nginxV -match 'nginx/(\d+)\.(\d+)\.(\d+)') {
+        $nginxVer = [System.Version]("{0}.{1}.{2}" -f $Matches[1], $Matches[2], $Matches[3])
+        if ($nginxVer -ge [System.Version]"1.27.0") {
+            Pass "nginx $nginxVer >= 1.27.0 (variables in proxy_limit_rate)"
+        }
+        else {
+            Fail "nginx $nginxVer is below 1.27.0 -- proxy_limit_rate does not accept variables before that"
+        }
+    }
+    else {
+        Fail "could not read the nginx version from nginx -V output: $nginxV"
+    }
+    $nativeRateConf = Join-Path $CoreRoot "nginx\vault-upstream-rate.conf"
+    if (-not (Test-Path $nativeRateConf)) {
+        Fail "missing $nativeRateConf (included by core/nginx/nginx.conf)"
+    }
+    elseif ((Get-Content $nativeRateConf -Raw) -notmatch '(?m)^\s*default 0;\s*$') {
+        Fail "$nativeRateConf is not the uncapped form ('default 0;') -- the native rig must not cap"
+    }
+    else {
+        Pass "static native include present and uncapped (default 0)"
     }
 }
 finally {

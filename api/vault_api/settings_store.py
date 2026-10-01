@@ -119,8 +119,16 @@ class SettingSpec:
     to_json: Callable[[Any], Any]
 
 
+#: Re-exported for callers/tests; the rule itself lives in ``config`` so
+#: ``VAULT_NAME`` at startup and ``PATCH /v1/settings`` share it (S2).
+MAX_VAULT_NAME_LENGTH = config.MAX_VAULT_NAME_LENGTH
+
+
 def _parse_vault_name(raw: str) -> str:
-    return raw.strip()
+    try:
+        return config.parse_vault_name(raw)
+    except ValueError as exc:
+        raise SettingValidationError(str(exc)) from exc
 
 
 def _parse_schedule_window_override(raw: str) -> ScheduleWindow | None:
@@ -147,7 +155,12 @@ def _parse_schedule_interval_override(raw: str) -> int:
             "an empty string"
         )
     try:
-        return config.parse_strict_int(raw, minimum=1)
+        # Same ceiling Settings.from_env applies (config.MAX_INTERVAL_MINUTES,
+        # WP API-FIX-2 S2): this value goes straight into a timedelta on the
+        # scheduler tick and in GET /v1/schedule, GET /v1/games.
+        return config.parse_strict_int(
+            raw, minimum=1, maximum=config.MAX_INTERVAL_MINUTES
+        )
     except ValueError as exc:
         raise SettingValidationError(str(exc)) from exc
 
@@ -159,7 +172,7 @@ def _parse_schedule_client_stale_days_override(raw: str) -> int:
             "an empty string"
         )
     try:
-        return config.parse_strict_int(raw, minimum=1)
+        return config.parse_strict_int(raw, minimum=1, maximum=config.MAX_DAYS)
     except ValueError as exc:
         raise SettingValidationError(str(exc)) from exc
 
@@ -465,12 +478,18 @@ def effective_settings(conn: sqlite3.Connection, base: Settings) -> Settings:
         try:
             updates[key] = spec.parse(raw)
         except SettingValidationError:
+            # A secret-carrying key (webhook_url) is never logged, not even
+            # through redact_url: a corrupt stored value need not parse as a
+            # URL (scheme-less ``admin:s3cr3t@host/x`` passes redact_url
+            # unchanged), and this line lands in `docker logs`
+            # (WP API-FIX-2, P2/S1).
+            shown = "<redacted>" if spec.secret else raw
             logger.error(
                 "settings: stored override for %r is %r, which no longer "
                 "passes validation; falling back to the env/default value "
                 "for this key. Clear it with PATCH /v1/settings (null) or "
                 "the sqlite3 escape hatch documented in api/README.md.",
-                key, raw,
+                key, shown,
             )
     return replace(base, **updates) if updates else base
 

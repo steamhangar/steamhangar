@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -485,5 +486,189 @@ func TestBackoffDelay_HugeAttemptDoesNotOverflowOrPanic(t *testing.T) {
 	d := backoffDelay(1_000_000, base, max, rng)
 	if d < 0 || d > max {
 		t.Fatalf("backoffDelay with a huge attempt count = %v, want in [0, %v]", d, max)
+	}
+}
+
+// --- B1 (WP AGENT-FIX-1): the client must NEVER follow a redirect. Before
+// this fix New() built an http.Client with no CheckRedirect, so net/http's
+// default policy applied: 301/302/303 turned the POST into a GET (body
+// dropped) at the Location target, 307/308 replayed the POST there - and in
+// every case the X-Api-Key header was copied onto the second hop (net/http
+// only strips Authorization/Cookie/WWW-Authenticate on a host change, not
+// custom headers). Measured with a two-server rig in review: hop 2 received
+// the key, and the operator saw a bare "HTTP 405". The fix returns
+// http.ErrUseLastResponse from CheckRedirect so the 3xx surfaces as-is, and
+// the APIError names the Location so the operator can fix --server-url.
+func TestReportInstalled_NeverFollowsRedirectOrForwardsKey(t *testing.T) {
+	for _, code := range []int{301, 302, 303, 307, 308} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			var hop2Requests int32
+			hop2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&hop2Requests, 1)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"client_id":"test-pc","received":0,"added":[],"removed":[],"first_report":false}`))
+			}))
+			defer hop2.Close()
+
+			var hop1Requests int32
+			var hop1Method, hop1Key string
+			hop1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&hop1Requests, 1)
+				hop1Method = r.Method
+				hop1Key = r.Header.Get("X-Api-Key")
+				w.Header().Set("Location", hop2.URL+"/v1/agent/installed")
+				w.WriteHeader(code)
+			}))
+			defer hop1.Close()
+
+			c := New(hop1.URL, "secret-key", testBackoff())
+			_, err := c.ReportInstalled(context.Background(), testPayload())
+			if err == nil {
+				t.Fatalf("expected an error for a %d response", code)
+			}
+
+			if got := atomic.LoadInt32(&hop2Requests); got != 0 {
+				t.Fatalf("redirect target received %d request(s), want 0 - the client must not follow redirects", got)
+			}
+			if got := atomic.LoadInt32(&hop1Requests); got != 1 {
+				t.Errorf("origin received %d request(s), want exactly 1 (3xx is not retried)", got)
+			}
+			if hop1Method != http.MethodPost || hop1Key != "secret-key" {
+				t.Errorf("origin saw method=%q key=%q, want POST with the configured key", hop1Method, hop1Key)
+			}
+
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("error = %v (%T), want *APIError", err, err)
+			}
+			if apiErr.StatusCode != code {
+				t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, code)
+			}
+			wantLocation := hop2.URL + "/v1/agent/installed"
+			if apiErr.Location != wantLocation {
+				t.Errorf("Location = %q, want %q", apiErr.Location, wantLocation)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "HTTP "+strconv.Itoa(code)) || !strings.Contains(msg, wantLocation) || !strings.Contains(msg, "--server-url") {
+				t.Errorf("error = %q, want it to name the status, the Location, and the --server-url hint", msg)
+			}
+		})
+	}
+}
+
+// A 3xx WITHOUT a Location header (malformed reverse-proxy answer) must
+// still be an APIError naming the status, just with no redirect hint.
+func TestReportInstalled_RedirectWithoutLocationIsAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultipleChoices)
+		_, _ = w.Write([]byte(`pick one`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "key", testBackoff())
+	_, err := c.ReportInstalled(context.Background(), testPayload())
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v (%T), want *APIError", err, err)
+	}
+	if apiErr.StatusCode != http.StatusMultipleChoices || apiErr.Location != "" {
+		t.Errorf("APIError = %+v, want status 300 and an empty Location", apiErr)
+	}
+	if strings.Contains(err.Error(), "redirected to") {
+		t.Errorf("error = %q, must not claim a redirect target it does not have", err.Error())
+	}
+}
+
+// WP AGENT-FIX-1 S1: net/http masks only the password of a userinfo URL in
+// *url.Error, so the username used to reach the log line. New strips the
+// userinfo from the stored base URL; neither part may appear in the error.
+func TestReportInstalled_NetworkErrorDoesNotLeakURLUserinfo(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve a port: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	c := New("http://USER-CANARY:PASS-CANARY@"+addr, "key", testBackoff(), WithMaxRetries(0))
+	_, err = c.ReportInstalled(context.Background(), testPayload())
+	if err == nil {
+		t.Fatal("expected a connection error")
+	}
+	if msg := err.Error(); strings.Contains(msg, "USER-CANARY") || strings.Contains(msg, "PASS-CANARY") {
+		t.Fatalf("server URL userinfo leaked into the error: %s", msg)
+	}
+}
+
+// The stripped userinfo is still honored: it travels as Basic auth.
+func TestReportInstalled_URLUserinfoIsSentAsBasicAuth(t *testing.T) {
+	var gotUser, gotPass string
+	var ok bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser, gotPass, ok = r.BasicAuth()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"client_id":"pc","received":0}`))
+	}))
+	defer srv.Close()
+
+	base := strings.Replace(srv.URL, "http://", "http://alice:s3cret@", 1)
+	c := New(base, "key", testBackoff(), WithMaxRetries(0))
+	if _, err := c.ReportInstalled(context.Background(), testPayload()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok || gotUser != "alice" || gotPass != "s3cret" {
+		t.Errorf("basic auth = (%q, %q, %v), want (alice, s3cret, true)", gotUser, gotPass, ok)
+	}
+}
+
+// WP SEC-FIX-2 (N2): the response body is server-controlled and ends up in
+// the error text (and so in the operator's terminal and logs). ESC and CR
+// must arrive escaped, never raw: a raw ESC starts a terminal escape
+// sequence, a raw CR lets the server overwrite the visible log line.
+func TestReportInstalled_ErrorBodyControlCharsAreEscaped(t *testing.T) {
+	for _, code := range []int{http.StatusUnprocessableEntity, http.StatusFound} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if code == http.StatusFound {
+					w.Header().Set("Location", "/elsewhere")
+				}
+				w.WriteHeader(code)
+				_, _ = w.Write([]byte("bad\x1b[2J\rFAKE LOG LINE\nnext"))
+			}))
+			defer srv.Close()
+
+			c := New(srv.URL, "key", testBackoff())
+			_, err := c.ReportInstalled(context.Background(), testPayload())
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("error = %v (%T), want *APIError", err, err)
+			}
+			msg := err.Error()
+			for _, raw := range []string{"\x1b", "\r", "\n"} {
+				if strings.Contains(msg, raw) || strings.Contains(apiErr.Body, raw) {
+					t.Errorf("error = %q contains a raw %q", msg, raw)
+				}
+			}
+			if !strings.Contains(msg, `bad\x1b[2J\rFAKE LOG LINE\nnext`) {
+				t.Errorf("error = %q, want the body with visible escapes", msg)
+			}
+		})
+	}
+}
+
+func TestSanitizeForLog(t *testing.T) {
+	cases := map[string]string{
+		"plain ascii":            "plain ascii",
+		"umlaut ä kept":          "umlaut ä kept",
+		"esc\x1b[31m":            `esc\x1b[31m`,
+		"cr\rlf\ntab\t":          `cr\rlf\ntab\t`,
+		"del\x7f c1\u009b":       `del\x7f c1\u009b`,
+		"cut rune \xc3":          "cut rune �",
+		"https://h.example/\x1b": `https://h.example/\x1b`,
+	}
+	for in, want := range cases {
+		if got := sanitizeForLog(in); got != want {
+			t.Errorf("sanitizeForLog(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

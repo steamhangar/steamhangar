@@ -228,6 +228,14 @@ STOP_FAILURE_REASONS = (FAILURE_CANCELLED, FAILURE_PAUSED)
 #: ignored — an unrecognized request must not silently kill a download.
 _STOP_REASONS = {"cancel": FAILURE_CANCELLED, "pause": FAILURE_PAUSED}
 
+#: Default wording appended to an ``'aborted'`` result — true for the
+#: in-process (subprocess-mode) caller, whose ``should_abort`` is vault-api's
+#: own stop event. Queue mode passes its own (WP API-FIX-1, P4): there the
+#: event belongs to the separate ``prefill_runner`` process, and a log line
+#: blaming vault-api's shutdown for a runner SIGTERM sent operators to the
+#: wrong container.
+ABORT_REASON_VAULT_API = "vault-api is shutting down"
+
 
 def run_prefill(
     appid: int,
@@ -236,13 +244,27 @@ def run_prefill(
     should_abort: Callable[[], bool] | None = None,
     use_force: bool = True,
     stop_request: Callable[[], str | None] | None = None,
+    abort_reason: str = ABORT_REASON_VAULT_API,
 ) -> PrefillResult:
     """Run SteamPrefill for one appid. Never raises for a prefill failure.
 
-    ``should_abort`` is polled while waiting; when it returns True (vault-api is
-    shutting down) the subprocess is terminated and the result is a failure with
-    reason ``'aborted'``. Without that, ``docker stop`` would hang until the
-    prefill finished or the runtime SIGKILLed the container.
+    ``should_abort`` is polled while waiting; when it returns True (the
+    calling process is shutting down) the subprocess is terminated and the
+    result is a failure with reason ``'aborted'``. Without that, ``docker
+    stop`` would hang until the prefill finished or the runtime SIGKILLed the
+    container. ``abort_reason`` is the human sentence recorded with that
+    outcome — it names WHOSE shutdown it was, which differs between the two
+    processes that call this function (see ``ABORT_REASON_VAULT_API``).
+
+    **The callbacks may raise, and the child is reaped anyway (WP API-FIX-1,
+    P2).** ``stop_request`` in queue mode reads the shared database on
+    every tick; a ``sqlite3.Error`` escaping it used to unwind
+    ``_wait_for_process`` past the terminate/wait step, leaving SteamPrefill
+    running unreaped behind a runner that had already given up on it.
+    ``_wait_for_process`` now stops the child before re-raising ANY exception
+    from the wait loop — the exception still propagates (it is a bug or an
+    infrastructure failure, not a prefill outcome), but never with a live
+    orphan behind it.
 
     ``stop_request`` (WP 3.12) is polled on the same tick and answers "did an
     operator ask for something?" — ``'cancel'``, ``'pause'`` or ``None``. Both
@@ -344,7 +366,7 @@ def run_prefill(
         if outcome == "aborted":
             return PrefillResult(
                 False, "aborted", exit_code,
-                output + "\n[vault-api] Aborted: vault-api is shutting down.",
+                output + f"\n[vault-api] Aborted: {abort_reason}.",
             )
         if outcome == "cancelled":
             return PrefillResult(
@@ -400,25 +422,38 @@ def _wait_for_process(
     so the job keeps its real outcome and the worker only notes in the log that
     the request arrived too late. Rewriting a finished download as ``cancelled``
     would throw away the mapping/manifest work it earned.
+
+    **Any exception out of the loop stops the child first (WP API-FIX-1,
+    P2).** ``should_abort``/``stop_request`` are caller-supplied and may
+    raise (queue mode's ``stop_request`` talks to SQLite); an exception is
+    re-raised unchanged, but only after ``_stop_process`` has terminated and
+    reaped the subprocess — the same "never an orphan SteamPrefill" promise
+    the pause path already makes. A child that already exited is left alone
+    (checked with ``poll()`` first, so nothing signals a reaped pid).
     """
     deadline = time.monotonic() + timeout_seconds
-    while True:
-        exit_code = process.poll()
-        if exit_code is not None:
-            return "exited", exit_code
-        if should_abort is not None and should_abort():
-            return "aborted", _stop_process(process)
-        if stop_request is not None:
-            reason = _STOP_REASONS.get(stop_request() or "")
-            if reason is not None:
-                # _stop_process() terminates and WAITS (then kills and waits
-                # again), so by the time this returns the child is reaped —
-                # which is what makes "a paused job never has an orphan
-                # SteamPrefill behind it" true rather than hopeful.
-                return reason, _stop_process(process)
-        if time.monotonic() >= deadline:
-            return "timeout", _stop_process(process)
-        time.sleep(_POLL_INTERVAL_SECONDS)
+    try:
+        while True:
+            exit_code = process.poll()
+            if exit_code is not None:
+                return "exited", exit_code
+            if should_abort is not None and should_abort():
+                return "aborted", _stop_process(process)
+            if stop_request is not None:
+                reason = _STOP_REASONS.get(stop_request() or "")
+                if reason is not None:
+                    # _stop_process() terminates and WAITS (then kills and
+                    # waits again), so by the time this returns the child is
+                    # reaped — which is what makes "a paused job never has an
+                    # orphan SteamPrefill behind it" true rather than hopeful.
+                    return reason, _stop_process(process)
+            if time.monotonic() >= deadline:
+                return "timeout", _stop_process(process)
+            time.sleep(_POLL_INTERVAL_SECONDS)
+    except BaseException:
+        if process.poll() is None:
+            _stop_process(process)
+        raise
 
 
 def _stop_process(process: "subprocess.Popen[str]") -> int | None:

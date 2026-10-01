@@ -38,6 +38,7 @@ import dev.steamvault.app.demo.DemoState
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.profile.buildConnectivityProfile
+import dev.steamvault.app.net.steam.PendingLoginState
 import dev.steamvault.app.net.steam.SteamOpenIdConfig
 import dev.steamvault.app.notifications.NotificationRouting
 import dev.steamvault.app.repo.SteamIdentityRepository
@@ -107,16 +108,28 @@ class MainActivity : ComponentActivity() {
      * OpenID sign-in, unlike library fetching, is reachable during
      * onboarding, before any connection exists), but the lambda below
      * re-reads the field every time it is invoked, same "read fresh"
-     * pattern [refreshVaultApiClient]'s own `apiKeyProvider` lambda uses. */
+     * pattern [refreshVaultApiClient]'s own `apiKeyProvider` lambda uses.
+     *
+     * WP APP-FIX-1 (P1): this repository is per-ACTIVITY-instance (a `by
+     * lazy` field on an Activity is gone the moment the Activity is
+     * recreated -- rotation, or the OS reclaiming it while the Custom Tab
+     * is in front), so the pending OpenID `state` it checks callbacks
+     * against is handed in from [PROCESS_PENDING_LOGIN_STATE], the one
+     * holder that outlives recreation. See that constant's kdoc. */
     private val identityRepository: SteamIdentityRepository by lazy {
-        SteamIdentityRepositoryImpl(credentialStore, vaultApiClientProvider = { vaultApiClientState })
+        SteamIdentityRepositoryImpl(
+            credentialStore,
+            vaultApiClientProvider = { vaultApiClientState },
+            pendingLoginState = PROCESS_PENDING_LOGIN_STATE,
+        )
     }
     private val libraryPreferences by lazy { SharedPreferencesLibraryPreferences(applicationContext) }
 
-    /** Long-lived for the whole app process (same category as
-     * [identityRepository]/[credentialStore]) -- `onNewIntent` needs a
-     * stable reference to route a Steam OpenID callback into while
-     * onboarding is the active screen. */
+    /** Long-lived for this Activity INSTANCE (same category as
+     * [identityRepository]/[credentialStore] -- not the process: a
+     * recreated Activity builds a fresh one, WP APP-FIX-1 P1) --
+     * `onNewIntent` needs a stable reference to route a Steam OpenID
+     * callback into while onboarding is the active screen. */
     private val onboardingController: OnboardingController by lazy {
         OnboardingController(credentialStore, identityRepository, AndroidOnboardingStrings(resources))
     }
@@ -490,12 +503,30 @@ class MainActivity : ComponentActivity() {
      * (a plain extra, see [handleNotificationTap]). Neither carries the
      * other's payload, so the two checks are independent -- a notification
      * Intent has no `dataString` at all and falls through the first check
-     * immediately. */
+     * immediately.
+     *
+     * WP APP-FIX-1 (S2): a consumed OpenID callback is STRIPPED from the
+     * Intent (`intent.data = null`) once it has been read, because the
+     * Activity's current Intent is re-delivered to `onCreate` on a
+     * configuration-change recreation (rotation) -- without this, the same
+     * callback URL would be re-processed after a rotation. Since WP
+     * SEC-FIX-2 (N1) `PendingLoginState.consume()` only clears on a MATCHING
+     * callback, so a replayed (already consumed) one no longer burns the
+     * next pending attempt -- it is simply rejected and leaves any new
+     * pending state alone. The strip still saves a pointless second
+     * verification round-trip and a spurious error shown to the user after
+     * every rotation. The same applies to a notification tap's extras, see
+     * [handleNotificationTap]. After process death the strip does not
+     * survive: Android hands back the ORIGINAL launch Intent, which is
+     * harmless -- the process-scoped pending state is empty then, and a
+     * callback (singleTask) arrives via `onNewIntent`, not the launch
+     * Intent. */
     private fun handleIntent(intent: Intent?) {
         handleNotificationTap(intent)
 
         val data = intent?.dataString ?: return
         if (!data.startsWith(SteamOpenIdConfig.RETURN_TO)) return
+        intent.data = null
 
         lifecycleScope.launch {
             val settings = settingsControllerState
@@ -517,13 +548,14 @@ class MainActivity : ComponentActivity() {
                     // Review fix (N2): neither screen is currently active to
                     // route this into (e.g. the connection was disconnected
                     // between launching the Custom Tab and the redirect
-                    // arriving) -- still consume the pending login state
-                    // directly through the repository, ignoring the result,
-                    // so a dropped/unroutable callback cannot leave
-                    // PendingLoginState holding a value forever. This is
-                    // what makes "single-use" literally true regardless of
-                    // which screen happens to be showing when the redirect
-                    // lands, not just when a controller is listening.
+                    // arriving) -- still hand the callback to the repository
+                    // directly, ignoring the result. Since WP SEC-FIX-2 (N1)
+                    // this clears PendingLoginState only when the callback
+                    // MATCHES the pending attempt (so a genuine sign-in still
+                    // completes single-use regardless of which screen is
+                    // showing); a mismatched or fake callback leaves the
+                    // pending state untouched until the next start()
+                    // replaces it.
                     //
                     // WP APP-DEMO residual (S1, not fixed -- documented):
                     // this still calls SteamIdentityRepository.completeLogin,
@@ -552,13 +584,19 @@ class MainActivity : ComponentActivity() {
      * see that object's kdoc). Ignored while onboarding is showing --
      * there is no bottom nav to switch yet, and onboarding's own completion
      * flow already lands on [Destination.LIBRARY] via [refreshVaultApiClient].
-     * An unrecognized/missing extra value is a silent no-op (`enumValueOf`
-     * throwing is caught defensively -- this Intent could in principle be
-     * replayed by anything targeting this exported... no, this activity is
-     * `exported="true"` only for its two intent-filters, but a stale
-     * `PendingIntent` from a previous app version's differently-named enum
-     * constant is a real, if unlikely, forward-compat edge case worth not
-     * crashing on).
+     * An unrecognized/missing extra value is a silent no-op (`valueOf`
+     * throwing is caught defensively: this Activity is `exported="true"`,
+     * so any app on the device can send it an Intent carrying an arbitrary
+     * string under this extra's key, and a stale `PendingIntent` from a
+     * previous app version's differently-named enum constant is a real, if
+     * unlikely, forward-compat edge case -- neither is worth crashing on).
+     *
+     * WP APP-FIX-1 (S2): both extras are REMOVED from the Intent once
+     * consumed, for the same reason [handleIntent] strips a consumed OpenID
+     * callback -- the Activity's current Intent is re-delivered on every
+     * recreation, and re-applying a stale tap would yank the user back to
+     * the notification's destination (or re-open the clients sheet) after
+     * a rotation they made minutes later.
      *
      * WP 4b.10: [NotificationRouting.EXTRA_OPEN_CLIENTS_SHEET] is checked
      * independently of [NotificationRouting.EXTRA_DESTINATION] -- a bypass
@@ -573,6 +611,7 @@ class MainActivity : ComponentActivity() {
         if (intent == null || showOnboarding) return
 
         intent.getStringExtra(NotificationRouting.EXTRA_DESTINATION)?.let { destinationName ->
+            intent.removeExtra(NotificationRouting.EXTRA_DESTINATION)
             try {
                 destination = Destination.valueOf(destinationName)
             } catch (_: IllegalArgumentException) {
@@ -581,6 +620,7 @@ class MainActivity : ComponentActivity() {
         }
 
         if (intent.getBooleanExtra(NotificationRouting.EXTRA_OPEN_CLIENTS_SHEET, false)) {
+            intent.removeExtra(NotificationRouting.EXTRA_OPEN_CLIENTS_SHEET)
             clientsControllerState?.open(lifecycleScope)
         }
     }
@@ -597,6 +637,24 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** WP APP-DEMO review round 2 (S2) -- see [onSaveInstanceState]/[onCreate]. */
         private const val KEY_WAS_IN_DEMO_MODE = "dev.steamvault.app.WAS_IN_DEMO_MODE"
+
+        /**
+         * WP APP-FIX-1 (P1): the pending Steam OpenID `state` holder lives
+         * here, at PROCESS scope, not on the Activity instance. The login
+         * round trip leaves this Activity for a Custom Tab, and Android may
+         * recreate the Activity in the meantime (rotation while the browser
+         * is in front; the OS reclaiming it) -- a per-instance holder would
+         * then be empty when the callback arrives and every such sign-in
+         * would fail "expired" once for no user-visible reason. This is the
+         * smallest wiring that makes `SteamIdentityRepositoryImpl`'s
+         * "outlives Activity recreation, not process death" kdoc TRUE: a
+         * companion `val` is created once per process, is never persisted
+         * (process death still fails closed, by design -- the state is a
+         * one-shot secret and belongs in no Bundle or file), and there is no
+         * other process-scoped wiring in this app to mirror
+         * (`VaultApplication` only runs idempotent `ensure*` calls).
+         */
+        private val PROCESS_PENDING_LOGIN_STATE = PendingLoginState()
     }
 }
 

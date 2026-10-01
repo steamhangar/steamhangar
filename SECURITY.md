@@ -4,7 +4,7 @@
 
 SteamHangar has no tagged releases yet (see `docs/PROJECT_PLAN.md` §7 Phase 5 —
 publishing to a registry with version tags is still gated on the user's
-go-ahead (docs/PROJECT_PLAN.md §11, WP 5.5). Until the first tagged release,
+go-ahead, `docs/PROJECT_PLAN.md` §11, WP 5.5). Until the first tagged release,
 security reports are accepted against the current state of the `main`
 branch, and fixes land there. Once tagged releases exist, only the most
 recent tag will receive security fixes — this is a single-maintainer
@@ -33,6 +33,18 @@ Do not open a public GitHub issue for a security report — see
 by-design limitations that are *not* new findings (in particular:
 `vault-core` has no authentication and is not meant to have any; that is a
 documented trust-boundary decision, not a bug to report).
+
+**Where your Steam credentials go.** ADR-0004
+(`docs/adr/0004-steam-credentials-never-touch-steamvault.md`) promised that
+the community release would document, in this file, both credential flows
+and every path data takes out of your LAN. That material lives in the
+threat model instead, where it can be checked against the code in one
+place: `docs/security/threat-model.md` §3 ("Credentials — ADR-0004's claim,
+checked against the code") for where Steam credentials and the relay's Web
+API key do and do not live, and §5 ("Outbound data flows — what leaves the
+LAN") for every outbound connection the stack makes. Read those two
+sections before reporting a credential-handling finding — they also name
+the claims the document could not substantiate from code alone.
 
 Please include:
 

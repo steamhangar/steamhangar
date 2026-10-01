@@ -23,7 +23,7 @@
 
 [Unit]
 Description=SteamHangar vault-agent: report installed Steam apps to vault-api
-Documentation=https://github.com/Riviera822/steamhangar/blob/main/agent/README.md
+Documentation=https://github.com/steamhangar/steamhangar/blob/main/agent/README.md
 # No After=/Wants=network-online.target: that target is a system-manager
 # concept and is not reliably present/orderable against from a systemd
 # USER unit (no system-level network-online service to depend on in this
@@ -46,9 +46,10 @@ EnvironmentFile=%h/.config/vault-agent/env
 # to a sanitized version of the local hostname if never set — see
 # go/agentconfig's defaultClientID and agent/README.md's "Client identity
 # and renaming" section for exactly what that means and why renaming later
-# is not free (a new client id is a NEW identity server-side, and the OLD
-# one keeps showing up in GET /v1/clients forever — there is no delete
-# endpoint yet). Uncomment the line below, OR add the same key to
+# is not free (a new client id is a NEW identity server-side; the OLD one
+# keeps showing up in GET /v1/clients until an operator removes it with
+# DELETE /v1/clients/{client_id}, WP AG-1 — not a ban, it reappears if it
+# reports again). Uncomment the line below, OR add the same key to
 # %h/.config/vault-agent/env instead — but not for the same reason as a
 # flag-vs-env choice on the agent's own command line: if BOTH set
 # VAULT_AGENT_CLIENT_ID, systemd.exec(5) is explicit that "settings from

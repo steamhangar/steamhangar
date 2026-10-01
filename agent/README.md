@@ -155,8 +155,12 @@ gitignored.
 AGENT-BIN, `.github/workflows/publish.yml`'s `agent-binaries` job runs
 exactly this cross-compile matrix on every `v*` tag and attaches the three
 binaries — named `vault-agent-<tag>-<os>-<arch>` (`.exe` on Windows), e.g.
-`vault-agent-v1.2.3-windows-amd64.exe` — plus a `SHA256SUMS` file to that
-tag's GitHub Release. Building it yourself from this section is only
+`vault-agent-v1.2.3-windows-amd64.exe` — to that tag's GitHub Release,
+together with the packaging files (`install-task.ps1`,
+`uninstall-task.ps1`, `run-vault-agent.ps1`, `vault-agent-report.service`,
+`vault-agent-report.timer`) and one `SHA256SUMS` file covering all of
+them (`sha256sum -c --ignore-missing SHA256SUMS`, or `Get-FileHash -Algorithm SHA256` on
+Windows). Building it yourself from this section is only
 needed for a version that hasn't been tagged yet, or if you'd rather not
 trust a prebuilt binary. See "Windows Scheduled Task (WP 2.6)" below for
 what to do with the downloaded `.exe` (including the SmartScreen note).
@@ -297,10 +301,14 @@ reproduced here (fixture/privacy policy, same as WP 2.1b).
   reporter → vault-api) with no error at all. `readFileStripBOM` now
   calls `utf8.Valid` explicitly before returning.
 - **`ParseError` carries a `Cause error` field and implements
-  `Unwrap()`.** So callers can use `errors.Is`/`errors.As` — e.g.
-  `errors.Is(err, fs.ErrNotExist)` in WP 2.2's reporter to tell "the
-  manifest file vanished between listing and reading it" apart from "the
-  manifest is corrupt", without string-matching the error message.
+  `Unwrap()`.** So callers can use `errors.Is`/`errors.As` — and
+  `Discover` itself does: `errors.Is(err, fs.ErrNotExist)` on a manifest
+  read tells "the manifest file vanished between listing and reading it"
+  (Steam mid-uninstall/move, a dangling link) apart from "the manifest is
+  corrupt", and the two get distinct warning texts (`... vanished between
+  listing and reading it ...` vs `skipping corrupt manifest ...`) without
+  string-matching the error message (WP AGENT-FIX-1 N2, pinned by
+  `TestDiscoverWarnsVanishedManifestDistinctlyFromCorrupt`).
 
 **Real-machine validation (WP 2.1b):** `DiscoverInstalled` was run from
 WSL against the real `/mnt/c/steam` install (read-only — the install
@@ -319,9 +327,11 @@ here or anywhere in the repo (fixture policy below).
 (69 cases across 4 files, `pytest`-parametrized cases counted
 individually) has a Go counterpart in `go/acf/*_test.go` using
 `t.Run` subtests where Python used `@pytest.mark.parametrize`, so the
-per-case count matches 1:1 (`go test ./... -v` reports 81 leaf test
-cases total: the 69 ported plus 12 Go-only). The 12 Go-only tests pin
-behavior the Python corpus implies but doesn't separately exercise:
+per-case count matches 1:1 (`go test ./acf -v` reports 88 leaf test
+cases: the 69 ported plus 19 Go-only — measured with `go test -json`,
+counting every pass/skip/fail event that has no sub-test beneath it). The
+19 Go-only tests pin behavior the Python corpus implies but doesn't
+separately exercise:
 - 3 depth-cap boundary tests (nesting depth exactly at the 100-level
   cap, one over it, and 1500);
 - 2 `filepath.Glob`-vs-`os.ReadDir` regression tests (a library path
@@ -333,7 +343,13 @@ behavior the Python corpus implies but doesn't separately exercise:
   plus 1 discover-level test proving the invalid-UTF-8 file is skipped
   with a warning, not silently mangled into the result;
 - 3 integer-overflow divergence tests (one per affected field — see
-  below).
+  below);
+- 7 WP AGENT-FIX-1 tests: 3 for `Discover`'s library counters
+  (`LibrariesRead`/`LibrariesProbed`, see "vault-agent CLI" below), 2 for
+  `libraryKey` (path normalisation for duplicate-library detection, both
+  GOOS branches), 1 proving a library listed twice with a trailing
+  separator is read once, and 1 for the vanished-vs-corrupt manifest
+  warning distinction above.
 
 ### Known divergences from the Python spec
 
@@ -418,6 +434,7 @@ over its env var equivalent.
 | `--library-root` | `VAULT_AGENT_LIBRARY_ROOT`   | no       | `C:\Program Files (x86)\Steam` (Windows) / `~/.local/share/Steam` (else) |
 | `--interval`     | `VAULT_AGENT_REPORT_INTERVAL`| no       | `30m` (only consulted with `--loop`)                    |
 | `--loop`         | —                            | no       | off (one-shot)                                          |
+| `--allow-empty`  | —                            | no       | off — post an empty list even when NO library under `--library-root` was readable (see below) |
 
 Why no config file: a file holding `VAULT_AGENT_API_KEY` needs its own
 permission story and its own "never commit this" warning that this project
@@ -463,6 +480,34 @@ problem found (not just the first one) is collected into one error report,
 printed to stderr, and the process exits **2** without attempting any
 discovery or network call.
 
+**A library root where Steam is not found fails loudly too (WP
+AGENT-FIX-1 S1).** `go/acf.Discover` reports how many libraries it could
+actually list (`LibrariesRead`) alongside the app list. If that is
+**zero** — no `steamapps/` directory readable under `--library-root`, nor
+under any path `libraryfolders.vdf` names — `report` logs
+`report refused ... probed="..." hint="..."` naming every path it checked
+and the `--library-root`/`VAULT_AGENT_LIBRARY_ROOT` fix, posts **nothing**,
+and exits **1**. Before this, a wrong library root (a typo, Steam installed
+on `D:`, a Linux box where none of the probed paths exist) produced a
+legitimate-looking `{"appids": []}` snapshot: vault-api diffed every
+previously reported game as removed (`REMOVED N apps` in its log), the
+client's badges vanished and its titles left the prefill set — silently,
+with exit code 0. A library that IS readable but has nothing installed is
+**not** this case: `LibrariesRead` is 1, and the empty report is posted as
+always (ADR-0002 full-list semantics). `--allow-empty` restores the old
+behaviour explicitly for the rare case where posting "nothing" from a
+machine with no Steam library is what you mean (Steam uninstalled, agent
+deliberately left running). Pinned by
+`TestRun_OneShot_ZeroReadableLibrariesRefusesToPost` (no request reaches
+the server, exit 1, the probed path and both hints in the log) and
+`TestRun_OneShot_AllowEmptyPostsDespiteZeroReadableLibraries`. The Windows
+default (`C:\Program Files (x86)\Steam`) is still a literal with no
+existence check and no registry lookup; reading Steam's `SteamPath`
+value from `HKCU\Software\Valve\Steam` is the intended post-release default —
+until then `install-task.ps1` checks the default for a `steamapps\`
+directory at install time and warns loudly (see "Windows Scheduled Task"
+below).
+
 ### Client identity and renaming (WP AG-0)
 
 `client_id` is not a cosmetic label — vault-api treats it as a **persisted
@@ -476,10 +521,13 @@ That has a direct, honest consequence for renaming:
   vault-api see a **brand-new client**, not a renamed one. The new id
   starts its own report history from scratch; it does not inherit
   anything from the old one.
-- **The old id's row does not go away.** `GET /v1/clients` is read-only —
-  there is no delete/rename endpoint today — so the old client id keeps
-  appearing in that list indefinitely, showing whatever its last report
-  was.
+- **The old id's row does not go away by itself.** There is no rename
+  endpoint, so the old client id keeps appearing in `GET /v1/clients`,
+  showing whatever its last report was, until an operator removes it with
+  `DELETE /v1/clients/{client_id}` (WP AG-1, see `api/README.md`'s
+  "Deleting a client"). That delete is **not a ban**: a client that
+  reports again under the deleted id simply reappears with a fresh diff
+  chain, as if it were a brand-new machine.
 - **It does stop being acted on**, though: vault-api's scheduler excludes
   a client from its prefill-target sweep once that client's newest report
   is older than the configured staleness window
@@ -490,18 +538,18 @@ That has a direct, honest consequence for renaming:
 **What this means in practice:** treat `client_id` as a name you set once
 and keep — a bare-metal reinstall of Windows/Steam is fine (games are
 rediscovered under the same library, same client id, same history), but
-renaming the client id on a whim leaves a ghost row behind that nothing in
-this project can currently clean up. Removing it is a known gap; a
-`DELETE` endpoint for stale client rows (touching `api/`) is the planned
-follow-up package — **AG-1** — not yet implemented as of this writing.
-Nothing here promises cleanup that does not exist.
+renaming the client id on a whim leaves a ghost row behind that has to be
+cleaned up by hand: `curl -X DELETE -H "X-Api-Key: ..."
+https://<vault-api>/v1/clients/<old-id>` (`204` on success, `404` if the
+id has no rows; shipped in **AG-1**). The agent itself has no delete
+command — it stays write-only towards `/v1/agent/installed` by design.
 
 ### Exit codes
 
 | Code | Meaning |
 |------|---------|
 | `0`  | the report was sent and accepted (one-shot); or `--loop` exited cleanly on SIGTERM/CTRL-C; or `-h`/`--help` was requested |
-| `1`  | a runtime failure: local report validation failed (should be unreachable in practice — acf's own parser already enforces the appid grammar — but checked, not assumed), or the HTTP client gave up (network error after retries, `401`, `422`, malformed response, ...) |
+| `1`  | a runtime failure: no readable Steam library under `--library-root` (refused without `--allow-empty`, see "Configuration" above), local report validation failed (should be unreachable in practice — acf's own parser already enforces the appid grammar — but checked, not assumed), or the HTTP client gave up (network error after retries, `401`, `422`, a `3xx` redirect, malformed response, ...) |
 | `2`  | a configuration/usage error (missing/invalid flag or env var, no subcommand given) |
 
 In `--loop` mode, a failed report is logged and the loop keeps going —
@@ -531,6 +579,22 @@ that client's previous one to derive `added`/`removed` — see
 contract, and ADR-0002 for why removals are surfaced there but never acted
 on automatically.
 
+**Removable / unmounted libraries (known behaviour, not a bug fix):** a
+library that `libraryfolders.vdf` lists but that is absent on disk right
+now — an external drive unplugged, a network share not mounted — is
+skipped with a warning (`library path X has no steamapps directory,
+skipping`), and its games are therefore **absent from that report**.
+vault-api reads that as those titles having been uninstalled and lists
+them under `removed` until the drive is back and the next report includes
+them again. Because removals are only ever *surfaced* (ADR-0002), nothing
+is deleted from the cache by this; the titles may drop out of the prefill
+target set for as long as the drive is away. As long as at least one
+library was readable the report is still posted (the machine has Steam,
+that library just is not here right now); only the all-libraries-
+unreadable case is refused (see "Configuration" above). Whether an
+absent-but-listed library should instead be carried over from the last
+report is a product decision deliberately deferred past the release.
+
 ### Retry behavior (`go/client`)
 
 Per-attempt timeout defaults to 15s; connection errors (refused, reset,
@@ -553,6 +617,19 @@ actively harmful. The backoff sleep itself is cancellable mid-wait (not
 just checked before it starts) — canceling the context passed to
 `ReportInstalled` (e.g. on SIGTERM in `--loop` mode) interrupts a pending
 backoff sleep immediately rather than sitting through it.
+
+**Redirects are never followed** (WP AGENT-FIX-1 B1): the client sets
+`CheckRedirect` to `http.ErrUseLastResponse`, so a `3xx` from a reverse
+proxy (an http→https upgrade, a moved hostname) surfaces as a non-retried
+error naming the status **and** the `Location` — `server returned HTTP 301
+redirected to https://…/v1/agent/installed; … set --server-url to that
+address` — instead of net/http's default behaviour, which would have
+forwarded `X-Api-Key` to whatever host the `Location` named and, on
+`301`/`302`/`303`, rewritten the `POST` into a body-less `GET` (the bare
+`HTTP 405` the pre-fix agent showed). Pinned by
+`TestReportInstalled_NeverFollowsRedirectOrForwardsKey`, a two-server rig
+asserting the redirect target receives zero requests for each of
+`301`/`302`/`303`/`307`/`308`.
 
 **Worst-case retry wall time** with the defaults above: 6 total attempts
 (1 initial + 5 retries), each up to the 15s per-attempt timeout, plus the
@@ -939,10 +1016,12 @@ the pre-existing Windows default already took (see that default's own
 doc comment). This is a deliberate choice, not an oversight: making the
 Linux default *harder-failing* than the Windows default for the exact
 same kind of guess would be an inconsistency with no real benefit,
-because `acf.DiscoverInstalled`'s own resilience contract already
-surfaces a missing library as a `Warning`, not silence, the moment
-`report` actually runs against it (see `main.go`'s
-`logger.Printf("discover warning=%q", ...)`). The probing primitive
+because the guess is caught one step later either way: `report` logs the
+`library root note=...` line at startup, and since WP AGENT-FIX-1 S1
+**refuses to post** when that guessed root (or any root) yields zero
+readable libraries — exit 1 with the probed paths and the
+`--library-root` hint, never a silent empty snapshot (see "vault-agent
+CLI" → "Configuration"). The probing primitive
 itself (`probeLinuxLibraryRoot`) is unit-tested in isolation for all four
 shapes: first-candidate-wins, second/third-wins-when-earlier-missing, and
 the none-exist case, which DOES return a descriptive error naming every
@@ -1373,6 +1452,51 @@ if a scheduled report silently isn't happening, check `vault-agent.log`
 and the Task Scheduler run history (see "Real-machine harness" below)
 instead of assuming a warning dialog is blocking it unattended.
 
+### Running the scripts: execution policy and mark-of-the-web
+
+The three `.ps1` files are not signed either, and the default
+`ExecutionPolicy` is `Restricted` on Windows client editions, `RemoteSigned`
+on Server editions — under either, an unsigned script carrying the download
+mark-of-the-web is refused, so double-clicking or `.\install-task.ps1`
+from a plain prompt is expected to fail with "running scripts is disabled
+on this system" / "is not digitally signed". Run the installer through an
+explicit, **per-process** bypass instead — this changes nothing machine-
+wide and needs no admin rights:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-task.ps1 `
+    -AgentPath $env:LOCALAPPDATA\VaultAgent\vault-agent.exe `
+    -ServerUrl http://100.64.0.5:8080 -ApiKeyFile $env:USERPROFILE\vault-key.txt
+Remove-Item $env:USERPROFILE\vault-key.txt
+```
+
+**Where to put the binary and the key file.** Put `vault-agent.exe` in
+`%LOCALAPPDATA%\VaultAgent\` (the same folder `install-task.ps1` uses
+as its default `-ConfigDir`), and the key file somewhere under your user
+profile, deleted once the install has run (the task never reads it again —
+the key is copied into the owner-only `env.txt`). The reason is the ACL a
+folder inherits: a folder you create directly under `C:\` (`C:\Tools`,
+`C:\secrets`) inherits `C:\`'s rules, which give every **Authenticated
+User** modify rights on its contents. Any other local account could then
+replace `vault-agent.exe`, which the scheduled task runs as you, or read
+the key file. Folders under your profile inherit an ACL that only you,
+SYSTEM and Administrators can use. `install-task.ps1` checks this with
+`Get-Acl` and prints a warning (it does not abort) when the binary or its
+folder is modifiable, or the key file readable, by Everyone,
+Authenticated Users or BUILTIN\Users.
+
+The scripts downloaded from the release carry the mark-of-the-web too;
+`Unblock-File .\install-task.ps1, .\uninstall-task.ps1,
+.\run-vault-agent.ps1` removes it once, after you have checked them
+against the release's `SHA256SUMS`, same as for the `.exe` above. **The installed task
+keeps working regardless of either setting:** `install-task.ps1`
+registers the action as `powershell.exe -NoProfile -NonInteractive
+-ExecutionPolicy Bypass -WindowStyle Hidden -File <ConfigDir>\run-vault-
+agent.ps1 ...` (see `$taskArgument` in the script), so the deployed copy
+of the wrapper runs under the same per-process bypass on every schedule,
+without you having to relax the user's or machine's policy. Use the same
+`-ExecutionPolicy Bypass -File` form for `uninstall-task.ps1`.
+
 ### Why `-LogonType Interactive`, not S4U
 
 Two Scheduled Task logon types need no stored password: **S4U** (runs
@@ -1501,6 +1625,17 @@ does not re-implement `go/agentconfig`'s sanitizing rules in PowerShell
 "Configuration" above) is the authoritative source for the id actually in
 use. See "Client identity and renaming" above for what changing it later
 does and does not do.
+
+The same summary states the **library root** situation (WP AGENT-FIX-1
+S1): given `-LibraryRoot`, it echoes the value; omitted, it checks whether
+vault-agent's Windows default `C:\Program Files (x86)\Steam` actually
+contains a `steamapps\` directory and, if not, prints a `WARNING` naming
+`-LibraryRoot` — the install still completes (Steam may be installed
+afterwards), but until the root is right every scheduled run will log
+`report refused` and exit 1 instead of posting an empty list (see
+"Configuration" above for why that refusal exists). No registry lookup is
+performed yet; `HKCU\Software\Valve\Steam\SteamPath` is the intended
+post-release default.
 
 plus the Scheduled Task itself (`VaultAgentReport` by default): one
 `-Once` trigger with `-RepetitionInterval` = `-IntervalMinutes` (default
@@ -1809,7 +1944,8 @@ degrades instead:
 |---|---|
 | Missing/corrupt `libraryfolders.vdf` | Warn, fall back to treating `libraryRoot` as the only library |
 | Missing/corrupt `appmanifest_*.acf` (incl. non-grammatical `appid`/`StateFlags`) | Warn, skip that file |
-| Library path listed but missing on disk | Warn, skip that library |
+| Library path listed but missing on disk | Warn, skip that library (`Discover` counts it as probed, not read; `report` refuses to post when **no** library was readable unless `--allow-empty` is given — see "vault-agent CLI" → "Configuration") |
+| Manifest listed by the directory scan but gone by the time it is read (dangling link, Steam mid-uninstall) | Warn with distinct "vanished between listing and reading it" wording (`errors.Is(err, fs.ErrNotExist)`), skip that file |
 | Duplicate appid across libraries | Warn, first occurrence wins |
 | Duplicate key at the same KeyValues nesting level (incl. a duplicated numbered library index) | Last occurrence silently wins (no warning — this is map-level parsing, not file discovery) |
 | Missing/non-grammatical `SizeOnDisk` | `SizeOnDisk` is `nil`, record still returned |

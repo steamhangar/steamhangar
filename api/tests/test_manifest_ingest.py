@@ -220,6 +220,35 @@ def test_ingest_respects_manifest_keep_retention(tmp_path: Path) -> None:
     assert remaining == ["441_3.bin"]
 
 
+def test_ingest_keep_retention_holds_when_every_archive_shares_one_mtime(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """WP API-FIX-2: the retention test above used to fail intermittently
+    because the three archives landed in one kernel clock tick (equal
+    st_mtime_ns) and prune order fell back to scandir order. Force the tie
+    outright: the just-ingested manifest must still be the one kept."""
+    import vault_api.manifest_archive as archive_module
+
+    monkeypatch.setattr(archive_module.time, "time_ns", lambda: 1_000_000_000)
+    cache_dir = tmp_path / "steamprefill-cache"
+    archive_dir = tmp_path / "archive"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=archive_dir, keep=1)
+
+    conn = _conn(settings.db_path)
+    try:
+        for manifest_id in (3, 2, 1):
+            for old in cache_dir.glob("440_440_441_*.bin"):
+                old.unlink()
+            _write_bin_file(
+                cache_dir, f"440_440_441_{manifest_id}.bin", depot_id=441, manifest_id=manifest_id
+            )
+            ingest_after_prefill(conn, appid=440, settings=settings)
+            remaining = sorted(p.name for p in archive_dir.glob("441_*.bin"))
+            assert remaining == [f"441_{manifest_id}.bin"]
+    finally:
+        conn.close()
+
+
 # -- parse-failure tolerance ---------------------------------------------------
 
 

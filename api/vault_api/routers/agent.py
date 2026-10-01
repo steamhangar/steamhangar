@@ -121,8 +121,15 @@ def report_installed_apps(
     ``X-Forwarded-For`` — vault-api is not behind a proxy in this design, and
     trusting a client-settable header for an identity key would let any agent
     claim any machine's cache traffic (or disclaim its own to dodge bypass
-    detection). ``request.client`` is ``None`` on some transports; the report
-    is stored anyway, with a NULL address.
+    detection). That "never" is only true because the shipped
+    ``api/Dockerfile`` starts uvicorn with ``--no-proxy-headers``
+    (WP API-FIX-2, N4): uvicorn's default is ``--proxy-headers`` ON, which
+    rewrites ``request.client`` from ``X-Forwarded-For`` for connections
+    from trusted hosts (``--forwarded-allow-ips``, default ``127.0.0.1``, so
+    any same-host reverse proxy or container-network hop would have been
+    enough). An operator who runs vault-api under their own uvicorn command
+    without that flag re-opens this. ``request.client`` is ``None`` on some
+    transports; the report is stored anyway, with a NULL address.
     """
     peer = request.client.host if request.client is not None else None
     with open_db() as conn:

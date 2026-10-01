@@ -124,14 +124,14 @@ flowchart LR
 
 | Component | Role |
 |---|---|
-| **vault-core** | nginx with `proxy_store` — the cache itself. Path-faithful depot storage, no LRU/eviction (deletion is explicit, by design). |
+| **vault-core** | nginx with `proxy_store` — the cache itself. Path-faithful depot storage, no LRU/eviction (deletion is explicit, by design). Optional upstream rate cap: one aggregate Steam → vault limit, divided across the requests in flight and by default lifted during the schedule window, while cache hits stay at LAN speed ([ADR-0015](docs/adr/0015-upstream-rate-cap.md), [`deploy/README.md`](deploy/README.md) "Upstream rate cap"). |
 | **vault-dns** | Optional bundled dnsmasq container for LANs with no existing DNS server. Not needed if you already run AdGuard Home, Pi-hole, dnsmasq, or Unbound. |
 | **vault-api** | FastAPI + SQLite control plane: depot→app mapping, per-game size/deletion, scheduler, manifest-based garbage collection, settings, webhooks. Hands prefill work off to vault-runner rather than running it itself, and — see "Your keys, and where they stop" below — has no direct route to the internet. |
 | **vault-runner** | Claims prefill jobs handed off by vault-api and actually runs [SteamPrefill](https://github.com/tpill90/steam-lancache-prefill) against the real Steam CDN. Splitting this out of vault-api is what makes the egress lock on vault-api possible: this is the one component that genuinely needs an ordinary route to the internet. |
 | **vault-proxy** | The egress lock: a filtering proxy that any outbound call from vault-api's container must pass through, refusing anything not on an allow-list. |
 | **vault-agent** | Small Go binary on each gaming PC/Steam Deck. Reports installed app IDs to vault-api — the reporting path is read-only, no control logic on the device. It also has an *opt-in* hosts-file mode that, only when explicitly invoked, writes a managed block into the local hosts file. |
-| **Web UI** | Browser single-page application (SPA) served directly by vault-api — no separate deploy step, works over the LAN or a VPN like Tailscale as soon as vault-api is reachable. Shipped: 680 automated tests. |
-| **Android app** | Kotlin/Compose app — the remote control for the hangar from "Wanting a game while you're away from home" above. Shipped: 578 automated tests, run so far only on the Java virtual machine (JVM) rather than a real device or emulator — see [Roadmap](#roadmap). |
+| **Web UI** | Browser single-page application (SPA) served directly by vault-api — no separate deploy step, works over the LAN or a VPN like Tailscale as soon as vault-api is reachable. Shipped with a CI-gated test suite (see [`web/tests/README.md`](web/tests/README.md); the CI run shows the count). |
+| **Android app** | Kotlin/Compose app — the remote control for the hangar from "Wanting a game while you're away from home" above. Shipped with a CI-gated test suite (see [`app/README.md`](app/README.md); the CI run shows the count) that has run so far only on the Java virtual machine (JVM) rather than a real device or emulator — see [Roadmap](#roadmap). |
 
 Full architecture details, the cache storage layout, and the API surface are
 in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) (§2–6). Design decisions
@@ -243,8 +243,9 @@ itself) — only prefill jobs are blocked, with an actionable error message.
   full per-game breakdown.
 
 Full deployment reference — volumes, backup, log rotation, the port-80/
-dedicated-IP story, security posture, and a 185-check verification script —
-lives in [`deploy/README.md`](deploy/README.md).
+dedicated-IP story, security posture, and the stack verification script
+(`deploy/tests/verify-stack.sh`) — lives in
+[`deploy/README.md`](deploy/README.md).
 
 ## Android app
 
@@ -273,13 +274,13 @@ holiday, and find it ready when you get back.
   the first tag is actually pushed, there is nothing there yet to download;
   build it yourself from source in the meantime, using that same README's
   release-signing section.
-- **One honest limitation up front.** The app has no offline or demo mode:
-  every screen before it can reach a configured vault shows a plain
-  "not connected" prompt rather than anything resembling a finished
-  product. That is also, plainly, why there are no in-repo screenshots of
-  the app yet — there is nothing meaningful to capture from an emulator with
-  no vault behind it, and real screenshots need an actual device against a
-  real vault.
+- **Looking at it without a vault.** The app has a demo mode, reached
+  through the skip link on the onboarding screen: screenshot-grade fixtures
+  with no account, no vault and no network, marked by a "DEMO MODE" banner
+  on every surface (see [`app/README.md`](app/README.md), "Demo mode"). What
+  is still missing are in-repo screenshots taken on a real device against a
+  real vault — the demo has so far only been exercised on the JVM and in
+  review, not photographed on hardware.
 
 <!--
 Uncomment once the two files below exist in docs/img/:
@@ -432,8 +433,8 @@ from.
 | 1 — vault-core + vault-api minimum viable product (MVP) | Cache core, API skeleton, prefill orchestration, size/deletion, Docker Compose | Done |
 | 2 — vault-agent | Windows + Linux/SteamOS PC listener, hosts-file mode, task/service packaging | Done |
 | 3 — Scheduler & update logic | Staleness detection, manifest-based garbage collection, job pause/cancel, per-client bypass detection, webhooks | Done |
-| 4a — Web UI | Browser single-page application served by vault-api | Done — 680 automated tests |
-| 4b — Android app | Kotlin/Compose app with system-VPN and public-domain connectivity profiles | Done — 578 automated tests (JVM-only; see Roadmap) |
+| 4a — Web UI | Browser single-page application served by vault-api | Done — CI-gated test suite |
+| 4b — Android app | Kotlin/Compose app with system-VPN and public-domain connectivity profiles | Done — CI-gated JVM test suite (no device run yet; see Roadmap) |
 | 5 — Community release | README, license, continuous integration, security policy & threat model | Nearly done — publication and announcement remain |
 
 ## Roadmap
@@ -448,21 +449,9 @@ otherwise:
   covers this); folding Tailscale's own userspace client directly into the
   app, so that separate app is no longer needed, is designed as an
   additive profile but not built.
-- **Instrumented Android tests.** All 578 Android tests run on the JVM;
-  none have run yet against a real device or emulator, including the
+- **Instrumented Android tests.** The whole Android suite runs on the JVM;
+  none of it has run yet against a real device or emulator, including the
   release-signing path.
-- **Download speed throttling, possibly time-dependent.** Nothing in the
-  stack limits how fast SteamHangar pulls from Steam today; the shipped
-  night window (03:00-07:00 local, [ADR-0014](docs/adr/0014-sweep-cached-and-auto-gc-default-on.md))
-  confines *when* the bulk downloads run, not *how fast*. Planned: a
-  bandwidth cap on the upstream (Steam → vault) direction — the WAN side
-  is the scarce resource; serving the LAN should stay at wire speed —
-  optionally varying by time of day (full speed inside the night window,
-  capped outside it, e.g. for a daytime "I want this game tonight"
-  prefill). Open design questions: whether SteamPrefill exposes a native
-  concurrency/rate knob or the limit belongs at the container level, and
-  how a cap interacts with the window scheduler. Until then, per-device
-  QoS on the router covers the same need without any code.
 - **The web UI's own still-open validation list:** real screen-reader
   testing, how cover art actually renders on a phone browser, and
   performance at a much larger library size than has been tested so far —

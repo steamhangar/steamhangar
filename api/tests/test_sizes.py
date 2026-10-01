@@ -363,3 +363,18 @@ def test_build_cache_summary_reports_exactly_the_snapshot_it_is_given(
         assert fresh.total_bytes == 100
     finally:
         conn.close()
+
+
+def test_scan_depot_signatures_ignores_non_ascii_digit_directory_names(tmp_path: Path) -> None:
+    """WP API-FIX-2, N1: ``str.isdigit()`` is True for superscripts and
+    Arabic-Indic digits; ``int("²")`` raises, which crashed the whole scan on
+    one odd directory name, and ``int("٤٤١")`` silently became 441."""
+    cache_root = tmp_path / "cache"
+    _write(cache_root / "depot" / "441" / "chunk" / "aa", b"1" * 20)
+    _write(cache_root / "depot" / "²" / "chunk" / "aa", b"1" * 5)
+    _write(cache_root / "depot" / "٤٤١" / "chunk" / "aa", b"1" * 7)
+
+    result = scan_depot_signatures(str(cache_root))
+
+    assert set(result) == {441}
+    assert result[441][:2] == (1, 20)

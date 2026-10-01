@@ -36,3 +36,11 @@ Go test suite consumes the same fixture corpus and it must survive the
 Python removal. Known deliberate Go deviations from the Python spec
 (stricter: invalid UTF-8 rejected, integer overflow rejected, ASCII-only
 digit keys) are documented in agent/README.md's divergence list.
+
+## Addendum (2026-09-30)
+
+The tsnet gomobile module named in Context did not enter the repo in
+Phase 4 — it is deliberately post-v1 (`docs/PROJECT_PLAN.md` §7 Phase 4b,
+the unticked tsnet bullet; the System-VPN profile covers Tailscale via the
+regular Tailscale app). The decision stands on its other grounds: the
+agent is the project's only Go code today.

@@ -35,12 +35,13 @@ steamhangar/
 ├── dns/             # optional dnsmasq container (Compose profile)
 ├── api/             # FastAPI, SQLite schema, scheduler
 ├── agent/           # PC listener (Windows/Linux/SteamOS, Go)
-├── web/             # browser UI (Phase 4a) — not started yet
-├── app/             # Android (Kotlin + Go tsnet module) — not started yet
-├── deploy/          # compose.yaml, example .env, DNS mode docs
-├── docs/            # architecture, ADRs, setup guides
-├── poc/             # Phase-0 feasibility PoC, frozen as evidence — read-only
-└── .github/         # CI, issue/PR templates
+├── web/             # browser UI, served by vault-api (plain HTML/CSS/JS, no build step)
+├── app/             # Android app (Kotlin + Jetpack Compose, Gradle)
+├── deploy/          # compose.yaml, example .env, proxy image, DNS mode docs, verify-stack
+├── docs/            # architecture, ADRs, security docs, setup guides
+├── poc/             # Phase-0 feasibility PoC, frozen as evidence — read-only,
+│                    # except poc/throttle/: later measurement spikes land there too
+└── .github/         # CI + publish workflows, issue/PR templates
 ```
 
 Each component directory has its own `README.md` with implementation detail —
@@ -60,23 +61,32 @@ the component, and describe what you ran in the PR description.
 
 | Component | Language / tooling | Test command | Notes |
 |---|---|---|---|
-| `api/` | Python 3.12+ (the Docker image pins 3.13), FastAPI, plain `sqlite3` (no ORM) | `cd api && pip install -r requirements.txt -r requirements-dev.txt`, then `pytest` | Runs fully offline, no Docker needed. Verified for this document: `pytest` from `api/` passes (704 passed, 1 skipped) on Python 3.12 against a clean checkout. This is what CI will run (see the CI note below). |
-| `agent/` | Go (module targets windows/amd64, linux/amd64, linux/arm64) | `cd agent/go && go build ./... && go vet ./... && gofmt -l . && go test ./...` | Runs fully offline. Verified for this document: builds and `go test ./...` passes on all six packages. **Windows-checkout caveat, verified while writing this doc:** if your local clone has `core.autocrlf=true` (common on Windows), `gofmt -l .` will list every `.go` file — that's `gofmt`'s LF-normalization disagreeing with your checkout's CRLF line endings, not a real style violation. Judge `gofmt` output from a checkout with `autocrlf=input` or `false` (or run it inside WSL/Linux against a Unix-checked-out copy) if you need a meaningful signal. This is what CI will run, on both Linux and Windows (see the CI note below). |
-| `core/` | nginx config (no code, just config + comments) | `core/tests/test-core.ps1` (PowerShell) | **Local-only.** Sends real requests to the live Steam CDN and needs the Windows nginx binary from `poc/` (see `core/README.md`). CI will only run `nginx -t` against the rendered config template — it will not run this suite. |
+| `api/` | Python 3.12+ (the Docker image pins 3.13), FastAPI, plain `sqlite3` (no ORM) | `cd api && pip install -r requirements.txt -r requirements-dev.txt`, then `pytest` | Runs fully offline, no Docker needed (CI-gated, so `main` is green by construction; the CI run shows the count). This is what CI's `api-tests` job runs (see the CI note below). |
+| `agent/` | Go (module targets windows/amd64, linux/amd64, linux/arm64) | `cd agent/go && go build ./... && go vet ./... && gofmt -l . && go test ./...` | Runs fully offline. Verified for this document: builds and `go test ./...` passes on all six packages. **Windows-checkout caveat, verified while writing this doc:** if your local clone has `core.autocrlf=true` (common on Windows), `gofmt -l .` will list every `.go` file — that's `gofmt`'s LF-normalization disagreeing with your checkout's CRLF line endings, not a real style violation. Judge `gofmt` output from a checkout with `autocrlf=input` or `false` (or run it inside WSL/Linux against a Unix-checked-out copy) if you need a meaningful signal. This is what CI's `agent-go` job runs, on both Linux and Windows (see the CI note below). |
+| `core/` | nginx config (no code, just config + comments) | `core/tests/test-core.ps1` (PowerShell) | **Local-only.** Sends real requests to the live Steam CDN and needs the Windows nginx binary from `poc/` (see `core/README.md`). CI (`core-nginx-config`) only runs `nginx -t` against the rendered config template plus the config-drift check, and parses this script for PowerShell 5.1 syntax — it does not run this suite. |
 | `dns/` | dnsmasq config template | `dns/tests/test-dnsmasq-config.ps1` (PowerShell, drives WSL2) | **Local-only.** Needs PowerShell plus a WSL2 distro with `dnsmasq` installed (see `dns/README.md`). Won't run in CI. |
-| `deploy/` | Docker Compose | `sudo sh deploy/tests/verify-stack.sh` | **Local-only.** Builds and runs all three containers for real, including a real Steam CDN MISS→HIT cycle; needs a working Docker Engine with Compose v2 and root (or a `docker` group membership) on the host. Won't run in CI — no image publishing or container runtime will be exercised there. |
+| `web/` | Plain HTML/CSS/JS, no build step; tests on Node's built-in runner | `node --test "web/tests/*.test.js"` | Runs fully offline, no browser needed (`web/tests/fake-dom.js` is the shared minimal in-memory DOM). Use a current Node — CI pins Node 24 (see `web/tests/README.md` for the quoting caveat). This is what CI's `web-tests` job runs. |
+| `app/` | Kotlin + Jetpack Compose, Gradle | `cd app && ./gradlew test lintDebug` (`gradlew.bat` on Windows; needs an Android SDK) | Runs offline after the first dependency download; JVM unit tests only — nothing here runs on a device or emulator (see `app/README.md`). CI's `android-tests` job runs the same plus `assembleDebug`. |
+| `deploy/` | Docker Compose | `sudo sh deploy/tests/verify-stack.sh` | Builds and runs the whole stack for real, including a real Steam CDN MISS→HIT cycle; needs a working Docker Engine with Compose v2 and root (or a `docker` group membership) on the host. **Not part of the PR gate** — CI runs it only on the nightly schedule and on manual dispatch (see the CI note below). |
 
-**CI note:** GitHub Actions workflows under `.github/workflows/` are not in
-this repository yet — they land shortly with WP 5.1 (tracked in
-`docs/WORKPACKAGES.md`). Once they do, CI is scoped to be
-intentionally narrower than "everything above": it runs the `api/` pytest
-suite, `agent/` `go build`/`go vet`/`go test` on Linux and Windows,
-`nginx -t` against the rendered `core/` templates, and PowerShell 5.1 syntax
-checks for the packaging scripts under `agent/packaging/windows/`. Anything
-network- or Docker-dependent is deliberately kept local-only rather than
-faked in CI — see the table above, and don't be surprised if a CI-green PR
-still needs one of the local-only suites run by hand before a component
-maintainer approves it.
+**CI note:** `.github/workflows/ci.yml` runs on every push and pull request
+and is intentionally narrower than "everything above". Its PR-gate jobs are
+`api-tests` (pytest), `agent-go` (build/vet/gofmt/test on Linux and
+Windows), `core-nginx-config` (`nginx -t` through the image's real
+entrypoint render path plus the config-drift check), `powershell-syntax`
+(PowerShell 5.1 parser gate for the scripts under `agent/packaging/windows/`,
+plus parse-only checks of `core/tests/` and `dns/tests/`), `web-tests` (`node --test`) and `android-tests`
+(`assembleDebug`, both unit-test variants, `lintDebug`), plus
+`deploy-static` (shellcheck over the shipped shell scripts and a
+`docker compose config` render of `deploy/compose.yaml`; no containers
+start). The one
+Docker-dependent job, `verify-stack`, runs on a nightly cron and on manual
+dispatch only, so a PR is never blocked on a container runtime. Anything
+that needs the live Steam CDN or a Windows nginx binary stays local-only —
+see the table above, and don't be surprised if a CI-green PR still needs
+one of the local-only suites run by hand before a component maintainer
+approves it. `publish.yml` (images, signed APK, agent binaries) runs only
+on `v*` tags and manual dispatch.
 
 ### A note on style
 
@@ -112,18 +122,21 @@ fields). A PR that reintroduces one of these is expected to fail review.
 - **[Conventional Commits](https://www.conventionalcommits.org/):**
   `feat(api): ...`, `fix(agent): ...`, `docs: ...`, `chore(deploy): ...`, and
   so on. Look at `git log` for the established scope names per component
-  (`core`, `api`, `agent`, `dns`, `deploy`, `docs`).
+  (`core`, `api`, `agent`, `dns`, `web`, `app`, `deploy`, `docs`, `ci`).
 - **One logical change per PR** (see "Before you start" above).
 - Update the relevant component `README.md` and, if you touched a checkbox
   item, `docs/PROJECT_PLAN.md` in the same PR — documentation drift is a bug.
 
 ## Reporting security issues
 
-**Do not open a public issue for a security vulnerability.** This project
-ships a `SECURITY.md` with the first tagged release describing the disclosure
-process in full; until it lands, please use
+**Do not open a public issue for a security vulnerability.** The disclosure
+process, what to include, and what to expect from a single-maintainer
+project are in [`SECURITY.md`](SECURITY.md); the short version is
 [GitHub's private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability)
-on this repository instead of a regular issue. Ordinary bugs (a crash, a wrong
+on this repository. Before reporting, skim
+[`docs/security/threat-model.md`](docs/security/threat-model.md) — it lists
+the by-design limitations (for example, `vault-core` has no authentication
+on purpose) that are not new findings. Ordinary bugs (a crash, a wrong
 result, a confusing error message) that don't expose a security risk are fine
 as normal issues — see the bug report template.
 

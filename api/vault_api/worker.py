@@ -157,9 +157,27 @@ class PrefillWorker:
                 # most one such row, and it must be resumed before this
                 # worker looks for other work.
                 if self._settings.prefill_mode_queue:
-                    reattach = jobs.find_active_run(conn)
+                    try:
+                        reattach = jobs.find_active_run(conn)
+                    except sqlite3.Error:
+                        # Same net as claim_next_job below (WP API-FIX-1,
+                        # S2): a locked/failed lookup must not end the
+                        # worker thread.
+                        logger.exception(
+                            "Failed to look up an active run; retrying after a poll"
+                        )
+                        self._stop.wait(self._settings.worker_poll_seconds)
+                        continue
                     if reattach is not None:
                         self._resume_prefill(conn, reattach)
+                        if not self._stop.is_set() and self._still_running(
+                            conn, int(reattach["id"])  # type: ignore[arg-type]
+                        ):
+                            # N6: _resume_prefill could not move the row on
+                            # (the DB is broken and even recording the
+                            # failure failed). find_active_run would return
+                            # it again at once; back off instead of spinning.
+                            self._stop.wait(self._settings.worker_poll_seconds)
                         continue
 
                 try:
@@ -178,6 +196,15 @@ class PrefillWorker:
                 self._execute(conn, job)
         finally:
             conn.close()
+
+    def _still_running(self, conn: sqlite3.Connection, job_id: int) -> bool:
+        """Whether ``job_id`` is still 'running'. A DB error counts as yes,
+        so the caller backs off rather than spinning on a broken database."""
+        try:
+            row = jobs.get_run_row(conn, job_id)
+        except sqlite3.Error:
+            return True
+        return row is not None and row.get("status") == jobs.STATUS_RUNNING
 
     def _execute(self, conn: sqlite3.Connection, job: dict[str, object]) -> None:
         """Dispatch one claimed job to the code that knows how to run it.

@@ -32,20 +32,40 @@
     </button>
   </header>
 
-  <!-- Bypass banner (WP 4a.7, web/js/components/bypass-banner.js). Same
-       app-shell placement reasoning as the bell above; hidden by default,
-       shown/toggled purely via the `hidden` attribute so it takes no
-       layout space at all when nobody is bypass_suspected. -->
-  <div class="banner-wrap" id="bypass-banner-wrap" hidden>
-    <div class="banner">
-      <span class="glyph" aria-hidden="true">
-        <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 2.6 18.4 17H1.6L10 2.6Z"/><path d="M10 8v3.6M10 14.1v.1"/></svg>
-      </span>
-      <div class="body">
-        <span id="bypass-banner-text"></span>
-        <div class="acts">
-          <button type="button" id="bypass-details">Details</button>
-          <button type="button" class="mute" id="bypass-dismiss">Dismiss</button>
+  <!-- Shell banners. ONE .banner-wrap holds both banners because at BP-L
+       it owns the single "banner" grid area (css/app.css); each banner
+       toggles its own .banner-slot and js/lib/banner-wrap.js shows the
+       wrap while any slot is shown (WP WEB-FIX-2). -->
+  <div class="banner-wrap" id="banner-wrap" hidden>
+    <!-- Connection-lost banner (WP WEB-FIX-2, web/js/components/
+         connection-banner.js): shown after a NETWORK/SERVER poll-failure
+         streak of >= 20 s, cleared by the next successful poll. Not a live
+         region itself; transitions are announced once via #view-announcer. -->
+    <div class="banner-slot" id="conn-banner" hidden>
+      <div class="banner">
+        <span class="glyph" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 2.6 18.4 17H1.6L10 2.6Z"/><path d="M10 8v3.6M10 14.1v.1"/></svg>
+        </span>
+        <div class="body">
+          <span id="conn-banner-text"></span>
+        </div>
+      </div>
+    </div>
+    <!-- Bypass banner (WP 4a.7, web/js/components/bypass-banner.js). Same
+         app-shell placement reasoning as the bell above; hidden by default,
+         shown/toggled purely via the `hidden` attribute so it takes no
+         layout space at all when nobody is bypass_suspected. -->
+    <div class="banner-slot" id="bypass-banner-wrap" hidden>
+      <div class="banner">
+        <span class="glyph" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 2.6 18.4 17H1.6L10 2.6Z"/><path d="M10 8v3.6M10 14.1v.1"/></svg>
+        </span>
+        <div class="body">
+          <span id="bypass-banner-text"></span>
+          <div class="acts">
+            <button type="button" id="bypass-details">Details</button>
+            <button type="button" class="mute" id="bypass-dismiss">Dismiss</button>
+          </div>
         </div>
       </div>
     </div>
@@ -111,7 +131,12 @@
     </div>
   </nav>
 
-  <main id="view-root" class="view-root" aria-live="polite"></main>
+  <!-- WP WEB-FIX-1 (S2): NO aria-live on <main> — a live region spanning
+       the whole view root would announce every navigation's full DOM
+       swap AND every poll tick's patched values (job progress, sizes) to
+       a screen reader. Navigation is announced once, by title, through
+       #view-announcer below (js/app.js renderView). -->
+  <main id="view-root" class="view-root"></main>
 
   <!-- Suggestions panel (WP 4h.2, js/components/decision-panel.js): a
        right-hand column at BP-XL (>=1800px), a collapsible card below that
@@ -150,6 +175,13 @@
   </aside>
 </div>
 
+<!-- Navigation announcer (WP WEB-FIX-1, S2): same role="status"/polite
+     pattern as #toast below, but visually hidden (.sr-only, css/theme.css)
+     — js/app.js writes the new view's title here once per navigation, so
+     assistive tech hears "Downloads", not the whole re-rendered view. Must
+     exist in the static markup (not be created by JS) so the live region
+     is registered before its first update. -->
+<div id="view-announcer" class="sr-only" role="status" aria-live="polite"></div>
 <div id="toast" class="toast" role="status" aria-live="polite">
   <span class="toast-key" aria-hidden="true"></span>
   <span id="toast-text" class="toast-text"></span>

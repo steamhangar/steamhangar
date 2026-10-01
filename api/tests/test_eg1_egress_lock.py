@@ -60,11 +60,11 @@ PROXY_VALIDATOR_PATH = REPO_ROOT / "deploy" / "proxy" / "validate-hostname.sh"
 
 #: Round-2 review N4/S2: the api-tests CI job (`.github/workflows/ci.yml`,
 #: `runs-on: ubuntu-latest`) always has a POSIX `sh` (dash) on PATH, and so
-#: does this project's own Windows dev box (Git for Windows ships
-#: `sh.exe`, confirmed present at `C:\Program Files\Git\usr\bin\sh.EXE`
-#: during this WP) -- but `shutil.which` is the honest, environment-
-#: agnostic way to state that requirement rather than assume it, and skips
-#: cleanly with a named reason on the one hypothetical host that lacks it.
+#: does a Windows development machine with Git for Windows installed (it
+#: ships `sh.exe` under its `usr/bin` directory, confirmed during this WP)
+#: -- but `shutil.which` is the honest, environment-agnostic way to state
+#: that requirement rather than assume it, and skips cleanly with a named
+#: reason on the one hypothetical host that lacks it.
 _SH = shutil.which("sh")
 requires_sh = pytest.mark.skipif(_SH is None, reason="no POSIX 'sh' on PATH")
 

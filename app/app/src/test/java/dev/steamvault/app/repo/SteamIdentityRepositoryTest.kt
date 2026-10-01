@@ -150,6 +150,23 @@ class SteamIdentityRepositoryTest {
         assertNull(repo.state().steamId64)
     }
 
+    /** WP APP-FIX-1 (S4a): `return_to` carries the `state` the replay gate
+     * trusts, so a callback whose `openid.signed` covers `claimed_id` but
+     * NOT `return_to` must be rejected before `check_authentication` -- the
+     * state it echoed back matches, which is exactly why the signature
+     * requirement is the load-bearing part here. */
+    @Test
+    fun `MUTATION PIN -- completeLogin fails when signed does not cover return_to, without calling the verifier`() = runTest {
+        val (repo, verifier, _) = repo()
+
+        repo.buildLoginUrl()
+        val result = repo.completeLogin(callbackUrl(signed = "signed,claimed_id,identity"))
+
+        assertTrue(result is SteamLoginResult.Failure)
+        assertEquals(0, verifier.callCount)
+        assertNull(repo.state().steamId64)
+    }
+
     @Test
     fun `completeLogin fails when check_authentication rejects the assertion, and nothing is persisted`() = runTest {
         val (repo, verifier, _) = repo(verifier = FakeOpenIdVerifier(checkAuthResult = false))

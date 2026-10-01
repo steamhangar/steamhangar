@@ -175,11 +175,12 @@ COPY web /app/web
 #                                "back this up" and "you may delete this" stay
 #                                separable advice (deploy/README.md).
 #   /vault                    -> the shared depot cache volume (same volume
-#                                vault-core mounts). cache/depot is pre-created
-#                                with the same layout vault-core's image uses so
-#                                that whichever service happens to seed the empty
-#                                named volume first produces the same result, and
-#                                so vault-api's deletion guard (which refuses a
+#                                vault-core mounts). Only vault-core seeds an
+#                                empty named volume: vault-api's mount is
+#                                :nocopy (deploy/compose.yaml). cache/depot is
+#                                still pre-created here, same layout as
+#                                vault-core's image, for bind-mount/standalone
+#                                use, and so vault-api's deletion guard (which refuses a
 #                                cache root with no depot/ dir) is satisfied on a
 #                                fresh install.
 RUN set -eux; \
@@ -232,5 +233,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # startup; a second process would fail the first one's genuinely running job and
 # run two prefill workers against one SQLite file (api/README.md "Worker
 # lifecycle"). Do not add --workers.
+# --no-proxy-headers (WP API-FIX-2, N4): uvicorn defaults to trusting
+# X-Forwarded-For from 127.0.0.1 and rewriting request.client from it.
+# routers/agent.py records request.client as the agent's identity address and
+# promises it is NEVER header-derived; this flag is what makes that true.
 CMD ["python", "-m", "uvicorn", "vault_api.main:create_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8080"]
+     "--host", "0.0.0.0", "--port", "8080", "--no-proxy-headers"]

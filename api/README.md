@@ -89,11 +89,82 @@ api/
 │       ├── schedule.py   # GET /v1/schedule (read-only, env-only config)
 │       └── oracle.py     # GET/POST/DELETE /v1/oracle/{appid} (WP 3.9)
 ├── tests/                # pytest (incl. tests/stub_prefill.py — fake CLI)
-├── requirements.txt      # pinned, runtime only
+├── requirements.txt      # pinned, runtime only, full transitive set
 ├── requirements-dev.txt  # pinned, adds test-only deps (pytest, httpx)
 ├── .env.example          # committed template — never commit a real .env
 └── pytest.ini
 ```
+
+## Dependencies
+
+`requirements.txt` is the **complete** resolved runtime set: every
+transitive dependency is pinned with `==` (WP SEC-FIX-3). Before that WP only
+the four direct dependencies were pinned and everything below them floated,
+so two image builds from the same commit could install different code. The
+Dockerfile is unchanged; it still runs `pip install -r requirements.txt`,
+which now has nothing left to choose. `requirements-dev.txt` adds pytest and
+httpx on top of it. Their own transitive dependencies (iniconfig, pluggy,
+packaging, httpcore, certifi) are still unpinned. They are test-only and
+never reach the image.
+
+Direct dependencies: `fastapi`, `starlette`, `uvicorn[standard]`,
+`python-dotenv`. starlette is pinned directly, not only through fastapi,
+because the security fixes live in starlette.
+
+**Regenerating.** Edit the direct pins, then resolve universally so that the
+native Windows path ("Running natively" below) keeps its `colorama` /
+`uvloop` markers:
+
+```
+printf 'fastapi==X\nstarlette==Y\nuvicorn[standard]==Z\npython-dotenv==W\n' > top.in
+uv pip compile --universal --python-version 3.13 --no-header --no-annotate top.in
+```
+
+Then paste the output under the file's header comment, keep `uvicorn[standard]`
+as written, run the full suite in a fresh venv, and re-run `pip-audit -r
+requirements.txt`.
+
+### Security audit, 2026-10-01 (WP SEC-FIX-3)
+
+Tool: `pip-audit 2.10.1` (PyPI/OSV advisory data), Python 3.13.15.
+
+**Before** (`fastapi==0.115.6`, which caps `starlette<0.47`, so it resolved to
+`starlette 0.41.3`; `python-dotenv==1.0.1`): 8 distinct advisories in 2
+packages.
+
+| Package | Advisory | Fixed in | Applies to vault-api? |
+|---|---|---|---|
+| starlette 0.41.3 | CVE-2025-62727 / GHSA-7f5h-v6xp-fcq8: quadratic-time `Range` header parsing in `FileResponse`, an unauthenticated CPU DoS | 0.49.1 | **Yes.** `webui.py` serves `/css` and `/js` through `StaticFiles` and `index.html` through `FileResponse`, all without authentication |
+| starlette 0.41.3 | CVE-2025-54121 / GHSA-2c2j-9gv5-cj73: multipart spool rollover blocks the event loop | 0.47.2 | No. vault-api parses no multipart forms |
+| starlette 0.41.3 | CVE-2026-48710 / GHSA-86qp-5c8j-p5mr: unvalidated `Host` header used to rebuild `request.url` | 1.0.1 | Indirectly (the framework builds `request.url` for every request) |
+| starlette 0.41.3 | CVE-2026-54282 / GHSA-jp82-jpqv-5vv3: unvalidated path used to rebuild `request.url` | 1.3.0 | Indirectly (same as above) |
+| starlette 0.41.3 | CVE-2026-54283 / GHSA-82w8-qh3p-5jfq: `max_fields`/`max_part_size` ignored for urlencoded forms | 1.3.1 | No. There is no `request.form()` |
+| starlette 0.41.3 | CVE-2026-48818 / GHSA-wqp7-x3pw-xc5r: `StaticFiles` UNC-path SSRF on Windows | 1.1.0 | Native Windows only |
+| starlette 0.41.3 | CVE-2026-48817 / GHSA-x746-7m8f-x49c: `HTTPEndpoint` method lookup via `getattr` | 1.1.0 | No. There is no `HTTPEndpoint` |
+| python-dotenv 1.0.1 | CVE-2026-28684 / GHSA-mf9w-mj56-hr94: `set_key`/`unset_key` follow symlinks | 1.2.2 | No. `config.py` only calls `load_dotenv()`. Bumped anyway because the fix is a minor bump |
+
+**Bumps.** Each package moved to the smallest version that fixes all of its
+advisories:
+
+- `starlette 0.41.3 -> 1.3.1`. 1.3.1 is the highest fix version across all
+  seven starlette advisories.
+- `fastapi 0.115.6 -> 0.133.0`. This is the first fastapi release that allows
+  `starlette>=1.0` (0.130-0.132 cap it at `<1.0.0`, 0.115.x at `<0.47`).
+  Measured against PyPI metadata.
+- `python-dotenv 1.0.1 -> 1.2.2`.
+- `uvicorn[standard]` stays at 0.32.1, which has no advisory.
+
+The full suite passed unchanged in a fresh Python 3.13 venv built from these
+pins: 1959 passed, 6 skipped, the same counts as before the bump. Starlette 1.x
+emits `StarletteDeprecationWarning` for `HTTP_422_UNPROCESSABLE_ENTITY`
+(renamed `HTTP_422_UNPROCESSABLE_CONTENT`) and for httpx in its TestClient.
+These are warnings only. The rename is left for a later WP.
+
+**After:** `pip-audit -r requirements.txt` reports "No known vulnerabilities
+found". `pip-audit -r requirements-dev.txt` still reports
+CVE-2025-71176 / GHSA-6w46-j5rx-g56g in **pytest 8.3.4** (predictable
+`/tmp/pytest-of-<user>` directory, fixed in 9.0.3). pytest is test-only and
+never installed in the image. The major bump is left open on purpose.
 
 ## Configuration
 
@@ -133,11 +204,16 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_WEBHOOK_URL`             | no       | *(empty — webhooks OFF)* | Generic JSON webhook target (WP 3.13). Unset/blank = the whole feature is off. See "Webhooks" |
 | `VAULT_WEBHOOK_EVENTS`          | no       | *(all five)* | Comma list of events to send: `job.done`, `job.error`, `job.cancelled`, `client.bypass_suspected`, `client.bypass_resolved`. Unknown names or empty entries fail at startup |
 | `VAULT_WEBHOOK_TIMEOUT_SECONDS` | no       | `5`          | Per-attempt HTTP timeout for one delivery try; **must be > 0** |
-| `VAULT_NAME`                    | no       | *(empty)*    | Optional label carried as `"vault_name"` in every webhook payload — omitted entirely when unset. Purely cosmetic, for an operator running more than one SteamHangar instance |
+| `VAULT_NAME`                    | no       | *(empty)*    | Optional label carried as `"vault_name"` in every webhook payload — omitted entirely when unset. Purely cosmetic, for an operator running more than one SteamHangar instance. Validated: at most 64 characters after trimming surrounding whitespace, printable characters only (no tab, newline or other control character inside the name); anything else refuses startup with a clear `RuntimeError` naming `VAULT_NAME`, and is answered `422` on `PATCH /v1/settings`. **Upgrade caveat:** a deployment whose existing `VAULT_NAME` is longer than 64 characters or contains a non-printable character such as a tab stops booting until the value is shortened or cleaned |
 | `VAULT_MANIFEST_ORACLE`         | no       | *(empty — oracle OFF)* | Third-party manifest oracle. Only `steamcmd_api` is implemented. **Enabling it makes vault-api send app ids to a service outside your LAN** — see "Manifest oracle" below before setting it. Any other value is refused at startup |
 | `VAULT_MANIFEST_ORACLE_URL`     | no       | `https://api.steamcmd.net/v1/info` | Base URL the oracle asks (`<base>/<appid>`). Point it at your own mirror to keep the queries on your network. Must be `http`/`https`; redirects away from it are never followed |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | no       | `10`         | Socket timeout (seconds) for one oracle request; **must be > 0**. A timeout is an ordinary "no data" outcome, never an error the API surfaces |
 | `VAULT_EGRESS_ALLOW`            | no       | *(empty)*    | WP EG-1 (ADR-0011). Comma-separated bare hostnames the egress-lock proxy (`deploy/proxy`) may additionally reach on vault-api's behalf, beyond the one host baked into that proxy's image unconditionally (`api.steampowered.com`, the Steam Web API relay). **Enabling `VAULT_MANIFEST_ORACLE` with its host missing from this list refuses to boot** — see "Egress lock" below. Each entry must look like a plausible hostname (letters, digits, `.`, `-` only; no leading/trailing `.`/`-`) or vault-api refuses to boot |
+| `VAULT_SWEEP_INCLUDE_CACHED`    | no       | `true` (**was `false` through WP 4d; flipped by WP SWEEP-1 / ADR-0014, 2026-08-22**) | Strict boolean (`true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`, case-insensitive). Widens the scheduler's target set from "installed on a fresh agent" to installed PLUS everything holding cache content. Runtime-editable via `PATCH /v1/settings`. See "Sweep target set — installed PLUS cached" |
+| `VAULT_RELAY_EXPOSE_PLAYTIME`   | no       | `false`      | Strict boolean. Privacy gate for the Steam Web API relay: off = `GET /v1/steam/owned-games` omits `playtime_forever`. Env-only. See "The privacy gate" (WP 4h.0, ADR-0010) |
+| `VAULT_RELAY_EXPOSE_LAST_PLAYED` | no      | `false`      | Strict boolean. Same gate for `rtime_last_played`, independent of the playtime switch. Env-only. See "The privacy gate" |
+| `VAULT_SETTINGS_READONLY`       | no       | `false`      | Strict boolean. Operator hard-lock: on = `PATCH /v1/settings` answers `403` (`GET` still works; the `/v1/steam/key` routes are not covered). Env-only by construction. See "`VAULT_SETTINGS_READONLY` — the operator hard-lock" |
+| `VAULT_WEB_DIR`                 | no       | the repo's `web/` directory (resolved relative to the package) outside the image; the image sets `/app/web` (api/Dockerfile) | Directory the web UI's static files are served from. Blank = the default. Env-only. See "Web UI static serving" |
 
 **All nineteen numeric settings are parsed strictly (WP 3.12).** Twelve take a
 whole number (`VAULT_PREFILL_TIMEOUT_SECONDS`, `VAULT_AGENT_REPORT_KEEP`,
@@ -177,7 +253,7 @@ rule below exists to prevent, reintroduced through the back door; a `nan`
 A grammatically valid but absurdly long digit string (400 digits) also
 overflows to `inf` in `float()` and is refused explicitly.
 
-**For these sixteen numeric settings** (and every other blank-means-off switch
+**For these nineteen numeric settings** (and every other blank-means-off switch
 in the table above — `VAULT_SCHEDULE_WINDOW`, `VAULT_EVENT_LOG_PATH`,
 `VAULT_WEBHOOK_URL`, `VAULT_MANIFEST_ORACLE`, `VAULT_STEAMPREFILL_PATH`), a
 **blank** value still means "not configured" and falls back to the default (a
@@ -511,8 +587,9 @@ is now `INSERT OR IGNORE` plus a conditional name `UPDATE`, pinned by
 ## Endpoints (WP 1.3 + 1.4 + 1.5 + 1.6 + 2.4 + 3.5 + 3.8 + 3.9 + 3.11 + 3.12 + 4a.6r + settings-API/ADR-0009 + 4h.1 + AG-1)
 
 All routes below require `X-Api-Key` (see "Auth"). Full API table:
-`docs/PROJECT_PLAN.md` §6; the games, mapping, prefill, jobs, cache, agent,
-clients, schedule and stats rows are implemented so far.
+`docs/PROJECT_PLAN.md` §6; every row there is implemented, and every
+authenticated one is listed below (`GET /v1/health` is the one public
+route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
@@ -2320,7 +2397,7 @@ here, in any game — the same way it would be excluded from a sweep. This was
 a deliberate choice between the two options on the table: expose the raw
 timestamp and let the frontend guess at staleness, or reuse the scheduler's
 own trust boundary. The second was chosen because a UI badge reading
-"installed on Zeus" from a report the scheduler itself refuses to act on
+"installed on the operator's server" from a report the scheduler itself refuses to act on
 would be the same dishonesty in a different place, and because
 `docs/LEARNINGS.md`'s "two call sites computing the same predicate diverge"
 entry (WP 4f) is exactly the failure mode a second, independently-written
@@ -2383,7 +2460,7 @@ list at the per-app level, and that is being kept, deliberately.**
 `_fresh_snapshots_now` already computes the excluded clients (the
 `_excluded` return value of `fresh_client_snapshots`) and the router
 currently discards it — a game nobody has ever installed and a game
-Zeus reported two months ago (now past the stale window) both render
+the operator's server reported two months ago (now past the stale window) both render
 `installed_on: []`, with nothing in the response distinguishing "no signal"
 from "stale signal". The field shape stays additive and app-scoped as
 shipped; the fix is NOT a bigger `installed_on` payload. AG-2's badge
@@ -3862,6 +3939,13 @@ requests from one vault-api process.
   reason — **never** a full traceback at ERROR for what is usually just "the
   receiver is down right now", an operational fact about the other end, not
   a bug in this code.
+- **Redirects are never followed; a 3xx is a failed delivery.** The
+  receiver must answer the configured URL directly with a 2xx. A `3xx`
+  counts as a failed attempt (retried, then dropped with the usual WARNING)
+  and its `Location` is never contacted, so a Basic-Auth header can never be
+  handed to a different host. A receiver that redirects (e.g. `http://` ->
+  `https://`, or a trailing-slash redirect) must be configured with its final
+  URL.
 - **Drops are counted, never silent.** A full queue means delivery is
   falling behind the rate events are produced; `enqueue` drops the OLDEST
   queued event (not the newest) to make room, logs it at WARNING, and counts
@@ -3892,9 +3976,10 @@ security theatre rather than a real mitigation.
 ### What this work package deliberately did NOT do
 
 - **No `deploy/` changes.** `VAULT_WEBHOOK_URL`/`VAULT_WEBHOOK_EVENTS`/
-  `VAULT_WEBHOOK_TIMEOUT_SECONDS`/`VAULT_NAME` are documented in
-  `api/.env.example`; wiring them through `deploy/compose.yaml` is a
-  follow-up, same pattern as WP 3.11's event-log path.
+  `VAULT_WEBHOOK_TIMEOUT_SECONDS`/`VAULT_NAME` were documented only in
+  `api/.env.example` by this package. Since then all four are wired through
+  `deploy/compose.yaml`'s `vault-api` environment and documented in
+  `deploy/.env.example` (pre-freeze review S3).
 - **No persistent delivery queue / outbox.** At-most-once, in-process only —
   see "Delivery semantics" above.
 - **No vendor-specific templates.** One schema; a receiver that wants a
@@ -4004,6 +4089,7 @@ neither of which GC has.
 | `skipped_unreadable_owner` | a mapping row has an unreadable app id ⇒ the claim set is incomplete |
 | `skipped_no_counting_apps` | every mapped app is verifiably uncached with no recorded manifest |
 | `skipped_no_manifest` | ADR-0007's readiness gate: a counting app's manifest could not be resolved |
+| `skipped_link_like_dir` | `depot/<id>/` is a symlink or junction — GC never descends through a link (threat model §9, S-2) |
 
 ### Guarantees (each pinned by a named test, each mutation-tested)
 
@@ -4867,7 +4953,7 @@ the fact entirely or offering a toggle that would `422`. `PATCH
   `rtime_last_played` were checked against the Steamworks Web API's public
   documentation and community reports, not against a real `GetOwnedGames`
   response — no Steam Web API key was available in this coding session. This
-  belongs on the Zeus/device real-world verification list alongside the other
+  belongs on the real-world/device verification list alongside the other
   documented "checked against docs, not against a live account" gaps in this
   file (e.g. the manifest oracle's shape assumption, "Manifest oracle"
   section above).
@@ -4878,6 +4964,20 @@ Every endpoint requires the header `X-Api-Key: <VAULT_API_KEY>`, checked
 with a constant-time comparison (`hmac.compare_digest`) in the
 `require_api_key` FastAPI dependency (`vault_api/auth.py`). Missing or
 wrong key → `401`.
+
+**Checked before routing (WP SEC-FIX-4, S-3):** FastAPI parses a JSON body
+before a router dependency runs, so `vault_api/body_guard.py` (a pure-ASGI
+middleware) checks the key first for every `/v1` path except exactly
+`/v1/health`, with the same comparison (`auth.api_key_matches`). A keyless
+request is answered `401` without a body byte being read — also for a path
+that does not exist (`401`, not `404`) and for malformed JSON (`401`, not
+`422`). Every request body is capped at 1 MiB (`body_guard.MAX_BODY_BYTES`):
+a larger `Content-Length` is `413` up front, a chunked body is `413` once it
+passes the cap. The largest legitimate body (a 10 000-appid agent report) is
+~110 KB. The dependency stays on every router as defence in depth.
+Because the public exception is exactly `/v1/health`, a keyless
+`/v1/health/` (trailing slash) now gets `401` rather than Starlette's
+`307` redirect.
 
 **Non-ASCII keys (WP 1.3 fix):** `hmac.compare_digest` raises `TypeError`
 for a non-ASCII `str` argument (confirmed empirically — a key containing
@@ -5464,7 +5564,7 @@ cd api
 .venv\Scripts\python -m pytest
 ```
 
-262 tests, no network and no Steam login required.
+CI-gated (the CI run shows the count); no network and no Steam login required.
 
 Covers: health returns `ok` without a key and leaks nothing else; every
 registered route requires `require_api_key` except `/v1/health` (route-walk
@@ -5970,7 +6070,7 @@ place rather than duplicated here.
 
 | Key | Env var | `applies` | Why |
 |---|---|---|---|
-| `vault_name` | `VAULT_NAME` | `restart-required` | Only read by `WebhookNotifier._build_body`, which holds a fixed `Settings` snapshot for the notifier's lifetime — see "The honest gap" below |
+| `vault_name` | `VAULT_NAME` | `restart-required` | Only read by `WebhookNotifier._build_body`, which holds a fixed `Settings` snapshot for the notifier's lifetime — see "The honest gap" below. Value rule (shared with the env var): at most 64 characters after trimming, printable only — anything else is `422` here and a startup refusal for `VAULT_NAME`. Upgrade caveat: an existing value longer than 64 characters or containing a non-printable character such as a tab stops vault-api booting until it is fixed |
 | `schedule_window` | `VAULT_SCHEDULE_WINDOW` | `next_sweep` | `vault_api/scheduler.py`'s tick loop resolves `effective_settings` fresh every ~60s tick, using the connection the tick already opened |
 | `schedule_interval_minutes` | `VAULT_SCHEDULE_INTERVAL_MINUTES` | `next_sweep` | Same tick-loop resolution as `schedule_window` |
 | `schedule_client_stale_days` | `VAULT_SCHEDULE_CLIENT_STALE_DAYS` | `next_sweep` | Same tick-loop resolution |
@@ -6074,6 +6174,16 @@ works, since it never goes through the API at all. Accepted spellings:
 `1`/`true`/`yes`/`on` (true), `0`/`false`/`no`/`off`/blank (false,
 case-insensitive) — anything else is refused at startup like every other
 enum-shaped setting in `config.py`.
+
+**Not covered by the lock: `PUT`/`DELETE /v1/steam/key`.** The Steam Web
+API relay key (see "Steam Web API relay") is stored through its own routes
+in `routers/steam.py`, and those stay writable with
+`VAULT_SETTINGS_READONLY=1`. The lock exists to "restore pure env
+semantics", and the relay key has no env source to restore to (there is no
+`VAULT_STEAM_RELAY_KEY`); gating the routes today would leave a readonly
+deployment with no way to configure the relay at all. Gating them together
+with an env source for the key is post-release work (ADR-0009 addendum
+2026-09-30, `docs/security/threat-model.md` §7).
 
 ### Redaction
 

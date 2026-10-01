@@ -6,19 +6,40 @@
 #                                       Steam CDN -- the source of truth)
 #   core/docker/nginx.conf.template    (WP 1.9, what actually runs in the image)
 #
-# The container variant exists because five directives cannot be shared (log
-# destinations, pid path, worker user, and the resolver becoming an env
-# placeholder). Everything else -- every map, every proxy_set_header, the store
-# guard, the Host allowlist, the nocache bypass, the log_format -- MUST stay
-# identical, or the container silently stops being the thing that was reviewed
-# and tested.
+# The container variant exists because a handful of directives cannot be
+# shared (log destinations, pid path, worker user, and the resolver and
+# event-log path becoming env placeholders). The deltas enumerated in step 2
+# below are the ONLY allowed differences -- six kinds today; this list, not
+# any prose count elsewhere, is authoritative. Everything else -- every map,
+# every proxy_set_header, the store guard, the Host allowlist, the nocache
+# bypass, the request guards, the log_format -- MUST stay identical, or the
+# container silently stops being the thing that was reviewed and tested.
 #
 # This script makes that contract executable:
 #   1. normalise both files (drop comments and blank lines, trim, collapse runs
 #      of whitespace -- none of which is semantic in nginx)
-#   2. un-apply the five allowed container deltas from the template, asserting
-#      each one was present EXACTLY once (so a delta that silently disappears is
-#      also a failure, not just an unexpected extra line)
+#   1b. assert the vault_event log_format line keeps its LITERAL tabs in both
+#      raw files (step 1's whitespace collapse would otherwise hide a
+#      TAB -> space regression, which breaks the sweeper's tab-split parser)
+#   2. un-apply the enumerated container deltas from the template, asserting
+#      each one was present EXACTLY the expected number of times (so a delta
+#      that silently disappears is also a failure, not just an unexpected
+#      extra line)
+#   2b. pin the WP TH-1a upstream rate cap, which is NOT a textual delta:
+#      both files carry the identical `include vault-upstream-rate.conf;`
+#      and the identical @miss directives (proxy_buffering on,
+#      proxy_ignore_headers X-Accel-Buffering, proxy_limit_rate
+#      $vault_upstream_rate). What differs is the INCLUDED FILE: the
+#      container renders /etc/nginx/vault-upstream-rate.conf at start
+#      (27-vault-upstream-rate.sh), the native rig uses the static
+#      core/nginx/vault-upstream-rate.conf. Asserted here: each pinned line
+#      exactly once in each file AND inside the location @miss block (awk
+#      brace-depth extraction; @miss inherits nothing from /depot/), BUCKETS
+#      in the hook >= worker_processes x worker_connections of the template,
+#      no `proxy_buffering off` anywhere, and the
+#      static native include identical (comments aside) to the script's
+#      cap-off render -- so "native = container with no cap configured"
+#      stays true by machine check
 #   3. diff. Any remaining difference fails with a unified diff.
 #
 # Usage:  sh core/docker/check-config-drift.sh   [from anywhere]
@@ -55,8 +76,25 @@ normalise() {
 normalise "$NATIVE"   > "$work/native.norm"
 normalise "$TEMPLATE" > "$work/template.norm"
 
-# --- 2. un-apply the five allowed deltas ------------------------------------
 fail=0
+
+# --- 1b. the vault_event log_format keeps its literal tabs (review P7) ------
+# normalise() collapses whitespace runs, so after step 1 a TAB between two
+# fields and a SPACE between them look the same -- a regression that turns
+# the 9-field TSV into a space-separated line would pass the diff in step 3
+# while breaking vault-api's `line.split("\t")` parser. Assert the raw line
+# (CR stripped, nothing else) with all 8 literal tabs, exactly once per file.
+tab=$(printf '\t')
+event_line="'v1${tab}\$time_iso8601${tab}\$remote_addr${tab}\$vault_event_status${tab}\$vault_event_depot${tab}\$vault_event_uri${tab}\$bytes_sent${tab}\$host${tab}\$status';"
+for f in "$NATIVE" "$TEMPLATE"; do
+    n=$(tr -d '\r' < "$f" | sed -e 's/^[[:space:]]*//' | grep -F -c -x -- "$event_line" || true)
+    if [ "$n" != "1" ]; then
+        echo "check-config-drift: FAIL: expected exactly 1 vault_event log_format line with 8 literal TABs in $f, found $n (a TAB -> space edit breaks the sweeper's tab-split parser)" >&2
+        fail=1
+    fi
+done
+
+# --- 2. un-apply the enumerated container deltas ----------------------------
 
 # expect_once <file> <fixed-string> <human description>
 expect_once() {
@@ -105,6 +143,80 @@ expect_count "$work/native.norm" 3 "access_log logs/access.log vault;"         "
 expect_count "$work/native.norm" 2 "access_log logs/event.log vault_event buffer=64k flush=5s;" \
     "native: WP 3.10 cache-event log, hardcoded ON, one per location (/depot/, @miss)"
 
+# --- 2b. WP TH-1a upstream rate cap: shared lines + the native include ----
+# Identical in both files (so step 3's diff alone would also pass if BOTH
+# lost them) -- hence explicit presence pins, in both normalised files.
+for f in "$work/native.norm" "$work/template.norm"; do
+    expect_count "$f" 1 "include vault-upstream-rate.conf;"         "TH-1a: upstream rate include (http level)"
+    expect_count "$f" 1 "proxy_buffering on;"                       "TH-1a: buffering on, required by proxy_limit_rate and proxy_store"
+    expect_count "$f" 1 "proxy_ignore_headers X-Accel-Buffering;"   "TH-1a: the upstream may not switch buffering off"
+    expect_count "$f" 1 'proxy_limit_rate $vault_upstream_rate;'    "TH-1a: the cap itself, in @miss"
+    if grep -q '^proxy_buffering off' "$f"; then
+        echo "check-config-drift: FAIL: 'proxy_buffering off' in $f -- proxy_limit_rate (the upstream cap) only acts on buffered responses" >&2
+        fail=1
+    fi
+done
+
+# The three cap lines must sit INSIDE location @miss: a named location
+# inherits nothing from location /depot/, so moving them one block up would
+# keep every count above at 1 and still drop the cap. miss_block prints the
+# normalised @miss block, from its opening line to its matching brace.
+miss_block() {
+    awk '/^location @miss [{]$/ { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }' "$1"
+}
+for f in "$work/native.norm" "$work/template.norm"; do
+    miss_block "$f" > "$work/miss.block"
+    if [ ! -s "$work/miss.block" ]; then
+        echo "check-config-drift: FAIL: no 'location @miss {' block in $f" >&2
+        fail=1
+        continue
+    fi
+    for want in "proxy_buffering on;" "proxy_ignore_headers X-Accel-Buffering;" 'proxy_limit_rate $vault_upstream_rate;'; do
+        n=$(grep -F -c -x -- "$want" "$work/miss.block" || true)
+        if [ "$n" != "1" ]; then
+            echo "check-config-drift: FAIL: '$want' must be inside location @miss in $f (found $n there) -- @miss does not inherit it from /depot/" >&2
+            fail=1
+        fi
+    done
+done
+
+RATE_HOOK="$core_dir/docker/27-vault-upstream-rate.sh"
+NATIVE_RATE="$core_dir/nginx/vault-upstream-rate.conf"
+
+# The share map has one bucket per possible connection, so $connections_writing
+# never falls through to the (overshooting) default. That only holds while
+# BUCKETS >= worker_processes x worker_connections of the template; a later
+# bump of either must also raise BUCKETS in the hook.
+wp=$(sed -n 's/^worker_processes \([0-9][0-9]*\);$/\1/p' "$work/template.norm")
+wc_=$(sed -n 's/^worker_connections \([0-9][0-9]*\);$/\1/p' "$work/template.norm")
+bk=$(sed -n 's/^BUCKETS=\([0-9][0-9]*\)$/\1/p' "$RATE_HOOK" 2>/dev/null || true)
+case "$wp:$wc_:$bk" in
+    *[!0-9:]*|:*|*::*|*:)
+        echo "check-config-drift: FAIL: need numeric worker_processes, worker_connections (template) and BUCKETS= (27-vault-upstream-rate.sh); got '$wp', '$wc_', '$bk'" >&2
+        fail=1 ;;
+    *)
+        if [ "$bk" -lt $((wp * wc_)) ]; then
+            echo "check-config-drift: FAIL: BUCKETS=$bk in 27-vault-upstream-rate.sh is below worker_processes x worker_connections = $wp x $wc_ = $((wp * wc_)); counts above $bk would hit the default and overshoot the cap" >&2
+            fail=1
+        fi ;;
+esac
+if [ ! -f "$RATE_HOOK" ] || [ ! -f "$NATIVE_RATE" ]; then
+    echo "check-config-drift: FAIL: missing $RATE_HOOK or $NATIVE_RATE (WP TH-1a)" >&2
+    fail=1
+elif ! VAULT_UPSTREAM_RATE= VAULT_UPSTREAM_RATE_WINDOW= sh "$RATE_HOOK" "$work/rate-off.conf" > "$work/rate-off.log" 2>&1; then
+    echo "check-config-drift: FAIL: $RATE_HOOK could not render the cap-off include:" >&2
+    cat "$work/rate-off.log" >&2
+    fail=1
+else
+    normalise "$NATIVE_RATE"        > "$work/rate-native.norm"
+    normalise "$work/rate-off.conf" > "$work/rate-off.norm"
+    if ! diff -u "$work/rate-native.norm" "$work/rate-off.norm" > "$work/rate.diff" 2>&1; then
+        echo "check-config-drift: FAIL: core/nginx/vault-upstream-rate.conf is not the cap-off render of 27-vault-upstream-rate.sh (left = native, right = render):" >&2
+        cat "$work/rate.diff" >&2
+        fail=1
+    fi
+fi
+
 [ "$fail" = "0" ] || exit 1
 
 sed \
@@ -127,7 +239,7 @@ fi
 
 echo "check-config-drift: FAIL -- the container template diverges from core/nginx/nginx.conf" >&2
 echo "  (left = core/nginx/nginx.conf, right = core/docker/nginx.conf.template with the" >&2
-echo "   five allowed container deltas un-applied)" >&2
+echo "   enumerated container deltas un-applied)" >&2
 echo >&2
 cat "$work/diff" >&2
 exit 1

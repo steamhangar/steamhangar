@@ -122,13 +122,15 @@ services:
     build:
       context: ../core
       dockerfile: Dockerfile
-    image: steamhangar/vault-core:${VAULT_IMAGE_TAG:-0.1.0}
+    image: ghcr.io/steamhangar/vault-core:${VAULT_IMAGE_TAG:-0.1.0}
     restart: unless-stopped
     environment:
       # Upstream DNS resolver nginx uses to resolve Steam CDN hostnames at
       # request time (ADR-0001 req 4). MUST NOT point at vault-dns: vault-dns
       # answers *.steamcontent.com with vault-core's own address, which would
-      # make every cache miss proxy back into this container forever.
+      # make every cache miss proxy back into this container: the boot
+      # preflight then refuses to start, and a rewrite that appears after
+      # boot gets every miss answered 508 Loop Detected after one hop.
       VAULT_RESOLVER: ${VAULT_RESOLVER:-1.1.1.1}
       # Optional cache-event log (WP 3.10, ADR-0008; core/README.md
       # "Cache-event log"). Empty (the default from core/Dockerfile) means
@@ -144,6 +146,35 @@ services:
       # vault-api's /vault mount below for why no extra mount is needed here
       # for vault-api to read it later.
       VAULT_EVENT_LOG: ${VAULT_EVENT_LOG:-}
+      # Container local time (WP TH-1b). nginx evaluates
+      # VAULT_UPSTREAM_RATE_WINDOW below against `$time_iso8601`, i.e. this
+      # container's local clock, so vault-core must see the same TZ the
+      # scheduler in vault-api uses. Same `:-` form as vault-api and
+      # vault-runner, for the same reason (blank TZ == UTC, see vault-api).
+      TZ: ${TZ:-UTC}
+      # Optional upstream (Steam CDN -> vault) rate cap (WP TH-1a/TH-1b,
+      # ADR-0015, core/README.md "Upstream rate cap"). ONE aggregate limit in
+      # bytes/s, nginx size syntax (k = 1024, m = 1048576), divided per
+      # request by the live request count. Empty or unset = no cap. An
+      # invalid value stops vault-core's boot (fail-closed). Env-only:
+      # recreate vault-core after a change.
+      VAULT_UPSTREAM_RATE: ${VAULT_UPSTREAM_RATE-}
+      # Full speed INSIDE this HH:MM-HH:MM window, capped outside it.
+      # DELIBERATELY THE NO-COLON FORM, twice (docs/LEARNINGS.md, the
+      # `${VAR-}` vs `${VAR:-}` entry): UNSET follows VAULT_SCHEDULE_WINDOW
+      # (with the same `03:00-07:00` default as vault-api's line, so the
+      # cap lifts exactly when the scheduler's window opens); explicitly
+      # BLANK passes through as "" = the cap applies around the clock. A
+      # blank VAULT_SCHEDULE_WINDOW (scheduler disabled) with this one unset
+      # therefore also caps around the clock. Only the ENV window is
+      # followed: a window stored via `PATCH /v1/settings` is invisible to
+      # vault-core. Nested interpolation `${A-${B-c}}` is part of the
+      # Compose specification; verified on Compose 2.40.3, older Compose v2
+      # releases may not support nested defaults. The deploy-static CI job
+      # only checks that this file is accepted; the resolved values (unset,
+      # blank, set, for both variables) are checked by verify-stack.sh step
+      # 3e-ter.
+      VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}
     ports:
       # PORT 80 IS NOT NEGOTIABLE FOR REAL CLIENTS. Steam CDN traffic is plain
       # HTTP and the Steam client will only ever ask for port 80 -- a cache on
@@ -183,8 +214,10 @@ services:
       # single /vault mount point that is being redirected, not a sub-path
       # underneath it. This is deliberate: the same-filesystem constraint above
       # is only satisfiable by moving both at once, never one at a time.
-      # vault-api mounts the identical expression a few lines down -- both
-      # services must resolve to the SAME location, named-volume or bind-mount.
+      # vault-api mounts the identical expression a few lines down (plus
+      # `:nocopy`, so this service is the volume's only seeder; see there) --
+      # both services must resolve to the SAME location, named-volume or
+      # bind-mount.
       # See deploy/README.md "Using a dedicated cache mount" for the required
       # host-side `mkdir` + `chown 101:101` before first start.
       - ${VAULT_CACHE_PATH:-vault-cache}:/vault
@@ -192,6 +225,47 @@ services:
       # nginx's master drops privileges to uid 101 for its workers; nothing here
       # ever needs to gain privileges via a setuid binary.
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # SEC-FIX-1 (WP 5.3 review S-1). Unlike every other service here,
+      # vault-core STARTS as root: the image entrypoint, its hooks and the
+      # nginx master run as root, and only the workers (uid 101) serve
+      # requests. Each capability below is what one of those root steps
+      # needs; the workers lose all of them at their setuid().
+      #
+      # NET_BIND_SERVICE: the master binds port 80. (Docker >= 20.10 sets
+      #   net.ipv4.ip_unprivileged_port_start=0 in a container's own network
+      #   namespace, so it may be redundant on this engine. Kept so the
+      #   bind does not depend on that default.)
+      # SETUID, SETGID: the master's setgid()/initgroups()/setuid() to the
+      #   `nginx` user for each worker, and busybox `su` in
+      #   40-vault-preflight.sh, which probes cache/ and tmp/ writability AS
+      #   the worker user.
+      # CHOWN: the master chown()s the temp dirs it creates (tmp/proxy,
+      #   tmp/client_body, ...) to the worker user; 25-vault-eventlog.sh
+      #   chowns the event-log dir and file to 101:101; 40-vault-preflight.sh
+      #   chowns cache/depot when it has to create it.
+      # DAC_OVERRIDE: root writing into directories it does not own. /vault
+      #   and everything in it belong to uid 101 (mode 0755), so without it
+      #   the master cannot create those temp dirs on a fresh volume,
+      #   25-vault-eventlog.sh cannot create the event-log file, and the
+      #   master cannot open that 101-owned file for appending when it
+      #   starts (event log ON, as deploy/.env.example ships it).
+      #
+      # Deliberately NOT granted: FOWNER (no root step chmods or utimes a
+      # file it does not own; nginx only chmods a temp dir that lacks u+rwx,
+      # and it creates them 0700), KILL (the master signals its uid-101
+      # workers over its channel socket for quit/reload; kill() is only a
+      # fallback, e.g. SIGKILL after a SIGTERM stop times out), and NET_RAW,
+      # MKNOD, SETPCAP, SETFCAP, FSETID, SYS_CHROOT, AUDIT_WRITE (nothing
+      # here uses them). verify-stack.sh step 4c checks the resulting
+      # CapEff/CapBnd of the master and of a worker.
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_OVERRIDE
     logging: *vault-logging
 
   # ===========================================================================
@@ -214,7 +288,7 @@ services:
       # build context, unaffected by this.
       context: ..
       dockerfile: api/Dockerfile
-    image: steamhangar/vault-api:${VAULT_IMAGE_TAG:-0.1.0}
+    image: ghcr.io/steamhangar/vault-api:${VAULT_IMAGE_TAG:-0.1.0}
     restart: unless-stopped
     environment:
       # Required. No default anywhere in the stack: Compose refuses to start
@@ -423,20 +497,47 @@ services:
       VAULT_RELAY_EXPOSE_PLAYTIME: ${VAULT_RELAY_EXPOSE_PLAYTIME:-false}
       VAULT_RELAY_EXPOSE_LAST_PLAYED: ${VAULT_RELAY_EXPOSE_LAST_PLAYED:-false}
       # Settings-API operator hard-lock (ADR-0009 decision 3; api/README.md
-      # "The operator hard-lock"). Forwarded HERE, and NOT grouped with
-      # VAULT_NAME/VAULT_SCHEDULE_*/VAULT_WEBHOOK_URL/VAULT_WEBHOOK_EVENTS
-      # below despite all of them being settings-API keys too: those have a
-      # DB-overridable alternative path (PATCH
-      # /v1/settings once the stack is up, ADR-0009), and this one does not
-      # -- a lock on the settings-write API can never be unlockable through
-      # that same API (ADR-0009 decision 3), so env forwarding is the ONLY
-      # path that reaches it at all. A shipped compose file that omitted this
-      # line could never actually enable the hard-lock api/README.md
-      # documents as a supported headless/GitOps deployment mode -- see
+      # "The operator hard-lock"). Env-only BY DEFINITION: a lock on the
+      # settings-write API can never be unlockable through that same API
+      # (ADR-0009 decision 3), so env forwarding is the ONLY path that
+      # reaches it at all. A shipped compose file that omitted this line
+      # could never actually enable the hard-lock api/README.md documents as
+      # a supported headless/GitOps deployment mode -- see
       # tests/test_p1_compose_env_defaults.py, which fails if this line is
       # ever removed. Off (read-write) by default, matching config.py's own
       # default.
       VAULT_SETTINGS_READONLY: ${VAULT_SETTINGS_READONLY:-false}
+      # The five remaining settings-API keys (settings_store.OVERRIDABLE_SPECS:
+      # vault_name, schedule_interval_minutes, schedule_client_stale_days,
+      # webhook_url, webhook_events). Through the pre-freeze review these
+      # were DELIBERATELY not forwarded here, on the reasoning that PATCH
+      # /v1/settings (ADR-0009) is the supported way to set them. That
+      # reasoning has the same hole ADR-0014 already closed for
+      # VAULT_SWEEP_INCLUDE_CACHED and VAULT_SCHEDULE_WINDOW above: under
+      # VAULT_SETTINGS_READONLY=1 every PATCH is refused with 403, and with
+      # no line here the five keys were unreachable in the shipped stack --
+      # a headless/GitOps deployment could never name its vault, tune the
+      # sweep cadence, or configure a webhook at all (pre-freeze project
+      # review, finding S3). PATCH /v1/settings remains the OTHER supported
+      # way to change them once the stack is up (db > env > default, ADR-0009
+      # -- this is only the ENV half of that chain).
+      #
+      # NO-COLON FORM WITH AN EMPTY DEFAULT, on purpose: none of the five has
+      # a compose-side default to hand-copy. Unset or blank both reach
+      # vault-api as "" and config.Settings.from_env then applies its OWN
+      # built-in default (DEFAULT_SCHEDULE_INTERVAL_MINUTES /
+      # DEFAULT_SCHEDULE_CLIENT_STALE_DAYS for the two integers; "no name",
+      # "no webhook", "all events" for the three strings) -- one source of
+      # truth, nothing here to drift. The no-colon form is chosen so a
+      # future edit that DOES add a default here cannot silently reintroduce
+      # the R2-B1 trap documented on VAULT_SCHEDULE_WINDOW above (a blank
+      # .env value must never become that default). Pinned structurally by
+      # tests/test_p1_compose_env_defaults.py.
+      VAULT_NAME: ${VAULT_NAME-}
+      VAULT_SCHEDULE_INTERVAL_MINUTES: ${VAULT_SCHEDULE_INTERVAL_MINUTES-}
+      VAULT_SCHEDULE_CLIENT_STALE_DAYS: ${VAULT_SCHEDULE_CLIENT_STALE_DAYS-}
+      VAULT_WEBHOOK_URL: ${VAULT_WEBHOOK_URL-}
+      VAULT_WEBHOOK_EVENTS: ${VAULT_WEBHOOK_EVENTS-}
       # --- WP EG-1 (ADR-0011): the egress lock. See the big banner comment
       # above the top-level `networks:` block for the full mechanism; these
       # four lines are that mechanism's vault-api-side half. ---
@@ -497,21 +598,14 @@ services:
       VAULT_EGRESS_ALLOW: ${VAULT_EGRESS_ALLOW:-}
       # VAULT_DB_PATH, VAULT_CACHE_ROOT, VAULT_STEAMPREFILL_PATH and
       # VAULT_WEB_DIR are baked into the image (they describe the image's own
-      # layout, not a deployment choice) -- see api/Dockerfile. VAULT_NAME,
-      # VAULT_SCHEDULE_INTERVAL_MINUTES, VAULT_SCHEDULE_CLIENT_STALE_DAYS,
-      # VAULT_WEBHOOK_URL and VAULT_WEBHOOK_EVENTS are deliberately NOT
-      # forwarded here, for a different reason than VAULT_SETTINGS_READONLY
-      # above: they are DB-overridable at runtime via PATCH /v1/settings
-      # (ADR-0009) once the stack is up, which is the supported way to set
-      # them -- see api/README.md "Settings" and the web UI / app settings
-      # screens. That reasoning does not transfer to VAULT_SETTINGS_READONLY,
-      # which is why it is forwarded separately above instead of grouped with
-      # these. VAULT_SCHEDULE_WINDOW used to be grouped with this list too
-      # (through the WP SWEEP-1 default flip above) -- it moved to its own
-      # forwarding line near VAULT_GC_GRACE_DAYS/VAULT_AUTO_GC once shipping
-      # a default window became necessary to make THAT pairing's sweep half
-      # actually run out of the box (ADR-0014 §"Shipping an enabled nightly
-      # schedule"); PATCH /v1/settings remains equally supported for it.
+      # layout, not a deployment choice) -- see api/Dockerfile. Every
+      # settings-API key (ADR-0009) is now forwarded above: VAULT_SCHEDULE_
+      # WINDOW near VAULT_GC_GRACE_DAYS/VAULT_AUTO_GC (ADR-0014 §"Shipping an
+      # enabled nightly schedule"), the other five directly under
+      # VAULT_SETTINGS_READONLY (pre-freeze review finding S3) -- the
+      # "PATCH /v1/settings is the supported path, so no .env line" reasoning
+      # that used to keep them out of this file does not survive
+      # VAULT_SETTINGS_READONLY=1, see the comment there.
       # VAULT_MANIFEST_ARCHIVE_DIR and VAULT_STEAMPREFILL_CACHE_DIR are
       # genuine path overrides tied to volume layout, not general-purpose
       # tuning knobs -- left env-only and documented via the
@@ -535,7 +629,7 @@ services:
       # Same VAULT_CACHE_PATH expression as vault-core above -- see the comment
       # there. Both services must agree on named-volume vs. bind-mount and on the
       # exact path; this line is kept textually identical to vault-core's on
-      # purpose.
+      # purpose, except for the `:nocopy` suffix explained below.
       #
       # This is ALSO where the cache-event log lives when VAULT_EVENT_LOG is
       # set on vault-core above: core/Dockerfile pre-creates /vault/logs/
@@ -548,7 +642,21 @@ services:
       # here: WP 3.11 owns the cursor/truncation contract (core/README.md
       # "Rotation and the USR1 contract") and decided its own access shape
       # (read, never truncate) rather than one imposed by the mount.
-      - ${VAULT_CACHE_PATH:-vault-cache}:/vault
+      #
+      # `:nocopy` (the ONE deliberate textual difference from vault-core's
+      # line): both images carry /vault/cache/depot and /vault/tmp, and Docker
+      # copies image content into an EMPTY named volume when a container is
+      # created with it. Compose creates vault-core and vault-api concurrently,
+      # so on a fresh volume both copied at once and one create failed with
+      # "mkdir .../_data/tmp: file exists" (observed in a verify run). With
+      # nocopy, vault-core is the only seeder (layout + 101:101 ownership come
+      # from core/Dockerfile), whatever the creation order: Docker seeds only
+      # an empty volume, and a nocopy mount leaves it empty. vault-api needs
+      # nothing under /vault at boot (VAULT_CACHE_ROOT is read per request).
+      # Bind-mount mode (VAULT_CACHE_PATH set): there is no copy-up for a bind,
+      # Compose ignores the option and prints a one-line warning ("mount of
+      # type `bind` should not define `volume` option"); harmless.
+      - ${VAULT_CACHE_PATH:-vault-cache}:/vault:nocopy
       # SQLite database (mapping, jobs, agent reports). Small; back this up.
       - vault-db:/data
       # SteamPrefill's Config/ (the Steam SESSION) is NOT mounted here anymore
@@ -634,7 +742,7 @@ services:
   # vault_api/prefill_runner.py's own module docstring.
   # ===========================================================================
   vault-runner:
-    image: steamhangar/vault-api:${VAULT_IMAGE_TAG:-0.1.0}
+    image: ghcr.io/steamhangar/vault-api:${VAULT_IMAGE_TAG:-0.1.0}
     command: ["python", "-m", "vault_api.prefill_runner"]
     restart: unless-stopped
     # A stable, project-scoped name for the one documented interactive step
@@ -820,6 +928,11 @@ services:
     # push the real number past it), so a SIGKILL could arrive mid-teardown
     # and turn a clean "aborted" result into a hard kill with nothing
     # recorded. 20s gives roughly 2x the computed worst case.
+    # Not covered by that budget: with a LOCKED database each result-write
+    # attempt can block for the full busy_timeout (5s per attempt), so
+    # prefill_runner._record_result's retries can outlast the 20s grace. The
+    # SIGKILL then has the same outcome as the runner giving up on its own
+    # (no result stored, lease expires, job failed as runner_lost).
     stop_grace_period: 20s
     # The image's baked HEALTHCHECK (api/Dockerfile) probes
     # http://127.0.0.1:8080/v1/health -- this process never listens on that
@@ -847,7 +960,7 @@ services:
     build:
       context: ./proxy
       dockerfile: Dockerfile
-    image: steamhangar/vault-proxy:${VAULT_IMAGE_TAG:-0.1.0}
+    image: ghcr.io/steamhangar/vault-proxy:${VAULT_IMAGE_TAG:-0.1.0}
     restart: unless-stopped
     environment:
       # The ONLY operator-facing knob this service has. Rendered into a
@@ -894,7 +1007,7 @@ services:
     build:
       context: ../dns
       dockerfile: Dockerfile
-    image: steamhangar/vault-dns:${VAULT_IMAGE_TAG:-0.1.0}
+    image: ghcr.io/steamhangar/vault-dns:${VAULT_IMAGE_TAG:-0.1.0}
     restart: unless-stopped
     environment:
       # REQUIRED when this profile is enabled: the LAN IPv4 address of the host

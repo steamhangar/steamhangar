@@ -19,6 +19,7 @@
  * instead of building their own store.
  */
 import { createPollingStore } from "./store.js";
+import { getStoredApiKey, isDemoMode } from "./api.js";
 
 export const store = createPollingStore();
 
@@ -27,4 +28,19 @@ export const store = createPollingStore();
 // the only one that actually runs this line). `ResourceLoop.start()` is
 // itself idempotent, so this is safe even if a future module imports
 // store-singleton.js and also calls `store.start()` defensively.
-store.start();
+//
+// WP WEB-FIX-1 (N4): gated on a stored vault API key OR demo mode — the
+// same predicate `components/rail-panel.js` already applies to its own
+// one-time settings fetch. A genuine first run has neither, so every loop
+// would otherwise 401 four times per cycle (jobs/games/clients/cache) and
+// back off for the whole time the onboarding overlay is up. Nothing needs
+// to start the loops later in that page's life: both onboarding exits
+// (`finish()` after a verified key, "browse in demo mode") reload the page,
+// and this line runs again against the new localStorage state.
+export function shouldStartPolling({ hasApiKey, demoMode }) {
+  return hasApiKey || demoMode;
+}
+
+if (shouldStartPolling({ hasApiKey: !!getStoredApiKey(), demoMode: isDemoMode() })) {
+  store.start();
+}

@@ -111,7 +111,13 @@
     own resolved client_id.
 
 .PARAMETER AgentPath
-    Full path to vault-agent.exe.
+    Full path to vault-agent.exe. Recommended location:
+    %LOCALAPPDATA%\VaultAgent\vault-agent.exe. A folder you create directly
+    under C:\ (C:\Tools, ...) inherits C:\'s ACL, which lets every
+    Authenticated User modify its contents -- any local account could then
+    swap the binary the task runs as you. This script warns (does not
+    abort) when the binary or its folder is writable by Users,
+    Authenticated Users or Everyone.
 
 .PARAMETER ServerUrl
     VAULT_AGENT_SERVER_URL value (e.g. http://100.x.y.z:8080).
@@ -127,7 +133,10 @@
 .PARAMETER ApiKeyFile
     Path to a file whose entire (trimmed) contents is the API key.
     Mutually exclusive with -ApiKey. The file itself is only read, never
-    copied or referenced by the installed task.
+    copied or referenced by the installed task -- keep it under your user
+    profile (e.g. $env:USERPROFILE\vault-key.txt) and delete it after the
+    install. This script warns (does not abort) when the file is readable
+    by Users, Authenticated Users or Everyone.
 
 .PARAMETER ClientId
     Optional VAULT_AGENT_CLIENT_ID value. Omitted -> vault-agent defaults to
@@ -145,7 +154,13 @@
 
 .PARAMETER LibraryRoot
     Optional VAULT_AGENT_LIBRARY_ROOT value. Omitted -> vault-agent's own
-    Windows default (`C:\Program Files (x86)\Steam`).
+    Windows default (`C:\Program Files (x86)\Steam`). When omitted, this
+    script checks whether that default actually contains a steamapps\
+    directory and prints a loud warning if it does not (WP AGENT-FIX-1
+    S1) - the install still proceeds, but vault-agent will then refuse to
+    post (exit 1, "report refused" in the log) until -LibraryRoot points
+    at the directory that contains steamapps\. No registry lookup is done
+    (v1 scope); see agent/README.md's "Windows Scheduled Task" section.
 
 .PARAMETER ConfigDir
     Directory this script owns: the env file, the deployed copy of
@@ -167,12 +182,12 @@
     Default: <ConfigDir>\vault-agent.log.
 
 .EXAMPLE
-    .\install-task.ps1 -AgentPath C:\Tools\vault-agent.exe `
-        -ServerUrl http://100.64.0.5:8080 -ApiKeyFile C:\secrets\key.txt
+    .\install-task.ps1 -AgentPath $env:LOCALAPPDATA\VaultAgent\vault-agent.exe `
+        -ServerUrl http://100.64.0.5:8080 -ApiKeyFile $env:USERPROFILE\vault-key.txt
 
 .EXAMPLE
-    .\install-task.ps1 -AgentPath C:\Tools\vault-agent.exe `
-        -ServerUrl http://100.64.0.5:8080 -ApiKeyFile C:\secrets\key.txt -WhatIf
+    .\install-task.ps1 -AgentPath $env:LOCALAPPDATA\VaultAgent\vault-agent.exe `
+        -ServerUrl http://100.64.0.5:8080 -ApiKeyFile $env:USERPROFILE\vault-key.txt -WhatIf
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -272,6 +287,61 @@ $runnerSourcePath = Join-Path $PSScriptRoot "run-vault-agent.ps1"
 if (-not (Test-Path -LiteralPath $runnerSourcePath -PathType Leaf)) {
     Write-Error "run-vault-agent.ps1 not found next to this script ($runnerSourcePath)."
     exit 2
+}
+
+# ---- ACL advisories (warn, never abort) --------------------------------
+# WP SEC-FIX-2 (S6): the task runs AgentPath as this user, so anyone who can
+# replace that binary runs code as this user; and the key file holds the API
+# key. Both are checked against the broad well-known groups by SID (locale-
+# independent): Everyone, Authenticated Users, BUILTIN\Users. Only Allow
+# rules that apply to the object itself count (inherit-only rules do not).
+# Generic-rights bits are not decoded; this is an advisory, not a proof.
+
+function Get-BroadGroupRights {
+    param([string]$Path, [int]$RightsMask)
+    $broadSids = @("S-1-1-0", "S-1-5-11", "S-1-5-32-545")
+    $hits = @()
+    try {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        $rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+    } catch {
+        Write-Warning "Could not read the ACL of '$Path' ($($_.Exception.Message)); skipping its permission check."
+        return @()
+    }
+    foreach ($rule in $rules) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        if (($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+        if ($broadSids -notcontains $rule.IdentityReference.Value) { continue }
+        if (([int]$rule.FileSystemRights -band $RightsMask) -eq 0) { continue }
+        $name = $rule.IdentityReference.Value
+        try { $name = $rule.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { }
+        $hits += $name
+    }
+    return @($hits | Select-Object -Unique)
+}
+
+# WriteData(2) | AppendData(4) | DeleteSubdirectoriesAndFiles(64) |
+# Delete(65536) | WriteDAC(262144) | WriteOwner(524288)
+$modifyMask = 2 + 4 + 64 + 65536 + 262144 + 524288
+# ReadData(1)
+$readMask = 1
+
+$agentDir = Split-Path -Parent $AgentPath
+foreach ($target in @($AgentPath, $agentDir)) {
+    $who = @(Get-BroadGroupRights -Path $target -RightsMask $modifyMask)
+    if ($who.Count -gt 0) {
+        Write-Warning ("'$target' can be modified by: " + ($who -join ", ") + ". Any local account " +
+            "could replace the binary this task runs as you. Move vault-agent.exe to " +
+            "$env:LOCALAPPDATA\VaultAgent\ (folders created directly under C:\ inherit write " +
+            "access for Authenticated Users).")
+    }
+}
+if ($haveApiKeyFile) {
+    $who = @(Get-BroadGroupRights -Path $ApiKeyFile -RightsMask $readMask)
+    if ($who.Count -gt 0) {
+        Write-Warning ("ApiKeyFile '$ApiKeyFile' is readable by: " + ($who -join ", ") + ". Keep the " +
+            "key file under your user profile and delete it after this install.")
+    }
 }
 
 # All inputs validated -- from here on, an unexpected failure (a mutating
@@ -413,6 +483,33 @@ if ($ClientId) {
     Write-Host "                    Pass -ClientId to choose a different one explicitly, or check"
     Write-Host "                    $LogFile after the first run for the exact value vault-agent"
     Write-Host "                    resolved (it logs client_id / client_id_source / client_id_note)."
+}
+
+# ---- library root visibility (WP AGENT-FIX-1, S1) -------------------------
+#
+# A wrong library root is the one misconfiguration vault-agent could not
+# tell from "nothing installed" until WP AGENT-FIX-1: the agent now
+# refuses to post when no steamapps\ directory is readable, so surface the
+# most likely cause HERE, at install time, instead of in a log nobody reads
+# until the games vanish from the server. The literal below mirrors
+# go/agentconfig's defaultLibraryRoot("windows") exactly - keep the two in
+# sync. Warn only, never abort: Steam may be installed after the agent.
+if ($LibraryRoot) {
+    Write-Host "  Library root    : $LibraryRoot (explicit -LibraryRoot)"
+} else {
+    $defaultLibraryRoot = "C:\Program Files (x86)\Steam"
+    $defaultSteamapps = Join-Path $defaultLibraryRoot "steamapps"
+    if (Test-Path -LiteralPath $defaultSteamapps -PathType Container) {
+        Write-Host "  Library root    : not given -> vault-agent's Windows default"
+        Write-Host "                    ($defaultLibraryRoot), steamapps\ found there."
+    } else {
+        Write-Host "  Library root    : not given -> vault-agent's Windows default"
+        Write-Host "                    ($defaultLibraryRoot)"
+        Write-Warning ("No steamapps directory at '$defaultSteamapps'. vault-agent will REFUSE to " +
+            "report (exit 1) until the Steam install directory is known. Re-run this script " +
+            "with -LibraryRoot <dir containing steamapps> (e.g. -LibraryRoot D:\Steam), or " +
+            "install Steam there first.")
+    }
 }
 
 Write-Host ""

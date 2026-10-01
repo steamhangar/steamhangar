@@ -23,14 +23,17 @@ citation below was opened and read at `234f16c`. `docs/PROJECT_PLAN.md` in
 particular grows under active editing — including this very package's own
 tick — so citations into it are given as section-plus-quote anchors, never
 line numbers, precisely because a line number into a file that grows is a
-claim with a short shelf life. Citations into files that are not actively
-growing (source code, other docs) are given as line numbers/ranges, each
-verified at the stated commit; re-open them if reading this well after
-that date.
+claim with a short shelf life. **WP DOCS-FIX-2 (2026-10-01) extended that
+rule to the whole document:** every former `file:NNN` citation is now a
+symbol or section anchor (a function, map, block, setting or heading name,
+often with a short verbatim quote), each re-checked against the tree at
+`f70c031`, so a later insertion into the cited file cannot silently stale
+it. If an anchor no longer greps, the claim it supports needs
+re-verifying.
 
 This document describes the security posture of SteamHangar *as shipped*, not
 as designed or aspired to. Every claim about behaviour below is followed by
-the file and line (or section-plus-quote anchor) it was read from. Where a
+the file and symbol or section-plus-quote anchor it was read from. Where a
 protection does not exist, that is stated plainly rather than left implicit.
 A separate, shorter [`SECURITY.md`](../../SECURITY.md) at the repository
 root covers how to report a vulnerability.
@@ -95,9 +98,9 @@ edits the lock away, `vault-runner`'s deliberately broad egress).
 This is the single load-bearing assumption of the whole design, stated
 directly in the deployment docs: **`vault-core` (the cache) has no
 authentication and cannot have any** — "the Steam client can't present a
-credential" (`deploy/README.md:595-601`). The same section states the
-consequence in imperative language: "Never port-forward it, never put it
-behind a public reverse proxy" (`deploy/README.md:600-601`, echoed in
+credential" (`deploy/README.md`, "Security posture"). The same section
+states the consequence in imperative language: "Never port-forward it,
+never put it behind a public reverse proxy" (same bullet, echoed in
 `docs/PROJECT_PLAN.md` §10's "Remote access" bullet, which states plainly:
 "never expose vault-core/port 80").
 
@@ -107,44 +110,106 @@ Reading the actual nginx config (`core/docker/nginx.conf.template`), not the
 ADR that describes it:
 
 - **Reach the cache with zero authentication.** `location /depot/` has no
-  auth directive of any kind (`core/docker/nginx.conf.template:428-476`).
+  auth directive of any kind (`core/docker/nginx.conf.template`, the
+  `location /depot/` block).
   Any device that can route a TCP connection to port 80 can `GET` a depot
   chunk it already knows the path for, and get it served — HIT from disk,
   or MISS via a live fetch from Steam's real CDN followed by
-  `proxy_store`-ing the result (`core/docker/nginx.conf.template:478-571`).
-  There is no `limit_req`/rate limiting anywhere in this config — its
-  absence was verified by reading the entire file, not assumed.
+  `proxy_store`-ing the result (the `location @miss` block). There is no
+  `limit_req`/`limit_conn` request limiting anywhere in this config — its
+  absence was verified by reading the entire file, not assumed. What does
+  exist, optional and off by default, is an upstream bandwidth cap
+  (`VAULT_UPSTREAM_RATE`, `proxy_limit_rate` in `location @miss`, WP
+  TH-1a/ADR-0015): it slows how fast MISSes are read from Steam, it is
+  not a request limit and not a DoS control — it limits no request count,
+  no connection count and no disk use. With the cap on, a LAN client that
+  opens many requests (HITs included) lowers every other client's share of
+  it, because the divisor counts all requests vault-core is serving. That
+  is a contention effect, not a bypass: the aggregate upstream rate still
+  never exceeds the cap.
 - **Use vault-core as a scoped, unauthenticated HTTP relay to Steam's CDN.**
   The one guard on the miss path is the Host-header allowlist
-  (`core/docker/nginx.conf.template:145-164`, enforced at
-  `core/docker/nginx.conf.template:511-513`): only `*.steamcontent.com` and
-  `*.steamserver.net` are ever proxied to. This is explicitly an anti-open-proxy
+  (the `$vault_upstream_host` and `$vault_host_allowed` maps under
+  "Host-header allowlist + upstream host" in
+  `core/docker/nginx.conf.template`, enforced by the
+  `if ($vault_host_allowed = 0)` guard in `location @miss`): only
+  `*.steamcontent.com` and
+  `*.steamserver.net` are ever proxied to. Since SEC-FIX-1 the host must
+  match one of those two patterns IN FULL: dot-separated labels of
+  `[a-z0-9-]` only, anchored at both ends. The upstream host is that matched
+  name (or the fixed fallback edge for `lancache.steamcontent.com`) and is
+  empty for anything else, so `proxy_pass` cannot dial a name the allowlist
+  did not match. **Before SEC-FIX-1 the allowlist was suffix-only**
+  (`~*\.steamcontent\.com$`, `~*\.steamserver\.net$`) and the upstream
+  map passed `$host` through for everything. It therefore accepted any Host
+  that merely ended in a Steam suffix, including ones carrying a URL
+  delimiter, such as `127.0.0.1?x.steamcontent.com`. `proxy_pass` splits
+  such a URL at the `?` and would dial `127.0.0.1`: an unauthenticated GET
+  relay to any port-80 target, with the answer stored under `/depot/`.
+  Measured against the pre-fix config on the shipped nginx 1.29.8
+  (`.github/scripts/verify-core-nginx.sh`, which now carries that probe):
+  the relay did not happen there, because nginx's own Host validation
+  already answers `400` for a Host containing `?`, `@`, `#`, a backslash, a
+  space or a `/` (also after a `:port`), before the allowlist is consulted.
+  Two characters did get through and were accepted. `%` (e.g.
+  `127.0.0.1%3fx.steamcontent.com`) and `_` (e.g. `x_y.steamcontent.com`)
+  each led to a DNS lookup of that literal name, which lies inside Valve's
+  own zone, not to a connection to some other host. On this nginx the fix is
+  therefore defence in depth. The allowlist no longer depends on nginx's
+  Host validation staying as strict as 1.29.8's, and `%`/`_` hosts are now
+  refused with `403` without a lookup. This is explicitly an anti-open-proxy
   guard, not an access-control guard — the config comment names the threat
   it defends against precisely: "what stops this server being usable as a
   generic open HTTP proxy via a forged Host header"
-  (`core/docker/nginx.conf.template:146-149`). It does **not** restrict *who*
+  (the comment above that map). It does **not** restrict *who*
   may use the cache as a relay to those two host families — it restricts
   *where* the relay can point. Concretely: any LAN device, trusted or not,
   can drive real Steam CDN egress traffic through your server and fill your
   disk with real (large) game content it requests, with no login and no
-  rate limit — and the requester picks both ends of that transaction: which
+  request rate limit (the optional upstream bandwidth cap above, when set,
+  only stretches the same download over more time) — and the requester
+  picks both ends of that transaction: which
   upstream edge gets contacted (`$host` becomes `$vault_upstream_host`
-  verbatim for anything outside the one hardcoded hosts-file fallback,
-  `core/docker/nginx.conf.template:177-180`, actually dialed at `:564`) and
-  where the response lands on disk (`$vault_store_path` is built from the
-  request's own `$uri`, `core/docker/nginx.conf.template:199-200`) — subject
+  verbatim whenever it fully matches one of the two family patterns,
+  except for the one hardcoded hosts-file fallback in the
+  `$vault_upstream_host` map; that name is actually dialed by the
+  `proxy_pass` in `location @miss`) and where the response lands on disk
+  (`$vault_store_path` is built from the request's own `$uri`, the
+  `$vault_store_path` map under "Store-only-200 guard") — subject
   only to the Host-family allowlist above, nothing scopes *which* depot/path
   under that family gets fetched and stored. This is a real, if not
   especially severe, in-LAN DoS/cost vector against your own disk and
   upstream bandwidth, and nothing in the code defends against it.
+  What the relay does refuse: it is GET-only — any other method, `HEAD`
+  included, is answered `405` by a guard at the top of `location /depot/`
+  before `try_files` runs, so nothing but a `GET` is ever relayed to
+  Valve — and any URI ending in `/` is answered `404` there too, before
+  any filesystem lookup (§2). A request arriving with vault-core's own
+  `X-SteamHangar-Hop` header is answered `508` by the same guard block, so
+  a DNS loop ends after one hop instead of recursing (§5 covers what that
+  header reveals upstream).
 - **Reach vault-api if it can guess or capture the API key** — but not
   without one. Every router except health is constructed as
   `APIRouter(dependencies=[Depends(require_api_key)])`
-  (`api/vault_api/routers/games.py:18`, `cache.py:29`, `jobs.py:37`,
-  `mapping.py:30`, `agent.py:27`, `clients.py:77`, `schedule.py:38`,
-  `settings.py:92`, `stats.py:36`, `oracle.py:41`, `steam.py:45` — all
-  verified individually), and `main.py` registers every one of those
-  routers (`api/vault_api/main.py:236-257`). See §7 for exactly what that
+  (the module-level `router = APIRouter(...)` in each of
+  `api/vault_api/routers/games.py`, `cache.py`, `jobs.py`, `mapping.py`,
+  `agent.py`, `clients.py`, `schedule.py`, `settings.py`, `stats.py`,
+  `oracle.py` and `steam.py` — all verified individually), and
+  `main.py` registers every one of those routers (the
+  `app.include_router(...)` calls in `api/vault_api/main.py::create_app`;
+  `routers/health.py` is the one router built without the dependency).
+  Since WP SEC-FIX-4 (S-3) the key is also checked BEFORE routing: FastAPI
+  reads and parses a JSON body while resolving a route's parameters, ahead
+  of the router dependency, so a keyless 40 MB body used to cost ~1.7 GB
+  RSS and malformed keyless JSON answered `422` (a pre-auth parser oracle)
+  instead of `401`. `api/vault_api/body_guard.py::PreAuthBodyGuard`, a
+  pure-ASGI middleware, now answers `401` for every `/v1` path except
+  exactly `/v1/health` without reading a body byte (same constant-time
+  comparison, `auth.py::api_key_matches`), and caps every body at 1 MiB
+  (`413` on a larger `Content-Length`, or once a chunked body passes the
+  cap). The largest legitimate body, a 10 000-appid agent report, is
+  ~110 KB. The router dependency stays as defence in depth.
+  See §7 for exactly what that
   key does and does not protect.
 - **Reach the web UI's static files without a key** (`index.html`,
   `.js`, `.css` — `api/vault_api/webui.py`), because the UI shell itself
@@ -155,8 +220,9 @@ ADR that describes it:
 ### What happens if someone exposes this to the internet — and what stops it
 
 Nothing in the code stops it. `vault-core`'s default bind is `0.0.0.0`
-(`deploy/compose.yaml:81`, comment at `deploy/compose.yaml:76-80`: "Default
-0.0.0.0 is deliberate and correct HERE and only here… It has no
+(`deploy/compose.yaml`, the `vault-core` service's
+`${VAULT_CORE_BIND:-0.0.0.0}` port entry, with the comment above it:
+"Default 0.0.0.0 is deliberate and correct HERE and only here… It has no
 authentication, by design"). Port-forwarding that address from a home
 router to the internet is a configuration action entirely outside
 SteamHangar's control — there is no code-level guard (no IP allowlist, no
@@ -164,7 +230,8 @@ SteamHangar's control — there is no code-level guard (no IP allowlist, no
 only thing standing between "LAN-only by design" and "an open,
 unauthenticated Steam-CDN-scoped HTTP relay on the internet" is the
 operator's own router/firewall configuration and reading the docs. The same
-is true of `vault-api`'s port 8080 (`deploy/compose.yaml:260-266`) — its
+is true of `vault-api`'s port 8080 (the `vault-api` service's
+`${VAULT_API_BIND:-0.0.0.0}` port entry) — its
 authentication is real (§7), but exposing it directly still exposes a
 single shared bearer credential with no rate limiting and no brute-force
 lockout (see §7) to the entire internet instead of to a LAN.
@@ -174,9 +241,10 @@ this risk, and the compose file itself is unusually blunt about it: the
 comment above its port mapping is titled "OPEN-RESOLVER WARNING — THE MOST
 DANGEROUS TWO LINES IN THIS FILE" and explains that a wrong bind turns it
 into "a DNS amplification/reflection weapon aimed at third parties, using
-your bandwidth and your IP's reputation" (`deploy/compose.yaml:336-355`).
-The default bind (`127.0.0.1`) fails closed if the operator forgets to set
-`VAULT_DNS_BIND` (`deploy/compose.yaml:353-355`), which is a real,
+your bandwidth and your IP's reputation" (`deploy/compose.yaml`, the
+`vault-dns` service's `ports:` comment). The default bind (`127.0.0.1`)
+fails closed if the operator forgets to set `VAULT_DNS_BIND` (the
+`${VAULT_DNS_BIND:-127.0.0.1}` port entries just below it), which is a real,
 code-level mitigation — but it only protects the *default*; nothing stops
 an operator from setting `VAULT_DNS_BIND=0.0.0.0` themselves.
 
@@ -194,14 +262,15 @@ plain HTTP and will not refuse to run without TLS in front of it.
 ## 2. The cache contents
 
 `vault-core` stores Steam depot content path-faithfully under
-`cache/depot/<depotid>/...` (`core/docker/nginx.conf.template:63` — `root
-cache` under the `-p /vault` prefix, i.e. `/vault/cache/depot/...`). There is
+`cache/depot/<depotid>/...` (the `root cache;` directive in the `server`
+block of `core/docker/nginx.conf.template`, under the `-p /vault` prefix,
+i.e. `/vault/cache/depot/...`). There is
 no `autoindex` directive anywhere in the config (verified by reading the
 whole file) — a device cannot browse a depot's contents; it can only
 request a chunk it already knows the hash/path of, learned in the ordinary
 course of that device's own Steam client asking for it. `location ^~ /tmp/ {
-return 404; }` (`core/docker/nginx.conf.template:579-581`) additionally
-denies the in-flight temp-file path defensively.
+return 404; }` additionally denies the in-flight temp-file path
+defensively.
 
 ### Who can read it
 
@@ -214,7 +283,8 @@ path-keyed store any Steam client on the network benefits from.
 ### What it reveals about who owns which games
 
 `vault-api`'s depot→app mapping table (`depot_app_map`,
-`api/vault_api/db.py:182-190`) plus the on-disk depot tree is exactly the
+the `CREATE TABLE IF NOT EXISTS depot_app_map` statement in
+`api/vault_api/db.py`) plus the on-disk depot tree is exactly the
 information "which games are cached" — reachable via `GET /v1/games` and
 `GET /v1/cache/summary`, both API-key gated (§7). Raw filesystem/nginx
 access without the API key does **not** let a device enumerate "which
@@ -222,11 +292,11 @@ games are here" (no directory listing, as above) — but the response for a
 HIT and a MISS is served by structurally different code paths (a HIT
 resolves inside `location /depot/` via `try_files`; a MISS falls through to
 `location @miss`, which round-trips to the real Steam CDN before answering
-— `core/docker/nginx.conf.template:428-433, 478-571`), and there is no
+— the `location /depot/` and `location @miss` blocks), and there is no
 cache-status response header that would make the difference explicit: the
 only `add_header` directive anywhere in this config is
 `X-LanCache-Processed-By` on the heartbeat endpoint
-(`core/docker/nginx.conf.template:593`), not on `/depot/`. So a device that
+(`location = /lancache-heartbeat`), not on `/depot/`. So a device that
 already knows a valid depot/chunk path can plausibly *infer* whether it is
 cached by observing response latency — a HIT skipping the upstream
 round-trip should be measurably faster than a MISS. This is stated as a
@@ -238,6 +308,13 @@ either owning the game or having captured that path from someone who
 does), and even confirmed it reveals only "is this already cached," not who
 cached it or when.
 
+Depot URIs ending in `/` are now answered `404` locally, before any
+filesystem lookup (the trailing-slash guard in `location /depot/`), so the
+former 403-vs-upstream-404 difference no longer tells an unauthenticated LAN
+client whether a depot is cached. The remaining oracle is timing: a HIT is
+served from local disk measurably faster than a MISS is fetched from Valve,
+and this is accepted as inherent to any transparent cache.
+
 ### What the cache is *not*: not a licence bypass
 
 SteamHangar stores exactly the bytes Steam's own CDN serves to a licensed,
@@ -247,7 +324,7 @@ content (there is no code path in this repository that does any such
 thing — the manifest-parsing module goes out of its way to note that it
 *cannot*: "Filenames inside a cache-stored manifest's PAYLOAD are
 Valve-encrypted (need the depot decryption key, which vault-api never
-holds)" — `api/README.md:2165-2166`). A device that pulls cached bytes
+holds)" — `api/README.md`, "Manifest parsers (WP 3.1)"). A device that pulls cached bytes
 still needs a genuine, licensed Steam client to make sense of them — the
 same as it would need to make sense of a genuine Steam CDN response
 outside a cache entirely. Whether that content is independently usable
@@ -267,17 +344,18 @@ directly, not taken on faith:
 - **`vault_api/auth.py` and every router module** were read in full; none
   of them contains a Steam login/password code path. The only credential
   `vault-api` code handles is the operator's own `VAULT_API_KEY`
-  (`api/vault_api/auth.py:16-53`) and, if configured, the opt-in Steam Web
+  (`api/vault_api/auth.py::require_api_key`) and, if configured, the opt-in Steam Web
   API relay key (below) — neither is a Steam account password.
 - **The one-time interactive login is real, and happens outside vault-api's
-  own code.** `deploy/README.md:110-114` documents the actual command an
+  own code.** `deploy/README.md`'s "First run: the one-time SteamPrefill
+  login" section documents the actual command an
   operator runs: `docker compose exec -it vault-runner
   /opt/steamprefill/SteamPrefill select-apps` (since WP S-2 the session
   volume and the login live in the dedicated `vault-runner` service, not
-  vault-api — `deploy/README.md`'s login section) — this hands the terminal
+  vault-api — same section) — this hands the terminal
   directly to SteamPrefill's own login prompt; nothing in `vault_api/*.py`
-  is on that call path. `deploy/README.md:105-108` states the resulting
-  claim in the docs: "vault-api never sees, stores, transmits or logs Steam
+  is on that call path. The same section states the resulting claim in
+  the docs: "vault-api never sees, stores, transmits or logs Steam
   credentials… and no login ever happens during an image build."
 
 ### Where credentials *do* live in a working setup
@@ -285,15 +363,15 @@ directly, not taken on faith:
 The password and Steam Guard code are typed once, interactively, into
 SteamPrefill's own prompt. The resulting **session** (not the password
 itself — this project's own Phase-0 research supports the checkable claim
-that what gets persisted afterward is "not raw credentials," `poc/
-steamprefill/PROTOCOL.md:176`; see the closing gap list for the stronger
+that what gets persisted afterward is "not raw credentials,"
+`poc/steamprefill/PROTOCOL.md` §3.1 "First-run login"; see the closing gap list for the stronger
 claim this document does *not* make) is written by SteamPrefill into
 `/opt/steamprefill/Config`, which `deploy/compose.yaml::vault-runner` (the `vault-steamprefill:/opt/steamprefill/Config` mount — moved off vault-api by WP S-2) mounts from the
-named Docker volume `vault-steamprefill`. `deploy/README.md:119-120,
-126-127` names this directly: "The session lands in the
+named Docker volume `vault-steamprefill`. `deploy/README.md`'s login
+section names this directly: "The session lands in the
 `vault-steamprefill` volume at `/opt/steamprefill/Config`… **Treat the
-`vault-steamprefill` volume as sensitive. It holds a logged-in Steam
-session.**" Concretely: whoever has read access to that Docker volume's
+`vault-steamprefill` volume as sensitive.** It holds a logged-in Steam
+session." Concretely: whoever has read access to that Docker volume's
 files on the host (root on the Docker host, or anyone who can `docker
 cp`/mount it) can act as that logged-in Steam session. This is the single
 point where a real, **full-account** Steam credential-equivalent lives at
@@ -318,18 +396,20 @@ surface in `app/README.md`) — it is out of scope for this package's
 
 ### The web UI's Steam Web API relay — a second, narrower credential
 
-ADR-0004's addendum (opt-in web relay, `docs/adr/0004-...md:36-59`) adds a
+ADR-0004's addendum (opt-in web relay, `docs/adr/0004-...md`, "Addendum (2026-08-09)") adds a
 **Steam Web API key** — not a password, a revocable, read-scoped key the
 operator generates on Valve's site — stored server-side once the operator
 enters it in Settings. Verified in the schema: `steam_relay_key.api_key` is
 a plain `TEXT` column with no encryption-at-rest of its own
-(`api/vault_api/db.py:523-527`) inside the `vault-db` SQLite file
+(the `CREATE TABLE IF NOT EXISTS steam_relay_key` statement in
+`api/vault_api/db.py`) inside the `vault-db` SQLite file
 (`deploy/compose.yaml`'s `vault-db:/data` mount on vault-api). It never appears in a `GET` response body in
 full — `GET /v1/steam/key` returns only whether one is configured plus the
-last four characters (`api/vault_api/steam_relay.py:35-36`, docstring
-verified against the router's actual response shape) — and is cleared from
-the in-memory relay cache on every key change
-(`api/vault_api/steam_relay.py:85-90`). Its confidentiality at rest
+last four characters (`api/vault_api/steam_relay.py::mask_key`, and rule 3
+"Never echoed, never logged" of that module's docstring, verified against
+the router's actual response shape) — and is cleared from the in-memory
+relay cache on every key change (the same docstring's "Invalidated on every
+key change" paragraph: both key routes call `RelayCache.clear()`). Its confidentiality at rest
 therefore rests entirely on who can read the `vault-db` volume's file on
 the host, the same trust boundary as the Steam session above, not on any
 in-database encryption.
@@ -345,18 +425,12 @@ this document is right to call it out by name.
 `settings_store.py` are under active development in this same phase — WP
 4h.0 alone drifted four of this section's citations by adding 109 lines to
 `routers/steam.py` in the same commit that rewrote this prose, on top of a
-`settings_readonly` drift the same review round caught in §7. Every
-citation into these three files **within this section (§4)** is therefore
-a `module::symbol` anchor (function/class/constant name, optionally with a
-short verbatim quote) rather than a line number, so it stays greppable
-across the next insertion instead of drifting again. Citations into these
-same three files elsewhere in this document (§5, §7) were re-verified
-against the current tree for this follow-up but are left as line numbers
-where they already were — converting every citation in the whole document
-is out of this follow-up's footprint; a plain line number is kept there
-only because it was re-checked as still accurate, not because the file has
-stopped moving (see the top-of-document stamp for the files this document
-actually judges to not be actively growing).
+`settings_readonly` drift the same review round caught in §7. This section
+was therefore the first to use `module::symbol` anchors
+(function/class/constant name, optionally with a short verbatim quote)
+instead of line numbers, so a citation stays greppable across the next
+insertion. As of WP DOCS-FIX-2 the whole document follows that convention
+(see the top-of-document stamp).
 
 ### What is stored, and where
 
@@ -367,7 +441,8 @@ Two distinct additions:
    `GameSummary`/`GameDetail`'s `manifest_change_frequency`,
    `manifest_observation_days`, and `manifest_days_since_last_change`
    fields, always present in `GET /v1/games`/`GET /v1/games/{appid}`
-   (`api/vault_api/routers/games.py:87-105, 132-136`). **This is not
+   (`api/vault_api/routers/games.py::GameSummary` and `::GameDetail`, the
+   three `manifest_*` fields of each). **This is not
    personal data about a person** — it describes how often *Valve* updates
    a game's depots, derived from vault-api's own observation history, not
    from any household member's behaviour. It is included here only to be
@@ -375,12 +450,14 @@ Two distinct additions:
    item.
 2. **`playtime_forever` and `rtime_last_played` (Steam's own "last played"
    timestamp), relayed per WP 4h.1.** `playtime_forever` was already
-   relayed and validated before WP 4h.1 (`api/vault_api/steam_relay.py:52`,
+   relayed and validated before WP 4h.1 (`api/vault_api/steam_relay.py`'s
+   module docstring, "Everything returned is hostile input", which names
+   `playtime_forever` in the response whitelist;
    `api/vault_api/routers/steam.py::OwnedGameOut.playtime_forever` — the
    field declared `playtime_forever: int = 0`); WP 4h.1 added
    `rtime_last_played` (`api/vault_api/routers/steam.py::
    OwnedGameOut.rtime_last_played` — declared `rtime_last_played: int |
-   None = None`, `steam_relay.py:536`). Both are returned by `GET
+   None = None`, and `steam_relay.py::OwnedGame.rtime_last_played`). Both are returned by `GET
    /v1/steam/owned-games` (`api/vault_api/routers/steam.py::get_owned_games`,
    the route decorated with path `"/v1/steam/owned-games"`) — **this is
    genuine behaviour data about a specific named Steam identity**, exactly
@@ -505,7 +582,8 @@ ungated path to the same data.
 
 Not stored server-side by vault-api at all for the playtime/last-played
 pair — the relay is a live pass-through with a short in-memory TTL cache
-(`RelayCache`, a few minutes, `api/vault_api/steam_relay.py:71-83`), never
+(`api/vault_api/steam_relay.py::RelayCache`, `DEFAULT_CACHE_TTL_SECONDS`
+= 300 s), never
 persisted to the SQLite database and cleared on every key change. Each
 `GET` re-fetches (or serves the brief in-memory cache) from Steam directly.
 The manifest-change-frequency fields (item 1 above, not personal data) *are*
@@ -529,15 +607,16 @@ actually shipped:
   playtime-derived tier is unreachable in production until a web Steam
   identity exists. The
   only UI surface that touches this relay today is the Settings "Library
-  preview" lookup (`web/js/views/settings.js:462-508`), and its render
-  function (`renderLookupResult`, `web/js/views/settings.js:368-391`) does
+  preview" lookup (`web/js/views/settings.js::buildSteamSection`), and its
+  render function (`web/js/views/settings.js::renderLookupResult`) does
   **not** render `playtime_forever` or `rtime_last_played` anywhere — that
   much is correctly absent. **It does, however, already render a persona
   name and a full SteamID64:** `` `Signed in as ${state.lookup.persona.
   personaname} · SteamID64 ${state.lookup.persona.steamid}` ``
-  (`web/js/views/settings.js:376-384`), sourced from a second relay call the
+  (inside `renderLookupResult`), sourced from a second relay call the
   lookup makes alongside `owned-games` —
-  `api.steamPlayerSummaries(steamid)` (`web/js/views/settings.js:489`) hits
+  `api.steamPlayerSummaries(steamid)` (the lookup button's click handler in
+  `buildSteamSection`) hits
   `GET /v1/steam/player-summaries`
   (`api/vault_api/routers/steam.py::get_player_summaries`, the route
   decorated with path `"/v1/steam/player-summaries"`), which returns
@@ -597,13 +676,16 @@ actually shipped:
 
 ### Client identity and network addresses — a second, related personal-data surface
 
-`GET /v1/clients` (`api/vault_api/routers/clients.py:80-155`) returns, per
+`GET /v1/clients` (`api/vault_api/routers/clients.py::list_clients`, response
+model `ClientOut`) returns, per
 client, `client_id`, `source_addrs` (a list of IP addresses), and hit/miss
 statistics. `client_id` defaults to the reporting machine's own hostname if
-the operator does not override it — `agent/README.md:368-372`: "Default
+the operator does not override it — `agent/README.md`'s
+"**Default `--client-id`:**" paragraph: "Default
 `--client-id`: the local hostname (`os.Hostname()`)…". Home networks
 routinely name machines after their owner or its role — the project's own
-documented example is `steam-deck-01` (`agent/README.md:945`), and a
+documented example is `steam-deck-01` (the
+`VAULT_AGENT_CLIENT_ID=steam-deck-01` example in `agent/README.md`), and a
 personal machine name is at least as plausible a default — so this row is a
 hostname-plus-IP-address record of which machine is or is not using the
 cache, readable by anyone with the API key. This is the same category of
@@ -627,7 +709,20 @@ MISS to Steam's real CDN (§1/§2 — the point of the project, and a HIT never
 leaves the LAN at all), and SteamPrefill's own login/prefill traffic to
 Valve's servers from inside the `vault-runner` container since WP S-2 — the split that makes vault-api egress-lockable at all (§3 — the whole
 reason the project exists, and the one flow that legitimately carries a
-real Steam session). **Enforcement (WP EG-1): neither of these two core
+real Steam session). One property of the first flow belongs in this
+inventory: every MISS that `location @miss` relays to Valve carries a
+`X-SteamHangar-Hop: 1` request header (the self-proxy loop breaker, §1),
+sent over plain HTTP, so Valve and any on-path observer can identify the
+requesting cache as SteamHangar. It carries no identifier beyond the
+product itself (no version, no host name, no key) — accepted as the price
+of a loop breaker that needs no per-install secret. The miss traffic itself
+is plain HTTP too, inherent to the Steam CDN protocol (clients fetch depot
+chunks over port 80). An on-path attacker on the WAN side can therefore
+corrupt chunks that vault-core caches, and a corrupted chunk stays in the
+cache and is served to every client that asks for it until it is removed;
+the Steam client's own chunk verification turns that into a failed
+download, not code execution. **Enforcement (WP
+EG-1): neither of these two core
 flows is proxy-gated, and neither needed to be** — `vault-core` has its own,
 separate, already-narrower Host-allowlist mechanism (ADR-0001 req 4), and
 `vault-runner` is deliberately excluded from the egress lock's network
@@ -650,7 +745,8 @@ none of them Steam credentials (§3):
    obligation directly: "SECURITY.md documents the added data path: with
    the relay configured, library queries originate from the SERVER (they
    leave the LAN toward Valve), not from the browser"
-   (`docs/adr/0004-steam-credentials-never-touch-steamvault.md:57-59`).
+   (`docs/adr/0004-steam-credentials-never-touch-steamvault.md`,
+   "Addendum (2026-08-09)").
    `steam_relay.py`'s own module docstring, "## Privacy" section, says the
    same thing in the same words and names this exact document by name as
    the place that should say it: "this is one of the few things in
@@ -658,8 +754,8 @@ none of them Steam credentials (§3):
    operator's own Steam Web API key and the SteamID64 being looked up…
    see api/README.md's 'Steam Web API relay' section for the full note
    WP 5.3's threat model is expected to read"
-   (`api/vault_api/steam_relay.py:94-100, 109-111` — the quoted sentence's
-   own tail sits on :111, not :110). Off by default (no row in
+   (`api/vault_api/steam_relay.py`'s module docstring, its "Privacy"
+   section). Off by default (no row in
    `steam_relay_key` until the operator enters one, §3); once configured,
    every `GET /v1/steam/owned-games` or `GET /v1/steam/player-summaries`
    call sends the relay key and a SteamID64 to `api.steampowered.com` over
@@ -681,10 +777,12 @@ none of them Steam credentials (§3):
    `HTTPS_PROXY` — it is proxy-gated, just permanently allowed rather than
    conditionally.
 2. **The optional manifest oracle.** `VAULT_MANIFEST_ORACLE` is off by
-   default (`api/vault_api/config.py:92-93`: "the default"); when an
+   default (`api/vault_api/config.py::MANIFEST_ORACLE_OFF`, whose comment
+   calls it "**the default**"); when an
    operator turns it on, `vault-api` sends the Steam **app ids** it tracks
    to a third party over HTTPS — default `api.steamcmd.net`
-   (`api/vault_api/oracle.py:98-107`: "this is the one thing in SteamHangar
+   (`api/vault_api/oracle.py`'s module docstring, its "Privacy" section:
+   "this is the one thing in SteamHangar
    that leaves the LAN… carrying the Steam app id it is asking about — i.e.
    which games this vault tracks, and roughly when. No API key, no client
    id, no user identity and no Steam credentials are ever sent"). Worth
@@ -695,9 +793,11 @@ none of them Steam credentials (§3):
    while `deploy/compose.yaml` did not yet forward that variable — so an
    operator following the project's *own* privacy advice still shipped
    their cached app ids to the public default with no error
-   (`docs/LEARNINGS.md:251-255`). That specific gap is recorded there as
+   (`docs/LEARNINGS.md`, "Containers" section, the "a doc sentence telling
+   an operator to set a variable IS a claim" bullet). That specific gap is recorded there as
    fixed (the WP that found it also closed it, same commit range), and
-   `deploy/compose.yaml:197` now forwards `VAULT_MANIFEST_ORACLE_URL` — cited
+   `deploy/compose.yaml`'s `vault-api` service now forwards
+   `VAULT_MANIFEST_ORACLE_URL` — cited
    here as a worked example of why this category of claim ("set this env
    var for privacy") must be re-verified against `compose.yaml` on every
    read, not trusted from a comment. **Enforcement (WP EG-1):** proxy-gated
@@ -709,13 +809,13 @@ none of them Steam credentials (§3):
    forever with a filtered-403 and no obvious cause (ADR-0011 §3).
 3. **Cover art.** The web UI's Content-Security-Policy allows exactly one
    external image host: `img-src 'self' data: https://cdn.akamai.
-   steamstatic.com` (`api/vault_api/webui.py:94`). A browser fetches real Steam art directly from that CDN, by
+   steamstatic.com` (`api/vault_api/webui.py::_CSP`). A browser fetches real Steam art directly from that CDN, by
    appid, from three surfaces: the library grid's capsule art, the detail
    card's mini-cover (WP 4a.4), and the detail card's header art (WP 4h.3
    — one additional request per opened detail, same host, same data
    class), with no vault-api relay in between — the browser's own request,
    not a server-side one, and carrying no vault-api secret (the CSP's
-   `connect-src 'self'` — same file, line 96 — is what the API calls
+   `connect-src 'self'` — same `_CSP` string — is what the API calls
    themselves are bound by; `img-src` is a separate, wider allowance
    specifically for this one host). This leaks "which app ids this browser
    is currently viewing" to that CDN the same way any hotlinked image would
@@ -792,27 +892,33 @@ your webhook stops firing after this update, that is the lock working."
 `vault-core` can optionally write a second, structured, tab-separated
 access log purpose-built for `vault-api` to consume (ADR-0008,
 `docs/adr/0008-cache-event-feed.md`). Reading the actual format
-(`core/docker/nginx.conf.template:232-388`), each line records: a version
-tag, an ISO-8601 timestamp, `$remote_addr` (the direct TCP peer address —
-explicitly *not* trusting any `X-Forwarded-For`,
-`core/docker/nginx.conf.template:261-263`), HIT/MISS/BYPASS, the depot id
+(the "Cache-event log (WP 3.10, ADR-0008)" section of
+`core/docker/nginx.conf.template`'s `http` block: `log_format vault_event`
+and the `$vault_event_*` maps), each line records: a version tag, an
+ISO-8601 timestamp, `$remote_addr` (the direct TCP peer address —
+explicitly *not* trusting any `X-Forwarded-For`, field 3 of that section's
+format comment), HIT/MISS/BYPASS, the depot id
 parsed from the URI, the URI path (bounded to 300 characters), bytes sent,
 the `Host` header, and the HTTP status code.
 
 **Where it lands:** under `/vault/logs/` inside the same shared Docker
 volume both `vault-core` and `vault-api` mount
-(`deploy/compose.yaml:277-287`), only when the operator sets
-`VAULT_EVENT_LOG`/`VAULT_EVENT_LOG_PATH` (both empty/off by default,
-`deploy/compose.yaml:62, 164`). It is off by default in `core/Dockerfile`
-per that same comment, though `.env.example` ships it uncommented (i.e.
-turned on) as of the packaging work package
-(`deploy/compose.yaml:56-58`) — so a fresh deployment following the shipped
-`.env.example` has this on, not off.
+(`${VAULT_CACHE_PATH:-vault-cache}:/vault` on vault-core and the same
+source with `:nocopy` on vault-api in `deploy/compose.yaml`, so only
+vault-core seeds a fresh named volume and the two cannot race on copy-up),
+only when the operator sets
+`VAULT_EVENT_LOG`/`VAULT_EVENT_LOG_PATH` (both empty/off by default: the
+`${VAULT_EVENT_LOG:-}` and `${VAULT_EVENT_LOG_PATH:-}` forwards). It is off
+by default in `core/Dockerfile` per the comment above vault-core's
+`VAULT_EVENT_LOG`, though `deploy/.env.example` ships both uncommented
+(i.e. turned on, `VAULT_EVENT_LOG=/vault/logs/event.log`) as of the
+packaging work package, as that same comment says — so a fresh deployment
+following the shipped `.env.example` has this on, not off.
 
 **Who reads it:** only `vault-api`'s own background sweep
 (`api/vault_api/event_sweep.py`), which reads it, never truncates it in the
-shipped container layout (a documented, accepted limitation —
-`deploy/compose.yaml:175-183`), and turns it into the derived, API-key-gated
+shipped container layout (a documented, accepted limitation — the comment
+above `VAULT_EVENT_LOG_MAX_BYTES` in vault-api's environment), and turns it into the derived, API-key-gated
 summaries at `GET /v1/clients` and `GET /v1/stats`. Nothing serves the raw
 log file itself over HTTP. At the filesystem level, whoever can read the
 shared Docker volume on the host can read the raw file directly — the same
@@ -826,7 +932,8 @@ and the bypass-suspicion determination in §7 — coarse request *facts*
 (who asked, HIT or MISS, how many bytes), never used to *derive* the
 depot→app content mapping (that comes from Steam manifests per
 ADR-0006/0007) — exactly the boundary ADR-0008 draws for itself
-(`docs/adr/0008-cache-event-feed.md:54-57`).
+(`docs/adr/0008-cache-event-feed.md`, "Decision", the "request facts only"
+bullet).
 
 ---
 
@@ -835,7 +942,7 @@ ADR-0006/0007) — exactly the boundary ADR-0008 draws for itself
 ### How authentication actually works
 
 One shared secret, `VAULT_API_KEY`, compared with `hmac.compare_digest`
-against the caller's `X-Api-Key` header (`api/vault_api/auth.py:16-53`).
+against the caller's `X-Api-Key` header (`api/vault_api/auth.py::require_api_key`).
 Constant-time comparison defends against a timing side-channel on the
 comparison itself; it does **not** provide any rate limiting or
 brute-force lockout on repeated wrong guesses — this repository's `auth.py`
@@ -847,7 +954,8 @@ requires only that `VAULT_API_KEY` be non-empty after stripping whitespace
 it to a short or
 guessable string is not stopped by any code path, only by the `.env.example`
 comment recommending `python -c "import secrets;
-print(secrets.token_urlsafe(36))"` (`deploy/.env.example:33-36`). Every
+print(secrets.token_urlsafe(36))"` (the `VAULT_API_KEY` entry in
+`deploy/.env.example`). Every
 router except `health` requires it (§1, verified router-by-router); `GET
 /v1/health` is the sole, deliberate exception, returning a fixed
 `{"status": "ok"}` body with no data (`api/vault_api/routers/health.py`).
@@ -861,7 +969,8 @@ standard browser same-origin behaviour, not a SteamHangar-specific control,
 and is not a substitute for anything above.
 
 **The key travels in cleartext by default.** `vault-api` serves plain HTTP
-(`deploy/compose.yaml:260-266`); nothing enforces TLS unless the operator
+(the `vault-api` service's port entry in `deploy/compose.yaml`); nothing
+enforces TLS unless the operator
 puts a reverse proxy in front of it (§1, public-domain profile). On the
 default LAN deployment, `X-Api-Key` goes out unencrypted on every request,
 same as the rest of the traffic — consistent with, and no worse than, the
@@ -871,12 +980,14 @@ given that this is the one credential that gates the whole control plane.
 **Storage on each client:**
 
 - The **web UI** stores the key in the browser's `localStorage`, in plain
-  text, keyed `"steamvault.apiKey"` (`web/js/api.js:37, 43, 54, 62, 66`),
-  sent back as the `X-Api-Key` header on every request
-  (`web/js/api.js:106`). Anyone with script execution in that browser
+  text, keyed `"steamvault.apiKey"` (`web/js/api.js`'s
+  `STORAGE_KEYS.apiKey`, read and written by `getStoredApiKey`/
+  `setStoredApiKey`), sent back as the `X-Api-Key` header on every request
+  (`web/js/api.js::request`). Anyone with script execution in that browser
   origin, or file-level access to that browser profile, can read it. The
   strict Content-Security-Policy the UI ships
-  (`api/vault_api/webui.py:90-101, 104-122` — `script-src 'self'`, no
+  (`api/vault_api/webui.py::_CSP`, applied by `install_security_headers` —
+  `script-src 'self'`, no
   inline scripts anywhere in `web/`, no third-party JavaScript) is the
   actual mitigation against the most likely way a key like this leaks
   (injected/XSS script reading `localStorage`), not encryption of the
@@ -884,7 +995,8 @@ given that this is the one credential that gates the whole control plane.
 - The **Android app** stores it in `EncryptedSharedPreferences`
   (`androidx.security-crypto`), a materially stronger at-rest guarantee
   than the web UI's plain `localStorage` — verified against
-  `app/README.md:358, 552, 569` (`EncryptedCredentialStore.kt`, the
+  `app/README.md`'s "Credential storage (`storage/`)" section
+  (`EncryptedCredentialStore.kt`, the
   `androidx.security-crypto`-backed implementation). This asymmetry
   between the two frontends is real and is stated here as a fact, not a
   recommendation to fix it (out of scope for this package).
@@ -892,12 +1004,14 @@ given that this is the one credential that gates the whole control plane.
 ### What "read-only" genuinely prevents
 
 There is exactly one read-only mechanism in the codebase:
-`VAULT_SETTINGS_READONLY` (env-only, `api/vault_api/config.py:923, 1186`),
-forwarded in the shipped `deploy/compose.yaml` (`vault-api` service,
-`deploy/compose.yaml:239`) -- an operator using the shipped stack can
+`VAULT_SETTINGS_READONLY` (env-only, `api/vault_api/config.py::Settings`'s
+`settings_readonly` field, read in `Settings.from_env`), forwarded in the
+shipped `deploy/compose.yaml` (`vault-api` service,
+`VAULT_SETTINGS_READONLY: ${VAULT_SETTINGS_READONLY:-false}`) -- an operator using the shipped stack can
 actually set it, not just the underlying env var in isolation.
-Reading `routers/settings.py` directly (`api/vault_api/routers/settings.py:95,
-116, 189` and the surrounding handler): when set, it makes `PATCH
+Reading `routers/settings.py` directly
+(`api/vault_api/routers/settings.py::patch_settings`, its
+`if base.settings_readonly:` guard): when set, it makes `PATCH
 /v1/settings` answer `403` with a distinct detail message. **It does
 nothing else.** It does not disable job creation, prefills, deletion, GC
 execution, or any other mutating endpoint — those are unrelated routers with
@@ -906,24 +1020,40 @@ their own, unrelated dependency chains (§1). A reader who assumes
 broadly" would be wrong: it locks exactly one settings-write endpoint and
 nothing about the trust model in §1 changes because of it.
 
+**One more write route that looks like a setting and is NOT under the
+lock:** `PUT /v1/steam/key` and `DELETE /v1/steam/key`
+(both routes in `api/vault_api/routers/steam.py`) store and clear the Steam Web
+API relay key in the database and stay writable with
+`VAULT_SETTINGS_READONLY=1` (verified by reading the router: it has no
+dependency on `settings_readonly`). This is deliberate for now, not an
+oversight (pre-freeze review, WP API-FIX-2): there is no environment
+variable for the relay key, so the key has no env source the lock could
+"restore pure env semantics" to -- gating those routes would make the relay
+unconfigurable in every readonly deployment. Gating them together with a
+`VAULT_STEAM_RELAY_KEY` env source is post-release work (ADR-0009
+addendum 2026-09-30). Until then, "read-only" means: `PATCH /v1/settings`
+is locked; the relay key is not.
+
 ### What the bypass banner means
 
 This is unrelated to authentication or "bypass" in the security sense —
 worth stating precisely because the word invites the wrong reading.
 `client.bypass_suspected` (surfaced in the web UI as a persistent banner,
-`web/js/lib/bypass-banner.js:45-47`, and in `GET /v1/clients`,
-`api/vault_api/routers/clients.py:106-109`) means: *this client reports
+`web/js/lib/bypass-banner.js::bypassBannerVisible`, and in `GET
+/v1/clients`, `api/vault_api/routers/clients.py::ClientOut.bypass_suspected`)
+means: *this client reports
 installed Steam games via the agent, but has not been observed at the cache
 at all within the configured window* — evidence of a DNS/IPv6/hosts-file
 misconfiguration causing that device's Steam traffic to route around the
 cache, not evidence of an intruder or an authentication failure. The rule
 is deliberately biased toward silence: the module docstring names six
-numbered disqualifications (`api/vault_api/routers/clients.py:40-51`), but
-`bypass_suspected` itself implements only **five** early-return branches
-(`api/vault_api/event_sweep.py:1683-1699`) — its own comment explains why:
+numbered disqualifications (`api/vault_api/routers/clients.py`'s module
+docstring), but `bypass_suspected` itself implements only **five**
+early-return branches (`api/vault_api/event_sweep.py::bypass_suspected`) —
+its own comment explains why:
 "1 + 2: the feed is off, has never swept, or is younger than the window
 (both folded into `feed_can_accuse` by the caller)"
-(`api/vault_api/event_sweep.py:1683-1684`), so the first two numbered items
+(the first comment in that function's body), so the first two numbered items
 collapse into one caller-supplied boolean before this function ever runs.
 Six disqualifications, five branches — each remaining branch still a
 distinct `return False`, and the result is `False` — never suspected —
@@ -940,16 +1070,17 @@ as a security alert about an intruder.
 
 Where this project actually looks disciplined, stated plainly rather than
 only listing gaps elsewhere: every image this project builds FROM is
-digest-pinned, not just tag-pinned. `core/Dockerfile:20`:
-`FROM nginx:1.29.8-alpine3.23@sha256:5616878291a2eed…`; `api/Dockerfile:33`
-and `:75` (build stage and runtime stage): the identical
+digest-pinned, not just tag-pinned. `core/Dockerfile`'s `FROM`:
+`nginx:1.29.8-alpine3.23@sha256:5616878291a2eed…`; `api/Dockerfile`'s two
+`FROM` lines (the `steamprefill` build stage and the runtime stage): the
+identical
 `FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad…` pin, so the
 runtime image cannot silently drift from the stage that fetched
 SteamPrefill. CI's own third-party actions are SHA-pinned with the version
 kept only as a trailing comment (`.github/workflows/*.yml`, e.g.
 `uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`).
 The Android Gradle wrapper carries `distributionSha256Sum`
-(`app/gradle/wrapper/gradle-wrapper.properties:4`) — the same integrity bar
+(`app/gradle/wrapper/gradle-wrapper.properties`) — the same integrity bar
 applied consistently across four different ecosystems (Docker base images,
 GitHub Actions, Gradle) rather than in just one. **One honest gap in that
 bar, found in WP CI-2's review:** the Android continuous-integration job
@@ -1009,9 +1140,13 @@ Named plainly, as out of scope, rather than implied to be covered:
   about BLAST RADIUS, not about identity: it does not make the vault
   multi-user").
 - **Denial of service from inside the LAN.** Covered concretely in §1 (the
-  unauthenticated relay-and-store path) and §7 (no rate limiting on the API
-  key check) — both are real, unmitigated vectors available to any LAN
-  device, named here rather than left to be discovered.
+  unauthenticated relay-and-store path; the optional upstream bandwidth cap
+  of ADR-0015 is not a request limit and does not mitigate it) and §7 (no
+  rate limiting on the API key check) — both are real, unmitigated vectors
+  available to any LAN device, named here rather than left to be
+  discovered. What IS bounded since WP SEC-FIX-4 (S-3) is pre-auth body
+  handling: no body is read for a keyless `/v1` request, and every body is
+  capped at 1 MiB (§1).
 - **Vulnerabilities in Valve's Steam infrastructure, or in SteamPrefill**,
   the third-party tool this project subprocess-drives. Both are outside
   this repository's code and this document's scope (see `SECURITY.md`
@@ -1026,6 +1161,71 @@ Named plainly, as out of scope, rather than implied to be covered:
   host to a container needs no masquerade either way — both are
   structural properties of the network topology existing at all, not
   omissions this package chose to leave unfixed in application code.
+- **The egress proxy filters by host, not by port (WP 5.3 review P-1).**
+  `deploy/proxy/tinyproxy.conf` restricts ports for neither request kind.
+  It has no `ConnectPort` line, and with none tinyproxy permits `CONNECT`
+  to every port (its documented default). Its filter matches the host
+  only (`FilterURLs Off`). vault-api can therefore reach an allowlisted
+  host (Valve's endpoints, or anything the operator adds to
+  `VAULT_EGRESS_ALLOW`) on any TCP port, not just 443/80. The lock limits
+  *which hosts* vault-api can talk to, not *which services on them*.
+  Documented, not changed: SEC-FIX-1 is a server-side pass and adds no
+  proxy config.
+- **A check-then-use race in the event-log hook (WP 5.3 review P-2).**
+  `core/docker/25-vault-eventlog.sh` runs as root at every vault-core start
+  and refuses a symlink anywhere on the `VAULT_EVENT_LOG` path below
+  `/vault/`. But it checks first and acts afterwards (`mkdir -p`, creating
+  the file, `chown -h`), and the nginx master then opens the same path as
+  root, following symlinks. `/vault` is shared with vault-api, and
+  `/vault/logs` is owned by uid 101. A uid-101 process that swaps a path
+  component for a symlink inside that window can make root create, chown
+  or append to a file with the configured file name (`event.log`) in a
+  directory of its choosing. That reach is vault-core's own container
+  filesystem: the volume is its only mount. Preconditions are code
+  execution as uid 101 in vault-api (or anything else that can write the
+  volume), and winning a race that is open only while vault-core starts.
+  Documented, not fixed: POSIX sh cannot open or chown through a file
+  descriptor with `O_NOFOLLOW`. Closing it means doing that step in a
+  small program, or moving the log off the shared volume.
+- **Planted symlinks on the shared `/vault` volume, as seen by vault-api
+  (WP 5.3 pass-2 review S-1/S-2) — fixed in WP SEC-FIX-4, recorded here
+  because the attacker model is the same as P-2's.** vault-core and
+  vault-api both run as uid 101 and share `/vault`; vault-api resolves a
+  link in its OWN mount namespace, where `/data` and
+  `/opt/steamprefill/home` exist. Before the fix, a uid-101 attacker in
+  vault-core could (S-1) replace `event.log` with a link and have the
+  event sweep read through it and rotation `truncate` its target, or (S-2)
+  link `depot/<id>`, `chunk/`, `manifest/` or `manifest/<mid>/5` into
+  `/data` and have GC unlink files there as orphans or duplicates. Now the
+  event log is opened `O_NOFOLLOW|O_NONBLOCK`, must be `S_ISREG` on the
+  log directory's device, and is rotated with `ftruncate` on that verified
+  fd (`api/vault_api/event_sweep.py::open_event_log`); a refusal is a
+  WARNING plus `truncate_denied_count`, never a crash. GC's planner skips
+  a link-like `depot/<id>` (`skipped_link_like_dir`) and refuses link-like
+  `chunk/`, `manifest/` and `manifest/<mid>/5`; at execute time every
+  unlink first requires `realpath(dirname(file))` to equal
+  `realpath(depot_root)/<id>/chunk` (or `.../manifest/<mid>/5`)
+  (`api/vault_api/gc_execute.py::remove_one_file`). `DELETE
+  /v1/cache/{appid}` keeps its own behaviour of unlinking a linked
+  `depot/<id>` itself without following it.
+- **Known limit: no cap on the number of agent clients (WP 5.3 pass-2
+  review P-2, not fixed in SEC-FIX-4).** Any key holder can report under
+  arbitrarily many `client_id`s, and nothing caps how many distinct
+  clients are stored. Bounded only by the key requirement.
+- **Known limit: the depot base itself is not `realpath`'d at startup
+  (WP 5.3 pass-2 review P-3, not fixed in SEC-FIX-4).** The S-2 check
+  resolves `depot_root` per GC run and trusts whatever it resolves to; a
+  `cache/depot` that is itself a link (planted before vault-api starts)
+  moves the whole base. Closing it means resolving and pinning the base
+  once at startup and refusing a base that later resolves elsewhere.
+- **Known limit: a TOCTOU window in GC removal (SEC-FIX-4 review,
+  post-release).** `remove_one_file` checks `realpath(dirname(file))`
+  and then unlinks by path. Between the two, `chunk/` or
+  `manifest/<mid>/5` can be swapped for a link, and the unlink then
+  lands in the link target. Exploiting it needs code execution in
+  vault-core and hitting a narrow window. The proper fix is to open each
+  level with `O_DIRECTORY|O_NOFOLLOW` and remove with
+  `unlink(name, dir_fd=...)`; that is planned after the first release.
 
 ---
 
@@ -1050,7 +1250,7 @@ In the interest of the review discipline this package was asked to follow:
   a structural near-certainty (different code paths, no cache-status
   response header that would make the difference explicit — the only
   `add_header` directive in the whole config is `X-LanCache-Processed-By`
-  on the heartbeat endpoint, `core/docker/nginx.conf.template:593`, not on
+  on the heartbeat endpoint, `location = /lancache-heartbeat`, not on
   `/depot/`), not as something this document measured. No timing
   measurement was run against a real deployment; §2's claim could be wrong
   if, for example, connection setup or TLS-adjacent overhead outweighs the
@@ -1061,7 +1261,13 @@ In the interest of the review discipline this package was asked to follow:
   repository. What is verified and cited in §3 is the weaker, checkable
   claim this project's own Phase-0 research supports: that what
   SteamPrefill *persists* afterward is "not raw credentials"
-  (`poc/steamprefill/PROTOCOL.md:176`). Whether the live handshake ever
+  (`poc/steamprefill/PROTOCOL.md` §3.1 "First-run login"). Whether the live handshake ever
   exposes the password in-process before that point is a fact about
   Valve's protocol, not about SteamHangar, and this document does not claim
   to have checked it.
+- **§5's "the client's own chunk verification turns a corrupted chunk into
+  a failed download"** (SEC-FIX-1, WP 5.3 review N-1) is about the Steam
+  client, not about SteamHangar. Nothing in this repository verifies a
+  chunk: vault-core stores whatever 200 body Valve's edge, or someone on the
+  path to it, returned. That the client checks each chunk against its depot
+  manifest and refuses a mismatch was not measured here.

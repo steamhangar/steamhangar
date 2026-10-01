@@ -1,5 +1,16 @@
 # SteamVault — Phase 0 PoC (Work Package 0.1)
 
+> **Status (banner added 2026-09-30).** Phase 0 is complete and this folder
+> is frozen as evidence; the text below is the WP 0.1 write-up as it stood
+> then, and its "awaiting" / "pending" notes are historical. Every planned
+> run happened: WP 0.3 (real Steam client,
+> `steam-client-test/RESULTS-20260804-*.md`) and WP 0.6 (Linux client under
+> WSL2, `linux-client-test/RESULTS-20260805-*.md` — the current Linux
+> client DOES perform the `lancache.steamcontent.com` lookup, ADR-0001 /
+> ADR-0002 addenda). The outcome is recorded in ADR-0001 and
+> `docs/PROJECT_PLAN.md` §7 Phase 0. The one exception to the freeze is
+> `throttle/`: later measurement spikes (WP TH-0, TH-0b) land there.
+
 Throwaway feasibility code for `docs/PROJECT_PLAN.md` section 7 ("Phase 0 —
 Feasibility PoC"). **Nothing under `poc/` is production code.** It exists to
 answer one question before any real implementation starts:
@@ -33,7 +44,8 @@ see WP 0.3. SteamPrefill is explicitly **out of scope here** — see WP 0.4
 | `MISS-HANDLING-FINDINGS.md` | WP 0.5 evidence write-up for the "Miss-handling decision" checkbox (`docs/PROJECT_PLAN.md` §7) — synchronous store vs. transparent passthrough, correctness + measured latency/throughput, preliminary Phase-0-gate recommendation. |
 | `steam-client-test/` | WP 0.3: real-Steam-client test kit — `PROTOCOL.md` (step-by-step protocol for the human-run test), `analyze.ps1` (mines `logs/access.log` and answers the Phase-0 checkboxes automatically), `test-analyze.ps1` (proves the analysis script itself against a synthetic fixture log). See below. |
 | `steamprefill/` | WP 0.4: SteamPrefill test kit — `setup.ps1` (downloads the latest `tpill90/steam-lancache-prefill` Windows x64 release into `steamprefill/bin/`, gitignored), `PROTOCOL.md` (protocol for the human-run login/select-apps/prefill test — **read section 0 first**, it explains the `/lancache-heartbeat` + `X-LanCache-Processed-By` contract SteamPrefill's auto-detection requires, now implemented in both nginx configs), `verify.ps1` (mines `logs/access.log` + `cache/depot/` and answers the Phase-0 checkboxes), `test-verify.ps1` (proves `verify.ps1` against a synthetic fixture log + fake cache dir). See `steamprefill/PROTOCOL.md`. |
-| `linux-client-test/` | WP 0.6: Linux-Steam-client (WSL2) test kit — **pre-built, awaiting WSL2 setup** (see below). |
+| `linux-client-test/` | WP 0.6: Linux-Steam-client (WSL2) test kit — run for real on 2026-08-05 (`RESULTS-20260805-*.md`; the "awaiting WSL2 setup" note below is historical). |
+| `throttle/` | Post-Phase-0 measurement spikes for download throttling, run against the containerized test stack: WP TH-0 (`RESULTS-THROTTLE-20260929.md` — nginx-native `proxy_limit_rate` caps the miss path) and WP TH-0b (`RESULTS-THROTTLE-DYNAMIC-20260930.md` — one aggregate cap divided by the live connection count). Evidence only; the implementation is WP TH-1. |
 | `nginx/` | Extracted nginx binary (gitignored, recreated by `setup.ps1`). |
 | `cache/` | The cache store, `cache/depot/<id>/...` (gitignored). |
 | `logs/` | nginx access/error log + pid (gitignored). |

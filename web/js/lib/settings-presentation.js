@@ -53,3 +53,39 @@ export function effectiveAsInputValue(entry) {
   if (Array.isArray(entry.effective)) return entry.effective.join(",");
   return String(entry.effective);
 }
+
+/**
+ * The eight `GET /v1/settings` keys `views/settings.js` builds a control
+ * for (WP WEB-FIX-1, P2). Before this guard existed, a response missing any
+ * one of them (an older/newer vault-api, a proxy rewriting the body) made
+ * `entryByKey()` return `undefined`, and the first `entry.key` dereference
+ * threw AFTER `loadSettings()`'s try/catch had already finished — an
+ * uncaught error inside `fullRender()` that left "Loading settings…" on
+ * screen forever with nothing in the UI saying why. Pinned as a literal
+ * list, not derived from the view (a derived list would drift with it).
+ */
+export const REQUIRED_SETTING_KEYS = Object.freeze([
+  "vault_name",
+  "schedule_window",
+  "schedule_interval_minutes",
+  "schedule_client_stale_days",
+  "sweep_include_cached",
+  "auto_gc",
+  "webhook_url",
+  "webhook_events",
+]);
+
+/**
+ * Which of `required` keys a `GET /v1/settings` response lacks — a
+ * malformed response (no `settings` array at all) is reported as missing
+ * EVERY key rather than throwing, so the caller has one path to its error
+ * state.
+ * @param {{settings?: Array<{key: string}>} | null | undefined} response
+ * @param {readonly string[]} [required]
+ * @returns {string[]} in `required` order; empty when the response is complete
+ */
+export function missingSettingKeys(response, required = REQUIRED_SETTING_KEYS) {
+  const list = response && Array.isArray(response.settings) ? response.settings : [];
+  const present = new Set(list.map((e) => e && e.key));
+  return required.filter((key) => !present.has(key));
+}

@@ -62,16 +62,22 @@ curl -H "X-Api-Key: $VAULT_API_KEY" http://<server>:8080/v1/schedule   # confirm
 ```
 
 No `docker compose up -d --build` or override file needed — this takes
-effect at the next scheduler tick, no restart. `deploy/.env`/`.env.example`
-still has no entry for these three, and that is correct, not a gap: an env
-value here WOULD still apply — it sets the STARTUP fallback a DB row can
-override once the stack has booted at least once, which matters for a
-first-boot/infra-as-code deployment that wants the scheduler on from the
-very first `docker compose up` before anyone has called `/v1/settings` yet.
-It buys little *once the stack is up*, though: at that point a DB row
-already wins over whatever the env value says, so editing `.env` and
-restarting to change these three is strictly more work than the `PATCH`
-above for the common case of tuning an already-running deployment.
+effect at the next scheduler tick, no restart.
+
+**All three also have `deploy/.env` lines now** (`VAULT_SCHEDULE_WINDOW`
+since WP SWEEP-1 / ADR-0014; `VAULT_SCHEDULE_INTERVAL_MINUTES` and
+`VAULT_SCHEDULE_CLIENT_STALE_DAYS` since the pre-freeze project review's
+S3 fix — see `.env.example`'s "Settings-API keys reachable from this file").
+An earlier revision of this page called their absence from `.env.example`
+"correct, not a gap"; it stopped being correct the moment
+`VAULT_SETTINGS_READONLY=1` became a documented deployment mode, because a
+hard-locked vault refuses the `PATCH` above and then had no way to reach
+two of the three at all. An env value sets the STARTUP fallback a DB row
+overrides once the stack has booted (db > env > default, ADR-0009) — which
+is what a first-boot/infra-as-code deployment wants. It buys little *once
+the stack is up* on a read-write deployment: a DB row already wins over
+whatever the env value says, so editing `.env` and restarting is strictly
+more work than the `PATCH` above for tuning an already-running vault.
 
 (`VAULT_GC_GRACE_DAYS`, listed here in earlier revisions of this document,
 is a plain forwarded `deploy/.env` value today — see `.env.example` — and

@@ -2,8 +2,11 @@
 
 A Steam game cache with true per-game management — self-hosted, Docker-first.
 
-Status: IMPLEMENTATION — Phases 0–3, 4a, and 4b (4b.1–4b.10) complete;
-pre-release (see §11 Next Steps) · License: Apache-2.0
+Status: IMPLEMENTATION — Phases 0–3 and 4 (4a–4e, 4h; the embedded tsnet
+profile is deferred post-v1), the S-track (runner split + egress lock,
+WP S-1/S-2/EG-1) and the CI/publish machinery (WP CI-1..3, AGENT-BIN)
+complete; Phase 5 open only on the pre-release security review, the first
+tag and the announcement (see §11 Next Steps) · License: Apache-2.0
 
 > SteamHangar is a community project and is not affiliated with Valve Corporation.
 > "Steam" is a trademark of Valve Corporation.
@@ -59,28 +62,43 @@ for v1.)
 ## 3. Architecture
 
 ```
-                    ┌─────────────────────────────────────────┐
-                    │            Cache Server                 │
-   Android App      │                                         │
-  ┌────────────┐    │  ┌─────────────┐    ┌───────────────┐   │
-  │ Compose UI │    │  │ vault-core   │    │ vault-api     │   │
-  │ Steam Lib  │────┼─▶│ nginx        │    │ FastAPI       │◀──┼── PC Agent
-  │ tsnet      │    │  │ proxy_store  │◀───│ SQLite        │   │   (gaming PC,
-  └────────────┘    │  │ /cache/depot/│    │ prefill ctrl  │   │    reports
-        │           │  └─────────────┘    └───────┬───────┘   │    installed
-        │           │         ▲                   │           │    games)
-        ▼           │         │           ┌───────▼───────┐   │
-  Steam Web API     │   DNS rewrite       │ SteamPrefill  │   │
-  (library+covers,  │   *.steamcontent    │ (subprocess/  │   │
-   regular internet)│   .com → server     │  container)   │   │
-                    └─────────────────────────────────────────┘
+                        ┌──────────────────────────────────────────────────┐
+                        │                  Cache Server                    │
+  Steam clients on the  │  ┌──────────────────┐     ┌────────────────────┐ │
+  LAN (DNS rewrite      │  │ vault-core       │     │ vault-api          │◀┼── vault-agent
+  *.steamcontent.com ───┼─▶│ nginx proxy_store│     │ FastAPI + SQLite   │ │   (gaming PC /
+  → cache server, or    │  │ /vault/cache/    │◀────│ jobs, scheduler,   │ │    Steam Deck:
+  hosts-file mode)      │  │   depot/<id>/... │     │ GC, settings, web  │ │    reports
+                        │  └────────┬─────────┘     │ UI + Steam relay   │ │    installed
+                        │           │ MISS          └───┬────────────┬───┘ │    games)
+  Web UI (browser) ─────┼───────────┼─────────────── ▲  │ job queue  │      │
+  Android app ──────────┼───────────┼─────────────── ┘  │ (SQLite)   │ egress
+   (system VPN /        │           │              ┌─────▼──────┐  ┌──▼─────────┐
+    public domain)      │           │              │vault-runner│  │vault-proxy │
+                        │           │              │SteamPrefill│  │allow-list  │
+                        └───────────┼──────────────┴─────┬──────┴──┴─────┬──────┘
+                                    ▼                    ▼               ▼
+                              Steam CDN            Steam CDN       api.steampowered.com
+                            (store on miss)     (prefill, via      (+ optional oracle host)
+                                                 vault-core)
 ```
+
+vault-api has no direct route to the internet: its only outbound path is
+vault-proxy (WP EG-1, ADR-0011). Prefill execution lives in vault-runner
+(WP S-1/S-2, ADR-0012), the one component with an ordinary internet route
+— it downloads through vault-core like any Steam client, so every chunk
+lands in the cache. Both frontends talk pure REST to vault-api; the
+Android app reaches it over a system VPN or a public domain (the embedded
+tsnet profile is post-v1), and since WP 4h.4 fetches library data through
+vault-api's Steam relay rather than calling the Steam Web API itself
+(ADR-0004 addendum 2). Cover art still loads from Steam's public CDN.
 
 ### Components
 
 **vault-core** — the cache itself
 - nginx container with `proxy_store`: Steam CDN responses are stored
-  path-faithfully under `/cache/depot/<depotid>/...`
+  path-faithfully under `/vault/cache/depot/<depotid>/...` (nginx runs
+  with `-p /vault`; the same tree is `VAULT_CACHE_ROOT` for vault-api)
 - No LRU, no automatic eviction — cleanup is deliberately explicit
   (that's the feature, not the flaw)
 - A lean, purpose-built nginx config set; NOT a LanCache fork — only the
@@ -104,12 +122,38 @@ for v1.)
   for easy adoption)
 - Responsible for:
   - Depot→app mapping (from SteamPrefill data / Steam PICS)
-  - Prefill orchestration (SteamPrefill as subprocess/sidecar, job queue)
+  - Prefill orchestration: a job queue in SQLite; execution is handed to
+    vault-runner in the shipped Compose stack (`VAULT_PREFILL_MODE=queue`,
+    ADR-0012), with an in-process subprocess mode kept for single-process
+    development runs
   - Per-app status tracking (idle / running / done / error / stale)
   - Per-game size calculation (du over depot folders, cached)
   - Per-game deletion (remove the app's depot folders)
-  - Scheduler (configurable daytime window, runs over the installed list)
-- REST API (see section 5)
+  - Scheduler (configurable daytime window, runs over the installed list
+    plus, by default, everything already cached — ADR-0014)
+  - Persisted runtime settings (`GET/PATCH /v1/settings`, ADR-0009) and
+    the opt-in Steam Web API relay both frontends use for library data
+  - Serving the web UI as static files (Phase 4a)
+- REST API (see section 6)
+- No direct route to the internet: vault-api sits on a no-masquerade LAN
+  network plus an internal egress network whose only exit is vault-proxy
+  (WP EG-1, ADR-0011)
+
+**vault-runner** — prefill execution (S-track, ADR-0012)
+- Same image as vault-api, started as `prefill_runner`: claims queued
+  prefill jobs under a heartbeat lease and runs SteamPrefill against the
+  Steam CDN — through vault-core, so every downloaded chunk is stored
+- The one component that needs an ordinary internet route; it holds the
+  SteamPrefill credential volume, which is no longer mounted into vault-api
+- A dead runner's lease expires and the job is re-queued, never stolen
+
+**vault-proxy** — the egress lock (WP EG-1, ADR-0011)
+- Allow-list HTTP proxy (tinyproxy) that every outbound call from
+  vault-api's container must pass through; `api.steampowered.com` is baked
+  in, `VAULT_EGRESS_ALLOW` adds hosts (the manifest oracle's, if enabled)
+- Two channels it does not close are documented as accepted gaps in the
+  ADR and the threat model: DNS resolution (the embedded resolver forwards
+  from the host namespace) and the Docker host's own addresses
 
 **vault-agent** — PC listener
 - Small static Go binary (ADR-0005: single-file distribution, trivial
@@ -122,16 +166,20 @@ for v1.)
   (XDG paths under `~/.local/share/Steam`, systemd user service instead
   of a scheduled task)
 - Reports the FULL list of installed app IDs periodically (e.g. every
-  30 min) via HTTP POST to vault-api — over Tailscale. Removed titles
+  30 min) via HTTP POST to vault-api — over the LAN or whatever VPN
+  reaches it. Removed titles
   are derived server-side by diffing against the previous report — the
   agent stays stateless and dumb by design
 - Runs as a scheduled task / optional tray icon; config: one URL + API key
 - Deliberately dumb: read + report only, no control logic
 - **Optional hosts-file mode (opt-in, requires admin rights):** writes a
-  `lancache.steamcontent.com → cache IP` entry into the Windows hosts file.
-  The Windows Steam client checks this hostname itself and uses it as a
-  cache when it resolves — no DNS server needed at all. Windows-only
-  (the Linux/Steam Deck client does not perform this lookup).
+  `lancache.steamcontent.com → cache IP` entry into the local hosts file.
+  The Steam client checks this hostname itself and uses it as a cache when
+  it resolves — no DNS server needed at all. For a single gaming PC,
+  Windows or Linux/SteamOS: Phase 0 (WP 0.6) showed the current Linux
+  client performs this lookup too, so the mode is platform-neutral
+  (`agent/README.md`, "The Linux-client finding"); only the hosts-file
+  path and the elevation wording differ.
   *Note: this hostname is hardcoded by Valve in the Steam client and lives
   on Valve's own `steamcontent.com` domain — it is the client's built-in
   cache-discovery interface, not a LanCache-project dependency. It cannot
@@ -147,8 +195,10 @@ for v1.)
   from Steam's public CDN
 - **Connectivity profiles** (user-selectable, abstracted behind one API-client
   interface — the server never knows or cares which one is used):
-  - **Embedded Tailscale (tsnet):** Go Mobile `.aar` bridge, auth-key based.
-    Zero-config for the user beyond pasting an auth key. Tailscale only.
+  - **Embedded Tailscale (tsnet) — post-v1, not built:** Go Mobile `.aar`
+    bridge, auth-key based. Zero-config for the user beyond pasting an
+    auth key. Tailscale only. Designed as an additive profile; day one is
+    covered by the System-VPN profile with the regular Tailscale app.
   - **System VPN:** plain HTTPS to an internal hostname/IP; works with the
     Tailscale app, Twingate client, WireGuard, or any other VPN the OS
     provides. (Twingate has no embeddable SDK — this profile covers it.)
@@ -165,7 +215,7 @@ for v1.)
 
 ### Storage layout
 ```
-/cache/
+/vault/cache/                   ← container-real path (nginx -p /vault)
 └── depot/
     ├── 441/                    ← depot ID (belongs to app 440, TF2)
     │   └── chunk/
@@ -184,9 +234,9 @@ for v1.)
 
 ### Deletion
 ```
-DELETE /cache/{appid}
+DELETE /v1/cache/{appid}
   → mapping: appid → [depotids]
-  → rm -rf /cache/depot/<each depotid>
+  → rm -rf /vault/cache/depot/<each depotid>
   → reset status to "idle"
 ```
 Shared depots (redistributables, shared content): before deleting, check
@@ -229,6 +279,7 @@ Steam-only, prefill-first design can solve better:
 | GET | /v1/games | All tracked games: status, size, last prefill |
 | GET | /v1/games/{appid} | Detail incl. depot list |
 | POST | /v1/prefill | Body: `{appids: [..]}` → create jobs (response marks deduplicated entries) |
+| POST | /v1/prefill/cached | No body: queue a check-and-update job for every app that holds cache content — the manual "check & update" (WP 4c), same selection the sweep uses (WP 4f) |
 | GET | /v1/jobs | Recent jobs, newest first (app polling UI) |
 | GET | /v1/jobs/{id} | Job status (for app polling) |
 | DELETE | /v1/jobs/{id} | Cancel a queued or running job (Phase 3, user decision 2026-08-06) |
@@ -248,11 +299,19 @@ Steam-only, prefill-first design can solve better:
 | PUT | /v1/mapping/{depotid} | Manual depot→app mapping fallback (additive, see ADR-0003) |
 | GET | /v1/mapping | List all depot→app mappings |
 | DELETE | /v1/mapping/{depotid}/{appid} | Remove one mapping pair (repair path) |
-| GET | /v1/health | Liveness (for external monitoring) |
+| GET | /v1/steam/key | Steam Web API relay (WP 4a.6r, ADR-0004 addenda): whether a server-side key is configured — never the key itself |
+| PUT | /v1/steam/key | Set or replace the server-side Web API key (one operator key for both frontends since WP 4h.4) |
+| DELETE | /v1/steam/key | Clear the configured key |
+| GET | /v1/steam/owned-games | Relay `GetOwnedGames` for a SteamID64; playtime/last-played fields are omitted unless the privacy gate opens them (WP 4h.0, ADR-0010) |
+| GET | /v1/steam/player-summaries | Relay `GetPlayerSummaries` (persona name, avatar) |
+| GET | /v1/settings | Effective runtime settings with the source of each value (settings API, ADR-0009) |
+| PATCH | /v1/settings | Partial update of the runtime-editable keys, same grammar as startup; `403` under `VAULT_SETTINGS_READONLY` |
+| GET | /v1/health | Liveness (for external monitoring) — the one unauthenticated route, besides the web UI's static files |
 
-Auth: static API key in a header (v1). Since everything is only reachable
-over the tailnet, this is sufficient; OIDC/forward-auth is a later option
-for users who expose the API differently.
+Auth: static API key in a header (v1) on every route except `/v1/health`
+and the web UI's static files (threat model §1/§7). Since everything is
+only reachable over the LAN or a VPN, this is sufficient; OIDC/forward-auth
+is a later option for users who expose the API differently.
 
 ---
 
@@ -515,8 +574,9 @@ headless web tests + 1461 api tests green. Every package: Sonnet coder
 → Opus review with independent mutation batteries → PASS. Recorded
 mockup divergences live in WORKPACKAGES.md (user veto welcome).
 Remaining for real-world validation: the honest still-open list in
-web/tests/README.md (real screen reader, phone browser cover art,
-Zeus-scale library) — the Zeus rollout session covers it.
+web/tests/README.md (real screen reader, phone browser cover art, a
+library at the operator's real scale) — the first real-world rollout
+session covers it.
 
 - [x] SPA sharing the mockup's design language; zero extra deploy
       complexity (vault-api serves it; works over Tailscale/LAN and on
@@ -992,8 +1052,11 @@ all. A settings screen that can toggle anything therefore needs a new layer.
       lifespan); webhook keys honestly restart-required; suite 1461
       green; Opus FAIL→fix→PASS, 13-mutation battery + A/B thread-cost
       measurement)*
-- [ ] Phase 4a's settings screen builds on this rather than displaying
+- [x] Phase 4a's settings screen builds on this rather than displaying
       read-only values with "set this env var" hints
+      *(the web settings view shipped in WP 4a.6, commit ff9798a; WP 4d-web,
+      commit c825625, drives it through `GET/PATCH /v1/settings` —
+      `web/js/api.js` `getSettings`/`patchSettings`)*
 
 **Sweep target set — installed PLUS cached (default-on since WP SWEEP-1,
 2026-08-22 — opt-in as originally shipped by WP 4d below).** Today the
@@ -1028,6 +1091,10 @@ so the same package also ships `VAULT_SCHEDULE_WINDOW=03:00-07:00` /
 `TZ=UTC` as the default Compose configuration (WP SWEEP-1 follow-up,
 2026-08-22) — see that ADR's "Shipping an enabled nightly schedule" section
 for the full argument.
+The same window, by default, also lifts the optional upstream rate cap
+(WP TH-1a/TH-1b, ADR-0015, §11 item 10): `VAULT_UPSTREAM_RATE_WINDOW`
+falls back to `VAULT_SCHEDULE_WINDOW` in `deploy/compose.yaml`, and `TZ`
+is forwarded to vault-core so both are read on the same clock.
 
 - [x] New target-set mode adding every cached app to the sweep. Cheap by
       construction: ~3 s and zero bytes per app that is already current
@@ -1072,7 +1139,8 @@ for the full argument.
       closed the demo-fixture drift class: a text-scrape guard pins
       web/js/demo-data.js's stated defaults to api/vault_api/config.py's
       real ones, labelling VALUE vs GRAMMAR drift. The Android half of
-      the sweep surface is still open — see §11 item 4)*
+      the sweep surface shipped the same day as part of WP AG-3, commit
+      0a3bfc5 — see §11 item 4)*
 - [x] **Pair with auto-GC** (still open in Phase 3): every kept-current game
       adds fresh chunks while the old manifest's chunks become orphans. A
       vault that keeps itself current without collecting garbage keeps
@@ -1221,9 +1289,11 @@ for the full argument.
       disk'"). Per docs/LEARNINGS.md ("Web UI" section, WP 4a.2 blocker):
       demo fixtures are a shipped surface and must demonstrate the product's
       invariants, not violate them — this is that same bug class. **Not
-      fixed here**: `web/` is occupied by WP 4e.1, which is actively editing
-      `demo-data.js`; the reviewer will close this once 4e.1 merges. The
-      shape of the fix: hoist the DELETE handler's local `otherOwners`/
+      fixed here**: `web/` was occupied by WP 4e.1 at review time. WP 4e.1
+      merged the same day (commit 07865a3) without picking this up, and no
+      later web package did either — **open since 2026-08-18, closed by WP
+      WEB-FIX-1 (2026-10-01)**, one of the fix packages from the pre-freeze
+      project review (§11 item 12). The shape of the fix: hoist the DELETE handler's local `otherOwners`/
       `hasCacheContent` helpers (currently function-scoped inside the
       `DELETE` branch, lines ~1039–1051) to module scope so
       `selectCachedAppids()` can reuse them, then change its filter
@@ -1900,9 +1970,10 @@ surface (playtime and last-played now flow through the API response).
       absence/unknown handling, the observation-window caveat, the NOT-a-rate
       correction, the poisoned-row degrade, and that these fields survive
       cache deletion (unlike `size_bytes`). Not verified against a live Steam
-      account/key — recorded on the Zeus/device list, incl. the reviewer's
-      own addition: every migrated row starts at one observation, so on Zeus
-      the panel legitimately shows `insufficient_data` for every game until
+      account/key — recorded on the real-world/device verification list,
+      incl. the reviewer's own addition: every migrated row starts at one
+      observation, so on a freshly upgraded vault the panel legitimately
+      shows `insufficient_data` for every game until
       two post-upgrade observations plus a 14-day window exist.)*
 - [x] **4h.2 (web)** — DONE 2026-08-19: both modes shipped (BP-XL right
       column + collapsible card below, one statement module), privacy stance
@@ -2112,8 +2183,11 @@ surface (playtime and last-played now flow through the API response).
       slashed refs (workflow_dispatch rehearsal), release notes generated
       by exactly one job per tag. Known, commented: re-pushing the SAME
       tag appends release notes a second time. First-tag advice recorded
-      by review: a throwaway v0.0.1-rc1 pre-release to exercise the
-      never-run path end to end.)*
+      by review: a throwaway pre-release to exercise the never-run path
+      end to end — originally named v0.0.1-rc1, superseded 2026-09-30 by
+      `v0.1.0-rc1` so the tag is a pre-release of the baked `0.1.0` base
+      (`__version__`, compose tag default, Dockerfile LABELs), see §11
+      item 7.)*
       *(WP 5.1 done 2026-08-09 — the test/lint half: api pytest (Linux),
       agent go build/vet/test (Linux+Windows matrix), core `nginx -t`
       through the image's REAL entrypoint render path (pinned upstream
@@ -2189,11 +2263,26 @@ surface (playtime and last-played now flow through the API response).
       explicitly could not be substantiated from code alone and are listed
       as open gaps in the document's own closing section rather than
       asserted anyway.
-- [ ] **Pre-release security review (WP 5.3 review half, Fable mandatory)**
-      — after an api/core code freeze. Not started: `api`/`core` are not
-      frozen (4h.2/4h.3 are open, and WP 4h.4 is in review),
-      so this cannot start yet regardless of the docs half above being done.
-      See §11 item 5.
+- [x] **Pre-release security review (WP 5.3 review half, Fable mandatory)**
+      — DONE 2026-10-01, after the api/core code freeze
+      ([ADR-0016](adr/0016-api-core-code-freeze.md), freeze commit
+      92e95be). Two passes on the strongest available model (Opus 5.5):
+      pass 1 with two reviewers (server; clients/release), pass 2 over the
+      remaining server areas. Fix packages, each reviewed to PASS:
+      SEC-FIX-1 (9aef5f4, full-match Host allowlist; vault-core
+      `cap_drop: ALL` plus five caps), SEC-FIX-2 (eea667d, signing secrets
+      in a tag-only Environment, verifiable release assets, client
+      hardening), SEC-FIX-3 (c20a33a, starlette 1.3.1 for CVE-2025-62727
+      and others, every runtime dependency pinned), SEC-FIX-4 (901368e, no
+      symlink following on the shared volume, pre-auth body guard, bounded
+      zip errors), plus test fix 907de53 (the racing-delete test asserts
+      the documented byte floor). Evidence: api suite 2000 passed /
+      6 skipped; `verify-stack.sh` 211/211. Known limits recorded in
+      threat-model §9: tinyproxy ConnectPort, event-log boot TOCTOU, GC
+      unlink TOCTOU, no client-count cap, depot base resolved per request,
+      plain-HTTP misses. Post-release items: web "forget key", removal of
+      the per-level `O_NOFOLLOW` GC walk, the deletion byte-count lock.
+      See §11 item 6.
 - [ ] Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
       frame as a complement/alternative, not a "LanCache killer")
 
@@ -2321,14 +2410,16 @@ why 0012 precedes it in time): split first, then lock.
 
 ```
 steamhangar/
-├── core/            # nginx config, Dockerfile
-├── dns/             # optional dnsmasq container (Compose profile)
-├── api/             # FastAPI, SQLite schema, scheduler
-├── agent/           # PC listener (Windows)
-├── app/             # Android (Kotlin + Go tsnet module)
-├── deploy/          # compose.yaml, example .env, DNS mode docs
-├── docs/            # architecture, ADRs, setup guides
-└── .github/         # CI, templates
+├── core/            # nginx config, Dockerfile (vault-core)
+├── dns/             # optional dnsmasq container (Compose profile, vault-dns)
+├── api/             # FastAPI, SQLite schema, scheduler, runner entrypoint (vault-api / vault-runner)
+├── agent/           # PC listener, Go (Windows, Linux, SteamOS) + packaging
+├── web/             # browser UI, plain HTML/CSS/JS, served by vault-api (no build step)
+├── app/             # Android app (Kotlin + Jetpack Compose; tsnet module is post-v1)
+├── deploy/          # compose.yaml, example .env, proxy image (vault-proxy), examples/, verify-stack
+├── docs/            # architecture, ADRs, security docs (threat model), setup guides
+├── poc/             # Phase-0 evidence, frozen — plus later measurement spikes (poc/throttle/)
+└── .github/         # CI + publish workflows, issue/PR templates
 ```
 
 ---
@@ -2339,7 +2430,7 @@ steamhangar/
 |---|---|---|
 | `proxy_store` incompatible with range requests | HIGH | Phase 0 resolves this; Plan A fallback defined |
 | Steam changes its CDN URL scheme | MEDIUM | Log schema anomalies with alerts; abstract the mapping layer |
-| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API designed with no unauthenticated endpoints |
+| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API has no unauthenticated endpoints except `/v1/health` and the web UI's static files (threat model §1/§7) |
 | Shared depots → incomplete deletion | LOW | Shared detection + transparent reporting |
 | tsnet gomobile build complexity | MEDIUM | Profile abstraction means tsnet can ship later; system-VPN profile works day one |
 | Single-maintainer risk | MEDIUM | Small scope (Steam only), good docs, permissive license lower the contribution barrier |
@@ -2371,9 +2462,11 @@ gomobile toolchain as the Android `.aar`.
      optional dnsmasq container and point your router's DHCP DNS at it.
      AAAA handling is covered by vault-dns's config (`address=` +
      `local=` pairing — see the vault-dns component note in §3).
-  3. **DNS-free hosts mode** (single Windows gaming PC, simplest setup):
-     a `lancache.steamcontent.com` hosts entry — manually or automated by
-     vault-agent (opt-in). Windows Steam client only.
+  3. **DNS-free hosts mode** (single gaming PC, Windows or Linux/SteamOS;
+     simplest setup): a `lancache.steamcontent.com` hosts entry — manually
+     or automated by vault-agent (opt-in). The current Steam client on both
+     platforms performs the lookup (WP 0.6); multi-device LANs belong on
+     mode 1 or 2.
 - **Remote access (vault-api only — never expose vault-core/port 80):**
   - Tailscale: reusable auth key for the app's embedded tsnet node, or the
     regular Tailscale client app
@@ -2391,7 +2484,8 @@ gomobile toolchain as the Android `.aar`.
 The original three steps here (build the Phase-0 PoC, create the public
 repository, then start Phase 1) are all DONE — Phase 0 answered the
 `proxy_store` question in favour of Plan B (ADR-0001), the repo exists, and
-Phases 1–3 plus 4a shipped. Rewritten 2026-08-17 to reflect the real state.
+Phases 1–3 plus 4a shipped (state as of the 2026-08-17 rewrite; the items
+below carry their own later dates, item 12 is the current one).
 
 1. [x] **Packaging package** (§7 Phase 5, first bullet) — DONE, WP P1: `web/`
    baked into the vault-api image, the full env-forwarding gap audited and
@@ -2399,10 +2493,11 @@ Phases 1–3 plus 4a shipped. Rewritten 2026-08-17 to reflect the real state.
    twelve keys total, see §7 Phase 5's own bullet for the complete list),
    `deploy/tests/verify-stack.sh` extended and run for real. What follows is
    unchanged by it: next up is item 2 below.
-2. [ ] **Zeus rollout** — joint interactive session (see the Deployment
-   section of `docs/WORKPACKAGES.md`). Two user-side blockers first: the
-   stale HADES Tailscale subnet route, and the Fritz!Box announcing itself
-   as an IPv6 DNS server via RA (a live cache bypass). This session is also
+2. [ ] **First real-world rollout** — joint interactive session with the
+   operator (see the Deployment section of `docs/WORKPACKAGES.md`). Two
+   operator-side network blockers first: a stale VPN subnet route, and a
+   router announcing itself as IPv6 DNS server via RA (a live cache
+   bypass). This session is also
    where the honest still-open lists in `web/tests/README.md` and
    `app/README.md` get verified — real screen reader, phone browser cover
    art, GC against real on-disk chunks, real multi-client bypass detection.
@@ -2426,20 +2521,49 @@ Phases 1–3 plus 4a shipped. Rewritten 2026-08-17 to reflect the real state.
    in the same commit range plus a false §5 exhaustiveness claim) —
    findings addressed in the WP 5.3-fix follow-up commit; round 3: PASS
    (2026-08-18).
-6. [ ] **WP 5.3 review half, still open** — pre-release security review
-   (Fable mandatory), after an api/core code freeze that has not happened
-   yet.
+6. [x] **WP 5.3 review half** — pre-release security review, DONE
+   2026-10-01 after the api/core/dns freeze
+   ([ADR-0016](adr/0016-api-core-code-freeze.md), commit 92e95be). Two
+   passes on Opus 5.5 (Fable unavailable, user decided not to wait; since
+   WP R-0, commit 80f750f, "[Fable]" names a boundary — the strongest
+   available model at call time — not a model). Fix packages SEC-FIX-1..4
+   (9aef5f4, eea667d, c20a33a, 901368e) plus test fix 907de53, each
+   reviewed to PASS; api 2000 passed / 6 skipped, `verify-stack.sh`
+   211/211. Known limits in threat-model §9, post-release items in §7
+   Phase 5's evidence note.
 7. [ ] **User-gated:** WP 5.5 — the machinery is no longer the gate. The
    GitHub org exists, the repo lives at `steamhangar/steamhangar`, and the
    full publish path is built and reviewed (WP CI-3 + WP AGENT-BIN, see §7
    Phase 5's CI bullet): images, signed APK, agent binaries, checksums.
-   What remains is exactly one user action — pushing the first tag — and
-   review's standing advice is a throwaway `v0.0.1-rc1` pre-release first,
-   because the path has never executed and the release page is the only
-   place its end-to-end result can be seen (re-pushing the SAME tag
-   double-appends release notes; known, commented at the site). WP 5.6
+   What remains are user actions only (steps (a)-(d) at the end of this
+   item), and review's standing advice is a throwaway pre-release first, named
+   `v0.1.0-rc1`: three things in the tree bake `0.1.0` —
+   `vault_api.__version__` (served as `server_version` by the
+   authenticated `GET /v1/settings`; `/v1/health` returns only
+   `{"status":"ok"}`), the compose `VAULT_IMAGE_TAG` default, and the
+   `org.opencontainers.image.version` LABEL in the api, core, dns and
+   deploy/proxy Dockerfiles. What the tag sets: since DEPLOY-FIX-1/APP-FIX-1 the APK's
+   versionName is the tag without its `v` (build.gradle.kts falls back to
+   `0.1.0` for local builds only), and the published images are tagged
+   (and labelled, via docker/metadata-action) with the same string. With
+   `v0.1.0-rc1` the APK and images say `0.1.0-rc1`, a semver pre-release
+   of the baked `0.1.0` base; a `v0.0.1-rc1` would ship images and an APK
+   whose version is older than the `server_version` inside them. The path has never executed and the
+   release page is the only place its end-to-end result can be seen
+   (re-pushing the SAME tag double-appends release notes; known, commented
+   at the site). WP 5.6
    (announcement) stays gated on the user's own end-to-end test with the
    Android app. Phase 6 integrations are deliberately post-release.
+   **Remaining release steps (2026-10-01, all user actions):**
+   (a) merge PR `wp/pre-freeze-review` once its CI is green — the first
+   android-tests run there is the first compile of the APP changes;
+   (b) one-time GitHub settings BEFORE setting the signing secrets: an
+   Environment `release` with a `v*`-tag deployment rule, the four
+   `ANDROID_*` secrets placed in it (not as repo secrets), and a `v*` tag
+   ruleset (see app/README "CI signing secrets"); (c) push the tag
+   `v0.1.0-rc1` from main; (d) check the release page's "Verify this
+   release" block. After the first push, the GHCR packages must be made
+   public.
 8. [x] **The AG series — agents become first-class residents** — COMPLETE
    2026-08-22, four packages in one day (user's go for the full chain).
    AG-0 (commit 74e7727): client identity visible and attributed at
@@ -2468,36 +2592,78 @@ Phases 1–3 plus 4a shipped. Rewritten 2026-08-17 to reflect the real state.
    surface. Four review rounds; the durable outcome is recorded in
    docs/LEARNINGS.md (the guarantee-vs-mechanism ceiling of name-based
    isolation scans). Real-device residuals listed in app/README.md.
-10. [ ] **Download throttling, possibly time-dependent** (operator request
-    2026-08-30, roadmap entry — not yet a scoped work package). Cap the
-    upstream (Steam → vault) bandwidth; LAN serving stays uncapped. The
-    time-dependent shape ties into the shipped schedule window: full
-    speed inside 03:00-07:00, capped outside it, so a daytime manual
-    prefill ("I want this game tonight") does not saturate the WAN while
-    people use it. Scoping questions to answer before briefing: does
-    SteamPrefill expose a native concurrency/rate option (check upstream
-    before building anything); if not, container-level shaping in
-    compose vs. documenting router QoS as the supported answer; and how
-    a cap interacts with the window scheduler (a capped sweep takes
-    longer than its window — does it stop at the window edge or run
-    over?). Interim answer that works today with zero code: per-device
-    QoS on the operator's router (Omada), which throttles exactly the
-    Steam-facing direction. README Roadmap carries the user-facing
-    version of this entry.
+10. [x] **Download throttling, time-dependent — done (WP TH-1a/TH-1b,
+    TH-1a committed as 6aa4c0c, TH-1b as 47747b4, TH-1-FIX as 92e95be; ADR-0015)** (operator request 2026-08-30). Caps the
+    upstream (Steam → vault) bandwidth; LAN serving stays uncapped. Scoping
+    by the WP TH-0 spike (commit 9865237,
+    `poc/throttle/RESULTS-THROTTLE-20260929.md`): SteamPrefill 3.7.1 has
+    no rate option, nginx-native `proxy_limit_rate $var` caps the
+    `proxy_store` miss path exactly, per request, HITs at LAN speed. User
+    decision 2026-09-30: the operator sets ONE aggregate limit, divided at
+    download time by the live number of parallel requests. WP TH-0b
+    (commit e3f3f65, `poc/throttle/RESULTS-THROTTLE-DYNAMIC-20260930.md`)
+    chose Option A (an nginx `map` on the live connection count) over Option B
+    (njs counter: burst overshoot, leak on abort). WP TH-1a
+    (`poc/throttle/RESULTS-TH1-20261001.md`) switched the divisor to
+    `$connections_writing`, not `$connections_active` (measured: `_writing`
+    0.98× of target with 8 idle keep-alives open, `_active` 0.50×). The map
+    is generated at container start with buckets 1..1024 =
+    `worker_connections` (worker_processes 1), so no live count reaches the
+    default; the bound is pinned by `check-config-drift.sh`. Fail-closed:
+    an invalid value refuses to boot. Env-only: `VAULT_UPSTREAM_RATE`
+    (empty = off) and `VAULT_UPSTREAM_RATE_WINDOW` (full speed inside;
+    unset follows `VAULT_SCHEDULE_WINDOW`, blank caps around the clock),
+    evaluated in vault-core's `TZ`, which `deploy/compose.yaml` now
+    forwards (WP TH-1b). Limits stated in `core/README.md` "Upstream rate
+    cap": per request divided by the live count (HITs dilute the share),
+    the LAN client of a MISS is slowed too, the window edge stops nothing,
+    slow-ramp overshoot unmeasured. Router QoS stays the zero-code
+    alternative.
 11. [ ] **Macvlan deploy example — vault-core on its own LAN IP** (operator
     request 2026-08-30, roadmap entry — not yet a scoped work package).
     Steam clients require plain HTTP on port 80 (Steam's choice), so on
     a host whose port 80 is already owned by a reverse proxy (Traefik,
     NPM — the homelab default) vault-core needs a second address. Today
-    that means a host-side IP alias created in the platform's own UI
-    (TrueNAS middleware, so it survives reboots). The comfortable
+    that means a host-side IP alias created in the host platform's own
+    UI (so it survives reboots). The comfortable
     shipped answer: a documented compose override giving vault-core its
     own LAN IP via a macvlan network — Docker-native, no host network
     clicks, the established lancache pattern. Must ship as an EXAMPLE
     with its caveats stated, not as a silent default: the host cannot
     reach a macvlan container directly (affects the host-side health
     probes and any same-host DNS rewrite target), the parent interface
-    and address range are operator-specific, and Dockge/TrueNAS
-    interaction needs a real test on the deployment this was requested
-    for. Belongs in deploy/examples/ beside minimal-lan and tuned-setup,
-    with a verify recipe; footprint deploy/ + docs only.
+    and address range are operator-specific, and the interaction with
+    the host platform's container manager needs a real test on the
+    deployment this was requested for. Belongs in deploy/examples/ beside
+    minimal-lan and tuned-setup, with a verify recipe; footprint deploy/ +
+    docs only.
+12. [x] **Pre-freeze project review (2026-09-30/10-01) and its fix
+    packages — done 2026-10-01; freeze declared (ADR-0016).** Before declaring the api/core freeze that
+    item 6 waits on, the whole tree was reviewed in eight areas (api data
+    layer, api surface, core + dns, agent, web, app, deploy, docs), each by
+    its own reviewer, each report naming blockers (claims or code that must
+    not reach the freeze as they are). One fix package per area with
+    findings, each through the usual coder → reviewer → PASS pipeline:
+    - [x] **AGENT-FIX-1** — commit 5ce6b50
+    - [x] **CORE-FIX-1** (core + dns) — commit 30151f8
+    - [x] **API-FIX-2** — commit 460897e
+    - [x] **WEB-FIX-1** — commit 9572e6f (includes the WP 4f demo-mode
+      carry-over open since 2026-08-18)
+    - [x] **API-FIX-1** — commit 298029f
+    - [x] **APP-FIX-1** — commit 95b684c
+    - [x] **DEPLOY-FIX-1** (deploy, CI) — commit 4c8a67d
+    - [x] **DOCS-FIX-1** (this plan, the root docs, the ADR addenda dated
+      2026-09-30 — files no other fix package owns) — commit f70c031
+    - [x] **DOCS-FIX-2** (the component docs those packages touch, after
+      they land) — commit ec90ce2
+    Follow-up commits after the review packages, all reviewed to PASS:
+    - [x] **TH-1a** (core, aggregate upstream cap) — commit 6aa4c0c
+    - [x] **WEB-FIX-2** (user decision 2026-10-01, connection-lost
+      indicator) — commit 984d02a
+    - [x] **TH-1b** (deploy, cap configurable from `.env`, follows the
+      schedule window) — commit 47747b4
+    - [x] **TH-1-FIX** (copy-up race on a fresh cache volume, found by a
+      live verify; verify 204/204) — commit 92e95be
+    Directly before the review, WP R-0 (commit 80f750f) moved agent
+    delegation to the session model (see item 6). The freeze followed the
+    last PASS: ADR-0016, freeze commit 92e95be.

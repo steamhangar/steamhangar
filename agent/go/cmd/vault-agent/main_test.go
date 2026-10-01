@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +19,21 @@ import (
 	"github.com/Riviera822/steamhangar/agent/agentconfig"
 	"github.com/Riviera822/steamhangar/agent/client"
 )
+
+// emptyLibraryRoot returns a Steam library root that EXISTS and is
+// READABLE but has nothing installed: <tmp>/steamapps/ with no manifests
+// and no libraryfolders.vdf. Since WP AGENT-FIX-1 S1 that is the only
+// shape of "empty" that `report` still posts by default - a bare
+// directory with no steamapps/ at all now reads as "Steam not found here"
+// and is refused (see TestRun_OneShot_ZeroReadableLibrariesRefusesToPost).
+func emptyLibraryRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "steamapps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
 
 func TestRun_NoSubcommandIsUsageError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -95,7 +114,7 @@ func TestRun_OneShotSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	libraryRoot := t.TempDir() // empty: no steamapps dir -> zero installed apps, still a legitimate report
+	libraryRoot := emptyLibraryRoot(t) // readable steamapps/, nothing installed: a legitimate empty report
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
@@ -114,6 +133,116 @@ func TestRun_OneShotSuccess(t *testing.T) {
 	}
 }
 
+// --- WP AGENT-FIX-1 S1: a library root with no readable steamapps/ is
+// "Steam not found", not "nothing installed" - and must NOT be posted as
+// an empty snapshot (which would make vault-api drop every one of this
+// client's games from the prefill set and log "REMOVED N apps").
+
+func TestRun_OneShot_ZeroReadableLibrariesRefusesToPost(t *testing.T) {
+	var requests int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"client_id":"test-pc","received":0,"added":[],"removed":[],"first_report":true}`))
+	}))
+	defer srv.Close()
+
+	wrongRoot := t.TempDir() // exists, but has no steamapps/ - a typical wrong --library-root
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"report",
+		"--server-url", srv.URL,
+		"--api-key", "test-key",
+		"--client-id", "test-pc",
+		"--library-root", wrongRoot,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1. stderr=%s", code, stderr.String())
+	}
+	if got := atomic.LoadInt32(&requests); got != 0 {
+		t.Fatalf("server received %d request(s), want 0 - nothing may be posted when no library was readable", got)
+	}
+	if strings.Contains(stdout.String(), "reported") {
+		t.Errorf("stdout = %q, must not claim a report was made", stdout.String())
+	}
+	// The refusal line logs probed=%q, so on Windows the backslashes of
+	// t.TempDir() appear doubled - assert the quoted form, not the raw path.
+	for _, want := range []string{"report refused", "probed=" + strconv.Quote(wrongRoot), "--library-root", agentconfig.EnvLibraryRoot, "--allow-empty"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+		}
+	}
+}
+
+func TestRun_OneShot_AllowEmptyPostsDespiteZeroReadableLibraries(t *testing.T) {
+	var requests int32
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"client_id":"test-pc","received":0,"added":[],"removed":[],"first_report":true}`))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"report",
+		"--allow-empty",
+		"--server-url", srv.URL,
+		"--api-key", "test-key",
+		"--client-id", "test-pc",
+		"--library-root", t.TempDir(), // no steamapps/ - explicitly allowed this time
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 with --allow-empty. stderr=%s", code, stderr.String())
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("server received %d request(s), want exactly 1", got)
+	}
+	if !strings.Contains(string(body), `"appids":[]`) {
+		t.Errorf("posted body = %s, want an empty appids list", body)
+	}
+	if strings.Contains(stderr.String(), "report refused") {
+		t.Errorf("stderr = %q, must not log a refusal when --allow-empty is given", stderr.String())
+	}
+}
+
+// --- WP AGENT-FIX-1 S2: the startup log line prints server_url; a URL
+// carrying userinfo (reverse-proxy basic auth) must have it redacted there.
+func TestRun_StartupLogNeverShowsServerURLUserinfo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"client_id":"test-pc","received":0,"added":[],"removed":[],"first_report":true}`))
+	}))
+	defer srv.Close()
+
+	// http://alice:URL-PASSWORD-CANARY@127.0.0.1:port
+	withUserinfo := strings.Replace(srv.URL, "http://", "http://alice:URL-PASSWORD-CANARY@", 1)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"report",
+		"--server-url", withUserinfo,
+		"--api-key", "test-key",
+		"--client-id", "test-pc",
+		"--library-root", emptyLibraryRoot(t),
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0. stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "URL-PASSWORD-CANARY") || strings.Contains(stderr.String(), "alice") {
+		t.Fatalf("server URL userinfo leaked into the log: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "server_url=\"http://<redacted>@") {
+		t.Errorf("stderr = %q, want the startup line to show the redacted userinfo placeholder", stderr.String())
+	}
+}
+
 func TestRun_OneShotFailureOn401(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -121,7 +250,7 @@ func TestRun_OneShotFailureOn401(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	libraryRoot := t.TempDir()
+	libraryRoot := emptyLibraryRoot(t)
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
@@ -156,7 +285,7 @@ func TestRun_APIKeyNeverAppearsInLoggedOutput(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	libraryRoot := t.TempDir()
+	libraryRoot := emptyLibraryRoot(t)
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
@@ -211,7 +340,7 @@ func TestRun_StartupLogShowsExplicitClientIDSource(t *testing.T) {
 		"--server-url", srv.URL,
 		"--api-key", "test-key",
 		"--client-id", "test-pc",
-		"--library-root", t.TempDir(),
+		"--library-root", emptyLibraryRoot(t),
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0. stderr=%s", code, stderr.String())
@@ -248,7 +377,7 @@ func TestRun_StartupLogShowsDerivedClientIDAndOverrideHint(t *testing.T) {
 		"--api-key", "test-key",
 		// no --client-id, no VAULT_AGENT_CLIENT_ID set: forces the
 		// hostname-derived path this test targets.
-		"--library-root", t.TempDir(),
+		"--library-root", emptyLibraryRoot(t),
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0. stderr=%s", code, stderr.String())
@@ -311,7 +440,7 @@ func TestRunLoop_ContinuesAfterFailureAndExitsCleanlyOnCancel(t *testing.T) {
 		ServerURL:      srv.URL,
 		APIKey:         "k",
 		ClientID:       "pc",
-		LibraryRoot:    t.TempDir(), // empty: zero installed apps is a legitimate report
+		LibraryRoot:    emptyLibraryRoot(t), // readable, nothing installed: a legitimate empty report
 		ReportInterval: 10 * time.Millisecond,
 	}
 	// MaxRetries(0): each reportOnce attempt fails/succeeds immediately -

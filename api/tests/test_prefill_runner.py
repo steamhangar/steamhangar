@@ -468,3 +468,88 @@ def test_apply_observed_mapping_creates_the_app_row_for_a_new_title(conn) -> Non
 
     row = conn.execute("SELECT appid FROM apps WHERE appid = 12345").fetchone()
     assert row is not None
+
+
+# -- WP API-FIX-1 (P2/P4): wait-loop exceptions and the abort wording --------
+
+
+def _spy_stop_process(monkeypatch) -> list:
+    """Wrap the real ``_stop_process`` so a test can see WHICH child it was
+    asked to stop, then check that child's ``poll()`` afterwards."""
+    stopped: list = []
+    real = prefill._stop_process
+
+    def spy(process):
+        stopped.append(process)
+        return real(process)
+
+    monkeypatch.setattr(prefill, "_stop_process", spy)
+    return stopped
+
+
+def test_a_raising_stop_request_still_terminates_the_child(tmp_path: Path, monkeypatch) -> None:
+    """WP API-FIX-1 (P2): the queue-mode ``stop_request`` callback talks to
+    SQLite; before the fix an exception out of it unwound the wait loop
+    WITHOUT ``_stop_process``, leaving SteamPrefill running unreaped. The
+    exception must still propagate (it is not a prefill outcome), but the
+    hanging child must be dead by the time it does."""
+    bindir = tmp_path / "bin"
+    executable = stub_prefill.make_stub(bindir, mode="hang")
+    stopped = _spy_stop_process(monkeypatch)
+
+    def broken_stop_request() -> str | None:
+        raise RuntimeError("database is locked (simulated)")
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        prefill.run_prefill(
+            440, executable, timeout_seconds=60, stop_request=broken_stop_request
+        )
+
+    assert len(stopped) == 1, "the child was not stopped on the way out"
+    assert stopped[0].poll() is not None, "the child is still running"
+
+
+def test_a_raising_should_abort_still_terminates_the_child(tmp_path: Path, monkeypatch) -> None:
+    bindir = tmp_path / "bin"
+    executable = stub_prefill.make_stub(bindir, mode="hang")
+    stopped = _spy_stop_process(monkeypatch)
+
+    def broken_should_abort() -> bool:
+        raise RuntimeError("stop event exploded (simulated)")
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        prefill.run_prefill(
+            440, executable, timeout_seconds=60, should_abort=broken_should_abort
+        )
+
+    assert len(stopped) == 1
+    assert stopped[0].poll() is not None
+
+
+def test_abort_reason_defaults_to_vault_api_wording(tmp_path: Path) -> None:
+    """Subprocess mode is byte-identical to before WP API-FIX-1: the caller
+    that passes nothing still gets the vault-api sentence."""
+    bindir = tmp_path / "bin"
+    executable = stub_prefill.make_stub(bindir, mode="hang")
+
+    result = prefill.run_prefill(
+        440, executable, timeout_seconds=60, should_abort=lambda: True
+    )
+
+    assert result.failure_reason == "aborted"
+    assert "[vault-api] Aborted: vault-api is shutting down." in result.output
+
+
+def test_abort_reason_is_recorded_verbatim(tmp_path: Path) -> None:
+    """WP API-FIX-1 (P4): the sentence names whose shutdown it was."""
+    bindir = tmp_path / "bin"
+    executable = stub_prefill.make_stub(bindir, mode="hang")
+
+    result = prefill.run_prefill(
+        440, executable, timeout_seconds=60, should_abort=lambda: True,
+        abort_reason="the moon is shutting down",
+    )
+
+    assert result.failure_reason == "aborted"
+    assert "[vault-api] Aborted: the moon is shutting down." in result.output
+    assert "vault-api is shutting down" not in result.output

@@ -51,12 +51,17 @@ object SteamLoginState {
  * OpenID plumbing already makes.
  *
  * **Single-use is the load-bearing property, not just "compares a string".**
- * [consume] ALWAYS clears the pending value, whether or not it matched --
- * a second call for the same attempt (a replay of the exact same callback
- * URL, or any other callback arriving after the first was already resolved)
- * finds nothing pending and fails closed. This is what makes a captured,
- * genuine callback un-replayable a second time, on top of it being rejected
- * outright for any OTHER pending attempt whose state differs.
+ * [consume] clears the pending value on a MATCH -- a second call with the
+ * same value (a replay of the exact same callback URL) finds nothing pending
+ * and fails closed. This is what makes a captured, genuine callback
+ * un-replayable a second time.
+ *
+ * A MISMATCH leaves the pending value intact (WP SEC-FIX-2, N1): any app on
+ * the device can fire a `vaultapp://` callback with a made-up state, and if
+ * a mismatch cleared the pending value, such a fake callback would kill the
+ * user's real sign-in in flight. Keeping it costs nothing: the state is 24
+ * CSPRNG bytes, so repeated guessing is not a practical attack, and the next
+ * [start] replaces the value anyway.
  */
 class PendingLoginState {
     private var expected: String? = null
@@ -67,16 +72,20 @@ class PendingLoginState {
     }
 
     /**
-     * Consumes (clears) the pending state and reports whether [actual]
-     * matches it. `false` when nothing is pending (no login was started, or
-     * a previous attempt already consumed it), when [actual] is `null`
-     * (the callback's `return_to` carried no `state` at all -- an older
-     * caller, a forged deep link, or a provider that dropped the query
-     * string), or when the two values differ.
+     * Reports whether [actual] matches the pending state and, only if it
+     * does, consumes (clears) it. `false` when nothing is pending (no login
+     * was started, or a previous attempt already consumed it), when [actual]
+     * is `null` (the callback's `return_to` carried no `state` at all -- an
+     * older caller, a forged deep link, or a provider that dropped the query
+     * string), or when the two values differ. On `false` the pending value
+     * is left unchanged.
      */
     fun consume(actual: String?): Boolean {
         val current = expected
-        expected = null
-        return current != null && actual != null && current == actual
+        val matches = current != null && actual != null && current == actual
+        if (matches) {
+            expected = null
+        }
+        return matches
     }
 }

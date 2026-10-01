@@ -237,8 +237,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- v15 (WP S-1, ADR-0012): queue-mode hand-off between vault-api's worker
     -- (still the ONLY writer of every column above -- job lifecycle stays
     -- here) and the separate prefill_runner process (the only thing that ever
-    -- writes the three run_result_json/run_completed_at/run_heartbeat_at
-    -- columns below, once it owns a job). NULL for every job that never goes
+    -- writes run_result_json/run_completed_at, and the only writer of
+    -- run_heartbeat_at once it owns a job -- see that column's note for the
+    -- one write vault-api makes to it). NULL for every job that never goes
     -- through queue mode. See vault_api/jobs.py's "queue-mode job handoff"
     -- section for the full state machine and vault_api/prefill_queue.py for
     -- the encode/decode helpers.
@@ -261,8 +262,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- compare-and-swap (jobs.claim_run) so two runner instances (a second
     -- replica, or a restarted one racing its own dangling row) can never both
     -- claim the same job.
-    -- run_heartbeat_at: updated by the runner while SteamPrefill is in
-    -- flight (piggybacked on prefill.run_prefill's existing 0.2s poll tick).
+    -- run_heartbeat_at: the runner lease clock. Stamped by vault-api ONCE,
+    -- at hand-off (jobs.handoff_run, WP API-FIX-1 B2) so that "no runner
+    -- claimed this within the lease" is measured from the moment a runner
+    -- could have claimed it -- not from started_at, which predates
+    -- vault-api's own pre-hand-off cache walk -- and then updated by the
+    -- runner while SteamPrefill is in flight (piggybacked on
+    -- prefill.run_prefill's existing 0.2s poll tick).
     -- Its staleness (jobs.run_is_stale) is the ONLY signal that a claimed job
     -- has a dead runner behind it -- there is deliberately no lease-stealing
     -- reclaim: once staleness is detected the JOB is failed (status leaves

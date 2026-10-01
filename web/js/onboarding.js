@@ -118,6 +118,10 @@ function freshState() {
     step: FIRST_STEP,
     mode: "first-run", // "first-run" | "reconnect" — governs Skip's behaviour
     tested: false,
+    // WP WEB-FIX-1 round 2 (S1): sticky — set by the FIRST successful key
+    // test and never cleared, because that test already stored the key and
+    // ended demo mode (B1). A later failed re-test resets `tested`, not this.
+    switched: false,
     settings: null, // the {readonly, settings} GET /v1/settings answer from the last successful test
     steamStatus: { configured: false, key_last4: null },
     lookup: null, // {gameCount, players} | {error} | null (nothing looked up yet)
@@ -205,28 +209,33 @@ function buildStep1() {
     okLine.classList.remove("on");
     errLine.hidden = true;
     try {
-      const { health, settings } = await checkVaultApiKey(key);
+      // WP WEB-FIX-1 (N5): this button TESTS. It stores the verified key
+      // (step 2's relay calls need it on the wire) and pre-fills the name
+      // field from the server — it no longer PATCHes `vault_name`; that
+      // write happens in `finish()`, behind the button whose label says
+      // the flow is being completed.
+      const { settings } = await checkVaultApiKey(key);
       setStoredApiKey(key);
+      // WP WEB-FIX-1 (B1): a verified real vault ends demo mode HERE, not
+      // only at finish(). `api.js` routes every request by `isDemoMode()`
+      // per call, so leaving the flag set until the final step would send
+      // step 2's Steam-relay PUT/GET to the in-memory fixtures and report
+      // a save that never reached the vault. (Before this WP nothing ever
+      // wrote `"0"` — a user who chose "browse in demo mode" once was in
+      // demo forever, reconnect included.)
+      setDemoMode(false);
       state.tested = true;
+      state.switched = true;
       state.settings = settings;
       const vaultNameEntry = settings.settings.find((s) => s.key === "vault_name");
       if (!nameInput.value && vaultNameEntry && vaultNameEntry.effective) {
         nameInput.value = vaultNameEntry.effective;
       }
-      const desiredName = nameInput.value.trim();
-      if (
-        desiredName &&
-        !settings.readonly &&
-        vaultNameEntry &&
-        desiredName !== (vaultNameEntry.effective || "")
-      ) {
-        try {
-          await api.patchSettings({ vault_name: desiredName });
-        } catch (patchErr) {
-          showToast(`Vault name not saved: ${errorText(patchErr)}`, { warn: true });
-        }
-      }
-      okText.textContent = `200 OK · vault-api${health && health.version ? " " + health.version : ""}`;
+      // WP WEB-FIX-1 (N3): no version suffix — `GET /v1/health` is a fixed
+      // `{"status":"ok"}` (api/vault_api/routers/health.py); the server
+      // version lives on `GET /v1/settings`'s `server_version`, which the
+      // rail foot already shows.
+      okText.textContent = "200 OK · vault-api";
       okLine.classList.add("on");
     } catch (err) {
       errLine.hidden = false;
@@ -252,7 +261,7 @@ function buildStep1() {
     ),
   );
 
-  els.step1 = { section, heading, nameInput, keyInput };
+  els.step1 = { section, heading, nameInput, keyInput, errLine };
   return section;
 }
 
@@ -449,7 +458,13 @@ function buildStep3() {
   section.append(el("p", "lede", "The app will reload once to pick everything up."));
   const summary = el("div", "summary");
   section.append(summary);
-  els.step3 = { section, heading, summary };
+  // WP WEB-FIX-1 (N5): where a failed vault-name save is reported — the
+  // save now happens in finish(), and a toast would be wiped by the reload
+  // that follows a successful one.
+  const errLine = el("p", "errline");
+  errLine.hidden = true;
+  section.append(errLine);
+  els.step3 = { section, heading, summary, errLine };
   return section;
 }
 
@@ -604,8 +619,51 @@ function onDemoSkip() {
   window.location.reload();
 }
 
-function finish() {
+/** The vault-name write `finish()` owes (WP WEB-FIX-1, N5 — moved here from
+ * the "Test connection" handler). Returns `null` when there is nothing to
+ * send: no verified settings snapshot, a blank name, a read-only vault, or
+ * a name equal to the server's current one. */
+function pendingVaultName() {
+  if (!state.tested || !state.settings) return null;
+  const desiredName = els.step1.nameInput.value.trim();
+  if (!desiredName || state.settings.readonly) return null;
+  const entry = (state.settings.settings || []).find((s) => s.key === "vault_name");
+  if (!entry || desiredName === (entry.effective || "")) return null;
+  return desiredName;
+}
+
+/** Complete the flow: save the vault name if the user changed it, then
+ * reload so every module re-initializes against the stored key
+ * (module header, step 3). A failed name save is shown on this step and
+ * does NOT reload — the user can retry ("Go to library" again), or go Back
+ * and clear the name to continue without it. Demo mode was already ended
+ * at key-test time (B1, step 1's handler); `setDemoMode(false)` here is the
+ * belt to that suspenders, so a verified connect can never reload into demo. */
+async function finish() {
+  const { errLine } = els.step3;
+  errLine.hidden = true;
+  const name = pendingVaultName();
+  if (name !== null) {
+    els.nextBtn.disabled = true;
+    try {
+      await api.patchSettings({ vault_name: name });
+    } catch (err) {
+      errLine.hidden = false;
+      errLine.textContent = `Vault name not saved: ${errorText(err)} — try again, or go Back and clear the name to continue without it.`;
+      return;
+    } finally {
+      els.nextBtn.disabled = false;
+    }
+  }
+  if (state.tested) setDemoMode(false);
   window.location.reload();
+}
+
+/** Whether the overlay is currently showing (WP WEB-FIX-1, B2 — the guard
+ * `components/auth-recovery.js` uses so a store-driven reconnect never
+ * resets a flow the user is already in). */
+export function isOnboardingOpen() {
+  return !!root && !root.classList.contains("gone");
 }
 
 // ---------------------------------------------------------------------
@@ -614,8 +672,10 @@ function finish() {
 
 /** Show the onboarding overlay. `mode: "reconnect"` is used from Settings'
  * "Reconnect / switch account" — Skip then just closes instead of enabling
- * demo mode, since a working connection may already exist. */
-export function openOnboarding({ mode = "first-run" } = {}) {
+ * demo mode, since a working connection may already exist. `notice`
+ * (WP WEB-FIX-1, B2) is shown in step 1's error line so a reconnect the app
+ * opened on its own (a 401 from the stored key) says why it appeared. */
+export function openOnboarding({ mode = "first-run", notice = "" } = {}) {
   if (!root) buildOverlay();
   state = freshState();
   state.mode = mode;
@@ -626,6 +686,9 @@ export function openOnboarding({ mode = "first-run" } = {}) {
   invokerEl = mode === "reconnect" ? document.activeElement : null;
   els.step1.keyInput.value = "";
   els.step1.nameInput.value = "";
+  els.step1.errLine.hidden = !notice;
+  els.step1.errLine.textContent = notice;
+  els.step3.errLine.hidden = true;
   render();
   if (getStoredApiKey()) {
     // Only worth asking on reconnect — a first run has no valid vault API
@@ -649,6 +712,12 @@ export function openOnboarding({ mode = "first-run" } = {}) {
   els.step1.nameInput.focus();
 }
 
+/** Hide the overlay. WP WEB-FIX-1 round 2 (S1): if a key test succeeded
+ * in this open, the key is already stored and demo mode already ended (B1),
+ * so closing without finishing (Skip or Escape) would leave the app
+ * half-switched — polling hits the real vault while views still show their
+ * demo-era state. Reload the same way `finish()` does so every module
+ * re-initializes against the stored key. */
 export function closeOnboarding() {
   if (!root) return;
   root.classList.add("gone");
@@ -657,6 +726,10 @@ export function closeOnboarding() {
   if (invokerEl) {
     invokerEl.focus();
     invokerEl = null;
+  }
+  if (state.switched) {
+    state.switched = false; // one reload per open, even if called twice
+    window.location.reload();
   }
 }
 

@@ -21,6 +21,7 @@
 package agentconfig
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -106,14 +107,59 @@ type Config struct {
 	LibraryRootProbeNote string
 	ReportInterval       time.Duration // only consulted in --loop mode
 	Loop                 bool
+
+	// AllowEmpty (--allow-empty) lets `report` post an empty installed
+	// list even when NO Steam library under LibraryRoot could be read.
+	// Off by default (WP AGENT-FIX-1 S1): a wrong library root used to
+	// post a legitimate-looking empty snapshot, which made vault-api drop
+	// every one of this client's games from the prefill set. A readable
+	// library that simply has nothing installed never needs this flag -
+	// that empty report is posted regardless (ADR-0002 full-list
+	// semantics). Flag-only, like --loop: it is a deliberate per-
+	// invocation override, not a deployment setting.
+	AllowEmpty bool
 }
 
 // Redacted returns a copy of cfg safe to log: APIKey is replaced with a
 // fixed placeholder, never a partial/truncated key (a truncated key is
-// still a key fragment).
+// still a key fragment), and any userinfo in ServerURL (a
+// "https://user:password@host" form an operator may use for a reverse
+// proxy's basic auth) is replaced the same way - cmd/vault-agent logs the
+// server URL at every start, into vault-agent.log / the journal (WP
+// AGENT-FIX-1 S2).
 func (c Config) Redacted() Config {
 	c.APIKey = "<redacted>"
+	c.ServerURL = redactURL(c.ServerURL)
 	return c
+}
+
+// redactedUserinfo is the placeholder redactURL substitutes for a URL's
+// userinfo. Inserted by string surgery rather than url.User("<redacted>"),
+// because url.URL.String percent-encodes '<' and '>' in userinfo
+// ("%3Credacted%3E@"), which reads like a real, odd username.
+const redactedUserinfo = "<redacted>@"
+
+// redactURL returns raw with any userinfo replaced by redactedUserinfo.
+// A URL without userinfo is returned byte-identical. Fail-closed: a raw
+// value url.Parse cannot even parse is replaced entirely by a placeholder
+// rather than echoed (it could still contain a password).
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable url, redacted>"
+	}
+	if u.User == nil {
+		return raw
+	}
+	u.User = nil
+	stripped := u.String()
+	i := strings.Index(stripped, "://")
+	if i < 0 {
+		// Scheme-less/opaque URL that still carried userinfo: Config
+		// validation rejects these, so this is defensive only.
+		return redactedUserinfo + stripped
+	}
+	return stripped[:i+3] + redactedUserinfo + stripped[i+3:]
 }
 
 // Getenv matches os.Getenv's signature; Parse takes it as a parameter
@@ -143,6 +189,7 @@ type flagSpec struct {
 	libraryRoot string
 	interval    string
 	loop        bool
+	allowEmpty  bool
 }
 
 // Parse parses args (NOT including the subcommand name itself, e.g. for
@@ -181,6 +228,9 @@ func Parse(name string, args []string, getenv Getenv, output io.Writer) (Config,
 	fs.StringVar(&spec.interval, "interval", "",
 		"report interval for --loop mode, e.g. 30m (env "+EnvInterval+"; default: "+DefaultReportInterval.String()+")")
 	fs.BoolVar(&spec.loop, "loop", false, "keep running, reporting every --interval (jittered) until SIGTERM/CTRL-C")
+	fs.BoolVar(&spec.allowEmpty, "allow-empty", false,
+		"post an empty installed list even when no Steam library under --library-root could be read "+
+			"(default: refuse and exit 1, since that usually means a wrong --library-root)")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err // flag package already printed usage (to output) on -h/bad flag
@@ -305,19 +355,30 @@ func build(spec flagSpec, getenv Getenv) (Config, error) {
 		LibraryRootProbeNote: libraryRootProbeNote,
 		ReportInterval:       interval,
 		Loop:                 spec.loop,
+		AllowEmpty:           spec.allowEmpty,
 	}, nil
 }
 
+// validateServerURL never echoes raw into its error: the messages land
+// in the "config error=" log line, and a value with userinfo would leak
+// the password there (WP AGENT-FIX-1 S2). The parse-failure branch
+// unwraps *url.Error deliberately - its Error() text quotes the whole
+// raw URL.
 func validateServerURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("server URL %q is not a valid URL: %w", raw, err)
+		cause := err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			cause = urlErr.Err
+		}
+		return fmt.Errorf("server URL is not a valid URL: %w", cause)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("server URL %q must use http:// or https://, got scheme %q", raw, u.Scheme)
+		return fmt.Errorf("server URL %q must use http:// or https://, got scheme %q", redactURL(raw), u.Scheme)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("server URL %q has no host", raw)
+		return fmt.Errorf("server URL %q has no host", redactURL(raw))
 	}
 	return nil
 }

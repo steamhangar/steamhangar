@@ -600,10 +600,10 @@ for what changed and how each fix was mutation-verified.
     mutation-verified: removing the guard now fails this test in under 1ms
     (`calls === 1` assertion, `2 !== 1`) with no `--test-timeout` needed.
 - `demo-data-cached-prefill.test.js` extends `demo-data.js`'s coverage with
-  the new `POST /v1/prefill/cached` route: selects every game whose `depots`
-  array is non-empty (this demo model's stand-in for "has cache content on
-  disk", `makeGame()`'s header), sorted ascending, excluding the one seed
-  game with no depots at all; response shape matches `PrefillJobRef`
+  the new `POST /v1/prefill/cached` route: selects every game that maps at
+  least one EXCLUSIVE or LAST-CACHED-REMNANT depot (the real
+  `deletion.appids_with_cache_content` rule since WP 4f, applied to the
+  demo by WP WEB-FIX-1 S1 — see that section below), sorted ascending; response shape matches `PrefillJobRef`
   exactly; a brand-new job dedupes `false`; the seed data's already-`running`
   job dedupes onto itself with no second job created; pausing that job first
   and re-calling the route dedupes onto it with `status: "paused"` — the job
@@ -625,9 +625,8 @@ for what changed and how each fix was mutation-verified.
   neither a two-line change):** a brand-new demo job flips straight to
   `"running"` on creation (the real contract allows `deduplicated: false`
   to arrive as `"queued"`, which this demo model never produces at that
-  moment); demo selection keys on `depots.length > 0` while the real grid
-  keys on `size_bytes > 0` (agree on every current fixture, but are not the
-  same predicate).
+  moment). (The second nitpick, demo selection keying on
+  `depots.length > 0`, was closed by WP WEB-FIX-1 S1.)
 
 ### WP 4e.1 — Desktop layout foundation (Phase 4e)
 
@@ -2104,14 +2103,10 @@ module and is tested here.
   itself wrong for a reformatting-shaped failure) — VALUE drift (the regex
   still matches, but resolves to a different value: fix `demo-data.js`)
   from GRAMMAR drift (the regex no longer matches `config.py` at all: fix
-  THIS file's regex, `demo-data.js` may be innocent). **Currently 2
-  intentional failures** (the `node --test` totals quoted in the coder's
-  report reflect this): this worktree's own `api/vault_api/config.py`
-  still carries the pre-ADR-0014 values — the sibling package that flips
-  them has not merged into this tree yet — and the guard is correctly
-  reporting that disagreement; it is expected to go green once that merge
-  lands, per the coordinator's stated merge order (sibling first, then
-  this package).
+  THIS file's regex, `demo-data.js` may be innocent). Green since the
+  sibling package that flipped `api/vault_api/config.py` to the ADR-0014
+  defaults merged (the "2 intentional failures" this paragraph used to
+  record are gone; WP WEB-FIX-1, N2).
 
 **Not covered, by design:** everything below needs a real rendered page,
 which neither `node --test` nor a pure `lib/` module can exercise — checked
@@ -2146,3 +2141,155 @@ timeout is a real, app-wide mechanism (every call site in `api.js` would
 need it, not just this screen's three) and is correctly out of scope for
 this package — noted here so it is found the next time a client timeout
 actually lands, rather than rediscovered from scratch.
+
+### WP WEB-FIX-1 — review findings B1/B2/S1/S2/S3/P2/N2-N5
+
+Suite at the end of this package: **820 tests, 820 pass, 0 fail**
+(`node --test "web/tests/*.test.js"`; 772 before it, 812 after review
+round 1 — round 2 added `fake-dom.test.js` and four onboarding tests).
+
+New files:
+- `onboarding-wiring.test.js` — fake-dom drive of `onboarding.js`: B1
+  (a verified key test writes `steamvault.demoMode = "0"`; finish never
+  reloads into demo), N3 (OK line carries no `health.version`), N5
+  ("Test connection" sends no PATCH; `finish()` sends the changed
+  `vault_name`, skips it when unchanged or read-only, shows a failed save
+  on step 3 without reloading and retries on the next press), and the B2
+  surface (`openOnboarding({notice})`, `isOnboardingOpen()`). Error lines
+  are looked up per step section (`section.ostep[data-step]`), never by
+  document position — step 2 has its own `p.errline`.
+- `settings-view-wiring.test.js` — `views/settings.js`: B2 (a 401 on
+  `GET /v1/settings` still renders the Connection section and its button
+  opens the reconnect overlay), B1 (demo notice + "Connect to a vault"
+  row, through the real `api.js` → `demo-data.js` path, zero fetches),
+  P2 (a response missing one of the eight keys lands on the error line
+  naming it). Compares TEXT, never nodes: a failed node assertion makes
+  `node:assert` dump the whole fake-DOM graph and the process was
+  OOM-killed (SIGKILL) during development.
+- `auth-recovery.test.js` — `components/auth-recovery.js` (B2): the first
+  AUTH-kind store error opens reconnect once; NETWORK/SERVER never;
+  no stored key never; an already-open overlay neither re-opens nor
+  consumes the one-shot; plus a source pin that `app.js` wires it.
+- `fake-dom.test.js` (round 2, N1/N2) — self-tests for the shared shim:
+  the `innerHTML` setter accepts exactly ONE top-level element and throws
+  otherwise, reading `innerHTML` throws "unsupported", and text nodes live
+  in `childNodes` but never in `children`.
+- `store-singleton-gate.test.js` — N4: no key and no demo starts no loop
+  (zero requests); a key or demo mode starts them.
+- `view-announcer.test.js` — S2: literal `VIEW_TITLES` pin + router twin
+  pin, `<main id="view-root">` has no `aria-live` (HTML comments stripped
+  before the scan), static `#view-announcer` (`.sr-only`, `role="status"`),
+  and the announcer write lives inside `renderView`.
+
+Extended: `settings-diff.test.js` (S3 trimmed string body, arrays
+verbatim), `settings-presentation.test.js` (P2 `missingSettingKeys`),
+`demo-data-cached-prefill.test.js` (S1: shared-with-cached-co-owner not
+selected; the delete-then-check-all carry-over scenario; remnant after
+both co-owners deleted), `fake-dom.js` (DocumentFragment move semantics,
+text nodes; round 2: `childNodes` is now the backing list of elements AND
+text nodes with `children` as the element-only view, and `innerHTML` is
+strict — the setter takes ONE top-level element and throws on anything
+else, the getter throws instead of returning a guess).
+
+Mutation evidence (each applied alone, full suite run, then restored):
+Connection section moved back below the load-error return → 2 fail;
+`setDemoMode(false)` removed from the key test → 2 fail; `aria-live`
+restored on `<main>` → 1 fail; announcer write removed → 1 fail; S3 trim
+reverted → 2 fail; P2 guard disabled → 1 fail; auth-recovery once-guard
+removed → 1 fail; `createAuthRecovery` call removed from `app.js` → 1
+fail; N4 gate forced to `return true` → 1 fail (it HUNG the suite until the
+first test moved `store.stop()` into `finally`); S1 filter reverted to
+`depots.length > 0` → 3 fail; demo notice disabled → 1 fail; N3
+`health.version` suffix restored → 5 fail.
+
+Not covered: a real screen reader actually speaking the announcer, and the
+demo notice's painted look (it reuses the existing `.hint` class only).
+
+### WP DOCS-FIX-2 — fake-dom `textContent`
+
+Closes the harness gap recorded after WEB-FIX-1 round 2: `textContent` was
+a plain property, so an element built from child nodes read back as
+`undefined` and setting it left the old children in place. It is now a
+real-DOM getter/setter pair — the getter joins the children's text when
+`childNodes` is non-empty (own text otherwise, `""` by default); only a
+`#text` node stores its own text. On an element the setter detaches the old
+children and, for a non-empty string, leaves exactly one new `#text` child
+(an empty string leaves none), so `p.textContent = "x"; p.append(b)` reads
+back `"xB"`. Four cases in `fake-dom.test.js` pin this (getter join; setter
+→ one `#text` child; `""` → no children; set-then-append → `"xB"`); each
+half was mutation-checked (getter reverted to own-text-only → 1 fail; setter
+no longer clearing → 1 fail; setter not creating the `#text` node → 3 fail).
+Suite: **824 tests, 824 pass, 0 fail**.
+
+
+### WP WEB-FIX-2 — connection-lost indicator
+
+The review's P1: every store subscriber drops `{error}` payloads, so a
+vault-api restart or a dropped network left a frozen snapshot with
+live-looking Downloads controls and no word about it. Now one app-level
+banner, in the bypass banner's shell slot and styles, says "Lost connection
+to the vault — showing the last data received (last update HH:MM).
+Retrying…" (the suffix is omitted when no poll has succeeded yet in this
+page load).
+
+Threshold (`lib/connection-watch.js`, `LOST_AFTER_MS`): only NETWORK and
+SERVER errors count. The banner shows on a counting failure that arrives at
+least **20 s** after the first failure of the current streak, with no
+successful poll of any resource in between. That means at least two
+failures spanning 20 s. A bare count of two would not work, because
+backoff.js retries after about 1 s, so two failures can be a single blip.
+A real outage shows within about 20-37 s of the first failed poll (one
+16 s backoff step past the threshold, +/-20 % jitter; review simulation
+of backoff.js: 20.0-35.5 s). Known limits: an endpoint that fails while
+the others succeed never shows the banner (by design: the vault answers),
+and a silently dropped connection hangs fetch until the browser gives up,
+because api.js sets no fetch timeout.
+Any successful poll clears it. AUTH (owned by `auth-recovery.js`) and the
+other kinds are ignored, so they neither start nor end a streak. Demo mode
+subscribes to nothing. Each transition announces once through
+`#view-announcer` (shown: the banner text; cleared: "Connection to the vault
+restored."). While the banner is shown, Downloads disables every job-control
+button (Pause/Resume/Cancel/Remove) and gives each the title "Not available
+while the connection to the vault is lost."
+
+Markup: the two banners now share ONE `.banner-wrap` (`#banner-wrap`),
+because at BP-L that element owns the single "banner" grid area. Each
+banner has its own `[hidden]`-toggled `.banner-slot`, and
+`lib/banner-wrap.js` shows the wrap while any slot is shown. The only new
+CSS is a margin between two slots that are both shown (no colour, no
+`display`).
+
+- `connection-banner.test.js`: subscribes to all four resources; one failure
+  stays silent; a blip under 20 s stays silent; it shows past 20 s with the
+  exact text and "last update 14:05"; there is no suffix before the first
+  success; any success clears it; AUTH never shows it and does not break a
+  NETWORK streak; demo mode makes no subscription; it announces once per
+  transition; the shared wrap stays visible while the bypass slot is shown.
+  Wiring pins: app.js calls the factory at top level with the three shell
+  ids, the `#view-announcer` write and `setConnectionLost`; index.html has
+  one wrap containing the connection slot and then the bypass slot.
+- `connection-downloads-wiring.test.js`: the real `views/downloads.js`
+  against the real store and a fake fetch. All five controls are live, then
+  disabled with the title on loss (both repainted and freshly built), then
+  live again on restore. The real `bypass-banner.js` still un-hides the
+  shared wrap.
+- `fake-dom.js`: `append()` now accepts strings as text nodes, as the real
+  DOM does (Downloads' `queueHeading.append("Queue ")`). This is pinned in
+  `fake-dom.test.js`.
+
+Mutation evidence (each applied alone, full suite run, then restored):
+20 s threshold removed → 1 fail; first failure shows → 2; success does not
+clear → 3; AUTH counted → 1; last-update suffix dropped → 1; demo gate
+removed → 1; once-per-transition guard removed → 6; announce call removed →
+1; `setConnectionLost` publish removed → 3; factory wrap sync removed → 3;
+app.js call removed → 1; app.js announce turned into a no-op → 1; Downloads
+gate call removed → 1; Downloads transition repaint removed → 1; Pause's own
+`disabled` overriding the gate → 1; same for Cancel → 1; bypass-banner wrap
+sync removed → 1; gate title dropped → 1; fake-dom `append(string)` reverted
+→ 2.
+
+Not covered: the banner's painted look at each breakpoint (no browser
+here; it reuses `.banner`), a real screen reader speaking the announcement,
+and the clicked-while-dropping case (`withButtonBusy` re-enables a button
+after a failed click until the next repaint).
+Suite: **840 tests, 840 pass, 0 fail**.
