@@ -145,7 +145,13 @@
 
 .PARAMETER LibraryRoot
     Optional VAULT_AGENT_LIBRARY_ROOT value. Omitted -> vault-agent's own
-    Windows default (`C:\Program Files (x86)\Steam`).
+    Windows default (`C:\Program Files (x86)\Steam`). When omitted, this
+    script checks whether that default actually contains a steamapps\
+    directory and prints a loud warning if it does not (WP AGENT-FIX-1
+    S1) - the install still proceeds, but vault-agent will then refuse to
+    post (exit 1, "report refused" in the log) until -LibraryRoot points
+    at the directory that contains steamapps\. No registry lookup is done
+    (v1 scope); see agent/README.md's "Windows Scheduled Task" section.
 
 .PARAMETER ConfigDir
     Directory this script owns: the env file, the deployed copy of
@@ -413,6 +419,33 @@ if ($ClientId) {
     Write-Host "                    Pass -ClientId to choose a different one explicitly, or check"
     Write-Host "                    $LogFile after the first run for the exact value vault-agent"
     Write-Host "                    resolved (it logs client_id / client_id_source / client_id_note)."
+}
+
+# ---- library root visibility (WP AGENT-FIX-1, S1) -------------------------
+#
+# A wrong library root is the one misconfiguration vault-agent could not
+# tell from "nothing installed" until WP AGENT-FIX-1: the agent now
+# refuses to post when no steamapps\ directory is readable, so surface the
+# most likely cause HERE, at install time, instead of in a log nobody reads
+# until the games vanish from the server. The literal below mirrors
+# go/agentconfig's defaultLibraryRoot("windows") exactly - keep the two in
+# sync. Warn only, never abort: Steam may be installed after the agent.
+if ($LibraryRoot) {
+    Write-Host "  Library root    : $LibraryRoot (explicit -LibraryRoot)"
+} else {
+    $defaultLibraryRoot = "C:\Program Files (x86)\Steam"
+    $defaultSteamapps = Join-Path $defaultLibraryRoot "steamapps"
+    if (Test-Path -LiteralPath $defaultSteamapps -PathType Container) {
+        Write-Host "  Library root    : not given -> vault-agent's Windows default"
+        Write-Host "                    ($defaultLibraryRoot), steamapps\ found there."
+    } else {
+        Write-Host "  Library root    : not given -> vault-agent's Windows default"
+        Write-Host "                    ($defaultLibraryRoot)"
+        Write-Warning ("No steamapps directory at '$defaultSteamapps'. vault-agent will REFUSE to " +
+            "report (exit 1) until the Steam install directory is known. Re-run this script " +
+            "with -LibraryRoot <dir containing steamapps> (e.g. -LibraryRoot D:\Steam), or " +
+            "install Steam there first.")
+    }
 }
 
 Write-Host ""

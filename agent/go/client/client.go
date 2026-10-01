@@ -50,6 +50,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/Riviera822/steamhangar/agent/report"
@@ -88,9 +89,22 @@ type Result struct {
 type APIError struct {
 	StatusCode int
 	Body       string
+	// Location is the resolved Location header of a 3xx response, empty
+	// otherwise (and empty on a 3xx that carried no usable Location). The
+	// client never follows it (see New's CheckRedirect); it is surfaced
+	// here so the operator can see WHERE the server wanted to send the
+	// report and fix --server-url to point there directly.
+	Location string
 }
 
 func (e *APIError) Error() string {
+	if e.Location != "" {
+		return fmt.Sprintf(
+			"server returned HTTP %d redirected to %s; vault-agent never follows redirects "+
+				"(the API key would be forwarded to another host) - set --server-url to that address: %s",
+			e.StatusCode, e.Location, e.Body,
+		)
+	}
 	return fmt.Sprintf("server returned HTTP %d: %s", e.StatusCode, e.Body)
 }
 
@@ -119,8 +133,14 @@ type randSource interface {
 
 // Client posts installed-app reports to vault-api.
 type Client struct {
-	baseURL    string
-	apiKey     string
+	baseURL string
+	apiKey  string
+	// userinfo holds credentials stripped from a server URL like
+	// http://user:pass@host (WP AGENT-FIX-1 S1). They are kept out of
+	// baseURL so a *url.Error (which masks only the password) can never
+	// put the username into a log line; attempt() sends them as Basic
+	// auth instead. nil when the URL carried no userinfo.
+	userinfo   *url.Userinfo
 	httpClient *http.Client
 	maxRetries int
 	baseDelay  time.Duration
@@ -174,11 +194,28 @@ func withRand(r randSource) Option {
 // New builds a Client for the given vault-api base URL (e.g.
 // "http://127.0.0.1:8080", no trailing slash required) and API key.
 func New(baseURL, apiKey string, opts ...Option) *Client {
+	var userinfo *url.Userinfo
+	if u, err := url.Parse(baseURL); err == nil && u.User != nil {
+		userinfo = u.User
+		u.User = nil
+		baseURL = u.String()
+	}
 	c := &Client{
-		baseURL: baseURL,
-		apiKey:  apiKey,
+		baseURL:  baseURL,
+		userinfo: userinfo,
+		apiKey:   apiKey,
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
+			// Never follow a redirect (WP AGENT-FIX-1 B1): net/http's
+			// default policy would carry X-Api-Key to whatever host the
+			// Location names and rewrite the POST to a GET on 301/302/303.
+			// Returning ErrUseLastResponse hands the 3xx itself back to
+			// attempt(), which surfaces it (with the Location) as an
+			// APIError instead. Pinned by
+			// TestReportInstalled_NeverFollowsRedirectOrForwardsKey.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Transport: &http.Transport{
 				// Preserved explicitly: building a custom *http.Transport
 				// (rather than using http.DefaultTransport directly) means
@@ -268,6 +305,10 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Api-Key", c.apiKey)
+	if c.userinfo != nil {
+		pass, _ := c.userinfo.Password()
+		req.SetBasicAuth(c.userinfo.Username(), pass)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -313,13 +354,24 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 		// resending).
 		return Result{}, false, &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
 	case resp.StatusCode >= 300:
-		// vault-api never issues a redirect for this endpoint; treat one
-		// as an unexpected-but-not-retryable response rather than silently
-		// following it (which net/http's default client would do anyway
-		// for 3xx GET/HEAD, but NOT for POST with a body - it would drop
-		// the body on some redirect codes, a subtle correctness trap this
-		// makes moot by simply not retrying and surfacing it clearly).
-		return Result{}, false, &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
+		// vault-api never issues a redirect for this endpoint, so a 3xx
+		// means a reverse proxy in front of it (http->https upgrade, a
+		// moved hostname, ...). It is NOT retryable, and it is NOT
+		// followed: the http.Client built in New() returns
+		// http.ErrUseLastResponse from CheckRedirect, so this branch sees
+		// the 3xx itself. Without that, net/http's DEFAULT policy would
+		// have followed it - rewriting the POST into a body-less GET on
+		// 301/302/303, replaying the POST on 307/308, and in EVERY case
+		// copying X-Api-Key onto the new host (net/http strips only
+		// Authorization/Cookie/WWW-Authenticate on a host change, never
+		// custom headers). Measured in the pre-freeze review with a two-
+		// server rig (WP AGENT-FIX-1 B1). The Location is surfaced in the
+		// error so the operator can point --server-url at it directly.
+		return Result{}, false, &APIError{
+			StatusCode: resp.StatusCode,
+			Body:       excerpt(respBody),
+			Location:   redirectTarget(resp),
+		}
 	}
 
 	var parsed responseBody
@@ -341,6 +393,17 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 		Removed:     parsed.Removed,
 		FirstReport: parsed.FirstReport,
 	}, false, nil
+}
+
+// redirectTarget returns resp's Location header resolved against the
+// request URL (so a relative Location is still meaningful to the
+// operator), or "" when the response carries none / an unparseable one.
+func redirectTarget(resp *http.Response) string {
+	loc, err := resp.Location()
+	if err != nil {
+		return ""
+	}
+	return loc.String()
 }
 
 // retryableStatus reports whether an HTTP status code should be retried:
