@@ -37,7 +37,7 @@ repo root `.gitignore`.
 | 1 | LanCache heartbeat contract | `location = /lancache-heartbeat` (bottom of the `server` block) |
 | 2 | Strip client `Range`/`Accept-Encoding`/`If-Range` upstream + store only 200 (incl. retry lists) | `proxy_set_header Range/Accept-Encoding/If-Range ""` in `@miss`; `map $upstream_status $vault_store_path` (`200` or `"~, 200$"` -> real path, else empty) feeding `proxy_store $vault_store_path` |
 | 3 | `?nocache=1` bypass | `map $arg_nocache $vault_try_target` (forces `try_files` onto a guaranteed-missing path) used by `location /depot/` |
-| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver 1.1.1.1 ipv6=off valid=30s`; `map $host $vault_host_allowed` + `map $host $vault_upstream_host`; `proxy_connect_timeout 3s`; `proxy_next_upstream ...`; the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
+| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver 1.1.1.1 ipv6=off valid=30s`; `map $host $vault_upstream_host` (full-match Steam hostnames, else empty) + `map $vault_upstream_host $vault_host_allowed`; `proxy_connect_timeout 3s`; `proxy_next_upstream ...`; the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
 
 (`Accept-Encoding`/`If-Range` stripping and the `"~, 200$"` retry-list
 match were added in a review-fix pass after the initial WP 1.1 submission
@@ -296,6 +296,31 @@ disk carries no open-proxy risk (the attacker learns nothing they couldn't
 get by requesting the exact same path with a valid Host), whereas
 `@miss` is the only place this server can be made to dial an
 attacker-chosen destination -- that's where the guard has to live.
+
+**Full match, one map (SEC-FIX-1).** The allowed host is a FULL match of a
+strict hostname charset, anchored at both ends:
+
+    ~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamcontent\.com$
+    ~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamserver\.net$
+
+The same map produces the upstream host: the matched `$host`, the fallback
+edge for `lancache.steamcontent.com` (an exact entry, which beats every
+regex in an nginx map), or empty. `$vault_host_allowed` is derived from it
+(empty = 0), so the guard and the name `proxy_pass` dials can never
+disagree. Before SEC-FIX-1 the patterns were suffix-only
+(`~*\.steamcontent\.com$`), and the upstream map passed every `$host`
+through. A Host such as `127.0.0.1?x.steamcontent.com` passed that
+allowlist, and `proxy_pass` splits its URL at the `?`. Measured on nginx
+1.29.8, with the old config: nginx itself already answers `400` for a Host
+containing `?`, `@`, `#`, a backslash, a space or `/`, so no relay
+happened. `%` and `_` got through and were accepted, which led to a DNS
+lookup inside Valve's zone. Real clients are unaffected: nginx lowercases
+`$host`, strips `:port` and drops one trailing dot before the map runs, so
+`CACHE2-AMS1.SteamContent.COM:80` and `cache2-ams1.steamcontent.com.` both
+match. The CI gate (`.github/scripts/verify-core-nginx.sh`) probes the
+delimiter classes live, with no network, and asserts both a refusal and
+the absence of any resolver or upstream attempt. It also evaluates both
+maps for normalised and for raw delimiter hosts.
 
 **Discrepancy found while writing this work package's tests:** ADR-0001
 req 4 describes `lancache.steamcontent.com` as "unusable, e.g. ... which
@@ -679,8 +704,8 @@ with expected counts, is in `check-config-drift.sh`). Everything else (every map
 guard, the Host allowlist, the Range/Accept-Encoding stripping, the nocache
 bypass, the log format) is byte-identical, and that is **machine-checked**
 by `core/docker/check-config-drift.sh`: it normalises both files, un-applies
-the enumerated deltas, and diffs. 118 normalised directive lines (as of
-WP TH-1a), verified identical; it also asserts that the
+the enumerated deltas, and diffs. 119 normalised directive lines (as of
+SEC-FIX-1), verified identical; it also asserts that the
 `vault_event` log_format line keeps all 8 of its LITERAL tabs in both files
 (review P7) -- the normaliser would otherwise hide a tab -> space edit that
 breaks vault-api's tab-split parser -- and verified to actually catch an injected difference (a
@@ -690,6 +715,13 @@ touching either file.
 - `-p /vault` is the prefix, so `root cache` -> `/vault/cache` and
   `proxy_temp_path tmp/proxy` -> `/vault/tmp/proxy`, path-faithful layout
   unchanged as predicted.
+- **Capabilities (SEC-FIX-1).** The entrypoint, its hooks and the nginx
+  master run as root; only the workers run as uid 101. `deploy/compose.yaml`
+  drops ALL capabilities for vault-core and adds back NET_BIND_SERVICE,
+  SETUID, SETGID, CHOWN and DAC_OVERRIDE. The reason for each is in the
+  comment there. `deploy/tests/verify-stack.sh` step 4c reads the master's
+  and a worker's CapEff from `/proc`. A plain `docker run` of the image
+  (no compose) still gets Docker's default set.
 - **The same-filesystem requirement is now enforced, not just documented:**
   `cache/` and `tmp/` live under ONE volume mounted at `/vault`, and
   `40-vault-preflight.sh` compares their `st_dev` at every start. A split

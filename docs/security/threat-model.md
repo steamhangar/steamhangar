@@ -129,11 +129,35 @@ ADR that describes it:
   never exceeds the cap.
 - **Use vault-core as a scoped, unauthenticated HTTP relay to Steam's CDN.**
   The one guard on the miss path is the Host-header allowlist
-  (the `$vault_host_allowed` map under "Host-header allowlist" in
+  (the `$vault_upstream_host` and `$vault_host_allowed` maps under
+  "Host-header allowlist + upstream host" in
   `core/docker/nginx.conf.template`, enforced by the
   `if ($vault_host_allowed = 0)` guard in `location @miss`): only
   `*.steamcontent.com` and
-  `*.steamserver.net` are ever proxied to. This is explicitly an anti-open-proxy
+  `*.steamserver.net` are ever proxied to. Since SEC-FIX-1 the host must
+  match one of those two patterns IN FULL: dot-separated labels of
+  `[a-z0-9-]` only, anchored at both ends. The upstream host is that matched
+  name (or the fixed fallback edge for `lancache.steamcontent.com`) and is
+  empty for anything else, so `proxy_pass` cannot dial a name the allowlist
+  did not match. **Before SEC-FIX-1 the allowlist was suffix-only**
+  (`~*\.steamcontent\.com$`, `~*\.steamserver\.net$`) and the upstream
+  map passed `$host` through for everything. It therefore accepted any Host
+  that merely ended in a Steam suffix, including ones carrying a URL
+  delimiter, such as `127.0.0.1?x.steamcontent.com`. `proxy_pass` splits
+  such a URL at the `?` and would dial `127.0.0.1`: an unauthenticated GET
+  relay to any port-80 target, with the answer stored under `/depot/`.
+  Measured against the pre-fix config on the shipped nginx 1.29.8
+  (`.github/scripts/verify-core-nginx.sh`, which now carries that probe):
+  the relay did not happen there, because nginx's own Host validation
+  already answers `400` for a Host containing `?`, `@`, `#`, a backslash, a
+  space or a `/` (also after a `:port`), before the allowlist is consulted.
+  Two characters did get through and were accepted. `%` (e.g.
+  `127.0.0.1%3fx.steamcontent.com`) and `_` (e.g. `x_y.steamcontent.com`)
+  each led to a DNS lookup of that literal name, which lies inside Valve's
+  own zone, not to a connection to some other host. On this nginx the fix is
+  therefore defence in depth. The allowlist no longer depends on nginx's
+  Host validation staying as strict as 1.29.8's, and `%`/`_` hosts are now
+  refused with `403` without a lookup. This is explicitly an anti-open-proxy
   guard, not an access-control guard — the config comment names the threat
   it defends against precisely: "what stops this server being usable as a
   generic open HTTP proxy via a forged Host header"
@@ -146,9 +170,10 @@ ADR that describes it:
   only stretches the same download over more time) — and the requester
   picks both ends of that transaction: which
   upstream edge gets contacted (`$host` becomes `$vault_upstream_host`
-  verbatim for anything outside the one hardcoded hosts-file fallback in
-  the `$vault_upstream_host` map, actually dialed by the `proxy_pass` in
-  `location @miss`) and where the response lands on disk
+  verbatim whenever it fully matches one of the two family patterns,
+  except for the one hardcoded hosts-file fallback in the
+  `$vault_upstream_host` map; that name is actually dialed by the
+  `proxy_pass` in `location @miss`) and where the response lands on disk
   (`$vault_store_path` is built from the request's own `$uri`, the
   `$vault_store_path` map under "Store-only-200 guard") — subject
   only to the Host-family allowlist above, nothing scopes *which* depot/path
@@ -679,7 +704,13 @@ inventory: every MISS that `location @miss` relays to Valve carries a
 sent over plain HTTP, so Valve and any on-path observer can identify the
 requesting cache as SteamHangar. It carries no identifier beyond the
 product itself (no version, no host name, no key) — accepted as the price
-of a loop breaker that needs no per-install secret. **Enforcement (WP
+of a loop breaker that needs no per-install secret. The miss traffic itself
+is plain HTTP too, inherent to the Steam CDN protocol (clients fetch depot
+chunks over port 80). An on-path attacker on the WAN side can therefore
+corrupt chunks that vault-core caches, and a corrupted chunk stays in the
+cache and is served to every client that asks for it until it is removed;
+the Steam client's own chunk verification turns that into a failed
+download, not code execution. **Enforcement (WP
 EG-1): neither of these two core
 flows is proxy-gated, and neither needed to be** — `vault-core` has its own,
 separate, already-narrower Host-allowlist mechanism (ADR-0001 req 4), and
@@ -1117,6 +1148,32 @@ Named plainly, as out of scope, rather than implied to be covered:
   host to a container needs no masquerade either way — both are
   structural properties of the network topology existing at all, not
   omissions this package chose to leave unfixed in application code.
+- **The egress proxy filters by host, not by port (WP 5.3 review P-1).**
+  `deploy/proxy/tinyproxy.conf` restricts ports for neither request kind.
+  It has no `ConnectPort` line, and with none tinyproxy permits `CONNECT`
+  to every port (its documented default). Its filter matches the host
+  only (`FilterURLs Off`). vault-api can therefore reach an allowlisted
+  host (Valve's endpoints, or anything the operator adds to
+  `VAULT_EGRESS_ALLOW`) on any TCP port, not just 443/80. The lock limits
+  *which hosts* vault-api can talk to, not *which services on them*.
+  Documented, not changed: SEC-FIX-1 is a server-side pass and adds no
+  proxy config.
+- **A check-then-use race in the event-log hook (WP 5.3 review P-2).**
+  `core/docker/25-vault-eventlog.sh` runs as root at every vault-core start
+  and refuses a symlink anywhere on the `VAULT_EVENT_LOG` path below
+  `/vault/`. But it checks first and acts afterwards (`mkdir -p`, creating
+  the file, `chown -h`), and the nginx master then opens the same path as
+  root, following symlinks. `/vault` is shared with vault-api, and
+  `/vault/logs` is owned by uid 101. A uid-101 process that swaps a path
+  component for a symlink inside that window can make root create, chown
+  or append to a file with the configured file name (`event.log`) in a
+  directory of its choosing. That reach is vault-core's own container
+  filesystem: the volume is its only mount. Preconditions are code
+  execution as uid 101 in vault-api (or anything else that can write the
+  volume), and winning a race that is open only while vault-core starts.
+  Documented, not fixed: POSIX sh cannot open or chown through a file
+  descriptor with `O_NOFOLLOW`. Closing it means doing that step in a
+  small program, or moving the log off the shared volume.
 
 ---
 
@@ -1156,3 +1213,9 @@ In the interest of the review discipline this package was asked to follow:
   exposes the password in-process before that point is a fact about
   Valve's protocol, not about SteamHangar, and this document does not claim
   to have checked it.
+- **§5's "the client's own chunk verification turns a corrupted chunk into
+  a failed download"** (SEC-FIX-1, WP 5.3 review N-1) is about the Steam
+  client, not about SteamHangar. Nothing in this repository verifies a
+  chunk: vault-core stores whatever 200 body Valve's edge, or someone on the
+  path to it, returned. That the client checks each chunk against its depot
+  manifest and refuses a mismatch was not measured here.

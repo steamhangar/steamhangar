@@ -771,6 +771,27 @@ say "what vault-runner actually has."
 run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' exec -T vault-api sh -c 'id; stat -c \"%n %u:%g\" /vault/cache /data /opt/steamprefill/home'"
 run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' exec -T vault-runner sh -c 'id; stat -c \"%n %u:%g\" /data /opt/steamprefill/Config /opt/steamprefill/home'"
 
+step "4c. SEC-FIX-1 (S-1): vault-core holds exactly its documented capability set"
+say 'compose.yaml drops ALL capabilities for vault-core and adds back'
+say 'NET_BIND_SERVICE, SETUID, SETGID, CHOWN and DAC_OVERRIDE (reasons in the'
+say 'comment there). Measured from the kernel, not from the compose file:'
+say 'CapEff/CapBnd of PID 1 (the nginx master, root) must be exactly that set'
+say '(bits 10, 7, 6, 0, 1 = 0x4c3), and a worker (uid 101) must hold nothing.'
+say 'The stack reaching healthy in step 4 already shows the set is enough for'
+say 'a default boot; step 5i repeats the boot with the event log ON.'
+run "docker inspect --format 'CapDrop={{.HostConfig.CapDrop}} CapAdd={{.HostConfig.CapAdd}}' \$(docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' ps -q vault-core)"
+core_pid1=$(dc exec -T vault-core sh -c 'tr "\0" " " < /proc/1/cmdline; echo; grep -E "^Cap(Eff|Bnd):" /proc/1/status' 2>&1)
+printf '%s\n' "$core_pid1" | sed 's/^/    /'
+assert_contains "$core_pid1" "nginx: master" "vault-core PID 1 is the nginx master"
+core_capeff=$(printf '%s\n' "$core_pid1" | awk '$1 == "CapEff:" { print $2 }')
+core_capbnd=$(printf '%s\n' "$core_pid1" | awk '$1 == "CapBnd:" { print $2 }')
+assert_eq "00000000000004c3" "$core_capeff" "vault-core master CapEff = NET_BIND_SERVICE+SETUID+SETGID+CHOWN+DAC_OVERRIDE"
+assert_eq "00000000000004c3" "$core_capbnd" "vault-core master CapBnd = the same set (cap_drop ALL took effect)"
+core_worker=$(dc exec -T vault-core sh -c 'for d in /proc/[0-9]*; do if tr "\0" " " < "$d/cmdline" 2>/dev/null | grep -q "^nginx: worker"; then awk "\$1 == \"Uid:\" || \$1 == \"CapEff:\"" "$d/status"; break; fi; done' 2>&1)
+printf '%s\n' "$core_worker" | sed 's/^/    /'
+assert_eq "0000000000000000" "$(printf '%s\n' "$core_worker" | awk '$1 == "CapEff:" { print $2 }')" "vault-core worker CapEff is empty"
+assert_eq "101" "$(printf '%s\n' "$core_worker" | awk '$1 == "Uid:" { print $3 }')" "vault-core worker runs as uid 101"
+
 # =============================================================================
 section "5. vault-core behaviour"
 # =============================================================================
@@ -795,6 +816,17 @@ assert_eq "404" "$tmp_code" "GET /tmp/proxy/... returns 404"
 step "5d. Host allowlist (ADR-0001 req 4 -- no open proxy)"
 forged=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: evil.example.com' "$CORE_URL$DEPOT_URI")
 assert_eq "403" "$forged" "a forged non-Steam Host is refused on the miss path"
+# SEC-FIX-1 (U-1): the allowlist is a full match now, not a suffix match.
+# nginx itself answers 400 for "?" in a Host; "%" reaches the allowlist.
+# The full delimiter matrix, with the no-upstream-attempt check, runs in
+# .github/scripts/verify-core-nginx.sh.
+forged_q=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: 127.0.0.1?x.steamcontent.com' "$CORE_URL$DEPOT_URI")
+case "$forged_q" in
+    400|403) ok "a Host carrying '?' before a Steam suffix is refused locally (= $forged_q)" ;;
+    *)       bad "a Host carrying '?' before a Steam suffix -- expected 400 or 403, got '$forged_q'" ;;
+esac
+forged_pct=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: 127.0.0.1%3fx.steamcontent.com' "$CORE_URL$DEPOT_URI")
+assert_eq "403" "$forged_pct" "a Host carrying '%' before a Steam suffix is refused by the allowlist"
 
 step "5e. REAL Steam CDN cache test: MISS -> stored in the volume -> HIT"
 say "object: $DEPOT_URI  (Host: $CDN_HOST)"

@@ -123,8 +123,14 @@ docker pull "$IMAGE"
 render_and_test() {
     local label="$1" event_log="$2" expected_directives="$3"
     local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}"
+    # SEC-FIX-1: the guard-probe run gets no network at all. Its Host-allowlist
+    # probes count any resolver or upstream attempt as a failure, and without
+    # a network such an attempt can only show up locally (error log, access
+    # log), never as a real DNS query or connection from the CI runner.
+    local -a net_args=()
+    [ -n "${4:-}" ] && net_args=(--network none)
     echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window') ---"
-    docker run --rm \
+    docker run --rm "${net_args[@]}" \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
         -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
         -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
@@ -328,7 +334,13 @@ render_and_test() {
             # needs DNS or the Steam CDN -- this runs offline.
             if [ -n "${PROBE_GUARDS:-}" ] && [ "$nginx_t_status" = "0" ]; then
                 command -v curl >/dev/null 2>&1 || { echo "FAIL: curl missing in the base image, cannot probe guards"; exit 1; }
-                nginx -p /vault -c "$conf"
+                # The config logs to /dev/stdout and /dev/stderr. nginx opens
+                # those paths at start, so redirecting them here sends the
+                # access log and error log to two files the SEC-FIX-1 Host
+                # probes below can read back.
+                : > /tmp/probe-access.log
+                : > /tmp/probe-error.log
+                nginx -p /vault -c "$conf" >> /tmp/probe-access.log 2>> /tmp/probe-error.log
                 obj=http://127.0.0.1/depot/70403/chunk/773d10050d99b2544665873ec2125b3bf273e8b2
                 probe() {
                     want=$1; what=$2; shift 2
@@ -353,6 +365,151 @@ render_and_test() {
                     echo "FAIL: N5 Server header is '"'"'$server_hdr'"'"', expected bare '"'"'nginx'"'"'"
                     status=1
                 fi
+
+                # --- SEC-FIX-1 (WP 5.3 review U-1): Host allowlist, LIVE -----
+                # Threat: a Host such as "127.0.0.1?x.steamcontent.com" passes
+                # a suffix-only allowlist, and proxy_pass splits the URL at
+                # "?" and dials 127.0.0.1. Each crafted Host below must be
+                # refused locally, and the status code alone does not prove
+                # that: a request relayed to 127.0.0.1 also comes back 403,
+                # because there is no index for "/". So every probe also needs
+                # exactly ONE new access-log line (a request relayed to this
+                # server would add a second one), upstream_status "-" on it,
+                # and no new error-log line. This container has no network, so
+                # a resolver or connect attempt always logs an error. One
+                # error-log line is expected and ignored: the "uninitialized
+                # vault_cache_status" warning nginx writes when it rejects a
+                # request before the server-level `set` runs.
+                #
+                # "400 403" = either refusal is fine. Measured on 1.29.8
+                # (SEC-FIX-1): nginx rejects a Host containing "?", "@", "#",
+                # a backslash, a space or a slash with 400 before any map is
+                # evaluated; "%" and "_" get through to the allowlist. The
+                # allowlist itself is pinned against every one of those
+                # characters by the raw map probe further down.
+                host_probe() {
+                    want=$1; what=$2; shift 2
+                    a0=$(wc -l < /tmp/probe-access.log); e0=$(wc -l < /tmp/probe-error.log)
+                    got=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$@" || echo curl-error)
+                    i=0
+                    while [ "$(wc -l < /tmp/probe-access.log)" -le "$a0" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+                    sleep 0.3
+                    new=$(tail -n +$((a0 + 1)) /tmp/probe-access.log)
+                    nnew=$(printf "%s\n" "$new" | grep -c . || true)
+                    errs=$(tail -n +$((e0 + 1)) /tmp/probe-error.log | grep -v -F "using uninitialized \"vault_cache_status\" variable while logging request" || true)
+                    why=""
+                    case " $want " in *" $got "*) : ;; *) why="$why status $got, expected one of: $want;" ;; esac
+                    [ "$nnew" = "1" ] || why="$why $nnew access-log lines, expected 1;"
+                    case "$new" in *" status=$got "*" upstream_status=- "*) : ;; *) why="$why access line is not status=$got with upstream_status=-;" ;; esac
+                    [ -z "$errs" ] || why="$why error log grew;"
+                    if [ -z "$why" ]; then
+                        echo "host guard OK: $what -> $got, no upstream attempt"
+                    else
+                        echo "FAIL: host guard: $what ->$why"
+                        printf "%s\n" "$new" | sed "s/^/    access: /"
+                        [ -z "$errs" ] || printf "%s\n" "$errs" | sed "s/^/    error:  /"
+                        status=1
+                    fi
+                }
+                obj0=http://127.0.0.1/depot/1/chunk/0000000000000000000000000000000000000000
+                host_probe 403       "control: off-list Host"               -H "Host: evil.example.com" "$obj0"
+                host_probe 403       "control: Steam name as a prefix"      -H "Host: x.steamcontent.com.evil.example.com" "$obj0"
+                host_probe 403       "control: bare apex"                   -H "Host: steamcontent.com" "$obj0"
+                host_probe "400 403" "? (query) delimiter"                  -H "Host: 127.0.0.1?x.steamcontent.com" "$obj0"
+                host_probe "400 403" "? delimiter, steamserver.net"         -H "Host: 127.0.0.1?x.steamserver.net" "$obj0"
+                host_probe "400 403" "@ (userinfo) delimiter"               -H "Host: evil.example.com@x.steamcontent.com" "$obj0"
+                host_probe "400 403" "# (fragment) delimiter"               -H "Host: 127.0.0.1#x.steamcontent.com" "$obj0"
+                host_probe 403       "% (percent-encoded ?)"                -H "Host: 127.0.0.1%3fx.steamcontent.com" "$obj0"
+                host_probe 403       "_ (not a hostname character)"         -H "Host: x_y.steamcontent.com" "$obj0"
+                host_probe "400 403" ": port, then ?"                       -H "Host: 127.0.0.1:80?x.steamcontent.com" "$obj0"
+                host_probe "400 403" "backslash"                            -H "Host: 127.0.0.1\\x.steamcontent.com" "$obj0"
+                host_probe "400 403" "space"                                -H "Host: 127.0.0.1 x.steamcontent.com" "$obj0"
+                host_probe "400 403" "slash"                                -H "Host: 127.0.0.1/x.steamcontent.com" "$obj0"
+                host_probe "400 403" "trailing dot after a ? delimiter"     -H "Host: 127.0.0.1?x.steamcontent.com." "$obj0"
+                host_probe 403       "trailing dot, off-list"               -H "Host: evil.example.com." "$obj0"
+                host_probe 403       "request-line host beats a Steam Host" -H "Host: cache2-ams1.steamcontent.com" \
+                    --request-target "http://evil.example.com/depot/1/chunk/0000000000000000000000000000000000000000" http://127.0.0.1/
+                host_probe "400 403" "@ in the request-line host"           \
+                    --request-target "http://evil.example.com@x.steamcontent.com/depot/1/chunk/0000000000000000000000000000000000000000" http://127.0.0.1/
+
+                # --- SEC-FIX-1: what the two Host maps evaluate to -----------
+                # A legitimate Host would need the real CDN, and nginx rejects
+                # most delimiter Hosts before any map runs. So a throwaway
+                # server includes the two Host maps exactly as rendered and
+                # returns "$vault_host_allowed|$vault_upstream_host".
+                #   - maps-host.conf: unchanged, keyed on $host, for what nginx
+                #     normalises (case, ":port", one trailing dot).
+                #   - maps-raw.conf: the same maps with $host replaced by an
+                #     X-Probe-Host request header, so the regexes see the raw
+                #     delimiter strings nginx would otherwise reject first.
+                # A refused Host must map to an EMPTY upstream host, so
+                # proxy_pass can never dial a name the allowlist did not match.
+                mkdir -p /tmp/hostprobe/logs
+                awk "/^[[:space:]]*map[[:space:]].*[\$]vault_(host_allowed|upstream_host)[[:space:]]*[{]/ { f = 1 } f { print; d += gsub(/[{]/, \"&\") - gsub(/[}]/, \"&\"); if (d <= 0) { f = 0; d = 0 } }" \
+                    "$conf" > /tmp/hostprobe/maps-host.conf
+                nmaps=$(grep -c "^[[:space:]]*map[[:space:]]" /tmp/hostprobe/maps-host.conf || true)
+                [ "$nmaps" = "2" ] || { echo "FAIL: expected the 2 Host maps in $conf, extracted $nmaps"; status=1; }
+                sed "s/[\$]host\([^a-z_]\)/\$http_x_probe_host\1/g" /tmp/hostprobe/maps-host.conf > /tmp/hostprobe/maps-raw.conf
+                grep -q "[\$]host[^a-z_]" /tmp/hostprobe/maps-raw.conf && { echo "FAIL: a \$host survived in maps-raw.conf"; status=1; }
+                mapprobe_start() {
+                    printf "%s\n" \
+                        "worker_processes 1;" \
+                        "pid /tmp/hostprobe/nginx.pid;" \
+                        "error_log /dev/stderr warn;" \
+                        "events { worker_connections 16; }" \
+                        "http {" \
+                        "    access_log off;" \
+                        "    map_hash_bucket_size 128;" \
+                        "    include $1;" \
+                        "    server {" \
+                        "        listen 127.0.0.1:8099;" \
+                        "        location / { return 200 \"\$vault_host_allowed|\$vault_upstream_host\"; }" \
+                        "    }" \
+                        "}" > /tmp/hostprobe/nginx.conf
+                    nginx -p /tmp/hostprobe -c /tmp/hostprobe/nginx.conf
+                }
+                mapprobe_stop() {
+                    nginx -p /tmp/hostprobe -c /tmp/hostprobe/nginx.conf -s quit || true
+                    i=0; while [ -f /tmp/hostprobe/nginx.pid ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+                }
+                map_probe() {
+                    hdr=$1; h=$2; want=$3
+                    got=$(curl -s -m 5 -H "$hdr: $h" http://127.0.0.1:8099/ | head -c 200 || echo curl-error)
+                    if [ "$got" = "$want" ]; then
+                        echo "host map OK ($hdr): \"$h\" -> \"$got\""
+                    else
+                        echo "FAIL: host map ($hdr): \"$h\" -> \"$got\", expected \"$want\""
+                        status=1
+                    fi
+                }
+                mapprobe_start /tmp/hostprobe/maps-host.conf
+                map_probe Host "cache2-ams1.steamcontent.com"        "1|cache2-ams1.steamcontent.com"
+                map_probe Host "CACHE2-AMS1.SteamContent.COM:80"     "1|cache2-ams1.steamcontent.com"
+                map_probe Host "cache2-ams1.steamcontent.com."       "1|cache2-ams1.steamcontent.com"
+                map_probe Host "lancache.steamcontent.com"           "1|dist-fra1.discovery.steamserver.net"
+                map_probe Host "127.0.0.1%3fx.steamcontent.com"      "0|"
+                map_probe Host "evil.example.com"                    "0|"
+                mapprobe_stop
+                mapprobe_start /tmp/hostprobe/maps-raw.conf
+                map_probe X-Probe-Host "cache2-ams1.steamcontent.com"         "1|cache2-ams1.steamcontent.com"
+                map_probe X-Probe-Host "dist-fra1.discovery.steamserver.net"  "1|dist-fra1.discovery.steamserver.net"
+                map_probe X-Probe-Host "lancache.steamcontent.com"            "1|dist-fra1.discovery.steamserver.net"
+                map_probe X-Probe-Host "127.0.0.1?x.steamcontent.com"         "0|"
+                map_probe X-Probe-Host "127.0.0.1?x.steamserver.net"          "0|"
+                map_probe X-Probe-Host "evil.example.com@x.steamcontent.com"  "0|"
+                map_probe X-Probe-Host "127.0.0.1#x.steamcontent.com"         "0|"
+                map_probe X-Probe-Host "127.0.0.1%3fx.steamcontent.com"       "0|"
+                map_probe X-Probe-Host "127.0.0.1:80?x.steamcontent.com"      "0|"
+                map_probe X-Probe-Host "127.0.0.1\\x.steamcontent.com"        "0|"
+                map_probe X-Probe-Host "127.0.0.1 x.steamcontent.com"         "0|"
+                map_probe X-Probe-Host "127.0.0.1/x.steamcontent.com"         "0|"
+                map_probe X-Probe-Host "x_y.steamcontent.com"                 "0|"
+                map_probe X-Probe-Host "x..steamcontent.com"                  "0|"
+                map_probe X-Probe-Host ".steamcontent.com"                    "0|"
+                map_probe X-Probe-Host "steamcontent.com"                     "0|"
+                map_probe X-Probe-Host "x.steamcontent.com.evil.example.com"  "0|"
+                mapprobe_stop
+
                 nginx -p /vault -c "$conf" -s quit || true
             fi
             exit $status
@@ -627,6 +784,8 @@ docker run --rm \
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \
      "the event log is owned 101:101; the /depot/ request guards answer live;" \
+     "crafted Hosts are refused with no upstream attempt and the Host maps" \
+     "full-match only Steam hostnames;" \
      "four bad VAULT_EVENT_LOG values and two planted symlinks are refused;" \
      "the preflight refuses the stock nginx.conf; the upstream cap renders in" \
      "all three shapes, refuses invalid rates/windows, is re-checked by the" \

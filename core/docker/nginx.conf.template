@@ -162,41 +162,68 @@ http {
     # map_hash_bucket_size".
     map_hash_bucket_size 128;
 
-    # --- Host-header allowlist (ADR req 4 abuse guard) ----------------------
+    # --- Host-header allowlist + upstream host (ADR req 4 abuse guard) -----
     # Only these two hostname families are legitimate Steam CDN edges. This
     # is what stops this server being usable as a generic open HTTP proxy
     # via a forged Host header -- see the "Host-header allowlist" test in
-    # core/tests/test-core.ps1.
+    # core/tests/test-core.ps1 and the SEC-FIX-1 probes in
+    # .github/scripts/verify-core-nginx.sh.
     #
     # Keyed on $host, not $http_host (nitpick fixed in review): $host is
     # nginx's normalized view of the effective hostname -- lowercased and
     # with any ":port" suffix already stripped, falling back to server_name
     # when no Host header is sent at all. $http_host is the raw header
-    # verbatim. Using $host here (and below) means a client sending e.g.
+    # verbatim. Using $host here means a client sending e.g.
     # "Host: Cache2-AMS1.SteamContent.COM:80" is matched/forwarded the same
     # as the canonical lowercase, portless form, instead of the allowlist
     # regex and the upstream connection target silently disagreeing on what
-    # was actually sent.
-    map $host $vault_host_allowed {
-        default                 0;
-        ~*\.steamcontent\.com$  1;
-        ~*\.steamserver\.net$   1;
-    }
-
-    # --- Upstream host resolution (ADR req 4) -------------------------------
-    # Default: honor the client's own Host verbatim (normalized via $host,
-    # see above) -- this is what lets a request for
-    # Host: cache2-ams1.steamcontent.com actually reach that real edge
-    # instead of a single hardcoded upstream.
+    # was actually sent. nginx also drops ONE trailing dot from $host, so a
+    # client sending the fully-qualified "cache2-ams1.steamcontent.com."
+    # matches without a pattern of its own (measured, SEC-FIX-1).
+    #
+    # SEC-FIX-1 (WP 5.3 review U-1): ONE map is the allowlist AND the
+    # upstream host. Before, the allowlist was a separate map with
+    # suffix-only patterns (`~*\.steamcontent\.com$`), and the upstream map
+    # passed $host through verbatim for everything. Any Host ENDING in a
+    # Steam suffix passed, e.g. "127.0.0.1?x.steamcontent.com", and
+    # proxy_pass splits its URL at "?" and would dial 127.0.0.1. nginx
+    # 1.29.8 happens to reject "?", "@", "#", "\", " " and "/" in a Host
+    # with 400 before this map runs (measured); "%" and "_" did get
+    # through and were allowed, which only ever led to a DNS lookup inside
+    # Valve's own zone. Now:
+    #   - each family is a FULL match of a strict hostname charset:
+    #     dot-separated labels of [a-z0-9-] only, anchored at both ends, so
+    #     no URL delimiter, percent sign, underscore, empty label or bare
+    #     apex can match. (`$` could also match before a final newline;
+    #     nginx refuses any control byte in a Host, so $host never has
+    #     one.)
+    #   - the value is $host itself, so a request for
+    #     Host: cache2-ams1.steamcontent.com still reaches that real edge
+    #     instead of one hardcoded upstream, and $vault_upstream_host is
+    #     either a name one of these patterns fully matched, the fixed
+    #     fallback edge below, or EMPTY. It can never carry an unvalidated
+    #     name.
+    #   - $vault_host_allowed is derived from it (empty = refused), so the
+    #     guard in @miss and the name proxy_pass dials cannot disagree.
     #
     # Exception: "lancache.steamcontent.com" has no public A record (see
-    # loop-safety note in core/nginx/nginx.conf) -- a client that resolved
-    # this server via the hosts-file mode's marker hostname sends exactly
-    # this Host. Falling back to a concrete, known-good Valve CDN edge here
-    # is the "safe fallback default edge" required by ADR req 4.
+    # the loop-safety note in
+    # core/nginx/nginx.conf) -- a client that resolved this server via the
+    # hosts-file mode's marker hostname sends exactly this Host. Falling
+    # back to a concrete, known-good Valve CDN edge here is the "safe
+    # fallback default edge" required by ADR req 4. An exact string beats
+    # every regex in an nginx map, so this entry wins over the
+    # steamcontent.com pattern.
     map $host $vault_upstream_host {
-        default                       $host;
-        "lancache.steamcontent.com"   dist-fra1.discovery.steamserver.net;
+        default                                             "";
+        "lancache.steamcontent.com"                         dist-fra1.discovery.steamserver.net;
+        "~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamcontent\.com$"  $host;
+        "~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamserver\.net$"   $host;
+    }
+
+    map $vault_upstream_host $vault_host_allowed {
+        default  1;
+        ""       0;
     }
 
     # --- Store-only-200 guard (ADR req 2) -----------------------------------
