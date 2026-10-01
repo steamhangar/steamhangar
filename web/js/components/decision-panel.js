@@ -35,12 +35,13 @@
  * `manifest_days_since_last_change` field the frequency-only statement
  * families need, at the SAME cadence the Library view's own grid already
  * repaints from. Playtime (`playtimeByAppid`, `lib/decision-support.js`'s
- * `buildSuggestions`) has no wiring here at all: there is no persisted Steam
- * identity anywhere in this codebase to poll `GET /v1/steam/owned-games`
- * against (`onboarding.js`/`views/settings.js`'s "Library preview" lookup is
- * a one-off, deliberately never stored) — building that is a separate,
- * unscoped feature this package does not add. The panel therefore always
- * operates in the "frequency" or "insufficient_data" tier in the real
+ * `buildSuggestions`) has no wiring here at all. Since WP WEB-FEAT-1 a
+ * persisted Steam identity DOES exist — the vault's `steam_library_steamid`
+ * setting, which `views/library.js` uses to fetch `GET /v1/steam/owned-games`
+ * on library open — but this panel's playtime path is NOT wired to it (that
+ * list is never shared with this panel, and the relay only carries playtime
+ * when the ADR-0010 gate is on); doing so is a separate, unscoped feature.
+ * The panel therefore always operates in the "frequency" or "insufficient_data" tier in the real
  * product today; the "full" (playtime-inclusive) tier is real, tested code
  * in `lib/decision-support.js`, reachable today only from a caller that
  * already has a `playtimeByAppid` map (a future WP's job) — see the coder's

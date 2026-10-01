@@ -257,9 +257,15 @@ export function dispKind(game, liveJob) {
  * @param {object|undefined} liveJob
  * @param {boolean} selecting `true` while multi-select is active — a tap
  *   must toggle selection instead of firing the action (mockup parity).
+ *   An `owned_only` row (WP WEB-FEAT-1) never gets an action here.
  */
 export function statusAction(game, liveJob, selecting) {
   if (selecting) return null;
+  // WP WEB-FEAT-1 (user decision): an owned game the vault does not know
+  // (`owned_only`, synthesized by lib/owned-library.js) gets its download
+  // action in the detail sheet only, never as a card quick action. The
+  // sheet's own "not tracked" branch offers it (game-detail-sheet.js).
+  if (game && game.owned_only === true) return null;
   if (liveJob) {
     if (liveJob.status === "running") return { type: "pause", title: "Pause download" };
     if (liveJob.status === "paused") return { type: "resume", title: "Resume download" };

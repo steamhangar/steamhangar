@@ -554,6 +554,10 @@ const SETTINGS_BASE = {
   auto_gc: { default: CONFIG_DEFAULT_AUTO_GC, env: CONFIG_DEFAULT_AUTO_GC },
   webhook_url: { default: "", env: "" },
   webhook_events: { default: [...WEBHOOK_EVENTS_ALL], env: [...WEBHOOK_EVENTS_ALL] },
+  // WP WEB-FEAT-1 (mirrors WP API-FEAT-1's `steam_library_steamid`): blank by
+  // default, like a fresh real vault — set it in Settings (after a demo Steam
+  // key) to see the owned-games merge in the Library.
+  steam_library_steamid: { default: "", env: "" },
 };
 
 const SETTINGS_APPLIES = {
@@ -565,6 +569,7 @@ const SETTINGS_APPLIES = {
   auto_gc: "immediately",
   webhook_url: "restart-required",
   webhook_events: "restart-required",
+  steam_library_steamid: "immediately",
 };
 
 // Same true/false spellings as api/vault_api/config.py's parse_strict_bool
@@ -672,6 +677,18 @@ function parseSettingValue(key, raw) {
     }
     return [...new Set(tokens)];
   }
+  if (key === "steam_library_steamid") {
+    // Mirrors config.parse_steam_library_steamid: trimmed, blank = not set,
+    // otherwise the relay's own SteamID64 grammar (lib/steamid.js here).
+    const text = raw.trim();
+    if (!text) return "";
+    if (!validSteamId64(text)) {
+      throw validationError(
+        `'${key}': must be a SteamID64: exactly 17 ASCII digits in the individual-account range; blank (or null over the API) clears it`,
+      );
+    }
+    return text;
+  }
   throw validationError(`unrecognised setting key ${JSON.stringify(key)}`); // unreachable: callers only pass known keys
 }
 
@@ -730,6 +747,13 @@ function coercePatchValue(key, value) {
     throw validationError(`'${key}' must be a string, not a boolean.`);
   }
   if (typeof value === "string") return value;
+  if (typeof value === "number" && key === "steam_library_steamid") {
+    // routers/settings.py's WP API-FEAT-1 S1 rule: a JSON number for a
+    // 17-digit id is already rounded by a JavaScript sender.
+    throw validationError(
+      `'${key}': send the SteamID64 as a JSON string (17 digits exceed JavaScript's safe integer range).`,
+    );
+  }
   if (typeof value === "number") return String(value);
   if (Array.isArray(value) && key === "webhook_events") {
     if (!value.every((v) => typeof v === "string")) {
@@ -858,7 +882,10 @@ function resetDemoSteamRelay() {
 // never real Steam data) — deliberately a DIFFERENT list from the cache
 // library's demo games above: this is what "the Steam Web API says this
 // account owns", which in real life is almost always a much bigger,
-// unrelated set from what happens to be cached.
+// unrelated set from what happens to be cached. The two lists OVERLAP on
+// purpose (WP WEB-FEAT-1): 2010010/2010040 are vault games too, the other
+// three are owned-only, so the Library's merge shows both cases (dedupe by
+// appid, plus "Not cached" owned-only rows).
 //
 // WP 4h.2 fix (named per the review that carried this defect forward): this
 // is now the DEFAULT-GATE shape — `playtime_forever`/`rtime_last_played`
@@ -1148,7 +1175,11 @@ function enqueuePrefillForAppid(appid) {
   };
   jobs.unshift(job);
   if (!game) {
-    games.push(makeGame({ appid, name: `App ${appid}`, status: "idle", depots: [] }));
+    // WP WEB-FEAT-1: an owned-only game queued from its detail sheet keeps
+    // its title once the vault knows it (the real vault-api resolves names
+    // the same way once a Steam identity is linked).
+    const owned = DEMO_OWNED_GAMES.find((g) => g.appid === appid);
+    games.push(makeGame({ appid, name: owned ? owned.name : `App ${appid}`, status: "idle", depots: [] }));
   }
   // First tick already flips it to "running" so a demo poll shortly after
   // enqueueing sees visible progress, matching the mockup's "job start"

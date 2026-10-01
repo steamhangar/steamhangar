@@ -18,8 +18,13 @@
  *    bug to the round-7 "don't rebuild animated nodes" rule this codebase
  *    already avoids elsewhere (views/downloads.js, views/library.js).
  *  - Steam identity — `GET`/`PUT`/`DELETE /v1/steam/key` (WP 4a.6r; ADR-0004
- *    addendum) plus a SteamID64 library-preview lookup
- *    (`GET /v1/steam/owned-games`/`player-summaries`). The typed key is
+ *    addendum) plus the vault's library SteamID64 (WP WEB-FEAT-1): the
+ *    `steam_library_steamid` setting, saved with its own button as a JSON
+ *    STRING via `PATCH /v1/settings` (a number is refused with 422 — 17
+ *    digits exceed JavaScript's safe integers), and a "Preview" lookup of
+ *    the typed id (`GET /v1/steam/owned-games`/`player-summaries`). The
+ *    Library view reads the same setting, so this is the one place the
+ *    account is chosen for every device. The typed key is
  *    handled by `lib/steam-key-form.js`'s `submitSteamKey`, which clears
  *    the input unconditionally after every submit attempt — see that
  *    module's header for the ADR-0004 "never retained" guarantee this
@@ -48,6 +53,12 @@ import {
 import { sweepTargetsMessage, cachedSweepGcRiskWarning } from "../lib/schedule-presentation.js";
 import { validSteamId64 } from "../lib/steamid.js";
 import { submitSteamKey } from "../lib/steam-key-form.js";
+import {
+  INVALID_STEAMID64_MESSAGE,
+  NO_STEAM_KEY_MESSAGE,
+  PRIVATE_PROFILE_MESSAGE,
+  STEAM_LIBRARY_SETTING_KEY,
+} from "../lib/owned-library.js";
 import { onViewChange } from "../router.js";
 
 const WEBHOOK_EVENT_OPTIONS = [
@@ -488,7 +499,7 @@ function renderSteamStatusLine() {
     statusLine.textContent = `Relay key configured (••••${state.steamStatus.key_last4}).`;
     removeBtn.hidden = false;
   } else {
-    statusLine.textContent = "No Steam Web API key configured. Library queries answer 409 until one is set.";
+    statusLine.textContent = NO_STEAM_KEY_MESSAGE;
     removeBtn.hidden = true;
   }
 }
@@ -511,6 +522,7 @@ function renderLookupResult() {
     );
   }
   lookupBody.appendChild(el("p", "foot-note", `${state.lookup.gameCount} games found.`));
+  if (state.lookup.gameCount === 0) lookupBody.appendChild(el("p", "foot-note", PRIVATE_PROFILE_MESSAGE));
   const list = el("ul", "bullets");
   for (const g of state.lookup.preview) {
     list.appendChild(el("li", null, g.name));
@@ -587,7 +599,31 @@ function buildSteamSection() {
   keyRow.append(saveBtn, removeBtn);
   wrap.append(keyField, keyRow, keyErr, statusLine);
 
-  wrap.append(el("h4", "sec", "Library preview"));
+  wrap.append(buildSteamLibraryBlock());
+  els.steam = { ...els.steam, statusLine, removeBtn };
+  return wrap;
+}
+
+/**
+ * The library SteamID64 (WP WEB-FEAT-1): input pre-filled from the
+ * `steam_library_steamid` setting, "Save" (its own PATCH, independent of the
+ * shared Save bar above, like "Save key"), and "Preview" for the typed id.
+ * Saving never rebuilds the rest of the form, so unsaved drafts elsewhere
+ * on the screen survive it.
+ */
+function buildSteamLibraryBlock() {
+  const wrap = document.createDocumentFragment();
+  wrap.append(el("h4", "sec", "Steam library"));
+  wrap.append(
+    el(
+      "p",
+      "hint",
+      "The Library lists every game this SteamID64 owns, on every device that uses this vault. Leave it blank and save to list only the games the vault knows.",
+    ),
+  );
+  const entry = entryByKey(STEAM_LIBRARY_SETTING_KEY);
+  const readonly = state.settingsResponse.readonly;
+
   const idField = el("div", "field");
   const idLabel = el("label", null, "SteamID64");
   idLabel.htmlFor = "settings-steam-steamid";
@@ -597,16 +633,107 @@ function buildSteamSection() {
   idInput.className = "inp txt";
   idInput.type = "text";
   idInput.inputMode = "numeric";
+  idInput.autocomplete = "off";
+  idInput.spellcheck = false;
   idInput.placeholder = "76561198042117903";
+  idInput.value = entry ? effectiveAsInputValue(entry) : "";
+  // Never disabled: Preview checks whatever is typed, and must work on a
+  // read-only vault and on an older vault-api without this setting too.
+  // Only Save/Reset are gated (WEB-FEAT-1 review S3).
   idField.appendChild(idInput);
-  const lookupBtn = el("button", "btn sm", "Look up");
+  const caption = el("p", "foot-note");
+  caption.dataset.role = "steamid-caption";
+  idField.appendChild(caption);
+  const idErr = el("p", "errline");
+  idErr.dataset.role = "steamid-error";
+  idErr.hidden = true;
+
+  const saveBtn = el("button", "btn sm", "Save SteamID64");
+  saveBtn.type = "button";
+  saveBtn.dataset.role = "steamid-save";
+  saveBtn.hidden = readonly || !entry;
+  const resetBtn = el("button", "btn ghost sm", "Reset");
+  resetBtn.type = "button";
+  resetBtn.dataset.role = "steamid-reset";
+  resetBtn.title = "Remove the override — back to the environment or default value";
+  const lookupBtn = el("button", "btn ghost sm", "Preview");
   lookupBtn.type = "button";
+  lookupBtn.dataset.role = "steamid-preview";
   const lookupBody = document.createElement("div");
+
+  function paintCaption() {
+    const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
+    caption.textContent = current
+      ? `${sourceLabel(current.source)} · ${appliesText(current.applies)}`
+      : "This vault-api does not store a library SteamID64 yet (it needs a newer version). Preview still works.";
+    // Same rule as every other setting's Reset (settings-presentation.js's
+    // canReset): only a `db` override has anything to clear.
+    resetBtn.hidden = readonly || !current || !canReset(current);
+  }
+  paintCaption();
+
+  function showIdError(text) {
+    idErr.hidden = !text;
+    idErr.textContent = text || "";
+  }
+
+  saveBtn.addEventListener("click", async () => {
+    showIdError(null);
+    const typed = idInput.value.trim();
+    if (typed && !validSteamId64(typed)) {
+      showIdError(INVALID_STEAMID64_MESSAGE);
+      return;
+    }
+    // Same body builder as the shared Save bar: only a real change is sent,
+    // and the value is the trimmed STRING from the input — never a Number().
+    const body = buildSettingsPatch(state.settingsResponse.settings, {
+      [STEAM_LIBRARY_SETTING_KEY]: { value: typed },
+    });
+    if (Object.keys(body).length === 0) {
+      showToast("SteamID64 unchanged.");
+      return;
+    }
+    saveBtn.disabled = true;
+    try {
+      state.settingsResponse = await api.patchSettings(body);
+      paintCaption();
+      showToast(typed ? "Library SteamID64 saved." : "Library SteamID64 cleared.");
+    } catch (err) {
+      showIdError(
+        err && err.status === 422 ? `${INVALID_STEAMID64_MESSAGE} (${errorText(err)})` : errorText(err),
+      );
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  resetBtn.addEventListener("click", async () => {
+    showIdError(null);
+    // {reset: true} -> `null` in the body (buildSettingsPatch), which deletes
+    // the override row: back to the env value or the blank default. Blank +
+    // Save stays the explicit "" override.
+    const body = buildSettingsPatch(state.settingsResponse.settings, {
+      [STEAM_LIBRARY_SETTING_KEY]: { reset: true },
+    });
+    if (Object.keys(body).length === 0) return;
+    resetBtn.disabled = true;
+    try {
+      state.settingsResponse = await api.patchSettings(body);
+      const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
+      idInput.value = current ? effectiveAsInputValue(current) : "";
+      paintCaption();
+      showToast("Library SteamID64 reset.");
+    } catch (err) {
+      showIdError(errorText(err));
+    } finally {
+      resetBtn.disabled = false;
+    }
+  });
 
   lookupBtn.addEventListener("click", async () => {
     const steamid = validSteamId64(idInput.value.trim());
     if (!steamid) {
-      state.lookup = { error: "That does not look like a valid SteamID64 (17 digits)." };
+      state.lookup = { error: INVALID_STEAMID64_MESSAGE };
       renderLookupResult();
       return;
     }
@@ -622,16 +749,24 @@ function buildSteamSection() {
         persona: players && players.players && players.players[0],
       };
     } catch (err) {
-      state.lookup = { error: errorText(err) };
+      // Preview checks the TYPED id, so a 422 is about that id, not the
+      // stored one; 409 is the shared no-key text; anything else stays the
+      // plain server error, as before this WP.
+      const status = err && err.status;
+      state.lookup = {
+        error: status === 409 ? NO_STEAM_KEY_MESSAGE : status === 422 ? INVALID_STEAMID64_MESSAGE : errorText(err),
+      };
     } finally {
       lookupBtn.disabled = false;
       renderLookupResult();
     }
   });
 
-  wrap.append(idField, lookupBtn, lookupBody);
+  const row = el("div", "btnrow");
+  row.append(saveBtn, resetBtn, lookupBtn);
+  wrap.append(idField, row, idErr, lookupBody);
 
-  els.steam = { statusLine, removeBtn, lookupBody };
+  els.steam = { ...els.steam, lookupBody };
   return wrap;
 }
 

@@ -2353,3 +2353,87 @@ to the About section, and Downloads. Not fixed here: when selecting games,
 the fixed bulk bar covers the last row of cards (its height varies, so it
 needs a live measurement).
 Suite: **851 tests, 851 pass, 0 fail**.
+
+### WP WEB-FEAT-1 — owned Steam games in the library
+
+The library used to list only `GET /v1/games` (games the vault knows) and
+called that count "owned". It now shows the union of the vault's games and
+the owned list of the vault's stored library SteamID64
+(`steam_library_steamid`, WP API-FEAT-1).
+
+- `owned-library.test.js` — the pure module `web/js/lib/owned-library.js`
+  plus the two decisions it bends. G1 merge (union by appid, owned
+  duplicates collapse, vault rows win for cache state, a missing vault name
+  is filled from Steam, owned-only rows flagged `owned_only` and read as
+  "Not cached"); G2 header ("N owned · M on the cache" only once the owned
+  list loaded, otherwise "V games on the vault · M on the cache"); G3 error
+  text (409 / 422 reuse the Settings strings, 0 games = private-profile
+  hint, a failure keeps the vault list); G4 detail-only download (no card
+  quick action in `statusAction`, `classifyBulkSelection`'s `notOnVault`
+  bucket never becomes a bulk target, notes never call such a game "already
+  cached"); G5 the setting is read only as a JSON string; G6 the loader has
+  no timer and drops superseded results.
+- `library-owned-wiring.test.js` — `views/library.js` through fake-dom, the
+  real `api.js` and the real store singleton against a counting fetch fake:
+  header text in both modes, owned-only cards without action buttons, no
+  relay call on poll ticks (only view open and the Reload button), 409 and
+  0-games notices with the vault cards still on screen, the detail sheet's
+  "Download to cache" queuing exactly that appid, the notice inside
+  `.lib-checkrow` (the BP-L area grid keeps six in-flow children), the
+  live-region notice not rebuilt by a search keystroke, and a CSS pin for
+  `.lib-owned` (wraps anywhere, no width).
+- `steam-library-setting.test.js` — the Settings "Steam library" block:
+  pre-fill from the setting, Save sends the RAW body
+  `{"steam_library_steamid":"<17 digits>"}` (a string, never a number),
+  trims, refuses invalid ids inline without a PATCH, shows a server 422
+  inline, sends nothing for an unchanged value and `""` for a clear,
+  read-only and older-server fallbacks, Preview's 409 / 0-games wording.
+- `demo-data-owned-library.test.js` — the demo setting mirrors the real one
+  (blank default, applies immediately, number -> 422, invalid -> 422, blank
+  is an override, null resets), the demo owned list overlaps the demo vault
+  (2 deduped, 3 owned-only), and queuing an owned-only demo game keeps its
+  title.
+- `fake-dom.js` gained the bare `[attr]` presence selector
+  (`.card[data-appid]`, used by `views/library.js` on every games tick);
+  other attribute operators still throw. `fake-dom.test.js` pins both.
+
+Mutation evidence (each applied alone, full suite run, then restored), all
+killed: the old `${games.length} owned` header; the `owned_only` guard in
+`statusAction` removed; the `notOnVault` bucket removed; `load()` called
+from the games subscription (relay polling); the SteamID sent as
+`Number(...)`; the 409 mapping removed; owned rows overriding vault rows;
+a numeric setting accepted; an empty owned list emptying the library; the
+notice render call removed; dedupe removed; `load()` removed from view
+open; `load()` only on the first open; the Reload button unwired; the
+live-region rebuild guard removed.
+
+Review fix round (PASS with should-fixes):
+- The notice's nodes are built once per mount and only updated: the live
+  region is the text span alone (`role="status"`), its text is written only
+  when it changes, and the Reload button is the SAME node through its own
+  reload cycle, busy via `aria-disabled` (never `disabled`, which drops
+  focus), with a click guard. Pinned in `library-owned-wiring.test.js`
+  (same node, focus kept, `aria-disabled` true while loading, no second
+  request, live region = span only).
+- A READY list with 0 games (private profile) uses the vault header wording,
+  never "0 owned"; the notice keeps the private hint.
+- Settings: the SteamID input is never disabled (Preview must work on a
+  read-only vault and an older vault-api); only Save/Reset are gated. New
+  Reset (PATCH `null`, shown only for a `db` override); blank + Save stays
+  the `""` override. Preview errors: 409 shared no-key text, 422 the
+  typed-id validation text, others the plain server error. The button row
+  is a `.btnrow` class (`flex-wrap:wrap`). The test uses a polling
+  `until()` instead of fixed sleeps (one negative "no PATCH" check keeps a
+  short wait).
+- `owned-library.test.js`: an older load's settings read landing after a
+  newer load finished does not overwrite READY.
+
+Mutation evidence for the round, all killed: Reload button rebuilt per
+render; `disabled` set while loading; `role=status` on the whole line;
+click guard removed; "0 owned" header back; input disabled when read-only;
+Reset sending `""`; Reset always hidden; Preview 422 saying "stored";
+generation check after the settings read removed; live-region text always
+rewritten. Re-checked after the refactor: notice render removed, Reload
+unwired, relay polled on games ticks — all still killed.
+
+Suite: **908 tests, 908 pass, 0 fail**.

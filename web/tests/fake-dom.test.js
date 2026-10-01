@@ -90,3 +90,18 @@ test("append(string) inserts a text node, as in a real DOM (WP WEB-FIX-2)", () =
   assert.equal(h.childNodes.length, 2);
   assert.equal(h.children.length, 1, "the text node is not an element child");
 });
+
+test("bare [attr] presence selector (WP WEB-FEAT-1): matches by presence, value-less; other operators still throw", () => {
+  const grid = document.createElement("div");
+  const a = document.createElement("div");
+  a.className = "card";
+  a.dataset.appid = "10";
+  const b = document.createElement("div");
+  b.className = "card"; // no data-appid
+  grid.append(a, b);
+  assert.equal(grid.querySelectorAll(".card[data-appid]").length, 1);
+  assert.equal(grid.querySelector(".card[data-appid]").dataset.appid, "10");
+  assert.equal(grid.querySelectorAll('.card[data-appid="10"]').length, 1, "the exact-match form is unchanged");
+  assert.equal(grid.querySelectorAll('.card[data-appid="11"]').length, 0);
+  assert.throws(() => grid.querySelectorAll('.card[data-appid^="1"]'), /does not support/);
+});
