@@ -16,9 +16,10 @@ VAULT_CACHE_PATH=/srv/steamhangar-cache
 ```
 
 `deploy/compose.yaml` already resolves both services' `/vault` mount from
-this variable (`${VAULT_CACHE_PATH:-vault-cache}:/vault`), so no
-`compose.yaml` edit is needed — this is the one setting in this document that
-is fully wired end to end today.
+this variable (a bind of this path when set, the `vault-cache` named volume
+when unset; vault-api's line drops its named-volume-only `nocopy` option by
+itself in bind mode), so no `compose.yaml` edit is needed — this is the one
+setting in this document that is fully wired end to end today.
 
 Before the first start, create the directory and hand it to the nginx worker
 user (uid/gid 101 — not a placeholder, see
