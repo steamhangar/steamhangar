@@ -156,6 +156,11 @@
     <string name="onboarding_base_url_placeholder_vpn">e.g. http://192.168.1.50:8080</string>
     <string name="onboarding_base_url_placeholder_public">e.g. https://vault.example.org</string>
     <string name="onboarding_api_key_label">Vault API key</string>
+    <!-- WP APP-FIX-1 (S1): the key field is masked by default; this pair
+         labels its show/hide toggle (a text button -- no eye glyph in the
+         icon set this app depends on). -->
+    <string name="onboarding_api_key_show">Show</string>
+    <string name="onboarding_api_key_hide">Hide</string>
     <string name="onboarding_test_connection">Test connection</string>
     <string name="onboarding_testing">Testing…</string>
     <string name="onboarding_connect_hint">The key is stored on this device only. It is sent as the X-Api-Key header on every request to this same server.</string>

@@ -443,6 +443,16 @@ HTTP is allowed), with two implementations now:
 - **`PublicDomainProfile`** — HTTPS only. Constructing one with an
   `http://` base URL throws `CleartextNotAllowedException` **at
   construction**, before any `Request` object exists.
+  **The certificate must be publicly trusted** (Let's Encrypt, `tailscale
+  cert`, any CA in Android's system store): the app's
+  `res/xml/network_security_config.xml` does not add user-installed or
+  private CAs to the trust anchors, so a vault behind a self-signed or
+  private-CA certificate fails the TLS handshake — and that failure
+  currently surfaces as the generic "Could not reach the server" message
+  (an `SSLException` is an `IOException` and lands in
+  `VaultApiError.Network`, WP APP-FIX-1 S6, wording not yet split). If
+  the vault is on a private CA, use the System-VPN profile over the VPN
+  instead of the Public-domain profile.
 
 `tsnet` (an embedded userspace Tailscale client) is explicitly **post-v1**
 (`docs/WORKPACKAGES.md` Phase 4b) — no dependency, no stub class, just the
@@ -800,15 +810,22 @@ only `request` actually bounds the FULL body), and a strict, exact
 check, so a garbage document that happens to contain that text elsewhere
 is not accepted).
 
-**Signed-fields check, scope stated honestly (WP brief).**
-`signedCoversClaimedId` checks ONLY that `claimed_id` is a member of
-`openid.signed` — the one field this app actually trusts (the sole source
-of the persisted SteamID64). It deliberately does NOT also require
-`return_to`/`response_nonce`/`op_endpoint`/`identity` to be signed: this
-app never branches on those fields' values for anything
+**Signed-fields check, scope stated honestly (WP brief; widened in WP
+APP-FIX-1 S4a).** `signedCoversClaimedId` checks that `claimed_id` is a
+member of `openid.signed` (the sole source of the persisted SteamID64),
+and `signedCoversReturnTo` checks the same for `return_to` — since WP
+4b.7 that field carries the per-login `state` the replay defence trusts,
+so it is the second field this app branches on for a security decision
+and an unsigned copy of it proves nothing (the earlier wording here,
+"this app never branches on `return_to`'s value", was true before 4b.7
+and false after it; a callback whose signed list omits `return_to` is now
+rejected before `check_authentication`, pinned in
+`SteamOpenIdCallbackTest` and `SteamIdentityRepositoryTest`). It still
+deliberately does NOT require `response_nonce`/`op_endpoint`/`identity`
+to be signed: this app never reads those fields' values for anything
 security-relevant, unlike a fully general OpenID relying party.
 
-### Residual FIXED by WP 4b.7: request↔callback binding (replay)
+### Residual narrowed by WP 4b.7: request↔callback binding (replay) — one class remains
 
 **Original finding (WP 4b.3 review), kept for the record.**
 `buildLoginUrl()`/`SteamOpenIdConfig.RETURN_TO` carried no per-login `state`
@@ -862,6 +879,25 @@ behaviour (fail closed, cheap to retry, no security cost), not a bug —
 through `identityRepository.completeLogin` for exactly this reason (review
 fix N2), rather than leaving a stale pending value that a LATER attacker
 window could still target.
+
+**What the `state` binding does NOT close (WP APP-FIX-1 S4b — the earlier
+heading said "FIXED"; "narrowed" is what is true).** Custom-scheme intent
+filters are unverifiable on every Android version (`docs/LEARNINGS.md`,
+"Android (Phase 4b)"): a second app that registers the same
+`steamvault://auth/openid-return` filter is offered by Android's chooser
+when Valve's page redirects, and if the user picks it, that app receives
+the GENUINE callback — including this attempt's `state`. The state binding
+cannot tell that apart from SteamHangar receiving it, because the value is
+correct; it was simply delivered to the wrong recipient, and that app can
+forward it to SteamHangar or keep it. Blast radius, unchanged from the
+original finding: which Steam account is displayed as signed in and
+therefore which PUBLIC Steam library the vault relay is asked for — no
+secret exists in this flow to leak (the OpenID assertion carries no
+credential), and the vault-api key is never involved. Closing this class
+would need a verified `https://` App Link `return_to` (a domain the
+operator controls) instead of a custom scheme, which is a deployment
+decision, not an app-side fix; recorded here rather than claimed away.
+`signOut()` recovers fully.
 
 ### Steam Web API on-device (`SteamWebApiClient`) — REMOVED in WP 4h.4
 
@@ -1041,20 +1077,48 @@ they can be called confirmed:
 3. **The real `check_authentication` round trip against the genuine
    `steamcommunity.com`** — the MockWebServer tests prove the CLIENT's
    logic against every shape of response, but never actually call Valve.
-4. **Reachable as of WP 4b.7, still needs a real device: the real
-   `GetOwnedGames`/`GetPlayerSummaries` calls against
-   `api.steampowered.com` with a genuine Steam Web API key** (both the
-   library-count preview AND the persona-name half of
-   `refreshPersonaName`). `setWebApiKey()` now has two real UI paths —
-   onboarding step 2 (`ui/onboarding/OnboardingScreen.kt`) and Settings'
-   Steam identity section (`ui/settings/SettingsScreen.kt`), both going
-   through `net/steam/SteamWebApiKeyInput.kt::submitWebApiKey` — closing
-   the "no way to reach this code path from the running app at all" gap
-   this item originally described. What remains device-only is the actual
-   network round trip against Valve's real API with a real key, same as
-   items 1-3 above.
-5. **Visual/UX check of `IdentityScreen`** — Compose rendering, button
-   states, and string wording have not been seen on a real screen.
+4. **REMOVED in WP 4h.4 — do not test this.** This item used to ask for
+   the on-device `GetOwnedGames`/`GetPlayerSummaries` round trip against
+   `api.steampowered.com` with a user-entered Steam Web API key via
+   `setWebApiKey()`/`SteamWebApiKeyInput.kt`. None of that exists any
+   more: the app never talks to Valve's Web API and has no key field
+   (`SteamKeyIsolationTest` pins both absences). The replacement device
+   items are 4a–4d below (WP APP-FIX-1 S3); the design is in "Steam
+   library via the vault relay, superseding on-device GetOwnedGames
+   (WP 4h.4)".
+   - **4a. Relay happy path.** Signed in with Steam, vault-api has
+     `STEAM_WEB_API_KEY` set, the Steam profile's "Game details" are
+     public: Settings → Steam identity → "Check library" must show the
+     `settings_steam_library_count` plural ("%1$d games found", e.g.
+     "12 games found"), and the Library
+     tab must merge owned-but-not-cached games into the grid.
+   - **4b. `409` — relay key not configured on vault-api.** Same, but the
+     operator has NOT set a key: the status line must read the
+     `settings_steam_library_not_configured` text ("The vault owner hasn't
+     set up a Steam Web API key yet …"), never a generic error, and the
+     Library tab must still show the vault-only view without complaint.
+   - **4c. `422` — rejected SteamID64.** Only reachable by corrupting the
+     stored steamid (not from the UI); if it ever appears, the line must
+     read `settings_steam_library_invalid_steamid` ("… try signing in
+     again"). Low priority, listed for completeness.
+   - **4d. Zero games (private profile OR genuinely empty).** Set "Game
+     details" to Private on the test account and check again: the status
+     must read `settings_steam_library_maybe_private` ("0 games found. Your
+     Steam profile's game details may be private …") — the app cannot
+     tell the two causes apart and must not pretend to (see the
+     private-profile trade-off in the WP 4h.4 section).
+5. **REMOVED in WP 4h.4.** `IdentityScreen` was deleted (it was already
+   unreachable since WP 4b.7). The identity UI to look at on a real
+   screen is onboarding step 2 and Settings' Steam-identity section.
+5b. **Rotate the phone after a completed sign-in (WP APP-FIX-1 S2/P1).**
+   Start "Sign in with Steam", rotate while Valve's page is in front,
+   complete the sign-in, then rotate again once back in the app: the
+   identity must stay signed in and no second "This sign-in link has
+   expired or was already used" message may appear. Before this WP the
+   first rotation emptied the pending `state` (per-Activity holder) and
+   the second re-delivered the consumed callback from the Activity's
+   Intent; both are fixed in code but only a device shows the OS actually
+   recreates the Activity in those two windows.
 6. **Watch for a malformed/rejected sign-in caused by a literal `+` in
    `openid.sig`.** `SteamOpenIdCallback.parse` decodes every query value
    with `java.net.URLDecoder.decode(_, "UTF-8")`, which follows
@@ -1339,7 +1403,12 @@ split `web/js/views/settings.js` (WP 4a.6) documents:
   interface's own documented "forget this vault entirely" contract for
   exactly this action.
 
-### `setWebApiKey` UI gap, closed (`net/steam/SteamWebApiKeyInput.kt`)
+### `setWebApiKey` UI gap, closed (`net/steam/SteamWebApiKeyInput.kt`) — REMOVED in WP 4h.4
+
+*Historical record only (WP APP-FIX-1 S3): `SteamWebApiKeyInput.kt`,
+`submitWebApiKeyEntry()` on both controllers, and `SteamWebApiKeyInputTest`
+were deleted in WP 4h.4 together with the device-local key itself — see
+"Steam library via the vault relay" below.*
 
 `submitWebApiKey` is a direct, Compose-free port of `web/js/lib/
 steam-key-form.js::submitSteamKey`'s two guarantees: `validSteamWebApiKey`
@@ -1360,8 +1429,8 @@ the WP brief's explicit ask to pin the clearing "in a controller test".
 
 ### Replay-residual fix (`net/steam/SteamLoginState.kt`)
 
-See the "Residual FIXED by WP 4b.7" section above (in the WP 4b.3 write-up)
-for the full before/after — summary: a CSPRNG per-login `state` token is
+See the "Residual narrowed by WP 4b.7" section above (in the WP 4b.3
+write-up) for the full before/after and the one class that remains — summary: a CSPRNG per-login `state` token is
 embedded in `openid.return_to`, checked via a single-use `PendingLoginState
 .consume()` BEFORE `signedCoversClaimedId`/`check_authentication` run, so a
 missing, wrong, OR previously-used state is rejected without any network
@@ -1397,8 +1466,9 @@ Robolectric/emulator dependency:
   first (the state check is now the first gate); new cases cover no
   pending state, no state in the callback, a mismatched state, and the
   named "a consumed state cannot be replayed" mutation pin.
-- `net/steam/SteamWebApiKeyInputTest` — the 32-hex validator's boundaries,
-  and `submitWebApiKey`'s clearing guarantee on all three paths.
+- `net/steam/SteamWebApiKeyInputTest` — **REMOVED in WP 4h.4** together
+  with the code under test (the 32-hex validator and `submitWebApiKey`'s
+  clearing guarantee); see the relay section for what replaced it.
 - `ui/onboarding/OnboardingControllerTest` — step navigation delegation,
   `start()`'s field-seeding from `CredentialStore`, Steam login delegation,
   the web-API-key clearing pin exercised through the real Compose state
@@ -1912,6 +1982,19 @@ app **never generates a keystore itself** — see the walkthrough below for
 the `keytool` command the user runs. No keystore, password, or alias
 appears anywhere in this tree, in a test fixture, or in git history from
 this WP.
+
+**Release version comes from the environment (WP APP-FIX-1 S5/S7).**
+`versionName`/`versionCode` were literals (`0.1.0` / `1`), so every
+published APK carried the same version regardless of tag. `build.gradle.kts`
+now reads `VAULT_RELEASE_VERSION_NAME` and `VAULT_RELEASE_VERSION_CODE`
+(`System.getenv`), falling back to exactly those literals when unset or
+blank, so a local `assembleDebug` is unchanged. A code that is not a
+positive integer fails Gradle configuration with the offending value in
+the message — never a silent `1`. `.github/workflows/publish.yml` sets
+both in its `Compute release version` step: the name from the release tag,
+the code from `github.run_number`. Caveat: `github.run_number` restarts if
+the workflow is renamed or recreated, and Android rejects the lower
+`versionCode` as a downgrade — bump past the old value before that happens.
 
 **A missing/incomplete config is an immediate, actionable build failure —
 never a crash, never a silently unsigned APK.** `assembleDebug` needs
@@ -3557,3 +3640,76 @@ Unconfirmed by sight, all real for this WP specifically:
 - Whether the detail sheet's job-control/delete/GC action row still lands
   above the fold once the new installed-state lines push it down on a
   typical phone screen height.
+
+## Pre-freeze review fixes (WP APP-FIX-1)
+
+Nine findings from the pre-freeze project review, all `app/`-only; no
+build environment exists here (Gradle/JVM tests run in GitHub CI only), so
+every Kotlin change is minimal and mirrors an existing pattern in this
+tree. Per finding:
+
+- **S1 — API key masked.** `ui/onboarding/OnboardingScreen.kt`'s API-key
+  field now uses `PasswordVisualTransformation()` by default with a
+  Show/Hide `TextButton` in the trailing slot (`rememberSaveable` keeps the
+  toggle across rotation; no eye glyph exists in material-icons-core, and
+  the extended pack is deliberately not a dependency — `NavIcons.kt`) and
+  `KeyboardOptions(keyboardType = KeyboardType.Password,
+  autoCorrectEnabled = false)`. Strings `onboarding_api_key_show`/`_hide`.
+  Pinned by `ui/onboarding/OnboardingApiKeyMaskingSourceTest` (source-text
+  scan of the one `OutlinedTextField` bound to `controller.apiKeyText`,
+  same technique as `SteamKeyIsolationTest`).
+- **S2 — consumed callback stripped from the Intent.** `MainActivity
+  .handleIntent` sets `intent.data = null` once an OpenID return has
+  been read, and `handleNotificationTap` removes both extras it consumed,
+  so a configuration-change recreation cannot replay either (kdoc on both
+  explains why). Device item 5b above. Pinned, together with the P1
+  wiring, by `MainActivityIntentWiringTest` (comment-stripped source scan
+  with enclosing-block anchors).
+- **P1 — pending `state` outlives Activity recreation.** The
+  `PendingLoginState` holder is now `MainActivity.PROCESS_PENDING_LOGIN_STATE`
+  (companion `val`, process scope), passed into
+  `SteamIdentityRepositoryImpl`; the repository kdoc that claimed
+  "repository lifetime == process lifetime" now states the real contract
+  (lifetime is the caller's choice; production passes the process-scoped
+  holder; process death still fails closed, nothing persisted).
+- **S4a — `return_to` must be signed.** `SteamOpenIdCallback
+  .signedCoversReturnTo` + a second gate in `completeLogin`, kdoc and the
+  "Signed-fields check" paragraph corrected; tests in
+  `SteamOpenIdCallbackTest` (accept/reject/substring) and
+  `SteamIdentityRepositoryTest` (rejected before the verifier is called).
+- **S4b — "Residual FIXED" reworded** to "narrowed", with the remaining
+  class named: a second app registering the same custom-scheme filter can
+  receive the genuine callback (state included) via Android's chooser;
+  blast radius stated.
+- **S3 — device checklist** items 4/5 and the WP 4b.7 `setWebApiKey`
+  section/test entry annotated REMOVED in WP 4h.4, replaced by relay-path
+  items 4a–4d (`409` / `422` / zero-games as `SteamLibraryStatus` renders
+  them).
+- **S5/S7 — release version from the environment** (`build.gradle.kts`,
+  release section above). `publish.yml` sets both variables in its
+  `Compute release version` step; `versionCode = github.run_number`
+  restarts on a workflow rename/recreate (Android rejects it as a
+  downgrade).
+- **S6 — private CA on the Public-domain profile** documented in the
+  connectivity-profile section. No code change: an `SSLException`-specific
+  `ConnectionFailureReason` is not a two-line addition (it would need a new
+  `VaultApiError` kind or a new reason plus `classifyConnectionFailure`,
+  `OnboardingStrings`'s exhaustive `when`, and a string), so the error still
+  reads "Could not reach the server" — recorded, not hidden.
+- **N1–N3** — `proguard-rules.pro` (shrinking is off; the "once 4b.9 turns
+  it on" wording was stale), `AndroidManifest.xml` (the key is stored NOW,
+  not "in a later WP"), `MainActivity.handleNotificationTap`'s unfinished
+  kdoc sentence.
+
+Left alone, as recorded by the review for post-release: P2
+(`NotificationPollWorker` catch-all) and P3 (`security-crypto` GA bump,
+scheduled for the device session).
+
+**What needs the CI build to confirm (no Gradle here):** the two new
+Compose imports resolve against BOM 2024.10.01 (`rememberSaveable` from
+`runtime-saveable`, an `api` dependency of `compose-ui`;
+`KeyboardOptions(autoCorrectEnabled = …)` is the non-deprecated 1.7.x
+parameter name), the Kotlin smart cast that lets `intent.data = null`
+follow `intent?.dataString ?: return`, and that AGP lint's
+`UnusedResources` sees both new strings as used (they are referenced from
+`OnboardingScreen.kt`).

@@ -117,6 +117,32 @@ class SteamOpenIdCallbackTest {
         assertFalse(SteamOpenIdCallback.signedCoversClaimedId("not_claimed_id,other"))
     }
 
+    // ---- signedCoversReturnTo (WP APP-FIX-1 S4a) ---------------------------
+
+    @Test
+    fun `signedCoversReturnTo accepts a signed list naming return_to`() {
+        assertTrue(
+            SteamOpenIdCallback.signedCoversReturnTo(
+                "signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle",
+            ),
+        )
+    }
+
+    @Test
+    fun `MUTATION PIN -- signedCoversReturnTo rejects a list that omits return_to`() {
+        assertFalse(
+            SteamOpenIdCallback.signedCoversReturnTo(
+                "signed,op_endpoint,claimed_id,identity,response_nonce,assoc_handle",
+            ),
+        )
+    }
+
+    @Test
+    fun `signedCoversReturnTo does not match a field name merely containing return_to as a substring`() {
+        assertFalse(SteamOpenIdCallback.signedCoversReturnTo("not_return_to,other"))
+        assertFalse(SteamOpenIdCallback.signedCoversReturnTo(""))
+    }
+
     // ---- steamId64From ------------------------------------------------------
 
     @Test

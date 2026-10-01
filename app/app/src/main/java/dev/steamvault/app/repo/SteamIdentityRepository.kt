@@ -116,12 +116,18 @@ class SteamIdentityRepositoryImpl(
      */
     vaultApiClientProvider: () -> VaultApiClient? = { null },
     private val libraryFetcher: SteamLibraryFetcher = VaultRelayLibraryFetcher(vaultApiClientProvider),
-    /** WP 4b.7 replay-residual fix -- see [PendingLoginState]'s kdoc. Held
-     * per-repository-instance (repository lifetime == app process lifetime,
-     * same as [MainActivity]'s `by lazy` wiring), not persisted: a login
-     * attempt that outlives the process (a killed-and-restarted app while
-     * the Custom Tab is open) simply fails closed on the way back in,
-     * rather than being silently exempt from the state check. */
+    /** WP 4b.7 replay-residual fix -- see [PendingLoginState]'s kdoc. The
+     * holder's LIFETIME is the caller's choice (WP APP-FIX-1 P1 corrected
+     * this kdoc, which used to claim "repository lifetime == app process
+     * lifetime" while [dev.steamvault.app.MainActivity] built one repository
+     * per Activity instance): the default here is per-repository-instance,
+     * which is what tests want; production passes
+     * `MainActivity.PROCESS_PENDING_LOGIN_STATE`, a process-scoped holder,
+     * so a pending attempt survives an Activity recreation while the Custom
+     * Tab is in front. Never persisted: a login attempt that outlives the
+     * PROCESS (a killed-and-restarted app while the Custom Tab is open)
+     * simply fails closed on the way back in, rather than being silently
+     * exempt from the state check. */
     private val pendingLoginState: PendingLoginState = PendingLoginState(),
     /** Overridable ONLY for deterministic tests -- the production default
      * is [SteamLoginState.generate]'s real `SecureRandom` path. */
@@ -161,6 +167,16 @@ class SteamIdentityRepositoryImpl(
 
         if (!SteamOpenIdCallback.signedCoversClaimedId(params.getValue("openid.signed"))) {
             return SteamLoginResult.Failure("Steam's response did not sign the account identifier — rejected.")
+        }
+
+        // WP APP-FIX-1 (S4a): return_to carries the `state` the gate above
+        // just trusted, so it is now a field this app branches on for a
+        // security decision and must be inside the signed set too --
+        // otherwise check_authentication's is_valid:true says nothing about
+        // it (OpenID 2.0 lists return_to among the fields an OP MUST sign;
+        // this app must not merely assume Valve did).
+        if (!SteamOpenIdCallback.signedCoversReturnTo(params.getValue("openid.signed"))) {
+            return SteamLoginResult.Failure("Steam's response did not sign the return address — rejected.")
         }
 
         val verified = openIdVerifier.checkAuthentication(params)
