@@ -797,3 +797,16 @@ These are not style preferences; each entry cost a review round to learn.
   guard. A test that has never been seen failing for the right reason is
   not yet evidence; mutate its subject once before counting it (WP
   pre-freeze review, cross-package).
+- Two services mounting the same fresh named volume, both from images
+  that populate that path, race on Docker's copy-up ("mkdir … file
+  exists"). A green first run proves nothing; the race needs a fresh
+  volume to show. Fix: `:nocopy` on every consumer but the one seeder
+  (WP TH-1-FIX).
+- A self-test that copies a subset of files for a mutation check
+  silently starts failing for the wrong reason once the checked script
+  gains a dependency outside the subset. Assert the unmutated copy passes
+  first, and assert that the failure names the injected difference
+  (WP TH-1-FIX).
+- A presence check on an env var the image already sets via `ENV KEY=`
+  pins nothing: the key is present whether or not compose forwards it.
+  Check values (WP TH-1b).

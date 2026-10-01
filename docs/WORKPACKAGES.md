@@ -1275,6 +1275,9 @@ OpenID in a Custom Tab; the PHONE fetches the library from Valve
   outlined in PLAN Phase 5.
 - **WP 5.3 — SECURITY.md + threat model + pre-release security review** —
   after code freeze of api/core; **[Fable] mandatory** (standing policy).
+  Freeze declared 2026-10-01 (ADR-0016, commit 92e95be); the second pass
+  runs on the strongest available model, Opus 5.5 on that date (Fable
+  unavailable, user decision not to wait).
 - **WP 5.4 — CONTRIBUTING.md, issue templates, example configs** — parallel.
 - **WP 5.5 — Multi-arch images to ghcr.io** — **DECIDED (user,
   2026-08-09): move to a GitHub organization.** Target naming:

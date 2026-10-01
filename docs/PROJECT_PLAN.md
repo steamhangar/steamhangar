@@ -2264,12 +2264,11 @@ surface (playtime and last-played now flow through the API response).
       as open gaps in the document's own closing section rather than
       asserted anyway.
 - [ ] **Pre-release security review (WP 5.3 review half, Fable mandatory)**
-      — after an api/core code freeze. Not started: every feature package
-      that touched `api`/`core` has merged (Phase 4h closed with 4h.2
-      6f21e56, 4h.3 aabe2ff, 4h.4 9bb38a3; the S-track with EG-1), but the
-      freeze itself has not been declared — the pre-freeze project review
-      and its fix packages (§11 item 12) come first. Blocked only on that
-      freeze; see §11 item 6.
+      — after an api/core code freeze. **Unblocked 2026-10-01:** the
+      freeze is declared ([ADR-0016](adr/0016-api-core-code-freeze.md),
+      freeze commit 92e95be) after the pre-freeze project review and its
+      fix packages (§11 item 12). Not started yet; it is next. See §11
+      item 6.
 - [ ] Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
       frame as a complement/alternative, not a "LanCache killer")
 
@@ -2509,8 +2508,11 @@ below carry their own later dates, item 12 is the current one).
    findings addressed in the WP 5.3-fix follow-up commit; round 3: PASS
    (2026-08-18).
 6. [ ] **WP 5.3 review half, still open** — pre-release security review
-   (Fable mandatory), after an api/core code freeze that has not happened
-   yet. Since WP R-0 (commit 80f750f, user decision 2026-09-29) the
+   (Fable mandatory), after an api/core code freeze. **Freeze precondition
+   met 2026-10-01** ([ADR-0016](adr/0016-api-core-code-freeze.md): api/,
+   core/ and dns/ frozen at commit 92e95be); the security review starts
+   next, its second pass on Opus 5.5 (Fable unavailable, user decided not
+   to wait). Since WP R-0 (commit 80f750f, user decision 2026-09-29) the
    "[Fable]" marker names a boundary, not a model: a second review pass
    with the strongest available model, chosen at call time; coder and
    reviewer ride the session's model (`model: inherit`) instead of a
@@ -2567,7 +2569,7 @@ below carry their own later dates, item 12 is the current one).
    docs/LEARNINGS.md (the guarantee-vs-mechanism ceiling of name-based
    isolation scans). Real-device residuals listed in app/README.md.
 10. [x] **Download throttling, time-dependent — done (WP TH-1a/TH-1b,
-    TH-1a committed as 6aa4c0c, TH-1b this WP; ADR-0015)** (operator request 2026-08-30). Caps the
+    TH-1a committed as 6aa4c0c, TH-1b as 47747b4, TH-1-FIX as 92e95be; ADR-0015)** (operator request 2026-08-30). Caps the
     upstream (Steam → vault) bandwidth; LAN serving stays uncapped. Scoping
     by the WP TH-0 spike (commit 9865237,
     `poc/throttle/RESULTS-THROTTLE-20260929.md`): SteamPrefill 3.7.1 has
@@ -2611,8 +2613,8 @@ below carry their own later dates, item 12 is the current one).
     deployment this was requested for. Belongs in deploy/examples/ beside
     minimal-lan and tuned-setup, with a verify recipe; footprint deploy/ +
     docs only.
-12. [ ] **Pre-freeze project review (2026-09-30/10-01) and its fix
-    packages — in progress.** Before declaring the api/core freeze that
+12. [x] **Pre-freeze project review (2026-09-30/10-01) and its fix
+    packages — done 2026-10-01; freeze declared (ADR-0016).** Before declaring the api/core freeze that
     item 6 waits on, the whole tree was reviewed in eight areas (api data
     layer, api surface, core + dns, agent, web, app, deploy, docs), each by
     its own reviewer, each report naming blockers (claims or code that must
@@ -2626,10 +2628,18 @@ below carry their own later dates, item 12 is the current one).
     - [x] **API-FIX-1** — commit 298029f
     - [x] **APP-FIX-1** — commit 95b684c
     - [x] **DEPLOY-FIX-1** (deploy, CI) — commit 4c8a67d
-    - [ ] **DOCS-FIX-1** (this plan, the root docs, the ADR addenda dated
-      2026-09-30 — files no other fix package owns) and **DOCS-FIX-2**
-      (the component docs those packages touch, after they land) — in
-      progress
+    - [x] **DOCS-FIX-1** (this plan, the root docs, the ADR addenda dated
+      2026-09-30 — files no other fix package owns) — commit f70c031
+    - [x] **DOCS-FIX-2** (the component docs those packages touch, after
+      they land) — commit ec90ce2
+    Follow-up commits after the review packages, all reviewed to PASS:
+    - [x] **TH-1a** (core, aggregate upstream cap) — commit 6aa4c0c
+    - [x] **WEB-FIX-2** (user decision 2026-10-01, connection-lost
+      indicator) — commit 984d02a
+    - [x] **TH-1b** (deploy, cap configurable from `.env`, follows the
+      schedule window) — commit 47747b4
+    - [x] **TH-1-FIX** (copy-up race on a fresh cache volume, found by a
+      live verify; verify 204/204) — commit 92e95be
     Directly before the review, WP R-0 (commit 80f750f) moved agent
-    delegation to the session model (see item 6). The freeze, and with it
-    item 6, follows the last PASS.
+    delegation to the session model (see item 6). The freeze followed the
+    last PASS: ADR-0016, freeze commit 92e95be.
