@@ -2293,3 +2293,63 @@ here; it reuses `.banner`), a real screen reader speaking the announcement,
 and the clicked-while-dropping case (`withButtonBusy` re-enables a button
 after a failed click until the next repaint).
 Suite: **840 tests, 840 pass, 0 fail**.
+
+### WP WEB-FIX-3 — the UI fits a phone screen
+
+User report, 2026-10-01: Pixel, Chrome, portrait (~412 CSS px). The whole
+page was zoomed out, the Settings segments wrapped "Dry run", the webhook
+event checkboxes sat above their labels, and the last Settings section
+stayed under the bottom nav. Analysed statically; no browser runs in this
+devbox.
+
+- **The zoom-out is NOT explained by this WP.** What follows is hardening
+  against horizontal overflow, not the cause of the report: the user's
+  Library was empty and Settings has no grid. The zoom-out stays open
+  until a device diagnosis is done. Leading hypothesis (review, still
+  unconfirmed): Chrome's "Desktop site" mode, a 980px layout that ignores
+  the viewport meta. A full-width header and nav around a narrow, centred
+  760px column means a layout of 720px or more, below 1024px (BP-M on,
+  BP-L off).
+- Hardening: the phone library grid used `1fr` tracks (`repeat(2,1fr)`,
+  `repeat(3,1fr)`, list `1fr`). `1fr` is `minmax(auto,1fr)`, so a track
+  never shrinks below its card's min-content width, and the card holds
+  `white-space:nowrap` text (`.instbadge`; `.rowname` in the list layout).
+  A long line could widen the grid past the viewport. Now `minmax(0,1fr)`
+  plus `.card{min-width:0}`, with `min-width:0` flex text columns,
+  `overflow-wrap:anywhere` text blocks and the toast on `100%`, not
+  `100vw`.
+- Real bugs fixed: the Settings text segments reused the 28px icon-segment
+  width (`.field > .segs`, now `nowrap` and scrolling instead of wrapping);
+  the webhook rows lost to `.field label`'s block/uppercase rule
+  (`.field label.srow` restores the inline row); inputs are 16px below
+  BP-M.
+- Bottom nav: `.nav` is `position:sticky` and in flow, so it covers no
+  content at scale 1 and no view padding was added. The pin asserts it
+  stays sticky, never fixed, and that `.view-root` carries no
+  `padding-bottom`. The reported overlap is not explained by static
+  analysis and is part of the open device diagnosis.
+- `html, body{overflow-x:clip}` (theme.css) is defence in depth only. It
+  is NOT the fix: it hides a future overflow, it does not stop one being
+  introduced. It uses `clip`, never `hidden`, because `hidden` on body
+  creates a scroll container and breaks the sticky topbar and bottom nav.
+- `css-mobile-overflow.test.js` pins each of these, top-level or in the
+  BP-M block, plus a scan that finds no top-level fixed width above 360px.
+  `css-layout-foundation.test.js`: the base grid pin now expects
+  `minmax(0,1fr)`.
+
+Mutation evidence (each applied alone, the CSS pin files run, then
+restored), all killed: safety net to `hidden` or removed; each grid back to
+`1fr`; `.card` `min-width` removed; list `.meta` shrink removed; `.jobtop >
+div` and `.banner .body` `min-width` removed; `overflow-wrap` reverted;
+toast back to `100vw`; toast text `min-width` removed; a 400px `min-width`;
+segment `nowrap`, `width:auto` or `max-width` removed; `.srow`
+`display:flex` or uppercase reset removed; `.nav` switched to `fixed`; a
+`.view-root` `padding-bottom` added; the 16px inputs or their BP-M restore
+reverted.
+
+Real-device verification happens after deploy: the user checks on the
+Pixel, first whether Chrome's "Desktop site" is on, then Library, Settings
+to the About section, and Downloads. Not fixed here: when selecting games,
+the fixed bulk bar covers the last row of cards (its height varies, so it
+needs a live measurement).
+Suite: **851 tests, 851 pass, 0 fail**.

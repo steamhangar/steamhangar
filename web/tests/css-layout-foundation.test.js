@@ -342,12 +342,14 @@ test("the auto-fill library grid is wired at BP-L: .grid and .grid.cols3 both us
 test("app.css's top-level .grid/.grid.cols3 rules are still the base fixed 2/3-column switch with the phone typography, untouched by auto-fill", () => {
   const gridBody = ruleBody(appTop, ".grid");
   assert.ok(gridBody, ".grid rule not found at top level");
-  assert.match(gridBody, /grid-template-columns:\s*repeat\(2,\s*1fr\)/, "base .grid must still be the fixed 2-column switch, not auto-fill");
+  // WP WEB-FIX-3: minmax(0,1fr), not 1fr — the phone grid must not blow out
+  // past the viewport on a nowrap card child (css-mobile-overflow.test.js).
+  assert.match(gridBody, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/, "base .grid must still be the fixed 2-column switch, not auto-fill");
   assert.equal(/auto-fill/.test(gridBody), false, "auto-fill must not appear in the base (phone) .grid rule");
 
   const cols3Body = ruleBody(appTop, ".grid.cols3");
   assert.ok(cols3Body, ".grid.cols3 rule not found at top level");
-  assert.match(cols3Body, /grid-template-columns:\s*repeat\(3,\s*1fr\)/, "base .grid.cols3 must still be the fixed 3-column switch, not auto-fill");
+  assert.match(cols3Body, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/, "base .grid.cols3 must still be the fixed 3-column switch, not auto-fill");
   assert.equal(/auto-fill/.test(cols3Body), false, "auto-fill must not appear in the base (phone) .grid.cols3 rule");
 
   // The mobile-only compact typography WP 4e.2's BP-L block resets (Opus
