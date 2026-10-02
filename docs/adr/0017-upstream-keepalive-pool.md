@@ -3,7 +3,9 @@
 Date: 2026-10-02
 Status: Accepted 2026-10-02 (user decisions below, "Decisions"). Code
 ships after `v0.1.0-rc7` as its own release candidate (`v0.1.0-rc8`), pulled
-ahead of `v0.1.0` by user decision; needs an ADR-0016 addendum when built.
+ahead of `v0.1.0` by user decision. Freeze exception recorded in
+`docs/adr/0016-api-core-code-freeze.md`, addendum "2026-10-02 — freeze
+exception: upstream keepalive pool (WP CORE-FEAT-1, CGNAT fix stage 2)".
 
 Evidence labels used below: **(repo)** read in this repository, **(nginx
 docs)** `ngx_http_upstream_module` documentation and `CHANGES` as read on
@@ -372,7 +374,7 @@ are needed (take them from a recent `vault-core` access log line:
   mapping for up to `keepalive_timeout` idle; question 3's ceiling bounds
   that.
 
-## Work package split (all code after tag v0.1.0; needs an ADR-0016 exit note)
+## Work package split (ships as v0.1.0-rc8; freeze exception in ADR-0016)
 
 - **CORE-FEAT-1a** (docs, about 1 h): the measurement recipe above as an
   operator page, with both proof statements; the operator's recorded

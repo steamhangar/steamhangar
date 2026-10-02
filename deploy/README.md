@@ -818,6 +818,72 @@ boot both. Details: [`api/README.md` "SteamPrefill concurrency"](../api/README.m
 
 ---
 
+## Checking that a Steam edge keeps connections alive
+
+Optional and read-only; nothing here changes vault-core. The upstream
+keepalive pool ([ADR-0017](../docs/adr/0017-upstream-keepalive-pool.md); its
+configuration is documented under "Upstream keepalive pool" once WP
+CORE-FEAT-1d lands) only pays off if the Steam CDN edge your line talks to
+reuses one TCP connection for several chunk requests. The steps below prove
+or disprove that from your host in a few minutes. You need two real chunk
+URIs of ONE edge: take them from two recent cache-event log lines that
+carry the same host (`/vault/logs/event.log` in the container; field 6 is
+the URI, field 8 the host, see the last paragraph). The access log has no
+host field, so two of its lines may belong to two different edges.
+
+0. **Pin the public edge IP first.** On this host the edge name may resolve
+   to vault-core itself (vault-dns, a Pi-hole/AdGuard rewrite, `extra_hosts`;
+   see "DNS: pick one of three modes"), and a run that hits your own cache
+   shows reuse for the wrong reason. Ask a public resolver directly:
+   ```bash
+   edge=cache6-ams1.steamcontent.com     # your edge, see the last paragraph
+   ip=$(dig +short A "$edge" @1.1.1.1 | head -1); echo "$ip"
+   ```
+   Yes: a public address. No: a private address (`10.`, `172.16-31.`,
+   `192.168.`) or nothing, or curl in step 1 printing `Connected to <edge>
+   (<private address>)`. Then the run is invalid; fix the lookup first.
+1. **Reuse across two requests in one process.**
+   ```bash
+   curl -sv --resolve "$edge:80:$ip" -o /dev/null -o /dev/null \
+     "http://$edge/depot/<id>/chunk/<a>" "http://$edge/depot/<id>/chunk/<b>"
+   ```
+   Yes: exactly one `Connected to <edge> (<ip>) port 80` line, the second
+   request logs `Re-using existing connection`, both responses are
+   `HTTP/1.1 200 OK` with `Connection: keep-alive`. No: a second
+   `Connected to` line, or `Connection: close` in the first response.
+2. **Handshake count (optional, second terminal).** `ss -tn state
+   established "( dst $ip )"` before and between the two requests (same
+   local port = reused), or `tcpdump -ni <wan-if> "tcp[tcpflags] & tcp-syn
+   != 0 and dst host $ip and dst port 80"` while step 1 runs. Yes: one SYN
+   for two requests. No: two SYNs. Skip it if step 1 already shows one
+   connection.
+3. **Idle timeout of the edge.** Two requests on ONE open connection with a
+   pause in between, from a single process (two `curl` runs never share a
+   connection, and curl's `--keepalive` only sends TCP probes). Run it with
+   `15`, then `30`, then `60` as the last argument:
+   ```bash
+   python3 -c 'import http.client,sys,time; c=http.client.HTTPConnection(sys.argv[1],80,timeout=30); h={"Host":sys.argv[2]}; c.request("GET",sys.argv[3],headers=h); c.getresponse().read(); time.sleep(int(sys.argv[5])); c.request("GET",sys.argv[4],headers=h); print(c.getresponse().status)' \
+     "$ip" "$edge" /depot/<id>/chunk/<a> /depot/<id>/chunk/<b> 15
+   ```
+   Yes: it prints `200`, the connection survived the pause. No:
+   `RemoteDisconnected`, `ConnectionResetError` or `BadStatusLine` on the
+   second request, the edge closed it. The longest pause that still prints
+   `200` is the edge's idle timeout.
+
+**Recorded result (2026-10-02, DS-Lite line, `cache6-ams1.steamcontent.com`
+at 155.133.248.17; ADR-0017 "Measurement"):** step 1 reused the connection
+(`Re-using existing connection #0`, both `200` with `Connection:
+keep-alive`); step 3 printed `200` after 15, 30 and 60 s. The edge keeps an
+idle connection for at least 60 s, so the pool (WP CORE-FEAT-1b) sets
+`keepalive_timeout 50s` and closes first.
+
+**Which edges your line uses:** field 8 of the cache-event log is the
+normalised Host of every cache request, so with `VAULT_EVENT_LOG` on (the shipped default)
+`docker compose exec vault-core sh -c 'cut -f8 /vault/logs/event.log | sort | uniq -c | sort -rn'`
+lists them, most used first.
+
+---
+
 ## Logs and rotation
 
 All three containers log to stdout/stderr, so `docker compose logs -f` is the
