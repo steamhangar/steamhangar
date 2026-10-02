@@ -1,8 +1,9 @@
 # ADR-0017: Upstream keepalive pool per Steam CDN edge (CORE-FEAT-1, roadmap D1)
 
 Date: 2026-10-02
-Status: Proposed (draft; awaits user decisions on the open questions; code
-only after tag v0.1.0, ADR-0016)
+Status: Accepted 2026-10-02 (user decisions below, "Decisions"). Code
+ships after `v0.1.0-rc7` as its own release candidate (`v0.1.0-rc8`), pulled
+ahead of `v0.1.0` by user decision; needs an ADR-0016 addendum when built.
 
 Evidence labels used below: **(repo)** read in this repository, **(nginx
 docs)** `ngx_http_upstream_module` documentation and `CHANGES` as read on
@@ -237,6 +238,48 @@ would get a 502 instead of a transparent retry. See open question 6.
    clients: unknown).
    Recommendation: A, with `keepalive_timeout` tuned per (e) so the case
    is rare in the first place.
+
+## Decisions (user, 2026-10-02)
+
+Answered as "1A 2B 3A 4B 5A 6A, Weg B":
+
+1. Edge list source: **A**, a static env list `VAULT_UPSTREAM_POOL_HOSTS`,
+   validated against the `$vault_upstream_host` allowlist families,
+   rendered fail-closed by an entrypoint hook.
+2. Shipped list: **B**, `deploy/.env.example` ships a seed (the edges seen
+   in the first rollout's logs plus the discovery edge); operators extend
+   it.
+3. Pool size: **A**, `keepalive 8` per edge, render-time ceiling of 32 idle
+   connections in total, refused above it.
+4. List changes: **B**, recreate the container (env-only, like
+   `VAULT_UPSTREAM_RATE`).
+5. Rate cap: **A**, unchanged, plus a CI assertion that `proxy_limit_rate
+   $vault_upstream_rate;` stays in `@miss` and one confirming measurement
+   with pooling on.
+6. `proxy_next_upstream`: **A**, restore `error` next to `timeout http_502
+   http_503 http_504`, keep `proxy_next_upstream_tries 2`.
+
+Release order: **Weg B**, `v0.1.0-rc7` carries only CORE-FIX-3 (TLS SNI
+passthrough); D1 follows as `v0.1.0-rc8`, so each change is tested on its
+own on the production line.
+
+## Measurement (2026-10-02, before building)
+
+Run from a container on the operator's host (same DS-Lite egress as
+vault-core), sequential requests only, against a public edge IP resolved
+outside the LAN rewrite (`cache6-ams1.steamcontent.com` -> 155.133.248.17),
+two real chunk URLs of depot 4358691:
+
+- Step 1, reuse across two requests in one curl process: one `Connected
+  to ... (155.133.248.17) port 80 (#0)`, the second request logs
+  `Re-using existing connection #0`; both answers `HTTP/1.1 200 OK` with
+  `Connection: keep-alive`. **The edge keeps connections alive.**
+- Step 3, idle timeout, two requests on one `http.client` connection with
+  a pause: 15 s -> 200, 30 s -> 200, 60 s -> 200. **The edge keeps an idle
+  connection for at least 60 s**; vault-core's `keepalive_timeout` for the
+  pool can therefore sit below 60 s (e.g. 50 s) so nginx closes first.
+- Step 2 (SYN count with ss/tcpdump) was not run: step 1's curl trace
+  already shows a single connection for two requests.
 
 ## Prove before building
 
