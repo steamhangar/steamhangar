@@ -37,7 +37,7 @@ repo root `.gitignore`.
 | 1 | LanCache heartbeat contract | `location = /lancache-heartbeat` (bottom of the `server` block) |
 | 2 | Strip client `Range`/`Accept-Encoding`/`If-Range` upstream + store only 200 (incl. retry lists) | `proxy_set_header Range/Accept-Encoding/If-Range ""` in `@miss`; `map $upstream_status $vault_store_path` (`200` or `"~, 200$"` -> real path, else empty) feeding `proxy_store $vault_store_path` |
 | 3 | `?nocache=1` bypass | `map $arg_nocache $vault_try_target` (forces `try_files` onto a guaranteed-missing path) used by `location /depot/` |
-| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver 1.1.1.1 ipv6=off valid=30s`; `map $host $vault_upstream_host` (full-match Steam hostnames, else empty) + `map $vault_upstream_host $vault_host_allowed`; `proxy_connect_timeout 3s`; `proxy_next_upstream ...`; the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
+| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver 1.1.1.1 ipv6=off valid=30s`; `map $host $vault_upstream_host` (full-match Steam hostnames, else empty) + `map $vault_upstream_host $vault_host_allowed`; `proxy_connect_timeout 3s`; `proxy_next_upstream timeout http_502 http_503 http_504` with `proxy_next_upstream_tries 2` (no retry on `error`, WP CORE-FIX-2); the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
 
 (`Accept-Encoding`/`If-Range` stripping and the `"~, 200$"` retry-list
 match were added in a review-fix pass after the initial WP 1.1 submission
@@ -379,10 +379,34 @@ on error pages).
 ## `proxy_next_upstream` caveat (honesty note)
 
 `nginx.conf` sets `proxy_connect_timeout 3s` and
-`proxy_next_upstream error timeout http_502 http_503 http_504` with a
-bounded `proxy_next_upstream_tries 3` / `proxy_next_upstream_timeout 6s`.
+`proxy_next_upstream timeout http_502 http_503 http_504` with a
+bounded `proxy_next_upstream_tries 2` / `proxy_next_upstream_timeout 6s`.
 This directly addresses the ~42s stall Phase 0 observed from a dead
 upstream IP (`poc/linux-client-test` findings) for the *connect* phase.
+
+**No retry on `error` (WP CORE-FIX-2, 2026-10-02).** Until then the list
+began with `error` and allowed 3 attempts (up to 2 retries). A production rollout behind a
+DS-Lite line showed why that hurts: vault-core opens a new upstream TCP
+connection for every miss (variable `proxy_pass`, no keepalive pool), the
+carrier-grade NAT ran out of port mappings and answered every new SYN with
+ICMP host-unreachable at once (RFC 6888 REQ-11), and nginx logged 57845
+`connect() failed (113: Host is unreachable)` 502s against 4029 200s in
+about two minutes. Each of those is an `error`, and each retry was one more
+SYN against a NAT that was already full; SteamPrefill re-requests failed
+chunks itself on top. Now a connect error goes straight back to the client
+(which retries anyway), a connect *timeout* still gets one retry, and so
+does an upstream 502/503/504. On Linux, with `proxy_connect_timeout 3s`, a
+black-holed IP is a `timeout` (3s per attempt, so it cannot spin). The
+Phase 0 dead-IP stalls on Windows were logged as 502 `error`s instead,
+because the OS connect timeout of about 21s fired before nginx's; that is
+why the old list needed `error` there and does not here. The trade-off:
+when a name has several A records, an edge that answers with RST or
+ICMP unreachable no longer fails over to the next address inside nginx;
+the client's retry does that instead. The other half of the fix is on the
+vault-api side: SteamPrefill runs with `--max-threads`
+(`VAULT_PREFILL_MAX_THREADS`, default 8, `api/README.md`). Pinned by
+`core/docker/check-config-drift.sh` step 2c. Pooling upstream keepalive
+connections (the root cause) is a separate, later decision.
 
 What this work package did **not** independently re-verify: whether
 `proxy_next_upstream` actually retries against a *second* IP address when

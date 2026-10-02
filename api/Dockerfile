@@ -71,6 +71,33 @@ RUN set -eux; \
     chmod 0755 /opt/steamprefill/SteamPrefill; \
     rm -rf /tmp/steamprefill /tmp/steamprefill.zip
 
+# --- Build probe: the hidden --max-threads flag (WP CORE-FIX-2) -------------
+# vault-api passes `--max-threads N` on every prefill (VAULT_PREFILL_MAX_THREADS)
+# so SteamPrefill cannot exhaust a carrier-grade NAT's port mappings. The flag
+# is HIDDEN: not in --help, pre-parsed and stripped in Program.cs
+# (ParseHiddenFlags) before CliFx runs. If a future SteamPrefill drops it,
+# CliFx answers "Unrecognized option(s): --max-threads" and EVERY prefill job
+# fails -- so this probe fails the image build instead.
+# Why the log line and not the exit code: `--help` ignores unknown options and
+# exits 0 either way (measured on 3.7.1: `prefill --bogus-flag 1 --help` -> 0),
+# so only the flag's own "Will download using at most N threads" line proves
+# the parser recognised it. A help run makes no network request and needs no
+# Steam login. Invariant globalization because this throwaway stage has no
+# libicu; HOME and the working directory are scratch because SteamPrefill's
+# AppConfig creates directories there before parsing anything. ANSI is
+# stripped: the count is colourised mid-sentence.
+# api/tests/test_core_fix_2_max_threads.py pins this probe's presence and the
+# list of SteamPrefill versions verified to carry the flag.
+RUN set -eux; \
+    mkdir -p /tmp/sp-probe/home; \
+    probe_out=$(cd /tmp/sp-probe && HOME=/tmp/sp-probe/home DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
+        /opt/steamprefill/SteamPrefill prefill --max-threads 3 --help </dev/null 2>&1 \
+        | sed 's/\x1b\[[0-9;]*m//g'); \
+    printf '%s\n' "$probe_out" | head -n 2; \
+    printf '%s\n' "$probe_out" | grep -F "Will download using at most 3 threads" \
+        || { echo "SteamPrefill ${STEAMPREFILL_VERSION} did not print the --max-threads line (flag dropped, or SteamPrefill failed to start; see output above). vault-api passes it on every prefill." >&2; exit 1; }; \
+    rm -rf /tmp/sp-probe /opt/steamprefill/Config
+
 # --- Stage 2: the runtime image ----------------------------------------------
 FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251
 

@@ -40,6 +40,9 @@
 #      static native include identical (comments aside) to the script's
 #      cap-off render -- so "native = container with no cap configured"
 #      stays true by machine check
+#   2c. pin the WP CORE-FIX-2 upstream retry policy inside location @miss in
+#      both files: no retry on `error`, proxy_next_upstream_tries 2, and no
+#      second proxy_next_upstream* line anywhere else
 #   3. diff. Any remaining difference fails with a unified diff.
 #
 # Usage:  sh core/docker/check-config-drift.sh   [from anywhere]
@@ -216,6 +219,35 @@ else
         fail=1
     fi
 fi
+
+# --- 2c. WP CORE-FIX-2: the upstream retry policy -------------------------
+# Identical in both files, so step 3's diff would also pass if BOTH drifted
+# back to retrying on `error` -- hence explicit pins. A connect failure
+# behind a full carrier-grade NAT ("113: Host is unreachable") is an
+# `error`; retrying it multiplies SYNs against the NAT that is already out
+# of mappings. At most one retry (tries 2), and only on timeout / 50x.
+for f in "$work/native.norm" "$work/template.norm"; do
+    miss_block "$f" > "$work/miss.block"
+    for want in "proxy_connect_timeout 3s;" \
+                "proxy_next_upstream timeout http_502 http_503 http_504;" \
+                "proxy_next_upstream_tries 2;" \
+                "proxy_next_upstream_timeout 6s;"; do
+        n=$(grep -F -c -x -- "$want" "$work/miss.block" || true)
+        if [ "$n" != "1" ]; then
+            echo "check-config-drift: FAIL: '$want' must appear exactly once inside location @miss in $f (found $n) -- CORE-FIX-2 retry policy" >&2
+            fail=1
+        fi
+    done
+    n=$(grep -E -c '^proxy_next_upstream(_tries)? ' "$f" || true)
+    if [ "$n" != "2" ]; then
+        echo "check-config-drift: FAIL: expected exactly one proxy_next_upstream and one proxy_next_upstream_tries line in $f, found $n lines -- a second one elsewhere would override or add retries (CORE-FIX-2)" >&2
+        fail=1
+    fi
+    if grep -E -q '^proxy_next_upstream( | .* )error( |;)' "$f"; then
+        echo "check-config-drift: FAIL: proxy_next_upstream retries on 'error' in $f -- each retry is a new connection against a carrier-grade NAT that already answers 113 Host is unreachable (CORE-FIX-2)" >&2
+        fail=1
+    fi
+done
 
 [ "$fail" = "0" ] || exit 1
 

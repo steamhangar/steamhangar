@@ -1506,7 +1506,7 @@ def test_scheduler_thread_sweeps_and_the_worker_drains_the_queue(
 
     # ADR-0006 decision 2: a scheduled run of an already-filled app is NOT
     # forced. (--no-ansi is always passed; see prefill.py.)
-    assert stub_prefill.read_argv(bindir) == ["prefill", "--no-ansi"]
+    assert stub_prefill.read_argv(bindir) == ["prefill", "--no-ansi", "--max-threads", "8"]
     assert stub_prefill.read_selection(bindir) == [440]
     # The frozen clock guarantees the interval never elapses again.
     assert len(stub_prefill.read_runs(bindir)) == 1
@@ -1554,7 +1554,7 @@ def test_a_scheduled_first_fill_still_runs_forced(tmp_path: Path) -> None:
             what="the scheduled first fill finishing",
         )
 
-    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi"]
+    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi", "--max-threads", "8"]
 
 
 def test_the_scheduler_thread_starts_even_with_no_window_but_sweeps_nothing(

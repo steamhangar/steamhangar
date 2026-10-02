@@ -179,6 +179,7 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_LOG_LEVEL`               | no       | `INFO`       | Log level                                                          |
 | `VAULT_STEAMPREFILL_PATH`       | no*      | *(empty)*    | Path to the SteamPrefill executable; *required to run prefill jobs* |
 | `VAULT_PREFILL_TIMEOUT_SECONDS` | no       | `14400`      | Hard time budget for one SteamPrefill run (hang backstop)           |
+| `VAULT_PREFILL_MAX_THREADS`     | no       | `8`          | Whole number 1-64: concurrent chunk requests per SteamPrefill run, passed as its hidden `--max-threads N` flag on every prefill in both modes (SteamPrefill's own default is 30). Keeps a prefill from exhausting a carrier-grade NAT (DS-Lite). Env-only. See "SteamPrefill concurrency (`--max-threads`)" (WP CORE-FIX-2) |
 | `VAULT_WORKER_POLL_SECONDS`     | no       | `1.0`        | Worker sleep between polls of an empty queue                        |
 | `VAULT_PREFILL_MODE`            | no       | `subprocess` | `subprocess` (vault-api runs SteamPrefill itself, unchanged pre-WP-S-1 behaviour) \| `queue` (hand execution off to a separate `prefill_runner` process — see "Queue mode" below). Any other value is refused at startup |
 | `VAULT_RUNNER_HEARTBEAT_SECONDS` | no      | `5.0`        | `queue` mode only: how often `prefill_runner` refreshes its lease while executing; **must be > 0** |
@@ -216,8 +217,9 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_SETTINGS_READONLY`       | no       | `false`      | Strict boolean. Operator hard-lock: on = `PATCH /v1/settings` answers `403` (`GET` still works; the `/v1/steam/key` routes are not covered). Env-only by construction. See "`VAULT_SETTINGS_READONLY` — the operator hard-lock" |
 | `VAULT_WEB_DIR`                 | no       | the repo's `web/` directory (resolved relative to the package) outside the image; the image sets `/app/web` (api/Dockerfile) | Directory the web UI's static files are served from. Blank = the default. Env-only. See "Web UI static serving" |
 
-**All nineteen numeric settings are parsed strictly (WP 3.12).** Twelve take a
-whole number (`VAULT_PREFILL_TIMEOUT_SECONDS`, `VAULT_AGENT_REPORT_KEEP`,
+**All twenty numeric settings are parsed strictly (WP 3.12).** Thirteen take a
+whole number (`VAULT_PREFILL_TIMEOUT_SECONDS`, WP CORE-FIX-2's
+`VAULT_PREFILL_MAX_THREADS` (also bounded to 1-64), `VAULT_AGENT_REPORT_KEEP`,
 `VAULT_MANIFEST_KEEP`, `VAULT_GC_GRACE_DAYS`,
 `VAULT_SCHEDULE_INTERVAL_MINUTES`, `VAULT_SCHEDULE_CLIENT_STALE_DAYS`,
 and WP 3.11's `VAULT_EVENT_SWEEP_INTERVAL_MINUTES`,
@@ -884,7 +886,7 @@ So the invocation vault-api uses is:
 
 ```
 write <exe dir>/Config/selectedAppsToPrefill.json  =  [<appid>]
-run   <exe> prefill [--force] --no-ansi   (cwd = exe dir, stdin = DEVNULL)
+run   <exe> prefill [--force] --no-ansi --max-threads <N>   (cwd = exe dir, stdin = DEVNULL)
 ```
 
 - **`--force` is deliberate, but no longer unconditional (WP 3.4, ADR-0006
@@ -914,6 +916,55 @@ run   <exe> prefill [--force] --no-ansi   (cwd = exe dir, stdin = DEVNULL)
 - OS selection is left at SteamPrefill's default (Windows). Prefilling Linux
   depots for Steam Deck clients (ADR-0002) would need `--os linux` and is not
   in this package's scope.
+
+### SteamPrefill concurrency (`--max-threads`, WP CORE-FIX-2)
+
+Every prefill, in subprocess mode (vault-api's worker) and in queue mode
+(vault-runner), passes `--max-threads <N>` with N from
+`VAULT_PREFILL_MAX_THREADS` (default **8**, whole number 1-64; anything else,
+including `0`, `65`, `+8` or `8 `, refuses to boot either process; blank means
+the default).
+
+- **Why.** SteamPrefill 3.7.1 keeps up to 30 chunk requests in flight
+  (`Models/DownloadArguments.cs`) and re-requests failed chunks at once.
+  vault-core opens a new upstream TCP connection per miss, so on a line behind
+  a carrier-grade NAT (DS-Lite and similar) a prefill can use up the NAT's port
+  mappings. The NAT then answers new connections with ICMP host-unreachable,
+  vault-core logs `connect() failed (113: Host is unreachable) while
+  connecting to upstream`, and SteamPrefill's instant retries turn that into a
+  storm (production, 2026-10-02: 57845 such 502s against 4029 200s in about
+  two minutes). 8 is well below the 50 parallel connections still measured to
+  work on that line, and cuts the concurrent upstream connections and the
+  retry storm to about a quarter. That was not measured on the real line, and
+  it is a mitigation, not the root fix: while a download is bandwidth-bound,
+  the rate of NEW connections is roughly throughput divided by chunk size,
+  whatever the thread count, and a CGN that keeps mappings after close
+  (RFC 5382 REQ-5: at least 4 minutes) can still run out at 8 threads.
+  `VAULT_UPSTREAM_RATE` (vault-core's bandwidth cap, ADR-0015) lowers that
+  rate too. The root fix is an upstream keepalive pool in vault-core, planned
+  after v0.1.0. Eight ~1 MB chunk streams still fill a typical home line; set
+  30 to get SteamPrefill's own behaviour back on a line with its own public
+  IPv4.
+- **The flag is hidden.** It is not in `--help`: `Program.cs`
+  (`ParseHiddenFlags`) strips it from the argv before the CLI parser runs and
+  logs `Using --max-threads flag.  Will download using at most N threads`,
+  which therefore shows up at the top of every job's output. If a future
+  SteamPrefill dropped it, the CLI parser would reject it as an unknown option
+  and every job would fail. `api/Dockerfile` runs
+  `SteamPrefill prefill --max-threads 3 --help` at build time and fails the
+  build unless that log line appears (exit codes cannot prove it: `--help`
+  ignores unknown options and exits 0), and
+  `tests/test_core_fix_2_max_threads.py` only accepts SteamPrefill versions
+  listed as verified, so a version bump forces a re-check.
+- **Env-only, not a `PATCH /v1/settings` key.** In the shipped queue mode the
+  consumer is vault-runner, which reads its environment once at start and
+  never the settings table. A database override would be read by vault-api
+  but not by the process that runs SteamPrefill (the boot-snapshot versus
+  effective-settings split `docs/LEARNINGS.md` warns about). The variable is
+  forwarded to both services by `deploy/compose.yaml`; change it in `.env`
+  and recreate the containers.
+- It bounds concurrency, not bandwidth. The aggregate bandwidth cap is
+  vault-core's `VAULT_UPSTREAM_RATE` (ADR-0015).
 
 ### Login prerequisite (and why a job can't hang on it)
 

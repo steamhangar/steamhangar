@@ -65,6 +65,9 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     # this key has the full argument against guessing a populated zone).
     "TZ": "UTC",
     "VAULT_PREFILL_TIMEOUT_SECONDS": str(config.DEFAULT_PREFILL_TIMEOUT_SECONDS),
+    # WP CORE-FIX-2: read here in subprocess mode only; same value as the
+    # runner's copy below.
+    "VAULT_PREFILL_MAX_THREADS": str(config.DEFAULT_PREFILL_MAX_THREADS),
     "VAULT_WORKER_POLL_SECONDS": str(config.DEFAULT_WORKER_POLL_SECONDS),
     # WP S-2 (ADR-0012). Deliberately the literal "queue", NOT
     # config.PREFILL_MODE_SUBPROCESS (config.py's own built-in default) —
@@ -197,6 +200,8 @@ EXPECTED_DEFAULTS_VAULT_RUNNER: dict[str, str] = {
     "TZ": "UTC",  # log-timestamp consistency only, see the block comment above
     "VAULT_PREFILL_MODE": "queue",  # same deliberate-divergence literal as vault-api's copy above
     "VAULT_PREFILL_TIMEOUT_SECONDS": str(config.DEFAULT_PREFILL_TIMEOUT_SECONDS),
+    # WP CORE-FIX-2: the copy the shipped queue mode actually uses.
+    "VAULT_PREFILL_MAX_THREADS": str(config.DEFAULT_PREFILL_MAX_THREADS),
     "VAULT_RUNNER_HEARTBEAT_SECONDS": str(config.DEFAULT_RUNNER_HEARTBEAT_SECONDS),
     "VAULT_RUNNER_POLL_SECONDS": str(config.DEFAULT_RUNNER_POLL_SECONDS),
 }

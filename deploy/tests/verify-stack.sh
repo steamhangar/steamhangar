@@ -315,6 +315,16 @@ assert_not_contains "$sp_smoke" "UnauthorizedAccessException" "no UnauthorizedAc
 assert_contains     "$sp_smoke" "account is required in order to prefill apps" "SteamPrefill starts and reaches its login logic"
 assert_contains     "$sp_smoke" "Steam account name" "...and gets as far as prompting for a username"
 
+say ''
+say 'WP CORE-FIX-2: the hidden --max-threads flag vault-api passes on every'
+say 'prefill, against the SHIPPED binary (api/Dockerfile already probes it at'
+say 'build time; this repeats it in the final image, as uid 101 with the real'
+say 'HOME). --help ignores unknown options, so the proof is the log line.'
+sp_threads=$(docker run --rm --entrypoint /opt/steamprefill/SteamPrefill \
+             "ghcr.io/steamhangar/vault-api:$TAG" prefill --max-threads 3 --help < /dev/null 2>&1 | strip_ansi | head -3)
+printf '%s\n' "$sp_threads" | sed 's/^/    /'
+assert_contains     "$sp_threads" "Will download using at most 3 threads" "the shipped SteamPrefill recognises --max-threads"
+
 # =============================================================================
 section "3. compose.yaml review surface"
 # =============================================================================
@@ -590,6 +600,7 @@ assert_eq "yes" "$runner_block_nonempty" "vault-runner: service block is present
 
 for pair in \
     "VAULT_PREFILL_MODE:queue" \
+    "VAULT_PREFILL_MAX_THREADS:8" \
     "VAULT_RUNNER_LEASE_TIMEOUT_SECONDS:30.0"
 do
     key=${pair%%:*}
@@ -604,6 +615,7 @@ for pair in \
     "VAULT_LOG_LEVEL:INFO" \
     "VAULT_PREFILL_MODE:queue" \
     "VAULT_PREFILL_TIMEOUT_SECONDS:14400" \
+    "VAULT_PREFILL_MAX_THREADS:8" \
     "VAULT_RUNNER_HEARTBEAT_SECONDS:5.0" \
     "VAULT_RUNNER_POLL_SECONDS:1.0"
 do
@@ -1315,6 +1327,7 @@ runner_logs=$(dc logs --no-log-prefix vault-runner 2>/dev/null)
 say "$runner_logs" | sed 's/^/    /'
 assert_contains "$runner_logs" "starting (poll every" "vault-runner logged its startup/poll-loop line"
 assert_contains "$runner_logs" "SteamPrefill path '/opt/steamprefill/SteamPrefill'" "the logged startup line names the real SteamPrefill path (not an empty/misconfigured one)"
+assert_contains "$runner_logs" "--max-threads 8)" "the logged startup line names the --max-threads value prefills will use (WP CORE-FIX-2 default 8)"
 
 say ''
 say '--- env forwarding: VAULT_PREFILL_MODE reaches BOTH processes; VAULT_API_KEY reaches NEITHER runner ---'

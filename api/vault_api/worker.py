@@ -300,6 +300,8 @@ class PrefillWorker:
                     # deps.py/db.py holds — `conn` belongs to the worker thread and
                     # never leaves it).
                     stop_request=lambda: jobs.read_stop_request(conn, job_id),
+                    # WP CORE-FIX-2: same bound as vault-runner's queue mode.
+                    max_threads=self._settings.prefill_max_threads,
                 )
 
             self._finalize_prefill_result(conn, job_id, appid, use_force, before, result)

@@ -35,6 +35,45 @@ except ImportError:  # pragma: no cover - python-dotenv is a pinned dependency,
 #: performance knob (WP 1.4).
 DEFAULT_PREFILL_TIMEOUT_SECONDS = 14400  # 4 hours
 
+#: How many chunk requests one SteamPrefill run may have in flight at once,
+#: passed as SteamPrefill's hidden ``--max-threads N`` flag on EVERY run, in
+#: both prefill modes (WP CORE-FIX-2 stage 1, ADR-0016 addendum 2026-10-02).
+#:
+#: Why it exists: SteamPrefill 3.7.1 defaults to 30 concurrent requests
+#: (``Models/DownloadArguments.cs``) and, when chunks fail, makes up to two
+#: more whole passes over the failed set, with no delay and with
+#: ``?nocache=1``.
+#: vault-core opens a NEW upstream TCP connection per miss (variable
+#: ``proxy_pass``, no keepalive pool), so every chunk is a new session on the
+#: operator's carrier-grade NAT. On a DS-Lite line the CGN ran out of
+#: mappings and answered ICMP host-unreachable (RFC 6888 REQ-11):
+#: production logged 57845 upstream 502s (``113: Host is unreachable``)
+#: against 4029 200s in about two minutes, while a single request always
+#: worked and 50 parallel connections from the same host still succeeded.
+#:
+#: Why 8: well below the 50 parallel connections measured to still work on
+#: that line, and about a quarter of SteamPrefill's concurrent upstream
+#: connections and of its retry storm when they fail. Not measured on the
+#: real line. It is a mitigation, not the root fix: while a download is
+#: bandwidth-bound, the rate of NEW connections is roughly throughput /
+#: chunk size whatever the thread count, and a CGN that keeps a mapping
+#: after close (RFC 5382 REQ-5: at least 4 minutes) can still run out at 8
+#: threads. ``VAULT_UPSTREAM_RATE`` (ADR-0015) lowers that rate too. The root
+#: fix is an upstream keepalive pool in vault-core, planned after v0.1.0. A
+#: chunk is ~1 MB from a CDN edge, so eight streams still fill a typical home
+#: line; an operator on a line without CGNAT who wants SteamPrefill's own
+#: behaviour back sets 30.
+DEFAULT_PREFILL_MAX_THREADS = 8
+
+#: Bounds for ``VAULT_PREFILL_MAX_THREADS``. 1 is the floor of the flag
+#: (SteamPrefill uses it as ``MaxDegreeOfParallelism``, which the .NET docs say
+#: rejects 0; not measured).
+#: 64 is about twice SteamPrefill's own default: above that, every request
+#: still costs vault-core two of its 1024 worker connections and dilutes the
+#: TH-1a per-request rate share, and no line this was built for benefits.
+MIN_PREFILL_MAX_THREADS = 1
+MAX_PREFILL_MAX_THREADS = 64
+
 #: How long the job worker sleeps between polls of an empty queue.
 DEFAULT_WORKER_POLL_SECONDS = 1.0
 
@@ -1115,6 +1154,10 @@ class Settings:
     # app down (see vault_api/prefill.py).
     steamprefill_path: str = ""
     prefill_timeout_seconds: int = DEFAULT_PREFILL_TIMEOUT_SECONDS
+    # WP CORE-FIX-2: SteamPrefill's --max-threads value. Env-only on purpose
+    # (not in settings_store.OVERRIDABLE_SPECS): in the shipped queue mode the
+    # consumer is vault-runner, which reads only this boot snapshot.
+    prefill_max_threads: int = DEFAULT_PREFILL_MAX_THREADS
     worker_poll_seconds: float = DEFAULT_WORKER_POLL_SECONDS
     # WP 1.5. TTL (seconds) for the in-process per-game size cache.
     size_cache_ttl_seconds: float = DEFAULT_SIZE_CACHE_TTL_SECONDS
@@ -1475,6 +1518,14 @@ class Settings:
             steamprefill_path=os.environ.get("VAULT_STEAMPREFILL_PATH", "").strip(),
             prefill_timeout_seconds=_env_int(
                 "VAULT_PREFILL_TIMEOUT_SECONDS", DEFAULT_PREFILL_TIMEOUT_SECONDS
+            ),
+            # WP CORE-FIX-2: strict digits, 1..64, blank = default; anything
+            # else refuses to boot (vault-api AND vault-runner).
+            prefill_max_threads=_env_int(
+                "VAULT_PREFILL_MAX_THREADS",
+                DEFAULT_PREFILL_MAX_THREADS,
+                minimum=MIN_PREFILL_MAX_THREADS,
+                maximum=MAX_PREFILL_MAX_THREADS,
             ),
             worker_poll_seconds=_env_float(
                 "VAULT_WORKER_POLL_SECONDS", DEFAULT_WORKER_POLL_SECONDS

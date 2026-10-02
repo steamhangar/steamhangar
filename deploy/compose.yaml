@@ -348,6 +348,12 @@ services:
       # simpler, more common `:-` form stays.
       TZ: ${TZ:-UTC}
       VAULT_PREFILL_TIMEOUT_SECONDS: ${VAULT_PREFILL_TIMEOUT_SECONDS:-14400}
+      # WP CORE-FIX-2: SteamPrefill's --max-threads (concurrent chunk
+      # requests per prefill, 1..64). Read here only in subprocess mode; the
+      # shipped queue mode reads vault-runner's copy below. Same variable and
+      # default on both services, like the timeout above. The colon form on
+      # purpose: config.py treats blank as unset too, so `:-` and `-` agree.
+      VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS:-8}
       VAULT_WORKER_POLL_SECONDS: ${VAULT_WORKER_POLL_SECONDS:-1.0}
       # WP S-2 (ADR-0012): the api-side half of the runner split's mode
       # switch. **Deliberately NOT the same default as vault_api/config.py's
@@ -854,6 +860,13 @@ services:
       # VAULT_RUNNER_LEASE_TIMEOUT_SECONDS on vault-api, not this) and "how
       # long SteamPrefill itself is allowed to run" (this one, here).
       VAULT_PREFILL_TIMEOUT_SECONDS: ${VAULT_PREFILL_TIMEOUT_SECONDS:-14400}
+      # WP CORE-FIX-2: SteamPrefill's --max-threads, consumed by
+      # prefill_runner.py's _execute -> prefill.run_prefill. The default 8
+      # keeps a prefill from exhausting a carrier-grade NAT's port mappings
+      # (DS-Lite: "113: Host is unreachable" in vault-core's log, see
+      # deploy/README.md "Troubleshooting"). Same variable and default as
+      # vault-api's copy above.
+      VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS:-8}
       # Queue mode only. How often this process refreshes its lease
       # (jobs.run_heartbeat_at) while a job is running, piggybacked on
       # prefill.run_prefill's existing 0.2s subprocess poll tick and

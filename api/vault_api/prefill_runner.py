@@ -103,11 +103,12 @@ class PrefillRunner:
         conn = get_connection(self._settings.db_path)
         logger.info(
             "prefill_runner %s starting (poll every %.1fs, heartbeat every "
-            "%.1fs, SteamPrefill path %r).",
+            "%.1fs, SteamPrefill path %r, --max-threads %d).",
             self._runner_id,
             self._settings.runner_poll_seconds,
             self._settings.runner_heartbeat_seconds,
             self._settings.steamprefill_path,
+            self._settings.prefill_max_threads,
         )
         try:
             while not self._stop.is_set():
@@ -192,6 +193,7 @@ class PrefillRunner:
             use_force=use_force,
             stop_request=stop_request_with_heartbeat,
             abort_reason=ABORT_REASON_RUNNER,
+            max_threads=self._settings.prefill_max_threads,
         )
 
         applied = self._record_result(conn, job_id, prefill_queue.encode_result(result))

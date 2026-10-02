@@ -67,7 +67,7 @@ def test_runner_selects_the_appid_via_the_state_file_and_uses_the_verified_argv(
     assert stub_prefill.read_selection(bindir) == [440]
     # use_force defaults to True (the pre-WP-3.4 behavior every direct caller
     # relied on) when the argument isn't passed at all.
-    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi"]
+    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi", "--max-threads", "8"]
     # The stub echoes what it read back, proving the selection reached it.
     assert "selected=[440]" in result.output
 
@@ -82,7 +82,7 @@ def test_use_force_true_includes_the_force_flag(tmp_path: Path) -> None:
     result = prefill.run_prefill(440, executable, timeout_seconds=30, use_force=True)
 
     assert result.success is True, result.output
-    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi"]
+    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi", "--max-threads", "8"]
 
 
 def test_use_force_false_omits_the_force_flag(tmp_path: Path) -> None:
@@ -92,7 +92,7 @@ def test_use_force_false_omits_the_force_flag(tmp_path: Path) -> None:
     result = prefill.run_prefill(440, executable, timeout_seconds=30, use_force=False)
 
     assert result.success is True, result.output
-    assert stub_prefill.read_argv(bindir) == ["prefill", "--no-ansi"]
+    assert stub_prefill.read_argv(bindir) == ["prefill", "--no-ansi", "--max-threads", "8"]
 
 
 def test_subprocess_gets_a_closed_stdin(tmp_path: Path) -> None:
