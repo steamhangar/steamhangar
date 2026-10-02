@@ -173,7 +173,7 @@ def test_queue_mode_end_to_end_success(tmp_path: Path) -> None:
 
     assert finished["status"] == jobs.STATUS_DONE, finished
     assert stub_prefill.read_selection(bindir) == [440]
-    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi"]
+    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi", "--max-threads", "8"]
 
     conn = get_connection(settings.db_path)
     try:
@@ -355,7 +355,7 @@ def test_queue_mode_pause_then_resume_genuinely_re_runs_the_stub(tmp_path: Path)
         "argv.json was never recreated -- the resumed job never actually "
         "re-invoked SteamPrefill (this is the exact shape of the B1 bug)"
     )
-    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi"]
+    assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi", "--max-threads", "8"]
 
     conn = get_connection(settings.db_path)
     try:

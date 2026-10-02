@@ -52,6 +52,16 @@ writing this module — NOT assumed from docs:
 - ``--no-ansi`` is passed but is **not sufficient**: Spectre.Console's
   exception renderer still emits SGR escapes (observed). Captured output is
   therefore stripped of ANSI escapes here before being stored.
+- ``--max-threads N`` (WP CORE-FIX-2) is a HIDDEN flag: absent from
+  ``--help``, pre-parsed and stripped from the argv in ``Program.cs``
+  (``ParseHiddenFlags``) before CliFx sees it, and it sets the cap on
+  concurrent chunk requests (default 30). Measured against the pinned linux-x64
+  binary: ``prefill --force --no-ansi --max-threads 8`` logs "Using
+  --max-threads flag. Will download using at most 8 threads" and then parses
+  normally; an option CliFx does not know (``--bogus 8``) exits 1 with
+  "Unrecognized option(s)". ``--help`` ignores unknown options (exit 0), so a
+  help run alone does not prove the flag exists; the build probe in
+  ``api/Dockerfile`` checks for the log line instead.
 - Not logged in, stdin closed: verified against a fresh copy of the binary
   with an empty ``Config/``. It does **not** hang — it prints "A Steam account
   is required in order to prefill apps!" / "Please enter your Steam account
@@ -77,6 +87,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+from vault_api.config import (
+    DEFAULT_PREFILL_MAX_THREADS,
+    MAX_PREFILL_MAX_THREADS,
+    MIN_PREFILL_MAX_THREADS,
+)
 from vault_api.mapping import delete_mapping, upsert_mapping
 from vault_api.sizes import DepotSignature, scan_depot_signatures
 
@@ -245,6 +260,7 @@ def run_prefill(
     use_force: bool = True,
     stop_request: Callable[[], str | None] | None = None,
     abort_reason: str = ABORT_REASON_VAULT_API,
+    max_threads: int = DEFAULT_PREFILL_MAX_THREADS,
 ) -> PrefillResult:
     """Run SteamPrefill for one appid. Never raises for a prefill failure.
 
@@ -296,7 +312,25 @@ def run_prefill(
     docstring's "``--force`` is deliberate" note for *why* forcing exists at
     all — that reasoning is unchanged, only *when* it is applied is now
     conditional instead of unconditional.
+
+    ``max_threads`` (WP CORE-FIX-2) is passed as SteamPrefill's hidden
+    ``--max-threads N`` flag on every run, after the documented options --
+    the argv shape measured against the pinned binary (it logs "Will download
+    using at most N threads" and parses the rest normally). Both production
+    callers pass ``Settings.prefill_max_threads`` explicitly; the default only
+    serves direct callers such as tests. An out-of-range value or a bool is a
+    caller bug (``Settings.from_env`` already refused it at boot), so it
+    raises ``ValueError`` instead of becoming a job outcome.
     """
+    if (
+        isinstance(max_threads, bool)
+        or not isinstance(max_threads, int)
+        or not MIN_PREFILL_MAX_THREADS <= max_threads <= MAX_PREFILL_MAX_THREADS
+    ):
+        raise ValueError(
+            f"max_threads must be an int in {MIN_PREFILL_MAX_THREADS}.."
+            f"{MAX_PREFILL_MAX_THREADS}, got {max_threads!r}"
+        )
     executable, error = resolve_executable(steamprefill_path)
     if executable is None:
         return PrefillResult(False, "setup", None, error or "")
@@ -309,6 +343,14 @@ def run_prefill(
     if use_force:
         command.append("--force")
     command.append("--no-ansi")
+    # WP CORE-FIX-2: bound SteamPrefill's concurrency (default 30 upstream)
+    # so a prefill cannot exhaust a carrier-grade NAT's port mappings. The
+    # flag is hidden (not in --help); api/Dockerfile's build probe fails the
+    # image build if the pinned binary stops recognising it.
+    # Keep it LAST: ParseHiddenFlags reads the element after "--max-threads"
+    # as the count, then removes the first argv string equal to that count,
+    # so an earlier token with the same text would be the one removed.
+    command.extend(["--max-threads", str(max_threads)])
     workdir = os.path.dirname(os.path.abspath(executable))
 
     # Output goes to a temp FILE rather than a pipe on purpose: a prefill run

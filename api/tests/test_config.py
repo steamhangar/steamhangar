@@ -412,6 +412,7 @@ def test_agent_report_keep_below_two_fails_loudly(monkeypatch: pytest.MonkeyPatc
 #: one un-hardened variable nobody checked.
 INTEGER_SETTINGS = [
     ("VAULT_PREFILL_TIMEOUT_SECONDS", "prefill_timeout_seconds", "7"),
+    ("VAULT_PREFILL_MAX_THREADS", "prefill_max_threads", "7"),
     ("VAULT_AGENT_REPORT_KEEP", "agent_report_keep", "7"),
     ("VAULT_MANIFEST_KEEP", "manifest_keep", "7"),
     ("VAULT_GC_GRACE_DAYS", "gc_grace_days", "7"),
@@ -531,6 +532,9 @@ def test_every_env_example_value_still_parses(monkeypatch: pytest.MonkeyPatch) -
 ENV_EXAMPLE_DEFAULT_PINS: dict[str, str] = {
     "VAULT_SWEEP_INCLUDE_CACHED": "true" if config.DEFAULT_SWEEP_INCLUDE_CACHED else "false",
     "VAULT_AUTO_GC": str(config.DEFAULT_AUTO_GC),
+    # WP CORE-FIX-2: deploy/.env.example's twin is pinned in
+    # test_core_fix_2_max_threads.py.
+    "VAULT_PREFILL_MAX_THREADS": str(config.DEFAULT_PREFILL_MAX_THREADS),
 }
 
 

@@ -65,3 +65,46 @@ different account.
 
 No route, schema or relay behaviour changed. Every other frozen-path change
 still needs its own user decision and note here.
+
+## Addendum 2026-10-02 — freeze exception: CGNAT port exhaustion during prefill (WP CORE-FIX-2, stage 1)
+
+(Named CORE-FIX-2 because CORE-FIX-1 is the pre-freeze core + dns review
+package, commit 30151f8.)
+
+User decision, 2026-10-02: "RC 6 erst wenn der Bug hier mit dem Download
+gefixt ist" (no rc6 until the download bug is fixed). The api/ and core/
+freeze opens for this one bug fix.
+
+The bug, from the production rollout on a DS-Lite line: vault-core logged
+57845 upstream 502s (`connect() failed (113: Host is unreachable) while
+connecting to upstream`, to Valve CDN addresses) against 4029 200s in about
+two minutes. A single request always worked; from another container on the
+same host 50 parallel new connections worked and 200 failed about half the
+time; the router logged an "ICMP Flood" from the DS-Lite AFTR. The
+carrier-grade NAT had run out of port mappings and answered new connections
+with ICMP host-unreachable (RFC 6888 REQ-11). Every miss is a new upstream
+connection (variable `proxy_pass`, no keepalive pool), SteamPrefill 3.7.1
+keeps 30 requests in flight and re-requests failures at once, and
+vault-core retried each connect error (`proxy_next_upstream_tries 3`: up to
+three attempts, i.e. two retries).
+
+Scope of the exception (stage 1), all in WP CORE-FIX-2:
+
+- api/: SteamPrefill gets its hidden `--max-threads N` flag on every
+  prefill, in subprocess and queue mode. N comes from the new env-only
+  setting `VAULT_PREFILL_MAX_THREADS` (`api/vault_api/config.py`, default 8,
+  strict whole number 1..64, invalid values refuse to boot). Not a
+  `PATCH /v1/settings` key, so no route or schema changes. `api/Dockerfile`
+  probes the pinned binary for the flag at build time.
+- core/: `@miss` no longer retries on `error` and allows one retry
+  (`proxy_next_upstream timeout http_502 http_503 http_504`,
+  `proxy_next_upstream_tries 2`), pinned by
+  `core/docker/check-config-drift.sh` step 2c.
+- deploy/ (not frozen, listed for completeness): forwarding on vault-api and
+  vault-runner, `.env.example`, README troubleshooting row, verify-stack
+  checks.
+
+Not in this exception: an upstream keepalive pool for vault-core (the root
+cause, since it removes the new connection per chunk). That is a separate
+decision for the user. Every other frozen-path change still needs its own
+user decision and note here.

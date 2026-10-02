@@ -487,11 +487,11 @@ def test_first_run_is_forced_and_success_clears_needs_force_for_the_next_run(
     with TestClient(app) as client:
         (job_id,) = enqueue(client, 440)
         assert wait_for_job(client, job_id)["status"] == "done"
-        assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi"]
+        assert stub_prefill.read_argv(bindir) == ["prefill", "--force", "--no-ansi", "--max-threads", "8"]
 
         (job_id_2,) = enqueue(client, 440)
         assert wait_for_job(client, job_id_2)["status"] == "done"
-        assert stub_prefill.read_argv(bindir) == ["prefill", "--no-ansi"]
+        assert stub_prefill.read_argv(bindir) == ["prefill", "--no-ansi", "--max-threads", "8"]
 
 
 def test_needs_force_is_exposed_on_the_games_endpoints_and_cleared_by_success(

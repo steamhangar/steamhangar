@@ -869,3 +869,15 @@ These are not style preferences; each entry cost a review round to learn.
   it as coarse pointer + short screen side < 600 + layout > 900 and
   >= 1.5x the screen width, and hint instead of auto-zooming (WP
   WEB-FIX-5).
+- On a DS-Lite line (IPv4 behind the provider's CGNAT) a burst of new
+  upstream connections ends in instant `connect() failed (113: Host is
+  unreachable)`: the CGN answers ICMP host-unreachable once the
+  subscriber's port quota is spent (RFC 6888 REQ-11). One connection
+  per chunk (variable `proxy_pass`, no keepalive) plus 30 instantly
+  retrying SteamPrefill workers spun at ~500 req/s. Cap the workers and
+  stop nginx retrying `error`; the root fix is connection reuse (WP
+  CORE-FIX-2).
+- A hidden CLI flag needs a positive probe: SteamPrefill's `--help`
+  exits 0 even with unknown options, so only the flag's own log line
+  proves the parser took it. Make the image build fail without that
+  line (WP CORE-FIX-2).

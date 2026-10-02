@@ -802,6 +802,20 @@ client that triggers a MISS is slowed too, the window edge stops nothing): see
 [`core/README.md` "Upstream rate cap"](../core/README.md).
 It is a bandwidth cap, not a request limit or DoS control.
 
+### Prefill concurrency behind a carrier-grade NAT
+
+Separate from the bandwidth cap: `VAULT_PREFILL_MAX_THREADS` (default `8`,
+whole number 1-64) sets how many chunk requests one SteamPrefill run keeps
+in flight. vault-api passes it as SteamPrefill's hidden `--max-threads`
+flag on every prefill (SteamPrefill's own default is 30). Each chunk
+vault-core fetches is a new upstream connection, so on a line behind a
+carrier-grade NAT (DS-Lite and similar) too many at once exhaust the NAT's
+port mappings, and vault-core logs `connect() failed (113: Host is
+unreachable)` (see [Troubleshooting](#troubleshooting)). Forwarded to
+vault-api and vault-runner; recreate both after a change:
+`docker compose up -d vault-api vault-runner`. An invalid value refuses to
+boot both. Details: [`api/README.md` "SteamPrefill concurrency"](../api/README.md).
+
 ---
 
 ## Logs and rotation
@@ -1380,4 +1394,5 @@ steamcontent.com` resolves to.
 | vault-dns exits with `FATAL: CACHE_IP is not set` | the `dns` profile is enabled but `CACHE_IP` is empty in `.env`. |
 | Clients download at internet speed and the cache stays empty | DNS redirection isn't reaching them, or the AAAA leak is open. Check with `dig A` **and** `dig AAAA` against your resolver (`dns/README.md`). |
 | Prefill jobs fail with "A Steam account is required" | the one-time interactive login hasn't been done — see [First run](#first-run-the-one-time-steamprefill-login). |
+| Prefills stall or fail with many errors; vault-core's log shows `connect() failed (113: Host is unreachable) while connecting to upstream` for Steam CDN addresses, single downloads work; your router may log an "ICMP flood" from your provider's gateway | your line is behind a carrier-grade NAT (DS-Lite, many fibre/cable/mobile lines) and a prefill used up its port mappings: every chunk vault-core fetches is a new upstream connection. Lower `VAULT_PREFILL_MAX_THREADS` in `.env` (default `8`; try `4`), then `docker compose up -d` to recreate vault-api and vault-runner. The job output starts with `Will download using at most N threads` when it took effect. Wait a few minutes before retrying so the NAT can expire old mappings. |
 | Port 80 already in use on the host | use a dedicated IP, not a different port — see [Port 80](#port-80-and-the-dedicated-ip-question). |
