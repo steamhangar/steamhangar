@@ -52,6 +52,9 @@ for f in "$dockerfile" \
          "$core_dir/docker/25-vault-eventlog.sh" \
          "$core_dir/docker/27-vault-upstream-rate.sh" \
          "$core_dir/nginx/vault-upstream-rate.conf" \
+         "$core_dir/docker/28-vault-upstream-pool.sh" \
+         "$core_dir/nginx/vault-upstream-pool.conf" \
+         "$core_dir/tests/test-upstream-pool-hook.sh" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/check-config-drift.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
@@ -64,6 +67,15 @@ done
 # rendered config that already failed this much narrower, much faster check.
 echo "--- core/docker/check-config-drift.sh ---"
 sh "$core_dir/docker/check-config-drift.sh"
+
+# --- 0b. the upstream keepalive pool hook, docker-free (WP CORE-FEAT-1b) ---
+# ADR-0017: renders VAULT_UPSTREAM_POOL_HOSTS lists through the real
+# 28-vault-upstream-pool.sh (under `sh`, as the container runs it) into a
+# temp dir and asserts the group shape and every refusal rule. Still no
+# Docker; `nginx -t` on a rendered pool include in the pinned image is WP
+# CORE-FEAT-1b2's job in the docker-based steps below.
+echo "--- core/tests/test-upstream-pool-hook.sh ---"
+bash "$core_dir/tests/test-upstream-pool-hook.sh"
 
 # --- S2: derive the pinned image ref from core/Dockerfile itself -----------
 # Round 1 duplicated the tag+digest as a literal in this script -- a bump to
@@ -161,8 +173,9 @@ render_and_test() {
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
+            cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh
 
             # The REAL stock entrypoint: runs every /docker-entrypoint.d/*.sh
             # hook in sorted order (stock 10-/15-/20-envsubst, our 25-, stock
@@ -553,8 +566,9 @@ render_must_fail() {
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
+            cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh
             /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf
         ' 2>&1) || rc=$?
     if [ "$rc" = "0" ]; then
@@ -643,7 +657,7 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 40-vault-preflight.sh; do
+        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -690,7 +704,7 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 40-vault-preflight.sh; do
+        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done

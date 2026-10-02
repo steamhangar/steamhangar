@@ -43,6 +43,15 @@
 #   2c. pin the WP CORE-FIX-2 upstream retry policy inside location @miss in
 #      both files: no retry on `error`, proxy_next_upstream_tries 2, and no
 #      second proxy_next_upstream* line anywhere else
+#   2d. pin the WP CORE-FEAT-1b upstream keepalive pool (ADR-0017), the same
+#      include contract as 2b: `include vault-upstream-pool.conf;` exactly
+#      once in each file and directly after the rate include; the static
+#      native core/nginx/vault-upstream-pool.conf byte-identical (cmp, not
+#      normalised -- the empty render is comments only) to the hook's empty
+#      render; a rendered list and the static file free of any `resolver`
+#      directive (groups must inherit the http-level one, ADR-0017 (c));
+#      the hook's keepalive-per-group and idle-ceiling constants at the
+#      ADR-0017 decision 3A values
 #   3. diff. Any remaining difference fails with a unified diff.
 #
 # Usage:  sh core/docker/check-config-drift.sh   [from anywhere]
@@ -248,6 +257,87 @@ for f in "$work/native.norm" "$work/template.norm"; do
         fail=1
     fi
 done
+
+# --- 2d. WP CORE-FEAT-1b (ADR-0017): the upstream keepalive pool include ---
+# Same shape as 2b. The include line is identical in both files (so step 3
+# alone would also pass if BOTH lost it), hence explicit pins; the static
+# native file is the hook's EMPTY render, compared with cmp because the empty
+# render is a header comment only and normalise() would reduce both sides to
+# nothing. The groups must not carry their own `resolver`: they inherit the
+# http-level one (delta 4) so ${VAULT_RESOLVER} stays the only DNS address.
+POOL_HOOK="$core_dir/docker/28-vault-upstream-pool.sh"
+NATIVE_POOL="$core_dir/nginx/vault-upstream-pool.conf"
+
+for f in "$work/native.norm" "$work/template.norm"; do
+    expect_count "$f" 1 "include vault-upstream-pool.conf;" "CORE-FEAT-1b: upstream keepalive pool include (http level)"
+    # Directly after the rate include: both sit at http level, after the
+    # resolver the groups inherit. awk prints the line following the rate
+    # include; it must be the pool include.
+    after=$(awk 'f { print; exit } /^include vault-upstream-rate\.conf;$/ { f = 1 }' "$f")
+    if [ "$after" != "include vault-upstream-pool.conf;" ]; then
+        echo "check-config-drift: FAIL: 'include vault-upstream-pool.conf;' must directly follow 'include vault-upstream-rate.conf;' in $f (found '$after')" >&2
+        fail=1
+    fi
+done
+
+if [ ! -f "$POOL_HOOK" ] || [ ! -f "$NATIVE_POOL" ]; then
+    echo "check-config-drift: FAIL: missing $POOL_HOOK or $NATIVE_POOL (WP CORE-FEAT-1b)" >&2
+    fail=1
+else
+    # ADR-0017 decision 3A: keepalive 8 per group, at most 32 idle in total.
+    ka=$(sed -n 's/^KEEPALIVE_PER_GROUP=\([0-9][0-9]*\)$/\1/p' "$POOL_HOOK")
+    ceil=$(sed -n 's/^MAX_IDLE_TOTAL=\([0-9][0-9]*\)$/\1/p' "$POOL_HOOK")
+    if [ "$ka" != "8" ] || [ "$ceil" != "32" ]; then
+        echo "check-config-drift: FAIL: 28-vault-upstream-pool.sh must define KEEPALIVE_PER_GROUP=8 and MAX_IDLE_TOTAL=32 (ADR-0017 decision 3A); got '$ka' and '$ceil'" >&2
+        fail=1
+    fi
+    # The hook validates against the allowlist families and the marker of
+    # `map $host $vault_upstream_host`, but reads them from its own constants.
+    # Pin BOTH sides: the three map lines (normalised, in both files) and the
+    # hook's constants, so a change to either without the other trips here.
+    for f in "$work/native.norm" "$work/template.norm"; do
+        expect_count "$f" 1 '"lancache.steamcontent.com" dist-fra1.discovery.steamserver.net;' \
+            "CORE-FEAT-1b: the marker line of the Host allowlist map (the hook refuses the marker and names its target)"
+        expect_count "$f" 1 '"~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamcontent\.com$" $host;' \
+            "CORE-FEAT-1b: allowlist family 1 (the hook requires *.steamcontent.com)"
+        expect_count "$f" 1 '"~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamserver\.net$" $host;' \
+            "CORE-FEAT-1b: allowlist family 2 (the hook requires *.steamserver.net)"
+    done
+    for want in "FAMILY_1=steamcontent.com" "FAMILY_2=steamserver.net" "MARKER=lancache.steamcontent.com"; do
+        n=$(grep -F -c -x -- "$want" "$POOL_HOOK" || true)
+        if [ "$n" != "1" ]; then
+            echo "check-config-drift: FAIL: expected exactly 1 line '$want' in 28-vault-upstream-pool.sh (found $n) -- the hook's allowlist constants must match the \$vault_upstream_host map" >&2
+            fail=1
+        fi
+    done
+    if ! VAULT_UPSTREAM_POOL_HOSTS='' sh "$POOL_HOOK" "$work/pool-empty.conf" > "$work/pool-empty.log" 2>&1; then
+        echo "check-config-drift: FAIL: $POOL_HOOK could not render the empty include:" >&2
+        cat "$work/pool-empty.log" >&2
+        fail=1
+    elif ! cmp -s "$NATIVE_POOL" "$work/pool-empty.conf"; then
+        echo "check-config-drift: FAIL: core/nginx/vault-upstream-pool.conf is not byte-identical to the empty render of 28-vault-upstream-pool.sh (left = native, right = render):" >&2
+        diff -u "$NATIVE_POOL" "$work/pool-empty.conf" >&2 || true
+        fail=1
+    fi
+    if ! VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
+            sh "$POOL_HOOK" "$work/pool-two.conf" > "$work/pool-two.log" 2>&1; then
+        echo "check-config-drift: FAIL: $POOL_HOOK could not render a two-edge list:" >&2
+        cat "$work/pool-two.log" >&2
+        fail=1
+    else
+        n=$(grep -c '^upstream ' "$work/pool-two.conf" || true)
+        if [ "$n" != "2" ]; then
+            echo "check-config-drift: FAIL: a two-edge list rendered $n upstream blocks, expected 2" >&2
+            fail=1
+        fi
+    fi
+    for f in "$NATIVE_POOL" "$work/pool-two.conf"; do
+        if [ -f "$f" ] && grep -qw 'resolver' "$f"; then
+            echo "check-config-drift: FAIL: a 'resolver' directive in $f -- pool groups must inherit the http-level resolver (ADR-0017 (c), delta 4)" >&2
+            fail=1
+        fi
+    done
+fi
 
 [ "$fail" = "0" ] || exit 1
 

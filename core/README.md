@@ -883,6 +883,133 @@ cross-check; and starts a throwaway server that returns the evaluated
 `$vault_upstream_rate` inside and outside a window built around the
 current minute.
 
+## Upstream keepalive pool (WP CORE-FEAT-1b, ADR-0017)
+
+Reuses **upstream** connections (vault-core -> Steam CDN edge) across cache
+MISSes instead of opening a new TCP connection per chunk. Off by default
+(empty list). Why it exists: the first production rollout ran behind a
+DS-Lite carrier-grade NAT that ran out of port mappings during a prefill
+(`connect() failed (113: Host is unreachable)`, 94% of 62k chunk requests
+failed; ADR-0017 "Context"). Stage 1 (WP CORE-FIX-2) bounded the burst;
+this is stage 2, which removes the per-chunk connection for the edges you
+name.
+
+| Variable | Meaning | Empty / unset |
+|---|---|---|
+| `VAULT_UPSTREAM_POOL_HOSTS` | Space-separated Steam CDN edge host names, e.g. `cache1-fra2.steamcontent.com dist-fra1.discovery.steamserver.net`. Lowercase, no port, each ending in `.steamcontent.com` or `.steamserver.net` (the two families of the Host allowlist map), **at most 4**. | no pool; every MISS opens its own connection, exactly as before |
+
+**Mechanism.** `/docker-entrypoint.d/28-vault-upstream-pool.sh` renders one
+`upstream` group per listed edge into `/etc/nginx/vault-upstream-pool.conf`,
+which `nginx.conf` includes at http level directly after the rate include:
+
+```nginx
+upstream cache1-fra2.steamcontent.com {
+    zone vault_edges 256k;                                  # size on the first group only
+    server cache1-fra2.steamcontent.com resolve max_fails=0;
+    keepalive 8;
+    keepalive_timeout 50s;
+}
+```
+
+`@miss` keeps its variable `proxy_pass http://$vault_upstream_host$request_uri;`.
+nginx looks the evaluated host up among the configured groups first: a
+listed edge matches its group by name (nginx strips `:port` from `$host`
+before the allowlist map runs, so the names compare equal) and reuses one of
+up to 8 idle pooled connections; **a host that is not listed takes today's
+per-request resolver path, unchanged** -- no error, just no gain. `@miss`
+already speaks HTTP/1.1 with an empty `Connection` header, which is what
+pooling requires. Each group re-resolves its name through the http-level
+`resolver` (`ipv6=off valid=30s`), one peer per A record; `max_fails=0`
+keeps one CGNAT connect failure from parking a peer for 10 s of `no live
+upstreams`. The groups carry **no `resolver` of their own**, so
+`VAULT_RESOLVER` stays the single DNS address in the image; the hook's
+self-check and `check-config-drift.sh` step 2d both refuse a render that
+contains one. `keepalive_timeout 50s` sits below the >= 60 s idle timeout
+measured on the edges on 2026-10-02, so nginx closes idle connections
+first.
+
+**The ceiling, and what the hook refuses (fail-closed, boot stops with
+`28-vault-upstream-pool.sh: FATAL: ...` naming the value):**
+
+- **More than 4 edges.** `keepalive 8` idle connections per group, at most
+  32 idle in total (ADR-0017 decision 3A: the only measured safe point
+  behind the CGNAT was 50 parallel connections; 32 idle + 8 in flight for a
+  capped prefill stays under it). The 5th name is refused with the ceiling
+  and the ADR in the message.
+- **Uppercase.** nginx would match it, but the list must equal what
+  `$vault_upstream_host` yields, and that is lowercase; the hook keeps it
+  strict instead of normalising.
+- **A port** (`host:80`), **a scheme**, **a comma-separated list**,
+  **anything outside `[a-z0-9-]` labels joined by single dots** (so no
+  trailing FQDN dot, no empty label, no `*`; globbing is off in the hook so
+  a `*` cannot expand against the working directory).
+- **A name outside the two allowlist families**, including the bare
+  `steamcontent.com` / `steamserver.net` and a family used as a prefix
+  (`steamcontent.com.evil.example`): vault-core would never dial it but
+  would re-resolve it every 30 s for nothing.
+- **`lancache.steamcontent.com`**, the client-side discovery marker: the
+  allowlist map rewrites that exact string to
+  `dist-fra1.discovery.steamserver.net`, so a group of the marker's name can
+  never match (and the name has no public A record). List the edge instead.
+- **A label longer than 63 characters or a name longer than 253** (RFC
+  1035). nginx would accept such a name at config time, but the group's
+  resolve handler then sends malformed queries and logs `could not be
+  resolved` every `resolver_timeout` for the container's lifetime.
+- **Duplicates.**
+- Whitespace is the only separator: runs of spaces, tabs or newlines
+  collapse and leading/trailing whitespace is ignored, so an empty token
+  cannot arise (POSIX word splitting); this is tolerated, not refused.
+- The rendered file is re-read before nginx sees it: block count equals the
+  host count, one `server <host> resolve max_fails=0;` per block, exactly
+  one sized `zone` line, no `resolver` token, nothing but comments and
+  those directives.
+
+**Honest limits (ADR-0017 "Consequences").**
+
+- **A stale list is silent.** Valve's edge names vary by region and over
+  time (`cacheN-<pop>`); an entry nobody is routed to costs one DNS query
+  per 30 s and gives nothing, and an edge missing from the list keeps the
+  old one-connection-per-chunk behaviour without any warning. Pooling does
+  not change what an edge answers (some ISP-hosted edges 403 certain
+  depots).
+- **NXDOMAIN empties a group.** If a listed name stops resolving, its peer
+  list becomes empty and the next MISS to it fails as `no live upstreams`
+  until a later re-resolve succeeds. Today the resolver path fails the same
+  request with 502, so this is the same outcome with a different log line.
+- **One DNS query per listed edge every 30 s** while vault-core runs,
+  download or not. A pooled idle connection also holds a CGNAT mapping for
+  up to `keepalive_timeout`; the ceiling bounds that.
+- A connection the edge closed while idle in the pool surfaces as an
+  `error` on its next use; whether `@miss` retries that transparently is
+  decided by `proxy_next_upstream` (ADR-0017 decision 6A puts `error` back
+  in WP CORE-FEAT-1b2; until then such a request gets a 502).
+- Not addressed: the Steam client's own concurrency and edge selection,
+  CM/WebSocket traffic, `vault-dns`, IPv6 egress.
+
+**Env-only, baked at container start.** Not a vault-api setting; a change
+to the list needs a vault-core recreate (ADR-0017 decision 4B, the same
+contract as `VAULT_UPSTREAM_RATE`). The zone's `256k` is sized for the
+4-group ceiling (the per-peer cost is undocumented upstream).
+
+**Native rig.** `core/nginx/nginx.conf` carries the identical
+`include vault-upstream-pool.conf;` line; its
+`core/nginx/vault-upstream-pool.conf` is the hook's empty render byte for
+byte (`check-config-drift.sh` step 2d asserts it with `cmp`, and the
+Dockerfile proves the same at build time, plus a 4-edge render and two
+refusals, in the image's own shell).
+
+**Tests.** `core/tests/test-upstream-pool-hook.sh` (bash, no Docker; run
+by `verify-core-nginx.sh` step 0b) renders unset/empty/1/2/4-host lists
+through the real hook, compares the two-host render against a golden file,
+and asserts every refusal listed above (one case per rule, including the
+RFC 1035 length limits with their 63/253 boundaries accepted) plus the
+glob, whitespace, output-path and unwritable-path behaviour. `nginx -t` on a rendered pool include inside the
+pinned image, `error` back in `proxy_next_upstream` and the upstream log
+fields are WP CORE-FEAT-1b2; the fake-edge connection count is WP
+CORE-FEAT-1c. The operator side -- the shipped seed list in
+`deploy/.env.example`, the compose forwarding and how to find your edges in
+the event log -- is documented in `deploy/README.md` (WP CORE-FEAT-1d).
+
 ## What this work package does NOT cover
 
 - Docker/Dockerfile/Compose -- delivered later by WP 1.9, see
