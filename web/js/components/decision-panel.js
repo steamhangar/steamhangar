@@ -89,6 +89,7 @@
  */
 
 import { buildSuggestions } from "../lib/decision-support.js";
+import { fillMissingNames } from "../lib/owned-library.js";
 
 const STORAGE_KEYS = Object.freeze({
   dismissed: "steamvault.decisionPanelDismissed",
@@ -141,6 +142,9 @@ export function createDecisionPanel({
   getCurrentView,
   storage,
   suggestionsLimit = 5,
+  // WP WEB-FIX-4: optional `{current, subscribe}` (owned-singleton.js's
+  // ownedLibrary). Only fills missing names; never adds a game.
+  ownedNames = null,
 }) {
   const { rootEl, bodyEl, collapseBtn, dismissBtn, appEl, createElement } = elements;
 
@@ -168,7 +172,8 @@ export function createDecisionPanel({
     // on plain visibility, so a fresh vault with nothing to say yet
     // (`tier === "insufficient_data"`, WP 4h.1's own ~14-day honesty
     // window) still reserved it to show one static sentence.
-    const suggestions = buildSuggestions(state.games, { limit: suggestionsLimit });
+    const games = ownedNames ? fillMissingNames(state.games, ownedNames.current().games) : state.games;
+    const suggestions = buildSuggestions(games, { limit: suggestionsLimit });
     const { items, tier } = suggestions;
 
     // `#app`'s own class, not `.decision-panel`'s — css/app.css's BP-XL
@@ -239,6 +244,8 @@ export function createDecisionPanel({
     state.view = view;
     render();
   });
+
+  if (ownedNames) ownedNames.subscribe(() => render());
 
   render(); // paint immediately from whatever snapshot/view already exists
   return { render };

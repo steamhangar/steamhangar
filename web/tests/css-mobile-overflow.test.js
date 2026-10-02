@@ -162,3 +162,14 @@ test("inputs are 16px below BP-M (no focus zoom) and get their desktop sizes bac
   assert.match(ruleBody(bpM.body, "input.inp, .inp input") ?? "", /font-size:\s*12\.5px/);
   assert.match(ruleBody(bpM.body, ".search input") ?? "", /font-size:\s*13px/);
 });
+
+test("WP WEB-FIX-4: the login command wraps inside its own box; the hint block is prose (normal white-space) and may shrink", () => {
+  const cmd = ruleBody(app.topLevel, ".log .failhint .cmd") ?? "";
+  assert.match(cmd, /max-width:\s*100%/);
+  assert.match(cmd, /min-width:\s*0/);
+  assert.match(cmd, /overflow-wrap:\s*anywhere/);
+  assert.match(cmd, /white-space:\s*pre-wrap/);
+  const box = ruleBody(app.topLevel, ".log .failhint") ?? "";
+  assert.match(box, /white-space:\s*normal/);
+  assert.match(box, /min-width:\s*0/);
+});

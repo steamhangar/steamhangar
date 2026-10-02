@@ -39,6 +39,7 @@ import { createAuthRecovery } from "./components/auth-recovery.js";
 import { createConnectionBanner } from "./components/connection-banner.js";
 import { setConnectionLost } from "./connection-status.js";
 import { store } from "./store-singleton.js";
+import { ownedLibrary } from "./owned-singleton.js";
 import { api, getStoredApiKey, isDemoMode } from "./api.js";
 import { openOnboarding, isOnboardingOpen } from "./onboarding.js";
 import { viewTitle } from "./lib/view-title.js";
@@ -112,6 +113,7 @@ createDecisionPanel({
   onViewChange,
   getCurrentView: currentView,
   storage: window.localStorage,
+  ownedNames: ownedLibrary,
 });
 createAuthRecovery({ store, openOnboarding, isOnboardingOpen, getStoredApiKey });
 createConnectionBanner({

@@ -1175,11 +1175,13 @@ function enqueuePrefillForAppid(appid) {
   };
   jobs.unshift(job);
   if (!game) {
-    // WP WEB-FEAT-1: an owned-only game queued from its detail sheet keeps
-    // its title once the vault knows it (the real vault-api resolves names
-    // the same way once a Steam identity is linked).
-    const owned = DEMO_OWNED_GAMES.find((g) => g.appid === appid);
-    games.push(makeGame({ appid, name: owned ? owned.name : `App ${appid}`, status: "idle", depots: [] }));
+    // WP WEB-FIX-4: the real `POST /v1/prefill` inserts the `apps` row with
+    // `name = NULL` (api/vault_api/jobs.py: `INSERT OR IGNORE INTO apps
+    // (appid, status)`); only a depot mapping names an app later. The demo
+    // used to copy the owned list's title here, which hid the "App <id>"
+    // bug in Downloads. The web UI now supplies that title itself
+    // (lib/owned-library.js's appTitle), so demo mode shows the same fix.
+    games.push(makeGame({ appid, name: null, status: "idle", depots: [] }));
   }
   // First tick already flips it to "running" so a demo poll shortly after
   // enqueueing sees visible progress, matching the mockup's "job start"

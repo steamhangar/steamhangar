@@ -103,7 +103,6 @@ import { formatBytesGB } from "../lib/format.js";
 import { onViewChange, navigateTo } from "../router.js";
 import { openDetail } from "../components/game-detail-sheet.js";
 import {
-  createOwnedLibraryLoader,
   librarySubtitle,
   mergeOwnedLibrary,
   ownedNotice,
@@ -111,6 +110,7 @@ import {
   OWNED_STATUS,
 } from "../lib/owned-library.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
+import { ownedLibrary } from "../owned-singleton.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
@@ -206,26 +206,25 @@ let liveJobsByAppid = indexLiveJobsByAppid(state.jobs);
 // ---------------------------------------------------------------------
 // After a SteamID change (Settings), the previous owned list stays on screen
 // until the new load lands — accepted: it is replaced, not merged, then.
+// WP WEB-FIX-4: the loader itself lives in `owned-singleton.js` so other
+// views can use its names; this view is still the one that loads it.
 let mergedOwnedGames = null; // the owned list `state.games` was last merged with
-const ownedLoader = createOwnedLibraryLoader({
-  apiClient: api,
-  onChange: (owned) => {
-    if (owned.games === mergedOwnedGames) {
-      // Only the status changed (a reload started): header + notice, no
-      // grid rebuild.
-      if (mounted()) {
-        updateSubtitle();
-        renderOwnedNotice();
-      }
-      return;
+ownedLibrary.subscribe((owned) => {
+  if (owned.games === mergedOwnedGames) {
+    // Only the status changed (a reload started): header + notice, no
+    // grid rebuild.
+    if (mounted()) {
+      updateSubtitle();
+      renderOwnedNotice();
     }
-    remerge();
-    fullRender();
-  },
+    return;
+  }
+  remerge();
+  fullRender();
 });
 
 function remerge() {
-  mergedOwnedGames = ownedLoader.current().games;
+  mergedOwnedGames = ownedLibrary.current().games;
   state.games = mergeOwnedLibrary(state.vaultGames, mergedOwnedGames);
 }
 
@@ -593,7 +592,7 @@ function updateSubtitle() {
   els.sub.textContent = librarySubtitle({
     games: state.games,
     liveJobsByAppid,
-    owned: ownedLoader.current(),
+    owned: ownedLibrary.current(),
   });
 }
 
@@ -603,7 +602,7 @@ const NOTICE_BUTTON_LABEL = {
 };
 
 function renderOwnedNotice() {
-  const owned = ownedLoader.current();
+  const owned = ownedLibrary.current();
   const notice = ownedNotice(owned);
   const { ownedNote, ownedText, ownedSettingsBtn, ownedReloadBtn } = els;
   // The nodes are built once per mount (buildSection) and only UPDATED
@@ -638,8 +637,8 @@ function noticeButton(action) {
   if (action === NOTICE_ACTION.RELOAD) {
     btn.setAttribute("aria-disabled", "false");
     btn.addEventListener("click", () => {
-      if (ownedLoader.current().loading) return; // a reload is already in flight
-      ownedLoader.load();
+      if (ownedLibrary.current().loading) return; // a reload is already in flight
+      ownedLibrary.load();
     });
   } else {
     btn.addEventListener("click", () => navigateTo("settings"));
@@ -1321,6 +1320,6 @@ export function renderLibrary() {
   fullRender();
   // WP WEB-FEAT-1: the one "view open" fetch of the stored SteamID64 and its
   // owned list. The other caller of load() is the Reload button.
-  ownedLoader.load();
+  ownedLibrary.load();
   return section;
 }

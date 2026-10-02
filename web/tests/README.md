@@ -2491,3 +2491,55 @@ validation removed.
 Final round: "Go to library" shows "Saving…" (aria-disabled, never `disabled`) while a save runs and restores label and aria state when the overlay stays open; an unexpected Look up error is logged with `console.error` (never rejects). Mutations killed: label, aria-disabled, `disabled` instead, aria restore, label restore, the log.
 
 Suite: **934 tests, 934 pass, 0 fail**.
+
+### WP WEB-FIX-4 — job titles from the owned list, failure hints
+
+- `job-failure.test.js` — `lib/job-failure.js`: the reason comes only from
+  vault-api's `[vault-api] Prefill failed (reason=...)` line, and only when
+  it is the LAST non-empty line (trailing blanks and CRLF tolerated), only
+  for a failed prefill job; SteamPrefill's login prompt text alone is no
+  reason. The one text exception, the public-IP hint: detected on
+  `reason=exit_code` plus the exact phrase "is resolving to a public IP"
+  only, never for other exit_code output, other reasons, near-miss wording
+  or SteamPrefill's other `LancacheNotFoundException` ("Unable to detect
+  Lancache server!", a heartbeat failure with any cause). Hint texts; `isNewestJobForApp` (prefill
+  jobs only). Drift guards against deploy/README.md: `LOGIN_COMMAND`
+  (backslash continuations joined) and the "Fix it (only needed with a
+  dedicated VAULT_CORE_BIND)" heading. Plus `lib/owned-library.js`'s
+  `appTitle` order, `fillMissingNames` and the refactored merge.
+- `downloads-owned-names.test.js` — `views/downloads.js` through fake-dom
+  and the real store, tests in order on a page-global owned list: no
+  relay call while every job has a vault name; the title order; a gated
+  relay proves the owned name (row title and Retry `aria-label`) is
+  painted by the owned-list subscription with no further `/v1/games`
+  call; exactly one owned-list load for
+  `/downloads` opened directly; the not_logged_in block (first, command,
+  folder wording, closed `<details>`, Retry with `aria-label="Retry
+  <title>"` POSTs `/v1/prefill`); the `<details>` open state survives a
+  full rebuild caused by another job (`fireToggle` THROWS when nothing
+  listens, so a missing handler cannot pass silently); Retry offline-gated
+  (WEB-FIX-2 style); no Retry on an older row when a newer prefill exists;
+  a plain exit_code failure unchanged; the public-IP block.
+- `downloads-owned-preloaded.test.js` — an already-loaded owned list names
+  the job and Downloads adds no relay call (separate file: page-global).
+- `owned-names-wiring.test.js` — source pins: notification panel and
+  detail sheet use the owned fallback; the Library uses the shared loader;
+  app.js hands it to the decision panel.
+- `decision-panel-wiring.test.js` gained the owned-name fallback case;
+  `css-mobile-overflow.test.js` the command-box wrap pin;
+  `demo-data-owned-library.test.js` pins that demo enqueue leaves the new
+  vault row unnamed, like the real API.
+
+Mutation evidence (each applied alone, the affected files run, then
+restored), all killed: owned-list subscription removed; toggle listener
+removed; rawOpen not applied on rebuild; Retry built without the offline
+gate; reason taken from any line; Retry on every row; GC jobs counted as
+newer; aria-label removed; old folder wording; public-IP detection off,
+without exit_code, marker broadened; README heading drift; login command
+drift; a block for every failure; round 3: the old regex matching the
+bare exception name; the Retry label not patched; the old newer-job line;
+the subprocess clause and the `up -d` step removed; no owned fallback; loading on every
+render; never loading; the games-known gate removed; `<details>` open by
+default; the fill adding rows; the merge mutating its input.
+
+Suite: **963 tests, 963 pass, 0 fail** (round 3 added assertions, no new tests).
