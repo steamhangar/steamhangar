@@ -77,9 +77,14 @@ test("the demo owned list overlaps the demo vault: 2 deduped vault games, 3 owne
   }
 });
 
-test("queuing an owned-only game (detail sheet path) keeps its Steam title on the new vault row", async () => {
+test("queuing an owned-only game (detail sheet path) creates a vault row with NO name, like the real API; the merge still titles it", async () => {
+  // WP WEB-FIX-4: the real enqueue inserts `apps (appid, status)` only.
+  await demoRequest("PUT", "/v1/steam/key", { body: { key: VALID_KEY } });
   await assert.rejects(() => demoRequest("GET", "/v1/games/3300100"), (err) => err.status === 404);
   await demoRequest("POST", "/v1/prefill", { body: { appids: [3300100] } });
   const vault = await demoRequest("GET", "/v1/games");
-  assert.equal(vault.find((g) => g.appid === 3300100).name, "Sable Undertow");
+  assert.equal(vault.find((g) => g.appid === 3300100).name, null);
+  const owned = await demoRequest("GET", "/v1/steam/owned-games", { params: { steamid: STEAMID } });
+  const merged = mergeOwnedLibrary(vault, owned.games);
+  assert.equal(merged.find((g) => g.appid === 3300100).name, "Sable Undertow", "the owned name fills the gap");
 });

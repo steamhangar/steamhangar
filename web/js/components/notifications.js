@@ -31,6 +31,8 @@ import { openClientsSheet } from "./clients-sheet.js";
 import { highlightJob } from "../views/downloads.js";
 import { openDetail } from "./game-detail-sheet.js";
 import { formatTimestamp } from "../lib/format.js";
+import { appTitle, ownedNamesByAppid } from "../lib/owned-library.js";
+import { ownedLibrary } from "../owned-singleton.js";
 import {
   metaFor,
   appendNotifications,
@@ -78,10 +80,13 @@ dialog.body.append(heading, intro, list, closeBtn);
 // diffGamesForNotifications). Reads the SAME store snapshot the games poll
 // keeps current, same pattern as views/downloads.js's `nameFor`.
 // ---------------------------------------------------------------------
+// WP WEB-FIX-4: vault name, then the owned-games list's name (an
+// owned-only game queued from its detail sheet has a vault row with no
+// name), then "App <id>" — lib/owned-library.js's appTitle.
 function gameNameFor(appid) {
   const games = store.snapshot("games") || [];
   const game = games.find((g) => g.appid === appid);
-  return (game && game.name) || `App ${appid}`;
+  return appTitle(appid, game && game.name, ownedNamesByAppid(ownedLibrary.current().games).get(appid));
 }
 
 function titleFor(entry) {

@@ -854,6 +854,25 @@ h4.sec[hidden]{ display:none; }
 .log p{ margin:0 0 6px; }
 .log .loading, .log .errmsg, .log .emptymsg{ color:var(--dim-2); font-style:italic; }
 .log .truncnote{ color:var(--dim-2); }
+/* WP WEB-FIX-4: the hint block at the top of a known failure's row
+   ("Steam login missing", "cannot find the cache"; views/downloads.js). Prose in the UI font, not the
+   log's mono/pre-wrap; the command wraps inside its own box (phone width,
+   WEB-FIX-3 rules) instead of pushing the row wider. */
+.log .failhint{
+  font-family:var(--ui); font-size:12.5px; line-height:1.5; color:var(--text);
+  white-space:normal; min-width:0;
+  margin:0 0 10px; padding:9px 0 9px 10px; border-left:2px solid var(--danger);
+}
+.log .failhint p{ margin:0 0 7px; }
+.log .failhint-title{ font-weight:700; }
+.log .failhint .cmd{
+  display:block; max-width:100%; min-width:0; box-sizing:border-box;
+  margin:0 0 7px; padding:7px 9px; border-radius:var(--r-s);
+  background:var(--raised); font-family:var(--mono); font-size:11.5px;
+  white-space:pre-wrap; overflow-wrap:anywhere; user-select:all;
+}
+.log .failhint .jobacts{ justify-content:flex-start; margin-top:4px; }
+.log .rawlog > summary{ cursor:pointer; font-family:var(--ui); font-size:12px; color:var(--dim); white-space:normal; margin-bottom:6px; }
 
 .tx-cancelled{ color:var(--dim-2); }
 

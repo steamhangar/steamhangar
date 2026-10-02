@@ -41,6 +41,7 @@ import { setConnectionLost } from "./connection-status.js";
 // WP WEB-FIX-5: the "Desktop site" hint, same DI-factory posture.
 import { createDesktopSiteHint, readBrowserEnv } from "./components/desktop-site-hint.js";
 import { store } from "./store-singleton.js";
+import { ownedLibrary } from "./owned-singleton.js";
 import { api, getStoredApiKey, isDemoMode } from "./api.js";
 import { openOnboarding, isOnboardingOpen } from "./onboarding.js";
 import { viewTitle } from "./lib/view-title.js";
@@ -123,6 +124,7 @@ createDecisionPanel({
       return null;
     }
   })(),
+  ownedNames: ownedLibrary,
 });
 createAuthRecovery({ store, openOnboarding, isOnboardingOpen, getStoredApiKey });
 createConnectionBanner({

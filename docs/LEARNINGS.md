@@ -850,6 +850,16 @@ These are not style preferences; each entry cost a review round to learn.
 - Pin race guarantees with a gated fake fetch: hold the response, act
   (double click, edit the input, press finish), then release. Fixed
   sleeps cannot show the order (WP WEB-FEAT-2).
+- A demo fixture that is nicer than the real API hides real bugs: demo
+  enqueue copied the owned title onto the new vault row, while the real
+  `POST /v1/prefill` inserts the app with name NULL, so "App N" only
+  showed on the live server. Demo shortcuts must mirror the API's actual
+  data shape (WP WEB-FIX-4).
+- Parsing a third-party tool's output for a hint: match the narrowest
+  phrase that names the cause, not the exception type. SteamPrefill's
+  `LancacheNotFoundException` covers both "resolving to a public IP" and
+  "Unable to detect Lancache server!", and only the first one justifies
+  a DNS hint (WP WEB-FIX-4).
 - Reading `window.localStorage` itself throws (SecurityError) when site
   data is blocked, not only `getItem`. A bare read in an argument list at
   module top level blanks the whole app; read it through a guarded
