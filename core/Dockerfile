@@ -175,7 +175,12 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     VAULT_UPSTREAM_RATE= \
     # HH:MM-HH:MM (VAULT_SCHEDULE_WINDOW's grammar): full speed inside, the
     # cap outside, in the container's local time (TZ). Empty = cap always.
-    VAULT_UPSTREAM_RATE_WINDOW=
+    VAULT_UPSTREAM_RATE_WINDOW= \
+    # WP CORE-FEAT-1b (ADR-0017): space-separated Steam CDN edge host names
+    # that get a keepalive pool (at most 4). DEFAULT EMPTY = no pool; the
+    # hook /docker-entrypoint.d/28-vault-upstream-pool.sh treats unset and
+    # empty alike (core/README.md "Upstream keepalive pool").
+    VAULT_UPSTREAM_POOL_HOSTS=
 
 WORKDIR /vault
 

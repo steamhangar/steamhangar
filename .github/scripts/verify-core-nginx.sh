@@ -77,6 +77,26 @@ sh "$core_dir/docker/check-config-drift.sh"
 echo "--- core/tests/test-upstream-pool-hook.sh ---"
 bash "$core_dir/tests/test-upstream-pool-hook.sh"
 
+# --- 0c. ADR-0017 decision 5A: the upstream rate cap stays in @miss --------
+# The keepalive pool (WP CORE-FEAT-1b) ships with the cap untouched, and the
+# ADR asks for a CI assertion that `proxy_limit_rate $vault_upstream_rate;`
+# is still inside location @miss in BOTH config files. The drift guard
+# (step 0, 2b) pins the same line and 2d pins the pool include's place
+# directly after the rate include -- neither is repeated here beyond this
+# one named assertion, docker-free, so a moved cap fails under the ADR's
+# own name.
+echo "--- ADR-0017 decision 5A: proxy_limit_rate \$vault_upstream_rate stays in @miss ---"
+for f in "$core_dir/nginx/nginx.conf" "$core_dir/docker/nginx.conf.template"; do
+    n=$(grep -v '^[[:space:]]*#' "$f" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]][[:space:]]*/ /g' \
+        | awk '/^location @miss [{]$/ { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }' \
+        | grep -c -x -F "proxy_limit_rate \$vault_upstream_rate;" || true)
+    if [ "$n" != "1" ]; then
+        echo "FAIL (ADR-0017 decision 5A): 'proxy_limit_rate \$vault_upstream_rate;' found $n times inside location @miss of $f, expected exactly 1" >&2
+        exit 1
+    fi
+    echo "decision 5A OK: proxy_limit_rate \$vault_upstream_rate; exactly once in @miss of ${f#"$repo_root"/}"
+done
+
 # --- S2: derive the pinned image ref from core/Dockerfile itself -----------
 # Round 1 duplicated the tag+digest as a literal in this script -- a bump to
 # core/Dockerfile's FROM line would silently leave this check validating a
@@ -113,7 +133,7 @@ done
 echo "docker pull $IMAGE"
 docker pull "$IMAGE"
 
-# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window]
+# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window] [VAULT_UPSTREAM_POOL_HOSTS]
 #
 # A non-empty 4th argument additionally STARTS the rendered nginx and probes
 # the location /depot/ request guards over loopback (once is enough; the
@@ -132,16 +152,29 @@ docker pull "$IMAGE"
 # "window" (800k outside 22:30-06:15, a window that wraps midnight and has
 # minute boundaries on both edges). The bucket/window assertions below are
 # written for exactly those two inputs.
+#
+# Arg 8 (WP CORE-FEAT-1b2, ADR-0017): the upstream keepalive pool list,
+# passed as VAULT_UPSTREAM_POOL_HOSTS the way args 5/6 pass the rate env.
+# Every scenario asserts the rendered pool include against the number of
+# hosts in that list (0 for the scenarios that do not set it: the empty
+# render, still included). A non-empty list runs with --network none, see
+# the pool block inside the container script.
 render_and_test() {
     local label="$1" event_log="$2" expected_directives="$3"
-    local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}"
+    local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}" pool="${8:-}"
+    local pool_n
+    pool_n=$(printf '%s' "$pool" | wc -w | tr -d ' ')
     # SEC-FIX-1: the guard-probe run gets no network at all. Its Host-allowlist
     # probes count any resolver or upstream attempt as a failure, and without
     # a network such an attempt can only show up locally (error log, access
     # log), never as a real DNS query or connection from the CI runner.
+    # The pool scenarios run without a network too: `server <host> resolve`
+    # is registered with no_resolve set, so `nginx -t` must parse a group
+    # without looking its name up (ADR-0017 (d)); a network here would hide
+    # a regression of that property.
     local -a net_args=()
-    [ -n "${4:-}" ] && net_args=(--network none)
-    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window') ---"
+    { [ -n "${4:-}" ] || [ -n "$pool" ]; } && net_args=(--network none)
+    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window', VAULT_UPSTREAM_POOL_HOSTS='$pool') ---"
     docker run --rm "${net_args[@]}" \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
         -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
@@ -154,6 +187,8 @@ render_and_test() {
         -e VAULT_UPSTREAM_RATE="$rate" \
         -e VAULT_UPSTREAM_RATE_WINDOW="$window" \
         -e RATE_MODE="$rate_mode" \
+        -e VAULT_UPSTREAM_POOL_HOSTS="$pool" \
+        -e EXPECTED_POOL_GROUPS="$pool_n" \
         --entrypoint sh \
         "$IMAGE" -c '
             set -eu
@@ -337,6 +372,53 @@ render_and_test() {
                     *) echo "FAIL: unknown RATE_MODE $RATE_MODE"; status=1 ;;
                 esac
                 echo "upstream rate include ($RATE_MODE): $buckets bucket line(s), $patterns time pattern(s)"
+            fi
+
+            # --- WP CORE-FEAT-1b2 (ADR-0017): the upstream keepalive pool --
+            # The include is wired in the RENDERED config (its place directly
+            # after the rate include is pinned in both source files by the
+            # drift guard, step 2d -- not repeated here), and
+            # 28-vault-upstream-pool.sh rendered the group file for this
+            # scenario'"'"'s VAULT_UPSTREAM_POOL_HOSTS: N upstream blocks, N
+            # `server <host> resolve max_fails=0;`, N `keepalive 8;`, N
+            # `keepalive_timeout 50s;`, N zone lines of which exactly one
+            # carries the size (none for N = 0), and no resolver directive
+            # (the groups inherit the http-level one). nginx -t has already
+            # accepted this file via the include -- and did so with
+            # --network none for N > 0, because `server ... resolve` sets
+            # no_resolve at parse time (ADR-0017 (d)): the names are only
+            # ever looked up at run time through the http-level resolver.
+            # The rendered file is printed so the gate log shows the groups.
+            n=$(grep -v "^[[:space:]]*#" "$conf" | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]][[:space:]]*/ /g" | grep -c -x -F "include vault-upstream-pool.conf;" || true)
+            if [ "$n" != "1" ]; then
+                echo "FAIL: expected exactly 1 \"include vault-upstream-pool.conf;\" in the rendered $conf, found $n"
+                status=1
+            fi
+            pc=/etc/nginx/vault-upstream-pool.conf
+            if [ ! -f "$pc" ]; then
+                echo "FAIL: $pc was never rendered"
+                status=1
+            else
+                echo "--- rendered $pc (VAULT_UPSTREAM_POOL_HOSTS='"'"'$VAULT_UPSTREAM_POOL_HOSTS'"'"') ---"
+                cat "$pc"
+                pool_expect() {
+                    c=$(grep -c -- "$2" "$pc" || true)
+                    if [ "$c" != "$1" ]; then echo "FAIL (pool): expected $1 $3 line(s) in $pc, found $c"; status=1; fi
+                }
+                pool_expect "$EXPECTED_POOL_GROUPS" "^upstream [a-z0-9.-]* {\$"                      "upstream block"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    server [a-z0-9.-]* resolve max_fails=0;\$" "server <host> resolve max_fails=0;"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    keepalive 8;\$"                            "keepalive 8;"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    keepalive_timeout 50s;\$"                  "keepalive_timeout 50s;"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    zone vault_edges"                          "zone vault_edges"
+                if [ "$EXPECTED_POOL_GROUPS" = "0" ]; then sized=0; else sized=1; fi
+                pool_expect "$sized" "^    zone vault_edges 256k;\$" "sized zone (the shared zone is sized exactly once)"
+                # Anchored to the directive, not the bare word, so a future
+                # header comment in the render cannot trip it (LEARNINGS).
+                if grep -q "^[[:space:]]*resolver[[:space:]]" "$pc"; then
+                    echo "FAIL (pool): a resolver directive inside $pc -- groups must inherit the http-level one (ADR-0017 (c))"
+                    status=1
+                fi
+                echo "upstream pool include: $(grep -c "^upstream " "$pc" || true) group(s), expected $EXPECTED_POOL_GROUPS"
             fi
 
             # --- Pre-freeze review S1/S2/P3/N5: request guards, LIVE -------
@@ -795,6 +877,89 @@ docker run --rm \
         exit $status
     '
 
+# =============================================================================
+# WP CORE-FEAT-1b2: upstream keepalive pool renders and refusals (ADR-0017)
+#
+# Step 0b proved the hook's renders and refusals docker-free. This section
+# proves that nginx itself, the pinned image, ACCEPTS a rendered pool
+# include through the real entrypoint chain (`server <host> resolve
+# max_fails=0` inside a shared `zone`, `keepalive`, `keepalive_timeout`),
+# for 1 host and for the 4-host ceiling, and that the refusals stop the
+# real boot with the hook's FATAL. All runs are --network none: a
+# `server ... resolve` entry is parsed with no_resolve (ADR-0017 (d)), so
+# `nginx -t` on a pooled group needs no DNS and no network; the 4-host
+# scenario also carries the rate cap (decision 5A: the cap and the pool
+# render into the same config). The per-scenario assertions on the rendered
+# include live inside render_and_test (the pool block) and run for every
+# scenario above as well, where they pin the empty render.
+# =============================================================================
+
+# Docker-free first: core/Dockerfile declares the variable in its ENV block
+# next to VAULT_UPSTREAM_RATE (the hook treats unset and empty alike, so
+# this is symmetry and documentation, pinned so it cannot drift away).
+grep -qE '^[[:space:]]*VAULT_UPSTREAM_POOL_HOSTS=' "$dockerfile" || {
+    echo "core/Dockerfile no longer declares VAULT_UPSTREAM_POOL_HOSTS= in its ENV block (WP CORE-FEAT-1b2)" >&2
+    exit 1
+}
+
+render_and_test "upstream keepalive pool, 1 edge" "" 0 "" "" "" off \
+    "cache1-fra2.steamcontent.com"
+render_and_test "upstream keepalive pool, 4 edges (the ceiling), with the cap ON" "" 0 "" "800k" "" cap \
+    "cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com dist-fra1.discovery.steamserver.net cache1-ams1.steamcontent.com"
+
+# Each bad list must abort the REAL entrypoint chain, and the abort must come
+# from 28-vault-upstream-pool.sh itself (a failure anywhere else would pass
+# for the wrong reason). One container, one entrypoint run per case, like
+# the TH-1a rate cases; --network none, a refused boot needs none either.
+# Cases: 5 hosts (above the 32-idle ceiling), a host outside the two
+# allowlist families, a port, uppercase, a duplicate.
+echo "--- must refuse: invalid VAULT_UPSTREAM_POOL_HOSTS ---"
+pool_cases='cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com cache3-fra2.steamcontent.com cache4-fra2.steamcontent.com dist-fra1.discovery.steamserver.net
+cache1.example.com
+cache1-fra2.steamcontent.com:80
+Cache1-fra2.steamcontent.com
+cache1-fra2.steamcontent.com cache1-fra2.steamcontent.com'
+docker run --rm --network none \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    -e VAULT_EVENT_LOG="" \
+    -e POOL_CASES="$pool_cases" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+        chown -R nginx:nginx /vault
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+            cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+            chmod 0755 "/docker-entrypoint.d/$h"
+        done
+        status=0
+        n=0
+        printf "%s\n" "$POOL_CASES" > /tmp/cases
+        while IFS= read -r hosts; do
+            n=$((n + 1))
+            rc=0
+            out=$(VAULT_UPSTREAM_POOL_HOSTS="$hosts" \
+                  /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf 2>&1) || rc=$?
+            if [ "$rc" = "0" ]; then
+                echo "FAIL: VAULT_UPSTREAM_POOL_HOSTS=\"$hosts\" was accepted (exit 0)"
+                status=1
+            elif ! printf "%s\n" "$out" | grep -qF "28-vault-upstream-pool.sh: FATAL"; then
+                printf "%s\n" "$out"
+                echo "FAIL: VAULT_UPSTREAM_POOL_HOSTS=\"$hosts\" failed (exit $rc), but not in 28-vault-upstream-pool.sh"
+                status=1
+            else
+                echo "refused (exit $rc): hosts=\"$hosts\": $(printf "%s\n" "$out" | grep -F "28-vault-upstream-pool.sh: FATAL" | head -n1 | cut -c1-110)"
+            fi
+        done < /tmp/cases
+        [ "$n" = "5" ] || { echo "FAIL: ran $n pool cases, expected 5"; status=1; }
+        exit $status
+    '
+
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \
      "the event log is owned 101:101; the /depot/ request guards answer live;" \
@@ -803,4 +968,6 @@ echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "four bad VAULT_EVENT_LOG values and two planted symlinks are refused;" \
      "the preflight refuses the stock nginx.conf; the upstream cap renders in" \
      "all three shapes, refuses invalid rates/windows, is re-checked by the" \
-     "preflight and evaluates to the expected value live."
+     "preflight and evaluates to the expected value live; the upstream" \
+     "keepalive pool renders for 1 and 4 edges pass nginx -t offline and" \
+     "five bad VAULT_UPSTREAM_POOL_HOSTS lists are refused by the hook."

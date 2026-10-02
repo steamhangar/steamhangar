@@ -40,9 +40,11 @@
 #      static native include identical (comments aside) to the script's
 #      cap-off render -- so "native = container with no cap configured"
 #      stays true by machine check
-#   2c. pin the WP CORE-FIX-2 upstream retry policy inside location @miss in
-#      both files: no retry on `error`, proxy_next_upstream_tries 2, and no
-#      second proxy_next_upstream* line anywhere else
+#   2c. pin the upstream retry policy inside location @miss in both files
+#      (WP CORE-FIX-2, `error` restored by WP CORE-FEAT-1b2 per ADR-0017
+#      decision 6A): the exact `proxy_next_upstream error timeout http_502
+#      http_503 http_504;` line, proxy_next_upstream_tries 2, and no second
+#      proxy_next_upstream* line anywhere else
 #   2d. pin the WP CORE-FEAT-1b upstream keepalive pool (ADR-0017), the same
 #      include contract as 2b: `include vault-upstream-pool.conf;` exactly
 #      once in each file and directly after the rate include; the static
@@ -229,31 +231,38 @@ else
     fi
 fi
 
-# --- 2c. WP CORE-FIX-2: the upstream retry policy -------------------------
+# --- 2c. WP CORE-FIX-2 / CORE-FEAT-1b2: the upstream retry policy ---------
 # Identical in both files, so step 3's diff would also pass if BOTH drifted
-# back to retrying on `error` -- hence explicit pins. A connect failure
-# behind a full carrier-grade NAT ("113: Host is unreachable") is an
-# `error`; retrying it multiplies SYNs against the NAT that is already out
-# of mappings. At most one retry (tries 2), and only on timeout / 50x.
+# -- hence explicit pins on the exact lines. At most one retry (tries 2),
+# and none when the name resolves to a single address: nginx zeroes
+# `tries` for a single-peer group (ngx_http_upstream_round_robin.c), so
+# tries 2 only bites with two or more A records.
+# `error` IS in the list (ADR-0017 decision 6A, WP CORE-FEAT-1b2): with the
+# keepalive pool (2d) a pooled connection the edge closed while idle fails
+# as an `error` on its next use, and nginx retries a failure on a cached
+# connection only if `error` is listed (CHANGES 1.9.13); that retry does
+# not consume a try (ngx_http_upstream_next: tries++ for the cached case,
+# 0 -> 1 even for a single peer), so the stale pooled connection keeps its
+# one free retry while a real connect failure behind a full carrier-grade
+# NAT ("113: Host is unreachable") still gets at most one retry, as
+# CORE-FIX-2 (stage 1) set it. Stage 1 had removed `error` while every
+# attempt was a NEW connection; the exact-line pin keeps the list from
+# growing or shrinking either way.
 for f in "$work/native.norm" "$work/template.norm"; do
     miss_block "$f" > "$work/miss.block"
     for want in "proxy_connect_timeout 3s;" \
-                "proxy_next_upstream timeout http_502 http_503 http_504;" \
+                "proxy_next_upstream error timeout http_502 http_503 http_504;" \
                 "proxy_next_upstream_tries 2;" \
                 "proxy_next_upstream_timeout 6s;"; do
         n=$(grep -F -c -x -- "$want" "$work/miss.block" || true)
         if [ "$n" != "1" ]; then
-            echo "check-config-drift: FAIL: '$want' must appear exactly once inside location @miss in $f (found $n) -- CORE-FIX-2 retry policy" >&2
+            echo "check-config-drift: FAIL: '$want' must appear exactly once inside location @miss in $f (found $n) -- CORE-FIX-2 / CORE-FEAT-1b2 retry policy (ADR-0017 decision 6A)" >&2
             fail=1
         fi
     done
     n=$(grep -E -c '^proxy_next_upstream(_tries)? ' "$f" || true)
     if [ "$n" != "2" ]; then
         echo "check-config-drift: FAIL: expected exactly one proxy_next_upstream and one proxy_next_upstream_tries line in $f, found $n lines -- a second one elsewhere would override or add retries (CORE-FIX-2)" >&2
-        fail=1
-    fi
-    if grep -E -q '^proxy_next_upstream( | .* )error( |;)' "$f"; then
-        echo "check-config-drift: FAIL: proxy_next_upstream retries on 'error' in $f -- each retry is a new connection against a carrier-grade NAT that already answers 113 Host is unreachable (CORE-FIX-2)" >&2
         fail=1
     fi
 done
@@ -332,7 +341,10 @@ else
         fi
     fi
     for f in "$NATIVE_POOL" "$work/pool-two.conf"; do
-        if [ -f "$f" ] && grep -qw 'resolver' "$f"; then
+        # Anchored to the DIRECTIVE (LEARNINGS: a guard grepping a bare name
+        # also matches comments), so a future header comment cannot trip it;
+        # the hook's own self-check stays stricter (the word anywhere).
+        if [ -f "$f" ] && grep -q '^[[:space:]]*resolver[[:space:]]' "$f"; then
             echo "check-config-drift: FAIL: a 'resolver' directive in $f -- pool groups must inherit the http-level resolver (ADR-0017 (c), delta 4)" >&2
             fail=1
         fi

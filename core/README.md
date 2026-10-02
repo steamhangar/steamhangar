@@ -37,7 +37,7 @@ repo root `.gitignore`.
 | 1 | LanCache heartbeat contract | `location = /lancache-heartbeat` (bottom of the `server` block) |
 | 2 | Strip client `Range`/`Accept-Encoding`/`If-Range` upstream + store only 200 (incl. retry lists) | `proxy_set_header Range/Accept-Encoding/If-Range ""` in `@miss`; `map $upstream_status $vault_store_path` (`200` or `"~, 200$"` -> real path, else empty) feeding `proxy_store $vault_store_path` |
 | 3 | `?nocache=1` bypass | `map $arg_nocache $vault_try_target` (forces `try_files` onto a guaranteed-missing path) used by `location /depot/` |
-| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver 1.1.1.1 ipv6=off valid=30s`; `map $host $vault_upstream_host` (full-match Steam hostnames, else empty) + `map $vault_upstream_host $vault_host_allowed`; `proxy_connect_timeout 3s`; `proxy_next_upstream timeout http_502 http_503 http_504` with `proxy_next_upstream_tries 2` (no retry on `error`, WP CORE-FIX-2); the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
+| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver 1.1.1.1 ipv6=off valid=30s`; `map $host $vault_upstream_host` (full-match Steam hostnames, else empty) + `map $vault_upstream_host $vault_host_allowed`; `proxy_connect_timeout 3s`; `proxy_next_upstream error timeout http_502 http_503 http_504` with `proxy_next_upstream_tries 2` (at most one retry, none when the name resolves to a single address: nginx zeroes `tries` for a single-peer group; `error` dropped by WP CORE-FIX-2 and restored by WP CORE-FEAT-1b2 for the keepalive pool, ADR-0017 decision 6A, whose stale-pooled-connection case keeps its one free retry); the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
 
 (`Accept-Encoding`/`If-Range` stripping and the `"~, 200$"` retry-list
 match were added in a review-fix pass after the initial WP 1.1 submission
@@ -274,6 +274,17 @@ line requires to appear right where `\S+` stopped. The whole line fails to
 match and is **silently skipped** by the analyzer -- not misparsed with a
 wrong value, just dropped as if it never happened.
 
+**Wider since WP CORE-FEAT-1b2 (ADR-0017).** The `vault` log format now
+carries two fields appended after `cache=...` (`upstream_addr="..."` and
+`upstream_connect_time=...`, see "Upstream keepalive pool" below). The
+existing fields keep their names and order, but two PoC analyzers anchor
+their pattern at end-of-line (`cache=(?<cache>\S+)$`):
+`poc/steam-client-test/analyze.ps1` and `poc/steamprefill/verify.ps1`.
+Against a log written by the current format each matches **no line at
+all**, retried or not. The PoC fixtures in `poc/` still use the 7-field
+lines and keep passing; only a run of those analyzers against a current
+vault-core log is affected.
+
 This is a known, currently-unfixed gap, not something this work package
 resolves: `analyze.ps1` belongs to `poc/` (frozen as Phase-0 evidence) and
 is out of scope here. It matters going forward because **this gap gets
@@ -379,34 +390,52 @@ on error pages).
 ## `proxy_next_upstream` caveat (honesty note)
 
 `nginx.conf` sets `proxy_connect_timeout 3s` and
-`proxy_next_upstream timeout http_502 http_503 http_504` with a
+`proxy_next_upstream error timeout http_502 http_503 http_504` with a
 bounded `proxy_next_upstream_tries 2` / `proxy_next_upstream_timeout 6s`.
 This directly addresses the ~42s stall Phase 0 observed from a dead
 upstream IP (`poc/linux-client-test` findings) for the *connect* phase.
 
-**No retry on `error` (WP CORE-FIX-2, 2026-10-02).** Until then the list
-began with `error` and allowed 3 attempts (up to 2 retries). A production rollout behind a
-DS-Lite line showed why that hurts: vault-core opens a new upstream TCP
-connection for every miss (variable `proxy_pass`, no keepalive pool), the
-carrier-grade NAT ran out of port mappings and answered every new SYN with
-ICMP host-unreachable at once (RFC 6888 REQ-11), and nginx logged 57845
-`connect() failed (113: Host is unreachable)` 502s against 4029 200s in
-about two minutes. Each of those is an `error`, and each retry was one more
-SYN against a NAT that was already full; SteamPrefill re-requests failed
-chunks itself on top. Now a connect error goes straight back to the client
-(which retries anyway), a connect *timeout* still gets one retry, and so
-does an upstream 502/503/504. On Linux, with `proxy_connect_timeout 3s`, a
+**One retry, and why `error` left and came back (WP CORE-FIX-2, then WP
+CORE-FEAT-1b2, ADR-0017 decision 6A).** Before 2026-10-02 the list began
+with `error` and allowed 3 attempts (up to 2 retries). A production rollout
+behind a DS-Lite line showed why that hurt: vault-core opened a new
+upstream TCP connection for every miss (variable `proxy_pass`, no keepalive
+pool yet), the carrier-grade NAT ran out of port mappings and answered
+every new SYN with ICMP host-unreachable at once (RFC 6888 REQ-11), and
+nginx logged 57845 `connect() failed (113: Host is unreachable)` 502s
+against 4029 200s in about two minutes. Each of those is an `error`, and
+each retry was one more SYN against a NAT that was already full;
+SteamPrefill re-requests failed chunks itself on top. Stage 1 (WP
+CORE-FIX-2) therefore cut the list to `timeout http_502 http_503 http_504`
+with `tries 2`, and capped SteamPrefill on the vault-api side
+(`--max-threads`, `VAULT_PREFILL_MAX_THREADS`, default 8, `api/README.md`).
+
+Stage 2 is the upstream keepalive pool (section "Upstream keepalive pool"
+below), and it changes what an `error` means. A pooled connection the edge
+closed while it sat idle surfaces as an `error` on its next use, and since
+nginx 1.9.13 (`CHANGES`) a failure on a *cached* connection is retried only
+if `error` is in `proxy_next_upstream`. That retry does not consume a try:
+`ngx_http_upstream_next` does `tries++` for the cached case before it
+applies the retry mask, so a stale pooled connection keeps its one free
+retry, transparently, while a real connect failure -- a SYN the CGN
+refuses -- gets at most one retry under `tries 2`, and none when the name
+resolves to a single address: nginx zeroes `tries` for a single-peer group
+(`ngx_http_upstream_round_robin.c`, the `single` branch of
+`free_round_robin_peer`), so `tries 2` only bites with two or more A
+records; the stale-cached path still gets its `tries++` (0 -> 1). So WP
+CORE-FEAT-1b2 put `error` back next to stage 1's list and kept
+`tries 2`; without it, the first request after an idle edge-side close
+would be a 502 per pooled group. The pool's `keepalive_timeout 50s` (below
+the edges' measured >= 60 s) makes that case rare in the first place.
+
+What did not change: a connect *timeout* still gets one retry, and so does
+an upstream 502/503/504. On Linux, with `proxy_connect_timeout 3s`, a
 black-holed IP is a `timeout` (3s per attempt, so it cannot spin). The
 Phase 0 dead-IP stalls on Windows were logged as 502 `error`s instead,
-because the OS connect timeout of about 21s fired before nginx's; that is
-why the old list needed `error` there and does not here. The trade-off:
-when a name has several A records, an edge that answers with RST or
-ICMP unreachable no longer fails over to the next address inside nginx;
-the client's retry does that instead. The other half of the fix is on the
-vault-api side: SteamPrefill runs with `--max-threads`
-(`VAULT_PREFILL_MAX_THREADS`, default 8, `api/README.md`). Pinned by
-`core/docker/check-config-drift.sh` step 2c. Pooling upstream keepalive
-connections (the root cause) is a separate, later decision.
+because the OS connect timeout of about 21s fired before nginx's; that does
+not apply in the container. Pinned by `core/docker/check-config-drift.sh`
+step 2c as the exact line, in `@miss`, in both config files, with no second
+`proxy_next_upstream*` line anywhere else.
 
 What this work package did **not** independently re-verify: whether
 `proxy_next_upstream` actually retries against a *second* IP address when
@@ -980,9 +1009,14 @@ first.
   download or not. A pooled idle connection also holds a CGNAT mapping for
   up to `keepalive_timeout`; the ceiling bounds that.
 - A connection the edge closed while idle in the pool surfaces as an
-  `error` on its next use; whether `@miss` retries that transparently is
-  decided by `proxy_next_upstream` (ADR-0017 decision 6A puts `error` back
-  in WP CORE-FEAT-1b2; until then such a request gets a 502).
+  `error` on its next use. `@miss` lists `error` in `proxy_next_upstream`
+  (WP CORE-FEAT-1b2, ADR-0017 decision 6A), so nginx retries that request
+  without consuming a try -- the retry may itself land on another idle
+  cached connection of the same group (the balancer picks the peer, then
+  the cache is searched), and each stale one costs one more free retry,
+  bounded by the group's idle count (8); a real connect failure still gets
+  at most one retry (none for a single-address name). Details and the
+  nginx-source reasoning: "`proxy_next_upstream` caveat" above.
 - Not addressed: the Steam client's own concurrency and edge selection,
   CM/WebSocket traffic, `vault-dns`, IPv6 egress.
 
@@ -990,6 +1024,32 @@ first.
 to the list needs a vault-core recreate (ADR-0017 decision 4B, the same
 contract as `VAULT_UPSTREAM_RATE`). The zone's `256k` is sized for the
 4-group ceiling (the per-peer cost is undocumented upstream).
+
+**Seeing reuse in the access log (WP CORE-FEAT-1b2).** The `vault` log
+format (every line on `docker logs vault-core`) ends with two fields
+appended for this feature, after `cache=...` and key=value like the rest:
+
+```text
+... request_time=0.329 cache=MISS upstream_addr="155.133.248.17:80" upstream_connect_time=0.000
+```
+
+- `upstream_addr`: the peer that answered (`ip:port`), `"-"` when no
+  upstream was contacted (a HIT, a 403 from the Host allowlist, `/health`).
+- `upstream_connect_time`: seconds spent establishing the upstream
+  connection. A **reused** pooled connection logs `0.000` or close to it
+  (nginx stamps the connect time in the same event-loop turn that returned
+  the cached connection; ADR-0017 "Prove before building" item 4 -- a
+  source reading, not yet measured: WP CORE-FEAT-1c's fake edge and the
+  first production run with a pool are what confirm the printed value).
+  A fresh connection logs its TCP handshake time instead. A pooled MISS
+  therefore reads `cache=MISS ... upstream_connect_time=0.000` with the
+  same `upstream_addr` as the MISS before it; an unlisted edge keeps
+  logging a handshake time on every MISS.
+
+Both fields become comma-separated lists on a `proxy_next_upstream` retry,
+like `upstream_status` (`docs/LEARNINGS.md`). The existing fields keep
+their names and order (append only); an analyzer that anchors at
+end-of-line must learn the two fields ("Known gap" above).
 
 **Native rig.** `core/nginx/nginx.conf` carries the identical
 `include vault-upstream-pool.conf;` line; its
@@ -1003,10 +1063,18 @@ by `verify-core-nginx.sh` step 0b) renders unset/empty/1/2/4-host lists
 through the real hook, compares the two-host render against a golden file,
 and asserts every refusal listed above (one case per rule, including the
 RFC 1035 length limits with their 63/253 boundaries accepted) plus the
-glob, whitespace, output-path and unwritable-path behaviour. `nginx -t` on a rendered pool include inside the
-pinned image, `error` back in `proxy_next_upstream` and the upstream log
-fields are WP CORE-FEAT-1b2; the fake-edge connection count is WP
-CORE-FEAT-1c. The operator side -- the shipped seed list in
+glob, whitespace, output-path and unwritable-path behaviour.
+`.github/scripts/verify-core-nginx.sh` (WP CORE-FEAT-1b2) then runs
+`nginx -t` in the pinned image through the real entrypoint chain on a
+1-edge and a 4-edge (ceiling, with the rate cap on) render -- offline, with
+`--network none`, because `server ... resolve` is parsed without a lookup
+-- prints the rendered include, asserts its shape (N blocks, N
+`resolve max_fails=0`, N `keepalive 8` / `keepalive_timeout 50s`, one sized
+zone, no resolver) in every scenario including the empty render, pins
+`proxy_limit_rate $vault_upstream_rate;` in `@miss` of both config files
+by name (ADR-0017 decision 5A), and proves that five bad lists (5 hosts, a
+foreign family, a port, uppercase, a duplicate) stop the real boot with the
+hook's FATAL. The fake-edge connection count is WP CORE-FEAT-1c. The operator side -- the shipped seed list in
 `deploy/.env.example`, the compose forwarding and how to find your edges in
 the event log -- is documented in `deploy/README.md` (WP CORE-FEAT-1d).
 
