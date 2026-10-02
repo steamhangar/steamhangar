@@ -103,6 +103,8 @@ import { confirmedCurrentWording, CONFIRMED_CURRENT_WORDING } from "../lib/detai
 import { GC_STATE, GC_EVENT, idleGcState, reduceGcFlow } from "../lib/gc-flow.js";
 import { buildDetailStructuralKey } from "../lib/detail-render-plan.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
+import { appTitle, fillMissingNames, ownedNamesByAppid } from "../lib/owned-library.js";
+import { ownedLibrary } from "../owned-singleton.js";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
 const GC_POLL_INTERVAL_MS = 1200;
@@ -118,7 +120,12 @@ function activeJobAppidsFrom(jobs) {
   return new Set(jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).map((j) => j.appid));
 }
 function namesFor(appids, gamesByAppid) {
-  return appids.map((id) => gamesByAppid.get(id)?.name || `App ${id}`).join(", ");
+  return appids.map((id) => appTitle(id, gamesByAppid.get(id)?.name)).join(", ");
+}
+/** WP WEB-FIX-4: vault rows by appid with names filled from the owned
+ * list (adds no rows, see lib/owned-library.js's fillMissingNames). */
+function namedGamesByAppid() {
+  return new Map(fillMissingNames(state.games, ownedLibrary.current().games).map((g) => [g.appid, g]));
 }
 
 // ---------------------------------------------------------------------
@@ -230,7 +237,7 @@ function openDeleteConfirm() {
   // alertdialog convention of not defaulting focus onto the dangerous action.
   dNo.focus();
 
-  const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
+  const gamesByAppid = namedGamesByAppid();
   const activeJobAppids = activeJobAppidsFrom(state.jobs);
   const plan = buildMultiPlan([state.appid], {
     details: [state.detail],
@@ -389,7 +396,9 @@ let gcConfirmInvokerEl = null;
 export function openDetail(appid, name) {
   generation++;
   state.appid = appid;
-  state.name = name || null;
+  // WP WEB-FIX-4: an opener without a name (a notification for a job whose
+  // vault row has none) still gets the owned list's title.
+  state.name = name || ownedNamesByAppid(ownedLibrary.current().games).get(appid) || null;
   state.detail = null;
   state.mapping = [];
   state.notTracked = false;
@@ -457,7 +466,7 @@ function currentGameLike() {
 
 function currentDepotPresentations() {
   if (!state.detail || !state.detail.depots.length) return [];
-  const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
+  const gamesByAppid = namedGamesByAppid();
   const activeJobAppids = activeJobAppidsFrom(state.jobs);
   const plan = buildMultiPlan([state.appid], {
     details: [state.detail],

@@ -27,6 +27,25 @@
  * `stop_request` is the ONLY volatile field the real API has here — no
  * live byte progress exists to patch, unlike the mockup.
  *
+ * **Titles (WP WEB-FIX-4).** A job carries only an appid, and vault-api
+ * has no name for an app it never resolved (an owned-only game queued from
+ * its detail sheet gets an `apps` row with `name = NULL`). Every title here
+ * is `appTitle`'s order: vault name, then the owned-games list's name
+ * (`owned-singleton.js`), then "App <id>". This view never polls the relay:
+ * it uses the list the Library already loaded, and only when a job on
+ * screen has no vault name AND no load was ever started in this page's
+ * life (`/downloads` opened directly) does it start that one load
+ * (`ownedLibrary.loadIfNeverLoaded`).
+ *
+ * **Known failures (WP WEB-FIX-4).** A failed prefill whose log ends in
+ * vault-api's `reason=not_logged_in` line, or an `exit_code` failure whose
+ * output carries SteamPrefill's public-IP cache-detection error
+ * (`lib/job-failure.js`), shows a short how-to and a Retry button at the
+ * top of its expanded history row; the raw SteamPrefill output moves into a
+ * closed `<details>`. Every other failure shows its output as before:
+ * there the output IS the diagnosis, and no summary exists that could
+ * replace it.
+ *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
  * with the job highlighted" navigation target lands here without any
@@ -50,6 +69,9 @@ import { formatTimestamp } from "../lib/format.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
+import { appTitle, fillMissingNames, hasText } from "../lib/owned-library.js";
+import { ownedLibrary } from "../owned-singleton.js";
+import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp } from "../lib/job-failure.js";
 
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
@@ -89,6 +111,10 @@ const CHEVRON_SVG =
 const state = {
   jobs: store.snapshot("jobs") || [],
   games: store.snapshot("games") || [],
+  // WP WEB-FIX-4: false until a real `GET /v1/games` answer is in. Before
+  // that every job "lacks" a vault name, and that must not start the
+  // owned-list load.
+  gamesKnown: Array.isArray(store.snapshot("games")),
 };
 
 /** jobId -> {expanded, loading, error, excerpt}. Persists across re-mounts
@@ -100,7 +126,9 @@ const state = {
 const excerptState = new Map();
 function getExcerptState(jobId) {
   if (!excerptState.has(jobId)) {
-    excerptState.set(jobId, { expanded: false, loading: false, error: null, excerpt: undefined });
+    // `rawOpen`: the not_logged_in row's raw-output <details>, kept here so a
+    // full section rebuild does not snap it shut again.
+    excerptState.set(jobId, { expanded: false, loading: false, error: null, excerpt: undefined, rawOpen: false });
   }
   return excerptState.get(jobId);
 }
@@ -130,11 +158,20 @@ function mounted() {
 
 let els = null;
 
+/** Vault rows by appid, names filled from the owned list (WP WEB-FIX-4). */
 function gamesByAppidMap() {
-  return new Map(state.games.map((g) => [g.appid, g]));
+  return new Map(fillMissingNames(state.games, ownedLibrary.current().games).map((g) => [g.appid, g]));
 }
 function nameFor(appid, gamesByAppid) {
-  return gamesByAppid.get(appid)?.name || `App ${appid}`;
+  return appTitle(appid, gamesByAppid.get(appid)?.name);
+}
+
+/** WP WEB-FIX-4: start the one owned-list load this view may start (see
+ * the module header) when a job on screen has no vault name. */
+function maybeLoadOwnedNames() {
+  if (!state.gamesKnown) return;
+  const named = new Set(state.games.filter((g) => hasText(g.name)).map((g) => g.appid));
+  if (state.jobs.some((j) => !named.has(j.appid))) ownedLibrary.loadIfNeverLoaded();
 }
 
 // ---------------------------------------------------------------------
@@ -187,6 +224,13 @@ async function onResume(jobId) {
 async function onCancel(jobId) {
   await api.cancelJob(jobId);
   showToast("Cancel requested");
+  store.refreshNow();
+}
+/** WP WEB-FIX-4: the not_logged_in block's Retry — a new prefill for the
+ * same app (`POST /v1/prefill`; vault-api dedupes an in-flight one). */
+async function onRetry(appid) {
+  await api.prefill([appid]);
+  showToast("Queued for download");
   store.refreshNow();
 }
 
@@ -384,15 +428,66 @@ function paintExcerpt(rowEl, jobId) {
     logEl.appendChild(p);
     return;
   }
+  const job = state.jobs.find((j) => j.id === jobId);
+  const hint = jobFailureHint(job, st.excerpt);
+  const outputParent = hint ? appendFailureHint(logEl, hint, job, st) : logEl;
   if (display.truncated) {
     const note = document.createElement("p");
     note.className = "truncnote";
     note.textContent = "Truncated — showing the last portion of the output.";
-    logEl.appendChild(note);
+    outputParent.appendChild(note);
   }
   const body = document.createElement("div");
   body.textContent = display.lines.join("\n");
-  logEl.appendChild(body);
+  outputParent.appendChild(body);
+}
+
+/** WP WEB-FIX-4: a known failure's hint block ("Steam login missing",
+ * "cannot find the cache"; text in lib/job-failure.js's HINTS), then a
+ * closed `<details>` for the raw output. Returns the `<details>` the caller
+ * puts the output into. Text only (textContent), no markup from the log.
+ * Retry only on the newest prefill job for the app: an older failed row
+ * would queue a second run of a game that already has a newer job. */
+function appendFailureHint(logEl, hintKind, job, st) {
+  const text = HINTS[hintKind];
+  const box = document.createElement("div");
+  box.className = "failhint";
+  box.dataset.hint = hintKind;
+  const para = (value, className) => {
+    const p = document.createElement("p");
+    if (className) p.className = className;
+    p.textContent = value;
+    return p;
+  };
+  const code = document.createElement("code");
+  code.className = "cmd";
+  code.textContent = text.code;
+  box.append(para(text.title, "failhint-title"), para(text.body), para(text.codeIntro), code, para(text.after));
+  if (isNewestJobForApp(job, state.jobs)) {
+    box.appendChild(para(text.retry));
+    const acts = document.createElement("div");
+    acts.className = "jobacts";
+    const retry = actionButton("Retry", "primary", () => onRetry(job.appid));
+    retry.dataset.retryAppid = String(job.appid); // patchNames keeps the label current
+    retry.setAttribute("aria-label", `Retry ${nameFor(job.appid, gamesByAppidMap())}`);
+    acts.appendChild(retry);
+    box.appendChild(acts);
+  } else {
+    box.appendChild(para(NEWER_JOB_LINE));
+  }
+
+  const raw = document.createElement("details");
+  raw.className = "rawlog";
+  raw.open = !!st.rawOpen;
+  raw.addEventListener("toggle", () => {
+    st.rawOpen = raw.open;
+  });
+  const summary = document.createElement("summary");
+  summary.textContent = text.outputSummary;
+  raw.appendChild(summary);
+
+  logEl.append(box, raw);
+  return raw;
 }
 
 function historyRowNow(jobId) {
@@ -614,6 +709,8 @@ function fullRender() {
         : "");
   }
 
+  maybeLoadOwnedNames();
+
   els.historyBody.replaceChildren();
   if (!p.history.length) {
     els.historyBody.appendChild(hintMessage("Nothing finished yet."));
@@ -648,6 +745,11 @@ function patchNames() {
     const appid = Number(nm.dataset.appid);
     const fresh = nameFor(appid, gamesByAppid);
     if (nm.textContent !== fresh) nm.textContent = fresh;
+  }
+  // The failure hints' Retry buttons name the game too (aria-label).
+  for (const btn of els.section.querySelectorAll("button[data-retry-appid]")) {
+    const label = `Retry ${nameFor(Number(btn.dataset.retryAppid), gamesByAppid)}`;
+    if (btn.getAttribute("aria-label") !== label) btn.setAttribute("aria-label", label);
   }
 }
 
@@ -742,6 +844,14 @@ store.subscribe("jobs", ({ items, diff }) => {
 store.subscribe("games", ({ items }) => {
   if (!Array.isArray(items)) return;
   state.games = items;
+  state.gamesKnown = true;
+  if (mounted()) maybeLoadOwnedNames();
+  patchNames();
+});
+
+// WP WEB-FIX-4: an owned list that lands (from the Library or from this
+// view's one load) only changes names: patch them, no rebuild.
+ownedLibrary.subscribe(() => {
   patchNames();
 });
 

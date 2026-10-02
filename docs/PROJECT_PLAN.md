@@ -2505,7 +2505,15 @@ below carry their own later dates, item 12 is the current one).
    v0.1.0-rc3. Gate (b) found that a bind-mounted cache
    (VAULT_CACHE_PATH) fails on Docker 28 because of vault-api's
    `:nocopy` (fixed in WP DEPLOY-FIX-3, verify now runs bind mode too);
-   production moves to v0.1.0-rc5, which carries the fix. This session is also
+   production moves to v0.1.0-rc5, which carries the fix. Findings from
+   the operator's first phone test on rc5 (2026-10-02), fixed in WP
+   WEB-FIX-3 (phone layout hardening), WEB-FIX-4 (job titles for
+   owned-only games; plain-language hints plus Retry for a missing Steam
+   login and for a cache name resolving to a public IP) and WEB-FIX-5
+   (dismissible hint when the browser's "Desktop site" mode renders the
+   UI at desktop width - the root cause of the zoomed-out phone view).
+   Prefill on the production stack needs vault-core on its own address
+   and `extra_hosts` for the cache name on vault-runner. This session is also
    where the honest still-open lists in `web/tests/README.md` and
    `app/README.md` get verified — real screen reader, phone browser cover
    art, GC against real on-disk chunks, real multi-client bypass detection.

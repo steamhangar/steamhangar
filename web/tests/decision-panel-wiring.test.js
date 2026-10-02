@@ -319,3 +319,36 @@ test("a storage.setItem that throws does not prevent the dismiss action from tak
   assert.doesNotThrow(() => elements.dismissBtn.dispatchEvent({ type: "click" }));
   assert.equal(elements.rootEl.hidden, true);
 });
+
+// ---------------------------------------------------------------------
+// WP WEB-FIX-4: a vault game with no name takes the owned list's title.
+// ---------------------------------------------------------------------
+
+test("MUTATION PIN (owned names): an unnamed vault game reads its owned-list title, re-rendered when the list lands", () => {
+  const elements = makeElements();
+  const store = makeFakeStore([{ ...stableGame(7, 40), name: null }]);
+  const router = makeFakeRouter("library");
+  let ownedState = { games: [] };
+  let onOwned = null;
+  const ownedNames = {
+    current: () => ownedState,
+    subscribe(fn) {
+      onOwned = fn;
+      return () => {};
+    },
+  };
+  createDecisionPanel({
+    elements,
+    store,
+    onViewChange: router.onViewChange,
+    getCurrentView: router.getCurrentView,
+    storage: makeFakeStorage(),
+    ownedNames,
+  });
+  assert.match(textOf(elements.bodyEl), /App 7/, "no owned list yet: the id fallback");
+  ownedState = { games: [{ appid: 7, name: "Owned Seven" }, { appid: 8, name: "Not On The Vault" }] };
+  onOwned(ownedState);
+  const text = textOf(elements.bodyEl);
+  assert.match(text, /Owned Seven/);
+  assert.doesNotMatch(text, /Not On The Vault/, "names only: the owned list adds no game");
+});

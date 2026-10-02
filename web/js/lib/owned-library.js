@@ -129,6 +129,62 @@ export function countOwned(ownedGames) {
   return new Set(validOwnedEntries(ownedGames).map((g) => g.appid)).size;
 }
 
+/** A usable display name: a non-blank string. */
+export function hasText(name) {
+  return typeof name === "string" && name.trim() !== "";
+}
+
+/**
+ * appid -> name from the owned list (first non-blank name per appid wins).
+ * @param {object[] | null | undefined} ownedGames relay `games`
+ * @returns {Map<number, string>}
+ */
+export function ownedNamesByAppid(ownedGames) {
+  const names = new Map();
+  for (const g of validOwnedEntries(ownedGames)) {
+    if (!names.has(g.appid) && hasText(g.name)) names.set(g.appid, g.name);
+  }
+  return names;
+}
+
+/**
+ * The title every surface shows for an app (WP WEB-FIX-4): the vault's
+ * name, then the owned list's name, then "App <id>". vault-api has no name
+ * for an app it never resolved: `POST /v1/prefill` inserts the `apps` row
+ * with `name = NULL` (api/vault_api/jobs.py), and only a depot mapping
+ * names it. A job for an owned-only game therefore has a vault row with no
+ * name, and the job itself carries none (`JobSummary` has no name field).
+ * @param {number} appid
+ * @param {unknown} vaultName
+ * @param {unknown} [ownedName]
+ * @returns {string}
+ */
+export function appTitle(appid, vaultName, ownedName) {
+  if (hasText(vaultName)) return vaultName.trim();
+  if (hasText(ownedName)) return ownedName.trim();
+  return `App ${appid}`;
+}
+
+/**
+ * The vault rows with a missing name filled in from the owned list. Adds no
+ * rows (unlike `mergeOwnedLibrary`) and leaves every other field alone, so
+ * surfaces that must only see vault-known apps (Downloads, the detail
+ * sheet's delete plan, the decision panel) can use it for names alone.
+ * Returns the input array itself when there is nothing to fill.
+ * @param {object[]} vaultGames
+ * @param {object[] | null | undefined} ownedGames
+ * @returns {object[]}
+ */
+export function fillMissingNames(vaultGames, ownedGames) {
+  const vault = Array.isArray(vaultGames) ? vaultGames : [];
+  const names = ownedNamesByAppid(ownedGames);
+  if (names.size === 0) return vault;
+  return vault.map((g) => {
+    const ownedName = g && !hasText(g.name) ? names.get(g.appid) : undefined;
+    return ownedName ? { ...g, name: ownedName } : g;
+  });
+}
+
 /**
  * @param {object[]} vaultGames `GET /v1/games` rows.
  * @param {object[] | null | undefined} ownedGames relay `games`, or null/[]
@@ -140,20 +196,9 @@ export function mergeOwnedLibrary(vaultGames, ownedGames) {
   const owned = validOwnedEntries(ownedGames);
   if (owned.length === 0) return vault;
 
-  const ownedNameByAppid = new Map();
-  for (const g of owned) {
-    if (!ownedNameByAppid.has(g.appid) && typeof g.name === "string" && g.name.trim()) {
-      ownedNameByAppid.set(g.appid, g.name);
-    }
-  }
-
-  const known = new Set();
-  const merged = vault.map((g) => {
-    known.add(g.appid);
-    const hasName = typeof g.name === "string" && g.name.trim();
-    const ownedName = ownedNameByAppid.get(g.appid);
-    return !hasName && ownedName ? { ...g, name: ownedName } : g;
-  });
+  // A copy: fillMissingNames hands back its input when it fills nothing.
+  const merged = fillMissingNames(vault, owned).slice();
+  const known = new Set(vault.map((g) => g.appid));
   for (const g of owned) {
     if (known.has(g.appid)) continue;
     known.add(g.appid);
