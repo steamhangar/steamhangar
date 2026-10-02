@@ -2683,3 +2683,118 @@ below carry their own later dates, item 12 is the current one).
     Directly before the review, WP R-0 (commit 80f750f) moved agent
     delegation to the session model (see item 6). The freeze followed the
     last PASS: ADR-0016, freeze commit 92e95be.
+13. [ ] **Road to v0.1.0 final and the post-v0.1.0 roadmap (user
+    decisions 2026-10-02).** The production rollout on the operator's
+    host (item 2) is the release gate. What it found, what is still open
+    before `v0.1.0`, and what was deliberately moved past it.
+
+    **A. In flight / next release candidate (`v0.1.0-rc6`)**
+    - [ ] **CORE-FIX-2** — prefill concurrency cap. On a DS-Lite line
+      (IPv4 behind the provider's CGNAT) a prefill failed 94% of chunk
+      requests with `connect() failed (113: Host is unreachable)`: the
+      CGN answers ICMP host-unreachable once the subscriber's port quota
+      is spent (RFC 6888 REQ-11). vault-core opens one upstream
+      connection per chunk, and SteamPrefill's 30 workers re-fire
+      instantly on failure. Fix: SteamPrefill runs with `--max-threads`
+      (new `VAULT_PREFILL_MAX_THREADS`), the hidden flag is guarded
+      against version bumps, nginx stops multiplying connect retries.
+    - [ ] Tag `v0.1.0-rc6` (user's yes given 2026-10-02, once CORE-FIX-2
+      is green and merged): verify digests, new override/.env templates
+      for the operator's rollout request.
+    - [ ] Operator re-tests on rc6: prefill of one real game completes,
+      Steam client downloads the same game from the cache (HIT), job
+      titles show game names, the failure hints read correctly, the
+      Desktop-site banner appears on the phone with the mode on.
+
+    **B. Open before `v0.1.0` final**
+    - [ ] **API-FIX-3** — misleading prefill summary. When SteamPrefill
+      reports `Failed 1`, vault-api appends "did not consider this app -
+      is it owned by the logged-in account?". It must tell "failed" from
+      "not considered" (parse the summary table's Failed column) and say
+      what failed. Needs the freeze opened for a bug fix (ADR-0016
+      addendum).
+    - [ ] **DOCS-FIX-3** — ADR-0004 and SECURITY.md claim QR login via the
+      Steam app is the documented path. No SteamPrefill release supports
+      QR (verified in the v3.7.1/v3.7.2 source, 2026-10-02); the only
+      path is account name + password + Steam Guard on the server
+      terminal. Correct the claim, point to the planned QR helper (D2).
+    - [ ] **APP-FIX-2** — Android parity with WEB-FIX-4: job titles from
+      the owned list (`JobCardModel.nameFor`), plain-language hints and
+      Retry for `not_logged_in` and the public-IP cache detection, the
+      raw output collapsed; demo enqueue creates an unnamed vault row
+      like the real API.
+    - [ ] **APP-FEAT-1** — the Android app reads the stored
+      `steam_library_steamid` (API-FEAT-1) instead of its own input, and
+      can set it, as the web Settings block does.
+    - [ ] **WEB-FIX-6** — the bulk bar overlaps content in select mode on
+      a phone (noted during WEB-FIX-3, not fixed).
+    - [ ] Signed APK: operator creates and backs up the keystore, puts
+      the four `ANDROID_*` secrets into the `release` Environment, then
+      dispatches the publish workflow on the release tag (app/README).
+    - [ ] Real-device checks from the honest open lists
+      (`web/tests/README.md`, `app/README.md`): screen reader, phone
+      cover art, GC against real chunks, multi-client bypass detection,
+      bottom-nav behaviour with Desktop site off.
+    - [ ] Nightly `deploy / verify-stack` runs the new bind-mode section
+      (DEPLOY-FIX-3) on a GitHub runner for the first time; check it.
+    - [ ] Rollout gates (h) and (i) by the operator: re-measure with the
+      DNS rewrite, scheduler on, stack in the operator's stack repo,
+      SQLite dump in the backup job.
+    - [ ] Release notes for `v0.1.0`: the DS-Lite/CGNAT behaviour, the
+      `extra_hosts` requirement with a dedicated `VAULT_CORE_BIND`, the
+      bind-mount precondition (`cache/depot` + `tmp`, 101:101).
+
+    **C. Hygiene (any time, small)**
+    - [ ] verify-stack section 8: its `rootonly/` fixture cannot be
+      removed by a non-root caller; clean it through a container like
+      section 9 does.
+    - [ ] SteamPrefill 3.7.2 is out (bug fix for invalid depot links);
+      bump the pin after re-checking `--max-threads` and the session file
+      format.
+    - [ ] The `api` tests that read `api/vault_api/config.py` from web
+      tests (`demo-data-config-defaults`, `demo-data-installed-on`) make
+      partial web copies fail; document it in web/tests/README.md.
+
+    **D. After `v0.1.0` (decided 2026-10-02, each with its own ADR)**
+    - [ ] **D1 CORE-FEAT-1 — upstream keepalive to the Steam CDN.**
+      nginx pools connections only for named `upstream` groups; a
+      variable `proxy_pass` first looks the name up among the defined
+      groups, then falls back to the resolver. Plan: one `upstream`
+      block per known edge host (`server <host> resolve; keepalive N;`
+      with a shared zone), rendered at container start from a list;
+      unknown hosts keep today's path, so the Host header, the
+      path-faithful store and the loop guard stay unchanged. Before
+      building: measure on production with a handful of requests whether
+      Valve edges keep connections alive. Benefits Steam clients too,
+      which also download through vault-core.
+    - [ ] **D2 AUTH-FEAT-1 — Steam login by QR code from the web UI.**
+      A small own helper on SteamKit2 (`BeginAuthSessionViaQRAsync`)
+      runs in the runner container, emits only the rotating challenge
+      URL, polls, and writes SteamPrefill's `Config/account.config`
+      (refresh token) directly; vault-api relays URL and status only, so
+      no password and no token cross the API. Endpoints behind the API
+      key, short-lived, rate-limited. The terminal login with a Steam
+      Guard code stays as the fallback, because Steam's location check
+      can block app/QR approval when the phone is far from the server.
+      Includes the Settings "Steam session: present / missing" status.
+      Amends ADR-0004 and needs the freeze opened for two endpoints.
+    - [ ] **D3 MULTI-1 — several Steam accounts per household.**
+      SteamPrefill keeps one session per install (`Config/` next to the
+      binary). Plan: one `Config/` per account, the job carries the
+      account, the runner picks the account that owns the app; the
+      library shows the union of several SteamIDs with an owner hint;
+      QR login (D2) per account. The cache itself is already
+      account-agnostic (chunks are keyed by depot path), so a game
+      cached by one account is a HIT for every client in the house.
+      Steam Families sharing is deliberately not pursued for now.
+    - [ ] **D4** IPv6 egress (operator network, optional): Steam CDN
+      hosts publish AAAA records and IPv6 bypasses the CGNAT. The
+      operator's host runs without global IPv6 on purpose; a network
+      decision, not a code change.
+    - [ ] **D5** Named, scoped API keys and per-target payload scoping
+      (Phase 6, already listed there).
+
+    **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
+    start on their own branches now; code for D1-D3 waits for `v0.1.0`
+    (the freeze holds until then, and every merge to `main` before the
+    final tag would ride into the release).
