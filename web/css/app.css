@@ -405,9 +405,9 @@
 /* ---------- capsule grid ---------- */
 .grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 12px; }
 /* WP WEB-FIX-3 hardening against horizontal overflow (NOT the cause of
-   the 2026-10-01 zoom-out report, whose Library was empty; that stays open
-   until a device diagnosis — leading hypothesis: Chrome desktop-site mode,
-   a 980px layout). `1fr` is `minmax(auto,1fr)`, so a track never shrinks
+   the 2026-10-01 zoom-out report, whose Library was empty; that was
+   Chrome's "Desktop site" mode, a 980px layout, confirmed 2026-10-02 and
+   mitigated by the WP WEB-FIX-5 hint banner). `1fr` is `minmax(auto,1fr)`, so a track never shrinks
    below its card's min-content width, and `.instbadge`/`.rowname` are
    `white-space:nowrap`: a long badge line or list-layout game name could
    widen the track past the viewport. `minmax(0,1fr)` above (and in
@@ -1120,6 +1120,23 @@ body.onboarding .nav{ display:none; }
 @media (hover:hover) and (pointer:fine){
   .banner .acts button:hover{ filter:brightness(1.25); }
 }
+/* WP WEB-FIX-5: the "Desktop site" hint's close button, the last flex item
+   of its `.banner` row. 32px square so it stays a usable touch target on
+   the very phone (scaled-down page) it is shown on; `margin` pulls it into
+   the banner's padding so the row height does not grow. Never
+   [hidden]-toggled itself (its `.banner-slot` is), so `display` is safe. */
+.banner .banner-x{
+  flex:none; display:inline-flex; align-items:center; justify-content:center;
+  width:32px; height:32px; margin:-7px -6px -7px 0;
+  border-radius:var(--r-m); color:rgba(246,220,196,.7);
+}
+@media (hover:hover) and (pointer:fine){
+  .banner .banner-x:hover{ filter:brightness(1.25); }
+}
+/* WEB-FIX-5 review: `#view-root` is `tabindex="-1"` so the hint's ✕ can
+   hand focus to it on dismiss. It is a programmatic focus target only,
+   never a control, so it draws no ring around the whole view. */
+.view-root:focus{ outline:none; }
 
 /* ---------- sheets (notifications panel, clients sheet) ----------
    Real-DOM analogue of the mockup's phone-frame-relative .sheet/.scrimlayer

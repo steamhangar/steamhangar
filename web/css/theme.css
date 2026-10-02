@@ -311,8 +311,9 @@ html, body{
      viewport would make Android Chrome zoom the page out; the per-element
      min-width:0 / minmax(0,1fr) / overflow-wrap rules in app.css are the
      hardening. Neither is the cause of the 2026-10-01 Pixel zoom-out
-     report, which stays open until a device diagnosis is done (leading
-     hypothesis: Chrome desktop-site mode, a 980px layout). `clip`,
+     report: that was Chrome's "Desktop site" mode (a 980px layout),
+     confirmed on the Pixel 2026-10-02 and mitigated by the WP WEB-FIX-5
+     hint banner (js/components/desktop-site-hint.js). `clip`,
      never `hidden`: `hidden` on body would turn it into a scroll container
      and break the sticky topbar/bottom nav, `clip` creates no scroll
      container. Every engine this CSS already targets (aspect-ratio,

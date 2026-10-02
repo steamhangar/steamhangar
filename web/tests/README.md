@@ -2304,12 +2304,13 @@ devbox.
 
 - **The zoom-out is NOT explained by this WP.** What follows is hardening
   against horizontal overflow, not the cause of the report: the user's
-  Library was empty and Settings has no grid. The zoom-out stays open
-  until a device diagnosis is done. Leading hypothesis (review, still
-  unconfirmed): Chrome's "Desktop site" mode, a 980px layout that ignores
-  the viewport meta. A full-width header and nav around a narrow, centred
-  760px column means a layout of 720px or more, below 1024px (BP-M on,
-  BP-L off).
+  Library was empty and Settings has no grid. **Resolved 2026-10-02:** the
+  root cause was Chrome's "Desktop site" mode (a ~980px layout that
+  ignores the viewport meta), confirmed by the user on the Pixel: turning
+  it off fixed the layout. Mitigated by the WP WEB-FIX-5 hint banner
+  below, not by forcing a zoom (user decision). The sign was as predicted:
+  a full-width header and nav around a narrow, centred 760px column
+  (BP-M on, BP-L off).
 - Hardening: the phone library grid used `1fr` tracks (`repeat(2,1fr)`,
   `repeat(3,1fr)`, list `1fr`). `1fr` is `minmax(auto,1fr)`, so a track
   never shrinks below its card's min-content width, and the card holds
@@ -2327,7 +2328,8 @@ devbox.
   content at scale 1 and no view padding was added. The pin asserts it
   stays sticky, never fixed, and that `.view-root` carries no
   `padding-bottom`. The reported overlap is not explained by static
-  analysis and is part of the open device diagnosis.
+  analysis; it was reported while "Desktop site" mode was on (see above).
+  Whether it remains with that mode off was not reported separately.
 - `html, body{overflow-x:clip}` (theme.css) is defence in depth only. It
   is NOT the fix: it hides a future overflow, it does not stop one being
   introduced. It uses `clip`, never `hidden`, because `hidden` on body
@@ -2543,3 +2545,82 @@ render; never loading; the games-known gate removed; `<details>` open by
 default; the fill adding rows; the merge mutating its input.
 
 Suite: **963 tests, 963 pass, 0 fail** (round 3 added assertions, no new tests).
+
+### WP WEB-FIX-5 — "Desktop site" hint banner
+
+Root cause of the WEB-FIX-3 zoom-out, confirmed by the user on a Pixel in
+Chrome (2026-10-02): "Desktop site" mode. Chrome then ignores the viewport
+meta, lays the page out at ~980 CSS px and scales it down. The user chose
+a dismissible hint over auto-zoom. A third `.banner-slot` (`#desktop-hint`)
+in the shared `#banner-wrap` (no new `#app` grid child, so the BP-L area
+map is unchanged), driven by `components/desktop-site-hint.js`; the rule
+and the dismissal store are pure in `lib/desktop-site-hint.js`.
+
+- **Rule** (all four): `(pointer: coarse)`; screen short side < 600 CSS px
+  (phone, not tablet: Chrome's tablet desktop mode uses the real window
+  width, so the page is not scaled there); layout width
+  (`documentElement.clientWidth`, immune to pinch zoom) > 900; and layout
+  width >= 1.5x the screen width in the current orientation. The ratio
+  rule exists because a Pixel 7 in LANDSCAPE, normal mode, has a real
+  915px layout, which `innerWidth > 900` alone would flag.
+- **Assumption, not device-verified:** Chrome keeps `screen.width/height`
+  at the device size (412x915 on a Pixel 7) in desktop mode. If a device
+  reports 980 there, the hint never shows (fails toward no hint). Known
+  gaps: desktop mode in phone landscape (980 vs 915, ratio 1.07) is not
+  detected; a page zoom below 100% can trigger the hint.
+- Re-evaluated on `resize`/`orientationchange`, debounced 200 ms; `hidden`
+  is written only when the verdict changes (no flicker).
+- ✕ dismisses for good: `localStorage` key
+  `steamvault.desktopSiteHintDismissed`; every access (including reading
+  `window.localStorage` itself) is in try/catch, falling back to an
+  in-memory flag for the session. Listeners are removed after dismissal.
+- a11y: the slot is `role="region"` with `aria-label="Display hint"`; the
+  close button is a plain `<button type="button">`, 32px square. Its
+  `aria-label` ("Dismiss desktop view hint") and the hint text have one
+  source, `lib/desktop-site-hint.js`; index.html carries neither. On
+  dismiss, focus moves to `#view-root` (now `tabindex="-1"`, no focus
+  ring) instead of falling to `<body>`.
+- Review fix: app.js passed `storage: window.localStorage` to the
+  decision panel. With site data blocked that getter throws and the page
+  stays blank. It is now a try/catch IIFE returning `null`, which
+  decision-panel's readFlag/writeFlag already catch.
+  `app-storage-guard.test.js` fails on any bare `window.localStorage`
+  in an argument position in app.js.
+- No store, no API: identical in demo mode.
+
+`desktop-site-hint.test.js` (31 tests): the detection matrix (phone +
+desktop mode show; phone normal, phone landscape, real desktop, narrow
+desktop window, fine-pointer narrow screen, 600px tablet, iPad, Pixel
+Tablet hide), the dismissal store with throwing `getItem`/`setItem` and a
+throwing `getStorage`, resize/orientationchange re-evaluation, the
+debounce/no-flicker write counter, listener removal, focus on dismiss,
+the index.html a11y markup and the app.js wiring. Timers run on a manual
+queue injected through `setTimer`/`clearTimer`, so the negative
+assertions are deterministic, with no sleeps. `app-storage-guard.test.js`
+(3) pins the guard; `decision-panel-wiring.test.js` gains a `storage:
+null` case.
+
+Mutation evidence (each applied alone in a scratch copy, the test file run,
+then discarded), all killed: pointer guard removed (rule-1 fixture); short
+side guard removed (600px tablet fixture); 900 floor removed (800px layout
+fixture); ratio rule forced true (landscape normal fixture); in-memory flag
+set only after a successful write; read not in try/catch (`SecurityError`
+escapes); `setItem` removed; the no-change guard removed (write counter
+2 !== 1); the debounce removed (3 !== 1); the resize listener dropped;
+`dispose` not called on close (2 !== 0 listeners); `syncBannerWrap`
+removed; close `aria-label` not set; boot-time dismissal ignored; the
+app.js `getStorage` getter removed; `role="region"` removed; `tabindex="-1"`
+on the close button; hint text changed. Review round: the app.js guard
+reverted to `storage: window.localStorage` (3 fail); decision-panel
+readFlag's try removed (null storage throws); the focus call removed
+(0 !== 1); focus call not wrapped ("focus failed" escapes); the app.js
+focus wiring removed; `#view-root` tabindex removed; the aria-label
+duplicated back into index.html; debounce removed (3 fail); debounce not
+clearing the previous timer (5 !== 1 pending); dispose keeping a pending
+timer (1 !== 0); the no-change guard removed (2 !== 1).
+
+Not covered: the painted look and a real device (no browser here); a
+screen reader. Real-device check after deploy: on the Pixel with "Desktop
+site" on, the hint shows and the ✕ hides it across reloads; with it off,
+no hint.
+Suite: **969 tests, 969 pass, 0 fail**.
