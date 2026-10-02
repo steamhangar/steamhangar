@@ -236,6 +236,9 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     "TZ": "UTC",  # nginx's $time_iso8601 is local time; same `:-` form as vault-api
     "VAULT_UPSTREAM_RATE": "",
     "VAULT_UPSTREAM_RATE_WINDOW": "${VAULT_SCHEDULE_WINDOW-03:00-07:00}",
+    # WP CORE-FEAT-1d (ADR-0017): the keepalive-pool edge list, same `-`
+    # form as VAULT_UPSTREAM_RATE (blank passes through as "" = no pool).
+    "VAULT_UPSTREAM_POOL_HOSTS": "",
 }
 
 #: One row per Compose service this file checks, in the sense used
@@ -787,7 +790,9 @@ def test_upstream_rate_window_follows_the_schedule_window_default(
     assert core_window_default == f"${{VAULT_SCHEDULE_WINDOW-{api_window_default}}}"
 
 
-@pytest.mark.parametrize("env_var", ("VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_RATE_WINDOW"))
+@pytest.mark.parametrize(
+    "env_var", ("VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_RATE_WINDOW", "VAULT_UPSTREAM_POOL_HOSTS")
+)
 def test_upstream_rate_vars_are_documented_in_env_example(env_var: str) -> None:
     text = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
     assert re.search(rf"^#?{re.escape(env_var)}=", text, re.MULTILINE), (

@@ -287,8 +287,8 @@ two real chunk URLs of depot 4358691:
 
 On the operator's production host; the test instance has no internet by
 design. Nothing here changes vault-core. Two chunk URLs of the same edge
-are needed (take them from a recent `vault-core` access log line:
-`uri="..."` plus the client's Host).
+are needed: take them from two cache-event log lines with the same host
+(`/vault/logs/event.log`, field 6 = URI, field 8 = host).
 
 0. **Pin the public edge IP first.** On the operator's host
    `*.steamcontent.com` may resolve to vault-core itself (vault-dns, a

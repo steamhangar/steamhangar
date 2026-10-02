@@ -32,7 +32,7 @@ set -u
 # exported in the calling shell must not leak in.
 # VAULT_EGRESS_SUBNET (WP DEPLOY-FIX-2) for the same reason: this run's own
 # subnet must come from the generated env file, never from the caller.
-unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_EGRESS_SUBNET
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_EGRESS_SUBNET
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)

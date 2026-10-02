@@ -815,15 +815,94 @@ unreachable)` (see [Troubleshooting](#troubleshooting)). Forwarded to
 vault-api and vault-runner; recreate both after a change:
 `docker compose up -d vault-api vault-runner`. An invalid value refuses to
 boot both. Details: [`api/README.md` "SteamPrefill concurrency"](../api/README.md).
+This bounds the burst; the per-chunk connection itself goes away for the
+edges listed in ["Upstream keepalive pool"](#upstream-keepalive-pool).
+
+---
+
+## Upstream keepalive pool
+
+Stage 2 of the CGNAT fix (WP CORE-FEAT-1,
+[ADR-0017](../docs/adr/0017-upstream-keepalive-pool.md)). For every Steam
+CDN edge you name, vault-core keeps a small pool of idle upstream
+connections and reuses **a few pooled connections per edge (at most 8
+idle) instead of one new connection per chunk**. Behind a carrier-grade NAT
+(DS-Lite and similar) each new connection costs one of a limited number of
+port mappings, and a prefill used to exhaust them (see
+["Prefill concurrency behind a carrier-grade NAT"](#prefill-concurrency-behind-a-carrier-grade-nat),
+which bounds the burst; this removes the per-chunk connection). Steam
+clients benefit too: their concurrency is not ours to cap, and they download
+through the same path.
+
+```bash
+# deploy/.env (the shipped seed, ADR-0017 decision 2B)
+VAULT_UPSTREAM_POOL_HOSTS=dist-fra1.discovery.steamserver.net cache6-ams1.steamcontent.com
+```
+
+- **`VAULT_UPSTREAM_POOL_HOSTS`**: space-separated edge host names. The
+  seed holds the edge the Steam client's discovery marker
+  (`lancache.steamcontent.com`) maps to and the edge measured on a DS-Lite
+  line on 2026-10-02 (next section). Replace or extend it with the edges
+  **your** line uses. Empty = no pool, every MISS opens its own connection,
+  exactly as before this release.
+- **Rules** (checked at boot by `28-vault-upstream-pool.sh`): lowercase; no
+  scheme or port; each name ends in `.steamcontent.com` or
+  `.steamserver.net` (the two families of vault-core's Host allowlist, a
+  foreign name could never be dialled); not the marker
+  `lancache.steamcontent.com` itself (the allowlist rewrites it, a group of
+  that name can never match: list `dist-fra1.discovery.steamserver.net`
+  instead); no duplicates; **at most 4 names**.
+- **Why 4.** Each edge gets `keepalive 8` idle connections, so 4 edges are
+  32 idle connections in total (ADR-0017 decision 3A). The only measured
+  safe point behind the CGNAT was 50 parallel connections; 32 idle plus the
+  8 in flight of a capped prefill stays under it. A 5th name is refused.
+- **An invalid list refuses to boot.** vault-core stops with
+  `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_POOL_HOSTS: '<value>'
+  ...` in `docker compose logs vault-core`, naming the offending value and
+  the rule (fail-closed, like the rate cap). Fix the line, recreate.
+- **Unknown hosts keep the old path.** An edge that is not listed is
+  proxied exactly as before: one connection per chunk, no error, no gain.
+- **Find your edges.** Field 8 of the cache-event log is the Host of every
+  cache request, so with `VAULT_EVENT_LOG` on (the shipped default), after
+  a few downloads:
+  ```bash
+  docker compose exec vault-core sh -c 'cut -f8 /vault/logs/event.log | sort | uniq -c | sort -rn'
+  ```
+  lists them, most used first. Put the top entries (at most 4) in the list;
+  if `lancache.steamcontent.com` is among them, list
+  `dist-fra1.discovery.steamserver.net` instead (the hook refuses the marker).
+- **Recreate vault-core after a change**; the list is read once at
+  container start, it is not a vault-api setting (ADR-0017 decision 4B):
+  `docker compose up -d vault-core`. The boot log then says
+  `upstream keepalive pool ON: N edge group(s) [...]`, or
+  `VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream keepalive pool`.
+
+**Honest limits.**
+
+- **A stale list is silent.** Valve's edge names vary by region and over
+  time (`cacheN-<pop>`). An entry nobody is routed to costs one DNS query
+  every 30 s and gives nothing; an edge missing from the list keeps the
+  one-connection-per-chunk behaviour without any warning. Re-run the
+  one-liner after a while and compare.
+- **NXDOMAIN empties a group.** If a listed name stops resolving, the next
+  MISS to it fails as `no live upstreams` (a 502 to the client) until the
+  next resolve succeeds, at most 30 s later. The old path failed the same
+  request with a 502 too.
+- **One DNS query per listed edge every 30 s** while vault-core runs,
+  download or not, against `VAULT_RESOLVER`. An idle pooled connection also
+  holds one CGNAT mapping for up to 50 s; the ceiling bounds that.
+- Pooling does not change what an edge answers (some ISP-hosted edges 403
+  certain depots), and the Steam client's own concurrency and edge
+  selection are not ours to control.
 
 ---
 
 ## Checking that a Steam edge keeps connections alive
 
 Optional and read-only; nothing here changes vault-core. The upstream
-keepalive pool ([ADR-0017](../docs/adr/0017-upstream-keepalive-pool.md); its
-configuration is documented under "Upstream keepalive pool" once WP
-CORE-FEAT-1d lands) only pays off if the Steam CDN edge your line talks to
+keepalive pool ([ADR-0017](../docs/adr/0017-upstream-keepalive-pool.md);
+configured in the previous section, ["Upstream keepalive pool"](#upstream-keepalive-pool))
+only pays off if the Steam CDN edge your line talks to
 reuses one TCP connection for several chunk requests. The steps below prove
 or disprove that from your host in a few minutes. You need two real chunk
 URIs of ONE edge: take them from two recent cache-event log lines that
@@ -1461,4 +1540,5 @@ steamcontent.com` resolves to.
 | Clients download at internet speed and the cache stays empty | DNS redirection isn't reaching them, or the AAAA leak is open. Check with `dig A` **and** `dig AAAA` against your resolver (`dns/README.md`). |
 | Prefill jobs fail with "A Steam account is required" | the one-time interactive login hasn't been done — see [First run](#first-run-the-one-time-steamprefill-login). |
 | Prefills stall or fail with many errors; vault-core's log shows `connect() failed (113: Host is unreachable) while connecting to upstream` for Steam CDN addresses, single downloads work; your router may log an "ICMP flood" from your provider's gateway | your line is behind a carrier-grade NAT (DS-Lite, many fibre/cable/mobile lines) and a prefill used up its port mappings: every chunk vault-core fetches is a new upstream connection. Lower `VAULT_PREFILL_MAX_THREADS` in `.env` (default `8`; try `4`), then `docker compose up -d` to recreate vault-api and vault-runner. The job output starts with `Will download using at most N threads` when it took effect. Wait a few minutes before retrying so the NAT can expire old mappings. |
+| vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_POOL_HOSTS: ...` | the edge list in `.env` breaks a rule: uppercase, a scheme or port, a name outside `*.steamcontent.com` / `*.steamserver.net`, the marker `lancache.steamcontent.com` itself, a duplicate, or more than 4 names. The message names the value and the rule. Fix the line (or empty it = no pool), then `docker compose up -d vault-core`. See ["Upstream keepalive pool"](#upstream-keepalive-pool). |
 | Port 80 already in use on the host | use a dedicated IP, not a different port — see [Port 80](#port-80-and-the-dedicated-ip-question). |
