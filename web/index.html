@@ -32,10 +32,10 @@
     </button>
   </header>
 
-  <!-- Shell banners. ONE .banner-wrap holds both banners because at BP-L
-       it owns the single "banner" grid area (css/app.css); each banner
+  <!-- Shell banners. ONE .banner-wrap holds every shell banner because at
+       BP-L it owns the single "banner" grid area (css/app.css); each banner
        toggles its own .banner-slot and js/lib/banner-wrap.js shows the
-       wrap while any slot is shown (WP WEB-FIX-2). -->
+       wrap while any slot is shown (WP WEB-FIX-2; third slot WEB-FIX-5). -->
   <div class="banner-wrap" id="banner-wrap" hidden>
     <!-- Connection-lost banner (WP WEB-FIX-2, web/js/components/
          connection-banner.js): shown after a NETWORK/SERVER poll-failure
@@ -67,6 +67,24 @@
             <button type="button" class="mute" id="bypass-dismiss">Dismiss</button>
           </div>
         </div>
+      </div>
+    </div>
+    <!-- "Desktop site" hint (WP WEB-FIX-5, web/js/components/
+         desktop-site-hint.js): shown when a phone renders the page on a
+         desktop-wide layout viewport (lib/desktop-site-hint.js has the
+         rule). A labelled region, not a live region. The text and the close
+         button's aria-label are set by that module only (one source). -->
+    <div class="banner-slot" id="desktop-hint" role="region" aria-label="Display hint" hidden>
+      <div class="banner">
+        <span class="glyph" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="7.6"/><path d="M10 9v4.6M10 6.3v.1"/></svg>
+        </span>
+        <div class="body">
+          <span id="desktop-hint-text"></span>
+        </div>
+        <button type="button" class="banner-x" id="desktop-hint-close">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>
+        </button>
       </div>
     </div>
   </div>
@@ -136,7 +154,7 @@
        swap AND every poll tick's patched values (job progress, sizes) to
        a screen reader. Navigation is announced once, by title, through
        #view-announcer below (js/app.js renderView). -->
-  <main id="view-root" class="view-root"></main>
+  <main id="view-root" class="view-root" tabindex="-1"></main>
 
   <!-- Suggestions panel (WP 4h.2, js/components/decision-panel.js): a
        right-hand column at BP-XL (>=1800px), a collapsible card below that

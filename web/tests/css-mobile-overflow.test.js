@@ -2,9 +2,10 @@
  * Phone-width fit (WP WEB-FIX-3) — structural CSS pins.
  *
  * Hardening against horizontal overflow — NOT the cause of the 2026-10-01
- * Pixel zoom-out report (its Library was empty, Settings has no grid). The
- * zoom-out stays open until a device diagnosis is done; leading
- * hypothesis: Chrome desktop-site mode (980px layout). The hardening: the
+ * Pixel zoom-out report (its Library was empty, Settings has no grid). That
+ * report's root cause was Chrome's "Desktop site" mode (980px layout),
+ * confirmed by the user on the Pixel 2026-10-02 and mitigated by the
+ * WP WEB-FIX-5 hint banner (desktop-site-hint.test.js). The hardening: the
  * phone grid's `1fr` tracks (= `minmax(auto,1fr)`) could not shrink below a
  * card's nowrap min-content (`.instbadge`, list `.rowname`). Same posture as
  * the other css-*.test.js files: no browser here, so these pin the

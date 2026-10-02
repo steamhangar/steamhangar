@@ -850,3 +850,12 @@ These are not style preferences; each entry cost a review round to learn.
 - Pin race guarantees with a gated fake fetch: hold the response, act
   (double click, edit the input, press finish), then release. Fixed
   sleeps cannot show the order (WP WEB-FEAT-2).
+- Reading `window.localStorage` itself throws (SecurityError) when site
+  data is blocked, not only `getItem`. A bare read in an argument list at
+  module top level blanks the whole app; read it through a guarded
+  getter (WP WEB-FIX-5).
+- Chrome's "Desktop site" mode on a phone ignores the viewport meta and
+  lays out at ~980 CSS px; it looks like a broken mobile layout. Detect
+  it as coarse pointer + short screen side < 600 + layout > 900 and
+  >= 1.5x the screen width, and hint instead of auto-zooming (WP
+  WEB-FIX-5).

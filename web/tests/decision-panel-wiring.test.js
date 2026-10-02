@@ -319,3 +319,24 @@ test("a storage.setItem that throws does not prevent the dismiss action from tak
   assert.doesNotThrow(() => elements.dismissBtn.dispatchEvent({ type: "click" }));
   assert.equal(elements.rootEl.hidden, true);
 });
+
+test("storage: null (app.js's guard when reading window.localStorage throws) — the panel still shows, collapses and dismisses in memory", () => {
+  const elements = makeElements();
+  const store = makeFakeStore([stableGame(1, 40)]);
+  const router = makeFakeRouter("library");
+  assert.doesNotThrow(() =>
+    createDecisionPanel({
+      elements,
+      store,
+      onViewChange: router.onViewChange,
+      getCurrentView: router.getCurrentView,
+      storage: null,
+    }),
+  );
+  assert.equal(elements.rootEl.hidden, false, "visible with no storage at all");
+  assert.equal(elements.collapseBtn.getAttribute("aria-expanded"), "false", "collapsed by default");
+  assert.doesNotThrow(() => elements.collapseBtn.dispatchEvent({ type: "click" }));
+  assert.equal(elements.collapseBtn.getAttribute("aria-expanded"), "true");
+  assert.doesNotThrow(() => elements.dismissBtn.dispatchEvent({ type: "click" }));
+  assert.equal(elements.rootEl.hidden, true);
+});

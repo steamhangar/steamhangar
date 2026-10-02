@@ -38,6 +38,8 @@ import { createAuthRecovery } from "./components/auth-recovery.js";
 // WP WEB-FIX-2: the connection-lost banner, same DI-factory posture.
 import { createConnectionBanner } from "./components/connection-banner.js";
 import { setConnectionLost } from "./connection-status.js";
+// WP WEB-FIX-5: the "Desktop site" hint, same DI-factory posture.
+import { createDesktopSiteHint, readBrowserEnv } from "./components/desktop-site-hint.js";
 import { store } from "./store-singleton.js";
 import { api, getStoredApiKey, isDemoMode } from "./api.js";
 import { openOnboarding, isOnboardingOpen } from "./onboarding.js";
@@ -111,7 +113,16 @@ createDecisionPanel({
   store,
   onViewChange,
   getCurrentView: currentView,
-  storage: window.localStorage,
+  // WEB-FIX-5 review: reading `window.localStorage` itself throws when site
+  // data is blocked, which would stop this module before the first paint.
+  // decision-panel.js's readFlag/writeFlag already catch a null storage.
+  storage: (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  })(),
 });
 createAuthRecovery({ store, openOnboarding, isOnboardingOpen, getStoredApiKey });
 createConnectionBanner({
@@ -126,6 +137,19 @@ createConnectionBanner({
     viewAnnouncer.textContent = text;
   },
   setConnectionLost,
+});
+createDesktopSiteHint({
+  elements: {
+    wrapEl: document.getElementById("banner-wrap"),
+    hintSlotEl: document.getElementById("desktop-hint"),
+    hintTextEl: document.getElementById("desktop-hint-text"),
+    hintCloseBtn: document.getElementById("desktop-hint-close"),
+  },
+  readEnv: () => readBrowserEnv(window),
+  eventTarget: window,
+  getStorage: () => window.localStorage,
+  // The ✕ hides with its slot; hand focus to the view root (tabindex=-1).
+  focusAfterDismiss: () => viewRoot.focus({ preventScroll: true }),
 });
 renderView(currentView());
 // WP 4a.6: shows the 3-step onboarding overlay on top of whatever view just
