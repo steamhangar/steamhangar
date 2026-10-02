@@ -2781,10 +2781,10 @@ below carry their own later dates, item 12 is the current one).
         page (87b0789).
       - [x] CORE-FEAT-1b — core: hook `28-vault-upstream-pool.sh`, include
         line, native empty render, drift pins, hook test (c414deb).
-      - [ ] CORE-FEAT-1b2 — core/CI: renders and refusals in
+      - [x] CORE-FEAT-1b2 — core/CI: renders and refusals in
         `verify-core-nginx.sh`, `error` back in `proxy_next_upstream`,
         upstream log fields, rate-cap pin.
-      - [ ] CORE-FEAT-1c — deploy tests: verify-stack fake edge with
+      - [x] CORE-FEAT-1c — deploy tests: verify-stack fake edge with
         connection counting, test resolver, fallback, 508 and rate cap.
       - [x] CORE-FEAT-1d — deploy and docs: compose forwarding,
         `.env.example` seed, `deploy/README.md` "Upstream keepalive
