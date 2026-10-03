@@ -219,6 +219,47 @@ egress-lock networks, which set `enable_ipv6: false` on purpose.
 
 Already specified in PROJECT_PLAN §7 Phase 6. No new findings.
 
+## D6: CLIENT-1, a proper desktop client
+
+**Goal (user, 2026-10-03).** A client that installs like normal software
+and runs without hand-made scheduled tasks or timers.
+
+**Today.** The Go agent is a one-shot CLI. On Windows a PowerShell
+installer registers a Scheduled Task (Interactive logon type, repetition
+plus a logon trigger since AGENT-FEAT-1). On Linux it is a systemd user
+timer. Configuration lives in environment variables and flags, and the
+API key is typed in by hand.
+
+**Sketch:**
+- **Installer.** An MSI (WiX) or Inno Setup package with an Apps & Features
+  entry and a clean uninstall; later a winget manifest.
+- **Background service.** It watches each Steam library's `steamapps/`
+  for appmanifest changes (ReadDirectoryChangesW on Windows, inotify on
+  Linux) and reports on change, debounced. A small heartbeat carries
+  presence, so presence no longer depends on the full report interval.
+- **Tray app (optional).** Shows the connection status, the last report
+  and the version, with "Open Hangar", settings and a connection test.
+- **Pairing.** The web UI's "PCs" list offers "Add PC" with a short code
+  or QR. The client exchanges it for its own revocable key (D5), so no
+  shared API key gets copied around.
+- **Updates.** The client compares its version with `GET /v1/about` and
+  offers the matching release.
+- **Code signing.** Without a certificate, SmartScreen warns. Options are
+  a paid OV/EV certificate, signing via the Microsoft Store or winget, or
+  accepting the warning. This is a cost decision for the user.
+- **Linux/SteamOS.** Flatpak, .deb or AUR, with a systemd user service
+  instead of a timer.
+
+**Open decision.** Service plus tray, or tray-only:
+- A service runs without a logged-on user, can read every user's Steam
+  libraries, and needs admin to install.
+- A tray-only client runs per user and needs no admin, but reports only
+  while someone is logged on.
+
+**Depends on.** D5 (per-PC keys) for pairing. The presence fields from
+AGENT-FEAT-1 (`agent_version`, `report_interval_seconds`) stay the wire
+contract.
+
 ## Suggested order
 
 1. DOCS-FIX-3 lands before `v0.1.0` (it is in item 13 B).
