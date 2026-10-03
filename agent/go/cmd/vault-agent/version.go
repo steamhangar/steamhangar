@@ -30,8 +30,8 @@ func isVersionFlag(arg string) bool {
 }
 
 // printVersion writes the one-line build identity, e.g.
-// "vault-agent 0.1.0-rc8 (commit 1a2b...)". The report payload does not
-// carry it (that is AGENT-FEAT-1).
+// "vault-agent 0.1.0-rc8 (commit 1a2b...)". Every report also carries
+// version as agent_version (WP AGENT-FEAT-1, see main.go's reportOnce).
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "vault-agent %s (commit %s)\n", version, commit)
 }

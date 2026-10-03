@@ -1680,6 +1680,52 @@ assert_eq '{"status":"ok"}' "$health_body" "GET /v1/health is still the fixed, v
 core_served=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$CORE_URL/vault-version")
 assert_eq "404" "$core_served" "vault-core serves no version page to the LAN"
 
+step "6x. WP AGENT-FEAT-1: a report with version and interval shows the PC online"
+say 'POST /v1/agent/installed with agent_version and report_interval_seconds'
+say '(an empty installed list, so nothing joins the prefill set), then'
+say 'GET /v1/clients: the row carries both and presence "online", with'
+say 'offline_after = last_reported_at + 2 x 600 + 300 s. A report without the'
+say 'fields (an agent from before AGENT-FEAT-1) is still accepted and shows'
+say 'version null and the assumed 30 minutes. Both clients are deleted after.'
+presence_post=$(curl -s -o "$work/presence-post.json" -w '%{http_code}' --max-time 10 -X POST "$API_URL/v1/agent/installed" \
+    -H "X-Api-Key: $TEST_API_KEY" -H 'Content-Type: application/json' \
+    -d '{"client_id":"verify-presence","appids":[],"agent_version":"0.1.0-verify","report_interval_seconds":600}')
+assert_eq "200" "$presence_post" "POST /v1/agent/installed with agent_version + report_interval_seconds"
+legacy_post=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST "$API_URL/v1/agent/installed" \
+    -H "X-Api-Key: $TEST_API_KEY" -H 'Content-Type: application/json' \
+    -d '{"client_id":"verify-presence-legacy","appids":[]}')
+assert_eq "200" "$legacy_post" "POST /v1/agent/installed without the new fields (old agent) is still accepted"
+curl -s --max-time 10 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/clients" > "$work/clients.json"
+sed 's/^/    /' "$work/clients.json"; echo
+# client_field <client_id> <field>: prints the value, "null" for null.
+client_field() {
+    python3 -c 'import json, sys
+rows = {r["client_id"]: r for r in json.load(open(sys.argv[1]))}
+v = rows[sys.argv[2]][sys.argv[3]]
+print("null" if v is None else v)' "$work/clients.json" "$1" "$2" 2>&1
+}
+assert_eq "online"       "$(client_field verify-presence presence)"                "verify-presence: presence"
+assert_eq "0.1.0-verify" "$(client_field verify-presence agent_version)"           "verify-presence: agent_version"
+assert_eq "600"          "$(client_field verify-presence report_interval_seconds)" "verify-presence: report_interval_seconds"
+presence_window=$(python3 -c 'import json, sys
+from datetime import datetime
+r = {r["client_id"]: r for r in json.load(open(sys.argv[1]))}[sys.argv[2]]
+f = "%Y-%m-%dT%H:%M:%SZ"
+print(int((datetime.strptime(r["offline_after"], f) - datetime.strptime(r["last_reported_at"], f)).total_seconds()))' "$work/clients.json" verify-presence 2>&1)
+assert_eq "1500" "$presence_window" "verify-presence: offline_after - last_reported_at = 2 x 600 + 300 s"
+assert_eq "online" "$(client_field verify-presence-legacy presence)"      "verify-presence-legacy (old agent): presence"
+assert_eq "null"   "$(client_field verify-presence-legacy agent_version)" "verify-presence-legacy (old agent): version unknown"
+legacy_window=$(python3 -c 'import json, sys
+from datetime import datetime
+r = {r["client_id"]: r for r in json.load(open(sys.argv[1]))}[sys.argv[2]]
+f = "%Y-%m-%dT%H:%M:%SZ"
+print(int((datetime.strptime(r["offline_after"], f) - datetime.strptime(r["last_reported_at"], f)).total_seconds()))' "$work/clients.json" verify-presence-legacy 2>&1)
+assert_eq "3900" "$legacy_window" "verify-presence-legacy: 30 minutes assumed, offline after 2 x 1800 + 300 s"
+for presence_client in verify-presence verify-presence-legacy; do
+    del_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X DELETE -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/clients/$presence_client")
+    assert_eq "204" "$del_code" "cleanup: DELETE /v1/clients/$presence_client"
+done
+
 step "6j. Regression guard: /v1/health and an authed route still behave after the build-context change"
 say '6a/6b above already exercise these for auth-contract reasons; restated'
 say 'explicitly here because the build-context move (api/ -> repo root,'

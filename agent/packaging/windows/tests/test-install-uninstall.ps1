@@ -216,6 +216,13 @@ try {
     Check "trigger repetition interval" $trigger.Repetition.Interval "PT30M"
     CheckTrue "trigger repetition duration is long (catch-up window)" ($trigger.Repetition.Duration -like "P*")
 
+    # WP AGENT-FEAT-1: a second trigger at logon of the installing user.
+    Check "task has two triggers (repetition + logon)" @($task.Triggers).Count 2
+    $logonTrigger = $task.Triggers[1]
+    Check "second trigger is a logon trigger" $logonTrigger.CimClass.CimClassName "MSFT_TaskLogonTrigger"
+    CheckTrue "logon trigger is for the installing user" ($logonTrigger.UserId -like "*$env:USERNAME")
+    Check "MultipleInstances is IgnoreNew (logon and repetition never overlap)" "$($task.Settings.MultipleInstances)" "IgnoreNew"
+
     Check "principal logon type" $task.Principal.LogonType "Interactive"
 
     $settings = $task.Settings
@@ -226,6 +233,7 @@ try {
     $envContent = Get-Content -Raw -LiteralPath $envFilePath
     CheckTrue "env file contains the API key" ($envContent -like "*VAULT_AGENT_API_KEY=$ApiKeyValue*")
     CheckTrue "env file contains the server URL" ($envContent -like "*VAULT_AGENT_SERVER_URL=$ServerUrl*")
+    CheckTrue "env file passes the interval to the agent (WP AGENT-FEAT-1)" ($envContent -like "*VAULT_AGENT_REPORT_INTERVAL=30m*")
 
     $acl = Get-Acl -LiteralPath $envFilePath
     CheckTrue "env file ACL: inheritance disabled" ($acl.AreAccessRulesProtected -eq $true)
@@ -265,9 +273,11 @@ try {
 
     $task2 = Get-TestTask
     Check "re-install updated trigger interval" $task2.Triggers[0].Repetition.Interval "PT15M"
+    Check "re-install still has exactly two triggers" @($task2.Triggers).Count 2
     $envContent2 = Get-Content -Raw -LiteralPath $envFilePath
     CheckTrue "re-install updated the server URL" ($envContent2 -like "*VAULT_AGENT_SERVER_URL=http://127.0.0.1:2*")
     CheckTrue "re-install updated the client id" ($envContent2 -like "*VAULT_AGENT_CLIENT_ID=wp26-harness-v2*")
+    CheckTrue "re-install updated the interval passed to the agent" ($envContent2 -like "*VAULT_AGENT_REPORT_INTERVAL=15m*")
 
     # ---- 6. uninstall removes exactly what install created ------------------
     & $uninstallScript -TaskName $TaskName -ConfigDir $ConfigDir | Out-Null

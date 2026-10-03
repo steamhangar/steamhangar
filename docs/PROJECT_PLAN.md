@@ -2741,6 +2741,9 @@ below carry their own later dates, item 12 is the current one).
     - [ ] Signed APK: operator creates and backs up the keystore, puts
       the four `ANDROID_*` secrets into the `release` Environment, then
       dispatches the publish workflow on the release tag (app/README).
+    - [ ] Standard-user check: `install-task.ps1` (AGENT-FEAT-1, with the
+      AtLogOn trigger) registers the task on a non-admin Windows account
+      (CI's harness runs as admin).
     - [ ] Real-device checks from the honest open lists
       (`web/tests/README.md`, `app/README.md`): screen reader, phone
       cover art, GC against real chunks, multi-client bypass detection,
@@ -2787,11 +2790,16 @@ below carry their own later dates, item 12 is the current one).
       in tinyproxy's egress filter); vault-dns `unknown`, never probed
       (vault-api cannot tell whether it runs). Footer: `dev` reads "dev
       build", only digit-leading versions get the `v`.
-    - [ ] **AGENT-FEAT-1** — the agent reports at logon/boot and every
+    - [x] **AGENT-FEAT-1** — the agent reports at logon/boot and every
       10 minutes (was 30), with its version and report interval in the
       report; `GET /v1/clients` adds them plus a computed online/offline
       state (offline after two intervals plus 5 minutes, "last seen ..."
       shown). Old agents appear without a version, assumed 30 minutes.
+      Implemented 2026-10-03, in review (ADR-0016 addendum): schema v17,
+      `agent_reports.presence`, Windows logon trigger + 10 min, systemd
+      `OnCalendar=*:0/10` + `OnStartupSec=30s`; a new agent resends once
+      without the fields to a server up to rc8 that refuses them. Operators
+      reinstall the task/units to get the new schedule.
     - [ ] **WEB-FEAT-3** — Settings gains "About" (component table) and
       "PCs (agents)" (always reachable, online/offline, last seen,
       version, games); the clients sheet no longer needs the bypass

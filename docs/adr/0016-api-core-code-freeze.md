@@ -396,3 +396,41 @@ Scope of the exception:
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-03 — freeze exception: agent presence (WP AGENT-FEAT-1, "Weg B")
+
+User decision, 2026-10-03 ("Weg B"), for `v0.1.0`: the agent reports at
+logon (Windows) / user-manager start (Linux) and every 10 minutes (was 30),
+each report carries the agent version and its report interval, and the server
+shows online/offline plus "last seen", with no third state. Offline when the
+last report is older than `2 × interval + 5 minutes`; an unstated interval
+(an old agent) counts as 30 minutes; old agents keep working and show
+"version unknown". The api/ freeze opens for this one feature.
+
+Scope of the exception, all in WP AGENT-FEAT-1:
+
+- api/: schema v17 (`agent_reports.agent_version`,
+  `agent_reports.report_interval_seconds`, both nullable, added by the
+  existing per-column step `_add_missing_agent_report_columns`); two optional
+  fields on `POST /v1/agent/installed` (`extra="forbid"` kept; version in the
+  VER-1 grammar, interval a strict int 60..86400; response unchanged);
+  `agent_reports.presence`, the one place the rule lives; four fields appended
+  to `GET /v1/clients` (`agent_version`, `report_interval_seconds`,
+  `presence`, `offline_after`), no existing field changed. `GET /v1/about` is
+  unchanged: the web counts `/v1/clients` rows (WEB-FEAT-3) instead of a
+  second presence computation.
+- Not frozen, listed for completeness: `agent/` (payload fields, default
+  interval 10m, one-shot states an interval only when told, the one-time
+  resend without the fields to a server that answers `422 extra_forbidden`
+  for exactly them, i.e. every vault-api up to `v0.1.0-rc8`), the Windows
+  task (logon trigger, 10 minutes, `VAULT_AGENT_REPORT_INTERVAL` in the env
+  file), the systemd units (`OnCalendar=*:0/10`, `OnStartupSec=30s`,
+  `--interval 10m`), `deploy/tests/verify-stack.sh` step 6x, tests and docs.
+
+Operator note: existing Windows tasks and systemd units keep their 30-minute
+schedule until reinstalled (`install-task.ps1` again; copy the two unit files
+and `daemon-reload`). They keep working meanwhile and show correct presence,
+because their reports state no interval and 30 minutes is assumed.
+
+Every other frozen-path change still needs its own user decision and note
+here.

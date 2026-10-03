@@ -9,9 +9,24 @@ structured event log:
      "source_addrs", "cache_hits", "cache_misses", "bytes_served",
      "last_seen_in_cache_log", "bypass_suspected"}
 
+WP AGENT-FEAT-1 (schema v17) adds four more, again next to the old ones:
+
+    {"agent_version", "report_interval_seconds", "presence", "offline_after"}
+
 The WP 2.4 shape was chosen to be forward-compatible — a flat object per
 client — and that held: every new field sits next to the old ones and nothing
 was restructured.
+
+Presence (WP AGENT-FEAT-1)
+--------------------------
+``presence`` is ``"online"`` or ``"offline"``, nothing else: a client is
+offline once its last report is older than two report intervals plus five
+minutes, using the interval its latest report stated, or 30 minutes when it
+stated none (an agent from before AGENT-FEAT-1). The rule lives in
+``agent_reports.presence``; this router only calls it, with one ``now`` for
+the whole answer. ``offline_after`` says when the client turns offline if no
+further report arrives, so a UI can show "last seen ..." and know when to
+flip without re-implementing the rule.
 
 How a client is correlated with cache traffic
 ---------------------------------------------
@@ -64,6 +79,7 @@ api/README.md "Auth").
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -107,6 +123,21 @@ class ClientOut(BaseModel):
     #: VAULT_BYPASS_WINDOW_DAYS. Fails toward ``false`` on every unknown — see
     #: the module docstring for the full disqualification chain.
     bypass_suspected: bool
+    #: WP AGENT-FEAT-1: the agent build that sent the LATEST report
+    #: (``vault-agent --version``). ``null`` = version unknown: an agent from
+    #: before AGENT-FEAT-1, or a latest report that did not carry it.
+    agent_version: str | None
+    #: WP AGENT-FEAT-1: the report interval the latest report stated, in
+    #: seconds. ``null`` = not stated; presence then assumes 1800 (30 min).
+    report_interval_seconds: int | None
+    #: WP AGENT-FEAT-1: ``"online"`` until ``offline_after``, ``"offline"``
+    #: after it. Computed per request from ``last_reported_at``; see the
+    #: module docstring.
+    presence: Literal["online", "offline"]
+    #: WP AGENT-FEAT-1: ``last_reported_at`` + 2 x interval + 5 minutes, the
+    #: moment this client turns offline without another report. ``null`` only
+    #: when ``last_reported_at`` is unreadable (then ``presence`` is offline).
+    offline_after: str | None
 
 
 @router.get("/v1/clients", response_model=list[ClientOut])
@@ -133,6 +164,15 @@ def list_clients(
         state, settings, now
     )
 
+    # One `now` for every row (and for the bypass cutoff above), so two
+    # clients with the same last report can never disagree within one answer.
+    presence = {
+        summary.client_id: agent_reports.presence(
+            summary.last_reported_at, summary.report_interval_seconds, now
+        )
+        for summary in summaries
+    }
+
     return [
         ClientOut(
             client_id=summary.client_id,
@@ -150,6 +190,10 @@ def list_clients(
                 feed_can_accuse=feed_can_accuse,
                 cutoff_iso=cutoff_iso,
             ),
+            agent_version=summary.agent_version,
+            report_interval_seconds=summary.report_interval_seconds,
+            presence=presence[summary.client_id][0],
+            offline_after=presence[summary.client_id][1],
         )
         for summary in summaries
     ]

@@ -35,6 +35,25 @@
 // 6*15s + 15.5s ≈ 105.5s. cmd/vault-agent budgets 2 minutes per report
 // specifically to comfortably clear this.
 //
+// Servers that predate the presence fields (WP AGENT-FEAT-1):
+// every vault-api up to and including v0.1.0-rc8 validates the report body
+// with extra="forbid", so the optional agent_version /
+// report_interval_seconds fields make it reject the WHOLE report with a
+// 422 (measured against the rc8 tree: {"detail":[{"type":
+// "extra_forbidden","loc":["body","agent_version"],...}]}). A fleet
+// upgrades agents and server in no fixed order, so ReportInstalled sends
+// the new fields first and, when the 422 consists of NOTHING BUT
+// extra_forbidden errors for those optional fields, resends the same
+// report once without them (Result.PresenceDropped tells the caller). Any
+// other 422 - including one that ALSO names a real problem such as a bad
+// client_id - is returned unchanged, so the fallback can never hide a
+// genuine rejection. The cost on an old server is one extra request per
+// report, nothing is remembered between reports, and the first report
+// after the server upgrade carries the fields again. Rejected
+// alternatives: asking the server first (an extra round trip on every
+// report, and rc8 has nothing to ask), and HTTP headers (old servers
+// ignore them, but the report contract would live in two places).
+//
 // TLS uses Go's default system root CA pool (no custom TLSClientConfig is
 // set). Proxying respects the standard http_proxy/https_proxy/no_proxy
 // environment variables via http.ProxyFromEnvironment, same as any other
@@ -46,6 +65,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -80,6 +100,10 @@ type Result struct {
 	Added       []int
 	Removed     []int
 	FirstReport bool
+	// PresenceDropped is true when the server rejected the optional
+	// presence fields as unknown and the report was resent without them
+	// (see the package doc: the server predates WP AGENT-FEAT-1).
+	PresenceDropped bool
 }
 
 // APIError is returned for a non-2xx HTTP response. StatusCode is always
@@ -98,6 +122,11 @@ type APIError struct {
 	// here so the operator can see WHERE the server wanted to send the
 	// report and fix --server-url to point there directly.
 	Location string
+
+	// presenceUnknown is set on a 422 whose body names nothing but the
+	// optional presence fields as unknown (see unknownPresenceFieldsOnly):
+	// the one rejection ReportInstalled answers by resending without them.
+	presenceUnknown bool
 }
 
 func (e *APIError) Error() string {
@@ -250,6 +279,22 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 // canceling it (e.g. on SIGTERM in --loop mode) aborts promptly rather than
 // finishing out the retry budget.
 func (c *Client) ReportInstalled(ctx context.Context, payload report.Payload) (Result, error) {
+	result, err := c.send(ctx, payload)
+	var apiErr *APIError
+	if err != nil && payload.HasPresence() && errors.As(err, &apiErr) && apiErr.presenceUnknown {
+		// The server predates the presence fields (package doc): resend
+		// the same report without them, once.
+		result, err = c.send(ctx, payload.WithoutPresence())
+		if err == nil {
+			result.PresenceDropped = true
+		}
+	}
+	return result, err
+}
+
+// send marshals payload and posts it with the retry policy from the
+// package doc.
+func (c *Client) send(ctx context.Context, payload report.Payload) (Result, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		// Payload is our own struct with only string/int fields - this
@@ -354,8 +399,13 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 		return Result{}, true, &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
 	case resp.StatusCode >= 400:
 		// Every other 4xx: never retryable (401/422 will not heal by
-		// resending).
-		return Result{}, false, &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
+		// resending the SAME body; ReportInstalled may resend a different
+		// one, see presenceUnknown).
+		return Result{}, false, &APIError{
+			StatusCode:      resp.StatusCode,
+			Body:            excerpt(respBody),
+			presenceUnknown: resp.StatusCode == http.StatusUnprocessableEntity && unknownPresenceFieldsOnly(respBody),
+		}
 	case resp.StatusCode >= 300:
 		// vault-api never issues a redirect for this endpoint, so a 3xx
 		// means a reverse proxy in front of it (http->https upgrade, a
@@ -396,6 +446,40 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 		Removed:     parsed.Removed,
 		FirstReport: parsed.FirstReport,
 	}, false, nil
+}
+
+// presenceFieldNames are report.Payload's optional JSON keys (WP
+// AGENT-FEAT-1), the only fields a 422 may name for the legacy resend.
+var presenceFieldNames = map[string]bool{
+	"agent_version":           true,
+	"report_interval_seconds": true,
+}
+
+// unknownPresenceFieldsOnly reports whether a 422 body is FastAPI's
+// validation error listing nothing but "extra_forbidden" at
+// ["body", <presence field>]: what a pre-AGENT-FEAT-1 vault-api answers to
+// a report carrying the presence fields. Anything else (another error type,
+// another location, an empty or non-list detail, a non-JSON body) is false.
+func unknownPresenceFieldsOnly(body []byte) bool {
+	var parsed struct {
+		Detail []struct {
+			Type string `json:"type"`
+			Loc  []any  `json:"loc"`
+		} `json:"detail"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Detail) == 0 {
+		return false
+	}
+	for _, d := range parsed.Detail {
+		if d.Type != "extra_forbidden" || len(d.Loc) != 2 || d.Loc[0] != "body" {
+			return false
+		}
+		name, ok := d.Loc[1].(string)
+		if !ok || !presenceFieldNames[name] {
+			return false
+		}
+	}
+	return true
 }
 
 // redirectTarget returns resp's Location header resolved against the

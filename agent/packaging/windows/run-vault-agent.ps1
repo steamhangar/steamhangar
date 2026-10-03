@@ -24,7 +24,8 @@
 
 .PARAMETER EnvFile
     Full path to the KEY=VALUE secret env file written by install-task.ps1
-    (VAULT_AGENT_SERVER_URL, VAULT_AGENT_API_KEY, and optionally
+    (VAULT_AGENT_SERVER_URL, VAULT_AGENT_API_KEY,
+    VAULT_AGENT_REPORT_INTERVAL (WP AGENT-FEAT-1), and optionally
     VAULT_AGENT_CLIENT_ID / VAULT_AGENT_LIBRARY_ROOT). Blank lines and lines
     starting with '#' are skipped.
 

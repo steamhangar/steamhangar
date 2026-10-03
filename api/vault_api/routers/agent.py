@@ -1,9 +1,12 @@
 """Agent endpoint (plan §6): ``POST /v1/agent/installed``.
 
 The vault-agent on a gaming machine (Windows PC, Steam Deck / Steam Machine —
-ADR-0002) posts the FULL list of installed Steam app ids here, typically every
-30 minutes. vault-api stores it as a snapshot and answers with the diff
-against that client's previous snapshot.
+ADR-0002) posts the FULL list of installed Steam app ids here, at logon/boot
+and every 10 minutes since WP AGENT-FEAT-1 (30 before). vault-api stores it as
+a snapshot and answers with the diff against that client's previous snapshot.
+Since schema v17 a report may also say which agent version sent it and how
+often it reports (``agent_version``, ``report_interval_seconds``, both
+optional); ``GET /v1/clients`` turns that into online/offline.
 
 Auth is attached at the router level (secure-by-default pattern, see
 api/README.md "Auth") — every route added here is authenticated automatically.
@@ -15,11 +18,18 @@ mechanics live in ``vault_api/agent_reports.py``.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Annotated
 
-from vault_api import agent_reports
-from vault_api.agent_reports import MAX_APPIDS_PER_REPORT, MAX_CLIENT_ID_LENGTH
+from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+
+from vault_api import agent_reports, is_valid_version
+from vault_api.agent_reports import (
+    MAX_APPIDS_PER_REPORT,
+    MAX_CLIENT_ID_LENGTH,
+    MAX_REPORT_INTERVAL_SECONDS,
+    MIN_REPORT_INTERVAL_SECONDS,
+)
 from vault_api.auth import require_api_key
 from vault_api.deps import DbOpener, db_opener, get_agent_report_keep
 from vault_api.validation import AppId
@@ -41,6 +51,36 @@ class InstalledReportRequest(BaseModel):
     #: field is a broken agent, and defaulting it to ``[]`` would silently
     #: report a full library as wiped.
     appids: list[AppId] = Field(max_length=MAX_APPIDS_PER_REPORT)
+
+    #: WP AGENT-FEAT-1 (schema v17), optional: the agent's build version
+    #: (``vault-agent --version``), in the VER-1 version grammar. Absent or
+    #: ``null`` from agents that predate it -- ``GET /v1/clients`` then shows
+    #: ``agent_version: null`` ("version unknown"). Strict: a JSON number is
+    #: not a version.
+    agent_version: StrictStr | None = None
+
+    #: WP AGENT-FEAT-1 (schema v17), optional: how often this agent reports,
+    #: in whole seconds, 60..86400. ``GET /v1/clients`` derives online/offline
+    #: from it; absent means "assume 30 minutes". Strict: ``true``, ``600.0``
+    #: and ``"600"`` are refused rather than coerced (docs/LEARNINGS.md,
+    #: Pydantic lax mode turns ``true`` into 1).
+    report_interval_seconds: Annotated[
+        StrictInt,
+        Field(ge=MIN_REPORT_INTERVAL_SECONDS, le=MAX_REPORT_INTERVAL_SECONDS),
+    ] | None = None
+
+    @field_validator("agent_version")
+    @classmethod
+    def _validate_agent_version(cls, value: str | None) -> str | None:
+        """The VER-1 grammar (``vault_api.is_valid_version``): the value is
+        shown in the web and app and written into log lines, so whitespace,
+        quotes, slashes and control characters are refused, not stored."""
+        if value is not None and not is_valid_version(value):
+            raise ValueError(
+                "agent_version must start with a letter or digit and contain "
+                "only letters, digits and . _ + - (at most 64 characters)"
+            )
+        return value
 
     @field_validator("client_id")
     @classmethod
@@ -139,6 +179,8 @@ def report_installed_apps(
             appids=body.appids,
             keep=keep,
             source_addr=peer,
+            agent_version=body.agent_version,
+            report_interval_seconds=body.report_interval_seconds,
         )
 
     return InstalledReportResponse(

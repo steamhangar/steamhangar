@@ -4,7 +4,9 @@
 # ~/.config/systemd/user/ — see agent/README.md's "Linux/SteamOS install"
 # section for the full step-by-step.
 #
-# This is the Linux answer to "report every ~30 min" (plan §3/§7):
+# This is the Linux answer to "report at login/boot and every 10 min"
+# (plan §3/§7; 10 min and the start-up report since WP AGENT-FEAT-1, user
+# decision 2026-10-03 "Weg B" -- it was every 30 min before):
 # systemd's own timer replaces vault-agent's `report --loop` here, the
 # same way a Windows Scheduled Task replaces it on Windows (WP 2.6).
 # `--loop` still exists and still works on Linux (e.g. inside a container
@@ -18,10 +20,13 @@ Description=Periodic timer for vault-agent-report.service
 Documentation=https://github.com/steamhangar/steamhangar/blob/main/agent/README.md
 
 [Timer]
-# Every 30 minutes on the clock (:00 and :30) — matches
+# Every 10 minutes on the clock (:00, :10, :20, ...) — matches
 # agentconfig.DefaultReportInterval (go/agentconfig/config.go), so the
 # timer's default cadence agrees with `report --loop`'s default without
-# either one having to read the other's config.
+# either one having to read the other's config. The paired .service passes
+# the same value to the agent (`--interval 10m`), because a one-shot report
+# states its interval only when told and vault-api derives online/offline
+# from it (offline after 2 x interval + 5 min). Change both together.
 #
 # MUST be OnCalendar=, not OnBootSec=/OnUnitActiveSec= (an earlier version
 # of this file used those instead, on the mistaken assumption that
@@ -34,9 +39,31 @@ Documentation=https://github.com/steamhangar/steamhangar/blob/main/agent/README.
 # suspend behavior a frequently-suspended Steam Deck needs most, and the
 # one case an earlier version of this file and the README both
 # (incorrectly) promised it had.
-OnCalendar=*:0/30
+OnCalendar=*:0/10
 
-# +/- up to 5 minutes of random jitter added to every trigger, same
+# WP AGENT-FEAT-1: one report shortly after this user's service manager
+# starts — i.e. at login, or at boot when lingering is enabled
+# (`loginctl enable-linger`) — so the machine shows online right away
+# instead of up to one interval later. OnStartupSec=, not OnBootSec=: in a
+# USER unit OnStartupSec= counts from the user manager's start, which is
+# exactly "this user logged in"; OnBootSec= counts from machine boot, which
+# for a user logging in later has long passed. (systemd.timer(5): a
+# monotonic OnBootSec=/OnStartupSec= point that is already in the past
+# when the timer is activated elapses immediately, so either would fire
+# at activation; OnStartupSec= is the one that says what is meant.)
+#
+# This ADDS a monotonic trigger next to OnCalendar=; it does not replace
+# it, and nothing above changes: Persistent= below still applies to the
+# OnCalendar= trigger only (it is the one with an on-disk stamp), which is
+# still what catches up a slot missed during suspend. The start-up trigger
+# needs no persistence — it fires once per manager start by definition.
+# 30 s gives the network a moment; the agent itself retries for ~105 s.
+# RandomizedDelaySec= below applies to this trigger too, so the first
+# report lands 30 s plus 0..5 min after the user manager starts, not after
+# exactly 30 s.
+OnStartupSec=30s
+
+# Up to 5 minutes of random delay added to every trigger, same
 # purpose as go/cmd/vault-agent's own +/-10% jitter on --loop: if many
 # agents on the same network are installed with the same timer, they
 # don't all hit vault-api in lockstep.
@@ -49,7 +76,7 @@ RandomizedDelaySec=5min
 # confirmed by `find` during WP 2.5's E2E re-run) is
 # ~/.local/share/systemd/timers/stamp-vault-agent-report.timer — and on
 # the next activation (e.g. the Deck waking from suspend, or a reboot)
-# the service runs immediately if a scheduled :00/:30 slot was missed,
+# the service runs immediately if a scheduled 10-minute slot was missed,
 # instead of waiting for the next one to come around on the clock.
 Persistent=true
 
