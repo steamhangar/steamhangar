@@ -2558,7 +2558,11 @@ below carry their own later dates, item 12 is the current one).
    authenticated `GET /v1/settings`; `/v1/health` returns only
    `{"status":"ok"}`), the compose `VAULT_IMAGE_TAG` default, and the
    `org.opencontainers.image.version` LABEL in the api, core, dns and
-   deploy/proxy Dockerfiles. What the tag sets: since DEPLOY-FIX-1/APP-FIX-1 the APK's
+   deploy/proxy Dockerfiles. (Superseded 2026-10-03 by WP VER-1: the
+   Dockerfile labels and `server_version` now come from the build args
+   publish.yml derives from the tag, `dev` for local builds; only
+   `vault_api.BASE_VERSION`, the fallback outside an image, and the
+   compose `VAULT_IMAGE_TAG` default still say `0.1.0`.) What the tag sets: since DEPLOY-FIX-1/APP-FIX-1 the APK's
    versionName is the tag without its `v` (build.gradle.kts falls back to
    `0.1.0` for local builds only), and the published images are tagged
    (and labelled, via docker/metadata-action) with the same string. With
@@ -2758,6 +2762,26 @@ below carry their own later dates, item 12 is the current one).
       `updating`/`verify`) exists but no view ever renders those kinds;
       decide whether a live update/verify state should be shown, or drop
       the dead glyph.
+
+    **B2. Component versions and agent presence (user decisions
+    2026-10-03, "Weg A1" and "Weg B")**
+    - [x] **VER-1** — every image and the agent carry the real release
+      version and commit (build args from publish.yml; `server_version`
+      from the image; `vault-agent --version`; publish fails if a tag is
+      not the version metadata-action derives).
+    - [ ] **VER-2** — `GET /v1/about`: versions and reachability of
+      vault-api/web, vault-core, vault-proxy, vault-runner, SteamPrefill
+      and vault-dns ("not in use" when the operator runs their own DNS
+      rewrite). The web rail footer must not render `vdev`.
+    - [ ] **AGENT-FEAT-1** — the agent reports at logon/boot and every
+      10 minutes (was 30), with its version and report interval in the
+      report; `GET /v1/clients` adds them plus a computed online/offline
+      state (offline after two intervals plus 5 minutes, "last seen ..."
+      shown). Old agents appear without a version, assumed 30 minutes.
+    - [ ] **WEB-FEAT-3** — Settings gains "About" (component table) and
+      "PCs (agents)" (always reachable, online/offline, last seen,
+      version, games); the clients sheet no longer needs the bypass
+      banner as its only entry point.
 
     **C. Hygiene (any time, small)**
     - [ ] verify-stack section 8: its `rootonly/` fixture cannot be

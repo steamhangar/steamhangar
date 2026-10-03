@@ -6086,66 +6086,71 @@ Forcing a value back to the env/default is explicit and first-class:
 is no tombstone, no "overridden to blank" state — so "does an override
 exist" is a plain row-presence check, not a `NULL` check.
 
-### `server_version` — the running server's own version (WP 4e.7)
+### `server_version` — the running server's own version (WP 4e.7, WP VER-1)
 
 `GET /v1/settings` reports one more field, `server_version` (a JSON string,
-e.g. `"0.1.0"`), a sibling of `readonly` at the TOP LEVEL of the response —
-not a row in the `settings` list. It is the value of `vault_api.__version__`
-(`api/vault_api/__init__.py`), the same constant `main.py` now passes to
-`FastAPI(version=...)` — one source of truth for "what code is running", not
-two independently hardcoded `"0.1.0"` literals.
+e.g. `"0.1.0-rc8"`), a sibling of `readonly` at the TOP LEVEL of the
+response — not a row in the `settings` list. It is the same value `main.py`
+passes to `FastAPI(version=...)`, resolved once per app by
+`vault_api.build_info()` (see "Build version" below).
 
 Why this shape, and why here:
 
-- **Not a setting.** It cannot be changed, has no db/env/default precedence
-  and no `applies` timing, so it does not belong in `SettingInfoOut` — that
-  would either fake those fields or special-case a row that behaves
-  differently from every other one. `PATCH /v1/settings` rejects
-  `server_version` exactly like any other name it does not recognise (`422`,
-  "not a recognised setting") — it needs no entry in `OVERRIDABLE_SPECS` or
-  `ENV_ONLY_KEYS` to be refused correctly; adding one would wrongly imply it
-  is either overridable or environment-controlled.
+- **Not a setting.** It cannot be changed through the API, has no
+  db/env/default precedence and no `applies` timing, so it does not belong
+  in `SettingInfoOut` — that would either fake those fields or special-case
+  a row that behaves differently from every other one. `PATCH /v1/settings`
+  rejects `server_version` exactly like any other name it does not
+  recognise (`422`, "not a recognised setting") — it needs no entry in
+  `OVERRIDABLE_SPECS` or `ENV_ONLY_KEYS` to be refused correctly; adding one
+  would wrongly imply it is either overridable or an operator setting.
 - **On `/v1/settings`, not a new route.** That endpoint is already
   authenticated and already polled by every frontend that has a settings
   screen, so this costs zero new routes and zero new requests.
 - **Deliberately NOT on `GET /v1/health`.** See "Auth" above for the full
   reasoning (fingerprinting risk on the one unauthenticated route).
 
-**What the number does and does not claim.** There are no release tags yet
-(`docs/PROJECT_PLAN.md` §7 Phase 5, WP 5.5 unstarted) — this is a
-hand-maintained value meaning "the code baked into this image", not a
-published release. `deploy/compose.yaml`'s `VAULT_IMAGE_TAG` answers a
-*different* question (which locally-built image tag `docker compose up -d
---build` produces and runs — there is no registry to publish to yet, so
-"already-published" would overstate it) but is meant to track the same
-release number as a matter of house style.
+### Build version (WP VER-1)
 
-**Bump ALL of the following together — this is the full list, not an
-illustrative pair (review round 1 correction: an earlier draft here, and in
-`api/vault_api/__init__.py`'s own header, wrongly implied only two sites
-existed):**
+Where the version comes from, in order:
 
-1. `api/vault_api/__init__.py`'s `__version__` — the source of truth;
-2. every `image:` line in `deploy/compose.yaml` (`${VAULT_IMAGE_TAG:-...}`);
-3. `api/Dockerfile`'s `org.opencontainers.image.version` LABEL (a build-time
-   literal — it cannot read a Python module);
-4. `deploy/tests/verify-stack.sh`'s `TAG=${VAULT_IMAGE_TAG:-...}` line;
-5. `deploy/.env.example`'s commented-out `#VAULT_IMAGE_TAG=...` example.
+| Running as | `VAULT_BUILD_VERSION` | `server_version` |
+|---|---|---|
+| a published image (`publish.yml`, tag `v0.1.0-rc8`) | `0.1.0-rc8` | `0.1.0-rc8` |
+| a locally built image (`docker build`, `docker compose up --build`, `verify-stack.sh`) | `dev` (the Dockerfile default) | `dev` |
+| natively from a checkout, or the test suite | absent | `0.1.0` (`vault_api.BASE_VERSION`) |
+| any image with a blank or invalid value | e.g. `""`, `1.0 beta` | `0.1.0`, plus one startup WARNING |
 
-`api/tests/test_version_pin.py` derives 1-5 independently from their real
-sources (no Docker, no network) and fails by name, in either drift
-direction, for each of 2-5 against 1 — see that file's module docstring for
-the full table, including a mutation-tested account of what it actually
-proves.
+Every Dockerfile takes the build args `VAULT_VERSION` (default `dev`) and
+`VAULT_COMMIT` (default `unknown`) and bakes them as the runtime env
+`VAULT_BUILD_VERSION` / `VAULT_BUILD_COMMIT` and as the OCI
+`org.opencontainers.image.version` / `.revision` labels. `publish.yml`'s
+`build-version` job passes the tag without its `v` (the same string the
+image is tagged with; the publish job checks that equality) and the full
+commit SHA; a branch rehearsal passes `dev-<short sha>`, ci.yml's
+`image-build` passes `ci-<short sha>`. Nothing reads the labels at runtime.
 
-**Two more copies exist and are explicitly OUT of this pin's reach, by WP
-4e.7's own footprint boundary (`api/` plus `deploy/` only):**
-`core/Dockerfile`'s and `dns/Dockerfile`'s own
-`org.opencontainers.image.version` LABELs. A release bump must touch these
-by hand too; nothing in this repository's test suite catches a miss there
-today. This is a stated, real gap, not a silent one — see
-`test_version_pin.py`'s module docstring for the same table, kept in one
-place rather than duplicated here.
+`vault_api.build_info()` accepts a version of 1-64 characters from
+`[0-9A-Za-z._+-]` starting with a letter or digit (the same grammar
+`publish.yml` enforces) and a commit of 7-40 lowercase hex characters (or
+the literal default `unknown`). Anything else, including a present-but-blank
+value, falls back as in the last table row: the version is informational,
+so a bad value does not stop vault-api from booting. The env can be
+overridden at `docker run` time, which is why the check happens here and
+not only in the Dockerfile. vault-api logs `vault-api version X (commit Y)`
+once at startup. The commit is not served by any route yet; WP VER-2 adds
+`GET /v1/about`.
+
+`vault_api.BASE_VERSION` is the one remaining hand-maintained release
+number in `api/`, the fallback above. Bump it together with every `image:`
+line in `deploy/compose.yaml` (`${VAULT_IMAGE_TAG:-...}`),
+`deploy/tests/verify-stack.sh`'s `TAG=${VAULT_IMAGE_TAG:-...}` and
+`deploy/.env.example`'s `#VAULT_IMAGE_TAG=...` example;
+`tests/test_version_pin.py` fails by name for each one that drifts. The
+Dockerfile labels are no longer literals, so they are no longer on that
+list; `tests/test_ver_1_build_version.py` pins their ARG/ENV/LABEL wiring
+in all four Dockerfiles, `publish.yml`'s build args and version script, and
+the fallback above.
 
 ### Which keys are overridable, and when a change takes effect
 

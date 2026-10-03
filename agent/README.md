@@ -412,7 +412,19 @@ SteamOS variant (WP 2.5)" below.
 vault-agent report                one-shot: discover -> report -> print result -> exit
 vault-agent report --loop         keep running, reporting every --interval
                                     (jittered ±10%) until SIGTERM/CTRL-C
+vault-agent --version             print the build version and commit, exit 0
 ```
+
+**Where the version comes from (WP VER-1).** `--version` prints
+`vault-agent <version> (commit <sha>)`. The release binaries attached to a
+GitHub Release are linked with
+`-ldflags "-X main.version=<tag without v> -X main.commit=<full sha>"` by
+`publish.yml`'s `agent-binaries` job (from its `build-version` job, the same
+version the images report), e.g. `vault-agent 0.1.0-rc8 (commit 1a2b...)`;
+that job runs the linux/amd64 binary's `--version` before attaching it. A
+plain `go build` from source prints `vault-agent dev (commit unknown)`. The
+variables live in `go/cmd/vault-agent/version.go`; the report payload does
+not carry the version.
 
 One-shot is the PRIMARY mode (plan §7: a Windows Scheduled Task provides
 the timing — see WP 2.6 for the installer). `--loop` exists for a systemd
@@ -548,7 +560,7 @@ command — it stays write-only towards `/v1/agent/installed` by design.
 
 | Code | Meaning |
 |------|---------|
-| `0`  | the report was sent and accepted (one-shot); or `--loop` exited cleanly on SIGTERM/CTRL-C; or `-h`/`--help` was requested |
+| `0`  | the report was sent and accepted (one-shot); or `--loop` exited cleanly on SIGTERM/CTRL-C; or `-h`/`--help` or `--version` was requested |
 | `1`  | a runtime failure: no readable Steam library under `--library-root` (refused without `--allow-empty`, see "Configuration" above), local report validation failed (should be unreachable in practice — acf's own parser already enforces the appid grammar — but checked, not assumed), or the HTTP client gave up (network error after retries, `401`, `422`, a `3xx` redirect, malformed response, ...) |
 | `2`  | a configuration/usage error (missing/invalid flag or env var, no subcommand given) |
 

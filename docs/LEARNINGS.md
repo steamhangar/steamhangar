@@ -953,3 +953,7 @@ These are not style preferences; each entry cost a review round to learn.
   visible travel (disc radius plus glyph extent), not just the glyph
   box. Test the end frame's visibility, not only the transform numbers
   (WP WEB-FIX-7).
+- Never edit a shell script while a run is reading it: `sh` reads the
+  script as it executes and aborts with a bogus syntax error at an
+  unchanged line. A local docker without buildx uses the legacy builder,
+  whose output format differs from BuildKit's; parse both (WP VER-1).

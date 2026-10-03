@@ -147,7 +147,9 @@ def test_vault_api_key_never_appears_in_the_response(client: TestClient) -> None
 
 
 def test_get_reports_server_version_as_a_top_level_field(client: TestClient) -> None:
-    """`vault_api.__version__` -- not env-derived, not a `settings` row (see
+    """`vault_api.__version__` (since WP VER-1 resolved from the image's
+    baked VAULT_BUILD_VERSION, else BASE_VERSION; the env override is
+    pinned in test_ver_1_build_version.py) -- not a `settings` row (see
     `routers/settings.py`'s module docstring for the shape decision)."""
     body = client.get("/v1/settings", headers=AUTH).json()
     assert body["server_version"] == VAULT_API_VERSION

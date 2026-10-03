@@ -22,8 +22,7 @@ FROM nginx:1.29.8-alpine3.23@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e
 LABEL org.opencontainers.image.title="SteamHangar vault-core" \
       org.opencontainers.image.description="nginx proxy_store cache with path-faithful Steam depot storage" \
       org.opencontainers.image.source="https://github.com/steamhangar/steamhangar" \
-      org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.version="0.1.0"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 # --- Config -------------------------------------------------------------------
 # The config is baked into the image, not mounted: it is reviewed, test-covered
@@ -212,6 +211,25 @@ EXPOSE 80 443
 # for "nginx is up and serving", not for "the internet works".
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1/health || exit 1
+
+# --- Build identity (WP VER-1) -----------------------------------------------
+# The release version and commit this image was built from, set by
+# .github/workflows/publish.yml (`VAULT_VERSION` = the tag without its `v`,
+# e.g. 0.1.0-rc8; `VAULT_COMMIT` = the full commit SHA). A local build
+# (`docker build`, deploy/compose.yaml, deploy/tests/verify-stack.sh) gets the
+# defaults `dev` / `unknown`, so a hand-built image never claims a release.
+# Baked as runtime ENV so the running container can report it; nothing reads
+# a LABEL at runtime. Declared LAST, after every RUN and COPY: a changed
+# build-arg value invalidates the cache of every later RUN, so the expensive
+# layers above stay cached across releases. Never validated here: ENV can be
+# overridden at `docker run` time, so every consumer validates what it reads
+# (docs: core/README.md "Build version").
+ARG VAULT_VERSION=dev
+ARG VAULT_COMMIT=unknown
+ENV VAULT_BUILD_VERSION="${VAULT_VERSION}" \
+    VAULT_BUILD_COMMIT="${VAULT_COMMIT}"
+LABEL org.opencontainers.image.version="${VAULT_VERSION}" \
+      org.opencontainers.image.revision="${VAULT_COMMIT}"
 
 # ENTRYPOINT stays the base image's /docker-entrypoint.sh, which renders the
 # template and runs /docker-entrypoint.d/*.sh (including our preflight) before

@@ -811,6 +811,24 @@ touching either file.
 - Deployment, volumes, ports and the port-80/dedicated-IP guidance:
   `deploy/README.md`.
 
+## Build version (WP VER-1)
+
+`core/Dockerfile` takes the build args `VAULT_VERSION` (default `dev`) and
+`VAULT_COMMIT` (default `unknown`) and bakes them as the runtime env
+`VAULT_BUILD_VERSION` / `VAULT_BUILD_COMMIT` and the OCI
+`org.opencontainers.image.version` / `.revision` labels. `publish.yml`
+passes the release tag without its `v` and the commit SHA; a local build
+keeps the defaults. The block sits at the end of the Dockerfile, after the
+last `RUN`, so a new version reuses every cached layer
+(`deploy/tests/verify-stack.sh` step 2.ver checks that).
+
+nginx does not serve the version yet (WP VER-2). Two notes for whoever
+wires it in: the names start with `VAULT_`, so the template envsubst
+(`NGINX_ENVSUBST_FILTER=^VAULT_`) would render a `${VAULT_BUILD_VERSION}`
+placeholder; and the value is NOT validated at build time, because ENV can
+be overridden at `docker run` time. Validate it where it is rendered, like
+the resolver and pool hooks do, before it can reach the config.
+
 ## Upstream rate cap (WP TH-1a)
 
 Caps the **upstream** read of a cache MISS (Steam CDN -> vault-core). HITs

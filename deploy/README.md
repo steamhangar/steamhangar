@@ -1085,6 +1085,26 @@ lists them, most used first.
 
 ---
 
+## Which version is running
+
+Every image carries the release it was built from as the environment
+variables `VAULT_BUILD_VERSION` and `VAULT_BUILD_COMMIT` (WP VER-1), plus the
+matching OCI labels. A published image says the tag without its `v` (e.g.
+`0.1.0-rc8`) and the full commit SHA; an image you built yourself
+(`docker compose up -d --build`) says `dev` and `unknown`. These are facts
+about the image, not settings: there is nothing to set in `.env`, and
+compose does not forward them. To check a running stack:
+
+```bash
+docker compose exec vault-core printenv VAULT_BUILD_VERSION VAULT_BUILD_COMMIT
+docker image inspect ghcr.io/steamhangar/vault-api:0.1.0-rc8 \
+  --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
+```
+
+vault-api reports the same version as `server_version` in
+`GET /v1/settings` (api/README.md "Build version"). `VAULT_IMAGE_TAG` is a
+different thing: it chooses which image to pull, not what is inside it.
+
 ## Logs and rotation
 
 All three containers log to stdout/stderr, so `docker compose logs -f` is the

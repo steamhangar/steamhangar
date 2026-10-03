@@ -10,9 +10,9 @@
 # repo-root-relative as a result. vault-core and vault-dns are UNCHANGED --
 # they keep their own directories as build context.
 #     docker build -t steamhangar/vault-api:<version> -f api/Dockerfile .
-# (<version> is a free-text tag for your own build -- see the
-# org.opencontainers.image.version LABEL below for the pinned-and-tested
-# constant, api/vault_api/__init__.py's __version__, WP 4e.7.)
+# (<version> is a free-text tag for your own build. The version the running
+# server reports comes from the VAULT_VERSION/VAULT_COMMIT build args, see
+# "Build identity" at the end of this file, WP VER-1.)
 # or, normally, via deploy/compose.yaml. The root `.dockerignore` keeps this
 # wider context from also sending app/ (the Android tree), poc/ (Phase-0
 # evidence) and every other component's own directory to the daemon on
@@ -101,20 +101,12 @@ RUN set -eux; \
 # --- Stage 2: the runtime image ----------------------------------------------
 FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251
 
-# org.opencontainers.image.version is a THIRD hand-maintained copy of the
-# same release number as api/vault_api/__init__.py's __version__ and
-# deploy/compose.yaml's VAULT_IMAGE_TAG default (WP 4e.7) -- a build-time
-# LABEL cannot read a Python module, so this cannot be collapsed into the
-# other two; api/tests/test_version_pin.py derives this line's value with its
-# own regex and compares it to __version__, pinned in both directions. Bump
-# all three together (see that test file's module docstring for the full
-# enumeration of every site a release bump must touch, including the ones
-# outside this pin's reach).
+# org.opencontainers.image.version/.revision are set from the build args at
+# the end of this file ("Build identity", WP VER-1), not here.
 LABEL org.opencontainers.image.title="SteamHangar vault-api" \
       org.opencontainers.image.description="FastAPI + SQLite control plane: prefill orchestration, per-game size and deletion" \
       org.opencontainers.image.source="https://github.com/steamhangar/steamhangar" \
-      org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.version="0.1.0"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 # libicu is the one native dependency a self-contained .NET application needs
 # beyond what python:slim already ships (globalization data). ca-certificates is
@@ -256,6 +248,26 @@ EXPOSE 8080
 # fixed body, no data, explicitly meant for exactly this kind of probe.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/v1/health', timeout=3).status == 200 else 1)"]
+
+# --- Build identity (WP VER-1) -----------------------------------------------
+# The release version and commit this image was built from, set by
+# .github/workflows/publish.yml (`VAULT_VERSION` = the tag without its `v`,
+# e.g. 0.1.0-rc8; `VAULT_COMMIT` = the full commit SHA). A local build
+# (`docker build`, deploy/compose.yaml, deploy/tests/verify-stack.sh) gets the
+# defaults `dev` / `unknown`, so a hand-built image never claims a release.
+# vault-api reads VAULT_BUILD_VERSION at startup and serves it as
+# `server_version` (vault_api.build_info(); api/README.md "Build version");
+# vault-runner runs this same image. Declared LAST, in the final stage, after
+# every RUN and COPY: a changed build-arg value invalidates the cache of every
+# later RUN, so pip, apt and the SteamPrefill fetch above stay cached across
+# releases. Not validated here: ENV can be overridden at `docker run` time,
+# so vault_api validates what it reads and falls back when it is unusable.
+ARG VAULT_VERSION=dev
+ARG VAULT_COMMIT=unknown
+ENV VAULT_BUILD_VERSION="${VAULT_VERSION}" \
+    VAULT_BUILD_COMMIT="${VAULT_COMMIT}"
+LABEL org.opencontainers.image.version="${VAULT_VERSION}" \
+      org.opencontainers.image.revision="${VAULT_COMMIT}"
 
 # EXACTLY ONE uvicorn worker, on purpose and permanently. vault-api runs a single
 # background job-queue thread per process and repairs orphaned 'running' jobs at
