@@ -30,12 +30,17 @@
 #
 # --- Stage 1: fetch SteamPrefill ---------------------------------------------
 # Kept in a throwaway stage so curl/unzip never exist in the shipped image.
-FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251 AS steamprefill
-
+#
 # Pinned to the exact upstream release Phase 0 validated (ADR-0001: SteamPrefill
 # v3.7.1 auto-detected the cache via the lancache-heartbeat contract and
-# prefilled path-faithfully).
+# prefilled path-faithfully). Declared BEFORE the first FROM (a global build
+# arg) so both stages read the one value: stage 1 downloads that release, the
+# final stage bakes it as ENV STEAMPREFILL_VERSION for GET /v1/about (WP VER-2).
+# Bump it together with STEAMPREFILL_ARCHIVE/URL/SHA256 below.
 ARG STEAMPREFILL_VERSION=3.7.1
+FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251 AS steamprefill
+
+ARG STEAMPREFILL_VERSION
 ARG STEAMPREFILL_ARCHIVE=SteamPrefill-3.7.1-linux-x64.zip
 ARG STEAMPREFILL_URL=https://github.com/tpill90/steam-lancache-prefill/releases/download/v3.7.1/SteamPrefill-3.7.1-linux-x64.zip
 # HOW THIS CHECKSUM WAS OBTAINED (documented because it matters):
@@ -162,6 +167,11 @@ RUN set -eux; \
     rm -f /tmp/requirements.txt
 
 COPY --from=steamprefill /opt/steamprefill/SteamPrefill /opt/steamprefill/SteamPrefill
+# WP VER-2: which SteamPrefill this image carries, for GET /v1/about (subprocess
+# mode reads it here, vault-runner reports it from here in queue mode). The
+# global build arg above, so it cannot drift from the release stage 1 fetched.
+ARG STEAMPREFILL_VERSION
+ENV STEAMPREFILL_VERSION="${STEAMPREFILL_VERSION}"
 # Repo-root-relative (see header note): this used to be plain `vault_api`
 # when the build context was api/ itself.
 COPY api/vault_api /app/vault_api

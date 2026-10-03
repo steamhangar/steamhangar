@@ -18,12 +18,14 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from vault_api import BuildInfo, build_info
+from vault_api.about import AboutService
 from vault_api.body_guard import PreAuthBodyGuard
 from vault_api.config import Settings
 from vault_api.db import get_connection, init_db
 from vault_api.jobs import recover_stale_jobs
 from vault_api.manifest_ingest import log_cache_dir_canary
 from vault_api.routers import (
+    about,
     agent,
     cache,
     clients,
@@ -270,6 +272,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     # WP VER-1: resolved once per app, read by GET /v1/settings.
     app.state.build_info = build
+    # WP VER-2: GET /v1/about's lookups and their 60 s cache. Constructed
+    # here for the same reason as size_cache below (no thread, no I/O until
+    # the first request), so a plain TestClient() has it too.
+    app.state.about = AboutService(settings)
     # Created here (not inside the lifespan) so it exists for a plain
     # TestClient() too, the same reasoning as app.state.settings above —
     # size-reporting endpoints don't need the worker running to be testable.
@@ -303,6 +309,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # against whatever the environment configured even on a fresh install
     # with no overrides yet, same reasoning as schedule.router above.
     app.include_router(settings_router.router)
+    # WP VER-2: component versions and status, behind the key like settings.
+    app.include_router(about.router)
     app.include_router(stats.router)
     # WP 3.9. Always mounted, even with VAULT_MANIFEST_ORACLE unset: the routes
     # answer "enabled: false" rather than 404 in that case, so a client can

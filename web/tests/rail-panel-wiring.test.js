@@ -202,6 +202,14 @@ test(".rail-foot stays VISIBLE with a real server_version even though the cache 
   assert.equal(elements.versionEl.textContent, "v0.1.0");
 });
 
+test("WP VER-2: a local build's server_version 'dev' reaches the rail as 'dev build', never 'vdev'", async () => {
+  const { elements } = build({ cacheSnapshot: undefined, settingsResult: { readonly: false, settings: [], server_version: "dev" } });
+  await Promise.resolve();
+
+  assert.equal(elements.versionEl.hidden, false);
+  assert.equal(elements.versionEl.textContent, "dev build");
+});
+
 test(".rail-foot hides again if it starts with cache data but the settings fetch answers with nothing new (regression: hiding must not be one-directional-only in the wrong direction)", async () => {
   // Sanity check on updateFootVisibility()'s AND, not OR, semantics: this
   // is the one combination that must NOT hide the foot — restated as its

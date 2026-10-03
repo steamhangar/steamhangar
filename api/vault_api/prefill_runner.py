@@ -44,7 +44,14 @@ import threading
 import time
 import uuid
 
-from vault_api import jobs, prefill, prefill_queue
+from vault_api import (
+    jobs,
+    prefill,
+    prefill_queue,
+    reported_identity,
+    runner_presence,
+    steamprefill_version,
+)
 from vault_api.config import Settings
 from vault_api.db import get_connection
 
@@ -81,10 +88,24 @@ def make_runner_id() -> str:
 class PrefillRunner:
     """The claim -> execute -> report loop. See the module docstring."""
 
-    def __init__(self, settings: Settings, runner_id: str | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        runner_id: str | None = None,
+        *,
+        presence_interval_seconds: float = runner_presence.PRESENCE_INTERVAL_SECONDS,
+    ) -> None:
         self._settings = settings
         self._runner_id = runner_id or make_runner_id()
         self._stop = threading.Event()
+        # WP VER-2: the presence record GET /v1/about reads. What this image
+        # says about itself is resolved once: the env of a running container
+        # does not change.
+        self._started_at = jobs.utcnow_iso()
+        self._build_version, self._build_commit = reported_identity()
+        self._steamprefill_version = steamprefill_version()
+        self._presence_interval = presence_interval_seconds
+        self._last_presence: float | None = None
 
     @property
     def runner_id(self) -> str:
@@ -92,6 +113,41 @@ class PrefillRunner:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def maybe_record_presence(self, conn: sqlite3.Connection) -> None:
+        """Refresh this runner's ``runner_presence`` row (WP VER-2) when the
+        last refresh is at least ``presence_interval_seconds`` old, or has
+        never happened. Called from the idle poll loop and from the job
+        heartbeat callback, so a runner busy with a four-hour prefill stays
+        visible too.
+
+        A database error is logged and swallowed: presence is informational
+        and must never stop a claim or a running download. The interval
+        clock advances on failure as well, so a broken database costs one
+        log line per interval, not one per poll tick.
+        """
+        now = time.monotonic()
+        if (
+            self._last_presence is not None
+            and now - self._last_presence < self._presence_interval
+        ):
+            return
+        self._last_presence = now
+        try:
+            runner_presence.record_presence(
+                conn,
+                runner_id=self._runner_id,
+                started_at=self._started_at,
+                build_version=self._build_version,
+                build_commit=self._build_commit,
+                steamprefill_version=self._steamprefill_version,
+            )
+        except sqlite3.Error as exc:
+            logger.warning(
+                "prefill_runner %s: could not record its presence for "
+                "GET /v1/about (%s); retrying in %.0fs.",
+                self._runner_id, exc, self._presence_interval,
+            )
 
     @property
     def stopping(self) -> bool:
@@ -110,8 +166,16 @@ class PrefillRunner:
             self._settings.steamprefill_path,
             self._settings.prefill_max_threads,
         )
+        logger.info(
+            "prefill_runner %s: build %s (commit %s), SteamPrefill %s.",
+            self._runner_id,
+            self._build_version,
+            self._build_commit or "unknown",
+            self._steamprefill_version or "unknown",
+        )
         try:
             while not self._stop.is_set():
+                self.maybe_record_presence(conn)
                 try:
                     job = jobs.claim_run(conn, self._runner_id)
                 except sqlite3.Error:
@@ -164,6 +228,7 @@ class PrefillRunner:
             vault-api's side is exactly what this looks like.
             """
             nonlocal last_heartbeat
+            self.maybe_record_presence(conn)
             now = time.monotonic()
             if now - last_heartbeat >= self._settings.runner_heartbeat_seconds:
                 last_heartbeat = now

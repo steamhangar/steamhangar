@@ -572,3 +572,23 @@ over IPv6 past the proxy. `vault-lan` and `vault-egress` now set
 `verify-stack.sh` step 6l checks both networks and both of vault-api's
 attachments live. The `default` network, used only by services that are
 allowed out anyway, is left as the daemon configures it.
+
+## Note 2026-10-03 — WP VER-2 keeps this lock as it is
+
+`GET /v1/about` (WP VER-2) reports every component's version. Its first brief
+assumed vault-api could query vault-core over the network; it cannot, by
+this ADR. The user decided ("Weg A", 2026-10-03) not to add a network path:
+
+- **vault-core** writes its validated build version into the cache volume
+  at start (`core/docker/29-vault-build-version.sh`,
+  `<cache>/logs/vault-core-version.json`); vault-api reads the file, the
+  same shared-volume channel as the event log. Its status stays `unknown`.
+- **vault-runner** writes a presence row into the shared database.
+- **vault-proxy** is probed over `vault-egress`, the network vault-api
+  already uses to reach it, with a request the filter refuses on the host
+  name alone (`steamhangar-about-probe.invalid`). No version is read: in
+  tinyproxy 1.11.3 a `StatHost` page sits behind the destination filter,
+  and allowlisting its host would open a case-variant hole.
+- **vault-dns** is not probed at all.
+
+No network, allowlist entry, `NO_PROXY` entry or compose line changed.

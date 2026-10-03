@@ -36,6 +36,10 @@ COPY docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
 COPY docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
 COPY docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
 COPY docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
+# WP VER-2: records VAULT_BUILD_VERSION/COMMIT (validated) in
+# /vault/logs/vault-core-version.json at every start for vault-api's
+# GET /v1/about. Touches no nginx config.
+COPY docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
 COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
 
 # Shipped for auditability: the running image can prove its own config matches
@@ -51,7 +55,7 @@ COPY docker/check-config-drift.sh /opt/vault/check-config-drift.sh
 COPY nginx/vault-upstream-pool.conf /opt/vault/vault-upstream-pool.native.conf
 
 RUN set -eux; \
-    chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
+    chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
     # image honest about what it serves.
@@ -128,7 +132,18 @@ RUN set -eux; \
         sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" 2>/dev/null; then \
         echo "BUILD CHECK FAILED: 28-vault-upstream-pool.sh accepted a host outside the allowlist families" >&2; exit 1; \
     fi; \
-    [ ! -e "$pool_check" ]
+    [ ! -e "$pool_check" ]; \
+    # WP VER-2: the build-version hook writes exactly the reviewed JSON for a
+    # valid pair and fails closed ("invalid") for a bad value, before the
+    # image ships. A scratch path, never /vault (that is the volume).
+    ver_check=/tmp/vault-ver-check/vault-core-version.json; \
+    VAULT_BUILD_VERSION=0.1.0-rc9 VAULT_BUILD_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+        sh /docker-entrypoint.d/29-vault-build-version.sh "$ver_check"; \
+    grep -qx '{"component":"vault-core","version":"0.1.0-rc9","commit":"0123456789abcdef0123456789abcdef01234567","recorded_at":"[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z"}' "$ver_check"; \
+    VAULT_BUILD_VERSION='1.0 beta' VAULT_BUILD_COMMIT=XYZ \
+        sh /docker-entrypoint.d/29-vault-build-version.sh "$ver_check" 2>/dev/null; \
+    grep -q '"version":"invalid","commit":"invalid"' "$ver_check"; \
+    rm -rf /tmp/vault-ver-check
 
 # Declared so that a plain `docker run` without -v cannot silently fill the
 # container's writable layer with depot chunks, and so that the default is one

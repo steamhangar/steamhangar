@@ -822,12 +822,76 @@ keeps the defaults. The block sits at the end of the Dockerfile, after the
 last `RUN`, so a new version reuses every cached layer
 (`deploy/tests/verify-stack.sh` step 2.ver checks that).
 
-nginx does not serve the version yet (WP VER-2). Two notes for whoever
-wires it in: the names start with `VAULT_`, so the template envsubst
-(`NGINX_ENVSUBST_FILTER=^VAULT_`) would render a `${VAULT_BUILD_VERSION}`
-placeholder; and the value is NOT validated at build time, because ENV can
-be overridden at `docker run` time. Validate it where it is rendered, like
-the resolver and pool hooks do, before it can reach the config.
+## Build version file for `GET /v1/about` (WP VER-2)
+
+The hook `docker/29-vault-build-version.sh` runs at every start (after the
+envsubst render and hooks 25-28, before `40-vault-preflight.sh`) and writes
+one line of JSON into the cache volume:
+
+```
+/vault/logs/vault-core-version.json
+{"component":"vault-core","version":"0.1.0-rc9","commit":"<sha>","recorded_at":"2026-10-03T10:00:00Z"}
+```
+
+vault-api mounts the same volume and serves it as the `vault-core` entry of
+`GET /v1/about` (api/README.md "Component versions"). A file, not an HTTP
+endpoint, because vault-api has no network path to vault-core by design
+(ADR-0011); user decision "Weg A", 2026-10-03. vault-api therefore reports
+vault-core's status as `unknown` with the recording time: the file says which
+version started last, not that nginx runs now.
+
+- **Validated where it is written.** `VAULT_BUILD_VERSION` must match the
+  VER-1 grammar (1-64 of `[0-9A-Za-z._+-]`, first a letter or digit),
+  `VAULT_BUILD_COMMIT` 7-40 lowercase hex or `unknown`. Anything else,
+  including blank or unset, is written as `invalid`, never as the raw value.
+  The ENV is never rendered into nginx config, so the `^VAULT_` envsubst
+  filter question does not arise: the template has no placeholder for it.
+- **Not served.** `/vault/logs/` is outside `root cache;`, and there is no
+  `location = /vault-version`: every LAN client could read it without a key,
+  while this server deliberately sends a bare `Server: nginx`. Because the
+  config is unchanged, `check-config-drift.sh` and the preflight's exact
+  pins need nothing new; `verify-core-nginx.sh` asserts the rendered config
+  never mentions the file and probes `/vault-version` and
+  `/logs/vault-core-version.json` live (404).
+- **Root writes nothing (review M1).** `/vault` and `/vault/logs` belong to
+  uid 101 (nginx here, vault-api next door), mode 0755 without a sticky
+  bit, so uid 101 can swap any name in them for a symlink at any time; a
+  root `printf >` or `chmod` on a name there can be redirected anywhere
+  (reproduced in review: a root-only 0600 file overwritten and made 0644).
+  So root only creates a missing `logs/` (plain `mkdir`, never `-p`;
+  `chown -h nginx:nginx`; a re-check that it is not a symlink). Everything
+  else (mktemp, write, chmod, the rename, removing a stale file) runs as
+  the nginx user: the hook re-invokes itself with `--writer` under busybox
+  `su`, which refuses to run as root. A link followed by uid 101 reaches
+  only what uid 101 may write anyway. Pinned structurally and with stubs in
+  `core/tests/test-build-version-hook.sh`, and live in the pinned image by
+  `core/tests/build-version-race-rig.sh`. In the CI gate the rig is
+  deterministic: `mktemp`/`mkdir` wrappers make the attacker win every
+  window (each temp file is swapped for a symlink to a root-only file at
+  once; `logs/` is planted right before `mkdir`) and count that each attack
+  ran. The pre-fix hook fails both (victim overwritten and made 0644; the
+  planted root directory chowned to nginx); the fixed one leaves both
+  untouched. A timing-based racer is kept as a manual mode (`race`) only:
+  how many runs it disturbs depends on scheduling, and a run it never
+  disturbed proves nothing (that flake failed CI on 5dac4a2).
+- **Atomic.** `mktemp` in the same directory, `chmod 0644`, `mv -f`; a
+  symlink on the file name is removed before the rename.
+- **Never stops the cache, with one exception.** A write failure (read-only
+  volume, a directory on the name) logs a WARNING, removes the old file if
+  it can (so vault-api says "no version recorded yet" instead of a stale
+  one) and boot continues. The exception: `VAULT_EVENT_LOG` naming this same
+  file stops the boot with `29-vault-build-version.sh: FATAL`, because the
+  hook would replace the cache-event log at every start.
+- **Bind mounts.** A bind-mounted `/vault` without `logs/` gets it created
+  (owner `nginx`). `/vault` itself must exist (it is the mount point), and
+  an existing `logs/` must be writable by uid 101, or the hook only warns
+  and vault-api reports "no version recorded yet".
+
+Tests: `core/tests/test-build-version-hook.sh` (docker-free, under `sh`),
+the build-time check in `core/Dockerfile`, `verify-core-nginx.sh` (hook
+order, the file and its nginx owner in the real entrypoint chain, the
+collision refusal, the 404 probes, the race rig), and
+`deploy/tests/verify-stack.sh` steps 6w and 9d.
 
 ## Upstream rate cap (WP TH-1a)
 
