@@ -79,9 +79,12 @@ plus parse-only checks of `core/tests/` and `dns/tests/`), `web-tests` (`node --
 (`assembleDebug`, both unit-test variants, `lintDebug`), plus
 `deploy-static` (shellcheck over the shipped shell scripts and a
 `docker compose config` render of `deploy/compose.yaml`; no containers
-start). The one
-Docker-dependent job, `verify-stack`, runs on a nightly cron and on manual
-dispatch only, so a PR is never blocked on a container runtime. Anything
+start) and `image-build` (`docker build` of every image `publish.yml`
+ships, same contexts and platforms including emulated arm64, nothing
+pushed, so a broken Dockerfile or `.dockerignore` fails the PR rather
+than the release tag). No container is ever started on a PR: the live-stack
+job, `verify-stack`, runs on a nightly cron and on manual dispatch only,
+so a PR is never blocked on a running stack or the Steam CDN. Anything
 that needs the live Steam CDN or a Windows nginx binary stays local-only —
 see the table above, and don't be surprised if a CI-green PR still needs
 one of the local-only suites run by hand before a component maintainer

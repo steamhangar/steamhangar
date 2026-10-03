@@ -2754,6 +2754,11 @@ below carry their own later dates, item 12 is the current one).
     - [ ] The `api` tests that read `api/vault_api/config.py` from web
       tests (`demo-data-config-defaults`, `demo-data-installed-on`) make
       partial web copies fail; document it in web/tests/README.md.
+    - [x] **CI-FIX-1** — CI builds every release image on every push and
+      PR: ci.yml `image-build` runs `docker build` with publish.yml's
+      matrix (contexts, Dockerfiles, all platforms incl. QEMU arm64), no
+      push, no login, no layer cache; `api/tests/test_ci_image_build.py`
+      pins the two matrices and action SHAs equal.
 
     **D. After `v0.1.0` (decided 2026-10-02, each with its own ADR)**
     - [ ] **D1 CORE-FEAT-1 — upstream keepalive to the Steam CDN.**
