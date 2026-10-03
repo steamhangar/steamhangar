@@ -617,11 +617,20 @@ body.selecting .card .pick{ display:grid; }
    `position:fixed` (not the mockup's phone-frame-relative `absolute`) —
    this app has no phone-frame ancestor to anchor to. */
 .bulk{
-  position:fixed; left:12px; right:12px; z-index:20;
-  /* was a hand-derived 78px (WP 4e.1: tokenized) — the bar sits one 14px gap
-     above wherever the nav currently ends; at BP-L (side rail) --nav-h
-     becomes 0 so the bar simply settles 14px above the viewport bottom. */
-  bottom:calc(var(--nav-h) + 14px);
+  position:fixed; z-index:20;
+  /* Horizontal safe-area insets (WP WEB-FIX-6): a phone in landscape with a
+     notch (`viewport-fit=cover`) would otherwise put the bar's edge under
+     it. BP-L replaces both insets with the rail/gutter pair. */
+  left:calc(12px + env(safe-area-inset-left, 0px));
+  right:calc(12px + env(safe-area-inset-right, 0px));
+  /* was a hand-derived 78px (WP 4e.1: tokenized) — the bar sits one
+     --bulk-gap above wherever the nav currently ends; at BP-L (side rail)
+     --nav-h becomes 0px so the bar settles --bulk-gap above the viewport
+     bottom. The bottom safe-area inset (WP WEB-FIX-6) is NOT in --nav-h
+     (.nav adds it to its own padding), so it is added here: without it the
+     bar covered the nav's top `inset` px on a phone with a home indicator,
+     and sat inside the indicator area at BP-L. */
+  bottom:calc(var(--nav-h) + var(--bulk-gap) + env(safe-area-inset-bottom, 0px));
   /* was a hand-derived 928px = 960 - 32 (WP 4e.1: tokenized) — derived from
      --w-text rather than repeated as a second independent number ("four
      copies of one number is why a fifth would appear otherwise"). */
@@ -661,6 +670,32 @@ body.selecting .card .pick{ display:grid; }
 .bulk .bulknote{ margin:0; font-size:11.5px; line-height:1.4; color:var(--dim-2); }
 .bulk .bulkbtns{ display:flex; gap:8px; flex-wrap:wrap; }
 .bulk .btn{ white-space:nowrap; }
+
+/* Scroll room while the bulk bar is up (WP WEB-FIX-6). The bar is
+   `position:fixed` over the end of the page, so without room the last row
+   of cards (or the Suggestions card under it) could never scroll above it.
+   `body.selecting` is library.js's own select-mode class (enterSelect /
+   exitSelect / buildSection). `--bulk-room` = the bar's measured height
+   (`--bulk-h`) plus `--bulk-gap` below it (to the nav's top, which is where
+   the page's flow ends below BP-L: `.nav` is sticky and in flow) plus
+   `--bulk-gap` of breathing room above it. The room REPLACES the 32px
+   bottom padding/margin of whichever box ends the flow, it is not added to
+   it. The top-level `.view-root` rule itself stays without padding-bottom
+   (WEB-FIX-3: the sticky nav needs no view padding); this rule only exists
+   in select mode. */
+body.selecting{ --bulk-room:calc(var(--bulk-h) + var(--bulk-gap) * 2); }
+body.selecting .view-root{ padding-bottom:var(--bulk-room); }
+/* A visible Suggestions card (`.decision-panel`, the last box before the
+   nav below BP-XL) ends the flow instead: it takes the room, and the view
+   gets its normal 32px back so there is no dead band between the last
+   card and the Suggestions card. Without `:has()` support the last rule
+   is dropped and both boxes carry the room: a wider gap, nothing hidden.
+   BP-XL's right-hand column puts the room back on the view (that block). */
+body.selecting .app > .decision-panel:not([hidden]){ margin-bottom:var(--bulk-room); }
+/* `:where()` keeps the `:has()` argument at zero specificity (0,3,1), so
+   BP-XL's plain `.app.has-decision-panel` override (0,4,1) wins without
+   repeating this selector. */
+body.selecting .app:has(> :where(.decision-panel:not([hidden]))) > .view-root{ padding-bottom:32px; }
 
 /* ---------- buttons ---------- */
 .btn{
@@ -1570,6 +1605,12 @@ body.onboarding .nav{ display:none; }
   .banner-wrap{ grid-area:banner; max-width:var(--w-wall); }
   .view-root{ grid-area:main; max-width:var(--w-wall); }
 
+  /* Select-mode scroll room at BP-L (WP WEB-FIX-6): no bottom nav, so the
+     flow ends at the viewport bottom and the bar sits `--bulk-gap` plus the
+     bottom safe-area inset above it (`.bulk`'s own `bottom`) — the inset
+     joins the room here; below BP-L it already lives in `.nav`'s padding. */
+  body.selecting{ --bulk-room:calc(var(--bulk-h) + var(--bulk-gap) * 2 + env(safe-area-inset-bottom, 0px)); }
+
   /* ----- Downloads / Settings: capped reading column (WP 4e.5, D-15) -----
      Closes the literal gap docs/PROJECT_PLAN.md's Phase 4e section named
      ("Downloads/Settings-specific desktop layout: both currently just
@@ -2248,6 +2289,17 @@ body.onboarding .nav{ display:none; }
      gutter, the card still exactly 300px (its own track width, `--panel-w`,
      unaffected by this change). */
   .app.has-decision-panel .decision-panel{ grid-area:panel; width:auto; margin:20px 16px 32px 0; align-self:start; }
+  /* Bulk bar beside the Suggestions column (WP WEB-FIX-6). The bar used
+     BP-L's `right:var(--gutter)`, so with the column present it spanned the
+     column too and covered the bottom of a tall Suggestions card. Moving its
+     right inset in by `--panel-w` keeps BP-L's Δleft/Δwidth=0 algebra
+     against `.view-root`'s content edges, now inside the narrower "main"
+     track. The scroll room goes back to the view (the column is not the
+     end of the flow); the column keeps its own 32px. Both win over the
+     top-level select-mode rules by specificity or source order. */
+  .app.has-decision-panel .bulk{ right:calc(var(--panel-w) + var(--gutter)); }
+  body.selecting .app.has-decision-panel > .view-root{ padding-bottom:var(--bulk-room); }
+  body.selecting .app.has-decision-panel > .decision-panel{ margin-bottom:32px; }
   /* No collapse affordance at BP-XL — the right-hand column is always
      fully expanded; the class toggled by decision-panel.js still exists
      (collapse state is only meaningful for the sub-BP-XL card, per the

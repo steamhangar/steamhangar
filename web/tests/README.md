@@ -2780,3 +2780,65 @@ the note at 60 s, the server constant at 120; focus flag not reset on leave;
 sheet heading "Clients".
 
 Suite: **1069 tests, 1069 pass, 0 fail**.
+
+### WP WEB-FIX-6 — the bulk bar no longer covers content
+
+Noted during WEB-FIX-3: in select mode the fixed `.bulk` bar covered the
+last row of cards. Static analysis found a second cause on phones with a
+home indicator: `--nav-h` (64px) does not include
+`env(safe-area-inset-bottom)` (`.nav` adds it to its own padding), so the
+bar's `bottom:calc(var(--nav-h) + 14px)` sat `inset - 14px` px inside the
+nav.
+
+- `.bulk`: `bottom:calc(var(--nav-h) + var(--bulk-gap) +
+  env(safe-area-inset-bottom, 0px))`, plus left/right safe-area insets
+  below BP-L. New tokens in theme.css: `--bulk-gap:14px` (the old literal)
+  and `--bulk-h` (fallback 168px).
+- Select mode (`body.selecting`, library.js's existing class) defines
+  `--bulk-room = --bulk-h + 2 x --bulk-gap` (BP-L: plus the bottom inset,
+  since no bottom nav carries it there) and puts it on the box that ends
+  the flow: `.view-root`'s bottom padding, or a visible Suggestions card's
+  bottom margin (the view then gets its 32px back through a
+  `:has(> :where(...))` rule; without `:has()` both carry the room, a
+  wider gap, nothing hidden). The plain `.view-root` rule still has no
+  padding-bottom (WEB-FIX-3 pin unchanged).
+- BP-XL with the Suggestions column: the bar's right inset becomes
+  `--panel-w + --gutter` (it used to span the column), the room goes back
+  to the view, the column keeps its 32px.
+- `--bulk-h` is measured live: `lib/bulk-room.js` (one ResizeObserver for
+  the module's lifetime, re-pointed per mount, released by `unwatch()`
+  in library.js's view-change listener, zero heights ignored) writes the
+  bar's `getBoundingClientRect().height`, rounded up, onto `<html>`. No-op
+  without ResizeObserver; the CSS fallback applies.
+
+Tests: `css-bulk-bar-room.test.js` (13: tokens, bar above the nav with
+the inset, no breakpoint overrides `bottom`, horizontal insets, room
+formula at base and BP-L, view/panel room and the `:has` restore, BP-XL
+inset and room, WEB-FIX-3 rules, library.js wiring) and
+`bulk-room.test.js` (5).
+
+Mutation evidence (each applied alone, the CSS pin files plus
+`bulk-room.test.js` run, then restored), all 22 killed: bar without the
+bottom inset; bar back to `+ 14px`; room without the second gap; view
+room removed; BP-L room without the inset; panel room removed; the `:has`
+restore removed; BP-XL bar right back to `--gutter`; BP-XL view room
+removed; BP-XL column margin restore removed; left / right insets
+removed; an unscoped `.view-root` padding-bottom; a BP-L `.bulk` bottom
+override; `--bulk-h` unitless; `--bulk-h` 60px; `--bulk-gap` 8px; the
+`watch()` call removed; no `disconnect()`; zero heights accepted; no
+rounding up; `--nav-h` with the inset folded in (double count).
+
+**Not measured in a browser.** No browser runs in this devbox: every
+geometry statement in this section (the bar's position, the scroll room,
+the safe-area handling, BP-XL's right inset) is derived from the CSS, not
+measured, and needs a check on the Pixel (and a desktop browser at BP-L
+and BP-XL) after deploy. Expected result: Pixel portrait, select two games,
+scroll to the end: the last row ends about 14px above the bar, the bar
+ends 14px above the nav's top edge, the nav is fully visible. With the
+Suggestions card shown, the card scrolls fully above the bar and there is
+no large gap between the grid and the card. At 1280px the bar sits 14px
+above the window bottom, aligned with the grid's edges; at 1920px with
+the Suggestions column, the bar stops at the column's left edge. Leaving
+select mode returns the normal 32px end padding.
+
+Suite: **1032 tests, 1032 pass, 0 fail** on the WEB-FIX-6 branch; **1087 tests, 1087 pass, 0 fail** after merging with WEB-FEAT-3.
