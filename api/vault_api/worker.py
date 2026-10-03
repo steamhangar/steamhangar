@@ -459,8 +459,17 @@ class PrefillWorker:
                 # Updated=0, Up To Date=0 summary (the WP 1.7 job-outcome
                 # trap this whole package closes).
                 summary = prefill_summary.parse_summary(result.output)
+                # WP API-FIX-3: SteamPrefill's own table says the app FAILED
+                # (a Failed column with a count above zero, or one that
+                # could not be read). Checked before the 0/0 "not
+                # considered" rule below, which a failed run's table
+                # (0 | 0 | 1) would otherwise satisfy.
+                run_failed = prefill_summary.reports_failure(summary)
 
-                if not summary.parse_ok:
+                # An unparseable table that still showed a Failed column is
+                # NOT the exit-code-rule case: the prefill_failed line below
+                # says what happened, so the fallback note is skipped.
+                if not summary.parse_ok and not run_failed:
                     logger.warning(
                         "Could not parse SteamPrefill's summary table for "
                         "appid %s (job %s); job outcome falls back to the "
@@ -472,16 +481,21 @@ class PrefillWorker:
                         "table; job outcome follows the exit-code rule only "
                         "(see api/README.md's job-outcome table)."
                     )
-                else:
+                elif summary.parse_ok:
                     log_parts.append(
                         "[vault-api] Prefill summary: updated="
                         f"{summary.updated} up_to_date={summary.up_to_date}"
+                        + (f" failed={summary.failed}" if summary.failed_column else "")
                         + (
                             f" (totaling {summary.total_bytes_text})"
                             if summary.total_bytes_text
                             else ""
                         )
                     )
+
+                if run_failed:
+                    self._finish_prefill_failed(conn, job_id, appid, result, summary, log_parts)
+                    return
 
                 unowned = (
                     summary.parse_ok
@@ -666,6 +680,53 @@ class PrefillWorker:
                 )
             except Exception:  # pragma: no cover - DB itself is broken
                 logger.exception("Could not even record the failure of job %s", job_id)
+
+    def _finish_prefill_failed(
+        self,
+        conn: sqlite3.Connection,
+        job_id: int,
+        appid: int,
+        result: prefill.PrefillResult,
+        summary: "prefill_summary.PrefillSummary",
+        log_parts: list[str],
+    ) -> None:
+        """SteamPrefill exited 0 but its summary reports the app as failed
+        (WP API-FIX-3, reason ``prefill_failed``).
+
+        Same outcome as every other failure: job and ``apps.status`` go to
+        ``error``, and nothing on disk is attributed to the app. The depot
+        mapping, the manifest state, ``needs_force``, ``last_prefill_at`` and
+        ``last_manifest_check`` are left alone and no auto-GC job is queued,
+        because none of that code is reached from here. A failed run is no
+        evidence about which depots belong to the app (half a download may
+        sit on disk), so replace-semantics on it would delete good rows.
+
+        The summary counters are still recorded on the job row, as they were
+        before this reason existed (the failed table used to take the 0/0
+        branch). The LAST log line keeps the ``Prefill failed (reason=...)``
+        shape the web reads (web/js/lib/job-failure.js) and adds what failed
+        and the likely cause.
+        """
+        detail = prefill.prefill_failed_detail(summary.failed, result.output)
+        log_parts.append(
+            f"[vault-api] Prefill failed (reason={prefill.FAILURE_PREFILL_FAILED}): "
+            f"{detail}. The depot mapping and manifest state for this app were "
+            "left unchanged."
+        )
+        jobs.set_app_status(conn, appid, jobs.STATUS_ERROR)
+        webhooks.finish_job_and_notify(
+            conn, self._webhook_notifier,
+            job_id, jobs.STATUS_ERROR, "\n".join(log_parts),
+            updated=summary.updated,
+            up_to_date=summary.up_to_date,
+            summary_parse_ok=summary.parse_ok,
+        )
+        logger.warning(
+            "Prefill job %s for appid %s failed (%s): SteamPrefill exited 0 "
+            "but its summary reported Failed=%s.",
+            job_id, appid, prefill.FAILURE_PREFILL_FAILED,
+            summary.failed if summary.failed is not None else "unreadable",
+        )
 
     # -- WP 3.12 -----------------------------------------------------------
 

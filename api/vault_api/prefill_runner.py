@@ -200,10 +200,19 @@ class PrefillRunner:
         if applied is None:
             return
         if applied:
+            # WP API-FIX-3: this is the PROCESS outcome, not the job's final
+            # state. vault-api's worker decides that from the result and can
+            # still end a clean exit as 'error' (SteamPrefill's summary
+            # reports the app as failed or not considered). A bare
+            # "success=True" here once sat next to a job the UI showed as
+            # failed, so the line says what it is.
             logger.info(
-                "prefill_runner %s: job %s (appid %s) finished, success=%s "
-                "failure_reason=%r.",
-                self._runner_id, job_id, appid, result.success, result.failure_reason,
+                "prefill_runner %s: job %s (appid %s) SteamPrefill run "
+                "finished, run_success=%s failure_reason=%r exit_code=%s; "
+                "result handed to vault-api, which sets the job's final state "
+                "from SteamPrefill's summary table.",
+                self._runner_id, job_id, appid, result.success,
+                result.failure_reason, result.exit_code,
             )
         else:
             # vault-api already declared this job's lease dead (staleness,

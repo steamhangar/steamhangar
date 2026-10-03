@@ -1178,12 +1178,41 @@ is the authoritative list of which outcomes set it:
 | Exit code | Summary parse | Updated / Up To Date | Job outcome | `apps.status` | `last_prefill_at` | `last_manifest_check` |
 |---|---|---|---|---|---|---|
 | non-zero / timeout / aborted / not-logged-in | — | — | `error` (unchanged, WP 1.4) | `error` | untouched | untouched |
-| `0` | failed (`parse_ok=False`) | — | `done` (exit-code rule, unchanged) | `done` | set | untouched |
-| `0` | ok | `0` / `0` | **`error`** — "SteamPrefill did not consider this app — is it owned by the logged-in account?" | `error` | untouched | untouched |
+| `0` | ok or failed | Failed column `>0`, or a Failed column whose count cannot be read | **`error`**, reason `prefill_failed` (WP API-FIX-3): the last line names what failed and, for two exact SteamPrefill phrases, the likely cause | `error` | untouched | untouched |
+| `0` | failed (`parse_ok=False`), no Failed column | — | `done` (exit-code rule, unchanged) | `done` | set | untouched |
+| `0` | ok | `0` / `0`, no Failed column or Failed `0` | **`error`** — "SteamPrefill did not consider this app — is it owned by the logged-in account?" | `error` | untouched | untouched |
 | `0` | ok | `0` / `>0` | `done` | `done` | set | **set** (ADR-0006 "current as of \<timestamp\>") |
 | `0` | ok | `>0` / anything | `done` | `done` | set | untouched |
 
-The middle two rows are the interesting ones: a parse failure deliberately
+**The Failed column (WP API-FIX-3).** SteamPrefill also exits 0 when it
+fails an app; the table then has a third column, `Updated | Up To Date |
+Failed`, and a successful run has none. Seen in production on 2026-10-02
+twice: once with the cache unreachable ("22213 requests failed
+unexpectedly"), once with "Unable to download manifests!". Both tables read
+`0 | 0 | 1` and used to land in the "did not consider this app" row. They
+now end `error` with vault-api's last line
+
+```
+[vault-api] Prefill failed (reason=prefill_failed): SteamPrefill reported 1 app(s) as failed: <cause>. The depot mapping and manifest state for this app were left unchanged.
+```
+
+where `<cause>` is "N download requests failed unexpectedly, so the cache or
+the upstream it fetches from was unreachable", or "it could not download the
+depot manifests; a possible cause is HTTPS to *.steamcontent.com being
+rewritten to a cache that does not pass port 443 through" (the
+DNS-mode/port-443 case, see `core/README.md`), or a pointer to the output
+above. The hints match those exact phrases only and change no outcome. The
+line keeps the `Prefill failed (reason=...)` shape the web reads. Like every
+failure, a `prefill_failed` run writes no depot mapping and no manifest
+state, leaves `needs_force` unchanged and queues no auto-GC; the job row still
+records the parsed `updated`/`up_to_date`.
+
+In queue mode the runner logs `run_success=... failure_reason=...` for the
+SteamPrefill process only; vault-api sets the job's final state afterwards,
+so `run_success=True` next to an `error` job is expected for the
+`prefill_failed` and "not considered" rows.
+
+The middle three rows are the interesting ones: a parse failure deliberately
 falls back to the pre-WP-3.3 exit-code rule rather than guessing — a summary
 table this parser cannot recognize is not evidence of anything — while
 `Updated==0 AND Up To Date==0` is treated as definitive (that is the one
