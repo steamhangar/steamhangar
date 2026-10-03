@@ -32,14 +32,18 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import dev.steamvault.app.R
+import dev.steamvault.app.ui.clients.logic.ClientPresence
+import dev.steamvault.app.ui.clients.logic.ClientPresenceView
 import dev.steamvault.app.ui.clients.logic.ClientRowModel
 import dev.steamvault.app.ui.clients.logic.buildClientRowModel
+import dev.steamvault.app.ui.clients.logic.formatAgo
 import dev.steamvault.app.ui.clients.logic.partitionClients
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.library.logic.formatBytesGB
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.theme.VaultColors
 
 /**
  * The clients sheet (WP 4b.10 brief): real `GET /v1/clients` data in the
@@ -167,8 +171,17 @@ private fun ClientRow(model: ClientRowModel) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(model.clientId, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = presenceLineFor(model.presence),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (model.presence.presence == ClientPresence.ONLINE) {
+                            VaultColors.StatusOk
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                     Text(
                         text = addressesLineFor(model.addresses) + " · " + statsLineFor(model),
                         style = MaterialTheme.typography.bodySmall,
@@ -243,4 +256,30 @@ private fun statsLineFor(model: ClientRowModel): String {
     } ?: stringResource(R.string.clients_hit_rate_none)
 
     return listOf(gamesText, bytesText, rateText).joinToString(" · ")
+}
+
+/**
+ * WP APP-FEAT-2 (parity with AGENT-FEAT-1 / web WEB-FEAT-3): "Online ·
+ * last seen 4 min ago · agent 0.1.0". Online/Offline is the SERVER's
+ * `presence`, passed through and never recomputed; a server older than
+ * AGENT-FEAT-1 sends none, which reads "Presence unknown", never a guess.
+ * "last seen" is relative (web `formatAgo`); a missing agent version reads
+ * "version unknown".
+ */
+@Composable
+private fun presenceLineFor(view: ClientPresenceView): String {
+    val word = when (view.presence) {
+        ClientPresence.ONLINE -> stringResource(R.string.clients_presence_online)
+        ClientPresence.OFFLINE -> stringResource(R.string.clients_presence_offline)
+        null -> stringResource(R.string.clients_presence_unknown)
+    }
+    val ago = formatAgo(view.lastReportedAt)
+    val lastSeen = if (ago != null) {
+        stringResource(R.string.clients_last_seen, ago)
+    } else {
+        stringResource(R.string.clients_last_seen_unknown)
+    }
+    val version = view.agentVersion?.let { stringResource(R.string.clients_agent_version, it) }
+        ?: stringResource(R.string.clients_agent_version_unknown)
+    return listOf(word, lastSeen, version).joinToString(" · ")
 }

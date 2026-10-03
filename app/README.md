@@ -238,9 +238,11 @@ Ports `web/js/components/status-icon.js` + the `.sic` rules in
   - **`shouldAnimate(kind, animatorsEnabled)`** — the animate-or-not
     decision. Only `running`/`updating`/`verify` ever animate, and only
     when `animatorsEnabled` is true.
-  - `downloadDriftFraction` / `downloadOpacityFraction` — the download
-    glyph's keyframe math (ported from the CSS `vault-dlslide` keyframes),
-    extracted as pure functions for the same reason.
+  - ~~`downloadDriftFraction` / `downloadOpacityFraction`~~ — removed in
+    WP APP-FIX-3: the running download glyph now "falls through" (two
+    arrows one `DOWNLOAD_FALL_PERIOD` apart, clipped to the disc, no fade);
+    the geometry is `downloadFallOffset`/`downloadArrowOffsets` plus the
+    measuring helpers, see "Android parity (WP APP-FEAT-2)" below.
 - **`AnimatorsEnabled.kt`** — documents and implements *how Compose picks
   up the system reduced-motion setting* (see below).
 - **`StatusIcon.kt`** — the Compose composable, drawing each glyph on a
@@ -3749,3 +3751,73 @@ parameter name), the Kotlin smart cast that lets `intent.data = null`
 follow `intent?.dataString ?: return`, and that AGP lint's
 `UnusedResources` sees both new strings as used (they are referenced from
 `OnboardingScreen.kt`).
+
+## Android parity (WP APP-FEAT-2: APP-FIX-2, APP-FEAT-1, APP-FIX-3, B2)
+
+Brings the app to the web's state after rc5. The web code is the reference;
+where the web has literal pins, the Kotlin port keeps the same strings and
+pins them twice: by string equality (this README's verbatim-port exception)
+and against the web source itself (`*WebTwinTest`, read at test time, the
+`DemoConfigDefaultsDriftTest` technique).
+
+- **APP-FIX-2 (WEB-FIX-4).** `ui/downloads/logic/JobFailure.kt` ports
+  `job-failure.js`: the reason comes from vault-api's LAST log line
+  (`[vault-api] Prefill failed (reason=...)`), hints for `not_logged_in`
+  and for `exit_code` + the narrow phrase "is resolving to a public IP"
+  (never the exception name). `prefill_failed` (API-FIX-3) is recognised
+  but gets NO hint block, exactly like the web (its cause is the output's
+  last line, which a hint would collapse away). With a hint the raw output
+  is collapsed behind "Show the full SteamPrefill output"; Retry only on
+  the newest prefill job for the app (`isNewestPrefillJobForApp`).
+  Titles: `appTitle` (vault name, owned name, "App N") via
+  `nameFor(..., ownedNames)`; Downloads starts the one owned-list load
+  itself only when a job has no vault name and nothing was loaded yet.
+  Demo enqueue for an unknown app inserts an UNNAMED vault row
+  (`needs_force = true`), like the real `POST /v1/prefill`; the seed
+  failed job carries the real `not_logged_in` reason line.
+- **APP-FEAT-1 (API-FEAT-1, WEB-FEAT-1/2).** The Library's owned games come
+  from the vault's stored `steam_library_steamid` (a JSON string; anything
+  else is "not set") plus the relay for that id, never from this device's
+  OpenID sign-in. `ui/library/logic/OwnedLibrary.kt` (pure + the loader
+  state machine with a generation token) and `OwnedLibraryController`
+  (held by `MainActivity`, shared with Downloads). The Library shows the
+  web's notice line (unset / 409 / stored id rejected / failed / private
+  profile) with Settings and Reload actions. Settings gains the "Steam
+  library" block: field pre-filled from the setting, Save (own PATCH,
+  string body via `buildSettingsPatchDraft`), Reset (null = delete the
+  override), Preview of the typed id (count, first 8 names, persona), plus
+  "Use my signed-in SteamID64" (hidden in demo mode, because it reads the
+  real identity, and wherever Save cannot store the value: read-only,
+  env-only, or a server without the setting; its hint says the change is
+  vault-wide). Coordinator decision "Weg A": the server setting is the ONLY
+  source of the library account. A server older than API-FEAT-1 (no such
+  setting) gets its own ABSENT state and a "server too old" notice, never
+  "set it in Settings". A load cancelled because the user left the Library
+  resets `loading` and, if nothing had completed yet, lets Downloads load
+  again. The OpenID sign-in and "Check library" are unchanged.
+- **APP-FIX-3 (WEB-FIX-7).** `StatusIcon.kt` draws the running arrow plus
+  one trailing arrow 32 units above it, clipped to the badge disc
+  (`clipPath`; a Compose Canvas does not clip by itself), 1.6 s linear,
+  no opacity animation; reduced motion = progress 0 = one arrow. The
+  arrow segments the composable draws are the same list the geometry tests
+  measure (at rest the trailing arrow is outside the disc; at the end frame
+  the leading one is 3.4 units outside; worst phase 70 % of one arrow
+  visible).
+- **B2 (VER-2, AGENT-FEAT-1).** Settings → About from `GET /v1/about`
+  (status passed through; `404` = "server too old" note; versions shown
+  verbatim, like web WEB-FEAT-3's `about-view.js` -- the "dev build"/"v"
+  rule is the web rail's only). The app showed no `server_version`
+  anywhere, so there was nothing else to fix. The clients sheet rows
+  (reachable from Settings → Clients) show the server's `presence`
+  verbatim ("Presence unknown" on an older server), "last seen 4 min ago"
+  (a port of web `formatAgo`), and "agent 0.1.0" / "version unknown",
+  next to the existing games count. Follow-up: twin pins against web
+  `about-view.js`/`clients-view.js`/`format.js` once WEB-FEAT-3 is on this
+  branch. `ClientOut` decodes the four new fields with defaults; the demo
+  fixtures carry them, `/v1/about` and a relay fixture.
+
+**Only CI can confirm** (no Gradle here): compile, lint (`UnusedResources`,
+new strings), `clipPath`/`Path.addOval`/`SelectionContainer`/
+`KeyboardType.Number` against the pinned Compose BOM, and every new test.
+On a device: the clipped arrow's rim anti-aliasing, the hint block's
+layout on a phone, and the Library notice under a slow relay.

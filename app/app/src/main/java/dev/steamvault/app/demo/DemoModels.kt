@@ -18,7 +18,11 @@ internal data class DemoDepot(val depotid: Int, val shared: Boolean, val sizeByt
  */
 internal class DemoGame(
     val appid: Int,
-    val name: String,
+    /** `null` for a row the demo's `POST /v1/prefill` inserted for an app
+     * the vault never knew (WP APP-FIX-2): the real API inserts such a row
+     * with `name = NULL` (api/vault_api/jobs.py), and only a depot mapping
+     * names it later. The UI supplies the title from the owned list. */
+    val name: String?,
     var status: String,
     var needsForce: Boolean,
     val depots: MutableList<DemoDepot>,

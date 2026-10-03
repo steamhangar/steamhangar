@@ -1,5 +1,6 @@
 package dev.steamvault.app.demo
 
+import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.GameDetail
@@ -9,9 +10,12 @@ import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
+import dev.steamvault.app.net.model.OwnedGamesRelayOut
+import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.repo.AboutRepository
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.ClientsRepository
 import dev.steamvault.app.repo.GamesRepository
@@ -19,6 +23,7 @@ import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
+import dev.steamvault.app.repo.SteamRelayRepository
 import kotlinx.serialization.json.JsonElement
 
 /**
@@ -79,4 +84,16 @@ class DemoSettingsRepository(private val state: DemoState) : SettingsRepository 
  * settings PATCH while `last_sweep_*` stay a static fixture. */
 class DemoScheduleRepository(private val state: DemoState) : ScheduleRepository {
     override suspend fun get(): ScheduleOut = state.scheduleOut()
+}
+
+/** WP APP-FEAT-2: `GET /v1/about` in demo mode -- see [seedAbout]. */
+class DemoAboutRepository(private val state: DemoState) : AboutRepository {
+    override suspend fun get(): AboutOut = state.aboutOut()
+}
+
+/** WP APP-FEAT-1: the relay for an explicit SteamID64 in demo mode -- see
+ * [DemoState.ownedGames]. */
+class DemoSteamRelayRepository(private val state: DemoState) : SteamRelayRepository {
+    override suspend fun ownedGames(steamId64: String): OwnedGamesRelayOut = state.ownedGames(steamId64)
+    override suspend fun playerSummaries(steamId64: String): PlayerSummariesRelayOut = state.playerSummaries(steamId64)
 }

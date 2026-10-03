@@ -1,5 +1,15 @@
 package dev.steamvault.app.ui.downloads
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontFamily
+import dev.steamvault.app.ui.downloads.logic.FailureHintView
+import dev.steamvault.app.ui.downloads.logic.NEWER_JOB_LINE
+import dev.steamvault.app.ui.downloads.logic.failureHintViewFor
+import dev.steamvault.app.ui.library.OwnedLibraryController
+import dev.steamvault.app.ui.library.logic.anyJobLacksVaultName
+import dev.steamvault.app.ui.library.logic.ownedNamesByAppid
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,6 +96,7 @@ import kotlinx.coroutines.delay
 fun DownloadsScreen(
     jobsRepository: JobsRepository,
     gamesRepository: GamesRepository,
+    ownedLibrary: OwnedLibraryController?,
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
     demoMode: Boolean,
 ) {
@@ -109,18 +120,29 @@ fun DownloadsScreen(
     LaunchedEffect(controller.jobs) { onJobsSnapshot(controller.jobs) }
 
     val gamesByAppid = remember(controller.games) { controller.games.associateBy { it.appid } }
+    // WP APP-FIX-2: titles in appTitle's order -- vault name, then the owned
+    // list's name, then "App <id>". This screen never polls the relay: it
+    // uses the list the Library already loaded, and starts the ONE load
+    // itself only when a job on screen has no vault name and nothing was
+    // loaded in this session yet (web downloads.js::maybeLoadOwnedNames).
+    val ownedState = ownedLibrary?.state
+    val ownedNames = remember(ownedState) { ownedNamesByAppid(ownedState?.ownedGamesOrNull) }
+    val jobAppids = remember(controller.jobs) { controller.jobs.map { it.appid } }
+    LaunchedEffect(controller.gamesKnown, jobAppids, gamesByAppid) {
+        if (controller.gamesKnown && anyJobLacksVaultName(jobAppids, gamesByAppid)) ownedLibrary?.loadIfNeverLoaded()
+    }
     val partition = remember(controller.jobs) { partitionJobs(controller.jobs) }
-    val activeModels = remember(partition, gamesByAppid) {
-        partition.running.map { buildJobCardModel(it, gamesByAppid, JobCardMode.ACTIVE) }
+    val activeModels = remember(partition, gamesByAppid, ownedNames) {
+        partition.running.map { buildJobCardModel(it, gamesByAppid, JobCardMode.ACTIVE, ownedNames) }
     }
-    val pausedModels = remember(partition, gamesByAppid) {
-        partition.paused.map { buildJobCardModel(it, gamesByAppid, JobCardMode.HELD) }
+    val pausedModels = remember(partition, gamesByAppid, ownedNames) {
+        partition.paused.map { buildJobCardModel(it, gamesByAppid, JobCardMode.HELD, ownedNames) }
     }
-    val queueModels = remember(partition, gamesByAppid) {
-        partition.queued.mapIndexed { index, job -> buildQueueRowModel(job, index + 1, gamesByAppid) }
+    val queueModels = remember(partition, gamesByAppid, ownedNames) {
+        partition.queued.mapIndexed { index, job -> buildQueueRowModel(job, index + 1, gamesByAppid, ownedNames) }
     }
-    val historyModels = remember(partition, gamesByAppid) {
-        partition.history.map { buildHistoryRowModel(it, gamesByAppid) }
+    val historyModels = remember(partition, gamesByAppid, ownedNames) {
+        partition.history.map { buildHistoryRowModel(it, gamesByAppid, ownedNames) }
     }
 
     Scaffold(
@@ -449,16 +471,84 @@ private fun HistoryRow(model: HistoryRowModel, controller: DownloadsController, 
                 modifier = Modifier.padding(start = 24.dp, top = 4.dp),
             )
             ExcerptState.READY -> Column(modifier = Modifier.padding(start = 24.dp, top = 4.dp)) {
-                if (display.truncated) {
-                    Text(
-                        stringResource(R.string.downloads_log_truncated_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // WP APP-FIX-2: a known failure (not_logged_in, the public-IP
+                // cache detection) shows the hint block + Retry first and the
+                // raw output collapsed behind a toggle; every other failure
+                // (prefill_failed included) shows the output as before.
+                val job = controller.jobs.firstOrNull { it.id == model.jobId }
+                val hintView = failureHintViewFor(job, excerptState.excerpt, controller.jobs)
+                val showOutput = if (hintView != null) {
+                    FailureHintBlock(
+                        view = hintView,
+                        retryLabel = stringResource(R.string.downloads_action_retry_for, model.name),
+                        retryBusy = model.appid in controller.retryBusyAppids,
+                        onRetry = { controller.retry(scope, model.appid) },
                     )
+                    val open = model.jobId in controller.rawOutputOpenJobIds
+                    TextButton(onClick = { controller.toggleRawOutput(model.jobId) }) {
+                        Text((if (open) "▲ " else "▼ ") + hintView.text.outputSummary)
+                    }
+                    open
+                } else {
+                    true
                 }
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    Text(display.lines.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
+                if (showOutput) {
+                    if (display.truncated) {
+                        Text(
+                            stringResource(R.string.downloads_log_truncated_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Text(display.lines.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
+                    }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * WP APP-FIX-2: a known failure's hint block (text from
+ * `ui/downloads/logic/JobFailure.kt`'s [FailureHintView], a verbatim port of
+ * web `job-failure.js`'s `HINTS`). Retry only on the newest prefill job for
+ * the app; an older failed row says a newer job exists instead. The command
+ * box is selectable so it can be copied.
+ */
+@Composable
+private fun FailureHintBlock(
+    view: FailureHintView,
+    retryLabel: String,
+    retryBusy: Boolean,
+    onRetry: () -> Unit,
+) {
+    val text = view.text
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(text.title, style = MaterialTheme.typography.titleSmall)
+            Text(text.body, style = MaterialTheme.typography.bodySmall)
+            Text(text.codeIntro, style = MaterialTheme.typography.bodySmall)
+            SelectionContainer {
+                Text(
+                    text.code,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(8.dp),
+                )
+            }
+            Text(text.after, style = MaterialTheme.typography.bodySmall)
+            if (view.retryOffered) {
+                Text(text.retry, style = MaterialTheme.typography.bodySmall)
+                Button(
+                    onClick = onRetry,
+                    enabled = !retryBusy,
+                    modifier = Modifier.semantics { contentDescription = retryLabel },
+                ) { Text(stringResource(R.string.downloads_action_retry)) }
+            } else {
+                Text(NEWER_JOB_LINE, style = MaterialTheme.typography.bodySmall)
             }
         }
     }

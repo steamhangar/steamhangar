@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.downloads.logic
 
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.ui.library.logic.appTitle
 import dev.steamvault.app.ui.status.StatusKind
 
 /**
@@ -69,11 +70,22 @@ data class JobCardModel(
     val action: JobCardAction,
 )
 
-/** `gamesByAppid[appid]?.name`, falling back to a stable placeholder for a
- * job whose app never landed on a `GET /v1/games` poll yet — mirrors
- * `web/js/views/downloads.js::nameFor`. */
-fun nameFor(appid: Int, gamesByAppid: Map<Int, GameSummary>): String =
-    gamesByAppid[appid]?.name?.takeIf { it.isNotBlank() } ?: "App $appid"
+/**
+ * A job's title (WP APP-FIX-2, mirrors `web/js/views/downloads.js::nameFor`
+ * since WP WEB-FIX-4): [appTitle]'s order -- the vault's name, then the
+ * owned-games list's name, then "App <id>". A job carries only an appid,
+ * and the vault row of an owned-only game queued from its detail sheet has
+ * `name = NULL` (the real `POST /v1/prefill` inserts it that way), so
+ * without [ownedNames] such a job reads "App 1234" although Steam told us
+ * its title.
+ *
+ * @param ownedNames appid -> owned-list name
+ *   ([dev.steamvault.app.ui.library.logic.ownedNamesByAppid]); empty when no
+ *   owned list is loaded (no library SteamID64 set, relay failed), which
+ *   leaves the vault name and the "App <id>" fallback.
+ */
+fun nameFor(appid: Int, gamesByAppid: Map<Int, GameSummary>, ownedNames: Map<Int, String> = emptyMap()): String =
+    appTitle(appid, gamesByAppid[appid]?.name, ownedNames[appid])
 
 /**
  * @param job a `running` or `paused` job — the only two statuses
@@ -86,6 +98,7 @@ fun buildJobCardModel(
     job: JobSummary,
     gamesByAppid: Map<Int, GameSummary>,
     mode: JobCardMode,
+    ownedNames: Map<Int, String> = emptyMap(),
 ): JobCardModel {
     val cancelling = job.status == "running" && job.stop_request == "cancel"
     val pausing = job.status == "running" && job.stop_request == "pause"
@@ -121,7 +134,7 @@ fun buildJobCardModel(
     return JobCardModel(
         jobId = job.id,
         appid = job.appid,
-        name = nameFor(job.appid, gamesByAppid),
+        name = nameFor(job.appid, gamesByAppid, ownedNames),
         kind = StatusKind.fromWireName(jobIconKind(job)),
         statusWord = jobStatusWord(job),
         mode = mode,
@@ -138,8 +151,13 @@ data class QueueRowModel(
     val position: Int,
 )
 
-fun buildQueueRowModel(job: JobSummary, position: Int, gamesByAppid: Map<Int, GameSummary>): QueueRowModel =
-    QueueRowModel(jobId = job.id, appid = job.appid, name = nameFor(job.appid, gamesByAppid), position = position)
+fun buildQueueRowModel(
+    job: JobSummary,
+    position: Int,
+    gamesByAppid: Map<Int, GameSummary>,
+    ownedNames: Map<Int, String> = emptyMap(),
+): QueueRowModel =
+    QueueRowModel(jobId = job.id, appid = job.appid, name = nameFor(job.appid, gamesByAppid, ownedNames), position = position)
 
 /** A finished/failed/cancelled row. `finishedAtLabel` is pre-formatted
  * ([formatTimestamp]) so the composable never needs a `java.time` import of
@@ -153,11 +171,15 @@ data class HistoryRowModel(
     val finishedAtLabel: String,
 )
 
-fun buildHistoryRowModel(job: JobSummary, gamesByAppid: Map<Int, GameSummary>): HistoryRowModel =
+fun buildHistoryRowModel(
+    job: JobSummary,
+    gamesByAppid: Map<Int, GameSummary>,
+    ownedNames: Map<Int, String> = emptyMap(),
+): HistoryRowModel =
     HistoryRowModel(
         jobId = job.id,
         appid = job.appid,
-        name = nameFor(job.appid, gamesByAppid),
+        name = nameFor(job.appid, gamesByAppid, ownedNames),
         kind = StatusKind.fromWireName(jobIconKind(job)),
         statusWord = jobStatusWord(job),
         finishedAtLabel = formatTimestamp(job.finished_at),

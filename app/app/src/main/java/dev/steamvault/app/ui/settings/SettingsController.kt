@@ -4,6 +4,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.net.model.AboutOut
+import dev.steamvault.app.net.steam.SteamId64
+import dev.steamvault.app.repo.AboutRepository
+import dev.steamvault.app.repo.SteamRelayRepository
+import dev.steamvault.app.ui.library.logic.steamIdFromSettings
+import dev.steamvault.app.ui.settings.logic.AboutLoadFailure
+import dev.steamvault.app.ui.settings.logic.LibraryLookupError
+import dev.steamvault.app.ui.settings.logic.LibraryPreview
+import dev.steamvault.app.ui.settings.logic.LibrarySteamIdSavePlan
+import dev.steamvault.app.ui.settings.logic.PREVIEW_LIMIT
+import dev.steamvault.app.ui.settings.logic.classifyAboutError
+import dev.steamvault.app.ui.settings.logic.describeLookupError
+import dev.steamvault.app.ui.settings.logic.libraryIdResetBody
+import dev.steamvault.app.ui.settings.logic.planLibrarySteamIdSave
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingsOut
 import dev.steamvault.app.repo.ScheduleRepository
@@ -78,6 +92,10 @@ class SettingsController(
     private val credentialStore: CredentialStore,
     private val identityRepository: SteamIdentityRepository,
     private val strings: SettingsStrings,
+    /** WP APP-FEAT-1: the relay for the "Steam library" block's Preview. */
+    private val steamRelayRepository: SteamRelayRepository,
+    /** WP APP-FEAT-2: `GET /v1/about` for the About section. */
+    private val aboutRepository: AboutRepository,
 ) {
     var loading by mutableStateOf(true)
         private set
@@ -110,6 +128,34 @@ class SettingsController(
     var libraryChecking by mutableStateOf(false)
         private set
 
+    // ---- Steam library block (WP APP-FEAT-1) ---------------------------------
+
+    /** The SteamID64 field. Pre-filled from the stored setting on [load] and
+     * after Reset; never disabled (Preview must work on a read-only vault
+     * and on an older server without the setting). */
+    var libraryIdInput by mutableStateOf("")
+    var libraryIdError by mutableStateOf<LibraryIdMessage?>(null)
+        private set
+    var libraryIdBusy by mutableStateOf(false)
+        private set
+    var libraryPreview by mutableStateOf<LibraryPreview?>(null)
+        private set
+    var libraryPreviewError by mutableStateOf<LibraryLookupError?>(null)
+        private set
+    var libraryPreviewBusy by mutableStateOf(false)
+        private set
+
+    // ---- About (WP APP-FEAT-2) ---------------------------------------------------
+
+    var about by mutableStateOf<AboutOut?>(null)
+        private set
+    var aboutFailure by mutableStateOf<AboutLoadFailure?>(null)
+        private set
+    var aboutErrorDetail by mutableStateOf<String?>(null)
+        private set
+    var aboutLoading by mutableStateOf(false)
+        private set
+
     val isDirty: Boolean get() = drafts.isNotEmpty()
     val isReadonly: Boolean get() = settingsResponse?.readonly ?: false
 
@@ -118,6 +164,7 @@ class SettingsController(
         loadError = null
         try {
             settingsResponse = settingsRepository.get()
+            libraryIdInput = steamIdFromSettings(settingsResponse)
         } catch (e: VaultApiError) {
             loadError = e.detail ?: strings.loadFailedFallback(e)
         } finally {
@@ -185,6 +232,111 @@ class SettingsController(
 
     fun dismissToast() {
         toast = null
+    }
+
+    // ---- Steam library block (WP APP-FEAT-1) ---------------------------------
+
+    /** Save: its own PATCH, independent of the shared Save bar (unsaved drafts
+     * elsewhere survive it). Decisions in [planLibrarySteamIdSave]. */
+    suspend fun saveLibrarySteamId() {
+        libraryIdError = null
+        when (val plan = planLibrarySteamIdSave(settingsResponse, libraryIdInput)) {
+            LibrarySteamIdSavePlan.Absent -> libraryIdError = LibraryIdMessage.ABSENT
+            LibrarySteamIdSavePlan.EnvOnly -> libraryIdError = LibraryIdMessage.ENV_ONLY
+            LibrarySteamIdSavePlan.Readonly -> libraryIdError = LibraryIdMessage.READONLY
+            LibrarySteamIdSavePlan.Invalid -> libraryIdError = LibraryIdMessage.INVALID
+            LibrarySteamIdSavePlan.Unchanged -> toast = strings.libraryIdUnchanged()
+            is LibrarySteamIdSavePlan.Patch -> {
+                libraryIdBusy = true
+                try {
+                    settingsResponse = settingsRepository.patch(plan.body)
+                    toast = if (plan.cleared) strings.libraryIdCleared() else strings.libraryIdSaved()
+                } catch (e: VaultApiError) {
+                    libraryIdError = LibraryIdMessage.SERVER
+                    libraryIdServerDetail = e.detail ?: e.message
+                } finally {
+                    libraryIdBusy = false
+                }
+            }
+        }
+    }
+
+    /** The server's own words for a failed Save/Reset ([LibraryIdMessage.SERVER]). */
+    var libraryIdServerDetail by mutableStateOf<String?>(null)
+        private set
+
+    /** Reset: `null` for the key (delete the override row), then re-fill the
+     * field from the new effective value. No-op without a `db` override. */
+    suspend fun resetLibrarySteamId() {
+        libraryIdError = null
+        val body = libraryIdResetBody(settingsResponse)
+        if (body.isEmpty()) return
+        libraryIdBusy = true
+        try {
+            settingsResponse = settingsRepository.patch(body)
+            libraryIdInput = steamIdFromSettings(settingsResponse)
+            toast = strings.libraryIdReset()
+        } catch (e: VaultApiError) {
+            libraryIdError = LibraryIdMessage.SERVER
+            libraryIdServerDetail = e.detail ?: e.message
+        } finally {
+            libraryIdBusy = false
+        }
+    }
+
+    /** Preview the TYPED id: game count, first names, persona (web Preview).
+     * The player-summaries call is best effort. */
+    suspend fun previewLibrarySteamId() {
+        val steamId = SteamId64.validate(libraryIdInput.trim())
+        if (steamId == null) {
+            libraryPreview = null
+            libraryPreviewError = LibraryLookupError.InvalidSteamId
+            return
+        }
+        libraryPreviewBusy = true
+        try {
+            val owned = steamRelayRepository.ownedGames(steamId)
+            val persona = try {
+                steamRelayRepository.playerSummaries(steamId).players.firstOrNull { it.steamid == steamId }?.personaname
+            } catch (_: VaultApiError) {
+                null
+            }
+            libraryPreview = LibraryPreview(
+                gameCount = owned.game_count,
+                previewNames = owned.games.take(PREVIEW_LIMIT).map { it.name },
+                personaName = persona?.takeIf { it.isNotBlank() },
+            )
+            libraryPreviewError = null
+        } catch (e: VaultApiError) {
+            libraryPreview = null
+            libraryPreviewError = describeLookupError(e)
+        } finally {
+            libraryPreviewBusy = false
+        }
+    }
+
+    /** Copies this device's own Steam sign-in into the field (not saved). */
+    fun useSignedInSteamId() {
+        identityState.steamId64?.let { libraryIdInput = it }
+    }
+
+    // ---- About (WP APP-FEAT-2) ---------------------------------------------------
+
+    /** `GET /v1/about`; a `404` (server before WP VER-2) is the "too old"
+     * note, not an error. Called on Settings open and by Refresh. */
+    suspend fun loadAbout() {
+        aboutLoading = true
+        try {
+            about = aboutRepository.get()
+            aboutFailure = null
+            aboutErrorDetail = null
+        } catch (e: VaultApiError) {
+            about = null
+            aboutFailure = classifyAboutError(e)
+            aboutErrorDetail = e.detail ?: e.message
+        } finally {
+            aboutLoading = false
+        }
     }
 
     // ---- Steam identity -----------------------------------------------------
@@ -259,3 +411,7 @@ class SettingsController(
         credentialStore.clear()
     }
 }
+
+/** Why the "Steam library" block's Save/Reset said no (worded in
+ * `SettingsScreen.kt` from strings.xml). */
+enum class LibraryIdMessage { ABSENT, ENV_ONLY, READONLY, INVALID, SERVER }

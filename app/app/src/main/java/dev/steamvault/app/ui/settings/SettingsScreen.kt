@@ -1,5 +1,18 @@
 package dev.steamvault.app.ui.settings
 
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import dev.steamvault.app.ui.library.logic.STEAM_LIBRARY_SETTING_KEY
+import dev.steamvault.app.ui.settings.logic.AboutComponentKind
+import dev.steamvault.app.ui.settings.logic.AboutLoadFailure
+import dev.steamvault.app.ui.settings.logic.AboutRow
+import dev.steamvault.app.ui.settings.logic.AboutStatus
+import dev.steamvault.app.ui.settings.logic.LibraryLookupError
+import dev.steamvault.app.ui.settings.logic.LibraryPreview
+import dev.steamvault.app.ui.settings.logic.aboutRowFor
+import dev.steamvault.app.ui.settings.logic.canResetLibrarySteamId
+import dev.steamvault.app.ui.settings.logic.canSaveLibrarySteamId
+import dev.steamvault.app.ui.theme.VaultColors
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,6 +84,7 @@ fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     LaunchedEffect(controller) { controller.load() }
+    LaunchedEffect(controller) { controller.loadAbout() }
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }) }) { innerPadding ->
         // WP APP-DEMO review round 2 (B2): the banner lives in this OUTER,
@@ -102,12 +116,17 @@ fun SettingsScreen(
 
                 HorizontalDivider()
                 SteamIdentitySection(controller, scope, onSignInSteamClick, demoMode)
+                if (!controller.loading && controller.loadError == null) {
+                    SteamLibraryBlock(controller, scope, demoMode)
+                }
                 HorizontalDivider()
                 NotificationsSection(onRequestNotificationPermission)
                 HorizontalDivider()
                 ClientsSection(onOpenClientsClick)
                 HorizontalDivider()
                 ConnectionSection(controller, onReconnectClick, onDisconnected, demoMode)
+                HorizontalDivider()
+                AboutSection(controller, scope)
             }
         }
     }
@@ -554,6 +573,231 @@ private fun steamLibraryStatusText(status: SteamLibraryStatus): String = when (s
     SteamLibraryStatus.RelayNotConfigured -> stringResource(R.string.settings_steam_library_not_configured)
     SteamLibraryStatus.InvalidSteamId -> stringResource(R.string.settings_steam_library_invalid_steamid)
     is SteamLibraryStatus.Failed -> stringResource(R.string.settings_steam_library_error, status.message)
+}
+
+// ---------------------------------------------------------------------
+// Steam library block (WP APP-FEAT-1, parity with web WEB-FEAT-1/2)
+// ---------------------------------------------------------------------
+
+/**
+ * The vault's ONE library SteamID64 (`steam_library_steamid`, WP
+ * API-FEAT-1): the field is pre-filled from the stored setting, Save is its
+ * own PATCH (independent of the shared Save bar), Reset deletes the
+ * override, Preview looks up the TYPED id through the relay. The Library on
+ * every device lists the games this id owns. Decisions live in
+ * `ui/settings/logic/SteamLibrarySetting.kt`.
+ *
+ * Demo mode: works on the demo's own settings and relay fixture; only
+ * "Use my signed-in SteamID64" is hidden, because it reads the REAL
+ * on-device identity (same rule as [SteamIdentitySection]).
+ */
+@Composable
+private fun SteamLibraryBlock(
+    controller: SettingsController,
+    scope: kotlinx.coroutines.CoroutineScope,
+    demoMode: Boolean,
+) {
+    val response = controller.settingsResponse
+    val entry = response?.settings?.firstOrNull { it.key == STEAM_LIBRARY_SETTING_KEY }
+    Text(stringResource(R.string.settings_library_id_title), style = MaterialTheme.typography.titleSmall)
+    Text(
+        stringResource(R.string.settings_library_id_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedTextField(
+        value = controller.libraryIdInput,
+        onValueChange = { controller.libraryIdInput = it },
+        label = { Text(stringResource(R.string.settings_library_id_label)) },
+        placeholder = { Text("76561198042117903") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        if (entry != null) captionFor(entry) else stringResource(R.string.settings_library_id_absent_preview_works),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    controller.libraryIdError?.let { message ->
+        Text(
+            when (message) {
+                LibraryIdMessage.ABSENT -> stringResource(R.string.settings_library_id_absent)
+                LibraryIdMessage.ENV_ONLY -> stringResource(R.string.settings_library_id_env_only)
+                LibraryIdMessage.READONLY -> stringResource(R.string.settings_library_id_readonly)
+                LibraryIdMessage.INVALID -> stringResource(R.string.settings_library_id_invalid)
+                LibraryIdMessage.SERVER -> controller.libraryIdServerDetail.orEmpty()
+            },
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (canSaveLibrarySteamId(response)) {
+            Button(
+                onClick = { scope.launch { controller.saveLibrarySteamId() } },
+                enabled = !controller.libraryIdBusy,
+            ) { Text(stringResource(R.string.settings_library_id_save)) }
+        }
+        if (canResetLibrarySteamId(response)) {
+            TextButton(
+                onClick = { scope.launch { controller.resetLibrarySteamId() } },
+                enabled = !controller.libraryIdBusy,
+            ) { Text(stringResource(R.string.settings_reset)) }
+        }
+        OutlinedButton(
+            onClick = { scope.launch { controller.previewLibrarySteamId() } },
+            enabled = !controller.libraryPreviewBusy,
+        ) { Text(stringResource(R.string.settings_library_id_preview)) }
+    }
+    // Weg A (coordinator decision): the server setting is the only source.
+    // The shortcut only fills the field; it is offered only where Save can
+    // actually store it (not read-only, not env-only, not an older server
+    // without the setting), and its hint says the change is vault-wide.
+    if (!demoMode && canSaveLibrarySteamId(response)) {
+        val signedIn = controller.identityState.steamId64
+        if (signedIn != null && signedIn != controller.libraryIdInput.trim()) {
+            TextButton(onClick = { controller.useSignedInSteamId() }) {
+                Text(stringResource(R.string.settings_library_id_use_signed_in))
+            }
+            Text(
+                stringResource(R.string.settings_library_id_use_signed_in_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    LibraryPreviewResult(controller.libraryPreview, controller.libraryPreviewError)
+}
+
+@Composable
+private fun LibraryPreviewResult(preview: LibraryPreview?, error: LibraryLookupError?) {
+    if (error != null) {
+        Text(
+            when (error) {
+                LibraryLookupError.NoRelayKey -> stringResource(R.string.settings_library_id_no_relay_key)
+                LibraryLookupError.InvalidSteamId -> stringResource(R.string.settings_library_id_invalid)
+                is LibraryLookupError.Failed -> error.detail
+            },
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        return
+    }
+    if (preview == null) return
+    preview.personaName?.let {
+        Text(stringResource(R.string.settings_library_id_preview_persona, it), style = MaterialTheme.typography.bodySmall)
+    }
+    Text(
+        pluralStringResource(R.plurals.settings_library_id_preview_count, preview.gameCount, preview.gameCount),
+        style = MaterialTheme.typography.bodySmall,
+    )
+    if (preview.gameCount == 0) {
+        Text(
+            stringResource(R.string.settings_library_id_preview_private),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    for (name in preview.previewNames) {
+        Text("• $name", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+// ---------------------------------------------------------------------
+// About section (WP APP-FEAT-2, GET /v1/about, WP VER-2)
+// ---------------------------------------------------------------------
+
+/**
+ * One row per component, status as the server sent it (never recomputed;
+ * vault-core and vault-dns are always "Unknown", the per-component note
+ * says why). A server without `/v1/about` (404) gets the "server too old"
+ * note instead of an error. Presentation decisions:
+ * `ui/settings/logic/AboutPresentation.kt`.
+ */
+@Composable
+private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutines.CoroutineScope) {
+    Text(stringResource(R.string.settings_section_about), style = MaterialTheme.typography.titleMedium)
+    when {
+        controller.aboutFailure == AboutLoadFailure.TOO_OLD -> Text(
+            stringResource(R.string.settings_about_too_old),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        controller.aboutFailure == AboutLoadFailure.ERROR -> Text(
+            stringResource(R.string.settings_about_error, controller.aboutErrorDetail.orEmpty()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        controller.about == null -> Text(
+            stringResource(R.string.settings_about_loading),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        else -> {
+            for (component in controller.about?.components.orEmpty()) {
+                AboutRowView(aboutRowFor(component))
+            }
+            Text(
+                stringResource(R.string.settings_about_cache_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    OutlinedButton(
+        onClick = { scope.launch { controller.loadAbout() } },
+        enabled = !controller.aboutLoading,
+    ) { Text(stringResource(R.string.settings_about_refresh)) }
+    Text(
+        stringResource(R.string.settings_about_trademark),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun AboutRowView(row: AboutRow) {
+    val unknown = stringResource(R.string.settings_about_unknown_value)
+    val statusWord = when (row.status) {
+        AboutStatus.OK -> stringResource(R.string.settings_about_status_ok)
+        AboutStatus.UNREACHABLE -> stringResource(R.string.settings_about_status_unreachable)
+        AboutStatus.NOT_IN_USE -> stringResource(R.string.settings_about_status_not_in_use)
+        AboutStatus.UNKNOWN -> stringResource(R.string.settings_about_status_unknown)
+    }
+    val note = when (row.kind) {
+        AboutComponentKind.VAULT_API -> stringResource(R.string.settings_about_note_vault_api)
+        AboutComponentKind.VAULT_CORE -> stringResource(R.string.settings_about_note_vault_core)
+        AboutComponentKind.VAULT_RUNNER -> stringResource(R.string.settings_about_note_vault_runner)
+        AboutComponentKind.STEAMPREFILL -> stringResource(R.string.settings_about_note_steamprefill)
+        AboutComponentKind.VAULT_PROXY -> stringResource(R.string.settings_about_note_vault_proxy)
+        AboutComponentKind.VAULT_DNS -> stringResource(R.string.settings_about_note_vault_dns)
+        null -> null
+    }
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(row.name, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                statusWord,
+                style = MaterialTheme.typography.labelMedium,
+                color = when (row.status) {
+                    AboutStatus.OK -> VaultColors.StatusOk
+                    AboutStatus.UNREACHABLE -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Text(
+            stringResource(R.string.settings_about_version_line, row.version ?: unknown, row.commit ?: unknown),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        note?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        row.detail?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------

@@ -1,6 +1,7 @@
 package dev.steamvault.app.net
 
 import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.ClientOut
@@ -226,6 +227,14 @@ class VaultApiClient(
      * added. Read-only endpoint; the writable half of this config lives at
      * [settings]/[patchSettings] (`sweep_include_cached` is one of its keys). */
     suspend fun schedule(): ScheduleOut = get("/v1/schedule")
+
+    // ---- about (WP VER-2) ----------------------------------------------------
+
+    /** `GET /v1/about` -- version and status of every component. A server
+     * from before WP VER-2 has no such route and answers `404`
+     * ([dev.steamvault.app.net.error.VaultApiError.NotFound]); the Settings
+     * About section reads that as "server too old", not as an error. */
+    suspend fun about(): AboutOut = get("/v1/about")
 
     // ---- steam relay (WP 4h.4; ADR-0004 second addendum) -----------------
     // The device-local Steam Web API key and its direct-to-Valve calls are
