@@ -2897,6 +2897,21 @@ below carry their own later dates, item 12 is the current one).
       decision, not a code change.
     - [ ] **D5** Named, scoped API keys and per-target payload scoping
       (Phase 6, already listed there).
+    - [ ] **D6 CLIENT-1 — a proper desktop client** (user request
+      2026-10-03: "moderner und professioneller", no scheduled tasks).
+      Replace the script + Scheduled Task / systemd timer packaging with:
+      a Windows installer (MSI via WiX or Inno Setup, Apps & Features
+      entry, clean uninstall, later winget); a background service that
+      watches the Steam library folders and reports on change, plus a
+      light heartbeat for presence; an optional tray app (status, last
+      report, version, "open Hangar", settings and connection test); set-up
+      by pairing from the web UI's "PCs" list (short code or QR) instead
+      of typing the API key, ideally one revocable key per PC (D5);
+      update offers driven by `GET /v1/about`; code signing (SmartScreen)
+      as an explicit cost decision; Linux/SteamOS as a package with a
+      systemd user service. Open decision: service + tray (reports
+      without a logged-on user, sees all users' libraries, needs admin to
+      install) versus tray-only (per user, no admin).
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
