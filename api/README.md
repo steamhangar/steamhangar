@@ -324,7 +324,7 @@ an operator asks for *off*, so a non-empty value is an explicit request for a
 feature, and a typo in it must not quietly look like it worked. Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v15)
+## Database schema (v16)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -348,6 +348,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `client_bypass_state` | `client_id` (PK), `bypass_suspected`, `updated_at`               | **v10**, WP 3.13. One row per client holding the LAST computed `bypass_suspected` verdict, so the cache-event sweep can fire `client.bypass_suspected`/`client.bypass_resolved` only on the TRANSITION (either direction), never on the steady state. Only populated when `VAULT_WEBHOOK_URL` is set and at least one of the two events is enabled — see "Webhooks" below |
 | `steam_relay_key` | `id` (PK, `CHECK (id = 1)`), `api_key`, `updated_at`               | **v12**, WP 4a.6r. Single-row: the opt-in Steam Web API relay's one revocable, read-scoped Web API key (ADR-0004 addendum), entered by the operator in the web UI and set via `PUT /v1/steam/key`. Never a password. See "Steam Web API relay" below |
 | `settings` | `key` (PK), `value`, `updated_at` | **v13**, settings-API work package (ADR-0009). One row per OVERRIDDEN key only — a key with no row falls through to its env value or built-in default. `value` is TEXT in the same string grammar the corresponding `VAULT_*` env var uses. See "Persisted settings" below |
+| `runner_presence` | `runner_id` (PK), `build_version`, `build_commit`, `steamprefill_version`, `started_at`, `last_seen` | **v16**, WP VER-2. One row per vault-runner PROCESS, upserted by `prefill_runner` about every 30 s (idle or busy); rows not seen for a day are pruned by the next write. Read only by `GET /v1/about`. See "Component versions" below |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -625,6 +626,7 @@ route, see "Auth").
 | GET    | `/v1/steam/owned-games`            | `?steamid=<SteamID64>` — relay `GetOwnedGames`. `200` with `{configured: true, game_count, games: [{appid, name, playtime_forever, img_icon_url, rtime_last_played}]}` (`rtime_last_played` added WP 4h.1: Unix-epoch seconds or `null` — see "rtime_last_played — absence is not zero" below); `409` if no key is configured; `422` for an unusable `steamid`; `502` for any upstream failure. **`playtime_forever`/`rtime_last_played` are each independently OMITTED from the JSON body entirely** (not sent as `0`/`null`) unless `VAULT_RELAY_EXPOSE_PLAYTIME`/`VAULT_RELAY_EXPOSE_LAST_PLAYED` are set — WP 4h.0, ADR-0010, see "The privacy gate" below. See "Steam Web API relay" below |
 | GET    | `/v1/steam/player-summaries`       | `?steamid=<SteamID64>` — relay `GetPlayerSummaries`. `200` with `{configured: true, players: [{steamid, personaname, avatar, avatarmedium, avatarfull, personastate}]}`; same `409`/`422`/`502` shape as `owned-games`. See "Steam Web API relay" below |
 | GET    | `/v1/settings`                     | Settings-API work package (ADR-0009): `{readonly, settings: [{key, effective, source, fallback, applies, env_only}, ...]}` — every overridable key plus informational env-only ones. `source` is `db`/`env`/`default`; `applies` is `immediately`/`next_sweep`/`restart-required`. See "Persisted settings" below |
+| GET    | `/v1/about`                        | WP VER-2: `{components: [{name, version, commit, status, checked_at, detail}, ...]}` for `vault-api` (also the web UI), `vault-core`, `vault-runner`, `steamprefill`, `vault-proxy`, `vault-dns`, in that order. `status` is `ok`/`unreachable`/`not_in_use`/`unknown`; `version`/`commit` are a string, `"invalid"` or `null`. Cached 60 s; never slow, never `5xx` for a missing component. See "Component versions" below |
 | PATCH  | `/v1/settings`                     | Partial update: `null` clears an override (revert to env/default), any other value sets it, validated with the SAME grammar `config.py` applies at startup. `200` with the same shape `GET` returns. `422` for an invalid value, an unknown key, or a recognised-but-environment-only key (distinct detail); `403` if `VAULT_SETTINGS_READONLY` is set. See "Persisted settings" below |
 
 ## Prefill orchestration (WP 1.4, job outcome honesty WP 3.3)
@@ -5039,6 +5041,105 @@ the fact entirely or offering a toggle that would `422`. `PATCH
   file (e.g. the manifest oracle's shape assumption, "Manifest oracle"
   section above).
 
+## Component versions — `GET /v1/about` (WP VER-2)
+
+One authenticated route lists what each part of the stack runs. The answer
+is a list, always six entries in this order:
+
+| `name` | `version` / `commit` from | `status` |
+|---|---|---|
+| `vault-api` | this process: `VAULT_BUILD_VERSION`/`VAULT_BUILD_COMMIT` (`vault_api.reported_identity`). It also serves the web UI, so the web shares this version | always `ok` (it answered) |
+| `vault-core` | the file `<cache volume>/logs/vault-core-version.json` (`/vault/logs/...` in the images), written by vault-core's start hook `core/docker/29-vault-build-version.sh` | always `unknown`, see below |
+| `vault-runner` | the freshest `runner_presence` row (schema v16) | `ok` while that row is younger than 90 s, else `unreachable`; `not_in_use` in `VAULT_PREFILL_MODE=subprocess` |
+| `steamprefill` | queue mode: what the runner reported (its image's `STEAMPREFILL_VERSION`); subprocess mode: vault-api's own `STEAMPREFILL_VERSION` | queue: `ok` with a fresh runner, else `unknown`; subprocess: `ok` when `VAULT_STEAMPREFILL_PATH` is an executable file, else `unknown` |
+| `vault-proxy` | nothing: `version` and `commit` are always `null` | `ok` when the proxy answers and refuses the probe host with `403`; `unreachable` when it does not answer; `unknown` for any other answer; `not_in_use` without `HTTP_PROXY` |
+| `vault-dns` | nothing | always `unknown` |
+
+Each entry also has `checked_at` (UTC, when vault-api looked) and `detail`
+(one or two plain sentences on where the facts come from). `version` and
+`commit` are a value, `"invalid"` (a baked value outside the VER-1 grammar,
+see "Build version"), or `null` (not known; a commit of `unknown` is `null`
+here). The response model is strict: unknown fields, names or status words
+cannot appear.
+
+**vault-core: a file, not a probe.** vault-api has no network path to
+vault-core (the egress lock, ADR-0011: vault-api gets cross-container facts
+through shared volumes only). The user decided on 2026-10-03 ("Weg A") to
+keep it that way: vault-core's hook records its validated build version at
+every start into the cache volume both containers mount, and `/v1/about`
+reads it. So the entry says which version **started last** (`detail` names
+the `recorded_at` from the file itself, not its mtime) and never claims that
+vault-core runs now. No file yet: `version: null`, "No version recorded
+yet". A file that is not exactly what the hook writes (not one JSON object
+with the four keys, a bad value, more than 4 KiB): `version: "invalid"`,
+"malformed". A file that is not a regular file in a real directory (a
+symlink, a directory, a FIFO, or a `logs/` that is itself a symlink: the
+parent is `lstat`-ed because `O_NOFOLLOW` covers the last component only):
+`version: "invalid"`, "cannot be read". vault-core does not serve its
+version over HTTP at all (no `/vault-version` location): the LAN would read
+it without a key, and core deliberately sends a bare `Server: nginx`.
+
+**vault-runner presence.** Before VER-2 an idle runner left no trace (only
+`jobs.run_heartbeat_at` while it owns a job). It now upserts its row when it
+starts and then about every 30 s, from its poll loop and from the heartbeat
+callback inside a running job (so a four-hour prefill does not make it look
+gone). 30 s instead of every 1 s poll keeps the shared SQLite file at two
+writes a minute. The 90 s threshold is three intervals: a write can be
+delayed by the 5 s `busy_timeout` or fail (it is logged and retried at the
+next interval), so two missed writes in a row still read `ok`, and a stopped
+runner shows `unreachable` within 90 s, as seen by the database. Add the
+60 s answer cache on top: a stopped runner can still read `ok` in
+`/v1/about` for up to about 150 s. A database error never stops a
+claim or a download. Each restart gets a new `runner_id`; rows older than a
+day are pruned. Values are validated again on read.
+
+**vault-proxy: reachability only.** The proxy image carries its version like
+every image, but tinyproxy 1.11.3 can serve a page of its own only for its
+`StatHost`, and it runs its destination filter BEFORE that check
+(`process_request` in `reqs.c`). A version page would need its host on the
+egress allowlist; the filter matches case-insensitively while the `StatHost`
+comparison is a case-sensitive `strcmp`, so an upper-case spelling of that
+host would pass the filter and be forwarded. That weakens the lock, so the
+version stays `null`. The probe instead connects to the proxy from
+`HTTP_PROXY` (2 s timeout) and asks for
+`http://steamhangar-about-probe.invalid/`, a name that never resolves
+(RFC 6761) and is on no allowlist: the filter refuses it on the name alone
+with `403 Filtered`, before any lookup. That proves the proxy answers and
+its filter is in force. The proxy logs one `Proxying refused on filtered
+domain "steamhangar-about-probe.invalid"` line per probe (at most one a
+minute, the cache); that line is this probe, not an attack.
+
+**vault-dns: never probed.** It is optional (`--profile dns`) and vault-api
+has no network path to it (same ADR-0011 rule), and a test query would
+itself be DNS traffic. So the entry is `unknown` with that reason, whether
+or not it runs; most setups use their own DNS rewrite instead.
+
+**Never slow, never failing.** The version file read, the presence query
+and the proxy probe run in parallel on worker threads; the route waits at
+most 3 s for all of them, and a late or crashing lookup degrades only its
+own entry (`unknown`, or `unreachable` for a proxy that did not answer in
+time). The whole answer is cached for 60 s per process, so a polling UI
+costs at most one round of lookups per minute. The route never waits for a
+late lookup, but its thread keeps running until its own call returns: the
+proxy socket has a 2 s timeout and the database read the 5 s
+`busy_timeout`, while the host-name lookup inside the proxy connect
+(`getaddrinfo`) and a read from a hung network filesystem under the cache
+volume have no timeout at all. Such a stuck thread can delay vault-api's
+shutdown until the call gives up; it never blocks a request.
+
+**What it does not reveal.** No path, host name, address, runner id or
+count appears in the answer; `detail` is fixed text plus timestamps, ages
+and versions (several fresh runners read "more than one runner", not a
+number). The route sits behind the key like `/v1/settings`, and
+`/v1/health` stays `{"status": "ok"}` (see "Auth").
+
+Pinned by `tests/test_ver_2_about.py` (every state of every component, the
+freshness threshold, presence writes on both runner paths, the probe's
+literal host, cache, deadline, no-leak and the v16 migration);
+`core/tests/test-build-version-hook.sh` and
+`.github/scripts/verify-core-nginx.sh` for the hook; `deploy/tests/
+verify-stack.sh` step 6w for the live stack.
+
 ## Auth
 
 Every endpoint requires the header `X-Api-Key: <VAULT_API_KEY>`, checked
@@ -5086,7 +5187,8 @@ that one route because:
   requirement (plan §10) that an API-key gate would defeat.
 
 **No version string either (WP 4e.7).** `GET /v1/settings`' `server_version`
-field (see "Persisted settings" below) is deliberately NOT mirrored onto
+field (see "Persisted settings" below), and since WP VER-2 the component
+list of `GET /v1/about`, are deliberately NOT mirrored onto
 `/v1/health` — a version number is free fingerprinting for anything that can
 reach the port. **Correction (review round 1, should-fix S2):** an earlier
 draft of this note cited "the one route this deployment's own docs say must
@@ -6138,8 +6240,9 @@ value, falls back as in the last table row: the version is informational,
 so a bad value does not stop vault-api from booting. The env can be
 overridden at `docker run` time, which is why the check happens here and
 not only in the Dockerfile. vault-api logs `vault-api version X (commit Y)`
-once at startup. The commit is not served by any route yet; WP VER-2 adds
-`GET /v1/about`.
+once at startup. `GET /v1/about` (WP VER-2, "Component versions" below)
+serves version and commit, with one deliberate difference: a present but
+invalid value shows as `"invalid"` there instead of the fallback.
 
 `vault_api.BASE_VERSION` is the one remaining hand-maintained release
 number in `api/`, the fallback above. Bump it together with every `image:`

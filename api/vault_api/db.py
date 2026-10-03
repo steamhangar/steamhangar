@@ -168,7 +168,14 @@ import sqlite3
 #: Same not-expressible-as-``CREATE TABLE IF NOT EXISTS`` situation as
 #: v4/v5/v8/v9/v14 -- an existing pre-v15 ``jobs`` table lacks all seven -- so
 #: this reuses the ``_add_missing_job_columns`` per-column-guarded ALTER step.
-SCHEMA_VERSION = 15
+#: v16 (WP VER-2): added ``runner_presence`` -- one row per vault-runner
+#: process, refreshed by ``prefill_runner`` about every
+#: ``prefill_runner.PRESENCE_INTERVAL_SECONDS`` while it runs (idle or busy),
+#: so ``GET /v1/about`` can say which runner build and which SteamPrefill
+#: version are live and when the runner was last seen. Before this the runner
+#: left a trace only while it owned a job (``jobs.run_heartbeat_at``). A
+#: brand-new table, so -- like v6/v9/v13 -- it needs no ``ALTER`` step.
+SCHEMA_VERSION = 16
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -609,6 +616,24 @@ CREATE TABLE IF NOT EXISTS settings (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+-- WP VER-2: vault-runner presence. One row per runner PROCESS (runner_id is
+-- prefill_runner.make_runner_id(): hostname:pid:random), upserted by that
+-- process about every 30 s whether or not it owns a job; rows not seen for a
+-- day are pruned by the next write. Read only by GET /v1/about, which shows
+-- the freshest row. build_version/build_commit/steamprefill_version hold what
+-- the runner's own image says (vault_api.reported_identity /
+-- steamprefill_version: a valid value, 'invalid', or NULL for "not baked"),
+-- and vault-api validates them again on read. Timestamps use the one UTC
+-- format of this database (jobs.TIMESTAMP_FORMAT).
+CREATE TABLE IF NOT EXISTS runner_presence (
+    runner_id            TEXT PRIMARY KEY,
+    build_version        TEXT,
+    build_commit         TEXT,
+    steamprefill_version TEXT,
+    started_at           TEXT NOT NULL,
+    last_seen            TEXT NOT NULL
 );
 """
 

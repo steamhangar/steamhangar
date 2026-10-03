@@ -1120,6 +1120,24 @@ vault-api reports the same version as `server_version` in
 `GET /v1/settings` (api/README.md "Build version"). `VAULT_IMAGE_TAG` is a
 different thing: it chooses which image to pull, not what is inside it.
 
+`GET /v1/about` (WP VER-2) lists all components in one answer:
+
+```bash
+curl -s -H "X-Api-Key: $VAULT_API_KEY" http://<vault-api>:8080/v1/about
+```
+
+What to expect in the shipped stack: `vault-api` `ok`; `vault-core`
+`unknown` with the version it recorded at its last start (vault-api cannot
+reach vault-core over the network by design, so it reads a file vault-core
+writes into the cache volume, `<cache>/logs/vault-core-version.json`);
+`vault-runner` and `steamprefill` `ok` while the runner has reported in the
+last 90 s (`not_in_use` / vault-api's own SteamPrefill with
+`VAULT_PREFILL_MODE=subprocess`); `vault-proxy` `ok` with no version (the
+probe only proves it answers and refuses an off-list host; it logs one
+`Proxying refused on filtered domain "steamhangar-about-probe.invalid"` line
+per probe, at most once a minute); `vault-dns` `unknown` (never probed).
+Details: api/README.md "Component versions".
+
 ## Logs and rotation
 
 All three containers log to stdout/stderr, so `docker compose logs -f` is the

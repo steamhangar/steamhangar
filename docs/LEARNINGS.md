@@ -957,3 +957,11 @@ These are not style preferences; each entry cost a review round to learn.
   script as it executes and aborts with a bogus syntax error at an
   unchanged line. A local docker without buildx uses the legacy builder,
   whose output format differs from BuildKit's; parse both (WP VER-1).
+- A root entrypoint hook must not create, write or chmod a name inside a
+  directory another uid owns: that uid can swap the name for a symlink
+  between root's check and use, and mktemp's O_EXCL only guards the
+  create. Do the file work as the owning user (busybox `su` keeps the
+  env), keep root to plain `mkdir` + `chown -h`, and prove it with a
+  real-uid race rig. tinyproxy filters before its StatHost check, so a
+  status page cannot be added without widening the egress allowlist
+  (WP VER-2).

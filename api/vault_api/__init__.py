@@ -87,6 +87,65 @@ def build_info(environ: Mapping[str, str] | None = None) -> BuildInfo:
     return BuildInfo(version=version, commit=commit, rejected=tuple(rejected))
 
 
+#: What ``GET /v1/about`` (WP VER-2) shows for a baked value that is present
+#: but outside the grammar. Deliberately NOT the fallback ``server_version``
+#: uses: ``/v1/about`` exists to diagnose a stack, so it says the value is
+#: bad instead of standing in a plausible release number. vault-core's
+#: version hook (``core/docker/29-vault-build-version.sh``) renders the same
+#: word for the same case.
+INVALID_VALUE = "invalid"
+
+#: The env the api image bakes from its pinned ``STEAMPREFILL_VERSION`` build
+#: arg (WP VER-2). A fact about the image, like ``VAULT_BUILD_VERSION``.
+STEAMPREFILL_VERSION_ENV = "STEAMPREFILL_VERSION"
+
+
+def is_valid_version(value: str) -> bool:
+    """True when ``value`` passes the VER-1 version grammar."""
+    return _VERSION_GRAMMAR.fullmatch(value) is not None
+
+
+def is_valid_commit(value: str) -> bool:
+    """True when ``value`` is a 7-40 character lowercase hex commit id."""
+    return _COMMIT_GRAMMAR.fullmatch(value) is not None
+
+
+def reported_identity(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str, str | None]:
+    """``(version, commit)`` as ``GET /v1/about`` reports them (WP VER-2).
+
+    Same resolution as :func:`build_info`, with two differences that suit a
+    diagnostic view: a present-but-unusable value becomes
+    :data:`INVALID_VALUE` instead of the fallback, and the "no commit known"
+    case is ``None`` instead of the word ``unknown``. The vault-runner
+    computes its presence record with this, vault-api its own row.
+    """
+    info = build_info(environ)
+    version = INVALID_VALUE if BUILD_VERSION_ENV in info.rejected else info.version
+    if BUILD_COMMIT_ENV in info.rejected:
+        commit: str | None = INVALID_VALUE
+    elif info.commit == UNKNOWN_COMMIT:
+        commit = None
+    else:
+        commit = info.commit
+    return version, commit
+
+
+def steamprefill_version(environ: Mapping[str, str] | None = None) -> str | None:
+    """The SteamPrefill version baked into this image, for ``GET /v1/about``.
+
+    ``None`` when ``STEAMPREFILL_VERSION`` is absent (a native run from a
+    checkout); :data:`INVALID_VALUE` when it is present but outside the
+    version grammar (blank included).
+    """
+    env = os.environ if environ is None else environ
+    raw = env.get(STEAMPREFILL_VERSION_ENV)
+    if raw is None:
+        return None
+    return raw if is_valid_version(raw) else INVALID_VALUE
+
+
 _IMPORT_BUILD = build_info()
 
 #: What this process reports as its version (``GET /v1/settings``'s
@@ -95,6 +154,7 @@ _IMPORT_BUILD = build_info()
 #: before building an app; in a container the env never changes, so both
 #: resolve the same value.
 __version__ = _IMPORT_BUILD.version
-#: The commit this image was built from, or ``"unknown"``. Not served by any
-#: route yet (WP VER-2 adds ``GET /v1/about``); logged once at startup.
+#: The commit this image was built from, or ``"unknown"``. Logged once at
+#: startup; served by ``GET /v1/about`` (WP VER-2) via
+#: :func:`reported_identity`.
 __commit__ = _IMPORT_BUILD.commit

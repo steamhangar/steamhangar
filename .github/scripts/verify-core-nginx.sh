@@ -58,6 +58,9 @@ for f in "$dockerfile" \
          "$core_dir/docker/28-vault-upstream-pool.sh" \
          "$core_dir/nginx/vault-upstream-pool.conf" \
          "$core_dir/tests/test-upstream-pool-hook.sh" \
+         "$core_dir/docker/29-vault-build-version.sh" \
+         "$core_dir/tests/test-build-version-hook.sh" \
+         "$core_dir/tests/build-version-race-rig.sh" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/check-config-drift.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
@@ -79,6 +82,15 @@ sh "$core_dir/docker/check-config-drift.sh"
 # CORE-FEAT-1b2's job in the docker-based steps below.
 echo "--- core/tests/test-upstream-pool-hook.sh ---"
 bash "$core_dir/tests/test-upstream-pool-hook.sh"
+
+# --- 0b-ver. the build-version hook, docker-free (WP VER-2) -----------------
+# 29-vault-build-version.sh writes vault-core's version file for vault-api's
+# GET /v1/about. The docker-free test covers its grammar, the fail-closed
+# "invalid", the atomic write, symlinks and the event-log collision refusal;
+# render_and_test below runs it inside the REAL entrypoint chain and checks
+# its order, and render_must_fail checks that the collision stops the boot.
+echo "--- core/tests/test-build-version-hook.sh ---"
+bash "$core_dir/tests/test-build-version-hook.sh"
 
 # --- 0c. ADR-0017 decision 5A: the upstream rate cap stays in @miss --------
 # The keepalive pool (WP CORE-FEAT-1b) ships with the cap untouched, and the
@@ -222,6 +234,8 @@ render_and_test() {
         -e TLS_MODE="$tls_mode" \
         -e VAULT_UPSTREAM_POOL_HOSTS="$pool" \
         -e EXPECTED_POOL_GROUPS="$pool_n" \
+        -e VAULT_BUILD_VERSION="0.1.0-rc9" \
+        -e VAULT_BUILD_COMMIT="0123456789abcdef0123456789abcdef01234567" \
         --entrypoint sh \
         "$IMAGE" -c '
             set -eu
@@ -243,8 +257,9 @@ render_and_test() {
             cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
+            cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
 
             # The REAL stock entrypoint: runs every /docker-entrypoint.d/*.sh
             # hook in sorted order (stock 10-/15-/20-envsubst, our 25-, stock
@@ -256,7 +271,10 @@ render_and_test() {
             # what a real `docker run ... "$IMAGE" nginx -t -p /vault -c
             # /etc/nginx/nginx.conf` (no entrypoint override) would do.
             nginx_t_status=0
-            /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf || nginx_t_status=$?
+            # Output captured (and replayed) so the hook order can be read
+            # back below (WP VER-2).
+            /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf > /tmp/entrypoint.log 2>&1 || nginx_t_status=$?
+            cat /tmp/entrypoint.log
 
             conf=/etc/nginx/nginx.conf
             [ -f "$conf" ] || { echo "FATAL: $conf was never rendered"; exit 1; }
@@ -303,6 +321,36 @@ render_and_test() {
             fi
             if [ "${marker_count:-0}" != "0" ]; then
                 echo "FAIL: $marker_count VAULT_EVENT_LOG_LINE marker(s) survived -- half-rendered config"
+                status=1
+            fi
+
+            # --- WP VER-2: the build-version hook ran in the real chain ------
+            # The stock entrypoint logs "Launching <hook>" per hook in sorted
+            # order. 29- must run after the envsubst render and 25..28 and
+            # before the preflight; it touches no config, but the order is
+            # the contract core/README.md states. The file it wrote must be
+            # exactly the reviewed JSON for the -e values above, 0644, under
+            # /vault/logs (outside the document root, on the shared volume).
+            launch_line() { grep -n "Launching /docker-entrypoint.d/$1" /tmp/entrypoint.log | head -n1 | cut -d: -f1; }
+            l20=$(launch_line 20-envsubst-on-templates.sh); l28=$(launch_line 28-vault-upstream-pool.sh)
+            l29=$(launch_line 29-vault-build-version.sh); l40=$(launch_line 40-vault-preflight.sh)
+            if [ -n "$l20" ] && [ -n "$l28" ] && [ -n "$l29" ] && [ -n "$l40" ] \
+               && [ "$l20" -lt "$l29" ] && [ "$l28" -lt "$l29" ] && [ "$l29" -lt "$l40" ]; then
+                echo "VER-2 OK: hook order 20-envsubst ($l20) < 28-pool ($l28) < 29-build-version ($l29) < 40-preflight ($l40)"
+            else
+                echo "FAIL (VER-2): hook order wrong or a hook did not run: 20=$l20 28=$l28 29=$l29 40=$l40"
+                status=1
+            fi
+            vf=/vault/logs/vault-core-version.json
+            if grep -qx "{\"component\":\"vault-core\",\"version\":\"0.1.0-rc9\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"recorded_at\":\"[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\"}" "$vf" 2>/dev/null \
+               && [ "$(stat -c %a "$vf")" = "644" ] && [ "$(stat -c %u:%g "$vf")" = "101:101" ]; then
+                echo "VER-2 OK: $vf rendered by the real entrypoint, mode 0644, owned by nginx (the writer half, review M1)"
+            else
+                echo "FAIL (VER-2): $vf missing, wrong, not 0644 or not owned 101:101: $(stat -c "%a %u:%g" "$vf" 2>&1) $(head -c 300 "$vf" 2>&1)"
+                status=1
+            fi
+            if grep -q "vault-core-version" "$conf"; then
+                echo "FAIL (VER-2): the rendered nginx config mentions the version file; it must not be served"
                 status=1
             fi
 
@@ -506,6 +554,11 @@ render_and_test() {
                 probe 404 "S2 trailing slash (cached-depot oracle)" http://127.0.0.1/depot/70403/chunk/
                 probe 404 "S2 trailing slash, depot root"   http://127.0.0.1/depot/70403/
                 probe 200 "/health still answers"           http://127.0.0.1/health
+                # WP VER-2: the version file is NOT served (decision: the
+                # authenticated GET /v1/about is the only place that shows it).
+                probe 404 "VER-2 no /vault-version location"  http://127.0.0.1/vault-version
+                probe 404 "VER-2 version file outside the document root" http://127.0.0.1/logs/vault-core-version.json
+                probe 400 "VER-2 no traversal to the version file" --path-as-is http://127.0.0.1/../logs/vault-core-version.json
                 server_hdr=$(curl -s -m 5 -o /dev/null -D - http://127.0.0.1/health | tr -d "\r" | sed -n "s/^[Ss]erver:[[:space:]]*//p")
                 if [ "$server_hdr" = "nginx" ]; then
                     echo "guard OK: N5 Server header carries no version ($server_hdr)"
@@ -697,7 +750,7 @@ render_and_test() {
 # pointing to <target> before the entrypoint runs, to prove the hook refuses
 # to create/chown through it instead of following it as root.
 render_must_fail() {
-    local label="$1" event_log="$2" link="${3:-}" target="${4:-}" out rc=0
+    local label="$1" event_log="$2" link="${3:-}" target="${4:-}" hook="${5:-25-vault-eventlog.sh}" out rc=0
     echo "--- must refuse: $label (VAULT_EVENT_LOG='$event_log') ---"
     out=$(docker run --rm \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
@@ -722,8 +775,9 @@ render_must_fail() {
             cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
+            cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
             /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf
         ' 2>&1) || rc=$?
     if [ "$rc" = "0" ]; then
@@ -731,12 +785,12 @@ render_must_fail() {
         echo "FAIL: VAULT_EVENT_LOG='$event_log' was accepted (exit 0), expected a refusal" >&2
         return 1
     fi
-    if ! printf '%s\n' "$out" | grep -qF "25-vault-eventlog.sh: FATAL"; then
+    if ! printf '%s\n' "$out" | grep -qF "$hook: FATAL"; then
         printf '%s\n' "$out"
-        echo "FAIL: VAULT_EVENT_LOG='$event_log' failed (exit $rc), but not in 25-vault-eventlog.sh's validation" >&2
+        echo "FAIL: VAULT_EVENT_LOG='$event_log' failed (exit $rc), but not in $hook" >&2
         return 1
     fi
-    echo "refused as expected (exit $rc): $(printf '%s\n' "$out" | grep -F '25-vault-eventlog.sh: FATAL' | head -n1)"
+    echo "refused as expected (exit $rc): $(printf '%s\n' "$out" | grep -F "$hook: FATAL" | head -n1)"
 }
 
 render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guards
@@ -756,6 +810,20 @@ render_must_fail "outside /vault"           "/etc/nginx/event.log"
 render_must_fail "'..' escape out of /vault" "/vault/../etc/event.log"
 render_must_fail "symlinked log directory"  "/vault/logs/event.log" /vault/logs /etc/nginx
 render_must_fail "symlinked log file"       "/vault/logs/event.log" /vault/logs/event.log /etc/passwd
+# WP VER-2: an event log on the build-version file's name would be replaced by
+# the version JSON at every start; 25- accepts the path, 29- stops the boot.
+render_must_fail "event log on the build-version file" "/vault/logs/vault-core-version.json" "" "" 29-vault-build-version.sh
+
+# WP VER-2 review M1: the hook runs as root in a directory uid 101 can
+# rename entries in. core/tests/build-version-race-rig.sh races it from the
+# nginx user (temp files swapped for symlinks to a root-only file, and a
+# planted logs/ symlink) in the pinned image; see the rig's header.
+echo "--- VER-2 M1: the build-version hook never writes through a name uid 101 can swap ---"
+docker run --rm --network none \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -v "$core_dir/tests:/workspace/core-tests:ro" \
+    --entrypoint sh \
+    "$IMAGE" /workspace/core-tests/build-version-race-rig.sh /workspace/core-docker/29-vault-build-version.sh 400
 
 # Pre-freeze review S5: 40-vault-preflight.sh must refuse the base image's
 # STOCK /etc/nginx/nginx.conf (what is left at that path when the envsubst
@@ -1253,4 +1321,7 @@ echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "client, refuses bad switch values, and is re-checked by the preflight" \
      "(exact stream block, own-address loop answer); the upstream" \
      "keepalive pool renders for 1 and 4 edges pass nginx -t offline and" \
-     "five bad VAULT_UPSTREAM_POOL_HOSTS lists are refused by the hook."
+     "five bad VAULT_UPSTREAM_POOL_HOSTS lists are refused by the hook;" \
+     "the build-version hook (WP VER-2) runs between 28- and 40-, writes the" \
+     "reviewed 0644 JSON, is never served, and stops the boot only when" \
+     "VAULT_EVENT_LOG names its file."

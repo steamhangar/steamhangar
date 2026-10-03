@@ -33,6 +33,8 @@ EXPECTED_TABLES = {
     # v13 (settings-API work package, ADR-0009): persisted overrides for a
     # small, named set of env-backed settings.
     "settings",
+    # v16 (WP VER-2): vault-runner presence for GET /v1/about.
+    "runner_presence",
 }
 
 

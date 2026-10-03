@@ -93,8 +93,9 @@ const VERSION_MAX_LEN = 24;
  * beyond "it is a string" any more than any other settings value is): this
  * function only clamps LENGTH (never markup — the caller assigns it via
  * `textContent`, never `innerHTML`, so there is no markup to sanitize). The
- * returned string is prefixed with `v` (unless the server value already
- * starts with one) — this is the SERVER's own reported version, deliberately
+ * returned string is prefixed with `v` only when it starts with a digit, and
+ * the bare local-build value `dev` reads "dev build" (WP VER-2: it used to
+ * render as "vdev") — this is the SERVER's own reported version, deliberately
  * not labelled "Release" (no release-tagging process exists yet — WP 5.5)
  * and never a frontend-hardcoded fallback: `VAULT_WEB_DIR` can point this
  * `web/` at a different image than the one actually running, so the two
@@ -108,6 +109,12 @@ export function versionFromSettings(settingsResponse) {
   if (!settingsResponse || typeof settingsResponse.server_version !== "string") return null;
   const trimmed = settingsResponse.server_version.trim();
   if (!trimmed) return null;
+  // WP VER-2: a locally built image reports `dev` (WP VER-1's Dockerfile
+  // default), which the old "always prefix v" rule rendered as "vdev". Only
+  // a value that starts with a digit is a release number and gets the `v`;
+  // the bare `dev` default reads "dev build"; anything else (`dev-1a2b3c4`,
+  // `ci-1a2b3c4`, `v0.1.0`, `V2`) is shown as the server sent it.
+  if (/^dev$/i.test(trimmed)) return "dev build";
   const clamped = trimmed.length > VERSION_MAX_LEN ? trimmed.slice(0, VERSION_MAX_LEN - 1) + "…" : trimmed;
-  return /^v/i.test(clamped) ? clamped : `v${clamped}`;
+  return /^[0-9]/.test(clamped) ? `v${clamped}` : clamped;
 }

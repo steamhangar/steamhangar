@@ -306,6 +306,7 @@ Steam-only, prefill-first design can solve better:
 | GET | /v1/steam/player-summaries | Relay `GetPlayerSummaries` (persona name, avatar) |
 | GET | /v1/settings | Effective runtime settings with the source of each value (settings API, ADR-0009) |
 | PATCH | /v1/settings | Partial update of the runtime-editable keys, same grammar as startup; `403` under `VAULT_SETTINGS_READONLY` |
+| GET | /v1/about | Version, commit and status of vault-api (web UI), vault-core, vault-runner, SteamPrefill, vault-proxy and vault-dns (WP VER-2; vault-core from a file on the cache volume, the proxy by reachability only, vault-dns never probed) |
 | GET | /v1/health | Liveness (for external monitoring) — the one unauthenticated route, besides the web UI's static files |
 
 Auth: static API key in a header (v1) on every route except `/v1/health`
@@ -2773,10 +2774,17 @@ below carry their own later dates, item 12 is the current one).
       version and commit (build args from publish.yml; `server_version`
       from the image; `vault-agent --version`; publish fails if a tag is
       not the version metadata-action derives).
-    - [ ] **VER-2** — `GET /v1/about`: versions and reachability of
+    - [x] **VER-2** — `GET /v1/about`: versions and reachability of
       vault-api/web, vault-core, vault-proxy, vault-runner, SteamPrefill
-      and vault-dns ("not in use" when the operator runs their own DNS
-      rewrite). The web rail footer must not render `vdev`.
+      and vault-dns. The web rail footer must not render `vdev`.
+      Shipped as: vault-core via a version file its start hook writes into
+      the cache volume (status `unknown`, user decision "Weg A"
+      2026-10-03: no network path from vault-api, ADR-0011 untouched);
+      runner presence table (schema v16, 30 s refresh, `ok` under 90 s);
+      vault-proxy by reachability only (a version page would need a hole
+      in tinyproxy's egress filter); vault-dns `unknown`, never probed
+      (vault-api cannot tell whether it runs). Footer: `dev` reads "dev
+      build", only digit-leading versions get the `v`.
     - [ ] **AGENT-FEAT-1** — the agent reports at logon/boot and every
       10 minutes (was 30), with its version and report interval in the
       report; `GET /v1/clients` adds them plus a computed online/offline
@@ -2786,6 +2794,18 @@ below carry their own later dates, item 12 is the current one).
       "PCs (agents)" (always reachable, online/offline, last seen,
       version, games); the clients sheet no longer needs the bypass
       banner as its only entry point.
+
+    - [ ] **SEC-FIX-5** — root may never follow a name uid 101 controls
+      in the cache volume (found in VER-2 review, 2026-10-03, severity
+      medium under a compromised vault-api or nginx worker). (a)
+      `25-vault-eventlog.sh` checks then creates/truncates the event log
+      as root (`[ -e ] || : >`); (b) the root nginx master opens
+      `/vault/logs/event.log` O_APPEND|O_CREAT and follows a symlink uid
+      101 can swap in at any time (CVE-2016-1247 class). Fix by
+      ownership: `/vault` and `/vault/logs` not renamable by uid 101, only
+      the files it must write owned by it; check the version hook
+      (VER-2), nginx temp dirs, GC and the bind-mount operator steps
+      (today `chown -R 101:101` on the cache dataset).
 
     **C. Hygiene (any time, small)**
     - [ ] verify-stack section 8: its `rootonly/` fixture cannot be

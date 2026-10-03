@@ -190,6 +190,13 @@ cleanup() {
     run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns down -v --remove-orphans"
     docker volume rm -f "$PROJECT-split-cache" "$PROJECT-scratch" >/dev/null 2>&1
     docker network rm "$POOL_NET" >/dev/null 2>&1
+    # WP VER-2 (review S2): step 8e's rootonly/ bind holds a root-owned tree
+    # plus logs/ written by vault-core's start hooks. Handed back here, not in
+    # step 8e, so an abort after 8e cannot leave undeletable debris in $work.
+    if [ -d "$work/rootonly" ]; then
+        docker run --rm --user 0:0 --entrypoint sh -v "$work/rootonly:/vault" \
+            "ghcr.io/steamhangar/vault-core:$TAG" -c "chown -R $(id -u):$(id -g) /vault && chmod -R u+w /vault" >/dev/null 2>&1
+    fi
     # WP DEPLOY-FIX-3: section 9's bind dir holds files owned by uid 101
     # (nginx wrote them); hand them back to the caller so rm -rf works
     # without root. The containers are gone by now.
@@ -1529,6 +1536,56 @@ served_version=$(curl -s --max-time 10 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v
     | python3 -c 'import json, sys; print(json.load(sys.stdin).get("server_version"))' 2>&1)
 assert_eq "dev" "$served_version" "vault-api: GET /v1/settings server_version is the baked VAULT_BUILD_VERSION"
 
+step "6w. WP VER-2: GET /v1/about reports every component (default stack, queue mode)"
+say 'Expected in this stack: vault-api ok/dev; vault-core unknown/dev (read'
+say 'from the version file its hook wrote into the shared volume -- vault-api'
+say 'has no network path to vault-core, ADR-0011); vault-runner ok/dev (its'
+say 'presence row); SteamPrefill ok/3.7.1 (the api image pin, reported by the'
+say 'runner); vault-proxy ok (it answered and refused the .invalid probe host);'
+say 'vault-dns unknown (never probed). /v1/about needs the key, /v1/health'
+say 'stays the fixed version-free body.'
+# about_field <json file> <component> <field>: prints the value, "null" for null.
+about_field() {
+    python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+c = {x["name"]: x for x in d["components"]}[sys.argv[2]]
+v = c[sys.argv[3]]
+print("null" if v is None else v)' "$1" "$2" "$3" 2>&1
+}
+about_code=$(curl -s -o "$work/about.json" -w '%{http_code}' --max-time 15 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/about")
+assert_eq "200" "$about_code" "GET /v1/about with the key"
+sed 's/^/    /' "$work/about.json"; echo
+assert_eq "vault-api vault-core vault-runner steamprefill vault-proxy vault-dns" \
+    "$(python3 -c 'import json, sys; print(" ".join(c["name"] for c in json.load(open(sys.argv[1]))["components"]))' "$work/about.json" 2>&1)" \
+    "/v1/about lists the six components in order"
+assert_eq "ok"      "$(about_field "$work/about.json" vault-api status)"     "vault-api: status"
+assert_eq "dev"     "$(about_field "$work/about.json" vault-api version)"    "vault-api: version (the baked dev default)"
+assert_eq "null"    "$(about_field "$work/about.json" vault-api commit)"     "vault-api: commit (unknown -> null)"
+assert_eq "unknown" "$(about_field "$work/about.json" vault-core status)"    "vault-core: status (not probed, by design)"
+assert_eq "dev"     "$(about_field "$work/about.json" vault-core version)"   "vault-core: version from its start hook's file"
+assert_contains "$(about_field "$work/about.json" vault-core detail)" "Recorded at vault-core's last start" "vault-core: the detail names the recording time"
+assert_eq "ok"      "$(about_field "$work/about.json" vault-runner status)"  "vault-runner: status (fresh presence row)"
+assert_eq "dev"     "$(about_field "$work/about.json" vault-runner version)" "vault-runner: version from its presence row"
+assert_eq "ok"      "$(about_field "$work/about.json" steamprefill status)"  "steamprefill: status"
+assert_eq "3.7.1"   "$(about_field "$work/about.json" steamprefill version)" "steamprefill: version (api/Dockerfile's pin, reported by the runner)"
+assert_eq "ok"      "$(about_field "$work/about.json" vault-proxy status)"   "vault-proxy: status (answered, refused the off-list probe host)"
+assert_eq "null"    "$(about_field "$work/about.json" vault-proxy version)"  "vault-proxy: version stays null (reachability only)"
+assert_eq "unknown" "$(about_field "$work/about.json" vault-dns status)"     "vault-dns: status (never probed)"
+proxy_refusal=$(dc logs --no-log-prefix vault-proxy 2>&1 | grep -c 'filtered domain "steamhangar-about-probe.invalid"' || true)
+if [ "${proxy_refusal:-0}" -ge 1 ]; then
+    ok "vault-proxy logged the probe as refused by its filter ($proxy_refusal line(s)): the 403 came from the egress filter, nothing left the proxy"
+else
+    bad "vault-proxy did not log a filter refusal for steamhangar-about-probe.invalid"
+fi
+core_file=$(dc exec -T vault-api cat /vault/logs/vault-core-version.json 2>&1 | tr -d '\r')
+assert_contains "$core_file" '"component":"vault-core","version":"dev","commit":"unknown"' "the version file vault-api reads is the one vault-core's hook wrote (shared volume)"
+about_noauth=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$API_URL/v1/about")
+assert_eq "401" "$about_noauth" "GET /v1/about without the key"
+health_body=$(curl -s --max-time 10 "$API_URL/v1/health")
+assert_eq '{"status":"ok"}' "$health_body" "GET /v1/health is still the fixed, version-free body"
+core_served=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$CORE_URL/vault-version")
+assert_eq "404" "$core_served" "vault-core serves no version page to the LAN"
+
 step "6j. Regression guard: /v1/health and an authed route still behave after the build-context change"
 say '6a/6b above already exercise these for auth-contract reasons; restated'
 say 'explicitly here because the build-context move (api/ -> repo root,'
@@ -1986,6 +2043,11 @@ dns_ver=$(dc exec -T vault-dns printenv VAULT_BUILD_VERSION 2>/dev/null | tr -d 
 dns_commit=$(dc exec -T vault-dns printenv VAULT_BUILD_COMMIT 2>/dev/null | tr -d '\r')
 assert_eq "dev"     "$dns_ver"    "vault-dns: VAULT_BUILD_VERSION in the running container (WP VER-1)"
 assert_eq "unknown" "$dns_commit" "vault-dns: VAULT_BUILD_COMMIT in the running container (WP VER-1)"
+# WP VER-2: even with vault-dns running, /v1/about must not claim to know --
+# vault-api has no network path to it and never sends a test query.
+dns_about=$(curl -s --max-time 15 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/about" \
+    | python3 -c 'import json, sys; c = {x["name"]: x for x in json.load(sys.stdin)["components"]}["vault-dns"]; print(c["status"], c["version"])' 2>&1)
+assert_eq "unknown None" "$dns_about" "GET /v1/about: vault-dns stays unknown/null while it runs (never probed, WP VER-2)"
 
 step "7i. WP CORE-FIX-3 (d): vault-core refuses to boot on a resolver that rewrites *.steamcontent.com"
 say 'vault-dns, running above, IS a looping resolver from vault-core'"'"'s point of'
@@ -2044,6 +2106,16 @@ chmod 0555 "$work/rootonly/cache" "$work/rootonly/tmp"
 ro=$(docker run --rm -v "$work/rootonly:/vault" "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$ro" | grep -E 'FATAL|chown|exit=' | sed 's/^/    /'
 assert_contains "$ro" "not writable" "a cache directory the nginx worker cannot write is refused"
+# WP VER-2: vault-core's start hooks run as root inside the container, and
+# 29-vault-build-version.sh creates logs/ (owner nginx) and its version file
+# in this bind before the preflight refuses, so a non-root caller cannot
+# delete $work afterwards. cleanup() hands the tree back (also on an aborted
+# run); here only the hook's effect is checked.
+if [ -f "$work/rootonly/logs/vault-core-version.json" ]; then
+    ok "8e: the version hook ran before the preflight refusal (cleanup hands rootonly/ back, WP VER-2)"
+else
+    bad "8e: logs/vault-core-version.json missing in the rootonly bind"
+fi
 
 # =============================================================================
 section "9. Dedicated cache mount: VAULT_CACHE_PATH bind mode, live (WP DEPLOY-FIX-3)"
@@ -2120,6 +2192,16 @@ if [ "$bind_up" = yes ]; then
     else
         bad "<VAULT_CACHE_PATH>/logs/ is missing although VAULT_EVENT_LOG is on"
     fi
+    # WP VER-2: the build-version file lands on the bind too, and vault-api
+    # (fresh container, empty /v1/about cache) reads it from there.
+    if [ -f "$bind_dir/logs/vault-core-version.json" ]; then
+        ok "vault-core wrote <VAULT_CACHE_PATH>/logs/vault-core-version.json on the bind (WP VER-2)"
+    else
+        bad "<VAULT_CACHE_PATH>/logs/vault-core-version.json is missing on the bind (WP VER-2)"
+    fi
+    bind_core_ver=$(curl -s --max-time 15 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/about" \
+        | python3 -c 'import json, sys; print({c["name"]: c for c in json.load(sys.stdin)["components"]}["vault-core"]["version"])' 2>&1)
+    assert_eq "dev" "$bind_core_ver" "GET /v1/about reads vault-core's version from the bind (WP VER-2)"
 fi
 
 # =============================================================================

@@ -283,3 +283,34 @@ Scope of the exception, all in WP VER-1:
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-03 — VER-1 exception extended: serving the versions (WP VER-2)
+
+The VER-1 addendum above opened api/ and core/ for the version plumbing and
+named WP VER-2 as the package that serves it. User decisions: "Weg A1"
+(2026-10-03, show component versions in `v0.1.0`) and "Weg A" (2026-10-03,
+vault-core's version comes from a file on the cache volume, no network path
+from vault-api, ADR-0011 unchanged). Scope, all in WP VER-2:
+
+- api/: the authenticated route `GET /v1/about` (`vault_api/about.py`,
+  `vault_api/routers/about.py`), schema v16 with the table
+  `runner_presence` (`vault_api/db.py`, `vault_api/runner_presence.py`),
+  the runner's presence writes (`vault_api/prefill_runner.py`), the helpers
+  `reported_identity` / `steamprefill_version` / `is_valid_*` in
+  `vault_api/__init__.py`, and `ENV STEAMPREFILL_VERSION` in `api/Dockerfile`
+  (from the one global build arg). `/v1/health` and `/v1/settings` are
+  unchanged.
+- core/: the start hook `docker/29-vault-build-version.sh` (root only
+  creates a missing `logs/`; every file operation runs as the nginx user,
+  review M1), its COPY, chmod and build-time check in `core/Dockerfile`,
+  `core/tests/test-build-version-hook.sh` and
+  `core/tests/build-version-race-rig.sh`. No nginx config change: no
+  `location = /vault-version`, so `check-config-drift.sh` and the
+  preflight pins are untouched.
+- Not frozen, listed for completeness: `.github/scripts/verify-core-nginx.sh`
+  (hook test, hook order, collision refusal, 404 probes),
+  `deploy/tests/verify-stack.sh` (steps 6w, 7h, 9d), the web rail footer
+  (`web/js/lib/rail-content.js`: `dev` reads "dev build"), docs.
+
+Every other frozen-path change still needs its own user decision and note
+here.

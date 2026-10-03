@@ -119,6 +119,18 @@ test("versionFromSettings: an empty/whitespace-only server_version renders nothi
 test("versionFromSettings: a real value is trimmed and prefixed with 'v' for display", () => {
   assert.equal(versionFromSettings({ server_version: "  0.1.0  " }), "v0.1.0");
 });
+// WP VER-2: a locally built image reports server_version "dev" (WP VER-1's
+// Dockerfile default); the old "always prefix v" rule rendered "vdev".
+test("versionFromSettings: the local-build value 'dev' reads 'dev build', never 'vdev'", () => {
+  assert.equal(versionFromSettings({ server_version: "dev" }), "dev build");
+  assert.equal(versionFromSettings({ server_version: "  DEV  " }), "dev build");
+});
+test("versionFromSettings: only a digit-leading value gets the 'v' prefix (dev-/ci- builds pass through)", () => {
+  assert.equal(versionFromSettings({ server_version: "dev-1a2b3c4" }), "dev-1a2b3c4");
+  assert.equal(versionFromSettings({ server_version: "ci-1a2b3c4" }), "ci-1a2b3c4");
+  assert.equal(versionFromSettings({ server_version: "0.1.0-rc9" }), "v0.1.0-rc9");
+  assert.equal(versionFromSettings({ server_version: "devel" }), "devel", "only the exact word dev is the local-build default");
+});
 test("versionFromSettings: a value that already starts with 'v'/'V' is not double-prefixed", () => {
   assert.equal(versionFromSettings({ server_version: "v0.1.0" }), "v0.1.0");
   assert.equal(versionFromSettings({ server_version: "V2" }), "V2");
