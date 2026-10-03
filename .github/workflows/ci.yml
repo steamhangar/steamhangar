@@ -283,11 +283,16 @@ jobs:
         # `-eo pipefail` and the script sets pipefail again explicitly, so
         # gradlew's exit status -- not tee's 0 -- is the step's result
         # (pinned by api/tests/test_ci_fix_2_android_annotate.py).
-        # stop-commands: Gradle/test output is untrusted data (a PR decides
-        # what a test prints); between the random-token stop and its resume
-        # the runner parses no `::` workflow command out of it. The EXIT
-        # trap resumes even when gradlew fails, so later steps' commands are
-        # processed again; it does not change the exit status.
+        # stop-commands: between the random-token stop and its resume the
+        # runner parses no `::` workflow command out of the Gradle output,
+        # so command-like text that trusted code prints (a test message, a
+        # compiler or lint message containing `::`) stays plain log text.
+        # It is NOT a defence against a malicious pull request: that PR's
+        # build code runs in this same step with the runner's files at hand
+        # ($GITHUB_ENV, $GITHUB_OUTPUT, the inputs of the annotate steps), so
+        # it does not need workflow commands in its stdout at all. The EXIT trap resumes even when gradlew fails, so later
+        # steps' commands are processed again; it does not change the exit
+        # status.
         working-directory: app
         shell: bash
         run: |

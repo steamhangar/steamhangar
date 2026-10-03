@@ -24,8 +24,13 @@ commands, one category per invocation (= per step, see "Limits" below):
 
 Each invocation also appends a markdown section to $GITHUB_STEP_SUMMARY.
 
-Security: everything read here is DATA produced by building untrusted code
-(a pull request can make a test print anything). The only way log text
+Security, and its limit: everything read here is DATA produced by the
+build, and this script never lets it act as a workflow command. That
+protects against command-like text the trusted code base happens to print
+(a test message, a file name, a lint message containing `::`). It is NOT a
+defence against a malicious pull request: that PR's build code runs in the
+same job and can write workflow commands, $GITHUB_ENV or the step summary
+itself, without going through this script. The only way log text
 reaches stdout is through `_command()`, which escapes it per GitHub's
 workflow-command rules: `%`, CR and LF in the message (so the message can
 never end the line and start a fresh `::command`), plus `:` and `,` in
@@ -236,11 +241,19 @@ def _iter_xml(paths: Iterable[Path]) -> Iterator[tuple[Path, ET.Element]]:
             # entity-expansion bombs, and no external entities are fetched.
             yield p, ET.parse(p).getroot()
         except (ET.ParseError, OSError) as exc:
-            print(f"android-annotate: skipping unreadable {p.name}: {type(exc).__name__}",
+            # repr(): the file name is build output too. A name such as
+            # "x\n::warning::y.xml" must not reach the log as its own line
+            # (stderr is part of the step log the runner parses).
+            print(f"android-annotate: skipping unreadable {p.name!r}: {type(exc).__name__}",
                   file=sys.stderr)
 
 
-_FRAME = re.compile(r"\bat ([\w$.]+)\.[\w$<>]+\(([\w$.-]+\.(?:kt|java)):(\d+)\)")
+# The method part is anything but parentheses and a line break: Kotlin
+# backtick test names contain spaces, commas and dashes
+# (`at pkg.FooTest.MUTATION PIN -- x(FooTest.kt:12)`). The class part cannot
+# contain a space, so the lazy method part still splits at the last `.`
+# before the name.
+_FRAME = re.compile(r"\bat ([\w$.]+)\.[^()\n]+?\(([\w$.-]+\.(?:kt|java)):(\d+)\)")
 
 
 def _junit_location(classname: str, body: str, workspace: Path,
@@ -254,8 +267,11 @@ def _junit_location(classname: str, body: str, workspace: Path,
             continue
         for root in test_roots:
             cand = root.joinpath(*pkg.split("."), fname) if pkg else root / fname
-            if cand.is_file():
-                return relativize(str(cand.resolve()), workspace), ln
+            try:
+                if cand.is_file():
+                    return relativize(str(cand.resolve()), workspace), ln
+            except OSError:
+                continue  # e.g. a name too long for the file system
         return None, None
     return None, None
 

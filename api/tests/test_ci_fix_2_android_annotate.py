@@ -511,3 +511,48 @@ def test_annotate_steps_run_from_workspace_root(ws: Path, tmp_path: Path) -> Non
         total += n
     assert total == sum(expected.values())
     assert summary.read_text(encoding="utf-8").count("### Android CI:") == 4
+
+
+# ---------------------------------------------------------------------------
+# Review fixes on WP CI-FIX-2
+# ---------------------------------------------------------------------------
+
+
+def test_unreadable_xml_file_name_cannot_inject_a_command_via_stderr(ws: Path, tmp_path: Path) -> None:
+    """A JUnit report whose file NAME carries a newline plus a workflow
+    command is reported on stderr with repr(), so the name stays on the
+    script's own line (stderr lands in the step log the runner parses)."""
+    results = tmp_path / "results" / "testDebugUnitTest"
+    results.mkdir(parents=True)
+    evil = results / "TEST-x\n::warning::pwned.xml"
+    evil.write_text("<testsuite><testcase", encoding="utf-8")  # unparseable
+    p = run_script("junit", "--results-dir", str(tmp_path / "results"), workspace=ws)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout == ""
+    assert parse_commands(p.stderr) == [], p.stderr
+    assert "skipping unreadable" in p.stderr
+    assert "\\n::warning::pwned.xml" in p.stderr  # escaped, not a line break
+
+
+def test_backtick_test_method_frame_gets_a_source_location(ws: Path) -> None:
+    """Kotlin backtick test names contain spaces, commas and dashes; the
+    frame regex must still map them to file and line."""
+    body = (
+        "java.lang.AssertionError: expected:<1> but was:<2>\n"
+        "\tat org.junit.Assert.fail(Assert.java:89)\n"
+        "\tat com.steamhangar.app.ParserTest.MUTATION PIN -- rejects garbage, quietly(ParserTest.kt:41)\n"
+    )
+    rel, ln = aa._junit_location("com.steamhangar.app.ParserTest", body, ws,
+                                 [ws / "app/app/src/test/java"])
+    assert rel == "app/app/src/test/java/com/steamhangar/app/ParserTest.kt"
+    assert ln == 41
+    # A plain method name still resolves to the class, not to a longer prefix.
+    plain = "\tat com.steamhangar.app.ParserTest.rejectsGarbage(ParserTest.kt:7)\n"
+    assert aa._junit_location("com.steamhangar.app.ParserTest", plain, ws,
+                              [ws / "app/app/src/test/java"]) == (rel, 7)
+
+
+def test_frame_path_os_error_is_skipped_not_fatal(ws: Path) -> None:
+    body = f"\tat com.steamhangar.app.ParserTest.x({'a' * 300}.kt:3)\n"
+    assert aa._junit_location("com.steamhangar.app.ParserTest", body, ws,
+                              [ws / "app/app/src/test/java"]) == (None, None)

@@ -39,7 +39,7 @@ class OwnedLibraryTest {
     // ---- steamIdFromSettings --------------------------------------------------
 
     @Test
-    fun `MUTATION PIN -- only a JSON string counts as the stored id, trimmed; a number is never coerced`() {
+    fun `MUTATION PIN -- only a JSON string counts as the stored id, trimmed, and a number is never coerced`() {
         assertEquals(validId, steamIdFromSettings(settings(JsonPrimitive(" $validId "))))
         assertEquals("", steamIdFromSettings(settings(JsonPrimitive(76561198042117903L))))
         assertEquals("", steamIdFromSettings(settings(JsonNull)))
@@ -50,7 +50,7 @@ class OwnedLibraryTest {
     // ---- titles ---------------------------------------------------------------
 
     @Test
-    fun `appTitle order -- vault name, then owned name, then App N; blank counts as missing`() {
+    fun `appTitle order -- vault name, then owned name, then App N, and blank counts as missing`() {
         assertEquals("Vault Five", appTitle(5, "Vault Five", "Steam Five"))
         assertEquals("Steam Five", appTitle(5, null, "Steam Five"))
         assertEquals("Steam Five", appTitle(5, "   ", "Steam Five"))
@@ -185,7 +185,7 @@ class OwnedLibraryTest {
     }
 
     @Test
-    fun `MUTATION PIN -- a server without the setting is ABSENT (server too old), never "set it in Settings"`() = runTest {
+    fun `MUTATION PIN -- a server without the setting is ABSENT (server too old), never set-it-in-Settings`() = runTest {
         var relayCalls = 0
         val loader = OwnedLibraryLoader(getSettings = { settings(null, present = false) }, ownedGames = { relayCalls++; OwnedGamesRelayOut() })
         loader.load()
