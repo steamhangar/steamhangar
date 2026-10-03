@@ -984,3 +984,7 @@ These are not style preferences; each entry cost a review round to learn.
   interval only when its scheduler was told one, so old 30-minute tasks
   running a new binary are not judged on a 10-minute window (WP
   AGENT-FEAT-1).
+- With a valid key an unknown /v1 route answers 404 (pre-auth guard), so
+  only a 404 means "server too old"; a 401 is always a bad or rotated
+  key. A UI that reads 401 as "update the server" sends the operator to
+  the wrong fix (WP WEB-FEAT-3).

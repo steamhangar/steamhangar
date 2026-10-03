@@ -1201,6 +1201,49 @@ body.onboarding .nav{ display:none; }
 .tx-stale{ color:var(--stale); }
 .tx-warn{ color:var(--stale); }
 
+/* ---------- PCs (agents) + Settings → About (WP WEB-FEAT-3) ----------
+   Presence chip next to the bypass badge, stacked in one non-shrinking
+   column; the name/stats column beside it shrinks (`.jobtop > div`,
+   min-width:0) and its "last seen · agent <version>" line wraps anywhere,
+   so a long agent version cannot widen the sheet on a phone. Shape cue for
+   CVD: online is a filled dot, offline a hollow ring, and the word is
+   always there. */
+.pcs-badges{ display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex:none; }
+.pchip{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; white-space:nowrap; }
+.pchip .pdot{ width:8px; height:8px; border-radius:50%; background:currentColor; flex:none; box-sizing:border-box; }
+.pchip-on{ color:var(--ok); }
+.pchip-off, .pchip-unknown{ color:var(--dim-2); }
+.pchip-off .pdot, .pchip-unknown .pdot{ background:transparent; border:1.5px solid currentColor; }
+.pcs-line{ overflow-wrap:anywhere; }
+
+/* About table, phone first: every row is a stacked block (component name
+   on its own line, then Version / Commit / Status as labelled cells in a
+   two-track grid of minmax(0,1fr), so nothing can push the page wider).
+   The header row is visually hidden here (each cell carries its own
+   data-label) and becomes a real table header from BP-M up (below). */
+.about-head{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; min-width:0; margin-top:8px; }
+.about-status-line{ margin:0; min-width:0; overflow-wrap:anywhere; }
+.about-content{ min-width:0; }
+.about-table{ width:100%; border-collapse:collapse; margin-top:10px; font-size:12.5px; }
+.about-table thead{
+  position:absolute; width:1px; height:1px; overflow:hidden;
+  clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap;
+}
+.about-table tbody, .about-table tr, .about-table th, .about-table td{ display:block; min-width:0; }
+.about-table .about-row{
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px 12px;
+  padding:10px 0 4px; border-top:1px solid var(--line-soft);
+}
+.about-table .about-name{ grid-column:1 / -1; text-align:left; font-weight:600; overflow-wrap:anywhere; }
+.about-table .about-status{ grid-column:1 / -1; }
+.about-table td[data-label]::before{
+  content:attr(data-label); display:block; margin-bottom:2px;
+  font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2);
+}
+.about-table .mono{ font-family:var(--mono); font-size:11.5px; overflow-wrap:anywhere; }
+.about-table .about-detail td{ padding:0 0 8px; }
+.about-table .about-detail .foot-note{ margin:2px 0 0; }
+
 /* ============================================================
    Game detail sheet (WP 4a.4)
    Reuses the WP 4a.7 .sheet-backdrop/.sheet scaffold (sheet-dialog.js) and
@@ -1374,6 +1417,25 @@ body.onboarding .nav{ display:none; }
   /* WP WEB-FIX-3: the pre-fix desktop values, unchanged from BP-M up. */
   .search input{ font-size:13px; }
   input.inp, .inp input{ font-size:12.5px; }
+
+  /* WP WEB-FEAT-3: the About table is a real table from here up — four
+     equal fixed columns (table-layout:fixed, so a long version wraps in its
+     cell instead of widening the table), the header row visible again, the
+     phone's per-cell labels gone. */
+  .about-table{ table-layout:fixed; }
+  .about-table thead{
+    position:static; width:auto; height:auto; overflow:visible;
+    clip:auto; clip-path:none; white-space:normal; display:table-header-group;
+  }
+  .about-table tbody{ display:table-row-group; }
+  .about-table tr, .about-table .about-row{ display:table-row; padding:0; border-top:0; }
+  .about-table th, .about-table td{
+    display:table-cell; padding:8px 10px 8px 0; vertical-align:top; text-align:left;
+    border-top:1px solid var(--line-soft);
+  }
+  .about-table thead th{ font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2); }
+  .about-table td[data-label]::before{ content:none; }
+  .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
 }
 
 /* ---------- BP-L (>= 1024px) — bottom nav becomes a left rail -----------
@@ -1869,6 +1931,12 @@ body.onboarding .nav{ display:none; }
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
+    /* WP WEB-FEAT-3: a <button> now (opens Settings → About); full width,
+       left-aligned like the text line it was. No author `display` (the UA
+       [hidden] rule must keep winning, css-hygiene.test.js). */
+    width:100%;
+    max-width:100%;
+    text-align:left;
   }
 
   /* `.onb` (the onboarding overlay) deliberately keeps `--w-text` instead of
@@ -2055,6 +2123,8 @@ body.onboarding .nav{ display:none; }
      with the same click/keyboard handling as the base bottom nav); this
      only adds a highlight a mouse user sees on the way to clicking. */
   .nav-btn:hover{ background:var(--raised); color:var(--text); }
+  /* WP WEB-FEAT-3: the version line is a button to Settings → About. */
+  .rail-version:hover{ color:var(--dim); text-decoration:underline; }
   /* S2 (Opus review, WP 4e.4): the rule above is the ORIGINAL WP 4e.1
      precedent this package generalized to every other hover rule — and it
      already carried the exact B1 cascade-inversion defect on its own,

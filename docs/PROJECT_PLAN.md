@@ -2800,7 +2800,7 @@ below carry their own later dates, item 12 is the current one).
       `OnCalendar=*:0/10` + `OnStartupSec=30s`; a new agent resends once
       without the fields to a server up to rc8 that refuses them. Operators
       reinstall the task/units to get the new schedule.
-    - [ ] **WEB-FEAT-3** — Settings gains "About" (component table) and
+    - [x] **WEB-FEAT-3** — Settings gains "About" (component table) and
       "PCs (agents)" (always reachable, online/offline, last seen,
       version, games); the clients sheet no longer needs the bypass
       banner as its only entry point.
@@ -2821,6 +2821,12 @@ below carry their own later dates, item 12 is the current one).
       mounts at every start or refuses to start with the host commands;
       the version file is written by root; bind-mount operator step is now
       `chown 101:101 <dir>/cache/depot` only (deploy/README).
+
+    - [ ] **WEB-FEAT-4** — remove a PC from the "PCs (agents)" list with
+      a confirmation dialog, calling the existing `DELETE
+      /v1/clients/{client_id}` (WP AG-1); a renamed or retired PC
+      otherwise stays listed as offline forever (user decision
+      2026-10-03, after rc9). Android follows in the next app package.
 
     **C. Hygiene (any time, small)**
     - [ ] Stale ownership leftovers after SEC-FIX-5 (frozen api code,

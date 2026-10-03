@@ -32,11 +32,27 @@
  *  - Connection — a single "Reconnect / switch account" action that
  *    replays the onboarding overlay (onboarding.js), matching the
  *    mockup's Settings screen.
+ *  - PCs (agents) — WP WEB-FEAT-3: the "Agents: N online, M offline" line
+ *    and a "Show PCs" button that opens the existing clients sheet
+ *    (components/clients-sheet.js). Reusing the sheet instead of a second
+ *    list here keeps ONE rendering of a PC row (presence chip, last seen,
+ *    version, games, bypass state) with one store subscription and one
+ *    patch-in-place path, so the two entry points cannot drift; and it
+ *    keeps the recorded WP 4a.1 decision "Clients is a sheet, not a nav
+ *    item". Before this WP the sheet was reachable only from the bypass
+ *    banner and the notifications, i.e. never on a healthy vault.
+ *  - About — WP WEB-FEAT-3: the component table from `GET /v1/about` (WP
+ *    VER-2), presented by lib/about-view.js. Fetched when this view opens
+ *    and on the Refresh button, never polled; the server caches its answer
+ *    for 60 s and the table says so. A 404 (a server from before VER-2: with
+ *    a valid key an unknown route is 404) shows a "server too old" note;
+ *    a 401 (key refused) and anything else show an error line.
  *
- * No live polling here (no store-singleton subscription): settings rarely
- * change from outside this screen, so a plain fetch-on-mount plus
- * fetch-after-save is enough — there is no round-7-style animated node to
- * protect from a naive rebuild.
+ * The settings form itself is not polled (settings rarely change from
+ * outside this screen, so fetch-on-mount plus fetch-after-save is enough).
+ * The one store-singleton subscription here (WP WEB-FEAT-3, "clients")
+ * only rewrites the agents-summary text and the About "checked ... ago"
+ * line; it never rebuilds the form.
  */
 
 import { api, isDemoMode } from "../api.js";
@@ -64,6 +80,17 @@ import {
   saveLibrarySteamId,
 } from "../lib/owned-library.js";
 import { onViewChange } from "../router.js";
+import { store } from "../store-singleton.js";
+import { openClientsSheet } from "../components/clients-sheet.js";
+import { createStatusIcon } from "../components/status-icon.js";
+import { agentsSummaryText } from "../lib/clients-view.js";
+import {
+  ABOUT_TOO_OLD_MESSAGE,
+  aboutComponents,
+  checkedText,
+  classifyAboutError,
+  describeComponent,
+} from "../lib/about-view.js";
 
 const WEBHOOK_EVENT_OPTIONS = [
   ["job.done", "Job finished"],
@@ -815,9 +842,263 @@ function buildConnectionSection() {
   return wrap;
 }
 
+// ---------------------------------------------------------------------
+// PCs (agents) section (WP WEB-FEAT-3)
+// ---------------------------------------------------------------------
+
+/** Agents line text from the store's latest clients snapshot; a waiting
+ * text before the first answer (never "none" before it knows). */
+function currentAgentsText() {
+  const snap = store.snapshot("clients");
+  return agentsSummaryText(Array.isArray(snap) ? snap : null) || "Agents: waiting for the first answer from the server…";
+}
+
+function buildPcsSection() {
+  const wrap = document.createDocumentFragment();
+  wrap.append(el("h4", "sec", "PCs (agents)"));
+  const summaryLine = el("p", "foot-note", currentAgentsText());
+  summaryLine.dataset.role = "agents-summary";
+  wrap.append(summaryLine);
+  const row = el("div", "srow");
+  const grow = el("span", "grow");
+  grow.append(
+    el("span", "ttl", "PCs running vault-agent"),
+    el(
+      "span",
+      "desc",
+      "Online or offline, last seen, agent version, games and cache bypass state for every PC that has reported — offline PCs included.",
+    ),
+  );
+  const btn = el("button", "btn ghost sm", "Show PCs");
+  btn.type = "button";
+  btn.dataset.role = "open-pcs";
+  btn.addEventListener("click", () => openClientsSheet());
+  row.append(grow, btn);
+  wrap.append(row);
+  els.agentsLines.push(summaryLine);
+  return wrap;
+}
+
+// ---------------------------------------------------------------------
+// About section (WP WEB-FEAT-3: GET /v1/about)
+// ---------------------------------------------------------------------
+
+/** Module state, survives re-mounts like `state` above. `phase`:
+ * "idle" | "loading" | "loaded" | "too_old" | "error". `components` is
+ * kept across a failed Refresh (the last good table stays visible under
+ * the error line); a "too old" answer clears it. */
+const about = { phase: "idle", components: null, error: null, gen: 0 };
+/** The About section's live nodes for the CURRENT mount, or null. */
+let aboutEls = null;
+/** Set by the rail's version button (requestAboutFocus) before it
+ * navigates here: the next full render moves focus to the About heading. */
+let focusAboutOnRender = false;
+
+/**
+ * Ask the Settings view to bring the About section into view and focus its
+ * heading on its next render. The rail footer's version button calls this
+ * right before `navigateTo("settings")` (app.js).
+ */
+export function requestAboutFocus() {
+  focusAboutOnRender = true;
+}
+
+function setRefreshBusy(busy) {
+  if (!aboutEls) return;
+  // aria-disabled + a click guard instead of `disabled`, so keyboard focus
+  // stays on the button across a refresh (docs/LEARNINGS.md, WP WEB-FEAT-1).
+  if (busy) aboutEls.refreshBtn.setAttribute("aria-disabled", "true");
+  else aboutEls.refreshBtn.removeAttribute("aria-disabled");
+}
+
+function aboutAnnouncement() {
+  if (about.phase === "loaded") return "Component versions refreshed.";
+  if (about.phase === "too_old") return ABOUT_TOO_OLD_MESSAGE;
+  if (about.phase === "error") return `Could not refresh: ${about.error}`;
+  return "";
+}
+
+/**
+ * Fetch `GET /v1/about`. One request at a time: a call while one is in
+ * flight is ignored (that one will paint whichever mount is current when
+ * it lands). `announce` is true only for the Refresh button: the role=status
+ * line then says what happened, because a refresh within the server's 60 s
+ * cache can return an identical table.
+ */
+async function loadAbout({ announce = false } = {}) {
+  if (about.phase === "loading") return;
+  const gen = ++about.gen;
+  about.phase = "loading";
+  setRefreshBusy(true);
+  if (announce && aboutEls) aboutEls.status.textContent = "Refreshing component versions…";
+  paintAbout();
+  try {
+    const response = await api.about();
+    if (gen !== about.gen) return;
+    const components = aboutComponents(response);
+    if (!components) throw new Error("the server's answer has no component list");
+    about.components = components;
+    about.error = null;
+    about.phase = "loaded";
+  } catch (err) {
+    if (gen !== about.gen) return;
+    if (classifyAboutError(err) === "too_old") {
+      about.phase = "too_old";
+      about.components = null;
+      about.error = null;
+    } else {
+      about.phase = "error";
+      about.error = errorText(err);
+    }
+  }
+  setRefreshBusy(false);
+  paintAbout();
+  if (announce && aboutEls) aboutEls.status.textContent = aboutAnnouncement();
+}
+
+/** One status cell: the badge pattern of the clients sheet — glyph
+ * aria-hidden, the visible word is the accessible text. */
+function buildStatusBadge(view) {
+  const badge = el("span", `badge ${view.statusTone}`);
+  badge.dataset.role = "about-status";
+  const icon = createStatusIcon(view.statusIcon, { size: "sm" });
+  icon.setAttribute("aria-hidden", "true");
+  badge.append(icon, el("span", null, view.statusWord));
+  return badge;
+}
+
+function cellWithTitle(tag, className, cell) {
+  const node = el(tag, className, cell.text);
+  if (cell.title && cell.title !== cell.text) node.setAttribute("title", cell.title);
+  return node;
+}
+
+/**
+ * The component table. Explicit ARIA table roles: below BP-M the CSS turns
+ * every row into a stacked block (app.css "About table"), and browsers drop
+ * native table semantics from a `display:block` table — the roles keep them.
+ */
+function buildAboutTable(components) {
+  const table = el("table", "about-table");
+  table.setAttribute("role", "table");
+  table.setAttribute("aria-label", "Component versions");
+  const thead = el("thead");
+  thead.setAttribute("role", "rowgroup");
+  const headRow = el("tr");
+  headRow.setAttribute("role", "row");
+  for (const label of ["Component", "Version", "Commit", "Status"]) {
+    const th = el("th", null, label);
+    th.setAttribute("scope", "col");
+    th.setAttribute("role", "columnheader");
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  const tbody = el("tbody");
+  tbody.setAttribute("role", "rowgroup");
+  for (const component of components) {
+    const view = describeComponent(component);
+    const tr = el("tr", "about-row");
+    tr.setAttribute("role", "row");
+    tr.dataset.component = view.name;
+    const nameCell = el("th", "about-name", view.name);
+    nameCell.setAttribute("scope", "row");
+    nameCell.setAttribute("role", "rowheader");
+    const versionCell = el("td", "about-version");
+    versionCell.setAttribute("role", "cell");
+    versionCell.dataset.label = "Version";
+    versionCell.appendChild(cellWithTitle("span", "mono", view.version));
+    const commitCell = el("td", "about-commit");
+    commitCell.setAttribute("role", "cell");
+    commitCell.dataset.label = "Commit";
+    commitCell.appendChild(cellWithTitle("span", "mono", view.commit));
+    const statusCell = el("td", "about-status");
+    statusCell.setAttribute("role", "cell");
+    statusCell.dataset.label = "Status";
+    statusCell.appendChild(buildStatusBadge(view));
+    tr.append(nameCell, versionCell, commitCell, statusCell);
+    tbody.appendChild(tr);
+
+    if (view.note || view.detail) {
+      const detailRow = el("tr", "about-detail");
+      detailRow.setAttribute("role", "row");
+      detailRow.dataset.detailFor = view.name;
+      const td = el("td");
+      td.setAttribute("role", "cell");
+      td.colSpan = 4;
+      if (view.note) td.appendChild(el("p", "foot-note", view.note));
+      // Server text, rendered with textContent (el() never parses markup).
+      if (view.detail) {
+        const d = el("p", "foot-note", view.detail);
+        d.dataset.role = "about-detail";
+        td.appendChild(d);
+      }
+      detailRow.appendChild(td);
+      tbody.appendChild(detailRow);
+    }
+  }
+  table.append(thead, tbody);
+  return table;
+}
+
+function paintAboutChecked() {
+  if (!aboutEls) return;
+  const text = about.components ? checkedText(about.components, Date.now()) : null;
+  aboutEls.checked.hidden = !text;
+  aboutEls.checked.textContent = text || "";
+}
+
+/** Repaint the About content area (never the heading or the Refresh
+ * button, so focus survives a refresh). */
+function paintAbout() {
+  if (!aboutEls) return;
+  const nodes = [];
+  if (about.phase === "too_old") {
+    const note = el("p", "hint", ABOUT_TOO_OLD_MESSAGE);
+    note.dataset.role = "about-too-old";
+    nodes.push(note);
+  } else {
+    if (about.phase === "error") {
+      const line = el("p", "errline", `Could not load component versions: ${about.error}`);
+      line.dataset.role = "about-error";
+      nodes.push(line);
+    }
+    if (about.components) {
+      nodes.push(buildAboutTable(about.components));
+    } else if (about.phase === "loading" || about.phase === "idle") {
+      nodes.push(el("p", "empty", "Loading component versions…"));
+    }
+  }
+  aboutEls.content.replaceChildren(...nodes);
+  paintAboutChecked();
+}
+
 function buildAboutSection() {
   const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "About"));
+  const heading = el("h4", "sec", "About");
+  heading.id = "settings-about";
+  // Programmatic focus target for the rail's version button only; never in
+  // the Tab order (same landing-spot technique as the sheets).
+  heading.tabIndex = -1;
+  wrap.append(heading);
+
+  const head = el("div", "about-head");
+  const refreshBtn = el("button", "btn ghost sm", "Refresh");
+  refreshBtn.type = "button";
+  refreshBtn.dataset.role = "about-refresh";
+  refreshBtn.addEventListener("click", () => {
+    if (refreshBtn.getAttribute("aria-disabled") === "true") return;
+    loadAbout({ announce: true });
+  });
+  // The one live region of this section: written only by a Refresh click.
+  const status = el("span", "foot-note about-status-line");
+  status.setAttribute("role", "status");
+  status.dataset.role = "about-refresh-status";
+  head.append(refreshBtn, status);
+
+  const content = el("div", "about-content");
+  const checked = el("p", "foot-note");
+  checked.dataset.role = "about-checked";
+  wrap.append(head, content, checked);
   wrap.append(
     el(
       "p",
@@ -825,8 +1106,21 @@ function buildAboutSection() {
       "SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.",
     ),
   );
+  aboutEls = { heading, refreshBtn, status, content, checked };
+  setRefreshBusy(about.phase === "loading");
+  paintAbout();
   return wrap;
 }
+
+// The settings form is not polled, but the agents line and the About
+// "checked ... ago" text follow the store's clients ticks (every 20 s):
+// text only, nothing rebuilt. An `{error}` tick keeps the last text.
+store.subscribe("clients", (payload) => {
+  if (!mounted() || !payload || payload.error) return;
+  const text = agentsSummaryText(Array.isArray(payload.items) ? payload.items : null);
+  if (text) for (const line of els.agentsLines) line.textContent = text;
+  paintAboutChecked();
+});
 
 // ---------------------------------------------------------------------
 // Top-level render
@@ -846,6 +1140,7 @@ function fullRender() {
     // before this line the early return hid the one control that fixes the
     // most likely cause (a 401 from a rotated key).
     els.body.append(buildConnectionSection());
+    focusAboutOnRender = false; // no About section in the error state
     return;
   }
 
@@ -880,7 +1175,14 @@ function fullRender() {
   renderSteamStatusLine();
   renderLookupResult();
 
-  els.body.append(buildConnectionSection(), buildAboutSection());
+  els.agentsLines = [];
+  els.body.append(buildConnectionSection(), buildPcsSection(), buildAboutSection());
+
+  if (focusAboutOnRender) {
+    focusAboutOnRender = false;
+    aboutEls.heading.focus();
+    if (typeof aboutEls.heading.scrollIntoView === "function") aboutEls.heading.scrollIntoView({ block: "start" });
+  }
 }
 
 async function loadSettings() {
@@ -935,6 +1237,10 @@ async function loadSettings() {
 onViewChange((view) => {
   if (view === "settings") return;
   sectionEl = null;
+  aboutEls = null;
+  // A rail click that navigated here and then away before Settings loaded
+  // must not move focus on some later, unrelated visit (review nit).
+  focusAboutOnRender = false;
 });
 
 export function renderSettings() {
@@ -944,8 +1250,12 @@ export function renderSettings() {
   section.append(h1, body);
 
   sectionEl = section;
-  els = { section, body };
+  els = { section, body, agentsLines: [] };
+  aboutEls = null;
   drafts = {};
   loadSettings();
+  // WP WEB-FEAT-3: About loads when Settings opens (in parallel with the
+  // settings form), never on a timer.
+  loadAbout();
   return section;
 }

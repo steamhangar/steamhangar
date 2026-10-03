@@ -5,10 +5,21 @@
  * `ClientOut`, WP 3.11's bypass_suspected) in the mockup's round-5
  * "Bypassing" / "Healthy" grouping. Per docs/WORKPACKAGES.md's Phase 4a
  * header (the recorded WP 4a.1 decision) **Clients is a sheet, not a nav
- * item** — it is only ever reached from the bypass banner's "Details"
- * button (`components/bypass-banner.js`) or from tapping a
- * bypass_suspected/bypass_resolved row in the notifications panel
- * (`components/notifications.js`); there is no standalone entry point.
+ * item**. Entry points: the bypass banner's "Details" button
+ * (`components/bypass-banner.js`), a bypass_suspected/bypass_resolved row
+ * in the notifications panel (`components/notifications.js`), and — WP
+ * WEB-FEAT-3 — the "Show PCs" button in Settings → "PCs (agents)"
+ * (`views/settings.js`), which makes the list reachable when nothing is
+ * bypassing. Still no nav item.
+ *
+ * WP WEB-FEAT-3 also shows, per PC: a presence chip (the server's
+ * `presence` field, read by `lib/clients-view.js`'s `presenceOf` and never
+ * recomputed here), "last seen ... ago" from `last_reported_at`, and the
+ * agent version ("version unknown" for `agent_version: null`); and an
+ * "Agents: N online, M offline" line at the top. Offline PCs stay listed.
+ * The relative time and the presence chip are repainted on every clients
+ * tick while the sheet is open (text only, no row rebuild), so "4 min ago"
+ * does not freeze while the sheet sits open.
  *
  * Data flows exclusively through the WP 4a.2 store (`store-singleton.js`)
  * — no parallel poll loop, same posture as `views/downloads.js`. Patch-in-
@@ -33,11 +44,19 @@ import {
   describeHealthyClient,
   describeBypassClient,
   BYPASS_EXPLANATION,
+  presenceOf,
+  presenceWord,
+  presenceLine,
+  agentsSummaryText,
 } from "../lib/clients-view.js";
 import { planClientsUpdate } from "../lib/clients-render-plan.js";
 
+const initialSnapshot = store.snapshot("clients");
 const state = {
-  clients: store.snapshot("clients") || [],
+  clients: Array.isArray(initialSnapshot) ? initialSnapshot : [],
+  // WP WEB-FEAT-3: false until a `GET /v1/clients` answer has landed, so the
+  // summary line never says "none have reported yet" before it knows.
+  loaded: Array.isArray(initialSnapshot),
 };
 
 // WP 4e.3: "drawer" — same ambient-side-panel treatment as the notifications
@@ -46,14 +65,21 @@ const state = {
 // `display` toggle, same as every other overlay here (Opus review, WP 4e.3
 // fix round: "slides in" overclaimed an animation this codebase's overlays
 // do not have). Below BP-L it stays the mockup's bottom sheet, unchanged.
-const dialog = createSheetDialog({ ariaLabel: "Client status", variant: "drawer" });
+const dialog = createSheetDialog({ ariaLabel: "PCs (agents)", variant: "drawer" });
 
 const heading = document.createElement("h2");
-heading.textContent = "Clients";
+heading.textContent = "PCs (agents)";
+// WP WEB-FEAT-3: "Agents: N online, M offline" — the same text as Settings'
+// "PCs (agents)" and About sections (lib/clients-view.js's
+// agentsSummaryText). Not a live region: it changes on background polls,
+// and announcing those would be noise.
+const summary = document.createElement("p");
+summary.className = "foot-note";
+summary.dataset.role = "agents-summary";
 const intro = document.createElement("p");
 intro.className = "hint";
 intro.textContent =
-  "Machines running vault-agent, matched against what actually arrived at the cache.";
+  "Machines running vault-agent, matched against what actually arrived at the cache. Online and offline are the server's verdict: offline once a PC has missed two reports plus 5 minutes.";
 
 const bypassHeading = document.createElement("h4");
 bypassHeading.className = "sec";
@@ -80,6 +106,7 @@ closeBtn.addEventListener("click", () => dialog.close());
 
 dialog.body.append(
   heading,
+  summary,
   intro,
   emptyMsg,
   bypassHeading,
@@ -89,7 +116,7 @@ dialog.body.append(
   closeBtn,
 );
 
-function buildRow(client, { bypass }) {
+function buildRow(client, { bypass }, nowMs) {
   const card = document.createElement("div");
   card.className = "jobcard" + (bypass ? " bypass" : "");
   card.dataset.clientId = client.client_id;
@@ -105,7 +132,26 @@ function buildRow(client, { bypass }) {
   sm.className = "sm";
   sm.dataset.statsLine = "";
   sm.textContent = statsLine(client, { bypass });
-  info.append(nm, sm);
+  // WP WEB-FEAT-3: "last seen 4 min ago · agent 0.1.0".
+  const pres = document.createElement("div");
+  pres.className = "sm pcs-line";
+  pres.dataset.presenceLine = "";
+  info.append(nm, sm, pres);
+
+  const badges = document.createElement("div");
+  badges.className = "pcs-badges";
+
+  // WP WEB-FEAT-3: presence chip. Word first (the dot is decoration,
+  // aria-hidden), colour third — same shape-word-colour order as the
+  // status icons.
+  const chip = document.createElement("span");
+  chip.dataset.presenceChip = "";
+  const dot = document.createElement("span");
+  dot.className = "pdot";
+  dot.setAttribute("aria-hidden", "true");
+  const chipWord = document.createElement("span");
+  chipWord.dataset.role = "presence-word";
+  chip.append(dot, chipWord);
 
   const badge = document.createElement("span");
   badge.className = "badge " + (bypass ? "tx-warn" : "tx-cached");
@@ -122,8 +168,10 @@ function buildRow(client, { bypass }) {
   word.textContent = bypass ? "Bypassing" : "Healthy";
   badge.appendChild(word);
 
-  top.append(info, badge);
+  badges.append(chip, badge);
+  top.append(info, badges);
   card.appendChild(top);
+  paintPresence(card, client, nowMs);
 
   if (bypass) {
     const hint = document.createElement("p");
@@ -135,21 +183,53 @@ function buildRow(client, { bypass }) {
   return card;
 }
 
+/** Presence chip + "last seen" line of one row, from the server's fields
+ * only (`presenceOf` reads `client.presence`; nothing here looks at a
+ * clock to decide online/offline — the clock only words "N min ago"). */
+function paintPresence(card, client, nowMs) {
+  const chip = card.querySelector("[data-presence-chip]");
+  const chipWord = card.querySelector('[data-role="presence-word"]');
+  const line = card.querySelector("[data-presence-line]");
+  const p = presenceOf(client);
+  if (chip) chip.className = "pchip " + (p === "online" ? "pchip-on" : p === "offline" ? "pchip-off" : "pchip-unknown");
+  if (chipWord) chipWord.textContent = presenceWord(client);
+  if (line) line.textContent = presenceLine(client, nowMs);
+}
+
 function statsLine(client, { bypass }) {
   const stats = bypass ? describeBypassClient(client) : describeHealthyClient(client);
   return `${addressesText(client)} · ${stats}`;
 }
 
+function paintSummary() {
+  const text = agentsSummaryText(state.loaded ? state.clients : null);
+  summary.textContent = text || "Agents: waiting for the first answer from the server…";
+}
+
 function fullRender() {
   const { bypassing, healthy } = partitionClients(state.clients);
+  const nowMs = Date.now(); // one clock for every row of this paint
 
+  paintSummary();
   emptyMsg.hidden = state.clients.length > 0;
 
   bypassHeading.hidden = bypassing.length === 0;
-  bypassBody.replaceChildren(...bypassing.map((c) => buildRow(c, { bypass: true })));
+  bypassBody.replaceChildren(...bypassing.map((c) => buildRow(c, { bypass: true }, nowMs)));
 
   healthyHeading.hidden = healthy.length === 0;
-  healthyBody.replaceChildren(...healthy.map((c) => buildRow(c, { bypass: false })));
+  healthyBody.replaceChildren(...healthy.map((c) => buildRow(c, { bypass: false }, nowMs)));
+}
+
+/** WP WEB-FEAT-3: repaint every row's presence chip and "last seen" text,
+ * plus the summary line — text only, rows are not rebuilt (scroll position
+ * and focus survive). Runs on every clients tick while the sheet is open. */
+function repaintPresence() {
+  const nowMs = Date.now();
+  paintSummary();
+  for (const client of state.clients) {
+    const card = dialog.body.querySelector(`.jobcard[data-client-id="${cssEscape(client.client_id)}"]`);
+    if (card) paintPresence(card, client, nowMs);
+  }
 }
 
 /** Update just `.sm`'s text for clients whose SECTION did not change
@@ -181,11 +261,13 @@ store.subscribe("clients", ({ items, diff }) => {
   if (!Array.isArray(items)) return; // {error} payload — nothing to render
   const plan = planClientsUpdate(diff);
   state.clients = items;
+  state.loaded = true;
   if (!dialog.isOpen()) return; // sheet isn't showing right now — nothing to paint
   if (plan.full || plan.rebuild.length) {
     fullRender();
-  } else if (plan.patch.length) {
-    patchStats(plan.patch);
+  } else {
+    if (plan.patch.length) patchStats(plan.patch);
+    repaintPresence();
   }
 });
 
