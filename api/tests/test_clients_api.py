@@ -62,6 +62,11 @@ def test_lists_one_row_per_client_with_the_latest_snapshot_size(
         "bytes_served",
         "last_seen_in_cache_log",
         "bypass_suspected",
+        # WP AGENT-FEAT-1 (schema v17): appended, nothing above moved.
+        "agent_version",
+        "report_interval_seconds",
+        "presence",
+        "offline_after",
     }
     # With no event feed configured there is nothing to correlate, and nobody
     # is accused of anything.

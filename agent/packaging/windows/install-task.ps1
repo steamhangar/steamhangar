@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Registers a per-user Windows Scheduled Task that runs vault-agent.exe
-    `report` every N minutes (default 30)  -  WP 2.6.
+    `report` at logon and every N minutes (default 10)  -  WP 2.6,
+    WP AGENT-FEAT-1.
 
 .DESCRIPTION
     This is the Windows counterpart to agent/packaging/systemd's
@@ -52,6 +53,25 @@
     replaced with an owner-only rule (inheritance disabled), and only then
     is the secret content written  -  never a window where a default,
     possibly-inherited ACL exposes real content.
+
+    ### When the task runs, and how vault-api tells online from offline
+    ### (WP AGENT-FEAT-1)
+
+    The task has two triggers: one at logon of the installing user (the
+    same user the Interactive principal below runs as), so the PC reports
+    as soon as someone sits down at it, and a repetition trigger every
+    -IntervalMinutes (default 10). -StartWhenAvailable catches up a run
+    missed while the PC was asleep, and -MultipleInstances IgnoreNew keeps
+    a logon run and a repetition run from overlapping.
+
+    The interval is also written into the env file as
+    VAULT_AGENT_REPORT_INTERVAL (e.g. "10m"), so every report states it.
+    vault-api shows the PC offline once its last report is older than
+    2 x interval + 5 minutes. An install from before AGENT-FEAT-1 (30
+    minutes, no logon trigger, no interval in the env file) keeps working
+    with a new vault-agent.exe: its reports state no interval and vault-api
+    assumes 30 minutes. Re-run this script to switch it to the new
+    schedule.
 
     ### What this prints about the client id (WP AG-0)
 
@@ -173,9 +193,12 @@
     creating a duplicate.
 
 .PARAMETER IntervalMinutes
-    Repetition interval in minutes. Default: 30, matching
+    Repetition interval in minutes, 1 to 1440. Default: 10, matching
     go/agentconfig.DefaultReportInterval and the systemd timer's
-    OnCalendar=*:0/30.
+    OnCalendar=*:0/10. Also passed to the agent as
+    VAULT_AGENT_REPORT_INTERVAL so its reports state it; intervals below
+    1 minute are not possible here, and vault-api accepts 1 minute to
+    1 day (24 hours = 1440 minutes).
 
 .PARAMETER LogFile
     Optional override for the log file run-vault-agent.ps1 appends to.
@@ -216,7 +239,7 @@ param(
     [string]$TaskName = "VaultAgentReport",
 
     [Parameter(Mandatory = $false)]
-    [int]$IntervalMinutes = 30,
+    [int]$IntervalMinutes = 10,
 
     [Parameter(Mandatory = $false)]
     [string]$LogFile
@@ -271,8 +294,8 @@ if ([string]::IsNullOrWhiteSpace($resolvedApiKey)) {
     exit 2
 }
 
-if ($IntervalMinutes -lt 1) {
-    Write-Error "IntervalMinutes must be >= 1."
+if ($IntervalMinutes -lt 1 -or $IntervalMinutes -gt 1440) {
+    Write-Error "IntervalMinutes must be between 1 and 1440 (one day)."
     exit 2
 }
 
@@ -398,6 +421,10 @@ if ($PSCmdlet.ShouldProcess($envFilePath, "Create/lock down secret env file")) {
     $envLines = New-Object System.Collections.Generic.List[string]
     $envLines.Add("VAULT_AGENT_SERVER_URL=$ServerUrl")
     $envLines.Add("VAULT_AGENT_API_KEY=$resolvedApiKey")
+    # WP AGENT-FEAT-1: the agent states this interval in every report, so
+    # vault-api can tell online from offline. Must match the repetition
+    # trigger below.
+    $envLines.Add("VAULT_AGENT_REPORT_INTERVAL=${IntervalMinutes}m")
     if ($ClientId) { $envLines.Add("VAULT_AGENT_CLIENT_ID=$ClientId") }
     if ($LibraryRoot) { $envLines.Add("VAULT_AGENT_LIBRARY_ROOT=$LibraryRoot") }
 
@@ -421,18 +448,29 @@ $taskArgument = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle
 if ($PSCmdlet.ShouldProcess($TaskName, "Register/update Scheduled Task")) {
     $action = New-ScheduledTaskAction -Execute $powershellExe -Argument $taskArgument
 
+    $userId = "$env:USERDOMAIN\$env:USERNAME"
+
+    # Trigger 1 (keep it first: the harness and the README read
+    # Triggers[0] as the repetition trigger): every -IntervalMinutes.
     $startTime = (Get-Date).AddMinutes(1)
     $trigger = New-ScheduledTaskTrigger -Once -At $startTime `
         -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
         -RepetitionDuration (New-TimeSpan -Days 3650)
 
-    $userId = "$env:USERDOMAIN\$env:USERNAME"
+    # Trigger 2 (WP AGENT-FEAT-1): at logon of the installing user, the same
+    # account the Interactive principal runs as, so the PC shows online
+    # right after logon instead of up to one interval later. No delay: the
+    # agent retries for up to about 105 s while the network comes up.
+    $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
+
     $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
 
     # -StartWhenAvailable is the closest Windows equivalent of the systemd
     # timer's Persistent=true (WP 2.5): a run missed while the machine was
     # off/asleep fires as soon as the task becomes available again, instead
     # of silently waiting for the next on-schedule slot.
+    # -MultipleInstances IgnoreNew: a logon run and a repetition run that
+    # fall together do not overlap; the second one is skipped.
     $settings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
         -AllowStartIfOnBatteries `
@@ -440,7 +478,7 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Register/update Scheduled Task")) {
         -MultipleInstances IgnoreNew `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
 
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($trigger, $logonTrigger) `
         -Principal $principal -Settings $settings -Force | Out-Null
 }
 
@@ -450,7 +488,9 @@ Write-Host ""
 Write-Host "vault-agent Scheduled Task installed/updated:"
 Write-Host "  Task name       : $TaskName"
 Write-Host "  Agent binary    : $AgentPath"
-Write-Host "  Interval        : every $IntervalMinutes minute(s), starting ~1 minute from now"
+Write-Host "  Runs            : at logon, and every $IntervalMinutes minute(s) starting ~1 minute from now"
+Write-Host "  Online/offline  : reports state VAULT_AGENT_REPORT_INTERVAL=${IntervalMinutes}m; vault-api shows"
+Write-Host "                    this PC offline after 2 x $IntervalMinutes + 5 minutes without a report"
 Write-Host "  Config dir      : $ConfigDir"
 Write-Host "  Secret env file : $envFilePath (owner-only ACL, contains VAULT_AGENT_API_KEY)"
 Write-Host "  Wrapper script  : $runnerDestPath"

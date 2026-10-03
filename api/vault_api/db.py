@@ -175,7 +175,17 @@ import sqlite3
 #: version are live and when the runner was last seen. Before this the runner
 #: left a trace only while it owned a job (``jobs.run_heartbeat_at``). A
 #: brand-new table, so -- like v6/v9/v13 -- it needs no ``ALTER`` step.
-SCHEMA_VERSION = 16
+#: v17 (WP AGENT-FEAT-1, ADR-0016 addendum): added
+#: ``agent_reports.agent_version`` and ``agent_reports.report_interval_seconds``
+#: -- what the agent says about itself in each report: its build version
+#: (VER-1 grammar) and how often it reports (60..86400 s). ``GET /v1/clients``
+#: reads them from the client's latest snapshot and derives online/offline
+#: from ``last_reported_at`` plus the interval. Both NULLable with no default:
+#: NULL is "the agent did not say" (an agent from before this version, or a
+#: one-shot run that was not told its interval), and the presence rule then
+#: assumes 30 minutes. Same not-expressible-as-``CREATE TABLE IF NOT EXISTS``
+#: situation as v9, so it reuses ``_add_missing_agent_report_columns``.
+SCHEMA_VERSION = 17
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -323,7 +333,14 @@ CREATE TABLE IF NOT EXISTS agent_reports (
     -- derived from X-Forwarded-For (vault-api is not behind a proxy in this
     -- design, and a trusted-header story is a security decision nobody has
     -- made here).
-    source_addr TEXT
+    source_addr TEXT,
+    -- v17 (WP AGENT-FEAT-1): what the agent said about itself in THIS
+    -- report: its build version (VER-1 grammar) and its report interval in
+    -- seconds (60..86400). NULL when it did not say (agents from before
+    -- v17, a one-shot run without --interval); GET /v1/clients then shows
+    -- "version unknown" and assumes a 30-minute interval for presence.
+    agent_version           TEXT,
+    report_interval_seconds INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_reports_client_time
@@ -738,7 +755,9 @@ def init_db(db_path: str) -> None:
         # `CREATE TABLE IF NOT EXISTS agent_reports` below is a no-op against
         # it. The four NEW tables v9 also adds need no step at all -- they are
         # plain `CREATE TABLE IF NOT EXISTS` (the v6 situation).
-        if row is not None and row["version"] < 9:
+        # v17 (WP AGENT-FEAT-1) reuses the same per-column-guarded step for
+        # agent_version / report_interval_seconds.
+        if row is not None and row["version"] < 17:
             _add_missing_agent_report_columns(conn)
 
         # v14 (WP 4h.1): same situation once more, for `depot_manifests`. An
@@ -814,11 +833,17 @@ def _add_missing_job_columns(conn: sqlite3.Connection) -> None:
 
 #: The ``agent_reports`` columns added after v1, same shape as
 #: ``_POST_V1_JOB_COLUMNS``.
-_POST_V1_AGENT_REPORT_COLUMNS = (("source_addr", "TEXT"),)
+_POST_V1_AGENT_REPORT_COLUMNS = (
+    ("source_addr", "TEXT"),
+    # v17 (WP AGENT-FEAT-1)
+    ("agent_version", "TEXT"),
+    ("report_interval_seconds", "INTEGER"),
+)
 
 
 def _add_missing_agent_report_columns(conn: sqlite3.Connection) -> None:
-    """v1->v9 migration step: add ``agent_reports.source_addr`` (WP 3.11).
+    """v1->v17 migration step: add ``agent_reports.source_addr`` (v9, WP 3.11)
+    and ``agent_version`` / ``report_interval_seconds`` (v17, WP AGENT-FEAT-1).
 
     Guarded per column via ``PRAGMA table_info`` for exactly the reasons
     ``_add_missing_job_columns`` spells out, and carrying an explicit type for
@@ -829,7 +854,9 @@ def _add_missing_agent_report_columns(conn: sqlite3.Connection) -> None:
     Nullable with no default, deliberately: a report stored before v9 has no
     recorded source address and there is no honest value to invent for it.
     ``NULL`` means "unknown", and every consumer treats unknown as "cannot
-    correlate, therefore cannot accuse" — see ``routers/clients.py``.
+    correlate, therefore cannot accuse" — see ``routers/clients.py``. The
+    same holds for the v17 columns: a report stored before v17 did not say
+    which agent version sent it or how often it reports.
     """
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(agent_reports)")}
     for column, column_type in _POST_V1_AGENT_REPORT_COLUMNS:

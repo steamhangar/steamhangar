@@ -7,7 +7,15 @@
 // reports" section:
 //
 //	POST /v1/agent/installed
-//	{"client_id": "<1-64 char id>", "appids": [<int ge=1>, ...]}
+//	{"client_id": "<1-64 char id>", "appids": [<int ge=1>, ...],
+//	 "agent_version": "<VER-1 grammar>",       (optional, WP AGENT-FEAT-1)
+//	 "report_interval_seconds": <60..86400>}   (optional, WP AGENT-FEAT-1)
+//
+// The two optional presence fields are attached with Payload.WithPresence
+// and are only ever sent when they pass the server's own rules (see
+// WithPresence); a server that predates them rejects them, and
+// agent/go/client then resends the report without them (see that
+// package's "Servers that predate the presence fields" section).
 //
 // BuildReport mirrors the server's validation rules LOCALLY, so a
 // misconfigured agent fails fast with a clear message instead of spending a
@@ -18,9 +26,11 @@ package report
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -33,13 +43,99 @@ const MaxClientIDLength = 64
 // MaxAppIDs mirrors vault_api.agent_reports.MAX_APPIDS_PER_REPORT.
 const MaxAppIDs = 10_000
 
+// MinReportIntervalSeconds and MaxReportIntervalSeconds mirror
+// vault_api.agent_reports.MIN_/MAX_REPORT_INTERVAL_SECONDS (WP
+// AGENT-FEAT-1): the range the server accepts for report_interval_seconds.
+const (
+	MinReportIntervalSeconds = 60
+	MaxReportIntervalSeconds = 24 * 60 * 60
+)
+
+// agentVersionGrammar mirrors vault_api's VER-1 version grammar
+// (api/vault_api/__init__.py _VERSION_GRAMMAR, also publish.yml's version
+// step): a letter or digit, then letters, digits and ". _ + -", at most 64
+// characters. In Go's RE2 syntax, $ without (?m) matches only at the end of
+// the text (unlike Python's $, it does not also match before a trailing
+// newline), so ^...$ is a whole-string match like Python's fullmatch.
+var agentVersionGrammar = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$`)
+
+// ValidAgentVersion reports whether v passes the server's agent_version
+// rule (the VER-1 version grammar).
+func ValidAgentVersion(v string) bool {
+	return agentVersionGrammar.MatchString(v)
+}
+
 // Payload is the exact JSON body `POST /v1/agent/installed` expects.
 // AppIDs is always sorted ascending and de-duplicated — BuildReport is the
 // only constructor and guarantees both, so the wire format is deterministic
 // (easier to diff in logs/tests than an arbitrary order would be).
+//
+// AgentVersion and ReportIntervalSeconds (WP AGENT-FEAT-1) are pointers
+// with omitempty, so a payload without them marshals to exactly the
+// pre-AGENT-FEAT-1 body: that legacy body is what agent/go/client resends
+// to a server that rejects the new fields.
 type Payload struct {
-	ClientID string `json:"client_id"`
-	AppIDs   []int  `json:"appids"`
+	ClientID              string  `json:"client_id"`
+	AppIDs                []int   `json:"appids"`
+	AgentVersion          *string `json:"agent_version,omitempty"`
+	ReportIntervalSeconds *int    `json:"report_interval_seconds,omitempty"`
+}
+
+// HasPresence reports whether either optional presence field is set.
+func (p Payload) HasPresence() bool {
+	return p.AgentVersion != nil || p.ReportIntervalSeconds != nil
+}
+
+// WithoutPresence returns a copy of p with both presence fields removed:
+// the body a pre-AGENT-FEAT-1 server accepts.
+func (p Payload) WithoutPresence() Payload {
+	p.AgentVersion = nil
+	p.ReportIntervalSeconds = nil
+	return p
+}
+
+// WithPresence returns a copy of p carrying the agent's version and its
+// report interval (WP AGENT-FEAT-1), plus one note per value it left out.
+//
+// A value is left out, never sent, when the server would reject it: a
+// version outside the VER-1 grammar, or an interval outside
+// MinReportIntervalSeconds..MaxReportIntervalSeconds. A rejected field
+// would 422 the WHOLE report, so an odd -ldflags version or a 30s test
+// interval would otherwise stop the agent reporting at all. A left-out
+// field reads as "unknown" server-side: version unknown, interval assumed
+// 30 minutes.
+//
+// intervalKnown is false when nobody told the agent how often it runs: a
+// one-shot `report` without --interval / VAULT_AGENT_REPORT_INTERVAL. The
+// scheduler that starts it may run it at any cadence (an install from
+// before AGENT-FEAT-1 runs it every 30 minutes), so the agent does not
+// claim its own default for it. --loop always knows: it times itself.
+func (p Payload) WithPresence(version string, interval time.Duration, intervalKnown bool) (Payload, []string) {
+	var notes []string
+	p.AgentVersion = nil
+	p.ReportIntervalSeconds = nil
+	if ValidAgentVersion(version) {
+		v := version
+		p.AgentVersion = &v
+	} else {
+		notes = append(notes, fmt.Sprintf(
+			"agent_version not sent: build version %q is outside the version grammar", version))
+	}
+	if intervalKnown {
+		seconds := int(interval / time.Second)
+		if seconds >= MinReportIntervalSeconds && seconds <= MaxReportIntervalSeconds {
+			p.ReportIntervalSeconds = &seconds
+		} else {
+			notes = append(notes, fmt.Sprintf(
+				"report_interval_seconds not sent: interval %s is outside %ds..%ds; vault-api assumes 30m",
+				interval, MinReportIntervalSeconds, MaxReportIntervalSeconds))
+		}
+	} else {
+		notes = append(notes,
+			"report_interval_seconds not sent: one-shot run without --interval/VAULT_AGENT_REPORT_INTERVAL; "+
+				"vault-api assumes 30m (set it to the scheduler's cadence)")
+	}
+	return p, notes
 }
 
 // ValidationError is returned by BuildReport/ValidateClientID for any

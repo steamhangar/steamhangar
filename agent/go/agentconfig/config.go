@@ -35,9 +35,12 @@ import (
 	"github.com/Riviera822/steamhangar/agent/report"
 )
 
-// Default report interval for --loop mode (plan §3: "periodically, e.g.
-// every 30 min").
-const DefaultReportInterval = 30 * time.Minute
+// DefaultReportInterval is how often --loop reports, and what the shipped
+// schedulers use (WP AGENT-FEAT-1, user decision 2026-10-03 "Weg B": every
+// 10 minutes, was 30; the Windows task and the systemd timer pass the same
+// value explicitly). vault-api calls a client offline once its last report
+// is older than 2 x interval + 5 minutes.
+const DefaultReportInterval = 10 * time.Minute
 
 // Env var names, also used as the flag-default source.
 const (
@@ -105,8 +108,17 @@ type Config struct {
 	// which is exactly what happened before this field existed: the
 	// error was real, but unreachable by any operator.
 	LibraryRootProbeNote string
-	ReportInterval       time.Duration // only consulted in --loop mode
-	Loop                 bool
+
+	// ReportInterval is how long --loop sleeps between reports, and the
+	// report_interval_seconds every report states (WP AGENT-FEAT-1).
+	ReportInterval time.Duration
+	// ReportIntervalExplicit is true when --interval or
+	// VAULT_AGENT_REPORT_INTERVAL set ReportInterval. A one-shot report
+	// states its interval only then: the scheduler that started it may run
+	// at any cadence, so the default is not a fact about it (see
+	// report.Payload.WithPresence).
+	ReportIntervalExplicit bool
+	Loop                   bool
 
 	// AllowEmpty (--allow-empty) lets `report` post an empty installed
 	// list even when NO Steam library under LibraryRoot could be read.
@@ -226,7 +238,9 @@ func Parse(name string, args []string, getenv Getenv, output io.Writer) (Config,
 	fs.StringVar(&spec.libraryRoot, "library-root", "",
 		"Steam install directory containing steamapps/ (env "+EnvLibraryRoot+"; default: OS-specific)")
 	fs.StringVar(&spec.interval, "interval", "",
-		"report interval for --loop mode, e.g. 30m (env "+EnvInterval+"; default: "+DefaultReportInterval.String()+")")
+		"report interval, e.g. 10m: how often --loop reports, and the interval every report states so vault-api "+
+			"can tell online from offline; for one-shot runs set it to the scheduler's cadence (env "+EnvInterval+
+			"; default: "+DefaultReportInterval.String()+")")
 	fs.BoolVar(&spec.loop, "loop", false, "keep running, reporting every --interval (jittered) until SIGTERM/CTRL-C")
 	fs.BoolVar(&spec.allowEmpty, "allow-empty", false,
 		"post an empty installed list even when no Steam library under --library-root could be read "+
@@ -325,7 +339,9 @@ func build(spec flagSpec, getenv Getenv) (Config, error) {
 	}
 
 	interval := DefaultReportInterval
+	intervalExplicit := false
 	if raw := strings.TrimSpace(rawInterval); raw != "" {
+		intervalExplicit = true
 		parsed, err := time.ParseDuration(raw)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf(
@@ -346,16 +362,17 @@ func build(spec flagSpec, getenv Getenv) (Config, error) {
 	}
 
 	return Config{
-		ServerURL:            serverURL,
-		APIKey:               apiKey,
-		ClientID:             clientID,
-		ClientIDSource:       clientIDSource,
-		ClientIDNote:         clientIDNote,
-		LibraryRoot:          libraryRoot,
-		LibraryRootProbeNote: libraryRootProbeNote,
-		ReportInterval:       interval,
-		Loop:                 spec.loop,
-		AllowEmpty:           spec.allowEmpty,
+		ServerURL:              serverURL,
+		APIKey:                 apiKey,
+		ClientID:               clientID,
+		ClientIDSource:         clientIDSource,
+		ClientIDNote:           clientIDNote,
+		LibraryRoot:            libraryRoot,
+		LibraryRootProbeNote:   libraryRootProbeNote,
+		ReportInterval:         interval,
+		ReportIntervalExplicit: intervalExplicit,
+		Loop:                   spec.loop,
+		AllowEmpty:             spec.allowEmpty,
 	}, nil
 }
 

@@ -977,3 +977,10 @@ These are not style preferences; each entry cost a review round to learn.
   CAP_FOWNER, so chmod must precede chown; run hook tests with the exact
   compose cap set. A probe that "cannot create a name" must use a random
   name and accept only EACCES/EPERM as "closed" (WP SEC-FIX-5).
+- Adding an optional request field is a breaking change against servers
+  that forbid extra fields: rc1-rc8 answer 422 for the whole report. The
+  agent resends once without the new fields only when the 422 names
+  nothing but `extra_forbidden` on exactly those fields, and states an
+  interval only when its scheduler was told one, so old 30-minute tasks
+  running a new binary are not judged on a 10-minute window (WP
+  AGENT-FEAT-1).

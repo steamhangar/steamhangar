@@ -110,7 +110,7 @@ Systemd packaging for the Linux/SteamOS variant (WP 2.5) lives outside
 ```
 agent/packaging/systemd/
 ├── vault-agent-report.service   # Type=oneshot: runs `vault-agent report` once
-└── vault-agent-report.timer     # OnCalendar=*:0/30 + jitter, Persistent=true (real catch-up)
+└── vault-agent-report.timer     # OnCalendar=*:0/10 + OnStartupSec=30s + jitter, Persistent=true (real catch-up)
 ```
 
 See "Linux/SteamOS variant (WP 2.5)" below for the full install and
@@ -423,8 +423,9 @@ GitHub Release are linked with
 version the images report), e.g. `vault-agent 0.1.0-rc8 (commit 1a2b...)`;
 that job runs the linux/amd64 binary's `--version` before attaching it. A
 plain `go build` from source prints `vault-agent dev (commit unknown)`. The
-variables live in `go/cmd/vault-agent/version.go`; the report payload does
-not carry the version.
+variables live in `go/cmd/vault-agent/version.go`. Since WP AGENT-FEAT-1
+every report also carries it as `agent_version` (see "Presence: version and
+report interval in every report" below).
 
 One-shot is the PRIMARY mode (plan §7: a Windows Scheduled Task provides
 the timing — see WP 2.6 for the installer). `--loop` exists for a systemd
@@ -444,7 +445,7 @@ over its env var equivalent.
 | `--api-key`      | `VAULT_AGENT_API_KEY`        | yes      | — (prefer the env var: a flag value is visible in process listings / Task Manager) |
 | `--client-id`    | `VAULT_AGENT_CLIENT_ID`      | no       | sanitized local hostname (see below)                    |
 | `--library-root` | `VAULT_AGENT_LIBRARY_ROOT`   | no       | `C:\Program Files (x86)\Steam` (Windows) / `~/.local/share/Steam` (else) |
-| `--interval`     | `VAULT_AGENT_REPORT_INTERVAL`| no       | `30m` (only consulted with `--loop`)                    |
+| `--interval`     | `VAULT_AGENT_REPORT_INTERVAL`| no       | `10m` — `--loop`'s sleep, and the interval every report states (one-shot: only when set, see below) |
 | `--loop`         | —                            | no       | off (one-shot)                                          |
 | `--allow-empty`  | —                            | no       | off — post an empty list even when NO library under `--library-root` was readable (see below) |
 
@@ -463,7 +464,42 @@ is validated with the exact same rules vault-api enforces server-side
 characters, no surrounding whitespace, no control characters, not `.` or
 `..` — so a bad value is rejected locally with a clear message instead of
 spending a round trip on the 422 the server would return anyway.
-**`--interval`** must be a positive Go duration (`"30m"`, `"1h"`, ...).
+**`--interval`** must be a positive Go duration (`"10m"`, `"1h"`, ...).
+
+### Presence: version and report interval in every report (WP AGENT-FEAT-1)
+
+Every report carries two optional fields next to `client_id`/`appids`:
+`agent_version` (the `--version` value) and `report_interval_seconds`.
+vault-api (schema v17) shows the machine **online** until its last report is
+older than `2 × interval + 5 minutes`, **offline** after that, and "version
+unknown" when no version was sent (`GET /v1/clients`, see api/README.md
+"Agent presence").
+
+- **`--loop`** always states its interval: it times itself (default 10m).
+- **One-shot** (`vault-agent report`, started by the Windows task or the
+  systemd timer) states an interval **only when `--interval` or
+  `VAULT_AGENT_REPORT_INTERVAL` is set**. The agent cannot know how often its
+  scheduler runs it, and a scheduled task installed before AGENT-FEAT-1 runs
+  a new binary every 30 minutes without saying so — claiming the 10m default
+  would make that PC flap offline for 5 of every 30 minutes. Without a stated
+  interval vault-api assumes 30 minutes. The shipped packaging passes the
+  interval (`--interval 10m` in the systemd service,
+  `VAULT_AGENT_REPORT_INTERVAL=10m` in the Windows env file).
+- A value vault-api would refuse is **left out, not sent**: a version outside
+  the VER-1 grammar (only an odd `-ldflags` build), or an interval outside
+  1 minute to 24 hours. A refused field would reject the whole report. The
+  log line `report presence note=...` says what was left out and why.
+
+**Against an older vault-api (up to v0.1.0-rc8).** Those servers refuse
+unknown fields (`422`, `extra_forbidden`) and would reject the whole report.
+The agent sends the new fields first; when the `422` names *nothing but*
+`agent_version`/`report_interval_seconds` as unknown, it resends the same
+report once without them and logs that the server is too old. Any other
+`422` (for example a bad `client_id` reported in the same answer) is shown
+as before and not resent. Cost on an old server: one extra request per
+report; nothing is remembered, so the first report after the server upgrade
+carries the fields again. Upgrade order therefore does not matter. (An old
+agent against a new server needs nothing: the fields are optional.)
 
 **Default `--client-id`:** the local hostname (`os.Hostname()`), trimmed,
 with any non-printable character replaced by `-`, truncated to 64
@@ -1084,7 +1120,10 @@ on SteamOS specifically, and why it's the right call even on a regular
 desktop Linux box):
 
 - **`vault-agent-report.service`** — `Type=oneshot`,
-  `ExecStart=%h/.local/bin/vault-agent report`,
+  `ExecStart=%h/.local/bin/vault-agent report --interval 10m` (the flag
+  states the timer's cadence in every report, WP AGENT-FEAT-1 — change it
+  together with the timer; a flag rather than `Environment=` so the env file
+  cannot silently override it),
   `EnvironmentFile=%h/.config/vault-agent/env` (no leading `-`: a
   missing/unreadable env file is a **hard** failure — the unit refuses to
   start at all rather than silently running vault-agent with no
@@ -1096,8 +1135,16 @@ desktop Linux box):
   case — see "Retry behavior" above) already covers "network isn't up
   yet" for the one HTTP POST this unit makes. Runs one report and exits;
   no loop, no scheduling logic in the unit itself.
-- **`vault-agent-report.timer`** — `OnCalendar=*:0/30` (every 30 minutes
-  on the clock, matching `agentconfig.DefaultReportInterval`),
+- **`vault-agent-report.timer`** — `OnCalendar=*:0/10` (every 10 minutes
+  on the clock, matching `agentconfig.DefaultReportInterval`; 30 before WP
+  AGENT-FEAT-1), `OnStartupSec=30s` (WP AGENT-FEAT-1: one report 30 s plus
+  up to 5 min of `RandomizedDelaySec=` jitter after the user's service
+  manager starts — at login, or at boot with
+  `loginctl enable-linger` — so the machine shows online right away;
+  `OnStartupSec=` rather than `OnBootSec=` because in a user unit it counts
+  from the user manager's start, and `systemd.timer(5)` lets a point already
+  in the past elapse immediately on activation; `Persistent=` still applies
+  to the `OnCalendar=` trigger only, which is unchanged),
   `RandomizedDelaySec=5min` (jitter, same purpose as `--loop`'s own
   ±10% jitter: many agents on one network shouldn't all hit vault-api in
   lockstep), `Persistent=true` (a missed run while suspended/off is
@@ -1181,7 +1228,7 @@ while that user has an active login session — on a Steam Deck sitting at
 the Gaming Mode UI with no desktop session open, or any Linux box you SSH
 into once to set this up and then log out of, the user manager (and every
 timer/service under it) stops the moment the last session closes, so the
-30-minute timer would never fire again after that. Fix it once, as root
+10-minute timer would never fire again after that. Fix it once, as root
 (or the same account via `sudo`):
 
 ```bash
@@ -1214,7 +1261,7 @@ answer** — use it on every real Linux/SteamOS install, including the
 Steam Deck. It integrates with `journalctl` (no separate log file to
 manage), survives a reboot on its own once enabled, and needs no process
 of vault-agent's own to stay resident between reports (`Type=oneshot`
-exits after every run — nothing idles in memory for 30 minutes doing
+exits after every run — nothing idles in memory for 10 minutes doing
 nothing).
 
 **`report --loop` still exists and still works on Linux** — it's for the
@@ -1617,12 +1664,12 @@ agent/packaging/windows/
 
 `install-task.ps1 -AgentPath <exe> -ServerUrl <url> -ApiKeyFile <path>
 [-ClientId ...] [-LibraryRoot ...] [-ConfigDir ...] [-TaskName ...]
-[-IntervalMinutes 30]` creates, under `-ConfigDir` (default
+[-IntervalMinutes 10]` creates, under `-ConfigDir` (default
 `%LOCALAPPDATA%\VaultAgent`):
 
 | Path | Contents |
 |---|---|
-| `env.txt` | `VAULT_AGENT_SERVER_URL`/`VAULT_AGENT_API_KEY`/etc., owner-only ACL (see above) |
+| `env.txt` | `VAULT_AGENT_SERVER_URL`/`VAULT_AGENT_API_KEY`/`VAULT_AGENT_REPORT_INTERVAL` (`<IntervalMinutes>m`, WP AGENT-FEAT-1)/etc., owner-only ACL (see above) |
 | `run-vault-agent.ps1` | a deployed copy of the wrapper script, so the installed task does not depend on this repo checkout still existing at its original path |
 | `vault-agent.log` (created on first run) | appended stdout+stderr from every `report` invocation — Windows Scheduled Tasks have no built-in per-run log the way `journalctl --user -u ...` gives WP 2.5 for free |
 
@@ -1649,10 +1696,11 @@ afterwards), but until the root is right every scheduled run will log
 performed yet; `HKCU\Software\Valve\Steam\SteamPath` is the intended
 post-release default.
 
-plus the Scheduled Task itself (`VaultAgentReport` by default): one
-`-Once` trigger with `-RepetitionInterval` = `-IntervalMinutes` (default
-30, matching `go/agentconfig.DefaultReportInterval` and the systemd
-timer's `OnCalendar=*:0/30`) and a 10-year `-RepetitionDuration` (Task
+plus the Scheduled Task itself (`VaultAgentReport` by default) with two
+triggers. **Trigger 1:** `-Once` with `-RepetitionInterval` =
+`-IntervalMinutes` (default 10 since WP AGENT-FEAT-1, was 30; 1 to 1440,
+matching `go/agentconfig.DefaultReportInterval` and the systemd timer's
+`OnCalendar=*:0/10`) and a 10-year `-RepetitionDuration` (Task
 Scheduler has no literal "forever," and `[TimeSpan]::MaxValue` itself is
 **out of range** and fails registration — `P99999999DT23H59M59S` is
 rejected outright; 10 years is comfortably "never needs manual renewal" in
@@ -1663,7 +1711,23 @@ fires as soon as the task becomes available again instead of waiting for
 the next on-schedule slot), and `-MultipleInstances IgnoreNew` (a slow
 report — e.g. mid-retry-backoff against an unreachable server, up to the
 ~105s worst case documented in "Retry behavior" above — must not stack a
-second overlapping run at the next 30-minute mark).
+second overlapping run at the next interval mark, and a logon run and a
+repetition run that fall together run once). **Trigger 2 (WP
+AGENT-FEAT-1):** `-AtLogOn -User <installing user>` — the same account the
+Interactive principal runs as — so the PC reports right after logon instead
+of up to one interval later. The interval is also written into `env.txt`
+as `VAULT_AGENT_REPORT_INTERVAL`, so every report states it (see "Presence"
+above).
+
+**Upgrading an existing install (WP AGENT-FEAT-1): re-run
+`install-task.ps1`** with the same arguments (minus `-IntervalMinutes 30`
+if you passed it). A task installed before AGENT-FEAT-1 keeps working with a
+new `vault-agent.exe` — still every 30 minutes, no logon trigger, and its
+reports state no interval, so vault-api assumes 30 minutes and shows it
+correctly — but it only gets the 10-minute schedule, the logon report and
+the stated interval from a re-install. On Linux the same applies to the two
+unit files: copy the new ones over and run `systemctl --user daemon-reload`
+and `systemctl --user restart vault-agent-report.timer`.
 
 **Two secrets that are NOT secrets:** `-ApiKey` takes the key directly as
 a string argument, which — like typing any password into a terminal —

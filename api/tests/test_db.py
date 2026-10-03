@@ -128,7 +128,16 @@ def test_agent_reports_is_one_row_per_report_snapshot(tmp_path) -> None:
         # source_addr joined in schema v9 (WP 3.11, ADR-0008): the address the
         # report arrived FROM, which is the only key correlating a client_id
         # with the event log's addresses.
-        assert columns == {"client_id", "reported_at", "appids", "source_addr"}
+        # agent_version / report_interval_seconds joined in schema v17 (WP
+        # AGENT-FEAT-1): what the agent says about itself in each report.
+        assert columns == {
+            "client_id",
+            "reported_at",
+            "appids",
+            "source_addr",
+            "agent_version",
+            "report_interval_seconds",
+        }
 
         conn.execute(
             "INSERT INTO agent_reports (client_id, reported_at, appids) VALUES (?, ?, ?)",

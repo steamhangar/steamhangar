@@ -34,9 +34,11 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from datetime import datetime, timedelta
+from typing import Iterable, Literal, Sequence
 
-from vault_api.jobs import immediate_transaction, utcnow_iso
+from vault_api import is_valid_version
+from vault_api.jobs import immediate_transaction, parse_utc_iso, to_utc_iso, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,27 @@ MAX_SOURCE_ADDR_LENGTH = 64
 #: How many removed/added ids a single log line prints before it summarizes.
 _LOG_ID_SAMPLE = 50
 
+#: Accepted range for a report's ``report_interval_seconds`` (schema v17,
+#: WP AGENT-FEAT-1): one minute to one day. Below a minute is not a schedule
+#: anybody runs a Steam library report on; above a day would keep a dead
+#: machine "online" for more than two days. Mirrored by the agent
+#: (``agent/go/report``), which leaves an out-of-range interval out rather
+#: than have the whole report rejected.
+MIN_REPORT_INTERVAL_SECONDS = 60
+MAX_REPORT_INTERVAL_SECONDS = 24 * 60 * 60
+
+#: The interval the presence rule assumes when a client did not state one
+#: (user decision 2026-10-03, "Weg B"): every agent before AGENT-FEAT-1 ran
+#: on the 30-minute schedule the old packaging installed.
+ASSUMED_REPORT_INTERVAL_SECONDS = 30 * 60
+
+#: Slack on top of two missed intervals before a client counts as offline
+#: (same decision): a report that is late because the machine was busy
+#: waking up or the network came up slowly does not flip it.
+PRESENCE_GRACE_SECONDS = 5 * 60
+
+Presence = Literal["online", "offline"]
+
 
 @dataclass(frozen=True)
 class StoredSnapshot:
@@ -76,6 +99,11 @@ class StoredSnapshot:
     rowid: int
     reported_at: str
     appids: list[int] | None
+    #: What the agent said about itself in this report (schema v17). ``None``
+    #: when it did not say, or when the stored value is not one the API
+    #: would have accepted (a hand-edited row) -- see ``_stored_version``.
+    agent_version: str | None = None
+    report_interval_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +140,12 @@ class ClientSummary:
     #: report written before schema v9, and is the case that must never be read
     #: as "this client is bypassing the cache" (see ``routers/clients.py``).
     source_addrs: list[str] = field(default_factory=list)
+    #: From the LATEST snapshot (schema v17, WP AGENT-FEAT-1): the agent's
+    #: build version and report interval, ``None`` when that report did not
+    #: carry them. Deliberately not "the last value ever sent": an agent
+    #: downgraded to a build without the fields reads as unknown again.
+    agent_version: str | None = None
+    report_interval_seconds: int | None = None
 
 
 def normalize_source_addr(raw: str | None) -> str | None:
@@ -139,6 +173,65 @@ def normalize_source_addr(raw: str | None) -> str | None:
     if any(character.isspace() for character in value):
         return None
     return value
+
+
+def valid_report_interval(value: object) -> bool:
+    """True for an ``int`` (not a ``bool``) within
+    ``MIN_REPORT_INTERVAL_SECONDS..MAX_REPORT_INTERVAL_SECONDS``."""
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and MIN_REPORT_INTERVAL_SECONDS <= value <= MAX_REPORT_INTERVAL_SECONDS
+    )
+
+
+def _stored_version(raw: object) -> str | None:
+    """A stored ``agent_version`` as the API may show it, else ``None``.
+
+    The request model already validates both v17 fields, so a bad value can
+    only come from a hand-edited database. It reads as "unknown" rather than
+    being echoed, the same way ``_decode_appids`` degrades a corrupt row.
+    """
+    return raw if isinstance(raw, str) and is_valid_version(raw) else None
+
+
+def _stored_interval(raw: object) -> int | None:
+    return raw if valid_report_interval(raw) else None
+
+
+def presence(
+    last_reported_at: str,
+    report_interval_seconds: int | None,
+    now: datetime,
+) -> tuple[Presence, str | None]:
+    """``(presence, offline_after)`` for a client (WP AGENT-FEAT-1).
+
+    The rule (user decision 2026-10-03, "Weg B"): a client is **offline**
+    once its last report is older than ``2 x interval + 5 minutes``, and
+    **online** until then -- at exactly that age it is still online. The
+    interval is the one the agent stated in its latest report, or
+    ``ASSUMED_REPORT_INTERVAL_SECONDS`` (30 minutes) when it stated none.
+    There is no third state.
+
+    ``offline_after`` is the UTC timestamp at which the client turns
+    offline if no further report arrives. An unreadable ``last_reported_at``
+    (hand-edited row) gives ``("offline", None)``: online is a claim this
+    function can only make from a timestamp it understands.
+
+    The one place the rule lives: ``GET /v1/clients`` calls this per client,
+    and anything else that ever needs presence must call it too.
+    """
+    last = parse_utc_iso(last_reported_at)
+    if last is None:
+        return "offline", None
+    interval = (
+        report_interval_seconds
+        if valid_report_interval(report_interval_seconds)
+        else ASSUMED_REPORT_INTERVAL_SECONDS
+    )
+    deadline = last + timedelta(seconds=2 * interval + PRESENCE_GRACE_SECONDS)
+    state: Presence = "online" if now <= deadline else "offline"
+    return state, to_utc_iso(deadline)
 
 
 def normalize_appids(appids: Iterable[int]) -> list[int]:
@@ -199,7 +292,8 @@ def latest_snapshot(conn: sqlite3.Connection, client_id: str) -> StoredSnapshot 
     """
     row = conn.execute(
         """
-        SELECT rowid AS rowid, reported_at, appids
+        SELECT rowid AS rowid, reported_at, appids,
+               agent_version, report_interval_seconds
         FROM agent_reports
         WHERE client_id = ?
         ORDER BY rowid DESC
@@ -214,6 +308,8 @@ def latest_snapshot(conn: sqlite3.Connection, client_id: str) -> StoredSnapshot 
         rowid=rowid,
         reported_at=str(row["reported_at"]),
         appids=_decode_appids(row["appids"], client_id, rowid),
+        agent_version=_stored_version(row["agent_version"]),
+        report_interval_seconds=_stored_interval(row["report_interval_seconds"]),
     )
 
 
@@ -259,6 +355,8 @@ def store_report(
     appids: Sequence[int],
     keep: int,
     source_addr: str | None = None,
+    agent_version: str | None = None,
+    report_interval_seconds: int | None = None,
 ) -> ReportResult:
     """Store one full-list snapshot and diff it against the previous one.
 
@@ -282,13 +380,32 @@ def store_report(
     # correlation is a nice-to-have on top of the report, not a precondition
     # for accepting one.
     stored_addr = normalize_source_addr(source_addr)
+    # Schema v17 (WP AGENT-FEAT-1): the router's request model has already
+    # validated both; re-checked here so no caller can store a value the API
+    # would refuse to show.
+    if agent_version is not None and not is_valid_version(agent_version):
+        raise ValueError("agent_version must match the VER-1 version grammar")
+    if report_interval_seconds is not None and not valid_report_interval(
+        report_interval_seconds
+    ):
+        raise ValueError(
+            f"report_interval_seconds must be an int in "
+            f"{MIN_REPORT_INTERVAL_SECONDS}..{MAX_REPORT_INTERVAL_SECONDS}"
+        )
 
     with immediate_transaction(conn):
         previous = latest_snapshot(conn, client_id)
         conn.execute(
-            "INSERT INTO agent_reports (client_id, reported_at, appids, source_addr) "
-            "VALUES (?, ?, ?, ?)",
-            (client_id, reported_at, payload, stored_addr),
+            "INSERT INTO agent_reports (client_id, reported_at, appids, source_addr, "
+            "agent_version, report_interval_seconds) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                client_id,
+                reported_at,
+                payload,
+                stored_addr,
+                agent_version,
+                report_interval_seconds,
+            ),
         )
         pruned = prune_reports(conn, client_id, keep)
 
@@ -305,9 +422,12 @@ def store_report(
 
     logger.info(
         "agent-report client=%r stored snapshot: reported_at=%s apps=%d "
-        "first_report=%s added=%d removed=%d pruned=%d",
+        "first_report=%s added=%d removed=%d pruned=%d agent_version=%s "
+        "report_interval_seconds=%s",
         client_id, reported_at, len(stored), first_report,
         len(added), len(removed), pruned,
+        agent_version if agent_version is not None else "-",
+        report_interval_seconds if report_interval_seconds is not None else "-",
     )
     if removed:
         # Audit line, deliberately separate and explicit about the boundary:
@@ -374,6 +494,8 @@ def list_clients(conn: sqlite3.Connection) -> list[ClientSummary]:
                 last_reported_at=latest.reported_at,
                 app_count=None if latest.appids is None else len(latest.appids),
                 source_addrs=source_addrs_for(conn, client_id),
+                agent_version=latest.agent_version,
+                report_interval_seconds=latest.report_interval_seconds,
             )
         )
     return summaries

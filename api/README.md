@@ -324,7 +324,7 @@ an operator asks for *off*, so a non-empty value is an explicit request for a
 feature, and a typo in it must not quietly look like it worked. Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v16)
+## Database schema (v17)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -336,7 +336,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `apps`           | `appid` (PK), `name`, `status`, `last_prefill_at`, `last_manifest_check`, `needs_force`     | One row per tracked Steam app. `needs_force` (**v5**, WP 3.4) is ADR-0006 decision 2's per-app flag — see "needs_force" below |
 | `depot_app_map`  | `depotid`, `appid`, PK `(depotid, appid)`                                                   | Depot→app mapping; a depot can map to multiple apps (shared depots, plan §4) |
 | `jobs`           | `id` (PK autoincrement), `appid`, `type`, `status`, `created_at`, `started_at`, `finished_at`, `log_excerpt`, `updated`, `up_to_date`, `summary_parse_ok`, `gc_execute`, `paused_at`, `stop_request`, `run_use_force`, `run_before_json`, `run_claimed_by`, `run_claimed_at`, `run_heartbeat_at`, `run_completed_at`, `run_result_json` | Prefill/GC job queue (plan §3, §6). `updated`/`up_to_date`/`summary_parse_ok` (**v4**, WP 3.3) are SteamPrefill's own summary-table counters — see "Job outcome honesty" above. `gc_execute` (**v7**, WP 3.8) is the GC dry-run/execute bit: `NULL` for every non-GC job, `0` = report only, `1` = delete — see "Garbage collection" below. `paused_at`/`stop_request` (**v8**, WP 3.12) are job control: when the job was last suspended, and the operator's pending `cancel`/`pause` request against a *running* job — see "Job control" below. The seven `run_*` columns (**v15**, WP S-1, ADR-0012) are queue-mode's job hand-off to a separate `prefill_runner` process — `NULL` for every job that never goes through queue mode (any GC job, any prefill job run in the default `subprocess` mode). See "Queue mode" below |
-| `agent_reports`  | `client_id`, `reported_at`, `appids` (JSON array of ints), `source_addr`                     | One row per agent report — a full installed-app-ID snapshot at that timestamp (ADR-0002: the agent is stateless/dumb, always reports the complete list). vault-api derives additions/removals by diffing the two most recent rows per `client_id`. `source_addr` (**v9**, WP 3.11) is the address the report arrived FROM — the only key correlating a `client_id` with the event log's addresses; `NULL` for pre-v9 rows, which is why such a client is never `bypass_suspected` |
+| `agent_reports`  | `client_id`, `reported_at`, `appids` (JSON array of ints), `source_addr`, `agent_version`, `report_interval_seconds` | One row per agent report — a full installed-app-ID snapshot at that timestamp (ADR-0002: the agent is stateless/dumb, always reports the complete list). vault-api derives additions/removals by diffing the two most recent rows per `client_id`. `source_addr` (**v9**, WP 3.11) is the address the report arrived FROM — the only key correlating a `client_id` with the event log's addresses; `NULL` for pre-v9 rows, which is why such a client is never `bypass_suspected`. `agent_version` / `report_interval_seconds` (**v17**, WP AGENT-FEAT-1) are what the agent said about itself in that report; `NULL` = it did not say. See "Agent presence" below |
 | `depot_manifests` | `appid`, `containing_appid`, `depotid`, `manifestid` (TEXT), `chunk_count`, `total_bytes`, `recorded_at`, `source`, `first_seen_at`, `manifest_changed_at`, `observation_count`, PK `(appid, depotid)` | **Latest**-known manifest state per (app, depot) — WP 3.2, ADR-0006 decision 3. `first_seen_at`/`manifest_changed_at`/`observation_count` (**v14**, WP 4h.1) are the change-frequency bookkeeping — see "Manifest ingestion" and "Change frequency" below |
 | `oracle_app_state` | `appid` (PK), `buildid`, `checked_at`, `source`, `depot_count`, `branch_count` | **v10**, WP 3.9. One row per app the opt-in oracle has been asked about: when, by which oracle (`source` provenance), and what it said the public build id is. See "Manifest oracle" below |
 | `oracle_branch_manifests` | `appid`, `depotid`, `branch`, `manifestid` (TEXT), `recorded_at`, `source`, PK `(appid, depotid, branch)` | **v10**, WP 3.9. One row per (app, depot, **open** branch) → manifest gid. Password-protected branches are never inserted at all. Written with snapshot semantics (a refresh replaces the app's rows in one transaction). **Never mixed into `depot_manifests`** — a third-party claim must stay distinguishable from a manifest vault-api parsed itself |
@@ -502,6 +502,14 @@ fourth mechanism — the same guarded loop that already knows how to bring a
 these seven. Covered by
 `tests/test_db.py::test_init_db_upgrades_a_v14_database_to_v15_in_place` and
 `..._a_fresh_database_and_a_v14_upgrade_agree_on_the_jobs_columns`.
+
+**v16 → v17 (WP AGENT-FEAT-1) reuses v9's per-column `agent_reports` step**
+(`db._add_missing_agent_report_columns`, now run for every database below
+v17) to add `agent_version TEXT` and `report_interval_seconds INTEGER`, both
+nullable with no default: a report stored before v17 did not say which agent
+sent it or how often it reports. Covered by
+`tests/test_agent_feat_1_presence.py` (in-place upgrade, idempotent, same
+column types as a fresh database).
 
 **Ordering fix (WP 1.5 carry-over from the WP 1.4 review):** `init_db` now
 creates only the `schema_version` table, reads the stored version, and checks
@@ -2260,13 +2268,15 @@ already-absent remnant removal still counts.
 
 `POST /v1/agent/installed` is the vault-agent's only write path (plan §3, §6).
 The agent — on a Windows gaming PC or a Linux/SteamOS device (ADR-0002) — posts
-the **complete** list of installed Steam app ids, typically every 30 minutes.
-The mechanics live in `vault_api/agent_reports.py`, the HTTP shape in
-`vault_api/routers/agent.py`.
+the **complete** list of installed Steam app ids, at logon/boot and every 10
+minutes (WP AGENT-FEAT-1; 30 minutes before, which agents installed with the
+old packaging still use). The mechanics live in `vault_api/agent_reports.py`,
+the HTTP shape in `vault_api/routers/agent.py`.
 
 ```
 POST /v1/agent/installed
-{"client_id": "gaming-pc", "appids": [440, 570, 1234]}
+{"client_id": "gaming-pc", "appids": [440, 570, 1234],
+ "agent_version": "0.1.0", "report_interval_seconds": 600}
 
 200
 {"client_id": "gaming-pc", "received": 3,
@@ -2318,6 +2328,15 @@ snapshot. Consequences worth stating:
   identically, and the `>= 1` constraint still applies afterwards (`"0"` is a
   `422`). A JSON agent cannot produce this anyway.
 - **Booleans are rejected** (`422`) — see "One shared `AppId` type" below.
+- `agent_version` and `report_interval_seconds` (schema v17, WP
+  AGENT-FEAT-1) are **optional**; an agent from before AGENT-FEAT-1 sends
+  neither and is unaffected. `agent_version` must pass the VER-1 version
+  grammar (letter or digit first, then letters, digits and `. _ + -`, at most
+  64 characters) and must be a JSON string. `report_interval_seconds` must be
+  a JSON integer from 60 to 86400 — strict: `true`, `600.0` and `"600"` are
+  `422`, unlike `appids`. `null` means the same as absent. Both are stored on
+  the snapshot row and read by `GET /v1/clients` (see "Agent presence").
+  The response is unchanged.
 
 ### One shared `AppId` type (WP 2.4 review)
 
@@ -2458,6 +2477,38 @@ client that reads only the fields it knows keeps working.
   `latest_snapshot` lookup per client rather than a single `MAX(reported_at)`
   aggregate. The follow-up query runs once per gaming machine — a homelab has
   a handful.
+
+### Agent presence (WP AGENT-FEAT-1, schema v17)
+
+`GET /v1/clients` adds four fields per client, next to the existing ones
+(nothing else changed):
+
+```json
+{"client_id": "gaming-pc", "last_reported_at": "2026-10-03T12:00:00Z", ...,
+ "agent_version": "0.1.0", "report_interval_seconds": 600,
+ "presence": "online", "offline_after": "2026-10-03T12:25:00Z"}
+```
+
+- `agent_version` / `report_interval_seconds`: from the client's **latest**
+  report. `null` = not stated: an agent from before AGENT-FEAT-1 ("version
+  unknown"), or a one-shot agent run that was not told its interval.
+- `presence` is `"online"` or `"offline"`, nothing else. A client is offline
+  once its last report is **older than** `2 × interval + 5 minutes`; at
+  exactly that age it is still online. The interval is the stated one, or
+  **30 minutes when none was stated** (every agent before AGENT-FEAT-1 ran on
+  a 30-minute schedule). So a 10-minute agent turns offline 25 minutes after
+  its last report, an old agent after 65 minutes.
+- `offline_after` is the moment that happens: `last_reported_at` plus that
+  window, so a UI can show "last seen …" and know when to flip without
+  re-implementing the rule. `null` only when `last_reported_at` is unreadable
+  (a hand-edited row), and then `presence` is `"offline"`.
+- Computed per request from the server clock (`agent_reports.presence`, the
+  one place the rule lives), one `now` for the whole answer. A report time in
+  the future (server clock stepped back) reads as online.
+- `GET /v1/about` does **not** count agents: it is a fixed list of server
+  components with a 60 s answer cache, and a count there would be a second
+  presence computation that could disagree with this one. The web counts the
+  rows of this endpoint instead (WP WEB-FEAT-3).
 
 ### Installed state per app (`installed_on`, WP AG-1)
 

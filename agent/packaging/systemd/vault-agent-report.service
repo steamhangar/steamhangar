@@ -60,7 +60,12 @@ EnvironmentFile=%h/.config/vault-agent/env
 # file's value to be the one that actually applies:
 #Environment=VAULT_AGENT_CLIENT_ID=steam-deck-01
 
-ExecStart=%h/.local/bin/vault-agent report
+# --interval must match the timer's OnCalendar= cadence (WP AGENT-FEAT-1):
+# the agent states it in every report and vault-api shows this machine
+# offline once its last report is older than 2 x interval + 5 minutes.
+# A flag, not an Environment= line, so the env file cannot silently
+# override it (systemd.exec(5), see the client-id note above).
+ExecStart=%h/.local/bin/vault-agent report --interval 10m
 
 # Hardening notes (deliberately NOT more aggressive than this):
 #   - No ProtectSystem=/ProtectHome= sandboxing here: this is a USER unit

@@ -224,7 +224,9 @@ func TestParse_EnvVarsUsedWhenFlagsOmitted(t *testing.T) {
 		EnvAPIKey:      "env-key",
 		EnvClientID:    "env-client",
 		EnvLibraryRoot: "/custom/steam",
-		EnvInterval:    "10m",
+		// Not 10m: that is the default since WP AGENT-FEAT-1, and an env
+		// value equal to the default could not show the env was read.
+		EnvInterval: "25m",
 	})
 	cfg, err := parseDiscard(nil, env)
 	if err != nil {
@@ -242,8 +244,11 @@ func TestParse_EnvVarsUsedWhenFlagsOmitted(t *testing.T) {
 	if cfg.LibraryRoot != "/custom/steam" {
 		t.Errorf("LibraryRoot = %q", cfg.LibraryRoot)
 	}
-	if cfg.ReportInterval != 10*time.Minute {
-		t.Errorf("ReportInterval = %v", cfg.ReportInterval)
+	if cfg.ReportInterval != 25*time.Minute {
+		t.Errorf("ReportInterval = %v, want 25m from %s", cfg.ReportInterval, EnvInterval)
+	}
+	if !cfg.ReportIntervalExplicit {
+		t.Errorf("ReportIntervalExplicit = false, want true when %s is set", EnvInterval)
 	}
 }
 
@@ -945,3 +950,56 @@ var errHostname = &staticError{"hostname lookup failed"}
 type staticError struct{ msg string }
 
 func (e *staticError) Error() string { return e.msg }
+
+// --- WP AGENT-FEAT-1: report interval default and provenance -----------
+
+// The default is pinned as a LITERAL, not against DefaultReportInterval
+// itself: the shipped schedulers (install-task.ps1's -IntervalMinutes 10,
+// the systemd timer's OnCalendar=*:0/10 and --interval 10m) are written
+// to match 10 minutes, and a comparison with the constant would follow
+// any change to it (api/tests/test_agent_feat_1_packaging.py pins the
+// packaging side against the same literal).
+func TestDefaultReportInterval_IsTenMinutes(t *testing.T) {
+	if DefaultReportInterval != 10*time.Minute {
+		t.Fatalf("DefaultReportInterval = %v, want 10m (user decision 2026-10-03, WP AGENT-FEAT-1)", DefaultReportInterval)
+	}
+}
+
+func TestParse_IntervalDefaultIsNotExplicit(t *testing.T) {
+	cfg, err := parseDiscard([]string{"--server-url", "http://h:1", "--api-key", "k", "--client-id", "pc"}, emptyEnv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ReportInterval != 10*time.Minute {
+		t.Errorf("ReportInterval = %v, want the 10m default", cfg.ReportInterval)
+	}
+	if cfg.ReportIntervalExplicit {
+		t.Error("ReportIntervalExplicit = true with neither --interval nor the env var set")
+	}
+}
+
+func TestParse_IntervalFlagIsExplicit(t *testing.T) {
+	cfg, err := parseDiscard([]string{
+		"--server-url", "http://h:1", "--api-key", "k", "--client-id", "pc", "--interval", "10m",
+	}, emptyEnv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 10m equals the default on purpose: being explicit is about WHO set
+	// it, not whether the value differs.
+	if !cfg.ReportIntervalExplicit || cfg.ReportInterval != 10*time.Minute {
+		t.Errorf("ReportInterval=%v explicit=%v, want 10m explicit", cfg.ReportInterval, cfg.ReportIntervalExplicit)
+	}
+}
+
+func TestParse_BlankIntervalEnvIsNotExplicit(t *testing.T) {
+	env := envMap(map[string]string{EnvServerURL: "http://h:1", EnvAPIKey: "k", EnvClientID: "pc", EnvInterval: "  "})
+	cfg, err := parseDiscard(nil, env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ReportIntervalExplicit || cfg.ReportInterval != DefaultReportInterval {
+		t.Errorf("ReportInterval=%v explicit=%v, want the default, not explicit, for a blank env value",
+			cfg.ReportInterval, cfg.ReportIntervalExplicit)
+	}
+}

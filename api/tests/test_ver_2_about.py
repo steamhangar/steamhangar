@@ -801,8 +801,10 @@ def test_schema_v16_migration_adds_runner_presence(tmp_path) -> None:
 
     conn = get_connection(db)
     try:
-        assert SCHEMA_VERSION == 16
-        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 16
+        # v16 introduced the table; later versions (v17, WP AGENT-FEAT-1)
+        # must still carry a v15 database through it.
+        assert SCHEMA_VERSION >= 16
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == SCHEMA_VERSION
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(runner_presence)")]
         assert cols == ["runner_id", "build_version", "build_commit",
                         "steamprefill_version", "started_at", "last_seen"]

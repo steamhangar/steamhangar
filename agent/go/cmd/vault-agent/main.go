@@ -17,6 +17,13 @@
 // the timing); --loop exists for systemd (Phase 2.5's Linux/SteamOS
 // packaging) where the service itself stays resident.
 //
+// Every report carries this build's version and its report interval (WP
+// AGENT-FEAT-1), so vault-api can show the machine online/offline. The
+// shipped schedulers start a one-shot run at logon/boot and every 10
+// minutes and pass that interval with --interval or
+// VAULT_AGENT_REPORT_INTERVAL; a one-shot run without it states no
+// interval (see report.Payload.WithPresence).
+//
 // Configuration is flags with an environment-variable fallback - see
 // agent/go/agentconfig and agent/README.md's "Configuration" section.
 // VAULT_AGENT_API_KEY is never logged in any code path here: every log
@@ -133,9 +140,9 @@ func runReport(args []string, stdout, stderr io.Writer) int {
 	// rather than a bare value that looks identical whether it was chosen
 	// or silently inherited. Both fields are built entirely in
 	// agentconfig.build()/defaultClientID(); nothing here re-derives them.
-	logger.Printf("vault-agent starting server_url=%q client_id=%q client_id_source=%s client_id_note=%q library_root=%q loop=%v report_interval=%s api_key=%s",
-		redacted.ServerURL, redacted.ClientID, redacted.ClientIDSource, redacted.ClientIDNote,
-		redacted.LibraryRoot, redacted.Loop, redacted.ReportInterval, redacted.APIKey)
+	logger.Printf("vault-agent starting version=%q server_url=%q client_id=%q client_id_source=%s client_id_note=%q library_root=%q loop=%v report_interval=%s report_interval_explicit=%v api_key=%s",
+		version, redacted.ServerURL, redacted.ClientID, redacted.ClientIDSource, redacted.ClientIDNote,
+		redacted.LibraryRoot, redacted.Loop, redacted.ReportInterval, redacted.ReportIntervalExplicit, redacted.APIKey)
 
 	// WP 2.5 S2 (review): LibraryRootProbeNote is only ever non-empty when
 	// LibraryRoot is an UNCONFIRMED Linux fallback guess (none of the
@@ -194,7 +201,16 @@ func reportOnce(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg a
 		logger.Printf("report build failed error=%q", err)
 		return false
 	}
-	logger.Printf("report built installed_count=%d client_id=%q", len(payload.AppIDs), payload.ClientID)
+	// WP AGENT-FEAT-1: version and interval let vault-api show this
+	// machine online/offline. --loop times itself, so its interval is
+	// always a fact; a one-shot run states one only when it was told
+	// (see report.Payload.WithPresence).
+	payload, notes := payload.WithPresence(version, cfg.ReportInterval, cfg.Loop || cfg.ReportIntervalExplicit)
+	for _, note := range notes {
+		logger.Printf("report presence note=%q", note)
+	}
+	logger.Printf("report built installed_count=%d client_id=%q agent_version=%s report_interval_seconds=%s",
+		len(payload.AppIDs), payload.ClientID, optString(payload.AgentVersion), optInt(payload.ReportIntervalSeconds))
 
 	// A single HTTP attempt (with client.Client's own internal retries) is
 	// bounded generously - this is a small JSON POST, not a download; 2
@@ -210,11 +226,32 @@ func reportOnce(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg a
 		return false
 	}
 
+	if result.PresenceDropped {
+		logger.Printf("report presence note=%q", "the server does not accept agent_version/report_interval_seconds "+
+			"yet (vault-api older than AGENT-FEAT-1); the report was resent without them and accepted - "+
+			"upgrade vault-api to see this machine's version and online state")
+	}
 	fmt.Fprintf(stdout, "reported %d installed app(s) for client_id=%s: added=%v removed=%v first_report=%v\n",
 		result.Received, result.ClientID, result.Added, result.Removed, result.FirstReport)
 	logger.Printf("report accepted received=%d added=%d removed=%d first_report=%v",
 		result.Received, len(result.Added), len(result.Removed), result.FirstReport)
 	return true
+}
+
+// optString and optInt render an optional payload field for a log line:
+// the quoted value, or "-" when it is not sent.
+func optString(v *string) string {
+	if v == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%q", *v)
+}
+
+func optInt(v *int) string {
+	if v == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d", *v)
 }
 
 // runLoop reports on cfg.ReportInterval (+/- jitter) until ctx is
@@ -249,7 +286,7 @@ func runLoop(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg agen
 
 		// time.NewTimer + Stop rather than time.After: a time.After
 		// channel is not collected until it fires, so a shutdown early in
-		// a long (30 min) sleep would leave the timer pending for the
+		// a long (10 min) sleep would leave the timer pending for the
 		// rest of the interval - harmless in practice, but the same
 		// pattern client.go's backoff wait already uses (WP AGENT-FIX-1
 		// N4).
