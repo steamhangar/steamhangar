@@ -74,6 +74,23 @@ test("only a failed prefill job has a reason; a reason line mid-line does not co
   assert.equal(jobFailureReason(failed, two), "not_logged_in");
 });
 
+// WP API-FIX-3: vault-api's line for a run SteamPrefill itself reported as
+// failed (exit 0, Failed column > 0). Literal copy of
+// api/tests/test_api_fix_3_prefill_failed.py's EXPECTED_LAST_LINE_B.
+const PREFILL_FAILED_LINE =
+  "[vault-api] Prefill failed (reason=prefill_failed): SteamPrefill reported 1 app(s) as failed: " +
+  "it could not download the depot manifests; a possible cause is HTTPS to *.steamcontent.com being " +
+  "rewritten to a cache that does not pass port 443 through. The depot mapping and manifest state for " +
+  "this app were left unchanged.";
+
+test("prefill_failed (WP API-FIX-3) is read from the reason line and gets no hint block", () => {
+  const excerpt = `[8:07:55 PM] Unexpected download error : Unable to download manifests!  Skipping app...\n${PREFILL_FAILED_LINE}`;
+  assert.equal(jobFailureReason(failed, excerpt), "prefill_failed");
+  // No hint on purpose: a hint block collapses the raw output, and the
+  // cause is in that output's last line.
+  assert.equal(jobFailureHint(failed, excerpt), null);
+});
+
 test("the login hint names the queue-mode command from deploy/README.md and says what to do next", () => {
   assert.equal(LOGIN_COMMAND, "docker compose exec -it vault-runner /opt/steamprefill/SteamPrefill select-apps");
   assert.match(LOGIN_HINT.body, /one-time interactive login on the server/);

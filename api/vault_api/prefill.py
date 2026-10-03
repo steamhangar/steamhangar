@@ -147,7 +147,11 @@ class PrefillResult:
     #: operator-requested stops and are NOT failures in the ordinary sense —
     #: ``success`` is still ``False`` (the run did not complete), but
     #: ``worker.py`` routes them to their own terminal/parked outcomes instead
-    #: of ``error``.
+    #: of ``error``. Two more values exist only on the job level, never from
+    #: this module's runner: ``'runner_lost'`` (``prefill_queue``) and
+    #: ``'prefill_failed'`` (``FAILURE_PREFILL_FAILED``, WP API-FIX-3), which
+    #: ``worker.py`` assigns when SteamPrefill exited 0 but its summary table
+    #: reports the app as failed.
     failure_reason: str | None
     exit_code: int | None
     #: ANSI-stripped combined stdout+stderr, plus any diagnostic vault-api adds.
@@ -237,6 +241,56 @@ def write_selected_apps(executable: str, appid: int) -> str | None:
 FAILURE_CANCELLED = "cancelled"
 FAILURE_PAUSED = "paused"
 STOP_FAILURE_REASONS = (FAILURE_CANCELLED, FAILURE_PAUSED)
+
+#: WP API-FIX-3: SteamPrefill exited 0, but its own summary table has a
+#: Failed column with a count above zero (or an unreadable one). Decided in
+#: ``worker.py`` from ``prefill_summary.reports_failure``, the same place the
+#: "not considered" (0/0) outcome is decided, so subprocess and queue mode
+#: share one decision. It appears in vault-api's last log line as
+#: ``(reason=prefill_failed)``, which the web reads (web/js/lib/job-failure.js).
+FAILURE_PREFILL_FAILED = "prefill_failed"
+
+#: Exact SteamPrefill phrases behind the two causes seen in production
+#: (2026-10-02). Cosmetic only: a miss changes the wording of the last log
+#: line, never the job outcome. Case-sensitive on purpose (narrowest match).
+_REQUESTS_FAILED_PHRASE = "requests failed unexpectedly"
+_REQUESTS_FAILED_COUNT_RE = re.compile(r"\b([0-9]+) requests failed unexpectedly", re.ASCII)
+_MANIFESTS_PHRASE = "Unable to download manifests"
+
+
+def prefill_failed_detail(failed: int | None, output: str) -> str:
+    """What failed and the likely cause, for the ``prefill_failed`` log line.
+
+    ``failed`` is the summary table's Failed count, ``None`` when the column
+    was there but its count could not be read. The cause hints match exact
+    SteamPrefill phrases only; without one, the text points at the output.
+    """
+    if failed is None:
+        head = (
+            "SteamPrefill's summary table has a Failed column, but its count "
+            "could not be read"
+        )
+    else:
+        head = f"SteamPrefill reported {failed} app(s) as failed"
+
+    causes: list[str] = []
+    if _REQUESTS_FAILED_PHRASE in output:
+        match = _REQUESTS_FAILED_COUNT_RE.search(output)
+        count = f"{match.group(1)} " if match else ""
+        causes.append(
+            f"{count}download requests failed unexpectedly, so the cache or "
+            "the upstream it fetches from was unreachable"
+        )
+    if _MANIFESTS_PHRASE in output:
+        causes.append(
+            "it could not download the depot manifests; a possible cause is "
+            "HTTPS to *.steamcontent.com being rewritten to a cache that does "
+            "not pass port 443 through"
+        )
+    if not causes:
+        causes.append("see SteamPrefill's output above for the cause")
+    return head + ": " + "; and ".join(causes)
+
 
 #: The ``jobs.stop_request`` values this runner understands, mapped to the
 #: ``failure_reason`` each produces. Anything else a callback returns is

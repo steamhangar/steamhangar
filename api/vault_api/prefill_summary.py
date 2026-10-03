@@ -42,6 +42,25 @@ This parser NEVER falls back to guessing zero: any layout it does not
 recognize returns ``parse_ok=False`` with every field ``None``, because
 ADR-0006 decision 1 depends on being able to tell "confirmed zero" apart from
 "could not tell".
+
+**The Failed column (WP API-FIX-3).** When SteamPrefill fails an app, the
+table grows a third column::
+
+    Prefilled 1 apps totaling 937.52 MiB in 02:14.64
+     Updated | Up To Date | Failed
+    ---------+------------+--------
+        0    |     0      |   1
+
+(production evidence, 2026-10-02: once with the cache unreachable, "22213
+requests failed unexpectedly", once with "Unable to download manifests!").
+A successful run has no Failed column at all. Before WP API-FIX-3 this
+parser read only the first two integers, so a failed run looked exactly like
+the 0/0 "never considered" shape above and the job log claimed the app was
+probably not owned. ``failed`` and ``failed_column`` carry the third column
+now, and :func:`reports_failure` is the one predicate the job outcome uses.
+A header with a Failed column whose count cannot be read still counts as a
+failure (``failed=None``): the column is only rendered when something
+failed, and reading a real failure as success is the dangerous direction.
 """
 
 from __future__ import annotations
@@ -63,6 +82,17 @@ _PREFILLED_LINE_RE = re.compile(
 # and ".*" tolerates whatever that glyph became (a real box character, a
 # stripped-blank, or a run of mojibake).
 _HEADER_RE = re.compile(r"Updated.*Up\s*To\s*Date", re.IGNORECASE)
+
+# WP API-FIX-3: the optional third column. Matched on the header line only,
+# after "Up To Date" (the column order is fixed). No word boundary BEFORE
+# "Failed": an unstripped SGR remnant glued to it ("[31mFailed") would
+# defeat one, and that miss would read a failure as "not considered". The
+# trailing boundary keeps a longer word such as "FailedApps" from counting.
+_FAILED_HEADER_RE = re.compile(r"Up\s*To\s*Date.*Failed\b", re.IGNORECASE)
+
+# Every integer in the data row, in column order (used when the header has a
+# Failed column: at least three are required, Failed is the third).
+_INT_RE = re.compile(r"[0-9]+", re.ASCII)
 
 # The border/separator row between the header and the data row is BOX GLYPHS
 # ONLY (or their corrupted equivalent) -- never a digit -- which is exactly
@@ -96,16 +126,51 @@ _TWO_INTS_RE = re.compile(r"([0-9]+)[^0-9]+?([0-9]+)", re.ASCII)
 
 @dataclass(frozen=True)
 class PrefillSummary:
-    """The outcome ADR-0006 decision 1 needs. All-``None`` iff ``parse_ok`` is False."""
+    """The outcome ADR-0006 decision 1 needs.
+
+    ``updated``, ``up_to_date``, ``failed`` and ``total_bytes_text`` are all
+    ``None`` when ``parse_ok`` is False (``total_bytes_text`` may also be
+    ``None`` on a parsed table without a totals line). ``failed_column`` is
+    set from the header alone, so it can be True on an unparsed table.
+    """
 
     updated: int | None
     up_to_date: int | None
     total_bytes_text: str | None
     parse_ok: bool
+    #: WP API-FIX-3: the Failed column's count. ``0`` when the table parsed
+    #: and has no Failed column (a successful run renders none); ``None``
+    #: when the table could not be parsed, including a Failed column whose
+    #: count could not be read.
+    failed: int | None = None
+    #: True iff the header line has a Failed column, whether or not the rest
+    #: of the table parsed.
+    failed_column: bool = False
 
 
-def _unparsed() -> PrefillSummary:
-    return PrefillSummary(updated=None, up_to_date=None, total_bytes_text=None, parse_ok=False)
+def _unparsed(failed_column: bool = False) -> PrefillSummary:
+    return PrefillSummary(
+        updated=None,
+        up_to_date=None,
+        total_bytes_text=None,
+        parse_ok=False,
+        failed=None,
+        failed_column=failed_column,
+    )
+
+
+def reports_failure(summary: PrefillSummary) -> bool:
+    """Whether SteamPrefill's own table says the run FAILED (WP API-FIX-3).
+
+    True when the table has a Failed column and its count is above zero or
+    could not be read. A Failed column that explicitly says ``0`` is not a
+    failure; together with Updated=0 and Up To Date=0 it is the ordinary
+    "never considered" shape. No Failed column, or no table at all, is never
+    a failure here: that keeps the pre-WP-API-FIX-3 rules for those shapes.
+    """
+    if not summary.failed_column:
+        return False
+    return summary.failed is None or summary.failed > 0
 
 
 def parse_summary(text: str) -> PrefillSummary:
@@ -123,6 +188,13 @@ def parse_summary(text: str) -> PrefillSummary:
        the data row. None found -> unparseable.
     3. Pull the first two integers out of that line, in order. Fewer than two
        -> unparseable. These are ``updated`` and ``up_to_date`` respectively.
+       If the header has a Failed column (WP API-FIX-3), the row must hold
+       at least three integers instead, the third being ``failed``; fewer ->
+       unparseable, with ``failed_column`` still True. More is fine:
+       SteamPrefill v3.7.1 (``PrefillSummaryResult.cs``) always renders
+       Updated and Up To Date, adds Failed only when FailedApps > 0 and then
+       Unowned only when UnownedAppsSkipped > 0, so a fourth integer is the
+       Unowned count and Failed stays third.
     4. Separately (independent of 1-3 succeeding or not being needed further),
        look for the "Prefilled N apps totaling X in Y" line and capture ``X``
        as ``total_bytes_text``. Its absence does not fail the parse; the
@@ -143,6 +215,8 @@ def parse_summary(text: str) -> PrefillSummary:
     if header_idx is None:
         return _unparsed()
 
+    failed_column = _FAILED_HEADER_RE.search(lines[header_idx]) is not None
+
     data_line = None
     for line in lines[header_idx + 1 :]:
         if not _ANY_DIGIT_RE.search(line):
@@ -152,14 +226,20 @@ def parse_summary(text: str) -> PrefillSummary:
         data_line = line
         break
     if data_line is None:
-        return _unparsed()
+        return _unparsed(failed_column)
 
-    match = _TWO_INTS_RE.search(data_line)
-    if match is None:
-        return _unparsed()
-
-    updated = int(match.group(1))
-    up_to_date = int(match.group(2))
+    if failed_column:
+        numbers = _INT_RE.findall(data_line)
+        if len(numbers) < 3:
+            return _unparsed(failed_column)
+        updated, up_to_date, failed = (int(n) for n in numbers[:3])
+    else:
+        match = _TWO_INTS_RE.search(data_line)
+        if match is None:
+            return _unparsed()
+        updated = int(match.group(1))
+        up_to_date = int(match.group(2))
+        failed = 0
 
     total_bytes_text = None
     totals_match = _PREFILLED_LINE_RE.search(text)
@@ -171,4 +251,6 @@ def parse_summary(text: str) -> PrefillSummary:
         up_to_date=up_to_date,
         total_bytes_text=total_bytes_text,
         parse_ok=True,
+        failed=failed,
+        failed_column=failed_column,
     )
