@@ -369,18 +369,48 @@ a{ color:var(--accent); }
    addendum). Only the two ACTIVE states move, and only their inner group
    (.dla / .rot) — never the whole badge — so a library at rest never
    flickers. Paused is deliberately motionless: a frozen glyph IS the
-   signal. All GPU-cheap transforms only (translateY / rotate). */
+   signal. Transforms only (translateY / rotate), never layout. Note that
+   Blink repaints SVG transform animations on the main thread rather than
+   compositing them; at badge size that is a tiny repaint, the same cost
+   the earlier drift animation had. */
 
-/* DOWNLOAD: only the arrow drifts; the arrow must never fade fully to
-   nothing (it doubles as the tap target — a status icon must never look
-   like an empty disc, mockup round 7). */
-@keyframes vault-dlslide{
-  0%   { transform:translateY(-1.6px); opacity:.35 }
-  30%  { opacity:1 }
-  70%  { opacity:1 }
-  100% { transform:translateY(1.8px);  opacity:.35 }
+/* DOWNLOAD (WP WEB-FIX-7, "arrow falls through"): the running glyph is
+   two identical arrows stacked one period apart (js/components/
+   status-icon.js, DOWNLOAD_FALL_PERIOD = 32 viewBox units). The whole .dla
+   group falls by exactly that period per cycle, then snaps back to 0.
+   Transform only, no opacity (the old drift-and-fade read as "nothing is
+   happening").
+   - Why the snap is invisible: in viewBox units the badge disc is centred
+     on (12,12) with radius 12/0.64 = 18.75 (y -6.75..30.75). At the start
+     frame the trailing arrow is parked above the disc; at the end frame
+     the leading arrow has fallen fully below it (its top ink, the shaft
+     cap, sits at y 34.15, 3.4 units outside). So at both ends exactly the
+     same thing is inside the disc: one arrow at rest position, and no
+     ink at all elsewhere. The two frames look identical, so the reset is
+     seamless. That needs the period to clear the exit (P >= ~28.6) and to
+     keep the parked arrow hidden at rest (P > ~21.4); 32 meets both with
+     margin for pixel snapping.
+   - linear: constant speed hides the seam; an ease would stall the arrows
+     at every cycle boundary.
+   - 1.6s per period = 20 units/s, about 9px/s on a 17px badge: a new
+     arrow every 1.6s, and each one takes ~2.5s to cross the disc. Fast
+     enough to read as "data is flowing" next to the 2.2s update turn,
+     slow enough to stay calm in a grid with several running cards.
+   - clip-path:circle(50%) clips the arrows to the badge's own disc. It is
+     the border-radius:50% circle by construction at every --sz (15/16/17/
+     19px), needs no per-instance SVG ids and no radius tied to the svg's
+     64% box. It relies on `.sic svg{ overflow:visible }` so the arrows can
+     travel outside the svg box at all. At every moment of the loop at
+     least one arrow is mostly inside the disc: the icon doubles as the
+     tap target and must never look empty (mockup round 7).
+   - No fill-mode: after the reduced-motion one-shot the group must return
+     to its rest transform (one arrow, the static glyph). */
+@keyframes vault-dlfall{
+  from { transform:translateY(0) }
+  to   { transform:translateY(32px) }
 }
-.sic.k-running .dla{ animation:vault-dlslide 2.6s ease-in-out infinite; }
+.sic.k-running{ clip-path:circle(50%); }
+.sic.k-running .dla{ animation:vault-dlfall 1.6s linear infinite; }
 .sic.k-running .dlbase{ display:none; } /* no static line under an animated arrow */
 
 /* UPDATE / VERIFY: two opposing curved arrows turning as one full circle,

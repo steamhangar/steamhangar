@@ -13,7 +13,9 @@
  * Motion = "activity right now", never decoration (round 5/6 addendum):
  * only running/updating/verify glyphs move, and only their inner group
  * (.dla / .rot) — never the whole badge. All motion is disabled globally
- * by the prefers-reduced-motion rule in css/theme.css.
+ * by the prefers-reduced-motion rule in css/theme.css. The running glyph
+ * is the one kind whose badge clips its content (WP WEB-FIX-7: two arrows
+ * falling through the disc, see buildDownload and theme.css).
  *
  * Built with `document.createElementNS` rather than `innerHTML`: no
  * functional difference under this app's CSP (static SVG markup executes
@@ -67,14 +69,45 @@ function buildCheck() {
   return [svgEl("path", { d: "M5 12.5 10 17.5 19 7" })];
 }
 
-function buildDownload() {
-  // .dla = the arrow (the only animated part), .dlbase = the baseline,
-  // hidden while animating (mockup: "no line under the ANIMATED arrow").
-  const arrow = svgEl("g", { class: "dla" });
-  arrow.append(
+/**
+ * Fall period of the running download arrow, in viewBox units (WP
+ * WEB-FIX-7). The trailing arrow sits exactly one period above the leading
+ * one, and css/theme.css's `vault-dlfall` keyframes move the whole `.dla`
+ * group down by exactly this distance per cycle before snapping back.
+ * The badge disc is radius 12/0.64 = 18.75 around (12,12). The snap is
+ * invisible only if no ink is inside the disc except one rest-position
+ * arrow at BOTH ends of the cycle: the parked trailing arrow must be above
+ * the disc at rest (P > ~21.4) and the leading arrow must have fully left
+ * it at the end (P >= ~28.6). 32 clears both with margin for pixel
+ * snapping. Keep it in sync with `vault-dlfall` (pinned by
+ * web/tests/status-icon-download.test.js).
+ */
+export const DOWNLOAD_FALL_PERIOD = 32;
+
+function arrowPaths() {
+  return [
     svgEl("path", { d: "M12 3.5V13" }),
     svgEl("path", { d: "M7.4 8.7 12 13.3 16.6 8.7" }),
-  );
+  ];
+}
+
+function buildDownload(kind) {
+  // .dla = the arrow (the only animated part), .dlbase = the baseline,
+  // hidden while running (mockup: "no line under the ANIMATED arrow").
+  const arrow = svgEl("g", { class: "dla" });
+  arrow.append(...arrowPaths());
+  if (kind === "running") {
+    // WP WEB-FIX-7, "arrow falls through": a second arrow parked one
+    // period above the first. css/theme.css clips the running badge to its
+    // own circle, so at rest (and under prefers-reduced-motion) this one
+    // is invisible above the disc; while the group falls it enters from
+    // the top as the first one leaves at the bottom. Only the running
+    // glyph gets it: every other download glyph (k-none) is unclipped and
+    // stays exactly the single static arrow it always was.
+    const next = svgEl("g", { class: "dlnext", transform: `translate(0 -${DOWNLOAD_FALL_PERIOD})` });
+    next.append(...arrowPaths());
+    arrow.append(next);
+  }
   const baseline = svgEl("path", { class: "dlbase", d: "M5 19.6h14" });
   return [arrow, baseline];
 }
@@ -149,7 +182,7 @@ export function createStatusIcon(kind, { size = "md" } = {}) {
     svg.setAttribute("stroke-linecap", "round");
     svg.setAttribute("stroke-linejoin", "round");
   }
-  svg.append(...build());
+  svg.append(...build(knownKind));
   wrap.appendChild(svg);
 
   const label = document.createElement("span");

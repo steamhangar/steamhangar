@@ -942,3 +942,8 @@ These are not style preferences; each entry cost a review round to learn.
   Dockerfile, only the publish job does) and the stack suite's fixed test
   subnet overlapped a real stack's network. Run both before a package
   counts as done (WP RC7-INT).
+- A clipped looping animation is seamless only if the leaving element
+  has no ink inside the clip at the end frame: the period must cover the
+  visible travel (disc radius plus glyph extent), not just the glyph
+  box. Test the end frame's visibility, not only the transform numbers
+  (WP WEB-FIX-7).

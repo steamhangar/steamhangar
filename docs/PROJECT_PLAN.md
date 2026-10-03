@@ -2744,6 +2744,20 @@ below carry their own later dates, item 12 is the current one).
       `extra_hosts` requirement with a dedicated `VAULT_CORE_BIND`, the
       bind-mount precondition (`cache/depot` + `tmp`, 101:101).
 
+    - [x] **WEB-FIX-7** — the running download arrow falls through the
+      badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
+      to the disc) instead of drifting 2px and fading (user feedback
+      2026-10-03, done 2026-10-03).
+    - [ ] **APP-FIX-3** — Android parity for WEB-FIX-7: `StatusIcon.kt`
+      still drifts and fades (`downloadDriftFraction` /
+      `downloadOpacityFraction`, ported from the removed `vault-dlslide`).
+    - [ ] Design notes: `docs/design/vault-app-mockup-NOTES.md` still
+      describes the old drift-and-fade arrow; record the WEB-FIX-7 change.
+    - [ ] The update/verify spinner (`vault-turn`, status kinds
+      `updating`/`verify`) exists but no view ever renders those kinds;
+      decide whether a live update/verify state should be shown, or drop
+      the dead glyph.
+
     **C. Hygiene (any time, small)**
     - [ ] verify-stack section 8: its `rootonly/` fixture cannot be
       removed by a non-root caller; clean it through a container like
