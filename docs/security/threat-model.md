@@ -116,8 +116,10 @@ ADR that describes it:
   chunk it already knows the path for, and get it served — HIT from disk,
   or MISS via a live fetch from Steam's real CDN followed by
   `proxy_store`-ing the result (the `location @miss` block). There is no
-  `limit_req`/`limit_conn` request limiting anywhere in this config — its
-  absence was verified by reading the entire file, not assumed. What does
+  `limit_req`/`limit_conn` request limiting anywhere in the HTTP part of
+  this config — its absence was verified by reading the entire `http {}`
+  block, not assumed. (The port-443 passthrough below has connection caps;
+  they do not apply to port 80.) What does
   exist, optional and off by default, is an upstream bandwidth cap
   (`VAULT_UPSTREAM_RATE`, `proxy_limit_rate` in `location @miss`, WP
   TH-1a/ADR-0015): it slows how fast MISSes are read from Steam, it is
@@ -188,6 +190,76 @@ ADR that describes it:
   `X-SteamHangar-Hop` header is answered `508` by the same guard block, so
   a DNS loop ends after one hop instead of recursing (§5 covers what that
   header reveals upstream).
+- **Use port 443 as a TLS relay — to `*.steamcontent.com` only** (WP
+  CORE-FIX-3, ADR-0020). vault-core's `stream {}` block passes TLS
+  connections through, unterminated, so that HTTPS to a DNS-rewritten Steam
+  CDN name still works. A listener that copies bytes to a client-chosen
+  destination is an open proxy unless the destination is pinned, so the
+  whole guarantee is the SNI allowlist: one map
+  (`$ssl_preread_server_name` -> `$vault_tls_upstream`) whose only
+  non-empty result is the SNI itself, and only if it fully matches
+  `^(?=.{1,253}\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+steamcontent\.com\z` (case-insensitive). Every
+  other ClientHello maps to an empty target, which `proxy_pass` refuses
+  before any DNS query or connection. That covers another domain, the bare
+  apex, `evilsteamcontent.com`, `steamcontent.com.evil.example`, a trailing
+  dot, an empty label, `_`, `:`, NUL or newline bytes, a 64-character label,
+  `*.steamserver.net`, no SNI, and non-TLS bytes. Each of these is sent as a
+  raw ClientHello against a live listener in
+  `.github/scripts/tls-sni-probe.sh`, and judged by the logged target plus
+  the absence of any resolve/connect attempt, not by a status code. The map
+  is pinned to exactly its two entries by `check-config-drift.sh` and
+  re-checked at every boot by `40-vault-preflight.sh`, which refuses a
+  widened, loosened or extra entry (`.github/scripts/tls-preflight-tamper.cases`).
+  Both scripts also pin the whole `stream {}` block as an exact directive
+  list, so an added `set`, `resolver` or `proxy_protocol` fails too.
+  What remains, stated plainly:
+  - **SNI is not authenticated, and it selects a name, not an address.**
+    Any LAN device can send any `*.steamcontent.com` name and have
+    vault-core dial whatever address that name resolves to, from your WAN
+    address. vault-core can only dial addresses that names in Valve's zone
+    resolve to. That is not the same as "Valve's servers": Valve's names
+    CNAME out of the zone, e.g. `lancache.steamcontent.com` -> an
+    `akadns` name -> a `steamserver.net` host, so the set of reachable
+    addresses is whatever Valve's zone and its CNAME targets point at,
+    today and in the future. Whatever the client then asks that server
+    inside the TLS session is invisible to vault-core and uncontrolled:
+    the HTTP `Host`, a `Host` that differs from the SNI, domain fronting
+    against a CDN that serves several customers on one address. vault-core
+    never decrypts, holds no certificate and cannot impersonate anyone; the
+    client verifies the far end's certificate itself.
+  - **No runtime destination filter.** nginx resolves the name and
+    connects with no hook in between. If a name in Valve's own zone ever
+    resolved publicly to a private or loopback address, vault-core would
+    dial it. The boot preflight refuses a `VAULT_RESOLVER` that answers a
+    Steam CDN name with a private, loopback, link-local or CGNAT address,
+    or with one of the container's own addresses. A resolver that starts
+    rewriting AFTER boot loops connections back into the listener, and TLS
+    has no header for a 508-style hop guard. The loop is bounded by
+    `limit_conn`: 64 sessions per client address (a loop arrives from one
+    address) and 256 in total, so the HTTP cache keeps half of the 1024
+    worker connections. It is bounded, not prevented.
+  - **No volume limit.** Nothing on 443 is cached or rate-capped
+    (`VAULT_UPSTREAM_RATE` is HTTP only). A LAN device can push unlimited
+    HTTPS bytes to and from Valve through the cache, up to 64 parallel
+    sessions.
+  - **The total cap can be filled.** Four LAN addresses x 64 sessions fill
+    the 256 total, and idle sessions hold their slots for up to
+    `proxy_timeout` (5 minutes) after the last byte. Until then every other
+    client's passthrough connection is refused. The HTTP cache keeps its
+    own share of worker connections (the cap leaves 512 of 1024, of which
+    the upstream keepalive pool can hold at most 32 idle, ADR-0017), so
+    HITs and MISSes on port 80 keep being served.
+  - **Exposure:** 443 is published to the LAN only when the operator sets
+    `VAULT_TLS_BIND`. Unset, Docker binds it to a random port on
+    `127.0.0.1`, and `0.0.0.0` happens only if written explicitly
+    (`deploy/compose.yaml`; resolved per case by `verify-stack.sh` step
+    3q). Everything in "exposed to the internet" below applies to 443 as
+    much as to 80.
+  - **What it logs:** one line per connection with the client address, the
+    SNI, the target, the upstream address and byte counts, on vault-core's
+    stdout, so it is in `docker logs` under the same json-file rotation.
+    The SNI is the only content-related field; URLs and payloads are
+    encrypted and never seen.
 - **Reach vault-api if it can guess or capture the API key** — but not
   without one. Every router except health is constructed as
   `APIRouter(dependencies=[Depends(require_api_key)])`

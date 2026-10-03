@@ -108,3 +108,104 @@ Not in this exception: an upstream keepalive pool for vault-core (the root
 cause, since it removes the new connection per chunk). That is a separate
 decision for the user. Every other frozen-path change still needs its own
 user decision and note here.
+
+## Addendum 2026-10-02 — freeze exception: upstream keepalive pool (WP CORE-FEAT-1, CGNAT fix stage 2)
+
+User decision, 2026-10-02: roadmap item D1 (`docs/PROJECT_PLAN.md` §11
+item 13 D) is pulled ahead of `v0.1.0`. ADR-0017 is accepted with the
+answers 1A 2B 3A 4B 5A 6A (`docs/adr/0017-upstream-keepalive-pool.md`
+"Decisions (user, 2026-10-02)"): a static env list
+`VAULT_UPSTREAM_POOL_HOSTS` rendered fail-closed at container start, a
+shipped seed in `deploy/.env.example`, `keepalive 8` per edge with a
+ceiling of 32 idle connections in total, list changes by container
+recreate, the rate cap untouched plus a CI pin, and `error` restored in
+`proxy_next_upstream`. Release order: `v0.1.0-rc7` carries both
+CORE-FIX-3 (TLS SNI passthrough, ADR-0020, a parallel track on its own
+branch) and D1 (user decision 2026-10-03, reversing the earlier Weg B,
+which had D1 as `v0.1.0-rc8`), each switchable off independently
+(`VAULT_TLS_PASSTHROUGH=0`, empty `VAULT_UPSTREAM_POOL_HOSTS`). The core/ freeze opens for this one feature: stage 2
+of the CGNAT fix whose stage 1 is the addendum above.
+
+Why now: stage 1 bounds the burst but keeps the one-TCP-connection-per-chunk
+cost (ADR-0017 "Context"). The 2026-10-02 measurement (ADR-0017
+"Measurement") showed the Valve edge reuses a connection across requests
+and keeps an idle one for at least 60 s, so a pool removes the root cause
+rather than throttling around it.
+
+Scope of the exception, per package as ADR-0017 "Work package split"
+defines them, refined here:
+
+- **CORE-FEAT-1a** (docs, not frozen): this addendum, the status pointer
+  in ADR-0017, and the operator measurement page `deploy/README.md`
+  "Checking that a Steam edge keeps connections alive".
+- **CORE-FEAT-1b** (core/): the entrypoint hook
+  `core/docker/28-vault-upstream-pool.sh`, rendering
+  `vault-upstream-pool.conf` from `VAULT_UPSTREAM_POOL_HOSTS`: one
+  `upstream` group per listed edge with a shared `zone`,
+  `server <host> resolve max_fails=0`, `keepalive 8` and
+  `keepalive_timeout 50s` (below the measured idle time of at least 60 s,
+  so nginx closes first); validation against the two allowlist families,
+  the ceiling, and the fail-closed self-check. With it: the include line
+  in both `core/nginx/nginx.conf` and `core/docker/nginx.conf.template`,
+  the empty native file `core/nginx/vault-upstream-pool.conf` (same
+  contract as `vault-upstream-rate.conf`), the `core/Dockerfile` COPY and
+  build-time self-check, the `core/docker/check-config-drift.sh` pins,
+  and a docker-free hook test.
+- **CORE-FEAT-1b2** (core/ and CI): the renders and refusals in
+  `.github/scripts/verify-core-nginx.sh`; `error` restored in `@miss`'s
+  `proxy_next_upstream` next to `timeout http_502 http_503 http_504`
+  (decision 6A, `proxy_next_upstream_tries 2` kept, drift-guard step 2c
+  updated); the two fields `upstream_addr="..."` and
+  `upstream_connect_time=...` appended to `log_format vault`; the CI pin
+  that `proxy_limit_rate $vault_upstream_rate;` stays in `@miss`
+  (decision 5A).
+- **CORE-FEAT-1c** (deploy/ tests, not frozen): the verify-stack fake edge
+  with connection counting, test resolver, fallback, 508 and rate-cap
+  checks in `deploy/tests/verify-stack.sh`.
+- **CORE-FEAT-1d** (deploy/ and docs, not frozen): compose forwarding, the
+  `.env.example` stanza with the seed and the edge-finding one-liner,
+  `core/README.md` and `deploy/README.md` "Upstream keepalive pool",
+  `docs/PROJECT_PLAN.md` §11 item 13 D1 ticked.
+
+Not in this exception: port 443, any `stream` block, and TLS passthrough
+(that is CORE-FIX-3, ADR-0020, its own track and its own note); anything
+under api/, whose freeze stays as the stage-1 addendum left it. Every
+other frozen-path change still needs its own user decision and note here.
+
+## Addendum 2026-10-02 — freeze exception: HTTPS passthrough on port 443 (WP CORE-FIX-3)
+
+User decision, 2026-10-02: "HTTPS-Durchreichung, Weg A (im Produkt, rc7)".
+The HTTPS passthrough ships in the product, in rc7. The core/ freeze opens
+for this one feature.
+
+The trigger, from the production rollout: with the LAN DNS rewriting
+`*.steamcontent.com` to vault-core (the documented DNS mode), a prefill
+failed with `HttpRequestException ... while downloading manifests`.
+SteamPrefill fetches depot manifests over HTTPS from the CDN host. That
+host resolved to vault-core, which listened on port 80 only. The operator
+worked around it by removing the runner's DNS override. The product must
+still work when containers or clients use the rewriting resolver.
+
+Scope of the exception, all in WP CORE-FIX-3 (design: ADR-0020):
+
+- core/: a `stream {}` block in `core/nginx/nginx.conf` and
+  `core/docker/nginx.conf.template` (SNI passthrough on 443 with
+  `ssl_preread`, a `*.steamcontent.com` allowlist, no TLS termination);
+  the new hook `core/docker/26-vault-tls-passthrough.sh` (the
+  `VAULT_TLS_PASSTHROUGH` switch); a re-check of the rendered passthrough
+  and an own-address answer check in `40-vault-preflight.sh`; drift pins
+  in `check-config-drift.sh` (step 2e -- numbered 2d on its own branch,
+  renumbered when merged after CORE-FEAT-1's step 2d --, a seventh delta
+  kind, and the resolver delta now appearing twice); `core/Dockerfile` (hook, ENV
+  default, `EXPOSE 443`, build-time module check).
+- api/: tests only (`api/tests/test_core_fix_3_tls_passthrough.py`, one row
+  in `test_p1_compose_env_defaults.py`). No application code changes.
+- deploy/ and .github/ (not frozen, listed for completeness):
+  `VAULT_TLS_PASSTHROUGH`, `VAULT_TLS_BIND` and `VAULT_TLS_PORT` in
+  `deploy/compose.yaml` and `deploy/.env.example`, verify-stack steps 3q,
+  5j and 7i, and the CI gate's new TLS checks
+  (`.github/scripts/tls-sni-probe.sh`, `tls-preflight-tamper.cases`).
+
+The HTTP cache path on port 80 is unchanged; the drift check pins it.
+Every other frozen-path change still needs its own user decision and note
+here.

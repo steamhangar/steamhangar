@@ -26,7 +26,8 @@ G7  deploy/.env.example documents the default (api/.env.example's twin is in
     ``test_config.py``'s ENV_EXAMPLE_DEFAULT_PINS; the compose rows are in
     ``test_p1_compose_env_defaults.py``).
 
-The nginx half (no retry on ``error``, tries 2) is pinned by
+The nginx half (tries 2; ``error`` was dropped here and restored by WP
+CORE-FEAT-1b2 for the keepalive pool, ADR-0017 decision 6A) is pinned by
 ``core/docker/check-config-drift.sh`` step 2c, run by ``dev.sh test-core`` /
 CI's core job.
 """

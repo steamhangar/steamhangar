@@ -34,7 +34,9 @@ LABEL org.opencontainers.image.title="SteamHangar vault-core" \
 # this template in sync with core/nginx/nginx.conf.
 COPY docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
 COPY docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
+COPY docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
 COPY docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
+COPY docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
 COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
 
 # Shipped for auditability: the running image can prove its own config matches
@@ -43,9 +45,14 @@ COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
 # this is primarily a repo-side tool -- it is included so the check travels with
 # the artifact rather than only existing in a checkout).
 COPY docker/check-config-drift.sh /opt/vault/check-config-drift.sh
+# WP CORE-FEAT-1b (ADR-0017): the native (empty) pool include travels with the
+# image for the same reason -- the build-time check below proves the hook's
+# empty render is byte-identical to it, and a running image can re-prove it.
+# nginx never reads this copy; the hook renders /etc/nginx/vault-upstream-pool.conf.
+COPY nginx/vault-upstream-pool.conf /opt/vault/vault-upstream-pool.native.conf
 
 RUN set -eux; \
-    chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
+    chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
     # image honest about what it serves.
@@ -85,7 +92,44 @@ RUN set -eux; \
     [ "$(grep -c '^[[:space:]]*include vault-upstream-rate\.conf;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
     [ "$(grep -c '^[[:space:]]*proxy_limit_rate[[:space:]]*\$vault_upstream_rate;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
     VAULT_UPSTREAM_RATE= VAULT_UPSTREAM_RATE_WINDOW= sh /docker-entrypoint.d/27-vault-upstream-rate.sh /tmp/vault-upstream-rate.build-check.conf; \
-    rm -f /tmp/vault-upstream-rate.build-check.conf
+    rm -f /tmp/vault-upstream-rate.build-check.conf; \
+    # WP CORE-FIX-3: the HTTPS passthrough block is marked exactly once for
+    # 26-vault-tls-passthrough.sh, and this nginx build has the stream and
+    # ssl_preread modules compiled in statically (no load_module needed).
+    [ "$(grep -c -x '# VAULT_TLS_PASSTHROUGH_BEGIN' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
+    [ "$(grep -c -x '# VAULT_TLS_PASSTHROUGH_END' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
+    # (Separate commands, no `&&`/`!`: `set -e` ignores a failure inside an
+    # AND list and after `!`, which would let the build pass.)
+    nginx -V 2>&1 | grep -q -e '--with-stream '; \
+    nginx -V 2>&1 | grep -q -e '--with-stream_ssl_preread_module'; \
+    if nginx -V 2>&1 | grep -q -e '--with-stream=dynamic' -e '--with-stream_ssl_preread_module=dynamic'; then exit 1; fi; \
+    # WP CORE-FEAT-1b (ADR-0017): the keepalive pool include is wired in
+    # exactly once; the hook's empty render equals the shipped native file
+    # byte for byte; a full list (the ceiling, 4 edges) renders 4 groups with
+    # no resolver of their own; a 5th edge and a name outside the allowlist
+    # families are refused -- all in this image's own shell, so an image
+    # cannot be built with a broken hook.
+    [ "$(grep -c '^[[:space:]]*include vault-upstream-pool\.conf;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
+    pool_check=/tmp/vault-upstream-pool.build-check.conf; \
+    VAULT_UPSTREAM_POOL_HOSTS= sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
+    cmp "$pool_check" /opt/vault/vault-upstream-pool.native.conf; \
+    VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com cache3-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
+        sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
+    [ "$(grep -c '^upstream ' "$pool_check")" = "4" ]; \
+    # (an explicit if: `! grep` would not trip set -e, POSIX exempts `!` pipelines)
+    if grep -qw resolver "$pool_check"; then \
+        echo "BUILD CHECK FAILED: a resolver directive inside the pool include (ADR-0017 (c))" >&2; exit 1; \
+    fi; \
+    rm -f "$pool_check"; \
+    if VAULT_UPSTREAM_POOL_HOSTS='c1.steamcontent.com c2.steamcontent.com c3.steamcontent.com c4.steamcontent.com c5.steamcontent.com' \
+        sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" 2>/dev/null; then \
+        echo "BUILD CHECK FAILED: 28-vault-upstream-pool.sh accepted 5 edges (ceiling is 4, ADR-0017 decision 3A)" >&2; exit 1; \
+    fi; \
+    if VAULT_UPSTREAM_POOL_HOSTS='cache1.example.com' \
+        sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" 2>/dev/null; then \
+        echo "BUILD CHECK FAILED: 28-vault-upstream-pool.sh accepted a host outside the allowlist families" >&2; exit 1; \
+    fi; \
+    [ ! -e "$pool_check" ]
 
 # Declared so that a plain `docker run` without -v cannot silently fill the
 # container's writable layer with depot chunks, and so that the default is one
@@ -142,12 +186,26 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     VAULT_UPSTREAM_RATE= \
     # HH:MM-HH:MM (VAULT_SCHEDULE_WINDOW's grammar): full speed inside, the
     # cap outside, in the container's local time (TZ). Empty = cap always.
-    VAULT_UPSTREAM_RATE_WINDOW=
+    VAULT_UPSTREAM_RATE_WINDOW= \
+    # WP CORE-FEAT-1b (ADR-0017): space-separated Steam CDN edge host names
+    # that get a keepalive pool (at most 4). DEFAULT EMPTY = no pool; the
+    # hook /docker-entrypoint.d/28-vault-upstream-pool.sh treats unset and
+    # empty alike (core/README.md "Upstream keepalive pool").
+    VAULT_UPSTREAM_POOL_HOSTS= \
+    # WP CORE-FIX-3 (ADR-0020): HTTPS passthrough on port 443 for
+    # *.steamcontent.com SNI names, TLS not terminated. DEFAULT ON (1);
+    # 0/false/off/no removes the stream block at start
+    # (/docker-entrypoint.d/26-vault-tls-passthrough.sh). Whether the port
+    # is reachable from the LAN is decided by the publish line in
+    # deploy/compose.yaml (VAULT_TLS_BIND), not here.
+    VAULT_TLS_PASSTHROUGH=1
 
 WORKDIR /vault
 
-# Steam CDN traffic is plain HTTP (docs/PROJECT_PLAN.md §10). No TLS here, ever.
-EXPOSE 80
+# Steam CDN traffic is plain HTTP (docs/PROJECT_PLAN.md §10); no TLS is ever
+# terminated here. 443 is the HTTPS passthrough (WP CORE-FIX-3, ADR-0020): TLS
+# bytes for *.steamcontent.com are copied to Valve unchanged, no certificate.
+EXPOSE 80 443
 
 # /health is a local, non-proxying location (see the config): it needs no Host
 # allowlist entry and never touches the network, so it is a true liveness probe

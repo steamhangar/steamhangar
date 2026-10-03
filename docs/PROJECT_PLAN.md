@@ -2767,6 +2767,29 @@ below carry their own later dates, item 12 is the current one).
       building: measure on production with a handful of requests whether
       Valve edges keep connections alive. Benefits Steam clients too,
       which also download through vault-core.
+      **Pulled ahead of `v0.1.0` by user decision 2026-10-02.** ADR-0017
+      accepted 2026-10-02 with decisions 1A 2B 3A 4B 5A 6A (static env
+      list `VAULT_UPSTREAM_POOL_HOSTS`, shipped seed in `.env.example`,
+      `keepalive 8` per edge with a ceiling of 32 idle = at most 4 edges,
+      list changes by container recreate, rate cap untouched plus a CI
+      pin, `error` restored in `proxy_next_upstream`). Measurement done
+      on the operator's DS-Lite line (ADR-0017 "Measurement"): the edge
+      keeps connections alive and holds an idle one for at least 60 s.
+      Ships in `v0.1.0-rc7` together with CORE-FIX-3 (user decision
+      2026-10-03, reversing the earlier Weg B), each switchable off
+      independently; freeze exception in ADR-0016. Packages:
+      - [x] CORE-FEAT-1a — docs: freeze exception, operator measurement
+        page (87b0789).
+      - [x] CORE-FEAT-1b — core: hook `28-vault-upstream-pool.sh`, include
+        line, native empty render, drift pins, hook test (c414deb).
+      - [x] CORE-FEAT-1b2 — core/CI: renders and refusals in
+        `verify-core-nginx.sh`, `error` back in `proxy_next_upstream`,
+        upstream log fields, rate-cap pin.
+      - [x] CORE-FEAT-1c — deploy tests: verify-stack fake edge with
+        connection counting, test resolver, fallback, 508 and rate cap.
+      - [x] CORE-FEAT-1d — deploy and docs: compose forwarding,
+        `.env.example` seed, `deploy/README.md` "Upstream keepalive
+        pool", this entry.
     - [ ] **D2 AUTH-FEAT-1 — Steam login by QR code from the web UI.**
       A small own helper on SteamKit2 (`BeginAuthSessionViaQRAsync`)
       runs in the runner container, emits only the rotating challenge
@@ -2795,6 +2818,8 @@ below carry their own later dates, item 12 is the current one).
       (Phase 6, already listed there).
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
-    start on their own branches now; code for D1-D3 waits for `v0.1.0`
-    (the freeze holds until then, and every merge to `main` before the
-    final tag would ride into the release).
+    start on their own branches now. D1 was pulled ahead of `v0.1.0` by
+    user decision on 2026-10-02 (ADR-0016 addendum, ships in
+    `v0.1.0-rc7` with CORE-FIX-3 per the 2026-10-03 decision); code for D2 and D3 still waits for `v0.1.0` (the freeze
+    holds for them until then, and every merge to `main` before the final
+    tag would ride into the release).

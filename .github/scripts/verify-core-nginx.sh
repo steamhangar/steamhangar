@@ -18,11 +18,11 @@
 # detail). The reviewer correctly pushed back: that also means round 1 never
 # exercised the REAL render wiring (NGINX_ENVSUBST_FILTER and friends) at
 # all -- it only ever tested this script's own idea of what that wiring
-# does. This version mounts the template + our two owned hook scripts into
+# does. This version mounts the template + our five owned hook scripts into
 # their REAL container paths, sets the exact ENV vars core/Dockerfile sets,
 # and lets the image's OWN stock /docker-entrypoint.sh run every hook in
-# /docker-entrypoint.d/ (the two stock ones this repo doesn't own, plus our
-# 25- and 40-) in the same sorted order the real container uses, before
+# /docker-entrypoint.d/ (the stock ones this repo doesn't own, plus our
+# 25-, 26-, 27-, 28- and 40-) in the same sorted order the real container uses, before
 # `nginx -t` runs. The only deviation from "just run the image normally" is
 # mechanical: --entrypoint is overridden to `sh` for one setup step (copying
 # the two hook scripts into a real, non-bind-mounted, chmod-able location --
@@ -50,8 +50,14 @@ dockerfile="$core_dir/Dockerfile"
 for f in "$dockerfile" \
          "$core_dir/docker/nginx.conf.template" \
          "$core_dir/docker/25-vault-eventlog.sh" \
+         "$core_dir/docker/26-vault-tls-passthrough.sh" \
          "$core_dir/docker/27-vault-upstream-rate.sh" \
+         "$script_dir/tls-sni-probe.sh" \
+         "$script_dir/tls-preflight-tamper.cases" \
          "$core_dir/nginx/vault-upstream-rate.conf" \
+         "$core_dir/docker/28-vault-upstream-pool.sh" \
+         "$core_dir/nginx/vault-upstream-pool.conf" \
+         "$core_dir/tests/test-upstream-pool-hook.sh" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/check-config-drift.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
@@ -64,6 +70,35 @@ done
 # rendered config that already failed this much narrower, much faster check.
 echo "--- core/docker/check-config-drift.sh ---"
 sh "$core_dir/docker/check-config-drift.sh"
+
+# --- 0b. the upstream keepalive pool hook, docker-free (WP CORE-FEAT-1b) ---
+# ADR-0017: renders VAULT_UPSTREAM_POOL_HOSTS lists through the real
+# 28-vault-upstream-pool.sh (under `sh`, as the container runs it) into a
+# temp dir and asserts the group shape and every refusal rule. Still no
+# Docker; `nginx -t` on a rendered pool include in the pinned image is WP
+# CORE-FEAT-1b2's job in the docker-based steps below.
+echo "--- core/tests/test-upstream-pool-hook.sh ---"
+bash "$core_dir/tests/test-upstream-pool-hook.sh"
+
+# --- 0c. ADR-0017 decision 5A: the upstream rate cap stays in @miss --------
+# The keepalive pool (WP CORE-FEAT-1b) ships with the cap untouched, and the
+# ADR asks for a CI assertion that `proxy_limit_rate $vault_upstream_rate;`
+# is still inside location @miss in BOTH config files. The drift guard
+# (step 0, 2b) pins the same line and 2d pins the pool include's place
+# directly after the rate include -- neither is repeated here beyond this
+# one named assertion, docker-free, so a moved cap fails under the ADR's
+# own name.
+echo "--- ADR-0017 decision 5A: proxy_limit_rate \$vault_upstream_rate stays in @miss ---"
+for f in "$core_dir/nginx/nginx.conf" "$core_dir/docker/nginx.conf.template"; do
+    n=$(grep -v '^[[:space:]]*#' "$f" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]][[:space:]]*/ /g' \
+        | awk '/^location @miss [{]$/ { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }' \
+        | grep -c -x -F "proxy_limit_rate \$vault_upstream_rate;" || true)
+    if [ "$n" != "1" ]; then
+        echo "FAIL (ADR-0017 decision 5A): 'proxy_limit_rate \$vault_upstream_rate;' found $n times inside location @miss of $f, expected exactly 1" >&2
+        exit 1
+    fi
+    echo "decision 5A OK: proxy_limit_rate \$vault_upstream_rate; exactly once in @miss of ${f#"$repo_root"/}"
+done
 
 # --- S2: derive the pinned image ref from core/Dockerfile itself -----------
 # Round 1 duplicated the tag+digest as a literal in this script -- a bump to
@@ -101,7 +136,26 @@ done
 echo "docker pull $IMAGE"
 docker pull "$IMAGE"
 
-# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window]
+# --- WP CORE-FIX-3: the stream modules are compiled in, statically ----------
+# The HTTPS passthrough needs ngx_stream_module and
+# ngx_stream_ssl_preread_module. Both must be STATIC in the pinned image
+# (no load_module line in the config); a base-image bump that drops them or
+# turns them into dynamic modules fails here, before any render.
+echo "--- nginx -V: stream + ssl_preread compiled in statically ---"
+nginx_v=$(docker run --rm --network none --entrypoint nginx "$IMAGE" -V 2>&1)
+printf '%s\n' "$nginx_v" | head -n 1
+for want in "--with-stream " "--with-stream_ssl_preread_module"; do
+    case "$nginx_v" in
+        *"$want"*) echo "module OK: $want" ;;
+        *) echo "FAIL: '$want' missing from nginx -V of $IMAGE" >&2; exit 1 ;;
+    esac
+done
+case "$nginx_v" in
+    *"--with-stream=dynamic"*|*"--with-stream_ssl_preread_module=dynamic"*)
+        echo "FAIL: the stream modules are dynamic in $IMAGE; the config has no load_module" >&2; exit 1 ;;
+esac
+
+# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window] [VAULT_TLS_PASSTHROUGH, "" = unset] [VAULT_UPSTREAM_POOL_HOSTS]
 #
 # A non-empty 4th argument additionally STARTS the rendered nginx and probes
 # the location /depot/ request guards over loopback (once is enough; the
@@ -120,18 +174,41 @@ docker pull "$IMAGE"
 # "window" (800k outside 22:30-06:15, a window that wraps midnight and has
 # minute boundaries on both edges). The bucket/window assertions below are
 # written for exactly those two inputs.
+#
+# Arg 8 (WP CORE-FIX-3): VAULT_TLS_PASSTHROUGH for this run; empty = not set
+# at all (the hook's default, on). On: the stream block is asserted in the
+# rendered config and, with probe-guards, .github/scripts/tls-sni-probe.sh
+# sends raw ClientHellos at the live listener. Off: no stream trace may be
+# rendered and, with probe-guards, nothing may answer on 443.
+#
+# Arg 9 (WP CORE-FEAT-1b2, ADR-0017): the upstream keepalive pool list,
+# passed as VAULT_UPSTREAM_POOL_HOSTS the way args 5/6 pass the rate env.
+# Every scenario asserts the rendered pool include against the number of
+# hosts in that list (0 for the scenarios that do not set it: the empty
+# render, still included). A non-empty list runs with --network none, see
+# the pool block inside the container script.
 render_and_test() {
     local label="$1" event_log="$2" expected_directives="$3"
-    local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}"
+    local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}" tls="${8:-}" tls_mode=on
+    local pool="${9:-}" pool_n
+    local -a tls_args=()
+    [ -n "$tls" ] && tls_args=(-e VAULT_TLS_PASSTHROUGH="$tls")
+    case "$tls" in 0|false|off|no) tls_mode=off ;; esac
+    pool_n=$(printf '%s' "$pool" | wc -w | tr -d ' ')
     # SEC-FIX-1: the guard-probe run gets no network at all. Its Host-allowlist
     # probes count any resolver or upstream attempt as a failure, and without
     # a network such an attempt can only show up locally (error log, access
     # log), never as a real DNS query or connection from the CI runner.
+    # The pool scenarios run without a network too: `server <host> resolve`
+    # is registered with no_resolve set, so `nginx -t` must parse a group
+    # without looking its name up (ADR-0017 (d)); a network here would hide
+    # a regression of that property.
     local -a net_args=()
-    [ -n "${4:-}" ] && net_args=(--network none)
-    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window') ---"
-    docker run --rm "${net_args[@]}" \
+    { [ -n "${4:-}" ] || [ -n "$pool" ]; } && net_args=(--network none)
+    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window', VAULT_TLS_PASSTHROUGH='${tls:-<unset>}', VAULT_UPSTREAM_POOL_HOSTS='$pool') ---"
+    docker run --rm "${net_args[@]}" "${tls_args[@]}" \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
+        -v "$script_dir:/workspace/ci:ro" \
         -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
         -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
         -e NGINX_ENVSUBST_FILTER='^VAULT_' \
@@ -142,6 +219,9 @@ render_and_test() {
         -e VAULT_UPSTREAM_RATE="$rate" \
         -e VAULT_UPSTREAM_RATE_WINDOW="$window" \
         -e RATE_MODE="$rate_mode" \
+        -e TLS_MODE="$tls_mode" \
+        -e VAULT_UPSTREAM_POOL_HOSTS="$pool" \
+        -e EXPECTED_POOL_GROUPS="$pool_n" \
         --entrypoint sh \
         "$IMAGE" -c '
             set -eu
@@ -150,19 +230,21 @@ render_and_test() {
             mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
             chown -R nginx:nginx /vault
 
-            # Place the template + our two owned hooks at their REAL
+            # Place the template + our five owned hooks at their REAL
             # container paths. Copied (not bind-mounted) specifically so
             # they land as regular files in this container'"'"'s own
             # writable layer -- a read-only bind mount cannot be chmod'"'"'d,
-            # and the two hooks need +x for the stock entrypoint to run
+            # and the hooks need +x for the stock entrypoint to run
             # them at all (matching core/Dockerfile'"'"'s own
-            # `chmod 0755 /docker-entrypoint.d/25-... /docker-entrypoint.d/40-...`
+            # `chmod 0755 /docker-entrypoint.d/25-... ... /docker-entrypoint.d/40-...`
             # RUN step, reproduced here instead of via a build).
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
+            cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
+            cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh
 
             # The REAL stock entrypoint: runs every /docker-entrypoint.d/*.sh
             # hook in sorted order (stock 10-/15-/20-envsubst, our 25-, stock
@@ -324,6 +406,72 @@ render_and_test() {
                     *) echo "FAIL: unknown RATE_MODE $RATE_MODE"; status=1 ;;
                 esac
                 echo "upstream rate include ($RATE_MODE): $buckets bucket line(s), $patterns time pattern(s)"
+            fi
+
+            # --- WP CORE-FIX-3: the HTTPS passthrough, structurally -------
+            # Counted on the RENDERED directives (comments stripped), for
+            # the mode 26-vault-tls-passthrough.sh was asked for.
+            directives=$(grep -v "^[[:space:]]*#" "$conf" | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]][[:space:]]*/ /g")
+            tls_n() { printf "%s\n" "$directives" | grep -c -x -F -- "$1" || true; }
+            if [ "$TLS_MODE" = "on" ]; then
+                for want in "stream {" "listen 443;" "ssl_preread on;" "proxy_next_upstream off;" \
+                            "proxy_pass \$vault_tls_upstream;" "access_log /dev/stdout vault_tls;"; do
+                    [ "$(tls_n "$want")" = "1" ] || { echo "FAIL (tls on): expected exactly 1 \"$want\" in the rendered $conf, found $(tls_n "$want")"; status=1; }
+                done
+                [ "$(tls_n "resolver 1.1.1.1 ipv6=off valid=30s;")" = "2" ] || { echo "FAIL (tls on): the stream block does not use VAULT_RESOLVER (expected 2 rendered resolver lines)"; status=1; }
+            else
+                n=$(printf "%s\n" "$directives" | grep -c -E "^(stream [{]|ssl_preread |listen ([^;]*:)?443[ ;])|vault_tls" || true)
+                [ "$n" = "0" ] || { echo "FAIL (tls off): $n stream/443/vault_tls directive(s) survived in the rendered $conf"; status=1; }
+                [ "$(tls_n "resolver 1.1.1.1 ipv6=off valid=30s;")" = "1" ] || { echo "FAIL (tls off): expected exactly the http resolver line"; status=1; }
+                [ "$(tls_n "listen 80;")" = "1" ] || { echo "FAIL (tls off): the HTTP listener is gone"; status=1; }
+            fi
+            echo "tls passthrough ($TLS_MODE): rendered as requested"
+
+            # --- WP CORE-FEAT-1b2 (ADR-0017): the upstream keepalive pool --
+            # The include is wired in the RENDERED config (its place directly
+            # after the rate include is pinned in both source files by the
+            # drift guard, step 2d -- not repeated here), and
+            # 28-vault-upstream-pool.sh rendered the group file for this
+            # scenario'"'"'s VAULT_UPSTREAM_POOL_HOSTS: N upstream blocks, N
+            # `server <host> resolve max_fails=0;`, N `keepalive 8;`, N
+            # `keepalive_timeout 50s;`, N zone lines of which exactly one
+            # carries the size (none for N = 0), and no resolver directive
+            # (the groups inherit the http-level one). nginx -t has already
+            # accepted this file via the include -- and did so with
+            # --network none for N > 0, because `server ... resolve` sets
+            # no_resolve at parse time (ADR-0017 (d)): the names are only
+            # ever looked up at run time through the http-level resolver.
+            # The rendered file is printed so the gate log shows the groups.
+            n=$(grep -v "^[[:space:]]*#" "$conf" | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]][[:space:]]*/ /g" | grep -c -x -F "include vault-upstream-pool.conf;" || true)
+            if [ "$n" != "1" ]; then
+                echo "FAIL: expected exactly 1 \"include vault-upstream-pool.conf;\" in the rendered $conf, found $n"
+                status=1
+            fi
+            pc=/etc/nginx/vault-upstream-pool.conf
+            if [ ! -f "$pc" ]; then
+                echo "FAIL: $pc was never rendered"
+                status=1
+            else
+                echo "--- rendered $pc (VAULT_UPSTREAM_POOL_HOSTS='"'"'$VAULT_UPSTREAM_POOL_HOSTS'"'"') ---"
+                cat "$pc"
+                pool_expect() {
+                    c=$(grep -c -- "$2" "$pc" || true)
+                    if [ "$c" != "$1" ]; then echo "FAIL (pool): expected $1 $3 line(s) in $pc, found $c"; status=1; fi
+                }
+                pool_expect "$EXPECTED_POOL_GROUPS" "^upstream [a-z0-9.-]* {\$"                      "upstream block"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    server [a-z0-9.-]* resolve max_fails=0;\$" "server <host> resolve max_fails=0;"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    keepalive 8;\$"                            "keepalive 8;"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    keepalive_timeout 50s;\$"                  "keepalive_timeout 50s;"
+                pool_expect "$EXPECTED_POOL_GROUPS" "^    zone vault_edges"                          "zone vault_edges"
+                if [ "$EXPECTED_POOL_GROUPS" = "0" ]; then sized=0; else sized=1; fi
+                pool_expect "$sized" "^    zone vault_edges 256k;\$" "sized zone (the shared zone is sized exactly once)"
+                # Anchored to the directive, not the bare word, so a future
+                # header comment in the render cannot trip it (LEARNINGS).
+                if grep -q "^[[:space:]]*resolver[[:space:]]" "$pc"; then
+                    echo "FAIL (pool): a resolver directive inside $pc -- groups must inherit the http-level one (ADR-0017 (c))"
+                    status=1
+                fi
+                echo "upstream pool include: $(grep -c "^upstream " "$pc" || true) group(s), expected $EXPECTED_POOL_GROUPS"
             fi
 
             # --- Pre-freeze review S1/S2/P3/N5: request guards, LIVE -------
@@ -510,6 +658,25 @@ render_and_test() {
                 map_probe X-Probe-Host "x.steamcontent.com.evil.example.com"  "0|"
                 mapprobe_stop
 
+                # --- WP CORE-FIX-3: the passthrough, LIVE (offline) -------
+                # On: raw ClientHellos with hostile SNI values against the
+                # running listener (see tls-sni-probe.sh for the verdict
+                # rules). Off: nothing may accept a connection on 443.
+                # Listening sockets on port 443 (0x01BB), from the kernel:
+                # /proc/net/tcp state 0A = LISTEN. No client tool involved.
+                l443=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk "\$2 ~ /:01BB\$/ && \$4 == \"0A\"" | wc -l)
+                if [ "$TLS_MODE" = "on" ]; then
+                    if [ "$l443" -ge 1 ]; then echo "tls on: nginx listens on 443"; else echo "FAIL (tls on): nothing listens on 443"; status=1; fi
+                    sh /workspace/ci/tls-sni-probe.sh /tmp/probe-access.log /tmp/probe-error.log || status=1
+                else
+                    if [ "$l443" = "0" ]; then
+                        echo "tls off OK: nothing listens on 443"
+                    else
+                        echo "FAIL (tls off): $l443 listening socket(s) on port 443"
+                        status=1
+                    fi
+                fi
+
                 nginx -p /vault -c "$conf" -s quit || true
             fi
             exit $status
@@ -552,9 +719,11 @@ render_must_fail() {
             fi
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
+            cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
+            cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/40-vault-preflight.sh
             /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf
         ' 2>&1) || rc=$?
     if [ "$rc" = "0" ]; then
@@ -572,6 +741,9 @@ render_must_fail() {
 
 render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guards
 render_and_test "cache-event log ON" "/vault/logs/event.log" 2
+# WP CORE-FIX-3: the passthrough switched off, live (the runs above use the
+# default, on).
+render_and_test "HTTPS passthrough OFF" "" 0 probe-guards "" "" off 0
 
 # WP TH-1a: the three upstream-cap render shapes (cap off is the two runs
 # above), each through the real entrypoint chain and nginx -t.
@@ -643,7 +815,7 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 40-vault-preflight.sh; do
+        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -690,7 +862,7 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 27-vault-upstream-rate.sh 40-vault-preflight.sh; do
+        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -781,6 +953,292 @@ docker run --rm \
         exit $status
     '
 
+# --- WP CORE-FIX-3: VAULT_TLS_PASSTHROUGH grammar ------------------------------
+# Every accepted spelling must render the requested mode through the real
+# entrypoint chain and nginx -t; everything else must stop the boot in
+# 26-vault-tls-passthrough.sh itself. Cases are "value|expect".
+echo "--- VAULT_TLS_PASSTHROUGH: accepted spellings and refusals ---"
+tls_cases='1|on
+true|on
+on|on
+yes|on
+|on
+0|off
+false|off
+off|off
+no|off
+2|refuse
+On|refuse
+TRUE|refuse
+ 1|refuse
+0 |refuse
+enabled|refuse
+1;listen 8443|refuse'
+docker run --rm --network none \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    -e VAULT_EVENT_LOG="" \
+    -e TLS_CASES="$tls_cases" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+        chown -R nginx:nginx /vault
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+            cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+            chmod 0755 "/docker-entrypoint.d/$h"
+        done
+        status=0
+        n=0
+        printf "%s\n" "$TLS_CASES" > /tmp/cases
+        while IFS= read -r case_line; do
+            v=${case_line%|*}; want=${case_line##*|}
+            n=$((n + 1))
+            rc=0
+            out=$(VAULT_TLS_PASSTHROUGH="$v" /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf 2>&1) || rc=$?
+            streams=$(grep -v "^[[:space:]]*#" /etc/nginx/nginx.conf | grep -c "^[[:space:]]*stream[[:space:]]*{" || true)
+            case "$want" in
+                on|off)
+                    exp=1; [ "$want" = "off" ] && exp=0
+                    if [ "$rc" = "0" ] && [ "$streams" = "$exp" ]; then
+                        echo "tls switch OK: \"$v\" -> $want"
+                    else
+                        printf "%s\n" "$out" | tail -n 5
+                        echo "FAIL: VAULT_TLS_PASSTHROUGH=\"$v\": exit $rc, $streams stream block(s), expected exit 0 and $exp"
+                        status=1
+                    fi ;;
+                refuse)
+                    if [ "$rc" != "0" ] && printf "%s\n" "$out" | grep -qF "26-vault-tls-passthrough.sh: FATAL"; then
+                        echo "tls switch OK: \"$v\" refused (exit $rc)"
+                    else
+                        printf "%s\n" "$out" | tail -n 5
+                        echo "FAIL: VAULT_TLS_PASSTHROUGH=\"$v\" was not refused by 26-vault-tls-passthrough.sh (exit $rc)"
+                        status=1
+                    fi ;;
+            esac
+        done < /tmp/cases
+        [ "$n" = "16" ] || { echo "FAIL: ran $n VAULT_TLS_PASSTHROUGH cases, expected 16"; status=1; }
+        exit $status
+    '
+
+# --- WP CORE-FIX-3: 40-vault-preflight.sh re-checks the passthrough ----------
+# Render with the passthrough ON through the real chain, then run the
+# preflight against a switch that disagrees and against tampered copies of
+# the rendered config. Each must hit the preflight's own FATAL with its own
+# message: these are the states 26-vault-tls-passthrough.sh exists to
+# prevent (a widened or missing allowlist, a block left behind although
+# switched off, retries, terminated TLS), and the preflight is the second
+# look. The sed edits live in a file so no shell quoting stands between
+# them and the config.
+echo "--- must refuse: 40-vault-preflight.sh against a mismatched / tampered passthrough ---"
+docker run --rm --network none \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -v "$script_dir:/workspace/ci:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    -e VAULT_EVENT_LOG="" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+        chown -R nginx:nginx /vault
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+            cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+            chmod 0755 "/docker-entrypoint.d/$h"
+        done
+        VAULT_TLS_PASSTHROUGH=1 /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf >/dev/null 2>&1
+        cp /etc/nginx/nginx.conf /tmp/rendered-on.conf
+        status=0
+        # The untampered render must pass, or every refusal below could be
+        # for the wrong reason.
+        if out=$(VAULT_TLS_PASSTHROUGH=1 sh /docker-entrypoint.d/40-vault-preflight.sh 2>&1); then
+            echo "preflight OK on the untampered render: $(printf "%s\n" "$out" | grep -F "HTTPS passthrough" | head -n1)"
+        else
+            printf "%s\n" "$out"; echo "FAIL: the preflight refuses the untampered passthrough render"; status=1
+        fi
+        n=0
+        while IFS="|" read -r what switch want edit; do
+            n=$((n + 1))
+            cp /tmp/rendered-on.conf /etc/nginx/nginx.conf
+            if [ -n "$edit" ]; then
+                printf "%s\n" "$edit" > /tmp/edit.sed
+                sed -i -f /tmp/edit.sed /etc/nginx/nginx.conf
+                if cmp -s /tmp/rendered-on.conf /etc/nginx/nginx.conf; then
+                    echo "FAIL: ($what) the tamper edit did not change the config -- the case tests nothing"
+                    status=1
+                    continue
+                fi
+            fi
+            rc=0
+            out=$(VAULT_TLS_PASSTHROUGH="$switch" sh /docker-entrypoint.d/40-vault-preflight.sh 2>&1) || rc=$?
+            if [ "$rc" != "0" ] && printf "%s\n" "$out" | grep -F "40-vault-preflight.sh: FATAL" | grep -qF -- "$want"; then
+                echo "refused as expected ($what): $(printf "%s\n" "$out" | grep -F FATAL | head -n1 | cut -c1-110)"
+            else
+                printf "%s\n" "$out" | tail -n 8
+                echo "FAIL: 40-vault-preflight.sh did not refuse ($what) with \"$want\", exit $rc"
+                status=1
+            fi
+        done < /workspace/ci/tls-preflight-tamper.cases
+        [ "$n" = "10" ] || { echo "FAIL: ran $n tamper cases, expected 10"; status=1; }
+        exit $status
+    '
+
+# --- WP CORE-FIX-3 (review S3): the loop probe's own-address branch ----------
+# 40-vault-preflight.sh refuses a resolver answer that equals one of the
+# container's own interface addresses even when it is PUBLIC (network_mode:
+# host on a public IP), which the private-range check cannot see. Offline,
+# nslookup and ip are replaced by PATH stubs: the resolver "answers"
+# 203.0.113.7 (a public documentation address). With the container "owning"
+# that address the preflight must stop with the own-address FATAL; owning a
+# different one, it must pass. The stub leaves a marker so a probe that
+# never ran cannot pass for the wrong reason.
+echo "--- must refuse: a resolver answer equal to the container's own (public) address ---"
+docker run --rm --network none \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="192.0.2.53" \
+    -e VAULT_EVENT_LOG="" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp /tmp/stub
+        chown -R nginx:nginx /vault
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+            cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+            chmod 0755 "/docker-entrypoint.d/$h"
+        done
+        rm /docker-entrypoint.d/40-vault-preflight.sh
+        /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf >/dev/null 2>&1
+        printf "%s\n" "#!/bin/sh" \
+            "touch /tmp/stub/nslookup.used" \
+            "printf \"Server:\\t\\t%s\\nAddress:\\t%s:53\\n\\nNon-authoritative answer:\\nName:\\t%s\\nAddress: 203.0.113.7\\n\" \"\$3\" \"\$3\" \"\$2\"" \
+            > /tmp/stub/nslookup
+        printf "%s\n" "#!/bin/sh" \
+            "echo \"1: lo    inet 127.0.0.1/8 scope host lo\"" \
+            "echo \"2: eth0    inet \$STUB_OWN/24 brd 203.0.113.255 scope global eth0\"" \
+            > /tmp/stub/ip
+        chmod 0755 /tmp/stub/nslookup /tmp/stub/ip
+        status=0
+        for own in 203.0.113.7 198.51.100.9; do
+            rm -f /tmp/stub/nslookup.used
+            rc=0
+            out=$(STUB_OWN=$own PATH="/tmp/stub:$PATH" sh /workspace/core-docker/40-vault-preflight.sh 2>&1) || rc=$?
+            if [ ! -f /tmp/stub/nslookup.used ]; then
+                printf "%s\n" "$out" | tail -n 5
+                echo "FAIL: own=$own: the nslookup stub was never called -- this case tests nothing"; status=1; continue
+            fi
+            if [ "$own" = "203.0.113.7" ]; then
+                if [ "$rc" != "0" ] && printf "%s\n" "$out" | grep -F "40-vault-preflight.sh: FATAL" | grep -qF "which is one of"; then
+                    echo "refused as expected (answer = own address $own): $(printf "%s\n" "$out" | grep -F FATAL | head -n1 | cut -c1-110)"
+                else
+                    printf "%s\n" "$out" | tail -n 8
+                    echo "FAIL: own address $own answered by the resolver was not refused (exit $rc)"; status=1
+                fi
+            else
+                if [ "$rc" = "0" ] && printf "%s\n" "$out" | grep -qF "resolver loop probe OK"; then
+                    echo "control OK (own address $own, answer 203.0.113.7): $(printf "%s\n" "$out" | grep -F "loop probe OK" | cut -c1-110)"
+                else
+                    printf "%s\n" "$out" | tail -n 8
+                    echo "FAIL: control case (own $own) did not pass the preflight (exit $rc)"; status=1
+                fi
+            fi
+        done
+        exit $status
+    '
+
+# =============================================================================
+# WP CORE-FEAT-1b2: upstream keepalive pool renders and refusals (ADR-0017)
+#
+# Step 0b proved the hook's renders and refusals docker-free. This section
+# proves that nginx itself, the pinned image, ACCEPTS a rendered pool
+# include through the real entrypoint chain (`server <host> resolve
+# max_fails=0` inside a shared `zone`, `keepalive`, `keepalive_timeout`),
+# for 1 host and for the 4-host ceiling, and that the refusals stop the
+# real boot with the hook's FATAL. All runs are --network none: a
+# `server ... resolve` entry is parsed with no_resolve (ADR-0017 (d)), so
+# `nginx -t` on a pooled group needs no DNS and no network; the 4-host
+# scenario also carries the rate cap (decision 5A: the cap and the pool
+# render into the same config). The per-scenario assertions on the rendered
+# include live inside render_and_test (the pool block) and run for every
+# scenario above as well, where they pin the empty render.
+# =============================================================================
+
+# Docker-free first: core/Dockerfile declares the variable in its ENV block
+# next to VAULT_UPSTREAM_RATE (the hook treats unset and empty alike, so
+# this is symmetry and documentation, pinned so it cannot drift away).
+grep -qE '^[[:space:]]*VAULT_UPSTREAM_POOL_HOSTS=' "$dockerfile" || {
+    echo "core/Dockerfile no longer declares VAULT_UPSTREAM_POOL_HOSTS= in its ENV block (WP CORE-FEAT-1b2)" >&2
+    exit 1
+}
+
+render_and_test "upstream keepalive pool, 1 edge" "" 0 "" "" "" off "" \
+    "cache1-fra2.steamcontent.com"
+render_and_test "upstream keepalive pool, 4 edges (the ceiling), with the cap ON" "" 0 "" "800k" "" cap "" \
+    "cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com dist-fra1.discovery.steamserver.net cache1-ams1.steamcontent.com"
+
+# Each bad list must abort the REAL entrypoint chain, and the abort must come
+# from 28-vault-upstream-pool.sh itself (a failure anywhere else would pass
+# for the wrong reason). One container, one entrypoint run per case, like
+# the TH-1a rate cases; --network none, a refused boot needs none either.
+# Cases: 5 hosts (above the 32-idle ceiling), a host outside the two
+# allowlist families, a port, uppercase, a duplicate.
+echo "--- must refuse: invalid VAULT_UPSTREAM_POOL_HOSTS ---"
+pool_cases='cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com cache3-fra2.steamcontent.com cache4-fra2.steamcontent.com dist-fra1.discovery.steamserver.net
+cache1.example.com
+cache1-fra2.steamcontent.com:80
+Cache1-fra2.steamcontent.com
+cache1-fra2.steamcontent.com cache1-fra2.steamcontent.com'
+docker run --rm --network none \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    -e VAULT_EVENT_LOG="" \
+    -e POOL_CASES="$pool_cases" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+        chown -R nginx:nginx /vault
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+            cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+            chmod 0755 "/docker-entrypoint.d/$h"
+        done
+        status=0
+        n=0
+        printf "%s\n" "$POOL_CASES" > /tmp/cases
+        while IFS= read -r hosts; do
+            n=$((n + 1))
+            rc=0
+            out=$(VAULT_UPSTREAM_POOL_HOSTS="$hosts" \
+                  /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf 2>&1) || rc=$?
+            if [ "$rc" = "0" ]; then
+                echo "FAIL: VAULT_UPSTREAM_POOL_HOSTS=\"$hosts\" was accepted (exit 0)"
+                status=1
+            elif ! printf "%s\n" "$out" | grep -qF "28-vault-upstream-pool.sh: FATAL"; then
+                printf "%s\n" "$out"
+                echo "FAIL: VAULT_UPSTREAM_POOL_HOSTS=\"$hosts\" failed (exit $rc), but not in 28-vault-upstream-pool.sh"
+                status=1
+            else
+                echo "refused (exit $rc): hosts=\"$hosts\": $(printf "%s\n" "$out" | grep -F "28-vault-upstream-pool.sh: FATAL" | head -n1 | cut -c1-110)"
+            fi
+        done < /tmp/cases
+        [ "$n" = "5" ] || { echo "FAIL: ran $n pool cases, expected 5"; status=1; }
+        exit $status
+    '
+
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \
      "the event log is owned 101:101; the /depot/ request guards answer live;" \
@@ -789,4 +1247,10 @@ echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "four bad VAULT_EVENT_LOG values and two planted symlinks are refused;" \
      "the preflight refuses the stock nginx.conf; the upstream cap renders in" \
      "all three shapes, refuses invalid rates/windows, is re-checked by the" \
-     "preflight and evaluates to the expected value live."
+     "preflight and evaluates to the expected value live;" \
+     "the HTTPS passthrough has static stream modules, renders on and off," \
+     "passes only *.steamcontent.com SNI names live, caps connections per" \
+     "client, refuses bad switch values, and is re-checked by the preflight" \
+     "(exact stream block, own-address loop answer); the upstream" \
+     "keepalive pool renders for 1 and 4 edges pass nginx -t offline and" \
+     "five bad VAULT_UPSTREAM_POOL_HOSTS lists are refused by the hook."

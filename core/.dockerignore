@@ -16,3 +16,8 @@ README.md
 # Excluding it from the context makes "which config is in this image?"
 # unambiguous.
 nginx/
+# Exception (WP CORE-FEAT-1b, ADR-0017): the native EMPTY pool include is
+# copied to /opt/vault/vault-upstream-pool.native.conf so the build-time
+# check can cmp the hook's empty render against it. It is not a config
+# nginx reads; nginx.conf itself stays excluded.
+!nginx/vault-upstream-pool.conf

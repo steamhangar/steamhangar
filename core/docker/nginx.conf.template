@@ -4,7 +4,7 @@
 # # THIS FILE IS A NEAR-VERBATIM COPY OF core/nginx/nginx.conf.              #
 # #                                                                          #
 # # Only the directive lines enumerated in core/docker/check-config-drift.sh #
-# # may differ (six kinds today), and they are all container-runtime         #
+# # may differ (seven kinds today), and they are all container-runtime       #
 # # plumbing (log destinations, pid file, worker user, resolver and event-   #
 # # log placeholders). Every other directive MUST stay byte-identical to     #
 # # core/nginx/nginx.conf, which is the reviewed, test-covered source of     #
@@ -25,12 +25,17 @@
 #   4. resolver ${VAULT_RESOLVER} ... <-  resolver 1.1.1.1 ...
 #   5. access_log /dev/stdout vault;  <-  access_log logs/access.log vault;
 #   6. access_log ${VAULT_EVENT_LOG} vault_event ...  <-  access_log logs/event.log vault_event ...
+#   7. access_log /dev/stdout vault_tls;  <-  access_log logs/tls.log vault_tls;
+#      (the stream block's log, WP CORE-FIX-3)
+# Delta 4 appears twice: in http {} and in the stream {} block at the end.
 #
 # NOT a delta (WP TH-1a): `include vault-upstream-rate.conf;` is the same
 # line in both files. What differs is the FILE it names -- rendered at start
 # by 27-vault-upstream-rate.sh here, static and uncapped natively; the
 # drift check pins the line and asserts the static file equals the cap-off
-# render.
+# render. Same contract for `include vault-upstream-pool.conf;` (WP
+# CORE-FEAT-1b, ADR-0017): rendered by 28-vault-upstream-pool.sh here,
+# static and empty natively, pinned by drift-check step 2d (byte for byte).
 #
 # --- Rendering (${VAULT_RESOLVER}) ------------------------------------------
 # This file is NOT read by nginx directly. It is installed at
@@ -39,8 +44,15 @@
 # (/docker-entrypoint.d/20-envsubst-on-templates.sh) with:
 #     NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx
 #     NGINX_ENVSUBST_FILTER=^VAULT_
-# ^VAULT_ means "only ${VAULT_*} placeholders are touched" — and this file
-# contains exactly one of those, ${VAULT_RESOLVER}.
+# ^VAULT_ means "only ${VAULT_*} placeholders are touched" — this file uses
+# ${VAULT_RESOLVER} (twice: http and stream) and ${VAULT_EVENT_LOG}.
+#
+# NOT a delta either (WP CORE-FIX-3): the stream {} block at the end of the
+# file, the HTTPS passthrough on port 443. It is identical in both files
+# apart from deltas 4 and 7; the container additionally wraps it in
+# "# VAULT_TLS_PASSTHROUGH_BEGIN/END" marker comments, which
+# 26-vault-tls-passthrough.sh uses to delete the block when
+# VAULT_TLS_PASSTHROUGH=0 (comments are not compared by the drift check).
 #
 # What that filter is actually for, measured rather than assumed: with the
 # image's stock environment it changes nothing — rendering with and without it
@@ -287,6 +299,21 @@ http {
     # native file equals the script's cap-off render.
     include vault-upstream-rate.conf;
 
+    # --- Upstream keepalive pool (ADR-0017, core/README.md "Upstream keepalive
+    # pool") ------------------------------------------------------------------
+    # One `upstream <edge> { ... keepalive 8; }` group per Steam CDN edge named
+    # in VAULT_UPSTREAM_POOL_HOSTS, so a MISS to a listed edge reuses a pooled
+    # connection instead of opening a new one per chunk. @miss's variable
+    # proxy_pass matches a group by the evaluated host name ($vault_upstream_host
+    # never carries a port); unlisted hosts take the per-request resolver path
+    # above, unchanged. Same include contract as the rate cap: rendered at start
+    # by /docker-entrypoint.d/28-vault-upstream-pool.sh in the container, static
+    # (header only, no pool) natively; check-config-drift.sh pins the line and
+    # asserts the native file is the hook's empty render byte for byte. Must stay
+    # at http level (upstream blocks live in http context) and after the
+    # resolver above, which the groups inherit.
+    include vault-upstream-pool.conf;
+
     # --- Cache-event log (WP 3.10, ADR-0008) --------------------------------
     # A second, dedicated, machine-readable access_log alongside the existing
     # human-oriented "vault" log below. ADR-0008 explains WHY this exists
@@ -445,15 +472,27 @@ http {
         'v1	$time_iso8601	$remote_addr	$vault_event_status	$vault_event_depot	$vault_event_uri	$bytes_sent	$host	$status';
 
     # Same log format/field names/order as the PoC (poc/conf/nginx.conf) --
-    # deliberately unchanged so existing/future log analyzers built against
-    # the Phase-0 format keep working against vault-core's production log.
+    # the order of the EXISTING fields is deliberately unchanged so log
+    # analyzers built against the Phase-0 format keep working against
+    # vault-core's production log. WP CORE-FEAT-1b2 (ADR-0017) APPENDED two
+    # fields at the very end, key=value like the rest, to make upstream
+    # connection reuse visible: upstream_addr (the peer that answered;
+    # "-" on a HIT or a local refusal) and upstream_connect_time (seconds
+    # spent establishing the upstream connection; a REUSED pooled
+    # connection logs a value near 0, a fresh one its TCP handshake time --
+    # source reading in ADR-0017 "Prove before building" item 4). Both
+    # become comma lists on a proxy_next_upstream retry, like
+    # upstream_status (LEARNINGS). Appending keeps every existing field at
+    # its position; an analyzer that anchors its pattern at end-of-line
+    # must learn the two fields (core/README.md "Known gap").
     # UNCHANGED in the container too, on purpose: the container only changes
     # WHERE the lines go (stdout), never their shape.
     log_format vault
         '$time_local uri="$request_uri" status=$status '
         'range="$http_range" upstream_status=$vault_upstream_status '
         'bytes_sent=$bytes_sent request_time=$request_time '
-        'cache=$vault_cache_status';
+        'cache=$vault_cache_status '
+        'upstream_addr="$upstream_addr" upstream_connect_time=$upstream_connect_time';
 
     # CONTAINER DELTA: stdout instead of logs/access.log. `docker logs` is the
     # single place both nginx logs appear, and the json-file driver's
@@ -461,9 +500,11 @@ http {
     access_log  /dev/stdout  vault;
 
     server {
-        # Steam CDN traffic is plain HTTP only. No other ports; no TLS here
-        # (docs/PROJECT_PLAN.md section 10: only vault-api is ever meant to
-        # be reachable remotely/behind TLS, never vault-core).
+        # Steam CDN traffic is plain HTTP only. This server listens on 80
+        # only and never terminates TLS (docs/PROJECT_PLAN.md section 10:
+        # only vault-api is ever meant to be reachable remotely/behind TLS,
+        # never vault-core). Port 443 is the stream {} block at the end of
+        # this file: a TLS passthrough that never decrypts (ADR-0020).
         listen       80;
 
         # Deliberately no server_name restriction: this server must answer
@@ -675,27 +716,45 @@ http {
             # 502 (poc/linux-client-test findings) -- this config trades
             # that for a fast, bounded failover instead.
             #
-            # WP CORE-FIX-2: no retry on `error`, and at most ONE retry.
-            # Every attempt here is a NEW upstream TCP connection (variable
-            # proxy_pass, no keepalive pool). Behind a carrier-grade NAT
-            # (DS-Lite) that has run out of port mappings, the CGN answers
-            # each SYN with ICMP host-unreachable at once (RFC 6888 REQ-11),
-            # logged as "connect() failed (113: Host is unreachable)" --
-            # an `error`. Retrying it only multiplies the SYNs against a
-            # NAT that is already full (production: 57845 such 502s against
-            # 4029 200s in about two minutes), and the client retries
-            # anyway (SteamPrefill re-requests failed chunks, so does the
-            # Steam client). `timeout` stays: on Linux, with the 3s connect
-            # timeout above, a black-holed IP is a `timeout`, and each one
-            # costs 3s, so it cannot spin. (The Phase 0 dead-IP stalls on
-            # Windows were logged as `error`s, because the OS connect timeout
-            # of ~21s fired before nginx's; that does not apply here.)
-            # Trade-off: with several A records, an edge that answers RST or
-            # unreachable no longer fails over to the next address inside
-            # nginx -- the client's retry does that instead.
+            # WP CORE-FIX-2 (stage 1) + WP CORE-FEAT-1b2 (stage 2, ADR-0017
+            # decision 6A): at most ONE retry, and `error` is in the list.
+            # Stage 1 had dropped `error`: every attempt was then a NEW
+            # upstream TCP connection (variable proxy_pass, no keepalive
+            # pool). Behind a carrier-grade NAT (DS-Lite) that has run out
+            # of port mappings, the CGN answers each SYN with ICMP
+            # host-unreachable at once (RFC 6888 REQ-11), logged as
+            # "connect() failed (113: Host is unreachable)" -- an `error`.
+            # Retrying it only multiplied the SYNs against a NAT that was
+            # already full (production: 57845 such 502s against 4029 200s
+            # in about two minutes), and the client retries anyway
+            # (SteamPrefill re-requests failed chunks, so does the Steam
+            # client).
+            # Stage 2 (the upstream keepalive pool included at http level,
+            # WP CORE-FEAT-1b) changes that picture. A pooled connection the
+            # edge closed while idle surfaces as an `error` on its next
+            # use, and since nginx 1.9.13 (CHANGES) a failure on a CACHED
+            # connection is retried only if `error` is listed here.
+            # ngx_http_upstream_next does `tries++` for the cached case
+            # before it applies the retry mask, so that retry does NOT
+            # consume a try: a stale pooled connection keeps its one free
+            # retry, transparently, while a real connect failure (a SYN the
+            # CGN refuses) gets AT MOST one retry under tries 2 -- and none
+            # when the name resolves to a single address: nginx zeroes
+            # `tries` for a single-peer group (ngx_http_upstream_round_
+            # robin.c, free_round_robin_peer's `single` branch), so tries 2
+            # only bites with two or more A records. Without `error`,
+            # the first request after an idle edge-side close would be a
+            # 502 (ADR-0017 "Stale pooled connections"); keepalive_timeout
+            # 50s in the pool (below the edges' measured >= 60s) makes the
+            # case rare, `error` here makes it harmless.
+            # `timeout` stays: on Linux, with the 3s connect timeout above,
+            # a black-holed IP is a `timeout`, and each one costs 3s, so it
+            # cannot spin. (The Phase 0 dead-IP stalls on Windows were
+            # logged as `error`s, because the OS connect timeout of ~21s
+            # fired before nginx's; that does not apply here.)
             # tries 2 = one retry, also for an upstream 50x.
             proxy_connect_timeout      3s;
-            proxy_next_upstream        timeout http_502 http_503 http_504;
+            proxy_next_upstream        error timeout http_502 http_503 http_504;
             proxy_next_upstream_tries  2;
             proxy_next_upstream_timeout 6s;
 
@@ -753,3 +812,120 @@ http {
         }
     }
 }
+
+# VAULT_TLS_PASSTHROUGH_BEGIN
+# --- HTTPS passthrough for *.steamcontent.com (WP CORE-FIX-3, ADR-0020) -----
+# Why this exists: in DNS mode the LAN resolver rewrites *.steamcontent.com
+# to this server, so a client that fetches something from a CDN host over
+# HTTPS -- SteamPrefill/SteamKit2 does this for depot manifests -- connects
+# to port 443 HERE. Without a listener it fails ("HttpRequestException ...
+# while downloading manifests", production 2026-10-02). lancache solves the
+# same problem with an SNI proxy; this is that, in nginx's stream module.
+#
+# What it does: read the TLS ClientHello WITHOUT terminating TLS
+# (ssl_preread), take the SNI name, and if it is a *.steamcontent.com name
+# open ONE TCP connection to that name's real address on port 443 and copy
+# bytes both ways. No certificate, no key, no decryption: the client
+# handshakes with Valve's server end to end and checks Valve's certificate
+# itself. Nothing on this path is cached or rate-capped.
+#
+# The stream and ssl_preread modules are compiled in STATICALLY in the
+# pinned nginx:1.29.8-alpine image (`nginx -V`: --with-stream
+# --with-stream_ssl_preread_module, no "=dynamic"), so no load_module line;
+# .github/scripts/verify-core-nginx.sh pins that.
+#
+# CONTAINER: the BEGIN/END marker comments around this block let
+# /docker-entrypoint.d/26-vault-tls-passthrough.sh delete the whole block
+# when VAULT_TLS_PASSTHROUGH=0. Natively the block is always on.
+stream {
+    # Same resolver as the HTTP cache (ADR-0001 req 4), never the LAN DNS:
+    # a resolver that rewrites *.steamcontent.com would send every
+    # passthrough connection back into this listener.
+    # 40-vault-preflight.sh refuses to boot on such a resolver; see
+    # "Loop bound" below for what happens if it starts rewriting later.
+    resolver ${VAULT_RESOLVER} ipv6=off valid=30s;
+    resolver_timeout 5s;
+
+    # --- The allowlist: SNI -> upstream, or nothing ------------------------
+    # The ONLY thing that stops this listener being an open TCP relay. One
+    # map is both the allowlist and the target (the SEC-FIX-1 lesson from
+    # the HTTP side): $vault_tls_upstream is either "<SNI>:443" for a name
+    # this pattern fully matched, or EMPTY. proxy_pass with an empty value
+    # fails before any DNS lookup or connect ("no host in upstream") and the
+    # connection is closed -- so a refused name never leaves this host.
+    #   - Full match, anchored at both ends (\z, not $, so a trailing
+    #     newline in a hostile SNI cannot match): one or more labels of
+    #     1-63 characters [a-z0-9-] that neither start nor end with "-",
+    #     each ending in a dot, then exactly "steamcontent.com", and at most
+    #     253 characters in total (the lookahead). So "evilsteamcontent.com" (no dot before
+    #     steamcontent), "x.steamcontent.com.evil.example" (does not END in
+    #     it), empty labels ("x..steamcontent.com"), "_", "%", ":" and every
+    #     other non-hostname byte are refused.
+    #   - Case-insensitive (~*): DNS names are, and clients may send any
+    #     case. The name is forwarded as sent; the resolver does not care.
+    #   - A trailing dot ("x.steamcontent.com.") is REFUSED: RFC 6066
+    #     section 3 forbids it in SNI, so no real client sends it.
+    #   - The bare apex "steamcontent.com" is REFUSED, like on the HTTP side:
+    #     content is served from subdomains (cacheN-xxx.steamcontent.com and
+    #     similar); nothing in Steam's download path needs the apex.
+    #   - No SNI at all (an IP-literal connection, a non-TLS client, a
+    #     ClientHello without server_name): $ssl_preread_server_name is empty
+    #     and maps to default -> refused.
+    #   - *.steamserver.net is NOT on this list, unlike the HTTP allowlist:
+    #     the LAN rewrite only covers *.steamcontent.com (dns/README.md), so
+    #     no other name is expected on this port.
+    map $ssl_preread_server_name $vault_tls_upstream {
+        default                                         "";
+        "~*^(?=.{1,253}\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+steamcontent\.com\z"  $ssl_preread_server_name:443;
+    }
+
+    # --- Loop bound -----------------------------------------------------------
+    # Stock nginx cannot inspect the address a name resolves to before it
+    # connects (there is no hook between resolve and connect), so a runtime
+    # "never dial RFC1918/loopback/link-local" filter is not possible here.
+    # The boot preflight is the guard; these caps bound the damage if the
+    # resolver starts rewriting after boot: a loop back into this listener
+    # arrives from one source address and stops at the per-client cap
+    # instead of eating every worker connection, and the total cap keeps
+    # half of worker_connections (each session = 2 connections) for the
+    # HTTP cache on port 80.
+    limit_conn_zone $binary_remote_addr zone=vault_tls_client:1m;
+    limit_conn_zone $server_port        zone=vault_tls_total:1m;
+
+    # One line per connection, accepted or refused. escape=default turns
+    # any control byte in a hostile SNI into \xXX.
+    log_format vault_tls escape=default
+        '$time_local tls client=$remote_addr sni="$ssl_preread_server_name" '
+        'target="$vault_tls_upstream" upstream=$upstream_addr status=$status '
+        'bytes_sent=$bytes_sent bytes_received=$bytes_received '
+        'session_time=$session_time';
+    # CONTAINER DELTA (7th, see check-config-drift.sh): stdout, next to the
+    # HTTP access log, instead of logs/tls.log.
+    access_log /dev/stdout vault_tls;
+
+    server {
+        listen 443;
+
+        ssl_preread     on;
+        # A client that connects and sends no ClientHello is dropped after
+        # 5s instead of nginx's default 30s.
+        preread_timeout 5s;
+
+        limit_conn vault_tls_client 64;
+        limit_conn vault_tls_total  256;
+
+        # Egress like the HTTP cache (WP CORE-FIX-2): exactly ONE upstream
+        # connection per client connection. proxy_next_upstream defaults to
+        # ON in the stream module and would try the next A record on a
+        # connect error; behind a carrier-grade NAT that has run out of
+        # mappings ("113: Host is unreachable") every retry is another SYN
+        # against the full NAT. The client retries instead.
+        proxy_connect_timeout 3s;
+        proxy_next_upstream   off;
+        # Idle timeout between two reads or writes on either side.
+        proxy_timeout         5m;
+
+        proxy_pass $vault_tls_upstream;
+    }
+}
+# VAULT_TLS_PASSTHROUGH_END
