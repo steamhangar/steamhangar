@@ -8,20 +8,22 @@ name: Publish
 # ci.yml instead.
 #
 # --- Why a second file, not a new job in ci.yml ------------------------------
-# ci.yml's own header states its two-tier design plainly: the six fast jobs
-# guard on `github.event_name == 'push' || 'pull_request' ||
+# ci.yml's own header states its two-tier design plainly: the fast jobs
+# (six when this was written, eight since WP CI-FIX-1 added image-build) guard
+# on `github.event_name == 'push' || 'pull_request' ||
 # 'workflow_dispatch'` against ONE shared, workflow-wide `on:` block whose
-# `push:` trigger is `branches: [main]` only -- it has no `tags:` filter.
+# `push:` trigger is `branches: [main, "wp/**"]` only -- it has no `tags:`
+# filter.
 # Publishing needs a git-tag push to fire at all. The only way to make a tag
 # push visible to *any* job in that file is adding a `tags:` filter to that
 # same shared `push:` trigger -- and doing so would silently widen every one
-# of those six jobs' actual trigger surface too, even with their own `if:`
-# text left character-for-character unchanged, because none of those six
+# of those fast jobs' actual trigger surface too, even with their own `if:`
+# text left character-for-character unchanged, because none of those
 # guards inspects `github.ref` -- only `github.event_name`. A tag push is
-# still `event_name == 'push'`, so all six would start firing on release
+# still `event_name == 'push'`, so all of them would start firing on release
 # tags as an unintended side effect of a change made only for this job's
 # sake, which is exactly the "existing six fast jobs ... unaffected"
-# requirement this package was given. A second file with its OWN `on:`
+# requirement this package (WP CI-3) was given. A second file with its OWN `on:`
 # block sidesteps the problem entirely: ci.yml is not touched at all, so
 # nothing about it can regress, and this file's `on:` names exactly the two
 # events that should ever build/push an image -- nothing else is even
