@@ -5,8 +5,10 @@ name: CI
 #   1. Fast build/test gates on every push/PR: api-tests, agent-go,
 #      core-nginx-config, powershell-syntax, web-tests, android-tests,
 #      deploy-static (shellcheck + `docker compose config`, pre-freeze
-#      project review S4). NO image publishing and NO ghcr.io pushes here
-#      -- that is publish.yml (WP CI-3), tag-gated.
+#      project review S4), image-build (WP CI-FIX-1: `docker build` of every
+#      image publish.yml ships, for every platform it ships, nothing
+#      pushed). NO image publishing and NO ghcr.io pushes here -- that is
+#      publish.yml (WP CI-3), tag-gated.
 #
 #   2. verify-stack: the real-Docker, real-Steam-CDN integration suite
 #      (deploy/tests/verify-stack.sh -- see its own header for the full
@@ -60,11 +62,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The seven jobs below are the fast PR gate: push, pull_request, and a
+  # The jobs below, up to and including image-build, are the fast PR gate
+  # (seven before WP CI-FIX-1 added image-build): push, pull_request, and a
   # manual workflow_dispatch run all trigger them (unchanged from before
   # WP CI-1 for push/pull_request; workflow_dispatch is new -- it lets a
   # human re-run the whole fast suite on demand). The nightly `schedule`
-  # event does NOT match this guard, so these seven do not re-run overnight
+  # event does NOT match this guard, so these do not re-run overnight
   # -- every push/PR already exercises them, so a nightly re-run would add
   # no signal, only cost. android-tests (WP CI-2) belongs here, not with
   # verify-stack below: it is a deterministic JVM unit-test + lint run (no
@@ -314,6 +317,89 @@ jobs:
         # the profile. No `.env` exists on the runner, so this is exactly
         # the "stock checkout, every default" render.
         run: VAULT_API_KEY=x docker compose -f deploy/compose.yaml --profile dns config -q
+
+  # WP CI-FIX-1: until this job existed, no push/PR ever built a release
+  # image -- only publish.yml did, on a v* tag, and verify-stack only
+  # nightly and amd64-only. A `.dockerignore` that excluded a file
+  # core/Dockerfile COPYs was green here and would first have failed at tag
+  # time (docs/LEARNINGS.md, WP RC7-INT). The Dockerfiles also carry
+  # build-time self-checks (core: the nginx stream-module check, the
+  # upstream-pool hook self-check; api: the SteamPrefill `--max-threads`
+  # probe; dns/proxy: running the installed dnsmasq/tinyproxy binary) that
+  # only a real build runs.
+  #
+  # Same matrix as publish.yml's `publish` job, entry for entry (image,
+  # context, dockerfile, platforms). The list is duplicated on purpose,
+  # not shared through a reusable workflow or a JSON file: either would
+  # have to restructure publish.yml's release job (its per-image digest
+  # outputs, `packages: write`, login and manifest checks) just to share
+  # four rows. api/tests/test_ci_image_build.py instead pins the two
+  # matrices equal and pins the action SHAs equal, so drift fails the
+  # api-tests job on the same push.
+  #
+  # Platforms: every platform publish ships, on every push -- including the
+  # QEMU-emulated arm64 legs. All three arm64 images are alpine bases with
+  # one pinned `apk add` and shell self-checks, no compile step, so
+  # emulation costs minutes, not the tens of minutes that would justify an
+  # amd64-only fast tier with the full matrix deferred to the nightly run.
+  # Building arm64 here is the point: the self-checks then run on arm64
+  # too, and an arm64-only break is caught on the push that causes it.
+  #
+  # No layer cache (no `cache-from`/`cache-to: type=gha`), deliberately:
+  # publish.yml builds cold, and api/Dockerfile's `apt-get install libicu76`
+  # is not version-pinned, so a cached layer could keep this job green on a
+  # change that publish's cold build would fail on -- the exact gap this job
+  # exists to close.
+  #
+  # No push and no login: `push: false`, no tags, no output -- buildx builds
+  # every platform and discards the result, the same thing publish.yml's own
+  # non-tag workflow_dispatch path does. The job needs nothing beyond the
+  # workflow's `contents: read`.
+  image-build:
+    name: image / docker build ${{ matrix.image }} (${{ matrix.platforms }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    # Same budget as publish.yml's build of the same matrix.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: vault-core
+            context: core
+            dockerfile: core/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - image: vault-api
+            # Repo root: api/Dockerfile COPYs both api/ and web/ (see the
+            # matrix comment in publish.yml for why it is amd64-only).
+            context: .
+            dockerfile: api/Dockerfile
+            platforms: linux/amd64
+          - image: vault-dns
+            context: dns
+            dockerfile: dns/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - image: vault-proxy
+            context: deploy/proxy
+            dockerfile: deploy/proxy/Dockerfile
+            platforms: linux/amd64,linux/arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up QEMU (arm64 emulation for cross-building)
+        if: contains(matrix.platforms, 'arm64')
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build ${{ matrix.image }} (not pushed)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platforms }}
+          push: false
 
   verify-stack:
     name: deploy / verify-stack
