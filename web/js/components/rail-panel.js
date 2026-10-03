@@ -115,14 +115,23 @@ import { vaultNameFromSettings, cacheFootFromSummary, versionFromSettings } from
  *   apiClient: { getSettings: () => Promise<object> },
  *   getStoredApiKey: () => string,
  *   isDemoMode: () => boolean,
+ *   onVersionActivate?: () => void,
  * }} deps
+ *   `onVersionActivate` (WP WEB-FEAT-3, optional): called when the version
+ *   line — a `<button>` in index.html — is clicked; app.js passes "open
+ *   Settings → About". The line's TEXT is unchanged (only the server's own
+ *   version, "dev build" for `dev`); its accessible name becomes
+ *   "About: <version>" so a screen reader hears where it leads.
  * @returns {{ renderCacheFoot: Function, renderSettingsSourced: Function }}
  *   exposed ONLY for `rail-panel-wiring.test.js` to drive directly without
  *   re-triggering the one-time fetch/subscription side effects a second
  *   time — production code never calls these.
  */
-export function createRailPanel({ elements, store, apiClient, getStoredApiKey, isDemoMode }) {
+export function createRailPanel({ elements, store, apiClient, getStoredApiKey, isDemoMode, onVersionActivate }) {
   const { headEl, vaultNameEl, footEl, cacheEl, versionEl, createElement } = elements;
+  if (typeof onVersionActivate === "function") {
+    versionEl.addEventListener("click", () => onVersionActivate());
+  }
 
   // Foot visibility depends on TWO independently-updating sources (the
   // cache-summary poll and the one-time settings fetch) — tracked here so
@@ -182,6 +191,8 @@ export function createRailPanel({ elements, store, apiClient, getStoredApiKey, i
     lastVersionText = version;
     versionEl.hidden = version === null;
     versionEl.textContent = version || "";
+    if (version === null) versionEl.removeAttribute("aria-label");
+    else versionEl.setAttribute("aria-label", `About: ${version}`);
     updateFootVisibility();
   }
 

@@ -2689,6 +2689,98 @@ on the Pixel at 15px (cols3) and 19px (detail sheet).
 
 Suite: **1010 tests, 1010 pass, 0 fail**.
 
+### WP WEB-FEAT-3 — Settings: About and PCs (agents)
+
+Settings gains two sections over WP VER-2's `GET /v1/about` and WP
+AGENT-FEAT-1's presence fields on `GET /v1/clients`:
+
+- **PCs (agents)**: the "Agents: N online, M offline" line and a "Show
+  PCs" button that opens the existing clients sheet (decision: reuse the
+  sheet, one row rendering and one store subscription instead of a second
+  list; the sheet stays a sheet, not a nav item). The sheet was reachable
+  only from the bypass banner and the notifications before. Each row now
+  has a presence chip (the server's `presence`, never recomputed), "last
+  seen … ago" and the agent version ("version unknown" for `null`); chip
+  and time are repainted on every clients tick while the sheet is open
+  (text only). Sheet title and dialog label are now "PCs (agents)".
+- **About**: a table, one row per component (name, version, 7-character
+  commit with the full id as title, status word + icon), then a plain note
+  per component (vault-core "recorded at last start, not a live check",
+  vault-dns "unknown, not probed", …) and the server's `detail` as text.
+  "Checked by the server N min ago" from the oldest `checked_at`, with the
+  60 s server cache stated. Loaded when Settings opens and on Refresh,
+  never polled; Refresh is `aria-disabled` while in flight and announces
+  its outcome in the section's only `role=status` span. Only a 404 shows
+  the "server too old" note (with a valid key an unknown route is 404); a
+  401 means the key was refused and is an error line (review fix). Two new neutral status-icon kinds, `unknown`
+  ("?") and `notinuse` (dash), so "not checked" never reads as a fault.
+- **Rail**: the version line ("dev build") is a `<button>` named
+  "About: <version>" that opens Settings and focuses the About heading.
+- **Demo**: `/v1/clients` rows carry the four AGENT-FEAT-1 fields (a
+  10-minute agent online, a legacy row with nulls offline; presence and
+  `offline_after` computed per request by the server's rule); a new demo
+  `/v1/about`. The demo-data.js header no longer claims every route
+  matches the server.
+
+Tests: `about-view.test.js` (13: every status word/icon, version/commit
+cells, notes, oldest-`checked_at` relative time, too-old classification,
+status set/names/cache pinned against `routers/about.py`/`about.py`),
+`clients-presence.test.js` (8: presence from the server field with
+fixtures that contradict the timestamps, summary counts, "version
+unknown", `formatAgo` boundaries), `demo-data-shape-guard.test.js` (9:
+demo `/v1/clients` and `/v1/about` keys EQUAL `ClientOut`/`AboutOut`/
+`ComponentOut` read from the Python source, names/order/statuses, presence
+constants and `offline_after` per row), `settings-about-pcs-wiring.test.js`
+(13: fake-dom + real store-singleton against a routing fetch fake: the
+About table for every status, 404/401/500, no polling + Refresh, the
+in-flight guard, the PCs sheet opened from Settings with no bypass, server
+presence in the chip and both summary lines, "version unknown", a presence
+flip on an open sheet, the rail button, About focus), `css-about-pcs.test.js`
+(6: phone stacked rows on `minmax(0,1fr)`, wrapping, the BP-M table, chip
+column, rail button without author `display`). `css-overlay-geometry`'s
+dialog-label pin follows the rename. The wiring file ran 20x in a loop: 0
+failures.
+
+Mutation evidence (each alone, in a scratch copy, the five new files run):
+all killed. presenceOf recomputing from `offline_after` (5 fail); the
+summary counting by timestamp (3); `agent_version` null printed as "agent
+null" (3); 401 as an error (2); settings ignoring the too-old verdict (2);
+the Show PCs click unwired (4); About refetched on each clients tick (1);
+demo `presence` dropped (3); demo `offline_after` with 1x interval (2);
+commit not shortened (3); `unknown` with the warn glyph (3); rail click
+unwired (1); `requestAboutFocus` ignored (1); the sheet not repainting
+presence on patch ticks (1); newest instead of oldest `checked_at` (1); an
+extra demo `/v1/about` key (1); `formatAgo` "just now" up to 2 min (1);
+phone rows on `1fr` tracks (1); the server `detail` dropped (1). Server
+side of the twin pins: a new `ClientOut` field, `CACHE_TTL_SECONDS` 30,
+`PRESENCE_GRACE_SECONDS` 10 min and a fifth status word each fail one
+named drift guard.
+
+Not covered: the painted result and a screen reader (no browser here).
+Expected look: on a phone the About table is one block per component
+(name, then VERSION and COMMIT side by side, STATUS below, each with a
+small uppercase label, then the note and the server detail); from 720px
+up a four-column table with a header row. In the PCs sheet each row shows
+the presence chip (filled dot "Online", hollow ring "Offline") above the
+Healthy/Bypassing badge. Device check: a long agent version wraps inside
+the row on the Pixel; Refresh announces once with TalkBack.
+
+Review round 1 (FAIL, two deletable wirings) added `rail-about-wiring.test.js`
+(2 source-scan pins: `onVersionActivate` inside the `createRailPanel({...})`
+argument with both calls in order, failure text "DELETED" / "MOVED" /
+"CHANGED"; `#rail-version` is `<button type="button">`), the 401-is-an-error
+flip, a drift guard for the vault-runner note's "90 s" against
+`runner_presence.PRESENCE_STALE_SECONDS`, shape-guard messages that print the
+field list the regex read, a ComponentOut/AboutOut reader sanity test, the
+sheet-heading pin, and the focus-request reset on leaving Settings; the
+duplicate agents line under About is gone. Mutations, all killed: handler
+deleted (DELETED), moved out of the call (MOVED), `requestAboutFocus()`
+dropped (CHANGED); `#rail-version` back to `<p>`; 401 back to too-old (2);
+the note at 60 s, the server constant at 120; focus flag not reset on leave;
+sheet heading "Clients".
+
+Suite: **1069 tests, 1069 pass, 0 fail**.
+
 ### WP WEB-FIX-6 — the bulk bar no longer covers content
 
 Noted during WEB-FIX-3: in select mode the fixed `.bulk` bar covered the
@@ -2749,4 +2841,4 @@ above the window bottom, aligned with the grid's edges; at 1920px with
 the Suggestions column, the bar stops at the column's left edge. Leaving
 select mode returns the normal 32px end padding.
 
-Suite: **1032 tests, 1032 pass, 0 fail**.
+Suite: **1032 tests, 1032 pass, 0 fail** on the WEB-FIX-6 branch; **1087 tests, 1087 pass, 0 fail** after merging with WEB-FEAT-3.

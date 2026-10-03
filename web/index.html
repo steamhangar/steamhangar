@@ -145,7 +145,11 @@
            `readonly` (js/lib/rail-content.js's versionFromSettings). Empty
            text is the honest "absent/blank/malformed" state — all three
            degrade the same way, never a fallback string. -->
-      <p class="rail-version" id="rail-version"></p>
+      <!-- WP WEB-FEAT-3: a button — it opens Settings → About (component
+           versions). Its text is still only the server's own version
+           ("dev build" for a local build); js/components/rail-panel.js
+           sets the accessible name "About: <version>". -->
+      <button type="button" class="rail-version" id="rail-version" title="Open Settings → About (component versions)"></button>
     </div>
   </nav>
 

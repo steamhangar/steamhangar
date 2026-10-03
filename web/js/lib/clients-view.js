@@ -22,10 +22,21 @@
  * the cache log) and lists plausible innocent causes — never a verdict like
  * "your DNS is broken".
  *
- * Pure only — no DOM, no fetch. Covered in web/tests/clients-view.test.js.
+ * **Presence (WP WEB-FEAT-3) is READ, never computed here.** `GET
+ * /v1/clients` carries `presence: "online" | "offline"` (WP AGENT-FEAT-1,
+ * `agent_reports.presence` on the server, "the one place the rule lives").
+ * {@link presenceOf} only reads that field; nothing in this module compares
+ * `last_reported_at` or `offline_after` against a clock to decide online vs
+ * offline (docs/LEARNINGS.md: two call sites computing the same predicate
+ * diverge). `last_reported_at` is used for the "last seen ... ago" WORDS
+ * only. A server older than AGENT-FEAT-1 sends no `presence` at all: that
+ * reads "presence unknown", not a guess.
+ *
+ * Pure only — no DOM, no fetch. Covered in web/tests/clients-view.test.js
+ * and web/tests/clients-presence.test.js.
  */
 
-import { formatBytesGB } from "./format.js";
+import { formatBytesGB, formatAgo } from "./format.js";
 
 /**
  * @param {object[] | null | undefined} clients `GET /v1/clients` snapshot.
@@ -122,4 +133,95 @@ export function bypassBannerText(clients) {
     return `Client ${bypassing[0].client_id} is bypassing the cache — check its DNS.`;
   }
   return `${bypassing.length} clients are bypassing the cache — check their DNS.`;
+}
+
+// ---------------------------------------------------------------------
+// Presence, last seen, agent version (WP WEB-FEAT-3)
+// ---------------------------------------------------------------------
+
+/** Visible words for the server's two presence values. */
+export const PRESENCE_WORD = Object.freeze({ online: "Online", offline: "Offline" });
+
+/** Chip word for a client whose server sent no presence (older than WP
+ * AGENT-FEAT-1). */
+export const PRESENCE_UNKNOWN_WORD = "Presence unknown";
+
+/**
+ * The server's `presence` field, verbatim when it is one of the two
+ * documented words, otherwise `null` ("not reported"). MUTATION TARGET: this
+ * must never look at `last_reported_at`/`offline_after` — a client the
+ * server calls online stays online here even if its timestamp looks old to
+ * this browser's clock, and vice versa.
+ * @param {{presence?: unknown} | null | undefined} client
+ * @returns {"online" | "offline" | null}
+ */
+export function presenceOf(client) {
+  const p = client ? client.presence : undefined;
+  return p === "online" || p === "offline" ? p : null;
+}
+
+/** The presence chip's word: "Online", "Offline" or "Presence unknown". */
+export function presenceWord(client) {
+  const p = presenceOf(client);
+  return p ? PRESENCE_WORD[p] : PRESENCE_UNKNOWN_WORD;
+}
+
+/**
+ * "last seen 4 min ago" from `last_reported_at` — words only, never a
+ * presence decision (see the module header).
+ * @param {{last_reported_at?: unknown} | null | undefined} client
+ * @param {number} [nowMs]
+ */
+export function lastSeenText(client, nowMs = Date.now()) {
+  const ago = formatAgo(client ? client.last_reported_at : null, nowMs);
+  return ago ? `last seen ${ago}` : "last seen: unknown";
+}
+
+/**
+ * "agent 0.1.0", or "version unknown" for `agent_version: null` (an agent
+ * from before AGENT-FEAT-1, or a server that does not send the field). The
+ * value is untrusted text; the caller assigns it with textContent.
+ * @param {{agent_version?: unknown} | null | undefined} client
+ */
+export function agentVersionText(client) {
+  const v = client ? client.agent_version : null;
+  return typeof v === "string" && v.trim() ? `agent ${v.trim()}` : "version unknown";
+}
+
+/** The row's second line: "last seen 4 min ago · agent 0.1.0". The game
+ * count stays in the stats line ({@link describeHealthyClient}). */
+export function presenceLine(client, nowMs = Date.now()) {
+  return `${lastSeenText(client, nowMs)} · ${agentVersionText(client)}`;
+}
+
+/**
+ * Counts by the server's presence field. `null` when there is no list yet
+ * (no poll landed): nothing honest to count.
+ * @param {object[] | null | undefined} clients
+ * @returns {{online: number, offline: number, unknown: number, total: number} | null}
+ */
+export function agentsSummary(clients) {
+  if (!Array.isArray(clients)) return null;
+  const counts = { online: 0, offline: 0, unknown: 0, total: clients.length };
+  for (const c of clients) {
+    const p = presenceOf(c);
+    if (p) counts[p] += 1;
+    else counts.unknown += 1;
+  }
+  return counts;
+}
+
+/**
+ * "Agents: 1 online, 1 offline" — shared by the Settings "PCs (agents)"
+ * section, the About section and the PCs sheet. `null` before the first
+ * `GET /v1/clients` answer.
+ * @param {object[] | null | undefined} clients
+ * @returns {string | null}
+ */
+export function agentsSummaryText(clients) {
+  const s = agentsSummary(clients);
+  if (!s) return null;
+  if (s.total === 0) return "Agents: none have reported yet";
+  const base = `Agents: ${s.online} online, ${s.offline} offline`;
+  return s.unknown > 0 ? `${base}, ${s.unknown} without presence (server older than this web UI)` : base;
 }

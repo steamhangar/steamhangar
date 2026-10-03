@@ -215,6 +215,9 @@ export const api = {
   gc: (appid, execute = false) => request("POST", `/v1/cache/${appid}/gc`, { body: { execute } }),
   cacheSummary: () => request("GET", "/v1/cache/summary"),
   clients: () => request("GET", "/v1/clients"),
+  // WP WEB-FEAT-3: Settings → About. Fetched when the Settings view opens
+  // and on its Refresh button, never polled (the server caches 60 s).
+  about: () => request("GET", "/v1/about"),
   getSettings: () => request("GET", "/v1/settings"),
   patchSettings: (body) => request("PATCH", "/v1/settings", { body }),
   schedule: () => request("GET", "/v1/schedule"),

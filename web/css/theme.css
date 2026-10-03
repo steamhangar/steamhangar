@@ -372,6 +372,9 @@ a{ color:var(--accent); }
    "not cached"/dim text reads as deliberately neutral, matching job
    outcome honesty (docs/PROJECT_PLAN.md). */
 .sic.k-cancelled{ background:var(--dim-2); color:var(--text); }
+/* WP WEB-FEAT-3 (Settings → About): "not checked" and "not used here" are
+   not faults either — the same neutral tone as cancelled, own glyphs. */
+.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); color:var(--text); }
 
 .sic-lg{ --sz:19px; }
 .sic-sm{ --sz:16px; }

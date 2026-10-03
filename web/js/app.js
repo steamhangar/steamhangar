@@ -9,7 +9,7 @@ import { VIEWS, DEFAULT_VIEW, currentView, navigateTo, onViewChange } from "./ro
 import { initToast } from "./components/toast.js";
 import { renderLibrary } from "./views/library.js";
 import { renderDownloads } from "./views/downloads.js";
-import { renderSettings } from "./views/settings.js";
+import { renderSettings, requestAboutFocus } from "./views/settings.js";
 import { maybeShowOnboardingOnStartup } from "./onboarding.js";
 // WP 4a.7 — side-effect imports: both components bind their DOM elements
 // and store subscriptions at module load (same posture as views/downloads.js's
@@ -101,6 +101,11 @@ createRailPanel({
   apiClient: api,
   getStoredApiKey,
   isDemoMode,
+  // WP WEB-FEAT-3: the rail's version line opens Settings → About.
+  onVersionActivate: () => {
+    requestAboutFocus();
+    navigateTo("settings");
+  },
 });
 createDecisionPanel({
   elements: {

@@ -461,7 +461,7 @@ test("the three real overlay components request the operator-decided variant: de
 
   assert.match(detailJs, /createSheetDialog\(\s*\{\s*ariaLabel:\s*"Game detail",\s*variant:\s*"center"\s*\}\s*\)/);
   assert.match(notifJs, /createSheetDialog\(\s*\{\s*ariaLabel:\s*"Notifications",\s*variant:\s*"drawer"\s*\}\s*\)/);
-  assert.match(clientsJs, /createSheetDialog\(\s*\{\s*ariaLabel:\s*"Client status",\s*variant:\s*"drawer"\s*\}\s*\)/);
+  assert.match(clientsJs, /createSheetDialog\(\s*\{\s*ariaLabel:\s*"PCs \(agents\)",\s*variant:\s*"drawer"\s*\}\s*\)/);
 });
 
 // ---------------------------------------------------------------------
