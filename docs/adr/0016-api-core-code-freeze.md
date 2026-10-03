@@ -314,3 +314,85 @@ from vault-api, ADR-0011 unchanged). Scope, all in WP VER-2:
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-03 — freeze exception: volume ownership (WP SEC-FIX-5)
+
+Found in the VER-2 review (2026-10-03), severity medium under a compromised
+vault-api or nginx worker (both uid 101). User decision 2026-10-03: fix it
+before `v0.1.0`.
+
+The problem: `/vault`, `/vault/cache`, `/vault/tmp` and `/vault/logs`
+belonged to uid 101, mode 0755, no sticky bit, while root acts on names in
+them: `25-vault-eventlog.sh` checked and then created/truncated the event log
+(`mkdir -p`, `[ -e ] || : >`), `40-vault-preflight.sh` ran `mkdir -p` +
+`chown` on `cache/depot`, and the root nginx master opens the event log
+`O_APPEND|O_CREAT` and creates, chowns and chmods its temp directories under
+`tmp/` by name at every start, following symlinks. uid 101 could swap any of
+those names for a symlink and make root create, truncate, append to, chown or
+chmod any file in vault-core (the CVE-2016-1247 class). No re-check in a
+hook can close the master's open.
+
+Decision: fix it by ownership. Every directory whose entries root resolves is
+root:root 0755; uid 101 owns only what it writes.
+
+| Path | Before | After |
+|---|---|---|
+| `/vault` | 101:101 0755 | root:root 0755 |
+| `/vault/cache` | 101:101 0755 | root:root 0755 |
+| `/vault/cache/depot` (+ tree) | 101:101 | 101:101 (unchanged) |
+| `/vault/tmp` | 101:101 0755 | root:root 0755 |
+| `/vault/tmp/{proxy,client_body,fastcgi,uwsgi,scgi}` | 101:101 0700 (nginx) | 101:101 0700 (created by 21- when missing) |
+| `/vault/logs` | 101:101 0755 | root:root 0755 |
+| `/vault/logs/event.log` | 101:101 | 101:101 (vault-api truncates it in place) |
+| `/vault/logs/vault-core-version.json` | 101:101 0644 (`su nginx` writer) | root:root 0644 (written by root) |
+
+Who writes what, checked in the code: the nginx workers write the depot tree
+(`proxy_store`) and their temp files; the master (root) opens the event log;
+vault-api (uid 101) deletes under `cache/depot` (GC, `DELETE /v1/cache`),
+reads and `ftruncate`s the event log through a verified fd, and reads the
+version file; vault-runner does not mount `/vault`. Nothing in vault-api
+creates a name directly in `/vault`, `cache/`, `tmp/` or `logs/`, so no api
+code changes.
+
+Upgrade -- **user decision 2026-10-03 ("Ist okay"): refuse to start when the
+migration is impossible.** The new start hook
+`21-vault-volume-ownership.sh` migrates every start (`chown -h 0:0`, then
+`chmod 0755`, `/vault` first, then `cache/`, `tmp/`, `logs/`; each level
+probed as uid 101 before the next is touched). It needs CAP_CHOWN, which
+`deploy/compose.yaml` already grants vault-core. When it cannot make the
+layout true (chown not permitted: no CAP_CHOWN, a root-squashing NFS export,
+files owned by a uid outside a user-namespaced daemon's mapping; a mode that
+does not stick; an ACL that still lets uid 101 create names; an inconclusive
+probe; a symlink on one of these names), **vault-core refuses to start** and
+prints the two host-side commands, with the caveat that under userns-remap
+the owners are the remapped root and the remapped 101, and that on a
+root-squashing export they run on the NFS server. Staying up on a volume uid
+101 can rewire was the alternative and was rejected: a stopped cache is the
+safer failure, and the fix is two commands. A planted symlink is never removed automatically; nothing in
+SteamHangar creates one.
+
+Scope of the exception:
+
+- core/: new hook `docker/21-vault-volume-ownership.sh`; `25-vault-eventlog.sh`
+  (every directory to the log root-only, missing ones created root-owned,
+  symlink / non-regular / hard-linked log refused); `29-vault-build-version.sh`
+  (root writes only into a root-only directory chain; the VER-2 `su nginx`
+  writer is gone); `40-vault-preflight.sh` (no root `mkdir -p`/`chown` of
+  `cache/depot`; the write probe targets `cache/depot` and `tmp/proxy`);
+  `Dockerfile` (the root-owned layout, its build-time assertion, the build
+  check of 29- moved off `/tmp`); `tests/test-root-only-dir.sh`,
+  `tests/volume-ownership-race-rig.sh`, the reworked
+  `tests/build-version-race-rig.sh` and `tests/test-build-version-hook.sh`.
+  No nginx config change.
+- api/: none. `api/Dockerfile` still creates its own `/vault` 101-owned; its
+  mount is `nocopy` in named-volume mode, so that layout never seeds a volume.
+- deploy/: `compose.yaml` comments only (the capability rationale for
+  CHOWN, SETUID/SETGID, DAC_OVERRIDE, FOWNER and the `nocopy` note now
+  describe the SEC-FIX-5 layout); no service definition changed.
+- Not frozen, listed for completeness: `.github/scripts/verify-core-nginx.sh`,
+  `deploy/tests/verify-stack.sh` (steps 4d, 5i, 9a, 9d2, 9e, section 11),
+  docs (deploy/README "Using a dedicated cache mount" and "Upgrading",
+  core/README, api/README, threat model §6/§9, `.env.example`, examples).
+
+Every other frozen-path change still needs its own user decision and note
+here.

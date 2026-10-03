@@ -21,13 +21,14 @@ when unset; vault-api's line drops its named-volume-only `nocopy` option by
 itself in bind mode), so no `compose.yaml` edit is needed — this is the one
 setting in this document that is fully wired end to end today.
 
-Before the first start, create the directory and hand it to the nginx worker
-user (uid/gid 101 — not a placeholder, see
-[`deploy/README.md`](../README.md#using-a-dedicated-cache-mount)):
+Before the first start, create the directory and hand its depot tree to the
+nginx worker user (uid/gid 101 — not a placeholder; the directory itself,
+`cache/` and `tmp/` stay root:root 0755, which vault-core enforces at start —
+see [`deploy/README.md`](../README.md#using-a-dedicated-cache-mount)):
 
 ```bash
 sudo mkdir -p /srv/steamhangar-cache/cache/depot /srv/steamhangar-cache/tmp
-sudo chown -R 101:101 /srv/steamhangar-cache
+sudo chown 101:101 /srv/steamhangar-cache/cache/depot
 ```
 
 If you're on TrueNAS SCALE with ZFS specifically,
@@ -149,8 +150,9 @@ services:
       - /srv/steamhangar-manifest-cache:/opt/steamprefill/home
 ```
 
-Create and `chown -R 101:101` the host directory first, same as the
-dedicated-cache-disk recipe in section 1 — and note this relocates ALL of
+Create and `chown -R 101:101` the host directory first (this one is a HOME
+for uid 101, not the cache volume, so the whole directory belongs to 101) —
+and note this relocates ALL of
 `/opt/steamprefill/home`, not only the manifest temp-cache subdirectory
 under it (there is little else there in practice, but it is the whole
 directory that moves, not a scoped piece of it).

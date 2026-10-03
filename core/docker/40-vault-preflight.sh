@@ -352,31 +352,36 @@ log "cache/ and tmp/ share one filesystem (st_dev=$cache_dev) -- proxy_store ren
 
 # --- 4. the depot root exists ------------------------------------------------
 # vault-api's deletion guard (DELETE /v1/cache/{appid}) refuses to operate on a
-# cache root that has no depot/ directory, and it reads this same volume. Create
-# it here so a fresh install is consistent from the first boot.
-if [ ! -d "$DEPOT_DIR" ]; then
-    mkdir -p "$DEPOT_DIR"
-    chown "$WORKER_USER:$WORKER_USER" "$DEPOT_DIR"
-    log "created $DEPOT_DIR"
+# cache root that has no depot/ directory, and it reads this same volume.
+# 21-vault-volume-ownership.sh creates it (owned by the worker user) once
+# cache/ is root-only; this hook used to `mkdir -p` + `chown` it as root
+# inside a cache/ uid 101 owned (WP SEC-FIX-5). Only checked here.
+if [ -L "$DEPOT_DIR" ] || [ ! -d "$DEPOT_DIR" ]; then
+    die "$DEPOT_DIR is missing or not a real directory. 21-vault-volume-ownership.sh
+  creates it at start; see its output above."
 fi
 
 # --- 5. the worker user can actually write ----------------------------------
 # nginx's master runs as root (it must bind :80), workers as $WORKER_USER -- and
-# it is the workers that proxy_store into cache/ and tmp/. Testing as root would
-# prove nothing, so probe as the worker user itself. Deliberately no automatic
-# chown: silently rewriting ownership of an operator's bind-mounted data is a
+# it is the workers that proxy_store into cache/depot/... and write their temp
+# files into tmp/proxy/. Testing as root would prove nothing, so probe as the
+# worker user itself. Since WP SEC-FIX-5 cache/ and tmp/ themselves are
+# root-only (21-vault-volume-ownership.sh), so the probe targets the two
+# directories the workers really write. Deliberately no automatic chown of
+# cache/depot: silently rewriting ownership of an operator's cached data is a
 # surprise; telling them exactly what to run is not.
-for d in "$CACHE_DIR" "$TMP_DIR"; do
+for d in "$DEPOT_DIR" "$TMP_DIR/proxy"; do
     probe="$d/.vault-write-probe.$$"
     if ! su -s /bin/sh "$WORKER_USER" -c "touch '$probe'" 2>/dev/null; then
         die "$d is not writable by the nginx worker user '$WORKER_USER'
   (uid $(id -u "$WORKER_USER"), gid $(id -g "$WORKER_USER")). Nothing would ever be
   cached. If this is a bind mount, fix it on the host:
-      chown -R $(id -u "$WORKER_USER"):$(id -g "$WORKER_USER") <host cache dir>
-  Named volumes get this right automatically -- see deploy/README.md."
+      chown -R $(id -u "$WORKER_USER"):$(id -g "$WORKER_USER") <host cache dir>${d#"$PREFIX"}
+  The cache directory itself, cache/, tmp/ and logs/ stay root:root 0755
+  (vault-core sets that at start). See deploy/README.md."
     fi
     su -s /bin/sh "$WORKER_USER" -c "rm -f '$probe'" 2>/dev/null || true
 done
-log "cache/ and tmp/ are writable by '$WORKER_USER' (uid $(id -u "$WORKER_USER"))"
+log "cache/depot and tmp/proxy are writable by '$WORKER_USER' (uid $(id -u "$WORKER_USER"))"
 
 log "preflight OK"

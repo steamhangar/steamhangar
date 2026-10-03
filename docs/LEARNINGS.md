@@ -969,3 +969,11 @@ These are not style preferences; each entry cost a review round to learn.
   happened" check flakes in CI; without that check it passes vacuously.
   Make the attacker win by construction (PATH wrappers around the tool
   that opens the window) and count the attacks (WP VER-2).
+- The nginx master (root) opens the access/event log O_APPEND|O_CREAT
+  and `ngx_create_paths` mkdirs/chowns/chmods temp paths by name, both
+  following symlinks, at every start and `nginx -t`: every directory
+  whose names root touches must be root-owned and not renamable by the
+  worker uid (CVE-2016-1247 class). Compose's cap set has no
+  CAP_FOWNER, so chmod must precede chown; run hook tests with the exact
+  compose cap set. A probe that "cannot create a name" must use a random
+  name and accept only EACCES/EPERM as "closed" (WP SEC-FIX-5).

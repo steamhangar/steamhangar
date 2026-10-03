@@ -145,13 +145,69 @@ zfs set reservation=50G <pool>/steamhangar-cache   # guaranteed floor (optional)
 `compression=off`/`recordsize=1M` are ZFS properties on the dataset;
 the layout and ownership of the *mount point* are plain POSIX, same as any
 bind mount (`deploy/README.md` "Using a dedicated cache mount"). Both
-`cache/depot` and `tmp` must exist and belong to 101:101 before the first
-start -- a bind mount is not seeded the way a fresh named volume is:
+`cache/depot` and `tmp` must exist before the first start -- a bind mount is
+not seeded the way a fresh named volume is. Only `cache/depot` belongs to
+101:101; the mount point, `cache/` and `tmp/` stay root:root 0755
+(vault-core enforces that at every start and migrates a dataset set up with
+the older `chown -R 101:101` instruction, WP SEC-FIX-5):
 
 ```bash
 mkdir -p /mnt/<pool>/steamhangar-cache/cache/depot /mnt/<pool>/steamhangar-cache/tmp
-chown -R 101:101 /mnt/<pool>/steamhangar-cache
+chown 101:101 /mnt/<pool>/steamhangar-cache/cache/depot
 ```
+
+Give the dataset plain Unix permissions (no ACL that grants other users
+write access). vault-core probes as uid 101 that it cannot create files in
+the mount point, `cache/`, `tmp/` or `logs/`, and refuses to start if an ACL
+lets it.
+
+#### Before the first start of a SEC-FIX-5 image on an existing dataset
+
+1. **Check the ACL type** of the dataset:
+
+   ```bash
+   zfs get acltype,aclmode,aclinherit <pool>/steamhangar-cache
+   ```
+
+2. **Look for grants to uid 101 (or everyone/group)** on the mount point,
+   `cache`, `tmp` and `logs`:
+   - `acltype=nfsv4`:
+
+     ```bash
+     for d in /mnt/<pool>/steamhangar-cache /mnt/<pool>/steamhangar-cache/cache \
+              /mnt/<pool>/steamhangar-cache/tmp /mnt/<pool>/steamhangar-cache/logs; do
+         nfs4xdr_getfacl "$d"
+     done
+     ```
+
+     Any entry for uid 101, `group@`, `everyone@` or a group 101 is in that
+     allows `write_data`, `append_data` or `delete_child` keeps uid 101 able
+     to create, replace or remove names there -- vault-core will refuse.
+   - `acltype=posix`: `getfacl -p <same four paths>`; look for `user:101`,
+     `group:101` or a `mask`/`other` with `w`.
+   - `acltype=off`: plain mode bits only, nothing to check.
+
+3. **Take a snapshot** so the old state can be restored exactly:
+
+   ```bash
+   zfs snapshot <pool>/steamhangar-cache@before-sec-fix-5
+   ```
+
+4. **If an ACL grants write**, strip it: in the TrueNAS UI, Datasets ->
+   the dataset -> Edit Permissions -> "Strip ACL"; or from a shell
+   `zfs set acltype=posix <pool>/steamhangar-cache` (then `setfacl -b` on the
+   four paths if POSIX ACL entries remain). Afterwards set the modes the
+   ACL may have hidden:
+
+   ```bash
+   chmod 0755 /mnt/<pool>/steamhangar-cache /mnt/<pool>/steamhangar-cache/cache \
+              /mnt/<pool>/steamhangar-cache/tmp /mnt/<pool>/steamhangar-cache/logs
+   ```
+
+   With `aclmode=restricted` (check step 1's output) a `chmod` on a
+   directory that carries a non-trivial ACL fails with "Operation not
+   permitted" -- that is the `cannot set ... mode 0755` refusal below;
+   stripping the ACL first is what makes it work.
 
 uid/gid 101 is not a placeholder -- it's the exact numeric identity of the
 stock nginx image's `nginx` user that `vault-core`'s workers run as, and
@@ -364,7 +420,11 @@ may not control what the Docker daemon's own resolver is doing.
 
 | Symptom | Likely cause |
 |---|---|
-| `vault-core` exits at boot: `... is not writable by the nginx worker user` | `chown -R 101:101` on the dataset's mount point was skipped or ran before the dataset existed. |
+| `vault-core` exits at boot: `... is not writable by the nginx worker user` | `chown 101:101 <mount point>/cache/depot` was skipped or ran before the dataset existed. |
+| `vault-core` exits at boot: `21-vault-volume-ownership.sh: FATAL: cannot make ... owned by root` | The container may not chown the dataset (an override without CAP_CHOWN; the dataset shared over a root-squashing NFS export; files owned by a uid outside a userns-remapped daemon's mapping). Run the two commands the message prints: on the NAS itself for a local dataset or an NFS export, and with the remapped ids under userns-remap (`deploy/README.md` "Using a dedicated cache mount"). |
+| `vault-core` exits at boot: `21-vault-volume-ownership.sh: FATAL: cannot set ... to mode 0755` or `... is still '...' after chown/chmod` | The dataset has `aclmode=restricted` and a non-trivial ACL: chmod is refused. (With `aclmode=passthrough` the chmod succeeds but named ACL entries survive; then the uid-101 probe reports the directory as still open.) Strip the ACL (section 4.2, step 4), then run the printed `chmod 0755`. |
+| `vault-core` exits at boot: `21-vault-volume-ownership.sh: FATAL: the ownership probe ... is inconclusive` | Creating a test name as uid 101 failed with something other than "Permission denied" (a read-only dataset, a full pool). Fix that cause; the message quotes the error. |
+| `vault-core` exits at boot: `21-vault-volume-ownership.sh: FATAL: ... could still create a name in it` | An ACL on the dataset grants uid 101 (or everyone) write access although the mode is 0755. Strip the ACL (plain Unix permissions). |
 | `vault-core` exits at boot: `... DIFFERENT filesystems` | Something (a snapshot mount, an unrelated bind mount) is layered inside `/mnt/<pool>/steamhangar-cache` on a different device than the dataset root. `VAULT_CACHE_PATH` must point at one filesystem boundary, not a directory with something else mounted inside it. |
 | `docker compose up` fails with `invalid mount config for type "bind": field VolumeOptions must not be specified` | `VAULT_CACHE_PATH` is set and your `compose.yaml` still carries `nocopy` on vault-api's `/vault` bind (releases up to v0.1.0-rc4). Docker 28 (observed 28.3.1) refuses that. Update `compose.yaml`; the current one drops `nocopy` in bind mode. |
 | `docker compose up` starts but nothing ever gets cached, and there's no ownership error | Check `VAULT_CACHE_PATH` was actually picked up (Dockge/`docker compose config | grep -B2 /vault`) -- a value without a leading `/` is parsed as a *named volume reference*, not a bind path, and Compose refuses with `refers to undefined volume ...: invalid compose project` if it doesn't match `vault-cache` exactly. |

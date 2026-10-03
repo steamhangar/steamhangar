@@ -2752,7 +2752,9 @@ below carry their own later dates, item 12 is the current one).
       SQLite dump in the backup job.
     - [ ] Release notes for `v0.1.0`: the DS-Lite/CGNAT behaviour, the
       `extra_hosts` requirement with a dedicated `VAULT_CORE_BIND`, the
-      bind-mount precondition (`cache/depot` + `tmp`, 101:101).
+      bind-mount precondition (`cache/depot` + `tmp`; since SEC-FIX-5 only
+      `cache/depot` is 101:101, the rest root:root, migrated at start; a
+      rollback to an older image needs the old ownership back).
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
@@ -2795,19 +2797,30 @@ below carry their own later dates, item 12 is the current one).
       version, games); the clients sheet no longer needs the bypass
       banner as its only entry point.
 
-    - [ ] **SEC-FIX-5** — root may never follow a name uid 101 controls
+    - [x] **SEC-FIX-5** (done 2026-10-03) — root may never follow a name uid 101 controls
       in the cache volume (found in VER-2 review, 2026-10-03, severity
       medium under a compromised vault-api or nginx worker). (a)
       `25-vault-eventlog.sh` checks then creates/truncates the event log
       as root (`[ -e ] || : >`); (b) the root nginx master opens
       `/vault/logs/event.log` O_APPEND|O_CREAT and follows a symlink uid
-      101 can swap in at any time (CVE-2016-1247 class). Fix by
-      ownership: `/vault` and `/vault/logs` not renamable by uid 101, only
-      the files it must write owned by it; check the version hook
-      (VER-2), nginx temp dirs, GC and the bind-mount operator steps
-      (today `chown -R 101:101` on the cache dataset).
+      101 can swap in at any time (CVE-2016-1247 class). Implemented
+      2026-10-03, in review (user decisions 2026-10-03: before `v0.1.0`;
+      refuse to start when the migration is impossible, "Ist okay";
+      ADR-0016 addendum): `/vault`,
+      `cache/`, `tmp/`, `logs/` root:root 0755, uid 101 owns only
+      `cache/depot`, the nginx temp dirs and the event log; new start hook
+      `21-vault-volume-ownership.sh` migrates existing volumes and bind
+      mounts at every start or refuses to start with the host commands;
+      the version file is written by root; bind-mount operator step is now
+      `chown 101:101 <dir>/cache/depot` only (deploy/README).
 
     **C. Hygiene (any time, small)**
+    - [ ] Stale ownership leftovers after SEC-FIX-5 (frozen api code,
+      comments/dead setup only, each needs a freeze note):
+      `api/Dockerfile` (`chown -R 101:101 /vault`, never seeds a volume
+      because of `nocopy`), `api/vault_api/db.py` (~423) and
+      `api/vault_api/event_sweep.py` (~1303) comments, and the
+      `VAULT_EVENT_LOG_MAX_BYTES` text in `deploy/compose.yaml`.
     - [ ] verify-stack section 8: its `rootonly/` fixture cannot be
       removed by a non-root caller; clean it through a container like
       section 9 does.

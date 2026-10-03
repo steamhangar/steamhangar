@@ -49,6 +49,7 @@ dockerfile="$core_dir/Dockerfile"
 
 for f in "$dockerfile" \
          "$core_dir/docker/nginx.conf.template" \
+         "$core_dir/docker/21-vault-volume-ownership.sh" \
          "$core_dir/docker/25-vault-eventlog.sh" \
          "$core_dir/docker/26-vault-tls-passthrough.sh" \
          "$core_dir/docker/27-vault-upstream-rate.sh" \
@@ -61,6 +62,8 @@ for f in "$dockerfile" \
          "$core_dir/docker/29-vault-build-version.sh" \
          "$core_dir/tests/test-build-version-hook.sh" \
          "$core_dir/tests/build-version-race-rig.sh" \
+         "$core_dir/tests/test-root-only-dir.sh" \
+         "$core_dir/tests/volume-ownership-race-rig.sh" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/check-config-drift.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
@@ -91,6 +94,12 @@ bash "$core_dir/tests/test-upstream-pool-hook.sh"
 # its order, and render_must_fail checks that the collision stops the boot.
 echo "--- core/tests/test-build-version-hook.sh ---"
 bash "$core_dir/tests/test-build-version-hook.sh"
+
+# --- 0b-own. the root-only directory predicate, docker-free (WP SEC-FIX-5) -----
+# 21-, 25- and 29- decide with one predicate whether root may act on names in
+# a directory; the three copies must be identical and the predicate right.
+echo "--- core/tests/test-root-only-dir.sh ---"
+bash "$core_dir/tests/test-root-only-dir.sh"
 
 # --- 0c. ADR-0017 decision 5A: the upstream rate cap stays in @miss --------
 # The keepalive pool (WP CORE-FEAT-1b) ships with the cap untouched, and the
@@ -145,6 +154,26 @@ for expected in \
     }
 done
 
+# --- WP SEC-FIX-5: vault-core's capability set, from deploy/compose.yaml -----
+# Docker's default set includes CAP_FOWNER; the shipped compose does not
+# (cap_drop ALL + five cap_add). A start hook that chmods a directory root no
+# longer owns passed here with the default set and crash-looped the real
+# stack (measured in verify-stack, WP SEC-FIX-5). The renders and rigs that
+# model a real start run with exactly the compose set, read from the file.
+mapfile -t core_caps < <(awk '/^  vault-core:$/ { svc = 1; next } svc && /^  [a-z]/ { exit }
+    svc && /^    cap_add:$/ { c = 1; next } c && /^[[:space:]]*#/ { next }
+    c && /^      - [A-Z_]+$/ { print $2; next } c { exit }' "$repo_root/deploy/compose.yaml")
+if [ "${#core_caps[@]}" -lt 1 ]; then
+    echo "could not read vault-core's cap_add list from deploy/compose.yaml" >&2
+    exit 1
+fi
+CORE_CAP_ARGS=(--cap-drop ALL)
+for c in "${core_caps[@]}"; do CORE_CAP_ARGS+=(--cap-add "$c"); done
+echo "vault-core capability set (deploy/compose.yaml): ${core_caps[*]}"
+case " ${core_caps[*]} " in
+    *" FOWNER "*) echo "note: compose now grants FOWNER; the no-FOWNER renders below no longer model a restriction" ;;
+esac
+
 echo "docker pull $IMAGE"
 docker pull "$IMAGE"
 
@@ -167,7 +196,7 @@ case "$nginx_v" in
         echo "FAIL: the stream modules are dynamic in $IMAGE; the config has no load_module" >&2; exit 1 ;;
 esac
 
-# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window] [VAULT_TLS_PASSTHROUGH, "" = unset] [VAULT_UPSTREAM_POOL_HOSTS]
+# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window] [VAULT_TLS_PASSTHROUGH, "" = unset] [VAULT_UPSTREAM_POOL_HOSTS] [volume layout: new|old]
 #
 # A non-empty 4th argument additionally STARTS the rendered nginx and probes
 # the location /depot/ request guards over loopback (once is enough; the
@@ -199,10 +228,17 @@ esac
 # hosts in that list (0 for the scenarios that do not set it: the empty
 # render, still included). A non-empty list runs with --network none, see
 # the pool block inside the container script.
+#
+# Arg 10 (WP SEC-FIX-5): the /vault layout before the entrypoint runs. "new"
+# (default) is what core/Dockerfile ships: /vault, cache/, tmp/, logs/
+# root:root 0755, cache/depot 101:101. "old" is a volume from an image before
+# SEC-FIX-5: everything 101:101, an existing 101-owned event.log and version
+# file -- the upgrade, which 21-vault-volume-ownership.sh must migrate. Every
+# scenario asserts the ownership map the entrypoint leaves behind.
 render_and_test() {
     local label="$1" event_log="$2" expected_directives="$3"
     local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}" tls="${8:-}" tls_mode=on
-    local pool="${9:-}" pool_n
+    local pool="${9:-}" pool_n layout="${10:-new}"
     local -a tls_args=()
     [ -n "$tls" ] && tls_args=(-e VAULT_TLS_PASSTHROUGH="$tls")
     case "$tls" in 0|false|off|no) tls_mode=off ;; esac
@@ -217,8 +253,8 @@ render_and_test() {
     # a regression of that property.
     local -a net_args=()
     { [ -n "${4:-}" ] || [ -n "$pool" ]; } && net_args=(--network none)
-    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window', VAULT_TLS_PASSTHROUGH='${tls:-<unset>}', VAULT_UPSTREAM_POOL_HOSTS='$pool') ---"
-    docker run --rm "${net_args[@]}" "${tls_args[@]}" \
+    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window', VAULT_TLS_PASSTHROUGH='${tls:-<unset>}', VAULT_UPSTREAM_POOL_HOSTS='$pool', layout $layout) ---"
+    docker run --rm "${net_args[@]}" "${tls_args[@]}" "${CORE_CAP_ARGS[@]}" \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
         -v "$script_dir:/workspace/ci:ro" \
         -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
@@ -234,15 +270,25 @@ render_and_test() {
         -e TLS_MODE="$tls_mode" \
         -e VAULT_UPSTREAM_POOL_HOSTS="$pool" \
         -e EXPECTED_POOL_GROUPS="$pool_n" \
+        -e LAYOUT="$layout" \
         -e VAULT_BUILD_VERSION="0.1.0-rc9" \
         -e VAULT_BUILD_COMMIT="0123456789abcdef0123456789abcdef01234567" \
         --entrypoint sh \
         "$IMAGE" -c '
             set -eu
 
-            # Same layout core/Dockerfile creates for the real /vault volume.
-            mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
-            chown -R nginx:nginx /vault
+            # The /vault layout this scenario starts from (arg 10).
+            # (chmod first: these containers run with the compose capability
+            # set, no CAP_FOWNER, so root may chmod only what it owns.)
+            mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp /vault/logs
+            chmod 0755 /vault /vault/cache /vault/cache/depot /vault/tmp /vault/logs
+            if [ "$LAYOUT" = old ]; then
+                chown -R nginx:nginx /vault
+                su -s /bin/sh -c ": > /vault/logs/event.log; printf old > /vault/logs/vault-core-version.json" nginx
+            else
+                chown root:root /vault /vault/cache /vault/tmp /vault/logs
+                chown nginx:nginx /vault/cache/depot
+            fi
 
             # Place the template + our five owned hooks at their REAL
             # container paths. Copied (not bind-mounted) specifically so
@@ -253,13 +299,14 @@ render_and_test() {
             # `chmod 0755 /docker-entrypoint.d/25-... ... /docker-entrypoint.d/40-...`
             # RUN step, reproduced here instead of via a build).
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+            cp /workspace/core-docker/21-vault-volume-ownership.sh /docker-entrypoint.d/21-vault-volume-ownership.sh
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
             cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
+            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
 
             # The REAL stock entrypoint: runs every /docker-entrypoint.d/*.sh
             # hook in sorted order (stock 10-/15-/20-envsubst, our 25-, stock
@@ -332,7 +379,8 @@ render_and_test() {
             # exactly the reviewed JSON for the -e values above, 0644, under
             # /vault/logs (outside the document root, on the shared volume).
             launch_line() { grep -n "Launching /docker-entrypoint.d/$1" /tmp/entrypoint.log | head -n1 | cut -d: -f1; }
-            l20=$(launch_line 20-envsubst-on-templates.sh); l28=$(launch_line 28-vault-upstream-pool.sh)
+            l20=$(launch_line 20-envsubst-on-templates.sh); l21=$(launch_line 21-vault-volume-ownership.sh)
+            l25=$(launch_line 25-vault-eventlog.sh); l28=$(launch_line 28-vault-upstream-pool.sh)
             l29=$(launch_line 29-vault-build-version.sh); l40=$(launch_line 40-vault-preflight.sh)
             if [ -n "$l20" ] && [ -n "$l28" ] && [ -n "$l29" ] && [ -n "$l40" ] \
                && [ "$l20" -lt "$l29" ] && [ "$l28" -lt "$l29" ] && [ "$l29" -lt "$l40" ]; then
@@ -341,13 +389,48 @@ render_and_test() {
                 echo "FAIL (VER-2): hook order wrong or a hook did not run: 20=$l20 28=$l28 29=$l29 40=$l40"
                 status=1
             fi
+            # SEC-FIX-5: 21- fixes the volume before any hook touches it.
+            if [ -n "$l20" ] && [ -n "$l21" ] && [ -n "$l25" ] && [ "$l20" -lt "$l21" ] && [ "$l21" -lt "$l25" ]; then
+                echo "SEC-FIX-5 OK: hook order 20-envsubst ($l20) < 21-volume-ownership ($l21) < 25-eventlog ($l25)"
+            else
+                echo "FAIL (SEC-FIX-5): hook order wrong or a hook did not run: 20=$l20 21=$l21 25=$l25"
+                status=1
+            fi
             vf=/vault/logs/vault-core-version.json
             if grep -qx "{\"component\":\"vault-core\",\"version\":\"0.1.0-rc9\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"recorded_at\":\"[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\"}" "$vf" 2>/dev/null \
-               && [ "$(stat -c %a "$vf")" = "644" ] && [ "$(stat -c %u:%g "$vf")" = "101:101" ]; then
-                echo "VER-2 OK: $vf rendered by the real entrypoint, mode 0644, owned by nginx (the writer half, review M1)"
+               && [ ! -L "$vf" ] && [ "$(stat -c %a "$vf")" = "644" ] && [ "$(stat -c %u:%g "$vf")" = "0:0" ]; then
+                echo "VER-2 OK: $vf rendered by the real entrypoint, mode 0644, owned by root in a root-only logs/ (SEC-FIX-5)"
             else
-                echo "FAIL (VER-2): $vf missing, wrong, not 0644 or not owned 101:101: $(stat -c "%a %u:%g" "$vf" 2>&1) $(head -c 300 "$vf" 2>&1)"
+                echo "FAIL (VER-2): $vf missing, wrong, not 0644 or not owned 0:0: $(stat -c "%a %u:%g" "$vf" 2>&1) $(head -c 300 "$vf" 2>&1)"
                 status=1
+            fi
+
+            # --- SEC-FIX-5: the ownership map the entrypoint leaves ---------
+            # Root (hooks, nginx master) opens names in these four; uid 101
+            # must not be able to rename any of them. The workers write
+            # cache/depot and the temp dirs. Same map for both layouts: the
+            # old one must have been migrated.
+            own_expect() {
+                got=$(stat -c "%u:%g %a" "$2" 2>&1)
+                if [ "$got" = "$1" ]; then echo "SEC-FIX-5 OK ($LAYOUT): $2 is $got"; else echo "FAIL (SEC-FIX-5, $LAYOUT): $2 is $got, expected $1"; status=1; fi
+            }
+            for d in /vault /vault/cache /vault/tmp /vault/logs; do own_expect "0:0 755" "$d"; done
+            own_expect "101:101 755" /vault/cache/depot
+            for t in proxy client_body fastcgi uwsgi scgi; do own_expect "101:101 700" "/vault/tmp/$t"; done
+            for d in /vault /vault/cache /vault/tmp /vault/logs; do
+                if su -s /bin/sh -c "ln -s / $d/.uid101-probe" nginx 2>/dev/null; then
+                    echo "FAIL (SEC-FIX-5, $LAYOUT): uid 101 can create a name in $d"
+                    rm -f "$d/.uid101-probe"; status=1
+                else
+                    echo "SEC-FIX-5 OK ($LAYOUT): uid 101 cannot create a name in $d"
+                fi
+            done
+            if [ "$LAYOUT" = old ]; then
+                if grep -q "21-vault-volume-ownership.sh: /vault: 101:101 755 -> 0:0 755 (migrated)" /tmp/entrypoint.log; then
+                    echo "SEC-FIX-5 OK (old): 21- logged the migration of /vault"
+                else
+                    echo "FAIL (SEC-FIX-5, old): no migration line for /vault in the entrypoint output"; status=1
+                fi
             fi
             if grep -q "vault-core-version" "$conf"; then
                 echo "FAIL (VER-2): the rendered nginx config mentions the version file; it must not be served"
@@ -355,6 +438,8 @@ render_and_test() {
             fi
 
             # --- Pre-freeze review S3/P6: event-log file ownership ---------
+            # (SEC-FIX-5: in the root-only logs/ checked above, so uid 101
+            # owns the file -- vault-api truncates it -- but cannot rename it.)
             # nginx -t (like a real start) opens every access_log from the
             # root master process. 25-vault-eventlog.sh must have created
             # the file first and owned it to uid/gid 101 -- the numeric
@@ -736,58 +821,78 @@ render_and_test() {
         '
 }
 
-# render_must_fail <label> <VAULT_EVENT_LOG value>
+# render_must_fail <label> <VAULT_EVENT_LOG value> [hook] [setup] [post] [docker args...]
 #
 # Pre-freeze review P6: the VAULT_EVENT_LOG validation in
 # core/docker/25-vault-eventlog.sh guards config injection and a chown of
 # arbitrary directories, but only the two happy paths were ever rendered.
 # Each bad value below must abort the entrypoint chain (non-zero) AND the
-# abort must come from 25-vault-eventlog.sh itself -- a failure anywhere
-# else (pull, a later hook, nginx -t) would otherwise pass for the wrong
-# reason.
+# abort must come from <hook> itself (default 25-vault-eventlog.sh) -- a
+# failure anywhere else (pull, a later hook, nginx -t) would otherwise pass
+# for the wrong reason.
 #
-# Optional 3rd/4th args (pre-freeze review S5): plant a symlink at <link>
-# pointing to <target> before the entrypoint runs, to prove the hook refuses
-# to create/chown through it instead of following it as root.
+# The volume starts in the layout of an image from before SEC-FIX-5
+# (everything 101:101), i.e. the upgrade case. Optional shell snippets, run as
+# root inside the container (WP SEC-FIX-5; replaces the earlier link/target
+# pair of pre-freeze review S5):
+#   setup -- after the layout, before the hooks are installed (plant a
+#            symlink, change a mode);
+#   post  -- after the refusal; must exit 0, e.g. "the planted link's target
+#            is unchanged". A failing post check fails this case.
+# Extra args after <post> go to `docker run`. PATH stubs cannot be used
+# here: the stock entrypoint SOURCES 15-local-resolvers.envsh, which resets
+# PATH for every later hook -- see hook21_must_fail below for stubbed cases.
 render_must_fail() {
-    local label="$1" event_log="$2" link="${3:-}" target="${4:-}" hook="${5:-25-vault-eventlog.sh}" out rc=0
+    local label="$1" event_log="$2" hook="${3:-25-vault-eventlog.sh}" setup="${4:-}" post="${5:-}" out rc=0
+    if [ "$#" -ge 5 ]; then shift 5; else shift "$#"; fi
     echo "--- must refuse: $label (VAULT_EVENT_LOG='$event_log') ---"
-    out=$(docker run --rm \
+    out=$(docker run --rm "${CORE_CAP_ARGS[@]}" "$@" \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
         -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
         -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
         -e NGINX_ENVSUBST_FILTER='^VAULT_' \
         -e VAULT_RESOLVER="1.1.1.1" \
         -e VAULT_EVENT_LOG="$event_log" \
-        -e SYMLINK_AT="$link" \
-        -e SYMLINK_TO="$target" \
+        -e RMF_SETUP="$setup" \
+        -e RMF_POST="$post" \
         --entrypoint sh \
         "$IMAGE" -c '
             set -eu
-            mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
+            mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp /vault/logs
             chown -R nginx:nginx /vault
-            if [ -n "$SYMLINK_AT" ]; then
-                mkdir -p "$(dirname "$SYMLINK_AT")"
-                ln -s "$SYMLINK_TO" "$SYMLINK_AT"
-            fi
+            eval "$RMF_SETUP"
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+            cp /workspace/core-docker/21-vault-volume-ownership.sh /docker-entrypoint.d/21-vault-volume-ownership.sh
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
             cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
-            /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf
+            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
+            rc=0
+            /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf || rc=$?
+            if [ -n "$RMF_POST" ] && ! sh -c "$RMF_POST"; then
+                echo "RMF POST-CHECK FAILED: $RMF_POST"
+            fi
+            exit $rc
         ' 2>&1) || rc=$?
     if [ "$rc" = "0" ]; then
         printf '%s\n' "$out"
-        echo "FAIL: VAULT_EVENT_LOG='$event_log' was accepted (exit 0), expected a refusal" >&2
+        echo "FAIL: $label (VAULT_EVENT_LOG='$event_log') was accepted (exit 0), expected a refusal" >&2
         return 1
     fi
-    if ! printf '%s\n' "$out" | grep -qF "$hook: FATAL"; then
+    # Here-strings, not `printf | grep -q`: under pipefail grep -q's early exit
+    # can SIGPIPE the printf and turn a match into a failure (it did, once the
+    # output grew, WP SEC-FIX-5).
+    if ! grep -qF "$hook: FATAL" <<<"$out"; then
         printf '%s\n' "$out"
-        echo "FAIL: VAULT_EVENT_LOG='$event_log' failed (exit $rc), but not in $hook" >&2
+        echo "FAIL: $label (VAULT_EVENT_LOG='$event_log') failed (exit $rc), but not in $hook" >&2
+        return 1
+    fi
+    if grep -q "RMF POST-CHECK FAILED" <<<"$out"; then
+        printf '%s\n' "$out"
+        echo "FAIL: $label: refused by $hook, but the post check failed (something was changed before the refusal)" >&2
         return 1
     fi
     echo "refused as expected (exit $rc): $(printf '%s\n' "$out" | grep -F "$hook: FATAL" | head -n1)"
@@ -795,6 +900,10 @@ render_must_fail() {
 
 render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guards
 render_and_test "cache-event log ON" "/vault/logs/event.log" 2
+# WP SEC-FIX-5: the upgrade -- a volume from an image before SEC-FIX-5
+# (everything 101:101, an existing event.log and version file) is migrated by
+# 21-vault-volume-ownership.sh, through the real entrypoint, event log on.
+render_and_test "upgrade from a 101-owned volume, event log ON" "/vault/logs/event.log" 2 "" "" "" off "" "" old
 # WP CORE-FIX-3: the passthrough switched off, live (the runs above use the
 # default, on).
 render_and_test "HTTPS passthrough OFF" "" 0 probe-guards "" "" off 0
@@ -808,26 +917,151 @@ render_must_fail "relative path"            "logs/event.log"
 render_must_fail "injection character"      "/vault/logs/e;vent.log"
 render_must_fail "outside /vault"           "/etc/nginx/event.log"
 render_must_fail "'..' escape out of /vault" "/vault/../etc/event.log"
-render_must_fail "symlinked log directory"  "/vault/logs/event.log" /vault/logs /etc/nginx
-render_must_fail "symlinked log file"       "/vault/logs/event.log" /vault/logs/event.log /etc/passwd
+# Pre-freeze review S5, SEC-FIX-5: symlinks planted while the volume still
+# belonged to uid 101 are refused, never followed (their targets unchanged).
+# The snippets are shell code for the container, hence single-quoted.
+# shellcheck disable=SC2016
+{
+# (Targets get a mode 21- would never set, 0700: a chmod 0755 that went
+# through the link shows; the link itself always stats as 0777.)
+render_must_fail "symlinked log directory"  "/vault/logs/event.log" 21-vault-volume-ownership.sh \
+    'rm -rf /vault/logs; mkdir -p /etc/rig-l; chmod 0700 /etc/rig-l; ln -s /etc/rig-l /vault/logs' \
+    '[ "$(stat -c "%u:%g %a" /etc/rig-l)" = "0:0 700" ] && [ -L /vault/logs ]'
+render_must_fail "symlinked log file"       "/vault/logs/event.log" 25-vault-eventlog.sh \
+    'ln -s /etc/passwd /vault/logs/event.log' \
+    '[ "$(stat -c "%u:%g %a" /etc/passwd)" = "0:0 644" ] && [ -s /etc/passwd ]'
+render_must_fail "symlinked tmp/proxy"      "" 21-vault-volume-ownership.sh \
+    'mkdir -p /etc/rig-t; chmod 0700 /etc/rig-t; ln -s /etc/rig-t /vault/tmp/proxy' \
+    '[ "$(stat -c "%u:%g %a" /etc/rig-t)" = "0:0 700" ]'
+render_must_fail "symlinked cache/depot"    "" 21-vault-volume-ownership.sh \
+    'rm -rf /vault/cache/depot; mkdir -p /etc/rig-d; chmod 0700 /etc/rig-d; ln -s /etc/rig-d /vault/cache/depot' \
+    '[ "$(stat -c "%u:%g %a" /etc/rig-d)" = "0:0 700" ]'
+render_must_fail "symlinked cache/"         "" 21-vault-volume-ownership.sh \
+    'mv /vault/cache /vault/cache.real; ln -s /vault/cache.real /vault/cache' \
+    '[ "$(stat -c "%u:%g" /vault/cache.real)" = "101:101" ]'
+render_must_fail "hard-linked event log"    "/vault/logs/event.log" 25-vault-eventlog.sh \
+    ': > /vault/logs/event.log; ln /vault/logs/event.log /vault/cache/depot/other-name'
+render_must_fail "event log under cache/depot (owned by uid 101)" "/vault/cache/depot/event.log" 25-vault-eventlog.sh
+render_must_fail "event log under tmp/proxy (owned by uid 101)" "/vault/tmp/proxy/event.log" 25-vault-eventlog.sh
+}
+
+# hook21_must_fail <label> <setup> <stub-install> <post> <expected FATAL text>
+#
+# WP SEC-FIX-5: refusals of 21-vault-volume-ownership.sh that need PATH stubs
+# (render_must_fail cannot use them, see above). The hook runs directly, as
+# root, on the 101-owned layout of an image before SEC-FIX-5, after <setup>,
+# with <stub-install> having put stubs into /rigbin. It must exit non-zero
+# with its own FATAL containing <expected FATAL text> and naming the
+# host-side chown, and <post> (run with the real tools) must exit 0. The
+# expected text matters: the hook's checks back each other up (a failed
+# chown, a mode that does not stick and the uid-101 probe all end in a
+# refusal), so only the message shows WHICH layer refused -- each layer is
+# pinned by its own case (LEARNINGS, WP 4b.2 review).
+hook21_must_fail() {
+    local label="$1" want="$5" out rc=0
+    echo "--- must refuse: $label (21-vault-volume-ownership.sh, stubbed) ---"
+    out=$(docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
+        -v "$core_dir/docker:/workspace/core-docker:ro" \
+        -e H21_SETUP="$2" -e H21_STUBS="$3" -e H21_POST="$4" \
+        --entrypoint sh \
+        "$IMAGE" -c '
+            set -eu
+            mkdir -p /vault/cache/depot /vault/tmp /vault/logs /rigbin
+            chown -R nginx:nginx /vault
+            eval "$H21_SETUP"
+            eval "$H21_STUBS"
+            rc=0
+            PATH="/rigbin:$PATH" sh /workspace/core-docker/21-vault-volume-ownership.sh || rc=$?
+            if ! sh -c "$H21_POST"; then echo "H21 POST-CHECK FAILED: $H21_POST"; fi
+            exit $rc
+        ' 2>&1) || rc=$?
+    local fatal
+    fatal=$(grep -F "21-vault-volume-ownership.sh: FATAL" <<<"$out" || true)
+    if [ "$rc" = "0" ] || [ -z "$fatal" ] \
+       || grep -q "H21 POST-CHECK FAILED" <<<"$out" \
+       || ! grep -qF "chown root:root <dir>" <<<"$out" \
+       || ! grep -qF "$want" <<<"$fatal"; then
+        printf '%s\n' "$out"
+        echo "FAIL: $label: expected a 21-vault-volume-ownership.sh FATAL with '$want', naming the host-side chown, volume untouched (exit $rc)" >&2
+        return 1
+    fi
+    echo "refused as expected (exit $rc): $(printf '%s\n' "$out" | grep -F "21-vault-volume-ownership.sh: FATAL" | head -n1)"
+}
+
+# chown refused (no CAP_CHOWN, a user-namespaced daemon, a root-squashing
+# share): 21- cannot migrate and must refuse, naming the host-side commands,
+# with the volume left as it was. A failing `chown` stub here; the real
+# capability drop (--cap-drop CHOWN) on a prepared volume is
+# deploy/tests/verify-stack.sh's.
+# shellcheck disable=SC2016
+hook21_must_fail "chown not permitted for the migration" "" \
+    'printf "%s\n" "#!/bin/sh" "echo \"chown: \$*: Operation not permitted\" >&2" "exit 1" > /rigbin/chown; chmod 0755 /rigbin/chown' \
+    '[ "$(stat -c %u:%g /vault) $(stat -c %u:%g /vault/logs)" = "101:101 101:101" ]' \
+    "cannot make /vault owned by root"
+# A mode that does not stick (a filesystem that ignores chmod): /vault is
+# root:root 0777 and a no-op `chmod` stub; the after-check must refuse.
+# shellcheck disable=SC2016
+hook21_must_fail "a mode that does not stick" 'chown root:root /vault; chmod 0777 /vault' \
+    'printf "%s\n" "#!/bin/sh" "exit 0" > /rigbin/chmod; /bin/chmod 0755 /rigbin/chmod' \
+    '[ "$(stat -c "%u:%g %a" /vault/logs)" = "101:101 755" ]' \
+    "is still '0:0 777' after chown/chmod"
+# A filesystem whose mode bits do not decide access (an ACL): modelled with a
+# `stat` stub that reports root:root 0755 for a /vault that is really 101:101
+# 0777. Only 21-'s probe as uid 101 can notice; it must refuse before acting
+# on any name below /vault.
+# shellcheck disable=SC2016
+hook21_must_fail "mode bits that do not decide access (probe)" 'su -s /bin/sh -c "chmod 0777 /vault" nginx' \
+    'printf "%s\n" "#!/bin/sh" "case \"\$2\" in \"%u:%g %a\") echo \"0:0 755\"; exit 0 ;; \"%u %a\") echo \"0 755\"; exit 0 ;; esac" "exec /bin/busybox stat \"\$@\"" > /rigbin/stat; chmod 0755 /rigbin/stat' \
+    '[ "$(stat -c %u:%g /vault/logs) $(find /vault -name ".vault-owner-probe*" | wc -l)" = "101:101 0" ]' \
+    "could still create a name in"
+# The probe counts only EACCES/EPERM as "closed" (SEC-FIX-5 review): a name
+# that already exists made the fixed-name `ln -s` fail with EEXIST, read as
+# closed. (1) A probe name planted before the start (an `od` stub pins the
+# "random" part so the planted name is the one the hook picks) is refused.
+# (2) Any other failure of the probe (an `ln` stub answering "File exists")
+# is inconclusive and refused, not taken as closed.
+# shellcheck disable=SC2016
+hook21_must_fail "probe name already exists" \
+    'ln -s / /vault/.vault-owner-probe.0123456789abcdef' \
+    'printf "%s\n" "#!/bin/sh" "echo \" 01 23 45 67 89 ab cd ef\"" > /rigbin/od; chmod 0755 /rigbin/od' \
+    '[ -L /vault/.vault-owner-probe.0123456789abcdef ]' \
+    "already exists in /vault"
+# shellcheck disable=SC2016
+hook21_must_fail "probe fails for another reason (inconclusive)" "" \
+    'printf "%s\n" "#!/bin/sh" "echo \"ln: \$*: File exists\" >&2" "exit 1" > /rigbin/ln; chmod 0755 /rigbin/ln' \
+    '[ "$(stat -c %u:%g /vault/logs)" = "101:101" ]' \
+    "probe in /vault is inconclusive"
 # WP VER-2: an event log on the build-version file's name would be replaced by
 # the version JSON at every start; 25- accepts the path, 29- stops the boot.
-render_must_fail "event log on the build-version file" "/vault/logs/vault-core-version.json" "" "" 29-vault-build-version.sh
+render_must_fail "event log on the build-version file" "/vault/logs/vault-core-version.json" 29-vault-build-version.sh
 
-# WP VER-2 review M1: the hook runs as root in a directory uid 101 can
-# rename entries in. core/tests/build-version-race-rig.sh, DETERMINISTIC
-# mode: mktemp/mkdir wrappers make the attacker win every window (temp file
-# swapped for a symlink to a root-only file, logs/ planted right before
-# mkdir) and count that each attack ran, so the result never depends on
-# scheduling. The stochastic racer is a manual mode only (see the rig's
-# header): it disturbed 5 of 400 runs on the devbox and can disturb none on a
-# CI runner, which failed this gate on 5dac4a2.
-echo "--- VER-2 M1: the build-version hook never writes through a name uid 101 can swap ---"
-docker run --rm --network none \
+# WP VER-2 review M1, reworked in SEC-FIX-5: the build-version hook writes as
+# root, and only into a root-only directory chain.
+# core/tests/build-version-race-rig.sh, DETERMINISTIC mode: mktemp/mkdir
+# wrappers put a real uid-101 attacker into every window (temp file swapped
+# for a symlink to a root-only file, logs/ planted right before mkdir) and
+# count that each attack ran, so the result never depends on scheduling. The
+# stochastic racer is a manual mode only (see the rig's header).
+echo "--- VER-2 M1 / SEC-FIX-5: the build-version hook never writes through a name uid 101 can swap ---"
+docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
     -v "$core_dir/docker:/workspace/core-docker:ro" \
     -v "$core_dir/tests:/workspace/core-tests:ro" \
     --entrypoint sh \
     "$IMAGE" /workspace/core-tests/build-version-race-rig.sh /workspace/core-docker/29-vault-build-version.sh
+
+# WP SEC-FIX-5 (VER-2 review): root must never follow a name uid 101
+# controls -- neither 25-'s mkdir/create windows nor the nginx master's open
+# of the event log. core/tests/volume-ownership-race-rig.sh runs
+# 21-vault-volume-ownership.sh and 25-vault-eventlog.sh with chown/mkdir
+# wrappers that make a real uid-101 attacker strike inside each window, then
+# swaps the log for a link and runs `nginx -t` as root. The hooks from before
+# SEC-FIX-5 fail every scenario that boots (see the rig's header).
+echo "--- SEC-FIX-5: no root process follows a name uid 101 can swap on the volume ---"
+docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -v "$core_dir/tests:/workspace/core-tests:ro" \
+    --entrypoint sh \
+    "$IMAGE" /workspace/core-tests/volume-ownership-race-rig.sh /workspace/core-docker
 
 # Pre-freeze review S5: 40-vault-preflight.sh must refuse the base image's
 # STOCK /etc/nginx/nginx.conf (what is left at that path when the envsubst
@@ -887,7 +1121,7 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -934,7 +1168,7 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1060,7 +1294,7 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1121,7 +1355,7 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1185,7 +1419,7 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp /tmp/stub
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1284,7 +1518,7 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
-        for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1328,4 +1562,9 @@ echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "five bad VAULT_UPSTREAM_POOL_HOSTS lists are refused by the hook;" \
      "the build-version hook (WP VER-2) runs between 28- and 40-, writes the" \
      "reviewed 0644 JSON, is never served, and stops the boot only when" \
-     "VAULT_EVENT_LOG names its file."
+     "VAULT_EVENT_LOG names its file; the volume ownership (WP SEC-FIX-5)" \
+     "leaves /vault, cache/, tmp/ and logs/ root:root 0755 on a fresh and a" \
+     "migrated volume under the compose capability set, planted links, a" \
+     "hard-linked log, a log under a uid-101 directory, a refused chown and" \
+     "an open probe stop the boot, and no root process follows a name a" \
+     "real uid-101 attacker swaps (race rigs)."

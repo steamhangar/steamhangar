@@ -3703,12 +3703,16 @@ primitive exists to make it zero. Set `VAULT_EVENT_LOG_MAX_BYTES=0` and rotate
 externally if that is unacceptable — the shrink detection then picks the new
 file up.
 
-**In the shipped containers the sweeper cannot rotate at all, and that is
-handled rather than assumed away.** vault-api runs as uid/gid `101:101`
-(`api/Dockerfile`) while `/vault/logs` is vault-core's `nginx` user's `0755`
-directory and the event log it creates there is `0644`. The sweeper can open it
-for reading and **`os.truncate` raises `PermissionError`**. The design is
-fail-soft:
+**In the shipped containers the sweeper rotates in place.** vault-api runs as
+uid/gid `101:101` (`api/Dockerfile`). vault-core's start hook
+`25-vault-eventlog.sh` creates the event log and gives it to uid 101 before
+nginx's root master opens it (pre-freeze review S3; before that the master
+created it `root:root 0644` and every truncation failed). Since WP SEC-FIX-5
+the file sits in a `logs/` directory that belongs to **root** (0755): uid 101
+can write the file's content and `ftruncate` it, but can no longer rename or
+replace any name in `logs/` -- the sweeper never needed to, it truncates in
+place through a verified fd. Where truncation is still denied (a
+differently-owned log, a non-container setup), the design is fail-soft:
 
 - **Sweeping is unaffected.** Correctness is cursor-based and the cursor is
   already committed before truncation is attempted. Nothing is re-read, nothing
@@ -3718,9 +3722,10 @@ fail-soft:
   increments `event_sweep_state.truncate_denied_count`, which `GET /v1/stats`
   reports. An operator who never reads container logs still sees it climb.
 - **The fix is a permission change on the vault-core side** — make
-  `/vault/logs/event.log` writable by vault-api's uid (`chown 101:101`, or a
-  shared group with `0664`). Wiring that into `deploy/` is a follow-up work
-  package, not this one.
+  `/vault/logs/event.log` writable by vault-api's uid (`chown 101:101`; a
+  vault-core restart does it). Do not make `/vault/logs` itself writable by
+  uid 101: vault-core resets it to root:root 0755 at its next start, or
+  refuses to start if it cannot (`core/README.md` "Volume ownership").
 
 A native install (the WP 1.7 MVP setup, or a dev machine where both processes
 run as the same user) hits none of this and truncates normally. Both directions

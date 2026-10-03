@@ -32,6 +32,10 @@ LABEL org.opencontainers.image.title="SteamHangar vault-core" \
 # mechanism and core/docker/check-config-drift.sh for the contract that keeps
 # this template in sync with core/nginx/nginx.conf.
 COPY docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+# WP SEC-FIX-5: makes /vault, cache/, tmp/ and logs/ root:root 0755 at every
+# start (migrating a volume from an earlier image) and refuses to start when
+# it cannot. Runs before every other hook that touches /vault.
+COPY docker/21-vault-volume-ownership.sh /docker-entrypoint.d/21-vault-volume-ownership.sh
 COPY docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
 COPY docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
 COPY docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
@@ -55,7 +59,7 @@ COPY docker/check-config-drift.sh /opt/vault/check-config-drift.sh
 COPY nginx/vault-upstream-pool.conf /opt/vault/vault-upstream-pool.native.conf
 
 RUN set -eux; \
-    chmod 0755 /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
+    chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
     # image honest about what it serves.
@@ -78,8 +82,17 @@ RUN set -eux; \
     # uid/gid 101 = the stock nginx image's `nginx` user, which the workers run
     # as. vault-api's container user is created with the SAME numeric uid/gid so
     # both services can write this shared volume -- see api/Dockerfile.
-    chown -R nginx:nginx /vault; \
+    # WP SEC-FIX-5: uid 101 owns only what it writes (cache/depot here; the
+    # nginx temp dirs and the event log are created at start). /vault, cache/,
+    # tmp/ and logs/ stay root:root 0755, because root (the start hooks, the
+    # nginx master) opens names in them and must never follow a name uid 101
+    # could swap. A fresh named volume copies this ownership up, the mount
+    # point's included; 21-vault-volume-ownership.sh enforces it at every start.
+    chown root:root /vault /vault/cache /vault/tmp /vault/logs; \
+    chown nginx:nginx /vault/cache/depot; \
     chmod 0755 /vault /vault/cache /vault/cache/depot /vault/tmp /vault/logs; \
+    [ "$(stat -c '%u:%g %a' /vault /vault/cache /vault/tmp /vault/logs | sort -u)" = "0:0 755" ]; \
+    [ "$(stat -c '%u:%g %a' /vault/cache/depot)" = "101:101 755" ]; \
     # Fail the BUILD, not the first deployment, if the template ever loses its
     # placeholder or gains an unexpected one.
     grep -q '\${VAULT_RESOLVER}' /etc/nginx/templates/nginx.conf.template; \
@@ -135,15 +148,18 @@ RUN set -eux; \
     [ ! -e "$pool_check" ]; \
     # WP VER-2: the build-version hook writes exactly the reviewed JSON for a
     # valid pair and fails closed ("invalid") for a bad value, before the
-    # image ships. A scratch path, never /vault (that is the volume).
-    ver_check=/tmp/vault-ver-check/vault-core-version.json; \
+    # image ships. A scratch path, never /vault (that is the volume), and not
+    # under /tmp: as root the hook writes only into a root-only directory
+    # chain (SEC-FIX-5), and /tmp is world-writable.
+    ver_check=/opt/vault/ver-check/vault-core-version.json; \
     VAULT_BUILD_VERSION=0.1.0-rc9 VAULT_BUILD_COMMIT=0123456789abcdef0123456789abcdef01234567 \
         sh /docker-entrypoint.d/29-vault-build-version.sh "$ver_check"; \
     grep -qx '{"component":"vault-core","version":"0.1.0-rc9","commit":"0123456789abcdef0123456789abcdef01234567","recorded_at":"[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z"}' "$ver_check"; \
     VAULT_BUILD_VERSION='1.0 beta' VAULT_BUILD_COMMIT=XYZ \
         sh /docker-entrypoint.d/29-vault-build-version.sh "$ver_check" 2>/dev/null; \
     grep -q '"version":"invalid","commit":"invalid"' "$ver_check"; \
-    rm -rf /tmp/vault-ver-check
+    [ "$(stat -c '%u:%g %a' "$ver_check")" = "0:0 644" ]; \
+    rm -rf /opt/vault/ver-check
 
 # Declared so that a plain `docker run` without -v cannot silently fill the
 # container's writable layer with depot chunks, and so that the default is one
