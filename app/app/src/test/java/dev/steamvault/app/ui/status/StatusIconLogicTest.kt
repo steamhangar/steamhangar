@@ -161,41 +161,73 @@ class StatusIconLogicTest {
         }
     }
 
-    // ---------- download drift/opacity keyframe math ----------
-    // Ported from the `vault-dlslide` CSS keyframes (theme.css); pinned at
-    // the keyframe boundaries so a transcription slip is caught exactly.
+    // ---------- download glyph: "arrow falls through" (WP APP-FIX-3) ----------
+    // Port of web/tests/status-icon-download.test.js's geometry pins
+    // (WP WEB-FIX-7), measured on DOWNLOAD_ARROW_SEGMENTS -- the same list
+    // StatusIcon.kt draws.
+
+    private val half = GLYPH_STROKE_WIDTH_UNITS / 2f
 
     @Test
-    fun `drift starts at -1_6 and ends at 1_8`() {
-        assertEquals(-1.6f, downloadDriftFraction(0f), 0.0001f)
-        assertEquals(1.8f, downloadDriftFraction(1f), 0.0001f)
+    fun `fall offset is linear from 0 to one period and clamped`() {
+        assertEquals(0f, downloadFallOffset(0f), 1e-4f)
+        assertEquals(16f, downloadFallOffset(0.5f), 1e-4f)
+        assertEquals(DOWNLOAD_FALL_PERIOD, downloadFallOffset(1f), 1e-4f)
+        assertEquals(0f, downloadFallOffset(-3f), 1e-4f)
+        assertEquals(DOWNLOAD_FALL_PERIOD, downloadFallOffset(7f), 1e-4f)
     }
 
     @Test
-    fun `drift is clamped outside the 0 to 1 range`() {
-        assertEquals(-1.6f, downloadDriftFraction(-5f), 0.0001f)
-        assertEquals(1.8f, downloadDriftFraction(5f), 0.0001f)
+    fun `period, duration and disc radius are the WEB-FIX-7 values`() {
+        assertEquals(32f, DOWNLOAD_FALL_PERIOD, 0f)
+        assertEquals(1600, DOWNLOAD_FALL_DURATION_MS)
+        assertEquals(18.75f, BADGE_DISC_RADIUS_UNITS, 1e-4f)
     }
 
     @Test
-    fun `opacity keyframes match the CSS 0-30-70-100 percent stops`() {
-        assertEquals(0.35f, downloadOpacityFraction(0f), 0.0001f)
-        assertEquals(1f, downloadOpacityFraction(0.3f), 0.0001f)
-        assertEquals(1f, downloadOpacityFraction(0.7f), 0.0001f)
-        assertEquals(0.35f, downloadOpacityFraction(1f), 0.0001f)
-    }
-
-    @Test
-    fun `opacity never reaches zero (status icon must never be blank)`() {
-        // mockup NOTES.md round 7: the glyph doubles as the tap target and
-        // must never fade to a fully blank disc.
-        var t = 0f
-        while (t <= 1f) {
-            assertTrue(
-                "opacity dropped to $t at progress=$t",
-                downloadOpacityFraction(t) >= 0.35f,
-            )
-            t += 0.01f
+    fun `the trailing arrow sits exactly one period above the leading one at every phase`() {
+        for (i in 0..20) {
+            val (lead, trail) = downloadArrowOffsets(i / 20f)
+            assertEquals(DOWNLOAD_FALL_PERIOD, lead - trail, 1e-4f)
         }
+    }
+
+    @Test
+    fun `MUTATION PIN -- at rest (and under reduced motion) the trailing arrow is fully outside the disc, the leading one fully inside`() {
+        val (lead, trail) = downloadArrowOffsets(0f)
+        assertTrue("parked trailing arrow must not peek into the disc", arrowNearestInkDistance(trail) > BADGE_DISC_RADIUS_UNITS)
+        assertEquals(arrowTotalLength(), arrowLengthInsideDisc(lead), 1e-3f)
+    }
+
+    @Test
+    fun `MUTATION PIN -- at the end frame the leading arrow has left the disc by at least 1 unit, so the snap back is invisible`() {
+        val (lead, trail) = downloadArrowOffsets(1f)
+        val margin = arrowNearestInkDistance(lead) - BADGE_DISC_RADIUS_UNITS
+        assertTrue("leading arrow ink only $margin units outside the disc at the end frame", margin >= 1f)
+        // ...and the trailing arrow then sits exactly at the rest position.
+        assertEquals(0f, trail, 1e-4f)
+    }
+
+    @Test
+    fun `at every phase at least one arrow is mostly (65 percent) inside the disc -- never an empty badge`() {
+        val full = arrowTotalLength()
+        var worst = Float.MAX_VALUE
+        for (i in 0..240) {
+            val (lead, trail) = downloadArrowOffsets(i / 240f)
+            worst = minOf(worst, maxOf(arrowLengthInsideDisc(lead, inset = half), arrowLengthInsideDisc(trail, inset = half)))
+        }
+        assertTrue("worst phase shows only $worst of $full units", worst >= full * 0.65f)
+    }
+
+    @Test
+    fun `the arrow segments are the SVG paths ported coordinate for coordinate`() {
+        assertEquals(
+            listOf(
+                GlyphSegment(12f, 3.5f, 12f, 13f),
+                GlyphSegment(7.4f, 8.7f, 12f, 13.3f),
+                GlyphSegment(12f, 13.3f, 16.6f, 8.7f),
+            ),
+            DOWNLOAD_ARROW_SEGMENTS,
+        )
     }
 }

@@ -1,6 +1,8 @@
 package dev.steamvault.app.ui.clients.logic
 
 import dev.steamvault.app.net.model.ClientOut
+import java.time.DateTimeException
+import java.time.Instant
 import kotlin.math.roundToInt
 
 /**
@@ -106,6 +108,40 @@ data class ClientRowModel(
     val bypassSuspected: Boolean,
     val addresses: List<String>,
     val stats: ClientRowStats,
+    val presence: ClientPresenceView,
+)
+
+/**
+ * The server's verdict on whether a PC's agent is still reporting (WP
+ * AGENT-FEAT-1; Android parity in WP APP-FEAT-2). `ClientOut.presence` is
+ * computed by vault-api per request (`agent_reports.presence`: offline
+ * after two report intervals plus five minutes) and is passed through
+ * VERBATIM -- never recomputed here from `last_reported_at`, so the app
+ * and the web can never disagree about who is online.
+ */
+enum class ClientPresence { ONLINE, OFFLINE }
+
+/** `"online"`/`"offline"` -> the enum; anything else (a server older than
+ * AGENT-FEAT-1 sends no field) -> `null`, rendered as "no presence shown",
+ * never guessed. */
+fun clientPresenceFor(wire: String?): ClientPresence? = when (wire) {
+    "online" -> ClientPresence.ONLINE
+    "offline" -> ClientPresence.OFFLINE
+    else -> null
+}
+
+/**
+ * The presence half of a PC row: online/offline (server verdict), when it
+ * last reported, and which agent build sent the latest report.
+ *
+ * @param agentVersion verbatim (trimmed), like web WEB-FEAT-3's
+ *   `agentVersionText`; `null` = "version unknown" (an agent from before
+ *   AGENT-FEAT-1).
+ */
+data class ClientPresenceView(
+    val presence: ClientPresence?,
+    val lastReportedAt: String?,
+    val agentVersion: String?,
 )
 
 fun buildClientRowModel(client: ClientOut): ClientRowModel = ClientRowModel(
@@ -117,4 +153,34 @@ fun buildClientRowModel(client: ClientOut): ClientRowModel = ClientRowModel(
         bytesServed = client.bytes_served,
         hitRatePercent = hitRatePercent(client),
     ),
+    presence = ClientPresenceView(
+        presence = clientPresenceFor(client.presence),
+        lastReportedAt = client.last_reported_at.takeIf { it.isNotBlank() },
+        agentVersion = client.agent_version?.trim()?.takeIf { it.isNotEmpty() },
+    ),
 )
+
+/**
+ * "4 min ago" from an ISO timestamp -- Kotlin port of web WEB-FEAT-3's
+ * `format.js::formatAgo`, same thresholds and words (verbatim-port
+ * exception, pinned by string equality in `ClientPresenceTest`). Used for
+ * the "last seen ..." WORDS only, never for a presence decision. `null`
+ * for a missing or unparseable time.
+ */
+fun formatAgo(iso: String?, nowMs: Long = System.currentTimeMillis()): String? {
+    if (iso.isNullOrBlank()) return null
+    val t = try {
+        Instant.parse(iso).toEpochMilli()
+    } catch (_: DateTimeException) {
+        return null
+    }
+    val seconds = Math.floorDiv(nowMs - t, 1000L)
+    if (seconds < -60) return "in the future (clocks differ)"
+    if (seconds < 60) return "just now"
+    val minutes = seconds / 60
+    if (minutes < 60) return "$minutes min ago"
+    val hours = minutes / 60
+    if (hours < 24) return "$hours h ago"
+    val days = hours / 24
+    return "$days day${if (days == 1L) "" else "s"} ago"
+}

@@ -1,6 +1,11 @@
 package dev.steamvault.app.demo
 
 import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.net.model.AboutOut
+import dev.steamvault.app.net.model.OwnedGame
+import dev.steamvault.app.net.model.OwnedGamesRelayOut
+import dev.steamvault.app.net.model.PlayerSummariesRelayOut
+import dev.steamvault.app.net.model.PlayerSummaryEntry
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.DeletedDepotOut
@@ -41,7 +46,13 @@ import java.time.Instant
  * here until this file's constructor call sites are updated too. This is a
  * stronger guarantee than a hand-checked "matches the docs" claim.
  *
- * **No Steam identity/library fixture on purpose (WP brief constraint 5:
+ * **WP APP-FEAT-1 update:** the Library's owned games now come from the
+ * vault's stored `steam_library_steamid` plus the relay for that id, both
+ * vault-api-mediated, so this class now has a relay fixture
+ * ([ownedGames]/[playerSummaries], [seedOwnedGames]) and the setting. The
+ * paragraph below still holds for the device's own OpenID identity.
+ *
+ * **No Steam identity fixture on purpose (WP brief constraint 5:
  * "do not touch the credential store or the OpenID flow").** Demo mode
  * never builds a [dev.steamvault.app.net.VaultApiClient], so
  * [dev.steamvault.app.repo.SteamIdentityRepositoryImpl.ownedGames] already
@@ -74,6 +85,8 @@ class DemoState private constructor(
      * same freshness posture [seedGames]/[seedJobs]/[seedClients] already
      * take for their own timestamps. */
     private val lastSweepAt: String,
+    private val about: AboutOut,
+    private val ownedGamesFixture: List<OwnedGame>,
 ) {
     private var nextJobId = (jobs.maxOfOrNull { it.id } ?: 900_099) + 1
     private val settingsOverrides = mutableMapOf<String, String>()
@@ -125,7 +138,27 @@ class DemoState private constructor(
         if (existing != null) {
             return PrefillJobRef(appid = appid, job_id = existing.id, status = existing.status, deduplicated = true)
         }
-        val game = games.find { it.appid == appid }
+        var game = games.find { it.appid == appid }
+        if (game == null) {
+            // WP APP-FIX-2 ("demo must mirror the API", docs/LEARNINGS.md WP
+            // WEB-FIX-4): the real POST /v1/prefill inserts the apps row with
+            // name = NULL (`INSERT OR IGNORE INTO apps (appid, status)`,
+            // api/vault_api/jobs.py); only a depot mapping names it later.
+            // Copying the owned title here would hide an "App <id>" bug the
+            // real server shows. A never-filled row is needs_force = true.
+            game = DemoGame(
+                appid = appid,
+                name = null,
+                status = STATUS_IDLE,
+                needsForce = true,
+                depots = mutableListOf(),
+                lastPrefillAt = null,
+                lastManifestCheck = null,
+                gcReclaimableBytes = 0L,
+                gcHeldBackBytes = 0L,
+            )
+            games.add(game)
+        }
         val job = DemoJob(
             id = nextJobId++,
             appid = appid,
@@ -136,7 +169,7 @@ class DemoState private constructor(
             ticksLeft = PREFILL_TICKS,
         )
         jobs.add(job)
-        game?.status = STATUS_RUNNING
+        game.status = STATUS_RUNNING
         return PrefillJobRef(appid = appid, job_id = job.id, status = job.status, deduplicated = false)
     }
 
@@ -303,6 +336,40 @@ class DemoState private constructor(
     @Synchronized
     fun clientsOut(): List<ClientOut> = clients
 
+    // ---- about (WP APP-FEAT-2) ------------------------------------------------
+
+    @Synchronized
+    fun aboutOut(): AboutOut = about
+
+    // ---- Steam relay for an explicit SteamID64 (WP APP-FEAT-1) ----------------
+
+    /**
+     * `GET /v1/steam/owned-games` -- mirrors the real route's input check
+     * (`422` for a steamid that is not a valid SteamID64) and answers with
+     * the fictional [seedOwnedGames] list for any valid id. The demo has no
+     * relay-key concept (Android has no key UI), so it never answers `409`.
+     */
+    @Synchronized
+    fun ownedGames(steamId64: String): OwnedGamesRelayOut {
+        requireDemoSteamId(steamId64)
+        return OwnedGamesRelayOut(configured = true, game_count = ownedGamesFixture.size, games = ownedGamesFixture)
+    }
+
+    @Synchronized
+    fun playerSummaries(steamId64: String): PlayerSummariesRelayOut {
+        requireDemoSteamId(steamId64)
+        return PlayerSummariesRelayOut(
+            configured = true,
+            players = listOf(PlayerSummaryEntry(steamid = steamId64, personaname = "vaultkeeper_demo", personastate = 1)),
+        )
+    }
+
+    private fun requireDemoSteamId(steamId64: String) {
+        if (!isDemoValidSteamId64(steamId64)) {
+            throw VaultApiError.Validation("invalid steamid", 422, "steamid must be a SteamID64 (17 digits)")
+        }
+    }
+
     // ---- settings (ADR-0009 db > env > default precedence) ------------------
 
     @Synchronized
@@ -319,7 +386,18 @@ class DemoState private constructor(
             if (value == null || value is JsonNull) {
                 settingsOverrides.remove(key)
             } else {
-                settingsOverrides[key] = rawTextOf(value)
+                val raw = rawTextOf(value)
+                // Mirrors config.parse_steam_library_steamid (WP API-FEAT-1):
+                // trimmed, blank = explicitly not set, otherwise a SteamID64.
+                if (key == STEAM_LIBRARY_STEAMID_KEY && raw.trim().isNotEmpty() && !isDemoValidSteamId64(raw.trim())) {
+                    throw VaultApiError.Validation(
+                        "invalid setting",
+                        422,
+                        "'$key': must be a SteamID64: exactly 17 ASCII digits in the individual-account range; " +
+                            "blank (or null over the API) clears it",
+                    )
+                }
+                settingsOverrides[key] = if (key == STEAM_LIBRARY_STEAMID_KEY) raw.trim() else raw
             }
         }
         return settingsOut()
@@ -454,6 +532,8 @@ class DemoState private constructor(
             seedJobs(),
             seedClients(),
             Instant.now().minusSeconds(DEMO_LAST_SWEEP_AGO_SECONDS).toString(),
+            seedAbout(),
+            seedOwnedGames(),
         )
     }
 }
@@ -494,6 +574,24 @@ private val WEBHOOK_EVENTS_ALL = listOf(
  * pins").
  */
 internal const val CONFIG_DEFAULT_AUTO_GC = "execute"
+
+private const val STEAM_LIBRARY_STEAMID_KEY = "steam_library_steamid"
+
+private const val STEAM_ID64_BASE = 76561197960265728L
+
+/**
+ * The demo's own SteamID64 check, the same rule as
+ * `net/steam/SteamId64.validate` and the server's `valid_steamid64`: exactly
+ * 17 ASCII digits in the individual-account range. Restated here because
+ * demo code may not import `net.steam` (DemoModeImportAllowlistTest);
+ * `DemoAppFeat2Test` (its TWIN PIN test) checks it against `SteamId64.validate` on the same
+ * inputs so the two cannot drift (the twin-pin rule).
+ */
+internal fun isDemoValidSteamId64(value: String): Boolean {
+    if (value.length != 17 || value.any { it !in '0'..'9' }) return false
+    val parsed = value.toLongOrNull() ?: return false
+    return parsed in STEAM_ID64_BASE..(STEAM_ID64_BASE + 0xFFFFFFFFL)
+}
 internal const val CONFIG_DEFAULT_SWEEP_INCLUDE_CACHED = true
 
 private val SETTINGS_SPECS: Map<String, DemoSettingSpec> = listOf(
@@ -548,6 +646,11 @@ private val SETTINGS_SPECS: Map<String, DemoSettingSpec> = listOf(
             )
         },
     ),
+    // WP APP-FEAT-1 (mirrors WP API-FEAT-1's `steam_library_steamid`): blank
+    // by default, like a fresh real vault (VAULT_STEAM_LIBRARY_STEAMID unset
+    // -> source "default"). Set it in the demo's Settings to see the
+    // owned-games merge in the Library. A JSON string on the wire.
+    DemoSettingSpec(STEAM_LIBRARY_STEAMID_KEY, default = JsonPrimitive(""), env = null, applies = "immediately"),
     DemoSettingSpec("db_path", default = JsonPrimitive("/data/vault.db"), env = null, applies = "restart-required", envOnly = true),
     DemoSettingSpec("cache_root", default = JsonPrimitive("/vault/cache"), env = null, applies = "restart-required", envOnly = true),
     DemoSettingSpec(

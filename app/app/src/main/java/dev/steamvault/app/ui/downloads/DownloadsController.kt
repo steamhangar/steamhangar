@@ -57,6 +57,26 @@ class DownloadsController(
     var busyJobIds by mutableStateOf<Set<Int>>(emptySet())
         private set
 
+    /** `true` once one `GET /v1/games` poll succeeded -- gates the owned-
+     * names load below (web `state.gamesKnown`): before the first games
+     * poll every job "lacks a vault name" and would trigger it for nothing. */
+    var gamesKnown by mutableStateOf(false)
+        private set
+
+    /** WP APP-FIX-2: appids with a failure-hint Retry call in flight. */
+    var retryBusyAppids by mutableStateOf<Set<Int>>(emptySet())
+        private set
+
+    /** WP APP-FIX-2: history rows whose collapsed raw SteamPrefill output
+     * (under a failure hint) the user opened. Closed by default, kept per
+     * job for the life of this screen (web `st.rawOpen`). */
+    var rawOutputOpenJobIds by mutableStateOf<Set<Int>>(emptySet())
+        private set
+
+    fun toggleRawOutput(jobId: Int) {
+        rawOutputOpenJobIds = if (jobId in rawOutputOpenJobIds) rawOutputOpenJobIds - jobId else rawOutputOpenJobIds + jobId
+    }
+
     private val excerptCache = ExcerptCache(fetchExcerpt = { jobId ->
         try {
             Result.success(jobsRepository.detail(jobId).log_excerpt ?: "")
@@ -126,6 +146,7 @@ class DownloadsController(
     suspend fun refreshGamesOnce() {
         try {
             games = gamesRepository.list()
+            gamesKnown = true
         } catch (_: VaultApiError) {
             // A games-poll hiccup degrades name lookups to "App {id}"
             // (nameFor's own fallback) rather than blanking the screen --
@@ -152,6 +173,27 @@ class DownloadsController(
     fun cancel(scope: CoroutineScope, jobId: Int) = runControl(scope, jobId) {
         jobsRepository.cancel(jobId)
         strings.cancelRequested()
+    }
+
+    /**
+     * WP APP-FIX-2: a failure hint's Retry -- a new prefill for the same app
+     * (`POST /v1/prefill`; vault-api dedupes an in-flight one), then an
+     * out-of-cadence jobs refresh. Mirrors web `downloads.js::onRetry`.
+     */
+    fun retry(scope: CoroutineScope, appid: Int) {
+        if (appid in retryBusyAppids) return
+        retryBusyAppids = retryBusyAppids + appid
+        scope.launch {
+            try {
+                jobsRepository.prefill(listOf(appid))
+                toast = strings.queuedForDownload()
+                refreshJobsOnce()
+            } catch (e: VaultApiError) {
+                toast = e.message ?: strings.actionFailedFallback()
+            } finally {
+                retryBusyAppids = retryBusyAppids - appid
+            }
+        }
     }
 
     private fun runControl(scope: CoroutineScope, jobId: Int, action: suspend () -> String) {

@@ -62,8 +62,15 @@ fun mergeLibrary(vaultGames: List<GameSummary>, ownedGames: List<OwnedGame>?): L
     if (ownedGames.isNullOrEmpty()) return vaultGames
 
     val knownAppids = vaultGames.mapTo(HashSet()) { it.appid }
+    // WP APP-FIX-2 (parity with web's mergeOwnedLibrary): the one thing a
+    // vault row takes from the owned list is a MISSING name -- vault-api
+    // has no name for an app it never resolved, so an owned game queued
+    // from its detail sheet would otherwise read "App 1234" here while
+    // Steam just told us its title. Every cache-state field stays the
+    // vault's.
+    val filledVault = fillMissingNames(vaultGames, ownedGames)
     val ownedOnly = ownedGames
-        .filter { it.appid !in knownAppids }
+        .filter { it.appid > 0 && it.appid !in knownAppids }
         // GetOwnedGames can legitimately list the same appid twice across
         // Steam's own quirks (e.g. demo + full game sharing an id in some
         // catalog edge cases) -- de-dupe defensively so the grid never
@@ -82,5 +89,53 @@ fun mergeLibrary(vaultGames: List<GameSummary>, ownedGames: List<OwnedGame>?): L
             )
         }
 
-    return vaultGames + ownedOnly
+    return filledVault + ownedOnly
+}
+
+/** A usable display name: non-null and not blank (web `hasText`). */
+fun hasText(name: String?): Boolean = name != null && name.isNotBlank()
+
+/**
+ * The title every surface shows for an app (WP APP-FIX-2, port of web
+ * `owned-library.js::appTitle`): the vault's name, then the owned list's
+ * name, then "App <id>". vault-api has no name for an app it never
+ * resolved: `POST /v1/prefill` inserts the `apps` row with `name = NULL`
+ * (api/vault_api/jobs.py), and only a depot mapping names it later. A job
+ * for an owned-only game therefore has a vault row with no name, and the
+ * job itself carries none (`JobSummary` has no name field).
+ *
+ * "App <id>" stays a Kotlin literal under app/README.md's verbatim-port
+ * exception: it is web's own fallback, pinned by string equality in
+ * `OwnedNamesTest`.
+ */
+fun appTitle(appid: Int, vaultName: String?, ownedName: String? = null): String {
+    if (vaultName != null && hasText(vaultName)) return vaultName.trim()
+    if (ownedName != null && hasText(ownedName)) return ownedName.trim()
+    return "App $appid"
+}
+
+/** appid -> name from the owned list; the first non-blank name per appid
+ * wins, entries with a non-positive appid are ignored (web
+ * `ownedNamesByAppid`). */
+fun ownedNamesByAppid(ownedGames: List<OwnedGame>?): Map<Int, String> {
+    val names = LinkedHashMap<Int, String>()
+    for (g in ownedGames.orEmpty()) {
+        if (g.appid > 0 && g.appid !in names && hasText(g.name)) names[g.appid] = g.name
+    }
+    return names
+}
+
+/**
+ * The vault rows with a missing name filled in from the owned list (web
+ * `fillMissingNames`). Adds no rows and leaves every other field alone, so
+ * surfaces that must only see vault-known apps (Downloads) can use it for
+ * names alone. Returns [vaultGames] itself when there is nothing to fill.
+ */
+fun fillMissingNames(vaultGames: List<GameSummary>, ownedGames: List<OwnedGame>?): List<GameSummary> {
+    val names = ownedNamesByAppid(ownedGames)
+    if (names.isEmpty()) return vaultGames
+    return vaultGames.map { g ->
+        val ownedName = if (!hasText(g.name)) names[g.appid] else null
+        if (ownedName != null) g.copy(name = ownedName) else g
+    }
 }

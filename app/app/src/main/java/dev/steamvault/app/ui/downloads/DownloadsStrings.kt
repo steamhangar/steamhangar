@@ -38,6 +38,9 @@ interface DownloadsStrings {
     fun cancelRequested(): String
     fun actionFailedFallback(): String
     fun logFetchErrorFallback(): String
+
+    /** WP APP-FIX-2: the failure hint's Retry (web `onRetry`'s toast). */
+    fun queuedForDownload(): String
 }
 
 class AndroidDownloadsStrings(private val resources: Resources) : DownloadsStrings {
@@ -46,4 +49,5 @@ class AndroidDownloadsStrings(private val resources: Resources) : DownloadsStrin
     override fun cancelRequested(): String = resources.getString(R.string.downloads_toast_cancel_requested)
     override fun actionFailedFallback(): String = resources.getString(R.string.downloads_toast_action_failed)
     override fun logFetchErrorFallback(): String = resources.getString(R.string.downloads_log_fetch_error_fallback)
+    override fun queuedForDownload(): String = resources.getString(R.string.downloads_toast_retry_queued)
 }

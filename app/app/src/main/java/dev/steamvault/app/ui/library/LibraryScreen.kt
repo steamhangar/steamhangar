@@ -56,7 +56,6 @@ import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
-import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.detail.AndroidDetailStrings
@@ -70,7 +69,12 @@ import dev.steamvault.app.ui.library.logic.buildGameCardModel
 import dev.steamvault.app.ui.library.logic.chipCounts
 import dev.steamvault.app.ui.library.logic.indexLiveJobsByAppid
 import dev.steamvault.app.ui.library.logic.isKnownToVault
+import dev.steamvault.app.ui.library.logic.OwnedLibraryState
+import dev.steamvault.app.ui.library.logic.OwnedNotice
 import dev.steamvault.app.ui.library.logic.mergeLibrary
+import dev.steamvault.app.ui.library.logic.noticeOffersReload
+import dev.steamvault.app.ui.library.logic.noticeOffersSettings
+import dev.steamvault.app.ui.library.logic.ownedNoticeFor
 import dev.steamvault.app.ui.library.logic.normalizeQuery
 import dev.steamvault.app.ui.library.logic.visibleGames
 import dev.steamvault.app.ui.theme.VaultColors
@@ -112,9 +116,10 @@ fun LibraryScreen(
     jobsRepository: JobsRepository,
     mappingRepository: MappingRepository,
     cacheRepository: CacheRepository,
-    identityRepository: SteamIdentityRepository,
+    ownedLibrary: OwnedLibraryController,
     libraryPreferences: LibraryPreferences,
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     demoMode: Boolean,
 ) {
     val scope = rememberCoroutineScope()
@@ -125,7 +130,6 @@ fun LibraryScreen(
             jobsRepository,
             mappingRepository,
             cacheRepository,
-            identityRepository,
             libraryPreferences,
             AndroidLibraryStrings(resources),
         )
@@ -154,15 +158,16 @@ fun LibraryScreen(
             controller.pollJobsForever()
         }
     }
-    LaunchedEffect(lifecycleOwner, controller) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            controller.refreshOwnedGamesOnce()
-        }
-    }
+    // WP APP-FEAT-1: the owned list is the vault's stored library SteamID64
+    // (GET /v1/settings) plus the relay, read on every Library open (this
+    // effect) and on the notice's Reload -- never on the poll interval, the
+    // relay calls Steam. Same account on every device (web WEB-FEAT-1).
+    LaunchedEffect(ownedLibrary) { ownedLibrary.load() }
     LaunchedEffect(controller.jobs) { onJobsSnapshot(controller.jobs) }
 
-    val merged = remember(controller.games, controller.ownedGames) {
-        mergeLibrary(controller.games, controller.ownedGames)
+    val ownedState = ownedLibrary.state
+    val merged = remember(controller.games, ownedState) {
+        mergeLibrary(controller.games, ownedState.ownedGamesOrNull)
     }
     val liveJobsByAppid = remember(controller.jobs) { indexLiveJobsByAppid(controller.jobs) }
     val normalizedQuery = remember(controller.query) { normalizeQuery(controller.query) }
@@ -238,6 +243,11 @@ fun LibraryScreen(
             LibraryToolbar(controller = controller)
             CheckAndUpdateRow(controller = controller, scope = scope)
             FilterChipsRow(counts = counts, selectedKey = controller.filterKey, onSelect = { controller.filterKey = it })
+            OwnedNoticeRow(
+                state = ownedState,
+                onOpenSettings = onOpenSettings,
+                onReload = { scope.launch { ownedLibrary.load() } },
+            )
 
             controller.loadError?.let { error ->
                 Text(
@@ -486,3 +496,43 @@ private fun LibraryGrid(
     }
 }
 
+
+/**
+ * WP APP-FEAT-1: the one line under the toolbar about the owned list (web
+ * `owned-library.js::ownedNotice`). Nothing when the owned list loaded
+ * with games. A relay that returned 0 games is almost always a private
+ * profile, so it never reads "0 owned". Every variant leaves the vault
+ * games on screen.
+ */
+@Composable
+private fun OwnedNoticeRow(state: OwnedLibraryState, onOpenSettings: () -> Unit, onReload: () -> Unit) {
+    val notice = ownedNoticeFor(state) ?: return
+    val detail = state.errorDetail.orEmpty()
+    val text = when (notice) {
+        OwnedNotice.LOADING -> stringResource(R.string.library_owned_loading)
+        OwnedNotice.UNSET -> stringResource(R.string.library_owned_unset)
+        OwnedNotice.SERVER_TOO_OLD -> stringResource(R.string.library_owned_server_too_old)
+        OwnedNotice.NO_RELAY_KEY -> stringResource(R.string.library_owned_no_relay_key)
+        OwnedNotice.STORED_ID_REJECTED -> stringResource(R.string.library_owned_stored_id_rejected)
+        OwnedNotice.FAILED -> stringResource(R.string.library_owned_failed, detail)
+        OwnedNotice.PRIVATE_OR_EMPTY -> stringResource(R.string.library_owned_private)
+    }
+    val warn = notice != OwnedNotice.LOADING && notice != OwnedNotice.UNSET
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (warn) VaultColors.StatusStale else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (noticeOffersSettings(notice)) {
+                TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.library_owned_action_settings)) }
+            }
+            if (noticeOffersReload(notice)) {
+                TextButton(onClick = onReload, enabled = !state.loading) {
+                    Text(stringResource(R.string.library_owned_action_reload))
+                }
+            }
+        }
+    }
+}

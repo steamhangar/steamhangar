@@ -1,7 +1,10 @@
 package dev.steamvault.app.demo
 
+import dev.steamvault.app.net.model.AboutComponentOut
+import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.InstalledOnEntry
+import dev.steamvault.app.net.model.OwnedGame
 import java.time.Instant
 
 /**
@@ -149,7 +152,11 @@ internal fun seedJobs(): MutableList<DemoJob> = mutableListOf(
         updated = 0,
         upToDate = 0,
         summaryParseOk = true,
-        logExcerpt = "[vault-api] SteamPrefill exited 1 -- see attached log.",
+        // WP APP-FIX-2: the real failure shape (api/vault_api/worker.py's
+        // failure branch writes this reason line LAST), so the demo's
+        // Downloads history shows the "Steam login missing" hint + Retry.
+        logExcerpt = "Unhandled exception. System.InvalidOperationException: Failed to read input in non-interactive mode.\n" +
+            "[vault-api] Prefill failed (reason=not_logged_in); the depot mapping for this app was left unchanged.",
         ticksLeft = 0,
     ),
     DemoJob(
@@ -176,6 +183,13 @@ internal fun seedClients(): List<ClientOut> = listOf(
         bytes_served = 42_000_000_000L,
         last_seen_in_cache_log = Instant.now().minusSeconds(600L).toString(),
         bypass_suspected = false,
+        // WP APP-FEAT-2: the four AGENT-FEAT-1 fields, real shape. A current
+        // agent: version + 10-minute interval, reported 10 min ago, online
+        // until last_reported_at + 2 x 600 s + 300 s.
+        agent_version = "0.1.0",
+        report_interval_seconds = 600,
+        presence = "online",
+        offline_after = Instant.now().minusSeconds(600L).plusSeconds(2 * 600L + 300L).toString(),
     ),
     ClientOut(
         client_id = "demo-steamdeck",
@@ -188,5 +202,63 @@ internal fun seedClients(): List<ClientOut> = listOf(
         bytes_served = 3_100_000_000L,
         last_seen_in_cache_log = Instant.now().minusSeconds(7_200L).toString(),
         bypass_suspected = true,
+        // An agent from before AGENT-FEAT-1: no version, no stated interval
+        // (the server assumes 30 min), last report 2 h ago -> offline since
+        // last_reported_at + 2 x 1800 s + 300 s.
+        agent_version = null,
+        report_interval_seconds = null,
+        presence = "offline",
+        offline_after = Instant.now().minusSeconds(7_200L).plusSeconds(2 * 1_800L + 300L).toString(),
     ),
+)
+
+/**
+ * `GET /v1/about` fixture (WP APP-FEAT-2), real shape
+ * (`vault_api/routers/about.py::AboutOut`): the six components in the
+ * server's fixed order, each status word one the server can actually send
+ * for that component (vault-core and vault-dns are ALWAYS `unknown`, never
+ * probed; vault-proxy never has a version). Detail sentences modeled on
+ * `vault_api/about.py`'s own.
+ */
+internal fun seedAbout(): AboutOut {
+    val checkedAt = Instant.now().minusSeconds(20L).toString().substringBefore('.').removeSuffix("Z") + "Z"
+    val commit = "4f1c2d3e5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d"
+    return AboutOut(
+        components = listOf(
+            AboutComponentOut("vault-api", "0.1.0", commit, "ok", checkedAt, "Also serves the web UI, so the web UI has this version."),
+            AboutComponentOut(
+                "vault-core", "0.1.0", commit, "unknown", checkedAt,
+                "Recorded at vault-core's last start. vault-api has no network path to vault-core (egress lock, ADR-0011), " +
+                    "so whether it is running now is not checked.",
+            ),
+            AboutComponentOut("vault-runner", "0.1.0", commit, "ok", checkedAt, "Last seen 12 s ago."),
+            AboutComponentOut("steamprefill", "3.7.1", null, "ok", checkedAt, "Runs in vault-runner; version as the runner reported it."),
+            AboutComponentOut(
+                "vault-proxy", null, null, "ok", checkedAt,
+                "Answers, and refuses a host that is not on the egress allowlist. Its version is not shown: reading it would " +
+                    "need a hole in the egress filter.",
+            ),
+            AboutComponentOut(
+                "vault-dns", null, null, "unknown", checkedAt,
+                "Optional (compose profile dns); most setups use their own DNS rewrite instead. Not checked: vault-api has no " +
+                    "network path to vault-dns (egress lock, ADR-0011), and a test query would itself be DNS traffic.",
+            ),
+        ),
+    )
+}
+
+/**
+ * Fictional owned-games fixture for the demo relay (WP APP-FEAT-1):
+ * deliberately overlapping the vault library on two appids (Duskfall Array,
+ * Marrowlight) and adding three owned-only games, so setting a library
+ * SteamID64 in the demo's Settings shows both merge cases. The default-gate
+ * shape: `playtime_forever`/`rtime_last_played` absent (ADR-0010 defaults
+ * off).
+ */
+internal fun seedOwnedGames(): List<OwnedGame> = listOf(
+    OwnedGame(appid = 4_010_010, name = "Duskfall Array"),
+    OwnedGame(appid = 4_010_070, name = "Marrowlight"),
+    OwnedGame(appid = 4_020_010, name = "Lanternfall Reach"),
+    OwnedGame(appid = 4_020_020, name = "Quiet Orbit"),
+    OwnedGame(appid = 4_020_030, name = "Tidewright"),
 )

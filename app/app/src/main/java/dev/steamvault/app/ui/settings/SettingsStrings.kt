@@ -14,6 +14,10 @@ interface SettingsStrings {
     fun loadFailedFallback(cause: Throwable): String
     fun savedToast(): String
     fun saveFailedFallback(): String
+    fun libraryIdSaved(): String
+    fun libraryIdCleared(): String
+    fun libraryIdUnchanged(): String
+    fun libraryIdReset(): String
 }
 
 class AndroidSettingsStrings(private val resources: Resources) : SettingsStrings {
@@ -21,4 +25,8 @@ class AndroidSettingsStrings(private val resources: Resources) : SettingsStrings
         resources.getString(R.string.settings_load_error, cause.message ?: "")
     override fun savedToast(): String = resources.getString(R.string.settings_toast_saved)
     override fun saveFailedFallback(): String = resources.getString(R.string.settings_toast_save_failed_fallback)
+    override fun libraryIdSaved(): String = resources.getString(R.string.settings_library_id_toast_saved)
+    override fun libraryIdCleared(): String = resources.getString(R.string.settings_library_id_toast_cleared)
+    override fun libraryIdUnchanged(): String = resources.getString(R.string.settings_library_id_toast_unchanged)
+    override fun libraryIdReset(): String = resources.getString(R.string.settings_library_id_toast_reset)
 }

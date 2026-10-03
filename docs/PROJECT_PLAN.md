@@ -2728,12 +2728,12 @@ below carry their own later dates, item 12 is the current one).
       QR (verified in the v3.7.1/v3.7.2 source, 2026-10-02); the only
       path is account name + password + Steam Guard on the server
       terminal. Correct the claim, point to the planned QR helper (D2).
-    - [ ] **APP-FIX-2** — Android parity with WEB-FIX-4: job titles from
+    - [x] **APP-FIX-2** — Android parity with WEB-FIX-4: job titles from
       the owned list (`JobCardModel.nameFor`), plain-language hints and
       Retry for `not_logged_in` and the public-IP cache detection, the
       raw output collapsed; demo enqueue creates an unnamed vault row
       like the real API.
-    - [ ] **APP-FEAT-1** — the Android app reads the stored
+    - [x] **APP-FEAT-1** — the Android app reads the stored
       `steam_library_steamid` (API-FEAT-1) instead of its own input, and
       can set it, as the web Settings block does.
     - [x] **WEB-FIX-6** (done 2026-10-03) — the bulk bar overlaps content in select mode on
@@ -2763,7 +2763,7 @@ below carry their own later dates, item 12 is the current one).
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
       to the disc) instead of drifting 2px and fading (user feedback
       2026-10-03, done 2026-10-03).
-    - [ ] **APP-FIX-3** — Android parity for WEB-FIX-7: `StatusIcon.kt`
+    - [x] **APP-FIX-3** — Android parity for WEB-FIX-7: `StatusIcon.kt`
       still drifts and fades (`downloadDriftFraction` /
       `downloadOpacityFraction`, ported from the removed `vault-dlslide`).
     - [ ] Design notes: `docs/design/vault-app-mockup-NOTES.md` still
@@ -2827,6 +2827,13 @@ below carry their own later dates, item 12 is the current one).
       /v1/clients/{client_id}` (WP AG-1); a renamed or retired PC
       otherwise stays listed as offline forever (user decision
       2026-10-03, after rc9). Android follows in the next app package.
+    - [x] **APP-FEAT-2** — Android parity package (2026-10-03): APP-FIX-2,
+      APP-FEAT-1 (library account from the stored setting only; servers
+      older than rc4 get a "too old" notice; a signed-in-id fill button
+      only where the setting is writable), APP-FIX-3, plus About and
+      presence in the clients sheet matching WEB-FEAT-3. Follow-up: twin
+      pins against web about-view.js / clients-view.js, onboarding step 2
+      saving the id, a separate PCs entry and "PC entfernen" (WEB-FEAT-4).
 
     **C. Hygiene (any time, small)**
     - [ ] Stale ownership leftovers after SEC-FIX-5 (frozen api code,

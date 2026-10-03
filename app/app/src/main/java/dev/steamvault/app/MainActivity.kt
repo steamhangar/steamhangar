@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import dev.steamvault.app.demo.DemoAboutRepository
 import dev.steamvault.app.demo.DemoCacheRepository
 import dev.steamvault.app.demo.DemoClientsRepository
 import dev.steamvault.app.demo.DemoGamesRepository
@@ -35,6 +36,7 @@ import dev.steamvault.app.demo.DemoMappingRepository
 import dev.steamvault.app.demo.DemoScheduleRepository
 import dev.steamvault.app.demo.DemoSettingsRepository
 import dev.steamvault.app.demo.DemoState
+import dev.steamvault.app.demo.DemoSteamRelayRepository
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.profile.buildConnectivityProfile
@@ -43,6 +45,7 @@ import dev.steamvault.app.net.steam.SteamOpenIdConfig
 import dev.steamvault.app.notifications.NotificationRouting
 import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.repo.SteamIdentityRepositoryImpl
+import dev.steamvault.app.repo.VaultAboutRepository
 import dev.steamvault.app.repo.VaultCacheRepository
 import dev.steamvault.app.repo.VaultClientsRepository
 import dev.steamvault.app.repo.VaultGamesRepository
@@ -50,6 +53,7 @@ import dev.steamvault.app.repo.VaultJobsRepository
 import dev.steamvault.app.repo.VaultMappingRepository
 import dev.steamvault.app.repo.VaultScheduleRepository
 import dev.steamvault.app.repo.VaultSettingsRepository
+import dev.steamvault.app.repo.VaultSteamRelayRepository
 import dev.steamvault.app.storage.EncryptedCredentialStore
 import dev.steamvault.app.storage.SharedPreferencesLibraryPreferences
 import dev.steamvault.app.ui.clients.AndroidClientsStrings
@@ -58,6 +62,7 @@ import dev.steamvault.app.ui.clients.ClientsSheet
 import dev.steamvault.app.ui.downloads.DownloadsScreen
 import dev.steamvault.app.ui.downloads.logic.countPending
 import dev.steamvault.app.ui.library.LibraryScreen
+import dev.steamvault.app.ui.library.OwnedLibraryController
 import dev.steamvault.app.ui.nav.BottomNavBar
 import dev.steamvault.app.ui.nav.Destination
 import dev.steamvault.app.ui.onboarding.AndroidOnboardingStrings
@@ -175,6 +180,12 @@ class MainActivity : ComponentActivity() {
      * hoisted at this level, not owned by any one [Destination], since
      * "Clients is a sheet, not a nav item" per `ui/nav/Destination.kt`). */
     private var clientsControllerState by mutableStateOf<ClientsController?>(null)
+
+    /** WP APP-FEAT-1/APP-FIX-2: the owned-games list (vault's stored
+     * library SteamID64 + relay), shared by Library and Downloads -- rebuilt
+     * with the connection / a fresh demo session, like the controllers
+     * above, so Downloads reuses what the Library loaded. */
+    private var ownedLibraryState by mutableStateOf<OwnedLibraryController?>(null)
 
     private var showOnboarding by mutableStateOf(false)
     private var onboardingMode by mutableStateOf(OnboardingMode.FIRST_RUN)
@@ -347,8 +358,11 @@ class MainActivity : ComponentActivity() {
                 credentialStore,
                 identityRepository,
                 AndroidSettingsStrings(resources),
+                VaultSteamRelayRepository(it),
+                VaultAboutRepository(it),
             )
         }
+        ownedLibraryState = client?.let { OwnedLibraryController(VaultSettingsRepository(it), VaultSteamRelayRepository(it)) }
         clientsControllerState = client?.let {
             ClientsController(VaultClientsRepository(it), AndroidClientsStrings(resources))
         }
@@ -385,7 +399,10 @@ class MainActivity : ComponentActivity() {
             credentialStore,
             identityRepository,
             AndroidSettingsStrings(resources),
+            DemoSteamRelayRepository(demo),
+            DemoAboutRepository(demo),
         )
+        ownedLibraryState = OwnedLibraryController(DemoSettingsRepository(demo), DemoSteamRelayRepository(demo))
         clientsControllerState = ClientsController(DemoClientsRepository(demo), AndroidClientsStrings(resources))
         pendingJobsSnapshot = emptyList()
         showOnboarding = false
@@ -400,21 +417,23 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun LibraryDestinationContent() {
         val demo = demoState
-        if (demo != null) {
+        val owned = ownedLibraryState
+        if (demo != null && owned != null) {
             LibraryScreen(
                 gamesRepository = remember(demo) { DemoGamesRepository(demo) },
                 jobsRepository = remember(demo) { DemoJobsRepository(demo) },
                 mappingRepository = remember(demo) { DemoMappingRepository(demo) },
                 cacheRepository = remember(demo) { DemoCacheRepository(demo) },
-                identityRepository = identityRepository,
+                ownedLibrary = owned,
                 libraryPreferences = libraryPreferences,
                 onJobsSnapshot = { pendingJobsSnapshot = it },
+                onOpenSettings = { destination = Destination.SETTINGS },
                 demoMode = true,
             )
             return
         }
         val client = vaultApiClientState
-        if (client == null) {
+        if (client == null || owned == null) {
             NotConnectedPlaceholder()
             return
         }
@@ -423,9 +442,10 @@ class MainActivity : ComponentActivity() {
             jobsRepository = remember(client) { VaultJobsRepository(client) },
             mappingRepository = remember(client) { VaultMappingRepository(client) },
             cacheRepository = remember(client) { VaultCacheRepository(client) },
-            identityRepository = identityRepository,
+            ownedLibrary = owned,
             libraryPreferences = libraryPreferences,
             onJobsSnapshot = { pendingJobsSnapshot = it },
+            onOpenSettings = { destination = Destination.SETTINGS },
             demoMode = false,
         )
     }
@@ -438,6 +458,7 @@ class MainActivity : ComponentActivity() {
             DownloadsScreen(
                 jobsRepository = remember(demo) { DemoJobsRepository(demo) },
                 gamesRepository = remember(demo) { DemoGamesRepository(demo) },
+                ownedLibrary = ownedLibraryState,
                 onJobsSnapshot = { pendingJobsSnapshot = it },
                 demoMode = true,
             )
@@ -451,6 +472,7 @@ class MainActivity : ComponentActivity() {
         DownloadsScreen(
             jobsRepository = remember(client) { VaultJobsRepository(client) },
             gamesRepository = remember(client) { VaultGamesRepository(client) },
+            ownedLibrary = ownedLibraryState,
             onJobsSnapshot = { pendingJobsSnapshot = it },
             demoMode = false,
         )

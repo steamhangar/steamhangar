@@ -7,13 +7,11 @@ import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
-import dev.steamvault.app.net.model.OwnedGame
 import dev.steamvault.app.polling.PollingIntervals
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
-import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateAction
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateResult
@@ -39,7 +37,7 @@ import kotlinx.coroutines.launch
  * `state`/`syncBulk`/`onAction` shapes one-to-one action-for-action).
  *
  * Not an `androidx.lifecycle.ViewModel` -- same house pattern `MainActivity`
- * already uses for [dev.steamvault.app.repo.SteamIdentityRepository]'s
+ * already uses for the Steam identity repository's
  * screen state (a plain `mutableStateOf` field, no ViewModel dependency
  * anywhere in this project yet). Held via `remember` in `LibraryScreen.kt`,
  * so it does not survive leaving the Library tab -- consistent with the
@@ -52,15 +50,12 @@ class LibraryController(
     private val jobsRepository: JobsRepository,
     private val mappingRepository: MappingRepository,
     private val cacheRepository: CacheRepository,
-    private val identityRepository: SteamIdentityRepository,
     private val libraryPreferences: LibraryPreferences,
     private val strings: LibraryStrings,
 ) {
     var games by mutableStateOf<List<GameSummary>>(emptyList())
         private set
     var jobs by mutableStateOf<List<JobSummary>>(emptyList())
-        private set
-    var ownedGames by mutableStateOf<List<OwnedGame>?>(null)
         private set
     var loadError by mutableStateOf<String?>(null)
         private set
@@ -231,14 +226,12 @@ class LibraryController(
         }
     }
 
-    /** One-shot; `null`/empty [SteamIdentityRepository.ownedGames] failures
-     * are swallowed on purpose -- see `LibraryMerge.kt`'s kdoc: "the
-     * vault-only view must be fully functional" when there is no Steam
-     * identity/key, which is exactly what leaving [ownedGames] `null`
-     * achieves. */
-    suspend fun refreshOwnedGamesOnce() {
-        ownedGames = identityRepository.ownedGames().getOrNull()
-    }
+    // WP APP-FEAT-1: the owned-games list no longer lives here (it used to
+    // come from this device's own Steam OpenID sign-in via
+    // SteamIdentityRepository.ownedGames). It is the vault's stored
+    // steam_library_steamid plus the relay, held by OwnedLibraryController
+    // (MainActivity level, shared with Downloads) and loaded by
+    // LibraryScreen on every Library open.
 
     /** Mirrors `store.refreshNow()`: an out-of-cadence poll right after a
      * mutation, so the grid doesn't wait out the ambient poll interval to

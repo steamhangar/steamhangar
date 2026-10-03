@@ -616,4 +616,85 @@
     <string name="settings_disconnect_unavailable_demo">Disconnect is not available while browsing demo data.</string>
     <string name="settings_clients_desc">See which machines have reported to this vault, and whether any of them appear to be bypassing the cache.</string>
     <string name="settings_clients_open_button">View clients</string>
+
+    <!-- WP APP-FIX-2 (parity with web WEB-FIX-4): a known failure's Retry
+         (a new prefill for the same app) and its toast, web downloads.js's
+         own words ("Retry", "Queued for download"). The hint block texts
+         themselves are a verbatim Kotlin port, see JobFailure.kt. -->
+    <string name="downloads_action_retry">Retry</string>
+    <string name="downloads_action_retry_for">Retry %1$s</string>
+    <string name="downloads_toast_retry_queued">Queued for download</string>
+
+    <!-- WP APP-FEAT-1 (parity with web WEB-FEAT-1): the Library's notice
+         about the owned list, from the vault's stored library SteamID64.
+         Every variant leaves the vault games on screen. -->
+    <string name="library_owned_loading">Loading your Steam library…</string>
+    <string name="library_owned_unset">Only games the vault knows are listed. Set your SteamID64 in Settings to list every game you own.</string>
+    <string name="library_owned_server_too_old">This server is too old to store the library SteamID64, so only games the vault knows are listed. Update the server to list every game you own.</string>
+    <string name="library_owned_no_relay_key">No Steam Web API key configured. Library queries answer 409 until one is set. Showing vault games only.</string>
+    <string name="library_owned_stored_id_rejected">The stored library SteamID64 was rejected. That does not look like a valid SteamID64 (17 digits). Showing vault games only.</string>
+    <string name="library_owned_failed">Could not load your Steam library: %1$s Showing vault games only.</string>
+    <string name="library_owned_private">Steam returned no games for this SteamID64. The profile or its game details are probably private.</string>
+    <string name="library_owned_action_settings">Settings</string>
+    <string name="library_owned_action_reload">Reload</string>
+
+    <!-- WP APP-FEAT-1: Settings' "Steam library" block (web settings.js
+         buildSteamLibraryBlock + owned-library.js messages). -->
+    <string name="settings_library_id_title">Steam library</string>
+    <string name="settings_library_id_hint">The Library lists every game this SteamID64 owns, on every device that uses this vault. Leave it blank and save to list only the games the vault knows.</string>
+    <string name="settings_library_id_label">SteamID64</string>
+    <string name="settings_library_id_save">Save SteamID64</string>
+    <string name="settings_library_id_preview">Preview</string>
+    <string name="settings_library_id_use_signed_in">Use my signed-in SteamID64</string>
+    <string name="settings_library_id_use_signed_in_hint">This only fills the field. Saving it changes the library for the whole vault: every device and the web UI list this account\'s games.</string>
+    <string name="settings_library_id_absent">This vault-api does not store a library SteamID64 yet (it needs a newer version).</string>
+    <string name="settings_library_id_absent_preview_works">This vault-api does not store a library SteamID64 yet (it needs a newer version). Preview still works.</string>
+    <string name="settings_library_id_env_only">The library SteamID64 is set by the server environment; change it there.</string>
+    <string name="settings_library_id_readonly">This vault\'s settings are read-only.</string>
+    <string name="settings_library_id_invalid">That does not look like a valid SteamID64 (17 digits).</string>
+    <string name="settings_library_id_no_relay_key">No Steam Web API key configured. Library queries answer 409 until one is set.</string>
+    <string name="settings_library_id_toast_saved">Library SteamID64 saved.</string>
+    <string name="settings_library_id_toast_cleared">Library SteamID64 cleared.</string>
+    <string name="settings_library_id_toast_unchanged">SteamID64 unchanged.</string>
+    <string name="settings_library_id_toast_reset">Library SteamID64 reset.</string>
+    <string name="settings_library_id_preview_persona">Steam profile: %1$s</string>
+    <plurals name="settings_library_id_preview_count">
+        <item quantity="one">%1$d game found.</item>
+        <item quantity="other">%1$d games found.</item>
+    </plurals>
+    <string name="settings_library_id_preview_private">Steam returned no games for this SteamID64. The profile or its game details are probably private.</string>
+
+    <!-- WP APP-FEAT-2 (VER-2): Settings → About, from GET /v1/about. Status
+         words as the server sends them; vault-core/vault-dns are always
+         "Unknown" (never probed), the notes say why. -->
+    <string name="settings_section_about">About</string>
+    <string name="settings_about_loading">Loading component versions…</string>
+    <string name="settings_about_too_old">This server is older than this app and does not report component versions. Update the server to see them here.</string>
+    <string name="settings_about_error">Could not load component versions: %1$s</string>
+    <string name="settings_about_refresh">Refresh</string>
+    <string name="settings_about_cache_note">The server reuses this answer for up to 60 s, so Refresh can show the same result.</string>
+    <string name="settings_about_unknown_value">unknown</string>
+    <string name="settings_about_version_line">Version %1$s · commit %2$s</string>
+    <string name="settings_about_status_ok">OK</string>
+    <string name="settings_about_status_unreachable">Unreachable</string>
+    <string name="settings_about_status_not_in_use">Not in use</string>
+    <string name="settings_about_status_unknown">Unknown</string>
+    <string name="settings_about_note_vault_api">This server. It also serves the web UI.</string>
+    <string name="settings_about_note_vault_core">Version recorded at vault-core\'s last start, not a live check.</string>
+    <string name="settings_about_note_vault_runner">OK means the runner checked in within the last 90 s.</string>
+    <string name="settings_about_note_steamprefill">The SteamPrefill build that prefill jobs run with.</string>
+    <string name="settings_about_note_vault_proxy">Reachability only; the egress proxy reports no version.</string>
+    <string name="settings_about_note_vault_dns">Unknown, not probed: vault-api never checks the optional DNS container.</string>
+    <string name="settings_about_trademark">SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.</string>
+
+    <!-- WP APP-FEAT-2 (AGENT-FEAT-1): a PC's presence as the SERVER computed
+         it (never recomputed here), when it last reported, and the agent
+         build. "version unknown" = an agent from before AGENT-FEAT-1. -->
+    <string name="clients_presence_online">Online</string>
+    <string name="clients_presence_offline">Offline</string>
+    <string name="clients_presence_unknown">Presence unknown</string>
+    <string name="clients_last_seen">last seen %1$s</string>
+    <string name="clients_last_seen_unknown">last seen: unknown</string>
+    <string name="clients_agent_version">agent %1$s</string>
+    <string name="clients_agent_version_unknown">version unknown</string>
 </resources>

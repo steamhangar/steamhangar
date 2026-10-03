@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -78,13 +79,16 @@ fun StatusIcon(
 
     val transition = rememberInfiniteTransition(label = "status-icon-transition")
 
+    // WP APP-FIX-3: one linear fall period, restarting at 0 (seamless, see
+    // StatusIconLogic.kt's DOWNLOAD_FALL_PERIOD kdoc). Not animated at all
+    // under reduced motion: progress stays 0, the rest pose.
     var downloadProgress = 0f
     if (animate && glyph == GlyphShape.DOWNLOAD) {
         val p by transition.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing)),
-            label = "download-progress",
+            animationSpec = infiniteRepeatable(tween(DOWNLOAD_FALL_DURATION_MS, easing = LinearEasing)),
+            label = "download-fall",
         )
         downloadProgress = p
     }
@@ -109,13 +113,13 @@ fun StatusIcon(
 
         // The glyph occupies 64% of the circle's diameter, centred — 1:1
         // with the web rule `.sic svg{ width:64%; height:64% }`.
-        val glyphSize = this.size.minDimension * 0.64f
+        val glyphSize = this.size.minDimension * GLYPH_BOX_FRACTION
         val scale = glyphSize / 24f
         val origin = Offset(
             (this.size.width - glyphSize) / 2f,
             (this.size.height - glyphSize) / 2f,
         )
-        val strokeWidth = 2.7f * scale
+        val strokeWidth = GLYPH_STROKE_WIDTH_UNITS * scale
         val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
 
         fun pt(x: Float, y: Float) = Offset(origin.x + x * scale, origin.y + y * scale)
@@ -132,32 +136,37 @@ fun StatusIcon(
             }
 
             GlyphShape.DOWNLOAD -> {
-                // Ported unchanged: arrow "M12 3.5V13" + "M7.4 8.7 12 13.3
-                // 16.6 8.7", baseline "M5 19.6h14".
-                //
-                // driftPx/alpha only apply the keyframe math while actually
-                // animating. Without this guard, reduced motion (or the
-                // static NONE kind, which never animates) would freeze the
-                // arrow at the t=0 keyframe position (-1.6 units, opacity
-                // .35) instead of its neutral, unshifted, fully-opaque
-                // resting pose — a static icon should render at its plain
-                // SVG coordinates, not a frozen frame of the animation.
-                val driftPx = if (animate) downloadDriftFraction(downloadProgress) * scale else 0f
-                val alpha = if (animate) downloadOpacityFraction(downloadProgress) else 1f
-                val arrow = Path().apply {
-                    moveTo(pt(12f, 3.5f).x, pt(12f, 3.5f).y + driftPx)
-                    lineTo(pt(12f, 13f).x, pt(12f, 13f).y + driftPx)
-                    moveTo(pt(7.4f, 8.7f).x, pt(7.4f, 8.7f).y + driftPx)
-                    lineTo(pt(12f, 13.3f).x, pt(12f, 13.3f).y + driftPx)
-                    lineTo(pt(16.6f, 8.7f).x, pt(16.6f, 8.7f).y + driftPx)
+                // Arrow ported unchanged ("M12 3.5V13" + "M7.4 8.7 12 13.3
+                // 16.6 8.7", DOWNLOAD_ARROW_SEGMENTS), baseline "M5 19.6h14".
+                fun drawArrow(dyUnits: Float) {
+                    val arrow = Path()
+                    for (seg in DOWNLOAD_ARROW_SEGMENTS) {
+                        arrow.moveTo(pt(seg.x1, seg.y1 + dyUnits).x, pt(seg.x1, seg.y1 + dyUnits).y)
+                        arrow.lineTo(pt(seg.x2, seg.y2 + dyUnits).x, pt(seg.x2, seg.y2 + dyUnits).y)
+                    }
+                    drawPath(arrow, color = ink, style = stroke)
                 }
-                drawPath(arrow, color = ink.copy(alpha = alpha), style = stroke)
 
-                // Baseline hidden specifically for the RUNNING kind (web:
-                // `.k-running .dlbase{display:none}`) — keyed on the KIND,
-                // not the animate flag, so reduced motion never re-reveals
-                // it under a running job.
-                if (kind != StatusKind.RUNNING) {
+                if (kind == StatusKind.RUNNING) {
+                    // WP APP-FIX-3 (parity with web WP WEB-FIX-7), "arrow
+                    // falls through": the leading arrow plus ONE trailing
+                    // arrow one period above it, clipped to the badge's own
+                    // disc (web: `.sic.k-running{ clip-path:circle(50%) }`).
+                    // A Compose Canvas does not clip to its bounds, so the
+                    // clip is what hides the parked trailing arrow at rest.
+                    // Full opacity always: no fade anywhere. Under reduced
+                    // motion downloadProgress stays 0, so the leading arrow
+                    // sits at rest and the trailing one is clipped away --
+                    // the static glyph is one arrow. The baseline stays
+                    // hidden for RUNNING (web `.k-running .dlbase{display:none}`),
+                    // keyed on the KIND, not the animate flag.
+                    val discRect = Rect(center = this.center, radius = this.size.minDimension / 2f)
+                    val disc = Path().apply { addOval(discRect) }
+                    clipPath(disc) {
+                        for (dy in downloadArrowOffsets(downloadProgress)) drawArrow(dy)
+                    }
+                } else {
+                    drawArrow(0f)
                     val baseline = Path().apply {
                         moveTo(pt(5f, 19.6f).x, pt(5f, 19.6f).y)
                         lineTo(pt(19f, 19.6f).x, pt(19f, 19.6f).y)
