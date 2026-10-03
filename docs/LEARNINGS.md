@@ -942,6 +942,12 @@ These are not style preferences; each entry cost a review round to learn.
   Dockerfile, only the publish job does) and the stack suite's fixed test
   subnet overlapped a real stack's network. Run both before a package
   counts as done (WP RC7-INT).
+- SteamPrefill exits 0 when an app fails; its summary table only grows a
+  "Failed" column (and an "Unowned" one) when the count is non-zero
+  (v3.7.1 `PrefillSummaryResult.cs`). Read optional columns by header,
+  fail closed when a present Failed column cannot be read, and never
+  match a word boundary before a header word that may carry an SGR
+  remnant (WP API-FIX-3).
 - A clipped looping animation is seamless only if the leaving element
   has no ink inside the clip at the end frame: the period must cover the
   visible travel (disc radius plus glyph extent), not just the glyph

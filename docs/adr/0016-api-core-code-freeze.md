@@ -209,3 +209,40 @@ Scope of the exception, all in WP CORE-FIX-3 (design: ADR-0020):
 The HTTP cache path on port 80 is unchanged; the drift check pins it.
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-03 — freeze exception: failed prefill misread as "not considered" (WP API-FIX-3)
+
+User decision: this bug fix goes in before `v0.1.0` (`docs/PROJECT_PLAN.md`
+§11, list B, API-FIX-3). The api/ freeze opens for this one bug fix.
+
+The bug, from production job outputs on 2026-10-02: SteamPrefill exited 0
+and printed a summary table with a third column, `Updated | Up To Date |
+Failed` = `0 | 0 | 1`, once with the cache unreachable ("22213 requests
+failed unexpectedly") and once with "Unable to download manifests!".
+vault-api read only the first two integers, took the 0/0 branch, and told
+the operator the app was probably not owned. The job did end `error`, but
+for the wrong stated reason. Separately, the runner logged
+`success=True` for the same job, which it meant as the process outcome.
+
+Scope of the exception, all in WP API-FIX-3:
+
+- `api/vault_api/prefill_summary.py`: the parser reads the Failed column
+  (`failed`, `failed_column`) and `reports_failure` decides. A Failed
+  column whose count cannot be read counts as a failure.
+- `api/vault_api/prefill.py`: the reason value `prefill_failed`
+  (`FAILURE_PREFILL_FAILED`) and the text of its log line, with two
+  exact-phrase cause hints.
+- `api/vault_api/worker.py`: a failed summary ends the job `error` with that
+  reason before the 0/0 rule runs; mapping, manifest state, `needs_force`
+  and auto-GC are untouched, as for every failure.
+- `api/vault_api/prefill_runner.py`: the runner's finish line names itself
+  the process outcome (`run_success=`) and says vault-api sets the final
+  state. Wording only.
+- Tests and docs: `api/tests/test_api_fix_3_prefill_failed.py`,
+  `api/README.md`'s job-outcome table; `web/tests/job-failure.test.js`
+  (web/ is not frozen) pins that the web reads the new reason and shows no
+  hint block for it.
+
+No route, schema or job-status semantics changed: these runs ended `error`
+before and still do; only the reason line and its wording are new. Every
+other frozen-path change still needs its own user decision and note here.

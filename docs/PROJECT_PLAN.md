@@ -2707,7 +2707,8 @@ below carry their own later dates, item 12 is the current one).
       Desktop-site banner appears on the phone with the mode on.
 
     **B. Open before `v0.1.0` final**
-    - [ ] **API-FIX-3** — misleading prefill summary. When SteamPrefill
+    - [x] **API-FIX-3** — misleading prefill summary (done 2026-10-03:
+      new failure reason `prefill_failed` from the summary's Failed column). When SteamPrefill
       reports `Failed 1`, vault-api appends "did not consider this app -
       is it owned by the logged-in account?". It must tell "failed" from
       "not considered" (parse the summary table's Failed column) and say
