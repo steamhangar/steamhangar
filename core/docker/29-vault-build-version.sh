@@ -39,26 +39,28 @@
 # replace the cache-event log with this JSON at every start (and vault-api's
 # sweeper would read it), so the hook stops the boot instead.
 #
-# Who writes what (review M1, WP VER-2 round 2). /vault and /vault/logs
-# belong to uid 101, the nginx user here AND vault-api's user, mode 0755 with
-# no sticky bit: whoever runs as uid 101 can rename any name in them at any
-# moment. No check-then-act a root process does on a name in that directory
-# is safe, mktemp included: mktemp creates its file with O_EXCL, but the
-# NAME it returns can be swapped for a symlink before the next command opens
-# it, and a root `printf >` / `chmod` would then follow the link anywhere
-# (reproduced in review: a 0600 root file overwritten and made 0644). So:
+# Who writes what (WP SEC-FIX-5; supersedes VER-2 review M1's split). The
+# hook writes as whoever runs it. As root it writes ONLY into a directory
+# chain no other uid can change: the output directory and every ancestor up
+# to / must be a real directory, owned by uid 0, writable by neither group nor
+# others (vault_root_only_dir). 21-vault-volume-ownership.sh makes /vault and
+# /vault/logs so before this hook runs. Then nobody can swap a name in the
+# directory between root's mktemp, write, chmod and rename, so root may do all
+# of them, and the file is root:root 0644 (vault-api only reads it).
 #
-#   - root does exactly one thing on that volume: create a MISSING logs/
-#     directory, with plain `mkdir` (never -p; it fails rather than follows
-#     when the name is already a symlink), `chown -h` (never dereferences)
-#     to nginx, then a re-check that the name is still not a symlink;
-#   - every other file operation (mktemp, write, chmod, symlink removal, the
-#     rename, removing a stale file) runs as the nginx user, by re-invoking
-#     this script with `--writer` under busybox `su`, the way
-#     40-vault-preflight.sh already probes as that user. A link followed by
-#     uid 101 reaches only what uid 101 may write anyway.
-#   - The writer refuses to run as root, and as root without an nginx user
-#     the hook writes nothing (warning), instead of falling back to root.
+#   - Chain not root-only (a volume 21- did not fix, a test path): WARNING,
+#     nothing written, nothing removed. Not even a stale file is removed:
+#     `rm` on a name in a directory another uid controls is the same class of
+#     mistake.
+#   - Output directory missing: created with plain `mkdir` (never -p) and
+#     chmod 0755, only if its parent chain is root-only.
+#   - Not root (tests, a native run): no chain check. A link followed by a
+#     non-root caller reaches only what that caller may write anyway.
+#
+# VER-2's design (root only creates logs/, an `su nginx` writer does the rest)
+# fit a 101-owned logs/; with a root-owned logs/ the nginx user can no longer
+# create the temp file, and root writing into a root-only directory is the
+# simpler safe form.
 #
 # Atomicity is unchanged: mktemp in the same directory, chmod 0644, `mv -f`
 # over the target, so a reader sees either the old or the new file. A symlink
@@ -66,9 +68,9 @@
 # would move the file into that directory).
 #
 # Usage: the stock entrypoint runs it with no argument (sorted after the
-# envsubst hook and 25..28, before 40-vault-preflight.sh). Tests pass the
-# output file as $1 (core/tests/test-build-version-hook.sh). `--writer OUT`
-# is the internal unprivileged half described above.
+# envsubst hook and 21..28, before 40-vault-preflight.sh). Tests pass the
+# output file as $1 (core/tests/test-build-version-hook.sh,
+# core/tests/build-version-race-rig.sh).
 
 set -eu
 LC_ALL=C
@@ -100,63 +102,33 @@ valid_commit() {
     return 0
 }
 
-# --- the unprivileged writer (--writer OUT) -----------------------------------
-# Every file operation on a name inside OUT_DIR lives here and nowhere else
-# (pinned by core/tests/test-build-version-hook.sh). Never runs as root.
-if [ "${1:-}" = "--writer" ]; then
-    OUT=${2:?--writer needs the output path}
-    OUT_DIR=$(dirname -- "$OUT")
-    if [ "$(id -u)" = "0" ]; then
-        die "the writer half must not run as root (review M1)."
-    fi
-    # Values come from the root half; re-checked so this half alone can
-    # never write anything outside the grammar.
-    w_version=${VBV_VERSION:-invalid}
-    valid_version "$w_version" || w_version=invalid
-    w_commit=${VBV_COMMIT:-unknown}
-    case "$w_commit" in
-        unknown|invalid) : ;;
-        *) valid_commit "$w_commit" || w_commit=invalid ;;
-    esac
-    w_at=${VBV_RECORDED_AT:-}
-    case "$w_at" in
-        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
-        *) w_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) ;;
-    esac
-    discard_old() {
-        if [ -L "$OUT" ] || [ -f "$OUT" ]; then
-            rm -f "$OUT" 2>/dev/null || warn "could not remove the old $OUT either; vault-api may show the previous version."
+# vault_root_only_dir <dir>: true iff <dir> is a real directory (not a
+# symlink), owned by uid 0 and writable by neither group nor others, i.e. only
+# root can create, rename or remove names in it. Byte-identical copies live in
+# 21-vault-volume-ownership.sh and 25-vault-eventlog.sh (pinned by
+# core/tests/test-root-only-dir.sh).
+vault_root_only_dir() {
+    [ -d "$1" ] && [ ! -L "$1" ] || return 1
+    _vrod=$(stat -c '%u %a' "$1") || return 1
+    [ "${_vrod%% *}" = "0" ] || return 1
+    [ $(( 0${_vrod#* } & 022 )) -eq 0 ] || return 1
+    return 0
+}
+
+# root_chain_bad <dir>: prints the first component of <dir>'s chain (itself,
+# then each ancestor up to /) that is NOT root-only; prints nothing and
+# returns 1 when the whole chain is root-only.
+root_chain_bad() {
+    _c=$1
+    while :; do
+        if ! vault_root_only_dir "$_c"; then
+            printf '%s' "$_c"
+            return 0
         fi
-    }
-    write_file() {
-        if [ -L "$OUT_DIR" ]; then
-            warn "$OUT_DIR is a symlink; refusing to write through it (replace it with a real directory)."
-            return 1
-        fi
-        if [ -d "$OUT" ] && [ ! -L "$OUT" ]; then
-            warn "$OUT is a directory; not writing the build version."
-            return 1
-        fi
-        tmp=$(mktemp "$OUT_DIR/.vault-core-version.XXXXXX") || return 1
-        if ! printf '{"component":"vault-core","version":"%s","commit":"%s","recorded_at":"%s"}\n' \
-                "$w_version" "$w_commit" "$w_at" > "$tmp" \
-           || ! chmod 0644 "$tmp"; then
-            rm -f "$tmp"
-            return 1
-        fi
-        [ -L "$OUT" ] && rm -f "$OUT"
-        if ! mv -f "$tmp" "$OUT"; then
-            rm -f "$tmp"
-            return 1
-        fi
-        return 0
-    }
-    if write_file; then
-        exit 0
-    fi
-    discard_old
-    exit 1
-fi
+        [ "$_c" = / ] && return 1
+        _c=$(dirname -- "$_c")
+    done
+}
 
 OUT="${1:-/vault/logs/vault-core-version.json}"
 OUT_DIR=$(dirname -- "$OUT")
@@ -189,56 +161,82 @@ if [ -n "${VAULT_BUILD_COMMIT+x}" ] && [ "$VAULT_BUILD_COMMIT" != "unknown" ]; t
 fi
 recorded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# --- write it ----------------------------------------------------------------
-WRITER_USER=nginx
-
-# Root half: only a missing logs/ directory (see the header, review M1).
-prepare_dir() {
+# --- where root may write (SEC-FIX-5) -----------------------------------------
+# Returns 1 (with a WARNING) when root must not touch the directory at all.
+root_may_write() {
+    [ "$(id -u)" = "0" ] || return 0
+    case "$OUT_DIR" in
+        /*) : ;;
+        *) warn "$OUT is not an absolute path; as root, not writing."; return 1 ;;
+    esac
     if [ -L "$OUT_DIR" ]; then
         warn "$OUT_DIR is a symlink; refusing to write through it (replace it with a real directory)."
         return 1
     fi
-    [ -d "$OUT_DIR" ] && return 0
-    # Plain mkdir: if the name became a symlink since the check above, this
-    # fails (EEXIST) instead of creating anything behind it.
-    mkdir "$OUT_DIR" || return 1
-    if [ "$(id -u)" = "0" ] && id "$WRITER_USER" >/dev/null 2>&1; then
-        # -h: if the new directory was already swapped for a symlink, this
-        # changes the link's owner, never its target's.
-        chown -h "$WRITER_USER:$WRITER_USER" "$OUT_DIR" || return 1
+    if [ ! -e "$OUT_DIR" ]; then
+        bad=$(root_chain_bad "$(dirname -- "$OUT_DIR")") || bad=""
+        if [ -n "$bad" ]; then
+            warn "$bad is not a root-only directory ($(stat -c '%u:%g %a' "$bad" 2>&1)); as root, not creating $OUT_DIR in it (SEC-FIX-5)."
+            return 1
+        fi
+        # Plain mkdir in a root-only parent: nobody else can create the name.
+        mkdir "$OUT_DIR" || return 1
+        chmod 0755 "$OUT_DIR" || return 1
     fi
-    if [ -L "$OUT_DIR" ] || [ ! -d "$OUT_DIR" ]; then
-        warn "$OUT_DIR changed while it was being created; not writing."
+    bad=$(root_chain_bad "$OUT_DIR") || bad=""
+    if [ -n "$bad" ]; then
+        warn "$bad is not a root-only directory ($(stat -c '%u:%g %a' "$bad" 2>&1)); another uid could swap names in it, so root writes nothing there (SEC-FIX-5). vault-api may show the previous version."
         return 1
     fi
     return 0
 }
 
-# Run the writer half as the nginx user (or as the caller when not root).
-run_writer() {
-    VBV_VERSION=$version
-    VBV_COMMIT=$commit
-    VBV_RECORDED_AT=$recorded_at
-    export VBV_VERSION VBV_COMMIT VBV_RECORDED_AT
-    if [ "$(id -u)" != "0" ]; then
-        sh "$0" --writer "$OUT"
-        return
-    fi
-    if ! id "$WRITER_USER" >/dev/null 2>&1; then
-        warn "running as root and there is no '$WRITER_USER' user to write as; not writing (never as root)."
+# --- the write -------------------------------------------------------------------
+# mktemp, write, chmod 0644, rename over the target. Every name here lives in
+# OUT_DIR, which is root-only when this runs as root (root_may_write).
+write_file() {
+    if [ -L "$OUT_DIR" ]; then
+        warn "$OUT_DIR is a symlink; refusing to write through it (replace it with a real directory)."
         return 1
     fi
-    case "$0$OUT" in
-        *\'*) warn "a quote in the script or output path; not writing."; return 1 ;;
-    esac
-    # busybox su without -l keeps the environment, so the VBV_* values
-    # reach the writer; the test-core run checks the written content.
-    su -s /bin/sh -c "exec sh '$0' --writer '$OUT'" "$WRITER_USER"
+    if [ ! -d "$OUT_DIR" ]; then
+        mkdir "$OUT_DIR" || return 1
+    fi
+    if [ -d "$OUT" ] && [ ! -L "$OUT" ]; then
+        warn "$OUT is a directory; not writing the build version."
+        return 1
+    fi
+    tmp=$(mktemp "$OUT_DIR/.vault-core-version.XXXXXX") || return 1
+    if ! printf '{"component":"vault-core","version":"%s","commit":"%s","recorded_at":"%s"}\n' \
+            "$version" "$commit" "$recorded_at" > "$tmp" \
+       || ! chmod 0644 "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if [ -L "$OUT" ]; then
+        rm -f "$OUT"
+    fi
+    if ! mv -f "$tmp" "$OUT"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    return 0
 }
 
-if prepare_dir && run_writer; then
-    log "build version recorded for vault-api's GET /v1/about: version $version, commit $commit ($OUT)"
+discard_old() {
+    if [ -L "$OUT" ] || [ -f "$OUT" ]; then
+        rm -f "$OUT" 2>/dev/null || warn "could not remove the old $OUT either; vault-api may show the previous version."
+    fi
+}
+
+if ! root_may_write; then
+    warn "could not write $OUT; vault-api will report no or an old vault-core version. The cache starts anyway."
+    exit 0
+fi
+if write_file; then
+    log "build version recorded for vault-api's GET /v1/about: version $version, commit $commit ($OUT, owner $(stat -c %u:%g "$OUT"))"
 else
+    discard_old
     warn "could not write $OUT; vault-api will report no vault-core version. The cache starts anyway."
 fi
 exit 0

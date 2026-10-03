@@ -2,8 +2,9 @@
 # Docker-free test of core/docker/29-vault-build-version.sh (WP VER-2).
 # Runs the real hook under `sh` (as the container does) with a temp output
 # path and asserts the file it writes, the fail-closed rendering of bad
-# values, the atomic write, the symlink handling and the one refusal (the
-# cache-event log naming the same file).
+# values, the atomic write, the symlink handling, the one refusal (the
+# cache-event log naming the same file) and, with PATH stubs, the SEC-FIX-5
+# rule that root writes only into a root-only directory chain.
 #
 #     bash core/tests/test-build-version-hook.sh
 #
@@ -206,65 +207,56 @@ else
     bad "missing logs/ directory" "rc=$rc log: $(head -n1 "$log")"
 fi
 
-# --- 9. review M1: no root file operation on a name inside the directory ---
-# Structural pin: every mktemp / write redirection / chmod / mv / rm lives in
-# the `--writer` block, which refuses to run as root; outside it the root
-# half may only `mkdir` (plain, never -p) and `chown -h`.
-writer_start=$(grep -n '^if \[ "${1:-}" = "--writer" \]; then$' "$HOOK" | cut -d: -f1)
-writer_end=$(awk -v s="$writer_start" 'NR > s && /^fi$/ { print NR; exit }' "$HOOK")
-if [ -z "$writer_start" ] || [ -z "$writer_end" ]; then
-    bad "M1 structure" "no '--writer' block found in the hook"
+# --- 9. SEC-FIX-5: as root, only into a root-only directory chain -----------
+# Structural pin: the main flow asks root_may_write before write_file, and
+# root_may_write consults root_chain_bad on the output directory.
+main_check=$(grep -n '^if ! root_may_write; then$' "$HOOK" | cut -d: -f1)
+main_write=$(grep -n '^if write_file; then$' "$HOOK" | cut -d: -f1)
+if [ -n "$main_check" ] && [ -n "$main_write" ] && [ "$main_check" -lt "$main_write" ]; then
+    ok "SEC-FIX-5 structure: root_may_write gates write_file"
 else
-    outside=$(awk -v s="$writer_start" -v e="$writer_end" 'NR < s || NR > e' "$HOOK" | grep -v '^[[:space:]]*#')
-    hits=$(printf '%s\n' "$outside" | grep -nE '(^|[^-])\b(mktemp|chmod|mv|rm|touch|cp|ln)\b|>[[:space:]]*"?\$|: >' || true)
-    if [ -n "$hits" ]; then
-        bad "M1 structure" "file operations outside the writer block: $hits"
-    else
-        ok "M1 structure: mktemp/write/chmod/mv/rm only inside the --writer block"
-    fi
-    if printf '%s\n' "$outside" | grep -qE 'mkdir[[:space:]]+-p'; then
-        bad "M1 structure" "the root half uses mkdir -p"
-    elif ! printf '%s\n' "$outside" | grep -qE '^[[:space:]]*mkdir "\$OUT_DIR"'; then
-        bad "M1 structure" "the root half no longer creates logs/ with a plain mkdir"
-    else
-        ok "M1 structure: the root half creates logs/ with a plain mkdir"
-    fi
-    if printf '%s\n' "$outside" | grep -E '\bchown\b' | grep -vq 'chown -h'; then
-        bad "M1 structure" "a chown without -h in the root half"
-    else
-        ok "M1 structure: every root chown is chown -h"
-    fi
-    if awk -v s="$writer_start" -v e="$writer_end" 'NR > s && NR < e' "$HOOK" | grep -q 'die "the writer half must not run as root'; then
-        ok "M1 structure: the writer block refuses root"
-    else
-        bad "M1 structure" "the writer block does not refuse root"
-    fi
+    bad "SEC-FIX-5 structure" "root_may_write ($main_check) does not precede write_file ($main_write)"
+fi
+rmw=$(awk '/^root_may_write\(\) \{$/ { f = 1 } f { print } f && /^}$/ { exit }' "$HOOK")
+if printf '%s\n' "$rmw" | grep -q 'root_chain_bad "\$OUT_DIR"' \
+   && printf '%s\n' "$rmw" | grep -q '\[ "\$(id -u)" = "0" \] || return 0'; then
+    ok "SEC-FIX-5 structure: root_may_write checks the whole chain of OUT_DIR when root"
+else
+    bad "SEC-FIX-5 structure" "root_may_write no longer checks root_chain_bad \"\$OUT_DIR\" for root"
+fi
+if grep -qE '\bsu\b.*--writer|^if \[ "\$\{1:-\}" = "--writer" \]' "$HOOK"; then
+    bad "SEC-FIX-5 structure" "the VER-2 --writer split is still present"
+else
+    ok "SEC-FIX-5 structure: no su writer left (root writes, in a root-only directory)"
 fi
 
-# Behaviour, with PATH stubs standing in for root (id -u = 0) and su.
+# Behaviour, with PATH stubs: `id -u` answers 0 (root). The work directory
+# belongs to the test user, so the real chain is NOT root-only. A `stat`
+# stub can make it look root-only ("0 755" for '%u %a'), except for one
+# path named in STUB_BAD, to drive both branches.
 stubs="$work/stubs"
 mkdir -p "$stubs"
 cat > "$stubs/id" <<'STUB'
 #!/bin/sh
 if [ "$1" = "-u" ]; then echo 0; exit 0; fi
-if [ "$1" = "nginx" ]; then [ -n "${STUB_HAS_NGINX:-}" ] && exit 0; exit 1; fi
-exec /usr/bin/id "$@"
+PATH=$STUB_REAL_PATH exec id "$@"
 STUB
-cat > "$stubs/chown" <<'STUB'
+cat > "$stubs/stat" <<'STUB'
 #!/bin/sh
-echo "chown $*" >> "$STUB_LOG"
+if [ -n "${STUB_ROOT_STAT:-}" ] && [ "$1" = "-c" ] && [ "$2" = "%u %a" ]; then
+    if [ -n "${STUB_BAD:-}" ] && [ "$3" = "$STUB_BAD" ]; then echo "101 755"; else echo "0 755"; fi
+    exit 0
+fi
+PATH=$STUB_REAL_PATH exec stat "$@"
 STUB
-# The su stub records the call and runs the command as the caller with
-# STUB_UNPRIV set, so the stubbed `id -u` answers non-root inside it -- the
-# same split the real su makes.
-cat > "$stubs/su" <<'STUB'
+for s in mkdir mktemp mv; do
+    cat > "$stubs/$s" <<STUB
 #!/bin/sh
-echo "su $*" >> "$STUB_LOG"
-c=""; prev=""
-for a in "$@"; do [ "$prev" = "-c" ] && c=$a; prev=$a; done
-PATH=$STUB_REAL_PATH exec sh -c "$c"
+echo "$s \$*" >> "\$STUB_LOG"
+PATH=\$STUB_REAL_PATH exec $s "\$@"
 STUB
-chmod 0755 "$stubs/id" "$stubs/chown" "$stubs/su"
+done
+chmod 0755 "$stubs"/*
 
 root_run() {
     local out="$1"
@@ -278,45 +270,77 @@ root_run() {
     ) > "$log" 2>&1 || rc=$?
 }
 
+# 9a. Real ownership (the test user's): root writes nothing, removes nothing.
 out="$work/asroot/vault/logs/vault-core-version.json"
-mkdir -p "$work/asroot/vault"
-STUB_HAS_NGINX=1 root_run "$out"
-if [ "$rc" -eq 0 ] && grep -q '"version":"8.0"' "$out" 2>/dev/null \
-   && grep -q "^su -s /bin/sh -c exec sh '.*29-vault-build-version.sh' --writer '$out' nginx$" "$work/stub.log" \
-   && grep -q "^chown -h nginx:nginx $work/asroot/vault/logs$" "$work/stub.log"; then
-    ok "M1 as root: logs/ created with chown -h, the file written by the writer under su nginx"
-else
-    bad "M1 as root" "rc=$rc file=$(head -c 120 "$out" 2>&1) stubs: $(tr '\n' ';' < "$work/stub.log") log: $(head -n2 "$log")"
-fi
-
-out="$work/nonginx/vault/logs/vault-core-version.json"
-mkdir -p "$work/nonginx/vault"
+mkdir -p "$(dirname "$out")"
+printf 'stale\n' > "$out"
 root_run "$out"
-if [ "$rc" -eq 0 ] && [ ! -e "$out" ] && grep -q "never as root" "$log" && ! grep -q '^su ' "$work/stub.log"; then
-    ok "M1 as root without an nginx user: nothing written, never falls back to root"
+if [ "$rc" -eq 0 ] && [ "$(cat "$out")" = "stale" ] && grep -q 'not a root-only directory' "$log" \
+   && ! grep -qE '^(mktemp|mv) ' "$work/stub.log"; then
+    ok "SEC-FIX-5 as root, directory not root-only: nothing written or removed, no mktemp/mv, WARNING"
 else
-    bad "M1 as root without an nginx user" "rc=$rc exists=$([ -e "$out" ] && echo yes || echo no) log: $(head -n2 "$log")"
+    bad "SEC-FIX-5 as root, not root-only" "rc=$rc file=$(cat "$out") stubs: $(tr '\n' ';' < "$work/stub.log") log: $(head -n2 "$log")"
 fi
 
-out="$work/writerroot/logs/vault-core-version.json"
-mkdir -p "$work/writerroot/logs"
-rc=0
-( PATH="$stubs:$PATH" sh "$HOOK" --writer "$out" ) > "$work/last.log" 2>&1 || rc=$?
-if [ "$rc" -ne 0 ] && grep -q 'FATAL: the writer half must not run as root' "$work/last.log" && [ -z "$(find "$work/writerroot/logs" -mindepth 1)" ]; then
-    ok "M1 writer refuses root: FATAL, nothing created"
+# 9b. Missing logs/ in a parent that is not root-only: not even created.
+out="$work/asroot-missing/vault/logs/vault-core-version.json"
+mkdir -p "$work/asroot-missing/vault"
+root_run "$out"
+if [ "$rc" -eq 0 ] && [ ! -e "$(dirname "$out")" ] && ! grep -q '^mkdir ' "$work/stub.log" \
+   && grep -q "not creating" "$log"; then
+    ok "SEC-FIX-5 as root, parent not root-only: logs/ is not created"
 else
-    bad "M1 writer refuses root" "rc=$rc log: $(head -n2 "$work/last.log")"
+    bad "SEC-FIX-5 as root, missing logs/" "rc=$rc stubs: $(tr '\n' ';' < "$work/stub.log") log: $(head -n2 "$log")"
 fi
 
-# A symlink planted where logs/ will be created: plain mkdir refuses it, the
-# target directory is neither chowned nor written.
+# 9c. Chain reported root-only: root writes (mktemp + mv in the directory).
+out="$work/rootonly/vault/logs/vault-core-version.json"
+mkdir -p "$(dirname "$out")"
+STUB_ROOT_STAT=1 root_run "$out"
+if [ "$rc" -eq 0 ] && grep -q '"version":"8.0"' "$out" 2>/dev/null && grep -q '^mktemp ' "$work/stub.log"; then
+    ok "SEC-FIX-5 as root, root-only chain: the file is written"
+else
+    bad "SEC-FIX-5 as root, root-only chain" "rc=$rc file=$(head -c 100 "$out" 2>&1) log: $(head -n2 "$log")"
+fi
+
+# 9d. One ANCESTOR not root-only (two levels up): refused, naming it.
+out="$work/ancestor/vault/logs/vault-core-version.json"
+mkdir -p "$(dirname "$out")"
+STUB_ROOT_STAT=1 STUB_BAD="$work/ancestor" root_run "$out"
+if [ "$rc" -eq 0 ] && [ ! -e "$out" ] && grep -qF "$work/ancestor is not a root-only directory" "$log" \
+   && ! grep -q '^mktemp ' "$work/stub.log"; then
+    ok "SEC-FIX-5 as root, an ancestor not root-only: refused, the ancestor named"
+else
+    bad "SEC-FIX-5 as root, ancestor" "rc=$rc exists=$([ -e "$out" ] && echo yes || echo no) log: $(head -n2 "$log")"
+fi
+
+# 9e. Missing logs/ under a root-only chain: created with a plain mkdir.
+out="$work/rootonly-missing/vault/logs/vault-core-version.json"
+mkdir -p "$work/rootonly-missing/vault"
+STUB_ROOT_STAT=1 root_run "$out"
+if [ "$rc" -eq 0 ] && grep -q '"version":"8.0"' "$out" 2>/dev/null \
+   && grep -qx "mkdir $work/rootonly-missing/vault/logs" "$work/stub.log"; then
+    ok "SEC-FIX-5 as root, root-only parent: logs/ created with a plain mkdir, file written"
+else
+    bad "SEC-FIX-5 as root, root-only parent" "rc=$rc stubs: $(tr '\n' ';' < "$work/stub.log") log: $(head -n2 "$log")"
+fi
+
+# 9f. A symlinked logs/ as root: refused before any chain walk.
 mkdir -p "$work/plant/vault" "$work/plant/target"
 ln -s "$work/plant/target" "$work/plant/vault/logs"
-STUB_HAS_NGINX=1 root_run "$work/plant/vault/logs/vault-core-version.json"
-if [ "$rc" -eq 0 ] && [ -z "$(find "$work/plant/target" -mindepth 1)" ] && ! grep -q '^chown' "$work/stub.log" && ! grep -q '^su ' "$work/stub.log"; then
-    ok "M1 planted logs/ symlink: no chown, no write, target untouched"
+STUB_ROOT_STAT=1 root_run "$work/plant/vault/logs/vault-core-version.json"
+if [ "$rc" -eq 0 ] && [ -z "$(find "$work/plant/target" -mindepth 1)" ] && grep -q 'is a symlink' "$log"; then
+    ok "SEC-FIX-5 as root, planted logs/ symlink: nothing written, target untouched"
 else
-    bad "M1 planted logs/ symlink" "rc=$rc stubs: $(tr '\n' ';' < "$work/stub.log") target: $(find "$work/plant/target" -mindepth 1)"
+    bad "SEC-FIX-5 as root, planted logs/ symlink" "rc=$rc target: $(find "$work/plant/target" -mindepth 1) log: $(head -n2 "$log")"
+fi
+
+# 9g. Relative output path as root: refused (the chain walk needs /).
+root_run "relative/logs/vault-core-version.json"
+if [ "$rc" -eq 0 ] && grep -q 'not an absolute path' "$log" && [ ! -e relative ]; then
+    ok "SEC-FIX-5 as root, relative path: refused"
+else
+    bad "SEC-FIX-5 as root, relative path" "rc=$rc log: $(head -n2 "$log")"
 fi
 
 echo

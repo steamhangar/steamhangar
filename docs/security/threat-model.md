@@ -995,9 +995,11 @@ packaging work package, as that same comment says — so a fresh deployment
 following the shipped `.env.example` has this on, not off.
 
 **Who reads it:** only `vault-api`'s own background sweep
-(`api/vault_api/event_sweep.py`), which reads it, never truncates it in the
-shipped container layout (a documented, accepted limitation — the comment
-above `VAULT_EVENT_LOG_MAX_BYTES` in vault-api's environment), and turns it into the derived, API-key-gated
+(`api/vault_api/event_sweep.py`), which reads it, truncates it in place
+(`ftruncate` on a verified fd) once it is fully swept and past
+`VAULT_EVENT_LOG_MAX_BYTES` — the file belongs to uid 101 since pre-freeze
+review S3, inside a `logs/` directory that belongs to root since WP
+SEC-FIX-5 (§9) — and turns it into the derived, API-key-gated
 summaries at `GET /v1/clients` and `GET /v1/stats`. Nothing serves the raw
 log file itself over HTTP. At the filesystem level, whoever can read the
 shared Docker volume on the host can read the raw file directly — the same
@@ -1259,22 +1261,39 @@ Named plainly, as out of scope, rather than implied to be covered:
   *which hosts* vault-api can talk to, not *which services on them*.
   Documented, not changed: SEC-FIX-1 is a server-side pass and adds no
   proxy config.
-- **A check-then-use race in the event-log hook (WP 5.3 review P-2).**
-  `core/docker/25-vault-eventlog.sh` runs as root at every vault-core start
-  and refuses a symlink anywhere on the `VAULT_EVENT_LOG` path below
-  `/vault/`. But it checks first and acts afterwards (`mkdir -p`, creating
-  the file, `chown -h`), and the nginx master then opens the same path as
-  root, following symlinks. `/vault` is shared with vault-api, and
-  `/vault/logs` is owned by uid 101. A uid-101 process that swaps a path
-  component for a symlink inside that window can make root create, chown
-  or append to a file with the configured file name (`event.log`) in a
-  directory of its choosing. That reach is vault-core's own container
-  filesystem: the volume is its only mount. Preconditions are code
-  execution as uid 101 in vault-api (or anything else that can write the
-  volume), and winning a race that is open only while vault-core starts.
-  Documented, not fixed: POSIX sh cannot open or chown through a file
-  descriptor with `O_NOFOLLOW`. Closing it means doing that step in a
-  small program, or moving the log off the shared volume.
+- **Root following names uid 101 controls on the shared volume (WP 5.3
+  review P-2, widened by the VER-2 review) — fixed in WP SEC-FIX-5,
+  recorded here because the attacker model is the same as the next entry's.**
+  vault-core's start hooks and its nginx master run as root and act on
+  names inside `/vault`: `25-vault-eventlog.sh` checked and then created the
+  event log, the preflight created `cache/depot`, and the master opens the
+  event log `O_APPEND|O_CREAT` and creates, chowns and chmods its temp
+  directories under `tmp/` by name at every start, following symlinks. Up to
+  SEC-FIX-5 `/vault`, `cache/`, `tmp/` and `logs/` belonged to uid 101, so a
+  uid-101 process (code execution in vault-api or an nginx worker) could
+  swap any of those names for a symlink at any time and make root create,
+  truncate, append to, chown or chmod any file in vault-core's container
+  (the CVE-2016-1247 class); no re-check in a shell hook could cover the
+  master's own open. Now those four directories are root:root 0755 and uid
+  101 owns only what it writes (`cache/depot` and its tree, the nginx temp
+  directories, the event log's content): it can no longer rename any name
+  root opens. `core/docker/21-vault-volume-ownership.sh` enforces this at
+  every start, migrating a volume from an earlier image, probes as uid 101
+  that the directories are really closed (an ACL would show here), and
+  refuses to start when it cannot make it true (no CAP_CHOWN, a
+  root-squashing share, a planted symlink), naming the host-side commands.
+  `25-vault-eventlog.sh` requires a root-only directory for the log and
+  refuses a symlink, non-regular or hard-linked log; the build-version file
+  is written by root, only into a root-only directory chain. Pinned by
+  `core/tests/volume-ownership-race-rig.sh` (a real uid-101 attacker put
+  into each window by PATH wrappers, plus the master's open via `nginx -t`;
+  the hooks from before the fix fail it), the refusals in
+  `.github/scripts/verify-core-nginx.sh`, and `deploy/tests/verify-stack.sh`
+  (fresh and upgraded named volume and bind mount). What remains: root still
+  writes event-log lines into a file uid 101 owns and can fill (disk use,
+  the same as any log), and nothing here protects against a uid-101 process
+  that can already write the depot tree serving wrong bytes to LAN clients
+  (that is the cache's content, §2).
 - **Planted symlinks on the shared `/vault` volume, as seen by vault-api
   (WP 5.3 pass-2 review S-1/S-2) — fixed in WP SEC-FIX-4, recorded here
   because the attacker model is the same as P-2's.** vault-core and

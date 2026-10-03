@@ -165,6 +165,81 @@ dc() {
     docker compose --env-file "$env_file" -f "$compose_file" -p "$PROJECT" "$@"
 }
 
+# --- WP SEC-FIX-5 helpers: who may rename names on the cache volume ------------
+# Root (vault-core's start hooks, its nginx master) opens names in /vault,
+# cache/, tmp/ and logs/, so those four must be root:root 0755; uid 101 (the
+# nginx workers, vault-api) owns only what it writes. sec5_live checks that
+# live in the RUNNING stack, from both sides, plus what must keep working on
+# that layout: GC deleting a depot as vault-api and, with the event log on, a
+# line reaching event.log and vault-api being able to open it for writing
+# (its sweeper truncates it in place).
+SEC5_CHUNK=5ec5f15e5ec5f15e5ec5f15e5ec5f15e5ec5f15e
+
+# sec5_live <label> <fresh appid for the GC check> <event log: on|off>
+# Each call uses its own depot (99990000 + appid): the calls share one
+# vault-db, and a depot mapped to two apps would be protected as shared.
+sec5_live() {
+    s5_lbl=$1
+    s5_app=$2
+    s5_ev=$3
+    SEC5_DEPOT=$((99990000 + s5_app))
+    s5_own=$(dc exec -T vault-core sh -c 'stat -c "%n %u:%g %a" /vault /vault/cache /vault/tmp /vault/logs /vault/cache/depot /vault/tmp/proxy' 2>&1 | tr -d '\r')
+    printf '%s\n' "$s5_own" | sed 's/^/    /'
+    for s5_d in /vault /vault/cache /vault/tmp /vault/logs; do
+        assert_contains "$s5_own" "$s5_d 0:0 755" "$s5_lbl: $s5_d is root:root 0755 (only root can rename names in it)"
+    done
+    assert_contains "$s5_own" "/vault/cache/depot 101:101 " "$s5_lbl: cache/depot belongs to uid 101 (workers store, vault-api deletes)"
+    assert_contains "$s5_own" "/vault/tmp/proxy 101:101 700" "$s5_lbl: tmp/proxy belongs to uid 101, 0700 (proxy_store temp files)"
+    s5_api=$(dc exec -T vault-api sh -c 'id -u; for d in /vault /vault/cache /vault/tmp /vault/logs; do if ln -s / "$d/.sec5-probe" 2>/dev/null; then rm -f "$d/.sec5-probe"; echo "$d OPEN"; else echo "$d closed"; fi; done; t=/vault/cache/depot/.sec5-probe; if touch "$t" 2>/dev/null && rm -f "$t"; then echo "depot writable"; else echo "depot NOT writable"; fi' 2>&1 | tr -d '\r')
+    printf '%s\n' "$s5_api" | sed 's/^/    vault-api: /'
+    assert_contains "$s5_api" "/vault/logs closed" "$s5_lbl: vault-api (uid 101) cannot create a name in /vault/logs (probe ran)"
+    assert_not_contains "$s5_api" "OPEN" "$s5_lbl: vault-api (uid 101) cannot create a name in /vault, cache/, tmp/ or logs/"
+    assert_contains "$s5_api" "depot writable" "$s5_lbl: vault-api (uid 101) can still write cache/depot"
+
+    # A chunk vault-api writes into the depot tree is served as a HIT by the
+    # workers -- the same 101-owned tree, from both containers.
+    dc exec -T vault-api sh -c "mkdir -p /vault/cache/depot/$SEC5_DEPOT/chunk && printf sec5 > /vault/cache/depot/$SEC5_DEPOT/chunk/$SEC5_CHUNK" >/dev/null 2>&1
+    s5_hit=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "Host: $CDN_HOST" "$CORE_URL/depot/$SEC5_DEPOT/chunk/$SEC5_CHUNK")
+    assert_eq "200" "$s5_hit" "$s5_lbl: a chunk in the depot tree is served (HIT) by vault-core"
+    if [ "$s5_ev" = on ]; then
+        # flush=5s: bounded wait for the line (LEARNINGS, WP 4g).
+        s5_line=""
+        s5_i=0
+        while [ "$s5_i" -lt 12 ]; do
+            s5_line=$(dc exec -T vault-core sh -c "grep '$SEC5_CHUNK' /vault/logs/event.log 2>/dev/null | tail -1" | tr -d '\r')
+            [ -n "$s5_line" ] && break
+            s5_i=$((s5_i + 1)); sleep 1
+        done
+        assert_eq "HIT" "$(printf '%s' "$s5_line" | awk -F'\t' '{print $4}')" "$s5_lbl: the HIT reached event.log (the root master's log fd, a 101-owned file in a root-only logs/)"
+        s5_evf=$(dc exec -T vault-core sh -c 'f=/vault/logs/event.log; if [ -f "$f" ] && [ ! -L "$f" ]; then stat -c "%u:%g regular" "$f"; else echo "not a regular file"; fi' 2>&1 | tr -d '\r')
+        assert_eq "101:101 regular" "$s5_evf" "$s5_lbl: event.log is a regular file owned by uid 101"
+        s5_wr=$(dc exec -T vault-api python -c "import os; os.close(os.open('/vault/logs/event.log', os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK)); print('write-open ok')" 2>&1 | tr -d '\r')
+        assert_eq "write-open ok" "$s5_wr" "$s5_lbl: vault-api can open event.log for writing (its sweeper truncates in place)"
+    fi
+
+    # GC as vault-api on this layout: map the depot to a fresh app, delete it.
+    s5_put=$(curl -s --max-time 10 -X PUT "$API_URL/v1/mapping/$SEC5_DEPOT" \
+        -H "X-Api-Key: $TEST_API_KEY" -H 'Content-Type: application/json' \
+        -d "{\"appid\": $s5_app, \"app_name\": \"SEC-FIX-5 GC check\"}")
+    assert_contains "$s5_put" "\"depotid\":$SEC5_DEPOT" "$s5_lbl: PUT /v1/mapping/$SEC5_DEPOT -> app $s5_app"
+    s5_del=$(curl -s --max-time 30 -X DELETE -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/cache/$s5_app")
+    say "    DELETE /v1/cache/$s5_app -> $s5_del"
+    assert_contains "$s5_del" "{\"depotid\":$SEC5_DEPOT," "$s5_lbl: DELETE /v1/cache/$s5_app deleted depot $SEC5_DEPOT"
+    assert_contains "$s5_del" '"failed":[]' "$s5_lbl: ...and no depot failed"
+    s5_gone=$(dc exec -T vault-api sh -c "test -e /vault/cache/depot/$SEC5_DEPOT && echo present || echo gone" 2>&1 | tr -d '\r')
+    assert_eq "gone" "$s5_gone" "$s5_lbl: the depot directory is gone from the volume"
+}
+
+# sec5_make_old <docker -v source>: turn a cache volume or bind dir into the
+# layout every image before SEC-FIX-5 left behind (everything 101:101, a
+# 101-owned event.log and version file) -- the upgrade case.
+sec5_make_old() {
+    docker run --rm --user 0:0 --entrypoint sh -v "$1:/vault" \
+        "ghcr.io/steamhangar/vault-core:$TAG" -c 'mkdir -p /vault/logs && : >> /vault/logs/event.log && printf "{}\n" > /vault/logs/vault-core-version.json && chown -R 101:101 /vault && chmod 0755 /vault /vault/cache /vault/tmp /vault/logs' 2>&1 | sed 's/^/    /'
+    docker run --rm --user 0:0 --entrypoint sh -v "$1:/vault" \
+        "ghcr.io/steamhangar/vault-core:$TAG" -c 'stat -c "%u:%g" /vault /vault/cache /vault/tmp /vault/logs /vault/logs/event.log | sort -u' 2>&1
+}
+
 cleanup() {
     section "Cleanup"
     say 'Test containers and TEST volumes are removed; the images are kept (they are the artifact).'
@@ -1121,6 +1196,16 @@ printf '%s\n' "$core_worker" | sed 's/^/    /'
 assert_eq "0000000000000000" "$(printf '%s\n' "$core_worker" | awk '$1 == "CapEff:" { print $2 }')" "vault-core worker CapEff is empty"
 assert_eq "101" "$(printf '%s\n' "$core_worker" | awk '$1 == "Uid:" { print $3 }')" "vault-core worker runs as uid 101"
 
+step "4d. SEC-FIX-5: who may rename names on the cache volume (fresh named volume)"
+say 'A fresh named volume is seeded from core/Dockerfile (Docker copies the'
+say "mount point's ownership too), and 21-vault-volume-ownership.sh enforces the"
+say 'same map at every start: /vault, cache/, tmp/, logs/ root:root 0755,'
+say 'cache/depot and the nginx temp dirs uid 101. Event log off here (5i turns'
+say 'it on; sections 9 and 11 check it on the bind mount and an upgrade).'
+core_boot=$(dc logs --no-log-prefix vault-core 2>/dev/null)
+assert_contains "$core_boot" "21-vault-volume-ownership.sh: volume ownership OK" "vault-core's 21- hook reports the volume ownership OK"
+sec5_live "named volume (fresh)" 4291 off
+
 # =============================================================================
 section "5. vault-core behaviour"
 # =============================================================================
@@ -1331,6 +1416,15 @@ else
     assert_eq "MISS" "$field4"    "field 4 records MISS for this forced fresh fetch"
     assert_eq "200" "$field9"     "field 9 (HTTP status) is 200"
 fi
+
+say ''
+say 'SEC-FIX-5: the log nginx'"'"'s root master opens sits in a root-only logs/'
+say 'and belongs to uid 101, which vault-api'"'"'s sweeper needs to truncate it.'
+ev5=$(dc exec -T vault-core sh -c 'stat -c "%u:%g %a" /vault/logs; f=/vault/logs/event.log; if [ -f "$f" ] && [ ! -L "$f" ]; then stat -c "%u:%g regular" "$f"; else echo "not a regular file"; fi' 2>&1 | tr -d '\r')
+assert_contains "$ev5" "0:0 755" "SEC-FIX-5: /vault/logs is root:root 0755 with the event log on"
+assert_contains "$ev5" "101:101 regular" "SEC-FIX-5: event.log is a regular file owned by uid 101"
+ev5_wr=$(dc exec -T vault-api python -c "import os; os.close(os.open('/vault/logs/event.log', os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK)); print('write-open ok')" 2>&1 | tr -d '\r')
+assert_eq "write-open ok" "$ev5_wr" "SEC-FIX-5: vault-api can open event.log for writing (truncation in place stays possible)"
 
 say ''
 say 'Reverting: strip VAULT_EVENT_LOG back out of the test .env and recreate'
@@ -2106,11 +2200,13 @@ chmod 0555 "$work/rootonly/cache" "$work/rootonly/tmp"
 ro=$(docker run --rm -v "$work/rootonly:/vault" "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
 printf '%s\n' "$ro" | grep -E 'FATAL|chown|exit=' | sed 's/^/    /'
 assert_contains "$ro" "not writable" "a cache directory the nginx worker cannot write is refused"
-# WP VER-2: vault-core's start hooks run as root inside the container, and
-# 29-vault-build-version.sh creates logs/ (owner nginx) and its version file
-# in this bind before the preflight refuses, so a non-root caller cannot
-# delete $work afterwards. cleanup() hands the tree back (also on an aborted
-# run); here only the hook's effect is checked.
+# WP VER-2 / SEC-FIX-5: vault-core's start hooks run as root inside the
+# container: 21-vault-volume-ownership.sh makes the bind's top directory,
+# cache/ and tmp/ root:root 0755 and creates logs/ and the nginx temp dirs,
+# and 29-vault-build-version.sh writes its version file, all before the
+# preflight refuses (cache/depot stays root-owned, so the worker cannot write
+# it). A non-root caller cannot delete $work afterwards; cleanup() hands the
+# tree back (also on an aborted run). Here only the hook's effect is checked.
 if [ -f "$work/rootonly/logs/vault-core-version.json" ]; then
     ok "8e: the version hook ran before the preflight refusal (cleanup hands rootonly/ back, WP VER-2)"
 else
@@ -2122,21 +2218,25 @@ section "9. Dedicated cache mount: VAULT_CACHE_PATH bind mode, live (WP DEPLOY-F
 # =============================================================================
 say 'Every section above ran on the default named volume. This one follows'
 say 'deploy/README.md "Using a dedicated cache mount" to the letter: create'
-say '<path>/cache/depot and <path>/tmp, owned 101:101, set VAULT_CACHE_PATH,'
-say 'bring the stack up. A first rollout on Docker 28 failed exactly here'
-say '("field VolumeOptions must not be specified") while this suite was green.'
+say '<path>/cache/depot and <path>/tmp as root, hand ONLY cache/depot to 101:101'
+say '(WP SEC-FIX-5), set VAULT_CACHE_PATH, bring the stack up. A first rollout'
+say 'on Docker 28 failed exactly here ("field VolumeOptions must not be'
+say 'specified") while this suite was green. 9e then repeats the start on the'
+say 'layout the README asked for before SEC-FIX-5 (chown -R 101:101 of the'
+say 'whole directory), which is what an existing bind mount looks like.'
 say ''
 say 'Ownership: this script may run as a non-root user (CI, a devbox), so the'
-say 'chown 101:101 the README asks for runs in a throwaway root container of'
-say 'the vault-core image -- the same effect as the operator'"'"'s own chown.'
+say 'chowns the README asks for run in a throwaway root container of the'
+say 'vault-core image -- the same effect as the operator'"'"'s own sudo.'
 run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns down"
 
 step "9a. Host directory prepared as the README demands"
 mkdir -p "$bind_dir/cache/depot" "$bind_dir/tmp"
 docker run --rm --user 0:0 --entrypoint sh -v "$bind_dir:/vault" \
-    "ghcr.io/steamhangar/vault-core:$TAG" -c 'chown -R 101:101 /vault' 2>&1 | sed 's/^/    /'
-bind_own=$(stat -c '%u:%g' "$bind_dir" "$bind_dir/cache" "$bind_dir/cache/depot" "$bind_dir/tmp" | sort -u | tr '\n' ' ' | sed 's/ $//')
-assert_eq "101:101" "$bind_own" "bind dir, cache/, cache/depot and tmp are owned 101:101 (precondition)"
+    "ghcr.io/steamhangar/vault-core:$TAG" -c 'chown root:root /vault /vault/cache /vault/tmp && chmod 0755 /vault /vault/cache /vault/tmp && chown 101:101 /vault/cache/depot' 2>&1 | sed 's/^/    /'
+bind_own=$(stat -c '%u:%g %a' "$bind_dir" "$bind_dir/cache" "$bind_dir/tmp" | sort -u | tr '\n' ' ' | sed 's/ $//')
+assert_eq "0:0 755" "$bind_own" "bind dir, cache/ and tmp/ are root:root 0755 (precondition, sudo mkdir)"
+assert_eq "101:101" "$(stat -c '%u:%g' "$bind_dir/cache/depot")" "cache/depot is owned 101:101 (precondition)"
 
 step "9b. Stack up with VAULT_CACHE_PATH=$bind_dir"
 say 'With the cache-event log ON, as deploy/.env.example ships it: vault-core'
@@ -2202,6 +2302,46 @@ if [ "$bind_up" = yes ]; then
     bind_core_ver=$(curl -s --max-time 15 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/about" \
         | python3 -c 'import json, sys; print({c["name"]: c for c in json.load(sys.stdin)["components"]}["vault-core"]["version"])' 2>&1)
     assert_eq "dev" "$bind_core_ver" "GET /v1/about reads vault-core's version from the bind (WP VER-2)"
+
+    step "9d2. SEC-FIX-5 on the bind mount (README steps): ownership, uid 101's reach, event log, GC"
+    sec5_live "bind (fresh, README steps)" 4292 on
+    bind_host=$(stat -c '%n %u:%g %a' "$bind_dir" "$bind_dir/logs" "$bind_dir/logs/vault-core-version.json" "$bind_dir/logs/event.log" | sed "s#$bind_dir#<bind>#")
+    printf '%s\n' "$bind_host" | sed 's/^/    host: /'
+    assert_contains "$bind_host" "<bind>/logs 0:0 755" "host view: <VAULT_CACHE_PATH>/logs is root:root 0755"
+    assert_contains "$bind_host" "<bind>/logs/vault-core-version.json 0:0 644" "host view: the version file is root:root 0644"
+    assert_contains "$bind_host" "<bind>/logs/event.log 101:101 " "host view: event.log is owned 101:101"
+
+    step "9e. SEC-FIX-5 upgrade on the bind mount: a directory chown -R 101:101 (the README before SEC-FIX-5)"
+    say 'Every bind mount set up before SEC-FIX-5 looks like this: the whole'
+    say 'directory, logs/, event.log and the version file owned 101:101. vault-core'
+    say 'must migrate it at the next start (21-vault-volume-ownership.sh) and run.'
+    docker compose --env-file "$bind_live_env_file" -f "$compose_file" -p "$PROJECT" down > /dev/null 2>&1
+    bind_old=$(sec5_make_old "$bind_dir")
+    assert_eq "101:101" "$bind_old" "bind dir reset to the pre-SEC-FIX-5 layout (everything 101:101, precondition)"
+    if docker compose --env-file "$bind_live_env_file" -f "$compose_file" -p "$PROJECT" up -d > "$work/compose-up-bind2.log" 2>&1; then
+        ok "docker compose up -d on the 101-owned bind succeeds"
+    else
+        sed 's/^/    /' "$work/compose-up-bind2.log"
+        bad "docker compose up -d on the 101-owned bind failed"
+    fi
+    i=0
+    while [ "$i" -lt 60 ]; do
+        core_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-core)" 2>/dev/null || echo starting)
+        api_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-api)" 2>/dev/null || echo starting)
+        [ "$core_h" = "healthy" ] && [ "$api_h" = "healthy" ] && break
+        i=$((i + 1))
+        sleep 2
+    done
+    assert_eq "healthy" "$core_h" "vault-core is healthy after migrating the bind"
+    assert_eq "healthy" "$api_h"  "vault-api is healthy on the migrated bind"
+    bind_mig=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep '^21-vault-volume-ownership.sh:')
+    printf '%s\n' "$bind_mig" | sed 's/^/    /'
+    assert_contains "$bind_mig" "/vault: 101:101 755 -> 0:0 755 (migrated)" "21- logged the migration of the bind's top directory"
+    assert_contains "$bind_mig" "/vault/logs: 101:101 755 -> 0:0 755 (migrated)" "21- logged the migration of logs/"
+    sec5_live "bind (upgraded from 101:101)" 4293 on
+    bind_up_ver=$(curl -s --max-time 15 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/about" \
+        | python3 -c 'import json, sys; print({c["name"]: c for c in json.load(sys.stdin)["components"]}["vault-core"]["version"])' 2>&1)
+    assert_eq "dev" "$bind_up_ver" "GET /v1/about reads the version vault-core rewrote (now root-owned) after the migration"
 fi
 
 # =============================================================================
@@ -2639,7 +2779,56 @@ pool_leftovers=$(docker ps -aq --filter "name=^$POOL_EDGE$" --filter "name=^$POO
 assert_eq "0" "$pool_leftovers" "no fake edge/resolver container is left behind"
 
 # =============================================================================
-section "11. Result"
+section "11. Upgrade: a named volume from before SEC-FIX-5 (WP SEC-FIX-5)"
+# =============================================================================
+say 'The default named volume of every installation that ran an earlier image'
+say 'is 101:101 throughout. 11a: without CAP_CHOWN vault-core cannot migrate it'
+say 'and must REFUSE to start, naming the host commands, the volume untouched.'
+say '11b: with the shipped compose (CAP_CHOWN) it migrates and everything runs.'
+docker compose --env-file "$env_file" -f "$compose_file" -p "$PROJECT" --profile dns down > /dev/null 2>&1
+named_vol="${PROJECT}_vault-cache"
+named_old=$(sec5_make_old "$named_vol")
+assert_eq "101:101" "$named_old" "named volume $named_vol reset to the pre-SEC-FIX-5 layout (precondition)"
+
+step "11a. No CAP_CHOWN: refused, with the host-side commands, volume unchanged"
+nochown=$(docker run --rm --cap-drop ALL --cap-add NET_BIND_SERVICE --cap-add SETUID --cap-add SETGID --cap-add DAC_OVERRIDE \
+    -v "$named_vol:/vault" "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
+printf '%s\n' "$nochown" | grep -E 'FATAL|chown root|chmod 0755|exit=' | sed 's/^/    /'
+assert_contains "$nochown" "21-vault-volume-ownership.sh: FATAL: cannot make /vault owned by root" "without CAP_CHOWN, 21- refuses to start"
+assert_contains "$nochown" "chown root:root <dir> <dir>/cache <dir>/tmp <dir>/logs" "...and names the host-side chown"
+assert_not_contains "$nochown" "exit=0" "...and exits non-zero"
+assert_not_contains "$nochown" "40-vault-preflight.sh: preflight OK" "...before the preflight or nginx ran"
+still_old=$(docker run --rm --user 0:0 --entrypoint sh -v "$named_vol:/vault" "ghcr.io/steamhangar/vault-core:$TAG" \
+    -c 'stat -c "%u:%g" /vault /vault/cache /vault/tmp /vault/logs /vault/logs/event.log | sort -u' 2>&1)
+assert_eq "101:101" "$still_old" "the refused start changed nothing on the volume"
+
+step "11b. The shipped compose (CAP_CHOWN): migrated at start, event log on, everything runs"
+upgrade_env_file="$work/verify-upgrade.env"
+cp "$env_file" "$upgrade_env_file"
+printf 'VAULT_EVENT_LOG=/vault/logs/event.log\nVAULT_EVENT_LOG_PATH=/vault/logs/event.log\n' >> "$upgrade_env_file"
+compose_up_or_die "$upgrade_env_file" up -d
+i=0
+while [ "$i" -lt 60 ]; do
+    core_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-core)" 2>/dev/null || echo starting)
+    api_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-api)" 2>/dev/null || echo starting)
+    [ "$core_h" = "healthy" ] && [ "$api_h" = "healthy" ] && break
+    i=$((i + 1))
+    sleep 2
+done
+assert_eq "healthy" "$core_h" "vault-core is healthy after migrating the named volume"
+assert_eq "healthy" "$api_h"  "vault-api is healthy on the migrated named volume"
+named_mig=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep '^21-vault-volume-ownership.sh:')
+printf '%s\n' "$named_mig" | sed 's/^/    /'
+for d in /vault /vault/cache /vault/tmp /vault/logs; do
+    assert_contains "$named_mig" "$d: 101:101 755 -> 0:0 755 (migrated)" "21- logged the migration of $d"
+done
+sec5_live "named volume (upgraded from 101:101)" 4294 on
+named_ver=$(curl -s --max-time 15 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/about" \
+    | python3 -c 'import json, sys; print({c["name"]: c for c in json.load(sys.stdin)["components"]}["vault-core"]["version"])' 2>&1)
+assert_eq "dev" "$named_ver" "GET /v1/about reads the version vault-core rewrote after the migration"
+
+# =============================================================================
+section "12. Result"
 # =============================================================================
 say "checks passed: $pass"
 say "checks failed: $fail"

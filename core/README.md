@@ -637,10 +637,10 @@ requirement):
 VAULT_EVENT_LOG=/vault/logs/event.log
 ```
 
-`/vault/logs/` is pre-created (owned by the `nginx` user) by
-`core/Dockerfile`, the same "named volumes get this right automatically"
-treatment `cache/` and `tmp/` already get -- turning the feature on needs
-no host-side `mkdir`/`chown` even on a fresh volume.
+`/vault/logs/` is pre-created by `core/Dockerfile` (root:root 0755 since WP
+SEC-FIX-5, see "Volume ownership" below) and created at start by
+`21-vault-volume-ownership.sh` when a bind mount lacks it -- turning the
+feature on needs no host-side `mkdir`/`chown`.
 
 Because plain envsubst can't express "empty means: delete this directive
 entirely" (an empty substitution leaves a syntactically broken
@@ -668,18 +668,20 @@ a small additional entrypoint hook,
   same class of guard `40-vault-preflight.sh` already applies to
   `VAULT_RESOLVER`, because this value is also substituted verbatim into
   `nginx.conf` and a `;`/`{`/`}` in it would be config injection. **Also
-  required (review finding N2): the path must be under `/vault/`.** The
-  character allowlist alone accepts any syntactically clean absolute path,
-  and this script `mkdir -p`s and `chown`s the value's PARENT directory to
-  the `nginx` worker user -- unconstrained, `VAULT_EVENT_LOG=/etc/nginx/x.log`
-  would hand `/etc/nginx` itself to that user. The feature only ever needs
-  to write somewhere on the `/vault` volume (alongside `cache/` and `tmp/`),
-  so anything outside it is refused with a clear message rather than acted
-  on. The marker comment is stripped (cosmetic only) once both checks pass,
-  and the target directory is `mkdir -p`'d and `chown`'d to the `nginx`
-  user. The hook runs as root and `/vault` is shared with vault-api, so a
-  symlink anywhere on the path below `/vault/` (directory or file) is
-  refused instead of followed, and the `chown`s use `-h`.
+  required (review finding N2): the path must be under `/vault/`**, with no
+  `.`/`..` component (S4). The feature only ever needs to write somewhere on
+  the `/vault` volume, so anything outside it is refused with a clear
+  message rather than acted on. The marker comment is stripped (cosmetic
+  only) once the checks pass. **Since WP SEC-FIX-5** every directory from
+  `/vault` down to the log's own must be root-only (a real directory, uid 0,
+  not group- or world-writable): a missing one is created root:root 0755, an
+  existing one owned by anybody else (e.g. anything under `cache/depot` or
+  `tmp/`, which uid 101 owns) is refused, never chowned. The hook and the
+  nginx master open the log as root, so uid 101 must not be able to rename
+  any name on the way. The log file itself is created if missing and owned
+  by uid 101 (vault-api truncates it); a symlink, a non-regular file or a
+  hard-linked file on its name is refused (it can only have been planted
+  before the volume was migrated).
 
 `core/docker/check-config-drift.sh` was extended with a 6th recognized
 delta for the two event-log lines (native: hardcoded ON at
@@ -695,8 +697,9 @@ opens it (pre-freeze review S3: a root-owned file made vault-api's
 truncating sweeper fail with EPERM), and asserts four bad values (relative
 path, injection character, outside `/vault`, a `..` escape -- review S4)
 plus a planted symlinked log directory and a symlinked log file are
-refused by `25-vault-eventlog.sh`, and that `40-vault-preflight.sh` refuses
-the image's stock `nginx.conf`. Historical note from WP 3.10: that
+refused (since SEC-FIX-5 the directory link by `21-vault-volume-ownership.sh`,
+the file link by `25-vault-eventlog.sh`), and that `40-vault-preflight.sh`
+refuses the image's stock `nginx.conf`. Historical note from WP 3.10: that
 work package's environment had no Docker and could not run the actual
 image end-to-end. The `25-vault-eventlog.sh` sed/validation logic was
 verified directly against synthetic rendered-config fixtures under
@@ -745,9 +748,12 @@ core/
 ├── Dockerfile                       # nginx:1.29.8-alpine3.23, pinned by digest
 └── docker/
     ├── nginx.conf.template          # what actually runs in the container
+    ├── 21-vault-volume-ownership.sh # /vault, cache/, tmp/, logs/ root-only (SEC-FIX-5)
     ├── 25-vault-eventlog.sh         # VAULT_EVENT_LOG on/off + validation
     ├── 26-vault-tls-passthrough.sh  # VAULT_TLS_PASSTHROUGH on/off (port 443)
     ├── 27-vault-upstream-rate.sh    # VAULT_UPSTREAM_RATE(_WINDOW) -> rate include
+    ├── 28-vault-upstream-pool.sh    # VAULT_UPSTREAM_POOL_HOSTS -> keepalive pool include
+    ├── 29-vault-build-version.sh    # version file for vault-api's GET /v1/about
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
     └── check-config-drift.sh        # keeps the template honest
 ```
@@ -781,6 +787,9 @@ touching either file.
   comment there. `deploy/tests/verify-stack.sh` step 4c reads the master's
   and a worker's CapEff from `/proc`. A plain `docker run` of the image
   (no compose) still gets Docker's default set.
+- **Volume ownership (WP SEC-FIX-5)** -- see the section of that name
+  below: root-only `/vault`, `cache/`, `tmp/`, `logs/`, enforced and
+  migrated at every start, or the container refuses to start.
 - **The same-filesystem requirement is now enforced, not just documented:**
   `cache/` and `tmp/` live under ONE volume mounted at `/vault`, and
   `40-vault-preflight.sh` compares their `st_dev` at every start. A split
@@ -853,27 +862,25 @@ version started last, not that nginx runs now.
   pins need nothing new; `verify-core-nginx.sh` asserts the rendered config
   never mentions the file and probes `/vault-version` and
   `/logs/vault-core-version.json` live (404).
-- **Root writes nothing (review M1).** `/vault` and `/vault/logs` belong to
-  uid 101 (nginx here, vault-api next door), mode 0755 without a sticky
-  bit, so uid 101 can swap any name in them for a symlink at any time; a
-  root `printf >` or `chmod` on a name there can be redirected anywhere
-  (reproduced in review: a root-only 0600 file overwritten and made 0644).
-  So root only creates a missing `logs/` (plain `mkdir`, never `-p`;
-  `chown -h nginx:nginx`; a re-check that it is not a symlink). Everything
-  else (mktemp, write, chmod, the rename, removing a stale file) runs as
-  the nginx user: the hook re-invokes itself with `--writer` under busybox
-  `su`, which refuses to run as root. A link followed by uid 101 reaches
-  only what uid 101 may write anyway. Pinned structurally and with stubs in
-  `core/tests/test-build-version-hook.sh`, and live in the pinned image by
-  `core/tests/build-version-race-rig.sh`. In the CI gate the rig is
-  deterministic: `mktemp`/`mkdir` wrappers make the attacker win every
-  window (each temp file is swapped for a symlink to a root-only file at
-  once; `logs/` is planted right before `mkdir`) and count that each attack
-  ran. The pre-fix hook fails both (victim overwritten and made 0644; the
-  planted root directory chowned to nginx); the fixed one leaves both
-  untouched. A timing-based racer is kept as a manual mode (`race`) only:
-  how many runs it disturbs depends on scheduling, and a run it never
-  disturbed proves nothing (that flake failed CI on 5dac4a2).
+- **Root writes only into a root-only directory (SEC-FIX-5; replaces VER-2
+  review M1's split).** In VER-2 `/vault/logs` belonged to uid 101, so root
+  created only a missing `logs/` and an `su nginx` writer did the rest (a
+  root `printf >` or `chmod` on a name uid 101 can swap can be redirected
+  anywhere; reproduced in that review). Since SEC-FIX-5 `/vault` and
+  `/vault/logs` are root:root 0755 (`21-vault-volume-ownership.sh`), the
+  nginx user can no longer create the temp file there, and root writes the
+  file itself -- but only when the output directory and every ancestor up
+  to `/` are root-only (real directory, uid 0, no group/other write). If
+  not (a volume 21- did not fix, a test path), root writes nothing and
+  removes nothing, with a WARNING. The file is root:root 0644; vault-api
+  only reads it. Pinned with stubs in `core/tests/test-build-version-hook.sh`
+  and live by `core/tests/build-version-race-rig.sh`, whose deterministic CI
+  mode puts a REAL uid-101 attacker (`su nginx`) into each window through
+  `mktemp`/`mkdir` wrappers and counts every attempt: on the root-owned
+  layout all 20 temp-file swaps and the `logs/` plant are denied; on a
+  101-owned layout the hook never calls `mktemp` as root (with the chain
+  check removed, the attacker wins and the root-only victim is overwritten).
+  A timing-based racer is kept as a manual mode (`race`) only.
 - **Atomic.** `mktemp` in the same directory, `chmod 0644`, `mv -f`; a
   symlink on the file name is removed before the rename.
 - **Never stops the cache, with one exception.** A write failure (read-only
@@ -883,15 +890,99 @@ version started last, not that nginx runs now.
   file stops the boot with `29-vault-build-version.sh: FATAL`, because the
   hook would replace the cache-event log at every start.
 - **Bind mounts.** A bind-mounted `/vault` without `logs/` gets it created
-  (owner `nginx`). `/vault` itself must exist (it is the mount point), and
-  an existing `logs/` must be writable by uid 101, or the hook only warns
-  and vault-api reports "no version recorded yet".
+  root:root 0755 by `21-vault-volume-ownership.sh`, which also migrates an
+  existing 101-owned one; the version hook then writes there as root.
 
 Tests: `core/tests/test-build-version-hook.sh` (docker-free, under `sh`),
 the build-time check in `core/Dockerfile`, `verify-core-nginx.sh` (hook
-order, the file and its nginx owner in the real entrypoint chain, the
+order, the file and its root owner in the real entrypoint chain, the
 collision refusal, the 404 probes, the race rig), and
-`deploy/tests/verify-stack.sh` steps 6w and 9d.
+`deploy/tests/verify-stack.sh` steps 6w, 9d, 9d2 and 11b.
+
+## Volume ownership (WP SEC-FIX-5)
+
+Root acts on names inside the cache volume: the start hooks create and
+chown files there, and the nginx master (root) opens the cache-event log
+`O_APPEND|O_CREAT` and creates, chowns and chmods its temp directories under
+`tmp/` **by name** at every start, following symlinks. vault-api and the
+nginx workers run as uid 101 and share the volume. Until SEC-FIX-5 the image
+gave `/vault`, `cache/`, `tmp/` and `logs/` to uid 101, so a uid-101 process
+could swap any of those names for a symlink and make root create, truncate,
+append to, chown or chmod any file in this container (CVE-2016-1247 class;
+VER-2 review). No re-check in a hook covers the master's open. The fix is
+ownership:
+
+| Path | Owner, mode | Written by |
+|---|---|---|
+| `/vault` | root:root 0755 | nobody but the start hooks |
+| `/vault/cache` | root:root 0755 | -- |
+| `/vault/cache/depot/...` | 101:101 | workers (`proxy_store`), vault-api (GC deletes) |
+| `/vault/tmp` | root:root 0755 | -- |
+| `/vault/tmp/{proxy,client_body,fastcgi,uwsgi,scgi}` | 101:101 0700 | workers (temp files) |
+| `/vault/logs` | root:root 0755 | -- |
+| `/vault/logs/event.log` | 101:101 | master's fd (lines), vault-api (`ftruncate`) |
+| `/vault/logs/vault-core-version.json` | root:root 0644 | `29-vault-build-version.sh` |
+
+uid 101 keeps write access to exactly what it writes and cannot rename any
+name root opens. vault-runner does not mount `/vault`.
+
+**Enforced at every start by `docker/21-vault-volume-ownership.sh`** (after
+the envsubst render, before every hook that touches `/vault`):
+
+- `/vault` first: `chown -h 0:0`, `chmod 0755`, then a probe as uid 101
+  (`ln -s` and `mkdir` of a random name under `su nginx`) that must fail
+  with "Permission denied"/"Operation not permitted". `/vault` is the mount point,
+  so its own name cannot be swapped; once it is root-only, `cache/`, `tmp/`
+  and `logs/` cannot be renamed either, and only then are they checked (not
+  a symlink, a directory), fixed and probed the same way. The probe is what
+  notices an ACL or a filesystem whose mode bits do not decide access.
+- `chown` comes before `chmod`, and for a new uid-101 directory `chmod`
+  before `chown`: vault-core runs without CAP_FOWNER (compose: `cap_drop:
+  ALL` plus NET_BIND_SERVICE, SETUID, SETGID, CHOWN, DAC_OVERRIDE), so root
+  may chmod only what it owns. The first version of this hook had it the
+  other way round and crash-looped the real stack until every temp
+  directory existed (verify-stack, before the fix); `verify-core-nginx.sh`
+  now renders with exactly the compose capability set.
+- A missing `logs/`, `cache/depot` and the five temp directories are
+  created (`mkdir` in a root-only parent). A missing `cache/` or `tmp/` is
+  left to the preflight ("mount the cache volume"), so binding the wrong,
+  empty host directory still fails loudly.
+- **Refuses to start** when it cannot make this true: `chown` not permitted
+  (no CAP_CHOWN, a root-squashing NFS export, files owned by a uid outside a
+  user-namespaced daemon's mapping), a mode that does not stick, the probe
+  succeeding or failing for any reason other than EACCES/EPERM, a probe name
+  that already exists, or a symlink on any of these names (never followed,
+  never removed automatically -- nothing in SteamHangar creates one). The
+  message names the two host-side commands (`chown root:root` and `chmod
+  0755` on the directory, `cache`, `tmp`, `logs`); under userns-remap the
+  owners are the host uids the container's root and 101 map to, and on a
+  root-squashing export the commands run on the NFS server. User decision
+  2026-10-03: refuse rather than stay up on a volume uid 101 can rewire
+  (ADR-0016 addendum of that date).
+- **Upgrade:** a volume or bind mount from an earlier image (all 101:101)
+  is migrated at the first start, one log line per directory
+  (`/vault: 101:101 755 -> 0:0 755 (migrated)`). Nothing below `cache/depot`
+  is touched.
+
+`25-vault-eventlog.sh` and `29-vault-build-version.sh` re-check with the
+same predicate (`vault_root_only_dir`, three byte-identical copies, pinned by
+`core/tests/test-root-only-dir.sh`), and `40-vault-preflight.sh` no longer
+creates `cache/depot` as root and probes `cache/depot` and `tmp/proxy` (the
+directories the workers write) as the worker user.
+
+Tests: `core/tests/volume-ownership-race-rig.sh` (in the pinned image, with
+the compose capability set) runs 21- and 25- with `chown`/`mkdir` wrappers
+that put a real uid-101 attacker into each window, then swaps the event log
+and `tmp/client_body` for links and runs `nginx -t` as root (the master's
+start-up: it opens every log and creates/chowns every temp path); it checks
+that no attack gets through on a root-owned layout, that an attacker who
+strikes before the migration only gets a refused boot, and that nothing
+outside the volume is created or changed. The hooks from before SEC-FIX-5
+fail it. `verify-core-nginx.sh` asserts the ownership map after the real
+entrypoint on a fresh and on an upgraded volume plus every refusal;
+`deploy/tests/verify-stack.sh` checks it live (steps 4d, 5i, 9d2, 9e,
+section 11: fresh and upgraded named volume and bind mount, GC as vault-api,
+the event log flowing, the refusal without CAP_CHOWN).
 
 ## Upstream rate cap (WP TH-1a)
 

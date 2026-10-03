@@ -737,7 +737,8 @@ VAULT_CACHE_PATH=/srv/steamhangar-cache
 ```
 
 Prepare the directory **before the first start**: `<path>/cache/depot` and
-`<path>/tmp` must both exist and be owned by `101:101`. A bind mount, unlike
+`<path>/tmp` must both exist; `<path>`, `cache/` and `tmp/` belong to root
+(mode 0755), and only `cache/depot` belongs to `101:101`. A bind mount, unlike
 a fresh named volume, does not get seeded with the image's pre-created
 `cache/depot/` and `tmp/` (that seeding only happens for an empty named
 volume; see `core/Dockerfile`'s `VOLUME ["/vault"]` step). Skipping this
@@ -756,14 +757,43 @@ fix; update it.
 
 ```bash
 sudo mkdir -p /srv/steamhangar-cache/cache/depot /srv/steamhangar-cache/tmp
-sudo chown -R 101:101 /srv/steamhangar-cache
+sudo chown 101:101 /srv/steamhangar-cache/cache/depot
 ```
+
+(`sudo mkdir` leaves the rest root:root 0755, which is what vault-core
+wants. It creates `logs/` and nginx's temp directories itself at start.)
 
 **uid/gid 101 is required, not a suggestion.** It is the numeric identity of
 the nginx image's worker user, and vault-api's container user is created with
-the same numbers so both services can write the shared cache. Named volumes
-get this right automatically; bind mounts do not. If you get it wrong,
+the same numbers so both services can write the depot tree. Named volumes
+get this right automatically; bind mounts do not. If `cache/depot` is wrong,
 vault-core refuses to start and tells you the exact `chown` to run.
+
+**Why the rest belongs to root (WP SEC-FIX-5).** vault-core's start hooks
+and its nginx master run as root and open names in `<path>`, `cache/`,
+`tmp/` and `logs/` (the event log, nginx's temp directories). If uid 101
+owned those directories, a compromised vault-api or nginx worker could swap
+a name for a symlink and make root write or chown any file in the container.
+So at every start vault-core makes those four root:root 0755 itself
+(`core/README.md` "Volume ownership"); it needs CAP_CHOWN for that, which
+`compose.yaml` grants. **An existing cache directory set up with the old
+instruction (`chown -R 101:101 <path>`) needs nothing from you**: the first
+start migrates it and logs one `(migrated)` line per directory. If vault-core
+cannot (chown not permitted, e.g. a root-squashing NFS export; a mode that
+does not stick; an ACL that still lets uid 101 create files there), it
+refuses to start and prints the two commands to run on the host:
+
+```bash
+sudo chown root:root /srv/steamhangar-cache /srv/steamhangar-cache/cache /srv/steamhangar-cache/tmp /srv/steamhangar-cache/logs
+sudo chmod 0755 /srv/steamhangar-cache /srv/steamhangar-cache/cache /srv/steamhangar-cache/tmp /srv/steamhangar-cache/logs
+```
+
+Where to run them: on the Docker host for a local disk; **on the NFS server**
+for a root-squashing NFS export (the client's root cannot chown there).
+With a **userns-remapped** Docker daemon, "root" and "101" inside the
+container are other uids on the host: use the subordinate id base from
+`/etc/subuid` for root and base+101 for 101 (`chown <base>:<base> ...`,
+`chown <base+101>:<base+101> .../cache/depot`).
 
 **`VAULT_CACHE_PATH` must be an absolute path** (start with `/`). Compose
 treats `./` and `~/` paths as binds too, but relative to the compose
@@ -1196,6 +1226,38 @@ one of them, it was harmless before this upgrade and becomes vault-api
 refusing to start, with an explicit error naming the bad key, after it.
 Check `docker compose logs vault-api` for exactly that message if a
 previously-working `.env` suddenly fails to start post-upgrade.
+
+**Cache volume ownership (WP SEC-FIX-5).** The first start of a vault-core
+image with SEC-FIX-5 changes the owner of the cache volume's top directory,
+`cache/`, `tmp/` and `logs/` from `101:101` to `root:root` (mode 0755) -- named
+volume or `VAULT_CACHE_PATH` bind alike; `cache/depot` and everything in it
+stay as they are. `docker compose logs vault-core` shows one
+`21-vault-volume-ownership.sh: ... (migrated)` line per directory. Nothing to
+do in the default setup. vault-core refuses to start instead if it cannot
+make the change (no CAP_CHOWN because an override dropped it, a
+root-squashing NFS export, files owned by a uid outside a userns-remapped
+daemon's mapping) or finds a symlink on one of those names; the message names
+the host commands, and "Using a dedicated cache mount" above says where to
+run them and which owners apply under userns-remap.
+
+A **custom `VAULT_EVENT_LOG` directory** (anything other than
+`/vault/logs/...`) was chowned to 101:101 by vault-core before SEC-FIX-5.
+`25-vault-eventlog.sh` now refuses a log directory uid 101 owns; if that
+directory holds only the event log, give it back to root on the host
+(`chown root:root <dir> && chmod 0755 <dir>`) or move the log to
+`/vault/logs/`. The refusal message says the same.
+
+> **Rolling back is not tested.** An image from before SEC-FIX-5 needs the
+> old ownership back first: its preflight probes `cache/` and `tmp/`
+> themselves as uid 101 and refuses to start otherwise (`... is not writable
+> by the nginx worker user`). For a bind mount run
+> `chown 101:101 <dir> <dir>/cache <dir>/tmp <dir>/logs` on the host. For the
+> named volume, find its name with `docker volume ls` (it is
+> `<project>_vault-cache`, the project being the compose project name,
+> `steamhangar` by default) and run
+> `docker run --rm -v <project>_vault-cache:/vault alpine:3.23.5 chown 101:101 /vault /vault/cache /vault/tmp /vault/logs`.
+> These commands are derived from the old preflight's checks; they have
+> **not** been run as a test.
 
 **Database schema.** vault-api creates and upgrades its schema itself at
 startup (`init_db`, `api/README.md` "Database schema"). Every change so far is

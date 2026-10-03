@@ -119,9 +119,10 @@ case "$VALUE" in
 esac
 
 # REVIEW FINDING N2: the checks above accept ANY absolute path, and this
-# script `mkdir -p`s and `chown`s the value's PARENT DIRECTORY below --
-# unconstrained, VAULT_EVENT_LOG=/etc/nginx/x.log would hand /etc/nginx
-# itself over to the nginx worker user (uid 101), and worse paths
+# script used to `mkdir -p` and `chown` the value's PARENT DIRECTORY (since
+# SEC-FIX-5 it creates missing directories root-owned and chowns only the
+# file) -- unconstrained, VAULT_EVENT_LOG=/etc/nginx/x.log would hand
+# /etc/nginx itself over to the nginx worker user (uid 101), and worse paths
 # (/etc, /) are just as syntactically "valid absolute paths". This value
 # only ever needs to point somewhere on the /vault volume (core/README.md
 # "Docker: VAULT_EVENT_LOG" -- the log lives alongside cache/ and tmp/ on
@@ -160,53 +161,106 @@ if [ "${still_marked:-0}" != "0" ]; then
     die "failed to strip the cache-event-log marker comment from $CONF while enabling it ($still_marked remain)."
 fi
 
-# Same reasoning as 40-vault-preflight.sh's depot/ pre-creation: don't make
-# a fresh install depend on the operator manually creating the log
-# directory. mkdir -p is a no-op if it already exists (the image seeds
-# /vault/logs itself -- see core/Dockerfile), so this only matters for a
-# custom VAULT_EVENT_LOG path pointing somewhere else on the /vault volume.
+# --- The directory and the file (WP SEC-FIX-5) -------------------------------
+# Everything below runs as root, and the nginx master (also root) opens this
+# path with O_APPEND|O_CREAT at every start, following symlinks. That is safe
+# only if no other uid can rename any name on the way: so every directory
+# from /vault down to the log's own directory must be root-only (a real
+# directory, uid 0, not group- or world-writable). 21-vault-volume-ownership.sh
+# makes /vault and /vault/logs so; a custom VAULT_EVENT_LOG directory that is
+# missing is created here, root:root 0755 (plain mkdir in a root-only
+# parent); one that exists but belongs to someone else -- e.g. anything under
+# cache/depot or tmp/, which uid 101 owns -- is refused, never chowned to root
+# (it may hold uid 101's data).
 #
-# PRE-FREEZE REVIEW S5: everything below runs as root and follows symlinks
-# (mkdir -p, the create, chown), and /vault is shared with vault-api. A
-# symlink planted at the log file, its directory or any component in
-# between (e.g. /vault/logs -> /etc) would turn the create/chown into a
-# write/chown of an arbitrary path. Refuse any symlink on the path below
-# /vault/ -- checked before mkdir and again right before the chowns -- and
-# use `chown -h` so the chown itself never dereferences one.
-vault_refuse_symlinks() {
-    _p="$VALUE"
-    while [ "$_p" != "/vault" ] && [ "$_p" != "/" ]; do
-        if [ -L "$_p" ]; then
-            die "VAULT_EVENT_LOG='$VALUE': '$_p' is a symlink. This hook runs as root
-  and /vault is shared with vault-api; refusing to create or chown through a
-  symlink. Replace '$_p' with a real directory/file."
-        fi
-        _p=$(dirname "$_p")
-    done
+# History: up to SEC-FIX-5 this section checked for symlinks and then acted
+# (mkdir -p, `: >`, chown) on names inside a directory uid 101 owned, which
+# left a window between check and use (pre-freeze review S5 / threat-model
+# §9 P-2) and could never cover the master's own open (VER-2 review).
+#
+# vault_root_only_dir <dir>: true iff <dir> is a real directory (not a
+# symlink), owned by uid 0 and writable by neither group nor others, i.e. only
+# root can create, rename or remove names in it. Byte-identical copies live in
+# 21-vault-volume-ownership.sh and 29-vault-build-version.sh (pinned by
+# core/tests/test-root-only-dir.sh).
+vault_root_only_dir() {
+    [ -d "$1" ] && [ ! -L "$1" ] || return 1
+    _vrod=$(stat -c '%u %a' "$1") || return 1
+    [ "${_vrod%% *}" = "0" ] || return 1
+    [ $(( 0${_vrod#* } & 022 )) -eq 0 ] || return 1
+    return 0
 }
-event_dir=$(dirname "$VALUE")
-vault_refuse_symlinks
-mkdir -p "$event_dir"
-vault_refuse_symlinks
-chown -h "$WORKER_USER:$WORKER_USER" "$event_dir"
 
-# PRE-FREEZE REVIEW S3: owning the DIRECTORY is not enough. nginx's master
-# process runs as root and it is the master that opens every access_log at
-# startup -- so a missing log file was created root:root, 0644. vault-api's
-# sweeper (api/vault_api/event_sweep.py) truncates this file after reading
-# it and runs as uid 101, so its truncation got EPERM on every sweep and the
-# file grew without bound in the shipped default. Create the file here if it
-# is missing and chown it to the worker user (uid/gid 101 in this image --
-# the SAME numeric identity api/Dockerfile gives vault-api, which is what
-# makes the shared /vault volume writable by both; see core/Dockerfile's
-# chown comment). nginx opens an EXISTING file O_APPEND without changing
-# its owner, so the ownership set here survives the start. Re-chowning an
-# existing file also migrates a deployment that already has a root-owned
-# log from an earlier image: the next boot fixes it.
+refuse_dir() {
+    die "VAULT_EVENT_LOG='$VALUE': '$1' is not a directory only root can change
+  ($2). This hook and the nginx master open the log as root; uid 101 (the nginx
+  workers, vault-api) must not be able to rename names on the way there.
+  Use a path under /vault/logs/ (the default is /vault/logs/event.log).
+  Upgrading with a custom log directory: vault-core before SEC-FIX-5 chowned
+  that directory to 101:101 itself. If it holds only the event log, give it
+  back to root on the Docker host (chown root:root <dir> && chmod 0755 <dir>,
+  <dir> being this path inside VAULT_CACHE_PATH or the named volume) and
+  start again; never do that for a directory under cache/depot or tmp/."
+}
+
+# shown <text>: a link target as it may appear in a message -- only
+# [A-Za-z0-9/._+ -], everything else (newlines, escapes, quotes) as '?'.
+shown() { printf '%s' "$1" | tr -c 'A-Za-z0-9/._+ -' '?'; }
+
+event_dir=/vault
+vault_root_only_dir "$event_dir" || refuse_dir "$event_dir" "$(stat -c '%u:%g %a' "$event_dir" 2>&1); 21-vault-volume-ownership.sh should have fixed it"
+rest=${VALUE#/vault/}
+while :; do
+    case "$rest" in
+        */*) comp=${rest%%/*}; rest=${rest#*/} ;;
+        *) break ;;
+    esac
+    [ -n "$comp" ] || continue      # '//' in the value
+    event_dir="$event_dir/$comp"
+    if [ -L "$event_dir" ]; then
+        refuse_dir "$event_dir" "a symlink to '$(shown "$(readlink "$event_dir")")'"
+    fi
+    if [ ! -e "$event_dir" ]; then
+        mkdir "$event_dir"
+        chmod 0755 "$event_dir"
+        log "created $event_dir (root:root 0755) for the cache-event log"
+    fi
+    vault_root_only_dir "$event_dir" || refuse_dir "$event_dir" "$(stat -c '%u:%g %a' "$event_dir" 2>&1)"
+done
+
+# The file. Its directory is root-only now, so nothing can change the name
+# between these checks and the create/chown below. What can still be there
+# is something planted BEFORE this start, while the directory belonged to uid
+# 101 (an upgraded volume): a symlink, a FIFO, a hard link. Each is refused,
+# not repaired -- nothing in SteamHangar creates one.
+if [ -L "$VALUE" ]; then
+    die "VAULT_EVENT_LOG='$VALUE' is a symlink (to '$(shown "$(readlink "$VALUE")")'). The
+  nginx master opens this path as root and would follow it. Nothing in
+  SteamHangar creates one; it may have been planted while the directory still
+  belonged to uid 101. Inspect it, remove it, then start again."
+fi
 if [ -d "$VALUE" ]; then
     die "VAULT_EVENT_LOG='$VALUE' is a directory; it must name a file."
 fi
+if [ -e "$VALUE" ] && [ ! -f "$VALUE" ]; then
+    die "VAULT_EVENT_LOG='$VALUE' exists but is not a regular file ($(stat -c %F "$VALUE")).
+  Remove it, then start again."
+fi
+# PRE-FREEZE REVIEW S3: nginx's master runs as root and opens every access_log
+# at startup, so a missing file would be created root:root 0644 -- and
+# vault-api's sweeper (api/vault_api/event_sweep.py, uid 101) truncates this
+# file in place (ftruncate) after reading it, which then fails with EPERM and
+# the file grows without bound. So: create it here if missing and chown it to
+# the worker user (uid/gid 101 in this image -- the SAME numeric identity
+# api/Dockerfile gives vault-api). nginx opens an EXISTING file O_APPEND
+# without changing its owner. Re-chowning an existing file also migrates a
+# root-owned log from an earlier image.
 [ -e "$VALUE" ] || : > "$VALUE"
-vault_refuse_symlinks
+links=$(stat -c %h "$VALUE")
+if [ "$links" != "1" ]; then
+    die "VAULT_EVENT_LOG='$VALUE' has $links hard links; chowning it to the worker user
+  would hand every other name of the same file over too. Remove it (a fresh
+  log is created at the next start), then start again."
+fi
 chown -h "$WORKER_USER:$WORKER_USER" "$VALUE"
-log "cache-event log ENABLED (ADR-0008): $VALUE (owner uid $(stat -c %u "$VALUE"), shared with vault-api)"
+log "cache-event log ENABLED (ADR-0008): $VALUE (owner $(stat -c %u:%g "$VALUE") in root-only $event_dir, shared with vault-api)"

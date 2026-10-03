@@ -313,22 +313,23 @@ services:
       #   bind does not depend on that default.)
       # SETUID, SETGID: the master's setgid()/initgroups()/setuid() to the
       #   `nginx` user for each worker, and busybox `su` in
-      #   40-vault-preflight.sh, which probes cache/ and tmp/ writability AS
-      #   the worker user.
-      # CHOWN: the master chown()s the temp dirs it creates (tmp/proxy,
-      #   tmp/client_body, ...) to the worker user; 25-vault-eventlog.sh
-      #   chowns the event-log dir and file to 101:101; 40-vault-preflight.sh
-      #   chowns cache/depot when it has to create it.
-      # DAC_OVERRIDE: root writing into directories it does not own. /vault
-      #   and everything in it belong to uid 101 (mode 0755), so without it
-      #   the master cannot create those temp dirs on a fresh volume,
-      #   25-vault-eventlog.sh cannot create the event-log file, and the
-      #   master cannot open that 101-owned file for appending when it
-      #   starts (event log ON, as deploy/.env.example ships it).
+      #   21-vault-volume-ownership.sh (probes AS uid 101 that it can create
+      #   nothing in /vault, cache/, tmp/, logs/) and 40-vault-preflight.sh
+      #   (probes that uid 101 can write cache/depot and tmp/proxy).
+      # CHOWN: 21-vault-volume-ownership.sh migrates /vault, cache/, tmp/ and
+      #   logs/ to root:root and creates cache/depot and the nginx temp dirs
+      #   owned by 101 (WP SEC-FIX-5); 25-vault-eventlog.sh chowns the
+      #   event-log FILE to 101:101; the master chown()s a temp dir only if
+      #   it is not already the worker's.
+      # DAC_OVERRIDE: since SEC-FIX-5 root owns every directory it writes
+      #   in, so the one remaining need is the master opening the 101-owned
+      #   event log (0644) for appending at start (event log ON, as
+      #   deploy/.env.example ships it).
       #
       # Deliberately NOT granted: FOWNER (no root step chmods or utimes a
-      # file it does not own; nginx only chmods a temp dir that lacks u+rwx,
-      # and it creates them 0700), KILL (the master signals its uid-101
+      # file it does not own: 21- chowns to root before chmod, and chmods a
+      # new 101-owned dir before handing it over; nginx only chmods a temp
+      # dir that lacks u+rwx, and they are created 0700), KILL (the master signals its uid-101
       # workers over its channel socket for quit/reload; kill() is only a
       # fallback, e.g. SIGKILL after a SIGTERM stop times out), and NET_RAW,
       # MKNOD, SETPCAP, SETFCAP, FSETID, SYS_CHROOT, AUDIT_WRITE (nothing
@@ -731,8 +732,9 @@ services:
       # when a container is created with it. Compose creates vault-core and
       # vault-api concurrently, so on a fresh volume both copied at once and
       # one create failed with "mkdir .../_data/tmp: file exists" (observed in
-      # a verify run). With nocopy, vault-core is the only seeder (layout +
-      # 101:101 ownership come from core/Dockerfile), whatever the creation
+      # a verify run). With nocopy, vault-core is the only seeder (layout and
+      # ownership -- root:root 0755 with only cache/depot 101:101 since WP
+      # SEC-FIX-5 -- come from core/Dockerfile), whatever the creation
       # order: Docker seeds only an empty volume, and a nocopy mount leaves it
       # empty. vault-api needs nothing under /vault at boot (VAULT_CACHE_ROOT
       # is read per request).
