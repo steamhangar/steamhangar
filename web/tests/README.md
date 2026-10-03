@@ -2624,3 +2624,67 @@ screen reader. Real-device check after deploy: on the Pixel with "Desktop
 site" on, the hint shows and the ✕ hides it across reloads; with it off,
 no hint.
 Suite: **969 tests, 969 pass, 0 fail**.
+
+### WP WEB-FIX-7 — the download arrow falls through the badge
+
+- `status-icon-download.test.js` — the running download glyph (user
+  decision Weg A, "arrow falls through"), fake-dom plus theme.css/app.css
+  static analysis: the `vault-dlfall` keyframes animate `transform` only
+  (no opacity; the old `vault-dlslide` is gone); the running `.dla` group
+  holds the unchanged arrow plus ONE identical trailing arrow
+  (`g.dlnext`, `translate(0 -32)`), and the keyframes move the group by
+  exactly `DOWNLOAD_FALL_PERIOD` (32) from 0, in two steps, `linear
+  infinite`, ~1.6s (about 20 units/s). The clip is
+  `.sic.k-running{ clip-path:circle(50%) }` on a square `border-radius:50%`
+  badge, no `.sic` size rule may make it non-square, `.sic svg` keeps
+  `overflow:visible`, and building every kind three times yields no
+  duplicate id. Geometry from the real paths and the `.sic svg` 64% box
+  (disc radius 12/0.64 = 18.75 units around (12,12)):
+  - at rest the parked trailing arrow (stroke included) is fully outside
+    the disc and the leading one fully inside;
+  - exit constraint: at the end frame (dy = period) the leading arrow's
+    nearest ink is at least 1 unit outside the disc (measured 3.4), and
+    the trailing arrow sits exactly at the rest position. Both ends of
+    the cycle therefore show the same thing inside the disc: one
+    rest-position arrow and no other ink. The snap back to 0 is visually
+    seamless; that is the only sense in which "end frame equals start
+    frame" holds (the transforms differ, the visible pixels do not). At
+    the first draft's period 24 this failed: the leading shaft top was
+    still 4.6 units inside the disc, so about 2px of shaft vanished in a
+    single frame every cycle (review FAIL);
+  - at every sampled phase the more-visible arrow has at least 65% of its
+    stroke length inside the disc, ink included. Measured worst case:
+    70.1%. A whole arrow is NOT always inside: with a period wide enough
+    for a clean exit there is a moment where one arrow is leaving and the
+    next is entering.
+  Reduced motion: the wildcard override is there, and the running
+  animation has no fill-mode, no delay and no `!important`. Only
+  `.sic.k-running .dla` animates the glyph, nothing moves `.sic` itself
+  or a paused glyph, only `running` builds a trailing arrow, `none` keeps
+  arrow plus baseline, and the glyph stays `aria-hidden` with the word
+  "Downloading".
+
+Mutation evidence (each applied alone, full suite run, then restored),
+all killed. First round: opacity in the keyframes; trailing offset 22;
+keyframe travel 22px; ease-in-out; an intermediate keyframe step; clip
+removed; clip `circle(40%)`; clip only inside a media query; a fixed
+`id` on the trailing group; period 12; `forwards`; `!important` on the
+animation; a delay; the reduced-motion iteration-count line removed;
+`k-none` or `k-paused` animating `.dla`; the badge itself animating; a
+trailing arrow for every kind; the running baseline shown again; a
+different trailing shape; the svg box at 45%; the trailing arrow below
+instead of above; a non-square `.sic-sm`; `aria-hidden` dropped. After
+the review fix (period 32, 1.6s): period 24 with 24px/1.2s applied
+consistently in JS and CSS (killed by the end-frame pin and the literal
+pin; this is the review's bug); period 28 in JS only; `.sic svg`
+`overflow:hidden`; opacity; travel 30px; ease-in-out; 3s duration;
+clip removed; `forwards`; trailing arrow below; svg box 45%; `k-none`
+animating.
+
+Not covered: the painted motion itself (no browser here). Device check
+item: `clip-path` on the badge anti-aliases the disc rim a second time on
+top of the `border-radius` background edge, which may look a little
+softer or show a faint fringe on some screens; look at a running badge
+on the Pixel at 15px (cols3) and 19px (detail sheet).
+
+Suite: **1010 tests, 1010 pass, 0 fail**.

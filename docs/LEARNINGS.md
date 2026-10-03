@@ -948,3 +948,8 @@ These are not style preferences; each entry cost a review round to learn.
   fail closed when a present Failed column cannot be read, and never
   match a word boundary before a header word that may carry an SGR
   remnant (WP API-FIX-3).
+- A clipped looping animation is seamless only if the leaving element
+  has no ink inside the clip at the end frame: the period must cover the
+  visible travel (disc radius plus glyph extent), not just the glyph
+  box. Test the end frame's visibility, not only the transform numbers
+  (WP WEB-FIX-7).
