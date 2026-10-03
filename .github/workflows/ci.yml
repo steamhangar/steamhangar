@@ -393,6 +393,17 @@ jobs:
         with:
           platforms: arm64
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # WP VER-1: the same build-arg KEYS publish.yml passes, with values
+      # that can never be mistaken for a release (ci-<short sha>). The
+      # values differ on purpose; api/tests/test_ci_image_build.py pins the
+      # keys equal and these values.
+      - name: Compute CI build version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "version=ci-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - name: Build ${{ matrix.image }} (not pushed)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -400,6 +411,9 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
           push: false
+          build-args: |
+            VAULT_VERSION=${{ steps.version.outputs.version }}
+            VAULT_COMMIT=${{ steps.version.outputs.commit }}
 
   verify-stack:
     name: deploy / verify-stack

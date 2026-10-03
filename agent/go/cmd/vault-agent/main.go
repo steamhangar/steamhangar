@@ -11,6 +11,7 @@
 //	vault-agent hosts apply|remove|status
 //	                                    opt-in, DNS-free hosts-file mode (WP 2.3) - see
 //	                                     hosts.go and agent/go/hostsfile
+//	vault-agent --version               print the build version and commit (WP VER-1)
 //
 // One-shot is the PRIMARY mode (plan §7: a Windows Scheduled Task provides
 // the timing); --loop exists for systemd (Phase 2.5's Linux/SteamOS
@@ -26,7 +27,7 @@
 // Exit codes:
 //
 //	0  the report was sent and accepted (one-shot); or --loop exited
-//	   cleanly on SIGTERM/CTRL-C; or -h/--help was requested
+//	   cleanly on SIGTERM/CTRL-C; or -h/--help or --version was requested
 //	1  a runtime failure: no readable Steam library under --library-root
 //	   (refused without --allow-empty), local report validation failed,
 //	   or the HTTP client gave up (network error, 401, 422, redirect,
@@ -69,6 +70,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printUsage(stderr)
 		return 2
 	}
+	if isVersionFlag(args[0]) {
+		printVersion(stdout)
+		return 0
+	}
 	switch args[0] {
 	case "report":
 		return runReport(args, stdout, stderr)
@@ -96,6 +101,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  report [--loop]              discover the local Steam library and report it to vault-api")
 	fmt.Fprintln(w, "  hosts apply|remove|status    manage the optional hosts-file cache entry (opt-in, admin rights)")
+	fmt.Fprintln(w, "  --version                    print the build version and commit")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "run 'vault-agent report -h' or 'vault-agent hosts' for the full flag list")
 }

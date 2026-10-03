@@ -1,6 +1,17 @@
-"""WP 4e.7 anti-drift guard: ``vault_api.__version__`` vs. every other
+"""WP 4e.7 anti-drift guard: ``vault_api.BASE_VERSION`` vs. every other
 hand-maintained copy of the same release number this package's footprint
 (``api/``, plus ``deploy/`` only where the pin requires it) can reach.
+
+**WP VER-1 update.** The number the server REPORTS is no longer
+hand-maintained: every image bakes ``VAULT_BUILD_VERSION`` from the
+``VAULT_VERSION`` build arg (publish.yml passes the tag without its ``v``),
+and ``vault_api.__version__`` resolves from it at runtime. What remains
+hand-maintained is the BASE: ``vault_api.BASE_VERSION`` (the fallback for
+a native run) and the compose/verify-stack/.env.example image-tag defaults,
+which this module still pins against each other. The four Dockerfiles'
+``org.opencontainers.image.version`` LABELs are now ``${VAULT_VERSION}``,
+so they left this table; ``api/tests/test_ver_1_build_version.py`` pins
+their ARG/ENV/LABEL wiring instead (all four, closing the old core/dns gap).
 
 Same failure class docs/LEARNINGS.md already names for env-var defaults
 (``test_p1_compose_env_defaults.py``): two hand-maintained copies of the same
@@ -15,31 +26,21 @@ BY NAME in either drift direction for each site.
 **Every hand-maintained "0.1.0" this project has, and which ones this file
 pins** (review round 1, blocker B1: an earlier version of this file covered
 only ``deploy/compose.yaml`` and both this module's own docstring and
-``api/README.md`` wrongly implied that was the complete set):
+``api/README.md`` wrongly implied that was the complete set; table updated
+by WP VER-1):
 
 | Site | Pinned here? | Why |
 |---|---|---|
-| ``api/vault_api/__init__.py``'s ``__version__`` | n/a (the source of truth) | Everything else is compared AGAINST this |
+| ``api/vault_api/__init__.py``'s ``BASE_VERSION`` | n/a (the source of truth) | Everything else is compared AGAINST this |
 | ``deploy/compose.yaml`` (5x ``image:`` lines, one per service — WP S-2 added ``vault-runner``'s, WP EG-1 added ``vault-proxy``'s; all ``ghcr.io/steamhangar/...`` since the pre-freeze review's S1 fix) | YES | in this pin's footprint, checked at startup-config time |
-| ``api/Dockerfile``'s ``org.opencontainers.image.version`` LABEL | YES | in ``api/``, this pin's footprint; a build-time literal that cannot read a Python module |
-| ``deploy/proxy/Dockerfile``'s ``org.opencontainers.image.version`` LABEL (WP EG-1) | YES | in ``deploy/``, this pin's footprint — unlike the two **NO** rows below, this component was introduced BY this WP, so it never gets to be an acknowledged gap |
 | ``deploy/tests/verify-stack.sh``'s ``TAG=${VAULT_IMAGE_TAG:-...}`` | YES | in ``deploy/``, same conceptual value as compose's default |
 | ``deploy/.env.example``'s ``#VAULT_IMAGE_TAG=...`` example line | YES | in ``deploy/``, same conceptual value as compose's default |
-| ``core/Dockerfile``'s ``org.opencontainers.image.version`` LABEL | **NO — out of this WP's footprint** | ``core/`` belongs to vault-core, a different component this package was not scoped to touch |
-| ``dns/Dockerfile``'s ``org.opencontainers.image.version`` LABEL | **NO — out of this WP's footprint** | ``dns/`` belongs to vault-dns, same reasoning |
-
-The two **NO** rows are a real, currently-unpinned gap, not an oversight this
-file hides: a release bump must ALSO hand-edit those two LABELs, and nothing
-in this repository's test suite catches a miss there today. Extending this
-exact pattern into ``core/tests/`` and ``dns/`` (each component keeps its own
-test suite) is the natural follow-up if/when a future work package owns
-those directories; recorded here so the next reader finds this table instead
-of rediscovering the gap.
+| the four Dockerfiles' ``org.opencontainers.image.version`` LABELs | no longer a literal (WP VER-1) | ``${VAULT_VERSION}``, pinned by ``test_ver_1_build_version.py`` |
 
 Mutation-verified in both directions for every **YES** row above (bump
-``vault_api.__version__`` alone; bump each site's own value alone) — each
-failure is a DIFFERENT named test below, so a reader immediately knows which
-side of which comparison drifted.
+``BASE_VERSION`` alone; bump each site's own value alone) — each failure is
+a DIFFERENT named test below, so a reader immediately knows which side of
+which comparison drifted.
 
 **Review round 2, WP S-2 blocker B1.** ``deploy/compose.yaml`` gained a
 FOURTH ``image:`` line (``vault-runner``, ADR-0012's runner split) that
@@ -66,20 +67,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from vault_api import __version__ as VAULT_API_VERSION
+from vault_api import BASE_VERSION as VAULT_API_VERSION
+from vault_api import BUILD_VERSION_ENV, build_info
 from vault_api.config import Settings
 from vault_api.main import create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = REPO_ROOT / "deploy" / "compose.yaml"
-API_DOCKERFILE_PATH = REPO_ROOT / "api" / "Dockerfile"
 VERIFY_STACK_PATH = REPO_ROOT / "deploy" / "tests" / "verify-stack.sh"
 ENV_EXAMPLE_PATH = REPO_ROOT / "deploy" / ".env.example"
-#: WP EG-1 (ADR-0011). `deploy/proxy/` is THIS package's own footprint (not
-#: someone else's component the way `core/`/`dns/` are), so its Dockerfile's
-#: OCI version label is pinned here from the day it is introduced, rather
-#: than joining the two acknowledged-gap rows in this module's docstring.
-PROXY_DOCKERFILE_PATH = REPO_ROOT / "deploy" / "proxy" / "Dockerfile"
 
 #: Matches `image: ghcr.io/steamhangar/<name>:${VAULT_IMAGE_TAG:-<default>}`
 #: lines exactly as they appear in deploy/compose.yaml today -- deliberately
@@ -171,13 +167,6 @@ def _compose_service_image_tags() -> dict[str, tuple[str, str]]:
             result[service] = (match.group(1), match.group(2))
     return result
 
-#: Matches ONLY the real LABEL assignment (`="0.1.0"`) — deliberately
-#: requires the `="..."` shape immediately after the key name, so a comment
-#: that merely mentions `org.opencontainers.image.version` in prose (this
-#: file's own module docstring above does, and so does api/Dockerfile's
-#: explanatory comment next to the real LABEL) can never accidentally match.
-_OCI_VERSION_PATTERN = re.compile(r'org\.opencontainers\.image\.version="([^"]+)"')
-
 #: verify-stack.sh's `TAG=` line is bash, not YAML, but the same
 #: `${VAR:-default}` shape compose.yaml uses -- one pattern, two files.
 _VERIFY_STACK_TAG_PATTERN = re.compile(
@@ -186,18 +175,6 @@ _VERIFY_STACK_TAG_PATTERN = re.compile(
 
 #: The commented-out example line in .env.example, e.g. `#VAULT_IMAGE_TAG=0.1.0`.
 _ENV_EXAMPLE_TAG_PATTERN = re.compile(r"^#VAULT_IMAGE_TAG=(.+)$", re.MULTILINE)
-
-
-def _dockerfile_oci_version() -> str | None:
-    text = API_DOCKERFILE_PATH.read_text(encoding="utf-8")
-    match = _OCI_VERSION_PATTERN.search(text)
-    return match.group(1) if match else None
-
-
-def _proxy_dockerfile_oci_version() -> str | None:
-    text = PROXY_DOCKERFILE_PATH.read_text(encoding="utf-8")
-    match = _OCI_VERSION_PATTERN.search(text)
-    return match.group(1) if match else None
 
 
 def _verify_stack_tag_default() -> str | None:
@@ -272,7 +249,7 @@ def test_all_compose_image_tag_default_occurrences_agree() -> None:
     """vault-core, vault-api, vault-runner and vault-dns share ONE conceptual
     release number -- a hand-edit that bumped only one of the four `image:`
     lines (typo, partial find-and-replace) must fail here, distinctly from
-    the `__version__`-vs-compose comparisons below, so a reader immediately
+    the `BASE_VERSION`-vs-compose comparisons below, so a reader immediately
     knows which of the two possible drifts happened.
     """
     tags = _compose_service_image_tags()
@@ -281,14 +258,6 @@ def test_all_compose_image_tag_default_occurrences_agree() -> None:
         f"deploy/compose.yaml's four image: lines disagree on the "
         f"VAULT_IMAGE_TAG default: {tags} -- they must all carry the "
         "same release number."
-    )
-
-
-def test_dockerfile_has_an_oci_version_label() -> None:
-    assert _dockerfile_oci_version() is not None, (
-        "api/Dockerfile: no org.opencontainers.image.version=\"...\" LABEL "
-        "found -- the extraction regex in this test file and the "
-        "Dockerfile's actual layout have diverged, or the LABEL was removed."
     )
 
 
@@ -309,7 +278,7 @@ def test_env_example_has_a_vault_image_tag_default() -> None:
 
 
 # ==========================================================================
-# The pins: vault_api.__version__ vs. each site, one named test per site so
+# The pins: vault_api.BASE_VERSION vs. each site, one named test per site so
 # a drift direction is identifiable from the test name alone.
 # ==========================================================================
 
@@ -328,9 +297,9 @@ def test_vault_api_version_matches_compose_image_tag_default() -> None:
     compose_default = _compose_service_image_tags().get("vault-api", (None, None))[1]
     assert compose_default == VAULT_API_VERSION, (
         f"deploy/compose.yaml's vault-api service's VAULT_IMAGE_TAG default "
-        f"is {compose_default!r}, but vault_api.__version__ is "
+        f"is {compose_default!r}, but vault_api.BASE_VERSION is "
         f"{VAULT_API_VERSION!r} -- one of the two changed without the "
-        "other. Bump both together (api/vault_api/__init__.py AND every "
+        "other. Bump both together (api/vault_api/__init__.py's BASE_VERSION AND every "
         "image: line in deploy/compose.yaml)."
     )
 
@@ -348,9 +317,9 @@ def test_vault_runner_image_tag_default_matches_vault_api_version() -> None:
     runner_default = _compose_service_image_tags().get("vault-runner", (None, None))[1]
     assert runner_default == VAULT_API_VERSION, (
         f"deploy/compose.yaml's vault-runner service's VAULT_IMAGE_TAG "
-        f"default is {runner_default!r}, but vault_api.__version__ is "
+        f"default is {runner_default!r}, but vault_api.BASE_VERSION is "
         f"{VAULT_API_VERSION!r} -- one of the two changed without the "
-        "other. Bump both together (api/vault_api/__init__.py AND every "
+        "other. Bump both together (api/vault_api/__init__.py's BASE_VERSION AND every "
         "image: line in deploy/compose.yaml, including vault-runner's)."
     )
 
@@ -369,44 +338,10 @@ def test_vault_proxy_image_tag_default_matches_vault_api_version() -> None:
     proxy_default = _compose_service_image_tags().get("vault-proxy", (None, None))[1]
     assert proxy_default == VAULT_API_VERSION, (
         f"deploy/compose.yaml's vault-proxy service's VAULT_IMAGE_TAG "
-        f"default is {proxy_default!r}, but vault_api.__version__ is "
+        f"default is {proxy_default!r}, but vault_api.BASE_VERSION is "
         f"{VAULT_API_VERSION!r} -- one of the two changed without the "
-        "other. Bump both together (api/vault_api/__init__.py AND every "
+        "other. Bump both together (api/vault_api/__init__.py's BASE_VERSION AND every "
         "image: line in deploy/compose.yaml, including vault-proxy's)."
-    )
-
-
-def test_vault_api_version_matches_dockerfile_oci_label() -> None:
-    """Review round 1 blocker B1: this site was missing entirely from the
-    first version of this file. A build-time LABEL cannot read
-    ``vault_api.__version__`` at build time (no Python import happens while
-    Docker evaluates a LABEL instruction), so it stays its own hand-edited
-    literal, checked here instead. Mutation-verified in both directions.
-    """
-    label_value = _dockerfile_oci_version()
-    assert label_value == VAULT_API_VERSION, (
-        f"api/Dockerfile's org.opencontainers.image.version LABEL is "
-        f"{label_value!r}, but vault_api.__version__ is "
-        f"{VAULT_API_VERSION!r} -- one of the two changed without the "
-        "other. Bump both together."
-    )
-
-
-def test_vault_proxy_dockerfile_oci_label_matches_vault_api_version() -> None:
-    """WP EG-1 (ADR-0011). `deploy/proxy/Dockerfile` is a new hand-maintained
-    "0.1.0" this WP's own footprint introduces — same reasoning as
-    `test_vault_api_version_matches_dockerfile_oci_label` above, and the same
-    class of gap this module's docstring already names for `core/Dockerfile`/
-    `dns/Dockerfile` (out of footprint for the WPs that did not own them).
-    `deploy/proxy/` IS this WP's footprint, so unlike those two, this one
-    does not get to stay an acknowledged gap.
-    """
-    label_value = _proxy_dockerfile_oci_version()
-    assert label_value == VAULT_API_VERSION, (
-        f"deploy/proxy/Dockerfile's org.opencontainers.image.version LABEL "
-        f"is {label_value!r}, but vault_api.__version__ is "
-        f"{VAULT_API_VERSION!r} -- one of the two changed without the "
-        "other. Bump both together."
     )
 
 
@@ -414,7 +349,7 @@ def test_vault_api_version_matches_verify_stack_tag_default() -> None:
     tag_default = _verify_stack_tag_default()
     assert tag_default == VAULT_API_VERSION, (
         f"deploy/tests/verify-stack.sh's VAULT_IMAGE_TAG default is "
-        f"{tag_default!r}, but vault_api.__version__ is "
+        f"{tag_default!r}, but vault_api.BASE_VERSION is "
         f"{VAULT_API_VERSION!r} -- one of the two changed without the "
         "other. Bump both together."
     )
@@ -424,20 +359,20 @@ def test_vault_api_version_matches_env_example_tag_default() -> None:
     tag_default = _env_example_tag_default()
     assert tag_default == VAULT_API_VERSION, (
         f"deploy/.env.example's VAULT_IMAGE_TAG example default is "
-        f"{tag_default!r}, but vault_api.__version__ is "
+        f"{tag_default!r}, but vault_api.BASE_VERSION is "
         f"{VAULT_API_VERSION!r} -- one of the two changed without the "
         "other. Bump both together."
     )
 
 
 # ==========================================================================
-# Wiring: main.py's `FastAPI(version=VAULT_API_VERSION)` actually uses the
-# constant, not a copy of it (review round 1, should-fix S1).
+# Wiring: main.py's `FastAPI(version=...)` uses the resolved build version,
+# not a copy of it (review round 1, should-fix S1; WP VER-1).
 # ==========================================================================
 
 
 def test_create_app_uses_vault_api_version_as_its_fastapi_version(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ) -> None:
     """Before this test existed, `version=VAULT_API_VERSION` in `main.py`
     was enforced by a comment only -- hand-changing it to a literal
@@ -454,5 +389,14 @@ def test_create_app_uses_vault_api_version_as_its_fastapi_version(
         cache_root=str(tmp_path / "cache"),
         log_level="INFO",
     )
+    # WP VER-1: without the baked env the app reports BASE_VERSION; with it,
+    # the env value -- in both cases the same object GET /v1/settings uses.
+    monkeypatch.delenv(BUILD_VERSION_ENV, raising=False)
     app = create_app(settings)
     assert app.version == VAULT_API_VERSION
+    assert app.state.build_info == build_info({})
+
+    monkeypatch.setenv(BUILD_VERSION_ENV, "0.1.0-rc99")
+    app = create_app(settings)
+    assert app.version == "0.1.0-rc99"
+    assert app.state.build_info.version == "0.1.0-rc99"

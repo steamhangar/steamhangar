@@ -153,9 +153,60 @@ concurrency:
 # repo is public by construction, with no separate per-package visibility
 # switch to flip.
 jobs:
+  # WP VER-1: ONE version string and commit for every artifact this run
+  # builds -- the four images (build args VAULT_VERSION/VAULT_COMMIT, baked
+  # as VAULT_BUILD_VERSION/VAULT_BUILD_COMMIT) and the vault-agent binaries
+  # (-ldflags -X main.version/main.commit). Computed once here instead of
+  # per job, so the images and the binaries cannot disagree.
+  #   v* tag ref (push, or a dispatch on a tag): the tag without its `v`,
+  #     e.g. v0.1.0-rc8 -> 0.1.0-rc8 -- the string docker/metadata-action's
+  #     `type=semver,pattern={{version}}` tags the images with; the publish
+  #     job checks that equality before it builds.
+  #   any other ref (a workflow_dispatch rehearsal off a branch):
+  #     dev-<short sha>, so a rehearsal build never claims a release.
+  # The grammar check matches vault_api.build_info() (api/vault_api/
+  # __init__.py), which falls back to its base version on anything else.
+  # api/tests/test_ver_1_build_version.py runs this script with bash for
+  # the tag, branch and invalid-tag cases.
+  build-version:
+    name: build-version / version and commit for every artifact
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # No checkout, no token use: it only reads the run's own context.
+    permissions: {}
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - name: Compute build version and commit
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Byte ranges in the grammar below, whatever the runner's locale.
+          export LC_ALL=C
+          case "$GITHUB_REF" in
+            refs/tags/v*) version="${GITHUB_REF_NAME#v}" ;;
+            *)            version="dev-${GITHUB_SHA:0:7}" ;;
+          esac
+          commit="$GITHUB_SHA"
+          if ! [[ "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$ ]]; then
+            printf '::error::build version %q is not 1-64 characters of [0-9A-Za-z._+-] starting with a letter or digit\n' "$version" >&2
+            exit 1
+          fi
+          if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '::error::GITHUB_SHA %q is not a 40-character commit id\n' "$commit" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+          echo "build version: ${version}, commit: ${commit}"
+
   publish:
     name: publish / ${{ matrix.image }} (ghcr.io)
     runs-on: ubuntu-latest
+    needs: build-version
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
@@ -384,6 +435,22 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short,prefix=sha-
 
+      # WP VER-1: on a release tag, the version baked into the image must be
+      # the same string the image is tagged with. A tag metadata-action does
+      # not read as semver (it then emits only the sha- tag) fails here,
+      # before anything is built or pushed.
+      - name: Check the baked version matches the image tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          META_VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
+        run: |
+          set -eu
+          if [ "$META_VERSION" != "$BUILD_VERSION" ]; then
+            echo "::error::metadata-action version '${META_VERSION}' differs from the build version '${BUILD_VERSION}'" >&2
+            exit 1
+          fi
+
       - name: Build and push ${{ matrix.image }}
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -399,6 +466,13 @@ jobs:
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # WP VER-1: every Dockerfile declares these two ARGs and bakes
+          # them as VAULT_BUILD_VERSION/VAULT_BUILD_COMMIT (see the
+          # build-version job). ci.yml's image-build passes the same KEYS
+          # with ci-<sha> values; api/tests/test_ci_image_build.py pins that.
+          build-args: |
+            VAULT_VERSION=${{ needs.build-version.outputs.version }}
+            VAULT_COMMIT=${{ needs.build-version.outputs.commit }}
 
       # Review round 2 (S3): a green build here proves buildx SUCCEEDED,
       # not that what got pushed is what was declared -- exactly the gap
@@ -979,7 +1053,8 @@ jobs:
     # `publish` is listed only so its per-image digest outputs are readable
     # here (WP SEC-FIX-2, S2); the ordering still comes from android-release,
     # which itself needs publish.
-    needs: [publish, android-release]
+    # build-version (WP VER-1) supplies the -ldflags version and commit.
+    needs: [build-version, publish, android-release]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     # WIDER than the default `contents: read` at the workflow level, scoped
     # to this job alone -- same shape as `android-release`'s own override,
@@ -1070,10 +1145,21 @@ jobs:
       # exists so a human can look at the GitHub Release page (whose own
       # `tag_name` is also "v1.2.3", unstripped) and see the exact same
       # string in both places.
+      #
+      # WP VER-1: `-X main.version` / `-X main.commit` set what
+      # `vault-agent --version` prints (agent/go/cmd/vault-agent/version.go;
+      # unset, a source build says `dev`). BUILD_VERSION is the build-version
+      # job's string WITHOUT the `v` (0.1.0-rc8), the same one the images
+      # report -- the filename keeps the `v`, as explained above. `go build`
+      # ignores -X for a symbol that does not exist, so main_test.go's
+      # TestLdflagsSetVersionAndCommit builds with these exact flags, and the
+      # step after the architecture check runs the linux/amd64 binary.
       - name: Cross-compile vault-agent (CGO_ENABLED=0, static binaries)
         working-directory: agent/go
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
+          BUILD_COMMIT: ${{ needs.build-version.outputs.commit }}
         run: |
           set -eu
           mkdir -p "$GITHUB_WORKSPACE/dist"
@@ -1082,7 +1168,8 @@ jobs:
             name="vault-agent-${VERSION}-${goos}-${goarch}${ext}"
             echo "=== building ${name} (GOOS=${goos} GOARCH=${goarch}) ==="
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-              go build -o "$GITHUB_WORKSPACE/dist/${name}" ./cmd/vault-agent
+              go build -ldflags "-X main.version=${BUILD_VERSION} -X main.commit=${BUILD_COMMIT}" \
+              -o "$GITHUB_WORKSPACE/dist/${name}" ./cmd/vault-agent
           }
           build windows amd64 .exe
           build linux   amd64 ""
@@ -1119,6 +1206,25 @@ jobs:
           check "vault-agent-${VERSION}-windows-amd64.exe" "x86-64"
           check "vault-agent-${VERSION}-linux-amd64"       "x86-64"
           check "vault-agent-${VERSION}-linux-arm64"       "ARM aarch64"
+
+      # WP VER-1: the one binary this linux/amd64 runner can execute must
+      # report exactly the build version and commit -- proof the -X flags
+      # reached the variables, not just that the linker accepted them.
+      - name: Verify the stamped version (vault-agent --version)
+        working-directory: dist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
+          BUILD_COMMIT: ${{ needs.build-version.outputs.commit }}
+        run: |
+          set -eu
+          got="$("./vault-agent-${VERSION}-linux-amd64" --version)"
+          want="vault-agent ${BUILD_VERSION} (commit ${BUILD_COMMIT})"
+          echo "$got"
+          if [ "$got" != "$want" ]; then
+            echo "::error::vault-agent --version printed '${got}', expected '${want}'" >&2
+            exit 1
+          fi
 
       # Why checksums matter for THIS binary specifically, not as boilerplate:
       # `hosts apply` edits the machine's hosts file and requires

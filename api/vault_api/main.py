@@ -17,7 +17,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from vault_api import __version__ as VAULT_API_VERSION
+from vault_api import BuildInfo, build_info
 from vault_api.body_guard import PreAuthBodyGuard
 from vault_api.config import Settings
 from vault_api.db import get_connection, init_db
@@ -215,11 +215,30 @@ def resolve_log_level(name: str) -> int:
     return level
 
 
+def log_build_info(build: BuildInfo) -> None:
+    """WP VER-1: name the running build once at startup, and warn about a
+    baked build env that was present but unusable (the value then falls
+    back, see ``vault_api.build_info``)."""
+    log = logging.getLogger(__name__)
+    log.info("vault-api version %s (commit %s)", build.version, build.commit)
+    for key in build.rejected:
+        log.warning(
+            "%s is set but is not a usable value; reporting the fallback "
+            "instead (version %s, commit %s).",
+            key,
+            build.version,
+            build.commit,
+        )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI app. Pass `settings` explicitly in tests; omit it to read from env."""
     settings = settings or Settings.from_env()
 
     logging.basicConfig(level=resolve_log_level(settings.log_level))
+
+    build = build_info()
+    log_build_info(build)
 
     init_db(settings.db_path)
 
@@ -228,13 +247,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Swagger/ReDoc would otherwise expose the full route/schema map without
     # a key, and Swagger UI loads its assets from a CDN anyway (won't work
     # offline on an isolated homelab install).
-    # version=VAULT_API_VERSION (WP 4e.7): reconciled with the ONE constant in
-    # vault_api/__init__.py rather than a second hardcoded "0.1.0" literal here
-    # — this value used to be its own copy and could silently drift from the
-    # one GET /v1/settings now also reports.
+    # version=build.version (WP 4e.7, WP VER-1): the same resolved value
+    # GET /v1/settings reports as server_version (app.state.build_info
+    # below), never a second literal.
     app = FastAPI(
         title="vault-api",
-        version=VAULT_API_VERSION,
+        version=build.version,
         openapi_url=None,
         lifespan=_lifespan,
     )
@@ -250,6 +268,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # keeps this file's read order matching request-handling order.
     install_security_headers(app)
     app.state.settings = settings
+    # WP VER-1: resolved once per app, read by GET /v1/settings.
+    app.state.build_info = build
     # Created here (not inside the lifespan) so it exists for a plain
     # TestClient() too, the same reasoning as app.state.settings above —
     # size-reporting endpoints don't need the worker running to be testable.

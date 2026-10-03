@@ -246,3 +246,40 @@ Scope of the exception, all in WP API-FIX-3:
 No route, schema or job-status semantics changed: these runs ended `error`
 before and still do; only the reason line and its wording are new. Every
 other frozen-path change still needs its own user decision and note here.
+
+## Addendum 2026-10-03 — freeze exception: build version in every artifact (WP VER-1, "Weg A1")
+
+User decision, 2026-10-03 ("Weg A1"): `v0.1.0` shows the component versions.
+The api/, core/ and dns/ freeze opens for the plumbing this needs, WP VER-1;
+serving the version (WP VER-2, `GET /v1/about` and vault-core) and showing
+it (web, app, agent report payload in AGENT-FEAT-1) are later packages,
+each with its own scope.
+
+The problem: `vault_api.__version__` was a hand-maintained `"0.1.0"`, so
+`GET /v1/settings` reported `server_version: "0.1.0"` on `v0.1.0-rc8`. The
+images carried the release version only as an OCI label set by
+docker/metadata-action, which nothing reads at runtime, and the agent
+binaries carried none.
+
+Scope of the exception, all in WP VER-1:
+
+- core/, dns/ (and api/, deploy/proxy/): each Dockerfile takes the build
+  args `VAULT_VERSION` (default `dev`) and `VAULT_COMMIT` (default
+  `unknown`) in its final stage, after the last `RUN`, and bakes them as
+  ENV `VAULT_BUILD_VERSION` / `VAULT_BUILD_COMMIT` and the OCI
+  `version` / `revision` labels. The hand-maintained `version="0.1.0"`
+  labels are gone. No hook, config or self-check changed.
+- api/: `vault_api.build_info()` resolves the version from
+  `VAULT_BUILD_VERSION`, falling back to `vault_api.BASE_VERSION`
+  (`"0.1.0"`, the release line, still pinned against compose's
+  `VAULT_IMAGE_TAG` defaults) when the env is absent, blank or outside the
+  grammar; `server_version` and `FastAPI(version=...)` use it; one startup
+  log line names version and commit. No route, schema or setting changed.
+- Not frozen, listed for completeness: `.github/workflows/publish.yml`
+  (`build-version` job, build args, a metadata-action equality check on
+  tags, agent `-ldflags -X`), `ci.yml`'s `image-build` (same build-arg
+  keys, `ci-<sha>` values), `agent/` (`vault-agent --version`),
+  `deploy/tests/verify-stack.sh` (steps 2.ver, 6v, 7h), tests and docs.
+
+Every other frozen-path change still needs its own user decision and note
+here.

@@ -66,9 +66,12 @@ external monitor, per that same section — "never expose vault-core/port
 legitimately be internet-reachable in that shipped profile, which makes
 the minimalism argument STRONGER, not weaker — free fingerprinting matters
 more, not less, on a route that may sit on the open internet with no key
-in front of it. See ``vault_api.__version__``'s docstring in
-``vault_api/__init__.py`` for where the value itself comes from and how it
-is pinned against drift.
+in front of it. Where the value comes from (WP VER-1): the image's baked
+``VAULT_BUILD_VERSION`` (the release tag without its ``v`` on a published
+image, ``dev`` on a local build), falling back to
+``vault_api.BASE_VERSION`` when the env is absent or unusable. It is
+resolved once per app in ``create_app`` (``app.state.build_info``) via
+``vault_api.build_info()``; see ``vault_api/__init__.py``.
 """
 
 from __future__ import annotations
@@ -78,7 +81,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from vault_api import __version__ as VAULT_API_VERSION
 from vault_api import settings_store
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
@@ -115,20 +117,20 @@ class SettingInfoOut(BaseModel):
 class SettingsOut(BaseModel):
     #: Mirrors ``Settings.settings_readonly`` — true means PATCH answers 403.
     readonly: bool
-    #: WP 4e.7: the running server's own version (``vault_api.__version__``).
-    #: Its own top-level field, not a row in ``settings`` — see this module's
-    #: docstring for why. Hand-maintained, not a published release number
-    #: (there are no release tags yet, plan §7 Phase 5 / WP 5.5); it states
-    #: "the code in this image", nothing more.
+    #: WP 4e.7: the running server's own version. Its own top-level field,
+    #: not a row in ``settings`` — see this module's docstring for why.
+    #: Since WP VER-1 it is the release version baked into the image
+    #: (``VAULT_BUILD_VERSION``), ``dev`` for a locally built image, and
+    #: ``vault_api.BASE_VERSION`` for a native run without that env.
     server_version: str
     settings: list[SettingInfoOut]
 
 
-def _build_response(conn, base: Settings) -> SettingsOut:
+def _build_response(conn, base: Settings, server_version: str) -> SettingsOut:
     infos = settings_store.describe_settings(conn, base)
     return SettingsOut(
         readonly=base.settings_readonly,
-        server_version=VAULT_API_VERSION,
+        server_version=server_version,
         settings=[SettingInfoOut(**vars(info)) for info in infos],
     )
 
@@ -137,7 +139,7 @@ def _build_response(conn, base: Settings) -> SettingsOut:
 def get_settings(request: Request, open_db: DbOpener = Depends(db_opener)) -> SettingsOut:
     base: Settings = request.app.state.settings
     with open_db() as conn:
-        return _build_response(conn, base)
+        return _build_response(conn, base, request.app.state.build_info.version)
 
 
 def _coerce_patch_value(key: str, value: Any) -> str:
@@ -235,4 +237,4 @@ def patch_settings(
     # leave a partial write despite the response claiming nothing persisted).
     with open_db() as conn:
         settings_store.apply_updates(conn, to_set, to_clear)
-        return _build_response(conn, base)
+        return _build_response(conn, base, request.app.state.build_info.version)

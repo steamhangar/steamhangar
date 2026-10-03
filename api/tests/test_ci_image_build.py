@@ -13,8 +13,11 @@ This module is what makes that copy safe: it fails when
 - the job's matrix drifts from publish.yml's (an image added, dropped, or
   built with a different context, Dockerfile, or platform list),
 - the build step's `with:` drifts from publish.yml's (anything beyond
-  `push`/`tags`/`labels`: target, build args, contexts, cache, secrets...),
-  or pushes, or logs in, or is skipped or allowed to fail,
+  `push`/`tags`/`labels`: target, contexts, cache, secrets...), or pushes,
+  or logs in, or is skipped or allowed to fail,
+- the build-args KEYS drift from publish.yml's (WP VER-1: the values differ
+  on purpose -- publish passes the release version, ci passes ci-<sha> --
+  but a key added, dropped or renamed on one side fails here),
 - the job's docker actions are pinned to different SHAs than publish.yml's,
 - a matrix `context`/`dockerfile` path does not exist in the repo.
 
@@ -24,10 +27,14 @@ nothing here needs Docker.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +55,8 @@ SHARED_ACTIONS = (
 
 #: `with:` keys only the publishing side may set: what to push and how to name it.
 PUBLISH_ONLY_WITH_KEYS = frozenset({"push", "tags", "labels"})
+#: WP VER-1: compared by KEY only (see test_image_build_build_args_keys_match_publish).
+BUILD_ARGS_KEY = "build-args"
 
 _EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 
@@ -155,11 +164,72 @@ def test_image_build_with_matches_publish_with_except_push_tags_labels() -> None
     ci_with.pop("push", None)
     for key in PUBLISH_ONLY_WITH_KEYS:
         publish_with.pop(key, None)
+    # WP VER-1: build-args values differ by design; their KEYS are pinned by
+    # test_image_build_build_args_keys_match_publish below.
+    ci_with.pop(BUILD_ARGS_KEY, None)
+    publish_with.pop(BUILD_ARGS_KEY, None)
     assert ci_with == publish_with, (
-        "ci.yml image-build `with:` (minus push) must equal publish.yml's "
-        f"(minus {sorted(PUBLISH_ONLY_WITH_KEYS)}).\n ci.yml:      {ci_with}\n "
-        f"publish.yml: {publish_with}"
+        "ci.yml image-build `with:` (minus push and build-args) must equal "
+        f"publish.yml's (minus {sorted(PUBLISH_ONLY_WITH_KEYS)} and build-args)."
+        f"\n ci.yml:      {ci_with}\n publish.yml: {publish_with}"
     )
+
+
+def _build_args(with_: dict[str, Any]) -> list[tuple[str, str]]:
+    """build-push-action's newline-separated ``KEY=VALUE`` list, in order."""
+    pairs = []
+    for line in str(with_.get(BUILD_ARGS_KEY) or "").splitlines():
+        line = line.strip()
+        if line:
+            key, sep, value = line.partition("=")
+            assert sep, f"build-args line without '=': {line!r}"
+            pairs.append((key, value))
+    return pairs
+
+
+def test_image_build_build_args_keys_match_publish() -> None:
+    """WP VER-1: ci builds with the same build args publish does, so a key
+    publish adds (and a Dockerfile starts depending on) is exercised on
+    every push -- only the values may differ."""
+    ci = _build_args(_build_step(_job(_load(CI_PATH), CI_JOB, CI_PATH)).get("with") or {})
+    publish = _build_args(
+        _build_step(_job(_load(PUBLISH_PATH), PUBLISH_JOB, PUBLISH_PATH)).get("with") or {}
+    )
+    ci_keys = [key for key, _ in ci]
+    publish_keys = [key for key, _ in publish]
+    assert publish_keys, "publish.yml passes no build-args at all (WP VER-1 expects two)"
+    assert len(set(ci_keys)) == len(ci_keys), f"duplicate build-arg key in ci.yml: {ci_keys}"
+    assert sorted(ci_keys) == sorted(publish_keys), (
+        "ci.yml image-build must pass the same build-arg KEYS as publish.yml "
+        f"(values may differ).\n ci.yml:      {ci_keys}\n publish.yml: {publish_keys}"
+    )
+
+
+def test_image_build_build_args_carry_the_ci_version_and_commit() -> None:
+    job = _job(_load(CI_PATH), CI_JOB, CI_PATH)
+    assert dict(_build_args(_build_step(job).get("with") or {})) == {
+        "VAULT_VERSION": "${{ steps.version.outputs.version }}",
+        "VAULT_COMMIT": "${{ steps.version.outputs.commit }}",
+    }
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+def test_image_build_version_step_says_ci_and_short_sha(tmp_path: Path) -> None:
+    """Executed, not grepped: the value can never look like a release."""
+    job = _job(_load(CI_PATH), CI_JOB, CI_PATH)
+    steps = [s for s in job["steps"] if s.get("id") == "version"]
+    assert len(steps) == 1
+    assert steps[0].get("shell") == "bash"
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    subprocess.run(
+        [shutil.which("bash"), "-c", steps[0]["run"]],
+        env={"PATH": os.environ.get("PATH", ""), "GITHUB_SHA": sha, "GITHUB_OUTPUT": str(out)},
+        check=True,
+    )
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines == [f"version=ci-{sha[:7]}", f"commit={sha}"]
 
 
 def test_image_build_cannot_be_skipped_or_soft_failed() -> None:

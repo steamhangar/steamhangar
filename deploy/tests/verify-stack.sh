@@ -183,6 +183,10 @@ cleanup() {
     # be removed), the network itself AFTER `down` has removed vault-core,
     # which may still be attached to it on an aborted run. Missing = no-op.
     docker rm -f "$POOL_EDGE" "$POOL_RESOLVER" >/dev/null 2>&1
+    # WP VER-1: step 2.ver's throwaway rebuilds (removed there already on the
+    # straight-line path; this covers an abort in between).
+    docker rmi "$PROJECT-ver-core:check" "$PROJECT-ver-api:check" \
+        "$PROJECT-ver-proxy:check" "$PROJECT-ver-dns:check" >/dev/null 2>&1
     run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns down -v --remove-orphans"
     docker volume rm -f "$PROJECT-split-cache" "$PROJECT-scratch" >/dev/null 2>&1
     docker network rm "$POOL_NET" >/dev/null 2>&1
@@ -369,6 +373,85 @@ sp_threads=$(docker run --rm --entrypoint /opt/steamprefill/SteamPrefill \
              "ghcr.io/steamhangar/vault-api:$TAG" prefill --max-threads 3 --help < /dev/null 2>&1 | strip_ansi | head -3)
 printf '%s\n' "$sp_threads" | sed 's/^/    /'
 assert_contains     "$sp_threads" "Will download using at most 3 threads" "the shipped SteamPrefill recognises --max-threads"
+
+step "2.ver  WP VER-1: the build identity is baked into every image, and a version rebuild reuses every cached layer"
+say 'The images above were built WITHOUT build args, so each must carry the'
+say 'Dockerfile defaults: ENV VAULT_BUILD_VERSION=dev / VAULT_BUILD_COMMIT=unknown'
+say 'and the same two values as the OCI version/revision labels. Then each image'
+say 'is rebuilt under a throwaway tag WITH the build args publish.yml passes, to'
+say 'prove the args reach ENV and labels (a hardcoded ENV=dev would pass the'
+say 'default check), and that every RUN step of that rebuild came from the cache:'
+say 'the ARGs are declared after the last RUN, so a new release version must not'
+say 'rebuild pip, apt, apk or the SteamPrefill fetch.'
+img_env() {
+    docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null \
+        | sed -n "s/^$2=//p"
+}
+img_label() {
+    docker image inspect --format "{{index .Config.Labels \"$2\"}}" "$1" 2>/dev/null
+}
+ver_commit=0123456789abcdef0123456789abcdef01234567
+for svc in core api proxy dns; do
+    img="ghcr.io/steamhangar/vault-$svc:$TAG"
+    assert_eq "dev"     "$(img_env "$img" VAULT_BUILD_VERSION)" "vault-$svc image: ENV VAULT_BUILD_VERSION is the default"
+    assert_eq "unknown" "$(img_env "$img" VAULT_BUILD_COMMIT)" "vault-$svc image: ENV VAULT_BUILD_COMMIT is the default"
+    assert_eq "dev"     "$(img_label "$img" org.opencontainers.image.version)" "vault-$svc image: OCI version label is the default"
+    assert_eq "unknown" "$(img_label "$img" org.opencontainers.image.revision)" "vault-$svc image: OCI revision label is the default"
+
+    case "$svc" in
+        api)   ver_file="$repo_root/api/Dockerfile";          ver_ctx="$repo_root" ;;
+        proxy) ver_file="$repo_root/deploy/proxy/Dockerfile"; ver_ctx="$repo_root/deploy/proxy" ;;
+        *)     ver_file="$repo_root/$svc/Dockerfile";         ver_ctx="$repo_root/$svc" ;;
+    esac
+    ver_img="$PROJECT-ver-$svc:check"
+    ver_log="$work/vbuild-$svc.log"
+    ver_start=$(date +%s)
+    if docker build \
+            --build-arg VAULT_VERSION=9.9.9-verify --build-arg "VAULT_COMMIT=$ver_commit" \
+            -t "$ver_img" -f "$ver_file" "$ver_ctx" > "$ver_log" 2>&1; then
+        ver_secs=$(( $(date +%s) - ver_start ))
+        assert_eq "9.9.9-verify" "$(img_env "$ver_img" VAULT_BUILD_VERSION)" "vault-$svc rebuilt with build args: ENV VAULT_BUILD_VERSION"
+        assert_eq "$ver_commit"  "$(img_env "$ver_img" VAULT_BUILD_COMMIT)" "vault-$svc rebuilt with build args: ENV VAULT_BUILD_COMMIT"
+        assert_eq "9.9.9-verify" "$(img_label "$ver_img" org.opencontainers.image.version)" "vault-$svc rebuilt with build args: OCI version label"
+        assert_eq "$ver_commit"  "$(img_label "$ver_img" org.opencontainers.image.revision)" "vault-$svc rebuilt with build args: OCI revision label"
+        # Both builders, since the docker CLI here may lack buildx (measured:
+        # the devbox verify runner falls back to the legacy builder, which
+        # has no --progress flag). Non-TTY BuildKit prints "#7 [ 3/9] RUN ..."
+        # and "#7 CACHED" for a cache hit; the legacy builder prints
+        # "Step 5/20 : RUN ..." and then " ---> Using cache" or
+        # " ---> Running in <id>" when it executes the step.
+        ver_runs=$(sed -n 's/^#\([0-9]\{1,\}\) \[[^]]*\] RUN .*/\1/p' "$ver_log" | sort -u)
+        if [ -n "$ver_runs" ]; then
+            ver_total=$(printf '%s\n' "$ver_runs" | wc -l | tr -d ' ')
+            ver_uncached=""
+            for id in $ver_runs; do
+                grep -q "^#$id CACHED" "$ver_log" || ver_uncached="$ver_uncached #$id"
+            done
+        else
+            # Legacy: judge each RUN step by the first "--->" line after its
+            # "Step" line. "Running in" alone is no signal: the legacy
+            # builder starts a container for ENV/LABEL/CMD steps too.
+            ver_total=$(grep -c '^Step [0-9]*/[0-9]* : RUN ' "$ver_log")
+            ver_uncached=$(awk '
+                /^Step [0-9]+\/[0-9]+ : / { step = $2; isrun = ($4 == "RUN"); judged = 0; next }
+                isrun && !judged && /--->/ { judged = 1; if ($0 !~ /Using cache/) printf " %s", step }
+            ' "$ver_log")
+        fi
+        if [ "${ver_total:-0}" = "0" ]; then
+            tail -20 "$ver_log" | sed 's/^/    /'
+            bad "vault-$svc version rebuild: no RUN step found in the build output (unknown builder format)"
+        elif [ -z "$ver_uncached" ]; then
+            ok "vault-$svc version rebuild: all $ver_total RUN steps came from the cache (${ver_secs}s)"
+        else
+            grep -E -- '\] RUN |^Step [0-9]+/[0-9]+ : RUN |---> ' "$ver_log" | cut -c1-120 | sed 's/^/    /'
+            bad "vault-$svc version rebuild re-ran RUN steps ($ver_uncached) -- an ARG is declared too early"
+        fi
+    else
+        tail -20 "$ver_log" | sed 's/^/    /'
+        bad "vault-$svc rebuild with VAULT_VERSION/VAULT_COMMIT build args failed"
+    fi
+    docker rmi "$ver_img" >/dev/null 2>&1
+done
 
 # =============================================================================
 section "3. compose.yaml review surface"
@@ -1430,6 +1513,22 @@ core_rate_window_val=$(dc exec -T vault-core printenv VAULT_UPSTREAM_RATE_WINDOW
 assert_eq "UTC" "$core_tz_val" "vault-core: TZ inside the running container is the compose default"
 assert_eq "03:00-07:00" "$core_rate_window_val" "vault-core: VAULT_UPSTREAM_RATE_WINDOW inside the running container is the compose default (follows VAULT_SCHEDULE_WINDOW's default), not the image's blank ENV"
 
+step "6v. WP VER-1: the running containers carry the build identity, and vault-api serves it"
+say 'printenv inside each running container (the process environment, not the'
+say 'image config), then GET /v1/settings: server_version must be the baked'
+say 'VAULT_BUILD_VERSION. This run builds without build args, so the values are'
+say 'the Dockerfile defaults dev / unknown (2.ver proves the args path). vault-dns'
+say 'is checked in section 7, where its profile runs.'
+for svc in vault-core vault-api vault-runner vault-proxy; do
+    svc_ver=$(dc exec -T "$svc" printenv VAULT_BUILD_VERSION 2>/dev/null | tr -d '\r')
+    svc_commit=$(dc exec -T "$svc" printenv VAULT_BUILD_COMMIT 2>/dev/null | tr -d '\r')
+    assert_eq "dev"     "$svc_ver"    "$svc: VAULT_BUILD_VERSION in the running container"
+    assert_eq "unknown" "$svc_commit" "$svc: VAULT_BUILD_COMMIT in the running container"
+done
+served_version=$(curl -s --max-time 10 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/settings" \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin).get("server_version"))' 2>&1)
+assert_eq "dev" "$served_version" "vault-api: GET /v1/settings server_version is the baked VAULT_BUILD_VERSION"
+
 step "6j. Regression guard: /v1/health and an authed route still behave after the build-context change"
 say '6a/6b above already exercise these for auth-contract reasons; restated'
 say 'explicitly here because the build-context move (api/ -> repo root,'
@@ -1883,6 +1982,10 @@ while [ "$i" -lt 20 ]; do
     i=$((i + 1)); sleep 2
 done
 assert_eq "healthy" "$dns_h" "vault-dns container healthcheck"
+dns_ver=$(dc exec -T vault-dns printenv VAULT_BUILD_VERSION 2>/dev/null | tr -d '\r')
+dns_commit=$(dc exec -T vault-dns printenv VAULT_BUILD_COMMIT 2>/dev/null | tr -d '\r')
+assert_eq "dev"     "$dns_ver"    "vault-dns: VAULT_BUILD_VERSION in the running container (WP VER-1)"
+assert_eq "unknown" "$dns_commit" "vault-dns: VAULT_BUILD_COMMIT in the running container (WP VER-1)"
 
 step "7i. WP CORE-FIX-3 (d): vault-core refuses to boot on a resolver that rewrites *.steamcontent.com"
 say 'vault-dns, running above, IS a looping resolver from vault-core'"'"'s point of'

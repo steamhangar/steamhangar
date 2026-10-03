@@ -26,8 +26,7 @@ FROM alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952
 LABEL org.opencontainers.image.title="SteamHangar vault-proxy" \
       org.opencontainers.image.description="Allowlist-only forward proxy: the sole egress path for the egress-locked vault-api container" \
       org.opencontainers.image.source="https://github.com/steamhangar/steamhangar" \
-      org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.version="0.1.0"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 # Exact version pin, matching the pinned base image (same reasoning as
 # dns/Dockerfile: an upstream Alpine security bump removes this exact version
@@ -93,6 +92,25 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 # header comment above for why there is no root phase to drop out of here,
 # unlike vault-core/vault-dns.
 USER tinyproxy:tinyproxy
+
+# --- Build identity (WP VER-1) -----------------------------------------------
+# The release version and commit this image was built from, set by
+# .github/workflows/publish.yml (`VAULT_VERSION` = the tag without its `v`,
+# e.g. 0.1.0-rc8; `VAULT_COMMIT` = the full commit SHA). A local build
+# (`docker build`, deploy/compose.yaml, deploy/tests/verify-stack.sh) gets the
+# defaults `dev` / `unknown`, so a hand-built image never claims a release.
+# Baked as runtime ENV so the running container can report it; nothing reads
+# a LABEL at runtime. Declared LAST, after every RUN and COPY: a changed
+# build-arg value invalidates the cache of every later RUN, so the expensive
+# layers above stay cached across releases. Never validated here: ENV can be
+# overridden at `docker run` time, so every consumer validates what it reads
+# (docs: deploy/README.md "Build version").
+ARG VAULT_VERSION=dev
+ARG VAULT_COMMIT=unknown
+ENV VAULT_BUILD_VERSION="${VAULT_VERSION}" \
+    VAULT_BUILD_COMMIT="${VAULT_COMMIT}"
+LABEL org.opencontainers.image.version="${VAULT_VERSION}" \
+      org.opencontainers.image.revision="${VAULT_COMMIT}"
 
 ENTRYPOINT ["/usr/local/bin/vault-proxy-entrypoint.sh"]
 # -d: stay in the foreground (see core/Dockerfile-style containers -- a
