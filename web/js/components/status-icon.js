@@ -43,6 +43,13 @@ export const STATUS_LABEL = {
   // purpose is not a failure (api/README.md "The status model" — job
   // outcome honesty, docs/PROJECT_PLAN.md).
   cancelled: "Cancelled",
+  // Added WP WEB-FEAT-3 for Settings → About (`GET /v1/about` status
+  // words): a component vault-api does not or cannot check ("unknown") and
+  // one this setup does not run ("not_in_use"). Neither is a fault, so
+  // neither reuses the warning/error glyphs — same reasoning as
+  // "cancelled" above. Neutral tone, own shapes ("?" and a dash).
+  unknown: "Unknown",
+  notinuse: "Not in use",
 };
 
 /** Which glyph shape a given status kind uses. */
@@ -57,6 +64,8 @@ const KIND_GLYPH = {
   error: "bang",
   warn: "bang",
   cancelled: "stop",
+  unknown: "question",
+  notinuse: "dash",
 };
 
 function svgEl(tag, attrs) {
@@ -147,6 +156,17 @@ function buildStop() {
   return [svgEl("rect", { x: "7", y: "7", width: "10", height: "10", rx: "1.6" })];
 }
 
+function buildQuestion() {
+  return [
+    svgEl("path", { d: "M9.1 9.2a2.9 2.9 0 1 1 4.3 2.6c-.9.5-1.4 1.1-1.4 2v.4" }),
+    svgEl("path", { d: "M12 17.7v.02" }),
+  ];
+}
+
+function buildDash() {
+  return [svgEl("path", { d: "M7 12h10" })];
+}
+
 const GLYPH_BUILDERS = {
   check: buildCheck,
   download: buildDownload,
@@ -154,6 +174,8 @@ const GLYPH_BUILDERS = {
   bang: buildBang,
   pause: buildPause,
   stop: buildStop,
+  question: buildQuestion,
+  dash: buildDash,
 };
 
 /**

@@ -3,11 +3,19 @@
  *
  * Serves the app entirely from in-memory, synthetic data so it works with
  * no vault present (NOTES open question 5: "real value for first-run and
- * screenshots"). Shapes are modeled 1:1 on the real vault-api responses
+ * screenshots"). Shapes are MODELED on the real vault-api responses
  * documented in api/README.md's "Endpoints" table and the Pydantic models
- * in api/vault_api/routers/{games,jobs,clients}.py — field names match
- * exactly, so api.js's callers and the polling store cannot tell demo mode
- * and a real server apart.
+ * in api/vault_api/routers/*.py, so api.js's callers and the polling store
+ * work the same in both modes. **That is a goal, not a guarantee for every
+ * route** (WP WEB-FEAT-3 correction: this header used to claim "field names
+ * match exactly" while `/v1/clients` had silently missed WP AGENT-FEAT-1's
+ * four fields). What IS guaranteed is only what a test pins against the
+ * server source: `/v1/clients` rows and `/v1/about` (keys equal the
+ * `ClientOut` / `AboutOut` / `ComponentOut` fields, web/tests/
+ * demo-data-shape-guard.test.js), `installed_on` (demo-data-installed-on),
+ * the settings keys and defaults (demo-data-settings, demo-data-config-
+ * defaults). Any other route may lag the server; add a key pin when a
+ * screen starts depending on it.
  *
  * Per docs/LEARNINGS.md ("Testing discipline": fixtures are synthetic,
  * modeled on real structure, never personal data): every title, id and
@@ -435,12 +443,65 @@ function buildJobs() {
   ];
 }
 
+// ---------------------------------------------------------------------
+// Agent presence (WP WEB-FEAT-3, mirroring WP AGENT-FEAT-1's server rule)
+// ---------------------------------------------------------------------
+
+/** api/vault_api/agent_reports.py `ASSUMED_REPORT_INTERVAL_SECONDS`: the
+ * interval presence assumes when a report stated none. Pinned against the
+ * server constant in web/tests/demo-data-shape-guard.test.js. */
+export const DEMO_ASSUMED_REPORT_INTERVAL_SECONDS = 1800;
+/** api/vault_api/agent_reports.py `PRESENCE_GRACE_SECONDS` (same pin). */
+export const DEMO_PRESENCE_GRACE_SECONDS = 300;
+
+/** Server timestamp format (`to_utc_iso`): whole seconds, `Z`, no millis. */
+function utcIsoSeconds(ms) {
+  return new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * `(presence, offline_after)` exactly as `agent_reports.presence` computes
+ * it: offline once the last report is OLDER than 2 x interval + 5 min
+ * (still online at exactly that age), interval = the stated one or 1800 s,
+ * `("offline", null)` for an unreadable timestamp. (The server also
+ * range-checks a stated interval, `valid_report_interval`; the demo's seed
+ * values are 600 or null, both inside it.) Demo-side only — the web
+ * UI itself never calls this; it reads the `presence` field the (demo)
+ * server returns, like it does for a real server.
+ * @param {string} lastReportedAt
+ * @param {number | null} intervalSeconds
+ * @param {number} nowMs
+ * @returns {[("online"|"offline"), (string|null)]}
+ */
+export function demoPresence(lastReportedAt, intervalSeconds, nowMs) {
+  const last = Date.parse(lastReportedAt);
+  if (!Number.isFinite(last)) return ["offline", null];
+  const interval =
+    Number.isInteger(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : DEMO_ASSUMED_REPORT_INTERVAL_SECONDS;
+  const deadline = last + (2 * interval + DEMO_PRESENCE_GRACE_SECONDS) * 1000;
+  return [nowMs <= deadline ? "online" : "offline", utcIsoSeconds(deadline)];
+}
+
+/**
+ * Seed clients. Two rows on purpose (WP WEB-FEAT-3 brief, AGENT-FEAT-1
+ * review S1):
+ *  - workshop-pc: a current agent (version + 600 s interval) that reported
+ *    4 minutes ago -> online. `_demoReportEveryMs` (demo-only, never
+ *    serialized) re-stamps its report on GET once an interval has passed,
+ *    standing in for the real 10-minute schedule so a long demo session
+ *    does not see it drift offline.
+ *  - loft-laptop: a legacy agent (`agent_version`/`report_interval_seconds`
+ *    null -> 30 min assumed) last heard from 2 h ago -> offline, and still
+ *    listed (offline PCs are not hidden).
+ * `presence`/`offline_after` are NOT stored: like the server, they are
+ * computed per request ({@link demoPresence}), one `now` per answer.
+ */
 function buildClients() {
   return [
     {
       client_id: "workshop-pc",
       first_seen: isoAgo(30 * 86_400_000),
-      last_reported_at: isoAgo(3_600_000),
+      last_reported_at: utcIsoSeconds(Date.now() - 4 * 60_000),
       app_count: 148,
       source_addrs: ["10.10.0.21"],
       cache_hits: 4213,
@@ -448,11 +509,14 @@ function buildClients() {
       bytes_served: 812_345_678_912,
       last_seen_in_cache_log: isoAgo(120_000),
       bypass_suspected: false,
+      agent_version: "0.1.0",
+      report_interval_seconds: 600,
+      _demoReportEveryMs: 600_000,
     },
     {
       client_id: "loft-laptop",
       first_seen: isoAgo(9 * 86_400_000),
-      last_reported_at: isoAgo(7_200_000),
+      last_reported_at: utcIsoSeconds(Date.now() - 2 * 3_600_000),
       app_count: 42,
       source_addrs: ["10.10.0.44"],
       cache_hits: 3,
@@ -460,8 +524,98 @@ function buildClients() {
       bytes_served: 41_943_040,
       last_seen_in_cache_log: null,
       bypass_suspected: true,
+      agent_version: null,
+      report_interval_seconds: null,
     },
   ];
+}
+
+/** `GET /v1/clients` (demo): the stored fields plus per-request presence.
+ * Every key the server's `ClientOut` has, nothing else (pinned). */
+function handleGetClients() {
+  const nowMs = Date.now();
+  return clients.map((c) => {
+    if (typeof c._demoReportEveryMs === "number" && nowMs - Date.parse(c.last_reported_at) > c._demoReportEveryMs) {
+      c.last_reported_at = utcIsoSeconds(nowMs - 30_000); // the "agent" just reported again
+    }
+    const [presence, offlineAfter] = demoPresence(c.last_reported_at, c.report_interval_seconds, nowMs);
+    const { _demoReportEveryMs, ...wire } = c;
+    return { ...wire, presence, offline_after: offlineAfter };
+  });
+}
+
+// ---------------------------------------------------------------------
+// GET /v1/about (WP WEB-FEAT-3, mirroring WP VER-2's AboutOut)
+// ---------------------------------------------------------------------
+
+/**
+ * Six components, server order, plausible for a fresh queue-mode install
+ * with the egress proxy and no vault-dns: vault-core `unknown` with the
+ * "recorded at last start" detail it always has (never probed, user
+ * decision "Weg A"), vault-dns `unknown` and never probed. Detail texts
+ * follow api/vault_api/about.py's wording. Fictional versions/commits.
+ */
+function handleGetAbout() {
+  const nowMs = Date.now();
+  const checkedAt = utcIsoSeconds(nowMs);
+  const coreRecordedAt = utcIsoSeconds(nowMs - 26 * 3_600_000);
+  const commit = "3f9c2a71d4be08e5c6a1f02b9d7e4c18a5b6f3d0";
+  const notProbed =
+    "vault-api has no network path to vault-core (egress lock, ADR-0011), so whether it is running now is not checked.";
+  return {
+    components: [
+      {
+        name: "vault-api",
+        version: "0.1.0",
+        commit,
+        status: "ok",
+        checked_at: checkedAt,
+        detail: "Also serves the web UI, so the web UI has this version.",
+      },
+      {
+        name: "vault-core",
+        version: "0.1.0",
+        commit,
+        status: "unknown",
+        checked_at: checkedAt,
+        detail: `Recorded at vault-core's last start, ${coreRecordedAt}. ${notProbed}`,
+      },
+      {
+        name: "vault-runner",
+        version: "0.1.0",
+        commit,
+        status: "ok",
+        checked_at: checkedAt,
+        detail: "Last seen 12 s ago.",
+      },
+      {
+        name: "steamprefill",
+        version: "3.7.1",
+        commit: null,
+        status: "ok",
+        checked_at: checkedAt,
+        detail: "Runs in vault-runner; version as the runner reported it.",
+      },
+      {
+        name: "vault-proxy",
+        version: null,
+        commit: null,
+        status: "ok",
+        checked_at: checkedAt,
+        detail:
+          "Answers, and refuses a host that is not on the egress allowlist. Its version is not shown: reading it would need a hole in the egress filter.",
+      },
+      {
+        name: "vault-dns",
+        version: null,
+        commit: null,
+        status: "unknown",
+        checked_at: checkedAt,
+        detail:
+          "Optional (compose profile dns); most setups use their own DNS rewrite instead. Not checked: vault-api has no network path to vault-dns (egress lock, ADR-0011), and a test query would itself be DNS traffic.",
+      },
+    ],
+  };
 }
 
 let games = buildGames(readLibrarySizePreference());
@@ -1678,7 +1832,10 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
 
   if (method === "GET" && path === "/v1/clients") {
-    return clients.map((c) => ({ ...c }));
+    return handleGetClients();
+  }
+  if (method === "GET" && path === "/v1/about") {
+    return handleGetAbout();
   }
 
   if (method === "GET" && path === "/v1/settings") {

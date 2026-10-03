@@ -2736,7 +2736,7 @@ below carry their own later dates, item 12 is the current one).
     - [x] **APP-FEAT-1** — the Android app reads the stored
       `steam_library_steamid` (API-FEAT-1) instead of its own input, and
       can set it, as the web Settings block does.
-    - [ ] **WEB-FIX-6** — the bulk bar overlaps content in select mode on
+    - [x] **WEB-FIX-6** (done 2026-10-03) — the bulk bar overlaps content in select mode on
       a phone (noted during WEB-FIX-3, not fixed).
     - [ ] Signed APK: operator creates and backs up the keystore, puts
       the four `ANDROID_*` secrets into the `release` Environment, then
@@ -2800,7 +2800,7 @@ below carry their own later dates, item 12 is the current one).
       `OnCalendar=*:0/10` + `OnStartupSec=30s`; a new agent resends once
       without the fields to a server up to rc8 that refuses them. Operators
       reinstall the task/units to get the new schedule.
-    - [ ] **WEB-FEAT-3** — Settings gains "About" (component table) and
+    - [x] **WEB-FEAT-3** — Settings gains "About" (component table) and
       "PCs (agents)" (always reachable, online/offline, last seen,
       version, games); the clients sheet no longer needs the bypass
       banner as its only entry point.
@@ -2822,6 +2822,11 @@ below carry their own later dates, item 12 is the current one).
       the version file is written by root; bind-mount operator step is now
       `chown 101:101 <dir>/cache/depot` only (deploy/README).
 
+    - [ ] **WEB-FEAT-4** — remove a PC from the "PCs (agents)" list with
+      a confirmation dialog, calling the existing `DELETE
+      /v1/clients/{client_id}` (WP AG-1); a renamed or retired PC
+      otherwise stays listed as offline forever (user decision
+      2026-10-03, after rc9). Android follows in the next app package.
     - [x] **APP-FEAT-2** — Android parity package (2026-10-03): APP-FIX-2,
       APP-FEAT-1 (library account from the stored setting only; servers
       older than rc4 get a "too old" notice; a signed-in-id fill button

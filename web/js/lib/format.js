@@ -55,3 +55,37 @@ export function formatTimestamp(iso) {
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString();
 }
+
+/**
+ * An ISO-8601 UTC timestamp -> how long ago it was, in words (WP
+ * WEB-FEAT-3: "last seen 4 min ago" for a PC, "checked 40 s ago" for the
+ * About table). Coarse on purpose — the inputs are a 10-minute agent report
+ * and a 60-second server cache, so seconds-level precision would only
+ * suggest a liveness these values do not have.
+ *
+ * `nowMs` is a parameter (default `Date.now()`) so a caller rendering a
+ * whole list uses ONE clock for every row, and tests pin it.
+ *
+ * A timestamp in the future (the server clock is ahead of this browser's)
+ * reads "just now" within a minute and "in the future (clocks differ)"
+ * beyond that — never a negative age. `null`, `undefined` and unparseable
+ * input return `null`: nothing honest to print, the caller decides.
+ *
+ * @param {string | null | undefined} iso
+ * @param {number} [nowMs]
+ * @returns {string | null}
+ */
+export function formatAgo(iso, nowMs = Date.now()) {
+  if (typeof iso !== "string" || !iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t) || !Number.isFinite(nowMs)) return null;
+  const seconds = Math.floor((nowMs - t) / 1000);
+  if (seconds < -60) return "in the future (clocks differ)";
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}

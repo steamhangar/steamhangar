@@ -57,6 +57,17 @@
      value changes per breakpoint. */
   --gutter:16px;    /* horizontal inset — matches .view-root's existing 16px side padding */
   --nav-h:64px;     /* bottom-nav rendered height (7px+9px vertical padding + ~48px content); 0 once BP-L turns it into a side rail */
+  /* Bulk action bar (WP WEB-FIX-6). `--bulk-gap` is the bar's distance above
+     the bottom nav's top edge (above the viewport's safe area at BP-L, where
+     there is no bottom nav) and the breathing room above the bar.
+     `--bulk-h` is the bar's border-box height: views/library.js writes the
+     MEASURED value onto <html> (lib/bulk-room.js, ResizeObserver) because the
+     note and the wrapping buttons change it; 168px is only the fallback
+     where no ResizeObserver exists (two note lines + one wrapped button row
+     at 360px). Select mode turns the two into scroll room at the end of the
+     Library (app.css, "bulk action bar"). */
+  --bulk-gap:14px;
+  --bulk-h:168px;
   /* BP-L left-rail width (WP 4e.6: narrowed from WP 4e.1's 232px — operator
      verdict, live at ~2000px: "232px feels unnecessarily large for the
      three things in it"). 180px is not a guess: measured live in a real
@@ -361,6 +372,9 @@ a{ color:var(--accent); }
    "not cached"/dim text reads as deliberately neutral, matching job
    outcome honesty (docs/PROJECT_PLAN.md). */
 .sic.k-cancelled{ background:var(--dim-2); color:var(--text); }
+/* WP WEB-FEAT-3 (Settings → About): "not checked" and "not used here" are
+   not faults either — the same neutral tone as cancelled, own glyphs. */
+.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); color:var(--text); }
 
 .sic-lg{ --sz:19px; }
 .sic-sm{ --sz:16px; }
