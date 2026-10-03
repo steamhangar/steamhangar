@@ -2714,8 +2714,12 @@ below carry their own later dates, item 12 is the current one).
       "not considered" (parse the summary table's Failed column) and say
       what failed. Needs the freeze opened for a bug fix (ADR-0016
       addendum).
-    - [ ] **DOCS-FIX-3** — ADR-0004 and SECURITY.md claim QR login via the
-      Steam app is the documented path. No SteamPrefill release supports
+    - [x] **DOCS-FIX-3** — ADR-0004 and SECURITY.md claim QR login via the
+      Steam app is the documented path (done 2026-10-03: ADR-0004
+      addendum 4 marks the claim wrong; SECURITY.md, threat-model §3 and
+      deploy/README's first-run login corrected, plus a note on Steam's
+      location check and the code workaround; only ADR-0004 actually
+      carried the QR sentence). No SteamPrefill release supports
       QR (verified in the v3.7.1/v3.7.2 source, 2026-10-02); the only
       path is account name + password + Steam Guard on the server
       terminal. Correct the claim, point to the planned QR helper (D2).

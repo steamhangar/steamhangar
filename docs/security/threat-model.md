@@ -432,8 +432,14 @@ directly, not taken on faith:
 
 ### Where credentials *do* live in a working setup
 
-The password and Steam Guard code are typed once, interactively, into
-SteamPrefill's own prompt. The resulting **session** (not the password
+The account name and password are typed once, interactively, into
+SteamPrefill's own prompt on the server; Steam Guard is then confirmed by
+approving in the Steam Mobile App or by typing a code. ADR-0004 decision 1
+originally claimed a QR login through the Mobile App, with the password
+never typed on the server; that was wrong for every SteamPrefill release
+(no QR flow exists, verified in the v3.7.1/v3.7.2 source on 2026-10-02) and
+is corrected by ADR-0004 addendum 4. A QR helper is planned (D2 in
+`docs/PROJECT_PLAN.md` §11 item 13), not shipped. The resulting **session** (not the password
 itself — this project's own Phase-0 research supports the checkable claim
 that what gets persisted afterward is "not raw credentials,"
 `poc/steamprefill/PROTOCOL.md` §3.1 "First-run login"; see the closing gap list for the stronger

@@ -52,8 +52,8 @@ implements, reviewer reviews every package, one commit per passed package.
   `Config/account.config` next to the binary: protobuf-net
   `UserAccountStore`, field 3 `CurrentUsername`, field 4 `SessionId`,
   field 5 `AccessToken`, which actually holds the refresh token. It is
-  valid for about 200 days. ADR-0004 claims otherwise; that is DOCS-FIX-3
-  in item 13 B, before `v0.1.0`.
+  valid for about 200 days. ADR-0004 claimed otherwise; DOCS-FIX-3 (item
+  13 B, 2026-10-03) corrected it in ADR-0004 addendum 4.
 - **Steam's anti-phishing location check** blocked an app approval when
   the approving phone was in another country than the server ("Steam has blocked
   this sign in"). Entering the 5-character Steam Guard code is reported

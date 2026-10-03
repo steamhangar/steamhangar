@@ -44,7 +44,11 @@ checked against the code") for where Steam credentials and the relay's Web
 API key do and do not live, and §5 ("Outbound data flows — what leaves the
 LAN") for every outbound connection the stack makes. Read those two
 sections before reporting a credential-handling finding — they also name
-the claims the document could not substantiate from code alone.
+the claims the document could not substantiate from code alone. One
+correction to ADR-0004 itself: SteamPrefill has no QR login, so the Steam
+password IS typed once on the server, into SteamPrefill's own prompt, with
+Steam Guard confirmed by app approval or code (ADR-0004 addendum 4,
+2026-10-03). It never passes through SteamHangar code.
 
 Please include:
 
