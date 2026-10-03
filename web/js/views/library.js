@@ -93,6 +93,7 @@ import {
   classifyBulkDeleteEligibility,
 } from "../lib/bulk-plan.js";
 import { buildMultiPlan } from "../lib/multiplan.js";
+import { createBulkHeightWatcher } from "../lib/bulk-room.js";
 import {
   summarizeCachedPrefillOutcome,
   describeCachedPrefillError,
@@ -233,6 +234,15 @@ function remerge() {
 // checkAndUpdateAction.isInFlight() below to paint a freshly-built button's
 // initial state correctly), same posture as `state` above.
 const checkAndUpdateAction = createCheckAndUpdateAction({ fetcher: () => api.prefillCached() });
+
+// The bulk bar's live height -> `--bulk-h` on <html> (WP WEB-FIX-6,
+// lib/bulk-room.js): css/app.css turns it into select-mode scroll room so
+// the last row of cards can scroll above the fixed bar. No-op without
+// ResizeObserver (fake DOM, old browsers): theme.css's fallback applies.
+const bulkHeight = createBulkHeightWatcher({
+  rootStyle: document.documentElement?.style,
+  ResizeObserverImpl: globalThis.ResizeObserver,
+});
 
 /** The currently-mounted <section>, or null. Store-subscription callbacks
  * check this before touching the DOM so a background tick while a
@@ -1025,6 +1035,7 @@ function buildSection() {
   bulkPrimary.textContent = "Download";
   bulkBtns.append(bulkDelete, bulkSecondary, bulkPrimary);
   bulkBar.append(bulkHead, bulkNote, bulkBtns);
+  bulkHeight.watch(bulkBar);
 
   // The delete-confirm dialog is NOT built here — see the module-level
   // block near the top of this file (WP 4a.8: it must be a `document.body`
@@ -1312,6 +1323,9 @@ onViewChange((view) => {
   // stops the tree from being reachable, and therefore keepable by the
   // GC, through this module for no reason once we've navigated away).
   sectionEl = null;
+  // Same release for the bulk bar the height watcher observed (WP
+  // WEB-FIX-6): stop observing the detached bar until the next mount.
+  bulkHeight.unwatch();
 });
 
 export function renderLibrary() {
