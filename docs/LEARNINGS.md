@@ -896,3 +896,49 @@ These are not style preferences; each entry cost a review round to learn.
 - Compose `${VAR:+...}` with an empty host port publishes on a random
   host port; `set -e` ignores failures inside `&&` lists and after `!`,
   so build-time checks must be separate commands (WP CORE-FIX-3).
+
+## 2026-10-02/03 — upstream keepalive pool (ADR-0017, WP CORE-FEAT-1a..1d)
+- nginx pools upstream connections only for explicit `upstream` groups
+  (those with a server-level config); the resolver path a variable
+  `proxy_pass` takes for an unknown host builds a throw-away peer per
+  request and never sees the keepalive cache, even after 1.29.7 made
+  `keepalive 32 local` the default. A variable `proxy_pass` matches a
+  defined group by host name first (port 0 when the URL has none), so one
+  group per edge name, `server <name> resolve`, pools without touching
+  the `proxy_pass` line (WP CORE-FEAT-1b, verified in the 1.29.8 source).
+- Since nginx 1.9.13 an error on a cached (pooled) connection is retried
+  only if `error` is in `proxy_next_upstream`; the cached case gets its
+  try back (`tries++`), so the retry is free. Dropping `error` to stop a
+  connect storm (CORE-FIX-2) and adding a pool later turns every stale
+  pooled connection into a client-visible 502 — the two decisions
+  interact, re-check one when changing the other (WP CORE-FEAT-1b2).
+- A resolved group with one A record is a "single" peer group: nginx
+  zeroes `tries` after the first failure, so `proxy_next_upstream_tries 2`
+  gives no retry at all for single-address names. "One retry" is an upper
+  bound, never a guarantee (WP CORE-FEAT-1b2 review).
+- With several resolved peers, the defaults `max_fails=1 fail_timeout=10s`
+  turn one CGNAT host-unreachable into 10 s of `no live upstreams` for
+  every request to that edge; `max_fails=0` keeps the per-request fast
+  failure instead (ADR-0017 (b)).
+- Several `upstream` groups may share one `zone`; the size must appear on
+  exactly one of them, in any order, or `nginx -t` fails with `zero size
+  shared memory zone`. Render the size on the first group and pin
+  "exactly one sized line" (WP CORE-FEAT-1b).
+- Appending key=value fields to a log format is only "append-compatible"
+  for substring parsers; a regex anchored with `$` on the old last field
+  (`poc/*/analyze.ps1`, `verify.ps1`) matches nothing afterwards. Grep the
+  repo for `$`-anchored consumers before touching a log format (WP
+  CORE-FEAT-1b2).
+- Measuring HTTP keepalive from the shell: two curl processes never share
+  a connection, and `curl --keepalive` only enables TCP keepalive probes.
+  Reuse across a pause needs one process holding one socket
+  (`python3 http.client`), and the edge name must be pinned to its public
+  IP first, or a LAN DNS rewrite makes the cache itself answer and the
+  test proves the wrong thing (ADR-0017 "Prove before building").
+- Docker-free tests do not stand in for the image build and the live
+  stack suite. CORE-FEAT-1's hook test, drift check and pytest were green
+  while the core image could not build (`COPY nginx/...` of a path the
+  build context's `.dockerignore` excludes; CI never builds that
+  Dockerfile, only the publish job does) and the stack suite's fixed test
+  subnet overlapped a real stack's network. Run both before a package
+  counts as done (WP RC7-INT).

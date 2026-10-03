@@ -208,6 +208,27 @@ services:
       # "off" always needs an explicit 0. Whether the LAN can REACH it is
       # the separate VAULT_TLS_BIND below.
       VAULT_TLS_PASSTHROUGH: ${VAULT_TLS_PASSTHROUGH:-1}
+      # Optional upstream keepalive pool (WP CORE-FEAT-1, ADR-0017,
+      # core/README.md and deploy/README.md "Upstream keepalive pool").
+      # Space-separated Steam CDN edge host names; vault-core renders one
+      # nginx `upstream` group per name at boot and reuses a few pooled TCP
+      # connections per edge (at most 8 idle) across cache MISSes instead of
+      # opening one new connection per chunk (the CGNAT port-quota fix,
+      # stage 2). Empty or unset = no pool, every MISS
+      # opens its own connection as before; a name that is not listed keeps
+      # that path too. Rules, checked fail-closed by
+      # core/docker/28-vault-upstream-pool.sh (an invalid list stops the boot
+      # with `28-vault-upstream-pool.sh: FATAL` naming the value): lowercase,
+      # no scheme or port, each name inside one of the two Host-allowlist
+      # families (`*.steamcontent.com`, `*.steamserver.net`; the marker
+      # `lancache.steamcontent.com` itself is refused, list the edge it maps
+      # to), no duplicates, AT MOST 4 names (keepalive 8 idle connections per
+      # edge, 32 in total, ADR-0017 decision 3A). Env-only, baked at container
+      # start: recreate vault-core after a change (`docker compose up -d
+      # vault-core`, decision 4B), the same contract as VAULT_UPSTREAM_RATE
+      # above and the same `-` form (blank passes through as "" = off).
+      # deploy/.env.example ships a seed list (decision 2B).
+      VAULT_UPSTREAM_POOL_HOSTS: ${VAULT_UPSTREAM_POOL_HOSTS-}
     ports:
       # PORT 80 IS NOT NEGOTIABLE FOR REAL CLIENTS. Steam CDN traffic is plain
       # HTTP and the Steam client will only ever ask for port 80 -- a cache on

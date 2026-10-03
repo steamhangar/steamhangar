@@ -3,7 +3,9 @@
 Date: 2026-10-02
 Status: Accepted (user decision 2026-10-02, "HTTPS-Durchreichung, Weg A (im
 Produkt, rc7)"; publication via `VAULT_TLS_BIND` accepted by the user
-2026-10-03, Weg A; implemented in WP CORE-FIX-3)
+2026-10-03, Weg A; implemented in WP CORE-FIX-3; ships in rc7 together
+with the upstream keepalive pool, ADR-0017, by user decision 2026-10-03,
+each switchable off independently)
 
 ## Context
 
@@ -113,7 +115,11 @@ real CDN.
   connections back into the listener from a single source address, so the
   loop stops at the per-client cap instead of eating every worker
   connection. The total cap keeps half of `worker_connections` for the
-  HTTP cache. TLS carries no header, so there is no equivalent of the HTTP
+  HTTP cache. That half also holds the upstream keepalive pool's idle
+  connections (at most 32, [ADR-0017](0017-upstream-keepalive-pool.md)
+  decision 3A), so at least 480 stay for live HTTP requests;
+  `check-config-drift.sh` step 2f pins `worker_processes 1`,
+  `worker_connections 1024` and this arithmetic. TLS carries no header, so there is no equivalent of the HTTP
   side's 508 hop guard.
 
 ### Switch and publication

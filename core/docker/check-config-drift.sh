@@ -40,10 +40,22 @@
 #      static native include identical (comments aside) to the script's
 #      cap-off render -- so "native = container with no cap configured"
 #      stays true by machine check
-#   2c. pin the WP CORE-FIX-2 upstream retry policy inside location @miss in
-#      both files: no retry on `error`, proxy_next_upstream_tries 2, and no
-#      second proxy_next_upstream* line anywhere else
-#   2d. pin the WP CORE-FIX-3 HTTPS passthrough (the stream {} block, port
+#   2c. pin the upstream retry policy inside location @miss in both files
+#      (WP CORE-FIX-2, `error` restored by WP CORE-FEAT-1b2 per ADR-0017
+#      decision 6A): the exact `proxy_next_upstream error timeout http_502
+#      http_503 http_504;` line, proxy_next_upstream_tries 2, and no second
+#      proxy_next_upstream* line anywhere else in the http block (the stream
+#      block has its own `proxy_next_upstream off;`, pinned in 2e)
+#   2d. pin the WP CORE-FEAT-1b upstream keepalive pool (ADR-0017), the same
+#      include contract as 2b: `include vault-upstream-pool.conf;` exactly
+#      once in each file and directly after the rate include; the static
+#      native core/nginx/vault-upstream-pool.conf byte-identical (cmp, not
+#      normalised -- the empty render is comments only) to the hook's empty
+#      render; a rendered list and the static file free of any `resolver`
+#      directive (groups must inherit the http-level one, ADR-0017 (c));
+#      the hook's keepalive-per-group and idle-ceiling constants at the
+#      ADR-0017 decision 3A values
+#   2e. pin the WP CORE-FIX-3 HTTPS passthrough (the stream {} block, port
 #      443) in both files: the SNI allowlist map is exactly one full-match
 #      *.steamcontent.com regex plus an empty default, ssl_preread on,
 #      proxy_pass of the map result, one upstream connection per client
@@ -53,6 +65,10 @@
 #      enclose exactly the stream block, and deleting that range (what
 #      26-vault-tls-passthrough.sh does for VAULT_TLS_PASSTHROUGH=0) must
 #      leave no stream/443 trace and the http block untouched
+#   2f. pin the worker connection budget both features are sized against:
+#      worker_processes 1 and worker_connections 1024 exactly, the stream
+#      total cap at 256 (2 x 256 = half of 1024), and the pool's idle
+#      ceiling (MAX_IDLE_TOTAL) fitting into the HTTP half with room left
 #   3. diff. Any remaining difference fails with a unified diff.
 #
 # Usage:  sh core/docker/check-config-drift.sh   [from anywhere]
@@ -238,40 +254,130 @@ else
     fi
 fi
 
-# --- 2c. WP CORE-FIX-2: the upstream retry policy -------------------------
+# --- 2c. WP CORE-FIX-2 / CORE-FEAT-1b2: the upstream retry policy ---------
 # Identical in both files, so step 3's diff would also pass if BOTH drifted
-# back to retrying on `error` -- hence explicit pins. A connect failure
-# behind a full carrier-grade NAT ("113: Host is unreachable") is an
-# `error`; retrying it multiplies SYNs against the NAT that is already out
-# of mappings. At most one retry (tries 2), and only on timeout / 50x.
+# -- hence explicit pins on the exact lines. At most one retry (tries 2),
+# and none when the name resolves to a single address: nginx zeroes
+# `tries` for a single-peer group (ngx_http_upstream_round_robin.c), so
+# tries 2 only bites with two or more A records.
+# `error` IS in the list (ADR-0017 decision 6A, WP CORE-FEAT-1b2): with the
+# keepalive pool (2d) a pooled connection the edge closed while idle fails
+# as an `error` on its next use, and nginx retries a failure on a cached
+# connection only if `error` is listed (CHANGES 1.9.13); that retry does
+# not consume a try (ngx_http_upstream_next: tries++ for the cached case,
+# 0 -> 1 even for a single peer), so the stale pooled connection keeps its
+# one free retry while a real connect failure behind a full carrier-grade
+# NAT ("113: Host is unreachable") still gets at most one retry, as
+# CORE-FIX-2 (stage 1) set it. Stage 1 had removed `error` while every
+# attempt was a NEW connection; the exact-line pin keeps the list from
+# growing or shrinking either way.
 for f in "$work/native.norm" "$work/template.norm"; do
     miss_block "$f" > "$work/miss.block"
     for want in "proxy_connect_timeout 3s;" \
-                "proxy_next_upstream timeout http_502 http_503 http_504;" \
+                "proxy_next_upstream error timeout http_502 http_503 http_504;" \
                 "proxy_next_upstream_tries 2;" \
                 "proxy_next_upstream_timeout 6s;"; do
         n=$(grep -F -c -x -- "$want" "$work/miss.block" || true)
         if [ "$n" != "1" ]; then
-            echo "check-config-drift: FAIL: '$want' must appear exactly once inside location @miss in $f (found $n) -- CORE-FIX-2 retry policy" >&2
+            echo "check-config-drift: FAIL: '$want' must appear exactly once inside location @miss in $f (found $n) -- CORE-FIX-2 / CORE-FEAT-1b2 retry policy (ADR-0017 decision 6A)" >&2
             fail=1
         fi
     done
     # Counted inside http {} only: the stream {} block (CORE-FIX-3) has its
-    # own `proxy_next_upstream off;`, pinned in step 2d.
+    # own `proxy_next_upstream off;`, pinned in step 2e.
     top_block http "$f" > "$work/http.block"
     n=$(grep -E -c '^proxy_next_upstream(_tries)? ' "$work/http.block" || true)
     if [ "$n" != "2" ]; then
         echo "check-config-drift: FAIL: expected exactly one proxy_next_upstream and one proxy_next_upstream_tries line in the http block of $f, found $n lines -- a second one elsewhere would override or add retries (CORE-FIX-2)" >&2
         fail=1
     fi
-    if grep -E -q '^proxy_next_upstream( | .* )error( |;)' "$f"; then
-        echo "check-config-drift: FAIL: proxy_next_upstream retries on 'error' in $f -- each retry is a new connection against a carrier-grade NAT that already answers 113 Host is unreachable (CORE-FIX-2)" >&2
+done
+
+# --- 2d. WP CORE-FEAT-1b (ADR-0017): the upstream keepalive pool include ---
+# Same shape as 2b. The include line is identical in both files (so step 3
+# alone would also pass if BOTH lost it), hence explicit pins; the static
+# native file is the hook's EMPTY render, compared with cmp because the empty
+# render is a header comment only and normalise() would reduce both sides to
+# nothing. The groups must not carry their own `resolver`: they inherit the
+# http-level one (delta 4) so ${VAULT_RESOLVER} stays the only DNS address.
+POOL_HOOK="$core_dir/docker/28-vault-upstream-pool.sh"
+NATIVE_POOL="$core_dir/nginx/vault-upstream-pool.conf"
+
+for f in "$work/native.norm" "$work/template.norm"; do
+    expect_count "$f" 1 "include vault-upstream-pool.conf;" "CORE-FEAT-1b: upstream keepalive pool include (http level)"
+    # Directly after the rate include: both sit at http level, after the
+    # resolver the groups inherit. awk prints the line following the rate
+    # include; it must be the pool include.
+    after=$(awk 'f { print; exit } /^include vault-upstream-rate\.conf;$/ { f = 1 }' "$f")
+    if [ "$after" != "include vault-upstream-pool.conf;" ]; then
+        echo "check-config-drift: FAIL: 'include vault-upstream-pool.conf;' must directly follow 'include vault-upstream-rate.conf;' in $f (found '$after')" >&2
         fail=1
     fi
 done
 
+if [ ! -f "$POOL_HOOK" ] || [ ! -f "$NATIVE_POOL" ]; then
+    echo "check-config-drift: FAIL: missing $POOL_HOOK or $NATIVE_POOL (WP CORE-FEAT-1b)" >&2
+    fail=1
+else
+    # ADR-0017 decision 3A: keepalive 8 per group, at most 32 idle in total.
+    ka=$(sed -n 's/^KEEPALIVE_PER_GROUP=\([0-9][0-9]*\)$/\1/p' "$POOL_HOOK")
+    ceil=$(sed -n 's/^MAX_IDLE_TOTAL=\([0-9][0-9]*\)$/\1/p' "$POOL_HOOK")
+    if [ "$ka" != "8" ] || [ "$ceil" != "32" ]; then
+        echo "check-config-drift: FAIL: 28-vault-upstream-pool.sh must define KEEPALIVE_PER_GROUP=8 and MAX_IDLE_TOTAL=32 (ADR-0017 decision 3A); got '$ka' and '$ceil'" >&2
+        fail=1
+    fi
+    # The hook validates against the allowlist families and the marker of
+    # `map $host $vault_upstream_host`, but reads them from its own constants.
+    # Pin BOTH sides: the three map lines (normalised, in both files) and the
+    # hook's constants, so a change to either without the other trips here.
+    for f in "$work/native.norm" "$work/template.norm"; do
+        expect_count "$f" 1 '"lancache.steamcontent.com" dist-fra1.discovery.steamserver.net;' \
+            "CORE-FEAT-1b: the marker line of the Host allowlist map (the hook refuses the marker and names its target)"
+        expect_count "$f" 1 '"~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamcontent\.com$" $host;' \
+            "CORE-FEAT-1b: allowlist family 1 (the hook requires *.steamcontent.com)"
+        expect_count "$f" 1 '"~*^[a-z0-9-]+(\.[a-z0-9-]+)*\.steamserver\.net$" $host;' \
+            "CORE-FEAT-1b: allowlist family 2 (the hook requires *.steamserver.net)"
+    done
+    for want in "FAMILY_1=steamcontent.com" "FAMILY_2=steamserver.net" "MARKER=lancache.steamcontent.com"; do
+        n=$(grep -F -c -x -- "$want" "$POOL_HOOK" || true)
+        if [ "$n" != "1" ]; then
+            echo "check-config-drift: FAIL: expected exactly 1 line '$want' in 28-vault-upstream-pool.sh (found $n) -- the hook's allowlist constants must match the \$vault_upstream_host map" >&2
+            fail=1
+        fi
+    done
+    if ! VAULT_UPSTREAM_POOL_HOSTS='' sh "$POOL_HOOK" "$work/pool-empty.conf" > "$work/pool-empty.log" 2>&1; then
+        echo "check-config-drift: FAIL: $POOL_HOOK could not render the empty include:" >&2
+        cat "$work/pool-empty.log" >&2
+        fail=1
+    elif ! cmp -s "$NATIVE_POOL" "$work/pool-empty.conf"; then
+        echo "check-config-drift: FAIL: core/nginx/vault-upstream-pool.conf is not byte-identical to the empty render of 28-vault-upstream-pool.sh (left = native, right = render):" >&2
+        diff -u "$NATIVE_POOL" "$work/pool-empty.conf" >&2 || true
+        fail=1
+    fi
+    if ! VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
+            sh "$POOL_HOOK" "$work/pool-two.conf" > "$work/pool-two.log" 2>&1; then
+        echo "check-config-drift: FAIL: $POOL_HOOK could not render a two-edge list:" >&2
+        cat "$work/pool-two.log" >&2
+        fail=1
+    else
+        n=$(grep -c '^upstream ' "$work/pool-two.conf" || true)
+        if [ "$n" != "2" ]; then
+            echo "check-config-drift: FAIL: a two-edge list rendered $n upstream blocks, expected 2" >&2
+            fail=1
+        fi
+    fi
+    for f in "$NATIVE_POOL" "$work/pool-two.conf"; do
+        # Anchored to the DIRECTIVE (LEARNINGS: a guard grepping a bare name
+        # also matches comments), so a future header comment cannot trip it;
+        # the hook's own self-check stays stricter (the word anywhere).
+        if [ -f "$f" ] && grep -q '^[[:space:]]*resolver[[:space:]]' "$f"; then
+            echo "check-config-drift: FAIL: a 'resolver' directive in $f -- pool groups must inherit the http-level resolver (ADR-0017 (c), delta 4)" >&2
+            fail=1
+        fi
+    done
+fi
 
-# --- 2d. WP CORE-FIX-3: the HTTPS passthrough (stream {}, port 443) -------
+# --- 2e. WP CORE-FIX-3: the HTTPS passthrough (stream {}, port 443) -------
 # Identical in both files apart from deltas 4 and 7, so step 3's diff alone
 # would also pass if BOTH lost the allowlist -- hence explicit pins. The
 # allowlist map is the only thing between this listener and an open TCP
@@ -421,6 +527,42 @@ if ! cmp -s "$work/http.block" "$work/http-off.block"; then
     echo "check-config-drift: FAIL: deleting the marked range from $TEMPLATE changes the http block -- VAULT_TLS_PASSTHROUGH=0 must not touch the HTTP cache" >&2
     fail=1
 fi
+
+# --- 2f. the worker connection budget (CORE-FIX-3 + CORE-FEAT-1) -----------
+# Both features size their caps against ONE nginx worker with 1024
+# connections, and nothing else pinned those two numbers:
+#   - the stream block's `limit_conn vault_tls_total 256` keeps half of
+#     worker_connections for the HTTP cache (each passthrough session holds
+#     two connections: 2 x 256 = 512 of 1024; ADR-0020 "Loop bound");
+#   - the pool's ceiling MAX_IDLE_TOTAL=32 counts idle upstream connections
+#     of that one worker (`keepalive 8` is per group PER WORKER; ADR-0017
+#     decision 3A counts 32 idle + 8 in flight against the CGNAT's measured
+#     safe 50) -- a second worker would double it silently;
+#   - so the HTTP half (512) also holds the pool's idle connections,
+#     leaving at least 480 for live HTTP requests.
+# Pinned as exact lines in both files, plus the arithmetic, so a change to
+# any of these numbers fails here until the docs' accounting is redone.
+TLS_TOTAL=256
+for f in "$work/native.norm" "$work/template.norm"; do
+    expect_count "$f" 1 "worker_processes 1;"       "budget: one worker (the pool ceiling and the stream cap assume it)"
+    expect_count "$f" 1 "worker_connections 1024;"  "budget: 1024 connections (2 x stream cap = half of it)"
+    expect_count "$f" 1 "limit_conn vault_tls_total $TLS_TOTAL;" "budget: the stream total cap the arithmetic below uses"
+done
+pool_ceil=$(sed -n 's/^MAX_IDLE_TOTAL=\([0-9][0-9]*\)$/\1/p' "$POOL_HOOK" 2>/dev/null || true)
+case "$wc_:$pool_ceil" in
+    *[!0-9:]*|:*|*:)
+        echo "check-config-drift: FAIL: need numeric worker_connections (template) and MAX_IDLE_TOTAL= (28-vault-upstream-pool.sh) for the budget; got '$wc_', '$pool_ceil'" >&2
+        fail=1 ;;
+    *)
+        if [ $((2 * TLS_TOTAL)) -gt $((wc_ / 2)) ]; then
+            echo "check-config-drift: FAIL: budget: the stream cap ($TLS_TOTAL sessions = $((2 * TLS_TOTAL)) connections) exceeds half of worker_connections ($wc_) -- the HTTP cache no longer keeps half (ADR-0020)" >&2
+            fail=1
+        fi
+        if [ $((wc_ / 2 - pool_ceil)) -lt 256 ]; then
+            echo "check-config-drift: FAIL: budget: the HTTP half of worker_connections ($((wc_ / 2))) minus the pool's idle ceiling ($pool_ceil) leaves fewer than 256 connections for live HTTP requests" >&2
+            fail=1
+        fi ;;
+esac
 
 [ "$fail" = "0" ] || exit 1
 

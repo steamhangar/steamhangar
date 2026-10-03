@@ -32,7 +32,9 @@ set -u
 # exported in the calling shell must not leak in.
 # VAULT_EGRESS_SUBNET (WP DEPLOY-FIX-2) for the same reason: this run's own
 # subnet must come from the generated env file, never from the caller.
-unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_EGRESS_SUBNET VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
+# VAULT_RESOLVER (WP CORE-FEAT-1c): section 10 points it at a fake resolver
+# through the env file; a caller's export would win over that line.
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_EGRESS_SUBNET VAULT_RESOLVER VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -71,6 +73,32 @@ TEST_CACHE_IP=192.168.222.50
 # them. Must not overlap any other Docker network on the host.
 VERIFY_EGRESS_SUBNET=172.30.239.0/24
 DEFAULT_EGRESS_SUBNET=172.30.238.0/24
+
+# WP CORE-FEAT-1c (ADR-0017): section 10's own bridge network for the fake
+# Steam edge, the fake resolver and vault-core's second interface, with FIXED
+# addresses so the resolver can name vault-core's address before vault-core
+# exists. Same overlap rule as VERIFY_EGRESS_SUBNET above: must not overlap
+# any other Docker network on the host. NOT the next /24 after it: an
+# operator who moves a real stack's VAULT_EGRESS_SUBNET off the default
+# tends to pick exactly that one (172.30.240.0/24 collided with a real
+# stack's egress network on the first live run, WP RC7-INT), so the default
+# sits well away from the 238-240 neighbourhood. Overridable from the
+# caller's environment as any a.b.c.0/24; the three fixed addresses are
+# derived from it. Names carry the project prefix so the Cleanup trap finds
+# them.
+VERIFY_POOL_SUBNET=${VERIFY_POOL_SUBNET:-172.30.253.0/24}
+case "$VERIFY_POOL_SUBNET" in
+    *[!0-9./]*|*/*/*) echo "VERIFY_POOL_SUBNET='$VERIFY_POOL_SUBNET' must be a.b.c.0/24" >&2; exit 2 ;;
+    *.0/24) ;;
+    *) echo "VERIFY_POOL_SUBNET='$VERIFY_POOL_SUBNET' must be a.b.c.0/24" >&2; exit 2 ;;
+esac
+pool_prefix=${VERIFY_POOL_SUBNET%.0/24}
+POOL_NET="$PROJECT-pool"
+POOL_EDGE="$PROJECT-fake-edge"
+POOL_RESOLVER="$PROJECT-fake-resolver"
+POOL_EDGE_IP=$pool_prefix.20
+POOL_RESOLVER_IP=$pool_prefix.53
+POOL_CORE_IP=$pool_prefix.10
 
 work=$(mktemp -d)
 env_file="$work/verify.env"
@@ -149,8 +177,15 @@ cleanup() {
     if [ -f "$work/b2-listener.pid" ]; then
         kill "$(cat "$work/b2-listener.pid")" >/dev/null 2>&1 || true
     fi
+    # WP CORE-FEAT-1c: section 10's fake edge and fake resolver are plain
+    # `docker run` containers outside the compose project, so `down` never
+    # sees them; removed here first (a network still holding endpoints cannot
+    # be removed), the network itself AFTER `down` has removed vault-core,
+    # which may still be attached to it on an aborted run. Missing = no-op.
+    docker rm -f "$POOL_EDGE" "$POOL_RESOLVER" >/dev/null 2>&1
     run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' --profile dns down -v --remove-orphans"
     docker volume rm -f "$PROJECT-split-cache" "$PROJECT-scratch" >/dev/null 2>&1
+    docker network rm "$POOL_NET" >/dev/null 2>&1
     # WP DEPLOY-FIX-3: section 9's bind dir holds files owned by uid 101
     # (nginx wrote them); hand them back to the caller so rm -rf works
     # without root. The containers are gone by now.
@@ -198,9 +233,13 @@ cp "$repo_root/core/docker/check-config-drift.sh" "$work/drift/docker/check-conf
 # TH-1a: the drift script also reads these two (resolved from its own dir/..).
 cp "$repo_root/core/docker/27-vault-upstream-rate.sh" "$work/drift/docker/27-vault-upstream-rate.sh"
 cp "$repo_root/core/nginx/vault-upstream-rate.conf" "$work/drift/nginx/vault-upstream-rate.conf"
-# CORE-FIX-3: it also compares its expected stream block with the copy in
+# CORE-FIX-3: step 2e also compares its expected stream block with the copy in
 # 40-vault-preflight.sh.
 cp "$repo_root/core/docker/40-vault-preflight.sh" "$work/drift/docker/40-vault-preflight.sh"
+# WP CORE-FEAT-1b/1c: step 2d of the drift script reads the pool hook and
+# cmp's the native empty render against it, resolved the same way.
+cp "$repo_root/core/docker/28-vault-upstream-pool.sh" "$work/drift/docker/28-vault-upstream-pool.sh"
+cp "$repo_root/core/nginx/vault-upstream-pool.conf" "$work/drift/nginx/vault-upstream-pool.conf"
 # The unmutated copy must pass first, else a later FAIL could stem from an
 # incomplete copy rather than from the injected difference.
 if sh "$work/drift/docker/check-config-drift.sh" >/dev/null 2>&1; then
@@ -1070,6 +1109,10 @@ say 'Log rotation is the json-file driver (max-size/max-file in compose.yaml) --
 say 'this is what makes that possible: nginx writes to stdout, not to a file.'
 run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' logs --no-log-prefix vault-core | grep depot"
 logline=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep "$CHUNK" | head -1)
+# Anchored on an EXISTING field, never on the end of the line: WP CORE-FEAT-1b2
+# (ADR-0017) appends upstream_addr="..." upstream_connect_time=... after
+# cache=..., and this check must pass with or without them. Section 10 reads
+# the two fields when they are present.
 assert_contains "$logline" "cache=" "access log lines carry the vault format's cache= field"
 
 step "5h. json-file log limits are actually applied to the container"
@@ -1977,7 +2020,441 @@ if [ "$bind_up" = yes ]; then
 fi
 
 # =============================================================================
-section "10. Result"
+section "10. Upstream keepalive pool, live (WP CORE-FEAT-1c, ADR-0017)"
+# =============================================================================
+say 'ADR-0017 "Tests": N chunk MISSes through a POOLED edge must cost fewer'
+say 'than N upstream TCP connections, N against an UNLISTED edge exactly N;'
+say 'the 508 loop guard still fires when a pooled name resolves to vault-core'
+say 'itself; the rate cap still applies with pooling on (decision 5A). No'
+say 'internet here: a fake edge (python http.server from the vault-api image,'
+say 'HTTP/1.1 keep-alive, one log line per accept()) and a fake resolver'
+say '(dnsmasq from the vault-dns image, authoritative for steamcontent.com with'
+say 'three host records, NXDOMAIN for the rest -- so the boot probe of'
+say '40-vault-preflight.sh is "skipped", never fatal) stand in for Valve and'
+say 'for VAULT_RESOLVER. Connections are counted at the edge'"'"'s accept(): real'
+say 'TCP connections vault-core opened, not nginx'"'"'s own view of them.'
+say ''
+say "Topology: an own bridge network $POOL_NET ($VERIFY_POOL_SUBNET) with FIXED"
+say "addresses -- edge $POOL_EDGE_IP, resolver $POOL_RESOLVER_IP, vault-core"
+say "attached as a SECOND network at $POOL_CORE_IP between create and start"
+say '(vault-core lives on the compose default network, step 3o; the egress'
+say "lock of ADR-0011 covers vault-api, not vault-core's upstream path). Fixed"
+say 'addresses are what make this deterministic: the resolver can answer'
+say "loop.steamcontent.com with vault-core's address BEFORE vault-core exists"
+say '(no re-resolve wait), and the expected upstream_addr is a constant.'
+
+POOL_N=20
+POOL_DEPOT=99990001          # pooled MISSes (Host: fake1.steamcontent.com)
+POOL_DEPOT_UNLISTED=99990003 # unlisted-edge MISSes (Host: fake2.steamcontent.com)
+POOL_DEPOT_BIG=99990002      # 2 MiB bodies, for the rate-cap check
+POOL_CHUNK_BYTES=4096
+POOL_BIG_BYTES=2097152
+
+# edge_accepts: accepted TCP connections so far, as the fake edge counted
+# them (one "accept N from <ip>" line per accept(), printed before the
+# request is even read, so a completed curl implies its line is written).
+edge_accepts() { docker logs "$POOL_EDGE" 2>/dev/null | grep -c '^accept ' || true; }
+
+# pool_chunk_sha <uri>: sha256 of the body the fake edge serves for <uri> at
+# POOL_CHUNK_BYTES, computed on the host with the same seed rule the server
+# uses (sha256 of the path, repeated), so a stored file can be checked byte
+# for byte against what the edge sent through the pooled connection.
+pool_chunk_sha() {
+    python3 -c 'import hashlib, sys
+seed = hashlib.sha256(sys.argv[1].encode()).digest()
+n = int(sys.argv[2])
+print(hashlib.sha256((seed * (n // len(seed) + 1))[:n]).hexdigest())' "$1" "$POOL_CHUNK_BYTES"
+}
+
+# pool_wait_core_healthy: the 30 x 2s pattern of 5i.
+pool_wait_core_healthy() {
+    i=0
+    core_h=starting
+    while [ "$i" -lt 30 ]; do
+        core_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q vault-core)" 2>/dev/null || echo starting)
+        [ "$core_h" = "healthy" ] && break
+        i=$((i + 1)); sleep 2
+    done
+}
+
+# pool_recreate_core <env-file>: recreate vault-core from <env-file> WITHOUT
+# starting it (`up --no-start` = the create phase of `up`: a diverged env
+# still recreates), attach it to $POOL_NET at the fixed $POOL_CORE_IP (an
+# endpoint added to a created-but-stopped container applies at start), start
+# it, wait for healthy. Attached BEFORE the first start so the preflight's
+# probe and nginx's resolver reach $POOL_RESOLVER_IP from the first second.
+pool_recreate_core() {
+    compose_up_or_die "$1" up --no-start vault-core
+    pool_core_cids=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.service=vault-core")
+    pool_core_cid_count=$(printf '%s\n' "$pool_core_cids" | grep -c . || true)
+    assert_eq "1" "$pool_core_cid_count" "exactly one vault-core container exists after the recreate (precondition for the attach)"
+    # Not via run(): its sed pipe loses the exit status, and a failed attach
+    # or start would only surface later as a wall of 502s. fatal, like a
+    # failed `up -d`: the gate log must name the real cause.
+    printf '$ docker network connect --ip %s %s %s\n' "$POOL_CORE_IP" "$POOL_NET" "$pool_core_cids"
+    if ! docker network connect --ip "$POOL_CORE_IP" "$POOL_NET" "$pool_core_cids" > "$work/pool-connect.log" 2>&1; then
+        sed 's/^/    /' "$work/pool-connect.log"
+        fatal "docker network connect of vault-core to $POOL_NET at $POOL_CORE_IP failed -- see the output above"
+    fi
+    printf '$ docker start %s\n' "$pool_core_cids"
+    if ! docker start "$pool_core_cids" > "$work/pool-start.log" 2>&1; then
+        sed 's/^/    /' "$work/pool-start.log"
+        fatal "docker start of the recreated vault-core failed -- see the output above"
+    fi
+    pool_wait_core_healthy
+}
+
+# pool_get <host> <uri> <out-file>: one chunk request through vault-core's
+# published port; prints "http=... bytes=... seconds=..." like 5e.
+pool_get() {
+    curl -s -o "$3" -w 'http=%{http_code} bytes=%{size_download} seconds=%{time_total}' \
+        --max-time 60 -H "Host: $1" "$CORE_URL$2"
+}
+
+# pool_batch <host> <depot> <prefix>: POOL_N sequential GETs of distinct chunk
+# names (<prefix> + 39 digits), one curl process each; sets pool_batch_ok
+# (count of 200s) and pool_batch_codes (the status list for the transcript).
+# Request #1 only: nginx arms a pooled group's first resolve 1 ms after
+# worker init, but a lost UDP query is retried only after
+# max(resolver_timeout, 1 s) = 5 s; a request inside that window gets
+# "no live upstreams" 502. That 502 opens NO upstream connection, so one
+# logged retry of request #1 after 2 s keeps the accept-count assertions
+# valid. Every other request stays strict.
+pool_batch() {
+    pool_batch_ok=0
+    pool_batch_codes=""
+    pb_i=1
+    while [ "$pb_i" -le "$POOL_N" ]; do
+        pb_name=$(printf '%s%039d' "$3" "$pb_i")
+        pb_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -H "Host: $1" "$CORE_URL/depot/$2/chunk/$pb_name")
+        if [ "$pb_i" -eq 1 ] && [ "$pb_code" = "502" ]; then
+            say "    request #1 answered 502 (first resolve of the group not done yet?) -- retrying it once after 2 s"
+            sleep 2
+            pb_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -H "Host: $1" "$CORE_URL/depot/$2/chunk/$pb_name")
+        fi
+        [ "$pb_code" = "200" ] && pool_batch_ok=$((pool_batch_ok + 1))
+        pool_batch_codes="$pool_batch_codes $pb_code"
+        pb_i=$((pb_i + 1))
+    done
+}
+
+step "10a. Fake edge and fake resolver on their own project-scoped network"
+# fatal, like a failed `up -d`: without the network every step below cascades
+# into FAILs that hide the one cause ("Pool overlaps with other one on this
+# address space" = another Docker network already uses $VERIFY_POOL_SUBNET).
+printf '$ docker network create --driver bridge --subnet %s %s\n' "$VERIFY_POOL_SUBNET" "$POOL_NET"
+if ! docker network create --driver bridge --subnet "$VERIFY_POOL_SUBNET" "$POOL_NET" > "$work/pool-net.log" 2>&1; then
+    sed 's/^/    /' "$work/pool-net.log"
+    fatal "docker network create $POOL_NET ($VERIFY_POOL_SUBNET) failed -- see the output above (an overlapping network on this host?)"
+fi
+sed 's/^/    /' "$work/pool-net.log"
+# IPv4 only, like the egress check in section 6: a daemon with default IPv6
+# address pools adds a v6 subnet to every new bridge network.
+pool_net_subnet=$(docker network inspect "$POOL_NET" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>&1 | tr ' ' '\n' | grep -v ':' | grep -v '^$' | tr '\n' ' ' | sed 's/ $//')
+assert_eq "$VERIFY_POOL_SUBNET" "$pool_net_subnet" "network $POOL_NET exists with IPv4 subnet $VERIFY_POOL_SUBNET"
+
+say ''
+say '--- the fake edge: python3 from the vault-api image (pinned there), :80, HTTP/1.1 keep-alive, counting accept() ---'
+say "Serves GET /depot/<id>/chunk/<name> with 200 and $POOL_CHUNK_BYTES deterministic bytes"
+say "($POOL_BIG_BYTES bytes for depot $POOL_DEPOT_BIG), Content-Length set so the connection"
+say 'can be reused; 404 elsewhere. Every accept() prints "accept N from <ip>" to'
+say 'stdout, which docker logs keeps -- that count is the measurement.'
+fake_edge_py=$(cat <<'PYEOF'
+import hashlib
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = int(sys.argv[1])
+BIG_DEPOT = "/depot/%s/" % sys.argv[2]
+SMALL = int(sys.argv[3])
+BIG = int(sys.argv[4])
+
+
+class Edge(ThreadingHTTPServer):
+    # Threaded: an idle pooled connection keeps its handler thread parked in
+    # readline(); a single-threaded server would never accept() again while
+    # vault-core holds one open (keepalive_timeout 50s).
+    daemon_threads = True
+    allow_reuse_address = True
+    accepted = 0
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        self.accepted += 1  # accept thread only, no lock needed
+        print("accept %d from %s" % (self.accepted, addr[0]), flush=True)
+        return sock, addr
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"  # keep-alive by default, like a Valve edge
+
+    def log_message(self, fmt, *args):
+        print("request " + (fmt % args), flush=True)
+
+    def do_GET(self):
+        if not self.path.startswith("/depot/"):
+            self.send_error(404)
+            return
+        size = BIG if self.path.startswith(BIG_DEPOT) else SMALL
+        seed = hashlib.sha256(self.path.encode()).digest()
+        body = (seed * (size // len(seed) + 1))[:size]
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(size))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+srv = Edge(("0.0.0.0", PORT), Handler)
+print("listening on :%d" % PORT, flush=True)
+srv.serve_forever()
+PYEOF
+)
+# --no-healthcheck: the image's HEALTHCHECK (vault-api's /v1/health) would
+# only mark this throwaway container unhealthy. Non-zero exit = fatal, like
+# the network create: every step below would cascade without the edge.
+edge_run=$(docker run -d --no-healthcheck --name "$POOL_EDGE" --network "$POOL_NET" --ip "$POOL_EDGE_IP" \
+    --user 0:0 --entrypoint python3 "ghcr.io/steamhangar/vault-api:$TAG" \
+    -c "$fake_edge_py" 80 "$POOL_DEPOT_BIG" "$POOL_CHUNK_BYTES" "$POOL_BIG_BYTES" 2>&1) \
+    || { say "    $edge_run"; fatal "docker run of the fake edge $POOL_EDGE failed -- see the output above"; }
+say "    docker run -> $edge_run"
+i=0
+edge_ready=no
+while [ "$i" -lt 15 ]; do
+    if docker logs "$POOL_EDGE" 2>/dev/null | grep -q '^listening on :80$'; then edge_ready=yes; break; fi
+    i=$((i + 1)); sleep 1
+done
+assert_eq "yes" "$edge_ready" "the fake edge is listening on :80 (its own log line, no connection spent on the probe)"
+assert_eq "0" "$(edge_accepts)" "the fake edge has accepted no connection yet (baseline)"
+
+say ''
+say '--- the fake resolver: dnsmasq from the vault-dns image, command line only ---'
+say 'fake1/fake2.steamcontent.com -> the fake edge, loop.steamcontent.com ->'
+say "vault-core's fixed address; the zone is local (NXDOMAIN for every other"
+say 'name in it), no upstream server at all (no-resolv, nothing forwarded).'
+# --no-healthcheck: the image's HEALTHCHECK probes healthcheck.steamcontent.com
+# every 30 s and would both mark the container unhealthy (no CACHE_IP answer)
+# and spam the query log read in 10d. Non-zero exit = fatal, as above.
+resolver_run=$(docker run -d --no-healthcheck --name "$POOL_RESOLVER" --network "$POOL_NET" --ip "$POOL_RESOLVER_IP" \
+    --entrypoint dnsmasq "ghcr.io/steamhangar/vault-dns:$TAG" \
+    --keep-in-foreground --log-facility=- --log-queries \
+    --conf-file=/dev/null --no-resolv --no-hosts \
+    --local=/steamcontent.com/ \
+    --host-record="fake1.steamcontent.com,$POOL_EDGE_IP" \
+    --host-record="fake2.steamcontent.com,$POOL_EDGE_IP" \
+    --host-record="loop.steamcontent.com,$POOL_CORE_IP" \
+    --listen-address=0.0.0.0 --bind-interfaces --port=53 \
+    --user=dnsmasq --group=dnsmasq 2>&1) \
+    || { say "    $resolver_run"; fatal "docker run of the fake resolver $POOL_RESOLVER failed -- see the output above"; }
+say "    docker run -> $resolver_run"
+# busybox nslookup against the container's own dnsmasq, exactly the probe
+# shape 40-vault-preflight.sh and the vault-dns healthcheck use.
+i=0
+resolver_ans=""
+while [ "$i" -lt 15 ]; do
+    resolver_ans=$(docker exec "$POOL_RESOLVER" nslookup -type=a fake1.steamcontent.com 127.0.0.1 2>/dev/null || true)
+    printf '%s\n' "$resolver_ans" | grep -qxF "Address: $POOL_EDGE_IP" && break
+    i=$((i + 1)); sleep 1
+done
+printf '%s\n' "$resolver_ans" | sed 's/^/    /'
+assert_contains "$resolver_ans" "Address: $POOL_EDGE_IP" "fake1.steamcontent.com resolves to the fake edge ($POOL_EDGE_IP)"
+resolver_loop_ans=$(docker exec "$POOL_RESOLVER" nslookup -type=a loop.steamcontent.com 127.0.0.1 2>/dev/null || true)
+assert_contains "$resolver_loop_ans" "Address: $POOL_CORE_IP" "loop.steamcontent.com resolves to vault-core's fixed address ($POOL_CORE_IP) -- before vault-core is even attached"
+# The preflight's own filter: A answers are the "Address:" lines AFTER the
+# first "Name:" line; none means "no A answer" = probe skipped, never fatal.
+probe_ans=$(docker exec "$POOL_RESOLVER" nslookup -type=a cache2-ams1.steamcontent.com 127.0.0.1 2>/dev/null \
+    | awk '/^Name:/ { seen = 1; next } seen && /^Address:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$/ { print $2 }')
+assert_eq "" "$probe_ans" "the boot probe's name (cache2-ams1.steamcontent.com) gets NO A answer from the fake resolver (so 40-vault-preflight.sh step 2b skips, not dies)"
+
+step "10b. vault-core recreated with VAULT_RESOLVER=$POOL_RESOLVER_IP and the pool list, attached to $POOL_NET at $POOL_CORE_IP"
+say "Env: the stack's current env (section 9's bind-mode env when 9b came up,"
+say 'else the section-3 env) plus VAULT_RESOLVER and VAULT_UPSTREAM_POOL_HOSTS='
+say '"fake1.steamcontent.com loop.steamcontent.com". fake2 is NOT listed on'
+say 'purpose: it is the unlisted control of 10d.'
+pool_base_env=$env_file
+[ "${bind_up:-no}" = yes ] && pool_base_env=$bind_live_env_file
+pool_env="$work/verify-pool.env"
+cp "$pool_base_env" "$pool_env"
+printf 'VAULT_RESOLVER=%s\nVAULT_UPSTREAM_POOL_HOSTS=fake1.steamcontent.com loop.steamcontent.com\n' "$POOL_RESOLVER_IP" >> "$pool_env"
+pool_recreate_core "$pool_env"
+say "vault-core health: $core_h"
+assert_eq "healthy" "$core_h" "vault-core is healthy with the fake resolver and the pool list"
+core_pool_ip=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$POOL_NET\"}}{{.IPAddress}}{{end}}" "$(dc ps -q vault-core)" 2>/dev/null)
+assert_eq "$POOL_CORE_IP" "$core_pool_ip" "vault-core holds the fixed address on $POOL_NET (the one loop.steamcontent.com resolves to)"
+
+say ''
+say '--- boot log: resolver, probe outcome, pool render ---'
+run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' logs --no-log-prefix vault-core | grep -E '28-vault-upstream-pool|40-vault-preflight' | grep -E 'pool|resolver'"
+pool_boot_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
+assert_contains "$pool_boot_log" "upstream resolver (ADR-0001 req 4): $POOL_RESOLVER_IP" "the preflight took VAULT_RESOLVER=$POOL_RESOLVER_IP"
+assert_contains "$pool_boot_log" "gave no A answer for cache2-ams1.steamcontent.com" "the preflight's loop probe NXDOMAINed harmlessly (ADR-0017 (d): a test resolver, VAULT_RESOLVER stays an IP)"
+assert_contains "$pool_boot_log" "upstream keepalive pool ON: 2 edge group(s)" "28-vault-upstream-pool.sh rendered two groups"
+pool_groups=$(dc exec -T vault-core sh -c 'grep -c "^upstream " /etc/nginx/vault-upstream-pool.conf' 2>/dev/null | tr -d '\r')
+pool_keepalive=$(dc exec -T vault-core sh -c 'grep -c "^    keepalive 8;$" /etc/nginx/vault-upstream-pool.conf' 2>/dev/null | tr -d '\r')
+assert_eq "2" "$pool_groups" "the running container's vault-upstream-pool.conf holds 2 upstream groups"
+assert_eq "2" "$pool_keepalive" "...each with keepalive 8 (ADR-0017 decision 3A)"
+# Same raw-DNS path nginx's resolver takes, from inside vault-core: proves
+# the second interface carries traffic to the resolver before any MISS.
+core_dns=$(dc exec -T vault-core nslookup -type=a fake1.steamcontent.com "$POOL_RESOLVER_IP" 2>/dev/null | tr -d '\r')
+assert_contains "$core_dns" "Address: $POOL_EDGE_IP" "from inside vault-core, $POOL_RESOLVER_IP answers fake1.steamcontent.com with the fake edge"
+
+step "10c. $POOL_N sequential MISSes via the POOLED edge (Host: fake1.steamcontent.com) cost at most 2 upstream connections"
+say 'Expected 1 (the first MISS opens it, every later one reuses it; the edge'
+say 'never closes an idle connection). Asserted <= 2 as ADR-0017 words it, the'
+say 'measured value is printed. One curl PROCESS per request on the client'
+say 'side, so client keep-alive plays no part: only the upstream pool merges.'
+accepts_before=$(edge_accepts)
+pool_batch fake1.steamcontent.com "$POOL_DEPOT" a
+say "    status codes:$pool_batch_codes"
+assert_eq "$POOL_N" "$pool_batch_ok" "all $POOL_N pooled requests answered 200 (distinct chunk names, each a real MISS)"
+sleep 1
+accepts_after=$(edge_accepts)
+pool_conns=$((accepts_after - accepts_before))
+say "    fake edge accepted connections during the pooled batch: $pool_conns (counter before: $accepts_before, after: $accepts_after)"
+if [ "$pool_conns" -ge 1 ] && [ "$pool_conns" -le 2 ]; then
+    ok "$POOL_N pooled MISSes cost $pool_conns upstream connection(s) (<= 2): the keepalive pool reuses the connection"
+else
+    bad "$POOL_N pooled MISSes cost $pool_conns upstream connections -- expected 1 (at most 2); the pool is not reusing connections"
+fi
+run "docker logs '$POOL_EDGE' 2>&1 | grep '^accept ' | tail -3"
+
+say ''
+say '--- the pooled MISSes were real MISSes: stored on disk, bytes intact ---'
+stored_n=$(dc exec -T vault-core sh -c "ls /vault/cache/depot/$POOL_DEPOT/chunk/ 2>/dev/null | wc -l" | tr -d '\r ')
+assert_eq "$POOL_N" "$stored_n" "all $POOL_N pooled chunks were proxy_store'd under /vault/cache/depot/$POOL_DEPOT/chunk/"
+pool_first=$(printf 'a%039d' 1)
+pool_first_disk_sha=$(dc exec -T vault-core sh -c "sha256sum /vault/cache/depot/$POOL_DEPOT/chunk/$pool_first" 2>/dev/null | cut -d' ' -f1 | tr -d '\r')
+pool_first_want_sha=$(pool_chunk_sha "/depot/$POOL_DEPOT/chunk/$pool_first")
+say "    sha256 on disk : $pool_first_disk_sha"
+say "    sha256 expected: $pool_first_want_sha"
+assert_eq "$pool_first_want_sha" "$pool_first_disk_sha" "the first stored chunk is byte-identical to what the fake edge serves for that path"
+
+say ''
+say '--- access log, WP CORE-FEAT-1b2 fields IF PRESENT (not required: 1b2 may land after this section) ---'
+pool_log=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep "uri=\"/depot/$POOL_DEPOT/chunk/a" | grep 'status=200' | grep 'cache=MISS')
+pool_log_n=$(printf '%s\n' "$pool_log" | grep -c . || true)
+say "    vault access-log lines for the pooled MISSes: $pool_log_n"
+printf '%s\n' "$pool_log" | head -2 | sed 's/^/    /'
+assert_eq "$POOL_N" "$pool_log_n" "one vault-format log line per pooled MISS (status=200 cache=MISS) reached docker logs"
+if printf '%s\n' "$pool_log" | grep -q 'upstream_addr='; then
+    say '    upstream_addr/upstream_connect_time ARE in the format (WP CORE-FEAT-1b2 landed): asserting them.'
+    pool_addr_n=$(printf '%s\n' "$pool_log" | grep -c "upstream_addr=\"$POOL_EDGE_IP:80\"" || true)
+    assert_eq "$pool_log_n" "$pool_addr_n" "every pooled MISS line names the fake edge as upstream_addr (\"$POOL_EDGE_IP:80\", one peer, no retry list)"
+    say "    upstream_connect_time values (count value): $(printf '%s\n' "$pool_log" | sed -n 's/.*upstream_connect_time=\([^ ]*\).*/\1/p' | sort | uniq -c | tr -s ' ' | tr '\n' ';')"
+    say '    (ADR-0017 "Prove before building" item 4 predicts ~0.000 on a reused connection; recorded, not asserted)'
+else
+    say '    upstream_addr/upstream_connect_time are NOT in this log format (WP CORE-FEAT-1b2 not landed): nothing asserted on them.'
+fi
+
+step "10d. $POOL_N sequential MISSes via the UNLISTED edge (Host: fake2.steamcontent.com) cost exactly $POOL_N connections"
+say 'fake2.steamcontent.com resolves to the SAME fake edge but has no upstream'
+say "group: today's per-request resolver path, one TCP connection per chunk."
+say 'The control that proves 10c measured the pool, not the edge or the client.'
+accepts_before=$(edge_accepts)
+pool_batch fake2.steamcontent.com "$POOL_DEPOT_UNLISTED" c
+say "    status codes:$pool_batch_codes"
+assert_eq "$POOL_N" "$pool_batch_ok" "all $POOL_N unlisted-edge requests answered 200"
+sleep 1
+accepts_after=$(edge_accepts)
+unlisted_conns=$((accepts_after - accepts_before))
+say "    fake edge accepted connections during the unlisted batch: $unlisted_conns (counter before: $accepts_before, after: $accepts_after)"
+assert_eq "$POOL_N" "$unlisted_conns" "$POOL_N unlisted MISSes cost exactly $POOL_N upstream connections (one per chunk, the pre-ADR-0017 path, unchanged)"
+unlisted_stored_n=$(dc exec -T vault-core sh -c "ls /vault/cache/depot/$POOL_DEPOT_UNLISTED/chunk/ 2>/dev/null | wc -l" | tr -d '\r ')
+assert_eq "$POOL_N" "$unlisted_stored_n" "all $POOL_N unlisted chunks were proxy_store'd too (the unlisted path still caches)"
+run "docker logs '$POOL_RESOLVER' 2>&1 | grep -E 'query|reply' | tail -8"
+
+step "10e. Loop guard with a POOLED name: loop.steamcontent.com -> vault-core itself -> 508, and the edge never sees it"
+say 'ADR-0017 (d): pooling changes how the peer is chosen, not the guard. The'
+say 'inner request arrives with X-SteamHangar-Hop: 1, location /depot/ answers'
+say '508 before @miss, the outer request relays it (not retried, not stored).'
+accepts_before=$(edge_accepts)
+loop_name=$(printf 'b%039d' 1)
+loop_res=$(pool_get loop.steamcontent.com "/depot/$POOL_DEPOT/chunk/$loop_name" /dev/null)
+say "    $loop_res"
+loop_code=$(printf '%s' "$loop_res" | sed -n 's/.*http=\([0-9]*\).*/\1/p')
+assert_eq "508" "$loop_code" "a MISS whose pooled group resolves to vault-core itself is answered 508 Loop Detected"
+sleep 1
+assert_eq "$accepts_before" "$(edge_accepts)" "the fake edge accepted no connection for it (the loop never left vault-core)"
+loop_log_n=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep "$loop_name" | grep -c 'status=508' || true)
+assert_eq "2" "$loop_log_n" "docker logs show exactly two status=508 lines for it: the inner (hop) request and the outer one -- the request really went around once"
+loop_stored=$(dc exec -T vault-core sh -c "test -f /vault/cache/depot/$POOL_DEPOT/chunk/$loop_name && echo present || echo absent" 2>&1 | tr -d '\r')
+assert_eq "absent" "$loop_stored" "nothing was stored for the 508 (proxy_store stores 200 only)"
+say ''
+say '--- the Host allowlist still answers 403 in front of the pool (ADR-0017 "Tests") ---'
+pool_forged=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: evil.example.com' "$CORE_URL/depot/$POOL_DEPOT/chunk/$loop_name")
+assert_eq "403" "$pool_forged" "a forged non-Steam Host is still refused on the miss path with the pool configured"
+
+step "10f. Rate cap with pooling on (ADR-0017 decision 5A): VAULT_UPSTREAM_RATE=1m around the clock, one $POOL_BIG_BYTES-byte chunk through the pooled edge"
+say 'Two checks, because each alone can lie: the rendered config (the'
+say 'proxy_limit_rate line in nginx.conf, decision 5A, and bucket 1 of the'
+say 'share map = 1048576 B/s) AND the wall clock of one 2 MiB download through'
+say 'the pooled group: at least 1.0 s (2 MiB at 1 MiB/s is ~2 s; uncapped, the'
+say 'same transfer over the bridge is far below 1 s -- measured first, printed).'
+say 'Only a LOWER bound is asserted: a slow runner can only make it slower, so'
+say 'this cannot fail for host speed, only for a missing cap. The window is set'
+say "blank (cap around the clock, 3e-ter), else the cap would depend on the"
+say "runner's local time of day."
+big_name=$(printf 'd%039d' 1)
+uncapped=$(pool_get fake1.steamcontent.com "/depot/$POOL_DEPOT_BIG/chunk/$big_name" "$work/pool-uncapped.bin")
+say "    uncapped control (current instance): $uncapped"
+assert_contains "$uncapped" "http=200" "the uncapped 2 MiB control download succeeds"
+assert_contains "$uncapped" "bytes=$POOL_BIG_BYTES" "...and delivers all $POOL_BIG_BYTES bytes"
+
+pool_rate_env="$work/verify-pool-rate.env"
+cp "$pool_env" "$pool_rate_env"
+printf 'VAULT_UPSTREAM_RATE=1m\nVAULT_UPSTREAM_RATE_WINDOW=\n' >> "$pool_rate_env"
+pool_recreate_core "$pool_rate_env"
+say "vault-core health: $core_h"
+assert_eq "healthy" "$core_h" "vault-core is healthy with the cap AND the pool configured"
+rate_boot_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
+assert_contains "$rate_boot_log" "upstream rate cap rendered (/etc/nginx/vault-upstream-rate.conf, VAULT_UPSTREAM_RATE=1m)" "the preflight saw the cap rendered"
+assert_contains "$rate_boot_log" "upstream keepalive pool ON: 2 edge group(s)" "the pool is still rendered next to the cap"
+rate_wired=$(dc exec -T vault-core sh -c "grep -v '^[[:space:]]*#' /etc/nginx/nginx.conf | grep -c 'proxy_limit_rate[[:space:]]*[\$]vault_upstream_rate;'" 2>/dev/null | tr -d '\r')
+assert_eq "1" "$rate_wired" "the running container's nginx.conf carries 'proxy_limit_rate \$vault_upstream_rate;' exactly once (decision 5A, unchanged by the pool)"
+rate_bucket1=$(dc exec -T vault-core sh -c 'grep -c "^    1 1048576;$" /etc/nginx/vault-upstream-rate.conf' 2>/dev/null | tr -d '\r')
+assert_eq "1" "$rate_bucket1" "the rendered share map's bucket 1 is 1048576 B/s (1m, one request in flight gets the whole cap)"
+
+accepts_before=$(edge_accepts)
+big_name2=$(printf 'd%039d' 2)
+capped=$(pool_get fake1.steamcontent.com "/depot/$POOL_DEPOT_BIG/chunk/$big_name2" "$work/pool-capped.bin")
+say "    capped (VAULT_UPSTREAM_RATE=1m, pooled): $capped"
+assert_contains "$capped" "http=200" "the capped 2 MiB download through the pooled group succeeds"
+assert_contains "$capped" "bytes=$POOL_BIG_BYTES" "...and delivers all $POOL_BIG_BYTES bytes"
+capped_s=$(printf '%s' "$capped" | sed -n 's/.*seconds=\([0-9.]*\).*/\1/p')
+uncapped_s=$(printf '%s' "$uncapped" | sed -n 's/.*seconds=\([0-9.]*\).*/\1/p')
+say "    seconds: uncapped=${uncapped_s:-?}  capped=${capped_s:-?}  (2 MiB at 1 MiB/s ~ 2 s)"
+if [ -n "$capped_s" ] && awk -v t="$capped_s" 'BEGIN { exit !(t >= 1.0) }'; then
+    ok "the capped download took ${capped_s}s (>= 1.0 s): proxy_limit_rate applies on a pooled connection"
+else
+    bad "the capped download took '${capped_s:-?}'s (< 1.0 s): the rate cap did not apply on the pooled connection"
+fi
+sleep 1
+assert_eq "1" "$(( $(edge_accepts) - accepts_before ))" "the capped download went to the fake edge over one new connection (fresh container, fresh pool)"
+
+step "10g. Revert: vault-core back on the stack's own env, fakes and network removed"
+say 'The 5i pattern: recreate from the original env (which also detaches the'
+say 'second network), then remove the two fakes and the network. The Cleanup'
+say 'trap does the same on an aborted run.'
+compose_up_or_die "$pool_base_env" up -d vault-core
+pool_wait_core_healthy
+say "vault-core health: $core_h"
+assert_eq "healthy" "$core_h" "vault-core is healthy again on the stack's own env (resolver default, no pool, no cap)"
+core_pool_ip_after=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$POOL_NET\"}}{{.IPAddress}}{{end}}" "$(dc ps -q vault-core)" 2>/dev/null)
+assert_eq "" "$core_pool_ip_after" "vault-core is no longer attached to $POOL_NET"
+revert_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
+assert_contains "$revert_log" "VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream keepalive pool" "the reverted vault-core renders no pool (the shipped default of this run's env)"
+run "docker rm -f '$POOL_EDGE' '$POOL_RESOLVER'"
+run "docker network rm '$POOL_NET'"
+if docker network inspect "$POOL_NET" >/dev/null 2>&1; then
+    bad "network $POOL_NET still exists after removal"
+else
+    ok "network $POOL_NET is gone"
+fi
+pool_leftovers=$(docker ps -aq --filter "name=^$POOL_EDGE$" --filter "name=^$POOL_RESOLVER$" | grep -c . || true)
+assert_eq "0" "$pool_leftovers" "no fake edge/resolver container is left behind"
+
+# =============================================================================
+section "11. Result"
 # =============================================================================
 say "checks passed: $pass"
 say "checks failed: $fail"

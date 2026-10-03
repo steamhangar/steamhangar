@@ -240,6 +240,9 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     # The `:-` form and the image/hook defaults are pinned in
     # test_core_fix_3_tls_passthrough.py.
     "VAULT_TLS_PASSTHROUGH": "1",
+    # WP CORE-FEAT-1d (ADR-0017): the keepalive-pool edge list, same `-`
+    # form as VAULT_UPSTREAM_RATE (blank passes through as "" = no pool).
+    "VAULT_UPSTREAM_POOL_HOSTS": "",
 }
 
 #: One row per Compose service this file checks, in the sense used
@@ -791,7 +794,9 @@ def test_upstream_rate_window_follows_the_schedule_window_default(
     assert core_window_default == f"${{VAULT_SCHEDULE_WINDOW-{api_window_default}}}"
 
 
-@pytest.mark.parametrize("env_var", ("VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_RATE_WINDOW"))
+@pytest.mark.parametrize(
+    "env_var", ("VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_RATE_WINDOW", "VAULT_UPSTREAM_POOL_HOSTS")
+)
 def test_upstream_rate_vars_are_documented_in_env_example(env_var: str) -> None:
     text = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
     assert re.search(rf"^#?{re.escape(env_var)}=", text, re.MULTILINE), (

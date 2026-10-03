@@ -246,8 +246,9 @@ ADR that describes it:
     the 256 total, and idle sessions hold their slots for up to
     `proxy_timeout` (5 minutes) after the last byte. Until then every other
     client's passthrough connection is refused. The HTTP cache keeps its
-    own share of worker connections (the cap leaves 512 of 1024), so HITs
-    and MISSes on port 80 keep being served.
+    own share of worker connections (the cap leaves 512 of 1024, of which
+    the upstream keepalive pool can hold at most 32 idle, ADR-0017), so
+    HITs and MISSes on port 80 keep being served.
   - **Exposure:** 443 is published to the LAN only when the operator sets
     `VAULT_TLS_BIND`. Unset, Docker binds it to a random port on
     `127.0.0.1`, and `0.0.0.0` happens only if written explicitly

@@ -642,7 +642,9 @@ Once the quota is spent, the NAT answers new connections with ICMP
 host-unreachable, which shows up as `connect() failed (113: Host is
 unreachable)` in vault-core's log. Manifest fetches are few, but many
 parallel HTTPS clients can still reach that limit. Nobody has measured
-it.
+it. With the upstream keepalive pool on, its idle connections (up to 32)
+count against the same quota; the two add up (see ["Upstream keepalive
+pool"](#upstream-keepalive-pool), "Why 4").
 
 ---
 
@@ -926,6 +928,160 @@ unreachable)` (see [Troubleshooting](#troubleshooting)). Forwarded to
 vault-api and vault-runner; recreate both after a change:
 `docker compose up -d vault-api vault-runner`. An invalid value refuses to
 boot both. Details: [`api/README.md` "SteamPrefill concurrency"](../api/README.md).
+This bounds the burst; the per-chunk connection itself goes away for the
+edges listed in ["Upstream keepalive pool"](#upstream-keepalive-pool).
+
+---
+
+## Upstream keepalive pool
+
+Stage 2 of the CGNAT fix (WP CORE-FEAT-1,
+[ADR-0017](../docs/adr/0017-upstream-keepalive-pool.md)). For every Steam
+CDN edge you name, vault-core keeps a small pool of idle upstream
+connections and reuses **a few pooled connections per edge (at most 8
+idle) instead of one new connection per chunk**. Behind a carrier-grade NAT
+(DS-Lite and similar) each new connection costs one of a limited number of
+port mappings, and a prefill used to exhaust them (see
+["Prefill concurrency behind a carrier-grade NAT"](#prefill-concurrency-behind-a-carrier-grade-nat),
+which bounds the burst; this removes the per-chunk connection). Steam
+clients benefit too: their concurrency is not ours to cap, and they download
+through the same path.
+
+```bash
+# deploy/.env (the shipped seed, ADR-0017 decision 2B)
+VAULT_UPSTREAM_POOL_HOSTS=dist-fra1.discovery.steamserver.net cache6-ams1.steamcontent.com
+```
+
+- **`VAULT_UPSTREAM_POOL_HOSTS`**: space-separated edge host names. The
+  seed holds the edge the Steam client's discovery marker
+  (`lancache.steamcontent.com`) maps to and the edge measured on a DS-Lite
+  line on 2026-10-02 (next section). Replace or extend it with the edges
+  **your** line uses. Empty = no pool, every MISS opens its own connection,
+  exactly as before this release.
+- **Rules** (checked at boot by `28-vault-upstream-pool.sh`): lowercase; no
+  scheme or port; each name ends in `.steamcontent.com` or
+  `.steamserver.net` (the two families of vault-core's Host allowlist, a
+  foreign name could never be dialled); not the marker
+  `lancache.steamcontent.com` itself (the allowlist rewrites it, a group of
+  that name can never match: list `dist-fra1.discovery.steamserver.net`
+  instead); no duplicates; **at most 4 names**.
+- **Why 4.** Each edge gets `keepalive 8` idle connections, so 4 edges are
+  32 idle connections in total (ADR-0017 decision 3A). The only measured
+  safe point behind the CGNAT was 50 parallel connections; 32 idle plus the
+  8 in flight of a capped prefill stays under it. A 5th name is refused.
+- **The HTTPS passthrough adds to the same budget.** Its sessions leave
+  through the same carrier-grade NAT ([Port 443](#port-443-the-https-passthrough),
+  "Behind a carrier-grade NAT"), capped at 256 at once (64 per client
+  address). During a prefill that is normally a few manifest fetches, but
+  the 40 above does not include them: on a CGNAT line the two add up. If
+  you hit `113: Host is unreachable` with both on, switch the passthrough
+  off (`VAULT_TLS_PASSTHROUGH=0`, then `docker compose up -d vault-core`)
+  or shorten the pool list. The 64/256 caps are fixed in the reviewed
+  config, not `.env` settings.
+- **An invalid list refuses to boot.** vault-core stops with
+  `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_POOL_HOSTS: '<value>'
+  ...` in `docker compose logs vault-core`, naming the offending value and
+  the rule (fail-closed, like the rate cap). Fix the line, recreate.
+- **Unknown hosts keep the old path.** An edge that is not listed is
+  proxied exactly as before: one connection per chunk, no error, no gain.
+- **Find your edges.** Field 8 of the cache-event log is the Host of every
+  cache request, so with `VAULT_EVENT_LOG` on (the shipped default), after
+  a few downloads:
+  ```bash
+  docker compose exec vault-core sh -c 'cut -f8 /vault/logs/event.log | sort | uniq -c | sort -rn'
+  ```
+  lists them, most used first. Put the top entries (at most 4) in the list;
+  if `lancache.steamcontent.com` is among them, list
+  `dist-fra1.discovery.steamserver.net` instead (the hook refuses the marker).
+- **Recreate vault-core after a change**; the list is read once at
+  container start, it is not a vault-api setting (ADR-0017 decision 4B):
+  `docker compose up -d vault-core`. The boot log then says
+  `upstream keepalive pool ON: N edge group(s) [...]`, or
+  `VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream keepalive pool`.
+
+**Honest limits.**
+
+- **A stale list is silent.** Valve's edge names vary by region and over
+  time (`cacheN-<pop>`). An entry nobody is routed to costs one DNS query
+  every 30 s and gives nothing; an edge missing from the list keeps the
+  one-connection-per-chunk behaviour without any warning. Re-run the
+  one-liner after a while and compare.
+- **NXDOMAIN empties a group.** If a listed name stops resolving, the next
+  MISS to it fails as `no live upstreams` (a 502 to the client) until the
+  next resolve succeeds, at most 30 s later. The old path failed the same
+  request with a 502 too.
+- **One DNS query per listed edge every 30 s** while vault-core runs,
+  download or not, against `VAULT_RESOLVER`. An idle pooled connection also
+  holds one CGNAT mapping for up to 50 s; the ceiling bounds that.
+- Pooling does not change what an edge answers (some ISP-hosted edges 403
+  certain depots), and the Steam client's own concurrency and edge
+  selection are not ours to control.
+
+---
+
+## Checking that a Steam edge keeps connections alive
+
+Optional and read-only; nothing here changes vault-core. The upstream
+keepalive pool ([ADR-0017](../docs/adr/0017-upstream-keepalive-pool.md);
+configured in the previous section, ["Upstream keepalive pool"](#upstream-keepalive-pool))
+only pays off if the Steam CDN edge your line talks to
+reuses one TCP connection for several chunk requests. The steps below prove
+or disprove that from your host in a few minutes. You need two real chunk
+URIs of ONE edge: take them from two recent cache-event log lines that
+carry the same host (`/vault/logs/event.log` in the container; field 6 is
+the URI, field 8 the host, see the last paragraph). The access log has no
+host field, so two of its lines may belong to two different edges.
+
+0. **Pin the public edge IP first.** On this host the edge name may resolve
+   to vault-core itself (vault-dns, a Pi-hole/AdGuard rewrite, `extra_hosts`;
+   see "DNS: pick one of three modes"), and a run that hits your own cache
+   shows reuse for the wrong reason. Ask a public resolver directly:
+   ```bash
+   edge=cache6-ams1.steamcontent.com     # your edge, see the last paragraph
+   ip=$(dig +short A "$edge" @1.1.1.1 | head -1); echo "$ip"
+   ```
+   Yes: a public address. No: a private address (`10.`, `172.16-31.`,
+   `192.168.`) or nothing, or curl in step 1 printing `Connected to <edge>
+   (<private address>)`. Then the run is invalid; fix the lookup first.
+1. **Reuse across two requests in one process.**
+   ```bash
+   curl -sv --resolve "$edge:80:$ip" -o /dev/null -o /dev/null \
+     "http://$edge/depot/<id>/chunk/<a>" "http://$edge/depot/<id>/chunk/<b>"
+   ```
+   Yes: exactly one `Connected to <edge> (<ip>) port 80` line, the second
+   request logs `Re-using existing connection`, both responses are
+   `HTTP/1.1 200 OK` with `Connection: keep-alive`. No: a second
+   `Connected to` line, or `Connection: close` in the first response.
+2. **Handshake count (optional, second terminal).** `ss -tn state
+   established "( dst $ip )"` before and between the two requests (same
+   local port = reused), or `tcpdump -ni <wan-if> "tcp[tcpflags] & tcp-syn
+   != 0 and dst host $ip and dst port 80"` while step 1 runs. Yes: one SYN
+   for two requests. No: two SYNs. Skip it if step 1 already shows one
+   connection.
+3. **Idle timeout of the edge.** Two requests on ONE open connection with a
+   pause in between, from a single process (two `curl` runs never share a
+   connection, and curl's `--keepalive` only sends TCP probes). Run it with
+   `15`, then `30`, then `60` as the last argument:
+   ```bash
+   python3 -c 'import http.client,sys,time; c=http.client.HTTPConnection(sys.argv[1],80,timeout=30); h={"Host":sys.argv[2]}; c.request("GET",sys.argv[3],headers=h); c.getresponse().read(); time.sleep(int(sys.argv[5])); c.request("GET",sys.argv[4],headers=h); print(c.getresponse().status)' \
+     "$ip" "$edge" /depot/<id>/chunk/<a> /depot/<id>/chunk/<b> 15
+   ```
+   Yes: it prints `200`, the connection survived the pause. No:
+   `RemoteDisconnected`, `ConnectionResetError` or `BadStatusLine` on the
+   second request, the edge closed it. The longest pause that still prints
+   `200` is the edge's idle timeout.
+
+**Recorded result (2026-10-02, DS-Lite line, `cache6-ams1.steamcontent.com`
+at 155.133.248.17; ADR-0017 "Measurement"):** step 1 reused the connection
+(`Re-using existing connection #0`, both `200` with `Connection:
+keep-alive`); step 3 printed `200` after 15, 30 and 60 s. The edge keeps an
+idle connection for at least 60 s, so the pool (WP CORE-FEAT-1b) sets
+`keepalive_timeout 50s` and closes first.
+
+**Which edges your line uses:** field 8 of the cache-event log is the
+normalised Host of every cache request, so with `VAULT_EVENT_LOG` on (the shipped default)
+`docker compose exec vault-core sh -c 'cut -f8 /vault/logs/event.log | sort | uniq -c | sort -rn'`
+lists them, most used first.
 
 ---
 
@@ -1514,4 +1670,5 @@ steamcontent.com` resolves to.
 | A prefill job fails with `HttpRequestException ... while downloading manifests`; your DNS rewrites `*.steamcontent.com` to the cache (for the runner too, e.g. via `dns:`) | SteamPrefill fetches manifests over HTTPS from those names, and port 443 on the rewritten address does not reach vault-core. Set `VAULT_TLS_BIND` to that address (and keep `VAULT_TLS_PASSTHROUGH` on), then `docker compose up -d vault-core`. See [Port 443](#port-443-the-https-passthrough). |
 | vault-core exits with `26-vault-tls-passthrough.sh: FATAL: VAULT_TLS_PASSTHROUGH=... is not one of ...` | the switch has a typo. Use `1`/`0` (or `true`/`false`, `on`/`off`, `yes`/`no`, lowercase). |
 | `up` fails with `... bind: address already in use` for port 443 | something else on the host owns 443 on the `VAULT_TLS_BIND` address. Use a dedicated address for vault-core (both `VAULT_CORE_BIND` and `VAULT_TLS_BIND`), or leave `VAULT_TLS_BIND` unset. |
+| vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_POOL_HOSTS: ...` | the edge list in `.env` breaks a rule: uppercase, a scheme or port, a name outside `*.steamcontent.com` / `*.steamserver.net`, the marker `lancache.steamcontent.com` itself, a duplicate, or more than 4 names. The message names the value and the rule. Fix the line (or empty it = no pool), then `docker compose up -d vault-core`. See ["Upstream keepalive pool"](#upstream-keepalive-pool). |
 | Port 80 already in use on the host | use a dedicated IP, not a different port — see [Port 80](#port-80-and-the-dedicated-ip-question). |
