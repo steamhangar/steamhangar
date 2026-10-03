@@ -815,15 +815,19 @@ render_must_fail "symlinked log file"       "/vault/logs/event.log" /vault/logs/
 render_must_fail "event log on the build-version file" "/vault/logs/vault-core-version.json" "" "" 29-vault-build-version.sh
 
 # WP VER-2 review M1: the hook runs as root in a directory uid 101 can
-# rename entries in. core/tests/build-version-race-rig.sh races it from the
-# nginx user (temp files swapped for symlinks to a root-only file, and a
-# planted logs/ symlink) in the pinned image; see the rig's header.
+# rename entries in. core/tests/build-version-race-rig.sh, DETERMINISTIC
+# mode: mktemp/mkdir wrappers make the attacker win every window (temp file
+# swapped for a symlink to a root-only file, logs/ planted right before
+# mkdir) and count that each attack ran, so the result never depends on
+# scheduling. The stochastic racer is a manual mode only (see the rig's
+# header): it disturbed 5 of 400 runs on the devbox and can disturb none on a
+# CI runner, which failed this gate on 5dac4a2.
 echo "--- VER-2 M1: the build-version hook never writes through a name uid 101 can swap ---"
 docker run --rm --network none \
     -v "$core_dir/docker:/workspace/core-docker:ro" \
     -v "$core_dir/tests:/workspace/core-tests:ro" \
     --entrypoint sh \
-    "$IMAGE" /workspace/core-tests/build-version-race-rig.sh /workspace/core-docker/29-vault-build-version.sh 400
+    "$IMAGE" /workspace/core-tests/build-version-race-rig.sh /workspace/core-docker/29-vault-build-version.sh
 
 # Pre-freeze review S5: 40-vault-preflight.sh must refuse the base image's
 # STOCK /etc/nginx/nginx.conf (what is left at that path when the envsubst

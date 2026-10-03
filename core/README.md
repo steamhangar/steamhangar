@@ -865,9 +865,15 @@ version started last, not that nginx runs now.
   `su`, which refuses to run as root. A link followed by uid 101 reaches
   only what uid 101 may write anyway. Pinned structurally and with stubs in
   `core/tests/test-build-version-hook.sh`, and live in the pinned image by
-  `core/tests/build-version-race-rig.sh` (a racer as nginx swaps every temp
-  file for a symlink to a root-only file; the pre-fix hook overwrote it,
-  the fixed one leaves it untouched).
+  `core/tests/build-version-race-rig.sh`. In the CI gate the rig is
+  deterministic: `mktemp`/`mkdir` wrappers make the attacker win every
+  window (each temp file is swapped for a symlink to a root-only file at
+  once; `logs/` is planted right before `mkdir`) and count that each attack
+  ran. The pre-fix hook fails both (victim overwritten and made 0644; the
+  planted root directory chowned to nginx); the fixed one leaves both
+  untouched. A timing-based racer is kept as a manual mode (`race`) only:
+  how many runs it disturbs depends on scheduling, and a run it never
+  disturbed proves nothing (that flake failed CI on 5dac4a2).
 - **Atomic.** `mktemp` in the same directory, `chmod 0644`, `mv -f`; a
   symlink on the file name is removed before the rename.
 - **Never stops the cache, with one exception.** A write failure (read-only

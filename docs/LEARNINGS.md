@@ -965,3 +965,7 @@ These are not style preferences; each entry cost a review round to learn.
   real-uid race rig. tinyproxy filters before its StatHost check, so a
   status page cannot be added without widening the egress allowlist
   (WP VER-2).
+- A probabilistic security race rig with a "the race must have
+  happened" check flakes in CI; without that check it passes vacuously.
+  Make the attacker win by construction (PATH wrappers around the tool
+  that opens the window) and count the attacks (WP VER-2).
