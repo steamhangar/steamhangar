@@ -218,11 +218,26 @@ docker exec -it steamhangar-vault-runner \
     /opt/steamprefill/SteamPrefill select-apps
 ```
 
-Enter your account name, password and Steam Guard code when prompted, then
-exit the app selector (vault-api overwrites the app selection per job anyway —
-`Config/selectedAppsToPrefill.json` is how it tells SteamPrefill which app to
-prefill, see `api/README.md`). The session lands in the `vault-steamprefill`
-volume at `/opt/steamprefill/Config` and survives restarts and image upgrades.
+Enter your account name and password when prompted, then confirm with Steam
+Guard: either approve the sign-in in the Steam Mobile App or type the Steam
+Guard code. Then exit the app selector (vault-api overwrites the app
+selection per job anyway — `Config/selectedAppsToPrefill.json` is how it
+tells SteamPrefill which app to prefill, see `api/README.md`). The session
+lands in the `vault-steamprefill` volume at `/opt/steamprefill/Config`
+(`account.config`, a refresh token valid for about 200 days, not your
+password) and survives restarts and image upgrades.
+
+**SteamPrefill has no QR login.** The password is always typed here, into
+SteamPrefill's own prompt; the Mobile App only confirms the sign-in, it does
+not replace the password (ADR-0004 addendum 4). A QR login from the web UI is
+planned as a separate helper (D2 in `docs/PROJECT_PLAN.md` §11 item 13).
+
+**"Steam has blocked this sign in" after approving in the app.** Steam's
+anti-phishing check can block an app approval when the phone is far from the
+server. Type the 5-character Steam Guard code from the Mobile App instead of
+approving; this is the community-reported workaround (Valve does not document
+it). Approving with the phone connected through a network near the server
+has also worked (one first-hand report).
 
 **If you have set `VAULT_PREFILL_MODE=subprocess`** (reverting to the
 pre-WP-S-2 shape, vault-api running SteamPrefill itself — see

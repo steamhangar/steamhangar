@@ -216,10 +216,10 @@ docker compose exec -it vault-runner \
     /opt/steamprefill/SteamPrefill select-apps
 ```
 
-Enter your account name, password, and Steam Guard code when prompted, then
-exit the app selector (vault-api overwrites the app selection per job
-anyway). The session persists in a dedicated volume and survives restarts
-and image upgrades. [`deploy/README.md`](deploy/README.md#first-run-the-one-time-steamprefill-login)
+Enter your account name and password when prompted, then approve in the
+Steam Mobile App or type the Steam Guard code. Then exit the app selector
+(vault-api overwrites the app selection per job anyway). The session
+persists in a dedicated volume and survives restarts and image upgrades. [`deploy/README.md`](deploy/README.md#first-run-the-one-time-steamprefill-login)
 covers the fallback command if you've reconfigured the stack to run
 SteamPrefill inside `vault-api` itself instead.
 

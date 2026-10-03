@@ -16,7 +16,10 @@ asks homelab users to run it next to their Steam account.
 1. **Server side:** the Steam session belongs to SteamPrefill alone. Login
    happens once, interactively, in SteamPrefill's own prompt — QR login via
    the Steam Mobile App is the recommended and documented path (the
-   password is never typed on the server at all). SteamPrefill persists
+   password is never typed on the server at all). **[Wrong — corrected
+   by Addendum 4 (2026-10-03): no SteamPrefill release has a QR login;
+   the password is typed in SteamPrefill's prompt on the server.]**
+   SteamPrefill persists
    only its refresh token in its own config directory (gitignored; a
    dedicated volume in the container setup). vault-api drives the already
    authenticated CLI with stdin closed and treats "not logged in" as a job
@@ -158,3 +161,50 @@ checked against the code", including the web relay and the Android
 identity flow) and §5 ("Outbound data flows — what leaves the LAN").
 `SECURITY.md` carries a pointer paragraph to those two sections rather
 than a copy. Read the two promises above as fulfilled there.
+
+## Addendum 4 (2026-10-03): decision 1's QR-login claim was wrong (DOCS-FIX-3)
+
+**What decision 1 said:** "QR login via the Steam Mobile App is the
+recommended and documented path (the password is never typed on the server
+at all)". That is false for every SteamPrefill release. The original
+wording above is left in place and marked, not rewritten.
+
+**What is true (verified in the SteamPrefill v3.7.1 and v3.7.2 source,
+2026-10-02):**
+
+- Login goes through `Steam3Session.GetAccessTokenAsync()` →
+  `BeginAuthSessionViaCredentialsAsync`. The account name and password are
+  typed on the console, in SteamPrefill's own prompt, on the server (inside
+  the `vault-runner` container in the shipped setup).
+- Steam Guard is then confirmed either by approving the sign-in in the Steam
+  Mobile App (SteamKit2 `UserConsoleAuthenticator.AcceptDeviceConfirmationAsync`:
+  "Use the Steam Mobile App to confirm your sign in...") or by typing a
+  Steam Guard code. The Mobile App only confirms; it does not replace the
+  password.
+- No QR flow exists, and there is no open upstream issue asking for one
+  (searched 2026-10-02).
+- The session is stored in `Config/account.config` next to the binary. It
+  holds a refresh token valid for about 200 days, not the password.
+
+**What does NOT change:** the decision itself. The password is typed into
+SteamPrefill's prompt only; no SteamHangar code path accepts, forwards,
+stores or logs it, and vault-api still drives the already-authenticated
+CLI with stdin closed. Only the QR-login claim, and with it the claim that
+the password never reaches the server, was wrong.
+
+**Known limit of app approval (2026-10-02):** Steam's anti-phishing location
+check can block an app approval when the approving phone is far from the
+server ("Steam has blocked this sign in"). Typing the 5-character Steam
+Guard code instead is the community-reported workaround (no Valve
+documentation); approving with the phone routed through a VPN exit near the
+server also worked. `deploy/README.md`'s first-run login section documents
+this.
+
+**Planned: a real QR login.** A small own helper on SteamKit2
+(`BeginAuthSessionViaQRAsync`) that writes SteamPrefill's
+`Config/account.config` directly, so no password is typed on the server and
+none crosses the API. It is post-`v0.1.0` work, tracked as D2 AUTH-FEAT-1
+in `docs/PROJECT_PLAN.md` §11 item 13 and in
+`docs/handover/post-0.1.0-roadmap.md` ("D2: AUTH-FEAT-1"). It will amend
+this ADR when it ships; until then, the terminal login above is the only
+path.
