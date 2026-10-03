@@ -2736,7 +2736,7 @@ below carry their own later dates, item 12 is the current one).
     - [ ] **APP-FEAT-1** — the Android app reads the stored
       `steam_library_steamid` (API-FEAT-1) instead of its own input, and
       can set it, as the web Settings block does.
-    - [ ] **WEB-FIX-6** — the bulk bar overlaps content in select mode on
+    - [x] **WEB-FIX-6** (done 2026-10-03) — the bulk bar overlaps content in select mode on
       a phone (noted during WEB-FIX-3, not fixed).
     - [ ] Signed APK: operator creates and backs up the keystore, puts
       the four `ANDROID_*` secrets into the `release` Environment, then
