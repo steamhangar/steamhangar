@@ -220,10 +220,17 @@ Give SteamHangar its own IP address on the NIC instead, via the SCALE UI:
 2. In the stack's `.env`:
    ```bash
    VAULT_CORE_BIND=192.168.1.50
+   VAULT_TLS_BIND=192.168.1.50
    ```
    `deploy/compose.yaml` already publishes `vault-core` as
    `${VAULT_CORE_BIND:-0.0.0.0}:${VAULT_CORE_PORT:-80}:80` -- this is an
-   existing knob, not something this guide adds.
+   existing knob, not something this guide adds. `VAULT_TLS_BIND` publishes
+   vault-core's HTTPS passthrough on port 443 of the same address. The DNS
+   rewrite in §6 also sends HTTPS for `*.steamcontent.com` there, for
+   example SteamPrefill's manifest downloads (`deploy/README.md` "Port 443:
+   the HTTPS passthrough"). Port 443 on the alias must be free exactly
+   like port 80: a service listening on all interfaces owns it on the alias
+   too.
 3. Point your DNS rewrite (§6 below) at `192.168.1.50`, not the host's main
    address.
 

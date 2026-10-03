@@ -1,0 +1,10 @@
+switch off, stream block still rendered|0|(off) but|
+switch on, stream block missing|1|stream[[:space:]]*[{]|/^# VAULT_TLS_PASSTHROUGH_BEGIN$/,/^# VAULT_TLS_PASSTHROUGH_END$/d
+allowlist default widened to any SNI|1|is not the|/map \$ssl_preread_server_name \$vault_tls_upstream/,/}/s/^\( *default *\)"";/\1$ssl_preread_server_name:443;/
+allowlist gained a second pattern|1|is not the|/steamcontent\\\.com\\z/a "~*example" $ssl_preread_server_name:443;
+allowlist anchor loosened to a suffix match|1|is not the|s/"~\*^.*)+steamcontent/"~*steamcontent/
+retries on the passthrough|1|proxy_next_upstream|s/proxy_next_upstream   off;/proxy_next_upstream   on;/
+TLS terminated|1|terminates TLS|/ssl_preread     on;/a ssl_certificate x.pem;
+extra set of the upstream variable|1|is not the reviewed directive list|/ssl_preread     on;/a set $vault_tls_upstream 10.0.0.1:22;
+server-level resolver|1|is not the reviewed directive list|/ssl_preread     on;/a resolver 10.0.0.53;
+proxy_protocol towards the upstream|1|is not the reviewed directive list|/ssl_preread     on;/a proxy_protocol on;

@@ -32,7 +32,7 @@ set -u
 # exported in the calling shell must not leak in.
 # VAULT_EGRESS_SUBNET (WP DEPLOY-FIX-2) for the same reason: this run's own
 # subnet must come from the generated env file, never from the caller.
-unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_EGRESS_SUBNET
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_EGRESS_SUBNET VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -46,6 +46,9 @@ TAG=${VAULT_IMAGE_TAG:-0.1.0}
 CORE_PORT=8180
 API_PORT=8181
 DNS_PORT=15353
+# WP CORE-FIX-3: host port for vault-core's 443 (HTTPS passthrough), also
+# loopback-only and off the default number.
+TLS_PORT=8143
 
 # The known-good Phase-0 test object: depot 70403, used from poc/ through
 # core/tests/test-core.ps1. Small, stable, and already proven to be a real
@@ -195,6 +198,9 @@ cp "$repo_root/core/docker/check-config-drift.sh" "$work/drift/docker/check-conf
 # TH-1a: the drift script also reads these two (resolved from its own dir/..).
 cp "$repo_root/core/docker/27-vault-upstream-rate.sh" "$work/drift/docker/27-vault-upstream-rate.sh"
 cp "$repo_root/core/nginx/vault-upstream-rate.conf" "$work/drift/nginx/vault-upstream-rate.conf"
+# CORE-FIX-3: it also compares its expected stream block with the copy in
+# 40-vault-preflight.sh.
+cp "$repo_root/core/docker/40-vault-preflight.sh" "$work/drift/docker/40-vault-preflight.sh"
 # The unmutated copy must pass first, else a later FAIL could stem from an
 # incomplete copy rather than from the injected difference.
 if sh "$work/drift/docker/check-config-drift.sh" >/dev/null 2>&1; then
@@ -334,6 +340,8 @@ VAULT_API_KEY=$TEST_API_KEY
 VAULT_IMAGE_TAG=$TAG
 VAULT_CORE_BIND=127.0.0.1
 VAULT_CORE_PORT=$CORE_PORT
+VAULT_TLS_BIND=127.0.0.1
+VAULT_TLS_PORT=$TLS_PORT
 VAULT_API_BIND=127.0.0.1
 VAULT_API_PORT=$API_PORT
 VAULT_DNS_BIND=127.0.0.1
@@ -842,6 +850,58 @@ else
     bad "a BLANK VAULT_CACHE_PATH= renders differently from an unset one"
 fi
 
+step "3q. WP CORE-FIX-3 (ADR-0020): port 443 is published only on VAULT_TLS_BIND, and the switch renders per case"
+say 'The HTTPS passthrough port must never reach the LAN by default and never'
+say 'land on 0.0.0.0 unless VAULT_TLS_BIND=0.0.0.0 is written explicitly. Its'
+say 'line is "${VAULT_TLS_BIND:-127.0.0.1}:${VAULT_TLS_BIND:+${VAULT_TLS_PORT:-443}}:443":'
+say 'unset/blank -> 127.0.0.1 with no fixed host port (Docker picks a random'
+say 'loopback port: nothing LAN-visible, no clash with a host service on 443).'
+say 'Each case renders section 3'"'"'s .env with VAULT_TLS_* replaced by the lines'
+say 'named, as JSON, and reads every vault-core port with target 443.'
+# tls_ports <env file>: "host_ip|published" per vault-core port targeting 443.
+tls_ports() {
+    docker compose --env-file "$1" -f "$compose_file" -p "$PROJECT" config --format json 2>/dev/null | python3 -c '
+import json, sys
+svc = json.load(sys.stdin)["services"]["vault-core"]
+for p in svc.get("ports", []):
+    if str(p.get("target")) == "443":
+        print("%s|%s" % (p.get("host_ip", ""), p.get("published", "")))
+'
+}
+# tls_env <env file>: the rendered VAULT_TLS_PASSTHROUGH value of vault-core.
+tls_env() {
+    docker compose --env-file "$1" -f "$compose_file" -p "$PROJECT" config --format json 2>/dev/null | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["services"]["vault-core"]["environment"].get("VAULT_TLS_PASSTHROUGH", "<absent>"))
+'
+}
+# Each case: <label>|<extra .env lines, \n-separated>|<expected host_ip|published>|<expected switch>
+for tls_case in \
+    'VAULT_TLS_BIND unset||127.0.0.1||1' \
+    'VAULT_TLS_BIND= (blank)|VAULT_TLS_BIND=\n|127.0.0.1||1' \
+    'VAULT_TLS_BIND=192.168.1.50|VAULT_TLS_BIND=192.168.1.50\n|192.168.1.50|443|1' \
+    'VAULT_TLS_BIND=192.168.1.50 + VAULT_TLS_PORT=8443|VAULT_TLS_BIND=192.168.1.50\nVAULT_TLS_PORT=8443\n|192.168.1.50|8443|1' \
+    'VAULT_TLS_PORT=8443 without a bind|VAULT_TLS_PORT=8443\n|127.0.0.1||1' \
+    'VAULT_TLS_BIND=0.0.0.0 (explicit)|VAULT_TLS_BIND=0.0.0.0\n|0.0.0.0|443|1' \
+    'VAULT_TLS_PASSTHROUGH=0|VAULT_TLS_PASSTHROUGH=0\n|127.0.0.1||0' \
+    'VAULT_TLS_PASSTHROUGH= (blank = default on)|VAULT_TLS_PASSTHROUGH=\n|127.0.0.1||1'
+do
+    t_label=${tls_case%%|*}; t_rest=${tls_case#*|}
+    t_lines=${t_rest%%|*};   t_rest=${t_rest#*|}
+    t_ip=${t_rest%%|*};      t_rest=${t_rest#*|}
+    t_pub=${t_rest%%|*};     t_switch=${t_rest#*|}
+    tls_env_file="$work/verify-tls.env"
+    grep -v '^VAULT_TLS_' "$env_file" > "$tls_env_file"
+    # shellcheck disable=SC2059 # the case table's \n escapes are the format
+    printf "$t_lines" >> "$tls_env_file"
+    got_ports=$(tls_ports "$tls_env_file")
+    assert_eq "$t_ip|$t_pub" "$got_ports" "vault-core publishes 443 exactly once as host_ip|published [$t_label]"
+    assert_eq "$t_switch" "$(tls_env "$tls_env_file")" "vault-core: VAULT_TLS_PASSTHROUGH renders '$t_switch' [$t_label]"
+done
+say 'Static guard: no compose line may publish 443 on 0.0.0.0 by default.'
+bare443=$(grep -nE '^[[:space:]]*-[[:space:]]*"?[^#]*:443"?[[:space:]]*$' "$compose_file" | grep -v 'VAULT_TLS_BIND:-127.0.0.1}:${VAULT_TLS_BIND:+' || true)
+assert_eq "" "$bare443" "compose.yaml has no other :443 port mapping"
+
 # =============================================================================
 section "4. Stack up (vault-core + vault-api + vault-proxy + vault-runner)"
 # =============================================================================
@@ -1152,6 +1212,54 @@ while [ "$i" -lt 30 ]; do
     i=$((i + 1)); sleep 2
 done
 assert_eq "healthy" "$core_h" "vault-core is healthy again after reverting VAULT_EVENT_LOG to the feature-off default"
+
+step "5j. HTTPS passthrough (WP CORE-FIX-3, ADR-0020): Valve's certificate through the cache, everything else closed"
+say 'This run publishes 443 as 127.0.0.1:'"$TLS_PORT"' (VAULT_TLS_BIND/VAULT_TLS_PORT in'
+say 'the test .env). (c) where it is published, from the daemon; (a) ONE real'
+say 'TLS handshake through the cache with the SNI of a real Steam CDN edge: curl'
+say 'checks the certificate chain and the name itself, so a pass means the client'
+say 'talked to Valve end to end (no vault-core certificate exists); (b) SNI'
+say 'names off the allowlist and no SNI at all must be closed, with no upstream'
+say 'connection in vault-core'"'"'s log line for them. The full offline SNI matrix'
+say '(trailing dot, newline, NUL, case, 64-char label, plain HTTP, per-client'
+say 'cap) runs in .github/scripts/verify-core-nginx.sh.'
+core_cid=$(dc ps -q vault-core)
+tls_pub=$(docker port "$core_cid" 443/tcp 2>&1 | sort -u | tr '\n' ' ' | sed 's/ $//')
+say "    docker port vault-core 443/tcp -> $tls_pub"
+assert_eq "127.0.0.1:$TLS_PORT" "$tls_pub" "(c) 443 is published only on the bound address"
+
+# tls_log_line <sni>: the newest stream log line for that exact SNI value.
+tls_log_line() {
+    dc logs --no-log-prefix vault-core 2>/dev/null | grep ' tls client=' | grep -F "sni=\"$1\"" | tail -n 1
+}
+
+tls_ok=$(curl -sS -v -o /dev/null --max-time 30 --resolve "$CDN_HOST:$TLS_PORT:127.0.0.1" \
+    -w 'ssl_verify_result=%{ssl_verify_result}\n' "https://$CDN_HOST:$TLS_PORT/" 2>&1)
+printf '%s\n' "$tls_ok" | grep -E 'subject:|issuer:|SSL certificate verify|ssl_verify_result=|SSL connection using' | sed 's/^/    /'
+assert_contains "$tls_ok" "ssl_verify_result=0" "(a) the handshake through the cache verifies against the system CA store"
+assert_contains "$tls_ok" "CN=$CDN_HOST" "(a) the certificate is the CDN edge's own ($CDN_HOST)"
+sleep 1
+tls_ok_line=$(tls_log_line "$CDN_HOST")
+say "    log: $tls_ok_line"
+assert_contains "$tls_ok_line" "target=\"$CDN_HOST:443\"" "(a) vault-core forwarded the allowlisted SNI to $CDN_HOST:443"
+assert_not_contains "$tls_ok_line" "upstream=-" "(a) ...over one real upstream connection"
+
+for bad_sni in example.com steamcontent.com.example.com evilsteamcontent.com; do
+    tls_bad=$(curl -sS -v -o /dev/null --max-time 15 --resolve "$bad_sni:$TLS_PORT:127.0.0.1" \
+        "https://$bad_sni:$TLS_PORT/" 2>&1; echo "curl_exit=$?")
+    assert_not_contains "$tls_bad" "curl_exit=0" "(b) SNI '$bad_sni' gets no TLS session"
+    assert_not_contains "$tls_bad" "subject:" "(b) SNI '$bad_sni' never sees a server certificate"
+    sleep 1
+    bad_line=$(tls_log_line "$bad_sni")
+    say "    log: $bad_line"
+    assert_contains "$bad_line" 'target="" upstream=-' "(b) SNI '$bad_sni' is refused before any upstream connection"
+done
+tls_nosni=$(curl -sS -v -k -o /dev/null --max-time 15 "https://127.0.0.1:$TLS_PORT/" 2>&1; echo "curl_exit=$?")
+assert_not_contains "$tls_nosni" "curl_exit=0" "(b) a connection without SNI (IP literal) gets no TLS session"
+sleep 1
+nosni_line=$(tls_log_line "")
+say "    log: $nosni_line"
+assert_contains "$nosni_line" 'target="" upstream=-' "(b) no SNI is refused before any upstream connection"
 
 # =============================================================================
 section "6. vault-api behaviour"
@@ -1732,6 +1840,26 @@ while [ "$i" -lt 20 ]; do
     i=$((i + 1)); sleep 2
 done
 assert_eq "healthy" "$dns_h" "vault-dns container healthcheck"
+
+step "7i. WP CORE-FIX-3 (d): vault-core refuses to boot on a resolver that rewrites *.steamcontent.com"
+say 'vault-dns, running above, IS a looping resolver from vault-core'"'"'s point of'
+say 'view: it answers every *.steamcontent.com name with CACHE_IP. The HTTP cache'
+say 'and the HTTPS passthrough both resolve through VAULT_RESOLVER, and TLS'
+say 'carries no header a loop guard could stamp, so the boot preflight is the'
+say 'guard. A throwaway vault-core on the same network, pointed at vault-dns,'
+say 'must stop with the resolver FATAL. Bounded by timeout and removed by name,'
+say 'so a regression that lets it boot cannot hang this suite.'
+dns_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(dc ps -q vault-dns)" 2>/dev/null | awk '{ print $1 }')
+say "    vault-dns address on the project network: $dns_ip"
+loop_name="$PROJECT-loop-probe"
+docker rm -f "$loop_name" >/dev/null 2>&1
+loop_out=$(timeout 60 docker run --rm --name "$loop_name" --network "${PROJECT}_default" \
+    -e VAULT_RESOLVER="$dns_ip" "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
+docker rm -f "$loop_name" >/dev/null 2>&1
+printf '%s\n' "$loop_out" | grep -E 'FATAL|resolver|exit=' | head -6 | sed 's/^/    /'
+assert_contains "$loop_out" "40-vault-preflight.sh: FATAL: resolver $dns_ip answers $CDN_HOST with $TEST_CACHE_IP" "a resolver answering a Steam CDN name with a private address is refused at boot"
+assert_contains "$loop_out" "HTTPS passthrough" "...and the refusal names the HTTPS passthrough as affected"
+assert_not_contains "$loop_out" "exit=0" "...and vault-core exits non-zero"
 
 # =============================================================================
 section "8. vault-core fail-fast guards"

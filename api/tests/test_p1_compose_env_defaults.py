@@ -236,6 +236,10 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     "TZ": "UTC",  # nginx's $time_iso8601 is local time; same `:-` form as vault-api
     "VAULT_UPSTREAM_RATE": "",
     "VAULT_UPSTREAM_RATE_WINDOW": "${VAULT_SCHEDULE_WINDOW-03:00-07:00}",
+    # WP CORE-FIX-3 (ADR-0020): the HTTPS passthrough switch, default on.
+    # The `:-` form and the image/hook defaults are pinned in
+    # test_core_fix_3_tls_passthrough.py.
+    "VAULT_TLS_PASSTHROUGH": "1",
 }
 
 #: One row per Compose service this file checks, in the sense used

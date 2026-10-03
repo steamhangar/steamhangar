@@ -104,6 +104,53 @@ else
     log "upstream rate cap off ($RATE_CONF renders 0 = unlimited)"
 fi
 
+# --- 1c. the HTTPS passthrough matches VAULT_TLS_PASSTHROUGH (CORE-FIX-3) --
+# 26-vault-tls-passthrough.sh keeps or deletes the stream {} block; this is
+# a second, independent look at the RESULT, in both directions, because
+# both failures are quiet: ON without the block means HTTPS to a rewritten
+# CDN name fails exactly as before the fix; OFF with the block left in
+# means port 443 is served although the operator switched it off. ON also
+# re-checks the allowlist line verbatim, so a widened or deleted SNI
+# allowlist (an open TCP relay on the LAN) cannot boot.
+TLS_ALLOW_LINE='"~*^(?=.{1,253}\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+steamcontent\.com\z" $ssl_preread_server_name:443;'
+tls_count() { printf '%s\n' "$CONF_DIRECTIVES" | grep -c -E "$1" || true; }
+TLS_MODE=on
+case "${VAULT_TLS_PASSTHROUGH:-1}" in
+    0|false|off|no)
+        TLS_MODE=off
+        n=$(tls_count '^[[:space:]]*(stream[[:space:]]*[{]|ssl_preread[[:space:]]|listen[[:space:]]+([^;]*:)?443[[:space:];])')
+        [ "$n" = "0" ] || die "VAULT_TLS_PASSTHROUGH=${VAULT_TLS_PASSTHROUGH} (off) but $CONF still has $n
+  stream/ssl_preread/listen 443 directive(s). Refusing to serve port 443."
+        log "HTTPS passthrough off (no stream block in $CONF)" ;;
+    *)
+        for re in '^[[:space:]]*stream[[:space:]]*[{]' \
+                  '^[[:space:]]*listen[[:space:]]+443;' \
+                  '^[[:space:]]*ssl_preread[[:space:]]+on;' \
+                  '^[[:space:]]*proxy_next_upstream[[:space:]]+off;' \
+                  '^[[:space:]]*proxy_pass[[:space:]]+\$vault_tls_upstream;'; do
+            n=$(tls_count "$re")
+            [ "$n" = "1" ] || die "VAULT_TLS_PASSTHROUGH is on but $n lines match '$re' in $CONF
+  (expected exactly 1) -- the HTTPS passthrough is missing or altered."
+        done
+        # The map's entries, whitespace-normalised, must be exactly the
+        # reviewed two: an empty default and the one full-match pattern.
+        tls_map=$(printf '%s\n' "$CONF_DIRECTIVES" \
+            | awk '/^[[:space:]]*map[[:space:]]+[$]ssl_preread_server_name[[:space:]]+[$]vault_tls_upstream[[:space:]]*[{]/ { f = 1; next } f && /^[[:space:]]*[}]/ { exit } f && NF { print }' \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]][[:space:]]*/ /g')
+        tls_map_want=$(printf '%s\n%s' 'default "";' "$TLS_ALLOW_LINE")
+        [ "$tls_map" = "$tls_map_want" ] || die "VAULT_TLS_PASSTHROUGH is on but the SNI allowlist map in $CONF is not the
+  reviewed one. Expected exactly these two entries:
+$(printf '%s\n' "$tls_map_want" | sed 's/^/      /')
+  found:
+$(printf '%s\n' "$tls_map" | sed 's/^/      /')
+  Refusing to start a TCP relay on port 443 with an unknown allowlist."
+        log "HTTPS passthrough on: port 443, SNI allowlist *.steamcontent.com, TLS passed through (not terminated)" ;;
+esac
+if printf '%s\n' "$CONF_DIRECTIVES" | grep -q -E '^[[:space:]]*(ssl_certificate|proxy_ssl[a-z_]*)[[:space:]]|^[[:space:]]*listen[[:space:]][^;]*[[:space:]]ssl[[:space:];]'; then
+    die "$CONF terminates TLS (ssl_certificate / proxy_ssl / 'listen ... ssl'). vault-core
+  never holds a certificate; the passthrough copies TLS bytes unchanged (ADR-0020)."
+fi
+
 # --- 2. VAULT_RESOLVER is a plain IP-address list ---------------------------
 # Substituted verbatim into nginx.conf, so anything that could terminate a
 # directive (';') or open a block ('{') would be config injection. Allowed
@@ -129,6 +176,61 @@ case "$RESOLVER" in
 esac
 log "upstream resolver (ADR-0001 req 4): $RESOLVER"
 
+# --- 2a. the rendered stream block is exactly the reviewed one (CORE-FIX-3) --
+# Review S1: section 1c pins the lines the passthrough NEEDS; this pins that
+# nothing else is there either (an added `set`, a server-level `resolver`,
+# `proxy_protocol on;` ...). The rendered block, comments dropped and
+# whitespace collapsed, must equal this list with VAULT_RESOLVER filled in.
+# core/docker/check-config-drift.sh keeps this copy identical to its own.
+if [ "$TLS_MODE" = "on" ]; then
+    tls_expected=$(cat <<'VAULT_TLS_STREAM_EOF'
+stream {
+resolver @RESOLVER@ ipv6=off valid=30s;
+resolver_timeout 5s;
+map $ssl_preread_server_name $vault_tls_upstream {
+default "";
+"~*^(?=.{1,253}\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+steamcontent\.com\z" $ssl_preread_server_name:443;
+}
+limit_conn_zone $binary_remote_addr zone=vault_tls_client:1m;
+limit_conn_zone $server_port zone=vault_tls_total:1m;
+log_format vault_tls escape=default
+'$time_local tls client=$remote_addr sni="$ssl_preread_server_name" '
+'target="$vault_tls_upstream" upstream=$upstream_addr status=$status '
+'bytes_sent=$bytes_sent bytes_received=$bytes_received '
+'session_time=$session_time';
+access_log @ACCESS_LOG@ vault_tls;
+server {
+listen 443;
+ssl_preread on;
+preread_timeout 5s;
+limit_conn vault_tls_client 64;
+limit_conn vault_tls_total 256;
+proxy_connect_timeout 3s;
+proxy_next_upstream off;
+proxy_timeout 5m;
+proxy_pass $vault_tls_upstream;
+}
+}
+VAULT_TLS_STREAM_EOF
+)
+    resolver_norm=$(printf '%s' "$RESOLVER" | sed -e 's/[[:space:]][[:space:]]*/ /g')
+    tls_expected=$(printf '%s\n' "$tls_expected" | sed -e "s|@RESOLVER@|$resolver_norm|" -e "s|@ACCESS_LOG@|/dev/stdout|")
+    tls_rendered=$(printf '%s\n' "$CONF_DIRECTIVES" \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$' | sed -e 's/[[:space:]][[:space:]]*/ /g' \
+        | awk '$0 == "stream {" { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }')
+    if [ "$tls_rendered" != "$tls_expected" ]; then
+        printf '%s\n' "$tls_expected" > /tmp/vault-tls-expected.$$
+        printf '%s\n' "$tls_rendered" > /tmp/vault-tls-rendered.$$
+        tls_diff=$(diff /tmp/vault-tls-expected.$$ /tmp/vault-tls-rendered.$$ || true)
+        rm -f /tmp/vault-tls-expected.$$ /tmp/vault-tls-rendered.$$
+        die "the rendered stream block in $CONF is not the reviewed directive list
+  (HTTPS passthrough, port 443). Differences (< expected, > rendered):
+$(printf '%s\n' "$tls_diff" | sed 's/^/      /')
+  Refusing to start a TCP relay that is not the reviewed one."
+    fi
+    log "stream block matches the reviewed directive list"
+fi
+
 # --- 2b. the resolver does not point Steam's CDN names back at a LAN host --
 # PRE-FREEZE REVIEW S1 (belt; the braces are the X-SteamHangar-Hop guard in
 # the config). Scenario: a LAN router transparently intercepts port 53 (DNAT
@@ -148,6 +250,15 @@ log "upstream resolver (ADR-0001 req 4): $RESOLVER"
 # PROBE_NAME is a single edge. If Valve retires it (NXDOMAIN), the probe
 # takes the "no A answer" branch below on every boot: the belt degrades to a
 # logged no-op, it never fails the boot. The 508 braces still hold.
+#
+# WP CORE-FIX-3: the HTTPS passthrough (stream {} block, port 443) resolves
+# the SNI name through the SAME VAULT_RESOLVER, so this one probe guards
+# both paths. It matters more there: TLS carries no header the 508 guard
+# could stamp, so a looping passthrough is only bounded by its connection
+# caps (limit_conn in the stream block), not stopped after one hop. Besides
+# private answers, an answer equal to one of this container's OWN interface
+# addresses is refused too (relevant with network_mode: host, where those
+# can be public).
 PROBE_NAME="cache2-ams1.steamcontent.com"
 
 # vault_is_private_ipv4 <dotted quad> -> 0 if the address is loopback,
@@ -181,6 +292,12 @@ vault_nslookup_answers() {
          seen && /^Address:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$/ { print $2 }'
 }
 
+# vault_own_ipv4s: this container's IPv4 interface addresses, one per line
+# (empty if `ip` is unavailable -- the private check alone still applies).
+vault_own_ipv4s() {
+    ip -4 -o addr show 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }'
+}
+
 probe_server=${RESOLVER%% *}
 if ! command -v nslookup >/dev/null 2>&1; then
     log "note: nslookup not available, skipping the resolver loop probe"
@@ -190,14 +307,24 @@ else
     if [ -z "$probe_answers" ]; then
         log "note: resolver $probe_server gave no A answer for $PROBE_NAME (unreachable, timed out or NXDOMAIN) -- loop probe skipped, not a boot failure"
     else
+        own_addrs=$(vault_own_ipv4s)
         for a in $probe_answers; do
+            for o in $own_addrs; do
+                if [ "$a" = "$o" ]; then
+                    die "resolver $probe_server answers $PROBE_NAME with $a, which is one of
+  this container's own addresses -- every cache MISS and every HTTPS
+  passthrough connection would be sent back into vault-core. Point
+  VAULT_RESOLVER at a truthful resolver (deploy/README.md)."
+                fi
+            done
             if vault_is_private_ipv4 "$a"; then
                 die "resolver $probe_server answers $PROBE_NAME with $a, a private/loopback
   address, so it rewrites *.steamcontent.com instead of answering truthfully.
   This probe cannot tell WHO answers: it may be this host (a router DNATs port
   53 to a Pi-hole/AdGuard rewriting to vault-core, or VAULT_RESOLVER points at
   vault-dns), another LAN cache (e.g. a lancache instance), or a blocker that
-  answers 0.0.0.0. In every case cache MISSes cannot reach Valve. Point
+  answers 0.0.0.0. In every case cache MISSes and HTTPS passthrough
+  connections cannot reach Valve. Point
   VAULT_RESOLVER at a truthful resolver (deploy/README.md), or exempt the
   vault-core host from any port-53 redirect on the router."
             fi

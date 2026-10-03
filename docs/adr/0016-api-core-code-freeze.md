@@ -108,3 +108,40 @@ Not in this exception: an upstream keepalive pool for vault-core (the root
 cause, since it removes the new connection per chunk). That is a separate
 decision for the user. Every other frozen-path change still needs its own
 user decision and note here.
+
+## Addendum 2026-10-02 — freeze exception: HTTPS passthrough on port 443 (WP CORE-FIX-3)
+
+User decision, 2026-10-02: "HTTPS-Durchreichung, Weg A (im Produkt, rc7)".
+The HTTPS passthrough ships in the product, in rc7. The core/ freeze opens
+for this one feature.
+
+The trigger, from the production rollout: with the LAN DNS rewriting
+`*.steamcontent.com` to vault-core (the documented DNS mode), a prefill
+failed with `HttpRequestException ... while downloading manifests`.
+SteamPrefill fetches depot manifests over HTTPS from the CDN host. That
+host resolved to vault-core, which listened on port 80 only. The operator
+worked around it by removing the runner's DNS override. The product must
+still work when containers or clients use the rewriting resolver.
+
+Scope of the exception, all in WP CORE-FIX-3 (design: ADR-0020):
+
+- core/: a `stream {}` block in `core/nginx/nginx.conf` and
+  `core/docker/nginx.conf.template` (SNI passthrough on 443 with
+  `ssl_preread`, a `*.steamcontent.com` allowlist, no TLS termination);
+  the new hook `core/docker/26-vault-tls-passthrough.sh` (the
+  `VAULT_TLS_PASSTHROUGH` switch); a re-check of the rendered passthrough
+  and an own-address answer check in `40-vault-preflight.sh`; drift pins
+  in `check-config-drift.sh` (step 2d, a seventh delta kind, and the
+  resolver delta now appearing twice); `core/Dockerfile` (hook, ENV
+  default, `EXPOSE 443`, build-time module check).
+- api/: tests only (`api/tests/test_core_fix_3_tls_passthrough.py`, one row
+  in `test_p1_compose_env_defaults.py`). No application code changes.
+- deploy/ and .github/ (not frozen, listed for completeness):
+  `VAULT_TLS_PASSTHROUGH`, `VAULT_TLS_BIND` and `VAULT_TLS_PORT` in
+  `deploy/compose.yaml` and `deploy/.env.example`, verify-stack steps 3q,
+  5j and 7i, and the CI gate's new TLS checks
+  (`.github/scripts/tls-sni-probe.sh`, `tls-preflight-tamper.cases`).
+
+The HTTP cache path on port 80 is unchanged; the drift check pins it.
+Every other frozen-path change still needs its own user decision and note
+here.

@@ -63,6 +63,10 @@ temp paths) resolve against the `-p` prefix, so this creates/uses
 `core/cache/`, `core/logs/` -- entirely separate from `poc/cache/`,
 `poc/logs/`. `core/tests/test-core.ps1` does exactly this (see below).
 
+**Port 443 (WP CORE-FIX-3):** the native config also runs the HTTPS
+passthrough (`stream {}` block, see "HTTPS passthrough on port 443"), so
+natively port 443 must be free as well; nginx refuses to start otherwise.
+
 **Port 80 contention:** only one nginx can listen on port 80 at a time.
 The PoC's own nginx may already be running (a live Steam client can be
 using it as its cache right now). `test-core.ps1` handles this automatically:
@@ -713,23 +717,25 @@ core/
 └── docker/
     ├── nginx.conf.template          # what actually runs in the container
     ├── 25-vault-eventlog.sh         # VAULT_EVENT_LOG on/off + validation
+    ├── 26-vault-tls-passthrough.sh  # VAULT_TLS_PASSTHROUGH on/off (port 443)
     ├── 27-vault-upstream-rate.sh    # VAULT_UPSTREAM_RATE(_WINDOW) -> rate include
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
     └── check-config-drift.sh        # keeps the template honest
 ```
 
-**The container does NOT run `core/nginx/nginx.conf`.** Six kinds of
+**The container does NOT run `core/nginx/nginx.conf`.** Seven kinds of
 directive line cannot be shared with the native dev config -- the log
-destinations, the pid path, an explicit worker user, the resolver becoming
-an env placeholder, and the two cache-event-log lines becoming a
+destinations (HTTP and, since WP CORE-FIX-3, the stream log), the pid path,
+an explicit worker user, the resolver becoming an env placeholder (in
+`http {}` and in `stream {}`), and the two cache-event-log lines becoming a
 `${VAULT_EVENT_LOG}` placeholder -- so `core/docker/nginx.conf.template` is
 a near-verbatim copy carrying exactly those deltas (the authoritative list,
 with expected counts, is in `check-config-drift.sh`). Everything else (every map, the store
 guard, the Host allowlist, the Range/Accept-Encoding stripping, the nocache
 bypass, the log format) is byte-identical, and that is **machine-checked**
 by `core/docker/check-config-drift.sh`: it normalises both files, un-applies
-the enumerated deltas, and diffs. 119 normalised directive lines (as of
-SEC-FIX-1), verified identical; it also asserts that the
+the enumerated deltas, and diffs. 146 normalised directive lines (as of
+CORE-FIX-3), verified identical; it also asserts that the
 `vault_event` log_format line keeps all 8 of its LITERAL tabs in both files
 (review P7) -- the normaliser would otherwise hide a tab -> space edit that
 breaks vault-api's tab-split parser -- and verified to actually catch an injected difference (a
@@ -769,8 +775,10 @@ touching either file.
   stock (never rendered) `nginx.conf` is refused (S5; pinned by a negative
   in `.github/scripts/verify-core-nginx.sh`); the resolver allowlist admits
   `[` `]` so a bracketed IPv6 `[addr]:port` value actually works (N3); and
-  the resolver loop probe described under "Request guards" above (N3 and
-  the probe are not pinned by any automated test).
+  the resolver loop probe described under "Request guards" above (N3 is
+  not pinned by any automated test; the loop probe is, since WP
+  CORE-FIX-3: `deploy/tests/verify-stack.sh` step 7i boots vault-core with
+  vault-dns as `VAULT_RESOLVER` and expects the FATAL).
 - Deployment, volumes, ports and the port-80/dedicated-IP guidance:
   `deploy/README.md`.
 
@@ -882,6 +890,106 @@ contents; refuses 18 invalid rate/window values; checks the preflight's
 cross-check; and starts a throwaway server that returns the evaluated
 `$vault_upstream_rate` inside and outside a window built around the
 current minute.
+
+## HTTPS passthrough on port 443 (WP CORE-FIX-3, ADR-0020)
+
+**Why.** In DNS mode every connection to a `*.steamcontent.com` name lands
+on vault-core, HTTPS included. SteamPrefill (SteamKit2) fetches depot
+manifests over HTTPS from those names; with only port 80 open it failed
+with `HttpRequestException ... while downloading manifests` (production,
+2026-10-02). lancache answers the same problem with an SNI proxy; this is
+that, as a `stream {}` block at the end of both config files.
+
+**What it does.** `ssl_preread on` reads the TLS ClientHello without
+decrypting anything and exposes the SNI as `$ssl_preread_server_name`. One
+map turns an allowlisted name into `"<name>:443"` and everything else into
+an empty string; `proxy_pass $vault_tls_upstream` then opens ONE TCP
+connection to that name's real address (resolved through `VAULT_RESOLVER`,
+same as the HTTP cache) and copies bytes both ways. vault-core holds no
+certificate and no key; the client verifies Valve's certificate itself.
+Nothing is cached, nothing is rate-capped (`VAULT_UPSTREAM_RATE` is HTTP
+only; stream sessions are not in `$connections_writing` either).
+
+**The allowlist** -- `"~*^(?=.{1,253}\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+steamcontent\.com\z"`:
+
+| SNI | Result |
+|---|---|
+| any subdomain of `steamcontent.com`, any case | passed, forwarded as sent |
+| `steamcontent.com` (apex) | closed (not used for downloads; the HTTP allowlist refuses it too) |
+| trailing dot | closed (RFC 6066 forbids it in SNI) |
+| `evilsteamcontent.com`, `steamcontent.com.evil.example` | closed (label-boundary full match) |
+| empty label, `_`, `:`, NUL, newline, a 64-character label | closed (1-63 `[a-z0-9-]` per label, no leading/trailing `-`, at most 253 in total; `\z`, not `$`, so a trailing newline cannot match) |
+| `*.steamserver.net` | closed (the LAN rewrite covers `*.steamcontent.com` only) |
+| no SNI, plain HTTP on 443 | closed |
+
+A refused connection maps to an empty target: `proxy_pass` fails with `no
+host in upstream` before any DNS query or connect, and nginx closes it
+(stream status 500).
+
+**One upstream connection per client connection.** `proxy_next_upstream
+off` (the stream default is ON and would try the next A record on a
+connect error -- each retry another SYN against a full carrier-grade NAT,
+WP CORE-FIX-2). `proxy_connect_timeout 3s` as on the HTTP path,
+`preread_timeout 5s`, `proxy_timeout 5m` idle.
+
+**Loop bound, not a destination filter.** nginx's stream proxy has no hook
+between "name resolved" and "connect", so it cannot refuse a private
+answer at request time. The boot preflight refuses a `VAULT_RESOLVER` that
+answers a Steam CDN name with a private/loopback/link-local/CGNAT address
+or one of the container's own addresses. If a rewrite appears after boot,
+`limit_conn` bounds the damage: 64 sessions per client address (a loop
+arrives from one address) and 256 in total (each session holds two of the
+1024 `worker_connections`, so the HTTP cache keeps half).
+
+**Log.** One line per connection, in the container on stdout next to the
+HTTP log (`docker compose logs vault-core`), natively in `logs/tls.log`:
+
+```
+02/Oct/2026:18:45:01 +0000 tls client=192.168.1.20 sni="cache2-ams1.steamcontent.com" target="cache2-ams1.steamcontent.com:443" upstream=155.133.248.13:443 status=200 bytes_sent=5321 bytes_received=812 session_time=0.412
+02/Oct/2026:18:45:07 +0000 tls client=192.168.1.20 sni="example.com" target="" upstream=- status=500 bytes_sent=0 bytes_received=0 session_time=0.051
+```
+
+**Container switch.** `VAULT_TLS_PASSTHROUGH` (image default `1`):
+`1/true/on/yes` keeps the block, `0/false/off/no` makes
+`26-vault-tls-passthrough.sh` delete it (it is wrapped in
+`# VAULT_TLS_PASSTHROUGH_BEGIN/END` marker comments in the template),
+anything else stops the boot. `40-vault-preflight.sh` then checks the
+result in both directions: off leaves no `stream`/`ssl_preread`/`listen
+443`; on has exactly one listener, `ssl_preread on`, `proxy_next_upstream
+off`, `proxy_pass $vault_tls_upstream`, and the allowlist map equal to the
+reviewed two entries; and nowhere an `ssl_certificate`, `proxy_ssl*` or
+`listen ... ssl`. Whether 443 is reachable from the LAN is
+`deploy/compose.yaml`'s `VAULT_TLS_BIND` (`deploy/README.md` "Port 443").
+
+**Modules.** The pinned image compiles `ngx_stream_module` and
+`ngx_stream_ssl_preread_module` in statically (`nginx -V`), so there is no
+`load_module` line; `core/Dockerfile` and the CI gate fail if that changes.
+
+**Tests.**
+- `check-config-drift.sh` step 2d: the stream pins in both files, the whole
+  stream block equal to an exact directive list (the same list
+  `40-vault-preflight.sh` checks the rendered config against at boot; the
+  drift check keeps the two copies identical), the map
+  has exactly its two entries, `http {}` listens on 80 only, no TLS
+  termination anywhere, and the template's markers enclose exactly the
+  stream block (deleting them leaves the http block byte-identical).
+- `.github/scripts/verify-core-nginx.sh`: module check; on/off renders
+  through the real entrypoint with `nginx -t`; 16 switch values (9 accepted
+  spellings, 7 refused); 10 preflight tamper cases
+  (`.github/scripts/tls-preflight-tamper.cases`, including an added `set`,
+  a server-level `resolver` and `proxy_protocol on`, caught by the exact
+  stream-block pin); the loop probe's own-address branch with stubbed
+  `nslookup`/`ip` (a public answer equal to the container's own address is
+  refused, a different one passes); and, offline against the
+  live listener, raw ClientHellos for every allowlist row above
+  (`.github/scripts/tls-sni-probe.sh`: refused = empty target and no
+  resolve/connect attempt in the error log; allowed = the name as target
+  and a resolve attempt), plain HTTP on 443, and the per-client cap (70
+  parallel idle connections, 6 refused with 503).
+- `deploy/tests/verify-stack.sh` step 3q (where 443 is published, per
+  `.env` case), 5j (one real handshake through the cache to a Valve edge
+  with certificate verification; off-list SNI and no SNI refused) and 7i
+  (vault-core refuses to boot with vault-dns as `VAULT_RESOLVER`).
 
 ## What this work package does NOT cover
 

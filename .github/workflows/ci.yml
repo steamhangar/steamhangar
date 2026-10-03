@@ -151,7 +151,12 @@ jobs:
       - name: shellcheck
         # Preinstalled on ubuntu-latest (actions/runner-images) -- lints
         # this job's own script before spending time on docker pull/run.
-        run: shellcheck .github/scripts/verify-core-nginx.sh
+        # WP CORE-FIX-3: tls-sni-probe.sh at warning level -- its info-tier
+        # output is SC2059/SC2317 on the deliberate printf-format byte
+        # builder.
+        run: |
+          shellcheck .github/scripts/verify-core-nginx.sh
+          shellcheck --severity=warning .github/scripts/tls-sni-probe.sh
       - name: Render core/docker/nginx.conf.template and run nginx -t
         run: bash .github/scripts/verify-core-nginx.sh
 

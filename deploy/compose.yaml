@@ -197,6 +197,17 @@ services:
       # blank, set, for both variables) are checked by verify-stack.sh step
       # 3e-ter.
       VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}
+      # HTTPS passthrough on port 443 (WP CORE-FIX-3, ADR-0020): TLS for
+      # *.steamcontent.com SNI names is copied to Valve unchanged (no
+      # certificate, nothing cached), everything else is closed at once.
+      # Needed when DNS rewrites *.steamcontent.com to this cache: Steam
+      # tools fetch some files (SteamPrefill: depot manifests) over HTTPS
+      # from those same names. ON by default; 0/false/off/no switches the
+      # listener off, any other value stops vault-core's boot. The `:-`
+      # form on purpose: a blank line in .env means the default (on), so
+      # "off" always needs an explicit 0. Whether the LAN can REACH it is
+      # the separate VAULT_TLS_BIND below.
+      VAULT_TLS_PASSTHROUGH: ${VAULT_TLS_PASSTHROUGH:-1}
     ports:
       # PORT 80 IS NOT NEGOTIABLE FOR REAL CLIENTS. Steam CDN traffic is plain
       # HTTP and the Steam client will only ever ask for port 80 -- a cache on
@@ -216,6 +227,24 @@ services:
       # (§10: "never expose vault-core/port 80"). It has no authentication, by
       # design: the Steam client cannot present any.
       - "${VAULT_CORE_BIND:-0.0.0.0}:${VAULT_CORE_PORT:-80}:80"
+      # Port 443, the HTTPS passthrough (WP CORE-FIX-3, ADR-0020). Published
+      # on the LAN ONLY when VAULT_TLS_BIND is set, and only on that address:
+      #   VAULT_TLS_BIND=192.168.1.50   -> 192.168.1.50:443  (set it to the
+      #                                    same address as VAULT_CORE_BIND)
+      #   unset or blank                -> 127.0.0.1:<random port>, i.e.
+      #                                    not reachable from the LAN and
+      #                                    never colliding with a host port
+      # It deliberately does NOT follow VAULT_CORE_BIND (unset = 0.0.0.0):
+      # port 443 is far more often taken on the host than port 80 (NAS web
+      # UIs, reverse proxies), and an upgrade must not suddenly bind it, or
+      # bind 443 on every interface. 0.0.0.0 happens only if you write
+      # VAULT_TLS_BIND=0.0.0.0 yourself. VAULT_TLS_PORT moves the HOST port
+      # (testing only: clients always connect to 443, like port 80 above).
+      # `${VAR:+...}` (Compose spec: "replacement if set and non-empty")
+      # leaves the host port EMPTY when the bind is unset or blank, so
+      # Docker picks a random loopback port. Resolved per case by
+      # deploy/tests/verify-stack.sh step 3q (measured on Compose 2.38.1).
+      - "${VAULT_TLS_BIND:-127.0.0.1}:${VAULT_TLS_BIND:+${VAULT_TLS_PORT:-443}}:443"
     volumes:
       # ONE volume, mounted at /vault, containing BOTH cache/ and tmp/.
       # This is a correctness requirement, not tidiness: proxy_store completes
@@ -256,7 +285,8 @@ services:
       # requests. Each capability below is what one of those root steps
       # needs; the workers lose all of them at their setuid().
       #
-      # NET_BIND_SERVICE: the master binds port 80. (Docker >= 20.10 sets
+      # NET_BIND_SERVICE: the master binds port 80 (and 443 for the HTTPS
+      #   passthrough, WP CORE-FIX-3). (Docker >= 20.10 sets
       #   net.ipv4.ip_unprivileged_port_start=0 in a container's own network
       #   namespace, so it may be redundant on this engine. Kept so the
       #   bind does not depend on that default.)

@@ -427,15 +427,25 @@ it):
    header regardless of which address they arrived on — depot hostnames
    themselves never need to resolve to the cache.
    Then `docker compose -f compose.yaml -f compose.override.yaml up -d`.
-2. **Alternative:** point the container's own resolver at your LAN's
-   rewriting DNS server instead:
+2. **Alternative, only with the HTTPS passthrough published:** point the
+   container's own resolver at your LAN's rewriting DNS server instead:
    ```yaml
    services:
      vault-runner:
        dns:
          - 192.168.1.50   # your AdGuard Home / Pi-hole / vault-dns address
    ```
-   Caveat: this makes vault-runner resolve *everything* it looks up through
+   **This option broke prefills before WP CORE-FIX-3, and still does unless
+   port 443 reaches vault-core.** With the rewrite, *every*
+   `*.steamcontent.com` name resolves to vault-core, including the CDN host
+   SteamPrefill fetches depot manifests from **over HTTPS**. With nothing
+   on 443 the job fails with `HttpRequestException ... while downloading
+   manifests` (production, 2026-10-02). It works only with
+   `VAULT_TLS_PASSTHROUGH` on (the default) **and** `VAULT_TLS_BIND` set to
+   the address the rewrite answers (see
+   [Port 443](#port-443-the-https-passthrough)). Option 1 does not have
+   this problem, because the depot hostnames keep resolving to Valve.
+   Second caveat: this makes vault-runner resolve *everything* it looks up through
    that resolver too — for this container that is just Steam's own CM/CDN
    hostnames during login and depot fetches (WP S-2: vault-runner never
    makes a manifest-oracle or webhook request, unlike vault-api — those stay
@@ -463,10 +473,23 @@ configuration decision in this project.
    # in .env:
    #   CACHE_IP=192.168.1.50        <- the LAN IP of THIS host
    #   VAULT_DNS_BIND=192.168.1.50  <- publish :53 on that LAN IP only
+   #   VAULT_TLS_BIND=192.168.1.50  <- publish the HTTPS passthrough there (see below)
    docker compose --profile dns up -d
    ```
    Then point your router's DHCP-advertised DNS server at that address.
 3. **Hosts-file mode** — a single Windows gaming PC, no DNS server involved.
+
+**Modes 1 and 2 also need port 443.** A rewrite of `*.steamcontent.com`
+sends *every* connection to those names to vault-core, not just the HTTP
+ones. Some Steam traffic to the same names is HTTPS: SteamPrefill fetches
+depot manifests that way, and Steam clients may too. vault-core answers 443
+with an SNI passthrough that hands the encrypted connection to Valve
+unchanged (no certificate of its own, nothing cached). It is on by default,
+but only reachable from the LAN once you set `VAULT_TLS_BIND` to the
+address the rewrite answers. See [Port 443](#port-443-the-https-passthrough).
+Without it, HTTPS to a rewritten name hits whatever owns 443 on that
+address, or nothing, and fails. The symptom is `HttpRequestException ...
+while downloading manifests` in a prefill job.
 
 Whichever you pick: **the AAAA record must be handled too.** If your resolver
 answers `AAAA` for `*.steamcontent.com` with Valve's real IPv6 address,
@@ -484,7 +507,8 @@ shows exactly what to add and how to verify it with `dig`.
 > `*.steamcontent.com` rewrite there instead (mode 1 above; a very common
 > homelab layout — AdGuard Home/Pi-hole and this stack side by side on a NAS
 > or a small server). Point `VAULT_RESOLVER` at that resolver and vault-core
-> would resolve Valve's CDN names to its own address: `40-vault-preflight.sh`
+> would resolve Valve's CDN names to its own address (HTTP cache and HTTPS
+> passthrough alike): `40-vault-preflight.sh`
 > then refuses to boot (it probes the first resolver in `VAULT_RESOLVER` for a Steam CDN name and
 > stops on a private answer), and should the resolver start rewriting after
 > boot, every cache MISS is answered `508 Loop Detected` after one hop with
@@ -528,10 +552,97 @@ sudo ip addr add 192.168.1.50/24 dev eth0
 
 # deploy/.env
 VAULT_CORE_BIND=192.168.1.50
+VAULT_TLS_BIND=192.168.1.50     # port 443, the HTTPS passthrough (next section)
 ```
 
 …then point your DNS rewrite (or `CACHE_IP`) at `192.168.1.50`. A macvlan
 network or a dedicated VLAN interface works equally well.
+
+---
+
+## Port 443: the HTTPS passthrough
+
+**Why it exists.** In DNS mode your resolver answers `*.steamcontent.com`
+with vault-core's address, so HTTPS connections to those names arrive at
+vault-core too. SteamPrefill fetches depot manifests over HTTPS from the CDN
+host, and Steam clients may do the same for some requests. vault-core used
+to listen on port 80 only. Since WP CORE-FIX-3 (ADR-0020) it also listens on
+443 and passes those connections through:
+
+- It reads the server name from the TLS handshake (SNI) and nothing else.
+  For a `*.steamcontent.com` name, it opens **one** connection to that
+  name's real address (resolved through `VAULT_RESOLVER`, never your LAN
+  DNS) and copies the encrypted bytes both ways.
+- There is **no certificate on vault-core and no decryption.** The client
+  checks Valve's certificate itself, end to end.
+- **Nothing on 443 is cached** and `VAULT_UPSTREAM_RATE` does not apply.
+  This is about not breaking HTTPS, not about saving bandwidth.
+- **Every other name is closed at once:** another domain, the bare
+  `steamcontent.com`, `evilsteamcontent.com`, `steamcontent.com.evil.example`,
+  a trailing dot, or no name at all. It is not a general relay.
+- Each client address may hold at most 64 sessions, 256 in total.
+
+**Turn it on for the LAN — required in DNS mode.** The listener is on by
+default (`VAULT_TLS_PASSTHROUGH=1`), but port 443 is published to the LAN
+**only when you set `VAULT_TLS_BIND`**, and only on that address. **In DNS
+mode, set `VAULT_TLS_BIND` to vault-core's own address** — the address your
+rewrite answers for `*.steamcontent.com`, normally the same as
+`VAULT_CORE_BIND`:
+
+```bash
+# deploy/.env -- the same dedicated address the DNS rewrite points at
+VAULT_CORE_BIND=192.168.1.50
+VAULT_TLS_BIND=192.168.1.50
+```
+
+| `VAULT_TLS_BIND` | Port 443 is published on |
+|---|---|
+| unset or blank (default) | `127.0.0.1:<random port>`: not reachable from the LAN, never clashes with a host service |
+| `192.168.1.50` | `192.168.1.50:443` |
+| `0.0.0.0` | every interface, only because you wrote it |
+
+It does **not** follow `VAULT_CORE_BIND` on purpose. Unset, that variable
+means `0.0.0.0`, and set, it is not always a dedicated address. Something
+else on the host owns 443 far more often than 80 (a NAS web UI, a reverse
+proxy). An upgrade must not suddenly bind 443 on every interface or fail to
+start because 443 is taken. `VAULT_TLS_PORT` moves the host port for
+testing only: clients always connect to 443.
+
+**Compose version.** The publish line uses `${VAR:+...}` interpolation.
+Verified on Compose ≥ 2.38.1; an older Compose without `${VAR:+...}`
+support stops with an interpolation error at `docker compose up`/`config`
+instead of starting anything.
+
+**Turn it off** with `VAULT_TLS_PASSTHROUGH=0` (or `false`/`off`/`no`) and
+`docker compose up -d vault-core`. A blank value means the default (on),
+and any other value stops vault-core's boot. If you only want to keep it
+off the LAN, leaving `VAULT_TLS_BIND` unset is enough.
+
+**Check it.** Run these from a LAN machine, with your cache address and a
+real CDN name:
+
+```bash
+# Valve's own certificate, through the cache: expect "SSL certificate verify ok"
+# and a subject of CN=cache2-ams1.steamcontent.com
+curl -sv -o /dev/null --resolve cache2-ams1.steamcontent.com:443:192.168.1.50 \
+     https://cache2-ams1.steamcontent.com/ 2>&1 | grep -E 'subject:|verify ok'
+# anything else is closed: expect a TLS error, no certificate
+curl -sv -o /dev/null --resolve example.com:443:192.168.1.50 https://example.com/
+# vault-core logs one line per connection
+docker compose logs vault-core | grep ' tls client='
+```
+
+**Behind a carrier-grade NAT (DS-Lite).** Each passthrough session is one
+upstream connection, held open as long as the client keeps it. vault-core
+never retries a failed connect on this path (`proxy_next_upstream off`).
+On a DS-Lite line the NAT has a fixed quota of port mappings per
+subscriber. HTTPS sessions count against it like HTTP cache misses do (see
+[Prefill concurrency behind a carrier-grade NAT](#prefill-concurrency-behind-a-carrier-grade-nat)).
+Once the quota is spent, the NAT answers new connections with ICMP
+host-unreachable, which shows up as `connect() failed (113: Host is
+unreachable)` in vault-core's log. Manifest fetches are few, but many
+parallel HTTPS clients can still reach that limit. Nobody has measured
+it.
 
 ---
 
@@ -1206,6 +1317,11 @@ What this deployment assumes, stated plainly so it can be checked:
   but stored depot chunks, and that a cache *miss* will only ever connect
   upstream to a `*.steamcontent.com` / `*.steamserver.net` host (the Host
   allowlist, ADR-0001 req 4 — this is what stops it being an open HTTP proxy).
+  The same holds for its port 443 (ADR-0020): only TLS connections whose
+  server name is a `*.steamcontent.com` host are passed to Valve, unchanged
+  and undecrypted; everything else is closed before any DNS lookup or
+  connection. Port 443 is not published to the LAN until `VAULT_TLS_BIND`
+  is set.
   **Never port-forward it, never put it behind a public reverse proxy**
   (`docs/PROJECT_PLAN.md` §10).
 - **vault-api is API-key authenticated on every route except `/v1/health`**,
@@ -1225,7 +1341,7 @@ What this deployment assumes, stated plainly so it can be checked:
   LAN (or WAN, on a host with a public interface) access to a published
   port. Restrict exposure where Docker honours it: bind each published
   port to one LAN IP with the `VAULT_*_BIND` variables in `deploy/.env`
-  (`VAULT_CORE_BIND`, `VAULT_API_BIND`, `VAULT_DNS_BIND`), or put your
+  (`VAULT_CORE_BIND`, `VAULT_TLS_BIND`, `VAULT_API_BIND`, `VAULT_DNS_BIND`), or put your
   filter rules in the `DOCKER-USER` chain, which Docker evaluates before
   its own forwarding rules.
 - **No secrets in `compose.yaml`.** `VAULT_API_KEY` appears only as a required
@@ -1395,4 +1511,7 @@ steamcontent.com` resolves to.
 | Clients download at internet speed and the cache stays empty | DNS redirection isn't reaching them, or the AAAA leak is open. Check with `dig A` **and** `dig AAAA` against your resolver (`dns/README.md`). |
 | Prefill jobs fail with "A Steam account is required" | the one-time interactive login hasn't been done — see [First run](#first-run-the-one-time-steamprefill-login). |
 | Prefills stall or fail with many errors; vault-core's log shows `connect() failed (113: Host is unreachable) while connecting to upstream` for Steam CDN addresses, single downloads work; your router may log an "ICMP flood" from your provider's gateway | your line is behind a carrier-grade NAT (DS-Lite, many fibre/cable/mobile lines) and a prefill used up its port mappings: every chunk vault-core fetches is a new upstream connection. Lower `VAULT_PREFILL_MAX_THREADS` in `.env` (default `8`; try `4`), then `docker compose up -d` to recreate vault-api and vault-runner. The job output starts with `Will download using at most N threads` when it took effect. Wait a few minutes before retrying so the NAT can expire old mappings. |
+| A prefill job fails with `HttpRequestException ... while downloading manifests`; your DNS rewrites `*.steamcontent.com` to the cache (for the runner too, e.g. via `dns:`) | SteamPrefill fetches manifests over HTTPS from those names, and port 443 on the rewritten address does not reach vault-core. Set `VAULT_TLS_BIND` to that address (and keep `VAULT_TLS_PASSTHROUGH` on), then `docker compose up -d vault-core`. See [Port 443](#port-443-the-https-passthrough). |
+| vault-core exits with `26-vault-tls-passthrough.sh: FATAL: VAULT_TLS_PASSTHROUGH=... is not one of ...` | the switch has a typo. Use `1`/`0` (or `true`/`false`, `on`/`off`, `yes`/`no`, lowercase). |
+| `up` fails with `... bind: address already in use` for port 443 | something else on the host owns 443 on the `VAULT_TLS_BIND` address. Use a dedicated address for vault-core (both `VAULT_CORE_BIND` and `VAULT_TLS_BIND`), or leave `VAULT_TLS_BIND` unset. |
 | Port 80 already in use on the host | use a dedicated IP, not a different port — see [Port 80](#port-80-and-the-dedicated-ip-question). |

@@ -881,3 +881,18 @@ These are not style preferences; each entry cost a review round to learn.
   exits 0 even with unknown options, so only the flag's own log line
   proves the parser took it. Make the image build fail without that
   line (WP CORE-FIX-2).
+- A DNS rewrite of `*.steamcontent.com` also catches HTTPS: SteamPrefill
+  fetches depot manifests over TLS from the CDN host, so a cache that
+  serves only port 80 breaks prefill in DNS mode. lancache answers with
+  an SNI proxy; vault-core now passes TLS through on 443 with nginx
+  `stream` + `ssl_preread` behind a strict suffix allowlist (WP
+  CORE-FIX-3).
+- Pin a security-relevant config block as an exact directive list, not
+  as a set of required lines: an edit applied to both config copies
+  (`set` overriding the target, a block-level `resolver`,
+  `proxy_protocol on`) passed the required-line drift pins. stream's
+  `proxy_next_upstream` defaults to on; `limit_conn` in stream counts
+  sessions still in preread (WP CORE-FIX-3).
+- Compose `${VAR:+...}` with an empty host port publishes on a random
+  host port; `set -e` ignores failures inside `&&` lists and after `!`,
+  so build-time checks must be separate commands (WP CORE-FIX-3).
