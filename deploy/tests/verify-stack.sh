@@ -34,7 +34,7 @@ set -u
 # subnet must come from the generated env file, never from the caller.
 # VAULT_RESOLVER (WP CORE-FEAT-1c): section 10 points it at a fake resolver
 # through the env file; a caller's export would win over that line.
-unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_EGRESS_SUBNET VAULT_RESOLVER VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_UPSTREAM_EDGE VAULT_UPSTREAM_MAX_CONNS VAULT_PREFILL_MAX_THREADS VAULT_EGRESS_SUBNET VAULT_RESOLVER VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -2657,14 +2657,15 @@ assert_eq "" "$probe_ans" "the boot probe's name (cache2-ams1.steamcontent.com) 
 
 step "10b. vault-core recreated with VAULT_RESOLVER=$POOL_RESOLVER_IP and the pool list, attached to $POOL_NET at $POOL_CORE_IP"
 say "Env: the stack's current env (section 9's bind-mode env when 9b came up,"
-say 'else the section-3 env) plus VAULT_RESOLVER and VAULT_UPSTREAM_POOL_HOSTS='
+say 'else the section-3 env) plus VAULT_RESOLVER, VAULT_UPSTREAM_EDGE= (EMPTY: the compose default is edge'
+say 'mode since CORE-FIX-4c, so legacy must be selected explicitly) and VAULT_UPSTREAM_POOL_HOSTS='
 say '"fake1.steamcontent.com loop.steamcontent.com". fake2 is NOT listed on'
 say 'purpose: it is the unlisted control of 10d.'
 pool_base_env=$env_file
 [ "${bind_up:-no}" = yes ] && pool_base_env=$bind_live_env_file
 pool_env="$work/verify-pool.env"
 cp "$pool_base_env" "$pool_env"
-printf 'VAULT_RESOLVER=%s\nVAULT_UPSTREAM_POOL_HOSTS=fake1.steamcontent.com loop.steamcontent.com\n' "$POOL_RESOLVER_IP" >> "$pool_env"
+printf 'VAULT_RESOLVER=%s\nVAULT_UPSTREAM_EDGE=\nVAULT_UPSTREAM_POOL_HOSTS=fake1.steamcontent.com loop.steamcontent.com\n' "$POOL_RESOLVER_IP" >> "$pool_env"
 pool_recreate_core "$pool_env"
 say "vault-core health: $core_h"
 assert_eq "healthy" "$core_h" "vault-core is healthy with the fake resolver and the pool list"
@@ -2936,11 +2937,11 @@ say 'trap does the same on an aborted run.'
 compose_up_or_die "$pool_base_env" up -d vault-core
 pool_wait_core_healthy
 say "vault-core health: $core_h"
-assert_eq "healthy" "$core_h" "vault-core is healthy again on the stack's own env (resolver default, no pool, no cap)"
+assert_eq "healthy" "$core_h" "vault-core is healthy again on the stack's own env (resolver default, shipped edge mode)"
 core_pool_ip_after=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$POOL_NET\"}}{{.IPAddress}}{{end}}" "$(dc ps -q vault-core)" 2>/dev/null)
 assert_eq "" "$core_pool_ip_after" "vault-core is no longer attached to $POOL_NET"
 revert_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
-assert_contains "$revert_log" "VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream pool" "the reverted vault-core renders no pool (the shipped default of this run's env)"
+assert_contains "$revert_log" "upstream edge mode ON: every MISS goes to dist-fra1.discovery.steamserver.net" "the reverted vault-core is back on the shipped compose default (edge mode, dist-fra1.discovery.steamserver.net)"
 run "docker rm -f '$POOL_EDGE' '$POOL_RESOLVER'"
 run "docker network rm '$POOL_NET'"
 if docker network inspect "$POOL_NET" >/dev/null 2>&1; then

@@ -229,6 +229,28 @@ services:
       # above and the same `-` form (blank passes through as "" = off).
       # deploy/.env.example ships a seed list (decision 2B).
       VAULT_UPSTREAM_POOL_HOSTS: ${VAULT_UPSTREAM_POOL_HOSTS-}
+      # One pooled upstream edge for EVERY cache MISS plus a global upstream
+      # connection cap (WP CORE-FIX-4, ADR-0021, core/README.md "Upstream edge
+      # and connection cap"). ON out of the box: the default is the edge the
+      # Steam client's discovery marker maps to. With an edge set, every
+      # allowed MISS is dialled on that ONE name over keepalive connections,
+      # whatever Host the client sent, and VAULT_UPSTREAM_POOL_HOSTS above is
+      # ignored. ROLLBACK to the per-name path: set VAULT_UPSTREAM_EDGE= EMPTY
+      # in .env. This is the `-` form on purpose: unset takes the default (on),
+      # an explicit blank passes through as "" (legacy mode). Exactly one
+      # lowercase host name in the Host-allowlist families; anything else
+      # stops the boot (`28-vault-upstream-pool.sh: FATAL`). Env-only: recreate
+      # vault-core after a change.
+      VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}
+      # The global cap C on concurrent upstream connections (both modes),
+      # whole number 1..64, NO off switch; over the cap vault-core answers
+      # 503. Empty or unset = 16 (the hook's default, so `-` and `:-` agree).
+      # Below VAULT_PREFILL_MAX_THREADS the boot is refused.
+      VAULT_UPSTREAM_MAX_CONNS: ${VAULT_UPSTREAM_MAX_CONNS-}
+      # Read here only for that floor check (the prefill threads of vault-api
+      # and vault-runner are what the cap must not starve). Same variable and
+      # default as on those services; empty counts as 8.
+      VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS:-8}
     ports:
       # PORT 80 IS NOT NEGOTIABLE FOR REAL CLIENTS. Steam CDN traffic is plain
       # HTTP and the Steam client will only ever ask for port 80 -- a cache on
