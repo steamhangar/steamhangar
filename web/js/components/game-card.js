@@ -24,6 +24,11 @@
  * used to patch) — `cardStructuralKey` is exported so library.js's tick
  * handler and this file can never disagree about what "structural" means.
  *
+ * **Capsule pill ground (WP WEB-FIX-9).** The pill's dark ground is drawn
+ * only when it carries a number (cached game); icon-only pills get the
+ * `bare` class (see `pillClassName`) and show just the status disc. The
+ * status word lives in the meta row under the cover, never in the pill.
+ *
  * **Nested-interactive-widget a11y (WP 4a.3 review nit, closed WP 4a.8).**
  * The card is `role="button"` yet contains two REAL nested `<button>`s (the
  * capsule pill and the meta-row icon, both only present when `statusAction`
