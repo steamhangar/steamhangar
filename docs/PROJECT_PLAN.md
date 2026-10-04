@@ -2746,8 +2746,10 @@ below carry their own later dates, item 12 is the current one).
       which prints one escaped `::error file=…,line=…,title=<suite > test>`
       per failing test (cap 10 per step; it reuses android-annotate.py's
       escaping). Tests: `api/tests/test_ci_fix_4_node_junit_annotate.py`.
-      Limit: a test file that crashes as a whole is annotated by file name
-      only; its crash text stays in the log.
+      Limit: a test file that crashes as a whole (junit names it by its
+      path as given on the command line -- relative under CI's glob) is
+      annotated on that file with a hint only; its crash text stays in the
+      log.
 
     **B. Open before `v0.1.0` final**
     - [x] **API-FIX-3** — misleading prefill summary (done 2026-10-03:

@@ -15,18 +15,20 @@ Node 24 and is assumed to write the same shape):
   `describe()` block -- and a test that has subtests -- becomes a
   `<testsuite name=...>`, so the annotation title joins the suite names
   (`suite > test`).
-- `classname` is always the literal "test"; there is NO file attribute
-  (one is used if a later Node version adds it). The file and line are
-  therefore taken from the first stack frame of the failure body that points
-  into the workspace, preferring a `*.test.js` frame -- ES-module frames are
-  `file:///...` URLs.
+- `classname` is always the literal "test"; there is NO file attribute.
+  The file and line are therefore taken from the first stack frame of the
+  failure body that points into the workspace (outside `node_modules/`),
+  preferring a `*.test.js` frame -- ES-module frames are `file:///...` URLs.
 - The `message` attribute has its line breaks DELETED ("line oneline two"),
   so the message is taken from the failure body instead: its text up to the
   first stack frame, minus the `Error [ERR_TEST_FAILURE]: ` wrapper.
 - A test file that fails as a whole (crash, syntax error, non-zero exit
-  outside a test) is a top-level `<testcase>` named by the file's absolute
-  path with the bare message "test failed"; the crash text itself only
-  reaches the spec log. Such a case is annotated on that file with a hint.
+  outside a test) is a top-level `<testcase>` named by the file's path AS
+  GIVEN ON THE COMMAND LINE -- relative (`web/tests/x.test.js`) for ci.yml's
+  relative glob, absolute for an absolute one -- with the bare message
+  "test failed"; the crash text itself only reaches the spec log. A
+  top-level case whose name resolves to a test file inside the workspace is
+  therefore annotated on that file, with a hint.
 - `failureType: 'subtestsFailed'` marks a parent that failed only because a
   child did; it is dropped when the child carries its own failure.
 - Node escapes `"` twice in attribute values (`&amp;quot;`); the leftover
@@ -84,8 +86,9 @@ relativize = _aa.relativize
 
 #: GitHub keeps 10 error annotations per step; never print more than that.
 MAX_ANNOTATIONS = 10
-#: Lines of a failure message kept per annotation ("first lines").
-MAX_MESSAGE_LINES = 6
+#: Lines of a failure message kept per annotation ("first lines"); enough
+#: for a short deepStrictEqual diff. `_command()` still clips at 1000 chars.
+MAX_MESSAGE_LINES = 12
 #: Title of the annotations that are not about one test case.
 REPORT_TITLE = "web tests"
 
@@ -148,6 +151,22 @@ def message_lines(body: str, fallback: str) -> list[str]:
     return out
 
 
+def as_test_file(name: str, workspace: Path) -> str | None:
+    """Workspace-relative path if a top-level test case's name is a test
+    file (absolute, `file:` URL, or relative to the workspace = node's cwd)."""
+    if name.startswith(("/", "file:")):
+        rel = relativize(name, workspace)
+    else:
+        rel = relativize(str(workspace / name), workspace)
+    if rel is None:
+        return None
+    try:
+        exists = (workspace / rel).is_file()
+    except OSError:
+        exists = False
+    return rel if _TEST_FILE.search(rel) or exists else None
+
+
 def _name(el: ET.Element) -> str:
     return (el.get("name") or "?").replace("&quot;", '"')
 
@@ -166,45 +185,41 @@ def parse(root: ET.Element, workspace: Path) -> list[Finding]:
     real: list[Finding] = []
     parents: list[Finding] = []
     for suites, case in _walk(root, ()):
-        for kind in ("failure", "error"):
-            for el in case.findall(kind):
-                body = el.text or ""
-                ftype_m = _FAILURE_TYPE.search(body)
-                ftype = ftype_m.group(1) if ftype_m else (el.get("type") or "")
-                name = _name(case)
-                file: str | None
-                line: int | None
-                as_file = relativize(name, workspace) if name.startswith(("/", "file:")) else None
-                if as_file is not None and not suites:
-                    # The test FILE failed as a whole (see the docstring).
-                    file, line = as_file, None
-                    title = f"Web test file failed: {as_file}"
-                    lines = message_lines(body, el.get("message") or kind)
-                    lines.append("(the whole file failed: crash, load error or non-zero "
-                                 "exit outside a test -- the details are only in the "
-                                 "spec output of the job log)")
-                else:
-                    file, line = location(body, workspace)
-                    file = _attr_file(case, workspace) or file
-                    title = "Web test failed: " + " > ".join(suites + (name,))
-                    lines = message_lines(body, el.get("message") or kind)
-                    if ftype and ftype != "testCodeFailure":
-                        lines.append(f"[{ftype}]")
-                f = Finding(title, "\n".join(lines), file, line)
-                (parents if ftype == "subtestsFailed" else real).append(f)
+        for el in case.findall("failure"):
+            body = el.text or ""
+            ftype_m = _FAILURE_TYPE.search(body)
+            ftype = ftype_m.group(1) if ftype_m else (el.get("type") or "")
+            name = _name(case)
+            file: str | None
+            line: int | None
+            # Only a TOP-LEVEL case can be a whole file; inside a suite a
+            # path-like name is just a test name.
+            as_file = None if suites else as_test_file(name, workspace)
+            if as_file is not None:
+                # The test FILE failed as a whole (see the docstring).
+                file, line = as_file, None
+                title = f"Web test file failed: {as_file}"
+                lines = message_lines(body, el.get("message") or "failure")
+                lines.append("(the whole file failed: crash, load error or non-zero "
+                             "exit outside a test -- the details are only in the "
+                             "spec output of the job log)")
+            else:
+                file, line = location(body, workspace)
+                title = "Web test failed: " + " > ".join(suites + (name,))
+                lines = message_lines(body, el.get("message") or "failure")
+                if ftype and ftype != "testCodeFailure":
+                    lines.append(f"[{ftype}]")
+            f = Finding(title, "\n".join(lines), file, line)
+            (parents if ftype == "subtestsFailed" else real).append(f)
     return real or parents
-
-
-def _attr_file(case: ET.Element, workspace: Path) -> str | None:
-    raw = case.get("file")
-    return relativize(raw, workspace) if raw else None
 
 
 def findings_for(report: Path, workspace: Path) -> list[Finding]:
     """Findings for the report, or one finding explaining why there are none."""
     if not report.is_file():
-        return [Finding(REPORT_TITLE, "node --test failed and wrote no junit report "
-                        f"({report.name}); see the job log.")]
+        return [Finding(REPORT_TITLE, "the job failed before or without writing a junit "
+                        f"report ({report.name}): checkout, setup-node or node --test; "
+                        "see the job log.")]
     try:
         root = ET.parse(report).getroot()
     except (ET.ParseError, OSError) as exc:

@@ -106,7 +106,10 @@ def ws(tmp_path: Path) -> Path:
 def _report(ws: Path) -> str:
     t = f"file://{ws}/web/tests/store.test.js"
     lib = f"file://{ws}/web/js/store.js"
-    crash = f"{ws}/web/tests/broken.test.js"
+    # Node names a whole-file failure by the path as given on its command
+    # line: relative for ci.yml's relative glob, absolute otherwise.
+    crash_rel = "web/tests/broken.test.js"
+    crash_abs = f"{ws}/web/tests/gone.test.js"
     return textwrap.dedent(f"""\
         <?xml version="1.0" encoding="utf-8"?>
         <testsuites>
@@ -135,7 +138,12 @@ def _report(ws: Path) -> str:
         \t\t\t</failure>
         \t\t</testcase>
         \t</testsuite>
-        \t<testcase name="{crash}" time="0.03" classname="test" failure="test failed">
+        \t<testcase name="{crash_rel}" time="0.03" classname="test" failure="test failed">
+        \t\t<failure type="testCodeFailure" message="test failed">
+        [Error: test failed] {{ code: 'ERR_TEST_FAILURE', failureType: 'testCodeFailure', cause: 'test failed', exitCode: 1, signal: null }}
+        \t\t</failure>
+        \t</testcase>
+        \t<testcase name="{crash_abs}" time="0.03" classname="test" failure="test failed">
         \t\t<failure type="testCodeFailure" message="test failed">
         [Error: test failed] {{ code: 'ERR_TEST_FAILURE', failureType: 'testCodeFailure', cause: 'test failed', exitCode: 1, signal: null }}
         \t\t</failure>
@@ -145,6 +153,9 @@ def _report(ws: Path) -> str:
         """)
 
 
+_CRASH_HINT = ("::test failed%0A(the whole file failed: crash, load error or non-zero exit "
+               "outside a test -- the details are only in the spec output of the job log)")
+
 EXPECTED = [
     "::error file=web/tests/store.test.js,line=12,"
     "title=Web test failed%3A sizes 100%25 \"a%2Cb\" <x> %3A%3Ay"
@@ -152,8 +163,9 @@ EXPECTED = [
     "::error title=Web test failed%3A poll > times out"
     "::test timed out after 500ms%0A[testTimeoutFailure]",
     "::error file=web/tests/broken.test.js,title=Web test file failed%3A web/tests/broken.test.js"
-    "::test failed%0A(the whole file failed: crash, load error or non-zero exit outside a "
-    "test -- the details are only in the spec output of the job log)",
+    + _CRASH_HINT,
+    "::error file=web/tests/gone.test.js,title=Web test file failed%3A web/tests/gone.test.js"
+    + _CRASH_HINT,
 ]
 
 
@@ -171,9 +183,9 @@ def test_test_data_never_becomes_a_command(ws: Path, tmp_path: Path) -> None:
     cmds = parse_commands(run_script(report, ws).stdout)
     # Exactly the three error commands; the `::error file=evil.js` text
     # inside a message stays message data.
-    assert [c["cmd"] for c in cmds] == ["error"] * 3
-    assert {c["props"].get("file") for c in cmds} == {
-        "web/tests/store.test.js", None, "web/tests/broken.test.js"}
+    assert [c["cmd"] for c in cmds] == ["error"] * 4
+    assert [c["props"].get("file") for c in cmds] == [
+        "web/tests/store.test.js", None, "web/tests/broken.test.js", "web/tests/gone.test.js"]
     first = cmds[0]
     assert first["props"]["title"] == 'Web test failed: sizes 100% "a,b" <x> ::y'
     assert first["message"] == "line one\n::error file=evil.js::pwned 100%\n\n1 !== 2"
@@ -204,8 +216,8 @@ def test_missing_report(ws: Path, tmp_path: Path) -> None:
     p = run_script(tmp_path / "web-junit.xml", ws)
     assert p.returncode == 0
     assert p.stdout.splitlines() == [
-        "::error title=web tests::node --test failed and wrote no junit report "
-        "(web-junit.xml); see the job log."]
+        "::error title=web tests::the job failed before or without writing a junit "
+        "report (web-junit.xml): checkout, setup-node or node --test; see the job log."]
 
 
 def test_subtests_failed_parent_is_dropped_when_the_child_reports(ws: Path) -> None:
@@ -226,13 +238,33 @@ def test_subtests_failed_parent_is_dropped_when_the_child_reports(ws: Path) -> N
 
 
 def test_long_message_and_frame_preference(ws: Path) -> None:
-    body = "Error [ERR_TEST_FAILURE]: " + "\n".join(f"l{i}" for i in range(9))
-    assert nja.message_lines(body, "x") == ["l0", "l1", "l2", "l3", "l4", "l5", "…"]
+    body = "Error [ERR_TEST_FAILURE]: " + "\n".join(f"l{i}" for i in range(15))
+    assert nja.message_lines(body, "x") == [f"l{i}" for i in range(12)] + ["…"]
     frames = (f"  at f (/elsewhere/x.js:1:1)\n  at g ({ws}/web/js/a.js:5:1)\n"
               f"  at h (file://{ws}/web/tests/a.test.js:9:2)\n")
     assert nja.location(frames, ws) == ("web/tests/a.test.js", 9)
     assert nja.location(f"  at g ({ws}/web/js/a.js:5:1)", ws) == ("web/js/a.js", 5)
     assert nja.location("  at f (/elsewhere/x.js:1:1)", ws) == (None, None)
+    # Library frames inside the workspace's node_modules are not the test's.
+    assert nja.location(f"  at d ({ws}/node_modules/dep/i.js:2:1)\n"
+                        f"  at g ({ws}/web/js/a.js:5:1)", ws) == ("web/js/a.js", 5)
+
+
+def test_whole_file_failure_only_at_top_level(ws: Path) -> None:
+    import xml.etree.ElementTree as ET
+    fail = ("<failure type='testCodeFailure'>[Error: test failed] "
+            "{ failureType: 'testCodeFailure' }</failure>")
+    root = ET.fromstring(
+        f"<testsuites><testsuite name='outer'><testcase name='web/tests/x.test.js'>{fail}"
+        f"</testcase></testsuite><testcase name='adds'>{fail}</testcase>"
+        f"<testcase name='../outside.test.js'>{fail}</testcase></testsuites>")
+    found = nja.parse(root, ws)
+    assert [(f.title, f.file) for f in found] == [
+        ("Web test failed: outer > web/tests/x.test.js", None),
+        ("Web test failed: adds", None),
+        ("Web test failed: ../outside.test.js", None),
+    ]
+    assert all("whole file" not in f.message for f in found)
 
 
 def test_cap_at_the_per_step_limit(ws: Path, tmp_path: Path) -> None:
@@ -312,13 +344,32 @@ def test_real_step_fails_and_its_report_is_annotated(ws: Path, tmp_path: Path) -
     env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")},
            "RUNNER_TEMP": str(runner_temp)}
     step = _step(_job(), TEST_STEP)
-    p = subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], cwd=ws, env=env,
-                       capture_output=True, text=True, timeout=120, check=False)
+
+    def run_step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], cwd=ws, env=env,
+                              capture_output=True, text=True, timeout=120, check=False)
+
+    bad = ws / "web" / "tests" / "bad.test.js"
+    bad_src = bad.read_text(encoding="utf-8")
+    bad.unlink()
+    # Only passing tests: the step succeeds.
+    ok = run_step()
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+
+    bad.write_text(bad_src, encoding="utf-8")
+    (ws / "web" / "tests" / "crash.test.js").write_text(
+        "throw new Error('top-level crash');\n", encoding="utf-8")
+    p = run_step()
     assert p.returncode != 0
     assert "✖ adds" in p.stdout  # the spec reporter still writes the log
     report = runner_temp / "web-junit.xml"
     assert report.is_file()
     cmds = parse_commands(run_script(report, ws).stdout)
-    assert [(c["props"].get("file"), c["props"].get("line"), c["props"]["title"])
-            for c in cmds] == [("web/tests/bad.test.js", "4", "Web test failed: adds")]
-    assert "3" in cmds[0]["message"] and "2" in cmds[0]["message"]
+    assert sorted((c["props"].get("file") or "", c["props"].get("line") or "",
+                   c["props"]["title"]) for c in cmds) == [
+        ("web/tests/bad.test.js", "4", "Web test failed: adds"),
+        ("web/tests/crash.test.js", "", "Web test file failed: web/tests/crash.test.js"),
+    ]
+    by_file = {c["props"]["file"]: c["message"] for c in cmds}
+    assert "3" in by_file["web/tests/bad.test.js"]
+    assert "the whole file failed" in by_file["web/tests/crash.test.js"]
