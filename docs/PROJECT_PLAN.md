@@ -2771,6 +2771,21 @@ below carry their own later dates, item 12 is the current one).
       bind-mount precondition (`cache/depot` + `tmp`; since SEC-FIX-5 only
       `cache/depot` is 101:101, the rest root:root, migrated at start; a
       rollback to an older image needs the old ownership back).
+      Also, as a known limitation (user decision 2026-10-04, Weg A): a
+      Steam client downloading an app that is NOT in the cache still
+      opens one upstream connection per chunk beyond the keepalive pool,
+      so behind DS-Lite/CGNAT a client MISS burst can exhaust the
+      subscriber's port quota for a few seconds (measured on the first
+      client test, 2026-10-04: 1838x `113: Host is unreachable` across
+      14 edge hosts in ~16 s, 898 of them on a pooled edge; Steam retried
+      and finished). Mitigation shipped: the scheduler prefills every
+      agent-reported installed app, so updates arrive as HITs; set the
+      window to cover the day (e.g. `06:00-24:00`, 60 min) in Settings.
+      Fix tracked as D7 CORE-FIX-4. Windows agent installer notes from
+      AGENT-FIX-2: a re-install keeps the key, client id and a working
+      library root from `env.txt`; going back to the hostname-derived id
+      needs uninstall + install; the registry SteamPath wins over an
+      earlier explicit `-LibraryRoot`.
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
@@ -2950,6 +2965,21 @@ below carry their own later dates, item 12 is the current one).
       systemd user service. Open decision: service + tray (reports
       without a logged-on user, sees all users' libraries, needs admin to
       install) versus tray-only (per user, no admin).
+    - [ ] **D7 CORE-FIX-4 — hard cap on concurrent upstream connections**
+      (user decision 2026-10-04, after the first Steam-client MISS test
+      behind CGNAT; see the release-notes item in B). The ADR-0017 pool
+      caps idle connections per listed edge (8 per group, at most 4
+      groups); it does not cap in-flight connections, and a Steam client's
+      concurrency is not ours to cap. Research first what nginx OSS
+      offers (`max_conns` without the Plus-only `queue`, `limit_conn` on
+      the client side, a local forward proxy with a connection pool),
+      and whether pooling by edge name fits when a client uses 14 edges.
+      Needs an ADR-0017 addendum and a freeze note.
+    - [ ] **D8 SCHED-FEAT-1 — several schedule windows** (user request
+      2026-10-04: "the night check is no use if I come home at 17:00 and
+      the update came during the day"). Today `schedule_window` is one
+      `HH:MM-HH:MM` range (editable in Settings, applies at the next
+      sweep); allow a list of ranges. Until then `06:00-24:00` covers it.
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by

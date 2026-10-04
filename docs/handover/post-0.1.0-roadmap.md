@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D5)
+# Handover: post-v0.1.0 roadmap (items D1-D8)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -259,6 +259,36 @@ API key is typed in by hand.
 **Depends on.** D5 (per-PC keys) for pairing. The presence fields from
 AGENT-FEAT-1 (`agent_version`, `report_interval_seconds`) stay the wire
 contract.
+
+## D7: CORE-FIX-4, cap concurrent upstream connections
+
+**Why (measured 2026-10-04, first Steam-client test on rc9).** Steam on a
+gaming PC updated two apps that had never been prefilled. In about 16
+seconds vault-core logged 1838 `connect() failed (113: Host is
+unreachable)` across 14 edge hosts; 898 of them went to
+`cache9-ams1`, which IS in the keepalive pool. The pool caps idle
+connections (8 per group, 4 groups), not in-flight ones, and the Steam
+client's concurrency is not ours to cap, so every request above the idle
+count opens and closes a fresh connection and a CGNAT port mapping. Steam
+retried and finished, but the whole household briefly loses new IPv4
+connections. Prefill is unaffected (`--max-threads 8`).
+
+**Decision (user, 2026-10-04, Weg A).** Ship `v0.1.0` with this as a known
+limitation in the release notes; mitigate with the scheduler (installed
+apps are prefilled, window covering the day). Fix after `v0.1.0`.
+
+**Open.** What nginx OSS can do without the Plus-only `queue`
+(`max_conns` alone fails fast with 502; client-side `limit_conn`; a
+separate pooled forward proxy); whether a per-edge-name pool is the right
+model when a client spreads over 14 edges; how to measure safely on the
+production line.
+
+## D8: SCHED-FEAT-1, several schedule windows
+
+User request 2026-10-04: a nightly-only check misses updates published
+during the day. `schedule_window` is a single `HH:MM-HH:MM` range today;
+allow a list. Workaround: one wide window such as `06:00-24:00` with a
+60-minute interval.
 
 ## Suggested order
 
