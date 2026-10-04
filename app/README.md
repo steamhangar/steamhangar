@@ -2203,8 +2203,8 @@ the workflow run summary. Compare it with
 version: current ones print `V2 Signer: certificate SHA-256 digest: …`,
 older ones `Signer #1 certificate SHA-256 digest: …` (the SHA-1 and MD5
 lines next to it are not the fingerprint). The release signing
-certificate (`CN=Jan Niesel, O=SteamHangar`), measured on the first
-signed release build (tag `v0.1.0-rc10`), has the SHA-256
+certificate, measured on the first signed release build (tag
+`v0.1.0-rc10`), has the SHA-256
 
 ```
 f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172

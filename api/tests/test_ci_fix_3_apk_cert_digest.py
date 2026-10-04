@@ -47,7 +47,9 @@ pytestmark = pytest.mark.skipif(SH is None or BASH is None, reason="sh/bash not 
 RC10_DIGEST = "f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172"
 OTHER_DIGEST = "0123456789abcdef" * 4
 
-# Verbatim from the v0.1.0-rc10 android-release job log (public values only).
+# The v0.1.0-rc10 android-release job log, verbatim except for a synthetic
+# certificate DN (fixtures carry no personal data); the digests are the real,
+# public ones.
 RC10_PRINT_CERTS = """\
 Verifies
 Verified using v1 scheme (JAR signing): false
@@ -58,7 +60,7 @@ Verified using v3.2 scheme (APK Signature Scheme v3.2): false
 Verified using v4 scheme (APK Signature Scheme v4): false
 Verified for SourceStamp: false
 Number of signers: 1
-V2 Signer: certificate DN: CN=Jan Niesel, O=SteamHangar
+V2 Signer: certificate DN: CN=Example, O=Example
 V2 Signer: certificate SHA-256 digest: f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172
 V2 Signer: certificate SHA-1 digest: a3d146832125d2ae1b22ce81882b4522d0d21193
 V2 Signer: certificate MD5 digest: 6b39b965ff80cab6ee32a2c66c3d17a6
@@ -107,6 +109,9 @@ Source Stamp Signer: certificate SHA-256 digest: {RC10_DIGEST}
 # A digest that is one hex digit short must not be truncated into a match.
 SHORT_DIGEST = f"V2 Signer: certificate SHA-256 digest: {RC10_DIGEST[:-1]}\n"
 
+# Nor may one that is one hex digit long (pins the end anchor).
+LONG_DIGEST = f"V2 Signer: certificate SHA-256 digest: {RC10_DIGEST}0\n"
+
 
 def _digest(tmp_path: Path, text: str, *, newline: str = "\n"
             ) -> subprocess.CompletedProcess[str]:
@@ -139,7 +144,9 @@ def test_digest_lowercases_upper_case_hex(tmp_path: Path) -> None:
     (ONLY_SHA1_MD5, 0),
     (ONLY_SOURCE_STAMP, 0),
     (SHORT_DIGEST, 0),
-], ids=["two-certs", "zero", "empty", "sha1-md5-only", "source-stamp-only", "short-digest"])
+    (LONG_DIGEST, 0),
+], ids=["two-certs", "zero", "empty", "sha1-md5-only", "source-stamp-only", "short-digest",
+        "long-digest"])
 @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 def test_digest_fails_closed(tmp_path: Path, text: str, found: int, newline: str) -> None:
     p = _digest(tmp_path, text, newline=newline)

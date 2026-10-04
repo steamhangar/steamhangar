@@ -163,6 +163,7 @@ jobs:
         run: |
           shellcheck .github/scripts/verify-core-nginx.sh
           shellcheck --severity=warning .github/scripts/tls-sni-probe.sh
+          shellcheck .github/scripts/apk-cert-digest.sh
       - name: Render core/docker/nginx.conf.template and run nginx -t
         run: bash .github/scripts/verify-core-nginx.sh
 
