@@ -168,6 +168,13 @@ class DownloadsController(
         }
     }
 
+    /** Every toast goes through here, so a regular toast always resets the
+     * duration a preceding bulk toast raised. */
+    private fun showToast(text: String, durationMs: Long = TOAST_MS) {
+        toastMs = durationMs
+        toast = text
+    }
+
     fun dismissToast() {
         toast = null
         toastMs = TOAST_MS
@@ -201,10 +208,10 @@ class DownloadsController(
         scope.launch {
             try {
                 jobsRepository.prefill(listOf(appid))
-                toast = strings.queuedForDownload()
+                showToast(strings.queuedForDownload())
                 refreshJobsOnce()
             } catch (e: VaultApiError) {
-                toast = e.message ?: strings.actionFailedFallback()
+                showToast(e.message ?: strings.actionFailedFallback())
             } finally {
                 retryBusyAppids = retryBusyAppids - appid
             }
@@ -256,8 +263,7 @@ class DownloadsController(
                 } else {
                     runBulkResume(resumeTargets, { id -> jobsRepository.resume(id) })
                 }
-                toastMs = BULK_TOAST_MS
-                toast = bulkSummary(kind, results).text
+                showToast(bulkSummary(kind, results).text, BULK_TOAST_MS)
             } finally {
                 bulkBusy = null
             }
@@ -270,10 +276,10 @@ class DownloadsController(
         busyJobIds = busyJobIds + jobId
         scope.launch {
             try {
-                toast = action()
+                showToast(action())
                 refreshJobsOnce() // out-of-cadence refresh, mirrors store.refreshNow()
             } catch (e: VaultApiError) {
-                toast = e.message ?: strings.actionFailedFallback()
+                showToast(e.message ?: strings.actionFailedFallback())
             } finally {
                 busyJobIds = busyJobIds - jobId
             }

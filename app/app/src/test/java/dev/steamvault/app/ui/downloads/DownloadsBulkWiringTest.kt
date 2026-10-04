@@ -39,4 +39,14 @@ class DownloadsBulkWiringTest {
         assertHas(bar, "BulkWording.SCHEDULER_NOTE", "scheduler note")
         assertHas(bar, "bar.gcActive", "gc note")
     }
+
+    @Test
+    fun `every toast goes through showToast so the bulk duration cannot linger`() {
+        val c = code("DownloadsController.kt")
+        // Only showToast (sets text) and dismissToast (null) may assign toast.
+        val assigns = Regex("""\btoast = (?!null)""").findAll(c).count()
+        assertTrue("toast is assigned outside showToast ($assigns direct non-null assignments, expected 1)", assigns == 1)
+        assertHas(c, "toastMs = durationMs", "showToast resets the duration")
+        assertHas(c, "showToast(bulkSummary(kind, results).text, BULK_TOAST_MS)", "bulk toast duration")
+    }
 }

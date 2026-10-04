@@ -486,12 +486,13 @@ def test_pausing_a_queued_gc_job_is_still_refused(conn) -> None:
 
 
 def test_pause_racing_the_workers_claim_resolves_cleanly(db_path: str) -> None:
-    """Pause (queued branch) and claim_next_job race on separate connections.
+    """Invariant check: pause (queued branch) vs claim_next_job on separate connections.
 
-    Both take BEGIN IMMEDIATE, so exactly one shape may come out per round:
-    pause wins -> 'paused', never claimed; claim wins -> 'running' with a
-    pause stop_request the worker honours. No round may lose the job (left
-    'queued' unclaimed with an 'immediate' answer, or claimed while 'paused').
+    Both take BEGIN IMMEDIATE, so every round must end in one of two valid
+    shapes: IMMEDIATE (pause won -> 'paused', never claimed) or REQUESTED
+    (claim won -> 'running' with a pause stop_request). The test does NOT
+    prove that both shapes occur - the interleaving is up to the scheduler;
+    it proves that no round loses the job or yields a third outcome.
     """
     import threading
 
