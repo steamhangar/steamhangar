@@ -34,7 +34,8 @@
  * `lib/modal-stack.js`) and then calls `DELETE /v1/clients/{client_id}`
  * (WP AG-1). The dialog names the PC, says what is deleted and that a
  * still-running agent lists the PC again with its next report (wording in
- * `lib/clients-view.js`). Success, and a 404 (already gone), drop the row
+ * `lib/clients-view.js`). Success, and the handler's own 404 (already
+ * gone, `isClientAlreadyGone`), drop the row
  * at once, force the next clients tick to re-render the list, and nudge
  * the store; any other failure leaves the row and shows the error inline on
  * it. A row whose id contains "/" gets a note instead of the button
@@ -48,13 +49,13 @@
 import { store } from "../store-singleton.js";
 import { onViewChange } from "../router.js";
 import { api } from "../api.js";
-import { ERROR_KINDS } from "../errors.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { showToast } from "./toast.js";
 import { createStatusIcon } from "./status-icon.js";
 import { createSheetDialog } from "./sheet-dialog.js";
 import {
   isRemovableClientId,
+  isClientAlreadyGone,
   UNREMOVABLE_SLASH_NOTE,
   removeConfirmTitle,
   REMOVE_WHAT_TEXT,
@@ -349,9 +350,14 @@ removeDialogEl.dataset.role = "remove-confirm";
 const removeTitle = document.createElement("h3");
 removeTitle.id = "pcs-remove-title";
 const removeWhat = document.createElement("p");
+removeWhat.id = "pcs-remove-what";
 removeWhat.textContent = REMOVE_WHAT_TEXT;
 const removeAgain = document.createElement("p");
+removeAgain.id = "pcs-remove-again";
 removeAgain.textContent = REMOVE_REREGISTER_TEXT;
+// Review fix: the two consequence paragraphs are the dialog's description,
+// read with its name when it opens (alertdialog convention).
+removeDialogEl.setAttribute("aria-describedby", "pcs-remove-what pcs-remove-again");
 const removeRow = document.createElement("div");
 removeRow.className = "row";
 const removeNo = document.createElement("button");
@@ -387,7 +393,10 @@ function openRemoveConfirm(clientId) {
   removeTitle.textContent = removeConfirmTitle(clientId);
   removeYes.textContent = "Remove";
   removeBackdrop.classList.add("on");
-  pushModal(removeBackdrop, () => closeRemoveConfirm());
+  // Review fix: Escape is ignored while the request runs, same as "Keep".
+  pushModal(removeBackdrop, () => {
+    if (!removeFlow.busy) closeRemoveConfirm();
+  });
   removeNo.focus();
 }
 
@@ -396,10 +405,16 @@ function closeRemoveConfirm({ restoreFocus = true } = {}) {
   removeBackdrop.classList.remove("on");
   popModal(removeBackdrop);
   const invoker = removeFlow.invokerEl;
+  const clientId = removeFlow.clientId;
   removeFlow.invokerEl = null;
   if (removeFlow.busy) return; // the in-flight request decides where focus goes
   removeFlow.clientId = null;
-  if (restoreFocus && invoker && typeof invoker.focus === "function") invoker.focus();
+  if (!restoreFocus) return;
+  // Review fix: a poll tick may have rebuilt the list while the dialog was
+  // open, detaching the captured invoker. Prefer the row's CURRENT button.
+  const live = clientId != null ? rowFor(clientId)?.querySelector('[data-role="remove-pc"]') : null;
+  const target = live || invoker;
+  if (target && typeof target.focus === "function") target.focus();
 }
 
 function setRemoveBusy(busy) {
@@ -435,9 +450,10 @@ async function confirmRemove() {
   try {
     await api.deleteClient(clientId);
   } catch (err) {
-    // 404: nothing left to delete for this id — another tab or an earlier
-    // click already removed it. Same end state as a 204.
-    if (!(err && err.kind === ERROR_KINDS.NOT_FOUND)) failure = err;
+    // The handler's own 404 ("Unknown client_id ..."): nothing left to delete
+    // for this id — another tab or an earlier click removed it. Same end
+    // state as a 204. Any OTHER 404 (no such route, a proxy) is an error.
+    if (!isClientAlreadyGone(err)) failure = err;
   }
   setRemoveBusy(false);
   removeFlow.clientId = null;

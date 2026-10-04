@@ -45,6 +45,8 @@ const { api, ERROR_KINDS } = await import("../js/api.js");
 const { demoRequest, resetDemoData } = await import("../js/demo-data.js");
 const {
   isRemovableClientId,
+  isClientAlreadyGone,
+  CLIENT_GONE_DETAIL_PREFIX,
   UNREMOVABLE_SLASH_NOTE,
   removeConfirmTitle,
   REMOVE_WHAT_TEXT,
@@ -164,6 +166,33 @@ test("TWIN PIN: 'a running agent adds the PC back' holds — the report route st
     "VALUE drift: the report route seems to check the client first; REMOVE_REREGISTER_TEXT may be false now",
   );
   assert.match(REMOVE_REREGISTER_TEXT, /^If vault-agent still runs on this PC, its next report adds the PC back/);
+});
+
+test("TWIN PIN: the 'already gone' prefix is the start of the DELETE handler's own 404 detail", () => {
+  const m = /def delete_client\([\s\S]*?status\.HTTP_404_NOT_FOUND,\s*detail=f"([^"{]*)\{/.exec(clientsRouterSrc);
+  assert.ok(
+    m,
+    "delete_client's 404 detail not found as detail=f\"...{...}\" — GRAMMAR drift: widen this regex, do not touch clients-view.js",
+  );
+  assert.equal(
+    m[1].trimEnd(),
+    CLIENT_GONE_DETAIL_PREFIX,
+    `VALUE drift: the handler's 404 detail now starts "${m[1]}". Update CLIENT_GONE_DETAIL_PREFIX in ` +
+      "web/js/lib/clients-view.js and the demo's 404 detail in demo-data.js (and the Android twin).",
+  );
+});
+
+test("MUTATION TARGET: only the handler's own 404 means 'already gone'", () => {
+  const e = (status, detail) => ({ status, detail, kind: status === 404 ? ERROR_KINDS.NOT_FOUND : ERROR_KINDS.SERVER });
+  assert.equal(isClientAlreadyGone(e(404, "Unknown client_id 'retired-pc'")), true);
+  assert.equal(isClientAlreadyGone(e(404, "Not Found")), false, "unknown route (server older than AG-1) or a proxy");
+  assert.equal(isClientAlreadyGone(e(404, null)), false, "a 404 with no JSON detail");
+  assert.equal(isClientAlreadyGone(e(500, "Unknown client_id 'x'")), false, "only a 404");
+  assert.equal(isClientAlreadyGone(null), false);
+});
+
+test("the demo's 404 is recognised as 'already gone' (demo behaves like the server)", async () => {
+  await assert.rejects(demoRequest("DELETE", "/v1/clients/never-reported"), (err) => isClientAlreadyGone(err));
 });
 
 test("titles and messages name the PC", () => {

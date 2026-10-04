@@ -252,12 +252,36 @@ export function agentsSummaryText(clients) {
  * `encodeURIComponent`. The remove flow reads a 404 as "already gone", so
  * offering the button for such an id would report a success that did not
  * happen; the row says why instead ({@link UNREMOVABLE_SLASH_NOTE}).
+ * The round-trip was measured against TestClient only, not through a
+ * production reverse proxy; a proxy that rejects an encoded character
+ * (e.g. a 400) lands on the inline-error path, never on "removed".
  * MUTATION TARGET.
  * @param {unknown} clientId
  * @returns {boolean}
  */
 export function isRemovableClientId(clientId) {
   return typeof clientId === "string" && clientId.length > 0 && !clientId.includes("/");
+}
+
+/** Start of the 404 detail `DELETE /v1/clients/{client_id}`'s own handler
+ * raises (`f"Unknown client_id {client_id!r}"`, routers/clients.py; pinned
+ * in web/tests/clients-remove.test.js). */
+export const CLIENT_GONE_DETAIL_PREFIX = "Unknown client_id";
+
+/**
+ * Whether a failed remove means "this PC is already gone": a 404 whose
+ * detail is the handler's own text. Any other 404 (an unknown route on a
+ * server older than AG-1, a proxy's 404 page) is a real error and is shown
+ * on the row. MUTATION TARGET.
+ * @param {unknown} err ApiError from api.deleteClient
+ */
+export function isClientAlreadyGone(err) {
+  return (
+    !!err &&
+    err.status === 404 &&
+    typeof err.detail === "string" &&
+    err.detail.startsWith(CLIENT_GONE_DETAIL_PREFIX)
+  );
 }
 
 /** Shown on a row whose id contains "/" instead of the Remove button. */

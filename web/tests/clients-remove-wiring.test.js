@@ -86,7 +86,10 @@ globalThis.fetch = async (url, init = {}) => {
   if (method === "DELETE" && p.startsWith("/v1/clients/")) {
     server.deletes.push(p);
     if (server.gate) await server.gate;
-    if (server.deleteStatus !== 204) return respond(server.deleteStatus, { detail: server.deleteStatus === 404 ? "Unknown client_id" : "database is locked" });
+    if (server.deleteStatus !== 204) {
+      const detail = server.deleteDetail ?? (server.deleteStatus === 404 ? `Unknown client_id '${decodeURIComponent(p.slice(12))}'` : "database is locked");
+      return respond(server.deleteStatus, { detail });
+    }
     if (server.removeOnDelete) {
       const id = decodeURIComponent(p.slice("/v1/clients/".length));
       server.clients = server.clients.filter((c) => c.client_id !== id);
@@ -143,6 +146,7 @@ beforeEach(async () => {
   resetModalStack(dom.document);
   server.clients = seed();
   server.deleteStatus = 204;
+  server.deleteDetail = null;
   server.removeOnDelete = true;
   server.deletes = [];
   server.gate = null;
@@ -305,4 +309,61 @@ test("MUTATION TARGET: after a remove, a tick equal to the previous list (agent 
   }
   await until(() => rowIds().length === 3, "the server's list wins on the next tick", 3000);
   assert.deepEqual(rowIds(), ["desk-pc", "retired-pc", "lab/pc-1"]);
+});
+
+// ---------------------------------------------------------------------
+// Review round 1 fixes
+// ---------------------------------------------------------------------
+
+test("MUTATION TARGET: a 404 that is NOT the handler's 'Unknown client_id' shows the error inline (row kept)", async () => {
+  await openSheetWithSeed();
+  server.deleteStatus = 404;
+  server.deleteDetail = "Not Found"; // unknown route, or a proxy's 404
+  click(removeBtn("retired-pc"));
+  click(confirmBtn("remove-confirm-yes"));
+  await until(() => errLine("retired-pc").hidden === false, "inline error shown");
+  assert.equal(errLine("retired-pc").textContent, "Could not remove retired-pc: Not Found");
+  assert.deepEqual(rowIds(), ["desk-pc", "retired-pc", "lab/pc-1"], "row kept");
+});
+
+test("MUTATION TARGET: Keep after a poll rebuilt the list focuses the row's LIVE button, not the detached one", async () => {
+  await openSheetWithSeed();
+  const oldBtn = removeBtn("retired-pc");
+  oldBtn.focus();
+  click(oldBtn);
+  server.clients = [...seed(), client("new-pc")]; // an added PC forces a full re-render
+  store.refreshNow();
+  await until(() => rowIds().includes("new-pc"), "list rebuilt while the dialog is open");
+  assert.equal(confirmIsOpen(), true, "precondition: dialog still open");
+  assert.equal(oldBtn === removeBtn("retired-pc"), false, "precondition: the invoker node was replaced");
+  click(confirmBtn("remove-cancel"));
+  assert.equal(dom.document.activeElement === removeBtn("retired-pc"), true, "focus on the live Remove button");
+  assert.equal(dom.document.activeElement.getAttribute("aria-label"), "Remove retired-pc");
+});
+
+test("MUTATION TARGET: Escape is ignored while the remove request runs", async () => {
+  let release;
+  server.gate = new Promise((r) => (release = r));
+  await openSheetWithSeed();
+  click(removeBtn("retired-pc"));
+  click(confirmBtn("remove-confirm-yes"));
+  await tick(5);
+  dom.document.dispatchEvent(fakeKeyEvent("Escape"));
+  assert.equal(confirmIsOpen(), true, "dialog stays while busy");
+  assert.equal(sheetIsOpen(), true, "and Escape did not fall through to the sheet");
+  release();
+  await until(() => !rowIds().includes("retired-pc"), "row removed");
+  assert.equal(confirmIsOpen(), false);
+});
+
+test("MUTATION TARGET: the alertdialog is described by its two consequence paragraphs", async () => {
+  await openSheetWithSeed();
+  click(removeBtn("retired-pc"));
+  const ids = confirmEl().getAttribute("aria-describedby");
+  assert.equal(ids, "pcs-remove-what pcs-remove-again");
+  const byId = new Map(confirmEl().querySelectorAll("p").map((p) => [p.id, p.textContent]));
+  for (const id of ids.split(" ")) assert.equal(typeof byId.get(id), "string", `#${id} is a paragraph in the dialog`);
+  assert.match(byId.get("pcs-remove-what"), /bypass status/);
+  assert.match(byId.get("pcs-remove-again"), /next report adds the PC back/);
+  assert.equal(confirmEl().getAttribute("aria-labelledby"), "pcs-remove-title");
 });

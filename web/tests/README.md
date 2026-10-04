@@ -2898,3 +2898,18 @@ the dialog is the narrow centred confirm card with "Keep" and a red-outlined
 "Remove"; a long PC name wraps in the title on a phone.
 
 Suite: **1108 tests, 1108 pass, 0 fail**.
+
+Review round 1 (PASS with fixes): only the handler's own 404 (detail
+starting "Unknown client_id", `isClientAlreadyGone`, prefix twin-pinned
+against `routers/clients.py`) counts as already gone; any other 404 (old
+server, proxy) is an inline error. Keep/Escape return focus to the row's
+LIVE Remove button when a poll rebuilt the list meanwhile. Escape is
+ignored while the request runs. The alertdialog is `aria-describedby` its
+two consequence paragraphs. The encoding note now says it was measured
+against TestClient, not through a reverse proxy. Tests +7 (clients-remove
+14, wiring 14). Mutations, all 8 killed: any 404 as gone; the sheet's 404
+as error; focus to the captured node only; Escape unguarded; no
+describedby; a paragraph id missing; server detail reworded (twin pin);
+demo detail reworded. Wiring file 20x in a loop: 0 failures.
+
+Suite: **1115 tests, 1115 pass, 0 fail**.
