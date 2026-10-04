@@ -1,5 +1,7 @@
 package dev.steamvault.app
 
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -47,6 +49,23 @@ class MainActivityIntentWiringTest {
         error("unbalanced '$openCh' at index $openIdx in MainActivity.kt")
     }
 
+    /** Same as [matchingClose], for a text already cut out of [code]. */
+    private fun matchingCloseIn(text: String, openIdx: Int): Int {
+        val openCh = text[openIdx]
+        val closeCh = if (openCh == '(') ')' else '}'
+        var depth = 0
+        for (i in openIdx until text.length) {
+            when (text[i]) {
+                openCh -> depth++
+                closeCh -> {
+                    depth--
+                    if (depth == 0) return i
+                }
+            }
+        }
+        error("unbalanced '$openCh' at index $openIdx")
+    }
+
     /** The body text of the block (`{...}` or `(...)`) whose header is
      * [anchor] -- the first [opener] after the anchor up to its matching
      * close. */
@@ -79,16 +98,144 @@ class MainActivityIntentWiringTest {
     }
 
     @Test
-    fun `MUTATION PIN -- handleIntent strips a consumed OpenID callback after the RETURN_TO check`() {
+    fun `MUTATION PIN -- handleIntent strips a consumed deep link after routing it and before handling it`() {
+        // WP APP-PAIR-1 replaced the bare RETURN_TO prefix check with
+        // routeIncomingLink (whose OpenID branch is that same prefix check,
+        // pinned in PairingLinkTest); the strip now covers both link kinds.
         val body = block("private fun handleIntent(", '{')
-        val returnToIdx = body.indexOf("if (!data.startsWith(SteamOpenIdConfig.RETURN_TO)) return")
-        assertTrue("expected the RETURN_TO check inside handleIntent -- body:\n$body", returnToIdx >= 0)
-        val strip = body.indexOf("intent.data = null", returnToIdx)
+        val routeIdx = body.indexOf("val route = routeIncomingLink(data)")
+        val noneIdx = body.indexOf("if (route == IncomingLinkRoute.NONE) return")
+        val strip = body.indexOf("intent.data = null")
+        val offer = body.indexOf("offerPairing(data)")
+        val openId = body.indexOf("lifecycleScope.launch")
+        assertTrue("expected the routing call inside handleIntent -- body:\n$body", routeIdx >= 0)
+        assertTrue("expected the NONE early return after routing -- body:\n$body", noneIdx > routeIdx)
         assertTrue(
-            "handleIntent must clear the consumed callback (`intent.data = null`) AFTER the RETURN_TO check " +
-                "(WP APP-FIX-1 S2) -- body:\n$body",
-            strip > returnToIdx,
+            "handleIntent must clear the consumed link (`intent.data = null`) AFTER the NONE check " +
+                "(WP APP-FIX-1 S2, WP APP-PAIR-1) -- body:\n$body",
+            strip > noneIdx,
         )
+        assertTrue("the strip must precede offering a pairing link -- body:\n$body", offer > strip)
+        assertTrue("the strip must precede the OpenID completion -- body:\n$body", openId > strip)
+    }
+
+    // ---- WP APP-PAIR-1 -----------------------------------------------------------
+
+    @Test
+    fun `MUTATION PIN -- a pairing link is offered only through the re-delivery guard`() {
+        val body = block("private fun handleIntent(", '{')
+        assertTrue(
+            "handleIntent must offer a pairing link only behind shouldOfferPairing(...) -- body:\n$body",
+            body.contains("if (shouldOfferPairing(restoredInstance, launchedFromHistory)) offerPairing(data)"),
+        )
+        assertTrue(
+            "launchedFromHistory must come from FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY -- body:\n$body",
+            body.contains("(intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0"),
+        )
+    }
+
+    @Test
+    fun `MUTATION PIN -- onCreate marks a restored instance, onNewIntent never does`() {
+        val onCreate = block("override fun onCreate(", '{')
+        assertTrue(
+            "onCreate must pass `restoredInstance = savedInstanceState != null` -- body:\n$onCreate",
+            onCreate.contains("handleIntent(intent, restoredInstance = savedInstanceState != null)"),
+        )
+        val onNewIntent = block("override fun onNewIntent(", '{')
+        assertTrue(
+            "onNewIntent must pass `restoredInstance = false` -- body:\n$onNewIntent",
+            onNewIntent.contains("handleIntent(intent, restoredInstance = false)"),
+        )
+    }
+
+    @Test
+    fun `MUTATION PIN -- the pairing dialog is composed in setContent with the process-scoped controller`() {
+        val content = block("setContent {", '{')
+        val call = content.indexOf("PairingDialog(")
+        assertTrue("setContent must compose PairingDialog(...) -- content:\n$content", call >= 0)
+        val args = content.substring(call, matchingCloseIn(content, content.indexOf('(', call)) + 1)
+        assertTrue("PairingDialog must get PROCESS_PAIRING -- call:\n$args", args.contains("controller = PROCESS_PAIRING"))
+        assertTrue(
+            "PairingDialog's onConfirm must run PROCESS_PAIRING.confirm with verifyAndApplyPairing -- call:\n$args",
+            args.contains("PROCESS_PAIRING.confirm { request -> verifyAndApplyPairing(request) }"),
+        )
+        val companion = block("companion object", '{')
+        assertTrue(
+            "PROCESS_PAIRING must live in the companion object (process scope) -- companion:\n$companion",
+            companion.contains("private val PROCESS_PAIRING = PairingController()"),
+        )
+    }
+
+    @Test
+    fun `MUTATION PIN -- pairing verifies first and stores only through the onboarding finish path`() {
+        val body = block("private suspend fun verifyAndApplyPairing(", '{')
+        val verify = body.indexOf("onboardingController.verifyConnection(choice, request.baseUrl, request.apiKey)")
+        val bail = body.indexOf("if (failure != null) return failure")
+        val firstApply = body.indexOf("applyVerifiedConnection(")
+        assertTrue("expected the shared onboarding check -- body:\n$body", verify >= 0)
+        assertTrue("a failed check must return before anything is applied -- body:\n$body", bail in (verify + 1) until firstApply)
+
+        assertFalse(
+            "pairing must not write the credential store itself (one storage path) -- body:\n$body",
+            body.contains("credentialStore.set"),
+        )
+    }
+
+    /** The `{...}` body of one `PairingContinuation.X -> { ... }` branch inside [body], cut at its own closing brace. */
+    private fun continuationBranch(body: String, name: String): String {
+        val arrow = body.indexOf("PairingContinuation.$name ->")
+        check(arrow >= 0) { "expected a `PairingContinuation.$name ->` branch in verifyAndApplyPairing -- body:\n$body" }
+        val open = body.indexOf('{', arrow)
+        check(open >= 0) { "expected a block body for PairingContinuation.$name" }
+        return body.substring(open, matchingCloseIn(body, open) + 1)
+    }
+
+    private val applyCall = "onboardingController.applyVerifiedConnection(choice, request.baseUrl, request.apiKey)"
+
+    @Test
+    fun `MUTATION PIN -- every pairing continuation branch applies the verified connection`() {
+        val body = block("private suspend fun verifyAndApplyPairing(", '{')
+        for (name in listOf("CONTINUE_ONBOARDING", "OPEN_ONBOARDING", "STORE_AND_GO_HOME")) {
+            val branch = continuationBranch(body, name)
+            assertTrue("branch $name must call `$applyCall` -- branch:\n$branch", branch.contains(applyCall))
+        }
+    }
+
+    @Test
+    fun `MUTATION PIN -- demo mode opens onboarding before applying`() {
+        val branch = continuationBranch(block("private suspend fun verifyAndApplyPairing(", '{'), "OPEN_ONBOARDING")
+        val open = branch.indexOf("openOnboarding(OnboardingMode.FIRST_RUN)")
+        assertTrue("OPEN_ONBOARDING must call openOnboarding(FIRST_RUN) -- branch:\n$branch", open >= 0)
+        assertTrue("openOnboarding must precede the apply -- branch:\n$branch", open < branch.indexOf(applyCall))
+    }
+
+    @Test
+    fun `MUTATION PIN -- going home applies, then finishes, then rebuilds the client and shows the library`() {
+        val branch = continuationBranch(block("private suspend fun verifyAndApplyPairing(", '{'), "STORE_AND_GO_HOME")
+        val order = listOf(
+            applyCall,
+            "onboardingController.finish()",
+            "refreshVaultApiClient()",
+            "destination = Destination.LIBRARY",
+        ).map { needle ->
+            val idx = branch.indexOf(needle)
+            assertTrue("STORE_AND_GO_HOME must call `$needle` -- branch:\n$branch", idx >= 0)
+            idx
+        }
+        assertEquals("STORE_AND_GO_HOME must run apply, finish, refresh, home in this order -- branch:\n$branch", order.sorted(), order)
+    }
+
+    @Test
+    fun `MUTATION PIN -- offerPairing compares against the stored connection`() {
+        val call = block("private fun offerPairing(", '{')
+        for (needle in listOf(
+            "PROCESS_PAIRING.offer(",
+            "rawLink = rawLink,",
+            "existingBaseUrl = credentialStore.getBaseUrl(),",
+            "hasExistingKey = !credentialStore.getApiKey().isNullOrBlank(),",
+        )) {
+            assertTrue("offerPairing must contain `$needle` -- body:\n$call", call.contains(needle))
+        }
     }
 
     @Test

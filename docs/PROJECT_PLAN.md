@@ -2879,6 +2879,16 @@ below carry their own later dates, item 12 is the current one).
       presence in the clients sheet matching WEB-FEAT-3. Follow-up: twin
       pins against web about-view.js / clients-view.js, onboarding step 2
       saving the id, a separate PCs entry and "PC entfernen" (WEB-FEAT-4).
+    - [x] **APP-PAIR-1** — pairing the Android app from the web UI's QR
+      code (user request 2026-10-04; web half is PAIR-1). The camera app
+      opens `steamhangar://pair?v=1&url=<enc>&key=<enc>`; the app parses it
+      (pure parser, `v=1` only, http/https origin only, key never shown or
+      logged), asks "Pair with <host>?" (replace notice when another vault
+      is configured), verifies with the onboarding check before writing,
+      stores through onboarding's `finish()`, then continues to the Steam
+      identity step or home. No API change, no camera permission. Not
+      device-tested; whether every camera app opens a custom-scheme QR is
+      open (app/README "Pairing from the web UI").
 
     **C. Hygiene (any time, small)**
     - [ ] Stale ownership leftovers after SEC-FIX-5 (frozen api code,

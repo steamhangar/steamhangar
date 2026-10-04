@@ -9,6 +9,8 @@ import dev.steamvault.app.storage.InMemoryCredentialStore
 import dev.steamvault.app.storage.ProfileKind
 import dev.steamvault.app.ui.onboarding.logic.OnboardingStep
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -158,5 +160,105 @@ class OnboardingControllerTest {
         assertEquals("http://192.168.1.50:8080", store.getBaseUrl())
         assertEquals("secret-key", store.getApiKey())
         assertEquals(ProfileKind.SYSTEM_VPN, store.getProfileKind())
+    }
+
+    // ---- WP APP-PAIR-1: the shared check and the pairing hand-over -------------
+
+    @Test
+    fun `verifyConnection refuses an invalid URL or an empty key without touching step 1`() = runTest {
+        val (controller, _, _) = controller()
+        controller.start(OnboardingMode.FIRST_RUN)
+        controller.baseUrlText = "typed-by-user"
+
+        assertEquals("invalid-url", controller.verifyConnection(ConnectivityProfileChoice.SYSTEM_VPN, "not a url", "k"))
+        assertEquals(
+            "invalid-url",
+            controller.verifyConnection(ConnectivityProfileChoice.PUBLIC_DOMAIN, "http://192.168.1.50:8080", "k"),
+        )
+        assertEquals(
+            "enter-key-first",
+            controller.verifyConnection(ConnectivityProfileChoice.SYSTEM_VPN, "http://192.168.1.50:8080", "   "),
+        )
+
+        assertEquals("typed-by-user", controller.baseUrlText)
+        assertFalse(controller.tested)
+        assertNull(controller.connectionMessage)
+    }
+
+    @Test
+    fun `MUTATION PIN -- verifyConnection runs health then the authenticated settings call with the trimmed key`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":"ok"}"""))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"readonly":false,"settings":[]}"""))
+            val (controller, store, _) = controller()
+            val baseUrl = server.url("/").toString().trimEnd('/')
+
+            assertNull(controller.verifyConnection(ConnectivityProfileChoice.SYSTEM_VPN, baseUrl, "  paired-key  "))
+
+            assertEquals("/v1/health", server.takeRequest().path)
+            val settings = server.takeRequest()
+            assertEquals("/v1/settings", settings.path)
+            assertEquals("paired-key", settings.getHeader("X-Api-Key"))
+            assertNull("verifying must not persist anything", store.getApiKey())
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `verifyConnection reports a rejected key with the onboarding wording`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":"ok"}"""))
+            server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"bad key"}"""))
+            val (controller, _, _) = controller()
+            val baseUrl = server.url("/").toString().trimEnd('/')
+
+            val failure = controller.verifyConnection(ConnectivityProfileChoice.SYSTEM_VPN, baseUrl, "wrong")
+
+            assertEquals("failure:" + ConnectionFailureReason.KeyRejected(401), failure)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `MUTATION PIN -- a verified pairing lands on the Steam identity step and persists only through finish`() {
+        val (controller, store, _) = controller()
+        controller.start(OnboardingMode.FIRST_RUN)
+
+        controller.applyVerifiedConnection(ConnectivityProfileChoice.PUBLIC_DOMAIN, "https://hangar.example.org", "paired-key")
+
+        assertEquals(OnboardingStep.STEAM, controller.step)
+        assertTrue(controller.tested)
+        assertTrue(controller.connectionOk)
+        assertEquals("ok", controller.connectionMessage)
+        assertNull("nothing is stored before finish()", store.getBaseUrl())
+
+        controller.finish()
+
+        assertEquals("https://hangar.example.org", store.getBaseUrl())
+        assertEquals("paired-key", store.getApiKey())
+        assertEquals(ProfileKind.PUBLIC_DOMAIN, store.getProfileKind())
+    }
+
+    @Test
+    fun `pairing over an existing connection replaces all three stored fields`() {
+        val store = InMemoryCredentialStore().apply {
+            setBaseUrl("http://192.168.1.50:8080")
+            setProfileKind(ProfileKind.SYSTEM_VPN)
+            setApiKey("old-key")
+        }
+        val (controller, _, _) = controller(store = store)
+
+        controller.applyVerifiedConnection(ConnectivityProfileChoice.PUBLIC_DOMAIN, "https://hangar.example.org", "new-key")
+        controller.finish()
+
+        assertEquals("https://hangar.example.org", store.getBaseUrl())
+        assertEquals("new-key", store.getApiKey())
+        assertEquals(ProfileKind.PUBLIC_DOMAIN, store.getProfileKind())
     }
 }
