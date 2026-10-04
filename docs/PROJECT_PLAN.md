@@ -3079,11 +3079,16 @@ below carry their own later dates, item 12 is the current one).
       the client side, a local forward proxy with a connection pool),
       and whether pooling by edge name fits when a client uses 14 edges.
       Needs an ADR-0017 addendum and a freeze note.
-    - [ ] **D8 SCHED-FEAT-1 — several schedule windows** (user request
+    - [ ] **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
       2026-10-04: "the night check is no use if I come home at 17:00 and
       the update came during the day"). Today `schedule_window` is one
       `HH:MM-HH:MM` range (editable in Settings, applies at the next
       sweep); allow a list of ranges. Until then `06:00-24:00` covers it.
+      Scope extended by the user on 2026-10-04: per-weekday schedules and
+      several different windows per day (e.g. Mon-Fri 12:00-16:00 and
+      22:00-06:00, weekend all day). The download-rate cap window
+      (`VAULT_UPSTREAM_RATE_WINDOW`, env-only in vault-core) must follow
+      the same schedule, or be replaced by it.
     - [ ] **D9 PAIR-2 — proper device pairing** (follows PAIR-1, user
       decision 2026-10-04). PAIR-1 hands every new device the one shared
       API key. Replace that with short-lived pairing codes (the web UI shows
