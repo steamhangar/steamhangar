@@ -19,7 +19,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -117,9 +117,30 @@ test("MUTATION TARGET: install-task.ps1 gets -AgentPath, -ServerUrl, -ApiKeyFile
   assert.ok(lines.includes("$serverUrl = 'http://192.0.2.10:8080'"));
 });
 
+test("MUTATION TARGET: the exe goes to a VERSIONED path, never over a running exe of another version", () => {
+  assert.ok(lines.includes("$agentPath = Join-Path $dir ('vault-agent-v' + $version + '.exe')"));
+  assert.equal(SNIPPET.includes("'vault-agent.exe'"), false, "no fixed, overwritable path");
+  const copy = lines.findIndex((l) => l.includes("Copy-Item -LiteralPath $kitExe -Destination $agentPath"));
+  assert.ok(lines[copy].startsWith("if (-not $sameExe) {"), "a byte-identical exe (same-version re-install) is not copied again");
+  assert.ok(lines[copy - 1].includes("$sameExe = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash -eq (Get-FileHash -Algorithm SHA256 -LiteralPath $kitExe).Hash"));
+});
+
+test("MUTATION TARGET: after a successful install the download folder is removed; uninstall-task.ps1 is kept", () => {
+  const install = lines.findIndex((l) => l.includes("-File (Join-Path $kit 'install-task.ps1')"));
+  const keep = lines.indexOf("Copy-Item -LiteralPath (Join-Path $kit 'uninstall-task.ps1') -Destination (Join-Path $dir 'uninstall-task.ps1') -Force");
+  const remove = lines.indexOf("Remove-Item -LiteralPath $kit -Recurse -Force");
+  const start = lines.indexOf("Start-ScheduledTask -TaskName 'VaultAgentReport'");
+  assert.ok(install > 0 && keep > install && remove > keep && start > remove, "install, keep the uninstaller, remove the kit, start");
+  assert.equal(lines[remove].startsWith(" "), false, "outside the try/finally: a failed install keeps the folder for inspection");
+});
+
 test("MUTATION TARGET: the key appears exactly once, quoted, after the history-off line", () => {
   const quoted = psQuote(KEY);
   assert.equal(quoted, "'k3y''with\u2019\u2019quotes&$dollar`tick\"dq'", "every single/typographic quote doubled; $ and ` are literal in single quotes");
+  // All four quote characters PowerShell accepts as a single quote.
+  assert.equal(psQuote("a\u2018b\u2019c\u201ad\u201be'f"), "'a\u2018\u2018b\u2019\u2019c\u201a\u201ad\u201b\u201be''f'");
+  assert.equal(psQuote("\u201a"), "'\u201a\u201a'");
+  assert.equal(psQuote("\u201b"), "'\u201b\u201b'");
   assert.equal(SNIPPET.split(quoted).length - 1, 1, "embedded once");
   assert.equal(SNIPPET.split("k3y").length - 1, 1, "no second copy in any other form");
   const keyLine = lines.findIndex((l) => l === `$apiKey = ${quoted}`);
@@ -154,6 +175,28 @@ test("MUTATION TARGET: agent server URL — http/https with a host, nothing else
     assert.equal(typeof r.message, "string");
   }
   assert.equal(validateAgentServerUrl(undefined).ok, false);
+});
+
+// Review finding 6: the generated command, with a dummy key, as a committed
+// fixture that CI's powershell-syntax job parses with Windows PowerShell
+// 5.1's own parser (.github/scripts/verify-ps-parse.ps1, never executed).
+// This test regenerates it and fails on any drift; refresh it with
+//   UPDATE_PS_FIXTURE=1 node --test web/tests/agent-install.test.js
+const FIXTURE = join(here, "fixtures", "windows-install-command.ps1");
+const FIXTURE_ARGS = Object.freeze({
+  version: "0.1.0-rc10",
+  serverUrl: "http://192.0.2.10:8080",
+  apiKey: "DUMMY-not-a-real-key_0123'quote",
+});
+
+test("MUTATION TARGET: the committed Windows command fixture equals what the page generates", () => {
+  const generated = windowsInstallSnippet(FIXTURE_ARGS) + "\n";
+  if (process.env.UPDATE_PS_FIXTURE === "1") writeFileSync(FIXTURE, generated);
+  const committed = readFileSync(FIXTURE, "utf8");
+  assert.equal(committed, generated, "fixture drifted: regenerate it (see the comment above) and commit it");
+  assert.equal(/[^\x00-\x7f]/.test(committed), false, "pure ASCII, so 5.1 parses it the same under any codepage");
+  const parseStep = readFileSync(join(here, "..", "..", ".github", "scripts", "verify-ps-parse.ps1"), "utf8");
+  assert.match(parseStep, /web\\tests\\fixtures\\windows-install-command\.ps1/, "CI parses the fixture");
 });
 
 test("the server-URL note names the reverse-proxy pitfall", () => {

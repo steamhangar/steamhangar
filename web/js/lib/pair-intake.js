@@ -6,8 +6,14 @@
  *
  *  1. {@link takePairFromLocation} runs synchronously at app start, before
  *     anything renders: it reads the fragment and removes it with
- *     `history.replaceState`, so the key never stays in the address bar,
- *     the history entry or a bookmark — whether the link is good or not.
+ *     `history.replaceState`, whether the link is good or not. That cleans
+ *     the address bar and THIS TAB's session-history entry (so Back and a
+ *     bookmark made afterwards do not carry the key). It does NOT clean the
+ *     browser's persistent history or address-bar suggestions, which
+ *     already recorded the full URL when it was opened and may be synced to
+ *     other devices (review finding 3). The sheet that builds the link
+ *     tells the user to delete it from the browsing history and from
+ *     wherever it was sent.
  *  2. {@link runPairIntake} decides what to do with the key and does it:
  *     same key as stored → say so; a DIFFERENT key stored → ask first
  *     (it may be another hangar), declining changes nothing; otherwise (or

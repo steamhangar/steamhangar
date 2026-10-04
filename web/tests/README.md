@@ -2956,7 +2956,8 @@ DOM. Demo mode or no stored key: a note, no option.
   first line), download exe + three scripts + SHA256SUMS into
   `%LOCALAPPDATA%\VaultAgent\release-v<version>`, `Get-FileHash` check of
   all four (stop before installing on a mismatch), `Unblock-File`, exe to
-  `%LOCALAPPDATA%\VaultAgent\vault-agent.exe`, key to a temp file locked
+  the versioned `%LOCALAPPDATA%\VaultAgent\vault-agent-v<version>.exe`
+  (review round 1), key to a temp file locked
   with icacls before it is written, `install-task.ps1 -AgentPath -ServerUrl
   -ApiKeyFile` in a child `powershell.exe -ExecutionPolicy Bypass`, temp
   file deleted in `finally`, `Start-ScheduledTask VaultAgentReport`. The key
@@ -3024,3 +3025,53 @@ command is checked by the structural tests above, not by a parser or a
 run), and a screen reader.
 
 Suite: **1174 tests, 1174 pass, 0 fail**.
+
+Review round 1 (FAIL on one blocker, the history file; its fix waits for
+a user decision, the key source is isolated in `keySourceLines` so either
+variant is a one-place change). Fixed in this round:
+- Late `/v1/about` answers: both guards in `add-device-sheet.js` pinned
+  with a gated fetch (held requests answered by the test): an answer after
+  Hide paints nothing (guard A, `windowsOption.shown`); an answer for an
+  earlier Show is dropped while the current one is pending (guard B,
+  `windows.gen`); an answer after the sheet closed leaves no secret.
+- Wording: `replaceState` cleans the address bar and this tab's history
+  entry only, NOT the browser's persistent history or address-bar
+  suggestions (which may be synced). The browser option now tells the user
+  to delete the link there and wherever it was sent.
+- The exe goes to `vault-agent-v<version>.exe`: a re-install of another
+  version never overwrites an exe the task may be running (install-task.ps1
+  re-points the task through `-AgentPath`); a same-version re-install skips
+  the copy when the file is byte-identical. Older versioned exes are left
+  in `%LOCALAPPDATA%\VaultAgent`; delete them by hand if wanted.
+- After a successful install `uninstall-task.ps1` is copied next to the
+  exe and the download folder is removed; on a failure it stays for
+  inspection.
+- Logging residuals, documented in `lib/agent-install.js`: turning off the
+  history file does not cover PowerShell transcription (Start-Transcript
+  or the transcription policy) or script block logging (policy, or 5.1's
+  automatic logging of blocks it deems suspicious; event 4104 in
+  Microsoft-Windows-PowerShell/Operational). Where those are on, the
+  command text, key included, is in them: rotate the key after the install.
+- The warning adds: copied text can also end up in clipboard history or
+  cloud clipboard sync.
+- Phone: the Android app's key rule is mirrored (`isAppPairableKey`:
+  printable ASCII, no space at either end); another key gets a note
+  instead of a QR code.
+- `psQuote` pins all four quote characters (U+2018..U+201B).
+- The generated command with a dummy key is committed as
+  `fixtures/windows-install-command.ps1` (pure ASCII). `agent-install.test.js`
+  regenerates it and fails on drift (`UPDATE_PS_FIXTURE=1` rewrites it), and
+  CI's powershell-syntax job parses it with Windows PowerShell 5.1's parser
+  (added to the parse-only list of `.github/scripts/verify-ps-parse.ps1`,
+  never executed).
+- Three node-vs-null assertions in the wiring file now compare booleans
+  (a failing one dumped the fake-DOM graph and crashed the file instead of
+  failing a test, measured by a mutation).
+
+Mutations, each alone in a scratch copy, all 12 killed: guard A removed;
+guard B removed; phone key rule gone; app key rule allowing edge spaces;
+fixed exe path; always copying the exe; download folder kept; uninstaller
+not kept; `psQuote` missing U+201A/B; fixture drift; CI not parsing the
+fixture; warning without the clipboard sentence.
+
+Suite: **1182 tests, 1182 pass, 0 fail**.

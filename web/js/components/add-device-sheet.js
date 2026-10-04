@@ -35,7 +35,14 @@ import { onViewChange } from "../router.js";
 import { showToast } from "./toast.js";
 import { createSheetDialog } from "./sheet-dialog.js";
 import { encodeQrText, qrSvgGeometry } from "../lib/qr-encode.js";
-import { apiBaseUrl, buildAppPairUri, buildBrowserPairLink, isUsableKey } from "../lib/pair-link.js";
+import {
+  APP_KEY_UNSUPPORTED_TEXT,
+  apiBaseUrl,
+  buildAppPairUri,
+  buildBrowserPairLink,
+  isAppPairableKey,
+  isUsableKey,
+} from "../lib/pair-link.js";
 import {
   AGENT_README_URL,
   AGENT_SERVER_URL_NOTE,
@@ -47,7 +54,7 @@ import {
 } from "../lib/agent-install.js";
 
 export const SECRET_WARNING =
-  "Anyone who sees this can control your hangar. Only show it on your own screen.";
+  "Anyone who sees this can control your hangar. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync.";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -221,6 +228,14 @@ function hideAll() {
 // ---- Phone ---------------------------------------------------------------
 
 function buildPhone(reveal, key) {
+  // Review finding 8: mirror the app's key rule; a code the app refuses is
+  // worse than a plain note.
+  if (!isAppPairableKey(key)) {
+    const note = el("p", "hint pair-left", APP_KEY_UNSUPPORTED_TEXT);
+    note.dataset.role = "pair-app-unsupported";
+    reveal.append(note);
+    return;
+  }
   const uri = buildAppPairUri(apiBaseUrl(window.location), key);
   reveal.append(buildQrSvg(uri));
   const link = el("a", "pair-open", "Open on this phone");
@@ -251,7 +266,7 @@ function buildBrowser(reveal, key) {
     el(
       "p",
       "foot-note",
-      "Open it in the other browser. The key sits after the #, which browsers never send to a server; the page removes it from the address bar at once and asks before replacing a different key.",
+      "Open it in the other browser. The key sits after the #, which browsers never send to a server. The page removes it from the address bar and from this tab's history at once and asks before replacing a different key, but the browser's own history (and its sync) still holds the link: delete it there afterwards, and from wherever you sent it.",
     ),
   );
 }
@@ -298,6 +313,8 @@ agentUrlInput.addEventListener("input", () => {
 });
 
 function paintWindows(reveal) {
+  // MUTATION TARGET (guard A): an About answer that lands after "Hide"
+  // must not paint the command (with the key) back into a hidden option.
   if (!windowsOption.shown) return;
   const key = getStoredApiKey();
   if (!isUsableKey(key)) return;
@@ -347,6 +364,8 @@ async function buildWindows(reveal) {
   paintWindows(reveal);
   try {
     const response = await api.about();
+    // MUTATION TARGET (guard B): an answer for an earlier Show (or an
+    // earlier open of the sheet) is dropped; only the latest request paints.
     if (gen !== windows.gen) return;
     windows.about = { response };
   } catch (err) {

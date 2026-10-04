@@ -59,6 +59,21 @@ export function isUsableKey(key) {
 }
 
 /**
+ * The key rule of the Android app (APP-PAIR-1, mirrored here, review
+ * finding 8): printable ASCII only (U+0020..U+007E) and no space at either
+ * end. A key outside it cannot be paired by QR; the phone option says so
+ * instead of showing a code the app would refuse.
+ * @param {unknown} key
+ */
+export function isAppPairableKey(key) {
+  return typeof key === "string" && /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/.test(key);
+}
+
+/** Shown instead of the QR code when {@link isAppPairableKey} fails. */
+export const APP_KEY_UNSUPPORTED_TEXT =
+  "This hangar's API key has characters the Android app does not accept (it takes printable ASCII without spaces at either end), so there is no QR code for it. Use a key made of plain letters, digits and punctuation.";
+
+/**
  * The vault-api base URL this page uses (web/js/api.js resolves every
  * request against `window.location.origin`).
  * @param {{origin: string}} location

@@ -28,7 +28,7 @@ import { test, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createFakeDom, fakeKeyEvent } from "./fake-dom.js";
 
-const KEY = "s3cr3t+key/&=ü";
+const KEY = "s3cr3t+key/&=(x) ~!";
 const ORIGIN = "http://vault.test";
 
 const dom = createFakeDom();
@@ -78,7 +78,7 @@ const SETTINGS = {
   server_version: "0.1.0-rc10",
   settings: KEYS.map(([key, effective]) => ({ key, effective, source: "default", fallback: effective, applies: "immediately", env_only: false })),
 };
-const server = { about: aboutFor("0.1.0-rc10"), aboutStatus: 200, aboutGets: 0 };
+const server = { about: aboutFor("0.1.0-rc10"), aboutStatus: 200, aboutGets: 0, hold: false, held: [] };
 function respond(status, data) {
   const text = JSON.stringify(data);
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => text };
@@ -87,6 +87,10 @@ globalThis.fetch = async (url) => {
   const p = new URL(String(url)).pathname;
   if (p === "/v1/about") {
     server.aboutGets += 1;
+    if (server.hold) {
+      // Gated: the test answers each held request itself, in any order.
+      return new Promise((resolve) => server.held.push((about) => resolve(respond(200, about))));
+    }
     return server.aboutStatus === 200 ? respond(200, server.about) : respond(server.aboutStatus, { detail: "Not Found" });
   }
   if (p === "/v1/settings") return respond(200, SETTINGS);
@@ -149,6 +153,8 @@ beforeEach(() => {
   storage.delete("steamvault.agentServerUrl");
   server.about = aboutFor("0.1.0-rc10");
   server.aboutStatus = 200;
+  server.hold = false;
+  server.held = [];
 });
 
 test("MUTATION TARGET: Settings → PCs has an 'Add' button that opens the 'Add a device' sheet", async () => {
@@ -175,7 +181,7 @@ test("MUTATION TARGET: nothing secret in the DOM until Show; every option starts
   }
   const warnings = sheet().querySelectorAll(".pair-warn").map((p) => p.textContent);
   assert.equal(warnings.length, 3);
-  for (const w of warnings) assert.match(w, /Anyone who sees this can control your hangar\. Only show it on your own screen\./);
+  for (const w of warnings) assert.match(w, /Anyone who sees this can control your hangar\. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync\./);
 });
 
 test("MUTATION TARGET: phone — Show renders the QR (SVG, role=img) and the exact URI as link and text; Hide removes it", () => {
@@ -264,7 +270,7 @@ test("MUTATION TARGET: Windows — the agent address is validated, remembered an
   assert.equal(q("agent-url-error").hidden, false);
   assert.match(q("agent-url-error").textContent, /Not a valid address/);
   assert.equal(input.getAttribute("aria-invalid"), "true");
-  assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]'), null, "no command for a bad address");
+  assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]') === null, true, "no command for a bad address");
   assert.equal(reveal("windows").querySelector('[data-role="agent-url-blocked"]') === null, false);
   assert.equal(storage.has("steamvault.agentServerUrl"), false, "an invalid value is not remembered");
 
@@ -286,7 +292,7 @@ test("MUTATION TARGET: Windows — a dev build gets the note, never a command", 
   click(showBtn("windows"));
   await until(() => reveal("windows").querySelector('[data-role="agent-no-release"]') !== null, "note");
   assert.match(reveal("windows").querySelector('[data-role="agent-no-release"]').textContent, /"dev-1a2b3c4", which is not a published release/);
-  assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]'), null);
+  assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]') === null, true);
   assert.equal(secretInDom(), false, "the note carries no key");
 });
 
@@ -343,4 +349,64 @@ test("MUTATION TARGET: pairing confirm — alertdialog, focus on Keep; Keep/Esca
   click(btn("pair-replace"));
   assert.equal(await answer, true);
   assert.equal(domStrings(dlg()).some((s) => s.includes("s3cr3t")), false, "the dialog names no key");
+});
+
+// ---- Review finding 2: late /v1/about answers (gated fetch) ---------------
+
+const snippetShown = () => reveal("windows").querySelector('[data-role="agent-snippet"]') !== null;
+const readingShown = () => /Reading the server's release version/.test(reveal("windows").textContent);
+
+test("MUTATION TARGET (guard A): an About answer that lands after Hide paints nothing", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  click(showBtn("windows"));
+  await until(() => server.held.length === 1, "About request in flight");
+  click(showBtn("windows")); // Hide while the request is still open
+  server.held.shift()(aboutFor("0.1.0-rc10"));
+  await tick(30);
+  assert.equal(reveal("windows").hidden, true);
+  assert.equal(reveal("windows").childNodes.length, 0, "nothing painted into the hidden option");
+  assert.equal(secretInDom(), false);
+});
+
+test("MUTATION TARGET (guard B): an answer for an earlier Show is dropped; only the latest request paints", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  click(showBtn("windows"));
+  await until(() => server.held.length === 1, "first request");
+  click(showBtn("windows")); // Hide
+  click(showBtn("windows")); // Show again: a second request
+  await until(() => server.held.length === 2, "second request");
+  server.held.shift()(aboutFor("0.1.0-rc10")); // the stale one answers first
+  await tick(30);
+  assert.equal(snippetShown(), false, "the stale answer does not paint the command");
+  assert.equal(readingShown(), true, "still waiting for the current request");
+  server.held.shift()(aboutFor("0.1.0-rc10"));
+  await until(snippetShown, "the current answer paints");
+});
+
+test("a late About answer after the sheet closed leaves no secret in the DOM", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  click(showBtn("windows"));
+  await until(() => server.held.length === 1, "request in flight");
+  closeSheetIfOpen();
+  server.held.shift()(aboutFor("0.1.0-rc10"));
+  await tick(30);
+  assert.equal(secretInDom(), false);
+  assert.equal(reveal("windows").childNodes.length, 0);
+});
+
+test("MUTATION TARGET: phone — a key the app does not accept gets a note, never a QR", () => {
+  for (const bad of ["schlüssel-1", " leading", "trailing "]) {
+    storage.set("steamvault.apiKey", bad);
+    openAddDeviceSheet();
+    click(showBtn("phone"));
+    assert.equal(reveal("phone").querySelector('[data-role="pair-qr"]') === null, true, `no QR for ${JSON.stringify(bad)}`);
+    assert.match(reveal("phone").querySelector('[data-role="pair-app-unsupported"]').textContent, /printable ASCII/);
+    click(showBtn("browser"));
+    assert.equal(reveal("browser").querySelector('[data-role="pair-browser-link"]') === null, false, "the browser option still works");
+    closeSheetIfOpen();
+    resetModalStack(dom.document);
+  }
 });

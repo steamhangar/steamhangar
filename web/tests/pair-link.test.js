@@ -14,6 +14,7 @@ import {
   buildAppPairUri,
   buildBrowserPairLink,
   encodePairComponent,
+  isAppPairableKey,
   isUsableKey,
   pairIntakeAction,
   readPairFragment,
@@ -98,6 +99,15 @@ test("isUsableKey: non-empty string without control characters", () => {
   assert.equal(isUsableKey("a\tb"), false);
   assert.equal(isUsableKey("a\u007fb"), false);
   assert.equal(isUsableKey("a\ud800b"), false, "a lone surrogate cannot be percent-encoded");
+});
+
+test("MUTATION TARGET: the app's key rule — printable ASCII, no space at either end", () => {
+  for (const ok of ["a", "abc", "a b", "!~", "s3cr3t+key/&=(x) ~!", "x".repeat(200)]) {
+    assert.equal(isAppPairableKey(ok), true, JSON.stringify(ok));
+  }
+  for (const bad of ["", " ", " a", "a ", "schlüssel", "a\tb", "a\u007fb", " a", null, 42]) {
+    assert.equal(isAppPairableKey(bad), false, JSON.stringify(bad));
+  }
 });
 
 test("urlWithoutFragment keeps path and query", () => {

@@ -21,16 +21,34 @@
  *     stops before installing anything on a mismatch. Honest limit: the sums
  *     come from the same release, so this catches a broken or swapped
  *     download, not a compromised release;
- *  4. `Unblock-File`s them, copies the exe to
- *     `%LOCALAPPDATA%\VaultAgent\vault-agent.exe` (a stable path the task
- *     keeps across upgrades);
+ *  4. `Unblock-File`s them, copies the exe to the VERSIONED path
+ *     `%LOCALAPPDATA%\VaultAgent\vault-agent-v<version>.exe` (review
+ *     finding 4: a re-install of another version never overwrites an exe
+ *     the task may be running right now; install-task.ps1 re-points the
+ *     task through -AgentPath; a same-version re-install skips the copy when
+ *     the file is already byte-identical). Older versioned exes are left in
+ *     place;
  *  5. writes the key to a temp file locked to the current user with icacls
  *     BEFORE the key is written (install-task.ps1's own, measured-on-
  *     Windows approach), runs `install-task.ps1 -AgentPath ... -ServerUrl
  *     ... -ApiKeyFile <temp>` in a child `powershell.exe -ExecutionPolicy
  *     Bypass` (agent/README.md "Running the scripts"), and deletes the temp
  *     file in a `finally`;
- *  6. starts the task `VaultAgentReport` once, so the PC reports now.
+ *  6. copies `uninstall-task.ps1` next to the exe (it needs nothing beside
+ *     it) and removes the download folder (review finding 9), then starts
+ *     the task `VaultAgentReport` once, so the PC reports now. On a failure
+ *     the folder stays, so the downloaded files can be inspected.
+ *
+ * Logging residuals (review finding 5), stated plainly: turning off the
+ * PSReadLine history file does not cover other places a pasted command can
+ * end up. If PowerShell transcription is on (Start-Transcript, or the
+ * "Turn on PowerShell Transcription" policy), the transcript holds the
+ * command text. If script block logging is on (policy, or PowerShell 5.1's
+ * automatic logging of script blocks it deems suspicious), Windows event
+ * 4104 in Microsoft-Windows-PowerShell/Operational holds the block text.
+ * Any of these that carries the command carries the key. On a managed PC
+ * with such logging, rotate the key after the install (or wait for D9
+ * PAIR-2's per-device keys).
  *
  * install-task.ps1 finds the Steam library itself (registry SteamPath,
  * AGENT-FIX-2), so no library path is asked here.
@@ -144,9 +162,20 @@ export function psQuote(value) {
 }
 
 /**
- * The install command. `apiKey` is embedded exactly once (the `$apiKey`
- * line); see the module header for how it is kept out of the history file
- * and off the disk.
+ * How the command gets the key into `$apiKey`: today one single-quoted
+ * literal (the key is in the command text exactly once). Kept as its own
+ * function so the way the key arrives can change in one place (review
+ * finding 1, decision pending) without touching the rest of the command.
+ * @param {string} apiKey
+ * @returns {string[]}
+ */
+function keySourceLines(apiKey) {
+  return [`$apiKey = ${psQuote(apiKey)}`];
+}
+
+/**
+ * The install command. See the module header for what it does, and for
+ * where the key can still end up (logging residuals).
  *
  * @param {{version: string, serverUrl: string, apiKey: string}} args
  * @returns {string}
@@ -164,7 +193,7 @@ export function windowsInstallSnippet({ version, serverUrl, apiKey }) {
     "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12",
     `$version = ${psQuote(version)}`,
     `$serverUrl = ${psQuote(serverUrl)}`,
-    `$apiKey = ${psQuote(apiKey)}`,
+    ...keySourceLines(apiKey),
     `$base = ${psQuote(`${RELEASE_DOWNLOAD_BASE}/${assets.tag}`)}`,
     `$exeName = ${psQuote(assets.exe)}`,
     "$dir = Join-Path $env:LOCALAPPDATA 'VaultAgent'",
@@ -182,8 +211,11 @@ export function windowsInstallSnippet({ version, serverUrl, apiKey }) {
     "  if ($want[$n] -ne $got) { throw ('SHA256 check failed for ' + $n + '. Nothing was installed.') }",
     "}",
     "Get-ChildItem -LiteralPath $kit | Unblock-File",
-    "$agentPath = Join-Path $dir 'vault-agent.exe'",
-    "Copy-Item -LiteralPath (Join-Path $kit $exeName) -Destination $agentPath -Force",
+    "$kitExe = Join-Path $kit $exeName",
+    "$agentPath = Join-Path $dir ('vault-agent-v' + $version + '.exe')",
+    "$sameExe = $false",
+    "if (Test-Path -LiteralPath $agentPath) { $sameExe = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash -eq (Get-FileHash -Algorithm SHA256 -LiteralPath $kitExe).Hash }",
+    "if (-not $sameExe) { Copy-Item -LiteralPath $kitExe -Destination $agentPath -Force }",
     "$keyFile = Join-Path $kit ('key-' + [guid]::NewGuid().ToString('N') + '.tmp')",
     "try {",
     "  New-Item -ItemType File -Path $keyFile | Out-Null",
@@ -195,6 +227,8 @@ export function windowsInstallSnippet({ version, serverUrl, apiKey }) {
     "} finally {",
     "  Remove-Item -LiteralPath $keyFile -Force -ErrorAction SilentlyContinue",
     "}",
+    "Copy-Item -LiteralPath (Join-Path $kit 'uninstall-task.ps1') -Destination (Join-Path $dir 'uninstall-task.ps1') -Force",
+    "Remove-Item -LiteralPath $kit -Recurse -Force",
     `Start-ScheduledTask -TaskName ${psQuote(AGENT_TASK_NAME)}`,
     "Write-Host 'vault-agent is installed and its first report has started. You can close this window.'",
     "}",
