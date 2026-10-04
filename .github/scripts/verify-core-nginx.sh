@@ -58,6 +58,7 @@ for f in "$dockerfile" \
          "$core_dir/nginx/vault-upstream-rate.conf" \
          "$core_dir/docker/28-vault-upstream-pool.sh" \
          "$core_dir/nginx/vault-upstream-pool.conf" \
+         "$core_dir/nginx/vault-upstream-cap.conf" \
          "$core_dir/tests/test-upstream-pool-hook.sh" \
          "$core_dir/docker/29-vault-build-version.sh" \
          "$core_dir/tests/test-build-version-hook.sh" \
@@ -605,6 +606,27 @@ render_and_test() {
                     status=1
                 fi
                 echo "upstream pool include: $(grep -c "^upstream " "$pc" || true) group(s), expected $EXPECTED_POOL_GROUPS"
+            fi
+
+            # --- WP CORE-FIX-4a (ADR-0021): edge mode parses ----------------
+            # The scenario own render is the legacy/no-edge shape; re-render
+            # the pool include in edge mode (one pooled group, map default =
+            # the edge, limit_conn cap include) and let nginx -t parse the same
+            # template with it: a variable proxy_pass naming the group, the
+            # limit_conn inside @miss, the log variables. Then restore the
+            # scenario render so the live probes below run against it. A
+            # minimal proof; the full edge scenario matrix is CORE-FIX-4b.
+            if [ "$nginx_t_status" = "0" ]; then
+                VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net VAULT_UPSTREAM_MAX_CONNS=16 \
+                    sh /docker-entrypoint.d/28-vault-upstream-pool.sh > /tmp/edge-render.log 2>&1 \
+                    || { echo "FAIL (edge): the hook refused the default edge"; cat /tmp/edge-render.log; status=1; }
+                if nginx -t -p /vault -c "$conf" > /tmp/edge-nginx-t.log 2>&1; then
+                    echo "edge mode OK: nginx -t accepts the pooled edge + limit_conn cap include"
+                else
+                    echo "FAIL (edge): nginx -t rejects the edge-mode render:"; cat /tmp/edge-nginx-t.log; status=1
+                fi
+                sh /docker-entrypoint.d/28-vault-upstream-pool.sh > /tmp/edge-restore.log 2>&1 \
+                    || { echo "FAIL (edge): could not restore the scenario render"; cat /tmp/edge-restore.log; status=1; }
             fi
 
             # --- Pre-freeze review S1/S2/P3/N5: request guards, LIVE -------

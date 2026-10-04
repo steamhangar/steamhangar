@@ -1,6 +1,42 @@
 #!/bin/sh
 # SteamHangar vault-core container hook -- upstream keepalive pool per Steam
-# CDN edge (WP CORE-FEAT-1b, docs/adr/0017-upstream-keepalive-pool.md).
+# CDN edge (WP CORE-FEAT-1b, docs/adr/0017-upstream-keepalive-pool.md) and, since
+# WP CORE-FIX-4a, the ONE pooled edge every MISS goes to plus the global
+# upstream connection cap (docs/adr/0021-one-pooled-upstream-and-global-
+# connection-cap.md).
+#
+# ADR-0021 (this hook renders TWO files, usage: [pool-out] [cap-out]):
+#   vault-upstream-pool.conf  always defines
+#                                 map $vault_upstream_host $vault_upstream_target
+#                             which @miss uses as Proxy host AND Host header.
+#     EDGE MODE   (VAULT_UPSTREAM_EDGE set, one host name): one upstream group
+#                 <edge> { zone; server <edge> resolve max_fails=0; keepalive C;
+#                 keepalive_timeout 50s; } and the map's default is <edge>, so
+#                 every allowed MISS, whatever Host the client sent, is dialled
+#                 on that one pooled name. VAULT_UPSTREAM_POOL_HOSTS is ignored
+#                 (logged): an edge equal to a listed name would otherwise be a
+#                 duplicate group.
+#     LEGACY MODE (VAULT_UPSTREAM_EDGE empty/unset, the rollback switch):
+#                 today's per-name groups below, and the map's default is
+#                 $vault_upstream_host (identity: the client's own edge).
+#   vault-upstream-cap.conf   `limit_conn vault_upstream_total C;`, both modes,
+#                             included inside location @miss.
+#
+#   VAULT_UPSTREAM_EDGE        exactly one host name, validated like a pool host
+#                              (lowercase, charset, DNS lengths, family suffix,
+#                              not the marker). More than one token is refused.
+#   VAULT_UPSTREAM_MAX_CONNS   C: digits only, no leading zero, 1..64. Empty or
+#                              unset = 16. 0, off and garbage are refused: there
+#                              is no off switch (ADR-0021 decision 3).
+#   VAULT_PREFILL_MAX_THREADS  floor for C. compose forwards
+#                              ${VAULT_PREFILL_MAX_THREADS:-8}, and vault-api's
+#                              own default is 8, so empty/unset counts as 8.
+#                              C below it is refused (a prefill alone would
+#                              otherwise run into 503s). A value that is not a
+#                              whole number 1..64 is ignored here: vault-api
+#                              refuses to boot on it.
+#   Without the 2nd argument the cap file goes next to the pool file
+#   (no arguments at all: /etc/nginx/vault-upstream-cap.conf).
 #
 # Renders /etc/nginx/vault-upstream-pool.conf, which nginx.conf pulls in with
 # `include vault-upstream-pool.conf;` (http level, directly after the rate
@@ -112,6 +148,7 @@ log()  { echo "$ME: $*"; }
 die()  { echo "$ME: FATAL: $*" >&2; exit 1; }
 
 OUT="${1:-/etc/nginx/vault-upstream-pool.conf}"
+CAP_OUT="${2:-$(dirname "$OUT")/vault-upstream-cap.conf}"
 
 # ADR-0017 decision 3A. check-config-drift.sh pins both numbers.
 KEEPALIVE_PER_GROUP=8
@@ -127,42 +164,50 @@ FAMILY_2=steamserver.net
 # The exact-string map entry that never yields itself.
 MARKER=lancache.steamcontent.com
 
+# ADR-0021 decision 3: default 16, range 1..64, no off switch.
+CAP_DEFAULT=16
+CAP_MIN=1
+CAP_MAX=64
+# vault-api's default for VAULT_PREFILL_MAX_THREADS (api/vault_api/config.py).
+PREFILL_DEFAULT=8
+CAP_ZONE=vault_upstream_total
+
 HOSTS_RAW="${VAULT_UPSTREAM_POOL_HOSTS:-}"
+EDGE_RAW="${VAULT_UPSTREAM_EDGE:-}"
+CAP_RAW="${VAULT_UPSTREAM_MAX_CONNS:-}"
+PREFILL_RAW="${VAULT_PREFILL_MAX_THREADS:-}"
 
 # --- validate ----------------------------------------------------------------
-HOSTS=""
-COUNT=0
-# No globbing: a `*` token must reach the charset check as a literal.
-set -f
-# Word splitting on the default IFS (space, tab, newline) is the tokenizer;
-# runs of whitespace collapse and empty tokens cannot occur.
-# shellcheck disable=SC2086
-for h in $HOSTS_RAW; do
+# check_host <variable-name> <host>: the ADR-0017 host rules, shared by the
+# pool list and the ADR-0021 edge. Dies with a message naming the variable.
+check_host() {
+    lbl=$1
+    h=$2
     case "$h" in
         *:*)
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' carries a scheme or port. Group names must
+            die "$lbl: '$h' carries a scheme or port. Group names must
   equal the bare host name \$vault_upstream_host yields (no http://, and nginx
   strips :port from \$host before the allowlist map runs). Refusing to start." ;;
     esac
     case "$h" in
         *[A-Z]*)
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' contains uppercase. The list must equal
+            die "$lbl: '$h' contains uppercase. The list must equal
   what \$vault_upstream_host yields, which is lowercase; write the name in
   lowercase. Refusing to start." ;;
     esac
     case "$h" in
         *[!a-z0-9.-]*)
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is not a host name (allowed: labels of
+            die "$lbl: '$h' is not a host name (allowed: labels of
   a-z 0-9 '-' joined by '.'). Also check for invisible characters, e.g. a CR
   from a Windows-edited .env. Refusing to start." ;;
         .*|*.|*..*)
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' has an empty label (leading, trailing or
+            die "$lbl: '$h' has an empty label (leading, trailing or
   doubled '.'). Refusing to start." ;;
     esac
     # RFC 1035 lengths: labels <= 63, whole name <= 253. Labels are non-empty
     # at this point, so the dot-split loop ends on the last label.
     if [ "${#h}" -gt 253 ]; then
-        die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is ${#h} characters long; a host name may have
+        die "$lbl: '$h' is ${#h} characters long; a host name may have
   at most 253. nginx would accept it and then log 'could not be resolved' for
   the container's lifetime. Refusing to start."
     fi
@@ -170,7 +215,7 @@ for h in $HOSTS_RAW; do
     while :; do
         _label=${_rest%%.*}
         if [ "${#_label}" -gt 63 ]; then
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' has a label of ${#_label} characters
+            die "$lbl: '$h' has a label of ${#_label} characters
   ('$_label'); a DNS label may have at most 63. Refusing to start."
         fi
         case "$_rest" in
@@ -180,110 +225,232 @@ for h in $HOSTS_RAW; do
     done
     case "$h" in
         "$FAMILY_1"|"$FAMILY_2")
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is a bare family name, not an edge. The
+            die "$lbl: '$h' is a bare family name, not an edge. The
   allowlist map needs at least one label in front, e.g. cache1-fra2.$FAMILY_1.
   Refusing to start." ;;
         *."$FAMILY_1"|*."$FAMILY_2") : ;;
         *)
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is outside the Host allowlist families
+            die "$lbl: '$h' is outside the Host allowlist families
   (*.$FAMILY_1, *.$FAMILY_2 -- the \`map \$host \$vault_upstream_host\` block in
   nginx.conf). vault-core would never dial it, but would re-resolve it every
   30s for nothing. Refusing to start." ;;
     esac
     case "$h" in
         "$MARKER")
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is the client-side discovery marker, not an
+            die "$lbl: '$h' is the client-side discovery marker, not an
   edge: the allowlist map rewrites it to dist-fra1.discovery.$FAMILY_2, so a
-  group of that name can never match and the name has no public A record. List
+  group of that name can never match and the name has no public A record. Use
   dist-fra1.discovery.$FAMILY_2 instead. Refusing to start." ;;
     esac
-    case " $HOSTS " in
-        *" $h "*)
-            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is listed twice. Refusing to start." ;;
-    esac
-    COUNT=$((COUNT + 1))
-    if [ "$COUNT" -gt "$MAX_HOSTS" ]; then
-        die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is edge number $COUNT, above the ceiling of
+}
+
+# No globbing: a `*` token must reach the charset check as a literal.
+set -f
+
+# --- the cap C (ADR-0021 decision 3) -----------------------------------------
+case "$CAP_RAW" in
+    "") CAP=$CAP_DEFAULT ;;
+    *[!0-9]*)
+        die "VAULT_UPSTREAM_MAX_CONNS='$CAP_RAW' is not a whole number (digits only, $CAP_MIN..$CAP_MAX).
+  There is no off switch: the cap is what keeps vault-core's upstream
+  connections below the carrier-grade NAT's port quota (ADR-0021 decision 3).
+  Refusing to start." ;;
+    0*)
+        die "VAULT_UPSTREAM_MAX_CONNS='$CAP_RAW': 0 and leading zeros are not accepted
+  (whole number $CAP_MIN..$CAP_MAX, no off switch -- ADR-0021 decision 3). Refusing to start." ;;
+    *)
+        if [ "${#CAP_RAW}" -gt 2 ] || [ "$CAP_RAW" -lt "$CAP_MIN" ] || [ "$CAP_RAW" -gt "$CAP_MAX" ]; then
+            die "VAULT_UPSTREAM_MAX_CONNS=$CAP_RAW is outside $CAP_MIN..$CAP_MAX (ADR-0021 decision 3).
+  Refusing to start."
+        fi
+        CAP=$CAP_RAW ;;
+esac
+
+# The prefill floor. Empty/unset counts as the default 8: compose forwards
+# ${VAULT_PREFILL_MAX_THREADS:-8}, and vault-api itself defaults to 8, so a
+# lowered cap without the variable would still collide with a prefill's 8
+# threads. A value that is not a whole number 1..64 is ignored (vault-api
+# refuses to boot on it).
+PREFILL=""
+case "$PREFILL_RAW" in
+    "") PREFILL=$PREFILL_DEFAULT ;;
+    *[!0-9]*|0*) : ;;
+    *)
+        if [ "${#PREFILL_RAW}" -le 2 ] && [ "$PREFILL_RAW" -ge 1 ] && [ "$PREFILL_RAW" -le 64 ]; then
+            PREFILL=$PREFILL_RAW
+        fi ;;
+esac
+if [ -n "$PREFILL" ] && [ "$CAP" -lt "$PREFILL" ]; then
+    die "VAULT_UPSTREAM_MAX_CONNS=$CAP is below the prefill thread count ${PREFILL}
+  (VAULT_PREFILL_MAX_THREADS=${PREFILL_RAW:-<empty, default $PREFILL_DEFAULT>}). A prefill alone would then run into
+  503s from the cap (ADR-0021 decision 3). Raise the cap to at least $PREFILL or lower
+  VAULT_PREFILL_MAX_THREADS. Refusing to start."
+fi
+
+# --- edge or legacy mode ------------------------------------------------------
+# shellcheck disable=SC2086
+set -- $EDGE_RAW
+EDGE=""
+if [ "$#" -gt 1 ]; then
+    die "VAULT_UPSTREAM_EDGE='$EDGE_RAW' names $# hosts; it takes exactly one (ADR-0021:
+  one pooled edge for every MISS). Refusing to start."
+elif [ "$#" -eq 1 ]; then
+    EDGE=$1
+    check_host "VAULT_UPSTREAM_EDGE" "$EDGE"
+fi
+
+HOSTS=""
+COUNT=0
+if [ -n "$EDGE" ]; then
+    # Edge mode: the per-name list is ignored, not validated.
+    # shellcheck disable=SC2086
+    set -- $HOSTS_RAW
+    if [ "$#" -gt 0 ]; then
+        log "VAULT_UPSTREAM_POOL_HOSTS is ignored while VAULT_UPSTREAM_EDGE is set (edge mode); set VAULT_UPSTREAM_EDGE empty for the per-name pool"
+    fi
+    GROUPS_N=1
+else
+    # Word splitting on the default IFS (space, tab, newline) is the tokenizer;
+    # runs of whitespace collapse and empty tokens cannot occur.
+    # shellcheck disable=SC2086
+    for h in $HOSTS_RAW; do
+        check_host "VAULT_UPSTREAM_POOL_HOSTS" "$h"
+        case " $HOSTS " in
+            *" $h "*)
+                die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is listed twice. Refusing to start." ;;
+        esac
+        COUNT=$((COUNT + 1))
+        if [ "$COUNT" -gt "$MAX_HOSTS" ]; then
+            die "VAULT_UPSTREAM_POOL_HOSTS: '$h' is edge number $COUNT, above the ceiling of
   $MAX_HOSTS edges (keepalive $KEEPALIVE_PER_GROUP idle connections per group, at most
   $MAX_IDLE_TOTAL idle in total -- ADR-0017 decision 3A, sized against the CGNAT port
   quota measured in the first rollout). Shorten the list. Refusing to start."
-    fi
-    HOSTS="${HOSTS:+$HOSTS }$h"
-done
+        fi
+        HOSTS="${HOSTS:+$HOSTS }$h"
+    done
+    GROUPS_N=$COUNT
+fi
 set +f
 
 # --- render ------------------------------------------------------------------
-# The header is the ENTIRE empty render and must stay byte-identical to
-# core/nginx/vault-upstream-pool.conf (check-config-drift.sh step 2d, cmp).
-# Rendered text must not contain the DNS directive's name anywhere (the
-# self-check greps the whole file, comments included).
+# The legacy header and map are the ENTIRE empty render and must stay
+# byte-identical to core/nginx/vault-upstream-pool.conf (check-config-drift.sh
+# step 2d, cmp); the cap render with the default C likewise equals
+# core/nginx/vault-upstream-cap.conf. Rendered text must not contain the DNS
+# directive's name anywhere (the self-check greps the whole file, comments
+# included).
 tmp="$OUT.tmp.$$"
-trap 'rm -f "$tmp"' EXIT INT TERM
+cap_tmp="$CAP_OUT.tmp.$$"
+trap 'rm -f "$tmp" "$cap_tmp"' EXIT INT TERM
 {
-    echo "# SteamHangar vault-core -- upstream keepalive pool include (ADR-0017)."
+    echo "# SteamHangar vault-core -- upstream keepalive pool include (ADR-0017, ADR-0021)."
     echo "# Rendered at container start by /docker-entrypoint.d/$ME from"
-    echo "# VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md \"Upstream"
-    echo "# keepalive pool\". Natively (core/nginx/vault-upstream-pool.conf) this file is"
-    echo "# the empty render, byte for byte (check-config-drift.sh asserts it)."
-    if [ "$COUNT" -eq 0 ]; then
-        echo "# Pooled edges: 0 (no pool; every MISS opens its own upstream connection)."
+    echo "# VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md"
+    echo "# \"Upstream keepalive pool\". Natively (core/nginx/vault-upstream-pool.conf) this file"
+    echo "# is the empty legacy render, byte for byte (check-config-drift.sh asserts it)."
+    if [ -n "$EDGE" ]; then
+        echo "# Edge mode (ADR-0021): every allowed MISS goes to $EDGE, pooled with"
+        echo "# keepalive $CAP (= the connection cap). The Host header the client sent only"
+        echo "# has to pass the allowlist; it never selects the upstream."
+        echo "# The group's zone is required by 'server ... resolve'. No DNS directive inside"
+        echo "# the group: it inherits the http-level setting, ipv6=off valid=30s included."
+        echo "upstream $EDGE {"
+        echo "    zone $ZONE_NAME $ZONE_SIZE;"
+        echo "    server $EDGE resolve max_fails=0;"
+        echo "    keepalive $CAP;"
+        echo "    keepalive_timeout $KEEPALIVE_TIMEOUT;"
+        echo "}"
+        TARGET_DEFAULT=$EDGE
     else
-        echo "# Pooled edges: $COUNT (keepalive $KEEPALIVE_PER_GROUP idle per group, ceiling $MAX_IDLE_TOTAL idle = at most $MAX_HOSTS groups)."
-        echo "# The shared zone's size is given once, on the first group (nginx docs, zone:"
-        echo "# \"Several groups may share the same zone. In this case, it is enough to"
-        echo "# specify the size only once.\"). No DNS directive inside a group: each one"
-        echo "# inherits the http-level setting, ipv6=off valid=30s included (ADR-0017 (c))."
-        _i=0
-        # shellcheck disable=SC2086
-        for h in $HOSTS; do
-            _i=$((_i + 1))
-            echo "upstream $h {"
-            if [ "$_i" -eq 1 ]; then
-                echo "    zone $ZONE_NAME $ZONE_SIZE;"
-            else
-                echo "    zone $ZONE_NAME;"
-            fi
-            echo "    server $h resolve max_fails=0;"
-            echo "    keepalive $KEEPALIVE_PER_GROUP;"
-            echo "    keepalive_timeout $KEEPALIVE_TIMEOUT;"
-            echo "}"
-        done
+        if [ "$COUNT" -eq 0 ]; then
+            echo "# Pooled edges: 0 (no pool; every MISS opens its own upstream connection)."
+        else
+            echo "# Pooled edges: $COUNT (keepalive $KEEPALIVE_PER_GROUP idle per group, ceiling $MAX_IDLE_TOTAL idle = at most $MAX_HOSTS groups)."
+            echo "# The shared zone's size is given once, on the first group (nginx docs, zone:"
+            echo "# \"Several groups may share the same zone. In this case, it is enough to"
+            echo "# specify the size only once.\"). No DNS directive inside a group: each one"
+            echo "# inherits the http-level setting, ipv6=off valid=30s included (ADR-0017 (c))."
+            _i=0
+            # shellcheck disable=SC2086
+            for h in $HOSTS; do
+                _i=$((_i + 1))
+                echo "upstream $h {"
+                if [ "$_i" -eq 1 ]; then
+                    echo "    zone $ZONE_NAME $ZONE_SIZE;"
+                else
+                    echo "    zone $ZONE_NAME;"
+                fi
+                echo "    server $h resolve max_fails=0;"
+                echo "    keepalive $KEEPALIVE_PER_GROUP;"
+                echo "    keepalive_timeout $KEEPALIVE_TIMEOUT;"
+                echo "}"
+            done
+        fi
+        TARGET_DEFAULT='$vault_upstream_host'
     fi
+    echo "# \$vault_upstream_target: the name @miss dials and sends as Host (ADR-0021)."
+    echo "map \$vault_upstream_host \$vault_upstream_target {"
+    echo "    default $TARGET_DEFAULT;"
+    echo "}"
 } > "$tmp"
 
+{
+    echo "# SteamHangar vault-core -- global upstream connection cap include (ADR-0021)."
+    echo "# Rendered at container start by /docker-entrypoint.d/$ME from"
+    echo "# VAULT_UPSTREAM_MAX_CONNS -- do not edit; see core/README.md \"Upstream edge and"
+    echo "# connection cap\". Included inside location @miss only. Natively"
+    echo "# (core/nginx/vault-upstream-cap.conf) this file is the default render (16),"
+    echo "# byte for byte (check-config-drift.sh asserts it). Over the cap: 503."
+    echo "limit_conn $CAP_ZONE $CAP;"
+} > "$cap_tmp"
+
 # --- assert the render before nginx sees it ----------------------------------
-# Independent of how the file was produced: re-read it and check the shape.
-assert_fail() { die "rendered $OUT failed its self-check: $*. Refusing to start
-  with a pool include that does not match VAULT_UPSTREAM_POOL_HOSTS."; }
+# Independent of how the files were produced: re-read them and check the shape.
+assert_fail() { die "rendered $OUT / $CAP_OUT failed its self-check: $*. Refusing to start
+  with an include that does not match the environment."; }
 
 count_lines() { grep -c -- "$1" "$tmp" || true; }
 
 blocks=$(count_lines '^upstream [a-z0-9.-]* {$')
-[ "$blocks" = "$COUNT" ] || assert_fail "expected $COUNT upstream blocks, found $blocks"
+[ "$blocks" = "$GROUPS_N" ] || assert_fail "expected $GROUPS_N upstream blocks, found $blocks"
 opens=$(count_lines '{$')
 closes=$(count_lines '^}$')
-if [ "$opens" != "$COUNT" ] || [ "$closes" != "$COUNT" ]; then
-    assert_fail "unbalanced braces ($opens open, $closes close, $COUNT expected)"
+EXPECT_BRACES=$((GROUPS_N + 1))
+if [ "$opens" != "$EXPECT_BRACES" ] || [ "$closes" != "$EXPECT_BRACES" ]; then
+    assert_fail "unbalanced braces ($opens open, $closes close, $EXPECT_BRACES expected)"
 fi
-if grep -qw 'resolver' "$tmp"; then
-    assert_fail "a DNS directive appears inside the pool include; groups must inherit the http-level one (ADR-0017 (c))"
+if grep -qw 'resolver' "$tmp" "$cap_tmp"; then
+    assert_fail "a DNS directive appears inside an include; groups must inherit the http-level one (ADR-0017 (c))"
 fi
 servers=$(count_lines '^    server [a-z0-9.-]* resolve max_fails=0;$')
-[ "$servers" = "$COUNT" ] || assert_fail "expected $COUNT 'server <host> resolve max_fails=0;' lines, found $servers"
-ka=$(count_lines "^    keepalive $KEEPALIVE_PER_GROUP;$")
-[ "$ka" = "$COUNT" ] || assert_fail "expected $COUNT 'keepalive $KEEPALIVE_PER_GROUP;' lines, found $ka"
+[ "$servers" = "$GROUPS_N" ] || assert_fail "expected $GROUPS_N 'server <host> resolve max_fails=0;' lines, found $servers"
+if [ -n "$EDGE" ]; then KA=$CAP; else KA=$KEEPALIVE_PER_GROUP; fi
+ka=$(count_lines "^    keepalive $KA;$")
+[ "$ka" = "$GROUPS_N" ] || assert_fail "expected $GROUPS_N 'keepalive $KA;' lines, found $ka"
 kt=$(count_lines "^    keepalive_timeout $KEEPALIVE_TIMEOUT;$")
-[ "$kt" = "$COUNT" ] || assert_fail "expected $COUNT 'keepalive_timeout $KEEPALIVE_TIMEOUT;' lines, found $kt"
+[ "$kt" = "$GROUPS_N" ] || assert_fail "expected $GROUPS_N 'keepalive_timeout $KEEPALIVE_TIMEOUT;' lines, found $kt"
 zones=$(count_lines "^    zone $ZONE_NAME\( $ZONE_SIZE\)\{0,1\};$")
-[ "$zones" = "$COUNT" ] || assert_fail "expected $COUNT 'zone $ZONE_NAME' lines, found $zones"
+[ "$zones" = "$GROUPS_N" ] || assert_fail "expected $GROUPS_N 'zone $ZONE_NAME' lines, found $zones"
 sized=$(count_lines "^    zone $ZONE_NAME $ZONE_SIZE;$")
-if [ "$COUNT" -eq 0 ]; then
+if [ "$GROUPS_N" -eq 0 ]; then
     [ "$sized" = "0" ] || assert_fail "a zone line in an empty render"
 else
     [ "$sized" = "1" ] || assert_fail "the shared zone's size must be given exactly once, found $sized"
 fi
-# Nothing but comments and the five line shapes above may be present.
-if grep -v '^#' "$tmp" | grep -qvE '^(upstream [a-z0-9.-]+ \{|    (zone|server|keepalive|keepalive_timeout) [^;]+;|\})$'; then
+# Exactly one target map with a non-empty default; in edge mode the default
+# is the group's name.
+maps=$(count_lines '^map \$vault_upstream_host \$vault_upstream_target {$')
+[ "$maps" = "1" ] || assert_fail "expected exactly 1 \$vault_upstream_target map, found $maps"
+defaults=$(count_lines '^    default [^; ][^; ]*;$')
+[ "$defaults" = "1" ] || assert_fail "expected exactly 1 non-empty map default, found $defaults"
+if [ -n "$EDGE" ]; then
+    grep -qx "    default $EDGE;" "$tmp" || assert_fail "the map default is not the edge '$EDGE'"
+    grep -qx "upstream $EDGE {" "$tmp" || assert_fail "the group is not named '$EDGE'"
+else
+    grep -qxF '    default $vault_upstream_host;' "$tmp" || assert_fail "legacy mode: the map default is not \$vault_upstream_host"
+fi
+# Nothing but comments and the line shapes above may be present.
+if grep -v '^#' "$tmp" | grep -qvE '^(upstream [a-z0-9.-]+ \{|map \$vault_upstream_host \$vault_upstream_target \{|    (zone|server|keepalive|keepalive_timeout|default) [^;]+;|\})$'; then
     assert_fail "an unexpected line is present"
 fi
 # Every host of the validated list has its block, in order.
@@ -295,12 +462,21 @@ for h in $HOSTS; do
     grep -qx "    server $h resolve max_fails=0;" "$tmp" || assert_fail "no server line for '$h'"
 done
 [ "$_i" = "$COUNT" ] || assert_fail "host count mismatch ($_i vs $COUNT)"
+# The cap file: exactly one positive limit_conn equal to C, nothing else.
+lc=$(grep -c "^limit_conn $CAP_ZONE $CAP;\$" "$cap_tmp" || true)
+[ "$lc" = "1" ] || assert_fail "expected exactly 1 'limit_conn $CAP_ZONE $CAP;' in the cap file, found $lc"
+if grep -v '^#' "$cap_tmp" | grep -qvE "^limit_conn $CAP_ZONE [1-9][0-9]*;\$"; then
+    assert_fail "an unexpected line in the cap file"
+fi
 
 mv "$tmp" "$OUT"
+mv "$cap_tmp" "$CAP_OUT"
 trap - EXIT INT TERM
 
-if [ "$COUNT" -eq 0 ]; then
-    log "VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream keepalive pool (every MISS opens its own connection); rendered $OUT"
+if [ -n "$EDGE" ]; then
+    log "upstream edge mode ON: every MISS goes to $EDGE (keepalive $CAP, keepalive_timeout $KEEPALIVE_TIMEOUT), connection cap $CAP (503 above); rendered $OUT and $CAP_OUT"
+elif [ "$COUNT" -eq 0 ]; then
+    log "VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream pool (every MISS opens its own connection), connection cap $CAP; rendered $OUT and $CAP_OUT"
 else
-    log "upstream keepalive pool ON: $COUNT edge group(s) [$HOSTS], keepalive $KEEPALIVE_PER_GROUP idle per group (ceiling $MAX_IDLE_TOTAL), keepalive_timeout $KEEPALIVE_TIMEOUT; rendered $OUT"
+    log "upstream keepalive pool ON (legacy per-name mode): $COUNT edge group(s) [$HOSTS], keepalive $KEEPALIVE_PER_GROUP idle per group (ceiling $MAX_IDLE_TOTAL), keepalive_timeout $KEEPALIVE_TIMEOUT, connection cap $CAP; rendered $OUT and $CAP_OUT"
 fi

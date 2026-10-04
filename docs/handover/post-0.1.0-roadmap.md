@@ -273,9 +273,13 @@ count opens and closes a fresh connection and a CGNAT port mapping. Steam
 retried and finished, but the whole household briefly loses new IPv4
 connections. Prefill is unaffected (`--max-threads 8`).
 
-**Decision (user, 2026-10-04, Weg A).** Ship `v0.1.0` with this as a known
-limitation in the release notes; mitigate with the scheduler (installed
-apps are prefilled, window covering the day). Fix after `v0.1.0`.
+**Decision (user, 2026-10-04, Weg A, superseded the same day).** First
+decided: ship `v0.1.0` with this as a known limitation and fix it after
+the tag. **Superseding decision (user, 2026-10-04): fix it BEFORE
+`v0.1.0`**, as ADR-0021 (one pooled upstream plus a global connection cap),
+in the work packages CORE-FIX-4a..4d. The scheduler mitigation (installed
+apps prefilled, window covering the day) stays in the release notes until
+the fix is in a tagged build.
 
 **Open.** What nginx OSS can do without the Plus-only `queue`
 (`max_conns` alone should fail fast with 502 per the nginx docs, to verify; client-side `limit_conn`; a
@@ -306,5 +310,6 @@ step with it.
 3. D1 first: it is the widest benefit, and the production measurement is
    cheap.
 4. D2, then D3 on top of it.
-5. D7 and D8 after the `v0.1.0` tag (user decision 2026-10-04); D7 first,
-   it is the only one with a measured harm on the production line.
+5. D7 BEFORE the `v0.1.0` tag (user decision 2026-10-04, superseding the
+   earlier "after the tag"; ADR-0021, CORE-FIX-4a..4d); D8 after the tag.
+   D7 is the only item with a measured harm on the production line.

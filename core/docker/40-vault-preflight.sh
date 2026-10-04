@@ -104,6 +104,32 @@ else
     log "upstream rate cap off ($RATE_CONF renders 0 = unlimited)"
 fi
 
+# --- 1b2. the pooled edge and the global cap match the env (CORE-FIX-4a) --
+# 28-vault-upstream-pool.sh validates VAULT_UPSTREAM_EDGE / _MAX_CONNS and
+# self-checks its renders; this is a second look at the RESULT (ADR-0021).
+# The failure it guards is quiet in both directions: an include missing or
+# out of order leaves @miss with no cap (the CGNAT port quota is then the
+# only limit), or edge mode configured but not rendered would silently dial
+# per-name again.
+POOL_CONF="/etc/nginx/vault-upstream-pool.conf"
+CAP_CONF="/etc/nginx/vault-upstream-cap.conf"
+[ -f "$POOL_CONF" ] || die "$POOL_CONF is missing; /docker-entrypoint.d/28-vault-upstream-pool.sh renders it at start. Refusing to start."
+[ -f "$CAP_CONF" ] || die "$CAP_CONF is missing; /docker-entrypoint.d/28-vault-upstream-pool.sh renders it at start. Refusing to start."
+printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*include[[:space:]][[:space:]]*vault-upstream-cap\.conf;' \
+    || die "$CONF has no 'include vault-upstream-cap.conf;' -- the global upstream connection cap is not wired in."
+printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*limit_conn_zone[[:space:]][[:space:]]*\$server_port[[:space:]][[:space:]]*zone=vault_upstream_total:' \
+    || die "$CONF defines no limit_conn_zone vault_upstream_total -- the global upstream connection cap is not wired in."
+grep -qE '^limit_conn vault_upstream_total ([1-9]|[1-5][0-9]|6[0-4]);$' "$CAP_CONF" \
+    || die "$CAP_CONF holds no 'limit_conn vault_upstream_total <1..64>;' -- the cap would not apply. Refusing to start."
+if [ -n "${VAULT_UPSTREAM_EDGE:-}" ]; then
+    grep -qx "upstream $VAULT_UPSTREAM_EDGE {" "$POOL_CONF" \
+        && grep -qx "    default $VAULT_UPSTREAM_EDGE;" "$POOL_CONF" \
+        || die "VAULT_UPSTREAM_EDGE='$VAULT_UPSTREAM_EDGE' is set but $POOL_CONF holds no such pooled group as map default -- edge mode would not apply."
+    log "upstream edge mode: all MISS -> $VAULT_UPSTREAM_EDGE, $(grep '^limit_conn ' "$CAP_CONF")"
+else
+    log "upstream edge mode off (per-name legacy), $(grep '^limit_conn ' "$CAP_CONF")"
+fi
+
 # --- 1c. the HTTPS passthrough matches VAULT_TLS_PASSTHROUGH (CORE-FIX-3) --
 # 26-vault-tls-passthrough.sh keeps or deletes the stream {} block; this is
 # a second, independent look at the RESULT, in both directions, because

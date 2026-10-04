@@ -3079,6 +3079,11 @@ below carry their own later dates, item 12 is the current one).
       the client side, a local forward proxy with a connection pool),
       and whether pooling by edge name fits when a client uses 14 edges.
       Needs an ADR-0017 addendum and a freeze note.
+      **Timing (user, 2026-10-04): BEFORE `v0.1.0`**, not after the tag;
+      designed in ADR-0021 (one pooled edge, global `limit_conn` cap),
+      built as CORE-FIX-4a..4d. 4a (core: hook, configs, preflight, drift
+      check, Dockerfile, hook test, ADR-0016 freeze note) is the first
+      package; the box stays open until 4b-4d are done.
     - [ ] **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
       2026-10-04: "the night check is no use if I come home at 17:00 and
       the update came during the day"). Today `schedule_window` is one

@@ -468,3 +468,29 @@ Scope of the exception, all in WP API-FIX-4:
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-04 — freeze exception: one pooled upstream and a global connection cap (WP CORE-FIX-4a, roadmap D7)
+
+User decision 2026-10-04: fix before `v0.1.0`. ADR-0021 is accepted with the
+answers 1 B1 + global cap, 2 edge on out of the box
+(`dist-fra1.discovery.steamserver.net`, empty = rollback), 3 C default 16 in
+1..64 with no off switch and boot refused below `VAULT_PREFILL_MAX_THREADS`
+(empty counts as 8), 4 status 503, 5 passthrough lowered to 32/16 as
+CORE-FIX-4d, 6 proof run by the operator (P1-P3 green).
+
+Scope of the exception, core/: `28-vault-upstream-pool.sh`
+(`VAULT_UPSTREAM_EDGE`, `VAULT_UPSTREAM_MAX_CONNS`, the cap include), both
+nginx configs (the `vault_upstream_total` zone, the cap include inside
+`@miss`, `limit_conn_status 503;`, `$vault_upstream_target` in the Host
+header and `proxy_pass`, three new log fields), the native static includes
+(`vault-upstream-pool.conf`, the new `vault-upstream-cap.conf`),
+`40-vault-preflight.sh`, `check-config-drift.sh`, `core/Dockerfile`, the
+hook test, and `verify-core-nginx.sh`. Not frozen: compose forwarding,
+`.env.example`, verify-stack section 10 and the READMEs (CORE-FIX-4b/4c).
+Not in this exception: api/ (no change; the event sweep already counts only
+2xx as success, `api/vault_api/event_sweep.py`), and the stream block,
+except CORE-FIX-4d on its own line (`vault_tls_total` 256 -> 32,
+`vault_tls_client` 64 -> 16, droppable).
+
+Every other frozen-path change still needs its own user decision and note
+here.

@@ -182,6 +182,26 @@ with a constant key caps all MISSes at **C** in flight.
   steady state, plus at most 2C per burst after an idle pause. So
   r × L ≤ 2C + 0.05 × 240 ≈ 44 at C = 16 (inference), against the 50
   measured as safe. It is independent of how many names a client uses.
+  The 50 is the household's whole budget, so it must also hold the HTTPS
+  passthrough on port 443 (ADR-0020): up to 256 concurrent sessions at the
+  current stream cap, each a new mapping, and the cap only meets the
+  budget once CORE-FIX-4d lowers it to 32 total. Until 4d lands, the
+  44 above covers the HTTP path alone and the 443 sessions come on top.
+- **ASSUMPTIONS behind the 2C bound (not measured, to check after the
+  rollout):** (a) the edge accepts about `keepalive_requests 1000`
+  requests per connection before it closes it; a lower limit raises the
+  steady churn above the 0.05/s used here; (b) warm-up bursts of up to 2C
+  new connections happen at most once per linger window (after an idle
+  pause longer than `keepalive_timeout`), not several times within it;
+  (c) the pool's idle connections spread unevenly over the C in-flight
+  slots (nginx takes the most recently used idle one, which favours a
+  small hot set, but a burst can still open up to C new ones while idle
+  ones exist for other slots), so `keepalive 2C` is the cautious option if
+  the post-rollout connect-time check shows new connections where reuse
+  was expected. A cheap pre-rollout measurement: one `curl -v` loop of
+  about 1100 sequential requests to the edge and a count of TCP connects
+  (`ss`/conntrack on the test box) tells (a); the post-rollout connect-time
+  histogram ("After rollout") tells (b) and (c).
 - Pro: meets requirements (2) and (3) structurally; one name to resolve
   instead of a list; no stale list. Retries on a connect error move to
   the next A record, which single-address groups never did.
@@ -262,12 +282,19 @@ All six answered with the recommended option:
    rollback to the ADR-0017 per-name path (`VAULT_UPSTREAM_POOL_HOSTS`).
 3. **Cap C = `VAULT_UPSTREAM_MAX_CONNS`:** default 16, range 1..64, no off
    switch. vault-core refuses to boot when C < `VAULT_PREFILL_MAX_THREADS`
-   (forwarded to vault-core for that check).
+   (forwarded to vault-core for that check; compose forwards
+   `${VAULT_PREFILL_MAX_THREADS:-8}`, and the hook treats an empty or unset
+   value as 8, vault-api's own default, so a lowered cap cannot slip
+   through with the variable left empty).
 4. **Status over the cap: 503** (nginx's default, set explicitly).
 5. **443 passthrough budget:** lower `limit_conn vault_tls_total` from 256
    to 32 and `vault_tls_client` from 64 to 16, as the separate, droppable
    package CORE-FIX-4d (amends ADR-0020).
 6. **Proof first:** done by the operator before any code; results below.
+7. **Timing: before `v0.1.0`** (user, 2026-10-04). This supersedes the
+   earlier "known limitation in the release notes, fix after the tag"
+   decision for D7. The freeze exception is recorded in ADR-0016 (step 12)
+   and lands together with the first code package, CORE-FIX-4a.
 
 ## Proof (measured, operator, production line, 2026-10-04)
 
@@ -441,7 +468,7 @@ Split for the ≤ 2 h rule, in this order:
     commands of "After rollout".
 11. **Plan and learnings.** `docs/PROJECT_PLAN.md` §11 item 13: tick D7
     and rewrite the release-notes item (the known limitation becomes "fixed
-    in rc10; legacy mode keeps it"). Update the ADR-0017 pointer to the
+    in the next rc; legacy mode keeps it"). Update the ADR-0017 pointer to the
     shipped state. `docs/LEARNINGS.md`:
     the r × L model, `max_conns` being per A record with an immediate 502,
     and `limit_conn` counting in a named location.
@@ -452,7 +479,7 @@ Split for the ≤ 2 h rule, in this order:
     1 B1 + global cap, 2 edge on out of the box
     (`dist-fra1.discovery.steamserver.net`, empty = rollback), 3 C default
     16 in 1..64 with no off switch and boot refused below
-    `VAULT_PREFILL_MAX_THREADS`, 4 status 503, 5 passthrough lowered to
+    `VAULT_PREFILL_MAX_THREADS` (empty counts as 8), 4 status 503, 5 passthrough lowered to
     32/16 as CORE-FIX-4d, 6 proof run by the operator (P1-P3 green).
     Scope: core/ — `28-vault-upstream-pool.sh` (`VAULT_UPSTREAM_EDGE`,
     `VAULT_UPSTREAM_MAX_CONNS`, cap include), both nginx configs (zone,
@@ -508,6 +535,15 @@ cached, and the forced prefill of app 275850.
 - Clients above C get 503s. The Steam client's handling of a sustained 503
   share is not measured. SteamPrefill is safe while C ≥ its threads and
   only one job runs.
+- **The concurrency limit that bites: client + prefill together.** C is
+  global, not per source. A prefill at its default 8 threads leaves
+  C - 8 = 8 slots at C = 16; a Steam client updating several apps in
+  parallel on top of it gets 503s for everything above that, and a
+  prefill that finds the slots taken by a client can get 503s on its own
+  chunks as well. The boot check (C ≥ prefill threads) only guarantees a
+  prefill alone fits. Raise C (to at most 64, at the price of a larger 2C
+  socket bound) or lower `VAULT_PREFILL_MAX_THREADS` if both are expected
+  at the same time; running them one after the other needs no change.
 - One edge name is a single point of dependency (DNS, Valve's tier).
   Rollback: set `VAULT_UPSTREAM_EDGE=` empty and recreate.
 - Not addressed: IPv6 egress (D4), DNS traffic, the CM/WebSocket traffic

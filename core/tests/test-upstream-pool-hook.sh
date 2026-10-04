@@ -10,6 +10,10 @@
 # `dev.sh test-core` and the CI gate run it. Exit 0 = all cases pass, 1 = at
 # least one failed; one line per case.
 #
+# CORE-FIX-4a (ADR-0021) adds the VAULT_UPSTREAM_EDGE single-pool mode and the
+# VAULT_UPSTREAM_MAX_CONNS cap; the legacy (edge empty) cases below keep the
+# ADR-0017 contract, the edge/cap cases are in sections 11-14.
+#
 # What this does NOT prove: that nginx accepts the rendered groups. `nginx -t`
 # on a rendered pool include inside the pinned image is WP CORE-FEAT-1b2's job.
 set -euo pipefail
@@ -21,6 +25,9 @@ NATIVE="$core_dir/nginx/vault-upstream-pool.conf"
 
 [ -f "$HOOK" ]   || { echo "missing $HOOK" >&2; exit 1; }
 [ -f "$NATIVE" ] || { echo "missing $NATIVE" >&2; exit 1; }
+
+# The image's ENV defaults (edge ON) must not leak into the legacy cases.
+unset VAULT_UPSTREAM_EDGE VAULT_UPSTREAM_MAX_CONNS VAULT_PREFILL_MAX_THREADS VAULT_UPSTREAM_POOL_HOSTS
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -75,7 +82,9 @@ assert_shape() {
     local name="$1" f="$2" n="$3"; shift 3
     local problems=()
     [ "$(count '^upstream [a-z0-9.-]* {$' "$f")" = "$n" ] || problems+=("upstream blocks != $n")
-    [ "$(count '^}$' "$f")" = "$n" ] || problems+=("closing braces != $n")
+    [ "$(count '^}$' "$f")" = "$((n + 1))" ] || problems+=("closing braces != $((n + 1)) (n groups + the target map)")
+    [ "$(count '^map \$vault_upstream_host \$vault_upstream_target {$' "$f")" = "1" ] || problems+=("target map != 1")
+    [ "$(count '^    default \$vault_upstream_host;$' "$f")" = "1" ] || problems+=("legacy map default is not \$vault_upstream_host")
     [ "$(count '^    server [a-z0-9.-]* resolve max_fails=0;$' "$f")" = "$n" ] || problems+=("server ... resolve max_fails=0 lines != $n")
     [ "$(count '^    keepalive 8;$' "$f")" = "$n" ] || problems+=("'keepalive 8;' lines != $n")
     [ "$(count '^    keepalive_timeout 50s;$' "$f")" = "$n" ] || problems+=("'keepalive_timeout 50s;' lines != $n")
@@ -83,7 +92,7 @@ assert_shape() {
     [ "$(count '^    zone vault_edges;$' "$f")" = "$((n - 1))" ] || problems+=("size-less zone lines != $((n - 1))")
     grep -qw 'resolver' "$f" && problems+=("a 'resolver' token is present")
     grep -q 'Pooled edges: '"$n"' ' "$f" || problems+=("header does not say 'Pooled edges: $n'")
-    if grep -v '^#' "$f" | grep -qvE '^(upstream [a-z0-9.-]+ \{|    (zone|server|keepalive|keepalive_timeout) [^;]+;|\})$'; then
+    if grep -v '^#' "$f" | grep -qvE '^(upstream [a-z0-9.-]+ \{|map \$vault_upstream_host \$vault_upstream_target \{|    (zone|server|keepalive|keepalive_timeout|default) [^;]+;|\})$'; then
         problems+=("an unexpected non-comment line")
     fi
     # Order: block i names host i, and the sized zone sits in block 1.
@@ -107,12 +116,14 @@ if [ "$rc" -ne 0 ]; then
     bad "unset var" "hook failed: $(head -n1 "$work/unset.log")"
 elif ! cmp -s "$work/unset.conf" "$NATIVE"; then
     bad "unset var" "render differs from core/nginx/vault-upstream-pool.conf"
-elif grep -qv '^#' "$work/unset.conf"; then
-    bad "unset var" "a non-comment line in the empty render"
+elif [ "$(grep -v '^#' "$work/unset.conf")" != 'map $vault_upstream_host $vault_upstream_target {
+    default $vault_upstream_host;
+}' ]; then
+    bad "unset var" "the empty render holds more than the legacy target map"
 elif ! grep -q 'Pooled edges: 0 ' "$work/unset.conf"; then
     bad "unset var" "header does not say 'Pooled edges: 0'"
 else
-    ok "unset var: header-only render, byte-identical to the static native file"
+    ok "unset var: header + legacy target map only, byte-identical to the static native file"
 fi
 
 # --- 2. set but empty -> the same -------------------------------------------
@@ -134,11 +145,11 @@ fi
 # --- 4. two hosts: the exact golden render (the format is the contract) ------
 render two "cache1-fra2.steamcontent.com dist-fra1.discovery.steamserver.net" "$work/two.conf"
 cat > "$work/two.golden" <<'EOF'
-# SteamHangar vault-core -- upstream keepalive pool include (ADR-0017).
+# SteamHangar vault-core -- upstream keepalive pool include (ADR-0017, ADR-0021).
 # Rendered at container start by /docker-entrypoint.d/28-vault-upstream-pool.sh from
-# VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md "Upstream
-# keepalive pool". Natively (core/nginx/vault-upstream-pool.conf) this file is
-# the empty render, byte for byte (check-config-drift.sh asserts it).
+# VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md
+# "Upstream keepalive pool". Natively (core/nginx/vault-upstream-pool.conf) this file
+# is the empty legacy render, byte for byte (check-config-drift.sh asserts it).
 # Pooled edges: 2 (keepalive 8 idle per group, ceiling 32 idle = at most 4 groups).
 # The shared zone's size is given once, on the first group (nginx docs, zone:
 # "Several groups may share the same zone. In this case, it is enough to
@@ -155,6 +166,10 @@ upstream dist-fra1.discovery.steamserver.net {
     server dist-fra1.discovery.steamserver.net resolve max_fails=0;
     keepalive 8;
     keepalive_timeout 50s;
+}
+# $vault_upstream_target: the name @miss dials and sends as Host (ADR-0021).
+map $vault_upstream_host $vault_upstream_target {
+    default $vault_upstream_host;
 }
 EOF
 if [ "$rc" -ne 0 ]; then
@@ -173,10 +188,10 @@ render four "$four" "$work/four.conf"
 if [ "$rc" -ne 0 ]; then
     bad "four hosts" "hook failed: $(head -n1 "$work/four.log")"
 elif assert_shape "four hosts" "$work/four.conf" 4 "${four_hosts[@]}"; then
-    if grep -q 'upstream keepalive pool ON: 4 edge group(s)' "$work/four.log"; then
+    if grep -q 'upstream keepalive pool ON (legacy per-name mode): 4 edge group(s)' "$work/four.log"; then
         ok "four hosts (the ceiling): 4 blocks in list order, 4x max_fails=0 / keepalive 8 / 50s, one sized zone, no resolver"
     else
-        bad "four hosts" "no 'pool ON: 4 edge group(s)' log line"
+        bad "four hosts" "no 'pool ON (legacy per-name mode): 4 edge group(s)' log line"
     fi
 fi
 
@@ -288,6 +303,123 @@ elif [ -e "$work/no-such-dir" ]; then
 else
     ok "unwritable path: non-zero exit, nothing created"
 fi
+
+# =============================================================================
+# CORE-FIX-4a (ADR-0021): edge mode and the global cap
+# =============================================================================
+EDGE_DEFAULT=dist-fra1.discovery.steamserver.net
+
+# render_env <case> <out> VAR=value... : run the hook with exactly these
+# variables (everything else unset), exit code in $rc, log in $work/<case>.log
+render_env() {
+    local name="$1" out="$2"; shift 2
+    rc=0
+    env -i "$@" sh "$HOOK" "$out" > "$work/$name.log" 2>&1 || rc=$?
+}
+# refused_env <case> <fragment> VAR=value... : non-zero, FATAL naming the
+# fragment, neither output file written.
+refused_env() {
+    local name="$1" fragment="$2"; shift 2
+    local out="$work/$name.conf"
+    rm -f "$work/vault-upstream-cap.conf"
+    render_env "$name" "$out" "$@"
+    if [ "$rc" -eq 0 ]; then bad "$name" "accepted $* (exit 0)"; return; fi
+    if ! grep -q '^28-vault-upstream-pool.sh: FATAL: ' "$work/$name.log"; then
+        bad "$name" "no FATAL line: $(head -n1 "$work/$name.log")"; return
+    fi
+    if ! tr '\n' ' ' < "$work/$name.log" | grep -qF -- "$fragment"; then
+        bad "$name" "FATAL does not mention '$fragment': $(tr '\n' ' ' < "$work/$name.log")"; return
+    fi
+    if [ -e "$out" ] || [ -e "$work/vault-upstream-cap.conf" ]; then
+        bad "$name" "refused but wrote an include"; return
+    fi
+    ok "$name: refused"
+}
+
+# --- 11. edge mode: one group, map default = the edge, cap include default ---
+rm -f "$work/vault-upstream-cap.conf"
+render_env edge "$work/edge.conf" VAULT_UPSTREAM_EDGE=$EDGE_DEFAULT
+cat > "$work/edge.golden" <<EOF
+# SteamHangar vault-core -- upstream keepalive pool include (ADR-0017, ADR-0021).
+# Rendered at container start by /docker-entrypoint.d/28-vault-upstream-pool.sh from
+# VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md
+# "Upstream keepalive pool". Natively (core/nginx/vault-upstream-pool.conf) this file
+# is the empty legacy render, byte for byte (check-config-drift.sh asserts it).
+# Edge mode (ADR-0021): every allowed MISS goes to $EDGE_DEFAULT, pooled with
+# keepalive 16 (= the connection cap). The Host header the client sent only
+# has to pass the allowlist; it never selects the upstream.
+# The group's zone is required by 'server ... resolve'. No DNS directive inside
+# the group: it inherits the http-level setting, ipv6=off valid=30s included.
+upstream $EDGE_DEFAULT {
+    zone vault_edges 256k;
+    server $EDGE_DEFAULT resolve max_fails=0;
+    keepalive 16;
+    keepalive_timeout 50s;
+}
+# \$vault_upstream_target: the name @miss dials and sends as Host (ADR-0021).
+map \$vault_upstream_host \$vault_upstream_target {
+    default $EDGE_DEFAULT;
+}
+EOF
+if [ "$rc" -ne 0 ]; then
+    bad "edge mode" "hook failed: $(head -n1 "$work/edge.log")"
+elif ! cmp -s "$work/edge.conf" "$work/edge.golden"; then
+    bad "edge mode" "render differs from the golden:"; diff -u "$work/edge.golden" "$work/edge.conf" >&2 || true
+elif ! cmp -s "$work/vault-upstream-cap.conf" "$core_dir/nginx/vault-upstream-cap.conf"; then
+    bad "edge mode" "default cap include differs from core/nginx/vault-upstream-cap.conf"
+elif ! grep -q "upstream edge mode ON: every MISS goes to $EDGE_DEFAULT .*connection cap 16" "$work/edge.log"; then
+    bad "edge mode" "log line does not name the edge and the cap: $(head -n1 "$work/edge.log")"
+else
+    ok "edge mode: golden render (one group named like the edge, keepalive = cap), default cap include = native file, log names edge and cap"
+fi
+
+# --- 12. the pool list is ignored in edge mode -------------------------------
+render_env edge_ignores "$work/edge2.conf" VAULT_UPSTREAM_EDGE=$EDGE_DEFAULT VAULT_UPSTREAM_POOL_HOSTS="cache1.example.com"
+if [ "$rc" -ne 0 ] || ! cmp -s "$work/edge2.conf" "$work/edge.conf"; then
+    bad "edge ignores pool list" "render differs or hook failed: $(head -n1 "$work/edge_ignores.log")"
+else
+    ok "edge mode: VAULT_UPSTREAM_POOL_HOSTS is ignored (even an invalid one), same render"
+fi
+
+# --- 13. edge refusals -------------------------------------------------------
+refused_env "edge outside families" "outside the Host allowlist families" VAULT_UPSTREAM_EDGE=cache1.example.com
+refused_env "edge marker"           "discovery marker"                    VAULT_UPSTREAM_EDGE=lancache.steamcontent.com
+refused_env "edge bare family"      "is a bare family name"               VAULT_UPSTREAM_EDGE=steamserver.net
+refused_env "edge with port"        "carries a scheme or port"            VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net:80
+refused_env "edge uppercase"        "contains uppercase"                  VAULT_UPSTREAM_EDGE=Dist-fra1.discovery.steamserver.net
+refused_env "two edges"             "takes exactly one"                   "VAULT_UPSTREAM_EDGE=a.steamcontent.com b.steamcontent.com"
+
+# --- 14. the cap C ----------------------------------------------------------
+for c in 8 64; do
+    rm -f "$work/vault-upstream-cap.conf"
+    render_env "cap $c" "$work/cap$c.conf" VAULT_UPSTREAM_EDGE=$EDGE_DEFAULT VAULT_UPSTREAM_MAX_CONNS=$c
+    if [ "$rc" -ne 0 ]; then
+        bad "cap $c" "refused: $(head -n1 "$work/cap $c.log")"
+    elif ! grep -qx "limit_conn vault_upstream_total $c;" "$work/vault-upstream-cap.conf" \
+         || ! grep -qx "    keepalive $c;" "$work/cap$c.conf"; then
+        bad "cap $c" "cap include or edge keepalive do not carry $c"
+    else
+        ok "cap $c: limit_conn vault_upstream_total $c; and keepalive $c;"
+    fi
+done
+# prefill floor: empty counts as 8 (compose forwards the :-8 default)
+refused_env "cap 7 vs empty prefill" "below the prefill thread count 8" VAULT_UPSTREAM_MAX_CONNS=7 VAULT_PREFILL_MAX_THREADS=
+refused_env "cap 7 vs unset prefill" "below the prefill thread count 8" VAULT_UPSTREAM_MAX_CONNS=7
+refused_env "cap 1 vs prefill 2"     "below the prefill thread count 2" VAULT_UPSTREAM_MAX_CONNS=1 VAULT_PREFILL_MAX_THREADS=2
+rm -f "$work/vault-upstream-cap.conf"
+render_env "cap 4 prefill 4" "$work/cap4.conf" VAULT_UPSTREAM_EDGE=$EDGE_DEFAULT VAULT_UPSTREAM_MAX_CONNS=4 VAULT_PREFILL_MAX_THREADS=4
+if [ "$rc" -eq 0 ] && grep -qx 'limit_conn vault_upstream_total 4;' "$work/vault-upstream-cap.conf"; then
+    ok "cap 4 with prefill 4: accepted (cap >= prefill threads)"
+else
+    bad "cap 4 prefill 4" "refused or wrong render: $(head -n1 "$work/cap 4 prefill 4.log")"
+fi
+refused_env "cap 0"        "0 and leading zeros are not accepted" VAULT_UPSTREAM_MAX_CONNS=0
+refused_env "cap 65"       "outside 1..64"                         VAULT_UPSTREAM_MAX_CONNS=65
+refused_env "cap 100"      "outside 1..64"                         VAULT_UPSTREAM_MAX_CONNS=100
+refused_env "cap abc"      "not a whole number"                    VAULT_UPSTREAM_MAX_CONNS=abc
+refused_env "cap negative" "not a whole number"                    VAULT_UPSTREAM_MAX_CONNS=-1
+refused_env "cap leading zero" "leading zeros"                     VAULT_UPSTREAM_MAX_CONNS=016
+refused_env "cap with space" "not a whole number"                  "VAULT_UPSTREAM_MAX_CONNS=1 6"
 
 echo
 echo "test-upstream-pool-hook: $pass passed, $fail failed"

@@ -57,6 +57,8 @@ COPY docker/check-config-drift.sh /opt/vault/check-config-drift.sh
 # empty render is byte-identical to it, and a running image can re-prove it.
 # nginx never reads this copy; the hook renders /etc/nginx/vault-upstream-pool.conf.
 COPY nginx/vault-upstream-pool.conf /opt/vault/vault-upstream-pool.native.conf
+# WP CORE-FIX-4a (ADR-0021): likewise the native (default, C=16) cap include.
+COPY nginx/vault-upstream-cap.conf /opt/vault/vault-upstream-cap.native.conf
 
 RUN set -eux; \
     chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
@@ -127,9 +129,12 @@ RUN set -eux; \
     # cannot be built with a broken hook.
     [ "$(grep -c '^[[:space:]]*include vault-upstream-pool\.conf;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
     pool_check=/tmp/vault-upstream-pool.build-check.conf; \
-    VAULT_UPSTREAM_POOL_HOSTS= sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
+    VAULT_UPSTREAM_EDGE= VAULT_UPSTREAM_POOL_HOSTS= VAULT_UPSTREAM_MAX_CONNS= VAULT_PREFILL_MAX_THREADS= \
+        sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
     cmp "$pool_check" /opt/vault/vault-upstream-pool.native.conf; \
-    VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com cache3-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
+    cmp "$(dirname "$pool_check")/vault-upstream-cap.conf" /opt/vault/vault-upstream-cap.native.conf; \
+    rm -f "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
+    VAULT_UPSTREAM_EDGE= VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com cache3-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
         sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
     [ "$(grep -c '^upstream ' "$pool_check")" = "4" ]; \
     # (an explicit if: `! grep` would not trip set -e, POSIX exempts `!` pipelines)
@@ -137,14 +142,34 @@ RUN set -eux; \
         echo "BUILD CHECK FAILED: a resolver directive inside the pool include (ADR-0017 (c))" >&2; exit 1; \
     fi; \
     rm -f "$pool_check"; \
-    if VAULT_UPSTREAM_POOL_HOSTS='c1.steamcontent.com c2.steamcontent.com c3.steamcontent.com c4.steamcontent.com c5.steamcontent.com' \
+    if VAULT_UPSTREAM_EDGE= VAULT_UPSTREAM_POOL_HOSTS='c1.steamcontent.com c2.steamcontent.com c3.steamcontent.com c4.steamcontent.com c5.steamcontent.com' \
         sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" 2>/dev/null; then \
         echo "BUILD CHECK FAILED: 28-vault-upstream-pool.sh accepted 5 edges (ceiling is 4, ADR-0017 decision 3A)" >&2; exit 1; \
     fi; \
-    if VAULT_UPSTREAM_POOL_HOSTS='cache1.example.com' \
+    if VAULT_UPSTREAM_EDGE= VAULT_UPSTREAM_POOL_HOSTS='cache1.example.com' \
         sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" 2>/dev/null; then \
         echo "BUILD CHECK FAILED: 28-vault-upstream-pool.sh accepted a host outside the allowlist families" >&2; exit 1; \
     fi; \
+    [ ! -e "$pool_check" ]; \
+    # WP CORE-FIX-4a (ADR-0021): the cap include is wired in exactly once, the
+    # default edge name (C=16) renders one pooled group named like the edge
+    # plus the default cap, and the fail-closed cases are
+    # refused: a cap below the prefill default 8 (empty counts as 8), cap 0,
+    # cap 65, a non-numeric cap, an edge outside the allowlist families and
+    # two edges.
+    [ "$(grep -c '^[[:space:]]*include vault-upstream-cap\.conf;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
+    VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
+    [ "$(grep -c '^upstream dist-fra1\.discovery\.steamserver\.net {$' "$pool_check")" = "1" ]; \
+    [ "$(grep -c '^upstream ' "$pool_check")" = "1" ]; \
+    grep -qx 'limit_conn vault_upstream_total 16;' "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
+    rm -f "$pool_check" "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
+    for bad in 'VAULT_UPSTREAM_MAX_CONNS=7' 'VAULT_UPSTREAM_MAX_CONNS=0' 'VAULT_UPSTREAM_MAX_CONNS=65' 'VAULT_UPSTREAM_MAX_CONNS=abc' \
+               'VAULT_UPSTREAM_EDGE=cache1.example.com' \
+               'VAULT_UPSTREAM_EDGE=a.steamcontent.com b.steamcontent.com'; do \
+        if env VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net "$bad" sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" 2>/dev/null; then \
+            echo "BUILD CHECK FAILED: 28-vault-upstream-pool.sh accepted $bad (ADR-0021)" >&2; exit 1; \
+        fi; \
+    done; \
     [ ! -e "$pool_check" ]; \
     # WP VER-2: the build-version hook writes exactly the reviewed JSON for a
     # valid pair and fails closed ("invalid") for a bad value, before the
@@ -222,6 +247,17 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     # hook /docker-entrypoint.d/28-vault-upstream-pool.sh treats unset and
     # empty alike (core/README.md "Upstream keepalive pool").
     VAULT_UPSTREAM_POOL_HOSTS= \
+    # WP CORE-FIX-4a (ADR-0021): the ONE pooled edge every MISS goes to,
+    # whatever Host the client sent (the Host only has to pass the allowlist).
+    # DEFAULT EMPTY here = the per-name ADR-0017 behaviour (and then
+    # VAULT_UPSTREAM_POOL_HOSTS applies); deploy/compose.yaml turns edge mode
+    # on out of the box (ADR-0021 decision 2, CORE-FIX-4c). Env-only, read at
+    # container start.
+    VAULT_UPSTREAM_EDGE= \
+    # Global cap C on concurrent upstream connections (1..64, default 16, no
+    # off switch; must be >= VAULT_PREFILL_MAX_THREADS, empty = 8). Over the
+    # cap the client gets 503. Rendered by the same hook.
+    VAULT_UPSTREAM_MAX_CONNS=16 \
     # WP CORE-FIX-3 (ADR-0020): HTTPS passthrough on port 443 for
     # *.steamcontent.com SNI names, TLS not terminated. DEFAULT ON (1);
     # 0/false/off/no removes the stream block at start

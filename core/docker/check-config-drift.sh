@@ -345,7 +345,8 @@ else
             fail=1
         fi
     done
-    if ! VAULT_UPSTREAM_POOL_HOSTS='' sh "$POOL_HOOK" "$work/pool-empty.conf" > "$work/pool-empty.log" 2>&1; then
+    if ! VAULT_UPSTREAM_EDGE='' VAULT_UPSTREAM_POOL_HOSTS='' VAULT_UPSTREAM_MAX_CONNS='' VAULT_PREFILL_MAX_THREADS='' \
+            sh "$POOL_HOOK" "$work/pool-empty.conf" > "$work/pool-empty.log" 2>&1; then
         echo "check-config-drift: FAIL: $POOL_HOOK could not render the empty include:" >&2
         cat "$work/pool-empty.log" >&2
         fail=1
@@ -354,7 +355,7 @@ else
         diff -u "$NATIVE_POOL" "$work/pool-empty.conf" >&2 || true
         fail=1
     fi
-    if ! VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
+    if ! VAULT_UPSTREAM_EDGE='' VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
             sh "$POOL_HOOK" "$work/pool-two.conf" > "$work/pool-two.log" 2>&1; then
         echo "check-config-drift: FAIL: $POOL_HOOK could not render a two-edge list:" >&2
         cat "$work/pool-two.log" >&2
@@ -375,6 +376,55 @@ else
             fail=1
         fi
     done
+fi
+
+# --- 2d2. WP CORE-FIX-4a (ADR-0021): edge target + global connection cap ---
+# Pins: the cap include sits inside @miss exactly once, the zone and the
+# dial target are what the hook's renders assume, the hook's cap constants,
+# and the native cap include is the hook's DEFAULT render byte for byte (the
+# same contract as the pool include). The edge-mode render must name exactly
+# one group, equal to the map default.
+NATIVE_CAP="$core_dir/nginx/vault-upstream-cap.conf"
+for f in "$work/native.norm" "$work/template.norm"; do
+    expect_count "$f" 1 "include vault-upstream-cap.conf;" "CORE-FIX-4a: the global upstream cap include (inside @miss)"
+    expect_count "$f" 1 'limit_conn_zone $server_port zone=vault_upstream_total:64k;' "CORE-FIX-4a: the constant-key cap zone"
+    expect_count "$f" 1 "limit_conn_status 503;" "CORE-FIX-4a: over-limit answer is 503"
+    expect_count "$f" 1 'proxy_pass http://$vault_upstream_target$request_uri;' "CORE-FIX-4a: @miss dials the pooled target"
+    expect_count "$f" 1 'proxy_set_header Host $vault_upstream_target;' "CORE-FIX-4a: Host header = the dial target"
+done
+if [ ! -f "$NATIVE_CAP" ]; then
+    echo "check-config-drift: FAIL: missing $NATIVE_CAP (WP CORE-FIX-4a)" >&2
+    fail=1
+else
+    for want in "CAP_DEFAULT=16" "CAP_MIN=1" "CAP_MAX=64" "CAP_ZONE=vault_upstream_total"; do
+        n=$(grep -F -c -x -- "$want" "$POOL_HOOK" || true)
+        if [ "$n" != "1" ]; then
+            echo "check-config-drift: FAIL: expected exactly 1 line '$want' in 28-vault-upstream-pool.sh (found $n) -- ADR-0021 decision 3" >&2
+            fail=1
+        fi
+    done
+    if ! VAULT_UPSTREAM_EDGE='' VAULT_UPSTREAM_POOL_HOSTS='' VAULT_UPSTREAM_MAX_CONNS='' VAULT_PREFILL_MAX_THREADS='' \
+            sh "$POOL_HOOK" "$work/cap-default.conf" > "$work/cap-default.log" 2>&1; then
+        echo "check-config-drift: FAIL: $POOL_HOOK could not render the default cap include:" >&2
+        cat "$work/cap-default.log" >&2
+        fail=1
+    elif ! cmp -s "$NATIVE_CAP" "$work/vault-upstream-cap.conf"; then
+        echo "check-config-drift: FAIL: core/nginx/vault-upstream-cap.conf is not byte-identical to the default render of 28-vault-upstream-pool.sh (left = native, right = render):" >&2
+        diff -u "$NATIVE_CAP" "$work/vault-upstream-cap.conf" >&2 || true
+        fail=1
+    fi
+    if ! VAULT_UPSTREAM_EDGE='dist-fra1.discovery.steamserver.net' VAULT_UPSTREAM_MAX_CONNS='' VAULT_PREFILL_MAX_THREADS='' \
+            sh "$POOL_HOOK" "$work/edge.conf" > "$work/edge.log" 2>&1; then
+        echo "check-config-drift: FAIL: $POOL_HOOK could not render the edge mode:" >&2
+        cat "$work/edge.log" >&2
+        fail=1
+    else
+        n=$(grep -c '^upstream ' "$work/edge.conf" || true)
+        if [ "$n" != "1" ] || ! grep -qx '    default dist-fra1.discovery.steamserver.net;' "$work/edge.conf"; then
+            echo "check-config-drift: FAIL: the edge render must hold exactly one upstream group and the edge as map default (found $n groups)" >&2
+            fail=1
+        fi
+    fi
 fi
 
 # --- 2e. WP CORE-FIX-3: the HTTPS passthrough (stream {}, port 443) -------
@@ -560,6 +610,23 @@ case "$wc_:$pool_ceil" in
         fi
         if [ $((wc_ / 2 - pool_ceil)) -lt 256 ]; then
             echo "check-config-drift: FAIL: budget: the HTTP half of worker_connections ($((wc_ / 2))) minus the pool's idle ceiling ($pool_ceil) leaves fewer than 256 connections for live HTTP requests" >&2
+            fail=1
+        fi ;;
+esac
+
+# CORE-FIX-4a (ADR-0021): the cap C (max 64) holds up to C in-flight plus C
+# idle upstream connections = 2 x CAP_MAX of the same worker, and they live
+# in the HTTP half too (the idle ones are the edge group's keepalive C). In
+# edge mode the legacy ceiling does not apply, so the larger of the two
+# counts; live HTTP requests must keep at least 256.
+cap_max=$(sed -n 's/^CAP_MAX=\([0-9][0-9]*\)$/\1/p' "$POOL_HOOK" 2>/dev/null || true)
+case "$wc_:$cap_max" in
+    *[!0-9:]*|:*|*:)
+        echo "check-config-drift: FAIL: need numeric worker_connections and CAP_MAX= (28-vault-upstream-pool.sh) for the cap budget; got '$wc_', '$cap_max'" >&2
+        fail=1 ;;
+    *)
+        if [ $((wc_ / 2 - 2 * cap_max)) -lt 256 ]; then
+            echo "check-config-drift: FAIL: budget: the HTTP half of worker_connections ($((wc_ / 2))) minus 2 x CAP_MAX ($((2 * cap_max))) leaves fewer than 256 connections for live HTTP requests (ADR-0021)" >&2
             fail=1
         fi ;;
 esac
