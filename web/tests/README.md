@@ -2842,3 +2842,74 @@ the Suggestions column, the bar stops at the column's left edge. Leaving
 select mode returns the normal 32px end padding.
 
 Suite: **1032 tests, 1032 pass, 0 fail** on the WEB-FIX-6 branch; **1087 tests, 1087 pass, 0 fail** after merging with WEB-FEAT-3.
+
+### WP WEB-FEAT-4 — remove a PC from the PCs list
+
+Each row of the PCs (agents) sheet gets a "Remove" button (accessible
+name "Remove <pc>"). It opens an alertdialog on top of the sheet (the
+detail sheet's `.dialog` markup, stacked through `lib/modal-stack.js`,
+focus on "Keep") that names the PC, says what `DELETE
+/v1/clients/{client_id}` (WP AG-1) deletes (the agent's reports and the
+bypass status; cached games, downloads and cache statistics stay) and that
+a still-running agent's next report lists the PC again (true: the report
+route stores for any valid id, "not a ban"). Confirm sends one request
+(`api.deleteClient`, the id percent-encoded as one segment); on 204 or
+404 ("already gone") the row is dropped at once, the next clients tick is
+forced to re-render the whole list, and the store is nudged; any other
+failure keeps the row and shows the error inline on it (`role=alert`).
+Buttons are `aria-disabled` with a click guard while the request runs.
+An id containing `/` gets a note instead of the button: the frozen route
+cannot address it (Starlette decodes `%2F` before routing; measured with
+TestClient: 404 while the PC stays listed, every other printable character
+tried round-trips). Demo mode removes the row in memory (204, then 404),
+mirroring the server; it never comes back because no agent runs there.
+
+Tests: `clients-remove.test.js` (11: URL encoding of space ? # % + &
+non-ASCII as one segment with no query/fragment leak, 204 → null, 404/500
+kinds, demo makes no request; `isRemovableClientId`; the route grammar
+pinned against `routers/clients.py`; twin pins: the confirm wording against
+the `DELETE FROM` tables of `agent_reports.delete_client` and the "not a
+ban" premise against the report route; phone-width CSS; demo DELETE and
+its decoding), `clients-remove-wiring.test.js` (10: fake-dom + real
+store-singleton against a routing fetch fake: button and name, the "/"
+note, dialog text/role/focus/inert, Keep and Escape send nothing and
+restore focus, confirm → one DELETE → row gone → store refreshed, row gone
+before the refresh answers, 404 as success, 500 inline, the in-flight
+guard, a re-reported PC listed again on the next tick). The wiring file
+ran 20x in a loop: 0 failures.
+
+Mutation evidence (each alone, in a scratch copy, both files run): all 19
+killed. No `encodeURIComponent`; the "/" rule dropped; 404 as an error; no
+store refresh; no forced full render after a remove; no local row drop;
+the error not painted inline; busy guard removed; Keep deleting; focus on
+Remove instead of Keep; button unwired; no accessible name; no focus
+restore on cancel; demo DELETE a no-op; demo without decoding; the server
+deleting a third table (twin pin); the wording without "bypass status";
+the error line without `role=alert`; the dialog-title wrap rule removed.
+Review note: the re-report test passed vacuously at first (it saw the row
+before the local drop); it now holds the refresh poll with a gate.
+
+Android follow-up (next app package, not done here): the same action in
+the app's clients sheet, with twin pins on the wording and the "/" rule.
+
+Not covered: the painted result and a screen reader (no browser here).
+Expected look: under each PC's stats a small "Remove" button at the right;
+the dialog is the narrow centred confirm card with "Keep" and a red-outlined
+"Remove"; a long PC name wraps in the title on a phone.
+
+Suite: **1108 tests, 1108 pass, 0 fail**.
+
+Review round 1 (PASS with fixes): only the handler's own 404 (detail
+starting "Unknown client_id", `isClientAlreadyGone`, prefix twin-pinned
+against `routers/clients.py`) counts as already gone; any other 404 (old
+server, proxy) is an inline error. Keep/Escape return focus to the row's
+LIVE Remove button when a poll rebuilt the list meanwhile. Escape is
+ignored while the request runs. The alertdialog is `aria-describedby` its
+two consequence paragraphs. The encoding note now says it was measured
+against TestClient, not through a reverse proxy. Tests +7 (clients-remove
+14, wiring 14). Mutations, all 8 killed: any 404 as gone; the sheet's 404
+as error; focus to the captured node only; Escape unguarded; no
+describedby; a paragraph id missing; server detail reworded (twin pin);
+demo detail reworded. Wiring file 20x in a loop: 0 failures.
+
+Suite: **1115 tests, 1115 pass, 0 fail**.

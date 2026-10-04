@@ -28,17 +28,40 @@
  * origin — see that module's header: avoiding a scroll-position reset on
  * the sheet's own 20s poll cadence while it happens to be open).
  *
- * DOM-building component, not unit-tested directly (see
- * `components/sheet-dialog.js`'s header for the general reasoning this WP
- * follows for every DOM component); verified live against a running
- * vault-api instance (see the coder's report).
+ * WP WEB-FEAT-4: every row has a "Remove" button that opens a confirm
+ * dialog (the `.dialog-backdrop`/`.dialog` alertdialog markup the detail
+ * sheet's delete confirm uses, stacked on this sheet through
+ * `lib/modal-stack.js`) and then calls `DELETE /v1/clients/{client_id}`
+ * (WP AG-1). The dialog names the PC, says what is deleted and that a
+ * still-running agent lists the PC again with its next report (wording in
+ * `lib/clients-view.js`). Success, and the handler's own 404 (already
+ * gone, `isClientAlreadyGone`), drop the row
+ * at once, force the next clients tick to re-render the list, and nudge
+ * the store; any other failure leaves the row and shows the error inline on
+ * it. A row whose id contains "/" gets a note instead of the button
+ * (`isRemovableClientId`: the server's route cannot address that id).
+ *
+ * DOM wiring is pinned with fake-dom in web/tests/settings-about-pcs-
+ * wiring.test.js (WEB-FEAT-3) and web/tests/clients-remove-wiring.test.js
+ * (WEB-FEAT-4); the painted result is not measured in a browser here.
  */
 
 import { store } from "../store-singleton.js";
 import { onViewChange } from "../router.js";
+import { api } from "../api.js";
+import { pushModal, popModal } from "../lib/modal-stack.js";
+import { showToast } from "./toast.js";
 import { createStatusIcon } from "./status-icon.js";
 import { createSheetDialog } from "./sheet-dialog.js";
 import {
+  isRemovableClientId,
+  isClientAlreadyGone,
+  UNREMOVABLE_SLASH_NOTE,
+  removeConfirmTitle,
+  REMOVE_WHAT_TEXT,
+  REMOVE_REREGISTER_TEXT,
+  removedToastText,
+  removeErrorText,
   partitionClients,
   addressesText,
   describeHealthyClient,
@@ -57,6 +80,16 @@ const state = {
   // WP WEB-FEAT-3: false until a `GET /v1/clients` answer has landed, so the
   // summary line never says "none have reported yet" before it knows.
   loaded: Array.isArray(initialSnapshot),
+  // WP WEB-FEAT-4: inline error per client_id from the last failed Remove;
+  // kept here (not only in the DOM) so a row rebuilt by a poll tick keeps
+  // showing it. Cleared on a later success and when the sheet is reopened.
+  removeErrors: new Map(),
+  // WP WEB-FEAT-4: set after a remove dropped a row locally. The next
+  // clients tick then re-renders the whole list even when its diff against
+  // the store's previous snapshot is empty (the agent re-reported between
+  // the DELETE and the poll), so the list never keeps hiding a PC the
+  // server lists.
+  forceFullRender: false,
 };
 
 // WP 4e.3: "drawer" — same ambient-side-panel treatment as the notifications
@@ -180,7 +213,48 @@ function buildRow(client, { bypass }, nowMs) {
     card.appendChild(hint);
   }
 
+  card.appendChild(buildRemoveControls(client.client_id));
+
   return card;
+}
+
+/** WP WEB-FEAT-4: the row's Remove button (or the "/" note), plus its
+ * inline error line. */
+function buildRemoveControls(clientId) {
+  const wrap = document.createElement("div");
+  wrap.className = "pcs-remove";
+
+  if (isRemovableClientId(clientId)) {
+    const acts = document.createElement("div");
+    acts.className = "jobacts";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn ghost sm";
+    btn.textContent = "Remove";
+    // Visible word first, then the PC: every row has a "Remove" button, so
+    // the accessible name says which PC (label-in-name kept).
+    btn.setAttribute("aria-label", `Remove ${clientId}`);
+    btn.dataset.role = "remove-pc";
+    btn.addEventListener("click", () => openRemoveConfirm(clientId));
+    acts.appendChild(btn);
+    wrap.appendChild(acts);
+  } else {
+    const note = document.createElement("p");
+    note.className = "foot-note";
+    note.dataset.role = "remove-unavailable";
+    note.textContent = UNREMOVABLE_SLASH_NOTE;
+    wrap.appendChild(note);
+  }
+
+  const err = document.createElement("p");
+  err.className = "errline";
+  err.dataset.role = "remove-error";
+  err.setAttribute("role", "alert");
+  const message = state.removeErrors.get(clientId);
+  err.textContent = message || "";
+  err.hidden = !message;
+  wrap.appendChild(err);
+  return wrap;
 }
 
 /** Presence chip + "last seen" line of one row, from the server's fields
@@ -257,13 +331,168 @@ function cssEscape(value) {
     : String(value).replace(/["\\]/g, "\\$&");
 }
 
+// ---------------------------------------------------------------------
+// Remove confirm (WP WEB-FEAT-4) — a persistent overlay on top of the
+// sheet, the same alertdialog markup/CSS as the detail sheet's delete
+// confirm. Escape closes it first (lib/modal-stack.js), the sheet behind it
+// is inert while it is open, focus starts on "Keep" (never on the
+// destructive button) and returns to the invoker on cancel.
+// ---------------------------------------------------------------------
+
+const removeBackdrop = document.createElement("div");
+removeBackdrop.className = "dialog-backdrop";
+const removeDialogEl = document.createElement("div");
+removeDialogEl.className = "dialog pcs-remove-dialog";
+removeDialogEl.setAttribute("role", "alertdialog");
+removeDialogEl.setAttribute("aria-modal", "true");
+removeDialogEl.setAttribute("aria-labelledby", "pcs-remove-title");
+removeDialogEl.dataset.role = "remove-confirm";
+const removeTitle = document.createElement("h3");
+removeTitle.id = "pcs-remove-title";
+const removeWhat = document.createElement("p");
+removeWhat.id = "pcs-remove-what";
+removeWhat.textContent = REMOVE_WHAT_TEXT;
+const removeAgain = document.createElement("p");
+removeAgain.id = "pcs-remove-again";
+removeAgain.textContent = REMOVE_REREGISTER_TEXT;
+// Review fix: the two consequence paragraphs are the dialog's description,
+// read with its name when it opens (alertdialog convention).
+removeDialogEl.setAttribute("aria-describedby", "pcs-remove-what pcs-remove-again");
+const removeRow = document.createElement("div");
+removeRow.className = "row";
+const removeNo = document.createElement("button");
+removeNo.type = "button";
+removeNo.className = "btn ghost sm";
+removeNo.textContent = "Keep";
+removeNo.dataset.role = "remove-cancel";
+const removeYes = document.createElement("button");
+removeYes.type = "button";
+removeYes.className = "btn danger sm";
+removeYes.textContent = "Remove";
+removeYes.dataset.role = "remove-confirm-yes";
+removeRow.append(removeNo, removeYes);
+removeDialogEl.append(removeTitle, removeWhat, removeAgain, removeRow);
+removeBackdrop.appendChild(removeDialogEl);
+document.body.appendChild(removeBackdrop);
+
+removeNo.addEventListener("click", () => {
+  if (!removeFlow.busy) closeRemoveConfirm(); // aria-disabled while busy
+});
+removeYes.addEventListener("click", () => confirmRemove());
+
+const removeFlow = {
+  clientId: null, // the PC the open dialog is about
+  invokerEl: null,
+  busy: false,
+};
+
+function openRemoveConfirm(clientId) {
+  if (removeFlow.busy) return;
+  removeFlow.clientId = clientId;
+  removeFlow.invokerEl = document.activeElement;
+  removeTitle.textContent = removeConfirmTitle(clientId);
+  removeYes.textContent = "Remove";
+  removeBackdrop.classList.add("on");
+  // Review fix: Escape is ignored while the request runs, same as "Keep".
+  pushModal(removeBackdrop, () => {
+    if (!removeFlow.busy) closeRemoveConfirm();
+  });
+  removeNo.focus();
+}
+
+function closeRemoveConfirm({ restoreFocus = true } = {}) {
+  if (!removeBackdrop.classList.contains("on")) return;
+  removeBackdrop.classList.remove("on");
+  popModal(removeBackdrop);
+  const invoker = removeFlow.invokerEl;
+  const clientId = removeFlow.clientId;
+  removeFlow.invokerEl = null;
+  if (removeFlow.busy) return; // the in-flight request decides where focus goes
+  removeFlow.clientId = null;
+  if (!restoreFocus) return;
+  // Review fix: a poll tick may have rebuilt the list while the dialog was
+  // open, detaching the captured invoker. Prefer the row's CURRENT button.
+  const live = clientId != null ? rowFor(clientId)?.querySelector('[data-role="remove-pc"]') : null;
+  const target = live || invoker;
+  if (target && typeof target.focus === "function") target.focus();
+}
+
+function setRemoveBusy(busy) {
+  removeFlow.busy = busy;
+  // aria-disabled + the click guard below, not `disabled`: a disabled
+  // button drops keyboard focus (LEARNINGS, WP WEB-FEAT-1).
+  for (const b of [removeNo, removeYes]) {
+    if (busy) b.setAttribute("aria-disabled", "true");
+    else b.removeAttribute("aria-disabled");
+  }
+  removeYes.textContent = busy ? "Removing…" : "Remove";
+}
+
+function rowFor(clientId) {
+  return dialog.body.querySelector(`.jobcard[data-client-id="${cssEscape(clientId)}"]`);
+}
+
+/** Paint one row's inline remove error from `state.removeErrors`. */
+function paintRemoveError(clientId) {
+  const card = rowFor(clientId);
+  const err = card ? card.querySelector('[data-role="remove-error"]') : null;
+  if (!err) return;
+  const message = state.removeErrors.get(clientId);
+  err.textContent = message || "";
+  err.hidden = !message;
+}
+
+async function confirmRemove() {
+  const clientId = removeFlow.clientId;
+  if (removeFlow.busy || clientId == null) return;
+  setRemoveBusy(true);
+  let failure = null;
+  try {
+    await api.deleteClient(clientId);
+  } catch (err) {
+    // The handler's own 404 ("Unknown client_id ..."): nothing left to delete
+    // for this id — another tab or an earlier click removed it. Same end
+    // state as a 204. Any OTHER 404 (no such route, a proxy) is an error.
+    if (!isClientAlreadyGone(err)) failure = err;
+  }
+  setRemoveBusy(false);
+  removeFlow.clientId = null;
+  closeRemoveConfirm({ restoreFocus: false });
+
+  if (failure) {
+    state.removeErrors.set(clientId, removeErrorText(clientId, errorText(failure)));
+    paintRemoveError(clientId);
+    const btn = rowFor(clientId)?.querySelector('[data-role="remove-pc"]');
+    if (btn) btn.focus();
+    return;
+  }
+
+  state.removeErrors.delete(clientId);
+  state.clients = state.clients.filter((c) => c.client_id !== clientId);
+  state.forceFullRender = true;
+  if (dialog.isOpen()) {
+    fullRender();
+    // The invoking row is gone; the sheet itself is the focus landing spot.
+    dialog.sheet.focus();
+  }
+  showToast(removedToastText(clientId));
+  store.refreshNow();
+}
+
+function errorText(err) {
+  if (err && typeof err.detail === "string" && err.detail) return err.detail;
+  return (err && err.message) || "Request failed.";
+}
+
 store.subscribe("clients", ({ items, diff }) => {
   if (!Array.isArray(items)) return; // {error} payload — nothing to render
   const plan = planClientsUpdate(diff);
   state.clients = items;
   state.loaded = true;
+  const forceFull = state.forceFullRender;
+  state.forceFullRender = false;
   if (!dialog.isOpen()) return; // sheet isn't showing right now — nothing to paint
-  if (plan.full || plan.rebuild.length) {
+  if (forceFull || plan.full || plan.rebuild.length) {
     fullRender();
   } else {
     if (plan.patch.length) patchStats(plan.patch);
@@ -273,6 +502,7 @@ store.subscribe("clients", ({ items, diff }) => {
 
 /** Open the clients sheet, painting it from the latest snapshot first. */
 export function openClientsSheet() {
+  state.removeErrors.clear(); // a reopened sheet starts without stale errors
   fullRender();
   dialog.open();
 }
@@ -282,4 +512,9 @@ export function openClientsSheet() {
 // the detail sheet and the notifications panel). Without this, tapping a
 // bottom-nav item while the sheet is open would leave it painted over the
 // new view, same class of bug as the mockup's original overlay bug.
-onViewChange(() => dialog.close());
+// WP WEB-FEAT-4: the remove confirm on top of it goes too (it belongs to the
+// sheet); an in-flight remove still finishes and refreshes the store.
+onViewChange(() => {
+  closeRemoveConfirm({ restoreFocus: false });
+  dialog.close();
+});

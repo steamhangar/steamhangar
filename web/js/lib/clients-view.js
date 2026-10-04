@@ -225,3 +225,90 @@ export function agentsSummaryText(clients) {
   const base = `Agents: ${s.online} online, ${s.offline} offline`;
   return s.unknown > 0 ? `${base}, ${s.unknown} without presence (server older than this web UI)` : base;
 }
+
+// ---------------------------------------------------------------------
+// Remove a PC (WP WEB-FEAT-4)
+// ---------------------------------------------------------------------
+//
+// `DELETE /v1/clients/{client_id}` (WP AG-1, api/vault_api/routers/
+// clients.py + agent_reports.delete_client) removes exactly two things for
+// that id: every stored report (`agent_reports`: the installed-games lists
+// the agent sent, the table that makes a PC appear in the list at all) and
+// its stored bypass verdict (`client_bypass_state`). It does NOT touch
+// cached games, jobs, the depot mapping or the per-address cache traffic
+// statistics. It is not a ban: `POST /v1/agent/installed` stores a report
+// for any valid client_id without checking that it exists, so a still-
+// running agent's next report lists the PC again with a fresh history
+// (api/tests/test_clients_api.py, "reappears cleanly on the next report").
+// The confirm text below says exactly that, nothing stronger.
+
+/**
+ * Whether the server's remove route can address this client_id at all.
+ * Measured against the real router (TestClient, 2026-10-04): a client_id
+ * containing "/" is a valid report key, but Starlette decodes `%2F` before
+ * routing, so `DELETE /v1/clients/a%2Fb` never reaches the handler and
+ * answers 404 while the PC stays listed. Every other printable character
+ * tried (space, ?, #, %, +, &, non-ASCII) round-trips through
+ * `encodeURIComponent`. The remove flow reads a 404 as "already gone", so
+ * offering the button for such an id would report a success that did not
+ * happen; the row says why instead ({@link UNREMOVABLE_SLASH_NOTE}).
+ * The round-trip was measured against TestClient only, not through a
+ * production reverse proxy; a proxy that rejects an encoded character
+ * (e.g. a 400) lands on the inline-error path, never on "removed".
+ * MUTATION TARGET.
+ * @param {unknown} clientId
+ * @returns {boolean}
+ */
+export function isRemovableClientId(clientId) {
+  return typeof clientId === "string" && clientId.length > 0 && !clientId.includes("/");
+}
+
+/** Start of the 404 detail `DELETE /v1/clients/{client_id}`'s own handler
+ * raises (`f"Unknown client_id {client_id!r}"`, routers/clients.py; pinned
+ * in web/tests/clients-remove.test.js). */
+export const CLIENT_GONE_DETAIL_PREFIX = "Unknown client_id";
+
+/**
+ * Whether a failed remove means "this PC is already gone": a 404 whose
+ * detail is the handler's own text. Any other 404 (an unknown route on a
+ * server older than AG-1, a proxy's 404 page) is a real error and is shown
+ * on the row. MUTATION TARGET.
+ * @param {unknown} err ApiError from api.deleteClient
+ */
+export function isClientAlreadyGone(err) {
+  return (
+    !!err &&
+    err.status === 404 &&
+    typeof err.detail === "string" &&
+    err.detail.startsWith(CLIENT_GONE_DETAIL_PREFIX)
+  );
+}
+
+/** Shown on a row whose id contains "/" instead of the Remove button. */
+export const UNREMOVABLE_SLASH_NOTE =
+  'Cannot be removed here: the name contains "/", which the server\'s remove request cannot address.';
+
+/** Confirm dialog title for one PC. */
+export function removeConfirmTitle(clientId) {
+  return `Remove ${clientId}?`;
+}
+
+/** Confirm dialog: what is deleted (the endpoint's two tables) and what stays. */
+export const REMOVE_WHAT_TEXT =
+  "This deletes the reports this PC's agent sent (its installed-games lists) and its bypass status. " +
+  "Cached games, downloads and cache statistics stay.";
+
+/** Confirm dialog: the "not a ban" consequence, as the server behaves. */
+export const REMOVE_REREGISTER_TEXT =
+  "If vault-agent still runs on this PC, its next report adds the PC back with a fresh history. " +
+  "To retire the PC for good, stop or uninstall the agent there first.";
+
+/** Toast after a successful remove (204, or 404 = already gone). */
+export function removedToastText(clientId) {
+  return `${clientId} removed from the list.`;
+}
+
+/** Inline error line on the row when the remove failed. */
+export function removeErrorText(clientId, reason) {
+  return `Could not remove ${clientId}: ${reason}`;
+}

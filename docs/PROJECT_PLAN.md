@@ -2835,11 +2835,15 @@ below carry their own later dates, item 12 is the current one).
       the version file is written by root; bind-mount operator step is now
       `chown 101:101 <dir>/cache/depot` only (deploy/README).
 
-    - [ ] **WEB-FEAT-4** — remove a PC from the "PCs (agents)" list with
+    - [x] **WEB-FEAT-4** — remove a PC from the "PCs (agents)" list with
       a confirmation dialog, calling the existing `DELETE
       /v1/clients/{client_id}` (WP AG-1); a renamed or retired PC
       otherwise stays listed as offline forever (user decision
       2026-10-03, after rc9). Android follows in the next app package.
+      Done 2026-10-04, web only, no API change: "Remove" per row, confirm
+      names the PC, what is deleted and that a running agent lists it
+      again; 404 counts as removed; ids containing "/" get a note instead
+      (the frozen route cannot address them, measured).
     - [x] **APP-FEAT-2** — Android parity package (2026-10-03): APP-FIX-2,
       APP-FEAT-1 (library account from the stored setting only; servers
       older than rc4 get a "too old" notice; a signed-in-id fill button

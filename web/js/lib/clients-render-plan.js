@@ -37,8 +37,8 @@ export function planClientsUpdate(diff) {
   }
   if ((diff.added && diff.added.length) || (diff.removed && diff.removed.length)) {
     // A client appearing/disappearing from GET /v1/clients is rare (a brand
-    // new agent report, or... in practice never disappearing) — same
-    // accepted simplification as the games/jobs render-plan siblings.
+    // new agent report, or a Remove — WP WEB-FEAT-4) — same accepted
+    // simplification as the games/jobs render-plan siblings.
     return { full: true, patch: [], rebuild: [] };
   }
 
