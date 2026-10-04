@@ -161,8 +161,8 @@ not a guarantee. The check after rollout is therefore explicit: with
 edge mode on, a client update of an app that is not cached must finish
 without a hash mismatch, and the `upstream_status` field of the vault-core
 log must show no 4xx/5xx for `host=` names other than the edge beyond the
-pre-change level; one such status that only appears in edge mode means B1 does not
-hold for that name and the operator sets `VAULT_UPSTREAM_EDGE=` empty.
+pre-change level; one such status that only appears in edge mode means
+B1 does not hold for that name and the operator sets `VAULT_UPSTREAM_EDGE=` empty.
 
 ## Options
 

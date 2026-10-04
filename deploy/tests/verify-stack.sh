@@ -244,6 +244,7 @@ sec5_make_old() {
 
 cleanup() {
     section "Cleanup"
+    compose_override=""   # never layer the section-10 override over the teardown
     say 'Test containers and TEST volumes are removed; the images are kept (they are the artifact).'
     # Pre-freeze review N3: the step-6l host-side listener used to be killed
     # only on the straight-line path, so an abort (INT/TERM, or a `set -e`-
@@ -2425,7 +2426,7 @@ POOL_DEPOT_BIG=99990002      # 2 MiB bodies, for the rate-cap check
 POOL_DEPOT_EDGE2=99990005    # edge mode, Host: fake2.steamcontent.com (outside every list)
 POOL_DEPOT_EDGE3=99990006    # edge mode, Host: fake3.steamcontent.com (no DNS record at all)
 POOL_DEPOT_SLOW=99990004     # the fake edge holds each answer open (cap test)
-POOL_SLOW_SECONDS=5
+POOL_SLOW_SECONDS=10
 POOL_CAP=2                   # VAULT_UPSTREAM_MAX_CONNS of the edge-mode steps
 POOL_CHUNK_BYTES=4096
 POOL_BIG_BYTES=2097152
@@ -2884,13 +2885,20 @@ say "The fake edge holds every answer of depot $POOL_DEPOT_SLOW for ${POOL_SLOW_
 say 'take the slots, the other two are refused at once. While the slots are held: one more MISS -> 503'
 say '(nothing stored), one HIT of a chunk stored in 10g -> 200 from disk, no new edge request.'
 slow_n=4
+host_reqs_before=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)
 si=1
 while [ "$si" -le "$slow_n" ]; do
     ( curl -s -o /dev/null -w '%{http_code}' --max-time 60 -H 'Host: fake2.steamcontent.com' \
         "$CORE_URL/depot/$POOL_DEPOT_SLOW/chunk/$(printf 's%039d' "$si")" > "$work/pool-slow-$si.code" 2>/dev/null ) &
     si=$((si + 1))
 done
-sleep 2
+# Wait until the edge really holds $POOL_CAP slow requests (bounded), no fixed sleep.
+slow_wait=0
+while [ "$slow_wait" -lt 30 ]; do
+    [ "$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)" -ge "$((host_reqs_before + POOL_CAP))" ] && break
+    slow_wait=$((slow_wait + 1)); sleep 1
+done
+say "    the edge held $POOL_CAP requests after ${slow_wait}s"
 edge_reqs_before=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)
 extra_name=$(printf 'x%039d' 1)
 extra_res=$(pool_get fake2.steamcontent.com "/depot/$POOL_DEPOT/chunk/$extra_name" /dev/null)
