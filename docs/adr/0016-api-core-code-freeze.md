@@ -468,3 +468,39 @@ Scope of the exception, all in WP API-FIX-4:
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-04 — freeze exception: pause a queued prefill job (WP WEB-FEAT-5 / API)
+
+User request, 2026-10-04: one Pause all / Resume all button on the
+Downloads page instead of pausing 16 downloads one by one. User decision
+the same day (Weg A): the api/ freeze opens for this one behaviour change.
+
+Why the API had to change: pause was defined for a **running** prefill only
+(`409` on a queued job), only one job runs at a time, and pause releases the
+worker slot, so the worker claims the next queued job straight away. A
+frontend loop over the existing endpoints could pause one download per
+round and watch the next one start; every queued job would have started
+SteamPrefill just to be stopped again. That traffic is the burst pattern the
+CGNAT fixes above exist to avoid.
+
+Scope of the exception, all in WP WEB-FEAT-5:
+
+- api/: `jobs.request_pause` parks a **queued prefill** job at `paused`
+  inside the request (`outcome: "immediate"`, new constant
+  `PAUSED_QUEUED_MESSAGE` as `detail`), under the same `BEGIN IMMEDIATE` lock
+  `claim_next_job` takes, so a pause racing a claim resolves one way or the
+  other. Running prefill: unchanged (`stop_request`, `"requested"`).
+  Paused/finished: unchanged `409` (detail now says "not 'queued' or
+  'running'"). GC jobs: unchanged `409`, queued or running. No new route, no
+  response-model change, no schema change. `CANCELLED_PAUSED_MESSAGE` is
+  reworded to stay true for a job paused before it started.
+- Unchanged and re-verified by tests: `claim_next_job` claims `queued` only,
+  `resume_job` puts the job back with its original id (FIFO front),
+  `cancel_job` cancels a paused job immediately, and `paused` stays in
+  `ACTIVE_STATUSES`, so dedupe and the scheduler's sweep do not stack a
+  second job for that app.
+- Not frozen, listed for completeness: web and Android Pause all / Resume
+  all, tests, api/README.md "Job control".
+
+Every other frozen-path change still needs its own user decision and note
+here.

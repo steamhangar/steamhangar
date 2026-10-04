@@ -694,11 +694,23 @@ CANCELLED_QUEUED_MESSAGE = (
     "nothing ran and nothing on disk was touched."
 )
 
+#: Worded for BOTH ways a job gets to ``paused`` (WP WEB-FEAT-5): a pause
+#: that terminated a running SteamPrefill, and a pause that caught a queued
+#: job before it ever started — the old wording claimed the former only.
 CANCELLED_PAUSED_MESSAGE = (
-    "[vault-api] Cancelled while paused. The SteamPrefill subprocess had "
-    "already been terminated by the pause, so nothing was running at this "
-    "point. Whatever the run had cached before it was paused stays on disk "
-    "and is served as local HITs by the next prefill for this app."
+    "[vault-api] Cancelled while paused. Nothing was running at this point: "
+    "the pause had either terminated SteamPrefill or caught the job before "
+    "it started. Whatever an earlier run cached stays on disk and is served "
+    "as local HITs by the next prefill for this app."
+)
+
+
+#: ``detail`` of a queued prefill paused before it started (WP WEB-FEAT-5).
+PAUSED_QUEUED_MESSAGE = (
+    "Paused while queued: this job had not started, so nothing was running "
+    "and nothing was stopped. The worker skips it until it is resumed with "
+    "POST /v1/jobs/{id}/resume, which puts it back in the queue with its "
+    "original job id."
 )
 
 
@@ -895,18 +907,34 @@ def cancel_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
 
 
 def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
-    """``POST /v1/jobs/{id}/pause``: suspend a RUNNING PREFILL job.
+    """``POST /v1/jobs/{id}/pause``: suspend a QUEUED or RUNNING PREFILL job.
 
-    Restricted to running prefills, and both halves of that are deliberate:
+    Restricted to prefills that have not finished, and every part of that is
+    deliberate:
 
     * **Prefill only.** A GC job is refused (409). GC runs are short — the plan
       is rebuilt from scratch on every run anyway, so "pause" would mean
       "throw away the current plan and rebuild it later", which is what
       cancelling and re-queueing already does, spelled honestly.
-    * **Running only.** A queued job has nothing to suspend (cancel it, or let
-      it run); a paused job is already paused; a finished one has an outcome.
+    * **Queued → paused immediately (WP WEB-FEAT-5, ADR-0016 addendum).** No
+      subprocess exists, so there is nothing for the worker to do: the row
+      moves to ``paused`` inside this transaction (``CONTROL_IMMEDIATE``). The
+      decision is taken under the same ``BEGIN IMMEDIATE`` write lock
+      ``claim_next_job`` uses, so "pause a queued job the worker is claiming
+      right now" resolves one way or the other: either the pause wins (the job
+      is parked and never claimed) or the claim wins (the job is ``running``
+      by the time this transaction reads it, and the pause becomes the
+      ordinary ``stop_request`` below). Without this, pausing the single
+      running job only let the worker claim the next queued one — "pause
+      everything" was impossible. ``log_excerpt``, ``started_at`` and the
+      ``run_*`` columns are left alone: a queued job either never ran or was
+      resumed (which already reset the ``run_*`` columns), and a resumed
+      job's excerpt from its earlier attempt is still true.
+    * **Paused / finished → 409.** A paused job is already paused; a finished
+      one has an outcome.
 
-    Like ``cancel_job``, the actual suspension is the worker's: it terminates
+    For a RUNNING job, like ``cancel_job``, the actual suspension is the
+    worker's: it terminates
     SteamPrefill and calls ``park_paused``. **There is no wire protocol to
     SteamPrefill** — it has no pause signal, so pause IS terminate, and resume
     IS a fresh run. What makes that cheap rather than wasteful is that the
@@ -936,24 +964,35 @@ def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
                 ),
             )
 
+        if job_status == STATUS_QUEUED:
+            conn.execute(
+                """
+                UPDATE jobs SET status = ?, paused_at = ?, stop_request = NULL
+                WHERE id = ? AND status = ?
+                """,
+                (STATUS_PAUSED, utcnow_iso(), job_id, STATUS_QUEUED),
+            )
+            after = conn.execute(
+                f"SELECT {_JOB_COLUMNS} FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return ControlResult(
+                CONTROL_IMMEDIATE,
+                _row_to_dict(after),
+                detail=PAUSED_QUEUED_MESSAGE,
+            )
+
         if job_status != STATUS_RUNNING:
             return ControlResult(
                 CONTROL_CONFLICT,
                 _row_to_dict(row),
                 detail=(
-                    f"Job {job_id} is '{job_status}', not 'running', so there "
-                    "is nothing to pause. "
+                    f"Job {job_id} is '{job_status}', not 'queued' or "
+                    "'running', so there is nothing to pause. "
                     + (
                         "It is already paused — resume it with "
                         "POST /v1/jobs/{id}/resume."
                         if job_status == STATUS_PAUSED
-                        else (
-                            "A queued job has not started: cancel it with "
-                            "DELETE /v1/jobs/{id}, or let it start and pause "
-                            "it then."
-                            if job_status == STATUS_QUEUED
-                            else "It already finished."
-                        )
+                        else "It already finished."
                     )
                 ),
             )

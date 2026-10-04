@@ -310,7 +310,7 @@ def test_cancelling_a_paused_job_is_immediate(conn) -> None:
     assert result.outcome == jobs.CONTROL_IMMEDIATE
     assert result.job["status"] == jobs.STATUS_CANCELLED
     assert result.job["finished_at"] is not None
-    assert "already been terminated by the pause" in result.job["log_excerpt"]
+    assert "the pause had either terminated SteamPrefill" in result.job["log_excerpt"]
 
 
 def test_cancelling_a_running_job_records_the_request_for_the_worker(conn) -> None:
@@ -357,8 +357,8 @@ def test_pause_is_refused_for_a_gc_job(conn) -> None:
     assert jobs.read_stop_request(conn, int(job["id"])) is None
 
 
-@pytest.mark.parametrize("state", ["queued", "paused", "finished"])
-def test_pause_is_refused_unless_the_job_is_running(conn, state: str) -> None:
+@pytest.mark.parametrize("state", ["paused", "finished", "cancelled"])
+def test_pause_is_refused_for_a_paused_or_finished_job(conn, state: str) -> None:
     job, _ = jobs.enqueue_prefill(conn, 440)
     job_id = int(job["id"])
     if state == "paused":
@@ -367,11 +367,183 @@ def test_pause_is_refused_unless_the_job_is_running(conn, state: str) -> None:
     elif state == "finished":
         jobs.claim_next_job(conn)
         jobs.finish_job(conn, job_id, jobs.STATUS_DONE, "ok")
+    else:
+        cancel_now(conn, job_id)
+    before = jobs.get_job(conn, job_id)
 
     result = jobs.request_pause(conn, job_id)
 
     assert result.outcome == jobs.CONTROL_CONFLICT
-    assert "not 'running'" in result.detail
+    assert "not 'queued' or 'running'" in result.detail
+    assert jobs.get_job(conn, job_id) == before, "a refused pause writes nothing"
+
+
+# --- WP WEB-FEAT-5: pausing a QUEUED prefill job (ADR-0016 addendum) -------
+
+
+def test_pausing_a_queued_job_parks_it_immediately(conn) -> None:
+    job, _ = jobs.enqueue_prefill(conn, 440)
+    job_id = int(job["id"])
+
+    result = jobs.request_pause(conn, job_id)
+
+    assert result.outcome == jobs.CONTROL_IMMEDIATE
+    assert result.detail == jobs.PAUSED_QUEUED_MESSAGE
+    row = jobs.get_job(conn, job_id)
+    assert row["status"] == jobs.STATUS_PAUSED
+    assert row["paused_at"] is not None
+    assert row["stop_request"] is None
+    # It never started and is not finished.
+    assert row["started_at"] is None
+    assert row["finished_at"] is None
+
+
+def test_pausing_a_queued_job_does_not_touch_the_apps_row(conn) -> None:
+    """A queued job never set apps.status, so parking it must not either —
+    pausing a re-check cannot grey out a game that is already 'done'."""
+    jobs.set_app_status(conn, 440, jobs.STATUS_DONE)
+    job, _ = jobs.enqueue_prefill(conn, 440)
+
+    jobs.request_pause(conn, int(job["id"]))
+
+    status = conn.execute("SELECT status FROM apps WHERE appid = 440").fetchone()[0]
+    assert status == jobs.STATUS_DONE
+
+
+def test_the_worker_never_claims_a_job_paused_while_queued(conn) -> None:
+    first, _ = jobs.enqueue_prefill(conn, 440)
+    second, _ = jobs.enqueue_prefill(conn, 730)
+    jobs.request_pause(conn, int(first["id"]))
+
+    claimed = jobs.claim_next_job(conn)
+
+    assert claimed is not None and claimed["id"] == second["id"]
+    assert jobs.claim_next_job(conn) is None, "the paused job stays parked"
+    assert jobs.get_job(conn, int(first["id"]))["status"] == jobs.STATUS_PAUSED
+
+
+def test_pausing_every_queued_job_then_the_running_one_leaves_nothing_to_claim(
+    conn,
+) -> None:
+    """The "Pause all" order the frontends use: queued first, running last."""
+    ids = [int(jobs.enqueue_prefill(conn, appid)[0]["id"]) for appid in (440, 730, 570)]
+    running = jobs.claim_next_job(conn)
+    assert running["id"] == ids[0]
+
+    for job_id in ids[1:]:
+        assert jobs.request_pause(conn, job_id).outcome == jobs.CONTROL_IMMEDIATE
+    assert jobs.request_pause(conn, ids[0]).outcome == jobs.CONTROL_REQUESTED
+    jobs.park_paused(conn, ids[0], "[stub] partial")
+
+    assert jobs.claim_next_job(conn) is None
+    assert [jobs.get_job(conn, i)["status"] for i in ids] == ["paused"] * 3
+
+
+def test_a_job_paused_while_queued_resumes_with_its_original_id_in_fifo_order(
+    conn,
+) -> None:
+    first, _ = jobs.enqueue_prefill(conn, 440)
+    jobs.request_pause(conn, int(first["id"]))
+    later, _ = jobs.enqueue_prefill(conn, 730)
+
+    result = jobs.resume_job(conn, int(first["id"]))
+
+    assert result.outcome == jobs.CONTROL_RESUMED
+    assert result.job["id"] == first["id"]
+    assert jobs.claim_next_job(conn)["id"] == first["id"]
+    assert int(later["id"]) > int(first["id"])
+
+
+def test_a_job_paused_while_queued_deduplicates_a_new_prefill(conn) -> None:
+    job, _ = jobs.enqueue_prefill(conn, 440)
+    jobs.request_pause(conn, int(job["id"]))
+
+    again, created = jobs.enqueue_prefill(conn, 440)
+
+    assert created is False
+    assert again["id"] == job["id"]
+
+
+def test_cancelling_a_job_paused_while_queued_is_immediate_and_honest(conn) -> None:
+    job, _ = jobs.enqueue_prefill(conn, 440)
+    jobs.request_pause(conn, int(job["id"]))
+
+    result = cancel_now(conn, int(job["id"]))
+
+    assert result.job["status"] == jobs.STATUS_CANCELLED
+    # The message covers a pause that never terminated anything.
+    assert "caught the job before it started" in result.detail
+
+
+def test_pausing_a_queued_gc_job_is_still_refused(conn) -> None:
+    job, _ = jobs.enqueue_gc(conn, 440, execute=False)
+
+    result = jobs.request_pause(conn, int(job["id"]))
+
+    assert result.outcome == jobs.CONTROL_CONFLICT
+    assert "cannot be paused" in result.detail
+    assert jobs.get_job(conn, int(job["id"]))["status"] == jobs.STATUS_QUEUED
+
+
+def test_pause_racing_the_workers_claim_resolves_cleanly(db_path: str) -> None:
+    """Pause (queued branch) and claim_next_job race on separate connections.
+
+    Both take BEGIN IMMEDIATE, so exactly one shape may come out per round:
+    pause wins -> 'paused', never claimed; claim wins -> 'running' with a
+    pause stop_request the worker honours. No round may lose the job (left
+    'queued' unclaimed with an 'immediate' answer, or claimed while 'paused').
+    """
+    import threading
+
+    setup = get_connection(db_path)
+    try:
+        outcomes: set[str] = set()
+        for round_no in range(40):
+            job, _ = jobs.enqueue_prefill(setup, 1000 + round_no)
+            job_id = int(job["id"])
+            barrier = threading.Barrier(2)
+            seen: dict[str, object] = {}
+
+            def do_claim() -> None:
+                c = get_connection(db_path)
+                try:
+                    barrier.wait()
+                    seen["claim"] = jobs.claim_next_job(c)
+                finally:
+                    c.close()
+
+            def do_pause() -> None:
+                c = get_connection(db_path)
+                try:
+                    barrier.wait()
+                    seen["pause"] = jobs.request_pause(c, job_id)
+                finally:
+                    c.close()
+
+            threads = [threading.Thread(target=do_claim), threading.Thread(target=do_pause)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
+            assert not any(t.is_alive() for t in threads)
+
+            pause = seen["pause"]
+            claim = seen["claim"]
+            row = jobs.get_job(setup, job_id)
+            if pause.outcome == jobs.CONTROL_IMMEDIATE:
+                assert claim is None, "a job paused while queued was claimed anyway"
+                assert row["status"] == jobs.STATUS_PAUSED
+            else:
+                assert pause.outcome == jobs.CONTROL_REQUESTED, pause
+                assert claim is not None and claim["id"] == job_id
+                assert row["status"] == jobs.STATUS_RUNNING
+                assert row["stop_request"] == jobs.STOP_REQUEST_PAUSE
+                # Let the next round start from an empty queue.
+                jobs.park_paused(setup, job_id, "[stub] partial")
+            outcomes.add(pause.outcome)
+        assert outcomes <= {jobs.CONTROL_IMMEDIATE, jobs.CONTROL_REQUESTED}
+    finally:
+        setup.close()
 
 
 def test_resume_is_refused_unless_the_job_is_paused(conn) -> None:
@@ -475,13 +647,24 @@ def test_deleting_a_finished_job_is_409_over_http(client: TestClient) -> None:
     assert "already finished" in second.json()["detail"]
 
 
-def test_pausing_a_queued_job_is_409_over_http(client: TestClient) -> None:
+def test_pausing_a_queued_job_over_http_is_immediate(client: TestClient) -> None:
+    """WP WEB-FEAT-5: was a 409 before the ADR-0016 addendum."""
     job_id = enqueue(client, 440)
 
     response = client.post(f"/v1/jobs/{job_id}/pause", headers=AUTH)
 
-    assert response.status_code == 409
-    assert "not 'running'" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "job_id": job_id,
+        "status": "paused",
+        "outcome": "immediate",
+        "detail": jobs.PAUSED_QUEUED_MESSAGE,
+    }
+    assert get_job(client, job_id)["status"] == "paused"
+
+    second = client.post(f"/v1/jobs/{job_id}/pause", headers=AUTH)
+    assert second.status_code == 409
+    assert "already paused" in second.json()["detail"]
 
 
 def test_resuming_a_job_that_is_not_paused_is_409_over_http(client: TestClient) -> None:
@@ -669,6 +852,33 @@ def test_pause_then_resume_reruns_steamprefill_and_completes(
     # the hanging first attempt never got that far).
     assert len(stub_prefill.read_runs(bindir)) == 1
     assert stub_prefill.read_selection(bindir) == [440]
+
+
+def test_pause_all_order_against_the_real_worker_leaves_it_idle(
+    tmp_path: Path, bindir: Path, cache_root: Path
+) -> None:
+    """WP WEB-FEAT-5 end to end: pause the queued jobs, then the running one.
+    The worker must not start either parked job afterwards."""
+    executable = stub_prefill.make_stub(bindir, mode="hang", cache_root=str(cache_root))
+    settings = make_settings(tmp_path, cache_root, executable)
+
+    with TestClient(create_app(settings)) as client:
+        running_id = start_hanging_prefill(client, 440)
+        queued_ids = [enqueue(client, 730), enqueue(client, 570)]
+
+        for job_id in queued_ids:
+            response = client.post(f"/v1/jobs/{job_id}/pause", headers=AUTH)
+            assert response.status_code == 200, response.text
+            assert response.json()["outcome"] == "immediate"
+        response = client.post(f"/v1/jobs/{running_id}/pause", headers=AUTH)
+        assert response.json()["outcome"] == "requested"
+
+        assert wait_for_status(client, running_id, ("paused",))["status"] == "paused"
+        time.sleep(0.5)  # ~25 worker polls at 0.02 s
+        for job_id in queued_ids:
+            job = get_job(client, job_id)
+            assert job["status"] == "paused"
+            assert job["started_at"] is None, "a job paused while queued was started"
 
 
 def test_a_paused_job_survives_a_restart_and_is_still_resumable(
