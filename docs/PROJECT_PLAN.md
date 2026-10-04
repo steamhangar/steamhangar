@@ -2779,11 +2779,11 @@ below carry their own later dates, item 12 is the current one).
       client test, 2026-10-04: 1838x `113: Host is unreachable` across
       14 edge hosts in ~16 s, 898 of them on a pooled edge; Steam retried
       and finished). Mitigation shipped: the scheduler prefills every
-      agent-reported installed app, so updates arrive as HITs; set the
+      installed app of an active PC (fresh agent report), so updates arrive as HITs; set the
       window to cover the day (e.g. `06:00-24:00`, 60 min) in Settings.
       Fix tracked as D7 CORE-FIX-4. Windows agent installer notes from
-      AGENT-FIX-2: a re-install keeps the key, client id and a working
-      library root from `env.txt`; going back to the hostname-derived id
+      AGENT-FIX-2: a re-install keeps the key, client id and (when the
+      registry has none) a working library root from `env.txt`; going back to the hostname-derived id
       needs uninstall + install; the registry SteamPath wins over an
       earlier explicit `-LibraryRoot`.
 

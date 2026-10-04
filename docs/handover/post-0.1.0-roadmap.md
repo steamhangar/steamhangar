@@ -278,7 +278,7 @@ limitation in the release notes; mitigate with the scheduler (installed
 apps are prefilled, window covering the day). Fix after `v0.1.0`.
 
 **Open.** What nginx OSS can do without the Plus-only `queue`
-(`max_conns` alone fails fast with 502; client-side `limit_conn`; a
+(`max_conns` alone should fail fast with 502 per the nginx docs, to verify; client-side `limit_conn`; a
 separate pooled forward proxy); whether a per-edge-name pool is the right
 model when a client spreads over 14 edges; how to measure safely on the
 production line.
@@ -298,3 +298,5 @@ allow a list. Workaround: one wide window such as `06:00-24:00` with a
 3. D1 first: it is the widest benefit, and the production measurement is
    cheap.
 4. D2, then D3 on top of it.
+5. D7 and D8 after the `v0.1.0` tag (user decision 2026-10-04); D7 first,
+   it is the only one with a measured harm on the production line.
