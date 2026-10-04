@@ -243,3 +243,18 @@ test("the product name is spelled 'SteamHangar' in the tab title, the header and
   assert.match(indexHtml, /<span class="brand">SteamHangar<\/span>/);
   assert.match(onboardingJs, /el\("div", "wordmark", "SteamHangar"\)/);
 });
+
+// ---------------------------------------------------------------------
+// 4. Android wiring pin
+// ---------------------------------------------------------------------
+
+test("Android CapsulePill actually calls capsulePillHasGround (comment-stripped scan)", () => {
+  const src = readFileSync(
+    path.join(webDir, "..", "app", "app", "src", "main", "java", "dev", "steamvault", "app", "ui", "library", "GameCard.kt"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const fn = src.slice(src.indexOf("fun CapsulePill("));
+  assert.ok(fn.length > 0, "CapsulePill not found");
+  assert.match(fn, /capsulePillHasGround\(model\)/);
+  assert.match(fn, /hasGround\s*&&\s*model\.sizeLabel/);
+});

@@ -173,7 +173,7 @@ private fun CapsulePill(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusIcon(kind = model.kind, size = StatusIconSize.SMALL, spokenLabel = toolAppStateWordFor(model.kind))
-        if (model.sizeLabel != null) {
+        if (hasGround && model.sizeLabel != null) {
             Text(
                 text = model.sizeLabel,
                 style = MaterialTheme.typography.labelSmall,

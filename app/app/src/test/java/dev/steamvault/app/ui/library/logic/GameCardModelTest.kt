@@ -182,4 +182,19 @@ class GameCardModelTest {
         assertTrue(cached.sizeLabel != null)
         assertEquals(true, capsulePillHasGround(cached))
     }
+
+    // Web parity: only a cached game prints a number, whatever size_bytes says.
+    @Test
+    fun `capsule pill has no ground for running, paused or stale even with a size`() {
+        val sized = runningGame().copy(size_bytes = 3_900_000_000L)
+        val running = buildGameCardModel(sized, runningJob(), selected = false, selecting = false)
+        val paused = buildGameCardModel(
+            sized, runningJob().copy(status = "paused"), selected = false, selecting = false,
+        )
+        assertEquals(StatusKind.RUNNING, running.kind)
+        assertEquals(StatusKind.PAUSED, paused.kind)
+        assertEquals(false, capsulePillHasGround(running))
+        assertEquals(false, capsulePillHasGround(paused))
+        assertEquals(false, capsulePillHasGround(running.copy(kind = StatusKind.STALE)))
+    }
 }
