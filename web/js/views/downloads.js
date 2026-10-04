@@ -46,6 +46,15 @@
  * there the output IS the diagnosis, and no summary exists that could
  * replace it.
  *
+ * **Pause all / Resume all (WP WEB-FEAT-5).** A bar under the heading
+ * pauses every queued prefill job and then the running one, or resumes
+ * every paused job (decisions and wording: `lib/bulk-jobs.js`). Same
+ * non-optimistic posture as the per-job buttons: the calls go out (at most
+ * `BULK_CONCURRENCY` at once), one aggregate toast reports what the server
+ * did, then `store.refreshNow()` repaints. Pause all asks first, naming the
+ * count; Resume all does not. The bar is built once per mount and patched
+ * (`paintBulkBar`), so a poll tick does not take focus from its buttons.
+ *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
  * with the job highlighted" navigation target lands here without any
@@ -73,6 +82,19 @@ import { fillMissingNames, hasText, vaultRowTitle } from "../lib/owned-library.j
 import { isToolApp, TOOL_APP_NOTE } from "../lib/game-status.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp, offersRetryFor } from "../lib/job-failure.js";
+import { pushModal, popModal } from "../lib/modal-stack.js";
+import {
+  WORDING as BULK,
+  bulkBarState,
+  bulkPauseTargets,
+  bulkResumeTargets,
+  runBulkPause,
+  runBulkResume,
+  bulkSummary,
+  pauseAriaLabel,
+  resumeAriaLabel,
+  confirmTitle,
+} from "../lib/bulk-jobs.js";
 
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
@@ -256,6 +278,161 @@ function gateOffline(btn) {
   if (!isConnectionLost()) return;
   btn.disabled = true;
   btn.title = OFFLINE_CONTROL_TITLE;
+}
+
+// ---------------------------------------------------------------------
+// Pause all / Resume all (WP WEB-FEAT-5)
+// ---------------------------------------------------------------------
+
+/** `null`, or the bulk run in flight (`"pause"`/`"resume"`). Module-level,
+ * so a re-mount mid-run still shows the busy state. */
+let bulkBusy = null;
+
+/** Toast duration for the aggregate result — longer than the default,
+ * because it may carry a server reason. */
+const BULK_TOAST_MS = 7000;
+
+// Confirm dialog — built ONCE at module load as a `document.body` sibling
+// of `#app`, the same placement library.js's delete confirm documents (a
+// dialog inside `#app` would go inert with it).
+const bulkBackdrop = document.createElement("div");
+bulkBackdrop.className = "dialog-backdrop";
+const bulkDialog = document.createElement("div");
+bulkDialog.className = "dialog";
+bulkDialog.setAttribute("role", "alertdialog");
+bulkDialog.setAttribute("aria-modal", "true");
+bulkDialog.dataset.role = "bulk-pause-confirm";
+const bulkTitle = document.createElement("h3");
+bulkTitle.id = "bulk-pause-title";
+bulkDialog.setAttribute("aria-labelledby", "bulk-pause-title");
+const bulkText = document.createElement("p");
+const bulkGcNote = document.createElement("p");
+bulkGcNote.textContent = BULK.confirmGcNote;
+const bulkRow = document.createElement("div");
+bulkRow.className = "row";
+const bulkNo = document.createElement("button");
+bulkNo.type = "button";
+bulkNo.className = "btn ghost sm";
+bulkNo.textContent = BULK.confirmNo;
+bulkNo.dataset.role = "bulk-pause-no";
+const bulkYes = document.createElement("button");
+bulkYes.type = "button";
+bulkYes.className = "btn primary sm";
+bulkYes.textContent = BULK.confirmYes;
+bulkYes.dataset.role = "bulk-pause-yes";
+bulkRow.append(bulkNo, bulkYes);
+bulkDialog.append(bulkTitle, bulkText, bulkGcNote, bulkRow);
+bulkBackdrop.appendChild(bulkDialog);
+document.body.appendChild(bulkBackdrop);
+
+let bulkConfirmOpen = false;
+let bulkInvokerEl = null;
+
+function openPauseConfirm() {
+  const bar = bulkBarState(state.jobs);
+  if (!bar.pauseVisible || bulkBusy) return;
+  bulkTitle.textContent = confirmTitle(bar.pauseCount);
+  bulkText.textContent = BULK.confirmBody;
+  bulkGcNote.hidden = !bar.gcActive;
+  bulkYes.disabled = isConnectionLost();
+  bulkInvokerEl = document.activeElement;
+  bulkConfirmOpen = true;
+  bulkBackdrop.classList.add("on");
+  pushModal(bulkBackdrop, closePauseConfirm);
+  bulkNo.focus(); // the non-destructive default gets initial focus
+}
+
+function closePauseConfirm() {
+  if (!bulkConfirmOpen) return;
+  bulkConfirmOpen = false;
+  bulkBackdrop.classList.remove("on");
+  popModal(bulkBackdrop);
+  if (bulkInvokerEl && typeof bulkInvokerEl.focus === "function" && bulkInvokerEl.isConnected !== false) {
+    bulkInvokerEl.focus();
+  }
+  bulkInvokerEl = null;
+}
+
+bulkNo.addEventListener("click", closePauseConfirm);
+bulkYes.addEventListener("click", () => {
+  closePauseConfirm();
+  // The targets are taken from the list as it is NOW, not as it was when
+  // the dialog opened: anything that finished meanwhile is simply not sent.
+  runBulk("pause");
+});
+
+/**
+ * Run Pause all / Resume all against the current jobs snapshot. Reached
+ * only from the bar's buttons and the confirm dialog's "Pause all".
+ * @param {"pause"|"resume"} kind
+ */
+async function runBulk(kind) {
+  if (bulkBusy) return;
+  const targets = kind === "pause" ? bulkPauseTargets(state.jobs) : bulkResumeTargets(state.jobs);
+  const total = kind === "pause" ? targets.count : targets.length;
+  if (!total) return;
+  bulkBusy = kind;
+  paintBulkBar();
+  let results = [];
+  try {
+    results =
+      kind === "pause"
+        ? await runBulkPause(targets, (id) => api.pauseJob(id))
+        : await runBulkResume(targets, (id) => api.resumeJob(id));
+  } finally {
+    bulkBusy = null;
+    paintBulkBar();
+  }
+  const summary = bulkSummary(kind, results);
+  showToast(summary.text, { warn: summary.warn, duration: BULK_TOAST_MS });
+  store.refreshNow();
+}
+
+function bulkButton(label, variant, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn sm" + (variant ? " " + variant : "");
+  btn.textContent = label;
+  // While a run is busy the buttons are aria-disabled, not `disabled`, so
+  // the focused one keeps focus (docs/LEARNINGS.md, WP WEB-FEAT-1); the
+  // click guard for that state is `bulkBusy` in openPauseConfirm/runBulk.
+  btn.addEventListener("click", () => {
+    if (btn.disabled) return;
+    onClick();
+  });
+  return btn;
+}
+
+/** Sync the bulk bar with `state.jobs`, `bulkBusy` and the connection. */
+function paintBulkBar() {
+  if (!mounted() || !els.bulkBar) return;
+  const bar = bulkBarState(state.jobs);
+  const offline = isConnectionLost();
+  const { bulkBar, bulkPause, bulkResume } = els;
+
+  // Keep a focused button's focus on a sibling when it disappears.
+  const pauseHadFocus = document.activeElement === bulkPause;
+  const resumeHadFocus = document.activeElement === bulkResume;
+
+  bulkBar.hidden = !bar.visible && !bulkBusy;
+  bulkPause.hidden = !bar.pauseVisible && bulkBusy !== "pause";
+  bulkResume.hidden = !bar.resumeVisible && bulkBusy !== "resume";
+
+  bulkPause.textContent = bulkBusy === "pause" ? BULK.pausing : BULK.pauseAll;
+  bulkResume.textContent = bulkBusy === "resume" ? BULK.resuming : BULK.resumeAll;
+  bulkPause.setAttribute("aria-label", bulkBusy === "pause" ? BULK.pausing : pauseAriaLabel(bar.pauseCount));
+  bulkResume.setAttribute("aria-label", bulkBusy === "resume" ? BULK.resuming : resumeAriaLabel(bar.resumeCount));
+
+  for (const btn of [bulkPause, bulkResume]) {
+    if (bulkBusy) btn.setAttribute("aria-disabled", "true");
+    else btn.removeAttribute("aria-disabled");
+    btn.disabled = offline;
+    if (offline) btn.title = OFFLINE_CONTROL_TITLE;
+    else btn.removeAttribute("title");
+  }
+
+  if (pauseHadFocus && bulkPause.hidden && !bulkResume.hidden) bulkResume.focus();
+  if (resumeHadFocus && bulkResume.hidden && !bulkPause.hidden) bulkPause.focus();
 }
 
 // ---------------------------------------------------------------------
@@ -687,6 +864,7 @@ function fullRender() {
   const gamesByAppid = gamesByAppidMap();
 
   els.sub.textContent = subtitleText(p);
+  paintBulkBar();
 
   els.activeBody.replaceChildren();
   if (!p.running.length) {
@@ -740,6 +918,8 @@ function patchStopRequests(jobIds) {
       els.pausedBody.querySelector(`.jobcard[data-jid="${jobId}"]`);
     if (job && card) paintJobActions(card, job);
   }
+  // A stop_request change moves a running job in or out of Pause all's set.
+  paintBulkBar();
 }
 
 /** Update just the name text on every visible row for this appid, without
@@ -784,6 +964,24 @@ function buildSection() {
   sub.className = "dl-sub";
   head.append(h1, sub);
 
+  // WP WEB-FEAT-5: Pause all / Resume all + the scheduler note.
+  const bulkBar = document.createElement("div");
+  bulkBar.className = "dl-bulk";
+  bulkBar.setAttribute("role", "group");
+  bulkBar.setAttribute("aria-label", BULK.groupLabel);
+  bulkBar.hidden = true;
+  const bulkActs = document.createElement("div");
+  bulkActs.className = "dl-bulk-acts";
+  const bulkPause = bulkButton(BULK.pauseAll, "", openPauseConfirm);
+  bulkPause.dataset.role = "bulk-pause";
+  const bulkResume = bulkButton(BULK.resumeAll, "primary", () => runBulk("resume"));
+  bulkResume.dataset.role = "bulk-resume";
+  bulkActs.append(bulkPause, bulkResume);
+  const bulkNote = document.createElement("p");
+  bulkNote.className = "dl-bulk-note";
+  bulkNote.textContent = BULK.schedulerNote;
+  bulkBar.append(bulkActs, bulkNote);
+
   const activeHeading = sectionHeading("Active");
   const activeBody = document.createElement("div");
 
@@ -804,6 +1002,7 @@ function buildSection() {
 
   section.append(
     head,
+    bulkBar,
     activeHeading,
     activeBody,
     pausedHeading,
@@ -818,6 +1017,9 @@ function buildSection() {
   els = {
     section,
     sub,
+    bulkBar,
+    bulkPause,
+    bulkResume,
     activeBody,
     pausedHeading,
     pausedBody,

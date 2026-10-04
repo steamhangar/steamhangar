@@ -164,7 +164,7 @@ fun DownloadsScreen(
         snackbarHost = {
             controller.toast?.let { message ->
                 LaunchedEffect(message) {
-                    delay(2500)
+                    delay(controller.toastMs)
                     controller.dismissToast()
                 }
                 Snackbar(modifier = Modifier.padding(12.dp)) { Text(message) }
@@ -181,6 +181,7 @@ fun DownloadsScreen(
                     modifier = Modifier.padding(12.dp),
                 )
             }
+            PauseAllDialog(controller, scope)
             DownloadsBody(
                 partition = partition,
                 activeModels = activeModels,
@@ -209,6 +210,7 @@ private fun DownloadsBody(
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        item(key = "bulk-bar") { DownloadsBulkBar(controller, scope) }
         item(key = "active-heading") { SectionHeading(stringResource(R.string.downloads_section_active)) }
         if (activeModels.isEmpty()) {
             item(key = "active-empty") { EmptyLine(stringResource(R.string.downloads_active_empty)) }

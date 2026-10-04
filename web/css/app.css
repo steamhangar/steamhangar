@@ -840,6 +840,13 @@ body.selecting .app:has(> :where(.decision-panel:not([hidden]))) > .view-root{ p
 .dl-head{ margin-bottom:2px; }
 .dl-head h1{ margin:0 0 2px; }
 .dl-sub{ display:block; font-size:11px; font-weight:500; color:var(--dim-2); letter-spacing:.3px; }
+/* WP WEB-FEAT-5: Pause all / Resume all under the heading, plus one note
+   line. The bar is [hidden]-toggled and display:flex, so it needs the
+   [hidden] guard (docs/LEARNINGS.md WP 4a.8). Buttons wrap at phone width. */
+.dl-bulk{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:10px 0 0; }
+.dl-bulk[hidden]{ display:none; }
+.dl-bulk-acts{ display:flex; flex-wrap:wrap; gap:8px; }
+.dl-bulk-note{ margin:0; flex:1 1 220px; min-width:0; font-size:11px; line-height:1.5; color:var(--dim-2); }
 
 h4.sec{
   margin:18px 0 8px; font-size:10.5px; font-weight:700;
