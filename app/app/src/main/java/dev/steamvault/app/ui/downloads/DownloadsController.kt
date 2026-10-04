@@ -10,7 +10,9 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.polling.PollingIntervals
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
+import dev.steamvault.app.ui.downloads.logic.BULK_TOAST_MS
 import dev.steamvault.app.ui.downloads.logic.BulkKind
+import dev.steamvault.app.ui.downloads.logic.TOAST_MS
 import dev.steamvault.app.ui.downloads.logic.ExcerptCache
 import dev.steamvault.app.ui.downloads.logic.ExcerptFetchState
 import dev.steamvault.app.ui.downloads.logic.bulkBarState
@@ -53,6 +55,11 @@ class DownloadsController(
     var loadError by mutableStateOf<String?>(null)
         private set
     var toast by mutableStateOf<String?>(null)
+        private set
+
+    /** How long the screen shows [toast]; the aggregate bulk toast may carry
+     * a server reason, so it stays longer (web `BULK_TOAST_MS`). */
+    var toastMs: Long = TOAST_MS
         private set
 
     /** Job ids with a job-control call currently in flight FROM THIS
@@ -163,6 +170,7 @@ class DownloadsController(
 
     fun dismissToast() {
         toast = null
+        toastMs = TOAST_MS
     }
 
     // ---- job control ----------------------------------------------------
@@ -248,6 +256,7 @@ class DownloadsController(
                 } else {
                     runBulkResume(resumeTargets, { id -> jobsRepository.resume(id) })
                 }
+                toastMs = BULK_TOAST_MS
                 toast = bulkSummary(kind, results).text
             } finally {
                 bulkBusy = null

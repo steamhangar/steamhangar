@@ -34,6 +34,10 @@ import kotlinx.coroutines.sync.withPermit
 /** Requests in flight at once, per phase (web `BULK_CONCURRENCY`). */
 const val BULK_CONCURRENCY = 4
 
+/** Snackbar durations in ms: the default, and the longer aggregate bulk toast (web `BULK_TOAST_MS`). */
+const val TOAST_MS = 2500L
+const val BULK_TOAST_MS = 7000L
+
 /** Every user-visible literal, ported verbatim from web `WORDING`. */
 object BulkWording {
     const val PAUSE_ALL = "Pause all"
