@@ -69,9 +69,10 @@ import { formatTimestamp } from "../lib/format.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
-import { appTitle, fillMissingNames, hasText } from "../lib/owned-library.js";
+import { fillMissingNames, hasText, vaultRowTitle } from "../lib/owned-library.js";
+import { isToolApp, TOOL_APP_NOTE } from "../lib/game-status.js";
 import { ownedLibrary } from "../owned-singleton.js";
-import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp } from "../lib/job-failure.js";
+import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp, offersRetryFor } from "../lib/job-failure.js";
 
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
@@ -163,14 +164,17 @@ function gamesByAppidMap() {
   return new Map(fillMissingNames(state.games, ownedLibrary.current().games).map((g) => [g.appid, g]));
 }
 function nameFor(appid, gamesByAppid) {
-  return appTitle(appid, gamesByAppid.get(appid)?.name);
+  // WP API-FIX-4: vaultRowTitle adds the Steam tool app's server-sent name.
+  return vaultRowTitle(appid, gamesByAppid.get(appid));
 }
 
 /** WP WEB-FIX-4: start the one owned-list load this view may start (see
  * the module header) when a job on screen has no vault name. */
 function maybeLoadOwnedNames() {
   if (!state.gamesKnown) return;
-  const named = new Set(state.games.filter((g) => hasText(g.name)).map((g) => g.appid));
+  const named = new Set(
+    state.games.filter((g) => hasText(g.name) || (isToolApp(g) && hasText(g.tool_app_name))).map((g) => g.appid),
+  );
   if (state.jobs.some((j) => !named.has(j.appid))) ownedLibrary.loadIfNeverLoaded();
 }
 
@@ -463,7 +467,11 @@ function appendFailureHint(logEl, hintKind, job, st) {
   code.className = "cmd";
   code.textContent = text.code;
   box.append(para(text.title, "failhint-title"), para(text.body), para(text.codeIntro), code, para(text.after));
-  if (isNewestJobForApp(job, state.jobs)) {
+  if (!offersRetryFor(gamesByAppidMap().get(job.appid))) {
+    // WP API-FIX-4: a tool app's job is never retried (POST /v1/prefill
+    // answers 422); say why instead of offering the button.
+    box.appendChild(para(TOOL_APP_NOTE));
+  } else if (isNewestJobForApp(job, state.jobs)) {
     box.appendChild(para(text.retry));
     const acts = document.createElement("div");
     acts.className = "jobacts";

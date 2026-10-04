@@ -95,6 +95,10 @@ import {
   installedBadgeState,
   installedSectionPresence,
   INSTALLED_BADGE,
+  isToolApp,
+  statusIconKind,
+  statusWordFor,
+  TOOL_APP_NOTE,
 } from "../lib/game-status.js";
 import { buildMultiPlan } from "../lib/multiplan.js";
 import { buildDepotPresentation, DEPOT_TAG } from "../lib/depot-presentation.js";
@@ -539,7 +543,8 @@ function buildHeader(gameLike, liveJob) {
 
   const info = document.createElement("div");
   const h2 = document.createElement("h2");
-  h2.textContent = state.detail?.name?.trim() || state.name || `App ${state.appid}`;
+  // WP API-FIX-4: a tool app's name comes from the server's tool list.
+  h2.textContent = state.detail?.name?.trim() || toolAppName(gameLike) || state.name || `App ${state.appid}`;
   const appidLine = document.createElement("div");
   appidLine.className = "appid";
   appidLine.textContent = `App ${state.appid}`;
@@ -548,7 +553,7 @@ function buildHeader(gameLike, liveJob) {
   const kind = dispKind(gameLike, liveJob);
   const statusRow = document.createElement("div");
   statusRow.className = "detail-statusrow";
-  const statusIcon = createStatusIcon(kind, { size: "sm" });
+  const statusIcon = createStatusIcon(statusIconKind(kind), { size: "sm" });
   // WP 4a.8 icon audit: the word right after this icon already says the
   // same thing visibly — hide the icon's own sr-only label so it is not
   // announced twice (same "avoid double announcement" posture as
@@ -557,12 +562,36 @@ function buildHeader(gameLike, liveJob) {
   statusRow.appendChild(statusIcon);
   const word = document.createElement("span");
   word.className = "tx-" + kind;
-  word.textContent = STATUS_LABEL[kind] || STATUS_LABEL.none;
+  word.textContent = statusWordFor(kind, STATUS_LABEL);
   statusRow.appendChild(word);
   info.appendChild(statusRow);
 
   dhead.appendChild(info);
   return dhead;
+}
+
+/** WP API-FIX-4: the tool app's server-supplied name, or null. */
+function toolAppName(gameLike) {
+  if (!isToolApp(gameLike)) return null;
+  const name = gameLike.tool_app_name;
+  return typeof name === "string" && name.trim() ? name.trim() : null;
+}
+
+/**
+ * WP API-FIX-4: the neutral note a Steam tool app's sheet shows where a
+ * game would offer Download/Retry (lib/game-status.js `TOOL_APP_NOTE`).
+ * Exported for web/tests/tool-app.test.js, same named-exception posture as
+ * `buildInstalledSection` below.
+ * @param {object} gameLike
+ * @returns {HTMLElement | null} `null` for every ordinary app.
+ */
+export function buildToolAppNote(gameLike) {
+  if (!isToolApp(gameLike)) return null;
+  const note = document.createElement("p");
+  note.className = "hint detail-block";
+  note.dataset.role = "tool-note";
+  note.textContent = TOOL_APP_NOTE;
+  return note;
 }
 
 function buildFactLines(gameLike) {
@@ -586,7 +615,8 @@ function buildFactLines(gameLike) {
   confirmedLine.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
   facts.appendChild(confirmedLine);
 
-  if (gameLike.needs_force) {
+  // WP API-FIX-4: no "next download" for a tool app, so no --force line.
+  if (gameLike.needs_force && !isToolApp(gameLike)) {
     const needsForceLine = document.createElement("div");
     needsForceLine.className = "tx-error";
     needsForceLine.textContent = "The next download re-verifies from scratch (--force).";
@@ -988,6 +1018,15 @@ function renderNotTracked() {
   const p = document.createElement("p");
   p.className = "hint";
   p.textContent = "vault-api does not track this app yet — nothing has been downloaded or manually mapped.";
+  // WP API-FIX-4: no download offer for a Steam tool app. Decided from the
+  // store's games row only (no client-side tool list); an app with no row
+  // at all carries no flag, and the server's 422 detail is the answer then.
+  const storeRow = state.games.find((g) => g.appid === state.appid);
+  if (isToolApp(storeRow)) {
+    p.textContent = TOOL_APP_NOTE;
+    wrap.append(h3, p);
+    return wrap;
+  }
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn primary sm";
@@ -1044,6 +1083,8 @@ function render() {
 
   contentEl.append(buildHeaderArt(state.appid));
   contentEl.append(buildHeader(gameLike, liveJob));
+  const toolNote = buildToolAppNote(gameLike);
+  if (toolNote) contentEl.append(toolNote);
   contentEl.append(buildFactLines(gameLike));
 
   const installedSection = buildInstalledSection(gameLike);

@@ -69,13 +69,17 @@ fun StatusIcon(
     kind: StatusKind,
     modifier: Modifier = Modifier,
     size: StatusIconSize = StatusIconSize.MEDIUM,
+    /** WP API-FIX-4: the spoken label when the visible word next to the icon
+     * is not [kind]'s own label (a tool app: "Steam tool package" on the
+     * NOTINUSE dash), so the two never disagree. `null` = the kind's label. */
+    spokenLabel: String? = null,
 ) {
     val animatorsEnabled by rememberAnimatorsEnabled()
     val animate = shouldAnimate(kind, animatorsEnabled)
     val glyph = glyphFor(kind)
     val bg = backgroundFor(kind)
     val ink = inkFor(kind)
-    val label = stringResource(kind.labelRes)
+    val label = spokenLabel ?: stringResource(kind.labelRes)
 
     val transition = rememberInfiniteTransition(label = "status-icon-transition")
 
@@ -246,6 +250,15 @@ fun StatusIcon(
                     size = Size(10f * scale, 10f * scale),
                     cornerRadius = CornerRadius(1.6f * scale),
                 )
+            }
+
+            GlyphShape.DASH -> {
+                // WP API-FIX-4, ported unchanged from web buildDash: "M7 12h10".
+                val dash = Path().apply {
+                    moveTo(pt(7f, 12f).x, pt(7f, 12f).y)
+                    lineTo(pt(17f, 12f).x, pt(17f, 12f).y)
+                }
+                drawPath(dash, color = ink, style = stroke)
             }
         }
     }

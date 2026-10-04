@@ -599,6 +599,10 @@ button.cappill:active{ transform:scale(.93); }
 .tx-cached{ color:var(--ok); } .tx-none{ color:var(--none); }
 .tx-running{ color:var(--run); } .tx-paused{ color:var(--run); } .tx-error{ color:var(--danger); }
 .tx-stale{ color:var(--stale); }
+/* WP API-FIX-4: a Steam tool package (228980): shown, but muted. It is
+   never downloaded on its own; its depots arrive with the games. */
+.tx-tool{ color:var(--dim-2); }
+.card.tool .cap{ opacity:.55; filter:grayscale(.6); }
 
 /* selection */
 .card .pick{

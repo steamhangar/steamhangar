@@ -2759,6 +2759,18 @@ below carry their own later dates, item 12 is the current one).
       "not considered" (parse the summary table's Failed column) and say
       what failed. Needs the freeze opened for a bug fix (ADR-0016
       addendum).
+    - [x] **API-FIX-4** — Steam tool apps are never prefilled (production
+      2026-10-04, user decision Weg A; done 2026-10-04, ADR-0016 addendum).
+      Every Windows agent reports 228980 "Steamworks Common
+      Redistributables"; its prefill always failed and the card read
+      "App 228980 / Failed / Retry download". vault-api keeps a fixed list
+      (`api/vault_api/tool_apps.py`, only 228980): the scheduler (installed
+      and cached sources), the miss trigger and `POST /v1/prefill/cached`
+      skip it, `POST /v1/prefill` answers `422`, `GET /v1/games[/{appid}]`
+      add `tool_app` + `tool_app_name`. Web and Android show the name, the
+      neutral "Steam tool package — cached together with the games that use
+      it", a muted card, no Download/Retry and no "not cached" warning; bulk
+      download never targets it. Agents still report it.
     - [x] **DOCS-FIX-3** — ADR-0004 and SECURITY.md claim QR login via the
       Steam app is the documented path (done 2026-10-03: ADR-0004
       addendum 4 marks the claim wrong; SECURITY.md, threat-model §3 and

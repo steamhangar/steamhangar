@@ -59,6 +59,52 @@ import dev.steamvault.app.ui.status.StatusKind
  * two functions.
  */
 
+/**
+ * Steam tool apps (WP API-FIX-4) -- port of `web/js/lib/game-status.js`'s
+ * tool-app helpers. `GET /v1/games` flags an app vault-api never prefills
+ * (`api/vault_api/tool_apps.py`: 228980, "Steamworks Common
+ * Redistributables", installed on every Windows PC, its depots cached
+ * together with the games that use them) with `tool_app` +
+ * `tool_app_name`. The server owns the list; the app only reads the flag.
+ * Such a row maps to [StatusKind.NOTINUSE] (web's neutral dash kind; web
+ * calls the display kind `KIND.TOOL` and draws it with "notinuse"), never
+ * [StatusKind.ERROR] -- old failed jobs left `status: "error"` on its apps
+ * row -- and never a download/retry action. A live job still wins.
+ *
+ * The two words are Kotlin literals, not `strings.xml` resources, for the
+ * same reason `BulkPlan.kt` keeps its labels as literals: they are a
+ * word-for-word port of web's `TOOL_APP_STATE_WORD` / `TOOL_APP_NOTE`, and
+ * `ToolAppTest` reads the web source and pins them equal.
+ */
+const val TOOL_APP_STATE_WORD = "Steam tool package"
+
+/** See [TOOL_APP_STATE_WORD]; web `TOOL_APP_NOTE`. */
+const val TOOL_APP_NOTE = "Steam tool package — cached together with the games that use it."
+
+/**
+ * The status word for a display kind when it is NOT the kind's own label:
+ * [TOOL_APP_STATE_WORD] for [StatusKind.NOTINUSE] (a tool app with no live
+ * job), `null` for every other kind -- the caller then shows
+ * `stringResource(kind.labelRes)`. Keyed on the computed kind, never on the
+ * tool flag, so a live job on a tool app reads "Downloading"/"Paused" (web
+ * `statusWordFor`).
+ */
+fun toolAppStateWordFor(kind: StatusKind): String? =
+    if (kind == StatusKind.NOTINUSE) TOOL_APP_STATE_WORD else null
+
+/** True for a games row the server flags as a Steam tool app. */
+fun isToolApp(game: GameSummary): Boolean = game.tool_app
+
+/** Display name: the vault's own name, else the tool app's name from the
+ * server, else `App {appid}` (web `gameDisplayName`). */
+fun gameDisplayName(game: GameSummary): String {
+    game.name?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    if (isToolApp(game)) {
+        game.tool_app_name?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    }
+    return "App ${game.appid}"
+}
+
 /** Job statuses that occupy this app's card with a live indicator. Queued
  * jobs are deliberately excluded (mockup parity: a queued job shows in the
  * Downloads FIFO queue, WP 4b.5, not on the Library card). GC jobs are
@@ -128,6 +174,9 @@ fun isKnownToVault(game: GameSummary): Boolean =
  */
 fun dispKind(game: GameSummary, liveJob: JobSummary?): StatusKind {
     if (liveJob != null) return if (liveJob.status == "paused") StatusKind.PAUSED else StatusKind.RUNNING
+    // WP API-FIX-4: before the error check, so old failed jobs for a tool
+    // app never make its card red.
+    if (isToolApp(game)) return StatusKind.NOTINUSE
     if (game.status == "error") return StatusKind.ERROR
     return if (hasVisibleCacheContent(game)) StatusKind.CACHED else StatusKind.NONE
 }
@@ -152,6 +201,9 @@ fun statusAction(game: GameSummary, liveJob: JobSummary?, selecting: Boolean): S
             else -> null
         }
     }
+    // WP API-FIX-4: a tool app's dispKind is NOTINUSE, which falls to the
+    // `else -> null` branch -- vault-api never prefills it (POST /v1/prefill
+    // answers 422), so there is no honest download or retry to offer.
     return when (dispKind(game, null)) {
         StatusKind.NONE -> StatusAction(StatusActionType.DOWNLOAD)
         StatusKind.ERROR -> StatusAction(StatusActionType.RETRY)

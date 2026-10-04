@@ -29,7 +29,7 @@
  * (`DELETE /v1/cache/{appid}` 404s: "appid has no depot_app_map rows").
  */
 
-import { dispKind, findLiveJob, hasVisibleCacheContent, KIND } from "./game-status.js";
+import { dispKind, findLiveJob, hasVisibleCacheContent, isToolApp, KIND } from "./game-status.js";
 
 /** Appids with a prefill job that is queued, running or paused right now —
  * shared by both classifiers below (queued jobs count as busy here, unlike
@@ -49,6 +49,7 @@ function busyAppidsFromJobs(jobs) {
  * @param {object[] | null | undefined} jobs `GET /v1/jobs` snapshot.
  * @returns {{
  *   busy: object[], needsDownload: object[], current: object[], notOnVault: object[],
+ *   toolApps: object[],
  * }}
  */
 export function classifyBulkSelection(games, jobs) {
@@ -59,8 +60,13 @@ export function classifyBulkSelection(games, jobs) {
   // (`owned_only`, lib/owned-library.js) is downloadable from its detail
   // sheet only, never in bulk — its own bucket, never `needsDownload`.
   const notOnVault = [];
+  // WP API-FIX-4: a Steam tool app is never a download target (vault-api
+  // answers 422 for it, and one 422 fails the whole bulk request) — its own
+  // bucket, never `needsDownload` or `current`.
+  const toolApps = [];
   for (const g of games) {
     if (g && g.owned_only === true) notOnVault.push(g);
+    else if (isToolApp(g)) toolApps.push(g);
     else (busyAppids.has(g.appid) ? busy : rest).push(g);
   }
 
@@ -75,7 +81,7 @@ export function classifyBulkSelection(games, jobs) {
     const kind = dispKind(g, undefined);
     (kind === KIND.CACHED ? current : needsDownload).push(g);
   }
-  return { busy, needsDownload, current, notOnVault };
+  return { busy, needsDownload, current, notOnVault, toolApps };
 }
 
 /**
@@ -114,8 +120,9 @@ const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
  *   3. Nothing needs downloading, everything is `current` -> primary
  *      disabled ("All cached"), secondary offers an explicit re-download.
  *
- * @param {{busy: object[], needsDownload: object[], current: object[], notOnVault?: object[]}} classification
+ * @param {{busy: object[], needsDownload: object[], current: object[], notOnVault?: object[], toolApps?: object[]}} classification
  *   `notOnVault` (WP WEB-FEAT-1): picked owned-only games, never a target.
+ *   `toolApps` (WP API-FIX-4): picked Steam tool apps, never a target.
  * @param {number} totalPicked
  */
 export function buildBulkDownloadPlan(classification, totalPicked) {
@@ -126,10 +133,16 @@ export function buildBulkDownloadPlan(classification, totalPicked) {
   const notOnVaultNote = notOnVault.length
     ? `${plural(notOnVault.length, "game")} not on the vault yet — open ${notOnVault.length === 1 ? "it" : "each one"} to download.`
     : "";
-  const withNotOnVault = (note) => [note, notOnVaultNote].filter(Boolean).join(" ");
+  // WP API-FIX-4: same append-a-sentence shape for picked tool apps.
+  const toolApps = classification.toolApps || [];
+  const toolAppsNote = toolApps.length
+    ? `${toolApps.length === 1 ? "1 Steam tool package" : `${toolApps.length} Steam tool packages`} — cached together with the games that use ${toolApps.length === 1 ? "it" : "them"}.`
+    : "";
+  const withNotOnVault = (note) => [note, notOnVaultNote, toolAppsNote].filter(Boolean).join(" ");
+  const notTargets = notOnVault.length + toolApps.length;
 
   if (needsDownload.length) {
-    const skipped = totalPicked - needsDownload.length - notOnVault.length;
+    const skipped = totalPicked - needsDownload.length - notTargets;
     return {
       primaryEnabled: true,
       primaryLabel:
@@ -140,7 +153,7 @@ export function buildBulkDownloadPlan(classification, totalPicked) {
       note: withNotOnVault(
         skipped
           ? `${skipped} already cached — not re-downloaded.`
-          : needsDownload.length > 1 && !notOnVault.length
+          : needsDownload.length > 1 && !notTargets
             ? `All ${needsDownload.length} are new to the cache.`
             : "",
       ),
@@ -152,10 +165,10 @@ export function buildBulkDownloadPlan(classification, totalPicked) {
   if (current.length) {
     return {
       primaryEnabled: false,
-      primaryLabel: notOnVault.length ? "Nothing to download here" : "All cached — nothing to download",
+      primaryLabel: notTargets ? "Nothing to download here" : "All cached — nothing to download",
       primaryTargets: [],
       note: withNotOnVault(
-        notOnVault.length
+        notTargets
           ? `${current.length} cached — re-download only if you need to refetch from Steam.`
           : "Every selected game is current. Re-download only if you need to refetch from Steam.",
       ),
@@ -164,7 +177,7 @@ export function buildBulkDownloadPlan(classification, totalPicked) {
     };
   }
 
-  if (notOnVault.length) {
+  if (notTargets) {
     return {
       primaryEnabled: false,
       primaryLabel: "Nothing to download here",

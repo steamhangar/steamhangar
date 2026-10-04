@@ -1176,6 +1176,10 @@ function gameSummary(g) {
     // it). Each entry copied fresh so a caller mutating the returned object
     // can never corrupt this module's own seed state.
     installed_on: g.installed_on.map((e) => ({ ...e })),
+    // WP API-FIX-4: additive on both game shapes. No demo game is a Steam
+    // tool app (the demo library is owned games only), so always false/null.
+    tool_app: false,
+    tool_app_name: null,
   };
 }
 
@@ -1197,6 +1201,8 @@ function gameDetail(g) {
     size_bytes: appSizeBytes(g.depots),
     needs_force: g.needs_force,
     installed_on: g.installed_on.map((e) => ({ ...e })), // WP AG-2 (see gameSummary's own comment)
+    tool_app: false, // WP API-FIX-4 (see gameSummary's own comment)
+    tool_app_name: null,
   };
 }
 

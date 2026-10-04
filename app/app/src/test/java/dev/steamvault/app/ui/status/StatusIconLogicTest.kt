@@ -1,5 +1,6 @@
 package dev.steamvault.app.ui.status
 
+import dev.steamvault.app.ui.theme.VaultColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -68,6 +69,13 @@ class StatusIconLogicTest {
     @Test
     fun `cancelled maps to stop`() {
         assertEquals(GlyphShape.STOP, glyphFor(StatusKind.CANCELLED))
+    }
+
+    @Test
+    fun `notinuse maps to dash, muted disc, light ink (web k-notinuse)`() {
+        assertEquals(GlyphShape.DASH, glyphFor(StatusKind.NOTINUSE))
+        assertEquals(VaultColors.Dim2, backgroundFor(StatusKind.NOTINUSE))
+        assertEquals(VaultColors.Text, inkFor(StatusKind.NOTINUSE))
     }
 
     @Test
@@ -142,6 +150,7 @@ class StatusIconLogicTest {
             StatusKind.ERROR,
             StatusKind.WARN,
             StatusKind.CANCELLED,
+            StatusKind.NOTINUSE,
         )
         for (kind in staticKinds) {
             assertFalse(

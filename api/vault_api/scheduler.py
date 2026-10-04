@@ -119,6 +119,7 @@ from vault_api import (
     jobs,
     settings_store,
     sizes,
+    tool_apps,
     webhooks,
 )
 from vault_api.config import Settings
@@ -336,6 +337,12 @@ class TargetSet:
     #: union+dedupe behaviour directly — ``appids`` already contains every
     #: one of these, this field is purely "which ones, and why".
     cached_only_appids: tuple[int, ...] = ()
+    #: WP API-FIX-4. Steam tool apps (``tool_apps.TOOL_APPS``, e.g. 228980)
+    #: that either source named and that were dropped: never prefilled, their
+    #: depots are cached together with the games that use them. Sorted;
+    #: ``()`` when none was named. Not in ``appids`` or
+    #: ``cached_only_appids``.
+    skipped_tool_appids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -585,14 +592,21 @@ def compute_targets(
     with no real ``cache_root`` now raises ``ValueError`` immediately rather
     than silently returning an empty cached set — a caller (production or
     test) that forgot to pass it gets a loud failure, not a quiet no-op.
+
+    **Steam tool apps are dropped from both sources (WP API-FIX-4).** An app
+    in ``tool_apps.TOOL_APPS`` (228980, "Steamworks Common Redistributables",
+    reported installed on every Windows PC) is never a target: SteamPrefill
+    cannot prefill it, and its depots are cached together with the games
+    that use them. Dropped ones are listed in ``skipped_tool_appids``.
     """
     fresh, excluded = fresh_client_snapshots(conn, now, stale_after_days)
 
-    appids: set[int] = set()
+    reported: set[int] = set()
     included: list[str] = []
     for snapshot in fresh:
         included.append(snapshot.client_id)
-        appids.update(snapshot.appids)
+        reported.update(snapshot.appids)
+    appids, skipped_tools = tool_apps.split_tool_apps(reported)
 
     cached_only: tuple[int, ...] = ()
     if include_cached:
@@ -614,7 +628,10 @@ def compute_targets(
                 "explicitly -- a missing/blank value must not silently "
                 "resolve to 'nothing is cached'."
             )
-        cached = cached_appids(conn, cache_root)
+        cached, cached_tools = tool_apps.split_tool_apps(
+            cached_appids(conn, cache_root)
+        )
+        skipped_tools = tuple(sorted(set(skipped_tools) | set(cached_tools)))
         cached_only = tuple(sorted(cached - appids))
         appids.update(cached)
 
@@ -623,6 +640,7 @@ def compute_targets(
         included_clients=included,
         excluded_clients=excluded,
         cached_only_appids=cached_only,
+        skipped_tool_appids=skipped_tools,
     )
 
 
@@ -653,6 +671,9 @@ class SweepResult:
     #: through any client's installed list this sweep. ``()`` when the mode
     #: is off (default-constructed, untouched) or when it added nothing new.
     cached_only_appids: tuple[int, ...] = ()
+    #: WP API-FIX-4. Mirrors ``TargetSet.skipped_tool_appids``: Steam tool
+    #: apps a source named that were not enqueued.
+    skipped_tool_appids: tuple[int, ...] = ()
 
 
 def _never() -> bool:
@@ -713,7 +734,7 @@ def maybe_sweep(
 
     logger.info(
         "scheduler: sweep at %s enqueued %d new job(s), %d app(s) already "
-        "queued/running, from %d target app(s) across %d client(s)%s%s%s",
+        "queued/running, from %d target app(s) across %d client(s)%s%s%s%s",
         swept_at, len(enqueued), len(already_active), len(target_set.appids),
         len(target_set.included_clients),
         (
@@ -741,6 +762,15 @@ def maybe_sweep(
             if settings.sweep_include_cached
             else ""
         ),
+        (
+            # WP API-FIX-4: say which tool apps were left out, so "why is
+            # 228980 never prefilled" is answered by the log.
+            " (Steam tool apps never prefilled, cached with their games: "
+            + ", ".join(str(a) for a in target_set.skipped_tool_appids)
+            + ")"
+            if target_set.skipped_tool_appids
+            else ""
+        ),
         " [ABORTED by shutdown]" if aborted else "",
     )
 
@@ -753,6 +783,7 @@ def maybe_sweep(
         aborted=aborted,
         swept_at=swept_at,
         cached_only_appids=target_set.cached_only_appids,
+        skipped_tool_appids=target_set.skipped_tool_appids,
     )
 
 

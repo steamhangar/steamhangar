@@ -83,6 +83,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterator, Mapping
 
+from vault_api import tool_apps
+
 #: The job type WP 1.4 creates. ``jobs.type`` exists because plan §6 also
 #: lists a GC job (``POST /v1/cache/{appid}/gc``) sharing this queue.
 JOB_TYPE_PREFILL = "prefill"
@@ -404,7 +406,15 @@ def enqueue_prefill(conn: sqlite3.Connection, appid: int) -> tuple[dict[str, obj
     miss trigger (ADR-0001) will fire on cache misses, so duplicate requests
     for the same app are the normal case, not an error; running the same
     prefill twice back to back would only re-download nothing.
+
+    **Tool apps are refused (WP API-FIX-4).** A Steam tool package
+    (``tool_apps.TOOL_APPS``, e.g. 228980) raises ``ToolAppNotPrefillable``
+    before anything is written, not even an ``apps`` row. Every automatic
+    caller filters tool apps out first and reports them; this check is the
+    last line, so a new enqueue path cannot forget the rule.
     """
+    if tool_apps.is_tool_app(appid):
+        raise tool_apps.ToolAppNotPrefillable(appid)
     with immediate_transaction(conn):
         ensure_app_row(conn, appid)
 

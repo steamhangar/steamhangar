@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from vault_api import depot_manifests, scheduler, settings_store
+from vault_api import depot_manifests, scheduler, settings_store, tool_apps
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
@@ -211,6 +211,25 @@ class GameSummary(BaseModel):
     # See InstalledOn's docstring for the freshness rule. Empty (never null)
     # when nothing claims it -- including every vault with zero agents.
     installed_on: list[InstalledOn] = []
+    # WP API-FIX-4: true for a Steam tool package (vault_api/tool_apps.py,
+    # e.g. 228980 "Steamworks Common Redistributables") that vault-api never
+    # prefills -- its depots are cached together with the games that use
+    # them. UIs show it as a tool package instead of a game: no download or
+    # retry action, and an old failed job (``status: "error"``) is not a
+    # failure to show. ``status`` and every other field stay the raw truth.
+    tool_app: bool = False
+    # The tool package's display name from vault_api/tool_apps.py, null for
+    # every ordinary app. ``name`` is untouched (it stays the apps-table
+    # value, usually null for a tool app); UIs fall back to this one.
+    tool_app_name: str | None = None
+
+
+def _tool_app_fields(appid: int) -> dict[str, object]:
+    """``tool_app`` / ``tool_app_name`` for one app (WP API-FIX-4)."""
+    tool = tool_apps.get_tool_app(appid)
+    if tool is None:
+        return {"tool_app": False, "tool_app_name": None}
+    return {"tool_app": True, "tool_app_name": tool.name}
 
 
 class DepotEntry(BaseModel):
@@ -244,6 +263,9 @@ class GameDetail(BaseModel):
     manifest_days_since_last_change: int | None = None
     # See GameSummary.installed_on.
     installed_on: list[InstalledOn] = []
+    # See GameSummary.tool_app / .tool_app_name (WP API-FIX-4).
+    tool_app: bool = False
+    tool_app_name: str | None = None
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -311,6 +333,7 @@ def list_games(
                 manifest_observation_days=frequency.observation_days,
                 manifest_days_since_last_change=frequency.days_since_last_change,
                 installed_on=installed_on.get(row["appid"], []),
+                **_tool_app_fields(row["appid"]),
             )
         )
     return games
@@ -389,4 +412,5 @@ def get_game(
         manifest_observation_days=frequency.observation_days,
         manifest_days_since_last_change=frequency.days_since_last_change,
         installed_on=installed_on,
+        **_tool_app_fields(app_row["appid"]),
     )

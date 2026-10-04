@@ -147,7 +147,7 @@ import stat
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from vault_api import agent_reports, deletion, jobs, webhooks
+from vault_api import agent_reports, deletion, jobs, tool_apps, webhooks
 from vault_api.config import (
     WEBHOOK_EVENT_BYPASS_RESOLVED,
     WEBHOOK_EVENT_BYPASS_SUSPECTED,
@@ -941,6 +941,9 @@ class TriggerResult:
     skipped_cooldown: tuple[int, ...] = ()
     skipped_active: tuple[int, ...] = ()
     skipped_current: tuple[int, ...] = ()
+    #: WP API-FIX-4: Steam tool apps (``tool_apps.TOOL_APPS``) among the
+    #: candidates. Never enqueued; they do not count against the cap.
+    skipped_tool: tuple[int, ...] = ()
 
 
 def in_cooldown(conn: sqlite3.Connection, appid: int, cutoff_iso: str) -> bool:
@@ -1019,6 +1022,11 @@ def run_miss_trigger(
 ) -> TriggerResult:
     """Enqueue non-forced prefills for miss candidates, under four guards.
 
+    Before the guards, a Steam tool app (``tool_apps.TOOL_APPS``, WP
+    API-FIX-4) is skipped outright and reported in ``skipped_tool``: it is
+    never prefilled, so it must not use up the per-sweep cap either. A miss
+    on its depot is a miss on a depot that the games using it fill.
+
     In order, cheapest and most decisive first:
 
     1. **The per-sweep cap** (``VAULT_MISS_TRIGGER_MAX_PER_SWEEP``). Checked
@@ -1049,9 +1057,13 @@ def run_miss_trigger(
     skipped_cooldown: list[int] = []
     skipped_active: list[int] = []
     skipped_current: list[int] = []
+    skipped_tool: list[int] = []
     triggered = 0
 
     for appid in candidates:
+        if tool_apps.is_tool_app(appid):
+            skipped_tool.append(appid)
+            continue
         if triggered >= settings.miss_trigger_max_per_sweep:
             dropped.append(appid)
             continue
@@ -1077,6 +1089,16 @@ def run_miss_trigger(
         else:  # pragma: no cover - needs a job created between guard 2 and here
             skipped_active.append(appid)
 
+    if skipped_tool:
+        # WP API-FIX-4: say why a missed tool app got no job, so "why is
+        # 228980 never prefilled" is answered by the log.
+        logger.info(
+            "event-sweep: miss trigger skipped %d Steam tool app(s), never "
+            "prefilled, cached together with the games that use them: %s",
+            len(skipped_tool),
+            _sample(skipped_tool),
+        )
+
     if dropped:
         logger.warning(
             "event-sweep: miss trigger hit its per-sweep cap of %d; %d further "
@@ -1094,6 +1116,7 @@ def run_miss_trigger(
         skipped_cooldown=tuple(skipped_cooldown),
         skipped_active=tuple(skipped_active),
         skipped_current=tuple(skipped_current),
+        skipped_tool=tuple(skipped_tool),
     )
 
 
@@ -1483,6 +1506,8 @@ class SweepOutcome:
     skipped_cooldown: tuple[int, ...] = ()
     skipped_active: tuple[int, ...] = ()
     skipped_current: tuple[int, ...] = ()
+    #: WP API-FIX-4: see ``TriggerResult.skipped_tool``.
+    skipped_tool: tuple[int, ...] = ()
     rotated: bool = False
     #: Bytes discarded because a single region exceeded a whole read batch.
     oversized_skipped_bytes: int = 0
@@ -1657,6 +1682,7 @@ def sweep_once(
         skipped_cooldown=trigger.skipped_cooldown,
         skipped_active=trigger.skipped_active,
         skipped_current=trigger.skipped_current,
+        skipped_tool=trigger.skipped_tool,
         rotated=batch.rotated,
         oversized_skipped_bytes=batch.oversized_skipped_bytes,
         oversized_stalled=batch.oversized_stalled,

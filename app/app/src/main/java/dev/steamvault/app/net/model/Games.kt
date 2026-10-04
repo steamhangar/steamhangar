@@ -28,6 +28,13 @@ data class GameSummary(
     val size_bytes: Long? = null,
     val needs_force: Boolean = false,
     val installed_on: List<InstalledOnEntry> = emptyList(),
+    /** WP API-FIX-4: a Steam tool package vault-api never prefills
+     * (`api/vault_api/tool_apps.py`, 228980). Defaulted: older servers send
+     * no flag. */
+    val tool_app: Boolean = false,
+    /** WP API-FIX-4: the tool package's display name, null for every
+     * ordinary app. */
+    val tool_app_name: String? = null,
 )
 
 /** One entry of [GameDetail.depots] — `vault_api/routers/games.py::DepotEntry`. */
@@ -66,4 +73,8 @@ data class GameDetail(
     val size_bytes: Long? = null,
     val needs_force: Boolean = false,
     val installed_on: List<InstalledOnEntry> = emptyList(),
+    /** See [GameSummary.tool_app] (WP API-FIX-4). */
+    val tool_app: Boolean = false,
+    /** See [GameSummary.tool_app_name] (WP API-FIX-4). */
+    val tool_app_name: String? = null,
 )

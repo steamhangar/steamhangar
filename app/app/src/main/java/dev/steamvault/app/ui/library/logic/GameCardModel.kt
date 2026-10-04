@@ -76,6 +76,10 @@ data class GameCardModel(
      * and its copy-rule kdoc (an empty list is "no fresh signal", never
      * "not installed anywhere"). */
     val installedBadge: InstalledBadge,
+    /** WP API-FIX-4: a Steam tool app -- the card shows
+     * [TOOL_APP_STATE_WORD] instead of [kind]'s label, and is drawn muted
+     * (shown, not hidden). */
+    val toolApp: Boolean = false,
 )
 
 /**
@@ -91,7 +95,7 @@ fun buildGameCardModel(
     val kind = dispKind(game, liveJob)
     return GameCardModel(
         appid = game.appid,
-        name = game.name?.takeIf { it.isNotBlank() } ?: "App ${game.appid}",
+        name = gameDisplayName(game),
         kind = kind,
         sizeLabel = formatBytesGB(game.size_bytes),
         coverUrl = coverArtUrl(game.appid),
@@ -101,5 +105,6 @@ fun buildGameCardModel(
         selected = selected,
         isKnownToVault = isKnownToVault(game),
         installedBadge = installedBadgeFor(game),
+        toolApp = isToolApp(game),
     )
 }

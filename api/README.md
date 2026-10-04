@@ -56,6 +56,7 @@ api/
 │   ├── deps.py           # Shared FastAPI dependencies (db_opener)
 │   ├── mapping.py        # upsert_mapping() — the depot->app write path
 │   ├── jobs.py           # job queue + apps.status transitions
+│   ├── tool_apps.py      # Steam tool apps never prefilled, e.g. 228980 (WP API-FIX-4)
 │   ├── prefill.py        # SteamPrefill runner + depot attribution
 │   ├── worker.py         # the single background job worker thread
 │   ├── sizes.py          # depot disk walk, TTL size cache, summary aggregation
@@ -605,13 +606,13 @@ route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
-| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below) |
-| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
+| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below) |
+| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
 | PUT    | `/v1/mapping/{depotid}`            | Body `{"appid": int, "app_name": str \| null}` — **additively** upsert one depot→app mapping fact (manual fallback, see below); `422` for `depotid <= 0`, `appid <= 0`, or an unrecognized body field |
 | GET    | `/v1/mapping`                      | Full depot→app mapping table: list of `{depotid, appid}` |
 | DELETE | `/v1/mapping/{depotid}/{appid}`    | Remove one mapping pair (correction path for the additive `PUT`, see below); `204` on success, `404` if the pair doesn't exist, `422` for non-positive ids |
-| POST   | `/v1/prefill`                      | Body `{"appids": [int, ...]}` — queue one prefill job per app id. `202` with a list of `{appid, job_id, status, deduplicated}`. `422` for an empty list, an appid `< 1`, a non-list, or an unrecognized body field |
-| POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
+| POST   | `/v1/prefill`                      | Body `{"appids": [int, ...]}` — queue one prefill job per app id. `202` with a list of `{appid, job_id, status, deduplicated}`. `422` for an empty list, an appid `< 1`, a non-list, or an unrecognized body field; `422` with a string `detail` (nothing queued) when the body names a Steam tool app (WP API-FIX-4, see "Steam tool apps" below) |
+| POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). Steam tool apps are never selected (WP API-FIX-4). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
 | GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
@@ -665,6 +666,39 @@ route, see "Auth").
 - `log_excerpt` is the ANSI-stripped **tail** of SteamPrefill's combined
   stdout/stderr, capped at 4 KiB and prefixed with `[...truncated...]` when it
   was cut, plus vault-api's own `[vault-api] …` diagnostic lines.
+
+### Steam tool apps — never prefilled (WP API-FIX-4)
+
+Production, 2026-10-04: every Windows agent reports app **228980**,
+"Steamworks Common Redistributables", as installed — Steam installs it
+next to games (DirectX, VC++ and .NET packages). The scheduler enqueued a
+prefill for it on every sweep, SteamPrefill cannot prefill it (it is not
+an owned app), every job ended `error`, and the library card read
+"App 228980 / Failed / Installed but not cached / Retry download". Nothing
+was missing: its depots are **shared depots** that Steam pulls together
+with each game (the `107100_228980_229002_....bin` manifest under
+"Manifest parsers" is exactly that: app 107100 pulling a depot whose home
+app is 228980), so they are cached whenever a game that uses them is.
+
+User decision 2026-10-04 (Weg A): vault-api keeps a small fixed list of
+**tool apps** in `vault_api/tool_apps.py` (app id, display name, reason;
+today only 228980) and never prefills them. Agents keep reporting the
+truth; the list is a code change on purpose, not a setting.
+
+| Where | What happens to a tool app |
+|---|---|
+| Scheduler (`compute_targets`) | Dropped from the installed and the cached source; listed in `skipped_tool_appids` and in the sweep's log line ("Steam tool apps never prefilled, cached with their games: 228980") |
+| Miss trigger (`run_miss_trigger`) | Skipped before every guard (`skipped_tool`), so it never uses up the per-sweep cap and gets no cooldown row |
+| `POST /v1/prefill/cached` | Never selected, even with cache content of its own |
+| `POST /v1/prefill` | `422`, string `detail`: "App 228980 (Steamworks Common Redistributables) is a Steam tool package, it is cached together with the games that use it. It is never prefilled on its own." The whole body is refused before anything is queued, the same all-or-nothing shape as `PATCH /v1/settings`. An older app/web build that sends one in a bulk request queues nothing and shows that message |
+| `jobs.enqueue_prefill` | Raises `ToolAppNotPrefillable` (a `ValueError`) before writing anything — the last line, so a future enqueue path cannot forget the rule |
+| `GET /v1/games[/{appid}]` | `tool_app: true`, `tool_app_name: "Steamworks Common Redistributables"`. `name`, `status` and every other field stay the raw truth (an old failed job leaves `status: "error"`); the UIs show the tool name, the word "Steam tool package" and the note "cached together with the games that use it", never Failed/Retry, and never an "installed but not cached" warning |
+
+Not changed: agent reports, `installed_on`, the depot mapping and the cache
+itself. A job for a tool app that was already queued before the upgrade
+still runs once (and fails as before); old failed jobs stay in the job
+history. Deleting a tool app's cache (`DELETE /v1/cache/228980`) follows
+the ordinary shared-depot rules.
 
 ### Check & update all cached games (`POST /v1/prefill/cached`, Phase 4c, WP 4c-api)
 
