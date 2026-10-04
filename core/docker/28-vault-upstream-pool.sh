@@ -15,7 +15,12 @@
 #                 every allowed MISS, whatever Host the client sent, is dialled
 #                 on that one pooled name. VAULT_UPSTREAM_POOL_HOSTS is ignored
 #                 (logged): an edge equal to a listed name would otherwise be a
-#                 duplicate group.
+#                 duplicate group. CGNAT bound: `keepalive C` lets a group hold up
+#                 to C IDLE connections (C may be 64, i.e. above the legacy
+#                 mode's 32-idle ceiling below), but every request reuses an idle
+#                 one before it dials, so with one group the total stays near C
+#                 in steady state (at most C in flight + C idle = 2C only for a
+#                 burst after an idle pause, ADR-0021 "Socket bound").
 #     LEGACY MODE (VAULT_UPSTREAM_EDGE empty/unset, the rollback switch):
 #                 today's per-name groups below, and the map's default is
 #                 $vault_upstream_host (identity: the client's own edge).
@@ -89,6 +94,9 @@
 #     and a render-time ceiling of 32 idle connections in total, i.e. at most
 #     4 groups (ADR-0017 decision 3A: the only measured safe point behind the
 #     CGNAT is 50 parallel connections; 32 idle + 8 in flight stays under it).
+#     This ceiling is the LEGACY mode's. Edge mode (ADR-0021) has one group with
+#     `keepalive C`: up to C (<= 64) idle connections, above this 32, but reuse
+#     keeps the total near C, and the global cap bounds the in-flight part.
 #   - `keepalive_timeout 50s`: the edges measured on 2026-10-02 keep an idle
 #     connection for at least 60s (ADR-0017 "Measurement"); 50s lets nginx
 #     close first, so the stale-connection path is rarely taken.

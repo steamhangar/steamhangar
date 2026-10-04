@@ -151,6 +151,19 @@ Steam client treats a 503 like the 502s it already survives).
   hands out for the operator's location (inference: the `akadns` hop is
   a geo-DNS hop).
 
+**Limit of the proof, and the check that closes it.** Edge mode sends the
+edge's own name as `Host` for every client name (`proxy_set_header Host
+$vault_upstream_target`). The byte-identical evidence in P2 covers one IP
+and two names (`dist-fra1` and `cache9-ams1`, one chunk). That every other
+client name, every depot and every chunk behaves the same is an inference
+beyond it, and P3 (no token tied to an edge) is an observation of one log,
+not a guarantee. The check after rollout is therefore explicit: with
+edge mode on, a client update of an app that is not cached must finish
+without a hash mismatch, and the `upstream_status` field of the vault-core
+log must show no 4xx/5xx for `host=` names other than the edge beyond the
+pre-change level; one such status that only appears in edge mode means B1 does not
+hold for that name and the operator sets `VAULT_UPSTREAM_EDGE=` empty.
+
 ## Options
 
 ### A: keep one group per name, add caps

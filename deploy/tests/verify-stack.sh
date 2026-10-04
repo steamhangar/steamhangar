@@ -132,8 +132,10 @@ fatal() {
 compose_up_or_die() {
     up_env=$1
     shift
-    printf '$ docker compose --env-file %s -f %s -p %s %s\n' "$up_env" "$compose_file" "$PROJECT" "$*"
-    if docker compose --env-file "$up_env" -f "$compose_file" -p "$PROJECT" "$@" > "$work/compose-up.log" 2>&1; then
+    # compose_override (optional, set by section 10's edge/cap steps): an extra
+    # -f file layered over compose.yaml; unset again to revert.
+    printf '$ docker compose --env-file %s -f %s %s-p %s %s\n' "$up_env" "$compose_file" "${compose_override:+-f $compose_override }" "$PROJECT" "$*"
+    if docker compose --env-file "$up_env" -f "$compose_file" ${compose_override:+-f "$compose_override"} -p "$PROJECT" "$@" > "$work/compose-up.log" 2>&1; then
         sed 's/^/    /' "$work/compose-up.log"
     else
         up_rc=$?
@@ -326,6 +328,8 @@ cp "$repo_root/core/docker/40-vault-preflight.sh" "$work/drift/docker/40-vault-p
 # cmp's the native empty render against it, resolved the same way.
 cp "$repo_root/core/docker/28-vault-upstream-pool.sh" "$work/drift/docker/28-vault-upstream-pool.sh"
 cp "$repo_root/core/nginx/vault-upstream-pool.conf" "$work/drift/nginx/vault-upstream-pool.conf"
+# WP CORE-FIX-4a: and the native cap file (ADR-0021).
+cp "$repo_root/core/nginx/vault-upstream-cap.conf" "$work/drift/nginx/vault-upstream-cap.conf"
 # The unmutated copy must pass first, else a later FAIL could stem from an
 # incomplete copy rather than from the injected difference.
 if sh "$work/drift/docker/check-config-drift.sh" >/dev/null 2>&1; then
@@ -2418,6 +2422,11 @@ POOL_N=20
 POOL_DEPOT=99990001          # pooled MISSes (Host: fake1.steamcontent.com)
 POOL_DEPOT_UNLISTED=99990003 # unlisted-edge MISSes (Host: fake2.steamcontent.com)
 POOL_DEPOT_BIG=99990002      # 2 MiB bodies, for the rate-cap check
+POOL_DEPOT_EDGE2=99990005    # edge mode, Host: fake2.steamcontent.com (outside every list)
+POOL_DEPOT_EDGE3=99990006    # edge mode, Host: fake3.steamcontent.com (no DNS record at all)
+POOL_DEPOT_SLOW=99990004     # the fake edge holds each answer open (cap test)
+POOL_SLOW_SECONDS=5
+POOL_CAP=2                   # VAULT_UPSTREAM_MAX_CONNS of the edge-mode steps
 POOL_CHUNK_BYTES=4096
 POOL_BIG_BYTES=2097152
 
@@ -2533,12 +2542,15 @@ say 'stdout, which docker logs keeps -- that count is the measurement.'
 fake_edge_py=$(cat <<'PYEOF'
 import hashlib
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(sys.argv[1])
 BIG_DEPOT = "/depot/%s/" % sys.argv[2]
 SMALL = int(sys.argv[3])
 BIG = int(sys.argv[4])
+SLOW_DEPOT = "/depot/%s/" % sys.argv[5]  # holds the answer open (cap test)
+SLOW_SECONDS = float(sys.argv[6])
 
 
 class Edge(ThreadingHTTPServer):
@@ -2566,6 +2578,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self.path.startswith("/depot/"):
             self.send_error(404)
             return
+        # The Host the client side of this hop sent, one line per request
+        # (edge mode must send the edge's own name for every client name).
+        print("host %s" % self.headers.get("Host", "-"), flush=True)
+        if self.path.startswith(SLOW_DEPOT):
+            time.sleep(SLOW_SECONDS)
         size = BIG if self.path.startswith(BIG_DEPOT) else SMALL
         seed = hashlib.sha256(self.path.encode()).digest()
         body = (seed * (size // len(seed) + 1))[:size]
@@ -2586,7 +2603,7 @@ PYEOF
 # the network create: every step below would cascade without the edge.
 edge_run=$(docker run -d --no-healthcheck --name "$POOL_EDGE" --network "$POOL_NET" --ip "$POOL_EDGE_IP" \
     --user 0:0 --entrypoint python3 "ghcr.io/steamhangar/vault-api:$TAG" \
-    -c "$fake_edge_py" 80 "$POOL_DEPOT_BIG" "$POOL_CHUNK_BYTES" "$POOL_BIG_BYTES" 2>&1) \
+    -c "$fake_edge_py" 80 "$POOL_DEPOT_BIG" "$POOL_CHUNK_BYTES" "$POOL_BIG_BYTES" "$POOL_DEPOT_SLOW" "$POOL_SLOW_SECONDS" 2>&1) \
     || { say "    $edge_run"; fatal "docker run of the fake edge $POOL_EDGE failed -- see the output above"; }
 say "    docker run -> $edge_run"
 i=0
@@ -2659,7 +2676,7 @@ run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' logs
 pool_boot_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
 assert_contains "$pool_boot_log" "upstream resolver (ADR-0001 req 4): $POOL_RESOLVER_IP" "the preflight took VAULT_RESOLVER=$POOL_RESOLVER_IP"
 assert_contains "$pool_boot_log" "gave no A answer for cache2-ams1.steamcontent.com" "the preflight's loop probe NXDOMAINed harmlessly (ADR-0017 (d): a test resolver, VAULT_RESOLVER stays an IP)"
-assert_contains "$pool_boot_log" "upstream keepalive pool ON: 2 edge group(s)" "28-vault-upstream-pool.sh rendered two groups"
+assert_contains "$pool_boot_log" "upstream keepalive pool ON (legacy per-name mode): 2 edge group(s)" "28-vault-upstream-pool.sh rendered two groups"
 pool_groups=$(dc exec -T vault-core sh -c 'grep -c "^upstream " /etc/nginx/vault-upstream-pool.conf' 2>/dev/null | tr -d '\r')
 pool_keepalive=$(dc exec -T vault-core sh -c 'grep -c "^    keepalive 8;$" /etc/nginx/vault-upstream-pool.conf' 2>/dev/null | tr -d '\r')
 assert_eq "2" "$pool_groups" "the running container's vault-upstream-pool.conf holds 2 upstream groups"
@@ -2779,7 +2796,7 @@ say "vault-core health: $core_h"
 assert_eq "healthy" "$core_h" "vault-core is healthy with the cap AND the pool configured"
 rate_boot_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
 assert_contains "$rate_boot_log" "upstream rate cap rendered (/etc/nginx/vault-upstream-rate.conf, VAULT_UPSTREAM_RATE=1m)" "the preflight saw the cap rendered"
-assert_contains "$rate_boot_log" "upstream keepalive pool ON: 2 edge group(s)" "the pool is still rendered next to the cap"
+assert_contains "$rate_boot_log" "upstream keepalive pool ON (legacy per-name mode): 2 edge group(s)" "the pool is still rendered next to the cap"
 rate_wired=$(dc exec -T vault-core sh -c "grep -v '^[[:space:]]*#' /etc/nginx/nginx.conf | grep -c 'proxy_limit_rate[[:space:]]*[\$]vault_upstream_rate;'" 2>/dev/null | tr -d '\r')
 assert_eq "1" "$rate_wired" "the running container's nginx.conf carries 'proxy_limit_rate \$vault_upstream_rate;' exactly once (decision 5A, unchanged by the pool)"
 rate_bucket1=$(dc exec -T vault-core sh -c 'grep -c "^    1 1048576;$" /etc/nginx/vault-upstream-rate.conf' 2>/dev/null | tr -d '\r')
@@ -2802,7 +2819,109 @@ fi
 sleep 1
 assert_eq "1" "$(( $(edge_accepts) - accepts_before ))" "the capped download went to the fake edge over one new connection (fresh container, fresh pool)"
 
-step "10g. Revert: vault-core back on the stack's own env, fakes and network removed"
+step "10g. Edge mode (ADR-0021): MISSes for names OUTSIDE every list go through the ONE pooled edge, and the edge sees ITS OWN Host"
+say "vault-core is recreated with VAULT_UPSTREAM_EDGE=fake1.steamcontent.com and the global cap"
+say "VAULT_UPSTREAM_MAX_CONNS=$POOL_CAP (VAULT_PREFILL_MAX_THREADS=$POOL_CAP, else the hook refuses a cap below the"
+say "prefill default 8). The knobs ride in a compose override file layered over compose.yaml, so this"
+say 'step does not depend on how compose.yaml forwards them. fake3.steamcontent.com has NO record in the'
+say 'fake resolver: in edge mode the client name is never resolved, only the edge is.'
+pool_edge_env="$work/verify-pool-edge.env"
+cp "$pool_base_env" "$pool_edge_env"
+printf 'VAULT_RESOLVER=%s\n' "$POOL_RESOLVER_IP" >> "$pool_edge_env"
+pool_override="$work/verify-pool-edge-override.yaml"
+cat > "$pool_override" <<OVEOF
+services:
+  vault-core:
+    environment:
+      VAULT_UPSTREAM_EDGE: fake1.steamcontent.com
+      VAULT_UPSTREAM_MAX_CONNS: "$POOL_CAP"
+      VAULT_PREFILL_MAX_THREADS: "$POOL_CAP"
+OVEOF
+compose_override="$pool_override"
+pool_recreate_core "$pool_edge_env"
+say "vault-core health: $core_h"
+assert_eq "healthy" "$core_h" "vault-core is healthy in edge mode with cap $POOL_CAP"
+edge_boot_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
+assert_contains "$edge_boot_log" "upstream edge mode ON: every MISS goes to fake1.steamcontent.com" "28-vault-upstream-pool.sh rendered edge mode"
+assert_contains "$edge_boot_log" "connection cap $POOL_CAP" "...with the connection cap $POOL_CAP"
+edge_groups=$(dc exec -T vault-core sh -c 'grep -c "^upstream " /etc/nginx/vault-upstream-pool.conf' 2>/dev/null | tr -d '\r')
+assert_eq "1" "$edge_groups" "the running container renders exactly one upstream group"
+
+host2_before=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host fake2' || true)
+accepts_before=$(edge_accepts)
+pool_batch fake2.steamcontent.com "$POOL_DEPOT_EDGE2" e
+say "    fake2 status codes:$pool_batch_codes"
+assert_eq "$POOL_N" "$pool_batch_ok" "all $POOL_N edge-mode requests with Host fake2 (outside every list) answered 200"
+pool_batch fake3.steamcontent.com "$POOL_DEPOT_EDGE3" f
+say "    fake3 status codes:$pool_batch_codes"
+assert_eq "$POOL_N" "$pool_batch_ok" "all $POOL_N edge-mode requests with Host fake3 (not even resolvable) answered 200"
+sleep 1
+edge_conns=$(( $(edge_accepts) - accepts_before ))
+say "    fake edge accepted connections for $((2 * POOL_N)) MISSes over two client names: $edge_conns"
+if [ "$edge_conns" -ge 1 ] && [ "$edge_conns" -le 2 ]; then
+    ok "$((2 * POOL_N)) MISSes for two foreign names cost $edge_conns upstream connection(s) (<= 2): one pooled edge, keepalive reuse"
+else
+    bad "$((2 * POOL_N)) MISSes for two foreign names cost $edge_conns upstream connections -- expected 1 (at most 2)"
+fi
+assert_eq "0" "$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host fake3' || true)" "the edge never saw Host fake3 (edge mode sends the edge's own name)"
+assert_eq "$host2_before" "$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host fake2' || true)" "...and received no new Host fake2 either (the legacy 10d requests are the only ones)"
+edge_stored2=$(dc exec -T vault-core sh -c "ls /vault/cache/depot/$POOL_DEPOT_EDGE2/chunk/ 2>/dev/null | wc -l" | tr -d '\r ')
+edge_stored3=$(dc exec -T vault-core sh -c "ls /vault/cache/depot/$POOL_DEPOT_EDGE3/chunk/ 2>/dev/null | wc -l" | tr -d '\r ')
+assert_eq "$POOL_N" "$edge_stored2" "all $POOL_N fake2 chunks were stored"
+assert_eq "$POOL_N" "$edge_stored3" "all $POOL_N fake3 chunks were stored"
+edge_first=$(printf 'e%039d' 1)
+edge_disk_sha=$(dc exec -T vault-core sh -c "sha256sum /vault/cache/depot/$POOL_DEPOT_EDGE2/chunk/$edge_first" 2>/dev/null | cut -d' ' -f1 | tr -d '\r')
+assert_eq "$(pool_chunk_sha "/depot/$POOL_DEPOT_EDGE2/chunk/$edge_first")" "$edge_disk_sha" "a stored edge-mode chunk is byte-identical to what the edge served"
+
+say ''
+say '--- access log: upstream_host / host / limit_conn fields on the edge-mode MISSes ---'
+edge_log=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep "uri=\"/depot/$POOL_DEPOT_EDGE3/chunk/f" | grep 'cache=MISS')
+printf '%s\n' "$edge_log" | head -2 | sed 's/^/    /'
+assert_eq "$POOL_N" "$(printf '%s\n' "$edge_log" | grep -c 'upstream_host="fake1.steamcontent.com" host="fake3.steamcontent.com" limit_conn=PASSED' || true)" "every edge-mode MISS line carries upstream_host=\"<edge>\" host=\"<client name>\" limit_conn=PASSED"
+
+step "10h. Global cap, live: over $POOL_CAP in-flight upstream connections an extra MISS gets 503; a cache HIT is unaffected"
+say "The fake edge holds every answer of depot $POOL_DEPOT_SLOW for ${POOL_SLOW_SECONDS}s. Four parallel MISSes for it: $POOL_CAP"
+say 'take the slots, the other two are refused at once. While the slots are held: one more MISS -> 503'
+say '(nothing stored), one HIT of a chunk stored in 10g -> 200 from disk, no new edge request.'
+slow_n=4
+si=1
+while [ "$si" -le "$slow_n" ]; do
+    ( curl -s -o /dev/null -w '%{http_code}' --max-time 60 -H 'Host: fake2.steamcontent.com' \
+        "$CORE_URL/depot/$POOL_DEPOT_SLOW/chunk/$(printf 's%039d' "$si")" > "$work/pool-slow-$si.code" 2>/dev/null ) &
+    si=$((si + 1))
+done
+sleep 2
+edge_reqs_before=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)
+extra_name=$(printf 'x%039d' 1)
+extra_res=$(pool_get fake2.steamcontent.com "/depot/$POOL_DEPOT/chunk/$extra_name" /dev/null)
+say "    extra MISS while saturated: $extra_res"
+assert_contains "$extra_res" "http=503" "an extra MISS over the cap is answered 503"
+extra_s=$(printf '%s' "$extra_res" | sed -n 's/.*seconds=\([0-9.]*\).*/\1/p')
+if awk -v t="${extra_s:-99}" 'BEGIN { exit !(t < 1.0) }'; then ok "...immediately (${extra_s}s < 1 s, not after a queue or an upstream timeout)"; else bad "the 503 took ${extra_s:-?}s (>= 1 s)"; fi
+hit_res=$(pool_get fake2.steamcontent.com "/depot/$POOL_DEPOT_EDGE2/chunk/$edge_first" "$work/pool-hit.bin")
+say "    HIT while saturated: $hit_res"
+assert_contains "$hit_res" "http=200" "a cache HIT is served while the cap is saturated"
+assert_contains "$hit_res" "bytes=$POOL_CHUNK_BYTES" "...with all $POOL_CHUNK_BYTES bytes"
+assert_eq "$edge_reqs_before" "$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)" "neither the 503 nor the HIT sent a request to the edge"
+wait
+slow_codes=$(for f in "$work"/pool-slow-*.code; do cat "$f"; echo; done | sort | tr '\n' ' ')
+say "    the four slow MISSes ended with: $slow_codes"
+assert_eq "200 200 503 503 " "$slow_codes" "$POOL_CAP of 4 parallel slow MISSes got through (200), the other 2 were refused (503)"
+slow_edge_conns=$(( $(edge_accepts) - accepts_before - edge_conns ))
+if [ "$slow_edge_conns" -le "$POOL_CAP" ]; then ok "the edge saw at most $POOL_CAP connections (cap $POOL_CAP) during the saturation: $slow_edge_conns new"; else bad "the edge saw $slow_edge_conns new connections during the saturation, cap is $POOL_CAP"; fi
+rej_stored=$(dc exec -T vault-core sh -c "test -f /vault/cache/depot/$POOL_DEPOT/chunk/$extra_name && echo present || echo absent" 2>&1 | tr -d '\r')
+assert_eq "absent" "$rej_stored" "nothing was stored for the refused MISS"
+cap_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
+rej_lines=$(printf '%s\n' "$cap_log" | grep "uri=\"/depot/$POOL_DEPOT_SLOW/chunk/s" | grep -c 'status=503 .*limit_conn=REJECTED' || true)
+assert_eq "2" "$rej_lines" "the access log has 2 status=503 limit_conn=REJECTED lines for the slow depot"
+assert_eq "3" "$(printf '%s\n' "$cap_log" | grep -c 'status=503 .*host="fake2.steamcontent.com" limit_conn=REJECTED' || true)" "...3 in total with the extra MISS, each with host=\"<client name>\" and the limit_conn field"
+printf '%s\n' "$cap_log" | grep 'limit_conn=REJECTED' | head -1 | sed 's/^/    /'
+hit_line=$(printf '%s\n' "$cap_log" | grep "uri=\"/depot/$POOL_DEPOT_EDGE2/chunk/$edge_first" | grep 'cache=HIT' | head -1)
+assert_contains "$hit_line" "status=200" "the HIT is logged as status=200 cache=HIT"
+assert_contains "$cap_log" 'limiting connections by zone "vault_upstream_total"' "nginx's error log names the zone that bit"
+compose_override=""
+
+step "10i. Revert: vault-core back on the stack's own env, fakes and network removed"
 say 'The 5i pattern: recreate from the original env (which also detaches the'
 say 'second network), then remove the two fakes and the network. The Cleanup'
 say 'trap does the same on an aborted run.'
@@ -2813,7 +2932,7 @@ assert_eq "healthy" "$core_h" "vault-core is healthy again on the stack's own en
 core_pool_ip_after=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$POOL_NET\"}}{{.IPAddress}}{{end}}" "$(dc ps -q vault-core)" 2>/dev/null)
 assert_eq "" "$core_pool_ip_after" "vault-core is no longer attached to $POOL_NET"
 revert_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
-assert_contains "$revert_log" "VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream keepalive pool" "the reverted vault-core renders no pool (the shipped default of this run's env)"
+assert_contains "$revert_log" "VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream pool" "the reverted vault-core renders no pool (the shipped default of this run's env)"
 run "docker rm -f '$POOL_EDGE' '$POOL_RESOLVER'"
 run "docker network rm '$POOL_NET'"
 if docker network inspect "$POOL_NET" >/dev/null 2>&1; then
