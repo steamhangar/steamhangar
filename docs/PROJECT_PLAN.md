@@ -2723,6 +2723,19 @@ below carry their own later dates, item 12 is the current one).
       NativeCommandError wrapping, no UTF-16). New hermetic CI test
       `agent/packaging/windows/tests/test-packaging-unit.ps1`. Follow-up,
       not done: registry lookup in the Go agent itself.
+    - [x] **CI-FIX-3** (tag `v0.1.0-rc10`, 2026-10-04; follows CI-FIX-2's
+      token-less annotations) — the signed APK verified (v2) but publish.yml
+      refused it with "found 0" certificates: current build-tools print
+      `V2 Signer: certificate SHA-256 digest:`, the inline sed wanted lines
+      starting with `Signer`. The parser moved to
+      `.github/scripts/apk-cert-digest.sh` (all known label shapes, CRLF,
+      de-duplicated, still exactly one certificate or fail-closed), and any
+      failure in the verify step now repeats apksigner's verdict and signer
+      lines as `::notice::` annotations. Fixture tests:
+      `api/tests/test_ci_fix_3_apk_cert_digest.py`. First real signing
+      certificate SHA-256, published in app/README.md:
+      `f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172`.
+      Still open: pinning that value as a CI comparison (N4 follow-up).
 
     **B. Open before `v0.1.0` final**
     - [x] **API-FIX-3** — misleading prefill summary (done 2026-10-03:

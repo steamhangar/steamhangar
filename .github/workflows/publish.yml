@@ -869,6 +869,15 @@ jobs:
         id: verify
         run: |
           set -eu
+          TRANSCRIPT="$RUNNER_TEMP/apksigner-verify.txt"
+          CERTS="$RUNNER_TEMP/apksigner-certs.txt"
+          # WP CI-FIX-3: on ANY failure in this step, repeat apksigner's
+          # verdict, scheme summary and signer lines as check-run
+          # annotations -- readable through the public API without a token,
+          # unlike the job log. They carry only the public certificate DN
+          # and fingerprints. rc10 refused to publish with "found 0" and
+          # nothing token-free said why.
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then sh .github/scripts/apk-cert-digest.sh annotate "$TRANSCRIPT" "$CERTS" || true; fi; exit "$rc"' EXIT
           APK_PATH="app/app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK_PATH" ]; then
             echo "::error::$APK_PATH does not exist -- assembleRelease did not produce the expected signed artefact." >&2
@@ -877,8 +886,9 @@ jobs:
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           BUILD_TOOLS_DIR="$(find "$SDK_ROOT/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)"
           APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
-          TRANSCRIPT="$RUNNER_TEMP/apksigner-verify.txt"
-          "$APKSIGNER" verify --verbose "$APK_PATH" > "$TRANSCRIPT"
+          # 2>&1: a refused APK reports its ERROR lines on stderr, and those
+          # belong in the transcript the trap above annotates.
+          "$APKSIGNER" verify --verbose "$APK_PATH" > "$TRANSCRIPT" 2>&1
           cat "$TRANSCRIPT"
           if ! grep -qx 'Verifies' "$TRANSCRIPT"; then
             echo "::error::apksigner did not report 'Verifies' -- refusing to publish this APK." >&2
@@ -891,23 +901,20 @@ jobs:
           # WP SEC-FIX-2 (S5): publish WHICH certificate signed the APK, so
           # users can check a download (and a keystore swap between
           # releases is visible). Exactly one signer is expected.
-          CERTS="$RUNNER_TEMP/apksigner-certs.txt"
-          "$APKSIGNER" verify --print-certs "$APK_PATH" > "$CERTS"
+          "$APKSIGNER" verify --print-certs "$APK_PATH" > "$CERTS" 2>&1
           cat "$CERTS"
           # The label in front of the digest varies by build-tools version
-          # and signature scheme ("Signer #1", or "Signer (minSdkVersion=..,
-          # maxSdkVersion=..)" for a v3.x block), and one certificate may be
-          # listed once per block. What must hold: every listed digest is the
-          # SAME certificate. First tag run (v0.1.0-rc1) failed on the old
-          # "Signer #1"-only pattern.
-          tr -d '\r' < "$CERTS" \
-            | sed -n 's/^Signer.* certificate SHA-256 digest: \([0-9a-fA-F]\{64\}\)$/\1/p' \
-            | tr 'A-F' 'a-f' | sort -u > "$CERTS.digests"
-          if [ "$(wc -l < "$CERTS.digests")" -ne 1 ]; then
-            echo "::error::expected exactly one signing certificate (SHA-256), found $(wc -l < "$CERTS.digests") -- refusing to publish this APK." >&2
+          # and signature scheme ("Signer #1", "Signer (minSdkVersion=..,
+          # maxSdkVersion=..)" for a v3.x block, "V2 Signer:" on current
+          # build-tools), and one certificate may be listed once per block.
+          # What must hold: every listed digest is the SAME certificate.
+          # v0.1.0-rc1 failed on a "Signer #1"-only pattern, v0.1.0-rc10 on
+          # a "^Signer"-anchored one; the parser now lives in a script with
+          # fixture tests (api/tests/test_ci_fix_3_apk_cert_digest.py).
+          if ! CERT_SHA256="$(sh .github/scripts/apk-cert-digest.sh digest "$CERTS")"; then
+            echo "::error::no single signing certificate found -- refusing to publish this APK." >&2
             exit 1
           fi
-          CERT_SHA256="$(cat "$CERTS.digests")"
           echo "cert_sha256=${CERT_SHA256}" >> "$GITHUB_OUTPUT"
           {
             echo "### Android release APK -- signed and verified"
