@@ -217,7 +217,25 @@ jobs:
         # The explicit glob, not the bare-directory form: web/tests/README.md
         # documents that `node --test web/tests` (no glob) fails hard with a
         # CJS MODULE_NOT_FOUND instead of discovering the files inside it.
-        run: node --test "web/tests/*.test.js"
+        #
+        # WP CI-FIX-4: two reporters -- `spec` to stdout for the log, `junit`
+        # to a file for the annotation step below (the token-less public API
+        # shows annotations, not the log). node's exit status is unchanged
+        # by the reporters: non-zero when any test fails, so this step still
+        # fails the job (pinned by api/tests/test_ci_fix_4_node_junit_annotate.py).
+        shell: bash
+        run: >-
+          node --test
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=junit --test-reporter-destination="${RUNNER_TEMP}/web-junit.xml"
+          "web/tests/*.test.js"
+      # WP CI-FIX-4: only adds information after the test step failed; exits
+      # 0 on any input. At most 10 annotations (GitHub's per-step cap); all
+      # test-derived text is escaped (see the script's docstring).
+      - name: "annotate: failed web tests"
+        if: failure()
+        shell: bash
+        run: python3 .github/scripts/node-junit-annotate.py "${RUNNER_TEMP}/web-junit.xml"
 
   android-tests:
     name: app / gradle unit tests + lint
