@@ -283,12 +283,20 @@ separate pooled forward proxy); whether a per-edge-name pool is the right
 model when a client spreads over 14 edges; how to measure safely on the
 production line.
 
-## D8: SCHED-FEAT-1, several schedule windows
+## D8: SCHED-FEAT-1, weekday schedules and several windows per day
 
 User request 2026-10-04: a nightly-only check misses updates published
 during the day. `schedule_window` is a single `HH:MM-HH:MM` range today;
 allow a list. Workaround: one wide window such as `06:00-24:00` with a
 60-minute interval.
+
+**Scope extended (user, 2026-10-04).** Weekdays and several different
+windows per day, e.g. Mon-Fri 12:00-16:00 plus 22:00-06:00 and the weekend
+all day. Open design points: the storage format of the schedule (a list
+of `{days, from, to}` entries, validated like today's window), how the
+Settings UI edits it on web and Android, and keeping vault-core's
+download-rate cap window (`VAULT_UPSTREAM_RATE_WINDOW`, env-only today) in
+step with it.
 
 ## Suggested order
 

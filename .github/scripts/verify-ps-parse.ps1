@@ -112,9 +112,15 @@ foreach ($f in $packagingFiles) {
 }
 
 # --- Group 2: parse-only, never executed (N3) -------------------------------
+# WP PAIR-1 (review finding 6): the vault-agent install command the web UI
+# generates (Settings -> Add a device -> Windows PC), with a dummy key. It
+# is written by web/tests/agent-install.test.js, which fails when the
+# committed copy drifts from what the page generates; parsed here with the
+# real 5.1 parser, never executed (it downloads and installs).
 $parseOnlyTargets = @(
     (Join-Path $repoRoot "core\tests\test-core.ps1"),
-    (Join-Path $repoRoot "dns\tests\test-dnsmasq-config.ps1")
+    (Join-Path $repoRoot "dns\tests\test-dnsmasq-config.ps1"),
+    (Join-Path $repoRoot "web\tests\fixtures\windows-install-command.ps1")
 )
 
 Write-Output ""

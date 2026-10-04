@@ -3029,3 +3029,224 @@ app's bar is a Scaffold bottom bar and its keyboard behaviour depends on
 the activity's soft-input mode; both are unverified on a device.
 
 Suite: **1158 tests, 1158 pass, 0 fail**.
+### WP PAIR-1 — "Add a device" (QR for the app, browser link, agent command)
+
+User decision 2026-10-04, "Weg A": a new device is set up from this
+already-connected web UI with the ONE shared vault API key, no API change
+(ADR-0016 freeze). Per-device keys and short-lived codes are D9 PAIR-2.
+
+Settings → PCs (agents) → "Add a device" opens a drawer sheet
+(`components/add-device-sheet.js`) with three options. Each shows its
+content only after its own "Show" press, under the warning "Anyone who
+sees this can control your hangar. Only show it on your own screen.";
+"Hide" and every close path (Close, Escape, backdrop, navigation — via the
+new optional `onClose` of `sheet-dialog.js`) remove the content from the
+DOM. Demo mode or no stored key: a note, no option.
+
+- **Phone (Android app)**: QR code of
+  `steamhangar://pair?v=1&url=<origin>&key=<key>` (`lib/pair-link.js`,
+  the contract with the Android package APP-PAIR-1: both values through
+  `encodeURIComponent`, so `+` is `%2B`; `url` reduced to
+  `scheme://host[:port]`, no trailing slash; the base is the page origin,
+  as `api.js` uses it). Inline SVG, black modules on a white plate with a
+  4-module quiet zone in every theme. The same URI as an "Open on this
+  phone" link and as copyable text (some camera apps only show the text of
+  a custom-scheme QR).
+- **Another browser**: `<origin>/#pair=<key>`. The receiving page
+  (`lib/pair-intake.js`, wired at the top of `app.js`) strips the fragment
+  with `history.replaceState` before the first render, then: same key →
+  toast; a different stored key → alertdialog "Replace this browser's API
+  key?" (`components/pair-confirm.js`, focus on "Keep current key");
+  otherwise (or after "Replace") `checkVaultApiKey` (the onboarding step-1
+  check) and only a passing key is stored, the onboarding way
+  (`setStoredApiKey` + `setDemoMode(false)`), followed by a reload; the
+  "Paired." toast crosses the reload as a sessionStorage flag ("1", never
+  the key). A rejected or unchecked key is never stored. While a link is
+  handled, the first-run overlay waits and auth-recovery does not fire.
+- **Windows PC (vault-agent)**: a PowerShell 5.1 command
+  (`lib/agent-install.js`) for the vault-api version from `GET /v1/about`
+  (release asset names as publish.yml writes them, tag = "v" + version). A
+  build without a release (dev-<sha>, a native run without a commit,
+  "invalid") gets a note instead. The command (since round 1, "Weg A",
+  it contains NO key): ask for the key with `Read-Host -AsSecureString`,
+  download exe + three scripts + SHA256SUMS into
+  `%LOCALAPPDATA%\VaultAgent\release-v<version>`, `Get-FileHash` check of
+  all four (stop before installing on a mismatch), `Unblock-File`, exe to
+  the versioned `%LOCALAPPDATA%\VaultAgent\vault-agent-v<version>.exe`
+  (review round 1), key to a temp file locked
+  with icacls before it is written, `install-task.ps1 -AgentPath -ServerUrl
+  -ApiKeyFile` in a child `powershell.exe -ExecutionPolicy Bypass`, temp
+  file deleted in `finally`, `Start-ScheduledTask VaultAgentReport`. The key
+  reaches the PC only through a separate "Copy key" button. **Agent server address**: an editable
+  field, prefilled with the page origin, validated (http/https + host,
+  nothing else), remembered in localStorage (`steamvault.agentServerUrl`,
+  not a secret). The note under it: the agent must reach vault-api's direct
+  LAN address, not a reverse proxy — vault-api records the TCP peer of
+  each report (uvicorn `--no-proxy-headers`) and matches it with cache
+  traffic; through a proxy every PC gets the proxy's address (found on the
+  real install, 2026-10-04). A Linux/SteamOS line points to agent/README.md.
+
+Copy buttons use the async clipboard where it exists (secure contexts
+only) and fall back to selecting the text field plus `execCommand("copy")`
+on a plain-http LAN page; a failure says "copy it by hand".
+
+**QR encoder: written for this project, not vendored**
+(`lib/qr-encode.js`, byte mode, levels L/M/Q/H, versions 1-40). The web
+UI has no build step and its CSP is `script-src 'self'`; the well-known
+single-file JS libraries are UMD/CommonJS, and only one byte segment is
+needed. Verified during the WP against segno 1.6.6 (BSD-3, Python, run once
+on the developer machine, not a dependency): all 40 versions x 4 levels x
+2 lengths with forced masks (320 cases) give identical matrices, after
+patching one segno quirk (it appends a whole zero byte when the terminator
+already ends on a byte boundary; ISO/IEC 18004 7.4.10 does not). Automatic
+mask choice differs from segno in 7 of 16 cases (the two implement the N3
+penalty differently; any mask decodes). The generated symbols were decoded
+back with jsQR 1.4.0: 334 of 336 (the two misses were version 23 at level
+L, where jsQR also fails on segno's output). `qr-reference-fixtures.js`
+keeps five segno matrices (v1-M, v1-L, v5-H, v6-M exactly full, v8-M with
+version bits).
+
+Tests: `qr-encode.test.js` (15: five reference matrices, Annex C/D/E and
+Table 7 spot values, structure, mask determinism, UTF-8, overflow throws,
+SVG geometry), `pair-link.test.js` (10: the URI contract as literals, the
+encoding, origin-only url, fragment round trip and refusals, the intake
+decision), `pair-intake.test.js` (13: strip, every intake path with
+recording fakes, the notice flag, two app.js source pins),
+`agent-install.test.js` (10: release guard, asset names against
+publish.yml, hash check before install, install-task.ps1 parameters
+against the real script, key once and quoted, PS 5.1 operators, URL
+validation, the note), `add-device-wiring.test.js` (11: fake-dom + real
+settings view and store: the Add button, nothing secret in the DOM before
+Show / after Hide / after each close path, QR/link/text, Windows command,
+dev-build note, /v1/about error, the address field, demo and no-key notes,
+the confirm dialog). `auth-recovery.test.js`'s app.js pin now expects the
+`|| pairIntakeBusy` gate. The wiring file ran 20x in a loop: 0 failures.
+
+Mutation evidence (each alone, in a scratch copy): all 30 killed — key
+not encoded; url not reduced to the origin; a different key replaced
+without asking; the browser link in the query; no `replaceState`; the
+confirm ignored; key stored before the check; first-run overlay not gated;
+fragment not read at top level; release guard without the commit; quotes
+not doubled; no hash check; temp key not deleted; history not switched
+off; a URL path accepted; an ECC table entry; the format XOR mask; the pad
+byte; overflow not thrown; Hide keeping the DOM; no `onClose`; `onClose`
+not called by sheet-dialog; agent address not saved; demo gate removed;
+prefill not the origin; a dev build getting a command; the Settings row
+removed; Escape answering "Replace"; focus on "Replace"; auth-recovery not
+gated.
+
+Not covered here: the painted result, a real scan with a phone, a real
+paste into Windows PowerShell 5.1 (no PowerShell available to this WP; the
+command is checked by the structural tests above, not by a parser or a
+run), and a screen reader.
+
+Suite: **1174 tests, 1174 pass, 0 fail**.
+
+Review round 1 (FAIL on one blocker, the history file; its fix waits for
+a user decision, the key source is isolated in `keySourceLines` so either
+variant is a one-place change). Fixed in this round:
+- Late `/v1/about` answers: both guards in `add-device-sheet.js` pinned
+  with a gated fetch (held requests answered by the test): an answer after
+  Hide paints nothing (guard A, `windowsOption.shown`); an answer for an
+  earlier Show is dropped while the current one is pending (guard B,
+  `windows.gen`); an answer after the sheet closed leaves no secret.
+- Wording: `replaceState` cleans the address bar and this tab's history
+  entry only, NOT the browser's persistent history or address-bar
+  suggestions (which may be synced). The browser option now tells the user
+  to delete the link there and wherever it was sent.
+- The exe goes to `vault-agent-v<version>.exe`: a re-install of another
+  version never overwrites an exe the task may be running (install-task.ps1
+  re-points the task through `-AgentPath`); a same-version re-install skips
+  the copy when the file is byte-identical. Older versioned exes are left
+  in `%LOCALAPPDATA%\VaultAgent`; delete them by hand if wanted.
+- After a successful install `uninstall-task.ps1` is copied next to the
+  exe and the download folder is removed; on a failure it stays for
+  inspection.
+- Logging residuals, documented in `lib/agent-install.js` (superseded by
+  finding 1 below: the command no longer carries the key, so history,
+  transcription and event 4104 hold no key).
+- The warning adds: copied text can also end up in clipboard history or
+  cloud clipboard sync.
+- Phone: the Android app's key rule is mirrored (`isAppPairableKey`:
+  printable ASCII, no space at either end); another key gets a note
+  instead of a QR code.
+- `psQuote` pins all four quote characters (U+2018..U+201B).
+- The generated command with a dummy key is committed as
+  `fixtures/windows-install-command.ps1` (pure ASCII). `agent-install.test.js`
+  regenerates it and fails on drift (`UPDATE_PS_FIXTURE=1` rewrites it), and
+  CI's powershell-syntax job parses it with Windows PowerShell 5.1's parser
+  (added to the parse-only list of `.github/scripts/verify-ps-parse.ps1`,
+  never executed).
+- Three node-vs-null assertions in the wiring file now compare booleans
+  (a failing one dumped the fake-DOM graph and crashed the file instead of
+  failing a test, measured by a mutation).
+
+Mutations, each alone in a scratch copy, all 12 killed: guard A removed;
+guard B removed; phone key rule gone; app key rule allowing edge spaces;
+fixed exe path; always copying the exe; download folder kept; uninstaller
+not kept; `psQuote` missing U+201A/B; fixture drift; CI not parsing the
+fixture; warning without the clipboard sentence.
+
+Suite: **1182 tests, 1182 pass, 0 fail**.
+
+Finding 1 (blocker, user decision 2026-10-04: **Weg A**). PSReadLine 2.0
+takes a pasted block as ONE history item and writes it to
+ConsoleHost_history.txt before any line in it runs, so the earlier
+"history off" first line could not protect a key inside the block. Now the
+command contains no key at all:
+- It asks `Read-Host 'Hangar API key (paste it, then press Enter)'
+  -AsSecureString` (asterisks only), converts with `SecureStringToBSTR` +
+  `PtrToStringBSTR`, `ZeroFreeBSTR` in a `finally`, disposes the
+  SecureString, and refuses an empty or non-printable-ASCII answer before
+  any download. The rest is unchanged: icacls-locked temp file (ACL before
+  content), `-ApiKeyFile`, temp file deleted and `$apiKey` cleared in the
+  `finally`. The history-off line is gone (nothing secret to keep out).
+- The sheet's Windows option, behind the same Show gate and warning, has a
+  "Copy key" button next to "Copy command". It reads the stored key at
+  click time and never puts it in the DOM; the plain-http fallback uses a
+  temporary off-screen textarea removed in a `finally`. A stored key the
+  command would refuse (not printable ASCII, `isInstallableKey`) gets a
+  note instead of the command.
+- What is guaranteed: the key is never part of the pasted text, so it is
+  not in the PSReadLine history, a transcript of the command or a 4104
+  script-block record of it. Residuals, stated on screen and in the module
+  header: the clipboard copy (and clipboard history or cloud clipboard
+  sync where on) until something else is copied; the plain string in the
+  PowerShell process while it runs; the owner-only temp file for the
+  seconds install-task.ps1 needs, then install-task.ps1's own owner-only
+  env.txt.
+- The fixture now holds no key; a test pins that (no `$apiKey = '`
+  literal, the Read-Host line present) and CI still parses it with 5.1.
+
+Tests: `agent-install.test.js` 15 (was 13; no key in any form even when one is
+passed; SecureString prompt, BSTR freed in a finally, check before any
+download, `$apiKey` cleared; `isInstallableKey` and the command's regex are
+one rule), `add-device-wiring.test.js` 17 (no key in the Windows option;
+Copy key only after Show, copies exactly the stored key via the async
+clipboard and via the fallback, the temporary textarea gone afterwards,
+gone with Hide; an uninstallable key gets the note).
+
+Mutations, each alone in a scratch copy, all killed: key literal back in
+the command; no `-AsSecureString`; `ZeroFreeBSTR` outside a finally; the
+key check after the downloads; `$apiKey` not cleared; Copy key copying
+something else; the temporary textarea not removed; Copy key outside the
+Show gate (built with the sheet); the uninstallable-key note removed.
+
+Suite: **1186 tests, 1186 pass, 0 fail**.
+
+Paste behaviour (coordinator must-fix): a console that types a multi-line
+paste line by line (Windows Terminal, conhost right-click) runs every
+complete top-level statement as it arrives, so a top-level `Read-Host`
+would have taken the next pasted line as the key. The whole command is now
+ONE statement, `& { ... }` from its first to its last non-empty line (the
+comment lines moved inside); PowerShell reads continuation lines up to the
+closing brace before running anything, so the prompt appears only after
+the whole paste is in. Nothing relies on top-level scope. The on-screen
+steps say: paste the whole command, then, at the prompt, press Copy key
+and paste the key. `agent-install.test.js` checks it at parse level (first
+and last non-empty lines, brace depth never back to 0 in between, string
+literals and comments ignored); the wiring test pins the step text; the
+CI-parsed fixture is regenerated. Mutations, both killed: a comment line
+back above `& {`; the prompt moved in front of the block.
+
+Suite: **1187 tests, 1187 pass, 0 fail**.
