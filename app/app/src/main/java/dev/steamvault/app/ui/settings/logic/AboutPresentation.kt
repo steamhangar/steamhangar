@@ -16,9 +16,11 @@ import dev.steamvault.app.net.model.AboutComponentOut
  *
  *  - The word "unknown" is never shown. A version/commit the component does
  *    not report is an em dash; the reason sits behind the row's (i) button.
- *    The server's generic `unknown` status reads "Not checked"
- *    ([AboutDisplayStatus.NOT_CHECKED]); an unrecognised status word too,
- *    never OK.
+ *    The server's generic `unknown` status means vault-api DID look and got
+ *    a bad or unclear answer (a proxy that forwards a host it must refuse,
+ *    an unreadable presence table, a late probe): a neutral CHECK whose
+ *    (i) details are open by default, so the server's reason is in view.
+ *    An unrecognised status word is CHECK too, never OK.
  *  - vault-core: the server's status is ALWAYS `unknown` (no network path,
  *    user decision "Weg A"). When its recorded version AND commit equal
  *    vault-api's (same answer), both come from the same release: OK. When
@@ -51,7 +53,7 @@ fun aboutStatusFor(wire: String?): AboutStatus = when (wire) {
  * What the status cell shows (web `ABOUT_DISPLAY`). Only [UNREACHABLE] is a
  * fault (error colour); every other non-OK state is neutral.
  */
-enum class AboutDisplayStatus { OK, UNREACHABLE, NOT_IN_USE, NOT_CHECKED, CHECK, NOT_REPORTED, NOT_APPLICABLE }
+enum class AboutDisplayStatus { OK, UNREACHABLE, NOT_IN_USE, CHECK, NOT_REPORTED, NOT_APPLICABLE }
 
 /** The display state for a server status without component rules (web
  * `ABOUT_STATUS`). */
@@ -59,7 +61,7 @@ fun aboutDisplayFor(status: AboutStatus): AboutDisplayStatus = when (status) {
     AboutStatus.OK -> AboutDisplayStatus.OK
     AboutStatus.UNREACHABLE -> AboutDisplayStatus.UNREACHABLE
     AboutStatus.NOT_IN_USE -> AboutDisplayStatus.NOT_IN_USE
-    AboutStatus.UNKNOWN -> AboutDisplayStatus.NOT_CHECKED
+    AboutStatus.UNKNOWN -> AboutDisplayStatus.CHECK
 }
 
 private val HEX_COMMIT = Regex("^[0-9a-fA-F]{8,64}$")
@@ -139,6 +141,10 @@ data class AboutRow(
 ) {
     /** Whether the row has anything behind its (i) button. */
     val hasInfo: Boolean get() = note != null || showDashNote || detail != null
+
+    /** WP WEB-FIX-8 review: a CHECK row's details start open, so the reason
+     * is never hidden behind the (i); every other row starts collapsed. */
+    val infoOpenByDefault: Boolean get() = display == AboutDisplayStatus.CHECK
 }
 
 private fun noteFor(kind: AboutComponentKind?): AboutNote? = when (kind) {

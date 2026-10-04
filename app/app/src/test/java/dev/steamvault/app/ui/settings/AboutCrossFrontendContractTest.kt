@@ -37,10 +37,15 @@ class AboutCrossFrontendContractTest {
         assertEquals("OK", res("settings_about_status_ok"))
         assertEquals("Unreachable", res("settings_about_status_unreachable"))
         assertEquals("Not in use", res("settings_about_status_not_in_use"))
-        assertEquals("Not checked", res("settings_about_status_not_checked"))
         assertEquals("Check", res("settings_about_status_check"))
         assertEquals("Not reported", res("settings_about_status_not_reported"))
         assertEquals("N/A", res("settings_about_status_not_applicable"))
+    }
+
+    @Test
+    fun `save bar words match web settings-js`() {
+        assertEquals("Unsaved changes", res("settings_unsaved_changes"))
+        assertEquals("Saving\u2026", res("settings_saving"))
     }
 
     @Test

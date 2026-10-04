@@ -15,7 +15,7 @@
  *     on Refresh (whose role=status line then says what happened);
  *   - Settings → "PCs (agents)" opens the clients sheet with NO bypass
  *     banner in play; each PC shows the SERVER's presence (fixtures
- *     contradict the timestamps), "last seen", "version unknown", and the
+ *     contradict the timestamps), "last seen", "version not reported", and the
  *     agents summary line;
  *   - the rail's version button calls its handler and is named "About: …";
  *     requestAboutFocus() lands focus on the About heading.
@@ -199,7 +199,7 @@ test("About: one row per component, WEB-FIX-8 words (core OK against vault-api, 
   assert.deepEqual(aboutRowText(s, "vault-api"), ["vault-api", "0.1.0", "3f9c2a7", "OK"]);
   assert.deepEqual(aboutRowText(s, "vault-core"), ["vault-core", "0.1.0", "3f9c2a7", "OK"], "same version and commit as vault-api");
   assert.deepEqual(aboutRowText(s, "vault-runner"), ["vault-runner", "0.1.0", "3f9c2a7", "Unreachable"]);
-  assert.deepEqual(aboutRowText(s, "steamprefill"), ["steamprefill", "0.1.0", "—", "Not checked"]);
+  assert.deepEqual(aboutRowText(s, "steamprefill"), ["steamprefill", "0.1.0", "—", "Check"], "server unknown = looked, unclear answer");
   assert.deepEqual(aboutRowText(s, "vault-proxy"), ["vault-proxy", "—", "—", "Not in use"]);
   assert.deepEqual(aboutRowText(s, "vault-dns"), ["vault-dns", "—", "—", "N/A"]);
   assert.equal(s.querySelectorAll("tr.about-row").length, 6);
@@ -250,7 +250,7 @@ test("About: the (i) details hold the note, the dash reason and the server detai
   assert.equal(full, FULL_COMMIT, "the short commit carries the full id as its title");
 });
 
-test("MUTATION TARGET: default render — every (i) collapsed, and no visible 'unknown' anywhere in the About section", async () => {
+test("MUTATION TARGET: default render — only Check rows open their (i), and no visible 'unknown' anywhere in the About section", async () => {
   const allUnknown = {
     components: ABOUT_ALL_STATUSES.components.map((c) => ({ ...c, version: null, commit: null, status: "unknown" })),
   };
@@ -261,14 +261,45 @@ test("MUTATION TARGET: default render — every (i) collapsed, and no visible 'u
     const content = s.querySelector(".about-content");
     const buttons = content.querySelectorAll('[data-role="about-info"]');
     assert.equal(buttons.length, 6, "one (i) per row");
-    for (const btn of buttons) assert.equal(btn.getAttribute("aria-expanded"), "false");
-    const details = content.querySelectorAll("tr.about-detail");
-    assert.equal(details.length, 6);
-    assert.equal(details.every((d) => d.hidden === true), true, "details collapsed by default");
+    for (const row of content.querySelectorAll("tr.about-row")) {
+      const name = row.getAttribute("data-component");
+      const word = aboutRowText(s, name)[3];
+      const btn = row.querySelector('[data-role="about-info"]');
+      const details = content.querySelectorAll("tr.about-detail").find((d) => d.getAttribute("data-detail-for") === name);
+      const open = word === "Check";
+      assert.equal(btn.getAttribute("aria-expanded"), String(open), `${name} (${word}) aria-expanded`);
+      assert.equal(details.hidden, !open, `${name} (${word}) details ${open ? "open" : "collapsed"} by default`);
+    }
     const seen = visibleText(content);
     assert.doesNotMatch(seen, /unknown/i, seen);
     assert.match(seen, /—/);
   }
+});
+
+test("MUTATION TARGET: a server 'unknown' on vault-proxy is a Check whose server reason is on screen without a click", async () => {
+  server.about = {
+    components: ABOUT_ALL_STATUSES.components.map((c) =>
+      c.name === "vault-proxy"
+        ? { ...c, status: "unknown", detail: "The proxy answered HTTP 200 for a host that is on no allowlist, instead of refusing it with 403. Check the egress filter." }
+        : c,
+    ),
+  };
+  const s = await mountSettings();
+  await until(() => aboutRow(s, "vault-dns") !== null, "about table");
+  assert.equal(aboutRowText(s, "vault-proxy")[3], "Check");
+  const details = s.querySelectorAll("tr.about-detail").find((d) => d.getAttribute("data-detail-for") === "vault-proxy");
+  assert.equal(details.hidden, false);
+  assert.match(visibleText(details), /Check the egress filter\./);
+});
+
+test("the row header is named by the component name alone (aria-labelledby the name span, not the (i) label)", async () => {
+  const s = await mountSettings();
+  await until(() => aboutRow(s, "vault-dns") !== null, "about table");
+  const th = aboutRow(s, "vault-core").querySelector("th.about-name");
+  const id = th.getAttribute("aria-labelledby");
+  const span = th.querySelector("span.about-name-text");
+  assert.equal(span.id, id);
+  assert.equal(span.textContent, "vault-core");
 });
 
 test("MUTATION TARGET: the (i) button is an accessible disclosure — named, aria-controls its details row, click toggles aria-expanded and hidden", async () => {
@@ -414,12 +445,12 @@ test("MUTATION TARGET: the sheet's heading reads 'PCs (agents)'", async () => {
   assert.equal(textOf(pcsSheet(), "h2"), "PCs (agents)");
 });
 
-test("MUTATION TARGET: 'version unknown' and 'last seen … ago' on the row; the stats line keeps the games count", async () => {
+test("MUTATION TARGET: 'version not reported' and 'last seen … ago' on the row; the stats line keeps the games count", async () => {
   await until(() => Array.isArray(store.snapshot("clients")), "first clients poll");
   const s = await mountSettings();
   s.querySelector('[data-role="open-pcs"]').dispatchEvent({ type: "click" });
   await until(() => sheetRow("fresh-but-offline") !== null, "rows");
-  assert.equal(textOf(sheetRow("fresh-but-offline"), "[data-presence-line]"), "last seen just now · version unknown");
+  assert.equal(textOf(sheetRow("fresh-but-offline"), "[data-presence-line]"), "last seen just now · version not reported");
   assert.equal(textOf(sheetRow("old-but-online"), "[data-presence-line]"), "last seen 3 days ago · agent 0.1.0");
   assert.match(textOf(sheetRow("old-but-online"), "[data-stats-line]"), /3 games reported/);
   assert.match(textOf(sheetRow("old-but-online"), ".badge"), /Healthy/, "the bypass state stays");

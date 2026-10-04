@@ -33,13 +33,20 @@ class AboutPresentationTest {
     }
 
     @Test
-    fun `server status without a component rule -- unknown reads NOT_CHECKED, never OK`() {
+    fun `MUTATION PIN -- server status unknown without a component rule is CHECK with details open, never OK`() {
         assertEquals(AboutDisplayStatus.OK, aboutDisplayFor(AboutStatus.OK))
         assertEquals(AboutDisplayStatus.UNREACHABLE, aboutDisplayFor(AboutStatus.UNREACHABLE))
         assertEquals(AboutDisplayStatus.NOT_IN_USE, aboutDisplayFor(AboutStatus.NOT_IN_USE))
-        assertEquals(AboutDisplayStatus.NOT_CHECKED, aboutDisplayFor(AboutStatus.UNKNOWN))
+        assertEquals(AboutDisplayStatus.CHECK, aboutDisplayFor(AboutStatus.UNKNOWN))
         val runner = aboutRowFor(AboutComponentOut("vault-runner", null, null, "degraded"), api)
-        assertEquals(AboutDisplayStatus.NOT_CHECKED, runner.display)
+        assertEquals(AboutDisplayStatus.CHECK, runner.display)
+        assertTrue(runner.infoOpenByDefault)
+        val proxyFault = aboutRowFor(AboutComponentOut("vault-proxy", null, null, "unknown", null, "The proxy answered HTTP 200."), api)
+        assertEquals(AboutDisplayStatus.CHECK, proxyFault.display)
+        assertTrue("the server's reason is in view", proxyFault.infoOpenByDefault)
+        assertEquals("The proxy answered HTTP 200.", proxyFault.detail)
+        assertFalse(aboutRowFor(api).infoOpenByDefault)
+        assertFalse(aboutRowFor(AboutComponentOut("vault-dns", null, null, "unknown"), api).infoOpenByDefault)
     }
 
     @Test
@@ -123,7 +130,7 @@ class AboutPresentationTest {
         assertEquals(AboutNote.VAULT_PROXY, row.note)
         assertFalse(row.showDashNote)
         assertEquals(
-            AboutDisplayStatus.NOT_CHECKED,
+            AboutDisplayStatus.CHECK,
             aboutRowFor(AboutComponentOut("vault-proxy", null, null, "unknown"), api).display,
         )
     }

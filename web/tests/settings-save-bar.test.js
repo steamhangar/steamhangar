@@ -86,7 +86,7 @@ globalThis.fetch = async (url, init = {}) => {
   return respond(404, { detail: "Not Found" });
 };
 
-const { renderSettings, UNSAVED_TEXT } = await import("../js/views/settings.js");
+const { renderSettings, UNSAVED_TEXT, SAVING_TEXT } = await import("../js/views/settings.js");
 
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 async function until(pred, label, timeoutMs = 2000) {
@@ -219,6 +219,54 @@ test("Discard hides the bar and puts the saved value back", async () => {
   assert.equal(server.patches.length, 0);
 });
 
+test("MUTATION TARGET: Discard from the bar moves focus to the page heading, not <body>", async () => {
+  const s = await mount();
+  type(nameInput(s), "vault-02");
+  const discard = bar(s).querySelector('[data-role="settings-discard"]');
+  discard.focus();
+  discard.dispatchEvent({ type: "click" });
+  assert.equal(barShown(s), false);
+  assert.equal(dom.document.activeElement && dom.document.activeElement.tagName, "H1");
+  assert.equal(dom.document.activeElement.tabIndex, -1, "a programmatic target, never in the Tab order");
+});
+
+test("MUTATION TARGET: an edit after a failed save puts the status line back to 'Unsaved changes'", async () => {
+  server.patchStatus = 500;
+  const s = await mount();
+  type(nameInput(s), "vault-02");
+  bar(s).querySelector('[data-role="settings-save"]').dispatchEvent({ type: "click" });
+  await until(() => /^Could not save: /.test(barText(s) || ""), "error line");
+  type(nameInput(s), "vault-03");
+  assert.equal(barText(s), UNSAVED_TEXT);
+  assert.equal(bar(s).querySelector('[data-role="save-status"]').className, "savebar-msg", "error colour gone");
+});
+
+test("MUTATION TARGET: an edit typed while the save is in flight survives it — the bar stays up with that change", async () => {
+  const s = await mount();
+  type(nameInput(s), "vault-02");
+  let release;
+  server.gate = new Promise((r) => (release = r));
+  const save = bar(s).querySelector('[data-role="settings-save"]');
+  try {
+    save.dispatchEvent({ type: "click" });
+    await tick(5);
+    assert.equal(barText(s), SAVING_TEXT, "the line keeps saying Saving… while typing");
+    type(nameInput(s), "vault-03");
+    assert.equal(barText(s), SAVING_TEXT);
+  } finally {
+    release();
+  }
+  await until(() => save.getAttribute("aria-disabled") === null, "save settled");
+  await tick(5);
+  assert.deepEqual(server.patches, [{ vault_name: "vault-02" }]);
+  assert.equal(barShown(s), true, "vault-03 is still unsaved");
+  assert.equal(barText(s), UNSAVED_TEXT);
+  assert.equal(nameInput(s).value, "vault-03", "the typed value is not replaced by the saved one");
+  bar(s).querySelector('[data-role="settings-save"]').dispatchEvent({ type: "click" });
+  await until(() => !barShown(s), "second save");
+  assert.deepEqual(server.patches.map((p) => p.vault_name), ["vault-02", "vault-03"]);
+});
+
 test("read-only settings never build a save bar", async () => {
   server.readonly = true;
   const s = await mount();
@@ -251,6 +299,8 @@ test("twin: the Android save bar uses the same words (strings.xml)", async () =>
     return m[1];
   };
   assert.equal(res("settings_unsaved_changes"), UNSAVED_TEXT);
+  assert.equal(res("settings_saving"), SAVING_TEXT);
+  assert.equal(SAVING_TEXT, "Saving…");
   assert.equal(res("settings_save_changes"), "Save changes");
   assert.equal(res("settings_discard_changes"), "Discard changes");
   assert.equal(res("settings_save_error"), "Could not save: %1$s", "web: `Could not save: ${detail}`");

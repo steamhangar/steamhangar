@@ -15,7 +15,7 @@
  * WP WEB-FEAT-3 also shows, per PC: a presence chip (the server's
  * `presence` field, read by `lib/clients-view.js`'s `presenceOf` and never
  * recomputed here), "last seen ... ago" from `last_reported_at`, and the
- * agent version ("version unknown" for `agent_version: null`); and an
+ * agent version ("version not reported" for `agent_version: null`); and an
  * "Agents: N online, M offline" line at the top. Offline PCs stay listed.
  * The relative time and the presence chip are repainted on every clients
  * tick while the sheet is open (text only, no row rebuild), so "4 min ago"

@@ -262,9 +262,9 @@ private fun statsLineFor(model: ClientRowModel): String {
  * WP APP-FEAT-2 (parity with AGENT-FEAT-1 / web WEB-FEAT-3): "Online ·
  * last seen 4 min ago · agent 0.1.0". Online/Offline is the SERVER's
  * `presence`, passed through and never recomputed; a server older than
- * AGENT-FEAT-1 sends none, which reads "Presence unknown", never a guess.
+ * AGENT-FEAT-1 sends none, which reads "Not reported", never a guess.
  * "last seen" is relative (web `formatAgo`); a missing agent version reads
- * "version unknown".
+ * "version not reported".
  */
 @Composable
 private fun presenceLineFor(view: ClientPresenceView): String {

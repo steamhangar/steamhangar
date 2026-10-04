@@ -48,10 +48,11 @@ export const STATUS_LABEL = {
   // one this setup does not run ("not_in_use"). Neither is a fault, so
   // neither reuses the warning/error glyphs — same reasoning as
   // "cancelled" above. Neutral tone, own shapes ("?" and a dash). The kind
-  // keeps its wire-derived name; its word is "Not checked" since WP
+  // keeps its wire-derived name; its word changed in WP
   // WEB-FIX-8 (user feedback: "Unknown" reads as if the user did something
-  // wrong).
-  unknown: "Not checked",
+  // wrong); since its review, "Check" (the server looked and got a bad or
+  // unclear answer — never "not checked").
+  unknown: "Check",
   notinuse: "Not in use",
 };
 

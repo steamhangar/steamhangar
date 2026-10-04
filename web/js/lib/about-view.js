@@ -11,8 +11,14 @@
  *
  *  - The word "unknown" is never shown. A version/commit the component does
  *    not report is an em dash ({@link DASH}); the reason sits behind the
- *    row's (i) button. The server's generic `unknown` status reads
- *    "Not checked".
+ *    row's (i) button.
+ *  - The server's generic `unknown` status means vault-api DID look and got
+ *    a bad or unclear answer (api/vault_api/about.py: a proxy that forwards
+ *    a host it must refuse, HTTP_PROXY unusable, an unreadable presence
+ *    table, a probe past its deadline). It reads as a neutral "Check", and
+ *    a Check row's (i) details start OPEN (`infoOpenByDefault`), so the
+ *    server's reason is in view instead of hidden (review fix). An
+ *    unrecognised status word is "Check" too, never OK.
  *  - vault-core: the server's status is ALWAYS `unknown` (no network path,
  *    ADR-0011, user decision "Weg A"); its version comes from a file
  *    vault-core's start hook wrote. When that recorded version AND commit
@@ -62,14 +68,13 @@ export const DASH_LABEL = "Not reported";
  * text-colour class of the badge. Only `unreachable` uses a fault glyph and
  * the error tone: every other non-OK state is neutral, so a component that
  * is simply not checked never reads as a fault (docs/LEARNINGS.md, the
- * "cancelled" glyph entry, same class). "?" = could not or did not check,
- * dash = nothing to show.
+ * "cancelled" glyph entry, same class). "?" = look at the details, dash =
+ * nothing to show.
  */
 export const ABOUT_DISPLAY = Object.freeze({
   ok: Object.freeze({ word: "OK", icon: "cached", tone: "tx-cached" }),
   unreachable: Object.freeze({ word: "Unreachable", icon: "error", tone: "tx-error" }),
   not_in_use: Object.freeze({ word: "Not in use", icon: "notinuse", tone: "tx-cancelled" }),
-  not_checked: Object.freeze({ word: "Not checked", icon: "unknown", tone: "tx-cancelled" }),
   check: Object.freeze({ word: "Check", icon: "unknown", tone: "tx-cancelled" }),
   not_reported: Object.freeze({ word: "Not reported", icon: "notinuse", tone: "tx-cancelled" }),
   not_applicable: Object.freeze({ word: "N/A", icon: "notinuse", tone: "tx-cancelled" }),
@@ -81,7 +86,7 @@ export const ABOUT_STATUS = Object.freeze({
   ok: "ok",
   unreachable: "unreachable",
   not_in_use: "not_in_use",
-  unknown: "not_checked",
+  unknown: "check",
 });
 
 /**
@@ -131,9 +136,9 @@ export const UNNAMED_COMPONENT = "Unnamed component";
 const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
 /** Display state key for a server status word, without component rules: an
- * unexpected word is "not_checked", never OK. */
+ * unexpected word is "check", never OK. */
 function stateFor(status) {
-  return has(ABOUT_STATUS, status) ? ABOUT_STATUS[status] : "not_checked";
+  return has(ABOUT_STATUS, status) ? ABOUT_STATUS[status] : "check";
 }
 
 /** The presentation of a server status word, without component rules.
@@ -226,6 +231,8 @@ export function describeComponent(component, api = null) {
     detail,
     /** The (i) paragraphs, in order: note, dash reason, server detail. */
     info: [note, dashNote, detail].filter((x) => x !== null),
+    /** A Check row's details start open, every other row's collapsed. */
+    infoOpenByDefault: state === "check",
   };
 }
 

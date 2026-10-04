@@ -15,6 +15,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
+  PRESENCE_UNKNOWN_WORD,
+  agentVersionText,
+  lastSeenText,
+  presenceWord,
+} from "../js/lib/clients-view.js";
+import {
   ABOUT_DISPLAY,
   COMPONENT_NOTES,
   CORE_NOTES,
@@ -43,7 +49,6 @@ test("twin: every display state has the same word in the app", () => {
     ok: "settings_about_status_ok",
     unreachable: "settings_about_status_unreachable",
     not_in_use: "settings_about_status_not_in_use",
-    not_checked: "settings_about_status_not_checked",
     check: "settings_about_status_check",
     not_reported: "settings_about_status_not_reported",
     not_applicable: "settings_about_status_not_applicable",
@@ -83,4 +88,15 @@ test("MUTATION TARGET: no app About string shows the word 'unknown' either", () 
   const all = [...stringsXml.matchAll(/<string name="(settings_about_[a-z_]+)"[^>]*>(.*?)<\/string>/g)];
   assert.ok(all.length >= 20, `expected the About strings, read ${all.length}`);
   for (const [, name, value] of all) assert.doesNotMatch(value, /unknown/i, `${name} says "unknown"`);
+});
+
+test("twin: the PCs sheet's 'not reported' words (review nit, no 'unknown' there either)", () => {
+  assert.equal(PRESENCE_UNKNOWN_WORD, "Not reported");
+  assert.equal(res("clients_presence_unknown"), presenceWord({}), drift("clients_presence_unknown"));
+  assert.equal(res("clients_last_seen_unknown"), lastSeenText({ last_reported_at: null }), drift("clients_last_seen_unknown"));
+  assert.equal(res("clients_agent_version_unknown"), agentVersionText({ agent_version: null }), drift("clients_agent_version_unknown"));
+  assert.equal(res("clients_games_unknown"), "game count not reported", drift("clients_games_unknown"));
+  for (const name of ["clients_presence_unknown", "clients_last_seen_unknown", "clients_agent_version_unknown", "clients_games_unknown"]) {
+    assert.doesNotMatch(res(name), /unknown/i, name);
+  }
 });

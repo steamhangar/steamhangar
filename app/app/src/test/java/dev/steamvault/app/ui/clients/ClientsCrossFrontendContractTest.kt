@@ -52,7 +52,11 @@ class ClientsCrossFrontendContractTest {
     fun `the honest fallback wordings match clients-view's own literals`() {
         val xml = readResFile("strings.xml")
         assertEquals("no known address", extractStringResource(xml, "clients_addresses_unknown"))
-        assertEquals("game count unknown", extractStringResource(xml, "clients_games_unknown"))
+        assertEquals("game count not reported", extractStringResource(xml, "clients_games_unknown"))
+        // WP WEB-FIX-8: presence/last-seen/version words of clients-view.js.
+        assertEquals("Not reported", extractStringResource(xml, "clients_presence_unknown"))
+        assertEquals("last seen: not reported", extractStringResource(xml, "clients_last_seen_unknown"))
+        assertEquals("version not reported", extractStringResource(xml, "clients_agent_version_unknown"))
         assertEquals("nothing served yet", extractStringResource(xml, "clients_bytes_none"))
         assertEquals("no cache requests yet", extractStringResource(xml, "clients_hit_rate_none"))
     }

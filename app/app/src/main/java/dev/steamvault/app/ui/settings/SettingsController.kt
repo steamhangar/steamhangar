@@ -210,11 +210,16 @@ class SettingsController(
             drafts = emptyMap()
             return
         }
+        // WP WEB-FIX-8: the drafts this PATCH carries. An edit made while it
+        // is in flight replaces its key's draft, so after success only the
+        // drafts that are still the sent ones are dropped -- a later edit
+        // survives and keeps the save bar up instead of vanishing silently.
+        val sent = drafts
         saving = true
         saveError = null
         try {
             settingsResponse = settingsRepository.patch(patch)
-            drafts = emptyMap()
+            drafts = drafts.filter { (key, draft) -> sent[key] != draft }
             toast = strings.savedToast()
             // A saved PATCH can change sweep_include_cached/auto_gc, which
             // changes sweep_cached_gc_risk server-side -- re-fetch so the

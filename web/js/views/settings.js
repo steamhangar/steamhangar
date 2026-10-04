@@ -174,6 +174,8 @@ function entryByKey(key) {
 
 /** Shown in the save bar while it is up (WP WEB-FIX-8). */
 export const UNSAVED_TEXT = "Unsaved changes";
+/** The bar's status line while a PATCH is in flight. */
+export const SAVING_TEXT = "Saving…";
 
 /** True when the drafts would change something server-side: the same
  * builder the PATCH uses, so a field edited and typed back to its saved
@@ -197,8 +199,9 @@ function markDirty() {
   els.saveBar.hidden = !dirty;
   els.section.classList.toggle("savebar-up", dirty);
   // Only on a change: the line is a live region, and rewriting the same
-  // text on every keystroke would re-announce it.
-  if (els.saveMsg.textContent !== UNSAVED_TEXT) {
+  // text on every keystroke would re-announce it. While a save is in
+  // flight the line keeps saying "Saving…".
+  if (!saving && els.saveMsg.textContent !== UNSAVED_TEXT) {
     els.saveMsg.textContent = UNSAVED_TEXT;
     els.saveMsg.className = "savebar-msg";
   }
@@ -235,13 +238,20 @@ async function saveDrafts() {
     markDirty();
     return;
   }
+  // The drafts this PATCH carries. Every edit replaces its key's draft
+  // object, so a draft that is no longer the sent one was typed while the
+  // save was in flight and must survive it (review fix: it used to be
+  // dropped silently with the bar).
+  const sent = { ...drafts };
   saving = true;
   els.saveBtn.setAttribute("aria-disabled", "true");
-  els.saveMsg.textContent = "Saving…";
+  els.saveMsg.textContent = SAVING_TEXT;
   try {
     const updated = await api.patchSettings(body);
     state.settingsResponse = updated;
-    drafts = {};
+    const later = {};
+    for (const [key, draft] of Object.entries(drafts)) if (sent[key] !== draft) later[key] = draft;
+    drafts = later;
     const hadFocus = barHasFocus();
     // The toast (role=status) announces the success; the bar is gone.
     showToast("Settings saved.");
@@ -257,8 +267,15 @@ async function saveDrafts() {
       // leave state.schedule as it was — stale is better than crashing a
       // successful save.
     }
-    fullRender();
-    restoreFocusAfterBar(hadFocus);
+    if (Object.keys(later).length > 0) {
+      // Keep the live inputs (they hold the later edits); the bar stays up
+      // for them. `saving` is still true here, so clear it first.
+      saving = false;
+      markDirty();
+    } else {
+      fullRender();
+      restoreFocusAfterBar(hadFocus);
+    }
   } catch (err) {
     // The bar stays up with the drafts; its own role=status line says what
     // failed (no warn toast on top: at BP-L the toast would sit over the
@@ -947,10 +964,10 @@ function buildPcsSection() {
  * kept across a failed Refresh (the last good table stays visible under
  * the error line); a "too old" answer clears it. */
 const about = { phase: "idle", components: null, error: null, gen: 0 };
-/** Component names whose (i) details are open (WP WEB-FIX-8). Module
- * state, so a Refresh (which rebuilds the table) keeps them open; default
- * collapsed. */
-const aboutInfoOpen = new Set();
+/** Component name -> the user's open/closed choice for its (i) details
+ * (WP WEB-FIX-8). Module state, so a Refresh (which rebuilds the table)
+ * keeps it; without a choice the row's `infoOpenByDefault` applies. */
+const aboutInfoOpen = new Map();
 /** The About section's live nodes for the CURRENT mount, or null. */
 let aboutEls = null;
 /** Set by the rail's version button (requestAboutFocus) before it
@@ -1085,8 +1102,10 @@ function aboutInfoId(name) {
  * Enter/Space and the global :focus-visible ring come for free;
  * aria-expanded + aria-controls point at the row's details. Toggling flips
  * `hidden` on the details row and records the choice in `aboutInfoOpen`.
+ * Until the user chooses, a "Check" row starts open (its reason must not
+ * hide behind the (i)) and every other row collapsed.
  */
-function buildInfoButton(name, detailRow) {
+function buildInfoButton(name, detailRow, openByDefault) {
   const btn = el("button", "about-info-btn");
   btn.type = "button";
   btn.dataset.role = "about-info";
@@ -1097,11 +1116,11 @@ function buildInfoButton(name, detailRow) {
     btn.setAttribute("aria-expanded", String(open));
     detailRow.hidden = !open;
   };
-  apply(aboutInfoOpen.has(name));
+  const isOpen = () => (aboutInfoOpen.has(name) ? aboutInfoOpen.get(name) : openByDefault);
+  apply(isOpen());
   btn.addEventListener("click", () => {
-    const open = !aboutInfoOpen.has(name);
-    if (open) aboutInfoOpen.add(name);
-    else aboutInfoOpen.delete(name);
+    const open = !isOpen();
+    aboutInfoOpen.set(name, open);
     apply(open);
   });
   return btn;
@@ -1136,7 +1155,12 @@ function buildAboutTable(components) {
     const nameCell = el("th", "about-name");
     nameCell.setAttribute("scope", "row");
     nameCell.setAttribute("role", "rowheader");
-    nameCell.appendChild(el("span", "about-name-text", view.name));
+    // The row header is named by the name span alone, so the (i) button's
+    // own label never joins it (review nit).
+    const nameText = el("span", "about-name-text", view.name);
+    nameText.id = aboutInfoId(view.name).replace("about-info-", "about-name-");
+    nameCell.setAttribute("aria-labelledby", nameText.id);
+    nameCell.appendChild(nameText);
     const versionCell = el("td", "about-version");
     versionCell.setAttribute("role", "cell");
     versionCell.dataset.label = "Version";
@@ -1171,7 +1195,7 @@ function buildAboutTable(components) {
         td.appendChild(d);
       }
       detailRow.appendChild(td);
-      nameCell.appendChild(buildInfoButton(view.name, detailRow));
+      nameCell.appendChild(buildInfoButton(view.name, detailRow, view.infoOpenByDefault));
       tbody.appendChild(detailRow);
     }
   }

@@ -113,7 +113,7 @@ class AppFeat2WiringTest {
     }
 
     @Test
-    fun `MUTATION PIN -- WEB-FIX-8 each About row has an info button that toggles its details, collapsed by default`() {
+    fun `MUTATION PIN -- WEB-FIX-8 each About row has an info button that toggles its details, collapsed by default except CHECK`() {
         assertCalledFrom(settings, "IconButton(", "AboutRowView")
         assertCalledFrom(settings, "AboutInfoGlyph(", "AboutRowView")
         val code = stripComments(read(settings))
@@ -121,7 +121,7 @@ class AppFeat2WiringTest {
         val end = code.indexOf("private fun AboutInfoGlyph(", start)
         check(start >= 0 && end > start) { "expected AboutRowView before AboutInfoGlyph" }
         val body = code.substring(start, end)
-        assertTrue("collapsed by default", body.contains("rememberSaveable(row.name) { mutableStateOf(false) }"))
+        assertTrue("collapsed by default, a CHECK row open", body.contains("rememberSaveable(row.name) { mutableStateOf(row.infoOpenByDefault) }"))
         assertTrue("the button toggles the state", body.contains("onClick = { expanded = !expanded }"))
         assertTrue("the details render only while expanded", body.contains("if (expanded) {"))
         assertTrue("the button is named for TalkBack", body.contains("contentDescription = infoDescription"))

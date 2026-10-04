@@ -2884,12 +2884,16 @@ below carry their own later dates, item 12 is the current one).
       sounds bad and makes it look like the user did something wrong").
       Done 2026-10-04, no API change (ADR-0016 freeze): the word "unknown"
       is never shown; a value a component does not report is an em dash;
-      the server's generic `unknown` reads "Not checked"; vault-core reads
+      the server's generic `unknown` (vault-api looked and got a bad or
+      unclear answer, e.g. a proxy that forwards a host it must refuse)
+      reads a neutral "Check" with its (i) details open; vault-core reads
       "OK" when its recorded version AND commit equal vault-api's (same
       release), a neutral "Check" when they differ or cannot be compared,
       "Not reported" when it never recorded one; vault-dns reads "N/A";
       vault-proxy keeps OK with dashes. Every explanation moved behind a
-      per-row (i) disclosure button, collapsed by default. The About twin
+      per-row (i) disclosure button, collapsed by default except on Check
+      rows. The PCs sheet says "not reported" instead of "unknown" too
+      (presence, last seen, agent version, game count). The About twin
       pins requested by APP-FEAT-2 now exist both ways
       (`web/tests/about-android-twin.test.js`,
       `AboutCrossFrontendContractTest.kt`). Second user request, same
@@ -2897,9 +2901,12 @@ below carry their own later dates, item 12 is the current one).
       the Save/Discard bar is fixed above the bottom nav (the bulk bar's
       placement, which never shares a view with it), shown while the PATCH
       would change something (typing a value back hides it), a failed save
-      keeps it with the error. Android: the same bar as the Scaffold's
-      bottom bar (it was an inline row at the end of the form), same dirty
-      rule.
+      keeps it with the error, an edit made during a save survives it, and
+      the root scroll padding keeps a focused field above the bar (WCAG
+      2.4.11). Android: the same bar as the Scaffold's bottom bar (it was
+      an inline row at the end of the form), same dirty rule, "Saving…"
+      while in flight. Review round 1 (FAIL: server `unknown` shown as
+      "Not checked" hid real faults) fixed in a second commit.
 
     **C. Hygiene (any time, small)**
     - [ ] Stale ownership leftovers after SEC-FIX-5 (frozen api code,

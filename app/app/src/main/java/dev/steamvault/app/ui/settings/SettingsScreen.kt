@@ -175,13 +175,13 @@ private fun SettingsSaveBar(controller: SettingsController, scope: kotlinx.corou
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                if (error != null) {
-                    stringResource(R.string.settings_save_error, error)
-                } else {
-                    stringResource(R.string.settings_unsaved_changes)
+                when {
+                    controller.saving -> stringResource(R.string.settings_saving)
+                    error != null -> stringResource(R.string.settings_save_error, error)
+                    else -> stringResource(R.string.settings_unsaved_changes)
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (error != null && !controller.saving) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -813,8 +813,9 @@ private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutin
  * name + (i) button + status word, then the version line (a dash for a
  * value not reported, read as "Not reported" by TalkBack), then -- only
  * while the (i) is open -- the note, the dash reason and the server's
- * detail. Collapsed by default; the open state survives rotation
- * (rememberSaveable, keyed by component name).
+ * detail. Collapsed by default except for a CHECK row (open, so the
+ * reason is in view); the open state survives rotation (rememberSaveable,
+ * keyed by component name).
  */
 @Composable
 private fun AboutRowView(row: AboutRow) {
@@ -824,7 +825,6 @@ private fun AboutRowView(row: AboutRow) {
         AboutDisplayStatus.OK -> stringResource(R.string.settings_about_status_ok)
         AboutDisplayStatus.UNREACHABLE -> stringResource(R.string.settings_about_status_unreachable)
         AboutDisplayStatus.NOT_IN_USE -> stringResource(R.string.settings_about_status_not_in_use)
-        AboutDisplayStatus.NOT_CHECKED -> stringResource(R.string.settings_about_status_not_checked)
         AboutDisplayStatus.CHECK -> stringResource(R.string.settings_about_status_check)
         AboutDisplayStatus.NOT_REPORTED -> stringResource(R.string.settings_about_status_not_reported)
         AboutDisplayStatus.NOT_APPLICABLE -> stringResource(R.string.settings_about_status_not_applicable)
@@ -843,7 +843,9 @@ private fun AboutRowView(row: AboutRow) {
         null -> null
     }
     val dashNote = if (row.showDashNote) stringResource(R.string.settings_about_dash_note) else null
-    var expanded by rememberSaveable(row.name) { mutableStateOf(false) }
+    // WP WEB-FIX-8 review: a CHECK row opens by default so a fault is never
+    // hidden behind the (i); every other row starts collapsed.
+    var expanded by rememberSaveable(row.name) { mutableStateOf(row.infoOpenByDefault) }
     val infoDescription = if (expanded) {
         stringResource(R.string.settings_about_info_hide, row.name)
     } else {

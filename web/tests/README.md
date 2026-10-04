@@ -2986,3 +2986,46 @@ viewport bottom right of the rail on desktop) with "Unsaved changes" over
 "Discard changes | Save changes".
 
 Suite: **1149 tests, 1149 pass, 0 fail**.
+
+Review round 1 (FAIL, one blocker): a server `unknown` on vault-proxy,
+vault-runner or steamprefill (or a probe past its deadline) means vault-api
+DID look and got a bad or unclear answer (`api/vault_api/about.py`: e.g. the
+proxy forwarded a host it must refuse). "Not checked" said the opposite and
+hid the fault. It now reads a neutral "Check" (the "Not checked" state is
+gone; an unrecognised word is Check too), and a Check row's (i) details
+start OPEN, so the server's reason is on screen; OK/N/A/Not reported/Not in
+use rows start collapsed, and a user's choice still wins across Refresh.
+The status-icon word for the "?" kind is "Check", and STATUS_LABEL is now
+pinned literally. Also taken: the row header is `aria-labelledby` the name
+span (the (i) label never joins it); a root `scroll-padding-bottom` (bar +
+gaps + nav + inset) while the bar is up, so a focused field is not hidden
+behind it (WCAG 2.4.11); an edit typed while a save is in flight survives
+it (drafts that are no longer the sent objects are kept, the form is not
+rebuilt, the bar stays up) and the line keeps "Saving…" while in flight;
+the PCs sheet says "Not reported" / "last seen: not reported" / "version
+not reported" / "game count not reported" instead of "unknown", twin-pinned
+against strings.xml. Android mirrors all of it (CHECK with details open,
+"Saving…", in-flight edits kept, save error cleared on edit and Discard,
+with a controller test on the demo repositories).
+
+Tests +9: about-view (+2: Check rows open with the server detail, the
+STATUS_LABEL pin), wiring (+2: the proxy fault visible without a click,
+aria-labelledby; the default-render test now expects exactly the Check
+rows open), save bar (+3: focus to the heading after Discard, an edit
+after a failure resets the line, an in-flight edit survives), CSS (+1:
+scroll padding), twin (+1: PCs words). Mutations, all 14 killed: `unknown`
+mapped elsewhere; Check rows collapsed; every row open; the DOM ignoring
+the default; the icon word back to "Unknown"; no aria-labelledby; in-flight
+edits dropped; "Saving…" overwritten by typing; no focus after Discard; the
+error line sticking after an edit; the scroll padding dropped; the presence
+word back to "Presence unknown"; Android last-seen and "Saving…" drifting.
+The two wiring files ran 10x in a loop: 0 failures.
+
+Expected look, added: on an Android phone in Chrome the soft keyboard
+resizes only the visual viewport (no `interactive-widget` in the viewport
+meta), so while a field is being typed in, the fixed save bar sits behind
+the keyboard; it shows again as soon as the keyboard closes. The Android
+app's bar is a Scaffold bottom bar and its keyboard behaviour depends on
+the activity's soft-input mode; both are unverified on a device.
+
+Suite: **1158 tests, 1158 pass, 0 fail**.

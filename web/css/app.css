@@ -1047,6 +1047,13 @@ input.inp.txt:disabled{ opacity:.55; }
 .savebar-msg{ margin:0 4px; font-size:12.5px; line-height:1.35; color:var(--dim); min-width:0; overflow-wrap:anywhere; }
 .savebar-msg.is-error{ color:var(--danger); }
 .savebar-up{ padding-bottom:calc(var(--savebar-h) + var(--bulk-gap) * 2); }
+/* Review fix (WCAG 2.4.11 focus not obscured): the page scrolls on the
+   root, so the root's scroll padding keeps a control that receives focus
+   (Tab, or the browser scrolling it into view) above the bar and the nav
+   below it: bar height + its two gaps + the nav + the bottom inset. */
+:root:has(.savebar-up){
+  scroll-padding-bottom:calc(var(--savebar-h) + var(--bulk-gap) * 2 + var(--nav-h) + env(safe-area-inset-bottom, 0px));
+}
 
 /* ---------- onboarding overlay ---------- */
 .onb{

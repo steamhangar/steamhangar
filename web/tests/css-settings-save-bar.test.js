@@ -133,3 +133,13 @@ test("theme tokens only (no hard-coded colours), the error line uses the danger 
   assert.match(ruleBody(app.topLevel, ".savebar-msg.is-error") ?? "", /color:\s*var\(--danger\)/);
   assert.ok(theme.topLevel.includes("--savebar-h"));
 });
+
+test("MUTATION TARGET: while the bar is up the root scroll padding keeps a focused control above it (WCAG 2.4.11)", () => {
+  const body = ruleBody(app.topLevel, ":root:has(.savebar-up)");
+  assert.ok(body, ":root:has(.savebar-up) rule missing at top level");
+  assert.equal(
+    norm(decl(body, "scroll-padding-bottom")),
+    "calc(var(--savebar-h)+var(--bulk-gap)*2+var(--nav-h)+env(safe-area-inset-bottom,0px))",
+    "bar height + its gaps + the nav + the bottom inset",
+  );
+});

@@ -246,6 +246,7 @@
     <string name="settings_save_error">Could not save: %1$s</string>
     <!-- WP WEB-FIX-8: the save bar's status line (web settings.js UNSAVED_TEXT). -->
     <string name="settings_unsaved_changes">Unsaved changes</string>
+    <string name="settings_saving">Saving…</string>
     <string name="settings_toast_saved">Settings saved.</string>
     <string name="settings_toast_save_failed_fallback">Could not save settings</string>
 
@@ -579,7 +580,7 @@
         <item quantity="one">%1$d game reported</item>
         <item quantity="other">%1$d games reported</item>
     </plurals>
-    <string name="clients_games_unknown">game count unknown</string>
+    <string name="clients_games_unknown">game count not reported</string>
     <string name="clients_bytes_served">%1$s served</string>
     <string name="clients_bytes_none">nothing served yet</string>
     <string name="clients_hit_rate">%1$d%% hit</string>
@@ -684,7 +685,6 @@
     <string name="settings_about_status_ok">OK</string>
     <string name="settings_about_status_unreachable">Unreachable</string>
     <string name="settings_about_status_not_in_use">Not in use</string>
-    <string name="settings_about_status_not_checked">Not checked</string>
     <string name="settings_about_status_check">Check</string>
     <string name="settings_about_status_not_reported">Not reported</string>
     <string name="settings_about_status_not_applicable">N/A</string>
@@ -705,12 +705,13 @@
 
     <!-- WP APP-FEAT-2 (AGENT-FEAT-1): a PC's presence as the SERVER computed
          it (never recomputed here), when it last reported, and the agent
-         build. "version unknown" = an agent from before AGENT-FEAT-1. -->
+         build. "version not reported" = an agent from before AGENT-FEAT-1.
+         WP WEB-FIX-8: "not reported" instead of "unknown", like the web. -->
     <string name="clients_presence_online">Online</string>
     <string name="clients_presence_offline">Offline</string>
-    <string name="clients_presence_unknown">Presence unknown</string>
+    <string name="clients_presence_unknown">Not reported</string>
     <string name="clients_last_seen">last seen %1$s</string>
-    <string name="clients_last_seen_unknown">last seen: unknown</string>
+    <string name="clients_last_seen_unknown">last seen: not reported</string>
     <string name="clients_agent_version">agent %1$s</string>
-    <string name="clients_agent_version_unknown">version unknown</string>
+    <string name="clients_agent_version_unknown">version not reported</string>
 </resources>

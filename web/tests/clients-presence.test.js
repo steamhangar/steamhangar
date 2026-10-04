@@ -58,10 +58,10 @@ test("MUTATION TARGET: the agents summary counts by the server field, not by tim
   assert.equal(agentsSummaryText([onlineButOld, offlineButFresh]), "Agents: 1 online, 1 offline");
 });
 
-test("a server older than AGENT-FEAT-1 (no presence field) reads 'Presence unknown', never a guess", () => {
+test("a server older than AGENT-FEAT-1 (no presence field) reads 'Not reported', never a guess", () => {
   const legacy = { client_id: "c", last_reported_at: iso(1000) };
   assert.equal(presenceOf(legacy), null);
-  assert.equal(presenceWord(legacy), "Presence unknown");
+  assert.equal(presenceWord(legacy), "Not reported");
   assert.equal(presenceOf({ presence: "ONLINE" }), null, "only the two documented words count");
   assert.equal(
     agentsSummaryText([legacy, onlineButOld]),
@@ -75,19 +75,19 @@ test("agents summary: null before the first answer, a plain sentence for an empt
   assert.equal(agentsSummaryText([]), "Agents: none have reported yet");
 });
 
-test("MUTATION TARGET: agent_version null reads 'version unknown'", () => {
-  assert.equal(agentVersionText({ agent_version: null }), "version unknown");
-  assert.equal(agentVersionText({}), "version unknown");
-  assert.equal(agentVersionText({ agent_version: "  " }), "version unknown");
+test("MUTATION TARGET: agent_version null reads 'version not reported'", () => {
+  assert.equal(agentVersionText({ agent_version: null }), "version not reported");
+  assert.equal(agentVersionText({}), "version not reported");
+  assert.equal(agentVersionText({ agent_version: "  " }), "version not reported");
   assert.equal(agentVersionText({ agent_version: "0.1.0" }), "agent 0.1.0");
 });
 
 test("last seen and the presence line use last_reported_at for words only", () => {
   assert.equal(lastSeenText({ last_reported_at: iso(4 * 60_000) }, NOW), "last seen 4 min ago");
-  assert.equal(lastSeenText({ last_reported_at: null }, NOW), "last seen: unknown");
+  assert.equal(lastSeenText({ last_reported_at: null }, NOW), "last seen: not reported");
   assert.equal(
     presenceLine({ last_reported_at: iso(2 * 3_600_000), agent_version: null }, NOW),
-    "last seen 2 h ago · version unknown",
+    "last seen 2 h ago · version not reported",
   );
 });
 

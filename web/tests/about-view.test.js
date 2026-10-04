@@ -97,7 +97,6 @@ test("every display state: own word, own icon kind, the icon kind exists in the 
     ok: ["OK", "cached"],
     unreachable: ["Unreachable", "error"],
     not_in_use: ["Not in use", "notinuse"],
-    not_checked: ["Not checked", "unknown"],
     check: ["Check", "unknown"],
     not_reported: ["Not reported", "notinuse"],
     not_applicable: ["N/A", "notinuse"],
@@ -110,25 +109,68 @@ test("every display state: own word, own icon kind, the icon kind exists in the 
   }
   assert.deepEqual(
     Object.fromEntries(["ok", "unreachable", "not_in_use", "unknown"].map((s) => [s, statusPresentation(s).word])),
-    { ok: "OK", unreachable: "Unreachable", not_in_use: "Not in use", unknown: "Not checked" },
+    { ok: "OK", unreachable: "Unreachable", not_in_use: "Not in use", unknown: "Check" },
   );
 });
 
-test("MUTATION TARGET: only 'unreachable' is a fault — Check / Not checked / Not reported / N/A are neutral glyph and tone", () => {
-  for (const state of ["not_in_use", "not_checked", "check", "not_reported", "not_applicable"]) {
+test("MUTATION TARGET: only 'unreachable' is a fault — Check / Not reported / N/A / Not in use are neutral glyph and tone", () => {
+  for (const state of ["not_in_use", "check", "not_reported", "not_applicable"]) {
     const p = ABOUT_DISPLAY[state];
     assert.ok(!["warn", "error"].includes(p.icon), `${state} renders as a fault glyph (${p.icon})`);
     assert.equal(p.tone, "tx-cancelled", `${state} must use the neutral tone, not ${p.tone}`);
   }
   assert.equal(ABOUT_DISPLAY.unreachable.tone, "tx-error");
-  assert.notEqual(ABOUT_DISPLAY.not_checked.icon, ABOUT_DISPLAY.not_in_use.icon, "two meanings, two shapes");
+  assert.notEqual(ABOUT_DISPLAY.check.icon, ABOUT_DISPLAY.not_in_use.icon, "two meanings, two shapes");
 });
 
-test("an unexpected status word reads as Not checked, never as OK", () => {
-  assert.equal(statusPresentation("exploded").word, "Not checked");
-  assert.equal(statusPresentation(undefined).word, "Not checked");
-  assert.equal(statusPresentation("__proto__").word, "Not checked");
-  assert.equal(describeComponent({ name: "vault-runner", status: "exploded" }).statusWord, "Not checked");
+test("an unexpected status word reads as Check, never as OK", () => {
+  assert.equal(statusPresentation("exploded").word, "Check");
+  assert.equal(statusPresentation(undefined).word, "Check");
+  assert.equal(statusPresentation("__proto__").word, "Check");
+  assert.equal(describeComponent({ name: "vault-runner", status: "exploded" }).statusWord, "Check");
+});
+
+// Review fix: a server `unknown` means vault-api looked and got a bad or
+// unclear answer (api/vault_api/about.py) — e.g. the proxy forwarded a host
+// it must refuse. "Not checked" would hide that fault.
+test("MUTATION TARGET: a server 'unknown' on proxy/runner/steamprefill is a Check with its server reason open by default", () => {
+  for (const name of ["vault-proxy", "vault-runner", "steamprefill"]) {
+    const v = describeComponent({ name, version: null, commit: null, status: "unknown", detail: `${name}: the proxy answered HTTP 200.` }, API);
+    assert.equal(v.statusWord, "Check", name);
+    assert.equal(v.infoOpenByDefault, true, `${name}: a Check row's reason must not hide behind the (i)`);
+    assert.ok(v.info.includes(`${name}: the proxy answered HTTP 200.`), `${name}: the server detail is in the (i) text`);
+  }
+  for (const row of [
+    describeComponent(API, API),
+    describeComponent(coreWith({}), API),
+    describeComponent({ name: "vault-dns", status: "unknown" }, API),
+    describeComponent({ name: "vault-proxy", status: "ok" }, API),
+    describeComponent({ name: "vault-proxy", status: "not_in_use" }, API),
+    describeComponent(coreWith({ version: null, commit: null }), API),
+  ]) {
+    assert.equal(row.infoOpenByDefault, false, `${row.name} ${row.statusWord} starts collapsed`);
+  }
+  assert.equal(describeComponent(coreWith({ version: "0.0.1" }), API).infoOpenByDefault, true, "a core mismatch is a Check: open");
+});
+
+test("MUTATION TARGET: status-icon words are pinned (the About '?' kind reads 'Check', never 'Unknown')", () => {
+  assert.deepEqual(
+    { ...STATUS_LABEL },
+    {
+      cached: "Current",
+      running: "Downloading",
+      updating: "Updating",
+      stale: "Update ready",
+      none: "Not cached",
+      paused: "Paused",
+      verify: "Verifying",
+      error: "Failed",
+      warn: "Warning",
+      cancelled: "Cancelled",
+      unknown: "Check",
+      notinuse: "Not in use",
+    },
+  );
 });
 
 test("MUTATION TARGET: version cell: null -> em dash (marked missing), 'invalid' verbatim, a value verbatim with itself as the title", () => {
@@ -232,9 +274,9 @@ test("MUTATION TARGET: vault-proxy keeps OK with dashes; its (i) says the egress
   assert.match(proxy.note, /egress proxy does not report a version/i);
   assert.equal(proxy.dashNote, null);
   assert.deepEqual(proxy.info, [proxy.note]);
-  // Its other server statuses stay the server's (vault-proxy 'unknown' =
-  // a misconfigured HTTP_PROXY or an unexpected answer: Not checked).
-  assert.equal(describeComponent({ name: "vault-proxy", status: "unknown" }, API).statusWord, "Not checked");
+  // vault-proxy 'unknown' = a misconfigured HTTP_PROXY or an unexpected
+  // answer (egress lock possibly broken): Check.
+  assert.equal(describeComponent({ name: "vault-proxy", status: "unknown" }, API).statusWord, "Check");
 });
 
 test("steamprefill: OK with its version and a dash for the commit, explained by its own note", () => {
