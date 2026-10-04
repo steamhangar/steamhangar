@@ -70,6 +70,20 @@ for f in "$dockerfile" \
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
 done
 
+# --- 0a. every COPY from nginx/ survives core/.dockerignore ------
+# A new file that is COPY-ed but not un-ignored passes every docker-free
+# check and only fails in the image build ("not found" in the build context;
+# CORE-FIX-4a vault-upstream-cap.conf). Docker-free, so it fails fast.
+while read -r _copy src _rest; do
+    # Only nginx/ is excluded wholesale (core/.dockerignore); a COPY from it
+    # needs its own "!" line.
+    case "$src" in nginx/*) ;; *) continue ;; esac
+    if ! grep -qxF "!$src" "$core_dir/.dockerignore"; then
+        echo "FAIL: Dockerfile COPYs '$src' but core/.dockerignore has no '!$src' line (the build context would not contain it)" >&2
+        exit 1
+    fi
+done < <(grep -E '^COPY [^ ]+ ' "$dockerfile")
+
 # --- 0. drift check first (S3): pure POSIX, no Docker, ~1s -----------------
 # Fails fast and cheaply if the container template has silently diverged
 # from the reviewed, real-CDN-tested native config (core/README.md "The

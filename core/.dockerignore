@@ -21,3 +21,4 @@ nginx/
 # check can cmp the hook's empty render against it. It is not a config
 # nginx reads; nginx.conf itself stays excluded.
 !nginx/vault-upstream-pool.conf
+!nginx/vault-upstream-cap.conf
