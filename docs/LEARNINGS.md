@@ -124,6 +124,21 @@ These are not style preferences; each entry cost a review round to learn.
   `[TimeSpan]::MaxValue` repetition durations; em dashes in BOM-less UTF-8
   break the PS 5.1 parser under the system codepage — packaging scripts
   are pure ASCII (WP 2.6).
+- `*>>` on a native command is no safe log redirect either: PS 5.1 still
+  wraps stderr in NativeCommandError text and writes UTF-16LE, so a log
+  that `Add-Content -Encoding utf8` also appends to ends up mixed (blank
+  lines, NULs). Seen on a real install (rc9). `Start-Process -NoNewWindow
+  -Wait -PassThru -RedirectStandardOutput/-RedirectStandardError` to temp
+  files, then append the bytes, avoids both; take the exit code from the
+  process object (WP AGENT-FIX-2).
+
+## Production rollout (operator line, DS-Lite)
+- A keepalive pool caps IDLE upstream connections, not in-flight ones. A
+  client we cannot throttle (the Steam client) still opens a fresh
+  connection per request above the idle count, and behind CGNAT every one
+  is a port mapping: 1838x `113` on the first client MISS test even on a
+  pooled edge (2026-10-04). Test behind the real line with a real client,
+  not only with our own capped prefill (D7).
 
 ## CI / GitHub Actions
 - The stock nginx image entrypoint soft-fails: `20-envsubst-on-templates.sh`
