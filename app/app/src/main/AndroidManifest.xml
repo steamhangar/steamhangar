@@ -65,6 +65,23 @@
                     android:host="auth"
                     android:path="/openid-return" />
             </intent-filter>
+
+            <!-- WP APP-PAIR-1: pairing link from the web UI's QR code,
+                 steamhangar://pair?v=1&amp;url=...&amp;key=... (the phone's
+                 camera app opens it). A different scheme from the OpenID
+                 callback above, so the two never overlap;
+                 dev.steamvault.app.net.pairing.PairingLinkContract's
+                 SCHEME/HOST must stay in sync with this filter
+                 (PairingLinkContractTest pins both). singleTask above
+                 delivers a scan while the app runs into onNewIntent. -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="steamhangar"
+                    android:host="pair" />
+            </intent-filter>
         </activity>
     </application>
 

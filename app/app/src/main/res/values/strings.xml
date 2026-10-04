@@ -187,6 +187,37 @@
     <string name="onboarding_summary_steam_configured">configured</string>
     <string name="onboarding_summary_steam_not_linked">not linked</string>
 
+    <!-- WP APP-PAIR-1: pairing from the web UI's QR code
+         (steamhangar://pair?v=1&url=...&key=..., net/pairing/PairingLink.kt).
+         The dialog shows the address that will be stored, never the key.
+         Connection-check failures reuse the onboarding_error_* wording
+         above (OnboardingController.verifyConnection). -->
+    <string name="pairing_title">Pair with %1$s?</string>
+    <string name="pairing_url_label">Server address</string>
+    <string name="pairing_key_hint">The API key from the pairing link is stored on this device only and is not shown here.</string>
+    <string name="pairing_cleartext_warning">This address uses plain HTTP, so the API key travels unencrypted. Only pair over your own LAN or VPN.</string>
+    <string name="pairing_notice_replace">This device is currently connected to %1$s. Pairing replaces that connection.</string>
+    <string name="pairing_notice_same_vault">This device is already connected to this server. Pairing replaces its stored API key.</string>
+    <string name="pairing_checking">Checking the connection…</string>
+    <string name="pairing_confirm">Pair</string>
+    <string name="pairing_cancel">Cancel</string>
+    <string name="pairing_invalid_title">Can\'t use this pairing link</string>
+    <string name="pairing_invalid_ok">OK</string>
+    <string name="pairing_error_not_a_pairing_link">This is not a SteamHangar pairing link.</string>
+    <string name="pairing_error_malformed">The pairing link is damaged. Show a new QR code in the web UI and scan it again.</string>
+    <string name="pairing_error_duplicate_parameter">The pairing link contains the parameter \"%1$s\" more than once.</string>
+    <string name="pairing_error_version_missing">The pairing link has no format version. Show a new QR code in the web UI and scan it again.</string>
+    <string name="pairing_error_version_unsupported">This pairing link uses format version %1$s, which this app does not understand. Update the app, then scan again.</string>
+    <string name="pairing_error_url_missing">The pairing link does not contain the server address.</string>
+    <string name="pairing_error_url_not_http">The server address in the pairing link must start with http:// or https://.</string>
+    <string name="pairing_error_url_invalid">The server address in the pairing link is not a valid URL.</string>
+    <string name="pairing_error_url_userinfo">The server address in the pairing link must not contain a user name or password.</string>
+    <string name="pairing_error_url_fragment">The server address in the pairing link must not contain a # fragment.</string>
+    <string name="pairing_error_url_path">The server address in the pairing link must be only scheme, host and port (for example https://hangar.example.org), without a path or query.</string>
+    <string name="pairing_error_key_missing">The pairing link does not contain an API key.</string>
+    <string name="pairing_error_key_empty">The API key in the pairing link is empty.</string>
+    <string name="pairing_error_key_characters">The API key in the pairing link contains characters that cannot be sent to the server.</string>
+
     <!-- Settings (WP 4b.7). Vault/Schedule/Webhook mirror GET/PATCH
          /v1/settings (ADR-0009), ported from web/js/views/settings.js's
          wording — see ui/settings/logic/SettingsDiff.kt / SettingsPresentation.kt

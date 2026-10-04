@@ -123,9 +123,9 @@ class OnboardingController(
         step = previousOnboardingStep(step)
     }
 
-    private fun buildProfile(): ConnectivityProfile? = try {
-        val url = baseUrlText.trim()
-        when (profileChoice) {
+    private fun buildProfile(choice: ConnectivityProfileChoice, baseUrl: String): ConnectivityProfile? = try {
+        val url = baseUrl.trim()
+        when (choice) {
             ConnectivityProfileChoice.SYSTEM_VPN -> SystemVpnProfile(url)
             ConnectivityProfileChoice.PUBLIC_DOMAIN -> PublicDomainProfile(url)
         }
@@ -150,30 +150,59 @@ class OnboardingController(
         tested = false
         connectionOk = false
         try {
-            val profile = buildProfile()
-            if (profile == null) {
-                connectionMessage = strings.invalidUrl()
-                return
-            }
-            val key = apiKeyText.trim()
-            if (key.isEmpty()) {
-                connectionMessage = strings.enterApiKeyFirst()
-                return
-            }
-            val client = buildClient(profile) { key }
-            when (val outcome = checkVaultConnection(health = { client.health() }, settings = { client.settings() })) {
-                is ConnectionCheckResult.Success -> {
-                    tested = true
-                    connectionOk = true
-                    connectionMessage = strings.connectionOk()
-                }
-                is ConnectionCheckResult.Failure -> {
-                    connectionMessage = strings.connectionFailure(outcome.reason)
-                }
+            val failure = verifyConnection(profileChoice, baseUrlText, apiKeyText)
+            if (failure == null) {
+                tested = true
+                connectionOk = true
+                connectionMessage = strings.connectionOk()
+            } else {
+                connectionMessage = failure
             }
         } finally {
             testing = false
         }
+    }
+
+    /**
+     * The one connection check of this app, shared by [testConnection] (the
+     * manual step-1 button) and the pairing link (WP APP-PAIR-1,
+     * `MainActivity.verifyAndApplyPairing`): profile + URL validation, the
+     * trim/non-empty key rule, then [checkVaultConnection]'s two steps
+     * (health, then the authenticated settings call that actually proves
+     * the key).
+     *
+     * Touches NO controller state, so a failed pairing attempt never
+     * clobbers what the user has typed into step 1.
+     *
+     * @return `null` on success, else the user-facing failure message.
+     */
+    suspend fun verifyConnection(choice: ConnectivityProfileChoice, baseUrl: String, apiKey: String): String? {
+        val profile = buildProfile(choice, baseUrl) ?: return strings.invalidUrl()
+        val key = apiKey.trim()
+        if (key.isEmpty()) return strings.enterApiKeyFirst()
+        val client = buildClient(profile) { key }
+        return when (val outcome = checkVaultConnection(health = { client.health() }, settings = { client.settings() })) {
+            is ConnectionCheckResult.Success -> null
+            is ConnectionCheckResult.Failure -> strings.connectionFailure(outcome.reason)
+        }
+    }
+
+    /**
+     * WP APP-PAIR-1: load a connection that [verifyConnection] has just
+     * accepted (from a pairing link) into step 1 exactly as if the user had
+     * typed it and pressed "Test connection" with success, then move on to
+     * the Steam identity step. Persisting stays [finish]'s job -- the one
+     * write path for a vault connection; pairing adds no second one.
+     */
+    fun applyVerifiedConnection(choice: ConnectivityProfileChoice, baseUrl: String, apiKey: String) {
+        profileChoice = choice
+        baseUrlText = baseUrl
+        apiKeyText = apiKey
+        testing = false
+        tested = true
+        connectionOk = true
+        connectionMessage = strings.connectionOk()
+        step = nextOnboardingStep(OnboardingStep.CONNECT, tested = true)
     }
 
     // ---- Step 2 orchestration -----------------------------------------------

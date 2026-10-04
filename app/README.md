@@ -3830,3 +3830,93 @@ new strings), `clipPath`/`Path.addOval`/`SelectionContainer`/
 `KeyboardType.Number` against the pinned Compose BOM, and every new test.
 On a device: the clipped arrow's rim anti-aliasing, the hint block's
 layout on a phone, and the Library notice under a slow relay.
+
+## Pairing from the web UI (APP-PAIR-1)
+
+User request 2026-10-04: no more typing the hangar URL and API key on every
+device. The web UI (package PAIR-1, built in parallel) shows a QR code; the
+phone's normal camera app scans it and opens this app through a deep link.
+No in-app scanner, no camera permission, no API change.
+
+**Contract** (fixed, shared with PAIR-1, pinned literally in
+`PairingLinkContractTest`):
+
+```
+steamhangar://pair?v=1&url=<percent-encoded base URL>&key=<percent-encoded API key>
+```
+
+- **Intent filter.** `MainActivity` carries a third filter: `VIEW`,
+  `DEFAULT` + `BROWSABLE`, scheme `steamhangar`, host `pair`. The Steam
+  OpenID callback uses a different scheme (`steamvault://auth/openid-return`),
+  so the two can never overlap; `net/pairing/PairingLink.kt::routeIncomingLink`
+  routes an incoming `dataString` to one of them (the OpenID branch is the
+  same `RETURN_TO` prefix test as before).
+- **Parser** (`net/pairing/PairingLink.kt`, no Android types). Requires
+  `v=1` and checks it first (another version: "Update the app"); `url`
+  http/https only, `//` authority, no backslash/whitespace/control
+  character, no userinfo, no fragment, no path or query (the API client
+  replaces the path, so a path would be dropped silently); `key` present,
+  trimmed, non-empty, printable ASCII (it travels as the `X-Api-Key`
+  header). `v`/`url`/`key` twice is refused, unknown parameters are
+  ignored. Each refusal has its own message (`pairing_error_*`).
+  Decoding is form decoding: strict `%XX` with ASCII hex digits only,
+  strict UTF-8, and `+` as a space, so links from both `encodeURIComponent`
+  and `URLSearchParams` decode the same; a literal `+` in a key must be
+  sent as `%2B` (both encoders do that). The URL is normalized to
+  `scheme://host[:port]` (default port dropped, IDN in punycode), and that
+  normalized form is what the dialog shows and what gets stored.
+  `PairingRequest.toString()` redacts the key; nothing in the pairing code
+  logs.
+- **Dialog** (`ui/pairing/PairingDialog.kt`, composed by `MainActivity` above
+  onboarding and the main shell). "Pair with <host>?", the address, a note
+  that the key is stored but not shown, a cleartext warning for `http://`,
+  and, if a working connection is stored, "currently connected to <host>,
+  pairing replaces that connection" (or, for the same server, "replaces its
+  stored API key"). Pair / Cancel; while checking, both are disabled and a
+  spinner shows; a failure is shown in place in the dialog with the
+  onboarding wording.
+- **One check, one write path.** Pair runs
+  `OnboardingController.verifyConnection` (extracted from `testConnection`,
+  which now calls it): health, then the authenticated `GET /v1/settings`.
+  Nothing is written before the check passes, so a failed pairing never
+  replaces a working connection. Then (`pairingContinuation`):
+  onboarding on screen → the connection is loaded into step 1
+  (`applyVerifiedConnection`) and onboarding moves to the Steam identity
+  step; its Done step persists it through `finish()` as always. Demo mode
+  (no real connection) → onboarding opens first, then the same. Onboarding
+  already finished → `applyVerifiedConnection` + `finish()` +
+  `refreshVaultApiClient()` and home (Library). Pairing adds no second
+  storage path. Profile: `https://` gets `PUBLIC_DOMAIN` (TLS-only),
+  `http://` gets `SYSTEM_VPN`.
+- **Consumed once.** The link is stripped from the Intent
+  (`intent.data = null`) before it is handled, like the OpenID callback, so
+  rotation does not re-open the dialog. The original launch Intent that
+  Android re-delivers after process death (`savedInstanceState != null`) or
+  from Recents (`FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY`) is not offered again
+  (`shouldOfferPairing`). The dialog state lives in a process-scoped
+  `PairingController` (MainActivity's companion, like
+  `PROCESS_PENDING_LOGIN_STATE`), so an open dialog survives rotation
+  without the key ever entering a Bundle; process death drops it (scan
+  again). A check cancelled with its Activity leaves the dialog usable.
+  Works on cold start (`onCreate`) and while running (`onNewIntent`,
+  `singleTask`).
+
+**Tests (JVM).** `PairingLinkTest` (accept/reject matrix: special
+characters in key and URL, missing `v`, `v=2`, `javascript:`/`file:`/`data:`
+URLs, OkHttp-lenient shapes, userinfo, fragment, path, empty key, duplicate
+and extra parameters, Unicode-digit escapes, routing pair vs OpenID),
+`PairingLinkContractTest` (literal link, wire names, manifest filter),
+`PairingDecisionsTest` (replace notice, profile choice, continuation,
+re-delivery guard), `PairingControllerTest` (dialog states, busy guard,
+cancellation, key never in `toString`), `OnboardingControllerTest` (the
+shared check against MockWebServer, apply + `finish()`), and source pins in
+`MainActivityIntentWiringTest` / `PairingWiringTest`.
+
+**Not verified** (no Gradle, no device here; CI compiles, lints and runs the
+JVM tests): that a real camera app (Google Camera, Google Lens, Samsung
+Camera) offers to open a `steamhangar://` QR code at all; some only show the
+text for custom schemes, and then the user has to copy it into a browser or
+use manual onboarding. The dialog's look on a phone, the cold-start path,
+`onNewIntent` while the app is in the background, rotation with the dialog
+open, the Recents re-delivery guard, and the web twin (PAIR-1 is not on
+main yet, so there is no cross-pin to its link builder).

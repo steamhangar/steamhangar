@@ -39,9 +39,11 @@ import dev.steamvault.app.demo.DemoState
 import dev.steamvault.app.demo.DemoSteamRelayRepository
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.net.pairing.IncomingLinkRoute
+import dev.steamvault.app.net.pairing.PairingRequest
+import dev.steamvault.app.net.pairing.routeIncomingLink
 import dev.steamvault.app.net.profile.buildConnectivityProfile
 import dev.steamvault.app.net.steam.PendingLoginState
-import dev.steamvault.app.net.steam.SteamOpenIdConfig
 import dev.steamvault.app.notifications.NotificationRouting
 import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.repo.SteamIdentityRepositoryImpl
@@ -70,6 +72,12 @@ import dev.steamvault.app.ui.onboarding.OnboardingController
 import dev.steamvault.app.ui.onboarding.OnboardingMode
 import dev.steamvault.app.ui.onboarding.OnboardingScreen
 import dev.steamvault.app.ui.onboarding.logic.shouldShowOnboarding
+import dev.steamvault.app.ui.pairing.PairingController
+import dev.steamvault.app.ui.pairing.PairingDialog
+import dev.steamvault.app.ui.pairing.logic.PairingContinuation
+import dev.steamvault.app.ui.pairing.logic.pairingContinuation
+import dev.steamvault.app.ui.pairing.logic.pairingProfileChoice
+import dev.steamvault.app.ui.pairing.logic.shouldOfferPairing
 import dev.steamvault.app.ui.settings.AndroidSettingsStrings
 import dev.steamvault.app.ui.settings.SettingsController
 import dev.steamvault.app.ui.settings.SettingsScreen
@@ -263,7 +271,7 @@ class MainActivity : ComponentActivity() {
         if (shouldShowOnboarding(hasVaultConnection = vaultApiClientState != null, demoMode = demoState != null)) {
             openOnboarding(OnboardingMode.FIRST_RUN)
         }
-        handleIntent(intent)
+        handleIntent(intent, restoredInstance = savedInstanceState != null)
 
         setContent {
             SteamVaultTheme {
@@ -318,8 +326,70 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+
+                // WP APP-PAIR-1: above onboarding AND the main shell, so a
+                // pairing link gets the same dialog whatever is on screen.
+                PairingDialog(
+                    controller = PROCESS_PAIRING,
+                    onConfirm = {
+                        lifecycleScope.launch { PROCESS_PAIRING.confirm { request -> verifyAndApplyPairing(request) } }
+                    },
+                )
             }
         }
+    }
+
+    /**
+     * WP APP-PAIR-1: a pairing link was routed here by [handleIntent]. The
+     * replace notice compares against what [credentialStore] holds right
+     * now -- the stored connection, not onboarding's unsaved fields.
+     */
+    private fun offerPairing(rawLink: String) {
+        PROCESS_PAIRING.offer(
+            rawLink = rawLink,
+            existingBaseUrl = credentialStore.getBaseUrl(),
+            hasExistingKey = !credentialStore.getApiKey().isNullOrBlank(),
+        )
+    }
+
+    /**
+     * WP APP-PAIR-1: the user confirmed "Pair with <host>?". Verifies with
+     * the SAME check manual onboarding runs
+     * ([OnboardingController.verifyConnection]: health, then the
+     * authenticated settings call) BEFORE anything is written, so a
+     * failed pairing never replaces a working connection. Then continues
+     * per [pairingContinuation]:
+     *  - onboarding on screen (or opened for it, from demo mode): the
+     *    verified connection is loaded into step 1 and onboarding moves to
+     *    the Steam identity step; its Done step persists it, as always;
+     *  - onboarding finished (a real connection exists): stored at once
+     *    through [OnboardingController.finish] -- the one write path for a
+     *    vault connection -- then [refreshVaultApiClient] and home.
+     *
+     * @return `null` on success, else the message the dialog shows in place.
+     */
+    private suspend fun verifyAndApplyPairing(request: PairingRequest): String? {
+        val choice = pairingProfileChoice(request)
+        val failure = onboardingController.verifyConnection(choice, request.baseUrl, request.apiKey)
+        if (failure != null) return failure
+
+        val hasRealConnection = vaultApiClientState != null && demoState == null
+        when (pairingContinuation(showOnboarding, hasRealConnection)) {
+            PairingContinuation.CONTINUE_ONBOARDING -> {
+                onboardingController.applyVerifiedConnection(choice, request.baseUrl, request.apiKey)
+            }
+            PairingContinuation.OPEN_ONBOARDING -> {
+                openOnboarding(OnboardingMode.FIRST_RUN)
+                onboardingController.applyVerifiedConnection(choice, request.baseUrl, request.apiKey)
+            }
+            PairingContinuation.STORE_AND_GO_HOME -> {
+                onboardingController.applyVerifiedConnection(choice, request.baseUrl, request.apiKey)
+                onboardingController.finish()
+                refreshVaultApiClient()
+                destination = Destination.LIBRARY
+            }
+        }
+        return null
     }
 
     /** Recomputes [vaultApiClientState]/[settingsControllerState] from
@@ -516,7 +586,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIntent(intent)
+        handleIntent(intent, restoredInstance = false)
     }
 
     /** Dispatches an incoming [Intent] to whichever of this Activity's two
@@ -542,13 +612,29 @@ class MainActivity : ComponentActivity() {
      * survive: Android hands back the ORIGINAL launch Intent, which is
      * harmless -- the process-scoped pending state is empty then, and a
      * callback (singleTask) arrives via `onNewIntent`, not the launch
-     * Intent. */
-    private fun handleIntent(intent: Intent?) {
+     * Intent.
+     *
+     * WP APP-PAIR-1 adds the third entry point, a pairing link
+     * (`steamhangar://pair?...`). [routeIncomingLink] decides between the
+     * two link kinds (different schemes, so never both), and the strip
+     * above applies to a pairing link too -- it carries the API key, and a
+     * rotation must not re-open the dialog. For the original launch Intent
+     * re-delivered after process death or from Recents, which the strip
+     * cannot reach, [shouldOfferPairing] refuses to offer it again
+     * ([restoredInstance] is `savedInstanceState != null` from [onCreate]). */
+    private fun handleIntent(intent: Intent?, restoredInstance: Boolean) {
         handleNotificationTap(intent)
 
         val data = intent?.dataString ?: return
-        if (!data.startsWith(SteamOpenIdConfig.RETURN_TO)) return
+        val route = routeIncomingLink(data)
+        if (route == IncomingLinkRoute.NONE) return
         intent.data = null
+
+        if (route == IncomingLinkRoute.PAIRING) {
+            val launchedFromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+            if (shouldOfferPairing(restoredInstance, launchedFromHistory)) offerPairing(data)
+            return
+        }
 
         lifecycleScope.launch {
             val settings = settingsControllerState
@@ -677,6 +763,12 @@ class MainActivity : ComponentActivity() {
          * (`VaultApplication` only runs idempotent `ensure*` calls).
          */
         private val PROCESS_PENDING_LOGIN_STATE = PendingLoginState()
+
+        /** WP APP-PAIR-1: the pairing dialog's state, process-scoped for the
+         * same reason as [PROCESS_PENDING_LOGIN_STATE] -- an open dialog
+         * survives rotation without the key ever entering a Bundle. See
+         * [PairingController]'s kdoc. */
+        private val PROCESS_PAIRING = PairingController()
     }
 }
 
