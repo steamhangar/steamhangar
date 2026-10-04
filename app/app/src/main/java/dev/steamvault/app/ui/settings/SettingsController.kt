@@ -28,6 +28,7 @@ import dev.steamvault.app.storage.CredentialStore
 import dev.steamvault.app.ui.settings.logic.SettingDraft
 import dev.steamvault.app.ui.settings.logic.SteamLibraryStatus
 import dev.steamvault.app.ui.settings.logic.buildSettingsPatchDraft
+import dev.steamvault.app.ui.settings.logic.settingsDirty
 import dev.steamvault.app.ui.settings.logic.steamLibraryStatusFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -156,7 +157,10 @@ class SettingsController(
     var aboutLoading by mutableStateOf(false)
         private set
 
-    val isDirty: Boolean get() = drafts.isNotEmpty()
+    /** WP WEB-FIX-8: dirty means the PATCH would change something (a field
+     * typed back to its saved value is clean again), so the save bar shows
+     * and hides like the web's. */
+    val isDirty: Boolean get() = settingsDirty(settingsResponse?.settings, drafts)
     val isReadonly: Boolean get() = settingsResponse?.readonly ?: false
 
     suspend fun load() {
@@ -182,16 +186,21 @@ class SettingsController(
         }
     }
 
+    // WP WEB-FIX-8: any edit (or Discard) clears a previous save error, so
+    // the save bar's status line goes back to "Unsaved changes" like the web.
     fun setDraft(key: String, draft: SettingDraft) {
         drafts = drafts + (key to draft)
+        saveError = null
     }
 
     fun resetDraft(key: String) {
         drafts = drafts + (key to SettingDraft.Reset)
+        saveError = null
     }
 
     fun discard() {
         drafts = emptyMap()
+        saveError = null
     }
 
     suspend fun save() {

@@ -107,3 +107,12 @@ fun buildSettingsPatchDraft(
 
     return body
 }
+
+/**
+ * Whether the drafts would change anything server-side (WP WEB-FIX-8, twin
+ * of web settings.js `isDirty`): the same builder the PATCH uses, so a field
+ * edited and typed back to its saved value is NOT dirty and the save bar
+ * goes away again. `null` entries (nothing loaded yet) are never dirty.
+ */
+fun settingsDirty(entries: List<SettingInfoOut>?, drafts: Map<String, SettingDraft>): Boolean =
+    entries != null && buildSettingsPatchDraft(entries, drafts).isNotEmpty()

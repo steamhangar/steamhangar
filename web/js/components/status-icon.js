@@ -47,8 +47,11 @@ export const STATUS_LABEL = {
   // words): a component vault-api does not or cannot check ("unknown") and
   // one this setup does not run ("not_in_use"). Neither is a fault, so
   // neither reuses the warning/error glyphs — same reasoning as
-  // "cancelled" above. Neutral tone, own shapes ("?" and a dash).
-  unknown: "Unknown",
+  // "cancelled" above. Neutral tone, own shapes ("?" and a dash). The kind
+  // keeps its wire-derived name; its word is "Not checked" since WP
+  // WEB-FIX-8 (user feedback: "Unknown" reads as if the user did something
+  // wrong).
+  unknown: "Not checked",
   notinuse: "Not in use",
 };
 

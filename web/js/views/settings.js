@@ -46,7 +46,9 @@
  *    and on the Refresh button, never polled; the server caches its answer
  *    for 60 s and the table says so. A 404 (a server from before VER-2: with
  *    a valid key an unknown route is 404) shows a "server too old" note;
- *    a 401 (key refused) and anything else show an error line.
+ *    a 401 (key refused) and anything else show an error line. WP
+ *    WEB-FIX-8: each row's explanations sit behind an (i) disclosure
+ *    button, collapsed by default; a value not reported is a dash.
  *
  * The settings form itself is not polled (settings rarely change from
  * outside this screen, so fetch-on-mount plus fetch-after-save is enough).
@@ -89,7 +91,8 @@ import {
   aboutComponents,
   checkedText,
   classifyAboutError,
-  describeComponent,
+  describeComponents,
+  DASH_LABEL,
 } from "../lib/about-view.js";
 
 const WEBHOOK_EVENT_OPTIONS = [
@@ -169,18 +172,62 @@ function entryByKey(key) {
 // Dirty-state bar (shared Save/Discard for the whole /v1/settings form)
 // ---------------------------------------------------------------------
 
+/** Shown in the save bar while it is up (WP WEB-FIX-8). */
+export const UNSAVED_TEXT = "Unsaved changes";
+
+/** True when the drafts would change something server-side: the same
+ * builder the PATCH uses, so a field edited and typed back to its saved
+ * value is NOT dirty (WP WEB-FIX-8: "revert -> hidden"). */
+function isDirty() {
+  if (!state.settingsResponse || state.settingsResponse.readonly) return false;
+  return Object.keys(buildSettingsPatch(state.settingsResponse.settings, drafts)).length > 0;
+}
+
+/**
+ * Show the save bar exactly while something is dirty (WP WEB-FIX-8: the
+ * bar is `position:fixed` above the bottom nav, app.css "Settings save
+ * bar", so it is on screen without scrolling wherever the user is on this
+ * long page). `.savebar-up` on the section reserves scroll room under the
+ * page's last content so the bar never covers it. Any edit clears a
+ * previous save error from the bar.
+ */
 function markDirty() {
-  if (!mounted()) return;
-  const dirty = Object.keys(drafts).length > 0;
+  if (!mounted() || !els.saveBar) return;
+  const dirty = isDirty();
   els.saveBar.hidden = !dirty;
+  els.section.classList.toggle("savebar-up", dirty);
+  // Only on a change: the line is a live region, and rewriting the same
+  // text on every keystroke would re-announce it.
+  if (els.saveMsg.textContent !== UNSAVED_TEXT) {
+    els.saveMsg.textContent = UNSAVED_TEXT;
+    els.saveMsg.className = "savebar-msg";
+  }
+}
+
+/** After a save or discard rebuilt the form, a keyboard user whose focus
+ * was on the (now removed) bar lands on the page heading, not on <body>. */
+function restoreFocusAfterBar(hadFocus) {
+  if (hadFocus && mounted()) els.heading.focus();
+}
+
+function barHasFocus() {
+  return !!(els && els.saveBar && els.saveBar.contains(document.activeElement));
 }
 
 function discardDrafts() {
+  const hadFocus = barHasFocus();
   drafts = {};
   fullRender();
+  restoreFocusAfterBar(hadFocus);
 }
 
+/** True while a PATCH is in flight: Save is `aria-disabled` plus this
+ * guard, not `disabled`, so keyboard focus stays on the button
+ * (docs/LEARNINGS.md, WP WEB-FEAT-1). */
+let saving = false;
+
 async function saveDrafts() {
+  if (saving) return;
   const entries = state.settingsResponse.settings;
   const body = buildSettingsPatch(entries, drafts);
   if (Object.keys(body).length === 0) {
@@ -188,11 +235,15 @@ async function saveDrafts() {
     markDirty();
     return;
   }
-  els.saveBtn.disabled = true;
+  saving = true;
+  els.saveBtn.setAttribute("aria-disabled", "true");
+  els.saveMsg.textContent = "Saving…";
   try {
     const updated = await api.patchSettings(body);
     state.settingsResponse = updated;
     drafts = {};
+    const hadFocus = barHasFocus();
+    // The toast (role=status) announces the success; the bar is gone.
     showToast("Settings saved.");
     // WP 4d-web: a saved PATCH can change sweep_include_cached/auto_gc,
     // which changes sweep_cached_gc_risk server-side — re-fetch so the
@@ -207,10 +258,18 @@ async function saveDrafts() {
       // successful save.
     }
     fullRender();
+    restoreFocusAfterBar(hadFocus);
   } catch (err) {
-    showToast(errorText(err), { warn: true });
+    // The bar stays up with the drafts; its own role=status line says what
+    // failed (no warn toast on top: at BP-L the toast would sit over the
+    // bar, and the line already announces it).
+    if (mounted() && els.saveBar) {
+      els.saveMsg.textContent = `Could not save: ${errorText(err)}`;
+      els.saveMsg.className = "savebar-msg is-error";
+    }
   } finally {
-    if (mounted()) els.saveBtn.disabled = false;
+    saving = false;
+    if (mounted() && els.saveBtn) els.saveBtn.removeAttribute("aria-disabled");
   }
 }
 
@@ -888,6 +947,10 @@ function buildPcsSection() {
  * kept across a failed Refresh (the last good table stays visible under
  * the error line); a "too old" answer clears it. */
 const about = { phase: "idle", components: null, error: null, gen: 0 };
+/** Component names whose (i) details are open (WP WEB-FIX-8). Module
+ * state, so a Refresh (which rebuilds the table) keeps them open; default
+ * collapsed. */
+const aboutInfoOpen = new Set();
 /** The About section's live nodes for the CURRENT mount, or null. */
 let aboutEls = null;
 /** Set by the rail's version button (requestAboutFocus) before it
@@ -970,7 +1033,78 @@ function buildStatusBadge(view) {
 function cellWithTitle(tag, className, cell) {
   const node = el(tag, className, cell.text);
   if (cell.title && cell.title !== cell.text) node.setAttribute("title", cell.title);
+  // WP WEB-FIX-8: a value the component does not report is a dash; name it
+  // for screen readers (the visible dash itself is hidden from them).
+  if (cell.missing) {
+    node.setAttribute("aria-hidden", "true");
+    const wrap = el("span");
+    wrap.append(node, el("span", "sr-only", DASH_LABEL));
+    return wrap;
+  }
   return node;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** The (i) glyph: a 24-unit outline circle with an "i", stroked in
+ * currentColor like the status-icon glyphs (components/status-icon.js:
+ * viewBox 0 0 24 24, round caps), decorative (the button carries the
+ * name). */
+function infoGlyph() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs = {
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true",
+    focusable: "false",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+  };
+  for (const k in attrs) svg.setAttribute(k, attrs[k]);
+  const parts = [
+    ["circle", { cx: "12", cy: "12", r: "9" }],
+    ["path", { d: "M12 11v6" }],
+    ["path", { d: "M12 7.5v.01" }],
+  ];
+  for (const [tag, a] of parts) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k in a) node.setAttribute(k, a[k]);
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
+/** A DOM id from a component name (letters, digits and dashes only). */
+function aboutInfoId(name) {
+  return "about-info-" + name.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+}
+
+/**
+ * The per-row (i) disclosure button (WP WEB-FIX-8): a native <button>, so
+ * Enter/Space and the global :focus-visible ring come for free;
+ * aria-expanded + aria-controls point at the row's details. Toggling flips
+ * `hidden` on the details row and records the choice in `aboutInfoOpen`.
+ */
+function buildInfoButton(name, detailRow) {
+  const btn = el("button", "about-info-btn");
+  btn.type = "button";
+  btn.dataset.role = "about-info";
+  btn.setAttribute("aria-label", `Details for ${name}`);
+  btn.setAttribute("aria-controls", detailRow.id);
+  btn.appendChild(infoGlyph());
+  const apply = (open) => {
+    btn.setAttribute("aria-expanded", String(open));
+    detailRow.hidden = !open;
+  };
+  apply(aboutInfoOpen.has(name));
+  btn.addEventListener("click", () => {
+    const open = !aboutInfoOpen.has(name);
+    if (open) aboutInfoOpen.add(name);
+    else aboutInfoOpen.delete(name);
+    apply(open);
+  });
+  return btn;
 }
 
 /**
@@ -995,14 +1129,14 @@ function buildAboutTable(components) {
   thead.appendChild(headRow);
   const tbody = el("tbody");
   tbody.setAttribute("role", "rowgroup");
-  for (const component of components) {
-    const view = describeComponent(component);
+  for (const view of describeComponents(components)) {
     const tr = el("tr", "about-row");
     tr.setAttribute("role", "row");
     tr.dataset.component = view.name;
-    const nameCell = el("th", "about-name", view.name);
+    const nameCell = el("th", "about-name");
     nameCell.setAttribute("scope", "row");
     nameCell.setAttribute("role", "rowheader");
+    nameCell.appendChild(el("span", "about-name-text", view.name));
     const versionCell = el("td", "about-version");
     versionCell.setAttribute("role", "cell");
     versionCell.dataset.label = "Version";
@@ -1018,14 +1152,18 @@ function buildAboutTable(components) {
     tr.append(nameCell, versionCell, commitCell, statusCell);
     tbody.appendChild(tr);
 
-    if (view.note || view.detail) {
+    // WP WEB-FIX-8: every explanation sits behind the row's (i) button,
+    // collapsed by default — note, dash reason, then the server's detail.
+    if (view.info.length > 0) {
       const detailRow = el("tr", "about-detail");
       detailRow.setAttribute("role", "row");
       detailRow.dataset.detailFor = view.name;
+      detailRow.id = aboutInfoId(view.name);
       const td = el("td");
       td.setAttribute("role", "cell");
       td.colSpan = 4;
       if (view.note) td.appendChild(el("p", "foot-note", view.note));
+      if (view.dashNote) td.appendChild(el("p", "foot-note", view.dashNote));
       // Server text, rendered with textContent (el() never parses markup).
       if (view.detail) {
         const d = el("p", "foot-note", view.detail);
@@ -1033,6 +1171,7 @@ function buildAboutTable(components) {
         td.appendChild(d);
       }
       detailRow.appendChild(td);
+      nameCell.appendChild(buildInfoButton(view.name, detailRow));
       tbody.appendChild(detailRow);
     }
   }
@@ -1129,6 +1268,9 @@ store.subscribe("clients", (payload) => {
 function fullRender() {
   if (!mounted()) return;
   els.body.replaceChildren();
+  // The save bar is rebuilt below (or not at all: loading, error, read-only).
+  els.saveBar = null;
+  els.section.classList.remove("savebar-up");
 
   if (state.loading) {
     els.body.appendChild(el("p", "empty", "Loading settings…"));
@@ -1156,20 +1298,33 @@ function fullRender() {
 
   els.body.append(buildVaultSection(), buildScheduleSection(), buildWebhookSection());
 
-  els.saveBar = el("div", "onbnav");
-  els.saveBar.hidden = Object.keys(drafts).length === 0;
-  const discardBtn = el("button", "btn ghost wide", "Discard changes");
-  discardBtn.type = "button";
-  discardBtn.addEventListener("click", discardDrafts);
-  els.saveBtn = el("button", "btn primary wide", "Save changes");
-  els.saveBtn.type = "button";
-  els.saveBtn.addEventListener("click", saveDrafts);
-  if (state.settingsResponse.readonly) {
-    els.saveBar.hidden = true;
-  } else {
-    els.saveBar.append(discardBtn, els.saveBtn);
+  // WP WEB-FIX-8: the save bar keeps its place in the DOM (and so in the
+  // Tab order) right after the form it saves, but is `position:fixed`
+  // above the bottom nav (app.css "Settings save bar"), so it is visible
+  // without scrolling while anything is dirty. Never built read-only.
+  if (!state.settingsResponse.readonly) {
+    els.saveBar = el("div", "savebar");
+    els.saveBar.hidden = true; // markDirty() below decides
+    els.saveBar.dataset.role = "save-bar";
+    els.saveBar.setAttribute("role", "region");
+    els.saveBar.setAttribute("aria-label", "Unsaved settings");
+    els.saveMsg = el("p", "savebar-msg", UNSAVED_TEXT);
+    els.saveMsg.dataset.role = "save-status";
+    els.saveMsg.setAttribute("role", "status");
+    const btns = el("div", "onbnav");
+    const discardBtn = el("button", "btn ghost wide", "Discard changes");
+    discardBtn.type = "button";
+    discardBtn.dataset.role = "settings-discard";
+    discardBtn.addEventListener("click", discardDrafts);
+    els.saveBtn = el("button", "btn primary wide", "Save changes");
+    els.saveBtn.type = "button";
+    els.saveBtn.dataset.role = "settings-save";
+    els.saveBtn.addEventListener("click", saveDrafts);
+    btns.append(discardBtn, els.saveBtn);
+    els.saveBar.append(els.saveMsg, btns);
+    els.body.appendChild(els.saveBar);
   }
-  els.body.appendChild(els.saveBar);
+  markDirty();
 
   els.body.append(buildSteamSection());
   renderSteamStatusLine();
@@ -1246,11 +1401,14 @@ onViewChange((view) => {
 export function renderSettings() {
   const section = el("section", "view view-settings");
   const h1 = el("h1", null, "Settings");
+  // Focus target after Save/Discard removed the focused bar (WP WEB-FIX-8);
+  // never in the Tab order.
+  h1.tabIndex = -1;
   const body = document.createElement("div");
   section.append(h1, body);
 
   sectionEl = section;
-  els = { section, body, agentsLines: [] };
+  els = { section, heading: h1, body, agentsLines: [] };
   aboutEls = null;
   drafts = {};
   loadSettings();

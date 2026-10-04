@@ -130,3 +130,29 @@ test("rail version button: still clipped with an ellipsis, full width, and no au
 test("the two new status-icon kinds have their neutral background", () => {
   assert.match(ruleBody(theme.topLevel, ".sic.k-unknown, .sic.k-notinuse") ?? "", /background:\s*var\(--dim-2\)/);
 });
+
+// WP WEB-FIX-8: the per-row (i) disclosure.
+test("MUTATION TARGET: a collapsed About details row is really hidden on a phone AND in the BP-M table (author display beats [hidden])", () => {
+  assert.match(ruleBody(app.topLevel, ".about-table .about-detail[hidden]") ?? "", /display:\s*none/);
+  // The guard must out-rank the display rules it fights, at every width:
+  // [classes+attributes, type selectors].
+  const spec = (sel) => [(sel.match(/\.[\w-]+|\[[^\]]+\]/g) || []).length, (sel.match(/(^|\s)[a-z]+/g) || []).length];
+  const guard = spec(".about-table .about-detail[hidden]");
+  for (const sel of [".about-table tr", ".about-table .about-row"]) {
+    const other = spec(sel);
+    assert.ok(guard[0] > other[0] || (guard[0] === other[0] && guard[1] >= other[1]), `${sel} out-ranks the [hidden] guard`);
+  }
+  assert.equal(ruleBody(bpM.body, ".about-table .about-detail[hidden]"), null, "no BP-M rule re-styles a hidden details row");
+});
+
+test("the (i) button: a fixed 28px touch target inline after the name, no author display on the name cell, a hover only for fine pointers", () => {
+  const btn = ruleBody(app.topLevel, ".about-info-btn") ?? "";
+  assert.match(btn, /width:\s*28px/);
+  assert.match(btn, /height:\s*28px/);
+  assert.match(btn, /display:\s*inline-flex/);
+  assert.doesNotMatch(ruleBody(app.topLevel, ".about-table .about-name") ?? "", /(^|;)\s*display\s*:/, "the name cell keeps block/table-cell");
+  assert.match(ruleBody(app.topLevel, ".about-table .about-name-text") ?? "", /overflow-wrap:\s*anywhere/, "a long name still wraps on a phone");
+  assert.equal(ruleBody(app.topLevel, ".about-info-btn:hover"), null, "hover must sit in the (hover:hover) and (pointer:fine) block");
+  const fine = app.mediaBlocks.filter((b) => /hover:\s*hover/.test(b.header) && /pointer:\s*fine/.test(b.header));
+  assert.ok(fine.some((b) => ruleBody(b.body, ".about-info-btn:hover") !== null));
+});

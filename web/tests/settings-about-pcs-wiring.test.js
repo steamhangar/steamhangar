@@ -4,8 +4,10 @@
  *
  *   - Settings → About renders `GET /v1/about` as a table, one row per
  *     component, with the status word for EVERY server status, the short
- *     commit, "unknown" for a null version, the plain-word notes for
- *     vault-core/vault-dns and the server's detail as text;
+ *     commit, an em dash for a null version (WP WEB-FIX-8: never the word
+ *     "unknown"), vault-core OK/Check/Not reported against vault-api,
+ *     vault-dns N/A, and every explanation behind a per-row (i)
+ *     disclosure button, collapsed by default;
  *   - 404 shows the "server too old" note, not an error; a 401 (key refused,
  *     on any server version) and a 500 are an error line (review fix);
  *     error line;
@@ -154,9 +156,18 @@ const aboutRowText = (s, name) => {
   // shared vocabulary; the visible word is the badge's last child.
   return row.children.map((c) => {
     const badge = c.querySelector('[data-role="about-status"]');
-    return badge ? badge.children[badge.children.length - 1].textContent : c.textContent;
+    return badge ? badge.children[badge.children.length - 1].textContent : visibleText(c);
   });
 };
+/** Text a sighted user sees: skips `hidden` subtrees and screen-reader-only
+ * spans (fake-dom keeps `hidden` as a plain property). WP WEB-FIX-8: a dash
+ * cell also carries an sr-only "Not reported". */
+function visibleText(node) {
+  if (node.hidden) return "";
+  if (node.classList && node.classList.contains("sr-only")) return "";
+  if (node.tagName === "#TEXT") return node.textContent;
+  return node.childNodes.map(visibleText).join("");
+}
 const detailText = (s, name) => textOf(s, `tr[data-detail-for="${name}"]`);
 const pcsSheet = () => dom.document.body.querySelectorAll("div").find((d) => d.getAttribute("aria-label") === "PCs (agents)") || null;
 const sheetIsOpen = () => {
@@ -182,17 +193,34 @@ beforeEach(() => {
   resetModalStack(dom.document);
 });
 
-test("About: one row per component, every server status as its word, short commit, 'unknown' for null", async () => {
+test("About: one row per component, WEB-FIX-8 words (core OK against vault-api, dns N/A), short commit, a dash for a value not reported", async () => {
   const s = await mountSettings();
   await until(() => aboutRow(s, "vault-dns") !== null, "about table");
   assert.deepEqual(aboutRowText(s, "vault-api"), ["vault-api", "0.1.0", "3f9c2a7", "OK"]);
-  assert.deepEqual(aboutRowText(s, "vault-core"), ["vault-core", "0.1.0", "3f9c2a7", "Unknown"]);
+  assert.deepEqual(aboutRowText(s, "vault-core"), ["vault-core", "0.1.0", "3f9c2a7", "OK"], "same version and commit as vault-api");
   assert.deepEqual(aboutRowText(s, "vault-runner"), ["vault-runner", "0.1.0", "3f9c2a7", "Unreachable"]);
-  assert.deepEqual(aboutRowText(s, "steamprefill"), ["steamprefill", "0.1.0", "unknown", "Unknown"]);
-  assert.deepEqual(aboutRowText(s, "vault-proxy"), ["vault-proxy", "unknown", "unknown", "Not in use"]);
-  assert.deepEqual(aboutRowText(s, "vault-dns"), ["vault-dns", "unknown", "unknown", "Unknown"]);
+  assert.deepEqual(aboutRowText(s, "steamprefill"), ["steamprefill", "0.1.0", "—", "Not checked"]);
+  assert.deepEqual(aboutRowText(s, "vault-proxy"), ["vault-proxy", "—", "—", "Not in use"]);
+  assert.deepEqual(aboutRowText(s, "vault-dns"), ["vault-dns", "—", "—", "N/A"]);
   assert.equal(s.querySelectorAll("tr.about-row").length, 6);
   assert.equal(aboutRow(s, "vault-api").querySelector("span.mono").getAttribute("title") === null, true, "version equal to text needs no title");
+});
+
+test("MUTATION TARGET: vault-core differing from vault-api reads a neutral 'Check'; one never recorded reads 'Not reported'", async () => {
+  server.about = {
+    components: ABOUT_ALL_STATUSES.components.map((c) => (c.name === "vault-core" ? { ...c, version: "0.0.9" } : c)),
+  };
+  let s = await mountSettings();
+  await until(() => aboutRow(s, "vault-dns") !== null, "about table");
+  assert.deepEqual(aboutRowText(s, "vault-core"), ["vault-core", "0.0.9", "3f9c2a7", "Check"]);
+  assert.equal(aboutRow(s, "vault-core").querySelector('[data-role="about-status"]').className, "badge tx-cancelled", "neutral, not red");
+  assert.match(detailText(s, "vault-core"), /differs from vault-api's/);
+  server.about = {
+    components: ABOUT_ALL_STATUSES.components.map((c) => (c.name === "vault-core" ? { ...c, version: null, commit: null } : c)),
+  };
+  s = await mountSettings();
+  await until(() => aboutRow(s, "vault-dns") !== null, "about table");
+  assert.deepEqual(aboutRowText(s, "vault-core"), ["vault-core", "—", "—", "Not reported"]);
 });
 
 test("About: status cells carry the matching icon kind, aria-hidden, next to the word", async () => {
@@ -203,20 +231,87 @@ test("About: status cells carry the matching icon kind, aria-hidden, next to the
     return icon ? `${icon.className}|${icon.getAttribute("aria-hidden")}` : null;
   };
   assert.equal(kindOf("vault-api"), "sic k-cached sic-sm|true");
+  assert.equal(kindOf("vault-core"), "sic k-cached sic-sm|true");
   assert.equal(kindOf("vault-runner"), "sic k-error sic-sm|true");
+  assert.equal(kindOf("steamprefill"), "sic k-unknown sic-sm|true");
   assert.equal(kindOf("vault-proxy"), "sic k-notinuse sic-sm|true");
-  assert.equal(kindOf("vault-dns"), "sic k-unknown sic-sm|true");
+  assert.equal(kindOf("vault-dns"), "sic k-notinuse sic-sm|true");
 });
 
-test("About: notes for vault-core and vault-dns, server detail as plain text, relative checked time with the 60 s cache", async () => {
+test("About: the (i) details hold the note, the dash reason and the server detail as plain text; relative checked time with the 60 s cache", async () => {
   const s = await mountSettings();
   await until(() => aboutRow(s, "vault-dns") !== null, "about table");
-  assert.match(detailText(s, "vault-core"), /Version recorded at vault-core's last start, not a live check\./);
+  assert.match(detailText(s, "vault-core"), /^Recorded at vault-core's last start: the same version and commit as vault-api/);
   assert.match(detailText(s, "vault-core"), /Recorded at vault-core's last start, 2026-10-02T10:00:00Z\. <i>text<\/i>/);
-  assert.match(detailText(s, "vault-dns"), /^Unknown, not probed/);
+  assert.match(detailText(s, "vault-dns"), /^Optional component\. vault-api does not check it/);
+  assert.match(detailText(s, "vault-dns"), /A dash means the component did not report this value\./);
   assert.match(textOf(s, '[data-role="about-checked"]'), /^Checked by the server 5 min ago\. .*up to 60 s/);
   const full = aboutRow(s, "vault-api").querySelectorAll("span.mono")[1].getAttribute("title");
   assert.equal(full, FULL_COMMIT, "the short commit carries the full id as its title");
+});
+
+test("MUTATION TARGET: default render — every (i) collapsed, and no visible 'unknown' anywhere in the About section", async () => {
+  const allUnknown = {
+    components: ABOUT_ALL_STATUSES.components.map((c) => ({ ...c, version: null, commit: null, status: "unknown" })),
+  };
+  for (const about of [ABOUT_ALL_STATUSES, allUnknown]) {
+    server.about = about;
+    const s = await mountSettings();
+    await until(() => aboutRow(s, "vault-dns") !== null, "about table");
+    const content = s.querySelector(".about-content");
+    const buttons = content.querySelectorAll('[data-role="about-info"]');
+    assert.equal(buttons.length, 6, "one (i) per row");
+    for (const btn of buttons) assert.equal(btn.getAttribute("aria-expanded"), "false");
+    const details = content.querySelectorAll("tr.about-detail");
+    assert.equal(details.length, 6);
+    assert.equal(details.every((d) => d.hidden === true), true, "details collapsed by default");
+    const seen = visibleText(content);
+    assert.doesNotMatch(seen, /unknown/i, seen);
+    assert.match(seen, /—/);
+  }
+});
+
+test("MUTATION TARGET: the (i) button is an accessible disclosure — named, aria-controls its details row, click toggles aria-expanded and hidden", async () => {
+  const s = await mountSettings();
+  await until(() => aboutRow(s, "vault-dns") !== null, "about table");
+  const btn = aboutRow(s, "vault-core").querySelector('[data-role="about-info"]');
+  try {
+    assert.equal(btn.tagName, "BUTTON", "a native button: Enter/Space and focus for free");
+    assert.equal(btn.type, "button");
+    assert.equal(btn.getAttribute("aria-label"), "Details for vault-core");
+    const controls = btn.getAttribute("aria-controls");
+    const target = s.querySelectorAll("tr").find((t) => t.id === controls);
+    assert.equal(target ? target.getAttribute("data-detail-for") : null, "vault-core", "aria-controls points at this row's details");
+    assert.equal(btn.querySelector("svg").getAttribute("aria-hidden"), "true", "the glyph is decorative");
+    btn.dispatchEvent({ type: "click" });
+    assert.equal(btn.getAttribute("aria-expanded"), "true");
+    assert.equal(target.hidden, false);
+    assert.equal(aboutRow(s, "vault-dns").querySelector('[data-role="about-info"]').getAttribute("aria-expanded"), "false", "only this row opens");
+    // A Refresh rebuilds the table and keeps the open row open.
+    s.querySelector('[data-role="about-refresh"]').dispatchEvent({ type: "click" });
+    await until(
+      () => s.querySelector('[data-role="about-refresh-status"]').textContent === "Component versions refreshed.",
+      "refreshed",
+    );
+    const again = aboutRow(s, "vault-core").querySelector('[data-role="about-info"]');
+    assert.equal(again.getAttribute("aria-expanded"), "true", "open state survives Refresh");
+    again.dispatchEvent({ type: "click" });
+    assert.equal(again.getAttribute("aria-expanded"), "false");
+    assert.equal(s.querySelectorAll("tr").find((t) => t.id === controls).hidden, true);
+  } finally {
+    const cur = aboutRow(s, "vault-core").querySelector('[data-role="about-info"]');
+    if (cur.getAttribute("aria-expanded") === "true") cur.dispatchEvent({ type: "click" });
+  }
+});
+
+test("About: a dash cell names itself for screen readers ('Not reported'), the dash itself is aria-hidden", async () => {
+  const s = await mountSettings();
+  await until(() => aboutRow(s, "vault-dns") !== null, "about table");
+  const cell = aboutRow(s, "vault-dns").querySelector("td.about-version");
+  assert.equal(cell.querySelector("span.mono").getAttribute("aria-hidden"), "true");
+  assert.equal(textOf(cell, "span.sr-only"), "Not reported");
+  const real = aboutRow(s, "vault-api").querySelector("td.about-version");
+  assert.equal(real.querySelector("span.sr-only"), null, "a real value needs no extra label");
 });
 
 test("MUTATION TARGET: a 404 shows the 'server too old' note — not an error, no table", async () => {

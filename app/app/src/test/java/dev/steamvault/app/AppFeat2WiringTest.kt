@@ -108,7 +108,39 @@ class AppFeat2WiringTest {
         assertCalledFrom(settings, "controller.saveLibrarySteamId()", "SteamLibraryBlock")
         assertCalledFrom(settings, "controller.resetLibrarySteamId()", "SteamLibraryBlock")
         assertCalledFrom(settings, "controller.previewLibrarySteamId()", "SteamLibraryBlock")
-        assertCalledFrom(settings, "AboutRowView(aboutRowFor(component))", "AboutSection")
+        assertCalledFrom(settings, "aboutRowsFor(controller.about?.components.orEmpty())", "AboutSection")
+        assertCalledFrom(settings, "AboutRowView(row)", "AboutSection")
+    }
+
+    @Test
+    fun `MUTATION PIN -- WEB-FIX-8 each About row has an info button that toggles its details, collapsed by default`() {
+        assertCalledFrom(settings, "IconButton(", "AboutRowView")
+        assertCalledFrom(settings, "AboutInfoGlyph(", "AboutRowView")
+        val code = stripComments(read(settings))
+        val start = code.indexOf("private fun AboutRowView(")
+        val end = code.indexOf("private fun AboutInfoGlyph(", start)
+        check(start >= 0 && end > start) { "expected AboutRowView before AboutInfoGlyph" }
+        val body = code.substring(start, end)
+        assertTrue("collapsed by default", body.contains("rememberSaveable(row.name) { mutableStateOf(false) }"))
+        assertTrue("the button toggles the state", body.contains("onClick = { expanded = !expanded }"))
+        assertTrue("the details render only while expanded", body.contains("if (expanded) {"))
+        assertTrue("the button is named for TalkBack", body.contains("contentDescription = infoDescription"))
+        assertFalse("no 'unknown' word in the row anymore", body.contains("unknown"))
+    }
+
+    @Test
+    fun `MUTATION PIN -- WEB-FIX-8 the save bar is the Scaffold bottom bar, shown only while dirty, and holds Save and Discard`() {
+        assertCalledFrom(settings, "SettingsSaveBar(controller, scope)", "SettingsScreen")
+        assertCalledFrom(settings, "controller.save()", "SettingsSaveBar")
+        assertCalledFrom(settings, "controller.discard()", "SettingsSaveBar")
+        val code = stripComments(read(settings))
+        val call = callIndex(code, "SettingsSaveBar(controller, scope)")
+        val bottomBar = code.lastIndexOf("bottomBar = {", call)
+        assertTrue("SettingsSaveBar must sit inside the Scaffold's bottomBar slot", bottomBar >= 0 && call - bottomBar < 300)
+        val gate = code.substring(bottomBar, call)
+        assertTrue("shown only while dirty", gate.contains("controller.isDirty"))
+        assertTrue("never on a read-only vault", gate.contains("!controller.isReadonly"))
+        assertEquals("exactly one Save action on the screen form", 1, Regex("controller\\.save\\(\\)").findAll(code).count())
     }
 
     @Test

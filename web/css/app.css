@@ -1019,6 +1019,35 @@ input.inp.txt:disabled{ opacity:.55; }
 
 .view-settings h4.sec:first-of-type{ margin-top:2px; }
 
+/* ---------- Settings save bar (WP WEB-FIX-8) ----------
+   User request: Save must be visible as soon as something changed, on a
+   page that is several screens long. Same placement as `.bulk` (fixed,
+   one --bulk-gap above wherever the bottom nav ends, the bottom safe-area
+   inset added because --nav-h does not carry it, horizontal insets for a
+   notched landscape phone), so the two never fight: `.bulk` only exists in
+   the Library's select mode and this bar only on Settings — one view at a
+   time. Width follows the Settings column (--w-text), not the Library's
+   --w-wall. While it is up, `.savebar-up` adds the same room under the
+   page's last content so scrolling to the end never hides anything behind
+   it. `display:flex` defeats the UA [hidden] rule, hence the guard. */
+.savebar{
+  position:fixed; z-index:20;
+  left:calc(12px + env(safe-area-inset-left, 0px));
+  right:calc(12px + env(safe-area-inset-right, 0px));
+  bottom:calc(var(--nav-h) + var(--bulk-gap) + env(safe-area-inset-bottom, 0px));
+  max-width:calc(var(--w-text) - (var(--gutter) * 2));
+  margin:0 auto;
+  display:flex; flex-direction:column; gap:8px;
+  padding:10px; border-radius:var(--r-l);
+  background:var(--raised-2);
+  border:1px solid var(--line);
+  box-shadow:0 12px 28px -8px rgba(0,0,0,.7);
+}
+.savebar[hidden]{ display:none; }
+.savebar-msg{ margin:0 4px; font-size:12.5px; line-height:1.35; color:var(--dim); min-width:0; overflow-wrap:anywhere; }
+.savebar-msg.is-error{ color:var(--danger); }
+.savebar-up{ padding-bottom:calc(var(--savebar-h) + var(--bulk-gap) * 2); }
+
 /* ---------- onboarding overlay ---------- */
 .onb{
   position:fixed; inset:0; z-index:50; background:var(--bg);
@@ -1285,6 +1314,25 @@ body.onboarding .nav{ display:none; }
 .about-table .mono{ font-family:var(--mono); font-size:11.5px; overflow-wrap:anywhere; }
 .about-table .about-detail td{ padding:0 0 8px; }
 .about-table .about-detail .foot-note{ margin:2px 0 0; }
+/* WP WEB-FIX-8: the per-row (i) button sits inline after the component
+   name (the name cell keeps its own display, so the BP-M table-cell rule
+   below still applies) and toggles the details row. 28px square: a touch
+   target above the WCAG 2.5.8 minimum without growing the phone row much.
+   Focus ring: the global :focus-visible rule (theme.css). The details row
+   is display-styled above (block, table-row from BP-M), which defeats the
+   UA's [hidden]{display:none} — hence the explicit guard (LEARNINGS 4a.8). */
+.about-table .about-name-text{ overflow-wrap:anywhere; }
+.about-info-btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:28px; height:28px; margin:-4px 0 -4px 4px; vertical-align:middle;
+  border-radius:50%; color:var(--dim-2);
+}
+.about-info-btn svg{ width:16px; height:16px; }
+@media (hover:hover) and (pointer:fine){
+  .about-info-btn:hover{ background:var(--raised); color:var(--text); }
+}
+.about-info-btn[aria-expanded="true"]{ color:var(--accent); }
+.about-table .about-detail[hidden]{ display:none; }
 
 /* ============================================================
    Game detail sheet (WP 4a.4)
@@ -1791,6 +1839,13 @@ body.onboarding .nav{ display:none; }
     left:calc(var(--rail-w) + var(--gutter));
     right:var(--gutter);
     max-width:calc(var(--w-wall) - (var(--gutter) * 2));
+  }
+  /* WP WEB-FIX-8: the Settings save bar clears the side rail the same way
+     and centres in the main column, like `.view-settings` itself; its cap
+     stays --w-text (the Settings column), not --w-wall. */
+  .savebar{
+    left:calc(var(--rail-w) + var(--gutter));
+    right:var(--gutter);
   }
 
   /* ----- Library toolbar band: search + chips side by side (WP 4e.2) -----
