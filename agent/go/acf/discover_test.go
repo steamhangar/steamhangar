@@ -499,7 +499,7 @@ func TestDiscoverWarnsVanishedManifestDistinctlyFromCorrupt(t *testing.T) {
 		t.Errorf("warnings = %v, want the corrupt-manifest wording for 999", d.Warnings)
 	}
 	for _, w := range d.Warnings {
-		if strings.Contains(w.Message, "555") && strings.Contains(w.Message, "corrupt") {
+		if strings.Contains(w.Message, "appmanifest_555.acf") && strings.Contains(w.Message, "corrupt") {
 			t.Errorf("warning %q calls the vanished manifest corrupt", w.Message)
 		}
 	}
