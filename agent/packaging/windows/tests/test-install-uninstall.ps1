@@ -289,13 +289,16 @@ try {
     CheckTrue "re-install updated the interval passed to the agent" ($envContent2 -like "*VAULT_AGENT_REPORT_INTERVAL=15m*")
 
     # ---- 5b. re-install WITHOUT a key parameter keeps the key (AGENT-FIX-2)
+    # No -ClientId either: it must be carried over from env.txt (review S1).
     $reuseOutput = & $installScript -AgentPath $AgentExe -ServerUrl "http://127.0.0.1:2" `
-        -ClientId "wp26-harness-v2" -LibraryRoot "C:\SteamHangarHarnessLibrary" `
+        -LibraryRoot "C:\SteamHangarHarnessLibrary" `
         -ConfigDir $ConfigDir -TaskName $TaskName -IntervalMinutes 15 *>&1 | Out-String
     $envContent3 = Get-Content -Raw -LiteralPath $envFilePath
     CheckTrue "key-less re-install kept the API key in env.txt" ($envContent3 -like "*VAULT_AGENT_API_KEY=$ApiKeyValue*")
     CheckTrue "key-less re-install applied the new library root" ($envContent3 -like "*VAULT_AGENT_LIBRARY_ROOT=C:\SteamHangarHarnessLibrary*")
-    CheckTrue "key-less re-install says the key was kept" ($reuseOutput -like "*kept from existing env.txt*")
+    CheckTrue "key-less re-install says the key was kept" ($reuseOutput -like "*API key*: kept from existing env.txt*")
+    CheckTrue "re-install without -ClientId kept the client id (S1)" ($envContent3 -like "*VAULT_AGENT_CLIENT_ID=wp26-harness-v2*")
+    CheckTrue "summary shows the kept client id (S1)" ($reuseOutput -like "*wp26-harness-v2 (kept from existing env.txt*")
     CheckTrue "key-less re-install never prints the key" ($reuseOutput -notlike "*$ApiKeyValue*")
     $aclAfterReuse = Get-Acl -LiteralPath $envFilePath
     CheckTrue "env file ACL still protected after key-less re-install" ($aclAfterReuse.AreAccessRulesProtected -eq $true)

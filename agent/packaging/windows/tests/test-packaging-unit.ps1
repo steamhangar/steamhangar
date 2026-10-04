@@ -29,6 +29,8 @@
          `exit`, which would end this script if run in-process):
            - no key parameter + env.txt with VAULT_AGENT_API_KEY -> exit 0,
              summary says "kept from existing env.txt", key never printed;
+             the client id and (without a usable registry value) the
+             library root from env.txt are kept too (review S1);
            - no key parameter + no env.txt -> exit 2 (unchanged usage error).
          -WhatIf skips every mutation (config dir, env file, wrapper copy,
          task registration); only the summary prints.
@@ -145,6 +147,19 @@ try {
     Check "default with steamapps is reported as found" $r.SteamappsFound $true
     CheckTrue "no registry value -> no registry candidate" ($null -eq $r.RegistryCandidate)
 
+    # Review S1: an existing env.txt root is kept only below the registry
+    # and only if it has steamapps\.
+    $r = Resolve-LibraryRoot -ExplicitRoot "" -RegistrySteamPath $null -DefaultRoot $missingDefault -ExistingRoot $withSteamapps
+    Check "existing env.txt root with steamapps -> source kept" $r.Source "kept"
+    Check "kept root value" $r.Root $withSteamapps
+    Check "kept root is written to env.txt again" $r.WriteToEnv $true
+    $r = Resolve-LibraryRoot -ExplicitRoot "" -RegistrySteamPath $rawWith -DefaultRoot $missingDefault -ExistingRoot $withoutSteamapps
+    Check "registry beats a kept env.txt root" $r.Source "registry"
+    $r = Resolve-LibraryRoot -ExplicitRoot "" -RegistrySteamPath $null -DefaultRoot $missingDefault -ExistingRoot $withoutSteamapps
+    Check "kept env.txt root without steamapps -> default" $r.Source "default"
+    $r = Resolve-LibraryRoot -ExplicitRoot "X:\Explicit" -RegistrySteamPath $null -DefaultRoot $missingDefault -ExistingRoot $withSteamapps
+    Check "explicit beats a kept env.txt root" $r.Source "explicit"
+
     # 1c. Get-RegistrySteamPath never throws (value depends on this host)
     $threw = $false
     try { $raw = Get-RegistrySteamPath } catch { $threw = $true }
@@ -167,7 +182,11 @@ try {
     CheckTrue "env value: missing file -> null" ($null -eq (Get-EnvFileValue -Path (Join-Path $workDir "nope.txt") -Key "VAULT_AGENT_API_KEY"))
 
     # ---- fake agent .exe (used by 2 and 3) ------------------------------
-    $fakeAgent = Join-Path $workDir "fake-agent.exe"
+    # A folder name with a space (review N4): the real default lives under
+    # paths like this, and every quoting step must survive it.
+    $spaceDir = Join-Path $workDir "dir with space"
+    New-Item -ItemType Directory -Path $spaceDir | Out-Null
+    $fakeAgent = Join-Path $spaceDir "fake-agent.exe"
     $fakeSource = @'
 using System;
 using System.IO;
@@ -190,7 +209,7 @@ public static class VaultFakeAgentAgentFix2 {
     }
 }
 '@
-    Add-Type -TypeDefinition $fakeSource -Language CSharp -OutputAssembly $fakeAgent -OutputType ConsoleApplication
+    Add-Type -TypeDefinition $fakeSource -Language CSharp -OutputAssembly $fakeAgent -OutputType ConsoleApplication -IgnoreWarnings
     CheckTrue "fake agent compiled" (Test-Path -LiteralPath $fakeAgent -PathType Leaf)
 
     # ---- 2. install-task.ps1 -WhatIf: API key reuse ----------------------
@@ -200,19 +219,29 @@ public static class VaultFakeAgentAgentFix2 {
     $reuseEnv = Join-Path $reuseConfigDir "env.txt"
     Set-Content -LiteralPath $reuseEnv -Encoding utf8 -Value @(
         "VAULT_AGENT_SERVER_URL=http://127.0.0.1:1",
-        "VAULT_AGENT_API_KEY=$secret"
+        "VAULT_AGENT_API_KEY=$secret",
+        "VAULT_AGENT_CLIENT_ID=unit-pc-kept-id",
+        "VAULT_AGENT_LIBRARY_ROOT=$withSteamapps"
     )
     $envBefore = [System.IO.File]::ReadAllBytes($reuseEnv)
 
-    # No -LibraryRoot on purpose: the registry lookup runs for real on this
-    # host and must not break the install, whatever it finds.
+    # No -LibraryRoot / -ClientId on purpose: the registry lookup runs for
+    # real on this host and must not break the install, whatever it finds;
+    # the client id and (without a usable registry value) the library root
+    # must be carried over from env.txt (review S1).
     $res = Invoke-ChildScript -ScriptPath $installScript -Arguments @(
         "-AgentPath", $fakeAgent, "-ServerUrl", "http://127.0.0.1:1",
         "-ConfigDir", $reuseConfigDir, "-TaskName", "SteamHangar-Unit-Never-Registered", "-WhatIf")
     Check "re-install without key parameters exits 0 when env.txt has a key" $res.ExitCode 0
     CheckTrue "summary says the API key was kept from env.txt" ($res.Output -like "*API key*: kept from existing env.txt*")
     CheckTrue "the reused API key is never printed" ($res.Output -notlike "*$secret*")
-    CheckTrue "summary names a library root source" ($res.Output -like "*Library root*")
+    CheckTrue "summary shows the kept client id (S1)" ($res.Output.Contains("Client id       : unit-pc-kept-id (kept from existing env.txt"))
+    $hostRegistryRoot = ConvertTo-SteamLibraryRoot -SteamPath (Get-RegistrySteamPath)
+    if ($hostRegistryRoot -and (Test-Path -LiteralPath (Join-Path $hostRegistryRoot "steamapps") -PathType Container)) {
+        CheckTrue "registry beats the kept library root (this host has Steam)" ($res.Output.Contains("(from HKCU\Software\Valve\Steam\SteamPath"))
+    } else {
+        CheckTrue "summary shows the kept library root (S1)" ($res.Output.Contains("Library root    : $withSteamapps (kept from existing env.txt"))
+    }
     $envAfter = [System.IO.File]::ReadAllBytes($reuseEnv)
     CheckTrue "-WhatIf left env.txt untouched" ([Convert]::ToBase64String($envBefore) -eq [Convert]::ToBase64String($envAfter))
     CheckTrue "-WhatIf registered no task" ($null -eq (Get-ScheduledTask -TaskName "SteamHangar-Unit-Never-Registered" -ErrorAction SilentlyContinue))
@@ -234,7 +263,7 @@ public static class VaultFakeAgentAgentFix2 {
         "VAULT_AGENT_SERVER_URL=http://127.0.0.1:1",
         "VAULT_AGENT_API_KEY=$secret"
     )
-    $logFile = Join-Path $workDir "vault-agent.log"
+    $logFile = Join-Path $spaceDir "vault-agent.log"
     $res = Invoke-ChildScript -ScriptPath $runnerScript -Arguments @(
         "-AgentPath", $fakeAgent, "-EnvFile", $runEnv, "-LogFile", $logFile)
     Check "wrapper exits with the agent's exit code" $res.ExitCode 3

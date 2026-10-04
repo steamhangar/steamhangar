@@ -1727,7 +1727,10 @@ S1, WP AGENT-FIX-2), resolved in this order:
    `VAULT_AGENT_LIBRARY_ROOT`, and the summary says
    `(from HKCU\Software\Valve\Steam\SteamPath, ...)`. A missing key or
    value is not an error.
-3. Otherwise vault-agent's Windows default `C:\Program Files (x86)\Steam`
+3. Otherwise (re-install) the `VAULT_AGENT_LIBRARY_ROOT` already in
+   `env.txt`, if it contains `steamapps\`; summary
+   `(kept from existing env.txt, ...)`.
+4. Otherwise vault-agent's Windows default `C:\Program Files (x86)\Steam`
    (nothing written to `env.txt`). The script checks it for a
    `steamapps\` directory and, if there is none, prints a `WARNING`
    naming `-LibraryRoot` — the install still completes (Steam may be
@@ -1790,9 +1793,21 @@ exactly one is required on a first install.
 summary only says `API key : kept from existing env.txt`. The env file is
 rewritten through the same ACL-before-content path as a first install.
 Without such a key, leaving out both is the same usage error (exit 2) as
-before. Note that every other setting is NOT carried over: env.txt is
-rewritten from this run's parameters, so pass `-ClientId`, `-LibraryRoot`
-etc. again if you set them before.
+before. Two more values are carried over so a re-install cannot silently
+change what the PC is or where it looks (review S1):
+
+- **Client id:** without `-ClientId`, a non-empty `VAULT_AGENT_CLIENT_ID`
+  in the existing `env.txt` is kept, and the summary says
+  `Client id : <value> (kept from existing env.txt ...)`. Dropping it
+  would make vault-agent fall back to the hostname-derived id — a new
+  identity and a ghost row (see "Client identity and renaming" above).
+  An explicit `-ClientId` still wins.
+- **Library root:** see the order below — a kept `VAULT_AGENT_LIBRARY_ROOT`
+  ranks after the registry and is used only if it still contains
+  `steamapps\`.
+
+Everything else (`-ServerUrl`, `-IntervalMinutes`, ...) comes from this
+run's parameters or their defaults, as before.
 
 ### Idempotent re-install
 
@@ -1881,8 +1896,9 @@ produced):**
 WP AGENT-FIX-2 added to this harness (not yet run on a real machine at
 the time of writing): step 4 also asserts the log has no
 `NativeCommandError` text and no NUL byte, and a step 5b re-installs
-without `-ApiKey`/`-ApiKeyFile` and asserts the key is kept in `env.txt`,
-never printed, and the ACL is still protected.
+without `-ApiKey`/`-ApiKeyFile` and `-ClientId` and asserts the key and
+the client id are kept in `env.txt`, the key is never printed, and the
+ACL is still protected.
 
 **Hermetic unit tests, executed in CI (WP AGENT-FIX-2):**
 `agent/packaging/windows/tests/test-packaging-unit.ps1` runs in the
@@ -1890,11 +1906,12 @@ never printed, and the ACL is still protected.
 throwaway `%TEMP%` directory: no task registration, no registry write, no
 network. It lifts `install-task.ps1`'s helper functions out of the script
 by name (PowerShell AST) and tests the SteamPath normalization and the
-explicit > registry > default choice against temp directories (the
-registry itself is not faked — a temp HKCU key on a shared machine is not
-acceptable — so only "reading it never throws" is checked live); runs
-`install-task.ps1 -WhatIf` in a child process for the key reuse (exit 0,
-"kept from existing env.txt", key never in the output) and the unchanged
+explicit > registry > kept from env.txt > default choice against temp
+directories (the registry itself is not faked — a temp HKCU key on a
+shared machine is not acceptable — so only "reading it never throws" is
+checked live); runs `install-task.ps1 -WhatIf` in a child process for the
+key reuse (exit 0, "kept from existing env.txt", key never in the output,
+client id and library root carried over) and the unchanged
 usage errors (exit 2); and runs `run-vault-agent.ps1` against a fake
 agent `.exe` it compiles with `Add-Type`, which writes to stdout and
 stderr (including a non-ASCII character and a last line without newline)

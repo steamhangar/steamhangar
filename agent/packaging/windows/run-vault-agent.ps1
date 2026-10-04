@@ -174,8 +174,15 @@ if ($LogFile) {
             Write-LogLine "ERROR: could not start '$AgentPath': $($_.Exception.Message)"
             $exitCode = 1
         }
-        Add-FileBytesToLog -SourcePath $stdoutFile
-        Add-FileBytesToLog -SourcePath $stderrFile
+        # If the log is locked or unwritable (e.g. held open by another
+        # program), this run's output is lost, but the temp files are still
+        # removed and the agent's exit code is still forwarded.
+        try {
+            Add-FileBytesToLog -SourcePath $stdoutFile
+            Add-FileBytesToLog -SourcePath $stderrFile
+        } catch {
+            Write-LogLine "ERROR: could not append vault-agent's output to the log: $($_.Exception.Message)"
+        }
     } finally {
         Remove-Item -LiteralPath $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
     }

@@ -63,6 +63,47 @@ def test_install_resolves_library_root_before_writing_env_and_before_stop() -> N
     assert "if ($libraryRootChoice.WriteToEnv)" in code
 
 
+def test_install_wires_the_registry_and_env_reuse() -> None:
+    """Review S2: the helpers are unit-tested in isolation, so the call
+    sites that connect them to the installer must be pinned here."""
+    code = ps_code(WINDOWS / "install-task.ps1")
+    stop = code.index('$ErrorActionPreference = "Stop"')
+    # Registry lookup and kept library root, only when -LibraryRoot is omitted.
+    assert re.search(
+        r"if \(-not \$LibraryRoot\) \{\s*"
+        r"\$registrySteamPath = Get-RegistrySteamPath\s*"
+        r'\$existingLibraryRoot = Get-EnvFileValue -Path \$envFilePath -Key "VAULT_AGENT_LIBRARY_ROOT"\s*\}',
+        code,
+    )
+    assert re.search(
+        r"Resolve-LibraryRoot -ExplicitRoot \$LibraryRoot -RegistrySteamPath \$registrySteamPath `\s*"
+        r"-DefaultRoot \$defaultLibraryRoot -ExistingRoot \$existingLibraryRoot",
+        code,
+    )
+    # API key reuse.
+    assert re.search(
+        r'\$existingApiKey = Get-EnvFileValue -Path \$envFilePath -Key "VAULT_AGENT_API_KEY"', code
+    )
+    assert "$resolvedApiKey = $existingApiKey" in code
+    # Client id carry-over (review S1), explicit -ClientId first.
+    assert re.search(
+        r"if \(\$ClientId\) \{\s*\$effectiveClientId = \$ClientId\s*"
+        r'\$clientIdSource = "explicit"\s*\} else \{\s*'
+        r'\$existingClientId = Get-EnvFileValue -Path \$envFilePath -Key "VAULT_AGENT_CLIENT_ID"',
+        code,
+    )
+    assert "$effectiveClientId = $existingClientId" in code
+    assert 'if ($effectiveClientId) { $envLines.Add("VAULT_AGENT_CLIENT_ID=$effectiveClientId") }' in code
+    assert "kept from existing env.txt; pass -ClientId" in code
+    # All of it happens during validation, before the Stop preference.
+    for anchor in (
+        "$registrySteamPath = Get-RegistrySteamPath",
+        "$resolvedApiKey = $existingApiKey",
+        "$effectiveClientId = $existingClientId",
+    ):
+        assert code.index(anchor) < stop, anchor
+
+
 def test_install_never_prints_the_api_key() -> None:
     code = ps_code(WINDOWS / "install-task.ps1")
     assert '$apiKeySource = "kept from existing env.txt"' in code

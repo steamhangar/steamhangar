@@ -2714,9 +2714,11 @@ below carry their own later dates, item 12 is the current one).
       non-admin, PS 5.1, 2026-10-04; follows AGENT-FIX-1/AGENT-FEAT-1) —
       `install-task.ps1` takes the library root from
       `HKCU\Software\Valve\Steam\SteamPath` when `-LibraryRoot` is omitted
-      and it holds `steamapps\` (explicit > registry > default + warning);
-      a re-install without `-ApiKey`/`-ApiKeyFile` keeps the key from
-      `env.txt` (never printed); `run-vault-agent.ps1` writes the agent's
+      and it holds `steamapps\` (explicit > registry > kept from
+      `env.txt` > default + warning); a re-install without
+      `-ApiKey`/`-ApiKeyFile` keeps the key from `env.txt` (never
+      printed), and without `-ClientId` keeps the client id (review S1);
+      `run-vault-agent.ps1` writes the agent's
       output as plain UTF-8 bytes via `Start-Process` redirection (no
       NativeCommandError wrapping, no UTF-16). New hermetic CI test
       `agent/packaging/windows/tests/test-packaging-unit.ps1`. Follow-up,
