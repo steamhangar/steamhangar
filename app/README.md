@@ -3897,9 +3897,45 @@ steamhangar://pair?v=1&url=<percent-encoded base URL>&key=<percent-encoded API k
   `PairingController` (MainActivity's companion, like
   `PROCESS_PENDING_LOGIN_STATE`), so an open dialog survives rotation
   without the key ever entering a Bundle; process death drops it (scan
-  again). A check cancelled with its Activity leaves the dialog usable.
-  Works on cold start (`onCreate`) and while running (`onNewIntent`,
-  `singleTask`).
+  again). A check cancelled with its Activity leaves the dialog usable
+  once the in-flight request ends (the coroutine's `finally` runs only
+  then). Works on cold start (`onCreate`) and while running
+  (`onNewIntent`, `singleTask`).
+- **Arm delay.** Pair is disabled for 700 ms after the dialog appears
+  (`PAIR_ARM_DELAY_MILLIS`), against tap-jacking by a link fired at a
+  moment of the sender's choosing. `PairingController.confirm` enforces
+  it on a monotonic clock; the dialog only mirrors it. A failed check
+  stays armed; a new link re-arms.
+- **Notice wording.** When only the scheme differs (`http://hangar.lan`
+  stored, `https://hangar.lan` paired) the replace notice names the stored
+  vault with its scheme. For the same server the notice says the key is
+  replaced and connection settings (the connection type) may be updated.
+- **Lost before Done.** A pairing applied into an unfinished onboarding is
+  held in onboarding's step-1 fields only, exactly like a manually tested
+  connection: if the Activity is recreated (rotation) or the process dies
+  before onboarding's Done step, it is gone and the user scans again.
+
+**Threat model and residuals.**
+- *Anyone can fire the link.* Any web page (after a user gesture) or any
+  installed app can open `steamhangar://pair?...` with a URL and key of its
+  choosing, e.g. to point the app at a server it controls. Mitigations:
+  nothing is applied automatically; the user must press Pair in a dialog
+  whose title names the host and whose body shows the exact address that
+  will be stored; the replace notice says when a working connection would
+  be replaced; the arm delay above; and nothing is written before Pair and
+  a successful connection check against that server.
+- *Custom schemes are unverifiable.* Another installed app can declare
+  the same `steamhangar://pair` filter. If the user picks it in the
+  chooser (or it is the default handler), that app receives the link, key
+  included. Verified Android App Links would prevent that, but they are
+  http/https only and need a public domain serving `assetlinks.json`,
+  which a LAN vault does not have; not an option here.
+- *The link is a credential.* The QR content may stay in the camera or
+  Lens scan history (possibly synced to a cloud account) and in the task's
+  base Intent shown by Recents. Stripping `intent.data` covers only the
+  current Intent; the re-delivery guard only stops the app from offering
+  the link again, it does not erase it. A user who suspects a leaked link
+  should rotate the vault API key.
 
 **Tests (JVM).** `PairingLinkTest` (accept/reject matrix: special
 characters in key and URL, missing `v`, `v=2`, `javascript:`/`file:`/`data:`

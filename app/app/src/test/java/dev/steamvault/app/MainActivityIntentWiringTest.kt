@@ -1,5 +1,6 @@
 package dev.steamvault.app
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -174,19 +175,67 @@ class MainActivityIntentWiringTest {
         assertTrue("expected the shared onboarding check -- body:\n$body", verify >= 0)
         assertTrue("a failed check must return before anything is applied -- body:\n$body", bail in (verify + 1) until firstApply)
 
-        val home = body.substring(body.indexOf("PairingContinuation.STORE_AND_GO_HOME ->"))
-        for (needle in listOf("onboardingController.finish()", "refreshVaultApiClient()", "destination = Destination.LIBRARY")) {
-            assertTrue("the go-home branch must call `$needle` -- branch:\n$home", home.contains(needle))
-        }
         assertFalse(
             "pairing must not write the credential store itself (one storage path) -- body:\n$body",
             body.contains("credentialStore.set"),
         )
-        val open = body.substring(body.indexOf("PairingContinuation.OPEN_ONBOARDING ->"))
-        assertTrue(
-            "demo mode must open onboarding before applying -- branch:\n$open",
-            open.indexOf("openOnboarding(OnboardingMode.FIRST_RUN)") in 0 until open.indexOf("applyVerifiedConnection("),
-        )
+    }
+
+    /** The `{...}` body of one `PairingContinuation.X -> { ... }` branch inside [body], cut at its own closing brace. */
+    private fun continuationBranch(body: String, name: String): String {
+        val arrow = body.indexOf("PairingContinuation.$name ->")
+        check(arrow >= 0) { "expected a `PairingContinuation.$name ->` branch in verifyAndApplyPairing -- body:\n$body" }
+        val open = body.indexOf('{', arrow)
+        check(open >= 0) { "expected a block body for PairingContinuation.$name" }
+        return body.substring(open, matchingCloseIn(body, open) + 1)
+    }
+
+    private val applyCall = "onboardingController.applyVerifiedConnection(choice, request.baseUrl, request.apiKey)"
+
+    @Test
+    fun `MUTATION PIN -- every pairing continuation branch applies the verified connection`() {
+        val body = block("private suspend fun verifyAndApplyPairing(", '{')
+        for (name in listOf("CONTINUE_ONBOARDING", "OPEN_ONBOARDING", "STORE_AND_GO_HOME")) {
+            val branch = continuationBranch(body, name)
+            assertTrue("branch $name must call `$applyCall` -- branch:\n$branch", branch.contains(applyCall))
+        }
+    }
+
+    @Test
+    fun `MUTATION PIN -- demo mode opens onboarding before applying`() {
+        val branch = continuationBranch(block("private suspend fun verifyAndApplyPairing(", '{'), "OPEN_ONBOARDING")
+        val open = branch.indexOf("openOnboarding(OnboardingMode.FIRST_RUN)")
+        assertTrue("OPEN_ONBOARDING must call openOnboarding(FIRST_RUN) -- branch:\n$branch", open >= 0)
+        assertTrue("openOnboarding must precede the apply -- branch:\n$branch", open < branch.indexOf(applyCall))
+    }
+
+    @Test
+    fun `MUTATION PIN -- going home applies, then finishes, then rebuilds the client and shows the library`() {
+        val branch = continuationBranch(block("private suspend fun verifyAndApplyPairing(", '{'), "STORE_AND_GO_HOME")
+        val order = listOf(
+            applyCall,
+            "onboardingController.finish()",
+            "refreshVaultApiClient()",
+            "destination = Destination.LIBRARY",
+        ).map { needle ->
+            val idx = branch.indexOf(needle)
+            assertTrue("STORE_AND_GO_HOME must call `$needle` -- branch:\n$branch", idx >= 0)
+            idx
+        }
+        assertEquals("STORE_AND_GO_HOME must run apply, finish, refresh, home in this order -- branch:\n$branch", order.sorted(), order)
+    }
+
+    @Test
+    fun `MUTATION PIN -- offerPairing compares against the stored connection`() {
+        val call = block("private fun offerPairing(", '{')
+        for (needle in listOf(
+            "PROCESS_PAIRING.offer(",
+            "rawLink = rawLink,",
+            "existingBaseUrl = credentialStore.getBaseUrl(),",
+            "hasExistingKey = !credentialStore.getApiKey().isNullOrBlank(),",
+        )) {
+            assertTrue("offerPairing must contain `$needle` -- body:\n$call", call.contains(needle))
+        }
     }
 
     @Test

@@ -27,6 +27,8 @@ sealed class PairingUiState {
         val request: PairingRequest,
         val notice: PairingReplaceNotice,
         val existingHost: String?,
+        /** [PairingController]'s clock when this link was offered -- the anti-tap-jacking delay counts from here. */
+        val shownAtMillis: Long,
         val busy: Boolean = false,
         val error: String? = null,
     ) : PairingUiState()
@@ -45,8 +47,17 @@ sealed class PairingUiState {
  *
  * The verification and the write are passed into [confirm] per call, so
  * the controller never retains the Activity.
+ *
+ * Anti-tap-jacking: Pair is armed only [PAIR_ARM_DELAY_MILLIS] after the
+ * confirmation appeared. Any web page or app can fire a link at a moment
+ * of its choosing; without the delay a tap the user aimed at the screen
+ * underneath could land on Pair. [confirm] enforces it (the dialog also
+ * keeps the button disabled until then), measured on [clock], which is
+ * monotonic by default and injectable for tests.
  */
-class PairingController {
+class PairingController(
+    private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+) {
 
     var state: PairingUiState by mutableStateOf<PairingUiState>(PairingUiState.Hidden)
         private set
@@ -63,7 +74,8 @@ class PairingController {
             is PairingParseResult.Valid -> PairingUiState.Confirm(
                 request = parsed.request,
                 notice = replaceNoticeFor(existingBaseUrl, hasExistingKey, parsed.request),
-                existingHost = existingDisplayHost(existingBaseUrl),
+                existingHost = existingDisplayHost(existingBaseUrl, parsed.request),
+                shownAtMillis = clock(),
             )
             is PairingParseResult.Invalid -> PairingUiState.Rejected(parsed.rejection, parsed.detail)
         }
@@ -90,7 +102,7 @@ class PairingController {
      */
     suspend fun confirm(verifyAndApply: suspend (PairingRequest) -> String?): Boolean {
         val current = state as? PairingUiState.Confirm ?: return false
-        if (current.busy) return false
+        if (current.busy || !isArmed()) return false
         val busyState = current.copy(busy = true, error = null)
         state = busyState
         var completed = false
@@ -110,5 +122,16 @@ class PairingController {
         return failure == null
     }
 
+    /** Milliseconds until Pair may be pressed; 0 once armed or when no confirmation is open. */
+    fun armRemainingMillis(): Long {
+        val current = state as? PairingUiState.Confirm ?: return 0L
+        return (current.shownAtMillis + PAIR_ARM_DELAY_MILLIS - clock()).coerceAtLeast(0L)
+    }
+
+    fun isArmed(): Boolean = state is PairingUiState.Confirm && armRemainingMillis() == 0L
+
     private fun isBusy(): Boolean = (state as? PairingUiState.Confirm)?.busy == true
 }
+
+/** How long Pair stays disabled after the confirmation appears (anti-tap-jacking). */
+const val PAIR_ARM_DELAY_MILLIS = 700L

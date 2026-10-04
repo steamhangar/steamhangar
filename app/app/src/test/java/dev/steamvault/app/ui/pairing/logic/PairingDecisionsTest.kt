@@ -74,11 +74,21 @@ class PairingDecisionsTest {
 
     @Test
     fun `the existing host for the notice is host and non-default port, or the raw text`() {
-        assertEquals("192.168.1.50:8080", existingDisplayHost("http://192.168.1.50:8080"))
-        assertEquals("hangar.example.org", existingDisplayHost("https://hangar.example.org/"))
-        assertEquals("not a url", existingDisplayHost(" not a url "))
-        assertNull(existingDisplayHost(null))
-        assertNull(existingDisplayHost("  "))
+        val new = request("https://other.example")
+        assertEquals("192.168.1.50:8080", existingDisplayHost("http://192.168.1.50:8080", new))
+        assertEquals("hangar.example.org", existingDisplayHost("https://hangar.example.org/", new))
+        assertEquals("not a url", existingDisplayHost(" not a url ", new))
+        assertNull(existingDisplayHost(null, new))
+        assertNull(existingDisplayHost("  ", new))
+    }
+
+    @Test
+    fun `MUTATION PIN -- the existing label carries the scheme when only the scheme differs`() {
+        val new = request("https://hangar.example.org")
+        assertEquals("http://hangar.example.org", existingDisplayHost("http://hangar.example.org", new))
+        assertEquals("http://hangar.example.org:8080", existingDisplayHost("http://hangar.example.org:8080", request("https://hangar.example.org:8080")))
+        // A different port is already visible in host:port, no scheme needed.
+        assertEquals("hangar.example.org:8443", existingDisplayHost("https://hangar.example.org:8443", new))
     }
 
     // ---- profile choice --------------------------------------------------------

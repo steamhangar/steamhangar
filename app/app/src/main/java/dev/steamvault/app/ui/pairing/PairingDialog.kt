@@ -11,6 +11,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -18,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
 import dev.steamvault.app.net.pairing.PairingRejection
 import dev.steamvault.app.ui.pairing.logic.PairingReplaceNotice
+import kotlinx.coroutines.delay
 
 /**
  * WP APP-PAIR-1: the pairing confirmation, composed by MainActivity above
@@ -42,21 +48,32 @@ fun PairingDialog(controller: PairingController, onConfirm: () -> Unit) {
                 }
             },
         )
-        is PairingUiState.Confirm -> AlertDialog(
-            onDismissRequest = { controller.dismiss() },
-            title = { Text(stringResource(R.string.pairing_title, state.request.displayHost)) },
-            text = { ConfirmBody(state) },
-            confirmButton = {
-                TextButton(enabled = !state.busy, onClick = onConfirm) {
-                    Text(stringResource(R.string.pairing_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(enabled = !state.busy, onClick = { controller.dismiss() }) {
-                    Text(stringResource(R.string.pairing_cancel))
-                }
-            },
-        )
+        is PairingUiState.Confirm -> {
+            // Anti-tap-jacking: Pair unlocks PAIR_ARM_DELAY_MILLIS after this
+            // link was offered (PairingController enforces the same rule in
+            // confirm()). Keyed on shownAtMillis, so a failed check (same
+            // offer) stays armed and a NEW link re-arms the delay.
+            var armed by remember(state.shownAtMillis) { mutableStateOf(controller.isArmed()) }
+            LaunchedEffect(state.shownAtMillis) {
+                delay(controller.armRemainingMillis())
+                armed = true
+            }
+            AlertDialog(
+                onDismissRequest = { controller.dismiss() },
+                title = { Text(stringResource(R.string.pairing_title, state.request.displayHost)) },
+                text = { ConfirmBody(state) },
+                confirmButton = {
+                    TextButton(enabled = !state.busy && armed, onClick = onConfirm) {
+                        Text(stringResource(R.string.pairing_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(enabled = !state.busy, onClick = { controller.dismiss() }) {
+                        Text(stringResource(R.string.pairing_cancel))
+                    }
+                },
+            )
+        }
     }
 }
 

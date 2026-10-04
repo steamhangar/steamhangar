@@ -39,14 +39,18 @@ fun replaceNoticeFor(existingBaseUrl: String?, hasExistingKey: Boolean, request:
 }
 
 /**
- * `host[:port]` of the stored base URL for the "currently paired with ..."
- * notice, or the trimmed raw text when it does not parse (a stored URL is
- * whatever the user typed in onboarding).
+ * How the "currently connected to ..." notice names the stored vault:
+ * `host[:port]`, or the full `scheme://host[:port]` when that host equals
+ * the paired one (only the scheme differs, e.g. `http://` stored and
+ * `https://` paired -- "connected to hangar.lan, replaces that connection"
+ * would read like a contradiction). The trimmed raw text when the stored
+ * URL does not parse (it is whatever the user typed in onboarding).
  */
-fun existingDisplayHost(existingBaseUrl: String?): String? {
+fun existingDisplayHost(existingBaseUrl: String?, request: PairingRequest): String? {
     val raw = existingBaseUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val url = raw.toHttpUrlOrNull() ?: return raw
-    return displayHostOf(url)
+    val host = displayHostOf(url)
+    return if (host == request.displayHost) "${url.scheme}://$host" else host
 }
 
 /** `scheme://host[:port]`, built exactly like `PairingLink.parse` builds `PairingRequest.baseUrl`. */

@@ -197,7 +197,7 @@
     <string name="pairing_key_hint">The API key from the pairing link is stored on this device only and is not shown here.</string>
     <string name="pairing_cleartext_warning">This address uses plain HTTP, so the API key travels unencrypted. Only pair over your own LAN or VPN.</string>
     <string name="pairing_notice_replace">This device is currently connected to %1$s. Pairing replaces that connection.</string>
-    <string name="pairing_notice_same_vault">This device is already connected to this server. Pairing replaces its stored API key.</string>
+    <string name="pairing_notice_same_vault">This device is already connected to this server. Pairing replaces its stored API key and may update its connection settings (for example the connection type).</string>
     <string name="pairing_checking">Checking the connection…</string>
     <string name="pairing_confirm">Pair</string>
     <string name="pairing_cancel">Cancel</string>

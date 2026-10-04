@@ -48,10 +48,40 @@ class PairingWiringTest {
     }
 
     @Test
+    fun `MUTATION PIN -- the same-vault notice is rendered`() {
+        assertTrue(dialog.contains("PairingReplaceNotice.SAME_VAULT -> Text("))
+        assertTrue(dialog.contains("stringResource(R.string.pairing_notice_same_vault)"))
+    }
+
+    @Test
+    fun `MUTATION PIN -- the cleartext warning is rendered for an http address`() {
+        val guard = dialog.indexOf("if (state.request.usesCleartext) {")
+        assertTrue("expected the usesCleartext guard -- code:\n$dialog", guard >= 0)
+        val warning = dialog.indexOf("stringResource(R.string.pairing_cleartext_warning)")
+        assertTrue("the cleartext warning must be rendered inside that guard", warning > guard)
+        assertTrue(
+            "nothing else may sit between the guard and the warning",
+            dialog.substring(guard, warning).count { it == '}' } == 0,
+        )
+    }
+
+    @Test
     fun `MUTATION PIN -- a failed check is shown in place and the buttons lock while busy`() {
         assertTrue(dialog.contains("state.error?.let"))
-        assertTrue(dialog.contains("TextButton(enabled = !state.busy, onClick = onConfirm)"))
+        assertTrue(dialog.contains("TextButton(enabled = !state.busy && armed, onClick = onConfirm)"))
         assertTrue(dialog.contains("TextButton(enabled = !state.busy, onClick = { controller.dismiss() })"))
+    }
+
+    @Test
+    fun `MUTATION PIN -- Pair stays disabled until the controller arm delay has passed`() {
+        for (needle in listOf(
+            "var armed by remember(state.shownAtMillis) { mutableStateOf(controller.isArmed()) }",
+            "LaunchedEffect(state.shownAtMillis) {",
+            "delay(controller.armRemainingMillis())",
+            "armed = true",
+        )) {
+            assertTrue("PairingDialog.kt must contain `$needle` -- code:\n$dialog", dialog.contains(needle))
+        }
     }
 
     @Test
