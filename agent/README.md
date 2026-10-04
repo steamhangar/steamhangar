@@ -550,10 +550,11 @@ deliberately left running). Pinned by
 the server, exit 1, the probed path and both hints in the log) and
 `TestRun_OneShot_AllowEmptyPostsDespiteZeroReadableLibraries`. The Windows
 default (`C:\Program Files (x86)\Steam`) is still a literal with no
-existence check and no registry lookup; reading Steam's `SteamPath`
-value from `HKCU\Software\Valve\Steam` is the intended post-release default —
-until then `install-task.ps1` checks the default for a `steamapps\`
-directory at install time and warns loudly (see "Windows Scheduled Task"
+existence check and no registry lookup in the agent itself. Since WP
+AGENT-FIX-2, `install-task.ps1` reads Steam's `SteamPath` value from
+`HKCU\Software\Valve\Steam` at install time and writes it to `env.txt`
+when it contains `steamapps\`; otherwise it checks the default for a
+`steamapps\` directory and warns loudly (see "Windows Scheduled Task"
 below).
 
 ### Client identity and renaming (WP AG-0)
@@ -1496,9 +1497,10 @@ available for now.
 
 **The scheduled run is a different launch path, and is *not* expected to
 show this warning:** `install-task.ps1`'s installed task runs
-`vault-agent.exe` via `run-vault-agent.ps1`'s PowerShell call operator
-(`& $AgentPath report`) — a direct process launch, not a shell/Explorer
-invocation. SmartScreen's app-reputation dialog is triggered by the
+`vault-agent.exe` via `run-vault-agent.ps1`'s `Start-Process` with
+redirected output (WP AGENT-FIX-2; before that, the call operator
+`& $AgentPath report`) — either way a direct process launch, not a
+shell/Explorer invocation (output redirection rules out `ShellExecute`). SmartScreen's app-reputation dialog is triggered by the
 shell-launch path (`ShellExecute` / Explorer's "Open File" verb acting on
 the mark-of-the-web), which a scheduled task's own process creation does
 not go through. This claim is stated as an **expectation from how the two
@@ -1602,7 +1604,33 @@ runs, and it does three things before ever touching vault-agent.exe:
 2. `Set-Item Env:$key $value` for each one, so they become real process
    environment variables — the same `VAULT_AGENT_SERVER_URL`/
    `VAULT_AGENT_API_KEY`/etc. names `go/agentconfig` already reads.
-3. `& $AgentPath report`, forwarding its exit code.
+3. Run `vault-agent report` and forward its exit code. With `-LogFile`
+   (what the installed task uses) that is `Start-Process -Wait -PassThru`
+   with stdout and stderr redirected to two temp files, which are then
+   appended to the log byte for byte (WP AGENT-FIX-2, see "The log file"
+   below); without `-LogFile` it is a plain `& $AgentPath report`.
+
+### The log file: plain UTF-8, exactly what vault-agent printed (WP AGENT-FIX-2)
+
+Up to rc9 the wrapper ran `& $AgentPath report *>> $LogFile`. A real
+operator install on Windows 11 / PowerShell 5.1 (2026-10-04) showed what
+that does: vault-agent logs to stderr, PowerShell 5.1 turns every native
+stderr line under a stream redirection into an ErrorRecord, so each line
+came wrapped in `+ CategoryInfo : NotSpecified: (...:String) [],
+RemoteException` / `+ FullyQualifiedErrorId : NativeCommandError`; and
+`*>>` writes UTF-16LE while the wrapper's own `[timestamp] starting/
+finished` lines are UTF-8, so the file mixed encodings and showed a blank
+line between every line. Since AGENT-FIX-2 the agent's stdout and stderr
+go to temp files as OS-level handles (no PowerShell stream involved, so no
+ErrorRecords and no dependence on `$ErrorActionPreference`), and those
+bytes are appended unchanged: the log is plain UTF-8, line for line what
+the agent printed, game names with non-ASCII characters included. Stdout
+is appended before stderr rather than interleaved; `report` writes to
+stderr only, so the order is the agent's. **An existing `vault-agent.log`
+from rc9 or older keeps its old UTF-16 part**; new runs append UTF-8
+after it, so an editor may show the old part garbled. Delete or rename the
+old log once if that bothers you; the wrapper creates a new one on the
+next run.
 
 The Task Action's own command line therefore contains exactly three
 things: the path to `powershell.exe`, the path to the deployed
@@ -1659,7 +1687,9 @@ agent/packaging/windows/
 ├── install-task.ps1
 ├── uninstall-task.ps1
 ├── run-vault-agent.ps1
-└── tests/test-install-uninstall.ps1
+└── tests/
+    ├── test-install-uninstall.ps1   # real-machine harness, run by hand
+    └── test-packaging-unit.ps1      # hermetic, executed in CI (WP AGENT-FIX-2)
 ```
 
 `install-task.ps1 -AgentPath <exe> -ServerUrl <url> -ApiKeyFile <path>
@@ -1671,7 +1701,7 @@ agent/packaging/windows/
 |---|---|
 | `env.txt` | `VAULT_AGENT_SERVER_URL`/`VAULT_AGENT_API_KEY`/`VAULT_AGENT_REPORT_INTERVAL` (`<IntervalMinutes>m`, WP AGENT-FEAT-1)/etc., owner-only ACL (see above) |
 | `run-vault-agent.ps1` | a deployed copy of the wrapper script, so the installed task does not depend on this repo checkout still existing at its original path |
-| `vault-agent.log` (created on first run) | appended stdout+stderr from every `report` invocation — Windows Scheduled Tasks have no built-in per-run log the way `journalctl --user -u ...` gives WP 2.5 for free |
+| `vault-agent.log` (created on first run) | appended stdout+stderr from every `report` invocation, plain UTF-8 since WP AGENT-FIX-2 (see "The log file" above) — Windows Scheduled Tasks have no built-in per-run log the way `journalctl --user -u ...` gives WP 2.5 for free |
 
 `install-task.ps1`'s summary output also always states the client id
 situation (WP AG-0): given `-ClientId`, it echoes that value back marked
@@ -1686,15 +1716,31 @@ use. See "Client identity and renaming" above for what changing it later
 does and does not do.
 
 The same summary states the **library root** situation (WP AGENT-FIX-1
-S1): given `-LibraryRoot`, it echoes the value; omitted, it checks whether
-vault-agent's Windows default `C:\Program Files (x86)\Steam` actually
-contains a `steamapps\` directory and, if not, prints a `WARNING` naming
-`-LibraryRoot` — the install still completes (Steam may be installed
-afterwards), but until the root is right every scheduled run will log
-`report refused` and exit 1 instead of posting an empty list (see
-"Configuration" above for why that refusal exists). No registry lookup is
-performed yet; `HKCU\Software\Valve\Steam\SteamPath` is the intended
-post-release default.
+S1, WP AGENT-FIX-2), resolved in this order:
+
+1. `-LibraryRoot` given: that value, marked `(explicit -LibraryRoot)`.
+2. Otherwise Steam's own install path from the registry,
+   `HKCU\Software\Valve\Steam` value `SteamPath`. Steam stores it with
+   forward slashes and often lowercase (`c:/steam` on the operator's
+   machine); the script turns it into `c:\steam` and uses it only if it
+   contains a `steamapps\` directory. It is then written to `env.txt` as
+   `VAULT_AGENT_LIBRARY_ROOT`, and the summary says
+   `(from HKCU\Software\Valve\Steam\SteamPath, ...)`. A missing key or
+   value is not an error.
+3. Otherwise vault-agent's Windows default `C:\Program Files (x86)\Steam`
+   (nothing written to `env.txt`). The script checks it for a
+   `steamapps\` directory and, if there is none, prints a `WARNING`
+   naming `-LibraryRoot` — the install still completes (Steam may be
+   installed afterwards), but until the root is right every scheduled run
+   will log `report refused` and exit 1 instead of posting an empty list
+   (see "Configuration" above for why that refusal exists). A registry
+   path that exists but has no `steamapps\` is named in the summary as
+   ignored.
+
+The lookup happens once, at install time. If Steam moves later, re-run
+`install-task.ps1` (the key can be left out, see below). vault-agent
+itself still does not read the registry; doing that in the Go agent is a
+possible follow-up, not part of AGENT-FIX-2.
 
 plus the Scheduled Task itself (`VaultAgentReport` by default) with two
 triggers. **Trigger 1:** `-Once` with `-RepetitionInterval` =
@@ -1734,7 +1780,19 @@ a string argument, which — like typing any password into a terminal —
 lands in this PowerShell session's own command history. `-ApiKeyFile`
 (read once, trimmed, then only its resolved value is used) avoids that
 entirely and is the recommended form; the two are mutually exclusive and
-exactly one is required.
+exactly one is required on a first install.
+
+**Re-install without the key (WP AGENT-FIX-2):** when you re-run
+`install-task.ps1` to change something else (`-LibraryRoot`,
+`-IntervalMinutes`, ...) you may leave out both `-ApiKey` and
+`-ApiKeyFile`: if `<ConfigDir>\env.txt` already holds a non-empty
+`VAULT_AGENT_API_KEY`, that key is reused. It is never printed; the
+summary only says `API key : kept from existing env.txt`. The env file is
+rewritten through the same ACL-before-content path as a first install.
+Without such a key, leaving out both is the same usage error (exit 2) as
+before. Note that every other setting is NOT carried over: env.txt is
+rewritten from this run's parameters, so pass `-ClientId`, `-LibraryRoot`
+etc. again if you set them before.
 
 ### Idempotent re-install
 
@@ -1819,6 +1877,29 @@ produced):**
    and the new env file content.
 6. Uninstall removes the task and every file it owns.
 7. A second uninstall on the now-clean state doesn't throw and exits 0.
+
+WP AGENT-FIX-2 added to this harness (not yet run on a real machine at
+the time of writing): step 4 also asserts the log has no
+`NativeCommandError` text and no NUL byte, and a step 5b re-installs
+without `-ApiKey`/`-ApiKeyFile` and asserts the key is kept in `env.txt`,
+never printed, and the ACL is still protected.
+
+**Hermetic unit tests, executed in CI (WP AGENT-FIX-2):**
+`agent/packaging/windows/tests/test-packaging-unit.ps1` runs in the
+`powershell-syntax` job under Windows PowerShell 5.1. It touches only a
+throwaway `%TEMP%` directory: no task registration, no registry write, no
+network. It lifts `install-task.ps1`'s helper functions out of the script
+by name (PowerShell AST) and tests the SteamPath normalization and the
+explicit > registry > default choice against temp directories (the
+registry itself is not faked — a temp HKCU key on a shared machine is not
+acceptable — so only "reading it never throws" is checked live); runs
+`install-task.ps1 -WhatIf` in a child process for the key reuse (exit 0,
+"kept from existing env.txt", key never in the output) and the unchanged
+usage errors (exit 2); and runs `run-vault-agent.ps1` against a fake
+agent `.exe` it compiles with `Add-Type`, which writes to stdout and
+stderr (including a non-ASCII character and a last line without newline)
+and exits 3 — the log must hold those bytes unchanged, no ErrorRecord
+wrapping, no NUL byte, and the wrapper must exit 3.
 
 All checks passed (`agent/packaging/windows/tests/test-install-uninstall.ps1`,
 36 assertions — counted directly from the harness's own PASS-line output,
