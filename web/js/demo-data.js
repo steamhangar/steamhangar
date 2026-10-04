@@ -1652,8 +1652,18 @@ export async function demoRequest(method, path, { body, params } = {}) {
     const id = Number(m[1]);
     const job = findJob(id);
     if (!job) throw notFound(`Unknown job id ${id}`);
-    if (job.type !== "prefill" || job.status !== "running") {
+    if (job.type !== "prefill" || (job.status !== "running" && job.status !== "queued")) {
       throw conflict(`Job ${id} cannot be paused from status ${job.status}`);
+    }
+    if (job.status === "queued") {
+      // WP WEB-FEAT-5: the real API parks a queued prefill at once
+      // (`outcome: "immediate"`) — nothing was running, nothing is stopped.
+      job.paused_at = new Date().toISOString();
+      return jobControlResponse(job, {
+        status: "paused",
+        outcome: "immediate",
+        detail: "Paused while queued: this job had not started, so nothing was running and nothing was stopped.",
+      });
     }
     delete job._demoTicksLeft;
     job.paused_at = new Date().toISOString();

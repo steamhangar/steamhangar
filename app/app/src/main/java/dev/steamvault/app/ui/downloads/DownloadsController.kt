@@ -10,8 +10,17 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.polling.PollingIntervals
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
+import dev.steamvault.app.ui.downloads.logic.BULK_TOAST_MS
+import dev.steamvault.app.ui.downloads.logic.BulkKind
+import dev.steamvault.app.ui.downloads.logic.TOAST_MS
 import dev.steamvault.app.ui.downloads.logic.ExcerptCache
 import dev.steamvault.app.ui.downloads.logic.ExcerptFetchState
+import dev.steamvault.app.ui.downloads.logic.bulkBarState
+import dev.steamvault.app.ui.downloads.logic.bulkPauseTargets
+import dev.steamvault.app.ui.downloads.logic.bulkResumeTargets
+import dev.steamvault.app.ui.downloads.logic.bulkSummary
+import dev.steamvault.app.ui.downloads.logic.runBulkPause
+import dev.steamvault.app.ui.downloads.logic.runBulkResume
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -46,6 +55,11 @@ class DownloadsController(
     var loadError by mutableStateOf<String?>(null)
         private set
     var toast by mutableStateOf<String?>(null)
+        private set
+
+    /** How long the screen shows [toast]; the aggregate bulk toast may carry
+     * a server reason, so it stays longer (web `BULK_TOAST_MS`). */
+    var toastMs: Long = TOAST_MS
         private set
 
     /** Job ids with a job-control call currently in flight FROM THIS
@@ -154,8 +168,16 @@ class DownloadsController(
         }
     }
 
+    /** Every toast goes through here, so a regular toast always resets the
+     * duration a preceding bulk toast raised. */
+    private fun showToast(text: String, durationMs: Long = TOAST_MS) {
+        toastMs = durationMs
+        toast = text
+    }
+
     fun dismissToast() {
         toast = null
+        toastMs = TOAST_MS
     }
 
     // ---- job control ----------------------------------------------------
@@ -186,13 +208,66 @@ class DownloadsController(
         scope.launch {
             try {
                 jobsRepository.prefill(listOf(appid))
-                toast = strings.queuedForDownload()
+                showToast(strings.queuedForDownload())
                 refreshJobsOnce()
             } catch (e: VaultApiError) {
-                toast = e.message ?: strings.actionFailedFallback()
+                showToast(e.message ?: strings.actionFailedFallback())
             } finally {
                 retryBusyAppids = retryBusyAppids - appid
             }
+        }
+    }
+
+    // ---- Pause all / Resume all (WP WEB-FEAT-5, web downloads.js runBulk) --
+
+    /** The bulk run in flight, or null. Both bulk buttons are disabled
+     * while it is set. */
+    var bulkBusy by mutableStateOf<BulkKind?>(null)
+        private set
+
+    /** Whether the Pause all confirm dialog is up. */
+    var pauseAllConfirmOpen by mutableStateOf(false)
+        private set
+
+    /** Pause all's button: asks first (the dialog names the count). */
+    fun requestPauseAll() {
+        if (bulkBusy != null || !bulkBarState(jobs).pauseVisible) return
+        pauseAllConfirmOpen = true
+    }
+
+    fun dismissPauseAll() {
+        pauseAllConfirmOpen = false
+    }
+
+    /** The dialog's "Pause all". Targets are taken from [jobs] as they are
+     * NOW, so anything that finished while the dialog was up is not sent. */
+    fun confirmPauseAll(scope: CoroutineScope) {
+        pauseAllConfirmOpen = false
+        runBulk(scope, BulkKind.PAUSE)
+    }
+
+    /** Resume all's button: no confirmation. */
+    fun resumeAll(scope: CoroutineScope) = runBulk(scope, BulkKind.RESUME)
+
+    private fun runBulk(scope: CoroutineScope, kind: BulkKind) {
+        if (bulkBusy != null) return
+        val pauseTargets = bulkPauseTargets(jobs)
+        val resumeTargets = bulkResumeTargets(jobs)
+        val total = if (kind == BulkKind.PAUSE) pauseTargets.count else resumeTargets.size
+        if (total == 0) return
+        bulkBusy = kind
+        scope.launch {
+            try {
+                val results = if (kind == BulkKind.PAUSE) {
+                    runBulkPause(pauseTargets, { id -> jobsRepository.pause(id) })
+                } else {
+                    runBulkResume(resumeTargets, { id -> jobsRepository.resume(id) })
+                }
+                showToast(bulkSummary(kind, results).text, BULK_TOAST_MS)
+            } finally {
+                bulkBusy = null
+            }
+            refreshJobsOnce() // out-of-cadence refresh, mirrors store.refreshNow()
         }
     }
 
@@ -201,10 +276,10 @@ class DownloadsController(
         busyJobIds = busyJobIds + jobId
         scope.launch {
             try {
-                toast = action()
+                showToast(action())
                 refreshJobsOnce() // out-of-cadence refresh, mirrors store.refreshNow()
             } catch (e: VaultApiError) {
-                toast = e.message ?: strings.actionFailedFallback()
+                showToast(e.message ?: strings.actionFailedFallback())
             } finally {
                 busyJobIds = busyJobIds - jobId
             }

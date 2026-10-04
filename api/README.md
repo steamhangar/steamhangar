@@ -616,7 +616,7 @@ route, see "Auth").
 | GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
-| POST   | `/v1/jobs/{id}/pause`              | **Pause** a running **prefill** job. Same response shape; `outcome` is always `"requested"`. `404` unknown id; `409` for a GC job or any job that is not `running` |
+| POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued or running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5) and `"requested"` for a running one. `404` unknown id; `409` for a GC job or a job that is already `paused` or finished |
 | POST   | `/v1/jobs/{id}/resume`             | **Resume** a paused job — back to `queued`, keeping its original job id, so it runs *before* anything enqueued while it was paused. `outcome: "resumed"`. `404` unknown id; `409` if the job is not `paused` |
 | DELETE | `/v1/cache/{appid}`                | Delete this game's depot directories. `200` with `{appid, deleted_depots[], skipped_shared[], failed[], total_bytes_freed}`; `404` unknown appid or no mappings; `409` while a prefill **or GC** job for the app is queued/running/**paused** (WP 3.12); `422` for `appid < 1`; `500` if the cache-root guards refuse. See "Per-game deletion" below |
 | POST   | `/v1/cache/{appid}/gc`             | Queue a garbage-collection job. Body optional; `{"execute": true}` (a literal JSON boolean) is the only way to delete — **dry run by default**. `202` with `{appid, job_id, status, type, mode, execute, deduplicated}`; `404` unknown appid or no mappings; `422` for `appid < 1`, a non-boolean `execute`, or an unrecognized body field. See "Garbage collection" below |
@@ -1517,13 +1517,31 @@ about (see "The worker slot" below).
 | Endpoint | On a `queued` job | On a `running` job | On a `paused` job | On a finished job |
 |---|---|---|---|---|
 | `DELETE /v1/jobs/{id}` | cancelled immediately, never runs | `stop_request='cancel'`; the worker stops it | cancelled immediately | `409` |
-| `POST /v1/jobs/{id}/pause` | `409` | prefill: `stop_request='pause'`; GC: `409` | `409` (already paused) | `409` |
+| `POST /v1/jobs/{id}/pause` | prefill: paused immediately, never claimed until resumed (WP WEB-FEAT-5); GC: `409` | prefill: `stop_request='pause'`; GC: `409` | `409` (already paused) | `409` |
 | `POST /v1/jobs/{id}/resume` | `409` | `409` | back to `queued`, same job id | `409` |
 
 `404` for an unknown job id everywhere. All three answer `200` with
 `{job_id, status, outcome, detail}`; a client that reads only `outcome` always
 knows whether it still has to poll (`"requested"`) or not (`"immediate"` /
 `"resumed"`).
+
+**Pausing a queued job (WP WEB-FEAT-5, ADR-0016 addendum).** Only one job
+runs at a time and pause releases the worker slot (below), so pausing only
+the running job used to let the worker claim the next queued one at once —
+"pause everything" was impossible. A queued **prefill** job is therefore
+parked at `paused` inside the request (`outcome: "immediate"`): nothing was
+running, nothing is stopped, `started_at`/`log_excerpt` stay as they were,
+`apps.status` is not touched. It is decided under the same `BEGIN IMMEDIATE`
+lock `claim_next_job` takes, so a pause racing the worker's claim resolves one
+way or the other — paused and never claimed, or claimed first and the pause
+becomes the running job's `stop_request` (pinned by
+`test_pause_racing_the_workers_claim_resolves_cleanly`). Such a job counts as
+active like any paused job: dedupe returns it, the scheduler's sweep does not
+stack a second job for its app, and `resume` puts it back in the queue with its
+original id. Clients that pause everything pause the queued jobs **first** and
+the running one last, so the worker finds nothing left to claim. A sweep can
+still queue NEW jobs for other apps afterwards — pausing is not a scheduler
+switch.
 
 ### The status model, and the audit behind it
 

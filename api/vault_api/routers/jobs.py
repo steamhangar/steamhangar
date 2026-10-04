@@ -475,9 +475,16 @@ def pause_job(
     job_id: int,
     open_db: DbOpener = Depends(db_opener),
 ) -> JobControlOut:
-    """Pause a running **prefill** job (WP 3.12). ``404`` / ``409`` otherwise.
+    """Pause a queued or running **prefill** job. ``404`` / ``409`` otherwise.
 
-    **Pause terminates SteamPrefill — there is no wire protocol.** SteamPrefill
+    **Queued (WP WEB-FEAT-5):** parked at ``paused`` inside this request,
+    ``outcome: "immediate"`` — it has not started, so there is nothing to stop,
+    and the worker never claims it until it is resumed. This is what makes
+    "pause all" possible: pause the queued jobs first, then the running one,
+    and the worker finds nothing left to claim.
+
+    **Running (WP 3.12): pause terminates SteamPrefill — there is no wire
+    protocol.** SteamPrefill
     offers no suspend signal, so pausing means killing the subprocess and
     resuming means running it again from the start. That is affordable, not
     wasteful: every chunk the first attempt already stored is served from disk
@@ -487,10 +494,10 @@ def pause_job(
     fully finished, so a non-forced resume skips those outright.
 
     ``409`` for a GC job (GC runs are short and rebuild their plan every time —
-    cancel it instead) and for any job that is not currently ``running``.
+    cancel it instead) and for a job that is already ``paused`` or finished.
 
-    Answers ``200`` immediately with ``outcome: "requested"``: the worker owns
-    the subprocess, so it performs the actual suspension. Poll
+    A running job answers ``200`` immediately with ``outcome: "requested"``:
+    the worker owns the subprocess, so it performs the actual suspension. Poll
     ``GET /v1/jobs/{id}`` until ``status`` is ``"paused"``.
     """
     with open_db() as conn:

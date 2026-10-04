@@ -24,6 +24,11 @@
  * used to patch) — `cardStructuralKey` is exported so library.js's tick
  * handler and this file can never disagree about what "structural" means.
  *
+ * **Capsule pill ground (WP WEB-FIX-9).** The pill's dark ground is drawn
+ * only when it carries a number (cached game); icon-only pills get the
+ * `bare` class (see `pillClassName`) and show just the status disc. The
+ * status word lives in the meta row under the cover, never in the pill.
+ *
  * **Nested-interactive-widget a11y (WP 4a.3 review nit, closed WP 4a.8).**
  * The card is `role="button"` yet contains two REAL nested `<button>`s (the
  * capsule pill and the meta-row icon, both only present when `statusAction`
@@ -185,6 +190,8 @@ export function patchCardVolatile(cardEl, game, kind) {
     } else if (pv) {
       pv.remove();
     }
+    // WP WEB-FIX-9: the ground follows the number (see pillClassName).
+    pill.classList.toggle("bare", !newPillNum);
   }
   const sizeEl = cardEl.querySelector(".meta .size");
   if (sizeEl) sizeEl.textContent = formatBytesGB(game.size_bytes) || "—";
@@ -250,10 +257,29 @@ function buildIcon(kind, { action, gameName }) {
   return btn;
 }
 
+/**
+ * The pill's class list (WP WEB-FIX-9). The dark translucent ground exists
+ * to carry the NUMBER legibly over any cover art (mockup round 6: "status
+ * icon + the number ... over a dark translucent ground"). With no number
+ * to print (every kind but a cached game, Divergence 2) that ground
+ * collapsed to a small grey lozenge around the icon with an empty right
+ * end, read live as "a grey ring with no status word" (user feedback on
+ * rc9, 2026-10-04). Icon-only pills are therefore `bare`: the status disc
+ * stands on the cover by itself (css/app.css `.cappill.bare`). The status
+ * WORD stays in the meta row under the cover, not in the pill: the round-6
+ * rule is that nothing on the card is said twice.
+ * @param {boolean} wantsButton
+ * @param {string|null} num pillNumberText's result
+ * @returns {string}
+ */
+export function pillClassName(wantsButton, num) {
+  return "cappill" + (wantsButton ? " act" : "") + (num ? "" : " bare");
+}
+
 function buildPill(game, kind, action) {
   const wantsButton = !!action;
   const pill = document.createElement(wantsButton ? "button" : "span");
-  pill.className = "cappill" + (wantsButton ? " act" : "");
+  pill.className = pillClassName(wantsButton, pillNumberText(game, kind));
   if (wantsButton) {
     pill.type = "button";
     pill.title = action.title;

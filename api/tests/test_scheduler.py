@@ -1202,6 +1202,26 @@ def test_a_running_job_also_counts_as_already_active(
     assert len(jobs_queue.list_jobs(conn, 10)) == 1
 
 
+def test_a_job_paused_while_queued_still_counts_as_already_active(
+    conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """WP WEB-FEAT-5: "Pause all" parks QUEUED jobs at 'paused'. The next
+    sweep must not stack a second job for such an app — the paused one keeps
+    its place and resumes later; a duplicate would run the app twice."""
+    settings = make_settings(tmp_path)
+    insert_report(conn, "gaming-pc", [440, 730], utc_iso(9))
+    job, _ = jobs_queue.enqueue_prefill(conn, 440)
+    paused = jobs_queue.request_pause(conn, int(job["id"]))
+    assert paused.outcome == jobs_queue.CONTROL_IMMEDIATE
+
+    result = maybe_sweep(conn, settings, local(10))
+
+    assert result.already_active == (440,)
+    assert result.enqueued == (730,)
+    rows = [(j["appid"], j["status"]) for j in jobs_queue.list_jobs(conn, 10)]
+    assert sorted(rows) == [(440, "paused"), (730, "queued")]
+
+
 def test_a_sweep_with_no_targets_still_consumes_the_interval(
     conn: sqlite3.Connection, tmp_path: Path
 ) -> None:

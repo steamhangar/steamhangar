@@ -19,10 +19,12 @@
   background:var(--bg);
   border-bottom:1px solid var(--line-soft);
 }
+/* WP WEB-FIX-9: the product name is "SteamHangar" everywhere (tab title,
+   onboarding wordmark, Android app label) — no uppercase transform here.
+   Letter-spacing tightened from the all-caps .6px to suit mixed case. */
 .brand{
   font-family:var(--cond);
-  text-transform:uppercase;
-  letter-spacing:.6px;
+  letter-spacing:.2px;
   font-weight:700;
   font-size:16px;
 }
@@ -479,6 +481,27 @@ button.cappill{ cursor:pointer; transition:transform .12s ease, box-shadow .12s 
 }
 button.cappill:active{ transform:scale(.93); }
 .card:active .cap button.cappill{ transform:none; }
+/* WP WEB-FIX-9: an icon-only pill (`.bare`, set by game-card.js's
+   pillClassName whenever there is no number to print) drops the ground.
+   The ground exists to carry the number over the artwork; around a lone
+   icon it was a small grey lozenge with an empty right end (8px right
+   padding, nothing in it), read on rc9 as "a grey ring where the status
+   word should be". The status disc now stands on the cover by itself,
+   with a drop shadow for contrast on light art (filter, not box-shadow on
+   the .sic: the running badge's clip-path would cut a box-shadow off).
+   Padding stays (symmetric now) so the tap target and the focus ring keep
+   their size; the hover ring returns as a circle around the disc.
+   Selectors carry `.cap` so they outrank `.grid.cols3 .cappill` below by
+   specificity, not by source order. */
+.cap .cappill.bare{
+  background:transparent; box-shadow:none; padding:3px;
+  -webkit-backdrop-filter:none; backdrop-filter:none;
+  filter:drop-shadow(0 1px 2.5px rgba(0,0,0,.6));
+}
+.grid.cols3 .cap .cappill.bare{ padding:2px; }
+@media (hover:hover) and (pointer:fine){
+  .cap button.cappill.bare:hover{ box-shadow:inset 0 0 0 1px rgba(255,255,255,.34); }
+}
 
 .meta{
   display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim);
@@ -817,6 +840,13 @@ body.selecting .app:has(> :where(.decision-panel:not([hidden]))) > .view-root{ p
 .dl-head{ margin-bottom:2px; }
 .dl-head h1{ margin:0 0 2px; }
 .dl-sub{ display:block; font-size:11px; font-weight:500; color:var(--dim-2); letter-spacing:.3px; }
+/* WP WEB-FEAT-5: Pause all / Resume all under the heading, plus one note
+   line. The bar is [hidden]-toggled and display:flex, so it needs the
+   [hidden] guard (docs/LEARNINGS.md WP 4a.8). Buttons wrap at phone width. */
+.dl-bulk{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:10px 0 0; }
+.dl-bulk[hidden]{ display:none; }
+.dl-bulk-acts{ display:flex; flex-wrap:wrap; gap:8px; }
+.dl-bulk-note{ margin:0; flex:1 1 220px; min-width:0; font-size:11px; line-height:1.5; color:var(--dim-2); }
 
 h4.sec{
   margin:18px 0 8px; font-size:10.5px; font-weight:700;
@@ -842,6 +872,13 @@ h4.sec[hidden]{ display:none; }
 .jobtop > div{ min-width:0; } /* WP WEB-FIX-3: the name column may shrink beside the nowrap badge */
 .jobtop .sm{ font-size:11px; color:var(--dim-2); font-family:var(--mono); margin-top:2px; font-variant-numeric:tabular-nums; }
 .badge{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; flex:none; white-space:nowrap; }
+/* WP WEB-FIX-9: the Downloads job badge (icon + word, a direct child of
+   .jobtop; the clients sheet wraps its badges in .pcs-badges instead)
+   centres on the two-line name block beside it, the way the History rows
+   below centre their icon on the same name + job line. `.jobtop`'s
+   flex-start pinned it to the top edge of the name, about 7px above the
+   block's middle, read on rc9 as "the pause symbol is shifted upward". */
+.jobtop > .badge{ align-self:center; }
 .jobacts{ display:flex; gap:8px; justify-content:flex-end; margin-top:11px; flex-wrap:wrap; }
 /* what pause/cancel actually cost the queue — stated, not hidden */
 .holdnote, .stopnote{
@@ -1830,6 +1867,7 @@ body.onboarding .nav{ display:none; }
   .grid.cols3 .cap .name{ left:9px; right:9px; bottom:8px; font-size:14.5px; letter-spacing:.4px; }
   .grid.cols3 .cappill{ left:7px; top:7px; min-height:23px; padding:3px 8px 3px 3px; gap:5px; font-size:10.5px; }
   .grid.cols3 .cappill .sic{ --sz:17px; }
+  .grid.cols3 .cap .cappill.bare{ padding:3px; } /* WP WEB-FIX-9: the bare pill's base padding */
   .grid.cols3 .card{ gap:7px; }
   /* NB: no separate `.grid.cols3 .meta .size` reset line here (Opus review
      nitpick, WP 4e.2 fix round) — `.meta .size` carries no font-size rule of
