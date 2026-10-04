@@ -1,7 +1,7 @@
-# SteamHangar: install vault-agent 0.1.0-rc10 for this Windows user (no admin rights needed).
-# Paste into a normal PowerShell window. It contains no key: it asks for the hangar API key
-# (use the Copy key button in SteamHangar, then paste at the prompt).
 & {
+# SteamHangar: install vault-agent 0.1.0-rc10 for this Windows user (no admin rights needed).
+# Paste all of it into a normal PowerShell window. It contains no key: when it asks for the
+# hangar API key, press Copy key in SteamHangar and paste at the prompt.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

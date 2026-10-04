@@ -4,7 +4,14 @@
  *
  * One PowerShell block the operator pastes into a normal (non-admin)
  * PowerShell 5.1 window on the gaming PC. THE BLOCK CONTAINS NO KEY (user
- * decision "Weg A" on review finding 1, 2026-10-04). It:
+ * decision "Weg A" on review finding 1, 2026-10-04). The whole command is
+ * ONE script block invoked once, `& { ... }`, first line to last: a console
+ * that types a paste line by line (Windows Terminal, conhost right-click)
+ * runs each complete top-level statement as it arrives, so a top-level
+ * Read-Host would read the next pasted line as the key. Inside the block
+ * PowerShell keeps reading until the closing brace, and the prompt appears
+ * only after the whole paste is in. Nothing relies on top-level scope (all
+ * variables are local to the block). It:
  *
  *  1. asks for the key with `Read-Host -AsSecureString` (the window echoes
  *     only asterisks; the user pastes it from the sheet's separate
@@ -205,10 +212,16 @@ function keySourceLines() {
 export function windowsInstallSnippet({ version, serverUrl }) {
   const assets = releaseAssets(version);
   const lines = [
-    `# SteamHangar: install vault-agent ${version} for this Windows user (no admin rights needed).`,
-    "# Paste into a normal PowerShell window. It contains no key: it asks for the hangar API key",
-    "# (use the Copy key button in SteamHangar, then paste at the prompt).",
+    // ONE top-level statement (coordinator must-fix): a console that types a
+    // multi-line paste line by line runs every complete statement as it
+    // arrives, so a Read-Host at top level would swallow the next pasted
+    // line as the key. Inside `& { ... }` PowerShell reads continuation
+    // lines up to the closing brace before running anything; the prompt
+    // comes only after the whole paste is in. Comments go inside too.
     "& {",
+    `# SteamHangar: install vault-agent ${version} for this Windows user (no admin rights needed).`,
+    "# Paste all of it into a normal PowerShell window. It contains no key: when it asks for the",
+    "# hangar API key, press Copy key in SteamHangar and paste at the prompt.",
     "$ErrorActionPreference = 'Stop'",
     "$ProgressPreference = 'SilentlyContinue'",
     "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12",

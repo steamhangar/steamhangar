@@ -171,6 +171,28 @@ test("MUTATION TARGET: Weg A — the key is asked for as a SecureString and chec
   for (const k of ["", "ü", "a\tb", "a\u007fb", null]) assert.equal(isInstallableKey(k), false, JSON.stringify(k));
 });
 
+test("MUTATION TARGET: the command is ONE top-level statement, `& { ... }`, so a line-by-line paste runs nothing before the end", () => {
+  const nonEmpty = lines.filter((l) => l.trim() !== "");
+  assert.equal(nonEmpty[0], "& {", "first non-empty line opens the block");
+  assert.equal(nonEmpty[nonEmpty.length - 1], "}", "last non-empty line closes it");
+  // Parse-level: with string literals and comments removed, the brace depth
+  // never returns to 0 before the last line, i.e. no second top-level
+  // statement (a comment line, a Read-Host) sits outside the block.
+  let depth = 0;
+  nonEmpty.forEach((line, i) => {
+    const code = line.trim().startsWith("#") ? "" : line.replace(/'(?:[^']|'')*'/g, "''").replace(/"[^"]*"/g, '""');
+    if (i > 0) assert.ok(depth > 0, `line ${i + 1} is outside the block: ${line}`);
+    for (const ch of code) {
+      if (ch === "{") depth++;
+      else if (ch === "}") depth--;
+    }
+    if (i < nonEmpty.length - 1) assert.ok(depth > 0, `the block closes early at line ${i + 1}: ${line}`);
+  });
+  assert.equal(depth, 0, "balanced at the end");
+  const ask = lines.findIndex((l) => l.includes("Read-Host"));
+  assert.ok(ask > 0 && lines[ask].startsWith("$secureKey"), "the prompt is inside the block");
+});
+
 test("PowerShell 5.1: no &&, ||, ??, ?. or ternary outside string literals", () => {
   for (const line of lines) {
     if (line.startsWith("#")) continue;

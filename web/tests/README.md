@@ -3118,3 +3118,20 @@ something else; the temporary textarea not removed; Copy key outside the
 Show gate (built with the sheet); the uninstallable-key note removed.
 
 Suite: **1186 tests, 1186 pass, 0 fail**.
+
+Paste behaviour (coordinator must-fix): a console that types a multi-line
+paste line by line (Windows Terminal, conhost right-click) runs every
+complete top-level statement as it arrives, so a top-level `Read-Host`
+would have taken the next pasted line as the key. The whole command is now
+ONE statement, `& { ... }` from its first to its last non-empty line (the
+comment lines moved inside); PowerShell reads continuation lines up to the
+closing brace before running anything, so the prompt appears only after
+the whole paste is in. Nothing relies on top-level scope. The on-screen
+steps say: paste the whole command, then, at the prompt, press Copy key
+and paste the key. `agent-install.test.js` checks it at parse level (first
+and last non-empty lines, brace depth never back to 0 in between, string
+literals and comments ignored); the wiring test pins the step text; the
+CI-parsed fixture is regenerated. Mutations, both killed: a comment line
+back above `& {`; the prompt moved in front of the block.
+
+Suite: **1187 tests, 1187 pass, 0 fail**.

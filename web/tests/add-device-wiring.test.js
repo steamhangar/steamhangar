@@ -363,6 +363,7 @@ test("MUTATION TARGET: 'Copy key' exists only after Show and copies the stored k
   const btn = reveal("windows").querySelector('[data-role="agent-copy-key"]');
   assert.equal(btn.textContent, "Copy key");
   assert.match(reveal("windows").textContent, /never part of the command/);
+  assert.match(reveal("windows").textContent, /Paste the whole command at once; it runs only after the last line is in\. When it then asks "Hangar API key \(paste it, then press Enter\)", press Copy key/);
   assert.match(reveal("windows").textContent, /clipboard history or cloud clipboard sync/);
 
   // Async clipboard (secure context).
