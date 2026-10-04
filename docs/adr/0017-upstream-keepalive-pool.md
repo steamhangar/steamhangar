@@ -11,10 +11,10 @@ exception: upstream keepalive pool (WP CORE-FEAT-1, CGNAT fix stage 2)".
 Follow-up (2026-10-04): the pool caps idle connections per listed name,
 not in-flight ones, and unlisted names stay unpooled; both drained the CGN
 quota on the production line. [ADR-0021](0021-one-pooled-upstream-and-global-connection-cap.md)
-(Proposed, WP CORE-FIX-4) proposes one pooled upstream for every MISS plus
-a global `limit_conn` cap. If accepted, it changes this ADR's `proxy_pass`
-and Host lines and decisions 1 and 3; the per-name groups stay as its
-legacy mode.
+(Accepted 2026-10-04, WP CORE-FIX-4) sends every MISS to one pooled
+upstream and adds a global `limit_conn` cap. It changes this ADR's
+`proxy_pass` and Host lines and decisions 1 and 3; the per-name groups
+stay as the rollback mode (`VAULT_UPSTREAM_EDGE` empty).
 
 Evidence labels used below: **(repo)** read in this repository, **(nginx
 docs)** `ngx_http_upstream_module` documentation and `CHANGES` as read on

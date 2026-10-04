@@ -1,9 +1,11 @@
 # ADR-0021: One pooled upstream for every MISS, with a global connection cap (CORE-FIX-4, roadmap D7)
 
 Date: 2026-10-04
-Status: Proposed (draft for the user's decision, "Open decisions" below).
-No code yet. If accepted it replaces ADR-0017's routing model (each MISS
-goes to the edge the client named) and adds a global cap. ADR-0017's
+Status: Accepted 2026-10-04 (user decisions below, "Decisions"; proof
+steps P1-P3 run by the operator the same day, "Proof (measured)"). Code
+follows in WPs CORE-FIX-4a..4c, plus the separate, droppable CORE-FIX-4d.
+It replaces ADR-0017's routing model (each MISS goes to the edge the
+client named) and adds a global cap. ADR-0017's
 mechanism (a resolving, pooled `upstream` group matched by name) is
 reused, not reverted. Needs a freeze exception note in ADR-0016 (draft
 text in "Implementation plan", step 12).
@@ -136,8 +138,8 @@ Steam client treats a 503 like the 502s it already survives).
   any chunk.
 - **Tokens.** The WP 0.3 client log had 0 non-conforming URIs: no query
   string, so no CDN auth token on Valve-edge chunk URLs (repo, one client,
-  2026-08). Not re-checked for current clients. Step P3 below checks it
-  on production.
+  2026-08). Re-checked on production on 2026-10-04: no token anywhere in
+  the vault-core log (P3, "Proof (measured)").
 - **Host header.** The PoC evidence holds for the shape "Host = the name
   we dial". Sending the *client's* Host to a *different* edge is only
   supported by the byte-identical observation above, which is one IP and
@@ -246,32 +248,56 @@ lacks.
 `max_conns` is not used: `limit_conn` is exact, global, and works on both
 paths. `max_conns` would add a second 502 path that counts per A record.
 
-## Open decisions for the user
+## Decisions (user, 2026-10-04)
 
-1. **Option.** Weg A (B1 + cap, recommended) / Weg B (A: caps on the
-   per-name model) / Weg C (D: HAProxy sidecar, after `v0.1.0`).
-2. **Default of `VAULT_UPSTREAM_EDGE`.** Weg A: on out of the box
-   (compose default `dist-fra1.discovery.steamserver.net`; explicitly
-   empty = legacy) (recommended, because DS-Lite is the normal case in
-   Germany). Weg B: off by default, operators opt in.
-3. **Cap C.** Weg A: default 16, range 1..64, no off switch, and vault-core
-   refuses to boot when C < `VAULT_PREFILL_MAX_THREADS` (forwarded to
-   vault-core for that check) (recommended). Weg B: default 8, the same as
-   prefill (the client then shares prefill's slots). Weg C: 32 (more
-   throughput, sockets ≤ 64, above the measured 50).
-4. **Status over the cap.** Weg A: 503, nginx's default (recommended).
-   Weg B: 429. Neither is measured with the Steam client; 503 is in the
-   5xx class the client already survived.
-5. **The 443 passthrough budget** (ADR-0020, up to 256 sessions through
-   the same CGN). Weg A: lower `limit_conn vault_tls_total` to 32 and
-   `vault_tls_client` to 16 in a separate, droppable package CORE-FIX-4d
-   (recommended; the requirement is "neither prefill nor client can
-   drain"). Weg B: leave it, documented as an open budget.
-6. **Proof first.** Weg A: the operator runs P1-P3 below before any code
-   (recommended; about 10 minutes, sequential requests only). Weg B:
-   build now and prove on the rc.
+All six answered with the recommended option:
 
-## Prove before building (operator, production line, sequential, a few requests)
+1. **Option: B1 + global cap.** Every allowed MISS goes to one pooled
+   edge name (dial target and Host header); one `limit_conn` in `@miss`.
+   Option A (caps on the per-name model) and D (HAProxy sidecar) are not
+   built; D stays the fallback if production shows B1's throughput or
+   its 503 behaviour to be unacceptable.
+2. **`VAULT_UPSTREAM_EDGE` is on out of the box** through the compose
+   default `dist-fra1.discovery.steamserver.net`. Explicitly empty =
+   rollback to the ADR-0017 per-name path (`VAULT_UPSTREAM_POOL_HOSTS`).
+3. **Cap C = `VAULT_UPSTREAM_MAX_CONNS`:** default 16, range 1..64, no off
+   switch. vault-core refuses to boot when C < `VAULT_PREFILL_MAX_THREADS`
+   (forwarded to vault-core for that check).
+4. **Status over the cap: 503** (nginx's default, set explicitly).
+5. **443 passthrough budget:** lower `limit_conn vault_tls_total` from 256
+   to 32 and `vault_tls_client` from 64 to 16, as the separate, droppable
+   package CORE-FIX-4d (amends ADR-0020).
+6. **Proof first:** done by the operator before any code; results below.
+
+## Proof (measured, operator, production line, 2026-10-04)
+
+- **P1 A records.** `dig +short A dist-fra1.discovery.steamserver.net
+  @1.1.1.1` -> `162.254.197.9`, `162.254.197.25`: two peers, so a failed
+  connect gets one retry on the other address
+  (`proxy_next_upstream_tries 2`). `dig +short lancache.steamcontent.com
+  @1.1.1.1` -> `origin-tier2.steampipe.steamcontent.com` ->
+  `steampipe-origin-tier2.steamcontent.com` ->
+  `cache-origin.steampipe.steamcontent.akadns.net` ->
+  `dist-fra1.discovery.steamserver.net` -> the same two addresses. From
+  the operator's line, Valve's own LAN-cache name ends at this edge,
+  which confirms the default (the 2026-08-05 repo observation still
+  holds).
+- **P2 One edge serves a chunk another edge was asked for.** The same
+  chunk `/depot/4358691/chunk/f1ea53af2e11db025852ba989c108bcadbfb1113`,
+  fetched via public IP from `dist-fra1.discovery.steamserver.net`
+  (Host = that name) and from `cache9-ams1.steamcontent.com` (Host = that
+  name): both `200`, 11632 bytes, sha256
+  `2f3667c293bd09ac51d69034fdf136955e1ca97cdbab70adf533fe2b32638f63` for
+  both. This proves the B1 shape (Host = the name we dial). P2b, a foreign
+  Host on an edge, was not run; B2 stays unproven and is not built.
+- **P3 Tokens.** `grep -c 'uri="[^"]*token='` over the whole vault-core log
+  -> `0`. No logged MISS URI carries a token, so no URL is tied to the
+  edge it was issued for.
+
+With two peers, option B's socket bound stays ≤ 2C (C in flight + C
+idle) and ≤ C per peer (inference, nginx src).
+
+## Proof recipe (as run; for re-checking or another operator's edge)
 
 Pin public IPs as in ADR-0017 "Prove before building" step 0; never test
 through the LAN rewrite.
@@ -292,10 +318,16 @@ through the LAN rewrite.
   must be 0. A non-zero count means some URLs carry tokens bound to a
   host, and B needs a rethink.
 
-## Implementation plan (follow-up code WP, after the decisions)
+## Implementation plan (follow-up code WPs, per the decisions)
 
-Split for the ≤ 2 h rule: **4a** steps 1-6, **4b** steps 7-8, **4c**
-steps 9-12, **4d** (decision 5A only) step 13.
+Split for the ≤ 2 h rule, in this order:
+
+- **CORE-FIX-4a** (core/, about 2 h): steps 1-6.
+- **CORE-FIX-4b** (CI and verify-stack, about 2 h): steps 7-8.
+- **CORE-FIX-4c** (deploy and docs, about 1 h): steps 9-12.
+- **CORE-FIX-4d** (core/ stream block, about 1 h, separate and droppable,
+  decision 5): step 13. 4a-4c must not depend on it; it can ship in the
+  same rc or be dropped without touching them.
 
 1. **`core/docker/28-vault-upstream-pool.sh`** (extend, keep one hook).
    It gets two new inputs, `VAULT_UPSTREAM_EDGE` and
@@ -307,9 +339,10 @@ steps 9-12, **4d** (decision 5A only) step 13.
      refused.
    - `VAULT_UPSTREAM_MAX_CONNS`: digits only, no leading zero, 1..64.
      Empty means the default 16; `0`, `off` and garbage are refused (no
-     off switch). If `VAULT_PREFILL_MAX_THREADS` is set and valid, C below
-     it is refused with a message naming both. Garbage in that variable
-     is ignored here, because vault-api validates it.
+     off switch, decision 3). If `VAULT_PREFILL_MAX_THREADS` is set and
+     valid, C below it is refused with a message naming both (decision 3).
+     Garbage in that variable is ignored here, because vault-api validates
+     it.
    - Edge mode render (`vault-upstream-pool.conf`):
      `upstream <edge> { zone vault_edges 256k; server <edge> resolve
      max_fails=0; keepalive <C>; keepalive_timeout 50s; }` plus
@@ -331,7 +364,7 @@ steps 9-12, **4d** (decision 5A only) step 13.
    - http: `limit_conn_zone $server_port zone=vault_upstream_total:1m;`
      (the constant-key form the stream block already uses).
    - `@miss`, after the 403 `if`: `include vault-upstream-cap.conf;` and
-     `limit_conn_status 503;`.
+     `limit_conn_status 503;` (decision 4).
    - `proxy_set_header Host $vault_upstream_target;` and
      `proxy_pass http://$vault_upstream_target$request_uri;`.
    - `log_format vault`: append ` host="$host"
@@ -383,7 +416,7 @@ steps 9-12, **4d** (decision 5A only) step 13.
      answers are 503 within 1 s; nothing is stored for them; the access
      log has 8 `limit_conn=REJECTED` lines, and every line has `host="`.
    - **New 10h, failover:** the fake resolver gives `fake1` two A
-     records, one of them a closed port (ECONNREFUSED, the same
+     records (the real edge has two, P1), one of them a closed port (ECONNREFUSED, the same
      `FT_ERROR` path as `113`). All requests answer 200; there is no
      `no live upstreams`.
    - `113` itself: an `iptables ... -j REJECT --reject-with
@@ -392,9 +425,10 @@ steps 9-12, **4d** (decision 5A only) step 13.
      quota and mapping linger cannot be simulated locally.
    - 508 loop: the resolver points the edge name at vault-core and
      expects 508 for every MISS.
-   - Rate cap with edge mode on (ADR-0015 decision 5A carried over).
+   - Rate cap with edge mode on (ADR-0017 decision 5A carried over).
 9. **`deploy/compose.yaml` and `deploy/.env.example`.** Forward
-   `VAULT_UPSTREAM_EDGE` (`${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}`),
+   `VAULT_UPSTREAM_EDGE` (`${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}`,
+   decision 2: on out of the box, explicitly empty = rollback),
    `VAULT_UPSTREAM_MAX_CONNS` (`${VAULT_UPSTREAM_MAX_CONNS-}`) and
    `VAULT_PREFILL_MAX_THREADS` to vault-core. The `.env.example` stanza
    covers the dig one-liner for the geo-correct name, the cap, and "empty
@@ -407,14 +441,19 @@ steps 9-12, **4d** (decision 5A only) step 13.
     commands of "After rollout".
 11. **Plan and learnings.** `docs/PROJECT_PLAN.md` §11 item 13: tick D7
     and rewrite the release-notes item (the known limitation becomes "fixed
-    in rc10; legacy mode keeps it"). Set this ADR to Accepted with the
-    decisions and add a status pointer in ADR-0017. `docs/LEARNINGS.md`:
+    in rc10; legacy mode keeps it"). Update the ADR-0017 pointer to the
+    shipped state. `docs/LEARNINGS.md`:
     the r × L model, `max_conns` being per A record with an immediate 502,
     and `limit_conn` counting in a named location.
 12. **ADR-0016 freeze note, draft text:**
     "Addendum 2026-10-0X — freeze exception: one pooled upstream and a
     global connection cap (WP CORE-FIX-4, roadmap D7). User decision
-    2026-10-04: fix before `v0.1.0`. ADR-0021 accepted with <answers>.
+    2026-10-04: fix before `v0.1.0`. ADR-0021 accepted with the answers
+    1 B1 + global cap, 2 edge on out of the box
+    (`dist-fra1.discovery.steamserver.net`, empty = rollback), 3 C default
+    16 in 1..64 with no off switch and boot refused below
+    `VAULT_PREFILL_MAX_THREADS`, 4 status 503, 5 passthrough lowered to
+    32/16 as CORE-FIX-4d, 6 proof run by the operator (P1-P3 green).
     Scope: core/ — `28-vault-upstream-pool.sh` (`VAULT_UPSTREAM_EDGE`,
     `VAULT_UPSTREAM_MAX_CONNS`, cap include), both nginx configs (zone,
     cap include, `limit_conn_status 503`, `$vault_upstream_target` in
@@ -424,11 +463,18 @@ steps 9-12, **4d** (decision 5A only) step 13.
     frozen): compose forwarding, `.env.example`, verify-stack section 10,
     READMEs. Not in this exception: api/ (no change; the event sweep
     already counts only 2xx as success, `api/vault_api/event_sweep.py`),
-    the stream block unless decision 5A (then CORE-FIX-4d, its own
-    line). Every other frozen-path change still needs its own decision."
-13. **CORE-FIX-4d (decision 5A only).** `vault_tls_total` 256 → 32 and
-    `vault_tls_client` 64 → 16 in both configs; update drift step 2f
-    `TLS_TOTAL`; ADR-0020 addendum; verify-stack section 5/TLS limits.
+    the stream block, except CORE-FIX-4d on its own line
+    (`vault_tls_total` 256 -> 32, `vault_tls_client` 64 -> 16, droppable).
+    Every other frozen-path change still needs its own decision."
+13. **CORE-FIX-4d (decision 5, separate and droppable).**
+    `limit_conn vault_tls_total` 256 → 32 and `limit_conn vault_tls_client`
+    64 → 16 in both configs and wherever the pinned stream lists repeat
+    them (grep `vault_tls_total`/`vault_tls_client` in `core/docker/`,
+    `.github/scripts/` and `deploy/tests/`); `TLS_TOTAL` in drift step
+    2f; an ADR-0020 addendum with the new numbers; the verify-stack TLS
+    limit checks; the passthrough numbers in `core/README.md` and
+    `deploy/README.md`. Freeze note: its own line in the step 12
+    addendum.
 
 ## After rollout: what the operator measures (production line)
 
