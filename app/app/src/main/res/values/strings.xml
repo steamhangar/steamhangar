@@ -20,6 +20,7 @@
     <string name="status_error">Failed</string>
     <string name="status_warn">Warning</string>
     <string name="status_cancelled">Cancelled</string>
+    <string name="status_notinuse">Not in use</string>
 
     <string name="reduced_motion_on">Reduced motion: ON (animations disabled)</string>
     <string name="reduced_motion_off">Reduced motion: OFF (animations enabled)</string>

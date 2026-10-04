@@ -13,7 +13,7 @@ import dev.steamvault.app.ui.theme.VaultColors
 
 /** Which glyph shape a given [StatusKind] uses — ported from `KIND_GLYPH` in
  *  web/js/components/status-icon.js. */
-enum class GlyphShape { CHECK, DOWNLOAD, REFRESH, BANG, PAUSE, STOP }
+enum class GlyphShape { CHECK, DOWNLOAD, REFRESH, BANG, PAUSE, STOP, DASH }
 
 /** [StatusKind] -> [GlyphShape], 1:1 with web's `KIND_GLYPH` table. */
 fun glyphFor(kind: StatusKind): GlyphShape = when (kind) {
@@ -27,6 +27,7 @@ fun glyphFor(kind: StatusKind): GlyphShape = when (kind) {
     StatusKind.ERROR -> GlyphShape.BANG
     StatusKind.WARN -> GlyphShape.BANG
     StatusKind.CANCELLED -> GlyphShape.STOP
+    StatusKind.NOTINUSE -> GlyphShape.DASH
 }
 
 /**
@@ -73,6 +74,8 @@ fun backgroundFor(kind: StatusKind): Color = when (kind) {
     StatusKind.ERROR -> VaultColors.StatusDanger
     StatusKind.WARN -> VaultColors.StatusStale
     StatusKind.CANCELLED -> VaultColors.Dim2
+    // web theme.css: `.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); color:var(--text); }`
+    StatusKind.NOTINUSE -> VaultColors.Dim2
 }
 
 /**
@@ -83,6 +86,7 @@ fun backgroundFor(kind: StatusKind): Color = when (kind) {
  */
 fun inkFor(kind: StatusKind): Color = when (kind) {
     StatusKind.CANCELLED -> VaultColors.Text
+    StatusKind.NOTINUSE -> VaultColors.Text
     else -> VaultColors.StatusIconInk
 }
 

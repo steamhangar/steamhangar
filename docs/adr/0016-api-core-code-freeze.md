@@ -434,3 +434,37 @@ because their reports state no interval and 30 minutes is assumed.
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-04 — freeze exception: Steam tool apps never prefilled (WP API-FIX-4)
+
+User decision 2026-10-04 ("Weg A"): a bug fix from the production rollout,
+inside the freeze. The api/ freeze opens for this one fix.
+
+The bug: every Windows agent reports app 228980, "Steamworks Common
+Redistributables", as installed (Steam installs it next to games). The
+scheduler enqueued a prefill for it on every sweep, SteamPrefill cannot
+prefill it (not an owned app), every job ended `error`, and the library
+showed "App 228980 / Failed / Installed but not cached / Retry download".
+Its depots are shared depots, cached together with the games that use them.
+
+Scope of the exception, all in WP API-FIX-4:
+
+- api/: the new module `vault_api/tool_apps.py` (the one fixed list, today
+  only 228980, with name and reason); `scheduler.compute_targets` drops
+  tool apps from the installed and the cached source (`TargetSet` /
+  `SweepResult.skipped_tool_appids`, one log fragment);
+  `event_sweep.run_miss_trigger` skips them before the cap
+  (`TriggerResult` / `SweepOutcome.skipped_tool`); `POST /v1/prefill/cached`
+  never selects them; `POST /v1/prefill` answers `422` with a string
+  `detail` for a body that names one, before queueing anything;
+  `jobs.enqueue_prefill` raises `ToolAppNotPrefillable` as the last line;
+  `GET /v1/games` and `GET /v1/games/{appid}` gain two additive fields,
+  `tool_app` and `tool_app_name`. No schema change, no setting, no change
+  to agent reports, `installed_on`, mapping or job-status semantics.
+- Not frozen, listed for completeness: web (card, detail sheet, bulk bar,
+  demo shapes), Android (models, card, list row, detail sheet, bulk plan,
+  the ported neutral `notinuse` status kind with its dash glyph), tests and
+  docs (api/README.md "Steam tool apps").
+
+Every other frozen-path change still needs its own user decision and note
+here.

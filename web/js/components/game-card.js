@@ -61,6 +61,10 @@ import {
   installedBadgeText,
   installedBadgeCompactText,
   INSTALLED_BADGE,
+  isToolApp,
+  statusIconKind,
+  statusWordFor,
+  gameDisplayName,
 } from "../lib/game-status.js";
 import { formatBytesGB } from "../lib/format.js";
 import { coverArtUrl, fallbackHues, fallbackPattern } from "../lib/cover-art.js";
@@ -226,7 +230,7 @@ function buildCover(game) {
 }
 
 function buildIcon(kind, { action, gameName }) {
-  const icon = createStatusIcon(kind);
+  const icon = createStatusIcon(statusIconKind(kind));
   if (!action) {
     // No action -> a plain, non-focusable span (see createStatusIcon). The
     // meta row always shows the SAME status word right next to this icon
@@ -255,7 +259,7 @@ function buildPill(game, kind, action) {
     pill.title = action.title;
     pill.setAttribute("aria-label", `${action.title} — ${displayName(game)}`);
   }
-  const icon = createStatusIcon(kind);
+  const icon = createStatusIcon(statusIconKind(kind));
   // The pill's icon is always redundant with the meta row's visible status
   // word on the SAME card (round 6 gave every layout that word back) — hide
   // it from assistive tech whether or not the pill itself is a button: a
@@ -295,7 +299,10 @@ function buildPill(game, kind, action) {
  * `web/tests/game-card.test.js` covers it directly against the fake DOM.
  */
 export function displayName(game) {
-  return game.name && game.name.trim() ? game.name.trim() : `App ${game.appid}`;
+  // WP API-FIX-4: lib/game-status.js's gameDisplayName adds the tool app's
+  // server-supplied name ("Steamworks Common Redistributables") between the
+  // vault name and the `App {appid}` fallback.
+  return gameDisplayName(game);
 }
 
 /**
@@ -329,7 +336,7 @@ function installedAriaFragment(game, kind) {
  * since a size-only tick (no structural change) would otherwise leave a
  * stale byte count in the announced name. */
 function cardAccessibleLabel(game, kind) {
-  const parts = [displayName(game), STATUS_LABEL[kind] || STATUS_LABEL.none];
+  const parts = [displayName(game), statusWordFor(kind, STATUS_LABEL)];
   const sizeText = formatBytesGB(game.size_bytes);
   if (sizeText) parts.push(sizeText);
   const installedText = installedAriaFragment(game, kind);
@@ -356,7 +363,9 @@ export function buildCard(game, ctx) {
   const action = statusAction(game, liveJob, selecting);
 
   const card = document.createElement("div");
-  card.className = "card" + (picked ? " picked" : "");
+  // WP API-FIX-4: a Steam tool app is shown muted (css/app.css `.card.tool`),
+  // not hidden — it is real and installed, just never downloaded on its own.
+  card.className = "card" + (picked ? " picked" : "") + (isToolApp(game) ? " tool" : "");
   card.dataset.appid = String(game.appid);
   card.dataset.dk = kind;
   card.setAttribute("role", "button");
@@ -403,7 +412,7 @@ export function buildCard(game, ctx) {
   meta.appendChild(buildIcon(kind, { action, gameName: displayName(game) }));
   const state = document.createElement("span");
   state.className = "state tx-" + kind;
-  state.textContent = STATUS_LABEL[kind] || STATUS_LABEL.none;
+  state.textContent = statusWordFor(kind, STATUS_LABEL);
   meta.appendChild(state);
   // Unlike the pill (which omits the number entirely rather than fabricate
   // one — see pillNumberText), the list/meta size column always shows

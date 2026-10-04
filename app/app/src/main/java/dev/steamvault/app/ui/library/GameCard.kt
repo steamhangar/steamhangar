@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.ui.library.logic.GameCardModel
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.StatusActionType
+import dev.steamvault.app.ui.library.logic.TOOL_APP_STATE_WORD
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import dev.steamvault.app.ui.theme.VaultColors
@@ -65,7 +67,9 @@ fun GameCard(
                 coverUrl = model.coverUrl,
                 name = model.name,
                 fallbackHues = model.fallbackHues,
-                modifier = Modifier.fillMaxSize(),
+                // WP API-FIX-4: a Steam tool app is shown muted, not hidden
+                // (web `.card.tool .cap`).
+                modifier = Modifier.fillMaxSize().alpha(if (model.toolApp) TOOL_APP_COVER_ALPHA else 1f),
             )
 
             if (selecting) {
@@ -98,7 +102,7 @@ fun GameCard(
         // carries icon + size, the meta row underneath carries the word, so
         // nothing in the roomier layouts is said only once via colour/shape.
         Text(
-            text = stringResource(model.kind.labelRes),
+            text = cardStatusWord(model),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -124,6 +128,16 @@ fun GameCard(
         }
     }
 }
+
+/** WP API-FIX-4: cover opacity of a Steam tool app's card (web `.card.tool
+ * .cap{ opacity:.55 }`). */
+internal const val TOOL_APP_COVER_ALPHA = 0.55f
+
+/** The card/list-row status word: [TOOL_APP_STATE_WORD] for a Steam tool
+ * app (WP API-FIX-4), otherwise the status kind's own label. */
+@Composable
+internal fun cardStatusWord(model: GameCardModel): String =
+    if (model.toolApp) TOOL_APP_STATE_WORD else stringResource(model.kind.labelRes)
 
 /** The status icon + size pill riding on the cover art (round-6 "one object
  * instead of a colour dot plus a duplicate line"). Inert (no click target)

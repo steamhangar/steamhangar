@@ -68,6 +68,19 @@
  * than a second, independently-computed definition (the exact failure class
  * docs/LEARNINGS.md's "two call sites computing the same domain predicate
  * WILL diverge" entry documents).
+ *
+ * **Steam tool apps (WP API-FIX-4).** `GET /v1/games` rows carry
+ * `tool_app: true` + `tool_app_name` for an app vault-api never prefills
+ * (api/vault_api/tool_apps.py: 228980, "Steamworks Common
+ * Redistributables" — installed on every Windows PC, its depots cached
+ * together with the games that use them). The server owns the list; this
+ * module only reads the flag. Such a row gets its own display kind
+ * `KIND.TOOL` (shown with the neutral "notinuse" dash glyph via
+ * `statusIconKind`, and the word {@link TOOL_APP_STATE_WORD}), never
+ * `error` — old failed jobs left `status: "error"` on its apps row, and
+ * that must not paint the card red — and never a download/retry action.
+ * A live job still wins (an honest "Downloading" for a job that was queued
+ * before the upgrade). `installedBadgeState` never says "not cached" for it.
  */
 
 /** Display-status kinds this module ever returns. Intentionally NOT the
@@ -78,7 +91,55 @@ export const KIND = Object.freeze({
   RUNNING: "running",
   PAUSED: "paused",
   ERROR: "error",
+  // WP API-FIX-4: a Steam tool package (see module header). A DISPLAY kind
+  // only, not a status-icon kind: `statusIconKind` maps it to "notinuse".
+  TOOL: "tool",
 });
+
+/** The status word a tool app's card and detail header show instead of a
+ * STATUS_LABEL word (WP API-FIX-4). */
+export const TOOL_APP_STATE_WORD = "Steam tool package";
+
+/** The neutral note a tool app's detail sheet shows (WP API-FIX-4). */
+export const TOOL_APP_NOTE = "Steam tool package — cached together with the games that use it.";
+
+/** True for a `GET /v1/games` row the server flags as a Steam tool app
+ * (WP API-FIX-4). Strictly `true`: an older server sends no flag at all. */
+export function isToolApp(game) {
+  return game?.tool_app === true;
+}
+
+/** Which status-icon kind (components/status-icon.js's STATUS_LABEL keys)
+ * draws a display kind: KIND.TOOL uses the neutral "notinuse" dash, every
+ * other kind is its own icon kind. */
+export function statusIconKind(kind) {
+  return kind === KIND.TOOL ? "notinuse" : kind;
+}
+
+/**
+ * The visible status word for a display kind. `labels` is
+ * components/status-icon.js's STATUS_LABEL, passed in so this module stays
+ * DOM-free. KIND.TOOL reads {@link TOOL_APP_STATE_WORD}.
+ * @param {string} kind
+ * @param {Record<string, string>} labels
+ */
+export function statusWordFor(kind, labels) {
+  if (kind === KIND.TOOL) return TOOL_APP_STATE_WORD;
+  return labels[kind] || labels.none;
+}
+
+/**
+ * Display name of a games row: the vault's own name, else the tool app's
+ * name from the server (WP API-FIX-4), else `App {appid}`.
+ * @param {{appid: number, name?: string|null, tool_app_name?: string|null}} game
+ */
+export function gameDisplayName(game) {
+  if (typeof game?.name === "string" && game.name.trim()) return game.name.trim();
+  if (isToolApp(game) && typeof game.tool_app_name === "string" && game.tool_app_name.trim()) {
+    return game.tool_app_name.trim();
+  }
+  return `App ${game?.appid}`;
+}
 
 /** Job statuses that occupy this app's card with a live indicator. Queued
  * jobs are deliberately excluded (mockup parity: `jobFor` only matches
@@ -155,6 +216,10 @@ export const INSTALLED_BADGE = Object.freeze({
 export function installedBadgeState(game) {
   const installedOn = Array.isArray(game?.installed_on) ? game.installed_on : [];
   if (installedOn.length === 0) return INSTALLED_BADGE.NONE;
+  // WP API-FIX-4: a tool app is never "installed but not cached" — its
+  // depots are cached with the games that use them, so the warning would
+  // be false. It reads as the plain "Installed on <pc>".
+  if (isToolApp(game)) return INSTALLED_BADGE.CACHED;
   return hasVisibleCacheContent(game) ? INSTALLED_BADGE.CACHED : INSTALLED_BADGE.NOT_CACHED;
 }
 
@@ -234,6 +299,9 @@ export function installedSectionPresence(game) {
  */
 export function dispKind(game, liveJob) {
   if (liveJob) return liveJob.status === "paused" ? KIND.PAUSED : KIND.RUNNING;
+  // WP API-FIX-4: before the error check, so old failed jobs for a tool app
+  // never make its card red.
+  if (isToolApp(game)) return KIND.TOOL;
   if (game.status === "error") return KIND.ERROR;
   return hasVisibleCacheContent(game) ? KIND.CACHED : KIND.NONE;
 }
@@ -271,6 +339,9 @@ export function statusAction(game, liveJob, selecting) {
     if (liveJob.status === "paused") return { type: "resume", title: "Resume download" };
     return null;
   }
+  // WP API-FIX-4: a tool app's dispKind is TOOL, which falls through to
+  // `null` below — vault-api never prefills it (POST /v1/prefill answers
+  // 422), so there is no honest download or retry to offer.
   const kind = dispKind(game, undefined);
   if (kind === KIND.NONE) return { type: "download", title: "Download to cache" };
   if (kind === KIND.ERROR) return { type: "download", title: "Retry download" };

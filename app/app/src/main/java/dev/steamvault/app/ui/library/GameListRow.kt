@@ -16,8 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.ui.library.logic.GameCardModel
@@ -65,10 +65,11 @@ fun GameListRow(
             fallbackHues = model.fallbackHues,
             modifier = Modifier
                 .size(width = 34.dp, height = 51.dp)
-                .clip(RoundedCornerShape(4.dp)),
+                .clip(RoundedCornerShape(4.dp))
+                .alpha(if (model.toolApp) TOOL_APP_COVER_ALPHA else 1f), // WP API-FIX-4
         )
 
-        val statusWord = stringResource(model.kind.labelRes)
+        val statusWord = cardStatusWord(model)
         val action = model.action
         val iconModifier = if (!selecting && action != null) {
             Modifier

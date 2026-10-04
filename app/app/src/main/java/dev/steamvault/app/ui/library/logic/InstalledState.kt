@@ -92,6 +92,10 @@ private fun buildDisplay(entries: List<InstalledOnEntry>): InstalledOnDisplay {
 fun installedBadgeFor(game: GameSummary): InstalledBadge {
     if (game.installed_on.isEmpty()) return InstalledBadge.NoSignal
     val display = buildDisplay(game.installed_on)
+    // WP API-FIX-4: a Steam tool app is never "installed but not cached" --
+    // its depots are cached with the games that use them (web
+    // installedBadgeState has the same branch).
+    if (isToolApp(game)) return InstalledBadge.InstalledAndCached(display)
     return if (hasVisibleCacheContent(game)) {
         InstalledBadge.InstalledAndCached(display)
     } else {

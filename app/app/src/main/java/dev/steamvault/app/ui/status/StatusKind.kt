@@ -21,7 +21,15 @@ enum class StatusKind(val wireName: String, val labelRes: Int) {
     VERIFY("verify", R.string.status_verify),
     ERROR("error", R.string.status_error),
     WARN("warn", R.string.status_warn),
-    CANCELLED("cancelled", R.string.status_cancelled);
+    CANCELLED("cancelled", R.string.status_cancelled),
+
+    /**
+     * WP API-FIX-4: web's neutral "notinuse" kind (dash glyph, muted disc),
+     * ported for the Steam tool-app card (228980). The library shows its own
+     * word for it ("Steam tool package", `GameStatus.kt`); this label is the
+     * web STATUS_LABEL word. Web's "unknown" kind is still web-only.
+     */
+    NOTINUSE("notinuse", R.string.status_notinuse);
 
     companion object {
         /**

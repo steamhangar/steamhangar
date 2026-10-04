@@ -59,6 +59,8 @@ import dev.steamvault.app.ui.library.installedBadgeText
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.MultiPlan
 import dev.steamvault.app.ui.library.logic.StatusActionType
+import dev.steamvault.app.ui.library.logic.TOOL_APP_NOTE
+import dev.steamvault.app.ui.library.logic.TOOL_APP_STATE_WORD
 import dev.steamvault.app.ui.library.logic.buildMultiPlan
 import dev.steamvault.app.ui.library.logic.coverArtUrl
 import dev.steamvault.app.ui.library.logic.dispKind
@@ -67,6 +69,7 @@ import dev.steamvault.app.ui.library.logic.formatBytesGB
 import dev.steamvault.app.ui.library.logic.hasProtectedCacheContent
 import dev.steamvault.app.ui.library.logic.hasVisibleCacheContent
 import dev.steamvault.app.ui.library.logic.installedBadgeFor
+import dev.steamvault.app.ui.library.logic.isToolApp
 import dev.steamvault.app.ui.library.logic.statusAction
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
@@ -197,6 +200,8 @@ private fun gameSummaryFrom(detail: GameDetail): GameSummary = GameSummary(
     size_bytes = detail.size_bytes,
     needs_force = detail.needs_force,
     installed_on = detail.installed_on,
+    tool_app = detail.tool_app,
+    tool_app_name = detail.tool_app_name,
 )
 
 @Composable
@@ -209,6 +214,8 @@ private fun GameDetailSheetBody(
     onLibraryChanged: () -> Unit,
 ) {
     val name = controller.detail?.name?.takeIf { it.isNotBlank() }
+        // WP API-FIX-4: a Steam tool app's name comes from the server's list.
+        ?: controller.detail?.takeIf { it.tool_app }?.tool_app_name?.takeIf { it.isNotBlank() }
         ?: controller.openName?.takeIf { it.isNotBlank() }
         ?: "App $appid"
 
@@ -283,7 +290,8 @@ private fun DetailHeader(appid: Int, name: String, detail: GameDetail?, jobs: Li
                 ) {
                     StatusIcon(kind = kind, size = StatusIconSize.SMALL)
                     Text(
-                        text = stringResource(kind.labelRes),
+                        // WP API-FIX-4: a tool app reads "Steam tool package".
+                        text = if (detail.tool_app) TOOL_APP_STATE_WORD else stringResource(kind.labelRes),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(start = 6.dp),
                     )
@@ -328,6 +336,18 @@ private fun LoadedDetailBody(
         games.firstOrNull { it.appid == appid } ?: gameSummaryFrom(detail)
     }
 
+    // ---- Steam tool app note (WP API-FIX-4) -----------------------------------
+    // Where a game offers Download/Retry, a tool app says why it has none
+    // (web buildToolAppNote). statusAction is null for it, so no button below.
+    if (isToolApp(gameSummary)) {
+        Text(
+            text = TOOL_APP_NOTE,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+
     // ---- last download / confirmed current ---------------------------------
     Text(
         text = detail.last_prefill_at?.let { stringResource(R.string.detail_last_download, it) }
@@ -345,7 +365,7 @@ private fun LoadedDetailBody(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    if (detail.needs_force) {
+    if (detail.needs_force && !detail.tool_app) { // WP API-FIX-4: no "next download" for a tool app
         Text(
             text = stringResource(R.string.detail_needs_force_note),
             style = MaterialTheme.typography.bodySmall,

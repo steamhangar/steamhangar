@@ -27,7 +27,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from vault_api import deletion
+from vault_api import deletion, tool_apps
 from vault_api import jobs as jobs_queue
 from vault_api.auth import require_api_key
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
@@ -118,7 +118,22 @@ def create_prefill_jobs(
     Duplicate app ids *within one request body* fall out of the same rule: the
     response keeps one entry per requested id, in request order, so the second
     occurrence points at the same ``job_id`` with ``deduplicated: true``.
+
+    **Steam tool apps are refused with ``422`` (WP API-FIX-4).** A body that
+    names an app in ``tool_apps.TOOL_APPS`` (228980, "Steamworks Common
+    Redistributables") is rejected as a whole before anything is queued,
+    with a string ``detail`` naming the first such app, the same shape as
+    ``PATCH /v1/settings``'s refusals. SteamPrefill cannot prefill a tool
+    app, and its depots are cached together with the games that use it, so
+    a job for it could only fail. The UIs never offer the action; an older
+    client that sends one in a bulk request gets the 422 and queues nothing.
     """
+    for appid in body.appids:
+        if tool_apps.is_tool_app(appid):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=tool_apps.reject_detail(appid),
+            )
     refs: list[PrefillJobRef] = []
     with open_db() as conn:
         for appid in body.appids:
@@ -189,8 +204,16 @@ def _select_appids_with_cache_content(
     about this: an unmapped depot is not "this game's cache content", it is
     orphaned or not-yet-attributed content, and `POST /v1/prefill/cached`
     only ever acts on apps it can name.
+
+    **Steam tool apps are left out (WP API-FIX-4).** An app in
+    `tool_apps.TOOL_APPS` is never selected, even with cache content of its
+    own: its depots are cached together with the games that use them, and
+    SteamPrefill cannot prefill it. Same rule as the scheduler's sweep.
     """
-    return sorted(deletion.appids_with_cache_content(conn, depot_bytes))
+    selected, _tools = tool_apps.split_tool_apps(
+        deletion.appids_with_cache_content(conn, depot_bytes)
+    )
+    return sorted(selected)
 
 
 @router.post(

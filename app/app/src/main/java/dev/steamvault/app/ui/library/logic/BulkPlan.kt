@@ -64,6 +64,10 @@ data class BulkSelectionClassification(
     val busy: List<GameSummary>,
     val needsDownload: List<GameSummary>,
     val current: List<GameSummary>,
+    /** WP API-FIX-4: picked Steam tool apps -- never a target (web
+     * `toolApps`): vault-api answers 422 for one, which fails the whole
+     * bulk request. */
+    val toolApps: List<GameSummary> = emptyList(),
 )
 
 /** @param games the SELECTED games (already resolved from the picked appid set — callers own that lookup). */
@@ -71,7 +75,14 @@ fun classifyBulkSelection(games: List<GameSummary>, jobs: List<JobSummary>): Bul
     val busyAppids = busyAppidsFromJobs(jobs)
     val busy = mutableListOf<GameSummary>()
     val rest = mutableListOf<GameSummary>()
-    for (g in games) (if (g.appid in busyAppids) busy else rest).add(g)
+    val toolApps = mutableListOf<GameSummary>()
+    for (g in games) {
+        when {
+            isToolApp(g) -> toolApps.add(g)
+            g.appid in busyAppids -> busy.add(g)
+            else -> rest.add(g)
+        }
+    }
 
     val needsDownload = mutableListOf<GameSummary>()
     val current = mutableListOf<GameSummary>()
@@ -84,7 +95,7 @@ fun classifyBulkSelection(games: List<GameSummary>, jobs: List<JobSummary>): Bul
         val kind = dispKind(g, null)
         (if (kind == StatusKind.CACHED) current else needsDownload).add(g)
     }
-    return BulkSelectionClassification(busy, needsDownload, current)
+    return BulkSelectionClassification(busy, needsDownload, current, toolApps)
 }
 
 /**
@@ -117,10 +128,17 @@ data class BulkDownloadPlan(
 )
 
 fun buildBulkDownloadPlan(classification: BulkSelectionClassification, totalPicked: Int): BulkDownloadPlan {
-    val (busy, needsDownload, current) = classification
+    val (busy, needsDownload, current, toolApps) = classification
+    // WP API-FIX-4: the web's appended sentence for picked tool apps, word for word.
+    val toolAppsNote = when (toolApps.size) {
+        0 -> ""
+        1 -> "1 Steam tool package — cached together with the games that use it."
+        else -> "${toolApps.size} Steam tool packages — cached together with the games that use them."
+    }
+    fun withToolApps(note: String): String = listOf(note, toolAppsNote).filter { it.isNotEmpty() }.joinToString(" ")
 
     if (needsDownload.isNotEmpty()) {
-        val skipped = totalPicked - needsDownload.size
+        val skipped = totalPicked - needsDownload.size - toolApps.size
         return BulkDownloadPlan(
             primaryEnabled = true,
             primaryLabel = if (needsDownload.size < totalPicked) {
@@ -129,11 +147,13 @@ fun buildBulkDownloadPlan(classification: BulkSelectionClassification, totalPick
                 "Download ${plural(needsDownload.size, "game")}"
             },
             primaryTargets = needsDownload.map { it.appid },
-            note = when {
-                skipped > 0 -> "$skipped already cached — not re-downloaded."
-                needsDownload.size > 1 -> "All ${needsDownload.size} are new to the cache."
-                else -> ""
-            },
+            note = withToolApps(
+                when {
+                    skipped > 0 -> "$skipped already cached — not re-downloaded."
+                    needsDownload.size > 1 && toolApps.isEmpty() -> "All ${needsDownload.size} are new to the cache."
+                    else -> ""
+                },
+            ),
             secondaryLabel = null,
             secondaryTargets = emptyList(),
         )
@@ -142,11 +162,28 @@ fun buildBulkDownloadPlan(classification: BulkSelectionClassification, totalPick
     if (current.isNotEmpty()) {
         return BulkDownloadPlan(
             primaryEnabled = false,
-            primaryLabel = "All cached — nothing to download",
+            primaryLabel = if (toolApps.isNotEmpty()) "Nothing to download here" else "All cached — nothing to download",
             primaryTargets = emptyList(),
-            note = "Every selected game is current. Re-download only if you need to refetch from Steam.",
+            note = withToolApps(
+                if (toolApps.isNotEmpty()) {
+                    "${current.size} cached — re-download only if you need to refetch from Steam."
+                } else {
+                    "Every selected game is current. Re-download only if you need to refetch from Steam."
+                },
+            ),
             secondaryLabel = "Re-download ${current.size}",
             secondaryTargets = current.map { it.appid },
+        )
+    }
+
+    if (toolApps.isNotEmpty()) {
+        return BulkDownloadPlan(
+            primaryEnabled = false,
+            primaryLabel = "Nothing to download here",
+            primaryTargets = emptyList(),
+            note = withToolApps(if (busy.isNotEmpty()) "${busy.size} already downloading." else ""),
+            secondaryLabel = null,
+            secondaryTargets = emptyList(),
         )
     }
 

@@ -226,9 +226,11 @@ one debug screen.
 Ports `web/js/components/status-icon.js` + the `.sic` rules in
 `web/css/theme.css`:
 
-- **`StatusKind.kt`** — the ten kinds (`cached`, `running`, `updating`,
-  `stale`, `none`, `paused`, `verify`, `error`, `warn`, `cancelled`), 1:1
-  with web's `STATUS_LABEL` keys (`wireName`), each with an English string
+- **`StatusKind.kt`** — the eleven kinds (`cached`, `running`, `updating`,
+  `stale`, `none`, `paused`, `verify`, `error`, `warn`, `cancelled`, and
+  `notinuse`, ported in WP API-FIX-4 for the Steam tool-app card: dash
+  glyph, muted disc), 1:1 with web's `STATUS_LABEL` keys (`wireName`;
+  web's `unknown` is not ported yet), each with an English string
   resource for the label. `fromWireName()` falls back to `NONE` for an
   unrecognized kind, mirroring the web component's own fallback.
 - **`StatusIconLogic.kt`** — pure, Android-framework-free functions:

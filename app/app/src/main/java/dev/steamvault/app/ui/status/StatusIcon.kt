@@ -247,6 +247,15 @@ fun StatusIcon(
                     cornerRadius = CornerRadius(1.6f * scale),
                 )
             }
+
+            GlyphShape.DASH -> {
+                // WP API-FIX-4, ported unchanged from web buildDash: "M7 12h10".
+                val dash = Path().apply {
+                    moveTo(pt(7f, 12f).x, pt(7f, 12f).y)
+                    lineTo(pt(17f, 12f).x, pt(17f, 12f).y)
+                }
+                drawPath(dash, color = ink, style = stroke)
+            }
         }
     }
 }
