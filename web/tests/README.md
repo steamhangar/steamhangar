@@ -2913,3 +2913,114 @@ describedby; a paragraph id missing; server detail reworded (twin pin);
 demo detail reworded. Wiring file 20x in a loop: 0 failures.
 
 Suite: **1115 tests, 1115 pass, 0 fail**.
+
+### WP PAIR-1 — "Add a device" (QR for the app, browser link, agent command)
+
+User decision 2026-10-04, "Weg A": a new device is set up from this
+already-connected web UI with the ONE shared vault API key, no API change
+(ADR-0016 freeze). Per-device keys and short-lived codes are D9 PAIR-2.
+
+Settings → PCs (agents) → "Add a device" opens a drawer sheet
+(`components/add-device-sheet.js`) with three options. Each shows its
+content only after its own "Show" press, under the warning "Anyone who
+sees this can control your hangar. Only show it on your own screen.";
+"Hide" and every close path (Close, Escape, backdrop, navigation — via the
+new optional `onClose` of `sheet-dialog.js`) remove the content from the
+DOM. Demo mode or no stored key: a note, no option.
+
+- **Phone (Android app)**: QR code of
+  `steamhangar://pair?v=1&url=<origin>&key=<key>` (`lib/pair-link.js`,
+  the contract with the Android package APP-PAIR-1: both values through
+  `encodeURIComponent`, so `+` is `%2B`; `url` reduced to
+  `scheme://host[:port]`, no trailing slash; the base is the page origin,
+  as `api.js` uses it). Inline SVG, black modules on a white plate with a
+  4-module quiet zone in every theme. The same URI as an "Open on this
+  phone" link and as copyable text (some camera apps only show the text of
+  a custom-scheme QR).
+- **Another browser**: `<origin>/#pair=<key>`. The receiving page
+  (`lib/pair-intake.js`, wired at the top of `app.js`) strips the fragment
+  with `history.replaceState` before the first render, then: same key →
+  toast; a different stored key → alertdialog "Replace this browser's API
+  key?" (`components/pair-confirm.js`, focus on "Keep current key");
+  otherwise (or after "Replace") `checkVaultApiKey` (the onboarding step-1
+  check) and only a passing key is stored, the onboarding way
+  (`setStoredApiKey` + `setDemoMode(false)`), followed by a reload; the
+  "Paired." toast crosses the reload as a sessionStorage flag ("1", never
+  the key). A rejected or unchecked key is never stored. While a link is
+  handled, the first-run overlay waits and auth-recovery does not fire.
+- **Windows PC (vault-agent)**: a PowerShell 5.1 command
+  (`lib/agent-install.js`) for the vault-api version from `GET /v1/about`
+  (release asset names as publish.yml writes them, tag = "v" + version). A
+  build without a release (dev-<sha>, a native run without a commit,
+  "invalid") gets a note instead. The command: history file off (its own
+  first line), download exe + three scripts + SHA256SUMS into
+  `%LOCALAPPDATA%\VaultAgent\release-v<version>`, `Get-FileHash` check of
+  all four (stop before installing on a mismatch), `Unblock-File`, exe to
+  `%LOCALAPPDATA%\VaultAgent\vault-agent.exe`, key to a temp file locked
+  with icacls before it is written, `install-task.ps1 -AgentPath -ServerUrl
+  -ApiKeyFile` in a child `powershell.exe -ExecutionPolicy Bypass`, temp
+  file deleted in `finally`, `Start-ScheduledTask VaultAgentReport`. The key
+  is in the command exactly once. **Agent server address**: an editable
+  field, prefilled with the page origin, validated (http/https + host,
+  nothing else), remembered in localStorage (`steamvault.agentServerUrl`,
+  not a secret). The note under it: the agent must reach vault-api's direct
+  LAN address, not a reverse proxy — vault-api records the TCP peer of
+  each report (uvicorn `--no-proxy-headers`) and matches it with cache
+  traffic; through a proxy every PC gets the proxy's address (found on the
+  real install, 2026-10-04). A Linux/SteamOS line points to agent/README.md.
+
+Copy buttons use the async clipboard where it exists (secure contexts
+only) and fall back to selecting the text field plus `execCommand("copy")`
+on a plain-http LAN page; a failure says "copy it by hand".
+
+**QR encoder: written for this project, not vendored**
+(`lib/qr-encode.js`, byte mode, levels L/M/Q/H, versions 1-40). The web
+UI has no build step and its CSP is `script-src 'self'`; the well-known
+single-file JS libraries are UMD/CommonJS, and only one byte segment is
+needed. Verified during the WP against segno 1.6.6 (BSD-3, Python, run once
+on the developer machine, not a dependency): all 40 versions x 4 levels x
+2 lengths with forced masks (320 cases) give identical matrices, after
+patching one segno quirk (it appends a whole zero byte when the terminator
+already ends on a byte boundary; ISO/IEC 18004 7.4.10 does not). Automatic
+mask choice differs from segno in 7 of 16 cases (the two implement the N3
+penalty differently; any mask decodes). The generated symbols were decoded
+back with jsQR 1.4.0: 334 of 336 (the two misses were version 23 at level
+L, where jsQR also fails on segno's output). `qr-reference-fixtures.js`
+keeps five segno matrices (v1-M, v1-L, v5-H, v6-M exactly full, v8-M with
+version bits).
+
+Tests: `qr-encode.test.js` (15: five reference matrices, Annex C/D/E and
+Table 7 spot values, structure, mask determinism, UTF-8, overflow throws,
+SVG geometry), `pair-link.test.js` (10: the URI contract as literals, the
+encoding, origin-only url, fragment round trip and refusals, the intake
+decision), `pair-intake.test.js` (13: strip, every intake path with
+recording fakes, the notice flag, two app.js source pins),
+`agent-install.test.js` (10: release guard, asset names against
+publish.yml, hash check before install, install-task.ps1 parameters
+against the real script, key once and quoted, PS 5.1 operators, URL
+validation, the note), `add-device-wiring.test.js` (11: fake-dom + real
+settings view and store: the Add button, nothing secret in the DOM before
+Show / after Hide / after each close path, QR/link/text, Windows command,
+dev-build note, /v1/about error, the address field, demo and no-key notes,
+the confirm dialog). `auth-recovery.test.js`'s app.js pin now expects the
+`|| pairIntakeBusy` gate. The wiring file ran 20x in a loop: 0 failures.
+
+Mutation evidence (each alone, in a scratch copy): all 30 killed — key
+not encoded; url not reduced to the origin; a different key replaced
+without asking; the browser link in the query; no `replaceState`; the
+confirm ignored; key stored before the check; first-run overlay not gated;
+fragment not read at top level; release guard without the commit; quotes
+not doubled; no hash check; temp key not deleted; history not switched
+off; a URL path accepted; an ECC table entry; the format XOR mask; the pad
+byte; overflow not thrown; Hide keeping the DOM; no `onClose`; `onClose`
+not called by sheet-dialog; agent address not saved; demo gate removed;
+prefill not the origin; a dev build getting a command; the Settings row
+removed; Escape answering "Replace"; focus on "Replace"; auth-recovery not
+gated.
+
+Not covered here: the painted result, a real scan with a phone, a real
+paste into Windows PowerShell 5.1 (no PowerShell available to this WP; the
+command is checked by the structural tests above, not by a parser or a
+run), and a screen reader.
+
+Suite: **1174 tests, 1174 pass, 0 fail**.

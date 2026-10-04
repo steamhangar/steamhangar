@@ -41,6 +41,9 @@
  *    keeps the recorded WP 4a.1 decision "Clients is a sheet, not a nav
  *    item". Before this WP the sheet was reachable only from the bypass
  *    banner and the notifications, i.e. never on a healthy vault.
+ *    WP PAIR-1 adds an "Add a device" row here that opens
+ *    components/add-device-sheet.js (QR for the app, a browser pairing
+ *    link, the vault-agent install command).
  *  - About — WP WEB-FEAT-3: the component table from `GET /v1/about` (WP
  *    VER-2), presented by lib/about-view.js. Fetched when this view opens
  *    and on the Refresh button, never polled; the server caches its answer
@@ -82,6 +85,7 @@ import {
 import { onViewChange } from "../router.js";
 import { store } from "../store-singleton.js";
 import { openClientsSheet } from "../components/clients-sheet.js";
+import { openAddDeviceSheet } from "../components/add-device-sheet.js";
 import { createStatusIcon } from "../components/status-icon.js";
 import { agentsSummaryText } from "../lib/clients-view.js";
 import {
@@ -875,6 +879,25 @@ function buildPcsSection() {
   btn.addEventListener("click", () => openClientsSheet());
   row.append(grow, btn);
   wrap.append(row);
+  // WP PAIR-1: "Add a device" — pair the Android app or another browser, or
+  // install vault-agent on a Windows PC, from this already-connected page.
+  const addRow = el("div", "srow");
+  const addGrow = el("span", "grow");
+  addGrow.append(
+    el("span", "ttl", "Add a device"),
+    el(
+      "span",
+      "desc",
+      "Pair the Android app or another browser, or get the install command for vault-agent on a Windows PC, without typing the address and API key.",
+    ),
+  );
+  const addBtn = el("button", "btn ghost sm", "Add");
+  addBtn.type = "button";
+  addBtn.dataset.role = "add-device";
+  addBtn.setAttribute("aria-label", "Add a device");
+  addBtn.addEventListener("click", () => openAddDeviceSheet());
+  addRow.append(addGrow, addBtn);
+  wrap.append(addRow);
   els.agentsLines.push(summaryLine);
   return wrap;
 }
