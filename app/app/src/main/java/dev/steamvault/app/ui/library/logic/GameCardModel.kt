@@ -83,6 +83,16 @@ data class GameCardModel(
 )
 
 /**
+ * WP WEB-FIX-9 (twin of web `pillClassName`): whether the capsule pill draws
+ * its dark ground. The ground exists to carry the size over the cover art;
+ * around a lone status icon it was a small grey lozenge with nothing in it
+ * (user feedback on rc9: "a grey ring where the status word should be").
+ * Icon-only pills draw no ground; the status word stays in the line under
+ * the cover, so nothing on the card is said twice.
+ */
+fun capsulePillHasGround(model: GameCardModel): Boolean = model.sizeLabel != null
+
+/**
  * @param selecting `true` while multi-select is active -- see
  *   [statusAction]'s `selecting` param.
  */

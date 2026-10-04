@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.ui.library.logic.GameCardModel
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.StatusActionType
+import dev.steamvault.app.ui.library.logic.capsulePillHasGround
 import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
@@ -159,12 +160,16 @@ private fun CapsulePill(
     } else {
         Modifier
     }
+    // WP WEB-FIX-9: the ground only behind a number; an icon-only pill is
+    // the bare status disc with symmetric padding (keeps the tap target).
+    val hasGround = capsulePillHasGround(model)
+    val groundModifier = if (hasGround) Modifier.background(Color.Black.copy(alpha = 0.55f)) else Modifier
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.55f))
+            .then(groundModifier)
             .then(clickableModifier)
-            .padding(horizontal = 6.dp, vertical = 3.dp),
+            .padding(horizontal = if (hasGround) 6.dp else 3.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusIcon(kind = model.kind, size = StatusIconSize.SMALL, spokenLabel = toolAppStateWordFor(model.kind))

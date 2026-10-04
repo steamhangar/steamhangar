@@ -154,4 +154,32 @@ class GameCardModelTest {
         )
         assertTrue(before != after)
     }
+
+    // WP WEB-FIX-9: the capsule pill draws its dark ground only behind a
+    // number; an icon-only pill (a paused job with no size yet, as in the
+    // rc9 report) is the bare status disc.
+    @Test
+    fun `capsule pill has no ground for an icon-only paused card`() {
+        val paused = buildGameCardModel(
+            runningGame(),
+            runningJob().copy(status = "paused"),
+            selected = false,
+            selecting = false,
+        )
+        assertEquals(StatusKind.PAUSED, paused.kind)
+        assertEquals(null, paused.sizeLabel)
+        assertEquals(false, capsulePillHasGround(paused))
+    }
+
+    @Test
+    fun `capsule pill keeps its ground when it prints a size`() {
+        val cached = buildGameCardModel(
+            runningGame().copy(status = "done", size_bytes = 3_900_000_000L, needs_force = false),
+            null,
+            selected = false,
+            selecting = false,
+        )
+        assertTrue(cached.sizeLabel != null)
+        assertEquals(true, capsulePillHasGround(cached))
+    }
 }
