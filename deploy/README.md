@@ -978,7 +978,85 @@ edges listed in ["Upstream keepalive pool"](#upstream-keepalive-pool).
 
 ---
 
+## Upstream edge and connection cap
+
+**Changes for operators in the release candidate after rc12** (WP CORE-FIX-4,
+[ADR-0021](../docs/adr/0021-one-pooled-upstream-and-global-connection-cap.md)).
+It is **on by default**: after the upgrade every cache MISS goes through ONE
+pooled Steam edge and a global cap bounds the concurrent upstream
+connections. This is the fix for the carrier-grade NAT port-quota exhaustion
+that a Steam client's MISS burst caused (`113: Host is unreachable`, hundreds
+of 502s); the per-name pool below could not bound it.
+
+New variables (all optional; vault-core only, recreate it after a change,
+`docker compose up -d vault-core`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VAULT_UPSTREAM_EDGE` | `dist-fra1.discovery.steamserver.net` | The one edge every MISS is dialled on. **Empty = legacy per-name mode** (rollback). Find a geo-correct name with `dig +short lancache.steamcontent.com` (the end of the CNAME chain). |
+| `VAULT_UPSTREAM_MAX_CONNS` | `16` (empty = 16) | Global cap C, 1..64, no off switch. Over C: HTTP 503. Must be >= `VAULT_PREFILL_MAX_THREADS` or vault-core refuses to boot. |
+| `VAULT_PREFILL_MAX_THREADS` | `8` | Unchanged for vault-api/vault-runner; now also forwarded to vault-core for the floor check above. |
+
+**What you will see.**
+
+- All MISSes use one upstream name; the Host the client sent no longer
+  selects the upstream. `VAULT_UPSTREAM_POOL_HOSTS` is ignored while an edge
+  is set (legacy mode only).
+- More than C concurrent upstream connections: the surplus requests get
+  **503** immediately, nothing is fetched or stored, the client retries.
+  `limiting connections by zone "vault_upstream_total"` appears in the log.
+  A 503 storm means C is too low for client + prefill together (raise it, to
+  at most 64, or lower `VAULT_PREFILL_MAX_THREADS`).
+- Three new access-log fields: `upstream_host="..."` (what was dialled),
+  `host="..."` (what the client sent), `limit_conn=` (`REJECTED` for a 503).
+- Socket bound: up to C in flight plus C idle (2C).
+
+**Rollback.** Set `VAULT_UPSTREAM_EDGE=` (empty, not commented out) in
+`.env` and recreate vault-core: the per-name pool of the next section
+applies again. The boot log says `upstream edge mode ON: ...` or
+`upstream keepalive pool ON (legacy per-name mode)`.
+
+**Keep the upload throttle on.** Recommended (user decision 2026-10-04):
+keep `VAULT_UPSTREAM_RATE=4m` and an **empty** `VAULT_UPSTREAM_RATE_WINDOW=`
+(throttle round the clock, see "Upstream rate cap") even with edge mode and
+the cap on, until measurements after the rollout show that edge and cap are
+stable. Only then loosen or remove it. Both are production `.env`
+settings; the repo defaults are unchanged.
+
+**Check after the rollout** (repeat a client update of an app that is not
+cached, and a forced prefill; production line):
+
+```bash
+docker compose logs --no-log-prefix --since 15m vault-core 2>&1 | grep -c 'Host is unreachable'
+docker compose logs --no-log-prefix --since 15m vault-core 2>&1 | grep -c 'limiting connections by zone "vault_upstream_total"'
+docker compose logs --no-log-prefix --since 15m vault-core 2>&1 | grep -o 'upstream_connect_time=[0-9.]*' | sort | uniq -c | sort -rn | head
+docker compose logs --no-log-prefix --since 15m vault-core 2>&1 | grep -o 'host="[^"]*"' | sort | uniq -c | sort -rn
+docker compose exec vault-core netstat -tn | awk '$5 ~ /:80$/ && $6 == "ESTABLISHED"' | wc -l
+```
+
+- `Host is unreachable`: expect 0 (before: 1838 and 11368 in two runs).
+- Cap hits: how often C bit.
+- `upstream_connect_time`: dominated by `0.000` (reused connections), the
+  proof that the connection count is a function of C.
+- `host=`: attributes the requests to the names clients asked for.
+- Established connections to :80 during the download: <= 2C. On the host,
+  conntrack entries of vault-core's outbound :80 connections should be
+  <= 2C plus a few closing ones. From another device, a new HTTPS
+  connection (`curl -sI https://github.com`) must succeed meanwhile.
+- **Host-for-all-names inference.** Edge mode sends the edge's own name as
+  Host for every client name; that is evidenced only for one IP and two
+  names. The update of the uncached app must finish without a hash
+  mismatch, and `upstream_status` must show no 4xx/5xx for `host=` names
+  other than the edge beyond the pre-change level. One such status that only
+  appears in edge mode: set `VAULT_UPSTREAM_EDGE=` empty.
+
+---
+
 ## Upstream keepalive pool
+
+**Legacy mode** since ADR-0021: this per-name pool applies only while
+`VAULT_UPSTREAM_EDGE=` is set empty; with the shipped edge default the
+list is ignored (previous section).
 
 Stage 2 of the CGNAT fix (WP CORE-FEAT-1,
 [ADR-0017](../docs/adr/0017-upstream-keepalive-pool.md)). For every Steam
@@ -1785,5 +1863,8 @@ steamcontent.com` resolves to.
 | A prefill job fails with `HttpRequestException ... while downloading manifests`; your DNS rewrites `*.steamcontent.com` to the cache (for the runner too, e.g. via `dns:`) | SteamPrefill fetches manifests over HTTPS from those names, and port 443 on the rewritten address does not reach vault-core. Set `VAULT_TLS_BIND` to that address (and keep `VAULT_TLS_PASSTHROUGH` on), then `docker compose up -d vault-core`. See [Port 443](#port-443-the-https-passthrough). |
 | vault-core exits with `26-vault-tls-passthrough.sh: FATAL: VAULT_TLS_PASSTHROUGH=... is not one of ...` | the switch has a typo. Use `1`/`0` (or `true`/`false`, `on`/`off`, `yes`/`no`, lowercase). |
 | `up` fails with `... bind: address already in use` for port 443 | something else on the host owns 443 on the `VAULT_TLS_BIND` address. Use a dedicated address for vault-core (both `VAULT_CORE_BIND` and `VAULT_TLS_BIND`), or leave `VAULT_TLS_BIND` unset. |
+| A burst of `503` from vault-core on cache MISSes; `limiting connections by zone "vault_upstream_total"` in its log, `limit_conn=REJECTED` in the access log | the global cap is too low for the concurrent load (a Steam client plus a prefill). Raise `VAULT_UPSTREAM_MAX_CONNS` (max 64) or lower `VAULT_PREFILL_MAX_THREADS`, recreate vault-core. See ["Upstream edge and connection cap"](#upstream-edge-and-connection-cap). |
+| vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_EDGE` or `VAULT_UPSTREAM_MAX_CONNS` | the edge is not exactly one valid lowercase host name in `*.steamcontent.com` / `*.steamserver.net`, or the cap is not a whole number 1..64, or it is below `VAULT_PREFILL_MAX_THREADS`. The message names the value. Fix the line, recreate vault-core. |
+| MISSes answer 502 with `no live upstreams` or `could not be resolved` for the edge name | the edge name does not resolve (NXDOMAIN) or resolves to vault-core itself (a DNS rewrite loop). Check `dig +short <VAULT_UPSTREAM_EDGE>` from your resolver, use a name from `dig +short lancache.steamcontent.com`, or set `VAULT_UPSTREAM_EDGE=` empty to fall back. |
 | vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_POOL_HOSTS: ...` | the edge list in `.env` breaks a rule: uppercase, a scheme or port, a name outside `*.steamcontent.com` / `*.steamserver.net`, the marker `lancache.steamcontent.com` itself, a duplicate, or more than 4 names. The message names the value and the rule. Fix the line (or empty it = no pool), then `docker compose up -d vault-core`. See ["Upstream keepalive pool"](#upstream-keepalive-pool). |
 | Port 80 already in use on the host | use a dedicated IP, not a different port — see [Port 80](#port-80-and-the-dedicated-ip-question). |

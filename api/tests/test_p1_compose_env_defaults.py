@@ -243,6 +243,15 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     # WP CORE-FEAT-1d (ADR-0017): the keepalive-pool edge list, same `-`
     # form as VAULT_UPSTREAM_RATE (blank passes through as "" = no pool).
     "VAULT_UPSTREAM_POOL_HOSTS": "",
+    # WP CORE-FIX-4c (ADR-0021): edge mode ON by default; the `-` form keeps
+    # an explicitly blank value = legacy mode (rollback), pinned in
+    # UPSTREAM_EDGE_CORE_LINES below.
+    "VAULT_UPSTREAM_EDGE": "dist-fra1.discovery.steamserver.net",
+    # The cap: blank = the hook's default 16 (rendered by 28-vault-upstream-pool.sh).
+    "VAULT_UPSTREAM_MAX_CONNS": "",
+    # Forwarded only for the hook's floor check (cap >= prefill threads);
+    # same default as vault-api/vault-runner.
+    "VAULT_PREFILL_MAX_THREADS": "8",
 }
 
 #: One row per Compose service this file checks, in the sense used
@@ -770,7 +779,18 @@ UPSTREAM_RATE_CORE_LINES = (
 )
 
 
-@pytest.mark.parametrize("expected_line", UPSTREAM_RATE_CORE_LINES)
+#: WP CORE-FIX-4c (ADR-0021): the edge key MUST be the no-colon form, else an
+#: explicitly blank VAULT_UPSTREAM_EDGE= (the documented rollback to legacy
+#: mode) would silently become the default edge. The prefill floor uses the
+#: colon form like vault-api (blank counts as 8 in the hook too).
+UPSTREAM_EDGE_CORE_LINES = (
+    "VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}",
+    "VAULT_UPSTREAM_MAX_CONNS: ${VAULT_UPSTREAM_MAX_CONNS-}",
+    "VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS:-8}",
+)
+
+
+@pytest.mark.parametrize("expected_line", UPSTREAM_RATE_CORE_LINES + UPSTREAM_EDGE_CORE_LINES)
 def test_upstream_rate_keys_use_the_no_colon_form(expected_line: str, compose_text: str) -> None:
     key = expected_line.split(":", 1)[0]
     core_block = _extract_service_environment_block(compose_text, "vault-core")
@@ -795,7 +815,14 @@ def test_upstream_rate_window_follows_the_schedule_window_default(
 
 
 @pytest.mark.parametrize(
-    "env_var", ("VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_RATE_WINDOW", "VAULT_UPSTREAM_POOL_HOSTS")
+    "env_var",
+    (
+        "VAULT_UPSTREAM_RATE",
+        "VAULT_UPSTREAM_RATE_WINDOW",
+        "VAULT_UPSTREAM_POOL_HOSTS",
+        "VAULT_UPSTREAM_EDGE",
+        "VAULT_UPSTREAM_MAX_CONNS",
+    ),
 )
 def test_upstream_rate_vars_are_documented_in_env_example(env_var: str) -> None:
     text = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")

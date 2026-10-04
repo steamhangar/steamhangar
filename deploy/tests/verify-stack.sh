@@ -34,7 +34,7 @@ set -u
 # subnet must come from the generated env file, never from the caller.
 # VAULT_RESOLVER (WP CORE-FEAT-1c): section 10 points it at a fake resolver
 # through the env file; a caller's export would win over that line.
-unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_EGRESS_SUBNET VAULT_RESOLVER VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_UPSTREAM_EDGE VAULT_UPSTREAM_MAX_CONNS VAULT_PREFILL_MAX_THREADS VAULT_EGRESS_SUBNET VAULT_RESOLVER VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -2426,7 +2426,7 @@ POOL_DEPOT_BIG=99990002      # 2 MiB bodies, for the rate-cap check
 POOL_DEPOT_EDGE2=99990005    # edge mode, Host: fake2.steamcontent.com (outside every list)
 POOL_DEPOT_EDGE3=99990006    # edge mode, Host: fake3.steamcontent.com (no DNS record at all)
 POOL_DEPOT_SLOW=99990004     # the fake edge holds each answer open (cap test)
-POOL_SLOW_SECONDS=10
+POOL_SLOW_SECONDS=30
 POOL_CAP=2                   # VAULT_UPSTREAM_MAX_CONNS of the edge-mode steps
 POOL_CHUNK_BYTES=4096
 POOL_BIG_BYTES=2097152
@@ -2657,14 +2657,15 @@ assert_eq "" "$probe_ans" "the boot probe's name (cache2-ams1.steamcontent.com) 
 
 step "10b. vault-core recreated with VAULT_RESOLVER=$POOL_RESOLVER_IP and the pool list, attached to $POOL_NET at $POOL_CORE_IP"
 say "Env: the stack's current env (section 9's bind-mode env when 9b came up,"
-say 'else the section-3 env) plus VAULT_RESOLVER and VAULT_UPSTREAM_POOL_HOSTS='
+say 'else the section-3 env) plus VAULT_RESOLVER, VAULT_UPSTREAM_EDGE= (EMPTY: the compose default is edge'
+say 'mode since CORE-FIX-4c, so legacy must be selected explicitly) and VAULT_UPSTREAM_POOL_HOSTS='
 say '"fake1.steamcontent.com loop.steamcontent.com". fake2 is NOT listed on'
 say 'purpose: it is the unlisted control of 10d.'
 pool_base_env=$env_file
 [ "${bind_up:-no}" = yes ] && pool_base_env=$bind_live_env_file
 pool_env="$work/verify-pool.env"
 cp "$pool_base_env" "$pool_env"
-printf 'VAULT_RESOLVER=%s\nVAULT_UPSTREAM_POOL_HOSTS=fake1.steamcontent.com loop.steamcontent.com\n' "$POOL_RESOLVER_IP" >> "$pool_env"
+printf 'VAULT_RESOLVER=%s\nVAULT_UPSTREAM_EDGE=\nVAULT_UPSTREAM_POOL_HOSTS=fake1.steamcontent.com loop.steamcontent.com\n' "$POOL_RESOLVER_IP" >> "$pool_env"
 pool_recreate_core "$pool_env"
 say "vault-core health: $core_h"
 assert_eq "healthy" "$core_h" "vault-core is healthy with the fake resolver and the pool list"
@@ -2892,13 +2893,23 @@ while [ "$si" -le "$slow_n" ]; do
         "$CORE_URL/depot/$POOL_DEPOT_SLOW/chunk/$(printf 's%039d' "$si")" > "$work/pool-slow-$si.code" 2>/dev/null ) &
     si=$((si + 1))
 done
-# Wait until the edge really holds $POOL_CAP slow requests (bounded), no fixed sleep.
+# Wait until the edge really holds $POOL_CAP slow requests: one docker logs call
+# per poll, every 0.2 s, bounded to 15 s (the hold is ${POOL_SLOW_SECONDS}s, so the slots stay
+# taken for the whole checks below). A timeout is a failure with the logs dumped.
 slow_wait=0
-while [ "$slow_wait" -lt 30 ]; do
-    [ "$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)" -ge "$((host_reqs_before + POOL_CAP))" ] && break
-    slow_wait=$((slow_wait + 1)); sleep 1
+slow_seen=0
+while [ "$slow_wait" -lt 75 ]; do
+    slow_seen=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)
+    [ "$slow_seen" -ge "$((host_reqs_before + POOL_CAP))" ] && break
+    slow_wait=$((slow_wait + 1)); sleep 0.2
 done
-say "    the edge held $POOL_CAP requests after ${slow_wait}s"
+if [ "$slow_seen" -ge "$((host_reqs_before + POOL_CAP))" ]; then
+    ok "the edge holds $POOL_CAP slow requests ($slow_wait polls of 0.2 s)"
+else
+    bad "the edge held only $((slow_seen - host_reqs_before)) of $POOL_CAP slow requests after 15 s"
+    say '--- fake edge log (tail) ---'; docker logs "$POOL_EDGE" 2>&1 | tail -15 | sed 's/^/    /'
+    say '--- vault-core log (tail) ---'; dc logs --no-log-prefix vault-core 2>&1 | tail -15 | cut -c1-300 | sed 's/^/    /'
+fi
 edge_reqs_before=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)
 extra_name=$(printf 'x%039d' 1)
 extra_res=$(pool_get fake2.steamcontent.com "/depot/$POOL_DEPOT/chunk/$extra_name" /dev/null)
@@ -2936,11 +2947,11 @@ say 'trap does the same on an aborted run.'
 compose_up_or_die "$pool_base_env" up -d vault-core
 pool_wait_core_healthy
 say "vault-core health: $core_h"
-assert_eq "healthy" "$core_h" "vault-core is healthy again on the stack's own env (resolver default, no pool, no cap)"
+assert_eq "healthy" "$core_h" "vault-core is healthy again on the stack's own env (resolver default, shipped edge mode)"
 core_pool_ip_after=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$POOL_NET\"}}{{.IPAddress}}{{end}}" "$(dc ps -q vault-core)" 2>/dev/null)
 assert_eq "" "$core_pool_ip_after" "vault-core is no longer attached to $POOL_NET"
 revert_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
-assert_contains "$revert_log" "VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream pool" "the reverted vault-core renders no pool (the shipped default of this run's env)"
+assert_contains "$revert_log" "upstream edge mode ON: every MISS goes to dist-fra1.discovery.steamserver.net" "the reverted vault-core is back on the shipped compose default (edge mode, dist-fra1.discovery.steamserver.net)"
 run "docker rm -f '$POOL_EDGE' '$POOL_RESOLVER'"
 run "docker network rm '$POOL_NET'"
 if docker network inspect "$POOL_NET" >/dev/null 2>&1; then

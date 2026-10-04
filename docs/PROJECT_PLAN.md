@@ -2810,17 +2810,29 @@ below carry their own later dates, item 12 is the current one).
       bind-mount precondition (`cache/depot` + `tmp`; since SEC-FIX-5 only
       `cache/depot` is 101:101, the rest root:root, migrated at start; a
       rollback to an older image needs the old ownership back).
-      Also, as a known limitation (user decision 2026-10-04, Weg A): a
-      Steam client downloading an app that is NOT in the cache still
-      opens one upstream connection per chunk beyond the keepalive pool,
-      so behind DS-Lite/CGNAT a client MISS burst can exhaust the
-      subscriber's port quota for a few seconds (measured on the first
-      client test, 2026-10-04: 1838x `113: Host is unreachable` across
-      14 edge hosts in ~16 s, 898 of them on a pooled edge; Steam retried
-      and finished). Mitigation shipped: the scheduler prefills every
-      installed app of an active PC (fresh agent report), so updates arrive as HITs; set the
-      window to cover the day (e.g. `06:00-24:00`, 60 min) in Settings.
-      Fix tracked as D7 CORE-FIX-4. Windows agent installer notes from
+      Also, for the release candidate after rc12 (D7 CORE-FIX-4,
+      ADR-0021; user decision 2026-10-04: fixed before `v0.1.0`): a Steam
+      client downloading an app that is NOT in the cache used to open one
+      upstream connection per chunk, so behind DS-Lite/CGNAT a MISS burst
+      could exhaust the subscriber's port quota (first client test,
+      2026-10-04: 1838x `113: Host is unreachable` across 14 edge hosts in
+      ~16 s). Now: new env vars `VAULT_UPSTREAM_EDGE` (compose default
+      `dist-fra1.discovery.steamserver.net`, on out of the box; empty =
+      legacy per-name pool = rollback, which keeps the old limitation),
+      `VAULT_UPSTREAM_MAX_CONNS` (default 16, 1..64, no off switch) and the
+      forwarded `VAULT_PREFILL_MAX_THREADS` (floor for the cap). Behaviour:
+      all MISSes go through ONE pooled edge (the client's Host only has to
+      pass the allowlist), a global cap answers 503 above C concurrent
+      upstream connections, three new log fields (`upstream_host`, `host`,
+      `limit_conn`). Keep `VAULT_UPSTREAM_RATE=4m` with an empty
+      `VAULT_UPSTREAM_RATE_WINDOW` (user decision 2026-10-04) until the
+      post-rollout measurements are stable. Post-rollout check (ADR-0021
+      "After rollout", deploy/README.md): `113` count 0, connect-time
+      dominated by `0.000`, established :80 sockets <= 2C, and the
+      Host-for-all-names inference confirmed (uncached app update without
+      hash mismatch, no edge-mode-only 4xx/5xx). Scheduler mitigation
+      stays: prefill every installed app of an active PC, window e.g.
+      `06:00-24:00`. Windows agent installer notes from
       AGENT-FIX-2: a re-install keeps the key, client id and (when the
       registry has none) a working library root from `env.txt`; going back to the hostname-derived id
       needs uninstall + install; the registry SteamPath wins over an
@@ -3084,6 +3096,11 @@ below carry their own later dates, item 12 is the current one).
       built as CORE-FIX-4a..4d. 4a (core: hook, configs, preflight, drift
       check, Dockerfile, hook test, ADR-0016 freeze note) is the first
       package; the box stays open until 4b-4d are done.
+      **Status:** 4a (core), 4b (live verify checks) and 4c (compose
+      forwarding with edge mode on by default, `.env.example`, deploy and
+      core docs, release notes) are done; **4d (443 passthrough 32/16)
+      and the operator's post-rollout measurement are open**, so the box
+      stays unticked.
     - [ ] **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
       2026-10-04: "the night check is no use if I come home at 17:00 and
       the update came during the day"). Today `schedule_window` is one

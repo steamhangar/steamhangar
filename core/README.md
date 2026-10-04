@@ -752,7 +752,7 @@ core/
     ├── 25-vault-eventlog.sh         # VAULT_EVENT_LOG on/off + validation
     ├── 26-vault-tls-passthrough.sh  # VAULT_TLS_PASSTHROUGH on/off (port 443)
     ├── 27-vault-upstream-rate.sh    # VAULT_UPSTREAM_RATE(_WINDOW) -> rate include
-    ├── 28-vault-upstream-pool.sh    # VAULT_UPSTREAM_POOL_HOSTS -> keepalive pool include
+    ├── 28-vault-upstream-pool.sh    # VAULT_UPSTREAM_EDGE/_MAX_CONNS/_POOL_HOSTS -> pool + cap includes
     ├── 29-vault-build-version.sh    # version file for vault-api's GET /v1/about
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
     └── check-config-drift.sh        # keeps the template honest
@@ -1196,7 +1196,61 @@ reviewed two entries; and nowhere an `ssl_certificate`, `proxy_ssl*` or
   with certificate verification; off-list SNI and no SNI refused) and 7i
   (vault-core refuses to boot with vault-dns as `VAULT_RESOLVER`).
 
+## Upstream edge and connection cap (WP CORE-FIX-4, ADR-0021)
+
+Since the release candidate after rc12 this is the default upstream path.
+The per-name pool below (ADR-0017) still exists as **legacy mode**.
+
+| Variable | Meaning | Empty / unset |
+|---|---|---|
+| `VAULT_UPSTREAM_EDGE` | Exactly ONE Steam CDN edge host name (lowercase, no port, ending in `.steamcontent.com` or `.steamserver.net`, not the marker `lancache.steamcontent.com`). compose ships `dist-fra1.discovery.steamserver.net`. | **empty = legacy per-name mode** (the rollback); unset in compose = the default name |
+| `VAULT_UPSTREAM_MAX_CONNS` | The global cap C on concurrent upstream connections, whole number 1..64, no off switch (`0`, `off`, garbage refuse to boot). | 16 |
+| `VAULT_PREFILL_MAX_THREADS` | Not a setting of vault-core: compose forwards it (`${VAULT_PREFILL_MAX_THREADS:-8}`) so the hook can refuse C below it. Empty counts as 8. | 8 |
+
+**Mechanism.** `28-vault-upstream-pool.sh` renders an `upstream` group for
+the edge (`keepalive C`, `keepalive_timeout 50s`) and a map
+`$vault_upstream_target` whose default is the edge. `@miss` dials
+`$vault_upstream_target` and sends it as `Host`, so **every** allowed MISS,
+whatever Host the client asked for, goes to that one name over pooled
+keepalive connections; the client's Host only has to pass the allowlist.
+`VAULT_UPSTREAM_POOL_HOSTS` is ignored while an edge is set (one boot log
+line says so). A second include, `vault-upstream-cap.conf`, puts
+`limit_conn vault_upstream_total C;` inside `@miss` only (both modes):
+above C concurrent upstream connections the answer is **503** and nothing
+is fetched or stored; HITs, 403s and `/health` never count.
+
+**Socket bound.** One group reuses idle connections before it dials, so
+the total stays near C in steady state; at most C in flight plus C idle =
+2C for a burst after an idle pause (`netstat` count of ESTABLISHED to :80
+should be <= 2C). This replaces the legacy mode's 32-idle ceiling.
+
+**Log fields.** The `vault` log format ends with three new key=value
+fields: `upstream_host="<name dialled>"`, `host="<Host the client sent>"`
+and `limit_conn=<PASSED|REJECTED|->` (`REJECTED` = 503 from the cap).
+
+**Limits.** C is global, not per source: a prefill (default 8 threads)
+plus a Steam client updating several apps can exceed C and get 503s; raise
+C (max 64) or run them one after the other. One edge name is a single
+point of dependency (DNS, Valve's tier): rollback is `VAULT_UPSTREAM_EDGE=`
+empty plus a recreate. The Steam client's handling of a sustained 503
+share is not measured. IPv6 egress, DNS and CM traffic are not covered.
+Env-only, read at container start: recreate vault-core after a change.
+
+**Post-rollout check** (ADR-0021 "After rollout"; the commands are in
+`deploy/README.md` "Upstream edge and connection cap"): `113` count 0 after
+a client update and a prefill, `upstream_connect_time` dominated by
+`0.000`, and the Host-for-all-names inference closed: the edge now gets
+its own name as Host for every client name, which is evidenced only for one
+IP and two names, so a client update of an uncached app must finish without
+a hash mismatch and `upstream_status` must show no 4xx/5xx for `host=`
+names other than the edge beyond the pre-change level. One status that only
+appears in edge mode means set `VAULT_UPSTREAM_EDGE=` empty.
+
 ## Upstream keepalive pool (WP CORE-FEAT-1b, ADR-0017)
+
+**Legacy mode** since ADR-0021: this per-name pool is used only when
+`VAULT_UPSTREAM_EDGE` is set empty; with an edge set (the shipped default)
+the list below is ignored (section above).
 
 Reuses **upstream** connections (vault-core -> Steam CDN edge) across cache
 MISSes instead of opening a new TCP connection per chunk. Off by default
