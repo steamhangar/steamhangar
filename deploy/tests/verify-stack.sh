@@ -2426,7 +2426,7 @@ POOL_DEPOT_BIG=99990002      # 2 MiB bodies, for the rate-cap check
 POOL_DEPOT_EDGE2=99990005    # edge mode, Host: fake2.steamcontent.com (outside every list)
 POOL_DEPOT_EDGE3=99990006    # edge mode, Host: fake3.steamcontent.com (no DNS record at all)
 POOL_DEPOT_SLOW=99990004     # the fake edge holds each answer open (cap test)
-POOL_SLOW_SECONDS=10
+POOL_SLOW_SECONDS=30
 POOL_CAP=2                   # VAULT_UPSTREAM_MAX_CONNS of the edge-mode steps
 POOL_CHUNK_BYTES=4096
 POOL_BIG_BYTES=2097152
@@ -2893,13 +2893,23 @@ while [ "$si" -le "$slow_n" ]; do
         "$CORE_URL/depot/$POOL_DEPOT_SLOW/chunk/$(printf 's%039d' "$si")" > "$work/pool-slow-$si.code" 2>/dev/null ) &
     si=$((si + 1))
 done
-# Wait until the edge really holds $POOL_CAP slow requests (bounded), no fixed sleep.
+# Wait until the edge really holds $POOL_CAP slow requests: one docker logs call
+# per poll, every 0.2 s, bounded to 15 s (the hold is ${POOL_SLOW_SECONDS}s, so the slots stay
+# taken for the whole checks below). A timeout is a failure with the logs dumped.
 slow_wait=0
-while [ "$slow_wait" -lt 30 ]; do
-    [ "$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)" -ge "$((host_reqs_before + POOL_CAP))" ] && break
-    slow_wait=$((slow_wait + 1)); sleep 1
+slow_seen=0
+while [ "$slow_wait" -lt 75 ]; do
+    slow_seen=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)
+    [ "$slow_seen" -ge "$((host_reqs_before + POOL_CAP))" ] && break
+    slow_wait=$((slow_wait + 1)); sleep 0.2
 done
-say "    the edge held $POOL_CAP requests after ${slow_wait}s"
+if [ "$slow_seen" -ge "$((host_reqs_before + POOL_CAP))" ]; then
+    ok "the edge holds $POOL_CAP slow requests ($slow_wait polls of 0.2 s)"
+else
+    bad "the edge held only $((slow_seen - host_reqs_before)) of $POOL_CAP slow requests after 15 s"
+    say '--- fake edge log (tail) ---'; docker logs "$POOL_EDGE" 2>&1 | tail -15 | sed 's/^/    /'
+    say '--- vault-core log (tail) ---'; dc logs --no-log-prefix vault-core 2>&1 | tail -15 | cut -c1-300 | sed 's/^/    /'
+fi
 edge_reqs_before=$(docker logs "$POOL_EDGE" 2>&1 | grep -c '^host ' || true)
 extra_name=$(printf 'x%039d' 1)
 extra_res=$(pool_get fake2.steamcontent.com "/depot/$POOL_DEPOT/chunk/$extra_name" /dev/null)
