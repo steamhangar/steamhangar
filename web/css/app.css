@@ -1284,6 +1284,9 @@ body.onboarding .nav{ display:none; }
 }
 .pair-left{ text-align:left; }
 .pair-agent-url{ margin:0 0 10px; }
+/* The "Copy key" fallback's temporary textarea (removed right after the
+   copy): selectable, but never visible and never in the layout. */
+.pair-offscreen{ position:fixed; left:-9999px; top:0; width:1px; height:1px; opacity:0; }
 
 /* About table, phone first: every row is a stacked block (component name
    on its own line, then Version / Commit / Status as labelled cells in a

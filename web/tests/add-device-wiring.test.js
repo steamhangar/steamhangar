@@ -255,7 +255,9 @@ test("MUTATION TARGET: Windows — the command for the reported release, prefill
   assert.match(snippet, /\$version = '0\.1\.0-rc10'/);
   assert.match(snippet, /releases\/download\/v0\.1\.0-rc10'/);
   assert.match(snippet, /\$serverUrl = 'http:\/\/vault\.test'/);
-  assert.equal(snippet.split(KEY).length - 1, 1, "key once");
+  assert.equal(snippet.includes(KEY) || snippet.includes("s3cr3t"), false, "Weg A: no key in the command");
+  assert.match(snippet, /Read-Host 'Hangar API key \(paste it, then press Enter\)' -AsSecureString/);
+  assert.equal(secretInDom(), false, "the Windows option shows no key anywhere");
   assert.match(snippet, /Get-FileHash -Algorithm SHA256/);
 });
 
@@ -349,6 +351,69 @@ test("MUTATION TARGET: pairing confirm — alertdialog, focus on Keep; Keep/Esca
   click(btn("pair-replace"));
   assert.equal(await answer, true);
   assert.equal(domStrings(dlg()).some((s) => s.includes("s3cr3t")), false, "the dialog names no key");
+});
+
+// ---- Weg A: "Copy key" (review finding 1) ----------------------------------
+
+test("MUTATION TARGET: 'Copy key' exists only after Show and copies the stored key without putting it in the DOM", async () => {
+  openAddDeviceSheet();
+  assert.equal(sheet().querySelector('[data-role="agent-copy-key"]') === null, true, "no Copy key before Show");
+  click(showBtn("windows"));
+  await until(() => reveal("windows").querySelector('[data-role="agent-copy-key"]') !== null, "Copy key shown");
+  const btn = reveal("windows").querySelector('[data-role="agent-copy-key"]');
+  assert.equal(btn.textContent, "Copy key");
+  assert.match(reveal("windows").textContent, /never part of the command/);
+  assert.match(reveal("windows").textContent, /clipboard history or cloud clipboard sync/);
+
+  // Async clipboard (secure context).
+  const copied = [];
+  const nav = globalThis.navigator;
+  Object.defineProperty(nav, "clipboard", { value: { writeText: async (t) => copied.push(t) }, configurable: true });
+  window.isSecureContext = true;
+  try {
+    click(btn);
+    await until(() => copied.length === 1, "clipboard write");
+    assert.equal(copied[0] === KEY, true, "exactly the stored key");
+  } finally {
+    delete nav.clipboard;
+    window.isSecureContext = false;
+  }
+  assert.equal(secretInDom(), false);
+
+  // Fallback (plain http): a temporary textarea, removed again.
+  let selectedValue = null;
+  dom.document.execCommand = (cmd) => {
+    const ta = dom.document.body.querySelectorAll("textarea").find((t) => t.className === "pair-offscreen");
+    selectedValue = cmd === "copy" && ta ? ta.value : null;
+    return true;
+  };
+  const origCreate = dom.document.createElement;
+  dom.document.createElement = (tag) => {
+    const node = origCreate(tag);
+    if (tag === "textarea") node.select = () => {};
+    return node;
+  };
+  try {
+    click(btn);
+    await until(() => selectedValue !== null, "fallback copy");
+    assert.equal(selectedValue === KEY, true, "the fallback copied the key");
+    assert.equal(secretInDom(), false, "the temporary textarea is gone again");
+  } finally {
+    delete dom.document.execCommand;
+    dom.document.createElement = origCreate;
+  }
+
+  click(showBtn("windows")); // Hide
+  assert.equal(reveal("windows").querySelector('[data-role="agent-copy-key"]') === null, true, "gone with Hide");
+});
+
+test("Windows — a key the command cannot take gets a note, no command, no Copy key", async () => {
+  storage.set("steamvault.apiKey", "schlüssel");
+  openAddDeviceSheet();
+  click(showBtn("windows"));
+  await until(() => reveal("windows").querySelector('[data-role="agent-key-unsupported"]') !== null, "note");
+  assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]') === null, true);
+  assert.equal(reveal("windows").querySelector('[data-role="agent-copy-key"]') === null, true);
 });
 
 // ---- Review finding 2: late /v1/about answers (gated fetch) ---------------

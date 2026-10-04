@@ -11,8 +11,10 @@
  *    installs, unblocks them, passes -AgentPath/-ServerUrl/-ApiKeyFile to
  *    install-task.ps1 (whose param block is read from the real script),
  *    deletes the temp key file in a finally, starts the task once;
- *  - the key is embedded EXACTLY ONCE, single-quoted with every quote
- *    character doubled, after a line that switches off the history file;
+ *  - the command contains NO key (user decision "Weg A"): it asks with
+ *    `Read-Host -AsSecureString`, frees the BSTR in a finally, refuses an
+ *    empty or non-printable answer before downloading; even a key passed by
+ *    mistake never reaches the text; `psQuote` doubles every quote kind;
  *  - PowerShell 5.1 only: no `&&`, `||`, `??`, `?.` or ternary outside
  *    string literals;
  *  - the agent server URL check (http/https + host, nothing else).
@@ -24,6 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AGENT_SERVER_URL_NOTE,
+  isInstallableKey,
   agentReleaseFromAbout,
   noReleaseText,
   psQuote,
@@ -77,6 +80,7 @@ test("MUTATION TARGET: asset names follow publish.yml (tag v<version>, exe carri
 });
 
 const KEY = "k3y'with\u2019quotes&$dollar`tick\"dq";
+// `apiKey` is passed on purpose: the function must ignore it (Weg A).
 const SNIPPET = windowsInstallSnippet({ version: "0.1.0-rc10", serverUrl: "http://192.0.2.10:8080", apiKey: KEY });
 const lines = SNIPPET.split("\n");
 
@@ -134,20 +138,37 @@ test("MUTATION TARGET: after a successful install the download folder is removed
   assert.equal(lines[remove].startsWith(" "), false, "outside the try/finally: a failed install keeps the folder for inspection");
 });
 
-test("MUTATION TARGET: the key appears exactly once, quoted, after the history-off line", () => {
-  const quoted = psQuote(KEY);
-  assert.equal(quoted, "'k3y''with\u2019\u2019quotes&$dollar`tick\"dq'", "every single/typographic quote doubled; $ and ` are literal in single quotes");
-  // All four quote characters PowerShell accepts as a single quote.
+test("psQuote doubles every quote character PowerShell accepts", () => {
+  assert.equal(psQuote(KEY), "'k3y''with\u2019\u2019quotes&$dollar`tick\"dq'", "$ and ` are literal in single quotes");
   assert.equal(psQuote("a\u2018b\u2019c\u201ad\u201be'f"), "'a\u2018\u2018b\u2019\u2019c\u201a\u201ad\u201b\u201be''f'");
   assert.equal(psQuote("\u201a"), "'\u201a\u201a'");
   assert.equal(psQuote("\u201b"), "'\u201b\u201b'");
-  assert.equal(SNIPPET.split(quoted).length - 1, 1, "embedded once");
-  assert.equal(SNIPPET.split("k3y").length - 1, 1, "no second copy in any other form");
-  const keyLine = lines.findIndex((l) => l === `$apiKey = ${quoted}`);
-  const historyOff = lines.findIndex((l) => l.includes("Set-PSReadLineOption -HistorySaveStyle SaveNothing"));
-  const block = lines.indexOf("& {");
-  assert.ok(historyOff >= 0 && historyOff < block && block < keyLine, "history off runs as its own line before the block");
+});
+
+test("MUTATION TARGET: Weg A — the command contains no key in any form", () => {
+  for (const form of [KEY, psQuote(KEY), "k3y", encodeURIComponent(KEY)]) {
+    assert.equal(SNIPPET.includes(form), false, `no ${JSON.stringify(form)}`);
+  }
+  assert.equal(windowsInstallSnippet({ version: "0.1.0-rc10", serverUrl: "http://192.0.2.10:8080" }), SNIPPET, "the key argument changes nothing");
+  assert.equal(lines.some((l) => /^\$apiKey = '/.test(l)), false, "no key literal");
+  assert.equal(SNIPPET.includes("Set-PSReadLineOption"), false, "no history claim: nothing secret to keep out");
+});
+
+test("MUTATION TARGET: Weg A — the key is asked for as a SecureString and checked before anything is downloaded", () => {
+  const ask = lines.indexOf("$secureKey = Read-Host 'Hangar API key (paste it, then press Enter)' -AsSecureString");
+  const bstr = lines.indexOf("$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)");
+  const plain = lines.indexOf("try { $apiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }");
+  const check = lines.indexOf("if ([string]::IsNullOrEmpty($apiKey) -or $apiKey -cnotmatch '^[\\x20-\\x7E]+$') { throw 'No usable API key was entered (empty or not printable ASCII). Nothing was installed.' }");
+  const download = lines.findIndex((l) => l.includes("Invoke-WebRequest"));
+  assert.ok(ask > lines.indexOf("& {"), "inside the block, so the paste is complete before it asks");
+  assert.ok(bstr === ask + 1 && plain === bstr + 1, "converted in memory, BSTR zero-freed in a finally");
+  assert.ok(check > plain && check < download, "refused before any download");
+  const fin = lines.findIndex((l) => l === "} finally {");
+  assert.equal(lines[fin + 2].trim(), "$apiKey = $null", "the variable is cleared at the end");
   assert.equal(lines[lines.length - 1], "}", "the block closes at the end");
+  // The command's check and the sheet's isInstallableKey are one rule.
+  for (const k of ["abc", "a b!~", " "]) assert.equal(isInstallableKey(k), true, k);
+  for (const k of ["", "ü", "a\tb", "a\u007fb", null]) assert.equal(isInstallableKey(k), false, JSON.stringify(k));
 });
 
 test("PowerShell 5.1: no &&, ||, ??, ?. or ternary outside string literals", () => {
@@ -186,7 +207,6 @@ const FIXTURE = join(here, "fixtures", "windows-install-command.ps1");
 const FIXTURE_ARGS = Object.freeze({
   version: "0.1.0-rc10",
   serverUrl: "http://192.0.2.10:8080",
-  apiKey: "DUMMY-not-a-real-key_0123'quote",
 });
 
 test("MUTATION TARGET: the committed Windows command fixture equals what the page generates", () => {
@@ -195,6 +215,8 @@ test("MUTATION TARGET: the committed Windows command fixture equals what the pag
   const committed = readFileSync(FIXTURE, "utf8");
   assert.equal(committed, generated, "fixture drifted: regenerate it (see the comment above) and commit it");
   assert.equal(/[^\x00-\x7f]/.test(committed), false, "pure ASCII, so 5.1 parses it the same under any codepage");
+  assert.equal(/\$apiKey = '/.test(committed), false, "no key literal in the fixture");
+  assert.match(committed, /Read-Host 'Hangar API key \(paste it, then press Enter\)' -AsSecureString/);
   const parseStep = readFileSync(join(here, "..", "..", ".github", "scripts", "verify-ps-parse.ps1"), "utf8");
   assert.match(parseStep, /web\\tests\\fixtures\\windows-install-command\.ps1/, "CI parses the fixture");
 });

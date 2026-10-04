@@ -2884,7 +2884,10 @@ below carry their own later dates, item 12 is the current one).
       key and storing only a key the server accepts; a PowerShell 5.1
       command that downloads the release's vault-agent and scripts, checks
       them against `SHA256SUMS`, and runs `install-task.ps1` with the key
-      in a temp file (a dev build gets a note instead). The agent's server
+      in a temp file (a dev build gets a note instead). The command holds
+      no key (review round 1, user decision "Weg A"): it asks for it with
+      `Read-Host -AsSecureString`, and the sheet has a separate "Copy key"
+      button. The agent's server
       address is an editable field (prefill: page origin, remembered per
       browser) because the agent must reach vault-api directly, not
       through a reverse proxy (per-PC stats and bypass detection match the

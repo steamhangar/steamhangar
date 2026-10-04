@@ -18,6 +18,9 @@
  *    server address is an editable field, prefilled with this page's origin
  *    and remembered per browser, because the agent must reach vault-api
  *    directly, not through a reverse proxy (lib/agent-install.js header).
+ *    The command contains NO key (user decision "Weg A"): it asks for it,
+ *    and a separate "Copy key" button next to it (inside the same Show
+ *    gate) puts the key on the clipboard without ever showing it.
  *  - Linux/SteamOS: a pointer to agent/README.md.
  *
  * The key is a secret, so every option's content is built only after an
@@ -48,6 +51,8 @@ import {
   AGENT_SERVER_URL_NOTE,
   AGENT_SERVER_URL_STORAGE_KEY,
   agentReleaseFromAbout,
+  KEY_PROMPT,
+  isInstallableKey,
   noReleaseText,
   validateAgentServerUrl,
   windowsInstallSnippet,
@@ -83,7 +88,9 @@ function writeAgentUrl(value) {
 
 /** Copy `text`; falls back to selecting `field` + execCommand("copy") where
  * the async clipboard API is missing (it needs a secure context, and a LAN
- * hangar is often plain http). */
+ * hangar is often plain http). Without a `field` (the "Copy key" button:
+ * the key is never shown) the fallback uses a temporary off-screen
+ * textarea that is removed again in every case. */
 async function copyText(text, field) {
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
@@ -93,12 +100,26 @@ async function copyText(text, field) {
   } catch {
     // fall through to the selection fallback
   }
+  let temp = null;
   try {
-    field.focus();
-    field.select();
+    let target = field;
+    if (!target) {
+      temp = document.createElement("textarea");
+      temp.className = "pair-offscreen";
+      temp.setAttribute("aria-hidden", "true");
+      temp.readOnly = true;
+      temp.value = text;
+      document.body.appendChild(temp);
+      target = temp;
+    }
+    target.focus();
+    target.select();
     return typeof document.execCommand === "function" && document.execCommand("copy") === true;
   } catch {
     return false;
+  } finally {
+    // MUTATION TARGET: the key must not stay in the DOM after a copy.
+    if (temp) temp.remove();
   }
 }
 
@@ -342,16 +363,35 @@ function paintWindows(reveal) {
     reveal.replaceChildren(note);
     return;
   }
-  const snippet = windowsInstallSnippet({ version: release.version, serverUrl: url.url, apiKey: key });
+  if (!isInstallableKey(key)) {
+    const note = el(
+      "p",
+      "hint pair-left",
+      "This hangar's API key has characters the install command does not accept (printable ASCII only). Install the agent by hand as agent/README.md describes.",
+    );
+    note.dataset.role = "agent-key-unsupported";
+    reveal.replaceChildren(note);
+    return;
+  }
+  // User decision "Weg A" (review finding 1): the command carries NO key;
+  // it asks for it, and the key travels only through "Copy key".
+  const snippet = windowsInstallSnippet({ version: release.version, serverUrl: url.url });
   const field = readonlyField(snippet, { multiline: true, label: "PowerShell install command" });
   field.dataset.role = "agent-snippet";
   const acts = el("div", "pair-acts");
-  acts.append(copyButton("Copy command", () => snippet, field));
+  const copyKey = copyButton("Copy key", () => getStoredApiKey(), null);
+  copyKey.dataset.role = "agent-copy-key";
+  acts.append(copyButton("Copy command", () => snippet, field), copyKey);
   reveal.replaceChildren(
     el(
       "p",
       "foot-note",
-      `Paste into a normal PowerShell window on the PC (not "Run as administrator"). It downloads vault-agent ${release.version} from the project's GitHub release, checks it against the release's SHA256SUMS, installs the scheduled task for this Windows user and starts the first report. The key appears once in the command; the command switches off PowerShell's history file for that window, so close the window afterwards.`,
+      `1. Copy the command and paste it into a normal PowerShell window on the PC (not "Run as administrator"). It downloads vault-agent ${release.version} from the project's GitHub release, checks it against the release's SHA256SUMS, installs the scheduled task for this Windows user and starts the first report.`,
+    ),
+    el(
+      "p",
+      "foot-note",
+      `2. When it asks "${KEY_PROMPT}", press Copy key here and paste into the window (it shows only asterisks). The key is never part of the command, so it is not in PowerShell's history, a transcript or a script-block log; the copy stays in the clipboard (and clipboard history or cloud clipboard sync, where on) until you copy something else.`,
     ),
     field,
     acts,

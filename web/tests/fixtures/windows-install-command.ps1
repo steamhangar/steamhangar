@@ -1,14 +1,17 @@
 # SteamHangar: install vault-agent 0.1.0-rc10 for this Windows user (no admin rights needed).
-# Paste into a normal PowerShell window. It contains the hangar API key: the first line
-# switches off this window's history file. Close the window when it is done.
-if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) { Set-PSReadLineOption -HistorySaveStyle SaveNothing }
+# Paste into a normal PowerShell window. It contains no key: it asks for the hangar API key
+# (use the Copy key button in SteamHangar, then paste at the prompt).
 & {
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $version = '0.1.0-rc10'
 $serverUrl = 'http://192.0.2.10:8080'
-$apiKey = 'DUMMY-not-a-real-key_0123''quote'
+$secureKey = Read-Host 'Hangar API key (paste it, then press Enter)' -AsSecureString
+$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+try { $apiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+$secureKey.Dispose()
+if ([string]::IsNullOrEmpty($apiKey) -or $apiKey -cnotmatch '^[\x20-\x7E]+$') { throw 'No usable API key was entered (empty or not printable ASCII). Nothing was installed.' }
 $base = 'https://github.com/steamhangar/steamhangar/releases/download/v0.1.0-rc10'
 $exeName = 'vault-agent-v0.1.0-rc10-windows-amd64.exe'
 $dir = Join-Path $env:LOCALAPPDATA 'VaultAgent'
@@ -41,6 +44,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw ('install-task.ps1 failed with exit code ' + $LASTEXITCODE + '.') }
 } finally {
   Remove-Item -LiteralPath $keyFile -Force -ErrorAction SilentlyContinue
+  $apiKey = $null
 }
 Copy-Item -LiteralPath (Join-Path $kit 'uninstall-task.ps1') -Destination (Join-Path $dir 'uninstall-task.ps1') -Force
 Remove-Item -LiteralPath $kit -Recurse -Force

@@ -3,12 +3,14 @@
  * (WP PAIR-1).
  *
  * One PowerShell block the operator pastes into a normal (non-admin)
- * PowerShell 5.1 window on the gaming PC. It:
+ * PowerShell 5.1 window on the gaming PC. THE BLOCK CONTAINS NO KEY (user
+ * decision "Weg A" on review finding 1, 2026-10-04). It:
  *
- *  1. switches off PSReadLine's history FILE for that window (the block
- *     carries the API key once; without this it would be saved to
- *     ConsoleHost_history.txt) — a separate first line, so it runs before
- *     the block that holds the key is accepted;
+ *  1. asks for the key with `Read-Host -AsSecureString` (the window echoes
+ *     only asterisks; the user pastes it from the sheet's separate
+ *     "Copy key" button), converts it in memory (`SecureStringToBSTR`,
+ *     `PtrToStringBSTR`, `ZeroFreeBSTR` in a `finally`) and refuses an
+ *     empty or non-printable-ASCII answer before anything is downloaded;
  *  2. downloads `vault-agent-v<version>-windows-amd64.exe`,
  *     `install-task.ps1`, `run-vault-agent.ps1`, `uninstall-task.ps1` and
  *     `SHA256SUMS` from the GitHub Release `v<version>` (asset names as
@@ -39,16 +41,21 @@
  *     the task `VaultAgentReport` once, so the PC reports now. On a failure
  *     the folder stays, so the downloaded files can be inspected.
  *
- * Logging residuals (review finding 5), stated plainly: turning off the
- * PSReadLine history file does not cover other places a pasted command can
- * end up. If PowerShell transcription is on (Start-Transcript, or the
- * "Turn on PowerShell Transcription" policy), the transcript holds the
- * command text. If script block logging is on (policy, or PowerShell 5.1's
- * automatic logging of script blocks it deems suspicious), Windows event
- * 4104 in Microsoft-Windows-PowerShell/Operational holds the block text.
- * Any of these that carries the command carries the key. On a managed PC
- * with such logging, rotate the key after the install (or wait for D9
- * PAIR-2's per-device keys).
+ * What this guarantees, and what it does not (review findings 1 and 5):
+ * the key is never part of the pasted text. So the PSReadLine history file
+ * (ConsoleHost_history.txt, written as one item when a block is pasted),
+ * a PowerShell transcript of the command, and a script-block log record
+ * (event 4104, Microsoft-Windows-PowerShell/Operational, by policy or by
+ * 5.1's automatic logging of "suspicious" blocks) hold the command but not
+ * the key. Read-Host input is not added to the history. Residuals: the
+ * "Copy key" copy sits in the clipboard (and in clipboard history or cloud
+ * clipboard sync where those are on) until something else is copied; the
+ * key exists as a plain string in this PowerShell process while it runs
+ * (`$apiKey` is cleared at the end, the .NET string itself cannot be
+ * wiped); and it is on disk in the owner-only temp file for the seconds
+ * install-task.ps1 needs, then in install-task.ps1's own owner-only
+ * env.txt, as with any install. The command no longer touches the history
+ * setting: with no secret in it there is nothing to keep out.
  *
  * install-task.ps1 finds the Steam library itself (registry SteamPath,
  * AGENT-FIX-2), so no library path is asked here.
@@ -161,39 +168,53 @@ export function psQuote(value) {
   return `'${String(value).replace(/['\u2018\u2019\u201A\u201B]/g, (q) => q + q)}'`;
 }
 
+/** The prompt the command shows; the sheet's text names it too. */
+export const KEY_PROMPT = "Hangar API key (paste it, then press Enter)";
+
 /**
- * How the command gets the key into `$apiKey`: today one single-quoted
- * literal (the key is in the command text exactly once). Kept as its own
- * function so the way the key arrives can change in one place (review
- * finding 1, decision pending) without touching the rest of the command.
- * @param {string} apiKey
- * @returns {string[]}
+ * The key rule of the install command: printable ASCII (what an HTTP header
+ * value can carry unchanged). The sheet shows a note instead of the command
+ * for a stored key outside it. Same rule as the command's own check.
+ * @param {unknown} key
  */
-function keySourceLines(apiKey) {
-  return [`$apiKey = ${psQuote(apiKey)}`];
+export function isInstallableKey(key) {
+  return typeof key === "string" && /^[\x20-\x7e]+$/.test(key);
 }
 
 /**
- * The install command. See the module header for what it does, and for
- * where the key can still end up (logging residuals).
+ * How the command gets the key into `$apiKey` (user decision "Weg A"): it
+ * asks for it. Nothing about the key is in the command text.
+ * @returns {string[]}
+ */
+function keySourceLines() {
+  return [
+    `$secureKey = Read-Host ${psQuote(KEY_PROMPT)} -AsSecureString`,
+    "$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)",
+    "try { $apiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }",
+    "$secureKey.Dispose()",
+    "if ([string]::IsNullOrEmpty($apiKey) -or $apiKey -cnotmatch '^[\\x20-\\x7E]+$') { throw 'No usable API key was entered (empty or not printable ASCII). Nothing was installed.' }",
+  ];
+}
+
+/**
+ * The install command. It takes no key: see the module header.
  *
- * @param {{version: string, serverUrl: string, apiKey: string}} args
+ * @param {{version: string, serverUrl: string}} args
  * @returns {string}
  */
-export function windowsInstallSnippet({ version, serverUrl, apiKey }) {
+export function windowsInstallSnippet({ version, serverUrl }) {
   const assets = releaseAssets(version);
   const lines = [
     `# SteamHangar: install vault-agent ${version} for this Windows user (no admin rights needed).`,
-    "# Paste into a normal PowerShell window. It contains the hangar API key: the first line",
-    "# switches off this window's history file. Close the window when it is done.",
-    "if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) { Set-PSReadLineOption -HistorySaveStyle SaveNothing }",
+    "# Paste into a normal PowerShell window. It contains no key: it asks for the hangar API key",
+    "# (use the Copy key button in SteamHangar, then paste at the prompt).",
     "& {",
     "$ErrorActionPreference = 'Stop'",
     "$ProgressPreference = 'SilentlyContinue'",
     "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12",
     `$version = ${psQuote(version)}`,
     `$serverUrl = ${psQuote(serverUrl)}`,
-    ...keySourceLines(apiKey),
+    ...keySourceLines(),
     `$base = ${psQuote(`${RELEASE_DOWNLOAD_BASE}/${assets.tag}`)}`,
     `$exeName = ${psQuote(assets.exe)}`,
     "$dir = Join-Path $env:LOCALAPPDATA 'VaultAgent'",
@@ -226,6 +247,7 @@ export function windowsInstallSnippet({ version, serverUrl, apiKey }) {
     "  if ($LASTEXITCODE -ne 0) { throw ('install-task.ps1 failed with exit code ' + $LASTEXITCODE + '.') }",
     "} finally {",
     "  Remove-Item -LiteralPath $keyFile -Force -ErrorAction SilentlyContinue",
+    "  $apiKey = $null",
     "}",
     "Copy-Item -LiteralPath (Join-Path $kit 'uninstall-task.ps1') -Destination (Join-Path $dir 'uninstall-task.ps1') -Force",
     "Remove-Item -LiteralPath $kit -Recurse -Force",

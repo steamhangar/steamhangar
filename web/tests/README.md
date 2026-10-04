@@ -2952,8 +2952,9 @@ DOM. Demo mode or no stored key: a note, no option.
   (`lib/agent-install.js`) for the vault-api version from `GET /v1/about`
   (release asset names as publish.yml writes them, tag = "v" + version). A
   build without a release (dev-<sha>, a native run without a commit,
-  "invalid") gets a note instead. The command: history file off (its own
-  first line), download exe + three scripts + SHA256SUMS into
+  "invalid") gets a note instead. The command (since round 1, "Weg A",
+  it contains NO key): ask for the key with `Read-Host -AsSecureString`,
+  download exe + three scripts + SHA256SUMS into
   `%LOCALAPPDATA%\VaultAgent\release-v<version>`, `Get-FileHash` check of
   all four (stop before installing on a mismatch), `Unblock-File`, exe to
   the versioned `%LOCALAPPDATA%\VaultAgent\vault-agent-v<version>.exe`
@@ -2961,7 +2962,7 @@ DOM. Demo mode or no stored key: a note, no option.
   with icacls before it is written, `install-task.ps1 -AgentPath -ServerUrl
   -ApiKeyFile` in a child `powershell.exe -ExecutionPolicy Bypass`, temp
   file deleted in `finally`, `Start-ScheduledTask VaultAgentReport`. The key
-  is in the command exactly once. **Agent server address**: an editable
+  reaches the PC only through a separate "Copy key" button. **Agent server address**: an editable
   field, prefilled with the page origin, validated (http/https + host,
   nothing else), remembered in localStorage (`steamvault.agentServerUrl`,
   not a secret). The note under it: the agent must reach vault-api's direct
@@ -3046,12 +3047,9 @@ variant is a one-place change). Fixed in this round:
 - After a successful install `uninstall-task.ps1` is copied next to the
   exe and the download folder is removed; on a failure it stays for
   inspection.
-- Logging residuals, documented in `lib/agent-install.js`: turning off the
-  history file does not cover PowerShell transcription (Start-Transcript
-  or the transcription policy) or script block logging (policy, or 5.1's
-  automatic logging of blocks it deems suspicious; event 4104 in
-  Microsoft-Windows-PowerShell/Operational). Where those are on, the
-  command text, key included, is in them: rotate the key after the install.
+- Logging residuals, documented in `lib/agent-install.js` (superseded by
+  finding 1 below: the command no longer carries the key, so history,
+  transcription and event 4104 hold no key).
 - The warning adds: copied text can also end up in clipboard history or
   cloud clipboard sync.
 - Phone: the Android app's key rule is mirrored (`isAppPairableKey`:
@@ -3075,3 +3073,48 @@ not kept; `psQuote` missing U+201A/B; fixture drift; CI not parsing the
 fixture; warning without the clipboard sentence.
 
 Suite: **1182 tests, 1182 pass, 0 fail**.
+
+Finding 1 (blocker, user decision 2026-10-04: **Weg A**). PSReadLine 2.0
+takes a pasted block as ONE history item and writes it to
+ConsoleHost_history.txt before any line in it runs, so the earlier
+"history off" first line could not protect a key inside the block. Now the
+command contains no key at all:
+- It asks `Read-Host 'Hangar API key (paste it, then press Enter)'
+  -AsSecureString` (asterisks only), converts with `SecureStringToBSTR` +
+  `PtrToStringBSTR`, `ZeroFreeBSTR` in a `finally`, disposes the
+  SecureString, and refuses an empty or non-printable-ASCII answer before
+  any download. The rest is unchanged: icacls-locked temp file (ACL before
+  content), `-ApiKeyFile`, temp file deleted and `$apiKey` cleared in the
+  `finally`. The history-off line is gone (nothing secret to keep out).
+- The sheet's Windows option, behind the same Show gate and warning, has a
+  "Copy key" button next to "Copy command". It reads the stored key at
+  click time and never puts it in the DOM; the plain-http fallback uses a
+  temporary off-screen textarea removed in a `finally`. A stored key the
+  command would refuse (not printable ASCII, `isInstallableKey`) gets a
+  note instead of the command.
+- What is guaranteed: the key is never part of the pasted text, so it is
+  not in the PSReadLine history, a transcript of the command or a 4104
+  script-block record of it. Residuals, stated on screen and in the module
+  header: the clipboard copy (and clipboard history or cloud clipboard
+  sync where on) until something else is copied; the plain string in the
+  PowerShell process while it runs; the owner-only temp file for the
+  seconds install-task.ps1 needs, then install-task.ps1's own owner-only
+  env.txt.
+- The fixture now holds no key; a test pins that (no `$apiKey = '`
+  literal, the Read-Host line present) and CI still parses it with 5.1.
+
+Tests: `agent-install.test.js` 15 (was 13; no key in any form even when one is
+passed; SecureString prompt, BSTR freed in a finally, check before any
+download, `$apiKey` cleared; `isInstallableKey` and the command's regex are
+one rule), `add-device-wiring.test.js` 17 (no key in the Windows option;
+Copy key only after Show, copies exactly the stored key via the async
+clipboard and via the fallback, the temporary textarea gone afterwards,
+gone with Hide; an uninstallable key gets the note).
+
+Mutations, each alone in a scratch copy, all killed: key literal back in
+the command; no `-AsSecureString`; `ZeroFreeBSTR` outside a finally; the
+key check after the downloads; `$apiKey` not cleared; Copy key copying
+something else; the temporary textarea not removed; Copy key outside the
+Show gate (built with the sheet); the uninstallable-key note removed.
+
+Suite: **1186 tests, 1186 pass, 0 fail**.
