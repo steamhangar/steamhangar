@@ -25,6 +25,10 @@
       5. Re-running install with different settings (idempotent update, not a
          duplicate): still exactly one task with that name, and its
          properties reflect the new settings.
+      5b. Re-running install WITHOUT -ApiKey/-ApiKeyFile keeps the key from
+         env.txt without printing it (WP AGENT-FIX-2); step 4 also checks
+         the log holds no NativeCommandError wrapping and no NUL bytes.
+         The hermetic, CI-executed counterpart is test-packaging-unit.ps1.
       6. uninstall removes the task and the config files it owns.
       7. Re-running uninstall on an already-clean state exits gracefully
          (no throw), still exit 0.
@@ -262,6 +266,11 @@ try {
         CheckTrue "log shows the wrapper invoked vault-agent report" ($logContent -like "*starting:*report*")
         CheckTrue "log shows the wrapper recorded a finish" ($logContent -like "*finished: exit=*")
         CheckTrue "log file does not contain the raw API key" ($logContent -notlike "*$ApiKeyValue*")
+        # WP AGENT-FIX-2: vault-agent logs to stderr; the wrapper must not
+        # wrap those lines in ErrorRecords or write UTF-16 (NUL bytes).
+        CheckTrue "log has no NativeCommandError wrapping (AGENT-FIX-2)" ($logContent -notlike "*NativeCommandError*")
+        $logBytes = [System.IO.File]::ReadAllBytes($logFilePath)
+        CheckTrue "log has no NUL byte, i.e. no UTF-16 content (AGENT-FIX-2)" (-not ($logBytes -contains [byte]0))
     }
 
     # ---- 5. idempotent re-install (update, not duplicate) ------------------
@@ -278,6 +287,21 @@ try {
     CheckTrue "re-install updated the server URL" ($envContent2 -like "*VAULT_AGENT_SERVER_URL=http://127.0.0.1:2*")
     CheckTrue "re-install updated the client id" ($envContent2 -like "*VAULT_AGENT_CLIENT_ID=wp26-harness-v2*")
     CheckTrue "re-install updated the interval passed to the agent" ($envContent2 -like "*VAULT_AGENT_REPORT_INTERVAL=15m*")
+
+    # ---- 5b. re-install WITHOUT a key parameter keeps the key (AGENT-FIX-2)
+    # No -ClientId either: it must be carried over from env.txt (review S1).
+    $reuseOutput = & $installScript -AgentPath $AgentExe -ServerUrl "http://127.0.0.1:2" `
+        -LibraryRoot "C:\SteamHangarHarnessLibrary" `
+        -ConfigDir $ConfigDir -TaskName $TaskName -IntervalMinutes 15 *>&1 | Out-String
+    $envContent3 = Get-Content -Raw -LiteralPath $envFilePath
+    CheckTrue "key-less re-install kept the API key in env.txt" ($envContent3 -like "*VAULT_AGENT_API_KEY=$ApiKeyValue*")
+    CheckTrue "key-less re-install applied the new library root" ($envContent3 -like "*VAULT_AGENT_LIBRARY_ROOT=C:\SteamHangarHarnessLibrary*")
+    CheckTrue "key-less re-install says the key was kept" ($reuseOutput -like "*API key*: kept from existing env.txt*")
+    CheckTrue "re-install without -ClientId kept the client id (S1)" ($envContent3 -like "*VAULT_AGENT_CLIENT_ID=wp26-harness-v2*")
+    CheckTrue "summary shows the kept client id (S1)" ($reuseOutput -like "*wp26-harness-v2 (kept from existing env.txt*")
+    CheckTrue "key-less re-install never prints the key" ($reuseOutput -notlike "*$ApiKeyValue*")
+    $aclAfterReuse = Get-Acl -LiteralPath $envFilePath
+    CheckTrue "env file ACL still protected after key-less re-install" ($aclAfterReuse.AreAccessRulesProtected -eq $true)
 
     # ---- 6. uninstall removes exactly what install created ------------------
     & $uninstallScript -TaskName $TaskName -ConfigDir $ConfigDir | Out-Null

@@ -152,15 +152,22 @@
 
 .PARAMETER ApiKeyFile
     Path to a file whose entire (trimmed) contents is the API key.
-    Mutually exclusive with -ApiKey. The file itself is only read, never
+    Mutually exclusive with -ApiKey. Re-install (WP AGENT-FIX-2): when
+    neither -ApiKey nor -ApiKeyFile is given and <ConfigDir>\env.txt
+    already holds a non-empty VAULT_AGENT_API_KEY, that key is kept (never
+    printed; the summary says "API key: kept from existing env.txt").
+    Without such a key, one of the two is required. The file itself is only read, never
     copied or referenced by the installed task -- keep it under your user
     profile (e.g. $env:USERPROFILE\vault-key.txt) and delete it after the
     install. This script warns (does not abort) when the file is readable
     by Users, Authenticated Users or Everyone.
 
 .PARAMETER ClientId
-    Optional VAULT_AGENT_CLIENT_ID value. Omitted -> vault-agent defaults to
-    the sanitized local hostname (go/agentconfig). Either way, this script's
+    Optional VAULT_AGENT_CLIENT_ID value. Omitted -> a non-empty
+    VAULT_AGENT_CLIENT_ID in the existing <ConfigDir>\env.txt is kept
+    (re-install, WP AGENT-FIX-2: the PC's identity stays stable); with no
+    such value vault-agent defaults to the sanitized local hostname
+    (go/agentconfig). Either way, this script's
     summary output (below) says plainly which one will happen and how to
     change it -- see "What this prints about the client id" below.
 
@@ -173,14 +180,22 @@
     actually resolved, plus its source) as the authoritative answer.
 
 .PARAMETER LibraryRoot
-    Optional VAULT_AGENT_LIBRARY_ROOT value. Omitted -> vault-agent's own
-    Windows default (`C:\Program Files (x86)\Steam`). When omitted, this
-    script checks whether that default actually contains a steamapps\
-    directory and prints a loud warning if it does not (WP AGENT-FIX-1
+    Optional VAULT_AGENT_LIBRARY_ROOT value. Omitted (WP AGENT-FIX-2) ->
+    this script reads Steam's own install path from
+    HKCU\Software\Valve\Steam\SteamPath (e.g. "c:/steam", normalized to
+    "c:\steam") and, if that directory contains steamapps\, writes it to
+    env.txt as VAULT_AGENT_LIBRARY_ROOT; the summary names the registry as
+    the source. Without a usable registry value, a VAULT_AGENT_LIBRARY_ROOT
+    already in <ConfigDir>\env.txt is kept if it contains steamapps\
+    (re-install). Failing both, it falls back to
+    vault-agent's own Windows default (`C:\Program Files (x86)\Steam`,
+    nothing written to env.txt), checks that default for a steamapps\
+    directory and prints a loud warning if there is none (WP AGENT-FIX-1
     S1) - the install still proceeds, but vault-agent will then refuse to
     post (exit 1, "report refused" in the log) until -LibraryRoot points
-    at the directory that contains steamapps\. No registry lookup is done
-    (v1 scope); see agent/README.md's "Windows Scheduled Task" section.
+    at the directory that contains steamapps\. The lookup happens here, at
+    install time, only; vault-agent itself does not read the registry.
+    See agent/README.md's "Windows Scheduled Task" section.
 
 .PARAMETER ConfigDir
     Directory this script owns: the env file, the deployed copy of
@@ -245,6 +260,95 @@ param(
     [string]$LogFile
 )
 
+# ---- helpers (WP AGENT-FIX-2) ------------------------------------------
+#
+# Pure functions with no side effects beyond reading, so
+# tests/test-packaging-unit.ps1 can lift them out of this file by name
+# (PowerShell AST) and test them in CI without running the installer.
+
+function Get-EnvFileValue {
+    # Returns the value of $Key in a KEY=VALUE env file written by this
+    # script, or $null when the file or the key is missing. Uses the same
+    # line rules as run-vault-agent.ps1 (blank and '#' lines skipped, key
+    # trimmed, value kept as-is; a later line wins). Encoding differs
+    # slightly: this reads UTF-8 explicitly, the wrapper uses PS 5.1's
+    # default (UTF-8 only when a BOM is present, else the ANSI codepage).
+    # env.txt as written by this script always carries a UTF-8 BOM
+    # (Set-Content -Encoding utf8 on 5.1), so both agree on it; only a
+    # hand-edited, BOM-less file with non-ASCII values could be read
+    # differently by the two.
+    param([string]$Path, [string]$Key)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $found = $null
+    foreach ($rawLine in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
+        $trimmed = $rawLine.Trim()
+        if ($trimmed.Length -eq 0) { continue }
+        if ($trimmed.StartsWith("#")) { continue }
+        $eqIndex = $rawLine.IndexOf("=")
+        if ($eqIndex -lt 1) { continue }
+        if ($rawLine.Substring(0, $eqIndex).Trim() -eq $Key) {
+            $found = $rawLine.Substring($eqIndex + 1)
+        }
+    }
+    return $found
+}
+
+function Get-RegistrySteamPath {
+    # Raw HKCU\Software\Valve\Steam SteamPath value (Steam writes it with
+    # forward slashes and often lowercase, e.g. "c:/steam"), or $null.
+    # Never throws: a missing key or value is the normal "Steam is not
+    # installed for this user" case.
+    try {
+        $item = Get-ItemProperty -LiteralPath "HKCU:\Software\Valve\Steam" -Name "SteamPath" -ErrorAction Stop
+        return [string]$item.SteamPath
+    } catch {
+        return $null
+    }
+}
+
+function ConvertTo-SteamLibraryRoot {
+    # Normalizes a raw SteamPath into a Windows path: forward slashes to
+    # backslashes, surrounding whitespace and trailing separators removed
+    # (a bare drive keeps its root backslash, "c:/" -> "c:\"). Case is
+    # kept as given; Windows paths are case-insensitive. $null for empty.
+    param([string]$SteamPath)
+    if ([string]::IsNullOrWhiteSpace($SteamPath)) { return $null }
+    $p = $SteamPath.Trim().Replace("/", "\").TrimEnd([char]92)
+    if ($p.Length -eq 0) { return $null }
+    if ($p -match '^[A-Za-z]:$') { $p = $p + "\" }
+    return $p
+}
+
+function Resolve-LibraryRoot {
+    # Picks the library root, in this order:
+    #   1. explicit -LibraryRoot                      (Source "explicit")
+    #   2. registry SteamPath, if it has steamapps\   (Source "registry")
+    #   3. VAULT_AGENT_LIBRARY_ROOT from the existing env.txt, if it has
+    #      steamapps\ (re-install, review S1)          (Source "kept")
+    #   4. vault-agent's own Windows default          (Source "default")
+    # WriteToEnv says whether the value goes into env.txt as
+    # VAULT_AGENT_LIBRARY_ROOT: for "default" it does not, the agent's own
+    # default applies exactly as before. RegistryCandidate is the
+    # normalized registry path even when it was rejected, for the summary.
+    param([string]$ExplicitRoot, [string]$RegistrySteamPath, [string]$DefaultRoot, [string]$ExistingRoot)
+    $candidate = ConvertTo-SteamLibraryRoot -SteamPath $RegistrySteamPath
+    if ($ExplicitRoot) {
+        return [PSCustomObject]@{ Root = $ExplicitRoot; Source = "explicit"; WriteToEnv = $true
+            SteamappsFound = $null; RegistryCandidate = $candidate }
+    }
+    if ($candidate -and (Test-Path -LiteralPath (Join-Path $candidate "steamapps") -PathType Container)) {
+        return [PSCustomObject]@{ Root = $candidate; Source = "registry"; WriteToEnv = $true
+            SteamappsFound = $true; RegistryCandidate = $candidate }
+    }
+    if ($ExistingRoot -and (Test-Path -LiteralPath (Join-Path $ExistingRoot "steamapps") -PathType Container)) {
+        return [PSCustomObject]@{ Root = $ExistingRoot; Source = "kept"; WriteToEnv = $true
+            SteamappsFound = $true; RegistryCandidate = $candidate }
+    }
+    $defaultFound = [bool](Test-Path -LiteralPath (Join-Path $DefaultRoot "steamapps") -PathType Container)
+    return [PSCustomObject]@{ Root = $DefaultRoot; Source = "default"; WriteToEnv = $false
+        SteamappsFound = $defaultFound; RegistryCandidate = $candidate }
+}
+
 # ---- validate inputs -------------------------------------------------
 #
 # NOTE: $ErrorActionPreference is deliberately left at its default
@@ -268,25 +372,37 @@ if (-not $resolvedAgentPath) {
 }
 $AgentPath = $resolvedAgentPath.Path
 
+$envFilePath = Join-Path $ConfigDir "env.txt"
+
+# WP AGENT-FIX-2: a re-install (e.g. only to change -LibraryRoot) may omit
+# both key parameters when the existing env.txt already holds a non-empty
+# VAULT_AGENT_API_KEY; that value is reused as-is and never printed. With
+# neither parameter and no such key, this is the same usage error as before.
 $haveApiKey = [bool]$PSBoundParameters.ContainsKey("ApiKey")
 $haveApiKeyFile = [bool]$PSBoundParameters.ContainsKey("ApiKeyFile")
+$apiKeySource = $null
 if ($haveApiKey -and $haveApiKeyFile) {
     Write-Error "Specify exactly one of -ApiKey or -ApiKeyFile, not both."
     exit 2
 }
 if (-not $haveApiKey -and -not $haveApiKeyFile) {
-    Write-Error "Specify one of -ApiKey or -ApiKeyFile."
-    exit 2
-}
-
-if ($haveApiKeyFile) {
+    $existingApiKey = Get-EnvFileValue -Path $envFilePath -Key "VAULT_AGENT_API_KEY"
+    if ([string]::IsNullOrWhiteSpace($existingApiKey)) {
+        Write-Error "Specify one of -ApiKey or -ApiKeyFile."
+        exit 2
+    }
+    $resolvedApiKey = $existingApiKey
+    $apiKeySource = "kept from existing env.txt"
+} elseif ($haveApiKeyFile) {
     if (-not (Test-Path -LiteralPath $ApiKeyFile -PathType Leaf)) {
         Write-Error "ApiKeyFile '$ApiKeyFile' does not exist."
         exit 2
     }
     $resolvedApiKey = (Get-Content -LiteralPath $ApiKeyFile -Raw).Trim()
+    $apiKeySource = "from -ApiKeyFile"
 } else {
     $resolvedApiKey = $ApiKey
+    $apiKeySource = "from -ApiKey"
 }
 
 if ([string]::IsNullOrWhiteSpace($resolvedApiKey)) {
@@ -303,7 +419,41 @@ if (-not $LogFile) {
     $LogFile = Join-Path $ConfigDir "vault-agent.log"
 }
 
-$envFilePath = Join-Path $ConfigDir "env.txt"
+# WP AGENT-FIX-2 (review S1): a re-install must not silently change this
+# PC's identity. Explicit -ClientId wins; otherwise a non-empty
+# VAULT_AGENT_CLIENT_ID from the existing env.txt is carried over (a
+# dropped id would make vault-agent fall back to the hostname-derived one
+# and leave a ghost row, see agent/README.md "Client identity and
+# renaming"); otherwise none, as before.
+$effectiveClientId = $null
+$clientIdSource = $null
+if ($ClientId) {
+    $effectiveClientId = $ClientId
+    $clientIdSource = "explicit"
+} else {
+    $existingClientId = Get-EnvFileValue -Path $envFilePath -Key "VAULT_AGENT_CLIENT_ID"
+    if (-not [string]::IsNullOrWhiteSpace($existingClientId)) {
+        $effectiveClientId = $existingClientId
+        $clientIdSource = "kept"
+    }
+}
+
+# WP AGENT-FIX-2: explicit -LibraryRoot > HKCU\Software\Valve\Steam
+# SteamPath (only if it contains steamapps\) > VAULT_AGENT_LIBRARY_ROOT
+# kept from the existing env.txt (only if it contains steamapps\) >
+# vault-agent's own Windows default. The default literal mirrors
+# go/agentconfig's defaultLibraryRoot("windows") exactly - keep the two in
+# sync.
+$defaultLibraryRoot = "C:\Program Files (x86)\Steam"
+$registrySteamPath = $null
+$existingLibraryRoot = $null
+if (-not $LibraryRoot) {
+    $registrySteamPath = Get-RegistrySteamPath
+    $existingLibraryRoot = Get-EnvFileValue -Path $envFilePath -Key "VAULT_AGENT_LIBRARY_ROOT"
+}
+$libraryRootChoice = Resolve-LibraryRoot -ExplicitRoot $LibraryRoot -RegistrySteamPath $registrySteamPath `
+    -DefaultRoot $defaultLibraryRoot -ExistingRoot $existingLibraryRoot
+
 $runnerDestPath = Join-Path $ConfigDir "run-vault-agent.ps1"
 $runnerSourcePath = Join-Path $PSScriptRoot "run-vault-agent.ps1"
 
@@ -425,8 +575,8 @@ if ($PSCmdlet.ShouldProcess($envFilePath, "Create/lock down secret env file")) {
     # vault-api can tell online from offline. Must match the repetition
     # trigger below.
     $envLines.Add("VAULT_AGENT_REPORT_INTERVAL=${IntervalMinutes}m")
-    if ($ClientId) { $envLines.Add("VAULT_AGENT_CLIENT_ID=$ClientId") }
-    if ($LibraryRoot) { $envLines.Add("VAULT_AGENT_LIBRARY_ROOT=$LibraryRoot") }
+    if ($effectiveClientId) { $envLines.Add("VAULT_AGENT_CLIENT_ID=$effectiveClientId") }
+    if ($libraryRootChoice.WriteToEnv) { $envLines.Add("VAULT_AGENT_LIBRARY_ROOT=$($libraryRootChoice.Root)") }
 
     # -Encoding utf8 explicitly: Set-Content otherwise defaults to the
     # system ANSI codepage on PowerShell 5.1 (docs/LEARNINGS.md).
@@ -493,6 +643,8 @@ Write-Host "  Online/offline  : reports state VAULT_AGENT_REPORT_INTERVAL=${Inte
 Write-Host "                    this PC offline after 2 x $IntervalMinutes + 5 minutes without a report"
 Write-Host "  Config dir      : $ConfigDir"
 Write-Host "  Secret env file : $envFilePath (owner-only ACL, contains VAULT_AGENT_API_KEY)"
+# Only where the key came from, never the key itself.
+Write-Host "  API key         : $apiKeySource"
 Write-Host "  Wrapper script  : $runnerDestPath"
 Write-Host "  Log file        : $LogFile"
 
@@ -515,6 +667,10 @@ if ($ClientId) {
     Write-Host "  Client id       : $ClientId (explicit -ClientId, passed to the agent as"
     Write-Host "                    VAULT_AGENT_CLIENT_ID -- so vault-agent's own log will show"
     Write-Host "                    client_id_source=env, not =flag)"
+} elseif ($clientIdSource -eq "kept") {
+    Write-Host "  Client id       : $effectiveClientId (kept from existing env.txt; pass -ClientId"
+    Write-Host "                    to change it -- see 'Client identity and renaming' in"
+    Write-Host "                    agent/README.md before you do)"
 } else {
     $hostnamePreview = [System.Net.Dns]::GetHostName()
     Write-Host "  Client id       : not given -> vault-agent will derive one from this machine's"
@@ -531,15 +687,26 @@ if ($ClientId) {
 # tell from "nothing installed" until WP AGENT-FIX-1: the agent now
 # refuses to post when no steamapps\ directory is readable, so surface the
 # most likely cause HERE, at install time, instead of in a log nobody reads
-# until the games vanish from the server. The literal below mirrors
-# go/agentconfig's defaultLibraryRoot("windows") exactly - keep the two in
-# sync. Warn only, never abort: Steam may be installed after the agent.
-if ($LibraryRoot) {
-    Write-Host "  Library root    : $LibraryRoot (explicit -LibraryRoot)"
+# until the games vanish from the server. Since WP AGENT-FIX-2 the root is
+# resolved during validation above (explicit > registry SteamPath > kept
+# from env.txt > default, see Resolve-LibraryRoot); this block only reports
+# the choice. Warn only, never abort: Steam may be installed after the
+# agent.
+if ($libraryRootChoice.Source -eq "explicit") {
+    Write-Host "  Library root    : $($libraryRootChoice.Root) (explicit -LibraryRoot)"
+} elseif ($libraryRootChoice.Source -eq "registry") {
+    Write-Host "  Library root    : $($libraryRootChoice.Root) (from HKCU\Software\Valve\Steam\SteamPath,"
+    Write-Host "                    steamapps\ found there; written to env.txt as VAULT_AGENT_LIBRARY_ROOT)"
+} elseif ($libraryRootChoice.Source -eq "kept") {
+    Write-Host "  Library root    : $($libraryRootChoice.Root) (kept from existing env.txt,"
+    Write-Host "                    steamapps\ found there)"
 } else {
-    $defaultLibraryRoot = "C:\Program Files (x86)\Steam"
     $defaultSteamapps = Join-Path $defaultLibraryRoot "steamapps"
-    if (Test-Path -LiteralPath $defaultSteamapps -PathType Container) {
+    if ($libraryRootChoice.RegistryCandidate) {
+        Write-Host "  Library root    : HKCU\Software\Valve\Steam\SteamPath points at"
+        Write-Host "                    $($libraryRootChoice.RegistryCandidate), but it has no steamapps\ - ignored"
+    }
+    if ($libraryRootChoice.SteamappsFound) {
         Write-Host "  Library root    : not given -> vault-agent's Windows default"
         Write-Host "                    ($defaultLibraryRoot), steamapps\ found there."
     } else {

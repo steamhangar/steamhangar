@@ -36,7 +36,10 @@ name: CI
 # make this one redundant to keep local-only, since it is the only place
 # that native-Windows-plus-real-CDN combination is exercised at all.) The
 # two PowerShell ones are still parse-checked (never executed) by the
-# powershell-syntax job below.
+# powershell-syntax job below. That job DOES execute one PowerShell test:
+# agent/packaging/windows/tests/test-packaging-unit.ps1 (WP AGENT-FIX-2),
+# which is hermetic by design (temp directory only, installer under
+# -WhatIf) and needs no real machine state.
 
 on:
   push:
@@ -187,6 +190,14 @@ jobs:
         # image. See verify-ps-analyze.ps1's header for the full reasoning.
         shell: pwsh
         run: ./.github/scripts/verify-ps-analyze.ps1
+      - name: Packaging unit tests (real Windows PowerShell 5.1)
+        # WP AGENT-FIX-2. Unlike the real-machine harness next to it, this
+        # one is hermetic and IS executed: it touches only a throwaway
+        # %TEMP% directory (no Scheduled Task, no registry write, no
+        # network) -- install-task.ps1 runs with -WhatIf only. See the
+        # script's own header for what it pins.
+        shell: powershell
+        run: .\agent\packaging\windows\tests\test-packaging-unit.ps1
 
   web-tests:
     name: web / node --test
