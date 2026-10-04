@@ -3,17 +3,31 @@ package dev.steamvault.app.ui.settings
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import dev.steamvault.app.ui.library.logic.STEAM_LIBRARY_SETTING_KEY
-import dev.steamvault.app.ui.settings.logic.AboutComponentKind
+import dev.steamvault.app.ui.settings.logic.AboutDisplayStatus
 import dev.steamvault.app.ui.settings.logic.AboutLoadFailure
 import dev.steamvault.app.ui.settings.logic.AboutRow
-import dev.steamvault.app.ui.settings.logic.AboutStatus
+import dev.steamvault.app.ui.settings.logic.AboutNote
 import dev.steamvault.app.ui.settings.logic.LibraryLookupError
 import dev.steamvault.app.ui.settings.logic.LibraryPreview
-import dev.steamvault.app.ui.settings.logic.aboutRowFor
+import dev.steamvault.app.ui.settings.logic.aboutRowsFor
 import dev.steamvault.app.ui.settings.logic.canResetLibrarySteamId
 import dev.steamvault.app.ui.settings.logic.canSaveLibrarySteamId
 import dev.steamvault.app.ui.theme.VaultColors
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.material3.Surface
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -86,7 +100,17 @@ fun SettingsScreen(
     LaunchedEffect(controller) { controller.load() }
     LaunchedEffect(controller) { controller.loadAbout() }
 
-    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }) }) { innerPadding ->
+    Scaffold(
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }) },
+        // WP WEB-FIX-8 (user request: Save visible as soon as something
+        // changed): a bottom bar outside the scrolling column; the Scaffold's
+        // innerPadding keeps the form's end clear of it.
+        bottomBar = {
+            if (!controller.loading && controller.loadError == null && !controller.isReadonly && controller.isDirty) {
+                SettingsSaveBar(controller, scope)
+            }
+        },
+    ) { innerPadding ->
         // WP APP-DEMO review round 2 (B2): the banner lives in this OUTER,
         // non-scrolling Column -- a sibling of the scrolling Column below,
         // never a child of it -- so it stays pinned on screen regardless of
@@ -111,7 +135,7 @@ fun SettingsScreen(
                             stringResource(R.string.settings_load_error, controller.loadError.orEmpty()),
                             color = MaterialTheme.colorScheme.error,
                         )
-                    else -> SettingsForm(controller, scope)
+                    else -> SettingsForm(controller)
                 }
 
                 HorizontalDivider()
@@ -127,6 +151,48 @@ fun SettingsScreen(
                 ConnectionSection(controller, onReconnectClick, onDisconnected, demoMode)
                 HorizontalDivider()
                 AboutSection(controller, scope)
+            }
+        }
+    }
+}
+
+/**
+ * The save bar (WP WEB-FIX-8, twin of web settings.js's `.savebar`): shown
+ * by [SettingsScreen]'s Scaffold `bottomBar` only while
+ * [SettingsController.isDirty] -- the PATCH would change something -- so it
+ * disappears after a successful save, on Discard, and when a field is typed
+ * back to its saved value. A failed save keeps the drafts (still dirty), so
+ * the bar stays and its status line says what failed; the line is a polite
+ * live region, so TalkBack announces it. Discard first, then Save (same
+ * order as the web).
+ */
+@Composable
+private fun SettingsSaveBar(controller: SettingsController, scope: kotlinx.coroutines.CoroutineScope) {
+    val error = controller.saveError
+    Surface(tonalElevation = 3.dp, shadowElevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                when {
+                    controller.saving -> stringResource(R.string.settings_saving)
+                    error != null -> stringResource(R.string.settings_save_error, error)
+                    else -> stringResource(R.string.settings_unsaved_changes)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (error != null && !controller.saving) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { controller.discard() }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_discard_changes))
+                }
+                Button(
+                    onClick = { scope.launch { controller.save() } },
+                    enabled = !controller.saving,
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(R.string.settings_save_changes)) }
             }
         }
     }
@@ -195,7 +261,7 @@ private fun ClientsSection(onOpenClientsClick: () -> Unit) {
 // ---------------------------------------------------------------------
 
 @Composable
-private fun SettingsForm(controller: SettingsController, scope: kotlinx.coroutines.CoroutineScope) {
+private fun SettingsForm(controller: SettingsController) {
     val response = controller.settingsResponse ?: return
     val entries = response.settings.associateBy { it.key }
 
@@ -284,23 +350,9 @@ private fun SettingsForm(controller: SettingsController, scope: kotlinx.coroutin
         }
     }
 
-    if (!response.readonly) {
-        controller.saveError?.let {
-            Text(stringResource(R.string.settings_save_error, it), color = MaterialTheme.colorScheme.error)
-        }
-        if (controller.isDirty) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { controller.discard() }, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_discard_changes))
-                }
-                Button(
-                    onClick = { scope.launch { controller.save() } },
-                    enabled = !controller.saving,
-                    modifier = Modifier.weight(1f),
-                ) { Text(stringResource(R.string.settings_save_changes)) }
-            }
-        }
-    }
+    // WP WEB-FIX-8: Save/Discard moved out of this scrolling form into the
+    // Scaffold's bottom bar (SettingsSaveBar), so it is on screen without
+    // scrolling while anything is dirty.
 }
 
 @Composable
@@ -709,10 +761,10 @@ private fun LibraryPreviewResult(preview: LibraryPreview?, error: LibraryLookupE
 // ---------------------------------------------------------------------
 
 /**
- * One row per component, status as the server sent it (never recomputed;
- * vault-core and vault-dns are always "Unknown", the per-component note
- * says why). A server without `/v1/about` (404) gets the "server too old"
- * note instead of an error. Presentation decisions:
+ * One row per component (WP WEB-FIX-8 words: vault-core OK/Check/Not
+ * reported against vault-api, vault-dns N/A, a dash for a value not
+ * reported, explanations behind a per-row (i) button). A server without
+ * `/v1/about` (404) gets the "server too old" note instead of an error. Presentation decisions:
  * `ui/settings/logic/AboutPresentation.kt`.
  */
 @Composable
@@ -735,8 +787,8 @@ private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutin
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         else -> {
-            for (component in controller.about?.components.orEmpty()) {
-                AboutRowView(aboutRowFor(component))
+            for (row in aboutRowsFor(controller.about?.components.orEmpty())) {
+                AboutRowView(row)
             }
             Text(
                 stringResource(R.string.settings_about_cache_note),
@@ -756,47 +808,108 @@ private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutin
     )
 }
 
+/**
+ * One About row (WP WEB-FIX-8, twin of web settings.js `buildAboutTable`):
+ * name + (i) button + status word, then the version line (a dash for a
+ * value not reported, read as "Not reported" by TalkBack), then -- only
+ * while the (i) is open -- the note, the dash reason and the server's
+ * detail. Collapsed by default except for a CHECK row (open, so the
+ * reason is in view); the open state survives rotation (rememberSaveable,
+ * keyed by component name).
+ */
 @Composable
 private fun AboutRowView(row: AboutRow) {
-    val unknown = stringResource(R.string.settings_about_unknown_value)
-    val statusWord = when (row.status) {
-        AboutStatus.OK -> stringResource(R.string.settings_about_status_ok)
-        AboutStatus.UNREACHABLE -> stringResource(R.string.settings_about_status_unreachable)
-        AboutStatus.NOT_IN_USE -> stringResource(R.string.settings_about_status_not_in_use)
-        AboutStatus.UNKNOWN -> stringResource(R.string.settings_about_status_unknown)
+    val dash = stringResource(R.string.settings_about_dash)
+    val dashLabel = stringResource(R.string.settings_about_dash_label)
+    val statusWord = when (row.display) {
+        AboutDisplayStatus.OK -> stringResource(R.string.settings_about_status_ok)
+        AboutDisplayStatus.UNREACHABLE -> stringResource(R.string.settings_about_status_unreachable)
+        AboutDisplayStatus.NOT_IN_USE -> stringResource(R.string.settings_about_status_not_in_use)
+        AboutDisplayStatus.CHECK -> stringResource(R.string.settings_about_status_check)
+        AboutDisplayStatus.NOT_REPORTED -> stringResource(R.string.settings_about_status_not_reported)
+        AboutDisplayStatus.NOT_APPLICABLE -> stringResource(R.string.settings_about_status_not_applicable)
     }
-    val note = when (row.kind) {
-        AboutComponentKind.VAULT_API -> stringResource(R.string.settings_about_note_vault_api)
-        AboutComponentKind.VAULT_CORE -> stringResource(R.string.settings_about_note_vault_core)
-        AboutComponentKind.VAULT_RUNNER -> stringResource(R.string.settings_about_note_vault_runner)
-        AboutComponentKind.STEAMPREFILL -> stringResource(R.string.settings_about_note_steamprefill)
-        AboutComponentKind.VAULT_PROXY -> stringResource(R.string.settings_about_note_vault_proxy)
-        AboutComponentKind.VAULT_DNS -> stringResource(R.string.settings_about_note_vault_dns)
+    val note = when (row.note) {
+        AboutNote.VAULT_API -> stringResource(R.string.settings_about_note_vault_api)
+        AboutNote.VAULT_CORE -> stringResource(R.string.settings_about_note_vault_core)
+        AboutNote.CORE_SAME_RELEASE -> stringResource(R.string.settings_about_note_core_same_release)
+        AboutNote.CORE_MISMATCH -> stringResource(R.string.settings_about_note_core_mismatch)
+        AboutNote.CORE_NOT_COMPARABLE -> stringResource(R.string.settings_about_note_core_not_comparable)
+        AboutNote.CORE_NOT_REPORTED -> stringResource(R.string.settings_about_note_core_not_reported)
+        AboutNote.VAULT_RUNNER -> stringResource(R.string.settings_about_note_vault_runner)
+        AboutNote.STEAMPREFILL -> stringResource(R.string.settings_about_note_steamprefill)
+        AboutNote.VAULT_PROXY -> stringResource(R.string.settings_about_note_vault_proxy)
+        AboutNote.VAULT_DNS -> stringResource(R.string.settings_about_note_vault_dns)
         null -> null
     }
+    val dashNote = if (row.showDashNote) stringResource(R.string.settings_about_dash_note) else null
+    // WP WEB-FIX-8 review: a CHECK row opens by default so a fault is never
+    // hidden behind the (i); every other row starts collapsed.
+    var expanded by rememberSaveable(row.name) { mutableStateOf(row.infoOpenByDefault) }
+    val infoDescription = if (expanded) {
+        stringResource(R.string.settings_about_info_hide, row.name)
+    } else {
+        stringResource(R.string.settings_about_info_show, row.name)
+    }
+    val versionLine = stringResource(R.string.settings_about_version_line, row.version ?: dash, row.commit ?: dash)
+    val versionLineSpoken = stringResource(
+        R.string.settings_about_version_line,
+        row.version ?: dashLabel,
+        row.commit ?: dashLabel,
+    )
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(row.name, style = MaterialTheme.typography.bodyMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Text(row.name, style = MaterialTheme.typography.bodyMedium)
+                if (row.hasInfo) {
+                    IconButton(
+                        onClick = { expanded = !expanded },
+                        modifier = Modifier.semantics { contentDescription = infoDescription },
+                    ) {
+                        AboutInfoGlyph(
+                            color = if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             Text(
                 statusWord,
                 style = MaterialTheme.typography.labelMedium,
-                color = when (row.status) {
-                    AboutStatus.OK -> VaultColors.StatusOk
-                    AboutStatus.UNREACHABLE -> MaterialTheme.colorScheme.error
+                color = when (row.display) {
+                    AboutDisplayStatus.OK -> VaultColors.StatusOk
+                    AboutDisplayStatus.UNREACHABLE -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
         }
         Text(
-            stringResource(R.string.settings_about_version_line, row.version ?: unknown, row.commit ?: unknown),
+            versionLine,
             style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.semantics { contentDescription = versionLineSpoken },
         )
-        note?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (expanded) {
+            for (paragraph in listOfNotNull(note, dashNote, row.detail)) {
+                Text(paragraph, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        row.detail?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+    }
+}
+
+/** The (i) glyph: outline circle with an "i", drawn like the nav icons
+ * (24-unit grid, round caps); decorative -- the IconButton carries the
+ * name. Same shape as the web's `infoGlyph()` in views/settings.js. */
+@Composable
+private fun AboutInfoGlyph(color: Color) {
+    Canvas(Modifier.size(18.dp)) {
+        val scale = size.minDimension / 24f
+        val stroke = Stroke(width = 2f * scale, cap = StrokeCap.Round)
+        drawCircle(color = color, radius = 9f * scale, center = Offset(12f * scale, 12f * scale), style = stroke)
+        drawLine(color, Offset(12f * scale, 11f * scale), Offset(12f * scale, 17f * scale), strokeWidth = 2f * scale, cap = StrokeCap.Round)
+        drawLine(color, Offset(12f * scale, 7.5f * scale), Offset(12f * scale, 7.51f * scale), strokeWidth = 2f * scale, cap = StrokeCap.Round)
     }
 }
 

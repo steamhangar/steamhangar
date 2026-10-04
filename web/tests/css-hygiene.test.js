@@ -537,9 +537,12 @@ test("every CSS class with an author `display` rule that is hidden-toggled in we
 // Sanity pin (not the mutation target itself, but proves the analysis found
 // real work to do rather than vacuously passing on an empty result): the
 // three historically-buggy classes from docs/LEARNINGS.md must actually be
-// present in both sides of the cross-reference.
-test("sanity: the three historically-buggy classes (.btn, h4.sec, .onbnav) are found on BOTH sides of the cross-reference", () => {
-  for (const cls of ["btn", "sec", "onbnav"]) {
+// present in both sides of the cross-reference. WP WEB-FIX-8: the Settings
+// save bar's hidden toggle moved from its `.onbnav` row to the new
+// `.savebar` container (the `.onbnav` row inside it is never toggled now),
+// so `.savebar` stands in as the third live instance of the class.
+test("sanity: the historically-buggy classes (.btn, h4.sec, and the save bar's .savebar) are found on BOTH sides of the cross-reference", () => {
+  for (const cls of ["btn", "sec", "savebar"]) {
     assert.ok(displayRulesByClass.has(cls), `no display rule found for .${cls} — CSS parsing regressed`);
     assert.ok(hiddenToggledClasses.has(cls), `no hidden-toggle site found for .${cls} — JS scanning regressed`);
   }

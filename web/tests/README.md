@@ -2913,3 +2913,119 @@ describedby; a paragraph id missing; server detail reworded (twin pin);
 demo detail reworded. Wiring file 20x in a loop: 0 failures.
 
 Suite: **1115 tests, 1115 pass, 0 fail**.
+
+### WP WEB-FIX-8 — About without "unknown", and a Settings save bar
+
+User feedback on the rc9 About table: "Unknown" reads as if the user did
+something wrong. No API change (ADR-0016 freeze); `lib/about-view.js`
+now decides the words from what the server already sends:
+
+- A version or commit the component does not report is an em dash (with
+  an sr-only "Not reported"); the server's generic `unknown` reads "Not
+  checked"; the status-icon word for that kind follows.
+- vault-core: "OK" when its recorded version AND commit equal vault-api's
+  in the same answer (same release); a neutral "Check" when they differ or
+  cannot be compared (a missing or `invalid` value on either side, so two
+  "dev" builds never read OK on the version alone); "Not reported" when
+  core never recorded one. A status other than `unknown` is never
+  overridden. vault-dns `unknown` reads "N/A"; vault-proxy keeps OK with
+  dashes.
+- Every explanation (the note, a "dash means not reported" line where the
+  note does not already say it, the server's detail) sits behind a per-row
+  (i) button: a native `<button>` after the name with `aria-expanded`,
+  `aria-controls` on the details row and an accessible name, collapsed by
+  default; the open state survives a Refresh. CSS: a `[hidden]` guard on
+  the details row (it is display-styled at every width), a 28px target,
+  hover only for fine pointers.
+
+Second user request in the same package: Save visible as soon as
+something changed. The Save/Discard bar is now `position:fixed` above the
+bottom nav with the bulk bar's own bottom formula (the two never share a
+view), cleared of the rail from BP-L, as wide as the Settings column; it
+stays in the DOM right after the form (Tab order unchanged). It shows while
+the PATCH body would be non-empty (a value typed back hides it), the page
+gets `.savebar-up` scroll room while it is up, Save is `aria-disabled` with
+a click guard while in flight, a failure keeps the bar and puts "Could not
+save: ..." in its `role=status` line, and after a save or discard that
+removed a focused bar, focus lands on the page heading. Read-only settings
+build no bar. Android mirrors both (twin pins below).
+
+Tests: `about-view.test.js` (23: every display word/icon/tone, the core
+comparison in all four outcomes, dns N/A, proxy and steamprefill dashes,
+no visible "unknown" for any row state), `about-android-twin.test.js` (4:
+strings.xml words and notes equal about-view.js, no app About string says
+"unknown"), `settings-about-pcs-wiring.test.js` (19: rows per state, core
+Check/Not reported in the DOM, default-collapsed render with no visible
+"unknown", the disclosure a11y and toggle, the dash label),
+`css-about-pcs.test.js` (+2: the `[hidden]` guard out-ranks both display
+rules, the button target), `settings-save-bar.test.js` (9: dirty/revert,
+region and order, save, failure, in-flight, discard, read-only, demo, the
+Android words), `css-settings-save-bar.test.js` (6: fixed above the nav and
+the inset, same bottom as `.bulk` and only one bar per view, `[hidden]`
+guard, scroll room token, BP-L rail, theme tokens). `css-hygiene`'s sanity
+pin now names `.savebar` (the hidden toggle moved off `.onbnav`).
+
+Mutation evidence (each alone, the seven affected files run): all 24
+killed — core OK on version only; null commits comparable; dns rule
+dropped; "Not checked" back to "Unknown"; Check in the error tone; a null
+version as "unknown"; the proxy dash note not suppressed; Not reported as
+Check; details open by default; `aria-controls` dropped; the toggle not
+flipping `hidden`; no sr label on a dash; the details `[hidden]` guard
+dropped; dirty as "touched"; the bar sticky instead of fixed; the bar
+ignoring the nav; the `.savebar[hidden]` guard dropped; no scroll room;
+a failure hiding the bar; no in-flight guard; no focus restore; the bar
+appended after About; an Android note and an Android status word drifting.
+The two wiring files ran 15x in a loop: 0 failures.
+
+Not covered: the painted result, a screen reader and real phones (no
+browser here); `--savebar-h` (104px) is an estimate like `--bulk-h`.
+Expected look: About rows show the name with a small outlined (i) after
+it, dashes in empty cells, and the details paragraph under the row once
+opened; the save bar floats 14px above the bottom nav (14px above the
+viewport bottom right of the rail on desktop) with "Unsaved changes" over
+"Discard changes | Save changes".
+
+Suite: **1149 tests, 1149 pass, 0 fail**.
+
+Review round 1 (FAIL, one blocker): a server `unknown` on vault-proxy,
+vault-runner or steamprefill (or a probe past its deadline) means vault-api
+DID look and got a bad or unclear answer (`api/vault_api/about.py`: e.g. the
+proxy forwarded a host it must refuse). "Not checked" said the opposite and
+hid the fault. It now reads a neutral "Check" (the "Not checked" state is
+gone; an unrecognised word is Check too), and a Check row's (i) details
+start OPEN, so the server's reason is on screen; OK/N/A/Not reported/Not in
+use rows start collapsed, and a user's choice still wins across Refresh.
+The status-icon word for the "?" kind is "Check", and STATUS_LABEL is now
+pinned literally. Also taken: the row header is `aria-labelledby` the name
+span (the (i) label never joins it); a root `scroll-padding-bottom` (bar +
+gaps + nav + inset) while the bar is up, so a focused field is not hidden
+behind it (WCAG 2.4.11); an edit typed while a save is in flight survives
+it (drafts that are no longer the sent objects are kept, the form is not
+rebuilt, the bar stays up) and the line keeps "Saving…" while in flight;
+the PCs sheet says "Not reported" / "last seen: not reported" / "version
+not reported" / "game count not reported" instead of "unknown", twin-pinned
+against strings.xml. Android mirrors all of it (CHECK with details open,
+"Saving…", in-flight edits kept, save error cleared on edit and Discard,
+with a controller test on the demo repositories).
+
+Tests +9: about-view (+2: Check rows open with the server detail, the
+STATUS_LABEL pin), wiring (+2: the proxy fault visible without a click,
+aria-labelledby; the default-render test now expects exactly the Check
+rows open), save bar (+3: focus to the heading after Discard, an edit
+after a failure resets the line, an in-flight edit survives), CSS (+1:
+scroll padding), twin (+1: PCs words). Mutations, all 14 killed: `unknown`
+mapped elsewhere; Check rows collapsed; every row open; the DOM ignoring
+the default; the icon word back to "Unknown"; no aria-labelledby; in-flight
+edits dropped; "Saving…" overwritten by typing; no focus after Discard; the
+error line sticking after an edit; the scroll padding dropped; the presence
+word back to "Presence unknown"; Android last-seen and "Saving…" drifting.
+The two wiring files ran 10x in a loop: 0 failures.
+
+Expected look, added: on an Android phone in Chrome the soft keyboard
+resizes only the visual viewport (no `interactive-widget` in the viewport
+meta), so while a field is being typed in, the fixed save bar sits behind
+the keyboard; it shows again as soon as the keyboard closes. The Android
+app's bar is a Scaffold bottom bar and its keyboard behaviour depends on
+the activity's soft-input mode; both are unverified on a device.
+
+Suite: **1158 tests, 1158 pass, 0 fail**.

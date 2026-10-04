@@ -30,7 +30,8 @@
  * offline (docs/LEARNINGS.md: two call sites computing the same predicate
  * diverge). `last_reported_at` is used for the "last seen ... ago" WORDS
  * only. A server older than AGENT-FEAT-1 sends no `presence` at all: that
- * reads "presence unknown", not a guess.
+ * reads "Not reported", not a guess (WP WEB-FIX-8: never the word
+ * "unknown" for a value that is simply not reported).
  *
  * Pure only — no DOM, no fetch. Covered in web/tests/clients-view.test.js
  * and web/tests/clients-presence.test.js.
@@ -105,7 +106,7 @@ export function describeBypassClient(client) {
 
 function gamesReportedText(client) {
   const count = client && typeof client.app_count === "number" ? client.app_count : null;
-  return count == null ? "game count unknown" : `${count} game${count === 1 ? "" : "s"} reported`;
+  return count == null ? "game count not reported" : `${count} game${count === 1 ? "" : "s"} reported`;
 }
 
 /** Shared explanatory hint shown under the "Bypassing" section — general
@@ -144,7 +145,7 @@ export const PRESENCE_WORD = Object.freeze({ online: "Online", offline: "Offline
 
 /** Chip word for a client whose server sent no presence (older than WP
  * AGENT-FEAT-1). */
-export const PRESENCE_UNKNOWN_WORD = "Presence unknown";
+export const PRESENCE_UNKNOWN_WORD = "Not reported";
 
 /**
  * The server's `presence` field, verbatim when it is one of the two
@@ -160,7 +161,7 @@ export function presenceOf(client) {
   return p === "online" || p === "offline" ? p : null;
 }
 
-/** The presence chip's word: "Online", "Offline" or "Presence unknown". */
+/** The presence chip's word: "Online", "Offline" or "Not reported". */
 export function presenceWord(client) {
   const p = presenceOf(client);
   return p ? PRESENCE_WORD[p] : PRESENCE_UNKNOWN_WORD;
@@ -174,18 +175,18 @@ export function presenceWord(client) {
  */
 export function lastSeenText(client, nowMs = Date.now()) {
   const ago = formatAgo(client ? client.last_reported_at : null, nowMs);
-  return ago ? `last seen ${ago}` : "last seen: unknown";
+  return ago ? `last seen ${ago}` : "last seen: not reported";
 }
 
 /**
- * "agent 0.1.0", or "version unknown" for `agent_version: null` (an agent
+ * "agent 0.1.0", or "version not reported" for `agent_version: null` (an agent
  * from before AGENT-FEAT-1, or a server that does not send the field). The
  * value is untrusted text; the caller assigns it with textContent.
  * @param {{agent_version?: unknown} | null | undefined} client
  */
 export function agentVersionText(client) {
   const v = client ? client.agent_version : null;
-  return typeof v === "string" && v.trim() ? `agent ${v.trim()}` : "version unknown";
+  return typeof v === "string" && v.trim() ? `agent ${v.trim()}` : "version not reported";
 }
 
 /** The row's second line: "last seen 4 min ago · agent 0.1.0". The game

@@ -275,6 +275,9 @@
     <string name="settings_save_changes">Save changes</string>
     <string name="settings_discard_changes">Discard changes</string>
     <string name="settings_save_error">Could not save: %1$s</string>
+    <!-- WP WEB-FIX-8: the save bar's status line (web settings.js UNSAVED_TEXT). -->
+    <string name="settings_unsaved_changes">Unsaved changes</string>
+    <string name="settings_saving">Saving…</string>
     <string name="settings_toast_saved">Settings saved.</string>
     <string name="settings_toast_save_failed_fallback">Could not save settings</string>
 
@@ -608,7 +611,7 @@
         <item quantity="one">%1$d game reported</item>
         <item quantity="other">%1$d games reported</item>
     </plurals>
-    <string name="clients_games_unknown">game count unknown</string>
+    <string name="clients_games_unknown">game count not reported</string>
     <string name="clients_bytes_served">%1$s served</string>
     <string name="clients_bytes_none">nothing served yet</string>
     <string name="clients_hit_rate">%1$d%% hit</string>
@@ -695,37 +698,51 @@
     </plurals>
     <string name="settings_library_id_preview_private">Steam returned no games for this SteamID64. The profile or its game details are probably private.</string>
 
-    <!-- WP APP-FEAT-2 (VER-2): Settings → About, from GET /v1/about. Status
-         words as the server sends them; vault-core/vault-dns are always
-         "Unknown" (never probed), the notes say why. -->
+    <!-- WP APP-FEAT-2 (VER-2): Settings → About, from GET /v1/about.
+         WP WEB-FIX-8: the word "unknown" is never shown (a dash for a value
+         not reported), vault-core OK/Check/Not reported against vault-api,
+         vault-dns N/A, explanations behind a per-row (i) button. Words are
+         the web's (web/js/lib/about-view.js), pinned both ways:
+         AboutCrossFrontendContractTest + web/tests/about-android-twin.test.js. -->
     <string name="settings_section_about">About</string>
     <string name="settings_about_loading">Loading component versions…</string>
     <string name="settings_about_too_old">This server is older than this app and does not report component versions. Update the server to see them here.</string>
     <string name="settings_about_error">Could not load component versions: %1$s</string>
     <string name="settings_about_refresh">Refresh</string>
     <string name="settings_about_cache_note">The server reuses this answer for up to 60 s, so Refresh can show the same result.</string>
-    <string name="settings_about_unknown_value">unknown</string>
+    <string name="settings_about_dash">—</string>
+    <string name="settings_about_dash_label">Not reported</string>
     <string name="settings_about_version_line">Version %1$s · commit %2$s</string>
     <string name="settings_about_status_ok">OK</string>
     <string name="settings_about_status_unreachable">Unreachable</string>
     <string name="settings_about_status_not_in_use">Not in use</string>
-    <string name="settings_about_status_unknown">Unknown</string>
+    <string name="settings_about_status_check">Check</string>
+    <string name="settings_about_status_not_reported">Not reported</string>
+    <string name="settings_about_status_not_applicable">N/A</string>
+    <string name="settings_about_info_show">Show details for %1$s</string>
+    <string name="settings_about_info_hide">Hide details for %1$s</string>
     <string name="settings_about_note_vault_api">This server. It also serves the web UI.</string>
     <string name="settings_about_note_vault_core">Version recorded at vault-core\'s last start, not a live check.</string>
+    <string name="settings_about_note_core_same_release">Recorded at vault-core\'s last start: the same version and commit as vault-api, so both come from the same release. Not a live check: vault-api has no network path to vault-core.</string>
+    <string name="settings_about_note_core_mismatch">The version or commit vault-core recorded at its last start differs from vault-api\'s. Usually vault-core was not restarted after an update; restart it so both run the same release.</string>
+    <string name="settings_about_note_core_not_comparable">vault-core\'s recorded version cannot be compared with vault-api\'s: one of them did not report a valid version and commit.</string>
+    <string name="settings_about_note_core_not_reported">vault-core has not recorded a version yet. It records one in the shared cache volume each time it starts.</string>
     <string name="settings_about_note_vault_runner">OK means the runner checked in within the last 90 s.</string>
-    <string name="settings_about_note_steamprefill">The SteamPrefill build that prefill jobs run with.</string>
-    <string name="settings_about_note_vault_proxy">Reachability only; the egress proxy reports no version.</string>
-    <string name="settings_about_note_vault_dns">Unknown, not probed: vault-api never checks the optional DNS container.</string>
+    <string name="settings_about_note_steamprefill">The SteamPrefill build that prefill jobs run with. SteamPrefill reports a version but no commit id.</string>
+    <string name="settings_about_note_vault_proxy">The egress proxy does not report a version. Its status is reachability only.</string>
+    <string name="settings_about_note_vault_dns">Optional component. vault-api does not check it, so there is no status to show.</string>
+    <string name="settings_about_dash_note">A dash means the component did not report this value.</string>
     <string name="settings_about_trademark">SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.</string>
 
     <!-- WP APP-FEAT-2 (AGENT-FEAT-1): a PC's presence as the SERVER computed
          it (never recomputed here), when it last reported, and the agent
-         build. "version unknown" = an agent from before AGENT-FEAT-1. -->
+         build. "version not reported" = an agent from before AGENT-FEAT-1.
+         WP WEB-FIX-8: "not reported" instead of "unknown", like the web. -->
     <string name="clients_presence_online">Online</string>
     <string name="clients_presence_offline">Offline</string>
-    <string name="clients_presence_unknown">Presence unknown</string>
+    <string name="clients_presence_unknown">Not reported</string>
     <string name="clients_last_seen">last seen %1$s</string>
-    <string name="clients_last_seen_unknown">last seen: unknown</string>
+    <string name="clients_last_seen_unknown">last seen: not reported</string>
     <string name="clients_agent_version">agent %1$s</string>
-    <string name="clients_agent_version_unknown">version unknown</string>
+    <string name="clients_agent_version_unknown">version not reported</string>
 </resources>

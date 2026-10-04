@@ -37,7 +37,7 @@ class ClientPresenceTest {
     }
 
     @Test
-    fun `agent version -- verbatim like web agentVersionText, null is version unknown`() {
+    fun `agent version -- verbatim like web agentVersionText, null is version not reported`() {
         assertEquals("0.1.0", buildClientRowModel(client("online", "2026-10-03T10:00:00Z", " 0.1.0 ")).presence.agentVersion)
         assertEquals("dev", buildClientRowModel(client("online", "2026-10-03T10:00:00Z", "dev")).presence.agentVersion)
         assertNull(buildClientRowModel(client("online", "2026-10-03T10:00:00Z", "  ")).presence.agentVersion)

@@ -68,6 +68,11 @@
      Library (app.css, "bulk action bar"). */
   --bulk-gap:14px;
   --bulk-h:168px;
+  /* Settings save bar height (WP WEB-FIX-8), same posture as --bulk-h: a
+     generous estimate (one status line + one button row, 10px padding,
+     ~86px at 360px; a long error line wraps), turned into scroll room under
+     the Settings page while the bar is up (app.css "Settings save bar"). */
+  --savebar-h:104px;
   /* BP-L left-rail width (WP 4e.6: narrowed from WP 4e.1's 232px — operator
      verdict, live at ~2000px: "232px feels unnecessarily large for the
      three things in it"). 180px is not a guess: measured live in a real

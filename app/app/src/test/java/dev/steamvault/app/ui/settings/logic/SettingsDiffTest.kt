@@ -173,4 +173,16 @@ class SettingsDiffTest {
         assertEquals(JsonPrimitive("20:00-08:00"), body["schedule_window"])
         assertEquals(1, body.size)
     }
+
+    // ---- WP WEB-FIX-8: dirty state for the save bar ---------------------------------
+
+    @Test
+    fun `MUTATION PIN -- dirty means the patch changes something, a value typed back is clean again`() {
+        val entries = listOf(entry("vault_name", JsonPrimitive("vault-01"), source = "db"))
+        assertFalse(settingsDirty(entries, emptyMap()))
+        assertTrue(settingsDirty(entries, mapOf("vault_name" to SettingDraft.Text("vault-02"))))
+        assertFalse("touched but equal to the saved value", settingsDirty(entries, mapOf("vault_name" to SettingDraft.Text("vault-01"))))
+        assertTrue("clearing a db override is a change", settingsDirty(entries, mapOf("vault_name" to SettingDraft.Reset)))
+        assertFalse("nothing loaded yet", settingsDirty(null, mapOf("vault_name" to SettingDraft.Text("x"))))
+    }
 }

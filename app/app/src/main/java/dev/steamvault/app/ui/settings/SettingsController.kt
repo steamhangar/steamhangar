@@ -28,6 +28,7 @@ import dev.steamvault.app.storage.CredentialStore
 import dev.steamvault.app.ui.settings.logic.SettingDraft
 import dev.steamvault.app.ui.settings.logic.SteamLibraryStatus
 import dev.steamvault.app.ui.settings.logic.buildSettingsPatchDraft
+import dev.steamvault.app.ui.settings.logic.settingsDirty
 import dev.steamvault.app.ui.settings.logic.steamLibraryStatusFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -156,7 +157,10 @@ class SettingsController(
     var aboutLoading by mutableStateOf(false)
         private set
 
-    val isDirty: Boolean get() = drafts.isNotEmpty()
+    /** WP WEB-FIX-8: dirty means the PATCH would change something (a field
+     * typed back to its saved value is clean again), so the save bar shows
+     * and hides like the web's. */
+    val isDirty: Boolean get() = settingsDirty(settingsResponse?.settings, drafts)
     val isReadonly: Boolean get() = settingsResponse?.readonly ?: false
 
     suspend fun load() {
@@ -182,16 +186,21 @@ class SettingsController(
         }
     }
 
+    // WP WEB-FIX-8: any edit (or Discard) clears a previous save error, so
+    // the save bar's status line goes back to "Unsaved changes" like the web.
     fun setDraft(key: String, draft: SettingDraft) {
         drafts = drafts + (key to draft)
+        saveError = null
     }
 
     fun resetDraft(key: String) {
         drafts = drafts + (key to SettingDraft.Reset)
+        saveError = null
     }
 
     fun discard() {
         drafts = emptyMap()
+        saveError = null
     }
 
     suspend fun save() {
@@ -201,11 +210,16 @@ class SettingsController(
             drafts = emptyMap()
             return
         }
+        // WP WEB-FIX-8: the drafts this PATCH carries. An edit made while it
+        // is in flight replaces its key's draft, so after success only the
+        // drafts that are still the sent ones are dropped -- a later edit
+        // survives and keeps the save bar up instead of vanishing silently.
+        val sent = drafts
         saving = true
         saveError = null
         try {
             settingsResponse = settingsRepository.patch(patch)
-            drafts = emptyMap()
+            drafts = drafts.filter { (key, draft) -> sent[key] != draft }
             toast = strings.savedToast()
             // A saved PATCH can change sweep_include_cached/auto_gc, which
             // changes sweep_cached_gc_risk server-side -- re-fetch so the

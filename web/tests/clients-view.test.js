@@ -110,7 +110,7 @@ test("describeHealthyClient: honest fallbacks when nothing has happened yet", ()
   const line = describeHealthyClient(
     client({ app_count: null, bytes_served: 0, cache_hits: 0, cache_misses: 0 }),
   );
-  assert.equal(line, "game count unknown · nothing served yet · no cache requests yet");
+  assert.equal(line, "game count not reported · nothing served yet · no cache requests yet");
 });
 
 test("describeBypassClient: states the observation, not a verdict", () => {

@@ -2889,6 +2889,34 @@ below carry their own later dates, item 12 is the current one).
       identity step or home. No API change, no camera permission. Not
       device-tested; whether every camera app opens a custom-scheme QR is
       open (app/README "Pairing from the web UI").
+    - [x] **WEB-FIX-8** — About wording and the Settings save bar, web and
+      Android (user feedback on the rc9 About table, 2026-10-04: "'Unknown'
+      sounds bad and makes it look like the user did something wrong").
+      Done 2026-10-04, no API change (ADR-0016 freeze): the word "unknown"
+      is never shown; a value a component does not report is an em dash;
+      the server's generic `unknown` (vault-api looked and got a bad or
+      unclear answer, e.g. a proxy that forwards a host it must refuse)
+      reads a neutral "Check" with its (i) details open; vault-core reads
+      "OK" when its recorded version AND commit equal vault-api's (same
+      release), a neutral "Check" when they differ or cannot be compared,
+      "Not reported" when it never recorded one; vault-dns reads "N/A";
+      vault-proxy keeps OK with dashes. Every explanation moved behind a
+      per-row (i) disclosure button, collapsed by default except on Check
+      rows. The PCs sheet says "not reported" instead of "unknown" too
+      (presence, last seen, agent version, game count). The About twin
+      pins requested by APP-FEAT-2 now exist both ways
+      (`web/tests/about-android-twin.test.js`,
+      `AboutCrossFrontendContractTest.kt`). Second user request, same
+      package: Save must be visible as soon as something changed. Web:
+      the Save/Discard bar is fixed above the bottom nav (the bulk bar's
+      placement, which never shares a view with it), shown while the PATCH
+      would change something (typing a value back hides it), a failed save
+      keeps it with the error, an edit made during a save survives it, and
+      the root scroll padding keeps a focused field above the bar (WCAG
+      2.4.11). Android: the same bar as the Scaffold's bottom bar (it was
+      an inline row at the end of the form), same dirty rule, "Saving…"
+      while in flight. Review round 1 (FAIL: server `unknown` shown as
+      "Not checked" hid real faults) fixed in a second commit.
 
     **C. Hygiene (any time, small)**
     - [ ] Stale ownership leftovers after SEC-FIX-5 (frozen api code,
@@ -2983,8 +3011,13 @@ below carry their own later dates, item 12 is the current one).
       report, version, "open Hangar", settings and connection test); set-up
       by pairing from the web UI's "PCs" list (short code or QR) instead
       of typing the API key, ideally one revocable key per PC (D5);
-      update offers driven by `GET /v1/about`; code signing (SmartScreen)
-      as an explicit cost decision; Linux/SteamOS as a package with a
+      update offers driven by `GET /v1/about` (follow-up from WEB-FIX-8:
+      a real "newer release available" check against GitHub releases
+      belongs here too, so the About table can say "Update available"
+      instead of only comparing vault-core with vault-api; it needs an
+      egress decision, since vault-api reaches the internet only through
+      the egress proxy's allowlist and GitHub is not on it); code signing
+      (SmartScreen) as an explicit cost decision; Linux/SteamOS as a package with a
       systemd user service. Open decision: service + tray (reports
       without a logged-on user, sees all users' libraries, needs admin to
       install) versus tray-only (per user, no admin).
