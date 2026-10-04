@@ -1298,6 +1298,36 @@ body.onboarding .nav{ display:none; }
 .pcs-remove .foot-note{ margin:9px 0 0; }
 .pcs-remove-dialog h3{ overflow-wrap:anywhere; }
 
+/* WP PAIR-1: "Add a device" sheet (components/add-device-sheet.js). The QR
+   code is always dark modules on a white plate (its quiet zone is part of
+   the SVG), whatever the theme: scanners want dark-on-light. Sized to the
+   sheet width up to 264px, never wider than a phone viewport. Links and
+   the install command wrap inside their own boxes (WEB-FIX-3 phone rules). */
+.pair-intro{ text-align:left; }
+.pair-option{ min-width:0; margin-bottom:14px; }
+.pair-option .foot-note{ margin:0 0 8px; }
+.pair-warn{
+  margin:0 0 9px; padding:7px 0 7px 10px; border-left:2px solid var(--stale);
+  font-size:12px; line-height:1.45; color:var(--text);
+}
+.pair-reveal{ min-width:0; margin-top:10px; }
+.pair-qr{
+  display:block; width:100%; max-width:264px; height:auto; margin:0 auto 10px;
+  background:#ffffff; border-radius:var(--r-s);
+}
+.pair-acts{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:0 0 8px; }
+.pair-open{ color:var(--accent); font-weight:600; font-size:13px; }
+.pair-value, .pair-snippet{ box-sizing:border-box; width:100%; min-width:0; margin:0 0 8px; }
+.pair-snippet{
+  display:block; resize:vertical; font-size:11.5px; line-height:1.5;
+  white-space:pre; overflow:auto;
+}
+.pair-left{ text-align:left; }
+.pair-agent-url{ margin:0 0 10px; }
+/* The "Copy key" fallback's temporary textarea (removed right after the
+   copy): selectable, but never visible and never in the layout. */
+.pair-offscreen{ position:fixed; left:-9999px; top:0; width:1px; height:1px; opacity:0; }
+
 /* About table, phone first: every row is a stacked block (component name
    on its own line, then Version / Commit / Status as labelled cells in a
    two-track grid of minmax(0,1fr), so nothing can push the page wider).

@@ -2898,6 +2898,28 @@ below carry their own later dates, item 12 is the current one).
       names the PC, what is deleted and that a running agent lists it
       again; 404 counts as removed; ids containing "/" get a note instead
       (the frozen route cannot address them, measured).
+    - [x] **PAIR-1** — "Add a device" in Settings → PCs (user request
+      2026-10-04, "Weg A": pairing from the already-configured web UI with
+      the one shared API key, no API change, ADR-0016 freeze holds). Done
+      2026-10-04, web only: a locally generated QR code (own byte-mode
+      encoder, `web/js/lib/qr-encode.js`, checked against segno) of
+      `steamhangar://pair?v=1&url=<origin>&key=<key>` for the Android app
+      (the contract with APP-PAIR-1, plus the same URI as a link and as
+      text); a browser link `<origin>/#pair=<key>` whose fragment the
+      receiving page strips at once, asking before it replaces a different
+      key and storing only a key the server accepts; a PowerShell 5.1
+      command that downloads the release's vault-agent and scripts, checks
+      them against `SHA256SUMS`, and runs `install-task.ps1` with the key
+      in a temp file (a dev build gets a note instead). The command holds
+      no key (review round 1, user decision "Weg A"): it asks for it with
+      `Read-Host -AsSecureString`, and the sheet has a separate "Copy key"
+      button. The agent's server
+      address is an editable field (prefill: page origin, remembered per
+      browser) because the agent must reach vault-api directly, not
+      through a reverse proxy (per-PC stats and bypass detection match the
+      report's TCP peer). Every option is shown only after "Show" and
+      removed from the DOM when hidden or closed. Details:
+      `web/tests/README.md` "WP PAIR-1".
     - [x] **APP-FEAT-2** — Android parity package (2026-10-03): APP-FIX-2,
       APP-FEAT-1 (library account from the stored setting only; servers
       older than rc4 get a "too old" notice; a signed-in-id fill button
@@ -3062,6 +3084,15 @@ below carry their own later dates, item 12 is the current one).
       the update came during the day"). Today `schedule_window` is one
       `HH:MM-HH:MM` range (editable in Settings, applies at the next
       sweep); allow a list of ranges. Until then `06:00-24:00` covers it.
+    - [ ] **D9 PAIR-2 — proper device pairing** (follows PAIR-1, user
+      decision 2026-10-04). PAIR-1 hands every new device the one shared
+      API key. Replace that with short-lived pairing codes (the web UI shows
+      a code or QR valid for minutes, the device trades it for its own
+      key) and one named, revocable key per device, so removing a phone or
+      PC revokes only its key. Builds on D5 (named, scoped API keys) and is
+      the pairing step D6's desktop client needs. Needs new endpoints, so
+      an ADR and the freeze opened; the `steamhangar://pair` URI gets a
+      `v=2` with a code instead of a key.
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
