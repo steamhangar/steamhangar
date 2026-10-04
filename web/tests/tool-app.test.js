@@ -39,6 +39,8 @@ import {
 } from "../js/lib/game-status.js";
 import { classifyBulkSelection, buildBulkDownloadPlan } from "../js/lib/bulk-plan.js";
 import { visibleGames } from "../js/lib/library-filters.js";
+import { vaultRowTitle } from "../js/lib/owned-library.js";
+import { offersRetryFor } from "../js/lib/job-failure.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.join(__dirname, "..");
@@ -296,4 +298,59 @@ test("sheet wiring: the header uses the tool name, the dash glyph and the tool w
   assert.match(body, /toolAppName\(gameLike\)/);
   assert.match(body, /createStatusIcon\(statusIconKind\(kind\)/);
   assert.match(body, /statusWordFor\(kind, STATUS_LABEL\)/);
+});
+
+// ---------------------------------------------------------------------
+// Review round 1 (nits 4, 5, 6)
+// ---------------------------------------------------------------------
+
+test("MUTATION TARGET -- downloads: a tool app's job is titled from its games row", () => {
+  assert.equal(vaultRowTitle(228980, redist()), "Steamworks Common Redistributables");
+  assert.equal(vaultRowTitle(440, game()), "Team Fortress 2");
+  // No games row (or an older server without the flag): no client-side list.
+  assert.equal(vaultRowTitle(228980, undefined), "App 228980");
+  assert.equal(vaultRowTitle(228980, { appid: 228980, name: null, tool_app_name: "X" }), "App 228980");
+});
+
+test("MUTATION TARGET -- downloads: no Retry for a tool app's failed job", () => {
+  assert.equal(offersRetryFor(redist()), false);
+  assert.equal(offersRetryFor(game()), true);
+  assert.equal(offersRetryFor(undefined), true);
+});
+
+const downloadsJs = readFileSync(path.join(webDir, "js", "views", "downloads.js"), "utf8");
+
+test("downloads wiring: nameFor uses vaultRowTitle; the hint block gates Retry on offersRetryFor", () => {
+  assert.match(
+    functionBody(downloadsJs, "function nameFor(appid, gamesByAppid) {"),
+    /vaultRowTitle\(appid, gamesByAppid\.get\(appid\)\)/,
+  );
+  const hint = functionBody(downloadsJs, "function appendFailureHint(logEl, hintKind, job, st) {");
+  assert.ok(hint, "appendFailureHint() not found in downloads.js");
+  assert.match(
+    hint,
+    /if \(!offersRetryFor\(gamesByAppidMap\(\)\.get\(job\.appid\)\)\) \{[\s\S]*?box\.appendChild\(para\(TOOL_APP_NOTE\)\);\s*\n\s*\} else if \(isNewestJobForApp/,
+  );
+});
+
+test("MUTATION TARGET -- sheet wiring: the not-tracked view offers no download for a tool app", () => {
+  const body = functionBody(detailJs, "function renderNotTracked() {");
+  assert.ok(body, "renderNotTracked() not found in game-detail-sheet.js");
+  const gate = body.indexOf("if (isToolApp(storeRow)) {");
+  const button = body.indexOf('createElement("button")');
+  assert.ok(gate !== -1 && button !== -1 && gate < button, "the tool-app gate must come before the Download button");
+  assert.match(body.slice(gate, button), /return wrap;/);
+});
+
+test("MUTATION TARGET -- card: every status icon of a tool app is hidden from assistive tech (the visible word speaks)", () =>
+  withCard(({ buildCard }) => {
+    const card = buildCard(redist(), ctx());
+    const icons = card.querySelectorAll(".sic");
+    assert.equal(icons.length, 2);
+    for (const icon of icons) assert.equal(icon.getAttribute("aria-hidden"), "true");
+  }));
+
+test("sheet wiring: the header icon is aria-hidden next to its word", () => {
+  const body = functionBody(detailJs, "function buildHeader(gameLike, liveJob) {");
+  assert.match(body, /statusIcon\.setAttribute\("aria-hidden", "true"\);/);
 });

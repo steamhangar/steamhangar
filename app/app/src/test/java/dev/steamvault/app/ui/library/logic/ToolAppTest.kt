@@ -1,5 +1,6 @@
 package dev.steamvault.app.ui.library.logic
 
+import dev.steamvault.app.R
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.InstalledOnEntry
 import dev.steamvault.app.net.model.JobSummary
@@ -157,6 +158,33 @@ class ToolAppTest {
         val ordinary = buildGameCardModel(failedGame(), null, selected = false, selecting = false)
         assertFalse(ordinary.toolApp)
         assertEquals(StatusKind.ERROR, ordinary.kind)
+    }
+
+    // ---------- the status word follows the computed kind (review S1) ----------
+
+    @Test
+    fun `MUTATION TARGET -- toolAppStateWordFor names only the NOTINUSE kind`() {
+        assertEquals("Steam tool package", toolAppStateWordFor(StatusKind.NOTINUSE))
+        for (kind in StatusKind.entries.filter { it != StatusKind.NOTINUSE }) {
+            assertNull("$kind must use its own label", toolAppStateWordFor(kind))
+        }
+    }
+
+    @Test
+    fun `MUTATION TARGET -- a tool app with a live job reads Downloading, not Steam tool package`() {
+        val running = JobSummary(id = 7, appid = 228980, type = "prefill", status = "running", created_at = "2026-10-04T08:00:00Z")
+        val model = buildGameCardModel(redist(), running, selected = false, selecting = false)
+        assertEquals(StatusKind.RUNNING, model.kind)
+        assertNull(toolAppStateWordFor(model.kind)) // so the card shows the kind's own label ...
+        assertEquals(R.string.status_running, model.kind.labelRes) // ... "Downloading"
+        assertTrue(model.toolApp) // still muted
+
+        val paused = buildGameCardModel(redist(), running.copy(status = "paused"), selected = false, selecting = false)
+        assertEquals(StatusKind.PAUSED, paused.kind)
+        assertNull(toolAppStateWordFor(paused.kind))
+
+        val idle = buildGameCardModel(redist(), null, selected = false, selecting = false)
+        assertEquals("Steam tool package", toolAppStateWordFor(idle.kind))
     }
 
     // ---------- LibraryFilters.kt ----------

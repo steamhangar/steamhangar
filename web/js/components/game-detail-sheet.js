@@ -1018,6 +1018,15 @@ function renderNotTracked() {
   const p = document.createElement("p");
   p.className = "hint";
   p.textContent = "vault-api does not track this app yet — nothing has been downloaded or manually mapped.";
+  // WP API-FIX-4: no download offer for a Steam tool app. Decided from the
+  // store's games row only (no client-side tool list); an app with no row
+  // at all carries no flag, and the server's 422 detail is the answer then.
+  const storeRow = state.games.find((g) => g.appid === state.appid);
+  if (isToolApp(storeRow)) {
+    p.textContent = TOOL_APP_NOTE;
+    wrap.append(h3, p);
+    return wrap;
+  }
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn primary sm";

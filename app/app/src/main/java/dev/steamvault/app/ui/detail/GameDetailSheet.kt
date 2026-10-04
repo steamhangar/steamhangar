@@ -60,7 +60,6 @@ import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.MultiPlan
 import dev.steamvault.app.ui.library.logic.StatusActionType
 import dev.steamvault.app.ui.library.logic.TOOL_APP_NOTE
-import dev.steamvault.app.ui.library.logic.TOOL_APP_STATE_WORD
 import dev.steamvault.app.ui.library.logic.buildMultiPlan
 import dev.steamvault.app.ui.library.logic.coverArtUrl
 import dev.steamvault.app.ui.library.logic.dispKind
@@ -70,6 +69,7 @@ import dev.steamvault.app.ui.library.logic.hasProtectedCacheContent
 import dev.steamvault.app.ui.library.logic.hasVisibleCacheContent
 import dev.steamvault.app.ui.library.logic.installedBadgeFor
 import dev.steamvault.app.ui.library.logic.isToolApp
+import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.library.logic.statusAction
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
@@ -288,10 +288,12 @@ private fun DetailHeader(appid: Int, name: String, detail: GameDetail?, jobs: Li
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 4.dp),
                 ) {
-                    StatusIcon(kind = kind, size = StatusIconSize.SMALL)
+                    // WP API-FIX-4: a tool app without a live job reads
+                    // "Steam tool package" (from the kind, not the flag).
+                    val word = toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                    StatusIcon(kind = kind, size = StatusIconSize.SMALL, spokenLabel = word)
                     Text(
-                        // WP API-FIX-4: a tool app reads "Steam tool package".
-                        text = if (detail.tool_app) TOOL_APP_STATE_WORD else stringResource(kind.labelRes),
+                        text = word,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(start = 6.dp),
                     )

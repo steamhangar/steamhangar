@@ -83,7 +83,7 @@ fun GameListRow(
         // own semantics -- reused per the brief, no separate a11y string
         // needed here). The word is ALSO rendered visibly in the title
         // column below (mockup rule: every roomy layout keeps icon + word).
-        StatusIcon(kind = model.kind, size = StatusIconSize.MEDIUM, modifier = iconModifier)
+        StatusIcon(kind = model.kind, size = StatusIconSize.MEDIUM, modifier = iconModifier, spokenLabel = statusWord)
 
         Column(modifier = Modifier.weight(1f).padding(horizontal = 10.dp)) {
             Text(

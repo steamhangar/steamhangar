@@ -1089,6 +1089,16 @@ def run_miss_trigger(
         else:  # pragma: no cover - needs a job created between guard 2 and here
             skipped_active.append(appid)
 
+    if skipped_tool:
+        # WP API-FIX-4: say why a missed tool app got no job, so "why is
+        # 228980 never prefilled" is answered by the log.
+        logger.info(
+            "event-sweep: miss trigger skipped %d Steam tool app(s), never "
+            "prefilled, cached together with the games that use them: %s",
+            len(skipped_tool),
+            _sample(skipped_tool),
+        )
+
     if dropped:
         logger.warning(
             "event-sweep: miss trigger hit its per-sweep cap of %d; %d further "

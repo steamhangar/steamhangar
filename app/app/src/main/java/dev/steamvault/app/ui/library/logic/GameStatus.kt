@@ -74,12 +74,23 @@ import dev.steamvault.app.ui.status.StatusKind
  * The two words are Kotlin literals, not `strings.xml` resources, for the
  * same reason `BulkPlan.kt` keeps its labels as literals: they are a
  * word-for-word port of web's `TOOL_APP_STATE_WORD` / `TOOL_APP_NOTE`, and
- * `ToolAppWebTwinTest` reads the web source and pins them equal.
+ * `ToolAppTest` reads the web source and pins them equal.
  */
 const val TOOL_APP_STATE_WORD = "Steam tool package"
 
 /** See [TOOL_APP_STATE_WORD]; web `TOOL_APP_NOTE`. */
 const val TOOL_APP_NOTE = "Steam tool package — cached together with the games that use it."
+
+/**
+ * The status word for a display kind when it is NOT the kind's own label:
+ * [TOOL_APP_STATE_WORD] for [StatusKind.NOTINUSE] (a tool app with no live
+ * job), `null` for every other kind -- the caller then shows
+ * `stringResource(kind.labelRes)`. Keyed on the computed kind, never on the
+ * tool flag, so a live job on a tool app reads "Downloading"/"Paused" (web
+ * `statusWordFor`).
+ */
+fun toolAppStateWordFor(kind: StatusKind): String? =
+    if (kind == StatusKind.NOTINUSE) TOOL_APP_STATE_WORD else null
 
 /** True for a games row the server flags as a Steam tool app. */
 fun isToolApp(game: GameSummary): Boolean = game.tool_app

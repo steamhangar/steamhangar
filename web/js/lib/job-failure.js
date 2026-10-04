@@ -25,6 +25,8 @@
  * Pure: no DOM, no fetch. Covered in web/tests/job-failure.test.js.
  */
 
+import { isToolApp } from "./game-status.js";
+
 export const FAILURE_REASON = Object.freeze({
   NOT_LOGGED_IN: "not_logged_in",
   EXIT_CODE: "exit_code",
@@ -151,4 +153,15 @@ export const LOGIN_HINT = HINTS[FAILURE_HINT.NOT_LOGGED_IN];
 export function isNewestJobForApp(job, jobs) {
   if (!job || !Array.isArray(jobs)) return false;
   return !jobs.some((j) => j && j.type === "prefill" && j.appid === job.appid && j.id > job.id);
+}
+
+/**
+ * WP API-FIX-4: whether a failed job's hint block may offer Retry. Never for
+ * a Steam tool app — `POST /v1/prefill` answers `422` for it. Decided from
+ * the app's `GET /v1/games` row (`tool_app`) only; a job whose row is not
+ * loaded keeps its Retry, and the server's 422 detail answers then.
+ * @param {object | undefined} game
+ */
+export function offersRetryFor(game) {
+  return !isToolApp(game);
 }

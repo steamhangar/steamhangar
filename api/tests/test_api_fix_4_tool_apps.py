@@ -220,7 +220,7 @@ def test_a_sweep_enqueues_no_job_for_a_tool_app(
 
 
 def test_the_miss_trigger_skips_a_tool_app_without_using_the_cap(
-    conn: sqlite3.Connection, tmp_path: Path
+    conn: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """MUTATION TARGET: drop the tool-app skip and 228980 is enqueued (and,
     with a cap of 1, 440 is then dropped by the cap)."""
@@ -233,9 +233,12 @@ def test_the_miss_trigger_skips_a_tool_app_without_using_the_cap(
         event_line(depot="70403"),
     )
 
-    outcome = event_sweep.sweep_once(conn, settings, moment())
+    with caplog.at_level(logging.INFO, logger="vault_api.event_sweep"):
+        outcome = event_sweep.sweep_once(conn, settings, moment())
 
     assert outcome.skipped_tool == (REDIST,)
+    assert "miss trigger skipped 1 Steam tool app(s)" in caplog.text
+    assert "228980" in caplog.text
     assert outcome.enqueued == (440,)
     assert outcome.dropped_by_cap == ()
     assert _job_appids(conn) == [440]

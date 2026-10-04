@@ -52,7 +52,7 @@
  *     notice line carries the private-profile hint.
  */
 
-import { dispKind, KIND } from "./game-status.js";
+import { dispKind, isToolApp, KIND } from "./game-status.js";
 import { buildSettingsPatch } from "./settings-diff.js";
 import { validSteamId64 } from "./steamid.js";
 
@@ -163,6 +163,19 @@ export function appTitle(appid, vaultName, ownedName) {
   if (hasText(vaultName)) return vaultName.trim();
   if (hasText(ownedName)) return ownedName.trim();
   return `App ${appid}`;
+}
+
+/**
+ * WP API-FIX-4: the title of an app from its `GET /v1/games` row — the
+ * vault name, else the Steam tool app's name the server sends on that row
+ * (`tool_app_name`; `JobSummary` itself carries no flag), else
+ * `App <id>`. No client-side tool list: without the row there is no name.
+ * @param {number} appid
+ * @param {object | undefined} game
+ * @returns {string}
+ */
+export function vaultRowTitle(appid, game) {
+  return appTitle(appid, game?.name, isToolApp(game) ? game.tool_app_name : undefined);
 }
 
 /**

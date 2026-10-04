@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.ui.library.logic.GameCardModel
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.StatusActionType
-import dev.steamvault.app.ui.library.logic.TOOL_APP_STATE_WORD
+import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import dev.steamvault.app.ui.theme.VaultColors
@@ -133,11 +133,13 @@ fun GameCard(
  * .cap{ opacity:.55 }`). */
 internal const val TOOL_APP_COVER_ALPHA = 0.55f
 
-/** The card/list-row status word: [TOOL_APP_STATE_WORD] for a Steam tool
- * app (WP API-FIX-4), otherwise the status kind's own label. */
+/** The card/list-row status word: [TOOL_APP_STATE_WORD] while a Steam tool
+ * app shows the NOTINUSE kind (WP API-FIX-4), otherwise the kind's own label
+ * -- decided by [toolAppStateWordFor] from the computed kind, so a live job
+ * reads "Downloading". */
 @Composable
 internal fun cardStatusWord(model: GameCardModel): String =
-    if (model.toolApp) TOOL_APP_STATE_WORD else stringResource(model.kind.labelRes)
+    toolAppStateWordFor(model.kind) ?: stringResource(model.kind.labelRes)
 
 /** The status icon + size pill riding on the cover art (round-6 "one object
  * instead of a colour dot plus a duplicate line"). Inert (no click target)
@@ -165,7 +167,7 @@ private fun CapsulePill(
             .padding(horizontal = 6.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StatusIcon(kind = model.kind, size = StatusIconSize.SMALL)
+        StatusIcon(kind = model.kind, size = StatusIconSize.SMALL, spokenLabel = toolAppStateWordFor(model.kind))
         if (model.sizeLabel != null) {
             Text(
                 text = model.sizeLabel,
