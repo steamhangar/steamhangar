@@ -2736,6 +2736,18 @@ below carry their own later dates, item 12 is the current one).
       certificate SHA-256, published in app/README.md:
       `f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172`.
       Still open: pinning that value as a CI comparison (N4 follow-up).
+    - [x] **CI-FIX-4** (2026-10-04; extends CI-FIX-2's token-less
+      annotations to the web job) — `web / node --test` failed on merge
+      commit 0048bc0 with only "Process completed with exit code 1" visible
+      publicly, while the same suite passed locally (1158/1158, Node 22 and
+      24). The test step now runs `spec` to stdout plus `junit` to
+      `$RUNNER_TEMP/web-junit.xml` (exit status unchanged), and an
+      `if: failure()` step runs `.github/scripts/node-junit-annotate.py`,
+      which prints one escaped `::error file=…,line=…,title=<suite > test>`
+      per failing test (cap 10 per step; it reuses android-annotate.py's
+      escaping). Tests: `api/tests/test_ci_fix_4_node_junit_annotate.py`.
+      Limit: a test file that crashes as a whole is annotated by file name
+      only; its crash text stays in the log.
 
     **B. Open before `v0.1.0` final**
     - [x] **API-FIX-3** — misleading prefill summary (done 2026-10-03:
