@@ -19,10 +19,12 @@
   background:var(--bg);
   border-bottom:1px solid var(--line-soft);
 }
+/* WP WEB-FIX-9: the product name is "SteamHangar" everywhere (tab title,
+   onboarding wordmark, Android app label) — no uppercase transform here.
+   Letter-spacing tightened from the all-caps .6px to suit mixed case. */
 .brand{
   font-family:var(--cond);
-  text-transform:uppercase;
-  letter-spacing:.6px;
+  letter-spacing:.2px;
   font-weight:700;
   font-size:16px;
 }
@@ -479,6 +481,27 @@ button.cappill{ cursor:pointer; transition:transform .12s ease, box-shadow .12s 
 }
 button.cappill:active{ transform:scale(.93); }
 .card:active .cap button.cappill{ transform:none; }
+/* WP WEB-FIX-9: an icon-only pill (`.bare`, set by game-card.js's
+   pillClassName whenever there is no number to print) drops the ground.
+   The ground exists to carry the number over the artwork; around a lone
+   icon it was a small grey lozenge with an empty right end (8px right
+   padding, nothing in it), read on rc9 as "a grey ring where the status
+   word should be". The status disc now stands on the cover by itself,
+   with a drop shadow for contrast on light art (filter, not box-shadow on
+   the .sic: the running badge's clip-path would cut a box-shadow off).
+   Padding stays (symmetric now) so the tap target and the focus ring keep
+   their size; the hover ring returns as a circle around the disc.
+   Selectors carry `.cap` so they outrank `.grid.cols3 .cappill` below by
+   specificity, not by source order. */
+.cap .cappill.bare{
+  background:transparent; box-shadow:none; padding:3px;
+  -webkit-backdrop-filter:none; backdrop-filter:none;
+  filter:drop-shadow(0 1px 2.5px rgba(0,0,0,.6));
+}
+.grid.cols3 .cap .cappill.bare{ padding:2px; }
+@media (hover:hover) and (pointer:fine){
+  .cap button.cappill.bare:hover{ box-shadow:inset 0 0 0 1px rgba(255,255,255,.34); }
+}
 
 .meta{
   display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim);
@@ -849,6 +872,13 @@ h4.sec[hidden]{ display:none; }
 .jobtop > div{ min-width:0; } /* WP WEB-FIX-3: the name column may shrink beside the nowrap badge */
 .jobtop .sm{ font-size:11px; color:var(--dim-2); font-family:var(--mono); margin-top:2px; font-variant-numeric:tabular-nums; }
 .badge{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; flex:none; white-space:nowrap; }
+/* WP WEB-FIX-9: the Downloads job badge (icon + word, a direct child of
+   .jobtop; the clients sheet wraps its badges in .pcs-badges instead)
+   centres on the two-line name block beside it, the way the History rows
+   below centre their icon on the same name + job line. `.jobtop`'s
+   flex-start pinned it to the top edge of the name, about 7px above the
+   block's middle, read on rc9 as "the pause symbol is shifted upward". */
+.jobtop > .badge{ align-self:center; }
 .jobacts{ display:flex; gap:8px; justify-content:flex-end; margin-top:11px; flex-wrap:wrap; }
 /* what pause/cancel actually cost the queue — stated, not hidden */
 .holdnote, .stopnote{
@@ -1304,6 +1334,36 @@ body.onboarding .nav{ display:none; }
 .pcs-remove .jobacts{ margin-top:9px; }
 .pcs-remove .foot-note{ margin:9px 0 0; }
 .pcs-remove-dialog h3{ overflow-wrap:anywhere; }
+
+/* WP PAIR-1: "Add a device" sheet (components/add-device-sheet.js). The QR
+   code is always dark modules on a white plate (its quiet zone is part of
+   the SVG), whatever the theme: scanners want dark-on-light. Sized to the
+   sheet width up to 264px, never wider than a phone viewport. Links and
+   the install command wrap inside their own boxes (WEB-FIX-3 phone rules). */
+.pair-intro{ text-align:left; }
+.pair-option{ min-width:0; margin-bottom:14px; }
+.pair-option .foot-note{ margin:0 0 8px; }
+.pair-warn{
+  margin:0 0 9px; padding:7px 0 7px 10px; border-left:2px solid var(--stale);
+  font-size:12px; line-height:1.45; color:var(--text);
+}
+.pair-reveal{ min-width:0; margin-top:10px; }
+.pair-qr{
+  display:block; width:100%; max-width:264px; height:auto; margin:0 auto 10px;
+  background:#ffffff; border-radius:var(--r-s);
+}
+.pair-acts{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:0 0 8px; }
+.pair-open{ color:var(--accent); font-weight:600; font-size:13px; }
+.pair-value, .pair-snippet{ box-sizing:border-box; width:100%; min-width:0; margin:0 0 8px; }
+.pair-snippet{
+  display:block; resize:vertical; font-size:11.5px; line-height:1.5;
+  white-space:pre; overflow:auto;
+}
+.pair-left{ text-align:left; }
+.pair-agent-url{ margin:0 0 10px; }
+/* The "Copy key" fallback's temporary textarea (removed right after the
+   copy): selectable, but never visible and never in the layout. */
+.pair-offscreen{ position:fixed; left:-9999px; top:0; width:1px; height:1px; opacity:0; }
 
 /* About table, phone first: every row is a stacked block (component name
    on its own line, then Version / Commit / Status as labelled cells in a
@@ -1807,6 +1867,7 @@ body.onboarding .nav{ display:none; }
   .grid.cols3 .cap .name{ left:9px; right:9px; bottom:8px; font-size:14.5px; letter-spacing:.4px; }
   .grid.cols3 .cappill{ left:7px; top:7px; min-height:23px; padding:3px 8px 3px 3px; gap:5px; font-size:10.5px; }
   .grid.cols3 .cappill .sic{ --sz:17px; }
+  .grid.cols3 .cap .cappill.bare{ padding:3px; } /* WP WEB-FIX-9: the bare pill's base padding */
   .grid.cols3 .card{ gap:7px; }
   /* NB: no separate `.grid.cols3 .meta .size` reset line here (Opus review
      nitpick, WP 4e.2 fix round) — `.meta .size` carries no font-size rule of

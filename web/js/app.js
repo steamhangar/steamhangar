@@ -42,9 +42,27 @@ import { setConnectionLost } from "./connection-status.js";
 import { createDesktopSiteHint, readBrowserEnv } from "./components/desktop-site-hint.js";
 import { store } from "./store-singleton.js";
 import { ownedLibrary } from "./owned-singleton.js";
-import { api, getStoredApiKey, isDemoMode } from "./api.js";
+import { api, checkVaultApiKey, getStoredApiKey, isDemoMode, setDemoMode, setStoredApiKey } from "./api.js";
 import { openOnboarding, isOnboardingOpen } from "./onboarding.js";
+// WP PAIR-1: the receiving side of a browser pairing link (#pair=<key>).
+import { showToast } from "./components/toast.js";
+import { confirmPairReplace } from "./components/pair-confirm.js";
+import {
+  PAIR_TEXT,
+  runPairIntake,
+  setPairedNotice,
+  takePairFromLocation,
+  takePairedNotice,
+} from "./lib/pair-intake.js";
 import { viewTitle } from "./lib/view-title.js";
+
+// WP PAIR-1: read and strip a `#pair=<key>` fragment before anything else
+// in this module runs, so the key leaves the address bar and the history
+// entry at once (lib/pair-intake.js). The intake itself runs after the
+// first paint, at the bottom of this file.
+const pairCandidate = takePairFromLocation(window);
+let pairIntakeBusy = pairCandidate !== null;
+const getSessionStorage = () => window.sessionStorage;
 
 const RENDERERS = {
   library: renderLibrary,
@@ -131,7 +149,14 @@ createDecisionPanel({
   })(),
   ownedNames: ownedLibrary,
 });
-createAuthRecovery({ store, openOnboarding, isOnboardingOpen, getStoredApiKey });
+// WP PAIR-1: while a pairing link is being handled, a 401 from the old key
+// must not throw the reconnect dialog over the pairing confirm.
+createAuthRecovery({
+  store,
+  openOnboarding,
+  isOnboardingOpen: () => isOnboardingOpen() || pairIntakeBusy,
+  getStoredApiKey,
+});
 createConnectionBanner({
   store,
   isDemoMode,
@@ -164,4 +189,29 @@ renderView(currentView());
 // already chosen (lib/onboarding-steps.js's shouldShowOnboarding). The
 // overlay covers the whole shell (css/app.css `.onb`) so which view sits
 // underneath does not matter.
-maybeShowOnboardingOnStartup();
+//
+// WP PAIR-1: the "Paired." toast survives the reload a successful pairing
+// ends with. With a pairing link the first-run check waits for the link's
+// outcome: a paired browser reloads into the normal start view, any other
+// outcome falls back to the usual first-run check.
+if (takePairedNotice(getSessionStorage)) showToast(PAIR_TEXT.paired, { duration: 4000 });
+if (pairCandidate) {
+  runPairIntake({
+    candidate: pairCandidate,
+    getStoredApiKey,
+    isDemoMode,
+    setStoredApiKey,
+    setDemoMode,
+    checkKey: checkVaultApiKey,
+    confirmReplace: confirmPairReplace,
+    notify: (text, { warn = false } = {}) => showToast(text, { warn, duration: warn ? 7000 : 3000 }),
+    setPairedNotice: () => setPairedNotice(getSessionStorage),
+    reload: () => window.location.reload(),
+  }).then((outcome) => {
+    if (outcome === "paired") return; // the page is reloading
+    pairIntakeBusy = false;
+    maybeShowOnboardingOnStartup();
+  });
+} else {
+  maybeShowOnboardingOnStartup();
+}

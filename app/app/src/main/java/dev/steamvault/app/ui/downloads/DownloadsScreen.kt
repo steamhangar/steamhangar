@@ -325,7 +325,15 @@ private fun JobCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            // WP WEB-FIX-9: the status badge centres on the name + job line
+            // block (web `.jobtop > .badge{ align-self:center }`), like the
+            // History rows; top alignment read as "the pause symbol is
+            // shifted upward".
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Column {
                     Text(model.name, style = MaterialTheme.typography.bodyLarge)
                     Text(

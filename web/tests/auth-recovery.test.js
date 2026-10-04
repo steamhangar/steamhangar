@@ -169,8 +169,12 @@ test("app.js wires createAuthRecovery at top level with the real store/openOnboa
   const src = stripComments(readFileSync(join(here, "..", "js", "app.js"), "utf8"));
   assert.match(src, /import \{ createAuthRecovery \} from "\.\/components\/auth-recovery\.js"/);
   assert.match(src, /import \{ openOnboarding, isOnboardingOpen \} from "\.\/onboarding\.js"/);
-  const callRe = /createAuthRecovery\(\{\s*store,\s*openOnboarding,\s*isOnboardingOpen,\s*getStoredApiKey\s*\}\)/;
+  // WP PAIR-1: the open-overlay gate also holds while a #pair= link is being
+  // handled (the pairing confirm must not get the reconnect dialog thrown
+  // over it), so the gate is `isOnboardingOpen() || pairIntakeBusy`.
+  const callRe =
+    /createAuthRecovery\(\{\s*store,\s*openOnboarding,\s*isOnboardingOpen: \(\) => isOnboardingOpen\(\) \|\| pairIntakeBusy,\s*getStoredApiKey,?\s*\}\)/;
   const m = callRe.exec(src);
-  assert.ok(m, "app.js must call createAuthRecovery({ store, openOnboarding, isOnboardingOpen, getStoredApiKey }) — the factory exists but nothing wires it (deleted), or its argument list drifted");
+  assert.ok(m, "app.js must call createAuthRecovery({ store, openOnboarding, isOnboardingOpen: () => isOnboardingOpen() || pairIntakeBusy, getStoredApiKey }) — the factory exists but nothing wires it (deleted), or its argument list drifted");
   assert.equal(braceDepthAt(src, m.index), 0, "the createAuthRecovery call moved INSIDE a function — it must run unconditionally at module top level, like createRailPanel/createDecisionPanel");
 });

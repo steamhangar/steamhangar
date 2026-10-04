@@ -56,13 +56,18 @@
 import { pushModal, popModal } from "../lib/modal-stack.js";
 
 /**
- * @param {{ariaLabel: string, variant?: "center"|"drawer"}} options
+ * `onClose` (WP PAIR-1, optional) runs on EVERY close path — the sheet's own
+ * buttons, Escape (modal-stack), a backdrop tap, navigation — after the
+ * sheet is hidden and before focus returns. The "Add a device" sheet uses it
+ * to drop the revealed pairing secrets from the DOM.
+ *
+ * @param {{ariaLabel: string, variant?: "center"|"drawer", onClose?: () => void}} options
  * @returns {{
  *   backdrop: HTMLElement, sheet: HTMLElement, body: HTMLElement,
  *   open: () => void, close: () => void, isOpen: () => boolean,
  * }}
  */
-export function createSheetDialog({ ariaLabel, variant }) {
+export function createSheetDialog({ ariaLabel, variant, onClose }) {
   const backdrop = document.createElement("div");
   backdrop.className = variant ? `sheet-backdrop sheet-backdrop--${variant}` : "sheet-backdrop";
 
@@ -110,6 +115,7 @@ export function createSheetDialog({ ariaLabel, variant }) {
     if (!isOpen()) return;
     backdrop.classList.remove("on");
     popModal(backdrop);
+    if (typeof onClose === "function") onClose();
     if (invokerEl && typeof invokerEl.focus === "function") invokerEl.focus();
     invokerEl = null;
   }
