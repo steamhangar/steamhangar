@@ -589,7 +589,10 @@ rediscovered under the same library, same client id, same history), but
 renaming the client id on a whim leaves a ghost row behind that has to be
 cleaned up by hand: `curl -X DELETE -H "X-Api-Key: ..."
 https://<vault-api>/v1/clients/<old-id>` (`204` on success, `404` if the
-id has no rows; shipped in **AG-1**). The agent itself has no delete
+id has no rows; shipped in **AG-1**), or with "Remove" on the PC's row in
+the web UI's Settings → PCs (agents) list (WP WEB-FEAT-4). An id that
+contains `/` cannot be removed either way: the route does not match it.
+The agent itself has no delete
 command — it stays write-only towards `/v1/agent/installed` by design.
 
 ### Exit codes

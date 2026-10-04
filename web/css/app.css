@@ -1250,6 +1250,13 @@ body.onboarding .nav{ display:none; }
 .pchip-off, .pchip-unknown{ color:var(--dim-2); }
 .pchip-off .pdot, .pchip-unknown .pdot{ background:transparent; border:1.5px solid currentColor; }
 .pcs-line{ overflow-wrap:anywhere; }
+/* WP WEB-FEAT-4: the row's Remove button sits right-aligned under the row
+   (.jobacts wraps), and the confirm dialog's title carries the PC name,
+   operator-chosen text that may be one long word: it breaks inside the
+   dialog instead of widening it past a phone viewport. */
+.pcs-remove .jobacts{ margin-top:9px; }
+.pcs-remove .foot-note{ margin:9px 0 0; }
+.pcs-remove-dialog h3{ overflow-wrap:anywhere; }
 
 /* About table, phone first: every row is a stacked block (component name
    on its own line, then Version / Commit / Status as labelled cells in a

@@ -1492,6 +1492,30 @@ const JOB_RESUME_RE = /^\/v1\/jobs\/(\d+)\/resume$/;
 const GAME_ID_RE = /^\/v1\/games\/(\d+)$/;
 const CACHE_APPID_RE = /^\/v1\/cache\/(\d+)$/;
 const GC_APPID_RE = /^\/v1\/cache\/(\d+)\/gc$/;
+// WP WEB-FEAT-4: one percent-encoded path segment, like the server's
+// `{client_id}` (which never matches a decoded "/").
+const CLIENT_ID_RE = /^\/v1\/clients\/([^/]+)$/;
+
+/**
+ * `DELETE /v1/clients/{client_id}` (demo, WP WEB-FEAT-4), mirroring WP AG-1:
+ * the row is gone from `GET /v1/clients`, the answer is `204` (`null` here,
+ * what api.js's `request()` returns for a 204), and an id with no rows is a
+ * 404 with the server's detail wording. No agent runs in demo mode, so a
+ * removed PC stays removed until a page reload (the real server lists it
+ * again with the agent's next report).
+ */
+function handleDeleteClient(encodedId) {
+  let clientId;
+  try {
+    clientId = decodeURIComponent(encodedId);
+  } catch {
+    clientId = encodedId; // malformed escape: no client can have that id
+  }
+  const before = clients.length;
+  clients = clients.filter((c) => c.client_id !== clientId);
+  if (clients.length === before) throw notFound(`Unknown client_id '${clientId}'`);
+  return null;
+}
 
 function jobControlResponse(job, { status, outcome, detail }) {
   job.status = status;
@@ -1833,6 +1857,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
 
   if (method === "GET" && path === "/v1/clients") {
     return handleGetClients();
+  }
+  if (method === "DELETE" && (m = path.match(CLIENT_ID_RE))) {
+    return handleDeleteClient(m[1]);
   }
   if (method === "GET" && path === "/v1/about") {
     return handleGetAbout();
