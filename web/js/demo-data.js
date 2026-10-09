@@ -590,7 +590,7 @@ function handleGetAbout() {
       },
       {
         name: "steamprefill",
-        version: "3.7.1",
+        version: "3.7.2",
         commit: null,
         status: "ok",
         checked_at: checkedAt,

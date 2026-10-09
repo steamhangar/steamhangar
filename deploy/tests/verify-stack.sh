@@ -1639,7 +1639,7 @@ step "6w. WP VER-2: GET /v1/about reports every component (default stack, queue 
 say 'Expected in this stack: vault-api ok/dev; vault-core unknown/dev (read'
 say 'from the version file its hook wrote into the shared volume -- vault-api'
 say 'has no network path to vault-core, ADR-0011); vault-runner ok/dev (its'
-say 'presence row); SteamPrefill ok/3.7.1 (the api image pin, reported by the'
+say 'presence row); SteamPrefill ok/3.7.2 (the api image pin, reported by the'
 say 'runner); vault-proxy ok (it answered and refused the .invalid probe host);'
 say 'vault-dns unknown (never probed). /v1/about needs the key, /v1/health'
 say 'stays the fixed version-free body.'
@@ -1666,7 +1666,7 @@ assert_contains "$(about_field "$work/about.json" vault-core detail)" "Recorded 
 assert_eq "ok"      "$(about_field "$work/about.json" vault-runner status)"  "vault-runner: status (fresh presence row)"
 assert_eq "dev"     "$(about_field "$work/about.json" vault-runner version)" "vault-runner: version from its presence row"
 assert_eq "ok"      "$(about_field "$work/about.json" steamprefill status)"  "steamprefill: status"
-assert_eq "3.7.1"   "$(about_field "$work/about.json" steamprefill version)" "steamprefill: version (api/Dockerfile's pin, reported by the runner)"
+assert_eq "3.7.2"   "$(about_field "$work/about.json" steamprefill version)" "steamprefill: version (api/Dockerfile's pin, reported by the runner)"
 assert_eq "ok"      "$(about_field "$work/about.json" vault-proxy status)"   "vault-proxy: status (answered, refused the off-list probe host)"
 assert_eq "null"    "$(about_field "$work/about.json" vault-proxy version)"  "vault-proxy: version stays null (reachability only)"
 assert_eq "unknown" "$(about_field "$work/about.json" vault-dns status)"     "vault-dns: status (never probed)"

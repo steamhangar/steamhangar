@@ -31,36 +31,45 @@
 # --- Stage 1: fetch SteamPrefill ---------------------------------------------
 # Kept in a throwaway stage so curl/unzip never exist in the shipped image.
 #
-# Pinned to the exact upstream release Phase 0 validated (ADR-0001: SteamPrefill
-# v3.7.1 auto-detected the cache via the lancache-heartbeat contract and
-# prefilled path-faithfully). Declared BEFORE the first FROM (a global build
-# arg) so both stages read the one value: stage 1 downloads that release, the
-# final stage bakes it as ENV STEAMPREFILL_VERSION for GET /v1/about (WP VER-2).
+# Phase 0 validated v3.7.1 (ADR-0001: it auto-detected the cache via the
+# lancache-heartbeat contract and prefilled path-faithfully). Bumped to v3.7.2
+# on 2026-10-09 (WP DEPS-1). The whole v3.7.1...v3.7.2 diff (GitHub compare
+# API, 5 commits, 2 files) is a one-line DepotInfo.IsInvalidDepot fix (a DLC
+# depot linking to itself without a manifest now counts as invalid) plus the
+# csproj VersionPrefix: Program.cs (the hidden --max-threads pre-parse), the
+# Config/ files (account session, selectedAppsToPrefill.json,
+# successfullyDownloadedDepots.json), the manifest cache filenames and the
+# summary table are untouched, and no package reference or submodule moved.
+# Declared BEFORE the first FROM (a global build arg) so both stages read the
+# one value: stage 1 downloads that release, the final stage bakes it as ENV
+# STEAMPREFILL_VERSION for GET /v1/about (WP VER-2).
 # Bump it together with STEAMPREFILL_ARCHIVE/URL/SHA256 below.
-ARG STEAMPREFILL_VERSION=3.7.1
+ARG STEAMPREFILL_VERSION=3.7.2
 FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251 AS steamprefill
 
 ARG STEAMPREFILL_VERSION
-ARG STEAMPREFILL_ARCHIVE=SteamPrefill-3.7.1-linux-x64.zip
-ARG STEAMPREFILL_URL=https://github.com/tpill90/steam-lancache-prefill/releases/download/v3.7.1/SteamPrefill-3.7.1-linux-x64.zip
+ARG STEAMPREFILL_ARCHIVE=SteamPrefill-3.7.2-linux-x64.zip
+ARG STEAMPREFILL_URL=https://github.com/tpill90/steam-lancache-prefill/releases/download/v3.7.2/SteamPrefill-3.7.2-linux-x64.zip
 # HOW THIS CHECKSUM WAS OBTAINED (documented because it matters):
 # upstream publishes NO checksum file and no signature alongside its release
-# assets -- verified against the GitHub releases API for tag v3.7.1 on
-# 2026-08-05, whose asset list contains only the four platform .zip files
-# (linux-arm64, linux-x64, osx-x64, win-x64) and nothing else. So this is a
-# trust-on-first-use pin, established as follows:
+# assets (v3.7.1 checked 2026-08-05, v3.7.2 re-checked 2026-10-09: the asset
+# list holds only the four platform .zip files -- linux-arm64, linux-x64,
+# osx-x64, win-x64). Since then GitHub's releases API reports a per-asset
+# `digest` it computed itself at upload; that is a second, independent
+# source, not an upstream signature. The v3.7.2 pin, 2026-10-09:
 #   1. downloaded https://github.com/tpill90/steam-lancache-prefill/releases/
-#      download/v3.7.1/SteamPrefill-3.7.1-linux-x64.zip over HTTPS (GitHub's
-#      own release CDN, TLS-verified) on 2026-08-05
-#   2. checked the byte count against the size the GitHub releases API reports
-#      for that asset: 12095541 bytes -- matched
-#   3. sha256sum -> 678765365fd3dacd9394912526a086e15f4f5b27dc6db24ea6ef8dc99e2d3748
-#   4. repeated the download independently and re-hashed: same digest
+#      download/v3.7.2/SteamPrefill-3.7.2-linux-x64.zip over HTTPS (GitHub's
+#      own release CDN, TLS-verified), twice, independently
+#   2. byte count of both downloads: 12096230 -- matches the API's size
+#   3. sha256sum of both -> 974d7c4e5c7a4664bd23cc8f1bba3db354ecb465a2cfc442ba766b048160394d
+#   4. the API's asset digest: sha256:974d7c4e...160394d -- identical
+#   5. ran the extracted binary: `--version` -> v3.7.2, and the --max-threads
+#      build probe below prints "Will download using at most 3 threads"
 # From here on the pin is what protects the build: any change to the bytes at
 # that URL -- upstream re-cutting the tag, a compromised release, a truncated
 # download -- fails the build instead of silently shipping. Bump version, URL
 # and hash together, never one of them alone.
-ARG STEAMPREFILL_SHA256=678765365fd3dacd9394912526a086e15f4f5b27dc6db24ea6ef8dc99e2d3748
+ARG STEAMPREFILL_SHA256=974d7c4e5c7a4664bd23cc8f1bba3db354ecb465a2cfc442ba766b048160394d
 
 RUN set -eux; \
     apt-get update; \

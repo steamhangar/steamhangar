@@ -547,5 +547,25 @@ note per touched frozen file.
 - Not frozen, listed for completeness: the `VAULT_EVENT_LOG_MAX_BYTES`
   comment in `deploy/compose.yaml`.
 
+## Addendum 2026-10-09 — dependency pin: SteamPrefill 3.7.1 -> 3.7.2 (WP DEPS-1)
+
+Planned in PROJECT_PLAN §11 item 13 C (hygiene): bump the pin once 3.7.2's
+`--max-threads` flag and session file format were re-checked. Upstream's
+only change is a bug fix: a DLC depot that links to itself without a
+manifest now counts as invalid instead of breaking the prefill.
+
+Scope of the exception: `api/Dockerfile`, the three pinned build args
+(`STEAMPREFILL_VERSION`, `STEAMPREFILL_ARCHIVE`/`URL`) and the TOFU
+`STEAMPREFILL_SHA256` (equal to GitHub's own asset digest), plus their
+comment; and in `api/vault_api/manifest_ingest.py` the version named in the
+coupling canary's warning text and docstring. No behaviour change. The whole v3.7.1...v3.7.2 diff is
+`DepotInfo.cs` (one line) and the csproj version. The hidden `--max-threads`
+pre-parse, the `Config/` files (session, `selectedAppsToPrefill.json`,
+`successfullyDownloadedDepots.json`), the manifest cache filenames and the
+summary table are not in that diff. The build probe (CORE-FIX-2) runs the
+new binary. Not frozen: the test pins (`test_core_fix_2_max_threads.py`,
+`test_ver_2_about.py`), verify-stack, publish.yml's comment, the web and
+Android demo data, and docs.
+
 Every other frozen-path change still needs its own user decision and note
 here.
