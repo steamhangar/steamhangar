@@ -26,6 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AGENT_SERVER_URL_NOTE,
+  installKey,
   isInstallableKey,
   agentReleaseFromAbout,
   noReleaseText,
@@ -132,10 +133,22 @@ test("MUTATION TARGET: the exe goes to a VERSIONED path, never over a running ex
 test("MUTATION TARGET: after a successful install the download folder is removed; uninstall-task.ps1 is kept", () => {
   const install = lines.findIndex((l) => l.includes("-File (Join-Path $kit 'install-task.ps1')"));
   const keep = lines.indexOf("Copy-Item -LiteralPath (Join-Path $kit 'uninstall-task.ps1') -Destination (Join-Path $dir 'uninstall-task.ps1') -Force");
-  const remove = lines.indexOf("Remove-Item -LiteralPath $kit -Recurse -Force");
+  const remove = lines.findIndex((l) => l.includes("Remove-Item -LiteralPath $kit -Recurse -Force"));
   const start = lines.indexOf("Start-ScheduledTask -TaskName 'VaultAgentReport'");
   assert.ok(install > 0 && keep > install && remove > keep && start > remove, "install, keep the uninstaller, remove the kit, start");
   assert.equal(lines[remove].startsWith(" "), false, "outside the try/finally: a failed install keeps the folder for inspection");
+});
+
+test("MUTATION TARGET: WEB-FIX-10 — a kit folder that cannot be removed warns and still starts the task", () => {
+  const remove = lines.findIndex((l) => l.includes("Remove-Item -LiteralPath $kit"));
+  const start = lines.indexOf("Start-ScheduledTask -TaskName 'VaultAgentReport'");
+  assert.equal(
+    lines[remove],
+    "try { Remove-Item -LiteralPath $kit -Recurse -Force -ErrorAction Stop } catch { Write-Warning ('Could not remove the download folder ' + $kit + ' (' + $_.Exception.Message + '). The agent is installed; delete the folder by hand later.') }",
+    "the cleanup's error is caught (ErrorActionPreference is Stop for the whole block) and reported as a warning",
+  );
+  assert.equal(start, remove + 1, "the task start follows the guarded cleanup directly");
+  assert.equal(lines.filter((l) => l.includes("Remove-Item -LiteralPath $kit")).length, 1, "no second, unguarded cleanup");
 });
 
 test("psQuote doubles every quote character PowerShell accepts", () => {
@@ -158,17 +171,32 @@ test("MUTATION TARGET: Weg A — the key is asked for as a SecureString and chec
   const ask = lines.indexOf("$secureKey = Read-Host 'Hangar API key (paste it, then press Enter)' -AsSecureString");
   const bstr = lines.indexOf("$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)");
   const plain = lines.indexOf("try { $apiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }");
+  const trim = lines.indexOf("$apiKey = ([string]$apiKey).Trim()");
   const check = lines.indexOf("if ([string]::IsNullOrEmpty($apiKey) -or $apiKey -cnotmatch '^[\\x20-\\x7E]+$') { throw 'No usable API key was entered (empty or not printable ASCII). Nothing was installed.' }");
   const download = lines.findIndex((l) => l.includes("Invoke-WebRequest"));
   assert.ok(ask > lines.indexOf("& {"), "inside the block, so the paste is complete before it asks");
   assert.ok(bstr === ask + 1 && plain === bstr + 1, "converted in memory, BSTR zero-freed in a finally");
-  assert.ok(check > plain && check < download, "refused before any download");
+  assert.ok(trim > plain && check > trim && check < download, "edge-trimmed, then refused before any download");
   const fin = lines.findIndex((l) => l === "} finally {");
   assert.equal(lines[fin + 2].trim(), "$apiKey = $null", "the variable is cleared at the end");
   assert.equal(lines[lines.length - 1], "}", "the block closes at the end");
   // The command's check and the sheet's isInstallableKey are one rule.
-  for (const k of ["abc", "a b!~", " "]) assert.equal(isInstallableKey(k), true, k);
-  for (const k of ["", "ü", "a\tb", "a\u007fb", null]) assert.equal(isInstallableKey(k), false, JSON.stringify(k));
+  for (const k of ["abc", "a b!~", " abc ", "\tabc\r\n"]) assert.equal(isInstallableKey(k), true, JSON.stringify(k));
+  for (const k of ["", " ", "\t\n", "ü", "a\tb", "a\u007fb", null]) assert.equal(isInstallableKey(k), false, JSON.stringify(k));
+});
+
+test("MUTATION TARGET: WEB-FIX-10 — the key's edge whitespace is handled like install-task.ps1 (trim edges, keep inner spaces)", () => {
+  // install-task.ps1: `$resolvedApiKey = (Get-Content -LiteralPath $ApiKeyFile -Raw).Trim()`,
+  // inner spaces kept. The command trims what was pasted; Copy key copies the trimmed key.
+  const ps = readFileSync(join(here, "..", "..", "agent", "packaging", "windows", "install-task.ps1"), "utf8");
+  assert.match(ps, /\$resolvedApiKey = \(Get-Content -LiteralPath \$ApiKeyFile -Raw\)\.Trim\(\)/, "install-task.ps1 still trims the key file");
+  assert.equal(installKey("  ab cd \t\r\n"), "ab cd");
+  assert.equal(installKey("abc"), "abc");
+  assert.equal(installKey(null), null);
+  assert.equal(installKey(42), null);
+  // The command's check runs on the trimmed value.
+  const trim = lines.indexOf("$apiKey = ([string]$apiKey).Trim()");
+  assert.ok(trim > 0 && lines[trim + 1].includes("$apiKey -cnotmatch '^[\\x20-\\x7E]+$'"), "trim directly before the check");
 });
 
 test("MUTATION TARGET: the command is ONE top-level statement, `& { ... }`, so a line-by-line paste runs nothing before the end", () => {

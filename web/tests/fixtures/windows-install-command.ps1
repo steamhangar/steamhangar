@@ -11,6 +11,7 @@ $secureKey = Read-Host 'Hangar API key (paste it, then press Enter)' -AsSecureSt
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
 try { $apiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 $secureKey.Dispose()
+$apiKey = ([string]$apiKey).Trim()
 if ([string]::IsNullOrEmpty($apiKey) -or $apiKey -cnotmatch '^[\x20-\x7E]+$') { throw 'No usable API key was entered (empty or not printable ASCII). Nothing was installed.' }
 $base = 'https://github.com/steamhangar/steamhangar/releases/download/v0.1.0-rc10'
 $exeName = 'vault-agent-v0.1.0-rc10-windows-amd64.exe'
@@ -47,7 +48,7 @@ try {
   $apiKey = $null
 }
 Copy-Item -LiteralPath (Join-Path $kit 'uninstall-task.ps1') -Destination (Join-Path $dir 'uninstall-task.ps1') -Force
-Remove-Item -LiteralPath $kit -Recurse -Force
+try { Remove-Item -LiteralPath $kit -Recurse -Force -ErrorAction Stop } catch { Write-Warning ('Could not remove the download folder ' + $kit + ' (' + $_.Exception.Message + '). The agent is installed; delete the folder by hand later.') }
 Start-ScheduledTask -TaskName 'VaultAgentReport'
 Write-Host 'vault-agent is installed and its first report has started. You can close this window.'
 }

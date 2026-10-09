@@ -3272,3 +3272,28 @@ CI-parsed fixture is regenerated. Mutations, both killed: a comment line
 back above `& {`; the prompt moved in front of the block.
 
 Suite: **1187 tests, 1187 pass, 0 fail**.
+
+### WEB-FIX-10 — PAIR-1 review nits (Windows install command)
+
+- The kit-folder cleanup is `try { Remove-Item ... -ErrorAction Stop }
+  catch { Write-Warning ... }` (the block runs with
+  `$ErrorActionPreference = 'Stop'`), so a locked or vanished folder only
+  warns and `Start-ScheduledTask` still runs; it follows directly.
+- Key edge whitespace matches install-task.ps1 (`.Trim()` of the
+  -ApiKeyFile contents, inner spaces kept): the command trims the pasted
+  key before its check, `installKey` trims for the sheet, "Copy key"
+  copies the trimmed key, and `isInstallableKey` checks the trimmed key
+  (a whitespace-only key is now refused). A test pins install-task.ps1's
+  trim line.
+- Step 2 adds "(press Enter once more if nothing happens)".
+- agent/README.md "Windows Scheduled Task" points to the in-app flow; the
+  sheet already points to agent/README.md.
+
+Tests: `agent-install.test.js` +2 (guarded cleanup right before the task
+start; trim rule and install-task.ps1's trim line), the key-rule cases
+extended; `add-device-wiring.test.js` +1 (Copy key trims) and the step
+text. Fixture regenerated (still ASCII). Mutations, each alone, all 5
+killed: cleanup without `-ErrorAction Stop`; no trim in the command; Copy
+key untrimmed; step sentence removed; `isInstallableKey` without trim.
+
+Suite: **1293 tests, 1293 pass, 0 fail**.
