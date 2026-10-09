@@ -2842,6 +2842,10 @@ below carry their own later dates, item 12 is the current one).
       `conhost.exe --headless` (direct `powershell.exe` action as before
       when `conhost.exe` is missing), logging unchanged. Existing installs
       keep the old action until `install-task.ps1` is re-run once.
+      WEB-FIX-10: the web UI's Windows install command trims spaces
+      around the pasted key (as `install-task.ps1` does), still starts the
+      first report when the download folder cannot be removed (warning
+      only), and its steps say to press Enter once more if nothing happens.
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped

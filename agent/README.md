@@ -1477,6 +1477,10 @@ PRIMARY mode" note), matching the systemd timer's role exactly. Everything
 this creates is per-user; no admin elevation is used or required anywhere
 in it.
 
+First install without the manual steps below: the web UI's Settings → "Add
+a device" → "Windows PC (vault-agent)" shows one PowerShell command that
+downloads, checks and installs a released agent (the key is asked for, never in the command).
+
 ### Getting `vault-agent.exe`, and the SmartScreen warning you should expect
 
 Download `vault-agent-<tag>-windows-amd64.exe` from the release's assets

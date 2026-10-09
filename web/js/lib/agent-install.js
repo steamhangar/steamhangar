@@ -17,7 +17,8 @@
  *     only asterisks; the user pastes it from the sheet's separate
  *     "Copy key" button), converts it in memory (`SecureStringToBSTR`,
  *     `PtrToStringBSTR`, `ZeroFreeBSTR` in a `finally`) and refuses an
- *     empty or non-printable-ASCII answer before anything is downloaded;
+ *     empty or non-printable-ASCII answer (after trimming edge whitespace,
+ *     as install-task.ps1 does) before anything is downloaded;
  *  2. downloads `vault-agent-v<version>-windows-amd64.exe`,
  *     `install-task.ps1`, `run-vault-agent.ps1`, `uninstall-task.ps1` and
  *     `SHA256SUMS` from the GitHub Release `v<version>` (asset names as
@@ -44,7 +45,8 @@
  *     Bypass` (agent/README.md "Running the scripts"), and deletes the temp
  *     file in a `finally`;
  *  6. copies `uninstall-task.ps1` next to the exe (it needs nothing beside
- *     it) and removes the download folder (review finding 9), then starts
+ *     it) and removes the download folder (review finding 9; a folder that
+ *     cannot be removed only gives a warning, WEB-FIX-10), then starts
  *     the task `VaultAgentReport` once, so the PC reports now. On a failure
  *     the folder stays, so the downloaded files can be inspected.
  *
@@ -179,13 +181,29 @@ export function psQuote(value) {
 export const KEY_PROMPT = "Hangar API key (paste it, then press Enter)";
 
 /**
- * The key rule of the install command: printable ASCII (what an HTTP header
- * value can carry unchanged). The sheet shows a note instead of the command
- * for a stored key outside it. Same rule as the command's own check.
+ * The key as the install command and install-task.ps1 end up using it
+ * (WEB-FIX-10): leading and trailing whitespace trimmed, inner characters
+ * kept. install-task.ps1 trims the -ApiKeyFile contents (`.Trim()`) and
+ * accepts inner spaces, so the command trims what was pasted at its prompt
+ * and "Copy key" copies this trimmed form. null for a non-string.
+ * @param {unknown} key
+ * @returns {string | null}
+ */
+export function installKey(key) {
+  return typeof key === "string" ? key.trim() : null;
+}
+
+/**
+ * The key rule of the install command: after the edge trim
+ * ({@link installKey}), non-empty printable ASCII (what an HTTP header value
+ * can carry unchanged; an inner space is allowed, as install-task.ps1
+ * allows it). The sheet shows a note instead of the command for a stored
+ * key outside it. Same rule as the command's own check.
  * @param {unknown} key
  */
 export function isInstallableKey(key) {
-  return typeof key === "string" && /^[\x20-\x7e]+$/.test(key);
+  const k = installKey(key);
+  return k !== null && /^[\x20-\x7e]+$/.test(k);
 }
 
 /**
@@ -199,6 +217,8 @@ function keySourceLines() {
     "$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)",
     "try { $apiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }",
     "$secureKey.Dispose()",
+    // Edge whitespace off, as install-task.ps1 trims -ApiKeyFile (WEB-FIX-10).
+    "$apiKey = ([string]$apiKey).Trim()",
     "if ([string]::IsNullOrEmpty($apiKey) -or $apiKey -cnotmatch '^[\\x20-\\x7E]+$') { throw 'No usable API key was entered (empty or not printable ASCII). Nothing was installed.' }",
   ];
 }
@@ -263,7 +283,9 @@ export function windowsInstallSnippet({ version, serverUrl }) {
     "  $apiKey = $null",
     "}",
     "Copy-Item -LiteralPath (Join-Path $kit 'uninstall-task.ps1') -Destination (Join-Path $dir 'uninstall-task.ps1') -Force",
-    "Remove-Item -LiteralPath $kit -Recurse -Force",
+    // Cleanup only (WEB-FIX-10): a locked or vanished folder must not stop
+    // the first report; warn and go on to Start-ScheduledTask.
+    "try { Remove-Item -LiteralPath $kit -Recurse -Force -ErrorAction Stop } catch { Write-Warning ('Could not remove the download folder ' + $kit + ' (' + $_.Exception.Message + '). The agent is installed; delete the folder by hand later.') }",
     `Start-ScheduledTask -TaskName ${psQuote(AGENT_TASK_NAME)}`,
     "Write-Host 'vault-agent is installed and its first report has started. You can close this window.'",
     "}",

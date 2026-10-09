@@ -52,6 +52,7 @@ import {
   AGENT_SERVER_URL_STORAGE_KEY,
   agentReleaseFromAbout,
   KEY_PROMPT,
+  installKey,
   isInstallableKey,
   noReleaseText,
   validateAgentServerUrl,
@@ -379,7 +380,7 @@ function paintWindows(reveal) {
   const field = readonlyField(snippet, { multiline: true, label: "PowerShell install command" });
   field.dataset.role = "agent-snippet";
   const acts = el("div", "pair-acts");
-  const copyKey = copyButton("Copy key", () => getStoredApiKey(), null);
+  const copyKey = copyButton("Copy key", () => installKey(getStoredApiKey()), null);
   copyKey.dataset.role = "agent-copy-key";
   acts.append(copyButton("Copy command", () => snippet, field), copyKey);
   reveal.replaceChildren(
@@ -391,7 +392,7 @@ function paintWindows(reveal) {
     el(
       "p",
       "foot-note",
-      `2. Paste the whole command at once; it runs only after the last line is in. When it then asks "${KEY_PROMPT}", press Copy key here and paste into the window (it shows only asterisks). The key is never part of the command, so it is not in PowerShell's history, a transcript or a script-block log; the copy stays in the clipboard (and clipboard history or cloud clipboard sync, where on) until you copy something else.`,
+      `2. Paste the whole command at once; it runs only after the last line is in (press Enter once more if nothing happens). When it then asks "${KEY_PROMPT}", press Copy key here and paste into the window (it shows only asterisks). The key is never part of the command, so it is not in PowerShell's history, a transcript or a script-block log; the copy stays in the clipboard (and clipboard history or cloud clipboard sync, where on) until you copy something else.`,
     ),
     field,
     acts,
