@@ -25,6 +25,28 @@ Run a single file directly the same way:
 node --test web/tests/backoff.test.js
 ```
 
+**Run from a full repo checkout, not a copy of `web/` alone.** Several
+tests pin the web UI against its twin in another component and read that
+file from the repo by a `../../` path, so a partial copy (only `web/`, or
+`web/` without `api/`) fails them with `ENOENT` instead of testing
+anything (found in WP HYG-1's catch-up, plan §11 item 13 C):
+
+- `demo-data-config-defaults.test.js` — `api/vault_api/config.py` (the
+  `DEFAULT_AUTO_GC` / `DEFAULT_SWEEP_INCLUDE_CACHED` defaults the demo
+  data must mirror)
+- `demo-data-installed-on.test.js` — `api/vault_api/routers/games.py`
+  (the `installed_on` shape)
+- `about-view.test.js`, `demo-data-shape-guard.test.js`,
+  `clients-remove.test.js` — files under `api/vault_api/`
+- `about-android-twin.test.js`, `settings-save-bar.test.js` —
+  `app/app/src/main/res/values/strings.xml`
+- `agent-install.test.js` — `.github/workflows/publish.yml`,
+  `.github/scripts/verify-ps-parse.ps1`,
+  `agent/packaging/windows/install-task.ps1`
+- `job-failure.test.js` — `deploy/README.md`
+
+This is deliberate: each of these is a drift guard against that twin.
+
 ## Scope
 
 - `backoff.test.js` — exponential backoff growth, cap, jitter bounds

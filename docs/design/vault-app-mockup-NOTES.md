@@ -432,8 +432,9 @@ The word was always in the DOM for screen readers; now it is visible everywhere 
 
 **Motion = "activity right now", never decoration (round-5 addendum).** *(Timings and both
 glyphs were reworked in round 6 — see "Motion, calmed down" below; the principle here is
-unchanged.)* Only the two active states animate: a **running** download's arrow drifts down
-and fades; an **update / re-verify** run's arrows turn. Every static state
+unchanged.)* *(The drift-and-fade download motion was replaced in the real app by WP
+WEB-FIX-7 — see "Real app: the download arrow falls through the badge" at the end.)* Only
+the two active states animate: a **running** download's arrow drifts down and fades; an **update / re-verify** run's arrows turn. Every static state
 (check, idle download arrow, idle update arrows, pause bars, `!`) is completely still, so a
 library at rest never flickers. Paused is *deliberately* motionless — a frozen pause glyph
 is the whole signal. All of it is GPU-cheap transforms only (`translateY`/`rotate`) and is
@@ -545,6 +546,9 @@ That is unacceptable for a glyph that is simultaneously the status indicator and
 The fade now bottoms out at **.35** and the travel is small enough (~3.4 user units ≈ 1.5 px
 at icon size) that the loop's reset is imperceptible even though the arrow is still faintly
 visible when it happens. Verified across five sampled animation phases: legible at every one.
+*(Superseded in the real app by WP WEB-FIX-7: no fade at all; the "never blank" rule now
+holds because at least one falling arrow is always mostly inside the disc — see the end of
+this file.)*
 
 **Toast sits where the bulk bar sits (item 2).** It was floating 78 px above the bottom
 edge; it is now pinned **12 px above the nav**, the same inset as the round-6 bulk bar.
@@ -630,7 +634,9 @@ The download arrow was "sehr unruhig" for two reasons, both addressed: the anima
 moving the **whole glyph including its baseline**, and it was fast. Now only the arrow group
 drifts, the travel is shorter, the cadence is 2.6 s, and — as asked — the **animated variant
 has no line under it at all**; the static "not cached" glyph keeps its baseline, where it
-reads as a floor to download onto rather than a jittering artefact.
+reads as a floor to download onto rather than a jittering artefact. *(The drift itself was
+replaced in the real app by WP WEB-FIX-7's falling two-arrow loop; the "no line under the
+animated arrow" rule still holds — see the end of this file.)*
 
 **Bulk bar: a column that cannot overflow, plus delete (item 6).** The bar was a single
 flex row with the buttons pushed right, which overflowed as soon as a third button or an
@@ -708,3 +714,20 @@ square and centred on the icon's centre).
   preserved.
 - ~~Icons at rest could be mistaken for "busy"~~ — motion is reserved for active jobs only,
   and disabled under reduced-motion.
+
+## Real app: the download arrow falls through the badge (WP WEB-FIX-7)
+
+Changed after the mockup rounds (user feedback 2026-10-03, commit 62aea00). The round-6/7
+drift-and-fade read as "nothing is happening", so the running download glyph no longer
+drifts 2 px and fades. It is now **two identical arrows stacked one period apart** that fall
+through the badge in a seamless loop: the arrow group moves by exactly one period
+(32 viewBox units), `linear`, **1.6 s** per period, then snaps back to the start, and the
+badge clips the arrows to its own disc (`clip-path: circle(50%)`). At both ends of the cycle
+the same thing is inside the disc (one arrow at rest position), so the reset is invisible;
+at every moment at least one arrow is mostly inside, so the "a status icon must never be
+blank" rule still holds without any opacity change. Unchanged: only the arrow group moves
+(transform only), the animated variant has no baseline, the update glyph keeps its 2.2 s
+turn, and reduced-motion switches it off (the group returns to the single static arrow).
+The rationale for each number lives next to the code in `web/css/theme.css`
+(`vault-dlfall`) and `web/js/components/status-icon.js` (`DOWNLOAD_FALL_PERIOD`); the
+Android app follows the same motion since WP APP-FIX-3.

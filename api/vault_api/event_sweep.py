@@ -1319,17 +1319,16 @@ def maybe_truncate(
     Every condition and the residual race are documented in the module
     docstring. **Never raises, and never blocks a sweep** — see below.
 
-    Rotation is BEST-EFFORT, because in the shipped deployment it usually
-    cannot happen at all
+    Rotation is BEST-EFFORT, because a deployment can deny it
     -------------------------------------------------------------------------
-    ADR-0008 assigns rotation to this sweeper, but the containers it assigns it
-    to do not, as shipped, permit it: vault-api runs as uid/gid ``101:101``
-    (``api/Dockerfile``) and so does vault-core's nginx since the non-root
-    hardening, so in the shipped stack the log usually IS writable. Where it
-    is not (a root-run or differently-owned vault-core, the event log ``0644``
-    and owned by someone else), the sweeper can open it for reading but not
-    for writing — the write ``open`` raises ``PermissionError``
-    (EPERM/EACCES).
+    ADR-0008 assigns rotation to this sweeper. In the shipped stack it works:
+    vault-api runs as uid/gid ``101:101`` (``api/Dockerfile``), and since WP
+    SEC-FIX-5 vault-core keeps ``/vault/logs`` root-only but the event log
+    itself ``101:101`` (core/README.md "Volume ownership"), so the write
+    ``open`` below succeeds. Where it does not (a differently-owned
+    vault-core, the event log ``0644`` and owned by someone else), the
+    sweeper can open it for reading but not for writing — the write ``open``
+    raises ``PermissionError`` (EPERM/EACCES).
 
     Since WP SEC-FIX-4 both opens go through ``open_event_log`` (no symlink,
     regular file, same device as the log directory) and rotation is an
@@ -1354,9 +1353,9 @@ def maybe_truncate(
 
     The fix is a permission change on the vault-core side (make
     ``/vault/logs/event.log`` writable by vault-api's uid — chown, or a shared
-    group with ``0664``). Wiring that into ``deploy/`` is a follow-up work
-    package, not this one; this module's job is to work correctly either way
-    and to say clearly which way it is running.
+    group with ``0664``); the shipped vault-core does exactly that since WP
+    SEC-FIX-5. This module's job is to work correctly either way and to say
+    clearly which way it is running.
 
     A native (non-container) install — the WP 1.7 MVP setup, or a dev machine
     where both processes run as the same user — hits neither of these problems

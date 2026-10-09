@@ -527,3 +527,25 @@ Scope of the exception, all in WP WEB-FEAT-5:
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-09 — freeze note: stale ownership comments after SEC-FIX-5 (WP HYG-1)
+
+Not a behaviour change; recorded because it touches api/. Comments and one
+Dockerfile comment block still described the layout from before SEC-FIX-5
+(event log not writable by vault-api, rotation "usually" impossible). Docs
+are an allowed class under this freeze; the plan's hygiene list asked for a
+note per touched frozen file.
+
+- api/: comment text only in `Dockerfile` (the `/vault` mount-point note:
+  the image's 101:101 `/vault` exists only where nothing is mounted there,
+  e.g. vault-runner, and never reaches the shared volume), the SQL comment
+  above `event_sweep_state` in `vault_api/db.py`, and the
+  `maybe_truncate` docstring in `vault_api/event_sweep.py`. The
+  `chown -R 101:101 ... /vault` itself stays: it still decides ownership in
+  a container without a `/vault` mount, so removing it is not a no-op. The
+  runtime WARNING text in `maybe_truncate` is unchanged (it is behaviour).
+- Not frozen, listed for completeness: the `VAULT_EVENT_LOG_MAX_BYTES`
+  comment in `deploy/compose.yaml`.
+
+Every other frozen-path change still needs its own user decision and note
+here.

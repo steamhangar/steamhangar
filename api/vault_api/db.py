@@ -435,11 +435,12 @@ CREATE TABLE IF NOT EXISTS schedule_state (
 -- the last_* ones describe the most recent sweep only (NULL before the first
 -- one). GET /v1/stats reads exactly this row.
 --
--- truncate_denied_count / last_truncate_denied_at record the deployment
--- reality that the sweeper often CANNOT rotate the file it is contractually
--- responsible for: in the shipped containers vault-api runs as uid 101 while
--- /vault/logs and the nginx-created event.log belong to nginx, so the log is
--- readable but not writable and os.truncate raises EPERM. That is a
+-- truncate_denied_count / last_truncate_denied_at record when the sweeper
+-- CANNOT rotate the file it is contractually responsible for. In the shipped
+-- containers it can: since WP SEC-FIX-5 event.log is 101:101 inside a
+-- root-only /vault/logs, and vault-api (uid 101) ftruncates it through a
+-- verified fd (event_sweep.maybe_truncate). A denial means a deployment that
+-- differs (a differently-owned or 0644 log from another writer). That is a
 -- fail-soft condition, not an error -- sweeping stays correct because
 -- correctness is cursor-based -- but it means the file grows without bound,
 -- which an operator has to be able to SEE rather than infer from a full disk.

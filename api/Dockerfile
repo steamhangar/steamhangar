@@ -208,12 +208,21 @@ COPY web /app/web
 #                                empty named volume: vault-api's mount is
 #                                nocopy in named-volume mode only; a
 #                                VAULT_CACHE_PATH bind carries no options
-#                                (deploy/compose.yaml). cache/depot is
-#                                still pre-created here, same layout as
-#                                vault-core's image, for bind-mount/standalone
-#                                use, and so vault-api's deletion guard (which refuses a
-#                                cache root with no depot/ dir) is satisfied on a
-#                                fresh install.
+#                                (deploy/compose.yaml). So the /vault layout
+#                                and its 101:101 ownership below exist ONLY
+#                                in a container with nothing mounted at
+#                                /vault (vault-runner, a standalone
+#                                `docker run`); there cache/depot keeps
+#                                vault-api's deletion guard (which refuses a
+#                                cache root with no depot/ dir) satisfied.
+#                                With the shared volume mounted, ownership
+#                                is vault-core's: since WP SEC-FIX-5 its
+#                                start hook 21-vault-volume-ownership.sh
+#                                makes /vault, cache/, tmp/ and logs/
+#                                root:root 0755 at every start and leaves
+#                                cache/depot to uid 101 (core/README.md
+#                                "Volume ownership"). This chown never
+#                                reaches that volume.
 RUN set -eux; \
     mkdir -p /data /opt/steamprefill/Config /opt/steamprefill/home /vault/cache/depot /vault/tmp; \
     chown -R 101:101 /data /opt/steamprefill /vault /app; \

@@ -549,14 +549,14 @@ services:
       VAULT_BYPASS_WINDOW_DAYS: ${VAULT_BYPASS_WINDOW_DAYS:-3}
       VAULT_CLIENT_STATS_KEEP: ${VAULT_CLIENT_STATS_KEEP:-48}
       # Truncate the event log past this size (api/README.md "Rotation --
-      # best-effort..."). Reachable now for the specific reason that section
-      # documents: in the SHIPPED containers vault-api cannot truncate at all
-      # (PermissionError, /vault/logs is vault-core's), so every sweep past
-      # this size warns and increments truncate_denied_count forever --
-      # setting this to 0 (disables truncation attempts entirely) is the
-      # documented way to silence that without lying about rotation actually
-      # happening. Default matches config.py's own built-in default
-      # byte-for-byte (64 MiB).
+      # best-effort..."). In the shipped containers rotation works: since WP
+      # SEC-FIX-5 /vault/logs is root-only but event.log itself is 101:101,
+      # and vault-api (uid 101) truncates it in place (verify-stack checks
+      # the write-open). Where a deployment denies it, every sweep past this
+      # size warns and increments truncate_denied_count -- setting this to 0
+      # (disables truncation attempts entirely) is the documented way to
+      # silence that and rotate externally instead. Default matches
+      # config.py's own built-in default byte-for-byte (64 MiB).
       VAULT_EVENT_LOG_MAX_BYTES: ${VAULT_EVENT_LOG_MAX_BYTES:-67108864}
       # Opt-in manifest oracle (WP 3.9, ADR-0007 addendum B). Empty/off by
       # default -- see .env.example for the privacy note (queries leave the

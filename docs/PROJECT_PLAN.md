@@ -2694,7 +2694,8 @@ below carry their own later dates, item 12 is the current one).
     before `v0.1.0`, and what was deliberately moved past it.
 
     **A. In flight / next release candidate (`v0.1.0-rc6`)**
-    - [ ] **CORE-FIX-2** — prefill concurrency cap. On a DS-Lite line
+    - [x] **CORE-FIX-2** (commit 7ecca59, merged 6965ea7 2026-10-02,
+      first shipped in `v0.1.0-rc6`) — prefill concurrency cap. On a DS-Lite line
       (IPv4 behind the provider's CGNAT) a prefill failed 94% of chunk
       requests with `connect() failed (113: Host is unreachable)`: the
       CGN answers ICMP host-unreachable once the subscriber's port quota
@@ -2703,9 +2704,10 @@ below carry their own later dates, item 12 is the current one).
       instantly on failure. Fix: SteamPrefill runs with `--max-threads`
       (new `VAULT_PREFILL_MAX_THREADS`), the hidden flag is guarded
       against version bumps, nginx stops multiplying connect retries.
-    - [ ] Tag `v0.1.0-rc6` (user's yes given 2026-10-02, once CORE-FIX-2
+    - [x] Tag `v0.1.0-rc6` (user's yes given 2026-10-02, once CORE-FIX-2
       is green and merged): verify digests, new override/.env templates
-      for the operator's rollout request.
+      for the operator's rollout request. Tagged 2026-10-02 on a7856fc
+      (contains 6965ea7); later candidates up to `v0.1.0-rc12` followed.
     - [ ] Operator re-tests on rc6: prefill of one real game completes,
       Steam client downloads the same game from the cache (HIT), job
       titles show game names, the failure hints read correctly, the
@@ -2800,8 +2802,13 @@ below carry their own later dates, item 12 is the current one).
       (`web/tests/README.md`, `app/README.md`): screen reader, phone
       cover art, GC against real chunks, multi-client bypass detection,
       bottom-nav behaviour with Desktop site off.
-    - [ ] Nightly `deploy / verify-stack` runs the new bind-mode section
+    - [x] Nightly `deploy / verify-stack` runs the new bind-mode section
       (DEPLOY-FIX-3) on a GitHub runner for the first time; check it.
+      Green: scheduled CI run 37921148659 (2026-10-09, main 6d7248e), job
+      `deploy / verify-stack` success; the four scheduled runs before it
+      (2026-10-05..08) green too. Section 9 has no skip path and any failed
+      check exits non-zero, so a green job means it ran and passed (job
+      log not read: it needs an authenticated API call; HYG-1).
     - [ ] Rollout gates (h) and (i) by the operator: re-measure with the
       DNS rewrite, scheduler on, stack in the operator's stack repo,
       SQLite dump in the backup job.
@@ -2850,8 +2857,11 @@ below carry their own later dates, item 12 is the current one).
     - [x] **APP-FIX-3** — Android parity for WEB-FIX-7: `StatusIcon.kt`
       still drifts and fades (`downloadDriftFraction` /
       `downloadOpacityFraction`, ported from the removed `vault-dlslide`).
-    - [ ] Design notes: `docs/design/vault-app-mockup-NOTES.md` still
+    - [x] Design notes: `docs/design/vault-app-mockup-NOTES.md` still
       describes the old drift-and-fade arrow; record the WEB-FIX-7 change.
+      Done in HYG-1: new closing section "Real app: the download arrow
+      falls through the badge", superseded markers on the three
+      drift-and-fade passages.
     - [ ] The update/verify spinner (`vault-turn`, status kinds
       `updating`/`verify`) exists but no view ever renders those kinds;
       decide whether a live update/verify state should be shown, or drop
@@ -2984,21 +2994,30 @@ below carry their own later dates, item 12 is the current one).
       "Not checked" hid real faults) fixed in a second commit.
 
     **C. Hygiene (any time, small)**
-    - [ ] Stale ownership leftovers after SEC-FIX-5 (frozen api code,
+    - [x] Stale ownership leftovers after SEC-FIX-5 (frozen api code,
       comments/dead setup only, each needs a freeze note):
       `api/Dockerfile` (`chown -R 101:101 /vault`, never seeds a volume
       because of `nocopy`), `api/vault_api/db.py` (~423) and
       `api/vault_api/event_sweep.py` (~1303) comments, and the
       `VAULT_EVENT_LOG_MAX_BYTES` text in `deploy/compose.yaml`.
-    - [ ] verify-stack section 8: its `rootonly/` fixture cannot be
+      Done in HYG-1, comments only (ADR-0016 addendum 2026-10-09). The
+      Dockerfile chown stays: it still sets ownership where nothing is
+      mounted at `/vault` (vault-runner, standalone `docker run`). Left
+      as is: the runtime WARNING text in `maybe_truncate` (behaviour).
+    - [x] verify-stack section 8: its `rootonly/` fixture cannot be
       removed by a non-root caller; clean it through a container like
-      section 9 does.
+      section 9 does. Already done in WP VER-2 (5dac4a2, review S2):
+      `cleanup()` hands `rootonly/` back through a root container of the
+      vault-core image, also on an aborted run; confirmed by HYG-1's
+      `dev.sh verify` as a non-root caller (no leftover work dir).
     - [ ] SteamPrefill 3.7.2 is out (bug fix for invalid depot links);
       bump the pin after re-checking `--max-threads` and the session file
       format.
-    - [ ] The `api` tests that read `api/vault_api/config.py` from web
+    - [x] The `api` tests that read `api/vault_api/config.py` from web
       tests (`demo-data-config-defaults`, `demo-data-installed-on`) make
       partial web copies fail; document it in web/tests/README.md.
+      Done in HYG-1 ("Run from a full repo checkout"), with every web test
+      that reads a file outside `web/`.
     - [x] **CI-FIX-1** — CI builds every release image on every push and
       PR: ci.yml `image-build` runs `docker build` with publish.yml's
       matrix (contexts, Dockerfiles, all platforms incl. QEMU arm64), no
