@@ -1575,6 +1575,14 @@ library root (see the re-install notes). Check with
 `(Get-ScheduledTask -TaskName <name>).Actions[0].Execute`: it should end
 in `conhost.exe`.
 
+Caveats: `--headless` is an undocumented conhost switch (present since
+Windows 10 1809), and the fallback only covers a missing `conhost.exe`,
+not a conhost that ignores the switch. Two things are still unverified,
+so after re-running `install-task.ps1` check once on the PC that no
+window flashes, that `Get-ScheduledTaskInfo`'s `LastTaskResult` reflects
+an agent failure, and that the 10-minute `ExecutionTimeLimit` still ends
+the agent through the conhost -> powershell -> vault-agent chain.
+
 ### Why `-LogonType Interactive`, not S4U
 
 Two Scheduled Task logon types need no stored password: **S4U** (runs
