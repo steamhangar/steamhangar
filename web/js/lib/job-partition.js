@@ -44,12 +44,23 @@
  * port: the Kotlin side stayed 4a.5-shaped ("earlier port had no name for
  * this"), this backport closes the same gap here.
  *
- * Pure only — no DOM, no fetch. Covered in web/tests/job-partition.test.js.
+ * **Updating / Verifying on the Active card (WP WEB-FEAT-6).** A running
+ * prefill job's badge follows the same derivation as the Library card
+ * (`lib/game-status.js`'s `liveRunKind`, module header there): the job row
+ * alone cannot say whether it refreshes a completed copy, so
+ * {@link activeJobKind}/{@link activeJobWord} take the app's games row as
+ * a second input. `verify` is still not a STATUS here — it is a display
+ * kind of a `running` job, so the partition below is unchanged.
+ *
+ * Pure only — no DOM, no fetch. Covered in web/tests/job-partition.test.js
+ * and web/tests/update-verify.test.js.
  */
+
+import { KIND, liveRunKind } from "./game-status.js";
 
 /** Statuses that count toward "something is pending" (the Downloads nav
  * pip, mockup's `syncPip`) — ported onto the real status set (no
- * `verify`). Mirrors `JOB_ACTIVE_STATUSES` in store.js/library.js, kept as
+ * `verify` status; WP WEB-FEAT-6's verify KIND is a running job). Mirrors `JOB_ACTIVE_STATUSES` in store.js/library.js, kept as
  * an independent local copy rather than a shared import: this module must
  * stay standalone (no view-layer coupling), and the two lists are pinned
  * to the same value by api/README.md's "ACTIVE_STATUSES" table, not by
@@ -150,4 +161,35 @@ const GC_WORD = Object.freeze({
 export function jobStatusWord(job) {
   const table = job.type === "gc" ? GC_WORD : PREFILL_WORD;
   return table[job.status] || job.status;
+}
+
+/** The words for the two derived kinds (WP WEB-FEAT-6). Literal copies of
+ * components/status-icon.js's STATUS_LABEL values — that module builds
+ * DOM, this one stays pure; web/tests/update-verify.test.js pins them
+ * equal. */
+const RUN_KIND_WORD = Object.freeze({
+  [KIND.UPDATING]: "Updating",
+  [KIND.VERIFY]: "Verifying",
+});
+
+/**
+ * The status-icon kind of a job's Downloads card (WP WEB-FEAT-6): a
+ * RUNNING PREFILL job shows `liveRunKind(game)` (running, updating or
+ * verify); every other job keeps {@link jobIconKind}.
+ * @param {{type: string, status: string}} job
+ * @param {object | null | undefined} game the app's `GET /v1/games` row
+ */
+export function activeJobKind(job, game) {
+  if (job.type === "prefill" && job.status === "running") return liveRunKind(game);
+  return jobIconKind(job);
+}
+
+/**
+ * The word next to {@link activeJobKind}'s icon: "Updating"/"Verifying"
+ * for the two derived kinds, otherwise {@link jobStatusWord}.
+ * @param {{type: string, status: string}} job
+ * @param {object | null | undefined} game
+ */
+export function activeJobWord(job, game) {
+  return RUN_KIND_WORD[activeJobKind(job, game)] || jobStatusWord(job);
 }

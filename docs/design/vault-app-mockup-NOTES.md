@@ -445,6 +445,11 @@ distinction (rotate vs. slide) is worth carrying because it answers "is this a n
 a patch?" at a glance. In the mockup this rides on a per-job `upd` flag set at enqueue
 time (`g.st` was stale/cached → update); the real app gets the same signal free from
 whether the app already had cached content when the job started.
+*(Real app, WP WEB-FEAT-6: the signal is the games row of the app with the running job —
+`last_prefill_at` set means a previous run completed, so the run is an update; with
+`needs_force` also set it is a forced re-run, shown as "Verifying". Both fields hold still
+for the whole run, unlike the cached byte count. The short "verifying cached chunks" phase
+after a resume is not shown: no API field marks its end.)*
 
 **Bulk actions never silently re-download a cached game (finding 2).** Multi-select now
 classifies the picked set by real cache state and targets only what needs bytes: fresh

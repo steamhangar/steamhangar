@@ -31,6 +31,17 @@ private val TRACKED_STATUSES = setOf("queued", "running", "paused")
 fun findTrackedJob(jobs: List<JobSummary>, appid: Int): JobSummary? =
     jobs.firstOrNull { it.appid == appid && it.type == "prefill" && it.status in TRACKED_STATUSES }
 
+/**
+ * The job that drives the detail HEADER's status icon and word (WP
+ * WEB-FEAT-6 review): [findTrackedJob] without a `queued` job. A queued job
+ * is not running yet, so it must not read Downloading/Updating/Verifying
+ * (`dispKind` maps every non-paused live job through `liveRunKind`); web's
+ * header uses `findLiveJob`, which excludes queued the same way. The
+ * action buttons keep [findTrackedJob] (Cancel on a queued job).
+ */
+fun headerLiveJob(jobs: List<JobSummary>, appid: Int): JobSummary? =
+    findTrackedJob(jobs, appid)?.takeIf { it.status != "queued" }
+
 enum class DetailJobAction { PAUSE, RESUME, CANCEL }
 
 /**

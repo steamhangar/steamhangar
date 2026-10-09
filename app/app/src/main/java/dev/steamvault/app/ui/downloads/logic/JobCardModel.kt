@@ -135,8 +135,9 @@ fun buildJobCardModel(
         jobId = job.id,
         appid = job.appid,
         name = nameFor(job.appid, gamesByAppid, ownedNames),
-        kind = StatusKind.fromWireName(jobIconKind(job)),
-        statusWord = jobStatusWord(job),
+        // WP WEB-FEAT-6: Downloading / Updating / Verifying from the games row.
+        kind = StatusKind.fromWireName(activeJobKind(job, gamesByAppid[job.appid])),
+        statusWord = activeJobWord(job, gamesByAppid[job.appid]),
         mode = mode,
         action = action,
     )

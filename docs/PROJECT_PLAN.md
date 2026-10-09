@@ -2857,6 +2857,9 @@ below carry their own later dates, item 12 is the current one).
       SteamPrefill 3.7.2 instead of 3.7.1 (upstream fix: a DLC depot that
       links to itself without a manifest no longer breaks a prefill);
       no setting, flag or file format changes.
+      WEB-FEAT-6: web and app show a running prefill of an already
+      completed game as "Updating" (turning arrows) and a forced re-run of
+      one as "Verifying", instead of "Downloading".
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
@@ -2870,10 +2873,17 @@ below carry their own later dates, item 12 is the current one).
       Done in HYG-1: new closing section "Real app: the download arrow
       falls through the badge", superseded markers on the three
       drift-and-fade passages.
-    - [ ] The update/verify spinner (`vault-turn`, status kinds
+    - [x] The update/verify spinner (`vault-turn`, status kinds
       `updating`/`verify`) exists but no view ever renders those kinds;
       decide whether a live update/verify state should be shown, or drop
-      the dead glyph.
+      the dead glyph. **WEB-FEAT-6** (user decision 2026-10-09: show it,
+      no API change): a `running` prefill job shows `updating` when the
+      app's games row has `last_prefill_at` set and `needs_force` false,
+      `verify` when `last_prefill_at` is set and `needs_force` true (a
+      `--force` run over a completed copy),
+      else `running` — in the library card, detail sheet and Downloads
+      card, web and Android. Not shown: the mockup's short "verifying"
+      phase at the start of a resumed run (no API field marks its end).
 
     **B2. Component versions and agent presence (user decisions
     2026-10-03, "Weg A1" and "Weg B")**

@@ -16,8 +16,25 @@ import dev.steamvault.app.ui.status.StatusKind
  * Reuses [StatusKind] (WP 4b.1's status-icon enum) rather than introducing
  * a parallel kind type the way the web `KIND` object does — this module
  * only ever returns [StatusKind.CACHED]/[StatusKind.NONE]/
- * [StatusKind.RUNNING]/[StatusKind.PAUSED]/[StatusKind.ERROR], the same
+ * [StatusKind.RUNNING]/[StatusKind.UPDATING]/[StatusKind.VERIFY]/
+ * [StatusKind.PAUSED]/[StatusKind.ERROR]/[StatusKind.NOTINUSE], the same
  * narrower set web/js/lib/game-status.js documents (no `stale` — see below).
+ *
+ * **Updating / Verifying (WP WEB-FEAT-6, user decision 2026-10-09).** The
+ * API has no `verify` job status and no live phase field, so both kinds are
+ * derived from the games row of an app whose prefill job is `running`
+ * ([liveRunKind], port of web `liveRunKind`, whose module header has the
+ * full reasoning): `last_prefill_at == null` -> RUNNING ("Downloading", a
+ * first fill or a refill after this app's own cache was deleted);
+ * `last_prefill_at` set and `needs_force` false -> UPDATING (a non-forced
+ * run over a completed copy); `last_prefill_at` set and `needs_force` true
+ * -> VERIFY (a `--force` run over a completed copy: SteamPrefill
+ * re-requests every chunk, cached ones come back as local HITs). Never
+ * `size_bytes`: it grows during a first fill, while the two fields used
+ * hold still for the whole run (written only at a successful finish).
+ * Cosmetic edge: the worker commits `last_prefill_at` just before it marks
+ * a successful job done, so for up to ~2 s (one poll) the end of a first
+ * fill may read Updating/Verifying.
  *
  * **Divergence 1 — no "stale" status, same as the web port.** `GameSummary`
  * (`net/model/Games.kt`) has no oracle/stale field folded in yet
@@ -168,12 +185,24 @@ fun isKnownToVault(game: GameSummary): Boolean =
     game.depot_count > 0 || game.last_prefill_at != null || game.status != "idle"
 
 /**
+ * Which kind a RUNNING prefill job for this app shows (WP WEB-FEAT-6, see
+ * the file kdoc): RUNNING, UPDATING or VERIFY. Shared by the library card,
+ * the detail sheet and the Downloads card (`activeJobKind` in
+ * `ui/downloads/logic/JobPartition.kt`). A missing games row (not polled
+ * yet) is RUNNING.
+ */
+fun liveRunKind(game: GameSummary?): StatusKind {
+    if (game == null || game.last_prefill_at == null) return StatusKind.RUNNING
+    return if (game.needs_force) StatusKind.VERIFY else StatusKind.UPDATING
+}
+
+/**
  * The status a card should SHOW: a live job overrides the cache state.
  * @param game GameSummary
  * @param liveJob from [indexLiveJobsByAppid], or `null`
  */
 fun dispKind(game: GameSummary, liveJob: JobSummary?): StatusKind {
-    if (liveJob != null) return if (liveJob.status == "paused") StatusKind.PAUSED else StatusKind.RUNNING
+    if (liveJob != null) return if (liveJob.status == "paused") StatusKind.PAUSED else liveRunKind(game)
     // WP API-FIX-4: before the error check, so old failed jobs for a tool
     // app never make its card red.
     if (isToolApp(game)) return StatusKind.NOTINUSE
