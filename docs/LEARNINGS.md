@@ -1018,7 +1018,7 @@ These are not style preferences; each entry cost a review round to learn.
   and Docker Hub's unauthenticated pull limit. Prove it by pushing
   unchanged main to a throwaway `wp/` branch; once it clears, one
   integration branch with all passed packages needs only one CI run.
-- `pwsh -WindowStyle Hidden` in a Scheduled Task with an Interactive
+- `powershell.exe -WindowStyle Hidden` in a Scheduled Task with an Interactive
   principal still flashes a console; `conhost.exe --headless` (Win10
   1809+, undocumented) is the launcher. Exit-code pass-through to
   LastTaskResult and ExecutionTimeLimit reaching the child chain are not
