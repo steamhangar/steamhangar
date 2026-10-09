@@ -2842,6 +2842,10 @@ below carry their own later dates, item 12 is the current one).
       `conhost.exe --headless` (direct `powershell.exe` action as before
       when `conhost.exe` is missing), logging unchanged. Existing installs
       keep the old action until `install-task.ps1` is re-run once.
+      DEPS-1 (release candidate after rc12): the vault-api image ships
+      SteamPrefill 3.7.2 instead of 3.7.1 (upstream fix: a DLC depot that
+      links to itself without a manifest no longer breaks a prefill);
+      no setting, flag or file format changes.
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
@@ -2993,9 +2997,12 @@ below carry their own later dates, item 12 is the current one).
     - [ ] verify-stack section 8: its `rootonly/` fixture cannot be
       removed by a non-root caller; clean it through a container like
       section 9 does.
-    - [ ] SteamPrefill 3.7.2 is out (bug fix for invalid depot links);
+    - [x] SteamPrefill 3.7.2 is out (bug fix for invalid depot links);
       bump the pin after re-checking `--max-threads` and the session file
-      format.
+      format. **DEPS-1** (2026-10-09): pinned in `api/Dockerfile`, sha256
+      matches GitHub's asset digest; the v3.7.1...v3.7.2 diff touches only
+      `DepotInfo.cs` and the version, the 3.7.2 binary prints the
+      `--max-threads` line, Config/ and cache file formats unchanged.
     - [ ] The `api` tests that read `api/vault_api/config.py` from web
       tests (`demo-data-config-defaults`, `demo-data-installed-on`) make
       partial web copies fail; document it in web/tests/README.md.

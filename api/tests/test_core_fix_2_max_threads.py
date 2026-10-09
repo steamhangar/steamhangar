@@ -60,10 +60,12 @@ DEPLOY_ENV_EXAMPLE = REPO_ROOT / "deploy" / ".env.example"
 #: 3.7.1: measured against the linux-x64 release binary (sha256 as pinned in
 #: api/Dockerfile): ``prefill --force --no-ansi --max-threads 8`` logs "Using
 #: --max-threads flag.  Will download using at most 8 threads" and then parses
-#: normally. 3.7.2 is NOT listed: its Program.cs still has the same
-#: ParseHiddenFlags block (source read), but no binary was run. Add a version
-#: here only after running it -- the image build probe does that for you.
-VERIFIED_MAX_THREADS_VERSIONS = ("3.7.1",)
+#: normally. 3.7.2 (WP DEPS-1, 2026-10-09): Program.cs is untouched by the
+#: v3.7.1...v3.7.2 diff, and the linux-x64 release binary (sha256 as pinned in
+#: api/Dockerfile) run as the build probe does, ``prefill --max-threads 3
+#: --help``, logs "Will download using at most 3 threads". Add a version here
+#: only after running it -- the image build probe does that for you.
+VERIFIED_MAX_THREADS_VERSIONS = ("3.7.1", "3.7.2")
 
 
 def _base_env(monkeypatch: pytest.MonkeyPatch) -> None:

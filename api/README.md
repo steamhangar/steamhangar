@@ -2988,7 +2988,7 @@ Pinned by `tests/test_depot_manifests.py::test_manifestid_stores_a_value_beyond_
 ### Coupling canary (research doc risk 6)
 
 Reading SteamPrefill's own temp-cache directory couples vault-api to its
-internal layout — version-pinned at 3.7.1 (same pin as the rest of the
+internal layout — version-pinned at 3.7.2 (same pin as the rest of the
 prefill orchestration, WP 1.4). `manifest_ingest.log_cache_dir_canary` runs
 once at startup (`main.py`'s lifespan, right after stale-job recovery) and
 logs a **WARNING, never a failure**, if `VAULT_STEAMPREFILL_CACHE_DIR` exists

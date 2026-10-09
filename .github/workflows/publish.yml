@@ -234,7 +234,7 @@ jobs:
             platforms: linux/amd64,linux/arm64
           # vault-api: NOT arm64-capable, and this is a Dockerfile fact, not
           # a CI choice. api/Dockerfile's "fetch SteamPrefill" stage
-          # hardcodes STEAMPREFILL_ARCHIVE=SteamPrefill-3.7.1-linux-x64.zip
+          # hardcodes STEAMPREFILL_ARCHIVE=SteamPrefill-3.7.2-linux-x64.zip
           # (an x86_64 self-contained .NET build) with a SHA-256 pinned to
           # exactly those bytes; upstream also publishes a linux-arm64.zip
           # under the same release (api/Dockerfile's own comment names all

@@ -351,7 +351,8 @@ def find_canary_mismatches(cache_dir: str) -> list[str]:
     as a real mismatch.
 
     Research doc risk 6: reading SteamPrefill's own temp-cache directory
-    couples vault-api to its internal layout, pinned to SteamPrefill 3.7.1.
+    couples vault-api to its internal layout, pinned to SteamPrefill 3.7.2
+    (layout unchanged from 3.7.1, WP DEPS-1).
     A future SteamPrefill release renaming or restructuring its manifest
     files would not break anything loudly — ``ingest_after_prefill`` just
     wouldn't match any files, warn-and-skip is the failure mode for a bad
@@ -406,6 +407,6 @@ def log_cache_dir_canary(cache_dir: str) -> None:
         "{manifestId}.bin' filename contract: %s%s. This is a coupling canary "
         "(docs/research/phase3-manifests.md risk 6), not a failure — "
         "vault-api's manifest ingestion is version-pinned to SteamPrefill "
-        "3.7.1's cache layout, and this may mean a different version changed it.",
+        "3.7.2's cache layout, and this may mean a different version changed it.",
         cache_dir, len(mismatches), shown, suffix,
     )

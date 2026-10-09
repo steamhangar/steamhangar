@@ -822,7 +822,7 @@ def test_api_dockerfile_bakes_steamprefill_version_from_the_one_global_arg() -> 
     froms = [i for i, line in enumerate(lines) if line.startswith("FROM ")]
     assert len(froms) == 2
     global_args = [line for line in lines[: froms[0]] if line.startswith("ARG ")]
-    assert global_args == ["ARG STEAMPREFILL_VERSION=3.7.1"]
+    assert global_args == ["ARG STEAMPREFILL_VERSION=3.7.2"]
     stage1 = lines[froms[0]: froms[1]]
     assert "ARG STEAMPREFILL_VERSION" in stage1
     final = lines[froms[1]:]

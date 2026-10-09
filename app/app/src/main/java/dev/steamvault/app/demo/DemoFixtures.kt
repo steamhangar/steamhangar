@@ -232,7 +232,7 @@ internal fun seedAbout(): AboutOut {
                     "so whether it is running now is not checked.",
             ),
             AboutComponentOut("vault-runner", "0.1.0", commit, "ok", checkedAt, "Last seen 12 s ago."),
-            AboutComponentOut("steamprefill", "3.7.1", null, "ok", checkedAt, "Runs in vault-runner; version as the runner reported it."),
+            AboutComponentOut("steamprefill", "3.7.2", null, "ok", checkedAt, "Runs in vault-runner; version as the runner reported it."),
             AboutComponentOut(
                 "vault-proxy", null, null, "ok", checkedAt,
                 "Answers, and refuses a host that is not on the egress allowlist. Its version is not shown: reading it would " +
