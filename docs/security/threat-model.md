@@ -237,7 +237,10 @@ ADR that describes it:
     has no header for a 508-style hop guard. The loop is bounded by
     `limit_conn`: 64 sessions per client address (a loop arrives from one
     address) and 256 in total, so the HTTP cache keeps half of the 1024
-    worker connections. It is bounded, not prevented.
+    worker connections. It is bounded, not prevented. These are the
+    defaults; since CORE-FIX-4d the operator can set them
+    (`VAULT_TLS_CLIENT_MAX_CONNS` up to 256, `VAULT_TLS_MAX_CONNS` up to
+    400, which leaves the HTTP cache less than half).
   - **No volume limit.** Nothing on 443 is cached or rate-capped
     (`VAULT_UPSTREAM_RATE` is HTTP only). A LAN device can push unlimited
     HTTPS bytes to and from Valve through the cache, up to 64 parallel

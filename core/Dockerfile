@@ -121,6 +121,27 @@ RUN set -eux; \
     nginx -V 2>&1 | grep -q -e '--with-stream '; \
     nginx -V 2>&1 | grep -q -e '--with-stream_ssl_preread_module'; \
     if nginx -V 2>&1 | grep -q -e '--with-stream=dynamic' -e '--with-stream_ssl_preread_module=dynamic'; then exit 1; fi; \
+    # WP CORE-FIX-4d: the passthrough caps render from the env (empty = the
+    # defaults 64/256, tuned values land on exactly their lines) and the
+    # fail-closed cases are refused, in this image's own shell, on a
+    # scratch copy of the template.
+    tls_check=/tmp/vault-tls-caps.build-check.conf; \
+    cp /etc/nginx/templates/nginx.conf.template "$tls_check"; \
+    VAULT_TLS_PASSTHROUGH=1 VAULT_TLS_CLIENT_MAX_CONNS= VAULT_TLS_MAX_CONNS= sh /docker-entrypoint.d/26-vault-tls-passthrough.sh "$tls_check" >/dev/null; \
+    [ "$(grep -c '^[[:space:]]*limit_conn vault_tls_client 64;$' "$tls_check")" = "1" ]; \
+    [ "$(grep -c '^[[:space:]]*limit_conn vault_tls_total[[:space:]]*256;$' "$tls_check")" = "1" ]; \
+    cp /etc/nginx/templates/nginx.conf.template "$tls_check"; \
+    VAULT_TLS_PASSTHROUGH=1 VAULT_TLS_CLIENT_MAX_CONNS=32 VAULT_TLS_MAX_CONNS=128 sh /docker-entrypoint.d/26-vault-tls-passthrough.sh "$tls_check" >/dev/null; \
+    [ "$(grep -c '^[[:space:]]*limit_conn vault_tls_client 32;$' "$tls_check")" = "1" ]; \
+    [ "$(grep -c '^[[:space:]]*limit_conn vault_tls_total[[:space:]]*128;$' "$tls_check")" = "1" ]; \
+    for bad in 'VAULT_TLS_CLIENT_MAX_CONNS=0' 'VAULT_TLS_CLIENT_MAX_CONNS=257' 'VAULT_TLS_CLIENT_MAX_CONNS=abc' \
+               'VAULT_TLS_MAX_CONNS=401' 'VAULT_TLS_MAX_CONNS=32'; do \
+        cp /etc/nginx/templates/nginx.conf.template "$tls_check"; \
+        if env VAULT_TLS_PASSTHROUGH=1 "$bad" sh /docker-entrypoint.d/26-vault-tls-passthrough.sh "$tls_check" >/dev/null 2>&1; then \
+            echo "BUILD CHECK FAILED: 26-vault-tls-passthrough.sh accepted $bad (CORE-FIX-4d)" >&2; exit 1; \
+        fi; \
+    done; \
+    rm -f "$tls_check"; \
     # WP CORE-FEAT-1b (ADR-0017): the keepalive pool include is wired in
     # exactly once; the hook's empty render equals the shipped native file
     # byte for byte; a full list (the ceiling, 4 edges) renders 4 groups with
@@ -258,6 +279,12 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     # off switch; must be >= VAULT_PREFILL_MAX_THREADS, empty = 8). Over the
     # cap the client gets 503. Rendered by the same hook.
     VAULT_UPSTREAM_MAX_CONNS=16 \
+    # WP CORE-FIX-4d (ADR-0021 addendum 2026-10-09): the passthrough's
+    # connection caps, rendered by 26-vault-tls-passthrough.sh. Per client address 1..256
+    # (empty = 64), in total 1..400 (empty = 256), client <= total; anything
+    # else refuses to boot.
+    VAULT_TLS_CLIENT_MAX_CONNS=64 \
+    VAULT_TLS_MAX_CONNS=256 \
     # WP CORE-FIX-3 (ADR-0020): HTTPS passthrough on port 443 for
     # *.steamcontent.com SNI names, TLS not terminated. DEFAULT ON (1);
     # 0/false/off/no removes the stream block at start

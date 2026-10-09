@@ -208,6 +208,15 @@ services:
       # "off" always needs an explicit 0. Whether the LAN can REACH it is
       # the separate VAULT_TLS_BIND below.
       VAULT_TLS_PASSTHROUGH: ${VAULT_TLS_PASSTHROUGH:-1}
+      # Connection caps of that passthrough (WP CORE-FIX-4d, ADR-0021
+      # addendum 2026-10-09): per client address 1..256 (empty/unset = 64)
+      # and in total 1..400 (empty/unset = 256), per-client <= total.
+      # Invalid values stop vault-core's boot (`26-vault-tls-passthrough.sh:
+      # FATAL`). Raise the per-client cap only after measuring: a client
+      # over it gets refused and retries at once. Same `-` form as
+      # VAULT_UPSTREAM_MAX_CONNS (blank = the hook's default).
+      VAULT_TLS_CLIENT_MAX_CONNS: ${VAULT_TLS_CLIENT_MAX_CONNS-}
+      VAULT_TLS_MAX_CONNS: ${VAULT_TLS_MAX_CONNS-}
       # Optional upstream keepalive pool (WP CORE-FEAT-1, ADR-0017,
       # core/README.md and deploy/README.md "Upstream keepalive pool").
       # Space-separated Steam CDN edge host names; vault-core renders one

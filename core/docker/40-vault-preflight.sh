@@ -208,7 +208,17 @@ log "upstream resolver (ADR-0001 req 4): $RESOLVER"
 # `proxy_protocol on;` ...). The rendered block, comments dropped and
 # whitespace collapsed, must equal this list with VAULT_RESOLVER filled in.
 # core/docker/check-config-drift.sh keeps this copy identical to its own.
+# CORE-FIX-4d: the two limit_conn values are filled in from
+# VAULT_TLS_CLIENT_MAX_CONNS / VAULT_TLS_MAX_CONNS (empty = 64 / 256), which
+# 26-vault-tls-passthrough.sh validated and rendered; a rendered value that
+# disagrees with the env shows up in the diff below.
 if [ "$TLS_MODE" = "on" ]; then
+    tls_client_cap="${VAULT_TLS_CLIENT_MAX_CONNS:-64}"
+    tls_total_cap="${VAULT_TLS_MAX_CONNS:-256}"
+    case "$tls_client_cap/$tls_total_cap" in
+        *[!0-9/]*|0*|*/0*|*/) die "VAULT_TLS_CLIENT_MAX_CONNS='$tls_client_cap' / VAULT_TLS_MAX_CONNS='$tls_total_cap'
+  are not whole numbers -- 26-vault-tls-passthrough.sh should have refused them. Refusing to start." ;;
+    esac
     tls_expected=$(cat <<'VAULT_TLS_STREAM_EOF'
 stream {
 resolver @RESOLVER@ ipv6=off valid=30s;
@@ -229,8 +239,8 @@ server {
 listen 443;
 ssl_preread on;
 preread_timeout 5s;
-limit_conn vault_tls_client 64;
-limit_conn vault_tls_total 256;
+limit_conn vault_tls_client @TLS_CLIENT@;
+limit_conn vault_tls_total @TLS_TOTAL@;
 proxy_connect_timeout 3s;
 proxy_next_upstream off;
 proxy_timeout 5m;
@@ -240,7 +250,8 @@ proxy_pass $vault_tls_upstream;
 VAULT_TLS_STREAM_EOF
 )
     resolver_norm=$(printf '%s' "$RESOLVER" | sed -e 's/[[:space:]][[:space:]]*/ /g')
-    tls_expected=$(printf '%s\n' "$tls_expected" | sed -e "s|@RESOLVER@|$resolver_norm|" -e "s|@ACCESS_LOG@|/dev/stdout|")
+    tls_expected=$(printf '%s\n' "$tls_expected" | sed -e "s|@RESOLVER@|$resolver_norm|" -e "s|@ACCESS_LOG@|/dev/stdout|" \
+        -e "s|@TLS_CLIENT@|$tls_client_cap|" -e "s|@TLS_TOTAL@|$tls_total_cap|")
     tls_rendered=$(printf '%s\n' "$CONF_DIRECTIVES" \
         | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$' | sed -e 's/[[:space:]][[:space:]]*/ /g' \
         | awk '$0 == "stream {" { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }')

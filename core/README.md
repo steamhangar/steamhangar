@@ -750,7 +750,7 @@ core/
     ├── nginx.conf.template          # what actually runs in the container
     ├── 21-vault-volume-ownership.sh # /vault, cache/, tmp/, logs/ root-only (SEC-FIX-5)
     ├── 25-vault-eventlog.sh         # VAULT_EVENT_LOG on/off + validation
-    ├── 26-vault-tls-passthrough.sh  # VAULT_TLS_PASSTHROUGH on/off (port 443)
+    ├── 26-vault-tls-passthrough.sh  # VAULT_TLS_PASSTHROUGH on/off + caps (port 443)
     ├── 27-vault-upstream-rate.sh    # VAULT_UPSTREAM_RATE(_WINDOW) -> rate include
     ├── 28-vault-upstream-pool.sh    # VAULT_UPSTREAM_EDGE/_MAX_CONNS/_POOL_HOSTS -> pool + cap includes
     ├── 29-vault-build-version.sh    # version file for vault-api's GET /v1/about
@@ -1146,6 +1146,30 @@ holds the upstream keepalive pool's at most 32 idle connections, ADR-0017,
 leaving at least 480 for live HTTP requests. `check-config-drift.sh` step 2f
 pins `worker_processes 1`, `worker_connections 1024` and this arithmetic).
 
+**Tuning the caps (WP CORE-FIX-4d, ADR-0021 addendum 2026-10-09).** Both
+numbers above are the defaults; in the container they are set by env and
+rendered at start by `26-vault-tls-passthrough.sh`:
+
+| Variable | Directive | Range | Empty / unset |
+|---|---|---|---|
+| `VAULT_TLS_CLIENT_MAX_CONNS` | `limit_conn vault_tls_client N;` (per client address) | 1..256 | 64 |
+| `VAULT_TLS_MAX_CONNS` | `limit_conn vault_tls_total N;` (all clients) | 1..400 | 256 |
+
+The per-client cap must not exceed the total. Anything else (non-integer,
+`0`, a leading zero, out of range) stops the boot with
+`26-vault-tls-passthrough.sh: FATAL` naming the variable; there is no off
+switch. The values are validated even with the passthrough off.
+`40-vault-preflight.sh` re-checks the rendered stream block against the
+env. Why tunable: a client over the per-client cap is refused with 503 and
+a Steam client retries at once, dozens of times per second; seen on a
+gateway as a "TCP SYN flood" from that one client. Measure before
+changing: `docker compose logs vault-core 2>&1 | grep -c ' tls client=.* status=503 '`
+counts the cap refusals. Above the default
+total of 256 the passthrough eats into the HTTP cache's half of the 1024
+worker connections: at the ceiling of 400 (800 connections) the HTTP side
+keeps 224, minus the upstream cap's 2C. Natively (`core/nginx/nginx.conf`)
+the defaults are literal; edit the two lines by hand there.
+
 **Log.** One line per connection, in the container on stdout next to the
 HTTP log (`docker compose logs vault-core`), natively in `logs/tls.log`:
 
@@ -1180,7 +1204,7 @@ reviewed two entries; and nowhere an `ssl_certificate`, `proxy_ssl*` or
   stream block (deleting them leaves the http block byte-identical).
 - `.github/scripts/verify-core-nginx.sh`: module check; on/off renders
   through the real entrypoint with `nginx -t`; 16 switch values (9 accepted
-  spellings, 7 refused); 10 preflight tamper cases
+  spellings, 7 refused); 11 preflight tamper cases
   (`.github/scripts/tls-preflight-tamper.cases`, including an added `set`,
   a server-level `resolver` and `proxy_protocol on`, caught by the exact
   stream-block pin); the loop probe's own-address branch with stubbed
@@ -1189,8 +1213,12 @@ reviewed two entries; and nowhere an `ssl_certificate`, `proxy_ssl*` or
   live listener, raw ClientHellos for every allowlist row above
   (`.github/scripts/tls-sni-probe.sh`: refused = empty target and no
   resolve/connect attempt in the error log; allowed = the name as target
-  and a resolve attempt), plain HTTP on 443, and the per-client cap (70
-  parallel idle connections, 6 refused with 503).
+  and a resolve attempt), plain HTTP on 443, and the per-client cap (cap + 6
+  parallel idle connections, at least 6 refused with 503; run at the
+  default 64 and at tuned caps 32/128).
+- `core/tests/test-tls-caps-hook.sh` (docker-free, CORE-FIX-4d): the cap
+  env through the real hook -- defaults, valid tuning, every refusal (the
+  config left untouched), and a template without the default line.
 - `deploy/tests/verify-stack.sh` step 3q (where 443 is published, per
   `.env` case), 5j (one real handshake through the cache to a Valve edge
   with certificate verification; off-list SNI and no SNI refused) and 7i

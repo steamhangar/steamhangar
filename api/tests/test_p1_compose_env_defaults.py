@@ -240,6 +240,11 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     # The `:-` form and the image/hook defaults are pinned in
     # test_core_fix_3_tls_passthrough.py.
     "VAULT_TLS_PASSTHROUGH": "1",
+    # WP CORE-FIX-4d (ADR-0021 addendum): the passthrough caps; blank = the
+    # hook's defaults 64/256 (26-vault-tls-passthrough.sh), `-` form pinned
+    # in UPSTREAM_EDGE_CORE_LINES below.
+    "VAULT_TLS_CLIENT_MAX_CONNS": "",
+    "VAULT_TLS_MAX_CONNS": "",
     # WP CORE-FEAT-1d (ADR-0017): the keepalive-pool edge list, same `-`
     # form as VAULT_UPSTREAM_RATE (blank passes through as "" = no pool).
     "VAULT_UPSTREAM_POOL_HOSTS": "",
@@ -787,6 +792,10 @@ UPSTREAM_EDGE_CORE_LINES = (
     "VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}",
     "VAULT_UPSTREAM_MAX_CONNS: ${VAULT_UPSTREAM_MAX_CONNS-}",
     "VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS:-8}",
+    # WP CORE-FIX-4d: blank and unset both mean the hook's default, so the
+    # form is not load-bearing; pinned like the upstream cap for consistency.
+    "VAULT_TLS_CLIENT_MAX_CONNS: ${VAULT_TLS_CLIENT_MAX_CONNS-}",
+    "VAULT_TLS_MAX_CONNS: ${VAULT_TLS_MAX_CONNS-}",
 )
 
 
@@ -822,6 +831,8 @@ def test_upstream_rate_window_follows_the_schedule_window_default(
         "VAULT_UPSTREAM_POOL_HOSTS",
         "VAULT_UPSTREAM_EDGE",
         "VAULT_UPSTREAM_MAX_CONNS",
+        "VAULT_TLS_CLIENT_MAX_CONNS",
+        "VAULT_TLS_MAX_CONNS",
     ),
 )
 def test_upstream_rate_vars_are_documented_in_env_example(env_var: str) -> None:
