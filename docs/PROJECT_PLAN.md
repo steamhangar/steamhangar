@@ -2836,7 +2836,12 @@ below carry their own later dates, item 12 is the current one).
       AGENT-FIX-2: a re-install keeps the key, client id and (when the
       registry has none) a working library root from `env.txt`; going back to the hostname-derived id
       needs uninstall + install; the registry SteamPath wins over an
-      earlier explicit `-LibraryRoot`.
+      earlier explicit `-LibraryRoot`. AGENT-FIX-3 (release candidate
+      after rc12): the Scheduled Task no longer flashes a console window
+      on every run; it launches `powershell.exe` through
+      `conhost.exe --headless` (direct `powershell.exe` action as before
+      when `conhost.exe` is missing), logging unchanged. Existing installs
+      keep the old action until `install-task.ps1` is re-run once.
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped

@@ -21,6 +21,9 @@
              steamapps\) > default, and only explicit/registry go to env.txt.
            - Get-RegistrySteamPath: never throws, whatever this host has.
            - Get-EnvFileValue: parses env.txt like run-vault-agent.ps1.
+           - Get-VaultTaskAction (WP AGENT-FIX-3): conhost --headless when
+             conhost.exe exists (injected path), else the direct
+             powershell.exe action.
          The registry itself is deliberately NOT faked: writing a temp HKCU
          subkey on a shared machine is not acceptable, so the lookup is
          split into "read the raw value" (only checked for not throwing)
@@ -94,7 +97,8 @@ try {
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($installScript, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw "install-task.ps1 does not parse: $($parseErrors[0].Message)" }
-    $wanted = @("Get-EnvFileValue", "Get-RegistrySteamPath", "ConvertTo-SteamLibraryRoot", "Resolve-LibraryRoot")
+    $wanted = @("Get-EnvFileValue", "Get-RegistrySteamPath", "ConvertTo-SteamLibraryRoot", "Resolve-LibraryRoot",
+        "Get-VaultTaskAction")
     $defs = @($ast.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
@@ -180,6 +184,37 @@ try {
     Check "env value: plain key" (Get-EnvFileValue -Path $envProbe -Key "VAULT_AGENT_SERVER_URL") "http://127.0.0.1:1"
     CheckTrue "env value: missing key -> null" ($null -eq (Get-EnvFileValue -Path $envProbe -Key "VAULT_AGENT_CLIENT_ID"))
     CheckTrue "env value: missing file -> null" ($null -eq (Get-EnvFileValue -Path (Join-Path $workDir "nope.txt") -Key "VAULT_AGENT_API_KEY"))
+
+    # 1e. Get-VaultTaskAction (WP AGENT-FIX-3). Paths with spaces on
+    # purpose; the conhost path is injected, so the result does not depend
+    # on this host.
+    $taPs = "C:\Win Dir\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $taRunner = "C:\Users\Some User\AppData\Local\VaultAgent\run-vault-agent.ps1"
+    $taAgent = "C:\Users\Some User\AppData\Local\VaultAgent\vault-agent.exe"
+    $taEnv = "C:\Users\Some User\AppData\Local\VaultAgent\env.txt"
+    $taLog = "C:\Users\Some User\AppData\Local\VaultAgent\vault-agent.log"
+    $taPsArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden " +
+        "-File `"$taRunner`" -AgentPath `"$taAgent`" -EnvFile `"$taEnv`" -LogFile `"$taLog`""
+    $fakeConhost = Join-Path $workDir "conhost dir\conhost.exe"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $fakeConhost) | Out-Null
+    Set-Content -LiteralPath $fakeConhost -Value "x" -Encoding ascii
+
+    $ta = Get-VaultTaskAction -PowerShellExe $taPs -RunnerPath $taRunner -AgentPath $taAgent `
+        -EnvFilePath $taEnv -LogFile $taLog -ConhostPath $fakeConhost
+    Check "conhost present: Execute is the conhost path" $ta.Execute $fakeConhost
+    CheckTrue "conhost present: Argument starts with --headless" ($ta.Argument.StartsWith("--headless "))
+    CheckTrue "conhost present: Argument has the quoted powershell.exe path" ($ta.Argument.Contains("`"$taPs`""))
+    CheckTrue "conhost present: Argument has -File and the quoted runner path" ($ta.Argument.Contains("-File `"$taRunner`""))
+    Check "conhost present: exact Argument" $ta.Argument ("--headless `"$taPs`" " + $taPsArgs)
+
+    $ta = Get-VaultTaskAction -PowerShellExe $taPs -RunnerPath $taRunner -AgentPath $taAgent `
+        -EnvFilePath $taEnv -LogFile $taLog -ConhostPath (Join-Path $workDir "missing\conhost.exe")
+    Check "conhost absent: Execute is powershell.exe (old action)" $ta.Execute $taPs
+    Check "conhost absent: Argument is the old argument line" $ta.Argument $taPsArgs
+
+    $ta = Get-VaultTaskAction -PowerShellExe $taPs -RunnerPath $taRunner -AgentPath $taAgent `
+        -EnvFilePath $taEnv -LogFile $taLog -ConhostPath ""
+    Check "no conhost path: Execute is powershell.exe (old action)" $ta.Execute $taPs
 
     # ---- fake agent .exe (used by 2 and 3) ------------------------------
     # A folder name with a space (review N4): the real default lives under

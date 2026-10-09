@@ -1556,10 +1556,24 @@ against the release's `SHA256SUMS`, same as for the `.exe` above. **The installe
 keeps working regardless of either setting:** `install-task.ps1`
 registers the action as `powershell.exe -NoProfile -NonInteractive
 -ExecutionPolicy Bypass -WindowStyle Hidden -File <ConfigDir>\run-vault-
-agent.ps1 ...` (see `$taskArgument` in the script), so the deployed copy
+agent.ps1 ...` (see `Get-VaultTaskAction` in the script), so the deployed copy
 of the wrapper runs under the same per-process bypass on every schedule,
 without you having to relax the user's or machine's policy. Use the same
 `-ExecutionPolicy Bypass -File` form for `uninstall-task.ps1`.
+
+**No console window (WP AGENT-FIX-3).** With the Interactive principal
+(next section) Windows opens a console window for `powershell.exe` before
+`-WindowStyle Hidden` can hide it, so every run flashed a window. The
+action therefore starts `%SystemRoot%\System32\conhost.exe` with
+`--headless "<path to powershell.exe>" <the arguments above>`: the
+headless console host creates no window. When `conhost.exe` is missing
+the installer falls back to the direct `powershell.exe` action. Logging
+is unchanged. **An existing install keeps its old action** (and the
+flash) until you run `install-task.ps1` once more; it updates the task
+in place (`Register-ScheduledTask -Force`) and keeps key, client id and
+library root (see the re-install notes). Check with
+`(Get-ScheduledTask -TaskName <name>).Actions[0].Execute`: it should end
+in `conhost.exe`.
 
 ### Why `-LogonType Interactive`, not S4U
 
@@ -1636,7 +1650,8 @@ old log once if that bothers you; the wrapper creates a new one on the
 next run.
 
 The Task Action's own command line therefore contains exactly three
-things: the path to `powershell.exe`, the path to the deployed
+things: the path to `powershell.exe` (plus `conhost.exe --headless` in
+front of it, AGENT-FIX-3), the path to the deployed
 `run-vault-agent.ps1`, and two **non-secret filesystem paths**
 (`-AgentPath`, `-EnvFile`) — never the key value itself. Verified directly
 in the real-machine harness run below (`Get-ScheduledTask`'s

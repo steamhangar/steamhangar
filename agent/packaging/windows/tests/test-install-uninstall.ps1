@@ -215,6 +215,14 @@ try {
     CheckTrue "action command line does not contain the API key" ($action.Arguments -notlike "*$ApiKeyValue*")
     CheckTrue "action command line references the wrapper script" ($action.Arguments -like "*run-vault-agent.ps1*")
     CheckTrue "action command line does not embed ServerUrl (paths only)" ($action.Arguments -notlike "*$ServerUrl*")
+    # WP AGENT-FIX-3: headless conhost launcher when conhost.exe exists.
+    $expectedConhost = Join-Path $env:SystemRoot "System32\conhost.exe"
+    if (Test-Path -LiteralPath $expectedConhost -PathType Leaf) {
+        Check "action runs via conhost.exe (no console window)" $action.Execute $expectedConhost
+        CheckTrue "action arguments start with --headless and name powershell.exe" ($action.Arguments -like "--headless *powershell.exe*")
+    } else {
+        CheckTrue "action runs powershell.exe directly (no conhost.exe on this host)" ($action.Execute -like "*powershell.exe")
+    }
 
     $trigger = $task.Triggers[0]
     Check "trigger repetition interval" $trigger.Repetition.Interval "PT30M"

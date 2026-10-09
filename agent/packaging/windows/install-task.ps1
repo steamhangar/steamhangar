@@ -349,6 +349,22 @@ function Resolve-LibraryRoot {
         SteamappsFound = $defaultFound; RegistryCandidate = $candidate }
 }
 
+function Get-VaultTaskAction {
+    # Execute + Argument of the Scheduled Task action (WP AGENT-FIX-3).
+    # With an Interactive principal Windows opens a console window before
+    # -WindowStyle Hidden takes effect; conhost --headless creates none.
+    # Falls back to the direct powershell.exe action when $ConhostPath
+    # is empty or missing.
+    param([string]$PowerShellExe, [string]$RunnerPath, [string]$AgentPath,
+        [string]$EnvFilePath, [string]$LogFile, [string]$ConhostPath)
+    $psArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden " +
+        "-File `"$RunnerPath`" -AgentPath `"$AgentPath`" -EnvFile `"$EnvFilePath`" -LogFile `"$LogFile`""
+    if ($ConhostPath -and (Test-Path -LiteralPath $ConhostPath -PathType Leaf)) {
+        return [PSCustomObject]@{ Execute = $ConhostPath; Argument = "--headless `"$PowerShellExe`" $psArgs" }
+    }
+    return [PSCustomObject]@{ Execute = $PowerShellExe; Argument = $psArgs }
+}
+
 # ---- validate inputs -------------------------------------------------
 #
 # NOTE: $ErrorActionPreference is deliberately left at its default
@@ -592,11 +608,12 @@ if ($PSCmdlet.ShouldProcess($runnerDestPath, "Deploy run-vault-agent.ps1")) {
 # ---- Scheduled Task ------------------------------------------------------
 
 $powershellExe = Join-Path $PSHOME "powershell.exe"
-$taskArgument = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden " +
-    "-File `"$runnerDestPath`" -AgentPath `"$AgentPath`" -EnvFile `"$envFilePath`" -LogFile `"$LogFile`""
+$conhostExe = Join-Path $env:SystemRoot "System32\conhost.exe"
+$taskAction = Get-VaultTaskAction -PowerShellExe $powershellExe -RunnerPath $runnerDestPath `
+    -AgentPath $AgentPath -EnvFilePath $envFilePath -LogFile $LogFile -ConhostPath $conhostExe
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Register/update Scheduled Task")) {
-    $action = New-ScheduledTaskAction -Execute $powershellExe -Argument $taskArgument
+    $action = New-ScheduledTaskAction -Execute $taskAction.Execute -Argument $taskAction.Argument
 
     $userId = "$env:USERDOMAIN\$env:USERNAME"
 
