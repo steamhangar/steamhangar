@@ -622,6 +622,9 @@ button.cappill:active{ transform:scale(.93); }
 .tx-cached{ color:var(--ok); } .tx-none{ color:var(--none); }
 .tx-running{ color:var(--run); } .tx-paused{ color:var(--run); } .tx-error{ color:var(--danger); }
 .tx-stale{ color:var(--stale); }
+/* WP WEB-FEAT-6: a running prefill over a completed copy (mockup colours:
+   updating shares --run, verify uses the accent like its icon disc). */
+.tx-updating{ color:var(--run); } .tx-verify{ color:var(--accent); }
 /* WP API-FIX-4: a Steam tool package (228980): shown, but muted. It is
    never downloaded on its own; its depots arrive with the games. */
 .tx-tool{ color:var(--dim-2); }

@@ -111,7 +111,9 @@ test("MUTATION TARGET -- buildCard: aria-label states BOTH facts for a running d
     // "Downloading", not "Not cached" — no collision risk, so the full
     // "Installed but not cached" phrasing must appear verbatim.
     const liveJob = { id: 1, appid: 2010010, type: "prefill", status: "running" };
-    const card = buildCard(game({ installed_on: installedOn(1), size_bytes: null, status: "idle" }), baseCtx({ liveJob }));
+    // last_prefill_at null: a first fill. With a completed copy the same
+    // job reads "Updating" (WP WEB-FEAT-6, update-verify.test.js).
+    const card = buildCard(game({ installed_on: installedOn(1), size_bytes: null, status: "idle", last_prefill_at: null }), baseCtx({ liveJob }));
     const label = card.getAttribute("aria-label");
     assert.match(label, /Downloading/);
     assert.match(label, /Installed but not cached · client-0/);

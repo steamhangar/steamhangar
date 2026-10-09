@@ -1,6 +1,8 @@
 package dev.steamvault.app.ui.downloads.logic
 
+import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.ui.library.logic.liveRunKind
 
 /**
  * Job partitioning + display wording for the Downloads screen (WP 4b.5) —
@@ -144,3 +146,25 @@ fun jobStatusWord(job: JobSummary): String {
     val table = if (job.type == "gc") GC_WORD else PREFILL_WORD
     return table[job.status] ?: job.status
 }
+
+/**
+ * The status-icon wire name of a job's Downloads card (WP WEB-FEAT-6, web
+ * `activeJobKind`): a RUNNING PREFILL job shows [liveRunKind] of the app's
+ * games row (running, updating or verify); every other job keeps
+ * [jobIconKind]. `verify` stays a display kind, never a status, so the
+ * partition above is unchanged.
+ */
+fun activeJobKind(job: JobSummary, game: GameSummary?): String =
+    if (job.type == "prefill" && job.status == "running") liveRunKind(game).wireName else jobIconKind(job)
+
+/** Web `RUN_KIND_WORD`: the words of the two derived kinds, equal to
+ * `status_updating`/`status_verify` and web STATUS_LABEL. */
+private val RUN_KIND_WORD = mapOf(
+    "updating" to "Updating",
+    "verify" to "Verifying",
+)
+
+/** The word next to [activeJobKind]'s icon (web `activeJobWord`):
+ * "Updating"/"Verifying" for the two derived kinds, else [jobStatusWord]. */
+fun activeJobWord(job: JobSummary, game: GameSummary?): String =
+    RUN_KIND_WORD[activeJobKind(job, game)] ?: jobStatusWord(job)

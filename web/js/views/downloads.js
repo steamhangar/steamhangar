@@ -71,6 +71,8 @@ import {
   queuePosition,
   jobIconKind,
   jobStatusWord,
+  activeJobKind,
+  activeJobWord,
 } from "../lib/job-partition.js";
 import { planJobsUpdate } from "../lib/downloads-render-plan.js";
 import { selectExcerptDisplay, EXCERPT_STATE } from "../lib/log-excerpt.js";
@@ -492,7 +494,10 @@ function buildJobCard(job, mode, gamesByAppid) {
   const card = document.createElement("div");
   card.className = "jobcard " + mode;
   card.dataset.jid = String(job.id);
-  card.dataset.dk = job.status;
+  // WP WEB-FEAT-6: the badge's kind (running/updating/verify/paused), read
+  // back by `jobCardKindsStale` when a games poll lands.
+  const kind = activeJobKind(job, gamesByAppid.get(job.appid));
+  card.dataset.dk = kind;
 
   const top = document.createElement("div");
   top.className = "jobtop";
@@ -507,7 +512,6 @@ function buildJobCard(job, mode, gamesByAppid) {
   sm.textContent = `job #${job.id} · appid ${job.appid}`;
   info.append(nm, sm);
 
-  const kind = jobIconKind(job);
   const badge = document.createElement("span");
   badge.className = "badge tx-" + kind;
   const badgeIcon = createStatusIcon(kind, { size: "sm" });
@@ -518,7 +522,7 @@ function buildJobCard(job, mode, gamesByAppid) {
   badgeIcon.setAttribute("aria-hidden", "true");
   badge.appendChild(badgeIcon);
   const word = document.createElement("span");
-  word.textContent = jobStatusWord(job);
+  word.textContent = activeJobWord(job, gamesByAppid.get(job.appid));
   badge.appendChild(word);
 
   top.append(info, badge);
@@ -1051,12 +1055,28 @@ store.subscribe("jobs", ({ items, diff }) => {
   }
 });
 
+/** WP WEB-FEAT-6: true when a job card's badge kind no longer matches its
+ * games row — the first games answer arriving after the first jobs paint
+ * (Downloading -> Updating), or `needs_force` changing mid-run. The badge
+ * kind is structural (its icon), so the caller rebuilds; a games poll that
+ * changes nothing here stays a name-only patch. */
+function jobCardKindsStale() {
+  if (!mounted()) return false;
+  const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
+  for (const card of els.section.querySelectorAll(".jobcard")) {
+    const job = state.jobs.find((j) => j.id === Number(card.dataset.jid));
+    if (job && card.dataset.dk !== activeJobKind(job, gamesByAppid.get(job.appid))) return true;
+  }
+  return false;
+}
+
 store.subscribe("games", ({ items }) => {
   if (!Array.isArray(items)) return;
   state.games = items;
   state.gamesKnown = true;
   if (mounted()) maybeLoadOwnedNames();
-  patchNames();
+  if (jobCardKindsStale()) fullRender();
+  else patchNames();
 });
 
 // WP WEB-FIX-4: an owned list that lands (from the Library or from this

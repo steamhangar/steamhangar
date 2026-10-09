@@ -3250,3 +3250,47 @@ CI-parsed fixture is regenerated. Mutations, both killed: a comment line
 back above `& {`; the prompt moved in front of the block.
 
 Suite: **1187 tests, 1187 pass, 0 fail**.
+
+### WP WEB-FEAT-6 — the Updating and Verifying states
+
+User decision 2026-10-09: show them. The API has no `verify` job status and
+no live phase field, so `lib/game-status.js`'s `liveRunKind` derives the
+kind of a RUNNING prefill job from the app's games row: `last_prefill_at`
+null -> `running` ("Downloading"); set with `needs_force` false ->
+`updating`; set with `needs_force` true -> `verify` ("Verifying"). Never
+from `size_bytes` (it grows during a first fill). `dispKind` uses it, so the
+library card and the detail-sheet header follow; `lib/job-partition.js`'s
+`activeJobKind`/`activeJobWord` give the Downloads Active card the same
+kind and word, and the Downloads games subscription rebuilds a job card
+whose kind changed (first games answer after the first jobs paint, or a
+`needs_force` flip) — an unchanged games poll stays a name-only patch.
+
+Tests: `update-verify.test.js` 20 (mapping, bytes ignored, paused/GC/queued
+boundaries, pause action kept, filters, the Downloads helpers and their
+words against STATUS_LABEL, the library card DOM — kind, word, colour
+class, both icons, the turning-arrows group — CSS colours, and the
+detail-sheet wiring by source scan), `downloads-update-verify.test.js` 2
+(gated games endpoint: Downloading -> Updating -> Verifying on the real
+store poll, marker attribute survives an unchanged poll; paused stays
+Paused). `game-card-installed.test.js`: the "running download, not cached"
+fixture now has `last_prefill_at: null` (it is a first fill; with a
+completed copy the same job now reads "Updating").
+
+Mutations, each alone, all killed: the games subscription never rebuilds
+(times out at "Downloading"); it always rebuilds (marker lost); the
+Downloads word back to `jobStatusWord`; `dispKind` back to plain
+`running` (4 fail); `liveRunKind` ignoring `needs_force` (6 fail).
+
+Suite: **1312 tests, 1312 pass, 0 fail**.
+
+#### Honest list
+
+- No browser run: the turning icon on a real Updating card was not looked
+  at, only its DOM and CSS.
+- The detail-sheet header is pinned by source scan, not by rendering the
+  sheet (its builder reads module state).
+- Known drift, by design of the API: a shared-depot or remnant delete of
+  ANOTHER app can set this app's `needs_force` mid-run, so a run that
+  started non-forced flips from "Updating" to "Verifying".
+- A resumed run shows its normal kind; the mockup's short "verifying
+  cached chunks" phase after a resume has no API signal.

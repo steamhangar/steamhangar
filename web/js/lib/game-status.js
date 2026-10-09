@@ -9,6 +9,37 @@
  * no fetch — so every branch is unit-testable headlessly
  * (web/tests/game-status.test.js).
  *
+ * **Updating / Verifying (WP WEB-FEAT-6, user decision 2026-10-09: show
+ * them).** The API has no `verify` job status and no live phase field
+ * (job statuses are exactly queued|running|paused|done|error|cancelled,
+ * api/vault_api/jobs.py), so both kinds are derived from the GAMES row of
+ * an app whose prefill job is `running` — see {@link liveRunKind}:
+ *   - `last_prefill_at == null` -> RUNNING ("Downloading"): the app never
+ *     finished a prefill, or its own cache was deleted since (DELETE
+ *     /v1/cache/{appid} nulls the field). A first fill or a refill.
+ *   - `last_prefill_at` set, `needs_force` false -> UPDATING ("Updating"):
+ *     a non-forced run over a copy that a previous run completed — the
+ *     cheap "is it current, fetch what changed" run (api/vault_api/
+ *     prefill.py, ADR-0006 decision 1). The mockup's `upd` flag ("the app
+ *     already had cached content when the job started").
+ *   - `last_prefill_at` set, `needs_force` true -> VERIFY ("Verifying"): a
+ *     `--force` run over a completed copy whose depots another deletion or
+ *     a GC touched. SteamPrefill re-requests EVERY chunk; the ones still
+ *     on disk come back as local HITs, missing ones are fetched — the
+ *     mockup's "re-verify" run.
+ * Why these two fields and not `size_bytes`: the decision must not be
+ * re-derived from live data (mockup NOTES round 6, item 5 — that is how
+ * fresh downloads leaked into "Updating"). `size_bytes` grows during a
+ * first fill (60 s size cache); `last_prefill_at` is written only at a
+ * successful finish, and the worker reads `needs_force` at job start and
+ * clears it only at a successful finish, so both hold still for the
+ * whole run. One known drift: a shared-depot or remnant delete of ANOTHER
+ * app may set this app's `needs_force` mid-run, turning "Updating" into
+ * "Verifying" although the run already started non-forced.
+ * Not shown: the mockup's short "verifying cached chunks" phase at the
+ * start of a resumed run. A resumed job is just `running` again; nothing
+ * in the API says when its replay of cached chunks ends.
+ *
  * **Divergence 1 — no "stale" status.** `web/js/notifications.js` already
  * documents this: `apps.status` is exactly `idle|running|done|error` (WP
  * 3.12, "apps.status gains none"); there is no manifest-oracle field folded
@@ -79,16 +110,19 @@
  * `statusIconKind`, and the word {@link TOOL_APP_STATE_WORD}), never
  * `error` — old failed jobs left `status: "error"` on its apps row, and
  * that must not paint the card red — and never a download/retry action.
- * A live job still wins (an honest "Downloading" for a job that was queued
- * before the upgrade). `installedBadgeState` never says "not cached" for it.
+ * A live job still wins (an honest "Downloading"/"Updating" for a job that
+ * was queued before the upgrade). `installedBadgeState` never says "not cached" for it.
  */
 
 /** Display-status kinds this module ever returns. Intentionally NOT the
- * mockup's full set (no "stale"/"updating"/"verify" — see module header). */
+ * mockup's full set (no "stale" — see module header). */
 export const KIND = Object.freeze({
   CACHED: "cached",
   NONE: "none",
   RUNNING: "running",
+  // WP WEB-FEAT-6: a running prefill over a completed copy (liveRunKind).
+  UPDATING: "updating",
+  VERIFY: "verify",
   PAUSED: "paused",
   ERROR: "error",
   // WP API-FIX-4: a Steam tool package (see module header). A DISPLAY kind
@@ -143,7 +177,9 @@ export function gameDisplayName(game) {
 
 /** Job statuses that occupy this app's card with a live indicator. Queued
  * jobs are deliberately excluded (mockup parity: `jobFor` only matches
- * running/paused/verify — a queued job shows in the Downloads FIFO queue,
+ * running/paused/verify; the real API has no `verify` status, WP
+ * WEB-FEAT-6 derives that kind from a running job instead — a queued job
+ * shows in the Downloads FIFO queue,
  * WP 4a.5, not on the Library card). GC jobs are excluded too: pause/resume
  * and the download pill are prefill-only concepts (api/README.md job
  * control table: pause on a GC job is `409`), so a GC job for this appid
@@ -293,12 +329,27 @@ export function installedSectionPresence(game) {
 }
 
 /**
+ * Which kind a RUNNING prefill job for this app shows (WP WEB-FEAT-6, see
+ * the module header for the mapping and why it reads only these two
+ * fields). Shared by the library card, the detail sheet and the Downloads
+ * view (lib/job-partition.js's `activeJobKind`), so the three never
+ * disagree about the same job.
+ * @param {{last_prefill_at?: string|null, needs_force?: boolean} | null | undefined} game
+ *   the app's `GET /v1/games` row; missing (not polled yet) -> RUNNING.
+ * @returns {string} KIND.RUNNING, KIND.UPDATING or KIND.VERIFY
+ */
+export function liveRunKind(game) {
+  if (!game || game.last_prefill_at == null) return KIND.RUNNING;
+  return game.needs_force === true ? KIND.VERIFY : KIND.UPDATING;
+}
+
+/**
  * The status a card should SHOW: a live job overrides the cache state.
  * @param {object} game GameSummary
  * @param {object|undefined} liveJob from indexLiveJobsByAppid, or undefined
  */
 export function dispKind(game, liveJob) {
-  if (liveJob) return liveJob.status === "paused" ? KIND.PAUSED : KIND.RUNNING;
+  if (liveJob) return liveJob.status === "paused" ? KIND.PAUSED : liveRunKind(game);
   // WP API-FIX-4: before the error check, so old failed jobs for a tool app
   // never make its card red.
   if (isToolApp(game)) return KIND.TOOL;
