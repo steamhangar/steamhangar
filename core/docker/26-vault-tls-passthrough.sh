@@ -41,6 +41,12 @@
 # validated in both modes, so a typo surfaces even while the passthrough
 # is off.
 #
+# The rewrite edits the rendered nginx.conf in place, so it relies on
+# 20-envsubst-on-templates.sh re-rendering the template on every start
+# (the same dependency as the OFF path's range delete); on a config that
+# was already rewritten the default line is gone and the hook dies
+# fail-closed instead of guessing.
+#
 # Optional argument: the config to edit (default /etc/nginx/nginx.conf),
 # so core/tests/test-tls-caps-hook.sh can run the hook without Docker.
 

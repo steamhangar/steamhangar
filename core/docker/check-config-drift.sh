@@ -644,15 +644,17 @@ esac
 # them, so they must agree -- and the arithmetic above holds for the
 # defaults. The env ceiling is allowed to eat into the HTTP half (an
 # operator decision, documented in core/README.md "Loop bound"), but even
-# at the ceiling the stream (2 x TLS_TOTAL_MAX) plus the upstream cap's 2C
-# must leave live HTTP connections: 1024 - 800 - 128 = 96 today.
+# at the ceiling the stream (2 x TLS_TOTAL_MAX), the upstream cap's 2C and
+# the legacy pool's idle ceiling (MAX_IDLE_TOTAL) must leave at least
+# HTTP_LIVE_MIN live HTTP connections: 1024 - 800 - 128 - 32 = 64 today.
+HTTP_LIVE_MIN=64
 TLS_HOOK="$core_dir/docker/26-vault-tls-passthrough.sh"
 hook_num() { sed -n "s/^$1=\([0-9][0-9]*\)\$/\1/p" "$TLS_HOOK" 2>/dev/null || true; }
 t_cd=$(hook_num TLS_CLIENT_DEFAULT); t_cm=$(hook_num TLS_CLIENT_MAX)
 t_td=$(hook_num TLS_TOTAL_DEFAULT); t_tm=$(hook_num TLS_TOTAL_MAX)
-case "$t_cd:$t_cm:$t_td:$t_tm:$wc_:$cap_max" in
+case "$t_cd:$t_cm:$t_td:$t_tm:$wc_:$cap_max:$pool_ceil" in
     *[!0-9:]*|:*|*::*|*:)
-        echo "check-config-drift: FAIL: need numeric TLS_CLIENT_DEFAULT/_MAX, TLS_TOTAL_DEFAULT/_MAX= (26-vault-tls-passthrough.sh), worker_connections and CAP_MAX for the passthrough budget; got '$t_cd' '$t_cm' '$t_td' '$t_tm' '$wc_' '$cap_max'" >&2
+        echo "check-config-drift: FAIL: need numeric TLS_CLIENT_DEFAULT/_MAX, TLS_TOTAL_DEFAULT/_MAX= (26-vault-tls-passthrough.sh), worker_connections, CAP_MAX and MAX_IDLE_TOTAL for the passthrough budget; got '$t_cd' '$t_cm' '$t_td' '$t_tm' '$wc_' '$cap_max' '$pool_ceil'" >&2
         fail=1 ;;
     *)
         if [ "$t_cd" != "64" ] || [ "$t_td" != "$TLS_TOTAL" ]; then
@@ -663,8 +665,8 @@ case "$t_cd:$t_cm:$t_td:$t_tm:$wc_:$cap_max" in
             echo "check-config-drift: FAIL: passthrough cap ranges inconsistent: client default $t_cd / max $t_cm, total default $t_td / max $t_tm" >&2
             fail=1
         fi
-        if [ $((wc_ - 2 * t_tm - 2 * cap_max)) -le 0 ]; then
-            echo "check-config-drift: FAIL: budget: at the env ceilings the passthrough ($((2 * t_tm)) connections) plus the upstream cap ($((2 * cap_max))) leave no worker connection for live HTTP requests (worker_connections $wc_)" >&2
+        if [ $((wc_ - 2 * t_tm - 2 * cap_max - pool_ceil)) -lt "$HTTP_LIVE_MIN" ]; then
+            echo "check-config-drift: FAIL: budget: at the env ceilings the passthrough ($((2 * t_tm)) connections), the upstream cap ($((2 * cap_max))) and the pool's idle ceiling ($pool_ceil) leave $((wc_ - 2 * t_tm - 2 * cap_max - pool_ceil)) of $wc_ worker connections for live HTTP requests, fewer than $HTTP_LIVE_MIN" >&2
             fail=1
         fi ;;
 esac

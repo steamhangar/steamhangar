@@ -1167,7 +1167,9 @@ changing: `docker compose logs vault-core 2>&1 | grep -c ' tls client=.* status=
 counts the cap refusals. Above the default
 total of 256 the passthrough eats into the HTTP cache's half of the 1024
 worker connections: at the ceiling of 400 (800 connections) the HTTP side
-keeps 224, minus the upstream cap's 2C. Natively (`core/nginx/nginx.conf`)
+keeps 224; minus the upstream cap's 2C (at most 128) and the pool's 32 idle
+connections that leaves 64 for live HTTP requests (`check-config-drift.sh`
+step 2f requires at least 64). Natively (`core/nginx/nginx.conf`)
 the defaults are literal; edit the two lines by hand there.
 
 **Log.** One line per connection, in the container on stdout next to the

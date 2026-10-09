@@ -597,10 +597,12 @@ the HTTP path's 2C) is unchanged and documented, not enforced.
 
 **Why 400.** Each passthrough session holds two of the single worker's
 1024 `worker_connections`. At 400 the stream takes 800, leaving 224 for
-the HTTP cache, of which the upstream cap needs at most 2 x 64. The
+the HTTP cache; the upstream cap needs at most 2 x 64 = 128 of those and
+the legacy pool's idle ceiling 32, so 64 stay for live HTTP requests. The
 default 256 keeps ADR-0020's half-and-half split, and
 `check-config-drift.sh` step 2f still pins that arithmetic for the
-defaults; for the ceiling it pins only that HTTP keeps some connections.
+defaults; for the ceiling it requires at least 64 live HTTP connections
+(`HTTP_LIVE_MIN`).
 Above 256 is an operator choice that trades HTTP headroom for 443 sessions.
 
 **Mechanism.** The two `limit_conn` lines stay literal (64/256) in
