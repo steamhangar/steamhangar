@@ -1003,3 +1003,34 @@ These are not style preferences; each entry cost a review round to learn.
   only a 404 means "server too old"; a 401 is always a bad or rotated
   key. A UI that reads 401 as "update the server" sends the operator to
   the wrong fix (WP WEB-FEAT-3).
+
+## 2026-10-09/10 — rc13 night run (CORE-FIX-4d, WEB-FEAT-6, DEPS-1, HYG-1, WEB-FIX-10, AGENT-FIX-3)
+
+- Parallel coders share one docker host: `deploy/tests/verify-stack.sh`
+  runs under a fixed compose project, so two concurrent `verify` runs
+  clobber each other. Every agent wraps every dev.sh call in one shared
+  `flock` lock file, and nobody edits worktree files while their verify
+  runs (a mid-run edit produced a bash syntax error and two false FAILs).
+- A red CI where only the docker jobs fail (`image / docker build *`,
+  `core / nginx -t`) on a package that touches none of them is usually
+  the runner's registry access: the check-run annotations endpoint
+  (readable without auth, unlike job logs) showed `auth.docker.io` 504
+  and Docker Hub's unauthenticated pull limit. Prove it by pushing
+  unchanged main to a throwaway `wp/` branch; once it clears, one
+  integration branch with all passed packages needs only one CI run.
+- `pwsh -WindowStyle Hidden` in a Scheduled Task with an Interactive
+  principal still flashes a console; `conhost.exe --headless` (Win10
+  1809+, undocumented) is the launcher. Exit-code pass-through to
+  LastTaskResult and ExecutionTimeLimit reaching the child chain are not
+  verified on a real PC yet (WP AGENT-FIX-3).
+- Without an API phase field, "Updating" and "Verifying" derive from
+  `last_prefill_at` and `needs_force` of a running prefill's app; queued
+  jobs must stay out of any header that shows a live kind (WP WEB-FEAT-6).
+- Steam's cover art for new apps needs a server-side
+  `IStoreBrowseService/GetItems` lookup (no CORS); that would send the
+  vault's appid list to Valve without a relay key, which the threat model
+  rules out. Such privacy questions go to the operator before the brief
+  (API-FIX-5 parked).
+- verify-stack step 10h (global cap, live) still flakes under load
+  despite 93542a1 (1 of 2 slow requests held after 15 s); a rerun was
+  green. Open follow-up.
