@@ -1,9 +1,14 @@
 package dev.steamvault.app.ui.detail.logic
 
+import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.ui.library.logic.dispKind
+import dev.steamvault.app.ui.status.StatusKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class DetailJobTest {
 
@@ -33,6 +38,38 @@ class DetailJobTest {
     fun `ignores a finished job and a job for a different app`() {
         assertNull(findTrackedJob(listOf(job(1, 440, "prefill", "done")), 440))
         assertNull(findTrackedJob(listOf(job(1, 730, "prefill", "running")), 440))
+    }
+
+    @Test
+    fun `MUTATION TARGET -- headerLiveJob drops a queued job, keeps running and paused`() {
+        assertNull(headerLiveJob(listOf(job(1, 440, "prefill", "queued")), 440))
+        assertEquals("running", headerLiveJob(listOf(job(1, 440, "prefill", "running")), 440)?.status)
+        assertEquals("paused", headerLiveJob(listOf(job(1, 440, "prefill", "paused")), 440)?.status)
+        assertNull(headerLiveJob(listOf(job(1, 440, "gc", "running")), 440))
+    }
+
+    @Test
+    fun `a queued job on a completed copy does not read Updating or Verifying in the header`() {
+        val queued = listOf(job(1, 440, "prefill", "queued"))
+        for (needsForce in listOf(false, true)) {
+            val game = GameSummary(
+                appid = 440, status = "done", last_prefill_at = "2026-10-09T08:00:00Z",
+                depot_count = 1, size_bytes = 5_000_000_000L, needs_force = needsForce,
+            )
+            assertEquals(StatusKind.CACHED, dispKind(game, headerLiveJob(queued, 440)))
+        }
+    }
+
+    @Test
+    fun `GameDetailSheet takes the header kind from headerLiveJob, the buttons from findTrackedJob`() {
+        val file = File("src/main/java/dev/steamvault/app/ui/detail/GameDetailSheet.kt")
+        check(file.exists()) { "expected a file at ${file.absolutePath}" }
+        val src = file.readText(Charsets.UTF_8)
+        assertTrue(
+            "header wiring: expected 'val liveJob = headerLiveJob(jobs, appid)' right before the dispKind call",
+            Regex("""val liveJob = headerLiveJob\(jobs, appid\)\s*\n\s*val kind = dispKind\(gameSummaryFrom\(detail\), liveJob\)""").containsMatchIn(src),
+        )
+        assertTrue("buttons still use findTrackedJob", src.contains("val trackedJob = findTrackedJob(jobs, appid)"))
     }
 
     @Test

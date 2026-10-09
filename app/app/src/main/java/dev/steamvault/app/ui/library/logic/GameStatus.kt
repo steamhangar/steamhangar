@@ -32,6 +32,9 @@ import dev.steamvault.app.ui.status.StatusKind
  * re-requests every chunk, cached ones come back as local HITs). Never
  * `size_bytes`: it grows during a first fill, while the two fields used
  * hold still for the whole run (written only at a successful finish).
+ * Cosmetic edge: the worker commits `last_prefill_at` just before it marks
+ * a successful job done, so for up to ~2 s (one poll) the end of a first
+ * fill may read Updating/Verifying.
  *
  * **Divergence 1 — no "stale" status, same as the web port.** `GameSummary`
  * (`net/model/Games.kt`) has no oracle/stale field folded in yet

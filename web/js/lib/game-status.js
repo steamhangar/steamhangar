@@ -35,7 +35,11 @@
  * clears it only at a successful finish, so both hold still for the
  * whole run. One known drift: a shared-depot or remnant delete of ANOTHER
  * app may set this app's `needs_force` mid-run, turning "Updating" into
- * "Verifying" although the run already started non-forced.
+ * "Verifying" although the run already started non-forced. A second,
+ * cosmetic one: at the very end of a successful first fill the worker
+ * commits `last_prefill_at` before it marks the job done
+ * (api/vault_api/worker.py, set_app_status before finish_job_and_notify),
+ * so for up to ~2 s (one poll) a first fill may read Updating/Verifying.
  * Not shown: the mockup's short "verifying cached chunks" phase at the
  * start of a resumed run. A resumed job is just `running` again; nothing
  * in the API says when its replay of cached chunks ends.

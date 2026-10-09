@@ -54,6 +54,7 @@ import dev.steamvault.app.ui.detail.logic.GcLogSummary
 import dev.steamvault.app.ui.detail.logic.buildDepotPresentation
 import dev.steamvault.app.ui.detail.logic.detailJobActions
 import dev.steamvault.app.ui.detail.logic.findTrackedJob
+import dev.steamvault.app.ui.detail.logic.headerLiveJob
 import dev.steamvault.app.ui.library.CoverArtImage
 import dev.steamvault.app.ui.library.installedBadgeText
 import dev.steamvault.app.ui.library.logic.InstalledBadge
@@ -282,7 +283,8 @@ private fun DetailHeader(appid: Int, name: String, detail: GameDetail?, jobs: Li
                 modifier = Modifier.semantics(mergeDescendants = true) { heading() },
             )
             if (detail != null) {
-                val liveJob = findTrackedJob(jobs, appid)
+                // WP WEB-FEAT-6 review: no queued job in the header state.
+                val liveJob = headerLiveJob(jobs, appid)
                 val kind = dispKind(gameSummaryFrom(detail), liveJob)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
