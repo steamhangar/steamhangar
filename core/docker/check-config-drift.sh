@@ -68,7 +68,10 @@
 #   2f. pin the worker connection budget both features are sized against:
 #      worker_processes 1 and worker_connections 1024 exactly, the stream
 #      total cap at 256 (2 x 256 = half of 1024), and the pool's idle
-#      ceiling (MAX_IDLE_TOTAL) fitting into the HTTP half with room left
+#      ceiling (MAX_IDLE_TOTAL) fitting into the HTTP half with room left;
+#      CORE-FIX-4d: the literal caps 64/256 equal 26-vault-tls-passthrough.sh's
+#      defaults, and its env ceilings (client 256, total 400) still leave
+#      the HTTP side live connections at the worst case
 #   3. diff. Any remaining difference fails with a unified diff.
 #
 # Usage:  sh core/docker/check-config-drift.sh   [from anywhere]
@@ -496,8 +499,11 @@ done
 # per-file deltas (4 and 7). 40-vault-preflight.sh carries the same list
 # for the rendered config at boot; the last check below keeps the two
 # copies identical.
+# CORE-FIX-4d: @TLS_CLIENT@/@TLS_TOTAL@ are the two passthrough caps --
+# the literal defaults 64/256 in both config files, the env values in the
+# container's rendered config (26-vault-tls-passthrough.sh rewrites them).
 expected_stream() {
-    cat <<'VAULT_TLS_STREAM_EOF' | sed -e "s|@RESOLVER@|$1|" -e "s|@ACCESS_LOG@|$2|"
+    cat <<'VAULT_TLS_STREAM_EOF' | sed -e "s|@RESOLVER@|$1|" -e "s|@ACCESS_LOG@|$2|" -e "s|@TLS_CLIENT@|$3|" -e "s|@TLS_TOTAL@|$4|"
 stream {
 resolver @RESOLVER@ ipv6=off valid=30s;
 resolver_timeout 5s;
@@ -517,8 +523,8 @@ server {
 listen 443;
 ssl_preread on;
 preread_timeout 5s;
-limit_conn vault_tls_client 64;
-limit_conn vault_tls_total 256;
+limit_conn vault_tls_client @TLS_CLIENT@;
+limit_conn vault_tls_total @TLS_TOTAL@;
 proxy_connect_timeout 3s;
 proxy_next_upstream off;
 proxy_timeout 5m;
@@ -527,8 +533,8 @@ proxy_pass $vault_tls_upstream;
 }
 VAULT_TLS_STREAM_EOF
 }
-expected_stream '1.1.1.1' 'logs/tls.log' > "$work/stream.expected.native"
-expected_stream '${VAULT_RESOLVER}' '/dev/stdout' > "$work/stream.expected.template"
+expected_stream '1.1.1.1' 'logs/tls.log' 64 256 > "$work/stream.expected.native"
+expected_stream '${VAULT_RESOLVER}' '/dev/stdout' 64 256 > "$work/stream.expected.template"
 for pair in "native:$work/native.norm" "template:$work/template.norm"; do
     which=${pair%%:*}; f=${pair#*:}
     top_block stream "$f" > "$work/stream.block"
@@ -540,7 +546,7 @@ for pair in "native:$work/native.norm" "template:$work/template.norm"; do
 done
 PREFLIGHT="$core_dir/docker/40-vault-preflight.sh"
 sed -n "/<<'VAULT_TLS_STREAM_EOF'\$/,/^VAULT_TLS_STREAM_EOF\$/p" "$PREFLIGHT" | sed '1d;$d' > "$work/stream.preflight"
-expected_stream '@RESOLVER@' '@ACCESS_LOG@' > "$work/stream.expected.raw"
+expected_stream '@RESOLVER@' '@ACCESS_LOG@' '@TLS_CLIENT@' '@TLS_TOTAL@' > "$work/stream.expected.raw"
 if ! diff -u "$work/stream.expected.raw" "$work/stream.preflight" > "$work/stream-pf.diff" 2>&1; then
     echo "check-config-drift: FAIL: 40-vault-preflight.sh's expected stream block differs from this script's (left = here, right = preflight):" >&2
     cat "$work/stream-pf.diff" >&2
@@ -627,6 +633,40 @@ case "$wc_:$cap_max" in
     *)
         if [ $((wc_ / 2 - 2 * cap_max)) -lt 256 ]; then
             echo "check-config-drift: FAIL: budget: the HTTP half of worker_connections ($((wc_ / 2))) minus 2 x CAP_MAX ($((2 * cap_max))) leaves fewer than 256 connections for live HTTP requests (ADR-0021)" >&2
+            fail=1
+        fi ;;
+esac
+
+# CORE-FIX-4d (ADR-0021 addendum 2026-10-09): the passthrough caps are
+# operator-tunable (VAULT_TLS_CLIENT_MAX_CONNS / VAULT_TLS_MAX_CONNS,
+# rendered by 26-vault-tls-passthrough.sh). The literal lines pinned above
+# are the hook's DEFAULTS -- the hook refuses to boot if it cannot find
+# them, so they must agree -- and the arithmetic above holds for the
+# defaults. The env ceiling is allowed to eat into the HTTP half (an
+# operator decision, documented in core/README.md "Loop bound"), but even
+# at the ceiling the stream (2 x TLS_TOTAL_MAX), the upstream cap's 2C and
+# the legacy pool's idle ceiling (MAX_IDLE_TOTAL) must leave at least
+# HTTP_LIVE_MIN live HTTP connections: 1024 - 800 - 128 - 32 = 64 today.
+HTTP_LIVE_MIN=64
+TLS_HOOK="$core_dir/docker/26-vault-tls-passthrough.sh"
+hook_num() { sed -n "s/^$1=\([0-9][0-9]*\)\$/\1/p" "$TLS_HOOK" 2>/dev/null || true; }
+t_cd=$(hook_num TLS_CLIENT_DEFAULT); t_cm=$(hook_num TLS_CLIENT_MAX)
+t_td=$(hook_num TLS_TOTAL_DEFAULT); t_tm=$(hook_num TLS_TOTAL_MAX)
+case "$t_cd:$t_cm:$t_td:$t_tm:$wc_:$cap_max:$pool_ceil" in
+    *[!0-9:]*|:*|*::*|*:)
+        echo "check-config-drift: FAIL: need numeric TLS_CLIENT_DEFAULT/_MAX, TLS_TOTAL_DEFAULT/_MAX= (26-vault-tls-passthrough.sh), worker_connections, CAP_MAX and MAX_IDLE_TOTAL for the passthrough budget; got '$t_cd' '$t_cm' '$t_td' '$t_tm' '$wc_' '$cap_max' '$pool_ceil'" >&2
+        fail=1 ;;
+    *)
+        if [ "$t_cd" != "64" ] || [ "$t_td" != "$TLS_TOTAL" ]; then
+            echo "check-config-drift: FAIL: 26-vault-tls-passthrough.sh's defaults ($t_cd/$t_td) are not the literal caps in both config files (64/$TLS_TOTAL) -- the hook would refuse to boot" >&2
+            fail=1
+        fi
+        if [ "$t_cd" -gt "$t_cm" ] || [ "$t_td" -gt "$t_tm" ] || [ "$t_cm" -gt "$t_tm" ]; then
+            echo "check-config-drift: FAIL: passthrough cap ranges inconsistent: client default $t_cd / max $t_cm, total default $t_td / max $t_tm" >&2
+            fail=1
+        fi
+        if [ $((wc_ - 2 * t_tm - 2 * cap_max - pool_ceil)) -lt "$HTTP_LIVE_MIN" ]; then
+            echo "check-config-drift: FAIL: budget: at the env ceilings the passthrough ($((2 * t_tm)) connections), the upstream cap ($((2 * cap_max))) and the pool's idle ceiling ($pool_ceil) leave $((wc_ - 2 * t_tm - 2 * cap_max - pool_ceil)) of $wc_ worker connections for live HTTP requests, fewer than $HTTP_LIVE_MIN" >&2
             fail=1
         fi ;;
 esac

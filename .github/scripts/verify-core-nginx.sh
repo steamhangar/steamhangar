@@ -60,6 +60,7 @@ for f in "$dockerfile" \
          "$core_dir/nginx/vault-upstream-pool.conf" \
          "$core_dir/nginx/vault-upstream-cap.conf" \
          "$core_dir/tests/test-upstream-pool-hook.sh" \
+         "$core_dir/tests/test-tls-caps-hook.sh" \
          "$core_dir/docker/29-vault-build-version.sh" \
          "$core_dir/tests/test-build-version-hook.sh" \
          "$core_dir/tests/build-version-race-rig.sh" \
@@ -100,6 +101,14 @@ sh "$core_dir/docker/check-config-drift.sh"
 # CORE-FEAT-1b2's job in the docker-based steps below.
 echo "--- core/tests/test-upstream-pool-hook.sh ---"
 bash "$core_dir/tests/test-upstream-pool-hook.sh"
+
+# --- 0b-tls. the HTTPS passthrough caps, docker-free (WP CORE-FIX-4d) -------
+# VAULT_TLS_CLIENT_MAX_CONNS / VAULT_TLS_MAX_CONNS through the real
+# 26-vault-tls-passthrough.sh against a copy of the template: defaults,
+# valid tuning, every refusal. nginx -t and the live cap: the tuned-caps
+# render_and_test scenario below.
+echo "--- core/tests/test-tls-caps-hook.sh ---"
+bash "$core_dir/tests/test-tls-caps-hook.sh"
 
 # --- 0b-ver. the build-version hook, docker-free (WP VER-2) -----------------
 # 29-vault-build-version.sh writes vault-core's version file for vault-api's
@@ -211,7 +220,7 @@ case "$nginx_v" in
         echo "FAIL: the stream modules are dynamic in $IMAGE; the config has no load_module" >&2; exit 1 ;;
 esac
 
-# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window] [VAULT_TLS_PASSTHROUGH, "" = unset] [VAULT_UPSTREAM_POOL_HOSTS] [volume layout: new|old]
+# render_and_test <label> <VAULT_EVENT_LOG value> <expected access_log/vault_event directive count> [probe-guards] [VAULT_UPSTREAM_RATE] [VAULT_UPSTREAM_RATE_WINDOW] [rate mode: off|cap|window] [VAULT_TLS_PASSTHROUGH, "" = unset] [VAULT_UPSTREAM_POOL_HOSTS] [volume layout: new|old] [passthrough caps "client:total", "" = unset = 64:256]
 #
 # A non-empty 4th argument additionally STARTS the rendered nginx and probes
 # the location /depot/ request guards over loopback (once is enough; the
@@ -253,9 +262,17 @@ esac
 render_and_test() {
     local label="$1" event_log="$2" expected_directives="$3"
     local rate="${5:-}" window="${6:-}" rate_mode="${7:-off}" tls="${8:-}" tls_mode=on
-    local pool="${9:-}" pool_n layout="${10:-new}"
+    local pool="${9:-}" pool_n layout="${10:-new}" tls_caps="${11:-}"
     local -a tls_args=()
     [ -n "$tls" ] && tls_args=(-e VAULT_TLS_PASSTHROUGH="$tls")
+    # Arg 11 (WP CORE-FIX-4d): the passthrough caps for this run; the
+    # rendered lines and the live per-client cap (tls-sni-probe.sh reads
+    # VAULT_TLS_CLIENT_MAX_CONNS) must follow them.
+    local tls_client=64 tls_total=256
+    if [ -n "$tls_caps" ]; then
+        tls_client=${tls_caps%%:*}; tls_total=${tls_caps##*:}
+        tls_args+=(-e VAULT_TLS_CLIENT_MAX_CONNS="$tls_client" -e VAULT_TLS_MAX_CONNS="$tls_total")
+    fi
     case "$tls" in 0|false|off|no) tls_mode=off ;; esac
     pool_n=$(printf '%s' "$pool" | wc -w | tr -d ' ')
     # SEC-FIX-1: the guard-probe run gets no network at all. Its Host-allowlist
@@ -268,7 +285,7 @@ render_and_test() {
     # a regression of that property.
     local -a net_args=()
     { [ -n "${4:-}" ] || [ -n "$pool" ]; } && net_args=(--network none)
-    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window', VAULT_TLS_PASSTHROUGH='${tls:-<unset>}', VAULT_UPSTREAM_POOL_HOSTS='$pool', layout $layout) ---"
+    echo "--- nginx -t: $label (VAULT_EVENT_LOG='$event_log', VAULT_UPSTREAM_RATE='$rate', VAULT_UPSTREAM_RATE_WINDOW='$window', VAULT_TLS_PASSTHROUGH='${tls:-<unset>}', VAULT_UPSTREAM_POOL_HOSTS='$pool', layout $layout, TLS caps $tls_client/$tls_total) ---"
     docker run --rm "${net_args[@]}" "${tls_args[@]}" "${CORE_CAP_ARGS[@]}" \
         -v "$core_dir/docker:/workspace/core-docker:ro" \
         -v "$script_dir:/workspace/ci:ro" \
@@ -283,6 +300,8 @@ render_and_test() {
         -e VAULT_UPSTREAM_RATE_WINDOW="$window" \
         -e RATE_MODE="$rate_mode" \
         -e TLS_MODE="$tls_mode" \
+        -e EXPECTED_TLS_CLIENT="$tls_client" \
+        -e EXPECTED_TLS_TOTAL="$tls_total" \
         -e VAULT_UPSTREAM_POOL_HOSTS="$pool" \
         -e EXPECTED_POOL_GROUPS="$pool_n" \
         -e LAYOUT="$layout" \
@@ -563,7 +582,8 @@ render_and_test() {
             tls_n() { printf "%s\n" "$directives" | grep -c -x -F -- "$1" || true; }
             if [ "$TLS_MODE" = "on" ]; then
                 for want in "stream {" "listen 443;" "ssl_preread on;" "proxy_next_upstream off;" \
-                            "proxy_pass \$vault_tls_upstream;" "access_log /dev/stdout vault_tls;"; do
+                            "proxy_pass \$vault_tls_upstream;" "access_log /dev/stdout vault_tls;" \
+                            "limit_conn vault_tls_client $EXPECTED_TLS_CLIENT;" "limit_conn vault_tls_total $EXPECTED_TLS_TOTAL;"; do
                     [ "$(tls_n "$want")" = "1" ] || { echo "FAIL (tls on): expected exactly 1 \"$want\" in the rendered $conf, found $(tls_n "$want")"; status=1; }
                 done
                 [ "$(tls_n "resolver 1.1.1.1 ipv6=off valid=30s;")" = "2" ] || { echo "FAIL (tls on): the stream block does not use VAULT_RESOLVER (expected 2 rendered resolver lines)"; status=1; }
@@ -943,6 +963,10 @@ render_and_test "upgrade from a 101-owned volume, event log ON" "/vault/logs/eve
 # WP CORE-FIX-3: the passthrough switched off, live (the runs above use the
 # default, on).
 render_and_test "HTTPS passthrough OFF" "" 0 probe-guards "" "" off 0
+# WP CORE-FIX-4d: operator-tuned passthrough caps render, pass nginx -t and
+# the preflight's exact stream block, and the per-client cap bites live at
+# the tuned value (tls-sni-probe.sh opens cap + 6 connections).
+render_and_test "HTTPS passthrough ON, tuned caps 32/128" "" 0 probe-guards "" "" off "" "" new "32:128"
 
 # WP TH-1a: the three upstream-cap render shapes (cap off is the two runs
 # above), each through the real entrypoint chain and nginx -t.
@@ -1428,7 +1452,7 @@ docker run --rm --network none \
                 status=1
             fi
         done < /workspace/ci/tls-preflight-tamper.cases
-        [ "$n" = "10" ] || { echo "FAIL: ran $n tamper cases, expected 10"; status=1; }
+        [ "$n" = "11" ] || { echo "FAIL: ran $n tamper cases, expected 11"; status=1; }
         exit $status
     '
 

@@ -8,3 +8,4 @@ TLS terminated|1|terminates TLS|/ssl_preread     on;/a ssl_certificate x.pem;
 extra set of the upstream variable|1|is not the reviewed directive list|/ssl_preread     on;/a set $vault_tls_upstream 10.0.0.1:22;
 server-level resolver|1|is not the reviewed directive list|/ssl_preread     on;/a resolver 10.0.0.53;
 proxy_protocol towards the upstream|1|is not the reviewed directive list|/ssl_preread     on;/a proxy_protocol on;
+per-client cap changed without the env (CORE-FIX-4d)|1|is not the reviewed directive list|s/limit_conn vault_tls_client 64;/limit_conn vault_tls_client 128;/

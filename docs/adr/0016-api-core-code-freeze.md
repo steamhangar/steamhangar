@@ -492,6 +492,21 @@ Not in this exception: api/ (no change; the event sweep already counts only
 except CORE-FIX-4d on its own line (`vault_tls_total` 256 -> 32,
 `vault_tls_client` 64 -> 16, droppable).
 
+## Addendum 2026-10-09 — CORE-FIX-4d in changed form: tunable passthrough caps
+
+User decision 2026-10-09 ("Weg A", ADR-0021 addendum 2026-10-09): the
+CORE-FIX-4d line of the addendum above (`vault_tls_total` 256 -> 32,
+`vault_tls_client` 64 -> 16) is replaced. The stream block's two
+`limit_conn` values become env-tunable (`VAULT_TLS_CLIENT_MAX_CONNS`,
+default 64, 1..256; `VAULT_TLS_MAX_CONNS`, default 256, 1..400), defaults
+unchanged. Scope, core/: `26-vault-tls-passthrough.sh` (validation and
+rendering), `40-vault-preflight.sh` (the expected stream block takes the
+env values), `check-config-drift.sh` step 2f, `core/Dockerfile` (ENV
+defaults, build checks), the new `core/tests/test-tls-caps-hook.sh`,
+`verify-core-nginx.sh`, `tls-sni-probe.sh` and the tamper cases. Both
+nginx configs are unchanged. Not frozen: compose forwarding,
+`.env.example`, `verify-stack.sh`, the READMEs; api/ only gains test pins.
+
 ## Addendum 2026-10-04 — freeze exception: pause a queued prefill job (WP WEB-FEAT-5 / API)
 
 User request, 2026-10-04: one Pause all / Resume all button on the

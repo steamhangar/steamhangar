@@ -595,7 +595,8 @@ to listen on port 80 only. Since WP CORE-FIX-3 (ADR-0020) it also listens on
 - **Every other name is closed at once:** another domain, the bare
   `steamcontent.com`, `evilsteamcontent.com`, `steamcontent.com.evil.example`,
   a trailing dot, or no name at all. It is not a general relay.
-- Each client address may hold at most 64 sessions, 256 in total.
+- Each client address may hold at most 64 sessions, 256 in total (the
+  defaults; tunable, see "Connection caps" below).
 
 **Turn it on for the LAN — required in DNS mode.** The listener is on by
 default (`VAULT_TLS_PASSTHROUGH=1`), but port 443 is published to the LAN
@@ -632,6 +633,30 @@ instead of starting anything.
 `docker compose up -d vault-core`. A blank value means the default (on),
 and any other value stops vault-core's boot. If you only want to keep it
 off the LAN, leaving `VAULT_TLS_BIND` unset is enough.
+
+**Connection caps (WP CORE-FIX-4d).** Optional, vault-core only; recreate
+it after a change (`docker compose up -d vault-core`):
+
+| Variable | Default (empty = default) | Range | Meaning |
+|---|---|---|---|
+| `VAULT_TLS_CLIENT_MAX_CONNS` | `64` | 1..256 | Concurrent 443 sessions per client address. Over it the connection is refused at once. |
+| `VAULT_TLS_MAX_CONNS` | `256` | 1..400 | Concurrent 443 sessions of all clients together. |
+
+The per-client cap must not exceed the total; any other value (not a whole
+number, `0`, a leading zero, out of range) stops vault-core's boot with
+`26-vault-tls-passthrough.sh: FATAL` naming the variable. A Steam client
+that holds many long-lived HTTPS sessions can hit the per-client cap; it
+then retries the refused connections at once, dozens per second, which a
+router may report as a "TCP SYN flood" from that client. Count the
+refusals before changing anything:
+
+```bash
+docker compose logs --no-log-prefix --since 1h vault-core 2>&1 | grep -c ' tls client=.* status=503 '
+```
+
+Raise `VAULT_TLS_CLIENT_MAX_CONNS` only if that count is high. Above `256`
+in total the passthrough takes worker connections from the HTTP cache on
+port 80 (each session uses two of 1024).
 
 **Check it.** Run these from a LAN machine, with your cache address and a
 real CDN name:
@@ -1862,6 +1887,8 @@ steamcontent.com` resolves to.
 | Prefills stall or fail with many errors; vault-core's log shows `connect() failed (113: Host is unreachable) while connecting to upstream` for Steam CDN addresses, single downloads work; your router may log an "ICMP flood" from your provider's gateway | your line is behind a carrier-grade NAT (DS-Lite, many fibre/cable/mobile lines) and a prefill used up its port mappings: every chunk vault-core fetches is a new upstream connection. Lower `VAULT_PREFILL_MAX_THREADS` in `.env` (default `8`; try `4`), then `docker compose up -d` to recreate vault-api and vault-runner. The job output starts with `Will download using at most N threads` when it took effect. Wait a few minutes before retrying so the NAT can expire old mappings. |
 | A prefill job fails with `HttpRequestException ... while downloading manifests`; your DNS rewrites `*.steamcontent.com` to the cache (for the runner too, e.g. via `dns:`) | SteamPrefill fetches manifests over HTTPS from those names, and port 443 on the rewritten address does not reach vault-core. Set `VAULT_TLS_BIND` to that address (and keep `VAULT_TLS_PASSTHROUGH` on), then `docker compose up -d vault-core`. See [Port 443](#port-443-the-https-passthrough). |
 | vault-core exits with `26-vault-tls-passthrough.sh: FATAL: VAULT_TLS_PASSTHROUGH=... is not one of ...` | the switch has a typo. Use `1`/`0` (or `true`/`false`, `on`/`off`, `yes`/`no`, lowercase). |
+| vault-core exits with `26-vault-tls-passthrough.sh: FATAL: VAULT_TLS_CLIENT_MAX_CONNS` or `VAULT_TLS_MAX_CONNS` | the cap is not a whole number in range (per client 1..256, total 1..400) or the per-client cap is above the total. The message names the value. Fix the line (blank = default 64/256), recreate vault-core. |
+| Many `tls client=... status=503` lines from one address in vault-core's log; the router logs a SYN flood from that client | the client hit `VAULT_TLS_CLIENT_MAX_CONNS` and retries at once. Raise the per-client cap (at most the total), recreate vault-core. See [Port 443](#port-443-the-https-passthrough). |
 | `up` fails with `... bind: address already in use` for port 443 | something else on the host owns 443 on the `VAULT_TLS_BIND` address. Use a dedicated address for vault-core (both `VAULT_CORE_BIND` and `VAULT_TLS_BIND`), or leave `VAULT_TLS_BIND` unset. |
 | A burst of `503` from vault-core on cache MISSes; `limiting connections by zone "vault_upstream_total"` in its log, `limit_conn=REJECTED` in the access log | the global cap is too low for the concurrent load (a Steam client plus a prefill). Raise `VAULT_UPSTREAM_MAX_CONNS` (max 64) or lower `VAULT_PREFILL_MAX_THREADS`, recreate vault-core. See ["Upstream edge and connection cap"](#upstream-edge-and-connection-cap). |
 | vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_EDGE` or `VAULT_UPSTREAM_MAX_CONNS` | the edge is not exactly one valid lowercase host name in `*.steamcontent.com` / `*.steamserver.net`, or the cap is not a whole number 1..64, or it is below `VAULT_PREFILL_MAX_THREADS`. The message names the value. Fix the line, recreate vault-core. |

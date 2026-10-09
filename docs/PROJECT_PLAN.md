@@ -2860,6 +2860,14 @@ below carry their own later dates, item 12 is the current one).
       WEB-FEAT-6: web and app show a running prefill of an already
       completed game as "Updating" (turning arrows) and a forced re-run of
       one as "Verifying", instead of "Downloading".
+      CORE-FIX-4d (release candidate after rc12): the HTTPS passthrough's
+      connection caps are tunable via `VAULT_TLS_CLIENT_MAX_CONNS` (per
+      client address, default 64, 1..256) and `VAULT_TLS_MAX_CONNS` (total,
+      default 256, 1..400, per-client <= total); defaults unchanged, an
+      invalid value stops vault-core's boot. A Steam client over the
+      per-client cap retries refused connections at once, which a gateway
+      may log as a SYN flood; count the `status=503` passthrough lines
+      before raising it.
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
@@ -3143,9 +3151,12 @@ below carry their own later dates, item 12 is the current one).
       package; the box stays open until 4b-4d are done.
       **Status:** 4a (core), 4b (live verify checks) and 4c (compose
       forwarding with edge mode on by default, `.env.example`, deploy and
-      core docs, release notes) are done; **4d (443 passthrough 32/16)
-      and the operator's post-rollout measurement are open**, so the box
-      stays unticked.
+      core docs, release notes) are done; 4d is done in changed form
+      (user decision 2026-10-09, "Weg A"): instead of lowering the 443
+      passthrough caps to 32/16 they are operator-tunable
+      (`VAULT_TLS_CLIENT_MAX_CONNS` default 64, `VAULT_TLS_MAX_CONNS`
+      default 256, ADR-0021 addendum 2026-10-09). **The operator's
+      post-rollout measurement is open**, so the box stays unticked.
     - [ ] **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
       2026-10-04: "the night check is no use if I come home at 17:00 and
       the update came during the day"). Today `schedule_window` is one

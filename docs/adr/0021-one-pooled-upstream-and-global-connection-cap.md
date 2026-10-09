@@ -200,6 +200,8 @@ with a constant key caps all MISSes at **C** in flight.
   current stream cap, each a new mapping, and the cap only meets the
   budget once CORE-FIX-4d lowers it to 32 total. Until 4d lands, the
   44 above covers the HTTP path alone and the 443 sessions come on top.
+  (2026-10-09: 4d did not lower it; the caps are tunable instead, see the
+  addendum at the end. The 443 sessions still come on top.)
 - **ASSUMPTIONS behind the 2C bound (not measured, to check after the
   rollout):** (a) the edge accepts about `keepalive_requests 1000`
   requests per connection before it closes it; a lower limit raises the
@@ -302,7 +304,8 @@ All six answered with the recommended option:
 4. **Status over the cap: 503** (nginx's default, set explicitly).
 5. **443 passthrough budget:** lower `limit_conn vault_tls_total` from 256
    to 32 and `vault_tls_client` from 64 to 16, as the separate, droppable
-   package CORE-FIX-4d (amends ADR-0020).
+   package CORE-FIX-4d (amends ADR-0020). **Superseded 2026-10-09** (see
+   the addendum at the end): parametrised, defaults stay 64/256.
 6. **Proof first:** done by the operator before any code; results below.
 7. **Timing: before `v0.1.0`** (user, 2026-10-04). This supersedes the
    earlier "known limitation in the release notes, fix after the tag"
@@ -506,7 +509,8 @@ Split for the ≤ 2 h rule, in this order:
     the stream block, except CORE-FIX-4d on its own line
     (`vault_tls_total` 256 -> 32, `vault_tls_client` 64 -> 16, droppable).
     Every other frozen-path change still needs its own decision."
-13. **CORE-FIX-4d (decision 5, separate and droppable).**
+13. **CORE-FIX-4d (decision 5, separate and droppable; built in changed
+    form, see the addendum 2026-10-09).**
     `limit_conn vault_tls_total` 256 → 32 and `limit_conn vault_tls_client`
     64 → 16 in both configs and wherever the pinned stream lists repeat
     them (grep `vault_tls_total`/`vault_tls_client` in `core/docker/`,
@@ -561,3 +565,55 @@ cached, and the forced prefill of app 275850.
   Rollback: set `VAULT_UPSTREAM_EDGE=` empty and recreate.
 - Not addressed: IPv6 egress (D4), DNS traffic, the CM/WebSocket traffic
   of clients, and other household devices' own use of the quota.
+
+## Addendum 2026-10-09 — decision 5 superseded: the passthrough caps are tunable (CORE-FIX-4d)
+
+**User decision 2026-10-09 ("Weg A").** CORE-FIX-4d does not lower the
+port 443 caps to 32/16. Both caps become operator-tunable env values; the
+defaults stay those of ADR-0020:
+
+| Variable | Directive | Default | Range |
+|---|---|---|---|
+| `VAULT_TLS_CLIENT_MAX_CONNS` | `limit_conn vault_tls_client` (per client address) | 64 | 1..256 |
+| `VAULT_TLS_MAX_CONNS` | `limit_conn vault_tls_total` (all clients) | 256 | 1..400 |
+
+The per-client cap must not exceed the total. Empty or unset = default;
+anything else that is not a whole number in range (`0`, a leading zero, a
+sign, a unit, a blank) stops the boot, fail-closed like
+`VAULT_UPSTREAM_MAX_CONNS`. There is no off switch.
+
+**Why.** On 2026-10-05 one Steam client held about 60 long-lived sessions
+on the passthrough. At the per-client cap further connects were refused
+(stream status 503, `session_time=0.000`) and the client retried at once,
+dozens of times per second. The site gateway logged this as a "TCP SYN
+flood" from that client address (159 events in about 2.5 hours) and the
+LAN stalled. Lowering the per-client cap to 16, as decision 5 planned,
+would make that retry storm start earlier, not stop it. Whether the cap or
+the gateway is the dominant limit, and how the Steam client reacts to a
+refused connect, is not measured; the operator tunes after measuring
+(count `tls client=... status=503` lines per address in vault-core's log).
+The CGNAT budget concern behind decision 5 (443 sessions come on top of
+the HTTP path's 2C) is unchanged and documented, not enforced.
+
+**Why 400.** Each passthrough session holds two of the single worker's
+1024 `worker_connections`. At 400 the stream takes 800, leaving 224 for
+the HTTP cache; the upstream cap needs at most 2 x 64 = 128 of those and
+the legacy pool's idle ceiling 32, so 64 stay for live HTTP requests. The
+default 256 keeps ADR-0020's half-and-half split, and
+`check-config-drift.sh` step 2f still pins that arithmetic for the
+defaults; for the ceiling it requires at least 64 live HTTP connections
+(`HTTP_LIVE_MIN`).
+Above 256 is an operator choice that trades HTTP headroom for 443 sessions.
+
+**Mechanism.** The two `limit_conn` lines stay literal (64/256) in
+`core/nginx/nginx.conf` and the template, so the drift check is
+unchanged. In the container `26-vault-tls-passthrough.sh` validates the
+env and rewrites exactly those two lines (it refuses to boot if either
+default line is missing); `40-vault-preflight.sh` fills the env values
+into its exact stream-block list and re-checks the rendered config.
+compose forwards both keys with the `-` form; the image ENV states the
+defaults. Tests: `core/tests/test-tls-caps-hook.sh` (docker-free),
+`verify-core-nginx.sh` (a tuned 32/128 render with the live per-client
+probe at the tuned value, one preflight tamper case), the image build
+checks, `verify-stack.sh` step 8f, and api pins for the compose lines and
+defaults.

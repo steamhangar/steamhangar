@@ -166,24 +166,32 @@ case "$line" in
 esac
 
 # --- the loop bound: per-client connection cap -------------------------------
-# 70 idle connections from one address (127.0.0.1), each holding its slot
-# until preread_timeout (5s) closes it. The per-client cap is 64, so at
-# least the excess must be refused by limit_conn (stream status 503) at
-# once -- the same thing that stops a resolver loop from eating every
-# worker connection.
+# cap + 6 idle connections from one address (127.0.0.1), each holding its
+# slot until preread_timeout (5s) closes it. The per-client cap is the
+# configured VAULT_TLS_CLIENT_MAX_CONNS (empty/unset = 64, the default,
+# WP CORE-FIX-4d), so at least the excess must be refused by limit_conn
+# (stream status 503) at once -- the same thing that stops a resolver loop
+# from eating every worker connection. The caller (verify-core-nginx.sh)
+# passes the same env the hook rendered, so a hook that ignored the value
+# fails here: at a tuned 32 a default 64 would refuse none of 38.
+cap="${VAULT_TLS_CLIENT_MAX_CONNS:-64}"
+case "$cap" in
+    ""|*[!0-9]*) echo "FAIL: per-client cap: VAULT_TLS_CLIENT_MAX_CONNS='$cap' is not a number"; exit 1 ;;
+esac
+n_conn=$((cap + 6))
 a0=$(wc -l < "$ACCESS")
 i=0
-while [ $i -lt 70 ]; do
+while [ $i -lt $n_conn ]; do
     ( sleep 7 | timeout 8 nc 127.0.0.1 443 >/dev/null 2>&1 ) &
     i=$((i + 1))
 done
 wait
 capped=$(tail -n +$((a0 + 1)) "$ACCESS" | grep ' tls client=' | grep -c ' status=503 ' || true)
 total=$(tail -n +$((a0 + 1)) "$ACCESS" | grep -c ' tls client=' || true)
-if [ "$capped" -ge 6 ] && [ "$total" = "70" ]; then
-    echo "tls guard OK: per-client cap -- $capped of 70 parallel connections refused with 503"
+if [ "$capped" -ge 6 ] && [ "$total" = "$n_conn" ]; then
+    echo "tls guard OK: per-client cap $cap -- $capped of $n_conn parallel connections refused with 503"
 else
-    echo "FAIL: per-client cap: $capped of $total logged connections refused with 503, expected >= 6 of 70"
+    echo "FAIL: per-client cap $cap: $capped of $total logged connections refused with 503, expected >= 6 of $n_conn"
     status=1
 fi
 

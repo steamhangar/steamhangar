@@ -188,3 +188,32 @@ def test_env_example_does_not_set_a_tls_bind_by_default() -> None:
     text = DEPLOY_ENV_EXAMPLE.read_text(encoding="utf-8")
     assert re.findall(r"^VAULT_TLS_BIND=.*$", text, re.MULTILINE) == []
     assert re.findall(r"^#VAULT_TLS_BIND=(.*)$", text, re.MULTILINE) == [""]
+
+
+# -- G7 (WP CORE-FIX-4d, ADR-0021 addendum 2026-10-09): the caps' defaults --
+# The passthrough caps are operator-tunable; their DEFAULTS stay 64/256 in
+# every place that states one. Literals on purpose (LEARNINGS: pins assert
+# literals, not values derived from the file under test).
+
+
+def test_hook_cap_defaults_and_ranges_are_the_reviewed_literals() -> None:
+    text = TLS_HOOK.read_text(encoding="utf-8")
+    found = dict(re.findall(r"^(TLS_(?:CLIENT|TOTAL)_(?:DEFAULT|MAX))=(\d+)$", text, re.MULTILINE))
+    assert found == {
+        "TLS_CLIENT_DEFAULT": "64",
+        "TLS_CLIENT_MAX": "256",
+        "TLS_TOTAL_DEFAULT": "256",
+        "TLS_TOTAL_MAX": "400",
+    }
+
+
+@pytest.mark.parametrize(("key", "default"), (("VAULT_TLS_CLIENT_MAX_CONNS", "64"), ("VAULT_TLS_MAX_CONNS", "256")))
+def test_image_env_cap_defaults(key: str, default: str) -> None:
+    text = CORE_DOCKERFILE.read_text(encoding="utf-8")
+    assert re.findall(rf"^\s*{key}=(\S*?)\s*\\?\s*$", text, re.MULTILINE) == [default]
+
+
+@pytest.mark.parametrize(("key", "default"), (("VAULT_TLS_CLIENT_MAX_CONNS", "64"), ("VAULT_TLS_MAX_CONNS", "256")))
+def test_env_example_documents_the_cap_defaults(key: str, default: str) -> None:
+    text = DEPLOY_ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert re.findall(rf"^#?{key}=(.*)$", text, re.MULTILINE) == [default]

@@ -34,7 +34,7 @@ set -u
 # subnet must come from the generated env file, never from the caller.
 # VAULT_RESOLVER (WP CORE-FEAT-1c): section 10 points it at a fake resolver
 # through the env file; a caller's export would win over that line.
-unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_UPSTREAM_EDGE VAULT_UPSTREAM_MAX_CONNS VAULT_PREFILL_MAX_THREADS VAULT_EGRESS_SUBNET VAULT_RESOLVER VAULT_TLS_PASSTHROUGH VAULT_TLS_BIND VAULT_TLS_PORT
+unset TZ VAULT_SCHEDULE_WINDOW VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_POOL_HOSTS VAULT_UPSTREAM_EDGE VAULT_UPSTREAM_MAX_CONNS VAULT_PREFILL_MAX_THREADS VAULT_EGRESS_SUBNET VAULT_RESOLVER VAULT_TLS_PASSTHROUGH VAULT_TLS_CLIENT_MAX_CONNS VAULT_TLS_MAX_CONNS VAULT_TLS_BIND VAULT_TLS_PORT
 
 # --- where things are --------------------------------------------------------
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -331,6 +331,9 @@ cp "$repo_root/core/docker/28-vault-upstream-pool.sh" "$work/drift/docker/28-vau
 cp "$repo_root/core/nginx/vault-upstream-pool.conf" "$work/drift/nginx/vault-upstream-pool.conf"
 # WP CORE-FIX-4a: and the native cap file (ADR-0021).
 cp "$repo_root/core/nginx/vault-upstream-cap.conf" "$work/drift/nginx/vault-upstream-cap.conf"
+# CORE-FIX-4d: step 2f reads the passthrough caps' defaults and ceilings
+# from 26-vault-tls-passthrough.sh.
+cp "$repo_root/core/docker/26-vault-tls-passthrough.sh" "$work/drift/docker/26-vault-tls-passthrough.sh"
 # The unmutated copy must pass first, else a later FAIL could stem from an
 # incomplete copy rather than from the injected difference.
 if sh "$work/drift/docker/check-config-drift.sh" >/dev/null 2>&1; then
@@ -2263,6 +2266,41 @@ if [ -f "$work/rootonly/logs/vault-core-version.json" ]; then
 else
     bad "8e: logs/vault-core-version.json missing in the rootonly bind"
 fi
+
+step "8f. WP CORE-FIX-4d: the HTTPS passthrough caps follow the env, and invalid caps stop the boot"
+say 'VAULT_TLS_CLIENT_MAX_CONNS / VAULT_TLS_MAX_CONNS (defaults 64/256) are'
+say 'rendered by 26-vault-tls-passthrough.sh and re-checked by the preflight.'
+say 'Through the REAL entrypoint chain of the built image: a tuned pair must'
+say 'reach the running config (nginx -T), the defaults must stay 64/256, and a'
+say 'zero, a non-number and a per-client cap above the total must each stop'
+say 'the boot in that hook. No network: nothing here needs one.'
+tlscap_conf() {
+    docker run --rm --network none -v "$PROJECT-scratch:/vault" "$@" \
+        "ghcr.io/steamhangar/vault-core:$TAG" nginx -T -p /vault -c /etc/nginx/nginx.conf 2>&1
+    echo "exit=$?"
+}
+tlscap_tuned=$(tlscap_conf -e VAULT_TLS_CLIENT_MAX_CONNS=32 -e VAULT_TLS_MAX_CONNS=128)
+printf '%s\n' "$tlscap_tuned" | grep -E 'limit_conn vault_tls|passthrough caps|FATAL|exit=' | sed 's/^/    /'
+assert_contains "$tlscap_tuned" "limit_conn vault_tls_client 32;" "VAULT_TLS_CLIENT_MAX_CONNS=32 reaches the rendered config"
+assert_contains "$tlscap_tuned" "limit_conn vault_tls_total  128;" "VAULT_TLS_MAX_CONNS=128 reaches the rendered config"
+assert_contains "$tlscap_tuned" "stream block matches the reviewed directive list" "...and the preflight accepts the tuned stream block"
+assert_contains "$tlscap_tuned" "exit=0" "...and nginx -T passes"
+tlscap_default=$(tlscap_conf)
+assert_contains "$tlscap_default" "limit_conn vault_tls_client 64;" "unset caps render the default 64 per client"
+assert_contains "$tlscap_default" "limit_conn vault_tls_total  256;" "...and the default 256 in total"
+# tlscap_refused <want fragment> <label> <docker -e args...>
+tlscap_refused() {
+    tlscap_want=$1; tlscap_label=$2; shift 2
+    tlscap_out=$(tlscap_conf "$@")
+    printf '%s\n' "$tlscap_out" | grep -E 'FATAL|exit=' | head -2 | sed 's/^/    /'
+    assert_contains "$tlscap_out" "26-vault-tls-passthrough.sh: FATAL: " "$tlscap_label is refused by the hook"
+    assert_contains "$tlscap_out" "$tlscap_want" "...naming the value"
+    assert_not_contains "$tlscap_out" "exit=0" "...and the boot stops"
+}
+tlscap_refused "VAULT_TLS_CLIENT_MAX_CONNS='0'" "VAULT_TLS_CLIENT_MAX_CONNS=0" -e VAULT_TLS_CLIENT_MAX_CONNS=0
+tlscap_refused "VAULT_TLS_MAX_CONNS='lots'" "VAULT_TLS_MAX_CONNS=lots" -e VAULT_TLS_MAX_CONNS=lots
+tlscap_refused "is above VAULT_TLS_MAX_CONNS=100" "per-client 200 above total 100" \
+    -e VAULT_TLS_CLIENT_MAX_CONNS=200 -e VAULT_TLS_MAX_CONNS=100
 
 # =============================================================================
 section "9. Dedicated cache mount: VAULT_CACHE_PATH bind mode, live (WP DEPLOY-FIX-3)"
