@@ -81,6 +81,17 @@ def make_junction(link: os.PathLike[str] | str, target: os.PathLike[str] | str) 
         pytest.skip(f"cannot create a junction here: {_mklink_output(result)}")
 
 
+@pytest.fixture(autouse=True)
+def _no_cover_art_lookup_in_tests(monkeypatch) -> None:
+    """WP API-FIX-5: a test that runs the lifespan starts the cover-art
+    refresher thread. Push its first tick an hour out, so no test ever calls
+    Steam for real; tests of the lookup drive ``refresh_once``/``tick``
+    directly with a fake fetch."""
+    from vault_api import cover_art
+
+    monkeypatch.setattr(cover_art, "INITIAL_DELAY_SECONDS", 3600.0)
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(

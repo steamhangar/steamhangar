@@ -264,7 +264,7 @@ def test_csp_has_no_unsafe_inline(client: TestClient) -> None:
     assert "'self'" in csp
 
 
-def test_csp_img_src_allows_self_data_and_exactly_the_steam_cdn_host(client: TestClient) -> None:
+def test_csp_img_src_allows_self_data_and_exactly_the_two_steam_asset_hosts(client: TestClient) -> None:
     # WP 4a.3: the Library view's cover art is the one deliberate CSP
     # extension over WP 4a.1's self-only baseline (web/js/lib/cover-art.js,
     # api/README.md "Security headers, including CSP"). Pin the exact
@@ -276,7 +276,12 @@ def test_csp_img_src_allows_self_data_and_exactly_the_steam_cdn_host(client: Tes
     directives = dict(
         part.strip().split(" ", 1) for part in csp.split(";") if part.strip()
     )
-    assert directives["img-src"] == "'self' data: https://cdn.akamai.steamstatic.com"
+    # WP API-FIX-5 adds exactly one more literal host for the hashed
+    # store-item cover art (vault_api/cover_art.py).
+    assert directives["img-src"] == (
+        "'self' data: https://cdn.akamai.steamstatic.com "
+        "https://shared.akamai.steamstatic.com"
+    )
 
 
 # ---------------------------------------------------------------------------

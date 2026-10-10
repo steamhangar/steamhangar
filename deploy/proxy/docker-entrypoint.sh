@@ -108,6 +108,10 @@ log "client allowlist rendered: Allow $egress_subnet (VAULT_EGRESS_SUBNET) + loo
 # turning the oracle on requires the operator to add it, or their own mirror,
 # to VAULT_EGRESS_ALLOW themselves, and vault-api refuses to boot if they
 # forget).
+# Since WP API-FIX-5 vault-api also calls this host on EVERY install, with no
+# key: the background cover-art lookup (IStoreBrowseService/GetItems,
+# api/vault_api/cover_art.py; threat-model §5 item 6; ADR-0011 addendum
+# 2026-10-10). Same host, so nothing here changed.
 BAKED_HOSTS="api.steampowered.com"
 
 # Turns "host.name" into the anchored, dot-escaped BRE pattern described

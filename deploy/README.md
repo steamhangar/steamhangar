@@ -1444,8 +1444,9 @@ it:
    receiver. It refuses every destination that is not in a filter file
    rendered from `VAULT_EGRESS_ALLOW` (`deploy/proxy/docker-entrypoint.sh`)
    plus one host baked into its image unconditionally: `api.steampowered.com`,
-   for the Steam Web API relay (see that script's own comment for why this
-   one host is not gated behind the variable).
+   for the Steam Web API relay and, since WP API-FIX-5, the always-on
+   cover-art lookup (see that script's own comment for why this one host is
+   not gated behind the variable).
 
 Nothing in `vault-api`'s own Python code changed to make this work — it
 never needed to. `steam_relay.py`, `oracle.py` and `webhooks.py` all use
@@ -1648,8 +1649,11 @@ Most home routers (or a managed switch with port mirroring / a `pfSense`/
 OPNsense box) can show live connections or a traffic log per internal IP.
 Find the Docker host's LAN IP and watch its connection log while triggering
 vault-api activity the same way as step 2 — you should see outbound
-connections only to the hosts you actually allowlisted (plus
-`api.steampowered.com` if the relay is configured), never to `vault-api`'s
+connections only to the hosts you actually allowlisted, plus
+`api.steampowered.com` — always, because vault-api looks up cover art there
+in the background on every install (WP API-FIX-5: the tracked app ids, no
+key; with no app tracked yet there is nothing to ask) and, if configured,
+for the Steam Web API relay — never to `vault-api`'s
 own outbound attempts directly (those never leave the Docker host's
 internal bridge at all, per step 1 — the router should not see them
 either way, which is itself a confirmation: if your router logs show

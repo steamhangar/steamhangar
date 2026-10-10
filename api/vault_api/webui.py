@@ -87,11 +87,21 @@ _ASSET_CACHE_CONTROL = "public, max-age=300, must-revalidate"
 #: no route to the host — a real homelab deployment) degrades to a styled
 #: fallback tile in JS, never a broken layout — the CSP addition only ever
 #: WIDENS what CAN load, it never becomes a hard dependency.
+#:
+#: **Second host (WP API-FIX-5): ``shared.akamai.steamstatic.com``.** Valve
+#: serves newer games' covers only under a hashed path on this host
+#: (``/store_item_assets/steam/apps/{appid}/{hash}/library_600x900.jpg``);
+#: the legacy path above answers 404 for them. vault-api looks the real URL
+#: up (``vault_api/cover_art.py``) and serves it as ``cover_url`` in
+#: ``GET /v1/games``; it only ever stores and serves https URLs on these two
+#: hosts, and ``web/js/lib/cover-art.js`` checks the same two hosts again
+#: before using one. Still no wildcard; exactly two literal hosts.
 _CSP = (
     "default-src 'self'; "
     "script-src 'self'; "
     "style-src 'self'; "
-    "img-src 'self' data: https://cdn.akamai.steamstatic.com; "
+    "img-src 'self' data: https://cdn.akamai.steamstatic.com "
+    "https://shared.akamai.steamstatic.com; "
     "font-src 'self'; "
     "connect-src 'self'; "
     "base-uri 'none'; "

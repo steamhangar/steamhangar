@@ -91,6 +91,20 @@ class GameCardModelTest {
     }
 
     @Test
+    fun `coverUrl uses the server cover_url when the row carries one (WP API-FIX-5)`() {
+        val url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/570/abc12345/library_600x900.jpg"
+        val model = buildGameCardModel(
+            runningGame(appid = 570).copy(cover_url = url), null, selected = false, selecting = false,
+        )
+        assertEquals(url, model.coverUrl)
+        val tampered = buildGameCardModel(
+            runningGame(appid = 570).copy(cover_url = "https://evil.example/x.jpg"),
+            null, selected = false, selecting = false,
+        )
+        assertEquals(coverArtUrl(570), tampered.coverUrl)
+    }
+
+    @Test
     fun `isKnownToVault is false for a synthetic Steam-only row`() {
         val synthetic = GameSummary(
             appid = 570,

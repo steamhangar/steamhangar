@@ -35,6 +35,10 @@ data class GameSummary(
     /** WP API-FIX-4: the tool package's display name, null for every
      * ordinary app. */
     val tool_app_name: String? = null,
+    /** WP API-FIX-5: the real portrait cover from Steam's store item lookup
+     * (`api/vault_api/cover_art.py`), null while unknown. Defaulted: older
+     * servers send none. Checked again by `serverCoverUrl` before use. */
+    val cover_url: String? = null,
 )
 
 /** One entry of [GameDetail.depots] — `vault_api/routers/games.py::DepotEntry`. */
@@ -77,4 +81,6 @@ data class GameDetail(
     val tool_app: Boolean = false,
     /** See [GameSummary.tool_app_name] (WP API-FIX-4). */
     val tool_app_name: String? = null,
+    /** See [GameSummary.cover_url] (WP API-FIX-5). */
+    val cover_url: String? = null,
 )

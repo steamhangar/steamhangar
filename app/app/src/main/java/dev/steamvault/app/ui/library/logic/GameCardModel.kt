@@ -110,7 +110,7 @@ fun buildGameCardModel(
         name = gameDisplayName(game),
         kind = kind,
         sizeLabel = formatBytesGB(game.size_bytes),
-        coverUrl = coverArtUrl(game.appid),
+        coverUrl = coverArtUrl(game.appid, game.cover_url),
         fallbackHues = fallbackHues(game.appid),
         fallbackPattern = fallbackPattern(game.appid),
         action = statusAction(game, liveJob, selecting),

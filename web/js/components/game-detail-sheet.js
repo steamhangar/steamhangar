@@ -519,7 +519,7 @@ function confirmedCurrentText(lastPrefillAt, lastManifestCheck) {
   return `Confirmed current at ${when}.`;
 }
 
-function buildMiniCover(appid) {
+function buildMiniCover(appid, coverUrl) {
   const { h1, h2 } = fallbackHues(appid);
   const cap = document.createElement("div");
   cap.className = "cap";
@@ -531,7 +531,7 @@ function buildMiniCover(appid) {
   img.loading = "lazy";
   img.decoding = "async";
   img.addEventListener("error", () => img.remove(), { once: true });
-  img.src = coverArtUrl(appid);
+  img.src = coverArtUrl(appid, coverUrl);
   cap.appendChild(img);
   return cap;
 }
@@ -539,7 +539,8 @@ function buildMiniCover(appid) {
 function buildHeader(gameLike, liveJob) {
   const dhead = document.createElement("div");
   dhead.className = "dhead";
-  dhead.appendChild(buildMiniCover(state.appid));
+  // WP API-FIX-5: the detail's server-resolved cover, else the list row's.
+  dhead.appendChild(buildMiniCover(state.appid, state.detail?.cover_url ?? gameLike?.cover_url));
 
   const info = document.createElement("div");
   const h2 = document.createElement("h2");

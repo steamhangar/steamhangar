@@ -1180,6 +1180,9 @@ function gameSummary(g) {
     // tool app (the demo library is owned games only), so always false/null.
     tool_app: false,
     tool_app_name: null,
+    // WP API-FIX-5: additive on both game shapes. The demo has no server
+    // lookup, so every demo game uses the legacy cover path.
+    cover_url: null,
   };
 }
 
@@ -1203,6 +1206,7 @@ function gameDetail(g) {
     installed_on: g.installed_on.map((e) => ({ ...e })), // WP AG-2 (see gameSummary's own comment)
     tool_app: false, // WP API-FIX-4 (see gameSummary's own comment)
     tool_app_name: null,
+    cover_url: null, // WP API-FIX-5 (see gameSummary's own comment)
   };
 }
 

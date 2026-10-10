@@ -820,7 +820,9 @@ this section previously listed three exceptions, then five (the two
 Android items had been named individually in §3/§4 but left out of this
 inventory, corrected by WP 5.3-fix), and now nets to four live ones once
 WP 4h.4 closed item 4 — some opt-in, some structural design decisions,
-none of them Steam credentials (§3):
+none of them Steam credentials (§3). **WP API-FIX-5 (2026-10-10) adds a
+fifth live exception, item 6: the cover-art lookup, the only one of them
+that vault-api makes on every install with no switch:**
 
 1. **The Steam Web API relay (§3, §4).** ADR-0004's addendum states the
    obligation directly: "SECURITY.md documents the added data path: with
@@ -888,9 +890,11 @@ none of them Steam credentials (§3):
    `api.steamcmd.net`, or an operator's own private mirror) missing from
    that allowlist, rather than booting clean and failing every query
    forever with a filtered-403 and no obvious cause (ADR-0011 §3).
-3. **Cover art.** The web UI's Content-Security-Policy allows exactly one
-   external image host: `img-src 'self' data: https://cdn.akamai.
-   steamstatic.com` (`api/vault_api/webui.py::_CSP`). A browser fetches real Steam art directly from that CDN, by
+3. **Cover art.** The web UI's Content-Security-Policy allows exactly two
+   external image hosts: `img-src 'self' data: https://cdn.akamai.
+   steamstatic.com https://shared.akamai.steamstatic.com`
+   (`api/vault_api/webui.py::_CSP`; the second host since WP API-FIX-5,
+   for the hashed store-item covers vault-api looks up — item 6). A browser fetches real Steam art directly from that CDN, by
    appid, from three surfaces: the library grid's capsule art, the detail
    card's mini-cover (WP 4a.4), and the detail card's header art (WP 4h.3
    — one additional request per opened detail, same host, same data
@@ -946,8 +950,32 @@ none of them Steam credentials (§3):
    reasoning as item 3's: this call originates from the Android device
    itself, never from inside `vault-api`'s container, so a lock scoped to
    that one container's own network egress has nothing to do with it.
+6. **The cover-art lookup, from vault-api to Valve — always on (WP
+   API-FIX-5, user decision 2026-10-10 "Weg B").** `api/vault_api/
+   cover_art.py` runs a background thread on every install, with no
+   setting to turn it off, that calls
+   `GET https://api.steampowered.com/IStoreBrowseService/GetItems/v1/`
+   with one `input_json` parameter: up to 50 tracked app ids per call, a
+   fixed store context (`english`/`US`) and `include_assets`. No Steam Web
+   API key, no SteamID64, no client id, no vault-api secret. What Valve
+   learns: which app ids this vault tracks (every row in `apps`, except
+   Steam tool packages), from the server's public address, re-asked about
+   every 30 days per app (7 days for an app without a cover). Same data
+   class as item 3's browser image requests, but from the server and for the
+   whole tracked set rather than what a browser happens to display, and
+   unlike items 1 and 2 not opt-in. The answer is hostile input: bounded,
+   parsed defensively, and only an https URL on
+   `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com` is
+   stored or served (`cover_art.valid_cover_url`, re-checked on read; the
+   web and Android clients check the same two hosts again).
+   **Enforcement (WP EG-1):** proxy-gated through vault-proxy over
+   `HTTPS_PROXY`, via the same `steam_relay.http_fetch` (host pinned, HTTPS
+   only, no redirects) as item 1; `api.steampowered.com` was already baked
+   into vault-proxy's image, so no allowlist changed (ADR-0011 addendum
+   2026-10-10). An operator who wants no call at all has to block that host
+   outside the stack; covers then keep the legacy CDN path.
 
-Beyond the two core flows named above and the four live exceptions just
+Beyond the two core flows named above and the five live exceptions just
 listed (plus the one now-closed historical exception, item 4), nothing
 else in this repository makes an outbound network call as shipped:
 agent reports and Android/web-to-API traffic stay LAN-internal by design

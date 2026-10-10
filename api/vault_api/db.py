@@ -185,7 +185,12 @@ import sqlite3
 #: one-shot run that was not told its interval), and the presence rule then
 #: assumes 30 minutes. Same not-expressible-as-``CREATE TABLE IF NOT EXISTS``
 #: situation as v9, so it reuses ``_add_missing_agent_report_columns``.
-SCHEMA_VERSION = 17
+#: v18 (WP API-FIX-5, ADR-0016 addendum): added ``app_cover_art`` -- one row
+#: per app the cover-art lookup (``vault_api/cover_art.py``) has asked Steam
+#: about: the validated cover URL (or NULL), the outcome, consecutive failed
+#: attempts and when to ask again. A brand-new table, so -- like v6/v9/v13/v16
+#: -- it needs no ``ALTER`` step; ``apps`` itself is untouched.
+SCHEMA_VERSION = 18
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -645,6 +650,29 @@ CREATE TABLE IF NOT EXISTS settings (
 -- steamprefill_version: a valid value, 'invalid', or NULL for "not baked"),
 -- and vault-api validates them again on read. Timestamps use the one UTC
 -- format of this database (jobs.TIMESTAMP_FORMAT).
+-- WP API-FIX-5 (schema v18): real cover art per app, from Steam's store item
+-- lookup (IStoreBrowseService/GetItems on api.steampowered.com, no key).
+-- Written only by vault_api/cover_art.py's background refresher; read by
+-- GET /v1/games[/{appid}] as `cover_url`. `cover_url` is NULL unless it passed
+-- cover_art.valid_cover_url (https on shared.akamai.steamstatic.com or
+-- cdn.akamai.steamstatic.com), and it is validated again on read.
+-- `outcome` is 'found', 'none' (Steam has no cover for it) or 'failed' (the
+-- lookup itself failed; a URL found earlier is kept). `attempts` counts
+-- consecutive failures and drives the backoff; `next_check_at` (UTC, the one
+-- timestamp format of this database) is when the refresher asks again.
+-- No foreign key: an app row is never deleted, and a stray row is harmless.
+CREATE TABLE IF NOT EXISTS app_cover_art (
+    appid         INTEGER PRIMARY KEY,
+    cover_url     TEXT,
+    outcome       TEXT NOT NULL,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    checked_at    TEXT NOT NULL,
+    next_check_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_cover_art_next_check
+    ON app_cover_art (next_check_at);
+
 CREATE TABLE IF NOT EXISTS runner_presence (
     runner_id            TEXT PRIMARY KEY,
     build_version        TEXT,

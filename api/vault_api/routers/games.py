@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from vault_api import depot_manifests, scheduler, settings_store, tool_apps
+from vault_api import cover_art, depot_manifests, scheduler, settings_store, tool_apps
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
@@ -222,6 +222,13 @@ class GameSummary(BaseModel):
     # every ordinary app. ``name`` is untouched (it stays the apps-table
     # value, usually null for a tool app); UIs fall back to this one.
     tool_app_name: str | None = None
+    # WP API-FIX-5: the real portrait cover (library capsule) from Steam's
+    # store item lookup (vault_api/cover_art.py), or null while unknown --
+    # not looked up yet, Steam has no store item for it, or the lookup
+    # failed. Only https URLs on shared.akamai.steamstatic.com or
+    # cdn.akamai.steamstatic.com ever appear here (validated on write AND
+    # on this read). UIs fall back to the legacy CDN path when it is null.
+    cover_url: str | None = None
 
 
 def _tool_app_fields(appid: int) -> dict[str, object]:
@@ -266,6 +273,8 @@ class GameDetail(BaseModel):
     # See GameSummary.tool_app / .tool_app_name (WP API-FIX-4).
     tool_app: bool = False
     tool_app_name: str | None = None
+    # See GameSummary.cover_url (WP API-FIX-5).
+    cover_url: str | None = None
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -308,6 +317,8 @@ def list_games(
         # (bounded by client count, not app count), re-keyed by appid, not a
         # per-app query in the loop below.
         installed_on = _installed_on_by_appid(conn, base_settings, now)
+        # WP API-FIX-5: one query for every stored cover, re-validated.
+        covers = cover_art.cover_urls_by_appid(conn)
 
     app_depotids: dict[int, list[int]] = {}
     for row in depot_rows:
@@ -334,6 +345,7 @@ def list_games(
                 manifest_days_since_last_change=frequency.days_since_last_change,
                 installed_on=installed_on.get(row["appid"], []),
                 **_tool_app_fields(row["appid"]),
+                cover_url=covers.get(row["appid"]),
             )
         )
     return games
@@ -387,6 +399,7 @@ def get_game(
         ).fetchall()
         frequency = depot_manifests.change_frequency_for_app(conn, appid)
         installed_on = _installed_on_for_appid(conn, base_settings, now, appid)
+        cover_url = cover_art.cover_url_for_appid(conn, appid)
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
@@ -413,4 +426,5 @@ def get_game(
         manifest_days_since_last_change=frequency.days_since_last_change,
         installed_on=installed_on,
         **_tool_app_fields(app_row["appid"]),
+        cover_url=cover_url,
     )

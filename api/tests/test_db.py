@@ -35,6 +35,8 @@ EXPECTED_TABLES = {
     "settings",
     # v16 (WP VER-2): vault-runner presence for GET /v1/about.
     "runner_presence",
+    # v18 (WP API-FIX-5): real cover art per app (vault_api/cover_art.py).
+    "app_cover_art",
 }
 
 

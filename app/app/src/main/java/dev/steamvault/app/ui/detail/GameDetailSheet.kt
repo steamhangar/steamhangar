@@ -203,6 +203,7 @@ private fun gameSummaryFrom(detail: GameDetail): GameSummary = GameSummary(
     installed_on = detail.installed_on,
     tool_app = detail.tool_app,
     tool_app_name = detail.tool_app_name,
+    cover_url = detail.cover_url,
 )
 
 @Composable
@@ -271,7 +272,7 @@ private fun GameDetailSheetBody(
 private fun DetailHeader(appid: Int, name: String, detail: GameDetail?, jobs: List<JobSummary>) {
     Row(verticalAlignment = Alignment.Top) {
         CoverArtImage(
-            coverUrl = coverArtUrl(appid),
+            coverUrl = coverArtUrl(appid, detail?.cover_url),
             name = name,
             fallbackHues = fallbackHues(appid),
             modifier = Modifier.size(width = 64.dp, height = 96.dp),

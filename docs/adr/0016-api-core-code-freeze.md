@@ -584,3 +584,47 @@ Android demo data, and docs.
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-10-10 — freeze exception: real cover art (WP API-FIX-5, "Weg B")
+
+User decision 2026-10-10 ("Weg B"): a bug fix inside the freeze, on by
+default with no switch. The bug: both frontends built the cover URL as
+`https://cdn.akamai.steamstatic.com/steam/apps/<appid>/library_600x900.jpg`,
+and Valve answers that legacy path with 404 for newer games (measured
+2026-10-09: app 3527290; its real cover is
+`https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3527290/<hash>/library_600x900.jpg?t=...`).
+Only Steam's store item lookup knows the hashed path, and that API sends no
+CORS headers, so the lookup has to run in vault-api. The user's reasoning
+for on-by-default: every user is a Steam customer anyway, and browsers
+already fetch covers from Valve's CDN with the app id in the URL.
+
+Scope of the exception, all in WP API-FIX-5:
+
+- api/: new module `vault_api/cover_art.py`. A background thread, started
+  unconditionally by the lifespan, asks
+  `GET https://api.steampowered.com/IStoreBrowseService/GetItems/v1/` with
+  only `input_json` (`ids`, `context` english/US,
+  `data_request.include_assets`), up to 50 apps per call, through
+  `steam_relay.http_fetch` (host pinned, HTTPS, no redirects, bounded body,
+  proxy env honoured). No key, no SteamID. First call 30 s after start, then
+  one batch per minute while apps are due; found covers are re-checked after
+  30 days, "no cover" after 7 days, failures back off 15 min doubling to
+  24 h (per app and for the whole thread). Tool apps are never asked.
+- Schema v18: new table `app_cover_art` (no `ALTER`; `apps` untouched).
+- `GET /v1/games` and `GET /v1/games/{appid}` gain one additive optional
+  field, `cover_url` (null while unknown). Only https URLs on
+  `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com` are
+  stored or served; the value is validated again on read.
+- `vault_api/webui.py`: CSP `img-src` gains exactly
+  `https://shared.akamai.steamstatic.com`.
+- No setting, no change to jobs, scheduler, mapping, agent reports or any
+  other route. `deploy/proxy` is unchanged: `api.steampowered.com` was
+  already baked in (ADR-0011 addendum 2026-10-10).
+- Not frozen, listed for completeness: web (`lib/cover-art.js`, card,
+  detail mini-cover, demo shapes) and Android (model, `CoverArt.kt`, card
+  model, detail header) prefer `cover_url` and keep the legacy path as
+  fallback; tests; docs (threat model outbound flow 5, deploy/README step 5,
+  api/README).
+
+Every other frozen-path change still needs its own user decision and note
+here.

@@ -66,8 +66,9 @@ def insert_report(
 # --- 1. schema v17 ----------------------------------------------------------------
 
 
-def test_schema_version_is_17() -> None:
-    assert SCHEMA_VERSION == 17
+def test_schema_version_is_at_least_17() -> None:
+    # v17 added the presence columns; v18 (WP API-FIX-5) added app_cover_art.
+    assert SCHEMA_VERSION >= 17
 
 
 def _make_v16_agent_reports(db_path: str) -> None:
@@ -113,7 +114,7 @@ def test_v16_database_gains_both_columns_in_place(tmp_path) -> None:
     finally:
         conn.close()
 
-    assert version == 17
+    assert version == SCHEMA_VERSION
     assert types["agent_version"] == "TEXT"
     assert types["report_interval_seconds"] == "INTEGER"
     # The existing row survives untouched, with "the agent did not say".

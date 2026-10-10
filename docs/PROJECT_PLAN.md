@@ -2773,6 +2773,24 @@ below carry their own later dates, item 12 is the current one).
       neutral "Steam tool package — cached together with the games that use
       it", a muted card, no Download/Retry and no "not cached" warning; bulk
       download never targets it. Agents still report it.
+    - [x] **API-FIX-5** — real cover art for new games (user decision
+      2026-10-10 Weg B; done 2026-10-10, ADR-0016 and ADR-0011 addenda).
+      Both frontends built the cover as the legacy
+      `cdn.akamai.steamstatic.com/steam/apps/<appid>/library_600x900.jpg`,
+      which Valve answers with 404 for newer games (measured: 3527290).
+      vault-api now asks Steam's store item lookup
+      (`IStoreBrowseService/GetItems` on `api.steampowered.com`, no key,
+      up to 50 apps per call) in a background thread
+      (`api/vault_api/cover_art.py`), stores the hashed
+      `shared.akamai.steamstatic.com/store_item_assets/...` URL in the new
+      table `app_cover_art` (schema v18) and serves it as `cover_url` in
+      `GET /v1/games[/{appid}]` (null while unknown). On by default with no
+      switch: the tracked app ids leave the server toward Valve
+      (threat-model §5 outbound flow 6). Web and Android use `cover_url` when
+      it is an https URL on one of the two asset hosts, else the legacy
+      path; CSP `img-src` gains `https://shared.akamai.steamstatic.com`.
+      Not changed: the detail sheet's header art (`header.jpg`) still uses
+      the legacy path.
     - [x] **DOCS-FIX-3** — ADR-0004 and SECURITY.md claim QR login via the
       Steam app is the documented path (done 2026-10-03: ADR-0004
       addendum 4 marks the claim wrong; SECURITY.md, threat-model §3 and
@@ -2868,6 +2886,14 @@ below carry their own later dates, item 12 is the current one).
       per-client cap retries refused connections at once, which a gateway
       may log as a SYN flood; count the `status=503` passthrough lines
       before raising it.
+      API-FIX-5 (release candidate after rc13): newer games get their real
+      cover art instead of the fallback tile. vault-api looks covers up in
+      the background through Steam's store API on `api.steampowered.com`
+      (no key; the list of tracked app ids and the server's address go to
+      Valve, always on), stores them (schema v18, new table) and serves
+      `cover_url`; offline vaults keep the old covers and log one warning
+      per failure streak. A rollback to an older image refuses the v18
+      database (as for every schema bump).
 
     - [x] **WEB-FIX-7** — the running download arrow falls through the
       badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped

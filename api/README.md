@@ -325,7 +325,7 @@ an operator asks for *off*, so a non-empty value is an explicit request for a
 feature, and a typo in it must not quietly look like it worked. Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v17)
+## Database schema (v18)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -350,6 +350,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `steam_relay_key` | `id` (PK, `CHECK (id = 1)`), `api_key`, `updated_at`               | **v12**, WP 4a.6r. Single-row: the opt-in Steam Web API relay's one revocable, read-scoped Web API key (ADR-0004 addendum), entered by the operator in the web UI and set via `PUT /v1/steam/key`. Never a password. See "Steam Web API relay" below |
 | `settings` | `key` (PK), `value`, `updated_at` | **v13**, settings-API work package (ADR-0009). One row per OVERRIDDEN key only — a key with no row falls through to its env value or built-in default. `value` is TEXT in the same string grammar the corresponding `VAULT_*` env var uses. See "Persisted settings" below |
 | `runner_presence` | `runner_id` (PK), `build_version`, `build_commit`, `steamprefill_version`, `started_at`, `last_seen` | **v16**, WP VER-2. One row per vault-runner PROCESS, upserted by `prefill_runner` about every 30 s (idle or busy); rows not seen for a day are pruned by the next write. Read only by `GET /v1/about`. See "Component versions" below |
+| `app_cover_art` | `appid` (PK), `cover_url`, `outcome`, `attempts`, `checked_at`, `next_check_at` | **v18**, WP API-FIX-5. One row per app the cover-art lookup asked Steam about: the validated cover URL or NULL, `found`/`none`/`failed`, consecutive failures, when to ask again. Read by `GET /v1/games[/{appid}]` as `cover_url`. See "Cover art lookup" below |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -512,6 +513,11 @@ sent it or how often it reports. Covered by
 `tests/test_agent_feat_1_presence.py` (in-place upgrade, idempotent, same
 column types as a fresh database).
 
+**v17 → v18 (WP API-FIX-5)** adds the new table `app_cover_art` and its
+`next_check_at` index — plain `CREATE ... IF NOT EXISTS`, no `ALTER` step;
+`apps` is untouched. Covered by
+`tests/test_api_fix_5_cover_art.py::test_schema_v18_adds_app_cover_art`.
+
 **Ordering fix (WP 1.5 carry-over from the WP 1.4 review):** `init_db` now
 creates only the `schema_version` table, reads the stored version, and checks
 the downgrade guard *before* running the rest of `_DDL` — previously the full
@@ -606,8 +612,8 @@ route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
-| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below) |
-| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
+| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below) |
+| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`, `cover_url`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
 | PUT    | `/v1/mapping/{depotid}`            | Body `{"appid": int, "app_name": str \| null}` — **additively** upsert one depot→app mapping fact (manual fallback, see below); `422` for `depotid <= 0`, `appid <= 0`, or an unrecognized body field |
 | GET    | `/v1/mapping`                      | Full depot→app mapping table: list of `{depotid, appid}` |
 | DELETE | `/v1/mapping/{depotid}/{appid}`    | Remove one mapping pair (correction path for the additive `PUT`, see below); `204` on success, `404` if the pair doesn't exist, `422` for non-positive ids |
@@ -699,6 +705,47 @@ itself. A job for a tool app that was already queued before the upgrade
 still runs once (and fails as before); old failed jobs stay in the job
 history. Deleting a tool app's cache (`DELETE /v1/cache/228980`) follows
 the ordinary shared-depot rules.
+
+### Cover art lookup (WP API-FIX-5)
+
+Valve no longer serves the legacy cover path
+`https://cdn.akamai.steamstatic.com/steam/apps/<appid>/library_600x900.jpg`
+for newer games (404). Their art lives under a hashed path on
+`shared.akamai.steamstatic.com`, and only Steam's store item lookup knows it.
+`vault_api/cover_art.py` runs one background thread (always on, user
+decision 2026-10-10 "Weg B"; no setting) that asks:
+
+```
+GET https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=
+  {"ids":[{"appid":N},...],"context":{"language":"english","country_code":"US"},
+   "data_request":{"include_assets":true}}
+```
+
+No key and no SteamID; up to 50 apps per call, through vault-proxy
+(`api.steampowered.com` is the host it always allows). The cover URL is
+`https://shared.akamai.steamstatic.com/store_item_assets/` +
+`assets.asset_url_format` with `${FILENAME}` replaced by
+`assets.library_capsule`. Both parts must match the known shape (format
+`steam/apps/<the same appid>/${FILENAME}` with an optional `?t=<digits>`,
+capsule `[<hex>/]<name>.<jpg|jpeg|png|webp>`), and the result must be an
+https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`;
+anything else is stored as "no cover".
+
+| Outcome | Stored in `app_cover_art` (schema v18) | Asked again |
+|---|---|---|
+| found | `cover_url`, `outcome='found'` | after 30 days |
+| no cover (`success != 1`, no assets, unknown shape) | `cover_url` NULL, `outcome='none'` | after 7 days |
+| call failed, or the app missing from the answer | `outcome='failed'`, `attempts` + 1, an earlier URL is kept | after 15 min, doubling to 24 h |
+
+The first lookup runs 30 s after start, then one batch per minute while apps
+are due; new apps go first. Steam tool apps are never asked. After a failed
+call the whole thread also pauses for the same backoff, so an offline vault
+sends one request per backoff step and logs one WARNING per failure streak
+(repeats at DEBUG, the recovery once at INFO). `GET /v1/games[/{appid}]`
+read `cover_url` from this table and validate it again (the database file is
+editable); `null` means "use the legacy path", which both frontends do.
+Privacy: the tracked app ids go to Valve from the server, always
+(`docs/security/threat-model.md` §5 item 6).
 
 ### Check & update all cached games (`POST /v1/prefill/cached`, Phase 4c, WP 4c-api)
 
@@ -5553,8 +5600,15 @@ second CDN alias. A blocked or missing image (offline LAN, no route to the
 host — a real homelab deployment) degrades to a styled fallback tile
 client-side; the CSP entry only widens what the browser is ALLOWED to
 load, it is never a hard dependency. Pinned by
-`tests/test_webui.py::test_csp_img_src_allows_self_data_and_exactly_the_steam_cdn_host`
+`tests/test_webui.py::test_csp_img_src_allows_self_data_and_exactly_the_two_steam_asset_hosts`
 against the exact directive value, not a substring check.
+
+**Second host (WP API-FIX-5): `https://shared.akamai.steamstatic.com`.**
+Newer games' covers exist only under a hashed path there (the legacy path
+above answers 404 for them); vault-api serves the looked-up URL as
+`cover_url` (see "Cover art lookup"). `img-src` is now `'self' data:
+https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com`
+— still two named hosts, no wildcard.
 
 ### App shell contents (WP 4a.1 scope: scaffolding only)
 

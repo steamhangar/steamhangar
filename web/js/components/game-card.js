@@ -226,7 +226,8 @@ function buildCover(game) {
   img.loading = "lazy";
   img.decoding = "async";
   img.addEventListener("error", () => img.remove(), { once: true });
-  img.src = coverArtUrl(game.appid);
+  // WP API-FIX-5: the server-resolved cover when it has one.
+  img.src = coverArtUrl(game.appid, game.cover_url);
   cap.appendChild(img);
 
   const scrim = document.createElement("div");

@@ -592,3 +592,21 @@ this ADR. The user decided ("Weg A", 2026-10-03) not to add a network path:
 - **vault-dns** is not probed at all.
 
 No network, allowlist entry, `NO_PROXY` entry or compose line changed.
+
+## Addendum 2026-10-10 (WP API-FIX-5): the baked-in host now also serves the cover-art lookup
+
+`api.steampowered.com` stays the one host baked into vault-proxy's image,
+and its justification widens. Until now it was there for the opt-in Steam
+Web API relay only, so a vault without a relay key made no call to it. Since
+WP API-FIX-5 (user decision 2026-10-10, "Weg B") vault-api ALSO calls it on
+every install, unconditionally: `IStoreBrowseService/GetItems`, keyless,
+to resolve real cover art (`api/vault_api/cover_art.py`). What leaves: the
+app ids this vault tracks, in batches of up to 50, from the server's public
+address. No key, no SteamID, no client id.
+
+No filter, network, allowlist or `NO_PROXY` entry changed; the call uses the
+same `HTTPS_PROXY` path as the relay. The statement above that the baked
+host is "for the Steam Web API relay" now reads "for the relay and the
+cover-art lookup". With no internet route the lookup fails, logs one
+WARNING per failure streak and backs off; covers then keep the legacy CDN
+path.

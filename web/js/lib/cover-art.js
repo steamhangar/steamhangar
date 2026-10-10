@@ -34,13 +34,59 @@
  * shape above. No CSP change needed — `STEAM_CDN_HOST` is already the
  * exact, single host `img-src` allows (api/vault_api/webui.py), and this
  * is a different PATH on the same host, not a new one.
+ *
+ * **Server-resolved covers (WP API-FIX-5).** Valve no longer serves the
+ * legacy `library_600x900.jpg` path for newer games (404); their art lives
+ * under a hashed path on `shared.akamai.steamstatic.com`. vault-api looks it
+ * up and sends it as `cover_url` on `GET /v1/games[/{appid}]` rows.
+ * `coverArtUrl(appid, coverUrl)` uses that URL when it is an https URL on
+ * one of `STEAM_ASSET_HOSTS` (the same two hosts the CSP's `img-src`
+ * allows, api/vault_api/webui.py), and the legacy URL otherwise (null, an
+ * older server, an owned-only game, anything malformed). The image's own
+ * error fallback in the components is unchanged. `headerArtUrl` still uses
+ * the legacy path (no server lookup for it).
  */
 
 export const STEAM_CDN_HOST = "cdn.akamai.steamstatic.com";
 
-/** @param {number} appid */
-export function coverArtUrl(appid) {
-  return `https://${STEAM_CDN_HOST}/steam/apps/${appid}/library_600x900.jpg`;
+/** Host of the hashed store-item assets (WP API-FIX-5). */
+export const STEAM_STORE_ASSET_HOST = "shared.akamai.steamstatic.com";
+
+/** Every host a server-sent `cover_url` may name. */
+export const STEAM_ASSET_HOSTS = Object.freeze([STEAM_CDN_HOST, STEAM_STORE_ASSET_HOST]);
+
+/**
+ * A server-sent `cover_url` if it is usable, else null: a string of at most
+ * 512 ASCII characters, https, host exactly one of `STEAM_ASSET_HOSTS`, no
+ * credentials, port or fragment, no whitespace or backslash.
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function serverCoverUrl(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 512) return null;
+  if (!/^[\x21-\x7e]+$/.test(value) || value.includes("\\") || value.includes("#")) return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:") return null;
+  if (!STEAM_ASSET_HOSTS.includes(parsed.host)) return null;
+  if (parsed.username || parsed.password || parsed.port) return null;
+  // The URL parser lowercases the host; insist the original already was.
+  if (!value.startsWith(`https://${parsed.host}/`)) return null;
+  return value;
+}
+
+/**
+ * Portrait cover for `appid`: the server's `cover_url` when usable (WP
+ * API-FIX-5), else the legacy CDN path.
+ * @param {number} appid
+ * @param {unknown} [coverUrl] `cover_url` from a `GET /v1/games` row
+ */
+export function coverArtUrl(appid, coverUrl) {
+  return serverCoverUrl(coverUrl) ?? `https://${STEAM_CDN_HOST}/steam/apps/${appid}/library_600x900.jpg`;
 }
 
 /** Wide (460x215) header/hero capsule art for the game detail card

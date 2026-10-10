@@ -21,6 +21,7 @@ from vault_api import BuildInfo, build_info
 from vault_api.about import AboutService
 from vault_api.body_guard import PreAuthBodyGuard
 from vault_api.config import Settings
+from vault_api.cover_art import CoverArtRefresher
 from vault_api.db import get_connection, init_db
 from vault_api.jobs import recover_stale_jobs
 from vault_api.manifest_ingest import log_cache_dir_canary
@@ -167,6 +168,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             "event log (VAULT_EVENT_LOG on that side) to switch it on."
         )
 
+    # WP API-FIX-5: real cover art. Started unconditionally (no setting,
+    # user decision 2026-10-10 "Weg B"); its first lookup waits
+    # cover_art.INITIAL_DELAY_SECONDS, and an offline vault logs one WARNING
+    # per failure streak, then backs off quietly (vault_api/cover_art.py).
+    cover_refresher: CoverArtRefresher = app.state.cover_art_refresher
+    cover_refresher.start()
+
     # WP 3.13.
     if settings.webhook_enabled:
         logger.info(
@@ -183,6 +191,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        cover_refresher.stop()
         scheduler.stop()
         worker.stop()
         # WP 3.13: stopped LAST — a job or sweep finalized microseconds before
@@ -297,6 +306,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.scheduler = PrefillScheduler(
         settings, webhook_notifier=app.state.webhook_notifier
     )
+    # WP API-FIX-5: same reasoning -- constructing it starts no thread; the
+    # lifespan starts it, and a test can replace it before that.
+    app.state.cover_art_refresher = CoverArtRefresher(settings.db_path)
     app.include_router(health.router)
     app.include_router(games.router)
     app.include_router(mapping.router)
