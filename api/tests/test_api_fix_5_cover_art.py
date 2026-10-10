@@ -324,6 +324,21 @@ def test_refresh_stores_found_and_none_then_waits(db) -> None:
     assert _refresh(db, NOW + timedelta(days=8), fetch).requested == (999999,)
 
 
+def test_recheck_answering_no_cover_keeps_the_found_url(db) -> None:
+    _add_apps(db, 3527290)
+    _refresh(db, NOW, lambda appids: REAL_SHAPED)
+    assert _rows(db)[3527290]["cover_url"] == HASHED
+
+    delisted = _payload(_item(3527290, None, None, success=15))
+    later = NOW + timedelta(days=31)
+    outcome = _refresh(db, later, lambda appids: delisted)
+    assert outcome.requested == (3527290,)
+    row = _rows(db)[3527290]
+    assert row["cover_url"] == HASHED  # kept, not overwritten with NULL
+    assert row["outcome"] == "found"
+    assert row["next_check_at"] == "2026-11-17T12:00:00Z"  # +7 days
+
+
 def test_refresh_batches_at_most_batch_size(db) -> None:
     _add_apps(db, *range(1, cover_art.BATCH_SIZE + 6))
     asked: list[int] = []

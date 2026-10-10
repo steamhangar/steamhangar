@@ -618,12 +618,13 @@ Scope of the exception, all in WP API-FIX-5:
 - `vault_api/webui.py`: CSP `img-src` gains exactly
   `https://shared.akamai.steamstatic.com`.
 - No setting, no change to jobs, scheduler, mapping, agent reports or any
-  other route. `deploy/proxy` is unchanged: `api.steampowered.com` was
-  already baked in (ADR-0011 addendum 2026-10-10).
+  other route. `deploy/proxy` changes by a comment only
+  (`docker-entrypoint.sh`): `api.steampowered.com` was already baked in
+  (ADR-0011 addendum 2026-10-10).
 - Not frozen, listed for completeness: web (`lib/cover-art.js`, card,
   detail mini-cover, demo shapes) and Android (model, `CoverArt.kt`, card
   model, detail header) prefer `cover_url` and keep the legacy path as
-  fallback; tests; docs (threat model outbound flow 5, deploy/README step 5,
+  fallback; tests; docs (threat model §5 outbound flow item 6, deploy/README step 5,
   api/README).
 
 Every other frozen-path change still needs its own user decision and note

@@ -59,7 +59,10 @@ whose ``next_check_at`` has passed, and asks once:
 - found: stored, checked again after ``REFRESH_FOUND_DAYS`` (Valve changes
   the hash when a game updates its art);
 - no cover (``success != 1``, no assets, or an answer that fails
-  validation): ``cover_url`` NULL, asked again after ``RETRY_NONE_DAYS``;
+  validation): on a first lookup ``cover_url`` NULL (``outcome='none'``);
+  on a re-check of an app that already has a URL, that URL is kept
+  (``outcome`` stays ``'found'``; a dead URL is covered by the frontends'
+  image-error fallback). Either way asked again after ``RETRY_NONE_DAYS``;
 - the call failed (offline, filtered by the proxy, HTTP error, garbage):
   each app's ``attempts`` grows and its next try backs off from
   ``FAIL_BACKOFF_BASE`` doubling up to ``FAIL_BACKOFF_MAX``; a stored URL
@@ -284,7 +287,12 @@ def due_appids(conn: sqlite3.Connection, now: datetime, limit: int = BATCH_SIZE)
 def record_results(
     conn: sqlite3.Connection, results: dict[int, str | None], now: datetime
 ) -> None:
-    """Store found/none outcomes. Commits."""
+    """Store found/none outcomes. Commits.
+
+    A "none" answer never overwrites a URL found earlier: a re-check that
+    Steam answers with ``success != 1`` (or an unusable asset) keeps the old
+    URL and ``outcome='found'``, and only moves ``next_check_at``.
+    """
     checked = _ts(now)
     for appid, url in results.items():
         url = valid_cover_url(url)
@@ -297,8 +305,10 @@ def record_results(
             INSERT INTO app_cover_art (appid, cover_url, outcome, attempts, checked_at, next_check_at)
             VALUES (?, ?, ?, 0, ?, ?)
             ON CONFLICT (appid) DO UPDATE SET
-                cover_url     = excluded.cover_url,
-                outcome       = excluded.outcome,
+                cover_url     = COALESCE(excluded.cover_url, app_cover_art.cover_url),
+                outcome       = CASE
+                    WHEN excluded.cover_url IS NULL AND app_cover_art.cover_url IS NOT NULL
+                    THEN 'found' ELSE excluded.outcome END,
                 attempts      = 0,
                 checked_at    = excluded.checked_at,
                 next_check_at = excluded.next_check_at

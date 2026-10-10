@@ -734,7 +734,7 @@ anything else is stored as "no cover".
 | Outcome | Stored in `app_cover_art` (schema v18) | Asked again |
 |---|---|---|
 | found | `cover_url`, `outcome='found'` | after 30 days |
-| no cover (`success != 1`, no assets, unknown shape) | `cover_url` NULL, `outcome='none'` | after 7 days |
+| no cover (`success != 1`, no assets, unknown shape) | first lookup: `cover_url` NULL, `outcome='none'`; re-check of an app that already has a URL: the URL is kept (`outcome='found'`; a dead URL falls back in the UI) | after 7 days |
 | call failed, or the app missing from the answer | `outcome='failed'`, `attempts` + 1, an earlier URL is kept | after 15 min, doubling to 24 h |
 
 The first lookup runs 30 s after start, then one batch per minute while apps
