@@ -157,8 +157,9 @@ receive vault-api's requests) and `default` (its own real, masquerading
 route out — to Valve, the manifest oracle, or a webhook receiver, LAN or
 WAN). It runs tinyproxy, refusing any destination not in a filter file its
 entrypoint renders at container start from `VAULT_EGRESS_ALLOW` plus one
-baked-in host (§3 below). `vault-api`'s `HTTP_PROXY`/`HTTPS_PROXY` env
-lines point at it by container name; per the empirical finding above, this
+baked-in host (§3 below) *(2026-10-13: plus `api.steamcmd.net` while the
+oracle is on and its URL is `https://` to that host, see the addendum
+2026-10-13)*. `vault-api`'s `HTTP_PROXY`/`HTTPS_PROXY` env lines point at it by container name; per the empirical finding above, this
 required **no change to any application code** — every outbound call this
 project already makes goes through the standard library's own proxy
 support, which was already there, unused, the whole time.
@@ -219,6 +220,9 @@ outright, by explicit operator decision:** the lock ships default-on in
 `VAULT_EGRESS_ALLOW` (default: empty) is the allowlist's operator-facing
 half — comma-separated bare hostnames, forwarded to both `vault-api` and
 `vault-proxy` identically. Two real, documented cases need an entry:
+*(Superseded in part 2026-10-13: an oracle URL that is `https://` to the
+default host no longer needs one; plain `http://` to it or any other oracle
+host still does. See the addendum 2026-10-13.)*
 
 - **The manifest oracle.** `VAULT_MANIFEST_ORACLE` is an env-only, boot-time
   switch — its value (and `VAULT_MANIFEST_ORACLE_URL`'s host) is fixed for
@@ -238,6 +242,11 @@ half — comma-separated bare hostnames, forwarded to both `vault-api` and
   `Settings` directly with the oracle on and no allowlist at all
   (`test_oracle.py`, `test_gc_execute.py`), in contexts unrelated to this
   package, and must keep passing unchanged.
+  *(Superseded in part 2026-10-13: with the oracle on and
+  `VAULT_MANIFEST_ORACLE_URL` `https://` to the default host
+  `api.steamcmd.net`, that host is allowed automatically; plain `http://`
+  to it or any other oracle host still needs a `VAULT_EGRESS_ALLOW` entry
+  and this check still enforces it. See the addendum 2026-10-13 below.)*
 - **Webhook receivers.** `VAULT_WEBHOOK_URL` is DB-overridable at runtime
   (ADR-0009, `PATCH /v1/settings`) — it can change with no vault-api
   restart, so there is no boot-time value to check it against, and no
@@ -262,6 +271,9 @@ prior reason to connect to a missing allowlist entry. The manifest oracle
 and webhook cases above do not share this problem (the oracle is env-only
 and fixed for the process's life; a filtered webhook fails visibly and
 loudly documented, not silently), so neither gets the same treatment.
+*(Superseded in part 2026-10-13: the default oracle host now gets a
+conditional automatic allowance too; the remaining difference to the relay
+host is conditional versus unconditional. See the addendum 2026-10-13.)*
 
 ### 4. `NO_PROXY`, and the LAN-webhook question — answered by measurement
 
@@ -610,3 +622,66 @@ host is "for the Steam Web API relay" now reads "for the relay and the
 cover-art lookup". With no internet route the lookup fails, logs one
 WARNING per failure streak and backs off; covers then keep the legacy CDN
 path.
+
+## Addendum 2026-10-13 (WP UPD-1/UPD-4): the default oracle host is allowed automatically while the oracle is on
+
+Decision: option A, narrowed by the orchestrator to the default host,
+confirmed by the user 2026-10-13. While the manifest oracle is on AND
+`VAULT_MANIFEST_ORACLE_URL` is `https://` to its **default** host
+`api.steamcmd.net` (`config.ORACLE_AUTO_ALLOWED_HOST`), that host is
+allowed automatically, without a `VAULT_EGRESS_ALLOW` entry: `vault-proxy`
+adds the constant host to its rendered filter, and vault-api's startup
+check (§3) treats it as allowed instead of refusing to boot. The URL is
+only compared with that constant, never rendered into the filter, so it
+cannot open any other host. Plain `http://` to the same host, or any other
+host (a private mirror, a LAN proxy), gets no automatic allowance: it still
+needs an explicit `VAULT_EGRESS_ALLOW` entry, and vault-api refuses to boot
+without one. `VAULT_MANIFEST_ORACLE=off` (or `none`) removes the exception:
+the host is then neither added nor needed, even when the URL still names
+it. Everything else stays default-deny; `VAULT_EGRESS_ALLOW` keeps its role
+for every other host (webhook receivers and non-default oracle URLs
+included).
+
+Why: the oracle now defaults to on (ADR-0006, addendum 2026-10-13). Under
+the §3 rule an upgraded prod install without `api.steamcmd.net` in
+`VAULT_EGRESS_ALLOW` would refuse to boot. Default-on must work in prod
+after an upgrade without a `.env` change, so the switch that turns the
+oracle on also opens exactly its one default host.
+
+Security consequence, stated plainly: with the default on, one
+third-party host (`api.steamcmd.net`) is reachable from vault-api without
+anyone having chosen it, and it receives the cached app ids (ADR-0006
+decision 4). The allowlist is no longer the only operator input that
+widens egress by default; the opt-out is `off`. Custom URLs keep the
+two-setting rule (oracle URL plus `VAULT_EGRESS_ALLOW` entry) on purpose:
+if the URL's host were allowed automatically, `VAULT_MANIFEST_ORACLE_URL`
+would become a second allowlist input that opens any host, including LAN
+addresses, on any port, through a setting whose stated purpose is
+something else. Pinning the exception to one fixed hostname keeps the
+allowlist the single place where an operator widens egress on purpose.
+
+Relation to the baked-in relay host (§3): both are now hosts outside
+`VAULT_EGRESS_ALLOW`. The remaining difference is that
+`api.steampowered.com` is allowed unconditionally (its feature switch is a
+runtime DB setting), while `api.steamcmd.net` is allowed only while the
+oracle's boot-time switch is on.
+
+What this does not change: the two-network mechanism (§1), the filter
+grammar, `NO_PROXY`, and the logging of every outbound destination.
+
+Implementation lands in WP UPD-1: the `vault-proxy` entrypoint (adds the
+host to the rendered filter under the condition above), the compose
+forwarding of `VAULT_MANIFEST_ORACLE` and `VAULT_MANIFEST_ORACLE_URL` to
+`vault-proxy`, and the startup check in `api/vault_api/config.py`. The
+rule is implemented twice, in `config.py` and in the proxy entrypoint, and
+both sides must agree or the proxy and vault-api disagree about whether the
+host is open:
+- selector, trimmed and case-insensitive: unset, empty or `steamcmd_api`
+  = on; `off` or `none` = off; any other value refuses to start;
+- URL: both refuse whitespace or control characters, a scheme other than
+  `http`/`https`, and an unbalanced IPv6 bracket (validated even while the
+  oracle is off);
+- host: `config.ORACLE_AUTO_ALLOWED_HOST` and the entrypoint's
+  `ORACLE_AUTO_ALLOWED_HOST` must stay equal.
+`api/tests/test_upd_1_oracle_egress.py` pins the two parsers against each
+other over a table of values.

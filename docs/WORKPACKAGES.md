@@ -211,6 +211,8 @@ a trap, and this WP agrees). The Android port (separate, still-open work
 package) should adopt both decisions verbatim: its own equivalent header/
 toolbar gains the same button, worded with the same "Check & update, never
 Check" rule, and its own pull-to-refresh equivalent stays passive-only.
+*(Superseded 2026-10-13: the "never bare Check" part of this rule, see the
+ADR-0006 addendum 2026-10-13. The pull-to-refresh rule stands.)*
 
 **Adopted verbatim on Android (WP 4c-app, 2026-08-18).** Both decisions
 carried over exactly as recorded above, with the layout stated precisely
@@ -222,8 +224,9 @@ container spans the width, the button does not (web's own button is
 `width:100%`), and the placement order differs too (web: tools → check row
 → search; Android: search → layout/select → check row) — for the same
 "Check & update all cached games" control, worded with the same "check &
-update, never bare check" rule (`library_check_update_button`/`_busy` in
-`strings.xml`); and `ui/library/` has no pull-to-refresh gesture at all
+update, never bare check" rule (superseded 2026-10-13, see ADR-0006
+addendum) (`library_check_update_button`/`_busy` in `strings.xml`); and
+`ui/library/` has no pull-to-refresh gesture at all
 (`LibraryController.pollGamesForever`/`pollJobsForever` are fixed-cadence
 foreground polls only), so the "stays passive-only" rule is satisfied by
 the gesture's absence rather than by an explicit carve-out. The pure
