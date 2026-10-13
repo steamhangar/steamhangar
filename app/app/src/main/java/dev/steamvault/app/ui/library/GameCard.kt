@@ -84,6 +84,7 @@ fun GameCard(
         ) {
             CoverArtImage(
                 coverUrl = model.coverUrl,
+                cachedCoverUrl = model.cachedCoverUrl,
                 name = model.name,
                 fallbackHues = model.fallbackHues,
                 fallbackTitleInsets = titleInsets,

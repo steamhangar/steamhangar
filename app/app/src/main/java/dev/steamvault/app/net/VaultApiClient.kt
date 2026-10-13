@@ -25,6 +25,7 @@ import dev.steamvault.app.net.model.UpdateStatusOut
 import dev.steamvault.app.net.model.buildSettingsPatch
 import dev.steamvault.app.net.profile.CleartextPolicyInterceptor
 import dev.steamvault.app.net.profile.ConnectivityProfile
+import dev.steamvault.app.ui.library.logic.cachedCoverPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
@@ -162,9 +163,20 @@ class VaultApiClient(
 
     suspend fun health(): HealthOut = get("/v1/health")
 
-    suspend fun games(): List<GameSummary> = get("/v1/games")
+    suspend fun games(): List<GameSummary> =
+        get<List<GameSummary>>("/v1/games").map { it.copy(cover_cached_url = vaultCoverUrl(it.appid, it.cover_cached_url)) }
 
-    suspend fun game(appid: Int): GameDetail = get("/v1/games/$appid")
+    suspend fun game(appid: Int): GameDetail =
+        get<GameDetail>("/v1/games/$appid").let { it.copy(cover_cached_url = vaultCoverUrl(it.appid, it.cover_cached_url)) }
+
+    /**
+     * WP D10: a server-sent `cover_cached_url` as an absolute URL on this
+     * client's base URL (same scheme, host and port the API calls use, so the
+     * profile's cleartext rule already vetted it), or null unless it is
+     * exactly `/v1/covers/{appid}/{32 hex}` for [appid].
+     */
+    internal fun vaultCoverUrl(appid: Int, value: String?): String? =
+        cachedCoverPath(appid, value)?.let { resolve(it, emptyMap()).toString() }
 
     // ---- jobs -----------------------------------------------------------
 

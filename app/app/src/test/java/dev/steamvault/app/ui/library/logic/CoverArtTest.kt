@@ -103,4 +103,55 @@ class CoverArtTest {
             assertTrue(pattern in 0..5)
         }
     }
+
+    // ---- WP D10 COVER-CACHE-1 --------------------------------------------
+
+    private val sig = "0123456789abcdef0123456789abcdef"
+
+    @Test
+    fun `cachedCoverPath accepts exactly the path for this appid`() {
+        assertEquals("/v1/covers/440/$sig", cachedCoverPath(440, "/v1/covers/440/$sig"))
+        for (bad in listOf(
+            "/v1/covers/730/$sig",
+            "/v1/covers/440/${sig.uppercase()}",
+            "/v1/covers/440/$sig/x",
+            "/v1/covers/440/$sig?x=1",
+            "/v1/covers/0440/$sig",
+            "//evil.example/v1/covers/440/$sig",
+            "/v1/covers/440/abc",
+            "",
+            null,
+        )) {
+            assertEquals("must reject: $bad", null, cachedCoverPath(440, bad))
+        }
+    }
+
+    @Test
+    fun `vaultCoverUrl accepts an absolute http(s) URL ending in the path for this appid`() {
+        val lan = "http://192.168.10.20:8080/v1/covers/440/$sig"
+        assertEquals(lan, vaultCoverUrl(440, lan))
+        val tls = "https://vault.example/v1/covers/440/$sig"
+        assertEquals(tls, vaultCoverUrl(440, tls))
+        for (bad in listOf(
+            "/v1/covers/440/$sig",
+            "ftp://host/v1/covers/440/$sig",
+            "http://host/v1/covers/730/$sig",
+            "http://u@host/v1/covers/440/$sig",
+            "http://host/v1/covers/440/$sig?x",
+            "http://host/v1/covers/440/$sig#f",
+            "http:///v1/covers/440/$sig",
+            null,
+        )) {
+            assertEquals("must reject: $bad", null, vaultCoverUrl(440, bad))
+        }
+    }
+
+    @Test
+    fun `MUTATION PIN -- coverCandidates puts the stored copy first and drops duplicates`() {
+        val cdn = coverArtUrl(440)
+        val vault = "http://host/v1/covers/440/$sig"
+        assertEquals(listOf(vault, cdn), coverCandidates(cdn, vault))
+        assertEquals(listOf(cdn), coverCandidates(cdn, null))
+        assertEquals(listOf(cdn), coverCandidates(cdn, cdn))
+    }
 }

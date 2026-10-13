@@ -30,6 +30,9 @@ from vault_api import config
 from vault_api.config import Settings
 
 DEFAULT_HOST_PATTERN = r"^api\.steamcmd\.net$"
+#: The hosts vault-proxy always allows: the relay/cover-lookup host and, since
+#: WP D10 COVER-CACHE-1, Steam's two cover image hosts.
+BAKED_COUNT = 3
 
 
 def from_env(
@@ -215,7 +218,7 @@ def test_config_and_proxy_agree_on_every_case(
             # Accepted by both parsers, but needs an allowlist entry.
             assert rc == 0, f"{description}: the proxy refused a valid value:\n{output}"
             assert DEFAULT_HOST_PATTERN not in rendered, description
-            assert len(patterns) == 1, patterns  # the baked relay host only
+            assert len(patterns) == BAKED_COUNT, patterns  # the baked hosts only
         else:
             assert rc != 0, f"{description}: vault-api refuses ({exc}), the proxy started:\n{output}"
         return
@@ -225,7 +228,7 @@ def test_config_and_proxy_agree_on_every_case(
         settings.manifest_oracle_url
     )
     assert (DEFAULT_HOST_PATTERN in rendered) is auto_allowed, (description, rendered)
-    assert len(patterns) == (2 if auto_allowed else 1), patterns
+    assert len(patterns) == BAKED_COUNT + (1 if auto_allowed else 0), patterns
 
 
 @requires_sh

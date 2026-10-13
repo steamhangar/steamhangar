@@ -62,6 +62,11 @@ data class GameCardModel(
      * [formatBytesGB]'s kdoc. */
     val sizeLabel: String?,
     val coverUrl: String,
+    /** WP D10: vault-api's stored copy of the cover ([vaultCoverUrl]),
+     * tried before [coverUrl]; null when the vault has none. A String, not a
+     * list, so this class stays a data class of stable value types (see the
+     * kdoc above). */
+    val cachedCoverUrl: String? = null,
     val fallbackHues: FallbackHues,
     val fallbackPattern: Int,
     val action: StatusAction?,
@@ -114,6 +119,7 @@ fun buildGameCardModel(
         kind = kind,
         sizeLabel = formatBytesGB(game.size_bytes),
         coverUrl = coverArtUrl(game.appid, game.cover_url),
+        cachedCoverUrl = vaultCoverUrl(game.appid, game.cover_cached_url),
         fallbackHues = fallbackHues(game.appid),
         fallbackPattern = fallbackPattern(game.appid),
         action = statusAction(game, liveJob, selecting),

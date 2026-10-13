@@ -10,7 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -31,6 +31,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import dev.steamvault.app.R
 import dev.steamvault.app.ui.library.logic.FallbackHues
+import dev.steamvault.app.ui.library.logic.coverCandidates
 
 /**
  * 2:3 portrait cover art (WP 4b.4 brief: "cover art via Steam CDN by appid
@@ -46,6 +47,9 @@ import dev.steamvault.app.ui.library.logic.FallbackHues
  * caps the title, which then ellipsizes within the space left. Callers
  * that pass neither (list-row thumbnail, detail header) keep the plain,
  * clipped title.
+ *
+ * WP D10 COVER-CACHE-1: [cachedCoverUrl], vault-api's stored copy, is tried
+ * before [coverUrl]; the fallback tile shows only after both failed.
  */
 @Composable
 fun CoverArtImage(
@@ -53,10 +57,15 @@ fun CoverArtImage(
     name: String,
     fallbackHues: FallbackHues,
     modifier: Modifier = Modifier,
+    cachedCoverUrl: String? = null,
     fallbackTitleInsets: PaddingValues = PaddingValues(),
     fallbackTitleMaxLines: Int = Int.MAX_VALUE,
 ) {
-    var failed by remember(coverUrl) { mutableStateOf(false) }
+    // WP D10: vault-api's stored copy first (LAN, works offline), then the
+    // CDN cover; the fallback tile only after every URL failed.
+    val urls = remember(coverUrl, cachedCoverUrl) { coverCandidates(coverUrl, cachedCoverUrl) }
+    var index by remember(urls) { mutableIntStateOf(0) }
+    val failed = index >= urls.size
 
     Box(
         modifier = modifier.clip(RoundedCornerShape(10.dp)),
@@ -65,13 +74,13 @@ fun CoverArtImage(
         if (!failed) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
-                    .data(coverUrl)
+                    .data(urls[index])
                     .crossfade(true)
                     .build(),
                 contentDescription = null, // decorative once loaded -- the card's own semantics carries the name/status.
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                onError = { failed = true },
+                onError = { index += 1 },
             )
         } else {
             FallbackTile(

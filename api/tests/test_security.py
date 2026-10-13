@@ -22,7 +22,12 @@ _WEBUI_PUBLIC_PATHS = {"/", "/index.html"} | {
     for path in (f"/{view}", f"/{view}/{{rest:path}}")
 }
 
-PUBLIC_PATHS = {"/v1/health"} | _WEBUI_PUBLIC_PATHS
+#: WP D10 COVER-CACHE-1: not behind require_api_key because an <img> cannot
+#: send the header; the path carries an HMAC of the key instead, checked by
+#: the handler (tests/test_d10_cover_cache.py pins every refusal).
+SIGNATURE_AUTH_PATHS = {"/v1/covers/{appid}/{signature}"}
+
+PUBLIC_PATHS = {"/v1/health"} | _WEBUI_PUBLIC_PATHS | SIGNATURE_AUTH_PATHS
 
 
 def _route_has_auth_dependency(route) -> bool:

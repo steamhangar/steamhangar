@@ -69,6 +69,38 @@ class VaultApiClientTest {
     }
 
     @Test
+    fun `WP D10 -- games and game turn a valid cover_cached_url into an absolute URL on the base URL`() = runTest {
+        val sig = "0123456789abcdef0123456789abcdef"
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """[{"appid":440,"status":"idle","depot_count":1,"needs_force":false,
+                    |"cover_cached_url":"/v1/covers/440/$sig"},
+                    |{"appid":730,"status":"idle","depot_count":1,"needs_force":false,
+                    |"cover_cached_url":"/v1/covers/440/$sig"},
+                    |{"appid":570,"status":"idle","depot_count":1,"needs_force":false,
+                    |"cover_cached_url":"https://evil.example/v1/covers/570/$sig"},
+                    |{"appid":10,"status":"idle","depot_count":1,"needs_force":false}]"""
+                    .trimMargin(),
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"appid":440,"status":"idle","depots":[],"needs_force":false,
+                    |"cover_cached_url":"/v1/covers/440/$sig"}"""
+                    .trimMargin(),
+            ),
+        )
+
+        val games = client.games().associateBy { it.appid }
+        val expected = server.url("/v1/covers/440/$sig").toString()
+        assertEquals(expected, games.getValue(440).cover_cached_url)
+        assertNull("another app's path is dropped", games.getValue(730).cover_cached_url)
+        assertNull("an absolute foreign URL is dropped", games.getValue(570).cover_cached_url)
+        assertNull("older servers send none", games.getValue(10).cover_cached_url)
+        assertEquals(expected, client.game(440).cover_cached_url)
+    }
+
+    @Test
     fun `games hits GET v1 games and decodes a list`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(

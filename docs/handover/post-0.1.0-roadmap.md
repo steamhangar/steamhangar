@@ -358,6 +358,17 @@ and cdn.akamai.steamstatic.com); signed cover URLs
 `/v1/covers/{appid}/{signature}` are accepted as a documented exception
 to plan section 9 (`<img>` cannot send the API key).
 
+Implemented on `wp/cover-cache-1` (WP D10, not reviewed yet): vault-api
+stores covers in `<data dir>/covers` (schema v21 `app_cover_file`, 512 MiB
+cap, background thread) and serves `GET /v1/covers/{appid}/{signature}`
+(HMAC of the API key in the path, since `<img>` cannot send the header;
+strong ETag, `304`, `private, max-age=31536000, immutable`);
+`cover_cached_url` on `/v1/games`; web and app try it first, then the CDN.
+The app's `VaultApplication` is Coil's `ImageLoaderFactory` with a sized
+disk cache. D10c: the user set vault-proxy's `BAKED_HOSTS` to include the
+two steamstatic hosts; tests, verify-stack check and the ADR-0011 addendum
+follow it.
+
 ## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
 
 Cause: `steamvault://auth/openid-return` is used as the return URL, and

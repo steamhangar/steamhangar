@@ -953,7 +953,7 @@ def test_the_bulk_verdicts_agree_with_the_per_app_view(
 
 
 def test_schema_v20_creates_the_full_table_on_a_v18_database(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 20
+    assert SCHEMA_VERSION >= 20
     path = str(tmp_path / "old.db")
     init_db(path)
     conn = get_connection(path)
@@ -1011,7 +1011,7 @@ def assert_full_update_check_table(path: str) -> None:
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(update_check_state)")}
     finally:
         conn.close()
-    assert version == 20
+    assert version == SCHEMA_VERSION
     assert columns == {
         "id", "last_check_at", "last_check_apps", "last_check_ok", "last_check_stale",
         "last_check_trigger", "last_check_finished_at", "last_check_outcome",

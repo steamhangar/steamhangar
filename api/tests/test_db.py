@@ -39,6 +39,8 @@ EXPECTED_TABLES = {
     "app_cover_art",
     # v19 (WP UPD-1): always-on update check bookkeeping.
     "update_check_state",
+    # v21 (WP D10 COVER-CACHE-1): stored cover images (vault_api/cover_cache.py).
+    "app_cover_file",
 }
 
 

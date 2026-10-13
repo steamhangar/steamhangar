@@ -9,7 +9,9 @@ key answered 422 (a pre-auth parser oracle) instead of 401.
 This pure-ASGI middleware runs before routing:
 
 1. **Auth first** for ``/v1`` and ``/v1/*`` except exactly ``/v1/health``
-   (the one documented unauthenticated route, ``auth.py``): the same
+   (the one documented unauthenticated route, ``auth.py``) and the signed
+   cover path ``/v1/covers/<appid, no leading zero>/<32 hex>`` (WP D10, authenticated by the
+   signature in its path, ``routers/covers.py``): the same
    constant-time comparison as the dependency (``auth.api_key_matches``),
    so a request without a valid key is answered 401 without one body byte
    being read. The dependency stays on every router as defence in depth.
@@ -27,6 +29,7 @@ within a factor of nine of it.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Awaitable, Callable
 
 from vault_api.auth import UNAUTHORIZED_DETAIL, api_key_matches
@@ -34,6 +37,16 @@ from vault_api.auth import UNAUTHORIZED_DETAIL, api_key_matches
 MAX_BODY_BYTES = 1024 * 1024
 
 _PUBLIC_PATHS = frozenset({"/v1/health"})
+
+#: WP D10 COVER-CACHE-1: ``GET /v1/covers/{appid}/{signature}`` carries its
+#: credential in the path (an HMAC keyed with the API key, checked by
+#: ``routers/covers.py``), because an ``<img>`` cannot send ``X-Api-Key``.
+#: Exactly this shape and nothing else skips the header check here.
+_SIGNED_COVER_PATH = re.compile(r"/v1/covers/[1-9][0-9]{0,9}/[0-9a-f]{32}", re.ASCII)
+
+
+def is_signed_cover_path(path: str) -> bool:
+    return _SIGNED_COVER_PATH.fullmatch(path) is not None
 
 Scope = dict[str, Any]
 Message = dict[str, Any]
@@ -47,8 +60,13 @@ class _BodyTooLarge(Exception):
 
 
 def needs_api_key(path: str) -> bool:
-    """Every ``/v1`` path except the public health check."""
-    return (path == "/v1" or path.startswith("/v1/")) and path not in _PUBLIC_PATHS
+    """Every ``/v1`` path except the public health check and the signed
+    cover path (which ``routers/covers.py`` authenticates by signature)."""
+    return (
+        (path == "/v1" or path.startswith("/v1/"))
+        and path not in _PUBLIC_PATHS
+        and not is_signed_cover_path(path)
+    )
 
 
 async def _send_json(send: Send, status: int, detail: str) -> None:
