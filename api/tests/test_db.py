@@ -37,6 +37,8 @@ EXPECTED_TABLES = {
     "runner_presence",
     # v18 (WP API-FIX-5): real cover art per app (vault_api/cover_art.py).
     "app_cover_art",
+    # v19 (WP UPD-1): always-on update check bookkeeping.
+    "update_check_state",
 }
 
 

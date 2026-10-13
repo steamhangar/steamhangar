@@ -11,10 +11,10 @@ api/README.md "Auth") — every route added here is authenticated automatically.
 
 **Two things this router deliberately does NOT do.**
 
-It does not run on a schedule. Wiring the oracle into the WP 3.5 scheduler or
-the job worker would make an outbound third-party request a background,
-invisible event on a box whose operator may never have read this file; refresh
-stays an explicit call for now (api/README.md records this as the follow-up).
+This router itself does not run on a schedule; refresh here is an explicit
+call. Since WP UPD-1 the scheduler separately refreshes cached games through
+``update_check.maybe_check_updates``, but only while the operator has enabled
+the oracle (see api/README.md "Always-on update check").
 
 It does not fail. ``POST .../refresh`` answers ``200`` with ``ok: false`` and
 a reason when the oracle is unreachable or answered garbage, and ``200`` with

@@ -39,6 +39,7 @@ from vault_api.routers import (
     settings as settings_router,
     stats,
     steam,
+    updates,
 )
 from vault_api.scheduler import PrefillScheduler
 from vault_api.sizes import SizeCache
@@ -329,6 +330,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # tell "this vault-api is too old to have an oracle" from "this operator
     # chose not to enable it" — which are different things to show a user.
     app.include_router(oracle.router)
+    # WP UPD-1: bulk update check (oracle refresh for cached games, no download).
+    app.include_router(updates.router)
     # WP 4a.6r. Always mounted, even with no key configured: the relay routes
     # answer 409 in that state rather than 404, so a web UI can tell "this
     # vault-api is too old to have the relay" from "this operator hasn't set

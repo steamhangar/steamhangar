@@ -190,7 +190,11 @@ import sqlite3
 #: about: the validated cover URL (or NULL), the outcome, consecutive failed
 #: attempts and when to ask again. A brand-new table, so -- like v6/v9/v13/v16
 #: -- it needs no ``ALTER`` step; ``apps`` itself is untouched.
-SCHEMA_VERSION = 18
+#: v19 (WP UPD-1): added ``update_check_state`` -- the single-row bookkeeping
+#: of the always-on update check (``vault_api/update_check.py``): when the
+#: last scheduled check was claimed and what it found. A brand-new table, so
+#: it needs no ``ALTER`` step.
+SCHEMA_VERSION = 19
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -672,6 +676,21 @@ CREATE TABLE IF NOT EXISTS app_cover_art (
 
 CREATE INDEX IF NOT EXISTS idx_app_cover_art_next_check
     ON app_cover_art (next_check_at);
+
+-- WP UPD-1: bookkeeping of the always-on update check. Single row, the same
+-- CHECK(id = 1) device and claim-then-work rule as schedule_state, but a
+-- SEPARATE row on purpose: the check runs whether or not a schedule window is
+-- set, so it must not share (and consume) the prefill sweep's interval.
+-- last_check_at is a UTC 'YYYY-MM-DDTHH:MM:SSZ' string stamped when the check
+-- is CLAIMED; the counters are NULL while a check is in flight (or the process
+-- died in one) and filled in when it finishes.
+CREATE TABLE IF NOT EXISTS update_check_state (
+    id                INTEGER PRIMARY KEY CHECK (id = 1),
+    last_check_at     TEXT,
+    last_check_apps   INTEGER,
+    last_check_ok     INTEGER,
+    last_check_stale  INTEGER
+);
 
 CREATE TABLE IF NOT EXISTS runner_presence (
     runner_id            TEXT PRIMARY KEY,

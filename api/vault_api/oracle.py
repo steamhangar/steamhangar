@@ -117,7 +117,7 @@ import sqlite3
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from vault_api import deletion, jobs
@@ -918,40 +918,17 @@ class AppOracleView:
         return self.checked_at is not None
 
 
-def app_view(
-    conn: sqlite3.Connection, appid: int, *, settings: Settings
-) -> AppOracleView:
-    """The stored oracle view of one app — read-only, no network, never raises
-    for missing data.
+def _compare_depots(
+    oracle_rows: Iterable[Mapping[str, object]],
+    recorded_rows: Iterable[Mapping[str, object]],
+) -> list[DepotStaleness]:
+    """Compare ONE app's oracle rows with its recorded manifests (pure).
 
-    Answers with ``enabled=False`` and an empty view when the oracle is off,
-    so a caller renders "not configured" rather than "nothing is stale".
+    Shared by ``app_view`` (one app) and ``verdicts_by_app`` (every app, from
+    two bulk reads) so the two can never disagree about what "stale" means.
+    ``oracle_rows`` carry ``depotid``/``branch``/``manifestid``,
+    ``recorded_rows`` carry ``depotid``/``manifestid``.
     """
-    if not settings.manifest_oracle_enabled:
-        return AppOracleView(
-            appid=appid,
-            enabled=False,
-            checked_at=None,
-            buildid=None,
-            verdict=VERDICT_UNKNOWN,
-        )
-
-    state = conn.execute(
-        "SELECT buildid, checked_at, source FROM oracle_app_state WHERE appid = ?",
-        (appid,),
-    ).fetchone()
-    rows = conn.execute(
-        """
-        SELECT depotid, branch, manifestid FROM oracle_branch_manifests
-        WHERE appid = ? ORDER BY depotid, branch
-        """,
-        (appid,),
-    ).fetchall()
-    recorded_rows = conn.execute(
-        "SELECT depotid, manifestid FROM depot_manifests WHERE appid = ?",
-        (appid,),
-    ).fetchall()
-
     recorded: dict[int, str | None] = {}
     for row in recorded_rows:
         depotid = deletion.coerce_positive_id(row["depotid"])
@@ -960,7 +937,7 @@ def app_view(
 
     public: dict[int, str] = {}
     betas: dict[int, list[str]] = {}
-    for row in rows:
+    for row in oracle_rows:
         depotid = deletion.coerce_positive_id(row["depotid"])
         manifestid = valid_manifest_id(row["manifestid"])
         branch = valid_branch_name(row["branch"])
@@ -994,6 +971,43 @@ def app_view(
                 beta_branches=tuple(sorted(betas.get(depotid, ()))),
             )
         )
+    return depots
+
+
+def app_view(
+    conn: sqlite3.Connection, appid: int, *, settings: Settings
+) -> AppOracleView:
+    """The stored oracle view of one app — read-only, no network, never raises
+    for missing data.
+
+    Answers with ``enabled=False`` and an empty view when the oracle is off,
+    so a caller renders "not configured" rather than "nothing is stale".
+    """
+    if not settings.manifest_oracle_enabled:
+        return AppOracleView(
+            appid=appid,
+            enabled=False,
+            checked_at=None,
+            buildid=None,
+            verdict=VERDICT_UNKNOWN,
+        )
+
+    state = conn.execute(
+        "SELECT buildid, checked_at, source FROM oracle_app_state WHERE appid = ?",
+        (appid,),
+    ).fetchone()
+    rows = conn.execute(
+        """
+        SELECT depotid, branch, manifestid FROM oracle_branch_manifests
+        WHERE appid = ? ORDER BY depotid, branch
+        """,
+        (appid,),
+    ).fetchall()
+    recorded_rows = conn.execute(
+        "SELECT depotid, manifestid FROM depot_manifests WHERE appid = ?",
+        (appid,),
+    ).fetchall()
+    depots = _compare_depots(rows, recorded_rows)
 
     return AppOracleView(
         appid=appid,
@@ -1004,6 +1018,42 @@ def app_view(
         depots=tuple(depots),
         source=None if state is None else state["source"],
     )
+
+
+def verdicts_by_app(
+    conn: sqlite3.Connection, *, settings: Settings
+) -> dict[int, tuple[str, str | None]]:
+    """``{appid: (verdict, checked_at)}`` for every app the oracle has a stored
+    snapshot of — read-only, no network, three statements regardless of how
+    many apps there are (the library listing calls this once, not per card).
+
+    Empty when the oracle is off. An app with no snapshot is simply absent:
+    callers read that as "never checked", not as "current". The verdict is
+    ``app_view``'s own (both go through ``_compare_depots``).
+    """
+    if not settings.manifest_oracle_enabled:
+        return {}
+
+    states = conn.execute(
+        "SELECT appid, checked_at FROM oracle_app_state"
+    ).fetchall()
+    oracle_by_app: dict[int, list[sqlite3.Row]] = {}
+    for row in conn.execute(
+        "SELECT appid, depotid, branch, manifestid FROM oracle_branch_manifests"
+    ):
+        oracle_by_app.setdefault(int(row["appid"]), []).append(row)
+    recorded_by_app: dict[int, list[sqlite3.Row]] = {}
+    for row in conn.execute("SELECT appid, depotid, manifestid FROM depot_manifests"):
+        recorded_by_app.setdefault(int(row["appid"]), []).append(row)
+
+    result: dict[int, tuple[str, str | None]] = {}
+    for state in states:
+        appid = int(state["appid"])
+        depots = _compare_depots(
+            oracle_by_app.get(appid, ()), recorded_by_app.get(appid, ())
+        )
+        result[appid] = (app_verdict(depots), state["checked_at"])
+    return result
 
 
 def app_verdict(depots: Sequence[DepotStaleness]) -> str:

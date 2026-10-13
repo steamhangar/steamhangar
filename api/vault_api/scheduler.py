@@ -117,9 +117,11 @@ from vault_api import (
     deletion,
     event_sweep,
     jobs,
+    oracle,
     settings_store,
     sizes,
     tool_apps,
+    update_check,
     webhooks,
 )
 from vault_api.config import Settings
@@ -521,6 +523,15 @@ def cached_appids(conn: sqlite3.Connection, cache_root: str) -> set[int]:
     if not depot_bytes:  # empty/missing cache — no error, just nothing found
         return set()
     return deletion.appids_with_cache_content(conn, depot_bytes)
+
+
+def update_check_appids(conn: sqlite3.Connection, cache_root: str) -> list[int]:
+    """The apps the always-on update check looks at (WP UPD-1): exactly the
+    cached ones — ``cached_appids``, the sweep's own definition, minus Steam
+    tool packages (never prefilled, so never "updated" on their own). Not the
+    whole library, not the installed-on-clients set."""
+    ordinary, _tools = tool_apps.split_tool_apps(cached_appids(conn, cache_root))
+    return sorted(ordinary)
 
 
 def compute_targets(
@@ -1046,8 +1057,15 @@ class PrefillScheduler:
         clock: Clock = local_now,
         tick_seconds: float = DEFAULT_TICK_SECONDS,
         webhook_notifier: "webhooks.WebhookNotifier | None" = None,
+        oracle_fetch: "oracle.Fetcher | None" = None,
+        update_check_pause_seconds: float = update_check.INTER_REQUEST_PAUSE_SECONDS,
     ) -> None:
         self._settings = settings
+        #: WP UPD-1: injectable oracle fetcher for the always-on update check.
+        #: ``None`` (production) means the configured HTTP fetcher; tests pass
+        #: a fake so nothing ever touches the network.
+        self._oracle_fetch = oracle_fetch
+        self._update_check_pause_seconds = update_check_pause_seconds
         self._clock = clock
         self._tick_seconds = tick_seconds
         #: WP 3.13: threaded through to event_sweep.maybe_sweep's persist step
@@ -1278,4 +1296,27 @@ class PrefillScheduler:
                 "apps it did not reach are picked up then (the target set is "
                 "recomputed from scratch, never resumed).",
                 self._tick_seconds,
+            )
+
+        # WP UPD-1: the always-on update check. Independent of the schedule
+        # window (it never reads it) and of the prefill sweep above: it only
+        # refreshes the manifest oracle for cached games, once per interval,
+        # and starts no download. Last and in its own try, so a failure here
+        # cannot affect the event sweep or the prefill sweep, and the sweep's
+        # enqueue is never delayed by its network round trips.
+        try:
+            update_check.maybe_check_updates(
+                conn,
+                effective,
+                now,
+                lambda: update_check_appids(conn, effective.cache_root),
+                fetch=self._oracle_fetch,
+                should_abort=self._stop.is_set,
+                pause=lambda: self._stop.wait(self._update_check_pause_seconds),
+            )
+        except Exception:
+            logger.exception(
+                "Update check failed (WP UPD-1). The thread survives; the "
+                "claim is already stamped, so the next check is one interval "
+                "away."
             )
