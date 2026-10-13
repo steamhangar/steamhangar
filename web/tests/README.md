@@ -3341,3 +3341,59 @@ Suite: **1312 tests, 1312 pass, 0 fail**.
   started non-forced flips from "Updating" to "Verifying".
 - A resumed run shows its normal kind; the mockup's short "verifying
   cached chunks" phase after a resume has no API signal.
+
+### WP UPD-2 — "Check updates", the "Update available" badge and the "Updates" chip
+
+D14 (user decision 2026-10-13), against the WP UPD-1 contract (every test
+mocks it). `lib/update-check.js` holds the
+decisions: the phases (`unknown` -> `unsupported` / `disabled` / `idle` /
+`running`), the runner (POST `/v1/updates/check`, then `GET
+/v1/updates/status` every 2 s until `running` is false, at most 150 reads,
+stopped by `detach()` when Library is left, resumed by `attach()` on the
+next open, a generation token so a read in flight after detach does
+nothing), the toast wording per `last_outcome`, and the status line ("last
+checked", `scheduled` -> automatic/manual hint, oracle off). `views/
+library.js` paints it: the button sits beside the unchanged "Check & update
+all cached games" in `.lib-checkbtns`, both inside `.lib-checkrow` (six
+in-flow children stay). No new live region: results go to the toast. Only
+the press that started a run is toasted; a scheduled run seen on view open
+just updates the line. A 404 on either route hides button and line; the
+"Updates" chip is optional in `lib/library-filters.js` and shows only when
+`GET /v1/games` rows carry a boolean `update_available`. The card badge
+(`components/game-card.js` `syncUpdateTag`) is not a status kind:
+`data-dk` and the status word do not change, so a flag flip falls back to
+a full render (`updateFlagsChanged`) to move chip counts and filter
+membership.
+
+Tests: `update-check.test.js` 29 (helpers, wording incl. "a failed game is
+never 'up to date'", 503 as transient, runner with fake timers: started,
+already_running, disabled, 404, in-flight guard, the bound, transient read
+error, detach with a read in flight, resume after re-attach, scheduled run
+not announced, 404 mid-run, failed read on return mid-run resumes
+polling, a run finished while away clears `announce`, attach stale guard), `game-card-update.test.js` 6 (badge build,
+non-boolean values, not a status, aria-label, patch add/remove, CSS),
+`library-update-check-wiring.test.js` 7 (real api.js -> fetch path: button
+and line, badge and chip filter, press to finish with toast and games
+re-read, detach stops polling, oracle off, older vault-api, vanished chip
+falls back to All), `library-filters.test.js` 3 new (optional chip, count
+follows the query, predicate is `=== true`).
+
+While busy the button is `aria-disabled` (keeps keyboard focus, the
+runner ignores the click); real `disabled` only with the oracle off. The
+BP-L "Compact" reset gives `.updbadge` its full wording back like
+`.instbadge` (both pinned in `css-layout-foundation.test.js`).
+
+Mutations, all killed: no `detach()` on view change (polling continues
+off-view); no full render on a flag flip (chip count stays 1); no
+vanished-chip fallback to All; no polling restart after a failed read on
+return; no `announce` reset on attach.
+
+Suite: **1382 tests, 1382 pass, 0 fail**.
+
+#### Honest list
+
+- No browser run: button row wrapping and the badge colour were not looked
+  at, only DOM and CSS rules.
+- Demo mode has no `/v1/updates/*` routes and no `update_available` on its
+  games, so the feature is hidden there (the 404 path).
+- The wiring tests poll with the real 2 s interval (about 7 s for the file).

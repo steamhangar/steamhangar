@@ -29,9 +29,17 @@
  * docs/WORKPACKAGES.md's WP 4a.3 divergence record), not a placeholder —
  * `Update ready` returns as a SIXTH chip, not a swapped-back one, on
  * whatever WP first surfaces oracle staleness on `GET /v1/games`.
+ *
+ * **WP UPD-2: that sixth chip, "Updates".** `GET /v1/games` carries
+ * `update_available` since WP UPD-1 (true only for a stale oracle verdict on
+ * a game with cache content). The chip is labeled "Updates" (D14 wording)
+ * and is OPTIONAL: `chipCounts` lists it only when the rows actually carry
+ * the field (`hasUpdateField`), so an older vault-api shows the five chips
+ * it always had.
  */
 
 import { dispKind, KIND } from "./game-status.js";
+import { hasUpdateField } from "./update-check.js";
 
 /**
  * @param {object} game GameSummary
@@ -55,6 +63,8 @@ export const FILTER_DEFS = Object.freeze([
     predicate: (g, job) => !!job, // findLiveJob already excludes queued/GC (game-status.js)
   },
   { key: "failed", label: "Failed", predicate: (g, job) => dispKind(g, job) === KIND.ERROR },
+  // WP UPD-2: optional — see the module header and chipCounts.
+  { key: "updates", label: "Updates", predicate: (g) => g.update_available === true, optional: true },
 ]);
 
 const FILTER_BY_KEY = new Map(FILTER_DEFS.map((f) => [f.key, f]));
@@ -85,7 +95,10 @@ export function visibleGames(games, { query, filterKey, liveJobsByAppid }) {
  */
 export function chipCounts(games, { query, liveJobsByAppid }) {
   const inQuery = games.filter((g) => matchesQuery(g, query));
-  return FILTER_DEFS.map((f) => ({
+  // Optional chips depend on the WHOLE list, not the query: typing a search
+  // must never make the "Updates" chip appear or vanish.
+  const withOptional = hasUpdateField(games);
+  return FILTER_DEFS.filter((f) => !f.optional || withOptional).map((f) => ({
     key: f.key,
     label: f.label,
     count: inQuery.filter((g) => f.predicate(g, liveJobsByAppid?.get(g.appid))).length,

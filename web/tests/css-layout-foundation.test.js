@@ -378,6 +378,13 @@ test("BP-L's .grid.cols3 reset restates EVERY one of the base card's own values 
     ".grid.cols3 .card{ gap:7px; }",
     ".grid.cols3 .meta{ gap:6px; font-size:11px; }",
     ".grid.cols3 .pick{ top:7px; right:7px; width:21px; height:21px; }",
+    // WP AG-2 / WP UPD-2: both meta-row badges get their full wording back.
+    ".grid.cols3 .instbadge{ font-size:11px; }",
+    ".grid.cols3 .instbadge .ibfull{ display:inline; }",
+    ".grid.cols3 .instbadge .ibcompact{ display:none; }",
+    ".grid.cols3 .updbadge{ font-size:11px; }",
+    ".grid.cols3 .updbadge .ubfull{ display:inline; }",
+    ".grid.cols3 .updbadge .ubcompact{ display:none; }",
   ];
   for (const rule of expectedResets) {
     assert.ok(block.body.includes(rule), `missing or changed BP-L .grid.cols3 reset rule: ${rule}`);

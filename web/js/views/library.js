@@ -79,6 +79,18 @@
  * quick action and are never a bulk-download target; their download lives
  * in the detail sheet (its existing "not tracked" branch). A relay failure
  * leaves the vault games on screen and says why in the notice line.
+ *
+ * **WP UPD-2 ("Check updates", D14).** A second button in `.lib-checkrow`
+ * calls `POST /v1/updates/check` (oracle refresh for every cached game, never
+ * a download), then polls `GET /v1/updates/status` until the run ends and
+ * re-reads the games. All decisions (phases, bounded polling, detach on
+ * view change, toast wording, the status line) live in
+ * `lib/update-check.js`; this file paints them. The "Check & update all
+ * cached games" button and its flow are unchanged. Cards show an "Update
+ * available" badge from `update_available` (components/game-card.js), and
+ * the "Updates" chip appears when the rows carry that field
+ * (lib/library-filters.js). An older vault-api (404 on the routes, no field
+ * on the rows) shows neither the button, the line nor the chip.
  */
 
 import { store } from "../store-singleton.js";
@@ -100,6 +112,17 @@ import {
   createCheckAndUpdateAction,
 } from "../lib/cached-prefill-outcome.js";
 import { planGamesUpdate } from "../lib/render-plan.js";
+import {
+  CHECK_UPDATES_LABEL,
+  CHECK_UPDATES_BUSY_LABEL,
+  UPDATE_DISABLED_TEXT,
+  UPDATE_GAVE_UP_TEXT,
+  UPDATE_PHASE,
+  createUpdateCheckRunner,
+  describeUpdateOutcome,
+  updateFlagsChanged,
+  updateStatusLine,
+} from "../lib/update-check.js";
 import { formatBytesGB } from "../lib/format.js";
 import { onViewChange, navigateTo } from "../router.js";
 import { openDetail } from "../components/game-detail-sheet.js";
@@ -234,6 +257,28 @@ function remerge() {
 // checkAndUpdateAction.isInFlight() below to paint a freshly-built button's
 // initial state correctly), same posture as `state` above.
 const checkAndUpdateAction = createCheckAndUpdateAction({ fetcher: () => api.prefillCached() });
+
+// WP UPD-2: module-level like the action above, so a running check's state
+// survives a navigate-away-and-back. Polling itself stops on leaving the
+// view (onViewChange -> detach) and resumes on the next renderLibrary.
+const updateCheck = createUpdateCheckRunner({
+  startCheck: () => api.checkUpdates(),
+  fetchStatus: () => api.updatesStatus(),
+  onChange: () => paintUpdateCheck(),
+  onDone: (done) => {
+    if (done.kind === "finished") {
+      // Re-read GET /v1/games so badges and the "Updates" chip follow the
+      // new verdicts — whoever started the run.
+      store.refreshNow();
+      if (done.announce) {
+        const desc = describeUpdateOutcome(done.status);
+        showToast(desc.message, { warn: desc.warn, duration: desc.warn ? CHECK_UPDATE_WARN_TOAST_MS : undefined });
+      }
+    } else if (done.announce) {
+      showToast(UPDATE_GAVE_UP_TEXT, { duration: CHECK_UPDATE_WARN_TOAST_MS });
+    }
+  },
+});
 
 // The bulk bar's live height -> `--bulk-h` on <html> (WP WEB-FIX-6,
 // lib/bulk-room.js): css/app.css turns it into select-mode scroll room so
@@ -447,11 +492,52 @@ async function onCheckAndUpdate() {
 }
 
 // ---------------------------------------------------------------------
+// "Check updates" (WP UPD-2) — DOM glue for lib/update-check.js.
+// ---------------------------------------------------------------------
+
+function paintUpdateCheck() {
+  if (!mounted()) return;
+  const { phase, status } = updateCheck.snapshot();
+  const btn = els.checkUpdatesBtn;
+  const hidden = phase === UPDATE_PHASE.UNKNOWN || phase === UPDATE_PHASE.UNSUPPORTED;
+  btn.hidden = hidden;
+  const busy = updateCheck.isBusy();
+  // While busy: aria-disabled, never `disabled` — a disabled button drops
+  // keyboard focus to <body> (LEARNINGS, WP WEB-FEAT-1); the runner's own
+  // in-flight guard ignores the click. Real `disabled` only while the oracle
+  // is off (nothing to do here at all; the line below says why).
+  btn.disabled = phase === UPDATE_PHASE.DISABLED;
+  btn.setAttribute("aria-disabled", String(busy));
+  btn.textContent = busy ? CHECK_UPDATES_BUSY_LABEL : CHECK_UPDATES_LABEL;
+  const line = updateStatusLine(phase, status);
+  if (els.updLine.textContent !== line) els.updLine.textContent = line;
+  els.updLine.hidden = !line;
+}
+
+async function onCheckUpdates() {
+  const res = await updateCheck.run();
+  if (res.skipped) return;
+  if (res.result === "disabled") {
+    showToast(UPDATE_DISABLED_TEXT, { warn: true, duration: CHECK_UPDATE_WARN_TOAST_MS });
+  } else if (res.result === "already_running") {
+    showToast("An update check is already running — its result follows when it finishes.");
+  } else if (res.result === "unsupported") {
+    showToast("This vault-api has no update check yet — update vault-api to use it.", { warn: true });
+  } else if (res.result === "error") {
+    showToast(res.message, { warn: true });
+  }
+}
+
+// ---------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------
 
 function renderChips() {
   const counts = chipCounts(state.games, { query: state.query, liveJobsByAppid });
+  // WP UPD-2: an optional chip (e.g. "Updates") can disappear when the API
+  // stops carrying its field; never leave the grid filtered by a chip the
+  // user can no longer see or press.
+  if (!counts.some((c) => c.key === state.filterKey)) state.filterKey = "all";
   els.chips.replaceChildren();
   for (const c of counts) {
     const btn = document.createElement("button");
@@ -660,9 +746,11 @@ function fullRender() {
   if (!mounted()) return;
   updateSubtitle();
   renderOwnedNotice();
+  // Chips before the grid: renderChips may reset a filter that vanished.
   renderChips();
   renderGrid();
   syncBulk();
+  paintUpdateCheck();
 }
 
 // ---------------------------------------------------------------------
@@ -946,7 +1034,23 @@ function buildSection() {
   const startsBusy = checkAndUpdateAction.isInFlight();
   checkUpdateBtn.disabled = startsBusy;
   checkUpdateBtn.textContent = startsBusy ? CHECK_UPDATE_BUSY_LABEL : CHECK_UPDATE_LABEL;
-  checkRow.appendChild(checkUpdateBtn);
+  // WP UPD-2: "Check updates" (oracle only, no download) next to it, hidden
+  // until GET /v1/updates/status answered (paintUpdateCheck). Both share one
+  // wrapping row, still inside `.lib-checkrow` (six in-flow children rule).
+  const checkUpdatesBtn = document.createElement("button");
+  checkUpdatesBtn.type = "button";
+  checkUpdatesBtn.className = "btn ghost sm";
+  checkUpdatesBtn.dataset.action = "check-updates";
+  checkUpdatesBtn.textContent = CHECK_UPDATES_LABEL;
+  checkUpdatesBtn.hidden = true;
+  const checkBtns = document.createElement("div");
+  checkBtns.className = "lib-checkbtns";
+  checkBtns.append(checkUpdatesBtn, checkUpdateBtn);
+  checkRow.appendChild(checkBtns);
+  const updLine = document.createElement("p");
+  updLine.className = "lib-upd";
+  updLine.hidden = true;
+  checkRow.appendChild(updLine);
   // WP WEB-FEAT-1: the owned-list status line (and its Reload / Open
   // Settings buttons) lives INSIDE `.lib-checkrow`, not as a new child of
   // the section: `.view-library`'s BP-L grid assigns its six in-flow
@@ -1052,6 +1156,8 @@ function buildSection() {
     layoutSegs,
     selectBtn,
     checkUpdateBtn,
+    checkUpdatesBtn,
+    updLine,
     searchWrap,
     searchInput,
     qClear,
@@ -1096,6 +1202,7 @@ function buildSection() {
   });
 
   checkUpdateBtn.addEventListener("click", onCheckAndUpdate);
+  checkUpdatesBtn.addEventListener("click", onCheckUpdates);
 
   bulkCancel.addEventListener("click", exitSelect);
 
@@ -1225,6 +1332,14 @@ function patchCard(appid) {
  * structural transition would also change which cards the current
  * filter/search shows. */
 function applyGamesTick(diff) {
+  // WP UPD-2: `update_available` is not part of the structural key, but a
+  // flip changes the badge, the "Updates" chip count and that chip's grid
+  // membership — rare (after a check), so a full render is the simple
+  // correct answer.
+  if (updateFlagsChanged(diff)) {
+    fullRender();
+    return;
+  }
   const plan = planGamesUpdate(diff, currentCardKeys(), computeCardKey);
   if (plan.full) {
     fullRender();
@@ -1317,6 +1432,8 @@ onViewChange((view) => {
   // stuck `inert` forever). Safe to call unconditionally — a no-op when the
   // dialog was not open (see closeDeleteConfirm()).
   closeDeleteConfirm();
+  // WP UPD-2: stop polling the update-check status off-view.
+  updateCheck.detach();
   // Release the detached DOM tree — app.js's replaceChildren() already
   // detached it, but this module held its own reference in `sectionEl`
   // (mounted()'s isConnected check would already report false, this just
@@ -1335,5 +1452,8 @@ export function renderLibrary() {
   // WP WEB-FEAT-1: the one "view open" fetch of the stored SteamID64 and its
   // owned list. The other caller of load() is the Reload button.
   ownedLibrary.load();
+  // WP UPD-2: status read on view open (support probe, "last checked",
+  // resume polling of a running check). No timer while the view is closed.
+  updateCheck.attach();
   return section;
 }

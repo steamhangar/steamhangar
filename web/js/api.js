@@ -226,6 +226,11 @@ export const api = {
   getSettings: () => request("GET", "/v1/settings"),
   patchSettings: (body) => request("PATCH", "/v1/settings", { body }),
   schedule: () => request("GET", "/v1/schedule"),
+  // WP UPD-2: the always-on update check (WP UPD-1). No body; never starts a
+  // download. A vault-api older than UPD-1 answers 404 on both (kind
+  // `not_found`), which lib/update-check.js reads as "feature unsupported".
+  checkUpdates: () => request("POST", "/v1/updates/check"),
+  updatesStatus: () => request("GET", "/v1/updates/status"),
   getSteamKey: () => request("GET", "/v1/steam/key"),
   putSteamKey: (key) => request("PUT", "/v1/steam/key", { body: { key } }),
   deleteSteamKey: () => request("DELETE", "/v1/steam/key"),

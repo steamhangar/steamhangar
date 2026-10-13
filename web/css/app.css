@@ -243,6 +243,19 @@
    docs/PROJECT_PLAN.md §7 Phase 4c) at phone widths. */
 .lib-checkrow{ margin-bottom:10px; }
 .lib-checkrow .btn{ width:100%; }
+/* WP UPD-2: "Check updates" sits next to "Check & update all cached games"
+   in one wrapping row — side by side where both labels fit, stacked full
+   width on a phone (flex-basis below the phone floor, no fixed width). */
+.lib-checkbtns{ display:flex; flex-wrap:wrap; gap:8px; }
+.lib-checkbtns .btn{ width:auto; flex:1 1 220px; min-width:0; }
+/* The update-check status line ("Updates last checked 5 min ago", oracle
+   off, still running). Not a live region: results are announced by the
+   toast; this line only states the current fact. */
+.lib-upd{
+  margin:8px 0 0; min-width:0;
+  font-size:11.5px; line-height:1.5; color:var(--dim-2);
+  overflow-wrap:anywhere;
+}
 /* Owned-library status line (WP WEB-FEAT-1): inside .lib-checkrow, so the
    BP-L named-area grid of .view-library keeps exactly six in-flow children.
    Wraps anywhere (an error detail can be one long token) and never sets a
@@ -548,6 +561,17 @@ button.cappill:active{ transform:scale(.93); }
    always builds — CSS alone decides which is visible (module header rule),
    base case shows the full wording everywhere. */
 .instbadge .ibcompact{ display:none; }
+/* "Update available" badge (WP UPD-2): same own-line shape as `.instbadge`
+   above, in `--stale` like the mockup's "Update ready" state — the cached
+   copy is valid, a newer manifest is upstream. Full word in grid2, the
+   compact "Update" in cols3 and list (rules below), never an ellipsis. */
+.updbadge{
+  display:inline-flex; align-items:center; font-size:10px; font-weight:600;
+  letter-spacing:.2px; color:var(--stale); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; max-width:100%; min-width:0;
+  flex-basis:100%; margin-top:1px;
+}
+.updbadge .ubcompact{ display:none; }
 .rowname{ display:none; }
 
 /* ---------- library layouts (2 cols / 3 cols / list) ---------- */
@@ -568,6 +592,9 @@ button.cappill:active{ transform:scale(.93); }
 .grid.cols3 .instbadge{ font-size:9px; }
 .grid.cols3 .instbadge .ibfull{ display:none; }
 .grid.cols3 .instbadge .ibcompact{ display:inline; }
+.grid.cols3 .updbadge{ font-size:9px; }
+.grid.cols3 .updbadge .ubfull{ display:none; }
+.grid.cols3 .updbadge .ubcompact{ display:inline; }
 
 .grid.list{ grid-template-columns:minmax(0,1fr); gap:7px; }
 .grid.list .card{
@@ -597,6 +624,9 @@ button.cappill:active{ transform:scale(.93); }
    wording so the badge stops dictating this row's width at all. */
 .grid.list .instbadge .ibfull{ display:none; }
 .grid.list .instbadge .ibcompact{ display:inline; }
+.grid.list .updbadge{ flex-basis:auto; }
+.grid.list .updbadge .ubfull{ display:none; }
+.grid.list .updbadge .ubcompact{ display:inline; }
 .grid.list .meta .size{ display:inline; margin-left:0; }
 .grid.list .meta > .sic, .grid.list .meta > .icnact{ display:grid; }
 /* `.icnact` (the list-layout per-row action icon, only ever visible via the
@@ -1892,6 +1922,10 @@ body.onboarding .nav{ display:none; }
   .grid.cols3 .instbadge{ font-size:11px; }
   .grid.cols3 .instbadge .ibfull{ display:inline; }
   .grid.cols3 .instbadge .ibcompact{ display:none; }
+  /* WP UPD-2: the update badge follows the same rule as `.instbadge`. */
+  .grid.cols3 .updbadge{ font-size:11px; }
+  .grid.cols3 .updbadge .ubfull{ display:inline; }
+  .grid.cols3 .updbadge .ubcompact{ display:none; }
   .grid.cols3 .pick{ top:7px; right:7px; width:21px; height:21px; }
   /* `.grid.list` needs no override at all: its top-level rule
      (`grid-template-columns:1fr`) already carries a HIGHER specificity
