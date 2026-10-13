@@ -13,7 +13,11 @@ make the flow work:
   property name and declares the same golden directory as a task input,
 - ci.yml uploads exactly that output directory (pinned action, never on
   cancel, nothing-found is not an error) and its summary step reports the
-  two counts without ever failing the job itself.
+  two counts without ever failing the job itself,
+- every `shoot("<name>")` in the Kotlin test has a checked-in golden
+  `<name>.png` and no golden is left without a shot (WP APP-TEST-1b): a
+  missing golden only records and passes in Gradle, so without this check a
+  lost PNG would silently turn a verify into a record.
 
 The summary step's real `run:` text is executed with fake output trees.
 Pure file parsing plus local bash subprocesses; no Gradle, Docker or network.
@@ -36,6 +40,8 @@ CI_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 GRADLE_FILE = REPO_ROOT / "app" / "app" / "build.gradle.kts"
 TEST_FILE = (REPO_ROOT / "app" / "app" / "src" / "testDebug" / "java" / "dev" / "steamvault"
              / "app" / "ui" / "library" / "LibraryScreenshotTest.kt")
+GOLDEN_DIR = REPO_ROOT / "app" / "app" / "src" / "testDebug" / "screenshots"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 JOB = "android-tests"
 UPLOAD_ACTION = "actions/upload-artifact"
 OUTPUT_DIR = "app/app/build/outputs/roborazzi"
@@ -187,3 +193,31 @@ def test_summary_counts_compare_images_only_and_stays_exit_zero(tmp_path: Path) 
     errors = [ln for ln in p.stdout.splitlines() if ln.startswith("::error ")]
     assert len(errors) == 1 and "::2 screenshot(s) differ" in errors[0]
     assert "(failed): 2" in summary and "(new): 1" in summary
+
+
+# ---------------------------------------------------------------------------
+# Goldens checked in (WP APP-TEST-1b)
+# ---------------------------------------------------------------------------
+
+
+def _shot_names() -> list[str]:
+    src = TEST_FILE.read_text(encoding="utf-8")
+    # Calls only: the definition is `shoot(\n    name: String, ...`.
+    return re.findall(r'\bshoot\(\s*"([^"]+)"', src)
+
+
+def test_every_shot_has_a_checked_in_golden() -> None:
+    names = _shot_names()
+    assert len(names) >= 6, names
+    assert len(names) == len(set(names)), "duplicate shot names overwrite each other's golden"
+    missing = [n for n in names if not (GOLDEN_DIR / f"{n}.png").is_file()]
+    assert not missing, f"no golden in {GOLDEN_DIR.relative_to(REPO_ROOT)} for: {missing}"
+    for n in names:
+        with (GOLDEN_DIR / f"{n}.png").open("rb") as fh:
+            assert fh.read(len(PNG_SIGNATURE)) == PNG_SIGNATURE, f"{n}.png is not a PNG"
+
+
+def test_no_golden_without_a_shot() -> None:
+    names = set(_shot_names())
+    orphans = sorted(p.name for p in GOLDEN_DIR.iterdir() if p.stem not in names or p.suffix != ".png")
+    assert not orphans, f"files in the golden directory no test shoots: {orphans}"

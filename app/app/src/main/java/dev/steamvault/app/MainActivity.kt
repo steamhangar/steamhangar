@@ -10,12 +10,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -67,8 +65,8 @@ import dev.steamvault.app.ui.downloads.DownloadsScreen
 import dev.steamvault.app.ui.downloads.logic.countPending
 import dev.steamvault.app.ui.library.LibraryScreen
 import dev.steamvault.app.ui.library.OwnedLibraryController
-import dev.steamvault.app.ui.nav.BottomNavBar
 import dev.steamvault.app.ui.nav.Destination
+import dev.steamvault.app.ui.nav.MainShell
 import dev.steamvault.app.ui.onboarding.AndroidOnboardingStrings
 import dev.steamvault.app.ui.onboarding.OnboardingController
 import dev.steamvault.app.ui.onboarding.OnboardingMode
@@ -291,29 +289,25 @@ class MainActivity : ComponentActivity() {
                 } else {
                     val pendingJobsCount = countPending(pendingJobsSnapshot)
 
-                    Scaffold(
-                        bottomBar = {
-                            BottomNavBar(
-                                current = destination,
-                                pendingJobsCount = pendingJobsCount,
-                                onSelect = {
-                                    destination = it
-                                    // Mockup rule: navigation dismisses transient
-                                    // surfaces (docs/design/vault-app-mockup-NOTES.md
-                                    // -- the clients sheet is explicitly named
-                                    // alongside the detail sheet and the
-                                    // notifications panel).
-                                    clientsControllerState?.close()
-                                },
-                            )
+                    // WP D12: the shell (bottom nav + inset handling) is
+                    // shared with the Library screenshot test.
+                    MainShell(
+                        current = destination,
+                        pendingJobsCount = pendingJobsCount,
+                        onSelect = {
+                            destination = it
+                            // Mockup rule: navigation dismisses transient
+                            // surfaces (docs/design/vault-app-mockup-NOTES.md
+                            // -- the clients sheet is explicitly named
+                            // alongside the detail sheet and the
+                            // notifications panel).
+                            clientsControllerState?.close()
                         },
-                    ) { innerPadding ->
-                        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                            when (destination) {
-                                Destination.LIBRARY -> LibraryDestinationContent()
-                                Destination.DOWNLOADS -> DownloadsDestinationContent()
-                                Destination.SETTINGS -> SettingsDestinationContent()
-                            }
+                    ) {
+                        when (destination) {
+                            Destination.LIBRARY -> LibraryDestinationContent()
+                            Destination.DOWNLOADS -> DownloadsDestinationContent()
+                            Destination.SETTINGS -> SettingsDestinationContent()
                         }
                     }
 

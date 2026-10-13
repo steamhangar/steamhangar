@@ -320,8 +320,21 @@ delete of a grouped game also deletes its packages' own depots when they
 would be orphaned, shared depots still kept (Q6, user variant); prefill
 unchanged until measured on prod (Q5 A). Flat list with `parent_appid`
 from the server, UIs group (Q2 A, orchestrator). Open: Q3 failed package
-on the card, Q7 tool packages, Q8 oracle for uncached apps, bulk-plan
-behaviour of grouped cards — after the prod check P1.
+on the card — decided 2026-10-13 (user, Q3 B variant): a failed package
+shows a small warning on the group card, the "Failed" chip counts such
+groups, and the detail sheet offers a retry per package. Prod library
+screenshot (user, 2026-10-13, rc14): packages 2506210..2506280 and
+4199890 show as cached (0.3 GB each, CURRENT, not failed), so they do
+have depots mapped to their own appid — a grouped delete really frees
+them. APP 1716750 (0.2 GB) is not an HD2 package. P1 step 3 measured
+2026-10-13 (diag): the store GetItems answers 553850 but not the
+packages (success 15) nor 228980; the oracle names them (2506210 /
+2514120: type DLC, parent 553850, no own depots; 228980: type Tool), and
+HD2's own PICS lists all 15 packages (`extended.listofdlc`, depot
+`dlcappid`). User decisions 2026-10-13: Q8 B (no extra oracle requests,
+packages come from the cached parent's answer); Q7 A (dynamic tool
+classification for display only, the fixed list keeps stopping
+prefills).
 
 ## D10: COVER-CACHE-1, slow cover loading
 
@@ -385,8 +398,19 @@ installed, what is loading now, what was loaded recently. Clients
 without an agent (e.g. the WLAN client "frame") appear from the cache
 traffic alone: connected, bytes loaded, last active; "installed" only
 for agent clients, an agent can be added later (Windows and Linux/SteamOS
-agents exist). Needs the client address in vault-core's log format
-(own package; event_sweep already reads client addresses). Includes
+agents exist). Data source (found 2026-10-13 in D15a): the opt-in
+event log (`VAULT_EVENT_LOG`, `$remote_addr` since WP 3.10), which
+`event_sweep.py` already aggregates per address into
+`client_cache_stats`; D15b builds on that and must check or document
+that `VAULT_EVENT_LOG` is set. D15a (`client=` on the stdout access log)
+is operator diagnostics only, not a D15b prerequisite. Measured on prod
+2026-10-13 22:36 (user, docker exec): `VAULT_EVENT_LOG` and
+`VAULT_EVENT_LOG_PATH` are both `/vault/logs/event.log`, so D15b needs no
+Antrag. The file is 41 MB and grows unrotated (vault-api cannot truncate
+it: nginx-owned 0644); at the default 64 MiB `VAULT_EVENT_LOG_MAX_BYTES`
+every sweep will log a WARNING. D15 must add real rotation (vault-core
+side) and longer client-stat retention (`VAULT_CLIENT_STATS_KEEP` default
+48 = about 4 h) for the history/graphs. Includes
 D13 SPEED-1: throughput measured once at the server (vault-core), shown
 per running job. Downloads history gets a time filter: 24 h, 7 days,
 30 days, all. Downloads header (user, 2026-10-13): current and average
@@ -454,7 +478,11 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
 7. **D10 COVER-CACHE-1 (api + app)** vault-api stores cover images and
    serves them with ETag + long Cache-Control; Coil disk cache on Android.
 
-**Wave 2 (rc16)** — runs in parallel where it does not touch wave 1
+**Release cut (user decision 2026-10-13):** rc15 = wave 1; rc16 = D11 +
+D9; rc17 = D15 + D16 (both rework Settings and both wait on Anträge:
+`VAULT_EVENT_LOG` on prod, settings volume).
+
+**Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
 design exists. Wave-2 code stays on branches until rc15 is tagged.
 8. **D16 SETTINGS-1** split into: (a) settings audit, collapsible

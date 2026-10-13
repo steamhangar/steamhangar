@@ -56,7 +56,10 @@ on:
   workflow_dispatch:
 
 # Only the read access every job below actually needs (checkout). No job
-# publishes anything, so nothing needs write permissions anywhere.
+# publishes anything. The one exception, android-goldens-push (WP
+# APP-TEST-2), grants itself contents: write at job level to push refreshed
+# screenshot goldens back to a wp/*-goldens branch; it runs no build code.
+# Every other job stays read-only.
 permissions:
   contents: read
 
@@ -240,7 +243,18 @@ jobs:
   android-tests:
     name: app / gradle unit tests + lint
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    # WP APP-TEST-2: not on a push to wp/*-goldens -- android-goldens-record
+    # below re-records the goldens and runs this job's task list in verify
+    # mode on the result; here it would verify against the goldens being
+    # replaced. The predicate is the refresh jobs' own, negated (no regex in
+    # expressions; their guard step enforces the single-segment shape).
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+      && !(github.event_name == 'push'
+      && github.ref_type == 'branch'
+      && startsWith(github.ref, 'refs/heads/wp/')
+      && endsWith(github.ref, '-goldens')
+      && !github.event.repository.fork)
     # Cold-cache Gradle (wrapper distribution + AGP/Kotlin/Compose dependency
     # resolution, none of it warm on a fresh runner) is slower than the
     # pytest/go/node jobs above, though nowhere near verify-stack's
@@ -413,6 +427,249 @@ jobs:
         if: failure()
         shell: bash
         run: python3 .github/scripts/android-annotate.py gradle --log "${RUNNER_TEMP}/android-gradle.log"
+
+  # WP APP-TEST-2: golden refresh by CI (decision 2026-10-13,
+  # docs/handover/post-0.1.0-roadmap.md wave plan item 5). Screenshot
+  # goldens can only be rendered here (no Android SDK or emulator in the
+  # devbox), so a push to a branch named wp/<name>-goldens runs two jobs:
+  #
+  #   android-goldens-record (contents: read, runs Gradle):
+  #     1. deletes the goldens and re-records every screenshot in record
+  #        mode, so the directory mirrors the test's shots exactly,
+  #     2. runs android-tests' full task list in VERIFY mode on that tree
+  #        (a second render must match the first pixel for pixel) -- this
+  #        is the verify of the bot commit: a push made with GITHUB_TOKEN
+  #        never triggers another workflow run (GitHub's loop protection),
+  #        so the commit gets no CI run of its own and is verified here,
+  #        before it exists; it differs from the CI-tested head only by PNGs,
+  #     3. uploads the PNGs, and nothing else, as an artifact.
+  #   android-goldens-push (contents: write, runs NO build code):
+  #     4. checks out the same commit, downloads the PNGs, accepts them only
+  #        as exactly the set of shot names in LibraryScreenshotTest.kt,
+  #        each a real PNG,
+  #     5. commits them as github-actions[bot] if anything changed and
+  #        pushes fast-forward to the SAME branch (a branch that moved
+  #        meanwhile is rejected; the newer run takes over).
+  #
+  # The write token exists only in the job that executes no Gradle, no
+  # dependency and no repository build code: a job that runs Gradle cannot
+  # keep a token away from that code, so it gets none. A -goldens branch
+  # accepts EVERY visual change its push renders -- the guards for the
+  # images themselves are the human review of the bot commit and the full
+  # CI run (android-tests included) on the merge to main.
+  #
+  # android-tests is skipped on these pushes (see its `if:`): it would
+  # verify against the goldens being replaced and go red by design; step 2
+  # runs the same Gradle tasks instead.
+  #
+  # Branch shape: GitHub expressions have no regex, so the three jobs share
+  # one textually identical prefix/suffix predicate (pinned by
+  # api/tests/test_app_test_2_golden_refresh_ci.py) and android-tests is
+  # skipped exactly when the refresh jobs start. The exact shape
+  # refs/heads/wp/<one segment>-goldens is then enforced by the first step
+  # of BOTH jobs, fail-closed: wp/a/b-goldens runs red, never silently
+  # green. Never on pull_request (never fork code), main, tags, or in a
+  # fork of the repository.
+  android-goldens-record:
+    name: app / record screenshot goldens
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push'
+      && github.ref_type == 'branch'
+      && startsWith(github.ref, 'refs/heads/wp/')
+      && endsWith(github.ref, '-goldens')
+      && !github.event.repository.fork
+    permissions:
+      contents: read
+    concurrency:
+      group: android-goldens-record-${{ github.ref }}
+      cancel-in-progress: true
+    # Two Gradle passes (record, then the full android-tests task list).
+    timeout-minutes: 40
+    steps:
+      - name: "goldens: guard branch"
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ "$GITHUB_REF_TYPE" != "branch" ]; then
+            echo "::error::golden refresh runs on branch pushes only (event=${GITHUB_EVENT_NAME}, ref type=${GITHUB_REF_TYPE})"
+            exit 1
+          fi
+          if ! printf '%s' "$GITHUB_REF" | grep -Eq '^refs/heads/wp/[^/]+-goldens$'; then
+            echo "::error::golden refresh runs on wp/<name>-goldens branches only, not ${GITHUB_REF}"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          # Same toolchain and cache as android-tests; reasons there.
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: "goldens: record"
+        working-directory: app
+        shell: bash
+        run: |
+          set -o pipefail
+          stop_token="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+          trap 'echo "::${stop_token}::"' EXIT
+          rm -f app/src/testDebug/screenshots/*.png
+          echo "::stop-commands::${stop_token}"
+          bash gradlew testDebugUnitTest --tests 'dev.steamvault.app.ui.library.LibraryScreenshotTest' \
+            -Psteamhangar.screenshots.record=true --console=plain 2>&1 \
+            | tee "${RUNNER_TEMP}/android-gradle.log"
+      - name: "goldens: verify (android-tests task list)"
+        working-directory: app
+        shell: bash
+        run: |
+          set -o pipefail
+          stop_token="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+          trap 'echo "::${stop_token}::"' EXIT
+          echo "::stop-commands::${stop_token}"
+          bash gradlew assembleDebug testDebugUnitTest testReleaseUnitTest lintDebug --console=plain 2>&1 \
+            | tee -a "${RUNNER_TEMP}/android-gradle.log"
+      - name: "goldens: upload recorded goldens"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-screenshot-goldens
+          path: app/app/src/testDebug/screenshots/*.png
+          if-no-files-found: error
+          retention-days: 14
+      - name: "goldens: upload render output"
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-screenshots-goldens-diffs
+          path: app/app/build/outputs/roborazzi/
+          # Only a failed verify pass leaves diffs behind.
+          if-no-files-found: ignore
+          retention-days: 14
+      # Same annotation steps as android-tests (WP CI-FIX-2), over the log
+      # of both Gradle passes.
+      - name: "annotate: Kotlin compile errors"
+        if: failure()
+        shell: bash
+        run: python3 .github/scripts/android-annotate.py kotlin --log "${RUNNER_TEMP}/android-gradle.log"
+      - name: "annotate: failed unit tests"
+        if: failure()
+        shell: bash
+        run: >-
+          python3 .github/scripts/android-annotate.py junit
+          --results-dir app/app/build/test-results
+          --test-root app/app/src/test/java
+          --test-root app/app/src/test/kotlin
+          --test-root app/app/src/testDebug/java
+      - name: "annotate: lint issues"
+        if: failure()
+        shell: bash
+        run: >-
+          python3 .github/scripts/android-annotate.py lint
+          --lint-xml app/app/build/reports/lint-results-debug.xml
+          --lint-txt app/app/build/reports/lint-results-debug.txt
+          --project-dir app/app
+      - name: "annotate: Gradle failure summary"
+        if: failure()
+        shell: bash
+        run: python3 .github/scripts/android-annotate.py gradle --log "${RUNNER_TEMP}/android-gradle.log"
+
+  android-goldens-push:
+    name: app / push screenshot goldens
+    runs-on: ubuntu-latest
+    needs: android-goldens-record
+    if: >-
+      github.event_name == 'push'
+      && github.ref_type == 'branch'
+      && startsWith(github.ref, 'refs/heads/wp/')
+      && endsWith(github.ref, '-goldens')
+      && !github.event.repository.fork
+    # The only write access in this workflow. Everything this job runs is
+    # in the steps below: git, coreutils, the artifact download. No Gradle,
+    # no setup-java, no cache restore, no repository script.
+    permissions:
+      contents: write
+    concurrency:
+      group: android-goldens-push-${{ github.ref }}
+      cancel-in-progress: false
+    timeout-minutes: 10
+    steps:
+      - name: "goldens: guard branch"
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ "$GITHUB_REF_TYPE" != "branch" ]; then
+            echo "::error::golden refresh runs on branch pushes only (event=${GITHUB_EVENT_NAME}, ref type=${GITHUB_REF_TYPE})"
+            exit 1
+          fi
+          if ! printf '%s' "$GITHUB_REF" | grep -Eq '^refs/heads/wp/[^/]+-goldens$'; then
+            echo "::error::golden refresh runs on wp/<name>-goldens branches only, not ${GITHUB_REF}"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: "goldens: download recorded goldens"
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: app-screenshot-goldens
+          path: ${{ runner.temp }}/goldens
+      - name: "goldens: validate and copy"
+        shell: bash
+        run: |
+          export LC_ALL=C
+          src=app/app/src/testDebug/java/dev/steamvault/app/ui/library/LibraryScreenshotTest.kt
+          goldens=app/app/src/testDebug/screenshots
+          dl="${RUNNER_TEMP:?}/goldens"
+          fail() { echo "::error title=Golden refresh rejected::$1"; exit 1; }
+          { [ -d "$dl" ] && [ ! -L "$dl" ]; } || fail "no downloaded goldens"
+          expected="$(grep -oE '\bshoot\("[^"]+"' "$src" | sed -E 's/^shoot\("//; s/"$//' | sort)"
+          [ -n "$expected" ] || fail "no shoot(\"...\") calls found in $src"
+          [ "$expected" = "$(printf '%s\n' "$expected" | sort -u)" ] || fail "duplicate shot names in $src"
+          actual="$(find "$dl" -mindepth 1 -printf '%P\n' | sort)"
+          [ -n "$actual" ] || fail "the artifact is empty"
+          while IFS= read -r f; do
+            printf '%s' "$f" | grep -Eq '^[a-z0-9_]+\.png$' || fail "unexpected name in the artifact: ${f}"
+            { [ -f "$dl/$f" ] && [ ! -L "$dl/$f" ]; } || fail "not a regular file: ${f}"
+            sig="$(head -c 8 "$dl/$f" | od -An -tx1 | tr -d ' \n')"
+            [ "$sig" = "89504e470d0a1a0a" ] || fail "not a PNG: ${f}"
+          done <<< "$actual"
+          [ "$(printf '%s\n' "$actual" | sed 's/\.png$//' | sort)" = "$expected" ] \
+            || fail "artifact files do not match the shots in LibraryScreenshotTest.kt"
+          mkdir -p "$goldens"
+          find "$goldens" -maxdepth 1 -type f -name '*.png' -delete
+          while IFS= read -r f; do cp -- "$dl/$f" "$goldens/$f"; done <<< "$actual"
+      - name: "goldens: commit locally"
+        id: commit
+        shell: bash
+        run: |
+          goldens=app/app/src/testDebug/screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- "$goldens"
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "### Screenshot goldens: unchanged" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### Screenshot goldens: refreshed"
+            echo ""
+            git diff --cached --name-status -- "$goldens" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          git commit -q -m "test(app): refresh screenshot goldens from CI" \
+            -m "Recorded and verified by workflow run ${GITHUB_RUN_ID} on ${GITHUB_SHA}."
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      - name: "goldens: push to the same branch"
+        if: steps.commit.outputs.changed == 'true'
+        shell: bash
+        env:
+          PUSH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          auth="$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          echo "::add-mask::${auth}"
+          git -c core.hooksPath=/dev/null \
+            -c "http.${GITHUB_SERVER_URL}/.extraheader=AUTHORIZATION: basic ${auth}" \
+            push origin "HEAD:${GITHUB_REF}"
 
   # Pre-freeze project review, S4: until this job existed the PR gate
   # never rendered deploy/compose.yaml at all and shellcheck'd exactly one
