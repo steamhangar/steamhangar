@@ -4038,8 +4038,57 @@ tolerates no differing pixel), and only
 check in images rendered by CI.
 
 **Record mode** (`-Psteamhangar.screenshots.record=true` on
-`testDebugUnitTest`) overwrites every golden in place. It exists for a
-machine whose render matches CI's; it is not used by CI.
+`testDebugUnitTest`) overwrites every golden in place. CI uses it in the
+golden refresh below; locally it only makes sense on a machine whose
+render matches CI's.
+
+**Refreshing goldens from CI (WP APP-TEST-2).** The manual
+artifact-download route above still works; the shorter one is a branch
+named `wp/<name>-goldens` (exactly one path segment after `wp/`, ending in
+`-goldens`). A push to such a branch runs two ci.yml jobs instead of
+`android-tests`:
+
+1. **`android-goldens-record`** (read-only token): deletes the checked-in
+   goldens, re-records every screenshot in record mode, then runs
+   `android-tests`' full task list (`assembleDebug testDebugUnitTest
+   testReleaseUnitTest lintDebug`) in verify mode on that tree -- a second
+   render must match the first pixel for pixel. It uploads only the PNGs
+   as the artifact `app-screenshot-goldens`.
+2. **`android-goldens-push`** (`contents: write`, the only job with write
+   access; it runs no Gradle and no repository build code): checks out the
+   same commit, downloads the PNGs, accepts them only if the names are
+   exactly the `shoot("...")` names in `LibraryScreenshotTest.kt` and every
+   file is a PNG, commits changed ones as `github-actions[bot]`
+   (`test(app): refresh screenshot goldens from CI`) and pushes to the same
+   branch, fast-forward only. If the branch moved meanwhile the push is
+   rejected and the run for the newer push takes over.
+
+A push made with `GITHUB_TOKEN` starts no workflow run (GitHub's loop
+protection), so the bot commit gets no CI run of its own -- the verify pass
+in step 1 is its verify, and it differs from the CI-tested branch head only
+by PNGs. The jobs never run on `main`, on tags, on pull requests, or in a
+fork.
+
+What this does NOT protect against: a `-goldens` branch accepts **every**
+visual change its push renders, wanted or not. The guards for the images
+are your review of the bot commit (step 4 below) and the full CI run,
+`android-tests` included, on the merge to main.
+
+Flow:
+
+1. `git switch -c wp/<name>-goldens` (from the branch with the UI change,
+   or from main for a plain refresh) and `git push -u origin
+   wp/<name>-goldens`.
+2. Wait for the CI run of that push: `app / record screenshot goldens` and
+   `app / push screenshot goldens` green. The push job's summary lists the
+   changed PNGs, or says "unchanged".
+3. `git fetch` and `git pull --ff-only` -- the bot commit is now on top.
+4. Review every changed image (`git show --stat HEAD`, then open the PNGs;
+   for a UI change compare against the previous golden with
+   `git show HEAD~1:<path> > old.png`). Wrong render: fix the code, push
+   again, the jobs re-record.
+5. Merge into main as usual. The merge to main runs the normal CI,
+   `android-tests` included, against the new goldens.
 
 **Versions.** Robolectric 4.14.1 (first line with SDK 35, runs on JDK 17),
 Roborazzi 1.32.2 (core artifact only, no Gradle plugin), Compose
