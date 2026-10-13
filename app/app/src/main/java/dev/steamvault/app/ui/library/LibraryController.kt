@@ -12,17 +12,22 @@ import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
+import dev.steamvault.app.repo.UpdatesRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateAction
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateResult
 import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.MultiPlan
 import dev.steamvault.app.ui.library.logic.StatusActionType
+import dev.steamvault.app.ui.library.logic.UPDATES_FILTER_KEY
+import dev.steamvault.app.ui.library.logic.UpdateCheckResult
 import dev.steamvault.app.ui.library.logic.buildMultiPlan
 import dev.steamvault.app.ui.library.logic.classifyBulkSelection
 import dev.steamvault.app.ui.library.logic.describeCachedPrefillError
 import dev.steamvault.app.ui.library.logic.findLiveJob
 import dev.steamvault.app.ui.library.logic.formatBytesGB
+import dev.steamvault.app.ui.library.logic.runUpdateCheck
+import dev.steamvault.app.ui.library.logic.updateCheckNoticeFor
 import dev.steamvault.app.ui.library.logic.summarizeCachedPrefillOutcome
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -50,6 +55,7 @@ class LibraryController(
     private val jobsRepository: JobsRepository,
     private val mappingRepository: MappingRepository,
     private val cacheRepository: CacheRepository,
+    private val updatesRepository: UpdatesRepository,
     private val libraryPreferences: LibraryPreferences,
     private val strings: LibraryStrings,
 ) {
@@ -152,6 +158,67 @@ class LibraryController(
                 }
             }
         }
+    }
+
+    // ---- "Check updates" (WP UPD-3, twin of web UPD-2; D14) ---------------
+    // Asks the vault to check cached games for a newer build, downloads
+    // nothing. The decisions (poll loop, bound, result wording) live in
+    // ui/library/logic/UpdateCheck.kt; this is the Compose state plus the
+    // launch in the screen's scope, so leaving the Library cancels the poll.
+
+    /** `false` once `/v1/updates/...` answered `404` (a vault from before
+     * UPD-1): the "Check updates" action and the "Updates" chip are hidden.
+     * Starts `true`: only a confirmed 404 hides anything. */
+    var updatesSupported by mutableStateOf(true)
+        private set
+
+    /** A check started from this screen is running (button disabled). */
+    var updateCheckRunning by mutableStateOf(false)
+        private set
+
+    /** One `GET /v1/updates/status` on Library open, only to learn whether
+     * this vault has the feature. Any other failure leaves it shown -- the
+     * button's own call reports errors. */
+    suspend fun probeUpdatesSupport() {
+        try {
+            updatesRepository.status()
+        } catch (_: VaultApiError.NotFound) {
+            markUpdatesUnsupported()
+        } catch (_: VaultApiError) {
+            // Transient or auth trouble: the games poll owns the error banner.
+        }
+    }
+
+    /** Start a check and follow it to its end in [scope]. A second press
+     * while one runs is ignored (the button is disabled too). */
+    fun checkUpdates(scope: CoroutineScope) {
+        if (updateCheckRunning) return
+        updateCheckRunning = true
+        scope.launch {
+            try {
+                val result = runUpdateCheck(updatesRepository)
+                if (result is UpdateCheckResult.Unsupported) {
+                    markUpdatesUnsupported()
+                } else {
+                    // The badges come from GET /v1/games: re-read it now
+                    // instead of waiting out the games poll interval.
+                    refreshNow(scope)
+                }
+                val notice = updateCheckNoticeFor(result)
+                toast = LibraryToast(
+                    message = strings.updateCheckNotice(notice),
+                    warn = notice.warn,
+                    durationMs = if (notice.warn) CHECK_UPDATE_WARN_TOAST_MS else DEFAULT_TOAST_DURATION_MS,
+                )
+            } finally {
+                updateCheckRunning = false
+            }
+        }
+    }
+
+    private fun markUpdatesUnsupported() {
+        updatesSupported = false
+        if (filterKey == UPDATES_FILTER_KEY) filterKey = "all"
     }
 
     // ---- layout -----------------------------------------------------------

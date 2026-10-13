@@ -69,6 +69,34 @@
     <string name="library_check_update_button">Check &amp; update all cached games</string>
     <string name="library_check_update_button_busy">Checking &amp; updating…</string>
 
+    <!-- "Check updates" (WP UPD-3, twin of web UPD-2; D14): asks the vault
+         whether cached games have a newer build, downloads nothing. The
+         "Check & update" button above stays. Lives in the top app bar. -->
+    <string name="library_check_updates_button">Check updates</string>
+    <string name="library_check_updates_button_busy">Checking…</string>
+    <!-- Badge on a game card / list row: GameSummary.update_available. -->
+    <string name="library_update_available_badge">Update available</string>
+    <!-- Result toasts. State-only copy: each sentence claims only what the
+         status fields carry (docs/LEARNINGS.md, WP 4d-web). -->
+    <plurals name="library_update_check_found">
+        <item quantity="one">Update check finished: %1$d game has an update</item>
+        <item quantity="other">Update check finished: %1$d games have an update</item>
+    </plurals>
+    <string name="library_update_check_none_found">Update check finished: no updates found</string>
+    <plurals name="library_update_check_with_unchecked">
+        <item quantity="one">%1$s (%2$d game could not be checked)</item>
+        <item quantity="other">%1$s (%2$d games could not be checked)</item>
+    </plurals>
+    <string name="library_update_check_nothing_cached">Update check finished: no cached games to check</string>
+    <string name="library_update_check_stopped_early">Update check stopped early: the update source kept failing</string>
+    <string name="library_update_check_not_finished">Update check did not finish: the vault stopped during the run</string>
+    <string name="library_update_check_vault_error">Update check failed on the vault, see its log</string>
+    <string name="library_update_check_finished">Update check finished</string>
+    <string name="library_update_check_disabled">Update checks are off on this vault (manifest oracle disabled)</string>
+    <string name="library_update_check_still_running">Update check still running on the vault; badges appear when it finishes</string>
+    <string name="library_update_check_unsupported">This vault does not offer update checks yet</string>
+    <string name="library_update_check_failed">Update check failed: %1$s</string>
+
     <!-- Multi-select bulk bar. -->
     <plurals name="library_bulk_selected_count">
         <item quantity="one">%1$d selected</item>

@@ -14,12 +14,15 @@ import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.SettingInfoOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.model.UpdateCheckOut
+import dev.steamvault.app.net.model.UpdateStatusOut
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.SteamRelayRepository
+import dev.steamvault.app.repo.UpdatesRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.STEAM_LIBRARY_SETTING_KEY
@@ -31,10 +34,13 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * Built to make the D12 layout problems visible
  * (`docs/handover/post-0.1.0-roadmap.md` "D12"): every filter chip has a
- * non-zero count (so FilterChipsRow carries all five labels, the widest
+ * non-zero count (so FilterChipsRow carries all six labels, the widest
  * being "Downloading 3"), titles range from short to very long, and every
  * card kind the grid can show appears at least once (cached, not cached,
- * downloading, updating, paused, failed). Names are invented, appids are
+ * downloading, updating, paused, failed). One cached game carries the
+ * "Update available" badge (WP UPD-3), which also gives the "Updates" chip
+ * a count, and [FixedUpdatesRepository] keeps the top bar's "Check
+ * updates" action visible. Names are invented, appids are
  * synthetic (docs/LEARNINGS.md "Fixtures: synthetic only").
  *
  * Deliberately NOT time-dependent: no `Instant.now()` anywhere (the demo
@@ -55,6 +61,8 @@ internal object LibraryScreenshotFixtures {
         GameSummary(
             appid = 1_000_010, name = "Starfall Odyssey", status = "done",
             last_prefill_at = PREFILLED_AT, depot_count = 2, size_bytes = 48_300_000_000,
+            // WP UPD-3: the oracle reports a newer build -> badge + "Updates 1".
+            update_available = true, update_checked_at = PREFILLED_AT,
         ),
         GameSummary(
             appid = 1_000_020,
@@ -146,6 +154,23 @@ internal class FixedSteamRelayRepository(private val owned: List<OwnedGame>) : S
         OwnedGamesRelayOut(configured = true, game_count = owned.size, games = owned)
 
     override suspend fun playerSummaries(steamId64: String): PlayerSummariesRelayOut = notUsed()
+}
+
+/** WP UPD-3: a vault WITH the update check (so the action and the chip
+ * render), idle, last run long finished. The screen only probes [status];
+ * nothing is tapped, so [check] is never reached. */
+internal class FixedUpdatesRepository : UpdatesRepository {
+    override suspend fun check(): UpdateCheckOut = notUsed()
+    override suspend fun status(): UpdateStatusOut = UpdateStatusOut(
+        enabled = true,
+        running = false,
+        last_trigger = "scheduled",
+        last_outcome = "completed",
+        last_apps = 4,
+        last_ok = 4,
+        last_failed = 0,
+        last_stale = 1,
+    )
 }
 
 internal class FixedLibraryPreferences(private val layout: LibraryLayout) : LibraryPreferences {

@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.library
 
 import android.content.res.Resources
 import dev.steamvault.app.R
+import dev.steamvault.app.ui.library.logic.UpdateCheckNotice
 
 /**
  * The dynamic toast/error strings [LibraryController] produces after an
@@ -35,6 +36,8 @@ interface LibraryStrings {
     fun jobsQueued(count: Int): String
     /** @param failedCount 0 when every delete in the batch succeeded. */
     fun freed(freedText: String, failedCount: Int): String
+    /** WP UPD-3: the "Check updates" result toast. */
+    fun updateCheckNotice(notice: UpdateCheckNotice): String
 }
 
 class AndroidLibraryStrings(private val resources: Resources) : LibraryStrings {
@@ -52,5 +55,32 @@ class AndroidLibraryStrings(private val resources: Resources) : LibraryStrings {
         resources.getQuantityString(R.plurals.library_toast_freed_with_failures, failedCount, freedText, failedCount)
     } else {
         resources.getString(R.string.library_toast_freed, freedText)
+    }
+
+    override fun updateCheckNotice(notice: UpdateCheckNotice): String = when (notice) {
+        is UpdateCheckNotice.Found -> withUncheckedCount(
+            resources.getQuantityString(R.plurals.library_update_check_found, notice.stale, notice.stale),
+            notice.failed,
+        )
+        is UpdateCheckNotice.NoneFound ->
+            withUncheckedCount(resources.getString(R.string.library_update_check_none_found), notice.failed)
+        UpdateCheckNotice.NothingCached -> resources.getString(R.string.library_update_check_nothing_cached)
+        UpdateCheckNotice.StoppedEarly -> resources.getString(R.string.library_update_check_stopped_early)
+        UpdateCheckNotice.NotFinished -> resources.getString(R.string.library_update_check_not_finished)
+        UpdateCheckNotice.VaultError -> resources.getString(R.string.library_update_check_vault_error)
+        UpdateCheckNotice.FinishedUnknown -> resources.getString(R.string.library_update_check_finished)
+        UpdateCheckNotice.Disabled -> resources.getString(R.string.library_update_check_disabled)
+        UpdateCheckNotice.StillRunning -> resources.getString(R.string.library_update_check_still_running)
+        UpdateCheckNotice.Unsupported -> resources.getString(R.string.library_update_check_unsupported)
+        is UpdateCheckNotice.Failed -> resources.getString(
+            R.string.library_update_check_failed,
+            notice.detail ?: resources.getString(R.string.library_toast_action_failed),
+        )
+    }
+
+    private fun withUncheckedCount(base: String, failed: Int): String = if (failed > 0) {
+        resources.getQuantityString(R.plurals.library_update_check_with_unchecked, failed, base, failed)
+    } else {
+        base
     }
 }

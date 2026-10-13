@@ -21,6 +21,9 @@ import dev.steamvault.app.ui.status.StatusKind
  * decision already made and recorded for the web frontend, applied here
  * for consistency between the two clients rather than re-litigated per
  * platform — chips ship All / Cached / Not cached / Downloading / Failed.
+ * WP UPD-3 (twin of web UPD-2, D14) appends "Updates": games whose
+ * `update_available` flag (WP UPD-1) is set. It is hidden on a vault from
+ * before UPD-1 ([hiddenChipKeys]), where the flag never exists.
  *
  * **String-resource rule, exception recorded (WP 4b.4 review fix; see
  * app/README.md's "String resources" conventions section, and
@@ -52,7 +55,17 @@ val FILTER_DEFS: List<FilterDef> = listOf(
     // findLiveJob/indexLiveJobsByAppid already exclude queued/GC jobs (GameStatus.kt).
     FilterDef("downloading", "Downloading") { _, job -> job != null },
     FilterDef("failed", "Failed") { g, job -> dispKind(g, job) == StatusKind.ERROR },
+    // WP UPD-3: the server sets the flag only for a game with cache bytes.
+    FilterDef(UPDATES_FILTER_KEY, "Updates") { g, _ -> g.update_available },
 )
+
+/** Key of the "Updates" chip (WP UPD-3). */
+const val UPDATES_FILTER_KEY = "updates"
+
+/** Chips not to show: "Updates" on a vault that has no update check
+ * (`404` from `/v1/updates/...`, a server from before UPD-1). */
+fun hiddenChipKeys(updatesSupported: Boolean): Set<String> =
+    if (updatesSupported) emptySet() else setOf(UPDATES_FILTER_KEY)
 
 private val FILTER_BY_KEY = FILTER_DEFS.associateBy { it.key }
 
@@ -82,7 +95,7 @@ fun visibleGames(
 data class ChipCount(val key: String, val label: String, val count: Int)
 
 /**
- * Counts for every chip, computed against the CURRENT query (mockup rule:
+ * Counts for every chip not in [hiddenKeys], computed against the CURRENT query (mockup rule:
  * "counts recompute against the current query, so a chip's number is
  * always something the grid can actually produce").
  */
@@ -90,9 +103,10 @@ fun chipCounts(
     games: List<GameSummary>,
     query: String,
     liveJobsByAppid: Map<Int, JobSummary>,
+    hiddenKeys: Set<String> = emptySet(),
 ): List<ChipCount> {
     val inQuery = games.filter { matchesQuery(it, query) }
-    return FILTER_DEFS.map { f ->
+    return FILTER_DEFS.filter { it.key !in hiddenKeys }.map { f ->
         ChipCount(f.key, f.label, inQuery.count { g -> f.predicate(g, liveJobsByAppid[g.appid]) })
     }
 }

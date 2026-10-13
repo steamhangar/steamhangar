@@ -13,6 +13,8 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.model.UpdateCheckOut
+import dev.steamvault.app.net.model.UpdateStatusOut
 import dev.steamvault.app.net.model.settingAsBooleanOrNull
 import dev.steamvault.app.net.model.settingAsIntOrNull
 import dev.steamvault.app.net.model.settingAsStringListOrNull
@@ -558,5 +560,78 @@ class SerializationRoundTripTest {
         } catch (_: SerializationException) {
             // expected
         }
+    }
+
+    // -----------------------------------------------------------------
+    // WP UPD-3: update check (API WP UPD-1, vault_api/routers/updates.py).
+    // -----------------------------------------------------------------
+
+    @Test
+    fun `GameSummary -- update_available and update_checked_at decode, api UPD-1`() {
+        val json = """
+            {"appid":440,"name":"Team Fortress 2","status":"done","last_prefill_at":"2026-08-05T20:44:34Z",
+             "last_manifest_check":null,"depot_count":2,"size_bytes":6000000,"needs_force":false,
+             "update_available":true,"update_checked_at":"2026-10-13T10:01:00Z"}
+        """.trimIndent()
+
+        val decoded = decodeStrictAndLenient<GameSummary>(json)
+
+        assertTrue(decoded.update_available)
+        assertEquals("2026-10-13T10:01:00Z", decoded.update_checked_at)
+    }
+
+    @Test
+    fun `GameSummary -- a pre-UPD-1 server with no update fields decodes to no badge, not a crash`() {
+        val json = """
+            {"appid":440,"name":"Team Fortress 2","status":"idle","last_prefill_at":null,
+             "last_manifest_check":null,"depot_count":0,"size_bytes":null,"needs_force":false}
+        """.trimIndent()
+
+        val decoded = VaultJson.decodeFromString<GameSummary>(json)
+
+        assertFalse(decoded.update_available)
+        assertNull(decoded.update_checked_at)
+    }
+
+    @Test
+    fun `UpdateCheckOut -- started and disabled bodies of POST v1 updates check`() {
+        val started = decodeStrictAndLenient<UpdateCheckOut>("""{"status":"started","enabled":true}""")
+        assertEquals("started", started.status)
+        assertTrue(started.enabled)
+        val disabled = decodeStrictAndLenient<UpdateCheckOut>("""{"status":"disabled","enabled":false}""")
+        assertEquals("disabled", disabled.status)
+        assertFalse(disabled.enabled)
+    }
+
+    @Test
+    fun `UpdateStatusOut -- a finished row with every UpdateCheckStatusOut field`() {
+        val json = """
+            {"enabled":true,"scheduled":false,"running":false,"last_trigger":"manual",
+             "last_started_at":"2026-10-13T10:00:00Z","last_finished_at":"2026-10-13T10:01:00Z",
+             "last_outcome":"completed","last_apps":12,"last_ok":11,"last_failed":1,"last_stale":3}
+        """.trimIndent()
+
+        val decoded = decodeStrictAndLenient<UpdateStatusOut>(json)
+
+        assertFalse(decoded.running)
+        assertEquals("completed", decoded.last_outcome)
+        assertEquals(12, decoded.last_apps)
+        assertEquals(1, decoded.last_failed)
+        assertEquals(3, decoded.last_stale)
+    }
+
+    @Test
+    fun `UpdateStatusOut -- a running row carries nulls for outcome and counters`() {
+        val json = """
+            {"enabled":true,"scheduled":true,"running":true,"last_trigger":"scheduled",
+             "last_started_at":"2026-10-13T10:00:00Z","last_finished_at":null,"last_outcome":null,
+             "last_apps":null,"last_ok":null,"last_failed":null,"last_stale":null}
+        """.trimIndent()
+
+        val decoded = decodeStrictAndLenient<UpdateStatusOut>(json)
+
+        assertTrue(decoded.running)
+        assertNull(decoded.last_outcome)
+        assertNull(decoded.last_stale)
     }
 }

@@ -7,7 +7,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-private fun game(appid: Int, name: String, status: String = "idle", sizeBytes: Long? = null): GameSummary =
+private fun game(
+    appid: Int,
+    name: String,
+    status: String = "idle",
+    sizeBytes: Long? = null,
+    updateAvailable: Boolean = false,
+): GameSummary =
     GameSummary(
         appid = appid,
         name = name,
@@ -17,6 +23,7 @@ private fun game(appid: Int, name: String, status: String = "idle", sizeBytes: L
         depot_count = 0,
         size_bytes = sizeBytes,
         needs_force = false,
+        update_available = updateAvailable,
     )
 
 private fun job(appid: Int, status: String = "running"): JobSummary = JobSummary(
@@ -33,8 +40,9 @@ class LibraryFiltersTest {
     private val cached = game(2, "Ironwood Hollow", status = "done", sizeBytes = 5_000_000_000)
     private val failed = game(3, "Tundra Protocol", status = "error")
     private val downloading = game(4, "Meridian Rally")
+    private val outdated = game(5, "Glasswing", status = "done", sizeBytes = 2_000_000_000, updateAvailable = true)
 
-    private val games = listOf(notCached, cached, failed, downloading)
+    private val games = listOf(notCached, cached, failed, downloading, outdated)
     private val liveJobsByAppid = indexLiveJobsByAppid(listOf(job(4, "running")))
 
     // ---- normalizeQuery / matchesQuery ----------------------------------
@@ -57,12 +65,12 @@ class LibraryFiltersTest {
         assertTrue(matchesQuery(notCached, ""))
     }
 
-    // ---- the recorded chip set: All Cached Not-cached Downloading Failed --
+    // ---- the recorded chip set: All Cached Not-cached Downloading Failed Updates --
 
     @Test
-    fun `chip set is exactly All Cached Not-cached Downloading Failed, in order`() {
+    fun `chip set is exactly All Cached Not-cached Downloading Failed Updates, in order`() {
         assertEquals(
-            listOf("all", "cached", "none", "downloading", "failed"),
+            listOf("all", "cached", "none", "downloading", "failed", "updates"),
             FILTER_DEFS.map { it.key },
         )
     }
@@ -80,9 +88,10 @@ class LibraryFiltersTest {
         // web/js/lib/library-filters.js's own FILTER_DEFS, not read back
         // from this file. This is what qualifies FILTER_DEFS's labels for
         // the literal-Kotlin-string exception this file's kdoc documents,
-        // instead of routing them through strings.xml.
+        // instead of routing them through strings.xml. "Updates" is the
+        // UPD-2/UPD-3 brief's label (D14), written for both frontends at once.
         assertEquals(
-            listOf("All", "Cached", "Not cached", "Downloading", "Failed"),
+            listOf("All", "Cached", "Not cached", "Downloading", "Failed", "Updates"),
             FILTER_DEFS.map { it.label },
         )
     }
@@ -98,7 +107,21 @@ class LibraryFiltersTest {
     @Test
     fun `cached chip returns only cached-with-bytes games`() {
         val visible = visibleGames(games, query = "", filterKey = "cached", liveJobsByAppid = liveJobsByAppid)
-        assertEquals(listOf(cached.appid), visible.map { it.appid })
+        assertEquals(listOf(cached.appid, outdated.appid), visible.map { it.appid })
+    }
+
+    @Test
+    fun `MUTATION PIN -- updates chip returns only games flagged update_available`() {
+        val visible = visibleGames(games, query = "", filterKey = "updates", liveJobsByAppid = liveJobsByAppid)
+        assertEquals(listOf(outdated.appid), visible.map { it.appid })
+    }
+
+    @Test
+    fun `MUTATION PIN -- the Updates chip is hidden only on a vault without the update check`() {
+        assertEquals(emptySet<String>(), hiddenChipKeys(updatesSupported = true))
+        assertEquals(setOf("updates"), hiddenChipKeys(updatesSupported = false))
+        val keys = chipCounts(games, "", liveJobsByAppid, hiddenChipKeys(updatesSupported = false)).map { it.key }
+        assertEquals(listOf("all", "cached", "none", "downloading", "failed"), keys)
     }
 
     @Test
@@ -143,11 +166,12 @@ class LibraryFiltersTest {
     @Test
     fun `chipCounts against an empty query count the whole library`() {
         val counts = chipCounts(games, query = "", liveJobsByAppid = liveJobsByAppid).associateBy { it.key }
-        assertEquals(4, counts.getValue("all").count)
-        assertEquals(1, counts.getValue("cached").count)
+        assertEquals(5, counts.getValue("all").count)
+        assertEquals(2, counts.getValue("cached").count)
         assertEquals(1, counts.getValue("none").count)
         assertEquals(1, counts.getValue("downloading").count)
         assertEquals(1, counts.getValue("failed").count)
+        assertEquals(1, counts.getValue("updates").count)
     }
 
     @Test
@@ -157,5 +181,6 @@ class LibraryFiltersTest {
         assertEquals(0, counts.getValue("cached").count)
         assertEquals(1, counts.getValue("downloading").count)
         assertEquals(0, counts.getValue("failed").count)
+        assertEquals(0, counts.getValue("updates").count)
     }
 }

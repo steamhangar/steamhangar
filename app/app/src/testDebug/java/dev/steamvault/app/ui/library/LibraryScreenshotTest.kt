@@ -245,6 +245,7 @@ class LibraryScreenshotTest {
                     jobsRepository = remember { FixedJobsRepository(fixtures.jobs) },
                     mappingRepository = remember { EmptyMappingRepository() },
                     cacheRepository = remember { UnusedCacheRepository() },
+                    updatesRepository = remember { FixedUpdatesRepository() },
                     ownedLibrary = ownedLibrary,
                     libraryPreferences = remember { FixedLibraryPreferences(layout) },
                     onJobsSnapshot = { jobsSnapshot = it },

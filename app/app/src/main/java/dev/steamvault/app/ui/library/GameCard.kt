@@ -81,6 +81,15 @@ fun GameCard(
                 )
             }
 
+            // WP UPD-3: top END -- the selection checkbox owns top start.
+            if (model.updateAvailable) {
+                UpdateAvailableBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp),
+                )
+            }
+
             CapsulePill(
                 model = model,
                 onAction = onAction,

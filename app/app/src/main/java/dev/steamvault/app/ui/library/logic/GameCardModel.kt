@@ -80,6 +80,9 @@ data class GameCardModel(
      * [TOOL_APP_STATE_WORD] instead of [kind]'s label, and is drawn muted
      * (shown, not hidden). */
     val toolApp: Boolean = false,
+    /** WP UPD-3: the "Update available" badge, straight from
+     * `GameSummary.update_available` (WP UPD-1). */
+    val updateAvailable: Boolean = false,
 )
 
 /**
@@ -118,5 +121,6 @@ fun buildGameCardModel(
         isKnownToVault = isKnownToVault(game),
         installedBadge = installedBadgeFor(game),
         toolApp = isToolApp(game),
+        updateAvailable = game.update_available,
     )
 }
