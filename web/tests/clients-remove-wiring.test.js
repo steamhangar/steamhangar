@@ -107,6 +107,14 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 const { store } = await import("../js/store-singleton.js");
+// The last clients tick and the number of the GET that produced it. The
+// loop is sequential (the next GET is issued only after this emit), so at
+// emit time `server.clientGets` IS that GET's number. Subscribed before the
+// sheet module, i.e. before the first poll can land.
+let lastClientsTick = { seq: 0, items: undefined };
+store.subscribe("clients", (p) => {
+  if (p.items) lastClientsTick = { seq: server.clientGets, items: p.items };
+});
 const { openClientsSheet } = await import("../js/components/clients-sheet.js");
 const { resetModalStack } = await import("../js/lib/modal-stack.js");
 
@@ -151,8 +159,19 @@ beforeEach(async () => {
   server.deletes = [];
   server.gate = null;
   server.getGate = null;
+  // Wait for a tick from a GET issued AFTER the reset above, not just for a
+  // 3-row snapshot: the previous test's snapshot can already have 3 rows
+  // while the sheet still shows its locally dropped list, and a stale
+  // in-flight GET can land after refreshNow() (WP WEB-FIX-FLAKE).
+  const getsBefore = server.clientGets;
   store.refreshNow();
-  await until(() => Array.isArray(store.snapshot("clients")) && store.snapshot("clients").length === 3, "store reseeded");
+  await until(
+    () =>
+      lastClientsTick.seq > getsBefore &&
+      store.snapshot("clients") === lastClientsTick.items &&
+      lastClientsTick.items.map((c) => c.client_id).join() === "desk-pc,retired-pc,lab/pc-1",
+    "store reseeded by a fresh GET",
+  );
 });
 
 test("MUTATION TARGET: each removable row has a 'Remove' button named after its PC; a '/' id gets the note instead", async () => {

@@ -4,25 +4,33 @@ import android.app.Application
 import android.content.ComponentName
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -38,13 +46,16 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.ui.downloads.logic.countPending
 import dev.steamvault.app.ui.library.logic.LibraryLayout
-import dev.steamvault.app.ui.nav.BottomNavBar
 import dev.steamvault.app.ui.nav.Destination
+import dev.steamvault.app.ui.nav.MainShell
 import dev.steamvault.app.ui.theme.SteamVaultTheme
 import java.io.File
 import kotlin.math.roundToInt
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
@@ -61,10 +72,10 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Screenshot tests of the Library screen (WP APP-TEST-1), Roborazzi on
- * Robolectric. They exist so D12 (`docs/handover/post-0.1.0-roadmap.md`:
+ * Robolectric. They showed D12 (`docs/handover/post-0.1.0-roadmap.md`:
  * FilterChipsRow does not scroll, the layout toggle wraps, an empty area,
- * a tall header) can be shown red first and then fixed -- this WP renders
- * the screen as it is and fixes nothing.
+ * a tall header) red first; WP D12 fixed it and added [assertLayout],
+ * which names the layout properties each shot must keep.
  *
  * Profiles (brief): 411 dp wide (Pixel reference) and 360 dp, font scale
  * 1.0 and 1.3, plus dark mode. The app theme is single-dark on purpose
@@ -73,16 +84,13 @@ import org.robolectric.annotation.GraphicsMode
  * reading the system setting. One extra shot covers the List layout in the
  * worst-case profile.
  *
- * What is rendered is the screen INSIDE the app shell, mirrored from
- * `MainActivity.setContent`: edge-to-edge window, outer Scaffold with the
- * bottom navigation bar, `LibraryScreen` in a Box padded by the outer
- * Scaffold's content padding. Rendering `LibraryScreen` alone would hide
- * exactly the nesting that D12's "empty area" / "tall header" may come
- * from. Robolectric reports zero system-bar insets on its own, so
- * [simulateSystemBars] dispatches fixed ones (status 24 dp, navigation
- * 48 dp) -- an approximation of a phone, constant across runs. If
- * `MainActivity`'s shell changes, [AppShell] must follow (it is a copy, not
- * a shared composable; extracting one is D12's call, not this WP's).
+ * What is rendered is the screen INSIDE the app shell: edge-to-edge
+ * window and the real [MainShell] that `MainActivity.setContent` uses
+ * (outer Scaffold with the bottom navigation bar, its inset handling).
+ * Rendering `LibraryScreen` alone would hide exactly the nesting that
+ * caused D12's tall header. Robolectric reports zero system-bar insets on
+ * its own, so [simulateSystemBars] dispatches fixed ones (status 24 dp,
+ * navigation 48 dp) -- an approximation of a phone, constant across runs.
  *
  * Determinism: fixed fixtures ([LibraryScreenshotFixtures]); cover art
  * never touches the network -- [OfflineImageLoader] fails every request at
@@ -124,10 +132,13 @@ class LibraryScreenshotTest {
     fun library_411dp_font130() = shoot("library_411dp_font130", PIXEL_411, fontScale = 1.3f)
 
     @Test
-    fun library_360dp_font100() = shoot("library_360dp_font100", SMALL_360)
+    fun library_360dp_font100() =
+        shoot("library_360dp_font100", SMALL_360, expectedBadgeText = UPDATE_BADGE_FULL)
 
+    // WP APP-FIX-CARD: the full label ellipsized here ("Update availa…").
     @Test
-    fun library_360dp_font130() = shoot("library_360dp_font130", SMALL_360, fontScale = 1.3f)
+    fun library_360dp_font130() =
+        shoot("library_360dp_font130", SMALL_360, fontScale = 1.3f, expectedBadgeText = UPDATE_BADGE_SHORT)
 
     @Test
     fun library_411dp_font100_night() = shoot("library_411dp_font100_night", PIXEL_411, night = true)
@@ -142,6 +153,7 @@ class LibraryScreenshotTest {
         fontScale: Float = 1.0f,
         night: Boolean = false,
         layout: LibraryLayout = LibraryLayout.GRID_2,
+        expectedBadgeText: String? = null,
     ) {
         // The rule already launched the host activity with the @Config
         // defaults; apply this profile and recreate it so the new
@@ -159,8 +171,153 @@ class LibraryScreenshotTest {
         composeRule.waitForIdle()
         simulateSystemBars()
         awaitStableFallbackTiles()
+        // Again right before the capture: the frames advanced while waiting
+        // for the tiles must not have replaced the simulated insets.
+        assertSystemBarsArrived()
 
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
+        // After the capture, so a failing check still leaves the image.
+        assertLayout()
+        assertCardContents(layout, expectedBadgeText)
+    }
+
+    /**
+     * WP D12 layout checks, in every profile (the goldens show the layout,
+     * these name what must hold):
+     * - no doubled status-bar inset: the search field sits right under ONE
+     *   status bar plus the TopAppBar;
+     * - every filter chip is single-line (all the same height) and
+     *   reachable by scrolling the chip row;
+     * - the cards start right under the controls, not below an empty band.
+     */
+    private fun assertLayout() {
+        val density = composeRule.activity.resources.displayMetrics.density
+        fun dp(px: Float) = px / density
+
+        val searchTop = dp(composeRule.onNode(hasSetTextAction()).fetchSemanticsNode().boundsInRoot.top)
+        val maxSearchTop = STATUS_BAR_DP + TOP_APP_BAR_DP + TOOLBAR_TOP_PADDING_DP + LAYOUT_TOLERANCE_DP
+        assertTrue(
+            "search field top ${searchTop}dp is below ${maxSearchTop}dp: the status-bar inset is applied twice",
+            searchTop <= maxSearchTop,
+        )
+
+        val chipMatcher = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
+        val chips = composeRule.onAllNodes(chipMatcher).fetchSemanticsNodes()
+        assertEquals("filter chips rendered", EXPECTED_CHIPS, chips.size)
+        // `size`, not `boundsInRoot`: the latter is clipped by the scrolling
+        // row, so a chip scrolled out of view reports a height of 0.
+        val heights = chips.map { dp(it.size.height.toFloat()) }
+        assertTrue(
+            "filter chips differ in height ($heights dp): a label wrapped to more than one line",
+            heights.max() - heights.min() <= LAYOUT_TOLERANCE_DP,
+        )
+        // The first chip is always in view at scroll position 0.
+        val chipsBottom = dp(chips.first().boundsInRoot.bottom)
+        for (index in chips.indices) {
+            composeRule.onAllNodes(chipMatcher)[index].performScrollTo().assertIsDisplayed()
+        }
+
+        val coversTop = dp(
+            composeRule
+                .onAllNodes(hasContentDescription(COVER_FALLBACK_PREFIX, substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .minOf { it.boundsInRoot.top },
+        )
+        assertTrue(
+            "first card starts at ${coversTop}dp, more than ${MAX_CHIPS_TO_CARDS_DP}dp below the chips (${chipsBottom}dp)",
+            coversTop - chipsBottom <= MAX_CHIPS_TO_CARDS_DP,
+        )
+        composeRule
+            .onAllNodes(hasContentDescription(COVER_FALLBACK_PREFIX, substring = true), useUnmergedTree = true)
+            .onFirst()
+            .assertIsDisplayed()
+
+        // WP D12 review: the toggle shows "2 col", the full name stays the
+        // spoken label.
+        composeRule.onNode(hasContentDescription(LAYOUT_GRID2_DESCRIPTION)).assertExists()
+    }
+
+    /**
+     * WP APP-FIX-CARD, in every profile:
+     * - a fallback tile's title never runs under the capsule pill or the
+     *   update badge: the lines it actually renders (not just its layout
+     *   box, which the tile bounds anyway) overlap neither;
+     * - the list rows' mini covers keep their plain title: the grid's line
+     *   limit and ellipsis must not reach them (a 34 dp tile showed only
+     *   "…");
+     * - the update badge is never ellipsized: it reads "Update available"
+     *   or, when that does not fit, "Update" -- the full label always being
+     *   its contentDescription. [expectedBadgeText] names the expected word
+     *   where the profile decides it.
+     */
+    private fun assertCardContents(layout: LibraryLayout, expectedBadgeText: String?) {
+        val titles = composeRule
+            .onAllNodes(hasTestTag(COVER_FALLBACK_TITLE_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        val pills = composeRule
+            .onAllNodes(hasTestTag(CAPSULE_PILL_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        val badges = composeRule
+            .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        assertTrue("no fallback titles rendered", titles.isNotEmpty())
+        val grid = layout != LibraryLayout.LIST
+        if (grid) {
+            assertTrue("no capsule pills rendered", pills.isNotEmpty())
+            assertTrue("no update badge rendered (fixture has update_available = true)", badges.isNotEmpty())
+        } else {
+            for (title in titles) {
+                assertFalse(
+                    "list mini cover title '${title.text()}' is ellipsized: the grid's line limit leaked into the list",
+                    textLayout(title).isLineEllipsized(0),
+                )
+            }
+        }
+        // A node scrolled fully out of the viewport reports empty bounds.
+        val overlays = (pills.map { "capsule pill" to it } + badges.map { "update badge" to it })
+            .filterNot { (_, node) -> node.boundsInRoot.isEmpty }
+        for (title in titles.filterNot { it.boundsInRoot.isEmpty }) {
+            val rendered = renderedTextBounds(title)
+            for ((kind, overlay) in overlays) {
+                assertFalse(
+                    "fallback title '${title.text()}' ($rendered) runs under the $kind (${overlay.boundsInRoot})",
+                    rendered.overlaps(overlay.boundsInRoot),
+                )
+            }
+        }
+
+        for (badge in badges) {
+            val text = badge.text()
+            assertTrue("update badge reads '$text'", text == UPDATE_BADGE_FULL || text == UPDATE_BADGE_SHORT)
+            // Not `hasVisualOverflow`: on the layout the semantics action
+            // hands out it reads true even for a short "Update" that fits
+            // (CI, Compose BOM 2024.10.01); the ellipsis flag is exact.
+            val badgeLayout = textLayout(badge)
+            assertTrue(
+                "update badge '$text' is ellipsized or wrapped",
+                badgeLayout.lineCount == 1 && !badgeLayout.isLineEllipsized(0),
+            )
+            if (expectedBadgeText != null) assertEquals("update badge label", expectedBadgeText, text)
+        }
+    }
+
+    private fun SemanticsNode.text(): String =
+        config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text }
+
+    private fun textLayout(node: SemanticsNode): TextLayoutResult {
+        val results = mutableListOf<TextLayoutResult>()
+        val action = node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action
+        assertNotNull("node '${node.text()}' exposes no text layout", action)
+        action!!.invoke(results)
+        return results.single()
+    }
+
+    /** Bounds of the lines a text node actually draws, in root px. */
+    private fun renderedTextBounds(node: SemanticsNode): Rect {
+        val layout = textLayout(node)
+        val bounds = node.boundsInRoot
+        val bottom = layout.getLineBottom(layout.lineCount - 1)
+        return Rect(bounds.left, bounds.top, bounds.right, bounds.top + bottom)
     }
 
     private fun simulateSystemBars() {
@@ -176,9 +333,15 @@ class LibraryScreenshotTest {
             ViewCompat.dispatchApplyWindowInsets(decor, insets)
         }
         composeRule.waitForIdle()
-        // The dispatch must actually reach Compose's WindowInsets, or every
-        // golden silently shows a phone without system bars (Robolectric
-        // re-dispatching its own empty insets would do exactly that).
+        assertSystemBarsArrived()
+    }
+
+    /**
+     * The dispatch must actually reach Compose's WindowInsets, or every
+     * golden silently shows a phone without system bars (Robolectric
+     * re-dispatching its own empty insets would do exactly that).
+     */
+    private fun assertSystemBarsArrived() {
         val density = composeRule.activity.resources.displayMetrics.density
         val expected = SystemBarsPx(
             top = (STATUS_BAR_DP * density).roundToInt(),
@@ -212,7 +375,8 @@ class LibraryScreenshotTest {
         fail("cover fallback tiles never settled within $STABLE_POLL_LIMIT idles (last count: $previous)")
     }
 
-    /** Mirror of `MainActivity.setContent`'s main shell with Library selected. */
+    /** `MainActivity.setContent`'s main shell ([MainShell], shared since
+     * WP D12) with Library selected. */
     @Composable
     private fun AppShell(layout: LibraryLayout) {
         val fixtures = LibraryScreenshotFixtures
@@ -230,29 +394,23 @@ class LibraryScreenshotTest {
             bottom = WindowInsets.navigationBars.getBottom(density),
         )
         SideEffect { observedSystemBars = bars }
-        Scaffold(
-            bottomBar = {
-                BottomNavBar(
-                    current = Destination.LIBRARY,
-                    pendingJobsCount = countPending(jobsSnapshot),
-                    onSelect = {},
-                )
-            },
-        ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                LibraryScreen(
-                    gamesRepository = remember { FixedGamesRepository(fixtures.vaultGames) },
-                    jobsRepository = remember { FixedJobsRepository(fixtures.jobs) },
-                    mappingRepository = remember { EmptyMappingRepository() },
-                    cacheRepository = remember { UnusedCacheRepository() },
-                    updatesRepository = remember { FixedUpdatesRepository() },
-                    ownedLibrary = ownedLibrary,
-                    libraryPreferences = remember { FixedLibraryPreferences(layout) },
-                    onJobsSnapshot = { jobsSnapshot = it },
-                    onOpenSettings = {},
-                    demoMode = false,
-                )
-            }
+        MainShell(
+            current = Destination.LIBRARY,
+            pendingJobsCount = countPending(jobsSnapshot),
+            onSelect = {},
+        ) {
+            LibraryScreen(
+                gamesRepository = remember { FixedGamesRepository(fixtures.vaultGames) },
+                jobsRepository = remember { FixedJobsRepository(fixtures.jobs) },
+                mappingRepository = remember { EmptyMappingRepository() },
+                cacheRepository = remember { UnusedCacheRepository() },
+                updatesRepository = remember { FixedUpdatesRepository() },
+                ownedLibrary = ownedLibrary,
+                libraryPreferences = remember { FixedLibraryPreferences(layout) },
+                onJobsSnapshot = { jobsSnapshot = it },
+                onOpenSettings = {},
+                demoMode = false,
+            )
         }
     }
 
@@ -283,6 +441,28 @@ class LibraryScreenshotTest {
         const val STATUS_BAR_DP = 24
         const val NAV_BAR_DP = 48
 
+        /** Material 3 small TopAppBar container height. */
+        const val TOP_APP_BAR_DP = 64
+
+        /** `LibraryToolbar`'s vertical padding above the search field. */
+        const val TOOLBAR_TOP_PADDING_DP = 8
+        const val LAYOUT_TOLERANCE_DP = 4
+
+        /** Chip row padding + grid content padding, with slack; the D12
+         * bug left ~130 dp here at 411 dp. */
+        const val MAX_CHIPS_TO_CARDS_DP = 32
+
+        /** All, Cached, Not cached, Downloading, Failed, Updates. */
+        const val EXPECTED_CHIPS = 6
+
+        /** `R.string.library_update_available_badge` and its `_short` twin
+         * -- literals, the words web uses too (game-card.js). */
+        const val UPDATE_BADGE_FULL = "Update available"
+        const val UPDATE_BADGE_SHORT = "Update"
+
+        /** `R.string.library_layout_grid2`. */
+        const val LAYOUT_GRID2_DESCRIPTION = "2-column grid"
+
         /** Prefix of `R.string.library_cover_fallback_description`. */
         const val COVER_FALLBACK_PREFIX = "No cover art available for"
     }
@@ -307,7 +487,10 @@ private class RegisterHostActivityRule : TestRule {
 }
 
 /** Coil loader that answers every request with an immediate error, so
- * `CoverArtImage` deterministically shows its offline fallback tile. */
+ * `CoverArtImage` deterministically shows its offline fallback tile.
+ * `awaitStableFallbackTiles` relies on Coil running this interceptor on
+ * the Main dispatcher (Robolectric's paused looper), so `waitForIdle`
+ * covers it; a loader with its own `interceptorDispatcher` would break that. */
 private object OfflineImageLoader {
     fun create(app: Application): ImageLoader = ImageLoader.Builder(app)
         .components {
