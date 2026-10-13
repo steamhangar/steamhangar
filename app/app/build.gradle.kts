@@ -279,7 +279,7 @@ dependencies {
 // existing golden and records a missing one into
 // build/outputs/roborazzi/new-goldens/ (never failing for it). Passing
 // `-Psteamhangar.screenshots.record=true` re-records every golden in
-// place instead. The golden directory is declared as a task input so a
+// place instead. The golden PNGs are declared as a task input so a
 // changed or added golden re-runs the test instead of leaving it
 // UP-TO-DATE. Robolectric with native graphics needs more than the
 // default 512 MiB test heap.
@@ -293,9 +293,13 @@ tasks.withType<Test>().configureEach {
             screenshotRecordProperty,
             providers.gradleProperty(screenshotRecordProperty).getOrElse("false"),
         )
-        inputs.dir("src/testDebug/screenshots")
+        // A fileTree, not inputs.dir(...): the directory does not exist
+        // until the first goldens are checked in, and Gradle's task
+        // validation rejects a missing input DIRECTORY even with
+        // .optional() (first CI run of APP-TEST-1). A tree over a missing
+        // or empty directory is just an empty file set.
+        inputs.files(fileTree("src/testDebug/screenshots") { include("**/*.png") })
             .withPropertyName("screenshotGoldens")
             .withPathSensitivity(PathSensitivity.RELATIVE)
-            .optional()
     }
 }

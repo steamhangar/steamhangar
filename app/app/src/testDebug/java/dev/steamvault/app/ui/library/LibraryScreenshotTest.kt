@@ -5,15 +5,20 @@ import android.content.ComponentName
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -39,6 +44,8 @@ import dev.steamvault.app.ui.theme.SteamVaultTheme
 import java.io.File
 import kotlin.math.roundToInt
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -151,13 +158,7 @@ class LibraryScreenshotTest {
         }
         composeRule.waitForIdle()
         simulateSystemBars()
-        // Every visible card's cover request fails in OfflineImageLoader;
-        // wait until the fallback tiles are actually composed.
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodes(hasContentDescription(COVER_FALLBACK_PREFIX, substring = true), useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.waitForIdle()
+        awaitStableFallbackTiles()
 
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
     }
@@ -175,6 +176,40 @@ class LibraryScreenshotTest {
             ViewCompat.dispatchApplyWindowInsets(decor, insets)
         }
         composeRule.waitForIdle()
+        // The dispatch must actually reach Compose's WindowInsets, or every
+        // golden silently shows a phone without system bars (Robolectric
+        // re-dispatching its own empty insets would do exactly that).
+        val density = composeRule.activity.resources.displayMetrics.density
+        val expected = SystemBarsPx(
+            top = (STATUS_BAR_DP * density).roundToInt(),
+            bottom = (NAV_BAR_DP * density).roundToInt(),
+        )
+        assertEquals(
+            "simulated system-bar insets (status ${STATUS_BAR_DP}dp, navigation ${NAV_BAR_DP}dp) did not reach " +
+                "Compose's WindowInsets -- the screenshot would show no system bars",
+            expected,
+            observedSystemBars,
+        )
+    }
+
+    /**
+     * Every visible card's cover request fails in [OfflineImageLoader] and
+     * flips that card to its fallback tile. Waits until the number of
+     * fallback tiles is non-zero AND unchanged across two consecutive
+     * idles, so a capture never lands while later cards are still flipping.
+     */
+    private fun awaitStableFallbackTiles() {
+        var previous = -1
+        repeat(STABLE_POLL_LIMIT) {
+            composeRule.waitForIdle()
+            val count = composeRule
+                .onAllNodes(hasContentDescription(COVER_FALLBACK_PREFIX, substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes().size
+            if (count > 0 && count == previous) return
+            previous = count
+            composeRule.mainClock.advanceTimeByFrame()
+        }
+        fail("cover fallback tiles never settled within $STABLE_POLL_LIMIT idles (last count: $previous)")
     }
 
     /** Mirror of `MainActivity.setContent`'s main shell with Library selected. */
@@ -188,6 +223,13 @@ class LibraryScreenshotTest {
             )
         }
         var jobsSnapshot by remember { mutableStateOf(emptyList<JobSummary>()) }
+        // Read here so simulateSystemBars can assert its insets arrived.
+        val density = LocalDensity.current
+        val bars = SystemBarsPx(
+            top = WindowInsets.statusBars.getTop(density),
+            bottom = WindowInsets.navigationBars.getBottom(density),
+        )
+        SideEffect { observedSystemBars = bars }
         Scaffold(
             bottomBar = {
                 BottomNavBar(
@@ -213,6 +255,11 @@ class LibraryScreenshotTest {
         }
     }
 
+    /** Last system-bar insets Compose saw in [AppShell], in px. */
+    private var observedSystemBars: SystemBarsPx? = null
+
+    data class SystemBarsPx(val top: Int, val bottom: Int)
+
     /** Robolectric resolution qualifiers for one screen size. */
     data class ScreenSize(val widthDp: Int, val heightDp: Int) {
         fun qualifiers(night: Boolean): String =
@@ -229,6 +276,8 @@ class LibraryScreenshotTest {
         /** One density for every profile: layout depends on dp only, and a
          * shared density keeps the goldens comparable side by side. */
         const val DENSITY = "420dpi"
+
+        const val STABLE_POLL_LIMIT = 50
 
         const val STATUS_BAR_DP = 24
         const val NAV_BAR_DP = 48

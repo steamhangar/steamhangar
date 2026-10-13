@@ -123,7 +123,11 @@ def test_gradle_forwards_the_record_switch_and_declares_goldens_as_input() -> No
     assert f'RECORD_PROPERTY = "{prop}"' in src
     assert f'val screenshotRecordProperty = "{prop}"' in gradle
     assert 'providers.gradleProperty(screenshotRecordProperty).getOrElse("false")' in gradle
-    assert 'inputs.dir("src/testDebug/screenshots")' in gradle
+    assert 'inputs.files(fileTree("src/testDebug/screenshots")' in gradle
+    # inputs.dir on a not-yet-existing golden directory fails task
+    # validation even with .optional() (first CI run, 8d12ee4).
+    code = [ln for ln in gradle.splitlines() if not ln.lstrip().startswith("//")]
+    assert not [ln for ln in code if "inputs.dir(" in ln]
     # Robolectric needs the merged resources to render real Composables.
     assert "isIncludeAndroidResources = true" in gradle
 

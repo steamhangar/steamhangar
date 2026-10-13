@@ -3978,7 +3978,8 @@ machine would not match CI's pixels anyway (fonts, native graphics build).
   `MainActivity`'s shell (edge-to-edge window, outer Scaffold with the
   bottom bar, `LibraryScreen` inside it) so the screen is rendered where it
   really lives. Robolectric reports no system-bar insets of its own; the
-  test dispatches fixed ones (status 24 dp, navigation 48 dp).
+  test dispatches fixed ones (status 24 dp, navigation 48 dp) and fails if
+  they do not reach Compose's `WindowInsets`.
 - `.../LibraryScreenshotFixtures.kt` -- fixed synthetic data: 7 vault games
   plus 3 owned-only ones, every filter chip non-zero, long and short
   titles, every card kind (cached, not cached, downloading, updating,
