@@ -1363,6 +1363,34 @@ every later phase's history.
    pre-freeze project review (`docs/PROJECT_PLAN.md` §11 item 12) — open
    since 2026-08-18.
 
+2. **PARTLY DONE (core/, 2026-10-13) — TLS passthrough per-client cap
+   causes a SYN retry storm.** Mechanism delivered by CORE-FIX-4d (rc13):
+   the caps are operator-tunable via `VAULT_TLS_CLIENT_MAX_CONNS` /
+   `VAULT_TLS_MAX_CONNS`, defaults unchanged at 64/256. Effect NOT
+   re-measured on `:443`: the 2026-10-10 measurement used a client on
+   `:80`, so the storm scenario was not exercised. Keep open until a
+   `:443` measurement or a decision on the default.
+   Observed on the operator's LAN: one Steam client (a single address)
+   holds ~60 long-lived sessions on the `:443` stream block. At the
+   per-client `limit_conn vault_tls_client 64` (`core/docker/
+   40-vault-preflight.sh`, ADR-0020) further connects are refused with
+   503 (`sni="-"`, `session_time=0.000`) and the client retries at once,
+   dozens per second. The site gateway logged 159 "TCP SYN Flood"
+   events from that one client address on 2026-10-05 (17:41-20:04,
+   ~1.55M packets dropped) and the operator saw the LAN stall.
+   Not measured: whether the gateway or the cap is the dominant limit,
+   and how the Steam client reacts to a refused connect.
+   Options: (A) raise the per-client cap (e.g. 64 -> 128, total 256
+   unchanged; arithmetic 256 x 2 = 512 of 1024 `worker_connections`),
+   which deviates from ADR-0020 and needs an ADR note; (B) leave the cap
+   and cap download parallelism on the client side; (C) bound the new-
+   connection rate or bandwidth on the passthrough (nginx stream has no
+   `limit_req`; needs design). Touch points for A: the stream template,
+   the preflight expected-block list, `check-config-drift.sh` step 2f,
+   `core/README.md` loop-bound paragraph, ADR-0020, and the cap assertion
+   in `.github/scripts/tls-sni-probe.sh`. Assigned to: another session.
+   Interim for the operator: drop the DNS rewrite for the affected client.
+
 ### D-17 — header art in the detail card (WP 4h.3, 2026-08-19; superseded by WP 4h.5, 2026-08-19)
 
 The frozen mockup's detail sheet body starts with `.dhead`

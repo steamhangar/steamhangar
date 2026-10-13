@@ -311,13 +311,14 @@ Observed on the rc14 production library: many bare "APP 25062xx" cards,
 mostly Helldivers 2 DLC/content packages. Proposed, not yet reviewed and
 not decided: a filter for them, grouping them under the parent game, and
 classifying tool packages dynamically instead of the fixed list in
-`tool_apps.py`. Needs an ADR and the user's go before any code.
+`tool_apps.py`. Needs an ADR and the user's go before any code. Decision 2026-10-13:
+group under the parent game (not just filter).
 
 ## D10: COVER-CACHE-1, slow cover loading
 
 Covers load slowly. Proposed, not decided: vault-api stores the images
 and serves them with an ETag and a long `Cache-Control`; the Android app
-gets its own Coil disk cache.
+gets its own Coil disk cache (decision 2026-10-13: both).
 
 ## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
 
@@ -363,7 +364,10 @@ agents exist). Needs the client address in vault-core's log format
 (own package; event_sweep already reads client addresses). Includes
 D13 SPEED-1: throughput measured once at the server (vault-core), shown
 per running job. Downloads history gets a time filter: 24 h, 7 days,
-30 days, all. Order: after UPD-1..4.
+30 days, all. Downloads header (user, 2026-10-13): current and average
+speed, GB loaded, graphs, hit rate, GB saved from the cache, peak speed,
+active clients. PC add/manage moves from Settings into the Clients page.
+Order: after UPD-1..4.
 
 ## Suggested order
 
