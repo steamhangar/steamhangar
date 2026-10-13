@@ -27,7 +27,7 @@ import org.junit.Test
 
 private class NoIdentity : SteamIdentityRepository {
     override fun state(): SteamIdentityState = SteamIdentityState(null, null)
-    override fun buildLoginUrl(): String = "https://steamcommunity.com/openid/login?fake=1"
+    override fun buildLoginUrl(vaultBaseUrl: String): String? = "https://steamcommunity.com/openid/login?fake=1"
     override suspend fun completeLogin(rawCallbackUrl: String): SteamLoginResult = SteamLoginResult.Success("76561198042117903")
     override suspend fun refreshPersonaName(): Boolean = false
     override suspend fun ownedGamesCountPreview(): Result<Int> = Result.success(0)

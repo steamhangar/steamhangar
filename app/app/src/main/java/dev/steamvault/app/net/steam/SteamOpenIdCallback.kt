@@ -98,8 +98,8 @@ object SteamOpenIdCallback {
     /**
      * Extracts the `state` query parameter from an `openid.return_to` value
      * (WP 4b.7 replay-residual fix -- see [SteamLoginState]/[PendingLoginState]).
-     * `return_to` is itself a full URL string (this app's own
-     * `steamvault://auth/openid-return?state=...`), so this is a small,
+     * `return_to` is itself a full URL string (since WP D11 the vault's
+     * `http(s)://<vault>/auth/steam/app-return?state=...`), so this is a small,
      * independent query-string parse over THAT value, not over the outer
      * callback URL [parse] already handled -- Valve's OpenID assertion
      * echoes `return_to` back verbatim as one of the signed `openid.*`

@@ -28,6 +28,7 @@ from vault_api.manifest_ingest import log_cache_dir_canary
 from vault_api.routers import (
     about,
     agent,
+    app_return,
     cache,
     clients,
     games,
@@ -344,6 +345,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # vault-api is too old to have the relay" from "this operator hasn't set
     # a key yet" -- same reasoning as the oracle router above.
     app.include_router(steam.router)
+    # WP D11 (APP-FIX-LOGIN): the Steam OpenID return page for the Android
+    # app. Public on purpose and OUTSIDE /v1 (the browser that lands there
+    # has no key); a fixed-target static hand-off to the app's deep link,
+    # see routers/app_return.py. Mounted unconditionally, unlike the web UI:
+    # the app needs it on a headless vault-api too.
+    app.include_router(app_return.router)
     # WP 4a.1. Registered last, by convention (webui.mount_web_ui's own
     # docstring): every route it adds is an exact path or a narrow real
     # asset-subtree prefix (/, /index.html, the SPA view paths, /css, /js —

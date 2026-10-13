@@ -22,21 +22,22 @@ import org.junit.Test
 class SteamOpenIdLoginUrlTest {
 
     @Test
-    fun `builds the exact literal checkid_setup URL for the default return_to and realm`() {
+    fun `builds the exact literal checkid_setup URL for a vault return_to and realm (WP D11)`() {
         val expected = "https://steamcommunity.com/openid/login" +
             "?openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0" +
             "&openid.mode=checkid_setup" +
-            "&openid.return_to=steamvault%3A%2F%2Fauth%2Fopenid-return" +
-            "&openid.realm=steamvault%3A%2F%2Fauth%2Fopenid-return" +
+            "&openid.return_to=http%3A%2F%2F192.168.1.50%3A8080%2Fauth%2Fsteam%2Fapp-return%3Fstate%3Dabc" +
+            "&openid.realm=http%3A%2F%2F192.168.1.50%3A8080%2F" +
             "&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select" +
             "&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
 
-        assertEquals(expected, SteamOpenIdLoginUrl.build())
+        val target = SteamOpenIdReturnUrl.forVault("http://192.168.1.50:8080", "abc")!!
+        assertEquals(expected, SteamOpenIdLoginUrl.build(target.returnTo, target.realm))
     }
 
     @Test
     fun `MUTATION PIN -- mode is literally checkid_setup, never id_res or check_authentication`() {
-        val url = SteamOpenIdLoginUrl.build()
+        val url = SteamOpenIdLoginUrl.build("http://h/auth/steam/app-return", "http://h/")
         assertEquals(true, url.contains("openid.mode=checkid_setup"))
         assertEquals(false, url.contains("openid.mode=id_res"))
         assertEquals(false, url.contains("openid.mode=check_authentication"))

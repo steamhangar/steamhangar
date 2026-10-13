@@ -7,7 +7,7 @@ import dev.steamvault.app.net.steam.SteamLibraryFetcher
 import dev.steamvault.app.net.steam.SteamLoginState
 import dev.steamvault.app.net.steam.SteamOpenIdCallback
 import dev.steamvault.app.net.steam.SteamOpenIdClient
-import dev.steamvault.app.net.steam.SteamOpenIdConfig
+import dev.steamvault.app.net.steam.SteamOpenIdReturnUrl
 import dev.steamvault.app.net.steam.SteamOpenIdVerifier
 import dev.steamvault.app.net.steam.VaultRelayLibraryFetcher
 import dev.steamvault.app.storage.CredentialStore
@@ -34,6 +34,12 @@ sealed class SteamLoginResult {
     data class Failure(val reason: String) : SteamLoginResult()
 }
 
+/** Shown when [SteamIdentityRepository.buildLoginUrl] has no usable vault
+ * address to send Steam back to (WP D11) -- fixed, key-free, like
+ * [SteamLoginResult.Failure.reason]. */
+const val STEAM_LOGIN_NEEDS_VAULT_ADDRESS =
+    "Steam sign-in needs the vault address (http:// or https://) — set up the connection first."
+
 /**
  * Steam identity (OpenID sign-in state + library data) — the data layer WP
  * 4b.3 asks for, updated by WP 4h.4 (ADR-0004's second addendum): OpenID
@@ -50,8 +56,14 @@ interface SteamIdentityRepository {
     /** Current persisted state, read fresh from [CredentialStore] every call. */
     fun state(): SteamIdentityState
 
-    /** The `checkid_setup` URL to open in a Custom Tab. */
-    fun buildLoginUrl(): String
+    /**
+     * The `checkid_setup` URL to open in a Custom Tab, or `null` when
+     * [vaultBaseUrl] is not an `http(s)` URL (WP D11: Steam returns to a
+     * page on the vault, so a login needs the vault's address -- during
+     * onboarding the just-tested one, later the stored one). Starts a new
+     * pending `state` only when it returns a URL.
+     */
+    fun buildLoginUrl(vaultBaseUrl: String): String?
 
     /**
      * Verifies [rawCallbackUrl] (the raw deep-link URL Valve redirected
@@ -139,15 +151,17 @@ class SteamIdentityRepositoryImpl(
         personaName = credentialStore.getSteamPersonaName(),
     )
 
-    override fun buildLoginUrl(): String {
+    override fun buildLoginUrl(vaultBaseUrl: String): String? {
         // WP 4b.7 replay-residual fix: a fresh, single-use random state per
         // login attempt, embedded in return_to and checked BEFORE the
         // network round trip in completeLogin below -- see
         // SteamLoginState.kt's module kdoc for the attack this closes.
+        // WP D11: return_to is the vault's hand-off page (Steam refuses the
+        // custom scheme); the state rides in its query exactly as before.
         val state = stateGenerator()
+        val target = SteamOpenIdReturnUrl.forVault(vaultBaseUrl, state) ?: return null
         pendingLoginState.start(state)
-        val returnTo = "${SteamOpenIdConfig.RETURN_TO}?state=$state"
-        return openIdVerifier.buildLoginUrl(returnTo = returnTo, realm = SteamOpenIdConfig.REALM)
+        return openIdVerifier.buildLoginUrl(returnTo = target.returnTo, realm = target.realm)
     }
 
     override suspend fun completeLogin(rawCallbackUrl: String): SteamLoginResult {
@@ -177,6 +191,14 @@ class SteamIdentityRepositoryImpl(
         // this app must not merely assume Valve did).
         if (!SteamOpenIdCallback.signedCoversReturnTo(params.getValue("openid.signed"))) {
             return SteamLoginResult.Failure("Steam's response did not sign the return address — rejected.")
+        }
+
+        // WP D11: the signed return_to must be the vault's hand-off page.
+        // The state above already binds the callback to this attempt; this
+        // shape check is defence in depth against an assertion minted for
+        // some other relying party that happens to carry a matching state.
+        if (!SteamOpenIdReturnUrl.isVaultReturnTo(params.getValue("openid.return_to"))) {
+            return SteamLoginResult.Failure("Steam's response named an unexpected return address — rejected.")
         }
 
         val verified = openIdVerifier.checkAuthentication(params)

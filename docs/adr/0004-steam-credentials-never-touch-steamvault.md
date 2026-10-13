@@ -208,3 +208,47 @@ in `docs/PROJECT_PLAN.md` §11 item 13 and in
 `docs/handover/post-0.1.0-roadmap.md` ("D2: AUTH-FEAT-1"). It will amend
 this ADR when it ships; until then, the terminal login above is the only
 path.
+
+## Addendum 5 (2026-10-13): the app's OpenID return goes through vault-api (D11)
+
+**Context.** The app sent `steamvault://auth/openid-return` as OpenID
+`return_to` and `realm` (WP 4b.3, with an "on-device only" caveat). On a
+device Steam answered "Invalid return protocol": its provider only returns
+to `http(s)`. User decision (roadmap wave plan item 10, 2026-10-13): return
+through an http(s) page on vault-api that deep-links into the app; it must
+not conflict with D2 (QR login for SteamPrefill's session).
+
+**Decision.**
+- `return_to` is `<vault base URL origin>/auth/steam/app-return?state=<per-login
+  state>`; `realm` is the vault origin (`scheme://host[:port]/`). Plain
+  `http://` on a LAN works for Steam in principle (OpenID allows any
+  http(s) realm); it is not yet confirmed on a device.
+- vault-api serves that page (`api/vault_api/routers/app_return.py`): public,
+  GET/HEAD only, OUTSIDE `/v1` so the `/v1` auth carve-out stays exactly
+  `/v1/health`. It copies the raw query behind the one fixed target
+  `steamvault://auth/openid-return?` (no open redirect), as a no-JS
+  `<meta http-equiv="refresh">` plus a tappable link, `Cache-Control:
+  no-store`, the global CSP and `Referrer-Policy: no-referrer`. A query
+  that is not a plausible Steam answer (no `openid.mode`, over 8 KiB, any
+  character outside a percent-encoded query's ASCII set) gets a 400 page
+  without a link.
+- vault-api verifies nothing, stores nothing and contacts nobody for this,
+  so ADR-0011's egress allowlist is unchanged (steamcommunity.com stays
+  off it). The trust decision stays in the app, unchanged from WP 4b.3/4b.7:
+  per-login `state` inside the signed `return_to`, `claimed_id` and
+  `return_to` in `openid.signed`, `check_authentication` against
+  steamcommunity.com from the phone. New in the app: the signed
+  `return_to` must be an http(s) URL on exactly `/auth/steam/app-return`.
+
+**Consequences.**
+- Steam sign-in in the app needs a vault address: onboarding uses step 1's
+  tested URL, Settings the stored one. Without one, the app says so and
+  opens nothing.
+- The plan's "no unauthenticated endpoints except `/v1/health` and the web
+  UI's static files" gains this one static hand-off page.
+- The signed assertion (SteamID64 included) passes through the vault's
+  request line; uvicorn's access log records request lines. The assertion
+  is single-use for the app (state) and carries no secret, but it is a
+  privacy note for operators who ship vault-api logs elsewhere.
+- No conflict with D2: D2 logs SteamPrefill into Steam behind the API key
+  under `/v1`; this page touches neither SteamPrefill nor any `/v1` route.

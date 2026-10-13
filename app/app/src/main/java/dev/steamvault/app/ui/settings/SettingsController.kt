@@ -22,6 +22,7 @@ import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingsOut
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
+import dev.steamvault.app.repo.STEAM_LOGIN_NEEDS_VAULT_ADDRESS
 import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.repo.SteamLoginResult
 import dev.steamvault.app.storage.CredentialStore
@@ -362,10 +363,13 @@ class SettingsController(
     /** @return the `checkid_setup` URL to open in a Custom Tab -- caller
      * ([dev.steamvault.app.MainActivity]) launches it; the redirect back
      * arrives at `onNewIntent`, which must call [completeSteamLogin] on
-     * THIS controller instance while it is the active one. */
-    fun buildSteamLoginUrl(): String {
-        loginError = null
-        return identityRepository.buildLoginUrl()
+     * THIS controller instance while it is the active one. `null` (with
+     * [loginError] set) when no stored vault URL can serve as Steam's
+     * return address (WP D11: Steam returns to a page on the vault). */
+    fun buildSteamLoginUrl(): String? {
+        val url = identityRepository.buildLoginUrl(credentialStore.getBaseUrl().orEmpty())
+        loginError = if (url == null) STEAM_LOGIN_NEEDS_VAULT_ADDRESS else null
+        return url
     }
 
     suspend fun completeSteamLogin(rawCallbackUrl: String) {

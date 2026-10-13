@@ -99,7 +99,7 @@ class MainActivityIntentWiringTest {
 
     @Test
     fun `MUTATION PIN -- handleIntent strips a consumed deep link after routing it and before handling it`() {
-        // WP APP-PAIR-1 replaced the bare RETURN_TO prefix check with
+        // WP APP-PAIR-1 replaced the bare APP_LINK (formerly RETURN_TO) prefix check with
         // routeIncomingLink (whose OpenID branch is that same prefix check,
         // pinned in PairingLinkTest); the strip now covers both link kinds.
         val body = block("private fun handleIntent(", '{')

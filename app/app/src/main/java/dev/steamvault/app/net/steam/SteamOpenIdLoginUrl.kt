@@ -1,55 +1,88 @@
 package dev.steamvault.app.net.steam
 
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
- * The custom-scheme app link this app registers as its OpenID `return_to`
- * (WP 4b.3 brief: "pick an app link scheme, document the choice + manifest
- * intent-filter").
+ * Where Steam sends the browser back to, and how that answer reaches the app.
  *
- * **Choice: a custom `steamvault://` scheme, not an `https://` return_to.**
- * SteamHangar has no hosted web presence of its own (it is a self-hosted
- * homelab tool -- `vault-api` is reachable only over the user's LAN/VPN,
- * never a public domain by default), so there is no HTTPS endpoint this app
- * could register as a redirect target even if it wanted one. A custom
- * scheme deep link is the standard native-app OpenID/OAuth pattern for
- * exactly this situation (no public HTTPS callback surface available) --
- * `AndroidManifest.xml`'s `MainActivity` carries a matching
- * `BROWSABLE`+`DEFAULT` intent-filter for `steamvault://auth/openid-return`,
- * and `MainActivity.onNewIntent` is where the redirected Custom Tab hands
- * the callback back to this app.
+ * **WP D11 (APP-FIX-LOGIN): Steam refuses a custom-scheme `return_to`.**
+ * WP 4b.3 used `steamvault://auth/openid-return` as both `return_to` and
+ * `realm`, with an "on-device only" caveat; on a device Steam answered
+ * "Invalid return protocol" -- its OpenID provider only returns to
+ * `http(s)`. Since D11 the app asks Steam to return to a page on the
+ * user's OWN vault-api ([VAULT_RETURN_PATH] under the configured base
+ * URL, plain `http://` on a LAN is fine) and that page hands the answer,
+ * query unchanged, to [APP_LINK] (`api/vault_api/routers/app_return.py`).
+ * [APP_LINK] keeps the manifest's `BROWSABLE` intent filter and
+ * `MainActivity.onNewIntent` exactly as before.
  *
- * **`realm` equals `return_to` exactly.** OpenID 2.0's realm-matching rules
- * exist to let a `return_to` be a NARROWER URL than a wildcarded realm (a
- * realm with a leading `*.` subdomain wildcard matching a `return_to` on
- * any one of its subdomains) -- this
- * app has no such wildcard need (one fixed callback URL), and using the
- * identical URL for both is an explicitly PERMITTED degenerate case of the
- * spec's realm/return_to relationship, not a workaround.
+ * The trust decision did not move: vault-api only forwards, it never
+ * verifies or stores the answer. The app still checks the per-login
+ * `state` (now inside the signed `http(s)` `return_to`), the signed-field
+ * list and `check_authentication` against [STEAM_HOST] itself
+ * (`SteamIdentityRepositoryImpl.completeLogin`).
  *
- * **Honest caveat (WP brief: maximize the pure-logic testable surface,
- * since the browser round trip itself cannot be exercised here).** Steam's
- * concrete OpenID implementation is not independently documented to
- * validate non-`http(s)` realms/return_to URLs the same way a fully
- * spec-compliant generic OpenID provider would -- this repo has no way to
- * confirm empirically, from this environment, that Valve's login page
- * accepts and correctly redirects to a `steamvault://` URL rather than
- * silently rejecting it or mangling it in transit. That confirmation is
- * exactly the "on-device only" verification step called out in this WP's
- * final report; if it turns out Valve rejects the custom scheme, the fix is
- * narrow (swap [RETURN_TO]/[REALM] for a scheme Valve accepts) and does not
- * touch anything downstream of [SteamOpenIdCallback.parse].
+ * `realm` is the vault's origin (`scheme://host[:port]/`, see
+ * [SteamOpenIdReturnUrl]): OpenID 2.0 requires `return_to` to sit under
+ * the realm, and the origin is also the name Steam shows on its sign-in
+ * page.
  */
 object SteamOpenIdConfig {
+    /** The app's deep link, matched by `AndroidManifest.xml`'s intent filter. */
     const val SCHEME = "steamvault"
     const val HOST = "auth"
     const val PATH = "/openid-return"
-    const val RETURN_TO = "$SCHEME://$HOST$PATH"
-    const val REALM = RETURN_TO
+    const val APP_LINK = "$SCHEME://$HOST$PATH"
+
+    /** vault-api's public hand-off page; must match
+     * `api/vault_api/routers/app_return.py::APP_RETURN_PATH`. */
+    const val VAULT_RETURN_PATH = "/auth/steam/app-return"
 
     /** The one host this app will ever send an OpenID request/verification to. */
     const val STEAM_HOST = "steamcommunity.com"
     const val LOGIN_ENDPOINT = "https://$STEAM_HOST/openid/login"
+}
+
+/** The `return_to` and `realm` one login attempt sends to Steam. */
+data class SteamOpenIdReturn(val returnTo: String, val realm: String)
+
+/**
+ * Builds the vault-hosted `return_to`/`realm` pair (WP D11) -- pure, no
+ * network, JVM-testable.
+ *
+ * Only the vault base URL's scheme, host and port are used: path, query,
+ * fragment and any userinfo are dropped, the same way `VaultApiClient`
+ * replaces the path for every call. `null` when [vaultBaseUrl] is not an
+ * `http(s)` URL (blank, malformed, another scheme): the caller then has
+ * no address Steam could return to.
+ */
+object SteamOpenIdReturnUrl {
+    fun forVault(vaultBaseUrl: String, state: String): SteamOpenIdReturn? {
+        val base = vaultBaseUrl.trim().toHttpUrlOrNull() ?: return null
+        val origin = base.newBuilder()
+            .username("")
+            .password("")
+            .query(null)
+            .fragment(null)
+        val realm = origin.encodedPath("/").build().toString()
+        val returnTo = origin.encodedPath(SteamOpenIdConfig.VAULT_RETURN_PATH)
+            .addQueryParameter("state", state)
+            .build()
+            .toString()
+        return SteamOpenIdReturn(returnTo = returnTo, realm = realm)
+    }
+
+    /**
+     * Shape check on a callback's (signed) `openid.return_to`: an `http(s)`
+     * URL whose path is exactly [SteamOpenIdConfig.VAULT_RETURN_PATH].
+     * Defence in depth next to the per-login `state`, which is what
+     * actually binds a callback to this app's own login attempt.
+     */
+    fun isVaultReturnTo(returnTo: String): Boolean {
+        val url = returnTo.toHttpUrlOrNull() ?: return false
+        return url.encodedPath == SteamOpenIdConfig.VAULT_RETURN_PATH
+    }
 }
 
 /**
@@ -63,10 +96,7 @@ object SteamOpenIdConfig {
  * OkHttp's own well-tested implementation, not a hand-rolled one.
  */
 object SteamOpenIdLoginUrl {
-    fun build(
-        returnTo: String = SteamOpenIdConfig.RETURN_TO,
-        realm: String = SteamOpenIdConfig.REALM,
-    ): String {
+    fun build(returnTo: String, realm: String): String {
         val builder = SteamOpenIdConfig.LOGIN_ENDPOINT.toHttpUrl().newBuilder()
         builder.addQueryParameter("openid.ns", "http://specs.openid.net/auth/2.0")
         builder.addQueryParameter("openid.mode", "checkid_setup")

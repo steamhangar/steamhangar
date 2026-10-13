@@ -303,7 +303,7 @@ private fun SteamStep(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        Button(onClick = { onLaunchSteamLogin(controller.buildSteamLoginUrl()) }) {
+        Button(onClick = { controller.buildSteamLoginUrl()?.let(onLaunchSteamLogin) }) {
             Text(stringResource(R.string.identity_sign_in))
         }
     } else {

@@ -10,6 +10,7 @@ import dev.steamvault.app.net.profile.CleartextNotAllowedException
 import dev.steamvault.app.net.profile.ConnectivityProfile
 import dev.steamvault.app.net.profile.PublicDomainProfile
 import dev.steamvault.app.net.profile.SystemVpnProfile
+import dev.steamvault.app.repo.STEAM_LOGIN_NEEDS_VAULT_ADDRESS
 import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.repo.SteamIdentityState
 import dev.steamvault.app.repo.SteamLoginResult
@@ -207,10 +208,13 @@ class OnboardingController(
 
     // ---- Step 2 orchestration -----------------------------------------------
 
-    /** @return the `checkid_setup` URL to open in a Custom Tab. */
-    fun buildSteamLoginUrl(): String {
-        loginError = null
-        return identityRepository.buildLoginUrl()
+    /** @return the `checkid_setup` URL to open in a Custom Tab, or `null`
+     * (with [loginError] set) when step 1's URL cannot serve as Steam's
+     * return address (WP D11: Steam returns to a page on the vault). */
+    fun buildSteamLoginUrl(): String? {
+        val url = identityRepository.buildLoginUrl(baseUrlText.trim())
+        loginError = if (url == null) STEAM_LOGIN_NEEDS_VAULT_ADDRESS else null
+        return url
     }
 
     suspend fun completeSteamLogin(rawCallbackUrl: String) {

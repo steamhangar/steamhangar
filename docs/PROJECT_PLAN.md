@@ -2432,7 +2432,7 @@ steamhangar/
 |---|---|---|
 | `proxy_store` incompatible with range requests | HIGH | Phase 0 resolves this; Plan A fallback defined |
 | Steam changes its CDN URL scheme | MEDIUM | Log schema anomalies with alerts; abstract the mapping layer |
-| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API has no unauthenticated endpoints except `/v1/health` and the web UI's static files (threat model §1/§7) |
+| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API has no unauthenticated endpoints except `/v1/health`, the web UI's static files and the static Steam sign-in hand-off page `/auth/steam/app-return` (ADR-0004 addendum 5; threat model §1/§7) |
 | Shared depots → incomplete deletion | LOW | Shared detection + transparent reporting |
 | tsnet gomobile build complexity | MEDIUM | Profile abstraction means tsnet can ship later; system-VPN profile works day one |
 | Single-maintainer risk | MEDIUM | Small scope (Steam only), good docs, permissive license lower the contribution barrier |

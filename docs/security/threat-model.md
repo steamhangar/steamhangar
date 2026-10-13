@@ -1085,6 +1085,10 @@ print(secrets.token_urlsafe(36))"` (the `VAULT_API_KEY` entry in
 router except `health` requires it (§1, verified router-by-router); `GET
 /v1/health` is the sole, deliberate exception, returning a fixed
 `{"status": "ok"}` body with no data (`api/vault_api/routers/health.py`).
+Outside `/v1`, besides the web UI's static files, `GET /auth/steam/app-return`
+(WP D11, ADR-0004 addendum 5) is public: it reads no key, no database and no
+network, and only echoes a validated query behind the fixed
+`steamvault://auth/openid-return?` deep link for the Android app.
 There is no CORS middleware configured anywhere in `vault_api`
 (verified by search across the package) — a browser will not send the
 custom `X-Api-Key` header to `vault-api` cross-origin without a CORS
