@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D14)
+# Handover: post-v0.1.0 roadmap (items D1-D15)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -349,6 +349,21 @@ production checks (the dev instance stays offline). Badge "Update
 available" plus a "Check updates" button and filter chip on web and
 Android. Supersedes the "Check & update, never bare Check" rule of
 2026-08-18 (ADR addendum in UPD-4).
+
+## D15: CLIENTS-1, Clients area plus server-side speed and history age filter
+
+User request 2026-10-13 (answers the same day). A "Clients" nav entry
+(own page, not a sheet; diverges from the WP 4a.1 "sheet" ruling, user
+veto welcome) under Library. Per client: connected or not, what is
+installed, what is loading now, what was loaded recently. Clients
+without an agent (e.g. the WLAN client "frame") appear from the cache
+traffic alone: connected, bytes loaded, last active; "installed" only
+for agent clients, an agent can be added later (Windows and Linux/SteamOS
+agents exist). Needs the client address in vault-core's log format
+(own package; event_sweep already reads client addresses). Includes
+D13 SPEED-1: throughput measured once at the server (vault-core), shown
+per running job. Downloads history gets a time filter: 24 h, 7 days,
+30 days, all. Order: after UPD-1..4.
 
 ## Suggested order
 
