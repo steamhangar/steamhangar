@@ -10,7 +10,7 @@ This pure-ASGI middleware runs before routing:
 
 1. **Auth first** for ``/v1`` and ``/v1/*`` except exactly ``/v1/health``
    (the one documented unauthenticated route, ``auth.py``) and the signed
-   cover path ``/v1/covers/<appid>/<32 hex>`` (WP D10, authenticated by the
+   cover path ``/v1/covers/<appid, no leading zero>/<32 hex>`` (WP D10, authenticated by the
    signature in its path, ``routers/covers.py``): the same
    constant-time comparison as the dependency (``auth.api_key_matches``),
    so a request without a valid key is answered 401 without one body byte
@@ -42,7 +42,7 @@ _PUBLIC_PATHS = frozenset({"/v1/health"})
 #: credential in the path (an HMAC keyed with the API key, checked by
 #: ``routers/covers.py``), because an ``<img>`` cannot send ``X-Api-Key``.
 #: Exactly this shape and nothing else skips the header check here.
-_SIGNED_COVER_PATH = re.compile(r"/v1/covers/[0-9]{1,10}/[0-9a-f]{32}", re.ASCII)
+_SIGNED_COVER_PATH = re.compile(r"/v1/covers/[1-9][0-9]{0,9}/[0-9a-f]{32}", re.ASCII)
 
 
 def is_signed_cover_path(path: str) -> bool:

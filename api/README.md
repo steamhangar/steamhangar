@@ -769,7 +769,8 @@ ETag, so repeat views were already cached by the clients.)
   thread (started by the lifespan, no setting; first tick after 45 s, then
   every 60 s). Each tick it first reconciles `<data dir>/covers/` with
   `app_cover_file` (a missing or wrong-size file is downloaded again, a file
-  without a row and a temp file older than an hour are removed; only names
+  without a row and a temp file of its own shape (`.<appid>.<32 hex>.tmp`)
+  older than an hour are removed; only names
   it creates itself are ever touched), then downloads up to 20 covers that
   are due: apps in `apps` with a resolved `cover_url` and no stored file, or
   a file from an older URL. Never on a request path.
@@ -5524,11 +5525,11 @@ without the key nobody can build one. Consequences, stated plainly:
   the vault tracks;
 - it is not a proxy: the handler only reads files `cover_cache.py` stored
   for known apps, never fetches anything;
-- a leaked URL (browser history, uvicorn's access log, a screenshot of the
+- a leaked URL (uvicorn's access log, a screenshot of the browser's
   network tab) lets its holder fetch that one public cover image until the
   cover changes or the API key is rotated, nothing else;
 - `body_guard.py` skips its header check for exactly the shape
-  `/v1/covers/<1-10 digits>/<32 lowercase hex>`; every other `/v1/covers/...`
+  `/v1/covers/<1-10 digits, no leading zero>/<32 lowercase hex>`; every other `/v1/covers/...`
   path still needs the header (`tests/test_d10_cover_cache.py`), and
   `tests/test_security.py` lists the route as the one signature-authenticated
   exception.

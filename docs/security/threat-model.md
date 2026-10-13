@@ -272,7 +272,11 @@ ADR that describes it:
   `oracle.py` and `steam.py` — all verified individually), and
   `main.py` registers every one of those routers (the
   `app.include_router(...)` calls in `api/vault_api/main.py::create_app`;
-  `routers/health.py` is the one router built without the dependency).
+  `routers/health.py` is the one router built without the dependency and
+  without any credential; `routers/covers.py` (WP D10) is the second router
+  without the dependency, authenticated instead by an HMAC of the key in
+  its path, see §7 "How authentication actually works", the paragraph on
+  `GET /v1/covers/{appid}/{signature}`).
   Since WP SEC-FIX-4 (S-3) the key is also checked BEFORE routing: FastAPI
   reads and parses a JSON body while resolving a route's parameters, ahead
   of the router dependency, so a keyless 40 MB body used to cost ~1.7 GB
@@ -1109,7 +1113,8 @@ key no URL can be built and every refusal is the same `404` (no
 enumeration of tracked apps); the route only reads files vault-api stored
 itself (not a proxy). A leaked URL exposes one public cover image until the
 cover changes or the key is rotated; it does not reveal the key. These URLs
-do appear in uvicorn's access log and in browser history.
+do appear in uvicorn's access log and in the browser's developer tools
+(network tab).
 There is no CORS middleware configured anywhere in `vault_api`
 (verified by search across the package) — a browser will not send the
 custom `X-Api-Key` header to `vault-api` cross-origin without a CORS

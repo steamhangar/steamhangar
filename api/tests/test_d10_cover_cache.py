@@ -94,7 +94,8 @@ def _file_rows(db_path: str) -> dict[int, sqlite3.Row]:
 
 
 @pytest.mark.parametrize(
-    "text", ["", "0", "-1", "+1", " 1", "1_0", "١", "12345678901", "4294967296", "1.0", "a"]
+    "text",
+    ["", "0", "00", "0730", "01", "-1", "+1", " 1", "1_0", "١", "12345678901", "4294967296", "1.0", "a"],
 )
 def test_parse_appid_rejects(text) -> None:
     assert cover_cache.parse_appid(text) is None
@@ -229,9 +230,13 @@ def test_opener_refuses_redirects_and_keeps_the_proxy_handler() -> None:
     handlers = {type(h) for h in cover_cache._OPENER.handlers}
     assert cover_cache._RefuseRedirects in handlers
     assert urllib.request.HTTPRedirectHandler not in handlers
-    # ProxyHandler is only kept when a proxy env var existed at import time
-    # (it is in the container: HTTPS_PROXY=http://vault-proxy:8888), so it is
-    # not asserted here; build_opener adds it exactly like steam_relay's.
+    # ProxyHandler is not asserted: build_opener always constructs one, and
+    # it reads the proxy env vars right then (when this module is imported),
+    # but OpenerDirector.add_handler only keeps a handler that has a
+    # <scheme>_open method, which ProxyHandler gets only for a configured
+    # proxy. The test environment sets none, so it is absent here; in the
+    # container HTTPS_PROXY=http://vault-proxy:8888 is set before vault-api
+    # starts, so it is present there (same mechanism as steam_relay._OPENER).
     assert cover_cache._RefuseRedirects().redirect_request(None, None, 302, "", {}, "x") is None
 
 
@@ -375,10 +380,17 @@ def test_reconcile_clears_missing_files_and_removes_strays(db, tmp_path) -> None
     _download(db, str(cache_dir), lambda u: _image(JPEG))
     os.unlink(cache_dir / "440.img")
     (cache_dir / "999.img").write_bytes(JPEG)  # no row: removed
-    (cache_dir / ".730.dead.tmp").write_bytes(b"x")  # stale temp: removed
+    dead = f".730.{'c' * 32}.tmp"
+    (cache_dir / dead).write_bytes(b"x")  # stale temp of our shape: removed
     old = 1_000_000.0
-    os.utime(cache_dir / ".730.dead.tmp", (old, old))
-    (cache_dir / ".731.fresh.tmp").write_bytes(b"x")  # fresh temp: kept
+    os.utime(cache_dir / dead, (old, old))
+    fresh = f".731.{'a' * 32}.tmp"
+    (cache_dir / fresh).write_bytes(b"x")  # fresh temp: kept
+    foreign = [".notes.tmp", ".730.ABC.tmp", ".0730." + "b" * 32 + ".tmp", ".x.tmp"]
+    for name in foreign:  # old, but not our exact temp shape: kept
+        (cache_dir / name).write_bytes(b"x")
+        os.utime(cache_dir / name, (old, old))
+    (cache_dir / "0730.img").write_bytes(JPEG)  # leading zero: not our name, kept
     (cache_dir / "README").write_text("not ours")  # not our name: kept
 
     conn = _conn(db)
@@ -386,10 +398,23 @@ def test_reconcile_clears_missing_files_and_removes_strays(db, tmp_path) -> None
         cover_cache.reconcile(conn, str(cache_dir))
     finally:
         conn.close()
-    assert sorted(os.listdir(cache_dir)) == [".731.fresh.tmp", "730.img", "README"]
+    assert sorted(os.listdir(cache_dir)) == sorted([fresh, "730.img", "README", "0730.img", *foreign])
     rows = _file_rows(db)
     assert rows[440]["sha256"] is None  # due again
     assert rows[730]["sha256"] is not None
+
+
+def test_write_atomic_temp_names_match_the_shape_reconcile_removes(tmp_path, monkeypatch) -> None:
+    seen = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        seen.append(os.path.basename(src))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(cover_cache.os, "replace", spy)
+    cover_cache._write_atomic(str(tmp_path), 730, JPEG)
+    assert len(seen) == 1 and cover_cache._TEMP_NAME.fullmatch(seen[0]), seen
 
 
 def test_reconcile_clears_a_row_whose_file_has_the_wrong_size(db, tmp_path) -> None:
@@ -582,6 +607,7 @@ def test_every_refusal_is_the_same_404(settings: Settings) -> None:
         "/v1/covers/730/ABCDEF0123456789ABCDEF0123456789",
         "/v1/covers/730/abc",
         "/v1/covers/0730x/0123456789abcdef0123456789abcdef",
+        "/v1/covers/0730/0123456789abcdef0123456789abcdef",  # leading zero
         "/v1/covers/730/0123456789abcdef0123456789abcdef/x",
     ],
 )
@@ -597,6 +623,7 @@ def test_signed_path_shape_is_exact() -> None:
         "/v1/covers/730/0123456789abcdef0123456789abcdeff",
         "/v1/covers/12345678901/0123456789abcdef0123456789abcdef",
         "/v1/covers//0123456789abcdef0123456789abcdef",
+        "/v1/covers/0730/0123456789abcdef0123456789abcdef",
         "/v1/games/0123456789abcdef0123456789abcdef",
         "/v1/covers/730/0123456789abcdef0123456789abcdef\n",
     ):

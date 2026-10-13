@@ -16,7 +16,8 @@ lifespan like the cover-art refresher. Every ``TICK_SECONDS`` it:
 
 1. reconciles the directory with ``app_cover_file`` (schema v21): a row whose
    file is gone or has the wrong size is cleared (fetched again), a stored
-   file without a row and a stale temp file are removed;
+   file without a row and a stale temp file of its own exact name shape
+   (``.<appid>.<32 hex>.tmp``) are removed;
 2. downloads up to ``DOWNLOADS_PER_TICK`` covers that are due: the app has a
    resolved ``cover_url`` (``cover_art.valid_cover_url``) and no stored file,
    or the stored file came from a different URL (Valve changed the art).
@@ -76,6 +77,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import sqlite3
 import stat
 import threading
@@ -117,6 +119,10 @@ CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 USER_AGENT = "SteamHangar-vault-api/0.1 (+https://github.com/, cover cache)"
 
+#: The exact name ``_write_atomic`` gives a temp file; reconcile removes
+#: nothing else that looks temporary.
+_TEMP_NAME = re.compile(r"\.([1-9][0-9]{0,9})\.[0-9a-f]{32}\.tmp", re.ASCII)
+
 _SIGNATURE_LEN = 32
 _SIGNATURE_CONTEXT = b"steamhangar-cover-v1"
 _HEX = frozenset("0123456789abcdef")
@@ -139,10 +145,11 @@ def cache_dir_for(db_path: str) -> str:
 
 
 def parse_appid(text: object) -> int | None:
-    """A positive appid from a path segment, ASCII digits only, else None."""
+    """A positive appid from a path segment or file name: ASCII digits only,
+    no leading zero (one canonical spelling per app), else None."""
     if not isinstance(text, str) or not (1 <= len(text) <= 10):
         return None
-    if not (text.isascii() and text.isdigit()):
+    if not (text.isascii() and text.isdigit()) or text[0] == "0":
         return None
     value = int(text)
     if value < 1 or value > _MAX_APPID:
@@ -512,7 +519,7 @@ def reconcile(conn: sqlite3.Connection, cache_dir: str, now_epoch: float | None 
         entries = []
     for entry in entries:
         name = entry.name
-        if name.startswith(".") and name.endswith(TEMP_SUFFIX):
+        if _TEMP_NAME.fullmatch(name) is not None:
             try:
                 if now_epoch - entry.stat(follow_symlinks=False).st_mtime > STALE_TEMP_SECONDS:
                     os.unlink(entry.path)
