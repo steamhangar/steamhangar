@@ -392,8 +392,12 @@ installed, what is loading now, what was loaded recently. Clients
 without an agent (e.g. the WLAN client "frame") appear from the cache
 traffic alone: connected, bytes loaded, last active; "installed" only
 for agent clients, an agent can be added later (Windows and Linux/SteamOS
-agents exist). Needs the client address in vault-core's log format
-(own package; event_sweep already reads client addresses). Includes
+agents exist). Data source (found 2026-10-13 in D15a): the opt-in
+event log (`VAULT_EVENT_LOG`, `$remote_addr` since WP 3.10), which
+`event_sweep.py` already aggregates per address into
+`client_cache_stats`; D15b builds on that and must check or document
+that `VAULT_EVENT_LOG` is set. D15a (`client=` on the stdout access log)
+is operator diagnostics only, not a D15b prerequisite. Includes
 D13 SPEED-1: throughput measured once at the server (vault-core), shown
 per running job. Downloads history gets a time filter: 24 h, 7 days,
 30 days, all. Downloads header (user, 2026-10-13): current and average
