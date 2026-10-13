@@ -465,7 +465,11 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
 7. **D10 COVER-CACHE-1 (api + app)** vault-api stores cover images and
    serves them with ETag + long Cache-Control; Coil disk cache on Android.
 
-**Wave 2 (rc16)** — runs in parallel where it does not touch wave 1
+**Release cut (user decision 2026-10-13):** rc15 = wave 1; rc16 = D11 +
+D9; rc17 = D15 + D16 (both rework Settings and both wait on Anträge:
+`VAULT_EVENT_LOG` on prod, settings volume).
+
+**Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
 design exists. Wave-2 code stays on branches until rc15 is tagged.
 8. **D16 SETTINGS-1** split into: (a) settings audit, collapsible
