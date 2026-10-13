@@ -204,7 +204,24 @@ import sqlite3
 #: whose cover image vault-api stores (``vault_api/cover_cache.py``): the URL
 #: it came from, its SHA-256, type and size (NULL while nothing is stored),
 #: plus the download backoff. A brand-new table, so it needs no ``ALTER`` step.
-SCHEMA_VERSION = 21
+#: v23 (WP D15b CLIENTS-1; v22 is WP D9 TOOL-APPS-2a on its own branch):
+#: added the three traffic tables ``client_traffic``,
+#: ``client_depot_traffic`` and ``server_traffic`` -- event-log statistics
+#: bucketed by EVENT time in three retention tiers (5-minute rows for 48 h,
+#: hourly rows for 30 days, daily rows forever; user decision 2026-10-13,
+#: ``vault_api/traffic.py``) -- and five ``event_sweep_state`` columns: the
+#: event log's file identity (``log_dev``/``log_ino``) so a rename-rotated
+#: log is detected even when the new file is already larger than the
+#: cursor, ``rotations_detected_total``/``last_rotation_detected_at``, and
+#: ``traffic_since`` (when the tiers started filling). The tables are
+#: brand-new (no ``ALTER``); the columns come from the per-column-guarded
+#: ``_add_missing_event_sweep_state_columns`` step, keyed on
+#: ``version < 23`` (not ``== 22``) so a v21 database (this branch without
+#: D9) and a v22 one (after D9) both take it exactly once. Existing
+#: ``client_cache_stats`` rows are NOT folded into the tiers: they are
+#: bucketed by sweep time, not event time, and hold about four hours; the
+#: tiers start empty and ``traffic_since`` says so.
+SCHEMA_VERSION = 23
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -487,7 +504,21 @@ CREATE TABLE IF NOT EXISTS event_sweep_state (
     -- the sweep re-read the same bytes forever, consumed nothing, and the only
     -- signal was an INFO line that read like progress.
     oversized_skips_total   INTEGER NOT NULL DEFAULT 0,
-    last_oversized_at       TEXT
+    last_oversized_at       TEXT,
+    -- v23 (WP D15b): st_dev/st_ino of the file the cursor points into.
+    -- A different inode on the next read means the log was replaced
+    -- (rename rotation) and the cursor restarts at 0 even when the new file
+    -- is already larger than the old offset. NULL until the first sweep
+    -- after the upgrade records it.
+    log_dev                   INTEGER,
+    log_ino                   INTEGER,
+    -- v23: rotations the SWEEPER DETECTED (file shrank below the cursor, or
+    -- its inode changed) -- not the ones it did itself (last_rotated_at).
+    rotations_detected_total  INTEGER NOT NULL DEFAULT 0,
+    last_rotation_detected_at TEXT,
+    -- v23: when the first sweep wrote into the traffic tiers; the honest
+    -- start of every "all" range (NULL = the tiers are still empty).
+    traffic_since             TEXT
 );
 
 -- WP 3.11: per-client-address request statistics, one row per address per
@@ -726,6 +757,73 @@ CREATE TABLE IF NOT EXISTS update_check_state (
     last_check_outcome      TEXT
 );
 
+-- WP D15b (schema v23): event-log traffic statistics in three retention
+-- tiers, bucketed by the EVENT time of each line (not the sweep time, unlike
+-- client_cache_stats). tier is '5m', '1h' or '1d'; bucket_at is the UTC
+-- start of the bucket ('YYYY-MM-DDTHH:MM:SSZ'). Every batch is folded into
+-- ALL three tiers additively in the same transaction that advances the
+-- event-sweep cursor, so each tier is complete for its retention on its own
+-- (exactly-once, like client_cache_stats) and late lines land in the right
+-- bucket of every tier. Retention (vault_api/traffic.py): 5m rows 48 h, 1h
+-- rows 30 days, 1d rows forever. hits/misses/bypasses/bytes count 2xx lines
+-- only; errors counts the rest; hit_bytes is what the cache served from
+-- disk ("saved"), miss_bytes what it fetched upstream while serving.
+CREATE TABLE IF NOT EXISTS client_traffic (
+    tier         TEXT NOT NULL,
+    bucket_at    TEXT NOT NULL,
+    client_addr  TEXT NOT NULL,
+    requests     INTEGER NOT NULL DEFAULT 0,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    misses       INTEGER NOT NULL DEFAULT 0,
+    bypasses     INTEGER NOT NULL DEFAULT 0,
+    errors       INTEGER NOT NULL DEFAULT 0,
+    bytes_served INTEGER NOT NULL DEFAULT 0,
+    hit_bytes    INTEGER NOT NULL DEFAULT 0,
+    miss_bytes   INTEGER NOT NULL DEFAULT 0,
+    last_seen    TEXT NOT NULL,
+    PRIMARY KEY (tier, client_addr, bucket_at)
+);
+CREATE INDEX IF NOT EXISTS idx_client_traffic_bucket
+    ON client_traffic (tier, bucket_at);
+
+-- WP D15b (v23): the same tiers per (client address, depot) for served lines
+-- that carry a depot id -- "what is this client loading" (depot -> app via
+-- depot_app_map at read time, so a mapping learned later still applies).
+CREATE TABLE IF NOT EXISTS client_depot_traffic (
+    tier         TEXT NOT NULL,
+    bucket_at    TEXT NOT NULL,
+    client_addr  TEXT NOT NULL,
+    depotid      INTEGER NOT NULL,
+    requests     INTEGER NOT NULL DEFAULT 0,
+    bytes_served INTEGER NOT NULL DEFAULT 0,
+    hit_bytes    INTEGER NOT NULL DEFAULT 0,
+    last_seen    TEXT NOT NULL,
+    PRIMARY KEY (tier, client_addr, depotid, bucket_at)
+);
+CREATE INDEX IF NOT EXISTS idx_client_depot_traffic_bucket
+    ON client_depot_traffic (tier, bucket_at);
+
+-- WP D15b (v23): server-wide sums per bucket plus the two values that are
+-- NOT sums and therefore cannot be derived from coarser rows later:
+-- peak_bucket_bytes (the largest 5-minute total inside this bucket -> peak
+-- speed) and active_buckets (how many 5-minute buckets inside it carried
+-- traffic -> average speed while loading). Maintained at write time.
+CREATE TABLE IF NOT EXISTS server_traffic (
+    tier              TEXT NOT NULL,
+    bucket_at         TEXT NOT NULL,
+    requests          INTEGER NOT NULL DEFAULT 0,
+    hits              INTEGER NOT NULL DEFAULT 0,
+    misses            INTEGER NOT NULL DEFAULT 0,
+    bypasses          INTEGER NOT NULL DEFAULT 0,
+    errors            INTEGER NOT NULL DEFAULT 0,
+    bytes_served      INTEGER NOT NULL DEFAULT 0,
+    hit_bytes         INTEGER NOT NULL DEFAULT 0,
+    miss_bytes        INTEGER NOT NULL DEFAULT 0,
+    peak_bucket_bytes INTEGER NOT NULL DEFAULT 0,
+    active_buckets    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tier, bucket_at)
+);
+
 CREATE TABLE IF NOT EXISTS runner_presence (
     runner_id            TEXT PRIMARY KEY,
     build_version        TEXT,
@@ -855,6 +953,12 @@ def init_db(db_path: str) -> None:
         # table).
         if row is not None and row["version"] < 20:
             _add_missing_update_check_columns(conn)
+
+        # v23 (WP D15b): five new event_sweep_state columns (file identity,
+        # detected rotations, traffic_since). Keyed `< 23` so it runs once
+        # whether D9's v22 landed first or not; guarded per column.
+        if row is not None and row["version"] < 23:
+            _add_missing_event_sweep_state_columns(conn)
 
         conn.executescript(_DDL)
 
@@ -1067,3 +1171,32 @@ def _add_missing_app_columns(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE apps ADD COLUMN needs_force INTEGER NOT NULL DEFAULT 1"
         )
+
+
+#: The ``event_sweep_state`` columns added in v23 (WP D15b).
+_V23_EVENT_SWEEP_STATE_COLUMNS = (
+    ("log_dev", "INTEGER"),
+    ("log_ino", "INTEGER"),
+    ("rotations_detected_total", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_rotation_detected_at", "TEXT"),
+    ("traffic_since", "TEXT"),
+)
+
+
+def _add_missing_event_sweep_state_columns(conn: sqlite3.Connection) -> None:
+    """v9..v22 -> v23 migration step for ``event_sweep_state``.
+
+    Guarded per column via ``PRAGMA table_info`` like every other ALTER step.
+    A database without the table (impossible after v9, but cheap to handle)
+    gets the complete table from ``_DDL``.
+    """
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(event_sweep_state)")
+    }
+    if not existing:
+        return
+    for column, column_type in _V23_EVENT_SWEEP_STATE_COLUMNS:
+        if column not in existing:
+            conn.execute(
+                f"ALTER TABLE event_sweep_state ADD COLUMN {column} {column_type}"
+            )

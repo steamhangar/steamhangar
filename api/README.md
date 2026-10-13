@@ -344,7 +344,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `oracle_branch_manifests` | `appid`, `depotid`, `branch`, `manifestid` (TEXT), `recorded_at`, `source`, PK `(appid, depotid, branch)` | **v10**, WP 3.9. One row per (app, depot, **open** branch) → manifest gid. Password-protected branches are never inserted at all. Written with snapshot semantics (a refresh replaces the app's rows in one transaction). **Never mixed into `depot_manifests`** — a third-party claim must stay distinguishable from a manifest vault-api parsed itself |
 | `update_check_state` | `id` (PK, `CHECK (id = 1)`), `last_check_at`, `last_check_apps`, `last_check_ok`, `last_check_stale`, `last_check_trigger`, `last_check_finished_at`, `last_check_outcome` | **v19**, WP UPD-1 (the last three **v20**, per-column-guarded `ALTER` for a v19 table). Single-row bookkeeping of the always-on update check, separate from `schedule_state` so it has its own interval and claim. Claim-then-work: `last_check_at` is stamped before any request, by either trigger (`manual`/`scheduled`); the counters, finish stamp and outcome are `NULL` while a run is in flight or the process died in it. Read by `GET /v1/updates/status`. See "Always-on update check" |
 | `schedule_state` | `id` (PK, `CHECK (id = 1)`), `last_sweep_at`, `last_sweep_targets`, `last_sweep_enqueued` | **v6**, WP 3.5. Single-row scheduler bookkeeping: when the last sweep started (UTC) and what it did. Persisted rather than in-memory so a restart mid-window does not re-sweep — see "Scheduler" below. The two counters are `NULL` while a sweep is in flight (or if the process died during one) |
-| `event_sweep_state` | `id` (PK, `CHECK (id = 1)`), `cursor_offset`, `first_sweep_at`, `last_sweep_at`, `last_rotated_at`, `lines_read_total`, `lines_skipped_total`, `last_lines`, `last_skipped`, `last_enqueued`, `last_dropped_by_cap`, `truncate_denied_count`, `last_truncate_denied_at`, `oversized_skips_total`, `last_oversized_at` | **v9**, WP 3.11. Single-row cache-event sweep bookkeeping. `cursor_offset` is the durable contract (each line read once); `first_sweep_at` is how bypass detection knows how long the feed has been watched; `truncate_denied_count` records that the sweeper may read the log but not rotate it; `oversized_skips_total` records a newline-free region longer than a read batch having to be discarded. See "Cache-event sweep" below |
+| `event_sweep_state` | `id` (PK, `CHECK (id = 1)`), `cursor_offset`, `first_sweep_at`, `last_sweep_at`, `last_rotated_at`, `lines_read_total`, `lines_skipped_total`, `last_lines`, `last_skipped`, `last_enqueued`, `last_dropped_by_cap`, `truncate_denied_count`, `last_truncate_denied_at`, `oversized_skips_total`, `last_oversized_at`, `log_dev`, `log_ino`, `rotations_detected_total`, `last_rotation_detected_at`, `traffic_since` | **v9**, WP 3.11; the last five **v23**, WP D15b (file identity for rename-rotation detection, detected-rotation counter, start of the traffic tiers). Single-row cache-event sweep bookkeeping. `cursor_offset` is the durable contract (each line read once); `first_sweep_at` is how bypass detection knows how long the feed has been watched; `truncate_denied_count` records that the sweeper may read the log but not rotate it; `oversized_skips_total` records a newline-free region longer than a read batch having to be discarded. See "Cache-event sweep" below |
 | `client_cache_stats` | `client_addr`, `window_at`, `requests`, `hits`, `misses`, `bypasses`, `errors`, `bytes_served`, `last_seen`, PK `(client_addr, window_at)` | **v9**, WP 3.11. One row per client address per sweep window (plan §5/§6 "per-client hit stats"). `requests = hits + misses + bypasses + errors` by construction; the three cache counters and `bytes_served` include **2xx responses only** (event-log field 9). Retention: `VAULT_CLIENT_STATS_KEEP` windows per address |
 | `depot_miss_stats` | `depotid` (PK), `miss_count`, `mapped`, `first_seen`, `last_seen`   | **v9**, WP 3.11. Which depots are being MISSed, and whether a mapping existed at the last sighting. ADR-0008's "misses on unmapped depots are counted but trigger nothing" is what this table counts. Bounded to `event_sweep.MAX_DEPOT_MISS_ROWS` (500) least-recently-seen-first |
 | `miss_trigger_state` | `appid` (PK), `last_triggered_at`, `trigger_count`                | **v9**, WP 3.11. The miss trigger's per-app cooldown, persisted so a restart cannot become "re-trigger everything that misses next" |
@@ -354,6 +354,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `runner_presence` | `runner_id` (PK), `build_version`, `build_commit`, `steamprefill_version`, `started_at`, `last_seen` | **v16**, WP VER-2. One row per vault-runner PROCESS, upserted by `prefill_runner` about every 30 s (idle or busy); rows not seen for a day are pruned by the next write. Read only by `GET /v1/about`. See "Component versions" below |
 | `app_cover_art` | `appid` (PK), `cover_url`, `outcome`, `attempts`, `checked_at`, `next_check_at` | **v18**, WP API-FIX-5. One row per app the cover-art lookup asked Steam about: the validated cover URL or NULL, `found`/`none`/`failed`, consecutive failures, when to ask again. Read by `GET /v1/games[/{appid}]` as `cover_url`. See "Cover art lookup" below |
 | `app_cover_file` | `appid` (PK), `source_url`, `sha256`, `content_type`, `size_bytes`, `stored_at`, `attempts`, `next_try_at` | **v21**, WP D10 COVER-CACHE-1. One row per app whose cover image vault-api stores in `<data dir>/covers/<appid>.img`: the URL it came from, the file's SHA-256, type and size (all NULL while nothing is stored), plus the download backoff. Read by `GET /v1/games[/{appid}]` as `cover_cached_url` and by `GET /v1/covers/...`. See "Stored covers" below |
+| `client_traffic` / `client_depot_traffic` / `server_traffic` | `tier`, `bucket_at`, then address (and depot) plus counters, see "Traffic tiers" | **v23**, WP D15b. Event-log statistics bucketed by event time in three tiers (5m for 48 h, 1h for 30 days, 1d forever), written in the sweep's cursor transaction. `server_traffic` also keeps `peak_bucket_bytes` and `active_buckets`. See "Traffic tiers: long-term client and server statistics" below |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -644,7 +645,7 @@ route, see "Auth").
 | POST   | `/v1/updates/check`                | Start the update check now (WP UPD-1): the manifest oracle is refreshed for every game that currently has cache content (tool packages excluded), **in the background**; **never starts a download**. Answers at once: `202 {status: "started", enabled: true}`, or `202 {status: "already_running", enabled: true}` when a scheduled or earlier manual check is still going (nothing new is started), or `200 {status: "disabled", enabled: false}` with the oracle off (nothing runs); `503` while vault-api shuts down. Poll `GET /v1/updates/status` until `running` is `false`, then re-read `GET /v1/games`. Not interval-limited, works with or without a schedule window, but stamps the interval (the next scheduled check is one interval later). **Leaves the LAN**: one oracle request per cached game — see "Always-on update check" |
 | GET    | `/v1/updates/status`               | Update check status (WP UPD-1): `{enabled, scheduled, running, last_trigger, last_started_at, last_finished_at, last_outcome, last_apps, last_ok, last_failed, last_stale}`. `scheduled` is `true` when the oracle is on AND a schedule window is configured (effective value, a `PATCH /v1/settings` window counts at once), `false` = manual checks only. `last_trigger` is `manual`/`scheduled`; `last_outcome` is `completed`, `bailed_out` (stopped after 5 failed oracle requests in a row), `aborted` (shutdown), `error` (bug, see the log) or `interrupted` (the process died during the run); outcome, finish stamp and counters are `null` while running. All `last_*` are `null` before the first run. No network |
 | GET    | `/v1/schedule`                     | Scheduler config + last-sweep bookkeeping: `{enabled, window, overnight, interval_minutes, client_stale_days, server_timezone, last_sweep_at, last_sweep_targets, last_sweep_enqueued, next_eligible_at}`. **Read-only itself** — the window/interval/staleness values are now writable through `PATCH /v1/settings` (settings-API work package, ADR-0009; see "Persisted settings" below), this endpoint just reports the currently EFFECTIVE configuration, override included |
-| GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, top_unmapped_depots[]}`. **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
+| GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, rotations_detected_total, last_rotation_detected_at, traffic_since, top_unmapped_depots[]}` (the three before the list: WP D15b). **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
 | GET    | `/v1/steam/key`                    | Opt-in Steam Web API relay (WP 4a.6r): key status only — `{configured, key_last4}`. `key_last4` is `null` when unconfigured; the full key is never returned |
 | PUT    | `/v1/steam/key`                    | Body `{"key": str}` — set (or replace) the relay's Web API key. `200` with the same shape `GET` returns; `422` unless `key` is exactly 32 hexadecimal characters |
 | DELETE | `/v1/steam/key`                    | Clear the configured key. `204` whether or not one was set |
@@ -3872,10 +3873,18 @@ is read once, and a sweep failure re-reads instead of losing data" real:
    one `BEGIN IMMEDIATE` covering the statistics upserts, the retention prunes
    and the new offset. There is no state where one is committed and the other
    is not.
-3. **A file smaller than the cursor is treated as rotated** and the cursor
-   resets to 0. This covers an operator, a `logrotate` with `copytruncate`, or
-   a vault-core redeployed onto a fresh volume — without it, everything the new
-   file accumulated below the old offset would be skipped forever.
+3. **A file smaller than the cursor, or a different file at the same path,
+   is treated as rotated** and the cursor resets to 0. This covers an
+   operator, a `logrotate` with `copytruncate`, a vault-core redeployed onto
+   a fresh volume, and (WP D15b) a rename rotation: the sweep stores the
+   log's `st_dev`/`st_ino` with the cursor, and a changed inode restarts at
+   offset 0 even when the new file is already larger than the old offset.
+   Every such reset is counted in `rotations_detected_total` /
+   `last_rotation_detected_at` (`GET /v1/stats`); the sweeper's own
+   truncation is not counted there (`last_rotated_at`). Lines the old file
+   received after the last sweep and before a rename rotation are not read
+   (the sweeper does not look for the renamed file) -- at most one sweep
+   interval.
 
 ### Idempotence, stated honestly
 
@@ -4075,6 +4084,59 @@ traffic, so one quiet day proves nothing.
 - No content attribution from the event log. ADR-0008's boundary holds: the
   depot id is used to *look up* the mapping vault-api already owns, never to
   build it. Chunk→game attribution stays with manifests (ADR-0006/0007).
+
+## Traffic tiers: long-term client and server statistics (WP D15b)
+
+`vault_api/traffic.py`, schema v23. The event sweep folds every batch into
+three new tables in the **same transaction as the cursor** (so they inherit
+its exactly-once rule), bucketed by each line's **event time** (field 2),
+not the sweep time:
+
+| table | key | content |
+|---|---|---|
+| `client_traffic` | tier, bucket, address | requests, hits, misses, bypasses, errors, `bytes_served`, `hit_bytes`, `miss_bytes`, `last_seen` |
+| `client_depot_traffic` | tier, bucket, address, depot | requests, `bytes_served`, `hit_bytes`, `last_seen` (2xx lines with a depot id) |
+| `server_traffic` | tier, bucket | the sums above, plus `peak_bucket_bytes` and `active_buckets` |
+
+| tier | bucket | kept |
+|---|---|---|
+| `5m` | 5 minutes | 48 hours |
+| `1h` | 1 hour | 30 days |
+| `1d` | 1 UTC day | forever |
+
+(User decision 2026-10-13.) Fixed in code, not env settings (roadmap D16:
+fewer env values).
+
+**Rollup at write time, not by a recompute job.** Each batch is added to
+all three tiers at once, so each tier is complete for its retention on its
+own and a reader uses exactly one tier per range. A late line (a backlog
+after vault-api was down) lands in its correct old hour and day. The
+per-sweep job is the retention prune (`DELETE ... WHERE bucket_at <
+cutoff`, idempotent), skipped while the sweep is still working through a
+backlog (a full 4 MiB batch) so old 5-minute rows survive until the
+backlog is consumed.
+
+**Peak and average are not sums.** `server_traffic.peak_bucket_bytes` is
+the largest server-wide 5-minute total inside a bucket (peak speed =
+`peak / 300 s`), `active_buckets` the number of 5-minute buckets inside it
+that carried bytes (average speed while loading = `bytes / (active x
+300 s)`). Both are maintained at write time from the server's 5-minute row
+before and after the batch.
+
+**Event times in the future** (a skewed clock) are clamped to the sweep
+time. **Errors** (non-2xx) count as requests and errors, never as bytes or
+hits. `hit_bytes` is what the cache served from disk, i.e. "saved from
+the internet"; `miss_bytes` is what it served while fetching upstream.
+
+**The tiers start empty on upgrade.** `client_cache_stats` (sweep-time
+windows, about four hours) is not folded in; `event_sweep_state.
+traffic_since` records when the first sweep after the upgrade wrote, and
+`GET /v1/stats` reports it. `client_cache_stats` and
+`VAULT_CLIENT_STATS_KEEP` stay unchanged: `GET /v1/clients` and bypass
+detection keep reading them.
+
+Privacy: this is a lasting per-IP activity record; see
+`docs/security/threat-model.md` §6, "Longer retention since WP D15b".
 
 ## Webhooks (WP 3.13)
 

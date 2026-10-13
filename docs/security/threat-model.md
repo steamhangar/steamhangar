@@ -1079,6 +1079,25 @@ ADR-0006/0007) — exactly the boundary ADR-0008 draws for itself
 (`docs/adr/0008-cache-event-feed.md`, "Decision", the "request facts only"
 bullet).
 
+**Longer retention since WP D15b (user decision 2026-10-13).** The event
+log's per-address statistics used to live about four hours
+(`client_cache_stats`, `VAULT_CLIENT_STATS_KEEP=48` sweep windows). WP
+D15b adds `client_traffic` and `client_depot_traffic`
+(`api/vault_api/traffic.py`): per client IP address, bytes, hit/miss
+counts and — per depot — what that address loaded, in 5-minute rows for
+48 hours, hourly rows for 30 days and **daily rows forever**. That turns a
+short operational buffer into a long-term activity record per household
+device: when each address loaded something, roughly how much, and which
+game (depot -> app through `depot_app_map`). It is readable by anyone with
+the API key (`GET /v1/clients/overview`, `GET /v1/throughput*`) and by
+anyone who can read `vault.db`. Nothing new leaves the host, the data is
+not sent to any third party, and the raw event log itself is still
+truncated/rotated as before. There is no deletion control yet: removing
+an address's history means deleting its rows from the three tables by
+hand. An operator who does not want a lasting record keeps
+`VAULT_EVENT_LOG_PATH` empty (then nothing is collected at all); a
+retention setting for the daily tier is a possible follow-up, not built.
+
 ---
 
 ## 7. The API key, and the read-only / bypass modes
