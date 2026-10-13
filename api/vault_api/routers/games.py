@@ -281,18 +281,6 @@ def _classification_fields(
     }
 
 
-def _display_name(
-    own: str | None, classification: app_classification.Classification | None
-) -> str | None:
-    """``name`` (WP TOOL-APPS-2a): the ``apps.name`` vault-api recorded when
-    it has one, else Steam's name for the app (store, then the oracle's
-    stored ``common.name``; plain text, capped, never written into
-    ``apps``). Null when neither knows it."""
-    if own is not None and own.strip():
-        return own
-    return None if classification is None else classification.name
-
-
 def _tool_app_fields(appid: int) -> dict[str, object]:
     """``tool_app`` / ``tool_app_name`` for one app (WP API-FIX-4)."""
     tool = tool_apps.get_tool_app(appid)
@@ -428,7 +416,9 @@ def list_games(
         games.append(
             GameSummary(
                 appid=row["appid"],
-                name=_display_name(row["name"], classifications.get(row["appid"])),
+                name=app_classification.display_name(
+                    row["name"], classifications.get(row["appid"])
+                ),
                 status=row["status"],
                 last_prefill_at=row["last_prefill_at"],
                 last_manifest_check=row["last_manifest_check"],
@@ -517,7 +507,7 @@ def get_game(
     detail_size = app_size_bytes([row["depotid"] for row in depot_rows], depot_bytes)
     return GameDetail(
         appid=app_row["appid"],
-        name=_display_name(app_row["name"], classification),
+        name=app_classification.display_name(app_row["name"], classification),
         status=app_row["status"],
         last_prefill_at=app_row["last_prefill_at"],
         last_manifest_check=app_row["last_manifest_check"],

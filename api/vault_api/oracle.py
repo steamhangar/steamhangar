@@ -45,12 +45,38 @@ claim must never be indistinguishable from it. Oracle facts live in their own
 two tables (``oracle_app_state``, ``oracle_branch_manifests``, schema v8),
 each row additionally carrying a ``source`` provenance tag.
 
-## The one safety invariant, stated as a promise
+## The one safety invariant, stated as a promise -- and its one exception
 
-**Oracle data can only ADD protection, never remove it.** Its single effect
-on the deletion path is that extra manifest gids join a depot's GC keep set
-(``gc.resolve_depot_chunkset``'s ``extra_manifest_ids``), and a keep set can
-only grow. Consequences, each of which is a test in ``tests/test_oracle.py``:
+**On every automatic path, oracle data can only ADD protection, never remove
+it.** Its single effect on GC and the scheduler is that extra manifest gids
+join a depot's GC keep set (``gc.resolve_depot_chunkset``'s
+``extra_manifest_ids``), and a keep set can only grow.
+
+**The exception (WP TOOL-APPS-2b, ADR-0022 §4): the user-confirmed grouped
+delete.** ``DELETE /v1/cache/{appid}?with_packages=true`` removes a game
+together with its content packages, and which apps are packages is decided
+from stored classification (``app_classification.py``), which comes from the
+store lookup or -- while the oracle is on -- from this module's stored
+``common.type`` / ``common.parent`` and a cached parent's ``listofdlc`` /
+``dlcappid`` links. So a wrong or poisoned answer CAN now widen a deletion:
+it can put another app into the delete set, and members of the set do not
+protect each other's depots. The bounds (``group_delete.py``):
+
+- only on that one request, opt-in per call (``with_packages=true``); the
+  plain delete, GC and every automatic path never read classification;
+- the confirmation dialog lists every member first
+  (``GET /v1/cache/{appid}/delete-plan``);
+- a member must have its OWN type in ``dlc``/``config``/``music``/``video``/
+  ``demo`` (store type or its own PICS ``common.type``); a ``dlc`` inferred
+  only from a parent's link list never makes an app deletable, and a child
+  typed ``game``/``application``/``tool``/unknown stays an outside owner that
+  protects its depots;
+- fixed-list tool apps (``tool_apps``) never join a delete set;
+- a depot any app OUTSIDE the delete set still protects (ADR-0003 remnant
+  rule) is kept and reported in ``skipped_shared``.
+
+The GC-side consequences below are unchanged; each is a test in
+``tests/test_oracle.py``:
 
 - with the oracle on, the planned orphan set is always a **subset** of what
   the same cache plans with the oracle off;

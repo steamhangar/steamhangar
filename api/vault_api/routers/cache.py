@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, StrictBool
 
-from vault_api import deletion, jobs
+from vault_api import deletion, group_delete, jobs
 from vault_api.auth import require_api_key
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
 from vault_api.sizes import SizeCache, build_cache_summary
@@ -129,6 +129,35 @@ class FailedDepotOut(BaseModel):
     error: str
 
 
+class DeleteMemberOut(BaseModel):
+    """One app a grouped delete removed together (WP TOOL-APPS-2b)."""
+
+    appid: int
+    #: ``"parent"`` (the requested app) or ``"package"``.
+    role: str
+    #: Display name (``apps.name``, else Steam's name), null if unknown.
+    name: str | None
+    #: The displayed app type (see ``GET /v1/games``), null if unknown.
+    app_type: str | None
+    #: This member's mapped depots that were deleted / that failed. A depot
+    #: mapped by several members appears under each of them.
+    deleted_depots: list[int] = []
+    failed_depots: list[int] = []
+
+
+class KeptChildOut(BaseModel):
+    """An app grouped under the parent that is NOT deleted with it
+    (WP TOOL-APPS-2b): its own type is not a package type, or only the
+    parent's DLC list names it, or its type is unknown. It protects its
+    depots like any other app."""
+
+    appid: int
+    name: str | None
+    app_type: str | None
+    #: ``"not_a_package_type"``, ``"type_only_inferred"`` or ``"type_unknown"``.
+    reason: str
+
+
 class CacheDeletionOut(BaseModel):
     appid: int
     deleted_depots: list[DeletedDepotOut]
@@ -140,11 +169,148 @@ class CacheDeletionOut(BaseModel):
     #: Sum of deleted_depots[].size_bytes_freed. A floor, never an
     #: overstatement: a depot that failed mid-tree contributes 0.
     total_bytes_freed: int
+    #: WP TOOL-APPS-2b: present (``true``) only on a grouped delete
+    #: (``?with_packages=true``); a plain request's body is byte-identical to
+    #: the pre-2b one (these three fields are absent).
+    with_packages: bool = False
+    #: Grouped delete only: the parent and every package removed with it.
+    #: ``deleted_depots`` / ``skipped_shared`` / ``failed`` above cover the
+    #: whole set, each depot once.
+    members: list[DeleteMemberOut] = []
+    #: Grouped delete only: grouped apps that were NOT deleted (see
+    #: ``KeptChildOut``).
+    kept_children: list[KeptChildOut] = []
 
 
-@router.delete("/v1/cache/{appid}", response_model=CacheDeletionOut)
+#: Accepted spellings of ``with_packages`` -- literal ``true``/``false`` only
+#: (same spirit as ``GcRequest.execute``'s ``StrictBool``: the flag that widens
+#: a deletion is never half-understood from "1", "yes" or "on").
+_WITH_PACKAGES_VALUES = {"true": True, "false": False}
+
+
+def _parse_with_packages(raw: str | None) -> bool:
+    if raw is None:
+        return False
+    try:
+        return _WITH_PACKAGES_VALUES[raw]
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="with_packages must be exactly 'true' or 'false'.",
+        ) from None
+
+
+_WITH_PACKAGES_DOC = (
+    "WP TOOL-APPS-2b: 'true' also deletes the app's content packages "
+    "(grouped children whose own type is dlc, config, music, video or "
+    "demo). Omitted or 'false': this app only, exactly as before."
+)
+
+
+def _member_depots(
+    rows: list[tuple[object, object]], members: frozenset[int]
+) -> dict[int, set[int]]:
+    """``{member: {depotid it maps}}`` from ``load_mapping_rows`` output."""
+    out: dict[int, set[int]] = {member: set() for member in members}
+    for raw_depotid, raw_owner in rows:
+        depotid = deletion.coerce_positive_id(raw_depotid)
+        owner = deletion.coerce_positive_id(raw_owner)
+        if depotid is not None and owner in out:
+            out[owner].add(depotid)
+    return out
+
+
+def _load_delete_request(
+    open_db: DbOpener, appid: int, *, with_packages: bool, oracle_enabled: bool
+) -> tuple[
+    group_delete.GroupSelection,
+    list[tuple[object, object]],
+    dict[int, bool],
+    list[tuple[int, dict[str, object]]],
+]:
+    """Everything a delete or its plan reads, in one connection: the delete
+    set, the mapping rows of every member's depots, the outside co-owners'
+    content state and every member's in-flight job. Raises the two ``404``s.
+    Shared by ``DELETE /v1/cache/{appid}`` and its ``delete-plan`` preview,
+    so the preview and the deletion read the same inputs."""
+    with open_db() as conn:
+        app_row = conn.execute(
+            "SELECT appid FROM apps WHERE appid = ?", (appid,)
+        ).fetchone()
+        if app_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Unknown appid {appid} — vault-api tracks no such app, so there "
+                    "is nothing to delete."
+                ),
+            )
+
+        selection = group_delete.select_group(
+            conn, appid, with_packages=with_packages, oracle_enabled=oracle_enabled
+        )
+        delete_set = selection.delete_set
+
+        rows = deletion.load_mapping_rows(conn, _target(delete_set))
+        if not rows:
+            what = (
+                f"App {appid} and its content packages have"
+                if len(delete_set.members) > 1
+                else f"App {appid} has"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"{what} no depot mappings, so there is nothing to "
+                    "delete. Mappings are created by a successful prefill or via "
+                    "PUT /v1/mapping/{depotid}."
+                ),
+            )
+
+        # ADR-0003 addendum: read every co-owner's current content state
+        # (status/last_prefill_at/active job) up front, in the same
+        # connection as the mapping read, so plan_deletion below can stay a
+        # pure function over plain data. Co-owners are apps OUTSIDE the
+        # delete set (WP TOOL-APPS-2b: members never protect each other).
+        co_owner_states = deletion.load_co_owner_states(
+            conn, deletion.other_owner_ids(rows, _target(delete_set))
+        )
+
+        active_jobs: list[tuple[int, dict[str, object]]] = []
+        for member in sorted(delete_set.members, key=lambda m: (m != appid, m)):
+            job = jobs.active_job_for_app(conn, member)
+            if job is not None:
+                active_jobs.append((member, job))
+    return selection, rows, co_owner_states, active_jobs
+
+
+def _target(delete_set: deletion.DeleteSet) -> "int | deletion.DeleteSet":
+    """What the deletion primitives are called with: the plain app id for a
+    one-member set (the exact pre-2b call, which ``deletion.as_delete_set``
+    reads as the same one-member set), the ``DeleteSet`` otherwise."""
+    return delete_set if len(delete_set.members) > 1 else delete_set.primary
+
+
+def _oracle_enabled(request: Request) -> bool:
+    """Same settings object ``GET /v1/games`` resolves classification with
+    (``manifest_oracle`` is not DB-overridable, so the boot value is the
+    effective one)."""
+    return bool(request.app.state.scheduler.settings.manifest_oracle_enabled)
+
+
+@router.delete(
+    "/v1/cache/{appid}",
+    response_model=CacheDeletionOut,
+    # WP TOOL-APPS-2b: the grouped-delete fields are only set for a grouped
+    # request, so a plain response keeps exactly its pre-2b shape.
+    response_model_exclude_unset=True,
+)
 def delete_cached_app(
+    request: Request,
     appid: int = Path(ge=1, description="Steam app id whose depots to delete"),
+    with_packages_raw: str | None = Query(
+        None, alias="with_packages", description=_WITH_PACKAGES_DOC
+    ),
     open_db: DbOpener = Depends(db_opener),
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
@@ -215,40 +381,28 @@ def delete_cached_app(
     own reset above, because a depot they still map just changed under them —
     but their ``status``/``last_prefill_at`` are left untouched (see
     ``deletion.set_needs_force_for_remnant_co_owners``).
+
+    **``?with_packages=true`` (WP TOOL-APPS-2b, ADR-0022 §4).** Deletes the
+    app together with its content packages: the server builds the delete set
+    (``group_delete.select_group``: grouped children whose OWN type is dlc,
+    config, music, video or demo; never a fixed-list tool app). Members do
+    not protect each other's depots; every app outside the set protects
+    under the rule above, through the same ``deletion.DeleteSet`` in the plan
+    and in the execute-time recheck. ``409`` if any member has an in-flight
+    job; each package that lost depots is reset like a single deletion. The
+    response adds ``with_packages``, ``members`` and ``kept_children``; a
+    plain request (no parameter, or ``false``) is unchanged, field for field.
+    Preview: ``GET /v1/cache/{appid}/delete-plan``.
     """
-    with open_db() as conn:
-        app_row = conn.execute(
-            "SELECT appid FROM apps WHERE appid = ?", (appid,)
-        ).fetchone()
-        if app_row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"Unknown appid {appid} — vault-api tracks no such app, so there "
-                    "is nothing to delete."
-                ),
-            )
-
-        rows = deletion.load_mapping_rows(conn, appid)
-        if not rows:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"App {appid} has no depot mappings, so there is nothing to "
-                    "delete. Mappings are created by a successful prefill or via "
-                    "PUT /v1/mapping/{depotid}."
-                ),
-            )
-
-        # ADR-0003 addendum: read every co-owner's current content state
-        # (status/last_prefill_at/active job) up front, in the same
-        # connection as the mapping read, so plan_deletion below can stay a
-        # pure function over plain data.
-        co_owner_states = deletion.load_co_owner_states(
-            conn, deletion.other_owner_ids(rows, appid)
-        )
-
-        active_job = jobs.active_job_for_app(conn, appid)
+    with_packages = _parse_with_packages(with_packages_raw)
+    selection, rows, co_owner_states, active_jobs = _load_delete_request(
+        open_db, appid, with_packages=with_packages,
+        oracle_enabled=_oracle_enabled(request),
+    )
+    delete_set = selection.delete_set
+    # WP TOOL-APPS-2b: the oldest in-flight job of the parent first, then of
+    # each package -- every member is guarded, with today's message.
+    active_member, active_job = active_jobs[0] if active_jobs else (appid, None)
 
     if active_job is not None:
         # Check-then-act, stated honestly: a job enqueued in the microseconds
@@ -284,12 +438,12 @@ def delete_cached_app(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"{job_label} job {active_job['id']} for app {appid} is "
+                f"{job_label} job {active_job['id']} for app {active_member} is "
                 f"{active_job['status']}. {why}"
             ),
         )
 
-    plan = deletion.plan_deletion(rows, appid, co_owner_states)
+    plan = deletion.plan_deletion(rows, _target(delete_set), co_owner_states)
 
     try:
         depot_root = deletion.resolve_depot_root(cache_root)
@@ -299,6 +453,12 @@ def delete_cached_app(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
         ) from exc
 
+    if with_packages:
+        logger.info(
+            "cache-delete appid=%s grouped delete: members=%s kept_children=%s",
+            appid, sorted(delete_set.members),
+            [child.appid for child in selection.kept_children],
+        )
     logger.info(
         "cache-delete appid=%s starting: depot_root=%s exclusive=%s remnant=%s "
         "shared=%s unusable_rows=%d",
@@ -317,7 +477,7 @@ def delete_cached_app(
         protection, see ``deletion.delete_app_depots``.
         """
         with open_db() as conn:
-            return deletion.load_co_owners(conn, depotid, appid)
+            return deletion.load_co_owners(conn, depotid, _target(delete_set))
 
     # Both plan.exclusive AND plan.remnant go through the identical execute-
     # time recheck below — delete_app_depots does not trust either
@@ -375,6 +535,10 @@ def delete_cached_app(
     # exclusive to touch" case leaves both empty, so needs_force is left
     # exactly as it was — nothing on disk changed for this app.
     set_needs_force = bool(deleted) or bool(failed)
+    member_depots = _member_depots(rows, delete_set.members)
+    deleted_ids = {d.depotid for d in deleted}
+    failed_ids = {f.depotid for f in failed if f.depotid}
+    package_ids = sorted(delete_set.members - {appid})
     with open_db() as conn:
         # Two separate statements, each committing on its own (both
         # `reset_app_after_deletion` and `set_needs_force_for_remnant_co_owners`
@@ -390,6 +554,21 @@ def delete_cached_app(
         deletion.reset_app_after_deletion(
             conn, appid, new_status, set_needs_force=set_needs_force
         )
+        # WP TOOL-APPS-2b: every package that lost (or may have lost) one of
+        # its own depots is reset like a single deletion: status 'error' if
+        # one of its depots failed, else 'idle'; last_prefill_at cleared;
+        # needs_force set. A package none of whose depots was touched (all
+        # kept as shared) is left alone.
+        for member in package_ids:
+            touched = member_depots[member] & (deleted_ids | failed_ids)
+            if not touched:
+                continue
+            deletion.reset_app_after_deletion(
+                conn,
+                member,
+                jobs.STATUS_ERROR if member_depots[member] & failed_ids else jobs.STATUS_IDLE,
+                set_needs_force=True,
+            )
         deletion.set_needs_force_for_remnant_co_owners(conn, remnant_co_owner_appids)
 
     total_bytes_freed = sum(depot.size_bytes_freed for depot in deleted)
@@ -404,6 +583,23 @@ def delete_cached_app(
         "1" if set_needs_force else "unchanged", sorted(remnant_co_owner_appids),
     )
 
+    grouped: dict[str, object] = {}
+    if with_packages:
+        grouped = {
+            "with_packages": True,
+            "members": [
+                DeleteMemberOut(
+                    appid=member.appid,
+                    role=member.role,
+                    name=member.name,
+                    app_type=member.app_type,
+                    deleted_depots=sorted(member_depots[member.appid] & deleted_ids),
+                    failed_depots=sorted(member_depots[member.appid] & failed_ids),
+                )
+                for member in selection.members
+            ],
+            "kept_children": _kept_children_out(selection),
+        }
     return CacheDeletionOut(
         appid=appid,
         deleted_depots=[
@@ -420,6 +616,139 @@ def delete_cached_app(
         ],
         failed=[FailedDepotOut(depotid=f.depotid, error=f.error) for f in failed],
         total_bytes_freed=total_bytes_freed,
+        **grouped,
+    )
+
+
+def _kept_children_out(selection: group_delete.GroupSelection) -> list[KeptChildOut]:
+    return [
+        KeptChildOut(
+            appid=child.appid, name=child.name, app_type=child.app_type, reason=child.reason
+        )
+        for child in selection.kept_children
+    ]
+
+
+# --------------------------------------------------------------------------
+# GET /v1/cache/{appid}/delete-plan -- the confirmation dialog's preview
+# --------------------------------------------------------------------------
+
+
+class PlanMemberOut(BaseModel):
+    appid: int
+    role: str
+    name: str | None
+    app_type: str | None
+    #: Every depot this member maps (deleted, kept or unusable alike).
+    depot_ids: list[int]
+
+
+class PlannedDepotOut(BaseModel):
+    depotid: int
+    #: Bytes on disk now (size cache), null when nothing is on disk.
+    size_bytes: int | None
+    #: Which members of the delete set map this depot.
+    owners: list[int]
+    #: Non-empty for a planned "last cached remnant" (ADR-0003 addendum).
+    shared_with_uncached: list[int] = []
+
+
+class BlockingJobOut(BaseModel):
+    appid: int
+    job_id: int
+    type: str
+    status: str
+
+
+class DeletePlanOut(BaseModel):
+    """What ``DELETE /v1/cache/{appid}`` with the same ``with_packages`` would
+    do right now (WP TOOL-APPS-2b). Read-only: nothing is deleted, no state
+    changes. The deletion itself re-checks every depot immediately before
+    removing it, so a depot can still move to ``skipped_shared`` if another
+    app gains content in between; it never deletes more than planned."""
+
+    appid: int
+    with_packages: bool
+    members: list[PlanMemberOut]
+    kept_children: list[KeptChildOut]
+    delete_depots: list[PlannedDepotOut]
+    skipped_shared: list[SkippedSharedDepotOut]
+    #: Mapping rows with an unusable depot id (poisoned database): the
+    #: deletion reports them in ``failed``.
+    unusable: list[FailedDepotOut]
+    #: Sum of ``delete_depots[].size_bytes`` (each depot once).
+    total_bytes: int
+    #: In-flight jobs of members: the deletion answers ``409`` while this is
+    #: non-empty.
+    blocked_by: list[BlockingJobOut]
+
+
+@router.get("/v1/cache/{appid}/delete-plan", response_model=DeletePlanOut)
+def plan_cached_app_deletion(
+    request: Request,
+    appid: int = Path(ge=1, description="Steam app id whose deletion to preview"),
+    with_packages_raw: str | None = Query(
+        None, alias="with_packages", description=_WITH_PACKAGES_DOC
+    ),
+    open_db: DbOpener = Depends(db_opener),
+    size_cache: SizeCache = Depends(get_size_cache),
+    cache_root: str = Depends(get_cache_root),
+) -> DeletePlanOut:
+    """Preview of ``DELETE /v1/cache/{appid}`` for the confirmation dialog.
+
+    Same inputs as the deletion (``_load_delete_request``), same delete set
+    and the same ``deletion.plan_deletion``: the dialog lists exactly the
+    apps and depots the deletion plans. ``404`` cases are the deletion's own;
+    an in-flight job is reported in ``blocked_by`` instead of a ``409``.
+    """
+    with_packages = _parse_with_packages(with_packages_raw)
+    selection, rows, co_owner_states, active_jobs = _load_delete_request(
+        open_db, appid, with_packages=with_packages,
+        oracle_enabled=_oracle_enabled(request),
+    )
+    delete_set = selection.delete_set
+    plan = deletion.plan_deletion(rows, _target(delete_set), co_owner_states)
+    depot_bytes = size_cache.get(cache_root).depot_bytes
+    member_depots = _member_depots(rows, delete_set.members)
+    remnants = {depot.depotid: depot.shared_with_uncached for depot in plan.remnant}
+
+    planned = [
+        PlannedDepotOut(
+            depotid=depotid,
+            size_bytes=depot_bytes.get(depotid),
+            owners=sorted(m for m, depots in member_depots.items() if depotid in depots),
+            shared_with_uncached=remnants.get(depotid, []),
+        )
+        for depotid in sorted(set(plan.exclusive) | set(remnants))
+    ]
+    return DeletePlanOut(
+        appid=appid,
+        with_packages=with_packages,
+        members=[
+            PlanMemberOut(
+                appid=member.appid,
+                role=member.role,
+                name=member.name,
+                app_type=member.app_type,
+                depot_ids=sorted(member_depots[member.appid]),
+            )
+            for member in selection.members
+        ],
+        kept_children=_kept_children_out(selection),
+        delete_depots=planned,
+        skipped_shared=[
+            SkippedSharedDepotOut(depotid=s.depotid, shared_with=s.shared_with)
+            for s in plan.shared
+        ],
+        unusable=[FailedDepotOut(depotid=f.depotid, error=f.error) for f in plan.unusable],
+        total_bytes=sum(d.size_bytes or 0 for d in planned),
+        blocked_by=[
+            BlockingJobOut(
+                appid=member, job_id=int(job["id"]), type=str(job["type"]),
+                status=str(job["status"]),
+            )
+            for member, job in active_jobs
+        ],
     )
 
 

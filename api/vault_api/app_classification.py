@@ -394,6 +394,16 @@ class Classification:
 UNCLASSIFIED = Classification()
 
 
+def display_name(own: str | None, classification: Classification | None) -> str | None:
+    """The name UIs show for an app: the ``apps.name`` vault-api recorded when
+    it is non-blank, else Steam's name from ``classification`` (store, then
+    the oracle's stored ``common.name``). Null when neither knows it. Shared
+    by ``GET /v1/games`` and the grouped-delete plan."""
+    if own is not None and own.strip():
+        return own
+    return None if classification is None else classification.name
+
+
 @dataclass(frozen=True)
 class _Row:
     app_type: str | None
