@@ -220,6 +220,28 @@ export function mergeOwnedLibrary(vaultGames, ownedGames) {
   return merged;
 }
 
+/**
+ * WP WEB-FEAT-SUGGEST-2: copy the owned list's `playtime_forever` onto the
+ * matching rows as `owned_playtime_forever` (a client-side field; the
+ * card's "Never played" pill reads it through `lib/decision-support.js`).
+ * The relay carries `playtime_forever` only with the operator's ADR-0010
+ * gate on, and only a real non-negative number is copied — an absent value
+ * stays absent, never a zero. Rows without a value are returned as is.
+ * @param {object[]} rows the merged library rows
+ * @param {object[] | null | undefined} ownedGames relay `games`
+ * @returns {object[]}
+ */
+export function withOwnedPlaytime(rows, ownedGames) {
+  const list = Array.isArray(rows) ? rows : [];
+  const playtime = new Map();
+  for (const g of validOwnedEntries(ownedGames)) {
+    const v = g.playtime_forever;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0 && !playtime.has(g.appid)) playtime.set(g.appid, v);
+  }
+  if (playtime.size === 0) return list;
+  return list.map((g) => (g && playtime.has(g.appid) ? { ...g, owned_playtime_forever: playtime.get(g.appid) } : g));
+}
+
 const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /**

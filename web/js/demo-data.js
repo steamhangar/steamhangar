@@ -639,7 +639,8 @@ let games = buildGames(readLibrarySizePreference());
 let jobs = buildJobs();
 let clients = buildClients();
 let nextJobId = 900002;
-let updateCheck = seedDemoUpdateCheck();
+// Seeded in the /v1/updates section below (its constants must exist first).
+let updateCheck = null;
 
 /** Restore all demo state to a fresh copy of the seed data. Exported for
  * tests (web/tests/demo-data.test.js and friends) so scenarios don't leak
@@ -664,7 +665,11 @@ let updateCheck = seedDemoUpdateCheck();
  * `0`/`null`).
  * @param {{ librarySize?: number, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean }} [options]
  */
-export function resetDemoData({ librarySize, relayExposePlaytime: rp = false, relayExposeLastPlayed: rl = false } = {}) {
+export function resetDemoData({
+  librarySize,
+  relayExposePlaytime: rp = readRelayPlaytimePreference(),
+  relayExposeLastPlayed: rl = false,
+} = {}) {
   games = buildGames(librarySize ?? readLibrarySizePreference());
   jobs = buildJobs();
   clients = buildClients();
@@ -764,8 +769,27 @@ const BOOL_FALSE_SPELLINGS = ["0", "false", "no", "off"];
 // restart", the same one-way, boot-time-only knob ADR-0010 requires of the
 // real server (there is deliberately no PATCH path for either, in demo mode
 // or the real one).
-let relayExposePlaytime = false;
+// WP WEB-FEAT-SUGGEST-2: the playtime gate's demo starting value comes
+// from a demo-only browser preference, `steamvault.demoRelayPlaytime` = "1"
+// (same idea as `steamvault.demoLibrarySize`), so the card's "Never
+// played" pill can be shown in a browser demo without changing the shipped
+// default (OFF, ADR-0010). Outside a browser (every test) it is OFF.
+// To see the pill (on Frostline Convoy): in demo mode run
+// `localStorage.setItem("steamvault.demoRelayPlaytime", "1")`, reload,
+// then in Settings save any 32-hex-character demo Steam Web API key and a
+// SteamID64 (e.g. 76561197960287930); the Library loads the owned list on
+// open. Read at module load and on resetDemoData().
+let relayExposePlaytime = readRelayPlaytimePreference();
 let relayExposeLastPlayed = false;
+
+function readRelayPlaytimePreference() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    return window.localStorage.getItem("steamvault.demoRelayPlaytime") === "1";
+  } catch {
+    return false;
+  }
+}
 
 // Mirrors settings_store.ENV_ONLY_INFO_KEYS — informational-only rows a
 // settings screen shows as "this exists but only the environment controls
@@ -1056,8 +1080,8 @@ function resetDemoSteamRelay() {
 // library's demo games above: this is what "the Steam Web API says this
 // account owns", which in real life is almost always a much bigger,
 // unrelated set from what happens to be cached. The two lists OVERLAP on
-// purpose (WP WEB-FEAT-1): 2010010/2010040 are vault games too, the other
-// three are owned-only, so the Library's merge shows both cases (dedupe by
+// purpose (WP WEB-FEAT-1): 2010010/2010040/2010050 are vault games too, the
+// other three are owned-only, so the Library's merge shows both cases (dedupe by
 // appid, plus "Not cached" owned-only rows).
 //
 // WP 4h.2 fix (named per the review that carried this defect forward): this
@@ -1075,6 +1099,9 @@ function resetDemoSteamRelay() {
 const DEMO_OWNED_GAMES = [
   { appid: 2010010, name: "Aurora Cascade", img_icon_url: "" },
   { appid: 2010040, name: "Emberreach", img_icon_url: "" },
+  // WP WEB-FEAT-SUGGEST-2: cached in the vault and never played (playtime
+  // 0 below), so the card's "Never played" pill has a demo case.
+  { appid: 2010050, name: "Frostline Convoy", img_icon_url: "" },
   { appid: 3300100, name: "Sable Undertow", img_icon_url: "" },
   { appid: 3300200, name: "Halcyon Foundry", img_icon_url: "" },
   { appid: 3300300, name: "Quietbrook", img_icon_url: "" },
@@ -1091,6 +1118,7 @@ const DEMO_OWNED_GAMES = [
 const DEMO_OWNED_GAMES_PLAYTIME = {
   2010010: { playtime_forever: 4312, rtime_last_played: 1_755_000_000 },
   2010040: { playtime_forever: 118, rtime_last_played: 1_754_000_000 },
+  2010050: { playtime_forever: 0 }, // cached and never played (WP WEB-FEAT-SUGGEST-2)
   3300100: { playtime_forever: 972 },
   3300200: { playtime_forever: 26, rtime_last_played: 1_753_000_000 },
   3300300: { playtime_forever: 0 }, // real, explicit "never played" — not absence
@@ -1604,15 +1632,31 @@ function finishDemoUpdateRun(state, trigger, startedAt, finishedAt) {
   });
 }
 
+/** Demo game whose update check failed in the seeded run, so its last
+ * successful check is old enough for the "update check due" notification
+ * (WP WEB-FEAT-SUGGEST-2, 14 days). A manual demo check succeeds for it. */
+export const DEMO_UPDATE_CHECK_OVERDUE_APPID = 2010070; // Glass Meridian
+const DEMO_UPDATE_CHECK_OVERDUE_DAYS = 20;
+
 /** The demo's starting point: a scheduled check finished three hours ago
- * (the demo ships a schedule window, so `scheduled` is true). */
+ * (the demo ships a schedule window, so `scheduled` is true). The oracle
+ * did not answer for one game (Glass Meridian), whose last successful
+ * check is therefore 20 days old. */
 function seedDemoUpdateCheck() {
   const state = { running: false, _readsLeft: 0 };
   const startedAt = isoAgo(3 * 3_600_000).replace(/\.\d{3}Z$/, "Z");
   const finishedAt = isoAgo(3 * 3_600_000 - 40_000).replace(/\.\d{3}Z$/, "Z");
   finishDemoUpdateRun(state, "scheduled", startedAt, finishedAt);
+  const overdue = findGame(DEMO_UPDATE_CHECK_OVERDUE_APPID);
+  if (overdue && overdue.update_checked_at !== null) {
+    overdue.update_checked_at = isoAgo(DEMO_UPDATE_CHECK_OVERDUE_DAYS * 86_400_000).replace(/\.\d{3}Z$/, "Z");
+    state.last_ok -= 1;
+    state.last_failed += 1;
+  }
   return state;
 }
+
+updateCheck = seedDemoUpdateCheck();
 
 function demoUpdateStatusOut() {
   const window = new Map(describeDemoSettings().map((i) => [i.key, i.effective])).get("schedule_window");

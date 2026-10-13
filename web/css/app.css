@@ -50,106 +50,6 @@
   line-height:1.5;
 }
 
-/* ---------- suggestions panel (WP 4h.2) ----------
-   The sub-BP-XL "collapsible card" presentation (docs/PROJECT_PLAN.md
-   :1867-1869), last child of #app, after <main> in DOM order (the D-14
-   reasoning: sitting after the ENTIRE Library view's flow trivially
-   satisfies "no new focusable content between the filter row and the first
-   card", since this is later than all of it, not between any of it) — but
-   **DOM order is not visual order below BP-L (Opus review blocker B1, WP
-   4h.2 fix round): #app becomes a CSS grid at BP-L (min-width:1024px) with
-   its own named area map, and a fifth in-flow child with no `grid-area` of
-   its own auto-places into whatever cell the grid algorithm finds first
-   vacant** — measured live at 1280px, landing ABOVE the library grid
-   (banner hidden) or squeezed into a 148px rail-column sliver (banner
-   visible), neither of which is "normal flow below main". The BP-L block
-   below fixes this with an explicit fourth grid row/area (see that block's
-   own comment) — this top-level rule only supplies the shared look
-   (background/border/typography) both presentations use; the BP-L block
-   supplies BP-L's placement, and the BP-XL block (search
-   "has-decision-panel") supplies the right-hand-column placement once
-   there is real content AND the viewport is wide enough.
-
-   Deliberately carries NO author `display` property anywhere in this file:
-   an `<aside>` is block-level by the UA default, and a `grid-area`
-   assignment needs no `display` of its own on the CHILD to become a grid
-   item — only the PARENT needs `display:grid`. Per css-hygiene.test.js's
-   own documented scope ("only elements with an author display rule need a
-   [hidden] guard" — the `.rail-version` sanity pin), this means
-   `.decision-panel` needs no `.decision-panel[hidden]` guard: the UA's
-   built-in `[hidden]{display:none}` is never fighting an author rule here,
-   unlike the three historically-buggy classes (.btn/h4.sec/.onbnav) that
-   motivated that lint in the first place. */
-.decision-panel{
-  /* Horizontal margin is `auto`, not a second `var(--gutter)` inset
-     (Opus review should-fix S2, WP 4h.2 fix round): below BP-L, this box's
-     own `max-width:var(--w-text)` can bind narrower than `#app`'s full
-     width the same way `.view-root`'s does — `.view-root` centres itself
-     with `margin:0 auto` (its own rule, above), and a FIXED left margin
-     here instead of `auto` left this box flush against the gutter with an
-     unclaimed gap on the right, measured live: a 108px stair-step against
-     `.view-root`'s centred edge at 1023px — the same class of seam WP
-     4e.1's `.banner-wrap`/`.view-root` mismatch was (that WP's own
-     should-fix S4). The 16px gutter inset itself still exists — as
-     `padding`, below — centring (margin) and inset (padding) are two
-     different concerns this rule used to conflate into one declaration.
-
-     **`width:100%` is load-bearing, not decorative — found live while
-     re-verifying this exact fix (WP 4h.2 fix round).** `.decision-panel` is
-     a direct grid item of `#app` from BP-L up (grid-area:panel); per the
-     CSS box-alignment spec, a grid item's default `justify-self:stretch`
-     is OVERRIDDEN by an `auto` margin in that axis — the item switches to
-     fit-content sizing (centered in the leftover space) instead of
-     stretching to fill its track. Measured live: without `width:100%`, a
-     short-content panel rendered 188px wide (its own shrink-to-fit content
-     size), centered around the track's midpoint, NEVER approaching
-     `max-width:760px` at all — `.view-root`/`.banner-wrap` (this file's own
-     `margin:0 auto` precedent, above) avoid exactly this because they
-     already carry `width:100%`/are non-grid-item content in the relevant
-     context; this rule needed the same explicit width to actually reach
-     its cap and centre THAT, not its own shrunk content. */
-  width:100%;
-  margin:20px auto 32px;
-  max-width:var(--w-text);
-  background:var(--raised);
-  border:1px solid var(--line);
-  border-radius:var(--r-l);
-  padding:14px 16px;
-}
-.dp-head{
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-.dp-title{
-  margin:0;
-  flex:1 1 auto;
-  font-size:14px;
-  font-weight:700;
-}
-.dp-acts{ display:flex; gap:2px; }
-.dp-collapse svg{ transition:transform .18s; }
-/* Collapsed = the sub-BP-XL card's own default (js/components/
-   decision-panel.js: `steamvault.decisionPanelCollapsed` defaults to
-   collapsed on a first visit) — hides the body and rotates the chevron; the
-   BP-XL block further down forces the body back open regardless of this
-   class (no collapse concept once this is the right-hand column). */
-.decision-panel.collapsed .dp-body{ display:none; }
-.decision-panel.collapsed .dp-collapse svg{ transform:rotate(-90deg); }
-.dp-body{
-  margin-top:10px;
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-.dp-row, .dp-empty{
-  margin:0;
-  font-size:12.5px;
-  line-height:1.5;
-  color:var(--dim);
-}
-.dp-row b{ color:var(--text); font-weight:600; }
-
 /* ---------- bottom nav ---------- */
 /* `order:1` (D-11, WP 4e.1): index.html now lists <nav> BEFORE <main> in DOM/
    reading/focus order (the rail is visually first once BP-L turns this into
@@ -507,19 +407,50 @@
    One object on the cover carries BOTH facts the grid needs: the status
    icon and the size (or nothing, honestly, while no live number exists —
    see game-status.js's module header). */
+/* WP WEB-FEAT-SUGGEST-2: the positioned row on the cover that holds the
+   status pill and, for a cached game never played, the "Never played" pill
+   to its right (game-card.js). Positioning moved here from `.cappill`. The
+   row itself takes no pointer events, so a tap on the cover between or
+   beside the pills still opens the card; the status pill (a button when it
+   has a quick action) takes them back. */
+.capbadges{
+  position:absolute; left:7px; top:7px; right:7px; z-index:2;
+  display:flex; align-items:center; gap:5px; min-width:0;
+  pointer-events:none;
+}
 .cappill{
-  position:absolute; left:7px; top:7px; z-index:2;
+  flex:none; pointer-events:auto;
   display:inline-flex; align-items:center; gap:5px;
   min-height:23px; padding:3px 8px 3px 3px; border-radius:999px;
   background:rgba(6,11,14,.74);
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.15), 0 1px 5px rgba(0,0,0,.45);
   font-family:var(--mono); font-size:10.5px; font-weight:500; color:#EAF3F6;
   font-variant-numeric:tabular-nums; line-height:1; letter-spacing:-.2px;
-  max-width:calc(100% - 14px);
+  max-width:100%;
 }
 @supports (backdrop-filter:blur(3px)){ .cappill{ backdrop-filter:blur(3px); } }
 .cappill .pv{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cappill .sic{ --sz:17px; }
+/* "Never played": same dark ground as a numbered status pill, text only,
+   shrinks with an ellipsis before it could push past the cover's edge.
+   Hidden in select mode, where the pick checkmark takes the top-right. */
+.playpill{
+  flex:0 1 auto; min-width:0; min-height:23px;
+  display:inline-flex; align-items:center; padding:3px 8px; border-radius:999px;
+  background:rgba(6,11,14,.74);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.15), 0 1px 5px rgba(0,0,0,.45);
+  font-size:10.5px; font-weight:600; line-height:1; color:#EAF3F6; letter-spacing:.1px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+@supports (backdrop-filter:blur(3px)){ .playpill{ backdrop-filter:blur(3px); } }
+/* The ellipsis must sit on the TEXT boxes: they are the pill's flex items
+   (blockified), and a flex container's own text-overflow never reaches
+   them (review fix). */
+.playpill .ppfull, .playpill .ppcompact{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.playpill .ppcompact{ display:none; }
+body.selecting .playpill{ display:none; }
+/* The list layout's twin in the meta row (its cover is 30px, no pills). */
+.playbadge{ display:none; }
 button.cappill{ cursor:pointer; transition:transform .12s ease, box-shadow .12s ease; }
 @media (hover:hover) and (pointer:fine){
   button.cappill:hover{ box-shadow:inset 0 0 0 1px rgba(255,255,255,.34), 0 2px 9px rgba(0,0,0,.5); }
@@ -610,7 +541,13 @@ button.cappill:active{ transform:scale(.93); }
 .grid.cols3{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px 9px; }
 .grid.cols3 .cap{ border-radius:9px; }
 .grid.cols3 .cap .name{ left:6px; right:6px; bottom:6px; font-size:11px; letter-spacing:.25px; }
-.grid.cols3 .cappill{ left:5px; top:5px; min-height:20px; padding:2px 6px 2px 2px; gap:4px; font-size:9px; }
+.grid.cols3 .capbadges{ left:5px; top:5px; right:5px; gap:4px; }
+.grid.cols3 .cappill{ min-height:20px; padding:2px 6px 2px 2px; gap:4px; font-size:9px; }
+/* Compact tiles: the short word, at every width (a BP-L Compact tile can
+   be ~150px, too narrow for a numbered status pill plus "Never played"). */
+.grid.cols3 .playpill{ min-height:20px; padding:2px 6px; font-size:9px; }
+.grid.cols3 .playpill .ppfull{ display:none; }
+.grid.cols3 .playpill .ppcompact{ display:inline; }
 .grid.cols3 .cappill .sic{ --sz:15px; }
 .grid.cols3 .card{ gap:5px; }
 .grid.cols3 .meta{ gap:5px; font-size:10px; }
@@ -636,7 +573,12 @@ button.cappill:active{ transform:scale(.93); }
 .grid.list .card.picked{ border-color:rgba(46,217,206,.5); }
 .grid.list .cap{ width:30px; flex:none; border-radius:5px; }
 .grid.list .cap .name{ display:none; }
-.grid.list .cappill{ display:none; }
+.grid.list .capbadges{ display:none; }
+.grid.list .playbadge{
+  display:inline; flex:none; font-size:10.5px; font-weight:600; color:var(--dim);
+  padding:1px 6px; border-radius:999px; border:1px solid var(--line); white-space:nowrap;
+}
+.grid.list .playbadge .pbfull{ display:none; }
 .grid.list .rowname{
   display:block; flex:1; min-width:0; font-size:13px; font-weight:600; letter-spacing:-.1px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -765,7 +707,7 @@ body.selecting .card .pick{ display:grid; }
 
 /* Scroll room while the bulk bar is up (WP WEB-FIX-6). The bar is
    `position:fixed` over the end of the page, so without room the last row
-   of cards (or the Suggestions card under it) could never scroll above it.
+   of cards could never scroll above it.
    `body.selecting` is library.js's own select-mode class (enterSelect /
    exitSelect / buildSection). `--bulk-room` = the bar's measured height
    (`--bulk-h`) plus `--bulk-gap` below it (to the nav's top, which is where
@@ -777,18 +719,6 @@ body.selecting .card .pick{ display:grid; }
    in select mode. */
 body.selecting{ --bulk-room:calc(var(--bulk-h) + var(--bulk-gap) * 2); }
 body.selecting .view-root{ padding-bottom:var(--bulk-room); }
-/* A visible Suggestions card (`.decision-panel`, the last box before the
-   nav below BP-XL) ends the flow instead: it takes the room, and the view
-   gets its normal 32px back so there is no dead band between the last
-   card and the Suggestions card. Without `:has()` support the last rule
-   is dropped and both boxes carry the room: a wider gap, nothing hidden.
-   BP-XL's right-hand column puts the room back on the view (that block). */
-body.selecting .app > .decision-panel:not([hidden]){ margin-bottom:var(--bulk-room); }
-/* `:where()` keeps the `:has()` argument at zero specificity (0,3,1), so
-   BP-XL's plain `.app.has-decision-panel` override (0,4,1) wins without
-   repeating this selector. */
-body.selecting .app:has(> :where(.decision-panel:not([hidden]))) > .view-root{ padding-bottom:32px; }
-
 /* ---------- buttons ---------- */
 .btn{
   display:inline-flex; align-items:center; justify-content:center; gap:7px;
@@ -1595,7 +1525,7 @@ body.onboarding .nav{ display:none; }
    "api/README.md", digit runs joined by commas, error text echoing a value)
    break inside these text blocks instead of widening their box past a
    phone viewport. Only changes rendering when a word does not fit. */
-.hint, .foot-note, .errline, .settings-warn, .notif .nx, .dp-row, .banner .body, .jobtop .nm{
+.hint, .foot-note, .errline, .settings-warn, .notif .nx, .banner .body, .jobtop .nm{
   overflow-wrap:anywhere;
 }
 
@@ -1755,49 +1685,14 @@ body.onboarding .nav{ display:none; }
   .app{
     display:grid;
     grid-template-columns:var(--rail-w) 1fr;
-    /* Fourth row, `auto`-sized (WP 4h.2 fix round, Opus review blocker
-       B1): `.decision-panel` (index.html) is a fifth in-flow child of
-       `#app` with no explicit `grid-area` of its own before this fix — CSS
-       grid auto-placement then dropped it into whichever named cell its
-       algorithm found first VACANT, measured live in both banner states at
-       1280px (headless-Chrome technique, see the coder's report for the
-       full numbers): banner hidden -> the empty "banner" cell (no item
-       placed there at all once `.banner-wrap` is `[hidden]`) swallowed it,
-       rendering it ABOVE the library grid (panel top 81px vs. main top
-       175px) while still DOM-last — the exact visual-vs-reading-order
-       divergence D-14 exists to prevent; banner visible -> that cell was
-       occupied, so auto-placement opened an IMPLICIT row inside the RAIL's
-       own narrow column instead (a 148px-wide sliver holding the whole
-       panel: heading, two buttons, statements). An explicit "panel" row
-       closes both: the panel always lands in its own row, in the MAIN
-       column, after "main" — which is what its actual DOM position (after
-       `<main>`) already implied and D-14 requires, instead of contradicting
-       it by accident. `auto`, not `1fr`: a `[hidden]` `.decision-panel`
-       contributes no content to this track, and an `auto` track (unlike an
-       explicit-length one) collapses to 0 height when nothing occupies it
-       — dismissed/off-Library costs zero vertical space, same reasoning
-       BP-XL's `--panel-w` COLUMN reservation does NOT get for free (see
-       that block's own comment, should-fix S3). Unconditional (not gated on
-       `.app.has-decision-panel`): unlike an explicit-WIDTH column, an empty
-       `auto` ROW has no space to reserve in the first place, so there is no
-       matching cost to gate here. */
-    grid-template-rows:auto auto 1fr auto;
+    grid-template-rows:auto auto 1fr;
     grid-template-areas:
       "rail top"
       "rail banner"
-      "rail main"
-      "rail panel";
+      "rail main";
     min-height:100vh;
   }
   .topbar{ grid-area:top; }
-  /* See the `.app` rule's own comment above (Opus review blocker B1) for
-     why this needs to be explicit at all. `.decision-panel`'s OTHER
-     grid-area declaration (BP-XL block, gated on `.app.has-decision-panel`)
-     wins over this one once both the panel has real content AND the
-     viewport is wide enough — same "later, higher-specificity source wins"
-     composition every other BP-L/BP-XL token pair in this file already
-     relies on (`--w-wall`, `--nav-h`, ...). */
-  .decision-panel{ grid-area:panel; margin:20px auto 32px; }
   /* `max-width:var(--w-wall)` here — the SAME token `.view-root` uses right
      below, deliberately, not `--w-text` (Opus review should-fix S4, WP 4e.1
      fix round): `.banner-wrap` and `.view-root` sit in the same visual
@@ -1938,7 +1833,9 @@ body.onboarding .nav{ display:none; }
      reset rules must fail css-layout-foundation.test.js, not silently pass. */
   .grid.cols3 .cap{ border-radius:var(--r-m); }
   .grid.cols3 .cap .name{ left:9px; right:9px; bottom:8px; font-size:14.5px; letter-spacing:.4px; }
-  .grid.cols3 .cappill{ left:7px; top:7px; min-height:23px; padding:3px 8px 3px 3px; gap:5px; font-size:10.5px; }
+  .grid.cols3 .capbadges{ left:7px; top:7px; right:7px; gap:5px; }
+  .grid.cols3 .cappill{ min-height:23px; padding:3px 8px 3px 3px; gap:5px; font-size:10.5px; }
+  .grid.cols3 .playpill{ min-height:23px; padding:3px 8px; font-size:10.5px; }
   .grid.cols3 .cappill .sic{ --sz:17px; }
   .grid.cols3 .cap .cappill.bare{ padding:3px; } /* WP WEB-FIX-9: the bare pill's base padding */
   .grid.cols3 .card{ gap:7px; }
@@ -2419,82 +2316,6 @@ body.onboarding .nav{ display:none; }
    live-measured column counts). */
 @media (min-width:1800px){
   :root{ --w-wall:2000px; }
-
-  /* ---------- Suggestions panel (WP 4h.2) — the right-hand column half of
-     docs/PROJECT_PLAN.md:1867-1869's two-presentation requirement. Gated on
-     `.app.has-decision-panel` (js/components/decision-panel.js toggles this
-     class on #app itself, never on .decision-panel) rather than always
-     reserving a third column: `grid-template-columns` tracks with an
-     EXPLICIT length (unlike `1fr`) reserve their space regardless of
-     whether any grid item currently occupies it, so an unconditional
-     3-column template would leave a permanent `--panel-w`-wide empty
-     gutter the moment the panel is dismissed/hidden/not on the Library
-     view — this class is the single signal that decides whether the
-     column exists AT ALL. "the panel takes width from the wall" (brief):
-     `.view-root`'s own `max-width:var(--w-wall)` is unchanged by this
-     block — it simply now stretches to fill a NARROWER "main" 1fr track
-     whenever the panel is present, exactly like it already shrinks to fit
-     the rail column at every other breakpoint; no JS layout math needed.
-     See theme.css's `--panel-w` comment for the measured, corrected cost of
-     that narrower track (should-fix S1: it is NOT free at 1920-2200px).
-
-     **Should-fix S3 (Opus review, WP 4h.2 fix round): the class used to
-     track plain VISIBILITY (onLibrary && !dismissed && games.length>0),
-     which meant an empty result — `buildSuggestions()`'s own `tier ===
-     "insufficient_data"`, e.g. every fresh vault for ~14 days by WP 4h.1's
-     own honesty window — still reserved this whole column to show ONE
-     static sentence. `decision-panel.js` now keys this class on
-     `visible && tier !== "insufficient_data"` (wiring `tier`'s previously
-     dead production caller in the same change) — an empty result still
-     shows the message, but as the BP-L block's plain full-width ROW
-     (below), never as a reserved right-hand column.** The three rules
-     below are therefore scoped to `.app.has-decision-panel` too, not bare
-     `.decision-panel`/`.dp-collapse` — so an empty-result panel at a BP-XL
-     viewport genuinely falls through to the BP-L placement/behaviour
-     (including a WORKING collapse toggle), rather than silently keeping
-     the "no collapse, force-expanded" BP-XL treatment with no column to
-     back it. */
-  .app.has-decision-panel{
-    grid-template-columns:var(--rail-w) 1fr var(--panel-w);
-    grid-template-areas:
-      "rail top top"
-      "rail banner banner"
-      "rail main panel";
-  }
-  /* `width:auto` (should-fix S6, Opus review round 2): the top-level rule's
-     `width:100%` (this WP's own B1/S2 fix round, needed there because
-     `margin:20px auto 32px` — an AUTO margin — makes a grid item shrink to
-     its content unless width is pinned) makes THIS rule's own
-     `margin-right:16px` inert once it wins the cascade: `width:100%` fills
-     the ENTIRE track regardless of margin, so the card sat flush against
-     the track's right edge at every BP-XL width, gutter gone (measured:
-     `panel.right === clientWidth` at 1800/1920/2200/2560px). This rule's
-     own margin has NO auto component (`20px 16px 32px 0`, all fixed), so
-     it needs the OTHER width algorithm — stretch-minus-margin, `width:auto`
-     — not the "fill regardless of margin" one the auto-margin rule above
-     needed. Re-verified live at 1900px after this fix: a real 16px right
-     gutter, the card still exactly 300px (its own track width, `--panel-w`,
-     unaffected by this change). */
-  .app.has-decision-panel .decision-panel{ grid-area:panel; width:auto; margin:20px 16px 32px 0; align-self:start; }
-  /* Bulk bar beside the Suggestions column (WP WEB-FIX-6). The bar used
-     BP-L's `right:var(--gutter)`, so with the column present it spanned the
-     column too and covered the bottom of a tall Suggestions card. Moving its
-     right inset in by `--panel-w` keeps BP-L's Δleft/Δwidth=0 algebra
-     against `.view-root`'s content edges, now inside the narrower "main"
-     track. The scroll room goes back to the view (the column is not the
-     end of the flow); the column keeps its own 32px. Both win over the
-     top-level select-mode rules by specificity or source order. */
-  .app.has-decision-panel .bulk{ right:calc(var(--panel-w) + var(--gutter)); }
-  body.selecting .app.has-decision-panel > .view-root{ padding-bottom:var(--bulk-room); }
-  body.selecting .app.has-decision-panel > .decision-panel{ margin-bottom:32px; }
-  /* No collapse affordance at BP-XL — the right-hand column is always
-     fully expanded; the class toggled by decision-panel.js still exists
-     (collapse state is only meaningful for the sub-BP-XL card, per the
-     brief), so its BODY is force-shown regardless, same specificity as the
-     base rule it overrides, later source wins (this file's own "gate in
-     place" convention). */
-  .app.has-decision-panel .dp-collapse{ display:none; }
-  .app.has-decision-panel .decision-panel.collapsed .dp-body{ display:flex; }
 }
 
 /* ============================================================

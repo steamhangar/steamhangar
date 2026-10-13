@@ -110,7 +110,7 @@ test("flex text columns may shrink: .jobtop > div and .banner .body carry min-wi
 });
 
 test("long unbreakable strings break inside the text blocks (overflow-wrap:anywhere, top level)", () => {
-  const sel = ".hint, .foot-note, .errline, .settings-warn, .notif .nx, .dp-row, .banner .body, .jobtop .nm";
+  const sel = ".hint, .foot-note, .errline, .settings-warn, .notif .nx, .banner .body, .jobtop .nm";
   assert.match(ruleBody(app.topLevel, sel) ?? "", /overflow-wrap:\s*anywhere/);
 });
 

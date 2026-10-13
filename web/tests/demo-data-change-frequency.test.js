@@ -66,10 +66,17 @@ test("GET /v1/games/{appid} projects the same three fields for the detail route"
   assert.equal(typeof detail.manifest_days_since_last_change, "number");
 });
 
-test("the suggestions panel's own buildSuggestions() finds real, non-empty statements from this fixture (end-to-end sanity, not just field presence)", async () => {
-  const { buildSuggestions } = await import("../js/lib/decision-support.js");
+test("the demo shows every moved Phase 4h statement end to end (WP WEB-FEAT-SUGGEST-2): Steam update line, overdue check, never-played pill", async () => {
+  const { lastUpdateDownloadedText, staleUpdateChecks, isNeverPlayedCached } = await import("../js/lib/decision-support.js");
+  const { withOwnedPlaytime } = await import("../js/lib/owned-library.js");
   const games = await demoRequest("GET", "/v1/games");
-  const { tier, items } = buildSuggestions(games);
-  assert.notEqual(tier, "insufficient_data", "the demo fixture must produce at least one real suggestion end to end");
-  assert.ok(items.length > 0);
+  assert.match(lastUpdateDownloadedText(games.find((g) => g.appid === 2010030)) ?? "", /^Last update downloaded \d+ days ago$/);
+  assert.deepEqual(staleUpdateChecks(games).map((i) => i.appid), [2010070], "Glass Meridian's last update check is 20 days old");
+  // The pill needs the owned list with the playtime gate on (a demo-only
+  // browser preference; resetDemoData's argument here).
+  resetDemoData({ relayExposePlaytime: true });
+  await demoRequest("PUT", "/v1/steam/key", { body: { key: "0123456789ABCDEF0123456789ABCDEF" } });
+  const owned = await demoRequest("GET", "/v1/steam/owned-games", { params: { steamid: "76561197960287930" } });
+  const rows = withOwnedPlaytime(await demoRequest("GET", "/v1/games"), owned.games);
+  assert.deepEqual(rows.filter(isNeverPlayedCached).map((g) => g.name), ["Frostline Convoy"]);
 });

@@ -1615,6 +1615,9 @@ was corrected in place rather than left stale.
 
 ### WP 4h.2 — Suggestions panel (Phase 4h)
 
+*Removed by WP WEB-FEAT-SUGGEST-2 (2026-10-13); the files named below
+(`decision-panel*.test.js`) no longer exist. See that section at the end.*
+
 Plan-vs-brief conflict resolved before any code was written (recorded as
 D-16, `docs/WORKPACKAGES.md`): `docs/PROJECT_PLAN.md`:1867-1869 requires
 BOTH a right-hand column at BP-XL (>=1800px) AND a collapsible card below
@@ -3442,3 +3445,63 @@ prefill.
 
 - No browser run: the row's real wrap points depend on font metrics and
   chip counts, only DOM and CSS rules were checked.
+
+### WP WEB-FEAT-SUGGEST-2 — suggestions panel removed, statements moved
+
+User decision 2026-10-13 (replaces WEB-FEAT-SUGGEST-1). The Phase 4h panel
+(`components/decision-panel.js`, its `<aside>` in index.html, the BP-L
+panel row, the BP-XL `.app.has-decision-panel` column, `--panel-w`, the
+two `steamvault.decisionPanel*` storage keys) is gone. `lib/decision-
+support.js` keeps only what the moved statements need:
+
+- detail sheet: "Last update downloaded today / yesterday / N days ago"
+  (`lastUpdateDownloadedText`, same gating as the panel: `changed` + a real
+  day count), a `data-role="updatedl"` fact line, patched per tick;
+- card: a "Never played" pill right of the status pill (`.capbadges` now
+  holds the status pill; ellipsis on its text boxes; "Unplayed" in Compact, a `.playbadge` twin in
+  the list layout, hidden in select mode), only for a cached card whose
+  owned-list `playtime_forever` is a real 0 (ADR-0010 gate on); the card's
+  accessible name gets "Fully cached, never played". The Library copies
+  the value as `owned_playtime_forever` (`withOwnedPlaytime`);
+- bell: ONE "Check due" entry for cached games whose last update check
+  (newer of `update_checked_at` and `last_manifest_check`) is 14+ days
+  old (`staleUpdateChecks`, `syncUpdateCheckDue`). Same games, a day
+  passing or a game leaving update it in place; it disappears when the
+  list empties. Opening the bell acknowledges its games, persisted in
+  `steamvault.updateCheckDueSeen` (guarded; pruned to the games still
+  overdue), so a reload raises it READ for the same games and only a NEW
+  game makes it unread (review fix). Its text names "Check updates" only
+  while that button exists (update-check phase idle/running); with the
+  oracle off it says update checks are turned off, otherwise nothing
+  extra;
+- "unchanged for N days" is dropped.
+
+Demo: Glass Meridian's last check is 20 days old (the seeded scheduled
+run failed for it), so the bell shows the entry; Frostline Convoy is owned
+with playtime 0. The pill needs the playtime gate, OFF by default as in a
+real install: set `localStorage.steamvault.demoRelayPlaytime = "1"`,
+reload, then set a demo Steam key and SteamID in Settings.
+
+Tests: `decision-support.test.js` rewritten (18), `notification-log.test.js`
++6 (`syncUpdateCheckDue` both directions, no-spam pins, navigation),
+`game-card-never-played.test.js` 7, `suggestions-moved-wiring.test.js` 3
+(detail sheet and bell wiring, nothing of the panel left),
+`demo-data-change-frequency.test.js` end-to-end case rewritten; the two
+`decision-panel*` files and the panel pins in `css-bulk-bar-room`,
+`app-storage-guard`, `owned-names-wiring` and `css-mobile-overflow` were
+removed with the panel.
+
+Mutations, all killed: entry always re-raised (no-spam), pill call removed
+from `buildCard`, pill fragment removed from the card name, threshold 30,
+pill without the CACHED kind check.
+
+#### Honest list
+
+- No browser run: the pill's fit was reasoned from the CSS sizes (base
+  tile ~173px, Compact uses the short word), not measured.
+- The bell entry is not individually dismissible (no notification is);
+  opening the bell marks it read, and it stays read (across reloads)
+  until a new game joins it.
+- The detail line says "downloaded": `manifest_days_since_last_change`
+  comes from the vault's own prefill (`manifest_ingest`), not Steam's
+  publish date (review fix; first draft said "on Steam").

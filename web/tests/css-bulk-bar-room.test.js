@@ -11,11 +11,11 @@
  *     `--bulk-gap` above the nav's REAL top edge (BP-L: above the inset);
  *   - select mode (`body.selecting`, library.js's own class) reserves
  *     `--bulk-room` = `--bulk-h` + 2 x `--bulk-gap` at the end of the flow
- *     (`.view-root`, or the Suggestions card when it is the last box);
+ *     (`.view-root`);
  *   - `--bulk-h` is measured live (lib/bulk-room.js) because the bar's
  *     height varies; theme.css carries a fallback;
- *   - BP-XL with the Suggestions column: the bar's right inset clears the
- *     column and the room goes back to the view.
+ *   - (the BP-XL Suggestions column and its select-mode rules were removed
+ *     with the panel, WP WEB-FEAT-SUGGEST-2).
  * Same posture as the other css-*.test.js files: no browser here, so these
  * pin declarations in the right selector and the right (or no) media block.
  */
@@ -176,39 +176,10 @@ test("select mode: .view-root's bottom padding becomes the room; the plain .view
   }
 });
 
-test("select mode: a visible Suggestions card ends the flow, takes the room, and the view gets its 32px back", () => {
-  assert.match(
-    ruleBody(app.topLevel, "body.selecting .app > .decision-panel:not([hidden])") ?? "",
-    /margin-bottom:\s*var\(--bulk-room\)/,
-  );
-  assert.match(
-    ruleBody(app.topLevel, "body.selecting .app:has(> :where(.decision-panel:not([hidden]))) > .view-root") ?? "",
-    /padding-bottom:\s*32px/,
-  );
-  // .view-root's own base bottom padding is the 32px restored above.
+test("no Suggestions panel rules are left (WP WEB-FEAT-SUGGEST-2 removed the panel)", () => {
+  assert.equal(/decision-panel|--panel-w/.test(appCss), false);
+  // .view-root's own base bottom padding is what ends the flow outside select mode.
   assert.match(ruleBody(app.topLevel, ".view-root") ?? "", /padding:\s*20px 16px 32px/);
-});
-
-// ---------------------------------------------------------------------
-// 4. BP-XL with the Suggestions column
-// ---------------------------------------------------------------------
-
-test("BP-XL: beside the Suggestions column the bar's right inset clears the column (--panel-w + --gutter)", () => {
-  assert.match(
-    ruleBody(bpXL.body, ".app.has-decision-panel .bulk") ?? "",
-    /right:\s*calc\(var\(--panel-w\)\s*\+\s*var\(--gutter\)\)/,
-  );
-});
-
-test("BP-XL: with the column the room goes back to the view and the column keeps its 32px", () => {
-  assert.match(
-    ruleBody(bpXL.body, "body.selecting .app.has-decision-panel > .view-root") ?? "",
-    /padding-bottom:\s*var\(--bulk-room\)/,
-  );
-  assert.match(
-    ruleBody(bpXL.body, "body.selecting .app.has-decision-panel > .decision-panel") ?? "",
-    /margin-bottom:\s*32px/,
-  );
 });
 
 // ---------------------------------------------------------------------

@@ -133,6 +133,7 @@ import { openDetail } from "../components/game-detail-sheet.js";
 import {
   librarySubtitle,
   mergeOwnedLibrary,
+  withOwnedPlaytime,
   ownedNotice,
   NOTICE_ACTION,
   OWNED_STATUS,
@@ -253,7 +254,9 @@ ownedLibrary.subscribe((owned) => {
 
 function remerge() {
   mergedOwnedGames = ownedLibrary.current().games;
-  state.games = mergeOwnedLibrary(state.vaultGames, mergedOwnedGames);
+  // WP WEB-FEAT-SUGGEST-2: playtime (ADR-0010 gate) for the card's
+  // "Never played" pill.
+  state.games = withOwnedPlaytime(mergeOwnedLibrary(state.vaultGames, mergedOwnedGames), mergedOwnedGames);
 }
 
 // Module-level, not per-mount: an in-flight "Check & update" call must stay
@@ -1459,6 +1462,13 @@ onViewChange((view) => {
   // WEB-FIX-6): stop observing the detached bar until the next mount.
   bulkHeight.unwatch();
 });
+
+/** The update check's current phase (lib/update-check.js UPDATE_PHASE), for
+ * the bell's "update check due" entry: it may point at the "Check updates"
+ * button only while that button exists (WP WEB-FEAT-SUGGEST-2 review). */
+export function currentUpdateCheckPhase() {
+  return updateCheck.snapshot().phase;
+}
 
 export function renderLibrary() {
   const section = buildSection();

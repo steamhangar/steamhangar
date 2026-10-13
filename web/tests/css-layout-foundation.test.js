@@ -375,7 +375,12 @@ test("BP-L's .grid.cols3 reset restates EVERY one of the base card's own values 
   const expectedResets = [
     ".grid.cols3 .cap{ border-radius:var(--r-m); }",
     ".grid.cols3 .cap .name{ left:9px; right:9px; bottom:8px; font-size:14.5px; letter-spacing:.4px; }",
-    ".grid.cols3 .cappill{ left:7px; top:7px; min-height:23px; padding:3px 8px 3px 3px; gap:5px; font-size:10.5px; }",
+    // WP WEB-FEAT-SUGGEST-2: the pill row's offsets moved from .cappill to
+    // .capbadges; the "Never played" pill resets with it (its compact word
+    // stays at every width, see app.css).
+    ".grid.cols3 .capbadges{ left:7px; top:7px; right:7px; gap:5px; }",
+    ".grid.cols3 .cappill{ min-height:23px; padding:3px 8px 3px 3px; gap:5px; font-size:10.5px; }",
+    ".grid.cols3 .playpill{ min-height:23px; padding:3px 8px; font-size:10.5px; }",
     ".grid.cols3 .cappill .sic{ --sz:17px; }",
     ".grid.cols3 .card{ gap:7px; }",
     ".grid.cols3 .meta{ gap:6px; font-size:11px; }",
