@@ -236,33 +236,20 @@
 }
 .lib-tools{ display:flex; gap:4px; flex-wrap:nowrap; flex:none; align-items:center; }
 
-/* "Check & update all cached games" (Phase 4c, WP 4c-web) — its own
-   full-width row below .lib-head rather than squeezed into .lib-tools:
-   that row is icon-button-sized and flex-wrap:nowrap, with no room for this
-   button's full honest label ("Check & update", never just "Check" —
-   docs/PROJECT_PLAN.md §7 Phase 4c) at phone widths. */
-.lib-checkrow{ margin-bottom:10px; }
-.lib-checkrow .btn{ width:100%; }
-/* WP UPD-2: "Check updates" sits next to "Check & update all cached games"
-   in one wrapping row — side by side where both labels fit, stacked full
-   width on a phone (flex-basis below the phone floor, no fixed width). */
-.lib-checkbtns{ display:flex; flex-wrap:wrap; gap:8px; }
-.lib-checkbtns .btn{ width:auto; flex:1 1 220px; min-width:0; }
 /* The update-check status line ("Updates last checked 5 min ago", oracle
    off, still running). Not a live region: results are announced by the
    toast; this line only states the current fact. */
 .lib-upd{
-  margin:8px 0 0; min-width:0;
+  min-width:0;
   font-size:11.5px; line-height:1.5; color:var(--dim-2);
   overflow-wrap:anywhere;
 }
-/* Owned-library status line (WP WEB-FEAT-1): inside .lib-checkrow, so the
-   BP-L named-area grid of .view-library keeps exactly six in-flow children.
+/* Owned-library status line (WP WEB-FEAT-1), inside `.lib-status`.
    Wraps anywhere (an error detail can be one long token) and never sets a
    width, so it cannot widen the phone layout (WP WEB-FIX-3 rules). */
 .lib-owned{
   display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px;
-  margin:8px 0 0; min-width:0;
+  min-width:0;
   font-size:11.5px; line-height:1.5; color:var(--dim-2);
   overflow-wrap:anywhere;
 }
@@ -416,6 +403,51 @@
   background:var(--accent-glow); border-color:rgba(46,217,206,.45); color:var(--accent);
 }
 .chip[aria-pressed="true"] .n{ opacity:.85; }
+
+/* ---------- library toolbar row (WP WEB-FIX-UPD-VIS, user layout
+   2026-10-13) ----------
+   ONE row: search field, filter chips, then the two check buttons at the
+   right end ("Check updates" = `.btn.primary`, "Check & update all cached
+   games" = plain filled `.btn`, because it downloads). Search, chips and
+   buttons share one height (`--tool-h`) and `align-items:center`, so all
+   three sit on one centre line. The chips never wrap (one scrolling line at
+   every width, see `.chips`), or a second chip line would break that.
+   Wrapping, all by flex-basis, no fixed widths (WP WEB-FIX-3 rules):
+   - below BP-M: `.lib-filters` wraps internally — search on its own full
+     line, the chips on the next; the buttons share the line below and fill
+     it, each on its own full line when both labels do not fit.
+   - BP-M (720-1023px, block below): search + chips on one line; the
+     buttons stay on that line while `.lib-filters`' content width (search
+     + every chip) plus the buttons fit, otherwise they wrap onto their own
+     line, right-aligned (`margin-left:auto`).
+   - BP-L up (block below): ONE row first (user spec): `.lib-filters` has
+     no basis of its own, only a minimum (search + `--chips-min` of chips),
+     so the chips scroll before the buttons wrap; the buttons wrap only
+     when even that minimum plus the buttons does not fit. */
+.lib-bar{
+  --tool-h:40px;
+  display:flex; flex-wrap:wrap; align-items:center;
+  gap:10px 12px; margin-bottom:12px; min-width:0;
+}
+.lib-filters{
+  flex:1 1 auto; min-width:0;
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px 12px;
+}
+.lib-bar .search{ flex:1 1 100%; min-width:0; height:var(--tool-h); margin:0; padding-top:0; padding-bottom:0; }
+/* The chips line scrolls (overflow-x:auto clips on both axes), so a
+   chip's default focus ring (2px OUTSIDE its box) would be cut off; it is
+   drawn inside instead, same as `.segs button`/`.hrow > button`. The 2px
+   padding is symmetric, so the chips keep the search field's centre line. */
+.lib-bar .chips{ flex:1 1 100%; min-width:0; margin:0; padding:2px; }
+.lib-bar .chip{ height:var(--tool-h); padding:0 12px; font-size:12px; }
+.lib-bar .chip:focus-visible{ outline-offset:-2px; }
+.lib-checkbtns{ flex:1 1 auto; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; min-width:0; }
+.lib-checkbtns .btn{ flex:1 1 auto; height:var(--tool-h); padding-top:0; padding-bottom:0; white-space:nowrap; }
+/* The status lines under the toolbar row (small text). `.lib-bar`'s 12px
+   bottom margin is the gap to the grid when no line shows; a visible line
+   tucks up under the row (-4px) and keeps 12px to whatever follows. */
+.lib-status{ min-width:0; }
+.lib-status > p{ margin:-4px 0 12px; }
 
 /* ---------- capsule grid ---------- */
 .grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 12px; }
@@ -1614,7 +1646,15 @@ body.onboarding .nav{ display:none; }
    requiring horizontal scroll. */
 @media (min-width:720px){
   :root{ --w-text:760px; }
-  .chips{ flex-wrap:wrap; overflow-x:visible; padding-bottom:0; }
+  /* WP WEB-FIX-UPD-VIS: the library toolbar row (see `.lib-bar` above).
+     The chips no longer wrap here (they did from WP 4e.1 to WP UPD-2): a
+     second chip line would leave the search field's centre line. */
+  .lib-bar{ --tool-h:36px; }
+  .lib-filters{ flex-wrap:nowrap; }
+  .lib-bar .search{ flex:0 1 var(--search-w); min-width:160px; }
+  .lib-bar .chips{ flex:1 1 auto; }
+  .lib-checkbtns{ flex:0 0 auto; margin-left:auto; flex-wrap:nowrap; }
+  .lib-checkbtns .btn{ flex:none; }
   /* WP WEB-FIX-3: the pre-fix desktop values, unchanged from BP-M up. */
   .search input{ font-size:13px; }
   input.inp, .inp input{ font-size:12.5px; }
@@ -1964,43 +2004,12 @@ body.onboarding .nav{ display:none; }
     right:var(--gutter);
   }
 
-  /* ----- Library toolbar band: search + chips side by side (WP 4e.2) -----
-     `.view-library` has exactly SIX in-flow children (`.bulk` is
-     `position:fixed` — out of grid flow by construction, needs no area of
-     its own), and every one of them already carries its own distinct class
-     (`.lib-head`/`.lib-checkrow`/`.search`/`.chips`/`.grid`/`.hint`) — areas
-     below are assigned BY CLASS, never by `nth-child`, so re-ordering
-     `library.js`'s `section.append(...)` call cannot silently desync this
-     layout from the DOM. `.search` is capped at `--search-w` (theme.css)
-     instead of stretching to the library's own, now much wider, `--w-wall`
-     column — a ~1536px-wide text input inside a 1600px column would be
-     absurd; the chips column absorbs whatever width that leaves and still
-     wraps internally past BP-M (`.chips{flex-wrap:wrap}` above, unchanged).
-     `align-items:start` keeps every row top-aligned rather than the grid's
-     default stretch, matching each item's own natural height exactly as it
-     rendered in normal flow below this breakpoint. */
-  .view-library{
-    display:grid;
-    grid-template-columns:var(--search-w) 1fr;
-    column-gap:var(--gutter);
-    grid-template-areas:
-      "head   head"
-      "check  check"
-      "search chips"
-      "cards  cards"
-      "hint   hint";
-    align-items:start;
-  }
-  .view-library > .lib-head{ grid-area:head; }
-  .view-library > .lib-checkrow{ grid-area:check; }
-  .view-library > .search{ grid-area:search; }
-  .view-library > .chips{ grid-area:chips; }
-  /* NB: this `.grid` is the CARDS grid (a grid item of `.view-library` here,
-     and independently a grid CONTAINER for its own card children via the
-     auto-fill rule above) — the two `display:grid` layers are unrelated
-     properties on the same element, not a naming collision. */
-  .view-library > .grid{ grid-area:cards; }
-  .view-library > .hint{ grid-area:hint; }
+  /* Library toolbar (WP 4e.2 put search + chips side by side here with a
+     named-area grid on `.view-library`). Since WP WEB-FIX-UPD-VIS the row
+     is its own flex container (`.lib-bar`, base rules + BP-M block), so
+     `.view-library` stays plain block flow at every width. */
+  .lib-bar{ --chips-min:160px; }
+  .lib-filters{ flex:1 1 0; min-width:calc(var(--search-w) + 12px + var(--chips-min)); }
 
   /* The rail. Overrides every base `.nav` property that assumed a
      horizontal, bottom-pinned, 3-column bar — `bottom`/`border-top`/
@@ -2392,7 +2401,7 @@ body.onboarding .nav{ display:none; }
    here — 2000px, not fully uncapped: on an unbounded ultra-wide monitor
    (3440px+) an uncapped wall would keep adding columns forever with no
    design ceiling at all, and the toolbar band right above it (search capped
-   at --search-w, chips wrapping) would look increasingly stranded under an
+   at --search-w, chips and check buttons in one row) would look increasingly stranded under an
    ever-widening grid with nothing else on the page that wide. This is a
    genuinely SEPARATE decision from BP-L's 1600px, not a continuation of
    it — BP-L's own cap is unreachable within BP-L's own width range (see

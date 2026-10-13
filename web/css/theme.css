@@ -250,13 +250,12 @@
      — out of scope for this package, recorded here as the honest escape
      hatch rather than pretended unnecessary. */
   --w-sheet-l:680px;
-  --search-w:420px; /* WP 4e.2: cap on the library search field once it sits
-                        beside the filter chips in a BP-L toolbar band
-                        (grid-template-areas "search chips") instead of
-                        stretching to the full, now much wider, --w-wall
-                        column — a ~1536px-wide text input inside a 1600px
-                        column would be absurd. See app.css's BP-L block,
-                        ".view-library" grid. */
+  --search-w:260px; /* Library search field width in the toolbar row from
+                        BP-M up (WP WEB-FIX-UPD-VIS: search, chips and the
+                        check buttons share one row; app.css `.lib-bar`).
+                        WP 4e.2 introduced it as a 420px cap for the old
+                        BP-L "search chips" grid band. Below BP-M the field
+                        takes its own full line instead. */
   /* WP 4h.2 — the suggestions panel's right-hand column width at BP-XL
      (>=1800px, app.css's `.app.has-decision-panel` block, only active with
      real content — should-fix S3). Below BP-XL (and at BP-XL with nothing

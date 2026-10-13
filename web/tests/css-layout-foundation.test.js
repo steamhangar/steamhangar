@@ -162,13 +162,15 @@ function findMediaBlock(minWidthPx) {
   return appMedia.find((b) => new RegExp(`min-width:\\s*${minWidthPx}px`).test(b.header) && !/and/.test(b.header));
 }
 
-test("BP-M (min-width:720px) narrows --w-text to 760px and wraps the filter chips", () => {
+test("BP-M (min-width:720px) narrows --w-text to 760px and does NOT wrap the filter chips (WP WEB-FIX-UPD-VIS)", () => {
   const block = findMediaBlock(720);
   assert.ok(block, "no bare min-width:720px block found");
   assert.match(block.body, /--w-text:\s*760px/);
-  const chipsBody = ruleBody(block.body, ".chips");
-  assert.ok(chipsBody, ".chips override not found in the BP-M block");
-  assert.match(chipsBody, /flex-wrap:\s*wrap/);
+  // Until WP WEB-FIX-UPD-VIS this block wrapped the chips. The toolbar row
+  // now keeps them on ONE scrolling line at every width, or a second chip
+  // line would leave the search field's centre line (user layout).
+  assert.equal(/(^|\})\s*\.chips\s*\{/.test(block.body), false, "BP-M must not override .chips any more (no flex-wrap:wrap)");
+  assert.equal(/flex-wrap:\s*wrap/.test(ruleBody(block.body, ".lib-bar .chips") ?? ""), false);
 });
 
 test("BP-L (min-width:1024px) turns #app into a rail grid and zeroes --nav-h (WITH a unit)", () => {
@@ -410,46 +412,62 @@ test(".bulk is re-derived from --w-wall (not --w-text) at BP-L, with rail/gutter
   assert.equal(/--w-text/.test(bulkBody), false, ".bulk's BP-L override must not reference --w-text any more");
 });
 
-test(".view-library becomes a named-area grid at BP-L, assigning all six in-flow children BY CLASS (never nth-child), search capped at --search-w", () => {
-  const block = findMediaBlock(1024);
-  const body = ruleBody(block.body, ".view-library");
-  assert.ok(body, ".view-library rule not found in the BP-L block");
-  assert.match(body, /display:\s*grid/);
-  // Opus review S4: the ORIGINAL version of this test only checked that
-  // `--search-w` is DECLARED (theme.css) and that `.search` gets
-  // `grid-area:search` — it named the capping mechanism without ever
-  // asserting it. Two real mutations survived as a result: changing the
-  // grid's own column template from `var(--search-w) 1fr` to `1fr 1fr`
-  // (the cap silently disappears — the input becomes ~976px wide at
-  // 2560px) and swapping the area map's "search chips" row to "chips
-  // search" (search and chips silently trade places). Both are pinned by
-  // name below.
-  assert.match(
-    body,
-    /grid-template-columns:\s*var\(--search-w\)\s+1fr\b/,
-    ".view-library's BP-L grid-template-columns must be `var(--search-w) 1fr` — search's column-track width is the actual cap, not merely --search-w's existence somewhere in the file",
-  );
-  assert.match(body, /grid-template-areas/);
-  // The exact row order/content of the area map, not just that AN area map
-  // exists — pins search-before-chips (never swapped) and every other row
-  // spanning both columns.
-  assert.match(body, /"head\s+head"/, 'the "head head" area row is missing or changed');
-  assert.match(body, /"check\s+check"/, 'the "check check" area row is missing or changed');
-  assert.match(body, /"search\s+chips"/, 'the "search chips" area row is missing, changed, or reordered to "chips search"');
-  assert.match(body, /"cards\s+cards"/, 'the "cards cards" area row is missing or changed');
-  assert.match(body, /"hint\s+hint"/, 'the "hint hint" area row is missing or changed');
-  for (const cls of ["lib-head", "lib-checkrow", "search", "chips", "grid", "hint"]) {
-    const selector = `.view-library > .${cls}`;
-    assert.ok(block.body.includes(selector), `no "${selector}" area-assignment rule found in the BP-L block`);
+// WP WEB-FIX-UPD-VIS (user layout 2026-10-13) replaced WP 4e.2's BP-L
+// named-area grid on .view-library with one flex toolbar row, `.lib-bar`
+// (search + chips in `.lib-filters`, then `.lib-checkbtns`), at every width.
+test("no breakpoint turns .view-library into a grid any more — the toolbar row is .lib-bar's own flexbox", () => {
+  for (const b of appMedia) {
+    assert.equal(ruleBody(b.body, ".view-library"), null, `${b.header} still has a .view-library rule`);
+    assert.equal(/\.view-library\s*>\s*\./.test(b.body), false, `${b.header} still assigns .view-library grid areas`);
   }
-  assert.equal(/nth-child/.test(block.body), false, "grid-area assignment must never use nth-child (brief: class-based, order-independent)");
-  const searchBody = ruleBody(block.body, ".view-library > .search");
-  assert.ok(searchBody, ".view-library > .search rule missing");
-  assert.match(searchBody, /grid-area:\s*search/);
 });
 
-test("theme.css declares --search-w (the library search field's BP-L cap)", () => {
-  assert.match(themeTop, /--search-w\s*:\s*420px/);
+test(".lib-bar: one wrapping flex row, centre-aligned, one shared --tool-h height for search, chips and buttons", () => {
+  const bar = ruleBody(appTop, ".lib-bar");
+  assert.ok(bar, ".lib-bar rule missing at top level");
+  assert.match(bar, /display:\s*flex/);
+  assert.match(bar, /flex-wrap:\s*wrap/, "the buttons must be able to wrap onto their own line");
+  assert.match(bar, /align-items:\s*center/, "search, chips and buttons share one centre line");
+  assert.match(bar, /--tool-h:\s*40px/);
+  for (const sel of [".lib-bar .search", ".lib-bar .chip", ".lib-checkbtns .btn"]) {
+    const body = ruleBody(appTop, sel);
+    assert.ok(body, `${sel} rule missing`);
+    assert.match(body, /(^|[;\s])height:\s*var\(--tool-h\)/, `${sel} must be exactly --tool-h tall`);
+  }
+  // The chips container is symmetric (2px all round), so its chips keep the
+  // search field's centre line; it never wraps (top-level .chips scrolls).
+  assert.match(ruleBody(appTop, ".lib-bar .chips"), /padding:\s*2px\s*;/);
+  assert.match(ruleBody(appTop, ".lib-filters"), /flex-wrap:\s*wrap/, "below BP-M: search on its own line, chips on the next");
+  assert.match(ruleBody(appTop, ".lib-bar .search"), /flex:\s*1 1 100%/);
+  assert.match(ruleBody(appTop, ".lib-checkbtns"), /flex-wrap:\s*wrap/);
+  assert.match(ruleBody(appTop, ".lib-checkbtns .btn"), /white-space:\s*nowrap/);
+});
+
+test("BP-M: search + chips on one line, search at --search-w, buttons pushed right and wrapping as one group", () => {
+  const block = findMediaBlock(720);
+  assert.match(ruleBody(block.body, ".lib-bar") ?? "", /--tool-h:\s*36px/);
+  assert.match(ruleBody(block.body, ".lib-filters") ?? "", /flex-wrap:\s*nowrap/);
+  assert.match(ruleBody(block.body, ".lib-bar .search") ?? "", /flex:\s*0 1 var\(--search-w\)/);
+  const btns = ruleBody(block.body, ".lib-checkbtns") ?? "";
+  assert.match(btns, /margin-left:\s*auto/, "a wrapped button group must sit at the right end");
+  assert.match(btns, /flex:\s*0 0 auto/);
+  assert.match(btns, /flex-wrap:\s*nowrap/);
+});
+
+test("BP-L: ONE row first — .lib-filters has no basis, only a minimum (search + --chips-min), so the chips scroll before the buttons wrap", () => {
+  const block = findMediaBlock(1024);
+  assert.match(ruleBody(block.body, ".lib-bar") ?? "", /--chips-min:\s*160px/);
+  const filters = ruleBody(block.body, ".lib-filters") ?? "";
+  assert.match(filters, /flex:\s*1 1 0\s*;/, "a zero basis: the line break is decided by the minimum, not by every chip's width");
+  assert.match(filters, /min-width:\s*calc\(var\(--search-w\)\s*\+\s*12px\s*\+\s*var\(--chips-min\)\)/);
+});
+
+test("a focused chip keeps its whole focus ring inside the scrolling chips line", () => {
+  assert.match(ruleBody(appTop, ".lib-bar .chip:focus-visible") ?? "", /outline-offset:\s*-2px/);
+});
+
+test("theme.css declares --search-w (the library search width in the toolbar row from BP-M up)", () => {
+  assert.match(themeTop, /--search-w\s*:\s*260px/);
 });
 
 // ---------------------------------------------------------------------

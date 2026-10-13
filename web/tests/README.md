@@ -3397,3 +3397,48 @@ Suite: **1382 tests, 1382 pass, 0 fail**.
 - Demo mode has no `/v1/updates/*` routes and no `update_available` on its
   games, so the feature is hidden there (the 404 path).
 - The wiring tests poll with the real 2 s interval (about 7 s for the file).
+
+### WP WEB-FIX-UPD-VIS — one Library toolbar row, visible check buttons, demo update check
+
+User feedback and layout 2026-10-13: the check buttons read as a full-width
+text bar. The Library toolbar is now one row, `.lib-bar`: `.lib-filters`
+(search, then the chips) on the left, `.lib-checkbtns` on the right with
+"Check updates" as `.btn.primary` (accent fill, check only) and "Check &
+update all cached games" as plain `.btn` (filled neutral, it downloads).
+Search, chips and buttons share `--tool-h` (40px below BP-M, 36px from
+BP-M) and one centre line; the chips never wrap any more (one scrolling
+line). Below BP-M search and chips take a line each and the buttons fill
+the next line (each on its own line when both labels do not fit); at BP-M
+the buttons stay in the row while search + every chip + buttons fit,
+otherwise they wrap onto their own line, right-aligned; from BP-L up the
+row stays ONE row (review fix): `.lib-filters` has a zero basis and a
+minimum of search + `--chips-min` (160px), so the chips scroll first and
+the buttons wrap only below that minimum. A focused chip draws its ring
+inside (`outline-offset:-2px`), the scroll clip would cut it otherwise. The status lines
+("Updates last checked …", the owned-list notice) sit under the row in
+`.lib-status`. WP 4e.2's BP-L named-area grid on `.view-library` is gone
+(the row lays itself out); `--search-w` is now the search width in the row
+(260px).
+
+Demo mode now serves `POST /v1/updates/check` / `GET /v1/updates/status`
+(a started check answers `running` to one read, then finishes) and
+`update_available` / `update_checked_at` on the rows, with Emberreach
+flagged; a finished prefill of it clears the flag.
+
+Tests: `demo-data-updates.test.js` 6 (keys equal `UpdateCheckStatusOut` /
+`UpdateCheckStartOut` and the GameSummary fields read from the Python
+source, the seed flag and chip, seeded status line, check run, flag
+cleared by a prefill), `library-update-check-wiring.test.js` +1 (row
+structure, primary/plain button classes), `css-layout-foundation.test.js`
+(no `.view-library` grid, `.lib-bar` rules, BP-M row rules, chips not
+wrapping, `--search-w: 260px`), child-order pins updated in
+`library-owned-wiring.test.js` and `css-downloads-settings-layout.test.js`.
+
+Mutations, all killed: "Check updates" back to `btn ghost sm`; no
+`margin-left:auto` on the BP-M button group; no flag clear after a demo
+prefill.
+
+#### Honest list
+
+- No browser run: the row's real wrap points depend on font metrics and
+  chip counts, only DOM and CSS rules were checked.

@@ -194,11 +194,28 @@ test("UPD-1 vault-api: the button shows next to the unchanged 'Check & update' b
   assert.equal(updLine(s).hidden, false);
   assert.deepEqual(
     s.children.map((c) => c.className),
-    ["lib-head", "lib-checkrow", "search", "chips", "grid", "hint", "bulk"],
-    "still six in-flow children for the BP-L area grid",
+    ["lib-head", "lib-bar", "lib-status", "grid", "hint", "bulk"],
+    "toolbar row, then the status lines (WP WEB-FIX-UPD-VIS)",
   );
   const statuses = s.querySelectorAll('[role="status"]').map((n) => n.className);
   assert.deepEqual(statuses, ["lib-owned-text"], "no new live region: results go to the toast");
+});
+
+test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; 'Check updates' is the primary button, 'Check & update' the plain one", async () => {
+  server.mode = "ok";
+  server.enabled = true;
+  server.statusQueue = [IDLE];
+  const s = await openLibrary();
+  await until(() => updBtn(s).hidden === false, "button shown");
+  const bar = s.querySelector(".lib-bar");
+  assert.deepEqual(bar.children.map((c) => c.className), ["lib-filters", "lib-checkbtns"]);
+  assert.deepEqual(bar.children[0].children.map((c) => c.className.split(" ")[0]), ["search", "chips"]);
+  const [first, second] = s.querySelector(".lib-checkbtns").children;
+  assert.equal(first.textContent, "Check updates");
+  assert.deepEqual(first.className.split(" ").sort(), ["btn", "primary", "sm"], "MUTATION PIN: the check-only button is the primary one");
+  assert.equal(second.textContent, "Check & update all cached games");
+  assert.deepEqual(second.className.split(" ").sort(), ["btn", "sm"], "MUTATION PIN: the downloading button is NOT primary and not a see-through ghost");
+  assert.equal(s.querySelector(".lib-status").children.map((c) => c.className).join(" "), "lib-upd lib-owned");
 });
 
 test("badge + 'Updates' chip from update_available; the chip filters the grid", async () => {
