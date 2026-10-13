@@ -93,6 +93,10 @@ tests, no manual on-device check. `assembleDebug` produces an installable
 APK (`app/build/outputs/apk/debug/app-debug.apk`) that has not been run on a
 device.
 
+`test` also runs the Library screenshot tests (Robolectric, debug variant
+only); goldens, CI artifact and record/verify: "Screenshot tests (WP
+APP-TEST-1)" at the end of this file.
+
 ## Quality gate: AGP lint, not ktlint
 
 This WP picks the **AGP `lint` task** as the static-analysis gate (not
@@ -3958,3 +3962,93 @@ use manual onboarding. The dialog's look on a phone, the cold-start path,
 `onNewIntent` while the app is in the background, rotation with the dialog
 open, the Recents re-delivery guard, and the web twin (PAIR-1 is not on
 main yet, so there is no cross-pin to its link builder).
+
+## Screenshot tests (WP APP-TEST-1)
+
+Roborazzi on Robolectric renders the Library screen to PNG on the JVM -- no
+emulator, no device. They run **only in GitHub CI** (the `android-tests`
+job in `.github/workflows/ci.yml`, as part of `testDebugUnitTest`); the
+devbox has no Android SDK and no `/dev/kvm`, and a local render on another
+machine would not match CI's pixels anyway (fonts, native graphics build).
+
+**Files.**
+
+- `app/src/testDebug/java/dev/steamvault/app/ui/library/LibraryScreenshotTest.kt`
+  -- the tests, the golden handling (`ScreenshotGoldens`), and a copy of
+  `MainActivity`'s shell (edge-to-edge window, outer Scaffold with the
+  bottom bar, `LibraryScreen` inside it) so the screen is rendered where it
+  really lives. Robolectric reports no system-bar insets of its own; the
+  test dispatches fixed ones (status 24 dp, navigation 48 dp).
+- `.../LibraryScreenshotFixtures.kt` -- fixed synthetic data: 7 vault games
+  plus 3 owned-only ones, every filter chip non-zero, long and short
+  titles, every card kind (cached, not cached, downloading, updating,
+  paused, failed). Nothing time-dependent. Cover art never touches the
+  network: a test `ImageLoader` fails every request, so each card shows its
+  fallback tile.
+- `app/src/testDebug/screenshots/<name>.png` -- the goldens, checked in.
+  `testDebug/` rather than `test/`: only `testDebugUnitTest` runs them (not
+  twice via `testReleaseUnitTest`).
+
+**Profiles.** 411 dp (Pixel reference) and 360 dp wide, font scale 1.0 and
+1.3, Robolectric SDK 35, all at 420 dpi; plus `night` at 411 dp / 1.0 (the
+theme is single-dark, so it should equal its `notnight` twin -- it guards
+against the app starting to read the system setting) and the List layout
+at 360 dp / 1.3. Six images:
+
+| Test | Width | Font | Other |
+|---|---|---|---|
+| `library_411dp_font100` | 411 dp | 1.0 | Grid 2 |
+| `library_411dp_font130` | 411 dp | 1.3 | Grid 2 |
+| `library_360dp_font100` | 360 dp | 1.0 | Grid 2 |
+| `library_360dp_font130` | 360 dp | 1.3 | Grid 2 |
+| `library_411dp_font100_night` | 411 dp | 1.0 | Grid 2, night |
+| `library_360dp_font130_list` | 360 dp | 1.3 | List |
+
+**Verify or record, per image.**
+
+| Golden in `src/testDebug/screenshots/` | What the test does | Job |
+|---|---|---|
+| exists, pixels equal | verify passes | green |
+| exists, pixels differ | test fails; `<name>_compare.png` + `<name>_actual.png` in `build/outputs/roborazzi/diffs/` | red |
+| missing | records `build/outputs/roborazzi/new-goldens/<name>.png`, passes | green, with a notice |
+
+After the Gradle step, `screenshots: summary` writes both counts to the job
+summary (a notice for missing goldens, an error line for diffs) and
+`screenshots: upload artifact` uploads `app/app/build/outputs/roborazzi/`
+as the artifact **`app-screenshots`** (kept 14 days; nothing to upload is
+normal once all goldens exist and match).
+
+**Checking goldens in.**
+
+1. First run (no goldens yet), or a new test: open the workflow run,
+   download `app-screenshots`, look at every image in `new-goldens/`.
+2. If an image shows what the screen should look like -- or, for D12, what
+   it looks like today, to turn red after the fix -- copy it unchanged to
+   `app/app/src/testDebug/screenshots/<name>.png` and commit it (a
+   `test(app): ...` commit of its own is clearest). The next CI run
+   verifies against it.
+3. Intended UI change (e.g. the D12 fix): CI goes red with diffs. Review
+   `diffs/<name>_compare.png` (golden, difference and new render side by side); if the new one is
+   right, copy `diffs/<name>_actual.png` over the golden as
+   `<name>.png` and commit it in the same package as the UI change.
+
+Never hand-edit or re-encode a golden (Roborazzi's default comparison
+tolerates no differing pixel), and only
+check in images rendered by CI.
+
+**Record mode** (`-Psteamhangar.screenshots.record=true` on
+`testDebugUnitTest`) overwrites every golden in place. It exists for a
+machine whose render matches CI's; it is not used by CI.
+
+**Versions.** Robolectric 4.14.1 (first line with SDK 35, runs on JDK 17),
+Roborazzi 1.32.2 (core artifact only, no Gradle plugin), Compose
+`ui-test-junit4` from the BOM. Reasons in `gradle/libs.versions.toml`.
+`isIncludeAndroidResources` is now `true` (Robolectric needs the merged
+resources); the plain JVM tests in `src/test/` are unaffected. The test
+host `ComponentActivity` is registered with Robolectric's package manager
+at test time instead of adding `ui-test-manifest`, which would put an
+exported test activity into every debug APK.
+
+**What this WP did NOT do.** No D12 fix (the screenshots show the layout
+as it is), no goldens (they can only come from CI), no screenshots of other
+screens, no emulator or instrumented tests.

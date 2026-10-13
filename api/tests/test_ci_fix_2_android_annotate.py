@@ -19,7 +19,8 @@ per category (Kotlin compiler errors, JUnit failures, lint issues, Gradle's
   piped through `tee`, and the step suspends workflow-command parsing while
   that output is printed,
 - the workflow wiring: every annotate step is `if: failure()`, uses only
-  python3 + this script, and the job gained no new action.
+  python3 + this script, and the job gained no new action (WP APP-TEST-1:
+  except actions/upload-artifact for the screenshot images).
 
 Pure file parsing plus local bash/python3 subprocesses; nothing needs
 Gradle, Docker or network.
@@ -415,8 +416,10 @@ def test_annotate_steps_are_failure_only_and_within_job_limit() -> None:
 
 
 def test_job_gained_no_new_action() -> None:
+    # WP APP-TEST-1 added exactly one: actions/upload-artifact for the
+    # screenshot images (pinned and wired in test_app_test_1_screenshot_ci.py).
     uses = [s["uses"].split("@")[0] for s in _job()["steps"] if "uses" in s]
-    assert uses == ["actions/checkout", "actions/setup-java"]
+    assert uses == ["actions/checkout", "actions/setup-java", "actions/upload-artifact"]
 
 
 # ---------------------------------------------------------------------------

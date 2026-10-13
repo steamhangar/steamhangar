@@ -106,6 +106,25 @@
 ##   `ProcessLifecycleOwner`, the "process-lifecycle check" the WP 4b.8
 ##   brief names as sufficient for the foreground-notification-suppression
 ##   rule (`NotificationPollWorker.kt`).
+##
+## WP APP-TEST-1 additions (library screenshot tests, TEST classpath only --
+## nothing below reaches the APK):
+## - org.robolectric:robolectric 4.14.1 is the first line that knows SDK 35
+##   (`DefaultSdkProvider`: android-all 15 / 12650502, required Java 17 --
+##   checked in the robolectric-4.14.1 source, so the CI job's Temurin 17
+##   is enough). Contemporaneous with the Compose BOM 2024.10.01 pinned
+##   above; 4.15+ (June 2025 onward) is not needed for anything here.
+## - io.github.takahirom.roborazzi:roborazzi 1.32.2 (Nov 2024, same month
+##   as Robolectric 4.14.1) -- its POM targets kotlin-stdlib 1.9.22 and
+##   espresso-core 3.5.1, its AAR declares minCompileSdk=1, so it resolves
+##   against Kotlin 2.0.21 / compileSdk 35 without forcing anything newer
+##   (POMs checked; 1.43.0 still targets 1.9.22, 1.49.0 moved to 2.0.21 --
+##   nothing from those lines is needed here). Only the core artifact: the test
+##   calls `SemanticsNodeInteraction.captureRoboImage` and picks
+##   record/verify per image itself, so neither the Roborazzi Gradle
+##   plugin nor roborazzi-compose / roborazzi-junit-rule is used.
+## - androidx.compose.ui:ui-test-junit4 comes from the SAME Compose BOM
+##   (1.7.5), never its own version.
 
 [versions]
 agp = "8.7.3"
@@ -123,6 +142,8 @@ androidxBrowser = "1.8.0"
 coil = "2.7.0"
 workRuntime = "2.9.1"
 lifecycleProcess = "2.8.7"
+robolectric = "4.14.1"
+roborazzi = "1.32.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -148,6 +169,9 @@ androidx-browser = { group = "androidx.browser", name = "browser", version.ref =
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workRuntime" }
 androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycleProcess" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", version.ref = "roborazzi" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

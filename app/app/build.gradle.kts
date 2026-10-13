@@ -187,7 +187,12 @@ android {
 
     testOptions {
         unitTests {
-            isIncludeAndroidResources = false
+            // WP APP-TEST-1: the library screenshot tests
+            // (src/testDebug/, Robolectric) render real Composables, which
+            // resolve strings/themes through the merged resources -- without
+            // this Robolectric has no R values to load. The plain JVM tests in
+            // src/test/ never touch Android resources and are unaffected.
+            isIncludeAndroidResources = true
         }
     }
 
@@ -258,4 +263,39 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.okhttp.tls)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // WP APP-TEST-1: Roborazzi + Robolectric screenshot tests of the library
+    // screen. Test classpath only; the tests live in src/testDebug/ so only
+    // testDebugUnitTest runs them (see app/README.md "Screenshot tests").
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+}
+
+// ---------------------------------------------------------------------
+// Screenshot tests (WP APP-TEST-1). Goldens are checked in under
+// src/testDebug/screenshots/; LibraryScreenshotTest verifies against an
+// existing golden and records a missing one into
+// build/outputs/roborazzi/new-goldens/ (never failing for it). Passing
+// `-Psteamhangar.screenshots.record=true` re-records every golden in
+// place instead. The golden directory is declared as a task input so a
+// changed or added golden re-runs the test instead of leaving it
+// UP-TO-DATE. Robolectric with native graphics needs more than the
+// default 512 MiB test heap.
+// ---------------------------------------------------------------------
+val screenshotRecordProperty = "steamhangar.screenshots.record"
+
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+    if (name == "testDebugUnitTest") {
+        systemProperty(
+            screenshotRecordProperty,
+            providers.gradleProperty(screenshotRecordProperty).getOrElse("false"),
+        )
+        inputs.dir("src/testDebug/screenshots")
+            .withPropertyName("screenshotGoldens")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .optional()
+    }
 }
