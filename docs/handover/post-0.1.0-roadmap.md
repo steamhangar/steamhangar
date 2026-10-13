@@ -404,6 +404,8 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
    oracle is on, its URL host is allowed automatically by vault-proxy and
    the vault-api startup check, without a `VAULT_EGRESS_ALLOW` entry
    (user decision 2026-10-13, option A; addendum to ADR-0011 in UPD-4).
+   The automatic allowance covers only the default host api.steamcmd.net;
+   a custom oracle URL host still needs a `VAULT_EGRESS_ALLOW` entry.
 2. **UPD-2 (web)** "Check updates" button (calls `POST
    /v1/updates/check`, no download), "Update available" badge from
    `update_available`, an "Updates" filter chip. The existing "Check &
