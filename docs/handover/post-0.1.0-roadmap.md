@@ -505,7 +505,15 @@ design exists. Wave-2 code stays on branches until rc15 is tagged.
 11. **D9 TOOL-APPS-2** ADR first, then group DLC/content under the
     parent game (decided).
 
-**WEB-FEAT-SUGGEST-1 (web, rc16; user request 2026-10-13):** once the
+**WEB-FEAT-SUGGEST-2 (web, rc16; user decision 2026-10-13, replaces
+SUGGEST-1 below):** the Phase 4h suggestions panel is removed. Its
+statements move: "last changed N days ago" -> detail sheet ("Last
+update"); "fully cached, never played" -> a second pill on the card,
+right of the status pill; "unchanged for N days" -> dropped; "not
+confirmed current for N days" -> a notification "Last update check was N
+days ago", raised from 14 days on (was 30 in the panel).
+
+~~WEB-FEAT-SUGGEST-1 (superseded the same evening):~~ once the
 4h suggestions panel is dismissed, its suggestions appear in the
 notifications (bell) instead, with a "Show suggestions panel again"
 action there; dismissing shows a short notice that the suggestions now
