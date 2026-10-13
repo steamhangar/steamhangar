@@ -249,6 +249,9 @@ not conflict with D2 (QR login for SteamPrefill's session).
 - The signed assertion (SteamID64 included) passes through the vault's
   request line; uvicorn's access log records request lines. The assertion
   is single-use for the app (state) and carries no secret, but it is a
-  privacy note for operators who ship vault-api logs elsewhere.
+  privacy note for operators who ship vault-api logs elsewhere. Remedies
+  for them: run uvicorn with `--no-access-log` (in a compose override; the
+  image keeps the access log on), and filter `/auth/steam/app-return` from
+  any reverse-proxy access log in front of vault-api.
 - No conflict with D2: D2 logs SteamPrefill into Steam behind the API key
   under `/v1`; this page touches neither SteamPrefill nor any `/v1` route.

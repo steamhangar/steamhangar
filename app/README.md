@@ -1076,10 +1076,19 @@ everything below is exercised via MockWebServer/fakes up to the network
 boundary, but the following need a real phone + real Steam account before
 they can be called confirmed:
 
-1. **Whether Valve's OpenID login page actually accepts and redirects to
-   the `steamvault://auth/openid-return` custom scheme at all** (the
-   "Honest caveat" above) — if Valve rejects or mangles it, sign-in will
-   visibly fail to return to the app.
+1. **The WP D11 return path** (Steam refused the original
+   `steamvault://` return_to with "Invalid return protocol"; Steam now
+   returns to the vault page `/auth/steam/app-return`, which links on to
+   the app). Open checks:
+   - Does Steam accept a plain-`http` LAN realm/return_to
+     (`http://192.168.x.y:8080/`) after sign-in, not only an `https` one?
+   - Does the Custom Tab follow the page's `<meta http-equiv="refresh">`
+     into the app on its own, or is a tap on "Open SteamHangar" needed?
+     (Either is acceptable; record which.)
+   - Does Chrome's HTTPS-by-default upgrade, or its Local Network Access
+     restriction (a public `https://steamcommunity.com` page navigating to
+     a private-IP `http://` page), block or warn on the redirect from
+     Steam to the vault page?
 2. **Whether the Custom Tab correctly hands the redirect to
    `MainActivity.onNewIntent`** (manifest intent-filter matching,
    `launchMode="singleTask"` behaviour) — this is Android OS/Custom Tab
