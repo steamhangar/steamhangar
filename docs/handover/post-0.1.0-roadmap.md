@@ -399,7 +399,14 @@ event log (`VAULT_EVENT_LOG`, `$remote_addr` since WP 3.10), which
 `event_sweep.py` already aggregates per address into
 `client_cache_stats`; D15b builds on that and must check or document
 that `VAULT_EVENT_LOG` is set. D15a (`client=` on the stdout access log)
-is operator diagnostics only, not a D15b prerequisite. Includes
+is operator diagnostics only, not a D15b prerequisite. Measured on prod
+2026-10-13 22:36 (user, docker exec): `VAULT_EVENT_LOG` and
+`VAULT_EVENT_LOG_PATH` are both `/vault/logs/event.log`, so D15b needs no
+Antrag. The file is 41 MB and grows unrotated (vault-api cannot truncate
+it: nginx-owned 0644); at the default 64 MiB `VAULT_EVENT_LOG_MAX_BYTES`
+every sweep will log a WARNING. D15 must add real rotation (vault-core
+side) and longer client-stat retention (`VAULT_CLIENT_STATS_KEEP` default
+48 = about 4 h) for the history/graphs. Includes
 D13 SPEED-1: throughput measured once at the server (vault-core), shown
 per running job. Downloads history gets a time filter: 24 h, 7 days,
 30 days, all. Downloads header (user, 2026-10-13): current and average
