@@ -512,6 +512,13 @@ action there; dismissing shows a short notice that the suggestions now
 live under notifications. Today a dismiss is permanent per browser
 (`steamvault.decisionPanelDismissed`, no re-enable).
 
+**WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
+check buttons do not read as buttons (full-width text bar). Make "Check
+updates" a clearly visible primary button and give "Check & update all
+cached games" a distinct style (it downloads); side by side, not a full
+row. The web demo mode gets the update check, one flagged game and the
+"Updates" chip (UPD-2 left demo out; the Android demo has it).
+
 **Before v0.1.0 (ongoing):** release notes, user device checks,
 verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
 saves id), D7 measurement on `:443` (TLS cap TODO in WORKPACKAGES),
