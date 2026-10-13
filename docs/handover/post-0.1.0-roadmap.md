@@ -320,8 +320,15 @@ delete of a grouped game also deletes its packages' own depots when they
 would be orphaned, shared depots still kept (Q6, user variant); prefill
 unchanged until measured on prod (Q5 A). Flat list with `parent_appid`
 from the server, UIs group (Q2 A, orchestrator). Open: Q3 failed package
-on the card, Q7 tool packages, Q8 oracle for uncached apps, bulk-plan
-behaviour of grouped cards — after the prod check P1.
+on the card — after the prod check P1 step 1. P1 step 3 measured
+2026-10-13 (diag): the store GetItems answers 553850 but not the
+packages (success 15) nor 228980; the oracle names them (2506210 /
+2514120: type DLC, parent 553850, no own depots; 228980: type Tool), and
+HD2's own PICS lists all 15 packages (`extended.listofdlc`, depot
+`dlcappid`). User decisions 2026-10-13: Q8 B (no extra oracle requests,
+packages come from the cached parent's answer); Q7 A (dynamic tool
+classification for display only, the fixed list keeps stopping
+prefills).
 
 ## D10: COVER-CACHE-1, slow cover loading
 
