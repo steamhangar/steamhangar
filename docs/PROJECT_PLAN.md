@@ -972,7 +972,8 @@ available at any reasonable cost, and would be the less useful half anyway.
       header row" description for a materially different layout. Both of
       `docs/WORKPACKAGES.md`'s recorded WP 4c-web decisions are adopted
       verbatim, per that entry's instruction: the button wording rule
-      ("check & update", never bare "check") and pull-to-refresh staying
+      ("check & update", never bare "check"; superseded, see ADR-0006
+      addendum 2026-10-13) and pull-to-refresh staying
       passive-only (this screen has no pull-to-refresh gesture at all, so
       the rule is satisfied by omission). `warn` stays paused-only, pinned
       by an explicit
