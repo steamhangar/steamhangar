@@ -159,6 +159,9 @@ class LibraryScreenshotTest {
         composeRule.waitForIdle()
         simulateSystemBars()
         awaitStableFallbackTiles()
+        // Again right before the capture: the frames advanced while waiting
+        // for the tiles must not have replaced the simulated insets.
+        assertSystemBarsArrived()
 
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
     }
@@ -176,9 +179,15 @@ class LibraryScreenshotTest {
             ViewCompat.dispatchApplyWindowInsets(decor, insets)
         }
         composeRule.waitForIdle()
-        // The dispatch must actually reach Compose's WindowInsets, or every
-        // golden silently shows a phone without system bars (Robolectric
-        // re-dispatching its own empty insets would do exactly that).
+        assertSystemBarsArrived()
+    }
+
+    /**
+     * The dispatch must actually reach Compose's WindowInsets, or every
+     * golden silently shows a phone without system bars (Robolectric
+     * re-dispatching its own empty insets would do exactly that).
+     */
+    private fun assertSystemBarsArrived() {
         val density = composeRule.activity.resources.displayMetrics.density
         val expected = SystemBarsPx(
             top = (STATUS_BAR_DP * density).roundToInt(),
@@ -307,7 +316,10 @@ private class RegisterHostActivityRule : TestRule {
 }
 
 /** Coil loader that answers every request with an immediate error, so
- * `CoverArtImage` deterministically shows its offline fallback tile. */
+ * `CoverArtImage` deterministically shows its offline fallback tile.
+ * `awaitStableFallbackTiles` relies on Coil running this interceptor on
+ * the Main dispatcher (Robolectric's paused looper), so `waitForIdle`
+ * covers it; a loader with its own `interceptorDispatcher` would break that. */
 private object OfflineImageLoader {
     fun create(app: Application): ImageLoader = ImageLoader.Builder(app)
         .components {

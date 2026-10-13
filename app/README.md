@@ -4051,5 +4051,10 @@ at test time instead of adding `ui-test-manifest`, which would put an
 exported test activity into every debug APK.
 
 **What this WP did NOT do.** No D12 fix (the screenshots show the layout
-as it is), no goldens (they can only come from CI), no screenshots of other
-screens, no emulator or instrumented tests.
+as it is), no screenshots of other screens, no emulator or instrumented
+tests. The six goldens followed in WP APP-TEST-1b, recorded by CI on the
+then-current app code; they deliberately show the D12 bugs (chips wrap, no
+"Updates" chip, the empty area, the tall header), so D12's fix will turn
+them red first. `api/tests/test_app_test_1_screenshot_ci.py` fails when a
+`shoot("<name>")` has no `<name>.png` (or a golden has no shot), so a lost
+golden can no longer silently degrade a verify into a record.
