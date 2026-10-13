@@ -1183,6 +1183,8 @@ function gameSummary(g) {
     // WP API-FIX-5: additive on both game shapes. The demo has no server
     // lookup, so every demo game uses the legacy cover path.
     cover_url: null,
+    // WP D10: additive on both game shapes; the demo stores no covers.
+    cover_cached_url: null,
   };
 }
 
@@ -1207,6 +1209,7 @@ function gameDetail(g) {
     tool_app: false, // WP API-FIX-4 (see gameSummary's own comment)
     tool_app_name: null,
     cover_url: null, // WP API-FIX-5 (see gameSummary's own comment)
+    cover_cached_url: null, // WP D10 (see gameSummary's own comment)
   };
 }
 

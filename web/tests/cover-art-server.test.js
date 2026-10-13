@@ -112,12 +112,12 @@ const detailJs = readFileSync(path.join(here, "..", "js", "components", "game-de
 test("MUTATION TARGET -- the detail header passes the server cover_url into buildMiniCover", () => {
   assert.match(
     detailJs,
-    /buildMiniCover\(state\.appid,\s*state\.detail\?\.cover_url \?\? gameLike\?\.cover_url\)/,
+    /buildMiniCover\(\s*state\.appid,\s*state\.detail\?\.cover_url \?\? gameLike\?\.cover_url,/,
     "buildHeader no longer hands cover_url to buildMiniCover: new games' detail covers fall back to the 404 legacy path",
   );
   assert.match(
     detailJs,
-    /function buildMiniCover\(appid, coverUrl\) \{[\s\S]*?img\.src = coverArtUrl\(appid, coverUrl\);/,
-    "buildMiniCover no longer feeds coverUrl into coverArtUrl",
+    /function buildMiniCover\(appid, coverUrl, cachedUrl\) \{[\s\S]*?wireCoverFallback\(img, coverCandidates\(appid, coverUrl, cachedUrl\)/,
+    "buildMiniCover no longer feeds coverUrl into the cover candidates",
   );
 });

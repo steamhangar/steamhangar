@@ -66,6 +66,7 @@ fun GameCard(
         ) {
             CoverArtImage(
                 coverUrl = model.coverUrl,
+                cachedCoverUrl = model.cachedCoverUrl,
                 name = model.name,
                 fallbackHues = model.fallbackHues,
                 // WP API-FIX-4: a Steam tool app is shown muted, not hidden

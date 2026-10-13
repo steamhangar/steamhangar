@@ -39,6 +39,13 @@ data class GameSummary(
      * (`api/vault_api/cover_art.py`), null while unknown. Defaulted: older
      * servers send none. Checked again by `serverCoverUrl` before use. */
     val cover_url: String? = null,
+    /** WP D10 COVER-CACHE-1: the same cover as stored by vault-api, sent as
+     * the relative path `/v1/covers/{appid}/{signature}` (the signature is
+     * the credential, no X-Api-Key needed). [dev.steamvault.app.net.VaultApiClient]
+     * turns a valid path into an absolute URL on the vault's base URL and
+     * drops anything else, so after the client this is either that absolute
+     * URL or null. Defaulted: older servers send none. */
+    val cover_cached_url: String? = null,
     /** WP UPD-1: the manifest oracle says a newer build exists than the one
      * cached (only ever true for a game with cache bytes). Defaulted: a
      * server from before UPD-1 sends no flag, which reads as "no update
@@ -91,4 +98,6 @@ data class GameDetail(
     val tool_app_name: String? = null,
     /** See [GameSummary.cover_url] (WP API-FIX-5). */
     val cover_url: String? = null,
+    /** See [GameSummary.cover_cached_url] (WP D10). */
+    val cover_cached_url: String? = null,
 )

@@ -70,6 +70,44 @@ private fun fnv1a(n: Long): Long {
     return h and 0xFFFFFFFFL
 }
 
+/** `/v1/covers/{appid}/{32 lowercase hex}` (WP D10). */
+private val CACHED_COVER_PATH = Regex("/v1/covers/([1-9][0-9]{0,9})/[0-9a-f]{32}")
+
+/**
+ * A server-sent `cover_cached_url` if it is exactly the relative path
+ * vault-api serves stored covers under, for [appid]; else null (WP D10
+ * COVER-CACHE-1, twin of web `cachedCoverPath`).
+ */
+fun cachedCoverPath(appid: Int, value: String?): String? {
+    if (value == null) return null
+    val match = CACHED_COVER_PATH.matchEntire(value) ?: return null
+    return if (match.groupValues[1] == appid.toString()) value else null
+}
+
+/** An absolute vault cover URL (what `VaultApiClient` makes of a valid
+ * `cover_cached_url`): http(s), a host, then exactly the path for [appid];
+ * else null. `CoverArtImage` tries it before the CDN cover. */
+fun vaultCoverUrl(appid: Int, value: String?): String? {
+    if (value == null || value.length > MAX_COVER_URL_LENGTH) return null
+    if (value.any { it.code < 0x21 || it.code > 0x7e || it == '\\' || it == '#' || it == '?' || it == '@' }) return null
+    val rest = when {
+        value.startsWith("http://") -> value.removePrefix("http://")
+        value.startsWith("https://") -> value.removePrefix("https://")
+        else -> return null
+    }
+    val slash = rest.indexOf('/')
+    if (slash <= 0) return null
+    return if (cachedCoverPath(appid, rest.substring(slash)) != null) value else null
+}
+
+/**
+ * Cover URLs to try, best first, without duplicates (WP D10): vault-api's
+ * stored copy when there is one, then the CDN cover. `CoverArtImage` moves
+ * to the next one on a load error and shows the fallback tile after the last.
+ */
+fun coverCandidates(coverUrl: String, cachedCoverUrl: String?): List<String> =
+    listOfNotNull(cachedCoverUrl, coverUrl).distinct()
+
 data class FallbackHues(val h1: Int, val h2: Int)
 
 /** Two hues (0-359) for the fallback tile's gradient. Always the same pair
