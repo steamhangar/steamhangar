@@ -86,8 +86,8 @@
     </plurals>
     <string name="library_update_check_none_found">Update check finished: no updates found</string>
     <plurals name="library_update_check_none_found_partial">
-        <item quantity="one">Update check finished: %1$d game could not be checked, the others are up to date</item>
-        <item quantity="other">Update check finished: %1$d games could not be checked, the others are up to date</item>
+        <item quantity="one">Update check finished: %1$d game could not be checked, no updates found for the others</item>
+        <item quantity="other">Update check finished: %1$d games could not be checked, no updates found for the others</item>
     </plurals>
     <plurals name="library_update_check_with_unchecked">
         <item quantity="one">%1$s (%2$d game could not be checked)</item>
