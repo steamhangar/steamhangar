@@ -3203,6 +3203,26 @@ below carry their own later dates, item 12 is the current one).
       an ADR and the freeze opened; the `steamhangar://pair` URI gets a
       `v=2` with a code instead of a key.
 
+    - [ ] **D14 UPD-1..4 — always-on update check** (user decision
+      2026-10-13; details in `docs/handover/post-0.1.0-roadmap.md`).
+      - [x] **UPD-1 (API)** — vault-api checks cached games for updates
+        every `VAULT_SCHEDULE_INTERVAL_MINUTES` while a schedule window is
+        configured (open or closed; no window = manual checks only, the dev
+        instance), on a background runner (`update_check.py`, schema v19/v20
+        `update_check_state`); only an open window still enqueues the
+        download (the sweep is unchanged). `POST /v1/updates/check` starts
+        the same check in the background (`202`, no download),
+        `GET /v1/updates/status` reports it; `GET /v1/games` and
+        `/v1/games/{appid}` carry `update_available` + `update_checked_at`.
+        The manifest oracle is **on by default** (`VAULT_MANIFEST_ORACLE`
+        unset/empty = `steamcmd_api`, `off`/`none` opts out; user decision
+        2026-10-13), and vault-proxy allows the default oracle host
+        `api.steamcmd.net` by itself while it is on (Weg A); a private
+        mirror still needs `VAULT_EGRESS_ALLOW`. ADR addenda (ADR-0006,
+        ADR-0011) in UPD-4.
+      - [ ] UPD-2 (web badge, button, filter chip), UPD-3 (Android), UPD-4
+        (docs, ADR addendum superseding the 2026-08-18 "never bare Check" rule).
+
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
     user decision on 2026-10-02 (ADR-0016 addendum, ships in

@@ -1,4 +1,4 @@
-"""The opt-in manifest oracle (``vault_api/oracle.py``, WP 3.9).
+"""The manifest oracle (``vault_api/oracle.py``, WP 3.9).
 
 **No test in this file touches the network.** Every response is a *recorded
 fixture*: a synthetic document built by ``app_info`` below, modeled on the
@@ -193,43 +193,44 @@ def failing_fetcher(message: str = "boom"):
 
 
 # ==========================================================================
-# 1. Off by default (the pin the work package asks for explicitly)
+# 1. On by default since WP UPD-1 (user decision 2026-10-13, superseding
+#    ADR-0006 decision 4's "default off"); opt-out and the egress rule are
+#    pinned in tests/test_upd_1_oracle_egress.py
 # ==========================================================================
 
 
-def test_the_oracle_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ADR-0006 decision 4: "Default off". This is the test that dies if the
-    default in ``config.py`` is ever flipped — and with it the guarantee that
-    a fresh install makes no outbound third-party request at all."""
+def test_the_oracle_is_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test that dies if the operator-facing default in ``config.py`` is
+    flipped back: unset means the default oracle, ``off`` is the opt-out."""
     monkeypatch.setenv("VAULT_API_KEY", "k")
     monkeypatch.delenv("VAULT_MANIFEST_ORACLE", raising=False)
+    monkeypatch.delenv("VAULT_MANIFEST_ORACLE_URL", raising=False)
 
     settings = Settings.from_env()
-    assert settings.manifest_oracle == MANIFEST_ORACLE_OFF
-    assert settings.manifest_oracle_enabled is False
+    assert settings.manifest_oracle == MANIFEST_ORACLE_STEAMCMD_API
+    assert settings.manifest_oracle_enabled is True
+
+    monkeypatch.setenv("VAULT_MANIFEST_ORACLE", "off")
+    assert Settings.from_env().manifest_oracle == MANIFEST_ORACLE_OFF
     # A directly constructed Settings (every other test fixture in this suite)
-    # must default the same way, or the default would only hold for from_env.
+    # stays OFF on purpose: no code path that bypasses from_env may reach the
+    # network by accident (config.py, MANIFEST_ORACLE_OFF).
     assert Settings(
         vault_api_key="k", db_path=":memory:", cache_root="c", log_level="INFO"
     ).manifest_oracle_enabled is False
 
 
-def test_a_blank_oracle_value_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_blank_oracle_value_is_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VAULT_API_KEY", "k")
     monkeypatch.setenv("VAULT_MANIFEST_ORACLE", "   ")
-    assert Settings.from_env().manifest_oracle_enabled is False
+    assert Settings.from_env().manifest_oracle_enabled is True
 
 
 def test_the_oracle_can_be_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VAULT_API_KEY", "k")
     monkeypatch.setenv("VAULT_MANIFEST_ORACLE", "  STEAMCMD_API ")
-    # WP EG-1 (ADR-0011): from_env now refuses to boot with the oracle on and
-    # its host missing from VAULT_EGRESS_ALLOW (config.py's own startup
-    # check) -- api.steamcmd.net is the default oracle host this test's own
-    # VAULT_MANIFEST_ORACLE_URL default resolves to. See
-    # test_config_egress_lock.py for that check's own dedicated tests; this
-    # one is only about oracle-selector parsing and must keep passing
-    # unrelated to it.
+    # An allowlist entry for the default host is harmless (no longer needed
+    # since WP UPD-1, see tests/test_upd_1_oracle_egress.py).
     monkeypatch.setenv("VAULT_EGRESS_ALLOW", "api.steamcmd.net")
     settings = Settings.from_env()
     assert settings.manifest_oracle == MANIFEST_ORACLE_STEAMCMD_API

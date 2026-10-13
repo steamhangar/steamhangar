@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from vault_api import cover_art, depot_manifests, scheduler, settings_store, tool_apps
+from vault_api import cover_art, depot_manifests, oracle, scheduler, settings_store, tool_apps
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
@@ -229,6 +229,17 @@ class GameSummary(BaseModel):
     # cdn.akamai.steamstatic.com ever appear here (validated on write AND
     # on this read). UIs fall back to the legacy CDN path when it is null.
     cover_url: str | None = None
+    # WP UPD-1: an update is available -- the manifest oracle's current public
+    # manifest differs from the one vault-api recorded for this app's cache
+    # (``oracle.app_view``'s ``stale`` verdict). ``false`` is "no known update",
+    # NOT "up to date": it is also ``false`` when the oracle is off
+    # (``VAULT_MANIFEST_ORACLE=off``) or has never been asked about this app --
+    # ``update_checked_at`` (null in both cases) tells the two apart. Read from
+    # stored rows only; the list never makes a network request. The always-on
+    # check and ``POST /v1/updates/check`` keep the rows fresh.
+    update_available: bool = False
+    # When the oracle last answered for this app (UTC), null if never.
+    update_checked_at: str | None = None
 
 
 def _tool_app_fields(appid: int) -> dict[str, object]:
@@ -237,6 +248,25 @@ def _tool_app_fields(appid: int) -> dict[str, object]:
     if tool is None:
         return {"tool_app": False, "tool_app_name": None}
     return {"tool_app": True, "tool_app_name": tool.name}
+
+
+def _update_fields(
+    verdict: tuple[str, str | None] | None, size_bytes: int | None
+) -> dict[str, object]:
+    """``update_available`` / ``update_checked_at`` from a stored oracle verdict
+    (``None`` = the oracle never answered for this app).
+
+    An update is only offered for a game that currently has bytes in the cache:
+    ``depot_manifests`` rows survive ``DELETE /v1/cache/{appid}``, so a deleted
+    game would otherwise keep a "stale" verdict for a cache that is gone.
+    """
+    if verdict is None:
+        return {"update_available": False, "update_checked_at": None}
+    return {
+        "update_available": verdict[0] == oracle.VERDICT_STALE
+        and bool(size_bytes),
+        "update_checked_at": verdict[1],
+    }
 
 
 class DepotEntry(BaseModel):
@@ -275,6 +305,9 @@ class GameDetail(BaseModel):
     tool_app_name: str | None = None
     # See GameSummary.cover_url (WP API-FIX-5).
     cover_url: str | None = None
+    # See GameSummary.update_available / .update_checked_at (WP UPD-1).
+    update_available: bool = False
+    update_checked_at: str | None = None
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -319,6 +352,8 @@ def list_games(
         installed_on = _installed_on_by_appid(conn, base_settings, now)
         # WP API-FIX-5: one query for every stored cover, re-validated.
         covers = cover_art.cover_urls_by_appid(conn)
+        # WP UPD-1: stored oracle verdicts, three statements for the whole list.
+        update_verdicts = oracle.verdicts_by_app(conn, settings=base_settings)
 
     app_depotids: dict[int, list[int]] = {}
     for row in depot_rows:
@@ -330,6 +365,7 @@ def list_games(
     games = []
     for row in rows:
         frequency = frequencies.get(row["appid"], no_manifest_data)
+        size_bytes = app_size_bytes(app_depotids.get(row["appid"], []), depot_bytes)
         games.append(
             GameSummary(
                 appid=row["appid"],
@@ -338,7 +374,7 @@ def list_games(
                 last_prefill_at=row["last_prefill_at"],
                 last_manifest_check=row["last_manifest_check"],
                 depot_count=row["depot_count"],
-                size_bytes=app_size_bytes(app_depotids.get(row["appid"], []), depot_bytes),
+                size_bytes=size_bytes,
                 needs_force=bool(row["needs_force"]),
                 manifest_change_frequency=frequency.category,
                 manifest_observation_days=frequency.observation_days,
@@ -346,6 +382,7 @@ def list_games(
                 installed_on=installed_on.get(row["appid"], []),
                 **_tool_app_fields(row["appid"]),
                 cover_url=covers.get(row["appid"]),
+                **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
             )
         )
     return games
@@ -400,6 +437,7 @@ def get_game(
         frequency = depot_manifests.change_frequency_for_app(conn, appid)
         installed_on = _installed_on_for_appid(conn, base_settings, now, appid)
         cover_url = cover_art.cover_url_for_appid(conn, appid)
+        update_view = oracle.app_view(conn, appid, settings=base_settings)
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
@@ -412,6 +450,7 @@ def get_game(
         for row in depot_rows
     ]
 
+    detail_size = app_size_bytes([row["depotid"] for row in depot_rows], depot_bytes)
     return GameDetail(
         appid=app_row["appid"],
         name=app_row["name"],
@@ -419,7 +458,7 @@ def get_game(
         last_prefill_at=app_row["last_prefill_at"],
         last_manifest_check=app_row["last_manifest_check"],
         depots=depots,
-        size_bytes=app_size_bytes([row["depotid"] for row in depot_rows], depot_bytes),
+        size_bytes=detail_size,
         needs_force=bool(app_row["needs_force"]),
         manifest_change_frequency=frequency.category,
         manifest_observation_days=frequency.observation_days,
@@ -427,4 +466,8 @@ def get_game(
         installed_on=installed_on,
         **_tool_app_fields(app_row["appid"]),
         cover_url=cover_url,
+        **_update_fields(
+            (update_view.verdict, update_view.checked_at) if update_view.known else None,
+            detail_size,
+        ),
     )

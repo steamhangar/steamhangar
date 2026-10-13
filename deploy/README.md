@@ -851,9 +851,11 @@ Four Phase-3 settings, documented in full in `.env.example`:
 | `VAULT_GC_GRACE_DAYS`   | no       | `14`         | vault-api: days a freshly stored chunk is protected from garbage collection purely by its own store time (protects beta-branch/demo content GC cannot otherwise see); `0` disables the window. See `api/README.md` "The recently-stored grace window" |
 | `VAULT_AUTO_GC`         | no       | `execute` (**since WP SWEEP-1, 2026-08-22 — was `off` through WP 3.12**) | vault-api: `off` \| `dry-run` \| `execute` — automatically queue a GC job after a prefill that actually updated something. See `api/README.md` "Auto-GC" |
 
-A fifth, `VAULT_MANIFEST_ORACLE` (WP 3.9), stays off by default and is
-**not** in this table on purpose — see `.env.example`'s privacy note before
-touching it: enabling it sends outbound queries to a third party.
+A fifth, `VAULT_MANIFEST_ORACLE` (WP 3.9), is **on by default since WP
+UPD-1** (unset or empty = `steamcmd_api`, `off` to opt out) and is **not** in
+this table on purpose — see `.env.example`'s privacy and upgrade notes: while
+it is on, vault-api asks `api.steamcmd.net` about every cached game in the
+background, and vault-proxy allows that one host by itself.
 
 **A sixth, newly forwarded here by WP SWEEP-1: `VAULT_SWEEP_INCLUDE_CACHED`
 (WP 4d) now also passes through, defaulting to `true`, paired with
@@ -1486,11 +1488,14 @@ worth knowing about before assuming the lock means more than it does.
 
 Two real cases, both documented in `deploy/.env.example`:
 
-- **The manifest oracle** (`VAULT_MANIFEST_ORACLE`). Turn it on without
-  adding its host here and `vault-api` **refuses to boot**, naming the
-  missing host — this is deliberate; the alternative is a silent, permanent
-  filtered-403 on every oracle query with nothing pointing back at the
-  cause.
+- **A private manifest-oracle mirror** (`VAULT_MANIFEST_ORACLE_URL`). The
+  default oracle host `api.steamcmd.net` needs **no** entry: while
+  `VAULT_MANIFEST_ORACLE` is on (the default since WP UPD-1) and the URL
+  is `https://` to it, `vault-proxy` allows that one host by itself. Point the URL
+  at any other host without adding that host here and `vault-api`
+  **refuses to boot**, naming the missing host — this is deliberate; the
+  alternative is a silent, permanent filtered-403 on every oracle query
+  with nothing pointing back at the cause.
 - **Webhooks** (`VAULT_WEBHOOK_URL`, set via `PATCH /v1/settings`). If your
   webhook stops firing after upgrading to this version, **that is the lock
   working, not a bug** — add the receiver's host to `VAULT_EGRESS_ALLOW`
@@ -1677,10 +1682,11 @@ compose.override.yaml up -d` applies it.
 **One thing this override does NOT remove (round-2 review S3):**
 `vault_api/config.py`'s manifest-oracle startup check is unconditional —
 it fires regardless of whether the network lock is actually in effect.
-With the lock removed this way, turning `VAULT_MANIFEST_ORACLE` on
-without also setting `VAULT_EGRESS_ALLOW` still refuses to boot, even
-though there is no proxy left to filter anything. Set
-`VAULT_EGRESS_ALLOW` to the oracle's host regardless of whether you kept
+With the lock removed this way, pointing `VAULT_MANIFEST_ORACLE_URL` at a
+private mirror without also listing its host in `VAULT_EGRESS_ALLOW` still
+refuses to boot, even though there is no proxy left to filter anything
+(the default host `api.steamcmd.net` needs no entry). Set
+`VAULT_EGRESS_ALLOW` to the mirror's host regardless of whether you kept
 the lock — see api/README.md's "Egress lock" section for why this check
 does not (and cannot cheaply) know the difference.
 

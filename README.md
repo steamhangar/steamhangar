@@ -389,12 +389,13 @@ minimal — only the changed chunks) fetch when it isn't; by default, that
 sweep widens to include cached-but-not-installed games too — a game with
 nobody currently reporting it installed still gets kept current
 ([ADR-0014](docs/adr/0014-sweep-cached-and-auto-gc-default-on.md), an
-operator can opt back out). Between sweeps, an optional, opt-in third-party
-manifest oracle (`VAULT_MANIFEST_ORACLE`, off by default) already ships as
-a backend feature that can answer "is this stale right now" without
-waiting for the next sweep — but neither frontend renders its answer as a
-badge yet, so today that's a capability you can query over the API, not
-something you'll see on screen. Garbage collection (**GC**: clearing out
+operator can opt back out). Between sweeps, a third-party manifest oracle
+(`VAULT_MANIFEST_ORACLE`, **on by default** since 2026-10-13, `off` to opt
+out) checks every cached game for updates in the background, independent of
+the schedule window, by sending its app id to `api.steamcmd.net` (metadata
+only, no download); `GET /v1/games` carries the resulting
+`update_available` flag — the web and Android badges for it are the next
+packages. Garbage collection (**GC**: clearing out
 the chunks a game update leaves behind that no cached version of the game
 needs any more) reclaims that orphaned space via
 `POST /v1/cache/{appid}/gc`, diffing cached chunks against the current

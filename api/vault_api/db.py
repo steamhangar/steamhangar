@@ -80,7 +80,7 @@ import sqlite3
 #: address is unknown can never be ``bypass_suspected`` (see
 #: ``routers/clients.py``).
 #: v10 (WP 3.9): added ``oracle_app_state`` and ``oracle_branch_manifests`` —
-#: the opt-in third-party manifest oracle's own storage (ADR-0006 decision 4).
+#: the third-party manifest oracle's own storage (ADR-0006 decision 4).
 #: **Two new tables, deliberately separate from ``depot_manifests``**: that
 #: table is vault-api's first-hand record of manifests it parsed itself, and a
 #: third-party claim must never be indistinguishable from it (see
@@ -190,7 +190,17 @@ import sqlite3
 #: about: the validated cover URL (or NULL), the outcome, consecutive failed
 #: attempts and when to ask again. A brand-new table, so -- like v6/v9/v13/v16
 #: -- it needs no ``ALTER`` step; ``apps`` itself is untouched.
-SCHEMA_VERSION = 18
+#: v19 (WP UPD-1): added ``update_check_state`` -- the single-row bookkeeping
+#: of the always-on update check (``vault_api/update_check.py``): when the
+#: last scheduled check was claimed and what it found. A brand-new table, so
+#: it needs no ``ALTER`` step.
+#: v20 (WP UPD-1 review round): ``update_check_state`` gained
+#: ``last_check_trigger``, ``last_check_finished_at`` and
+#: ``last_check_outcome`` (the check now runs in the background and both
+#: triggers are recorded, read by ``GET /v1/updates/status``). A v18 database
+#: gets the full table from ``_DDL``; a v19 one gets the three columns from the
+#: per-column-guarded ``_add_missing_update_check_columns`` step.
+SCHEMA_VERSION = 20
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -562,7 +572,7 @@ CREATE TABLE IF NOT EXISTS client_bypass_state (
     updated_at       TEXT NOT NULL
 );
 
--- WP 3.9 / ADR-0006 decision 4: the opt-in third-party manifest oracle's own
+-- WP 3.9 / ADR-0006 decision 4: the third-party manifest oracle's own
 -- storage. THIRD-PARTY CLAIMS LIVE HERE AND NOWHERE ELSE -- nothing in
 -- vault_api/oracle.py writes to depot_manifests, which stays vault-api's
 -- first-hand record of manifests it parsed itself. Every row additionally
@@ -672,6 +682,27 @@ CREATE TABLE IF NOT EXISTS app_cover_art (
 
 CREATE INDEX IF NOT EXISTS idx_app_cover_art_next_check
     ON app_cover_art (next_check_at);
+
+-- WP UPD-1: bookkeeping of the always-on update check. Single row, the same
+-- CHECK(id = 1) device and claim-then-work rule as schedule_state, but a
+-- SEPARATE row on purpose: the check runs whether the window is open or
+-- closed (and on manual demand), so it must not share (and consume) the
+-- prefill sweep's interval.
+-- last_check_at is a UTC 'YYYY-MM-DDTHH:MM:SSZ' string stamped when a check
+-- (scheduled or manual, see last_check_trigger) is CLAIMED; the counters,
+-- last_check_finished_at and last_check_outcome are NULL while a check is in
+-- flight (or the process died in one) and filled in when it finishes. v20
+-- added the trigger, finish and outcome columns (ALTER step for v19).
+CREATE TABLE IF NOT EXISTS update_check_state (
+    id                      INTEGER PRIMARY KEY CHECK (id = 1),
+    last_check_at           TEXT,
+    last_check_apps         INTEGER,
+    last_check_ok           INTEGER,
+    last_check_stale        INTEGER,
+    last_check_trigger      TEXT,
+    last_check_finished_at  TEXT,
+    last_check_outcome      TEXT
+);
 
 CREATE TABLE IF NOT EXISTS runner_presence (
     runner_id            TEXT PRIMARY KEY,
@@ -795,6 +826,13 @@ def init_db(db_path: str) -> None:
         # no-op against it.
         if row is not None and row["version"] < 14:
             _add_missing_depot_manifest_columns(conn)
+
+        # v20 (WP UPD-1 review round): a v19 `update_check_state` lacks the
+        # three run-status columns. Older databases have no such table yet
+        # and get the full one from _DDL below (the step skips a missing
+        # table).
+        if row is not None and row["version"] < 20:
+            _add_missing_update_check_columns(conn)
 
         conn.executescript(_DDL)
 
@@ -953,6 +991,34 @@ def _add_missing_depot_manifest_columns(conn: sqlite3.Connection) -> None:
         "UPDATE depot_manifests SET manifest_changed_at = recorded_at "
         "WHERE manifest_changed_at IS NULL"
     )
+
+
+#: The ``update_check_state`` columns added in v20.
+_V20_UPDATE_CHECK_COLUMNS = (
+    ("last_check_trigger", "TEXT"),
+    ("last_check_finished_at", "TEXT"),
+    ("last_check_outcome", "TEXT"),
+)
+
+
+def _add_missing_update_check_columns(conn: sqlite3.Connection) -> None:
+    """v19->v20 migration step for ``update_check_state``.
+
+    Guarded per column via ``PRAGMA table_info`` (re-running ``init_db`` never
+    raises ``duplicate column name``). A database older than v19 has no such
+    table, ``PRAGMA table_info`` returns nothing and the step does nothing;
+    ``_DDL`` then creates the complete table.
+    """
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(update_check_state)")
+    }
+    if not existing:
+        return
+    for column, column_type in _V20_UPDATE_CHECK_COLUMNS:
+        if column not in existing:
+            conn.execute(
+                f"ALTER TABLE update_check_state ADD COLUMN {column} {column_type}"
+            )
 
 
 def _add_missing_app_columns(conn: sqlite3.Connection) -> None:

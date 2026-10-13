@@ -114,7 +114,9 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     "VAULT_BYPASS_WINDOW_DAYS": str(config.DEFAULT_BYPASS_WINDOW_DAYS),
     "VAULT_CLIENT_STATS_KEEP": str(config.DEFAULT_CLIENT_STATS_KEEP),
     "VAULT_EVENT_LOG_MAX_BYTES": str(config.DEFAULT_EVENT_LOG_MAX_BYTES),
-    "VAULT_MANIFEST_ORACLE": config.MANIFEST_ORACLE_OFF,  # "" -- off by default, no DEFAULT_MANIFEST_ORACLE constant
+    # WP UPD-1: rendered EMPTY, and empty means config.DEFAULT_MANIFEST_ORACLE
+    # (on) -- pinned by test_an_empty_oracle_value_from_compose_means_on.
+    "VAULT_MANIFEST_ORACLE": "",
     "VAULT_MANIFEST_ORACLE_URL": config.DEFAULT_MANIFEST_ORACLE_URL,
     "VAULT_MANIFEST_ORACLE_TIMEOUT": str(config.DEFAULT_MANIFEST_ORACLE_TIMEOUT),
     "VAULT_WEBHOOK_TIMEOUT_SECONDS": str(config.DEFAULT_WEBHOOK_TIMEOUT_SECONDS),
@@ -214,6 +216,11 @@ EXPECTED_DEFAULTS_VAULT_RUNNER: dict[str, str] = {
 # cross-references against VAULT_MANIFEST_ORACLE.
 EXPECTED_DEFAULTS_VAULT_PROXY: dict[str, str] = {
     "VAULT_EGRESS_ALLOW": "",
+    # WP UPD-1 (Weg A): the oracle switch and URL, same defaults as
+    # vault-api's copies; the entrypoint allows the default oracle host while
+    # the oracle is on (tests/test_upd_1_oracle_egress.py).
+    "VAULT_MANIFEST_ORACLE": "",
+    "VAULT_MANIFEST_ORACLE_URL": config.DEFAULT_MANIFEST_ORACLE_URL,
     # WP DEPLOY-FIX-2 (ADR-0011 addendum 2026-10-01): the vault-egress subnet,
     # same expression as the top-level network's ipam config; the entrypoint
     # renders tinyproxy's client Allow line from it. Literal, not a config.py

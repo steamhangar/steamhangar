@@ -124,14 +124,28 @@ def test_egress_allow_accepts_a_realistic_multi_label_hostname(
 # ==========================================================================
 
 
-def test_oracle_on_with_host_missing_from_allowlist_refuses_to_boot(
+def test_oracle_on_with_a_mirror_missing_from_allowlist_refuses_to_boot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Since WP UPD-1 only the DEFAULT oracle host is allowed automatically
+    (tests/test_upd_1_oracle_egress.py); any other host the URL names still
+    needs an allowlist entry, or vault-api refuses to boot."""
+    monkeypatch.setenv("VAULT_API_KEY", "k")
+    monkeypatch.setenv("VAULT_MANIFEST_ORACLE", "steamcmd_api")
+    monkeypatch.setenv("VAULT_MANIFEST_ORACLE_URL", "https://mirror.example.net/v1/info")
+    monkeypatch.delenv("VAULT_EGRESS_ALLOW", raising=False)
+    with pytest.raises(RuntimeError, match="VAULT_EGRESS_ALLOW"):
+        Settings.from_env()
+
+
+def test_oracle_on_with_the_default_host_boots_without_an_allowlist_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VAULT_API_KEY", "k")
     monkeypatch.setenv("VAULT_MANIFEST_ORACLE", "steamcmd_api")
+    monkeypatch.delenv("VAULT_MANIFEST_ORACLE_URL", raising=False)
     monkeypatch.delenv("VAULT_EGRESS_ALLOW", raising=False)
-    with pytest.raises(RuntimeError, match="VAULT_EGRESS_ALLOW"):
-        Settings.from_env()
+    assert Settings.from_env().manifest_oracle_enabled is True
 
 
 def test_oracle_on_with_host_present_in_allowlist_boots_clean(
@@ -153,7 +167,8 @@ def test_oracle_off_ignores_the_allowlist_entirely_for_this_check(
     VAULT_EGRESS_ALLOW does or does not contain.
     """
     monkeypatch.setenv("VAULT_API_KEY", "k")
-    monkeypatch.delenv("VAULT_MANIFEST_ORACLE", raising=False)
+    monkeypatch.setenv("VAULT_MANIFEST_ORACLE", "off")
+    monkeypatch.setenv("VAULT_MANIFEST_ORACLE_URL", "https://mirror.example.net/v1/info")
     monkeypatch.delenv("VAULT_EGRESS_ALLOW", raising=False)
     settings = Settings.from_env()
     assert settings.manifest_oracle_enabled is False
@@ -200,8 +215,9 @@ def test_oracle_check_error_message_names_the_actual_missing_host(
     """
     monkeypatch.setenv("VAULT_API_KEY", "k")
     monkeypatch.setenv("VAULT_MANIFEST_ORACLE", "steamcmd_api")
+    monkeypatch.setenv("VAULT_MANIFEST_ORACLE_URL", "https://mirror.example.net/v1/info")
     monkeypatch.delenv("VAULT_EGRESS_ALLOW", raising=False)
-    with pytest.raises(RuntimeError, match="api.steamcmd.net"):
+    with pytest.raises(RuntimeError, match="mirror.example.net"):
         Settings.from_env()
 
 

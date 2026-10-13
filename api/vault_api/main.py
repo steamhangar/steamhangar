@@ -39,8 +39,10 @@ from vault_api.routers import (
     settings as settings_router,
     stats,
     steam,
+    updates,
 )
 from vault_api.scheduler import PrefillScheduler
+from vault_api.update_check import UpdateCheckRunner
 from vault_api.sizes import SizeCache
 from vault_api.steam_relay import RelayCache
 from vault_api.webhooks import WebhookNotifier, redact_url
@@ -192,7 +194,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         cover_refresher.stop()
-        scheduler.stop()
+        scheduler.stop()  # also stops the shared update-check runner
         worker.stop()
         # WP 3.13: stopped LAST — a job or sweep finalized microseconds before
         # shutdown may have just enqueued an event, and this gives the
@@ -303,8 +305,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # TestClient()), and a test that wants a deterministic clock can replace
     # app.state.scheduler before entering the lifespan, which then starts the
     # replacement. Constructing it starts no thread.
+    # WP UPD-1: ONE update-check runner, shared by the scheduler tick and
+    # POST /v1/updates/check so the two triggers can never overlap.
+    # Constructing it starts no thread; each run starts its own.
+    app.state.update_checker = UpdateCheckRunner(settings.db_path)
     app.state.scheduler = PrefillScheduler(
-        settings, webhook_notifier=app.state.webhook_notifier
+        settings,
+        webhook_notifier=app.state.webhook_notifier,
+        update_checker=app.state.update_checker,
     )
     # WP API-FIX-5: same reasoning -- constructing it starts no thread; the
     # lifespan starts it, and a test can replace it before that.
@@ -324,11 +332,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # WP VER-2: component versions and status, behind the key like settings.
     app.include_router(about.router)
     app.include_router(stats.router)
-    # WP 3.9. Always mounted, even with VAULT_MANIFEST_ORACLE unset: the routes
+    # WP 3.9. Always mounted, even with VAULT_MANIFEST_ORACLE=off: the routes
     # answer "enabled: false" rather than 404 in that case, so a client can
     # tell "this vault-api is too old to have an oracle" from "this operator
     # chose not to enable it" — which are different things to show a user.
     app.include_router(oracle.router)
+    # WP UPD-1: bulk update check (oracle refresh for cached games, no download).
+    app.include_router(updates.router)
     # WP 4a.6r. Always mounted, even with no key configured: the relay routes
     # answer 409 in that state rather than 404, so a web UI can tell "this
     # vault-api is too old to have the relay" from "this operator hasn't set

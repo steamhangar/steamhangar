@@ -117,9 +117,11 @@ from vault_api import (
     deletion,
     event_sweep,
     jobs,
+    oracle,
     settings_store,
     sizes,
     tool_apps,
+    update_check,
     webhooks,
 )
 from vault_api.config import Settings
@@ -521,6 +523,15 @@ def cached_appids(conn: sqlite3.Connection, cache_root: str) -> set[int]:
     if not depot_bytes:  # empty/missing cache — no error, just nothing found
         return set()
     return deletion.appids_with_cache_content(conn, depot_bytes)
+
+
+def update_check_appids(conn: sqlite3.Connection, cache_root: str) -> list[int]:
+    """The apps the always-on update check looks at (WP UPD-1): exactly the
+    cached ones — ``cached_appids``, the sweep's own definition, minus Steam
+    tool packages (never prefilled, so never "updated" on their own). Not the
+    whole library, not the installed-on-clients set."""
+    ordinary, _tools = tool_apps.split_tool_apps(cached_appids(conn, cache_root))
+    return sorted(ordinary)
 
 
 def compute_targets(
@@ -1046,8 +1057,27 @@ class PrefillScheduler:
         clock: Clock = local_now,
         tick_seconds: float = DEFAULT_TICK_SECONDS,
         webhook_notifier: "webhooks.WebhookNotifier | None" = None,
+        update_checker: "update_check.UpdateCheckRunner | None" = None,
+        oracle_fetch: "oracle.Fetcher | None" = None,
+        update_check_pause_seconds: float | None = None,
     ) -> None:
         self._settings = settings
+        #: WP UPD-1: the background runner of the always-on update check.
+        #: ``main.create_app`` passes the instance it also gives
+        #: ``POST /v1/updates/check`` (one run at a time across both
+        #: triggers); without one (tests) the scheduler builds its own.
+        #: ``oracle_fetch`` is only used for that own runner: ``None``
+        #: (production) means the configured HTTP fetcher, tests pass a fake
+        #: so nothing ever touches the network.
+        self._update_checker = update_checker or update_check.UpdateCheckRunner(
+            settings.db_path,
+            fetch=oracle_fetch,
+            pause_seconds=update_check_pause_seconds,
+        )
+        #: The last "Update check: ..." line logged (first tick, then again
+        #: only when it changes). Mutated only from ``_tick`` (same as
+        #: ``_logged_resolved_schedule``).
+        self._logged_update_check: str | None = None
         self._clock = clock
         self._tick_seconds = tick_seconds
         #: WP 3.13: threaded through to event_sweep.maybe_sweep's persist step
@@ -1147,8 +1177,14 @@ class PrefillScheduler:
         self._thread.start()
 
     def stop(self, timeout: float = SHUTDOWN_JOIN_TIMEOUT_SECONDS) -> None:
-        """Signal and join. A no-op when the scheduler was never started."""
+        """Signal and join. A no-op when the scheduler was never started.
+
+        Also stops the update-check runner (WP UPD-1): a check in flight stops
+        between two apps. Harmless when ``main``'s lifespan stops the shared
+        runner as well.
+        """
         self._stop.set()
+        self._update_checker.stop()
         thread = self._thread
         if thread is None:
             return
@@ -1278,4 +1314,39 @@ class PrefillScheduler:
                 "apps it did not reach are picked up then (the target set is "
                 "recomputed from scratch, never resumed).",
                 self._tick_seconds,
+            )
+
+        # WP UPD-1: the always-on update check. Runs while a schedule window
+        # is CONFIGURED (open or closed does not matter; no window = no
+        # scheduled check, review round 2) and is independent of the prefill
+        # sweep above: it only
+        # refreshes the manifest oracle for cached games, once per interval,
+        # and starts no download. This tick only DECIDES (an interval read,
+        # and on the rare due tick a claim): the cached-app selection and
+        # every oracle request run on the runner's own thread, so the next
+        # tick's event and prefill sweeps are never delayed by them. Last
+        # and in its own try, so a failure here cannot affect either sweep.
+        try:
+            described = update_check.describe_update_check(effective)
+            if described != self._logged_update_check:
+                logger.info("%s", described)
+                self._logged_update_check = described
+            cache_root = effective.cache_root
+            started = self._update_checker.start(
+                conn,
+                effective,
+                trigger=update_check.TRIGGER_SCHEDULED,
+                select_appids=lambda run_conn: update_check_appids(run_conn, cache_root),
+                now=now,
+                require_interval=True,
+            )
+            if started == update_check.ALREADY_RUNNING:
+                logger.info(
+                    "update check (scheduled): skipped, a check is already "
+                    "running; nothing recorded, retried next tick."
+                )
+        except Exception:
+            logger.exception(
+                "Could not start the scheduled update check (WP UPD-1). The "
+                "thread survives and retries next tick."
             )

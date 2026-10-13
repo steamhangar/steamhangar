@@ -859,11 +859,16 @@ that vault-api makes on every install with no switch:**
    `vault-api`'s own container through `vault-proxy`, over `HTTP_PROXY`/
    `HTTPS_PROXY` — it is proxy-gated, just permanently allowed rather than
    conditionally.
-2. **The optional manifest oracle.** `VAULT_MANIFEST_ORACLE` is off by
-   default (`api/vault_api/config.py::MANIFEST_ORACLE_OFF`, whose comment
-   calls it "**the default**"); when an
-   operator turns it on, `vault-api` sends the Steam **app ids** it tracks
-   to a third party over HTTPS — default `api.steamcmd.net`
+2. **The manifest oracle (on by default since WP UPD-1).**
+   `VAULT_MANIFEST_ORACLE` unset or empty means `steamcmd_api`
+   (`api/vault_api/config.py::DEFAULT_MANIFEST_ORACLE`, user decision
+   2026-10-13, superseding ADR-0006 decision 4's "default off"); `off` or
+   `none` turns it off. While it is on, `vault-api` sends the Steam
+   **app id of every cached game** to a third party over HTTPS, in the
+   background every `VAULT_SCHEDULE_INTERVAL_MINUTES` (the update check;
+   it runs when a schedule window is configured, open or closed, and not at
+   all without one) and on every manual check —
+   default `api.steamcmd.net`
    (`api/vault_api/oracle.py`'s module docstring, its "Privacy" section:
    "this is the one thing in SteamHangar
    that leaves the LAN… carrying the Steam app id it is asking about — i.e.
@@ -883,13 +888,22 @@ that vault-api makes on every install with no switch:**
    `VAULT_MANIFEST_ORACLE_URL` — cited
    here as a worked example of why this category of claim ("set this env
    var for privacy") must be re-verified against `compose.yaml` on every
-   read, not trusted from a comment. **Enforcement (WP EG-1):** proxy-gated
-   via `VAULT_EGRESS_ALLOW`, and — unlike item 1 above — genuinely
-   conditional: `vault_api/config.py`'s own startup check refuses to boot
-   if this oracle is turned on with its configured host (the default
-   `api.steamcmd.net`, or an operator's own private mirror) missing from
-   that allowlist, rather than booting clean and failing every query
-   forever with a filtered-403 and no obvious cause (ADR-0011 §3).
+   read, not trusted from a comment. **Enforcement (WP EG-1, narrowed by
+   WP UPD-1):** proxy-gated and conditional on the oracle switch. **Egress
+   exception:** while the oracle is on and `VAULT_MANIFEST_ORACLE_URL` is
+   `https://` to the default host, `vault-proxy` allows exactly
+   `api.steamcmd.net` by itself, with no `VAULT_EGRESS_ALLOW` entry
+   (`deploy/proxy/docker-entrypoint.sh`; `vault-proxy` receives
+   `VAULT_MANIFEST_ORACLE`/`VAULT_MANIFEST_ORACLE_URL` from
+   `deploy/compose.yaml`). The URL is only compared with that constant,
+   never rendered into the filter, so it cannot open any other host; with
+   the oracle `off` the host is not allowed at all. Plain `http://` to the
+   same host, or any other oracle host (an operator's private mirror),
+   still needs a `VAULT_EGRESS_ALLOW` entry,
+   and `vault_api/config.py`'s startup check refuses to boot without it,
+   rather than booting clean and failing every query forever with a
+   filtered-403 and no obvious cause (ADR-0011 §3). The two sides are
+   pinned against each other by `api/tests/test_upd_1_oracle_egress.py`.
 3. **Cover art.** The web UI's Content-Security-Policy allows exactly two
    external image hosts: `img-src 'self' data: https://cdn.akamai.
    steamstatic.com https://shared.akamai.steamstatic.com`

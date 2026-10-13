@@ -128,12 +128,19 @@ MIN_MANIFEST_KEEP = 1
 #: is deleted.
 DEFAULT_GC_GRACE_DAYS = 14
 
-#: ``VAULT_MANIFEST_ORACLE`` value meaning "no oracle" — **the default**
-#: (WP 3.9, ADR-0006 decision 4: "Default off; unaffiliated with Valve").
-#: With this value vault-api makes no outbound third-party request at all,
-#: which is the only posture a fresh install may have: enabling the oracle
-#: sends this vault's app ids to a service outside the LAN (see
-#: ``vault_api/oracle.py``'s privacy section and api/README.md).
+#: The internal ``Settings.manifest_oracle`` value meaning "no oracle". With it
+#: vault-api makes no oracle request at all. Operators select it with
+#: ``VAULT_MANIFEST_ORACLE=off`` (or ``none``), see ``MANIFEST_ORACLE_OFF_VALUES``.
+#:
+#: It is NOT the operator-facing default any more: since WP UPD-1 (user
+#: decision 2026-10-13, superseding ADR-0006 decision 4's "default off") an
+#: unset or empty ``VAULT_MANIFEST_ORACLE`` resolves to
+#: ``DEFAULT_MANIFEST_ORACLE`` (on), because the always-on update check needs
+#: the oracle. It stays the default of a directly constructed ``Settings``
+#: (tests, tools) on purpose, so no code path that bypasses ``from_env`` can
+#: reach the network by accident. Enabling the oracle sends this vault's
+#: cached app ids to a service outside the LAN (``vault_api/oracle.py``'s
+#: privacy section and api/README.md).
 MANIFEST_ORACLE_OFF = ""
 
 #: The one implemented oracle: ``api.steamcmd.net``'s public mirror of Steam's
@@ -141,12 +148,21 @@ MANIFEST_ORACLE_OFF = ""
 #: row it produces (``oracle.SOURCE_STEAMCMD_API``).
 MANIFEST_ORACLE_STEAMCMD_API = "steamcmd_api"
 
-#: Everything ``VAULT_MANIFEST_ORACLE`` may be set to. An unrecognised value
-#: is refused at STARTUP rather than silently treated as "off": "off" is what
-#: the operator gets by leaving the variable alone, so a non-empty value is an
-#: explicit request for a feature — and a typo in it must not look like it
+#: What an unset or empty ``VAULT_MANIFEST_ORACLE`` means (WP UPD-1): on.
+#: ``deploy/compose.yaml`` forwards ``${VAULT_MANIFEST_ORACLE:-}``, so an unset
+#: .env arrives here as an EMPTY string and must mean this default too.
+DEFAULT_MANIFEST_ORACLE = MANIFEST_ORACLE_STEAMCMD_API
+
+#: The explicit opt-out spellings of ``VAULT_MANIFEST_ORACLE`` (trimmed,
+#: case-insensitive). ``deploy/proxy/docker-entrypoint.sh`` uses the same
+#: grammar to decide whether to allow the oracle's host.
+MANIFEST_ORACLE_OFF_VALUES = ("off", "none")
+
+#: Everything ``VAULT_MANIFEST_ORACLE`` may name besides an opt-out value or
+#: empty. An unrecognised value is refused at STARTUP rather than silently
+#: treated as "off" or as the default: a typo in it must not look like it
 #: worked (the misconfiguration is loud, the oracle's own failures stay soft).
-SUPPORTED_MANIFEST_ORACLES = (MANIFEST_ORACLE_OFF, MANIFEST_ORACLE_STEAMCMD_API)
+SUPPORTED_MANIFEST_ORACLES = (MANIFEST_ORACLE_STEAMCMD_API,)
 
 #: Where ``steamcmd_api`` asks. Overridable so an operator can point at their
 #: own mirror of the same API (or at a LAN proxy, which is the only way to use
@@ -154,6 +170,14 @@ SUPPORTED_MANIFEST_ORACLES = (MANIFEST_ORACLE_OFF, MANIFEST_ORACLE_STEAMCMD_API)
 #: operator-supplied and therefore trusted by definition — vault-api only
 #: insists on http/https and refuses to follow redirects away from it.
 DEFAULT_MANIFEST_ORACLE_URL = "https://api.steamcmd.net/v1/info"
+
+#: The one host vault-proxy allows on its own while the oracle is on (WP
+#: UPD-1, Weg A as refined in the ADR-0011 review): the host of
+#: ``DEFAULT_MANIFEST_ORACLE_URL``, and only when VAULT_MANIFEST_ORACLE_URL
+#: still points at it over https (``oracle_url_is_auto_allowed``). Hardcoded (not derived) in
+#: ``deploy/proxy/docker-entrypoint.sh`` as well;
+#: ``tests/test_upd_1_oracle_egress.py`` pins that the two agree.
+ORACLE_AUTO_ALLOWED_HOST = "api.steamcmd.net"
 
 #: Socket timeout for one oracle request. Short on purpose: the oracle is
 #: optional information, and a slow third party must never turn into a slow
@@ -818,19 +842,24 @@ def _env_auto_gc(name: str = "VAULT_AUTO_GC") -> str:
 
 
 def _env_manifest_oracle(name: str = "VAULT_MANIFEST_ORACLE") -> str:
-    """Read the oracle selector, refusing anything not implemented (WP 3.9).
+    """Read the oracle selector (WP 3.9; default and opt-out since WP UPD-1).
 
-    Case- and whitespace-insensitive so ``STEAMCMD_API`` and a stray trailing
-    space still select the oracle the operator meant; anything else raises at
-    startup. See ``SUPPORTED_MANIFEST_ORACLES`` for why an unknown value is a
-    hard error rather than a silent "off".
+    Trimmed and case-insensitive. Unset or empty -> ``DEFAULT_MANIFEST_ORACLE``
+    (on); ``off``/``none`` -> ``MANIFEST_ORACLE_OFF``; a supported oracle name
+    -> itself; anything else raises at startup (see
+    ``SUPPORTED_MANIFEST_ORACLES``).
     """
     raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return DEFAULT_MANIFEST_ORACLE
+    if raw in MANIFEST_ORACLE_OFF_VALUES:
+        return MANIFEST_ORACLE_OFF
     if raw not in SUPPORTED_MANIFEST_ORACLES:
-        known = ", ".join(repr(v) for v in SUPPORTED_MANIFEST_ORACLES if v)
+        known = ", ".join(repr(v) for v in SUPPORTED_MANIFEST_ORACLES)
         raise RuntimeError(
             f"{name}={raw!r} is not a supported manifest oracle "
-            f"(known: {known}; leave it unset or empty to disable the oracle)"
+            f"(known: {known}; 'off' or 'none' disables the oracle; unset or "
+            "empty means the default, on)"
         )
     return raw
 
@@ -847,17 +876,46 @@ def _env_manifest_oracle_url(name: str = "VAULT_MANIFEST_ORACLE_URL") -> str:
     surprising failure mode, so it is refused here rather than once per
     request inside ``oracle.http_fetch``'s fail-soft path, where it would only
     ever show up as "the oracle never works".
+
+    WP UPD-1 review round 2: whitespace or control characters inside the
+    value are refused too (a URL never contains them unencoded, and
+    ``deploy/proxy/docker-entrypoint.sh`` refuses the same values), as is a
+    value ``urlsplit`` itself cannot parse (an unbalanced IPv6 bracket).
     """
     raw = os.environ.get(name, "").strip()
     if not raw:
         return DEFAULT_MANIFEST_ORACLE_URL
-    scheme = urlsplit(raw).scheme.lower()
+    if any(c.isspace() or ord(c) < 0x20 or ord(c) == 0x7F for c in raw):
+        raise RuntimeError(
+            f"{name}={raw!r} contains whitespace or control characters; "
+            "percent-encode them or fix the value"
+        )
+    try:
+        scheme = urlsplit(raw).scheme.lower()
+    except ValueError as exc:
+        raise RuntimeError(f"{name}={raw!r} is not a parsable URL: {exc}") from exc
     if scheme not in ("http", "https"):
         raise RuntimeError(
             f"{name}={raw!r} must be an http:// or https:// URL "
             f"(got scheme {scheme!r})"
         )
     return raw
+
+
+def oracle_url_is_auto_allowed(url: str) -> bool:
+    """Does vault-proxy allow this oracle URL's host by itself (WP UPD-1,
+    Weg A, review round 2)? Only ``https://api.steamcmd.net...``: scheme
+    https AND host ``ORACLE_AUTO_ALLOWED_HOST``. Plain http to the same host,
+    or any other host, needs a ``VAULT_EGRESS_ALLOW`` entry.
+    ``deploy/proxy/docker-entrypoint.sh`` applies the same rule;
+    ``tests/test_upd_1_oracle_egress.py`` pins the two against each other.
+    Only meaningful while the oracle is on.
+    """
+    parts = urlsplit(url)
+    return (
+        parts.scheme.lower() == "https"
+        and (parts.hostname or "").lower() == ORACLE_AUTO_ALLOWED_HOST
+    )
 
 
 #: Characters a syntactically valid hostname may contain (RFC 1123):
@@ -871,6 +929,17 @@ def _env_manifest_oracle_url(name: str = "VAULT_MANIFEST_ORACLE_URL") -> str:
 _HOSTNAME_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
 )
+
+
+def _implausible_hostname(host: str) -> bool:
+    """The shape and character rule ``deploy/proxy/validate-hostname.sh``
+    applies (byte-for-byte), on an already trimmed, lowercased host."""
+    return (
+        not set(host) <= _HOSTNAME_CHARS
+        or host.startswith((".", "-"))
+        or host.endswith((".", "-"))
+        or ".." in host
+    )
 
 
 def _env_egress_allow(name: str = "VAULT_EGRESS_ALLOW") -> frozenset[str]:
@@ -909,10 +978,7 @@ def _env_egress_allow(name: str = "VAULT_EGRESS_ALLOW") -> frozenset[str]:
         host = entry.strip().lower()
         if not host:
             continue
-        implausible_shape = (
-            host.startswith((".", "-")) or host.endswith((".", "-")) or ".." in host
-        )
-        if not set(host) <= _HOSTNAME_CHARS or implausible_shape:
+        if _implausible_hostname(host):
             raise RuntimeError(
                 f"{name} contains an entry {entry.strip()!r} that is not a "
                 "plausible hostname (letters, digits, '.', '-' only; no "
@@ -1243,10 +1309,11 @@ class Settings:
     # the app) shows, stored per vault instead of per device. "" = not set.
     # A public identifier, not a secret. DB-overridable (settings_store).
     steam_library_steamid: str = ""
-    # WP 3.9 / ADR-0006 decision 4. Which third-party manifest oracle to use.
-    # "" (the default) = none, and that default is load-bearing: it is the
-    # difference between a vault-api that talks only to the LAN and one that
-    # queries an external service. See vault_api/oracle.py.
+    # WP 3.9. Which third-party manifest oracle to use; "" = none. The
+    # operator-facing default is ON (WP UPD-1: `from_env` resolves an unset
+    # or empty VAULT_MANIFEST_ORACLE to DEFAULT_MANIFEST_ORACLE); this
+    # dataclass default stays "" so a directly constructed Settings (tests,
+    # tools) never reaches the network. See MANIFEST_ORACLE_OFF.
     manifest_oracle: str = MANIFEST_ORACLE_OFF
     manifest_oracle_url: str = DEFAULT_MANIFEST_ORACLE_URL
     manifest_oracle_timeout: float = DEFAULT_MANIFEST_ORACLE_TIMEOUT
@@ -1483,31 +1550,41 @@ class Settings:
             except ScheduleWindowError as exc:
                 raise RuntimeError(f"VAULT_SCHEDULE_WINDOW is invalid: {exc}") from exc
 
-        # WP EG-1 (ADR-0011). Computed here, ahead of the `Settings(...)`
-        # call below, so the two can be cross-checked BEFORE vault-api
-        # finishes booting: an operator who turns the oracle on but forgets
-        # to allowlist its host would otherwise boot cleanly and then watch
-        # every oracle query fail with a filtered-403 from the proxy
-        # container, forever, with no hint pointing back at this file. See
-        # `_env_egress_allow`'s own docstring for why a bad hostname
-        # character is a hard error here specifically (not just on the
-        # proxy's side, which also validates the identical value).
+        # WP EG-1 (ADR-0011), narrowed by WP UPD-1 (user decision 2026-10-13,
+        # Weg A, refined in the ADR-0011 review). Computed here, ahead of the
+        # `Settings(...)` call below, so the two can be cross-checked BEFORE
+        # vault-api finishes booting.
+        #
+        # While the oracle is on, vault-proxy allows the DEFAULT oracle host
+        # (`ORACLE_AUTO_ALLOWED_HOST`, api.steamcmd.net) on its own -- but only
+        # when VAULT_MANIFEST_ORACLE_URL is https:// to it
+        # (deploy/proxy/docker-entrypoint.sh applies the same rule to the same
+        # two variables). Any other host the URL names (a private mirror, a
+        # LAN proxy) still needs an explicit VAULT_EGRESS_ALLOW entry, so the
+        # URL never becomes a second allowlist input that could open an
+        # arbitrary host. Without that entry vault-api refuses to boot rather
+        # than watching every oracle query fail with a filtered-403 from the
+        # proxy, forever, with no hint pointing back at this file.
         egress_allow = _env_egress_allow()
         manifest_oracle = _env_manifest_oracle()
         manifest_oracle_url = _env_manifest_oracle_url()
         if manifest_oracle != MANIFEST_ORACLE_OFF:
             oracle_host = (urlsplit(manifest_oracle_url).hostname or "").lower()
-            if not oracle_host or oracle_host not in egress_allow:
+            if not oracle_url_is_auto_allowed(manifest_oracle_url) and (
+                not oracle_host or oracle_host not in egress_allow
+            ):
                 raise RuntimeError(
-                    f"VAULT_MANIFEST_ORACLE={manifest_oracle!r} is enabled, but "
-                    f"its host ({oracle_host or manifest_oracle_url!r}) is not "
-                    "listed in VAULT_EGRESS_ALLOW. Once the egress lock "
-                    "(deploy/proxy, ADR-0011) is in effect, every oracle query "
-                    "would otherwise fail with a filtered-403 from the proxy "
-                    "container, forever, with nothing pointing back at this "
-                    "as the cause. Add the host to VAULT_EGRESS_ALLOW in "
-                    "deploy/.env (see deploy/.env.example), or turn the oracle "
-                    "back off."
+                    f"VAULT_MANIFEST_ORACLE={manifest_oracle!r} is on and "
+                    f"VAULT_MANIFEST_ORACLE_URL points at "
+                    f"{oracle_host or manifest_oracle_url!r}, which is not the "
+                    f"default oracle (https://{ORACLE_AUTO_ALLOWED_HOST}, allowed "
+                    "automatically; plain http to it is not) and is not listed "
+                    "in VAULT_EGRESS_ALLOW. "
+                    "Once the egress lock (deploy/proxy, ADR-0011) is in "
+                    "effect, every oracle query would otherwise fail with a "
+                    "filtered-403 from the proxy container, forever. Add the "
+                    "host to VAULT_EGRESS_ALLOW in deploy/.env (see "
+                    "deploy/.env.example), or set VAULT_MANIFEST_ORACLE=off."
                 )
 
         return Settings(
@@ -1626,9 +1703,8 @@ class Settings:
             # WP API-FEAT-1. Blank/unset = not set; a malformed id refuses
             # startup (same grammar as PATCH /v1/settings).
             steam_library_steamid=_env_steam_library_steamid(),
-            # WP 3.9. Unset/blank = no oracle, no outbound third-party request
-            # — the default, and the reason the URL and timeout below are
-            # harmless to have a default for.
+            # WP 3.9 / WP UPD-1. Unset/blank = the default oracle (on);
+            # 'off'/'none' = no oracle, no outbound oracle request.
             manifest_oracle=manifest_oracle,
             manifest_oracle_url=manifest_oracle_url,
             manifest_oracle_timeout=_env_float(
