@@ -191,12 +191,15 @@ class LibraryScreenshotTest {
         val chipMatcher = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
         val chips = composeRule.onAllNodes(chipMatcher).fetchSemanticsNodes()
         assertEquals("filter chips rendered", EXPECTED_CHIPS, chips.size)
-        val heights = chips.map { dp(it.boundsInRoot.height) }
+        // `size`, not `boundsInRoot`: the latter is clipped by the scrolling
+        // row, so a chip scrolled out of view reports a height of 0.
+        val heights = chips.map { dp(it.size.height.toFloat()) }
         assertTrue(
             "filter chips differ in height ($heights dp): a label wrapped to more than one line",
             heights.max() - heights.min() <= LAYOUT_TOLERANCE_DP,
         )
-        val chipsBottom = dp(chips.maxOf { it.boundsInRoot.bottom })
+        // The first chip is always in view at scroll position 0.
+        val chipsBottom = dp(chips.first().boundsInRoot.bottom)
         for (index in chips.indices) {
             composeRule.onAllNodes(chipMatcher)[index].performScrollTo().assertIsDisplayed()
         }
