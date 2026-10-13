@@ -322,7 +322,11 @@ unchanged until measured on prod (Q5 A). Flat list with `parent_appid`
 from the server, UIs group (Q2 A, orchestrator). Open: Q3 failed package
 on the card — decided 2026-10-13 (user, Q3 B variant): a failed package
 shows a small warning on the group card, the "Failed" chip counts such
-groups, and the detail sheet offers a retry per package. P1 step 3 measured
+groups, and the detail sheet offers a retry per package. Prod library
+screenshot (user, 2026-10-13, rc14): packages 2506210..2506280 and
+4199890 show as cached (0.3 GB each, CURRENT, not failed), so they do
+have depots mapped to their own appid — a grouped delete really frees
+them. APP 1716750 (0.2 GB) is not an HD2 package. P1 step 3 measured
 2026-10-13 (diag): the store GetItems answers 553850 but not the
 packages (success 15) nor 228980; the oracle names them (2506210 /
 2514120: type DLC, parent 553850, no own depots; 228980: type Tool), and
