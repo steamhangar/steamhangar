@@ -23,8 +23,8 @@ single query parameter ``input_json``::
                       "include_related_items": true}}
 
 The last two flags (WP TOOL-APPS-2a, ADR-0022 §1) ask for the item's store
-type and ``related_items.parent_appid`` in the same answer; the ids sent are
-unchanged. What they yield is stored by ``app_classification.py``.
+type, ``related_items.parent_appid`` and name in the same answer; the ids
+sent are unchanged. What they yield is stored by ``app_classification.py``.
 
 No Web API key, no SteamID, nothing else. Up to ``BATCH_SIZE`` apps per
 call. Each answered item carries ``assets.asset_url_format`` (e.g.
@@ -224,8 +224,8 @@ _UNANSWERED = app_classification.StoreFacts(answered=False)
 
 
 def _store_facts(appid: int, item: dict) -> app_classification.StoreFacts:
-    """Type and parent of one answered item (WP TOOL-APPS-2a). A missing or
-    malformed field is ``None`` ("unknown"), never an error."""
+    """Type, parent and name of one answered item (WP TOOL-APPS-2a). A
+    missing or malformed field is ``None`` ("unknown"), never an error."""
     app_type = app_classification.app_type_from_store(item.get("type"))
     parent: int | None = None
     related = item.get("related_items")
@@ -236,7 +236,10 @@ def _store_facts(appid: int, item: dict) -> app_classification.StoreFacts:
         if parent == appid:
             parent = None
     return app_classification.StoreFacts(
-        answered=True, app_type=app_type, parent_appid=parent
+        answered=True,
+        app_type=app_type,
+        parent_appid=parent,
+        name=app_classification.valid_app_name(item.get("name")),
     )
 
 

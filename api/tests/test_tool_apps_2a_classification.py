@@ -134,13 +134,16 @@ HD2_ANSWER = _app_info(
         },
     },
 )
-PKG_OWN_ANSWER = _app_info(PKG_OWN, {"common": {"type": "DLC", "parent": str(HD2)}})
+PKG_OWN_ANSWER = _app_info(
+    PKG_OWN, {"common": {"type": "DLC", "parent": str(HD2), "name": "Synthetic package"}}
+)
 
 
 def test_parse_reads_parent_side_links_and_keeps_existing_fields() -> None:
     info = oracle.parse_app_info(HD2, HD2_ANSWER)
     assert info.app_type == "game"
     assert info.parent_appid is None
+    assert info.name == "HELLDIVERS 2"
     assert info.dlc_appids == (PKG_A, PKG_B, PKG_OWN)
     # Existing consumers' view is unchanged by the new fields.
     assert info.depotids == (553851, 553852)
@@ -154,6 +157,7 @@ def test_parse_reads_parent_side_links_and_keeps_existing_fields() -> None:
 def test_parse_reads_child_type_and_parent_without_depots() -> None:
     info = oracle.parse_app_info(PKG_OWN, PKG_OWN_ANSWER)
     assert (info.app_type, info.parent_appid, info.dlc_appids) == ("dlc", HD2, ())
+    assert info.name == "Synthetic package"
     assert info.branch_manifests == ()
 
 
@@ -191,7 +195,7 @@ def test_unusable_dlcappid_is_skipped_with_a_warning() -> None:
         440, _app_info(440, {"depots": {"441": {"dlcappid": "x1"}, "442": {"dlcappid": "9"}}})
     )
     assert info.dlc_appids == (9,)
-    assert any("dlcappid" in w for w in info.warnings)
+    assert "ignored unusable dlcappid of depot 441" in info.warnings
 
 
 def test_dlc_links_are_bounded(monkeypatch) -> None:
@@ -236,6 +240,7 @@ def test_store_writes_type_parent_and_links_snapshot(conn: sqlite3.Connection) -
     state = {r["appid"]: r for r in conn.execute("SELECT * FROM oracle_app_state")}
     assert (state[HD2]["app_type"], state[HD2]["parent_appid"]) == ("game", None)
     assert (state[PKG_OWN]["app_type"], state[PKG_OWN]["parent_appid"]) == ("dlc", HD2)
+    assert (state[HD2]["name"], state[PKG_OWN]["name"]) == ("HELLDIVERS 2", "Synthetic package")
     assert _links(conn) == {
         (HD2, PKG_A, "steamcmd_api"),
         (HD2, PKG_B, "steamcmd_api"),
@@ -259,57 +264,66 @@ def _store_item(appid: int, *, success: int = 1, **extra: object) -> dict:
     if success != 1:
         return {"item_type": 0, "id": appid, "success": success, "visible": False,
                 "name": "", "store_url_path": "app/0/", "appid": 0}
-    return {"item_type": 0, "id": appid, "success": 1, "appid": appid,
-            "name": f"Synthetic {appid}", **extra}
+    item = {"item_type": 0, "id": appid, "success": 1, "appid": appid,
+            "name": f"Synthetic {appid}"}
+    item.update(extra)
+    return item
 
 
 def _payload(*items: dict) -> bytes:
     return json.dumps({"response": {"store_items": list(items)}}).encode()
 
 
-def test_parse_store_items_reads_type_and_parent() -> None:
+def test_parse_store_items_reads_type_parent_and_name() -> None:
     payload = _payload(
-        _store_item(HD2, type=0),
+        _store_item(HD2, type=0, name="HELLDIVERS™ 2"),
         _store_item(4000001, type=4, related_items={"parent_appid": HD2}),
         _store_item(PKG_A, success=15),
-        _store_item(4000002),  # answered, neither field
-        _store_item(4000003, type=True, related_items={"parent_appid": 4000003}),
-        _store_item(4000004, type=4, related_items="junk"),
+        _store_item(4000002, name=""),  # answered, nothing usable
+        _store_item(4000003, type=True, related_items={"parent_appid": 4000003}, name=7),
+        _store_item(4000004, type=4, related_items="junk", name="A\x00B‮ C "),
     )
     items = cover_art.parse_store_items(
         payload, [HD2, 4000001, PKG_A, 4000002, 4000003, 4000004]
     )
     facts = {appid: item.facts for appid, item in items.items()}
-    assert facts[HD2] == app_classification.StoreFacts(True, "game", None)
-    assert facts[4000001] == app_classification.StoreFacts(True, "dlc", HD2)
-    assert facts[PKG_A] == app_classification.StoreFacts(False, None, None)
-    assert facts[4000002] == app_classification.StoreFacts(True, None, None)
-    assert facts[4000003] == app_classification.StoreFacts(True, None, None)
-    assert facts[4000004] == app_classification.StoreFacts(True, "dlc", None)
+    Facts = app_classification.StoreFacts
+    assert facts[HD2] == Facts(True, "game", None, "HELLDIVERS™ 2")
+    assert facts[4000001] == Facts(True, "dlc", HD2, "Synthetic 4000001")
+    assert facts[PKG_A] == Facts(False, None, None, None)
+    assert facts[4000002] == Facts(True, None, None, None)
+    assert facts[4000003] == Facts(True, None, None, None)
+    assert facts[4000004] == Facts(True, "dlc", None, "AB C")
     assert not facts[4000002].usable and facts[4000004].usable
     # The old cover-only view is unchanged in shape.
     assert cover_art.parse_items(payload, [HD2, PKG_A]) == {HD2: None, PKG_A: None}
 
 
-def _add_apps(db_path: str, *appids: int) -> None:
+def _add_apps(db_path: str, *appids: int, name: str | None = None) -> None:
     connection = get_connection(db_path)
     try:
         for appid in appids:
-            connection.execute("INSERT INTO apps (appid, status) VALUES (?, 'idle')", (appid,))
+            connection.execute(
+                "INSERT INTO apps (appid, name, status) VALUES (?, ?, 'idle')", (appid, name)
+            )
         connection.commit()
     finally:
         connection.close()
 
 
-def _classes(db_path: str) -> dict[int, tuple[str | None, int | None, str]]:
+def _classes(db_path: str) -> dict[tuple[int, str], tuple[str | None, int | None, int, str | None]]:
+    """``{(appid, source): (app_type, parent_appid, linked, name)}``."""
     connection = get_connection(db_path)
     try:
         return {
-            r["appid"]: (r["app_type"], r["parent_appid"], r["source"])
+            (r["appid"], r["source"]): (r["app_type"], r["parent_appid"], r["linked"], r["name"])
             for r in connection.execute("SELECT * FROM app_classification")
         }
     finally:
         connection.close()
+
+
+S, O = "store", "steamcmd_api"
 
 
 def test_refresh_records_store_classification(db: str) -> None:
@@ -328,17 +342,34 @@ def test_refresh_records_store_classification(db: str) -> None:
     finally:
         connection.close()
     assert outcome.requested and outcome.error is None
-    assert _classes(db) == {HD2: ("game", None, "store"), 4000001: ("dlc", HD2, "store")}
+    assert _classes(db) == {
+        (HD2, S): ("game", None, 0, "Synthetic 553850"),
+        (4000001, S): ("dlc", HD2, 0, "Synthetic 4000001"),
+    }
 
 
-def test_store_non_answer_removes_only_a_store_row(db: str) -> None:
+def _insert(db_path: str, *rows: tuple) -> None:
+    """Rows of (appid, source, app_type, parent_appid[, linked[, name]])."""
+    connection = get_connection(db_path)
+    try:
+        for row in rows:
+            appid, source, app_type, parent, *rest = row
+            linked = rest[0] if rest else 0
+            name = rest[1] if len(rest) > 1 else None
+            connection.execute(
+                "INSERT INTO app_classification (appid, source, app_type, parent_appid, "
+                "linked, name, checked_at) VALUES (?, ?, ?, ?, ?, ?, 'x')",
+                (appid, source, app_type, parent, linked, name),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_store_non_answer_removes_only_the_store_row(db: str) -> None:
+    _insert(db, (1, S, "dlc", 9), (1, O, "dlc", 9), (2, O, "dlc", 9))
     connection = get_connection(db)
     try:
-        connection.execute(
-            "INSERT INTO app_classification VALUES (1, 'dlc', 9, 'store', 'x'),"
-            " (2, 'dlc', 9, 'steamcmd_api', 'x')"
-        )
-        connection.commit()
         app_classification.record_store_results(
             connection,
             {1: app_classification.StoreFacts(False), 2: app_classification.StoreFacts(False)},
@@ -346,24 +377,23 @@ def test_store_non_answer_removes_only_a_store_row(db: str) -> None:
         )
     finally:
         connection.close()
-    assert _classes(db) == {2: ("dlc", 9, "steamcmd_api")}
+    assert _classes(db) == {(1, O): ("dlc", 9, 0, None), (2, O): ("dlc", 9, 0, None)}
 
 
-def test_store_answer_replaces_an_oracle_row(db: str) -> None:
+def test_store_answer_never_touches_the_oracle_row(db: str) -> None:
+    _insert(db, (1, O, "dlc", 9))
     connection = get_connection(db)
     try:
-        connection.execute("INSERT INTO app_classification VALUES (1, 'dlc', 9, 'steamcmd_api', 'x')")
-        connection.commit()
         app_classification.record_store_results(
-            connection, {1: app_classification.StoreFacts(True, "game", None)}, NOW
+            connection, {1: app_classification.StoreFacts(True, "game", None, "One")}, NOW
         )
     finally:
         connection.close()
-    assert _classes(db) == {1: ("game", None, "store")}
+    assert _classes(db) == {(1, S): ("game", None, 0, "One"), (1, O): ("dlc", 9, 0, None)}
 
 
 # ==========================================================================
-# 5. Oracle gap fill (S2/S3, decision Q8 B: no request, cached answers only)
+# 5. Oracle rows (S2/S3, decision Q8 B: no request, cached answers only)
 # ==========================================================================
 
 
@@ -383,7 +413,7 @@ def _fill(db_path: str, *, oracle_enabled: bool = True) -> app_classification.Fi
         connection.close()
 
 
-def test_fill_groups_packages_from_the_parents_answer_and_their_own(db: str) -> None:
+def test_fill_records_own_answers_and_parent_links(db: str) -> None:
     _add_apps(db, HD2, PKG_A, PKG_B, PKG_OWN, 4000009)
     _store_oracle(db, HD2, HD2_ANSWER)
     _store_oracle(db, PKG_OWN, PKG_OWN_ANSWER, checked_at="2026-10-13T02:00:00Z")
@@ -391,10 +421,12 @@ def test_fill_groups_packages_from_the_parents_answer_and_their_own(db: str) -> 
     outcome = _fill(db)
 
     assert _classes(db) == {
-        HD2: ("game", None, "steamcmd_api"),
-        PKG_A: ("dlc", HD2, "steamcmd_api"),
-        PKG_B: ("dlc", HD2, "steamcmd_api"),
-        PKG_OWN: ("dlc", HD2, "steamcmd_api"),
+        (HD2, O): ("game", None, 0, "HELLDIVERS 2"),
+        # Only linked: no own type, the single claimant is the parent.
+        (PKG_A, O): (None, HD2, 1, None),
+        (PKG_B, O): (None, HD2, 1, None),
+        # Own answer plus linked.
+        (PKG_OWN, O): ("dlc", HD2, 1, "Synthetic package"),
     }
     assert outcome.written == 4
     # Idempotent: nothing changes on the next tick.
@@ -408,21 +440,13 @@ def test_fill_does_nothing_while_the_oracle_is_off(db: str) -> None:
     assert _classes(db) == {}
 
 
-def test_fill_never_overrides_a_store_row(db: str) -> None:
+def test_fill_writes_its_own_row_beside_a_store_row(db: str) -> None:
     _add_apps(db, HD2, PKG_A)
     _store_oracle(db, HD2, HD2_ANSWER)
-    connection = get_connection(db)
-    try:
-        app_classification.record_store_results(
-            connection, {PKG_A: app_classification.StoreFacts(True, "game", None)}, NOW
-        )
-    finally:
-        connection.close()
-    outcome = _fill(db)
-    assert _classes(db)[PKG_A] == ("game", None, "store")
-    # The fill skips store-answered apps itself (HD2 is its only write), not
-    # only through the upsert's source guard.
-    assert outcome.written == 1
+    _insert(db, (PKG_A, S, "dlc", None))
+    _fill(db)
+    assert _classes(db)[(PKG_A, S)] == ("dlc", None, 0, None)
+    assert _classes(db)[(PKG_A, O)] == (None, HD2, 1, None)
 
 
 def test_fill_two_claiming_parents_name_no_parent(db: str) -> None:
@@ -430,25 +454,25 @@ def test_fill_two_claiming_parents_name_no_parent(db: str) -> None:
     _store_oracle(db, 10, _app_info(10, {"extended": {"listofdlc": "30"}}))
     _store_oracle(db, 20, _app_info(20, {"extended": {"listofdlc": "30"}}))
     _fill(db)
-    assert _classes(db)[30] == ("dlc", None, "steamcmd_api")
+    assert _classes(db)[(30, O)] == (None, None, 1, None)
 
 
-def test_fill_only_classifies_tracked_apps(db: str) -> None:
+def test_fill_only_covers_tracked_apps(db: str) -> None:
     _add_apps(db, HD2)
     _store_oracle(db, HD2, HD2_ANSWER)
     _fill(db)
-    assert set(_classes(db)) == {HD2}
+    assert set(_classes(db)) == {(HD2, O)}
 
 
 def test_fill_removes_its_row_when_the_oracle_no_longer_describes_the_app(db: str) -> None:
     _add_apps(db, HD2, PKG_A)
     _store_oracle(db, HD2, HD2_ANSWER)
     _fill(db)
-    assert PKG_A in _classes(db)
+    assert (PKG_A, O) in _classes(db)
     _store_oracle(db, HD2, _app_info(HD2, {"depots": {}}))
     outcome = _fill(db)
-    assert PKG_A not in _classes(db)
-    assert outcome.removed == 2  # PKG_A, and HD2 itself (no type any more)
+    assert _classes(db) == {}
+    assert outcome.removed == 2  # PKG_A, and HD2 itself (no type or name any more)
 
 
 def test_fill_makes_no_oracle_request(db: str, monkeypatch) -> None:
@@ -460,7 +484,7 @@ def test_fill_makes_no_oracle_request(db: str, monkeypatch) -> None:
     _add_apps(db, HD2, PKG_A)
     _store_oracle(db, HD2, HD2_ANSWER)
     _fill(db)
-    assert _classes(db)[PKG_A] == ("dlc", HD2, "steamcmd_api")
+    assert _classes(db)[(PKG_A, O)] == (None, HD2, 1, None)
 
 
 def test_tick_fills_even_while_the_store_lookup_is_paused(db: str) -> None:
@@ -481,7 +505,7 @@ def test_tick_fills_even_while_the_store_lookup_is_paused(db: str) -> None:
         connection.close()
     clock[0] = NOW + timedelta(seconds=1)
     assert refresher.tick() is None  # paused: no lookup ...
-    assert _classes(db)[PKG_A] == ("dlc", HD2, "steamcmd_api")  # ... but the fill ran
+    assert _classes(db)[(PKG_A, O)] == (None, HD2, 1, None)  # ... but the fill ran
 
 
 def test_tick_without_the_oracle_does_not_fill(db: str) -> None:
@@ -503,36 +527,71 @@ def test_main_wires_the_oracle_switch_into_the_refresher(tmp_path) -> None:
 
 
 # ==========================================================================
-# 6. Reading: nesting, cycles, tool apps, oracle switch, tampered rows
+# 6. Reading: per-field merge, nesting, cycles, tool apps, names
 # ==========================================================================
 
 
 def _raw(db_path: str, *rows: tuple[int, str | None, object, str]) -> None:
+    """Rows of (appid, app_type, parent_appid, source), the 2a-round-1 shape."""
+    _insert(db_path, *[(appid, source, app_type, parent) for appid, app_type, parent, source in rows])
+
+
+def _resolve_full(db_path: str, *, oracle_enabled: bool = True) -> dict[int, app_classification.Classification]:
     connection = get_connection(db_path)
     try:
-        connection.executemany(
-            "INSERT INTO app_classification (appid, app_type, parent_appid, source, checked_at) "
-            "VALUES (?, ?, ?, ?, 'x')",
-            rows,
-        )
-        connection.commit()
+        return app_classification.resolve_classifications(connection, oracle_enabled=oracle_enabled)
     finally:
         connection.close()
 
 
 def _resolve(db_path: str, *, oracle_enabled: bool = True) -> dict[int, tuple[str | None, int | None]]:
-    connection = get_connection(db_path)
-    try:
-        result = app_classification.resolve_classifications(connection, oracle_enabled=oracle_enabled)
-    finally:
-        connection.close()
-    return {appid: (c.app_type, c.parent_appid) for appid, c in result.items()}
+    return {
+        appid: (c.app_type, c.parent_appid)
+        for appid, c in _resolve_full(db_path, oracle_enabled=oracle_enabled).items()
+    }
+
+
+def test_store_type_without_parent_takes_the_oracle_parent(db: str) -> None:
+    """Q1 A, "oracle for gaps", per field (2a review)."""
+    _add_apps(db, HD2, PKG_A)
+    _insert(db, (PKG_A, S, "dlc", None), (PKG_A, O, None, HD2, 1))
+    assert _resolve(db) == {PKG_A: ("dlc", HD2)}
+    # Without the oracle the gap stays open, the store's type stays.
+    assert _resolve(db, oracle_enabled=False) == {PKG_A: ("dlc", None)}
+
+
+def test_store_type_wins_over_the_oracle_type(db: str) -> None:
+    _add_apps(db, HD2, PKG_A)
+    _insert(db, (PKG_A, S, "music", None), (PKG_A, O, "dlc", HD2))
+    assert _resolve(db) == {PKG_A: ("music", HD2)}
+
+
+def test_store_parent_always_wins_over_the_oracle_parent(db: str) -> None:
+    _add_apps(db, HD2, 730, PKG_A)
+    _insert(db, (PKG_A, S, None, 730), (PKG_A, O, "dlc", HD2))
+    assert _resolve(db)[PKG_A] == ("dlc", 730)
+
+
+def test_own_type_is_kept_apart_from_a_linked_dlc(db: str) -> None:
+    """For TOOL-APPS-2b: a dlc inferred only from a parent's list is not the
+    app's own type."""
+    _add_apps(db, HD2, PKG_A, PKG_OWN)
+    _insert(db, (PKG_A, O, None, HD2, 1), (PKG_OWN, O, "dlc", HD2, 1))
+    resolved = _resolve_full(db)
+    assert (resolved[PKG_A].app_type, resolved[PKG_A].own_app_type) == ("dlc", None)
+    assert (resolved[PKG_OWN].app_type, resolved[PKG_OWN].own_app_type) == ("dlc", "dlc")
 
 
 def test_nested_packages_attach_to_the_top_level_parent(db: str) -> None:
     _add_apps(db, 1, 2, 3)
     _raw(db, (1, "dlc", 2, "store"), (2, "dlc", 3, "store"), (3, "game", None, "store"))
     assert _resolve(db) == {1: ("dlc", 3), 2: ("dlc", 3), 3: ("game", None)}
+
+
+def test_nesting_follows_the_merged_parent(db: str) -> None:
+    _add_apps(db, 1, 2, 3)
+    _insert(db, (1, S, "dlc", 2), (2, S, "dlc", None), (2, O, None, 3))
+    assert _resolve(db) == {1: ("dlc", 3), 2: ("dlc", 3)}
 
 
 def test_chain_of_four_links_groups_five_does_not(db: str) -> None:
@@ -575,26 +634,58 @@ def test_oracle_rows_are_ignored_while_the_oracle_is_off(db: str) -> None:
 
 
 def test_tampered_rows_are_revalidated_on_read(db: str) -> None:
-    _add_apps(db, 1, 2, 3, HD2)
+    _add_apps(db, 1, 2, 3, 4, HD2)
     _raw(
         db,
         (1, "evil", HD2, "store"),
         (2, "dlc", "abc", "store"),  # stays TEXT under INTEGER affinity
         (3, "dlc", HD2, "somebody_else"),
     )
-    resolved = _resolve(db)
-    assert resolved[1] == (None, HD2)
-    assert resolved[2] == ("dlc", None)
+    _insert(db, (4, S, None, None, 0, "X" * 1000 + "\x07"))
+    resolved = _resolve_full(db)
+    assert (resolved[1].app_type, resolved[1].parent_appid) == (None, HD2)
+    assert (resolved[2].app_type, resolved[2].parent_appid) == ("dlc", None)
     assert 3 not in resolved
+    assert resolved[4].name == "X" * app_classification.MAX_NAME_LEN
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("HELLDIVERS™ 2 - Português-Brasil", "HELLDIVERS™ 2 - Português-Brasil"),
+        ("  padded  ", "padded"),
+        ("tab\there\nnewline\x7f\x85", "tabherenewline"),
+        ("‮evil⁦", "evil"),
+        ("<b>markup stays text</b>", "<b>markup stays text</b>"),
+        ("", None),
+        ("   ", None),
+        ("\x00\x01", None),
+        (5, None),
+        (None, None),
+        ("y" * 300, "y" * 256),
+    ],
+)
+def test_valid_app_name(raw: object, expected: str | None) -> None:
+    assert app_classification.valid_app_name(raw) == expected
+
+
+def test_name_merge_store_first_then_oracle(db: str) -> None:
+    _add_apps(db, 1, 2)
+    _insert(db, (1, S, None, None, 0, "Store name"), (1, O, None, None, 0, "Oracle name"),
+            (2, O, None, None, 0, "Oracle only"))
+    resolved = _resolve_full(db)
+    assert resolved[1].name == "Store name"
+    assert resolved[2].name == "Oracle only"
+    assert 2 not in _resolve_full(db, oracle_enabled=False)
 
 
 # ==========================================================================
-# 7. API: parent_appid / app_type on GET /v1/games and /v1/games/{appid}
+# 7. API: parent_appid / app_type / name on GET /v1/games and /v1/games/{appid}
 # ==========================================================================
 
 
-def _seed(client: TestClient, depotid: int, appid: int) -> None:
-    response = client.put(f"/v1/mapping/{depotid}", json={"appid": appid, "app_name": None}, headers=AUTH)
+def _seed(client: TestClient, depotid: int, appid: int, name: str | None = None) -> None:
+    response = client.put(f"/v1/mapping/{depotid}", json={"appid": appid, "app_name": name}, headers=AUTH)
     assert response.status_code == 200
 
 
@@ -619,13 +710,39 @@ def test_games_expose_parent_and_type(settings: Settings) -> None:
     assert (detail["parent_appid"], detail["app_type"]) == (None, None)
 
 
+def test_games_fill_a_missing_name_but_never_replace_one(settings: Settings) -> None:
+    client = TestClient(create_app(settings))
+    _seed(client, HD2 + 1, HD2, name="HELLDIVERS 2 (owned)")
+    _seed(client, PKG_A + 1, PKG_A)
+    _seed(client, 731, 730)
+    pkg_name = "HELLDIVERS™ 2 - Português-Brasil"
+    _insert(
+        settings.db_path,
+        (HD2, S, "game", None, 0, "HELLDIVERS™ 2"),
+        (PKG_A, S, None, None, 0, pkg_name),
+    )
+    games = {g["appid"]: g for g in client.get("/v1/games", headers=AUTH).json()}
+    assert games[HD2]["name"] == "HELLDIVERS 2 (owned)"  # vault-api's own name wins
+    assert games[PKG_A]["name"] == pkg_name  # filled, untrimmed
+    assert games[730]["name"] is None
+    assert client.get(f"/v1/games/{PKG_A}", headers=AUTH).json()["name"] == pkg_name
+    assert client.get(f"/v1/games/{HD2}", headers=AUTH).json()["name"] == "HELLDIVERS 2 (owned)"
+    # Never written into apps.
+    connection = get_connection(settings.db_path)
+    try:
+        (stored,) = connection.execute("SELECT name FROM apps WHERE appid = ?", (PKG_A,)).fetchone()
+    finally:
+        connection.close()
+    assert stored is None
+
+
 def test_games_hide_oracle_rows_when_the_oracle_is_off(settings: Settings, tmp_path) -> None:
     client = TestClient(create_app(settings))  # conftest settings: oracle off
     _seed(client, HD2 + 1, HD2)
     _seed(client, PKG_A + 1, PKG_A)
-    _raw(settings.db_path, (PKG_A, "dlc", HD2, "steamcmd_api"))
+    _insert(settings.db_path, (PKG_A, O, "dlc", HD2, 0, "Oracle name"))
     games = {g["appid"]: g for g in client.get("/v1/games", headers=AUTH).json()}
-    assert games[PKG_A]["parent_appid"] is None and games[PKG_A]["app_type"] is None
+    assert (games[PKG_A]["parent_appid"], games[PKG_A]["app_type"], games[PKG_A]["name"]) == (None, None, None)
 
     on = Settings(
         vault_api_key=TEST_API_KEY,
@@ -635,7 +752,9 @@ def test_games_hide_oracle_rows_when_the_oracle_is_off(settings: Settings, tmp_p
         manifest_oracle="steamcmd_api",
     )
     games = {g["appid"]: g for g in TestClient(create_app(on)).get("/v1/games", headers=AUTH).json()}
-    assert (games[PKG_A]["parent_appid"], games[PKG_A]["app_type"]) == (HD2, "dlc")
+    assert (games[PKG_A]["parent_appid"], games[PKG_A]["app_type"], games[PKG_A]["name"]) == (
+        HD2, "dlc", "Oracle name",
+    )
 
 
 def test_tool_app_keeps_its_fixed_list_fields_and_is_not_grouped(settings: Settings) -> None:
@@ -712,12 +831,15 @@ def test_upgrade_to_v22_adds_schema_and_resets_cover_checks_once(tmp_path, old_v
 
     assert version == 22
     assert state_cols["app_type"] == "TEXT" and state_cols["parent_appid"] == "INTEGER"
+    assert state_cols["name"] == "TEXT"
     assert class_cols == {
-        "appid": "INTEGER", "app_type": "TEXT", "parent_appid": "INTEGER",
-        "source": "TEXT", "checked_at": "TEXT",
+        "appid": "INTEGER", "source": "TEXT", "app_type": "TEXT", "parent_appid": "INTEGER",
+        "linked": "INTEGER", "name": "TEXT", "checked_at": "TEXT",
     }
     assert link_cols == {"appid": "INTEGER", "dlc_appid": "INTEGER", "recorded_at": "TEXT", "source": "TEXT"}
-    assert (old_state["buildid"], old_state["app_type"], old_state["parent_appid"]) == ("1", None, None)
+    assert (old_state["buildid"], old_state["app_type"], old_state["parent_appid"], old_state["name"]) == (
+        "1", None, None, None,
+    )
 
     after = datetime.now(timezone.utc) + timedelta(seconds=1)
     for appid in (10, 20):

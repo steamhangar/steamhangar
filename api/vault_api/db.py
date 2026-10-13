@@ -205,8 +205,9 @@ import time
 #: on its own branch): added ``app_classification`` (which tracked app is a
 #: content package of which game, ``vault_api/app_classification.py``) and
 #: ``oracle_dlc_links`` (a cached parent's ``extended.listofdlc`` / depot
-#: ``dlcappid`` links), and ``oracle_app_state`` gained ``app_type`` and
-#: ``parent_appid`` (the oracle's ``common.type`` / ``common.parent``). The two
+#: ``dlcappid`` links), and ``oracle_app_state`` gained ``app_type``,
+#: ``parent_appid`` and ``name`` (the oracle's ``common.type`` /
+#: ``common.parent`` / ``common.name``). The two
 #: tables are brand-new (no ``ALTER``); the two columns come from the
 #: per-column-guarded ``_add_missing_oracle_state_columns`` step. One data
 #: step runs once on upgrade: every ``app_cover_art.next_check_at`` still in
@@ -597,8 +598,8 @@ CREATE TABLE IF NOT EXISTS client_bypass_state (
 -- (operator information -- nothing branches on the build id).
 -- v22 (WP TOOL-APPS-2a): app_type is the oracle's common.type mapped onto
 -- vault_api/app_classification.py's vocabulary, parent_appid its
--- common.parent; both NULL when the answer did not carry them (and on every
--- row stored before v22).
+-- common.parent, name its common.name (display text, capped); NULL when the
+-- answer did not carry them (and on every row stored before v22).
 CREATE TABLE IF NOT EXISTS oracle_app_state (
     appid        INTEGER PRIMARY KEY,
     buildid      TEXT,
@@ -607,7 +608,8 @@ CREATE TABLE IF NOT EXISTS oracle_app_state (
     depot_count  INTEGER NOT NULL,
     branch_count INTEGER NOT NULL,
     app_type     TEXT,
-    parent_appid INTEGER
+    parent_appid INTEGER,
+    name         TEXT
 );
 
 -- v22 (WP TOOL-APPS-2a): the content packages one oracle answer names for
@@ -716,19 +718,27 @@ CREATE INDEX IF NOT EXISTS idx_app_cover_art_next_check
     ON app_cover_art (next_check_at);
 
 -- WP TOOL-APPS-2a (schema v22, ADR-0022 §1): which tracked app is a content
--- package of which game. Written only by the background cover refresher
--- (vault_api/app_classification.py): source 'store' (Steam's store item
--- lookup) or 'steamcmd_api' (the manifest oracle's stored answers, only for
--- ids the store cannot answer). app_type is one normalised lowercase
--- vocabulary or NULL; parent_appid is the RAW parent as the source named it
--- (GET /v1/games resolves nesting, cycles and tool apps on read). Display
--- data: nothing that prefills, collects or deletes reads it.
+-- package of which game, and a fallback display name. Written only by the
+-- background cover refresher (vault_api/app_classification.py). One row per
+-- (app, source) -- 'store' (Steam's store item lookup) or 'steamcmd_api'
+-- (the manifest oracle's stored answers) -- each holding only what that
+-- source said, so provenance is per field; GET /v1/games merges them on
+-- read, store first. app_type is the source's OWN type for the app (one
+-- normalised lowercase vocabulary or NULL); linked = 1 when a cached
+-- parent's listofdlc/dlcappid names the app (an inferred dlc, kept apart);
+-- parent_appid is the RAW parent (nesting, cycles and tool apps are
+-- resolved on read); name is capped plain text, shown only when apps.name
+-- is empty and never copied into apps. Display data: nothing that
+-- prefills, collects or deletes reads it.
 CREATE TABLE IF NOT EXISTS app_classification (
-    appid        INTEGER PRIMARY KEY,
+    appid        INTEGER NOT NULL,
+    source       TEXT NOT NULL,
     app_type     TEXT,
     parent_appid INTEGER,
-    source       TEXT NOT NULL,
-    checked_at   TEXT
+    linked       INTEGER NOT NULL DEFAULT 0,
+    name         TEXT,
+    checked_at   TEXT,
+    PRIMARY KEY (appid, source)
 );
 
 -- WP UPD-1: bookkeeping of the always-on update check. Single row, the same
@@ -1083,6 +1093,7 @@ def _add_missing_update_check_columns(conn: sqlite3.Connection) -> None:
 _V22_ORACLE_STATE_COLUMNS = (
     ("app_type", "TEXT"),
     ("parent_appid", "INTEGER"),
+    ("name", "TEXT"),
 )
 
 

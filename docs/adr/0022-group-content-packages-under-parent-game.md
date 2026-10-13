@@ -372,7 +372,12 @@ prefill skip stays on the reviewed fixed list (open question 7).
    "another cached game keeps its depot", "a member wrongly classified as
    a game keeps its depots", "a fixed-list tool app never joins the
    delete", "plan and execution delete the same depots" and "old call
-   without the parameter unchanged".
+   without the parameter unchanged". **Recorded after the 2a review
+   (2026-10-13):** only a child whose OWN type is a package type is
+   deletable: the store's type or the app's own PICS `common.type`
+   (`app_classification.Classification.own_app_type`). A `dlc` inferred
+   only because a cached parent's `extended.listofdlc` / depot `dlcappid`
+   names the app (the `linked` flag) is display data and not enough.
 3. **TOOL-APPS-2c (web)** grouped card, package list in the detail sheet,
    counts per group, bulk selection expands to children (same targets as
    ungrouped), delete dialog listing packages, Downloads labels,
@@ -383,4 +388,13 @@ prefill skip stays on the reviewed fixed list (open question 7).
    (`docs/security/threat-model.md`: the store lookup's new flags; and, if
    Q8 = A, the new oracle flow plus the ADR-0006/ADR-0011 addenda), the
    addendum to the oracle's "can only add protection" promise in ADR-0006
-   and ADR-0007 (§4), this ADR to Accepted.
+   and ADR-0007 (§4), this ADR to Accepted. **Recorded after the 2a
+   review (2026-10-13):** document that fixed-list tool apps are never
+   parents either (a chain reaching one stays ungrouped); the new GetItems
+   flags (`include_basic_info`, `include_related_items`) and what they
+   return in api/README.md and the threat model; the new `parent_appid` /
+   `app_type` fields; the per-field merge (store first, oracle parent for
+   a store answer without one); and the name fill (`name` falls back to
+   Steam's store name, then the oracle's stored `common.name`, only when
+   vault-api has no name, never written into `apps`, plain text capped at
+   256 characters).

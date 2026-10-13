@@ -132,6 +132,10 @@ def _installed_on_for_appid(
 
 class GameSummary(BaseModel):
     appid: int
+    # The name vault-api recorded (owned library, agent, mapping); when it has
+    # none, Steam's name for the app from the store lookup or the oracle's
+    # stored answer (WP TOOL-APPS-2a, plain text, at most 256 characters, as
+    # Steam spells it). Null when no source knows it.
     name: str | None
     status: str
     last_prefill_at: str | None
@@ -257,10 +261,11 @@ class GameSummary(BaseModel):
     # path reads it.
     parent_appid: int | None = None
     # One of "game", "dlc", "tool", "application", "config", "music",
-    # "video", "demo", or null (unknown). From Steam's store item lookup,
-    # else (only while the manifest oracle is on) from the oracle's stored
-    # answers for cached apps. Display only: ``tool_app`` stays the fixed
-    # list (an ``app_type`` of "tool" never stops a prefill).
+    # "video", "demo", or null (unknown). Per field, Steam's store item lookup
+    # first, else (only while the manifest oracle is on) the oracle's stored
+    # answers for cached apps; "dlc" also when only a cached parent's DLC list
+    # names the app. Display only: ``tool_app`` stays the fixed list (an
+    # ``app_type`` of "tool" never stops a prefill).
     app_type: str | None = None
 
 
@@ -274,6 +279,18 @@ def _classification_fields(
         "parent_appid": classification.parent_appid,
         "app_type": classification.app_type,
     }
+
+
+def _display_name(
+    own: str | None, classification: app_classification.Classification | None
+) -> str | None:
+    """``name`` (WP TOOL-APPS-2a): the ``apps.name`` vault-api recorded when
+    it has one, else Steam's name for the app (store, then the oracle's
+    stored ``common.name``; plain text, capped, never written into
+    ``apps``). Null when neither knows it."""
+    if own is not None and own.strip():
+        return own
+    return None if classification is None else classification.name
 
 
 def _tool_app_fields(appid: int) -> dict[str, object]:
@@ -411,7 +428,7 @@ def list_games(
         games.append(
             GameSummary(
                 appid=row["appid"],
-                name=row["name"],
+                name=_display_name(row["name"], classifications.get(row["appid"])),
                 status=row["status"],
                 last_prefill_at=row["last_prefill_at"],
                 last_manifest_check=row["last_manifest_check"],
@@ -500,7 +517,7 @@ def get_game(
     detail_size = app_size_bytes([row["depotid"] for row in depot_rows], depot_bytes)
     return GameDetail(
         appid=app_row["appid"],
-        name=app_row["name"],
+        name=_display_name(app_row["name"], classification),
         status=app_row["status"],
         last_prefill_at=app_row["last_prefill_at"],
         last_manifest_check=app_row["last_manifest_check"],

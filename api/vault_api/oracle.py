@@ -339,6 +339,10 @@ class OracleAppInfo:
     #: ``common.parent`` (the game this app is content of), ``None`` if absent,
     #: invalid or the app itself.
     parent_appid: int | None = None
+    #: ``common.name`` as plain display text (``app_classification.
+    #: valid_app_name``: control characters dropped, capped), ``None`` if
+    #: absent.
+    name: str | None = None
     #: The content packages this answer names for its app: ``extended.
     #: listofdlc`` plus every depot's ``dlcappid``, sorted, self excluded.
     dlc_appids: tuple[int, ...] = ()
@@ -610,15 +614,17 @@ def _parse_dlc_list(value: object, warnings: list[str]) -> list[int]:
 
 def _parse_classification(
     appid: int, app: Mapping[str, object], warnings: list[str]
-) -> tuple[str | None, int | None, list[int]]:
-    """``common.type``, ``common.parent`` and ``extended.listofdlc`` (WP
-    TOOL-APPS-2a). A missing or malformed field means "unknown", never an
-    error: grouping degrades to the flat list."""
+) -> tuple[str | None, int | None, str | None, list[int]]:
+    """``common.type``, ``common.parent``, ``common.name`` and
+    ``extended.listofdlc`` (WP TOOL-APPS-2a). A missing or malformed field
+    means "unknown", never an error: grouping degrades to the flat list."""
     app_type: str | None = None
     parent: int | None = None
+    name: str | None = None
     common = app.get("common")
     if isinstance(common, dict):
         app_type = app_classification.app_type_from_pics(common.get("type"))
+        name = app_classification.valid_app_name(common.get("name"))
         raw_parent = common.get("parent")
         if isinstance(raw_parent, (str, int)) and not isinstance(raw_parent, bool):
             parent = deletion.coerce_positive_id(raw_parent)
@@ -628,7 +634,7 @@ def _parse_classification(
     dlc: list[int] = []
     if isinstance(extended, dict):
         dlc = _parse_dlc_list(extended.get("listofdlc"), warnings)
-    return app_type, parent, dlc
+    return app_type, parent, name, dlc
 
 
 def _bounded_links(appid: int, links: Iterable[int], warnings: list[str]) -> tuple[int, ...]:
@@ -653,7 +659,7 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
     app = _app_object(appid, document)
 
     warnings: list[str] = []
-    app_type, parent_appid, dlc_links = _parse_classification(appid, app, warnings)
+    app_type, parent_appid, name, dlc_links = _parse_classification(appid, app, warnings)
     depots = app.get("depots")
     if not isinstance(depots, dict):
         _warn(warnings, "no usable 'depots' object: nothing was recorded")
@@ -666,6 +672,7 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
             warnings=tuple(warnings),
             app_type=app_type,
             parent_appid=parent_appid,
+            name=name,
             dlc_appids=_bounded_links(appid, dlc_links, warnings),
         )
 
@@ -700,7 +707,7 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
                 else None
             )
             if dlc is None:
-                _warn(warnings, f"ignored depot {depotid}: unusable dlcappid")
+                _warn(warnings, f"ignored unusable dlcappid of depot {depotid}")
             else:
                 dlc_links.append(dlc)
         manifests = raw_depot.get("manifests")
@@ -748,6 +755,7 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
         warnings=tuple(warnings),
         app_type=app_type,
         parent_appid=parent_appid,
+        name=name,
         dlc_appids=_bounded_links(appid, dlc_links, warnings),
     )
 
@@ -792,8 +800,8 @@ def store_app_info(
             """
             INSERT INTO oracle_app_state
                 (appid, buildid, checked_at, source, depot_count, branch_count,
-                 app_type, parent_appid)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 app_type, parent_appid, name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (appid) DO UPDATE SET
                 buildid      = excluded.buildid,
                 checked_at   = excluded.checked_at,
@@ -801,7 +809,8 @@ def store_app_info(
                 depot_count  = excluded.depot_count,
                 branch_count = excluded.branch_count,
                 app_type     = excluded.app_type,
-                parent_appid = excluded.parent_appid
+                parent_appid = excluded.parent_appid,
+                name         = excluded.name
             """,
             (
                 info.appid,
@@ -812,6 +821,7 @@ def store_app_info(
                 len(info.open_branches),
                 info.app_type,
                 info.parent_appid,
+                info.name,
             ),
         )
         # WP TOOL-APPS-2a: the content-package links, same snapshot semantics.
