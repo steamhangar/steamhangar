@@ -1322,6 +1322,10 @@ logline=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep "$CHUNK" | head 
 # cache=..., and this check must pass with or without them. Section 10 reads
 # the two fields when they are present.
 assert_contains "$logline" "cache=" "access log lines carry the vault format's cache= field"
+# WP D15a: the client address is the LAST field (appended after limit_conn=),
+# IPv4 or IPv6 text form. From the host this is the bridge gateway (userland
+# proxy, ADR-0020), so only the shape is pinned, not a specific address.
+assert_eq "1" "$(printf '%s\n' "$logline" | grep -cE ' limit_conn=[A-Z-]+ client=[0-9A-Fa-f.:]+$' || true)" "access log lines end with limit_conn=... client=<address> (WP D15a)"
 
 step "5h. json-file log limits are actually applied to the container"
 run "docker inspect --format '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}}' \$(docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' ps -q vault-core vault-api)"

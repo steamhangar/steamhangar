@@ -1294,6 +1294,12 @@ Tune with `VAULT_LOG_MAX_SIZE` / `VAULT_LOG_MAX_FILE` in `.env`. vault-core
 writes **one line per depot request**, so a large prefill can churn through
 10 MB quickly — raise `max-file` if you want that history to survive.
 
+Since WP D15a every vault-core access-log line ends with `client=<address>`,
+the client's IP address as vault-core sees it (the Docker bridge gateway for
+requests from the host itself), so `docker logs vault-core | grep
+'client=192.168.1.42'` shows one device's requests. It is kept as long as the
+rotation above keeps the log; there is no switch to turn it off.
+
 `vault-dns` deliberately does **not** log queries. It is your LAN's forwarding
 resolver for *every* domain, so query logging would record full
 browsing-metadata-level history for every device. See `dns/README.md`
