@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D12)
+# Handover: post-v0.1.0 roadmap (items D1-D14)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -181,6 +181,9 @@ non-interactive select-apps (#427).
 **Goal.** Each household member's games can be prefilled with their own
 session, and the library shows everyone's games.
 
+**Also (user, 2026-10-13):** in multi-client and multi-account setups every
+game needs a visible note on which device or account it belongs to.
+
 **Facts.**
 - SteamPrefill supports exactly one session per install: `Config/` is
   hard-wired to `AppContext.BaseDirectory/Config`, and there is no
@@ -329,6 +332,23 @@ hand, or QR login (D2). The user decides.
 wraps into a column of letters and "Failed" falls off. The view toggle
 (`LibraryScreen.kt:387`) wraps. The cause of the empty area and the tall
 header is unknown and needs investigation first.
+
+## D13: SPEED-1, download speed display
+
+User request 2026-10-13. No package exists today (checked PROJECT_PLAN,
+WORKPACKAGES, this roadmap). Proposed, not decided: show the current
+throughput of a running job in Downloads (web and Android), derived from
+vault-core's event log or the job's byte counter; open point is whether it
+is per job or per client, and how it relates to the upstream rate cap.
+
+## D14: UPD-1..4, always-on update check (user decision 2026-10-13)
+
+Check cached games for updates independent of the schedule; only an
+open schedule window also starts the download. Cached games only; only
+production checks (the dev instance stays offline). Badge "Update
+available" plus a "Check updates" button and filter chip on web and
+Android. Supersedes the "Check & update, never bare Check" rule of
+2026-08-18 (ADR addendum in UPD-4).
 
 ## Suggested order
 
