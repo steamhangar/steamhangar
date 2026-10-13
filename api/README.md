@@ -628,7 +628,7 @@ route, see "Auth").
 | DELETE | `/v1/mapping/{depotid}/{appid}`    | Remove one mapping pair (correction path for the additive `PUT`, see below); `204` on success, `404` if the pair doesn't exist, `422` for non-positive ids |
 | POST   | `/v1/prefill`                      | Body `{"appids": [int, ...]}` — queue one prefill job per app id. `202` with a list of `{appid, job_id, status, deduplicated}`. `422` for an empty list, an appid `< 1`, a non-list, or an unrecognized body field; `422` with a string `detail` (nothing queued) when the body names a Steam tool app (WP API-FIX-4, see "Steam tool apps" below) |
 | POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). Steam tool apps are never selected (WP API-FIX-4). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
-| GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
+| GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
 | POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued or running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5) and `"requested"` for a running one. `404` unknown id; `409` for a GC job or a job that is already `paused` or finished |
@@ -646,6 +646,9 @@ route, see "Auth").
 | GET    | `/v1/updates/status`               | Update check status (WP UPD-1): `{enabled, scheduled, running, last_trigger, last_started_at, last_finished_at, last_outcome, last_apps, last_ok, last_failed, last_stale}`. `scheduled` is `true` when the oracle is on AND a schedule window is configured (effective value, a `PATCH /v1/settings` window counts at once), `false` = manual checks only. `last_trigger` is `manual`/`scheduled`; `last_outcome` is `completed`, `bailed_out` (stopped after 5 failed oracle requests in a row), `aborted` (shutdown), `error` (bug, see the log) or `interrupted` (the process died during the run); outcome, finish stamp and counters are `null` while running. All `last_*` are `null` before the first run. No network |
 | GET    | `/v1/schedule`                     | Scheduler config + last-sweep bookkeeping: `{enabled, window, overnight, interval_minutes, client_stale_days, server_timezone, last_sweep_at, last_sweep_targets, last_sweep_enqueued, next_eligible_at}`. **Read-only itself** — the window/interval/staleness values are now writable through `PATCH /v1/settings` (settings-API work package, ADR-0009; see "Persisted settings" below), this endpoint just reports the currently EFFECTIVE configuration, override included |
 | GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, rotations_detected_total, last_rotation_detected_at, traffic_since, top_unmapped_depots[]}` (the three before the list: WP D15b). **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
+| GET    | `/v1/throughput`                   | WP D15b (D13 SPEED-1): Downloads header numbers from the traffic tiers. `?range=24h` (default) `|7d|30d|all`. `{event_feed, range, tier, bucket_seconds, range_start, active_window_minutes, current, active_clients_now, summary, jobs[]}`; traffic fields are `null` with the event feed off. See "Clients overview and throughput (WP D15b)" below |
+| GET    | `/v1/throughput/series`            | WP D15b: server-wide traffic per bucket for graphs, zero-filled, oldest first. `?range=` as above (24h: 288 x 5 min, 7d: 168 x 1 h, 30d: 720 x 1 h, all: daily from the first recorded day) |
+| GET    | `/v1/clients/overview`             | WP D15b: agent clients merged with every event-log address (agentless machines too): connected, installed (agents), loading now, recently loaded apps, per-range stats. `?range=7d` (default) `|24h|30d|all`. `GET /v1/clients` is unchanged |
 | GET    | `/v1/steam/key`                    | Opt-in Steam Web API relay (WP 4a.6r): key status only — `{configured, key_last4}`. `key_last4` is `null` when unconfigured; the full key is never returned |
 | PUT    | `/v1/steam/key`                    | Body `{"key": str}` — set (or replace) the relay's Web API key. `200` with the same shape `GET` returns; `422` unless `key` is exactly 32 hexadecimal characters |
 | DELETE | `/v1/steam/key`                    | Clear the configured key. `204` whether or not one was set |
@@ -4137,6 +4140,165 @@ detection keep reading them.
 
 Privacy: this is a lasting per-IP activity record; see
 `docs/security/threat-model.md` §6, "Longer retention since WP D15b".
+
+## Clients overview and throughput (WP D15b)
+
+`vault_api/routers/traffic.py`. Three read-only endpoints over the traffic
+tiers above, for the web Clients page and Downloads header (D15c) and
+Android (D15d). All take `range` = `24h` | `7d` | `30d` | `all`; anything
+else is `422`. `24h` reads 5-minute rows, `7d`/`30d` hourly rows, `all` daily
+rows. Byte values are integers, speeds floats in bytes per second, times
+UTC `YYYY-MM-DDTHH:MM:SSZ`.
+
+### `event_feed` — in every response
+
+```json
+{"enabled": true, "state": "ok", "last_sweep_at": "2026-10-13T20:05:00Z",
+ "sweep_interval_minutes": 5, "traffic_since": "2026-10-13T19:00:00Z"}
+```
+
+`state` is one of:
+
+- `disabled` — `VAULT_EVENT_LOG_PATH` is empty. **Every traffic field is
+  `null`** (not `0`: nothing was measured), series are `[]`, agentless
+  clients are not listed. Agent clients still appear with their presence
+  and installed games. The UI should say "enable the event log" rather
+  than show zeros.
+- `never-swept` — enabled, but no sweep has run yet (fresh start).
+- `stale` — the last sweep is older than three sweep intervals. Stored
+  totals are reported; `current`, `active_clients_now`, `loading_now` and
+  `cache_active` are `null`.
+- `ok`.
+
+`traffic_since` is when the tiers started filling (the v23 upgrade): nothing
+before it was recorded, so "all" starts there.
+
+### `GET /v1/throughput?range=24h`
+
+```json
+{"event_feed": {...}, "range": "24h", "tier": "5m", "bucket_seconds": 300,
+ "range_start": "2026-10-12T20:10:00Z", "active_window_minutes": 15,
+ "current": {"bytes_per_second": 41943040.0,
+             "window_start": "2026-10-13T20:00:00Z",
+             "window_end": "2026-10-13T20:08:00Z", "window_seconds": 480},
+ "active_clients_now": 2,
+ "summary": {"bytes_served": 64424509440, "hit_bytes": 53687091200,
+             "miss_bytes": 10737418240, "requests": 120034, "hits": 100100,
+             "misses": 19900, "errors": 34, "hit_rate": 0.834,
+             "byte_hit_rate": 0.833, "average_bytes_per_second": 52428800.0,
+             "peak_bytes_per_second": 104857600.0, "active_clients": 3},
+ "jobs": [{"job_id": 812, "appid": 440, "name": "Some Game",
+           "started_at": "2026-10-13T19:55:00Z", "bytes_per_second": 31457280.0,
+           "bytes_since_start": 9437184000, "exclusive_depots": 2}]}
+```
+
+- **`current`** is the average over the previous 5-minute bucket plus the
+  part of the bucket the last sweep fell into (`window_seconds` 300..600),
+  ending at the last sweep. It is not a live gauge: the sweep runs every
+  `VAULT_EVENT_SWEEP_INTERVAL_MINUTES` and nginx flushes every 5 s. `null`
+  unless `event_feed.state` is `ok`.
+- **`active_clients_now`**: addresses with a line within
+  `active_window_minutes` (2 x sweep interval + 5 = 15 by default).
+- **`summary`** over the range: `hit_bytes` is "GB saved from the cache"
+  (served from disk), `miss_bytes` what was fetched upstream while serving,
+  `bytes_served` their sum plus bypassed bytes. `hit_rate` counts requests,
+  `byte_hit_rate` bytes; both `null` with no hits and no misses.
+  `average_bytes_per_second` is the average **while loading** (bytes over the
+  5-minute buckets that carried traffic), `null` when nothing was loaded;
+  `peak_bytes_per_second` the busiest 5-minute bucket. `active_clients`:
+  distinct addresses that loaded bytes in the range.
+- **`jobs`**: one entry per RUNNING prefill job, never omitted. Attribution
+  is by depot: bytes on the app's **exclusive** depots (in `depot_app_map`
+  for this app only) from any address. A shared depot is not counted, and a
+  client loading the same game at the same time is counted in. `null` speeds
+  when the feed is not `ok` or `exclusive_depots` is 0 (no mapping yet).
+  `bytes_since_start` is bucket-aligned (5-minute buckets within 48 h).
+
+### `GET /v1/throughput/series?range=24h`
+
+```json
+{"event_feed": {...}, "range": "24h", "tier": "5m", "bucket_seconds": 300,
+ "range_start": "2026-10-12T20:10:00Z",
+ "points": [{"t": "2026-10-12T20:10:00Z", "bytes_served": 0, "hit_bytes": 0,
+             "miss_bytes": 0, "requests": 0, "bytes_per_second": 0.0,
+             "peak_bytes_per_second": 0.0}, ...]}
+```
+
+Oldest first, zero-filled up to the bucket "now" falls in (288 points for
+24h, 168 for 7d, 720 for 30d, one per UTC day from the first recorded day for
+`all`). `bytes_per_second` is the bucket's wall-clock average,
+`peak_bytes_per_second` its busiest 5-minute bucket (equal for `24h`).
+
+### `GET /v1/clients/overview?range=7d`
+
+```json
+{"event_feed": {...}, "range": "7d", "tier": "1h",
+ "range_start": "2026-10-07T21:00:00Z", "active_window_minutes": 15,
+ "clients": [
+  {"key": "agent:gaming-pc", "kind": "agent", "client_id": "gaming-pc",
+   "addresses": ["192.168.1.42"], "connected": true,
+   "agent_presence": "online", "cache_active": true,
+   "last_active": "2026-10-13T20:07:58Z",
+   "last_seen_in_cache_log": "2026-10-13T20:07:58Z",
+   "last_reported_at": "2026-10-13T19:50:00Z",
+   "installed_appids": [440, 570], "installed_app_count": 2,
+   "stats": {"bytes_served": 1073741824, "hit_bytes": 805306368,
+             "miss_bytes": 268435456, "requests": 2048, "hits": 1536,
+             "misses": 512, "hit_rate": 0.75},
+   "loading_now": {"loading": true, "bytes_per_second": 31457280.0,
+                   "apps": [{"appid": 440, "name": "Some Game",
+                             "bytes_per_second": 31457280.0}],
+                   "unattributed_bytes_per_second": 0.0},
+   "recent_apps": [{"appid": 440, "name": "Some Game",
+                    "bytes_served": 1073741824,
+                    "last_seen": "2026-10-13T20:07:58Z"}],
+   "recent_unattributed_bytes": 0},
+  {"key": "addr:192.168.1.77", "kind": "address", "client_id": null,
+   "addresses": ["192.168.1.77"], "connected": false,
+   "agent_presence": null, "cache_active": false,
+   "last_active": "2026-10-11T18:00:12Z", ..., "installed_appids": null,
+   "installed_app_count": null, ...}]}
+```
+
+- **Who is listed:** every agent client (as `GET /v1/clients`), plus every
+  address with event-log traffic in the last 30 days or in the range that no
+  agent owns. Sorted connected first, then newest `last_active`.
+- **Address → agent:** an address belongs to the ONE agent whose newest
+  report arrived from it (`agent_reports.source_addr`), so a DHCP address
+  moving between PCs follows the PC that has it now. `addresses` therefore
+  can differ from `GET /v1/clients`' `source_addrs` (all retained
+  addresses). If agents reach vault-api through a reverse proxy, the
+  recorded address is the proxy's: no mapping is possible and the PC shows
+  twice (agent entry without traffic, address entry with it). The prefill
+  runner's own downloads appear as an address client (vault-runner's
+  container address). There is no naming of agentless addresses yet (the
+  event log has IPs only, no reverse DNS by design).
+- **`connected`**: agent `online` (`GET /v1/clients`' presence rule) or
+  cache activity within `active_window_minutes`. For an address client it is
+  `cache_active`, `null` when the feed is not `ok`.
+- **`installed_appids`**: agent clients only (latest report); `null` for
+  addresses and for an unreadable snapshot.
+- **`stats`** sum the client's addresses over the range; `null` with the
+  feed disabled.
+- **`loading_now`** uses the same window as `/v1/throughput`'s `current`;
+  `null` unless the feed is `ok`; `loading: false` with zero speed when idle.
+- **`recent_apps`**: top 10 apps by bytes in the range. Depot → app through
+  `depot_app_map` at read time; a depot mapped to no app or to several (a
+  shared redistributable) cannot say which game pulled it, and its bytes are
+  in `recent_unattributed_bytes` / `unattributed_bytes_per_second` (as are
+  lines without a depot id for `loading_now`). `name` is `apps.name`, `null`
+  when unknown.
+
+### What WP D15b deliberately did NOT do
+
+- No event-log rotation on the vault-core side (D15-ROT); the sweeper only
+  survives one (inode/shrink detection). It does not read the renamed old
+  file's unread tail.
+- No names for agentless addresses, no reverse DNS, no per-address history
+  deletion, no retention setting for the daily tier.
+- `GET /v1/jobs` keeps its 1..200 `limit`; there is no paging for long
+  history views.
+- No web or Android UI (D15c/D15d), no change to `GET /v1/clients`.
 
 ## Webhooks (WP 3.13)
 

@@ -23,6 +23,8 @@ twice (once on the code, once on the state it then reads anyway).
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -362,14 +364,50 @@ def create_cached_prefill_jobs(
     return refs
 
 
+#: WP D15b: the Downloads history filter's ranges.
+_HISTORY_RANGES = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
 @router.get("/v1/jobs", response_model=list[JobSummary])
 def list_recent_jobs(
     limit: int = Query(default=20, ge=1, le=200),
+    range: Literal["24h", "7d", "30d", "all"] | None = Query(default=None),  # noqa: A002
+    since: str | None = Query(default=None),
     open_db: DbOpener = Depends(db_opener),
 ) -> list[JobSummary]:
-    """Most recent jobs, newest first — the app's polling list."""
+    """Most recent jobs, newest first — the app's polling list.
+
+    WP D15b, the Downloads history filter (backward compatible: without
+    either parameter nothing changes). ``range`` = ``24h``/``7d``/``30d``
+    keeps finished jobs that finished within that period, ``all`` keeps
+    everything; ``since`` = a UTC ``YYYY-MM-DDTHH:MM:SSZ`` timestamp does the
+    same from an explicit point. Queued, running and paused jobs are always
+    included. Giving both is a 422, as is a malformed ``since``. ``limit``
+    still applies unchanged (1..200, newest first).
+    """
+    if range is not None and since is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Give either 'range' or 'since', not both.",
+        )
+    cutoff: str | None = None
+    if since is not None:
+        if jobs_queue.parse_utc_iso(since) is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'since' must be a UTC timestamp like 2026-10-13T00:00:00Z.",
+            )
+        cutoff = since
+    elif range is not None and range in _HISTORY_RANGES:
+        cutoff = jobs_queue.to_utc_iso(
+            datetime.now(timezone.utc) - _HISTORY_RANGES[range]
+        )
     with open_db() as conn:
-        rows = jobs_queue.list_jobs(conn, limit)
+        rows = jobs_queue.list_jobs(conn, limit, since=cutoff)
     return [JobSummary(**row) for row in rows]  # type: ignore[arg-type]
 
 
