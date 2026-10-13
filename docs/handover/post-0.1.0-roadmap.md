@@ -398,7 +398,9 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
    (`VAULT_MANIFEST_ORACLE`, ADR-0006 decision 4), so in prod it does
    nothing until the oracle is on. Decided 2026-10-13 (user, option A):
    the oracle defaults to on in code; the ADR-0006 addendum lands in
-   UPD-4, no prod .env change.
+   UPD-4, no prod .env change. A manual "Check updates" on the dev
+   instance may query the oracle (metadata only, user decision
+   2026-10-13); dev.env stays unchanged.
 2. **UPD-2 (web)** "Check updates" button (calls `POST
    /v1/updates/check`, no download), "Update available" badge from
    `update_available`, an "Updates" filter chip. The existing "Check &
