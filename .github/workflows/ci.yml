@@ -244,9 +244,13 @@ jobs:
     # Cold-cache Gradle (wrapper distribution + AGP/Kotlin/Compose dependency
     # resolution, none of it warm on a fresh runner) is slower than the
     # pytest/go/node jobs above, though nowhere near verify-stack's
-    # build-four-images-and-run-a-live-stack scope -- 20 minutes gives a cold
-    # run headroom without reaching into the heavier tier's 30.
-    timeout-minutes: 20
+    # build-four-images-and-run-a-live-stack scope -- 20 minutes gave a cold
+    # run headroom without reaching into the heavier tier's 30. WP
+    # APP-TEST-1 raised it to 25: the screenshot tests make Robolectric
+    # fetch its SDK 35 android-all jar from Maven Central into ~/.m2 on
+    # EVERY run (setup-java's gradle cache covers ~/.gradle only) and render
+    # with native graphics; the first CI run is the measurement.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -332,6 +336,53 @@ jobs:
           echo "::stop-commands::${stop_token}"
           bash gradlew assembleDebug testDebugUnitTest testReleaseUnitTest lintDebug --console=plain 2>&1 \
             | tee "${RUNNER_TEMP}/android-gradle.log"
+      # WP APP-TEST-1: the library screenshot tests run inside
+      # testDebugUnitTest above (Roborazzi on Robolectric, no emulator). Per
+      # image they VERIFY against a checked-in golden
+      # (app/app/src/testDebug/screenshots/) -- a pixel difference fails the
+      # test and with it the gradle step -- or, when no golden exists yet,
+      # RECORD into build/outputs/roborazzi/new-goldens/ and pass. These two
+      # steps only report and publish what the tests left behind; neither
+      # can turn a red job green or a green one red. `!cancelled()` instead
+      # of `always()`: after a failed gradle step the diff images are the
+      # point, after a cancel there is nothing worth keeping.
+      - name: "screenshots: summary"
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          out=app/app/build/outputs/roborazzi
+          new=0
+          changed=0
+          if [ -d "$out/new-goldens" ]; then
+            new="$(find "$out/new-goldens" -type f -name '*.png' | wc -l | tr -d ' ')"
+          fi
+          if [ -d "$out/diffs" ]; then
+            changed="$(find "$out/diffs" -type f -name '*_compare.png' | wc -l | tr -d ' ')"
+          fi
+          {
+            echo "### Android screenshots"
+            echo ""
+            echo "- recorded without a golden (new): ${new}"
+            echo "- differing from their golden (failed): ${changed}"
+            echo ""
+            echo "Images: workflow artifact \`app-screenshots\`. How goldens get checked in: app/README.md, \"Screenshot tests\"."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$new" -gt 0 ]; then
+            echo "::notice title=Screenshot goldens missing::${new} screenshot(s) have no golden yet and were recorded instead of verified. Review them in the app-screenshots artifact and check them in (app/README.md)."
+          fi
+          if [ "$changed" -gt 0 ]; then
+            echo "::error title=Screenshots changed::${changed} screenshot(s) differ from their golden. Compare images are in the app-screenshots artifact (diffs/)."
+          fi
+      - name: "screenshots: upload artifact"
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-screenshots
+          path: app/app/build/outputs/roborazzi/
+          # Nothing to upload is the normal case once every golden exists
+          # and all of them match -- not a warning, not a failure.
+          if-no-files-found: ignore
+          retention-days: 14
       # WP CI-FIX-2: one step per category, because GitHub keeps at most 10
       # error annotations per step (and 50 per job: 4 x 10 fits). Each step
       # only adds information -- it runs after the job already failed and
@@ -349,6 +400,7 @@ jobs:
           --results-dir app/app/build/test-results
           --test-root app/app/src/test/java
           --test-root app/app/src/test/kotlin
+          --test-root app/app/src/testDebug/java
       - name: "annotate: lint issues"
         if: failure()
         shell: bash
