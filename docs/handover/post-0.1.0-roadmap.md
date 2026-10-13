@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D15)
+# Handover: post-v0.1.0 roadmap (items D1-D16)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -368,6 +368,22 @@ per running job. Downloads history gets a time filter: 24 h, 7 days,
 speed, GB loaded, graphs, hit rate, GB saved from the cache, peak speed,
 active clients. PC add/manage moves from Settings into the Clients page.
 Order: after UPD-1..4.
+
+## D16: SETTINGS-1, fewer env values, an expert mode, a calmer Settings page
+
+User request and decisions 2026-10-13. Keep as few values as possible
+fixed in the env; move them into Settings behind a collapsible expert
+mode. Candidates (all four chosen): upstream rate cap and its window,
+TLS and upstream caps, prefill threads, GC and retention timings. Risky
+values get a confirmation dialog and the same validation grammar as the
+env today. Core path (chosen): vault-api writes the values to a file on
+a shared volume, vault-core renders its nginx includes from it
+(`26-`, `27-`, `28-vault-*.sh` today read env at boot) and reloads with
+`nginx -s reload`, no restart. This needs a compose volume change, which
+is an Antrag to the user, never a self-service edit. Also audit the
+Settings page structure (web/js/views/settings.js, 1466 lines; 9
+override keys in settings_store.py vs 47 env vars): collapsible sections,
+tooltips instead of text walls. Order: Wave 2, before D15.
 
 ## Suggested order
 
