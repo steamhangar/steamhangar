@@ -430,7 +430,11 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
    the library screen; profiles 411 dp (Pixel reference, API 35) and
    360 dp, font scale 1.0 and 1.3, dark mode. Runs only in GitHub CI
    (`android-tests` job); golden images recorded once in CI, then checked
-   in. No emulator in the devbox (no /dev/kvm).
+   in. No emulator in the devbox (no /dev/kvm). Golden refresh is
+   automated (user decision 2026-10-13, option B): pushing a branch
+   `wp/*-goldens` makes CI record the screenshots and commit them back
+   to that branch with its own GITHUB_TOKEN; no token in the devbox,
+   main is never written by CI.
 6. **D12 APP-FIX-LAYOUT (app)** red screenshot test first, then fix:
    FilterChipsRow scrolls, the layout toggle does not wrap, find the cause
    of the empty area and the tall header.
