@@ -988,6 +988,18 @@ that vault-api makes on every install with no switch:**
    into vault-proxy's image, so no allowlist changed (ADR-0011 addendum
    2026-10-10). An operator who wants no call at all has to block that host
    outside the stack; covers then keep the legacy CDN path.
+7. **Cover image downloads, from vault-api to Steam's image CDN — built,
+   NOT yet reachable (WP D10 COVER-CACHE-1, user decision 2026-10-13 "Weg
+   A").** `api/vault_api/cover_cache.py` downloads each tracked app's cover
+   once from the URL item 6 resolved (`shared.akamai.steamstatic.com` or
+   `cdn.akamai.steamstatic.com`, https, no redirects, at most 4 MiB, JPEG/
+   PNG/WebP only) and stores it under the data volume (512 MiB cap). What
+   the CDN learns: the same app ids item 6 already sends to Valve, from the
+   server's address. **Enforcement: blocked today.** vault-proxy's filter
+   does not allow these two hosts in this release, so every download is
+   refused at the proxy and the feature stays inert; opening them is a
+   separate egress decision (ADR-0011) that has not been applied. This item
+   becomes a live exception only with that change.
 
 Beyond the two core flows named above and the five live exceptions just
 listed (plus the one now-closed historical exception, item 4), nothing
@@ -1085,6 +1097,16 @@ print(secrets.token_urlsafe(36))"` (the `VAULT_API_KEY` entry in
 router except `health` requires it (§1, verified router-by-router); `GET
 /v1/health` is the sole, deliberate exception, returning a fixed
 `{"status": "ok"}` body with no data (`api/vault_api/routers/health.py`).
+**One route takes the key in derived form (WP D10):** `GET
+/v1/covers/{appid}/{signature}` has no `X-Api-Key` header check because
+an `<img>` cannot send one; its path carries the first 128 bits of
+HMAC-SHA256 keyed with `VAULT_API_KEY` over the appid and the stored file's
+hash, handed out only by the authenticated `GET /v1/games`. Without the
+key no URL can be built and every refusal is the same `404` (no
+enumeration of tracked apps); the route only reads files vault-api stored
+itself (not a proxy). A leaked URL exposes one public cover image until the
+cover changes or the key is rotated; it does not reveal the key. These URLs
+do appear in uvicorn's access log and in browser history.
 There is no CORS middleware configured anywhere in `vault_api`
 (verified by search across the package) — a browser will not send the
 custom `X-Api-Key` header to `vault-api` cross-origin without a CORS

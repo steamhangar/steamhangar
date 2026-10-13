@@ -326,7 +326,7 @@ startup error rather than a soft "no data": unset or empty means the default
 is refused, so a typo can neither look like it worked nor silently mean "off". Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v20)
+## Database schema (v21)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -353,6 +353,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `settings` | `key` (PK), `value`, `updated_at` | **v13**, settings-API work package (ADR-0009). One row per OVERRIDDEN key only — a key with no row falls through to its env value or built-in default. `value` is TEXT in the same string grammar the corresponding `VAULT_*` env var uses. See "Persisted settings" below |
 | `runner_presence` | `runner_id` (PK), `build_version`, `build_commit`, `steamprefill_version`, `started_at`, `last_seen` | **v16**, WP VER-2. One row per vault-runner PROCESS, upserted by `prefill_runner` about every 30 s (idle or busy); rows not seen for a day are pruned by the next write. Read only by `GET /v1/about`. See "Component versions" below |
 | `app_cover_art` | `appid` (PK), `cover_url`, `outcome`, `attempts`, `checked_at`, `next_check_at` | **v18**, WP API-FIX-5. One row per app the cover-art lookup asked Steam about: the validated cover URL or NULL, `found`/`none`/`failed`, consecutive failures, when to ask again. Read by `GET /v1/games[/{appid}]` as `cover_url`. See "Cover art lookup" below |
+| `app_cover_file` | `appid` (PK), `source_url`, `sha256`, `content_type`, `size_bytes`, `stored_at`, `attempts`, `next_try_at` | **v21**, WP D10 COVER-CACHE-1. One row per app whose cover image vault-api stores in `<data dir>/covers/<appid>.img`: the URL it came from, the file's SHA-256, type and size (all NULL while nothing is stored), plus the download backoff. Read by `GET /v1/games[/{appid}]` as `cover_cached_url` and by `GET /v1/covers/...`. See "Stored covers" below |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -520,6 +521,10 @@ column types as a fresh database).
 `apps` is untouched. Covered by
 `tests/test_api_fix_5_cover_art.py::test_schema_v18_adds_app_cover_art`.
 
+**v20 → v21 (WP D10 COVER-CACHE-1)** adds the new table `app_cover_file` —
+plain `CREATE TABLE IF NOT EXISTS`, no `ALTER` step. Covered by
+`tests/test_d10_cover_cache.py::test_schema_v21_adds_app_cover_file`.
+
 **Ordering fix (WP 1.5 carry-over from the WP 1.4 review):** `init_db` now
 creates only the `schema_version` table, reads the stored version, and checks
 the downgrade guard *before* running the rest of `_DDL` — previously the full
@@ -614,8 +619,9 @@ route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
-| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`) |
-| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`, `cover_url`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
+| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `cover_cached_url` (WP D10 — the relative path `/v1/covers/{appid}/{signature}` of vault-api's stored copy of that cover, `null` until one is stored; see "Stored covers" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`) |
+| GET    | `/v1/covers/{appid}/{signature}`   | WP D10: the cover image vault-api stored for this app (`image/jpeg`/`png`/`webp`), `ETag` + `Cache-Control: private, max-age=31536000, immutable`, `304` on a matching `If-None-Match`. **No `X-Api-Key`**: the `signature` in the path is an HMAC of the API key (see "Auth"); clients take the URL from `cover_cached_url`. Any refusal is `404`. See "Stored covers" |
+| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`, `cover_url`, `cover_cached_url`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
 | PUT    | `/v1/mapping/{depotid}`            | Body `{"appid": int, "app_name": str \| null}` — **additively** upsert one depot→app mapping fact (manual fallback, see below); `422` for `depotid <= 0`, `appid <= 0`, or an unrecognized body field |
 | GET    | `/v1/mapping`                      | Full depot→app mapping table: list of `{depotid, appid}` |
 | DELETE | `/v1/mapping/{depotid}/{appid}`    | Remove one mapping pair (correction path for the additive `PUT`, see below); `204` on success, `404` if the pair doesn't exist, `422` for non-positive ids |
@@ -750,6 +756,53 @@ read `cover_url` from this table and validate it again (the database file is
 editable); `null` means "use the legacy path", which both frontends do.
 Privacy: the tracked app ids go to Valve from the server, always
 (`docs/security/threat-model.md` §5 item 6).
+
+### Stored covers (WP D10 COVER-CACHE-1)
+
+User decision 2026-10-13 (Weg A): vault-api keeps its own copy of each
+tracked game's cover and serves it over the LAN, so the first load is LAN
+speed and covers still show with the internet down. (Measured 2026-10-13:
+Steam's CDN answers in 0.2-0.8 s with a ten-year `Cache-Control` and an
+ETag, so repeat views were already cached by the clients.)
+
+- **What is downloaded.** `vault_api/cover_cache.py` runs one background
+  thread (started by the lifespan, no setting; first tick after 45 s, then
+  every 60 s). Each tick it first reconciles `<data dir>/covers/` with
+  `app_cover_file` (a missing or wrong-size file is downloaded again, a file
+  without a row and a temp file older than an hour are removed; only names
+  it creates itself are ever touched), then downloads up to 20 covers that
+  are due: apps in `apps` with a resolved `cover_url` and no stored file, or
+  a file from an older URL. Never on a request path.
+- **Bounds.** `<data dir>` is the directory of `VAULT_DB_PATH` (`/data` in
+  the image, the existing persistent volume; no new volume). The file name
+  is `<appid>.img` from a validated integer. One file at most 4 MiB, all
+  files together at most 512 MiB (`MAX_FILE_BYTES`, `MAX_TOTAL_BYTES`); a
+  cover that would pass the total is not stored (one WARNING per process)
+  and is retried a day later, that game keeps loading from the CDN. A body
+  is stored only when it starts with a JPEG, PNG or WebP signature, and the
+  served `Content-Type` comes from that check. Writes go to a temp file in
+  the same directory, then `os.replace`.
+- **Fetching.** HTTPS to exactly `shared.akamai.steamstatic.com` or
+  `cdn.akamai.steamstatic.com` (`cover_art.valid_cover_url` again), no
+  redirects, through `HTTPS_PROXY`. A failure backs that app off (15 min
+  doubling to 24 h), ends the tick and pauses the thread for the same
+  backoff; one WARNING per failure streak, recovery at INFO.
+- **Egress: not yet open.** vault-proxy's filter does not allow these two
+  hosts in this release, so in the shipped stack every download is refused
+  by the proxy and fails soft (clients keep using the CDN). Allowing them is
+  a separate, user-approved change to the egress lock (ADR-0011); until it
+  lands, this feature is inert in a locked stack.
+- **`cover_cached_url`** on `GET /v1/games[/{appid}]`: the relative path
+  `/v1/covers/{appid}/{signature}` once a file is stored, else `null`.
+  `cover_url` keeps its meaning, so older clients are unaffected. Clients
+  try `cover_cached_url` first, then `cover_url`, then the legacy CDN path.
+- **`GET /v1/covers/{appid}/{signature}`** serves the stored bytes with a
+  strong `ETag` (the file's SHA-256), `Cache-Control: private,
+  max-age=31536000, immutable` (the URL changes whenever the content does),
+  `304` for a matching `If-None-Match`, and the file's hash checked on every
+  read (an altered or missing file is `404` and queued for download again).
+  Every refusal is the same `404`. See "Auth" for why this route takes no
+  `X-Api-Key` header.
 
 ### Check & update all cached games (`POST /v1/prefill/cached`, Phase 4c, WP 4c-api)
 
@@ -5456,6 +5509,29 @@ reachable in that shipped profile, keeping its body minimal matters MORE,
 not less. `tests/test_health.py::test_health_body_is_byte_for_byte_unchanged_by_wp_4e7`
 pins the exact response text so a future change is caught by an assertion,
 not a review comment.
+
+**Signature-authenticated: `GET /v1/covers/{appid}/{signature}` (WP D10
+COVER-CACHE-1).** Browsers load covers with `<img src>`, which cannot send
+`X-Api-Key`. So this one route carries its credential in the path instead
+of a header: `signature` is the first 32 hex characters of
+HMAC-SHA256(key = `VAULT_API_KEY`, message = `steamhangar-cover-v1`, appid
+and the stored file's SHA-256). Only the key-authenticated
+`GET /v1/games[/{appid}]` hands these URLs out (`cover_cached_url`), so
+without the key nobody can build one. Consequences, stated plainly:
+
+- it is not an open endpoint: no key-derived URL, no image, and every
+  refusal is the same `404`, so an unkeyed caller cannot learn which apps
+  the vault tracks;
+- it is not a proxy: the handler only reads files `cover_cache.py` stored
+  for known apps, never fetches anything;
+- a leaked URL (browser history, uvicorn's access log, a screenshot of the
+  network tab) lets its holder fetch that one public cover image until the
+  cover changes or the API key is rotated, nothing else;
+- `body_guard.py` skips its header check for exactly the shape
+  `/v1/covers/<1-10 digits>/<32 lowercase hex>`; every other `/v1/covers/...`
+  path still needs the header (`tests/test_d10_cover_cache.py`), and
+  `tests/test_security.py` lists the route as the one signature-authenticated
+  exception.
 
 This is now factually the *only* unauthenticated surface: FastAPI's
 auto-generated docs (`/docs`, `/redoc`) and schema (`/openapi.json`) are

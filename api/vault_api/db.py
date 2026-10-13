@@ -200,7 +200,11 @@ import sqlite3
 #: triggers are recorded, read by ``GET /v1/updates/status``). A v18 database
 #: gets the full table from ``_DDL``; a v19 one gets the three columns from the
 #: per-column-guarded ``_add_missing_update_check_columns`` step.
-SCHEMA_VERSION = 20
+#: v21 (WP D10 COVER-CACHE-1): added ``app_cover_file`` -- one row per app
+#: whose cover image vault-api stores (``vault_api/cover_cache.py``): the URL
+#: it came from, its SHA-256, type and size (NULL while nothing is stored),
+#: plus the download backoff. A brand-new table, so it needs no ``ALTER`` step.
+SCHEMA_VERSION = 21
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -682,6 +686,24 @@ CREATE TABLE IF NOT EXISTS app_cover_art (
 
 CREATE INDEX IF NOT EXISTS idx_app_cover_art_next_check
     ON app_cover_art (next_check_at);
+
+-- WP D10 COVER-CACHE-1 (schema v21): cover images stored by vault-api in
+-- <data dir>/covers/<appid>.img (vault_api/cover_cache.py). sha256,
+-- content_type and size_bytes describe the stored file and are NULL while
+-- none is stored; source_url is the cover_url it was downloaded from (a
+-- different current cover_url means "download again"). attempts and
+-- next_try_at are the download backoff. Served by GET /v1/covers/{appid}/
+-- {signature}; the file's hash is checked on every read.
+CREATE TABLE IF NOT EXISTS app_cover_file (
+    appid        INTEGER PRIMARY KEY,
+    source_url   TEXT,
+    sha256       TEXT,
+    content_type TEXT,
+    size_bytes   INTEGER,
+    stored_at    TEXT,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    next_try_at  TEXT
+);
 
 -- WP UPD-1: bookkeeping of the always-on update check. Single row, the same
 -- CHECK(id = 1) device and claim-then-work rule as schedule_state, but a
