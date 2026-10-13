@@ -685,3 +685,13 @@ host is open:
   `ORACLE_AUTO_ALLOWED_HOST` must stay equal.
 `api/tests/test_upd_1_oracle_egress.py` pins the two parsers against each
 other over a table of values.
+
+## Note 2026-10-13 (WP TOOL-APPS-2a/2b): no egress change
+
+Content-package grouping (ADR-0022) changes no host, filter or allowlist.
+The cover-art lookup on the baked-in `api.steampowered.com` now sets two
+more `data_request` flags (`include_basic_info`, `include_related_items`)
+in the same `GetItems` request; the app ids sent are unchanged. The manifest
+oracle is not asked about any additional app (ADR-0022 Q8 B: classification
+uses the answers the update check already fetches for cached apps), so the
+2026-10-13 addendum's "it receives the cached app ids" stays true as written.

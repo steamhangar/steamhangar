@@ -904,6 +904,22 @@ that vault-api makes on every install with no switch:**
    rather than booting clean and failing every query forever with a
    filtered-403 and no obvious cause (ADR-0011 §3). The two sides are
    pinned against each other by `api/tests/test_upd_1_oracle_egress.py`.
+   **WP TOOL-APPS-2a/2b (2026-10-13):** the set of app ids sent is
+   unchanged (only cached games, user decision Q8 B: no request for
+   uncached content packages). From each answer vault-api now also keeps
+   `common.type`, `common.parent`, `common.name` and the parent's
+   content-package links (`extended.listofdlc`, depot `dlcappid`) as
+   display data (`oracle_app_state`, `oracle_dlc_links`): names are plain
+   text, cleaned of control and invisible characters and capped at 256
+   characters. That data feeds one deletion path: the user-confirmed grouped
+   delete (`DELETE /v1/cache/{appid}?with_packages=true`), where a wrong or
+   poisoned type/parent could add an app to the delete set. Bounds: opt-in
+   per request; the request must repeat exactly the member list the
+   confirmation showed (`members=`, `409` on any difference); only apps
+   whose OWN type is a package type join; fixed-list tool apps never join;
+   any app outside the set still protects its depots
+   (api/README.md "Grouped delete"). GC and every automatic path still only
+   gain protection from oracle data.
 3. **Cover art.** The web UI's Content-Security-Policy allows exactly two
    external image hosts: `img-src 'self' data: https://cdn.akamai.
    steamstatic.com https://shared.akamai.steamstatic.com`
@@ -970,7 +986,10 @@ that vault-api makes on every install with no switch:**
    setting to turn it off, that calls
    `GET https://api.steampowered.com/IStoreBrowseService/GetItems/v1/`
    with one `input_json` parameter: up to 50 tracked app ids per call, a
-   fixed store context (`english`/`US`) and `include_assets`. No Steam Web
+   fixed store context (`english`/`US`) and `include_assets`, plus (WP
+   TOOL-APPS-2a) `include_basic_info` and `include_related_items`, which
+   ask for each item's store type, parent app and name in the same answer
+   without sending anything new. No Steam Web
    API key, no SteamID64, no client id, no vault-api secret. What Valve
    learns: which app ids this vault tracks (every row in `apps`, except
    Steam tool packages), from the server's public address, re-asked about
@@ -981,7 +1000,15 @@ that vault-api makes on every install with no switch:**
    parsed defensively, and only an https URL on
    `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com` is
    stored or served (`cover_art.valid_cover_url`, re-checked on read; the
-   web and Android clients check the same two hosts again).
+   web and Android clients check the same two hosts again). The type,
+   parent and name are stored as display data (`app_classification`):
+   types are mapped onto a fixed vocabulary, ids validated, names cleaned
+   and capped like the oracle's (item 2), all re-validated on read; a name
+   is shown only when vault-api has none of its own and is never written
+   into `apps`. Like item 2's data, the store's type and parent can decide
+   who joins a user-confirmed grouped delete, under the same bounds.
+   One-time effect of the upgrade to schema v22: every tracked app is
+   re-asked at 50 apps per minute instead of over the next 30 days.
    **Enforcement (WP EG-1):** proxy-gated through vault-proxy over
    `HTTPS_PROXY`, via the same `steam_relay.http_fetch` (host pinned, HTTPS
    only, no redirects) as item 1; `api.steampowered.com` was already baked

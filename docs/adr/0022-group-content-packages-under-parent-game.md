@@ -1,10 +1,13 @@
 # ADR-0022: Group DLC/content packages under their parent game (TOOL-APPS-2, roadmap D9)
 
 Date: 2026-10-13
-Status: Proposed. Decided by the user 2026-10-13: Q1, Q4, Q5, Q6; by the
-orchestrator: Q2 (see "Decisions"). Still open until the production check
-P1 has run: Q3, Q7, Q8 ("Open questions"). No code before P1 and those
-answers. Roadmap item D9 (TOOL-APPS-2),
+Status: Accepted 2026-10-13. Decided by the user: Q1 A, Q3 B variant, Q4 A,
+Q5 A, Q6 (user variant), Q7 A, Q8 B (after P1, roadmap D9); by the
+orchestrator: Q2 A and the grouped-delete `members` confirmation. Server
+side implemented in TOOL-APPS-2a/2b and documented in TOOL-APPS-2e
+(api/README.md "Content packages" and "Grouped delete"; threat model §5
+items 2 and 6; ADR-0006/0007 addenda and an ADR-0011 note of 2026-10-13).
+UIs: TOOL-APPS-2c/2d. (Original status: Proposed, Q3/Q7/Q8 open until P1.) Roadmap item D9 (TOOL-APPS-2),
 `docs/handover/post-0.1.0-roadmap.md`, wave plan item 11. Extends the
 API-FIX-4 tool-app rule (`api/vault_api/tool_apps.py`, api/README.md
 "Steam tool apps"). Touches ADR-0003 (deletion, decision Q6), and, only
