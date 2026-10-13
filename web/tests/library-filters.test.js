@@ -50,11 +50,43 @@ test("normalizeQuery trims and lowercases", () => {
   assert.equal(normalizeQuery(undefined), "");
 });
 
-test("FILTER_DEFS has no 'stale'/'update ready' chip (no oracle data on GET /v1/games yet)", () => {
+test("FILTER_DEFS: the only update chip is the optional 'updates' one (WP UPD-2), never a mockup 'stale'/'upd' key", () => {
   assert.equal(
     FILTER_DEFS.some((f) => f.key === "stale" || f.key === "upd"),
     false,
   );
+  const upd = FILTER_DEFS.find((f) => f.key === "updates");
+  assert.ok(upd, "the 'updates' chip exists");
+  assert.equal(upd.label, "Updates");
+  assert.equal(upd.optional, true);
+});
+
+test("WP UPD-2: chipCounts lists 'Updates' ONLY when the rows carry update_available (older vault-api: five chips)", () => {
+  const keysOld = chipCounts(GAMES, { query: "", liveJobsByAppid: LIVE }).map((c) => c.key);
+  assert.deepEqual(keysOld, ["all", "cached", "none", "downloading", "failed"]);
+  const withField = GAMES.map((g) => ({ ...g, update_available: g.appid === 1 }));
+  const counts = chipCounts(withField, { query: "", liveJobsByAppid: LIVE });
+  assert.deepEqual(counts.map((c) => c.key), ["all", "cached", "none", "downloading", "failed", "updates"]);
+  assert.equal(counts.find((c) => c.key === "updates").count, 1);
+});
+
+test("WP UPD-2: the 'Updates' chip stays while a search hides every row that carries the field; its count follows the query", () => {
+  const withField = GAMES.map((g) => ({ ...g, update_available: g.appid === 1 }));
+  const counts = chipCounts(withField, { query: "copper", liveJobsByAppid: LIVE });
+  const upd = counts.find((c) => c.key === "updates");
+  assert.ok(upd, "chip presence depends on the whole list, not the query");
+  assert.equal(upd.count, 0);
+});
+
+test("WP UPD-2: visibleGames 'updates' shows exactly the update_available === true rows (truthy non-booleans do not count)", () => {
+  const rows = [
+    game({ appid: 1, update_available: true, status: "done", size_bytes: 1 }),
+    game({ appid: 2, update_available: false }),
+    game({ appid: 3, update_available: "yes" }),
+    game({ appid: 4 }),
+  ];
+  const list = visibleGames(rows, { query: "", filterKey: "updates", liveJobsByAppid: new Map() });
+  assert.deepEqual(list.map((g) => g.appid), [1]);
 });
 
 test("visibleGames: 'all' with no query returns everything", () => {

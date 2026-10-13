@@ -54,6 +54,15 @@
  * apply to their own status icons. Verified live with a screen reader
  * (see the WP 4a.8 coder's report); not unit-tested (DOM-building
  * component, see this file's own long-standing header note above).
+ *
+ * **"Update available" badge (WP UPD-2).** `game.update_available === true`
+ * (WP UPD-1: a stale oracle verdict on a game with cache content) adds a
+ * `.updbadge` span to the meta row, on its own line like `.instbadge`, and
+ * an "Update available" fragment to the card's accessible name. It is NOT a
+ * status kind: `dispKind`/`data-dk` are unchanged, the card still says
+ * "Cached" (the copy on disk is valid, just not the newest). `views/
+ * library.js` full-renders when the flag flips (`updateFlagsChanged`), and
+ * `patchCardVolatile` keeps the badge in sync as well.
  */
 
 import { createStatusIcon, STATUS_LABEL } from "./status-icon.js";
@@ -154,6 +163,37 @@ function syncInstalledTag(metaEl, game) {
   }
 }
 
+export const UPDATE_BADGE_TEXT = "Update available";
+export const UPDATE_BADGE_COMPACT_TEXT = "Update";
+
+/**
+ * Create or remove the `.updbadge` child of a card's `.meta` row so it
+ * matches `game.update_available` (WP UPD-2). Plain text, no icon, no
+ * animation — the same documented exception to `patchCardVolatile`'s
+ * "no node created or removed" rule as `syncInstalledTag`. Two children like
+ * `.instbadge`: CSS shows the compact word in cols3 and list.
+ * @param {HTMLElement} metaEl
+ * @param {object} game
+ */
+function syncUpdateTag(metaEl, game) {
+  const existing = metaEl.querySelector(".updbadge");
+  if (game.update_available !== true) {
+    if (existing) existing.remove();
+    return;
+  }
+  if (existing) return;
+  const tag = document.createElement("span");
+  tag.className = "updbadge";
+  const full = document.createElement("span");
+  full.className = "ubfull";
+  full.textContent = UPDATE_BADGE_TEXT;
+  const compact = document.createElement("span");
+  compact.className = "ubcompact";
+  compact.textContent = UPDATE_BADGE_COMPACT_TEXT;
+  tag.append(full, compact);
+  metaEl.appendChild(tag);
+}
+
 /**
  * Patch the VOLATILE text on an already-built card in place. The
  * status-icon `<svg>` subtree (and any CSS animation running on it) is
@@ -196,7 +236,10 @@ export function patchCardVolatile(cardEl, game, kind) {
   const sizeEl = cardEl.querySelector(".meta .size");
   if (sizeEl) sizeEl.textContent = formatBytesGB(game.size_bytes) || "—";
   const metaEl = cardEl.querySelector(".meta");
-  if (metaEl) syncInstalledTag(metaEl, game);
+  if (metaEl) {
+    syncInstalledTag(metaEl, game);
+    syncUpdateTag(metaEl, game);
+  }
   // Keep the explicit accessible name (module header) in sync too — `kind`
   // is unchanged by definition on the patch path (round-7 rule), but the
   // SIZE this same tick just wrote above is part of the announced name and
@@ -366,6 +409,7 @@ function cardAccessibleLabel(game, kind) {
   const parts = [displayName(game), statusWordFor(kind, STATUS_LABEL)];
   const sizeText = formatBytesGB(game.size_bytes);
   if (sizeText) parts.push(sizeText);
+  if (game.update_available === true) parts.push(UPDATE_BADGE_TEXT);
   const installedText = installedAriaFragment(game, kind);
   if (installedText) parts.push(installedText);
   return parts.join(" — ");
@@ -450,6 +494,7 @@ export function buildCard(game, ctx) {
   size.className = "size";
   size.textContent = formatBytesGB(game.size_bytes) || "—";
   meta.appendChild(size);
+  syncUpdateTag(meta, game); // WP UPD-2: appends `.updbadge` iff update_available
   syncInstalledTag(meta, game); // WP AG-2: appends `.instbadge` iff installed_on is non-empty
   card.appendChild(meta);
 
