@@ -4,25 +4,27 @@ import android.app.Application
 import android.content.ComponentName
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -38,13 +40,14 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.ui.downloads.logic.countPending
 import dev.steamvault.app.ui.library.logic.LibraryLayout
-import dev.steamvault.app.ui.nav.BottomNavBar
 import dev.steamvault.app.ui.nav.Destination
+import dev.steamvault.app.ui.nav.MainShell
 import dev.steamvault.app.ui.theme.SteamVaultTheme
 import java.io.File
 import kotlin.math.roundToInt
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
@@ -61,10 +64,10 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Screenshot tests of the Library screen (WP APP-TEST-1), Roborazzi on
- * Robolectric. They exist so D12 (`docs/handover/post-0.1.0-roadmap.md`:
+ * Robolectric. They showed D12 (`docs/handover/post-0.1.0-roadmap.md`:
  * FilterChipsRow does not scroll, the layout toggle wraps, an empty area,
- * a tall header) can be shown red first and then fixed -- this WP renders
- * the screen as it is and fixes nothing.
+ * a tall header) red first; WP D12 fixed it and added [assertLayout],
+ * which names the layout properties each shot must keep.
  *
  * Profiles (brief): 411 dp wide (Pixel reference) and 360 dp, font scale
  * 1.0 and 1.3, plus dark mode. The app theme is single-dark on purpose
@@ -73,16 +76,13 @@ import org.robolectric.annotation.GraphicsMode
  * reading the system setting. One extra shot covers the List layout in the
  * worst-case profile.
  *
- * What is rendered is the screen INSIDE the app shell, mirrored from
- * `MainActivity.setContent`: edge-to-edge window, outer Scaffold with the
- * bottom navigation bar, `LibraryScreen` in a Box padded by the outer
- * Scaffold's content padding. Rendering `LibraryScreen` alone would hide
- * exactly the nesting that D12's "empty area" / "tall header" may come
- * from. Robolectric reports zero system-bar insets on its own, so
- * [simulateSystemBars] dispatches fixed ones (status 24 dp, navigation
- * 48 dp) -- an approximation of a phone, constant across runs. If
- * `MainActivity`'s shell changes, [AppShell] must follow (it is a copy, not
- * a shared composable; extracting one is D12's call, not this WP's).
+ * What is rendered is the screen INSIDE the app shell: edge-to-edge
+ * window and the real [MainShell] that `MainActivity.setContent` uses
+ * (outer Scaffold with the bottom navigation bar, its inset handling).
+ * Rendering `LibraryScreen` alone would hide exactly the nesting that
+ * caused D12's tall header. Robolectric reports zero system-bar insets on
+ * its own, so [simulateSystemBars] dispatches fixed ones (status 24 dp,
+ * navigation 48 dp) -- an approximation of a phone, constant across runs.
  *
  * Determinism: fixed fixtures ([LibraryScreenshotFixtures]); cover art
  * never touches the network -- [OfflineImageLoader] fails every request at
@@ -164,6 +164,60 @@ class LibraryScreenshotTest {
         assertSystemBarsArrived()
 
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
+        // After the capture, so a failing check still leaves the image.
+        assertLayout()
+    }
+
+    /**
+     * WP D12 layout checks, in every profile (the goldens show the layout,
+     * these name what must hold):
+     * - no doubled status-bar inset: the search field sits right under ONE
+     *   status bar plus the TopAppBar;
+     * - every filter chip is single-line (all the same height) and
+     *   reachable by scrolling the chip row;
+     * - the cards start right under the controls, not below an empty band.
+     */
+    private fun assertLayout() {
+        val density = composeRule.activity.resources.displayMetrics.density
+        fun dp(px: Float) = px / density
+
+        val searchTop = dp(composeRule.onNode(hasSetTextAction()).fetchSemanticsNode().boundsInRoot.top)
+        val maxSearchTop = STATUS_BAR_DP + TOP_APP_BAR_DP + TOOLBAR_TOP_PADDING_DP + LAYOUT_TOLERANCE_DP
+        assertTrue(
+            "search field top ${searchTop}dp is below ${maxSearchTop}dp: the status-bar inset is applied twice",
+            searchTop <= maxSearchTop,
+        )
+
+        val chipMatcher = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
+        val chips = composeRule.onAllNodes(chipMatcher).fetchSemanticsNodes()
+        assertEquals("filter chips rendered", EXPECTED_CHIPS, chips.size)
+        // `size`, not `boundsInRoot`: the latter is clipped by the scrolling
+        // row, so a chip scrolled out of view reports a height of 0.
+        val heights = chips.map { dp(it.size.height.toFloat()) }
+        assertTrue(
+            "filter chips differ in height ($heights dp): a label wrapped to more than one line",
+            heights.max() - heights.min() <= LAYOUT_TOLERANCE_DP,
+        )
+        // The first chip is always in view at scroll position 0.
+        val chipsBottom = dp(chips.first().boundsInRoot.bottom)
+        for (index in chips.indices) {
+            composeRule.onAllNodes(chipMatcher)[index].performScrollTo().assertIsDisplayed()
+        }
+
+        val coversTop = dp(
+            composeRule
+                .onAllNodes(hasContentDescription(COVER_FALLBACK_PREFIX, substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .minOf { it.boundsInRoot.top },
+        )
+        assertTrue(
+            "first card starts at ${coversTop}dp, more than ${MAX_CHIPS_TO_CARDS_DP}dp below the chips (${chipsBottom}dp)",
+            coversTop - chipsBottom <= MAX_CHIPS_TO_CARDS_DP,
+        )
+        composeRule
+            .onAllNodes(hasContentDescription(COVER_FALLBACK_PREFIX, substring = true), useUnmergedTree = true)
+            .onFirst()
+            .assertIsDisplayed()
     }
 
     private fun simulateSystemBars() {
@@ -221,7 +275,8 @@ class LibraryScreenshotTest {
         fail("cover fallback tiles never settled within $STABLE_POLL_LIMIT idles (last count: $previous)")
     }
 
-    /** Mirror of `MainActivity.setContent`'s main shell with Library selected. */
+    /** `MainActivity.setContent`'s main shell ([MainShell], shared since
+     * WP D12) with Library selected. */
     @Composable
     private fun AppShell(layout: LibraryLayout) {
         val fixtures = LibraryScreenshotFixtures
@@ -239,29 +294,23 @@ class LibraryScreenshotTest {
             bottom = WindowInsets.navigationBars.getBottom(density),
         )
         SideEffect { observedSystemBars = bars }
-        Scaffold(
-            bottomBar = {
-                BottomNavBar(
-                    current = Destination.LIBRARY,
-                    pendingJobsCount = countPending(jobsSnapshot),
-                    onSelect = {},
-                )
-            },
-        ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                LibraryScreen(
+        MainShell(
+            current = Destination.LIBRARY,
+            pendingJobsCount = countPending(jobsSnapshot),
+            onSelect = {},
+        ) {
+            LibraryScreen(
                     gamesRepository = remember { FixedGamesRepository(fixtures.vaultGames) },
-                    jobsRepository = remember { FixedJobsRepository(fixtures.jobs) },
-                    mappingRepository = remember { EmptyMappingRepository() },
-                    cacheRepository = remember { UnusedCacheRepository() },
-                    updatesRepository = remember { FixedUpdatesRepository() },
-                    ownedLibrary = ownedLibrary,
-                    libraryPreferences = remember { FixedLibraryPreferences(layout) },
-                    onJobsSnapshot = { jobsSnapshot = it },
-                    onOpenSettings = {},
-                    demoMode = false,
-                )
-            }
+                jobsRepository = remember { FixedJobsRepository(fixtures.jobs) },
+                mappingRepository = remember { EmptyMappingRepository() },
+                cacheRepository = remember { UnusedCacheRepository() },
+                updatesRepository = remember { FixedUpdatesRepository() },
+                ownedLibrary = ownedLibrary,
+                libraryPreferences = remember { FixedLibraryPreferences(layout) },
+                onJobsSnapshot = { jobsSnapshot = it },
+                onOpenSettings = {},
+                demoMode = false,
+            )
         }
     }
 
@@ -291,6 +340,20 @@ class LibraryScreenshotTest {
 
         const val STATUS_BAR_DP = 24
         const val NAV_BAR_DP = 48
+
+        /** Material 3 small TopAppBar container height. */
+        const val TOP_APP_BAR_DP = 64
+
+        /** `LibraryToolbar`'s vertical padding above the search field. */
+        const val TOOLBAR_TOP_PADDING_DP = 8
+        const val LAYOUT_TOLERANCE_DP = 4
+
+        /** Chip row padding + grid content padding, with slack; the D12
+         * bug left ~130 dp here at 411 dp. */
+        const val MAX_CHIPS_TO_CARDS_DP = 32
+
+        /** All, Cached, Not cached, Downloading, Failed, Updates. */
+        const val EXPECTED_CHIPS = 6
 
         /** Prefix of `R.string.library_cover_fallback_description`. */
         const val COVER_FALLBACK_PREFIX = "No cover art available for"

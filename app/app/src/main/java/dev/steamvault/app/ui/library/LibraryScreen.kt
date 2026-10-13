@@ -1,6 +1,7 @@
 package dev.steamvault.app.ui.library
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -334,7 +337,13 @@ private fun LibraryToolbar(controller: LibraryController) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            LayoutToggle(current = controller.layout, onSelect = { controller.selectLayout(it) })
+            // WP D12: the toggle takes the row's free width (its three
+            // segments share it equally) and the select button keeps its own.
+            LayoutToggle(
+                current = controller.layout,
+                onSelect = { controller.selectLayout(it) },
+                modifier = Modifier.weight(1f).padding(end = 4.dp),
+            )
             val selectModeDescription = if (controller.selecting) {
                 stringResource(R.string.library_select_mode_exit)
             } else {
@@ -426,23 +435,52 @@ private fun CheckUpdatesAction(controller: LibraryController, scope: CoroutineSc
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LayoutToggle(current: LibraryLayout, onSelect: (LibraryLayout) -> Unit) {
+private fun LayoutToggle(
+    current: LibraryLayout,
+    onSelect: (LibraryLayout) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // WP D12: short visible labels ("2 col") on a single line -- the full
+    // names ("2-column grid") wrapped to two lines at 360 dp / font 1.3.
+    // The full name stays the spoken label (contentDescription).
     val options = listOf(
-        LibraryLayout.GRID_2 to stringResource(R.string.library_layout_grid2),
-        LibraryLayout.GRID_3 to stringResource(R.string.library_layout_grid3),
-        LibraryLayout.LIST to stringResource(R.string.library_layout_list),
+        LayoutOption(
+            LibraryLayout.GRID_2,
+            stringResource(R.string.library_layout_grid2_short),
+            stringResource(R.string.library_layout_grid2),
+        ),
+        LayoutOption(
+            LibraryLayout.GRID_3,
+            stringResource(R.string.library_layout_grid3_short),
+            stringResource(R.string.library_layout_grid3),
+        ),
+        LayoutOption(
+            LibraryLayout.LIST,
+            stringResource(R.string.library_layout_list),
+            stringResource(R.string.library_layout_list),
+        ),
     )
-    SingleChoiceSegmentedButtonRow {
-        options.forEachIndexed { index, (layout, label) ->
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, option ->
             SegmentedButton(
-                selected = current == layout,
-                onClick = { onSelect(layout) },
+                selected = current == option.layout,
+                onClick = { onSelect(option.layout) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                label = { Text(label) },
+                modifier = Modifier.semantics { contentDescription = option.description },
+                label = {
+                    Text(
+                        text = option.label,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
             )
         }
     }
 }
+
+private data class LayoutOption(val layout: LibraryLayout, val label: String, val description: String)
 
 @Composable
 private fun FilterChipsRow(
@@ -450,9 +488,16 @@ private fun FilterChipsRow(
     selectedKey: String,
     onSelect: (String) -> Unit,
 ) {
+    // WP D12: scrolls horizontally, every chip on one line. The old
+    // fixed-width Row squeezed the trailing chips to a sliver: their labels
+    // wrapped letter by letter ("Downloa/ding"), the tallest of them set
+    // the row's height (the empty band above the cards, at 360 dp / font
+    // 1.3 tall enough to push the grid off screen) and the last chips were
+    // not reachable at all.
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -460,7 +505,7 @@ private fun FilterChipsRow(
             FilterChip(
                 selected = chip.key == selectedKey,
                 onClick = { onSelect(chip.key) },
-                label = { Text("${chip.label} ${chip.count}") },
+                label = { Text("${chip.label} ${chip.count}", maxLines = 1, softWrap = false) },
             )
         }
     }
