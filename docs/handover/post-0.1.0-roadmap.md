@@ -385,6 +385,66 @@ Settings page structure (web/js/views/settings.js, 1466 lines; 9
 override keys in settings_store.py vs 47 env vars): collapsible sections,
 tooltips instead of text walls. Order: Wave 2, before D15.
 
+## Wave plan (user-approved 2026-10-13)
+
+Supersedes the order below for D9-D16. Each package: coder -> reviewer ->
+one commit; review weight by package type (`docs/LEARNINGS.md`).
+
+**Wave 1 (rc15)**
+1. **UPD-1 (api)** always-on update check. Implemented on
+   `wp/upd-1-update-check` (3619a71), WIP, NOT reviewed. Next: reviewer,
+   then fix, commit, CI, merge. Open user decision: the check only
+   refreshes the manifest oracle, which is off by default
+   (`VAULT_MANIFEST_ORACLE`, ADR-0006 decision 4), so in prod it does
+   nothing until the oracle is on. Options: default on (ADR addendum in
+   UPD-4) or on via prod .env (Antrag).
+2. **UPD-2 (web)** "Check updates" button (calls `POST
+   /v1/updates/check`, no download), "Update available" badge from
+   `update_available`, an "Updates" filter chip. The existing "Check &
+   update all cached games" button stays.
+3. **UPD-3 (app)** the same on Android.
+4. **UPD-4 (docs)** ADR addendum: superseding the 2026-08-18 "never bare
+   Check" rule, the oracle default, "only prod checks, cached games only".
+5. **APP-TEST-1 (app, CI)** Roborazzi + Robolectric screenshot tests for
+   the library screen; profiles 411 dp (Pixel reference, API 35) and
+   360 dp, font scale 1.0 and 1.3, dark mode. Runs only in GitHub CI
+   (`android-tests` job); golden images recorded once in CI, then checked
+   in. No emulator in the devbox (no /dev/kvm).
+6. **D12 APP-FIX-LAYOUT (app)** red screenshot test first, then fix:
+   FilterChipsRow scrolls, the layout toggle does not wrap, find the cause
+   of the empty area and the tall header.
+7. **D10 COVER-CACHE-1 (api + app)** vault-api stores cover images and
+   serves them with ETag + long Cache-Control; Coil disk cache on Android.
+
+**Wave 2 (rc16)**
+8. **D16 SETTINGS-1** split into: (a) settings audit, collapsible
+   sections, tooltips instead of text walls (web, then app); (b) expert
+   mode API: rate cap + window, TLS/upstream caps, prefill threads,
+   GC/retention, confirm dialog for risky values, env grammar reused;
+   (c) core path: settings file on a shared volume, core renders its
+   includes and runs `nginx -s reload` (needs an Antrag for the compose
+   volume, dev and prod).
+9. **D15 CLIENTS-1** split into: (a) client address in the vault-core
+   log format; (b) API: clients incl. agentless ones (e.g. "frame"),
+   server-side throughput, history; (c) web Clients nav page (connected,
+   installed for agent clients, loading now, loaded recently; PC
+   add/manage moves here from Settings) and Downloads header (current,
+   average and peak speed, GB loaded, graphs, hit rate, GB saved, active
+   clients) plus history filter 24 h / 7 d / 30 d / all; (d) the same on
+   Android.
+10. **D11 APP-FIX-LOGIN** OpenID return via an https page on vault-api
+    that deep-links into the app (decided; does not conflict with D2).
+11. **D9 TOOL-APPS-2** ADR first, then group DLC/content under the
+    parent game (decided).
+
+**Before v0.1.0 (ongoing):** release notes, user device checks,
+verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
+saves id), D7 measurement on `:443` (TLS cap TODO in WORKPACKAGES),
+failed jobs Subnautica/Timberborn (measure live on the next run).
+
+**After v0.1.0:** D8 (incl. rate window in Settings, may fold into D16),
+D1, D3 (incl. device/account note per game), D2, D4, D5, D6.
+
 ## Suggested order
 
 1. DOCS-FIX-3 lands before `v0.1.0` (it is in item 13 B).
