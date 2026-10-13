@@ -175,6 +175,14 @@ def test_unusable_or_self_parent_is_no_parent(parent: object) -> None:
     assert info.app_type == "dlc"
 
 
+def test_parsed_oracle_name_is_sanitized_plain_text() -> None:
+    raw = "  \u202eHD2\u200b - Pack\x00 " + "x" * 400
+    info = oracle.parse_app_info(440, _app_info(440, {"common": {"name": raw}}))
+    assert info.name == ("HD2 - Pack " + "x" * 400)[: app_classification.MAX_NAME_LEN]
+    assert oracle.parse_app_info(440, _app_info(440, {"common": {"name": "\u200b "}})).name is None
+    assert oracle.parse_app_info(440, _app_info(440, {"common": {"name": 5}})).name is None
+
+
 def test_listofdlc_junk_entries_are_skipped_and_self_excluded() -> None:
     info = oracle.parse_app_info(
         440, _app_info(440, {"extended": {"listofdlc": "1, x,  ,0,3,440,3,٣"}})
@@ -281,7 +289,7 @@ def test_parse_store_items_reads_type_parent_and_name() -> None:
         _store_item(PKG_A, success=15),
         _store_item(4000002, name=""),  # answered, nothing usable
         _store_item(4000003, type=True, related_items={"parent_appid": 4000003}, name=7),
-        _store_item(4000004, type=4, related_items="junk", name="A\x00B‮ C "),
+        _store_item(4000004, type=4, related_items="junk", name="A\x00B\u202e C "),
     )
     items = cover_art.parse_store_items(
         payload, [HD2, 4000001, PKG_A, 4000002, 4000003, 4000004]
@@ -447,6 +455,14 @@ def test_fill_writes_its_own_row_beside_a_store_row(db: str) -> None:
     _fill(db)
     assert _classes(db)[(PKG_A, S)] == ("dlc", None, 0, None)
     assert _classes(db)[(PKG_A, O)] == (None, HD2, 1, None)
+
+
+def test_fill_own_parent_beats_the_single_linking_parent(db: str) -> None:
+    _add_apps(db, 10, 20, 30)
+    _store_oracle(db, 10, _app_info(10, {"extended": {"listofdlc": "30"}}))
+    _store_oracle(db, 30, _app_info(30, {"common": {"type": "DLC", "parent": "20"}}))
+    _fill(db)
+    assert _classes(db)[(30, O)] == ("dlc", 20, 1, None)
 
 
 def test_fill_two_claiming_parents_name_no_parent(db: str) -> None:
@@ -655,7 +671,12 @@ def test_tampered_rows_are_revalidated_on_read(db: str) -> None:
         ("HELLDIVERS™ 2 - Português-Brasil", "HELLDIVERS™ 2 - Português-Brasil"),
         ("  padded  ", "padded"),
         ("tab\there\nnewline\x7f\x85", "tabherenewline"),
-        ("‮evil⁦", "evil"),
+        ("\u202eevil\u2066", "evil"),
+        ("a\u200eb\u200fc\u061cd", "abcd"),  # LRM, RLM, ALM
+        ("z\u200bw\u200cj\u200dn\u2060b\ufeffo", "zwjnbo"),  # zero-width, WJ, BOM
+        ("line\u2028para\u2029end", "lineparaend"),
+        ("\u200b\ufeff\u200e", None),
+        ("\ufeffBOM-led", "BOM-led"),
         ("<b>markup stays text</b>", "<b>markup stays text</b>"),
         ("", None),
         ("   ", None),
@@ -734,6 +755,22 @@ def test_games_fill_a_missing_name_but_never_replace_one(settings: Settings) -> 
     finally:
         connection.close()
     assert stored is None
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_games_blank_apps_name_falls_back(settings: Settings, blank: str) -> None:
+    client = TestClient(create_app(settings))
+    _seed(client, PKG_A + 1, PKG_A)
+    connection = get_connection(settings.db_path)
+    try:
+        connection.execute("UPDATE apps SET name = ? WHERE appid = ?", (blank, PKG_A))
+        connection.commit()
+    finally:
+        connection.close()
+    _insert(settings.db_path, (PKG_A, S, None, None, 0, "Store name"))
+    (game,) = client.get("/v1/games", headers=AUTH).json()
+    assert game["name"] == "Store name"
+    assert client.get(f"/v1/games/{PKG_A}", headers=AUTH).json()["name"] == "Store name"
 
 
 def test_games_hide_oracle_rows_when_the_oracle_is_off(settings: Settings, tmp_path) -> None:

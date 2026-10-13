@@ -46,7 +46,7 @@ thread), never on a request path.
 when ``apps.name`` is empty, and it is never written into ``apps`` (owned
 library, agent and mapping names keep winning, and a third-party name never
 becomes vault-api's own record). It is plain text from a third party:
-``valid_app_name`` drops control and bidi-override characters, trims, and
+``valid_app_name`` drops control and invisible format characters, trims, and
 caps it at ``MAX_NAME_LEN`` characters, on write AND on read. Steam's own
 spelling is kept (no parent-prefix trimming; UIs may shorten later).
 
@@ -133,9 +133,17 @@ MAX_NESTING_DEPTH = 4
 #: owned-games names, ``steam_relay.MAX_NAME_LEN``).
 MAX_NAME_LEN = 256
 
-#: Bidi embedding/override/isolate controls: category Cf, not Cc, but they
-#: reorder the text around them, so a third-party name must not carry them.
-_BIDI_CONTROLS = frozenset("‪‫‬‭‮⁦⁧⁨⁩")
+#: Invisible format characters a third-party name must not carry (category
+#: Cf/Zl/Zp, not Cc): bidi embedding/override/isolate controls and the
+#: implicit marks LRM/RLM/ALM (they reorder or disguise the text around
+#: them), zero-width space/joiners, word joiner and BOM (invisible padding
+#: that makes two names look alike), and the line/paragraph separators.
+_INVISIBLE_CHARS = frozenset(
+    "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+    "\u200e\u200f\u061c"
+    "\u200b\u200c\u200d\u2060\ufeff"
+    "\u2028\u2029"
+)
 
 
 def app_type_from_pics(value: object) -> str | None:
@@ -161,7 +169,7 @@ def valid_app_type(value: object) -> str | None:
 def valid_app_name(value: object) -> str | None:
     """A third-party app name as plain display text, or ``None``.
 
-    Control characters (C0, DEL, C1) and bidi controls are removed, the
+    Control characters (C0, DEL, C1) and ``_INVISIBLE_CHARS`` are removed, the
     result is trimmed and capped at ``MAX_NAME_LEN`` characters; an empty
     result is ``None``. Markup is NOT stripped: the UIs render names as text
     (``textContent`` on the web, ``Text`` on Android), never as HTML.
@@ -171,7 +179,7 @@ def valid_app_name(value: object) -> str | None:
     cleaned = "".join(
         ch
         for ch in value
-        if not (ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F or ch in _BIDI_CONTROLS)
+        if not (ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F or ch in _INVISIBLE_CHARS)
     ).strip()
     cleaned = cleaned[:MAX_NAME_LEN].rstrip()
     return cleaned or None
