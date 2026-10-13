@@ -83,6 +83,10 @@
     <string name="library_check_updates_button_off">Update checks off</string>
     <!-- Badge on a game card / list row: GameSummary.update_available. -->
     <string name="library_update_available_badge">Update available</string>
+    <!-- Same badge when the full label would not fit the card (narrow card,
+         large font): web uses the same word in its compact layouts. The full
+         label stays the spoken one (contentDescription). -->
+    <string name="library_update_available_badge_short">Update</string>
     <!-- Result toasts. State-only copy: each sentence claims only what the
          status fields carry (docs/LEARNINGS.md, WP 4d-web). -->
     <plurals name="library_update_check_found">
