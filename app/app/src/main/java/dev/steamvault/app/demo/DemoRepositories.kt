@@ -15,6 +15,8 @@ import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.model.UpdateCheckOut
+import dev.steamvault.app.net.model.UpdateStatusOut
 import dev.steamvault.app.repo.AboutRepository
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.ClientsRepository
@@ -24,6 +26,7 @@ import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.SteamRelayRepository
+import dev.steamvault.app.repo.UpdatesRepository
 import kotlinx.serialization.json.JsonElement
 
 /**
@@ -96,4 +99,27 @@ class DemoAboutRepository(private val state: DemoState) : AboutRepository {
 class DemoSteamRelayRepository(private val state: DemoState) : SteamRelayRepository {
     override suspend fun ownedGames(steamId64: String): OwnedGamesRelayOut = state.ownedGames(steamId64)
     override suspend fun playerSummaries(steamId64: String): PlayerSummariesRelayOut = state.playerSummaries(steamId64)
+}
+
+/**
+ * WP UPD-3: "Check updates" in demo mode. Nothing is asked of any update
+ * source: the check "finishes" at once, counting the demo's cached games
+ * and reporting the ones whose fixture carries `update_available`.
+ */
+class DemoUpdatesRepository(private val state: DemoState) : UpdatesRepository {
+    override suspend fun check(): UpdateCheckOut = UpdateCheckOut(status = "started", enabled = true)
+
+    override suspend fun status(): UpdateStatusOut {
+        val cached = state.listGameSummaries().filter { (it.size_bytes ?: 0L) > 0L && !it.tool_app }
+        return UpdateStatusOut(
+            enabled = true,
+            running = false,
+            last_trigger = "manual",
+            last_outcome = "completed",
+            last_apps = cached.size,
+            last_ok = cached.size,
+            last_failed = 0,
+            last_stale = cached.count { it.update_available },
+        )
+    }
 }

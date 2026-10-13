@@ -97,6 +97,10 @@ fun GameListRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // WP UPD-3: same flag as GameCard's badge, as a text line here.
+            if (model.updateAvailable) {
+                UpdateAvailableLabel()
+            }
             // WP AG-3: same shared decision/text as GameCard.kt's grid pill --
             // see ui/library/InstalledBadgeText.kt.
             installedBadgeText(model.installedBadge)?.let { text ->

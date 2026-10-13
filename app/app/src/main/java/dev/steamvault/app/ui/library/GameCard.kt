@@ -81,6 +81,16 @@ fun GameCard(
                 )
             }
 
+            // WP UPD-3: top END -- the selection checkbox owns top start,
+            // and the start padding keeps the badge's width clear of it.
+            if (model.updateAvailable) {
+                UpdateAvailableBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(start = UPDATE_BADGE_START_CLEARANCE, top = 6.dp, end = 6.dp),
+                )
+            }
+
             CapsulePill(
                 model = model,
                 onAction = onAction,

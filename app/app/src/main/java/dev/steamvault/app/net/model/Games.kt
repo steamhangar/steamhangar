@@ -39,6 +39,14 @@ data class GameSummary(
      * (`api/vault_api/cover_art.py`), null while unknown. Defaulted: older
      * servers send none. Checked again by `serverCoverUrl` before use. */
     val cover_url: String? = null,
+    /** WP UPD-1: the manifest oracle says a newer build exists than the one
+     * cached (only ever true for a game with cache bytes). Defaulted: a
+     * server from before UPD-1 sends no flag, which reads as "no update
+     * known", never as an error. */
+    val update_available: Boolean = false,
+    /** WP UPD-1: when the oracle last answered for this game, null while
+     * never checked (or on a server from before UPD-1). */
+    val update_checked_at: String? = null,
 )
 
 /** One entry of [GameDetail.depots] — `vault_api/routers/games.py::DepotEntry`. */

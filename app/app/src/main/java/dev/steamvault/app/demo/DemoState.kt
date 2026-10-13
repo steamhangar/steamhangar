@@ -241,6 +241,7 @@ class DemoState private constructor(
         game.status = STATUS_DONE
         game.needsForce = false
         game.lastPrefillAt = nowIso()
+        game.updateAvailable = false // WP UPD-3: the newer build is now cached
         if (game.depots.isEmpty()) {
             game.depots.add(DemoDepot(depotid = game.appid + 1, shared = false, sizeBytes = 1_200_000_000L))
         }

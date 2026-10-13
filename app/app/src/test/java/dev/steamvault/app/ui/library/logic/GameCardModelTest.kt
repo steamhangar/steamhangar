@@ -211,4 +211,13 @@ class GameCardModelTest {
         assertEquals(false, capsulePillHasGround(paused))
         assertEquals(false, capsulePillHasGround(running.copy(kind = StatusKind.STALE)))
     }
+
+    // WP UPD-3: the "Update available" badge flag.
+    @Test
+    fun `MUTATION PIN -- update_available reaches the card model, absent reads as no badge`() {
+        val flagged = buildGameCardModel(runningGame().copy(update_available = true), null, selected = false, selecting = false)
+        val plain = buildGameCardModel(runningGame(), null, selected = false, selecting = false)
+        assertEquals(true, flagged.updateAvailable)
+        assertEquals(false, plain.updateAvailable)
+    }
 }

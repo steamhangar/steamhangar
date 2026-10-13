@@ -735,4 +735,53 @@ class VaultApiClientTest {
             assertNull(e.status)
         }
     }
+
+    // ---- WP UPD-3: update check ---------------------------------------
+
+    @Test
+    fun `checkUpdates POSTs v1 updates check with no body and decodes 202 started`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(202).setBody("""{"status":"started","enabled":true}"""))
+
+        val out = client.checkUpdates()
+
+        assertEquals("started", out.status)
+        val recorded = server.takeRequest()
+        assertEquals("POST", recorded.method)
+        assertEquals("/v1/updates/check", recorded.path)
+        assertEquals(0L, recorded.bodySize)
+        assertEquals("test-key-123", recorded.getHeader("X-Api-Key"))
+    }
+
+    @Test
+    fun `checkUpdates decodes 200 disabled as a normal answer, not an error`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"status":"disabled","enabled":false}"""))
+
+        val out = client.checkUpdates()
+
+        assertEquals("disabled", out.status)
+        assertFalse(out.enabled)
+    }
+
+    @Test
+    fun `updatesStatus GETs v1 updates status, and a pre-UPD-1 server's 404 is NotFound`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"enabled":true,"scheduled":false,"running":true,"last_trigger":"manual",""" +
+                    """"last_started_at":"2026-10-13T10:00:00Z","last_finished_at":null,"last_outcome":null,""" +
+                    """"last_apps":null,"last_ok":null,"last_failed":null,"last_stale":null}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"detail":"Not Found"}"""))
+
+        assertTrue(client.updatesStatus().running)
+        val recorded = server.takeRequest()
+        assertEquals("GET", recorded.method)
+        assertEquals("/v1/updates/status", recorded.path)
+        try {
+            client.updatesStatus()
+            fail("expected VaultApiError.NotFound")
+        } catch (_: VaultApiError.NotFound) {
+            // expected
+        }
+    }
 }

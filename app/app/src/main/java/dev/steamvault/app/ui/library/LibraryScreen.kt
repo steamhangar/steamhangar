@@ -56,6 +56,7 @@ import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
+import dev.steamvault.app.repo.UpdatesRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.detail.AndroidDetailStrings
@@ -67,6 +68,7 @@ import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.StatusActionType
 import dev.steamvault.app.ui.library.logic.buildGameCardModel
 import dev.steamvault.app.ui.library.logic.chipCounts
+import dev.steamvault.app.ui.library.logic.hiddenChipKeys
 import dev.steamvault.app.ui.library.logic.indexLiveJobsByAppid
 import dev.steamvault.app.ui.library.logic.isKnownToVault
 import dev.steamvault.app.ui.library.logic.OwnedLibraryState
@@ -108,6 +110,9 @@ import kotlinx.coroutines.launch
  *   `Vault*Repository` instances -- this screen never branches on it for
  *   DATA (the repositories already differ upstream, `MainActivity.kt`'s
  *   wiring), only to render [DemoModeBanner] (WP brief constraint 1).
+ * @param updatesRepository WP UPD-3: "Check updates" (top app bar action)
+ *   and the probe that hides it, and the "Updates" chip, on a vault from
+ *   before UPD-1.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +121,7 @@ fun LibraryScreen(
     jobsRepository: JobsRepository,
     mappingRepository: MappingRepository,
     cacheRepository: CacheRepository,
+    updatesRepository: UpdatesRepository,
     ownedLibrary: OwnedLibraryController,
     libraryPreferences: LibraryPreferences,
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
@@ -130,6 +136,7 @@ fun LibraryScreen(
             jobsRepository,
             mappingRepository,
             cacheRepository,
+            updatesRepository,
             libraryPreferences,
             AndroidLibraryStrings(resources),
         )
@@ -163,6 +170,9 @@ fun LibraryScreen(
     // effect) and on the notice's Reload -- never on the poll interval, the
     // relay calls Steam. Same account on every device (web WEB-FEAT-1).
     LaunchedEffect(ownedLibrary) { ownedLibrary.load() }
+    // WP UPD-3: one status read per Library open; a 404 hides the update
+    // action and the "Updates" chip.
+    LaunchedEffect(controller) { controller.probeUpdatesSupport() }
     LaunchedEffect(controller.jobs) { onJobsSnapshot(controller.jobs) }
 
     val ownedState = ownedLibrary.state
@@ -174,8 +184,8 @@ fun LibraryScreen(
     val visible = remember(merged, normalizedQuery, controller.filterKey, liveJobsByAppid) {
         visibleGames(merged, normalizedQuery, controller.filterKey, liveJobsByAppid)
     }
-    val counts = remember(merged, normalizedQuery, liveJobsByAppid) {
-        chipCounts(merged, normalizedQuery, liveJobsByAppid)
+    val counts = remember(merged, normalizedQuery, liveJobsByAppid, controller.updatesSupported) {
+        chipCounts(merged, normalizedQuery, liveJobsByAppid, hiddenChipKeys(controller.updatesSupported))
     }
     val cardModels = remember(visible, liveJobsByAppid, controller.selectedAppids, controller.selecting) {
         visible.map { g ->
@@ -190,7 +200,10 @@ fun LibraryScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.library_title)) })
+            TopAppBar(
+                title = { Text(stringResource(R.string.library_title)) },
+                actions = { CheckUpdatesAction(controller = controller, scope = scope) },
+            )
         },
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = {
@@ -379,6 +392,35 @@ private fun CheckAndUpdateRow(controller: LibraryController, scope: CoroutineSco
                 },
             )
         }
+    }
+}
+
+/**
+ * "Check updates" (WP UPD-3, twin of web UPD-2; D14): asks the vault
+ * whether cached games have a newer build -- downloads nothing (that stays
+ * [CheckAndUpdateRow]'s job). In the top app bar so the header gains no
+ * height and the check row no width (D12 is a separate package). Hidden on
+ * a vault without the feature ([LibraryController.updatesSupported]).
+ */
+@Composable
+private fun CheckUpdatesAction(controller: LibraryController, scope: CoroutineScope) {
+    if (!controller.updatesSupported) return
+    // Oracle off (status enabled=false): visible, disabled, and the label
+    // itself is the hint; the spoken label says why.
+    val off = !controller.updatesEnabled
+    val offDescription = stringResource(R.string.library_update_check_disabled)
+    TextButton(
+        enabled = !off && !controller.updateCheckRunning,
+        onClick = { controller.checkUpdates(scope) },
+        modifier = if (off) Modifier.semantics { contentDescription = offDescription } else Modifier,
+    ) {
+        Text(
+            when {
+                off -> stringResource(R.string.library_check_updates_button_off)
+                controller.updateCheckRunning -> stringResource(R.string.library_check_updates_button_busy)
+                else -> stringResource(R.string.library_check_updates_button)
+            },
+        )
     }
 }
 

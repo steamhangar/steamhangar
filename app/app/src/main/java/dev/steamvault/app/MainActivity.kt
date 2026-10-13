@@ -37,6 +37,7 @@ import dev.steamvault.app.demo.DemoScheduleRepository
 import dev.steamvault.app.demo.DemoSettingsRepository
 import dev.steamvault.app.demo.DemoState
 import dev.steamvault.app.demo.DemoSteamRelayRepository
+import dev.steamvault.app.demo.DemoUpdatesRepository
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.pairing.IncomingLinkRoute
@@ -56,6 +57,7 @@ import dev.steamvault.app.repo.VaultMappingRepository
 import dev.steamvault.app.repo.VaultScheduleRepository
 import dev.steamvault.app.repo.VaultSettingsRepository
 import dev.steamvault.app.repo.VaultSteamRelayRepository
+import dev.steamvault.app.repo.VaultUpdatesRepository
 import dev.steamvault.app.storage.EncryptedCredentialStore
 import dev.steamvault.app.storage.SharedPreferencesLibraryPreferences
 import dev.steamvault.app.ui.clients.AndroidClientsStrings
@@ -494,6 +496,7 @@ class MainActivity : ComponentActivity() {
                 jobsRepository = remember(demo) { DemoJobsRepository(demo) },
                 mappingRepository = remember(demo) { DemoMappingRepository(demo) },
                 cacheRepository = remember(demo) { DemoCacheRepository(demo) },
+                updatesRepository = remember(demo) { DemoUpdatesRepository(demo) },
                 ownedLibrary = owned,
                 libraryPreferences = libraryPreferences,
                 onJobsSnapshot = { pendingJobsSnapshot = it },
@@ -512,6 +515,7 @@ class MainActivity : ComponentActivity() {
             jobsRepository = remember(client) { VaultJobsRepository(client) },
             mappingRepository = remember(client) { VaultMappingRepository(client) },
             cacheRepository = remember(client) { VaultCacheRepository(client) },
+            updatesRepository = remember(client) { VaultUpdatesRepository(client) },
             ownedLibrary = owned,
             libraryPreferences = libraryPreferences,
             onJobsSnapshot = { pendingJobsSnapshot = it },

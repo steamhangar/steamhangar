@@ -112,6 +112,9 @@ internal fun seedGames(): MutableList<DemoGame> = mutableListOf(
         lastManifestCheck = isoAgo(3_600L),
         gcReclaimableBytes = 0L,
         gcHeldBackBytes = 0L,
+        // WP UPD-3: the one demo game with a newer build -> "Update
+        // available" badge, "Updates 1" chip, and "Check updates" reports it.
+        updateAvailable = true,
     ),
     DemoGame(
         appid = 4_010_070,

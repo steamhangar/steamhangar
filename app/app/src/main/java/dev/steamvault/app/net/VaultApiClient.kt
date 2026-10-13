@@ -20,6 +20,8 @@ import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.PrefillRequest
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.model.UpdateCheckOut
+import dev.steamvault.app.net.model.UpdateStatusOut
 import dev.steamvault.app.net.model.buildSettingsPatch
 import dev.steamvault.app.net.profile.CleartextPolicyInterceptor
 import dev.steamvault.app.net.profile.ConnectivityProfile
@@ -227,6 +229,20 @@ class VaultApiClient(
      * added. Read-only endpoint; the writable half of this config lives at
      * [settings]/[patchSettings] (`sweep_include_cached` is one of its keys). */
     suspend fun schedule(): ScheduleOut = get("/v1/schedule")
+
+    // ---- update check (WP UPD-1 API, WP UPD-3 app) -------------------------
+
+    /** `POST /v1/updates/check` -- starts an update check of every cached
+     * game in the background and answers at once (`202` started /
+     * already_running, `200` disabled). **No request body**, and it never
+     * starts a download. Asynchronous on purpose: a run takes minutes, far
+     * past this client's 45 s call timeout. A server from before UPD-1
+     * answers `404` ([dev.steamvault.app.net.error.VaultApiError.NotFound]). */
+    suspend fun checkUpdates(): UpdateCheckOut = postEmpty("/v1/updates/check")
+
+    /** `GET /v1/updates/status` -- poll until `running` is false. No network
+     * on the server side. `404` on a server from before UPD-1. */
+    suspend fun updatesStatus(): UpdateStatusOut = get("/v1/updates/status")
 
     // ---- about (WP VER-2) ----------------------------------------------------
 
