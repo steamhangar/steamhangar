@@ -277,7 +277,14 @@ class LibraryScreenshotTest {
         for (badge in badges) {
             val text = badge.text()
             assertTrue("update badge reads '$text'", text == UPDATE_BADGE_FULL || text == UPDATE_BADGE_SHORT)
-            assertFalse("update badge '$text' is ellipsized", textLayout(badge).hasVisualOverflow)
+            // Not `hasVisualOverflow`: on the layout the semantics action
+            // hands out it reads true even for a short "Update" that fits
+            // (CI, Compose BOM 2024.10.01); the ellipsis flag is exact.
+            val badgeLayout = textLayout(badge)
+            assertTrue(
+                "update badge '$text' is ellipsized or wrapped",
+                badgeLayout.lineCount == 1 && !badgeLayout.isLineEllipsized(0),
+            )
             if (expectedBadgeText != null) assertEquals("update badge label", expectedBadgeText, text)
         }
     }
