@@ -312,7 +312,16 @@ mostly Helldivers 2 DLC/content packages. Proposed, not yet reviewed and
 not decided: a filter for them, grouping them under the parent game, and
 classifying tool packages dynamically instead of the fixed list in
 `tool_apps.py`. Needs an ADR and the user's go before any code. Decision 2026-10-13:
-group under the parent game (not just filter).
+group under the parent game (not just filter). Draft: ADR-0022 on
+`wp/d9-adr-tool-apps`. User decisions 2026-10-13: parent source = Steam
+store lookup first, oracle only for gaps while it is on (Q1 A); display =
+"+N content packages" on the card, list in the detail sheet (Q4 A);
+delete of a grouped game also deletes its packages' own depots when they
+would be orphaned, shared depots still kept (Q6, user variant); prefill
+unchanged until measured on prod (Q5 A). Flat list with `parent_appid`
+from the server, UIs group (Q2 A, orchestrator). Open: Q3 failed package
+on the card, Q7 tool packages, Q8 oracle for uncached apps, bulk-plan
+behaviour of grouped cards — after the prod check P1.
 
 ## D10: COVER-CACHE-1, slow cover loading
 
@@ -330,7 +339,11 @@ Measured 2026-10-13 (diag, ZEUS host): one cover takes 0.2-0.8 s from
 the CDN (50-175 KB), `Cache-Control: max-age` about 10 years plus an
 ETag, vault-dns resolves the hosts normally. The CDN is not slow; the
 gain is LAN speed on first loads and offline covers. User: build
-option A anyway.
+option A anyway. User decisions 2026-10-13 (after the build): yes to
+the egress change (vault-proxy bakes in exactly shared.akamai.steamstatic.com
+and cdn.akamai.steamstatic.com); signed cover URLs
+`/v1/covers/{appid}/{signature}` are accepted as a documented exception
+to plan section 9 (`<img>` cannot send the API key).
 
 ## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
 
