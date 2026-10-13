@@ -87,6 +87,7 @@ fun GameCard(
                 name = model.name,
                 fallbackHues = model.fallbackHues,
                 fallbackTitleInsets = titleInsets,
+                fallbackTitleMaxLines = FALLBACK_TITLE_MAX_LINES,
                 // WP API-FIX-4: a Steam tool app is shown muted, not hidden
                 // (web `.card.tool .cap`).
                 modifier = Modifier.fillMaxSize().alpha(if (model.toolApp) TOOL_APP_COVER_ALPHA else 1f),

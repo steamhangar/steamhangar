@@ -40,10 +40,12 @@ import dev.steamvault.app.ui.library.logic.FallbackHues
  * the CDN has no art for) -- see `ui/library/logic/CoverArt.kt`'s kdoc for
  * the "Coil vs hand-rolled" justification and the fallback-hash rationale.
  *
- * [fallbackTitleInsets] keeps the fallback tile's title clear of whatever
- * the caller draws over the cover (WP APP-FIX-CARD: the grid card's
- * capsule pill and update badge); the title is capped at
- * [FALLBACK_TITLE_MAX_LINES] and ellipsizes within the space left.
+ * WP APP-FIX-CARD, both opt-in for callers that draw over the cover (the
+ * grid card's capsule pill and update badge): [fallbackTitleInsets] keeps
+ * the fallback tile's title clear of them, and [fallbackTitleMaxLines]
+ * caps the title, which then ellipsizes within the space left. Callers
+ * that pass neither (list-row thumbnail, detail header) keep the plain,
+ * clipped title.
  */
 @Composable
 fun CoverArtImage(
@@ -52,6 +54,7 @@ fun CoverArtImage(
     fallbackHues: FallbackHues,
     modifier: Modifier = Modifier,
     fallbackTitleInsets: PaddingValues = PaddingValues(),
+    fallbackTitleMaxLines: Int = Int.MAX_VALUE,
 ) {
     var failed by remember(coverUrl) { mutableStateOf(false) }
 
@@ -75,6 +78,7 @@ fun CoverArtImage(
                 name = name,
                 hues = fallbackHues,
                 titleInsets = fallbackTitleInsets,
+                titleMaxLines = fallbackTitleMaxLines,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -86,6 +90,7 @@ private fun FallbackTile(
     name: String,
     hues: FallbackHues,
     titleInsets: PaddingValues,
+    titleMaxLines: Int,
     modifier: Modifier = Modifier,
 ) {
     val color1 = Color.hsv(hues.h1.toFloat(), 0.55f, 0.35f)
@@ -102,8 +107,10 @@ private fun FallbackTile(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center,
-            maxLines = FALLBACK_TITLE_MAX_LINES,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = titleMaxLines,
+            // Ellipsis only where the caller set a limit: on a tiny tile it
+            // would leave nothing but "…" (WP APP-FIX-CARD review).
+            overflow = if (titleMaxLines == Int.MAX_VALUE) TextOverflow.Clip else TextOverflow.Ellipsis,
             // The tag sits inside both paddings, so its bounds are the
             // title's own (LibraryScreenshotTest checks it against the pill).
             modifier = Modifier
@@ -114,9 +121,11 @@ private fun FallbackTile(
     }
 }
 
-/** Most lines the fallback tile's title takes before it ellipsizes. Five
- * keeps the longest fixture title whole on a 360 dp grid card at font
- * scale 1.0; the tile's height cuts it earlier when that is tighter. */
+/** Most lines a GRID card's fallback title takes before it ellipsizes
+ * (only [GameCard] passes it; list rows and the detail header keep no
+ * limit). Five keeps the longest fixture title whole on a 360 dp grid card
+ * at font scale 1.0; the tile's height cuts it earlier when that is
+ * tighter. */
 internal const val FALLBACK_TITLE_MAX_LINES = 5
 
 /** Test tag of the fallback tile's title. */

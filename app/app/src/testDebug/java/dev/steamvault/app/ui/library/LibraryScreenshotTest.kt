@@ -239,9 +239,12 @@ class LibraryScreenshotTest {
 
     /**
      * WP APP-FIX-CARD, in every profile:
-     * - a fallback tile's title never runs under the capsule pill: the
-     *   lines it actually renders (not just its layout box, which the tile
-     *   bounds anyway) stay above every pill;
+     * - a fallback tile's title never runs under the capsule pill or the
+     *   update badge: the lines it actually renders (not just its layout
+     *   box, which the tile bounds anyway) overlap neither;
+     * - the list rows' mini covers keep their plain title: the grid's line
+     *   limit and ellipsis must not reach them (a 34 dp tile showed only
+     *   "…");
      * - the update badge is never ellipsized: it reads "Update available"
      *   or, when that does not fit, "Update" -- the full label always being
      *   its contentDescription. [expectedBadgeText] names the expected word
@@ -254,26 +257,35 @@ class LibraryScreenshotTest {
         val pills = composeRule
             .onAllNodes(hasTestTag(CAPSULE_PILL_TAG), useUnmergedTree = true)
             .fetchSemanticsNodes()
+        val badges = composeRule
+            .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        assertTrue("no fallback titles rendered", titles.isNotEmpty())
         val grid = layout != LibraryLayout.LIST
         if (grid) {
-            assertTrue("no fallback titles rendered", titles.isNotEmpty())
             assertTrue("no capsule pills rendered", pills.isNotEmpty())
+            assertTrue("no update badge rendered (fixture has update_available = true)", badges.isNotEmpty())
+        } else {
+            for (title in titles) {
+                assertFalse(
+                    "list mini cover title '${title.text()}' is ellipsized: the grid's line limit leaked into the list",
+                    textLayout(title).isLineEllipsized(0),
+                )
+            }
         }
         // A node scrolled fully out of the viewport reports empty bounds.
+        val overlays = (pills.map { "capsule pill" to it } + badges.map { "update badge" to it })
+            .filterNot { (_, node) -> node.boundsInRoot.isEmpty }
         for (title in titles.filterNot { it.boundsInRoot.isEmpty }) {
             val rendered = renderedTextBounds(title)
-            for (pill in pills.filterNot { it.boundsInRoot.isEmpty }) {
+            for ((kind, overlay) in overlays) {
                 assertFalse(
-                    "fallback title '${title.text()}' ($rendered) runs under a capsule pill (${pill.boundsInRoot})",
-                    rendered.overlaps(pill.boundsInRoot),
+                    "fallback title '${title.text()}' ($rendered) runs under the $kind (${overlay.boundsInRoot})",
+                    rendered.overlaps(overlay.boundsInRoot),
                 )
             }
         }
 
-        val badges = composeRule
-            .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
-            .fetchSemanticsNodes()
-        if (grid) assertTrue("no update badge rendered (fixture has update_available = true)", badges.isNotEmpty())
         for (badge in badges) {
             val text = badge.text()
             assertTrue("update badge reads '$text'", text == UPDATE_BADGE_FULL || text == UPDATE_BADGE_SHORT)
