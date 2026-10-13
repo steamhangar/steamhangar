@@ -531,6 +531,20 @@ action there; dismissing shows a short notice that the suggestions now
 live under notifications. Today a dismiss is permanent per browser
 (`steamvault.decisionPanelDismissed`, no re-enable).
 
+**User decisions 2026-10-13 (late evening):**
+- "Never played" card pill also on Android (small follow-up, rc16).
+- D15 statistics retention: 5-minute rows for 48 h, hourly rows for
+  30 days, daily rows forever (the "all" filter works).
+- D15 event-log rotation done by vault-core: rotate at 64 MiB, keep one
+  old file (about 128 MiB max).
+- D16 expert mode: as much as possible controllable from Settings. A
+  value set in the env is shown read-only in expert settings (env wins,
+  no input field); unset values are editable there. Rationale: easier
+  debugging now, good values can be pinned in the env later. Secrets,
+  network/egress, paths and subnets stay env-only by default; D16a lists
+  every env value with a proposed editable/env-only class for the user's
+  review.
+
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check
 updates" a clearly visible primary button and give "Check & update all
