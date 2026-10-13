@@ -320,6 +320,13 @@ Covers load slowly. Proposed, not decided: vault-api stores the images
 and serves them with an ETag and a long `Cache-Control`; the Android app
 gets its own Coil disk cache (decision 2026-10-13: both).
 
+Step 1 (2026-10-13): vault-api only resolves `cover_url`; web and app
+load the image straight from `shared.akamai.steamstatic.com` /
+`cdn.akamai.steamstatic.com`, which the egress lock does not allow for
+vault-api. Coil 2.7 already has a default disk cache. User decision
+2026-10-13: option A (allow the two steamstatic hosts, vault-api stores
+and serves covers), but measure first what is actually slow.
+
 ## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
 
 Cause: `steamvault://auth/openid-return` is used as the return URL, and
