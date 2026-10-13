@@ -13,7 +13,15 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from vault_api import cover_art, depot_manifests, oracle, scheduler, settings_store, tool_apps
+from vault_api import (
+    app_classification,
+    cover_art,
+    depot_manifests,
+    oracle,
+    scheduler,
+    settings_store,
+    tool_apps,
+)
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
@@ -240,6 +248,32 @@ class GameSummary(BaseModel):
     update_available: bool = False
     # When the oracle last answered for this app (UTC), null if never.
     update_checked_at: str | None = None
+    # WP TOOL-APPS-2a (ADR-0022 §1): the TOP-LEVEL game this app is a content
+    # package of, or null when it is not grouped -- no source named a parent,
+    # the chain is cyclic or longer than 4 links, the top-level parent is not
+    # a tracked app, or the app (or a parent on its chain) is on the fixed
+    # tool list (``tool_app``). The list stays flat: the server never nests or
+    # drops rows, the UIs group. Display data only; no download, GC or delete
+    # path reads it.
+    parent_appid: int | None = None
+    # One of "game", "dlc", "tool", "application", "config", "music",
+    # "video", "demo", or null (unknown). From Steam's store item lookup,
+    # else (only while the manifest oracle is on) from the oracle's stored
+    # answers for cached apps. Display only: ``tool_app`` stays the fixed
+    # list (an ``app_type`` of "tool" never stops a prefill).
+    app_type: str | None = None
+
+
+def _classification_fields(
+    classification: app_classification.Classification | None,
+) -> dict[str, object]:
+    """``parent_appid`` / ``app_type`` for one app (WP TOOL-APPS-2a)."""
+    if classification is None:
+        classification = app_classification.UNCLASSIFIED
+    return {
+        "parent_appid": classification.parent_appid,
+        "app_type": classification.app_type,
+    }
 
 
 def _tool_app_fields(appid: int) -> dict[str, object]:
@@ -308,6 +342,9 @@ class GameDetail(BaseModel):
     # See GameSummary.update_available / .update_checked_at (WP UPD-1).
     update_available: bool = False
     update_checked_at: str | None = None
+    # See GameSummary.parent_appid / .app_type (WP TOOL-APPS-2a).
+    parent_appid: int | None = None
+    app_type: str | None = None
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -354,6 +391,11 @@ def list_games(
         covers = cover_art.cover_urls_by_appid(conn)
         # WP UPD-1: stored oracle verdicts, three statements for the whole list.
         update_verdicts = oracle.verdicts_by_app(conn, settings=base_settings)
+        # WP TOOL-APPS-2a: stored classification, nesting resolved, two
+        # statements for the whole list.
+        classifications = app_classification.resolve_classifications(
+            conn, oracle_enabled=base_settings.manifest_oracle_enabled
+        )
 
     app_depotids: dict[int, list[int]] = {}
     for row in depot_rows:
@@ -383,6 +425,7 @@ def list_games(
                 **_tool_app_fields(row["appid"]),
                 cover_url=covers.get(row["appid"]),
                 **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
+                **_classification_fields(classifications.get(row["appid"])),
             )
         )
     return games
@@ -438,6 +481,10 @@ def get_game(
         installed_on = _installed_on_for_appid(conn, base_settings, now, appid)
         cover_url = cover_art.cover_url_for_appid(conn, appid)
         update_view = oracle.app_view(conn, appid, settings=base_settings)
+        # Same resolution as the list (the chain may pass through other apps).
+        classification = app_classification.resolve_classifications(
+            conn, oracle_enabled=base_settings.manifest_oracle_enabled
+        ).get(appid)
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
@@ -470,4 +517,5 @@ def get_game(
             (update_view.verdict, update_view.checked_at) if update_view.known else None,
             detail_size,
         ),
+        **_classification_fields(classification),
     )

@@ -39,6 +39,10 @@ EXPECTED_TABLES = {
     "app_cover_art",
     # v19 (WP UPD-1): always-on update check bookkeeping.
     "update_check_state",
+    # v22 (WP TOOL-APPS-2a): content-package classification and the oracle's
+    # content-package links.
+    "app_classification",
+    "oracle_dlc_links",
 }
 
 

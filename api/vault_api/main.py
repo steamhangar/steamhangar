@@ -316,7 +316,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     # WP API-FIX-5: same reasoning -- constructing it starts no thread; the
     # lifespan starts it, and a test can replace it before that.
-    app.state.cover_art_refresher = CoverArtRefresher(settings.db_path)
+    # WP TOOL-APPS-2a: the same thread fills app classification from the
+    # oracle's stored answers, only while the oracle is on.
+    app.state.cover_art_refresher = CoverArtRefresher(
+        settings.db_path, oracle_enabled=settings.manifest_oracle_enabled
+    )
     app.include_router(health.router)
     app.include_router(games.router)
     app.include_router(mapping.router)
