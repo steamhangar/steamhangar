@@ -172,16 +172,23 @@ class LibraryController(
     var updatesSupported by mutableStateOf(true)
         private set
 
+    /** `false` while the vault says the manifest oracle is off
+     * (`enabled: false` from the status read or the check): the action
+     * stays visible but disabled with a hint; nothing else is hidden. */
+    var updatesEnabled by mutableStateOf(true)
+        private set
+
     /** A check started from this screen is running (button disabled). */
     var updateCheckRunning by mutableStateOf(false)
         private set
 
-    /** One `GET /v1/updates/status` on Library open, only to learn whether
-     * this vault has the feature. Any other failure leaves it shown -- the
-     * button's own call reports errors. */
+    /** One `GET /v1/updates/status` on Library open, to learn whether this
+     * vault has the feature (404 hides it) and whether the oracle is on
+     * (`enabled: false` disables the action). Any other failure leaves it
+     * shown -- the button's own call reports errors. */
     suspend fun probeUpdatesSupport() {
         try {
-            updatesRepository.status()
+            updatesEnabled = updatesRepository.status().enabled
         } catch (_: VaultApiError.NotFound) {
             markUpdatesUnsupported()
         } catch (_: VaultApiError) {
@@ -200,6 +207,7 @@ class LibraryController(
                 if (result is UpdateCheckResult.Unsupported) {
                     markUpdatesUnsupported()
                 } else {
+                    updatesEnabled = result !is UpdateCheckResult.Disabled
                     // The badges come from GET /v1/games: re-read it now
                     // instead of waiting out the games poll interval.
                     refreshNow(scope)

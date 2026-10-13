@@ -62,8 +62,12 @@ class AndroidLibraryStrings(private val resources: Resources) : LibraryStrings {
             resources.getQuantityString(R.plurals.library_update_check_found, notice.stale, notice.stale),
             notice.failed,
         )
-        is UpdateCheckNotice.NoneFound ->
-            withUncheckedCount(resources.getString(R.string.library_update_check_none_found), notice.failed)
+        // Never "no updates" while some games went unanswered.
+        is UpdateCheckNotice.NoneFound -> if (notice.failed > 0) {
+            resources.getQuantityString(R.plurals.library_update_check_none_found_partial, notice.failed, notice.failed)
+        } else {
+            resources.getString(R.string.library_update_check_none_found)
+        }
         UpdateCheckNotice.NothingCached -> resources.getString(R.string.library_update_check_nothing_cached)
         UpdateCheckNotice.StoppedEarly -> resources.getString(R.string.library_update_check_stopped_early)
         UpdateCheckNotice.NotFinished -> resources.getString(R.string.library_update_check_not_finished)

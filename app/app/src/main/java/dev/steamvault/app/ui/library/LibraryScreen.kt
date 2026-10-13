@@ -405,15 +405,20 @@ private fun CheckAndUpdateRow(controller: LibraryController, scope: CoroutineSco
 @Composable
 private fun CheckUpdatesAction(controller: LibraryController, scope: CoroutineScope) {
     if (!controller.updatesSupported) return
+    // Oracle off (status enabled=false): visible, disabled, and the label
+    // itself is the hint; the spoken label says why.
+    val off = !controller.updatesEnabled
+    val offDescription = stringResource(R.string.library_update_check_disabled)
     TextButton(
-        enabled = !controller.updateCheckRunning,
+        enabled = !off && !controller.updateCheckRunning,
         onClick = { controller.checkUpdates(scope) },
+        modifier = if (off) Modifier.semantics { contentDescription = offDescription } else Modifier,
     ) {
         Text(
-            if (controller.updateCheckRunning) {
-                stringResource(R.string.library_check_updates_button_busy)
-            } else {
-                stringResource(R.string.library_check_updates_button)
+            when {
+                off -> stringResource(R.string.library_check_updates_button_off)
+                controller.updateCheckRunning -> stringResource(R.string.library_check_updates_button_busy)
+                else -> stringResource(R.string.library_check_updates_button)
             },
         )
     }

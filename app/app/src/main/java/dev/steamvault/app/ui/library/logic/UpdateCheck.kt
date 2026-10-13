@@ -106,19 +106,21 @@ suspend fun runUpdateCheck(
  * `LibraryStrings.updateCheckNotice` turns it into text from strings.xml.
  * [warn] mirrors [dev.steamvault.app.ui.library.LibraryToast.warn]: the
  * user should look at something (the vault, its settings), not just
- * acknowledge.
+ * acknowledge. A finished check where some games could not be asked
+ * warns too (twin of web UPD-2): its answer is incomplete.
  *
  * Copy rule (docs/LEARNINGS.md, 4d-web): every sentence claims only what
  * its fields carry. `last_stale` counts games the oracle reported with a
  * newer build; `last_failed` games it could not answer for. An outcome
- * other than `completed` never reads as "no updates".
+ * other than `completed` never reads as "no updates", and neither does a
+ * completed run in which some games failed.
  */
 sealed class UpdateCheckNotice(val warn: Boolean) {
     /** Completed, [stale] > 0 games have an update. */
-    data class Found(val stale: Int, val failed: Int) : UpdateCheckNotice(warn = false)
+    data class Found(val stale: Int, val failed: Int) : UpdateCheckNotice(warn = failed > 0)
 
-    /** Completed, no game has an update ([apps] > 0 were asked). */
-    data class NoneFound(val failed: Int) : UpdateCheckNotice(warn = false)
+    /** Completed, no game that answered has an update; [failed] did not answer. */
+    data class NoneFound(val failed: Int) : UpdateCheckNotice(warn = failed > 0)
 
     /** Completed with nothing cached to ask about. */
     data object NothingCached : UpdateCheckNotice(warn = false)

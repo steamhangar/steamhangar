@@ -67,6 +67,8 @@ class Upd3WiringTest {
     fun `MUTATION PIN -- the grid card draws the badge when the model says so`() {
         assertCalledFrom(card, "if (model.updateAvailable)", "GameCard")
         assertCalledFrom(card, "UpdateAvailableBadge(", "GameCard")
+        // Review fix: the badge keeps clear of the select checkbox.
+        assertCalledFrom(card, "padding(start = UPDATE_BADGE_START_CLEARANCE", "GameCard")
     }
 
     @Test
@@ -80,6 +82,8 @@ class Upd3WiringTest {
         assertCalledFrom(library, "CheckUpdatesAction(controller = controller, scope = scope)", "LibraryScreen")
         assertCalledFrom(library, "controller.checkUpdates(scope)", "CheckUpdatesAction")
         assertCalledFrom(library, "if (!controller.updatesSupported) return", "CheckUpdatesAction")
+        assertCalledFrom(library, "val off = !controller.updatesEnabled", "CheckUpdatesAction")
+        assertCalledFrom(library, "enabled = !off && !controller.updateCheckRunning", "CheckUpdatesAction")
     }
 
     @Test

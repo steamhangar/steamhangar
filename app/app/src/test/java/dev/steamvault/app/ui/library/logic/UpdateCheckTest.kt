@@ -206,6 +206,13 @@ class UpdateCheckTest {
         assertTrue(UpdateCheckNotice.Failed(null).warn)
         assertTrue(UpdateCheckNotice.StoppedEarly.warn)
         assertFalse(UpdateCheckNotice.Found(1, 0).warn)
+        assertFalse(UpdateCheckNotice.NoneFound(0).warn)
         assertFalse(UpdateCheckNotice.StillRunning.warn)
+    }
+
+    @Test
+    fun `MUTATION PIN -- a completed check with unanswered games warns (twin of web UPD-2)`() {
+        assertTrue(UpdateCheckNotice.Found(stale = 2, failed = 1).warn)
+        assertTrue(UpdateCheckNotice.NoneFound(failed = 1).warn)
     }
 }

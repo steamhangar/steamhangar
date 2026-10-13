@@ -74,6 +74,8 @@
          "Check & update" button above stays. Lives in the top app bar. -->
     <string name="library_check_updates_button">Check updates</string>
     <string name="library_check_updates_button_busy">Checking…</string>
+    <!-- Shown (disabled) when GET /v1/updates/status says enabled=false. -->
+    <string name="library_check_updates_button_off">Update checks off</string>
     <!-- Badge on a game card / list row: GameSummary.update_available. -->
     <string name="library_update_available_badge">Update available</string>
     <!-- Result toasts. State-only copy: each sentence claims only what the
@@ -83,6 +85,10 @@
         <item quantity="other">Update check finished: %1$d games have an update</item>
     </plurals>
     <string name="library_update_check_none_found">Update check finished: no updates found</string>
+    <plurals name="library_update_check_none_found_partial">
+        <item quantity="one">Update check finished: %1$d game could not be checked, the others are up to date</item>
+        <item quantity="other">Update check finished: %1$d games could not be checked, the others are up to date</item>
+    </plurals>
     <plurals name="library_update_check_with_unchecked">
         <item quantity="one">%1$s (%2$d game could not be checked)</item>
         <item quantity="other">%1$s (%2$d games could not be checked)</item>

@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.library
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -20,6 +21,11 @@ import dev.steamvault.app.ui.theme.VaultColors
  * ([UpdateAvailableBadge]); list rows as a text line in the same colour
  * ([UpdateAvailableLabel]). Colour is the palette's `--stale` ("update
  * ready"), the same one the mockup gave the update state.
+ *
+ * The grid badge never grows past [UPDATE_BADGE_MAX_WIDTH] and ellipsizes;
+ * [GameCard] additionally keeps it clear of the select checkbox
+ * ([UPDATE_BADGE_START_CLEARANCE]), so a narrow card at a large font
+ * scale shows "Upda…" rather than a badge under the checkbox.
  */
 @Composable
 fun UpdateAvailableBadge(modifier: Modifier = Modifier) {
@@ -30,11 +36,19 @@ fun UpdateAvailableBadge(modifier: Modifier = Modifier) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
+            .widthIn(max = UPDATE_BADGE_MAX_WIDTH)
             .clip(RoundedCornerShape(50))
             .background(VaultColors.StatusStale)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
+
+/** Widest the grid badge may get, on any card. */
+internal val UPDATE_BADGE_MAX_WIDTH = 120.dp
+
+/** Space the grid badge leaves at the cover's start for the select
+ * checkbox (Material's 48 dp touch target plus a little air). */
+internal val UPDATE_BADGE_START_CLEARANCE = 52.dp
 
 @Composable
 fun UpdateAvailableLabel(modifier: Modifier = Modifier) {

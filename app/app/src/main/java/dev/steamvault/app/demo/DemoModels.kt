@@ -36,6 +36,10 @@ internal class DemoGame(
      * that field's own real-API default. See `DemoFixtures.kt::seedGames`
      * for the three states this fixture set deliberately exercises. */
     var installedOn: List<InstalledOnEntry> = emptyList(),
+    /** WP UPD-3: the oracle's "newer build exists" verdict. Like the real
+     * API (WP UPD-1) it only reaches the wire for a game with cache bytes,
+     * and a finished prefill clears it ([DemoState]). */
+    var updateAvailable: Boolean = false,
 ) {
     private fun totalSizeBytes(): Long? = depots.sumOf { it.sizeBytes }.takeIf { depots.isNotEmpty() }
 
@@ -49,6 +53,7 @@ internal class DemoGame(
         size_bytes = totalSizeBytes(),
         needs_force = needsForce,
         installed_on = installedOn,
+        update_available = updateAvailable && depots.isNotEmpty(),
     )
 
     fun toDetail(): GameDetail = GameDetail(

@@ -133,6 +133,7 @@ class LibraryControllerUpdateCheckTest {
         assertEquals(listOf<UpdateCheckNotice>(UpdateCheckNotice.Disabled), strings.notices)
         assertTrue(c.toast!!.warn)
         assertTrue(c.updatesSupported)
+        assertFalse("a disabled answer disables the action too", c.updatesEnabled)
     }
 
     @Test
@@ -144,6 +145,23 @@ class LibraryControllerUpdateCheckTest {
         c.probeUpdatesSupport()
         assertFalse(c.updatesSupported)
         assertEquals("all", c.filterKey)
+    }
+
+    @Test
+    fun `MUTATION PIN -- oracle off at the probe disables the action and hides nothing`() = runTest {
+        val c = controller(ScriptedUpdates(statuses = listOf(finishedStatus().copy(enabled = false))))
+        c.filterKey = UPDATES_FILTER_KEY
+        c.probeUpdatesSupport()
+        assertFalse(c.updatesEnabled)
+        assertTrue(c.updatesSupported)
+        assertEquals(UPDATES_FILTER_KEY, c.filterKey)
+    }
+
+    @Test
+    fun `oracle on at the probe keeps the action enabled`() = runTest {
+        val c = controller(ScriptedUpdates(statuses = listOf(finishedStatus())))
+        c.probeUpdatesSupport()
+        assertTrue(c.updatesEnabled)
     }
 
     @Test
