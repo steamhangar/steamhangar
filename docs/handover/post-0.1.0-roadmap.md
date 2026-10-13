@@ -400,7 +400,10 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
    the oracle defaults to on in code; the ADR-0006 addendum lands in
    UPD-4, no prod .env change. A manual "Check updates" on the dev
    instance may query the oracle (metadata only, user decision
-   2026-10-13); dev.env stays unchanged.
+   2026-10-13); dev.env stays unchanged. Egress (ADR-0011): when the
+   oracle is on, its URL host is allowed automatically by vault-proxy and
+   the vault-api startup check, without a `VAULT_EGRESS_ALLOW` entry
+   (user decision 2026-10-13, option A; addendum to ADR-0011 in UPD-4).
 2. **UPD-2 (web)** "Check updates" button (calls `POST
    /v1/updates/check`, no download), "Update available" badge from
    `update_available`, an "Updates" filter chip. The existing "Check &
