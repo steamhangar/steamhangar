@@ -988,20 +988,22 @@ that vault-api makes on every install with no switch:**
    into vault-proxy's image, so no allowlist changed (ADR-0011 addendum
    2026-10-10). An operator who wants no call at all has to block that host
    outside the stack; covers then keep the legacy CDN path.
-7. **Cover image downloads, from vault-api to Steam's image CDN — built,
-   NOT yet reachable (WP D10 COVER-CACHE-1, user decision 2026-10-13 "Weg
-   A").** `api/vault_api/cover_cache.py` downloads each tracked app's cover
+7. **Cover image downloads, from vault-api to Steam's image CDN — always
+   on (WP D10 COVER-CACHE-1, user decisions 2026-10-13: "Weg A", then the
+   egress change).** `api/vault_api/cover_cache.py` downloads each tracked app's cover
    once from the URL item 6 resolved (`shared.akamai.steamstatic.com` or
    `cdn.akamai.steamstatic.com`, https, no redirects, at most 4 MiB, JPEG/
    PNG/WebP only) and stores it under the data volume (512 MiB cap). What
    the CDN learns: the same app ids item 6 already sends to Valve, from the
-   server's address. **Enforcement: blocked today.** vault-proxy's filter
-   does not allow these two hosts in this release, so every download is
-   refused at the proxy and the feature stays inert; opening them is a
-   separate egress decision (ADR-0011) that has not been applied. This item
-   becomes a live exception only with that change.
+   server's address, plus plain image requests for those apps' covers.
+   **Enforcement:** proxy-gated through vault-proxy over `HTTPS_PROXY`;
+   both hosts are baked into vault-proxy's image, exact-host anchored, with
+   no `VAULT_EGRESS_ALLOW` entry and no off switch (ADR-0011 addendum
+   2026-10-13 (D10)). An operator who wants no such request has to block
+   the two hosts outside the stack; downloads then fail soft and clients
+   load covers from the CDN themselves.
 
-Beyond the two core flows named above and the five live exceptions just
+Beyond the two core flows named above and the six live exceptions just
 listed (plus the one now-closed historical exception, item 4), nothing
 else in this repository makes an outbound network call as shipped:
 agent reports and Android/web-to-API traffic stay LAN-internal by design
@@ -1101,7 +1103,8 @@ router except `health` requires it (§1, verified router-by-router); `GET
 /v1/covers/{appid}/{signature}` has no `X-Api-Key` header check because
 an `<img>` cannot send one; its path carries the first 128 bits of
 HMAC-SHA256 keyed with `VAULT_API_KEY` over the appid and the stored file's
-hash, handed out only by the authenticated `GET /v1/games`. Without the
+hash, handed out only by the authenticated `GET /v1/games` (accepted by
+the user on 2026-10-13 as a documented exception to plan §9). Without the
 key no URL can be built and every refusal is the same `404` (no
 enumeration of tracked apps); the route only reads files vault-api stored
 itself (not a proxy). A leaked URL exposes one public cover image until the

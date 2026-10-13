@@ -352,12 +352,9 @@ cap, background thread) and serves `GET /v1/covers/{appid}/{signature}`
 strong ETag, `304`, `private, max-age=31536000, immutable`);
 `cover_cached_url` on `/v1/games`; web and app try it first, then the CDN.
 The app's `VaultApplication` is Coil's `ImageLoaderFactory` with a sized
-disk cache. **Open: the egress change.** Allowing the two steamstatic hosts
-in vault-proxy was refused by the coder session's permission system (an
-orchestrator message is not the user's approval); it needs the user's own
-go, then the proxy entrypoint's `BAKED_HOSTS`, the egress tests, the
-verify-stack filter check and an ADR-0011 addendum. Until then the
-download thread fails soft and clients keep loading from the CDN.
+disk cache. D10c: the user set vault-proxy's `BAKED_HOSTS` to include the
+two steamstatic hosts; tests, verify-stack check and the ADR-0011 addendum
+follow it.
 
 ## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
 

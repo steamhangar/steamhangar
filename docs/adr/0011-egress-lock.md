@@ -685,3 +685,50 @@ host is open:
   `ORACLE_AUTO_ALLOWED_HOST` must stay equal.
 `api/tests/test_upd_1_oracle_egress.py` pins the two parsers against each
 other over a table of values.
+
+## Addendum 2026-10-13 (WP D10 COVER-CACHE-1): Steam's two cover image hosts are baked in
+
+Decision (user, 2026-10-13, recorded in
+`docs/handover/post-0.1.0-roadmap.md` D10): vault-proxy bakes in exactly
+`shared.akamai.steamstatic.com` and `cdn.akamai.steamstatic.com`, next to
+`api.steampowered.com`, exact-host anchored with the same `to_pattern`
+rendering (`^shared\.akamai\.steamstatic\.com$`,
+`^cdn\.akamai\.steamstatic\.com$`). No wildcard, no other steamstatic
+host, no `VAULT_EGRESS_ALLOW` entry needed, and no off switch. The
+`BAKED_HOSTS` line in `deploy/proxy/docker-entrypoint.sh` was set by the
+user.
+
+Why: WP D10 has vault-api keep its own copy of each tracked game's cover
+and serve it over the LAN (`api/vault_api/cover_cache.py`), so first loads
+are LAN speed and covers still show with the internet down (user decision
+2026-10-13, "Weg A"; the measurement that preceded it found the CDN itself
+fast, 0.2-0.8 s, so the gain is LAN speed and offline covers, not CDN
+latency). The download URLs are the ones the cover-art lookup already
+resolves (addendum 2026-10-10), and `cover_art.valid_cover_url` accepts
+exactly these two hosts; the proxy's baked list is pinned to equal
+`cover_art.ALLOWED_ASSET_HOSTS` plus the relay host
+(`api/tests/test_d10_cover_cache.py`). The cover lookup has no off switch,
+so neither do these hosts; tying them to a setting would leave the
+feature silently broken in exactly the case it exists for.
+
+Security consequence, stated plainly: two more third-party hosts are
+reachable from vault-api by default, without anyone listing them. They
+receive only image requests (`GET`, no key, no SteamID, no client id) for
+the covers of apps this vault tracks, from the server's address: the same
+app ids the cover-art lookup already sends to Valve, now also visible to
+Valve's CDN (Akamai) as image paths. vault-api follows no redirects there,
+bounds every body at 4 MiB and stores only JPEG/PNG/WebP. An operator who
+wants no such request has to block the two hosts outside the stack;
+downloads then fail soft and the clients load covers from the CDN
+themselves.
+
+What this does not change: the two-network mechanism (§1), the filter
+grammar, `NO_PROXY`, `VAULT_EGRESS_ALLOW`'s role for every other host, and
+the logging of every outbound destination. `deploy/tests/verify-stack.sh`
+checks the live filter for both patterns and for exactly two steamstatic
+lines.
+
+Related decision recorded with it (user, 2026-10-13): the stored covers are
+served at `GET /v1/covers/{appid}/{signature}` with an HMAC of the API key
+in the path instead of the `X-Api-Key` header (an `<img>` cannot send one),
+accepted as a documented exception to plan §9 (api/README.md "Auth").

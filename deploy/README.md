@@ -1445,10 +1445,13 @@ it:
    network) — its own real route to Valve, the oracle, or a webhook
    receiver. It refuses every destination that is not in a filter file
    rendered from `VAULT_EGRESS_ALLOW` (`deploy/proxy/docker-entrypoint.sh`)
-   plus one host baked into its image unconditionally: `api.steampowered.com`,
+   plus hosts baked into its image unconditionally: `api.steampowered.com`,
    for the Steam Web API relay and, since WP API-FIX-5, the always-on
-   cover-art lookup (see that script's own comment for why this one host is
-   not gated behind the variable).
+   cover-art lookup (see that script's own comment for why it is not gated
+   behind the variable), and since WP D10 Steam's two cover image hosts
+   `shared.akamai.steamstatic.com` and `cdn.akamai.steamstatic.com`, from
+   which vault-api downloads the covers it serves over the LAN (ADR-0011
+   addendum 2026-10-13 (D10)).
 
 Nothing in `vault-api`'s own Python code changed to make this work — it
 never needed to. `steam_relay.py`, `oracle.py` and `webhooks.py` all use

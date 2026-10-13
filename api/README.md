@@ -212,7 +212,7 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_MANIFEST_ORACLE`         | no       | *(empty = `steamcmd_api`, oracle **ON** since WP UPD-1)* | Third-party manifest oracle. Unset or empty = the default `steamcmd_api` (the only one implemented); `off` or `none` turns it off. **While it is on, vault-api sends the app id of every cached game to a service outside your LAN, in the background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`** (the always-on update check) — see "Manifest oracle" and "Always-on update check" below. Any other value is refused at startup |
 | `VAULT_MANIFEST_ORACLE_URL`     | no       | `https://api.steamcmd.net/v1/info` | Base URL the oracle asks (`<base>/<appid>`). Point it at your own mirror to keep the queries on your network. Must be `http`/`https`; redirects away from it are never followed |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | no       | `10`         | Socket timeout (seconds) for one oracle request; **must be > 0**. A timeout is an ordinary "no data" outcome, never an error the API surfaces |
-| `VAULT_EGRESS_ALLOW`            | no       | *(empty)*    | WP EG-1 (ADR-0011). Comma-separated bare hostnames the egress-lock proxy (`deploy/proxy`) may additionally reach on vault-api's behalf, beyond the one host baked into that proxy's image unconditionally (`api.steampowered.com`, the Steam Web API relay) and the default oracle host `api.steamcmd.net`, which the proxy allows by itself while the oracle is on (WP UPD-1). **An oracle URL pointing at any other host (a private mirror) with that host missing from this list refuses to boot** — see "Egress lock" below. Each entry must look like a plausible hostname (letters, digits, `.`, `-` only; no leading/trailing `.`/`-`) or vault-api refuses to boot |
+| `VAULT_EGRESS_ALLOW`            | no       | *(empty)*    | WP EG-1 (ADR-0011). Comma-separated bare hostnames the egress-lock proxy (`deploy/proxy`) may additionally reach on vault-api's behalf, beyond the hosts baked into that proxy's image unconditionally (`api.steampowered.com`, the Steam Web API relay and cover-art lookup; since WP D10 `shared.akamai.steamstatic.com` and `cdn.akamai.steamstatic.com`, the cover images) and the default oracle host `api.steamcmd.net`, which the proxy allows by itself while the oracle is on (WP UPD-1). **An oracle URL pointing at any other host (a private mirror) with that host missing from this list refuses to boot** — see "Egress lock" below. Each entry must look like a plausible hostname (letters, digits, `.`, `-` only; no leading/trailing `.`/`-`) or vault-api refuses to boot |
 | `VAULT_SWEEP_INCLUDE_CACHED`    | no       | `true` (**was `false` through WP 4d; flipped by WP SWEEP-1 / ADR-0014, 2026-08-22**) | Strict boolean (`true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`, case-insensitive). Widens the scheduler's target set from "installed on a fresh agent" to installed PLUS everything holding cache content. Runtime-editable via `PATCH /v1/settings`. See "Sweep target set — installed PLUS cached" |
 | `VAULT_RELAY_EXPOSE_PLAYTIME`   | no       | `false`      | Strict boolean. Privacy gate for the Steam Web API relay: off = `GET /v1/steam/owned-games` omits `playtime_forever`. Env-only. See "The privacy gate" (WP 4h.0, ADR-0010) |
 | `VAULT_RELAY_EXPOSE_LAST_PLAYED` | no      | `false`      | Strict boolean. Same gate for `rtime_last_played`, independent of the playtime switch. Env-only. See "The privacy gate" |
@@ -787,11 +787,10 @@ ETag, so repeat views were already cached by the clients.)
   redirects, through `HTTPS_PROXY`. A failure backs that app off (15 min
   doubling to 24 h), ends the tick and pauses the thread for the same
   backoff; one WARNING per failure streak, recovery at INFO.
-- **Egress: not yet open.** vault-proxy's filter does not allow these two
-  hosts in this release, so in the shipped stack every download is refused
-  by the proxy and fails soft (clients keep using the CDN). Allowing them is
-  a separate, user-approved change to the egress lock (ADR-0011); until it
-  lands, this feature is inert in a locked stack.
+- **Egress.** vault-proxy bakes in exactly these two hosts, exact-host
+  anchored like `api.steampowered.com`, with no `VAULT_EGRESS_ALLOW` entry
+  and no off switch (user decision 2026-10-13; ADR-0011 addendum 2026-10-13
+  (D10)). Offline or refused downloads fail soft; clients keep using the CDN.
 - **`cover_cached_url`** on `GET /v1/games[/{appid}]`: the relative path
   `/v1/covers/{appid}/{signature}` once a file is stored, else `null`.
   `cover_url` keeps its meaning, so older clients are unaffected. Clients
@@ -5511,7 +5510,8 @@ pins the exact response text so a future change is caught by an assertion,
 not a review comment.
 
 **Signature-authenticated: `GET /v1/covers/{appid}/{signature}` (WP D10
-COVER-CACHE-1).** Browsers load covers with `<img src>`, which cannot send
+COVER-CACHE-1; accepted by the user on 2026-10-13 as a documented exception
+to plan §9, `docs/handover/post-0.1.0-roadmap.md` D10).** Browsers load covers with `<img src>`, which cannot send
 `X-Api-Key`. So this one route carries its credential in the path instead
 of a header: `signature` is the first 32 hex characters of
 HMAC-SHA256(key = `VAULT_API_KEY`, message = `steamhangar-cover-v1`, appid

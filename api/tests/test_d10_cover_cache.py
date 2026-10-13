@@ -654,3 +654,33 @@ def test_lifespan_starts_and_stops_the_fetcher(settings: Settings) -> None:
     with TestClient(app):
         assert fetcher._thread is not None and fetcher._thread.is_alive()
     assert fetcher._thread is None
+
+
+# --------------------------------------------------------------------------
+# Egress parity: vault-proxy's baked hosts cover every host the cover code
+# may contact (user decision 2026-10-13, ADR-0011 addendum D10)
+# --------------------------------------------------------------------------
+
+
+def _baked_hosts() -> set[str]:
+    import re
+
+    from tests.test_eg1_egress_lock import PROXY_ENTRYPOINT_PATH
+
+    text = PROXY_ENTRYPOINT_PATH.read_text(encoding="utf-8")
+    (value,) = re.findall(r'^BAKED_HOSTS="([^"]*)"$', text, re.MULTILINE)
+    return set(value.split())
+
+
+def test_proxy_bakes_in_exactly_the_relay_host_and_the_cover_hosts() -> None:
+    from vault_api import cover_art, steam_relay
+
+    expected = {steam_relay.STEAM_API_HOST} | set(cover_art.ALLOWED_ASSET_HOSTS)
+    assert _baked_hosts() == expected
+
+
+@pytest.mark.parametrize("url", [URL_730, URL_440])
+def test_every_valid_cover_url_names_a_baked_host(url) -> None:
+    from urllib.parse import urlsplit
+
+    assert urlsplit(url).hostname in _baked_hosts()

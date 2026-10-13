@@ -47,11 +47,10 @@ wait for the CDN, which is the latency this module exists to remove.
 ``fetch_image`` re-validates the URL with ``cover_art.valid_cover_url``
 (https, exactly ``shared.akamai.steamstatic.com`` or
 ``cdn.akamai.steamstatic.com``), refuses redirects, bounds the body, and
-honours ``HTTPS_PROXY`` (the egress lock, ADR-0011). **The downloads need
-vault-proxy to allow those two hosts, and the shipped filter does not (yet):
-that egress change is a separate, user-approved step that is NOT part of
-this work package.** Until it lands, every download is refused by the proxy
-and fails soft as described next; clients keep loading covers from the CDN.
+honours ``HTTPS_PROXY`` (the egress lock, ADR-0011): vault-proxy bakes in
+exactly these two hosts (user decision 2026-10-13, ADR-0011 addendum
+2026-10-13 (D10)). If a download fails anyway (offline, proxy refusal), it
+fails soft as described next and clients keep loading covers from the CDN.
 A failure backs that app off
 (``cover_art.failure_backoff``), ends the tick, and pauses the thread for the
 same backoff, so an offline vault sends at most one request per step. The

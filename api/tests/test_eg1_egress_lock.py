@@ -695,9 +695,15 @@ def test_entrypoint_end_to_end_renders_the_expected_filter_file(
     assert rc == 0, f"entrypoint failed on a valid allowlist. Output:\n{output}"
     rendered = filter_file.read_text(encoding="utf-8")
     assert r"^api\.steampowered\.com$" in rendered, "baked-in relay host missing from the rendered filter"
+    # WP D10 COVER-CACHE-1: Steam's two cover image hosts, also baked in.
+    assert r"^shared\.akamai\.steamstatic\.com$" in rendered, "baked-in cover host missing"
+    assert r"^cdn\.akamai\.steamstatic\.com$" in rendered, "baked-in cover host missing"
     assert r"^api\.steamcmd\.net$" in rendered, "operator host missing or not normalized/anchored/escaped correctly"
     assert r"^my-webhook\.example\.com$" in rendered, "second operator host missing or malformed"
-    assert "filter file rendered: api.steampowered.com (baked-in) + 2 operator host(s)" in output, (
+    assert (
+        "filter file rendered: api.steampowered.com shared.akamai.steamstatic.com "
+        "cdn.akamai.steamstatic.com (baked-in) + 2 operator host(s)"
+    ) in output, (
         f"entrypoint's own summary log line does not report exactly 2 "
         f"operator hosts (the two valid entries; the blank ones from the "
         f"trailing commas must be silently skipped, not counted). Output:\n{output}"
