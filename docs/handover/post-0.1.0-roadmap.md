@@ -396,8 +396,9 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
    then fix, commit, CI, merge. Open user decision: the check only
    refreshes the manifest oracle, which is off by default
    (`VAULT_MANIFEST_ORACLE`, ADR-0006 decision 4), so in prod it does
-   nothing until the oracle is on. Options: default on (ADR addendum in
-   UPD-4) or on via prod .env (Antrag).
+   nothing until the oracle is on. Decided 2026-10-13 (user, option A):
+   the oracle defaults to on in code; the ADR-0006 addendum lands in
+   UPD-4, no prod .env change.
 2. **UPD-2 (web)** "Check updates" button (calls `POST
    /v1/updates/check`, no download), "Update available" badge from
    `update_available`, an "Updates" filter chip. The existing "Check &
