@@ -414,6 +414,25 @@ def test_the_jobs_history_filter_keeps_recent_finished_and_all_active_jobs(jobs_
     assert ids(client.get("/v1/jobs?range=24h&limit=1", headers=AUTH)) == [4]
 
 
+def test_an_unpadded_since_is_normalised_before_comparing(tmp_path: Path) -> None:
+    """strptime accepts "2026-9-30T0:0:0Z". Compared as a raw string it sorts
+    AFTER "2026-10-01..." ('9' > '1') and would hide an October job."""
+    settings = make_settings(tmp_path, log_path="")
+    conn = open_conn(settings)
+    try:
+        conn.execute(
+            "INSERT INTO jobs (id, appid, type, status, created_at, finished_at) "
+            "VALUES (1, 440, 'prefill', 'done', '2026-10-01T00:00:00Z', "
+            "'2026-10-01T00:00:00Z')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = client_for(settings)
+    assert ids(client.get("/v1/jobs?since=2026-9-30T0:0:0Z", headers=AUTH)) == [1]
+    assert ids(client.get("/v1/jobs?since=2026-10-2T0:0:0Z", headers=AUTH)) == []
+
+
 def test_the_jobs_history_filter_rejects_bad_input(jobs_client) -> None:
     client, _now = jobs_client
     assert client.get("/v1/jobs?range=1y", headers=AUTH).status_code == 422

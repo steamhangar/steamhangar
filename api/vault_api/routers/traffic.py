@@ -34,9 +34,13 @@ DHCP address that moved from one PC to another counts for the PC that has it
 now. Every other logged address is an agentless client (``kind:
 "address"``). If agents reach vault-api through a reverse proxy, the recorded
 address is the proxy's and no mapping is possible; the PC then appears twice
-(agent entry without cache traffic, address entry with it). The prefill
-runner's own downloads appear as an address too (the vault-runner
-container's address).
+(agent entry without cache traffic, address entry with it).
+
+Known gap: the prefill runner's own downloads appear as an ordinary address
+client and count as an active client. Its address as vault-core logs it
+depends on the host's routing/NAT and cannot be derived deterministically
+here (api/README.md, "Clients overview and throughput"); identifying it
+needs a decision (operator-set address or a runner probe).
 
 Auth is attached at the router level.
 """
@@ -114,7 +118,8 @@ class SummaryOut(BaseModel):
     average_bytes_per_second: float | None
     #: Largest server-wide 5-minute total / 300 s.
     peak_bytes_per_second: float
-    #: Distinct addresses that loaded bytes in the range.
+    #: Distinct addresses that loaded bytes in the range. INCLUDES the
+    #: prefill runner's address when it downloaded (see module docstring).
     active_clients: int
 
 
@@ -141,7 +146,8 @@ class ThroughputOut(BaseModel):
     range_start: str | None
     active_window_minutes: int
     current: CurrentOut | None
-    #: Addresses with cache activity within active_window_minutes.
+    #: Addresses with cache activity within active_window_minutes, the
+    #: prefill runner's included while a job downloads (module docstring).
     active_clients_now: int | None
     summary: SummaryOut | None
     #: One entry per RUNNING prefill job (never null; values inside may be).
@@ -208,6 +214,8 @@ class RecentAppOut(BaseModel):
 class ClientActivityOut(BaseModel):
     #: Stable key: "agent:<client_id>" or "addr:<address>".
     key: str
+    #: "address" = seen in the event log, no agent owns it. The prefill
+    #: runner is one of these today (no reliable way to tell it apart yet).
     kind: Literal["agent", "address"]
     client_id: str | None
     #: Agent: the addresses assigned to it (see module docstring).

@@ -3880,14 +3880,27 @@ is read once, and a sweep failure re-reads instead of losing data" real:
    is treated as rotated** and the cursor resets to 0. This covers an
    operator, a `logrotate` with `copytruncate`, a vault-core redeployed onto
    a fresh volume, and (WP D15b) a rename rotation: the sweep stores the
-   log's `st_dev`/`st_ino` with the cursor, and a changed inode restarts at
-   offset 0 even when the new file is already larger than the old offset.
-   Every such reset is counted in `rotations_detected_total` /
-   `last_rotation_detected_at` (`GET /v1/stats`); the sweeper's own
-   truncation is not counted there (`last_rotated_at`). Lines the old file
-   received after the last sweep and before a rename rotation are not read
-   (the sweeper does not look for the renamed file) -- at most one sweep
-   interval.
+   log's inode with the cursor, and a changed inode restarts at offset 0
+   even when the new file is already larger than the old offset. The
+   decision uses `st_ino` only: `st_dev` is stored (`log_dev`) for
+   diagnostics but never compared, because ZFS and other filesystems with
+   anonymous device numbers can change it across a reboot for the same
+   file, which would re-count the whole log into the forever tier. Before
+   switching, the sweep reads the old file's unread tail if it is still at
+   `<path>.1` with the stored inode (the D15-ROT "keep one old file"
+   layout); a partial last line there is dropped, and if `<path>.1` is gone
+   the tail is lost (at most one sweep interval). Every reset is counted in
+   `rotations_detected_total` / `last_rotation_detected_at`
+   (`GET /v1/stats`); the sweeper's own truncation is not counted there
+   (`last_rotated_at`).
+
+   **`copytruncate` caveat.** A `copytruncate` rotation keeps the inode, so
+   only the shrink check can see it, and only if the file is still smaller
+   than the cursor at the next sweep. Lines written between the last sweep
+   and the copy end up in the copy and are never read. If the truncated file
+   has already grown past the old cursor by the next sweep, the rotation is
+   invisible and the sweep continues from the old offset in the new content,
+   skipping its beginning. A rename rotation (D15-ROT) has neither problem.
 
 ### Idempotence, stated honestly
 
@@ -4133,7 +4146,8 @@ the internet"; `miss_bytes` is what it served while fetching upstream.
 
 **The tiers start empty on upgrade.** `client_cache_stats` (sweep-time
 windows, about four hours) is not folded in; `event_sweep_state.
-traffic_since` records when the first sweep after the upgrade wrote, and
+traffic_since` records when the first sweep after the upgrade wrote tier
+rows (it stays `null` until a batch actually contained lines), and
 `GET /v1/stats` reports it. `client_cache_stats` and
 `VAULT_CLIENT_STATS_KEEP` stay unchanged: `GET /v1/clients` and bypass
 detection keep reading them.
@@ -4269,10 +4283,23 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
   can differ from `GET /v1/clients`' `source_addrs` (all retained
   addresses). If agents reach vault-api through a reverse proxy, the
   recorded address is the proxy's: no mapping is possible and the PC shows
-  twice (agent entry without traffic, address entry with it). The prefill
-  runner's own downloads appear as an address client (vault-runner's
-  container address). There is no naming of agentless addresses yet (the
+  twice (agent entry without traffic, address entry with it). There is no
+  naming of agentless addresses yet (the
   event log has IPs only, no reverse DNS by design).
+- **The prefill runner is counted as a client (known gap).** SteamPrefill
+  in vault-runner downloads through vault-core like any PC, so its traffic
+  appears as one `kind: "address"` entry and counts in `active_clients` /
+  `active_clients_now`. vault-api cannot know that address
+  deterministically: the runner reaches vault-core through the operator's
+  DNS rewrite to vault-core's LAN address, so the source vault-core logs is
+  whatever the host's routing and NAT make of the runner's bridge address
+  (often the host's own address), not something either container can read.
+  Guessing it from "only seen while a prefill job ran" would mislabel a PC
+  downloading at the same time. Identifying it needs a decision (an
+  operator-set address, or a probe request from the runner that the sweep
+  recognises); until then the UI should treat a busy address during a
+  running job with care. The per-job speed in `/v1/throughput` does not
+  depend on this (it is attributed by depot).
 - **`connected`**: agent `online` (`GET /v1/clients`' presence rule) or
   cache activity within `active_window_minutes`. For an address client it is
   `cache_active`, `null` when the feed is not `ok`.

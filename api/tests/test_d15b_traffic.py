@@ -415,3 +415,137 @@ def test_stats_reports_detected_rotations_and_traffic_since(
     assert body["rotations_detected_total"] == 1
     assert body["last_rotation_detected_at"] == "2026-10-13T10:10:00Z"
     assert body["traffic_since"] == "2026-10-13T10:05:00Z"
+
+
+# ---------------------------------------------------------------------------
+# Review round: inode-only identity, draining <path>.1, active buckets of
+# expired 5-minute buckets, traffic_since
+# ---------------------------------------------------------------------------
+
+
+def test_a_changed_st_dev_with_the_same_inode_is_not_a_rotation(
+    tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    """ZFS hands out anonymous device numbers that can change across a
+    reboot; the same file must not be re-read from offset 0."""
+    settings = make_settings(tmp_path)
+    log = tmp_path / "event.log"
+    write_log(log, event_line(time=iso(at(13, 10, 0)), bytes_sent="100"))
+    event_sweep.sweep_once(db, settings, at(13, 10, 5))
+    before = event_sweep.read_state(db)
+    db.execute("UPDATE event_sweep_state SET log_dev = log_dev + 12345")
+    db.commit()
+    append_log(log, event_line(time=iso(at(13, 10, 6)), bytes_sent="1"))
+
+    outcome = event_sweep.sweep_once(db, settings, at(13, 10, 10))
+    state = event_sweep.read_state(db)
+    assert not outcome.rotated
+    assert outcome.lines == 1  # only the new line, nothing re-read
+    assert state.rotations_detected_total == 0
+    assert state.cursor_offset == log.stat().st_size > before.cursor_offset
+    assert [r["bytes_served"] for r in rows(db, "server_traffic", "1d")] == [101]
+    assert state.log_dev == log.stat().st_dev  # refreshed for diagnostics
+
+
+def test_a_rename_rotation_first_drains_the_old_files_unread_tail(
+    tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    settings = make_settings(tmp_path)
+    log = tmp_path / "event.log"
+    old = tmp_path / "event.log.1"
+    write_log(log, event_line(time=iso(at(13, 10, 0)), addr="10.0.0.1", bytes_sent="1"))
+    event_sweep.sweep_once(db, settings, at(13, 10, 5))
+    old_ino = log.stat().st_ino
+    # Written after that sweep, then nginx's file is renamed away.
+    append_log(
+        log,
+        event_line(time=iso(at(13, 10, 6)), addr="10.0.0.1", bytes_sent="10"),
+        event_line(time=iso(at(13, 10, 7)), addr="10.0.0.1", bytes_sent="20"),
+    )
+    with open(log, "ab") as handle:
+        handle.write(b"v1\tpartial line never finished")
+    os.rename(log, old)
+    write_log(log, event_line(time=iso(at(13, 10, 8)), addr="10.0.0.2", bytes_sent="300"))
+
+    drained = event_sweep.sweep_once(db, settings, at(13, 10, 10))
+    state = event_sweep.read_state(db)
+    assert drained.lines == 2 and not drained.rotated
+    assert state.log_ino == old_ino
+    assert state.rotations_detected_total == 0
+
+    switched = event_sweep.sweep_once(db, settings, at(13, 10, 15))
+    state = event_sweep.read_state(db)
+    assert switched.rotated and switched.lines == 1
+    assert state.log_ino == log.stat().st_ino
+    assert state.rotations_detected_total == 1
+    assert [r["bytes_served"] for r in rows(db, "server_traffic", "1d")] == [331]
+
+
+def test_an_old_file_with_another_inode_is_not_drained(
+    tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    settings = make_settings(tmp_path)
+    log = tmp_path / "event.log"
+    write_log(log, event_line(time=iso(at(13, 10, 0)), bytes_sent="1"))
+    event_sweep.sweep_once(db, settings, at(13, 10, 5))
+    os.rename(log, tmp_path / "gone.log")
+    # Some unrelated file at <path>.1 with plenty of lines.
+    write_log(tmp_path / "event.log.1", *[event_line(bytes_sent="999")] * 5)
+    write_log(log, event_line(time=iso(at(13, 10, 6)), bytes_sent="2"))
+
+    outcome = event_sweep.sweep_once(db, settings, at(13, 10, 10))
+    assert outcome.rotated and outcome.lines == 1
+    assert [r["bytes_served"] for r in rows(db, "server_traffic", "1d")] == [3]
+
+
+def test_no_self_truncation_while_draining_the_old_file(
+    tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    """While the cursor refers to <path>.1 it says nothing about the live
+    log; a live log that happens to be exactly cursor-sized must survive."""
+    settings = make_settings(tmp_path, max_bytes=1)
+    log = tmp_path / "event.log"
+    line = event_line(time=iso(at(13, 10, 6)), bytes_sent="10")
+    write_log(log, event_line(time=iso(at(13, 10, 0))))
+    event_sweep.sweep_once(db, settings, at(13, 10, 5))  # truncates, cursor 0
+    assert event_sweep.read_state(db).cursor_offset == 0
+    append_log(log, line)
+    os.rename(log, tmp_path / "event.log.1")
+    write_log(log, line)  # same byte length as the drained tail
+
+    outcome = event_sweep.sweep_once(db, settings, at(13, 10, 10))
+    assert outcome.lines == 1 and not outcome.truncated
+    assert log.stat().st_size == len(line) + 1
+
+
+def test_a_late_line_for_an_expired_5_minute_bucket_does_not_count_it_active_twice(
+    tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    settings = make_settings(tmp_path)
+    log = tmp_path / "event.log"
+    now = at(13, 12, 0)
+    old = now - timedelta(days=3)
+    write_log(log, event_line(time=iso(old), bytes_sent="5"))
+    event_sweep.sweep_once(db, settings, now)
+    assert rows(db, "server_traffic", "5m") == []  # pruned, caught up
+    append_log(log, event_line(time=iso(old + timedelta(seconds=30)), bytes_sent="7"))
+    event_sweep.sweep_once(db, settings, now + timedelta(minutes=5))
+
+    for tier in ("1h", "1d"):
+        (row,) = rows(db, "server_traffic", tier)
+        assert row["bytes_served"] == 12
+        assert row["active_buckets"] == 1
+
+
+def test_traffic_since_waits_for_the_first_written_rows(
+    tmp_path: Path, db: sqlite3.Connection
+) -> None:
+    settings = make_settings(tmp_path)
+    log = tmp_path / "event.log"
+    write_log(log)
+    event_sweep.sweep_once(db, settings, at(13, 10, 0))
+    assert event_sweep.read_state(db).traffic_since is None
+    append_log(log, event_line(time=iso(at(13, 10, 1))))
+    event_sweep.sweep_once(db, settings, at(13, 10, 5))
+    event_sweep.sweep_once(db, settings, at(13, 10, 10))
+    assert event_sweep.read_state(db).traffic_since == "2026-10-13T10:05:00Z"

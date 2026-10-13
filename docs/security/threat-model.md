@@ -1091,8 +1091,13 @@ device: when each address loaded something, roughly how much, and which
 game (depot -> app through `depot_app_map`). It is readable by anyone with
 the API key (`GET /v1/clients/overview`, `GET /v1/throughput*`) and by
 anyone who can read `vault.db`. Nothing new leaves the host, the data is
-not sent to any third party, and the raw event log itself is still
-truncated/rotated as before. There is no deletion control yet: removing
+not sent to any third party. The raw event log is a separate, larger
+record: in production the sweeper's in-place truncation is currently
+denied (measured 2026-10-13: 41 MB and growing, roadmap D15), so until
+vault-core rotates it itself (D15-ROT: rotate at 64 MiB, keep one old
+file, about 128 MiB) it grows without limit and keeps every request line,
+with client address and URI, since it was enabled. There is no deletion
+control yet: removing
 an address's history means deleting its rows from the three tables by
 hand. An operator who does not want a lasting record keeps
 `VAULT_EVENT_LOG_PATH` empty (then nothing is collected at all); a

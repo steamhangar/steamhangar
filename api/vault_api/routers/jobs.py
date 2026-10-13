@@ -396,12 +396,15 @@ def list_recent_jobs(
         )
     cutoff: str | None = None
     if since is not None:
-        if jobs_queue.parse_utc_iso(since) is None:
+        parsed = jobs_queue.parse_utc_iso(since)
+        if parsed is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="'since' must be a UTC timestamp like 2026-10-13T00:00:00Z.",
             )
-        cutoff = since
+        # strptime also accepts unpadded fields ("2026-1-5T0:0:0Z"); the
+        # query compares strings, so it must see the canonical padded form.
+        cutoff = jobs_queue.to_utc_iso(parsed)
     elif range is not None and range in _HISTORY_RANGES:
         cutoff = jobs_queue.to_utc_iso(
             datetime.now(timezone.utc) - _HISTORY_RANGES[range]

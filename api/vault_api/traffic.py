@@ -313,8 +313,18 @@ def _coarse_buckets(bucket_5m: str) -> list[tuple[str, str]]:
     return [(TIER_1H, bucket_iso(moment, TIER_1H)), (TIER_1D, bucket_iso(moment, TIER_1D))]
 
 
-def write_batch(conn: sqlite3.Connection, batch: TrafficBatch) -> None:
-    """Fold one batch into all three tiers. Caller holds the transaction."""
+def write_batch(
+    conn: sqlite3.Connection, batch: TrafficBatch, now: datetime | None = None
+) -> None:
+    """Fold one batch into all three tiers. Caller holds the transaction.
+
+    ``now`` (the sweep time) decides which 5-minute buckets are older than
+    the 5m retention. For such a bucket a missing 5-minute row does not prove
+    the bucket was never active -- its row may simply have been pruned -- so
+    it counts as newly active in a coarse row only when that coarse row does
+    not exist yet. That can under-count ``active_buckets`` for very late
+    data (average speed slightly high), never over-count it.
+    """
     server: dict[str, TrafficCell] = {}
     for (addr, bucket), cell in batch.cells.items():
         values = (
@@ -349,6 +359,11 @@ def write_batch(conn: sqlite3.Connection, batch: TrafficBatch) -> None:
         for tier, coarse in _coarse_buckets(bucket):
             conn.execute(_DEPOT_UPSERT, (tier, coarse, addr, depotid, *values))
 
+    cutoff_5m = (
+        to_utc_iso(floor_bucket(now, TIER_5M) - TIER_RETENTION[TIER_5M])  # type: ignore[operator]
+        if now is not None
+        else None
+    )
     for bucket, total in sorted(server.items()):
         row = conn.execute(
             "SELECT bytes_served FROM server_traffic WHERE tier = '5m' AND bucket_at = ?",
@@ -370,10 +385,16 @@ def write_batch(conn: sqlite3.Connection, batch: TrafficBatch) -> None:
             _SERVER_UPSERT_5M, (bucket, *sums, after, 1 if after > 0 else 0)
         )
         newly_active = 1 if before == 0 and after > 0 else 0
+        expired = cutoff_5m is not None and bucket < cutoff_5m
         for tier, coarse in _coarse_buckets(bucket):
-            conn.execute(
-                _SERVER_UPSERT_COARSE, (tier, coarse, *sums, after, newly_active)
-            )
+            active = newly_active
+            if active and expired:
+                exists = conn.execute(
+                    "SELECT 1 FROM server_traffic WHERE tier = ? AND bucket_at = ?",
+                    (tier, coarse),
+                ).fetchone()
+                active = 0 if exists is not None else 1
+            conn.execute(_SERVER_UPSERT_COARSE, (tier, coarse, *sums, after, active))
 
 
 def prune(conn: sqlite3.Connection, now: datetime) -> int:
