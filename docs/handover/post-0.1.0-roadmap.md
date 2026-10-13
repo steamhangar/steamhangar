@@ -326,6 +326,11 @@ load the image straight from `shared.akamai.steamstatic.com` /
 vault-api. Coil 2.7 already has a default disk cache. User decision
 2026-10-13: option A (allow the two steamstatic hosts, vault-api stores
 and serves covers), but measure first what is actually slow.
+Measured 2026-10-13 (diag, ZEUS host): one cover takes 0.2-0.8 s from
+the CDN (50-175 KB), `Cache-Control: max-age` about 10 years plus an
+ETag, vault-dns resolves the hosts normally. The CDN is not slow; the
+gain is LAN speed on first loads and offline covers. User: build
+option A anyway.
 
 ## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
 
