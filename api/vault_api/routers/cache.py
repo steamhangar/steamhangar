@@ -207,6 +207,48 @@ _WITH_PACKAGES_DOC = (
 )
 
 
+#: Upper bound on ``members`` entries (a game with more packages than this is
+#: not a real catalogue entry; the bound keeps a hostile query string cheap).
+MAX_CONFIRMED_MEMBERS = 1024
+
+
+def _parse_members(raw: str | None, *, with_packages: bool) -> frozenset[int] | None:
+    """``members=<csv appids>``: exactly the apps the confirmation dialog
+    listed (``delete-plan``'s ``members[].appid``, parent included). Required
+    with ``with_packages=true`` (``422`` without it), refused without it.
+    Strict grammar: comma-separated ASCII-digit ids, no spaces, no empties."""
+    if not with_packages:
+        if raw is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="members is only accepted together with with_packages=true.",
+            )
+        return None
+    if raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "with_packages=true requires members=<comma-separated app ids>: "
+                "exactly the apps the confirmation listed "
+                "(GET /v1/cache/{appid}/delete-plan?with_packages=true, members[].appid)."
+            ),
+        )
+    parts = raw.split(",")
+    ids: set[int] = set()
+    for part in parts[: MAX_CONFIRMED_MEMBERS + 1]:
+        appid = deletion.coerce_positive_id(part)
+        if appid is None or len(parts) > MAX_CONFIRMED_MEMBERS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "members must be comma-separated app ids (ASCII digits only, "
+                    f"at most {MAX_CONFIRMED_MEMBERS})."
+                ),
+            )
+        ids.add(appid)
+    return frozenset(ids)
+
+
 def _member_depots(
     rows: list[tuple[object, object]], members: frozenset[int]
 ) -> dict[int, set[int]]:
@@ -311,6 +353,15 @@ def delete_cached_app(
     with_packages_raw: str | None = Query(
         None, alias="with_packages", description=_WITH_PACKAGES_DOC
     ),
+    members_raw: str | None = Query(
+        None,
+        alias="members",
+        description=(
+            "Required with with_packages=true: the comma-separated app ids the "
+            "confirmation listed (delete-plan members[].appid, parent included). "
+            "409 when the server's delete set differs."
+        ),
+    ),
     open_db: DbOpener = Depends(db_opener),
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
@@ -395,11 +446,28 @@ def delete_cached_app(
     Preview: ``GET /v1/cache/{appid}/delete-plan``.
     """
     with_packages = _parse_with_packages(with_packages_raw)
+    confirmed = _parse_members(members_raw, with_packages=with_packages)
     selection, rows, co_owner_states, active_jobs = _load_delete_request(
         open_db, appid, with_packages=with_packages,
         oracle_enabled=_oracle_enabled(request),
     )
     delete_set = selection.delete_set
+    # WP TOOL-APPS-2b: the user confirmed a list; the server's own set must be
+    # exactly that list, or nothing is deleted (a package classified between
+    # the preview and the click must be shown before it is removed).
+    if confirmed is not None and confirmed != delete_set.members:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    "The apps this delete would remove differ from the confirmed "
+                    "list. Nothing was deleted; fetch the delete plan again and "
+                    "confirm the current list."
+                ),
+                "server_members": sorted(delete_set.members),
+                "confirmed_members": sorted(confirmed),
+            },
+        )
     # WP TOOL-APPS-2b: the oldest in-flight job of the parent first, then of
     # each package -- every member is guarded, with today's message.
     active_member, active_job = active_jobs[0] if active_jobs else (appid, None)
@@ -526,7 +594,16 @@ def delete_cached_app(
     # 'error' is the honest state: the operator sees it, and a re-prefill (which
     # runs with --force) repairs the cache. last_prefill_at is cleared either
     # way, because it is no longer true either way.
-    new_status = jobs.STATUS_ERROR if failed else jobs.STATUS_IDLE
+    member_depots = _member_depots(rows, delete_set.members)
+    deleted_ids = {d.depotid for d in deleted}
+    failed_ids = {f.depotid for f in failed if f.depotid}
+    # WP TOOL-APPS-2b: the parent's outcome comes from its OWN depots, like
+    # each package's below. A failure whose depot id is unusable (0) cannot be
+    # attributed and counts for the parent. For a plain delete every
+    # candidate is the parent's, so this equals the pre-2b "any failure".
+    unattributed_failure = any(not f.depotid for f in failed)
+    parent_failed = bool(member_depots[appid] & failed_ids) or unattributed_failure
+    new_status = jobs.STATUS_ERROR if parent_failed else jobs.STATUS_IDLE
     # WP 3.4 / ADR-0006 decision 2: this request changed or left uncertain
     # what is on disk for this app the moment ANYTHING landed in `deleted`
     # (includes the ALREADY-ABSENT case — the mapping claimed this depot was
@@ -534,10 +611,9 @@ def delete_cached_app(
     # failure). The "everything mapped turned out to be shared, nothing
     # exclusive to touch" case leaves both empty, so needs_force is left
     # exactly as it was — nothing on disk changed for this app.
-    set_needs_force = bool(deleted) or bool(failed)
-    member_depots = _member_depots(rows, delete_set.members)
-    deleted_ids = {d.depotid for d in deleted}
-    failed_ids = {f.depotid for f in failed if f.depotid}
+    set_needs_force = (
+        bool(member_depots[appid] & (deleted_ids | failed_ids)) or unattributed_failure
+    )
     package_ids = sorted(delete_set.members - {appid})
     with open_db() as conn:
         # Two separate statements, each committing on its own (both

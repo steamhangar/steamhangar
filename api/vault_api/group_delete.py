@@ -93,8 +93,21 @@ def select_group(
     with_packages: bool,
     oracle_enabled: bool,
 ) -> GroupSelection:
-    """The delete set for ``parent``. Without ``with_packages`` it is the
-    one-member set and nothing is classified (today's behaviour)."""
+    """The delete set for ``parent``.
+
+    Without ``with_packages``, or for a fixed-list tool app, it is the
+    one-member set, returned BEFORE any classification is read: the plain
+    delete never touches ``app_classification`` (its member carries only the
+    ``apps.name``, one ``SELECT``, and no type).
+    """
+    if not with_packages or tool_apps.is_tool_app(parent):
+        row = conn.execute("SELECT name FROM apps WHERE appid = ?", (parent,)).fetchone()
+        own = None if row is None else row["name"]
+        name = own if own is not None and own.strip() else None
+        return GroupSelection(
+            deletion.as_delete_set(parent), (Member(parent, ROLE_PARENT, name, None),), ()
+        )
+
     classes = app_classification.resolve_classifications(
         conn, oracle_enabled=oracle_enabled
     )
@@ -105,8 +118,6 @@ def select_group(
 
     parent_class = classes.get(parent, app_classification.UNCLASSIFIED)
     parent_member = Member(parent, ROLE_PARENT, name_of(parent), parent_class.app_type)
-    if not with_packages or tool_apps.is_tool_app(parent):
-        return GroupSelection(deletion.as_delete_set(parent), (parent_member,), ())
 
     packages: list[Member] = []
     kept: list[KeptChild] = []

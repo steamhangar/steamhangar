@@ -63,9 +63,12 @@ it can put another app into the delete set, and members of the set do not
 protect each other's depots. The bounds (``group_delete.py``):
 
 - only on that one request, opt-in per call (``with_packages=true``); the
-  plain delete, GC and every automatic path never read classification;
-- the confirmation dialog lists every member first
-  (``GET /v1/cache/{appid}/delete-plan``);
+  plain delete, GC and every automatic path never read classification (the
+  plain delete builds its one-member set before any classification read);
+- the request must name exactly the members the confirmation dialog listed
+  (``members=<csv>``, taken from ``GET /v1/cache/{appid}/delete-plan``); the
+  server builds its own set and refuses with ``409`` when the two differ, so
+  no app is deleted that the user was not shown;
 - a member must have its OWN type in ``dlc``/``config``/``music``/``video``/
   ``demo`` (store type or its own PICS ``common.type``); a ``dlc`` inferred
   only from a parent's link list never makes an app deletable, and a child

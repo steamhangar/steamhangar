@@ -129,6 +129,15 @@ def hd2(tmp_path: Path):
     return client, root, settings
 
 
+def _grouped(client: TestClient, appid: int):
+    """A grouped delete the way a UI does it: preview, then confirm exactly
+    the previewed members."""
+    plan = client.get(f"/v1/cache/{appid}/delete-plan?with_packages=true", headers=AUTH)
+    assert plan.status_code == 200, plan.text
+    members = ",".join(str(m["appid"]) for m in plan.json()["members"])
+    return client.delete(f"/v1/cache/{appid}?with_packages=true&members={members}", headers=AUTH)
+
+
 def _on_disk(root: Path, depotid: int) -> bool:
     return (root / "depot" / str(depotid)).exists()
 
@@ -143,6 +152,8 @@ def test_plain_delete_is_unchanged_and_has_no_group_fields(hd2) -> None:
     body = client.delete(f"/v1/cache/{HD2}", headers=AUTH).json()
     assert set(body) == {"appid", "deleted_depots", "skipped_shared", "failed", "total_bytes_freed"}
     assert [d["depotid"] for d in body["deleted_depots"]] == [D_HD2_OWN]
+    # The nested pre-2b shape too (exclude_unset must not drop it).
+    assert set(body["deleted_depots"][0]) == {"depotid", "size_bytes_freed", "shared_with_uncached"}
     assert {s["depotid"]: s["shared_with"] for s in body["skipped_shared"]} == {
         D_HD2_PKG_A: [PKG_A],
         D_HD2_GAME_CHILD: [GAME_CHILD],
@@ -174,7 +185,7 @@ def test_with_packages_accepts_only_literal_true_or_false(hd2, value: str) -> No
 
 def test_grouped_delete_removes_packages_and_keeps_protected_depots(hd2) -> None:
     client, root, settings = hd2
-    response = client.delete(f"/v1/cache/{HD2}?with_packages=true", headers=AUTH)
+    response = _grouped(client, HD2)
     assert response.status_code == 200, response.text
     body = response.json()
 
@@ -218,7 +229,7 @@ def test_a_wrongly_classified_game_keeps_its_depots(tmp_path: Path) -> None:
         _map(client, depotid, owner)
     _cached(settings, 2000)
     _classify(settings, 2000, "game", 1000)
-    body = client.delete("/v1/cache/1000?with_packages=true", headers=AUTH).json()
+    body = _grouped(client, 1000).json()
     assert [m["appid"] for m in body["members"]] == [1000]
     assert [d["depotid"] for d in body["deleted_depots"]] == [1001]
     assert _on_disk(root, 2001)
@@ -237,7 +248,7 @@ def test_linked_only_dlc_is_not_deletable(tmp_path: Path) -> None:
     assert plan["kept_children"] == [
         {"appid": 2000, "name": None, "app_type": "dlc", "reason": "type_only_inferred"}
     ]
-    client.delete("/v1/cache/1000?with_packages=true", headers=AUTH)
+    _grouped(client, 1000)
     assert _on_disk(root, 2001)
 
 
@@ -247,7 +258,7 @@ def test_own_pics_type_from_the_oracle_makes_a_package(tmp_path: Path) -> None:
         _depot(root, depotid)
         _map(client, depotid, owner)
     _classify(settings, 2000, "dlc", 1000, source="steamcmd_api", linked=1)
-    body = client.delete("/v1/cache/1000?with_packages=true", headers=AUTH).json()
+    body = _grouped(client, 1000).json()
     assert [m["appid"] for m in body["members"]] == [1000, 2000]
     assert not _on_disk(root, 2001)
 
@@ -258,7 +269,7 @@ def test_oracle_rows_do_not_count_while_the_oracle_is_off(tmp_path: Path) -> Non
         _depot(root, depotid)
         _map(client, depotid, owner)
     _classify(settings, 2000, "dlc", 1000, source="steamcmd_api")
-    body = client.delete("/v1/cache/1000?with_packages=true", headers=AUTH).json()
+    body = _grouped(client, 1000).json()
     assert [m["appid"] for m in body["members"]] == [1000]
     assert _on_disk(root, 2001)
 
@@ -270,7 +281,7 @@ def test_every_package_type_is_deletable(tmp_path: Path, package_type: str) -> N
         _depot(root, depotid)
         _map(client, depotid, owner)
     _classify(settings, 2000, package_type, 1000)
-    client.delete("/v1/cache/1000?with_packages=true", headers=AUTH)
+    _grouped(client, 1000)
     assert not _on_disk(root, 2001)
 
 
@@ -281,13 +292,13 @@ def test_no_other_type_is_deletable(tmp_path: Path, other_type: str | None) -> N
         _depot(root, depotid)
         _map(client, depotid, owner)
     _classify(settings, 2000, other_type, 1000)
-    client.delete("/v1/cache/1000?with_packages=true", headers=AUTH)
+    _grouped(client, 1000)
     assert _on_disk(root, 2001)
 
 
 def test_a_fixed_list_tool_app_never_joins_the_delete(hd2) -> None:
     client, root, _settings = hd2
-    body = client.delete(f"/v1/cache/{HD2}?with_packages=true", headers=AUTH).json()
+    body = _grouped(client, HD2).json()
     assert TOOL not in {m["appid"] for m in body["members"]}
     assert TOOL not in {c["appid"] for c in body["kept_children"]}
     assert _on_disk(root, D_TOOL_OWN)
@@ -301,7 +312,7 @@ def test_a_tool_app_as_the_parent_deletes_only_itself(tmp_path: Path) -> None:
     _classify(settings, 2000, "dlc", TOOL)
     plan = client.get(f"/v1/cache/{TOOL}/delete-plan?with_packages=true", headers=AUTH).json()
     assert [m["appid"] for m in plan["members"]] == [TOOL]
-    client.delete(f"/v1/cache/{TOOL}?with_packages=true", headers=AUTH)
+    _grouped(client, TOOL)
     assert _on_disk(root, 2001)
 
 
@@ -315,7 +326,7 @@ def test_409_when_any_member_has_an_active_job(hd2) -> None:
     finally:
         conn.close()
     assert created
-    response = client.delete(f"/v1/cache/{HD2}?with_packages=true", headers=AUTH)
+    response = _grouped(client, HD2)
     assert response.status_code == 409
     assert f"for app {PKG_A} is queued" in response.json()["detail"]
     assert _on_disk(root, D_HD2_OWN) and _on_disk(root, D_PKG_A_OWN)
@@ -331,7 +342,7 @@ def test_404_when_no_member_maps_a_depot(tmp_path: Path) -> None:
     client, _root, settings = _make(tmp_path)
     _sql(settings, "INSERT INTO apps (appid, status) VALUES (1000, 'idle'), (2000, 'idle')")
     _classify(settings, 2000, "dlc", 1000)
-    response = client.delete("/v1/cache/1000?with_packages=true", headers=AUTH)
+    response = client.delete("/v1/cache/1000?with_packages=true&members=1000,2000", headers=AUTH)
     assert response.status_code == 404
     assert "and its content packages" in response.json()["detail"]
     assert client.get("/v1/cache/9999/delete-plan", headers=AUTH).status_code == 404
@@ -346,7 +357,7 @@ def test_plan_and_execution_delete_the_same_depots(hd2) -> None:
     """ADR pin: the dialog's preview and the deletion use one definition."""
     client, _root, _settings = hd2
     plan = client.get(f"/v1/cache/{HD2}/delete-plan?with_packages=true", headers=AUTH).json()
-    body = client.delete(f"/v1/cache/{HD2}?with_packages=true", headers=AUTH).json()
+    body = _grouped(client, HD2).json()
 
     assert {d["depotid"] for d in plan["delete_depots"]} == {d["depotid"] for d in body["deleted_depots"]}
     assert plan["skipped_shared"] == body["skipped_shared"]
@@ -422,3 +433,126 @@ def test_members_do_not_protect_each_other_in_the_plan() -> None:
 def test_as_delete_set_always_contains_the_primary() -> None:
     assert deletion.as_delete_set(5) == deletion.DeleteSet(5, frozenset({5}))
     assert deletion.as_delete_set(deletion.DeleteSet(5, frozenset({6}))).members == {5, 6}
+
+
+# ==========================================================================
+# 4. The confirmed member list (orchestrator decision after the 2b review)
+# ==========================================================================
+
+
+def test_grouped_delete_requires_the_confirmed_members(hd2) -> None:
+    client, root, _settings = hd2
+    response = client.delete(f"/v1/cache/{HD2}?with_packages=true", headers=AUTH)
+    assert response.status_code == 422
+    assert "members" in response.json()["detail"]
+    assert _on_disk(root, D_HD2_OWN) and _on_disk(root, D_PKG_A_OWN)
+
+
+def test_members_without_with_packages_is_refused(hd2) -> None:
+    client, root, _settings = hd2
+    for query in (f"members={HD2}", f"with_packages=false&members={HD2}"):
+        assert client.delete(f"/v1/cache/{HD2}?{query}", headers=AUTH).status_code == 422
+    assert _on_disk(root, D_HD2_OWN)
+
+
+@pytest.mark.parametrize("members", ["", " 553850", "553850,,2506210", "553850,abc", "+553850", "553850;2506210"])
+def test_malformed_members_are_refused(hd2, members: str) -> None:
+    client, root, _settings = hd2
+    response = client.delete(f"/v1/cache/{HD2}?with_packages=true&members={members}", headers=AUTH)
+    assert response.status_code == 422
+    assert _on_disk(root, D_HD2_OWN)
+
+
+@pytest.mark.parametrize(
+    "members",
+    [
+        f"{HD2},{PKG_A}",  # the dialog did not show PKG_B
+        f"{HD2},{PKG_A},{PKG_B},{GAME_CHILD}",  # one more than the server's set
+        f"{PKG_A},{PKG_B}",  # parent missing
+    ],
+)
+def test_a_differing_member_list_is_409_with_both_lists(hd2, members: str) -> None:
+    client, root, settings = hd2
+    response = client.delete(f"/v1/cache/{HD2}?with_packages=true&members={members}", headers=AUTH)
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["server_members"] == [HD2, PKG_A, PKG_B]
+    assert detail["confirmed_members"] == sorted(int(m) for m in members.split(","))
+    for depotid in (D_HD2_OWN, D_HD2_PKG_A, D_PKG_A_OWN):
+        assert _on_disk(root, depotid)
+    assert _app(settings, HD2)["status"] == "done"
+
+
+def test_member_order_and_duplicates_do_not_matter(hd2) -> None:
+    client, root, _settings = hd2
+    members = f"{PKG_B},{HD2},{PKG_A},{HD2}"
+    response = client.delete(f"/v1/cache/{HD2}?with_packages=true&members={members}", headers=AUTH)
+    assert response.status_code == 200
+    assert not _on_disk(root, D_PKG_A_OWN)
+
+
+def test_a_package_classified_after_the_preview_blocks_the_delete(hd2) -> None:
+    client, root, settings = hd2
+    plan = client.get(f"/v1/cache/{HD2}/delete-plan?with_packages=true", headers=AUTH).json()
+    shown = ",".join(str(m["appid"]) for m in plan["members"])
+    _sql(settings, "UPDATE app_classification SET app_type = 'dlc' WHERE appid = ?", (GAME_CHILD,))
+    response = client.delete(f"/v1/cache/{HD2}?with_packages=true&members={shown}", headers=AUTH)
+    assert response.status_code == 409
+    assert response.json()["detail"]["server_members"] == [HD2, PKG_A, PKG_B, GAME_CHILD]
+    assert _on_disk(root, D_HD2_GAME_CHILD)
+
+
+# ==========================================================================
+# 5. The plain delete never reads classification; parent outcome from its own depots
+# ==========================================================================
+
+
+def test_plain_delete_and_plan_never_read_classification(hd2, monkeypatch) -> None:
+    from vault_api import app_classification
+
+    def boom(*_a, **_k):
+        raise AssertionError("the plain delete must not read classification")
+
+    monkeypatch.setattr(app_classification, "resolve_classifications", boom)
+    client, _root, _settings = hd2
+    plan = client.get(f"/v1/cache/{HD2}/delete-plan", headers=AUTH)
+    assert plan.status_code == 200
+    assert plan.json()["members"] == [
+        {"appid": HD2, "role": "parent", "name": None, "app_type": None, "depot_ids": [D_HD2_OWN, D_HD2_PKG_A, D_HD2_GAME_CHILD]}
+    ]
+    assert client.delete(f"/v1/cache/{HD2}", headers=AUTH).status_code == 200
+
+
+def test_parent_outcome_comes_from_its_own_depots(hd2, monkeypatch) -> None:
+    """A package depot failing marks the package 'error', not the parent."""
+    client, root, settings = hd2
+    real = deletion.remove_depot_dir_settling
+
+    def failing_for_pkg_a(path):
+        if path.endswith(str(D_PKG_A_OWN)):
+            return False, PermissionError("simulated")
+        return real(path)
+
+    monkeypatch.setattr(deletion, "remove_depot_dir_settling", failing_for_pkg_a)
+    body = _grouped(client, HD2).json()
+    assert [f["depotid"] for f in body["failed"]] == [D_PKG_A_OWN]
+    assert {m["appid"]: m["failed_depots"] for m in body["members"]}[PKG_A] == [D_PKG_A_OWN]
+    assert _app(settings, HD2)["status"] == "idle"
+    assert _app(settings, PKG_A)["status"] == "error"
+
+
+def test_parent_untouched_by_the_delete_keeps_its_needs_force(tmp_path: Path) -> None:
+    """Parent's depots all protected by an outsider, a package deleted: the
+    parent's needs_force is not set (nothing of its own changed)."""
+    client, root, settings = _make(tmp_path)
+    for depotid, owners in {1001: [1000, 730], 2001: [2000]}.items():
+        _depot(root, depotid)
+        for owner in owners:
+            _map(client, depotid, owner)
+    for appid in (1000, 730, 2000):
+        _cached(settings, appid)
+    _classify(settings, 2000, "dlc", 1000)
+    body = _grouped(client, 1000).json()
+    assert [d["depotid"] for d in body["deleted_depots"]] == [2001]
+    assert _app(settings, 1000)["needs_force"] == 0
+    assert _app(settings, 2000)["needs_force"] == 1

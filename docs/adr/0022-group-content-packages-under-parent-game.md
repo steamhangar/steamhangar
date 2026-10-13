@@ -397,4 +397,10 @@ prefill skip stays on the reviewed fixed list (open question 7).
    a store answer without one); and the name fill (`name` falls back to
    Steam's store name, then the oracle's stored `common.name`, only when
    vault-api has no name, never written into `apps`, plain text capped at
-   256 characters).
+   256 characters). **Recorded after the 2b review (2026-10-13):** the
+   grouped-delete contract (`with_packages=true` plus the required
+   `members=<csv>` confirmed from `GET /v1/cache/{appid}/delete-plan`,
+   `409` with both lists when they differ), and one README sentence on
+   nesting: in a chain Y (dlc) -> X (game) -> Z, deleting Z with packages
+   deletes Y and keeps X (Y resolves to the top-level parent Z; X is a
+   game-typed child and stays an outside owner).
