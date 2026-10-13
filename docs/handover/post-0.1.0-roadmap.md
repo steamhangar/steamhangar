@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D8)
+# Handover: post-v0.1.0 roadmap (items D1-D12)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -301,6 +301,34 @@ of `{days, from, to}` entries, validated like today's window), how the
 Settings UI edits it on web and Android, and keeping vault-core's
 download-rate cap window (`VAULT_UPSTREAM_RATE_WINDOW`, env-only today) in
 step with it.
+
+## D9: TOOL-APPS-2, bare "APP 25062xx" cards and dynamic tool-package grading
+
+Observed on the rc14 production library: many bare "APP 25062xx" cards,
+mostly Helldivers 2 DLC/content packages. Proposed, not yet reviewed and
+not decided: a filter for them, grouping them under the parent game, and
+classifying tool packages dynamically instead of the fixed list in
+`tool_apps.py`. Needs an ADR and the user's go before any code.
+
+## D10: COVER-CACHE-1, slow cover loading
+
+Covers load slowly. Proposed, not decided: vault-api stores the images
+and serves them with an ETag and a long `Cache-Control`; the Android app
+gets its own Coil disk cache.
+
+## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
+
+Cause: `steamvault://auth/openid-return` is used as the return URL, and
+Steam only accepts http(s) (`SteamOpenIdLoginUrl.kt:44-48`). Three
+options are open: a detour through vault-api, typing the SteamID64 by
+hand, or QR login (D2). The user decides.
+
+## D12: APP-FIX-LAYOUT, Android library layout
+
+`FilterChipsRow` (`LibraryScreen.kt:406`) does not scroll: "Downloading"
+wraps into a column of letters and "Failed" falls off. The view toggle
+(`LibraryScreen.kt:387`) wraps. The cause of the empty area and the tall
+header is unknown and needs investigation first.
 
 ## Suggested order
 
