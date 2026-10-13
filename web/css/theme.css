@@ -250,69 +250,12 @@
      — out of scope for this package, recorded here as the honest escape
      hatch rather than pretended unnecessary. */
   --w-sheet-l:680px;
-  --search-w:420px; /* WP 4e.2: cap on the library search field once it sits
-                        beside the filter chips in a BP-L toolbar band
-                        (grid-template-areas "search chips") instead of
-                        stretching to the full, now much wider, --w-wall
-                        column — a ~1536px-wide text input inside a 1600px
-                        column would be absurd. See app.css's BP-L block,
-                        ".view-library" grid. */
-  /* WP 4h.2 — the suggestions panel's right-hand column width at BP-XL
-     (>=1800px, app.css's `.app.has-decision-panel` block, only active with
-     real content — should-fix S3). Below BP-XL (and at BP-XL with nothing
-     to say) the panel instead occupies its own explicit grid ROW, capped by
-     `--w-text` — see app.css's BP-L block for that placement. Not derived
-     from `--w-sheet`/`--search-w` (both answer a different question — a
-     modal's width, an input's cap) — a plain, independent value picked to
-     read comfortably as a short-statement list.
-
-     **Correction (Opus review should-fix S1, WP 4h.2 fix round 3 — the
-     round that actually settled it): both round-2 rigs (coder's and
-     reviewer's) measured correctly — they simply measured two DIFFERENT
-     quantities.** The decisive number at 2200px is **1673px** — `.grid`'s
-     own CONTENT-box width on a SCROLLING page (the shipped condition:
-     this panel only ever renders next to a library with enough games to
-     need one — `css-layout-foundation.test.js`'s own `SCROLLBAR_PX`
-     convention already treats a scrolling page as the real case, not an
-     edge one). The coder's own 1720px was a real, correctly-measured
-     number too, just of a different box: `.view-root`'s BORDER-box width
-     on a page with NO scrollbar. The chain from one to the other: `2200 -
-     180(--rail-w) - 300(--panel-w) = 1720px` (`.view-root`'s own outer
-     box) `- 15px` (the classic scrollbar, present once the page actually
-     scrolls) `- 32px` (`.view-root`'s own `padding:20px 16px 32px`,
-     left+right) `= 1673px` — the CONTENT box `.grid`'s auto-fill tracks
-     actually lay out inside.
-
-     Measured live (with vs. without the panel present, same viewport,
-     `.grid`'s own resolved `grid-template-columns` track count, on a
-     scrolling page):
-       1800px:  8 -> 6 columns (Δ2)
-       1920px:  9 -> 7 columns (Δ2)
-       2200px: 10 -> 8 columns (Δ2) — the decisive 1673px content-box sits
-               BELOW the 9-track floor (1680px), not just the 10-track one
-               (1868px)
-       2300px: 10 -> 9 columns (Δ1)
-       2395px: 10 -> 10 columns (Δ0 — the real crossover: 2394px is still
-               9 columns, 2395px is the first 10)
-       2560px: 10 -> 10 columns (Δ0, --w-wall's own 2000px cap already binds
-               on both sides — the panel's 300px stops costing a column
-               once the wall was already narrower than the available track)
-     Floors (`--tile-min:176px`, 12px gap): 8 tracks need >=1492px, 9 need
-     >=1680px, 10 need >=1868px.
-
-     The real threshold above which this token is genuinely free is
-     ~2395px, not the 1920-2560px range originally claimed — 1920px and
-     most of 2200px's range DO cost real columns. Accepted anyway, stated
-     plainly rather than re-derived away: 300px is still the deliberate,
-     independent value (not re-tuned to chase a "never costs a column"
-     property no single value in this range can have — the wall only
-     stops noticing ANY 300px reservation once it is already capped below
-     the reservation's own headroom), and the two-tile-column cost at
-     1800-2200px is a real, accepted trade for the suggestions the panel
-     earns its width with — see docs/WORKPACKAGES.md D-16 for the
-     discoverability-vs-cost trade-off named explicitly, and should-fix S3
-     for why an EMPTY panel no longer pays this cost at all. */
-  --panel-w:300px;
+  --search-w:260px; /* Library search field width in the toolbar row from
+                        BP-M up (WP WEB-FIX-UPD-VIS: search, chips and the
+                        check buttons share one row; app.css `.lib-bar`).
+                        WP 4e.2 introduced it as a 420px cap for the old
+                        BP-L "search chips" grid band. Below BP-M the field
+                        takes its own full line instead. */
 }
 
 *, *::before, *::after{ box-sizing:border-box; }

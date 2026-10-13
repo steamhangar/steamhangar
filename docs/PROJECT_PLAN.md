@@ -1988,6 +1988,12 @@ surface (playtime and last-played now flow through the API response).
       Original bullet: **4h.2 (web)** — the panel itself: a right-hand column at BP-XL
       (>=1800px), a collapsible card below that width. Serves the statements
       above. Depends on 4h.1's fields and on Phase 4e's breakpoints.
+      **Panel removed 2026-10-13 (user decision), statements moved, see
+      `docs/handover/post-0.1.0-roadmap.md` WEB-FEAT-SUGGEST-2:** "last
+      changed" to the detail sheet ("Last update downloaded N days ago"),
+      "fully cached, never played" to a card pill ("Never played"), "not
+      confirmed current" to one bell notification at 14 days, "unchanged
+      for N days" dropped.
 - [x] **4h.3 (web)** — DONE 2026-08-19: header art in the detail card
       (aspect-ratio as the only reservation, whole-wrapper collapse on 404
       — verified against the real CDN both ways), 665→676 web tests, Opus

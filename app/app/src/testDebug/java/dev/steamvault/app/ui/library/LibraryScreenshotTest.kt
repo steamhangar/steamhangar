@@ -14,13 +14,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onRoot
@@ -47,6 +53,8 @@ import java.io.File
 import kotlin.math.roundToInt
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -124,10 +132,13 @@ class LibraryScreenshotTest {
     fun library_411dp_font130() = shoot("library_411dp_font130", PIXEL_411, fontScale = 1.3f)
 
     @Test
-    fun library_360dp_font100() = shoot("library_360dp_font100", SMALL_360)
+    fun library_360dp_font100() =
+        shoot("library_360dp_font100", SMALL_360, expectedBadgeText = UPDATE_BADGE_FULL)
 
+    // WP APP-FIX-CARD: the full label ellipsized here ("Update availa…").
     @Test
-    fun library_360dp_font130() = shoot("library_360dp_font130", SMALL_360, fontScale = 1.3f)
+    fun library_360dp_font130() =
+        shoot("library_360dp_font130", SMALL_360, fontScale = 1.3f, expectedBadgeText = UPDATE_BADGE_SHORT)
 
     @Test
     fun library_411dp_font100_night() = shoot("library_411dp_font100_night", PIXEL_411, night = true)
@@ -142,6 +153,7 @@ class LibraryScreenshotTest {
         fontScale: Float = 1.0f,
         night: Boolean = false,
         layout: LibraryLayout = LibraryLayout.GRID_2,
+        expectedBadgeText: String? = null,
     ) {
         // The rule already launched the host activity with the @Config
         // defaults; apply this profile and recreate it so the new
@@ -166,6 +178,7 @@ class LibraryScreenshotTest {
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
         // After the capture, so a failing check still leaves the image.
         assertLayout()
+        assertCardContents(layout, expectedBadgeText)
     }
 
     /**
@@ -218,6 +231,93 @@ class LibraryScreenshotTest {
             .onAllNodes(hasContentDescription(COVER_FALLBACK_PREFIX, substring = true), useUnmergedTree = true)
             .onFirst()
             .assertIsDisplayed()
+
+        // WP D12 review: the toggle shows "2 col", the full name stays the
+        // spoken label.
+        composeRule.onNode(hasContentDescription(LAYOUT_GRID2_DESCRIPTION)).assertExists()
+    }
+
+    /**
+     * WP APP-FIX-CARD, in every profile:
+     * - a fallback tile's title never runs under the capsule pill or the
+     *   update badge: the lines it actually renders (not just its layout
+     *   box, which the tile bounds anyway) overlap neither;
+     * - the list rows' mini covers keep their plain title: the grid's line
+     *   limit and ellipsis must not reach them (a 34 dp tile showed only
+     *   "…");
+     * - the update badge is never ellipsized: it reads "Update available"
+     *   or, when that does not fit, "Update" -- the full label always being
+     *   its contentDescription. [expectedBadgeText] names the expected word
+     *   where the profile decides it.
+     */
+    private fun assertCardContents(layout: LibraryLayout, expectedBadgeText: String?) {
+        val titles = composeRule
+            .onAllNodes(hasTestTag(COVER_FALLBACK_TITLE_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        val pills = composeRule
+            .onAllNodes(hasTestTag(CAPSULE_PILL_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        val badges = composeRule
+            .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        assertTrue("no fallback titles rendered", titles.isNotEmpty())
+        val grid = layout != LibraryLayout.LIST
+        if (grid) {
+            assertTrue("no capsule pills rendered", pills.isNotEmpty())
+            assertTrue("no update badge rendered (fixture has update_available = true)", badges.isNotEmpty())
+        } else {
+            for (title in titles) {
+                assertFalse(
+                    "list mini cover title '${title.text()}' is ellipsized: the grid's line limit leaked into the list",
+                    textLayout(title).isLineEllipsized(0),
+                )
+            }
+        }
+        // A node scrolled fully out of the viewport reports empty bounds.
+        val overlays = (pills.map { "capsule pill" to it } + badges.map { "update badge" to it })
+            .filterNot { (_, node) -> node.boundsInRoot.isEmpty }
+        for (title in titles.filterNot { it.boundsInRoot.isEmpty }) {
+            val rendered = renderedTextBounds(title)
+            for ((kind, overlay) in overlays) {
+                assertFalse(
+                    "fallback title '${title.text()}' ($rendered) runs under the $kind (${overlay.boundsInRoot})",
+                    rendered.overlaps(overlay.boundsInRoot),
+                )
+            }
+        }
+
+        for (badge in badges) {
+            val text = badge.text()
+            assertTrue("update badge reads '$text'", text == UPDATE_BADGE_FULL || text == UPDATE_BADGE_SHORT)
+            // Not `hasVisualOverflow`: on the layout the semantics action
+            // hands out it reads true even for a short "Update" that fits
+            // (CI, Compose BOM 2024.10.01); the ellipsis flag is exact.
+            val badgeLayout = textLayout(badge)
+            assertTrue(
+                "update badge '$text' is ellipsized or wrapped",
+                badgeLayout.lineCount == 1 && !badgeLayout.isLineEllipsized(0),
+            )
+            if (expectedBadgeText != null) assertEquals("update badge label", expectedBadgeText, text)
+        }
+    }
+
+    private fun SemanticsNode.text(): String =
+        config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text }
+
+    private fun textLayout(node: SemanticsNode): TextLayoutResult {
+        val results = mutableListOf<TextLayoutResult>()
+        val action = node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action
+        assertNotNull("node '${node.text()}' exposes no text layout", action)
+        action!!.invoke(results)
+        return results.single()
+    }
+
+    /** Bounds of the lines a text node actually draws, in root px. */
+    private fun renderedTextBounds(node: SemanticsNode): Rect {
+        val layout = textLayout(node)
+        val bounds = node.boundsInRoot
+        val bottom = layout.getLineBottom(layout.lineCount - 1)
+        return Rect(bounds.left, bounds.top, bounds.right, bounds.top + bottom)
     }
 
     private fun simulateSystemBars() {
@@ -300,7 +400,7 @@ class LibraryScreenshotTest {
             onSelect = {},
         ) {
             LibraryScreen(
-                    gamesRepository = remember { FixedGamesRepository(fixtures.vaultGames) },
+                gamesRepository = remember { FixedGamesRepository(fixtures.vaultGames) },
                 jobsRepository = remember { FixedJobsRepository(fixtures.jobs) },
                 mappingRepository = remember { EmptyMappingRepository() },
                 cacheRepository = remember { UnusedCacheRepository() },
@@ -354,6 +454,14 @@ class LibraryScreenshotTest {
 
         /** All, Cached, Not cached, Downloading, Failed, Updates. */
         const val EXPECTED_CHIPS = 6
+
+        /** `R.string.library_update_available_badge` and its `_short` twin
+         * -- literals, the words web uses too (game-card.js). */
+        const val UPDATE_BADGE_FULL = "Update available"
+        const val UPDATE_BADGE_SHORT = "Update"
+
+        /** `R.string.library_layout_grid2`. */
+        const val LAYOUT_GRID2_DESCRIPTION = "2-column grid"
 
         /** Prefix of `R.string.library_cover_fallback_description`. */
         const val COVER_FALLBACK_PREFIX = "No cover art available for"

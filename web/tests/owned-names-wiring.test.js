@@ -4,8 +4,7 @@
  * panel, the detail sheet) plus the one-loader rule. Same technique as
  * game-detail-sheet-installed.test.js: each pin is bounded to one function
  * body. The behaviour itself (title order, fill-only) is pinned in
- * job-failure.test.js, downloads-owned-names.test.js and
- * decision-panel-wiring.test.js.
+ * job-failure.test.js and downloads-owned-names.test.js.
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -48,10 +47,9 @@ test("detail sheet: openDetail takes the owned name when the opener has none; bo
   assert.match(functionBody(src, "function namedGamesByAppid() {"), /fillMissingNames\(state\.games, ownedLibrary\.current\(\)\.games\)/);
 });
 
-test("one owned-list loader per page: the Library uses owned-singleton.js, app.js hands it to the decision panel", () => {
+test("one owned-list loader per page: the Library uses owned-singleton.js", () => {
   const library = read("views/library.js");
   assert.doesNotMatch(library, /createOwnedLibraryLoader\(/, "a second, view-local loader would split the list again");
   assert.match(library, /import \{ ownedLibrary \} from "\.\.\/owned-singleton\.js";/);
   assert.match(functionBody(library, "export function renderLibrary() {"), /ownedLibrary\.load\(\);/);
-  assert.match(read("app.js"), /ownedNames: ownedLibrary,/);
 });

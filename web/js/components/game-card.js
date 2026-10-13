@@ -63,6 +63,16 @@
  * "Cached" (the copy on disk is valid, just not the newest). `views/
  * library.js` full-renders when the flag flips (`updateFlagsChanged`), and
  * `patchCardVolatile` keeps the badge in sync as well.
+ *
+ * **"Never played" pill (WP WEB-FEAT-SUGGEST-2).** The Phase 4h panel's
+ * "fully cached, never played" statement, moved onto the card: a second
+ * pill right of the status pill on the cover (both inside `.capbadges`),
+ * plus a `.playbadge` twin in the meta row that only the list layout shows
+ * (its cover is too small for pills). Shown only for a CACHED card whose
+ * owned-list playtime is a real zero (`lib/decision-support.js`
+ * `isNeverPlayedCached`; playtime reaches the app only with the operator's
+ * ADR-0010 gate on). Plain text, no icon, `aria-hidden` — the card's
+ * accessible name carries "Fully cached, never played" instead.
  */
 
 import { createStatusIcon, STATUS_LABEL } from "./status-icon.js";
@@ -82,6 +92,12 @@ import {
 } from "../lib/game-status.js";
 import { formatBytesGB } from "../lib/format.js";
 import { coverArtUrl, fallbackHues, fallbackPattern } from "../lib/cover-art.js";
+import {
+  isNeverPlayedCached,
+  NEVER_PLAYED_LABEL,
+  NEVER_PLAYED_COMPACT_LABEL,
+  NEVER_PLAYED_DESCRIPTION,
+} from "../lib/decision-support.js";
 
 /** The exact string library.js's `GET /v1/games` tick handler
  * (js/lib/render-plan.js's `planGamesUpdate`) compares against a live
@@ -194,6 +210,51 @@ function syncUpdateTag(metaEl, game) {
   metaEl.appendChild(tag);
 }
 
+/** Whether this card shows the "Never played" pill (module header). */
+function showsNeverPlayed(game, kind) {
+  return kind === KIND.CACHED && isNeverPlayedCached(game);
+}
+
+function neverPlayedNode(className, fullClass, compactClass) {
+  const tag = document.createElement("span");
+  tag.className = className;
+  tag.title = NEVER_PLAYED_DESCRIPTION;
+  tag.setAttribute("aria-hidden", "true");
+  const full = document.createElement("span");
+  full.className = fullClass;
+  full.textContent = NEVER_PLAYED_LABEL;
+  const compact = document.createElement("span");
+  compact.className = compactClass;
+  compact.textContent = NEVER_PLAYED_COMPACT_LABEL;
+  tag.append(full, compact);
+  return tag;
+}
+
+/**
+ * Create or remove the "Never played" pill (in `.capbadges`, after the
+ * status pill) and its list-layout twin (`.playbadge` in `.meta`). Plain
+ * text nodes only — the same documented exception to `patchCardVolatile`'s
+ * "no node created or removed" rule as `syncUpdateTag`; the status pill and
+ * its icon are never touched.
+ * @param {HTMLElement} cardEl
+ * @param {object} game
+ * @param {string} kind
+ */
+function syncNeverPlayed(cardEl, game, kind) {
+  const want = showsNeverPlayed(game, kind);
+  const badges = cardEl.querySelector(".capbadges");
+  const metaEl = cardEl.querySelector(".meta");
+  const pill = badges ? badges.querySelector(".playpill") : null;
+  const twin = metaEl ? metaEl.querySelector(".playbadge") : null;
+  if (!want) {
+    if (pill) pill.remove();
+    if (twin) twin.remove();
+    return;
+  }
+  if (badges && !pill) badges.appendChild(neverPlayedNode("playpill", "ppfull", "ppcompact"));
+  if (metaEl && !twin) metaEl.appendChild(neverPlayedNode("playbadge", "pbfull", "pbcompact"));
+}
+
 /**
  * Patch the VOLATILE text on an already-built card in place. The
  * status-icon `<svg>` subtree (and any CSS animation running on it) is
@@ -240,6 +301,7 @@ export function patchCardVolatile(cardEl, game, kind) {
     syncInstalledTag(metaEl, game);
     syncUpdateTag(metaEl, game);
   }
+  syncNeverPlayed(cardEl, game, kind); // WP WEB-FEAT-SUGGEST-2
   // Keep the explicit accessible name (module header) in sync too — `kind`
   // is unchanged by definition on the patch path (round-7 rule), but the
   // SIZE this same tick just wrote above is part of the announced name and
@@ -410,6 +472,7 @@ function cardAccessibleLabel(game, kind) {
   const sizeText = formatBytesGB(game.size_bytes);
   if (sizeText) parts.push(sizeText);
   if (game.update_available === true) parts.push(UPDATE_BADGE_TEXT);
+  if (showsNeverPlayed(game, kind)) parts.push(NEVER_PLAYED_DESCRIPTION);
   const installedText = installedAriaFragment(game, kind);
   if (installedText) parts.push(installedText);
   return parts.join(" — ");
@@ -450,7 +513,13 @@ export function buildCard(game, ctx) {
 
   card.appendChild(buildCover(game));
   const cap = card.firstChild;
-  cap.appendChild(buildPill(game, kind, action)); // z-index:2 in CSS, so DOM order doesn't matter
+  // WP WEB-FEAT-SUGGEST-2: the status pill sits in `.capbadges` (the
+  // positioned row on the cover, z-index:2 in CSS), so a second pill
+  // ("Never played", syncNeverPlayed below) can follow it to the right.
+  const badges = document.createElement("div");
+  badges.className = "capbadges";
+  badges.appendChild(buildPill(game, kind, action));
+  cap.appendChild(badges);
 
   const name = document.createElement("div");
   name.className = "name";
@@ -497,6 +566,7 @@ export function buildCard(game, ctx) {
   syncUpdateTag(meta, game); // WP UPD-2: appends `.updbadge` iff update_available
   syncInstalledTag(meta, game); // WP AG-2: appends `.instbadge` iff installed_on is non-empty
   card.appendChild(meta);
+  syncNeverPlayed(card, game, kind); // WP WEB-FEAT-SUGGEST-2: needs `.capbadges` and `.meta` in place
 
   // ---- interaction wiring (mockup parity: long-press / right-click /
   // header select icon -> multi-select; a tap toggles selection while
