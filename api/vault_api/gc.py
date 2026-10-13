@@ -58,7 +58,7 @@ one is never silently substituted.
 
 ``resolve_depot_chunkset`` accepts ``extra_manifest_ids``: manifest ids that
 are **not** any app's current manifest but whose chunks must survive anyway.
-Today the only producer is the opt-in manifest oracle
+Today the only producer is the manifest oracle (on by default since WP UPD-1)
 (``vault_api.oracle.gc_keepset_gids``), supplying the gids of open
 (non-passworded) beta branches — content that reached the cache through a real
 client's store-on-miss download and appears in no ``public`` manifest.

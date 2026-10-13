@@ -440,7 +440,7 @@ def test_refresher_thread_starts_and_stops_without_calling_out(db) -> None:
 
 
 def test_schema_v18_adds_app_cover_art(tmp_path) -> None:
-    assert SCHEMA_VERSION == 18
+    assert SCHEMA_VERSION >= 18
     path = str(tmp_path / "old.db")
     init_db(path)
     conn = get_connection(path)
@@ -461,7 +461,7 @@ def test_schema_v18_adds_app_cover_art(tmp_path) -> None:
         app = conn.execute("SELECT name FROM apps WHERE appid = 440").fetchone()
     finally:
         conn.close()
-    assert version == 18
+    assert version == SCHEMA_VERSION
     assert columns == {
         "appid": "INTEGER",
         "cover_url": "TEXT",

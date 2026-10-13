@@ -567,10 +567,13 @@ services:
       # silence that and rotate externally instead. Default matches
       # config.py's own built-in default byte-for-byte (64 MiB).
       VAULT_EVENT_LOG_MAX_BYTES: ${VAULT_EVENT_LOG_MAX_BYTES:-67108864}
-      # Opt-in manifest oracle (WP 3.9, ADR-0007 addendum B). Empty/off by
-      # default -- see .env.example for the privacy note (queries leave the
-      # LAN) before setting this. Same forwarding gap as above until the
-      # packaging WP: present in config.py, never wired through here.
+      # Manifest oracle (WP 3.9). ON by default since WP UPD-1 (user decision
+      # 2026-10-13): an unset .env renders this EMPTY, and empty means the
+      # default ('steamcmd_api'); set it to 'off' (or 'none') to stop every
+      # oracle request, including the always-on update check's background
+      # polling. See .env.example for the privacy note (cached app ids leave
+      # the LAN). vault-proxy below gets the same value: while it is on, the
+      # proxy allows the default oracle host api.steamcmd.net by itself.
       VAULT_MANIFEST_ORACLE: ${VAULT_MANIFEST_ORACLE:-}
       # The oracle's URL and per-request timeout -- forwarding these is NOT
       # optional once VAULT_MANIFEST_ORACLE is on: .env.example's privacy note
@@ -1113,6 +1116,14 @@ services:
       # not a reason this one could be dropped: this is the copy that
       # actually enforces anything.
       VAULT_EGRESS_ALLOW: ${VAULT_EGRESS_ALLOW:-}
+      # WP UPD-1 (user decision 2026-10-13, Weg A): the SAME two oracle values
+      # vault-api gets above. While the oracle is on (empty = default = on;
+      # 'off'/'none' = off) AND the URL is https:// to the default host, the
+      # entrypoint allows api.steamcmd.net by itself -- that one host only,
+      # never whatever else the URL names (a private mirror still needs a
+      # VAULT_EGRESS_ALLOW entry). Same defaults as vault-api's copies.
+      VAULT_MANIFEST_ORACLE: ${VAULT_MANIFEST_ORACLE:-}
+      VAULT_MANIFEST_ORACLE_URL: ${VAULT_MANIFEST_ORACLE_URL:-https://api.steamcmd.net/v1/info}
       # The vault-egress subnet, with the SAME expression as the top-level
       # `networks:` block's ipam config (WP DEPLOY-FIX-2): the entrypoint
       # renders tinyproxy's client `Allow` line from it, so the proxy always

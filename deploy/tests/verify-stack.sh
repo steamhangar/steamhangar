@@ -766,7 +766,9 @@ assert_eq "1" "$manifest_oracle_key_count" "vault-api: VAULT_MANIFEST_ORACLE key
 event_log_path_val=$(printf '%s\n' "$api_block" | grep 'VAULT_EVENT_LOG_PATH:' | head -1 | sed -e 's/^[[:space:]]*VAULT_EVENT_LOG_PATH:[[:space:]]*//' -e 's/"//g')
 manifest_oracle_val=$(printf '%s\n' "$api_block" | grep 'VAULT_MANIFEST_ORACLE:' | head -1 | sed -e 's/^[[:space:]]*VAULT_MANIFEST_ORACLE:[[:space:]]*//' -e 's/"//g')
 assert_eq "" "$event_log_path_val"    "vault-api: VAULT_EVENT_LOG_PATH renders empty (feature off) with the test .env's defaults"
-assert_eq "" "$manifest_oracle_val"   "vault-api: VAULT_MANIFEST_ORACLE renders empty (oracle off) by default"
+# WP UPD-1: EMPTY now means the default oracle (on); 'off'/'none' opts out
+# (api/tests/test_upd_1_oracle_egress.py pins what empty resolves to).
+assert_eq "" "$manifest_oracle_val"   "vault-api: VAULT_MANIFEST_ORACLE renders empty (= the default, oracle on) with the test .env"
 
 # B1 audit (Opus review, packaging-WP fix round): a complete pass over every
 # env var api/vault_api/config.py reads found TEN MORE forwarded nowhere in
@@ -981,6 +983,19 @@ egress_allow_val=$(printf '%s\n' "$api_block" | grep 'VAULT_EGRESS_ALLOW:' | hea
 proxy_egress_allow_val=$(printf '%s\n' "$proxy_block" | grep 'VAULT_EGRESS_ALLOW:' | head -1 | sed -e 's/^[[:space:]]*VAULT_EGRESS_ALLOW:[[:space:]]*//' -e 's/"//g')
 assert_eq "" "$egress_allow_val" "vault-api: VAULT_EGRESS_ALLOW defaults empty (the test .env above sets none)"
 assert_eq "" "$proxy_egress_allow_val" "vault-proxy: VAULT_EGRESS_ALLOW defaults empty"
+# WP UPD-1 (Weg A): vault-proxy gets the oracle switch and URL too, with the
+# same defaults as vault-api, so it can allow the default oracle host itself.
+for pair in \
+    "VAULT_MANIFEST_ORACLE:" \
+    "VAULT_MANIFEST_ORACLE_URL:https://api.steamcmd.net/v1/info"
+do
+    key=${pair%%:*}
+    expected=${pair#*:}
+    count=$(printf '%s\n' "$proxy_block" | grep -c "^      ${key}:" || true)
+    assert_eq "1" "${count:-0}" "vault-proxy: $key key is present exactly once in the rendered block (precondition)"
+    val=$(printf '%s\n' "$proxy_block" | grep "^      ${key}:" | head -1 | sed -e "s/^[[:space:]]*${key}:[[:space:]]*//" -e 's/"//g')
+    assert_eq "$expected" "$val" "vault-proxy: $key renders the same default as vault-api's copy"
+done
 
 step "3o. WP EG-1: vault-core, vault-runner and vault-dns are UNCHANGED -- still on the plain default network"
 say 'ADR-0011 states this explicitly as out of scope: vault-runner stays broad'
@@ -1117,6 +1132,16 @@ assert_eq "" "$bare443" "compose.yaml has no other :443 port mapping"
 # =============================================================================
 section "4. Stack up (vault-core + vault-api + vault-proxy + vault-runner)"
 # =============================================================================
+# WP UPD-1: the manifest oracle is ON by default and this test .env leaves
+# VAULT_SCHEDULE_WINDOW unset, which renders the 03:00-07:00 default -- a
+# configured window, so the scheduled update check would send the app id of
+# every cached game to api.steamcmd.net on the first tick. This throwaway
+# stack must never do that on its own: the RUNTIME part runs with the oracle
+# off. Appended only now, after every section-3 render above has pinned the
+# shipped defaults (empty = on); step 6l still checks the oracle-on proxy
+# filter, through a separate render of the entrypoint into /tmp.
+printf 'VAULT_MANIFEST_ORACLE=off\n' >> "$env_file"
+say 'Runtime .env adds VAULT_MANIFEST_ORACLE=off (WP UPD-1: no automatic oracle query from this test stack).'
 compose_up_or_die "$env_file" up -d
 
 say ''
@@ -1933,6 +1958,24 @@ say "    $baked_probe"
 assert_contains "$baked_probe" "OK 200" "vault-api reaches api.steampowered.com through vault-proxy, no VAULT_EGRESS_ALLOW entry needed (the baked-in relay host)"
 
 say ''
+say '--- WP UPD-1: the default oracle host is allowed exactly while the oracle is on ---'
+say '(filter files only; no request to the oracle is made here)'
+live_filter=$(dc exec -T vault-proxy cat /run/tinyproxy/filter 2>&1 || true)
+assert_contains "$live_filter" '^api\.steampowered\.com$' "precondition: the live proxy filter was read"
+assert_not_contains "$live_filter" 'steamcmd' "this stack runs with VAULT_MANIFEST_ORACLE=off (section 4), so the live proxy does NOT allow api.steamcmd.net"
+# A second render of the REAL entrypoint inside the running proxy container,
+# with the oracle at its shipped default (unset = on), into /tmp only (the
+# VAULT_PROXY_*_FOR_TESTS overrides; the live /run/tinyproxy files are not
+# touched and tinyproxy is not restarted).
+oracle_on_filter=$(dc exec -T \
+    -e VAULT_MANIFEST_ORACLE= \
+    -e VAULT_MANIFEST_ORACLE_URL= \
+    -e VAULT_PROXY_FILTER_FILE_FOR_TESTS=/tmp/upd1-filter \
+    -e VAULT_PROXY_CONF_FILE_FOR_TESTS=/tmp/upd1-tinyproxy.conf \
+    vault-proxy sh -c '/usr/local/bin/vault-proxy-entrypoint.sh true >/dev/null && cat /tmp/upd1-filter; rm -f /tmp/upd1-filter /tmp/upd1-tinyproxy.conf' 2>&1 || true)
+assert_contains "$oracle_on_filter" '^api\.steamcmd\.net$' "with VAULT_MANIFEST_ORACLE unset (= on), the proxy entrypoint allows the default oracle host with no VAULT_EGRESS_ALLOW entry"
+
+say ''
 say '--- a NON-allowlisted host is refused BY THE PROXY (403 Filtered) -- the destination allowlist, actually enforced ---'
 denied_probe=$(dc exec -T vault-api python3 <<'PYEOF'
 import urllib.request
@@ -2333,7 +2376,10 @@ say 'must create <path>/logs/ itself, nothing beyond cache/depot and tmp is'
 say 'asked of the operator.'
 bind_live_env_file="$work/verify-bind-live.env"
 cp "$bind_env_file" "$bind_live_env_file"
-printf 'VAULT_EVENT_LOG=/vault/logs/event.log\nVAULT_EVENT_LOG_PATH=/vault/logs/event.log\n' >> "$bind_live_env_file"
+# VAULT_MANIFEST_ORACLE=off: bind_env_file was copied in section 3, BEFORE
+# section 4 appended the same line to env_file (WP UPD-1: no stack this
+# script starts may query the oracle on its own; pool_base_env reuses this).
+printf 'VAULT_EVENT_LOG=/vault/logs/event.log\nVAULT_EVENT_LOG_PATH=/vault/logs/event.log\nVAULT_MANIFEST_ORACLE=off\n' >> "$bind_live_env_file"
 printf '$ docker compose --env-file %s -f %s -p %s up -d\n' "$bind_live_env_file" "$compose_file" "$PROJECT"
 if docker compose --env-file "$bind_live_env_file" -f "$compose_file" -p "$PROJECT" up -d > "$work/compose-up-bind.log" 2>&1; then
     sed 's/^/    /' "$work/compose-up-bind.log"

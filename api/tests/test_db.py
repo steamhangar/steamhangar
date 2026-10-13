@@ -22,7 +22,7 @@ EXPECTED_TABLES = {
     "client_cache_stats",
     "depot_miss_stats",
     "miss_trigger_state",
-    # v10 (WP 3.9): the opt-in manifest oracle's own storage. Present on every
+    # v10 (WP 3.9): the manifest oracle's own storage. Present on every
     # install, empty unless the oracle is enabled AND has been asked something.
     "oracle_app_state",
     "oracle_branch_manifests",
@@ -37,6 +37,8 @@ EXPECTED_TABLES = {
     "runner_presence",
     # v18 (WP API-FIX-5): real cover art per app (vault_api/cover_art.py).
     "app_cover_art",
+    # v19 (WP UPD-1): always-on update check bookkeeping.
+    "update_check_state",
 }
 
 
