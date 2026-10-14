@@ -700,6 +700,15 @@ def is_incomplete(figure: Completeness) -> bool:
     return figure.pct is not None and figure.pct < 100
 
 
+def is_completable(figure: Completeness) -> bool:
+    """Incomplete AND short of at least one chunk file -- what "Complete all"
+    and the scheduler's automatic completion act on. A game short only of
+    chunk files with the wrong size is incomplete but not completable: a
+    forced prefill serves those files from disk and cannot replace them
+    (repair is the CACHE-REPAIR-1 follow-up)."""
+    return is_incomplete(figure) and (figure.missing_chunks or 0) > 0
+
+
 @dataclass(frozen=True)
 class IncompleteApp:
     appid: int

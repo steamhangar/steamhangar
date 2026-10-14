@@ -184,9 +184,13 @@ build's full chunk list (as any run that downloads does); vault-core serves
 present chunks from disk, so only missing chunks are fetched from Steam.
 Rejected: `?nocache=1`/`--nocache` (full re-download, or manifests only).
 
-1. Automatic completion follows updates: only inside the schedule window,
-   only for sweep targets, only for games with missing chunk files; without
-   a window it is manual only.
+1. Automatic completion runs only inside the schedule window; without a
+   window it is manual only. In the window it covers every incomplete cached
+   game with missing chunk files, sweep target or not, also with
+   `VAULT_SWEEP_INCLUDE_CACHED` off (user decision 2026-10-14).
 2. Chunk files of the wrong size are not replaced by a forced run (served as
-   HITs); fixing them needs vault-api to remove them first — open follow-up.
+   HITs). Such a game is skipped by "Complete all" and by the automatic
+   completion and has no repair action yet; the fix (vault-api removes the
+   mismatched files, then a forced run) is CACHE-REPAIR-1, after rc17 (user
+   decision 2026-10-14).
 3. No schema change. Details: api/README.md "Verify and complete".

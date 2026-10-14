@@ -302,6 +302,11 @@ class GameSummary(BaseModel):
     cache_present_bytes: int | None = None
     # When the oldest depot figure was measured (UTC), null when unknown.
     cache_complete_checked_at: str | None = None
+    # WP CACHE-COMPLETE-1b: chunk files of the current build with no file on
+    # disk; null exactly when ``cache_complete_pct`` is. An incomplete game
+    # with 0 here is short only of wrong-size chunk files, which no current
+    # action repairs (UIs do not offer "Complete now" for it).
+    cache_missing_chunks: int | None = None
     # Same figure over the whole group this row heads (D9): the depots of the
     # members that currently have bytes on disk (own size_bytes > 0, the same
     # members that add bytes to ``group_size_bytes``), each depot/manifest
@@ -320,6 +325,7 @@ def _completeness_fields(figure: cache_completeness.Completeness) -> dict[str, o
         "cache_expected_bytes": figure.expected_bytes,
         "cache_present_bytes": figure.present_bytes,
         "cache_complete_checked_at": figure.checked_at,
+        "cache_missing_chunks": figure.missing_chunks if figure.pct is not None else None,
     }
 
 
@@ -467,6 +473,7 @@ class GameDetail(BaseModel):
     cache_expected_bytes: int | None = None
     cache_present_bytes: int | None = None
     cache_complete_checked_at: str | None = None
+    cache_missing_chunks: int | None = None
     group_cache_complete_pct: int | None = None
 
 

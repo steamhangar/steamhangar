@@ -638,7 +638,7 @@ route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
-| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `cover_cached_url` (WP D10 — the relative path `/v1/covers/{appid}/{signature}` of vault-api's stored copy of that cover, `null` until one is stored; see "Stored covers" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`), `parent_appid` + `app_type` (WP TOOL-APPS-2a — the top-level game this app is a content package of, or `null` when not grouped; one of `game`/`dlc`/`tool`/`application`/`config`/`music`/`video`/`demo` or `null`; the list stays flat, UIs group; see "Content packages" below). **`name`** falls back to Steam's name (store lookup, else the oracle's stored `common.name`) when vault-api has none (WP TOOL-APPS-2a), `group_size_bytes` (WP TOOL-APPS-2 — on a top-level row the bytes of the whole group it heads: the union of its own depots and those of every row whose `parent_appid` is this app, each depot counted once; equals `size_bytes` for an ungrouped row; `null` on a row that is itself grouped, and with the same `null` rules as `size_bytes`; also on `GET /v1/games/{appid}`), `cache_complete_pct` + `cache_expected_bytes` + `cache_present_bytes` + `cache_complete_checked_at` + `group_cache_complete_pct` (WP CACHE-COMPLETE-1a — how much of the CURRENT build is on disk, 0-100, `null` when unknown; also on `GET /v1/games/{appid}`; `?incomplete=true` lists only games below 100; see "Cache completeness" below) |
+| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `cover_cached_url` (WP D10 — the relative path `/v1/covers/{appid}/{signature}` of vault-api's stored copy of that cover, `null` until one is stored; see "Stored covers" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`), `parent_appid` + `app_type` (WP TOOL-APPS-2a — the top-level game this app is a content package of, or `null` when not grouped; one of `game`/`dlc`/`tool`/`application`/`config`/`music`/`video`/`demo` or `null`; the list stays flat, UIs group; see "Content packages" below). **`name`** falls back to Steam's name (store lookup, else the oracle's stored `common.name`) when vault-api has none (WP TOOL-APPS-2a), `group_size_bytes` (WP TOOL-APPS-2 — on a top-level row the bytes of the whole group it heads: the union of its own depots and those of every row whose `parent_appid` is this app, each depot counted once; equals `size_bytes` for an ungrouped row; `null` on a row that is itself grouped, and with the same `null` rules as `size_bytes`; also on `GET /v1/games/{appid}`), `cache_complete_pct` + `cache_expected_bytes` + `cache_present_bytes` + `cache_complete_checked_at` + `group_cache_complete_pct` (WP CACHE-COMPLETE-1a; plus `cache_missing_chunks`, WP CACHE-COMPLETE-1b, see "Verify and complete" below — how much of the CURRENT build is on disk, 0-100, `null` when unknown; also on `GET /v1/games/{appid}`; `?incomplete=true` lists only games below 100; see "Cache completeness" below) |
 | GET    | `/v1/covers/{appid}/{signature}`   | WP D10: the cover image vault-api stored for this app (`image/jpeg`/`png`/`webp`), `ETag` + `Cache-Control: private, max-age=31536000, immutable`, `304` on a matching `If-None-Match`. **No `X-Api-Key`**: the `signature` in the path is an HMAC of the API key (see "Auth"); clients take the URL from `cover_cached_url`. Any refusal is `404`. See "Stored covers" |
 | GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`, `cover_url`, `cover_cached_url`, `parent_appid`, `app_type`, `group_size_bytes`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
 | PUT    | `/v1/mapping/{depotid}`            | Body `{"appid": int, "app_name": str \| null}` — **additively** upsert one depot→app mapping fact (manual fallback, see below); `422` for `depotid <= 0`, `appid <= 0`, or an unrecognized body field |
@@ -647,7 +647,7 @@ route, see "Auth").
 | POST   | `/v1/prefill`                      | Body `{"appids": [int, ...]}` — queue one prefill job per app id. `202` with a list of `{appid, job_id, status, deduplicated}`. `422` for an empty list, an appid `< 1`, a non-list, or an unrecognized body field; `422` with a string `detail` (nothing queued) when the body names a Steam tool app (WP API-FIX-4, see "Steam tool apps" below) |
 | POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). Steam tool apps are never selected (WP API-FIX-4). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
 | POST   | `/v1/prefill/verify`               | WP CACHE-COMPLETE-1b. "Verify" / "Complete now". Body `{"appids": [int, ...]}` as for `POST /v1/prefill` (same `422`s, tool apps refused). Sets `needs_force = 1` for each app, then queues it through the same enqueue (same dedupe, same response). `202`. See "Verify and complete" below |
-| POST   | `/v1/prefill/incomplete`           | WP CACHE-COMPLETE-1b. "Complete all". **No request body** (ignored, like `/v1/prefill/cached`). Selects exactly the games `GET /v1/games?incomplete=true` lists and handles each like `POST /v1/prefill/verify`. `202`, `[]` when nothing is incomplete. See "Verify and complete" below |
+| POST   | `/v1/prefill/incomplete`           | WP CACHE-COMPLETE-1b. "Complete all". **No request body** (ignored, like `/v1/prefill/cached`). Selects the games `GET /v1/games?incomplete=true` lists that miss at least one chunk file (`cache_missing_chunks > 0`) and handles each like `POST /v1/prefill/verify`. `202`, `[]` when nothing is incomplete. See "Verify and complete" below |
 | GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
@@ -1606,7 +1606,7 @@ described next. The lifecycle:
 | `DELETE /v1/cache/{appid}` deleted (or attempted, or found already-absent) a last-remnant depot — every **other** app still mapping it (ADR-0003 addendum) | `1` |
 | `POST /v1/cache/{appid}/gc` with `execute: true` actually removed chunks from a depot — every app mapped to that depot, whether or not it is the app the GC job was queued for (ADR-0007) | `1` |
 | `POST /v1/cache/{appid}/gc` — dry run, or an executing run that removed nothing | unchanged |
-| `POST /v1/prefill/verify` / `POST /v1/prefill/incomplete` (WP CACHE-COMPLETE-1b), or the sweep completing an incomplete target | `1` |
+| `POST /v1/prefill/verify` / `POST /v1/prefill/incomplete` (WP CACHE-COMPLETE-1b), or the sweep completing an incomplete game | `1` |
 
 **This is routine maintenance, not a failure path — say so wherever this
 flag's "ordinary case" is described.** A GC execute run is expected to run
@@ -2218,7 +2218,11 @@ non-forced run uses once an update exists). vault-core's `try_files` serves
 every chunk file that exists as a local HIT; only the missing ones go to
 Steam and are stored. So the internet traffic is exactly the missing chunks;
 the remaining cost is reading the whole game from disk once and passing it to
-the runner, which discards the bodies. The Steam client's own "verify"
+the runner, which discards the bodies. **Statistics caveat:** that read goes
+through vault-core like client traffic, so a forced run's HITs count as
+cache-served ("saved by the cache") bytes and are credited to the runner's
+address in the D15b client and throughput figures -- the known D15b gap that
+D15-RUNNER will close. The Steam client's own "verify"
 cannot be driven from the vault. Rejected: `--nocache` (a hidden flag that
 only re-downloads SteamPrefill's own manifest files) and `?nocache=1`
 (no option turns it on: SteamPrefill adds it only to its speed probes and its
@@ -2235,13 +2239,29 @@ compare-and-swap against the value it read at claim time), so the app's
 **next** run is forced. A forced run that succeeds clears the flag like any
 other successful job.
 
+**UI note.** A "Verify" (or "Complete now") on a game whose job is already
+running non-forced returns that job with `deduplicated: true` and only forces
+the game's NEXT run; the current run does not become a verify. Say so rather
+than showing the running job as the verify. A queued or paused job does run
+forced.
+
 **Selection for "Complete all".** `cache_completeness.incomplete_apps`: every
 tracked app whose figure (`cache_completeness.app_figure`, the games list's
 own computation) passes `cache_completeness.is_incomplete` (known and below
-100), Steam tool packages left out. `GET /v1/games?incomplete=true` uses the
+100), Steam tool packages left out -- `GET /v1/games?incomplete=true` uses the
 same two functions with the same inputs (shared `SizeCache` snapshot, the
-scheduler's settings), so the button acts on exactly the listed rows. A
+scheduler's settings) -- and then only those that
+`cache_completeness.is_completable` (at least one chunk file missing). A
 `null` figure is never incomplete: with the oracle off nothing is listed.
+
+**Games short only of wrong-size chunks.** The games list carries
+`cache_missing_chunks` (chunk files of the current build with no file on
+disk; `null` exactly when `cache_complete_pct` is). An incomplete row with
+`cache_missing_chunks: 0` is short only of chunk files with the wrong size.
+**No current action repairs such a game** until the CACHE-REPAIR-1 follow-up
+lands (see "Damaged chunks" below): "Complete all" skips it, and UIs should
+not offer "Complete now" for it (`POST /v1/prefill/verify` would still queue
+the forced run, which does not help).
 
 **Re-measured after the job.** The worker's post-success hook from 1a
 (`PrefillWorker._remeasure_completeness`) measures the app right after every
@@ -2251,25 +2271,28 @@ the next update check (oracle on; with it off there are no figures).
 **Automatic completion (schedule window only).** Completion is a download,
 so it follows the rules updates have: nothing starts outside the schedule
 window, and without a window it is manual only. Inside the window,
-`scheduler.maybe_sweep` flags `needs_force = 1` on every sweep target that
-`incomplete_apps` lists **with at least one missing chunk file**
-(`scheduler.completion_appids`) before it enqueues the targets, so those
-runs complete the game; the log names them. Rules:
+`scheduler.maybe_sweep` flags `needs_force = 1` on every game that
+`incomplete_apps` lists and `is_completable` accepts
+(`scheduler.completion_appids`), and enqueues it together with the sweep
+targets, so those runs complete the game; the log names them. Rules:
 
-- **Same scope as updates.** Only sweep targets complete automatically:
-  games installed on a reporting PC, plus every cached game while
-  `VAULT_SWEEP_INCLUDE_CACHED` is on (the default). Nothing is added to the
-  target set.
+- **All incomplete cached games** (user decision 2026-10-14), not only sweep
+  targets: a game completes in the window whether or not a PC reports it
+  installed and whether `VAULT_SWEEP_INCLUDE_CACHED` is on. The window is
+  the only gate. `GET /v1/schedule`'s `last_sweep_targets` counts the
+  targets plus these games.
 - **Stored figures.** The sweep reads the figures the latest update check
   (or a post-job re-measure) stored; it does not measure. The check runs on
   its own thread in the same tick, so a sweep acts on the previous check's
   figures (at most one `VAULT_SCHEDULE_INTERVAL_MINUTES` old). A figure whose
   target changed since is unknown and not acted on. Cost: one depot walk per
-  sweep, skipped when no stored row is short of a chunk.
+  sweep, shared with the cached-targets selection (`compute_targets`
+  takes the walk), and none at all when `VAULT_SWEEP_INCLUDE_CACHED` is off
+  and no stored row is short of a chunk.
 - **Wrong-size chunks are not a reason.** A game short only of chunk files
   with the wrong size is not auto-completed, because a forced run cannot fix
   it (next point) and would otherwise replay the whole game every interval.
-  It stays in the incomplete list for a manual action.
+  It stays in the incomplete list, with no action that repairs it yet.
 - **Known limit:** a game whose missing chunks a forced run does not fetch
   (for example a mapped depot SteamPrefill no longer selects) is forced
   again on every sweep while it stays incomplete.
@@ -2282,7 +2305,8 @@ checking its length or hash. Replacing one needs the file removed first, so
 the next request misses and stores a fresh copy: vault-api would delete the
 mismatched chunk files of the app's target manifests (re-checking each size
 right before the unlink, with the cache-root guards `deletion.py` uses) and
-then queue the forced run. Not built in 1b.
+then queue the forced run. Not built in 1b: follow-up package CACHE-REPAIR-1
+(after rc17, user decision 2026-10-14).
 
 ### `GET /v1/cache/summary`
 

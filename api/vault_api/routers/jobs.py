@@ -442,14 +442,16 @@ def create_incomplete_jobs(
     cache_root: str = Depends(get_cache_root),
 ) -> list[PrefillJobRef]:
     """"Complete all" (WP CACHE-COMPLETE-1b): a forced prefill for every game
-    ``GET /v1/games?incomplete=true`` lists right now. No request body (like
-    ``POST /v1/prefill/cached``; a body is ignored). 202.
+    ``GET /v1/games?incomplete=true`` lists right now that is short of at
+    least one chunk file (``cache_completeness.is_completable``). No request
+    body (like ``POST /v1/prefill/cached``; a body is ignored). 202.
 
     The selection is ``cache_completeness.incomplete_apps`` with the games
     list's own inputs (the shared ``SizeCache`` snapshot and the scheduler's
-    settings), so the button acts on exactly the listed games. Steam tool
-    packages are never listed. Nothing incomplete: ``[]``. Same dedupe and
-    forced-run rules as ``POST /v1/prefill/verify``.
+    settings). A listed game short only of wrong-size chunk files
+    (``cache_missing_chunks == 0``) is skipped: a forced run cannot repair it.
+    Steam tool packages are never listed. Nothing to do: ``[]``. Same dedupe
+    and forced-run rules as ``POST /v1/prefill/verify``.
     """
     depot_bytes = size_cache.get(cache_root).depot_bytes
     settings = request.app.state.scheduler.settings
@@ -457,6 +459,7 @@ def create_incomplete_jobs(
         appids = [
             app.appid
             for app in cache_completeness.incomplete_apps(conn, settings, depot_bytes)
+            if cache_completeness.is_completable(app.figure)
         ]
         if not appids:
             return []

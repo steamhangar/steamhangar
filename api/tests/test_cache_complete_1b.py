@@ -11,9 +11,11 @@ Guarantees pinned here, by name:
 3. **Complete all acts on exactly the listed games.** ``POST
    /v1/prefill/incomplete`` and ``GET /v1/games?incomplete=true`` share
    ``cache_completeness.is_incomplete`` (structural pin).
-4. **Automatic completion only in the window, only for sweep targets, only
-   with missing chunks.** No window, outside the window, not a target, or a
-   game short only of wrong-size chunk files: nothing is forced.
+4. **Automatic completion only in the window, for every incomplete cached
+   game (sweep target or not, user decision 2026-10-14), only with missing
+   chunks.** No window, outside the window, or a game short only of
+   wrong-size chunk files: nothing is forced. "Complete all" skips the
+   latter too. One depot walk per sweep.
 5. **Re-measured after the job** (1a's worker hook; end-to-end here through
    a verify).
 """
@@ -189,16 +191,31 @@ def test_list_complete_all_and_scheduler_share_one_predicate(
     )
     client = client_for(settings)
     listed = [g["appid"] for g in client.get("/v1/games?incomplete=true", headers=AUTH).json()]
-    queued = [r["appid"] for r in client.post("/v1/prefill/incomplete", headers=AUTH).json()]
-    assert listed == queued == [440]
+    assert listed == [440]
+    # Complete all and the scheduler go through is_completable, which must
+    # delegate to the same is_incomplete (pinned on its own below).
+    assert cache_completeness.is_completable(
+        cache_completeness.Completeness(pct=100, missing_chunks=1)
+    )
 
     sentinel = [cache_completeness.IncompleteApp(
-        appid=4242, figure=cache_completeness.Completeness(pct=1, missing_chunks=1)
+        appid=4242, figure=cache_completeness.Completeness(pct=100, missing_chunks=1)
     )]
     monkeypatch.setattr(
         cache_completeness, "incomplete_apps", lambda *a, **k: sentinel
     )
-    assert scheduler.completion_appids(conn, settings, [4242, 440, 730]) == (4242,)
+    assert scheduler.completion_appids(conn, settings) == (4242,)
+
+
+def test_complete_all_and_the_scheduler_share_the_completable_rule(
+    tmp_path: Path, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Second structural pin: "short of a chunk file" is one function too."""
+    settings = window_settings(tmp_path)
+    seed_measured(conn, settings)
+    monkeypatch.setattr(cache_completeness, "is_completable", lambda figure: False)
+    assert client_for(settings).post("/v1/prefill/incomplete", headers=AUTH).json() == []
+    assert scheduler.completion_appids(conn, settings) == ()
 
 
 # --------------------------------------------------------------------------
@@ -229,27 +246,57 @@ def test_inside_the_window_incomplete_targets_run_forced(
     assert queued == {440, 730}
 
 
-@pytest.mark.parametrize(
-    "case",
-    ["no-window", "outside-window", "not-a-target"],
-)
+@pytest.mark.parametrize("case", ["no-window", "outside-window"])
 def test_no_automatic_completion_outside_the_window_or_scope(
     tmp_path: Path, conn: sqlite3.Connection, case: str
 ) -> None:
     if case == "no-window":
         settings = dataclasses.replace(window_settings(tmp_path), schedule_window=None)
         moment = local(10)
-    elif case == "outside-window":
+    else:
         settings = window_settings(tmp_path)
         moment = local(20)
-    else:  # cached games are not sweep targets, no client reports anything
-        settings = window_settings(tmp_path, sweep_include_cached=False)
-        moment = local(10)
     seed_measured(conn, settings)
     result = scheduler.maybe_sweep(conn, settings, moment)
     assert result.completing == ()
     assert needs_force(conn, 730) == 0
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+
+
+def test_incomplete_games_are_completed_even_when_they_are_no_sweep_target(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    """User decision 2026-10-14: with VAULT_SWEEP_INCLUDE_CACHED off and no
+    client reporting anything, the window still completes every incomplete
+    cached game."""
+    settings = window_settings(tmp_path, sweep_include_cached=False)
+    seed_measured(conn, settings)
+    result = scheduler.maybe_sweep(conn, settings, local(10))
+    assert result.swept and result.targets == ()
+    assert result.completing == (730,)
+    assert result.enqueued == (730,)
+    assert (needs_force(conn, 730), needs_force(conn, 440)) == (1, 0)
+    assert [int(r[0]) for r in conn.execute("SELECT appid FROM jobs")] == [730]
+
+
+def test_one_depot_walk_serves_targets_and_completion(
+    tmp_path: Path, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vault_api import sizes
+
+    settings = window_settings(tmp_path)
+    seed_measured(conn, settings)
+    real = sizes.scan_depot_dir_bytes
+    calls: list[str] = []
+
+    def counting(root: str) -> dict[int, int]:
+        calls.append(root)
+        return real(root)
+
+    monkeypatch.setattr(sizes, "scan_depot_dir_bytes", counting)
+    result = scheduler.maybe_sweep(conn, settings, local(10))
+    assert result.completing == (730,)
+    assert len(calls) == 1
 
 
 def test_a_game_short_only_of_wrong_size_chunks_is_not_auto_completed(
@@ -285,6 +332,20 @@ def test_a_game_short_only_of_wrong_size_chunks_is_not_auto_completed(
     assert result.swept and 730 in result.targets
     assert result.completing == (570,)
     assert (needs_force(conn, 730), needs_force(conn, 570)) == (0, 1)
+
+    # Complete all skips it too, and the list says why (0 missing chunks).
+    conn.execute("DELETE FROM jobs")
+    conn.execute("UPDATE apps SET needs_force = 0")
+    conn.commit()
+    client = client_for(settings)
+    rows = {
+        g["appid"]: g["cache_missing_chunks"]
+        for g in client.get("/v1/games?incomplete=true", headers=AUTH).json()
+    }
+    assert rows == {570: 1, 730: 0}
+    queued = [r["appid"] for r in client.post("/v1/prefill/incomplete", headers=AUTH).json()]
+    assert queued == [570]
+    assert needs_force(conn, 730) == 0
 
 
 def test_a_failing_completion_step_does_not_stop_the_sweep(

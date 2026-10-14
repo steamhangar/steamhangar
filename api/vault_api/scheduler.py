@@ -110,7 +110,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Iterable
+from typing import Callable, Mapping
 
 from vault_api import (
     agent_reports,
@@ -437,7 +437,11 @@ def fresh_client_snapshots(
     return fresh, excluded
 
 
-def cached_appids(conn: sqlite3.Connection, cache_root: str) -> set[int]:
+def cached_appids(
+    conn: sqlite3.Connection,
+    cache_root: str,
+    depot_bytes: Mapping[int, int] | None = None,
+) -> set[int]:
     """Every appid that currently holds cache content on disk — **exclusive
     OR last-cached-remnant** — right now.
 
@@ -520,10 +524,11 @@ def cached_appids(conn: sqlite3.Connection, cache_root: str) -> set[int]:
     has always been able to target an appid with no ``apps`` row either, via
     a bare agent report.
     """
-    depot_bytes = sizes.scan_depot_dir_bytes(cache_root)
+    if depot_bytes is None:
+        depot_bytes = sizes.scan_depot_dir_bytes(cache_root)
     if not depot_bytes:  # empty/missing cache — no error, just nothing found
         return set()
-    return deletion.appids_with_cache_content(conn, depot_bytes)
+    return deletion.appids_with_cache_content(conn, dict(depot_bytes))
 
 
 def update_check_appids(conn: sqlite3.Connection, cache_root: str) -> list[int]:
@@ -542,9 +547,14 @@ def compute_targets(
     *,
     include_cached: bool = False,
     cache_root: str | None = None,
+    depot_bytes: Mapping[int, int] | None = None,
 ) -> TargetSet:
     """Union the app ids from every client's LATEST agent report, optionally
     widened with every app that has cache content on disk (WP 4d).
+
+    ``depot_bytes`` (WP CACHE-COMPLETE-1b): a depot walk the caller already
+    made (``maybe_sweep`` shares one with its completion step); ``None``
+    walks ``cache_root`` as before.
 
     "Latest" is ``agent_reports.latest_snapshot`` — newest by **rowid**, i.e.
     insertion order, not by ``reported_at`` (WP 2.4's rule: second-precision
@@ -641,7 +651,7 @@ def compute_targets(
                 "resolve to 'nothing is cached'."
             )
         cached, cached_tools = tool_apps.split_tool_apps(
-            cached_appids(conn, cache_root)
+            cached_appids(conn, cache_root, depot_bytes)
         )
         skipped_tools = tuple(sorted(set(skipped_tools) | set(cached_tools)))
         cached_only = tuple(sorted(cached - appids))
@@ -686,37 +696,43 @@ class SweepResult:
     #: WP API-FIX-4. Mirrors ``TargetSet.skipped_tool_appids``: Steam tool
     #: apps a source named that were not enqueued.
     skipped_tool_appids: tuple[int, ...] = ()
-    #: WP CACHE-COMPLETE-1b. Targets the stored completeness figures call
-    #: incomplete with missing chunks; flagged ``needs_force = 1`` before the
-    #: enqueue so their run fetches what is missing (``completion_appids``).
+    #: WP CACHE-COMPLETE-1b. Games the stored completeness figures call
+    #: incomplete with missing chunks (``completion_appids``), target or
+    #: not; flagged ``needs_force = 1`` and enqueued with the targets so
+    #: their run fetches what is missing.
     completing: tuple[int, ...] = ()
 
 
 def completion_appids(
-    conn: sqlite3.Connection, settings: Settings, targets: Iterable[int]
+    conn: sqlite3.Connection,
+    settings: Settings,
+    depot_bytes: Mapping[int, int] | None = None,
 ) -> tuple[int, ...]:
-    """The sweep targets to complete (WP CACHE-COMPLETE-1b): apps
-    ``cache_completeness.incomplete_apps`` lists (the predicate behind
-    ``GET /v1/games?incomplete=true``) whose figure has missing chunk files.
+    """The games the sweep completes (WP CACHE-COMPLETE-1b; scope per user
+    decision 2026-10-14): every app ``cache_completeness.incomplete_apps``
+    lists (the games behind ``GET /v1/games?incomplete=true``) that
+    ``cache_completeness.is_completable`` -- short of at least one chunk file.
 
-    * **Only sweep targets.** Completion is a download and follows the scope
-      updates have: installed games, plus every cached game when
-      ``sweep_include_cached`` is on. Nothing is added to the target set.
+    * **All incomplete cached games, not only sweep targets.** Completing is
+      independent of ``sweep_include_cached`` and of the installed lists;
+      the window is the only gate (``maybe_sweep`` calls this only inside
+      it).
     * **Only missing chunks.** A game short only of chunk files with the wrong
       size is left out: the forced run serves those files from disk as HITs
       and cannot replace them, so forcing it every interval would replay the
       whole game for nothing.
-    * **Stored figures.** The update check measures, this only reads (plus
-      one depot walk, skipped when no stored row is short of a chunk).
+    * **Stored figures.** The update check measures, this only reads.
+      ``depot_bytes`` is the sweep's own depot walk when it made one; without
+      it, one walk -- skipped when no stored row is short of a chunk.
     """
-    wanted = set(targets)
-    if not wanted or not cache_completeness.any_stored_missing(conn):
+    if not cache_completeness.any_stored_missing(conn):
         return ()
-    depot_bytes = sizes.scan_depot_dir_bytes(settings.cache_root)
+    if depot_bytes is None:
+        depot_bytes = sizes.scan_depot_dir_bytes(settings.cache_root)
     return tuple(
         app.appid
         for app in cache_completeness.incomplete_apps(conn, settings, depot_bytes)
-        if app.appid in wanted and (app.figure.missing_chunks or 0) > 0
+        if cache_completeness.is_completable(app.figure)
     )
 
 
@@ -752,21 +768,28 @@ def maybe_sweep(
         return SweepResult(swept=False, skipped_reason="interval-not-elapsed")
 
     swept_at = to_utc_iso(now)
+    # WP CACHE-COMPLETE-1b: one depot walk serves the cached targets and the
+    # completion step. A blank root is left to compute_targets' own refusal.
+    depot_bytes: dict[int, int] | None = None
+    if settings.sweep_include_cached and (settings.cache_root or "").strip():
+        depot_bytes = sizes.scan_depot_dir_bytes(settings.cache_root)
     target_set = compute_targets(
         conn,
         now,
         settings.schedule_client_stale_days,
         include_cached=settings.sweep_include_cached,
         cache_root=settings.cache_root,
+        depot_bytes=depot_bytes,
     )
 
-    # WP CACHE-COMPLETE-1b: incomplete targets run forced, so the run
-    # fetches their missing chunks even when SteamPrefill's own bookkeeping
-    # calls the app up to date. Its own try: a failure here costs only the
-    # completion, never the sweep (which is already claimed).
+    # WP CACHE-COMPLETE-1b: every completable game runs forced (and is
+    # enqueued even when it is no target), so the run fetches its missing
+    # chunks even when SteamPrefill's own bookkeeping calls it up to date.
+    # Its own try: a failure here costs only the completion, never the sweep
+    # (which is already claimed).
     completing: tuple[int, ...] = ()
     try:
-        completing = completion_appids(conn, settings, target_set.appids)
+        completing = completion_appids(conn, settings, depot_bytes)
         if completing:
             deletion.set_needs_force(conn, completing)
     except Exception:
@@ -776,10 +799,12 @@ def maybe_sweep(
         )
         completing = ()
 
+    target_ids = set(target_set.appids)
+    to_enqueue = list(target_set.appids) + [a for a in completing if a not in target_ids]
     enqueued: list[int] = []
     already_active: list[int] = []
     aborted = False
-    for appid in target_set.appids:
+    for appid in to_enqueue:
         if should_abort():
             # Shutdown mid-sweep. The remaining apps are simply not enqueued;
             # nothing is left half-done, because each enqueue is its own
@@ -790,7 +815,7 @@ def maybe_sweep(
         _job, created = jobs.enqueue_prefill(conn, appid)
         (enqueued if created else already_active).append(appid)
 
-    finish_sweep(conn, targets=len(target_set.appids), enqueued=len(enqueued))
+    finish_sweep(conn, targets=len(to_enqueue), enqueued=len(enqueued))
 
     logger.info(
         "scheduler: sweep at %s enqueued %d new job(s), %d app(s) already "
