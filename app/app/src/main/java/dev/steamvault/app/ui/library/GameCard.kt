@@ -129,7 +129,7 @@ fun GameCard(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 CapsulePill(model = model, onAction = onAction, selecting = selecting)
-                if (model.neverPlayed) NeverPlayedPill(compact = compact)
+                if (model.neverPlayed) NeverPlayedPill(compact = compact, modifier = Modifier.weight(1f, fill = false))
             }
         }
         Text(

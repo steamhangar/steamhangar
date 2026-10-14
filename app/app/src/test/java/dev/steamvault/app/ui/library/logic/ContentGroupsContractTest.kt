@@ -47,6 +47,31 @@ class ContentGroupsContractTest {
         assertEquals("Deleting X frees about 0 GB.", groupDeleteIntro("X", 0L))
     }
 
+    /** web components/group-delete-plan.js and views/library.js after
+     * a8ec24e ("Deleted (N)" became "Will be deleted (N)"). */
+    @Test
+    fun `grouped delete plan block wording`() {
+        assertEquals("Will be deleted (3)", willBeDeletedLabel(3))
+        assertEquals("game", memberRoleWord("parent"))
+        assertEquals("package", memberRoleWord("package"))
+        assertEquals("Kept (1 shared depot)", keptDepotsLabel(1))
+        assertEquals("Kept (2 shared depots)", keptDepotsLabel(2))
+        assertEquals("553853 kept — Glasswing still uses it", keptDepotLine(553853, listOf("Glasswing")))
+        assertEquals("0 GB freed", freedText(0L))
+        assertEquals(null, unusableDepotsText(0))
+        assertEquals("1 unreadable depot entry — the delete will report it as failed.", unusableDepotsText(1))
+        assertEquals("2 unreadable depot entries — the delete will report them as failed.", unusableDepotsText(2))
+        assertEquals("Not deleted: X (not a content package).", keptChildrenText(listOf(GroupPlanKeptChild(1, "X", "not a content package"))))
+        assertEquals(
+            "Not possible right now: X — Download running. Wait for it to finish or cancel it in Downloads.",
+            blockedText(listOf(GroupPlanBlocked(1, "X", "Download running"))),
+        )
+        assertEquals(
+            "Deleting 2 games and their content packages frees about 0 GB.",
+            multiGroupDeleteIntro(2, 0L),
+        )
+    }
+
     @Test
     fun `never played pill`() {
         assertEquals("Never played", NEVER_PLAYED_LABEL)

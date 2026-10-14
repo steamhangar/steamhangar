@@ -32,6 +32,7 @@ import dev.steamvault.app.ui.library.logic.describeGroupPlan
 import dev.steamvault.app.ui.library.logic.expandSelection
 import dev.steamvault.app.ui.library.logic.groupDeleteIntro
 import dev.steamvault.app.ui.library.logic.groupHasCacheContent
+import dev.steamvault.app.ui.library.logic.multiGroupDeleteIntro
 import dev.steamvault.app.ui.library.logic.buildBulkDownloadPlan
 import dev.steamvault.app.ui.library.logic.classifyBulkDeleteEligibility
 import dev.steamvault.app.ui.library.logic.classifyBulkSelection
@@ -206,8 +207,7 @@ private fun GroupedDeletePlanBody(state: DeletePlanUiState.Ready, allGames: List
             text = if (state.ids.size == 1) {
                 groupDeleteIntro(describeGroupPlan(first, nameFor).subject, state.freedBytes)
             } else {
-                "Deleting ${state.ids.size} games and their content packages frees about " +
-                    "${formatBytesGB(state.freedBytes) ?: "0 GB"}."
+                multiGroupDeleteIntro(state.ids.size, state.freedBytes)
             },
             style = MaterialTheme.typography.bodyMedium,
         )

@@ -259,6 +259,10 @@ class DetailController(
     /** "Retry download" on a failed package: its own `POST /v1/prefill`, the
      * same request its own card would send. */
     fun retryPackage(scope: CoroutineScope, packageAppid: Int, onLibraryChanged: () -> Unit) {
+        // In-flight guard: a second tap while the request is pending does
+        // nothing (the button is disabled too, see [retryingAppids]).
+        if (packageAppid in retryingAppids) return
+        retryingAppids = retryingAppids + packageAppid
         scope.launch {
             try {
                 jobsRepository.prefill(listOf(packageAppid))
@@ -266,9 +270,15 @@ class DetailController(
                 onLibraryChanged()
             } catch (e: VaultApiError) {
                 toast = e.message ?: strings.actionFailedFallback()
+            } finally {
+                retryingAppids = retryingAppids - packageAppid
             }
         }
     }
+
+    /** Packages whose "Retry download" request is in flight (button disabled). */
+    var retryingAppids by mutableStateOf<Set<Int>>(emptySet())
+        private set
 
     /** Fetch the server's grouped-delete plan for the open game and show
      * it. Also the re-confirm step after a 409 "members differ" ([notice]). */

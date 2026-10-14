@@ -139,3 +139,32 @@ fun keptChildrenText(children: List<GroupPlanKeptChild>): String =
 /** The blocked warning line. */
 fun blockedText(blocked: List<GroupPlanBlocked>): String =
     "$BLOCKED_HEADING: ${blocked.joinToString("; ") { "${it.name} — ${it.text}" }}. Wait for it to finish or cancel it in Downloads."
+
+// ---- the plan block's own words (web components/group-delete-plan.js, a8ec24e) ----
+
+/** "Will be deleted (N)": the parent plus its packages. */
+fun willBeDeletedLabel(count: Int): String = "Will be deleted ($count)"
+
+/** "game" / "package": a member's role word. */
+fun memberRoleWord(role: String): String = if (role == "parent") "game" else "package"
+
+/** "Kept (N shared depot|depots)". */
+fun keptDepotsLabel(count: Int): String = "Kept ($count shared ${if (count == 1) "depot" else "depots"})"
+
+/** "<depot id> kept — <why>". */
+fun keptDepotLine(depotid: Int, usedBy: List<String>): String = "$depotid kept — ${keptDepotWhy(usedBy)}"
+
+/** "<bytes> freed". */
+fun freedText(freedBytes: Long): String = "${formatBytesGB(freedBytes) ?: "0 GB"} freed"
+
+/** Mapping rows with an unusable depot id (poisoned database); the delete
+ * reports them as failed. Null when there are none. */
+fun unusableDepotsText(count: Int): String? = when {
+    count <= 0 -> null
+    count == 1 -> "1 unreadable depot entry — the delete will report it as failed."
+    else -> "$count unreadable depot entries — the delete will report them as failed."
+}
+
+/** The bulk dialog's intro when it holds several games, groups among them. */
+fun multiGroupDeleteIntro(count: Int, freedBytes: Long): String =
+    "Deleting $count games and their content packages frees about ${formatBytesGB(freedBytes) ?: "0 GB"}."

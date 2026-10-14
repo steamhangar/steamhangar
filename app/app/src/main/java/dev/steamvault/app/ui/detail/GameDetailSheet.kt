@@ -473,6 +473,7 @@ private fun LoadedDetailBody(
             groupSizeBytes = gameSummary.group_size_bytes,
             packages = packages,
             jobs = jobs,
+            retrying = controller.retryingAppids,
             onRetry = { pkg -> controller.retryPackage(scope, pkg.appid, onLibraryChanged) },
         )
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
@@ -700,6 +701,7 @@ private fun PackagesSection(
     groupSizeBytes: Long?,
     packages: List<GameSummary>,
     jobs: List<JobSummary>,
+    retrying: Set<Int>,
     onRetry: (GameSummary) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().testTag(PACKAGES_SECTION_TAG)) {
@@ -747,6 +749,7 @@ private fun PackagesSection(
                     val retryDescription = "$PACKAGE_RETRY_LABEL — $full"
                     TextButton(
                         onClick = { onRetry(pkg) },
+                        enabled = pkg.appid !in retrying,
                         modifier = Modifier.semantics { contentDescription = retryDescription },
                     ) {
                         Text(PACKAGE_RETRY_LABEL)

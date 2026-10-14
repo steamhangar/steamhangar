@@ -83,7 +83,11 @@ class ToolApps2dWiringTest {
     @Test
     fun `MUTATION PIN -- the grid card and the list row draw the group line and the never-played pill`() {
         assertCalledFrom(card, "GroupPackagesLine(model)", "GameCard")
-        assertCalledFrom(card, "if (model.neverPlayed) NeverPlayedPill(compact = compact)", "GameCard")
+        assertCalledFrom(
+            card,
+            "if (model.neverPlayed) NeverPlayedPill(compact = compact, modifier = Modifier.weight(1f, fill = false))",
+            "GameCard",
+        )
         assertCalledFrom(row, "GroupPackagesLine(model)", "GameListRow")
         assertCalledFrom(row, "if (model.neverPlayed) NeverPlayedLabel()", "GameListRow")
     }
@@ -104,6 +108,9 @@ class ToolApps2dWiringTest {
         assertCalledFrom(sheet, "controller.retryPackage(scope, pkg.appid, onLibraryChanged)", "LoadedDetailBody")
         assertCalledFrom(sheet, "controller.openGroupDeleteConfirm(scope)", "LoadedDetailBody")
         assertCalledFrom(sheet, "offersPackageRetry(pkg, liveJob, findTrackedJob(jobs, pkg.appid))", "PackagesSection")
+        // Review fix: the retry button is disabled while its request is in flight.
+        assertCalledFrom(sheet, "enabled = pkg.appid !in retrying", "PackagesSection")
+        assertCalledFrom(sheet, "retrying = controller.retryingAppids", "LoadedDetailBody")
         assertCalledFrom(sheet, "GroupDeleteConfirmDialog(", "GameDetailSheet")
         assertCalledFrom(sheet, "enabled = state is GroupDeleteUiState.Ready && !isPlanBlocked(state.plan)", "GroupDeleteConfirmDialog")
     }

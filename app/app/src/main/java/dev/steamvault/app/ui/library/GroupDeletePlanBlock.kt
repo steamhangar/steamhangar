@@ -15,9 +15,13 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.ui.library.logic.blockedText
 import dev.steamvault.app.ui.library.logic.describeGroupPlan
-import dev.steamvault.app.ui.library.logic.formatBytesGB
+import dev.steamvault.app.ui.library.logic.freedText
 import dev.steamvault.app.ui.library.logic.keptChildrenText
-import dev.steamvault.app.ui.library.logic.keptDepotWhy
+import dev.steamvault.app.ui.library.logic.keptDepotLine
+import dev.steamvault.app.ui.library.logic.keptDepotsLabel
+import dev.steamvault.app.ui.library.logic.memberRoleWord
+import dev.steamvault.app.ui.library.logic.unusableDepotsText
+import dev.steamvault.app.ui.library.logic.willBeDeletedLabel
 
 /** Test tag of one grouped-delete plan block (WP TOOL-APPS-2d). */
 internal const val GROUP_DELETE_PLAN_TAG = "group-delete-plan"
@@ -46,7 +50,7 @@ internal fun GroupDeletePlanBlock(
             Text(d.subject, style = MaterialTheme.typography.titleSmall)
         }
         Text(
-            text = "Deleted (${1 + d.packages.size})",
+            text = willBeDeletedLabel(1 + d.packages.size),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -60,7 +64,7 @@ internal fun GroupDeletePlanBlock(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = if (member.role == "parent") "game" else "package",
+                    text = memberRoleWord(member.role),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 8.dp),
@@ -68,16 +72,15 @@ internal fun GroupDeletePlanBlock(
             }
         }
         if (d.keptDepots.isNotEmpty()) {
-            val n = d.keptDepots.size
             Text(
-                text = "Kept ($n shared ${if (n == 1) "depot" else "depots"})",
+                text = keptDepotsLabel(d.keptDepots.size),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp),
             )
             for (kept in d.keptDepots) {
                 Text(
-                    text = "${kept.depotid} kept — ${keptDepotWhy(kept.usedBy)}",
+                    text = keptDepotLine(kept.depotid, kept.usedBy),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -91,8 +94,16 @@ internal fun GroupDeletePlanBlock(
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
+        unusableDepotsText(plan.unusable.size)?.let { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
         Text(
-            text = "${formatBytesGB(d.freedBytes) ?: "0 GB"} freed",
+            text = freedText(d.freedBytes),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 6.dp),
         )
