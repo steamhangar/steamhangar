@@ -120,6 +120,23 @@ def _no_runner_mark_network_in_tests(monkeypatch):
     runner_mark.reset_negative_cache()
 
 
+@pytest.fixture(autouse=True)
+def _no_post_run_oracle_network_in_tests(monkeypatch):
+    """WP UPD-FIX-1: a successful prefill whose app still reads "stale" asks
+    the manifest oracle once. Make the worker's default fetcher fail closed,
+    so no test reaches api.steamcmd.net; tests of the re-check inject their
+    own ``oracle_fetch`` or patch this seam."""
+    from vault_api import oracle, worker
+
+    def refuse(_settings):
+        def fetch(url: str) -> bytes:
+            raise oracle.OracleError(f"network disabled in tests: {url}")
+
+        return fetch
+
+    monkeypatch.setattr(worker, "_default_oracle_fetch", refuse)
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(

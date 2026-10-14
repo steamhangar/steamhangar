@@ -26,10 +26,11 @@ import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
+from typing import Iterable
 
 from vault_api import depot_manifests, manifest_archive
 from vault_api.config import Settings
-from vault_api.jobs import utcnow_iso
+from vault_api.jobs import immediate_transaction, parse_utc_iso, utcnow_iso
 from vault_api.mapping import upsert_mapping
 from vault_api.manifests import (
     ManifestParseError,
@@ -81,6 +82,10 @@ class IngestResult:
     #: bad" with "this file disappeared out from under us" would make a
     #: perfectly benign race read like a corruption finding in the job log.
     vanished_during_scan: list[str] = field(default_factory=list)
+    #: Well-formed files this pass deliberately did NOT record because a
+    #: newer file exists for the same depot (WP UPD-FIX-1,
+    #: ``select_current_manifest``): manifests left over from earlier runs.
+    superseded: list[str] = field(default_factory=list)
     #: True if the configured cache dir does not exist / isn't readable —
     #: the common, unremarkable case on a host where VAULT_STEAMPREFILL_PATH
     #: itself is unset or SteamPrefill has never run. Not an error.
@@ -92,7 +97,12 @@ class IngestResult:
                 "[vault-api] Manifest ingestion: SteamPrefill temp-cache directory "
                 "not found or unreadable; nothing ingested (VAULT_STEAMPREFILL_CACHE_DIR)."
             )
-        if not self.ingested and not self.parse_failures and not self.vanished_during_scan:
+        if (
+            not self.ingested
+            and not self.parse_failures
+            and not self.vanished_during_scan
+            and not self.superseded
+        ):
             return "[vault-api] Manifest ingestion: no matching .bin files found."
 
         parts = []
@@ -101,6 +111,15 @@ class IngestResult:
             parts.append(
                 f"[vault-api] Manifest ingestion: recorded {len(self.ingested)} "
                 f"manifest(s) for depot(s) {depots}."
+            )
+        if self.superseded:
+            shown = self.superseded[:MAX_LOGGED_NAMES]
+            omitted = len(self.superseded) - len(shown)
+            suffix = "" if omitted <= 0 else f" (+{omitted} more)"
+            parts.append(
+                f"[vault-api] Manifest ingestion: ignored {len(self.superseded)} "
+                f"older manifest file(s) left over from earlier runs (only the "
+                f"newest file per depot is recorded): {shown}{suffix}."
             )
         if self.parse_failures:
             shown = self.parse_failures[:MAX_LOGGED_NAMES]
@@ -126,25 +145,32 @@ def ingest_after_prefill(
     conn: sqlite3.Connection, *, appid: int, settings: Settings
 ) -> IngestResult:
     """Scan ``settings.steamprefill_cache_dir`` for ``{appid}_*.bin`` files
-    belonging to this job's app, record each one's manifest state, and
-    archive the source file.
+    belonging to this job's app, record ONE manifest per depot, and archive
+    its source file.
 
-    Per file:
+    1. Parse every filename (``manifests.parse_bin_filename``) to recover
+       ``containing_appid`` — the shared-depot attribution signal — and group
+       the files per depot.
+    2. **Per depot, pick the one file ``select_current_manifest`` names (WP
+       UPD-FIX-1)**: the newest by file mtime. The temp cache keeps every
+       manifest SteamPrefill ever downloaded; recording each of them in
+       directory order let a leftover overwrite the current one. The others
+       are listed as ``superseded`` in the job log and not touched.
 
-    1. Parse the filename (``manifests.parse_bin_filename``) to recover
-       ``containing_appid`` — the shared-depot attribution signal.
-    2. Parse the payload (``manifests.parse_steamprefill_bin``), which
+    For the chosen file:
+
+    3. Parse the payload (``manifests.parse_steamprefill_bin``), which
        independently re-validates the filename and cross-checks it against
        the payload's own depot/manifest ids (corruption signal).
-    3. Upsert ``depot_manifests`` (latest-per-(appid, depotid), replacing any
+    4. Upsert ``depot_manifests`` (latest-per-(appid, depotid), replacing any
        older row for this app+depot — ADR-0006 decision 3).
-    4. **If ``containing_appid != appid``, additively map the depot to
+    5. **If ``containing_appid != appid``, additively map the depot to
        ``containing_appid`` too** (``mapping.upsert_mapping``) — this is
        purely additive (ADR-0003), a SEPARATE fact from the job's own
        replace-set mapping (``vault_api.prefill.apply_observed_mapping``,
        which is unaffected by this function and still comes from the
        before/after depot diff exactly as before WP 3.2).
-    5. Archive the ``.bin`` file durably and prune old archives for that
+    6. Archive the ``.bin`` file durably and prune old archives for that
        depot to ``settings.manifest_keep``.
 
     **A file that fails to parse is warned about and skipped — it never
@@ -161,7 +187,7 @@ def ingest_after_prefill(
     ``"_"``).
 
     **The REVERSE direction of ADR-0003, measured (WP 3.2 review):** the
-    additive ``upsert_mapping(depotid, containing_appid)`` call in step 4
+    additive ``upsert_mapping(depotid, containing_appid)`` call in step 5
     above can later be undone by the CONTAINING app's own next prefill job.
     ``vault_api.prefill.apply_observed_mapping`` is "replace within the app":
     when ``containing_appid``'s own job runs, any depot currently mapped to
@@ -203,9 +229,8 @@ def ingest_after_prefill(
       describing the intended design as the implemented one.
     """
     cache_dir = settings.steamprefill_cache_dir
-    try:
-        entries = list(os.scandir(cache_dir))
-    except OSError:
+    scan = _scan_bin_files(cache_dir, prefix=f"{appid}_")
+    if scan is None:
         logger.info(
             "manifest-ingest appid=%s: cache dir %r not found or unreadable; "
             "nothing to ingest.",
@@ -213,52 +238,57 @@ def ingest_after_prefill(
         )
         return IngestResult(cache_dir_unavailable=True)
 
-    prefix = f"{appid}_"
-    candidates = [
-        entry
-        for entry in entries
-        if entry.is_file() and entry.name.startswith(prefix) and entry.name.endswith(".bin")
-    ]
-
     ingested: list[IngestedManifest] = []
-    parse_failures: list[str] = []
-    vanished_during_scan: list[str] = []
+    parse_failures: list[str] = list(scan.parse_failures)
+    vanished_during_scan: list[str] = list(scan.vanished)
+    superseded: list[str] = []
 
-    for entry in candidates:
+    # WP UPD-FIX-1: one manifest per depot, chosen by ``select_current_manifest``
+    # -- never "every file, last one wins". See that function for the rule.
+    for (_original_appid, depotid), group in sorted(scan.groups.items()):
+        chosen = select_current_manifest(group)
+        if chosen is None:  # pragma: no cover - a group is never empty
+            continue
+        superseded.extend(
+            sorted(candidate.name for candidate in group if candidate is not chosen)
+        )
         try:
-            _original_app_id, containing_app_id, _filename_depot_id, _filename_manifest_id = (
-                parse_bin_filename(entry.path)
-            )
-            manifest = parse_steamprefill_bin(entry.path)
+            manifest = parse_steamprefill_bin(chosen.path)
         except ManifestParseError as exc:
             # Distinguish an I/O race (WP 3.2 review nitpick) from a genuine
             # bad file: if the path is gone by now, it vanished BETWEEN the
-            # os.scandir() listing above and this parse attempt (SteamPrefill's
-            # own clear-temp running concurrently, or an operator clearing the
+            # os.scandir() listing and this parse attempt (SteamPrefill's own
+            # clear-temp running concurrently, or an operator clearing the
             # directory by hand) -- not a data-quality problem, and logging it
             # as one would train an operator to distrust a real corruption
             # warning. `lexists`, not `exists`: a broken/dangling link (not
             # expected here, but consistent with deletion.py's own rule)
             # still counts as "something is there".
-            if not os.path.lexists(entry.path):
+            #
+            # No fallback to an older file of the same depot (WP UPD-FIX-1):
+            # recording a superseded manifest because the current one is
+            # unreadable is exactly the wrong-gid failure this rule exists to
+            # prevent. The depot keeps its previous row.
+            if not os.path.lexists(chosen.path):
                 logger.info(
                     "manifest-ingest appid=%s file=%s: vanished during the scan "
                     "(I/O race, not a data problem), skipping: %s",
-                    appid, entry.name, exc,
+                    appid, chosen.name, exc,
                 )
-                vanished_during_scan.append(entry.name)
+                vanished_during_scan.append(chosen.name)
             else:
                 logger.warning(
                     "manifest-ingest appid=%s file=%s: parse failed, skipping: %s",
-                    appid, entry.name, exc,
+                    appid, chosen.name, exc,
                 )
-                parse_failures.append(entry.name)
+                parse_failures.append(chosen.name)
             continue
 
         recorded_at = utcnow_iso()
         manifestid = str(manifest.manifest_id)
         chunk_count = len(manifest.chunks)
         total_bytes = sum(manifest.chunks.values())
+        containing_app_id = chosen.containing_appid
 
         depot_manifests.upsert_depot_manifest(
             conn,
@@ -279,30 +309,10 @@ def ingest_after_prefill(
         if containing_app_id != appid:
             upsert_mapping(conn, depotid=manifest.depot_id, appid=containing_app_id, name=None)
 
-        try:
-            archived_path = manifest_archive.archive_manifest(
-                settings.manifest_archive_dir,
-                depotid=manifest.depot_id,
-                manifestid=manifestid,
-                src_path=entry.path,
-            )
-            manifest_archive.prune_archive(
-                settings.manifest_archive_dir,
-                depotid=manifest.depot_id,
-                keep=settings.manifest_keep,
-                current=os.path.basename(archived_path),
-            )
-        except OSError as exc:
-            # The DB row is already recorded even if the archive copy fails —
-            # "we know what the manifest was" and "we kept a durable copy of
-            # the bytes" are two different facts, and losing the second must
-            # not undo the first.
-            logger.warning(
-                "manifest-ingest appid=%s depot=%s manifest=%s: archiving failed "
-                "(the depot_manifests row was still recorded): %s",
-                appid, manifest.depot_id, manifestid, exc,
-            )
-            archived_path = None
+        archived_path = _archive_quietly(
+            settings, appid=appid, depotid=manifest.depot_id,
+            manifestid=manifestid, src_path=chosen.path,
+        )
 
         ingested.append(
             IngestedManifest(
@@ -319,7 +329,284 @@ def ingest_after_prefill(
         ingested=ingested,
         parse_failures=parse_failures,
         vanished_during_scan=vanished_during_scan,
+        superseded=superseded,
     )
+
+
+def _archive_quietly(
+    settings: Settings, *, appid: int, depotid: int, manifestid: str, src_path: str
+) -> str | None:
+    """Archive one ``.bin`` and prune the depot's archive. ``None`` on failure.
+
+    The DB row is already recorded even if the archive copy fails -- "we know
+    what the manifest was" and "we kept a durable copy of the bytes" are two
+    different facts, and losing the second must not undo the first.
+    """
+    try:
+        archived_path = manifest_archive.archive_manifest(
+            settings.manifest_archive_dir,
+            depotid=depotid,
+            manifestid=manifestid,
+            src_path=src_path,
+        )
+        manifest_archive.prune_archive(
+            settings.manifest_archive_dir,
+            depotid=depotid,
+            keep=settings.manifest_keep,
+            current=os.path.basename(archived_path),
+        )
+    except OSError as exc:
+        logger.warning(
+            "manifest-ingest appid=%s depot=%s manifest=%s: archiving failed "
+            "(the depot_manifests row was still recorded): %s",
+            appid, depotid, manifestid, exc,
+        )
+        return None
+    return archived_path
+
+
+# --------------------------------------------------------------------------
+# Which .bin file is "the" manifest of a depot (WP UPD-FIX-1)
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BinCandidate:
+    """One well-named ``.bin`` file in SteamPrefill's temp cache."""
+
+    path: str
+    name: str
+    original_appid: int
+    containing_appid: int
+    depotid: int
+    manifestid: int
+    #: The file's own mtime. SteamPrefill writes a manifest file exactly once,
+    #: when it first downloads that manifest, and only ever reads it after
+    #: that (``ManifestHandler``: ``File.Exists`` -> ``LoadFromFile``, else
+    #: download -> ``SaveToFile``; v3.7.2 source) -- so the mtime is the
+    #: moment SteamPrefill first used this manifest.
+    mtime_ns: int
+
+
+def select_current_manifest(
+    candidates: Iterable[BinCandidate], *, not_after_ns: int | None = None
+) -> BinCandidate | None:
+    """The manifest SteamPrefill used last for one depot, or ``None``.
+
+    **The rule (WP UPD-FIX-1):** among the depot's ``.bin`` files (optionally
+    only those written at or before ``not_after_ns``), the one with the newest
+    file mtime; an mtime tie (coarse filesystem ticks, ``docs/LEARNINGS.md``)
+    goes to the larger manifest id, so the answer never depends on directory
+    order.
+
+    Why this and not something else:
+
+    - SteamPrefill's temp cache keeps every manifest it ever downloaded
+      (nothing prunes it), so a depot routinely has several files. Before this
+      rule, ingestion upserted every one of them in unsorted ``os.scandir``
+      order and the LAST file won -- on prod an old manifest overwrote the
+      current one and "Update available" never cleared.
+    - SteamPrefill's own record, ``Config/successfullyDownloadedDepots.json``,
+      cannot answer the question: it is ``{depotid: [manifestid, ...]}``, a
+      ``HashSet`` of EVERY manifest it ever finished (``DepotHandler.
+      MarkDownloadAsSuccessful`` only ever adds; v3.7.2 source), with no
+      timestamp, and it lives in the runner's ``Config/`` next to the Steam
+      session, which vault-api deliberately does not mount (ADR-0012). So the
+      file mtime is the record that is both reachable and ordered.
+    - Each new manifest is written by the run that first downloads it, so the
+      newest file is the build the latest successful run fetched. A run that
+      found the app "Up To Date" writes nothing, and its current manifest is
+      the newest one it already has.
+
+    Known limit, stated rather than hidden: if Steam ever rolls a depot BACK
+    to a manifest SteamPrefill downloaded before, no new file is written and
+    the rule keeps the newer, no-longer-current one. The oracle comparison then
+    flags the game and the post-run re-check says so in the job log
+    (``worker``), instead of silently recording something else.
+    """
+    eligible = [
+        candidate
+        for candidate in candidates
+        if not_after_ns is None or candidate.mtime_ns <= not_after_ns
+    ]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda candidate: (candidate.mtime_ns, candidate.manifestid))
+
+
+@dataclass(frozen=True)
+class _BinScan:
+    #: ``{(original_appid, depotid): [candidates]}``.
+    groups: dict[tuple[int, int], list[BinCandidate]]
+    parse_failures: list[str]
+    vanished: list[str]
+
+
+def _scan_bin_files(cache_dir: str, *, prefix: str = "") -> _BinScan | None:
+    """List the well-named ``.bin`` files whose name starts with ``prefix``,
+    grouped per ``(original_appid, depotid)``. ``None`` if the directory is
+    missing or unreadable."""
+    try:
+        entries = list(os.scandir(cache_dir))
+    except OSError:
+        return None
+
+    groups: dict[tuple[int, int], list[BinCandidate]] = {}
+    parse_failures: list[str] = []
+    vanished: list[str] = []
+    for entry in entries:
+        name = entry.name
+        if not (name.endswith(".bin") and name.startswith(prefix)):
+            continue
+        try:
+            if not entry.is_file():
+                continue
+            original_appid, containing_appid, depotid, manifestid = parse_bin_filename(
+                entry.path
+            )
+            mtime_ns = os.stat(entry.path).st_mtime_ns
+        except ManifestParseError:
+            parse_failures.append(name)
+            continue
+        except FileNotFoundError:
+            logger.info(
+                "manifest-ingest file=%s: vanished during the scan (I/O race, "
+                "not a data problem), skipping.",
+                name,
+            )
+            vanished.append(name)
+            continue
+        except OSError as exc:
+            logger.warning("manifest-ingest: cannot stat %s, skipping: %s", entry.path, exc)
+            parse_failures.append(name)
+            continue
+        groups.setdefault((original_appid, depotid), []).append(
+            BinCandidate(
+                path=entry.path,
+                name=name,
+                original_appid=original_appid,
+                containing_appid=containing_appid,
+                depotid=depotid,
+                manifestid=manifestid,
+                mtime_ns=mtime_ns,
+            )
+        )
+    return _BinScan(groups=groups, parse_failures=parse_failures, vanished=vanished)
+
+
+# --------------------------------------------------------------------------
+# One-time repair of rows recorded before the rule (WP UPD-FIX-1, schema v28)
+# --------------------------------------------------------------------------
+
+#: ``maintenance_steps.name`` of the repair below.
+REPAIR_STEP_NAME = "upd-fix-1-depot-manifest-repair"
+
+
+@dataclass(frozen=True)
+class RepairResult:
+    #: The step had already run on this database; nothing was looked at.
+    already_done: bool = False
+    #: The temp-cache directory could not be listed; the step is NOT stamped
+    #: and runs again on the next start.
+    cache_dir_unavailable: bool = False
+    #: ``(appid, depotid, old manifest id, new manifest id)`` per fixed row.
+    repaired: tuple[tuple[int, int, str, str], ...] = ()
+
+
+def repair_recorded_manifests(conn: sqlite3.Connection, settings: Settings) -> RepairResult:
+    """Re-derive every ``steamprefill_bin`` row of ``depot_manifests`` once,
+    with ``select_current_manifest``.
+
+    Rows written before WP UPD-FIX-1 may hold a superseded manifest (the
+    last-file-wins bug). For each such row this takes the depot's files for
+    the row's app and picks with the same rule, restricted to files that
+    already existed when the row was recorded (``not_after_ns`` = the row's
+    ``recorded_at``, whose second precision is widened to the end of that
+    second). That restriction is what makes the repair safe: a file written
+    later -- by a run that failed, so its manifest was never confirmed -- is
+    never promoted. A row is changed only when the chosen file differs from
+    it and its payload parses; ``recorded_at`` and the change-frequency
+    columns stay as they are (a correction, not a new observation).
+
+    Runs once per database: stamped in ``maintenance_steps`` (schema v28) when
+    the temp-cache directory could be listed, so a host whose directory is
+    not mounted yet retries on the next start. Idempotent on its own as well:
+    a second pass finds every row already equal to its choice. Never raises
+    for missing or bad files; the caller still wraps it (startup must not
+    fail over a repair).
+    """
+    if conn.execute(
+        "SELECT 1 FROM maintenance_steps WHERE name = ?", (REPAIR_STEP_NAME,)
+    ).fetchone() is not None:
+        return RepairResult(already_done=True)
+
+    scan = _scan_bin_files(settings.steamprefill_cache_dir)
+    if scan is None:
+        return RepairResult(cache_dir_unavailable=True)
+
+    rows = conn.execute(
+        "SELECT appid, depotid, manifestid, recorded_at FROM depot_manifests "
+        "WHERE source = ? ORDER BY appid, depotid",
+        (SOURCE_STEAMPREFILL_BIN,),
+    ).fetchall()
+
+    planned: list[tuple[int, int, str, BinCandidate, int, int]] = []
+    for row in rows:
+        appid = int(row["appid"])
+        depotid = int(row["depotid"])
+        old = str(row["manifestid"])
+        group = scan.groups.get((appid, depotid))
+        recorded = parse_utc_iso(str(row["recorded_at"] or ""))
+        if not group or recorded is None:
+            continue
+        not_after_ns = (int(recorded.timestamp()) + 1) * 1_000_000_000 - 1
+        chosen = select_current_manifest(group, not_after_ns=not_after_ns)
+        if chosen is None or str(chosen.manifestid) == old:
+            continue
+        try:
+            manifest = parse_steamprefill_bin(chosen.path)
+        except ManifestParseError as exc:
+            logger.warning(
+                "manifest repair: app %s depot %s: %s does not parse, row left "
+                "as-is: %s", appid, depotid, chosen.name, exc,
+            )
+            continue
+        planned.append(
+            (appid, depotid, old, chosen, len(manifest.chunks), sum(manifest.chunks.values()))
+        )
+
+    repaired: list[tuple[int, int, str, str]] = []
+    with immediate_transaction(conn):
+        for appid, depotid, old, chosen, chunk_count, total_bytes in planned:
+            new = str(chosen.manifestid)
+            cursor = conn.execute(
+                """
+                UPDATE depot_manifests
+                SET manifestid = ?, containing_appid = ?, chunk_count = ?, total_bytes = ?
+                WHERE appid = ? AND depotid = ? AND manifestid = ?
+                """,
+                (new, chosen.containing_appid, chunk_count, total_bytes, appid, depotid, old),
+            )
+            if cursor.rowcount:
+                repaired.append((appid, depotid, old, new))
+        conn.execute(
+            "INSERT OR IGNORE INTO maintenance_steps (name, done_at) VALUES (?, ?)",
+            (REPAIR_STEP_NAME, utcnow_iso()),
+        )
+
+    by_key = {(appid, depotid): chosen for appid, depotid, _old, chosen, _c, _t in planned}
+    for appid, depotid, old, new in repaired:
+        _archive_quietly(
+            settings, appid=appid, depotid=depotid, manifestid=new,
+            src_path=by_key[(appid, depotid)].path,
+        )
+        logger.warning(
+            "manifest repair: app %s depot %s recorded manifest %s corrected to %s "
+            "(the newest SteamPrefill manifest file at the time it was recorded; "
+            "WP UPD-FIX-1)",
+            appid, depotid, old, new,
+        )
+    return RepairResult(repaired=tuple(repaired))
 
 
 # --------------------------------------------------------------------------
