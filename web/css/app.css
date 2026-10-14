@@ -491,6 +491,10 @@ button.cappill:active{ transform:scale(.93); }
 .meta .size{ display:none; font-family:var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.2px; }
 .meta > .sic, .meta > .icnact{ display:none; }
 .meta .state{ display:block; font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim-2); }
+/* WP UPD-6: "Update available" is the one status word drawn in its hue
+   (`--stale`, like the orange refresh disc on the pill), so a game with an
+   update stands out in every layout; every other word stays muted. */
+.meta .state.tx-stale{ color:var(--stale); }
 /* Installed-state badge (WP AG-2): visible in EVERY layout (grid2/grid3/
    list) unlike `.size`/the icon above, which are grid-only or list-only —
    this affordance exists precisely so an "installed but not cached" game is
@@ -908,6 +912,23 @@ h4.sec[hidden]{ display:none; }
 .qrow .grip{ color:var(--dim-2); flex:none; display:grid; place-items:center; }
 .qrow .nm{ font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .qrow .pos{ font-family:var(--mono); font-size:11px; color:var(--dim-2); flex:none; }
+
+/* WP UPD-6: "Updates available (N)" — rows like `.qrow` (name, size,
+   "Update now"), "Update all" and the schedule note above them. The note
+   is left-aligned (`.hint` centres). The size never wraps; the name takes
+   what is left and ellipsizes, so a 360 px row stays one line. */
+.dl-updates[hidden]{ display:none; }
+.dl-updates .dl-updates-note{ text-align:left; margin:0 0 9px; }
+.dl-updates-acts{ display:flex; flex-wrap:wrap; gap:8px; margin:0 0 9px; }
+.dl-updates-acts:empty{ display:none; }
+.urow{
+  display:flex; align-items:center; gap:10px; padding:8px 11px;
+  background:var(--surface); border:1px solid var(--line-soft);
+  border-radius:var(--r-m); margin-bottom:7px;
+}
+.urow .nm{ font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.urow .usize{ font-family:var(--mono); font-size:11px; color:var(--dim-2); flex:none; white-space:nowrap; }
+.urow .btn{ flex:none; }
 
 .hrow{ border:1px solid var(--line-soft); background:var(--surface); border-radius:var(--r-m); margin-bottom:7px; overflow:hidden; }
 .hrow > button{

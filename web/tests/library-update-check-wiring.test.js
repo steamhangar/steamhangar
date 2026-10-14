@@ -172,6 +172,10 @@ const pressChip = (s, key) => {
 };
 const card = (s, appid) => s.querySelector(`.card[data-appid="${appid}"]`);
 const statusReads = () => count("GET /v1/updates/status");
+// WP UPD-6: a flagged cached card says "Update available" as its status
+// word with the orange refresh glyph; the separate .updbadge is gone there.
+const stateWord = (s, appid) => card(s, appid).querySelector(".state").textContent;
+const pillKind = (s, appid) => card(s, appid).querySelector(".cappill .sic").className;
 
 async function openLibrary() {
   pathname = "/library";
@@ -221,8 +225,11 @@ test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; '
 test("badge + 'Updates' chip from update_available; the chip filters the grid", async () => {
   server.mode = "ok";
   const s = await openLibrary();
-  assert.ok(card(s, 10).querySelector(".updbadge"), "badge on the flagged game");
-  assert.equal(card(s, 30).querySelector(".updbadge"), null);
+  assert.equal(stateWord(s, 10), "Update available", "state on the flagged game");
+  assert.match(pillKind(s, 10), /\bk-stale\b/);
+  assert.equal(card(s, 10).querySelector(".updbadge"), null, "WP UPD-6: no second 'Update' line");
+  assert.equal(stateWord(s, 30), "Current");
+  assert.match(pillKind(s, 30), /\bk-cached\b/);
   assert.ok(chipKeys(s).includes("updates"));
   assert.equal(chip(s, "updates").querySelector(".n").textContent, "1");
   pressChip(s, "updates");
@@ -257,7 +264,8 @@ test("press: POST once (no body), busy while running, polls to the end, re-reads
   assert.match(toastText.textContent, /Checked 2 games · 2 updates available/);
   await until(() => count("GET /v1/games") > gamesBefore, "games re-read after the run");
   await until(() => chip(s, "updates").querySelector(".n").textContent === "2", "chip count follows the new verdicts");
-  assert.ok(card(s, 30).querySelector(".updbadge"), "badge appeared on the newly flagged game");
+  await until(() => stateWord(s, 30) === "Update available", "state appeared on the newly flagged game");
+  assert.match(pillKind(s, 30), /\bk-stale\b/);
   const readsAfter = statusReads();
   await tick(2300);
   assert.equal(statusReads(), readsAfter, "MUTATION PIN: no polling after running=false");

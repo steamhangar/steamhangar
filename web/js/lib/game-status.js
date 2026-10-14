@@ -166,6 +166,45 @@ export function statusWordFor(kind, labels) {
   return labels[kind] || labels.none;
 }
 
+/** The status word a CACHED card shows instead of "Current" while a newer
+ * version is upstream (WP UPD-6). Also the full form of the card's
+ * `.updbadge` (components/game-card.js). */
+export const UPDATE_AVAILABLE_WORD = "Update available";
+
+/**
+ * Whether a card shows the "Update available" state (WP UPD-6): a CACHED
+ * card (no live job, visible bytes) whose row carries `update_available:
+ * true` (WP UPD-1; for a group row, the OR over its members that
+ * lib/content-groups.js `groupGames` already computes). Strictly `true`: an
+ * older vault-api sends no field. A DISPLAY overlay only: `dispKind`,
+ * `data-dk`, `statusAction` and the filters stay on `cached` (the copy on
+ * disk is valid, just not the newest), so the round-7 structural key is
+ * unchanged; views/library.js full-renders when the flag flips
+ * (lib/update-check.js `updateFlagsChanged`).
+ * @param {object} game
+ * @param {string} kind the card's dispKind
+ */
+export function showsUpdateState(game, kind) {
+  return kind === KIND.CACHED && game?.update_available === true;
+}
+
+/** The status-icon kind a card draws: the orange "stale" refresh glyph for
+ * {@link showsUpdateState}, otherwise {@link statusIconKind}. */
+export function cardIconKind(game, kind) {
+  return showsUpdateState(game, kind) ? "stale" : statusIconKind(kind);
+}
+
+/** The colour class suffix (`tx-<kind>`) of a card's status word. */
+export function cardTextKind(game, kind) {
+  return showsUpdateState(game, kind) ? "stale" : kind;
+}
+
+/** The status word a card shows: {@link UPDATE_AVAILABLE_WORD} for
+ * {@link showsUpdateState}, otherwise {@link statusWordFor}. */
+export function cardStatusWord(game, kind, labels) {
+  return showsUpdateState(game, kind) ? UPDATE_AVAILABLE_WORD : statusWordFor(kind, labels);
+}
+
 /**
  * Display name of a games row: the vault's own name, else the tool app's
  * name from the server (WP API-FIX-4), else `App {appid}`.

@@ -55,14 +55,20 @@
  * (see the WP 4a.8 coder's report); not unit-tested (DOM-building
  * component, see this file's own long-standing header note above).
  *
- * **"Update available" badge (WP UPD-2).** `game.update_available === true`
- * (WP UPD-1: a stale oracle verdict on a game with cache content) adds a
- * `.updbadge` span to the meta row, on its own line like `.instbadge`, and
- * an "Update available" fragment to the card's accessible name. It is NOT a
- * status kind: `dispKind`/`data-dk` are unchanged, the card still says
- * "Cached" (the copy on disk is valid, just not the newest). `views/
- * library.js` full-renders when the flag flips (`updateFlagsChanged`), and
- * `patchCardVolatile` keeps the badge in sync as well.
+ * **"Update available" state (WP UPD-6, supersedes the UPD-2 badge on
+ * cached cards).** `game.update_available === true` (WP UPD-1: a stale
+ * oracle verdict on a game with cache content; a group row ORs it over its
+ * members) turns a CACHED card's status into "Update available": the pill
+ * and the list-layout meta icon draw the orange "stale" refresh glyph
+ * instead of the green check, and the status word reads "Update available"
+ * in `--stale` (lib/game-status.js `showsUpdateState`, `cardIconKind`,
+ * `cardStatusWord`). User feedback on rc15: cards said both "Current" and
+ * "Update". It is a DISPLAY overlay, not a status kind: `dispKind`/`data-dk`
+ * stay `cached`, so `views/library.js` full-renders when the flag flips
+ * (`updateFlagsChanged`); `patchCardVolatile` never redraws the icon.
+ * The UPD-2 `.updbadge` line remains only for a card whose status word
+ * does NOT already say it (a failed or running app that still carries the
+ * flag), so nothing on the card is said twice.
  *
  * **"Never played" pill (WP WEB-FEAT-SUGGEST-2).** The Phase 4h panel's
  * "fully cached, never played" statement, moved onto the card: a second
@@ -96,9 +102,12 @@ import {
   installedBadgeCompactText,
   INSTALLED_BADGE,
   isToolApp,
-  statusIconKind,
-  statusWordFor,
   gameDisplayName,
+  showsUpdateState,
+  cardIconKind,
+  cardTextKind,
+  cardStatusWord,
+  UPDATE_AVAILABLE_WORD,
 } from "../lib/game-status.js";
 import { formatBytesGB } from "../lib/format.js";
 import {
@@ -196,21 +205,29 @@ function syncInstalledTag(metaEl, game) {
   }
 }
 
-export const UPDATE_BADGE_TEXT = "Update available";
+export const UPDATE_BADGE_TEXT = UPDATE_AVAILABLE_WORD;
 export const UPDATE_BADGE_COMPACT_TEXT = "Update";
+
+/** Whether the card needs the separate `.updbadge` line: the flag is set
+ * and the status word does not already say "Update available" (WP UPD-6). */
+function showsUpdateBadge(game, kind) {
+  return game.update_available === true && !showsUpdateState(game, kind);
+}
 
 /**
  * Create or remove the `.updbadge` child of a card's `.meta` row so it
- * matches `game.update_available` (WP UPD-2). Plain text, no icon, no
- * animation — the same documented exception to `patchCardVolatile`'s
- * "no node created or removed" rule as `syncInstalledTag`. Two children like
- * `.instbadge`: CSS shows the compact word in cols3 and list.
+ * matches `showsUpdateBadge` (WP UPD-2, narrowed by WP UPD-6). Plain text,
+ * no icon, no animation — the same documented exception to
+ * `patchCardVolatile`'s "no node created or removed" rule as
+ * `syncInstalledTag`. Two children like `.instbadge`: CSS shows the compact
+ * word in cols3 and list.
  * @param {HTMLElement} metaEl
  * @param {object} game
+ * @param {string} kind the card's dispKind
  */
-function syncUpdateTag(metaEl, game) {
+function syncUpdateTag(metaEl, game, kind) {
   const existing = metaEl.querySelector(".updbadge");
-  if (game.update_available !== true) {
+  if (!showsUpdateBadge(game, kind)) {
     if (existing) existing.remove();
     return;
   }
@@ -316,7 +333,7 @@ export function patchCardVolatile(cardEl, game, kind) {
   const metaEl = cardEl.querySelector(".meta");
   if (metaEl) {
     syncInstalledTag(metaEl, game);
-    syncUpdateTag(metaEl, game);
+    syncUpdateTag(metaEl, game, kind);
   }
   syncNeverPlayed(cardEl, game, kind); // WP WEB-FEAT-SUGGEST-2
   // Keep the explicit accessible name (module header) in sync too — `kind`
@@ -408,8 +425,8 @@ function buildCover(game) {
   return cap;
 }
 
-function buildIcon(kind, { action, gameName }) {
-  const icon = createStatusIcon(statusIconKind(kind));
+function buildIcon(iconKind, { action, gameName }) {
+  const icon = createStatusIcon(iconKind);
   if (!action) {
     // No action -> a plain, non-focusable span (see createStatusIcon). The
     // meta row always shows the SAME status word right next to this icon
@@ -457,7 +474,7 @@ function buildPill(game, kind, action) {
     pill.title = action.title;
     pill.setAttribute("aria-label", `${action.title} — ${displayName(game)}`);
   }
-  const icon = createStatusIcon(statusIconKind(kind));
+  const icon = createStatusIcon(cardIconKind(game, kind)); // WP UPD-6: orange for an update
   // The pill's icon is always redundant with the meta row's visible status
   // word on the SAME card (round 6 gave every layout that word back) — hide
   // it from assistive tech whether or not the pill itself is a button: a
@@ -534,11 +551,11 @@ function installedAriaFragment(game, kind) {
  * since a size-only tick (no structural change) would otherwise leave a
  * stale byte count in the announced name. */
 function cardAccessibleLabel(game, kind, failedCount = 0) {
-  const parts = [displayName(game), statusWordFor(kind, STATUS_LABEL)];
+  const parts = [displayName(game), cardStatusWord(game, kind, STATUS_LABEL)];
   const sizeText = formatBytesGB(displaySizeBytes(game));
   if (sizeText) parts.push(sizeText);
   if (isGroup(game)) parts.push(packagesAriaText(game.packages.length, failedCount));
-  if (game.update_available === true) parts.push(UPDATE_BADGE_TEXT);
+  if (showsUpdateBadge(game, kind)) parts.push(UPDATE_BADGE_TEXT);
   if (showsNeverPlayed(game, kind)) parts.push(NEVER_PLAYED_DESCRIPTION);
   const installedText = installedAriaFragment(game, kind);
   if (installedText) parts.push(installedText);
@@ -620,10 +637,10 @@ export function buildCard(game, ctx) {
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.appendChild(buildIcon(kind, { action, gameName: displayName(game) }));
+  meta.appendChild(buildIcon(cardIconKind(game, kind), { action, gameName: displayName(game) }));
   const state = document.createElement("span");
-  state.className = "state tx-" + kind;
-  state.textContent = statusWordFor(kind, STATUS_LABEL);
+  state.className = "state tx-" + cardTextKind(game, kind);
+  state.textContent = cardStatusWord(game, kind, STATUS_LABEL); // WP UPD-6
   meta.appendChild(state);
   // Unlike the pill (which omits the number entirely rather than fabricate
   // one — see pillNumberText), the list/meta size column always shows
@@ -636,7 +653,7 @@ export function buildCard(game, ctx) {
   meta.appendChild(size);
   // WP TOOL-APPS-2c: the group's own line, before the badges.
   if (isGroup(game)) meta.appendChild(buildPackagesLine(game, failedCount));
-  syncUpdateTag(meta, game); // WP UPD-2: appends `.updbadge` iff update_available
+  syncUpdateTag(meta, game, kind); // WP UPD-2/UPD-6: `.updbadge` iff flagged and not said by the status word
   syncInstalledTag(meta, game); // WP AG-2: appends `.instbadge` iff installed_on is non-empty
   card.appendChild(meta);
   syncNeverPlayed(card, game, kind); // WP WEB-FEAT-SUGGEST-2: needs `.capbadges` and `.meta` in place

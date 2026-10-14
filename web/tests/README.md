@@ -3529,3 +3529,56 @@ updated.
 
 Mutations, all killed: module-load seed removed; preference back to opt-in
 (`=== "1"`); reset seed removed; demo `scheduled: false`.
+
+### WP UPD-6 (web) — visible update state, "Updates available" in Downloads
+
+User feedback on prod rc15: "Checked 14 games · 7 updates available", but
+the 7 were hard to find, and cards said both "Current" and "Update". A
+CACHED card with `update_available: true` (a group row: the OR over its
+members) now draws the orange "stale" refresh glyph on the pill and the
+list-layout meta icon, and its status word reads "Update available" in
+`--stale` (`lib/game-status.js` `showsUpdateState` / `cardIconKind` /
+`cardStatusWord`). Display overlay only: `dispKind`, `data-dk`, actions
+and filters stay `cached`. The UPD-2 `.updbadge` line remains only on a
+card whose word does not already say it (failed, running).
+
+Downloads gets "Updates available (N)" between Paused and Queue
+(`lib/updates-available.js`): the flagged games without a queued, running
+or paused prefill job, sorted by name, each with its size and "Update
+now", plus "Update all" and a note from `GET /v1/schedule` ("Downloads
+automatically in the schedule window HH:MM–HH:MM", the installed-only
+variant when "Include cached games" is off, "Manual only — no schedule
+window is set" without a window, nothing when the read fails). Both
+buttons send `POST /v1/prefill` with the listed app ids (the enqueue
+"Check & update" uses; no force flag exists, `needs_force` decides). One
+request at a time, busy buttons `aria-disabled`, offline-gated; the
+section is rebuilt only when its content changes.
+
+Tests: `updates-available.test.js` 13 (list rules, wording, window
+format, schedule note incl. include-cached off and unknown, toast outcomes
+and forced note, 5xx re-read, list key, demo: Emberreach listed, demo
+window note, Update all queues and empties the list),
+`downloads-updates-wiring.test.js` 5 (rows, heading, position above
+Queue, hidden when cleared; schedule note three ways; Update now body,
+busy and focus, single request, row leaves for the Queue; Update all skips
+a paused game; offline gate), `game-card-update.test.js` rewritten (8:
+state word, orange pill and meta icon, no duplicate badge, failed card
+keeps the badge, aria-label, group OR, patch, CSS),
+`library-update-check-wiring.test.js` badge pins moved to the state word
+and pill glyph.
+
+Mutations, all killed: pill back to `statusIconKind`; status word without
+the overlay; badge also on cached cards; `prefillCached` instead of
+`prefill`; no active-job filter; no include-cached note; no offline gate.
+Survived (belt and braces): the in-flight guard in `startUpdates` alone
+(the click handler checks the same flag).
+
+#### Honest list
+
+- No browser run: the orange word and row fit at 360 px were reasoned from
+  the CSS, not measured.
+- The detail sheet header still says "Current" for a flagged game (out of
+  scope); the Library cards and Downloads carry the new state.
+- `GET /v1/jobs` returns the newest 20 jobs; an older still-queued job
+  would leave its game listed, and "Update now" then reads "already
+  queued" (server dedupe).

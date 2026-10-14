@@ -55,6 +55,17 @@
  * count; Resume all does not. The bar is built once per mount and patched
  * (`paintBulkBar`), so a poll tick does not take focus from its buttons.
  *
+ * **Updates available (WP UPD-6).** A section between Paused and Queue
+ * lists the games whose `update_available` is set and that have no active
+ * job (`lib/updates-available.js` `pendingUpdates`), each with "Update now",
+ * plus "Update all" and a note on whether they download by themselves
+ * (`scheduleNote`, from `GET /v1/schedule`, read once per mount). Both
+ * buttons send `POST /v1/prefill` with the listed app ids — the enqueue
+ * "Check & update" uses, never a forced run of its own. The game then sits
+ * in the Queue; it leaves this list as soon as a jobs poll shows its job.
+ * The section is rebuilt only when its content changes
+ * (`updatesListKey`), so a poll tick does not take a button's focus.
+ *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
  * with the job highlighted" navigation target lands here without any
@@ -76,7 +87,20 @@ import {
 } from "../lib/job-partition.js";
 import { planJobsUpdate } from "../lib/downloads-render-plan.js";
 import { selectExcerptDisplay, EXCERPT_STATE } from "../lib/log-excerpt.js";
-import { formatTimestamp } from "../lib/format.js";
+import { formatTimestamp, formatBytesGB } from "../lib/format.js";
+import {
+  pendingUpdates,
+  updatesHeadingText,
+  updateAllAriaLabel,
+  updateNowAriaLabel,
+  scheduleNote,
+  summarizeUpdateStart,
+  describeUpdateStartError,
+  updatesListKey,
+  UPDATE_NOW_LABEL,
+  UPDATE_ALL_LABEL,
+  UPDATING_ALL_LABEL,
+} from "../lib/updates-available.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
@@ -141,6 +165,8 @@ const state = {
   // that every job "lacks" a vault name, and that must not start the
   // owned-list load.
   gamesKnown: Array.isArray(store.snapshot("games")),
+  // WP UPD-6: `GET /v1/schedule`, read once per mount; null = not known.
+  schedule: null,
 };
 
 /** jobId -> {expanded, loading, error, excerpt}. Persists across re-mounts
@@ -445,6 +471,130 @@ function paintBulkBar() {
 
   if (pauseHadFocus && bulkPause.hidden && !bulkResume.hidden) bulkResume.focus();
   if (resumeHadFocus && bulkResume.hidden && !bulkPause.hidden) bulkPause.focus();
+}
+
+// ---------------------------------------------------------------------
+// Updates available (WP UPD-6)
+// ---------------------------------------------------------------------
+
+/** `null`, `"all"`, or the appid whose "Update now" request is in flight.
+ * One request at a time; every update button is aria-disabled meanwhile. */
+let updatesInFlight = null;
+/** Bumped per mount so a late `GET /v1/schedule` answer for an old mount
+ * is dropped. */
+let scheduleGen = 0;
+
+const sizeOfRow = (g) => formatBytesGB(g.size_bytes);
+
+async function loadSchedule() {
+  const my = ++scheduleGen;
+  try {
+    const sched = await api.schedule();
+    if (my !== scheduleGen) return;
+    state.schedule = sched;
+  } catch {
+    if (my !== scheduleGen) return;
+    state.schedule = null; // unknown: no note rather than a guess
+  }
+  paintUpdates();
+}
+
+/**
+ * Queue updates for `appids` (`POST /v1/prefill`, see module header).
+ * @param {number[]} appids
+ * @param {"all"|number} which what the busy label goes on
+ */
+async function startUpdates(appids, which) {
+  if (updatesInFlight !== null || !appids.length) return;
+  updatesInFlight = which;
+  paintUpdates();
+  try {
+    const refs = await api.prefill(appids);
+    const outcome = summarizeUpdateStart(refs, state.games);
+    showToast(outcome.message, { warn: outcome.warn });
+    store.refreshNow();
+  } catch (err) {
+    const outcome = describeUpdateStartError(err);
+    showToast(outcome.message, { warn: true });
+    if (outcome.refresh) store.refreshNow();
+  } finally {
+    updatesInFlight = null;
+    paintUpdates();
+  }
+}
+
+function updateButton(label, variant, ariaLabel, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn sm" + (variant ? " " + variant : "");
+  btn.textContent = label;
+  btn.setAttribute("aria-label", ariaLabel);
+  // Busy: aria-disabled plus this guard, not `disabled` (docs/LEARNINGS.md,
+  // WP WEB-FEAT-1), so a focused button keeps its focus.
+  if (updatesInFlight !== null) btn.setAttribute("aria-disabled", "true");
+  btn.addEventListener("click", () => {
+    if (btn.disabled || updatesInFlight !== null) return;
+    onClick();
+  });
+  gateOffline(btn);
+  return btn;
+}
+
+function buildUpdateRow(game, gamesByAppid) {
+  const row = document.createElement("div");
+  row.className = "urow";
+  row.dataset.updateAppid = String(game.appid);
+  const title = nameFor(game.appid, gamesByAppid);
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.dataset.appid = String(game.appid); // patchNames keeps it current
+  nm.textContent = title;
+  const size = document.createElement("span");
+  size.className = "usize";
+  size.textContent = sizeOfRow(game) || "—";
+  const busy = updatesInFlight === game.appid;
+  const btn = updateButton(busy ? UPDATING_ALL_LABEL : UPDATE_NOW_LABEL, "primary", updateNowAriaLabel(title), () =>
+    startUpdates([game.appid], game.appid),
+  );
+  btn.dataset.role = "update-now";
+  row.append(nm, size, btn);
+  return row;
+}
+
+/** Sync the "Updates available" section with the games, jobs, schedule,
+ * in-flight and connection state. Rebuilds only on a content change. */
+function paintUpdates() {
+  if (!mounted() || !els.updates) return;
+  const gamesByAppid = gamesByAppidMap();
+  const titleOf = (g) => nameFor(g.appid, gamesByAppid);
+  const rows = state.gamesKnown ? pendingUpdates(state.games, state.jobs, titleOf) : [];
+  const note = scheduleNote(state.schedule);
+  const key = [
+    updatesListKey(rows, titleOf, sizeOfRow),
+    note ?? "",
+    String(updatesInFlight),
+    String(isConnectionLost()),
+  ].join("\u0000");
+  if (els.updatesKey === key) return;
+  els.updatesKey = key;
+
+  const { updates, updatesHeading, updatesNote, updatesActs, updatesBody } = els;
+  updates.hidden = rows.length === 0;
+  updatesHeading.textContent = updatesHeadingText(rows.length);
+  updatesNote.hidden = !note;
+  updatesNote.textContent = note ?? "";
+  updatesActs.replaceChildren();
+  updatesBody.replaceChildren();
+  if (!rows.length) return;
+  const all = updateButton(
+    updatesInFlight === "all" ? UPDATING_ALL_LABEL : UPDATE_ALL_LABEL,
+    "",
+    updateAllAriaLabel(rows.length),
+    () => startUpdates(rows.map((g) => g.appid), "all"),
+  );
+  all.dataset.role = "update-all";
+  updatesActs.appendChild(all);
+  for (const g of rows) updatesBody.appendChild(buildUpdateRow(g, gamesByAppid));
 }
 
 // ---------------------------------------------------------------------
@@ -918,6 +1068,7 @@ function fullRender() {
     for (const job of p.history) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
   }
 
+  paintUpdates();
   applyPendingHighlight();
 }
 
@@ -1002,6 +1153,22 @@ function buildSection() {
   const pausedHeading = sectionHeading("Paused");
   const pausedBody = document.createElement("div");
 
+  // WP UPD-6: hidden until paintUpdates finds a flagged game.
+  const updates = document.createElement("div");
+  updates.className = "dl-updates";
+  updates.hidden = true;
+  const updatesHeading = sectionHeading("");
+  updatesHeading.id = "dl-updates-heading";
+  updates.setAttribute("role", "group");
+  updates.setAttribute("aria-labelledby", "dl-updates-heading");
+  const updatesNote = hintMessage("");
+  updatesNote.classList.add("dl-updates-note");
+  const updatesActs = document.createElement("div");
+  updatesActs.className = "dl-updates-acts";
+  const updatesBody = document.createElement("div");
+  updatesBody.className = "dl-updates-list";
+  updates.append(updatesHeading, updatesNote, updatesActs, updatesBody);
+
   const queueHeading = document.createElement("h4");
   queueHeading.className = "sec";
   queueHeading.append("Queue ");
@@ -1021,6 +1188,7 @@ function buildSection() {
     activeBody,
     pausedHeading,
     pausedBody,
+    updates,
     queueHeading,
     queueBody,
     queueHint,
@@ -1041,6 +1209,12 @@ function buildSection() {
     queueBody,
     queueHint,
     historyBody,
+    updates,
+    updatesHeading,
+    updatesNote,
+    updatesActs,
+    updatesBody,
+    updatesKey: null,
   };
   return section;
 }
@@ -1060,8 +1234,9 @@ store.subscribe("jobs", ({ items, diff }) => {
   const plan = planJobsUpdate(diff);
   if (plan.full) {
     fullRender();
-  } else if (plan.patchStopRequest.length) {
-    patchStopRequests(plan.patchStopRequest);
+  } else {
+    if (plan.patchStopRequest.length) patchStopRequests(plan.patchStopRequest);
+    paintUpdates(); // WP UPD-6: a new job takes its game out of the list
   }
 });
 
@@ -1086,13 +1261,17 @@ store.subscribe("games", ({ items }) => {
   state.gamesKnown = true;
   if (mounted()) maybeLoadOwnedNames();
   if (jobCardKindsStale()) fullRender();
-  else patchNames();
+  else {
+    patchNames();
+    paintUpdates(); // WP UPD-6: a flag set or cleared by this poll
+  }
 });
 
 // WP WEB-FIX-4: an owned list that lands (from the Library or from this
 // view's one load) only changes names: patch them, no rebuild.
 ownedLibrary.subscribe(() => {
   patchNames();
+  paintUpdates(); // WP UPD-6: names feed the sort order and aria-labels
 });
 
 // WP WEB-FIX-2: repaint the job controls on a connection transition. A full
@@ -1116,5 +1295,6 @@ export function renderDownloads() {
   const section = buildSection();
   sectionEl = section;
   fullRender();
+  loadSchedule(); // WP UPD-6: the section's schedule note
   return section;
 }
