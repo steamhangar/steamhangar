@@ -194,3 +194,22 @@ Rejected: `?nocache=1`/`--nocache` (full re-download, or manifests only).
    mismatched files, then a forced run) is CACHE-REPAIR-1, after rc17 (user
    decision 2026-10-14).
 3. No schema change. Details: api/README.md "Verify and complete".
+
+## Note 2026-10-15 (WP UPD-FIX-1): which file is "the" manifest of a depot
+
+Decision 3 records one manifest per (app, depot), but the temp cache keeps
+every manifest SteamPrefill ever downloaded. Recording each `.bin` in
+directory order let a leftover overwrite the current gid on prod ("Update
+now" never cleared the flag). "Latest per depot" now means **the newest
+`.bin` by file mtime** (tie: larger manifest id): SteamPrefill writes a
+manifest file once, when it first downloads it. `successfullyDownloadedDepots.json`
+cannot decide it (an unordered set of every manifest ever finished, stored
+next to the Steam session vault-api does not mount). A one-time startup
+repair re-derives existing rows with the same rule (schema v28,
+`maintenance_steps`). Limits: a Steam rollback to an already-downloaded
+manifest keeps the newer file, and restoring the temp-cache volume without
+preserving mtimes breaks the rule until the next real download.
+The stale comparison still covers every recorded depot, not only those in
+`depot_app_map`: the mapping drops depots a partial update did not touch, so
+filtering by it hid later updates (review B1). Orphan rows and mapping drift
+on partial updates are a tracked follow-up.

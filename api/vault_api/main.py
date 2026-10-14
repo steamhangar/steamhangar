@@ -12,7 +12,7 @@ testable with an in-memory/temp-file Settings instance (see api/tests/).
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -26,7 +26,7 @@ from vault_api.cover_cache import CoverFileFetcher
 from vault_api.db import get_connection, init_db
 from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
-from vault_api.manifest_ingest import log_cache_dir_canary
+from vault_api.manifest_ingest import log_cache_dir_canary, repair_recorded_manifests
 from vault_api.routers import (
     about,
     agent,
@@ -99,6 +99,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # filename contract manifest ingestion depends on. Never fails startup —
     # see manifest_ingest.log_cache_dir_canary's docstring.
     log_cache_dir_canary(settings.steamprefill_cache_dir)
+
+    # WP UPD-FIX-1: once per database, correct depot_manifests rows recorded
+    # by the old last-file-wins ingestion. Before the worker starts, so no
+    # ingestion runs concurrently. Never fails startup.
+    try:
+        with closing(get_connection(settings.db_path)) as repair_conn:
+            repair = repair_recorded_manifests(repair_conn, settings)
+        if repair.repaired:
+            logger.warning(
+                "Manifest repair corrected %d recorded manifest(s) (WP UPD-FIX-1).",
+                len(repair.repaired),
+            )
+    except Exception:  # noqa: BLE001 - a repair must never stop the API
+        logger.exception("Manifest repair failed; it is retried on the next start.")
 
     # WP 3.13: started before the worker so the worker's very first job
     # finalization already has somewhere to enqueue a webhook. A no-op thread

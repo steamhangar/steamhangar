@@ -452,6 +452,11 @@ class UpdateCheckRunner:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        #: Guards start-and-publish of ``_thread`` (WP UPD-FIX-1 review S1):
+        #: ``wait`` must never see a thread object that was published but not
+        #: started yet -- ``join`` raises "cannot join thread before it is
+        #: started" on that, which a shutdown racing a check hit in tests.
+        self._thread_guard = threading.Lock()
 
     @property
     def running(self) -> bool:
@@ -503,8 +508,9 @@ class UpdateCheckRunner:
                 name="vault-update-check",
                 daemon=True,
             )
-            self._thread = thread
-            thread.start()
+            with self._thread_guard:
+                thread.start()
+                self._thread = thread
         except BaseException:
             self._lock.release()
             raise
@@ -602,7 +608,8 @@ class UpdateCheckRunner:
 
     def wait(self, timeout: float | None = None) -> bool:
         """Join the current run, if any. True when no run is left."""
-        thread = self._thread
+        with self._thread_guard:
+            thread = self._thread
         if thread is not None:
             thread.join(timeout)
             return not thread.is_alive()

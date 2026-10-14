@@ -71,6 +71,7 @@ from vault_api import (
     gc_execute,
     jobs,
     manifest_ingest,
+    oracle,
     prefill,
     prefill_queue,
     prefill_summary,
@@ -91,6 +92,16 @@ logger = logging.getLogger(__name__)
 SHUTDOWN_JOIN_TIMEOUT_SECONDS = 30.0
 
 
+def _default_oracle_fetch(settings: Settings) -> "oracle.Fetcher":
+    """The fetcher the post-run oracle re-check uses when none is injected.
+
+    A module-level seam so the test suite can make it fail closed in one place
+    (``tests/conftest.py``) without touching ``oracle.http_fetch``, which the
+    oracle's own tests exercise against local servers.
+    """
+    return oracle._configured_fetcher(settings)
+
+
 class PrefillWorker:
     """Runs queued prefill jobs, strictly one at a time, in FIFO order."""
 
@@ -99,8 +110,12 @@ class PrefillWorker:
         settings: Settings,
         size_cache: SizeCache | None = None,
         webhook_notifier: WebhookNotifier | None = None,
+        oracle_fetch: "oracle.Fetcher | None" = None,
     ) -> None:
         self._settings = settings
+        #: WP UPD-FIX-1: the fetcher of the post-run oracle re-check
+        #: (``_recheck_update_verdict``). ``None`` = the configured one.
+        self._oracle_fetch = oracle_fetch
         #: Invalidated after a successful prefill job (WP 1.5: plan §3's "du
         #: over depot folders, cached" needs an explicit invalidation hook,
         #: not polling). None in tests that don't care about size caching.
@@ -578,6 +593,10 @@ class PrefillWorker:
                         "(the prefill job itself still succeeded)."
                     )
 
+                # WP UPD-FIX-1: settle "Update available" now, not at the
+                # next scheduled update check.
+                self._recheck_update_verdict(conn, appid, summary, log_parts)
+
                 now = jobs.utcnow_iso()
                 # ADR-0006 "current as of <timestamp>" semantics: only this
                 # exact shape — nothing changed, but SteamPrefill DID confirm
@@ -824,6 +843,83 @@ class PrefillWorker:
         # VAULT_SIZE_CACHE_TTL seconds.
         if self._size_cache is not None:
             self._size_cache.invalidate()
+
+    def _recheck_update_verdict(
+        self,
+        conn: sqlite3.Connection,
+        appid: int,
+        summary: "prefill_summary.PrefillSummary",
+        log_parts: list[str],
+    ) -> None:
+        """WP UPD-FIX-1: re-evaluate the app's "Update available" verdict right
+        after a successful run, and say so in the job log when it stays.
+
+        The verdict is computed live from ``depot_manifests`` against the
+        stored oracle snapshot (``oracle.app_view``), so a run that recorded
+        the oracle's build clears the flag with no further step. Only when the
+        app still reads ``stale`` is the oracle asked again for THIS app (one
+        request, the same one ``POST /v1/oracle/{appid}/refresh`` sends):
+        the snapshot may predate a build Steam published since. Without this
+        the flag would wait for the next scheduled check (UPD-5 cadence).
+
+        If it is still stale after that, the job log says so honestly instead
+        of leaving the flag unexplained -- when SteamPrefill reported the app
+        Up To Date, Steam and the oracle disagree about the current build.
+
+        Off with the oracle; never raises (the job already succeeded).
+        """
+        if not self._settings.manifest_oracle_enabled:
+            return
+        try:
+            view = oracle.app_view(conn, appid, settings=self._settings)
+            if view.verdict != oracle.VERDICT_STALE:
+                return
+            fetch = (
+                self._oracle_fetch
+                if self._oracle_fetch is not None
+                else _default_oracle_fetch(self._settings)
+            )
+            refresh = oracle.refresh_app(conn, appid, settings=self._settings, fetch=fetch)
+            view = oracle.app_view(conn, appid, settings=self._settings)
+            if view.verdict != oracle.VERDICT_STALE:
+                log_parts.append(
+                    "[vault-api] Update check: re-asked the manifest oracle after "
+                    "this run; the recorded build is current now."
+                )
+                return
+            stale = [d for d in view.depots if d.verdict == oracle.VERDICT_STALE]
+            detail = ", ".join(
+                f"depot {d.depotid}: recorded {d.recorded_manifestid}, "
+                f"oracle {d.oracle_manifestid}"
+                for d in stale
+            )
+            checked = (
+                f"re-checked {view.checked_at}"
+                if refresh.ok
+                else f"re-check failed ({refresh.error}); snapshot {view.checked_at}"
+            )
+            steam_says_current = (
+                summary.parse_ok
+                and summary.updated == 0
+                and summary.up_to_date is not None
+                and summary.up_to_date > 0
+            )
+            if steam_says_current:
+                log_parts.append(
+                    "[vault-api] Update check: Steam reports this build as current "
+                    "- oracle and Steam disagree. The game stays flagged until "
+                    f"they agree ({detail}; oracle {checked})."
+                )
+            else:
+                log_parts.append(
+                    "[vault-api] Update check: the manifest oracle still lists a "
+                    "different build than the one recorded after this run "
+                    f"({detail}; oracle {checked})."
+                )
+        except Exception:  # noqa: BLE001 - the job already succeeded
+            logger.exception(
+                "update check: re-evaluating app %s after its prefill failed", appid
+            )
 
     def _remeasure_completeness(self, conn: sqlite3.Connection, appid: int) -> None:
         """WP CACHE-COMPLETE-1a: re-measure the app's cache completeness right
