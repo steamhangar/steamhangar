@@ -495,6 +495,14 @@ button.cappill:active{ transform:scale(.93); }
    (`--stale`, like the orange refresh disc on the pill), so a game with an
    update stands out in every layout; every other word stays muted. */
 .meta .state.tx-stale{ color:var(--stale); }
+/* WP CACHE-COMPLETE-1c: "Partially cached N%" stands out like the update
+   state (same hue as its half-disc glyph); "Cached · not verified" stays
+   muted like every other word. Both words have a compact twin (`.stcompact`,
+   built only for these two states by components/game-card.js): the full
+   form here, the compact one in the Compact tiles and the list rows (rules
+   below), never an ellipsis in the everyday case. */
+.meta .state.tx-partial{ color:var(--stale); }
+.meta .state .stcompact{ display:none; }
 /* Installed-state badge (WP AG-2): visible in EVERY layout (grid2/grid3/
    list) unlike `.size`/the icon above, which are grid-only or list-only —
    this affordance exists precisely so an "installed but not cached" game is
@@ -582,6 +590,8 @@ button.cappill:active{ transform:scale(.93); }
 .grid.cols3 .updbadge{ font-size:9px; }
 .grid.cols3 .updbadge .ubfull{ display:none; }
 .grid.cols3 .updbadge .ubcompact{ display:inline; }
+.grid.cols3 .meta .state .stfull{ display:none; }
+.grid.cols3 .meta .state .stcompact{ display:inline; }
 
 .grid.list{ grid-template-columns:minmax(0,1fr); gap:7px; }
 /* ---- list rows: fixed columns (WP LIB-LIST-1) ----
@@ -648,6 +658,10 @@ body.selecting .grid.list .card{ --lc-lead:[cover] 30px [pick] 21px; }
   grid-column:size; grid-row:2; display:block; margin-left:0; min-width:0;
   text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
+/* WP CACHE-COMPLETE-1c: the status column holds the compact word at every
+   width ("Partial 42%", "Not verified"; the BP-M column is 118px). */
+.grid.list .meta .state .stfull{ display:none; }
+.grid.list .meta .state .stcompact{ display:inline; }
 .grid.list .updbadge{ grid-column:size; grid-row:3; justify-self:end; margin-top:2px; }
 .grid.list .updbadge .ubfull{ display:none; }
 .grid.list .updbadge .ubcompact{ display:inline; }
@@ -691,6 +705,8 @@ body.selecting .grid.list .card{ --lc-lead:[cover] 30px [pick] 21px; }
 .tx-cached{ color:var(--ok); } .tx-none{ color:var(--none); }
 .tx-running{ color:var(--run); } .tx-paused{ color:var(--run); } .tx-error{ color:var(--danger); }
 .tx-stale{ color:var(--stale); }
+/* WP CACHE-COMPLETE-1c (lib/cache-completeness.js `cardDisplay`). */
+.tx-partial{ color:var(--stale); } .tx-unverified{ color:var(--dim); }
 /* WP WEB-FEAT-6: a running prefill over a completed copy (mockup colours:
    updating shares --run, verify uses the accent like its icon disc). */
 .tx-updating{ color:var(--run); } .tx-verify{ color:var(--accent); }
@@ -975,6 +991,12 @@ h4.sec[hidden]{ display:none; }
 .urow .nm{ font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .urow .usize{ font-family:var(--mono); font-size:11px; color:var(--dim-2); flex:none; white-space:nowrap; }
 .urow .btn{ flex:none; }
+/* WP CACHE-COMPLETE-1c: the "Incomplete" row of a game short only of
+   damaged chunks says why it has no "Complete now" button. */
+/* WP CACHE-COMPLETE-1c: the detail sheet's Verify explanation, under the
+   button (left-aligned like the facts; `.hint` centres). */
+.detail-verify-hint{ text-align:left; margin:6px 0 0; }
+.urow .unote{ flex:none; max-width:55%; font-size:11px; color:var(--dim-2); text-align:right; }
 
 .hrow{ border:1px solid var(--line-soft); background:var(--surface); border-radius:var(--r-m); margin-bottom:7px; overflow:hidden; }
 .hrow > button{

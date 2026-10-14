@@ -107,3 +107,33 @@ warn. Now:
   60 s by default.
 - "Optional at runtime" is unchanged: with `VAULT_EVENT_LOG` empty, the
   rotation hook does nothing.
+
+## Addendum 2026-10-14 (WP D15-RUNNER): the `RUNNER` status line
+
+User decision 2026-10-14 (`docs/handover/post-0.1.0-roadmap.md`, "User
+decisions 2026-10-14 (morning)", D15 runner, option B). The event log gains
+one line that is NOT traffic:
+
+- vault-core answers `GET /steamhangar/runner-mark/<32 lowercase hex>`
+  locally (`204`, header `X-SteamHangar-Runner-Mark`, never upstream) and
+  logs it as a normal v1 line: field 4 = `RUNNER`, field 5 = `-`, field 6 =
+  the path, field 9 = `204`. The format stays `v1`. The field count and
+  order are unchanged, and the new value appears only in field 4.
+- It is an **identity signal**: the prefill runner sends it before each
+  prefill over the same route SteamPrefill uses, so field 3 is the source
+  address the runner's chunks will carry. It is never counted as a
+  request, hit, miss or byte, in any table.
+- **Parser contract.** A sweeper treats `RUNNER` as a marker and never as
+  a cache status. It accepts the line only when it is served (2xx) and
+  field 6 is exactly the prefix plus a 32-character lowercase hex token.
+  Any other line claiming `RUNNER` is counted and skipped
+  (`bad-runner-mark`). A well-formed marker changes state only when its
+  token was stored by the runner in the shared database, is unused, and
+  the line's time lies 5 minutes before to 1 hour after the issue time.
+  This check runs in the same transaction as the cursor, so a token is
+  consumed exactly once. Sweepers older than this addendum skip the line
+  as `bad-cache-status`. That is the behaviour the version field was meant
+  to guarantee for unknown values: skip, never misread.
+- How identity becomes figures (periods, day-aligned windows, 7-day hold)
+  and what it cannot do: `api/vault_api/runner_identity.py` and
+  api/README.md, "The prefill runner in the client figures".

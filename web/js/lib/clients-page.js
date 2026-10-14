@@ -1,6 +1,7 @@
 /**
  * Clients page presentation (WP D15c), one row per entry of
- * `GET /v1/clients/overview` (WP D15b): agent PCs and agentless addresses.
+ * `GET /v1/clients/overview` (WP D15b): agent PCs, agentless addresses and
+ * the server's own prefill runner (WP D15-RUNNER, `kind: "runner"`).
  * Pure: no DOM; `views/clients.js` builds the cards from these strings.
  * Unit-tested in web/tests/clients-page.test.js.
  *
@@ -16,10 +17,13 @@
  *    what it replaced (the agent's PC name, or the address), so the machine
  *    stays recognisable.
  *  - An address client is described as "No agent" and "seen in the cache
- *    log" and nothing more. The server's own prefill downloads can appear as
- *    one of these (api/README.md "The prefill runner is counted as a client
- *    (known gap)"), so no line here may claim the address is a PC, a person
- *    or a game console.
+ *    log" and nothing more: no line here may claim the address is a PC, a
+ *    person or a game console.
+ *  - The prefill runner (WP D15-RUNNER) is the server itself downloading;
+ *    its title is the server's `display_name` ("Prefill runner") and the
+ *    line under it says so. Traffic from before the runner first marked its
+ *    address stays with that address (api/README.md "The prefill runner in
+ *    the client figures").
  *  - "Installed" exists for agent clients only (`installed_app_count`).
  *  - A `null` the server sent (feed not `ok`) shows the dash; a real zero
  *    prints.
@@ -35,6 +39,16 @@ export const RECENT_APPS_SHOWN = 3;
 /** @param {object} client @returns {boolean} */
 export function isAgentClient(client) {
   return !!client && client.kind === "agent";
+}
+
+/** WP D15-RUNNER. @param {object} client @returns {boolean} */
+export function isRunnerClient(client) {
+  return !!client && client.kind === "runner";
+}
+
+/** An agentless address (neither an agent nor the prefill runner). */
+export function isAddressClient(client) {
+  return !!client && !isAgentClient(client) && !isRunnerClient(client);
 }
 
 /**
@@ -59,6 +73,9 @@ export function clientName(client) {
 export function clientKindText(client) {
   const named = typeof client.name === "string" && client.name !== "";
   const addrs = Array.isArray(client.addresses) ? client.addresses.filter(Boolean) : [];
+  if (isRunnerClient(client)) {
+    return addrs.length ? `This server's prefill downloads · ${addrs.join(", ")}` : "This server's prefill downloads";
+  }
   if (!isAgentClient(client)) {
     return named && addrs.length ? `No agent · ${addrs.join(", ")} · seen in the cache log` : "No agent · seen in the cache log";
   }

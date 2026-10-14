@@ -12,6 +12,7 @@ import dev.steamvault.app.net.model.JobThroughputOut
 import dev.steamvault.app.net.model.LoadingAppOut
 import dev.steamvault.app.net.model.LoadingNowOut
 import dev.steamvault.app.net.model.RecentAppOut
+import dev.steamvault.app.net.model.RunnerTrafficOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
 import dev.steamvault.app.net.model.SummaryOut
@@ -34,6 +35,19 @@ import kotlin.math.sin
  * idle, and two agentless addresses (one loading now, one last seen days
  * ago). The feed is always `ok` in demo mode, so every screen shows its
  * figures. Addresses are fictional (10.0.0.x like [seedClients]).
+ *
+ * WP D15-RUNNER (web demo-traffic.js): the server's prefill runner is its
+ * own overview entry (`kind: "runner"`), and its bytes stay out of every
+ * client figure: a tenth of each bucket is the runner's (`runner_bytes`),
+ * hit and miss bytes are the clients' share only, and the summary carries
+ * `client_bytes_served` and `prefill_runner` (bytes_served =
+ * client_bytes_served + runner bytes).
+ *
+ * WP D15-NAMES: client rows carry the server's name fields (`name`,
+ * `name_addr`, `display_name`). Names are stored per address
+ * ([DEMO_CLIENT_NAMES]); the demo names one agent so the Clients page shows
+ * an operator-set title with "vault-agent on <PC name>" under it. Renaming
+ * and "Delete history" are web-only, so the demo has no way to change them.
  */
 
 /** The demo state [DemoTrafficRepository] reads, taken in one lock. */
@@ -42,6 +56,13 @@ data class DemoTrafficSnapshot(
     val games: List<GameSummary>,
     val agents: List<ClientOut>,
 )
+
+/** Operator-set names by address (WP D15-NAMES; the server's
+ * `client_names` table). The offline demo agent's address is named. */
+internal val DEMO_CLIENT_NAMES: Map<String, String> = mapOf("10.0.0.57" to "Steam Deck")
+
+/** The prefill runner's demo address (a Docker bridge gateway). */
+internal const val DEMO_RUNNER_ADDRESS = "172.18.0.1"
 
 private const val MIB = 1024.0 * 1024.0
 private const val GIB = 1024.0 * MIB
@@ -99,13 +120,16 @@ fun demoSeries(range: String, nowMs: Long): SeriesOut {
         val start = last - i * t.bucket * 1000L
         val bps = rateAt(start, t.bucket)
         val served = (bps * t.bucket).roundToLong()
-        val hit = (served * 0.82).roundToLong()
+        val runner = (served * 0.1).roundToLong()
+        val clients = served - runner
+        val hit = (clients * 0.82).roundToLong()
         SeriesPointOut(
             t = iso(start),
             bytes_served = served,
             hit_bytes = hit,
-            miss_bytes = served - hit,
-            requests = (served / (1.4 * MIB)).roundToLong(),
+            miss_bytes = clients - hit,
+            requests = (clients / (1.4 * MIB)).roundToLong(),
+            runner_bytes = runner,
             bytes_per_second = bps,
             peak_bytes_per_second = if (t.bucket == 300) bps else (bps * 1.35).roundToLong().toDouble(),
         )
@@ -123,31 +147,47 @@ fun demoSeries(range: String, nowMs: Long): SeriesOut {
 private fun summaryFor(range: String, nowMs: Long): SummaryOut {
     val series = demoSeries(range, nowMs)
     var served = 0L
+    var runner = 0L
     var hit = 0L
     var requests = 0L
     var active = 0.0
     var peak = 0.0
     for (p in series.points) {
         served += p.bytes_served
+        runner += p.runner_bytes
         hit += p.hit_bytes
         requests += p.requests
         if (p.bytes_served > 0) active += series.bucket_seconds / 300.0
         peak = max(peak, p.peak_bytes_per_second)
     }
     val hits = (requests * 0.83).roundToLong()
+    val clients = served - runner
+    val runnerHit = (runner * 0.6).roundToLong()
+    val runnerRequests = (runner / (1.4 * MIB)).roundToLong()
+    val runnerHits = (runnerRequests * 0.6).roundToLong()
     return SummaryOut(
         bytes_served = served,
         hit_bytes = hit,
-        miss_bytes = served - hit,
+        miss_bytes = clients - hit,
         requests = requests,
         hits = hits,
         misses = requests - hits,
         errors = requests / 4000,
         hit_rate = if (requests > 0) hits.toDouble() / requests else null,
-        byte_hit_rate = if (served > 0) hit.toDouble() / served else null,
+        byte_hit_rate = if (clients > 0) hit.toDouble() / clients else null,
         average_bytes_per_second = if (active > 0) served / (active * 300) else null,
         peak_bytes_per_second = peak,
         active_clients = if (range == "24h") 3 else 4,
+        client_bytes_served = clients,
+        prefill_runner = RunnerTrafficOut(
+            bytes_served = runner,
+            hit_bytes = runnerHit,
+            miss_bytes = runner - runnerHit,
+            requests = runnerRequests,
+            hits = runnerHits,
+            misses = runnerRequests - runnerHits,
+            errors = 0,
+        ),
     )
 }
 
@@ -185,6 +225,7 @@ fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): T
             window_seconds = windowSeconds,
         ),
         active_clients_now = 2,
+        runner_active_now = jobs.isNotEmpty(),
         summary = summaryFor(range, nowMs),
         jobs = jobs,
     )
@@ -209,8 +250,18 @@ private val RANGE_SCALE: Map<String, Double> = mapOf("24h" to 1.0, "7d" to 4.2, 
 
 private val IDLE = LoadingNowOut(loading = false, bytes_per_second = 0.0, apps = emptyList(), unattributed_bytes_per_second = 0.0)
 
-/** `GET /v1/clients/overview` (demo): the demo agents plus two agentless
- * addresses, server order (connected first, then newest activity). */
+/** The server's name fields for a client named by [addr] (`null` = cannot
+ * be named), [fallback] being its title without an operator-set name. */
+private data class DemoName(val name: String?, val nameAddr: String?, val displayName: String)
+
+private fun demoName(addr: String?, fallback: String): DemoName {
+    val name = addr?.let { DEMO_CLIENT_NAMES[it] }
+    return DemoName(name, addr, name ?: fallback)
+}
+
+/** `GET /v1/clients/overview` (demo): the demo agents, two agentless
+ * addresses and the prefill runner, server order (connected first, then
+ * newest activity). */
 fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): ClientsOverviewOut {
     val scale = RANGE_SCALE[range] ?: 1.0
     val games = snapshot.games
@@ -229,11 +280,13 @@ fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Lon
         val installed = games.filter { g -> g.installed_on.any { it.client_id == a.client_id } }.map { it.appid }
         val lastCache = if (online) iso(nowMs - 60_000L) else a.last_seen_in_cache_log
         val lastActive = listOfNotNull(lastCache, a.last_reported_at).maxOrNull()
+        val addresses = a.source_addrs.take(1)
+        val names = demoName(addresses.firstOrNull(), a.client_id)
         ClientActivityOut(
             key = "agent:${a.client_id}",
             kind = "agent",
             client_id = a.client_id,
-            addresses = a.source_addrs.take(1),
+            addresses = addresses,
             connected = online,
             agent_presence = a.presence,
             cache_active = online,
@@ -263,8 +316,13 @@ fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Lon
                 else -> recent(gameIds.drop(3).take(1), 0.3 * GIB)
             },
             recent_unattributed_bytes = if (online) (0.4 * GIB * scale).roundToLong() else 0L,
+            name = names.name,
+            name_addr = names.nameAddr,
+            display_name = names.displayName,
         )
     }.toMutableList()
+    val loading = demoName("10.0.0.61", "10.0.0.61")
+    val old = demoName("10.0.0.63", "10.0.0.63")
     // Two agentless addresses: a machine loading right now, and one last
     // active days ago (still listed: seen within 30 days).
     clients.add(
@@ -285,6 +343,9 @@ fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Lon
             ),
             recent_apps = recent(gameIds.take(1), 2.4 * GIB),
             recent_unattributed_bytes = (0.7 * GIB * scale).roundToLong(),
+            name = loading.name,
+            name_addr = loading.nameAddr,
+            display_name = loading.displayName,
         ),
     )
     val oldMs = nowMs - 4 * 86_400_000L
@@ -302,6 +363,39 @@ fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Lon
             loading_now = IDLE,
             recent_apps = if (oldInRange) recent(gameIds.drop(1).take(1), 1.2 * GIB / scale) else emptyList(),
             recent_unattributed_bytes = 0L,
+            name = old.name,
+            name_addr = old.nameAddr,
+            display_name = old.displayName,
+        ),
+    )
+    // WP D15-RUNNER: the server's own prefill runner, loading the running
+    // demo job's game while one runs. It cannot be named (`name_addr` null).
+    val runnerSeen = if (running != null) iso(nowMs - 60_000L) else iso(nowMs - 9 * 3_600_000L)
+    clients.add(
+        ClientActivityOut(
+            key = "runner",
+            kind = "runner",
+            addresses = listOf(DEMO_RUNNER_ADDRESS),
+            connected = running != null,
+            cache_active = running != null,
+            last_active = runnerSeen,
+            last_seen_in_cache_log = runnerSeen,
+            stats = stats((4.8 * GIB * scale).roundToLong(), 0.6),
+            loading_now = if (running != null) {
+                LoadingNowOut(
+                    loading = true,
+                    bytes_per_second = 12.4 * MIB,
+                    apps = listOf(LoadingAppOut(running.appid, nameOf(running.appid, games), 12.4 * MIB)),
+                    unattributed_bytes_per_second = 0.0,
+                )
+            } else {
+                IDLE
+            },
+            recent_apps = recent(gameIds.take(2), 3 * GIB),
+            recent_unattributed_bytes = 0L,
+            name = null,
+            name_addr = null,
+            display_name = "Prefill runner",
         ),
     )
     val ordered = clients.sortedWith(

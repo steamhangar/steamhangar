@@ -2,12 +2,12 @@
 
 A push to a `wp/<name>-goldens` branch runs two ci.yml jobs:
 
-- `android-goldens-record` (read-only token) records the Library
-  screenshots, runs android-tests' task list in verify mode on that tree and
+- `android-goldens-record` (read-only token) records every
+  `*ScreenshotTest` class (APP-TEST-2: Library, Clients, ...), runs android-tests' task list in verify mode on that tree and
   uploads only the PNGs as an artifact;
 - `android-goldens-push` (contents: write, no build code at all) downloads
-  them, accepts exactly the shot names of LibraryScreenshotTest.kt as real
-  PNGs, commits changed ones as github-actions[bot] and pushes fast-forward
+  them, accepts exactly the union of the shot names of every
+  `*ScreenshotTest.kt` under app/app/src/testDebug as real PNGs, commits changed ones as github-actions[bot] and pushes fast-forward
   to the same branch.
 
 Gradle cannot run here, so what is pinned is the jobs' contract: trigger
@@ -33,6 +33,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 README = REPO_ROOT / "app" / "README.md"
 TEST_FILE_REL = "app/app/src/testDebug/java/dev/steamvault/app/ui/library/LibraryScreenshotTest.kt"
+SECOND_TEST_REL = "app/app/src/testDebug/java/dev/steamvault/app/ui/clients/ClientsScreenshotTest.kt"
+SCREENSHOT_ROOT_REL = "app/app/src/testDebug/java"
 RECORD = "android-goldens-record"
 PUSH = "android-goldens-push"
 GOLDENS = "app/app/src/testDebug/screenshots"
@@ -231,6 +233,9 @@ def test_record_step_rerecords_every_golden_in_place() -> None:
     assert "rm -f app/src/testDebug/screenshots/*.png" in run
     assert "-Psteamhangar.screenshots.record=true" in run
     assert "testDebugUnitTest" in run
+    # APP-TEST-2: every screenshot class, not the Library one only.
+    assert "--tests '*ScreenshotTest'" in run
+    assert "LibraryScreenshotTest" not in run
     assert "set -o pipefail" in run
     assert '| tee "${RUNNER_TEMP}/android-gradle.log"' in run
 
@@ -439,16 +444,58 @@ def test_validation_rejects_duplicate_shot_names(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(BASH is None or GIT is None, reason="bash/git not available")
-def test_validation_parses_the_real_kotlin_test(tmp_path: Path) -> None:
-    # The step's grep must find the same names the APP-TEST-1b pytest does.
-    src = (REPO_ROOT / TEST_FILE_REL).read_text(encoding="utf-8")
-    names = re.findall(r'\bshoot\(\s*"([^"]+)"', src)
+def test_validation_parses_the_real_kotlin_tests(tmp_path: Path) -> None:
+    # The step's grep must find the same names the APP-TEST-1b pytest does,
+    # across EVERY real *ScreenshotTest.kt (APP-TEST-2).
+    real = sorted(p for p in (REPO_ROOT / SCREENSHOT_ROOT_REL).rglob("*ScreenshotTest.kt") if p.is_file())
+    assert len(real) >= 2, real
     repo = _repo(tmp_path)
-    (repo / TEST_FILE_REL).write_text(src, encoding="utf-8")
+    names: list[str] = []
+    for f in real:
+        src = f.read_text(encoding="utf-8")
+        names += re.findall(r'\bshoot\(\s*"([^"]+)"', src)
+        target = repo / f.relative_to(REPO_ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(src, encoding="utf-8")
     _download(tmp_path, {f"{n}.png": PNG for n in names})
     p, _, _ = _run_step(tmp_path, repo, VALIDATE)
     assert p.returncode == 0, p.stdout + p.stderr
     assert sorted(f.stem for f in (repo / GOLDENS).iterdir()) == sorted(names)
+
+
+def _add_second_class(repo: Path, shots: list[str]) -> None:
+    f = repo / SECOND_TEST_REL
+    f.parent.mkdir(parents=True, exist_ok=True)
+    calls = "\n".join(f'    fun s{i}() = shoot("{n}", 411)' for i, n in enumerate(shots))
+    f.write_text(f"class C {{\n{calls}\n}}\n", encoding="utf-8")
+
+
+@pytest.mark.skipif(BASH is None or GIT is None, reason="bash/git not available")
+def test_validation_takes_the_union_of_every_screenshot_class(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _add_second_class(repo, ["clients_a"])
+    _download(tmp_path, {"library_a.png": PNG, "library_b_night.png": PNG, "clients_a.png": PNG + b"c"})
+    p, _, _ = _run_step(tmp_path, repo, VALIDATE)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert (repo / GOLDENS / "clients_a.png").read_bytes() == PNG + b"c"
+
+
+@pytest.mark.skipif(BASH is None or GIT is None, reason="bash/git not available")
+def test_validation_rejects_a_missing_shot_of_a_second_class(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _add_second_class(repo, ["clients_a"])
+    _download(tmp_path, {"library_a.png": PNG, "library_b_night.png": PNG})
+    p, _, _ = _run_step(tmp_path, repo, VALIDATE)
+    assert p.returncode != 0 and "do not match" in p.stdout, p.stdout
+
+
+@pytest.mark.skipif(BASH is None or GIT is None, reason="bash/git not available")
+def test_validation_rejects_a_shot_name_used_by_two_classes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _add_second_class(repo, ["library_a"])
+    _download(tmp_path, {"library_a.png": PNG, "library_b_night.png": PNG})
+    p, _, _ = _run_step(tmp_path, repo, VALIDATE)
+    assert p.returncode != 0 and "duplicate shot names" in p.stdout, p.stdout
 
 
 @pytest.mark.skipif(BASH is None or GIT is None, reason="bash/git not available")

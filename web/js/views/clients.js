@@ -75,7 +75,9 @@ import {
   clientsSummaryText,
   connectionChip,
   installedText,
+  isAddressClient,
   isAgentClient,
+  isRunnerClient,
   lastActiveText,
   loadingNowText,
   recentAppsText,
@@ -150,7 +152,7 @@ function line(text, role) {
 function buildCard(client, range, nowMs) {
   const card = el("div", "jobcard clcard");
   card.dataset.clientKey = String(client.key);
-  card.dataset.kind = isAgentClient(client) ? "agent" : "address";
+  card.dataset.kind = isAgentClient(client) ? "agent" : isRunnerClient(client) ? "runner" : "address";
 
   const top = el("div", "jobtop");
   const info = el("div");
@@ -232,7 +234,7 @@ function paint() {
   if (!clients.length) els.list.appendChild(el("p", "hint", NO_CLIENTS_TEXT));
   const nowMs = Date.now();
   for (const client of clients) els.list.appendChild(buildCard(client, data.range, nowMs));
-  els.agentlessNote.hidden = !clients.some((c) => !isAgentClient(c));
+  els.agentlessNote.hidden = !clients.some((c) => isAddressClient(c));
   if (focusKey) {
     const again = renameButtonFor(focusKey);
     if (again) again.focus();

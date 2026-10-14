@@ -326,7 +326,7 @@ startup error rather than a soft "no data": unset or empty means the default
 is refused, so a typo can neither look like it worked nor silently mean "off". Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v26)
+## Database schema (v27)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -359,6 +359,8 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `app_cover_file` | `appid` (PK), `source_url`, `sha256`, `content_type`, `size_bytes`, `stored_at`, `attempts`, `next_try_at` | **v21**, WP D10 COVER-CACHE-1. One row per app whose cover image vault-api stores in `<data dir>/covers/<appid>.img`: the URL it came from, the file's SHA-256, type and size (all NULL while nothing is stored), plus the download backoff. Read by `GET /v1/games[/{appid}]` as `cover_cached_url` and by `GET /v1/covers/...`. See "Stored covers" below |
 | `client_traffic` / `client_depot_traffic` / `server_traffic` | `tier`, `bucket_at`, then address (and depot) plus counters, see "Traffic tiers" | **v23**, WP D15b. Event-log statistics bucketed by event time in three tiers (5m for 48 h, 1h for 30 days, 1d forever), written in the sweep's cursor transaction. `server_traffic` also keeps `peak_bucket_bytes` and `active_buckets`. See "Traffic tiers: long-term client and server statistics" below |
 | `client_names` | `key_type`, `key`, `name`, `updated_at`, PK `(key_type, key)` | **v26**, WP D15-NAMES (on top of v25 CACHE-COMPLETE-1a). An operator-set client name per address: `key_type` `ip` (canonical IP literal); `mac` is allowed by the `CHECK` but refused by the API until an agent reports MACs. Plain `CREATE TABLE IF NOT EXISTS`, run on every start, so it does not depend on the version stamp. See "Client names" below |
+| `runner_marks` | `token` PK, `issued_at`, `runner_id`, `consumed_at`, `consumed_addr` | **v27**, WP D15-RUNNER. One row per marker token the prefill runner issued before `GET /steamhangar/runner-mark/<token>`; the sweep consumes it on its first valid marker line. Rows older than 7 days are deleted when the next token is issued |
+| `runner_address_periods` | `id`, `addr`, `first_marked_at`, `last_marked_at` | **v27**, WP D15-RUNNER. Which cache-log address was the prefill runner, when (one row per continuous period). Kept forever. Both v27 tables are plain `CREATE TABLE IF NOT EXISTS`, run on every start, so they do not depend on the version stamp. See "The prefill runner in the client figures" |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -2220,10 +2222,11 @@ every chunk file that exists as a local HIT; only the missing ones go to
 Steam and are stored. So the internet traffic is exactly the missing chunks;
 the remaining cost is reading the whole game from disk once and passing it to
 the runner, which discards the bodies. **Statistics caveat:** that read goes
-through vault-core like client traffic, so a forced run's HITs count as
-cache-served ("saved by the cache") bytes and are credited to the runner's
-address in the D15b client and throughput figures -- the known D15b gap that
-D15-RUNNER will close. The Steam client's own "verify"
+through vault-core like client traffic; since WP D15-RUNNER those reads
+are the prefill runner's (`summary.prefill_runner`, the overview's runner
+entry) and do not count as "saved by the cache" or in the hit rate, once the
+runner has marked its address ("The prefill runner in the client
+figures"). The Steam client's own "verify"
 cannot be driven from the vault. Rejected: `--nocache` (a hidden flag that
 only re-downloads SteamPrefill's own manifest files) and `?nocache=1`
 (no option turns it on: SteamPrefill adds it only to its speed probes and its
@@ -4577,12 +4580,17 @@ before it was recorded, so "all" starts there.
  "current": {"bytes_per_second": 41943040.0,
              "window_start": "2026-10-13T20:00:00Z",
              "window_end": "2026-10-13T20:08:00Z", "window_seconds": 480},
- "active_clients_now": 2,
- "summary": {"bytes_served": 64424509440, "hit_bytes": 53687091200,
+ "active_clients_now": 2, "runner_active_now": true,
+ "summary": {"bytes_served": 69793218560, "hit_bytes": 53687091200,
              "miss_bytes": 10737418240, "requests": 120034, "hits": 100100,
              "misses": 19900, "errors": 34, "hit_rate": 0.834,
              "byte_hit_rate": 0.833, "average_bytes_per_second": 52428800.0,
-             "peak_bytes_per_second": 104857600.0, "active_clients": 3},
+             "peak_bytes_per_second": 104857600.0, "active_clients": 3,
+             "client_bytes_served": 64424509440,
+             "prefill_runner": {"bytes_served": 5368709120,
+                                "hit_bytes": 4294967296,
+                                "miss_bytes": 1073741824, "requests": 2560,
+                                "hits": 2048, "misses": 512, "errors": 0}},
  "jobs": [{"job_id": 812, "appid": 440, "name": "Some Game",
            "started_at": "2026-10-13T19:55:00Z", "bytes_per_second": 31457280.0,
            "bytes_since_start": 9437184000, "exclusive_depots": 2}]}
@@ -4594,15 +4602,25 @@ before it was recorded, so "all" starts there.
   `VAULT_EVENT_SWEEP_INTERVAL_MINUTES` and nginx flushes every 5 s. `null`
   unless `event_feed.state` is `ok`.
 - **`active_clients_now`**: addresses with a line within
-  `active_window_minutes` (2 x sweep interval + 5 = 15 by default).
-- **`summary`** over the range: `hit_bytes` is "GB saved from the cache"
-  (served from disk), `miss_bytes` what was fetched upstream while serving,
-  `bytes_served` their sum plus bypassed bytes. `hit_rate` counts requests,
+  `active_window_minutes` (2 x sweep interval + 5 = 15 by default), the
+  prefill runner not counted; `runner_active_now` says whether the runner
+  loaded within that window (WP D15-RUNNER, `null` unless the feed is `ok`).
+- **`summary`** over the range. `bytes_served` is **everything** the cache
+  served, the prefill runner included (the real load on the cache and the
+  line; average and peak speed use it too). Every client figure leaves the
+  runner out (see "The prefill runner in the client figures" below):
+  `hit_bytes` is "GB saved from the cache" (served to clients from disk),
+  `miss_bytes` what was fetched upstream while serving clients,
+  `client_bytes_served` their sum plus bypassed bytes; `requests`, `hits`,
+  `misses`, `errors` count client requests. `hit_rate` counts requests,
   `byte_hit_rate` bytes; both `null` with no hits and no misses.
+  `prefill_runner` is the runner's own share, so `bytes_served ==
+  client_bytes_served + prefill_runner.bytes_served`.
   `average_bytes_per_second` is the average **while loading** (bytes over the
   5-minute buckets that carried traffic), `null` when nothing was loaded;
   `peak_bytes_per_second` the busiest 5-minute bucket. `active_clients`:
-  distinct addresses that loaded bytes in the range.
+  distinct addresses that loaded bytes in the range, the runner not
+  counted.
 - **`jobs`**: one entry per RUNNING prefill job, never omitted. Attribution
   is by depot: bytes on the app's **exclusive** depots (in `depot_app_map`
   for this app only) from any address. A shared depot is not counted, and a
@@ -4616,14 +4634,18 @@ before it was recorded, so "all" starts there.
 {"event_feed": {...}, "range": "24h", "tier": "5m", "bucket_seconds": 300,
  "range_start": "2026-10-12T20:10:00Z",
  "points": [{"t": "2026-10-12T20:10:00Z", "bytes_served": 0, "hit_bytes": 0,
-             "miss_bytes": 0, "requests": 0, "bytes_per_second": 0.0,
-             "peak_bytes_per_second": 0.0}, ...]}
+             "miss_bytes": 0, "requests": 0, "runner_bytes": 0,
+             "bytes_per_second": 0.0, "peak_bytes_per_second": 0.0}, ...]}
 ```
 
 Oldest first, zero-filled up to the bucket "now" falls in (288 points for
 24h, 168 for 7d, 720 for 30d, one per UTC day from the first recorded day for
 `all`). `bytes_per_second` is the bucket's wall-clock average,
 `peak_bytes_per_second` its busiest 5-minute bucket (equal for `24h`).
+Like the summary: `bytes_served` and the speeds include the prefill runner,
+`hit_bytes`, `miss_bytes` and `requests` are clients only, and
+`runner_bytes` is the runner's share; summed over the points each equals
+the summary figure of the same range.
 
 ### `GET /v1/clients/overview?range=7d`
 
@@ -4671,20 +4693,13 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
   entry without traffic, address entry with it) until the agent is updated.
   Names are operator-set per address (WP D15-NAMES, "Client names" below);
   there is still no reverse DNS, by design.
-- **The prefill runner is counted as a client (known gap).** SteamPrefill
-  in vault-runner downloads through vault-core like any PC, so its traffic
-  appears as one `kind: "address"` entry and counts in `active_clients` /
-  `active_clients_now`. vault-api cannot know that address
-  deterministically: the runner reaches vault-core through the operator's
-  DNS rewrite to vault-core's LAN address, so the source vault-core logs is
-  whatever the host's routing and NAT make of the runner's bridge address
-  (often the host's own address), not something either container can read.
-  Guessing it from "only seen while a prefill job ran" would mislabel a PC
-  downloading at the same time. Identifying it needs a decision (an
-  operator-set address, or a probe request from the runner that the sweep
-  recognises); until then the UI should treat a busy address during a
-  running job with care. The per-job speed in `/v1/throughput` does not
-  depend on this (it is attributed by depot).
+- **The prefill runner** is one `kind: "runner"` entry (`key: "runner"`,
+  `display_name: "Prefill runner"`, `name`/`name_addr` `null`: it cannot
+  be renamed), listed while it has traffic or a marker window in the last
+  30 days; `addresses` are the addresses it marked. Its rows are in no
+  agent or address entry, so every traffic row is in exactly one entry and
+  the entries' `stats` add up to `/v1/throughput`'s totals. See "The
+  prefill runner in the client figures" below.
 - **`connected`**: agent `online` (`GET /v1/clients`' presence rule) or
   cache activity within `active_window_minutes`. For an address client it is
   `cache_active`, `null` when the feed is not `ok`.
@@ -4700,6 +4715,65 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
   in `recent_unattributed_bytes` / `unattributed_bytes_per_second` (as are
   lines without a depot id for `loading_now`). `name` is `apps.name`, `null`
   when unknown.
+
+### The prefill runner in the client figures (WP D15-RUNNER, schema v27)
+
+`vault_api/runner_identity.py`, `vault_api/runner_mark.py`. SteamPrefill
+downloads through vault-core like any PC, and vault-api cannot derive the
+source address vault-core logs for it (it depends on the route the runner
+takes -- DNS rewrite, Docker gateway, a dedicated bind address -- and the
+host's NAT). So the runner says it (user decision 2026-10-14, option B):
+
+1. **Marker.** Before each prefill, vault-runner (vault-api's own worker in
+   `subprocess` mode) finds vault-core exactly like SteamPrefill will --
+   `lancache.steamcontent.com`, `localhost`, `172.17.0.1`, the hostname;
+   first private/loopback IPv4 answering `/lancache-heartbeat` with
+   `X-LanCache-Processed-By` -- stores a random 128-bit token in
+   `runner_marks` and sends `GET /steamhangar/runner-mark/<token>` to that
+   address. vault-core answers `204` locally and logs the line with cache
+   status `RUNNER` (core/README.md "The runner marker"). Fail-soft: no
+   cache, a database error, a refused connection or an older vault-core
+   (404, no `X-SteamHangar-Runner-Mark` header) are logged and the prefill
+   runs unmarked. When no cache was found, discovery is skipped for the
+   next 5 minutes (a queue of jobs does not pay up to 4 x 3 s each).
+2. **Sweep.** A `RUNNER` line is not traffic. In the cursor transaction it
+   is accepted only if its token is in `runner_marks`, unused, and the
+   line's time lies between 5 minutes before and 1 hour after the token
+   was issued; the token is then consumed. Unknown, reused or expired
+   tokens are counted and logged (one WARNING per sweep). **Spoofing:**
+   the runner never held an API key; its credential is write access to the
+   shared database, which a LAN host does not have. A forged marker
+   therefore marks nothing. One exception: if another LanCache-compatible
+   host on the LAN wins discovery instead of vault-core, it receives an
+   unused token and can replay it to vault-core within the hour to flag
+   itself as the runner. That only hides its own traffic from the client
+   figures, and SteamPrefill would download through that host anyway.
+3. **Identity and expiry.** Each accepted marker extends a period of its
+   address in `runner_address_periods`; a marker more than 7 days after
+   the period's last one opens a new period. Rows of that address count as
+   the runner's from the start of the UTC day of the period's first marker
+   to the end of the UTC day 7 days after its last marker. Day-aligned on
+   purpose: a day boundary is also an hour and a 5-minute boundary, so all
+   ranges select the same rows. A runner that moves to another address
+   stops flagging the old one a week later; periods are kept forever
+   because the daily tier is.
+4. **Figures.** Speeds and `bytes_served` include the runner (real load);
+   "saved by the cache", hit rates, miss bytes, request counts and active
+   clients do not (a runner HIT saves nothing -- a forced verify run reads
+   every chunk it already has -- and a runner MISS is the prefill itself).
+   The runner's share is `summary.prefill_runner` / the series'
+   `runner_bytes`, and the overview's runner entry.
+
+Limits, stated honestly: traffic from before the first accepted marker
+(an install upgraded from an older build) stays with its address; if the
+runner's address is also a real client's (both reach vault-core through
+the same NAT, e.g. the Docker host itself), that client's traffic inside a
+window counts as the runner's -- vault-core sees one address; nothing is
+marked while the event log is off. On the day the runner first marks a new
+address, traffic that address carried earlier that same day also counts as
+the runner's. The
+miss-triggered prefill still sees the runner's own MISS lines (a running
+job dedupes them). `GET /v1/clients` (agent clients) is unchanged.
 
 ### What WP D15b deliberately did NOT do
 

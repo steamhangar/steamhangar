@@ -46,11 +46,28 @@ Names (WP D15-NAMES): every client carries ``name``, ``name_addr`` and
 ``resolve_address`` -- the same functions ``GET /v1/clients`` uses, on the
 same ``address_owners`` map.
 
-Known gap: the prefill runner's own downloads appear as an ordinary address
-client and count as an active client. Its address as vault-core logs it
-depends on the host's routing/NAT and cannot be derived deterministically
-here (api/README.md, "Clients overview and throughput"); identifying it
-needs a decision (operator-set address or a runner probe).
+The prefill runner (WP D15-RUNNER)
+----------------------------------
+The runner marks its source address through vault-core before each prefill
+(``runner_identity``); its rows are selected by ``runner_identity.windows``
+and kept apart everywhere a figure describes CLIENTS:
+
+* ``/v1/throughput``: speed figures (``current``, average, peak, the series'
+  ``bytes_served``/``bytes_per_second``) and ``summary.bytes_served`` are
+  everything the cache served, the runner included -- that is real load on
+  the cache and the line. Every cache-effectiveness and client figure
+  (``hit_bytes`` = "saved by the cache", ``miss_bytes``, the hit rates,
+  request counts, ``client_bytes_served``, ``active_clients``,
+  ``active_clients_now``, the series' ``hit_bytes``/``miss_bytes``/
+  ``requests``) is clients only. A runner HIT saves nothing (a forced verify
+  run reads every chunk it already has), and a runner MISS is the prefill
+  itself, not a client missing the cache. The runner's own share is
+  ``summary.prefill_runner`` and the series' ``runner_bytes``, so
+  ``bytes_served == client_bytes_served + prefill_runner.bytes_served``.
+* ``/v1/clients/overview``: one ``kind: "runner"`` entry ("Prefill runner")
+  carries every runner row; agent and address entries carry only the rest.
+  Each traffic row is in exactly one entry, so the entries' ``stats`` add up
+  to the same totals ``/v1/throughput`` reports.
 
 Auth is attached at the router level.
 """
@@ -58,17 +75,25 @@ Auth is attached at the router level.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
-from vault_api import agent_reports, client_names, event_sweep, peer_hops, traffic
+from vault_api import (
+    agent_reports,
+    client_names,
+    event_sweep,
+    peer_hops,
+    runner_identity,
+    traffic,
+)
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener
-from vault_api.jobs import JOB_TYPE_PREFILL, STATUS_RUNNING, parse_utc_iso, to_utc_iso
+from vault_api.jobs import JOB_TYPE_PREFILL, STATUS_RUNNING, parse_utc_iso
 
 router = APIRouter(dependencies=[Depends(require_api_key)], tags=["traffic"])
 
@@ -109,11 +134,27 @@ class CurrentOut(BaseModel):
     window_seconds: int
 
 
-class SummaryOut(BaseModel):
+class RunnerTrafficOut(BaseModel):
+    """The prefill runner's share of a range (WP D15-RUNNER)."""
+
     bytes_served: int
-    #: Served from the cache's disk -- "saved" from the internet line.
+    #: Chunks the runner read that were already cached (verify reads).
     hit_bytes: int
-    #: Served while fetching from upstream (MISS).
+    #: Chunks the runner fetched from upstream (the prefill itself).
+    miss_bytes: int
+    requests: int
+    hits: int
+    misses: int
+    errors: int
+
+
+class SummaryOut(BaseModel):
+    #: Everything the cache served in the range, the prefill runner included.
+    bytes_served: int
+    #: Served to CLIENTS from the cache's disk -- "saved" from the internet
+    #: line. The runner's HITs are not savings and are excluded.
+    hit_bytes: int
+    #: Served to clients while fetching from upstream (MISS), runner excluded.
     miss_bytes: int
     requests: int
     hits: int
@@ -128,9 +169,14 @@ class SummaryOut(BaseModel):
     average_bytes_per_second: float | None
     #: Largest server-wide 5-minute total / 300 s.
     peak_bytes_per_second: float
-    #: Distinct addresses that loaded bytes in the range. INCLUDES the
-    #: prefill runner's address when it downloaded (see module docstring).
+    #: Distinct addresses that loaded bytes in the range, the prefill
+    #: runner's rows excluded (module docstring).
     active_clients: int
+    #: WP D15-RUNNER: bytes served to clients, the runner excluded.
+    #: ``bytes_served`` (everything) = this + ``prefill_runner.bytes_served``.
+    client_bytes_served: int
+    #: WP D15-RUNNER: the prefill runner's own traffic in the range.
+    prefill_runner: RunnerTrafficOut
 
 
 class JobThroughputOut(BaseModel):
@@ -157,8 +203,11 @@ class ThroughputOut(BaseModel):
     active_window_minutes: int
     current: CurrentOut | None
     #: Addresses with cache activity within active_window_minutes, the
-    #: prefill runner's included while a job downloads (module docstring).
+    #: prefill runner excluded (module docstring).
     active_clients_now: int | None
+    #: WP D15-RUNNER: the runner loaded from the cache within
+    #: active_window_minutes. Null when the feed is not ``ok``.
+    runner_active_now: bool | None
     summary: SummaryOut | None
     #: One entry per RUNNING prefill job (never null; values inside may be).
     jobs: list[JobThroughputOut]
@@ -167,10 +216,14 @@ class ThroughputOut(BaseModel):
 class SeriesPointOut(BaseModel):
     #: Bucket start (UTC).
     t: str
+    #: Everything served in the bucket, the prefill runner included.
     bytes_served: int
+    #: Clients only (WP D15-RUNNER), as in ``SummaryOut``.
     hit_bytes: int
     miss_bytes: int
     requests: int
+    #: WP D15-RUNNER: the prefill runner's bytes in the bucket.
+    runner_bytes: int
     #: bytes_served / bucket_seconds (the bucket's wall-clock average).
     bytes_per_second: float
     #: Largest 5-minute total inside the bucket / 300 s.
@@ -222,14 +275,15 @@ class RecentAppOut(BaseModel):
 
 
 class ClientActivityOut(BaseModel):
-    #: Stable key: "agent:<client_id>" or "addr:<address>".
+    #: Stable key: "agent:<client_id>", "addr:<address>" or "runner".
     key: str
-    #: "address" = seen in the event log, no agent owns it. The prefill
-    #: runner is one of these today (no reliable way to tell it apart yet).
-    kind: Literal["agent", "address"]
+    #: "address" = seen in the event log, no agent owns it. "runner" = the
+    #: server's own prefill runner (WP D15-RUNNER), at most one entry.
+    kind: Literal["agent", "address", "runner"]
     client_id: str | None
     #: Agent: the addresses assigned to it (see module docstring).
-    #: Address: exactly that address.
+    #: Address: exactly that address. Runner: every address it marked whose
+    #: window overlaps the listing period, newest window last.
     addresses: list[str]
     #: Agent online, or cache activity within active_window_minutes. Null
     #: only for an address client while the feed is not ``ok``.
@@ -255,7 +309,7 @@ class ClientActivityOut(BaseModel):
     #: (``client_names.resolve_agent`` / ``resolve_address``).
     name: str | None
     #: WP D15-NAMES: the address a rename writes to; null = cannot be named
-    #: (an agent with no assigned address).
+    #: (an agent with no assigned address, and the prefill runner).
     name_addr: str | None
     #: WP D15-NAMES: ``name`` when set (an explicit name wins), else the
     #: agent's client_id, else the address.
@@ -309,11 +363,26 @@ def _ratio(part: int, other: int) -> float | None:
     return part / total if total > 0 else None
 
 
-def _summary(summary: traffic.ServerSummary) -> SummaryOut:
-    totals = summary.totals
+def _runner_out(totals: traffic.Totals) -> RunnerTrafficOut:
+    return RunnerTrafficOut(
+        bytes_served=totals.bytes_served,
+        hit_bytes=totals.hit_bytes,
+        miss_bytes=totals.miss_bytes,
+        requests=totals.requests,
+        hits=totals.hits,
+        misses=totals.misses,
+        errors=totals.errors,
+    )
+
+
+def _summary(summary: traffic.ServerSummary, runner: traffic.Totals) -> SummaryOut:
+    """``summary`` is server-wide; ``runner`` the runner's rows of the same
+    range. Client figures are the difference (module docstring)."""
+    everything = summary.totals
+    totals = traffic.subtract(everything, runner)
     seconds = summary.active_buckets * traffic.TIER_SECONDS[traffic.TIER_5M]
     return SummaryOut(
-        bytes_served=totals.bytes_served,
+        bytes_served=everything.bytes_served,
         hit_bytes=totals.hit_bytes,
         miss_bytes=totals.miss_bytes,
         requests=totals.requests,
@@ -322,27 +391,13 @@ def _summary(summary: traffic.ServerSummary) -> SummaryOut:
         errors=totals.errors,
         hit_rate=_ratio(totals.hits, totals.misses),
         byte_hit_rate=_ratio(totals.hit_bytes, totals.miss_bytes),
-        average_bytes_per_second=(totals.bytes_served / seconds) if seconds else None,
+        average_bytes_per_second=(everything.bytes_served / seconds) if seconds else None,
         peak_bytes_per_second=summary.peak_bucket_bytes
         / traffic.TIER_SECONDS[traffic.TIER_5M],
         active_clients=summary.distinct_clients,
+        client_bytes_served=totals.bytes_served,
+        prefill_runner=_runner_out(runner),
     )
-
-
-def _active_addrs(
-    conn: sqlite3.Connection, now: datetime, minutes: int
-) -> dict[str, str]:
-    """Addresses whose newest line is within ``minutes`` -> that time."""
-    since = to_utc_iso(now - timedelta(minutes=minutes))
-    rows = conn.execute(
-        """
-        SELECT client_addr, MAX(last_seen) AS seen FROM client_traffic
-        WHERE tier = '5m' AND bucket_at >= ?
-        GROUP BY client_addr HAVING MAX(last_seen) >= ?
-        """,
-        (traffic.bucket_iso(now - timedelta(minutes=minutes), traffic.TIER_5M), since),
-    ).fetchall()
-    return {str(row["client_addr"]): str(row["seen"]) for row in rows}
 
 
 def _job_throughput(
@@ -437,11 +492,18 @@ def get_throughput(
         feed, window = _feed(settings, state, now)
         spec = traffic.range_spec(conn, range, now)
         feed_on = feed.enabled
+        windows = runner_identity.windows(conn)
+        clients = traffic.clients_scope(windows)
+        runner = traffic.runner_scope(windows)
         current: CurrentOut | None = None
         active_now: int | None = None
+        runner_now: bool | None = None
         summary: SummaryOut | None = None
         if feed_on:
-            summary = _summary(traffic.server_summary(conn, spec))
+            summary = _summary(
+                traffic.server_summary(conn, spec, clients),
+                traffic.scoped_totals(conn, spec.tier, spec.start, runner),
+            )
             if window is not None:
                 current = CurrentOut(
                     bytes_per_second=traffic.server_bytes_since(conn, window.start)
@@ -450,7 +512,8 @@ def get_throughput(
                     window_end=window.end,
                     window_seconds=window.seconds,
                 )
-                active_now = len(_active_addrs(conn, now, minutes))
+                active_now = len(traffic.active_addrs(conn, now, minutes, clients))
+                runner_now = bool(traffic.active_addrs(conn, now, minutes, runner))
         jobs = _job_throughput(conn, window, now, feed_on)
     return ThroughputOut(
         event_feed=feed,
@@ -461,6 +524,7 @@ def get_throughput(
         active_window_minutes=minutes,
         current=current,
         active_clients_now=active_now,
+        runner_active_now=runner_now,
         summary=summary,
         jobs=jobs,
     )
@@ -480,7 +544,15 @@ def get_throughput_series(
         feed, _window = _feed(settings, state, now)
         spec = traffic.range_spec(conn, range, now)
         points = traffic.series(conn, spec) if feed.enabled else []
+        runner_rows = (
+            traffic.scoped_bucket_totals(
+                conn, spec, traffic.runner_scope(runner_identity.windows(conn))
+            )
+            if feed.enabled
+            else {}
+        )
     five = traffic.TIER_SECONDS[traffic.TIER_5M]
+    empty = traffic.Totals()
     return SeriesOut(
         event_feed=feed,
         range=range,
@@ -491,13 +563,16 @@ def get_throughput_series(
             SeriesPointOut(
                 t=point.bucket_at,
                 bytes_served=point.totals.bytes_served,
-                hit_bytes=point.totals.hit_bytes,
-                miss_bytes=point.totals.miss_bytes,
-                requests=point.totals.requests,
+                hit_bytes=clients.hit_bytes,
+                miss_bytes=clients.miss_bytes,
+                requests=clients.requests,
+                runner_bytes=runner_part.bytes_served,
                 bytes_per_second=point.totals.bytes_served / spec.bucket_seconds,
                 peak_bytes_per_second=point.peak_bucket_bytes / five,
             )
             for point in points
+            for runner_part in (runner_rows.get(point.bucket_at, empty),)
+            for clients in (traffic.subtract(point.totals, runner_part),)
         ],
     )
 
@@ -512,6 +587,9 @@ def get_clients_overview(
     settings: Settings = request.app.state.settings
     now = datetime.now(timezone.utc)
     minutes = traffic.active_window_minutes(settings.event_sweep_interval_minutes)
+    listing_since = traffic.bucket_iso(
+        now - timedelta(days=ADDRESS_LISTING_DAYS), traffic.TIER_1H
+    )
 
     with open_db() as conn:
         state = event_sweep.read_state(conn)
@@ -531,46 +609,36 @@ def get_clients_overview(
         owners = agent_reports.address_owners(conn, is_hop)
         client_name_map = client_names.ip_names(conn)
 
-        totals: dict[str, traffic.Totals] = {}
-        last_seen: dict[str, str] = {}
-        listed: set[str] = set()
-        recent: dict[str, dict[int, tuple[int, str]]] = {}
-        current: dict[str, dict[int, tuple[int, str]]] = {}
-        current_bytes: dict[str, int] = {}
-        active: dict[str, str] = {}
-        if feed_on:
-            totals = traffic.client_totals(conn, spec.tier, spec.start)
-            last_seen = traffic.last_seen_by_addr(conn)
-            listed = traffic.addrs_seen_since(
-                conn,
-                traffic.bucket_iso(now - timedelta(days=ADDRESS_LISTING_DAYS), traffic.TIER_1H),
-            ) | set(totals)
-            if spec.start is not None:
-                recent = traffic.depot_bytes(conn, spec.tier, spec.start)
-            if window is not None:
-                current = traffic.depot_bytes(conn, traffic.TIER_5M, window.start)
-                current_bytes = {
-                    addr: value.bytes_served
-                    for addr, value in traffic.client_totals(
-                        conn, traffic.TIER_5M, window.start
-                    ).items()
-                }
-                active = _active_addrs(conn, now, minutes)
-        depots = {d for per in (*recent.values(), *current.values()) for d in per}
+        # WP D15-RUNNER: every traffic row goes to exactly one side.
+        windows = runner_identity.windows(conn)
+        side_clients = _read_side(
+            conn, traffic.clients_scope(windows), spec, window, now, minutes,
+            listing_since, feed_on,
+        )
+        side_runner = _read_side(
+            conn, traffic.runner_scope(windows), spec, window, now, minutes,
+            listing_since, feed_on,
+        )
+        depots = {
+            d
+            for side in (side_clients, side_runner)
+            for per in (*side.recent.values(), *side.current.values())
+            for d in per
+        }
         depot_owners = traffic.depot_owners(conn, depots)
         app_ids = {a for apps in depot_owners.values() if len(apps) == 1 for a in apps}
         names = traffic.app_names(conn, app_ids)
 
-    def loading(addrs: list[str]) -> LoadingNowOut | None:
+    def loading(side: _Side, addrs: list[str]) -> LoadingNowOut | None:
         if not live or window is None:
             return None
         merged: dict[int, tuple[int, str]] = {}
         for addr in addrs:
-            for depotid, (size, seen) in current.get(addr, {}).items():
+            for depotid, (size, seen) in side.current.get(addr, {}).items():
                 old = merged.get(depotid, (0, ""))
                 merged[depotid] = (old[0] + size, max(old[1], seen))
         attribution = traffic.attribute(merged, depot_owners)
-        total = sum(current_bytes.get(addr, 0) for addr in addrs)
+        total = sum(side.current_bytes.get(addr, 0) for addr in addrs)
         attributed = sum(app.bytes_served for app in attribution.apps)
         return LoadingNowOut(
             loading=total > 0,
@@ -586,12 +654,14 @@ def get_clients_overview(
             unattributed_bytes_per_second=max(0, total - attributed) / window.seconds,
         )
 
-    def recent_apps(addrs: list[str]) -> tuple[list[RecentAppOut] | None, int | None]:
+    def recent_apps(
+        side: _Side, addrs: list[str]
+    ) -> tuple[list[RecentAppOut] | None, int | None]:
         if not feed_on:
             return None, None
         merged: dict[int, tuple[int, str]] = {}
         for addr in addrs:
-            for depotid, (size, seen) in recent.get(addr, {}).items():
+            for depotid, (size, seen) in side.recent.get(addr, {}).items():
                 old = merged.get(depotid, (0, ""))
                 merged[depotid] = (old[0] + size, max(old[1], seen))
         attribution = traffic.attribute(merged, depot_owners)
@@ -608,15 +678,17 @@ def get_clients_overview(
             attribution.unattributed_bytes,
         )
 
-    def cache_view(addrs: list[str]) -> tuple[bool | None, str | None, ClientStatsOut | None]:
+    def cache_view(
+        side: _Side, addrs: list[str]
+    ) -> tuple[bool | None, str | None, ClientStatsOut | None]:
         if not feed_on:
             return None, None, None
-        seen = [last_seen[a] for a in addrs if a in last_seen]
-        cache_active = any(a in active for a in addrs) if live else None
+        seen = [side.last_seen[a] for a in addrs if a in side.last_seen]
+        cache_active = any(a in side.active for a in addrs) if live else None
         return (
             cache_active,
             max(seen) if seen else None,
-            _stats(_sum_totals([totals[a] for a in addrs if a in totals])),
+            _stats(_sum_totals([side.totals[a] for a in addrs if a in side.totals])),
         )
 
     clients: list[ClientActivityOut] = []
@@ -625,8 +697,8 @@ def get_clients_overview(
         presence, _offline_after = agent_reports.presence(
             summary.last_reported_at, summary.report_interval_seconds, now
         )
-        cache_active, seen_in_log, stats = cache_view(addrs)
-        apps, unattributed = recent_apps(addrs)
+        cache_active, seen_in_log, stats = cache_view(side_clients, addrs)
+        apps, unattributed = recent_apps(side_clients, addrs)
         snapshot = snapshots.get(summary.client_id)
         installed = snapshot.appids if snapshot is not None else None
         named = client_names.resolve_agent(client_name_map, owners, summary.client_id)
@@ -647,7 +719,7 @@ def get_clients_overview(
                 installed_appids=installed,
                 installed_app_count=None if installed is None else len(installed),
                 stats=stats,
-                loading_now=loading(addrs),
+                loading_now=loading(side_clients, addrs),
                 recent_apps=apps,
                 recent_unattributed_bytes=unattributed,
                 name=named.name,
@@ -656,9 +728,9 @@ def get_clients_overview(
             )
         )
 
-    for addr in sorted(listed - set(owners)):
-        cache_active, seen_in_log, stats = cache_view([addr])
-        apps, unattributed = recent_apps([addr])
+    for addr in sorted(side_clients.listed - set(owners)):
+        cache_active, seen_in_log, stats = cache_view(side_clients, [addr])
+        apps, unattributed = recent_apps(side_clients, [addr])
         named = client_names.resolve_address(client_name_map, addr)
         clients.append(
             ClientActivityOut(
@@ -675,12 +747,46 @@ def get_clients_overview(
                 installed_appids=None,
                 installed_app_count=None,
                 stats=stats,
-                loading_now=loading([addr]),
+                loading_now=loading(side_clients, [addr]),
                 recent_apps=apps,
                 recent_unattributed_bytes=unattributed,
                 name=named.name,
                 name_addr=named.name_addr,
                 display_name=named.display_name,
+            )
+        )
+
+    # WP D15-RUNNER: one entry for the prefill runner, listed while it has
+    # traffic in the listing period or a window that reaches into it.
+    recent_windows = [w for w in windows if w.end > listing_since]
+    runner_addrs: list[str] = []
+    for addr in [w.addr for w in recent_windows] + sorted(side_runner.listed):
+        if addr not in runner_addrs:
+            runner_addrs.append(addr)
+    if runner_addrs:
+        cache_active, seen_in_log, stats = cache_view(side_runner, runner_addrs)
+        apps, unattributed = recent_apps(side_runner, runner_addrs)
+        clients.append(
+            ClientActivityOut(
+                key="runner",
+                kind="runner",
+                client_id=None,
+                addresses=runner_addrs,
+                connected=cache_active,
+                agent_presence=None,
+                cache_active=cache_active,
+                last_active=seen_in_log,
+                last_seen_in_cache_log=seen_in_log,
+                last_reported_at=None,
+                installed_appids=None,
+                installed_app_count=None,
+                stats=stats,
+                loading_now=loading(side_runner, runner_addrs),
+                recent_apps=apps,
+                recent_unattributed_bytes=unattributed,
+                name=None,
+                name_addr=None,
+                display_name=runner_identity.DISPLAY_NAME,
             )
         )
 
@@ -693,6 +799,49 @@ def get_clients_overview(
         active_window_minutes=minutes,
         clients=clients,
     )
+
+
+@dataclass
+class _Side:
+    """One side of the runner split, read once per request."""
+
+    totals: dict[str, traffic.Totals] = field(default_factory=dict)
+    last_seen: dict[str, str] = field(default_factory=dict)
+    listed: set[str] = field(default_factory=set)
+    recent: dict[str, dict[int, tuple[int, str]]] = field(default_factory=dict)
+    current: dict[str, dict[int, tuple[int, str]]] = field(default_factory=dict)
+    current_bytes: dict[str, int] = field(default_factory=dict)
+    active: dict[str, str] = field(default_factory=dict)
+
+
+def _read_side(
+    conn: sqlite3.Connection,
+    scope: traffic.Scope,
+    spec: traffic.RangeSpec,
+    window: traffic.CurrentWindow | None,
+    now: datetime,
+    minutes: int,
+    listing_since: str,
+    feed_on: bool,
+) -> _Side:
+    side = _Side()
+    if not feed_on:
+        return side
+    side.totals = traffic.client_totals(conn, spec.tier, spec.start, scope)
+    side.last_seen = traffic.last_seen_by_addr(conn, scope)
+    side.listed = traffic.addrs_seen_since(conn, listing_since, scope) | set(side.totals)
+    if spec.start is not None:
+        side.recent = traffic.depot_bytes(conn, spec.tier, spec.start, scope)
+    if window is not None:
+        side.current = traffic.depot_bytes(conn, traffic.TIER_5M, window.start, scope)
+        side.current_bytes = {
+            addr: value.bytes_served
+            for addr, value in traffic.client_totals(
+                conn, traffic.TIER_5M, window.start, scope
+            ).items()
+        }
+        side.active = traffic.active_addrs(conn, now, minutes, scope)
+    return side
 
 
 def _desc(value: str | None) -> tuple[int, ...]:

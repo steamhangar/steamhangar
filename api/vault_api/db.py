@@ -264,7 +264,14 @@ import time
 #: EVERY start, so a file a parallel branch already stamped v25 or v26
 #: without this table still gets it, and a second start is a no-op. No
 #: ``ALTER`` and no data step.
-SCHEMA_VERSION = 26
+#: v27 (WP D15-RUNNER): added ``runner_marks`` (tokens the prefill runner
+#: issues before its marker request) and ``runner_address_periods`` (which
+#: cache-log address was the runner, when) -- ``vault_api/runner_identity.py``.
+#: Two brand-new tables, plain ``CREATE TABLE IF NOT EXISTS`` in ``_DDL``
+#: that runs on EVERY start, so the step does not trust the version stamp: a
+#: file a parallel branch already stamped v27 without them still gets them.
+#: No ``ALTER`` and no data step.
+SCHEMA_VERSION = 27
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -950,6 +957,32 @@ CREATE TABLE IF NOT EXISTS client_names (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (key_type, key)
 );
+
+-- WP D15-RUNNER (schema v27): runner identity in the cache log
+-- (vault_api/runner_identity.py). runner_marks: one row per token the prefill
+-- runner issued before sending GET /steamhangar/runner-mark/<token> through
+-- vault-core; the sweep consumes a token on its first valid marker line.
+CREATE TABLE IF NOT EXISTS runner_marks (
+    token         TEXT PRIMARY KEY,
+    issued_at     TEXT NOT NULL,
+    runner_id     TEXT,
+    consumed_at   TEXT,
+    consumed_addr TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runner_marks_issued
+    ON runner_marks (issued_at);
+
+-- runner_address_periods: per accepted marker address, the first and last
+-- marker of one continuous period (a gap longer than runner_identity.HOLD
+-- opens a new row). Kept forever: the daily traffic tier is too.
+CREATE TABLE IF NOT EXISTS runner_address_periods (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    addr            TEXT NOT NULL,
+    first_marked_at TEXT NOT NULL,
+    last_marked_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runner_address_periods_addr
+    ON runner_address_periods (addr, last_marked_at);
 
 CREATE TABLE IF NOT EXISTS runner_presence (
     runner_id            TEXT PRIMARY KEY,

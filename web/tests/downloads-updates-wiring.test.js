@@ -164,7 +164,9 @@ test("MUTATION PIN: lists the flagged games (name, size), heading count, between
     const order = s.children.map((c) => c.className || c.tagName);
     const at = order.indexOf("dl-updates");
     assert.ok(at > 0, "in the section");
-    assert.equal(s.children[at + 1].textContent.startsWith("Queue"), true, "directly above the Queue heading");
+    // WP CACHE-COMPLETE-1c: the (here hidden) Incomplete section sits between.
+    assert.equal(s.children[at + 1].className, "dl-updates dl-incomplete", "directly above the Incomplete section");
+    assert.equal(s.children[at + 2].textContent.startsWith("Queue"), true, "then the Queue heading");
 
     server.games = server.games.map((g) => ({ ...g, update_available: false }));
     store.refreshNow();

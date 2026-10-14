@@ -751,14 +751,20 @@ def test_a_v23_database_gains_the_table(tmp_path: Path) -> None:
 
 def test_a_v25_database_without_the_v24_column_still_gains_it(tmp_path: Path) -> None:
     """Merge order (AGENT-ADDR-1 v24 vs this v25): a file this branch stamped
-    25 before v24 existed must still get ``agent_reports.local_addrs``."""
+    25 before v24 existed must still get ``agent_reports.local_addrs``.
+
+    The pre-v24 table is hand-written (AGENT-ADDR-1's helper), not today's
+    table with ``ALTER TABLE ... DROP COLUMN local_addrs``: DROP COLUMN
+    rewrites the stored CREATE TABLE text, and older SQLite fails on the
+    ``--`` comment block in front of that last column ("error in table
+    agent_reports after drop column: incomplete input"). Measured
+    (CI-FLAKE-1): the CI runner's system SQLite 3.45.1 and 3.40.1 fail, the
+    3.53.1 bundled with uv's Python passes -- so it was green locally only.
+    """
+    from tests.test_agent_addr_1 import _stamp_without_local_addrs
+
     path = str(tmp_path / "v25-first.db")
-    init_db(path)
-    raw = get_connection(path)
-    raw.execute("ALTER TABLE agent_reports DROP COLUMN local_addrs")
-    raw.execute("UPDATE schema_version SET version = 25")
-    raw.commit()
-    raw.close()
+    _stamp_without_local_addrs(path, 25)
 
     init_db(path)
 

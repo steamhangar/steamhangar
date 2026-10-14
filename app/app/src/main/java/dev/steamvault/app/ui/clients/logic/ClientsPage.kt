@@ -15,7 +15,8 @@ import dev.steamvault.app.ui.traffic.logic.formatTrafficBytes
 /**
  * Clients page presentation (WP D15d) -- a Kotlin port of
  * `web/js/lib/clients-page.js` (WP D15c), one card per entry of
- * `GET /v1/clients/overview` (WP D15b): agent PCs and agentless addresses.
+ * `GET /v1/clients/overview` (WP D15b): agent PCs, agentless addresses and
+ * the server's own prefill runner (WP D15-RUNNER, `kind: "runner"`).
  * Pure: `ui/clients/ClientsScreen.kt` draws the cards from these strings.
  *
  * **Verbatim-port exception (app/README.md "String resources").** Every
@@ -23,11 +24,18 @@ import dev.steamvault.app.ui.traffic.logic.formatTrafficBytes
  * in `ClientsPageTest` and against the web source in `TrafficWebTwinTest`.
  *
  * Wording rules (web's):
- *  - An address client is named by its address; the server has no names
- *    for machines without an agent, so the page does not invent one.
+ *  - The card title is the server's `display_name` (WP D15-NAMES): the
+ *    operator-set name when there is one, else the agent's PC name, else
+ *    the address. A server older than D15-NAMES sends none; the title then
+ *    falls back to the pre-D15-NAMES rule. The page never invents a name.
+ *  - When an operator-set name replaces the title, the line under it keeps
+ *    what it replaced (the agent's PC name, or the address).
  *  - An address client is "No agent · seen in the cache log" and nothing
- *    more: the server's own prefill downloads can appear as one of these,
- *    so no line may claim the address is a PC, a person or a console.
+ *    more: no line may claim the address is a PC, a person or a console.
+ *  - The prefill runner is the server itself downloading; its title is the
+ *    server's `display_name` ("Prefill runner") and the line under it says
+ *    so. It is not an agentless machine, so it does not raise the agentless
+ *    note. Renaming (and its runner exclusion) is web-only for now.
  *  - "Installed" exists for agent clients only (`installed_app_count`).
  *  - A `null` the server sent (feed not `ok`) shows the dash; a real zero
  *    prints.
@@ -38,8 +46,24 @@ const val RECENT_APPS_SHOWN = 3
 
 fun isAgentClient(client: ClientActivityOut): Boolean = client.kind == "agent"
 
-/** The card's title: the agent's client_id, or the address. */
+/** WP D15-RUNNER: the server's own prefill runner. */
+fun isRunnerClient(client: ClientActivityOut): Boolean = client.kind == "runner"
+
+/** An agentless address (neither an agent nor the prefill runner). */
+fun isAddressClient(client: ClientActivityOut): Boolean = !isAgentClient(client) && !isRunnerClient(client)
+
+/**
+ * Wrap operator-chosen text in Unicode first-strong isolates (FSI ... PDI,
+ * web `client-names.js` `isolate`) so a right-to-left name cannot reorder
+ * the words around it. Escapes on purpose: no invisible characters in the
+ * source.
+ */
+fun isolate(text: String): String = "\u2068$text\u2069"
+
+/** The card's title: the server's `display_name` (an operator-set name
+ * wins), else the agent's client_id, or the address. */
 fun clientName(client: ClientActivityOut): String {
+    if (!client.display_name.isNullOrEmpty()) return client.display_name
     if (isAgentClient(client) && !client.client_id.isNullOrEmpty()) return client.client_id
     client.addresses.firstOrNull { it.isNotEmpty() }?.let { return it }
     val key = client.key
@@ -48,9 +72,20 @@ fun clientName(client: ClientActivityOut): String {
 
 /** The line under the title: what kind of client this is and its addresses. */
 fun clientKindText(client: ClientActivityOut): String {
-    if (!isAgentClient(client)) return "No agent · seen in the cache log"
+    val named = !client.name.isNullOrEmpty()
     val addrs = client.addresses.filter { it.isNotEmpty() }
-    return if (addrs.isNotEmpty()) "vault-agent · ${addrs.joinToString(", ")}" else "vault-agent · no address in the cache log"
+    if (isRunnerClient(client)) {
+        return if (addrs.isNotEmpty()) "This server's prefill downloads · ${addrs.joinToString(", ")}" else "This server's prefill downloads"
+    }
+    if (!isAgentClient(client)) {
+        return if (named && addrs.isNotEmpty()) {
+            "No agent · ${addrs.joinToString(", ")} · seen in the cache log"
+        } else {
+            "No agent · seen in the cache log"
+        }
+    }
+    val agent = if (named && !client.client_id.isNullOrEmpty()) "vault-agent on ${isolate(client.client_id)}" else "vault-agent"
+    return if (addrs.isNotEmpty()) "$agent · ${addrs.joinToString(", ")}" else "$agent · no address in the cache log"
 }
 
 /** The connection chip's three looks (web `.pchip-on/-off/-unknown`). */
@@ -141,8 +176,9 @@ const val COULD_NOT_LOAD_CLIENTS = "Could not load clients"
 /** The Clients page has figures to range over unless the feed is off. */
 fun clientsHaveFigures(overview: ClientsOverviewOut): Boolean = feedState(overview.event_feed) != FeedState.DISABLED
 
-/** The note under the list shows while any card is an agentless address. */
-fun showAgentlessNote(clients: List<ClientActivityOut>): Boolean = clients.any { !isAgentClient(it) }
+/** The note under the list shows while any card is an agentless address
+ * (the prefill runner is not one). */
+fun showAgentlessNote(clients: List<ClientActivityOut>): Boolean = clients.any { isAddressClient(it) }
 
 /** Everything one card shows, in order; `null` lines are left out. */
 data class ClientCardModel(

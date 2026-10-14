@@ -1063,3 +1063,26 @@ These are not style preferences; each entry cost a review round to learn.
 - Overnight, four parallel agents already hit the session limit; keep to
   three and continue an interrupted agent with SendMessage instead of
   spawning a fresh one.
+
+## 2026-10-14 afternoon — rc17 integration (D15c/d, NAMES, RUNNER, AGENT-ADDR-1, CACHE-COMPLETE-1a-c)
+
+- After every merge into an integration branch, run test-api, test-web
+  (and test-core when core changed) on the merged tree and
+  `git grep -nE '^(<<<<<<<|>>>>>>>)'` before pushing. Skipping this once
+  committed conflict markers into api/README.md and left a deterministic
+  api failure (golden guard vs a new screenshot class) on the branch.
+- Local uv Python bundles a newer SQLite (3.53) than CI's setup-python,
+  which links the runner's system SQLite (3.45). `ALTER TABLE ... DROP
+  COLUMN` on a table whose DDL has a `--` comment before the dropped
+  column fails on the older one ("incomplete input"). Never DROP COLUMN in
+  test fixtures; hand-write the old table instead.
+- A red CI job without log access: failed test names can still be read
+  without a token through check-run annotations. A throwaway `wp/` branch
+  whose conftest prints one `::error` line per failed test
+  (pytest_terminal_summary) exposes them via the public
+  check-runs/{id}/annotations endpoint. Match failures to the packages a
+  tree contains before calling something a flake.
+- Parallel packages that add schema steps reserve version numbers up
+  front and make every step idempotent without trusting the stamp
+  (CREATE TABLE IF NOT EXISTS, per-column guards); version pins in tests
+  use `>=`.

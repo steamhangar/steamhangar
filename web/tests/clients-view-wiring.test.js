@@ -61,7 +61,14 @@ const ADDR = {
   agent_presence: null, cache_active: false, last_reported_at: null, installed_appids: null, installed_app_count: null,
   loading_now: { loading: false, bytes_per_second: 0, apps: [], unattributed_bytes_per_second: 0 }, recent_apps: [],
 };
+const RUNNER = {
+  ...ADDR, key: "runner", kind: "runner", addresses: ["172.18.0.1"], connected: true, cache_active: true,
+  name: null, name_addr: null, display_name: "Prefill runner",
+};
 function overview(range, state = "ok") {
+  if (state === "runner") {
+    return { event_feed: feed("ok"), range, tier: "1h", range_start: null, active_window_minutes: 15, clients: [AGENT, RUNNER] };
+  }
   const strip = (c) =>
     state === "disabled"
       ? { ...c, stats: null, loading_now: null, recent_apps: null, recent_unattributed_bytes: null, cache_active: null }
@@ -153,6 +160,19 @@ test("MUTATION TARGET: one card per client; the agent's lines, and the address n
   assert.equal(s.querySelector('[data-role="clients-range"]').hidden, false, "range selector shown with figures");
   assert.equal(s.querySelector('[data-role="clients-note"]').hidden, true, "no note when the feed is ok");
   assert.equal(s.querySelector('[data-role="agentless-note"]').hidden, false);
+});
+
+test("MUTATION TARGET: D15-RUNNER — the runner card is its own kind, titled by the server, and does not raise the agentless note", async () => {
+  server.state = "runner";
+  const s = await mount();
+  await until(() => card(s, "runner") !== null, "runner card");
+  const r = card(s, "runner");
+  assert.equal(r.getAttribute("data-kind"), "runner");
+  assert.equal(text(r, ".nm"), "Prefill runner");
+  assert.equal(text(r, '[data-role="client-kind"]'), "This server's prefill downloads · 172.18.0.1");
+  assert.equal(r.querySelector('[data-role="rename-client"]'), null, "no rename: name_addr is null");
+  assert.equal(r.querySelector('[data-role="installed"]'), null);
+  assert.equal(s.querySelector('[data-role="agentless-note"]').hidden, true, "only an agent and the runner: no agentless note");
 });
 
 test("MUTATION TARGET: feed disabled — the note, and no stats/recent lines (never zeros)", async () => {

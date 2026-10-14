@@ -22,7 +22,10 @@ Tab-separated, ``escape=default``, exactly **9** fields, version-prefixed::
 1. ``v1`` — format version
 2. ``$time_iso8601``
 3. ``$remote_addr``
-4. ``HIT`` / ``MISS`` / ``BYPASS``
+4. ``HIT`` / ``MISS`` / ``BYPASS``, or ``RUNNER`` for the prefill runner's
+   marker request (WP D15-RUNNER, ``runner_identity``): such a line is not
+   traffic; it names the runner's source address and is handed to
+   ``runner_identity.apply_marks`` in the cursor transaction
 5. depot id, or ``-``
 6. ``$uri`` (decoded, query-free, bounded to 300 chars by nginx)
 7. ``$bytes_sent``
@@ -158,7 +161,15 @@ import stat
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from vault_api import agent_reports, deletion, jobs, tool_apps, traffic, webhooks
+from vault_api import (
+    agent_reports,
+    deletion,
+    jobs,
+    runner_identity,
+    tool_apps,
+    traffic,
+    webhooks,
+)
 from vault_api.config import (
     WEBHOOK_EVENT_BYPASS_RESOLVED,
     WEBHOOK_EVENT_BYPASS_SUSPECTED,
@@ -184,6 +195,9 @@ STATUS_HIT = "HIT"
 STATUS_MISS = "MISS"
 STATUS_BYPASS = "BYPASS"
 CACHE_STATUSES = (STATUS_HIT, STATUS_MISS, STATUS_BYPASS)
+#: WP D15-RUNNER: vault-core's status for the runner's marker request. Not a
+#: cache status and never traffic; see ``aggregate_lines``.
+STATUS_RUNNER_MARK = runner_identity.MARK_CACHE_STATUS
 
 #: The "no depot id in this URI" placeholder in field 5.
 DEPOT_PLACEHOLDER = "-"
@@ -366,7 +380,7 @@ def parse_line(raw: str) -> tuple[EventLine | None, str]:
         return None, "unknown-version"
     if not _is_clean_token(addr, MAX_ADDR_LENGTH):
         return None, "bad-address"
-    if cache_status not in CACHE_STATUSES:
+    if cache_status not in CACHE_STATUSES and cache_status != STATUS_RUNNER_MARK:
         return None, "bad-cache-status"
 
     depotid: int | None = None
@@ -944,6 +958,8 @@ class Aggregate:
     unknown_versions: int = 0
     #: WP D15b: the same lines bucketed by event time for the traffic tiers.
     traffic_batch: traffic.TrafficBatch = field(default_factory=traffic.TrafficBatch)
+    #: WP D15-RUNNER: marker lines, validated in ``commit_batch``.
+    runner_marks: list[runner_identity.Mark] = field(default_factory=list)
 
 
 def aggregate_lines(
@@ -970,8 +986,26 @@ def aggregate_lines(
                 result.unknown_versions += 1
             continue
 
-        result.parsed += 1
         seen_at = line.time_utc or fallback_time
+        if line.cache_status == STATUS_RUNNER_MARK:
+            # WP D15-RUNNER: the runner's marker is not traffic -- not a
+            # request of any client, not a hit, not a miss. Only a served
+            # line with a well-formed token is a marker; anything else that
+            # claims the status is counted and skipped.
+            token = runner_identity.token_from_uri(line.uri)
+            if token is None or not line.served:
+                result.skipped += 1
+                result.skip_reasons["bad-runner-mark"] = (
+                    result.skip_reasons.get("bad-runner-mark", 0) + 1
+                )
+                continue
+            result.parsed += 1
+            result.runner_marks.append(
+                runner_identity.Mark(token=token, addr=line.addr, seen_at=seen_at)
+            )
+            continue
+
+        result.parsed += 1
         result.traffic_batch.add(
             addr=line.addr,
             seen_at=seen_at,
@@ -1291,15 +1325,17 @@ def commit_batch(
     batch: ReadBatch,
     trigger: TriggerResult,
     now_iso: str,
-) -> None:
+) -> runner_identity.MarkResult:
     """Write the batch's statistics AND advance the cursor, atomically.
 
     One ``BEGIN IMMEDIATE`` transaction, and that is the whole idempotence
     story for statistics (module docstring): there is no window in which the
     counters are committed but the cursor is not, so a re-read batch can never
-    be counted twice.
+    be counted twice. The runner markers (WP D15-RUNNER) ride the same
+    transaction, so a token is consumed exactly when its line is.
     """
     with immediate_transaction(conn):
+        marks = runner_identity.apply_marks(conn, aggregate.runner_marks)
         for addr, stats in aggregate.addrs.items():
             conn.execute(
                 """
@@ -1425,6 +1461,7 @@ def commit_batch(
                 now_iso if aggregate.traffic_batch.cells else None,
             ),
         )
+    return marks
 
 
 def _prune_client_stats(conn: sqlite3.Connection, addr: str, keep: int) -> int:
@@ -1702,6 +1739,9 @@ class SweepOutcome:
     truncate_denied: bool = False
     cursor: int = 0
     swept_at: str | None = None
+    #: WP D15-RUNNER: marker lines accepted / ignored (``runner_identity``).
+    runner_marks_accepted: int = 0
+    runner_marks_rejected: int = 0
 
 
 def sweep_once(
@@ -1793,7 +1833,7 @@ def sweep_once(
 
     aggregate = aggregate_lines(conn, batch.lines, fallback_time=now_iso)
     trigger = run_miss_trigger(conn, settings, aggregate.candidates, now)
-    commit_batch(conn, settings, aggregate, batch, trigger, now_iso)
+    marks = commit_batch(conn, settings, aggregate, batch, trigger, now_iso)
     # Strictly AFTER the cursor is committed, and strictly best-effort: a
     # refused rotation must not affect anything above it.
     # Never while the cursor refers to the renamed-away file: its offset says
@@ -1825,6 +1865,19 @@ def sweep_once(
             aggregate.skipped,
             aggregate.skipped + aggregate.parsed,
             aggregate.skip_reasons,
+        )
+    if marks.accepted:
+        logger.info(
+            "event-sweep: accepted %d prefill-runner marker(s) "
+            "(runner_identity).", marks.accepted,
+        )
+    if marks.rejected:
+        logger.warning(
+            "event-sweep: ignored %d prefill-runner marker line(s) with an "
+            "unknown, already used or expired token. Harmless (a marker only "
+            "counts with a token the runner stored); repeated ones mean "
+            "something on the LAN requests /steamhangar/runner-mark/ itself.",
+            marks.rejected,
         )
     if batch.oversized_skipped_bytes:
         logger.warning(
@@ -1895,6 +1948,8 @@ def sweep_once(
         truncate_denied=rotation.denied,
         cursor=0 if truncated else batch.new_cursor,
         swept_at=now_iso,
+        runner_marks_accepted=marks.accepted,
+        runner_marks_rejected=marks.rejected,
     )
 
 

@@ -4,6 +4,7 @@ import dev.steamvault.app.net.model.CurrentOut
 import dev.steamvault.app.net.model.EventFeedOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.JobThroughputOut
+import dev.steamvault.app.net.model.RunnerTrafficOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
 import dev.steamvault.app.net.model.SummaryOut
@@ -150,6 +151,22 @@ class TrafficViewTest {
         )
         assertEquals(listOf("40.0 MB/s", "20.0 MB/s", "60.0 MB/s", "5.0 GB", "80%", "4.0 GB", "2"), tiles.map { it.value })
         assertEquals("3 in the last 7 days", tiles.last().detail)
+    }
+
+    @Test
+    fun `D15-RUNNER -- Loaded names the prefill runner's share, only when it loaded something`() {
+        val base = throughput("ok")
+        val withRunner = base.copy(
+            summary = base.summary!!.copy(client_bytes_served = 1 * gib, prefill_runner = RunnerTrafficOut(bytes_served = 4 * gib)),
+        )
+        val tiles = headerTiles(withRunner)!!.associateBy { it.key }
+        assertEquals("4.0 GB by the prefill runner", tiles.getValue("loaded").detail)
+        assertEquals("Loaded: 5.0 GB, 4.0 GB by the prefill runner", tileDescription(tiles.getValue("loaded")))
+        // An older server (no runner figures) and a range without runner traffic: no line.
+        assertNull(headerTiles(base)!!.first { it.key == "loaded" }.detail)
+        assertNull(runnerDetail(base.summary!!.copy(prefill_runner = RunnerTrafficOut(bytes_served = 0))))
+        assertNull(runnerDetail(null))
+        assertEquals("< 1 MB by the prefill runner", runnerDetail(SummaryOut(prefill_runner = RunnerTrafficOut(bytes_served = 1))))
     }
 
     @Test
