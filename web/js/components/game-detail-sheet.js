@@ -80,7 +80,7 @@
  * content packages (the same grouping the Library uses, lib/content-groups.js
  * `groupGames` over the store's rows), the sheet lists them in a "Content
  * packages" section (components/package-list.js) with the total size of the
- * group (depot union, `group-sizes-singleton.js`) and a "Retry download"
+ * group (the server's `group_size_bytes`) and a "Retry download"
  * button per failed package. The package rows' structure is part of the
  * structural key; their sizes are patched.
  */
@@ -118,7 +118,6 @@ import { buildDetailStructuralKey } from "../lib/detail-render-plan.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { appTitle, fillMissingNames, ownedNamesByAppid } from "../lib/owned-library.js";
 import { ownedLibrary } from "../owned-singleton.js";
-import { groupSizes } from "../group-sizes-singleton.js";
 import { groupGames, groupHasCacheContent, isGroup } from "../lib/content-groups.js";
 import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
 import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "./group-delete-plan.js";
@@ -568,15 +567,11 @@ function currentGameLike() {
 }
 
 /** WP TOOL-APPS-2c: the open game's group row (parent + content packages)
- * from the store's rows, or null when it has no packages. Requests the
- * depot lists the group's size needs (cached, see group-sizes.js). */
+ * from the store's rows, or null when it has no packages. */
 function currentGroup() {
   if (!state.appid) return null;
-  const grouped = groupGames(state.games, { depotsFor: groupSizes.depotsFor });
-  const row = grouped.rows.find((g) => g.appid === state.appid);
-  if (!isGroup(row)) return null;
-  groupSizes.request(grouped.needDepots.filter((g) => g.appid === row.appid || row.packages.includes(g)));
-  return row;
+  const row = groupGames(state.games).rows.find((g) => g.appid === state.appid);
+  return isGroup(row) ? row : null;
 }
 
 function packageJobLookups() {
@@ -1631,6 +1626,3 @@ store.subscribe("jobs", ({ items }) => {
   state.jobs = items;
   applyLiveTick();
 });
-
-// WP TOOL-APPS-2c: a depot list for the group's total size landed.
-groupSizes.subscribe(() => applyLiveTick());

@@ -67,7 +67,9 @@ function vaultGame(appid, name, overrides = {}) {
 function freshGames() {
   return [
     vaultGame(10, "Aurora Cascade"),
-    vaultGame(20, "Starfall Legion", { app_type: "game" }),
+    // WP TOOL-APPS-2: the server's depot union (2.5 GiB; the list sizes
+    // 2 + 1 would sum to 3).
+    vaultGame(20, "Starfall Legion", { app_type: "game", group_size_bytes: 2.5 * GIB }),
     vaultGame(21, "Starfall Legion - Voice Pack", { parent_appid: 20, app_type: "dlc", size_bytes: 1 * GIB, depot_count: 2 }),
     vaultGame(22, "Starfall Legion - Cosmetics", {
       parent_appid: 20,
@@ -122,7 +124,7 @@ function respond(status, data) {
   const text = data === undefined ? "" : JSON.stringify(data);
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => text };
 }
-const strip = ({ parent_appid, app_type, ...rest }) => rest;
+const strip = ({ parent_appid, app_type, group_size_bytes, ...rest }) => rest;
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url));
   const p = u.pathname;
@@ -171,7 +173,6 @@ const { renderLibrary } = await import("../js/views/library.js");
 const { store } = await import("../js/store-singleton.js");
 const { navigateTo } = await import("../js/router.js");
 const { initToast } = await import("../js/components/toast.js");
-const { groupSizes } = await import("../js/group-sizes-singleton.js");
 initToast();
 
 after(() => store.stop());
@@ -210,13 +211,23 @@ test("one card per group: packages hidden from the grid, the line and the failed
   assert.equal(s.querySelector('.chip[data-f="all"] .n').textContent, "2");
 });
 
-test("MUTATION PIN -- the group size is the depot union from the detail reads (2.5 GiB: the shared depot once, not the 3 GiB sum)", async () => {
+test("MUTATION PIN -- the group card shows the server's group_size_bytes (2.5 GiB, not the 3 GiB sum) without any per-member request", async () => {
   server.mode = "new";
   server.games = freshGames();
   const s = await openLibrary(2);
-  await until(() => card(s, 20).querySelector(".meta .size").textContent === "2.5 GB", "union patched in");
-  assert.ok(count("GET /v1/games/20") >= 1 && count("GET /v1/games/21") >= 1);
-  assert.equal(count("GET /v1/games/22"), 0, "a member without bytes needs no depot list");
+  assert.equal(card(s, 20).querySelector(".meta .size").textContent, "2.5 GB");
+  await tick(30);
+  for (const id of [20, 21, 22]) assert.equal(count(`GET /v1/games/${id}`), 0, `no detail read for ${id}`);
+});
+
+test("a server with grouping but without group_size_bytes shows the parent's own size, still with no extra request", async () => {
+  server.mode = "new";
+  server.games = freshGames().map(({ group_size_bytes, ...rest }) => rest);
+  const s = await openLibrary(2);
+  await until(() => card(s, 20).querySelector(".meta .size").textContent === "2.0 GB", "parent's own size after the re-read");
+  await tick(30);
+  assert.equal(count("GET /v1/games/20") + count("GET /v1/games/21"), 0);
+  server.games = freshGames();
 });
 
 test("a package's games tick rebuilds its group card (the failed warning goes away)", async () => {
@@ -234,7 +245,6 @@ test("a package's games tick rebuilds its group card (the failed warning goes aw
 test("MUTATION PIN -- an older vault-api (no parent_appid / app_type fields) renders the flat list unchanged", async () => {
   server.mode = "old";
   server.games = freshGames();
-  groupSizes.reset();
   const s = await openLibrary(4);
   assert.deepEqual(cards(s), [10, 20, 21, 22]);
   assert.equal(s.querySelector(".pkgline"), null);

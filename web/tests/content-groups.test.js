@@ -8,7 +8,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   groupGames,
-  groupSizeBytes,
   displaySizeBytes,
   failedPackages,
   expandSelection,
@@ -106,27 +105,14 @@ test("the group row keeps the parent's own status fields, ORs update_available a
   assert.equal(plain.update_available, false);
 });
 
-test("MUTATION PIN -- group size is the union of depots, a depot shared by two members counted once", () => {
-  const depots = new Map([
-    [100, [{ depotid: 1, size_bytes: 1000 }, { depotid: 9, size_bytes: 50 }]],
-    [101, [{ depotid: 2, size_bytes: 300 }, { depotid: 9, size_bytes: 50 }]],
-  ]);
-  const depotsFor = (g) => depots.get(g.appid);
-  assert.equal(groupSizeBytes(PARENT, [PKG_A, PKG_B], depotsFor), 1350, "1000 + 300 + 50 once, never the 1350+50 sum");
-  const { rows, needDepots } = groupGames(LIST, { depotsFor });
-  assert.equal(rows[1].group_size_bytes, 1350);
-  assert.equal(displaySizeBytes(rows[1]), 1350);
-  assert.deepEqual(needDepots.map((g) => g.appid), [100, 101], "only sized members need a depot list");
-});
-
-test("group size without depot lists: exact when at most one member has bytes, else unknown (the card shows the parent's own size)", () => {
-  assert.equal(groupSizeBytes(PARENT, [PKG_B, PKG_FAILED]), 1000);
-  assert.equal(groupSizeBytes(row(1, { size_bytes: null }), [row(2, { size_bytes: 300 })]), 300);
-  assert.equal(groupSizeBytes(PARENT, [PKG_A]), null);
-  const g = groupGames([PARENT, PKG_A]).rows[0];
-  assert.equal(g.group_size_bytes, null);
-  assert.equal(displaySizeBytes(g), 1000);
-  assert.equal(displaySizeBytes(OTHER), 1000);
+test("MUTATION PIN -- the group card shows the server's group_size_bytes (depot union), a server without it the parent's own size, never a sum", () => {
+  const withField = groupGames([{ ...PARENT, group_size_bytes: 1350 }, PKG_A]).rows[0];
+  assert.equal(displaySizeBytes(withField), 1350);
+  const oldServer = groupGames([PARENT, PKG_A]).rows[0];
+  assert.equal("group_size_bytes" in oldServer, false);
+  assert.equal(displaySizeBytes(oldServer), PARENT.size_bytes, "fallback: the parent's size_bytes, not 1000 + 300");
+  assert.equal(displaySizeBytes({ ...OTHER, group_size_bytes: 99 }), OTHER.size_bytes, "a plain row shows its own size");
+  assert.equal(displaySizeBytes(groupGames([{ ...PARENT, group_size_bytes: null }, PKG_A]).rows[0]), PARENT.size_bytes);
 });
 
 test("failed packages: a package showing as Failed on its own; a running retry or a tool app is not failed", () => {
@@ -214,4 +200,18 @@ test("wiring: Downloads' nameFor falls back to the content-package title only fo
   const body = /function nameFor\(appid, gamesByAppid\) \{([\s\S]*?)\n\}/.exec(src);
   assert.ok(body, "nameFor not found");
   assert.match(body[1], /if \(game && !hasText\(game\.name\)\) \{[\s\S]*contentPackageFallbackTitle\(game,/);
+});
+
+test("demo: group_size_bytes is the depot union on the parent, null on its packages, size_bytes on a plain game", async () => {
+  const { demoRequest, resetDemoData } = await import("../js/demo-data.js");
+  resetDemoData();
+  const games = await demoRequest("GET", "/v1/games");
+  const by = new Map(games.map((g) => [g.appid, g]));
+  // 6.1 GB + 0.15 shared (once) + 0.3 + 0.45
+  assert.equal(by.get(2010080).group_size_bytes, 6_100_000_000 + 150_000_000 + 300_000_000 + 450_000_000);
+  assert.equal(by.get(2010082).group_size_bytes, null);
+  assert.equal(by.get(2010010).group_size_bytes, by.get(2010010).size_bytes);
+  assert.equal(by.get(2010020).group_size_bytes, null, "no depots: null like size_bytes");
+  const detail = await demoRequest("GET", "/v1/games/2010080");
+  assert.equal(detail.group_size_bytes, by.get(2010080).group_size_bytes);
 });

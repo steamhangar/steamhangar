@@ -1271,6 +1271,22 @@ function demoUpdateFields(g) {
   };
 }
 
+/** `group_size_bytes` (WP TOOL-APPS-2, api/README.md "Group size"): on a
+ * top-level row the union of its depots and those of every row whose
+ * `parent_appid` is this app, each depot once; `null` on a grouped row and
+ * under the same `null` rule as `size_bytes` (no depots at all). */
+function demoGroupSizeBytes(g) {
+  if (g.parent_appid != null) return null;
+  const union = new Map();
+  for (const m of [g, ...games.filter((c) => c.parent_appid === g.appid)]) {
+    for (const d of m.depots) union.set(d.depotid, d.size_bytes ?? 0);
+  }
+  if (union.size === 0) return null;
+  let total = 0;
+  for (const v of union.values()) total += v;
+  return total;
+}
+
 function gameSummary(g) {
   return {
     appid: g.appid,
@@ -1308,6 +1324,7 @@ function gameSummary(g) {
     ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (WP UPD-1 fields)
     parent_appid: g.parent_appid, // WP TOOL-APPS-2c (WP TOOL-APPS-2a fields)
     app_type: g.app_type,
+    group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     // WP D10: additive on both game shapes; the demo stores no covers.
     cover_cached_url: null,
   };
@@ -1337,6 +1354,7 @@ function gameDetail(g) {
     ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (see gameSummary)
     parent_appid: g.parent_appid, // WP TOOL-APPS-2c (see gameSummary)
     app_type: g.app_type,
+    group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     cover_cached_url: null, // WP D10 (see gameSummary's own comment)
   };
 }

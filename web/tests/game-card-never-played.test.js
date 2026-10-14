@@ -113,7 +113,7 @@ test("wiring: the Library's remerge applies withOwnedPlaytime to the merged rows
   // WP TOOL-APPS-2c: the playtime-carrying merged rows are grouped next,
   // and the grid shows the grouped rows built from exactly them.
   assert.match(body[1], /state\.rawGames = withOwnedPlaytime\(mergeOwnedLibrary\(state\.vaultGames, mergedOwnedGames\), mergedOwnedGames\);/);
-  assert.match(body[1], /groupGames\(state\.rawGames,/);
+  assert.match(body[1], /groupGames\(state\.rawGames\)/);
   assert.match(body[1], /state\.games = grouped\.rows;/);
 });
 

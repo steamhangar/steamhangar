@@ -16,9 +16,10 @@
  *   an old response renders exactly as before.
  * - The group card is the parent's own row plus: `packages` (the raw child
  *   rows), `update_available` true when the parent or any package has it,
- *   `installed_on` the union by client id, and `group_size_bytes` (the union
- *   of the members' depots, each depot counted once — never the sum of the
- *   per-app sizes, which would count a depot mapped to two members twice).
+ *   `installed_on` the union by client id. The group's size is the server's
+ *   `group_size_bytes` on the parent row (WP TOOL-APPS-2: the union of the
+ *   members' depots, each depot counted once — never the sum of the per-app
+ *   sizes); a server without that field shows the parent's own size.
  *   `status`, `size_bytes`, `last_prefill_at` and every other field stay the
  *   parent's own, so the card's status is the parent's status.
  * - A package "failed" when it would show as Failed on its own card
@@ -63,57 +64,16 @@ export function unionInstalledOn(members) {
 }
 
 /**
- * Size of a group: the union of the members' depots, each depot once.
- *
- * `GET /v1/games` carries no depot ids, so the union needs each sized
- * member's depot list (`GET /v1/games/{appid}`), handed in through
- * `depotsFor`. When at most one member has bytes, the union is that
- * member's own size and no depot list is needed. Returns null while a
- * needed depot list is not known yet.
- * @param {object} parent
- * @param {object[]} packages
- * @param {(game: object) => ({depotid: number, size_bytes: number|null}[] | undefined)} [depotsFor]
- * @returns {number | null}
- */
-export function groupSizeBytes(parent, packages, depotsFor) {
-  const members = [parent, ...packages];
-  const sized = members.filter(hasVisibleCacheContent);
-  if (sized.length === 0) return typeof parent.size_bytes === "number" ? parent.size_bytes : null;
-  if (sized.length === 1) return sized[0].size_bytes;
-  const union = new Map();
-  for (const m of sized) {
-    const depots = depotsFor ? depotsFor(m) : undefined;
-    if (!Array.isArray(depots)) return null;
-    for (const d of depots) {
-      if (Number.isInteger(d?.depotid)) union.set(d.depotid, typeof d.size_bytes === "number" ? d.size_bytes : 0);
-    }
-  }
-  let total = 0;
-  for (const v of union.values()) total += v;
-  return total;
-}
-
-/** The members whose depot list `groupSizeBytes` needs (sized members of a
- * group with at least two sized members). */
-export function membersNeedingDepots(parent, packages) {
-  const sized = [parent, ...packages].filter(hasVisibleCacheContent);
-  return sized.length > 1 ? sized : [];
-}
-
-/**
  * Group a flat games list.
  * @param {object[]} games the merged library rows (vault rows plus owned-only rows)
- * @param {{depotsFor?: Function}} [opts]
  * @returns {{
  *   rows: object[],
  *   parentOf: Map<number, number>,
- *   needDepots: object[],
  * }} `rows` in the input order with packages removed and parents replaced
  *   by their group row; `parentOf` maps each grouped package appid to its
- *   parent appid; `needDepots` the rows whose depot list is needed for an
- *   exact group size.
+ *   parent appid.
  */
-export function groupGames(games, { depotsFor } = {}) {
+export function groupGames(games) {
   const list = Array.isArray(games) ? games : [];
   const byAppid = new Map();
   for (const g of list) if (g && !byAppid.has(g.appid)) byAppid.set(g.appid, g);
@@ -131,7 +91,6 @@ export function groupGames(games, { depotsFor } = {}) {
   }
 
   const rows = [];
-  const needDepots = [];
   for (const g of list) {
     if (parentOf.has(g.appid)) continue;
     const packages = packagesByParent.get(g.appid);
@@ -140,7 +99,6 @@ export function groupGames(games, { depotsFor } = {}) {
       continue;
     }
     const members = [g, ...packages];
-    needDepots.push(...membersNeedingDepots(g, packages));
     rows.push({
       ...g,
       packages,
@@ -148,10 +106,9 @@ export function groupGames(games, { depotsFor } = {}) {
         ? true
         : g.update_available,
       installed_on: unionInstalledOn(members),
-      group_size_bytes: groupSizeBytes(g, packages, depotsFor),
     });
   }
-  return { rows, parentOf, needDepots };
+  return { rows, parentOf };
 }
 
 /** True for a group row built by `groupGames`. */
@@ -159,7 +116,9 @@ export function isGroup(game) {
   return Array.isArray(game?.packages) && game.packages.length > 0;
 }
 
-/** The size a card shows: the group's union once known, else the row's own. */
+/** The size a card shows: for a group the server's `group_size_bytes`
+ * (the depot union); a server without that field, or a plain row, shows the
+ * row's own `size_bytes`. No extra request either way. */
 export function displaySizeBytes(game) {
   if (isGroup(game) && typeof game.group_size_bytes === "number") return game.group_size_bytes;
   return game?.size_bytes ?? null;

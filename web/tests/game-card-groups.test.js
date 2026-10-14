@@ -31,13 +31,13 @@ const row = (appid, over = {}) => ({
   ...over,
 });
 
-function group(depots) {
+function group(groupSize) {
   const list = [
-    row(100, { name: "Starfall Legion" }),
+    row(100, { name: "Starfall Legion", ...(groupSize === undefined ? {} : { group_size_bytes: groupSize }) }),
     row(101, { parent_appid: 100, size_bytes: 500_000_000 }),
     row(102, { parent_appid: 100, status: "error", size_bytes: null }),
   ];
-  return groupGames(list, { depotsFor: depots ? (g) => depots.get(g.appid) : undefined }).rows[0];
+  return groupGames(list).rows[0];
 }
 
 test("MUTATION TARGET -- a group card shows '+N content packages' and the failed warning", () => {
@@ -63,14 +63,10 @@ test("no warning without a failed package; a plain card has no line and an empty
   assert.doesNotMatch(plain.getAttribute("aria-label"), /content package/);
 });
 
-test("MUTATION TARGET -- the size shown is the group's union once known, and a patch keeps it (and the aria fragment) in sync", () => {
+test("MUTATION TARGET -- the size shown is the server's group_size_bytes (parent's own size without the field), and a patch keeps it (and the aria fragment) in sync", () => {
   const unknown = buildCard(group(), { ...ctx, failedPackageCount: 1 });
-  assert.equal(unknown.querySelector(".meta .size").textContent, "2.0 GB", "parent's own size until the union is known");
-  const depots = new Map([
-    [100, [{ depotid: 1, size_bytes: 2 * GIB }]],
-    [101, [{ depotid: 2, size_bytes: 0.4 * GIB }, { depotid: 1, size_bytes: 2 * GIB }]],
-  ]);
-  patchCardVolatile(unknown, group(depots), "cached");
+  assert.equal(unknown.querySelector(".meta .size").textContent, "2.0 GB", "older server: the parent's own size");
+  patchCardVolatile(unknown, group(2.4 * GIB), "cached");
   assert.equal(unknown.querySelector(".meta .size").textContent, "2.4 GB");
   assert.equal(unknown.querySelector(".cappill .pv").textContent, "2.4 GB");
   assert.match(unknown.getAttribute("aria-label"), /2\.4 GB — 2 content packages, 1 failed/);

@@ -104,9 +104,8 @@
  * parent and every package and classifies each one exactly as it would be
  * ungrouped (`expandSelection`), names and the forced-run lookup read the
  * raw rows. A games tick on a package patches or rebuilds its group card
- * (`displayDiff`); a package moving in or out of a group re-renders. Group
- * sizes need depot lists, read once per change through
- * `group-sizes-singleton.js` and patched in when they land.
+ * (`displayDiff`); a package moving in or out of a group re-renders. The
+ * group size is the server's `group_size_bytes` on the parent row.
  */
 
 import { store } from "../store-singleton.js";
@@ -152,7 +151,6 @@ import {
 } from "../lib/owned-library.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { ownedLibrary } from "../owned-singleton.js";
-import { groupSizes } from "../group-sizes-singleton.js";
 import {
   expandSelection,
   failedPackages,
@@ -286,19 +284,10 @@ function remerge() {
   // "Never played" pill.
   state.rawGames = withOwnedPlaytime(mergeOwnedLibrary(state.vaultGames, mergedOwnedGames), mergedOwnedGames);
   // WP TOOL-APPS-2c: group content packages under their parent game.
-  const grouped = groupGames(state.rawGames, { depotsFor: groupSizes.depotsFor });
+  const grouped = groupGames(state.rawGames);
   state.games = grouped.rows;
   state.parentOf = grouped.parentOf;
-  groupSizes.request(grouped.needDepots);
 }
-
-// WP TOOL-APPS-2c: a depot list for a group size landed. The size is not
-// structural, so the group cards on screen are patched, never rebuilt.
-groupSizes.subscribe(() => {
-  remerge();
-  if (!mounted()) return;
-  for (const game of state.games) if (isGroup(game)) patchCard(game.appid);
-});
 
 /** Raw (ungrouped) rows by appid, for names and per-app decisions. */
 function rawByAppid() {
