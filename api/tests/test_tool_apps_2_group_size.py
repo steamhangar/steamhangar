@@ -147,3 +147,30 @@ def test_oracle_children_count_only_while_the_oracle_is_on(tmp_path: Path) -> No
     on_client = TestClient(create_app(on))
     assert _games(on_client)[10]["group_size_bytes"] == 11
     assert on_client.get("/v1/games/10", headers=AUTH).json()["group_size_bytes"] == 11
+
+
+def test_children_map_gives_the_same_sizes_as_a_full_scan(tmp_path: Path) -> None:
+    """Review fix: the per-row size reads a children map built once; it must
+    agree with the brute-force definition (every app whose parent is the row)."""
+    from vault_api.app_classification import resolve_classifications
+    from vault_api.db import get_connection
+    from vault_api.routers.games import _children_by_parent, _group_size_bytes
+
+    client, _root, settings = _library(tmp_path)
+    games = _games(client)
+    conn = get_connection(settings.db_path)
+    try:
+        classes = resolve_classifications(conn, oracle_enabled=False)
+        rows = conn.execute("SELECT appid, depotid FROM depot_app_map").fetchall()
+    finally:
+        conn.close()
+    app_depots: dict[int, list[int]] = {}
+    for r in rows:
+        app_depots.setdefault(int(r["appid"]), []).append(int(r["depotid"]))
+    sizes = {int(p.name): sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+             for p in (Path(settings.cache_root) / "depot").iterdir()}
+    children = _children_by_parent(classes)
+    for appid in games:
+        brute = [c for c, cls in classes.items() if cls.parent_appid == appid]
+        assert sorted(children.get(appid, [])) == sorted(brute), appid
+        assert _group_size_bytes(appid, classes, children, app_depots, sizes) == games[appid]["group_size_bytes"], appid

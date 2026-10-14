@@ -168,6 +168,10 @@ parent's own row plus an aggregate:
   P1 confirms children have no own depots this equals the parent's size,
   and the UI may simply show it. Needs depot ids per app in the list
   response or a server-side `group_size_bytes`; decided in the API package.
+  **Decided 2026-10-14 (API package, commit 5c20d8e):** server-side
+  `group_size_bytes` on `GET /v1/games[/{appid}]`: the depot union on a
+  top-level row, equal to `size_bytes` on an ungrouped row, null on a
+  grouped row.
 - **Update available (UPD-1):** the group shows the badge when the parent
   or any child has `update_available`. Children are rarely cached, so in
   practice this is the parent's own verdict. The card's update action

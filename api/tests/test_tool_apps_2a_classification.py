@@ -817,6 +817,9 @@ def _make_pre_v22(path: str, version: int) -> None:
     try:
         connection.execute("DROP TABLE app_classification")
         connection.execute("DROP TABLE oracle_dlc_links")
+        if version < 21:
+            # A true v20 database has no D10 table either.
+            connection.execute("DROP TABLE app_cover_file")
         connection.execute("DROP TABLE oracle_branch_manifests")
         connection.execute("DROP TABLE oracle_app_state")
         connection.execute(

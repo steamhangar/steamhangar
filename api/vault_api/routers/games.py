@@ -288,9 +288,22 @@ class GameSummary(BaseModel):
     group_size_bytes: int | None = None
 
 
+def _children_by_parent(
+    classifications: dict[int, app_classification.Classification],
+) -> dict[int, list[int]]:
+    """``{parent appid: [grouped child appids]}`` -- built once per request,
+    so the per-row group size is O(members), not O(classified apps)."""
+    out: dict[int, list[int]] = {}
+    for child, cls in classifications.items():
+        if cls.parent_appid is not None:
+            out.setdefault(cls.parent_appid, []).append(child)
+    return out
+
+
 def _group_size_bytes(
     appid: int,
     classifications: dict[int, app_classification.Classification],
+    children_by_parent: dict[int, list[int]],
     app_depotids: dict[int, list[int]],
     depot_bytes: dict[int, int],
 ) -> int | None:
@@ -299,9 +312,7 @@ def _group_size_bytes(
     own = classifications.get(appid)
     if own is not None and own.parent_appid is not None:
         return None
-    members = {appid} | {
-        child for child, cls in classifications.items() if cls.parent_appid == appid
-    }
+    members = [appid, *children_by_parent.get(appid, [])]
     depots = {depotid for member in members for depotid in app_depotids.get(member, [])}
     return app_size_bytes(sorted(depots), depot_bytes)
 
@@ -446,6 +457,7 @@ def list_games(
         classifications = app_classification.resolve_classifications(
             conn, oracle_enabled=base_settings.manifest_oracle_enabled
         )
+        children_by_parent = _children_by_parent(classifications)
 
     app_depotids: dict[int, list[int]] = {}
     for row in depot_rows:
@@ -480,7 +492,7 @@ def list_games(
                 **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
                 **_classification_fields(classifications.get(row["appid"])),
                 group_size_bytes=_group_size_bytes(
-                    row["appid"], classifications, app_depotids, depot_bytes
+                    row["appid"], classifications, children_by_parent, app_depotids, depot_bytes
                 ),
             )
         )
@@ -544,11 +556,10 @@ def get_game(
         classifications = app_classification.resolve_classifications(
             conn, oracle_enabled=base_settings.manifest_oracle_enabled
         )
+        children_by_parent = _children_by_parent(classifications)
         classification = classifications.get(appid)
         # The depots of every app this one heads (group_size_bytes).
-        group_members = sorted(
-            {appid} | {c for c, cls in classifications.items() if cls.parent_appid == appid}
-        )
+        group_members = sorted({appid, *children_by_parent.get(appid, [])})
         group_depot_rows = conn.execute(
             "SELECT appid, depotid FROM depot_app_map WHERE appid IN ({})".format(
                 ",".join("?" for _ in group_members)
@@ -593,6 +604,6 @@ def get_game(
         ),
         **_classification_fields(classification),
         group_size_bytes=_group_size_bytes(
-            appid, classifications, group_depotids, depot_bytes
+            appid, classifications, children_by_parent, group_depotids, depot_bytes
         ),
     )
