@@ -595,6 +595,10 @@ the agent reports its own LAN address(es) used toward the vault in the
 report payload; vault-api correlates on those (fallback source_addr);
 the bypass rule refuses to accuse when the only known address is a
 private bridge/gateway address. No ZEUS change.
+Constraint (user, 2026-10-14): after v0.1.0 a real installer replaces
+the PowerShell task scripts. The address detection lives in the agent
+binary itself (no new script parameter, task argument or config entry),
+and old servers / old agents keep working (optional field).
 Constraint (user, 2026-10-14): a real installer replaces the
 PowerShell task scripts later. The address detection lives in the agent
 binary itself (no new script parameter, task argument or config entry
