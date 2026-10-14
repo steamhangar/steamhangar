@@ -33,14 +33,18 @@ import kotlinx.serialization.json.JsonPrimitive
  * Fixed, synthetic library for the screenshot tests (WP APP-TEST-1).
  *
  * Built to make the D12 layout problems visible
- * (`docs/handover/post-0.1.0-roadmap.md` "D12"): every filter chip has a
- * non-zero count (so FilterChipsRow carries all six labels, the widest
- * being "Downloading 3"), titles range from short to very long, and every
- * card kind the grid can show appears at least once (cached, not cached,
- * downloading, updating, paused, failed). One cached game carries the
- * "Update available" badge (WP UPD-3), which also gives the "Updates" chip
- * a count, and [FixedUpdatesRepository] keeps the top bar's "Check
- * updates" action visible. WP TOOL-APPS-2d: Starfall Odyssey heads a
+ * (`docs/handover/post-0.1.0-roadmap.md` "D12"): every filter chip but
+ * "Installed, not cached" has a non-zero count (FilterChipsRow carries all
+ * seven labels, the widest being "Installed, not cached 0"), titles range
+ * from short to very long, and every card kind the grid can show appears
+ * at least once (cached, not cached, downloading, updating, paused,
+ * failed). WP UPD-6: the cached Starfall Odyssey carries update_available,
+ * so its card shows the update state (orange refresh glyph, "Update
+ * available" instead of "Current"); the updating Glasswing carries it too,
+ * so the separate "Update available" badge (WP UPD-3) still has a card
+ * whose status word does not say it. Both give the "Updates" chip a count,
+ * and [FixedUpdatesRepository] keeps the top bar's "Check updates" action
+ * visible. WP TOOL-APPS-2d: Starfall Odyssey heads a
  * content-package group of two packages, one failed ("+2 content packages
  * · 1 failed", sized by the server's `group_size_bytes`), and the Lighthouse Keeper game
  * is cached with an owned playtime of exactly 0 (the "Never played" pill).
@@ -65,7 +69,8 @@ internal object LibraryScreenshotFixtures {
         GameSummary(
             appid = 1_000_010, name = "Starfall Odyssey", status = "done",
             last_prefill_at = PREFILLED_AT, depot_count = 2, size_bytes = 48_300_000_000,
-            // WP UPD-3: the oracle reports a newer build -> badge + "Updates 1".
+            // WP UPD-6: the oracle reports a newer build on a cached game ->
+            // the card's update state.
             update_available = true, update_checked_at = PREFILLED_AT,
             // WP TOOL-APPS-2d: heads the group below.
             app_type = "game", group_size_bytes = 48_900_000_000,
@@ -92,6 +97,8 @@ internal object LibraryScreenshotFixtures {
         GameSummary(
             appid = 1_000_040, name = "Glasswing", status = "running",
             last_prefill_at = PREFILLED_AT, depot_count = 1, size_bytes = 3_400_000_000,
+            // WP UPD-6: flagged but Updating -> the separate badge.
+            update_available = true, update_checked_at = PREFILLED_AT,
         ),
         // Paused job -> "Paused" (counts as Downloading).
         GameSummary(appid = 1_000_050, name = "Harbor Lights Café Simulator", status = "running", depot_count = 1),

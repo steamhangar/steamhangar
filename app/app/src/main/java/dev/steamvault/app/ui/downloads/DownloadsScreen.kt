@@ -50,6 +50,7 @@ import dev.steamvault.app.R
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
+import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
@@ -69,6 +70,10 @@ import dev.steamvault.app.ui.downloads.logic.buildQueueRowModel
 import dev.steamvault.app.ui.downloads.logic.JobCardMode
 import dev.steamvault.app.ui.downloads.logic.partitionJobs
 import dev.steamvault.app.ui.downloads.logic.selectExcerptDisplay
+import dev.steamvault.app.ui.downloads.logic.nameFor
+import dev.steamvault.app.ui.downloads.logic.pendingUpdates
+import dev.steamvault.app.ui.downloads.logic.scheduleNote
+import dev.steamvault.app.ui.library.logic.formatBytesGB
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import kotlinx.coroutines.CoroutineScope
@@ -100,6 +105,8 @@ import kotlinx.coroutines.delay
  * @param trafficRepository WP D15d: the statistics header and graph
  *   (`DownloadsStats.kt`, polled every 30 s while this screen is STARTED),
  *   the speed line under a running job, and the History range filter.
+ * @param scheduleRepository WP UPD-6: `GET /v1/schedule` for the "Updates
+ *   available" section's note (read once per visit); `null` = no note.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,12 +118,14 @@ fun DownloadsScreen(
     ownedLibrary: OwnedLibraryController?,
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
     demoMode: Boolean,
+    scheduleRepository: ScheduleRepository? = null,
 ) {
     val scope = rememberCoroutineScope()
     val resources = LocalContext.current.resources
     val controller = remember {
-        DownloadsController(jobsRepository, gamesRepository, AndroidDownloadsStrings(resources))
+        DownloadsController(jobsRepository, gamesRepository, AndroidDownloadsStrings(resources), scheduleRepository)
     }
+    LaunchedEffect(controller) { controller.loadSchedule() } // WP UPD-6
 
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, controller) {
@@ -164,6 +173,21 @@ fun DownloadsScreen(
     }
     val queueModels = remember(partition, gamesByAppid, ownedNames) {
         partition.queued.mapIndexed { index, job -> buildQueueRowModel(job, index + 1, gamesByAppid, ownedNames) }
+    }
+    // WP UPD-6: "Updates available" -- flagged games without an active job.
+    val updateRows = remember(controller.gamesKnown, controller.games, controller.jobs, gamesByAppid, ownedNames) {
+        if (!controller.gamesKnown) {
+            emptyList()
+        } else {
+            pendingUpdates(controller.games, controller.jobs) { nameFor(it.appid, gamesByAppid, ownedNames) }
+                .map { g ->
+                    UpdateRowModel(
+                        appid = g.appid,
+                        name = nameFor(g.appid, gamesByAppid, ownedNames),
+                        sizeLabel = formatBytesGB(g.size_bytes) ?: UPDATE_SIZE_UNKNOWN,
+                    )
+                }
+        }
     }
     // WP D15d: the History list for the chosen range -- the newest jobs
     // merged with the `?range=` fetch, filtered by the server's own rule.
@@ -214,6 +238,7 @@ fun DownloadsScreen(
                 partition = partition,
                 activeModels = activeModels,
                 pausedModels = pausedModels,
+                updateRows = updateRows,
                 queueModels = queueModels,
                 historyModels = historyModels,
                 historyJobs = historyJobs,
@@ -233,6 +258,7 @@ private fun DownloadsBody(
     partition: PartitionedJobs,
     activeModels: List<JobCardModel>,
     pausedModels: List<JobCardModel>,
+    updateRows: List<UpdateRowModel>,
     queueModels: List<QueueRowModel>,
     historyModels: List<HistoryRowModel>,
     historyJobs: List<JobSummary>,
@@ -276,6 +302,25 @@ private fun DownloadsBody(
                     onPause = { controller.pause(scope, model.jobId) },
                     onResume = { controller.resume(scope, model.jobId) },
                     onCancel = { controller.cancel(scope, model.jobId) },
+                )
+            }
+        }
+
+        // WP UPD-6: between Paused and Queue (web order), only when non-empty.
+        if (updateRows.isNotEmpty()) {
+            item(key = "updates-heading") {
+                UpdatesHeader(
+                    rows = updateRows,
+                    note = scheduleNote(controller.schedule),
+                    inFlight = controller.updatesInFlight,
+                    onUpdateAll = { controller.startUpdates(scope, updateRows.map { it.appid }, UPDATES_ALL) },
+                )
+            }
+            items(updateRows, key = { "update-${it.appid}" }) { row ->
+                UpdateRow(
+                    model = row,
+                    inFlight = controller.updatesInFlight,
+                    onUpdateNow = { controller.startUpdates(scope, listOf(row.appid), row.appid) },
                 )
             }
         }

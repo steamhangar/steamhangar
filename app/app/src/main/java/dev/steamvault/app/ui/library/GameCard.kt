@@ -35,10 +35,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.steamvault.app.R
 import dev.steamvault.app.ui.library.logic.GameCardModel
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.StatusActionType
 import dev.steamvault.app.ui.library.logic.capsulePillHasGround
+import dev.steamvault.app.ui.library.logic.cardIconKind
+import dev.steamvault.app.ui.library.logic.showsUpdateBadge
 import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
@@ -72,7 +75,7 @@ fun GameCard(
     var pillHeight by remember { mutableStateOf(0.dp) }
     var badgeHeight by remember { mutableStateOf(0.dp) }
     val titleInsets = PaddingValues(
-        top = if (model.updateAvailable) badgeHeight else 0.dp,
+        top = if (showsUpdateBadge(model)) badgeHeight else 0.dp,
         bottom = pillHeight,
     )
     Column(
@@ -110,7 +113,8 @@ fun GameCard(
 
             // WP UPD-3: top END -- the selection checkbox owns top start,
             // and the start padding keeps the badge's width clear of it.
-            if (model.updateAvailable) {
+            // WP UPD-6: only where the status word does not already say it.
+            if (showsUpdateBadge(model)) {
                 UpdateAvailableBadge(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -152,7 +156,7 @@ fun GameCard(
         Text(
             text = cardStatusWord(model),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = cardStatusWordColor(model),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
@@ -192,7 +196,19 @@ internal const val CAPSULE_PILL_TAG = "capsule-pill"
  * reads "Downloading". */
 @Composable
 internal fun cardStatusWord(model: GameCardModel): String =
-    toolAppStateWordFor(model.kind) ?: stringResource(model.kind.labelRes)
+    if (model.updateState) {
+        // WP UPD-6: "Update available" instead of "Current".
+        stringResource(R.string.library_update_available_badge)
+    } else {
+        toolAppStateWordFor(model.kind) ?: stringResource(model.kind.labelRes)
+    }
+
+/** WP UPD-6 (twin of web `tx-stale`): the status word in the orange
+ * "update ready" colour for the update state, the muted text colour
+ * otherwise. */
+@Composable
+internal fun cardStatusWordColor(model: GameCardModel): Color =
+    if (model.updateState) VaultColors.StatusStale else MaterialTheme.colorScheme.onSurfaceVariant
 
 /** The status icon + size pill riding on the cover art (round-6 "one object
  * instead of a colour dot plus a duplicate line"). Inert (no click target)
@@ -225,7 +241,7 @@ private fun CapsulePill(
             .padding(horizontal = if (hasGround) 6.dp else 3.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StatusIcon(kind = model.kind, size = StatusIconSize.SMALL, spokenLabel = toolAppStateWordFor(model.kind))
+        StatusIcon(kind = cardIconKind(model), size = StatusIconSize.SMALL, spokenLabel = cardStatusWord(model))
         if (hasGround && model.sizeLabel != null) {
             Text(
                 text = model.sizeLabel,

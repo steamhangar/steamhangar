@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -56,6 +57,7 @@ fun UpdateAvailableBadge(modifier: Modifier = Modifier) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
+                .testTag(UPDATE_BADGE_TAG)
                 .semantics { contentDescription = fullLabel }
                 .widthIn(max = UPDATE_BADGE_MAX_WIDTH)
                 .clip(RoundedCornerShape(50))
@@ -69,6 +71,10 @@ fun UpdateAvailableBadge(modifier: Modifier = Modifier) {
  * on one line, fits the [availableTextWidthPx] the badge leaves for text. */
 internal fun updateBadgeFullLabelFits(fullLabelWidthPx: Int, availableTextWidthPx: Float): Boolean =
     fullLabelWidthPx <= availableTextWidthPx
+
+/** Test tag of the grid badge's text (WP UPD-6: the card's status icon
+ * now speaks "Update available" too, so the badge is found by tag). */
+internal const val UPDATE_BADGE_TAG = "update-badge"
 
 /** Text inset at each side of the badge's pill. */
 internal val UPDATE_BADGE_HORIZONTAL_PADDING = 6.dp
