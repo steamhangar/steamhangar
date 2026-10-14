@@ -6679,8 +6679,9 @@ non-regular files under a valid name. Versioned names are served with
 above. A baked file has `local: true`, `size`, `sha256` and
 `local_url` (`/dist/<name>`, relative to the vault origin). A file that is
 not baked has `local: false` and, when the server version is a published
-release (release-shaped version AND a known commit, the rule the web's
-`agentReleaseFromAbout` uses), the GitHub Release asset URL of the same
+release (release-shaped version AND a known commit; the web reads this
+`release` flag and checks the version grammar again with
+`isReleaseVersion`), the GitHub Release asset URL of the same
 version as `release_url`. `url` is the one to use (`local_url`, else
 `release_url`), `source` says which (`local`/`release`/`none`).
 `apk_alias_url` is set while the APK is baked in.

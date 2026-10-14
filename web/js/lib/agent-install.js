@@ -21,16 +21,20 @@
  *     as install-task.ps1 does) before anything is downloaded;
  *  2. downloads `vault-agent-v<version>-windows-amd64.exe`,
  *     `install-task.ps1`, `run-vault-agent.ps1`, `uninstall-task.ps1` and
- *     `SHA256SUMS` from the GitHub Release `v<version>` (asset names as
- *     .github/workflows/publish.yml's agent-binaries job writes them: the
- *     tag is "v" + the version vault-api reports, the exe carries the tag)
- *     into `%LOCALAPPDATA%\VaultAgent\release-v<version>` (under the user
+ *     `SHA256SUMS` (asset names as .github/workflows/publish.yml's
+ *     agent-binaries job writes them: the tag is "v" + the version vault-api
+ *     reports, the exe carries the tag) from `downloadBase`: the vault's own
+ *     `<agent server URL>/dist` when `GET /v1/dist` says the files are baked
+ *     into the image, else the GitHub Release `v<version>` (WP DIST-1b,
+ *     AGENT-DIST-1; the choice is lib/dist-downloads.js
+ *     `agentDownloadPlan`), into `%LOCALAPPDATA%\VaultAgent\release-v<version>` (under the user
  *     profile; agent/README.md: a folder under C:\ would inherit an ACL that
  *     lets every local user swap the binary);
  *  3. checks all four files against `SHA256SUMS` with `Get-FileHash` and
  *     stops before installing anything on a mismatch. Honest limit: the sums
- *     come from the same release, so this catches a broken or swapped
- *     download, not a compromised release;
+ *     come from the same place as the files (the vault serves the
+ *     release's own SHA256SUMS), so this catches a broken or swapped
+ *     download, not a compromised release or vault;
  *  4. `Unblock-File`s them, copies the exe to the VERSIONED path
  *     `%LOCALAPPDATA%\VaultAgent\vault-agent-v<version>.exe` (review
  *     finding 4: a re-install of another version never overwrites an exe
@@ -94,31 +98,26 @@ export const AGENT_SERVER_URL_NOTE =
   "Must be vault-api's direct LAN address (e.g. http://<host-ip>:8080), not a reverse-proxy hostname. Otherwise per-PC cache stats and bypass detection cannot match this PC.";
 
 // A release version as publish.yml derives it from a v* tag: digits-dot
-// triple, optional pre-release (e.g. "0.1.0", "0.1.0-rc10").
+// triple, optional pre-release (e.g. "0.1.0", "0.1.0-rc10"). Same grammar
+// as api/vault_api/dist.py `_RELEASE_VERSION` (fullmatch; JS `$` without
+// the m flag does not match before a trailing newline).
 const RELEASE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$/;
-const COMMIT = /^[0-9a-f]{7,40}$/;
 
 /**
- * The vault-api release version from a `GET /v1/about` answer, if it names a
- * downloadable release.
- *
- * A build from a v* tag reports the tag without its "v" plus the commit
- * (WP VER-1). Anything else has no release to download from: a CI build of
- * a branch reports `dev-<sha>`, a native run reports the source tree's
- * base version WITHOUT a commit (indistinguishable from a release by the
- * version alone, so the commit is required too), an unusable baked value
- * reports `"invalid"`, and a server older than `/v1/about` has no answer.
- *
- * @param {unknown} response
- * @returns {{ok: true, version: string} | {ok: false, version: string | null}}
+ * True when `version` has the release grammar. Every version that ends up
+ * in a command or a download URL passes this first (WP DIST-1b review B1:
+ * a version from the server must never carry a newline, a quote or a path
+ * into a pasted command). Whether it is a PUBLISHED release (a known
+ * commit too) is the server's `release` flag in `GET /v1/dist`.
+ * @param {unknown} version
  */
-export function agentReleaseFromAbout(response) {
-  const components = response && typeof response === "object" && Array.isArray(response.components) ? response.components : [];
-  const api = components.find((c) => c && c.name === "vault-api");
-  const version = api && typeof api.version === "string" ? api.version : null;
-  const commit = api && typeof api.commit === "string" ? api.commit : null;
-  if (version && RELEASE_VERSION.test(version) && commit && COMMIT.test(commit)) return { ok: true, version };
-  return { ok: false, version };
+export function isReleaseVersion(version) {
+  return typeof version === "string" && RELEASE_VERSION.test(version);
+}
+
+/** Thrown by the command builders for a version outside the grammar. */
+function requireReleaseVersion(version) {
+  if (!isReleaseVersion(version)) throw new Error("not a release version");
 }
 
 /** Text shown instead of the command when there is no release to use. */
@@ -223,14 +222,23 @@ function keySourceLines() {
   ];
 }
 
+/** The GitHub Release download base of a version (no trailing slash). */
+export function releaseDownloadBase(version) {
+  return `${RELEASE_DOWNLOAD_BASE}/v${version}`;
+}
+
 /**
  * The install command. It takes no key: see the module header.
  *
- * @param {{version: string, serverUrl: string}} args
+ * @param {{version: string, serverUrl: string, downloadBase?: string}} args
+ *   `downloadBase`: where the files are fetched from, no trailing slash
+ *   (default: the GitHub Release of `version`).
  * @returns {string}
  */
-export function windowsInstallSnippet({ version, serverUrl }) {
+export function windowsInstallSnippet({ version, serverUrl, downloadBase }) {
+  requireReleaseVersion(version);
   const assets = releaseAssets(version);
+  const base = downloadBase || releaseDownloadBase(version);
   const lines = [
     // ONE top-level statement (coordinator must-fix): a console that types a
     // multi-line paste line by line runs every complete statement as it
@@ -239,7 +247,7 @@ export function windowsInstallSnippet({ version, serverUrl }) {
     // lines up to the closing brace before running anything; the prompt
     // comes only after the whole paste is in. Comments go inside too.
     "& {",
-    `# SteamHangar: install vault-agent ${version} for this Windows user (no admin rights needed).`,
+    "# SteamHangar: install vault-agent for this Windows user (no admin rights needed).",
     "# Paste all of it into a normal PowerShell window. It contains no key: when it asks for the",
     "# hangar API key, press Copy key in SteamHangar and paste at the prompt.",
     "$ErrorActionPreference = 'Stop'",
@@ -248,7 +256,7 @@ export function windowsInstallSnippet({ version, serverUrl }) {
     `$version = ${psQuote(version)}`,
     `$serverUrl = ${psQuote(serverUrl)}`,
     ...keySourceLines(),
-    `$base = ${psQuote(`${RELEASE_DOWNLOAD_BASE}/${assets.tag}`)}`,
+    `$base = ${psQuote(base)}`,
     `$exeName = ${psQuote(assets.exe)}`,
     "$dir = Join-Path $env:LOCALAPPDATA 'VaultAgent'",
     "$kit = Join-Path $dir ('release-v' + $version)",
@@ -289,6 +297,71 @@ export function windowsInstallSnippet({ version, serverUrl }) {
     `Start-ScheduledTask -TaskName ${psQuote(AGENT_TASK_NAME)}`,
     "Write-Host 'vault-agent is installed and its first report has started. You can close this window.'",
     "}",
+  ];
+  return lines.join("\n");
+}
+
+/** Linux release asset names for a version (publish.yml agent-binaries). */
+export function linuxReleaseAssets(version) {
+  return {
+    amd64: `vault-agent-v${version}-linux-amd64`,
+    arm64: `vault-agent-v${version}-linux-arm64`,
+    units: ["vault-agent-report.service", "vault-agent-report.timer"],
+    sums: "SHA256SUMS",
+  };
+}
+
+/**
+ * A POSIX shell single-quoted literal: inside one nothing is special but
+ * the quote itself, which is closed, escaped and reopened.
+ * @param {string} value
+ */
+export function shQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Linux / SteamOS (WP DIST-1b): a download-and-check command, NOT an
+ * installer. The systemd user-unit install needs an env file with the key
+ * and the unit edits agent/README.md describes; that stays the README's
+ * job (a real installer is the post-v0.1.0 follow-up of AGENT-DIST-1). The
+ * command fetches the binary for this machine's architecture plus the two
+ * systemd units and SHA256SUMS from `downloadBase` into
+ * `~/.local/share/vault-agent/release-v<version>`, checks the three files
+ * against SHA256SUMS (same rule as the Windows command: a file without a
+ * line, or with a different sum, stops it) and marks the binary
+ * executable. It runs in a subshell `( ... )`, so `set -eu` and `exit`
+ * never close the operator's terminal. Contains no key.
+ *
+ * @param {{version: string, downloadBase?: string}} args
+ * @returns {string}
+ */
+export function linuxDownloadSnippet({ version, downloadBase }) {
+  requireReleaseVersion(version);
+  const assets = linuxReleaseAssets(version);
+  const base = downloadBase || releaseDownloadBase(version);
+  const lines = [
+    "(",
+    "# SteamHangar: download and check vault-agent for this Linux user.",
+    "set -eu",
+    `base=${shQuote(base)}`,
+    `dir="$HOME/.local/share/vault-agent/release-v"${shQuote(version)}`,
+    'case "$(uname -m)" in',
+    `  x86_64|amd64) bin=${shQuote(assets.amd64)} ;;`,
+    `  aarch64|arm64) bin=${shQuote(assets.arm64)} ;;`,
+    '  *) echo "No vault-agent build for $(uname -m)." >&2; exit 1 ;;',
+    "esac",
+    'mkdir -p "$dir"',
+    'cd "$dir"',
+    `for n in "$bin" ${assets.units.map(shQuote).join(" ")} ${shQuote(assets.sums)}; do curl -fsSL -o "$n" "$base/$n"; done`,
+    `for n in "$bin" ${assets.units.map(shQuote).join(" ")}; do`,
+    `  want=$(awk -v n="$n" '{ f = $2; sub(/^\\*/, "", f); if (f == n) print tolower($1) }' ${shQuote(assets.sums)})`,
+    `  got=$(sha256sum "$n" | cut -d ' ' -f 1)`,
+    '  if [ -z "$want" ] || [ "$want" != "$got" ]; then echo "SHA256 check failed for $n." >&2; exit 1; fi',
+    "done",
+    'chmod +x "$bin"',
+    'echo "vault-agent is downloaded and checked in $dir. Install it as agent/README.md describes."',
+    ")",
   ];
   return lines.join("\n");
 }

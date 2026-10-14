@@ -5,7 +5,12 @@
  * ONE shared API key this browser already holds (user decision 2026-10-04,
  * "Weg A": no API change; per-device keys are the later D9 PAIR-2):
  *
- *  - Phone (Android app): a QR code of the pairing URI
+ *  - Phone (Android app): first the app itself (WP DIST-1b): a "Download
+ *    app" button and a QR code of the APK's address, from this vault when
+ *    `GET /v1/dist` says the APK is baked in (page origin +
+ *    `/dist/steamhangar-app.apk`), else the GitHub Release asset of the
+ *    same version, else a note (lib/dist-downloads.js). Not a secret, so it
+ *    is shown without the Show gate. Then a QR code of the pairing URI
  *    (lib/pair-link.js `buildAppPairUri`, the contract with the app),
  *    generated on this page by lib/qr-encode.js — no third party sees it —
  *    plus the same URI as an "Open on this phone" link for a phone that
@@ -13,21 +18,28 @@
  *  - Another browser: `<origin>/#pair=<key>`, consumed by
  *    lib/pair-intake.js on the receiving page.
  *  - Windows PC (vault-agent): a PowerShell install command
- *    (lib/agent-install.js) for the release vault-api reports in
- *    `GET /v1/about`; a development build gets a note instead. The agent's
+ *    (lib/agent-install.js) for the release `GET /v1/dist` reports; it
+ *    downloads from this vault when the files are baked in, else from the
+ *    GitHub Release of the same version (WP DIST-1b); a development build
+ *    gets a note instead. The agent's
  *    server address is an editable field, prefilled with this page's origin
  *    and remembered per browser, because the agent must reach vault-api
  *    directly, not through a reverse proxy (lib/agent-install.js header).
  *    The command contains NO key (user decision "Weg A"): it asks for it,
  *    and a separate "Copy key" button next to it (inside the same Show
  *    gate) puts the key on the clipboard without ever showing it.
- *  - Linux/SteamOS: a pointer to agent/README.md.
+ *  - Linux/SteamOS: a download-and-check shell command from the same
+ *    source (no key, no installer: agent/README.md does the install).
+ *
+ * `GET /v1/dist` is read once per open of the sheet; a late answer for an
+ * earlier open is dropped (generation token).
  *
  * The key is a secret, so every option's content is built only after an
  * explicit "Show" press, next to a warning, and removed from the DOM again
  * on "Hide" and whenever the sheet closes (any path: sheet-dialog.js
  * `onClose`). Nothing here logs the key. In demo mode, or with no key
- * stored, the sheet says there is nothing to share and shows no option.
+ * stored, the sheet says there is nothing to share and shows no option;
+ * demo mode still shows the app download (from the demo's fake index).
  *
  * Same module-singleton shape as clients-sheet.js; DOM wiring pinned with
  * fake-dom in web/tests/add-device-wiring.test.js.
@@ -50,14 +62,23 @@ import {
   AGENT_README_URL,
   AGENT_SERVER_URL_NOTE,
   AGENT_SERVER_URL_STORAGE_KEY,
-  agentReleaseFromAbout,
   KEY_PROMPT,
   installKey,
   isInstallableKey,
+  linuxDownloadSnippet,
   noReleaseText,
   validateAgentServerUrl,
   windowsInstallSnippet,
 } from "../lib/agent-install.js";
+import {
+  RELEASES_PAGE_URL,
+  agentDownloadPlan,
+  appDownloadPlan,
+  formatDownloadSize,
+  linuxArtifactNames,
+  noAppText,
+  windowsArtifactNames,
+} from "../lib/dist-downloads.js";
 
 export const SECRET_WARNING =
   "Anyone who sees this can control your hangar. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync.";
@@ -149,16 +170,16 @@ function readonlyField(value, { multiline = false, label }) {
 
 /** The QR code as an inline SVG: dark modules on a white plate including
  * the quiet zone, in every theme (scanners want dark-on-light). */
-function buildQrSvg(text) {
+function buildQrSvg(text, { label = "QR code for pairing the SteamHangar app", role = "pair-qr" } = {}) {
   const qr = encodeQrText(text, { ecl: "M" });
   const { side, d } = qrSvgGeometry(qr.modules);
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("class", "pair-qr");
   svg.setAttribute("viewBox", `0 0 ${side} ${side}`);
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "QR code for pairing the SteamHangar app");
+  svg.setAttribute("aria-label", label);
   svg.setAttribute("shape-rendering", "crispEdges");
-  svg.dataset.role = "pair-qr";
+  svg.dataset.role = role;
   svg.dataset.qrVersion = String(qr.version);
   const bg = document.createElementNS(SVG_NS, "rect");
   bg.setAttribute("width", String(side));
@@ -181,26 +202,32 @@ const heading = el("h2", null, "Add a device");
 const intro = el(
   "p",
   "hint pair-intro",
-  "Set up a phone, another browser or a Windows PC with this hangar's address and API key, without typing them.",
+  "Set up a phone, another browser or a PC with this hangar's address and API key, without typing them.",
 );
 const unavailable = el("p", "hint");
 unavailable.dataset.role = "pair-unavailable";
 unavailable.hidden = true;
 const optionsWrap = el("div", "pair-options");
+// Demo mode (and only there): the phone's app download on its own, since
+// the options themselves are hidden (nothing to share).
+const demoPhone = el("div", "pair-option");
+demoPhone.dataset.role = "demo-app-download";
+demoPhone.append(el("h4", "sec", "Phone (Android app)"));
+demoPhone.hidden = true;
 const closeBtn = el("button", "btn wide ghost", "Close");
 closeBtn.type = "button";
 closeBtn.addEventListener("click", () => dialog.close());
 
 /** One option: heading, description, the warning, a Show/Hide toggle and the
  * (initially empty) reveal area. `build(revealEl)` fills it on Show. */
-function buildOption({ id, title, desc, showLabel, extra, build }) {
+function buildOption({ id, title, desc, showLabel, extra, build, secret = true }) {
   const wrap = el("div", "pair-option");
   wrap.dataset.option = id;
   const h = el("h4", "sec", title);
   const p = el("p", "foot-note", desc);
   wrap.append(h, p);
   if (extra) wrap.append(extra);
-  const warn = el("p", "pair-warn", SECRET_WARNING);
+  const warn = secret ? el("p", "pair-warn", SECRET_WARNING) : null;
   const reveal = el("div", "pair-reveal");
   reveal.id = `pair-reveal-${id}`;
   reveal.dataset.role = `reveal-${id}`;
@@ -215,7 +242,8 @@ function buildOption({ id, title, desc, showLabel, extra, build }) {
     if (option.shown) hideOption(option);
     else showOption(option);
   });
-  wrap.append(warn, toggle, reveal);
+  if (warn) wrap.append(warn);
+  wrap.append(toggle, reveal);
   options.push(option);
   return wrap;
 }
@@ -244,7 +272,95 @@ function hideOption(option) {
 
 function hideAll() {
   for (const option of options) hideOption(option);
-  windows.gen++; // an About answer still in flight paints nothing
+  // MUTATION TARGET: an index answer still in flight when the sheet closes
+  // paints nothing (not even the app download) into the closed sheet.
+  dist.gen++;
+}
+
+// ---- The download index (GET /v1/dist) -------------------------------------
+
+const dist = {
+  gen: 0,
+  state: null, // null while loading, {response} or {error}, for this open
+};
+
+async function loadDist() {
+  const gen = ++dist.gen;
+  dist.state = null;
+  paintDistConsumers();
+  try {
+    const response = await api.dist();
+    // MUTATION TARGET (guard B): an answer for an earlier open of the sheet
+    // is dropped; only the latest request paints.
+    if (gen !== dist.gen) return;
+    dist.state = { response };
+  } catch (err) {
+    if (gen !== dist.gen) return;
+    const detail = err && typeof err.detail === "string" && err.detail ? err.detail : (err && err.message) || "request failed";
+    dist.state = { error: err && err.status === 404 ? "this server is older than GET /v1/dist" : detail };
+  }
+  paintDistConsumers();
+}
+
+// Callers do NOT check `shown`: the one guard is inside paintWindows /
+// paintLinux (review S1, one layer, one pin).
+function paintDistConsumers() {
+  paintAppDownload();
+  paintWindows(windowsOption.reveal);
+  paintLinux(linuxOption.reveal);
+}
+
+// ---- Phone: the app itself (not a secret) -----------------------------------
+
+const appDownload = el("div", "pair-download");
+appDownload.dataset.role = "app-download";
+
+function paintAppDownload() {
+  if (dist.state === null) {
+    appDownload.replaceChildren(el("p", "foot-note", "Looking up the app download…"));
+    return;
+  }
+  if (dist.state.error) {
+    const line = el("p", "errline", `Could not read the vault's download list: ${dist.state.error}`);
+    line.dataset.role = "app-download-error";
+    appDownload.replaceChildren(line);
+    return;
+  }
+  const plan = appDownloadPlan(dist.state.response, window.location.origin);
+  if (plan.kind !== "download") {
+    const note = el("p", "hint pair-left", noAppText(plan.version) + " ");
+    note.dataset.role = "app-download-none";
+    const link = el("a", null, "Releases");
+    link.href = RELEASES_PAGE_URL;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    note.append(link);
+    appDownload.replaceChildren(note);
+    return;
+  }
+  const where = plan.source === "local" ? "from this vault" : "from the project's GitHub release (this vault has no copy)";
+  const size = formatDownloadSize(plan.size);
+  const acts = el("div", "pair-acts");
+  if (isDemoMode()) {
+    // Review N3: the demo's index is fake, so no link that leads nowhere.
+    const note = el("p", "foot-note", `Demo mode: on a connected vault a "Download app" button here downloads ${plan.name} ${where}.`);
+    note.dataset.role = "app-download-demo";
+    acts.append(note);
+  } else {
+    const btn = el("a", "btn primary sm", "Download app");
+    btn.href = plan.url;
+    btn.dataset.role = "app-download-link";
+    btn.dataset.source = plan.source;
+    btn.title = `${plan.name}${size ? `, ${size}` : ""}, ${where}.`;
+    acts.append(btn);
+  }
+  const caption = el("p", "foot-note", "Scan the code with the phone's camera to download and install the app.");
+  caption.title = `${plan.url}\nAndroid asks once to allow installs from the browser. ${plan.name} ${where}.`;
+  appDownload.replaceChildren(
+    caption,
+    buildQrSvg(plan.url, { label: "QR code to download the SteamHangar app", role: "app-download-qr" }),
+    acts,
+  );
 }
 
 // ---- Phone ---------------------------------------------------------------
@@ -295,11 +411,6 @@ function buildBrowser(reveal, key) {
 
 // ---- Windows -------------------------------------------------------------
 
-const windows = {
-  gen: 0,
-  about: null, // last GET /v1/about answer for this open, or null
-};
-
 const agentUrlField = el("div", "field pair-agent-url");
 const agentUrlLabel = el("label", null, "vault-api address for the agent");
 agentUrlLabel.htmlFor = "pair-agent-url";
@@ -331,39 +442,19 @@ function agentUrlCheck() {
 agentUrlInput.addEventListener("input", () => {
   const result = agentUrlCheck();
   if (result.ok) writeAgentUrl(result.url);
-  if (windowsOption.shown) paintWindows(windowsOption.reveal);
+  paintWindows(windowsOption.reveal);
+  paintLinux(linuxOption.reveal);
 });
 
 function paintWindows(reveal) {
-  // MUTATION TARGET (guard A): an About answer that lands after "Hide"
+  // MUTATION TARGET (guard A): an index answer that lands after "Hide"
   // must not paint the command (with the key) back into a hidden option.
   if (!windowsOption.shown) return;
   const key = getStoredApiKey();
   if (!isUsableKey(key)) return;
-  if (windows.about === null) {
-    reveal.replaceChildren(el("p", "foot-note", "Reading the server's release version…"));
-    return;
-  }
-  if (windows.about.error) {
-    const line = el("p", "errline", `Could not read the server version: ${windows.about.error}`);
-    line.dataset.role = "agent-error";
-    reveal.replaceChildren(line);
-    return;
-  }
-  const release = agentReleaseFromAbout(windows.about.response);
-  if (!release.ok) {
-    const note = el("p", "hint pair-left", noReleaseText(release.version));
-    note.dataset.role = "agent-no-release";
-    reveal.replaceChildren(note);
-    return;
-  }
-  const url = agentUrlCheck();
-  if (!url.ok) {
-    const note = el("p", "foot-note", "Fix the address above to see the command.");
-    note.dataset.role = "agent-url-blocked";
-    reveal.replaceChildren(note);
-    return;
-  }
+  const pre = agentPrecheck(reveal, windowsArtifactNames);
+  if (!pre) return;
+  const { plan, url } = pre;
   if (!isInstallableKey(key)) {
     const note = el(
       "p",
@@ -376,7 +467,7 @@ function paintWindows(reveal) {
   }
   // User decision "Weg A" (review finding 1): the command carries NO key;
   // it asks for it, and the key travels only through "Copy key".
-  const snippet = windowsInstallSnippet({ version: release.version, serverUrl: url.url });
+  const snippet = windowsInstallSnippet({ version: plan.version, serverUrl: url.url, downloadBase: plan.base });
   const field = readonlyField(snippet, { multiline: true, label: "PowerShell install command" });
   field.dataset.role = "agent-snippet";
   const acts = el("div", "pair-acts");
@@ -387,7 +478,7 @@ function paintWindows(reveal) {
     el(
       "p",
       "foot-note",
-      `1. Copy the command and paste it into a normal PowerShell window on the PC (not "Run as administrator"). It downloads vault-agent ${release.version} from the project's GitHub release, checks it against the release's SHA256SUMS, installs the scheduled task for this Windows user and starts the first report.`,
+      `1. Copy the command and paste it into a normal PowerShell window on the PC (not "Run as administrator"). It downloads vault-agent ${plan.version} ${sourceWords(plan)}, checks it against the release's SHA256SUMS, installs the scheduled task for this Windows user and starts the first report.`,
     ),
     el(
       "p",
@@ -399,32 +490,79 @@ function paintWindows(reveal) {
   );
 }
 
-async function buildWindows(reveal) {
-  const gen = ++windows.gen;
-  windows.about = null;
-  paintWindows(reveal);
-  try {
-    const response = await api.about();
-    // MUTATION TARGET (guard B): an answer for an earlier Show (or an
-    // earlier open of the sheet) is dropped; only the latest request paints.
-    if (gen !== windows.gen) return;
-    windows.about = { response };
-  } catch (err) {
-    if (gen !== windows.gen) return;
-    const detail = err && typeof err.detail === "string" && err.detail ? err.detail : (err && err.message) || "request failed";
-    windows.about = { error: err && err.status === 404 ? "this server is older than GET /v1/about" : detail };
+/** Shared by the Windows and Linux commands: the index state, the release
+ * and download source, and the agent address. Paints the reason and returns
+ * null when there is no command to show. */
+function agentPrecheck(reveal, namesFor) {
+  if (dist.state === null) {
+    reveal.replaceChildren(el("p", "foot-note", "Reading the vault's download list…"));
+    return null;
   }
-  paintWindows(reveal);
+  if (dist.state.error) {
+    const line = el("p", "errline", `Could not read the vault's download list: ${dist.state.error}`);
+    line.dataset.role = "agent-error";
+    reveal.replaceChildren(line);
+    return null;
+  }
+  const url = agentUrlCheck();
+  // The URL only matters for a local download, but the Windows command
+  // always needs it; a bad address blocks both commands alike.
+  if (!url.ok) {
+    const note = el("p", "foot-note", "Fix the agent address above to see the command.");
+    note.dataset.role = "agent-url-blocked";
+    reveal.replaceChildren(note);
+    return null;
+  }
+  const plan = agentDownloadPlan(dist.state.response, url.url, namesFor);
+  if (!plan.ok) {
+    const note = el("p", "hint pair-left", noReleaseText(plan.version));
+    note.dataset.role = "agent-no-release";
+    reveal.replaceChildren(note);
+    return null;
+  }
+  return { plan, url };
+}
+
+function sourceWords(plan) {
+  return plan.source === "local" ? `from this vault (${plan.base})` : "from the project's GitHub release";
+}
+
+// ---- Linux ---------------------------------------------------------------
+
+function paintLinux(reveal) {
+  // MUTATION TARGET (guard A, Linux): nothing is painted into a hidden option.
+  if (!linuxOption.shown) return;
+  if (!isUsableKey(getStoredApiKey())) return;
+  const pre = agentPrecheck(reveal, linuxArtifactNames);
+  if (!pre) return;
+  const { plan } = pre;
+  const snippet = linuxDownloadSnippet({ version: plan.version, downloadBase: plan.base });
+  const field = readonlyField(snippet, { multiline: true, label: "Shell download command" });
+  field.dataset.role = "linux-snippet";
+  field.title = "Fetches the binary for this machine (amd64 or arm64) and the systemd units, checks them against SHA256SUMS, installs nothing.";
+  const acts = el("div", "pair-acts");
+  const readme = el("a", "pair-open", "Install steps (agent/README.md)");
+  readme.href = AGENT_README_URL;
+  readme.target = "_blank";
+  readme.rel = "noopener noreferrer";
+  acts.append(copyButton("Copy command", () => snippet, field), readme);
+  reveal.replaceChildren(
+    el("p", "foot-note", `Paste it into a terminal on the PC. It downloads vault-agent ${plan.version} ${sourceWords(plan)} and checks it; the install itself follows agent/README.md.`),
+    field,
+    acts,
+  );
 }
 
 // ---- Assemble --------------------------------------------------------------
 
+const phoneSlot = el("div");
 optionsWrap.append(
   buildOption({
     id: "phone",
     title: "Phone (Android app)",
-    desc: "A QR code with this hangar's address and API key for the SteamHangar app.",
-    showLabel: "Show QR code",
+    desc: "Install the SteamHangar app, then pair it with this hangar.",
+    showLabel: "Show pairing QR code",
+    extra: phoneSlot,
     build: buildPhone,
   }),
   buildOption({
@@ -441,21 +579,21 @@ const windowsWrap = buildOption({
   desc: "A PowerShell command that installs vault-agent, which reports the PC's installed games to the hangar.",
   showLabel: "Show command",
   extra: agentUrlField,
-  build: (reveal) => {
-    buildWindows(reveal);
-  },
+  build: (reveal) => paintWindows(reveal),
 });
 const windowsOption = options[options.length - 1];
-const linuxNote = el("p", "foot-note pair-linux");
-linuxNote.append("Linux / SteamOS: install vault-agent with its systemd timer as described in ");
-const readme = el("a", null, "agent/README.md");
-readme.href = AGENT_README_URL;
-readme.target = "_blank";
-readme.rel = "noopener noreferrer";
-linuxNote.append(readme, ".");
-optionsWrap.append(windowsWrap, linuxNote);
+const linuxWrap = buildOption({
+  id: "linux",
+  title: "Linux / SteamOS PC (vault-agent)",
+  desc: "A shell command that downloads and checks vault-agent from the agent address above; the systemd install follows agent/README.md.",
+  showLabel: "Show command",
+  secret: false,
+  build: (reveal) => paintLinux(reveal),
+});
+const linuxOption = options[options.length - 1];
+optionsWrap.append(windowsWrap, linuxWrap);
 
-dialog.body.append(heading, intro, unavailable, optionsWrap, closeBtn);
+dialog.body.append(heading, intro, unavailable, demoPhone, optionsWrap, closeBtn);
 
 /** Open the sheet with every option hidden. */
 export function openAddDeviceSheet() {
@@ -472,6 +610,13 @@ export function openAddDeviceSheet() {
     unavailable.hidden = true;
     optionsWrap.hidden = false;
   }
+  // The app download needs the index (behind the key): demo mode answers it
+  // from its fixtures, a browser without a key gets nothing to show.
+  demoPhone.hidden = !demo;
+  if (demo) demoPhone.append(appDownload);
+  else phoneSlot.append(appDownload);
+  if (demo || hasKey) loadDist();
+  else appDownload.replaceChildren();
   const stored = readAgentUrl();
   agentUrlInput.value = stored && validateAgentServerUrl(stored).ok ? stored : apiBaseUrl(window.location);
   agentUrlCheck();
