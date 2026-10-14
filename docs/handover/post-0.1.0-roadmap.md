@@ -592,6 +592,12 @@ report payload; vault-api correlates on those (fallback source_addr);
 the bypass rule refuses to accuse when the only known address is a
 private bridge/gateway address. No ZEUS change.
 
+**LIB-FILTER-INST-1 (web + app, rc17; user request 2026-10-14):** a
+library filter chip "Installed, not cached" — games an agent reports as
+installed on a PC (installed_on non-empty) that have no bytes in the
+cache. Uses the existing installed_on data; counts groups like the other
+chips (D9); same chip on Android.
+
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
 vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
