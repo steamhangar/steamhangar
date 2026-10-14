@@ -578,7 +578,7 @@ an update moves the game into the normal download queue. Prod has no
 schedule window today (manual only); an automatic window needs its own
 Antrag and also enables the nightly prefill.
 
-**AGENT-ADDR-1 (agent + api, rc16 bug fix; found 2026-10-14):** prod
+**AGENT-ADDR-1 (agent + api, rc17 — moved from rc16 by the user 2026-10-14; bug found 2026-10-14):** prod
 shows "Client Demon is bypassing the cache" permanently although Demon's
 downloads demonstrably come from the cache (Graveyard Keeper 2, 94 % HIT,
 2026-10-13). Cause, measured 2026-10-14 via `diag netns
