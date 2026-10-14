@@ -28,13 +28,9 @@ import "./components/bypass-banner.js";
 // `store-singleton.js` role), which is why it needs the store/api imports
 // below rather than a bare `import "./components/rail-panel.js";`.
 import { createRailPanel } from "./components/rail-panel.js";
-// WP 4h.2 — same DI-factory posture as rail-panel.js just above (see that
-// import's comment): decision-panel.js has no import-time side effects, so
-// it needs the real DOM/store/router handed in here.
-import { createDecisionPanel } from "./components/decision-panel.js";
 // WP WEB-FIX-1 (B2): a rotated/revoked vault API key used to leave the UI
 // dead with no recovery surface — every store `{error}` payload is dropped
-// by every view. Same DI-factory posture as rail-panel/decision-panel above.
+// by every view. Same DI-factory posture as rail-panel above.
 import { createAuthRecovery } from "./components/auth-recovery.js";
 // WP WEB-FIX-2: the connection-lost banner, same DI-factory posture.
 import { createConnectionBanner } from "./components/connection-banner.js";
@@ -42,7 +38,6 @@ import { setConnectionLost } from "./connection-status.js";
 // WP WEB-FIX-5: the "Desktop site" hint, same DI-factory posture.
 import { createDesktopSiteHint, readBrowserEnv } from "./components/desktop-site-hint.js";
 import { store } from "./store-singleton.js";
-import { ownedLibrary } from "./owned-singleton.js";
 import { api, checkVaultApiKey, getStoredApiKey, isDemoMode, setDemoMode, setStoredApiKey } from "./api.js";
 import { openOnboarding, isOnboardingOpen } from "./onboarding.js";
 // WP PAIR-1: the receiving side of a browser pairing link (#pair=<key>).
@@ -126,30 +121,6 @@ createRailPanel({
     requestAboutFocus();
     navigateTo("settings");
   },
-});
-createDecisionPanel({
-  elements: {
-    rootEl: document.getElementById("decision-panel"),
-    bodyEl: document.getElementById("dp-body"),
-    collapseBtn: document.getElementById("dp-collapse"),
-    dismissBtn: document.getElementById("dp-dismiss"),
-    appEl: document.getElementById("app"),
-    createElement: (tag) => document.createElement(tag),
-  },
-  store,
-  onViewChange,
-  getCurrentView: currentView,
-  // WEB-FIX-5 review: reading `window.localStorage` itself throws when site
-  // data is blocked, which would stop this module before the first paint.
-  // decision-panel.js's readFlag/writeFlag already catch a null storage.
-  storage: (() => {
-    try {
-      return window.localStorage;
-    } catch {
-      return null;
-    }
-  })(),
-  ownedNames: ownedLibrary,
 });
 // WP PAIR-1: while a pairing link is being handled, a 401 from the old key
 // must not throw the reconnect dialog over the pairing confirm.

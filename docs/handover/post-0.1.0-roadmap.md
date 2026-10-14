@@ -492,6 +492,10 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
 **Release cut (user decision 2026-10-13):** rc15 = wave 1; rc16 = D11 +
 D9; rc17 = D15 + D16 (both rework Settings and both wait on Anträge:
 `VAULT_EVENT_LOG` on prod, settings volume).
+Revised 2026-10-14 (user, multiple choice): rc17 = D15 (a-d, ROT,
+RUNNER, client names, history delete) + AGENT-ADDR-1 (agent change
+allowed; the Windows PC needs the new agent once) + CACHE-COMPLETE-1 +
+LIB-LIST-1 + LIB-FILTER-INST-1 + UPD-6 Android; rc18 = D16 + APP-DIST-1.
 
 **Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
@@ -544,6 +548,107 @@ live under notifications. Today a dismiss is permanent per browser
   network/egress, paths and subnets stay env-only by default; D16a lists
   every env value with a proposed editable/env-only class for the user's
   review.
+
+**User decisions 2026-10-14 (morning):**
+- UPD-5 (api, rc16): the scheduled update check is always on (oracle on),
+  independent of the schedule window; automatic downloads stay bound to
+  the window. Supersedes the window gate from the UPD-1 review (dev then
+  checks in the background too: anonymous metadata, allowed).
+- The web demo shows the "Never played" pill out of the box (demo seeds
+  the playtime gate, key and SteamID; real installs keep the gate off).
+- D15: clients can be given a name (by IP address; by MAC where the
+  vault can learn it — agents can report it, the server itself only sees
+  IPs).
+- D15: "Delete history" in two variants: everything, and older than
+  30 days.
+- D15 runner (option B): before each prefill the runner sends a
+  recognisable marker request through vault-core; vault-api records its
+  source address and flags that client as the runner (excluded from
+  "active clients"). Own small package D15-RUNNER (core/runner + api).
+- rc16 prod Antrag must also switch the playtime relay on for the user's
+  own install: `.env` `VAULT_RELAY_EXPOSE_PLAYTIME=true` (ADR-0010 gate,
+  env-only today, forwarded by compose; default stays off for everyone
+  else). The user wants to test the "Never played" pill with real data.
+
+**UPD-6 (web + app, rc16; user feedback 2026-10-14 on prod rc15:
+"Checked 14 games · 7 updates available", but the 7 were hard to find):**
+the status pill on the cover shows an orange "Update" (instead of the
+green check) and the status line reads "UPDATE AVAILABLE" instead of
+"CURRENT" for games with update_available; Downloads gets a section
+"Updates available (N)" listing them with "Update now" per game and
+"Update all", plus a note when they download automatically ("in the
+schedule window HH:MM-HH:MM" or "manual only" without a window). Starting
+an update moves the game into the normal download queue. Prod has no
+schedule window today (manual only); an automatic window needs its own
+Antrag and also enables the nightly prefill.
+
+**AGENT-ADDR-1 (agent + api, rc17 — moved from rc16 by the user 2026-10-14; bug found 2026-10-14):** prod
+shows "Client Demon is bypassing the cache" permanently although Demon's
+downloads demonstrably come from the cache (Graveyard Keeper 2, 94 % HIT,
+2026-10-13). Cause, measured 2026-10-14 via `diag netns
+steamhangar-vault-api-1 ss`: every connection to vault-api arrives from
+172.16.13.1 (docker bridge gateway, published port through the userland
+proxy), so `agent_reports.source_addr` is never Demon's LAN address and
+the bypass rule (no cache-log presence for that address) always fires.
+The same breaks the D15b agent<->address mapping. Fix (orchestrator):
+the agent reports its own LAN address(es) used toward the vault in the
+report payload; vault-api correlates on those (fallback source_addr);
+the bypass rule refuses to accuse when the only known address is a
+private bridge/gateway address. No ZEUS change.
+Constraint (user, 2026-10-14): after v0.1.0 a real installer replaces
+the PowerShell task scripts. The address detection lives in the agent
+binary itself (no new script parameter, task argument or config entry),
+and old servers / old agents keep working (optional field).
+Constraint (user, 2026-10-14): a real installer replaces the
+PowerShell task scripts later. The address detection lives in the agent
+binary itself (no new script parameter, task argument or config entry
+needed), and old servers / old agents keep working (optional field).
+
+**LIB-FILTER-INST-1 (web + app, rc17; user request 2026-10-14):** a
+library filter chip "Installed, not cached" — games an agent reports as
+installed on a PC (installed_on non-empty) that have no bytes in the
+cache. Uses the existing installed_on data; counts groups like the other
+chips (D9); same chip on Android.
+
+**LIB-LIST-1 (web + app, rc17; user feedback 2026-10-14 on prod rc15):**
+the list layout's right side is restless: status word, size, "Update",
+"not cached · Demon" and "Installed on" are right-aligned with varying
+widths, so nothing lines up from row to row. Rework into fixed columns
+(table-like grid): status (icon + word, fixed width), size
+(right-aligned, tabular figures), update state, installed on (PC names,
+truncated); one line per row where it fits, same columns in every row,
+column headers optional. Check at 360/768/1440 px; same idea for the
+Android list row.
+
+**CACHE-COMPLETE-1 (api + web + app, rc17; user report 2026-10-14):**
+Timberborn flipped from "Not cached" to "Cached" seconds after Demon
+started its update, although 1.3 GB could not have arrived: "cached"
+today only means size_bytes > 0 (hasVisibleCacheContent). User decision:
+both stages. (1) Completeness: vault-api compares the bytes on disk with
+the current build's manifest size per depot (manifest archive / oracle
+data) and exposes a completeness figure; cards show "Partially cached
+N %" and only 100 % gets the green check. (2) "Verify" action per game:
+the runner re-validates the game (non-forced prefill / SteamPrefill
+verify path — check what SteamPrefill offers) and fetches missing or
+damaged chunks; progress in Downloads. Addition (user, same day): the
+always-on update check (UPD-5 cadence) also runs the completeness check
+automatically, so incomplete games are detected without a click. With
+auto-download (a schedule window) they are completed inside the window;
+without one they are listed in Downloads next to "Updates available"
+(e.g. "Incomplete (N)" with "Complete now" / "Complete all") — the
+completion itself is a download and never runs outside the window
+unless started by hand.
+UI rule (user, 2026-10-14): every new Downloads section ("Updates
+available", "Incomplete", and later ones) is shown only when it has at
+least one entry — no empty headings.
+
+**APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
+the release pipeline builds and signs the APK first and bakes it into the
+vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
+in the LAN at a fixed path. Clients page -> "Add device" -> Android
+phone: "Download app" button plus a QR code to the vault's APK, then the
+existing pairing QR. Dev builds (no APK in the image) fall back to the
+GitHub release asset of the same version.
 
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check

@@ -1,118 +1,68 @@
 /**
- * Decision-support statements for the Phase 4h suggestions panel (WP 4h.2).
+ * Per-game cache facts that used to be the Phase 4h suggestions panel
+ * (WP 4h.2). WP WEB-FEAT-SUGGEST-2 (user decision 2026-10-13) removed the
+ * panel and moved its statements to where they are read:
  *
- * `docs/PROJECT_PLAN.md`'s Phase 4h section names the statement families this
- * project is allowed to make ("decision support about the cache, not
- * taste") and explicitly rejects the Steam-storefront kind ("what should I
- * play next" via tags/reviews/similar titles) — this module implements only
- * the accepted families, each one traceable to a plan bullet:
+ *   - "last changed N days ago" -> the game detail sheet,
+ *     {@link lastUpdateDownloadedText} ("Last update downloaded N days ago");
+ *   - "fully cached, never played" -> a second pill on the library card,
+ *     {@link isNeverPlayedCached};
+ *   - "not confirmed current for N days" -> one notification in the bell
+ *     list, {@link staleUpdateChecks} (14 days, was 30 in the panel);
+ *   - "unchanged for the N days we've watched it" -> dropped.
  *
- *   - `PLAYABLE_NOW` -> plan: "43 GB cached, 0 minutes played" / "these games
- *     are fully cached and you have never started them — playable now, no
- *     wait." Requires playtime data (gated server-side by ADR-0010 — see
- *     below) AND a real, non-fabricated zero, never an absent value.
- *   - `STALE_CONFIRMATION` -> plan: "Not confirmed current for 40 days" —
- *     `apps.last_manifest_check`'s age, already relayed with no privacy gate
- *     at all (this is a cache-management fact, not personal data).
- *   - `CHANGED_RECENTLY` / `STABLE` -> plan: "Changes every three days" vs
- *     "unchanged for two years", corrected to WP 4h.1's own honesty rule:
- *     `depot_manifests` never stores a change HISTORY, only the latest
- *     manifest per depot, so a rate/cadence claim is unsupportable — worded
- *     here as a single past-tense fact ("last changed N days ago" /
- *     "unchanged for the N days we've watched it"), matching
- *     `manifest_change_frequency`'s own "changed" (has-changed-at-least-once)
- *     semantics, never "changes every N days".
+ * The honesty rules of the panel stay (docs/PROJECT_PLAN.md Phase 4h):
  *
- * **Deliberately NOT implemented here** (plan-acceptable in principle, no
- * buildable data source in THIS package's footprint — named rather than
- * silently dropped):
- *   - "Installed on your PC, not in the cache" needs a local Steam install
- *     list, which only the Android agent has; the web frontend has no
- *     comparable source.
- *   - "Deleting frees 12 of 43 GB; the other 31 sits in shared depots" needs
- *     each candidate's full depot list (`GET /v1/games/{appid}`, not the
- *     `GET /v1/games` list this module is fed from) — an extra per-card
- *     fetch this WP does not add without measuring its cost first (the same
- *     "no new poll loop without measurement" rule the brief applies to
- *     store.js resources applies to on-demand fetches too).
+ * **Privacy gate (ADR-0010, binding).** `playtime_forever` reaches the web
+ * app only when the operator turned on `relay_expose_playtime`; it ships
+ * OFF. This module never fetches it; the Library hands in the owned list's
+ * value as `owned_playtime_forever`. `playtime_forever === 0` is a real,
+ * printable claim ("never played"); absent, null, negative or non-finite is
+ * UNKNOWN and never becomes a fabricated zero. No code path here names a
+ * non-zero playtime, a last-played date or an inactivity span, and
+ * `rtime_last_played` is never read.
  *
- * **The privacy gate (ADR-0010, binding).** `playtime_forever`/
- * `rtime_last_played` leave vault-api's Steam relay at all only when the
- * operator has explicitly turned on the corresponding env-only setting, and
- * ship OFF by default. This module never fetches that data itself (it takes
- * whatever `playtimeByAppid` the caller already has); its OWN honesty rule
- * mirrors WP 4h.1's absent-vs-zero pin: `playtime_forever === 0` is a real,
- * printable claim ("never started"), `undefined`/`null`/negative/non-finite
- * is UNKNOWN and never degrades into a fabricated zero. `rtime_last_played`
- * is accepted in the same map (future-proofing the shape against
- * `OwnedGameOut`) but is NEVER read by any statement-producing code path in
- * this file — see the negative pin in web/tests/decision-support.test.js:
- * "when did this person last play" is the sharper, more sensitive of the two
- * facts (ADR-0010's own wording) and the plan's accepted statement families
- * never need it, so the safest structural guarantee is to never wire it to
- * a string at all, not to trust a wording review to keep catching it.
+ * **Day counts** from the server (`manifest_days_since_last_change`) must
+ * be real, whole, non-negative numbers, or nothing is said (NaN, -5, 3.7,
+ * Infinity and 1e21 were all probed rendering in WP 4h.2 before the guard).
  *
- * **The negative privacy pin, stated as a rule this module's shape
- * enforces rather than a style guide sentence:** no statement produced here
- * ever names a NON-zero playtime number, a last-played date, or an
- * inactivity duration ("haven't played in N days") — the plan's binding
- * stance is "no number held up to someone else in the living room", and
- * `PLAYABLE_NOW`'s only use of playtime is the boolean fact "exactly zero",
- * which is the one example the plan itself blesses by name.
- *
- * Pure — no DOM, no fetch, no timers, no `Date.now()` default hidden inside
- * (every function taking "now" takes it as an explicit, defaulted parameter
- * so a test can pin exact day-boundary arithmetic). See
- * web/tests/decision-support.test.js for the degrade-tier and ranking pins.
+ * Pure: no DOM, no fetch, no hidden clock (every "now" is a parameter).
+ * Tests: web/tests/decision-support.test.js.
  */
 
 const MS_PER_DAY = 86_400_000;
 
-export const SUGGESTION_KIND = Object.freeze({
-  PLAYABLE_NOW: "playable_now",
-  STALE_CONFIRMATION: "stale_confirmation",
-  CHANGED_RECENTLY: "changed_recently",
-  STABLE: "stable",
-});
+/** A cached game whose last update check is at least this old is named in
+ * the "update check due" notification (user decision 2026-10-13: 14 days,
+ * the panel used 30). */
+export const UPDATE_CHECK_DUE_DAYS = 14;
 
-// Rank, ascending (lower = shown first) — see buildSuggestions' header for
-// why this order (roughly: "actionable now" before "informational only").
-const KIND_PRIORITY = Object.freeze({
-  [SUGGESTION_KIND.PLAYABLE_NOW]: 0,
-  [SUGGESTION_KIND.STALE_CONFIRMATION]: 1,
-  [SUGGESTION_KIND.CHANGED_RECENTLY]: 2,
-  [SUGGESTION_KIND.STABLE]: 3,
-});
-
-// A cache-management threshold, not a privacy one — how many days without a
-// confirming run before it is worth mentioning at all. Chosen independently
-// of VAULT_GC_GRACE_DAYS/the 14-day manifest-observation window (both
-// different concerns: those are server-side data-sufficiency rules, this is
-// purely "is this old enough to be worth a line in a short suggestions
-// list").
-const STALE_CONFIRMATION_THRESHOLD_DAYS = 30;
+export const NEVER_PLAYED_LABEL = "Never played";
+/** The pill's short word where the card is narrow (Compact grid). */
+export const NEVER_PLAYED_COMPACT_LABEL = "Unplayed";
+/** The pill's full meaning: tooltip and the card's accessible name. */
+export const NEVER_PLAYED_DESCRIPTION = "Fully cached, never played";
 
 /**
- * Whole days between `iso` and `now` (both real dates), or `null` if `iso`
- * cannot be parsed. Floors rather than rounds — "40 days" means at least 40
- * full days have actually elapsed, never a rounded-up 39.6.
+ * Whole days between `iso` and `nowMs`, or `null` if `iso` cannot be
+ * parsed or lies in the future (clock skew is not "N days ago"). Floors:
+ * "20 days" means at least 20 full days.
  * @param {string} iso
  * @param {number} nowMs
  * @returns {number | null}
  */
-function daysSince(iso, nowMs) {
+export function daysSince(iso, nowMs) {
+  if (typeof iso !== "string" || !iso) return null;
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
   const deltaMs = nowMs - t;
-  if (deltaMs < 0) return null; // a clock-skewed "future" timestamp is not honestly "N days ago"
+  if (deltaMs < 0) return null;
   return Math.floor(deltaMs / MS_PER_DAY);
 }
 
 /**
- * A real, printable playtime-forever value, or `null` for "unknown" — never
- * a fabricated zero. Mirrors `api/vault_api/steam_relay.py`'s own
- * `_coerce_nonneg_int` contract client-side: absent, non-numeric, negative
- * or non-finite are all "we don't actually know", not "zero".
+ * A real playtime-forever value, or `null` for "unknown" — never a
+ * fabricated zero (mirrors `steam_relay.py`'s `_coerce_nonneg_int`).
  * @param {unknown} value
  * @returns {number | null}
  */
@@ -121,24 +71,7 @@ function realPlaytimeForeverOrNull(value) {
 }
 
 /**
- * A real, whole, non-negative day count, or `null` — the same honesty
- * contract as {@link realPlaytimeForeverOrNull}, applied to
- * `manifest_observation_days`/`manifest_days_since_last_change` (Opus
- * review should-fix S4, WP 4h.2 fix round). These two fields lacked ANY
- * numeric sanitation before this fix — only `typeof === "number"`, which is
- * true for `NaN`/`Infinity`/negatives/fractions too. Probed and confirmed
- * rendering before this guard existed: `NaN` -> "Last changed NaN days
- * ago.", `-5` -> "Last changed -5 days ago.", `3.7` -> "...3.7 days ago.",
- * `Infinity` -> "...Infinity days ago.". Today's server-side contract
- * (`depot_manifests.py`) already only ever produces a real, clamped
- * integer, so this is defense in depth against a future regression or a
- * malformed demo fixture, not a response to a currently-reachable server
- * value — but a client-side statement generator should not silently trust
- * that boundary. `Number.isSafeInteger` (not merely `Number.isInteger`)
- * additionally rejects a pathologically large-but-integral value like
- * `1e+21` (also probed) — a value so large it cannot be a real day count
- * derived from any realistic timestamp, and one `Number.isInteger` alone
- * would still accept.
+ * A real, whole, non-negative day count, or `null`.
  * @param {unknown} value
  * @returns {number | null}
  */
@@ -147,122 +80,125 @@ function realNonNegativeIntOrNull(value) {
 }
 
 /**
- * The single best statement for one game, or `null` when there is honestly
- * nothing to say (matches WP 4h.1's own rule: a game with no manifest data
- * and no known-zero playtime gets silence, not a fabricated claim).
- *
- * @param {{
- *   appid: number, name?: string|null, status?: string, size_bytes?: number|null,
- *   last_manifest_check?: string|null, manifest_change_frequency?: string|null,
- *   manifest_observation_days?: number|null, manifest_days_since_last_change?: number|null,
- * }} game a `GameSummary`-shaped row (`GET /v1/games`).
- * @param {{playtimeForever?: unknown, nowMs?: number}} [opts]
- * @returns {{kind: string, text: string} | null}
+ * True when the card may say "Never played": the game has bytes in the
+ * cache AND the owned list reported a real, explicit zero playtime for it.
+ * The caller additionally requires the card's own status to be "cached"
+ * (a running or failed download is not "fully cached").
+ * @param {{size_bytes?: number|null, owned_playtime_forever?: unknown, tool_app?: boolean}} game
+ * @returns {boolean}
  */
-export function statementForGame(game, { playtimeForever, nowMs = Date.now() } = {}) {
-  if (!game) return null;
-
-  // PLAYABLE_NOW — highest priority: an honest, non-judgemental positive
-  // framing of "cached and never started", the plan's own headline example.
-  // Gated on a REAL cached size (never claim "playable now" for an app with
-  // nothing on disk) and a REAL, non-fabricated zero playtime.
-  const realPlaytime = realPlaytimeForeverOrNull(playtimeForever);
-  const sizeBytes = typeof game.size_bytes === "number" && game.size_bytes > 0 ? game.size_bytes : null;
-  if (realPlaytime === 0 && sizeBytes !== null) {
-    return { kind: SUGGESTION_KIND.PLAYABLE_NOW, text: "Fully cached and never started — playable right now." };
-  }
-
-  // STALE_CONFIRMATION — no privacy gate at all (this is a fact about the
-  // CACHE's own confirmed-current state, not about the person using it).
-  if (game.last_manifest_check) {
-    const days = daysSince(game.last_manifest_check, nowMs);
-    if (days !== null && days >= STALE_CONFIRMATION_THRESHOLD_DAYS) {
-      return { kind: SUGGESTION_KIND.STALE_CONFIRMATION, text: `Not confirmed current for ${days} days.` };
-    }
-  }
-
-  // CHANGED_RECENTLY / STABLE — WP 4h.1's own four-state field, `null` and
-  // "insufficient_data" both silently produce no statement here (neither is
-  // "changed" or "stable"): "we never looked" and "we looked, but not
-  // enough" are honestly nothing to suggest ON, not a fourth statement kind.
-  if (game.manifest_change_frequency === "changed") {
-    const n = realNonNegativeIntOrNull(game.manifest_days_since_last_change);
-    if (n !== null) {
-      return {
-        kind: SUGGESTION_KIND.CHANGED_RECENTLY,
-        text: `Last changed ${n} day${n === 1 ? "" : "s"} ago.`,
-      };
-    }
-  }
-  if (game.manifest_change_frequency === "stable") {
-    const n = realNonNegativeIntOrNull(game.manifest_observation_days);
-    if (n !== null) {
-      return {
-        kind: SUGGESTION_KIND.STABLE,
-        text: `Unchanged for the ${n} day${n === 1 ? "" : "s"} we've been watching.`,
-      };
-    }
-  }
-
-  return null;
+export function isNeverPlayedCached(game) {
+  if (!game || game.tool_app === true) return false;
+  const cached = typeof game.size_bytes === "number" && game.size_bytes > 0;
+  return cached && realPlaytimeForeverOrNull(game.owned_playtime_forever) === 0;
 }
 
 /**
- * The panel's full, ranked suggestion list plus an overall degrade tier.
- *
- * Tier ladder (brief's own language): `"full"` — at least one statement used
- * REAL playtime data; `"frequency"` — at least one statement exists, none of
- * them needed playtime; `"insufficient_data"` — nothing qualified at all
- * (WP 4h.1's "no data yet is a first-class, designed state, not an error and
- * not an empty box" rule, applied here at the whole-panel level: a fresh
- * vault legitimately produces zero statements for ~14 days by 4h.1's own
- * window, and the caller renders a friendly, honest message for that case
- * rather than nothing).
- *
- * @param {object[] | null | undefined} games `GET /v1/games` snapshot
- *   (`GameSummary[]`).
- * @param {{
- *   playtimeByAppid?: Map<number, unknown>,
- *   limit?: number,
- *   nowMs?: number,
- * }} [opts] `playtimeByAppid` maps appid -> `playtime_forever` (a plain
- *   number, or the raw `OwnedGameOut` field value — only `playtime_forever`
- *   is ever read, see this module's header for why `rtime_last_played` is
- *   deliberately never consulted). Absent/omitted means "no playtime data at
- *   all" (the ADR-0010 default: both relay keys ship off), never "everyone
- *   has zero playtime".
- * @returns {{tier: "full"|"frequency"|"insufficient_data", items: Array<{appid: number, name: string, kind: string, text: string}>}}
+ * The detail sheet's "Last update downloaded …" line, or `null` when there is
+ * no real observation to report. Only `manifest_change_frequency ===
+ * "changed"` carries a meaningful `manifest_days_since_last_change` (WP
+ * 4h.1: "stable", "insufficient_data" and null say nothing about a change).
+ * The day count is when the VAULT's own download recorded a new manifest
+ * (`manifest_ingest` during a prefill), not Steam's publish date — hence
+ * "downloaded", never "updated on Steam" (review fix). The vault keeps only
+ * the latest manifest per depot, so this is one past fact, never a cadence
+ * ("updates every N days").
+ * @param {{manifest_change_frequency?: string|null, manifest_days_since_last_change?: unknown}} game
+ * @returns {string | null}
  */
-export function buildSuggestions(games, { playtimeByAppid, limit = 5, nowMs = Date.now() } = {}) {
-  const list = Array.isArray(games) ? games : [];
-  const ptMap = playtimeByAppid instanceof Map ? playtimeByAppid : new Map();
+export function lastUpdateDownloadedText(game) {
+  if (!game || game.manifest_change_frequency !== "changed") return null;
+  const n = realNonNegativeIntOrNull(game.manifest_days_since_last_change);
+  if (n === null) return null;
+  if (n === 0) return "Last update downloaded today";
+  if (n === 1) return "Last update downloaded yesterday";
+  return `Last update downloaded ${n} days ago`;
+}
 
-  const candidates = [];
-  for (const game of list) {
-    if (!game || typeof game.appid !== "number") continue;
-    const statement = statementForGame(game, { playtimeForever: ptMap.get(game.appid), nowMs });
-    if (!statement) continue;
-    candidates.push({
-      appid: game.appid,
-      name: typeof game.name === "string" && game.name ? game.name : `App ${game.appid}`,
-      kind: statement.kind,
-      text: statement.text,
-    });
+/**
+ * The newest of the two times something checked this game for updates:
+ * `update_checked_at` (the manifest oracle answered, WP UPD-1) and
+ * `last_manifest_check` (a download run confirmed it current). `null` when
+ * neither ever happened.
+ * @param {{update_checked_at?: string|null, last_manifest_check?: string|null}} game
+ * @returns {string | null}
+ */
+export function lastUpdateCheckAt(game) {
+  let best = null;
+  let bestMs = -Infinity;
+  for (const iso of [game?.update_checked_at, game?.last_manifest_check]) {
+    if (typeof iso !== "string" || !iso) continue;
+    const t = Date.parse(iso);
+    if (Number.isNaN(t) || t <= bestMs) continue;
+    best = iso;
+    bestMs = t;
   }
+  return best;
+}
 
-  candidates.sort((a, b) => {
-    const pa = KIND_PRIORITY[a.kind] ?? 99;
-    const pb = KIND_PRIORITY[b.kind] ?? 99;
-    if (pa !== pb) return pa - pb;
-    return a.appid - b.appid; // deterministic tiebreak, matches GameSummary's own appid ordering
-  });
+/**
+ * Cached games whose last update check is {@link UPDATE_CHECK_DUE_DAYS} or
+ * more days old, oldest first (ties by appid). A game never checked at all
+ * is left out: "never" is not a day count, and a fresh vault would
+ * otherwise name every game at once.
+ * @param {object[] | null | undefined} games `GET /v1/games` rows
+ * @param {{nowMs?: number}} [opts]
+ * @returns {Array<{appid: number, days: number}>}
+ */
+export function staleUpdateChecks(games, { nowMs = Date.now() } = {}) {
+  const list = Array.isArray(games) ? games : [];
+  const out = [];
+  for (const g of list) {
+    if (!g || typeof g.appid !== "number") continue;
+    if (g.tool_app === true || g.owned_only === true) continue;
+    if (!(typeof g.size_bytes === "number" && g.size_bytes > 0)) continue;
+    const days = daysSince(lastUpdateCheckAt(g), nowMs);
+    if (days === null || days < UPDATE_CHECK_DUE_DAYS) continue;
+    out.push({ appid: g.appid, days });
+  }
+  out.sort((a, b) => b.days - a.days || a.appid - b.appid);
+  return out;
+}
 
-  const items = candidates.slice(0, Math.max(0, limit));
-  const tier = items.some((i) => i.kind === SUGGESTION_KIND.PLAYABLE_NOW)
-    ? "full"
-    : items.length > 0
-      ? "frequency"
-      : "insufficient_data";
+/** At most this many game names are spelled out in the notification. */
+export const UPDATE_CHECK_DUE_MAX_NAMES = 3;
 
-  return { tier, items };
+/** How the notification may point at the Library's "Check updates"
+ * button (lib/update-check.js's phase, read by the bell at render time). */
+export const UPDATE_CHECK_HINT = Object.freeze({
+  /** The button exists and works: point at it. */
+  AVAILABLE: "available",
+  /** The manifest oracle is off: there is nothing to press. */
+  DISABLED: "disabled",
+  /** Unknown yet, or the vault has no update check: say nothing extra. */
+  NONE: "none",
+});
+
+const HINT_SUFFIX = Object.freeze({
+  [UPDATE_CHECK_HINT.AVAILABLE]: ' Use "Check updates" in the Library to check again.',
+  [UPDATE_CHECK_HINT.DISABLED]: " Update checks are turned off on this vault.",
+  [UPDATE_CHECK_HINT.NONE]: "",
+});
+
+/**
+ * Title and text of the "update check due" notification.
+ * @param {Array<{appid: number, days: number}>} items from {@link staleUpdateChecks}
+ * @param {(appid: number) => string} nameFor
+ * @param {string} [hint] one of {@link UPDATE_CHECK_HINT}; only AVAILABLE
+ *   points at the "Check updates" button (no target otherwise).
+ * @returns {{title: string, text: string}}
+ */
+export function updateCheckDueWording(items, nameFor, hint = UPDATE_CHECK_HINT.NONE) {
+  const suffix = HINT_SUFFIX[hint] ?? "";
+  if (items.length === 1) {
+    const { appid, days } = items[0];
+    return { title: nameFor(appid), text: `Last checked for updates ${days} days ago.${suffix}` };
+  }
+  const names = items.slice(0, UPDATE_CHECK_DUE_MAX_NAMES).map((i) => nameFor(i.appid));
+  const more = items.length - names.length;
+  const listed = more > 0 ? `${names.join(", ")} and ${more} more` : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return {
+    title: `${items.length} games`,
+    text: `Not checked for updates in ${UPDATE_CHECK_DUE_DAYS} days or more: ${listed}.${suffix}`,
+  };
 }

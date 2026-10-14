@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 
 #: v1 (WP 1.2): initial schema.
 #: v2 (WP 1.4): added the two ``jobs`` indexes below. Purely additive
@@ -204,13 +205,27 @@ import sqlite3
 #: whose cover image vault-api stores (``vault_api/cover_cache.py``): the URL
 #: it came from, its SHA-256, type and size (NULL while nothing is stored),
 #: plus the download backoff. A brand-new table, so it needs no ``ALTER`` step.
-#: v23 (WP D15b CLIENTS-1; v22 is WP D9 TOOL-APPS-2a on its own branch):
+#: v22 (WP TOOL-APPS-2a, ADR-0022 §1): added ``app_classification`` (which tracked app is a
+#: content package of which game, ``vault_api/app_classification.py``) and
+#: ``oracle_dlc_links`` (a cached parent's ``extended.listofdlc`` / depot
+#: ``dlcappid`` links), and ``oracle_app_state`` gained ``app_type``,
+#: ``parent_appid`` and ``name`` (the oracle's ``common.type`` /
+#: ``common.parent`` / ``common.name``). The two
+#: tables are brand-new (no ``ALTER``); the two columns come from the
+#: per-column-guarded ``_add_missing_oracle_state_columns`` step. One data
+#: step runs once on upgrade: every ``app_cover_art.next_check_at`` still in
+#: the future is moved to "now", so the cover refresher re-asks every tracked
+#: app with the new store flags instead of over the next 30 days. Every step
+#: is keyed on ``version < 22``, not on ``== 21``, so a v20 database (upgraded
+#: straight past D10) and a v21 one both take it exactly once.
+#: v23 (WP D15b CLIENTS-1, on top of v22 WP D9 TOOL-APPS-2a):
 #: added the three traffic tables ``client_traffic``,
 #: ``client_depot_traffic`` and ``server_traffic`` -- event-log statistics
 #: bucketed by EVENT time in three retention tiers (5-minute rows for 48 h,
 #: hourly rows for 30 days, daily rows forever; user decision 2026-10-13,
 #: ``vault_api/traffic.py``) -- and five ``event_sweep_state`` columns: the
-#: event log's file identity (``log_dev``/``log_ino``) so a rename-rotated
+#: event log's file identity (``log_ino`` decides; ``log_dev`` is kept for
+#: diagnostics only, ZFS does not keep st_dev stable) so a rename-rotated
 #: log is detected even when the new file is already larger than the
 #: cursor, ``rotations_detected_total``/``last_rotation_detected_at``, and
 #: ``traffic_since`` (when the tiers started filling). The tables are
@@ -506,7 +521,8 @@ CREATE TABLE IF NOT EXISTS event_sweep_state (
     oversized_skips_total   INTEGER NOT NULL DEFAULT 0,
     last_oversized_at       TEXT,
     -- v23 (WP D15b): st_dev/st_ino of the file the cursor points into.
-    -- A different inode on the next read means the log was replaced
+    -- Only st_ino decides (ZFS does not keep st_dev stable across reboots);
+    -- log_dev is stored for diagnostics. A different inode on the next read means the log was replaced
     -- (rename rotation) and the cursor restarts at 0 even when the new file
     -- is already larger than the old offset. NULL until the first sweep
     -- after the upgrade records it.
@@ -616,13 +632,32 @@ CREATE TABLE IF NOT EXISTS client_bypass_state (
 --
 -- One row per app: when it was last asked, and the public branch's build id
 -- (operator information -- nothing branches on the build id).
+-- v22 (WP TOOL-APPS-2a): app_type is the oracle's common.type mapped onto
+-- vault_api/app_classification.py's vocabulary, parent_appid its
+-- common.parent, name its common.name (display text, capped); NULL when the
+-- answer did not carry them (and on every row stored before v22).
 CREATE TABLE IF NOT EXISTS oracle_app_state (
     appid        INTEGER PRIMARY KEY,
     buildid      TEXT,
     checked_at   TEXT NOT NULL,
     source       TEXT NOT NULL,
     depot_count  INTEGER NOT NULL,
-    branch_count INTEGER NOT NULL
+    branch_count INTEGER NOT NULL,
+    app_type     TEXT,
+    parent_appid INTEGER,
+    name         TEXT
+);
+
+-- v22 (WP TOOL-APPS-2a): the content packages one oracle answer names for
+-- its app: extended.listofdlc plus every depot's dlcappid. Same snapshot
+-- semantics and provenance tag as oracle_branch_manifests; display data only
+-- (vault_api/app_classification.py), never read by GC or deletion.
+CREATE TABLE IF NOT EXISTS oracle_dlc_links (
+    appid       INTEGER NOT NULL,
+    dlc_appid   INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    PRIMARY KEY (appid, dlc_appid)
 );
 
 -- One row per (app, depot, OPEN branch). Password-protected branches are
@@ -734,6 +769,30 @@ CREATE TABLE IF NOT EXISTS app_cover_file (
     stored_at    TEXT,
     attempts     INTEGER NOT NULL DEFAULT 0,
     next_try_at  TEXT
+);
+
+-- WP TOOL-APPS-2a (schema v22, ADR-0022 §1): which tracked app is a content
+-- package of which game, and a fallback display name. Written only by the
+-- background cover refresher (vault_api/app_classification.py). One row per
+-- (app, source) -- 'store' (Steam's store item lookup) or 'steamcmd_api'
+-- (the manifest oracle's stored answers) -- each holding only what that
+-- source said, so provenance is per field; GET /v1/games merges them on
+-- read, store first. app_type is the source's OWN type for the app (one
+-- normalised lowercase vocabulary or NULL); linked = 1 when a cached
+-- parent's listofdlc/dlcappid names the app (an inferred dlc, kept apart);
+-- parent_appid is the RAW parent (nesting, cycles and tool apps are
+-- resolved on read); name is capped plain text, shown only when apps.name
+-- is empty and never copied into apps. Display data: nothing that
+-- prefills, collects or deletes reads it.
+CREATE TABLE IF NOT EXISTS app_classification (
+    appid        INTEGER NOT NULL,
+    source       TEXT NOT NULL,
+    app_type     TEXT,
+    parent_appid INTEGER,
+    linked       INTEGER NOT NULL DEFAULT 0,
+    name         TEXT,
+    checked_at   TEXT,
+    PRIMARY KEY (appid, source)
 );
 
 -- WP UPD-1: bookkeeping of the always-on update check. Single row, the same
@@ -954,6 +1013,11 @@ def init_db(db_path: str) -> None:
         if row is not None and row["version"] < 20:
             _add_missing_update_check_columns(conn)
 
+        # v22 (WP TOOL-APPS-2a): a pre-v22 `oracle_app_state` lacks app_type /
+        # parent_appid. Older databases without the table get it from _DDL.
+        if row is not None and row["version"] < 22:
+            _add_missing_oracle_state_columns(conn)
+
         # v23 (WP D15b): five new event_sweep_state columns (file identity,
         # detected rotations, traffic_since). Keyed `< 23` so it runs once
         # whether D9's v22 landed first or not; guarded per column.
@@ -961,6 +1025,11 @@ def init_db(db_path: str) -> None:
             _add_missing_event_sweep_state_columns(conn)
 
         conn.executescript(_DDL)
+
+        # v22 data step, once: see the SCHEMA_VERSION docstring block. After
+        # _DDL so the table exists on any version (empty before v18).
+        if row is not None and row["version"] < 22:
+            _reset_cover_checks_for_classification(conn)
 
         if row is None:
             conn.execute(
@@ -1145,6 +1214,50 @@ def _add_missing_update_check_columns(conn: sqlite3.Connection) -> None:
             conn.execute(
                 f"ALTER TABLE update_check_state ADD COLUMN {column} {column_type}"
             )
+
+
+#: The ``oracle_app_state`` columns added in v22.
+_V22_ORACLE_STATE_COLUMNS = (
+    ("app_type", "TEXT"),
+    ("parent_appid", "INTEGER"),
+    ("name", "TEXT"),
+)
+
+
+def _add_missing_oracle_state_columns(conn: sqlite3.Connection) -> None:
+    """pre-v22 -> v22 migration step for ``oracle_app_state``.
+
+    Guarded per column via ``PRAGMA table_info``; a database without the
+    table (pre-v10) is skipped and gets the complete table from ``_DDL``.
+    """
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(oracle_app_state)")
+    }
+    if not existing:
+        return
+    for column, column_type in _V22_ORACLE_STATE_COLUMNS:
+        if column not in existing:
+            conn.execute(
+                f"ALTER TABLE oracle_app_state ADD COLUMN {column} {column_type}"
+            )
+
+
+def _reset_cover_checks_for_classification(conn: sqlite3.Connection) -> None:
+    """v22 one-time data step (ADR-0022 §1, "S1 timing").
+
+    The cover refresher re-asks an app only when its ``next_check_at`` has
+    passed (30 days after a found cover). Moving every future
+    ``next_check_at`` to now makes the next ticks re-ask every tracked app
+    with the new store flags, so existing installs get their classification
+    within minutes. A stored cover is kept on that re-check (``cover_art``'s
+    existing rule); ``attempts`` is untouched. Runs only on the upgrade into
+    v22 (the caller's version check), never again.
+    """
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    conn.execute(
+        "UPDATE app_cover_art SET next_check_at = ? WHERE next_check_at > ?",
+        (now, now),
+    )
 
 
 def _add_missing_app_columns(conn: sqlite3.Connection) -> None:

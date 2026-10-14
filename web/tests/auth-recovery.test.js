@@ -176,5 +176,5 @@ test("app.js wires createAuthRecovery at top level with the real store/openOnboa
     /createAuthRecovery\(\{\s*store,\s*openOnboarding,\s*isOnboardingOpen: \(\) => isOnboardingOpen\(\) \|\| pairIntakeBusy,\s*getStoredApiKey,?\s*\}\)/;
   const m = callRe.exec(src);
   assert.ok(m, "app.js must call createAuthRecovery({ store, openOnboarding, isOnboardingOpen: () => isOnboardingOpen() || pairIntakeBusy, getStoredApiKey }) — the factory exists but nothing wires it (deleted), or its argument list drifted");
-  assert.equal(braceDepthAt(src, m.index), 0, "the createAuthRecovery call moved INSIDE a function — it must run unconditionally at module top level, like createRailPanel/createDecisionPanel");
+  assert.equal(braceDepthAt(src, m.index), 0, "the createAuthRecovery call moved INSIDE a function — it must run unconditionally at module top level, like createRailPanel");
 });

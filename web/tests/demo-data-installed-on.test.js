@@ -173,9 +173,9 @@ test("mutating one response's installed_on array does not leak into the next fet
 });
 
 test("a synthetic (large-library) game has no installed_on entries — the badge is only exercised by the curated fixtures", async () => {
-  resetDemoData({ librarySize: 10 });
+  resetDemoData({ librarySize: 14 });
   const games = await demoRequest("GET", "/v1/games");
   const synthetic = games.find((g) => g.appid >= 5_000_000);
-  assert.ok(synthetic, "expected at least one synthetic game at librarySize 10");
+  assert.ok(synthetic, "expected at least one synthetic game at librarySize 14 (10 curated rows)");
   assert.deepEqual(synthetic.installed_on, []);
 });

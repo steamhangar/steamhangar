@@ -4,7 +4,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -48,7 +51,7 @@ import dev.steamvault.app.ui.theme.VaultColors
  * `ui/library/logic/GameCardModel.kt`'s kdoc for why this composable is
  * skip-safe across a poll tick as long as [model] compares equal.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun GameCard(
     model: GameCardModel,
@@ -58,6 +61,9 @@ fun GameCard(
     onToggleSelect: (Int) -> Unit,
     onAction: (Int, StatusActionType) -> Unit,
     modifier: Modifier = Modifier,
+    /** WP TOOL-APPS-2d: the narrow (3-column) grid -- the "Never played"
+     * pill reads "Unplayed" there. */
+    compact: Boolean = false,
 ) {
     // WP APP-FIX-CARD: the fallback tile's title keeps clear of the capsule
     // pill (bottom) and the update badge (top). Both are measured, not
@@ -113,15 +119,23 @@ fun GameCard(
                 )
             }
 
-            CapsulePill(
-                model = model,
-                onAction = onAction,
-                selecting = selecting,
+            // WP TOOL-APPS-2d: the status pill, then the "Never played"
+            // pill to its right (web `.capbadges`). A FlowRow: where even
+            // "Unplayed" does not fit beside the status pill (3-column grid,
+            // large font) it moves onto its own line instead of being
+            // ellipsized. The block's height is what the fallback title
+            // keeps clear of.
+            FlowRow(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .onSizeChanged { pillHeight = with(density) { it.height.toDp() } }
                     .padding(6.dp),
-            )
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                CapsulePill(model = model, onAction = onAction, selecting = selecting)
+                if (model.neverPlayed) NeverPlayedPill(compact = compact)
+            }
         }
         Text(
             text = model.name,
@@ -143,6 +157,8 @@ fun GameCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
+        // WP TOOL-APPS-2d: "+N content packages · N failed" on a group card.
+        GroupPackagesLine(model)
         // WP AG-3: nothing rendered at all for InstalledBadge.NoSignal --
         // "no fresh signal" is not the same claim as "not installed
         // anywhere" (ui/library/logic/InstalledState.kt's copy rule).

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -37,6 +38,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
 import dev.steamvault.app.net.model.GameDetail
@@ -56,6 +59,22 @@ import dev.steamvault.app.ui.detail.logic.detailJobActions
 import dev.steamvault.app.ui.detail.logic.findTrackedJob
 import dev.steamvault.app.ui.detail.logic.headerLiveJob
 import dev.steamvault.app.ui.library.CoverArtImage
+import dev.steamvault.app.ui.library.GroupDeletePlanBlock
+import dev.steamvault.app.ui.library.logic.PACKAGES_HEADING
+import dev.steamvault.app.ui.library.logic.PACKAGE_RETRY_LABEL
+import dev.steamvault.app.ui.library.logic.appTitle
+import dev.steamvault.app.ui.library.logic.describeGroupPlan
+import dev.steamvault.app.ui.library.logic.findLiveJob
+import dev.steamvault.app.ui.library.logic.groupDeleteIntro
+import dev.steamvault.app.ui.library.logic.groupGames
+import dev.steamvault.app.ui.library.logic.groupHasCacheContent
+import dev.steamvault.app.ui.library.logic.isPlanBlocked
+import dev.steamvault.app.ui.library.logic.offersPackageRetry
+import dev.steamvault.app.ui.library.logic.packageFactsText
+import dev.steamvault.app.ui.library.logic.packageFullName
+import dev.steamvault.app.ui.library.logic.packagesTotalText
+import dev.steamvault.app.ui.library.logic.shortPackageName
+import dev.steamvault.app.ui.status.StatusKind
 import dev.steamvault.app.ui.library.installedBadgeText
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.MultiPlan
@@ -167,6 +186,17 @@ fun GameDetailSheet(
         )
     }
 
+    // WP TOOL-APPS-2d: the grouped-delete confirmation (a game with content
+    // packages).
+    if (controller.groupDelete !is GroupDeleteUiState.Hidden) {
+        GroupDeleteConfirmDialog(
+            state = controller.groupDelete,
+            games = games,
+            onConfirm = { controller.confirmGroupDelete(scope, onLibraryChanged) },
+            onDismiss = { controller.closeGroupDeleteConfirm() },
+        )
+    }
+
     val gcState = controller.gcState
     if (gcState is GcFlowState.ConfirmExecute) {
         GcExecuteConfirmDialog(
@@ -256,6 +286,7 @@ private fun GameDetailSheetBody(
                 games = games,
                 jobs = jobs,
                 scope = scope,
+                onLibraryChanged = onLibraryChanged,
             )
         }
 
@@ -339,10 +370,14 @@ private fun LoadedDetailBody(
     games: List<GameSummary>,
     jobs: List<JobSummary>,
     scope: CoroutineScope,
+    onLibraryChanged: () -> Unit,
 ) {
     val gameSummary = remember(games, detail) {
         games.firstOrNull { it.appid == appid } ?: gameSummaryFrom(detail)
     }
+    // WP TOOL-APPS-2d: this game's content packages (the same grouping the
+    // Library uses), empty for a game without any.
+    val packages = remember(games, appid) { groupGames(games).packagesOf(appid) }
 
     // ---- Steam tool app note (WP API-FIX-4) -----------------------------------
     // Where a game offers Download/Retry, a tool app says why it has none
@@ -431,6 +466,19 @@ private fun LoadedDetailBody(
 
     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
+    // ---- content packages (WP TOOL-APPS-2d) ------------------------------------
+    if (packages.isNotEmpty()) {
+        PackagesSection(
+            parentName = gameSummary.name,
+            groupSizeBytes = gameSummary.group_size_bytes,
+            packages = packages,
+            jobs = jobs,
+            retrying = controller.retryingAppids,
+            onRetry = { pkg -> controller.retryPackage(scope, pkg.appid, onLibraryChanged) },
+        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+    }
+
     // ---- depots ---------------------------------------------------------------
     if (detail.depots.isEmpty()) {
         Text(
@@ -459,7 +507,15 @@ private fun LoadedDetailBody(
     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
     // ---- delete -----------------------------------------------------------------
-    if (hasVisibleCacheContent(gameSummary)) {
+    // WP TOOL-APPS-2d: a game with content packages is deleted with them
+    // (the server's plan lists every app first), also when only a package
+    // holds bytes.
+    if (packages.isNotEmpty() && groupHasCacheContent(gameSummary, packages)) {
+        OutlinedButton(onClick = { controller.openGroupDeleteConfirm(scope) }) {
+            Text(stringResource(R.string.detail_action_delete))
+        }
+        Spacer(Modifier.height(8.dp))
+    } else if (hasVisibleCacheContent(gameSummary)) {
         OutlinedButton(onClick = { controller.openDeleteConfirm() }) {
             Text(stringResource(R.string.detail_action_delete))
         }
@@ -623,6 +679,134 @@ private fun DetailDeleteConfirmDialog(
             }
         },
         confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.library_delete_confirm)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.library_delete_cancel)) } },
+    )
+}
+
+// ---- content packages (WP TOOL-APPS-2d) -------------------------------------------
+
+/** Test tag of the "Content packages" section. */
+internal const val PACKAGES_SECTION_TAG = "packages-section"
+
+/**
+ * The "Content packages" section (WP TOOL-APPS-2d, ADR-0022 §3, user
+ * decisions Q4 A and Q3 B variant; twin of web `components/package-list.js`):
+ * the group's total size, then per package its short name (the full name is
+ * the spoken one), facts (app id, type, size, where installed), status word,
+ * and "Retry download" for a package that failed.
+ */
+@Composable
+private fun PackagesSection(
+    parentName: String?,
+    groupSizeBytes: Long?,
+    packages: List<GameSummary>,
+    jobs: List<JobSummary>,
+    retrying: Set<Int>,
+    onRetry: (GameSummary) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().testTag(PACKAGES_SECTION_TAG)) {
+        Text(text = PACKAGES_HEADING, style = MaterialTheme.typography.titleSmall)
+        packagesTotalText(groupSizeBytes)?.let { total ->
+            Text(
+                text = total,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        for (pkg in packages) {
+            val liveJob = findLiveJob(jobs, pkg.appid)
+            val kind = dispKind(pkg, liveJob)
+            val full = packageFullName(pkg)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics(mergeDescendants = true) { contentDescription = full },
+                ) {
+                    Text(
+                        text = shortPackageName(full, parentName),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = packageFactsText(pkg),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val word = toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                Text(
+                    text = word,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (kind == StatusKind.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                if (offersPackageRetry(pkg, liveJob, findTrackedJob(jobs, pkg.appid))) {
+                    val retryDescription = "$PACKAGE_RETRY_LABEL — $full"
+                    TextButton(
+                        onClick = { onRetry(pkg) },
+                        enabled = pkg.appid !in retrying,
+                        modifier = Modifier.semantics { contentDescription = retryDescription },
+                    ) {
+                        Text(PACKAGE_RETRY_LABEL)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** WP TOOL-APPS-2d: the grouped-delete confirmation -- every app the delete
+ * removes ([GroupDeletePlanBlock]), with the notice after a 409 "members
+ * differ"; Delete disabled while a member has a job in flight. */
+@Composable
+private fun GroupDeleteConfirmDialog(
+    state: GroupDeleteUiState,
+    games: List<GameSummary>,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val namesByAppid = remember(games) { games.associate { it.appid to it.name } }
+    val nameFor: (Int, String?) -> String = { id, serverName -> appTitle(id, namesByAppid[id], serverName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(pluralStringResource(R.plurals.library_delete_title, 1, 1)) },
+        text = {
+            when (state) {
+                is GroupDeleteUiState.Loading, GroupDeleteUiState.Hidden -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                    Text(stringResource(R.string.library_delete_calculating))
+                }
+                is GroupDeleteUiState.Error -> Text(stringResource(R.string.library_delete_error, state.message))
+                is GroupDeleteUiState.Ready -> Column(
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                ) {
+                    state.notice?.let { notice ->
+                        Text(
+                            text = notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                    }
+                    val subject = describeGroupPlan(state.plan, nameFor).subject
+                    Text(groupDeleteIntro(subject, state.plan.total_bytes), style = MaterialTheme.typography.bodyMedium)
+                    GroupDeletePlanBlock(plan = state.plan, nameFor = nameFor)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = state is GroupDeleteUiState.Ready && !isPlanBlocked(state.plan),
+                onClick = onConfirm,
+            ) {
+                Text(stringResource(R.string.library_delete_confirm))
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.library_delete_cancel)) } },
     )
 }

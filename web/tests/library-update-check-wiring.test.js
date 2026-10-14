@@ -172,6 +172,10 @@ const pressChip = (s, key) => {
 };
 const card = (s, appid) => s.querySelector(`.card[data-appid="${appid}"]`);
 const statusReads = () => count("GET /v1/updates/status");
+// WP UPD-6: a flagged cached card says "Update available" as its status
+// word with the orange refresh glyph; the separate .updbadge is gone there.
+const stateWord = (s, appid) => card(s, appid).querySelector(".state").textContent;
+const pillKind = (s, appid) => card(s, appid).querySelector(".cappill .sic").className;
 
 async function openLibrary() {
   pathname = "/library";
@@ -194,18 +198,38 @@ test("UPD-1 vault-api: the button shows next to the unchanged 'Check & update' b
   assert.equal(updLine(s).hidden, false);
   assert.deepEqual(
     s.children.map((c) => c.className),
-    ["lib-head", "lib-checkrow", "search", "chips", "grid", "hint", "bulk"],
-    "still six in-flow children for the BP-L area grid",
+    ["lib-head", "lib-bar", "lib-status", "grid", "hint", "bulk"],
+    "toolbar row, then the status lines (WP WEB-FIX-UPD-VIS)",
   );
   const statuses = s.querySelectorAll('[role="status"]').map((n) => n.className);
   assert.deepEqual(statuses, ["lib-owned-text"], "no new live region: results go to the toast");
 });
 
+test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; 'Check updates' is the primary button, 'Check & update' the plain one", async () => {
+  server.mode = "ok";
+  server.enabled = true;
+  server.statusQueue = [IDLE];
+  const s = await openLibrary();
+  await until(() => updBtn(s).hidden === false, "button shown");
+  const bar = s.querySelector(".lib-bar");
+  assert.deepEqual(bar.children.map((c) => c.className), ["lib-filters", "lib-checkbtns"]);
+  assert.deepEqual(bar.children[0].children.map((c) => c.className.split(" ")[0]), ["search", "chips"]);
+  const [first, second] = s.querySelector(".lib-checkbtns").children;
+  assert.equal(first.textContent, "Check updates");
+  assert.deepEqual(first.className.split(" ").sort(), ["btn", "primary", "sm"], "MUTATION PIN: the check-only button is the primary one");
+  assert.equal(second.textContent, "Check & update all cached games");
+  assert.deepEqual(second.className.split(" ").sort(), ["btn", "sm"], "MUTATION PIN: the downloading button is NOT primary and not a see-through ghost");
+  assert.equal(s.querySelector(".lib-status").children.map((c) => c.className).join(" "), "lib-upd lib-owned");
+});
+
 test("badge + 'Updates' chip from update_available; the chip filters the grid", async () => {
   server.mode = "ok";
   const s = await openLibrary();
-  assert.ok(card(s, 10).querySelector(".updbadge"), "badge on the flagged game");
-  assert.equal(card(s, 30).querySelector(".updbadge"), null);
+  assert.equal(stateWord(s, 10), "Update available", "state on the flagged game");
+  assert.match(pillKind(s, 10), /\bk-stale\b/);
+  assert.equal(card(s, 10).querySelector(".updbadge"), null, "WP UPD-6: no second 'Update' line");
+  assert.equal(stateWord(s, 30), "Current");
+  assert.match(pillKind(s, 30), /\bk-cached\b/);
   assert.ok(chipKeys(s).includes("updates"));
   assert.equal(chip(s, "updates").querySelector(".n").textContent, "1");
   pressChip(s, "updates");
@@ -240,7 +264,8 @@ test("press: POST once (no body), busy while running, polls to the end, re-reads
   assert.match(toastText.textContent, /Checked 2 games · 2 updates available/);
   await until(() => count("GET /v1/games") > gamesBefore, "games re-read after the run");
   await until(() => chip(s, "updates").querySelector(".n").textContent === "2", "chip count follows the new verdicts");
-  assert.ok(card(s, 30).querySelector(".updbadge"), "badge appeared on the newly flagged game");
+  await until(() => stateWord(s, 30) === "Update available", "state appeared on the newly flagged game");
+  assert.match(pillKind(s, 30), /\bk-stale\b/);
   const readsAfter = statusReads();
   await tick(2300);
   assert.equal(statusReads(), readsAfter, "MUTATION PIN: no polling after running=false");

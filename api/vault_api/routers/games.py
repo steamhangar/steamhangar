@@ -13,7 +13,16 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from vault_api import cover_art, cover_cache, depot_manifests, oracle, scheduler, settings_store, tool_apps
+from vault_api import (
+    app_classification,
+    cover_art,
+    cover_cache,
+    depot_manifests,
+    oracle,
+    scheduler,
+    settings_store,
+    tool_apps,
+)
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
@@ -124,6 +133,10 @@ def _installed_on_for_appid(
 
 class GameSummary(BaseModel):
     appid: int
+    # The name vault-api recorded (owned library, agent, mapping); when it has
+    # none, Steam's name for the app from the store lookup or the oracle's
+    # stored answer (WP TOOL-APPS-2a, plain text, at most 256 characters, as
+    # Steam spells it). Null when no source knows it.
     name: str | None
     status: str
     last_prefill_at: str | None
@@ -248,6 +261,72 @@ class GameSummary(BaseModel):
     update_available: bool = False
     # When the oracle last answered for this app (UTC), null if never.
     update_checked_at: str | None = None
+    # WP TOOL-APPS-2a (ADR-0022 §1): the TOP-LEVEL game this app is a content
+    # package of, or null when it is not grouped -- no source named a parent,
+    # the chain is cyclic or longer than 4 links, the top-level parent is not
+    # a tracked app, or the app (or a parent on its chain) is on the fixed
+    # tool list (``tool_app``). The list stays flat: the server never nests or
+    # drops rows, the UIs group. Display data only; no download, GC or delete
+    # path reads it.
+    parent_appid: int | None = None
+    # One of "game", "dlc", "tool", "application", "config", "music",
+    # "video", "demo", or null (unknown). Per field, Steam's store item lookup
+    # first, else (only while the manifest oracle is on) the oracle's stored
+    # answers for cached apps; "dlc" also when only a cached parent's DLC list
+    # names the app. Display only: ``tool_app`` stays the fixed list (an
+    # ``app_type`` of "tool" never stops a prefill).
+    app_type: str | None = None
+    # WP TOOL-APPS-2 (ADR-0022 §2, "decided in the API package"): the size of
+    # the whole group this row heads -- the union of the depots mapped to this
+    # app and to every app whose ``parent_appid`` is this app, each depot
+    # counted ONCE (never the sum of the members' ``size_bytes``, which would
+    # double-count a depot shared inside the group). Same null rules as
+    # ``size_bytes``: null when no depot is mapped or none is on disk yet.
+    # For an ungrouped top-level row it equals ``size_bytes``; for a row that
+    # is itself grouped under a parent (``parent_appid`` set) it is null --
+    # its bytes are part of its parent's ``group_size_bytes``.
+    group_size_bytes: int | None = None
+
+
+def _children_by_parent(
+    classifications: dict[int, app_classification.Classification],
+) -> dict[int, list[int]]:
+    """``{parent appid: [grouped child appids]}`` -- built once per request,
+    so the per-row group size is O(members), not O(classified apps)."""
+    out: dict[int, list[int]] = {}
+    for child, cls in classifications.items():
+        if cls.parent_appid is not None:
+            out.setdefault(cls.parent_appid, []).append(child)
+    return out
+
+
+def _group_size_bytes(
+    appid: int,
+    classifications: dict[int, app_classification.Classification],
+    children_by_parent: dict[int, list[int]],
+    app_depotids: dict[int, list[int]],
+    depot_bytes: dict[int, int],
+) -> int | None:
+    """``group_size_bytes`` for one row (see ``GameSummary``). Grouping is the
+    same ``parent_appid`` resolution the list returns."""
+    own = classifications.get(appid)
+    if own is not None and own.parent_appid is not None:
+        return None
+    members = [appid, *children_by_parent.get(appid, [])]
+    depots = {depotid for member in members for depotid in app_depotids.get(member, [])}
+    return app_size_bytes(sorted(depots), depot_bytes)
+
+
+def _classification_fields(
+    classification: app_classification.Classification | None,
+) -> dict[str, object]:
+    """``parent_appid`` / ``app_type`` for one app (WP TOOL-APPS-2a)."""
+    if classification is None:
+        classification = app_classification.UNCLASSIFIED
+    return {
+        "parent_appid": classification.parent_appid,
+        "app_type": classification.app_type,
+    }
 
 
 def _tool_app_fields(appid: int) -> dict[str, object]:
@@ -318,6 +397,11 @@ class GameDetail(BaseModel):
     # See GameSummary.update_available / .update_checked_at (WP UPD-1).
     update_available: bool = False
     update_checked_at: str | None = None
+    # See GameSummary.parent_appid / .app_type (WP TOOL-APPS-2a).
+    parent_appid: int | None = None
+    app_type: str | None = None
+    # See GameSummary.group_size_bytes (WP TOOL-APPS-2).
+    group_size_bytes: int | None = None
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -368,6 +452,12 @@ def list_games(
         )
         # WP UPD-1: stored oracle verdicts, three statements for the whole list.
         update_verdicts = oracle.verdicts_by_app(conn, settings=base_settings)
+        # WP TOOL-APPS-2a: stored classification, nesting resolved, two
+        # statements for the whole list.
+        classifications = app_classification.resolve_classifications(
+            conn, oracle_enabled=base_settings.manifest_oracle_enabled
+        )
+        children_by_parent = _children_by_parent(classifications)
 
     app_depotids: dict[int, list[int]] = {}
     for row in depot_rows:
@@ -383,7 +473,9 @@ def list_games(
         games.append(
             GameSummary(
                 appid=row["appid"],
-                name=row["name"],
+                name=app_classification.display_name(
+                    row["name"], classifications.get(row["appid"])
+                ),
                 status=row["status"],
                 last_prefill_at=row["last_prefill_at"],
                 last_manifest_check=row["last_manifest_check"],
@@ -398,6 +490,10 @@ def list_games(
                 cover_url=covers.get(row["appid"]),
                 cover_cached_url=cached_covers.get(row["appid"]),
                 **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
+                **_classification_fields(classifications.get(row["appid"])),
+                group_size_bytes=_group_size_bytes(
+                    row["appid"], classifications, children_by_parent, app_depotids, depot_bytes
+                ),
             )
         )
     return games
@@ -456,6 +552,20 @@ def get_game(
             conn, request.app.state.settings.vault_api_key, appid
         )
         update_view = oracle.app_view(conn, appid, settings=base_settings)
+        # Same resolution as the list (the chain may pass through other apps).
+        classifications = app_classification.resolve_classifications(
+            conn, oracle_enabled=base_settings.manifest_oracle_enabled
+        )
+        children_by_parent = _children_by_parent(classifications)
+        classification = classifications.get(appid)
+        # The depots of every app this one heads (group_size_bytes).
+        group_members = sorted({appid, *children_by_parent.get(appid, [])})
+        group_depot_rows = conn.execute(
+            "SELECT appid, depotid FROM depot_app_map WHERE appid IN ({})".format(
+                ",".join("?" for _ in group_members)
+            ),
+            group_members,
+        ).fetchall()
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
@@ -469,9 +579,12 @@ def get_game(
     ]
 
     detail_size = app_size_bytes([row["depotid"] for row in depot_rows], depot_bytes)
+    group_depotids: dict[int, list[int]] = {}
+    for row in group_depot_rows:
+        group_depotids.setdefault(int(row["appid"]), []).append(int(row["depotid"]))
     return GameDetail(
         appid=app_row["appid"],
-        name=app_row["name"],
+        name=app_classification.display_name(app_row["name"], classification),
         status=app_row["status"],
         last_prefill_at=app_row["last_prefill_at"],
         last_manifest_check=app_row["last_manifest_check"],
@@ -488,5 +601,9 @@ def get_game(
         **_update_fields(
             (update_view.verdict, update_view.checked_at) if update_view.known else None,
             detail_size,
+        ),
+        **_classification_fields(classification),
+        group_size_bytes=_group_size_bytes(
+            appid, classifications, children_by_parent, group_depotids, depot_bytes
         ),
     )

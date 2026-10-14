@@ -55,14 +55,40 @@
  * (see the WP 4a.8 coder's report); not unit-tested (DOM-building
  * component, see this file's own long-standing header note above).
  *
- * **"Update available" badge (WP UPD-2).** `game.update_available === true`
- * (WP UPD-1: a stale oracle verdict on a game with cache content) adds a
- * `.updbadge` span to the meta row, on its own line like `.instbadge`, and
- * an "Update available" fragment to the card's accessible name. It is NOT a
- * status kind: `dispKind`/`data-dk` are unchanged, the card still says
- * "Cached" (the copy on disk is valid, just not the newest). `views/
- * library.js` full-renders when the flag flips (`updateFlagsChanged`), and
- * `patchCardVolatile` keeps the badge in sync as well.
+ * **"Update available" state (WP UPD-6, supersedes the UPD-2 badge on
+ * cached cards).** `game.update_available === true` (WP UPD-1: a stale
+ * oracle verdict on a game with cache content; a group row ORs it over its
+ * members) turns a CACHED card's status into "Update available": the pill
+ * and the list-layout meta icon draw the orange "stale" refresh glyph
+ * instead of the green check, and the status word reads "Update available"
+ * in `--stale` (lib/game-status.js `showsUpdateState`, `cardIconKind`,
+ * `cardStatusWord`). User feedback on rc15: cards said both "Current" and
+ * "Update". It is a DISPLAY overlay, not a status kind: `dispKind`/`data-dk`
+ * stay `cached`, so `views/library.js` full-renders when the flag flips
+ * (`updateFlagsChanged`); `patchCardVolatile` never redraws the icon.
+ * The UPD-2 `.updbadge` line remains only for a card whose status word
+ * does NOT already say it (a failed or running app that still carries the
+ * flag), so nothing on the card is said twice.
+ *
+ * **"Never played" pill (WP WEB-FEAT-SUGGEST-2).** The Phase 4h panel's
+ * "fully cached, never played" statement, moved onto the card: a second
+ * pill right of the status pill on the cover (both inside `.capbadges`),
+ * plus a `.playbadge` twin in the meta row that only the list layout shows
+ * (its cover is too small for pills). Shown only for a CACHED card whose
+ * owned-list playtime is a real zero (`lib/decision-support.js`
+ * `isNeverPlayedCached`; playtime reaches the app only with the operator's
+ * ADR-0010 gate on). Plain text, no icon, `aria-hidden` — the card's
+ * accessible name carries "Fully cached, never played" instead.
+ *
+ * **Group cards (WP TOOL-APPS-2c, ADR-0022 §3).** A row built by
+ * `lib/content-groups.js`'s `groupGames` (a parent game with its content
+ * packages) is one card: the parent's status, the group's size (the union of
+ * the members' depots, `displaySizeBytes`), and a `.pkgline` in the meta row
+ * — "+N content packages", followed by a warning "· N failed" when a package
+ * failed (user decision Q3 B variant). The package list itself lives in the
+ * detail sheet (Q4 A). `data-gk` carries the group's structural part
+ * (package count and failed count, `ctx.failedPackageCount`): a change
+ * rebuilds the card, never a patch.
  */
 
 import { createStatusIcon, STATUS_LABEL } from "./status-icon.js";
@@ -76,12 +102,28 @@ import {
   installedBadgeCompactText,
   INSTALLED_BADGE,
   isToolApp,
-  statusIconKind,
-  statusWordFor,
   gameDisplayName,
+  showsUpdateState,
+  cardIconKind,
+  cardTextKind,
+  cardStatusWord,
+  UPDATE_AVAILABLE_WORD,
 } from "../lib/game-status.js";
 import { formatBytesGB } from "../lib/format.js";
+import {
+  displaySizeBytes,
+  failedPackagesText,
+  isGroup,
+  packagesAriaText,
+  packagesLineText,
+} from "../lib/content-groups.js";
 import { coverCandidates, fallbackHues, fallbackPattern, wireCoverFallback } from "../lib/cover-art.js";
+import {
+  isNeverPlayedCached,
+  NEVER_PLAYED_LABEL,
+  NEVER_PLAYED_COMPACT_LABEL,
+  NEVER_PLAYED_DESCRIPTION,
+} from "../lib/decision-support.js";
 
 /** The exact string library.js's `GET /v1/games` tick handler
  * (js/lib/render-plan.js's `planGamesUpdate`) compares against a live
@@ -95,7 +137,7 @@ function pillNumberText(game, kind) {
   // Honest per game-status.js's Divergence 2: no fabricated live percentage
   // for running/paused — only a genuinely cached game prints a number.
   if (kind !== "cached") return null;
-  return formatBytesGB(game.size_bytes);
+  return formatBytesGB(displaySizeBytes(game)); // WP TOOL-APPS-2c: a group's union
 }
 
 /** Installed-badge class for the `.instbadge` span (WP AG-2, css/app.css) —
@@ -163,21 +205,29 @@ function syncInstalledTag(metaEl, game) {
   }
 }
 
-export const UPDATE_BADGE_TEXT = "Update available";
+export const UPDATE_BADGE_TEXT = UPDATE_AVAILABLE_WORD;
 export const UPDATE_BADGE_COMPACT_TEXT = "Update";
+
+/** Whether the card needs the separate `.updbadge` line: the flag is set
+ * and the status word does not already say "Update available" (WP UPD-6). */
+function showsUpdateBadge(game, kind) {
+  return game.update_available === true && !showsUpdateState(game, kind);
+}
 
 /**
  * Create or remove the `.updbadge` child of a card's `.meta` row so it
- * matches `game.update_available` (WP UPD-2). Plain text, no icon, no
- * animation — the same documented exception to `patchCardVolatile`'s
- * "no node created or removed" rule as `syncInstalledTag`. Two children like
- * `.instbadge`: CSS shows the compact word in cols3 and list.
+ * matches `showsUpdateBadge` (WP UPD-2, narrowed by WP UPD-6). Plain text,
+ * no icon, no animation — the same documented exception to
+ * `patchCardVolatile`'s "no node created or removed" rule as
+ * `syncInstalledTag`. Two children like `.instbadge`: CSS shows the compact
+ * word in cols3 and list.
  * @param {HTMLElement} metaEl
  * @param {object} game
+ * @param {string} kind the card's dispKind
  */
-function syncUpdateTag(metaEl, game) {
+function syncUpdateTag(metaEl, game, kind) {
   const existing = metaEl.querySelector(".updbadge");
-  if (game.update_available !== true) {
+  if (!showsUpdateBadge(game, kind)) {
     if (existing) existing.remove();
     return;
   }
@@ -192,6 +242,51 @@ function syncUpdateTag(metaEl, game) {
   compact.textContent = UPDATE_BADGE_COMPACT_TEXT;
   tag.append(full, compact);
   metaEl.appendChild(tag);
+}
+
+/** Whether this card shows the "Never played" pill (module header). */
+function showsNeverPlayed(game, kind) {
+  return kind === KIND.CACHED && isNeverPlayedCached(game);
+}
+
+function neverPlayedNode(className, fullClass, compactClass) {
+  const tag = document.createElement("span");
+  tag.className = className;
+  tag.title = NEVER_PLAYED_DESCRIPTION;
+  tag.setAttribute("aria-hidden", "true");
+  const full = document.createElement("span");
+  full.className = fullClass;
+  full.textContent = NEVER_PLAYED_LABEL;
+  const compact = document.createElement("span");
+  compact.className = compactClass;
+  compact.textContent = NEVER_PLAYED_COMPACT_LABEL;
+  tag.append(full, compact);
+  return tag;
+}
+
+/**
+ * Create or remove the "Never played" pill (in `.capbadges`, after the
+ * status pill) and its list-layout twin (`.playbadge` in `.meta`). Plain
+ * text nodes only — the same documented exception to `patchCardVolatile`'s
+ * "no node created or removed" rule as `syncUpdateTag`; the status pill and
+ * its icon are never touched.
+ * @param {HTMLElement} cardEl
+ * @param {object} game
+ * @param {string} kind
+ */
+function syncNeverPlayed(cardEl, game, kind) {
+  const want = showsNeverPlayed(game, kind);
+  const badges = cardEl.querySelector(".capbadges");
+  const metaEl = cardEl.querySelector(".meta");
+  const pill = badges ? badges.querySelector(".playpill") : null;
+  const twin = metaEl ? metaEl.querySelector(".playbadge") : null;
+  if (!want) {
+    if (pill) pill.remove();
+    if (twin) twin.remove();
+    return;
+  }
+  if (badges && !pill) badges.appendChild(neverPlayedNode("playpill", "ppfull", "ppcompact"));
+  if (metaEl && !twin) metaEl.appendChild(neverPlayedNode("playbadge", "pbfull", "pbcompact"));
 }
 
 /**
@@ -234,17 +329,65 @@ export function patchCardVolatile(cardEl, game, kind) {
     pill.classList.toggle("bare", !newPillNum);
   }
   const sizeEl = cardEl.querySelector(".meta .size");
-  if (sizeEl) sizeEl.textContent = formatBytesGB(game.size_bytes) || "—";
+  if (sizeEl) sizeEl.textContent = formatBytesGB(displaySizeBytes(game)) || "—";
   const metaEl = cardEl.querySelector(".meta");
   if (metaEl) {
     syncInstalledTag(metaEl, game);
-    syncUpdateTag(metaEl, game);
+    syncUpdateTag(metaEl, game, kind);
   }
+  syncNeverPlayed(cardEl, game, kind); // WP WEB-FEAT-SUGGEST-2
   // Keep the explicit accessible name (module header) in sync too — `kind`
   // is unchanged by definition on the patch path (round-7 rule), but the
   // SIZE this same tick just wrote above is part of the announced name and
   // would otherwise go stale until the next structural rebuild.
-  cardEl.setAttribute("aria-label", cardAccessibleLabel(game, kind));
+  cardEl.setAttribute("aria-label", cardAccessibleLabel(game, kind, failedCountFromKey(cardEl.dataset.gk)));
+}
+
+/** The failed-package count a card was built with (its `data-gk`). */
+function failedCountFromKey(gk) {
+  const m = typeof gk === "string" ? gk.match(/^\d+:(\d+)$/) : null;
+  return m ? Number(m[1]) : 0;
+}
+
+/** `data-gk`: a group card's structural part (lib/content-groups.js
+ * `groupCardKey` computes the same string from the live jobs). */
+function groupKeyFor(game, failedCount) {
+  return isGroup(game) ? `${game.packages.length}:${failedCount}` : "";
+}
+
+/**
+ * The "+N content packages" line of a group card (WP TOOL-APPS-2c), with a
+ * "· N failed" warning when a package failed. Plain text, `aria-hidden`
+ * (the card's accessible name carries the same facts).
+ * @param {object} game a group row
+ * @param {number} failedCount
+ * @returns {HTMLElement}
+ */
+function buildPackagesLine(game, failedCount) {
+  const line = document.createElement("span");
+  line.className = "pkgline";
+  line.setAttribute("aria-hidden", "true");
+  const n = document.createElement("span");
+  n.className = "pkgn";
+  n.textContent = packagesLineText(game.packages.length);
+  line.appendChild(n);
+  if (failedCount > 0) {
+    // Review fix: the separator is its own element (a leading space in a
+    // flex item's text is trimmed), and the warning is one unit that wraps
+    // onto its own line on a narrow card instead of being clipped
+    // (css/app.css `.pkgline`).
+    const warn = document.createElement("span");
+    warn.className = "pkgfail";
+    const sep = document.createElement("span");
+    sep.className = "pkgsep";
+    sep.textContent = "·";
+    const text = document.createElement("span");
+    text.className = "pkgfailtext";
+    text.textContent = failedPackagesText(failedCount);
+    warn.append(sep, text);
+    line.appendChild(warn);
+  }
+  return line;
 }
 
 function buildCover(game) {
@@ -282,8 +425,8 @@ function buildCover(game) {
   return cap;
 }
 
-function buildIcon(kind, { action, gameName }) {
-  const icon = createStatusIcon(statusIconKind(kind));
+function buildIcon(iconKind, { action, gameName }) {
+  const icon = createStatusIcon(iconKind);
   if (!action) {
     // No action -> a plain, non-focusable span (see createStatusIcon). The
     // meta row always shows the SAME status word right next to this icon
@@ -331,7 +474,7 @@ function buildPill(game, kind, action) {
     pill.title = action.title;
     pill.setAttribute("aria-label", `${action.title} — ${displayName(game)}`);
   }
-  const icon = createStatusIcon(statusIconKind(kind));
+  const icon = createStatusIcon(cardIconKind(game, kind)); // WP UPD-6: orange for an update
   // The pill's icon is always redundant with the meta row's visible status
   // word on the SAME card (round 6 gave every layout that word back) — hide
   // it from assistive tech whether or not the pill itself is a button: a
@@ -407,11 +550,13 @@ function installedAriaFragment(game, kind) {
  * visual placeholder, not spoken). Recomputed by `patchCardVolatile` too,
  * since a size-only tick (no structural change) would otherwise leave a
  * stale byte count in the announced name. */
-function cardAccessibleLabel(game, kind) {
-  const parts = [displayName(game), statusWordFor(kind, STATUS_LABEL)];
-  const sizeText = formatBytesGB(game.size_bytes);
+function cardAccessibleLabel(game, kind, failedCount = 0) {
+  const parts = [displayName(game), cardStatusWord(game, kind, STATUS_LABEL)];
+  const sizeText = formatBytesGB(displaySizeBytes(game));
   if (sizeText) parts.push(sizeText);
-  if (game.update_available === true) parts.push(UPDATE_BADGE_TEXT);
+  if (isGroup(game)) parts.push(packagesAriaText(game.packages.length, failedCount));
+  if (showsUpdateBadge(game, kind)) parts.push(UPDATE_BADGE_TEXT);
+  if (showsNeverPlayed(game, kind)) parts.push(NEVER_PLAYED_DESCRIPTION);
   const installedText = installedAriaFragment(game, kind);
   if (installedText) parts.push(installedText);
   return parts.join(" — ");
@@ -427,11 +572,14 @@ function cardAccessibleLabel(game, kind) {
  *   onLongPress: (appid: number) => void,
  *   onToggle: (appid: number) => void,
  *   onAction: (appid: number, actionType: string) => void,
- * }} ctx
+ *   failedPackageCount?: number,
+ * }} ctx `failedPackageCount` (WP TOOL-APPS-2c): how many of a group
+ *   card's packages failed (lib/content-groups.js `failedPackages`).
  * @returns {HTMLElement}
  */
 export function buildCard(game, ctx) {
   const { liveJob, picked, selecting, onOpen, onLongPress, onToggle, onAction } = ctx;
+  const failedCount = isGroup(game) ? ctx.failedPackageCount || 0 : 0;
   const kind = dispKind(game, liveJob);
   const action = statusAction(game, liveJob, selecting);
 
@@ -441,9 +589,10 @@ export function buildCard(game, ctx) {
   card.className = "card" + (picked ? " picked" : "") + (isToolApp(game) ? " tool" : "");
   card.dataset.appid = String(game.appid);
   card.dataset.dk = kind;
+  card.dataset.gk = groupKeyFor(game, failedCount);
   card.setAttribute("role", "button");
   card.tabIndex = 0;
-  card.setAttribute("aria-label", cardAccessibleLabel(game, kind));
+  card.setAttribute("aria-label", cardAccessibleLabel(game, kind, failedCount));
   // In multi-select mode the card's default action is "toggle selection",
   // not "open" — aria-pressed makes that a stated TOGGLE state instead of a
   // silent visual-only "picked" class (mirrors the `.pick` checkmark, which
@@ -452,7 +601,13 @@ export function buildCard(game, ctx) {
 
   card.appendChild(buildCover(game));
   const cap = card.firstChild;
-  cap.appendChild(buildPill(game, kind, action)); // z-index:2 in CSS, so DOM order doesn't matter
+  // WP WEB-FEAT-SUGGEST-2: the status pill sits in `.capbadges` (the
+  // positioned row on the cover, z-index:2 in CSS), so a second pill
+  // ("Never played", syncNeverPlayed below) can follow it to the right.
+  const badges = document.createElement("div");
+  badges.className = "capbadges";
+  badges.appendChild(buildPill(game, kind, action));
+  cap.appendChild(badges);
 
   const name = document.createElement("div");
   name.className = "name";
@@ -482,10 +637,10 @@ export function buildCard(game, ctx) {
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.appendChild(buildIcon(kind, { action, gameName: displayName(game) }));
+  meta.appendChild(buildIcon(cardIconKind(game, kind), { action, gameName: displayName(game) }));
   const state = document.createElement("span");
-  state.className = "state tx-" + kind;
-  state.textContent = statusWordFor(kind, STATUS_LABEL);
+  state.className = "state tx-" + cardTextKind(game, kind);
+  state.textContent = cardStatusWord(game, kind, STATUS_LABEL); // WP UPD-6
   meta.appendChild(state);
   // Unlike the pill (which omits the number entirely rather than fabricate
   // one — see pillNumberText), the list/meta size column always shows
@@ -494,11 +649,14 @@ export function buildCard(game, ctx) {
   // `num?...:""` check is what actually hides it on the cover).
   const size = document.createElement("span");
   size.className = "size";
-  size.textContent = formatBytesGB(game.size_bytes) || "—";
+  size.textContent = formatBytesGB(displaySizeBytes(game)) || "—";
   meta.appendChild(size);
-  syncUpdateTag(meta, game); // WP UPD-2: appends `.updbadge` iff update_available
+  // WP TOOL-APPS-2c: the group's own line, before the badges.
+  if (isGroup(game)) meta.appendChild(buildPackagesLine(game, failedCount));
+  syncUpdateTag(meta, game, kind); // WP UPD-2/UPD-6: `.updbadge` iff flagged and not said by the status word
   syncInstalledTag(meta, game); // WP AG-2: appends `.instbadge` iff installed_on is non-empty
   card.appendChild(meta);
+  syncNeverPlayed(card, game, kind); // WP WEB-FEAT-SUGGEST-2: needs `.capbadges` and `.meta` in place
 
   // ---- interaction wiring (mockup parity: long-press / right-click /
   // header select icon -> multi-select; a tap toggles selection while

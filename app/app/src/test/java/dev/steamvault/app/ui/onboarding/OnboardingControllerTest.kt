@@ -29,13 +29,18 @@ private class FakeSteamIdentityRepository(
     var loginResult: SteamLoginResult = SteamLoginResult.Success("76561198042117903"),
 ) : SteamIdentityRepository {
     var buildLoginUrlCalls = 0
+    var lastVaultBaseUrl: String? = null
     var completeLoginCalls = 0
     var signOutCalls = 0
 
     override fun state(): SteamIdentityState = current
-    override fun buildLoginUrl(): String {
+
+    /** Mirrors the real repository's contract (WP D11): no URL without a
+     * vault address. */
+    override fun buildLoginUrl(vaultBaseUrl: String): String? {
         buildLoginUrlCalls++
-        return "https://steamcommunity.com/openid/login?fake=1"
+        lastVaultBaseUrl = vaultBaseUrl
+        return if (vaultBaseUrl.isBlank()) null else "https://steamcommunity.com/openid/login?fake=1"
     }
 
     override suspend fun completeLogin(rawCallbackUrl: String): SteamLoginResult {
@@ -106,12 +111,39 @@ class OnboardingControllerTest {
     fun `buildSteamLoginUrl clears any previous login error and delegates to the repository`() {
         val (controller, _, identity) = controller()
         controller.start(OnboardingMode.FIRST_RUN)
+        controller.baseUrlText = "http://192.168.1.50:8080"
 
         val url = controller.buildSteamLoginUrl()
 
         assertEquals(1, identity.buildLoginUrlCalls)
-        assertTrue(url.isNotEmpty())
+        assertTrue(!url.isNullOrEmpty())
         assertNull(controller.loginError)
+    }
+
+    @Test
+    fun `MUTATION PIN -- buildSteamLoginUrl hands step 1's trimmed vault URL to the repository (WP D11)`() {
+        val (controller, _, identity) = controller()
+        controller.start(OnboardingMode.FIRST_RUN)
+        controller.baseUrlText = "  http://192.168.1.50:8080  "
+
+        controller.buildSteamLoginUrl()
+
+        assertEquals("http://192.168.1.50:8080", identity.lastVaultBaseUrl)
+    }
+
+    @Test
+    fun `buildSteamLoginUrl without a usable vault URL returns null and says why (WP D11)`() {
+        val (controller, _, _) = controller()
+        controller.start(OnboardingMode.FIRST_RUN)
+        controller.baseUrlText = ""
+
+        val url = controller.buildSteamLoginUrl()
+
+        assertNull(url)
+        assertEquals(
+            "Steam sign-in needs the vault address (http:// or https://) — set up the connection first.",
+            controller.loginError,
+        )
     }
 
     @Test

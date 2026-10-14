@@ -38,9 +38,5 @@ test("app.js: every window.localStorage read is a lazy getter or sits inside a t
   assert.deepEqual(offenders, []);
 });
 
-test("app.js: the decision panel gets the guarded storage (null on failure)", () => {
-  assert.match(
-    src,
-    /storage: \(\(\) => \{\s*try \{\s*return window\.localStorage;\s*\} catch \{\s*return null;\s*\}\s*\}\)\(\),/,
-  );
-});
+// The "decision panel gets the guarded storage" pin went with the panel
+// (WP WEB-FEAT-SUGGEST-2); the two generic guards above still cover app.js.

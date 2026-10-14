@@ -318,9 +318,9 @@ class PairingLinkTest {
     fun `the Steam OpenID callback routes to the OpenID handler`() {
         assertEquals(
             IncomingLinkRoute.STEAM_OPENID_CALLBACK,
-            routeIncomingLink("${SteamOpenIdConfig.RETURN_TO}?openid.mode=id_res&state=abc"),
+            routeIncomingLink("${SteamOpenIdConfig.APP_LINK}?openid.mode=id_res&state=abc"),
         )
-        assertEquals(IncomingLinkRoute.STEAM_OPENID_CALLBACK, routeIncomingLink(SteamOpenIdConfig.RETURN_TO))
+        assertEquals(IncomingLinkRoute.STEAM_OPENID_CALLBACK, routeIncomingLink(SteamOpenIdConfig.APP_LINK))
     }
 
     @Test
@@ -346,7 +346,7 @@ class PairingLinkTest {
         // Different schemes: the routing order in routeIncomingLink can
         // never make one kind shadow the other.
         assertFalse(SteamOpenIdConfig.SCHEME.equals(PairingLinkContract.SCHEME, ignoreCase = true))
-        assertEquals(IncomingLinkRoute.STEAM_OPENID_CALLBACK, routeIncomingLink("${SteamOpenIdConfig.RETURN_TO}?url=x&key=y&v=1"))
+        assertEquals(IncomingLinkRoute.STEAM_OPENID_CALLBACK, routeIncomingLink("${SteamOpenIdConfig.APP_LINK}?url=x&key=y&v=1"))
         assertEquals(IncomingLinkRoute.PAIRING, routeIncomingLink("steamhangar://pair?openid.mode=id_res"))
     }
 }

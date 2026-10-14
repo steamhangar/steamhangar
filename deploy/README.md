@@ -933,9 +933,16 @@ UNTIL the packaging work package that closed the actual
 `environment:` block, so the whole feature was unreachable in the shipped
 stack even though the code was correct — see `docs/LEARNINGS.md`
 "Containers"). To turn it back off, set BOTH variables to empty in `.env` —
-`.env.example` has the exact wording. It genuinely grows over time (one TSV
-line per request); `.env.example` also states plainly that vault-api can
-read the file but not truncate it, so rotation is on the operator.
+`.env.example` has the exact wording. It grows by one TSV line per
+request, and **since WP D15-ROT vault-core bounds it**: at 64 MiB it renames
+`event.log` to `event.log.1` (replacing the previous one) and has nginx
+reopen the log, so the two files together stay at about 128 MiB. One line
+per rotation in `docker compose logs vault-core`
+(`45-vault-eventlog-rotate.sh: rotated ...`). No `.env` change is needed;
+the knobs and the details are in `core/README.md` "Rotation and the USR1
+contract". vault-api's own in-place truncation
+(`VAULT_EVENT_LOG_MAX_BYTES`) is no longer needed for that; leaving it at
+its default is harmless, `0` switches it off.
 
 **Turning on auto-GC deletes files automatically once you pick `execute`.**
 Start with `dry-run` and read a few job logs (`GET /v1/jobs/{id}`) before
@@ -1293,6 +1300,12 @@ there is superseded by this.)
 Tune with `VAULT_LOG_MAX_SIZE` / `VAULT_LOG_MAX_FILE` in `.env`. vault-core
 writes **one line per depot request**, so a large prefill can churn through
 10 MB quickly — raise `max-file` if you want that history to survive.
+
+Since WP D15a every vault-core access-log line ends with `client=<address>`,
+the client's IP address as vault-core sees it (the Docker bridge gateway for
+requests from the host itself), so `docker logs vault-core | grep
+'client=192.168.1.42'` shows one device's requests. It is kept as long as the
+rotation above keeps the log; there is no switch to turn it off.
 
 `vault-dns` deliberately does **not** log queries. It is your LAN's forwarding
 resolver for *every* domain, so query logging would record full
@@ -1713,9 +1726,19 @@ What this deployment assumes, stated plainly so it can be checked:
   (`docs/PROJECT_PLAN.md` §10).
 - **vault-api is API-key authenticated on every route except `/v1/health`**,
   which returns a fixed body and exists so external monitoring can poll it.
+  Outside `/v1` two things are public as well: the web UI's static files and
+  `GET /auth/steam/app-return`, the Steam sign-in hand-off page for the
+  Android app (ADR-0004 addendum 5). That page reads no key, no database and
+  no network; it only forwards Steam's answer to the app's
+  `steamvault://auth/openid-return` link.
   For access from outside the LAN use Tailscale, Twingate, or your own TLS
   reverse proxy with forward-auth on top of the key — never a bare port
-  forward.
+  forward. **With forward-auth, let `GET /auth/steam/app-return` through**,
+  or make sure the proxy's login detour returns to it with the query string
+  intact: Steam's answer is entirely in that query, and a proxy that drops
+  it makes the app's Steam sign-in fail. The page's request line carries
+  the signed Steam assertion (including the SteamID64); filter that path
+  from proxy access logs if you ship them elsewhere.
 - **vault-dns is an open resolver if you publish it wrong.** It forwards
   arbitrary queries upstream with no source-address ACL, which is fine on a
   trusted LAN and a DNS amplification/reflection weapon on the internet.

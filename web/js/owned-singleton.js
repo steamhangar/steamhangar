@@ -3,7 +3,7 @@
  *
  * WEB-FEAT-1 kept the owned-list loader inside `views/library.js`, so only
  * the Library grid knew a title Steam had told us. Downloads, the detail
- * sheet, the notification panel and the decision panel read the raw
+ * sheet and the notification panel read the raw
  * `GET /v1/games` rows instead, and a job for an owned-only game read
  * "App 4358690" there: vault-api inserts the `apps` row with no name when
  * the job is queued (`api/vault_api/jobs.py`), and a job carries no name at

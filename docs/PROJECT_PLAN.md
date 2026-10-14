@@ -1992,6 +1992,12 @@ surface (playtime and last-played now flow through the API response).
       Original bullet: **4h.2 (web)** — the panel itself: a right-hand column at BP-XL
       (>=1800px), a collapsible card below that width. Serves the statements
       above. Depends on 4h.1's fields and on Phase 4e's breakpoints.
+      **Panel removed 2026-10-13 (user decision), statements moved, see
+      `docs/handover/post-0.1.0-roadmap.md` WEB-FEAT-SUGGEST-2:** "last
+      changed" to the detail sheet ("Last update downloaded N days ago"),
+      "fully cached, never played" to a card pill ("Never played"), "not
+      confirmed current" to one bell notification at 14 days, "unchanged
+      for N days" dropped.
 - [x] **4h.3 (web)** — DONE 2026-08-19: header art in the detail card
       (aspect-ratio as the only reservation, whole-wrapper collapse on 404
       — verified against the real CDN both ways), 665→676 web tests, Opus
@@ -2436,7 +2442,7 @@ steamhangar/
 |---|---|---|
 | `proxy_store` incompatible with range requests | HIGH | Phase 0 resolves this; Plan A fallback defined |
 | Steam changes its CDN URL scheme | MEDIUM | Log schema anomalies with alerts; abstract the mapping layer |
-| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API has no unauthenticated endpoints except `/v1/health` and the web UI's static files; stored covers are fetched by a key-derived signed URL (WP D10) (threat model §1/§7) |
+| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API has no unauthenticated endpoints except `/v1/health`, the web UI's static files and the static Steam sign-in hand-off page `/auth/steam/app-return` (ADR-0004 addendum 5); stored covers are fetched by a key-derived signed URL (WP D10) (threat model §1/§7) |
 | Shared depots → incomplete deletion | LOW | Shared detection + transparent reporting |
 | tsnet gomobile build complexity | MEDIUM | Profile abstraction means tsnet can ship later; system-VPN profile works day one |
 | Single-maintainer risk | MEDIUM | Small scope (Steam only), good docs, permissive license lower the contribution barrier |
@@ -3211,9 +3217,9 @@ below carry their own later dates, item 12 is the current one).
     - [ ] **D14 UPD-1..4 — always-on update check** (user decision
       2026-10-13; details in `docs/handover/post-0.1.0-roadmap.md`).
       - [x] **UPD-1 (API)** — vault-api checks cached games for updates
-        every `VAULT_SCHEDULE_INTERVAL_MINUTES` while a schedule window is
-        configured (open or closed; no window = manual checks only, the dev
-        instance), on a background runner (`update_check.py`, schema v19/v20
+        every `VAULT_SCHEDULE_INTERVAL_MINUTES` (at UPD-1 only while a
+        schedule window was configured; since UPD-5 with or without one),
+        on a background runner (`update_check.py`, schema v19/v20
         `update_check_state`); only an open window still enqueues the
         download (the sweep is unchanged). `POST /v1/updates/check` starts
         the same check in the background (`202`, no download),
@@ -3225,6 +3231,13 @@ below carry their own later dates, item 12 is the current one).
         `api.steamcmd.net` by itself while it is on (Weg A); a private
         mirror still needs `VAULT_EGRESS_ALLOW`. ADR addenda (ADR-0006,
         ADR-0011) in UPD-4.
+      - [x] **UPD-5 (API, rc16)** — the scheduled update check runs every
+        `VAULT_SCHEDULE_INTERVAL_MINUTES` whenever the oracle is on, with or
+        without a schedule window (user decision 2026-10-14, superseding
+        the UPD-1 review's window gate; the dev instance now checks in the
+        background too, anonymous metadata). Downloads and prefill sweeps
+        stay window-bound; `GET /v1/updates/status` `scheduled` now equals
+        `enabled`. ADR-0006 note 2026-10-14.
       - [ ] UPD-2 (web badge, button, filter chip), UPD-3 (Android), UPD-4
         (docs, ADR addendum superseding the 2026-08-18 "never bare Check" rule).
 

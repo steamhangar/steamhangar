@@ -39,7 +39,7 @@ class SteamOpenIdClientTest {
         "openid.mode" to "id_res",
         "openid.claimed_id" to "https://steamcommunity.com/openid/id/76561198042117903",
         "openid.identity" to "https://steamcommunity.com/openid/id/76561198042117903",
-        "openid.return_to" to SteamOpenIdConfig.RETURN_TO,
+        "openid.return_to" to SteamOpenIdConfig.APP_LINK,
         "openid.signed" to "signed,claimed_id,identity,return_to",
         "openid.sig" to "Zm9vYmFy",
     )

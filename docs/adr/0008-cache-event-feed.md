@@ -68,3 +68,42 @@ Option C. Consequences and boundaries:
 - The feed is optional at runtime: vault-core without the extra log (or
   vault-api without read access to it) degrades to today's behavior —
   serving, prefill, GC all unaffected.
+
+## Addendum 2026-10-13 (WP D15-ROT): vault-core rotates the log
+
+User decision 2026-10-13 (`docs/handover/post-0.1.0-roadmap.md`, "User
+decisions 2026-10-13 (late evening)"). The original decision gave rotation
+to the sweeper alone ("sweep, then truncate"). That is best-effort: where
+vault-api may not write the file, it never shrinks — measured on a
+production instance at 41 MB and growing, every sweep past 64 MiB would
+warn. Now:
+
+- vault-core rotates the event log itself: at 64 MiB (`45-vault-eventlog-
+  rotate.sh`, image-level `VAULT_EVENT_LOG_ROTATE_BYTES`, `0` = off) it
+  renames `event.log` to `event.log.1`, creates a fresh 101:101 file and
+  sends `USR1` to the nginx master. ONE old file is kept (about 128 MiB at
+  most). Rename, never copytruncate: no line is lost, and the old file stays
+  readable to the end.
+- This supersedes "rotation happens only after a successful sweep" and
+  "the sweeper owns rotation" in Option C above: vault-core is now the
+  primary rotator, on its own schedule, independent of vault-api.
+- The sweeper follows the rename (WP D15b): it stores the file's inode and
+  treats a different inode at the path as a rotation (inode only, never
+  `st_dev`, which ZFS does not keep stable across reboots). Before
+  switching it reads the unread tail of `event.log.1` while that file still
+  has the cursor's inode, then restarts at offset 0 of the new file. Lines
+  are lost only if `event.log.1` is replaced again before the sweeper
+  drains it (two rotations within one sweep interval).
+- The sweeper's in-place truncation (`VAULT_EVENT_LOG_MAX_BYTES`, default
+  64 MiB) stays as a fallback for deployments without the vault-core hook
+  (`VAULT_EVENT_LOG_ROTATE_BYTES=0`, or an older core image). It never
+  truncates while its cursor still refers to the renamed-away file. In the
+  shipped containers the log belongs to uid 101 (vault-core's start hook),
+  which vault-api runs as, so truncation is permitted and whichever of the
+  two runs first wins; where the file is owned otherwise (as measured on
+  production), a truncation attempt is refused and counted
+  (`truncate_denied_count`) as before. With the core hook running the log
+  rarely reaches the limit at sweep time, because the hook checks every
+  60 s by default.
+- "Optional at runtime" is unchanged: with `VAULT_EVENT_LOG` empty, the
+  rotation hook does nothing.

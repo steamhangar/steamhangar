@@ -3,6 +3,8 @@ package dev.steamvault.app.ui.downloads.logic
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.ui.library.logic.appTitle
+import dev.steamvault.app.ui.library.logic.contentPackageFallbackTitle
+import dev.steamvault.app.ui.library.logic.hasText
 import dev.steamvault.app.ui.status.StatusKind
 
 /**
@@ -84,8 +86,21 @@ data class JobCardModel(
  *   owned list is loaded (no library SteamID64 set, relay failed), which
  *   leaves the vault name and the "App <id>" fallback.
  */
-fun nameFor(appid: Int, gamesByAppid: Map<Int, GameSummary>, ownedNames: Map<Int, String> = emptyMap()): String =
-    appTitle(appid, gamesByAppid[appid]?.name, ownedNames[appid])
+fun nameFor(appid: Int, gamesByAppid: Map<Int, GameSummary>, ownedNames: Map<Int, String> = emptyMap()): String {
+    val game = gamesByAppid[appid]
+    if (hasText(game?.name) || hasText(ownedNames[appid])) return appTitle(appid, game?.name, ownedNames[appid])
+    // WP TOOL-APPS-2d (ADR-0022 §2): a content package with no name of its
+    // own reads "<parent title> · content <appid>", not "App <appid>".
+    contentPackageFallbackTitle(game) { parent ->
+        val parentName = gamesByAppid[parent]?.name
+        when {
+            hasText(parentName) -> parentName!!.trim()
+            hasText(ownedNames[parent]) -> ownedNames.getValue(parent).trim()
+            else -> null
+        }
+    }?.let { return it }
+    return appTitle(appid, game?.name, ownedNames[appid])
+}
 
 /**
  * @param job a `running` or `paused` job — the only two statuses

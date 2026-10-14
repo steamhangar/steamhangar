@@ -214,6 +214,13 @@ export const api = {
   pauseJob: (id) => request("POST", `/v1/jobs/${id}/pause`),
   resumeJob: (id) => request("POST", `/v1/jobs/${id}/resume`),
   deleteCache: (appid) => request("DELETE", `/v1/cache/${appid}`),
+  // WP TOOL-APPS-2c (api/README.md "Grouped delete"): the preview of a
+  // delete together with the game's content packages, and the delete
+  // itself with the confirmed member list (409 when the server's set
+  // changed since the preview).
+  deletePlan: (appid) => request("GET", `/v1/cache/${appid}/delete-plan`, { params: { with_packages: "true" } }),
+  deleteCacheWithPackages: (appid, members) =>
+    request("DELETE", `/v1/cache/${appid}`, { params: { with_packages: "true", members: members.join(",") } }),
   gc: (appid, execute = false) => request("POST", `/v1/cache/${appid}/gc`, { body: { execute } }),
   cacheSummary: () => request("GET", "/v1/cache/summary"),
   clients: () => request("GET", "/v1/clients"),

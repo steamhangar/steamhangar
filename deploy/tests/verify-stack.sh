@@ -1132,14 +1132,15 @@ assert_eq "" "$bare443" "compose.yaml has no other :443 port mapping"
 # =============================================================================
 section "4. Stack up (vault-core + vault-api + vault-proxy + vault-runner)"
 # =============================================================================
-# WP UPD-1: the manifest oracle is ON by default and this test .env leaves
-# VAULT_SCHEDULE_WINDOW unset, which renders the 03:00-07:00 default -- a
-# configured window, so the scheduled update check would send the app id of
-# every cached game to api.steamcmd.net on the first tick. This throwaway
-# stack must never do that on its own: the RUNTIME part runs with the oracle
-# off. Appended only now, after every section-3 render above has pinned the
-# shipped defaults (empty = on); step 6l still checks the oracle-on proxy
-# filter, through a separate render of the entrypoint into /tmp.
+# WP UPD-1: the manifest oracle is ON by default, and since WP UPD-5 the
+# scheduled update check runs whenever it is on -- with or without a schedule
+# window -- so it would send the app id of every cached game to
+# api.steamcmd.net on the first tick. This throwaway stack must never do that
+# on its own: the RUNTIME part runs with the oracle off (the oracle switch is
+# the only one that stops the check; a blank window would not). Appended
+# only now, after every section-3 render above has pinned the shipped
+# defaults (empty = on); step 6l still checks the oracle-on proxy filter,
+# through a separate render of the entrypoint into /tmp.
 printf 'VAULT_MANIFEST_ORACLE=off\n' >> "$env_file"
 say 'Runtime .env adds VAULT_MANIFEST_ORACLE=off (WP UPD-1: no automatic oracle query from this test stack).'
 compose_up_or_die "$env_file" up -d
@@ -1322,6 +1323,10 @@ logline=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep "$CHUNK" | head 
 # cache=..., and this check must pass with or without them. Section 10 reads
 # the two fields when they are present.
 assert_contains "$logline" "cache=" "access log lines carry the vault format's cache= field"
+# WP D15a: the client address is the LAST field (appended after limit_conn=),
+# IPv4 or IPv6 text form. From the host this is the bridge gateway (userland
+# proxy, ADR-0020), so only the shape is pinned, not a specific address.
+assert_eq "1" "$(printf '%s\n' "$logline" | grep -cE ' limit_conn=[A-Z-]+ client=[0-9A-Fa-f.:]+$' || true)" "access log lines end with limit_conn=... client=<address> (WP D15a)"
 
 step "5h. json-file log limits are actually applied to the container"
 run "docker inspect --format '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}}' \$(docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' ps -q vault-core vault-api)"
@@ -1392,6 +1397,14 @@ while [ "$i" -lt 30 ]; do
     i=$((i + 1)); sleep 2
 done
 assert_eq "healthy" "$core_h" "vault-core is healthy again after enabling VAULT_EVENT_LOG"
+# WP D15-ROT: the shipped image starts its rotation loop with the decided
+# default (64 MiB, one old file), and the loop is a child of PID 1 (the
+# nginx master reaps it; no second init). The rotation itself is proven
+# live with a tiny threshold in .github/scripts/verify-core-nginx.sh.
+rot_boot=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep '^45-vault-eventlog-rotate.sh: rotating ' | tail -n 1)
+assert_contains "$rot_boot" "rotating /vault/logs/event.log at 67108864 bytes into /vault/logs/event.log.1 (one old file kept), checked every 60s" "vault-core starts the event-log rotation loop with the 64 MiB default (D15-ROT)"
+rot_ps=$(dc exec -T vault-core sh -c 'ps -o ppid,args | grep "[4]5-vault-eventlog-rotate.sh" | head -n 1' 2>&1 | tr -d '\r')
+assert_eq "1" "$(printf '%s' "$rot_ps" | awk '{print $1}')" "the rotation loop runs as a child of PID 1, the nginx master (D15-ROT)"
 
 say ''
 say 'Removing the object 5e already cached, so the next request is a genuine MISS'

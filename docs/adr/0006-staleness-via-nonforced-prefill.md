@@ -2,7 +2,8 @@
 
 Date: 2026-08-06
 Status: Accepted (orchestrator decision from evidence; see docs/research/phase3-manifests.md).
-Decision 4's "opt-in, default off" superseded by the addendum 2026-10-13 below.
+Decision 4's "opt-in, default off" superseded by the addendum 2026-10-13 below;
+that addendum's window gate superseded by the note 2026-10-14 (WP UPD-5).
 
 ## Decision
 
@@ -95,3 +96,49 @@ recorded; this addendum supersedes two points.
    the oracle on get this background polling new; fresh installs, and
    upgrades that never set the variable, now query this third party by
    default. Opt-out for both: `VAULT_MANIFEST_ORACLE=off` (or `none`).
+
+## Addendum 2026-10-13 — the grouped delete is the one place oracle data can widen a deletion (WP TOOL-APPS-2b, ADR-0022)
+
+Decision 4 promised that oracle data can only add protection. That still
+holds for GC, the scheduler and the plain `DELETE /v1/cache/{appid}`. It no
+longer holds in full for one request: the user-confirmed grouped delete
+(`DELETE /v1/cache/{appid}?with_packages=true&members=...`, ADR-0022 §4).
+Which apps are content packages is decided from stored classification,
+which comes from the store lookup or, while the oracle is on, from the
+oracle's stored `common.type` / `common.parent` and a cached parent's
+`listofdlc` / `dlcappid`. A wrong or poisoned answer can therefore put
+another app into the delete set, and members of the set do not protect
+each other's depots.
+
+Bounds: opt-in per request; the request must name exactly the members the
+confirmation dialog listed (from `GET /v1/cache/{appid}/delete-plan`;
+`409` with both lists on any difference); only apps whose OWN type (store
+or own PICS type, not one inferred from a parent's list) is `dlc`,
+`config`, `music`, `video` or `demo` join; fixed-list tool apps never join;
+any app outside the set still protects its depots under the ADR-0003
+remnant rule. No new oracle request is made for this (ADR-0022 Q8 B: the
+update check still asks only about cached apps). `api/vault_api/oracle.py`
+states the exception in its safety-invariant docstring.
+
+## Note 2026-10-14 — the scheduled check no longer needs a window (WP UPD-5)
+
+User decision 2026-10-14 (morning, `docs/handover/post-0.1.0-roadmap.md`).
+Supersedes the window gate in points 1 and 3 of the 2026-10-13 addendum
+"always-on update check" (not the grouped-delete one)
+(the orchestrator's implementation of "only prod checks"), and point 2's
+rationale sentence "the dev instance has no schedule window configured,
+so it never checks on its own":
+
+- The scheduled update check runs every
+  `VAULT_SCHEDULE_INTERVAL_MINUTES` **whenever the oracle is on**, with a
+  schedule window open, closed or not configured at all. The oracle switch
+  (`VAULT_MANIFEST_ORACLE=off`) is the only way to stop it.
+- Automatic downloads and prefill sweeps stay strictly bound to the
+  window, unchanged: without a window, no automatic download starts.
+- The dev instance, which has no window, therefore also checks in the
+  background now. That sends only anonymous metadata (the app ids of
+  cached games) to the oracle; the user approved this.
+- `GET /v1/updates/status` keeps its `scheduled` field; it now means
+  "the oracle is on" and equals `enabled`.
+- Point 4 applies without its window condition: with the oracle on, the
+  background polling happens on every install.

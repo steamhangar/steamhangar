@@ -41,6 +41,10 @@ EXPECTED_TABLES = {
     "update_check_state",
     # v21 (WP D10 COVER-CACHE-1): stored cover images (vault_api/cover_cache.py).
     "app_cover_file",
+    # v22 (WP TOOL-APPS-2a): content-package classification and the oracle's
+    # content-package links.
+    "app_classification",
+    "oracle_dlc_links",
     # v23 (WP D15b CLIENTS-1): event-log traffic tiers (vault_api/traffic.py).
     "client_traffic",
     "client_depot_traffic",

@@ -167,42 +167,6 @@
        a screen reader. Navigation is announced once, by title, through
        #view-announcer below (js/app.js renderView). -->
   <main id="view-root" class="view-root" tabindex="-1"></main>
-
-  <!-- Suggestions panel (WP 4h.2, js/components/decision-panel.js): a
-       right-hand column at BP-XL (>=1800px), a collapsible card below that
-       width (docs/PROJECT_PLAN.md:1867-1869 — the operator-ratified plan
-       item, not the narrower "BP-XL only" a first brief draft assumed; see
-       docs/WORKPACKAGES.md D-16). ONE element, ONE DOM position (last child
-       of #app, after <main> — satisfies D-14's "no new focusable content
-       between the filter row and the first library card" by construction,
-       since this comes later than all of it) — but DOM position is NOT the
-       same as VISUAL position below BP-L (Opus review blocker B1, WP 4h.2
-       fix round): #app becomes a CSS grid at BP-L with a named area map,
-       and this element needs an EXPLICIT grid-area there (css/app.css's
-       BP-L block) or it auto-places into whichever cell the grid finds
-       first vacant, landing above the library or inside the rail's own
-       column depending on the bypass banner's visibility — measured live,
-       see that block's own comment for the full story and numbers. Which
-       of the two presentations it looks like is decided purely by CSS
-       (the BP-L block's explicit row, the BP-XL block's column), never by
-       this file or by js/components/decision-panel.js. `hidden` by default
-       (Library-view-only, and genuinely nothing to show before the first
-       "games" poll lands); js/components/decision-panel.js toggles it,
-       never removes/re-inserts the node. -->
-  <aside class="decision-panel" id="decision-panel" hidden aria-label="Suggestions">
-    <div class="dp-head">
-      <h2 class="dp-title">Suggestions</h2>
-      <div class="dp-acts">
-        <button type="button" class="iconbtn dp-collapse" id="dp-collapse" aria-expanded="false" aria-label="Expand suggestions">
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m5.5 7.5 5 5 5-5"/></svg>
-        </button>
-        <button type="button" class="iconbtn dp-dismiss" id="dp-dismiss" aria-label="Dismiss suggestions">
-          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>
-        </button>
-      </div>
-    </div>
-    <div class="dp-body" id="dp-body"></div>
-  </aside>
 </div>
 
 <!-- Navigation announcer (WP WEB-FIX-1, S2): same role="status"/polite

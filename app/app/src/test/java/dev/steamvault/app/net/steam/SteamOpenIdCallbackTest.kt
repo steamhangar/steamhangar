@@ -13,7 +13,7 @@ class SteamOpenIdCallbackTest {
         "&openid.op_endpoint=" + enc("https://steamcommunity.com/openid/login") +
         "&openid.claimed_id=" + enc("https://steamcommunity.com/openid/id/76561198042117903") +
         "&openid.identity=" + enc("https://steamcommunity.com/openid/id/76561198042117903") +
-        "&openid.return_to=" + enc(SteamOpenIdConfig.RETURN_TO) +
+        "&openid.return_to=" + enc(SteamOpenIdConfig.APP_LINK) +
         "&openid.response_nonce=" + enc("2026-08-11T12:00:00ZABCDEF") +
         "&openid.assoc_handle=1234567890" +
         "&openid.signed=" + enc("signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle") +
@@ -25,18 +25,18 @@ class SteamOpenIdCallbackTest {
 
     @Test
     fun `parses a well-formed id_res callback into a full openid dot star map`() {
-        val params = SteamOpenIdCallback.parse("${SteamOpenIdConfig.RETURN_TO}?$validQuery")
+        val params = SteamOpenIdCallback.parse("${SteamOpenIdConfig.APP_LINK}?$validQuery")
         requireNotNull(params)
         assertEquals("id_res", params["openid.mode"])
         assertEquals("https://steamcommunity.com/openid/id/76561198042117903", params["openid.claimed_id"])
         assertEquals("Zm9vYmFyc2lnbmF0dXJl==", params["openid.sig"])
-        assertEquals(SteamOpenIdConfig.RETURN_TO, params["openid.return_to"])
+        assertEquals(SteamOpenIdConfig.APP_LINK, params["openid.return_to"])
     }
 
     @Test
     fun `MUTATION PIN -- a non-openid stray query parameter is ignored, not forwarded`() {
         val params = SteamOpenIdCallback.parse(
-            "${SteamOpenIdConfig.RETURN_TO}?$validQuery&evil=" + enc("http://attacker.example/steal"),
+            "${SteamOpenIdConfig.APP_LINK}?$validQuery&evil=" + enc("http://attacker.example/steal"),
         )
         requireNotNull(params)
         assertFalse(params.containsKey("evil"))
@@ -44,15 +44,15 @@ class SteamOpenIdCallbackTest {
 
     @Test
     fun `rejects a callback with no query string at all`() {
-        assertNull(SteamOpenIdCallback.parse(SteamOpenIdConfig.RETURN_TO))
-        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.RETURN_TO}?"))
+        assertNull(SteamOpenIdCallback.parse(SteamOpenIdConfig.APP_LINK))
+        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.APP_LINK}?"))
     }
 
     @Test
     fun `MUTATION PIN (mode) -- a cancel response is rejected, never treated as a login`() {
         val cancelQuery = "openid.mode=cancel" +
             "&openid.claimed_id=x&openid.signed=x&openid.sig=x&openid.return_to=x"
-        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.RETURN_TO}?$cancelQuery"))
+        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.APP_LINK}?$cancelQuery"))
     }
 
     @Test
@@ -63,28 +63,28 @@ class SteamOpenIdCallbackTest {
             val truncated = parts.joinToString("&")
             assertNull(
                 "expected parse() to reject a callback missing $missing",
-                SteamOpenIdCallback.parse("${SteamOpenIdConfig.RETURN_TO}?$truncated"),
+                SteamOpenIdCallback.parse("${SteamOpenIdConfig.APP_LINK}?$truncated"),
             )
         }
     }
 
     @Test
     fun `a base64 signature's own trailing equals-sign padding stays part of the value`() {
-        val params = SteamOpenIdCallback.parse("${SteamOpenIdConfig.RETURN_TO}?$validQuery")
+        val params = SteamOpenIdCallback.parse("${SteamOpenIdConfig.APP_LINK}?$validQuery")
         requireNotNull(params)
         assertEquals("Zm9vYmFyc2lnbmF0dXJl==", params["openid.sig"])
     }
 
     @Test
     fun `rejects malformed percent-encoding rather than throwing`() {
-        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.RETURN_TO}?openid.mode=id_res%"))
+        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.APP_LINK}?openid.mode=id_res%"))
     }
 
     @Test
     fun `a duplicate key keeps its last occurrence`() {
         val withDup = "$validQuery&openid.mode=cancel"
         // last occurrence of openid.mode is "cancel" -> the whole callback is rejected
-        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.RETURN_TO}?$withDup"))
+        assertNull(SteamOpenIdCallback.parse("${SteamOpenIdConfig.APP_LINK}?$withDup"))
     }
 
     // ---- signedCoversClaimedId ---------------------------------------------
@@ -179,29 +179,29 @@ class SteamOpenIdCallbackTest {
     fun `extracts the state parameter from a return_to query string`() {
         assertEquals(
             "abc123",
-            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.RETURN_TO}?state=abc123"),
+            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.APP_LINK}?state=abc123"),
         )
     }
 
     @Test
     fun `returns null when return_to has no query string at all`() {
-        assertNull(SteamOpenIdCallback.stateFromReturnTo(SteamOpenIdConfig.RETURN_TO))
+        assertNull(SteamOpenIdCallback.stateFromReturnTo(SteamOpenIdConfig.APP_LINK))
     }
 
     @Test
     fun `returns null when return_to has a query string but no state key`() {
-        assertNull(SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.RETURN_TO}?other=1"))
+        assertNull(SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.APP_LINK}?other=1"))
     }
 
     @Test
     fun `finds state alongside other query parameters, in either position`() {
         assertEquals(
             "xyz",
-            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.RETURN_TO}?other=1&state=xyz"),
+            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.APP_LINK}?other=1&state=xyz"),
         )
         assertEquals(
             "xyz",
-            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.RETURN_TO}?state=xyz&other=1"),
+            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.APP_LINK}?state=xyz&other=1"),
         )
     }
 
@@ -209,12 +209,12 @@ class SteamOpenIdCallbackTest {
     fun `decodes a percent-encoded state value`() {
         assertEquals(
             "a+b/c",
-            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.RETURN_TO}?state=" + enc("a+b/c")),
+            SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.APP_LINK}?state=" + enc("a+b/c")),
         )
     }
 
     @Test
     fun `returns null for a trailing question mark with no query content`() {
-        assertNull(SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.RETURN_TO}?"))
+        assertNull(SteamOpenIdCallback.stateFromReturnTo("${SteamOpenIdConfig.APP_LINK}?"))
     }
 }

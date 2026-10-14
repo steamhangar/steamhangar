@@ -326,7 +326,7 @@ startup error rather than a soft "no data": unset or empty means the default
 is refused, so a typo can neither look like it worked nor silently mean "off". Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v21)
+## Database schema (v22)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -340,7 +340,9 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `jobs`           | `id` (PK autoincrement), `appid`, `type`, `status`, `created_at`, `started_at`, `finished_at`, `log_excerpt`, `updated`, `up_to_date`, `summary_parse_ok`, `gc_execute`, `paused_at`, `stop_request`, `run_use_force`, `run_before_json`, `run_claimed_by`, `run_claimed_at`, `run_heartbeat_at`, `run_completed_at`, `run_result_json` | Prefill/GC job queue (plan §3, §6). `updated`/`up_to_date`/`summary_parse_ok` (**v4**, WP 3.3) are SteamPrefill's own summary-table counters — see "Job outcome honesty" above. `gc_execute` (**v7**, WP 3.8) is the GC dry-run/execute bit: `NULL` for every non-GC job, `0` = report only, `1` = delete — see "Garbage collection" below. `paused_at`/`stop_request` (**v8**, WP 3.12) are job control: when the job was last suspended, and the operator's pending `cancel`/`pause` request against a *running* job — see "Job control" below. The seven `run_*` columns (**v15**, WP S-1, ADR-0012) are queue-mode's job hand-off to a separate `prefill_runner` process — `NULL` for every job that never goes through queue mode (any GC job, any prefill job run in the default `subprocess` mode). See "Queue mode" below |
 | `agent_reports`  | `client_id`, `reported_at`, `appids` (JSON array of ints), `source_addr`, `agent_version`, `report_interval_seconds` | One row per agent report — a full installed-app-ID snapshot at that timestamp (ADR-0002: the agent is stateless/dumb, always reports the complete list). vault-api derives additions/removals by diffing the two most recent rows per `client_id`. `source_addr` (**v9**, WP 3.11) is the address the report arrived FROM — the only key correlating a `client_id` with the event log's addresses; `NULL` for pre-v9 rows, which is why such a client is never `bypass_suspected`. `agent_version` / `report_interval_seconds` (**v17**, WP AGENT-FEAT-1) are what the agent said about itself in that report; `NULL` = it did not say. See "Agent presence" below |
 | `depot_manifests` | `appid`, `containing_appid`, `depotid`, `manifestid` (TEXT), `chunk_count`, `total_bytes`, `recorded_at`, `source`, `first_seen_at`, `manifest_changed_at`, `observation_count`, PK `(appid, depotid)` | **Latest**-known manifest state per (app, depot) — WP 3.2, ADR-0006 decision 3. `first_seen_at`/`manifest_changed_at`/`observation_count` (**v14**, WP 4h.1) are the change-frequency bookkeeping — see "Manifest ingestion" and "Change frequency" below |
-| `oracle_app_state` | `appid` (PK), `buildid`, `checked_at`, `source`, `depot_count`, `branch_count` | **v10**, WP 3.9. One row per app the manifest oracle has been asked about: when, by which oracle (`source` provenance), and what it said the public build id is. See "Manifest oracle" below |
+| `oracle_app_state` | `appid` (PK), `buildid`, `checked_at`, `source`, `depot_count`, `branch_count`, `app_type`, `parent_appid`, `name` | **v10**, WP 3.9. One row per app the manifest oracle has been asked about: when, by which oracle (`source` provenance), and what it said the public build id is. `app_type` / `parent_appid` / `name` (**v22**, WP TOOL-APPS-2a, per-column-guarded `ALTER`) are its `common.type` (mapped onto the app-type vocabulary), `common.parent` and `common.name` (plain text, capped); `NULL` when absent and on every pre-v22 row. Display data only. See "Manifest oracle" and "Content packages" below |
+| `oracle_dlc_links` | `appid`, `dlc_appid`, `recorded_at`, `source`, PK `(appid, dlc_appid)` | **v22**, WP TOOL-APPS-2a. The content packages one oracle answer names for its app: `extended.listofdlc` plus every depot's `dlcappid`. Snapshot semantics like `oracle_branch_manifests`; display data, never read by GC. See "Content packages" below |
+| `app_classification` | `appid`, `source`, `app_type`, `parent_appid`, `linked`, `name`, `checked_at`, PK `(appid, source)` | **v22**, WP TOOL-APPS-2a. Per tracked app and source (`store` or `steamcmd_api`), exactly what that source said: its own type, raw parent, whether a cached parent's DLC list names the app (`linked`), and Steam's name. Written only by the background cover refresher; merged per field on read. See "Content packages" below |
 | `oracle_branch_manifests` | `appid`, `depotid`, `branch`, `manifestid` (TEXT), `recorded_at`, `source`, PK `(appid, depotid, branch)` | **v10**, WP 3.9. One row per (app, depot, **open** branch) → manifest gid. Password-protected branches are never inserted at all. Written with snapshot semantics (a refresh replaces the app's rows in one transaction). **Never mixed into `depot_manifests`** — a third-party claim must stay distinguishable from a manifest vault-api parsed itself |
 | `update_check_state` | `id` (PK, `CHECK (id = 1)`), `last_check_at`, `last_check_apps`, `last_check_ok`, `last_check_stale`, `last_check_trigger`, `last_check_finished_at`, `last_check_outcome` | **v19**, WP UPD-1 (the last three **v20**, per-column-guarded `ALTER` for a v19 table). Single-row bookkeeping of the always-on update check, separate from `schedule_state` so it has its own interval and claim. Claim-then-work: `last_check_at` is stamped before any request, by either trigger (`manual`/`scheduled`); the counters, finish stamp and outcome are `NULL` while a run is in flight or the process died in it. Read by `GET /v1/updates/status`. See "Always-on update check" |
 | `schedule_state` | `id` (PK, `CHECK (id = 1)`), `last_sweep_at`, `last_sweep_targets`, `last_sweep_enqueued` | **v6**, WP 3.5. Single-row scheduler bookkeeping: when the last sweep started (UTC) and what it did. Persisted rather than in-memory so a restart mid-window does not re-sweep — see "Scheduler" below. The two counters are `NULL` while a sweep is in flight (or if the process died during one) |
@@ -526,6 +528,17 @@ column types as a fresh database).
 plain `CREATE TABLE IF NOT EXISTS`, no `ALTER` step. Covered by
 `tests/test_d10_cover_cache.py::test_schema_v21_adds_app_cover_file`.
 
+**v20/v21 → v22 (WP TOOL-APPS-2a)** adds the tables `app_classification` and
+`oracle_dlc_links` (plain `CREATE ... IF NOT EXISTS`), adds `app_type`,
+`parent_appid` and `name` to `oracle_app_state` through the per-column-guarded
+`db._add_missing_oracle_state_columns`, and runs one data step once: every
+`app_cover_art.next_check_at` still in the future is moved to "now", so the
+cover refresher re-asks every tracked app with the new store flags at 50
+apps per minute instead of over the next 30 days (a stored cover is kept on that
+re-check; `attempts` is untouched). Covered by
+`tests/test_tool_apps_2a_classification.py::test_upgrade_to_v22_adds_schema_and_resets_cover_checks_once`
+(from v20 and from v21, and not again on a later start).
+
 **Ordering fix (WP 1.5 carry-over from the WP 1.4 review):** `init_db` now
 creates only the `schema_version` table, reads the stored version, and checks
 the downgrade guard *before* running the rest of `_DDL` — previously the full
@@ -620,9 +633,9 @@ route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
-| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `cover_cached_url` (WP D10 — the relative path `/v1/covers/{appid}/{signature}` of vault-api's stored copy of that cover, `null` until one is stored; see "Stored covers" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`) |
+| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `cover_cached_url` (WP D10 — the relative path `/v1/covers/{appid}/{signature}` of vault-api's stored copy of that cover, `null` until one is stored; see "Stored covers" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`), `parent_appid` + `app_type` (WP TOOL-APPS-2a — the top-level game this app is a content package of, or `null` when not grouped; one of `game`/`dlc`/`tool`/`application`/`config`/`music`/`video`/`demo` or `null`; the list stays flat, UIs group; see "Content packages" below). **`name`** falls back to Steam's name (store lookup, else the oracle's stored `common.name`) when vault-api has none (WP TOOL-APPS-2a), `group_size_bytes` (WP TOOL-APPS-2 — on a top-level row the bytes of the whole group it heads: the union of its own depots and those of every row whose `parent_appid` is this app, each depot counted once; equals `size_bytes` for an ungrouped row; `null` on a row that is itself grouped, and with the same `null` rules as `size_bytes`; also on `GET /v1/games/{appid}`) |
 | GET    | `/v1/covers/{appid}/{signature}`   | WP D10: the cover image vault-api stored for this app (`image/jpeg`/`png`/`webp`), `ETag` + `Cache-Control: private, max-age=31536000, immutable`, `304` on a matching `If-None-Match`. **No `X-Api-Key`**: the `signature` in the path is an HMAC of the API key (see "Auth"); clients take the URL from `cover_cached_url`. Any refusal is `404`. See "Stored covers" |
-| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`, `cover_url`, `cover_cached_url`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
+| GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`, `cover_url`, `cover_cached_url`, `parent_appid`, `app_type`, `group_size_bytes`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
 | PUT    | `/v1/mapping/{depotid}`            | Body `{"appid": int, "app_name": str \| null}` — **additively** upsert one depot→app mapping fact (manual fallback, see below); `422` for `depotid <= 0`, `appid <= 0`, or an unrecognized body field |
 | GET    | `/v1/mapping`                      | Full depot→app mapping table: list of `{depotid, appid}` |
 | DELETE | `/v1/mapping/{depotid}/{appid}`    | Remove one mapping pair (correction path for the additive `PUT`, see below); `204` on success, `404` if the pair doesn't exist, `422` for non-positive ids |
@@ -633,7 +646,8 @@ route, see "Auth").
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
 | POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued or running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5) and `"requested"` for a running one. `404` unknown id; `409` for a GC job or a job that is already `paused` or finished |
 | POST   | `/v1/jobs/{id}/resume`             | **Resume** a paused job — back to `queued`, keeping its original job id, so it runs *before* anything enqueued while it was paused. `outcome: "resumed"`. `404` unknown id; `409` if the job is not `paused` |
-| DELETE | `/v1/cache/{appid}`                | Delete this game's depot directories. `200` with `{appid, deleted_depots[], skipped_shared[], failed[], total_bytes_freed}`; `404` unknown appid or no mappings; `409` while a prefill **or GC** job for the app is queued/running/**paused** (WP 3.12); `422` for `appid < 1`; `500` if the cache-root guards refuse. See "Per-game deletion" below |
+| DELETE | `/v1/cache/{appid}`                | Delete this game's depot directories. `200` with `{appid, deleted_depots[], skipped_shared[], failed[], total_bytes_freed}`; `404` unknown appid or no mappings; `409` while a prefill **or GC** job for the app is queued/running/**paused** (WP 3.12); `422` for `appid < 1`; `500` if the cache-root guards refuse. **`?with_packages=true&members=<csv>`** (WP TOOL-APPS-2b) also deletes the app's content packages; `members` must be exactly the list the confirmation showed. See "Per-game deletion" and "Grouped delete" below |
+| GET    | `/v1/cache/{appid}/delete-plan`    | WP TOOL-APPS-2b. Read-only preview of `DELETE /v1/cache/{appid}` (optionally `?with_packages=true`) for a confirmation dialog: `{appid, with_packages, members[], kept_children[], delete_depots[], skipped_shared[], unusable[], total_bytes, blocked_by[]}`. Same `404`s as the deletion; an in-flight job is listed in `blocked_by` instead of a `409`. See "Grouped delete" below |
 | POST   | `/v1/cache/{appid}/gc`             | Queue a garbage-collection job. Body optional; `{"execute": true}` (a literal JSON boolean) is the only way to delete — **dry run by default**. `202` with `{appid, job_id, status, type, mode, execute, deduplicated}`; `404` unknown appid or no mappings; `422` for `appid < 1`, a non-boolean `execute`, or an unrecognized body field. See "Garbage collection" below |
 | GET    | `/v1/cache/summary`                | `total_bytes` (disk usage of `depot/`, each depot counted once), `top_consumers` (top 10 `{appid, name, size_bytes}`, largest first), `unmapped_depots` (`{count, size_bytes}` for depot dirs on disk with no mapping row for any app), `free_disk_bytes` (free space on the cache filesystem, `null` if undeterminable) |
 | POST   | `/v1/agent/installed`              | Body `{"client_id": str, "appids": [int, ...]}` — store one **full-list** snapshot of a client's installed games. `200` with `{client_id, received, added, removed, first_report}`; `422` for a bad `client_id` (empty, > 64 chars, control characters, surrounding whitespace, `.`/`..`), an appid `< 1` or a boolean, a missing/non-list `appids`, more than 10 000 ids, or an unrecognized body field. See "Agent reports" below |
@@ -642,8 +656,8 @@ route, see "Auth").
 | GET    | `/v1/oracle/{appid}`               | Stored manifest-oracle view (WP 3.9): `{appid, enabled, checked_at, source, buildid, verdict, depots[]}`, each depot `{depotid, recorded_manifestid, oracle_manifestid, verdict, beta_branches[]}`. `verdict` is `current`/`stale`/`not_cached`/`unknown`. **No network, no `404`** — an app nobody asked about answers `checked_at: null`, and `enabled: false` when the oracle is off. `422` for `appid < 1` |
 | POST   | `/v1/oracle/{appid}/refresh`       | Ask the oracle now (WP 3.9). **This request leaves the LAN** when the oracle is enabled. Always `200`: `{appid, enabled, ok, error, checked_at, depot_count, branch_manifest_count, open_branches[], skipped_password_branches, warnings[]}` — an unreachable or garbage answer is `ok: false` with a reason, never a 5xx. `422` for `appid < 1` |
 | DELETE | `/v1/oracle/{appid}`               | Forget everything the oracle said about one app (WP 3.9). `204` whether or not anything was stored — idempotent, and the way to withdraw the extra GC keep-set protection oracle rows grant |
-| POST   | `/v1/updates/check`                | Start the update check now (WP UPD-1): the manifest oracle is refreshed for every game that currently has cache content (tool packages excluded), **in the background**; **never starts a download**. Answers at once: `202 {status: "started", enabled: true}`, or `202 {status: "already_running", enabled: true}` when a scheduled or earlier manual check is still going (nothing new is started), or `200 {status: "disabled", enabled: false}` with the oracle off (nothing runs); `503` while vault-api shuts down. Poll `GET /v1/updates/status` until `running` is `false`, then re-read `GET /v1/games`. Not interval-limited, works with or without a schedule window, but stamps the interval (the next scheduled check is one interval later). **Leaves the LAN**: one oracle request per cached game — see "Always-on update check" |
-| GET    | `/v1/updates/status`               | Update check status (WP UPD-1): `{enabled, scheduled, running, last_trigger, last_started_at, last_finished_at, last_outcome, last_apps, last_ok, last_failed, last_stale}`. `scheduled` is `true` when the oracle is on AND a schedule window is configured (effective value, a `PATCH /v1/settings` window counts at once), `false` = manual checks only. `last_trigger` is `manual`/`scheduled`; `last_outcome` is `completed`, `bailed_out` (stopped after 5 failed oracle requests in a row), `aborted` (shutdown), `error` (bug, see the log) or `interrupted` (the process died during the run); outcome, finish stamp and counters are `null` while running. All `last_*` are `null` before the first run. No network |
+| POST   | `/v1/updates/check`                | Start the update check now (WP UPD-1): the manifest oracle is refreshed for every game that currently has cache content (tool packages excluded), **in the background**; **never starts a download**. Answers at once: `202 {status: "started", enabled: true}`, or `202 {status: "already_running", enabled: true}` when a scheduled or earlier manual check is still going (nothing new is started), or `200 {status: "disabled", enabled: false}` with the oracle off (nothing runs); `503` while vault-api shuts down. Poll `GET /v1/updates/status` until `running` is `false`, then re-read `GET /v1/games`. Not interval-limited, works with or without a schedule window (as does the scheduled check since WP UPD-5), but stamps the interval (the next scheduled check is one interval later). **Leaves the LAN**: one oracle request per cached game — see "Always-on update check" |
+| GET    | `/v1/updates/status`               | Update check status (WP UPD-1): `{enabled, scheduled, running, last_trigger, last_started_at, last_finished_at, last_outcome, last_apps, last_ok, last_failed, last_stale}`. `scheduled` is `true` whenever the oracle is on (WP UPD-5: the scheduled check no longer needs a schedule window, so today it always equals `enabled`; kept as its own field for UPD-1 clients). `last_trigger` is `manual`/`scheduled`; `last_outcome` is `completed`, `bailed_out` (stopped after 5 failed oracle requests in a row), `aborted` (shutdown), `error` (bug, see the log) or `interrupted` (the process died during the run); outcome, finish stamp and counters are `null` while running. All `last_*` are `null` before the first run. No network |
 | GET    | `/v1/schedule`                     | Scheduler config + last-sweep bookkeeping: `{enabled, window, overnight, interval_minutes, client_stale_days, server_timezone, last_sweep_at, last_sweep_targets, last_sweep_enqueued, next_eligible_at}`. **Read-only itself** — the window/interval/staleness values are now writable through `PATCH /v1/settings` (settings-API work package, ADR-0009; see "Persisted settings" below), this endpoint just reports the currently EFFECTIVE configuration, override included |
 | GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, rotations_detected_total, last_rotation_detected_at, traffic_since, top_unmapped_depots[]}` (the three before the list: WP D15b). **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
 | GET    | `/v1/throughput`                   | WP D15b (D13 SPEED-1): Downloads header numbers from the traffic tiers. `?range=24h` (default) `|7d|30d|all`. `{event_feed, range, tier, bucket_seconds, range_start, active_window_minutes, current, active_clients_now, summary, jobs[]}`; traffic fields are `null` with the event feed off. See "Clients overview and throughput (WP D15b)" below |
@@ -714,6 +728,14 @@ truth; the list is a code change on purpose, not a setting.
 | `jobs.enqueue_prefill` | Raises `ToolAppNotPrefillable` (a `ValueError`) before writing anything — the last line, so a future enqueue path cannot forget the rule |
 | `GET /v1/games[/{appid}]` | `tool_app: true`, `tool_app_name: "Steamworks Common Redistributables"`. `name`, `status` and every other field stay the raw truth (an old failed job leaves `status: "error"`); the UIs show the tool name, the word "Steam tool package" and the note "cached together with the games that use it", never Failed/Retry, and never an "installed but not cached" warning |
 
+**Content packages (WP TOOL-APPS-2a/2b).** A fixed-list tool app is never
+grouped: never a package of a game and never a parent (a package whose
+chain reaches one stays a top-level card), and it never joins a grouped
+delete. A dynamic `app_type: "tool"` from Steam's data is display data only
+(user decision Q7 A, 2026-10-13): `tool_app` and every rule in the table
+above still come from the fixed list alone, so a third-party "tool" answer
+never stops a prefill.
+
 Not changed: agent reports, `installed_on`, the depot mapping and the cache
 itself. A job for a tool app that was already queued before the upgrade
 still runs once (and fails as before); old failed jobs stay in the job
@@ -732,8 +754,14 @@ decision 2026-10-10 "Weg B"; no setting) that asks:
 ```
 GET https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=
   {"ids":[{"appid":N},...],"context":{"language":"english","country_code":"US"},
-   "data_request":{"include_assets":true}}
+   "data_request":{"include_assets":true,"include_basic_info":true,
+                   "include_related_items":true}}
 ```
+
+The last two flags (WP TOOL-APPS-2a) ask the same request for each item's
+store type, `related_items.parent_appid` and name; the ids sent are
+unchanged. What they yield is stored in `app_classification` (see "Content
+packages" below).
 
 No key and no SteamID; up to 50 apps per call, through vault-proxy
 (`api.steampowered.com` is the host it always allows). The cover URL is
@@ -807,6 +835,119 @@ ETag, so repeat views were already cached by the clients.)
   read (an altered or missing file is `404` and queued for download again).
   Every refusal is the same `404`. See "Auth" for why this route takes no
   `X-Api-Key` header.
+
+### Content packages grouped under their game (WP TOOL-APPS-2a/2b, ADR-0022)
+
+Steam keeps some content packages (DLC, language packs; the Helldivers 2
+packages on the prod library) in appmanifests of their own, so agents report
+them as installed apps and the library showed bare "App 2506210" cards.
+vault-api now says which game such an app belongs to; the UIs group the
+flat list (decision Q2: the server never nests or drops a row).
+
+**Two sources, merged per field, store first** (`vault_api/app_classification.py`,
+decision Q1 A). Both are written only by the background cover refresher, never
+on a request path:
+
+- `store`: the GetItems lookup above. Its numeric store type (0 game, 1 demo,
+  4 dlc, 6 application, 7 video, 11 music, 13 tool; other values unknown),
+  `related_items.parent_appid` and `name`. A store answer with
+  `success != 1` (the HD2 packages and 228980 answer `15`) removes only
+  the app's earlier store row.
+- `steamcmd_api`: the manifest oracle's STORED answers, only while the oracle
+  is on. No extra oracle request is made (decision Q8 B): the update check
+  still asks only about cached apps, and the classification uses what those
+  answers carry: the app's own `common.type` / `common.parent` /
+  `common.name`, plus `extended.listofdlc` and depot `dlcappid` of a cached
+  parent (`linked`; the parent is named only when exactly one cached parent
+  lists the app).
+
+Each of type, parent and name is the store's value when the store gave one,
+else the oracle's. A store answer with a type but no parent therefore keeps
+its type and takes the oracle's parent; a store parent always wins. An app
+only named in a parent's DLC list shows `app_type: "dlc"`, but that is an
+inference, not its own type (it matters for the delete below).
+
+**Group size.** `group_size_bytes` on the game endpoints is the size of the
+whole group a top-level row heads: the union of the depots mapped to it and to
+every row grouped under it, each depot counted once (a depot shared between
+the game and a package is not counted twice, unlike a sum of the members'
+`size_bytes`). It equals `size_bytes` for an ungrouped row and is `null` on
+a grouped row (its bytes are in its parent's figure).
+
+**Nesting.** Grouping is one level: `parent_appid` is the top-level game,
+following parents over at most 4 links. A cycle, a self reference, a longer
+chain, or a top-level parent that is not a tracked app leaves the row
+ungrouped (`parent_appid: null`). Fixed-list tool apps are neither children
+nor parents. Rows from the oracle are ignored while it is off; every stored
+value is re-validated on read.
+
+**Names.** `name` on the game endpoints is `apps.name` when it is non-blank
+(owned library, agent, mapping), else Steam's name (store, then the oracle's
+`common.name`). It is never written into `apps`, kept as Steam spells it
+(no parent prefix trimming), and treated as plain text from a third party:
+control characters, bidi controls, LRM/RLM/ALM, zero-width characters, BOM
+and line/paragraph separators are dropped, the result is trimmed and capped
+at 256 characters, on write and again on read. The UIs render it as text.
+
+### Grouped delete (`with_packages`, WP TOOL-APPS-2b, ADR-0022 §4)
+
+A two-step contract, so the user is always shown every app that a grouped
+delete removes:
+
+1. `GET /v1/cache/{appid}/delete-plan?with_packages=true` (read-only):
+
+   ```json
+   {
+     "appid": 553850, "with_packages": true,
+     "members": [
+       {"appid": 553850, "role": "parent", "name": "HELLDIVERS 2", "app_type": "game", "depot_ids": [553851, 553852]},
+       {"appid": 2506210, "role": "package", "name": "HELLDIVERS 2 - ...", "app_type": "dlc", "depot_ids": [2506211]}
+     ],
+     "kept_children": [{"appid": 4000001, "name": null, "app_type": "game", "reason": "not_a_package_type"}],
+     "delete_depots": [{"depotid": 553851, "size_bytes": 1000, "owners": [553850], "shared_with_uncached": []}],
+     "skipped_shared": [{"depotid": 553853, "shared_with": [4000001]}],
+     "unusable": [], "total_bytes": 1000, "blocked_by": []
+   }
+   ```
+
+2. `DELETE /v1/cache/{appid}?with_packages=true&members=553850,2506210`:
+   `members` is exactly `members[].appid` from the plan (comma-separated,
+   ASCII digits, order and duplicates do not matter, at most 1024).
+
+**Who is a package.** The server builds the set itself and never trusts the
+client's list for that: a tracked app whose resolved top-level parent is the
+requested app AND whose OWN type (store type, or its own PICS `common.type`)
+is `dlc`, `config`, `music`, `video` or `demo`. A child typed `game`,
+`application` or `tool`, of unknown type, or only listed in the parent's DLC
+list is reported in `kept_children` (`not_a_package_type`, `type_unknown`,
+`type_only_inferred`) and stays an ordinary outside app. Fixed-list tool apps
+never join. Nesting follows the same resolution as the list: in a chain
+Y (dlc) -> X (game) -> Z, deleting Z with packages deletes Y and keeps X.
+
+**What is deleted.** The depots mapped to any member. Members do not protect
+each other's depots; every app outside the set protects under the remnant
+rule (see "Last cached remnants"), checked in the plan and again right before
+each depot is removed, through one shared definition
+(`deletion.DeleteSet`). A protected depot is kept and listed in
+`skipped_shared`. Each package that lost depots is reset like a single
+deletion; the parent's status and `needs_force` come from its own depots.
+
+**Answers.**
+
+| Situation | Result |
+|---|---|
+| `with_packages=true` without `members` | `422` |
+| `members` without `with_packages=true` | `422` |
+| malformed `members`, or a `with_packages` value other than `true`/`false` | `422` |
+| unknown app, or no member maps a depot | `404` |
+| the server's set differs from `members` (e.g. a package was classified after the preview) | `409`, `detail: {message, server_members, confirmed_members}`, nothing deleted; fetch the plan again |
+| any member has a queued, running or paused job | `409` (the plan lists it in `blocked_by`) |
+| otherwise | `200`: the usual fields for the whole set, each depot once, plus `with_packages: true`, `members[] {appid, role, name, app_type, deleted_depots[], failed_depots[]}` and `kept_children[]` |
+
+Without the parameter (or with `with_packages=false`) the request, its
+response body and its behaviour are exactly as before; the plain delete reads
+no classification. The one place store or oracle data can widen a deletion is
+this opt-in request, see "The safety invariant" under "Manifest oracle".
 
 ### Check & update all cached games (`POST /v1/prefill/cached`, Phase 4c, WP 4c-api)
 
@@ -2043,6 +2184,7 @@ live in `vault_api/deletion.py`, the HTTP shape in `vault_api/routers/cache.py`.
 | a prefill job for the app is `queued`/`running` | `409` — retry after the job |
 | `appid < 1` | `422` |
 | the `VAULT_CACHE_ROOT` guards refuse | `500`, nothing deleted (see "Path safety") |
+| `?with_packages=true&members=...` | the game and its content packages; see "Grouped delete" |
 | otherwise | `200` with the per-depot report |
 
 ```json
@@ -3920,9 +4062,15 @@ A crash anywhere before the commit means the whole batch is re-read. Per effect:
   a second non-forced prefill — ~3 s if it really is current (ADR-0006). That is
   the trade this ordering deliberately makes, not an oversight.
 
-### Rotation — best-effort, and usually impossible in the shipped containers
+### Rotation — vault-core first, the sweeper's truncation as fallback
 
-ADR-0008 gives rotation to this sweeper and to nothing else. `maybe_truncate`
+Since WP D15-ROT (ADR-0008 addendum) vault-core rotates the event log itself:
+at 64 MiB (`VAULT_EVENT_LOG_ROTATE_BYTES`, checked every 60 s by default) it
+renames `event.log` to `event.log.1`, keeps that one old file and makes nginx
+reopen. The sweeper follows the rename by inode and drains `event.log.1`
+first (see above). The in-place truncation below remains as a fallback for
+setups without the core hook (`VAULT_EVENT_LOG_ROTATE_BYTES=0`, an older core
+image, a native install); whichever runs first wins. `maybe_truncate`
 truncates to zero and resets the cursor only when the sweep succeeded, the file
 is at least `VAULT_EVENT_LOG_MAX_BYTES`, **and** its size right now still equals
 the committed cursor (i.e. every byte has been read).
@@ -3977,9 +4125,10 @@ The sweep runs on WP 3.5's scheduler thread but on **its own interval**
 (`VAULT_EVENT_SWEEP_INTERVAL_MINUTES`, default 5) and **unconditionally** — it
 is not gated on `VAULT_SCHEDULE_WINDOW`. Three reasons, heaviest first:
 
-1. **This sweeper owns the event log's rotation.** A window-gated sweeper would
-   leave the file unread for the 16 hours a day the window is shut, so the
-   feature would create the unbounded-growth problem it exists to own.
+1. **The sweeper must keep up with the log.** A window-gated sweeper would
+   leave the file unread for the 16 hours a day the window is shut: without
+   the vault-core rotation hook (D15-ROT) the fallback truncation would never
+   run, and with it more than one rotation could pass unread, losing lines.
 2. **Bypass detection must not have blind hours.** "This machine never appears
    in the cache log" is only trustworthy if the log is read around the clock;
    windowed, every evening gamer would look like a suspect at 22:00 and
@@ -4318,9 +4467,9 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
 
 ### What WP D15b deliberately did NOT do
 
-- No event-log rotation on the vault-core side (D15-ROT); the sweeper only
-  survives one (inode/shrink detection). It does not read the renamed old
-  file's unread tail.
+- No event-log rotation on the vault-core side; that is WP D15-ROT. The
+  sweeper follows a rename rotation (inode/shrink detection) and drains the
+  unread tail of `<path>.1`.
 - No names for agentless addresses, no reverse DNS, no per-address history
   deletion, no retention setting for the daily tier.
 - `GET /v1/jobs` keeps its 1..200 `limit`; there is no paging for long
@@ -5054,8 +5203,20 @@ actually saved something, so its presence means something.
 
 ### The safety invariant: oracle data can only ADD protection
 
-Its single effect on the deletion path is that extra manifest gids join a
-keep set, and a keep set can only grow. Consequences, each pinned by a test:
+On every automatic path (GC, the scheduler, the plain delete), its single
+effect on deletion is that extra manifest gids join a keep set, and a keep
+set can only grow.
+
+**One exception (WP TOOL-APPS-2b):** the user-confirmed grouped delete
+(`DELETE /v1/cache/{appid}?with_packages=true`). Which apps are packages is
+decided from stored classification, which can come from the oracle, so a
+wrong or poisoned answer can put another app into the delete set. Bounds:
+opt-in per request; the request must name exactly the members the
+confirmation listed (`members`, `409` on any difference); only apps whose own
+type is a package type join; fixed-list tool apps never join; any app outside
+the set still protects its depots. See "Grouped delete" above.
+
+Consequences on the automatic paths, each pinned by a test:
 
 - the planned orphan set with the oracle on is always a **subset** of the same
   cache's orphan set with it off
@@ -5148,12 +5309,11 @@ project).
   cache contents, no LAN addresses.
 - **It is sent automatically** (since WP UPD-1). With the oracle on, the
   scheduler's update check sends the app id of **every cached game** in the
-  background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`, while a schedule window
-  is configured (open or closed); `POST /v1/updates/check` and
+  background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`, with or without a
+  schedule window (WP UPD-5); `POST /v1/updates/check` and
   `POST /v1/oracle/{appid}/refresh` add on-demand requests. The job worker
-  never calls it. Turning the oracle off stops all of it; clearing the
-  schedule window stops only the background part (see "Always-on update
-  check").
+  never calls it. Turning the oracle off is the only way to stop it; the
+  schedule window does not (see "Always-on update check").
 - **Keeping it on your network:** point `VAULT_MANIFEST_ORACLE_URL` at your
   own mirror of the same API. Redirects are never followed, so the request
   cannot be handed to a host you did not configure.
@@ -5177,22 +5337,21 @@ project).
   `deploy/compose.yaml` forwards the oracle variables to vault-api and
   vault-proxy and the oracle is on by default).
 
-## Always-on update check (WP UPD-1, user decision 2026-10-13)
+## Always-on update check (WP UPD-1, user decision 2026-10-13; WP UPD-5, 2026-10-14)
 
-vault-api checks **cached games** for updates on its own **while a schedule
-window is configured — open or closed**. Whether the window is open right now
-plays no part in the check; it only decides whether a found update is also
-downloaded (that is `maybe_sweep`, unchanged). **No window configured = no
-scheduled check** (review round 2, implementing the user's "only prod
-checks": the dev instance has no window); the manual check still works. The
-window is read from the effective settings on every tick, so a window set
-later through `PATCH /v1/settings` turns the scheduled check on without a
-restart. **The oracle setting `VAULT_MANIFEST_ORACLE` gates both triggers**
-(see "Manifest oracle"): with it off, no check runs, scheduled or manual.
+vault-api checks **cached games** for updates on its own **whenever the
+oracle is on — with a schedule window open, closed or not configured at
+all** (WP UPD-5, user decision 2026-10-14, superseding UPD-1's review-round-2
+rule "no window = no scheduled check"). The window plays no part in the
+check; it only decides whether a found update is also downloaded (that is
+`maybe_sweep`, unchanged and strictly window-bound: without a window no
+automatic download or prefill sweep starts). **The oracle setting
+`VAULT_MANIFEST_ORACLE` is the one switch for both triggers** (see "Manifest
+oracle"): with it off, no check runs, scheduled or manual.
 
-- **Scheduled trigger.** While a window is configured, every scheduler tick
-  asks the shared `update_check.UpdateCheckRunner` whether a check is due
-  (once per `VAULT_SCHEDULE_INTERVAL_MINUTES`). On a due tick it stamps the claim and
+- **Scheduled trigger.** Every scheduler tick asks the shared
+  `update_check.UpdateCheckRunner` whether a check is due (once per
+  `VAULT_SCHEDULE_INTERVAL_MINUTES`). On a due tick it stamps the claim and
   hands the run to a background thread, so the tick itself never waits for the
   oracle and the event and prefill sweeps are never delayed by it. The run
   refreshes the manifest oracle for every game with cache content
@@ -5208,11 +5367,11 @@ restart. **The oracle setting `VAULT_MANIFEST_ORACLE` gates both triggers**
   runs is logged as "skipped" and records nothing (the running check's row
   stands).
 - **Status.** `GET /v1/updates/status` reports whether scheduled checks are on
-  (`scheduled`), whether a check is running and what the last one (either
-  trigger) found. The scheduler logs one line on its first tick (and again
-  when it changes): `Update check: ON (...)`, `Update check: scheduled checks
-  off, no schedule window; manual check available (...)` or `Update check:
-  OFF (...)`, and one
+  (`scheduled`, equal to `enabled` since WP UPD-5), whether a check is running
+  and what the last one (either trigger) found. The scheduler logs one line on
+  its first tick (and again when it changes): `Update check: ON (...)` (which
+  also says whether downloads start inside a schedule window or, with none
+  configured, not automatically at all) or `Update check: OFF (...)`, and one
   result line per run (`update check (manual|scheduled): N cached app(s)
   checked, ...`).
 - **Crash-safe.** `update_check_state.last_check_at` is stamped in a
@@ -5227,13 +5386,14 @@ restart. **The oracle setting `VAULT_MANIFEST_ORACLE` gates both triggers**
   differs from the one recorded for the cache), only for a game that currently
   has cache bytes (`depot_manifests` rows outlive a cache deletion).
 
-**What leaves the LAN.** With the oracle on and a schedule window configured,
-every cached game's app id goes to the oracle (`api.steamcmd.net` by default)
-**in the background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`**, plus on every
-manual check. Metadata only: no download starts, nothing else is sent. The dev
-instance has no window, so it never checks on its own; a manual "Check
-updates" click there may query the oracle (user decision 2026-10-13, metadata
-only). Tests inject a fake fetcher and fail on any socket connect.
+**What leaves the LAN.** With the oracle on, every cached game's app id goes to
+the oracle (`api.steamcmd.net` by default) **in the background, every
+`VAULT_SCHEDULE_INTERVAL_MINUTES`**, plus on every manual check, whether or not
+a schedule window is configured. Metadata only: no download starts, nothing
+else is sent. This includes an instance without a window, like the dev
+instance (user decision 2026-10-14: anonymous metadata, allowed). Tests inject
+a fake fetcher and fail on any socket connect; `deploy/tests/verify-stack.sh`
+runs every live stack with `VAULT_MANIFEST_ORACLE=off`.
 
 **On by default, `off` to opt out** (user decision 2026-10-13, superseding
 ADR-0006 decision 4's "default off"). `VAULT_MANIFEST_ORACLE` unset or empty
@@ -5248,10 +5408,10 @@ same host or a private mirror still needs a `VAULT_EGRESS_ALLOW` entry, see
 
 **Behaviour change on upgrade.** A vault that never set `VAULT_MANIFEST_ORACLE`
 (or set it empty, as the old `.env.example` did) turns the oracle on after this
-upgrade. If it also has a schedule window (the shipped default is
-`03:00-07:00`), it starts polling the oracle in the background: every
+upgrade and starts polling it in the background: every
 `VAULT_SCHEDULE_INTERVAL_MINUTES`, the app ids of all cached games go to
-`api.steamcmd.net`, whether the window is open or not. Set
+`api.steamcmd.net`, with or without a schedule window (since WP UPD-5; under
+UPD-1 a vault without a window did not poll). Set
 `VAULT_MANIFEST_ORACLE=off` before upgrading to keep the old behaviour.
 
 Not done in UPD-1: the web badge/button/chip (UPD-2), Android (UPD-3), the ADR
@@ -5718,6 +5878,18 @@ passes the cap. The largest legitimate body (a 10 000-appid agent report) is
 Because the public exception is exactly `/v1/health`, a keyless
 `/v1/health/` (trailing slash) now gets `401` rather than Starlette's
 `307` redirect.
+
+**Public outside `/v1`:** the web UI's static files (below) and, since WP
+D11, `GET`/`HEAD /auth/steam/app-return` — the Steam OpenID return page for
+the Android app (`vault_api/routers/app_return.py`, ADR-0004 addendum 5).
+Steam only returns to `http(s)`, so the app sends Steam here and the page
+hands the raw query, unchanged, to the fixed deep link
+`steamvault://auth/openid-return?<query>` (meta refresh plus a tappable
+link, no JavaScript, `Cache-Control: no-store`). It verifies, stores and
+fetches nothing; the app verifies the assertion with Steam itself. A query
+without an `openid.mode` parameter, over 8 KiB, or with any character
+outside a percent-encoded query's ASCII set gets `400` and no link. The
+same path under `/v1` is not public (`401`).
 
 **Non-ASCII keys (WP 1.3 fix):** `hmac.compare_digest` raises `TypeError`
 for a non-ASCII `str` argument (confirmed empirically — a key containing

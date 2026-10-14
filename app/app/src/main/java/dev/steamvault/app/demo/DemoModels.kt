@@ -40,6 +40,12 @@ internal class DemoGame(
      * API (WP UPD-1) it only reaches the wire for a game with cache bytes,
      * and a finished prefill clears it ([DemoState]). */
     var updateAvailable: Boolean = false,
+    /** WP TOOL-APPS-2d: the game this app is a content package of (the
+     * server's resolved `parent_appid`, ADR-0022), null for a top-level
+     * game. */
+    val parentAppid: Int? = null,
+    /** WP TOOL-APPS-2d: the server's `app_type` vocabulary, null = unknown. */
+    val appType: String? = null,
 ) {
     private fun totalSizeBytes(): Long? = depots.sumOf { it.sizeBytes }.takeIf { depots.isNotEmpty() }
 
@@ -54,6 +60,8 @@ internal class DemoGame(
         needs_force = needsForce,
         installed_on = installedOn,
         update_available = updateAvailable && depots.isNotEmpty(),
+        parent_appid = parentAppid,
+        app_type = appType,
     )
 
     fun toDetail(): GameDetail = GameDetail(
@@ -66,6 +74,8 @@ internal class DemoGame(
         size_bytes = totalSizeBytes(),
         needs_force = needsForce,
         installed_on = installedOn,
+        parent_appid = parentAppid,
+        app_type = appType,
     )
 }
 

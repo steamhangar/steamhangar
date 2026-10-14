@@ -64,7 +64,11 @@ fun GameListRow(
             cachedCoverUrl = model.cachedCoverUrl,
             name = model.name,
             fallbackHues = model.fallbackHues,
+            // WP TOOL-APPS-2d: top-aligned -- a row with extra lines (a
+            // group's "+N content packages", "Never played") grows
+            // downward instead of pushing its cover down to the middle.
             modifier = Modifier
+                .align(Alignment.Top)
                 .size(width = 34.dp, height = 51.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .alpha(if (model.toolApp) TOOL_APP_COVER_ALPHA else 1f), // WP API-FIX-4
@@ -102,6 +106,10 @@ fun GameListRow(
             if (model.updateAvailable) {
                 UpdateAvailableLabel()
             }
+            // WP TOOL-APPS-2d: the group line and the "Never played" label,
+            // as on the grid card.
+            GroupPackagesLine(model)
+            if (model.neverPlayed) NeverPlayedLabel()
             // WP AG-3: same shared decision/text as GameCard.kt's grid pill --
             // see ui/library/InstalledBadgeText.kt.
             installedBadgeText(model.installedBadge)?.let { text ->

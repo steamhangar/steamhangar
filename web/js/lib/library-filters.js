@@ -36,10 +36,18 @@
  * and is OPTIONAL: `chipCounts` lists it only when the rows actually carry
  * the field (`hasUpdateField`), so an older vault-api shows the five chips
  * it always had.
+ *
+ * **WP TOOL-APPS-2c: chips count groups, not packages.** The Library hands
+ * in GROUPED rows (lib/content-groups.js): a group card is one row, so every
+ * chip counts it once. "Failed" also matches a group whose parent is fine
+ * but a content package failed (user decision Q3 B variant); every other
+ * chip reads the parent's own row. A search matches a group when the parent
+ * or any of its packages matches, so typing a package name finds its game.
  */
 
 import { dispKind, KIND } from "./game-status.js";
 import { hasUpdateField } from "./update-check.js";
+import { failedPackages } from "./content-groups.js";
 
 /**
  * @param {object} game GameSummary
@@ -47,12 +55,15 @@ import { hasUpdateField } from "./update-check.js";
  */
 export function matchesQuery(game, query) {
   if (!query) return true;
-  return typeof game.name === "string" && game.name.toLowerCase().includes(query);
+  if (typeof game.name === "string" && game.name.toLowerCase().includes(query)) return true;
+  // WP TOOL-APPS-2c: a group card also matches on its packages' names.
+  return Array.isArray(game.packages) && game.packages.some((p) => matchesQuery(p, query));
 }
 
 /** One filter chip: a stable key, its label, and a predicate over
- * `(game, liveJob)` where `liveJob` is this game's entry from
- * `indexLiveJobsByAppid` (undefined if none). */
+ * `(game, liveJob, liveJobsByAppid)` where `liveJob` is this game's entry
+ * from `indexLiveJobsByAppid` (undefined if none) and the map is the whole
+ * index (a group's packages have jobs of their own). */
 export const FILTER_DEFS = Object.freeze([
   { key: "all", label: "All", predicate: () => true },
   { key: "cached", label: "Cached", predicate: (g, job) => dispKind(g, job) === KIND.CACHED },
@@ -62,7 +73,12 @@ export const FILTER_DEFS = Object.freeze([
     label: "Downloading",
     predicate: (g, job) => !!job, // findLiveJob already excludes queued/GC (game-status.js)
   },
-  { key: "failed", label: "Failed", predicate: (g, job) => dispKind(g, job) === KIND.ERROR },
+  {
+    key: "failed",
+    label: "Failed",
+    // WP TOOL-APPS-2c: a group also counts when one of its packages failed.
+    predicate: (g, job, live) => dispKind(g, job) === KIND.ERROR || failedPackages(g, live).length > 0,
+  },
   // WP UPD-2: optional — see the module header and chipCounts.
   { key: "updates", label: "Updates", predicate: (g) => g.update_available === true, optional: true },
 ]);
@@ -83,7 +99,7 @@ export function visibleGames(games, { query, filterKey, liveJobsByAppid }) {
   const filter = FILTER_BY_KEY.get(filterKey) || FILTER_BY_KEY.get("all");
   return games.filter((g) => {
     if (!matchesQuery(g, query)) return false;
-    return filter.predicate(g, liveJobsByAppid?.get(g.appid));
+    return filter.predicate(g, liveJobsByAppid?.get(g.appid), liveJobsByAppid);
   });
 }
 
@@ -101,6 +117,6 @@ export function chipCounts(games, { query, liveJobsByAppid }) {
   return FILTER_DEFS.filter((f) => !f.optional || withOptional).map((f) => ({
     key: f.key,
     label: f.label,
-    count: inQuery.filter((g) => f.predicate(g, liveJobsByAppid?.get(g.appid))).length,
+    count: inQuery.filter((g) => f.predicate(g, liveJobsByAppid?.get(g.appid), liveJobsByAppid)).length,
   }));
 }

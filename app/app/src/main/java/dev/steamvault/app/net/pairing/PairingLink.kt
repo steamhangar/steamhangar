@@ -317,7 +317,7 @@ private val PAIRING_LINK_PREFIX = Regex(
  */
 fun routeIncomingLink(dataString: String?): IncomingLinkRoute = when {
     dataString == null -> IncomingLinkRoute.NONE
-    dataString.startsWith(SteamOpenIdConfig.RETURN_TO) -> IncomingLinkRoute.STEAM_OPENID_CALLBACK
+    dataString.startsWith(SteamOpenIdConfig.APP_LINK) -> IncomingLinkRoute.STEAM_OPENID_CALLBACK
     PAIRING_LINK_PREFIX.matches(dataString) -> IncomingLinkRoute.PAIRING
     else -> IncomingLinkRoute.NONE
 }
