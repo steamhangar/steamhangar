@@ -566,6 +566,18 @@ live under notifications. Today a dismiss is permanent per browser
   env-only today, forwarded by compose; default stays off for everyone
   else). The user wants to test the "Never played" pill with real data.
 
+**UPD-6 (web + app, rc16; user feedback 2026-10-14 on prod rc15:
+"Checked 14 games · 7 updates available", but the 7 were hard to find):**
+the status pill on the cover shows an orange "Update" (instead of the
+green check) and the status line reads "UPDATE AVAILABLE" instead of
+"CURRENT" for games with update_available; Downloads gets a section
+"Updates available (N)" listing them with "Update now" per game and
+"Update all", plus a note when they download automatically ("in the
+schedule window HH:MM-HH:MM" or "manual only" without a window). Starting
+an update moves the game into the normal download queue. Prod has no
+schedule window today (manual only); an automatic window needs its own
+Antrag and also enables the nightly prefill.
+
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
 vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
