@@ -656,6 +656,16 @@ phone: "Download app" button plus a QR code to the vault's APK, then the
 existing pairing QR. Dev builds (no APK in the image) fall back to the
 GitHub release asset of the same version.
 
+**AGENT-DIST-1 (ci + api + web, rc18; user decision 2026-10-14):** like
+APP-DIST-1 for the agent: the vault serves the vault-agent itself in the
+LAN instead of the GitHub release. rc18: the release binaries (Windows exe,
+Linux amd64/arm64) and the task scripts plus SHA256SUMS are baked into the
+vault-api image and served at a fixed path; the "Add a device" install
+snippet (web/js/lib/agent-install.js) downloads from the vault, with the
+GitHub release asset of the same version as fallback for dev builds. Later
+(after v0.1.0): a real installer replaces the snippet and the PowerShell
+task scripts (see AGENT-ADDR-1 constraint) and is served the same way.
+
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check
 updates" a clearly visible primary button and give "Check & update all
