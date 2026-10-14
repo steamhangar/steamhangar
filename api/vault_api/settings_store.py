@@ -94,8 +94,12 @@ class SettingSpec:
     #: Typed value -> JSON-safe value.
     to_json: Callable[[Any], Any]
     target: str = TARGET_API
-    #: Debug knob (D16 audit 3.2): PATCH needs ``confirm_risky=true``.
+    #: PATCH needs ``confirm_risky=true`` (D16a table sign-off 2026-10-14:
+    #: the network/load caps and the debug knobs except the log level).
     risky: bool = False
+    #: Shown in the expert area of the Settings page (D16a sign-off):
+    #: network/load keys, debug keys and housekeeping. ``False`` = normal.
+    expert: bool = False
     #: Short grammar hint for the UI.
     grammar: str = ""
 
@@ -210,18 +214,21 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
             False, config.DEFAULT_SCHEDULE_INTERVAL_MINUTES,
             _int(1, config.MAX_INTERVAL_MINUTES), _identity,
             grammar=f"{_INT_HINT}, 1..{config.MAX_INTERVAL_MINUTES}",
+            expert=True,
         ),
         SettingSpec(
             "schedule_client_stale_days", "VAULT_SCHEDULE_CLIENT_STALE_DAYS", "next_sweep",
             False, config.DEFAULT_SCHEDULE_CLIENT_STALE_DAYS,
             _int(1, config.MAX_DAYS), _identity,
             grammar=f"{_INT_HINT}, 1..{config.MAX_DAYS}",
+            expert=True,
         ),
         SettingSpec(
             "sweep_include_cached", "VAULT_SWEEP_INCLUDE_CACHED", "next_sweep", False,
             config.DEFAULT_SWEEP_INCLUDE_CACHED,
             _non_blank(config.parse_strict_bool), _identity,
             grammar="true/false (also yes/no, on/off, 1/0)",
+            expert=True,
         ),
         SettingSpec(
             "auto_gc", "VAULT_AUTO_GC", "immediately", False, config.DEFAULT_AUTO_GC,
@@ -232,38 +239,45 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
             "gc_grace_days", "VAULT_GC_GRACE_DAYS", "next_job", False,
             config.DEFAULT_GC_GRACE_DAYS, _int(0, config.MAX_DAYS), _identity,
             grammar=f"{_INT_HINT}, 0..{config.MAX_DAYS} (0 = no grace)",
+            expert=True,
         ),
         SettingSpec(
             "manifest_keep", "VAULT_MANIFEST_KEEP", "next_job", False,
             config.DEFAULT_MANIFEST_KEEP, _int(config.MIN_MANIFEST_KEEP), _identity,
             grammar=f"{_INT_HINT}, at least {config.MIN_MANIFEST_KEEP}",
+            expert=True,
         ),
         SettingSpec(
             "agent_report_keep", "VAULT_AGENT_REPORT_KEEP", "immediately", False,
             config.DEFAULT_AGENT_REPORT_KEEP, _int(config.MIN_AGENT_REPORT_KEEP), _identity,
             grammar=f"{_INT_HINT}, at least {config.MIN_AGENT_REPORT_KEEP}",
+            expert=True,
         ),
         SettingSpec(
             "client_stats_keep", "VAULT_CLIENT_STATS_KEEP", "next_sweep", False,
             config.DEFAULT_CLIENT_STATS_KEEP, _int(1), _identity,
             grammar=f"{_INT_HINT}, at least 1",
+            expert=True,
         ),
         SettingSpec(
             "event_sweep_interval_minutes", "VAULT_EVENT_SWEEP_INTERVAL_MINUTES", "next_sweep",
             False, config.DEFAULT_EVENT_SWEEP_INTERVAL_MINUTES,
             _int(1, config.MAX_INTERVAL_MINUTES), _identity,
             grammar=f"{_INT_HINT}, 1..{config.MAX_INTERVAL_MINUTES}",
+            expert=True,
         ),
         SettingSpec(
             "miss_trigger_cooldown_minutes", "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES",
             "next_sweep", False, config.DEFAULT_MISS_TRIGGER_COOLDOWN_MINUTES,
             _int(0, config.MAX_COOLDOWN_MINUTES), _identity,
             grammar=f"{_INT_HINT}, 0..{config.MAX_COOLDOWN_MINUTES} (0 = trigger off)",
+            expert=True,
         ),
         SettingSpec(
             "miss_trigger_max_per_sweep", "VAULT_MISS_TRIGGER_MAX_PER_SWEEP", "next_sweep",
             False, config.DEFAULT_MISS_TRIGGER_MAX_PER_SWEEP, _int(1), _identity,
             grammar=f"{_INT_HINT}, at least 1",
+            expert=True,
         ),
         SettingSpec(
             "bypass_window_days", "VAULT_BYPASS_WINDOW_DAYS", "immediately", False,
@@ -274,7 +288,7 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
             "prefill_max_threads", "VAULT_PREFILL_MAX_THREADS", "next_job", False,
             config.DEFAULT_PREFILL_MAX_THREADS,
             _int(config.MIN_PREFILL_MAX_THREADS, config.MAX_PREFILL_MAX_THREADS), _identity,
-            target=TARGET_BOTH,
+            target=TARGET_BOTH, risky=True, expert=True,
             grammar=(
                 f"{_INT_HINT}, {config.MIN_PREFILL_MAX_THREADS}.."
                 f"{config.MAX_PREFILL_MAX_THREADS}, at most upstream_max_conns"
@@ -284,11 +298,13 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
             "prefill_timeout_seconds", "VAULT_PREFILL_TIMEOUT_SECONDS", "next_job", False,
             config.DEFAULT_PREFILL_TIMEOUT_SECONDS, _int(1), _identity,
             grammar=f"{_INT_HINT}, seconds, at least 1",
+            expert=True,
         ),
         SettingSpec(
             "manifest_oracle_timeout", "VAULT_MANIFEST_ORACLE_TIMEOUT", "immediately", False,
             config.DEFAULT_MANIFEST_ORACLE_TIMEOUT, _float, _identity,
             grammar="positive number of seconds, e.g. 10 or 2.5",
+            expert=True,
         ),
         SettingSpec(
             "webhook_events", "VAULT_WEBHOOK_EVENTS", "restart-required", False,
@@ -310,24 +326,28 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
         SettingSpec(
             "upstream_rate", "VAULT_UPSTREAM_RATE", "core", False, None,
             _core(core_settings.parse_upstream_rate), _identity, target=TARGET_CORE,
+            expert=True,
             grammar="bytes/s with optional k or m suffix (800k, 2m), min 1024; off = no cap",
         ),
         SettingSpec(
             "upstream_max_conns", "VAULT_UPSTREAM_MAX_CONNS", "core", False,
             str(core_settings.UPSTREAM_CAP_DEFAULT),
             _core(core_settings.parse_upstream_max_conns), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
             grammar="whole number 1..64, no leading zero, at least prefill_max_threads",
         ),
         SettingSpec(
             "tls_client_max_conns", "VAULT_TLS_CLIENT_MAX_CONNS", "core", False,
             str(core_settings.TLS_CLIENT_DEFAULT),
             _core(core_settings.parse_tls_client_max_conns), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
             grammar="whole number 1..256, no leading zero, at most tls_max_conns",
         ),
         SettingSpec(
             "tls_max_conns", "VAULT_TLS_MAX_CONNS", "core", False,
             str(core_settings.TLS_TOTAL_DEFAULT),
             _core(core_settings.parse_tls_max_conns), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
             grammar="whole number 1..400, no leading zero",
         ),
         SettingSpec(
@@ -341,23 +361,24 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
             "upstream_edge", "VAULT_UPSTREAM_EDGE", "core", False,
             core_settings.UPSTREAM_EDGE_DEFAULT,
             _core(core_settings.parse_upstream_edge), _identity, target=TARGET_CORE,
-            risky=True,
+            risky=True, expert=True,
             grammar="one *.steamcontent.com or *.steamserver.net host; off = legacy per-name pool",
         ),
         SettingSpec(
             "upstream_pool_hosts", "VAULT_UPSTREAM_POOL_HOSTS", "core", False, None,
             _core(core_settings.parse_upstream_pool_hosts), _identity, target=TARGET_CORE,
-            risky=True,
+            risky=True, expert=True,
             grammar="up to 4 space-separated Steam edge hosts, used only while upstream_edge is off; off = none",
         ),
         SettingSpec(
             "resolver", "VAULT_RESOLVER", "core", False, core_settings.RESOLVER_DEFAULT,
             _core(core_settings.parse_resolver), _identity, target=TARGET_CORE, risky=True,
+            expert=True,
             grammar="IP address list, e.g. 1.1.1.1 or [2606:4700::1111]:53; never a resolver that rewrites Steam names",
         ),
         SettingSpec(
             "log_level", "VAULT_LOG_LEVEL", "immediately", False, config.DEFAULT_LOG_LEVEL,
-            _non_blank(config.parse_log_level), _identity, risky=True,
+            _non_blank(config.parse_log_level), _identity, expert=True,
             grammar="DEBUG, INFO, WARNING, ERROR or CRITICAL",
         ),
     )
@@ -680,6 +701,8 @@ class SettingInfo:
     risky: bool
     grammar: str
     target: str
+    #: Expert area of the Settings page (D16a table sign-off).
+    expert: bool
     #: False for core-only keys: vault-api cannot see vault-core's env.
     env_visible: bool
     #: A stored value exists but env (or env-only status) overrides it.
@@ -720,6 +743,7 @@ def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingI
                 value=stored_json,
                 editable=not pinned,
                 risky=spec.risky,
+                expert=spec.expert,
                 grammar=spec.grammar,
                 target=spec.target,
                 env_visible=spec.target != TARGET_CORE,
@@ -741,6 +765,7 @@ def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingI
                 value=None,
                 editable=False,
                 risky=False,
+                expert=False,
                 grammar="",
                 target=TARGET_API,
                 env_visible=True,

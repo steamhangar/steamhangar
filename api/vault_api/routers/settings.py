@@ -4,7 +4,7 @@
 set in vault-api's env is reported ``source: "env"``, ``editable: false``, and
 PATCH answers ``409`` for it. Every row now also carries ``env_var``,
 ``value`` (the stored Settings value or ``null``), ``editable``, ``risky``,
-``grammar``, ``target`` (``api`` | ``core`` | ``api+core``), ``env_visible``
+``expert`` (expert area of the page), ``grammar``, ``target`` (``api`` | ``core`` | ``api+core``), ``env_visible``
 (false for core-only keys, whose env vault-api cannot see) and ``shadowed``.
 A PATCH that sets or clears a risky key needs the query parameter
 ``confirm_risky=true``, else ``428`` with ``detail.risky_keys``. A blank
@@ -138,6 +138,7 @@ class SettingInfoOut(BaseModel):
     value: Any
     editable: bool
     risky: bool
+    expert: bool
     grammar: str
     target: str
     env_visible: bool

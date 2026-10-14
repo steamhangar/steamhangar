@@ -146,8 +146,10 @@ section 5.1), implemented in D16b (rc18). It **reverses decision 1**.
    is also vault-core's rate-cap window, handed over through the core
    settings file. `VAULT_UPSTREAM_RATE_WINDOW` is deprecated (startup
    warning; vault-core still honours it as an env pin).
-5. **Risky keys** (debug knobs: upstream edge, pool hosts, resolver, log
-   level) need an explicit confirmation flag on PATCH (`428` without it),
+5. **Risky keys** (D16a table sign-off: the upstream and TLS connection
+   caps, the prefill thread count, and the debug knobs upstream edge, pool
+   hosts and resolver; the log level is not risky) need an explicit
+   confirmation flag on PATCH (`428` without it),
    and core keys are validated at PATCH time with Python twins of the hook
    grammars, pinned by one shared fixture table, so vault-api refuses what
    vault-core would refuse at render time (decision 4 extended to core).

@@ -11,7 +11,8 @@ G3  ``Settings.from_env`` pins exactly the non-blank ``VAULT_*`` variables
 G4  one startup warning per shadowed key, one for a stored webhook URL (Q2),
     one for the deprecated ``VAULT_UPSTREAM_RATE_WINDOW`` (Q3).
 G5  ``webhook_url`` is env-only and shown masked (Q2).
-G6  risky keys need ``confirm_risky=true`` (428 otherwise), set and clear.
+G6  risky keys need ``confirm_risky=true`` (428 otherwise), set and clear;
+    the risky set and the expert flag follow the D16a table sign-off.
 G7  cross-variable rules of audit 3.4 at PATCH time, only for touched keys.
 G8  the ``off`` keyword for the window, blank PATCH = reset (Q7).
 G9  GET carries the new per-key fields for the web package.
@@ -194,8 +195,9 @@ def test_mask_url(url: str, shown: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "body", [{"resolver": "9.9.9.9"}, {"upstream_edge": "off"}, {"log_level": "DEBUG"},
-             {"upstream_pool_hosts": "off"}, {"resolver": None}]
+    "body", [{"resolver": "9.9.9.9"}, {"upstream_edge": "off"}, {"upstream_pool_hosts": "off"},
+             {"resolver": None}, {"upstream_max_conns": "32"}, {"tls_max_conns": "300"},
+             {"tls_client_max_conns": "32"}, {"prefill_max_threads": "4"}]
 )
 def test_risky_keys_need_the_confirm_flag(client: TestClient, body: dict) -> None:
     refused = client.patch("/v1/settings", json={"vault_name": "x", **body}, headers=AUTH)
@@ -207,31 +209,56 @@ def test_risky_keys_need_the_confirm_flag(client: TestClient, body: dict) -> Non
         "/v1/settings", params={"confirm_risky": "true"}, json=body, headers=AUTH
     )
     assert accepted.status_code == 200, accepted.text
-    logging.getLogger().setLevel(logging.WARNING)
 
 
 def test_non_risky_keys_need_no_confirm(client: TestClient) -> None:
-    response = client.patch("/v1/settings", json={"upstream_rate": "800k"}, headers=AUTH)
+    response = client.patch(
+        "/v1/settings",
+        json={"upstream_rate": "800k", "schedule_window": "22:00-06:00"},
+        headers=AUTH,
+    )
     assert response.status_code == 200
     row = _row(response.json(), "upstream_rate")
     assert (row["value"], row["effective"], row["source"]) == ("800k", "800k", "db")
 
 
-def test_risky_flags_are_exactly_the_four_debug_knobs() -> None:
+def test_risky_flags_follow_the_d16a_sign_off() -> None:
+    """User sign-off 2026-10-14: the network/load caps and the debug knobs,
+    but not the log level, the rate or the window."""
     risky = {k for k, s in settings_store.OVERRIDABLE_SPECS.items() if s.risky}
-    assert risky == {"upstream_edge", "upstream_pool_hosts", "resolver", "log_level"}
+    assert risky == {
+        "upstream_edge", "upstream_pool_hosts", "resolver", "prefill_max_threads",
+        "upstream_max_conns", "tls_client_max_conns", "tls_max_conns",
+    }
+
+
+def test_expert_flags_follow_the_d16a_sign_off() -> None:
+    normal = {k for k, s in settings_store.OVERRIDABLE_SPECS.items() if not s.expert}
+    assert normal == {
+        "schedule_window", "auto_gc", "vault_name", "steam_library_steamid",
+        "bypass_window_days", "webhook_events", "webhook_timeout_seconds",
+        "event_log_rotate_bytes",
+    }
 
 
 # -- G7 -----------------------------------------------------------------------
 
 
+CONFIRM = {"confirm_risky": "true"}
+
+
 def test_upstream_cap_must_cover_the_prefill_threads(client: TestClient) -> None:
-    low = client.patch("/v1/settings", json={"upstream_max_conns": "4"}, headers=AUTH)
+    low = client.patch(
+        "/v1/settings", params=CONFIRM, json={"upstream_max_conns": "4"}, headers=AUTH
+    )
     assert low.status_code == 422 and "prefill_max_threads" in low.json()["detail"]
-    many = client.patch("/v1/settings", json={"prefill_max_threads": "32"}, headers=AUTH)
+    many = client.patch(
+        "/v1/settings", params=CONFIRM, json={"prefill_max_threads": "32"}, headers=AUTH
+    )
     assert many.status_code == 422
     both = client.patch(
-        "/v1/settings", json={"prefill_max_threads": "32", "upstream_max_conns": "32"}, headers=AUTH
+        "/v1/settings", params=CONFIRM,
+        json={"prefill_max_threads": "32", "upstream_max_conns": "32"}, headers=AUTH,
     )
     assert both.status_code == 200
     # An unrelated PATCH is not judged on these keys.
@@ -239,10 +266,13 @@ def test_upstream_cap_must_cover_the_prefill_threads(client: TestClient) -> None
 
 
 def test_tls_client_cap_must_not_exceed_the_total(client: TestClient) -> None:
-    response = client.patch("/v1/settings", json={"tls_max_conns": "32"}, headers=AUTH)
+    response = client.patch(
+        "/v1/settings", params=CONFIRM, json={"tls_max_conns": "32"}, headers=AUTH
+    )
     assert response.status_code == 422 and "tls_client_max_conns" in response.json()["detail"]
     ok = client.patch(
-        "/v1/settings", json={"tls_max_conns": "32", "tls_client_max_conns": "16"}, headers=AUTH
+        "/v1/settings", params=CONFIRM,
+        json={"tls_max_conns": "32", "tls_client_max_conns": "16"}, headers=AUTH,
     )
     assert ok.status_code == 200
 
@@ -252,7 +282,9 @@ def test_cap_floor_uses_the_env_pinned_thread_count(tmp_path: Path) -> None:
         tmp_path, prefill_max_threads=20, env_pinned=frozenset({"VAULT_PREFILL_MAX_THREADS"})
     )
     with TestClient(create_app(settings)) as client:
-        response = client.patch("/v1/settings", json={"upstream_max_conns": "16"}, headers=AUTH)
+        response = client.patch(
+            "/v1/settings", params=CONFIRM, json={"upstream_max_conns": "16"}, headers=AUTH
+        )
     assert response.status_code == 422
 
 
@@ -295,12 +327,14 @@ def test_get_rows_carry_the_expert_fields(client: TestClient) -> None:
     assert rate == {
         "key": "upstream_rate", "effective": None, "source": "default", "fallback": None,
         "applies": "core", "env_only": False, "env_var": "VAULT_UPSTREAM_RATE",
-        "value": None, "editable": True, "risky": False,
+        "value": None, "editable": True, "risky": False, "expert": True,
         "grammar": rate["grammar"], "target": "core", "env_visible": False, "shadowed": False,
     }
     assert "off" in rate["grammar"]
     edge = _row(body, "upstream_edge")
     assert edge["effective"] == "dist-fra1.discovery.steamserver.net" and edge["risky"] is True
+    assert _row(body, "schedule_window")["expert"] is False
+    assert _row(body, "db_path")["expert"] is False
     threads = _row(body, "prefill_max_threads")
     assert threads["target"] == "api+core" and threads["env_visible"] is True
     assert threads["effective"] == 8
@@ -367,10 +401,9 @@ def test_log_level_applies_immediately(client: TestClient) -> None:
     root = logging.getLogger()
     before = root.level
     try:
-        client.patch(
-            "/v1/settings", params={"confirm_risky": "true"}, json={"log_level": "error"},
-            headers=AUTH,
-        )
+        # Not risky since the D16a sign-off: no confirm flag needed.
+        response = client.patch("/v1/settings", json={"log_level": "error"}, headers=AUTH)
+        assert response.status_code == 200
         assert root.level == logging.ERROR
     finally:
         root.setLevel(before)
@@ -432,7 +465,7 @@ def test_subprocess_worker_reads_prefill_threads_per_job_from_settings(tmp_path:
     assert settings.prefill_mode == config.PREFILL_MODE_SUBPROCESS
     with TestClient(create_app(settings)) as client:
         assert client.patch(
-            "/v1/settings", json={"prefill_max_threads": "6"}, headers=AUTH
+            "/v1/settings", params=CONFIRM, json={"prefill_max_threads": "6"}, headers=AUTH
         ).status_code == 200
         (job_id,) = enqueue(client, 440)
         assert wait_for_job(client, job_id)["status"] == "done"
