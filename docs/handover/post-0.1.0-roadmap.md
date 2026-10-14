@@ -656,6 +656,49 @@ phone: "Download app" button plus a QR code to the vault's APK, then the
 existing pairing QR. Dev builds (no APK in the image) fall back to the
 GitHub release asset of the same version.
 
+**UPD-FIX-1 (api, rc18 FIRST; bug reported by the user on prod rc17,
+2026-10-14):** "Update now" does not clear "Update available". Prod showed
+7 games under "Updates available" (Assassin's Creed Black Flag Resync,
+Bongo Cat, Graveyard Keeper 2, No Man's Sky, Subnautica 2, Tavern Keeper,
+The Crust). "Update now" on Tavern Keeper ran job #108 in 3 s: SteamPrefill
+"Prefilled 1 apps totaling 0 b, Updated 0 | Up To Date 1"; vault-api
+"Manifest ingestion: recorded 4 manifest(s) for depot(s) [436781]"; the game
+stayed flagged.
+Analysis (code, rc17; not yet confirmed with prod data):
+- `update_available` = oracle public gid != `depot_manifests.manifestid`
+  per depot (oracle.py `_compare_depots`, ~1065-1118; recomputed live on
+  every GET /v1/games).
+- Likely root cause: `manifest_ingest.py` (~216-273) ingests EVERY
+  `{appid}_*.bin` in SteamPrefill's temp dir in unsorted `os.scandir` order
+  and upserts each into the single `(appid, depotid)` row — last file wins.
+  Old manifests from earlier runs accumulate there (nothing clears them),
+  so the stored gid can be an old one, the flag never clears, and a real
+  update run can overwrite the correct gid with a stale one. The only test
+  of a replaced manifest deletes the old file first
+  (tests/test_manifest_ingest.py ~186-189), so it hides this.
+- Other candidates: oracle snapshot disagrees with Steam (would change
+  after a manual update check); a `depot_manifests` row for a depot
+  SteamPrefill no longer downloads (rows are never deleted; depot_app_map
+  is not consulted).
+Fix scope:
+1. Confirm with prod data first (user runs one read-only command: stored vs
+   oracle gid per depot + the .bin files present).
+2. Ingestion records only the manifest SteamPrefill actually used in this
+   run (newest by SteamPrefill's own record `successfullyDownloadedDepots.json`
+   or by file mtime, documented), never an arbitrary leftover; one-time
+   repair of existing rows at startup (re-derive from the same rule).
+3. The oracle comparison only considers depots the vault prefills
+   (depot_app_map) — a stale row for an unselected depot must not flag.
+4. After a successful "Update now", re-evaluate the verdict immediately
+   (no 3 h wait); if SteamPrefill says Up To Date but the oracle still says
+   stale, surface it honestly (e.g. a job note "Steam reports this build as
+   current — oracle and Steam disagree") instead of silently leaving the
+   game flagged.
+5. Tests: several .bin files for one depot in random order; end-to-end
+   "Update now clears the flag"; stale row for an unmapped depot.
+Interplay: CACHE-COMPLETE-1a uses the same target selection (recorded vs
+oracle gid) — check the completeness figure is not affected the same way.
+
 **AGENT-DIST-1 (ci + api + web, rc18; user decision 2026-10-14):** like
 APP-DIST-1 for the agent: the vault serves the vault-agent itself in the
 LAN instead of the GitHub release. rc18: the release binaries (Windows exe,
