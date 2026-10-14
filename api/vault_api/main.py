@@ -324,7 +324,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     # WP API-FIX-5: same reasoning -- constructing it starts no thread; the
     # lifespan starts it, and a test can replace it before that.
-    app.state.cover_art_refresher = CoverArtRefresher(settings.db_path)
+    # WP TOOL-APPS-2a: the same thread fills app classification from the
+    # oracle's stored answers, only while the oracle is on.
+    app.state.cover_art_refresher = CoverArtRefresher(
+        settings.db_path, oracle_enabled=settings.manifest_oracle_enabled
+    )
     # WP D10 COVER-CACHE-1: same reasoning; GET /v1/covers reads its cache_dir.
     app.state.cover_file_fetcher = CoverFileFetcher(settings.db_path)
     app.include_router(health.router)

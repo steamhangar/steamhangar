@@ -18,7 +18,13 @@ single query parameter ``input_json``::
 
     {"ids": [{"appid": N}, ...],
      "context": {"language": "english", "country_code": "US"},
-     "data_request": {"include_assets": true}}
+     "data_request": {"include_assets": true,
+                      "include_basic_info": true,
+                      "include_related_items": true}}
+
+The last two flags (WP TOOL-APPS-2a, ADR-0022 §1) ask for the item's store
+type, ``related_items.parent_appid`` and name in the same answer; the ids
+sent are unchanged. What they yield is stored by ``app_classification.py``.
 
 No Web API key, no SteamID, nothing else. Up to ``BATCH_SIZE`` apps per
 call. Each answered item carries ``assets.asset_url_format`` (e.g.
@@ -84,7 +90,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Sequence
 from urllib.parse import urlsplit
 
-from vault_api import deletion, steam_relay, tool_apps
+from vault_api import app_classification, deletion, steam_relay, tool_apps
 from vault_api.db import get_connection
 from vault_api.jobs import TIMESTAMP_FORMAT
 
@@ -192,7 +198,11 @@ def request_params(appids: Sequence[int]) -> dict[str, str]:
     payload = {
         "ids": [{"appid": int(appid)} for appid in appids],
         "context": LOOKUP_CONTEXT,
-        "data_request": {"include_assets": True},
+        "data_request": {
+            "include_assets": True,
+            "include_basic_info": True,
+            "include_related_items": True,
+        },
     }
     return {"input_json": json.dumps(payload, separators=(",", ":"))}
 
@@ -202,11 +212,52 @@ def fetch_items(appids: Sequence[int]) -> bytes:
     return steam_relay.http_fetch(GET_ITEMS_PATH, request_params(appids))
 
 
+@dataclass(frozen=True)
+class StoreItem:
+    """What one GetItems item says about one requested app."""
+
+    cover_url: str | None
+    facts: app_classification.StoreFacts
+
+
+_UNANSWERED = app_classification.StoreFacts(answered=False)
+
+
+def _store_facts(appid: int, item: dict) -> app_classification.StoreFacts:
+    """Type, parent and name of one answered item (WP TOOL-APPS-2a). A
+    missing or malformed field is ``None`` ("unknown"), never an error."""
+    app_type = app_classification.app_type_from_store(item.get("type"))
+    parent: int | None = None
+    related = item.get("related_items")
+    if isinstance(related, dict):
+        raw_parent = related.get("parent_appid")
+        if isinstance(raw_parent, (str, int)):
+            parent = deletion.coerce_positive_id(raw_parent)
+        if parent == appid:
+            parent = None
+    return app_classification.StoreFacts(
+        answered=True,
+        app_type=app_type,
+        parent_appid=parent,
+        name=app_classification.valid_app_name(item.get("name")),
+    )
+
+
 def parse_items(payload: bytes, requested: Iterable[int]) -> dict[int, str | None]:
     """``{appid: cover_url or None}`` for every REQUESTED app the answer
     talks about. An app missing from the answer is missing from the result
     (the caller treats it as a failed attempt). Raises ``SteamRelayError``
     when the document is unusable as a whole."""
+    return {
+        appid: item.cover_url
+        for appid, item in parse_store_items(payload, requested).items()
+    }
+
+
+def parse_store_items(payload: bytes, requested: Iterable[int]) -> dict[int, StoreItem]:
+    """``parse_items`` plus each item's store type and parent (WP
+    TOOL-APPS-2a). Same rules: an app missing from the answer is missing from
+    the result; ``SteamRelayError`` for an unusable document."""
     wanted = set(requested)
     document = steam_relay._decode_json(payload, GET_ITEMS_PATH)
     if not isinstance(document, dict) or not isinstance(document.get("response"), dict):
@@ -221,7 +272,7 @@ def parse_items(payload: bytes, requested: Iterable[int]) -> dict[int, str | Non
             f"{steam_relay._redacted_url(GET_ITEMS_PATH)} 'store_items' is not a list"
         )
 
-    result: dict[int, str | None] = {}
+    result: dict[int, StoreItem] = {}
     for item in items[:MAX_STORE_ITEMS]:
         if not isinstance(item, dict):
             continue
@@ -233,17 +284,21 @@ def parse_items(payload: bytes, requested: Iterable[int]) -> dict[int, str | Non
             # Unknown/hidden app: Steam answers e.g. {"id": 228980,
             # "success": 15, "appid": 0} (measured 2026-10-10), so the
             # appid cross-check below applies to answered items only.
-            result[appid] = None
+            result[appid] = StoreItem(None, _UNANSWERED)
             continue
         other = item.get("appid")
         if other is not None and deletion.coerce_positive_id(other) != appid:
             continue
+        facts = _store_facts(appid, item)
         assets = item.get("assets")
         if not isinstance(assets, dict):
-            result[appid] = None
+            result[appid] = StoreItem(None, facts)
             continue
-        result[appid] = build_cover_url(
-            appid, assets.get("asset_url_format"), assets.get("library_capsule")
+        result[appid] = StoreItem(
+            build_cover_url(
+                appid, assets.get("asset_url_format"), assets.get("library_capsule")
+            ),
+            facts,
         )
     return result
 
@@ -387,11 +442,16 @@ def refresh_once(
         return RefreshOutcome()
     fetcher = fetch if fetch is not None else fetch_items
     try:
-        results = parse_items(fetcher(appids), appids)
+        items = parse_store_items(fetcher(appids), appids)
     except steam_relay.SteamRelayError as exc:
         record_failures(conn, appids, now)
         return RefreshOutcome(requested=tuple(appids), failed=len(appids), error=str(exc))
+    results = {appid: item.cover_url for appid, item in items.items()}
     record_results(conn, results, now)
+    # WP TOOL-APPS-2a: the same answer's store type and parent.
+    app_classification.record_store_results(
+        conn, {appid: item.facts for appid, item in items.items()}, now
+    )
     missing = [appid for appid in appids if appid not in results]
     if missing:
         record_failures(conn, missing, now)
@@ -417,10 +477,15 @@ class CoverArtRefresher:
         *,
         fetch: Callable[[Sequence[int]], bytes] | None = None,
         now: Callable[[], datetime] = _utcnow,
+        oracle_enabled: bool = False,
     ) -> None:
         self._db_path = db_path
         self._fetch = fetch
         self._now = now
+        # WP TOOL-APPS-2a: whether app_classification.fill_from_oracle may use
+        # the oracle's stored answers (``Settings.manifest_oracle_enabled``,
+        # not DB-overridable, so the boot value is the effective one).
+        self._oracle_enabled = oracle_enabled
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._streak = 0
@@ -453,16 +518,24 @@ class CoverArtRefresher:
                 return
 
     def tick(self) -> RefreshOutcome | None:
-        """One step: skipped while paused after a failure, else one batch."""
+        """One step: one store batch unless paused after a failure, then the
+        classification gap fill from the oracle's stored answers (no network,
+        so it runs while paused too; WP TOOL-APPS-2a)."""
         now = self._now()
-        if self._paused_until is not None and now < self._paused_until:
-            return None
+        paused = self._paused_until is not None and now < self._paused_until
         conn = get_connection(self._db_path)
         try:
-            outcome = refresh_once(conn, now, self._fetch)
+            outcome = None if paused else refresh_once(conn, now, self._fetch)
+            try:
+                app_classification.fill_from_oracle(
+                    conn, oracle_enabled=self._oracle_enabled
+                )
+            except sqlite3.Error:
+                logger.exception("App classification fill failed; trying again next tick.")
         finally:
             conn.close()
-        self._log(outcome, now)
+        if outcome is not None:
+            self._log(outcome, now)
         return outcome
 
     def _log(self, outcome: RefreshOutcome, now: datetime) -> None:

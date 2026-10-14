@@ -570,6 +570,41 @@ def remove_file_settling(path: str) -> tuple[bool, Exception | None]:
 
 
 @dataclass(frozen=True)
+class DeleteSet:
+    """The apps one deletion request removes together (WP TOOL-APPS-2b,
+    ADR-0022 §4).
+
+    ``primary`` is the app the request names; ``members`` always contains it.
+    A plain ``DELETE /v1/cache/{appid}`` is the one-member set, so the
+    single-app behaviour is this type's degenerate case, not a second code
+    path. Members never protect each other's depots: "another owner" means
+    an owner OUTSIDE ``members``, in the plan (``plan_deletion``,
+    ``other_owner_ids``, ``load_mapping_rows``) and in the execute-time
+    recheck (``load_co_owners``) alike. All four read membership through
+    ``as_delete_set`` and ``DeleteSet.members`` only, so the dry plan a
+    confirmation dialog shows and what is removed cannot use two different
+    definitions (LEARNINGS, "two call sites computing the same domain
+    predicate WILL diverge").
+    """
+
+    primary: int
+    members: frozenset[int]
+
+
+def as_delete_set(target: "int | DeleteSet") -> DeleteSet:
+    """The one membership definition every deletion primitive reads.
+
+    An ``int`` is the single-app set ``{target}``; a ``DeleteSet`` is used as
+    given, with its primary always included.
+    """
+    if isinstance(target, DeleteSet):
+        if target.primary in target.members:
+            return target
+        return DeleteSet(target.primary, target.members | {target.primary})
+    return DeleteSet(target, frozenset({target}))
+
+
+@dataclass(frozen=True)
 class SharedDepot:
     """A depot that is NOT deleted because a co-owner currently has cache
     content (plan §4; ADR-0003 addendum's "protected" outcome)."""
@@ -657,10 +692,14 @@ class DeletionPlan:
 
 def plan_deletion(
     rows: Iterable[Sequence[object]],
-    appid: int,
+    appid: "int | DeleteSet",
     co_owner_states: Mapping[int, bool] | None = None,
 ) -> DeletionPlan:
     """Split ``appid``'s mapped depots into exclusive / remnant / shared / unusable.
+
+    ``appid`` may be a ``DeleteSet`` (WP TOOL-APPS-2b): then "own" depots are
+    those mapped to any member, and only owners outside the set are
+    co-owners. An ``int`` is the one-member set (unchanged behaviour).
 
     ``rows`` are ``(depotid, appid)`` pairs covering **every** app that maps
     any depot of this app (see ``load_mapping_rows``) — that is what makes the
@@ -689,6 +728,7 @@ def plan_deletion(
     them maps to ``has_content=False`` is it classified as ``remnant``
     (deletable last-remnant) rather than ``shared`` (protected).
     """
+    delete_set = as_delete_set(appid)
     states: Mapping[int, bool] = co_owner_states or {}
     own: set[int] = set()
     others: dict[int, set[int]] = {}
@@ -708,7 +748,7 @@ def plan_deletion(
         if owner is None:
             unreadable_owner.add(depotid)
             continue
-        if owner == appid:
+        if owner in delete_set.members:
             own.add(depotid)
         else:
             others.setdefault(depotid, set()).add(owner)
@@ -1020,9 +1060,14 @@ def _has_cache_content(
 _ACTIVE_JOB_PLACEHOLDERS = ",".join("?" for _ in jobs.ACTIVE_STATUSES)
 
 
-def load_co_owners(conn: sqlite3.Connection, depotid: int, appid: int) -> list[CoOwner]:
+def load_co_owners(
+    conn: sqlite3.Connection, depotid: int, appid: "int | DeleteSet"
+) -> list[CoOwner]:
     """Apps *other than* ``appid`` that map ``depotid`` right now, each tagged
     with whether it currently has cache content (ADR-0003 addendum).
+
+    ``appid`` may be a ``DeleteSet`` (WP TOOL-APPS-2b): every member is
+    excluded, through the same ``as_delete_set`` the plan uses.
 
     The execute-time half of the shared-depot protection (WP 1.6 review,
     extended by the addendum): one **joined** lookup per depot, immediately
@@ -1052,16 +1097,19 @@ def load_co_owners(conn: sqlite3.Connection, depotid: int, appid: int) -> list[C
             ) AS has_active_job
         FROM depot_app_map dam
         LEFT JOIN apps ap ON ap.appid = dam.appid
-        WHERE dam.depotid = ? AND dam.appid != ?
+        WHERE dam.depotid = ?
         """,
-        (*jobs.ACTIVE_STATUSES, depotid, appid),
+        (*jobs.ACTIVE_STATUSES, depotid),
     ).fetchall()
 
+    delete_set = as_delete_set(appid)
     owners: dict[int, bool] = {}
     for row in rows:
         owner = coerce_positive_id(row["owner_appid"])
         if owner is None:
             owners[0] = True
+            continue
+        if owner in delete_set.members:
             continue
         has_content = _has_cache_content(
             row["status"], row["last_prefill_at"], row["has_active_job"]
@@ -1074,18 +1122,19 @@ def load_co_owners(conn: sqlite3.Connection, depotid: int, appid: int) -> list[C
     return [CoOwner(appid=aid, has_content=has_content) for aid, has_content in sorted(owners.items())]
 
 
-def other_owner_ids(rows: Iterable[Sequence[object]], appid: int) -> set[int]:
+def other_owner_ids(rows: Iterable[Sequence[object]], appid: "int | DeleteSet") -> set[int]:
     """The set of usable co-owner appids across ``load_mapping_rows`` output,
-    excluding ``appid`` itself.
+    excluding ``appid`` itself (every member, for a ``DeleteSet``).
 
     Kept separate from ``plan_deletion`` (which stays pure, no I/O) so a
     caller — ``routers/cache.py`` — knows exactly which appids are worth
     asking ``load_co_owner_states`` about before building the plan.
     """
+    delete_set = as_delete_set(appid)
     ids: set[int] = set()
     for row in rows:
         owner = coerce_positive_id(row[1])
-        if owner is not None and owner != appid:
+        if owner is not None and owner not in delete_set.members:
             ids.add(owner)
     return ids
 
@@ -1387,8 +1436,11 @@ def set_needs_force(conn: sqlite3.Connection, appids: Iterable[int]) -> None:
     conn.commit()
 
 
-def load_mapping_rows(conn: sqlite3.Connection, appid: int) -> list[tuple[object, object]]:
-    """``(depotid, appid)`` for every app that maps any depot of ``appid``.
+def load_mapping_rows(
+    conn: sqlite3.Connection, appid: "int | DeleteSet"
+) -> list[tuple[object, object]]:
+    """``(depotid, appid)`` for every app that maps any depot of ``appid``
+    (of any member, for a ``DeleteSet``).
 
     One query answers both questions deletion has ("which depots does this app
     map" and "does anything else map them"), and the subquery avoids building
@@ -1399,14 +1451,18 @@ def load_mapping_rows(conn: sqlite3.Connection, appid: int) -> list[tuple[object
     An empty result means the app maps no depots at all, which the endpoint
     turns into a 404.
     """
+    members = sorted(as_delete_set(appid).members)
+    placeholders = ",".join("?" for _ in members)
     return [
         (row["depotid"], row["appid"])
         for row in conn.execute(
-            """
+            f"""
             SELECT depotid, appid FROM depot_app_map
-            WHERE depotid IN (SELECT depotid FROM depot_app_map WHERE appid = ?)
+            WHERE depotid IN (
+                SELECT depotid FROM depot_app_map WHERE appid IN ({placeholders})
+            )
             """,
-            (appid,),
+            members,
         ).fetchall()
     ]
 
