@@ -3974,6 +3974,57 @@ use manual onboarding. The dialog's look on a phone, the cold-start path,
 open, the Recents re-delivery guard, and the web twin (PAIR-1 is not on
 main yet, so there is no cross-pin to its link builder).
 
+## Clients page and Downloads statistics (WP D15d)
+
+Twin of the web's D15c (`web/js/views/clients.js`, the statistics block of
+`web/js/views/downloads.js`), over vault-api's D15b endpoints
+`GET /v1/clients/overview`, `GET /v1/throughput`, `GET /v1/throughput/series`
+and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
+
+- **Clients** is a fourth bottom-nav destination after Library
+  (`ui/clients/ClientsScreen.kt`; user decision 2026-10-13, D15). One card
+  per agent PC or agentless address: connected or not, loading now,
+  installed games (agents only), bytes and hit rate for the range, recently
+  loaded games, last active. "Manage PCs" opens the existing PCs sheet
+  (`ClientsSheet.kt`); Settings keeps a pointer to the page.
+- **Downloads** gets a statistics header under the bulk bar
+  (`ui/downloads/DownloadsStats.kt`): current, average and peak speed,
+  loaded, byte hit rate, saved by the cache, active clients, plus a line
+  graph; a speed line under a running job; and a History range filter.
+- Ranges 24 h / 7 days / 30 days / All (`ui/traffic/RangeChips.kt`).
+  Statistics poll every 30 s only while the screen is started
+  (`ui/traffic/TrafficPoll.kt`).
+- Honest states, the web's rules and words (`ui/traffic/logic/TrafficView.kt`,
+  `ui/clients/logic/ClientsPage.kt`, verbatim-port exception above): with
+  the event feed disabled or on a server older than D15b (404) there is one
+  note and no figures, and the statistics range selectors are hidden; a
+  failed refresh keeps the old figures and adds "Couldn't refresh: ...".
+  The History filter always shows (an old server ignores `range`; the app
+  filters by the same rule).
+- Demo mode answers all four reads with synthetic data
+  (`demo/DemoTraffic.kt`), so every new surface shows.
+- The chosen ranges survive a tab switch (`ui/traffic/TrafficRanges.kt`,
+  held by `MainActivity` like `destination`; a recreation resets them).
+  "Last active ... ago" and the stale-feed note refresh every minute.
+- **Bottom-nav labels with four items** are one line, never wrapped
+  (`BottomNavBar.kt`): "Downloads" wrapped to "Download/s" at 360 dp and
+  font 1.3 before. Proven by the goldens up to font scale 1.3 at 360 dp;
+  at larger font scales the longest label may draw a few dp into its
+  neighbours' padding. Not measured beyond 1.3.
+- **Manage PCs parity gap vs web.** The web's Clients page has "Add a
+  device" (pairing QR and the agent install command) and a Remove button
+  per PC in its PCs sheet. The app has neither: "Manage PCs" opens the
+  read-only PCs sheet (presence, last report, version, bypass state), and
+  the app's `ClientsRepository` has no delete. Closing that gap is its own
+  package.
+
+Tests: `TrafficViewTest`, `ClientsPageTest`, `TrafficPollTest`,
+`TrafficApiTest`, `DemoTrafficTest`, the web twin `TrafficWebTwinTest`, and
+the wiring pins in `D15dWiringTest`. Screenshots (APP-TEST-2):
+`ClientsScreenshotTest` renders the Clients page in the real shell and the
+Downloads statistics header, from the demo's traffic builders over a fixed
+snapshot and clock, at 411 dp / font 1.0 and 360 dp / font 1.3, dark.
+
 ## Screenshot tests (WP APP-TEST-1)
 
 Roborazzi on Robolectric renders the Library screen to PNG on the JVM -- no
@@ -4068,7 +4119,9 @@ named `wp/<name>-goldens` (exactly one path segment after `wp/`, ending in
 2. **`android-goldens-push`** (`contents: write`, the only job with write
    access; it runs no Gradle and no repository build code): checks out the
    same commit, downloads the PNGs, accepts them only if the names are
-   exactly the `shoot("...")` names in `LibraryScreenshotTest.kt` and every
+   exactly the union of the shot names in every `*ScreenshotTest.kt` class
+   under `src/testDebug` (APP-TEST-2; the first, string-literal argument of
+   each `shoot` call) and every
    file is a PNG, commits changed ones as `github-actions[bot]`
    (`test(app): refresh screenshot goldens from CI`) and pushes to the same
    branch, fast-forward only. If the branch moved meanwhile the push is
