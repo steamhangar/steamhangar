@@ -4017,6 +4017,15 @@ and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
   read-only PCs sheet (presence, last report, version, bypass state), and
   the app's `ClientsRepository` has no delete. Closing that gap is its own
   package.
+- **Client names and the prefill runner (APP-17n, web D15-NAMES and
+  D15-RUNNER).** The card title is the server's `display_name`; a named
+  agent's line reads "vault-agent on <PC name> · <address>", a named
+  address keeps its address on the line. The server's prefill runner is
+  its own card ("Prefill runner", "This server's prefill downloads ·
+  <address>"), never raises the agentless note, and its share of
+  "Loaded" shows as "<size> by the prefill runner". Renaming and
+  "Delete history" are web-only for now (a parity gap like Manage PCs);
+  the demo names one agent and shows the runner.
 
 Tests: `TrafficViewTest`, `ClientsPageTest`, `TrafficPollTest`,
 `TrafficApiTest`, `DemoTrafficTest`, the web twin `TrafficWebTwinTest`, and
