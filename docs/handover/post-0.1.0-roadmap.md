@@ -578,6 +578,20 @@ an update moves the game into the normal download queue. Prod has no
 schedule window today (manual only); an automatic window needs its own
 Antrag and also enables the nightly prefill.
 
+**AGENT-ADDR-1 (agent + api, rc16 bug fix; found 2026-10-14):** prod
+shows "Client Demon is bypassing the cache" permanently although Demon's
+downloads demonstrably come from the cache (Graveyard Keeper 2, 94 % HIT,
+2026-10-13). Cause, measured 2026-10-14 via `diag netns
+steamhangar-vault-api-1 ss`: every connection to vault-api arrives from
+172.16.13.1 (docker bridge gateway, published port through the userland
+proxy), so `agent_reports.source_addr` is never Demon's LAN address and
+the bypass rule (no cache-log presence for that address) always fires.
+The same breaks the D15b agent<->address mapping. Fix (orchestrator):
+the agent reports its own LAN address(es) used toward the vault in the
+report payload; vault-api correlates on those (fallback source_addr);
+the bypass rule refuses to accuse when the only known address is a
+private bridge/gateway address. No ZEUS change.
+
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
 vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
