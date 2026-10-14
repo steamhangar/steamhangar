@@ -224,7 +224,8 @@ import time
 #: bucketed by EVENT time in three retention tiers (5-minute rows for 48 h,
 #: hourly rows for 30 days, daily rows forever; user decision 2026-10-13,
 #: ``vault_api/traffic.py``) -- and five ``event_sweep_state`` columns: the
-#: event log's file identity (``log_dev``/``log_ino``) so a rename-rotated
+#: event log's file identity (``log_ino`` decides; ``log_dev`` is kept for
+#: diagnostics only, ZFS does not keep st_dev stable) so a rename-rotated
 #: log is detected even when the new file is already larger than the
 #: cursor, ``rotations_detected_total``/``last_rotation_detected_at``, and
 #: ``traffic_since`` (when the tiers started filling). The tables are
@@ -520,7 +521,8 @@ CREATE TABLE IF NOT EXISTS event_sweep_state (
     oversized_skips_total   INTEGER NOT NULL DEFAULT 0,
     last_oversized_at       TEXT,
     -- v23 (WP D15b): st_dev/st_ino of the file the cursor points into.
-    -- A different inode on the next read means the log was replaced
+    -- Only st_ino decides (ZFS does not keep st_dev stable across reboots);
+    -- log_dev is stored for diagnostics. A different inode on the next read means the log was replaced
     -- (rename rotation) and the cursor restarts at 0 even when the new file
     -- is already larger than the old offset. NULL until the first sweep
     -- after the upgrade records it.

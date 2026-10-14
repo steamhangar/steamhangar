@@ -4062,9 +4062,15 @@ A crash anywhere before the commit means the whole batch is re-read. Per effect:
   a second non-forced prefill — ~3 s if it really is current (ADR-0006). That is
   the trade this ordering deliberately makes, not an oversight.
 
-### Rotation — best-effort, and usually impossible in the shipped containers
+### Rotation — vault-core first, the sweeper's truncation as fallback
 
-ADR-0008 gives rotation to this sweeper and to nothing else. `maybe_truncate`
+Since WP D15-ROT (ADR-0008 addendum) vault-core rotates the event log itself:
+at 64 MiB (`VAULT_EVENT_LOG_ROTATE_BYTES`, checked every 60 s by default) it
+renames `event.log` to `event.log.1`, keeps that one old file and makes nginx
+reopen. The sweeper follows the rename by inode and drains `event.log.1`
+first (see above). The in-place truncation below remains as a fallback for
+setups without the core hook (`VAULT_EVENT_LOG_ROTATE_BYTES=0`, an older core
+image, a native install); whichever runs first wins. `maybe_truncate`
 truncates to zero and resets the cursor only when the sweep succeeded, the file
 is at least `VAULT_EVENT_LOG_MAX_BYTES`, **and** its size right now still equals
 the committed cursor (i.e. every byte has been read).
@@ -4119,9 +4125,10 @@ The sweep runs on WP 3.5's scheduler thread but on **its own interval**
 (`VAULT_EVENT_SWEEP_INTERVAL_MINUTES`, default 5) and **unconditionally** — it
 is not gated on `VAULT_SCHEDULE_WINDOW`. Three reasons, heaviest first:
 
-1. **This sweeper owns the event log's rotation.** A window-gated sweeper would
-   leave the file unread for the 16 hours a day the window is shut, so the
-   feature would create the unbounded-growth problem it exists to own.
+1. **The sweeper must keep up with the log.** A window-gated sweeper would
+   leave the file unread for the 16 hours a day the window is shut: without
+   the vault-core rotation hook (D15-ROT) the fallback truncation would never
+   run, and with it more than one rotation could pass unread, losing lines.
 2. **Bypass detection must not have blind hours.** "This machine never appears
    in the cache log" is only trustworthy if the log is read around the clock;
    windowed, every evening gamer would look like a suspect at 22:00 and
@@ -4460,9 +4467,9 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
 
 ### What WP D15b deliberately did NOT do
 
-- No event-log rotation on the vault-core side (D15-ROT); the sweeper only
-  survives one (inode/shrink detection). It does not read the renamed old
-  file's unread tail.
+- No event-log rotation on the vault-core side; that is WP D15-ROT. The
+  sweeper follows a rename rotation (inode/shrink detection) and drains the
+  unread tail of `<path>.1`.
 - No names for agentless addresses, no reverse DNS, no per-address history
   deletion, no retention setting for the daily tier.
 - `GET /v1/jobs` keeps its 1..200 `limit`; there is no paging for long

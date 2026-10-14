@@ -87,8 +87,10 @@ data" true rather than aspirational:
 
 Rotation, and why truncate-in-place is safe
 -------------------------------------------
-ADR-0008 gives rotation to this module and to nothing else — no logrotate, no
-rename, nothing in ``core/``. ``maybe_truncate`` truncates the file to zero
+Since WP D15-ROT (ADR-0008 addendum) vault-core rotates the event log itself:
+at 64 MiB it renames it to ``<path>.1`` (one old file kept) and nginx reopens.
+The sweeper follows that rename (point 3 above). ``maybe_truncate`` is the
+fallback for setups without the core hook: it truncates the file to zero
 bytes and resets the cursor, and only when **all** of these hold:
 
 * the sweep succeeded and its cursor was committed,

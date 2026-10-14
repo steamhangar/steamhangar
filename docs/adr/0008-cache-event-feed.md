@@ -98,9 +98,12 @@ warn. Now:
   64 MiB) stays as a fallback for deployments without the vault-core hook
   (`VAULT_EVENT_LOG_ROTATE_BYTES=0`, or an older core image). It never
   truncates while its cursor still refers to the renamed-away file. In the
-  shipped containers vault-api cannot write the nginx-owned log, so a
-  truncation attempt is refused and counted (`truncate_denied_count`) as
-  before; with the core hook running the log rarely reaches the limit at
-  sweep time, because the hook checks every 60 s by default.
+  shipped containers the log belongs to uid 101 (vault-core's start hook),
+  which vault-api runs as, so truncation is permitted and whichever of the
+  two runs first wins; where the file is owned otherwise (as measured on
+  production), a truncation attempt is refused and counted
+  (`truncate_denied_count`) as before. With the core hook running the log
+  rarely reaches the limit at sweep time, because the hook checks every
+  60 s by default.
 - "Optional at runtime" is unchanged: with `VAULT_EVENT_LOG` empty, the
   rotation hook does nothing.
