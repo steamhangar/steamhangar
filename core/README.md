@@ -279,9 +279,11 @@ match and is **silently skipped** by the analyzer -- not misparsed with a
 wrong value, just dropped as if it never happened.
 
 **Wider since WP CORE-FEAT-1b2 (ADR-0017).** The `vault` log format now
-carries two fields appended after `cache=...` (`upstream_addr="..."` and
-`upstream_connect_time=...`, see "Upstream keepalive pool" below). The
-existing fields keep their names and order, but two PoC analyzers anchor
+carries six fields appended after `cache=...`: `upstream_addr="..."` and
+`upstream_connect_time=...` (WP CORE-FEAT-1b2, see "Upstream keepalive
+pool" below), `upstream_host="..."`, `host="..."` and `limit_conn=...`
+(ADR-0021) and `client=...` (WP D15a). The existing fields keep their
+names and order, but two PoC analyzers anchor
 their pattern at end-of-line (`cache=(?<cache>\S+)$`):
 `poc/steam-client-test/analyze.ps1` and `poc/steamprefill/verify.ps1`.
 Against a log written by the current format each matches **no line at
@@ -1258,6 +1260,28 @@ should be <= 2C). This replaces the legacy mode's 32-idle ceiling.
 fields: `upstream_host="<name dialled>"`, `host="<Host the client sent>"`
 and `limit_conn=<PASSED|REJECTED|->` (`REJECTED` = 503 from the cap).
 
+**Client address (WP D15a).** After `limit_conn=` the `vault` log ends with
+`client=<address>`: `$remote_addr`, the direct TCP peer, IPv4 or IPv6 text
+form, the same key and meaning as the port-443 stream log's `client=`
+field. Example tail:
+`upstream_host="fake1.steamcontent.com" host="lancache.steamcontent.com" limit_conn=PASSED client=192.168.1.42`.
+No `X-Forwarded-For` is trusted (vault-core is never behind another
+proxy). A request that arrives through Docker's userland proxy (from the
+host itself or the loopback publish) shows the bridge gateway instead of
+the real peer; LAN clients on a published or dedicated address keep their
+own (ADR-0020). The field is appended, so every existing field keeps its
+position; a reader of this log must accept older lines without it.
+
+**What it is for.** This field is operator diagnostics: grep `docker logs
+vault-core` for one device, or attribute a `limit_conn=REJECTED` (503 from
+the cap) to the client that hit it. vault-api never reads this log; its
+per-client data (`GET /v1/clients`, `GET /v1/stats`) comes from the
+machine-readable event log (`vault_event`, field 3), which has carried the
+client address since WP 3.10 and is unchanged. That log exists only when
+`VAULT_EVENT_LOG` is set: the compose default is empty (off),
+`deploy/.env.example` sets it. Retention of the access log is
+unchanged: the json-file rotation in `deploy/compose.yaml` ("Log rotation" above).
+
 **Limits.** C is global, not per source: a prefill (default 8 threads)
 plus a Steam client updating several apps can exceed C and get 503s; raise
 C (max 64) or run them one after the other. One edge name is a single
@@ -1417,7 +1441,9 @@ appended for this feature, after `cache=...` and key=value like the rest:
 Both fields become comma-separated lists on a `proxy_next_upstream` retry,
 like `upstream_status` (`docs/LEARNINGS.md`). The existing fields keep
 their names and order (append only); an analyzer that anchors at
-end-of-line must learn the two fields ("Known gap" above).
+end-of-line must learn every appended field: these two, then
+`upstream_host`, `host`, `limit_conn` (ADR-0021) and `client` (WP D15a)
+("Known gap" above).
 
 **Native rig.** `core/nginx/nginx.conf` carries the identical
 `include vault-upstream-pool.conf;` line; its

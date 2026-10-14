@@ -708,6 +708,22 @@ render_and_test() {
                     status=1
                 fi
 
+                # --- WP D15a: the vault log ends with client=$remote_addr ---
+                # Appended after limit_conn=, so every older field keeps its
+                # position. A loopback request must log client=127.0.0.1 as
+                # the LAST field of exactly the line it produced.
+                c0=$(wc -l < /tmp/probe-access.log)
+                curl -s -m 5 -o /dev/null http://127.0.0.1/health?d15a-client-probe || true
+                i=0
+                while [ "$(wc -l < /tmp/probe-access.log)" -le "$c0" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+                cline=$(tail -n +$((c0 + 1)) /tmp/probe-access.log | grep -F "d15a-client-probe" | tail -n 1)
+                if printf "%s\n" "$cline" | grep -qE " limit_conn=[A-Z-]+ client=127[.]0[.]0[.]1\$"; then
+                    echo "log OK: D15a access line ends with client=127.0.0.1"
+                else
+                    echo "FAIL: D15a access line does not end with limit_conn=... client=127.0.0.1: $cline"
+                    status=1
+                fi
+
                 # --- SEC-FIX-1 (WP 5.3 review U-1): Host allowlist, LIVE -----
                 # Threat: a Host such as "127.0.0.1?x.steamcontent.com" passes
                 # a suffix-only allowlist, and proxy_pass splits the URL at

@@ -781,6 +781,20 @@ payload-scoping mitigation yet (that mitigation is explicitly planned only
 for Phase 6 webhooks, not for this existing
 endpoint).
 
+**The plain access logs carry the same addresses (WP D15a).** Every line of
+vault-core's human-readable `vault` access log (port 80, on stdout, i.e.
+`docker logs vault-core`) ends with `client=$remote_addr`, the same field
+the port-443 stream log has carried since WP CORE-FIX-3 (§1). Together with
+`uri=` and `host=` this is a record of which LAN address downloaded which
+depot when, readable by anyone who can read the container logs on the host
+(the host-level trust boundary of §6). Unlike the opt-in event log (§6),
+this field has no off switch; the precedent is the port-443 stream log's
+`client=` field (WP CORE-FIX-3). Retention did not change: the
+json-file driver's `max-size`/`max-file` rotation bounds it
+(`VAULT_LOG_MAX_SIZE` / `VAULT_LOG_MAX_FILE`, `deploy/compose.yaml`). The
+address is the direct TCP peer; requests from the host itself show the
+Docker bridge gateway, not a person's device.
+
 ---
 
 ## 5. Outbound data flows — what leaves the LAN
