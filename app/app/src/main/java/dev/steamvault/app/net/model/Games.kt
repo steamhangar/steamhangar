@@ -54,6 +54,21 @@ data class GameSummary(
     /** WP UPD-1: when the oracle last answered for this game, null while
      * never checked (or on a server from before UPD-1). */
     val update_checked_at: String? = null,
+    /** WP TOOL-APPS-2a (ADR-0022): the TOP-LEVEL game this app is a content
+     * package of, resolved by the server (one level). Null when ungrouped --
+     * and on a server from before TOOL-APPS-2a, which sends no field: a
+     * missing value means "ungrouped", so the flat list renders as before. */
+    val parent_appid: Int? = null,
+    /** WP TOOL-APPS-2a: "game", "dlc", "tool", "application", "config",
+     * "music", "video", "demo" or null (unknown, or an older server).
+     * Display data only. */
+    val app_type: String? = null,
+    /** WP TOOL-APPS-2 (ADR-0022 §2): on a top-level row, the bytes of the
+     * whole group it heads (its own depots plus those of every row whose
+     * [parent_appid] is this app, each depot counted once); equals
+     * [size_bytes] for an ungrouped row, null on a grouped row and on an
+     * older server. */
+    val group_size_bytes: Long? = null,
 )
 
 /** One entry of [GameDetail.depots] — `vault_api/routers/games.py::DepotEntry`. */
@@ -100,4 +115,10 @@ data class GameDetail(
     val cover_url: String? = null,
     /** See [GameSummary.cover_cached_url] (WP D10). */
     val cover_cached_url: String? = null,
+    /** See [GameSummary.parent_appid] (WP TOOL-APPS-2a). */
+    val parent_appid: Int? = null,
+    /** See [GameSummary.app_type] (WP TOOL-APPS-2a). */
+    val app_type: String? = null,
+    /** See [GameSummary.group_size_bytes] (WP TOOL-APPS-2). */
+    val group_size_bytes: Long? = null,
 )

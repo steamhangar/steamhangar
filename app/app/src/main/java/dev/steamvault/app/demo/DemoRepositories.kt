@@ -3,6 +3,7 @@ package dev.steamvault.app.demo
 import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
@@ -67,6 +68,9 @@ class DemoJobsRepository(private val state: DemoState) : JobsRepository {
 class DemoCacheRepository(private val state: DemoState) : CacheRepository {
     override suspend fun delete(appid: Int): CacheDeletionOut = state.deleteCache(appid)
     override suspend fun gc(appid: Int, execute: Boolean): GcJobRef = state.gc(appid, execute)
+    override suspend fun deletePlan(appid: Int): DeletePlanOut = state.deletePlan(appid)
+    override suspend fun deleteWithPackages(appid: Int, members: List<Int>): CacheDeletionOut =
+        state.deleteCacheWithPackages(appid, members)
 }
 
 class DemoClientsRepository(private val state: DemoState) : ClientsRepository {

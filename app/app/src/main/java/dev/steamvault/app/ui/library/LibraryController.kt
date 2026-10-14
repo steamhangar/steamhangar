@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
@@ -17,6 +18,7 @@ import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateAction
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateResult
 import dev.steamvault.app.ui.library.logic.LibraryLayout
+import dev.steamvault.app.ui.library.logic.MEMBERS_CHANGED_NOTICE
 import dev.steamvault.app.ui.library.logic.MultiPlan
 import dev.steamvault.app.ui.library.logic.StatusActionType
 import dev.steamvault.app.ui.library.logic.UPDATES_FILTER_KEY
@@ -26,6 +28,10 @@ import dev.steamvault.app.ui.library.logic.classifyBulkSelection
 import dev.steamvault.app.ui.library.logic.describeCachedPrefillError
 import dev.steamvault.app.ui.library.logic.findLiveJob
 import dev.steamvault.app.ui.library.logic.formatBytesGB
+import dev.steamvault.app.ui.library.logic.groupGames
+import dev.steamvault.app.ui.library.logic.isMembersMismatch
+import dev.steamvault.app.ui.library.logic.isPlanBlocked
+import dev.steamvault.app.ui.library.logic.planMemberIds
 import dev.steamvault.app.ui.library.logic.runUpdateCheck
 import dev.steamvault.app.ui.library.logic.updateCheckNoticeFor
 import dev.steamvault.app.ui.library.logic.summarizeCachedPrefillOutcome
@@ -372,17 +378,33 @@ class LibraryController(
     // kdoc for why the selected set must be resolved against the merged
     // list rather than the raw vault snapshot.
 
-    fun openDeleteConfirm(scope: CoroutineScope, ids: List<Int>) {
+    /**
+     * WP TOOL-APPS-2d (ADR-0022 §4): an id whose card is a group (a game with
+     * content packages, [groupGames] over the vault rows) is previewed by the
+     * SERVER (`GET /v1/cache/{appid}/delete-plan?with_packages=true`) and
+     * later deleted with exactly that plan's members; every other id keeps
+     * the set-aware [buildMultiPlan] preview. [notice] is the re-confirm
+     * message after a 409 "members differ".
+     */
+    fun openDeleteConfirm(scope: CoroutineScope, ids: List<Int>, notice: String? = null) {
         if (ids.isEmpty()) return
         deletePlan = DeletePlanUiState.Loading(ids)
+        val grouped = groupGames(games)
+        val groupIds = ids.filter { grouped.packagesOf(it).isNotEmpty() }
+        val plainIds = ids.filter { it !in groupIds }
         scope.launch {
             try {
-                val details: List<GameDetail> = ids.map { gamesRepository.detail(it) }
-                val mapping = mappingRepository.list()
-                val gamesByAppid = games.associateBy { it.appid }
-                val activeJobAppids = classifyBulkSelection(games, jobs).busy.mapTo(HashSet()) { it.appid }
-                val plan = buildMultiPlan(ids, details, mapping, gamesByAppid, activeJobAppids)
-                deletePlan = DeletePlanUiState.Ready(ids, plan)
+                val groupPlans = groupIds.map { cacheRepository.deletePlan(it) }
+                val plan = if (plainIds.isEmpty()) {
+                    EMPTY_MULTI_PLAN
+                } else {
+                    val details: List<GameDetail> = plainIds.map { gamesRepository.detail(it) }
+                    val mapping = mappingRepository.list()
+                    val gamesByAppid = games.associateBy { it.appid }
+                    val activeJobAppids = classifyBulkSelection(games, jobs).busy.mapTo(HashSet()) { it.appid }
+                    buildMultiPlan(plainIds, details, mapping, gamesByAppid, activeJobAppids)
+                }
+                deletePlan = DeletePlanUiState.Ready(ids, plan, groupPlans, notice)
             } catch (e: VaultApiError) {
                 deletePlan = DeletePlanUiState.Error(ids, e.message ?: strings.deletePlanErrorFallback())
             }
@@ -404,19 +426,38 @@ class LibraryController(
      * `MultiPlan.kt`'s kdoc.
      */
     fun confirmDelete(scope: CoroutineScope, ids: List<Int>) {
+        // WP TOOL-APPS-2d: a group card is deleted with exactly the members
+        // its plan listed; every other pick as before.
+        val groupPlans = (deletePlan as? DeletePlanUiState.Ready)?.groupPlans.orEmpty().associateBy { it.appid }
         scope.launch {
             var freedTotal = 0L
             var failedCount = 0
+            val changed = mutableListOf<Int>()
             for (id in ids) {
+                val groupPlan = groupPlans[id]
                 try {
-                    freedTotal += cacheRepository.delete(id).total_bytes_freed
-                } catch (_: VaultApiError) {
-                    failedCount++
+                    freedTotal += if (groupPlan != null) {
+                        cacheRepository.deleteWithPackages(id, planMemberIds(groupPlan)).total_bytes_freed
+                    } else {
+                        cacheRepository.delete(id).total_bytes_freed
+                    }
+                } catch (e: VaultApiError) {
+                    if (groupPlan != null && isMembersMismatch(e)) changed.add(id) else failedCount++
                 }
+            }
+            refreshNow(scope)
+            if (changed.isNotEmpty()) {
+                // A group whose package list changed since the preview (409,
+                // nothing deleted for it): show its new plan and ask again.
+                refreshGamesOnce()
+                openDeleteConfirm(scope, changed, MEMBERS_CHANGED_NOTICE)
+                if (changed.size < ids.size) {
+                    toast = LibraryToast(strings.freed(formatFreed(freedTotal), failedCount))
+                }
+                return@launch
             }
             deletePlan = DeletePlanUiState.Hidden
             exitSelect()
-            refreshNow(scope)
             toast = LibraryToast(strings.freed(formatFreed(freedTotal), failedCount))
         }
     }
@@ -465,6 +506,35 @@ data class LibraryToast(
 sealed class DeletePlanUiState {
     data object Hidden : DeletePlanUiState()
     data class Loading(val ids: List<Int>) : DeletePlanUiState()
-    data class Ready(val ids: List<Int>, val plan: MultiPlan) : DeletePlanUiState()
+
+    /** @property plan the [buildMultiPlan] preview of the PLAIN picks (empty
+     *   when every pick is a group).
+     * @property groupPlans WP TOOL-APPS-2d: the server's plan per picked
+     *   group card (deleted with exactly its members).
+     * @property notice the re-confirm message after a 409 "members differ". */
+    data class Ready(
+        val ids: List<Int>,
+        val plan: MultiPlan,
+        val groupPlans: List<DeletePlanOut> = emptyList(),
+        val notice: String? = null,
+    ) : DeletePlanUiState() {
+        /** Delete stays disabled while a group member has a job in flight. */
+        val blocked: Boolean get() = groupPlans.any { isPlanBlocked(it) }
+
+        /** Bytes the dialog says this frees: the plain picks' preview plus
+         * every group plan's total. */
+        val freedBytes: Long get() = plan.freedBytes + groupPlans.sumOf { it.total_bytes }
+    }
+
     data class Error(val ids: List<Int>, val message: String) : DeletePlanUiState()
 }
+
+/** The plain-picks preview when every pick is a group (nothing plain to plan). */
+internal val EMPTY_MULTI_PLAN = MultiPlan(
+    ids = emptyList(),
+    rows = emptyList(),
+    sharedRows = emptyList(),
+    freedBytes = 0L,
+    keptBytes = 0L,
+    occupiedBytes = 0L,
+)

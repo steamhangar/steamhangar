@@ -88,6 +88,15 @@ data class GameCardModel(
     /** WP UPD-3: the "Update available" badge, straight from
      * `GameSummary.update_available` (WP UPD-1). */
     val updateAvailable: Boolean = false,
+    /** WP TOOL-APPS-2d: how many content packages this group card holds
+     * (0 = a plain card) -- the "+N content packages" line. */
+    val packageCount: Int = 0,
+    /** WP TOOL-APPS-2d: how many of them show as Failed -- the "· N
+     * failed" warning on the card (user decision Q3 B variant). */
+    val failedPackageCount: Int = 0,
+    /** WP TOOL-APPS-2d (twin of web WEB-FEAT-SUGGEST-2): the "Never played"
+     * pill ([showsNeverPlayed]). */
+    val neverPlayed: Boolean = false,
 )
 
 /**
@@ -105,19 +114,28 @@ fun capsulePillHasGround(model: GameCardModel): Boolean =
 /**
  * @param selecting `true` while multi-select is active -- see
  *   [statusAction]'s `selecting` param.
+ * @param packages WP TOOL-APPS-2d: the content packages grouped under this
+ *   card ([GroupedLibrary.packagesOf]); empty for a plain card.
+ * @param liveJobsByAppid the whole live-job index (a package's failed state
+ *   reads its own job).
+ * @param ownedPlaytimeForever the owned list's playtime for this app, null
+ *   when unknown ([ownedPlaytimeByAppid]).
  */
 fun buildGameCardModel(
     game: GameSummary,
     liveJob: JobSummary?,
     selected: Boolean,
     selecting: Boolean,
+    packages: List<GameSummary> = emptyList(),
+    liveJobsByAppid: Map<Int, JobSummary> = emptyMap(),
+    ownedPlaytimeForever: Int? = null,
 ): GameCardModel {
     val kind = dispKind(game, liveJob)
     return GameCardModel(
         appid = game.appid,
         name = gameDisplayName(game),
         kind = kind,
-        sizeLabel = formatBytesGB(game.size_bytes),
+        sizeLabel = formatBytesGB(displaySizeBytes(game, packages.size)),
         coverUrl = coverArtUrl(game.appid, game.cover_url),
         cachedCoverUrl = vaultCoverUrl(game.appid, game.cover_cached_url),
         fallbackHues = fallbackHues(game.appid),
@@ -128,5 +146,8 @@ fun buildGameCardModel(
         installedBadge = installedBadgeFor(game),
         toolApp = isToolApp(game),
         updateAvailable = game.update_available,
+        packageCount = packages.size,
+        failedPackageCount = failedPackages(packages, liveJobsByAppid).size,
+        neverPlayed = showsNeverPlayed(game, kind, ownedPlaytimeForever),
     )
 }

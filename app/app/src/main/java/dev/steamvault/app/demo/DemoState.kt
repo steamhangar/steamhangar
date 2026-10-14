@@ -6,9 +6,15 @@ import dev.steamvault.app.net.model.OwnedGame
 import dev.steamvault.app.net.model.OwnedGamesRelayOut
 import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PlayerSummaryEntry
+import dev.steamvault.app.net.model.BlockingJobOut
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.DeleteMemberOut
+import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.DeletedDepotOut
+import dev.steamvault.app.net.model.KeptChildOut
+import dev.steamvault.app.net.model.PlanMemberOut
+import dev.steamvault.app.net.model.PlannedDepotOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
@@ -94,13 +100,25 @@ class DemoState private constructor(
     // ---- games ------------------------------------------------------------
 
     @Synchronized
-    fun listGameSummaries(): List<GameSummary> = games.map { it.toSummary() }
+    fun listGameSummaries(): List<GameSummary> =
+        games.map { it.toSummary().copy(group_size_bytes = groupSizeBytes(it)) }
 
     @Synchronized
     fun gameDetail(appid: Int): GameDetail {
         val game = games.find { it.appid == appid }
             ?: throw VaultApiError.NotFound("no such app in the demo library", 404, "appid $appid not found")
-        return game.toDetail()
+        return game.toDetail().copy(group_size_bytes = groupSizeBytes(game))
+    }
+
+    /** WP TOOL-APPS-2d: the server's `group_size_bytes` rule
+     * (api/README.md "Content packages"): a top-level game's own depots plus
+     * those of every game whose parent it is, each depot once; null for a
+     * grouped game and when nothing is on disk. */
+    private fun groupSizeBytes(game: DemoGame): Long? {
+        if (game.parentAppid != null) return null
+        val members = listOf(game) + games.filter { it.parentAppid == game.appid }
+        val depots = members.flatMap { it.depots }.associateBy { it.depotid }
+        return if (depots.isEmpty()) null else depots.values.sumOf { it.sizeBytes }
     }
 
     @Synchronized
@@ -302,6 +320,128 @@ class DemoState private constructor(
             skipped_shared = skipped,
             failed = emptyList(),
             total_bytes_freed = freed,
+        )
+    }
+
+    // ---- grouped delete (WP TOOL-APPS-2d; api/README.md "Grouped delete") ----
+    // Same contract as the real routes: the set is the game plus every child
+    // whose OWN type is a package type; other children are kept and
+    // reported; members never protect each other's depots, a depot another
+    // game outside the set still lists is kept, as the plain delete above.
+
+    private fun groupMembers(appid: Int): Pair<List<DemoGame>, List<KeptChildOut>> {
+        val game = games.find { it.appid == appid }
+            ?: throw VaultApiError.NotFound("no such app in the demo library", 404, "appid $appid not found")
+        val children = games.filter { it.parentAppid == appid && it.appid != appid }
+        val packages = children.filter { it.appType in DEMO_PACKAGE_TYPES }
+        val kept = children.filter { it.appType !in DEMO_PACKAGE_TYPES }.map {
+            KeptChildOut(
+                appid = it.appid,
+                name = it.name,
+                app_type = it.appType,
+                reason = if (it.appType == null) "type_unknown" else "not_a_package_type",
+            )
+        }
+        return (listOf(game) + packages) to kept
+    }
+
+    @Synchronized
+    fun deletePlan(appid: Int): DeletePlanOut {
+        val (members, kept) = groupMembers(appid)
+        val memberIds = members.map { it.appid }.toSet()
+        val owners = LinkedHashMap<Int, MutableList<Int>>()
+        val sizes = HashMap<Int, Long>()
+        for (m in members) for (d in m.depots) {
+            owners.getOrPut(d.depotid) { mutableListOf() }.add(m.appid)
+            sizes[d.depotid] = d.sizeBytes
+        }
+        if (owners.isEmpty()) {
+            throw VaultApiError.NotFound(
+                "nothing to delete",
+                404,
+                "App $appid and its content packages have no depot mappings, so there is nothing to delete.",
+            )
+        }
+        val deleteDepots = mutableListOf<PlannedDepotOut>()
+        val skipped = mutableListOf<SkippedSharedDepotOut>()
+        for ((depotid, depotOwners) in owners.entries.sortedBy { it.key }) {
+            val outside = games.filter { it.appid !in memberIds && it.depots.any { d -> d.depotid == depotid } }
+            if (outside.isNotEmpty()) {
+                skipped.add(SkippedSharedDepotOut(depotid = depotid, shared_with = outside.map { it.appid }.sorted()))
+            } else {
+                deleteDepots.add(PlannedDepotOut(depotid = depotid, size_bytes = sizes[depotid], owners = depotOwners.sorted()))
+            }
+        }
+        return DeletePlanOut(
+            appid = appid,
+            with_packages = true,
+            members = members.mapIndexed { i, m ->
+                PlanMemberOut(
+                    appid = m.appid,
+                    role = if (i == 0) "parent" else "package",
+                    name = m.name,
+                    app_type = m.appType,
+                    depot_ids = m.depots.map { it.depotid }.sorted(),
+                )
+            },
+            kept_children = kept,
+            delete_depots = deleteDepots,
+            skipped_shared = skipped,
+            total_bytes = deleteDepots.sumOf { it.size_bytes ?: 0L },
+            blocked_by = jobs.filter { it.appid in memberIds && it.status in ACTIVE_JOB_STATUSES }.map {
+                BlockingJobOut(appid = it.appid, job_id = it.id, type = it.type, status = it.status)
+            },
+        )
+    }
+
+    @Synchronized
+    fun deleteCacheWithPackages(appid: Int, confirmed: List<Int>): CacheDeletionOut {
+        val plan = deletePlan(appid)
+        val serverMembers = plan.members.map { it.appid }.sorted()
+        if (confirmed.toSet() != serverMembers.toSet()) {
+            throw VaultApiError.Validation(
+                "DELETE /v1/cache/$appid failed: 409",
+                409,
+                "{\"message\":\"The apps this delete would remove differ from the confirmed list.\"," +
+                    "\"server_members\":$serverMembers,\"confirmed_members\":${confirmed.toSet().sorted()}}",
+            )
+        }
+        val blocked = plan.blocked_by.firstOrNull()
+        if (blocked != null) {
+            throw VaultApiError.Validation(
+                "DELETE /v1/cache/$appid failed: 409",
+                409,
+                "Prefill job ${blocked.job_id} for app ${blocked.appid} is ${blocked.status}.",
+            )
+        }
+        val deletedIds = plan.delete_depots.map { it.depotid }.toSet()
+        for (member in plan.members) {
+            val game = games.first { it.appid == member.appid }
+            if (game.depots.isEmpty() && member.role == "package") continue
+            game.depots.removeAll { it.depotid in deletedIds }
+            if (member.role == "parent" || member.depot_ids.any { it in deletedIds }) {
+                game.status = STATUS_IDLE
+                game.lastPrefillAt = null
+                game.needsForce = true
+            }
+        }
+        return CacheDeletionOut(
+            appid = appid,
+            deleted_depots = plan.delete_depots.map { DeletedDepotOut(depotid = it.depotid, size_bytes_freed = it.size_bytes ?: 0L) },
+            skipped_shared = plan.skipped_shared,
+            failed = emptyList(),
+            total_bytes_freed = plan.total_bytes,
+            with_packages = true,
+            members = plan.members.map {
+                DeleteMemberOut(
+                    appid = it.appid,
+                    role = it.role,
+                    name = it.name,
+                    app_type = it.app_type,
+                    deleted_depots = it.depot_ids.filter { d -> d in deletedIds },
+                )
+            },
+            kept_children = plan.kept_children,
         )
     }
 
@@ -512,6 +652,9 @@ class DemoState private constructor(
         internal const val STATUS_PAUSED = "paused"
         internal const val STATUS_CANCELLED = "cancelled"
         private val ACTIVE_JOB_STATUSES = setOf(STATUS_RUNNING, STATUS_PAUSED, "queued")
+
+        /** The server's package types (api/README.md "Grouped delete"). */
+        private val DEMO_PACKAGE_TYPES = setOf("dlc", "config", "music", "video", "demo")
         private const val PREFILL_TICKS = 2
         private const val GC_TICKS = 1
 
@@ -529,7 +672,7 @@ class DemoState private constructor(
         /** A brand-new, unmutated fixture set — call once per "enter demo
          * mode" action, never reused across sessions (WP brief constraint 4). */
         fun fresh(): DemoState = DemoState(
-            seedGames(),
+            (seedGames() + seedContentPackageGroup()).toMutableList(),
             seedJobs(),
             seedClients(),
             Instant.now().minusSeconds(DEMO_LAST_SWEEP_AGO_SECONDS).toString(),

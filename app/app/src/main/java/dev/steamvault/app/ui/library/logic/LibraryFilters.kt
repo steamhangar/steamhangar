@@ -39,6 +39,18 @@ import dev.steamvault.app.ui.status.StatusKind
  * the general "static UI chrome belongs in resources" rule.
  */
 
+/*
+ * **WP TOOL-APPS-2d: chips count groups, not packages** (twin of web
+ * TOOL-APPS-2c). The Library hands in GROUPED rows ([groupGames]) plus each
+ * group's packages ([visibleGames]/[chipCounts]'s `packagesByParent`): a
+ * group card is one row, so every chip counts it once. "Failed" also matches
+ * a group whose parent is fine but a content package failed (user decision
+ * Q3 B variant); every other chip reads the parent's own row. A search
+ * matches a group when the parent or any of its packages matches, so typing
+ * a package name finds its game. Without `packagesByParent` (an older
+ * server, or no groups) everything behaves exactly as before.
+ */
+
 /** One filter chip: a stable key, its label, and a predicate over
  * `(game, liveJob)` where `liveJob` is this game's entry from
  * [indexLiveJobsByAppid] (`null` if none). */
@@ -79,16 +91,39 @@ fun matchesQuery(game: GameSummary, query: String): Boolean {
     return game.name?.lowercase()?.contains(query) == true
 }
 
-/** @return games matching BOTH the query and the active filter. */
+/** WP TOOL-APPS-2d: [matchesQuery] for a card -- the row, or one of its packages. */
+fun matchesQueryWithPackages(game: GameSummary, query: String, packages: List<GameSummary>): Boolean =
+    matchesQuery(game, query) || packages.any { matchesQuery(it, query) }
+
+/** WP TOOL-APPS-2d: a chip's predicate for a card -- "Failed" also matches a
+ * group with a failed package (see the note above [FilterDef]). */
+private fun matchesFilter(
+    filter: FilterDef,
+    game: GameSummary,
+    liveJobsByAppid: Map<Int, JobSummary>,
+    packages: List<GameSummary>,
+): Boolean {
+    if (filter.predicate(game, liveJobsByAppid[game.appid])) return true
+    return filter.key == FAILED_FILTER_KEY && failedPackages(packages, liveJobsByAppid).isNotEmpty()
+}
+
+/** Key of the "Failed" chip. */
+const val FAILED_FILTER_KEY = "failed"
+
+/** @return games matching BOTH the query and the active filter.
+ * @param packagesByParent WP TOOL-APPS-2d: each group card's packages
+ *   ([GroupedLibrary.packagesByParent]); empty = no groups. */
 fun visibleGames(
     games: List<GameSummary>,
     query: String,
     filterKey: String,
     liveJobsByAppid: Map<Int, JobSummary>,
+    packagesByParent: Map<Int, List<GameSummary>> = emptyMap(),
 ): List<GameSummary> {
     val filter = filterByKey(filterKey)
     return games.filter { g ->
-        matchesQuery(g, query) && filter.predicate(g, liveJobsByAppid[g.appid])
+        val packages = packagesByParent[g.appid].orEmpty()
+        matchesQueryWithPackages(g, query, packages) && matchesFilter(filter, g, liveJobsByAppid, packages)
     }
 }
 
@@ -104,9 +139,14 @@ fun chipCounts(
     query: String,
     liveJobsByAppid: Map<Int, JobSummary>,
     hiddenKeys: Set<String> = emptySet(),
+    packagesByParent: Map<Int, List<GameSummary>> = emptyMap(),
 ): List<ChipCount> {
-    val inQuery = games.filter { matchesQuery(it, query) }
+    val inQuery = games.filter { matchesQueryWithPackages(it, query, packagesByParent[it.appid].orEmpty()) }
     return FILTER_DEFS.filter { it.key !in hiddenKeys }.map { f ->
-        ChipCount(f.key, f.label, inQuery.count { g -> f.predicate(g, liveJobsByAppid[g.appid]) })
+        ChipCount(
+            f.key,
+            f.label,
+            inQuery.count { g -> matchesFilter(f, g, liveJobsByAppid, packagesByParent[g.appid].orEmpty()) },
+        )
     }
 }
