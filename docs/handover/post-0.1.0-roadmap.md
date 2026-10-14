@@ -618,7 +618,14 @@ data) and exposes a completeness figure; cards show "Partially cached
 N %" and only 100 % gets the green check. (2) "Verify" action per game:
 the runner re-validates the game (non-forced prefill / SteamPrefill
 verify path — check what SteamPrefill offers) and fetches missing or
-damaged chunks; progress in Downloads.
+damaged chunks; progress in Downloads. Addition (user, same day): the
+always-on update check (UPD-5 cadence) also runs the completeness check
+automatically, so incomplete games are detected without a click. With
+auto-download (a schedule window) they are completed inside the window;
+without one they are listed in Downloads next to "Updates available"
+(e.g. "Incomplete (N)" with "Complete now" / "Complete all") — the
+completion itself is a download and never runs outside the window
+unless started by hand.
 
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
