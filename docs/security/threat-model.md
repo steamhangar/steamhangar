@@ -1142,6 +1142,10 @@ itself (not a proxy). A leaked URL exposes one public cover image until the
 cover changes or the key is rotated; it does not reveal the key. These URLs
 do appear in uvicorn's access log and in the browser's developer tools
 (network tab).
+Outside `/v1`, besides the web UI's static files, `GET /auth/steam/app-return`
+(WP D11, ADR-0004 addendum 5) is public: it reads no key, no database and no
+network, and only echoes a validated query behind the fixed
+`steamvault://auth/openid-return?` deep link for the Android app.
 There is no CORS middleware configured anywhere in `vault_api`
 (verified by search across the package) — a browser will not send the
 custom `X-Api-Key` header to `vault-api` cross-origin without a CORS

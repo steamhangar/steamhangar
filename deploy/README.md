@@ -1713,9 +1713,19 @@ What this deployment assumes, stated plainly so it can be checked:
   (`docs/PROJECT_PLAN.md` §10).
 - **vault-api is API-key authenticated on every route except `/v1/health`**,
   which returns a fixed body and exists so external monitoring can poll it.
+  Outside `/v1` two things are public as well: the web UI's static files and
+  `GET /auth/steam/app-return`, the Steam sign-in hand-off page for the
+  Android app (ADR-0004 addendum 5). That page reads no key, no database and
+  no network; it only forwards Steam's answer to the app's
+  `steamvault://auth/openid-return` link.
   For access from outside the LAN use Tailscale, Twingate, or your own TLS
   reverse proxy with forward-auth on top of the key — never a bare port
-  forward.
+  forward. **With forward-auth, let `GET /auth/steam/app-return` through**,
+  or make sure the proxy's login detour returns to it with the query string
+  intact: Steam's answer is entirely in that query, and a proxy that drops
+  it makes the app's Steam sign-in fail. The page's request line carries
+  the signed Steam assertion (including the SteamID64); filter that path
+  from proxy access logs if you ship them elsewhere.
 - **vault-dns is an open resolver if you publish it wrong.** It forwards
   arbitrary queries upstream with no source-address ACL, which is fine on a
   trusted LAN and a DNS amplification/reflection weapon on the internet.

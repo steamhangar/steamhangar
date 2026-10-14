@@ -27,7 +27,11 @@ _WEBUI_PUBLIC_PATHS = {"/", "/index.html"} | {
 #: the handler (tests/test_d10_cover_cache.py pins every refusal).
 SIGNATURE_AUTH_PATHS = {"/v1/covers/{appid}/{signature}"}
 
-PUBLIC_PATHS = {"/v1/health"} | _WEBUI_PUBLIC_PATHS | SIGNATURE_AUTH_PATHS
+# WP D11: the Steam OpenID return page for the Android app (a fixed-target
+# hand-off to the app's deep link, routers/app_return.py). Literal on purpose.
+PUBLIC_PATHS = (
+    {"/v1/health", "/auth/steam/app-return"} | _WEBUI_PUBLIC_PATHS | SIGNATURE_AUTH_PATHS
+)
 
 
 def _route_has_auth_dependency(route) -> bool:

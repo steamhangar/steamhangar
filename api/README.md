@@ -5622,6 +5622,18 @@ Because the public exception is exactly `/v1/health`, a keyless
 `/v1/health/` (trailing slash) now gets `401` rather than Starlette's
 `307` redirect.
 
+**Public outside `/v1`:** the web UI's static files (below) and, since WP
+D11, `GET`/`HEAD /auth/steam/app-return` — the Steam OpenID return page for
+the Android app (`vault_api/routers/app_return.py`, ADR-0004 addendum 5).
+Steam only returns to `http(s)`, so the app sends Steam here and the page
+hands the raw query, unchanged, to the fixed deep link
+`steamvault://auth/openid-return?<query>` (meta refresh plus a tappable
+link, no JavaScript, `Cache-Control: no-store`). It verifies, stores and
+fetches nothing; the app verifies the assertion with Steam itself. A query
+without an `openid.mode` parameter, over 8 KiB, or with any character
+outside a percent-encoded query's ASCII set gets `400` and no link. The
+same path under `/v1` is not public (`401`).
+
 **Non-ASCII keys (WP 1.3 fix):** `hmac.compare_digest` raises `TypeError`
 for a non-ASCII `str` argument (confirmed empirically — a key containing
 e.g. "café" raised `TypeError: comparing strings with non-ASCII characters

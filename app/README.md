@@ -779,31 +779,32 @@ vault entirely" (untouched by signing out of Steam).
    decimal digits, individual-account range). Only on success is anything
    persisted (`CredentialStore.setSteamId64`).
 
-### `return_to`/intent-filter design (WP brief: "pick a scheme, document it")
+### `return_to`/intent-filter design (WP 4b.3, replaced by WP D11)
 
-**Chose a custom `steamvault://` scheme, not an `https://` return_to.**
-SteamHangar has no hosted web presence — `vault-api` lives on the user's
-LAN/VPN, never a public domain by default — so there is no HTTPS endpoint
-this app could register as a redirect target. A custom-scheme deep link is
-the standard native-app OpenID/OAuth pattern for exactly this situation.
+**WP 4b.3 chose a custom `steamvault://` `return_to`; Steam refuses it.**
+On a device Steam's login answered "Invalid return protocol": its OpenID
+provider only returns to `http(s)`. Since WP D11 (ADR-0004 addendum 5):
 
-- `RETURN_TO = REALM = "steamvault://auth/openid-return"` (`realm` equals
-  `return_to` exactly — an explicitly permitted degenerate case of OpenID
-  2.0's realm-matching rules, since this app has no wildcard-subdomain
-  need).
-- `AndroidManifest.xml`'s `MainActivity` carries a second intent-filter:
+- `return_to` = `<vault origin>/auth/steam/app-return?state=<state>` and
+  `realm` = `<vault origin>/` (`SteamOpenIdReturnUrl.forVault`; only
+  scheme, host and port of the vault base URL are used). Onboarding uses
+  step 1's tested URL, Settings the stored one; without a usable http(s)
+  URL the app shows `STEAM_LOGIN_NEEDS_VAULT_ADDRESS` and opens nothing.
+- vault-api's public page at that path (`api/vault_api/routers/app_return.py`)
+  hands the raw query, unchanged, to `steamvault://auth/openid-return?<query>`
+  (meta refresh plus a tappable link). It verifies nothing; everything in
+  "OpenID login flow" above still happens in the app.
+- `AndroidManifest.xml`'s `MainActivity` keeps its intent-filter:
   `action=VIEW`, `category=DEFAULT,BROWSABLE`,
-  `data android:scheme="steamvault" android:host="auth" android:path="/openid-return"`,
-  plus `android:launchMode="singleTask"` so the redirect lands in
-  `onNewIntent` on the app's existing instance instead of spawning a
-  second one.
-- **Honest caveat, stated in `SteamOpenIdConfig`'s kdoc too:** this
-  environment cannot confirm empirically that Valve's login page accepts
-  and correctly redirects to a `steamvault://` URL rather than rejecting
-  or mangling it — that is squarely the "on-device only" item in the
-  verification list below. If it turns out Valve rejects the scheme, the
-  fix is narrow (swap the constants) and touches nothing downstream of
-  `SteamOpenIdCallback.parse`.
+  `data android:scheme="steamvault" android:host="auth" android:path="/openid-return"`
+  (`SteamOpenIdConfig.APP_LINK`), plus `android:launchMode="singleTask"` so
+  the hand-off lands in `onNewIntent` on the existing instance.
+- New check in `completeLogin`: the signed `openid.return_to` must be an
+  http(s) URL on exactly `/auth/steam/app-return`
+  (`SteamOpenIdReturnUrl.isVaultReturnTo`), next to the state check.
+- **Not yet confirmed on a device:** that Steam accepts a plain-`http` LAN
+  realm, and that the Custom Tab follows the meta refresh into the app
+  without a tap (the link is the fallback).
 
 ### OpenID verification hardening
 
@@ -860,7 +861,8 @@ per-login random `state` token (`SteamLoginState.generate`, 192 bits,
 URL-safe base64) and a single-use holder (`PendingLoginState`).
 `SteamIdentityRepositoryImpl.buildLoginUrl()` generates one fresh `state`
 per call, records it as "pending" BEFORE building the URL, and embeds it in
-`openid.return_to` (`"$RETURN_TO?state=$state"`). `completeLogin` extracts
+`openid.return_to` (`"$RETURN_TO?state=$state"`; since WP D11 the vault page
+`<vault origin>/auth/steam/app-return?state=$state`). `completeLogin` extracts
 the `state` back out of the callback's echoed `openid.return_to`
 (`SteamOpenIdCallback.stateFromReturnTo`) and calls
 `PendingLoginState.consume(callbackState)` — which ALWAYS clears the
@@ -1074,10 +1076,19 @@ everything below is exercised via MockWebServer/fakes up to the network
 boundary, but the following need a real phone + real Steam account before
 they can be called confirmed:
 
-1. **Whether Valve's OpenID login page actually accepts and redirects to
-   the `steamvault://auth/openid-return` custom scheme at all** (the
-   "Honest caveat" above) — if Valve rejects or mangles it, sign-in will
-   visibly fail to return to the app.
+1. **The WP D11 return path** (Steam refused the original
+   `steamvault://` return_to with "Invalid return protocol"; Steam now
+   returns to the vault page `/auth/steam/app-return`, which links on to
+   the app). Open checks:
+   - Does Steam accept a plain-`http` LAN realm/return_to
+     (`http://192.168.x.y:8080/`) after sign-in, not only an `https` one?
+   - Does the Custom Tab follow the page's `<meta http-equiv="refresh">`
+     into the app on its own, or is a tap on "Open SteamHangar" needed?
+     (Either is acceptable; record which.)
+   - Does Chrome's HTTPS-by-default upgrade, or its Local Network Access
+     restriction (a public `https://steamcommunity.com` page navigating to
+     a private-IP `http://` page), block or warn on the redirect from
+     Steam to the vault page?
 2. **Whether the Custom Tab correctly hands the redirect to
    `MainActivity.onNewIntent`** (manifest intent-filter matching,
    `launchMode="singleTask"` behaviour) — this is Android OS/Custom Tab
