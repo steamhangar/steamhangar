@@ -25,6 +25,8 @@ function game(over = {}) {
     installed_on: [],
     update_available: false,
     update_checked_at: "2026-10-13T10:00:00Z",
+    // WP CACHE-COMPLETE-1c: measured complete, so a cached card is "Current".
+    cache_complete_pct: 100,
     ...over,
   };
 }

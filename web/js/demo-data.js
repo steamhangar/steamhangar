@@ -142,6 +142,13 @@ function makeGame({
   // fixture in buildContentPackageGames().
   parentAppid = null,
   appType = null,
+  // WP CACHE-COMPLETE-1c: the stored completeness figure (api/README.md
+  // "Cache completeness"). Demo-only shape `{expected, present, missing}`
+  // (bytes of the current build, chunk files missing); `undefined` (the
+  // default) means "measured complete": every byte of the game's depots is
+  // the current build. `null` = not known (e.g. an announced build nobody
+  // fetched yet). The projection applies the real null rules on top.
+  completeness = undefined,
 }) {
   return {
     appid,
@@ -170,6 +177,10 @@ function makeGame({
     update_checked_at: null,
     parent_appid: parentAppid,
     app_type: appType,
+    _demoCompleteness: completeness,
+    // When the figure was measured: the seeded update check's time (3 h
+    // ago); a finished demo prefill re-stamps it.
+    _demoCompletenessCheckedAt: isoAgo(3 * 3_600_000).replace(/\.\d{3}Z$/, "Z"),
   };
 }
 
@@ -189,6 +200,10 @@ function buildContentPackageGames() {
       name: "Starfall Legion",
       status: "done",
       appType: "game",
+      // WP CACHE-COMPLETE-1c: the demo's "wrong-size chunks only" game — no
+      // chunk file missing, a few with the wrong size. The group card reads
+      // "Partially cached 99%"; Downloads lists it without "Complete now".
+      completeness: { expected: 6_250_000_000, present: 6_236_000_000, missing: 0 },
       depots: [
         { depotid: 2010081, shared: false, size_bytes: 6_100_000_000 },
         { depotid: 2010089, shared: true, size_bytes: 150_000_000 },
@@ -248,6 +263,10 @@ function buildCuratedGames() {
       // "workshop-pc" client_id so the two fixtures stay one consistent
       // fictional vault rather than inventing a third, unrelated name.
       installedOn: [{ client_id: "workshop-pc", reported_at: isoAgo(3_600_000) }],
+      // WP CACHE-COMPLETE-1c: the demo's partially cached game — "Partially
+      // cached 86%" on the card, listed under Downloads "Incomplete" with
+      // "Complete now" (chunk files are missing, so a forced run helps).
+      completeness: { expected: 4_880_000_000, present: 4_200_000_000, missing: 412 },
     }),
     makeGame({
       appid: 2010020,
@@ -284,6 +303,10 @@ function buildCuratedGames() {
       name: "Driftwood Signal",
       status: "running",
       depots: [{ depotid: 2010031, shared: false, size_bytes: 1_100_000_000 }],
+      // WP CACHE-COMPLETE-1c: mid-download, so only part of the build is on
+      // disk; its live job keeps it out of Downloads "Incomplete" and the
+      // finished demo job re-measures it complete.
+      completeness: { expected: 2_900_000_000, present: 1_100_000_000, missing: 1_800 },
       // WP 4h.2 fix: exercises the suggestions panel's CHANGED_RECENTLY
       // family — "changed", past tense, with a real days-since-last-change.
       manifestChangeFrequency: "changed",
@@ -301,6 +324,11 @@ function buildCuratedGames() {
       // because nothing else here contradicts it: Aurora Cascade is
       // "stable" and Frostline Convoy was confirmed current an hour ago.
       updateAvailable: true,
+      // WP CACHE-COMPLETE-1c: the announced build's manifest has not been
+      // fetched by anyone yet, so its completeness is not known (the real
+      // API's null case); the card still says "Update available" (UPD-6
+      // wins), the detail sheet "Completeness unknown".
+      completeness: null,
       depots: [
         { depotid: 2010041, shared: false, size_bytes: 800_000_000 },
         // Shared with Frostline Convoy (2010050) below — deleting Emberreach
@@ -1438,6 +1466,66 @@ function demoGroupSizeBytes(g) {
   return total;
 }
 
+/** WP CACHE-COMPLETE-1c: the row's own `cache_complete_*` /
+ * `cache_missing_chunks` (api/README.md "Cache completeness"): all null when
+ * nothing is on disk or the figure is not known, `pct` floored. */
+function demoOwnFigure(g) {
+  const size = appSizeBytes(g.depots);
+  const c = g._demoCompleteness;
+  if (!size || c === null) return null;
+  const expected = c === undefined ? size : c.expected;
+  const present = c === undefined ? size : c.present;
+  return {
+    pct: Math.floor((100 * present) / expected),
+    expected,
+    present,
+    missing: c === undefined ? 0 : c.missing,
+    checkedAt: g._demoCompletenessCheckedAt,
+  };
+}
+
+/** `group_cache_complete_pct` (D9): over the members with bytes on disk,
+ * unknown when any of them is; null on a grouped row and with nothing on
+ * disk. Demo approximation: a depot shared inside the group is counted per
+ * member (the real API counts it once). */
+function demoGroupPct(g) {
+  if (g.parent_appid != null) return null;
+  const members = [g, ...games.filter((c) => c.parent_appid === g.appid)].filter((m) => appSizeBytes(m.depots));
+  if (members.length === 0) return null;
+  let expected = 0;
+  let present = 0;
+  for (const m of members) {
+    const f = demoOwnFigure(m);
+    if (!f) return null;
+    expected += f.expected;
+    present += f.present;
+  }
+  return Math.floor((100 * present) / expected);
+}
+
+function demoCompletenessFields(g) {
+  const f = demoOwnFigure(g);
+  return {
+    cache_complete_pct: f ? f.pct : null,
+    cache_expected_bytes: f ? f.expected : null,
+    cache_present_bytes: f ? f.present : null,
+    cache_complete_checked_at: f ? f.checkedAt : null,
+    cache_missing_chunks: f ? f.missing : null,
+    group_cache_complete_pct: demoGroupPct(g),
+  };
+}
+
+/** The server's `is_incomplete` (known, below 100) and `is_completable`
+ * (at least one chunk file missing) against the demo figure. */
+function demoIsIncomplete(g) {
+  const f = demoOwnFigure(g);
+  return !!f && f.pct < 100;
+}
+function demoIsCompletable(g) {
+  const f = demoOwnFigure(g);
+  return !!f && f.pct < 100 && f.missing > 0;
+}
+
 function gameSummary(g) {
   return {
     appid: g.appid,
@@ -1478,6 +1566,7 @@ function gameSummary(g) {
     group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     // WP D10: additive on both game shapes; the demo stores no covers.
     cover_cached_url: null,
+    ...demoCompletenessFields(g), // WP CACHE-COMPLETE-1c (WP CACHE-COMPLETE-1a/1b fields)
   };
 }
 
@@ -1507,6 +1596,7 @@ function gameDetail(g) {
     app_type: g.app_type,
     group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     cover_cached_url: null, // WP D10 (see gameSummary's own comment)
+    ...demoCompletenessFields(g), // WP CACHE-COMPLETE-1c (see gameSummary)
   };
 }
 
@@ -1713,6 +1803,13 @@ function advanceJob(job) {
     // WP WEB-FIX-UPD-VIS: the newer build is now cached (the Android demo
     // does the same, DemoState.kt).
     game._demoUpdateAvailable = false;
+    // WP CACHE-COMPLETE-1c: the worker re-measures after every successful
+    // prefill. Missing chunks are fetched now; chunk files with the wrong
+    // size stay (a forced run serves them as HITs, api/README.md "Damaged
+    // chunks"), so a damaged-only figure does not change.
+    const c = game._demoCompleteness;
+    if (!(c && c.missing === 0 && c.present < c.expected)) game._demoCompleteness = undefined;
+    game._demoCompletenessCheckedAt = job.finished_at.replace(/\.\d{3}Z$/, "Z");
   }
 }
 
@@ -2092,6 +2189,10 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
 
   if (method === "GET" && path === "/v1/games") {
+    // WP CACHE-COMPLETE-1c: `?incomplete=true` (WP CACHE-COMPLETE-1b).
+    if (params?.incomplete === true || params?.incomplete === "true") {
+      return games.filter(demoIsIncomplete).map(gameSummary);
+    }
     return games.map(gameSummary);
   }
 
@@ -2214,6 +2315,33 @@ export async function demoRequest(method, path, { body, params } = {}) {
   //      than a conditional that could later "helpfully" start reading it.
   if (method === "POST" && path === "/v1/prefill/cached") {
     return selectCachedAppids().map(enqueuePrefillForAppid);
+  }
+
+  // WP CACHE-COMPLETE-1c: "Verify" / "Complete now" (POST
+  // /v1/prefill/verify) and "Complete all" (POST /v1/prefill/incomplete),
+  // api/README.md "Verify and complete": flag `needs_force` first, then the
+  // one enqueue (same dedupe as POST /v1/prefill). The demo job runs
+  // forced and re-measures on success (advanceJob).
+  if (method === "POST" && path === "/v1/prefill/verify") {
+    const appids = Array.isArray(body?.appids) ? body.appids : [];
+    if (appids.length === 0) throw validationError("appids must be a non-empty list");
+    for (const appid of appids) {
+      if (!Number.isInteger(appid) || appid < 1) throw validationError(`invalid appid ${appid}`);
+    }
+    for (const appid of appids) {
+      const game = findGame(appid);
+      if (game) game.needs_force = true;
+    }
+    return appids.map(enqueuePrefillForAppid);
+  }
+  if (method === "POST" && path === "/v1/prefill/incomplete") {
+    // No body read, like /v1/prefill/cached: the server selects.
+    const selected = games
+      .filter(demoIsCompletable)
+      .map((g) => g.appid)
+      .sort((a, b) => a - b);
+    for (const appid of selected) findGame(appid).needs_force = true;
+    return selected.map(enqueuePrefillForAppid);
   }
 
   if (method === "DELETE" && (m = path.match(JOB_ID_RE))) {

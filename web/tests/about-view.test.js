@@ -169,6 +169,9 @@ test("MUTATION TARGET: status-icon words are pinned (the About '?' kind reads 'C
       cancelled: "Cancelled",
       unknown: "Check",
       notinuse: "Not in use",
+      // WP CACHE-COMPLETE-1c (library card / detail header).
+      partial: "Partially cached",
+      unverified: "Not verified",
     },
   );
 });

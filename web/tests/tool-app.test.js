@@ -295,13 +295,21 @@ test("MUTATION TARGET -- sheet wiring: render() appends the tool note; the downl
 test("sheet wiring: the header uses the tool name, the dash glyph and the tool word", () => {
   const body = functionBody(detailJs, "function buildHeader(gameLike, liveJob) {");
   assert.ok(body, "buildHeader() not found in game-detail-sheet.js");
-  assert.match(body, /toolAppName\(gameLike\)/);
+  // WP CACHE-COMPLETE-1c: the title moved into sheetTitle (shared with Verify).
+  assert.match(body, /h2\.textContent = sheetTitle\(gameLike\);/);
+  const title = functionBody(detailJs, "function sheetTitle(gameLike) {");
+  assert.ok(title, "sheetTitle() not found");
+  assert.match(title, /toolAppName\(gameLike\)/);
   // WP UPD-6 review fix: the status row is buildDetailStatusRow; the card
   // helpers fall through to statusIconKind/statusWordFor (TOOL -> dash, tool word).
+  // WP CACHE-COMPLETE-1c: through lib/cache-completeness.js `cardDisplay`,
+  // which keeps every non-CACHED kind on those helpers (pinned in
+  // cache-completeness.test.js).
   const row = functionBody(detailJs, "export function buildDetailStatusRow(row, kind) {");
   assert.ok(row, "buildDetailStatusRow() not found");
-  assert.match(row, /createStatusIcon\(cardIconKind\(row, kind\)/);
-  assert.match(row, /cardStatusWord\(row, kind, STATUS_LABEL\)/);
+  assert.match(row, /const display = cardDisplay\(row, kind, STATUS_LABEL\);/);
+  assert.match(row, /createStatusIcon\(display\.icon/);
+  assert.match(row, /word\.textContent = display\.word;/);
 });
 
 // ---------------------------------------------------------------------

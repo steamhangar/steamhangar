@@ -54,6 +54,14 @@ export const STATUS_LABEL = {
   // unclear answer — never "not checked").
   unknown: "Check",
   notinuse: "Not in use",
+  // Added WP CACHE-COMPLETE-1c for the library card and the detail header
+  // (lib/cache-completeness.js `cardDisplay`): a cached game with only part
+  // of the current build on disk, and one whose completeness is not known.
+  // Web-only for now (the Android twin follows in its own package). The
+  // card shows its own word ("Partially cached N%", "Cached · not
+  // verified"); these are the icon's screen-reader fallbacks.
+  partial: "Partially cached",
+  unverified: "Not verified",
 };
 
 /** Which glyph shape a given status kind uses. */
@@ -70,6 +78,8 @@ const KIND_GLYPH = {
   cancelled: "stop",
   unknown: "question",
   notinuse: "dash",
+  partial: "half",
+  unverified: "question",
 };
 
 function svgEl(tag, attrs) {
@@ -167,6 +177,16 @@ function buildQuestion() {
   ];
 }
 
+/** WP CACHE-COMPLETE-1c: a ring with its left half filled — "part of it is
+ * here". Its own silhouette, unlike the check (complete) and the download
+ * arrow (not cached). */
+function buildHalf() {
+  return [
+    svgEl("circle", { cx: "12", cy: "12", r: "6.6" }),
+    svgEl("path", { d: "M12 5.4a6.6 6.6 0 0 0 0 13.2Z", fill: "currentColor" }),
+  ];
+}
+
 function buildDash() {
   return [svgEl("path", { d: "M7 12h10" })];
 }
@@ -180,6 +200,7 @@ const GLYPH_BUILDERS = {
   stop: buildStop,
   question: buildQuestion,
   dash: buildDash,
+  half: buildHalf,
 };
 
 /**
