@@ -218,7 +218,60 @@ import time
 #: app with the new store flags instead of over the next 30 days. Every step
 #: is keyed on ``version < 22``, not on ``== 21``, so a v20 database (upgraded
 #: straight past D10) and a v21 one both take it exactly once.
-SCHEMA_VERSION = 22
+#: v23 (WP D15b CLIENTS-1, on top of v22 WP D9 TOOL-APPS-2a):
+#: added the three traffic tables ``client_traffic``,
+#: ``client_depot_traffic`` and ``server_traffic`` -- event-log statistics
+#: bucketed by EVENT time in three retention tiers (5-minute rows for 48 h,
+#: hourly rows for 30 days, daily rows forever; user decision 2026-10-13,
+#: ``vault_api/traffic.py``) -- and five ``event_sweep_state`` columns: the
+#: event log's file identity (``log_ino`` decides; ``log_dev`` is kept for
+#: diagnostics only, ZFS does not keep st_dev stable) so a rename-rotated
+#: log is detected even when the new file is already larger than the
+#: cursor, ``rotations_detected_total``/``last_rotation_detected_at``, and
+#: ``traffic_since`` (when the tiers started filling). The tables are
+#: brand-new (no ``ALTER``); the columns come from the per-column-guarded
+#: ``_add_missing_event_sweep_state_columns`` step, keyed on
+#: ``version < 23`` (not ``== 22``) so a v21 database (this branch without
+#: D9) and a v22 one (after D9) both take it exactly once. Existing
+#: ``client_cache_stats`` rows are NOT folded into the tiers: they are
+#: bucketed by sweep time, not event time, and hold about four hours; the
+#: tiers start empty and ``traffic_since`` says so.
+#: v24 (WP AGENT-ADDR-1, on top of v23): ``agent_reports`` gained
+#: ``local_addrs`` -- the LAN addresses the agent states for itself (a JSON
+#: array of canonical IP literals, NULL when the report carried none). Behind
+#: Docker's published ports ``source_addr`` is the bridge gateway for every
+#: PC, so correlation now prefers what the agent states and falls back to
+#: ``source_addr`` only when it is not a forwarding hop
+#: (``agent_reports.effective_addrs``, ``vault_api/peer_hops.py``). The column
+#: comes from the per-column-guarded ``_add_missing_agent_report_columns``
+#: step, which now runs on every existing database whatever version it is
+#: stamped with (a parallel branch may stamp v25 first); existing rows keep
+#: NULL ("the agent stated nothing").
+#: v25 (WP CACHE-COMPLETE-1a, on top of v24): added ``cache_completeness`` --
+#: one row per (app, depot) the always-on update check measured: the target
+#: manifest id, its expected (``cb_compressed``) bytes and how many of them are
+#: on disk as exact-size chunk files (``vault_api/cache_completeness.py``). A
+#: brand-new table, so it needs no ``ALTER`` step and no version-keyed step.
+#: A database stamped 25 before AGENT-ADDR-1 was merged still gains
+#: ``local_addrs``, because that step is unconditional. Dev databases: a DB
+#: stamped 25 refuses to open under a v24-only build (the downgrade guard in
+#: ``init_db``).
+#: v26 (WP D15-NAMES): added ``client_names`` -- operator-set client names,
+#: keyed by ``(key_type, key)``: ``ip`` + a canonical IP literal today,
+#: ``mac`` reserved for when an agent reports MACs (no source does yet, and
+#: the API refuses it). **This step does not trust the version stamp:** the
+#: table is a plain ``CREATE TABLE IF NOT EXISTS`` in ``_DDL``, which runs on
+#: EVERY start, so a file a parallel branch already stamped v25 or v26
+#: without this table still gets it, and a second start is a no-op. No
+#: ``ALTER`` and no data step.
+#: v27 (WP D15-RUNNER): added ``runner_marks`` (tokens the prefill runner
+#: issues before its marker request) and ``runner_address_periods`` (which
+#: cache-log address was the runner, when) -- ``vault_api/runner_identity.py``.
+#: Two brand-new tables, plain ``CREATE TABLE IF NOT EXISTS`` in ``_DDL``
+#: that runs on EVERY start, so the step does not trust the version stamp: a
+#: file a parallel branch already stamped v27 without them still gets them.
+#: No ``ALTER`` and no data step.
+SCHEMA_VERSION = 27
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -373,7 +426,13 @@ CREATE TABLE IF NOT EXISTS agent_reports (
     -- v17, a one-shot run without --interval); GET /v1/clients then shows
     -- "version unknown" and assumes a 30-minute interval for presence.
     agent_version           TEXT,
-    report_interval_seconds INTEGER
+    report_interval_seconds INTEGER,
+    -- v24 (WP AGENT-ADDR-1): the LAN addresses the agent stated for itself in
+    -- THIS report, a JSON array of canonical IP literals (at most 8, no
+    -- loopback/link-local). NULL when it stated none (agents from before
+    -- v24); correlation then falls back to source_addr unless that is a
+    -- forwarding hop (agent_reports.effective_addrs).
+    local_addrs             TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_reports_client_time
@@ -501,7 +560,22 @@ CREATE TABLE IF NOT EXISTS event_sweep_state (
     -- the sweep re-read the same bytes forever, consumed nothing, and the only
     -- signal was an INFO line that read like progress.
     oversized_skips_total   INTEGER NOT NULL DEFAULT 0,
-    last_oversized_at       TEXT
+    last_oversized_at       TEXT,
+    -- v23 (WP D15b): st_dev/st_ino of the file the cursor points into.
+    -- Only st_ino decides (ZFS does not keep st_dev stable across reboots);
+    -- log_dev is stored for diagnostics. A different inode on the next read means the log was replaced
+    -- (rename rotation) and the cursor restarts at 0 even when the new file
+    -- is already larger than the old offset. NULL until the first sweep
+    -- after the upgrade records it.
+    log_dev                   INTEGER,
+    log_ino                   INTEGER,
+    -- v23: rotations the SWEEPER DETECTED (file shrank below the cursor, or
+    -- its inode changed) -- not the ones it did itself (last_rotated_at).
+    rotations_detected_total  INTEGER NOT NULL DEFAULT 0,
+    last_rotation_detected_at TEXT,
+    -- v23: when the first sweep wrote into the traffic tiers; the honest
+    -- start of every "all" range (NULL = the tiers are still empty).
+    traffic_since             TEXT
 );
 
 -- WP 3.11: per-client-address request statistics, one row per address per
@@ -783,6 +857,133 @@ CREATE TABLE IF NOT EXISTS update_check_state (
     last_check_outcome      TEXT
 );
 
+-- WP D15b (schema v23): event-log traffic statistics in three retention
+-- tiers, bucketed by the EVENT time of each line (not the sweep time, unlike
+-- client_cache_stats). tier is '5m', '1h' or '1d'; bucket_at is the UTC
+-- start of the bucket ('YYYY-MM-DDTHH:MM:SSZ'). Every batch is folded into
+-- ALL three tiers additively in the same transaction that advances the
+-- event-sweep cursor, so each tier is complete for its retention on its own
+-- (exactly-once, like client_cache_stats) and late lines land in the right
+-- bucket of every tier. Retention (vault_api/traffic.py): 5m rows 48 h, 1h
+-- rows 30 days, 1d rows forever. hits/misses/bypasses/bytes count 2xx lines
+-- only; errors counts the rest; hit_bytes is what the cache served from
+-- disk ("saved"), miss_bytes what it fetched upstream while serving.
+CREATE TABLE IF NOT EXISTS client_traffic (
+    tier         TEXT NOT NULL,
+    bucket_at    TEXT NOT NULL,
+    client_addr  TEXT NOT NULL,
+    requests     INTEGER NOT NULL DEFAULT 0,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    misses       INTEGER NOT NULL DEFAULT 0,
+    bypasses     INTEGER NOT NULL DEFAULT 0,
+    errors       INTEGER NOT NULL DEFAULT 0,
+    bytes_served INTEGER NOT NULL DEFAULT 0,
+    hit_bytes    INTEGER NOT NULL DEFAULT 0,
+    miss_bytes   INTEGER NOT NULL DEFAULT 0,
+    last_seen    TEXT NOT NULL,
+    PRIMARY KEY (tier, client_addr, bucket_at)
+);
+CREATE INDEX IF NOT EXISTS idx_client_traffic_bucket
+    ON client_traffic (tier, bucket_at);
+
+-- WP D15b (v23): the same tiers per (client address, depot) for served lines
+-- that carry a depot id -- "what is this client loading" (depot -> app via
+-- depot_app_map at read time, so a mapping learned later still applies).
+CREATE TABLE IF NOT EXISTS client_depot_traffic (
+    tier         TEXT NOT NULL,
+    bucket_at    TEXT NOT NULL,
+    client_addr  TEXT NOT NULL,
+    depotid      INTEGER NOT NULL,
+    requests     INTEGER NOT NULL DEFAULT 0,
+    bytes_served INTEGER NOT NULL DEFAULT 0,
+    hit_bytes    INTEGER NOT NULL DEFAULT 0,
+    last_seen    TEXT NOT NULL,
+    PRIMARY KEY (tier, client_addr, depotid, bucket_at)
+);
+CREATE INDEX IF NOT EXISTS idx_client_depot_traffic_bucket
+    ON client_depot_traffic (tier, bucket_at);
+
+-- WP D15b (v23): server-wide sums per bucket plus the two values that are
+-- NOT sums and therefore cannot be derived from coarser rows later:
+-- peak_bucket_bytes (the largest 5-minute total inside this bucket -> peak
+-- speed) and active_buckets (how many 5-minute buckets inside it carried
+-- traffic -> average speed while loading). Maintained at write time.
+CREATE TABLE IF NOT EXISTS server_traffic (
+    tier              TEXT NOT NULL,
+    bucket_at         TEXT NOT NULL,
+    requests          INTEGER NOT NULL DEFAULT 0,
+    hits              INTEGER NOT NULL DEFAULT 0,
+    misses            INTEGER NOT NULL DEFAULT 0,
+    bypasses          INTEGER NOT NULL DEFAULT 0,
+    errors            INTEGER NOT NULL DEFAULT 0,
+    bytes_served      INTEGER NOT NULL DEFAULT 0,
+    hit_bytes         INTEGER NOT NULL DEFAULT 0,
+    miss_bytes        INTEGER NOT NULL DEFAULT 0,
+    peak_bucket_bytes INTEGER NOT NULL DEFAULT 0,
+    active_buckets    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tier, bucket_at)
+);
+
+-- v25 (WP CACHE-COMPLETE-1a): per (app, depot) completeness against the
+-- current build's manifest, written by the update check, read by GET
+-- /v1/games. Replaced per app in one transaction; see
+-- vault_api/cache_completeness.py for the formula and every status value.
+-- manifestid is TEXT for the same u64 reason as depot_manifests.manifestid.
+CREATE TABLE IF NOT EXISTS cache_completeness (
+    appid             INTEGER NOT NULL,
+    depotid           INTEGER NOT NULL,
+    manifestid        TEXT,
+    status            TEXT NOT NULL,
+    source            TEXT,
+    expected_bytes    INTEGER,
+    present_bytes     INTEGER,
+    chunk_count       INTEGER,
+    missing_chunks    INTEGER,
+    mismatched_chunks INTEGER,
+    checked_at        TEXT NOT NULL,
+    PRIMARY KEY (appid, depotid)
+);
+
+-- WP D15-NAMES (schema v26): a name the operator gave a client. key_type
+-- 'ip' = key is a canonical IP literal (client_names.canonical_ip), the form
+-- agent_reports.effective_addrs and the event log use; 'mac' is reserved for
+-- MAC-keyed names once an agent reports MACs (the API refuses it today).
+-- A name follows the ADDRESS, not an agent's client_id: GET /v1/clients and
+-- GET /v1/clients/overview resolve it per client (client_names.py).
+CREATE TABLE IF NOT EXISTS client_names (
+    key_type   TEXT NOT NULL CHECK (key_type IN ('ip', 'mac')),
+    key        TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (key_type, key)
+);
+
+-- WP D15-RUNNER (schema v27): runner identity in the cache log
+-- (vault_api/runner_identity.py). runner_marks: one row per token the prefill
+-- runner issued before sending GET /steamhangar/runner-mark/<token> through
+-- vault-core; the sweep consumes a token on its first valid marker line.
+CREATE TABLE IF NOT EXISTS runner_marks (
+    token         TEXT PRIMARY KEY,
+    issued_at     TEXT NOT NULL,
+    runner_id     TEXT,
+    consumed_at   TEXT,
+    consumed_addr TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runner_marks_issued
+    ON runner_marks (issued_at);
+
+-- runner_address_periods: per accepted marker address, the first and last
+-- marker of one continuous period (a gap longer than runner_identity.HOLD
+-- opens a new row). Kept forever: the daily traffic tier is too.
+CREATE TABLE IF NOT EXISTS runner_address_periods (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    addr            TEXT NOT NULL,
+    first_marked_at TEXT NOT NULL,
+    last_marked_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runner_address_periods_addr
+    ON runner_address_periods (addr, last_marked_at);
+
 CREATE TABLE IF NOT EXISTS runner_presence (
     runner_id            TEXT PRIMARY KEY,
     build_version        TEXT,
@@ -895,8 +1096,13 @@ def init_db(db_path: str) -> None:
         # it. The four NEW tables v9 also adds need no step at all -- they are
         # plain `CREATE TABLE IF NOT EXISTS` (the v6 situation).
         # v17 (WP AGENT-FEAT-1) reuses the same per-column-guarded step for
-        # agent_version / report_interval_seconds.
-        if row is not None and row["version"] < 17:
+        # agent_version / report_interval_seconds, and v24 (WP AGENT-ADDR-1)
+        # for local_addrs. Since v24 it runs on EVERY existing database, not
+        # keyed on the stored version: parallel branches stamp versions in
+        # a different order (CACHE-COMPLETE-1a takes v25 with a pure CREATE
+        # TABLE), so a file may already say v25 without this column. The
+        # per-column guard makes the step a no-op once the columns exist.
+        if row is not None:
             _add_missing_agent_report_columns(conn)
 
         # v14 (WP 4h.1): same situation once more, for `depot_manifests`. An
@@ -917,6 +1123,12 @@ def init_db(db_path: str) -> None:
         # parent_appid. Older databases without the table get it from _DDL.
         if row is not None and row["version"] < 22:
             _add_missing_oracle_state_columns(conn)
+
+        # v23 (WP D15b): five new event_sweep_state columns (file identity,
+        # detected rotations, traffic_since). Keyed `< 23` so it runs once
+        # whether D9's v22 landed first or not; guarded per column.
+        if row is not None and row["version"] < 23:
+            _add_missing_event_sweep_state_columns(conn)
 
         conn.executescript(_DDL)
 
@@ -994,12 +1206,15 @@ _POST_V1_AGENT_REPORT_COLUMNS = (
     # v17 (WP AGENT-FEAT-1)
     ("agent_version", "TEXT"),
     ("report_interval_seconds", "INTEGER"),
+    # v24 (WP AGENT-ADDR-1)
+    ("local_addrs", "TEXT"),
 )
 
 
 def _add_missing_agent_report_columns(conn: sqlite3.Connection) -> None:
-    """v1->v17 migration step: add ``agent_reports.source_addr`` (v9, WP 3.11)
-    and ``agent_version`` / ``report_interval_seconds`` (v17, WP AGENT-FEAT-1).
+    """v1->v24 migration step: add ``agent_reports.source_addr`` (v9, WP 3.11),
+    ``agent_version`` / ``report_interval_seconds`` (v17, WP AGENT-FEAT-1) and
+    ``local_addrs`` (v24, WP AGENT-ADDR-1).
 
     Guarded per column via ``PRAGMA table_info`` for exactly the reasons
     ``_add_missing_job_columns`` spells out, and carrying an explicit type for
@@ -1178,3 +1393,32 @@ def _add_missing_app_columns(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE apps ADD COLUMN needs_force INTEGER NOT NULL DEFAULT 1"
         )
+
+
+#: The ``event_sweep_state`` columns added in v23 (WP D15b).
+_V23_EVENT_SWEEP_STATE_COLUMNS = (
+    ("log_dev", "INTEGER"),
+    ("log_ino", "INTEGER"),
+    ("rotations_detected_total", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_rotation_detected_at", "TEXT"),
+    ("traffic_since", "TEXT"),
+)
+
+
+def _add_missing_event_sweep_state_columns(conn: sqlite3.Connection) -> None:
+    """v9..v22 -> v23 migration step for ``event_sweep_state``.
+
+    Guarded per column via ``PRAGMA table_info`` like every other ALTER step.
+    A database without the table (impossible after v9, but cheap to handle)
+    gets the complete table from ``_DDL``.
+    """
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(event_sweep_state)")
+    }
+    if not existing:
+        return
+    for column, column_type in _V23_EVENT_SWEEP_STATE_COLUMNS:
+        if column not in existing:
+            conn.execute(
+                f"ALTER TABLE event_sweep_state ADD COLUMN {column} {column_type}"
+            )

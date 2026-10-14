@@ -45,6 +45,9 @@ class StatusIconCrossFrontendContractTest {
         "cancelled",
         // WP API-FIX-4 (Steam tool-app card). Web's "unknown" is not ported.
         "notinuse",
+        // WP CACHE-COMPLETE-1c (completeness overlay of a cached card).
+        "partial",
+        "unverified",
     )
 
     /** web STATUS_LABEL's values, spelled out. */
@@ -60,6 +63,8 @@ class StatusIconCrossFrontendContractTest {
         "warn" to "Warning",
         "cancelled" to "Cancelled",
         "notinuse" to "Not in use",
+        "partial" to "Partially cached",
+        "unverified" to "Not verified",
     )
 
     /** The English string-resource name each wire name is expected to use. */
@@ -75,11 +80,13 @@ class StatusIconCrossFrontendContractTest {
         "warn" to "status_warn",
         "cancelled" to "status_cancelled",
         "notinuse" to "status_notinuse",
+        "partial" to "status_partial",
+        "unverified" to "status_unverified",
     )
 
     @Test
     fun `StatusKind wire names match the literal frontend contract exactly`() {
-        assertEquals(11, expectedWireNames.size)
+        assertEquals(13, expectedWireNames.size)
         val actual = StatusKind.entries.map { it.wireName }.toSet()
         assertEquals(expectedWireNames, actual)
     }
@@ -123,6 +130,8 @@ class StatusIconCrossFrontendContractTest {
             R.string.status_warn to "status_warn",
             R.string.status_cancelled to "status_cancelled",
             R.string.status_notinuse to "status_notinuse",
+            R.string.status_partial to "status_partial",
+            R.string.status_unverified to "status_unverified",
         )
         for (kind in StatusKind.entries) {
             val expectedResName = stringResourceNameByWireName.getValue(kind.wireName)

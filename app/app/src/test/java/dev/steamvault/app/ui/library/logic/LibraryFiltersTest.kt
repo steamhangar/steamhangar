@@ -68,9 +68,9 @@ class LibraryFiltersTest {
     // ---- the recorded chip set: All Cached Not-cached Downloading Failed Updates --
 
     @Test
-    fun `chip set is exactly All Cached Not-cached Downloading Failed Updates, in order`() {
+    fun `chip set is exactly All Cached Not-cached Installed-not-cached Downloading Failed Updates, in order`() {
         assertEquals(
-            listOf("all", "cached", "none", "downloading", "failed", "updates"),
+            listOf("all", "cached", "none", "installed", "downloading", "failed", "updates"),
             FILTER_DEFS.map { it.key },
         )
     }
@@ -91,7 +91,7 @@ class LibraryFiltersTest {
         // instead of routing them through strings.xml. "Updates" is the
         // UPD-2/UPD-3 brief's label (D14), written for both frontends at once.
         assertEquals(
-            listOf("All", "Cached", "Not cached", "Downloading", "Failed", "Updates"),
+            listOf("All", "Cached", "Not cached", "Installed, not cached", "Downloading", "Failed", "Updates"),
             FILTER_DEFS.map { it.label },
         )
     }
@@ -121,7 +121,7 @@ class LibraryFiltersTest {
         assertEquals(emptySet<String>(), hiddenChipKeys(updatesSupported = true))
         assertEquals(setOf("updates"), hiddenChipKeys(updatesSupported = false))
         val keys = chipCounts(games, "", liveJobsByAppid, hiddenChipKeys(updatesSupported = false)).map { it.key }
-        assertEquals(listOf("all", "cached", "none", "downloading", "failed"), keys)
+        assertEquals(listOf("all", "cached", "none", "installed", "downloading", "failed"), keys)
     }
 
     @Test
@@ -172,6 +172,8 @@ class LibraryFiltersTest {
         assertEquals(1, counts.getValue("downloading").count)
         assertEquals(1, counts.getValue("failed").count)
         assertEquals(1, counts.getValue("updates").count)
+        // WP LIB-FILTER-INST-1: always listed, 0 when nothing matches.
+        assertEquals(0, counts.getValue("installed").count)
     }
 
     @Test

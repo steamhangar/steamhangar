@@ -131,9 +131,11 @@ internal fun NeverPlayedPill(compact: Boolean, modifier: Modifier = Modifier) {
 /** The list layout's twin of [NeverPlayedPill] (web `.playbadge`): a text
  * line, since the list's mini cover is too small for pills. */
 @Composable
-internal fun NeverPlayedLabel(modifier: Modifier = Modifier) {
+internal fun NeverPlayedLabel(modifier: Modifier = Modifier, compact: Boolean = false) {
+    // WP LIB-LIST-1: [compact] = "Unplayed" in the list row's fixed update
+    // cell (web `.grid.list .playbadge .pbfull{display:none}`).
     Text(
-        text = NEVER_PLAYED_LABEL,
+        text = if (compact) NEVER_PLAYED_COMPACT_LABEL else NEVER_PLAYED_LABEL,
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,

@@ -492,6 +492,10 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
 **Release cut (user decision 2026-10-13):** rc15 = wave 1; rc16 = D11 +
 D9; rc17 = D15 + D16 (both rework Settings and both wait on Anträge:
 `VAULT_EVENT_LOG` on prod, settings volume).
+Revised 2026-10-14 (user, multiple choice): rc17 = D15 (a-d, ROT,
+RUNNER, client names, history delete) + AGENT-ADDR-1 (agent change
+allowed; the Windows PC needs the new agent once) + CACHE-COMPLETE-1 +
+LIB-LIST-1 + LIB-FILTER-INST-1 + UPD-6 Android; rc18 = D16 + APP-DIST-1.
 
 **Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
@@ -591,6 +595,10 @@ the agent reports its own LAN address(es) used toward the vault in the
 report payload; vault-api correlates on those (fallback source_addr);
 the bypass rule refuses to accuse when the only known address is a
 private bridge/gateway address. No ZEUS change.
+Constraint (user, 2026-10-14): after v0.1.0 a real installer replaces
+the PowerShell task scripts. The address detection lives in the agent
+binary itself (no new script parameter, task argument or config entry),
+and old servers / old agents keep working (optional field).
 
 **LIB-FILTER-INST-1 (web + app, rc17; user request 2026-10-14):** a
 library filter chip "Installed, not cached" — games an agent reports as
@@ -630,6 +638,16 @@ UI rule (user, 2026-10-14): every new Downloads section ("Updates
 available", "Incomplete", and later ones) is shown only when it has at
 least one entry — no empty headings.
 
+**CACHE-REPAIR-1 (api, after rc17; user decision 2026-10-14):** repair
+games whose cache holds chunk files of the wrong size (CACHE-COMPLETE-1a
+counts them as damaged; `cache_missing_chunks: 0` on an incomplete row). A
+forced prefill cannot fix them: vault-core serves the existing file as a
+HIT. vault-api deletes the mismatched chunk files of the app's target
+manifests -- re-checking each file's size right before the delete, behind
+the cache-root guards of `deletion.py` -- and then queues a forced run, which
+misses on those chunks and stores fresh copies. Until then no action repairs
+such a game; "Complete all" and the automatic completion skip it.
+
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
 vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
@@ -644,6 +662,15 @@ updates" a clearly visible primary button and give "Check & update all
 cached games" a distinct style (it downloads); side by side, not a full
 row. The web demo mode gets the update check, one flagged game and the
 "Updates" chip (UPD-2 left demo out; the Android demo has it).
+
+**rc17 follow-ups (review findings deferred 2026-10-14, after rc17):**
+CACHE-REPAIR-1 (above); app list: fixture with installed_on + column
+assertions, compact installed-on wording below 1024 dp; stronger
+completeness twin pins; app parity gaps (client rename, Delete history,
+Manage PCs add/remove, focus handling on Downloads rebuilds); clock
+injection for the D15b/D15-NAMES endpoint tests (bucket-boundary edge
+cases); a permanent conftest hook that emits failed test names as CI
+annotations; per-app backoff for repeated forced completion runs.
 
 **Before v0.1.0 (ongoing):** release notes, user device checks,
 verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding

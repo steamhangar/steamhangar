@@ -98,10 +98,18 @@ test("root cause: the phone grid columns are minmax(0,1fr), so a nowrap card chi
   assert.match(ruleBody(app.topLevel, ".card") ?? "", /min-width:\s*0\s*(;|$)/);
 });
 
-test("list layout: .grid.list .meta may shrink (flex-shrink:1, min-width:0) instead of pushing the row wider", () => {
-  const body = allRuleBodies(app.topLevel, ".grid.list .meta");
-  assert.match(body, /flex-shrink:\s*1/);
-  assert.match(body, /min-width:\s*0/);
+// WP LIB-LIST-1 replaced the list row's flex line (where `.meta` needed
+// flex-shrink:1 + min-width:0) with a grid of fixed columns: the row can no
+// longer be pushed wider because its only content-sized track is the name's
+// minmax(0,1fr), and the name itself may shrink (min-width:0 + ellipsis).
+// The full column model is pinned in game-card-list-columns.test.js.
+test("list layout: the row's flexible track is minmax(0,1fr) and the name may shrink, so nothing pushes the row wider", () => {
+  const card = allRuleBodies(app.topLevel, ".grid.list .card");
+  assert.match(card, /grid-template-columns:[^;]*minmax\(0,\s*1fr\)/);
+  assert.doesNotMatch(card.match(/grid-template-columns:([^;]*)/)[1], /\bauto\b|max-content/, "no content-sized track");
+  const name = allRuleBodies(app.topLevel, ".grid.list .rowname");
+  assert.match(name, /min-width:\s*0/);
+  assert.match(name, /text-overflow:\s*ellipsis/);
 });
 
 test("flex text columns may shrink: .jobtop > div and .banner .body carry min-width:0", () => {

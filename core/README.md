@@ -279,9 +279,11 @@ match and is **silently skipped** by the analyzer -- not misparsed with a
 wrong value, just dropped as if it never happened.
 
 **Wider since WP CORE-FEAT-1b2 (ADR-0017).** The `vault` log format now
-carries two fields appended after `cache=...` (`upstream_addr="..."` and
-`upstream_connect_time=...`, see "Upstream keepalive pool" below). The
-existing fields keep their names and order, but two PoC analyzers anchor
+carries six fields appended after `cache=...`: `upstream_addr="..."` and
+`upstream_connect_time=...` (WP CORE-FEAT-1b2, see "Upstream keepalive
+pool" below), `upstream_host="..."`, `host="..."` and `limit_conn=...`
+(ADR-0021) and `client=...` (WP D15a). The existing fields keep their
+names and order, but two PoC analyzers anchor
 their pattern at end-of-line (`cache=(?<cache>\S+)$`):
 `poc/steam-client-test/analyze.ps1` and `poc/steamprefill/verify.ps1`.
 Against a log written by the current format each matches **no line at
@@ -486,7 +488,7 @@ field 1 below.
 | 1 | format version | literal `v1` | WP 3.11's sweeper MUST reject any line whose first field isn't exactly `v1` instead of guessing at a changed layout |
 | 2 | time | `$time_iso8601` | e.g. `2026-08-09T14:03:11+02:00` |
 | 3 | client address | `$remote_addr` | direct TCP peer; no `X-Forwarded-For` trust (vault-core is never behind another proxy) |
-| 4 | cache status | `$vault_event_status` | `HIT` / `MISS` / `BYPASS` -- see "Cache-status truth" below |
+| 4 | cache status | `$vault_event_status` | `HIT` / `MISS` / `BYPASS` -- see "Cache-status truth" below; `RUNNER` for the prefill runner's marker request (WP D15-RUNNER, "The runner marker" below) |
 | 5 | depot id | `$vault_event_depot` | digits captured from `/depot/<id>/...`, else `-` |
 | 6 | URI path | `$vault_event_uri` | `$uri` (decoded, query-string-free), bounded to 300 characters |
 | 7 | bytes sent | `$bytes_sent` | same variable/semantics as the `vault` log's `bytes_sent` field |
@@ -558,7 +560,8 @@ and the store-path guard's 301/302 branch above).
 ### Scope: what produces a line, what doesn't
 
 The `access_log ... vault_event ...` directive is declared **per-location**
-(inside `location /depot/` and `location @miss`), not at `server`/`http`
+(inside `location /depot/`, `location @miss` and the runner-marker
+location below), not at `server`/`http`
 level. `/health`, `/lancache-heartbeat` and `location ^~ /tmp/` never
 declare it at all, so they produce **zero** event-log lines -- not a typed
 "heartbeat" line the sweeper has to recognize and skip, but no line at all,
@@ -567,6 +570,22 @@ resolves locally never reaches `@miss` (nginx switches the request's
 "current location" on an internal redirect, including for the log phase),
 so exactly one of the two directives fires per request -- never both, never
 neither, for anything reaching `/depot/`.
+
+### The runner marker (WP D15-RUNNER)
+
+`location ^~ /steamhangar/runner-mark/` answers `204` locally (never
+upstream, no file access) with the header `X-SteamHangar-Runner-Mark:
+steamhangar`, and writes one event-log line with cache status `RUNNER`,
+depot `-`, the path (`/steamhangar/runner-mark/<32 hex>`) and status `204`.
+vault-runner sends it before each prefill over the same route SteamPrefill
+then uses, so the line carries the source address SteamPrefill's chunks
+will carry. vault-api's sweep accepts it only with a token the runner
+stored in the shared database first
+(`api/vault_api/runner_identity.py`); a LAN host requesting the path
+changes nothing. Older vault-api builds skip the line (`bad-cache-status`).
+It is the third `vault_event` directive, so the event-log ON render has
+three (`.github/scripts/verify-core-nginx.sh`, `check-config-drift.sh`),
+and the CI script checks the 204, the header and the logged line live.
 
 ### Performance: `buffer=64k flush=5s`
 
@@ -584,28 +603,69 @@ the file concurrently with traffic, which is exactly WP 3.11's situation.)
 
 ### Rotation and the USR1 contract
 
-Per ADR-0008, **the sweeper (WP 3.11, `api/`) owns the cursor and
-truncation** -- nothing in `core/` rotates this file. Two consequences worth
-being explicit about:
+**vault-core rotates this file itself since WP D15-ROT** (user decision
+2026-10-13, ADR-0008 addendum of the same date). Before, rotation was
+only the sweeper's in-place truncation (WP 3.11, `api/`), which a
+deployment can deny -- the file then grew without bound (measured: 41 MB
+and climbing on a production instance).
 
-- nginx's stock `USR1`-reopen behavior (`kill -USR1 <master pid>`, or
-  `nginx -s reopen`) already covers every open `access_log` file handle,
-  including this one, for free -- no code in this work package changes
-  that. If a future rotation strategy ever renames the file instead of
-  truncating it in place, the sweeper (or whatever triggers rotation) MUST
-  signal vault-core's master process afterwards, or nginx keeps writing to
-  the renamed (now effectively deleted-on-most-filesystems) inode. This is
-  a boundary note, not something WP 3.10 needed to implement: the ADR's
-  chosen design is cursor+truncate, not rename.
-- Truncate-in-place is actually safe against nginx's own writer without any
-  reopen at all, and it's worth recording why: nginx opens `access_log`
-  files with `O_APPEND`, under which every `write()` targets the file's
-  *current* end-of-file as tracked by the kernel, not an offset cached by
-  the writing process. Truncating the file to zero bytes while nginx holds
-  it open changes that current end-of-file too, so the next line nginx
-  writes lands at the new offset 0 -- no gap, no sparse hole, no reopen
-  needed. This is *why* ADR-0008 could choose "sweep, then truncate" as the
-  whole rotation story instead of a logrotate-style rename dance.
+`docker/45-vault-eventlog-rotate.sh` forks a small loop before nginx
+starts. Every 60 s it checks the size; at or above 64 MiB it
+
+1. finds the running nginx master (`/var/run/nginx.pid`, accepted only if
+   `/proc/<pid>/cmdline` reads `nginx: master process`; without one it
+   does not rotate and logs a WARNING),
+2. removes the previous `event.log.1` and renames `event.log` to
+   `event.log.1` (one `rename(2)` in the root-only `logs/` directory),
+3. creates a fresh `event.log` owned 101:101 0644 (append-create, never a
+   truncate), and
+4. sends `SIGUSR1` to the master (`nginx -s reopen`): the master flushes
+   the buffered lines into the old file, reopens the name and has the
+   workers do the same.
+
+One line per rotation in `docker logs`:
+`45-vault-eventlog-rotate.sh: rotated /vault/logs/event.log (<n> bytes) ->
+/vault/logs/event.log.1, nginx master <pid> reopened its logs`. ONE old
+file is kept, so the log needs at most about 2 x 64 MiB on the volume.
+Nothing is ever truncated or copied (no copytruncate): until the reopen,
+nginx keeps writing through its open fd into the renamed file, so no line
+is lost, and a reader that follows the file by inode (the sweeper, WP
+D15b) reads the rest of `event.log.1` before it switches to the new file.
+
+The loop is not a second init: the stock entrypoint execs nginx, so the
+master is PID 1, the loop (forked by the hook) is its child, and the master
+reaps it like any unknown child. It dies with the container. An
+`nginx -s reload` changes nothing (same master, same name). It is started
+only for the server itself: an `nginx -t`/`-T`/`-s`/`-v`/`-V`/`-h` run
+(read from the entrypoint's argument list, `/proc/$PPID/cmdline`) logs
+"not a server start" instead, so a one-shot config check never leaves a
+loop behind.
+
+Knobs (image-level env, read at start, **not** forwarded by
+`deploy/compose.yaml` -- the decided defaults need none, in line with the
+"few env values" direction of D16; add them to a compose override only if
+you must):
+
+| Variable | Default | Grammar |
+|---|---|---|
+| `VAULT_EVENT_LOG_ROTATE_BYTES` | `67108864` (64 MiB) | digits; `0` = rotation off; otherwise >= 1048576 |
+| `VAULT_EVENT_LOG_ROTATE_INTERVAL` | `60` (seconds) | 1..3600 |
+
+An invalid value stops the boot (`45-vault-eventlog-rotate.sh: FATAL`),
+also while `VAULT_EVENT_LOG` is off. Keep the threshold large enough that
+two rotations never fall into one sweep interval (5 min by default): a
+second rotation replaces `event.log.1` whether or not it was read.
+
+The sweeper's own truncation (`VAULT_EVENT_LOG_MAX_BYTES`, default 64 MiB)
+still exists and is harmless next to this: whichever acts first wins, the
+other then sees a small file. Its documented race (lines flushed between
+its size check and the truncate are lost) does not exist for the rename,
+so with vault-core rotating, `VAULT_EVENT_LOG_MAX_BYTES=0` is the cleaner
+setting; it is optional, and D15b decides the sweeper side.
+
+The earlier note still holds for anyone truncating by hand: nginx opens
+`access_log` files with `O_APPEND`, so a truncate in place needs no reopen
+(the next write lands at the new end of file, offset 0).
 
 ### Docker: `VAULT_EVENT_LOG` (optional, default OFF)
 
@@ -755,6 +815,7 @@ core/
     ├── 28-vault-upstream-pool.sh    # VAULT_UPSTREAM_EDGE/_MAX_CONNS/_POOL_HOSTS -> pool + cap includes
     ├── 29-vault-build-version.sh    # version file for vault-api's GET /v1/about
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
+    ├── 45-vault-eventlog-rotate.sh  # rotates the event log at 64 MiB (D15-ROT)
     └── check-config-drift.sh        # keeps the template honest
 ```
 
@@ -921,6 +982,7 @@ ownership:
 | `/vault/tmp/{proxy,client_body,fastcgi,uwsgi,scgi}` | 101:101 0700 | workers (temp files) |
 | `/vault/logs` | root:root 0755 | -- |
 | `/vault/logs/event.log` | 101:101 | master's fd (lines), vault-api (`ftruncate`) |
+| `/vault/logs/event.log.1` | 101:101 | `45-vault-eventlog-rotate.sh` (rename of the full log; one old file) |
 | `/vault/logs/vault-core-version.json` | root:root 0644 | `29-vault-build-version.sh` |
 
 uid 101 keeps write access to exactly what it writes and cannot rename any
@@ -1258,6 +1320,28 @@ should be <= 2C). This replaces the legacy mode's 32-idle ceiling.
 fields: `upstream_host="<name dialled>"`, `host="<Host the client sent>"`
 and `limit_conn=<PASSED|REJECTED|->` (`REJECTED` = 503 from the cap).
 
+**Client address (WP D15a).** After `limit_conn=` the `vault` log ends with
+`client=<address>`: `$remote_addr`, the direct TCP peer, IPv4 or IPv6 text
+form, the same key and meaning as the port-443 stream log's `client=`
+field. Example tail:
+`upstream_host="fake1.steamcontent.com" host="lancache.steamcontent.com" limit_conn=PASSED client=192.168.1.42`.
+No `X-Forwarded-For` is trusted (vault-core is never behind another
+proxy). A request that arrives through Docker's userland proxy (from the
+host itself or the loopback publish) shows the bridge gateway instead of
+the real peer; LAN clients on a published or dedicated address keep their
+own (ADR-0020). The field is appended, so every existing field keeps its
+position; a reader of this log must accept older lines without it.
+
+**What it is for.** This field is operator diagnostics: grep `docker logs
+vault-core` for one device, or attribute a `limit_conn=REJECTED` (503 from
+the cap) to the client that hit it. vault-api never reads this log; its
+per-client data (`GET /v1/clients`, `GET /v1/stats`) comes from the
+machine-readable event log (`vault_event`, field 3), which has carried the
+client address since WP 3.10 and is unchanged. That log exists only when
+`VAULT_EVENT_LOG` is set: the compose default is empty (off),
+`deploy/.env.example` sets it. Retention of the access log is
+unchanged: the json-file rotation in `deploy/compose.yaml` ("Log rotation" above).
+
 **Limits.** C is global, not per source: a prefill (default 8 threads)
 plus a Steam client updating several apps can exceed C and get 503s; raise
 C (max 64) or run them one after the other. One edge name is a single
@@ -1417,7 +1501,9 @@ appended for this feature, after `cache=...` and key=value like the rest:
 Both fields become comma-separated lists on a `proxy_next_upstream` retry,
 like `upstream_status` (`docs/LEARNINGS.md`). The existing fields keep
 their names and order (append only); an analyzer that anchors at
-end-of-line must learn the two fields ("Known gap" above).
+end-of-line must learn every appended field: these two, then
+`upstream_host`, `host`, `limit_conn` (ADR-0021) and `client` (WP D15a)
+("Known gap" above).
 
 **Native rig.** `core/nginx/nginx.conf` carries the identical
 `include vault-upstream-pool.conf;` line; its

@@ -45,6 +45,11 @@ COPY docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-poo
 # GET /v1/about. Touches no nginx config.
 COPY docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
 COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
+# WP D15-ROT (ADR-0008 addendum 2026-10-13): rotates the cache-event log at
+# 64 MiB into ONE old file (rename + nginx reopen), from a background loop
+# forked before nginx starts. Runs after the preflight; a no-op while
+# VAULT_EVENT_LOG is empty.
+COPY docker/45-vault-eventlog-rotate.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
 
 # Shipped for auditability: the running image can prove its own config matches
 # the reviewed native one (`docker run --rm --entrypoint sh <image> -c
@@ -61,7 +66,7 @@ COPY nginx/vault-upstream-pool.conf /opt/vault/vault-upstream-pool.native.conf
 COPY nginx/vault-upstream-cap.conf /opt/vault/vault-upstream-cap.native.conf
 
 RUN set -eux; \
-    chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /opt/vault/check-config-drift.sh; \
+    chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh /opt/vault/check-config-drift.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
     # image honest about what it serves.
@@ -99,11 +104,12 @@ RUN set -eux; \
     # placeholder or gains an unexpected one.
     grep -q '\${VAULT_RESOLVER}' /etc/nginx/templates/nginx.conf.template; \
     # Same for the WP 3.10 event-log placeholder -- it must appear exactly
-    # twice (location /depot/ and location @miss, see
-    # core/docker/check-config-drift.sh "delta 6"), each carrying the
-    # trailing marker comment 25-vault-eventlog.sh depends on to find it.
+    # three times (location /depot/, location @miss and the WP D15-RUNNER
+    # marker location, see core/docker/check-config-drift.sh "delta 6"),
+    # each carrying the trailing marker comment 25-vault-eventlog.sh depends
+    # on to find it. check-config-drift.sh cross-checks this number.
     grep -q '\${VAULT_EVENT_LOG}' /etc/nginx/templates/nginx.conf.template; \
-    [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "2" ]; \
+    [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "3" ]; \
     # WP TH-1a: the upstream rate cap is wired in exactly once (include at
     # http level, proxy_limit_rate in @miss), and the hook renders its cap-off
     # form in this image's own shell.
@@ -205,7 +211,17 @@ RUN set -eux; \
         sh /docker-entrypoint.d/29-vault-build-version.sh "$ver_check" 2>/dev/null; \
     grep -q '"version":"invalid","commit":"invalid"' "$ver_check"; \
     [ "$(stat -c '%u:%g %a' "$ver_check")" = "0:0 644" ]; \
-    rm -rf /opt/vault/ver-check
+    rm -rf /opt/vault/ver-check; \
+    # WP D15-ROT: the rotation hook refuses a bad threshold or interval in
+    # this image's own shell (only refusals here: a valid value would fork
+    # the loop -- it does not, the build shell is no nginx start, but the
+    # check must not depend on that).
+    for bad in 'VAULT_EVENT_LOG_ROTATE_BYTES=abc' 'VAULT_EVENT_LOG_ROTATE_BYTES=1048575' 'VAULT_EVENT_LOG_ROTATE_BYTES=-1' \
+               'VAULT_EVENT_LOG_ROTATE_INTERVAL=0' 'VAULT_EVENT_LOG_ROTATE_INTERVAL=3601' 'VAULT_EVENT_LOG_ROTATE_INTERVAL=1m'; do \
+        if env VAULT_EVENT_LOG=/vault/logs/event.log "$bad" sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh >/dev/null 2>&1; then \
+            echo "BUILD CHECK FAILED: 45-vault-eventlog-rotate.sh accepted $bad (D15-ROT)" >&2; exit 1; \
+        fi; \
+    done
 
 # Declared so that a plain `docker run` without -v cannot silently fill the
 # container's writable layer with depot chunks, and so that the default is one
@@ -242,11 +258,11 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     VAULT_RESOLVER=1.1.1.1 \
     # WP 3.10 (ADR-0008): path for the optional cache-event log. DEFAULT EMPTY
     # -- feature OFF -- deliberately, not "on by default with a sane path":
-    # the ADR explicitly frames this feed as "optional at runtime", and
-    # nothing in this image rotates or truncates the file once it exists
-    # (that is WP 3.11's sweeper, api/, not yet shipped as of this work
-    # package) -- defaulting it on here would grow an unbounded file on every
-    # vault-core deployment that hasn't also deployed the sweeper. Set it to
+    # the ADR explicitly frames this feed as "optional at runtime" (written
+    # when nothing in this image rotated the file; since WP D15-ROT
+    # 45-vault-eventlog-rotate.sh rotates it at 64 MiB into one old file,
+    # core/README.md "Rotation and the USR1 contract" -- the default stays
+    # off because the log only makes sense with a consumer). Set it to
     # an absolute path under the /vault volume (e.g.
     # /vault/logs/event.log -- logs/ is pre-created below) in deploy/.env to
     # enable it once a consumer exists. /docker-entrypoint.d/25-vault-eventlog.sh

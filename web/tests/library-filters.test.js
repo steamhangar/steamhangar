@@ -61,12 +61,12 @@ test("FILTER_DEFS: the only update chip is the optional 'updates' one (WP UPD-2)
   assert.equal(upd.optional, true);
 });
 
-test("WP UPD-2: chipCounts lists 'Updates' ONLY when the rows carry update_available (older vault-api: five chips)", () => {
+test("WP UPD-2: chipCounts lists 'Updates' ONLY when the rows carry update_available (older vault-api: six chips)", () => {
   const keysOld = chipCounts(GAMES, { query: "", liveJobsByAppid: LIVE }).map((c) => c.key);
-  assert.deepEqual(keysOld, ["all", "cached", "none", "downloading", "failed"]);
+  assert.deepEqual(keysOld, ["all", "cached", "none", "installed", "downloading", "failed"]);
   const withField = GAMES.map((g) => ({ ...g, update_available: g.appid === 1 }));
   const counts = chipCounts(withField, { query: "", liveJobsByAppid: LIVE });
-  assert.deepEqual(counts.map((c) => c.key), ["all", "cached", "none", "downloading", "failed", "updates"]);
+  assert.deepEqual(counts.map((c) => c.key), ["all", "cached", "none", "installed", "downloading", "failed", "updates"]);
   assert.equal(counts.find((c) => c.key === "updates").count, 1);
 });
 

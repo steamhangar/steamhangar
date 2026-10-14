@@ -781,6 +781,46 @@ payload-scoping mitigation yet (that mitigation is explicitly planned only
 for Phase 6 webhooks, not for this existing
 endpoint).
 
+**Agent-stated LAN addresses cross the trust boundary (WP AGENT-ADDR-1).**
+Until this package every address in `GET /v1/clients` came from the TCP
+peer, which a client cannot choose. Since schema v24 a report may also
+carry `local_addrs`, the PC's own LAN addresses as the agent determined them,
+and vault-api correlates clients with cache traffic on those in preference
+to the peer (the peer is the Docker bridge gateway behind a published port,
+the same for every PC). These values ARE caller-chosen. What bounds them:
+only a caller holding the API key can send them, and that caller can already
+delete cache content and read every client's data, so a lying agent gains no
+new capability — the worst it achieves is mislabelled statistics. Two
+cases, precisely: (a) claiming another PC's address: in `GET /v1/clients`
+BOTH clients then list that address and its cache traffic counts for both
+(each client's totals are summed over its own address set); only the D15b
+overview (`agent_reports.address_owners`, one owner per address, newest
+report wins) moves the address and its traffic to the claiming agent.
+(b) an agent can hide its own bypass by claiming an address that does have
+cache traffic: the bypass rule then sees presence in the cache log and
+does not accuse it. Neither needs more than the API key, which is
+admin-level already, so this adds no new capability. Validation keeps the values from becoming an injection vector:
+at most 8 plain IP literals, no zone id, no loopback/link-local/unspecified/
+multicast, stored canonical; they appear in API answers (`source_addrs`,
+`reported_addrs`) and in the report's log line. Privacy-wise they add
+nothing new in kind — the same LAN addresses are already in the event log and
+the access logs — but they now reach the database for every agent PC even
+when the event log is off.
+
+**The plain access logs carry the same addresses (WP D15a).** Every line of
+vault-core's human-readable `vault` access log (port 80, on stdout, i.e.
+`docker logs vault-core`) ends with `client=$remote_addr`, the same field
+the port-443 stream log has carried since WP CORE-FIX-3 (§1). Together with
+`uri=` and `host=` this is a record of which LAN address downloaded which
+depot when, readable by anyone who can read the container logs on the host
+(the host-level trust boundary of §6). Unlike the opt-in event log (§6),
+this field has no off switch; the precedent is the port-443 stream log's
+`client=` field (WP CORE-FIX-3). Retention did not change: the
+json-file driver's `max-size`/`max-file` rotation bounds it
+(`VAULT_LOG_MAX_SIZE` / `VAULT_LOG_MAX_FILE`, `deploy/compose.yaml`). The
+address is the direct TCP peer; requests from the host itself show the
+Docker bridge gateway, not a person's device.
+
 ---
 
 ## 5. Outbound data flows — what leaves the LAN
@@ -1092,7 +1132,20 @@ following the shipped `.env.example` has this on, not off.
 review S3, inside a `logs/` directory that belongs to root since WP
 SEC-FIX-5 (§9) — and turns it into the derived, API-key-gated
 summaries at `GET /v1/clients` and `GET /v1/stats`. Nothing serves the raw
-log file itself over HTTP. At the filesystem level, whoever can read the
+log file itself over HTTP.
+
+**How much raw history it holds (WP D15-ROT):** bounded. vault-core renames
+the log to `event.log.1` at 64 MiB and keeps that ONE old file
+(`core/docker/45-vault-eventlog-rotate.sh`), so at most about 128 MiB of
+raw lines — client address, time, depot, Host per request — sit on the
+volume, i.e. the last few hundred thousand requests, not the whole history.
+Before, the raw file grew without bound wherever vault-api's truncation was
+denied (measured on a production instance, 2026-10-13). The rotation runs as
+root inside the root-only `logs/` directory (§9 / SEC-FIX-5: no other uid
+can swap a name there), signals only a process whose cmdline reads
+`nginx: master process`, and creates the fresh file 101:101 like the start
+hook does. The derived per-client rows in vault-api's database have their
+own retention (`VAULT_CLIENT_STATS_KEEP`), unchanged by this. At the filesystem level, whoever can read the
 shared Docker volume on the host can read the raw file directly — the same
 host-level trust boundary as §3's Steam session and §3's relay key; this
 document does not repeat that caveat as a new finding each time it
@@ -1106,6 +1159,30 @@ depot→app content mapping (that comes from Steam manifests per
 ADR-0006/0007) — exactly the boundary ADR-0008 draws for itself
 (`docs/adr/0008-cache-event-feed.md`, "Decision", the "request facts only"
 bullet).
+
+**Longer retention since WP D15b (user decision 2026-10-13).** The event
+log's per-address statistics used to live about four hours
+(`client_cache_stats`, `VAULT_CLIENT_STATS_KEEP=48` sweep windows). WP
+D15b adds `client_traffic` and `client_depot_traffic`
+(`api/vault_api/traffic.py`): per client IP address, bytes, hit/miss
+counts and — per depot — what that address loaded, in 5-minute rows for
+48 hours, hourly rows for 30 days and **daily rows forever**. That turns a
+short operational buffer into a long-term activity record per household
+device: when each address loaded something, roughly how much, and which
+game (depot -> app through `depot_app_map`). It is readable by anyone with
+the API key (`GET /v1/clients/overview`, `GET /v1/throughput*`) and by
+anyone who can read `vault.db`. Nothing new leaves the host, the data is
+not sent to any third party. The raw event log is a separate, larger
+record: in production the sweeper's in-place truncation is currently
+denied (measured 2026-10-13: 41 MB and growing, roadmap D15), so until
+vault-core rotates it itself (D15-ROT: rotate at 64 MiB, keep one old
+file, about 128 MiB) it grows without limit and keeps every request line,
+with client address and URI, since it was enabled. There is no deletion
+control yet: removing
+an address's history means deleting its rows from the three tables by
+hand. An operator who does not want a lasting record keeps
+`VAULT_EVENT_LOG_PATH` empty (then nothing is collected at all); a
+retention setting for the daily tier is a possible follow-up, not built.
 
 ---
 

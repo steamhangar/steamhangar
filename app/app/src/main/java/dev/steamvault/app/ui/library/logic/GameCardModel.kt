@@ -1,6 +1,7 @@
 package dev.steamvault.app.ui.library.logic
 
 import dev.steamvault.app.net.model.GameSummary
+import dev.steamvault.app.net.model.InstalledOnEntry
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.ui.status.StatusKind
 
@@ -85,9 +86,16 @@ data class GameCardModel(
      * [TOOL_APP_STATE_WORD] instead of [kind]'s label, and is drawn muted
      * (shown, not hidden). */
     val toolApp: Boolean = false,
-    /** WP UPD-3: the "Update available" badge, straight from
-     * `GameSummary.update_available` (WP UPD-1). */
+    /** WP UPD-3: `GameSummary.update_available` (WP UPD-1), straight from
+     * the row (a group row ORs it over its members, [groupGames]). */
     val updateAvailable: Boolean = false,
+    /** WP UPD-6 (twin of web `showsUpdateState`): a CACHED card whose row is
+     * flagged -- the status icon draws the orange "stale" refresh glyph
+     * ([cardIconKind]) and the status word reads "Update available" instead
+     * of "Current". A DISPLAY overlay only: [kind] stays [StatusKind.CACHED]
+     * (the copy on disk is valid, just not the newest), so the pill keeps
+     * its size and the chips keep counting the game as Cached. */
+    val updateState: Boolean = false,
     /** WP TOOL-APPS-2d: how many content packages this group card holds
      * (0 = a plain card) -- the "+N content packages" line. */
     val packageCount: Int = 0,
@@ -97,6 +105,16 @@ data class GameCardModel(
     /** WP TOOL-APPS-2d (twin of web WEB-FEAT-SUGGEST-2): the "Never played"
      * pill ([showsNeverPlayed]). */
     val neverPlayed: Boolean = false,
+    /** WP CACHE-COMPLETE-1c (twin of web `cardDisplay`): what a CACHED card
+     * without the update state shows instead of "Current" -- "Partially
+     * cached N%" or "Cached · not verified" ([completenessOverlay]); null
+     * when the card shows its own kind (the green check only at 100 %). A
+     * DISPLAY overlay like [updateState]: [kind] stays CACHED. */
+    val completeness: CompletenessOverlay? = null,
+    /** WP LIB-LIST-1: every client the game is installed on ("Demon, Frame",
+     * [installedOnNames]) -- the list row's installed-on column truncates,
+     * so its spoken label names them all. Null when none. */
+    val installedNames: String? = null,
 )
 
 /**
@@ -110,6 +128,35 @@ data class GameCardModel(
  */
 fun capsulePillHasGround(model: GameCardModel): Boolean =
     model.kind == StatusKind.CACHED && model.sizeLabel != null
+
+/** WP UPD-6 (twin of web `showsUpdateState`). */
+fun showsUpdateState(game: GameSummary, kind: StatusKind): Boolean =
+    kind == StatusKind.CACHED && game.update_available
+
+/** WP UPD-6 (twin of web `cardIconKind`): the kind the card's status icon
+ * draws -- [StatusKind.STALE] (orange refresh glyph) for the update state,
+ * otherwise the card's own [GameCardModel.kind]. */
+fun cardIconKind(model: GameCardModel): StatusKind =
+    if (model.updateState) StatusKind.STALE else model.completeness?.icon ?: model.kind
+
+/** [cardIconKind] for a raw row and its kind -- the detail sheet's header,
+ * which has no [GameCardModel]. WP CACHE-COMPLETE-1c: [isGroup] = the row
+ * heads content packages (its completeness is the group's). */
+fun cardIconKind(game: GameSummary, kind: StatusKind, isGroup: Boolean = false): StatusKind =
+    if (showsUpdateState(game, kind)) StatusKind.STALE else completenessOverlay(game, kind, isGroup)?.icon ?: kind
+
+/** WP LIB-LIST-1 (twin of web `installedOnNames`): EVERY client the game
+ * is installed on, comma-separated ("Demon, Frame, Laptop"), null when
+ * none -- the un-truncated counterpart of the "first +N" badge text. */
+fun installedOnNames(installedOn: List<InstalledOnEntry>): String? =
+    installedOn.takeIf { it.isNotEmpty() }?.joinToString(", ") { it.client_id }
+
+/** WP UPD-2/UPD-6 (twin of web `showsUpdateBadge`): whether the card needs
+ * the separate "Update available" badge/line -- the flag is set and the
+ * status word does not already say it (a failed or running app that still
+ * carries the flag), so nothing on the card is said twice. */
+fun showsUpdateBadge(model: GameCardModel): Boolean =
+    model.updateAvailable && !model.updateState
 
 /**
  * @param selecting `true` while multi-select is active -- see
@@ -131,6 +178,7 @@ fun buildGameCardModel(
     ownedPlaytimeForever: Int? = null,
 ): GameCardModel {
     val kind = dispKind(game, liveJob)
+    val isGroup = packages.isNotEmpty()
     return GameCardModel(
         appid = game.appid,
         name = gameDisplayName(game),
@@ -146,8 +194,16 @@ fun buildGameCardModel(
         installedBadge = installedBadgeFor(game),
         toolApp = isToolApp(game),
         updateAvailable = game.update_available,
+        updateState = showsUpdateState(game, kind),
         packageCount = packages.size,
         failedPackageCount = failedPackages(packages, liveJobsByAppid).size,
-        neverPlayed = showsNeverPlayed(game, kind, ownedPlaytimeForever),
+        // WP CACHE-COMPLETE-1c: not on a partially cached card -- its
+        // description says "Fully cached", which a known figure below 100
+        // contradicts. An unknown figure keeps the pill (web
+        // `showsNeverPlayed`).
+        neverPlayed = showsNeverPlayed(game, kind, ownedPlaytimeForever) &&
+            completenessState(game, isGroup) != CompletenessState.PARTIAL,
+        completeness = completenessOverlay(game, kind, isGroup),
+        installedNames = installedOnNames(game.installed_on),
     )
 }

@@ -445,7 +445,8 @@ jobs:
   #     3. uploads the PNGs, and nothing else, as an artifact.
   #   android-goldens-push (contents: write, runs NO build code):
   #     4. checks out the same commit, downloads the PNGs, accepts them only
-  #        as exactly the set of shot names in LibraryScreenshotTest.kt,
+  #        as exactly the set of shot names (`shoot("...")`) in the
+  #        *ScreenshotTest.kt classes under app/app/src/testDebug (APP-TEST-2),
   #        each a real PNG,
   #     5. commits them as github-actions[bot] if anything changed and
   #        pushes fast-forward to the SAME branch (a branch that moved
@@ -516,7 +517,7 @@ jobs:
           trap 'echo "::${stop_token}::"' EXIT
           rm -f app/src/testDebug/screenshots/*.png
           echo "::stop-commands::${stop_token}"
-          bash gradlew testDebugUnitTest --tests 'dev.steamvault.app.ui.library.LibraryScreenshotTest' \
+          bash gradlew testDebugUnitTest --tests '*ScreenshotTest' \
             -Psteamhangar.screenshots.record=true --console=plain 2>&1 \
             | tee "${RUNNER_TEMP}/android-gradle.log"
       - name: "goldens: verify (android-tests task list)"
@@ -617,14 +618,18 @@ jobs:
         shell: bash
         run: |
           export LC_ALL=C
-          src=app/app/src/testDebug/java/dev/steamvault/app/ui/library/LibraryScreenshotTest.kt
+          # APP-TEST-2: every *ScreenshotTest.kt class (regular files only)
+          # defines shots; the allowlist is the union of their names.
+          testroot=app/app/src/testDebug/java
+          mapfile -t srcs < <(find "$testroot" -type f -name '*ScreenshotTest.kt' | sort)
           goldens=app/app/src/testDebug/screenshots
           dl="${RUNNER_TEMP:?}/goldens"
           fail() { echo "::error title=Golden refresh rejected::$1"; exit 1; }
+          [ "${#srcs[@]}" -gt 0 ] || fail "no *ScreenshotTest.kt under $testroot"
           { [ -d "$dl" ] && [ ! -L "$dl" ]; } || fail "no downloaded goldens"
-          expected="$(grep -oE '\bshoot\("[^"]+"' "$src" | sed -E 's/^shoot\("//; s/"$//' | sort)"
-          [ -n "$expected" ] || fail "no shoot(\"...\") calls found in $src"
-          [ "$expected" = "$(printf '%s\n' "$expected" | sort -u)" ] || fail "duplicate shot names in $src"
+          expected="$(grep -ohE '\bshoot\("[^"]+"' "${srcs[@]}" | sed -E 's/^shoot\("//; s/"$//' | sort)"
+          [ -n "$expected" ] || fail "no shoot(\"...\") calls found in ${srcs[*]}"
+          [ "$expected" = "$(printf '%s\n' "$expected" | sort -u)" ] || fail "duplicate shot names across ${srcs[*]}"
           actual="$(find "$dl" -mindepth 1 -printf '%P\n' | sort)"
           [ -n "$actual" ] || fail "the artifact is empty"
           while IFS= read -r f; do
@@ -634,7 +639,7 @@ jobs:
             [ "$sig" = "89504e470d0a1a0a" ] || fail "not a PNG: ${f}"
           done <<< "$actual"
           [ "$(printf '%s\n' "$actual" | sed 's/\.png$//' | sort)" = "$expected" ] \
-            || fail "artifact files do not match the shots in LibraryScreenshotTest.kt"
+            || fail "artifact files do not match the shots in the *ScreenshotTest.kt classes"
           mkdir -p "$goldens"
           find "$goldens" -maxdepth 1 -type f -name '*.png' -delete
           while IFS= read -r f; do cp -- "$dl/$f" "$goldens/$f"; done <<< "$actual"

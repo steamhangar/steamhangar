@@ -416,9 +416,10 @@ These are not style preferences; each entry cost a review round to learn.
   %2e%2e-encoded forms or a raw ASGI scope with un-normalized raw_path
   (WP 4a.1 review).
 - The frozen mockup is binding for UI surfaces: scaffolding must not add
-  navigation items or views the mockup lacks (Clients is a sheet, not a nav
-  entry) — any divergence is a user decision, recorded like the paused-slot
-  one (WP 4a.1 blocker).
+  navigation items or views the mockup lacks — any divergence is a user
+  decision, recorded like the paused-slot one (WP 4a.1 blocker). Example:
+  Clients started as a sheet, not a nav entry; the user's 2026-10-13
+  decision made it its own nav page (D15c).
 - Security-constant pins must assert STRING LITERALS, not the module's own
   constants: a test comparing the built URL against STEAM_API_BASE stays
   green when STEAM_API_BASE itself is mutated to attacker.example or http.
@@ -1034,3 +1035,54 @@ These are not style preferences; each entry cost a review round to learn.
 - verify-stack step 10h (global cap, live) still flakes under load
   despite 93542a1 (1 of 2 slow requests held after 15 s); a rerun was
   green. Open follow-up.
+
+## 2026-10-13/14 — rc15/rc16 (D9, D10, UPD-5, UPD-6, D15a-c)
+
+- `dev.sh verify` tears down the dev instance as a side effect; run
+  `dev.sh up` right after it. Only the orchestrator runs verify — coders
+  and reviewers never do, so a review cannot silently stop the instance
+  another agent is testing against.
+- Edits that widen egress (allowlists, relay hosts) are blocked by the
+  auto-mode safety classifier even after the operator agreed in chat. The
+  operator makes that one-line edit himself; the brief says so up front
+  instead of letting an agent retry.
+- Golden screenshots are refreshed on a dedicated `wp/*-goldens` branch
+  where CI commits them as a bot. Commits pushed with `GITHUB_TOKEN`
+  trigger no new CI run, so push an empty or follow-up commit to get the
+  branch checked.
+- A package branched from an older main must merge current main before it
+  joins an integration branch (D9 vs D10 conflicted only at integration).
+  Merge main into long-lived `wp/` branches before review, not after.
+- On ZFS `st_dev` is not stable across reboots; identify cached files by
+  inode (plus path) only, never by `(st_dev, st_ino)`.
+- Behind Docker published ports (userland proxy / NAT) vault-api sees the
+  bridge gateway as the peer, never the client's LAN address. Anything that
+  attributes traffic to a client (D15, "client bypasses the cache") must
+  take the address from a source that sees the real peer (proxy access
+  log, or the agent reporting its own LAN address — AGENT-ADDR-1).
+- Overnight, four parallel agents already hit the session limit; keep to
+  three and continue an interrupted agent with SendMessage instead of
+  spawning a fresh one.
+
+## 2026-10-14 afternoon — rc17 integration (D15c/d, NAMES, RUNNER, AGENT-ADDR-1, CACHE-COMPLETE-1a-c)
+
+- After every merge into an integration branch, run test-api, test-web
+  (and test-core when core changed) on the merged tree and
+  `git grep -nE '^(<<<<<<<|>>>>>>>)'` before pushing. Skipping this once
+  committed conflict markers into api/README.md and left a deterministic
+  api failure (golden guard vs a new screenshot class) on the branch.
+- Local uv Python bundles a newer SQLite (3.53) than CI's setup-python,
+  which links the runner's system SQLite (3.45). `ALTER TABLE ... DROP
+  COLUMN` on a table whose DDL has a `--` comment before the dropped
+  column fails on the older one ("incomplete input"). Never DROP COLUMN in
+  test fixtures; hand-write the old table instead.
+- A red CI job without log access: failed test names can still be read
+  without a token through check-run annotations. A throwaway `wp/` branch
+  whose conftest prints one `::error` line per failed test
+  (pytest_terminal_summary) exposes them via the public
+  check-runs/{id}/annotations endpoint. Match failures to the packages a
+  tree contains before calling something a flake.
+- Parallel packages that add schema steps reserve version numbers up
+  front and make every step idempotent without trusting the stamp
+  (CREATE TABLE IF NOT EXISTS, per-column guards); version pins in tests
+  use `>=`.

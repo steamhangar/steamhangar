@@ -68,3 +68,72 @@ Option C. Consequences and boundaries:
 - The feed is optional at runtime: vault-core without the extra log (or
   vault-api without read access to it) degrades to today's behavior —
   serving, prefill, GC all unaffected.
+
+## Addendum 2026-10-13 (WP D15-ROT): vault-core rotates the log
+
+User decision 2026-10-13 (`docs/handover/post-0.1.0-roadmap.md`, "User
+decisions 2026-10-13 (late evening)"). The original decision gave rotation
+to the sweeper alone ("sweep, then truncate"). That is best-effort: where
+vault-api may not write the file, it never shrinks — measured on a
+production instance at 41 MB and growing, every sweep past 64 MiB would
+warn. Now:
+
+- vault-core rotates the event log itself: at 64 MiB (`45-vault-eventlog-
+  rotate.sh`, image-level `VAULT_EVENT_LOG_ROTATE_BYTES`, `0` = off) it
+  renames `event.log` to `event.log.1`, creates a fresh 101:101 file and
+  sends `USR1` to the nginx master. ONE old file is kept (about 128 MiB at
+  most). Rename, never copytruncate: no line is lost, and the old file stays
+  readable to the end.
+- This supersedes "rotation happens only after a successful sweep" and
+  "the sweeper owns rotation" in Option C above: vault-core is now the
+  primary rotator, on its own schedule, independent of vault-api.
+- The sweeper follows the rename (WP D15b): it stores the file's inode and
+  treats a different inode at the path as a rotation (inode only, never
+  `st_dev`, which ZFS does not keep stable across reboots). Before
+  switching it reads the unread tail of `event.log.1` while that file still
+  has the cursor's inode, then restarts at offset 0 of the new file. Lines
+  are lost only if `event.log.1` is replaced again before the sweeper
+  drains it (two rotations within one sweep interval).
+- The sweeper's in-place truncation (`VAULT_EVENT_LOG_MAX_BYTES`, default
+  64 MiB) stays as a fallback for deployments without the vault-core hook
+  (`VAULT_EVENT_LOG_ROTATE_BYTES=0`, or an older core image). It never
+  truncates while its cursor still refers to the renamed-away file. In the
+  shipped containers the log belongs to uid 101 (vault-core's start hook),
+  which vault-api runs as, so truncation is permitted and whichever of the
+  two runs first wins; where the file is owned otherwise (as measured on
+  production), a truncation attempt is refused and counted
+  (`truncate_denied_count`) as before. With the core hook running the log
+  rarely reaches the limit at sweep time, because the hook checks every
+  60 s by default.
+- "Optional at runtime" is unchanged: with `VAULT_EVENT_LOG` empty, the
+  rotation hook does nothing.
+
+## Addendum 2026-10-14 (WP D15-RUNNER): the `RUNNER` status line
+
+User decision 2026-10-14 (`docs/handover/post-0.1.0-roadmap.md`, "User
+decisions 2026-10-14 (morning)", D15 runner, option B). The event log gains
+one line that is NOT traffic:
+
+- vault-core answers `GET /steamhangar/runner-mark/<32 lowercase hex>`
+  locally (`204`, header `X-SteamHangar-Runner-Mark`, never upstream) and
+  logs it as a normal v1 line: field 4 = `RUNNER`, field 5 = `-`, field 6 =
+  the path, field 9 = `204`. The format stays `v1`. The field count and
+  order are unchanged, and the new value appears only in field 4.
+- It is an **identity signal**: the prefill runner sends it before each
+  prefill over the same route SteamPrefill uses, so field 3 is the source
+  address the runner's chunks will carry. It is never counted as a
+  request, hit, miss or byte, in any table.
+- **Parser contract.** A sweeper treats `RUNNER` as a marker and never as
+  a cache status. It accepts the line only when it is served (2xx) and
+  field 6 is exactly the prefix plus a 32-character lowercase hex token.
+  Any other line claiming `RUNNER` is counted and skipped
+  (`bad-runner-mark`). A well-formed marker changes state only when its
+  token was stored by the runner in the shared database, is unused, and
+  the line's time lies 5 minutes before to 1 hour after the issue time.
+  This check runs in the same transaction as the cursor, so a token is
+  consumed exactly once. Sweepers older than this addendum skip the line
+  as `bad-cache-status`. That is the behaviour the version field was meant
+  to guarantee for unknown values: skip, never misread.
+- How identity becomes figures (periods, day-aligned windows, 7-day hold)
+  and what it cannot do: `api/vault_api/runner_identity.py` and
+  api/README.md, "The prefill runner in the client figures".

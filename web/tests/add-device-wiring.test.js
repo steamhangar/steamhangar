@@ -3,7 +3,8 @@
  * (`web/js/components/add-device-sheet.js`) and the pairing confirm
  * (`web/js/components/pair-confirm.js`).
  *
- *   - Settings → PCs has an "Add" button that opens the "Add a device" sheet;
+ *   - Clients → Manage PCs has an "Add" button that opens the "Add a device"
+ *     sheet (moved from Settings → PCs in WP D15c);
  *   - nothing secret is in the DOM before "Show", after "Hide", or after the
  *     sheet closes by its button, Escape or navigation (the WHOLE tree is
  *     scanned: text, attributes, value/href properties);
@@ -101,7 +102,7 @@ globalThis.fetch = async (url) => {
 };
 
 const { store } = await import("../js/store-singleton.js");
-const { renderSettings } = await import("../js/views/settings.js");
+const { renderClients } = await import("../js/views/clients.js");
 const { openAddDeviceSheet } = await import("../js/components/add-device-sheet.js");
 const { confirmPairReplace } = await import("../js/components/pair-confirm.js");
 const { resetModalStack } = await import("../js/lib/modal-stack.js");
@@ -157,10 +158,10 @@ beforeEach(() => {
   server.held = [];
 });
 
-test("MUTATION TARGET: Settings → PCs has an 'Add' button that opens the 'Add a device' sheet", async () => {
-  const s = renderSettings();
+test("MUTATION TARGET: Clients → Manage PCs has an 'Add' button that opens the 'Add a device' sheet", async () => {
+  const s = renderClients();
   dom.appRoot.replaceChildren(s);
-  await until(() => s.querySelector('[data-role="add-device"]') !== null, "settings loaded");
+  await until(() => s.querySelector('[data-role="add-device"]') !== null, "clients page built");
   const btn = s.querySelector('[data-role="add-device"]');
   assert.equal(btn.textContent, "Add");
   assert.equal(btn.getAttribute("aria-label"), "Add a device");

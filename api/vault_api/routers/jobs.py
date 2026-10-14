@@ -23,11 +23,13 @@ twice (once on the code, once on the state it then reads anyway).
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from vault_api import deletion, tool_apps
+from vault_api import cache_completeness, deletion, tool_apps
 from vault_api import jobs as jobs_queue
 from vault_api.auth import require_api_key
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
@@ -362,14 +364,155 @@ def create_cached_prefill_jobs(
     return refs
 
 
+def _enqueue_forced(conn: sqlite3.Connection, appids: list[int]) -> list[PrefillJobRef]:
+    """WP CACHE-COMPLETE-1b: flag each app ``needs_force = 1``, then queue it
+    through the one ``enqueue_prefill`` (same dedupe as every other route).
+
+    The flag is set FIRST: a job that is still queued (new, or the one the
+    dedupe returns) reads ``needs_force`` when the worker claims it, so it runs
+    with ``--force``. A job that is already running keeps the mode it was
+    claimed with; the flag survives its end (``clear_needs_force_if_unchanged``
+    is a compare-and-swap against the value it read), so the app's NEXT run is
+    forced. A paused job re-reads the flag when it is resumed and claimed.
+    """
+    deletion.set_needs_force(conn, appids)
+    refs: list[PrefillJobRef] = []
+    for appid in appids:
+        job, created = jobs_queue.enqueue_prefill(conn, appid)
+        refs.append(
+            PrefillJobRef(
+                appid=appid,
+                job_id=int(job["id"]),  # type: ignore[arg-type]
+                status=str(job["status"]),
+                deduplicated=not created,
+            )
+        )
+    return refs
+
+
+@router.post(
+    "/v1/prefill/verify",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=list[PrefillJobRef],
+)
+def create_verify_jobs(
+    body: PrefillRequest,
+    open_db: DbOpener = Depends(db_opener),
+) -> list[PrefillJobRef]:
+    """"Verify" / "Complete now" for the listed games (WP CACHE-COMPLETE-1b):
+    a forced prefill per app, queued like ``POST /v1/prefill``. 202.
+
+    A forced run makes SteamPrefill skip its own up-to-date bookkeeping and
+    request every chunk of the current build through vault-core: chunks on
+    disk are served locally (HIT), only missing ones are fetched from Steam
+    and stored. Progress, dedupe, tool-app refusal (422) and the response
+    shape are exactly ``POST /v1/prefill``'s. It does NOT replace a chunk
+    file of the wrong size (vault-core serves the file that is there); see
+    api/README.md "Verify and complete".
+    """
+    for appid in body.appids:
+        if tool_apps.is_tool_app(appid):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=tool_apps.reject_detail(appid),
+            )
+    appids = list(dict.fromkeys(body.appids))
+    with open_db() as conn:
+        refs = {r.appid: r for r in _enqueue_forced(conn, appids)}
+    # One entry per requested id, in request order (POST /v1/prefill's rule):
+    # a repeated id points at the same job, marked deduplicated.
+    out: list[PrefillJobRef] = []
+    seen: set[int] = set()
+    for appid in body.appids:
+        ref = refs[appid]
+        out.append(ref if appid not in seen else ref.model_copy(update={"deduplicated": True}))
+        seen.add(appid)
+    return out
+
+
+@router.post(
+    "/v1/prefill/incomplete",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=list[PrefillJobRef],
+)
+def create_incomplete_jobs(
+    request: Request,
+    open_db: DbOpener = Depends(db_opener),
+    size_cache: SizeCache = Depends(get_size_cache),
+    cache_root: str = Depends(get_cache_root),
+) -> list[PrefillJobRef]:
+    """"Complete all" (WP CACHE-COMPLETE-1b): a forced prefill for every game
+    ``GET /v1/games?incomplete=true`` lists right now that is short of at
+    least one chunk file (``cache_completeness.is_completable``). No request
+    body (like ``POST /v1/prefill/cached``; a body is ignored). 202.
+
+    The selection is ``cache_completeness.incomplete_apps`` with the games
+    list's own inputs (the shared ``SizeCache`` snapshot and the scheduler's
+    settings). A listed game short only of wrong-size chunk files
+    (``cache_missing_chunks == 0``) is skipped: a forced run cannot repair it.
+    Steam tool packages are never listed. Nothing to do: ``[]``. Same dedupe
+    and forced-run rules as ``POST /v1/prefill/verify``.
+    """
+    depot_bytes = size_cache.get(cache_root).depot_bytes
+    settings = request.app.state.scheduler.settings
+    with open_db() as conn:
+        appids = [
+            app.appid
+            for app in cache_completeness.incomplete_apps(conn, settings, depot_bytes)
+            if cache_completeness.is_completable(app.figure)
+        ]
+        if not appids:
+            return []
+        return _enqueue_forced(conn, appids)
+
+
+#: WP D15b: the Downloads history filter's ranges.
+_HISTORY_RANGES = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
 @router.get("/v1/jobs", response_model=list[JobSummary])
 def list_recent_jobs(
     limit: int = Query(default=20, ge=1, le=200),
+    range: Literal["24h", "7d", "30d", "all"] | None = Query(default=None),  # noqa: A002
+    since: str | None = Query(default=None),
     open_db: DbOpener = Depends(db_opener),
 ) -> list[JobSummary]:
-    """Most recent jobs, newest first — the app's polling list."""
+    """Most recent jobs, newest first — the app's polling list.
+
+    WP D15b, the Downloads history filter (backward compatible: without
+    either parameter nothing changes). ``range`` = ``24h``/``7d``/``30d``
+    keeps finished jobs that finished within that period, ``all`` keeps
+    everything; ``since`` = a UTC ``YYYY-MM-DDTHH:MM:SSZ`` timestamp does the
+    same from an explicit point. Queued, running and paused jobs are always
+    included. Giving both is a 422, as is a malformed ``since``. ``limit``
+    still applies unchanged (1..200, newest first).
+    """
+    if range is not None and since is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Give either 'range' or 'since', not both.",
+        )
+    cutoff: str | None = None
+    if since is not None:
+        parsed = jobs_queue.parse_utc_iso(since)
+        if parsed is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'since' must be a UTC timestamp like 2026-10-13T00:00:00Z.",
+            )
+        # strptime also accepts unpadded fields ("2026-1-5T0:0:0Z"); the
+        # query compares strings, so it must see the canonical padded form.
+        cutoff = jobs_queue.to_utc_iso(parsed)
+    elif range is not None and range in _HISTORY_RANGES:
+        cutoff = jobs_queue.to_utc_iso(
+            datetime.now(timezone.utc) - _HISTORY_RANGES[range]
+        )
     with open_db() as conn:
-        rows = jobs_queue.list_jobs(conn, limit)
+        rows = jobs_queue.list_jobs(conn, limit, since=cutoff)
     return [JobSummary(**row) for row in rows]  # type: ignore[arg-type]
 
 

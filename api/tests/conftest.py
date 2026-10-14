@@ -94,6 +94,32 @@ def _no_cover_art_lookup_in_tests(monkeypatch) -> None:
     monkeypatch.setattr(cover_cache, "INITIAL_DELAY_SECONDS", 3600.0)
 
 
+@pytest.fixture(autouse=True)
+def _no_host_routes_in_tests(monkeypatch, tmp_path) -> None:
+    """WP AGENT-ADDR-1: ``peer_hops`` reads the routing tables of the network
+    namespace it runs in. Point them at absent files so no test result
+    depends on which gateway the test host happens to have; tests of the
+    hop rule write their own route files."""
+    from vault_api import peer_hops
+
+    monkeypatch.setattr(peer_hops, "IPV4_ROUTE_FILE", str(tmp_path / "no-route"))
+    monkeypatch.setattr(peer_hops, "IPV6_ROUTE_FILE", str(tmp_path / "no-ipv6_route"))
+
+
+@pytest.fixture(autouse=True)
+def _no_runner_mark_network_in_tests(monkeypatch):
+    """WP D15-RUNNER: every prefill (runner and subprocess worker) first
+    looks for vault-core by name and sends a marker request. Make every name
+    unresolvable so no test does real DNS or HTTP to the host's port 80;
+    tests of the marker pass their own ``resolve``/``fetch``."""
+    from vault_api import runner_mark
+
+    monkeypatch.setattr(runner_mark, "resolve_v4", lambda host: None)
+    runner_mark.reset_negative_cache()
+    yield
+    runner_mark.reset_negative_cache()
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(

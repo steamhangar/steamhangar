@@ -13,6 +13,7 @@
 
 export const VIEW_TITLES = Object.freeze({
   library: "Library",
+  clients: "Clients",
   downloads: "Downloads",
   settings: "Settings",
 });

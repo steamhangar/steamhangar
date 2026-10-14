@@ -142,3 +142,55 @@ so it never checks on its own":
   "the oracle is on" and equals `enabled`.
 - Point 4 applies without its window condition: with the oracle on, the
   background polling happens on every install.
+
+## Addendum 2026-10-14 — cache completeness against the current build (WP CACHE-COMPLETE-1a)
+
+"Cached" meant `size_bytes > 0`, so a game read as cached seconds after a
+download started (user report, Timberborn). Decided (user: both stages;
+orchestrator: the review-round rules below):
+
+1. **Target manifest per (app, depot):** the oracle's current `public` gid;
+   vault-api's own `depot_manifests` record instead when it is newer than the
+   oracle's last answer for the app, or when the oracle is off or has no row
+   for the depot. Never an older or different manifest id than the target.
+2. **Chunk-level formula, compressed on both sides:** expected = sum of the
+   target manifest's `cb_compressed` over its unique chunks; present = the
+   same sum over chunks whose file `depot/<id>/chunk/<chunkid>` exists with
+   exactly that size. Chunk list from the manifest archive, else a
+   cache-stored client copy of the same id (GC's source chain). Rejected:
+   depot directory bytes vs manifest size, because an older build's
+   leftover chunks push it past 100 % during exactly the update it should
+   reveal.
+3. **Counted depots:** `depot_app_map` (what SteamPrefill filled, so its own
+   OS/language/DLC selection), never the oracle's full depot list.
+4. **Unknown is `null`**, and one unknown depot makes the app unknown; a
+   `null` with bytes on disk is never shown as complete.
+5. **Groups (D9):** only members with bytes on disk count, each
+   depot/manifest once.
+6. **Freshness:** measured by every update check (rows outside the
+   selection are dropped), after each successful prefill of the app, and
+   dropped by `DELETE /v1/cache/{appid}`; otherwise a figure is as old as
+   `cache_complete_checked_at` (up to one check interval). Stored in
+   `cache_completeness` (schema v25). Details: api/README.md "Cache
+   completeness", `api/vault_api/cache_completeness.py`.
+
+## Addendum 2026-10-14 — verify and complete (WP CACHE-COMPLETE-1b)
+
+Decided: "Verify", "Complete now" and "Complete all" are a **forced
+prefill** (`needs_force = 1`, then the normal enqueue). SteamPrefill has no
+verify command and a non-forced run skips an app its own bookkeeping calls
+current, i.e. exactly the incomplete ones. A forced run requests the current
+build's full chunk list (as any run that downloads does); vault-core serves
+present chunks from disk, so only missing chunks are fetched from Steam.
+Rejected: `?nocache=1`/`--nocache` (full re-download, or manifests only).
+
+1. Automatic completion runs only inside the schedule window; without a
+   window it is manual only. In the window it covers every incomplete cached
+   game with missing chunk files, sweep target or not, also with
+   `VAULT_SWEEP_INCLUDE_CACHED` off (user decision 2026-10-14).
+2. Chunk files of the wrong size are not replaced by a forced run (served as
+   HITs). Such a game is skipped by "Complete all" and by the automatic
+   completion and has no repair action yet; the fix (vault-api removes the
+   mismatched files, then a forced run) is CACHE-REPAIR-1, after rc17 (user
+   decision 2026-10-14).
+3. No schema change. Details: api/README.md "Verify and complete".

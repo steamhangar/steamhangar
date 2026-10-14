@@ -101,13 +101,83 @@ class DemoState private constructor(
 
     @Synchronized
     fun listGameSummaries(): List<GameSummary> =
-        games.map { it.toSummary().copy(group_size_bytes = groupSizeBytes(it)) }
+        games.map { game ->
+            val own = ownFigure(game)
+            game.toSummary().copy(
+                group_size_bytes = groupSizeBytes(game),
+                // WP CACHE-COMPLETE-1c (CACHE-COMPLETE-1a/1b fields).
+                cache_complete_pct = own?.pct,
+                cache_expected_bytes = own?.expectedBytes,
+                cache_present_bytes = own?.presentBytes,
+                cache_complete_checked_at = own?.checkedAt,
+                cache_missing_chunks = own?.missingChunks,
+                group_cache_complete_pct = groupPct(game),
+            )
+        }
 
     @Synchronized
     fun gameDetail(appid: Int): GameDetail {
         val game = games.find { it.appid == appid }
             ?: throw VaultApiError.NotFound("no such app in the demo library", 404, "appid $appid not found")
-        return game.toDetail().copy(group_size_bytes = groupSizeBytes(game))
+        val own = ownFigure(game)
+        return game.toDetail().copy(
+            group_size_bytes = groupSizeBytes(game),
+            cache_complete_pct = own?.pct,
+            cache_expected_bytes = own?.expectedBytes,
+            cache_present_bytes = own?.presentBytes,
+            cache_complete_checked_at = own?.checkedAt,
+            cache_missing_chunks = own?.missingChunks,
+            group_cache_complete_pct = groupPct(game),
+        )
+    }
+
+    /** WP CACHE-COMPLETE-1c: one row's `cache_complete_*` figure. */
+    private data class DemoFigure(
+        val pct: Int,
+        val expectedBytes: Long,
+        val presentBytes: Long,
+        val missingChunks: Int,
+        val checkedAt: String,
+    )
+
+    /** The seeded update check's time, three hours before the session
+     * started (web demo `_demoCompletenessCheckedAt`). */
+    private val seededCheckAt: String = Instant.now().minusSeconds(3 * 3_600L).toString()
+
+    /** The row's own figure (api/README.md "Cache completeness"): null when
+     * nothing is on disk or the figure is not known; `pct` floored. */
+    private fun ownFigure(game: DemoGame): DemoFigure? {
+        val size = game.depots.sumOf { it.sizeBytes }
+        if (size <= 0L || game.completenessUnknown) return null
+        val c = game.completeness
+        val expected = c?.expectedBytes ?: size
+        val present = c?.presentBytes ?: size
+        return DemoFigure(
+            pct = ((100L * present) / expected).toInt(),
+            expectedBytes = expected,
+            presentBytes = present,
+            missingChunks = c?.missingChunks ?: 0,
+            checkedAt = game.completenessCheckedAt ?: seededCheckAt,
+        )
+    }
+
+    /** `group_cache_complete_pct` (D9): over the members with bytes on disk,
+     * unknown when any of them is; null on a grouped row and with nothing
+     * on disk. Demo approximation (as on the web): a depot shared inside the
+     * group is counted per member. */
+    private fun groupPct(game: DemoGame): Int? {
+        if (game.parentAppid != null) return null
+        val members = (listOf(game) + games.filter { it.parentAppid == game.appid })
+            .filter { m -> m.depots.sumOf { it.sizeBytes } > 0L }
+        if (members.isEmpty()) return null
+        var expected = 0L
+        var present = 0L
+        for (m in members) {
+            val f = ownFigure(m) ?: return null
+            expected += f.expectedBytes
+            present += f.presentBytes
+        }
+        return ((100L * present) / expected).toInt()
     }
 
     /** WP TOOL-APPS-2d: the server's `group_size_bytes` rule
@@ -150,6 +220,21 @@ class DemoState private constructor(
     @Synchronized
     fun enqueuePrefillCached(): List<PrefillJobRef> =
         games.filter { it.status == STATUS_DONE }.map { enqueueOnePrefill(it.appid) }
+
+    /**
+     * WP CACHE-COMPLETE-1c: `POST /v1/prefill/verify` ("Verify", "Complete
+     * now", "Complete all"; api/README.md "Verify and complete"): flag
+     * `needs_force` first, then the one enqueue with `POST /v1/prefill`'s
+     * dedupe. The demo job re-measures on success ([finishPrefillJob]).
+     */
+    @Synchronized
+    fun enqueueVerify(appids: List<Int>): List<PrefillJobRef> {
+        if (appids.isEmpty()) {
+            throw VaultApiError.Validation("appids must be a non-empty list", 422, "appids must be a non-empty list")
+        }
+        for (appid in appids) games.find { it.appid == appid }?.needsForce = true
+        return appids.map { enqueueOnePrefill(it) }
+    }
 
     private fun enqueueOnePrefill(appid: Int): PrefillJobRef {
         val existing = jobs.find { it.appid == appid && it.status in ACTIVE_JOB_STATUSES }
@@ -260,6 +345,13 @@ class DemoState private constructor(
         game.needsForce = false
         game.lastPrefillAt = nowIso()
         game.updateAvailable = false // WP UPD-3: the newer build is now cached
+        // WP CACHE-COMPLETE-1c: the worker re-measures after every successful
+        // prefill. Missing chunks are fetched now; chunk files with the wrong
+        // size stay (a forced run serves them as HITs, api/README.md
+        // "Damaged chunks"), so a damaged-only figure does not change.
+        if (game.completeness?.damagedOnly != true) game.completeness = null
+        game.completenessUnknown = false
+        game.completenessCheckedAt = nowIso()
         if (game.depots.isEmpty()) {
             game.depots.add(DemoDepot(depotid = game.appid + 1, shared = false, sizeBytes = 1_200_000_000L))
         }
@@ -476,6 +568,28 @@ class DemoState private constructor(
 
     @Synchronized
     fun clientsOut(): List<ClientOut> = clients
+
+    // ---- traffic (WP D15d) ----------------------------------------------------
+
+    /**
+     * What [DemoTrafficRepository] builds its synthetic statistics from: the
+     * running jobs, the games (names, installed_on) and the agents. Unlike
+     * [listJobSummaries] this does NOT tick the job simulation -- the
+     * statistics poll must not make the demo's downloads finish faster.
+     */
+    @Synchronized
+    fun trafficSnapshot(): DemoTrafficSnapshot = DemoTrafficSnapshot(
+        runningJobs = jobs.filter { it.status == STATUS_RUNNING }.map { it.toSummary() },
+        games = listGameSummaries(),
+        agents = clients,
+    )
+
+    /** `GET /v1/jobs?range=` in demo mode: the newest [limit] jobs, without a
+     * tick (see [trafficSnapshot]). The range itself is applied by the
+     * screen, the same way it treats a server that ignores `range`. */
+    @Synchronized
+    fun jobHistory(limit: Int): List<JobSummary> =
+        jobs.sortedByDescending { it.id }.take(limit).map { it.toSummary() }
 
     // ---- about (WP APP-FEAT-2) ------------------------------------------------
 

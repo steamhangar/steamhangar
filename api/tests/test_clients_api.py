@@ -67,6 +67,13 @@ def test_lists_one_row_per_client_with_the_latest_snapshot_size(
         "report_interval_seconds",
         "presence",
         "offline_after",
+        # WP AGENT-ADDR-1 (schema v24): appended, nothing above moved.
+        "peer_addrs",
+        "reported_addrs",
+        # WP D15-NAMES (schema v26): appended, nothing above moved.
+        "name",
+        "name_addr",
+        "display_name",
     }
     # With no event feed configured there is nothing to correlate, and nobody
     # is accused of anything.

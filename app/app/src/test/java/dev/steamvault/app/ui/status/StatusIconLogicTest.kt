@@ -79,6 +79,37 @@ class StatusIconLogicTest {
     }
 
     @Test
+    fun `partial maps to half, stale disc, dark ink (web k-partial)`() {
+        assertEquals(GlyphShape.HALF, glyphFor(StatusKind.PARTIAL))
+        assertEquals(VaultColors.StatusStale, backgroundFor(StatusKind.PARTIAL))
+        assertEquals(VaultColors.StatusIconInk, inkFor(StatusKind.PARTIAL))
+    }
+
+    @Test
+    fun `unverified maps to question, muted disc, light ink (web k-unverified)`() {
+        assertEquals(GlyphShape.QUESTION, glyphFor(StatusKind.UNVERIFIED))
+        assertEquals(VaultColors.Dim2, backgroundFor(StatusKind.UNVERIFIED))
+        assertEquals(VaultColors.Text, inkFor(StatusKind.UNVERIFIED))
+    }
+
+    @Test
+    fun `the question hook's arc runs from the SVG start point to the SVG end point`() {
+        fun pointAt(deg: Float): Pair<Double, Double> {
+            val rad = Math.toRadians(deg.toDouble())
+            return QUESTION_ARC_CX + QUESTION_ARC_R * kotlin.math.cos(rad) to QUESTION_ARC_CY + QUESTION_ARC_R * kotlin.math.sin(rad)
+        }
+        val (sx, sy) = pointAt(QUESTION_ARC_START_DEG)
+        val (ex, ey) = pointAt(QUESTION_ARC_START_DEG + QUESTION_ARC_SWEEP_DEG)
+        // web "M9.1 9.2a2.9 2.9 0 1 1 4.3 2.6": from (9.1,9.2) to (13.4,11.8).
+        assertEquals(9.1, sx, 0.02)
+        assertEquals(9.2, sy, 0.02)
+        assertEquals(13.4, ex, 0.02)
+        assertEquals(11.8, ey, 0.02)
+        // large-arc flag 1, sweep flag 1: more than half a turn, clockwise (y down).
+        assertTrue(QUESTION_ARC_SWEEP_DEG > 180f)
+    }
+
+    @Test
     fun `every StatusKind has a glyph mapping`() {
         // Exhaustiveness guard: if a new StatusKind is ever added without
         // updating glyphFor's `when`, this loop (not just the compiler)
@@ -151,6 +182,8 @@ class StatusIconLogicTest {
             StatusKind.WARN,
             StatusKind.CANCELLED,
             StatusKind.NOTINUSE,
+            StatusKind.PARTIAL,
+            StatusKind.UNVERIFIED,
         )
         for (kind in staticKinds) {
             assertFalse(

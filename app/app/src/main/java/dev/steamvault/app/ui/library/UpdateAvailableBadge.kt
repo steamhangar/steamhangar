@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -56,6 +57,7 @@ fun UpdateAvailableBadge(modifier: Modifier = Modifier) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
+                .testTag(UPDATE_BADGE_TAG)
                 .semantics { contentDescription = fullLabel }
                 .widthIn(max = UPDATE_BADGE_MAX_WIDTH)
                 .clip(RoundedCornerShape(50))
@@ -70,6 +72,10 @@ fun UpdateAvailableBadge(modifier: Modifier = Modifier) {
 internal fun updateBadgeFullLabelFits(fullLabelWidthPx: Int, availableTextWidthPx: Float): Boolean =
     fullLabelWidthPx <= availableTextWidthPx
 
+/** Test tag of the grid badge's text (WP UPD-6: the card's status icon
+ * now speaks "Update available" too, so the badge is found by tag). */
+internal const val UPDATE_BADGE_TAG = "update-badge"
+
 /** Text inset at each side of the badge's pill. */
 internal val UPDATE_BADGE_HORIZONTAL_PADDING = 6.dp
 
@@ -80,14 +86,27 @@ internal val UPDATE_BADGE_MAX_WIDTH = 120.dp
  * checkbox (Material's 48 dp touch target plus a little air). */
 internal val UPDATE_BADGE_START_CLEARANCE = 52.dp
 
+/**
+ * The list row's update flag. WP LIB-LIST-1: [compact] = the short "Update"
+ * in the row's fixed update cell (web `.grid.list .updbadge .ubcompact`),
+ * still spoken as the full "Update available".
+ */
 @Composable
-fun UpdateAvailableLabel(modifier: Modifier = Modifier) {
+fun UpdateAvailableLabel(modifier: Modifier = Modifier, compact: Boolean = false) {
+    val full = stringResource(R.string.library_update_available_badge)
+    val text = if (compact) stringResource(R.string.library_update_available_badge_short) else full
     Text(
-        text = stringResource(R.string.library_update_available_badge),
+        text = text,
         style = MaterialTheme.typography.labelSmall,
         color = VaultColors.StatusStale,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = modifier,
+        modifier = modifier
+            .testTag(UPDATE_LABEL_TAG)
+            .semantics { contentDescription = full },
     )
 }
+
+/** Test tag of the list row's "Update available" line (review fix: the
+ * screenshot test tells it apart from a status word saying the same). */
+internal const val UPDATE_LABEL_TAG = "update-label"

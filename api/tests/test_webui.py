@@ -103,13 +103,13 @@ def test_direct_index_html_request_also_gets_no_cache(client: TestClient) -> Non
 
 
 # ---------------------------------------------------------------------------
-# SPA fallback: only the three scaffolded views, never /v1/*, /docs, or junk.
-# Review fix (blocker B2): the frozen mockup has three nav items, not four —
-# "clients" is NOT a view here (WP 4a.7 adds it as a sheet, not a nav item).
+# SPA fallback: only the scaffolded views, never /v1/*, /docs, or junk.
+# WP D15c: "clients" is a view again (user decision 2026-10-13: Clients is
+# its own page under Library, superseding the WP 4a.1 "sheet" ruling).
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("view", ["library", "downloads", "settings"])
+@pytest.mark.parametrize("view", ["library", "clients", "downloads", "settings"])
 def test_spa_view_routes_serve_index(client: TestClient, view: str) -> None:
     response = client.get(f"/{view}")
     assert response.status_code == 200
@@ -117,12 +117,14 @@ def test_spa_view_routes_serve_index(client: TestClient, view: str) -> None:
     assert "SteamHangar" in response.text
 
 
-def test_clients_is_not_a_registered_view(client: TestClient) -> None:
-    # Review fix (blocker B2): "clients" was a fourth nav item/view in the
-    # rejected version; it must not exist as a route until WP 4a.7.
-    assert "clients" not in webui._SPA_ROUTES
+def test_clients_is_a_registered_view(client: TestClient) -> None:
+    # WP D15c: the Clients page deep-links like every other view, and the
+    # API's own /v1/clients routes are untouched by it.
+    assert "clients" in webui._SPA_ROUTES
     response = client.get("/clients")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert client.get("/v1/clients").headers["content-type"].startswith("application/json")
 
 
 def test_spa_fallback_serves_index_for_nested_view_paths(client: TestClient) -> None:
@@ -134,7 +136,7 @@ def test_spa_fallback_serves_index_for_nested_view_paths(client: TestClient) -> 
     assert "text/html" in response.headers["content-type"]
 
 
-@pytest.mark.parametrize("path", ["/", "/index.html", "/library", "/downloads", "/settings"])
+@pytest.mark.parametrize("path", ["/", "/index.html", "/library", "/clients", "/downloads", "/settings"])
 def test_head_on_app_shell_routes_matches_get(client: TestClient, path: str) -> None:
     # Review fix: HEAD must behave like GET on every app-shell route (200,
     # same content-type, empty body) — not 404 (the rejected version's

@@ -87,6 +87,15 @@ class StatsOut(BaseModel):
     #: (or it is corrupt), and those bytes were discarded, not retried.
     oversized_skips_total: int
     last_oversized_at: str | None
+    #: WP D15b: how often the sweeper found the event log rotated by someone
+    #: else -- smaller than the cursor, or replaced by another file (inode
+    #: change). Each one reset the cursor to 0. Expected to climb once
+    #: vault-core rotates the log itself (D15-ROT); unexpected before that.
+    rotations_detected_total: int = 0
+    last_rotation_detected_at: str | None = None
+    #: WP D15b: when the traffic tiers behind /v1/throughput and
+    #: /v1/clients/overview started filling (``null`` = not yet).
+    traffic_since: str | None = None
     #: Most recently MISSed depots that map to no app — vault-api can neither
     #: attribute nor prefill these (plan §4's manual-mapping fallback case).
     top_unmapped_depots: list[DepotMissOut]
@@ -125,6 +134,9 @@ def get_stats(
         last_truncate_denied_at=state.last_truncate_denied_at,
         oversized_skips_total=state.oversized_skips_total,
         last_oversized_at=state.last_oversized_at,
+        rotations_detected_total=state.rotations_detected_total,
+        last_rotation_detected_at=state.last_rotation_detected_at,
+        traffic_since=state.traffic_since,
         top_unmapped_depots=[
             DepotMissOut(
                 depotid=row.depotid,

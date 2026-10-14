@@ -19,7 +19,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, StrictBool
 
-from vault_api import deletion, group_delete, jobs
+from vault_api import cache_completeness, deletion, group_delete, jobs
 from vault_api.auth import require_api_key
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
 from vault_api.sizes import SizeCache, build_cache_summary
@@ -646,6 +646,13 @@ def delete_cached_app(
                 set_needs_force=True,
             )
         deletion.set_needs_force_for_remnant_co_owners(conn, remnant_co_owner_appids)
+        # WP CACHE-COMPLETE-1a: the stored completeness of these apps and of
+        # every depot touched is unknown now (until the next check).
+        cache_completeness.forget(
+            conn,
+            appids=[appid, *package_ids],
+            depotids=deleted_ids | failed_ids,
+        )
 
     total_bytes_freed = sum(depot.size_bytes_freed for depot in deleted)
     remnant_deleted_count = sum(1 for d in deleted if d.shared_with_uncached)

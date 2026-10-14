@@ -49,6 +49,7 @@ const row = (over = {}) => ({
   size_bytes: 1e9,
   needs_force: false,
   update_available: false,
+  cache_complete_pct: 100, // WP CACHE-COMPLETE-1c: measured complete -> "Current"
   ...over,
 });
 

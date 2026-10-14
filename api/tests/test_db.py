@@ -35,6 +35,9 @@ EXPECTED_TABLES = {
     "settings",
     # v16 (WP VER-2): vault-runner presence for GET /v1/about.
     "runner_presence",
+    # WP D15-RUNNER (v27)
+    "runner_marks",
+    "runner_address_periods",
     # v18 (WP API-FIX-5): real cover art per app (vault_api/cover_art.py).
     "app_cover_art",
     # v19 (WP UPD-1): always-on update check bookkeeping.
@@ -45,6 +48,14 @@ EXPECTED_TABLES = {
     # content-package links.
     "app_classification",
     "oracle_dlc_links",
+    # v23 (WP D15b CLIENTS-1): event-log traffic tiers (vault_api/traffic.py).
+    "client_traffic",
+    "client_depot_traffic",
+    "server_traffic",
+    # v25 (WP CACHE-COMPLETE-1a): cache completeness per (app, depot).
+    "cache_completeness",
+    # v26 (WP D15-NAMES): operator-set client names.
+    "client_names",
 }
 
 
@@ -147,6 +158,8 @@ def test_agent_reports_is_one_row_per_report_snapshot(tmp_path) -> None:
             "source_addr",
             "agent_version",
             "report_interval_seconds",
+            # schema v24 (WP AGENT-ADDR-1): the agent's stated LAN addresses.
+            "local_addrs",
         }
 
         conn.execute(

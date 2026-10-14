@@ -260,6 +260,45 @@ fun StatusIcon(
                 }
                 drawPath(dash, color = ink, style = stroke)
             }
+
+            GlyphShape.HALF -> {
+                // WP CACHE-COMPLETE-1c, ported from web buildHalf: a ring
+                // `circle cx=12 cy=12 r=6.6` plus its left half filled,
+                // "M12 5.4a6.6 6.6 0 0 0 0 13.2Z" (counter-clockwise from the
+                // top through the left to the bottom, then closed).
+                val ring = Rect(center = pt(12f, 12f), radius = 6.6f * scale)
+                drawCircle(color = ink, radius = 6.6f * scale, center = pt(12f, 12f), style = stroke)
+                val half = Path().apply {
+                    moveTo(pt(12f, 5.4f).x, pt(12f, 5.4f).y)
+                    arcTo(ring, startAngleDegrees = 270f, sweepAngleDegrees = -180f, forceMoveTo = false)
+                    close()
+                }
+                drawPath(half, color = ink)
+            }
+
+            GlyphShape.QUESTION -> {
+                // WP CACHE-COMPLETE-1c, ported from web buildQuestion:
+                // "M9.1 9.2a2.9 2.9 0 1 1 4.3 2.6c-.9.5-1.4 1.1-1.4 2v.4" plus
+                // the dot "M12 17.7v.02". The SVG arc is re-expressed with a
+                // centre and angles (QUESTION_ARC_* in StatusIconLogic.kt).
+                val hook = Path().apply {
+                    moveTo(pt(9.1f, 9.2f).x, pt(9.1f, 9.2f).y)
+                    arcTo(
+                        Rect(center = pt(QUESTION_ARC_CX, QUESTION_ARC_CY), radius = QUESTION_ARC_R * scale),
+                        startAngleDegrees = QUESTION_ARC_START_DEG,
+                        sweepAngleDegrees = QUESTION_ARC_SWEEP_DEG,
+                        forceMoveTo = false,
+                    )
+                    cubicTo(
+                        pt(12.5f, 12.3f).x, pt(12.5f, 12.3f).y,
+                        pt(12f, 12.9f).x, pt(12f, 12.9f).y,
+                        pt(12f, 13.8f).x, pt(12f, 13.8f).y,
+                    )
+                    lineTo(pt(12f, 14.2f).x, pt(12f, 14.2f).y)
+                }
+                drawPath(hook, color = ink, style = stroke)
+                drawCircle(color = ink, radius = strokeWidth / 2f, center = pt(12f, 17.71f))
+            }
         }
     }
 }

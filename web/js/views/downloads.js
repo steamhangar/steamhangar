@@ -55,6 +55,22 @@
  * count; Resume all does not. The bar is built once per mount and patched
  * (`paintBulkBar`), so a poll tick does not take focus from its buttons.
  *
+ * **Statistics header, per-job speed, history filter (WP D15c, D13/D15).**
+ * Under the bulk bar: current, average ("while loading") and peak speed,
+ * GB loaded, hit rate, GB saved by the cache and active clients from
+ * `GET /v1/throughput`, plus a small inline-SVG graph of
+ * `GET /v1/throughput/series`, both for a 24 h / 7 days / 30 days / All
+ * range (`lib/traffic-view.js` has the wording and the honest-state rules:
+ * feed disabled -> a note and no numbers, stale/never-swept -> a dash for
+ * the current values). They are polled every 30 s only while this view is
+ * open (`createViewPoll`); the store's jobs poll is untouched. A running
+ * job's card gets a speed line from the same answer's `jobs[]`, patched in
+ * place (never the badge's status icon). The History list has its own range
+ * filter (default All): `GET /v1/jobs?range=&limit=200`, fetched when the
+ * view opens and when the filter changes, merged with the store's newest 20
+ * (the fresher copy wins) and filtered client-side by the same rule, so a
+ * job that finishes while the view is open appears at once.
+ *
  * **Updates available (WP UPD-6).** A section between Paused and Queue
  * lists the games whose `update_available` is set and that have no active
  * job (`lib/updates-available.js` `pendingUpdates`), each with "Update now",
@@ -66,6 +82,35 @@
  * The section is rebuilt only when its content changes
  * (`updatesListKey`), so a poll tick does not take a button's focus.
  *
+ * **Incomplete (WP CACHE-COMPLETE-1c).** Right after "Updates available",
+ * same pattern: the games whose measured `cache_complete_pct` is below 100,
+ * with no active job and no update flag (lib/cache-completeness.js
+ * `pendingIncomplete`), each with its figure and "Complete now" (`POST
+ * /v1/prefill/verify`, a forced run), plus "Complete all" (the same
+ * route with exactly the listed completable rows, like "Update all") and a
+ * schedule note (`incompleteScheduleNote`:
+ * completed automatically in the window, or manual only). A game short only
+ * of damaged (wrong-size) chunks has no "Complete now" — a forced run
+ * cannot fix it — and says so in its row; "Complete all" is offered only
+ * while at least one row can be completed. Like every Downloads section
+ * since UPD-6 (user rule 2026-10-14) it is rendered only with at least one
+ * entry, and rebuilt only when its content changes.
+ *
+ * **Delete history (WP D15-NAMES).** Under the History filter, a "Delete
+ * history…" button opens a confirm dialog (alertdialog, focus on "Keep")
+ * with two choices, "Older than 30 days" (preselected) and "Everything",
+ * and `DELETE /v1/history?scope=` behind the confirm button. It lives here
+ * and not on the Clients page because both halves of what it deletes
+ * (finished jobs and the traffic statistics, `api/vault_api/history.py`)
+ * are shown on this page, next to the History time filter they are
+ * measured against; the Clients page only reads part of the statistics.
+ * After a delete the history list, the statistics header and the store's
+ * jobs are fetched again; a failure keeps the dialog open with the error.
+ * Wording: `lib/history-delete.js`.
+ *
+ * Section order, top to bottom: heading, bulk bar, statistics header,
+ * Active, Paused, Updates available, Incomplete, Queue, History.
+ *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
  * with the job highlighted" navigation target lands here without any
@@ -73,7 +118,28 @@
  */
 
 import { store } from "../store-singleton.js";
-import { api } from "../api.js";
+import { createViewPoll, VIEW_POLL_MS } from "../store.js";
+import { api, getStoredApiKey, isDemoMode } from "../api.js";
+import { ERROR_KINDS } from "../errors.js";
+import { createRangeSegs } from "../components/range-segs.js";
+import {
+  DASH,
+  FEED_TEXT,
+  emptyHistoryText,
+  feedNote,
+  feedState,
+  filterJobsByRange,
+  formatSpeed,
+  headerTiles,
+  isRange,
+  jobSpeedText,
+  joinNotes,
+  mergeJobLists,
+  refreshFailedText,
+  seriesGeometry,
+  seriesLabel,
+  seriesStartText,
+} from "../lib/traffic-view.js";
 import { showToast } from "../components/toast.js";
 import { createStatusIcon } from "../components/status-icon.js";
 import {
@@ -101,6 +167,21 @@ import {
   UPDATE_ALL_LABEL,
   STARTING_LABEL,
 } from "../lib/updates-available.js";
+import {
+  pendingIncomplete,
+  incompleteHeadingText,
+  completeAllAriaLabel,
+  completeNowAriaLabel,
+  incompletePctText,
+  incompleteScheduleNote,
+  incompleteListKey,
+  isCompletable,
+  summarizeVerifyStart,
+  describeVerifyStartError,
+  COMPLETE_NOW_LABEL,
+  COMPLETE_ALL_LABEL,
+  DAMAGED_NOTE,
+} from "../lib/cache-completeness.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
@@ -110,6 +191,17 @@ import { ownedLibrary } from "../owned-singleton.js";
 import { contentPackageFallbackTitle } from "../lib/content-groups.js";
 import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp, offersRetryFor } from "../lib/job-failure.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
+import {
+  HISTORY_DELETE_KEEPS,
+  HISTORY_DELETE_OPTIONS,
+  HISTORY_DELETE_TITLE,
+  HISTORY_DELETE_WHAT,
+  SCOPE_OLDER,
+  historyDeleteButtonText,
+  historyDeleteErrorText,
+  historyDeletedText,
+  isHistoryScope,
+} from "../lib/history-delete.js";
 import {
   WORDING as BULK,
   bulkBarState,
@@ -168,6 +260,20 @@ const state = {
   // WP UPD-6: `GET /v1/schedule`, read once per mount; null = not known.
   schedule: null,
 };
+
+/** WP D15c: the statistics header's last answer for `range`
+ * (`{throughput, series}`), and the History filter's fetched rows. Module
+ * state, so a re-mount keeps the chosen ranges. */
+const traffic = { range: "24h", throughput: null, series: null, error: null, unsupported: false, noFigures: false };
+const history = { range: "all", jobs: [], gen: 0 };
+
+/** WP D15c: the history fetch's page size (the API's maximum; no paging). */
+const HISTORY_LIMIT = 200;
+
+/** A job by id from the store's list or the history fetch. */
+function findJobById(jobId) {
+  return state.jobs.find((j) => j.id === jobId) || history.jobs.find((j) => j.id === jobId);
+}
 
 /** jobId -> {expanded, loading, error, excerpt}. Persists across re-mounts
  * AND across a full section rebuild triggered by an unrelated job
@@ -497,6 +603,7 @@ async function loadSchedule() {
     state.schedule = null; // unknown: no note rather than a guess
   }
   paintUpdates();
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: its schedule note too
 }
 
 /**
@@ -645,6 +752,161 @@ function paintUpdates() {
 }
 
 // ---------------------------------------------------------------------
+// Incomplete (WP CACHE-COMPLETE-1c)
+// ---------------------------------------------------------------------
+
+/** `null`, `"all"`, or the appid whose "Complete now" request is in flight.
+ * One request at a time; every button of the section is aria-disabled
+ * meanwhile. */
+let incompleteInFlight = null;
+
+/**
+ * Queue the completion: `POST /v1/prefill/verify` with one game ("Complete
+ * now") or exactly the listed completable rows ("Complete all").
+ * @param {number[]} appids
+ * @param {"all"|number} which what the busy label goes on
+ */
+async function startCompletion(appids, which) {
+  if (incompleteInFlight !== null || !appids.length) return;
+  incompleteInFlight = which;
+  paintIncomplete();
+  try {
+    const refs = await api.prefillVerify(appids);
+    const outcome = summarizeVerifyStart(refs, "complete");
+    showToast(outcome.message, { warn: outcome.warn });
+    store.refreshNow();
+  } catch (err) {
+    const outcome = describeVerifyStartError(err);
+    showToast(outcome.message, { warn: true });
+    if (outcome.refresh) store.refreshNow();
+  } finally {
+    incompleteInFlight = null;
+    paintIncomplete();
+  }
+}
+
+function completionButton(label, variant, ariaLabel, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn sm" + (variant ? " " + variant : "");
+  btn.textContent = label;
+  btn.setAttribute("aria-label", ariaLabel);
+  // Busy: aria-disabled plus this guard, not `disabled` (see updateButton).
+  btn.addEventListener("click", () => {
+    if (btn.disabled || incompleteInFlight !== null) return;
+    onClick();
+  });
+  gateOffline(btn);
+  return btn;
+}
+
+function buildIncompleteRow(game, gamesByAppid) {
+  const row = document.createElement("div");
+  row.className = "urow";
+  row.dataset.incompleteAppid = String(game.appid);
+  const title = nameFor(game.appid, gamesByAppid);
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.dataset.appid = String(game.appid); // patchNames keeps it current
+  nm.textContent = title;
+  const pct = document.createElement("span");
+  pct.className = "usize";
+  pct.textContent = incompletePctText(game);
+  row.append(nm, pct);
+  if (isCompletable(game)) {
+    const btn = completionButton(COMPLETE_NOW_LABEL, "primary", completeNowAriaLabel(title), () =>
+      startCompletion([game.appid], game.appid),
+    );
+    btn.dataset.role = "complete-now";
+    // Not `data-appid`: patchNames rewrites the text of every such node.
+    btn.dataset.incompleteAppid = String(game.appid);
+    row.appendChild(btn);
+  } else {
+    // Short only of wrong-size chunks: nothing a forced run fixes.
+    const note = document.createElement("span");
+    note.className = "unote";
+    note.dataset.role = "damaged-note";
+    note.textContent = DAMAGED_NOTE;
+    row.appendChild(note);
+  }
+  return row;
+}
+
+/** Which completion button `btn` is: `"all"`, its row's appid, or null. */
+function completionButtonId(btn) {
+  if (!btn || !btn.dataset) return null;
+  if (btn.dataset.role === "complete-all") return "all";
+  if (btn.dataset.role === "complete-now" && btn.dataset.incompleteAppid) return Number(btn.dataset.incompleteAppid);
+  return null;
+}
+
+function focusedCompletionButton() {
+  const el = document.activeElement;
+  for (const btn of els.incomplete.querySelectorAll("button")) if (btn === el) return completionButtonId(btn);
+  return null;
+}
+
+/** Label and busy state of the completion buttons, patched in place. */
+function paintIncompleteBusy() {
+  const busy = incompleteInFlight !== null;
+  for (const btn of els.incomplete.querySelectorAll("button")) {
+    const which = completionButtonId(btn);
+    const idle = btn.dataset.role === "complete-all" ? COMPLETE_ALL_LABEL : COMPLETE_NOW_LABEL;
+    const label = incompleteInFlight === which ? STARTING_LABEL : idle;
+    if (btn.textContent !== label) btn.textContent = label;
+    if (busy) btn.setAttribute("aria-disabled", "true");
+    else btn.removeAttribute("aria-disabled");
+  }
+}
+
+/**
+ * Sync the "Incomplete" section with the games, jobs, schedule and
+ * connection state — the same rebuild/focus rules as `paintUpdates`.
+ */
+function paintIncomplete() {
+  if (!mounted() || !els.incomplete) return;
+  const gamesByAppid = gamesByAppidMap();
+  const titleOf = (g) => nameFor(g.appid, gamesByAppid);
+  const rows = state.gamesKnown ? pendingIncomplete(state.games, state.jobs, titleOf) : [];
+  const note = incompleteScheduleNote(state.schedule);
+  const key = [incompleteListKey(rows, titleOf), note ?? "", String(isConnectionLost())].join("\u0000");
+  if (els.incompleteKey === key) {
+    paintIncompleteBusy();
+    return;
+  }
+  els.incompleteKey = key;
+  const hadFocus = focusedCompletionButton();
+
+  const { incomplete, incompleteHeading, incompleteNote, incompleteActs, incompleteBody } = els;
+  incomplete.hidden = rows.length === 0;
+  incompleteHeading.textContent = incompleteHeadingText(rows.length);
+  incompleteNote.hidden = !note;
+  incompleteNote.textContent = note ?? "";
+  incompleteActs.replaceChildren();
+  incompleteBody.replaceChildren();
+  const completable = rows.filter(isCompletable).map((g) => g.appid);
+  if (completable.length) {
+    const all = completionButton(COMPLETE_ALL_LABEL, "", completeAllAriaLabel(completable.length), () =>
+      startCompletion(completable, "all"),
+    );
+    all.dataset.role = "complete-all";
+    incompleteActs.appendChild(all);
+  }
+  for (const g of rows) incompleteBody.appendChild(buildIncompleteRow(g, gamesByAppid));
+  paintIncompleteBusy();
+
+  if (hadFocus === null) return;
+  const same =
+    hadFocus === "all"
+      ? incompleteActs.querySelector('[data-role="complete-all"]')
+      : Array.from(incompleteBody.querySelectorAll('[data-role="complete-now"]')).find(
+          (b) => completionButtonId(b) === hadFocus,
+        );
+  const target = same || incompleteActs.querySelector('[data-role="complete-all"]') || els.queueHeading;
+  target.focus();
+}
+
+// ---------------------------------------------------------------------
 // Job card (Active / Paused sections)
 // ---------------------------------------------------------------------
 
@@ -735,6 +997,17 @@ function buildJobCard(job, mode, gamesByAppid) {
   top.append(info, badge);
   card.appendChild(top);
 
+  // WP D15c (D13 SPEED-1): the job's speed at the cache, painted by
+  // paintJobSpeeds() from the statistics poll; hidden until there is one.
+  if (mode === "active") {
+    const speed = document.createElement("p");
+    speed.className = "jobspeed";
+    speed.dataset.role = "job-speed";
+    speed.title = "Measured at the cache over the last few minutes, on this game's own depots.";
+    speed.hidden = true;
+    card.appendChild(speed);
+  }
+
   if (mode === "held") {
     // The slot-release divergence, stated on the card itself — see
     // js/lib/job-partition.js's module header for the full "why".
@@ -820,7 +1093,7 @@ function paintExcerpt(rowEl, jobId) {
     logEl.appendChild(p);
     return;
   }
-  const job = state.jobs.find((j) => j.id === jobId);
+  const job = findJobById(jobId);
   const hint = jobFailureHint(job, st.excerpt);
   const outputParent = hint ? appendFailureHint(logEl, hint, job, st) : logEl;
   if (display.truncated) {
@@ -1108,14 +1381,363 @@ function fullRender() {
 
   maybeLoadOwnedNames();
 
-  els.historyBody.replaceChildren();
-  if (!p.history.length) {
-    els.historyBody.appendChild(hintMessage("Nothing finished yet."));
-  } else {
-    for (const job of p.history) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
-  }
+  renderHistory(gamesByAppid);
+  paintJobSpeeds();
+}
 
+/** WP D15c: the History list for the chosen range — the store's newest jobs
+ * merged with the `?range=` fetch, filtered by the server's own rule. */
+function historyRows() {
+  return partitionJobs(filterJobsByRange(mergeJobLists(state.jobs, history.jobs), history.range)).history;
+}
+
+/** Identity of the rows on screen; a history fetch that changes nothing
+ * visible does not rebuild them. */
+function historyKey(rows) {
+  return rows.map((j) => `${j.id}:${j.status}`).join(",");
+}
+
+function renderHistory(gamesByAppid = gamesByAppidMap()) {
+  if (!mounted()) return;
+  const finished = historyRows();
+  els.historyKey = historyKey(finished);
+  els.historyBody.replaceChildren();
+  if (!finished.length) {
+    els.historyBody.appendChild(hintMessage(emptyHistoryText(history.range)));
+  } else {
+    for (const job of finished) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
+  }
   applyPendingHighlight();
+}
+
+async function loadHistory() {
+  const gen = ++history.gen;
+  const range = history.range;
+  let items = [];
+  try {
+    const answer = await api.jobs(HISTORY_LIMIT, { range });
+    items = Array.isArray(answer) ? answer : [];
+  } catch {
+    // The store's newest jobs still show; the filter applies to them.
+    items = [];
+  }
+  if (gen !== history.gen) return; // a newer range was chosen meanwhile
+  history.jobs = items;
+  if (mounted() && historyKey(historyRows()) !== els.historyKey) renderHistory();
+}
+
+function setHistoryRange(range) {
+  if (!isRange(range) || range === history.range) return;
+  history.range = range;
+  history.jobs = [];
+  renderHistory();
+  loadHistory();
+}
+
+// ---------------------------------------------------------------------
+// Delete history (WP D15-NAMES) — built once at module load as a
+// `document.body` sibling of `#app`, like the Pause all confirm above.
+// ---------------------------------------------------------------------
+
+const histBackdrop = document.createElement("div");
+histBackdrop.className = "dialog-backdrop";
+const histDialog = document.createElement("div");
+histDialog.className = "dialog hist-delete-dialog";
+histDialog.setAttribute("role", "alertdialog");
+histDialog.setAttribute("aria-modal", "true");
+histDialog.setAttribute("aria-labelledby", "hist-delete-title");
+histDialog.setAttribute("aria-describedby", "hist-delete-what hist-delete-keeps");
+histDialog.dataset.role = "history-delete-confirm";
+const histTitle = document.createElement("h3");
+histTitle.id = "hist-delete-title";
+histTitle.textContent = HISTORY_DELETE_TITLE;
+const histWhat = document.createElement("p");
+histWhat.id = "hist-delete-what";
+histWhat.textContent = HISTORY_DELETE_WHAT;
+const histScope = document.createElement("fieldset");
+histScope.className = "hist-scope";
+const histLegend = document.createElement("legend");
+histLegend.textContent = "What to delete";
+histScope.appendChild(histLegend);
+const histRadios = HISTORY_DELETE_OPTIONS.map((option) => {
+  const row = document.createElement("label");
+  row.className = "srow";
+  const radio = document.createElement("input");
+  radio.type = "radio";
+  radio.name = "history-delete-scope";
+  radio.value = option.value;
+  radio.id = `hist-scope-${option.value}`;
+  radio.dataset.role = "history-scope";
+  radio.addEventListener("change", () => paintHistDeleteButton());
+  const grow = document.createElement("span");
+  grow.className = "grow";
+  const ttl = document.createElement("span");
+  ttl.className = "ttl";
+  ttl.textContent = option.label;
+  const desc = document.createElement("span");
+  desc.className = "desc";
+  desc.textContent = option.desc;
+  grow.append(ttl, desc);
+  row.append(radio, grow);
+  histScope.appendChild(row);
+  return radio;
+});
+const histKeeps = document.createElement("p");
+histKeeps.id = "hist-delete-keeps";
+histKeeps.textContent = HISTORY_DELETE_KEEPS;
+const histError = document.createElement("p");
+histError.className = "errline";
+histError.dataset.role = "history-delete-error";
+histError.setAttribute("role", "alert");
+histError.hidden = true;
+const histRow = document.createElement("div");
+histRow.className = "row";
+const histNo = document.createElement("button");
+histNo.type = "button";
+histNo.className = "btn ghost sm";
+histNo.textContent = "Keep";
+histNo.dataset.role = "history-delete-no";
+const histYes = document.createElement("button");
+histYes.type = "button";
+histYes.className = "btn danger sm";
+histYes.dataset.role = "history-delete-yes";
+histRow.append(histNo, histYes);
+histDialog.append(histTitle, histWhat, histScope, histKeeps, histError, histRow);
+histBackdrop.appendChild(histDialog);
+document.body.appendChild(histBackdrop);
+
+const histFlow = { open: false, busy: false, invokerEl: null };
+
+function chosenHistoryScope() {
+  const checked = histRadios.find((r) => r.checked);
+  return checked && isHistoryScope(checked.value) ? checked.value : SCOPE_OLDER;
+}
+
+function paintHistDeleteButton() {
+  histYes.textContent = histFlow.busy ? "Deleting…" : historyDeleteButtonText(chosenHistoryScope());
+}
+
+function setHistBusy(busy) {
+  histFlow.busy = busy;
+  // aria-disabled + click guards, not `disabled` (LEARNINGS, WP WEB-FEAT-1).
+  for (const b of [histNo, histYes]) {
+    if (busy) b.setAttribute("aria-disabled", "true");
+    else b.removeAttribute("aria-disabled");
+  }
+  paintHistDeleteButton();
+}
+
+function setHistError(message) {
+  histError.textContent = message || "";
+  histError.hidden = !message;
+}
+
+function openHistoryDelete() {
+  if (histFlow.open || histFlow.busy) return;
+  for (const radio of histRadios) radio.checked = radio.value === SCOPE_OLDER;
+  setHistError(null);
+  setHistBusy(false);
+  histFlow.invokerEl = document.activeElement;
+  histFlow.open = true;
+  histBackdrop.classList.add("on");
+  pushModal(histBackdrop, () => {
+    if (!histFlow.busy) closeHistoryDelete();
+  });
+  histNo.focus(); // the non-destructive default gets initial focus
+}
+
+function closeHistoryDelete({ restoreFocus = true } = {}) {
+  if (!histFlow.open) return;
+  histFlow.open = false;
+  histBackdrop.classList.remove("on");
+  popModal(histBackdrop);
+  const invoker = histFlow.invokerEl;
+  histFlow.invokerEl = null;
+  if (!restoreFocus) return;
+  const live = mounted() ? els.historyDeleteBtn : null;
+  const target = live || invoker;
+  if (target && typeof target.focus === "function" && target.isConnected !== false) target.focus();
+}
+
+async function confirmHistoryDelete() {
+  if (histFlow.busy || !histFlow.open) return;
+  const scope = chosenHistoryScope();
+  setHistError(null);
+  setHistBusy(true);
+  let result;
+  try {
+    result = await api.deleteHistory(scope);
+  } catch (err) {
+    setHistBusy(false);
+    setHistError(historyDeleteErrorText(err));
+    return;
+  }
+  setHistBusy(false);
+  closeHistoryDelete();
+  showToast(historyDeletedText(result));
+  history.jobs = [];
+  if (mounted()) renderHistory();
+  loadHistory();
+  trafficPoll.refresh();
+  store.refreshNow();
+}
+
+histNo.addEventListener("click", () => {
+  if (!histFlow.busy) closeHistoryDelete();
+});
+histYes.addEventListener("click", () => confirmHistoryDelete());
+
+// ---------------------------------------------------------------------
+// Statistics header (WP D15c)
+// ---------------------------------------------------------------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const GRAPH_W = 300;
+const GRAPH_H = 60;
+
+const trafficPoll = createViewPoll({
+  fetcher: async () => {
+    const range = traffic.range;
+    const [throughput, series] = await Promise.all([api.throughput(range), api.throughputSeries(range)]);
+    return { range, throughput, series };
+  },
+  intervalMs: VIEW_POLL_MS,
+  onTick: (answer) => {
+    // An answer for a range the user has since left: dropped, the refresh
+    // the range change asked for is queued behind it.
+    if (!answer || answer.range !== traffic.range) return;
+    traffic.throughput = answer.throughput;
+    traffic.series = answer.series;
+    traffic.error = null;
+    traffic.unsupported = false;
+    traffic.noFigures = headerTiles(answer.throughput) === null;
+    paintStats();
+    paintJobSpeeds();
+  },
+  onError: (err) => {
+    if (err && err.kind === ERROR_KINDS.NOT_FOUND) {
+      // A server older than D15b: polling again cannot change that answer
+      // (an upgrade restarts vault-api; the next visit to this view asks
+      // again), so the poll stops here.
+      traffic.unsupported = true;
+      traffic.noFigures = true;
+      trafficPoll.stop();
+    } else {
+      traffic.error = errorText(err);
+    }
+    paintStats();
+  },
+});
+
+function setStatsRange(range) {
+  if (!isRange(range) || range === traffic.range) return;
+  traffic.range = range;
+  traffic.throughput = null;
+  traffic.series = null;
+  traffic.error = null;
+  paintStats();
+  paintJobSpeeds();
+  trafficPoll.refresh();
+}
+
+function svgEl(tag, attrs) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+  return node;
+}
+
+/** Repaint the note, the tiles and the graph from `traffic`. Nothing in
+ * here is focusable, so rebuilding the tiles takes no focus. */
+function paintStats() {
+  if (!mounted() || !els.statsNote) return;
+  const t = traffic.throughput;
+  let note = null;
+  if (traffic.unsupported) note = FEED_TEXT.unsupported;
+  else if (traffic.error && !t) note = `Could not load the statistics: ${traffic.error}`;
+  else if (t) note = joinNotes(traffic.error ? refreshFailedText(traffic.error) : null, feedNote(t));
+  else note = "Loading statistics…";
+  els.statsNote.textContent = note || "";
+  els.statsNote.hidden = !note;
+  // No figures (feed disabled, or a server without the endpoints): no
+  // range to choose either, the note stands alone. While an answer is
+  // pending the last known verdict holds, so a range click never hides
+  // the control it came from.
+  els.statsRange.hidden = traffic.noFigures;
+
+  const tiles = traffic.unsupported ? null : headerTiles(t);
+  els.statsGrid.replaceChildren();
+  els.statsGrid.hidden = !tiles;
+  for (const tile of tiles || []) {
+    const box = document.createElement("div");
+    box.className = "stat";
+    box.dataset.stat = tile.key;
+    box.title = tile.title;
+    const dt = document.createElement("dt");
+    dt.textContent = tile.label;
+    const dd = document.createElement("dd");
+    if (tile.value === DASH) {
+      const dash = document.createElement("span");
+      dash.setAttribute("aria-hidden", "true");
+      dash.textContent = DASH;
+      const sr = document.createElement("span");
+      sr.className = "sr-only";
+      sr.textContent = "Not available";
+      dd.append(dash, sr);
+    } else {
+      dd.textContent = tile.value;
+    }
+    if (tile.detail) {
+      const detail = document.createElement("span");
+      detail.className = "stat-detail";
+      detail.textContent = tile.detail;
+      dd.appendChild(detail);
+    }
+    box.append(dt, dd);
+    els.statsGrid.appendChild(box);
+  }
+  paintGraph();
+}
+
+function paintGraph() {
+  const s = traffic.series;
+  const show = !traffic.unsupported && s && feedState(s) !== "disabled" && s.range === traffic.range;
+  const geo = show ? seriesGeometry(s.points, { width: GRAPH_W, height: GRAPH_H }) : null;
+  els.graph.replaceChildren();
+  // An all-zero series is a flat line on the floor: nothing to show.
+  els.graph.hidden = !geo || geo.maxBytesPerSecond === 0;
+  if (els.graph.hidden) return;
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${GRAPH_W} ${GRAPH_H}`,
+    preserveAspectRatio: "none",
+    role: "img",
+    "aria-label": seriesLabel(s, geo.maxBytesPerSecond),
+  });
+  svg.dataset.role = "graph-svg";
+  svg.append(svgEl("path", { class: "tg-area", d: geo.area }), svgEl("path", { class: "tg-line", d: geo.line }));
+  const axis = document.createElement("div");
+  axis.className = "tg-axis";
+  axis.setAttribute("aria-hidden", "true");
+  for (const text of [seriesStartText(s), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"]) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    axis.appendChild(span);
+  }
+  els.graph.append(svg, axis);
+}
+
+/** Patch every running job card's speed line (text only). */
+function paintJobSpeeds() {
+  if (!mounted()) return;
+  const t = traffic.throughput;
+  const state = feedState(t);
+  const entries = new Map(((t && t.jobs) || []).map((j) => [j.job_id, j]));
+  for (const card of els.activeBody.querySelectorAll(".jobcard")) {
+    const line = card.querySelector('[data-role="job-speed"]');
+    if (!line) continue;
+    const text = t && t.range === traffic.range ? jobSpeedText(entries.get(Number(card.dataset.jid)), state) : null;
+    line.textContent = text || "";
+    line.hidden = !text;
+  }
 }
 
 /** Patch just the named jobs' `.jobacts`/`.stopnote` (their `stop_request`
@@ -1193,6 +1815,32 @@ function buildSection() {
   bulkNote.textContent = BULK.schedulerNote;
   bulkBar.append(bulkActs, bulkNote);
 
+  // WP D15c: the statistics header.
+  const stats = document.createElement("div");
+  stats.className = "dl-stats";
+  stats.setAttribute("role", "region");
+  stats.setAttribute("aria-label", "Download statistics");
+  stats.dataset.role = "dl-stats";
+  const statsRange = createRangeSegs({
+    label: "Statistics range",
+    value: traffic.range,
+    onChange: setStatsRange,
+    role: "stats-range",
+  });
+  const statsNote = hintMessage("");
+  statsNote.dataset.role = "stats-note";
+  statsNote.hidden = true;
+  const statsGrid = document.createElement("dl");
+  statsGrid.className = "statgrid";
+  statsGrid.dataset.role = "stats-grid";
+  statsGrid.hidden = true;
+  const graph = document.createElement("figure");
+  graph.className = "tgraph";
+  graph.dataset.role = "stats-graph";
+  graph.hidden = true;
+  statsRange.el.hidden = traffic.noFigures;
+  stats.append(statsRange.el, statsNote, statsGrid, graph);
+
   const activeHeading = sectionHeading("Active");
   const activeBody = document.createElement("div");
 
@@ -1215,6 +1863,23 @@ function buildSection() {
   updatesBody.className = "dl-updates-list";
   updates.append(updatesHeading, updatesNote, updatesActs, updatesBody);
 
+  // WP CACHE-COMPLETE-1c: hidden until paintIncomplete finds a game. Styled
+  // like the updates section (`.dl-updates`), found by `.dl-incomplete`.
+  const incomplete = document.createElement("div");
+  incomplete.className = "dl-updates dl-incomplete";
+  incomplete.hidden = true;
+  const incompleteHeading = sectionHeading("");
+  incompleteHeading.id = "dl-incomplete-heading";
+  incomplete.setAttribute("role", "group");
+  incomplete.setAttribute("aria-labelledby", "dl-incomplete-heading");
+  const incompleteNote = hintMessage("");
+  incompleteNote.classList.add("dl-updates-note");
+  const incompleteActs = document.createElement("div");
+  incompleteActs.className = "dl-updates-acts";
+  const incompleteBody = document.createElement("div");
+  incompleteBody.className = "dl-updates-list";
+  incomplete.append(incompleteHeading, incompleteNote, incompleteActs, incompleteBody);
+
   const queueHeading = document.createElement("h4");
   queueHeading.className = "sec";
   queueHeading.tabIndex = -1; // WP UPD-6: focus anchor when the updates section empties
@@ -1226,20 +1891,41 @@ function buildSection() {
   const queueHint = hintMessage("");
 
   const historyHeading = sectionHeading("History");
+  // WP D15c: the History filter (its own range, default All).
+  const historyRange = createRangeSegs({
+    label: "History range",
+    value: history.range,
+    onChange: setHistoryRange,
+    role: "history-range",
+  });
+  // WP D15-NAMES: "Delete history…" under the filter.
+  const historyActs = document.createElement("div");
+  historyActs.className = "jobacts dl-history-acts";
+  const historyDeleteBtn = document.createElement("button");
+  historyDeleteBtn.type = "button";
+  historyDeleteBtn.className = "btn ghost sm";
+  historyDeleteBtn.textContent = "Delete history…";
+  historyDeleteBtn.dataset.role = "history-delete";
+  historyDeleteBtn.addEventListener("click", () => openHistoryDelete());
+  historyActs.appendChild(historyDeleteBtn);
   const historyBody = document.createElement("div");
 
   section.append(
     head,
     bulkBar,
+    stats,
     activeHeading,
     activeBody,
     pausedHeading,
     pausedBody,
     updates,
+    incomplete,
     queueHeading,
     queueBody,
     queueHint,
     historyHeading,
+    historyRange.el,
+    historyActs,
     historyBody,
   );
 
@@ -1256,12 +1942,23 @@ function buildSection() {
     queueBody,
     queueHint,
     historyBody,
+    historyDeleteBtn,
+    statsRange: statsRange.el,
+    statsNote,
+    statsGrid,
+    graph,
     updates,
     updatesHeading,
     updatesNote,
     updatesActs,
     updatesBody,
     updatesKey: null,
+    incomplete,
+    incompleteHeading,
+    incompleteNote,
+    incompleteActs,
+    incompleteBody,
+    incompleteKey: null,
     queueHeading,
   };
   return section;
@@ -1288,6 +1985,7 @@ store.subscribe("jobs", ({ items, diff }) => {
   // WP UPD-6: a new job takes its game out of the list, without waiting for
   // a games poll (pinned in downloads-updates-wiring.test.js).
   paintUpdates();
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: same rule
 });
 
 /** WP WEB-FEAT-6: true when a job card's badge kind no longer matches its
@@ -1313,6 +2011,7 @@ store.subscribe("games", ({ items }) => {
   if (jobCardKindsStale()) fullRender();
   else patchNames();
   paintUpdates(); // WP UPD-6: a flag set or cleared by this poll
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: a figure measured by this poll
 });
 
 // WP WEB-FIX-4: an owned list that lands (from the Library or from this
@@ -1320,6 +2019,7 @@ store.subscribe("games", ({ items }) => {
 ownedLibrary.subscribe(() => {
   patchNames();
   paintUpdates(); // WP UPD-6: names feed the sort order and aria-labels
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: same
 });
 
 // WP WEB-FIX-2: repaint the job controls on a connection transition. A full
@@ -1328,11 +2028,16 @@ ownedLibrary.subscribe(() => {
 onConnectionChange(() => {
   fullRender();
   paintUpdates(); // WP UPD-6: the offline gate
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: same
 });
 
 onViewChange((view) => {
   if (view === "downloads") return;
+  // The history confirm belongs to this page; an in-flight delete still
+  // finishes and refreshes the store.
+  closeHistoryDelete({ restoreFocus: false });
   sectionEl = null;
+  trafficPoll.stop();
 });
 
 // Paint the pip immediately from whatever snapshot already exists (e.g.
@@ -1345,6 +2050,15 @@ export function renderDownloads() {
   sectionEl = section;
   fullRender();
   paintUpdates(); // WP UPD-6
+  paintIncomplete(); // WP CACHE-COMPLETE-1c
   loadSchedule(); // WP UPD-6: the section's schedule note
+  paintStats();
+  // Same gate as the store's loops (store-singleton.js): no key and no
+  // demo mode means the onboarding overlay is up.
+  if (getStoredApiKey() || isDemoMode()) {
+    trafficPoll.start();
+    trafficPoll.refresh();
+    loadHistory();
+  }
   return section;
 }

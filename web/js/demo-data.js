@@ -63,6 +63,8 @@
 import { ApiError, ERROR_KINDS } from "./errors.js";
 import { validSteamId64 } from "./lib/steamid.js";
 import { validSteamWebApiKey } from "./lib/steam-key-form.js";
+import { demoClientsOverview, demoSeries, demoThroughput } from "./demo-traffic.js";
+import { normalizeClientName } from "./lib/client-names.js";
 
 function isoAgo(msAgo) {
   return new Date(Date.now() - msAgo).toISOString();
@@ -140,6 +142,13 @@ function makeGame({
   // fixture in buildContentPackageGames().
   parentAppid = null,
   appType = null,
+  // WP CACHE-COMPLETE-1c: the stored completeness figure (api/README.md
+  // "Cache completeness"). Demo-only shape `{expected, present, missing}`
+  // (bytes of the current build, chunk files missing); `undefined` (the
+  // default) means "measured complete": every byte of the game's depots is
+  // the current build. `null` = not known (e.g. an announced build nobody
+  // fetched yet). The projection applies the real null rules on top.
+  completeness = undefined,
 }) {
   return {
     appid,
@@ -168,6 +177,10 @@ function makeGame({
     update_checked_at: null,
     parent_appid: parentAppid,
     app_type: appType,
+    _demoCompleteness: completeness,
+    // When the figure was measured: the seeded update check's time (3 h
+    // ago); a finished demo prefill re-stamps it.
+    _demoCompletenessCheckedAt: isoAgo(3 * 3_600_000).replace(/\.\d{3}Z$/, "Z"),
   };
 }
 
@@ -187,6 +200,10 @@ function buildContentPackageGames() {
       name: "Starfall Legion",
       status: "done",
       appType: "game",
+      // WP CACHE-COMPLETE-1c: the demo's "wrong-size chunks only" game — no
+      // chunk file missing, a few with the wrong size. The group card reads
+      // "Partially cached 99%"; Downloads lists it without "Complete now".
+      completeness: { expected: 6_250_000_000, present: 6_236_000_000, missing: 0 },
       depots: [
         { depotid: 2010081, shared: false, size_bytes: 6_100_000_000 },
         { depotid: 2010089, shared: true, size_bytes: 150_000_000 },
@@ -246,6 +263,10 @@ function buildCuratedGames() {
       // "workshop-pc" client_id so the two fixtures stay one consistent
       // fictional vault rather than inventing a third, unrelated name.
       installedOn: [{ client_id: "workshop-pc", reported_at: isoAgo(3_600_000) }],
+      // WP CACHE-COMPLETE-1c: the demo's partially cached game — "Partially
+      // cached 86%" on the card, listed under Downloads "Incomplete" with
+      // "Complete now" (chunk files are missing, so a forced run helps).
+      completeness: { expected: 4_880_000_000, present: 4_200_000_000, missing: 412 },
     }),
     makeGame({
       appid: 2010020,
@@ -282,6 +303,10 @@ function buildCuratedGames() {
       name: "Driftwood Signal",
       status: "running",
       depots: [{ depotid: 2010031, shared: false, size_bytes: 1_100_000_000 }],
+      // WP CACHE-COMPLETE-1c: mid-download, so only part of the build is on
+      // disk; its live job keeps it out of Downloads "Incomplete" and the
+      // finished demo job re-measures it complete.
+      completeness: { expected: 2_900_000_000, present: 1_100_000_000, missing: 1_800 },
       // WP 4h.2 fix: exercises the suggestions panel's CHANGED_RECENTLY
       // family — "changed", past tense, with a real days-since-last-change.
       manifestChangeFrequency: "changed",
@@ -299,6 +324,11 @@ function buildCuratedGames() {
       // because nothing else here contradicts it: Aurora Cascade is
       // "stable" and Frostline Convoy was confirmed current an hour ago.
       updateAvailable: true,
+      // WP CACHE-COMPLETE-1c: the announced build's manifest has not been
+      // fetched by anyone yet, so its completeness is not known (the real
+      // API's null case); the card still says "Update available" (UPD-6
+      // wins), the detail sheet "Completeness unknown".
+      completeness: null,
       depots: [
         { depotid: 2010041, shared: false, size_bytes: 800_000_000 },
         // Shared with Frostline Convoy (2010050) below — deleting Emberreach
@@ -585,6 +615,9 @@ function buildClients() {
       last_reported_at: utcIsoSeconds(Date.now() - 4 * 60_000),
       app_count: 148,
       source_addrs: ["10.10.0.21"],
+      // WP AGENT-ADDR-1 diagnostics: a current agent states its LAN address.
+      peer_addrs: ["10.10.0.21"],
+      reported_addrs: ["10.10.0.21"],
       cache_hits: 4213,
       cache_misses: 96,
       bytes_served: 812_345_678_912,
@@ -600,6 +633,9 @@ function buildClients() {
       last_reported_at: utcIsoSeconds(Date.now() - 2 * 3_600_000),
       app_count: 42,
       source_addrs: ["10.10.0.44"],
+      // A legacy agent states nothing; it is correlated on its TCP peer.
+      peer_addrs: ["10.10.0.44"],
+      reported_addrs: [],
       cache_hits: 3,
       cache_misses: 1,
       bytes_served: 41_943_040,
@@ -621,8 +657,119 @@ function handleGetClients() {
     }
     const [presence, offlineAfter] = demoPresence(c.last_reported_at, c.report_interval_seconds, nowMs);
     const { _demoReportEveryMs, ...wire } = c;
-    return { ...wire, presence, offline_after: offlineAfter };
+    return { ...wire, presence, offline_after: offlineAfter, ...demoAgentName(c) };
   });
+}
+
+// ---------------------------------------------------------------------
+// Client names (WP D15-NAMES; api/vault_api/client_names.py). Demo agents
+// own exactly their first source address (the overview fixture's
+// `addresses` is the same slice), so the server's rule "first named owned
+// address, an explicit name wins" reduces to one lookup here.
+// ---------------------------------------------------------------------
+
+/** canonical address -> name. */
+let clientNameMap = new Map();
+
+/** A demo-sized `client_names.canonical_ip`: dotted-quad IPv4 (no leading
+ * zeros) or an IPv6 literal lowercased; `null` for anything else. */
+function demoCanonicalIp(raw) {
+  if (typeof raw !== "string" || raw !== raw.trim() || !raw || raw.includes("%")) return null;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(raw);
+  if (v4) {
+    const ok = v4.slice(1).every((part) => (part === "0" || !part.startsWith("0")) && Number(part) <= 255);
+    return ok ? raw : null;
+  }
+  if (raw.includes(":") && /^[0-9a-fA-F:.]+$/.test(raw)) return raw.toLowerCase();
+  return null;
+}
+
+function resolvedName(name, addr, fallback) {
+  return { name: name ?? null, name_addr: addr ?? null, display_name: name ?? fallback };
+}
+
+function demoAgentName(client) {
+  const addr = Array.isArray(client.source_addrs) && client.source_addrs[0] ? demoCanonicalIp(client.source_addrs[0]) : null;
+  return resolvedName(addr ? clientNameMap.get(addr) : null, addr, client.client_id);
+}
+
+function demoAddressName(addr) {
+  const canonical = demoCanonicalIp(addr);
+  return resolvedName(canonical ? clientNameMap.get(canonical) : null, canonical, addr);
+}
+
+const CLIENT_NAME_RE = /^\/v1\/client-names\/([^/]+)\/([^/]+)$/;
+
+/** The path key, validated like `routers/client_names.py`'s `_key`. */
+function demoNameKey(type, encodedKey) {
+  if (type === "mac") throw validationError("Naming by MAC address is not supported yet: no source reports MACs.");
+  if (type !== "ip") throw validationError(`Unknown key type '${type}'; use 'ip'.`);
+  let key;
+  try {
+    key = decodeURIComponent(encodedKey);
+  } catch {
+    key = encodedKey;
+  }
+  const canonical = demoCanonicalIp(key);
+  if (!canonical) throw validationError(`'${key}' is not an IP address`);
+  return canonical;
+}
+
+function handleListClientNames() {
+  return [...clientNameMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, name]) => ({ key_type: "ip", key, name, updated_at: utcIsoSeconds(Date.now()) }));
+}
+
+function handlePutClientName(type, encodedKey, body) {
+  const key = demoNameKey(type, encodedKey);
+  if (!body || typeof body !== "object" || Object.keys(body).some((k) => k !== "name")) {
+    throw validationError("Body must be {\"name\": \"...\"}");
+  }
+  const checked = normalizeClientName(body.name);
+  if (!checked.ok) throw validationError(checked.error);
+  clientNameMap.set(key, checked.value);
+  return { key_type: "ip", key, name: checked.value, updated_at: utcIsoSeconds(Date.now()) };
+}
+
+function handleDeleteClientName(type, encodedKey) {
+  const key = demoNameKey(type, encodedKey);
+  if (!clientNameMap.delete(key)) throw notFound(`No name stored for '${key}'`);
+  return null;
+}
+
+// ---------------------------------------------------------------------
+// Delete history (WP D15-NAMES; api/vault_api/history.py): finished jobs
+// and the traffic statistics. The demo traffic is synthetic, so deleting
+// it records a "since" moment the traffic fixtures zero everything before.
+// ---------------------------------------------------------------------
+
+/** Traffic before this moment (ms) was deleted; `null` = nothing deleted. */
+let historySinceMs = null;
+
+const DEMO_TERMINAL = new Set(["done", "error", "cancelled"]);
+
+function handleDeleteHistory(scope) {
+  if (scope !== "all" && scope !== "older-than-30d") {
+    throw validationError("scope must be one of all, older-than-30d");
+  }
+  const nowMs = Date.now();
+  const cutoffMs = scope === "all" ? null : nowMs - 30 * 86_400_000;
+  const before = jobs.length;
+  jobs = jobs.filter((j) => {
+    if (!DEMO_TERMINAL.has(j.status)) return true;
+    if (cutoffMs === null) return false;
+    return Date.parse(j.finished_at || j.started_at || j.created_at) >= cutoffMs;
+  });
+  const since = cutoffMs === null ? nowMs : cutoffMs;
+  historySinceMs = historySinceMs === null ? since : Math.max(historySinceMs, since);
+  return {
+    scope,
+    cutoff: cutoffMs === null ? null : utcIsoSeconds(cutoffMs),
+    jobs_deleted: before - jobs.length,
+    // The demo has no stored rows to count.
+    traffic_rows_deleted: { client_traffic: 0, client_depot_traffic: 0, server_traffic: 0 },
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -745,6 +892,8 @@ export function resetDemoData({
   games = buildGames(librarySize ?? readLibrarySizePreference());
   jobs = buildJobs();
   clients = buildClients();
+  clientNameMap = new Map();
+  historySinceMs = null;
   nextJobId = 900002;
   updateCheck = seedDemoUpdateCheck();
   resetDemoSettings();
@@ -1317,6 +1466,66 @@ function demoGroupSizeBytes(g) {
   return total;
 }
 
+/** WP CACHE-COMPLETE-1c: the row's own `cache_complete_*` /
+ * `cache_missing_chunks` (api/README.md "Cache completeness"): all null when
+ * nothing is on disk or the figure is not known, `pct` floored. */
+function demoOwnFigure(g) {
+  const size = appSizeBytes(g.depots);
+  const c = g._demoCompleteness;
+  if (!size || c === null) return null;
+  const expected = c === undefined ? size : c.expected;
+  const present = c === undefined ? size : c.present;
+  return {
+    pct: Math.floor((100 * present) / expected),
+    expected,
+    present,
+    missing: c === undefined ? 0 : c.missing,
+    checkedAt: g._demoCompletenessCheckedAt,
+  };
+}
+
+/** `group_cache_complete_pct` (D9): over the members with bytes on disk,
+ * unknown when any of them is; null on a grouped row and with nothing on
+ * disk. Demo approximation: a depot shared inside the group is counted per
+ * member (the real API counts it once). */
+function demoGroupPct(g) {
+  if (g.parent_appid != null) return null;
+  const members = [g, ...games.filter((c) => c.parent_appid === g.appid)].filter((m) => appSizeBytes(m.depots));
+  if (members.length === 0) return null;
+  let expected = 0;
+  let present = 0;
+  for (const m of members) {
+    const f = demoOwnFigure(m);
+    if (!f) return null;
+    expected += f.expected;
+    present += f.present;
+  }
+  return Math.floor((100 * present) / expected);
+}
+
+function demoCompletenessFields(g) {
+  const f = demoOwnFigure(g);
+  return {
+    cache_complete_pct: f ? f.pct : null,
+    cache_expected_bytes: f ? f.expected : null,
+    cache_present_bytes: f ? f.present : null,
+    cache_complete_checked_at: f ? f.checkedAt : null,
+    cache_missing_chunks: f ? f.missing : null,
+    group_cache_complete_pct: demoGroupPct(g),
+  };
+}
+
+/** The server's `is_incomplete` (known, below 100) and `is_completable`
+ * (at least one chunk file missing) against the demo figure. */
+function demoIsIncomplete(g) {
+  const f = demoOwnFigure(g);
+  return !!f && f.pct < 100;
+}
+function demoIsCompletable(g) {
+  const f = demoOwnFigure(g);
+  return !!f && f.pct < 100 && f.missing > 0;
+}
+
 function gameSummary(g) {
   return {
     appid: g.appid,
@@ -1357,6 +1566,7 @@ function gameSummary(g) {
     group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     // WP D10: additive on both game shapes; the demo stores no covers.
     cover_cached_url: null,
+    ...demoCompletenessFields(g), // WP CACHE-COMPLETE-1c (WP CACHE-COMPLETE-1a/1b fields)
   };
 }
 
@@ -1386,6 +1596,7 @@ function gameDetail(g) {
     app_type: g.app_type,
     group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     cover_cached_url: null, // WP D10 (see gameSummary's own comment)
+    ...demoCompletenessFields(g), // WP CACHE-COMPLETE-1c (see gameSummary)
   };
 }
 
@@ -1592,6 +1803,13 @@ function advanceJob(job) {
     // WP WEB-FIX-UPD-VIS: the newer build is now cached (the Android demo
     // does the same, DemoState.kt).
     game._demoUpdateAvailable = false;
+    // WP CACHE-COMPLETE-1c: the worker re-measures after every successful
+    // prefill. Missing chunks are fetched now; chunk files with the wrong
+    // size stay (a forced run serves them as HITs, api/README.md "Damaged
+    // chunks"), so a damaged-only figure does not change.
+    const c = game._demoCompleteness;
+    if (!(c && c.missing === 0 && c.present < c.expected)) game._demoCompleteness = undefined;
+    game._demoCompletenessCheckedAt = job.finished_at.replace(/\.\d{3}Z$/, "Z");
   }
 }
 
@@ -1677,6 +1895,9 @@ function validationError(detail) {
 function conflict(detail) {
   return new ApiError(ERROR_KINDS.VALIDATION, detail, { status: 409, detail });
 }
+
+/** WP D15c: `GET /v1/jobs?range=` spans; `all` has none. */
+const HISTORY_RANGE_MS = Object.freeze({ "24h": 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000, all: null });
 
 const JOB_ID_RE = /^\/v1\/jobs\/(\d+)$/;
 const JOB_PAUSE_RE = /^\/v1\/jobs\/(\d+)\/pause$/;
@@ -1968,6 +2189,10 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
 
   if (method === "GET" && path === "/v1/games") {
+    // WP CACHE-COMPLETE-1c: `?incomplete=true` (WP CACHE-COMPLETE-1b).
+    if (params?.incomplete === true || params?.incomplete === "true") {
+      return games.filter(demoIsIncomplete).map(gameSummary);
+    }
     return games.map(gameSummary);
   }
 
@@ -1993,13 +2218,59 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
 
   if (method === "GET" && path === "/v1/jobs") {
-    tickAllJobs();
+    // WP D15c: the history filter (`range`, WP D15b). Its fetch does not
+    // advance the job simulation; only the store's plain poll does, so the
+    // demo job runs at the same pace with the Downloads view open.
+    const range = params?.range;
+    if (range !== undefined && !Object.hasOwn(HISTORY_RANGE_MS, range)) {
+      throw validationError("range must be one of 24h, 7d, 30d, all");
+    }
+    if (range === undefined) tickAllJobs();
     const limit = Number(params?.limit ?? 20);
+    const span = range === undefined ? null : HISTORY_RANGE_MS[range];
+    const cutoff = span ? Date.now() - span : null;
     return jobs
       .slice()
+      .filter((j) => {
+        if (cutoff === null || ["queued", "running", "paused"].includes(j.status)) return true;
+        return Date.parse(j.finished_at || j.started_at || j.created_at) >= cutoff;
+      })
       .sort((a, b) => b.id - a.id)
       .slice(0, limit)
       .map(jobSummary);
+  }
+
+  // WP D15c: the traffic endpoints (WP D15b), from demo-traffic.js.
+  if (method === "GET" && (path === "/v1/throughput" || path === "/v1/throughput/series" || path === "/v1/clients/overview")) {
+    const fallback = path === "/v1/clients/overview" ? "7d" : "24h";
+    const range = params?.range ?? fallback;
+    if (!Object.hasOwn(HISTORY_RANGE_MS, range)) throw validationError("range must be one of 24h, 7d, 30d, all");
+    if (path === "/v1/throughput/series") return demoSeries(range, Date.now(), historySinceMs);
+    const running = jobs.filter((j) => j.status === "running" && j.type === "prefill");
+    if (path === "/v1/throughput") {
+      return demoThroughput(
+        range,
+        running.map((j) => ({ id: j.id, appid: j.appid, started_at: j.started_at, name: findGame(j.appid)?.name ?? null })),
+        Date.now(),
+        historySinceMs,
+      );
+    }
+    const installed = new Map();
+    for (const g of games) {
+      for (const e of g.installed_on) {
+        if (!installed.has(e.client_id)) installed.set(e.client_id, []);
+        installed.get(e.client_id).push(g.appid);
+      }
+    }
+    const runningGame = running[0] ? { appid: running[0].appid, name: findGame(running[0].appid)?.name ?? null } : null;
+    return demoClientsOverview(range, {
+      agents: handleGetClients(),
+      runningGame,
+      games: games.map((g) => ({ appid: g.appid, name: g.name })),
+      installed,
+      addressName: demoAddressName,
+      historySinceMs,
+    });
   }
 
   if (method === "GET" && (m = path.match(JOB_ID_RE))) {
@@ -2044,6 +2315,33 @@ export async function demoRequest(method, path, { body, params } = {}) {
   //      than a conditional that could later "helpfully" start reading it.
   if (method === "POST" && path === "/v1/prefill/cached") {
     return selectCachedAppids().map(enqueuePrefillForAppid);
+  }
+
+  // WP CACHE-COMPLETE-1c: "Verify" / "Complete now" (POST
+  // /v1/prefill/verify) and "Complete all" (POST /v1/prefill/incomplete),
+  // api/README.md "Verify and complete": flag `needs_force` first, then the
+  // one enqueue (same dedupe as POST /v1/prefill). The demo job runs
+  // forced and re-measures on success (advanceJob).
+  if (method === "POST" && path === "/v1/prefill/verify") {
+    const appids = Array.isArray(body?.appids) ? body.appids : [];
+    if (appids.length === 0) throw validationError("appids must be a non-empty list");
+    for (const appid of appids) {
+      if (!Number.isInteger(appid) || appid < 1) throw validationError(`invalid appid ${appid}`);
+    }
+    for (const appid of appids) {
+      const game = findGame(appid);
+      if (game) game.needs_force = true;
+    }
+    return appids.map(enqueuePrefillForAppid);
+  }
+  if (method === "POST" && path === "/v1/prefill/incomplete") {
+    // No body read, like /v1/prefill/cached: the server selects.
+    const selected = games
+      .filter(demoIsCompletable)
+      .map((g) => g.appid)
+      .sort((a, b) => a - b);
+    for (const appid of selected) findGame(appid).needs_force = true;
+    return selected.map(enqueuePrefillForAppid);
   }
 
   if (method === "DELETE" && (m = path.match(JOB_ID_RE))) {
@@ -2309,6 +2607,18 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
   if (method === "DELETE" && (m = path.match(CLIENT_ID_RE))) {
     return handleDeleteClient(m[1]);
+  }
+  if (method === "GET" && path === "/v1/client-names") {
+    return handleListClientNames();
+  }
+  if (method === "PUT" && (m = path.match(CLIENT_NAME_RE))) {
+    return handlePutClientName(m[1], m[2], body);
+  }
+  if (method === "DELETE" && (m = path.match(CLIENT_NAME_RE))) {
+    return handleDeleteClientName(m[1], m[2]);
+  }
+  if (method === "DELETE" && path === "/v1/history") {
+    return handleDeleteHistory(params?.scope);
   }
   if (method === "GET" && path === "/v1/about") {
     return handleGetAbout();

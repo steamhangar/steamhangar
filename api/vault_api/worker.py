@@ -67,12 +67,14 @@ import threading
 import traceback
 
 from vault_api import (
+    cache_completeness,
     gc_execute,
     jobs,
     manifest_ingest,
     prefill,
     prefill_queue,
     prefill_summary,
+    runner_mark,
     settings_store,
     webhooks,
 )
@@ -289,6 +291,10 @@ class PrefillWorker:
                     return
                 result, before = result_and_before
             else:
+                # WP D15-RUNNER: subprocess mode runs SteamPrefill from THIS
+                # process, so this process sends the runner marker (the
+                # queue-mode runner sends its own, prefill_runner._execute).
+                runner_mark.announce(conn, "vault-api")
                 result = prefill.run_prefill(
                     appid=appid,
                     steamprefill_path=self._settings.steamprefill_path,
@@ -642,6 +648,8 @@ class PrefillWorker:
                 if self._size_cache is not None:
                     self._size_cache.invalidate()
 
+                self._remeasure_completeness(conn, appid)
+
                 logger.info(
                     "Prefill job %s for appid %s done (%d depots observed)",
                     job_id, appid, len(observed),
@@ -816,6 +824,21 @@ class PrefillWorker:
         # VAULT_SIZE_CACHE_TTL seconds.
         if self._size_cache is not None:
             self._size_cache.invalidate()
+
+    def _remeasure_completeness(self, conn: sqlite3.Connection, appid: int) -> None:
+        """WP CACHE-COMPLETE-1a: re-measure the app's cache completeness right
+        after a successful job, so the figure does not lag until the next
+        update check. Same switch as the check (the oracle). Local reads only
+        (one depot scan + one manifest parse per depot); a failure is logged
+        and never touches the finished job."""
+        if not self._settings.manifest_oracle_enabled:
+            return
+        try:
+            cache_completeness.remeasure_app(conn, self._settings, appid)
+        except Exception:  # noqa: BLE001 - the job already succeeded
+            logger.exception(
+                "cache completeness: re-measuring app %s after its prefill failed", appid
+            )
 
     def _maybe_queue_auto_gc(
         self,

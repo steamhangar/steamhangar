@@ -97,10 +97,10 @@ const bpXl = findMediaBlock(1800);
 
 test("BP-L (min-width:1024px) exists and gives .view-downloads/.view-settings their own capped, centred column", () => {
   assert.ok(bpL, "no bare min-width:1024px block found — did the breakpoint move or get renamed?");
-  const body = ruleBody(bpL.body, ".view-downloads, .view-settings");
+  const body = ruleBody(bpL.body, ".view-downloads, .view-settings, .view-clients");
   assert.ok(
     body,
-    "no '.view-downloads, .view-settings{...}' rule found in the BP-L block — this is the WP 4e.5 layout itself; reverting/deleting it must fail exactly this test",
+    "no '.view-downloads, .view-settings, .view-clients{...}' rule found in the BP-L block — this is the WP 4e.5 layout itself; reverting/deleting it must fail exactly this test",
   );
   assert.match(body, /max-width:\s*var\(--w-text\)/, "must reference the live --w-text token, never a re-typed literal");
   assert.match(body, /margin:\s*0\s+auto\b/, "must self-centre (margin:0 auto) — without it the capped column would hug the left edge of .view-root's own, wider box instead of sitting centred inside it");
@@ -108,9 +108,9 @@ test("BP-L (min-width:1024px) exists and gives .view-downloads/.view-settings th
 });
 
 test(".view-library is deliberately excluded from the capped-column rule — it still needs --w-wall for its own auto-fill tile grid", () => {
-  const body = ruleBody(bpL.body, ".view-downloads, .view-settings");
+  const body = ruleBody(bpL.body, ".view-downloads, .view-settings, .view-clients");
   assert.ok(body);
-  assert.equal(/view-library/.test(bpL.body.slice(bpL.body.indexOf(".view-downloads, .view-settings"), bpL.body.indexOf(".view-downloads, .view-settings") + 200)), false);
+  assert.equal(/view-library/.test(bpL.body.slice(bpL.body.indexOf(".view-downloads, .view-settings, .view-clients"), bpL.body.indexOf(".view-downloads, .view-settings, .view-clients") + 200)), false);
   // WP WEB-FIX-UPD-VIS removed .view-library's own BP-L grid (the toolbar
   // row is `.lib-bar`'s flexbox now, css-layout-foundation.test.js); the
   // library still must not appear in this capped-column list anywhere.
@@ -237,5 +237,5 @@ test("the capped-column rule exists ONLY inside the BP-L block, never at the top
   // occurrence — asserting no mention of either class name at all outside
   // @media would false-positive on it. This checks specifically for the
   // WP 4e.5 selector pair, not any reference to either class.
-  assert.equal(appTop.includes(".view-downloads, .view-settings{"), false, "the capped-column selector must not exist outside @media — the base/mobile column width for both views is unaffected by this WP, exactly as before");
+  assert.equal(appTop.includes(".view-downloads, .view-settings, .view-clients{"), false, "the capped-column selector must not exist outside @media — the base/mobile column width for both views is unaffected by this WP, exactly as before");
 });

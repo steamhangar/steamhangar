@@ -204,10 +204,15 @@ export const api = {
   games: () => request("GET", "/v1/games"),
   game: (appid) => request("GET", `/v1/games/${appid}`),
   mapping: () => request("GET", "/v1/mapping"),
-  jobs: (limit = 20) => request("GET", "/v1/jobs", { params: { limit } }),
+  // WP D15c: `range` (24h|7d|30d|all) or `since` filters finished jobs by
+  // age (WP D15b); omitted, the call is unchanged (the store's poll).
+  jobs: (limit = 20, { range, since } = {}) => request("GET", "/v1/jobs", { params: { limit, range, since } }),
   job: (id) => request("GET", `/v1/jobs/${id}`),
   prefill: (appids) => request("POST", "/v1/prefill", { body: { appids } }),
   prefillCached: () => request("POST", "/v1/prefill/cached"),
+  // WP CACHE-COMPLETE-1c (api/README.md "Verify and complete"): "Verify",
+  // "Complete now" and "Complete all" queue a forced prefill per app id.
+  prefillVerify: (appids) => request("POST", "/v1/prefill/verify", { body: { appids } }),
   cancelJob: (id) => request("DELETE", `/v1/jobs/${id}`),
   pauseJob: (id) => request("POST", `/v1/jobs/${id}/pause`),
   resumeJob: (id) => request("POST", `/v1/jobs/${id}/resume`),
@@ -222,11 +227,24 @@ export const api = {
   gc: (appid, execute = false) => request("POST", `/v1/cache/${appid}/gc`, { body: { execute } }),
   cacheSummary: () => request("GET", "/v1/cache/summary"),
   clients: () => request("GET", "/v1/clients"),
+  // WP D15c: the Clients page and the Downloads header (WP D15b endpoints).
+  // `range` is 24h|7d|30d|all. A server older than D15b answers 404 (kind
+  // `not_found`), which the views read as "not supported by this server".
+  clientsOverview: (range) => request("GET", "/v1/clients/overview", { params: { range } }),
+  throughput: (range) => request("GET", "/v1/throughput", { params: { range } }),
+  throughputSeries: (range) => request("GET", "/v1/throughput/series", { params: { range } }),
   // WP WEB-FEAT-4: Remove in the PCs sheet. `client_id` is operator-chosen
   // free text, so it is percent-encoded as ONE path segment. Resolves
   // `null` (204); 404 rejects with kind `not_found` and the caller decides
   // what that means (the PCs sheet reads it as "already gone").
   deleteClient: (clientId) => request("DELETE", `/v1/clients/${encodeURIComponent(clientId)}`),
+  // WP D15-NAMES: a client name is stored per address (`name_addr` of a
+  // clients row). Clearing is DELETE; its 404 "No name stored ..." means
+  // already cleared. `scope` of deleteHistory: "all" | "older-than-30d".
+  setClientName: (addr, name) =>
+    request("PUT", `/v1/client-names/ip/${encodeURIComponent(addr)}`, { body: { name } }),
+  clearClientName: (addr) => request("DELETE", `/v1/client-names/ip/${encodeURIComponent(addr)}`),
+  deleteHistory: (scope) => request("DELETE", "/v1/history", { params: { scope } }),
   // WP WEB-FEAT-3: Settings → About. Fetched when the Settings view opens
   // and on its Refresh button, never polled (the server caches 60 s).
   about: () => request("GET", "/v1/about"),

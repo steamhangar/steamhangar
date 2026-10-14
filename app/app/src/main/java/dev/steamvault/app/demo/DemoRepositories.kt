@@ -2,6 +2,7 @@ package dev.steamvault.app.demo
 
 import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
+import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GameDetail
@@ -15,7 +16,9 @@ import dev.steamvault.app.net.model.OwnedGamesRelayOut
 import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.ScheduleOut
+import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.net.model.UpdateCheckOut
 import dev.steamvault.app.net.model.UpdateStatusOut
 import dev.steamvault.app.repo.AboutRepository
@@ -27,8 +30,10 @@ import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.SteamRelayRepository
+import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.repo.UpdatesRepository
 import kotlinx.serialization.json.JsonElement
+import java.time.Instant
 
 /**
  * Demo mode's repository implementations (WP APP-DEMO brief: "put the seam
@@ -60,6 +65,7 @@ class DemoJobsRepository(private val state: DemoState) : JobsRepository {
     override suspend fun detail(id: Int): JobDetail = state.jobDetail(id)
     override suspend fun prefill(appids: List<Int>): List<PrefillJobRef> = state.enqueuePrefill(appids)
     override suspend fun prefillCached(): List<PrefillJobRef> = state.enqueuePrefillCached()
+    override suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> = state.enqueueVerify(appids)
     override suspend fun cancel(id: Int): JobControlOut = state.controlJob(id, JobControlAction.CANCEL)
     override suspend fun pause(id: Int): JobControlOut = state.controlJob(id, JobControlAction.PAUSE)
     override suspend fun resume(id: Int): JobControlOut = state.controlJob(id, JobControlAction.RESUME)
@@ -126,4 +132,22 @@ class DemoUpdatesRepository(private val state: DemoState) : UpdatesRepository {
             last_stale = cached.count { it.update_available },
         )
     }
+}
+
+/**
+ * WP D15d: the traffic statistics in demo mode (Downloads header and graph,
+ * the Clients page, the History filter) -- synthetic, deterministic per
+ * range, built by `DemoTraffic.kt` from the demo's own jobs, games and
+ * agents. The feed is always `ok` here, so every screen shows its figures.
+ */
+class DemoTrafficRepository(private val state: DemoState) : TrafficRepository {
+    override suspend fun throughput(range: String): ThroughputOut =
+        demoThroughput(range, state.trafficSnapshot(), Instant.now().toEpochMilli())
+
+    override suspend fun series(range: String): SeriesOut = demoSeries(range, Instant.now().toEpochMilli())
+
+    override suspend fun clientsOverview(range: String): ClientsOverviewOut =
+        demoClientsOverview(range, state.trafficSnapshot(), Instant.now().toEpochMilli())
+
+    override suspend fun jobHistory(range: String, limit: Int): List<JobSummary> = state.jobHistory(limit)
 }

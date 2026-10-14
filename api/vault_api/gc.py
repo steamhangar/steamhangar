@@ -734,6 +734,12 @@ class _ManifestReader:
             self._cache[path] = cached
         return cached
 
+    def forget(self, path: str) -> None:
+        """Drop one memoized parse (WP CACHE-COMPLETE-1a: a completeness run
+        reads every cached game's manifests and keeps only those of shared
+        depots, so its memory stays bounded). GC itself never calls this."""
+        self._cache.pop(path, None)
+
     def archived_bin(
         self, path: str, *, depotid: int, manifestid: str
     ) -> ParsedManifest | ManifestParseError:
@@ -1227,6 +1233,16 @@ def _newest_stored_manifest_id(
         if best is None or candidate > best:
             best = candidate
     return None if best is None else best[1]
+
+
+#: Public names for the SECOND caller of the manifest source chain:
+#: ``vault_api.cache_completeness`` (WP CACHE-COMPLETE-1a) reads one known
+#: manifest id exactly the way GC does -- archive first, then a cache-stored
+#: copy of the same id, never a different id -- to measure how much of it is
+#: on disk. Read-only there as here; a change to these two is a change to both
+#: features.
+ManifestReader = _ManifestReader
+read_manifest_by_id = _read_manifest_by_id
 
 
 # --------------------------------------------------------------------------

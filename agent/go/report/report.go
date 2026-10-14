@@ -9,13 +9,19 @@
 //	POST /v1/agent/installed
 //	{"client_id": "<1-64 char id>", "appids": [<int ge=1>, ...],
 //	 "agent_version": "<VER-1 grammar>",       (optional, WP AGENT-FEAT-1)
-//	 "report_interval_seconds": <60..86400>}   (optional, WP AGENT-FEAT-1)
+//	 "report_interval_seconds": <60..86400>,   (optional, WP AGENT-FEAT-1)
+//	 "local_addrs": ["<IP literal>", ...]}     (optional, WP AGENT-ADDR-1)
 //
 // The two optional presence fields are attached with Payload.WithPresence
 // and are only ever sent when they pass the server's own rules (see
 // WithPresence); a server that predates them rejects them, and
 // agent/go/client then resends the report without them (see that
 // package's "Servers that predate the presence fields" section).
+//
+// local_addrs (WP AGENT-ADDR-1) is attached with Payload.WithLocalAddrs:
+// the LAN addresses this PC uses toward the vault (agent/go/localaddr),
+// filtered to what the server accepts. A server older than it rejects the
+// field the same way and the client drops it the same way.
 //
 // BuildReport mirrors the server's validation rules LOCALLY, so a
 // misconfigured agent fails fast with a clear message instead of spending a
@@ -35,6 +41,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Riviera822/steamhangar/agent/acf"
+	"github.com/Riviera822/steamhangar/agent/localaddr"
 )
 
 // MaxClientIDLength mirrors vault_api.agent_reports.MAX_CLIENT_ID_LENGTH.
@@ -74,11 +81,75 @@ func ValidAgentVersion(v string) bool {
 // with omitempty, so a payload without them marshals to exactly the
 // pre-AGENT-FEAT-1 body: that legacy body is what agent/go/client resends
 // to a server that rejects the new fields.
+//
+// LocalAddrs (WP AGENT-ADDR-1) is omitted when empty, for the same reason.
 type Payload struct {
-	ClientID              string  `json:"client_id"`
-	AppIDs                []int   `json:"appids"`
-	AgentVersion          *string `json:"agent_version,omitempty"`
-	ReportIntervalSeconds *int    `json:"report_interval_seconds,omitempty"`
+	ClientID              string   `json:"client_id"`
+	AppIDs                []int    `json:"appids"`
+	AgentVersion          *string  `json:"agent_version,omitempty"`
+	ReportIntervalSeconds *int     `json:"report_interval_seconds,omitempty"`
+	LocalAddrs            []string `json:"local_addrs,omitempty"`
+}
+
+// OptionalFields are the JSON keys of the optional fields, in the order
+// they were added. agent/go/client drops exactly the ones an old server
+// names as unknown.
+var OptionalFields = []string{"agent_version", "report_interval_seconds", "local_addrs"}
+
+// Has reports whether the optional field with JSON key name is set.
+func (p Payload) Has(name string) bool {
+	switch name {
+	case "agent_version":
+		return p.AgentVersion != nil
+	case "report_interval_seconds":
+		return p.ReportIntervalSeconds != nil
+	case "local_addrs":
+		return len(p.LocalAddrs) > 0
+	}
+	return false
+}
+
+// Without returns a copy of p with the named optional fields removed.
+// Unknown names are ignored.
+func (p Payload) Without(names ...string) Payload {
+	for _, name := range names {
+		switch name {
+		case "agent_version":
+			p.AgentVersion = nil
+		case "report_interval_seconds":
+			p.ReportIntervalSeconds = nil
+		case "local_addrs":
+			p.LocalAddrs = nil
+		}
+	}
+	return p
+}
+
+// WithLocalAddrs returns a copy of p carrying addrs as local_addrs (WP
+// AGENT-ADDR-1), keeping only entries the server accepts
+// (localaddr.Usable), canonical, de-duplicated, sorted and capped at
+// localaddr.MaxAddrs - a rejected entry would 422 the whole report. No
+// usable entry leaves the field out.
+func (p Payload) WithLocalAddrs(addrs []string) Payload {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, a := range addrs {
+		canonical, ok := localaddr.Usable(a)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[canonical]; dup {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	sort.Strings(out)
+	if len(out) > localaddr.MaxAddrs {
+		out = out[:localaddr.MaxAddrs]
+	}
+	p.LocalAddrs = out
+	return p
 }
 
 // HasPresence reports whether either optional presence field is set.

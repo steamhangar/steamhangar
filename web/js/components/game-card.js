@@ -70,6 +70,18 @@
  * does NOT already say it (a failed or running app that still carries the
  * flag), so nothing on the card is said twice.
  *
+ * **Cache completeness (WP CACHE-COMPLETE-1c).** A CACHED card without an
+ * update shows the green check only at `cache_complete_pct` 100 (a group
+ * card: `group_cache_complete_pct`); below 100 it reads "Partially cached
+ * N%" with the orange half-disc, unknown reads "Cached · not verified" with
+ * the neutral question glyph. Same DISPLAY-overlay shape as UPD-6 (dispKind
+ * stays `cached`); "Update available" wins. Precedence and wording:
+ * lib/cache-completeness.js `cardDisplay`. The overlay is part of the card's
+ * `data-ck`, which views/library.js compares like `data-dk`, so a changed
+ * figure rebuilds that one card; `patchCardVolatile` never redraws the icon.
+ * The two new words have a compact twin (`.stfull`/`.stcompact` inside
+ * `.state`, CSS picks one per layout); every other word stays plain text.
+ *
  * **"Never played" pill (WP WEB-FEAT-SUGGEST-2).** The Phase 4h panel's
  * "fully cached, never played" statement, moved onto the card: a second
  * pill right of the status pill on the cover (both inside `.capbadges`),
@@ -98,17 +110,16 @@ import {
   statusAction,
   installedBadgeState,
   installedOnSummary,
+  installedOnNames,
   installedBadgeText,
   installedBadgeCompactText,
   INSTALLED_BADGE,
   isToolApp,
   gameDisplayName,
   showsUpdateState,
-  cardIconKind,
-  cardTextKind,
-  cardStatusWord,
   UPDATE_AVAILABLE_WORD,
 } from "../lib/game-status.js";
+import { cardDisplay, completenessState, COMPLETENESS } from "../lib/cache-completeness.js";
 import { formatBytesGB } from "../lib/format.js";
 import {
   displaySizeBytes,
@@ -131,6 +142,30 @@ import {
  * needs a full rebuild (round-7 rule — see render-plan.js's header). */
 export function cardStructuralKey(game, liveJob) {
   return dispKind(game, liveJob);
+}
+
+/** WP CACHE-COMPLETE-1c: the card's completeness-overlay part (`data-ck`):
+ * what the status icon and word show beyond `dispKind`. views/library.js
+ * rebuilds a card whose painted `data-ck` no longer matches. */
+export function cardCompletenessKey(game, liveJob) {
+  return cardDisplay(game, dispKind(game, liveJob), STATUS_LABEL).key;
+}
+
+/** Fill a card's `.state` element: plain text, or the full/compact twin
+ * spans when the overlay has a shorter form (module header). */
+export function fillStateWord(stateEl, display) {
+  stateEl.className = "state tx-" + display.text;
+  if (display.compact === display.word) {
+    stateEl.textContent = display.word;
+    return;
+  }
+  const full = document.createElement("span");
+  full.className = "stfull";
+  full.textContent = display.word;
+  const compact = document.createElement("span");
+  compact.className = "stcompact";
+  compact.textContent = display.compact;
+  stateEl.replaceChildren(full, compact);
 }
 
 function pillNumberText(game, kind) {
@@ -194,12 +229,17 @@ function syncInstalledTag(metaEl, game) {
   }
   const summary = installedOnSummary(game.installed_on);
   const [full, compact] = buildInstalledTagChildren(state, summary);
+  // WP LIB-LIST-1: the list column truncates (ellipsis), so the badge's
+  // tooltip names EVERY client, not the "first +N" summary.
+  const title = installedBadgeText(state, installedOnNames(game.installed_on));
   if (existing) {
     existing.className = installedTagClass(state);
+    existing.title = title;
     existing.replaceChildren(full, compact);
   } else {
     const tag = document.createElement("span");
     tag.className = installedTagClass(state);
+    tag.title = title;
     tag.append(full, compact);
     metaEl.appendChild(tag);
   }
@@ -244,9 +284,13 @@ function syncUpdateTag(metaEl, game, kind) {
   metaEl.appendChild(tag);
 }
 
-/** Whether this card shows the "Never played" pill (module header). */
+/** Whether this card shows the "Never played" pill (module header). WP
+ * CACHE-COMPLETE-1c: not on a partially cached card — its description says
+ * "Fully cached", which a known figure below 100 contradicts. An unknown
+ * figure keeps the pill (its rule was always bytes-based; dropping it there
+ * would remove it on every vault running without the oracle). */
 function showsNeverPlayed(game, kind) {
-  return kind === KIND.CACHED && isNeverPlayedCached(game);
+  return kind === KIND.CACHED && isNeverPlayedCached(game) && completenessState(game) !== COMPLETENESS.PARTIAL;
 }
 
 function neverPlayedNode(className, fullClass, compactClass) {
@@ -474,7 +518,8 @@ function buildPill(game, kind, action) {
     pill.title = action.title;
     pill.setAttribute("aria-label", `${action.title} — ${displayName(game)}`);
   }
-  const icon = createStatusIcon(cardIconKind(game, kind)); // WP UPD-6: orange for an update
+  // WP UPD-6: orange for an update; WP CACHE-COMPLETE-1c: completeness.
+  const icon = createStatusIcon(cardDisplay(game, kind, STATUS_LABEL).icon);
   // The pill's icon is always redundant with the meta row's visible status
   // word on the SAME card (round 6 gave every layout that word back) — hide
   // it from assistive tech whether or not the pill itself is a button: a
@@ -537,11 +582,12 @@ export function displayName(game) {
 function installedAriaFragment(game, kind) {
   const state = installedBadgeState(game);
   if (state === INSTALLED_BADGE.NONE) return null;
-  const summary = installedOnSummary(game.installed_on);
+  // WP LIB-LIST-1: every client by name (the visible column may truncate).
+  const names = installedOnNames(game.installed_on);
   if (state === INSTALLED_BADGE.NOT_CACHED && kind === KIND.NONE) {
-    return `Installed on ${summary}`;
+    return `Installed on ${names}`;
   }
-  return installedBadgeText(state, summary);
+  return installedBadgeText(state, names);
 }
 
 /** The card's explicit accessible name (module header, "Nested-interactive-
@@ -551,7 +597,7 @@ function installedAriaFragment(game, kind) {
  * since a size-only tick (no structural change) would otherwise leave a
  * stale byte count in the announced name. */
 function cardAccessibleLabel(game, kind, failedCount = 0) {
-  const parts = [displayName(game), cardStatusWord(game, kind, STATUS_LABEL)];
+  const parts = [displayName(game), cardDisplay(game, kind, STATUS_LABEL).word];
   const sizeText = formatBytesGB(displaySizeBytes(game));
   if (sizeText) parts.push(sizeText);
   if (isGroup(game)) parts.push(packagesAriaText(game.packages.length, failedCount));
@@ -589,6 +635,8 @@ export function buildCard(game, ctx) {
   card.className = "card" + (picked ? " picked" : "") + (isToolApp(game) ? " tool" : "");
   card.dataset.appid = String(game.appid);
   card.dataset.dk = kind;
+  const display = cardDisplay(game, kind, STATUS_LABEL); // WP UPD-6 + CACHE-COMPLETE-1c
+  card.dataset.ck = display.key;
   card.dataset.gk = groupKeyFor(game, failedCount);
   card.setAttribute("role", "button");
   card.tabIndex = 0;
@@ -637,10 +685,9 @@ export function buildCard(game, ctx) {
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.appendChild(buildIcon(cardIconKind(game, kind), { action, gameName: displayName(game) }));
+  meta.appendChild(buildIcon(display.icon, { action, gameName: displayName(game) }));
   const state = document.createElement("span");
-  state.className = "state tx-" + cardTextKind(game, kind);
-  state.textContent = cardStatusWord(game, kind, STATUS_LABEL); // WP UPD-6
+  fillStateWord(state, display);
   meta.appendChild(state);
   // Unlike the pill (which omits the number entirely rather than fabricate
   // one — see pillNumberText), the list/meta size column always shows

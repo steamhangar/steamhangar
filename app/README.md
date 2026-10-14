@@ -3974,6 +3974,117 @@ use manual onboarding. The dialog's look on a phone, the cold-start path,
 open, the Recents re-delivery guard, and the web twin (PAIR-1 is not on
 main yet, so there is no cross-pin to its link builder).
 
+## Clients page and Downloads statistics (WP D15d)
+
+Twin of the web's D15c (`web/js/views/clients.js`, the statistics block of
+`web/js/views/downloads.js`), over vault-api's D15b endpoints
+`GET /v1/clients/overview`, `GET /v1/throughput`, `GET /v1/throughput/series`
+and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
+
+- **Clients** is a fourth bottom-nav destination after Library
+  (`ui/clients/ClientsScreen.kt`; user decision 2026-10-13, D15). One card
+  per agent PC or agentless address: connected or not, loading now,
+  installed games (agents only), bytes and hit rate for the range, recently
+  loaded games, last active. "Manage PCs" opens the existing PCs sheet
+  (`ClientsSheet.kt`); Settings keeps a pointer to the page.
+- **Downloads** gets a statistics header under the bulk bar
+  (`ui/downloads/DownloadsStats.kt`): current, average and peak speed,
+  loaded, byte hit rate, saved by the cache, active clients, plus a line
+  graph; a speed line under a running job; and a History range filter.
+- Ranges 24 h / 7 days / 30 days / All (`ui/traffic/RangeChips.kt`).
+  Statistics poll every 30 s only while the screen is started
+  (`ui/traffic/TrafficPoll.kt`).
+- Honest states, the web's rules and words (`ui/traffic/logic/TrafficView.kt`,
+  `ui/clients/logic/ClientsPage.kt`, verbatim-port exception above): with
+  the event feed disabled or on a server older than D15b (404) there is one
+  note and no figures, and the statistics range selectors are hidden; a
+  failed refresh keeps the old figures and adds "Couldn't refresh: ...".
+  The History filter always shows (an old server ignores `range`; the app
+  filters by the same rule).
+- Demo mode answers all four reads with synthetic data
+  (`demo/DemoTraffic.kt`), so every new surface shows.
+- The chosen ranges survive a tab switch (`ui/traffic/TrafficRanges.kt`,
+  held by `MainActivity` like `destination`; a recreation resets them).
+  "Last active ... ago" and the stale-feed note refresh every minute.
+- **Bottom-nav labels with four items** are one line, never wrapped
+  (`BottomNavBar.kt`): "Downloads" wrapped to "Download/s" at 360 dp and
+  font 1.3 before. Proven by the goldens up to font scale 1.3 at 360 dp;
+  at larger font scales the longest label may draw a few dp into its
+  neighbours' padding. Not measured beyond 1.3.
+- **Manage PCs parity gap vs web.** The web's Clients page has "Add a
+  device" (pairing QR and the agent install command) and a Remove button
+  per PC in its PCs sheet. The app has neither: "Manage PCs" opens the
+  read-only PCs sheet (presence, last report, version, bypass state), and
+  the app's `ClientsRepository` has no delete. Closing that gap is its own
+  package.
+- **Client names and the prefill runner (APP-17n, web D15-NAMES and
+  D15-RUNNER).** The card title is the server's `display_name`; a named
+  agent's line reads "vault-agent on <PC name> · <address>", a named
+  address keeps its address on the line. The server's prefill runner is
+  its own card ("Prefill runner", "This server's prefill downloads ·
+  <address>"), never raises the agentless note, and its share of
+  "Loaded" shows as "<size> by the prefill runner". Renaming and
+  "Delete history" are web-only for now (a parity gap like Manage PCs);
+  the demo names one agent and shows the runner.
+
+Tests: `TrafficViewTest`, `ClientsPageTest`, `TrafficPollTest`,
+`TrafficApiTest`, `DemoTrafficTest`, the web twin `TrafficWebTwinTest`, and
+the wiring pins in `D15dWiringTest`. Screenshots (APP-TEST-2):
+`ClientsScreenshotTest` renders the Clients page in the real shell and the
+Downloads statistics header, from the demo's traffic builders over a fixed
+snapshot and clock, at 411 dp / font 1.0 and 360 dp / font 1.3, dark.
+
+## Fixed list columns and cache completeness (APP-17b: LIB-LIST-1, CACHE-COMPLETE-1c)
+
+Twin of the web's LIB-LIST-1 (`web/css/app.css` list grid,
+`web/js/components/game-card.js`) and CACHE-COMPLETE-1c
+(`web/js/lib/cache-completeness.js`).
+
+- **List rows with fixed columns** (`ui/library/GameListRow.kt`). Every
+  row uses the same fixed cells, so status, size, update and installed-on
+  line up from row to row; the name takes the slack. Phone: name and size
+  (right-aligned, tabular figures) on line 1; icon, status word and the
+  update cell (compact "Update", or "Unplayed") on line 2; installed-on
+  (truncated) and the group line below. From 720 dp row width every column
+  sits on one line, the installed-on column widening from 1000 dp. The
+  truncated installed-on text is spoken with every PC's name.
+- **Only 100 % gets the green check.** A cached card without "Update
+  available" reads "Partially cached N%" (orange half-disc, compact
+  "Partial N%") below 100 and "Cached · not verified" (grey question
+  glyph, compact "Not verified") when the figure is unknown -- including
+  on a server older than CACHE-COMPLETE-1a. A group card reads
+  `group_cache_complete_pct`. "Update available" still wins. "Never
+  played" is hidden on a partial card. Logic and words:
+  `ui/library/logic/CacheCompleteness.kt`; new status kinds `PARTIAL` and
+  `UNVERIFIED` (`ui/status/`).
+- **Detail sheet**: the header uses the same overlay; a completeness block
+  shows "N% complete — x of y GB on disk · checked …" (or "Completeness
+  unknown …"), the group's figure, the damaged-chunks note, and "Verify"
+  (`POST /v1/prefill/verify` for the game and its packages with bytes,
+  never tool apps or damaged-only rows) with its explanation as visible
+  text.
+- **Downloads "Incomplete (N)"** after "Updates available", only when
+  non-empty (`ui/downloads/DownloadsIncomplete.kt`,
+  `ui/downloads/logic/IncompleteGames.kt`): measured below 100 %, no active
+  job, no update flag, no tool app. "Complete now" only with missing chunk
+  files, otherwise "Damaged chunks — SteamHangar can't repair these yet.";
+  "Complete all" sends exactly the listed completable ids to the verify
+  route; a schedule note says whether they complete in the window. Toasts
+  say when a verify lands on a running job ("verifies on the next run").
+- **Demo mode** seeds Halcyon Ledger partially cached (86 %, completable),
+  the Emberline group short only of damaged chunks (99 %), Pale Meridian
+  unknown (its update was announced, not fetched) and answers Verify; a
+  finished demo job re-measures.
+
+Tests: `CacheCompletenessTest`, `IncompleteGamesTest`,
+`CacheCompletenessWebTwinTest` (every word against the web source),
+`CacheCompletenessApiTest` (the wire shape, old servers, the verify
+route), `DemoCompletenessTest`, `DetailControllerVerifyTest`,
+`DownloadsControllerIncompleteTest`, the status-kind pins, the wiring pins
+in `CacheComplete1cWiringTest`, and the screenshot test's list-column
+check (status words start, sizes end at the same x) in both list shots,
+including the new `library_800dp_font100_list`.
+
 ## Screenshot tests (WP APP-TEST-1)
 
 Roborazzi on Robolectric renders the Library screen to PNG on the JVM -- no
@@ -4015,6 +4126,7 @@ at 360 dp / 1.3. Six images:
 | `library_360dp_font130` | 360 dp | 1.3 | Grid 2 |
 | `library_411dp_font100_night` | 411 dp | 1.0 | Grid 2, night |
 | `library_360dp_font130_list` | 360 dp | 1.3 | List |
+| `library_800dp_font100_list` | 800 dp | 1.0 | List, one line per row (APP-17b) |
 
 **Verify or record, per image.**
 
@@ -4068,7 +4180,9 @@ named `wp/<name>-goldens` (exactly one path segment after `wp/`, ending in
 2. **`android-goldens-push`** (`contents: write`, the only job with write
    access; it runs no Gradle and no repository build code): checks out the
    same commit, downloads the PNGs, accepts them only if the names are
-   exactly the `shoot("...")` names in `LibraryScreenshotTest.kt` and every
+   exactly the union of the shot names in every `*ScreenshotTest.kt` class
+   under `src/testDebug` (APP-TEST-2; the first, string-literal argument of
+   each `shoot` call) and every
    file is a PNG, commits changed ones as `github-actions[bot]`
    (`test(app): refresh screenshot goldens from CI`) and pushes to the same
    branch, fast-forward only. If the branch moved meanwhile the push is

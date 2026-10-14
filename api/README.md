@@ -326,7 +326,7 @@ startup error rather than a soft "no data": unset or empty means the default
 is refused, so a typo can neither look like it worked nor silently mean "off". Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v22)
+## Database schema (v27)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -338,15 +338,16 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `apps`           | `appid` (PK), `name`, `status`, `last_prefill_at`, `last_manifest_check`, `needs_force`     | One row per tracked Steam app. `needs_force` (**v5**, WP 3.4) is ADR-0006 decision 2's per-app flag — see "needs_force" below |
 | `depot_app_map`  | `depotid`, `appid`, PK `(depotid, appid)`                                                   | Depot→app mapping; a depot can map to multiple apps (shared depots, plan §4) |
 | `jobs`           | `id` (PK autoincrement), `appid`, `type`, `status`, `created_at`, `started_at`, `finished_at`, `log_excerpt`, `updated`, `up_to_date`, `summary_parse_ok`, `gc_execute`, `paused_at`, `stop_request`, `run_use_force`, `run_before_json`, `run_claimed_by`, `run_claimed_at`, `run_heartbeat_at`, `run_completed_at`, `run_result_json` | Prefill/GC job queue (plan §3, §6). `updated`/`up_to_date`/`summary_parse_ok` (**v4**, WP 3.3) are SteamPrefill's own summary-table counters — see "Job outcome honesty" above. `gc_execute` (**v7**, WP 3.8) is the GC dry-run/execute bit: `NULL` for every non-GC job, `0` = report only, `1` = delete — see "Garbage collection" below. `paused_at`/`stop_request` (**v8**, WP 3.12) are job control: when the job was last suspended, and the operator's pending `cancel`/`pause` request against a *running* job — see "Job control" below. The seven `run_*` columns (**v15**, WP S-1, ADR-0012) are queue-mode's job hand-off to a separate `prefill_runner` process — `NULL` for every job that never goes through queue mode (any GC job, any prefill job run in the default `subprocess` mode). See "Queue mode" below |
-| `agent_reports`  | `client_id`, `reported_at`, `appids` (JSON array of ints), `source_addr`, `agent_version`, `report_interval_seconds` | One row per agent report — a full installed-app-ID snapshot at that timestamp (ADR-0002: the agent is stateless/dumb, always reports the complete list). vault-api derives additions/removals by diffing the two most recent rows per `client_id`. `source_addr` (**v9**, WP 3.11) is the address the report arrived FROM — the only key correlating a `client_id` with the event log's addresses; `NULL` for pre-v9 rows, which is why such a client is never `bypass_suspected`. `agent_version` / `report_interval_seconds` (**v17**, WP AGENT-FEAT-1) are what the agent said about itself in that report; `NULL` = it did not say. See "Agent presence" below |
+| `agent_reports`  | `client_id`, `reported_at`, `appids` (JSON array of ints), `source_addr`, `agent_version`, `report_interval_seconds`, `local_addrs` | One row per agent report — a full installed-app-ID snapshot at that timestamp (ADR-0002: the agent is stateless/dumb, always reports the complete list). vault-api derives additions/removals by diffing the two most recent rows per `client_id`. `source_addr` (**v9**, WP 3.11) is the address the report arrived FROM — the only key correlating a `client_id` with the event log's addresses; `NULL` for pre-v9 rows, which is why such a client is never `bypass_suspected`. `agent_version` / `report_interval_seconds` (**v17**, WP AGENT-FEAT-1) are what the agent said about itself in that report; `NULL` = it did not say. See "Agent presence" below. `local_addrs` (**v24**, WP AGENT-ADDR-1, per-column-guarded `ALTER`) is a JSON array of the LAN addresses the agent stated for itself; `NULL` = it stated none. Correlation prefers it over `source_addr` — see "Agent LAN addresses" below |
 | `depot_manifests` | `appid`, `containing_appid`, `depotid`, `manifestid` (TEXT), `chunk_count`, `total_bytes`, `recorded_at`, `source`, `first_seen_at`, `manifest_changed_at`, `observation_count`, PK `(appid, depotid)` | **Latest**-known manifest state per (app, depot) — WP 3.2, ADR-0006 decision 3. `first_seen_at`/`manifest_changed_at`/`observation_count` (**v14**, WP 4h.1) are the change-frequency bookkeeping — see "Manifest ingestion" and "Change frequency" below |
 | `oracle_app_state` | `appid` (PK), `buildid`, `checked_at`, `source`, `depot_count`, `branch_count`, `app_type`, `parent_appid`, `name` | **v10**, WP 3.9. One row per app the manifest oracle has been asked about: when, by which oracle (`source` provenance), and what it said the public build id is. `app_type` / `parent_appid` / `name` (**v22**, WP TOOL-APPS-2a, per-column-guarded `ALTER`) are its `common.type` (mapped onto the app-type vocabulary), `common.parent` and `common.name` (plain text, capped); `NULL` when absent and on every pre-v22 row. Display data only. See "Manifest oracle" and "Content packages" below |
 | `oracle_dlc_links` | `appid`, `dlc_appid`, `recorded_at`, `source`, PK `(appid, dlc_appid)` | **v22**, WP TOOL-APPS-2a. The content packages one oracle answer names for its app: `extended.listofdlc` plus every depot's `dlcappid`. Snapshot semantics like `oracle_branch_manifests`; display data, never read by GC. See "Content packages" below |
 | `app_classification` | `appid`, `source`, `app_type`, `parent_appid`, `linked`, `name`, `checked_at`, PK `(appid, source)` | **v22**, WP TOOL-APPS-2a. Per tracked app and source (`store` or `steamcmd_api`), exactly what that source said: its own type, raw parent, whether a cached parent's DLC list names the app (`linked`), and Steam's name. Written only by the background cover refresher; merged per field on read. See "Content packages" below |
+| `cache_completeness` | `appid`, `depotid`, `manifestid` (TEXT), `status`, `source`, `expected_bytes`, `present_bytes`, `chunk_count`, `missing_chunks`, `mismatched_chunks`, `checked_at`, PK `(appid, depotid)` | **v25**, WP CACHE-COMPLETE-1a (v24 is reserved for WP AGENT-ADDR-1). Per (app, depot): the target manifest the update check measured against and how many of its compressed chunk bytes are on disk. Replaced per app in one transaction. See "Cache completeness" below |
 | `oracle_branch_manifests` | `appid`, `depotid`, `branch`, `manifestid` (TEXT), `recorded_at`, `source`, PK `(appid, depotid, branch)` | **v10**, WP 3.9. One row per (app, depot, **open** branch) → manifest gid. Password-protected branches are never inserted at all. Written with snapshot semantics (a refresh replaces the app's rows in one transaction). **Never mixed into `depot_manifests`** — a third-party claim must stay distinguishable from a manifest vault-api parsed itself |
 | `update_check_state` | `id` (PK, `CHECK (id = 1)`), `last_check_at`, `last_check_apps`, `last_check_ok`, `last_check_stale`, `last_check_trigger`, `last_check_finished_at`, `last_check_outcome` | **v19**, WP UPD-1 (the last three **v20**, per-column-guarded `ALTER` for a v19 table). Single-row bookkeeping of the always-on update check, separate from `schedule_state` so it has its own interval and claim. Claim-then-work: `last_check_at` is stamped before any request, by either trigger (`manual`/`scheduled`); the counters, finish stamp and outcome are `NULL` while a run is in flight or the process died in it. Read by `GET /v1/updates/status`. See "Always-on update check" |
 | `schedule_state` | `id` (PK, `CHECK (id = 1)`), `last_sweep_at`, `last_sweep_targets`, `last_sweep_enqueued` | **v6**, WP 3.5. Single-row scheduler bookkeeping: when the last sweep started (UTC) and what it did. Persisted rather than in-memory so a restart mid-window does not re-sweep — see "Scheduler" below. The two counters are `NULL` while a sweep is in flight (or if the process died during one) |
-| `event_sweep_state` | `id` (PK, `CHECK (id = 1)`), `cursor_offset`, `first_sweep_at`, `last_sweep_at`, `last_rotated_at`, `lines_read_total`, `lines_skipped_total`, `last_lines`, `last_skipped`, `last_enqueued`, `last_dropped_by_cap`, `truncate_denied_count`, `last_truncate_denied_at`, `oversized_skips_total`, `last_oversized_at` | **v9**, WP 3.11. Single-row cache-event sweep bookkeeping. `cursor_offset` is the durable contract (each line read once); `first_sweep_at` is how bypass detection knows how long the feed has been watched; `truncate_denied_count` records that the sweeper may read the log but not rotate it; `oversized_skips_total` records a newline-free region longer than a read batch having to be discarded. See "Cache-event sweep" below |
+| `event_sweep_state` | `id` (PK, `CHECK (id = 1)`), `cursor_offset`, `first_sweep_at`, `last_sweep_at`, `last_rotated_at`, `lines_read_total`, `lines_skipped_total`, `last_lines`, `last_skipped`, `last_enqueued`, `last_dropped_by_cap`, `truncate_denied_count`, `last_truncate_denied_at`, `oversized_skips_total`, `last_oversized_at`, `log_dev`, `log_ino`, `rotations_detected_total`, `last_rotation_detected_at`, `traffic_since` | **v9**, WP 3.11; the last five **v23**, WP D15b (file identity for rename-rotation detection, detected-rotation counter, start of the traffic tiers). Single-row cache-event sweep bookkeeping. `cursor_offset` is the durable contract (each line read once); `first_sweep_at` is how bypass detection knows how long the feed has been watched; `truncate_denied_count` records that the sweeper may read the log but not rotate it; `oversized_skips_total` records a newline-free region longer than a read batch having to be discarded. See "Cache-event sweep" below |
 | `client_cache_stats` | `client_addr`, `window_at`, `requests`, `hits`, `misses`, `bypasses`, `errors`, `bytes_served`, `last_seen`, PK `(client_addr, window_at)` | **v9**, WP 3.11. One row per client address per sweep window (plan §5/§6 "per-client hit stats"). `requests = hits + misses + bypasses + errors` by construction; the three cache counters and `bytes_served` include **2xx responses only** (event-log field 9). Retention: `VAULT_CLIENT_STATS_KEEP` windows per address |
 | `depot_miss_stats` | `depotid` (PK), `miss_count`, `mapped`, `first_seen`, `last_seen`   | **v9**, WP 3.11. Which depots are being MISSed, and whether a mapping existed at the last sighting. ADR-0008's "misses on unmapped depots are counted but trigger nothing" is what this table counts. Bounded to `event_sweep.MAX_DEPOT_MISS_ROWS` (500) least-recently-seen-first |
 | `miss_trigger_state` | `appid` (PK), `last_triggered_at`, `trigger_count`                | **v9**, WP 3.11. The miss trigger's per-app cooldown, persisted so a restart cannot become "re-trigger everything that misses next" |
@@ -356,6 +357,10 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `runner_presence` | `runner_id` (PK), `build_version`, `build_commit`, `steamprefill_version`, `started_at`, `last_seen` | **v16**, WP VER-2. One row per vault-runner PROCESS, upserted by `prefill_runner` about every 30 s (idle or busy); rows not seen for a day are pruned by the next write. Read only by `GET /v1/about`. See "Component versions" below |
 | `app_cover_art` | `appid` (PK), `cover_url`, `outcome`, `attempts`, `checked_at`, `next_check_at` | **v18**, WP API-FIX-5. One row per app the cover-art lookup asked Steam about: the validated cover URL or NULL, `found`/`none`/`failed`, consecutive failures, when to ask again. Read by `GET /v1/games[/{appid}]` as `cover_url`. See "Cover art lookup" below |
 | `app_cover_file` | `appid` (PK), `source_url`, `sha256`, `content_type`, `size_bytes`, `stored_at`, `attempts`, `next_try_at` | **v21**, WP D10 COVER-CACHE-1. One row per app whose cover image vault-api stores in `<data dir>/covers/<appid>.img`: the URL it came from, the file's SHA-256, type and size (all NULL while nothing is stored), plus the download backoff. Read by `GET /v1/games[/{appid}]` as `cover_cached_url` and by `GET /v1/covers/...`. See "Stored covers" below |
+| `client_traffic` / `client_depot_traffic` / `server_traffic` | `tier`, `bucket_at`, then address (and depot) plus counters, see "Traffic tiers" | **v23**, WP D15b. Event-log statistics bucketed by event time in three tiers (5m for 48 h, 1h for 30 days, 1d forever), written in the sweep's cursor transaction. `server_traffic` also keeps `peak_bucket_bytes` and `active_buckets`. See "Traffic tiers: long-term client and server statistics" below |
+| `client_names` | `key_type`, `key`, `name`, `updated_at`, PK `(key_type, key)` | **v26**, WP D15-NAMES (on top of v25 CACHE-COMPLETE-1a). An operator-set client name per address: `key_type` `ip` (canonical IP literal); `mac` is allowed by the `CHECK` but refused by the API until an agent reports MACs. Plain `CREATE TABLE IF NOT EXISTS`, run on every start, so it does not depend on the version stamp. See "Client names" below |
+| `runner_marks` | `token` PK, `issued_at`, `runner_id`, `consumed_at`, `consumed_addr` | **v27**, WP D15-RUNNER. One row per marker token the prefill runner issued before `GET /steamhangar/runner-mark/<token>`; the sweep consumes it on its first valid marker line. Rows older than 7 days are deleted when the next token is issued |
+| `runner_address_periods` | `id`, `addr`, `first_marked_at`, `last_marked_at` | **v27**, WP D15-RUNNER. Which cache-log address was the prefill runner, when (one row per continuous period). Kept forever. Both v27 tables are plain `CREATE TABLE IF NOT EXISTS`, run on every start, so they do not depend on the version stamp. See "The prefill runner in the client figures" |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -632,7 +637,7 @@ route, see "Auth").
 
 | Method | Endpoint                          | Purpose |
 |--------|-------------------------------------|---------|
-| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `cover_cached_url` (WP D10 — the relative path `/v1/covers/{appid}/{signature}` of vault-api's stored copy of that cover, `null` until one is stored; see "Stored covers" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`), `parent_appid` + `app_type` (WP TOOL-APPS-2a — the top-level game this app is a content package of, or `null` when not grouped; one of `game`/`dlc`/`tool`/`application`/`config`/`music`/`video`/`demo` or `null`; the list stays flat, UIs group; see "Content packages" below). **`name`** falls back to Steam's name (store lookup, else the oracle's stored `common.name`) when vault-api has none (WP TOOL-APPS-2a), `group_size_bytes` (WP TOOL-APPS-2 — on a top-level row the bytes of the whole group it heads: the union of its own depots and those of every row whose `parent_appid` is this app, each depot counted once; equals `size_bytes` for an ungrouped row; `null` on a row that is itself grouped, and with the same `null` rules as `size_bytes`; also on `GET /v1/games/{appid}`) |
+| GET    | `/v1/games`                        | All tracked apps: `appid`, `name`, `status`, `last_prefill_at`, `last_manifest_check` (schema v4, WP 3.3; surfaced here WP 4c — the last run that CONFIRMED this app current, `null` until that exact outcome happens; **much narrower than "last time a job ran"**, see "Job outcome honesty" below; **and unlike `last_prefill_at`, survives `DELETE /v1/cache/{appid}`** — deletion nulls `last_prefill_at` but deliberately leaves this field, so a game with zero cached bytes can still show a past confirmation timestamp, see "Per-game deletion" below), `depot_count`, `size_bytes` (sum of the app's mapped depots' bytes on disk; `null` if unmapped or not yet cached — see "Per-game size calculation" below), `needs_force` (schema v5, WP 3.4 — whether the NEXT prefill will run with `--force`, see "needs_force" below), `manifest_change_frequency` (schema v14, WP 4h.1 — `null`/`"insufficient_data"`/`"stable"`/`"changed"`; **NOT a rate**, see "Change frequency" below), `manifest_observation_days` (days since the youngest-observed depot's first observation; `null` only alongside a `null` category), `manifest_days_since_last_change` (days since the most recently observed change; populated ONLY when the category is `"changed"`), `installed_on` (WP AG-1 — list of `{client_id, reported_at}`, ALREADY filtered to fresh agent reports only; `[]` for an unmapped/never-installed app and for a vault with zero agents — see "Installed state per app" below), `tool_app` + `tool_app_name` (WP API-FIX-4 — `true` + the display name for a Steam tool package vault-api never prefills, `false`/`null` otherwise; see "Steam tool apps" below), `cover_url` (WP API-FIX-5 — the real portrait cover from Steam's store item lookup, an https URL on `shared.akamai.steamstatic.com` or `cdn.akamai.steamstatic.com`, or `null` while unknown; see "Cover art lookup" below), `cover_cached_url` (WP D10 — the relative path `/v1/covers/{appid}/{signature}` of vault-api's stored copy of that cover, `null` until one is stored; see "Stored covers" below), `update_available` + `update_checked_at` (WP UPD-1 — `true` only when the manifest oracle's stored verdict is `stale` AND the game currently has cache content; `false` with the oracle off or the game never checked; read from stored rows, no network; also on `GET /v1/games/{appid}`), `parent_appid` + `app_type` (WP TOOL-APPS-2a — the top-level game this app is a content package of, or `null` when not grouped; one of `game`/`dlc`/`tool`/`application`/`config`/`music`/`video`/`demo` or `null`; the list stays flat, UIs group; see "Content packages" below). **`name`** falls back to Steam's name (store lookup, else the oracle's stored `common.name`) when vault-api has none (WP TOOL-APPS-2a), `group_size_bytes` (WP TOOL-APPS-2 — on a top-level row the bytes of the whole group it heads: the union of its own depots and those of every row whose `parent_appid` is this app, each depot counted once; equals `size_bytes` for an ungrouped row; `null` on a row that is itself grouped, and with the same `null` rules as `size_bytes`; also on `GET /v1/games/{appid}`), `cache_complete_pct` + `cache_expected_bytes` + `cache_present_bytes` + `cache_complete_checked_at` + `group_cache_complete_pct` (WP CACHE-COMPLETE-1a; plus `cache_missing_chunks`, WP CACHE-COMPLETE-1b, see "Verify and complete" below — how much of the CURRENT build is on disk, 0-100, `null` when unknown; also on `GET /v1/games/{appid}`; `?incomplete=true` lists only games below 100; see "Cache completeness" below) |
 | GET    | `/v1/covers/{appid}/{signature}`   | WP D10: the cover image vault-api stored for this app (`image/jpeg`/`png`/`webp`), `ETag` + `Cache-Control: private, max-age=31536000, immutable`, `304` on a matching `If-None-Match`. **No `X-Api-Key`**: the `signature` in the path is an HMAC of the API key (see "Auth"); clients take the URL from `cover_cached_url`. Any refusal is `404`. See "Stored covers" |
 | GET    | `/v1/games/{appid}`                | Detail for one app: same fields (incl. `installed_on`, `tool_app`, `tool_app_name`, `cover_url`, `cover_cached_url`, `parent_appid`, `app_type`, `group_size_bytes`) plus `depots` (list of `{depotid, shared, size_bytes}`); `404` for an unknown `appid` |
 | PUT    | `/v1/mapping/{depotid}`            | Body `{"appid": int, "app_name": str \| null}` — **additively** upsert one depot→app mapping fact (manual fallback, see below); `422` for `depotid <= 0`, `appid <= 0`, or an unrecognized body field |
@@ -640,7 +645,9 @@ route, see "Auth").
 | DELETE | `/v1/mapping/{depotid}/{appid}`    | Remove one mapping pair (correction path for the additive `PUT`, see below); `204` on success, `404` if the pair doesn't exist, `422` for non-positive ids |
 | POST   | `/v1/prefill`                      | Body `{"appids": [int, ...]}` — queue one prefill job per app id. `202` with a list of `{appid, job_id, status, deduplicated}`. `422` for an empty list, an appid `< 1`, a non-list, or an unrecognized body field; `422` with a string `detail` (nothing queued) when the body names a Steam tool app (WP API-FIX-4, see "Steam tool apps" below) |
 | POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). Steam tool apps are never selected (WP API-FIX-4). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
-| GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
+| POST   | `/v1/prefill/verify`               | WP CACHE-COMPLETE-1b. "Verify" / "Complete now". Body `{"appids": [int, ...]}` as for `POST /v1/prefill` (same `422`s, tool apps refused). Sets `needs_force = 1` for each app, then queues it through the same enqueue (same dedupe, same response). `202`. See "Verify and complete" below |
+| POST   | `/v1/prefill/incomplete`           | WP CACHE-COMPLETE-1b. "Complete all". **No request body** (ignored, like `/v1/prefill/cached`). Selects the games `GET /v1/games?incomplete=true` lists that miss at least one chunk file (`cache_missing_chunks > 0`) and handles each like `POST /v1/prefill/verify`. `202`, `[]` when nothing is incomplete. See "Verify and complete" below |
+| GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
 | POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued or running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5) and `"requested"` for a running one. `404` unknown id; `409` for a GC job or a job that is already `paused` or finished |
@@ -649,8 +656,8 @@ route, see "Auth").
 | GET    | `/v1/cache/{appid}/delete-plan`    | WP TOOL-APPS-2b. Read-only preview of `DELETE /v1/cache/{appid}` (optionally `?with_packages=true`) for a confirmation dialog: `{appid, with_packages, members[], kept_children[], delete_depots[], skipped_shared[], unusable[], total_bytes, blocked_by[]}`. Same `404`s as the deletion; an in-flight job is listed in `blocked_by` instead of a `409`. See "Grouped delete" below |
 | POST   | `/v1/cache/{appid}/gc`             | Queue a garbage-collection job. Body optional; `{"execute": true}` (a literal JSON boolean) is the only way to delete — **dry run by default**. `202` with `{appid, job_id, status, type, mode, execute, deduplicated}`; `404` unknown appid or no mappings; `422` for `appid < 1`, a non-boolean `execute`, or an unrecognized body field. See "Garbage collection" below |
 | GET    | `/v1/cache/summary`                | `total_bytes` (disk usage of `depot/`, each depot counted once), `top_consumers` (top 10 `{appid, name, size_bytes}`, largest first), `unmapped_depots` (`{count, size_bytes}` for depot dirs on disk with no mapping row for any app), `free_disk_bytes` (free space on the cache filesystem, `null` if undeterminable) |
-| POST   | `/v1/agent/installed`              | Body `{"client_id": str, "appids": [int, ...]}` — store one **full-list** snapshot of a client's installed games. `200` with `{client_id, received, added, removed, first_report}`; `422` for a bad `client_id` (empty, > 64 chars, control characters, surrounding whitespace, `.`/`..`), an appid `< 1` or a boolean, a missing/non-list `appids`, more than 10 000 ids, or an unrecognized body field. See "Agent reports" below |
-| GET    | `/v1/clients`                      | One row per reporting client, sorted by `client_id`: `{client_id, first_seen, last_reported_at, app_count}` (WP 2.4) plus `{source_addrs, cache_hits, cache_misses, bytes_served, last_seen_in_cache_log, bypass_suspected}` (WP 3.11, ADR-0008 — the hit statistics and bypass warnings plan §5/§6 promised). The cache fields are `0`/`null`/`false` when the event feed is off. See "Cache-event sweep → Bypass detection" |
+| POST   | `/v1/agent/installed`              | Body `{"client_id": str, "appids": [int, ...]}` — store one **full-list** snapshot of a client's installed games. `200` with `{client_id, received, added, removed, first_report}`; `422` for a bad `client_id` (empty, > 64 chars, control characters, surrounding whitespace, `.`/`..`), an appid `< 1` or a boolean, a missing/non-list `appids`, more than 10 000 ids, or an unrecognized body field. Optional `local_addrs` (WP AGENT-ADDR-1): up to 8 unicast IP literals the PC uses toward the vault; `422` for anything else. See "Agent reports" and "Agent LAN addresses" below |
+| GET    | `/v1/clients`                      | One row per reporting client, sorted by `client_id`: `{client_id, first_seen, last_reported_at, app_count}` (WP 2.4) plus `{source_addrs, cache_hits, cache_misses, bytes_served, last_seen_in_cache_log, bypass_suspected}` (WP 3.11, ADR-0008 — the hit statistics and bypass warnings plan §5/§6 promised). The cache fields are `0`/`null`/`false` when the event feed is off. Plus `{peer_addrs, reported_addrs}` (WP AGENT-ADDR-1, diagnostics). See "Cache-event sweep → Bypass detection" and "Agent LAN addresses" WP D15-NAMES adds `name`, `name_addr`, `display_name` (see "Client names"). |
 | DELETE | `/v1/clients/{client_id}`          | Remove one client's rows (WP AG-1 — the rename-cleanup path AG-0 named). `204` on success; `404` if the `client_id` has no rows at all. **Not a ban** — a client that reports again under the same id simply reappears with a fresh diff chain. See "Deleting a client" below |
 | GET    | `/v1/oracle/{appid}`               | Stored manifest-oracle view (WP 3.9): `{appid, enabled, checked_at, source, buildid, verdict, depots[]}`, each depot `{depotid, recorded_manifestid, oracle_manifestid, verdict, beta_branches[]}`. `verdict` is `current`/`stale`/`not_cached`/`unknown`. **No network, no `404`** — an app nobody asked about answers `checked_at: null`, and `enabled: false` when the oracle is off. `422` for `appid < 1` |
 | POST   | `/v1/oracle/{appid}/refresh`       | Ask the oracle now (WP 3.9). **This request leaves the LAN** when the oracle is enabled. Always `200`: `{appid, enabled, ok, error, checked_at, depot_count, branch_manifest_count, open_branches[], skipped_password_branches, warnings[]}` — an unreachable or garbage answer is `ok: false` with a reason, never a 5xx. `422` for `appid < 1` |
@@ -658,7 +665,14 @@ route, see "Auth").
 | POST   | `/v1/updates/check`                | Start the update check now (WP UPD-1): the manifest oracle is refreshed for every game that currently has cache content (tool packages excluded), **in the background**; **never starts a download**. Answers at once: `202 {status: "started", enabled: true}`, or `202 {status: "already_running", enabled: true}` when a scheduled or earlier manual check is still going (nothing new is started), or `200 {status: "disabled", enabled: false}` with the oracle off (nothing runs); `503` while vault-api shuts down. Poll `GET /v1/updates/status` until `running` is `false`, then re-read `GET /v1/games`. Not interval-limited, works with or without a schedule window (as does the scheduled check since WP UPD-5), but stamps the interval (the next scheduled check is one interval later). **Leaves the LAN**: one oracle request per cached game — see "Always-on update check" |
 | GET    | `/v1/updates/status`               | Update check status (WP UPD-1): `{enabled, scheduled, running, last_trigger, last_started_at, last_finished_at, last_outcome, last_apps, last_ok, last_failed, last_stale}`. `scheduled` is `true` whenever the oracle is on (WP UPD-5: the scheduled check no longer needs a schedule window, so today it always equals `enabled`; kept as its own field for UPD-1 clients). `last_trigger` is `manual`/`scheduled`; `last_outcome` is `completed`, `bailed_out` (stopped after 5 failed oracle requests in a row), `aborted` (shutdown), `error` (bug, see the log) or `interrupted` (the process died during the run); outcome, finish stamp and counters are `null` while running. All `last_*` are `null` before the first run. No network |
 | GET    | `/v1/schedule`                     | Scheduler config + last-sweep bookkeeping: `{enabled, window, overnight, interval_minutes, client_stale_days, server_timezone, last_sweep_at, last_sweep_targets, last_sweep_enqueued, next_eligible_at}`. **Read-only itself** — the window/interval/staleness values are now writable through `PATCH /v1/settings` (settings-API work package, ADR-0009; see "Persisted settings" below), this endpoint just reports the currently EFFECTIVE configuration, override included |
-| GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, top_unmapped_depots[]}`. **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
+| GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, rotations_detected_total, last_rotation_detected_at, traffic_since, top_unmapped_depots[]}` (the three before the list: WP D15b). **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
+| GET    | `/v1/throughput`                   | WP D15b (D13 SPEED-1): Downloads header numbers from the traffic tiers. `?range=24h` (default) `|7d|30d|all`. `{event_feed, range, tier, bucket_seconds, range_start, active_window_minutes, current, active_clients_now, summary, jobs[]}`; traffic fields are `null` with the event feed off. See "Clients overview and throughput (WP D15b)" below |
+| GET    | `/v1/throughput/series`            | WP D15b: server-wide traffic per bucket for graphs, zero-filled, oldest first. `?range=` as above (24h: 288 x 5 min, 7d: 168 x 1 h, 30d: 720 x 1 h, all: daily from the first recorded day) |
+| GET    | `/v1/clients/overview`             | WP D15b: agent clients merged with every event-log address (agentless machines too): connected, installed (agents), loading now, recently loaded apps, per-range stats. `?range=7d` (default) `|24h|30d|all`. `GET /v1/clients` is unchanged WP D15-NAMES adds `name`, `name_addr`, `display_name` per client. |
+| GET    | `/v1/client-names`                 | WP D15-NAMES: every stored client name, `[{key_type, key, name, updated_at}]`. See "Client names" |
+| PUT    | `/v1/client-names/ip/{addr}`       | WP D15-NAMES: set or rename, body `{"name": "..."}` (trimmed, 1-40 characters, no control/format characters; extra fields `422`). `addr` any IP literal, stored canonically. `mac/{...}` is `422` (reserved). Answers the stored row |
+| DELETE | `/v1/client-names/ip/{addr}`       | WP D15-NAMES: clear a name; `204`, `404 "No name stored ..."` when there is none |
+| DELETE | `/v1/history?scope=`               | WP D15-NAMES: delete finished jobs and traffic statistics, `scope` = `all` or `older-than-30d` (required, else `422`). Answers `{scope, cutoff, jobs_deleted, traffic_rows_deleted}`. See "Delete history" |
 | GET    | `/v1/steam/key`                    | Opt-in Steam Web API relay (WP 4a.6r): key status only — `{configured, key_last4}`. `key_last4` is `null` when unconfigured; the full key is never returned |
 | PUT    | `/v1/steam/key`                    | Body `{"key": str}` — set (or replace) the relay's Web API key. `200` with the same shape `GET` returns; `422` unless `key` is exactly 32 hexadecimal characters |
 | DELETE | `/v1/steam/key`                    | Clear the configured key. `204` whether or not one was set |
@@ -1595,6 +1609,7 @@ described next. The lifecycle:
 | `DELETE /v1/cache/{appid}` deleted (or attempted, or found already-absent) a last-remnant depot — every **other** app still mapping it (ADR-0003 addendum) | `1` |
 | `POST /v1/cache/{appid}/gc` with `execute: true` actually removed chunks from a depot — every app mapped to that depot, whether or not it is the app the GC job was queued for (ADR-0007) | `1` |
 | `POST /v1/cache/{appid}/gc` — dry run, or an executing run that removed nothing | unchanged |
+| `POST /v1/prefill/verify` / `POST /v1/prefill/incomplete` (WP CACHE-COMPLETE-1b), or the sweep completing an incomplete game | `1` |
 
 **This is routine maintenance, not a failure path — say so wherever this
 flag's "ordinary case" is described.** A GC execute run is expected to run
@@ -2129,6 +2144,173 @@ Returns `None` (not `0`) in two distinct cases the API must not confuse:
 A *partially*-cached app (some depots on disk, others not yet) returns the sum
 of what IS on disk — a missing depot there contributes `0` correctly, it just
 hasn't been filled yet.
+
+### Cache completeness (WP CACHE-COMPLETE-1a, schema v25)
+
+`size_bytes > 0` only says that *some* bytes are on disk; a game read as
+"cached" seconds after a download started. `cache_complete_pct` says how much
+of the **current build** is there (`vault_api/cache_completeness.py`):
+
+- **Depots counted:** the app's `depot_app_map` rows (the same set
+  `size_bytes` sums; written from what SteamPrefill actually filled, so it
+  already follows SteamPrefill's OS/language/DLC selection). The oracle's full
+  depot list is never used as the set.
+- **Target manifest per depot:** the oracle's current `public` gid, unless
+  vault-api recorded a manifest (`depot_manifests`) after the oracle's last
+  answer, or the oracle is off or has no row for the depot -- then the
+  recorded one.
+- **Chunk list:** the archived `.bin`, else a cache-stored client copy under
+  `depot/<id>/manifest/<gid>/5/` (a Steam client updating through the cache
+  stores the new manifest there). Never a different manifest id.
+- **Formula:** expected = sum of the manifest's `cb_compressed` per unique
+  chunk; present = the same sum over chunks whose file
+  `depot/<id>/chunk/<chunkid>` exists with exactly that size (the cache stores
+  compressed chunk bodies, byte-exact against `cb_compressed`). Chunks of an
+  older build count for nothing. `pct = floor(100 * present / expected)`, so
+  100 means every byte is there.
+- **`null`** when nothing is on disk, the game was never measured, a depot has
+  no target, the target manifest is readable nowhere (an announced update no
+  client or prefill has fetched yet), or the target changed since the
+  measurement. One unknown depot makes the game unknown. UIs then fall back to
+  the `size_bytes` rule.
+- **UI contract:** `null` while `size_bytes > 0` means "not known", never
+  "complete" -- it must not render as the green check. Only 100 does.
+- **Groups (D9):** `group_cache_complete_pct` over the depots of the group
+  members that currently have bytes on disk (own `size_bytes` > 0, the same
+  members that add bytes to `group_size_bytes`), each depot/manifest once; a
+  member with nothing on disk is skipped. `null` on a grouped row.
+- **When:** every update check (UPD-5 cadence, scheduled and
+  `POST /v1/updates/check`) measures the games it selected after the oracle
+  refresh -- local disk reads only -- stores one row per (app, depot) in
+  `cache_completeness`, and then drops the rows of every app outside the
+  selection (an aborted run stores no partial app and drops nothing). The
+  prefill worker re-measures an app right after a successful prefill job for
+  it; `DELETE /v1/cache/{appid}` drops the rows of the app and of every depot
+  it removed; a measurement that read a depot the delete removed meanwhile is
+  not stored (checked inside the write transaction). Anything else (a Steam
+  client finishing through the cache, GC)
+  shows at the next check: **a figure is as old as
+  `cache_complete_checked_at`, up to one `VAULT_SCHEDULE_INTERVAL_MINUTES`
+  (default 180 min).** The API only reads the table. With the oracle off
+  neither the check nor the post-prefill re-measure runs and the figures stay
+  `null`.
+- **Cost:** one run shares one manifest reader; a depot several selected
+  apps map is scanned and parsed once, every other depot's listing is
+  released right after it is measured, and the stop flag is checked between
+  depots. Measured 2026-10-14 in the devbox (synthetic depot, 150,000 chunks
+  in the manifest, 135,000 sparse 1 MiB chunk files on disk, page cache warm,
+  4 cores, overlay fs): **about 2.4 s** for that one depot (manifest parse +
+  `chunk/` scan + compare + store). Not measured on ZFS with a cold cache.
+
+### Verify and complete (WP CACHE-COMPLETE-1b)
+
+"Verify" (one game) and "Complete now" / "Complete all" (the incomplete list)
+are the same operation: a **forced prefill** of the game, queued as a normal
+download job (progress in Downloads, `GET /v1/jobs`).
+
+**Why `--force`, and what it costs.** SteamPrefill (v3.7.2) has no verify
+command. Without `--force` it skips an app whose current manifests are all
+in its own `Config/successfullyDownloadedDepots.json`, which knows nothing
+about chunks that later went missing from the cache, so a non-forced run is
+a no-op for exactly the games that need completing. With `--force` it skips
+that check and requests **every chunk of the current build** through
+vault-core (`SteamManager.DownloadSingleAppAsync`,
+`DepotHandler.BuildChunkDownloadQueueAsync`: the full chunk list of the
+current manifests, no diff against an older build -- the same list a
+non-forced run uses once an update exists). vault-core's `try_files` serves
+every chunk file that exists as a local HIT; only the missing ones go to
+Steam and are stored. So the internet traffic is exactly the missing chunks;
+the remaining cost is reading the whole game from disk once and passing it to
+the runner, which discards the bodies. **Statistics caveat:** that read goes
+through vault-core like client traffic; since WP D15-RUNNER those reads
+are the prefill runner's (`summary.prefill_runner`, the overview's runner
+entry) and do not count as "saved by the cache" or in the hit rate, once the
+runner has marked its address ("The prefill runner in the client
+figures"). The Steam client's own "verify"
+cannot be driven from the vault. Rejected: `--nocache` (a hidden flag that
+only re-downloads SteamPrefill's own manifest files) and `?nocache=1`
+(no option turns it on: SteamPrefill adds it only to its speed probes and its
+retries of failed chunk requests; applied to a whole game it would fetch every
+chunk from Steam again).
+
+**Mechanism.** Both routes set `apps.needs_force = 1` first, then call
+`jobs.enqueue_prefill` (one job per app; an app with a queued, running or
+paused job gets that job back with `deduplicated: true`, so repeated clicks
+are idempotent). A still-queued job reads the flag when the worker claims it
+and runs forced. A job that is already **running** keeps the mode it was
+claimed with; its end does not clear the flag (the worker's clear is a
+compare-and-swap against the value it read at claim time), so the app's
+**next** run is forced. A forced run that succeeds clears the flag like any
+other successful job.
+
+**UI note.** A "Verify" (or "Complete now") on a game whose job is already
+running non-forced returns that job with `deduplicated: true` and only forces
+the game's NEXT run; the current run does not become a verify. Say so rather
+than showing the running job as the verify. A queued or paused job does run
+forced.
+
+**Selection for "Complete all".** `cache_completeness.incomplete_apps`: every
+tracked app whose figure (`cache_completeness.app_figure`, the games list's
+own computation) passes `cache_completeness.is_incomplete` (known and below
+100), Steam tool packages left out -- `GET /v1/games?incomplete=true` uses the
+same two functions with the same inputs (shared `SizeCache` snapshot, the
+scheduler's settings) -- and then only those that
+`cache_completeness.is_completable` (at least one chunk file missing). A
+`null` figure is never incomplete: with the oracle off nothing is listed.
+
+**Games short only of wrong-size chunks.** The games list carries
+`cache_missing_chunks` (chunk files of the current build with no file on
+disk; `null` exactly when `cache_complete_pct` is). An incomplete row with
+`cache_missing_chunks: 0` is short only of chunk files with the wrong size.
+**No current action repairs such a game** until the CACHE-REPAIR-1 follow-up
+lands (see "Damaged chunks" below): "Complete all" skips it, and UIs should
+not offer "Complete now" for it (`POST /v1/prefill/verify` would still queue
+the forced run, which does not help).
+
+**Re-measured after the job.** The worker's post-success hook from 1a
+(`PrefillWorker._remeasure_completeness`) measures the app right after every
+successful prefill, forced or not, so the figure moves without waiting for
+the next update check (oracle on; with it off there are no figures).
+
+**Automatic completion (schedule window only).** Completion is a download,
+so it follows the rules updates have: nothing starts outside the schedule
+window, and without a window it is manual only. Inside the window,
+`scheduler.maybe_sweep` flags `needs_force = 1` on every game that
+`incomplete_apps` lists and `is_completable` accepts
+(`scheduler.completion_appids`), and enqueues it together with the sweep
+targets, so those runs complete the game; the log names them. Rules:
+
+- **All incomplete cached games** (user decision 2026-10-14), not only sweep
+  targets: a game completes in the window whether or not a PC reports it
+  installed and whether `VAULT_SWEEP_INCLUDE_CACHED` is on. The window is
+  the only gate. `GET /v1/schedule`'s `last_sweep_targets` counts the
+  targets plus these games.
+- **Stored figures.** The sweep reads the figures the latest update check
+  (or a post-job re-measure) stored; it does not measure. The check runs on
+  its own thread in the same tick, so a sweep acts on the previous check's
+  figures (at most one `VAULT_SCHEDULE_INTERVAL_MINUTES` old). A figure whose
+  target changed since is unknown and not acted on. Cost: one depot walk per
+  sweep, shared with the cached-targets selection (`compute_targets`
+  takes the walk), and none at all when `VAULT_SWEEP_INCLUDE_CACHED` is off
+  and no stored row is short of a chunk.
+- **Wrong-size chunks are not a reason.** A game short only of chunk files
+  with the wrong size is not auto-completed, because a forced run cannot fix
+  it (next point) and would otherwise replay the whole game every interval.
+  It stays in the incomplete list, with no action that repairs it yet.
+- **Known limit:** a game whose missing chunks a forced run does not fetch
+  (for example a mapped depot SteamPrefill no longer selects) is forced
+  again on every sweep while it stays incomplete.
+
+**Damaged chunks (wrong size) are NOT replaced.** 1a counts a chunk file
+whose size differs from the manifest's `cb_compressed` as damaged. A forced
+prefill does not fix it: `try_files` finds the file and serves it as a HIT,
+`proxy_store` is never reached, and SteamPrefill reads the body without
+checking its length or hash. Replacing one needs the file removed first, so
+the next request misses and stores a fresh copy: vault-api would delete the
+mismatched chunk files of the app's target manifests (re-checking each size
+right before the unlink, with the cache-root guards `deletion.py` uses) and
+then queue the forced run. Not built in 1b: follow-up package CACHE-REPAIR-1
+(after rc17, user decision 2026-10-14).
 
 ### `GET /v1/cache/summary`
 
@@ -2913,6 +3095,61 @@ to tell the two states apart (not merely that the distinction is
 theoretically visible), `installed_on_stale: list[InstalledOn]` alongside
 `installed_on` is an additive two-liner then — same shape, opposite filter,
 no schema change to the existing field. Not built speculatively now.
+
+### Agent LAN addresses (WP AGENT-ADDR-1, schema v24)
+
+**The bug it fixes (measured 2026-10-14):** behind Docker's published ports
+vault-api sees every connection coming from the Docker bridge **gateway** —
+the userland proxy connects from the host side of the bridge — so
+`agent_reports.source_addr` was the same gateway address for every PC. The
+bypass rule never found that address in the cache log and accused every agent
+PC ("Client X is bypassing the cache"), and the clients overview gave the
+gateway to whichever agent reported last.
+
+**The report field.** `POST /v1/agent/installed` accepts an optional
+`local_addrs`: the LAN addresses the PC uses toward the vault, which the agent
+determines itself (no flag, no config — see `agent/README.md`). Rules, each a
+`422` when broken: a JSON list of at most **8** strings, each a plain IP
+literal (no zone id, no surrounding whitespace) that is not loopback,
+unspecified, link-local or multicast. Stored canonical (compressed IPv6, an
+IPv4-mapped IPv6 address as plain IPv4), de-duplicated and sorted; absent,
+`null` and `[]` all store `NULL`.
+
+**Which addresses a client is correlated on**
+(`agent_reports.effective_addrs`, one definition for `GET /v1/clients`, the
+bypass rule, its webhook and the clients overview), per retained report:
+
+1. the agent stated `local_addrs` → exactly those (the TCP peer is ignored);
+2. otherwise the TCP peer (`source_addr`) — **unless it is a forwarding hop**;
+3. otherwise nothing.
+
+**Forwarding hop** (`vault_api/peer_hops.py`): a loopback or unspecified
+address, or a next-hop **gateway** in vault-api's own routing table (every
+route with `RTF_GATEWAY` in `/proc/net/route` and `/proc/net/ipv6_route`,
+read per request). Inside a Docker bridge network that is the bridge gateway —
+exactly what a published port connects from; with `network_mode: host` it is
+the LAN router, never a gaming PC. No address range is hard-coded (Docker's
+pools are configurable, and `172.16.0.0/12` is also a real LAN range).
+Consequence for the bypass rule: an old agent whose only peer is the gateway
+has no usable address, so disqualification 5 applies and it is **never
+accused**; a new agent is judged on its stated address and still accused when
+that address never shows up in the cache log.
+
+**Not covered:** a reverse proxy in its own container on the same Docker
+network connects from that container's address, which is neither loopback
+nor a gateway. Old agents behind such a proxy are still correlated with the
+proxy's address; updated agents are not affected.
+
+**`GET /v1/clients`:** `source_addrs` now lists the correlated addresses
+above (the keys the statistics are summed over, as before). Two diagnostic
+lists are appended: `peer_addrs` (raw TCP peers, hops included) and
+`reported_addrs` (what the agent stated).
+
+**Compatibility.** Old agents keep working (the field is optional). A new
+agent against a server older than this package gets a `422` naming
+`local_addrs` as `extra_forbidden` and resends once without exactly the
+fields named (`agent/go/client`), so an rc9..rc16 server still receives
+`agent_version` / `report_interval_seconds`.
 
 ### Deleting a client (`DELETE /v1/clients/{client_id}`, WP AG-1)
 
@@ -4014,10 +4251,31 @@ is read once, and a sweep failure re-reads instead of losing data" real:
    one `BEGIN IMMEDIATE` covering the statistics upserts, the retention prunes
    and the new offset. There is no state where one is committed and the other
    is not.
-3. **A file smaller than the cursor is treated as rotated** and the cursor
-   resets to 0. This covers an operator, a `logrotate` with `copytruncate`, or
-   a vault-core redeployed onto a fresh volume — without it, everything the new
-   file accumulated below the old offset would be skipped forever.
+3. **A file smaller than the cursor, or a different file at the same path,
+   is treated as rotated** and the cursor resets to 0. This covers an
+   operator, a `logrotate` with `copytruncate`, a vault-core redeployed onto
+   a fresh volume, and (WP D15b) a rename rotation: the sweep stores the
+   log's inode with the cursor, and a changed inode restarts at offset 0
+   even when the new file is already larger than the old offset. The
+   decision uses `st_ino` only: `st_dev` is stored (`log_dev`) for
+   diagnostics but never compared, because ZFS and other filesystems with
+   anonymous device numbers can change it across a reboot for the same
+   file, which would re-count the whole log into the forever tier. Before
+   switching, the sweep reads the old file's unread tail if it is still at
+   `<path>.1` with the stored inode (the D15-ROT "keep one old file"
+   layout); a partial last line there is dropped, and if `<path>.1` is gone
+   the tail is lost (at most one sweep interval). Every reset is counted in
+   `rotations_detected_total` / `last_rotation_detected_at`
+   (`GET /v1/stats`); the sweeper's own truncation is not counted there
+   (`last_rotated_at`).
+
+   **`copytruncate` caveat.** A `copytruncate` rotation keeps the inode, so
+   only the shrink check can see it, and only if the file is still smaller
+   than the cursor at the next sweep. Lines written between the last sweep
+   and the copy end up in the copy and are never read. If the truncated file
+   has already grown past the old cursor by the next sweep, the rotation is
+   invisible and the sweep continues from the old offset in the new content,
+   skipping its beginning. A rename rotation (D15-ROT) has neither problem.
 
 ### Idempotence, stated honestly
 
@@ -4037,9 +4295,15 @@ A crash anywhere before the commit means the whole batch is re-read. Per effect:
   a second non-forced prefill — ~3 s if it really is current (ADR-0006). That is
   the trade this ordering deliberately makes, not an oversight.
 
-### Rotation — best-effort, and usually impossible in the shipped containers
+### Rotation — vault-core first, the sweeper's truncation as fallback
 
-ADR-0008 gives rotation to this sweeper and to nothing else. `maybe_truncate`
+Since WP D15-ROT (ADR-0008 addendum) vault-core rotates the event log itself:
+at 64 MiB (`VAULT_EVENT_LOG_ROTATE_BYTES`, checked every 60 s by default) it
+renames `event.log` to `event.log.1`, keeps that one old file and makes nginx
+reopen. The sweeper follows the rename by inode and drains `event.log.1`
+first (see above). The in-place truncation below remains as a fallback for
+setups without the core hook (`VAULT_EVENT_LOG_ROTATE_BYTES=0`, an older core
+image, a native install); whichever runs first wins. `maybe_truncate`
 truncates to zero and resets the cursor only when the sweep succeeded, the file
 is at least `VAULT_EVENT_LOG_MAX_BYTES`, **and** its size right now still equals
 the committed cursor (i.e. every byte has been read).
@@ -4094,9 +4358,10 @@ The sweep runs on WP 3.5's scheduler thread but on **its own interval**
 (`VAULT_EVENT_SWEEP_INTERVAL_MINUTES`, default 5) and **unconditionally** — it
 is not gated on `VAULT_SCHEDULE_WINDOW`. Three reasons, heaviest first:
 
-1. **This sweeper owns the event log's rotation.** A window-gated sweeper would
-   leave the file unread for the 16 hours a day the window is shut, so the
-   feature would create the unbounded-growth problem it exists to own.
+1. **The sweeper must keep up with the log.** A window-gated sweeper would
+   leave the file unread for the 16 hours a day the window is shut: without
+   the vault-core rotation hook (D15-ROT) the fallback truncation would never
+   run, and with it more than one rotation could pass unread, losing lines.
 2. **Bypass detection must not have blind hours.** "This machine never appears
    in the cache log" is only trustworthy if the log is read around the clock;
    windowed, every evening gamer would look like a suspect at 22:00 and
@@ -4166,10 +4431,12 @@ storm shape the setting exists to prevent and is therefore not selectable.
 
 `GET /v1/clients` gains `cache_hits`, `cache_misses`, `bytes_served`,
 `last_seen_in_cache_log`, `source_addrs` and `bypass_suspected`. The event log
-knows **addresses**; agent reports know **client_ids**; schema v9's
-`agent_reports.source_addr` is the only bridge, and a client's statistics are
-summed over **every** address its retained reports arrived from (a laptop that
-moved from wifi to cable still has traffic under the old address). The peer
+knows **addresses**; agent reports know **client_ids**; the bridge is the
+addresses each retained report correlates on — since WP AGENT-ADDR-1 the
+agent's stated `local_addrs`, else the TCP peer `source_addr` unless it is a
+forwarding hop (see "Agent LAN addresses") — and a client's statistics are
+summed over **every** such address (a laptop that moved from wifi to cable
+still has traffic under the old address). The peer
 address is taken from the TCP peer, **never** from `X-Forwarded-For` — trusting
 a client-settable header for an identity key would let any agent claim another
 machine's traffic, or disclaim its own to dodge detection.
@@ -4185,9 +4452,10 @@ surviving all six disqualifications:
 3. the client's own newest report is older than the window — a machine that has
    been off cannot be bypassing, and would otherwise be accused forever;
 4. it reports no installed games, or its snapshot was unreadable;
-5. no retained report recorded a source address — **including every pre-v9
+5. no retained report gives a usable address — **including every pre-v9
    row**, so an upgraded installation does not light up with accusations
-   against every machine at once;
+   against every machine at once, and (WP AGENT-ADDR-1) an old agent whose
+   only peer is a forwarding hop such as the Docker bridge gateway;
 6. it *has* appeared in the cache log within the window.
 
 Each of the six is separately mutation-tested: flip it and a named test in
@@ -4217,6 +4485,385 @@ traffic, so one quiet day proves nothing.
 - No content attribution from the event log. ADR-0008's boundary holds: the
   depot id is used to *look up* the mapping vault-api already owns, never to
   build it. Chunk→game attribution stays with manifests (ADR-0006/0007).
+
+## Traffic tiers: long-term client and server statistics (WP D15b)
+
+`vault_api/traffic.py`, schema v23. The event sweep folds every batch into
+three new tables in the **same transaction as the cursor** (so they inherit
+its exactly-once rule), bucketed by each line's **event time** (field 2),
+not the sweep time:
+
+| table | key | content |
+|---|---|---|
+| `client_traffic` | tier, bucket, address | requests, hits, misses, bypasses, errors, `bytes_served`, `hit_bytes`, `miss_bytes`, `last_seen` |
+| `client_depot_traffic` | tier, bucket, address, depot | requests, `bytes_served`, `hit_bytes`, `last_seen` (2xx lines with a depot id) |
+| `server_traffic` | tier, bucket | the sums above, plus `peak_bucket_bytes` and `active_buckets` |
+
+| tier | bucket | kept |
+|---|---|---|
+| `5m` | 5 minutes | 48 hours |
+| `1h` | 1 hour | 30 days |
+| `1d` | 1 UTC day | forever |
+
+(User decision 2026-10-13.) Fixed in code, not env settings (roadmap D16:
+fewer env values).
+
+**Rollup at write time, not by a recompute job.** Each batch is added to
+all three tiers at once, so each tier is complete for its retention on its
+own and a reader uses exactly one tier per range. A late line (a backlog
+after vault-api was down) lands in its correct old hour and day. The
+per-sweep job is the retention prune (`DELETE ... WHERE bucket_at <
+cutoff`, idempotent), skipped while the sweep is still working through a
+backlog (a full 4 MiB batch) so old 5-minute rows survive until the
+backlog is consumed.
+
+**Peak and average are not sums.** `server_traffic.peak_bucket_bytes` is
+the largest server-wide 5-minute total inside a bucket (peak speed =
+`peak / 300 s`), `active_buckets` the number of 5-minute buckets inside it
+that carried bytes (average speed while loading = `bytes / (active x
+300 s)`). Both are maintained at write time from the server's 5-minute row
+before and after the batch.
+
+**Event times in the future** (a skewed clock) are clamped to the sweep
+time. **Errors** (non-2xx) count as requests and errors, never as bytes or
+hits. `hit_bytes` is what the cache served from disk, i.e. "saved from
+the internet"; `miss_bytes` is what it served while fetching upstream.
+
+**The tiers start empty on upgrade.** `client_cache_stats` (sweep-time
+windows, about four hours) is not folded in; `event_sweep_state.
+traffic_since` records when the first sweep after the upgrade wrote tier
+rows (it stays `null` until a batch actually contained lines), and
+`GET /v1/stats` reports it. `client_cache_stats` and
+`VAULT_CLIENT_STATS_KEEP` stay unchanged: `GET /v1/clients` and bypass
+detection keep reading them.
+
+Privacy: this is a lasting per-IP activity record; see
+`docs/security/threat-model.md` §6, "Longer retention since WP D15b".
+
+## Clients overview and throughput (WP D15b)
+
+`vault_api/routers/traffic.py`. Three read-only endpoints over the traffic
+tiers above, for the web Clients page and Downloads header (D15c) and
+Android (D15d). All take `range` = `24h` | `7d` | `30d` | `all`; anything
+else is `422`. `24h` reads 5-minute rows, `7d`/`30d` hourly rows, `all` daily
+rows. Byte values are integers, speeds floats in bytes per second, times
+UTC `YYYY-MM-DDTHH:MM:SSZ`.
+
+### `event_feed` — in every response
+
+```json
+{"enabled": true, "state": "ok", "last_sweep_at": "2026-10-13T20:05:00Z",
+ "sweep_interval_minutes": 5, "traffic_since": "2026-10-13T19:00:00Z"}
+```
+
+`state` is one of:
+
+- `disabled` — `VAULT_EVENT_LOG_PATH` is empty. **Every traffic field is
+  `null`** (not `0`: nothing was measured), series are `[]`, agentless
+  clients are not listed. Agent clients still appear with their presence
+  and installed games. The UI should say "enable the event log" rather
+  than show zeros.
+- `never-swept` — enabled, but no sweep has run yet (fresh start).
+- `stale` — the last sweep is older than three sweep intervals. Stored
+  totals are reported; `current`, `active_clients_now`, `loading_now` and
+  `cache_active` are `null`.
+- `ok`.
+
+`traffic_since` is when the tiers started filling (the v23 upgrade): nothing
+before it was recorded, so "all" starts there.
+
+### `GET /v1/throughput?range=24h`
+
+```json
+{"event_feed": {...}, "range": "24h", "tier": "5m", "bucket_seconds": 300,
+ "range_start": "2026-10-12T20:10:00Z", "active_window_minutes": 15,
+ "current": {"bytes_per_second": 41943040.0,
+             "window_start": "2026-10-13T20:00:00Z",
+             "window_end": "2026-10-13T20:08:00Z", "window_seconds": 480},
+ "active_clients_now": 2, "runner_active_now": true,
+ "summary": {"bytes_served": 69793218560, "hit_bytes": 53687091200,
+             "miss_bytes": 10737418240, "requests": 120034, "hits": 100100,
+             "misses": 19900, "errors": 34, "hit_rate": 0.834,
+             "byte_hit_rate": 0.833, "average_bytes_per_second": 52428800.0,
+             "peak_bytes_per_second": 104857600.0, "active_clients": 3,
+             "client_bytes_served": 64424509440,
+             "prefill_runner": {"bytes_served": 5368709120,
+                                "hit_bytes": 4294967296,
+                                "miss_bytes": 1073741824, "requests": 2560,
+                                "hits": 2048, "misses": 512, "errors": 0}},
+ "jobs": [{"job_id": 812, "appid": 440, "name": "Some Game",
+           "started_at": "2026-10-13T19:55:00Z", "bytes_per_second": 31457280.0,
+           "bytes_since_start": 9437184000, "exclusive_depots": 2}]}
+```
+
+- **`current`** is the average over the previous 5-minute bucket plus the
+  part of the bucket the last sweep fell into (`window_seconds` 300..600),
+  ending at the last sweep. It is not a live gauge: the sweep runs every
+  `VAULT_EVENT_SWEEP_INTERVAL_MINUTES` and nginx flushes every 5 s. `null`
+  unless `event_feed.state` is `ok`.
+- **`active_clients_now`**: addresses with a line within
+  `active_window_minutes` (2 x sweep interval + 5 = 15 by default), the
+  prefill runner not counted; `runner_active_now` says whether the runner
+  loaded within that window (WP D15-RUNNER, `null` unless the feed is `ok`).
+- **`summary`** over the range. `bytes_served` is **everything** the cache
+  served, the prefill runner included (the real load on the cache and the
+  line; average and peak speed use it too). Every client figure leaves the
+  runner out (see "The prefill runner in the client figures" below):
+  `hit_bytes` is "GB saved from the cache" (served to clients from disk),
+  `miss_bytes` what was fetched upstream while serving clients,
+  `client_bytes_served` their sum plus bypassed bytes; `requests`, `hits`,
+  `misses`, `errors` count client requests. `hit_rate` counts requests,
+  `byte_hit_rate` bytes; both `null` with no hits and no misses.
+  `prefill_runner` is the runner's own share, so `bytes_served ==
+  client_bytes_served + prefill_runner.bytes_served`.
+  `average_bytes_per_second` is the average **while loading** (bytes over the
+  5-minute buckets that carried traffic), `null` when nothing was loaded;
+  `peak_bytes_per_second` the busiest 5-minute bucket. `active_clients`:
+  distinct addresses that loaded bytes in the range, the runner not
+  counted.
+- **`jobs`**: one entry per RUNNING prefill job, never omitted. Attribution
+  is by depot: bytes on the app's **exclusive** depots (in `depot_app_map`
+  for this app only) from any address. A shared depot is not counted, and a
+  client loading the same game at the same time is counted in. `null` speeds
+  when the feed is not `ok` or `exclusive_depots` is 0 (no mapping yet).
+  `bytes_since_start` is bucket-aligned (5-minute buckets within 48 h).
+
+### `GET /v1/throughput/series?range=24h`
+
+```json
+{"event_feed": {...}, "range": "24h", "tier": "5m", "bucket_seconds": 300,
+ "range_start": "2026-10-12T20:10:00Z",
+ "points": [{"t": "2026-10-12T20:10:00Z", "bytes_served": 0, "hit_bytes": 0,
+             "miss_bytes": 0, "requests": 0, "runner_bytes": 0,
+             "bytes_per_second": 0.0, "peak_bytes_per_second": 0.0}, ...]}
+```
+
+Oldest first, zero-filled up to the bucket "now" falls in (288 points for
+24h, 168 for 7d, 720 for 30d, one per UTC day from the first recorded day for
+`all`). `bytes_per_second` is the bucket's wall-clock average,
+`peak_bytes_per_second` its busiest 5-minute bucket (equal for `24h`).
+Like the summary: `bytes_served` and the speeds include the prefill runner,
+`hit_bytes`, `miss_bytes` and `requests` are clients only, and
+`runner_bytes` is the runner's share; summed over the points each equals
+the summary figure of the same range.
+
+### `GET /v1/clients/overview?range=7d`
+
+```json
+{"event_feed": {...}, "range": "7d", "tier": "1h",
+ "range_start": "2026-10-07T21:00:00Z", "active_window_minutes": 15,
+ "clients": [
+  {"key": "agent:gaming-pc", "kind": "agent", "client_id": "gaming-pc",
+   "addresses": ["192.168.1.42"], "connected": true,
+   "agent_presence": "online", "cache_active": true,
+   "last_active": "2026-10-13T20:07:58Z",
+   "last_seen_in_cache_log": "2026-10-13T20:07:58Z",
+   "last_reported_at": "2026-10-13T19:50:00Z",
+   "installed_appids": [440, 570], "installed_app_count": 2,
+   "stats": {"bytes_served": 1073741824, "hit_bytes": 805306368,
+             "miss_bytes": 268435456, "requests": 2048, "hits": 1536,
+             "misses": 512, "hit_rate": 0.75},
+   "loading_now": {"loading": true, "bytes_per_second": 31457280.0,
+                   "apps": [{"appid": 440, "name": "Some Game",
+                             "bytes_per_second": 31457280.0}],
+                   "unattributed_bytes_per_second": 0.0},
+   "recent_apps": [{"appid": 440, "name": "Some Game",
+                    "bytes_served": 1073741824,
+                    "last_seen": "2026-10-13T20:07:58Z"}],
+   "recent_unattributed_bytes": 0},
+  {"key": "addr:192.168.1.77", "kind": "address", "client_id": null,
+   "addresses": ["192.168.1.77"], "connected": false,
+   "agent_presence": null, "cache_active": false,
+   "last_active": "2026-10-11T18:00:12Z", ..., "installed_appids": null,
+   "installed_app_count": null, ...}]}
+```
+
+- **Who is listed:** every agent client (as `GET /v1/clients`), plus every
+  address with event-log traffic in the last 30 days or in the range that no
+  agent owns. Sorted connected first, then newest `last_active`.
+- **Address → agent:** an address belongs to the ONE agent whose newest
+  report correlates on it (`agent_reports.address_owners` over
+  `effective_addrs`: the agent's stated `local_addrs`, else its TCP peer
+  unless that is a forwarding hop — see "Agent LAN addresses"), so a DHCP
+  address moving between PCs follows the PC that has it now. `addresses`
+  therefore can differ from `GET /v1/clients`' `source_addrs` (all retained
+  addresses). A forwarding hop (the Docker bridge gateway) is never assigned
+  to an agent. An agent from before AGENT-ADDR-1 behind a published port or
+  reverse proxy therefore gets no address and the PC shows twice (agent
+  entry without traffic, address entry with it) until the agent is updated.
+  Names are operator-set per address (WP D15-NAMES, "Client names" below);
+  there is still no reverse DNS, by design.
+- **The prefill runner** is one `kind: "runner"` entry (`key: "runner"`,
+  `display_name: "Prefill runner"`, `name`/`name_addr` `null`: it cannot
+  be renamed), listed while it has traffic or a marker window in the last
+  30 days; `addresses` are the addresses it marked. Its rows are in no
+  agent or address entry, so every traffic row is in exactly one entry and
+  the entries' `stats` add up to `/v1/throughput`'s totals. See "The
+  prefill runner in the client figures" below.
+- **`connected`**: agent `online` (`GET /v1/clients`' presence rule) or
+  cache activity within `active_window_minutes`. For an address client it is
+  `cache_active`, `null` when the feed is not `ok`.
+- **`installed_appids`**: agent clients only (latest report); `null` for
+  addresses and for an unreadable snapshot.
+- **`stats`** sum the client's addresses over the range; `null` with the
+  feed disabled.
+- **`loading_now`** uses the same window as `/v1/throughput`'s `current`;
+  `null` unless the feed is `ok`; `loading: false` with zero speed when idle.
+- **`recent_apps`**: top 10 apps by bytes in the range. Depot → app through
+  `depot_app_map` at read time; a depot mapped to no app or to several (a
+  shared redistributable) cannot say which game pulled it, and its bytes are
+  in `recent_unattributed_bytes` / `unattributed_bytes_per_second` (as are
+  lines without a depot id for `loading_now`). `name` is `apps.name`, `null`
+  when unknown.
+
+### The prefill runner in the client figures (WP D15-RUNNER, schema v27)
+
+`vault_api/runner_identity.py`, `vault_api/runner_mark.py`. SteamPrefill
+downloads through vault-core like any PC, and vault-api cannot derive the
+source address vault-core logs for it (it depends on the route the runner
+takes -- DNS rewrite, Docker gateway, a dedicated bind address -- and the
+host's NAT). So the runner says it (user decision 2026-10-14, option B):
+
+1. **Marker.** Before each prefill, vault-runner (vault-api's own worker in
+   `subprocess` mode) finds vault-core exactly like SteamPrefill will --
+   `lancache.steamcontent.com`, `localhost`, `172.17.0.1`, the hostname;
+   first private/loopback IPv4 answering `/lancache-heartbeat` with
+   `X-LanCache-Processed-By` -- stores a random 128-bit token in
+   `runner_marks` and sends `GET /steamhangar/runner-mark/<token>` to that
+   address. vault-core answers `204` locally and logs the line with cache
+   status `RUNNER` (core/README.md "The runner marker"). Fail-soft: no
+   cache, a database error, a refused connection or an older vault-core
+   (404, no `X-SteamHangar-Runner-Mark` header) are logged and the prefill
+   runs unmarked. When no cache was found, discovery is skipped for the
+   next 5 minutes (a queue of jobs does not pay up to 4 x 3 s each).
+2. **Sweep.** A `RUNNER` line is not traffic. In the cursor transaction it
+   is accepted only if its token is in `runner_marks`, unused, and the
+   line's time lies between 5 minutes before and 1 hour after the token
+   was issued; the token is then consumed. Unknown, reused or expired
+   tokens are counted and logged (one WARNING per sweep). **Spoofing:**
+   the runner never held an API key; its credential is write access to the
+   shared database, which a LAN host does not have. A forged marker
+   therefore marks nothing. One exception: if another LanCache-compatible
+   host on the LAN wins discovery instead of vault-core, it receives an
+   unused token and can replay it to vault-core within the hour to flag
+   itself as the runner. That only hides its own traffic from the client
+   figures, and SteamPrefill would download through that host anyway.
+3. **Identity and expiry.** Each accepted marker extends a period of its
+   address in `runner_address_periods`; a marker more than 7 days after
+   the period's last one opens a new period. Rows of that address count as
+   the runner's from the start of the UTC day of the period's first marker
+   to the end of the UTC day 7 days after its last marker. Day-aligned on
+   purpose: a day boundary is also an hour and a 5-minute boundary, so all
+   ranges select the same rows. A runner that moves to another address
+   stops flagging the old one a week later; periods are kept forever
+   because the daily tier is.
+4. **Figures.** Speeds and `bytes_served` include the runner (real load);
+   "saved by the cache", hit rates, miss bytes, request counts and active
+   clients do not (a runner HIT saves nothing -- a forced verify run reads
+   every chunk it already has -- and a runner MISS is the prefill itself).
+   The runner's share is `summary.prefill_runner` / the series'
+   `runner_bytes`, and the overview's runner entry.
+
+Limits, stated honestly: traffic from before the first accepted marker
+(an install upgraded from an older build) stays with its address; if the
+runner's address is also a real client's (both reach vault-core through
+the same NAT, e.g. the Docker host itself), that client's traffic inside a
+window counts as the runner's -- vault-core sees one address; nothing is
+marked while the event log is off. On the day the runner first marks a new
+address, traffic that address carried earlier that same day also counts as
+the runner's. The
+miss-triggered prefill still sees the runner's own MISS lines (a running
+job dedupes them). `GET /v1/clients` (agent clients) is unchanged.
+
+### What WP D15b deliberately did NOT do
+
+- No event-log rotation on the vault-core side; that is WP D15-ROT. The
+  sweeper follows a rename rotation (inode/shrink detection) and drains the
+  unread tail of `<path>.1`.
+- No names for agentless addresses, no reverse DNS, no per-address history
+  deletion, no retention setting for the daily tier.
+- `GET /v1/jobs` keeps its 1..200 `limit`; there is no paging for long
+  history views.
+- No web or Android UI (D15c/D15d), no change to `GET /v1/clients`.
+
+## Client names (WP D15-NAMES, schema v26)
+
+`vault_api/client_names.py`, `vault_api/routers/client_names.py`. The
+operator can name a client. vault-api only ever sees addresses, so a name is
+stored per **address** (`client_names`, `key_type = "ip"`). MAC-keyed names
+are reserved in the schema (`key_type = "mac"`) for when an agent reports its
+MAC; no source does today, and the API answers `422` for them.
+
+Every row of `GET /v1/clients` and `GET /v1/clients/overview` carries three
+fields, resolved by one shared function per client kind
+(`client_names.resolve_agent` / `resolve_address`, pinned structurally):
+
+| Field | Meaning |
+|-------|---------|
+| `name` | The operator-set name, `null` when none. |
+| `name_addr` | The address a rename writes to (`PUT /v1/client-names/ip/{name_addr}`): the address the current name is stored under, else the client's first owned address. `null` = the client cannot be named (an agent with no correlated address, e.g. an agent from before AGENT-ADDR-1 behind a published port). |
+| `display_name` | `name` when set, else the agent's `client_id`, else the address. |
+
+**The rule, stated once.** An address client shows the name stored for its
+address. An agent client shows the name of the first (sorted) address it
+**owns** (`agent_reports.address_owners`, i.e. the agent whose newest report
+correlates on that address via `effective_addrs`). Owned, not every retained
+`source_addrs` entry: a DHCP address that moved to another PC takes its name
+along. **An explicit name wins** over the PC name the agent reports
+(`client_id`); the agent keeps reporting under its `client_id`, which stays
+the identity key (bypass webhooks, `DELETE /v1/clients/{client_id}`,
+`installed_on` still use it).
+
+Validation is strict: the name is trimmed, then must be 1-40 characters
+(code points) with no control (`Cc`), format (`Cf`, e.g. zero-width or bidi
+controls), surrogate, private-use, unassigned or line/paragraph separator
+characters, and must contain at least one letter, number, symbol or
+punctuation character (combining marks alone are refused). The web dialog
+applies the same rule. The body is `{"name": <string>}` and nothing else. The address
+must be a plain IP literal (no zone id, no whitespace) and is stored in the
+canonical spelling the event log and `effective_addrs` use (compressed IPv6,
+IPv4-mapped unwrapped), so `::ffff:192.0.2.7` and `192.0.2.7` are one key.
+Naming an address the vault has not seen yet is allowed. Clearing is
+`DELETE`, never an empty name. `DELETE /v1/clients/{client_id}` and
+`DELETE /v1/history` never touch names.
+
+## Delete history (WP D15-NAMES)
+
+`DELETE /v1/history?scope=all` or `?scope=older-than-30d`
+(`vault_api/history.py`); `scope` is required.
+
+```json
+{"scope": "older-than-30d", "cutoff": "2026-09-14T08:00:00Z", "jobs_deleted": 12,
+ "traffic_rows_deleted": {"client_traffic": 840, "client_depot_traffic": 2210,
+                          "server_traffic": 31}}
+```
+
+**What history is:** finished jobs (`status` done, error, cancelled; prefill
+and GC, with their log excerpts) and the three traffic tables
+(`client_traffic`, `client_depot_traffic`, `server_traffic`, every tier).
+
+**Never touched:** queued, running and paused jobs; cache content and
+`apps` (incl. `last_prefill_at`, `last_manifest_check`); mappings and
+manifests; agent reports and client names; `client_cache_stats`,
+`depot_miss_stats` and `client_bypass_state` (about four hours of
+operational state the bypass rule and the miss trigger decide on; emptying
+it could raise a false "bypassing the cache" warning, and it ages out on its
+own, so `GET /v1/clients`' `cache_hits`/`bytes_served` still show those
+hours after a delete); the event-sweep cursor and counters.
+
+- `all`: every finished job and every traffic row; `event_feed.traffic_since`
+  becomes `null` until the next sweep writes.
+- `older-than-30d`: finished jobs whose finish time (else start, else
+  creation, the same rule as `GET /v1/jobs?range=`, `jobs.HISTORY_TIME_SQL`)
+  is before `cutoff` = now - 30 days, and traffic buckets that end at or
+  before the cutoff. A bucket that straddles the cutoff (e.g. the daily row
+  of the cutoff's day) is kept whole, because it also holds newer data.
+  `traffic_since` moves forward to the start of the cutoff's day if it was
+  earlier.
+
+One `BEGIN IMMEDIATE` transaction; a concurrent sweep lands wholly before or
+after it. The web UI asks for confirmation (Downloads -> History -> "Delete
+history…").
 
 ## Webhooks (WP 3.13)
 
@@ -5856,7 +6503,10 @@ exactly the three nav destinations the frozen round-7 mockup
 (`docs/design/vault-app-mockup.html`) actually has — **not four**: an
 earlier draft of this work package added a `clients` nav item/view, which
 review correctly flagged, since the mockup reaches the client list from
-the bypass banner as a sheet, not a nav destination (WP 4a.7's job). Two
+the bypass banner as a sheet, not a nav destination (WP 4a.7's job).
+**WP D15c (user decision 2026-10-13) added `clients` as a fourth view**:
+Clients became its own page under Library, the sheet stays for the bypass
+banner and the notifications. Two
 tests guard the sync between the server and the client router:
 `tests/test_webui.py::test_router_js_views_match_webui_spa_routes` parses
 `VIEWS` out of `web/js/router.js` and compares it to `webui._SPA_ROUTES`,
@@ -5957,7 +6607,8 @@ https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com`
 three destinations — Library / Downloads / Settings, matching
 `_SPA_ROUTES` above 1:1 (Clients is NOT a nav item; it is WP 4a.7's sheet,
 reached from the bypass banner in the frozen mockup, not the bottom nav —
-see the routing section above for the review round that corrected this), a
+see the routing section above for the review round that corrected this;
+WP D15c later added Clients as a fourth nav destination), a
 History-API router (`web/js/router.js`) that swaps the active view on nav
 clicks and browser back/forward, three placeholder views
 (`web/js/views/{library,downloads,settings}.js`, each just a heading and a

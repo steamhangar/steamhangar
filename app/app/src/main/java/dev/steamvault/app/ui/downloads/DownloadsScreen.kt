@@ -50,6 +50,14 @@ import dev.steamvault.app.R
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
+import dev.steamvault.app.repo.ScheduleRepository
+import dev.steamvault.app.repo.TrafficRepository
+import dev.steamvault.app.ui.traffic.RangeChips
+import dev.steamvault.app.ui.traffic.TrafficPoll
+import dev.steamvault.app.ui.traffic.TrafficRanges
+import dev.steamvault.app.ui.traffic.logic.emptyHistoryText
+import dev.steamvault.app.ui.traffic.logic.filterJobsByRange
+import dev.steamvault.app.ui.traffic.logic.mergeJobLists
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.downloads.logic.ExcerptState
 import dev.steamvault.app.ui.downloads.logic.HistoryRowModel
@@ -62,6 +70,12 @@ import dev.steamvault.app.ui.downloads.logic.buildQueueRowModel
 import dev.steamvault.app.ui.downloads.logic.JobCardMode
 import dev.steamvault.app.ui.downloads.logic.partitionJobs
 import dev.steamvault.app.ui.downloads.logic.selectExcerptDisplay
+import dev.steamvault.app.ui.downloads.logic.nameFor
+import dev.steamvault.app.ui.downloads.logic.pendingUpdates
+import dev.steamvault.app.ui.downloads.logic.pendingIncomplete
+import dev.steamvault.app.ui.downloads.logic.incompleteScheduleNote
+import dev.steamvault.app.ui.downloads.logic.scheduleNote
+import dev.steamvault.app.ui.library.logic.formatBytesGB
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import kotlinx.coroutines.CoroutineScope
@@ -90,21 +104,30 @@ import kotlinx.coroutines.delay
  *   `MainActivity.kt`'s kdoc for the honest scope limitation this implies
  *   (the pip is only live while a jobs-polling screen is visible; a
  *   background-independent pip needs WP 4b.8's WorkManager wiring).
+ * @param trafficRepository WP D15d: the statistics header and graph
+ *   (`DownloadsStats.kt`, polled every 30 s while this screen is STARTED),
+ *   the speed line under a running job, and the History range filter.
+ * @param scheduleRepository WP UPD-6: `GET /v1/schedule` for the "Updates
+ *   available" section's note (read once per visit); `null` = no note.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(
     jobsRepository: JobsRepository,
     gamesRepository: GamesRepository,
+    trafficRepository: TrafficRepository,
+    ranges: TrafficRanges,
     ownedLibrary: OwnedLibraryController?,
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
     demoMode: Boolean,
+    scheduleRepository: ScheduleRepository? = null,
 ) {
     val scope = rememberCoroutineScope()
     val resources = LocalContext.current.resources
     val controller = remember {
-        DownloadsController(jobsRepository, gamesRepository, AndroidDownloadsStrings(resources))
+        DownloadsController(jobsRepository, gamesRepository, AndroidDownloadsStrings(resources), scheduleRepository)
     }
+    LaunchedEffect(controller) { controller.loadSchedule() } // WP UPD-6
 
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, controller) {
@@ -118,6 +141,18 @@ fun DownloadsScreen(
         }
     }
     LaunchedEffect(controller.jobs) { onJobsSnapshot(controller.jobs) }
+
+    // WP D15d: statistics header + per-job speed (one poll), History filter.
+    // The ranges chosen last survive a tab switch (WP D15d review, web parity).
+    val statsPoll = remember(trafficRepository) { downloadsStatsPoll(trafficRepository, ranges.statistics) }
+    val historyFilter = remember(trafficRepository) { HistoryFilter(trafficRepository, ranges.history) }
+    LaunchedEffect(lifecycleOwner, statsPoll) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            statsPoll.pollForever()
+        }
+    }
+    LaunchedEffect(historyFilter) { historyFilter.load() }
+    val speedLines = jobSpeedLines(statsPoll)
 
     val gamesByAppid = remember(controller.games) { controller.games.associateBy { it.appid } }
     // WP APP-FIX-2: titles in appTitle's order -- vault name, then the owned
@@ -141,8 +176,37 @@ fun DownloadsScreen(
     val queueModels = remember(partition, gamesByAppid, ownedNames) {
         partition.queued.mapIndexed { index, job -> buildQueueRowModel(job, index + 1, gamesByAppid, ownedNames) }
     }
-    val historyModels = remember(partition, gamesByAppid, ownedNames) {
-        partition.history.map { buildHistoryRowModel(it, gamesByAppid, ownedNames) }
+    // WP UPD-6: "Updates available" -- flagged games without an active job.
+    val updateRows = remember(controller.gamesKnown, controller.games, controller.jobs, gamesByAppid, ownedNames) {
+        if (!controller.gamesKnown) {
+            emptyList()
+        } else {
+            pendingUpdates(controller.games, controller.jobs) { nameFor(it.appid, gamesByAppid, ownedNames) }
+                .map { g ->
+                    UpdateRowModel(
+                        appid = g.appid,
+                        name = nameFor(g.appid, gamesByAppid, ownedNames),
+                        sizeLabel = formatBytesGB(g.size_bytes) ?: UPDATE_SIZE_UNKNOWN,
+                    )
+                }
+        }
+    }
+    // WP CACHE-COMPLETE-1c: "Incomplete" -- measured below 100 %, no active
+    // job, no update flag.
+    val incompleteRows = remember(controller.gamesKnown, controller.games, controller.jobs, gamesByAppid, ownedNames) {
+        if (!controller.gamesKnown) {
+            emptyList()
+        } else {
+            pendingIncomplete(controller.games, controller.jobs) { nameFor(it.appid, gamesByAppid, ownedNames) }
+                .map { g -> incompleteRowModel(g, nameFor(g.appid, gamesByAppid, ownedNames)) }
+        }
+    }
+    // WP D15d: the History list for the chosen range -- the newest jobs
+    // merged with the `?range=` fetch, filtered by the server's own rule.
+    val historyJobs = remember(controller.jobs, historyFilter.jobs) { mergeJobLists(controller.jobs, historyFilter.jobs) }
+    val historyModels = remember(historyJobs, historyFilter.range, gamesByAppid, ownedNames) {
+        partitionJobs(filterJobsByRange(historyJobs, historyFilter.range)).history
+            .map { buildHistoryRowModel(it, gamesByAppid, ownedNames) }
     }
 
     Scaffold(
@@ -186,10 +250,17 @@ fun DownloadsScreen(
                 partition = partition,
                 activeModels = activeModels,
                 pausedModels = pausedModels,
+                updateRows = updateRows,
+                incompleteRows = incompleteRows,
                 queueModels = queueModels,
                 historyModels = historyModels,
+                historyJobs = historyJobs,
                 controller = controller,
                 scope = scope,
+                statsPoll = statsPoll,
+                speedLines = speedLines,
+                historyFilter = historyFilter,
+                ranges = ranges,
             )
         }
     }
@@ -200,10 +271,17 @@ private fun DownloadsBody(
     partition: PartitionedJobs,
     activeModels: List<JobCardModel>,
     pausedModels: List<JobCardModel>,
+    updateRows: List<UpdateRowModel>,
+    incompleteRows: List<IncompleteRowModel>,
     queueModels: List<QueueRowModel>,
     historyModels: List<HistoryRowModel>,
+    historyJobs: List<JobSummary>,
     controller: DownloadsController,
     scope: CoroutineScope,
+    statsPoll: TrafficPoll<StatsAnswer>,
+    speedLines: Map<Int, String>,
+    historyFilter: HistoryFilter,
+    ranges: TrafficRanges,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -211,6 +289,7 @@ private fun DownloadsBody(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item(key = "bulk-bar") { DownloadsBulkBar(controller, scope) }
+        item(key = "stats") { DownloadsStatsHeader(statsPoll, scope, onRangeChosen = { ranges.statistics = it }) }
         item(key = "active-heading") { SectionHeading(stringResource(R.string.downloads_section_active)) }
         if (activeModels.isEmpty()) {
             item(key = "active-empty") { EmptyLine(stringResource(R.string.downloads_active_empty)) }
@@ -218,6 +297,7 @@ private fun DownloadsBody(
             items(activeModels, key = { "active-${it.jobId}" }) { model ->
                 JobCard(
                     model = model,
+                    speedLine = speedLines[model.jobId],
                     busy = model.jobId in controller.busyJobIds,
                     onPause = { controller.pause(scope, model.jobId) },
                     onResume = { controller.resume(scope, model.jobId) },
@@ -231,10 +311,50 @@ private fun DownloadsBody(
             items(pausedModels, key = { "paused-${it.jobId}" }) { model ->
                 JobCard(
                     model = model,
+                    speedLine = null,
                     busy = model.jobId in controller.busyJobIds,
                     onPause = { controller.pause(scope, model.jobId) },
                     onResume = { controller.resume(scope, model.jobId) },
                     onCancel = { controller.cancel(scope, model.jobId) },
+                )
+            }
+        }
+
+        // WP UPD-6: between Paused and Queue (web order), only when non-empty.
+        if (updateRows.isNotEmpty()) {
+            item(key = "updates-heading") {
+                UpdatesHeader(
+                    rows = updateRows,
+                    note = scheduleNote(controller.schedule),
+                    inFlight = controller.updatesInFlight,
+                    onUpdateAll = { controller.startUpdates(scope, updateRows.map { it.appid }, UPDATES_ALL) },
+                )
+            }
+            items(updateRows, key = { "update-${it.appid}" }) { row ->
+                UpdateRow(
+                    model = row,
+                    inFlight = controller.updatesInFlight,
+                    onUpdateNow = { controller.startUpdates(scope, listOf(row.appid), row.appid) },
+                )
+            }
+        }
+
+        // WP CACHE-COMPLETE-1c: right after "Updates available" (web
+        // order), only when non-empty.
+        if (incompleteRows.isNotEmpty()) {
+            item(key = "incomplete-heading") {
+                IncompleteHeader(
+                    rows = incompleteRows,
+                    note = incompleteScheduleNote(controller.schedule),
+                    inFlight = controller.incompleteInFlight,
+                    onCompleteAll = { ids -> controller.startCompletion(scope, ids, COMPLETE_ALL) },
+                )
+            }
+            items(incompleteRows, key = { "incomplete-${it.appid}" }) { row ->
+                IncompleteRow(
+                    model = row,
+                    inFlight = controller.incompleteInFlight,
+                    onCompleteNow = { controller.startCompletion(scope, listOf(row.appid), row.appid) },
                 )
             }
         }
@@ -264,11 +384,21 @@ private fun DownloadsBody(
         }
 
         item(key = "history-heading") { SectionHeading(stringResource(R.string.downloads_section_history)) }
+        item(key = "history-range") {
+            RangeChips(
+                label = stringResource(R.string.traffic_range_history),
+                selected = historyFilter.range,
+                onSelect = {
+                    historyFilter.selectRange(scope, it)
+                    ranges.history = historyFilter.range
+                },
+            )
+        }
         if (historyModels.isEmpty()) {
-            item(key = "history-empty") { EmptyLine(stringResource(R.string.downloads_history_empty)) }
+            item(key = "history-empty") { EmptyLine(emptyHistoryText(historyFilter.range)) }
         } else {
             items(historyModels, key = { "history-${it.jobId}" }) { model ->
-                HistoryRow(model = model, controller = controller, scope = scope)
+                HistoryRow(model = model, historyJobs = historyJobs, controller = controller, scope = scope)
             }
         }
     }
@@ -318,6 +448,7 @@ private fun EmptyLine(text: String) {
 @Composable
 private fun JobCard(
     model: JobCardModel,
+    speedLine: String?,
     busy: Boolean,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -346,6 +477,16 @@ private fun JobCard(
                     StatusIcon(kind = model.kind, size = StatusIconSize.SMALL)
                     Text(model.statusWord, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 4.dp))
                 }
+            }
+
+            // WP D15d (D13 SPEED-1): the job's speed at the cache.
+            if (speedLine != null) {
+                Text(
+                    text = speedLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
 
             if (model.mode == JobCardMode.HELD) {
@@ -427,7 +568,12 @@ private fun QueueRow(model: QueueRowModel, busy: Boolean, onRemove: () -> Unit) 
  * recompose when [ExcerptCache]'s plain-map state changes underneath it.
  */
 @Composable
-private fun HistoryRow(model: HistoryRowModel, controller: DownloadsController, scope: CoroutineScope) {
+private fun HistoryRow(
+    model: HistoryRowModel,
+    historyJobs: List<JobSummary>,
+    controller: DownloadsController,
+    scope: CoroutineScope,
+) {
     controller.excerptVersion // subscribe this scope to excerpt-cache mutations -- see kdoc above
     val excerptState = controller.excerptStateFor(model.jobId)
     val display = selectExcerptDisplay(excerptState)
@@ -485,8 +631,10 @@ private fun HistoryRow(model: HistoryRowModel, controller: DownloadsController, 
                 // cache detection) shows the hint block + Retry first and the
                 // raw output collapsed behind a toggle; every other failure
                 // (prefill_failed included) shows the output as before.
-                val job = controller.jobs.firstOrNull { it.id == model.jobId }
-                val hintView = failureHintViewFor(job, excerptState.excerpt, controller.jobs)
+                // WP D15d: the merged list, so an older row from the range
+                // fetch still finds its job (and the newest-job rule sees it).
+                val job = historyJobs.firstOrNull { it.id == model.jobId }
+                val hintView = failureHintViewFor(job, excerptState.excerpt, historyJobs)
                 val showOutput = if (hintView != null) {
                     FailureHintBlock(
                         view = hintView,
