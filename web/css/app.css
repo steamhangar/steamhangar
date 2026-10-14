@@ -553,7 +553,6 @@ button.cappill:active{ transform:scale(.93); }
 .pkgline .pkgn{ white-space:nowrap; }
 .pkgline .pkgfail{ display:inline-flex; gap:4px; white-space:nowrap; color:var(--danger); }
 .grid.cols3 .pkgline{ font-size:9px; }
-.grid.list .pkgline{ flex-basis:auto; }
 .rowname{ display:none; }
 
 /* ---------- library layouts (2 cols / 3 cols / list) ---------- */
@@ -585,54 +584,101 @@ button.cappill:active{ transform:scale(.93); }
 .grid.cols3 .updbadge .ubcompact{ display:inline; }
 
 .grid.list{ grid-template-columns:minmax(0,1fr); gap:7px; }
+/* ---- list rows: fixed columns (WP LIB-LIST-1) ----
+   User feedback on rc15: the right side of a list row was a flex line of
+   right-aligned items with varying widths (status word, size, "Update",
+   "not cached · Demon"), so nothing lined up from row to row. Each row is
+   now its own CSS grid with the SAME fixed-width tracks, so the status,
+   size, update and installed-on columns sit at the same x in every row;
+   the name track absorbs all the slack. `.meta` is `display:contents` here
+   (its children become the row's grid items; it is a plain div without a
+   role, so no semantics are lost — the card's own aria-label is the row's
+   accessible name, game-card.js header). Columns are placed by NAMED
+   LINES: the lead (cover, plus the select checkbox in select mode) is a
+   custom property, so the pick track exists only while it is shown. The
+   lead must END on a track: two adjacent line-name groups (`[a] [b]`)
+   make the whole template invalid.
+   Rows: `1fr auto auto auto auto 1fr` — two flexible spacers around the
+   text lines, so whatever lines a row has are centred against the cover
+   (which spans all rows). Every item sits in ONE row: an item spanning an
+   auto row that is empty in most cards (e.g. the status columns spanning
+   the name line and the package line) made Chrome grow that empty row to
+   half the item's height (measured 8.5px for the 17px icon), which pushed
+   the name 4px above the status icon.
+   Phone (this top-level block, < 720px; measured at 360 px the row has
+   ~250 px beside the cover, too little for a status column AND a readable
+   installed-on column, so installed-on wraps below):
+     line 1: cover | name ......................... | size
+     line 2: cover | icon | status word ........... | update
+     line 3 (installed games only): installed on (full row width)
+     line 4 (group rows only): "+N content packages · N failed"
+   The update cell sits under the size and carries the compact "Update"
+   (`.updbadge`) or the "Unplayed" pill (`.playbadge`); the two never
+   co-occur (an update badge needs a non-cached card, the pill a cached
+   one — pinned in game-card-list-columns.test.js). BP-M (>= 720px) puts
+   the columns on one line, see the LIB-LIST-1 rules in that media block. */
 .grid.list .card{
-  flex-direction:row; align-items:center; gap:10px; padding:6px 10px;
+  --lc-lead:[cover] 30px;
+  --lc-size:66px; /* also holds the "Unplayed" pill on line 2 (measured 64.4px) */
+  display:grid; align-items:center; gap:0 8px; padding:6px 10px;
+  grid-template-columns:
+    var(--lc-lead) [icon-start] 18px [icon-end state-start] minmax(0,1fr)
+    [state-end size-start] var(--lc-size) [size-end];
+  grid-template-rows:1fr auto auto auto auto 1fr;
   background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m);
 }
+body.selecting .grid.list .card{ --lc-lead:[cover] 30px [pick] 21px; }
 .grid.list .card.picked{ border-color:rgba(46,217,206,.5); }
-.grid.list .cap{ width:30px; flex:none; border-radius:5px; }
+.grid.list .cap{ grid-column:cover / span 1; grid-row:1 / -1; width:30px; border-radius:5px; }
 .grid.list .cap .name{ display:none; }
 .grid.list .capbadges{ display:none; }
-.grid.list .playbadge{
-  display:inline; flex:none; font-size:10.5px; font-weight:600; color:var(--dim);
-  padding:1px 6px; border-radius:999px; border:1px solid var(--line); white-space:nowrap;
-}
-.grid.list .playbadge .pbfull{ display:none; }
+.grid.list .pick{ grid-column:pick / span 1; grid-row:1 / -1; position:static; margin:0; }
 .grid.list .rowname{
-  display:block; flex:1; min-width:0; font-size:13px; font-weight:600; letter-spacing:-.1px;
+  grid-column:icon-start / state-end; grid-row:2;
+  display:block; min-width:0; font-size:13px; font-weight:600; letter-spacing:-.1px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
-.grid.list .meta{ flex:none; gap:8px; }
-/* WP WEB-FIX-3: still max-content wide whenever it fits (flex-basis auto,
-   no grow), but allowed to shrink and wrap instead of pushing the row past
-   the viewport when the client summary is long. */
-.grid.list .meta{ flex-shrink:1; min-width:0; }
-/* WP AG-2 review round 2: `.meta{flex:none}` above sizes this box to its
-   OWN max-content width, and `.instbadge`'s full-wording line was the
-   widest thing in it — measured live: a two-client NOT_CACHED row's
-   `.meta` grew 244.7px -> 301px once the badge existed, squeezing
-   `.rowname` (the row's PRIMARY identifier, `flex:1; min-width:0` above)
-   down to 80px with real clipping (`scrollWidth 92 > clientWidth 80`).
-   Same fix as `.grid.cols3` below, same reason: swap to the compact
-   wording so the badge stops dictating this row's width at all. */
-.grid.list .instbadge .ibfull{ display:none; }
-.grid.list .instbadge .ibcompact{ display:inline; }
-.grid.list .updbadge{ flex-basis:auto; }
+.grid.list .meta{ display:contents; }
+.grid.list .meta > .sic, .grid.list .meta > .icnact{ display:grid; grid-column:icon; grid-row:3; justify-self:start; margin-top:2px; }
+.grid.list .meta .state{
+  grid-column:state; grid-row:3; display:block; margin:2px 0 0; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.grid.list .meta .size{
+  grid-column:size; grid-row:2; display:block; margin-left:0; min-width:0;
+  text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.grid.list .updbadge{ grid-column:size; grid-row:3; justify-self:end; margin-top:2px; }
 .grid.list .updbadge .ubfull{ display:none; }
 .grid.list .updbadge .ubcompact{ display:inline; }
-.grid.list .meta .size{ display:inline; margin-left:0; }
-.grid.list .meta > .sic, .grid.list .meta > .icnact{ display:grid; }
-/* `.icnact` (the list-layout per-row action icon, only ever visible via the
-   rule directly above) has no box of its own beyond the `.sic` circle it
-   wraps — no padding/border-radius, so a hover BACKGROUND would need a new
-   base-level box first, which is a layout change outside this WP's
-   hover-only scope. `filter` changes no box size at all, the same
-   technique `.btn:hover` uses, so this is hover-only and layout-inert. */
+.grid.list .playbadge{
+  grid-column:size; grid-row:3; justify-self:end; min-width:0; max-width:100%; margin-top:2px;
+  display:block; font-size:10.5px; font-weight:600; color:var(--dim);
+  padding:1px 6px; border-radius:999px; border:1px solid var(--line);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.grid.list .playbadge .pbfull{ display:none; }
+/* Installed on: the compact wording (WP AG-2 review round 2: the full
+   wording dictated the row's width), truncated with an ellipsis inside its
+   column. `display:block` so the ellipsis lands on the visible inline span
+   (a flex container's text-overflow never reaches its items, see
+   `.playpill` above); every client by name is in the badge's `title` and
+   in the card's aria-label (game-card.js `syncInstalledTag`). */
+.grid.list .instbadge{
+  grid-column:icon-start / size-end; grid-row:4; display:block; margin-top:2px;
+  min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.grid.list .instbadge .ibfull{ display:none; }
+.grid.list .instbadge .ibcompact{ display:inline; }
+.grid.list .pkgline{ grid-column:icon-start / size-end; grid-row:5; margin-top:2px; }
+/* `.icnact` (the list-layout per-row action icon) has no box of its own
+   beyond the `.sic` circle it wraps — no padding/border-radius, so a hover
+   BACKGROUND would need a new base-level box first. `filter` changes no box
+   size at all, the same technique `.btn:hover` uses, so this is hover-only
+   and layout-inert. */
 @media (hover:hover) and (pointer:fine){
   .icnact:hover{ filter:brightness(1.3); }
 }
-.grid.list .meta .state{ display:inline; margin-left:0; }
-.grid.list .pick{ position:static; margin:0; flex:none; }
 .grid.list .card:active .cap{ transform:none; }
 .grid.list .card:active{ background:var(--raised); }
 /* New affordance (WP 4e.4): a pointer-only hover echo of the `:active`
@@ -1657,6 +1703,30 @@ body.onboarding .nav{ display:none; }
   .about-table thead th{ font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2); }
   .about-table td[data-label]::before{ content:none; }
   .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
+
+  /* WP LIB-LIST-1: the list columns on ONE line (top-level list rules
+     explain the model). The name takes all the slack; a group row's "+N
+     content packages" line sits under the name, inside the cover's height;
+     the fixed columns stay on the name's line (no row spans, see the
+     top-level comment):
+       cover | name ......... | icon | status | size | update | installed on
+             | +N content packages
+  */
+  .grid.list .card{
+    --lc-state:118px; --lc-size:64px; --lc-flag:72px; --lc-inst:132px;
+    column-gap:10px;
+    grid-template-columns:
+      var(--lc-lead) [name-start] minmax(0,1fr) [name-end icon-start] 18px
+      [icon-end state-start] var(--lc-state) [state-end size-start] var(--lc-size)
+      [size-end flag-start] var(--lc-flag) [flag-end inst-start] var(--lc-inst) [inst-end];
+  }
+  .grid.list .rowname{ grid-column:name; grid-row:2; }
+  .grid.list .pkgline{ grid-column:name; grid-row:3; }
+  .grid.list .meta > .sic, .grid.list .meta > .icnact,
+  .grid.list .meta .state, .grid.list .meta .size{ grid-row:2; margin-top:0; }
+  .grid.list .meta .state{ grid-column:state; }
+  .grid.list .instbadge{ grid-column:inst; grid-row:2; margin-top:0; }
+  .grid.list .updbadge, .grid.list .playbadge{ grid-column:flag; grid-row:2; justify-self:start; margin-top:0; }
 }
 
 /* ---------- BP-L (>= 1024px) — bottom nav becomes a left rail -----------
@@ -1918,6 +1988,14 @@ body.onboarding .nav{ display:none; }
      (`grid-template-columns:1fr`) already carries a HIGHER specificity
      (two classes) than this block's plain `.grid` rule (one class), so it
      keeps winning regardless of source order — list stays list. */
+  /* WP LIB-LIST-1: from BP-L on the row has room for the installed-on
+     column's FULL wording ("Installed on Demon", "Installed but not cached
+     · Demon"), which also says what the column is (there are no column
+     headers). Still one fixed width, still an ellipsis for a long client
+     list (full list in the badge's title). */
+  .grid.list .card{ --lc-inst:210px; }
+  .grid.list .instbadge .ibfull{ display:inline; }
+  .grid.list .instbadge .ibcompact{ display:none; }
 
   /* ----- Bulk action bar, re-derived from the library's content column ---
      (WP 4e.2). WP 4e.1 left this on `--w-text`, which only ever LOOKED
