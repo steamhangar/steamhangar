@@ -86,8 +86,9 @@
  * same pattern: the games whose measured `cache_complete_pct` is below 100,
  * with no active job and no update flag (lib/cache-completeness.js
  * `pendingIncomplete`), each with its figure and "Complete now" (`POST
- * /v1/prefill/verify`, a forced run), plus "Complete all" (`POST
- * /v1/prefill/incomplete`) and a schedule note (`incompleteScheduleNote`:
+ * /v1/prefill/verify`, a forced run), plus "Complete all" (the same
+ * route with exactly the listed completable rows, like "Update all") and a
+ * schedule note (`incompleteScheduleNote`:
  * completed automatically in the window, or manual only). A game short only
  * of damaged (wrong-size) chunks has no "Complete now" — a forced run
  * cannot fix it — and says so in its row; "Complete all" is offered only
@@ -737,17 +738,17 @@ function paintUpdates() {
 let incompleteInFlight = null;
 
 /**
- * Queue the completion: `POST /v1/prefill/verify` for one game ("Complete
- * now"), `POST /v1/prefill/incomplete` for "Complete all" (the server's own
- * selection, see lib/cache-completeness.js).
- * @param {"all"|number} which
+ * Queue the completion: `POST /v1/prefill/verify` with one game ("Complete
+ * now") or exactly the listed completable rows ("Complete all").
+ * @param {number[]} appids
+ * @param {"all"|number} which what the busy label goes on
  */
-async function startCompletion(which) {
-  if (incompleteInFlight !== null) return;
+async function startCompletion(appids, which) {
+  if (incompleteInFlight !== null || !appids.length) return;
   incompleteInFlight = which;
   paintIncomplete();
   try {
-    const refs = which === "all" ? await api.prefillIncomplete() : await api.prefillVerify([which]);
+    const refs = await api.prefillVerify(appids);
     const outcome = summarizeVerifyStart(refs, "complete");
     showToast(outcome.message, { warn: outcome.warn });
     store.refreshNow();
@@ -791,7 +792,7 @@ function buildIncompleteRow(game, gamesByAppid) {
   row.append(nm, pct);
   if (isCompletable(game)) {
     const btn = completionButton(COMPLETE_NOW_LABEL, "primary", completeNowAriaLabel(title), () =>
-      startCompletion(game.appid),
+      startCompletion([game.appid], game.appid),
     );
     btn.dataset.role = "complete-now";
     // Not `data-appid`: patchNames rewrites the text of every such node.
@@ -860,9 +861,11 @@ function paintIncomplete() {
   incompleteNote.textContent = note ?? "";
   incompleteActs.replaceChildren();
   incompleteBody.replaceChildren();
-  const completable = rows.filter(isCompletable).length;
-  if (completable) {
-    const all = completionButton(COMPLETE_ALL_LABEL, "", completeAllAriaLabel(completable), () => startCompletion("all"));
+  const completable = rows.filter(isCompletable).map((g) => g.appid);
+  if (completable.length) {
+    const all = completionButton(COMPLETE_ALL_LABEL, "", completeAllAriaLabel(completable.length), () =>
+      startCompletion(completable, "all"),
+    );
     all.dataset.role = "complete-all";
     incompleteActs.appendChild(all);
   }

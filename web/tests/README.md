@@ -3786,7 +3786,7 @@ cached, never played") is hidden on a partial card.
 
 Detail sheet: a completeness block (own figure with bytes and check time,
 or "Completeness unknown — not measured for the current build."; the group
-figure; "Damaged chunks — this version cannot repair them." for a game
+figure; "Damaged chunks — SteamHangar can't repair these yet." for a game
 short only of wrong-size chunks) and "Verify" (`POST /v1/prefill/verify`
 for the game and its packages with bytes, damaged-only members left out).
 
@@ -3794,7 +3794,8 @@ Downloads: "Incomplete (N)" after "Updates available", only with an
 entry: own figure known and below 100, no tool app, no active job, no
 update flag. "Complete now" (`POST /v1/prefill/verify`) only when a chunk
 file is missing, else the damaged note; "Complete all" (`POST
-/v1/prefill/incomplete`, no body) only when a row can be completed. Note:
+/v1/prefill/verify` with exactly the listed completable rows, like "Update
+all") only when a row can be completed. Note:
 window -> "These complete automatically in the schedule window …",
 otherwise "Manual only — …". Toast: a dedupe onto a running job reads
 "Already downloading — verifies on the next run."
@@ -3817,7 +3818,7 @@ cached display; update precedence removed; group figure ignored; Incomplete
 list without the update or the active-job filter; completable always true;
 running-dedupe wording; the Library key without `data-ck` (both the
 painted and the computed half — removing only one makes every tick a
-rebuild, so the test stays green); "Complete all" via verify; never-played
+rebuild, so the test stays green); "Complete all" sending every row (incl. damaged-only); "Complete all" via /v1/prefill/incomplete; never-played
 pill on partial; list compact CSS; demo selects damaged-only; demo without
 re-measure; sheet Verify without the packages; damaged row with a button;
 section always shown; Verify including damaged-only members; schedule note
@@ -3830,8 +3831,5 @@ ignoring the window.
   Roboto): grid2 full words up to 137 px, compact words 72-79 px in the
   118 px BP-M list column and the 147 px phone column, no overflow, no
   extra line. Not measured with Roboto.
-- "Complete all" is the server's selection: it can also force a game the
-  list shows under "Updates available" (both runs fetch the same chunks);
-  the toast reports what was queued.
 - The Android twin and the `partial`/`unverified` status kinds on Android
   are not part of this package.

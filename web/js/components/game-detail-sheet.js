@@ -132,6 +132,7 @@ import {
   DAMAGED_NOTE,
   VERIFY_HINT,
   VERIFY_LABEL,
+  verifyAriaLabel,
 } from "../lib/cache-completeness.js";
 import {
   sheetUpdateAppids,
@@ -762,7 +763,7 @@ function buildHeader(gameLike, liveJob) {
   const info = document.createElement("div");
   const h2 = document.createElement("h2");
   // WP API-FIX-4: a tool app's name comes from the server's tool list.
-  h2.textContent = state.detail?.name?.trim() || toolAppName(gameLike) || state.name || `App ${state.appid}`;
+  h2.textContent = sheetTitle(gameLike);
   const appidLine = document.createElement("div");
   appidLine.className = "appid";
   appidLine.textContent = `App ${state.appid}`;
@@ -845,9 +846,10 @@ async function startSheetUpdate(appids) {
  * @param {object | null} group its group row, or null
  * @param {number[]} appids what "Verify" sends; no button when empty
  * @param {() => Promise<void>} onVerify
+ * @param {string} title the game's name, for the button's accessible name
  * @returns {HTMLElement | null}
  */
-export function buildCompletenessSection(gameLike, group, appids, onVerify) {
+export function buildCompletenessSection(gameLike, group, appids, onVerify, title) {
   if (!showsCompletenessBlock(gameLike, group)) return null;
   const wrap = document.createElement("div");
   wrap.className = "facts detail-block";
@@ -877,9 +879,16 @@ export function buildCompletenessSection(gameLike, group, appids, onVerify) {
     btn.dataset.role = "verify";
     btn.dataset.appids = appids.join(",");
     btn.textContent = VERIFY_LABEL;
-    btn.title = VERIFY_HINT;
+    btn.setAttribute("aria-label", verifyAriaLabel(title));
+    // The hint is visible text under the button and its description.
+    const hint = document.createElement("p");
+    hint.className = "hint detail-verify-hint";
+    hint.id = "detail-verify-hint";
+    hint.dataset.role = "verify-hint";
+    hint.textContent = VERIFY_HINT;
+    btn.setAttribute("aria-describedby", hint.id);
     btn.addEventListener("click", () => withButtonBusy(btn, onVerify));
-    wrap.appendChild(btn);
+    wrap.append(btn, hint);
   }
   return wrap;
 }
@@ -897,6 +906,12 @@ async function startSheetVerify(appids) {
     showToast(outcome.message, { warn: true });
     if (outcome.refresh) store.refreshNow();
   }
+}
+
+/** The sheet's game title (header and the Verify button's name). WP
+ * API-FIX-4: a tool app's name comes from the server's tool list. */
+function sheetTitle(gameLike) {
+  return state.detail?.name?.trim() || toolAppName(gameLike) || state.name || `App ${state.appid}`;
 }
 
 /** WP API-FIX-4: the tool app's server-supplied name, or null. */
@@ -1432,7 +1447,13 @@ function render() {
   contentEl.append(buildFactLines(gameLike));
   // WP CACHE-COMPLETE-1c: completeness figure and "Verify".
   const verifyIds = currentVerifyAppids();
-  const completeness = buildCompletenessSection(gameLike, currentGroup(), verifyIds, () => startSheetVerify(verifyIds));
+  const completeness = buildCompletenessSection(
+    gameLike,
+    currentGroup(),
+    verifyIds,
+    () => startSheetVerify(verifyIds),
+    sheetTitle(gameLike),
+  );
   if (completeness) contentEl.append(completeness);
 
   const installedSection = buildInstalledSection(gameLike);

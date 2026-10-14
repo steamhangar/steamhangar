@@ -258,7 +258,7 @@ test("Incomplete texts: heading, aria labels, the row's figure", () => {
   assert.equal(completeNowAriaLabel("Aurora"), "Complete now — Aurora");
   assert.equal(incompletePctText(partial(42)), "42%");
   assert.equal(incompletePctText(unknown()), "—");
-  assert.equal(DAMAGED_NOTE, "Damaged chunks — this version cannot repair them.");
+  assert.equal(DAMAGED_NOTE, "Damaged chunks — SteamHangar can't repair these yet.");
 });
 
 test("Incomplete list key: changes with the figure and the completable state, not with unrelated fields", () => {

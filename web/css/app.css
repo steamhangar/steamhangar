@@ -993,6 +993,9 @@ h4.sec[hidden]{ display:none; }
 .urow .btn{ flex:none; }
 /* WP CACHE-COMPLETE-1c: the "Incomplete" row of a game short only of
    damaged chunks says why it has no "Complete now" button. */
+/* WP CACHE-COMPLETE-1c: the detail sheet's Verify explanation, under the
+   button (left-aligned like the facts; `.hint` centres). */
+.detail-verify-hint{ text-align:left; margin:6px 0 0; }
 .urow .unote{ flex:none; max-width:55%; font-size:11px; color:var(--dim-2); text-align:right; }
 
 .hrow{ border:1px solid var(--line-soft); background:var(--surface); border-radius:var(--r-m); margin-bottom:7px; overflow:hidden; }

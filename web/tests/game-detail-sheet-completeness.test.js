@@ -59,13 +59,16 @@ const role = (el, r) => el.querySelector(`[data-role="${r}"]`);
 
 test("MUTATION TARGET -- block: the figure line, and Verify carrying its app ids", () =>
   withFakeDom(({ buildCompletenessSection }) => {
-    const el = buildCompletenessSection(row(), null, [2010010], async () => {});
+    const el = buildCompletenessSection(row(), null, [2010010], async () => {}, "Aurora Cascade");
     assert.equal(el.dataset.role, "completeness");
     assert.match(role(el, "complete-line").textContent, /^80% complete — 3\.2 GB of 4\.0 GB on disk · checked /);
     const btn = role(el, "verify");
     assert.equal(btn.textContent, "Verify");
+    assert.equal(btn.getAttribute("aria-label"), "Verify — Aurora Cascade");
     assert.equal(btn.dataset.appids, "2010010");
-    assert.match(btn.title, /downloads what is missing/);
+    const hint = role(el, "verify-hint");
+    assert.match(hint.textContent, /downloads what is missing/, "visible explanation");
+    assert.equal(btn.getAttribute("aria-describedby"), hint.id, "and the button's description");
     assert.equal(role(el, "damaged-note"), null);
     assert.equal(role(el, "complete-group"), null, "no group line for a plain game");
   }));
@@ -86,7 +89,7 @@ test("MUTATION TARGET -- block: damaged-only shows the note and no Verify (empty
   withFakeDom(({ buildCompletenessSection }) => {
     const damaged = row({ cache_complete_pct: 99, cache_missing_chunks: 0 });
     const el = buildCompletenessSection(damaged, null, [], async () => {});
-    assert.equal(role(el, "damaged-note").textContent, "Damaged chunks — this version cannot repair them.");
+    assert.equal(role(el, "damaged-note").textContent, "Damaged chunks — SteamHangar can't repair these yet.");
     assert.equal(role(el, "verify"), null);
   }));
 
@@ -137,7 +140,7 @@ test("MUTATION TARGET -- wiring: render() builds the block after the facts with 
   const r = body("function render() {");
   assert.match(
     r,
-    /contentEl\.append\(buildFactLines\(gameLike\)\);\s*\/\/[^\n]*\n\s*const verifyIds = currentVerifyAppids\(\);\s*const completeness = buildCompletenessSection\(gameLike, currentGroup\(\), verifyIds, \(\) => startSheetVerify\(verifyIds\)\);\s*if \(completeness\) contentEl\.append\(completeness\);/,
+    /contentEl\.append\(buildFactLines\(gameLike\)\);\s*\/\/[^\n]*\n\s*const verifyIds = currentVerifyAppids\(\);\s*const completeness = buildCompletenessSection\(\s*gameLike,\s*currentGroup\(\),\s*verifyIds,\s*\(\) => startSheetVerify\(verifyIds\),\s*sheetTitle\(gameLike\),\s*\);\s*if \(completeness\) contentEl\.append\(completeness\);/,
   );
 });
 
@@ -153,7 +156,7 @@ test("MUTATION TARGET -- wiring: the request is POST /v1/prefill/verify, worded 
   assert.match(s, /store\.refreshNow\(\)/);
   const apiSrc = readFileSync(new URL("../js/api.js", import.meta.url), "utf8");
   assert.match(apiSrc, /prefillVerify: \(appids\) => request\("POST", "\/v1\/prefill\/verify", \{ body: \{ appids \} \}\)/);
-  assert.match(apiSrc, /prefillIncomplete: \(\) => request\("POST", "\/v1\/prefill\/incomplete"\)/);
+  assert.doesNotMatch(apiSrc, /prefill\/incomplete/, "Complete all sends the listed ids, never the server's selection");
 });
 
 test("MUTATION TARGET -- wiring: the structural key carries the completeness part; the patch path refreshes the lines", () => {

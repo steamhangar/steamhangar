@@ -54,11 +54,11 @@
  * server's own two-line rule on the same fields.
  *
  * **Actions.** "Verify" (detail sheet) and "Complete now" (one row) send
- * `POST /v1/prefill/verify {appids}`; "Complete all" sends
- * `POST /v1/prefill/incomplete` (no body: the server selects every
- * incomplete game short of at least one chunk file, so it can also force a
- * game the list shows under "Updates available"; the toast reports what it
- * really queued). A row short only of wrong-size chunks
+ * `POST /v1/prefill/verify {appids}`; "Complete all" sends the same route
+ * with exactly the listed rows "Complete now" is offered for (like UPD-6's
+ * "Update all"), never `POST /v1/prefill/incomplete`: the server's own
+ * selection ignores jobs and update flags, so it could force games this
+ * list does not show. A row short only of wrong-size chunks
  * (`cache_missing_chunks === 0`) gets no "Complete now": a forced run cannot
  * replace such a chunk (README "Damaged chunks"), so the row says so
  * instead ({@link DAMAGED_NOTE}). A verify that dedupes onto a RUNNING job
@@ -169,7 +169,7 @@ export const VERIFY_LABEL = "Verify";
 export const VERIFY_HINT =
   "Re-checks every chunk of the current build against the cache and downloads what is missing.";
 /** A row short only of wrong-size chunks (see module header). */
-export const DAMAGED_NOTE = "Damaged chunks — this version cannot repair them.";
+export const DAMAGED_NOTE = "Damaged chunks — SteamHangar can't repair these yet.";
 export const UNKNOWN_LINE = "Completeness unknown — not measured for the current build.";
 
 /** True for a row whose own figure is known, below 100 and short of no
@@ -317,8 +317,8 @@ export function incompleteScheduleNote(schedule) {
 }
 
 /**
- * Toast for a successful `POST /v1/prefill/verify` or
- * `POST /v1/prefill/incomplete`.
+ * Toast for a successful `POST /v1/prefill/verify` ("Verify", "Complete
+ * now", "Complete all").
  *
  * A deduplicated entry is worded by its job's status (README "UI note"): a
  * QUEUED job runs forced when the worker claims it; a PAUSED one runs

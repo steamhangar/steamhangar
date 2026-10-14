@@ -3,8 +3,9 @@
  * `views/downloads.js`: rendered only with an entry (user rule 2026-10-14),
  * placed after "Updates available" and before the Queue, one row per
  * incomplete game with its figure, "Complete now" -> `POST
- * /v1/prefill/verify {appids:[id]}`, "Complete all" -> `POST
- * /v1/prefill/incomplete` without a body, no "Complete now" (a note
+ * /v1/prefill/verify {appids:[id]}`, "Complete all" -> the same route with
+ * exactly the listed completable rows (never `/v1/prefill/incomplete`), focus
+ * kept across a rebuild, no "Complete now" (a note
  * instead) for a game short only of damaged chunks, no "Complete all" when
  * no row can be completed, the schedule note, the "verifies on the next run"
  * toast for a running dedupe, and the started game leaving the list once
@@ -65,8 +66,6 @@ const server = {
   jobs: [],
   schedule: { enabled: false, window: null, sweep_include_cached: true },
   posts: [], // {path, body}
-  // what POST /v1/prefill/incomplete selects (the server's own choice)
-  incompleteSelection: [],
   // appid -> job status to dedupe onto
   dedupe: new Map(),
   nextJobId: 700,
@@ -93,7 +92,6 @@ globalThis.fetch = async (url, init = {}) => {
   if (method === "POST" && p.startsWith("/v1/prefill")) {
     const body = init.body === undefined ? undefined : JSON.parse(init.body);
     server.posts.push({ path: p, body });
-    if (p === "/v1/prefill/incomplete") return respond(202, server.incompleteSelection.map(enqueue));
     return respond(202, (body?.appids || []).map(enqueue));
   }
   return respond(404, { detail: "Not Found" });
@@ -137,7 +135,6 @@ function reset() {
   server.posts = [];
   server.jobs = [];
   server.dedupe = new Map();
-  server.incompleteSelection = [];
   server.schedule = { enabled: false, window: null, sweep_include_cached: true };
   shell["toast-text"].textContent = "";
 }
@@ -164,7 +161,7 @@ test("MUTATION PIN: hidden while nothing is incomplete; shown with rows, figures
     assert.equal(nowBtn(s, 20).textContent, "Complete now");
     assert.equal(nowBtn(s, 20).getAttribute("aria-label"), "Complete now — Aurora");
     assert.equal(nowBtn(s, 40), null, "MUTATION PIN: no Complete now for damaged-only");
-    assert.equal(rowFor(s, 40).querySelector('[data-role="damaged-note"]').textContent, "Damaged chunks — this version cannot repair them.");
+    assert.equal(rowFor(s, 40).querySelector('[data-role="damaged-note"]').textContent, "Damaged chunks — SteamHangar can't repair these yet.");
     assert.equal(allBtn(s).textContent, "Complete all");
     assert.equal(allBtn(s).getAttribute("aria-label"), "Complete all 2 games", "counts only the completable rows");
 
@@ -211,16 +208,24 @@ test("MUTATION PIN: 'Complete now' sends POST /v1/prefill/verify with exactly th
   }
 });
 
-test("MUTATION PIN: 'Complete all' sends POST /v1/prefill/incomplete with no body; the toast reports what the server queued", async () => {
+test("MUTATION PIN: 'Complete all' sends POST /v1/prefill/verify with exactly the listed completable rows", async () => {
   reset();
-  server.games = [partial(20, "Aurora", 86, 3), partial(30, "Zephyr Run", 42, 7)];
-  server.incompleteSelection = [20, 30];
+  // Incomplete on the server, but not listed here: update-flagged (60), busy
+  // (70) and damaged-only (40). None of them may be sent.
+  server.games = [
+    partial(20, "Aurora", 86, 3),
+    partial(30, "Zephyr Run", 42, 7),
+    partial(40, "Broken Bits", 99, 0),
+    partial(60, "Has Update", 10, 9, { update_available: true }),
+    partial(70, "Busy One", 50, 5),
+  ];
+  server.jobs = [{ id: 9, appid: 70, type: "prefill", status: "paused", stop_request: null, created_at: T, started_at: T }];
   try {
     const s = await open();
     await until(() => allBtn(s) !== null, "button shown");
     click(allBtn(s));
     await until(() => server.posts.length === 1, "one POST");
-    assert.deepEqual(server.posts[0], { path: "/v1/prefill/incomplete", body: undefined });
+    assert.deepEqual(server.posts[0], { path: "/v1/prefill/verify", body: { appids: [20, 30] } });
     await until(() => toastText() === "2 queued to complete", "toast");
   } finally {
     store.stop();
@@ -268,6 +273,36 @@ test("a game with an active job is not listed (it is in the queue)", async () =>
     const s = await open();
     await until(() => box(s).hidden === false, "section shown");
     assert.deepEqual(rowNames(s), ["Aurora"]);
+  } finally {
+    store.stop();
+  }
+});
+
+test("MUTATION PIN: focus survives a rebuild — the same row's button, then 'Complete all', then the Queue heading", async () => {
+  reset();
+  server.games = [partial(20, "Aurora", 86, 3), partial(30, "Zephyr Run", 42, 7)];
+  try {
+    const s = await open();
+    await until(() => nowBtn(s, 30) !== null, "rows shown");
+    nowBtn(s, 30).focus();
+    // A new figure for the other row rebuilds the section.
+    server.games = [partial(20, "Aurora", 87, 2), partial(30, "Zephyr Run", 42, 7)];
+    store.refreshNow();
+    await until(() => rowFor(s, 20).querySelector(".usize").textContent === "87%", "rebuilt");
+    assert.equal(document.activeElement?.dataset?.incompleteAppid, "30", "the same row's button");
+    assert.equal(document.activeElement?.dataset?.role, "complete-now");
+
+    // Its row leaves: focus moves to "Complete all".
+    server.games = [partial(20, "Aurora", 87, 2), partial(30, "Zephyr Run", 100, 0)];
+    store.refreshNow();
+    await until(() => rowFor(s, 30) === null, "row gone");
+    assert.equal(document.activeElement?.dataset?.role, "complete-all");
+
+    // The whole section empties: focus moves to the Queue heading.
+    server.games = [partial(20, "Aurora", 100, 0), partial(30, "Zephyr Run", 100, 0)];
+    store.refreshNow();
+    await until(() => box(s).hidden === true, "section hidden");
+    assert.equal(document.activeElement?.textContent?.startsWith("Queue"), true);
   } finally {
     store.stop();
   }
