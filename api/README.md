@@ -5942,7 +5942,10 @@ exactly the three nav destinations the frozen round-7 mockup
 (`docs/design/vault-app-mockup.html`) actually has — **not four**: an
 earlier draft of this work package added a `clients` nav item/view, which
 review correctly flagged, since the mockup reaches the client list from
-the bypass banner as a sheet, not a nav destination (WP 4a.7's job). Two
+the bypass banner as a sheet, not a nav destination (WP 4a.7's job).
+**WP D15c (user decision 2026-10-13) added `clients` as a fourth view**:
+Clients became its own page under Library, the sheet stays for the bypass
+banner and the notifications. Two
 tests guard the sync between the server and the client router:
 `tests/test_webui.py::test_router_js_views_match_webui_spa_routes` parses
 `VIEWS` out of `web/js/router.js` and compares it to `webui._SPA_ROUTES`,
@@ -6043,7 +6046,8 @@ https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com`
 three destinations — Library / Downloads / Settings, matching
 `_SPA_ROUTES` above 1:1 (Clients is NOT a nav item; it is WP 4a.7's sheet,
 reached from the bypass banner in the frozen mockup, not the bottom nav —
-see the routing section above for the review round that corrected this), a
+see the routing section above for the review round that corrected this;
+WP D15c later added Clients as a fourth nav destination), a
 History-API router (`web/js/router.js`) that swaps the active view on nav
 clicks and browser back/forward, three placeholder views
 (`web/js/views/{library,downloads,settings}.js`, each just a heading and a

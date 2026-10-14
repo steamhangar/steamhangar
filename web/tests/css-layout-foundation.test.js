@@ -132,11 +132,13 @@ test("app.css's top-level (non-media) text contains no rail/grid layout machiner
   }
 });
 
-test("app.css's top-level .nav rule is still the base 3-column bottom bar, untouched in substance", () => {
+test("app.css's top-level .nav rule is still the base bottom bar, one column per nav item (four since WP D15c's Clients)", () => {
   const body = ruleBody(appTop, ".nav");
   assert.ok(body, ".nav rule not found at top level");
   assert.ok(body.includes("bottom:0"), "base .nav must still be bottom-pinned");
-  assert.ok(body.includes("repeat(3, 1fr)"), "base .nav must still be the 3-column grid");
+  assert.ok(body.includes("repeat(4, 1fr)"), "base .nav must be a 4-column grid: Library, Clients, Downloads, Settings (WP D15c)");
+  const navButtons = (readFileSync(new URL("../index.html", import.meta.url), "utf8").match(/class="nav-btn"/g) || []).length;
+  assert.equal(navButtons, 4, "one grid column per .nav-btn in index.html");
   assert.ok(body.includes("order:1"), "base .nav needs the D-11 order compensation for the DOM reorder");
 });
 

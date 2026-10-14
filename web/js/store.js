@@ -223,6 +223,65 @@ class ResourceLoop {
 }
 
 /**
+ * A view-scoped single-snapshot poll (WP D15c): the Clients page's
+ * `GET /v1/clients/overview` and the Downloads header's
+ * `GET /v1/throughput[/series]`. These carry a `range` parameter the view
+ * owns and are only worth a request while their view is on screen, so they
+ * are not loops of the always-on store below. They reuse `ResourceLoop` all
+ * the same, so they get the same in-flight guard, generation token, backoff
+ * and hidden-tab park as every store loop (no second timer idiom).
+ *
+ * `start()` is idempotent and registers its own `visibilitychange` nudge;
+ * `stop()` cancels the timer and removes the listener (the view calls it
+ * when it is navigated away from). `refresh()` polls again as soon as the
+ * loop allows (a range change): an answer already in flight still lands,
+ * so `onTick` must check that the answer is for the range it wants (the
+ * traffic endpoints echo `range`).
+ *
+ * @param {{
+ *   fetcher: () => Promise<unknown>,
+ *   intervalMs: number,
+ *   onTick: (curr: unknown) => void,
+ *   onError?: (err: unknown) => void,
+ *   backoffOptions?: import("./backoff.js").BackoffOptions,
+ * }} options
+ */
+export function createViewPoll({ fetcher, intervalMs, onTick, onError, backoffOptions }) {
+  const loop = new ResourceLoop({
+    fetcher,
+    getIntervalMs: () => intervalMs,
+    backoffOptions,
+    onTick: ({ curr }) => onTick(curr),
+    onError,
+  });
+  function onVisibilityChange() {
+    if (!isDocumentHidden()) loop.nudge();
+  }
+  return {
+    start() {
+      if (!loop.stopped) return;
+      loop.start();
+      if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibilityChange);
+    },
+    stop() {
+      loop.stop();
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange);
+    },
+    refresh() {
+      loop.nudge();
+    },
+    get running() {
+      return !loop.stopped;
+    },
+  };
+}
+
+/** WP D15c: the view polls' cadence. The traffic numbers change once per
+ * event sweep (5 minutes by default), so 30 s is fresh enough without a
+ * request every few seconds. */
+export const VIEW_POLL_MS = 30000;
+
+/**
  * Build (but do not start) the polling store.
  *
  * @param {{

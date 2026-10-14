@@ -165,7 +165,7 @@
   position:sticky; bottom:0; z-index:20;
   order:1;
   display:grid;
-  grid-template-columns:repeat(3, 1fr);
+  grid-template-columns:repeat(4, 1fr);
   background:rgba(13,21,27,.96);
   border-top:1px solid var(--line-soft);
   padding:7px 6px calc(9px + env(safe-area-inset-bottom));
@@ -1368,6 +1368,38 @@ body.onboarding .nav{ display:none; }
 .pcs-remove .foot-note{ margin:9px 0 0; }
 .pcs-remove-dialog h3{ overflow-wrap:anywhere; }
 
+/* ---------- WP D15c: range selector, Clients page, Downloads statistics ----------
+   The range selector reuses `.segs` with the text-segment sizing Settings
+   gives `.field > .segs` (WEB-FIX-3): never wraps a label, scrolls sideways
+   on a screen too narrow for all four. Client cards reuse `.jobcard`/
+   `.jobtop` and the `.pchip` presence chip. The statistics header is a
+   two-column tile grid on a phone, four columns from BP-M (below), and the
+   throughput graph is inline SVG drawn by views/downloads.js. */
+.segs.rangesegs{ display:flex; width:max-content; max-width:100%; overflow-x:auto; scrollbar-width:none; margin:10px 0 4px; }
+.segs.rangesegs button{
+  width:auto; height:auto; min-height:32px; flex:none;
+  padding:6px 12px; font-size:12.5px; white-space:nowrap;
+}
+.segs.rangesegs[hidden]{ display:none; }
+.cl-note{ text-align:left; }
+.clcard .cl-line{ margin-top:4px; overflow-wrap:anywhere; }
+.clcard .jobtop .pchip{ margin-top:2px; }
+.dl-stats{ margin:10px 0 2px; }
+.dl-stats .hint{ text-align:left; }
+.statgrid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin:8px 0 0; }
+.statgrid[hidden]{ display:none; }
+.stat{ min-width:0; padding:9px 11px; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line-soft); }
+.stat dt{ font-size:11px; font-weight:600; letter-spacing:.3px; color:var(--dim-2); }
+.stat dd{ margin:3px 0 0; font-family:var(--mono); font-size:15px; color:var(--text); overflow-wrap:anywhere; }
+.stat .stat-detail{ display:block; margin-top:2px; font-family:var(--ui); font-size:11px; color:var(--dim-2); }
+.tgraph{ margin:10px 0 0; }
+.tgraph[hidden]{ display:none; }
+.tgraph svg{ display:block; width:100%; height:72px; }
+.tgraph .tg-line{ fill:none; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+.tgraph .tg-area{ fill:var(--accent-glow); stroke:none; }
+.tgraph .tg-axis{ display:flex; justify-content:space-between; gap:8px; margin-top:3px; font-size:10.5px; color:var(--dim-2); }
+.jobspeed{ margin:6px 0 0; font-family:var(--mono); font-size:12px; color:var(--dim); }
+
 /* WP PAIR-1: "Add a device" sheet (components/add-device-sheet.js). The QR
    code is always dark modules on a white plate (its quiet zone is part of
    the SVG), whatever the theme: scanners want dark-on-light. Sized to the
@@ -1637,6 +1669,9 @@ body.onboarding .nav{ display:none; }
   .about-table thead th{ font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2); }
   .about-table td[data-label]::before{ content:none; }
   .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
+
+  /* WP D15c: the Downloads statistics tiles in one row of four. */
+  .statgrid{ grid-template-columns:repeat(4, minmax(0, 1fr)); }
 }
 
 /* ---------- BP-L (>= 1024px) — bottom nav becomes a left rail -----------
@@ -1845,7 +1880,7 @@ body.onboarding .nav{ display:none; }
      property on the same element: the two rules target two different
      elements, so there is no cascade tie to resolve here, and none is
      created by adding this. */
-  .view-downloads, .view-settings{
+  .view-downloads, .view-settings, .view-clients{
     max-width:var(--w-text);
     margin:0 auto;
   }

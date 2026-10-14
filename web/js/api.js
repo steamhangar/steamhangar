@@ -204,7 +204,9 @@ export const api = {
   games: () => request("GET", "/v1/games"),
   game: (appid) => request("GET", `/v1/games/${appid}`),
   mapping: () => request("GET", "/v1/mapping"),
-  jobs: (limit = 20) => request("GET", "/v1/jobs", { params: { limit } }),
+  // WP D15c: `range` (24h|7d|30d|all) or `since` filters finished jobs by
+  // age (WP D15b); omitted, the call is unchanged (the store's poll).
+  jobs: (limit = 20, { range, since } = {}) => request("GET", "/v1/jobs", { params: { limit, range, since } }),
   job: (id) => request("GET", `/v1/jobs/${id}`),
   prefill: (appids) => request("POST", "/v1/prefill", { body: { appids } }),
   prefillCached: () => request("POST", "/v1/prefill/cached"),
@@ -215,6 +217,12 @@ export const api = {
   gc: (appid, execute = false) => request("POST", `/v1/cache/${appid}/gc`, { body: { execute } }),
   cacheSummary: () => request("GET", "/v1/cache/summary"),
   clients: () => request("GET", "/v1/clients"),
+  // WP D15c: the Clients page and the Downloads header (WP D15b endpoints).
+  // `range` is 24h|7d|30d|all. A server older than D15b answers 404 (kind
+  // `not_found`), which the views read as "not supported by this server".
+  clientsOverview: (range) => request("GET", "/v1/clients/overview", { params: { range } }),
+  throughput: (range) => request("GET", "/v1/throughput", { params: { range } }),
+  throughputSeries: (range) => request("GET", "/v1/throughput/series", { params: { range } }),
   // WP WEB-FEAT-4: Remove in the PCs sheet. `client_id` is operator-chosen
   // free text, so it is percent-encoded as ONE path segment. Resolves
   // `null` (204); 404 rejects with kind `not_found` and the caller decides
