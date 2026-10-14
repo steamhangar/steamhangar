@@ -101,7 +101,9 @@ recorded; this addendum supersedes two points.
 
 User decision 2026-10-14 (morning, `docs/handover/post-0.1.0-roadmap.md`).
 Supersedes the window gate in points 1 and 3 of the 2026-10-13 addendum
-(the orchestrator's implementation of "only prod checks"):
+(the orchestrator's implementation of "only prod checks"), and point 2's
+rationale sentence "the dev instance has no schedule window configured,
+so it never checks on its own":
 
 - The scheduled update check runs every
   `VAULT_SCHEDULE_INTERVAL_MINUTES` **whenever the oracle is on**, with a

@@ -4937,8 +4937,9 @@ automatic download or prefill sweep starts). **The oracle setting
 `VAULT_MANIFEST_ORACLE` is the one switch for both triggers** (see "Manifest
 oracle"): with it off, no check runs, scheduled or manual.
 
-- **Scheduled trigger.** Every scheduler tick asks the shared `update_check.UpdateCheckRunner` whether a check is due
-  (once per `VAULT_SCHEDULE_INTERVAL_MINUTES`). On a due tick it stamps the claim and
+- **Scheduled trigger.** Every scheduler tick asks the shared
+  `update_check.UpdateCheckRunner` whether a check is due (once per
+  `VAULT_SCHEDULE_INTERVAL_MINUTES`). On a due tick it stamps the claim and
   hands the run to a background thread, so the tick itself never waits for the
   oracle and the event and prefill sweeps are never delayed by it. The run
   refreshes the manifest oracle for every game with cache content
