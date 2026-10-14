@@ -168,7 +168,7 @@ test("demo: the flagged game is listed, the demo window gives the automatic note
     assert.ok(rows.length >= 1, "at least one flagged demo game");
     assert.ok(rows.some((r) => r.name === "Emberreach"), "the demo's flagged game");
     const schedule = await demoRequest("GET", "/v1/schedule");
-    assert.equal(scheduleNote(schedule), "These download automatically in the schedule window 22:00–06:00.");
+    assert.equal(scheduleNote(schedule), "These download automatically in the schedule window 03:00–07:00.");
 
     const refs = await demoRequest("POST", "/v1/prefill", { body: { appids: rows.map((r) => r.appid) } });
     assert.match(summarizeUpdateStart(refs, games).message, /queued for update/);

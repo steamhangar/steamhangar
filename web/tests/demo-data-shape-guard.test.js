@@ -29,6 +29,7 @@ import {
   demoPresence,
   DEMO_ASSUMED_REPORT_INTERVAL_SECONDS,
   DEMO_PRESENCE_GRACE_SECONDS,
+  demoSettingSpecs,
 } from "../js/demo-data.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -215,4 +216,69 @@ test("demo GET /v1/dist mirrors a release vault: the about version, the server's
   assert.equal(index.apk_alias_url, "/dist/steamhangar-app.apk");
   assert.match(distSrc, /APK_ALIAS = "steamhangar-app\.apk"/);
   assert.equal(index.artifacts[0].name, `steamhangar-app-v${index.version}.apk`);
+});
+
+// ---- WP D16-WEB: GET /v1/settings (SettingsOut / SettingInfoOut, D16b) ------
+
+const settingsRouterSrc = readFileSync(path.join(apiDir, "routers", "settings.py"), "utf8");
+const settingsStoreSrc = readFileSync(path.join(apiDir, "settings_store.py"), "utf8");
+
+/** OVERRIDABLE_SPECS read from settings_store.py: key, env name, applies
+ * and the target/risky/expert keywords of each `SettingSpec(...)` block. */
+function overridableSpecs() {
+  const start = settingsStoreSrc.indexOf("OVERRIDABLE_SPECS: dict[str, SettingSpec] = {");
+  const end = settingsStoreSrc.indexOf("\n}\n", start);
+  assert.ok(start !== -1 && end !== -1, "OVERRIDABLE_SPECS not found — VALUE drift (moved/renamed): re-point this guard");
+  const blocks = settingsStoreSrc.slice(start, end).split("SettingSpec(").slice(1);
+  return blocks.map((b) => {
+    const m = /^\s*"([a-z_0-9]+)",\s*"(VAULT_[A-Z_0-9]+)",\s*"([a-z_-]+)"/.exec(b);
+    assert.ok(m, `a SettingSpec( block does not start with "key", "ENV", "applies" — GRAMMAR drift: widen this reader. Block: ${b.slice(0, 80)}`);
+    const target = /target=TARGET_CORE/.test(b) ? "core" : /target=TARGET_BOTH/.test(b) ? "api+core" : "api";
+    return { key: m[1], env_var: m[2], applies: m[3], target, risky: /risky=True/.test(b), expert: /expert=True/.test(b) };
+  });
+}
+
+test("sanity: the spec reader sees 29 editable keys incl. the risky core keys (proves it is not vacuous)", () => {
+  const specs = overridableSpecs();
+  assert.equal(specs.length, 29, `read ${specs.length} specs — GRAMMAR drift if the API still has 29: widen overridableSpecs`);
+  assert.ok(specs.find((s) => s.key === "upstream_max_conns" && s.risky && s.expert && s.target === "core"));
+  assert.ok(specs.find((s) => s.key === "log_level" && !s.risky && s.expert));
+});
+
+test("MUTATION TARGET: demo /v1/settings has EXACTLY SettingsOut's keys, and every row EXACTLY SettingInfoOut's", async () => {
+  const out = await demoRequest("GET", "/v1/settings");
+  const outer = modelFields(settingsRouterSrc, "SettingsOut");
+  assert.deepEqual(sortedKeys(out), [...outer].sort(), driftMessage("demo /v1/settings", "SettingsOut", outer, "update handleGetSettings in demo-data.js"));
+  const inner = modelFields(settingsRouterSrc, "SettingInfoOut");
+  assert.ok(inner.includes("editable") && inner.includes("shadowed"), "GRAMMAR drift: the D16b fields were not read");
+  for (const row of out.settings) {
+    assert.deepEqual(sortedKeys(row), [...inner].sort(), driftMessage(`demo settings row ${row.key}`, "SettingInfoOut", inner, "update describeDemoSettings in demo-data.js"));
+  }
+});
+
+test("MUTATION TARGET: the demo's editable keys equal OVERRIDABLE_SPECS in order, with env name, applies, target, risky and expert", async () => {
+  const specs = overridableSpecs();
+  assert.deepEqual(demoSettingSpecs(), specs, "VALUE drift: settings_store.OVERRIDABLE_SPECS changed — update DEMO_SETTING_SPECS in demo-data.js");
+  const out = await demoRequest("GET", "/v1/settings");
+  const editable = out.settings.filter((r) => !r.env_only);
+  assert.deepEqual(editable.map((r) => r.key), specs.map((s) => s.key));
+  for (const r of editable) {
+    const s = specs.find((x) => x.key === r.key);
+    assert.equal(r.env_visible, s.target !== "core", `${r.key}: env_visible is false exactly for core-only keys`);
+    assert.equal(r.editable, r.source !== "env", `${r.key}: editable is false exactly while env pins it`);
+    assert.ok(r.grammar.length > 0, `${r.key}: grammar hint`);
+  }
+});
+
+test("the demo's env-only rows equal ENV_ONLY_INFO_KEYS (webhook_url included, masked)", async () => {
+  const m = /ENV_ONLY_INFO_KEYS[^=]*=\s*\(([\s\S]*?)\n\)/.exec(settingsStoreSrc);
+  assert.ok(m, "ENV_ONLY_INFO_KEYS not found — VALUE drift: re-point this guard");
+  const keys = [...m[1].matchAll(/EnvOnlySpec\("([a-z_]+)",\s*"(VAULT_[A-Z_]+)"/g)].map((x) => [x[1], x[2]]);
+  assert.ok(keys.length >= 10, `read ${keys.length} env-only keys — GRAMMAR drift: widen this regex`);
+  const out = await demoRequest("GET", "/v1/settings");
+  const rows = out.settings.filter((r) => r.env_only).map((r) => [r.key, r.env_var]);
+  assert.deepEqual(rows, keys, "VALUE drift: update ENV_ONLY_DEMO in demo-data.js");
+  const url = out.settings.find((r) => r.key === "webhook_url");
+  assert.match(url.effective, /^https:\/\/[^/@]+\/\*\*\*$/, "masked like settings_store.mask_url");
+  assert.equal(url.editable, false);
 });

@@ -3889,3 +3889,29 @@ computed one, so the file still fails).
   shows a note instead of a link into the fake index.
 - Mutations killed: both grammar checks, both guards A, the hideAll
   generation bump, the `local !== true` check, the demo branch.
+
+### WP D16-WEB (D16a-2 + D16b-2, rc18): Settings sections, expert mode, env pins
+
+- `settings-sections-wiring.test.js` (18): `<details>` sections (Vault &
+  connection open, no empty section, one-line state, open state
+  remembered); no expert row on the normal page, the "Show expert
+  settings" switch (remembered, hidden drafts keep a dot); env-pinned and
+  env-only rows are plain text with "Set via env (VAULT_…)" and no
+  `<input>`; shadowed note; the core-file-disabled note; (i) help; apply
+  captions per `applies`; risky confirm (Cancel sends nothing, "Save
+  anyway" sends `?confirm_risky=true`, an unforeseen 428 retries once, a
+  428 after confirming is reported); 409/422 lines; demo rows render.
+- `settings-layout.test.js` (10): placement, pin and value wording,
+  section summaries, risky helpers, `describeSaveError`, guarded storage.
+- `demo-data-shape-guard.test.js` (+4): demo `/v1/settings` keys equal
+  `SettingsOut` / `SettingInfoOut`; the editable keys, env names,
+  `applies`, `target`, `risky`, `expert` equal `OVERRIDABLE_SPECS`; the
+  env-only rows equal `ENV_ONLY_INFO_KEYS`.
+- `demo-data-settings.test.js` (+4): demo 409 / 428 / cross-rule 422,
+  `off` window. `demo-data-config-defaults.test.js` (+1): the demo window
+  is `DEFAULT_SCHEDULE_WINDOW`. `add-device-wiring.test.js`: the demo
+  caption does not invite a scan (DIST-1b review nit).
+
+Mutations killed: `isPinned` ignoring `editable`; the Expert section not
+hidden while the switch is off; `confirmRisky` always false; Cancel
+ignored.

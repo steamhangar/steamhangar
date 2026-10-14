@@ -1,69 +1,66 @@
 /**
- * Settings view (WP 4a.6).
+ * Settings view (WP 4a.6; sections, expert mode and env pins WP D16-WEB).
  *
- * Three independent surfaces, each backed by its own real endpoint:
+ * Layout (WP D16-WEB, docs/handover/d16-settings-audit.md 1.3 and the D16a
+ * table sign-off 2026-10-14): collapsible sections as native
+ * `<details>/<summary>` — Vault & connection (open by default), Download
+ * window & updates, Disk & cleanup, Notifications, Steam, Expert, About.
+ * A collapsed section shows a one-line state in its summary
+ * (`sectionSummary`, same-section fields only) and a dot while it holds an
+ * unsaved draft, so a draft is never hidden. Open state is remembered per
+ * browser (guarded storage). Placement and wording live in
+ * lib/settings-layout.js; a section with nothing to show is not built.
  *
- *  - Vault / Schedule / Webhook — one form over `GET`/`PATCH /v1/settings`
- *    (ADR-0009). The PATCH body is built by `lib/settings-diff.js` from a
- *    `drafts` map populated ONLY by fields the user actually edits — never
- *    pre-seeded with every field's current value — which is what makes
- *    "the body contains only changed keys" true by construction rather
- *    than by a diff that could be fooled by re-sending the same value
- *    (LEARNINGS "Testing discipline": that diff itself is unit-tested with
- *    a mutation pin in web/tests/settings-diff.test.js). Inputs are built
- *    ONCE per fetched snapshot and never replaced while the user is typing
- *    (`input`/`change` handlers only update `drafts` and the dirty-state
- *    banner) — replacing a live `<input>` node on every keystroke would
- *    steal focus and the cursor position, an unrelated but real class of
- *    bug to the round-7 "don't rebuild animated nodes" rule this codebase
- *    already avoids elsewhere (views/downloads.js, views/library.js).
- *  - Steam identity — `GET`/`PUT`/`DELETE /v1/steam/key` (WP 4a.6r; ADR-0004
- *    addendum) plus the vault's library SteamID64 (WP WEB-FEAT-1): the
- *    `steam_library_steamid` setting, saved with its own button as a JSON
- *    STRING via `PATCH /v1/settings` (a number is refused with 422 — 17
- *    digits exceed JavaScript's safe integers), and a "Preview" lookup of
- *    the typed id (`GET /v1/steam/owned-games`/`player-summaries`). The
- *    Library view reads the same setting, so this is the one place the
- *    account is chosen for every device. The typed key is
+ * - Normal page: only rows the API marks `expert: false`. Every
+ *   `expert: true` row sits in the Expert section, which exists only while
+ *   the separate "Show expert settings" switch is on (remembered per
+ *   browser), split into Bandwidth & connections, Housekeeping and Debug.
+ *   Switching it off hides the section but keeps its drafts (the switch row
+ *   then shows the unsaved-changes dot).
+ * - Env pins (Q1 2026-10-14: env always wins): a row with `editable: false`
+ *   or `env_only: true` is plain text with a "Set via env (VAULT_…)" note —
+ *   no input, no Reset. `shadowed` adds a note that a stored value is
+ *   overridden. The masked webhook URL is such a row. (The
+ *   VAULT_SETTINGS_READONLY mode keeps its disabled inputs: another state.)
+ * - Explanations sit behind a per-field (i) disclosure (the About table's
+ *   button, WP WEB-FIX-8); state (source and apply caption, sweep status,
+ *   GC-risk warning, env notes) stays visible.
+ * - Risky keys (API `risky: true`): Save opens one confirm dialog naming
+ *   each risky key with old -> new value and what can break
+ *   (components/risky-confirm.js); only "Save anyway" sends the PATCH, with
+ *   `?confirm_risky=true`. A 428 the client did not foresee opens the same
+ *   dialog for the keys the server names, then retries once. 409/422/428
+ *   answers say "Nothing was saved" (the API validates the whole body
+ *   first); anything else does not claim to know.
+ *
+ * The form itself (unchanged mechanics, WP 4a.6): the PATCH body is built
+ * by `lib/settings-diff.js` from a `drafts` map populated ONLY by fields the
+ * user actually edits, so "the body contains only changed keys" holds by
+ * construction. Inputs are built once per fetched snapshot and never
+ * replaced while the user is typing.
+ *
+ * Other surfaces on this page:
+ *  - Steam — `GET`/`PUT`/`DELETE /v1/steam/key` (WP 4a.6r) plus the vault's
+ *    library SteamID64 (WP WEB-FEAT-1), saved with its own button as a
+ *    JSON STRING (a number is refused with 422: 17 digits exceed
+ *    JavaScript's safe integers), and a "Preview" lookup. The typed key is
  *    handled by `lib/steam-key-form.js`'s `submitSteamKey`, which clears
- *    the input unconditionally after every submit attempt — see that
- *    module's header for the ADR-0004 "never retained" guarantee this
- *    pins headlessly.
- *  - Connection — a single "Reconnect / switch account" action that
- *    replays the onboarding overlay (onboarding.js), matching the
- *    mockup's Settings screen.
- *  - PCs (agents) — WP D15c: now only a pointer to the Clients page, where
- *    the block described next moved. Before D15c: WP WEB-FEAT-3: the
- *    "Agents: N online, M offline" line and a "Show PCs" button that
- *    opens the existing clients sheet
- *    (components/clients-sheet.js). Reusing the sheet instead of a second
- *    list here keeps ONE rendering of a PC row (presence chip, last seen,
- *    version, games, bypass state) with one store subscription and one
- *    patch-in-place path, so the two entry points cannot drift; and it
- *    keeps the recorded WP 4a.1 decision "Clients is a sheet, not a nav
- *    item". Before this WP the sheet was reachable only from the bypass
- *    banner and the notifications, i.e. never on a healthy vault.
- *    WP PAIR-1 adds an "Add a device" row here that opens
- *    components/add-device-sheet.js (QR for the app, a browser pairing
- *    link, the vault-agent install command).
- *  - About — WP WEB-FEAT-3: the component table from `GET /v1/about` (WP
- *    VER-2), presented by lib/about-view.js. Fetched when this view opens
- *    and on the Refresh button, never polled; the server caches its answer
- *    for 60 s and the table says so. A 404 (a server from before VER-2: with
- *    a valid key an unknown route is 404) shows a "server too old" note;
- *    a 401 (key refused) and anything else show an error line. WP
- *    WEB-FIX-8: each row's explanations sit behind an (i) disclosure
- *    button, collapsed by default; a value not reported is a dash.
+ *    the input after every attempt (ADR-0004 "never retained").
+ *  - Connection — "Reconnect / switch account" replays onboarding; it also
+ *    renders in the load-error state (WP WEB-FIX-1 B2), and says so in demo
+ *    mode (B1).
+ *  - PCs — a pointer to the Clients page (WP D15c).
+ *  - About — the component table from `GET /v1/about` (WP WEB-FEAT-3),
+ *    fetched when this view opens and on Refresh, never polled; a 404 shows
+ *    "server too old". The rail's version button opens and focuses it.
  *
- * The settings form itself is not polled (settings rarely change from
- * outside this screen, so fetch-on-mount plus fetch-after-save is enough).
- * The one store-singleton subscription here (WP WEB-FEAT-3, "clients")
- * only rewrites the About "checked ... ago" line; it never rebuilds the
- * form.
+ * The settings form is not polled. The one store-singleton subscription
+ * ("clients") only rewrites the About "checked ... ago" line.
  */
 
 import { api, isDemoMode } from "../api.js";
 import { showToast } from "../components/toast.js";
+import { confirmRiskyChange } from "../components/risky-confirm.js";
 import { openOnboarding } from "../onboarding.js";
 import { buildSettingsPatch } from "../lib/settings-diff.js";
 import {
@@ -73,7 +70,32 @@ import {
   effectiveAsInputValue,
   missingSettingKeys,
 } from "../lib/settings-presentation.js";
-import { sweepTargetsMessage, cachedSweepGcRiskWarning } from "../lib/schedule-presentation.js";
+import {
+  EXPERT_GROUPS,
+  SECTIONS,
+  describeSaveError,
+  displayValue,
+  envNote,
+  fieldHelp,
+  fieldMeta,
+  isPinned,
+  isSectionOpen,
+  placeEntries,
+  readExpertSwitch,
+  readOpenState,
+  riskyItems,
+  riskyKeysFrom428,
+  riskyKeysInBody,
+  sectionSummary,
+  shadowNote,
+  writeExpertSwitch,
+  writeOpenState,
+} from "../lib/settings-layout.js";
+import {
+  sweepTargetsMessage,
+  cachedSweepGcRiskWarning,
+  CACHED_SWEEP_GC_RISK_SHORT,
+} from "../lib/schedule-presentation.js";
 import { validSteamId64 } from "../lib/steamid.js";
 import { submitSteamKey } from "../lib/steam-key-form.js";
 import {
@@ -98,32 +120,6 @@ import {
   DASH_LABEL,
 } from "../lib/about-view.js";
 
-const WEBHOOK_EVENT_OPTIONS = [
-  ["job.done", "Job finished"],
-  ["job.error", "Job failed"],
-  ["job.cancelled", "Job cancelled"],
-  ["client.bypass_suspected", "Cache bypass suspected"],
-  ["client.bypass_resolved", "Cache bypass resolved"],
-];
-const AUTO_GC_OPTIONS = [
-  ["off", "Off"],
-  ["dry-run", "Dry run"],
-  ["execute", "Execute"],
-];
-// WP 4d-web: sweep_include_cached is the first genuine boolean setting this
-// view surfaces. Reuses the exact `.segs`/`aria-pressed` segmented-button
-// idiom `auto_gc` above already established (and passed review) rather
-// than introducing the mockup's separate, never-yet-wired `.toggle` switch
-// vocabulary — one working idiom, not two. Draft/effective values travel
-// as the strings "true"/"false" (what `PATCH /v1/settings` expects for this
-// key, `config.parse_strict_bool`'s grammar) — never a JSON boolean, which
-// the real endpoint explicitly rejects (Pydantic lax-mode trap, LEARNINGS
-// "Parsers").
-const SWEEP_INCLUDE_CACHED_OPTIONS = [
-  ["false", "Off"],
-  ["true", "On"],
-];
-
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
   return (err && err.message) || "Request failed.";
@@ -134,6 +130,12 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+/** Guarded: reading `window.localStorage` itself can throw (LEARNINGS
+ * WEB-FIX-5); lib/settings-layout.js catches it around this call. */
+function getStorage() {
+  return window.localStorage;
 }
 
 // ---------------------------------------------------------------------
@@ -148,17 +150,21 @@ const state = {
   settingsResponse: null, // {readonly, settings: [...]}, last successful GET
   steamStatus: { configured: false, key_last4: null },
   lookup: null,
-  // WP 4d-web: last GET /v1/schedule response, or null before the first
-  // fetch / after a failed one. Best-effort on purpose (see loadSettings) —
-  // a schedule fetch failure must not block the rest of this screen from
-  // rendering; it only means the sweep-status line and the cached-GC-risk
-  // warning below have nothing to show.
+  // WP 4d-web: last GET /v1/schedule response, or null (best-effort; a
+  // failure only means the sweep status line and GC-risk warning are empty).
   schedule: null,
 };
 
 /** {[key]: {reset: true} | {value: string | string[]}} — only ever
  * populated by an actual user edit; see the module header. */
 let drafts = {};
+
+/** Remembered open sections, re-read on every mount. */
+let openState = {};
+/** The "Show expert settings" switch, re-read on every mount. */
+let expertOn = false;
+/** Field key -> the user's open/closed choice for its (i) text. */
+const fieldInfoOpen = new Map();
 
 let sectionEl = null;
 function mounted() {
@@ -171,6 +177,10 @@ function entryByKey(key) {
   return (list || []).find((e) => e.key === key);
 }
 
+function readonly() {
+  return !!(state.settingsResponse && state.settingsResponse.readonly);
+}
+
 // ---------------------------------------------------------------------
 // Dirty-state bar (shared Save/Discard for the whole /v1/settings form)
 // ---------------------------------------------------------------------
@@ -179,31 +189,50 @@ function entryByKey(key) {
 export const UNSAVED_TEXT = "Unsaved changes";
 /** The bar's status line while a PATCH is in flight. */
 export const SAVING_TEXT = "Saving…";
+/** The bar's status line while the risky-change dialog is open. */
+export const CONFIRMING_TEXT = "Waiting for confirmation…";
+/** The bar's line after "Cancel" in the risky-change dialog. */
+export const NOT_CONFIRMED_TEXT = "Not saved: the change was not confirmed. Your edits are still here.";
+
+/** The PATCH body the drafts would send (`{}` when nothing changes). */
+function pendingBody() {
+  if (!state.settingsResponse || state.settingsResponse.readonly) return {};
+  return buildSettingsPatch(state.settingsResponse.settings, drafts);
+}
 
 /** True when the drafts would change something server-side: the same
  * builder the PATCH uses, so a field edited and typed back to its saved
  * value is NOT dirty (WP WEB-FIX-8: "revert -> hidden"). */
 function isDirty() {
-  if (!state.settingsResponse || state.settingsResponse.readonly) return false;
-  return Object.keys(buildSettingsPatch(state.settingsResponse.settings, drafts)).length > 0;
+  return Object.keys(pendingBody()).length > 0;
+}
+
+/** Show the unsaved-changes dot on every section (and the expert switch)
+ * holding a key of the pending body. */
+function paintDirtyDots() {
+  if (!mounted() || !els.dots) return;
+  const keys = new Set(Object.keys(pendingBody()));
+  for (const [id, dot] of els.dots) {
+    const owned = els.sectionKeys.get(id) || new Set();
+    dot.hidden = ![...owned].some((k) => keys.has(k));
+  }
 }
 
 /**
  * Show the save bar exactly while something is dirty (WP WEB-FIX-8: the
  * bar is `position:fixed` above the bottom nav, app.css "Settings save
- * bar", so it is on screen without scrolling wherever the user is on this
- * long page). `.savebar-up` on the section reserves scroll room under the
- * page's last content so the bar never covers it. Any edit clears a
- * previous save error from the bar.
+ * bar"). `.savebar-up` on the section reserves scroll room under the
+ * page's last content. Any edit clears a previous save error from the bar.
  */
 function markDirty() {
+  paintDirtyDots();
   if (!mounted() || !els.saveBar) return;
   const dirty = isDirty();
   els.saveBar.hidden = !dirty;
   els.section.classList.toggle("savebar-up", dirty);
   // Only on a change: the line is a live region, and rewriting the same
   // text on every keystroke would re-announce it. While a save is in
-  // flight the line keeps saying "Saving…".
+  // flight the line keeps its text.
   if (!saving && els.saveMsg.textContent !== UNSAVED_TEXT) {
     els.saveMsg.textContent = UNSAVED_TEXT;
     els.saveMsg.className = "savebar-msg";
@@ -227,10 +256,22 @@ function discardDrafts() {
   restoreFocusAfterBar(hadFocus);
 }
 
-/** True while a PATCH is in flight: Save is `aria-disabled` plus this
- * guard, not `disabled`, so keyboard focus stays on the button
- * (docs/LEARNINGS.md, WP WEB-FEAT-1). */
+/** True while a save (incl. its confirm dialog) is in progress: Save is
+ * `aria-disabled` plus this guard, not `disabled`, so keyboard focus stays
+ * on the button (docs/LEARNINGS.md, WP WEB-FEAT-1). */
 let saving = false;
+
+function setBarLine(text, isError) {
+  if (!mounted() || !els.saveBar) return;
+  els.saveMsg.textContent = text;
+  els.saveMsg.className = isError ? "savebar-msg is-error" : "savebar-msg";
+}
+
+/** Ask about risky keys; resolves true when the user confirmed. */
+async function confirmRisky(entries, body, keys) {
+  setBarLine(CONFIRMING_TEXT, false);
+  return confirmRiskyChange(riskyItems(entries, body, keys));
+}
 
 async function saveDrafts() {
   if (saving) return;
@@ -243,14 +284,36 @@ async function saveDrafts() {
   }
   // The drafts this PATCH carries. Every edit replaces its key's draft
   // object, so a draft that is no longer the sent one was typed while the
-  // save was in flight and must survive it (review fix: it used to be
-  // dropped silently with the bar).
+  // save was in flight and must survive it.
   const sent = { ...drafts };
   saving = true;
   els.saveBtn.setAttribute("aria-disabled", "true");
-  els.saveMsg.textContent = SAVING_TEXT;
   try {
-    const updated = await api.patchSettings(body);
+    let confirmed = false;
+    const risky = riskyKeysInBody(entries, body);
+    if (risky.length > 0) {
+      confirmed = await confirmRisky(entries, body, risky);
+      if (!confirmed) {
+        setBarLine(NOT_CONFIRMED_TEXT, true);
+        return;
+      }
+    }
+    setBarLine(SAVING_TEXT, false);
+    let updated;
+    try {
+      updated = await api.patchSettings(body, { confirmRisky: confirmed });
+    } catch (err) {
+      // 428: the server knows a risky key this client did not (e.g. an
+      // older settings snapshot). Ask once for exactly those, then retry.
+      const named = err && err.status === 428 && !confirmed ? riskyKeysFrom428(err) : [];
+      if (named.length === 0) throw err;
+      if (!(await confirmRisky(entries, body, named))) {
+        setBarLine(NOT_CONFIRMED_TEXT, true);
+        return;
+      }
+      setBarLine(SAVING_TEXT, false);
+      updated = await api.patchSettings(body, { confirmRisky: true });
+    }
     state.settingsResponse = updated;
     const later = {};
     for (const [key, draft] of Object.entries(drafts)) if (sent[key] !== draft) later[key] = draft;
@@ -258,21 +321,14 @@ async function saveDrafts() {
     const hadFocus = barHasFocus();
     // The toast (role=status) announces the success; the bar is gone.
     showToast("Settings saved.");
-    // WP 4d-web: a saved PATCH can change sweep_include_cached/auto_gc,
-    // which changes sweep_cached_gc_risk server-side — re-fetch so the
-    // warning below reflects the just-saved values immediately rather than
-    // whatever GET /v1/schedule answered at page load. Best-effort, same
-    // reasoning as loadSettings(): a failed refetch must not undo the
-    // successful save or block the rest of this render.
+    // WP 4d-web: a saved PATCH can change sweep_cached_gc_risk server-side,
+    // so re-fetch the schedule (best-effort: stale beats a failed save).
     try {
       state.schedule = await api.schedule();
     } catch {
-      // leave state.schedule as it was — stale is better than crashing a
-      // successful save.
+      // leave state.schedule as it was
     }
     if (Object.keys(later).length > 0) {
-      // Keep the live inputs (they hold the later edits); the bar stays up
-      // for them. `saving` is still true here, so clear it first.
       saving = false;
       markDirty();
     } else {
@@ -281,12 +337,8 @@ async function saveDrafts() {
     }
   } catch (err) {
     // The bar stays up with the drafts; its own role=status line says what
-    // failed (no warn toast on top: at BP-L the toast would sit over the
-    // bar, and the line already announces it).
-    if (mounted() && els.saveBar) {
-      els.saveMsg.textContent = `Could not save: ${errorText(err)}`;
-      els.saveMsg.className = "savebar-msg is-error";
-    }
+    // failed (no warn toast on top: at BP-L the toast would sit over it).
+    setBarLine(describeSaveError(err), true);
   } finally {
     saving = false;
     if (mounted() && els.saveBtn) els.saveBtn.removeAttribute("aria-disabled");
@@ -294,308 +346,382 @@ async function saveDrafts() {
 }
 
 // ---------------------------------------------------------------------
-// One field: label, input, source/applies caption, optional Reset button.
-// `onInput(value)` is called on every edit to update `drafts`.
+// (i) disclosure — the About table's button (WP WEB-FIX-8), shared by the
+// field help texts (WP D16-WEB).
 // ---------------------------------------------------------------------
 
-function buildTextField({ entry, label, placeholder, hint, onInput }) {
-  const field = el("div", "field");
-  const fieldId = `settings-${entry.key}`;
-  const labelEl = el("label", null, label);
-  labelEl.htmlFor = fieldId;
-  field.append(labelEl);
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** The (i) glyph: a 24-unit outline circle with an "i", stroked in
+ * currentColor like the status-icon glyphs, decorative (the button
+ * carries the name). */
+function infoGlyph() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs = {
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true",
+    focusable: "false",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+  };
+  for (const k in attrs) svg.setAttribute(k, attrs[k]);
+  const parts = [
+    ["circle", { cx: "12", cy: "12", r: "9" }],
+    ["path", { d: "M12 11v6" }],
+    ["path", { d: "M12 7.5v.01" }],
+  ];
+  for (const [tag, a] of parts) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k in a) node.setAttribute(k, a[k]);
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
+/**
+ * A disclosure button: a native <button> (Enter/Space and the global
+ * :focus-visible ring for free) with aria-expanded + aria-controls; a click
+ * flips `hidden` on `detailEl` and records the choice in `memory` under
+ * `name`, so a re-render keeps it.
+ */
+function buildDisclosure({ name, detailEl, openByDefault, memory, role, label }) {
+  const btn = el("button", "about-info-btn");
+  btn.type = "button";
+  btn.dataset.role = role;
+  btn.setAttribute("aria-label", label);
+  btn.setAttribute("aria-controls", detailEl.id);
+  btn.appendChild(infoGlyph());
+  const apply = (open) => {
+    btn.setAttribute("aria-expanded", String(open));
+    detailEl.hidden = !open;
+  };
+  const isOpen = () => (memory.has(name) ? memory.get(name) : openByDefault);
+  apply(isOpen());
+  btn.addEventListener("click", () => {
+    const open = !isOpen();
+    memory.set(name, open);
+    apply(open);
+  });
+  return btn;
+}
+
+/** The (i) button plus its hidden text block for one help id. */
+function helpDisclosure(id, paragraphs, label) {
+  const help = el("div", "field-help");
+  help.id = `${id}-help`;
+  help.dataset.role = "field-help";
+  for (const text of paragraphs) help.appendChild(el("p", "foot-note", text));
+  const btn = buildDisclosure({
+    name: id,
+    detailEl: help,
+    openByDefault: false,
+    memory: fieldInfoOpen,
+    role: "field-info",
+    label: `More about ${label}`,
+  });
+  return { btn, help };
+}
+
+// ---------------------------------------------------------------------
+// One field. Pinned rows (env / env-only) are plain text; everything else
+// is a text input, a segmented group or the event checkboxes, each with a
+// "<source> · <applies>" caption and a Reset button for a stored value.
+// ---------------------------------------------------------------------
+
+function draftValue(key) {
+  return drafts[key] && "value" in drafts[key] ? drafts[key].value : undefined;
+}
+
+function setDraft(key, draft) {
+  drafts[key] = draft;
+  markDirty();
+}
+
+function buildCaption(entry) {
+  const caption = el("p", "foot-note", `${sourceLabel(entry.source)} · ${appliesText(entry.applies)}`);
+  caption.dataset.role = "field-caption";
+  return caption;
+}
+
+function buildResetButton(entry, onReset) {
+  const resetBtn = el("button", "btn ghost sm field-reset", "Reset");
+  resetBtn.type = "button";
+  resetBtn.dataset.role = "field-reset";
+  resetBtn.hidden = !canReset(entry) || readonly();
+  resetBtn.addEventListener("click", () => {
+    onReset();
+    setDraft(entry.key, { reset: true });
+  });
+  return resetBtn;
+}
+
+/** Plain text for an env-pinned or env-only row (Q1/Q2): no input. */
+function buildPinnedBody(field, entry) {
+  const value = el("p", "setting-value", displayValue(entry));
+  value.dataset.role = "setting-value";
+  const note = el("p", "foot-note", envNote(entry));
+  note.dataset.role = "env-note";
+  field.append(value, note);
+  const shadow = shadowNote(entry);
+  if (shadow) {
+    const s = el("p", "foot-note", shadow);
+    s.dataset.role = "shadow-note";
+    field.append(s);
+  }
+}
+
+function buildTextBody(field, entry, meta, fieldId) {
   const input = document.createElement("input");
   input.id = fieldId;
   input.className = "inp txt";
   input.type = "text";
   input.autocomplete = "off";
   input.spellcheck = false;
-  if (placeholder) input.placeholder = placeholder;
+  if (meta.placeholder) input.placeholder = meta.placeholder;
   input.value = effectiveAsInputValue(entry);
-  input.disabled = state.settingsResponse.readonly;
-  input.addEventListener("input", () => onInput(input.value));
-  field.appendChild(input);
-
-  const caption = el("p", "foot-note");
-  const resetBtn = el("button", "btn ghost sm", "Reset");
-  resetBtn.type = "button";
-  resetBtn.style.marginTop = "6px";
-  resetBtn.hidden = !canReset(entry) || state.settingsResponse.readonly;
-  resetBtn.addEventListener("click", () => {
-    drafts[entry.key] = { reset: true };
-    input.value = effectiveAsInputValue({ ...entry, effective: entry.fallback });
-    markDirty();
-  });
-  caption.textContent = `${sourceLabel(entry.source)} · ${appliesText(entry.applies)}`;
-  field.append(caption, resetBtn);
-  if (hint) field.append(el("p", "foot-note", hint));
-  return field;
+  input.disabled = readonly();
+  input.addEventListener("input", () => setDraft(entry.key, { value: input.value }));
+  field.append(input, buildCaption(entry));
+  field.append(
+    buildResetButton(entry, () => {
+      input.value = effectiveAsInputValue({ ...entry, effective: entry.fallback });
+    }),
+  );
 }
 
-// ---------------------------------------------------------------------
-// Vault section
-// ---------------------------------------------------------------------
-
-function buildVaultSection() {
-  const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "Vault"));
-  const entry = entryByKey("vault_name");
-  wrap.append(
-    buildTextField({
-      entry,
-      label: "Vault name",
-      placeholder: "e.g. vault-01",
-      onInput: (value) => {
-        drafts.vault_name = { value };
-        markDirty();
-      },
-    }),
-  );
-  return wrap;
-}
-
-// ---------------------------------------------------------------------
-// Schedule section
-// ---------------------------------------------------------------------
-
-function buildScheduleSection() {
-  const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "Schedule"));
-
-  wrap.append(
-    buildTextField({
-      entry: entryByKey("schedule_window"),
-      label: "Sweep window",
-      placeholder: "22:00-06:00, blank to disable",
-      hint: "Overnight windows are allowed (e.g. 22:00-06:00). Blank disables scheduled sweeps.",
-      onInput: (value) => {
-        drafts.schedule_window = { value };
-        markDirty();
-      },
-    }),
-  );
-  wrap.append(
-    buildTextField({
-      entry: entryByKey("schedule_interval_minutes"),
-      label: "Sweep interval (minutes)",
-      onInput: (value) => {
-        drafts.schedule_interval_minutes = { value };
-        markDirty();
-      },
-    }),
-  );
-  wrap.append(
-    buildTextField({
-      entry: entryByKey("schedule_client_stale_days"),
-      label: "Client staleness (days)",
-      onInput: (value) => {
-        drafts.schedule_client_stale_days = { value };
-        markDirty();
-      },
-    }),
-  );
-
-  wrap.append(buildSweepIncludeCachedField());
-
-  const autoGcEntry = entryByKey("auto_gc");
-  const field = el("div", "field");
-  const autoGcLabel = el("label", null, "Auto-GC after a prefill");
-  autoGcLabel.id = "settings-auto_gc-label";
-  field.append(autoGcLabel);
+function buildSegsBody(field, entry, meta, labelId) {
   const segs = el("div", "segs");
   segs.setAttribute("role", "group");
-  segs.setAttribute("aria-labelledby", autoGcLabel.id);
-  const current = drafts.auto_gc && "value" in drafts.auto_gc ? drafts.auto_gc.value : autoGcEntry.effective;
+  segs.setAttribute("aria-labelledby", labelId);
+  const current = draftValue(entry.key) ?? String(entry.effective);
   const buttons = [];
-  for (const [mode, label] of AUTO_GC_OPTIONS) {
+  const press = (value) => {
+    for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.value === value));
+  };
+  for (const [value, label] of meta.options) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = label;
-    btn.setAttribute("aria-pressed", String(mode === current));
-    btn.addEventListener("click", () => {
-      drafts.auto_gc = { value: mode };
-      for (const other of buttons) other.setAttribute("aria-pressed", "false");
-      btn.setAttribute("aria-pressed", "true");
-      markDirty();
-    });
-    if (state.settingsResponse.readonly) btn.disabled = true;
-    buttons.push(btn);
-    segs.appendChild(btn);
-  }
-  field.appendChild(segs);
-  const caption = el(
-    "p",
-    "foot-note",
-    `${sourceLabel(autoGcEntry.source)} · ${appliesText(autoGcEntry.applies)}`,
-  );
-  field.appendChild(caption);
-  if (canReset(autoGcEntry) && !state.settingsResponse.readonly) {
-    const resetBtn = el("button", "btn ghost sm", "Reset");
-    resetBtn.type = "button";
-    resetBtn.style.marginTop = "6px";
-    resetBtn.addEventListener("click", () => {
-      drafts.auto_gc = { reset: true };
-      for (const btn of buttons) btn.setAttribute("aria-pressed", String(btn.textContent === labelFor(autoGcEntry.fallback)));
-      markDirty();
-    });
-    field.appendChild(resetBtn);
-  }
-  wrap.append(field);
-
-  wrap.append(buildSweepStatusBlock());
-  return wrap;
-}
-function labelFor(mode) {
-  const found = AUTO_GC_OPTIONS.find(([m]) => m === mode);
-  return found ? found[1] : mode;
-}
-
-/**
- * The `sweep_include_cached` toggle — WP 4d-web. Structurally the same
- * segmented-button group as `auto_gc` above (see `SWEEP_INCLUDE_CACHED_
- * OPTIONS`'s comment for why this reuses that idiom rather than the
- * mockup's separate, unwired `.toggle` switch), just with two options
- * instead of three, and string values `"false"`/`"true"` instead of an
- * enum's own words.
- */
-function buildSweepIncludeCachedField() {
-  const entry = entryByKey("sweep_include_cached");
-  const field = el("div", "field");
-  const label = el("label", null, "Include cached games in the sweep");
-  label.id = "settings-sweep_include_cached-label";
-  field.append(label);
-  const segs = el("div", "segs");
-  segs.setAttribute("role", "group");
-  segs.setAttribute("aria-labelledby", label.id);
-  const current =
-    drafts.sweep_include_cached && "value" in drafts.sweep_include_cached
-      ? drafts.sweep_include_cached.value
-      : String(entry.effective);
-  const buttons = [];
-  for (const [value, label2] of SWEEP_INCLUDE_CACHED_OPTIONS) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = label2;
     btn.dataset.value = value;
-    btn.setAttribute("aria-pressed", String(value === current));
+    btn.disabled = readonly();
     btn.addEventListener("click", () => {
-      drafts.sweep_include_cached = { value };
-      for (const other of buttons) other.setAttribute("aria-pressed", "false");
-      btn.setAttribute("aria-pressed", "true");
-      markDirty();
+      press(value);
+      setDraft(entry.key, { value });
     });
-    if (state.settingsResponse.readonly) btn.disabled = true;
     buttons.push(btn);
     segs.appendChild(btn);
   }
-  field.appendChild(segs);
-  field.appendChild(
-    el("p", "foot-note", `${sourceLabel(entry.source)} · ${appliesText(entry.applies)}`),
-  );
-  field.appendChild(
-    el(
-      "p",
-      "foot-note",
-      "When on, the next sweep also refreshes every game that already has content on disk, not only games a PC agent reports as installed.",
-    ),
-  );
-  if (canReset(entry) && !state.settingsResponse.readonly) {
-    const resetBtn = el("button", "btn ghost sm", "Reset");
-    resetBtn.type = "button";
-    resetBtn.style.marginTop = "6px";
-    resetBtn.addEventListener("click", () => {
-      drafts.sweep_include_cached = { reset: true };
-      const fallbackStr = String(entry.fallback);
-      for (const btn of buttons) btn.setAttribute("aria-pressed", String(btn.dataset.value === fallbackStr));
-      markDirty();
-    });
-    field.appendChild(resetBtn);
-  }
-  return field;
+  press(current);
+  field.append(segs, buildCaption(entry));
+  field.append(buildResetButton(entry, () => press(String(entry.fallback))));
 }
 
-/**
- * The "did the last scheduled sweep actually do anything" line, plus the
- * "keeping the cache current without collecting" warning when the server
- * reports the risk condition — WP 4d-web. Both pieces of text come from
- * `lib/schedule-presentation.js`, fed the server's own `GET /v1/schedule`
- * response verbatim (`state.schedule`): neither is computed here from
- * `sweep_include_cached`/`auto_gc` a second time (see that module's header
- * for why re-deriving `sweep_cached_gc_risk` client-side would be exactly
- * the two-copies-diverge mistake docs/LEARNINGS.md warns about). Renders
- * nothing at all — not a placeholder — while `state.schedule` is still
- * null (no fetch yet, or the fetch failed); this is a status readout, not
- * a required part of the form.
- */
-function buildSweepStatusBlock() {
-  const wrap = document.createDocumentFragment();
-  const statusText = sweepTargetsMessage(state.schedule);
-  if (statusText) wrap.append(el("p", "foot-note", statusText));
-  const riskText = cachedSweepGcRiskWarning(state.schedule);
-  if (riskText) wrap.append(el("p", "settings-warn", riskText));
-  return wrap;
-}
-
-// ---------------------------------------------------------------------
-// Webhook section
-// ---------------------------------------------------------------------
-
-function buildWebhookSection() {
-  const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "Webhook"));
-
-  wrap.append(
-    buildTextField({
-      entry: entryByKey("webhook_url"),
-      label: "Webhook URL",
-      placeholder: "https://... , blank to disable",
-      hint: "Restart-required: vault-api only starts the delivery thread at boot if a webhook was already configured then (api/README.md “The honest gap”).",
-      onInput: (value) => {
-        drafts.webhook_url = { value };
-        markDirty();
-      },
-    }),
-  );
-
-  const eventsEntry = entryByKey("webhook_events");
-  const field = el("div", "field");
-  field.setAttribute("role", "group");
-  const eventsLabel = el("label", null, "Events sent");
-  eventsLabel.id = "settings-webhook_events-label";
-  field.setAttribute("aria-labelledby", eventsLabel.id);
-  field.append(eventsLabel);
-  const currentList = new Set(
-    drafts.webhook_events && "value" in drafts.webhook_events
-      ? drafts.webhook_events.value
-      : eventsEntry.effective,
-  );
+function buildEventsBody(field, entry, meta) {
+  const selected = new Set(draftValue(entry.key) ?? (Array.isArray(entry.effective) ? entry.effective : []));
   const checkboxes = [];
-  for (const [value, label] of WEBHOOK_EVENT_OPTIONS) {
+  for (const [value, label] of meta.options) {
     const row = el("label", "srow");
     row.style.cursor = "pointer";
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = currentList.has(value);
-    cb.disabled = state.settingsResponse.readonly;
-    cb.addEventListener("change", () => {
-      const selected = checkboxes.filter((c) => c.checked).map((c) => c.dataset.event);
-      drafts.webhook_events = { value: selected };
-      markDirty();
-    });
+    cb.checked = selected.has(value);
+    cb.disabled = readonly();
     cb.dataset.event = value;
+    cb.addEventListener("change", () => {
+      setDraft(entry.key, { value: checkboxes.filter((c) => c.checked).map((c) => c.dataset.event) });
+    });
     checkboxes.push(cb);
     const grow = el("span", "grow");
     grow.append(el("span", "ttl", label));
     row.append(cb, grow);
     field.appendChild(row);
   }
-  const caption = el(
-    "p",
-    "foot-note",
-    `${sourceLabel(eventsEntry.source)} · ${appliesText(eventsEntry.applies)}`,
+  field.append(buildCaption(entry));
+  field.append(
+    buildResetButton(entry, () => {
+      const back = new Set(Array.isArray(entry.fallback) ? entry.fallback : []);
+      for (const cb of checkboxes) cb.checked = back.has(cb.dataset.event);
+    }),
   );
-  field.appendChild(caption);
-  wrap.append(field);
+}
+
+function buildSettingField(entry) {
+  const meta = fieldMeta(entry);
+  const fieldId = `settings-${entry.key}`;
+  const pinned = isPinned(entry);
+  const field = el("div", pinned ? "field is-pinned" : "field");
+  field.dataset.key = entry.key;
+  const head = el("div", "field-head");
+  let labelEl;
+  if (!pinned && meta.kind === "text") {
+    labelEl = el("label", null, meta.label);
+    labelEl.htmlFor = fieldId;
+  } else {
+    labelEl = el("span", "field-label", meta.label);
+  }
+  labelEl.id = `${fieldId}-label`;
+  head.append(labelEl);
+  field.append(head);
+  if (meta.kind === "events" && !pinned) {
+    field.setAttribute("role", "group");
+    field.setAttribute("aria-labelledby", labelEl.id);
+  }
+  const paragraphs = fieldHelp(entry);
+  let help = null;
+  if (paragraphs.length > 0) {
+    const d = helpDisclosure(fieldId, paragraphs, meta.label);
+    head.append(d.btn);
+    help = d.help;
+  }
+  if (pinned) buildPinnedBody(field, entry);
+  else if (meta.kind === "segs" && meta.options) buildSegsBody(field, entry, meta, labelEl.id);
+  else if (meta.kind === "events" && meta.options) buildEventsBody(field, entry, meta);
+  else buildTextBody(field, entry, meta, fieldId);
+  if (help) field.append(help);
+  return field;
+}
+
+// ---------------------------------------------------------------------
+// Sections
+// ---------------------------------------------------------------------
+
+/**
+ * One collapsible section. `keys` are the settings keys it carries (for the
+ * unsaved-changes dot); `summaryText` is the collapsed one-liner.
+ */
+function buildSection(id, { summaryText = "", keys = [], summaryId } = {}) {
+  const meta = SECTIONS.find((s) => s.id === id);
+  const details = el("details", "settings-sec");
+  details.dataset.section = id;
+  details.open = isSectionOpen(openState, id);
+  const summary = el("summary", "sec-summary");
+  if (summaryId) summary.id = summaryId;
+  summary.append(el("span", "sec-title", meta.title));
+  if (summaryText) {
+    const st = el("span", "sec-state", summaryText);
+    st.dataset.role = "section-state";
+    summary.append(st);
+  }
+  if (keys.length > 0) {
+    const dot = el("span", "sec-dirty");
+    dot.dataset.role = "section-dirty";
+    dot.hidden = true;
+    dot.append(el("span", "sr-only", "(unsaved changes)"));
+    summary.append(dot);
+    els.dots.set(id, dot);
+    els.sectionKeys.set(id, new Set(keys));
+  }
+  details.addEventListener("toggle", () => {
+    openState = { ...openState, [id]: details.open };
+    writeOpenState(getStorage, openState);
+  });
+  const body = el("div", "sec-body");
+  details.append(summary, body);
+  els.sectionsById.set(id, details);
+  return { details, body };
+}
+
+/** A form section from its placed rows; null when it has none. */
+function buildFormSection(id, rows, extra) {
+  if (rows.length === 0 && !extra) return null;
+  const { details, body } = buildSection(id, {
+    summaryText: sectionSummary(id, entryByKey, rows),
+    keys: rows.map((e) => e.key),
+  });
+  for (const entry of rows) body.appendChild(buildSettingField(entry));
+  if (extra) body.append(extra);
+  return details;
+}
+
+/**
+ * The "did the last scheduled sweep do anything" line and the
+ * cached-sweep GC-risk warning (WP 4d-web), from `GET /v1/schedule`
+ * verbatim. The warning is one visible sentence; its explanation sits
+ * behind (i). Renders nothing while the schedule is unknown.
+ */
+function buildSweepStatusBlock() {
+  const wrap = document.createDocumentFragment();
+  const statusText = sweepTargetsMessage(state.schedule);
+  if (statusText) {
+    const p = el("p", "foot-note", statusText);
+    p.dataset.role = "sweep-status";
+    wrap.append(p);
+  }
+  const riskText = cachedSweepGcRiskWarning(state.schedule);
+  if (riskText) {
+    const warn = el("div", "settings-warn");
+    warn.dataset.role = "gc-risk";
+    const head = el("div", "field-head");
+    head.append(el("span", null, CACHED_SWEEP_GC_RISK_SHORT));
+    const d = helpDisclosure("settings-gc-risk", [riskText], "this warning");
+    head.append(d.btn);
+    warn.append(head, d.help);
+    wrap.append(warn);
+  }
+  return wrap;
+}
+
+/** Vault & connection: vault name (+ any other row placed here), the
+ * Connection row and the PCs pointer. Always built. */
+function buildVaultSection(rows) {
+  const { details, body } = buildSection("vault", {
+    summaryText: sectionSummary("vault", entryByKey, rows),
+    keys: rows.map((e) => e.key),
+  });
+  for (const entry of rows) body.appendChild(buildSettingField(entry));
+  body.append(buildConnectionSection(), buildPcsSection());
+  return details;
+}
+
+/** The Expert switch row + the Expert section (hidden while off). */
+function buildExpertArea(groups) {
+  const all = EXPERT_GROUPS.flatMap((g) => groups[g.id]);
+  if (all.length === 0) return null;
+  const wrap = document.createDocumentFragment();
+
+  const row = el("div", "srow expert-switch");
+  const grow = el("span", "grow");
+  const ttl = el("span", "ttl", "Show expert settings");
+  ttl.id = "settings-expert-switch-label";
+  grow.append(ttl, el("span", "desc", "Bandwidth and connections, housekeeping and debug settings."));
+  const dot = el("span", "sec-dirty");
+  dot.dataset.role = "expert-dirty";
+  dot.hidden = true;
+  dot.append(el("span", "sr-only", "(unsaved expert changes)"));
+  const sw = el("button", "toggle");
+  sw.type = "button";
+  sw.dataset.role = "expert-switch";
+  sw.setAttribute("role", "switch");
+  sw.setAttribute("aria-labelledby", ttl.id);
+  sw.setAttribute("aria-checked", String(expertOn));
+  row.append(grow, dot, sw);
+  els.dots.set("expert-switch", dot);
+  els.sectionKeys.set("expert-switch", new Set(all.map((e) => e.key)));
+
+  const { details, body } = buildSection("expert", {
+    summaryText: sectionSummary("expert", entryByKey, all),
+    keys: all.map((e) => e.key),
+  });
+  details.hidden = !expertOn;
+  for (const group of EXPERT_GROUPS) {
+    const rows = groups[group.id];
+    if (rows.length === 0) continue;
+    const sub = el("div", "expert-group");
+    sub.dataset.group = group.id;
+    sub.append(el("h4", "sec", group.title));
+    for (const entry of rows) sub.appendChild(buildSettingField(entry));
+    body.appendChild(sub);
+  }
+  sw.addEventListener("click", () => {
+    expertOn = !expertOn;
+    writeExpertSwitch(getStorage, expertOn);
+    sw.setAttribute("aria-checked", String(expertOn));
+    details.hidden = !expertOn;
+    if (expertOn && !details.open) details.open = true;
+  });
+  wrap.append(row, details);
   return wrap;
 }
 
@@ -640,16 +766,18 @@ function renderLookupResult() {
   lookupBody.appendChild(list);
 }
 
+const STEAM_IDENTITY_HELP =
+  "With a relay key configured, library lookups leave your LAN toward Valve. The key is a revocable, read-only Steam Web API key, never a password.";
+const STEAM_LIBRARY_HELP =
+  "The Library lists every game this SteamID64 owns, on every device that uses this vault. Leave it blank and save to list only the games the vault knows.";
+
 function buildSteamSection() {
   const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "Steam identity"));
-  wrap.append(
-    el(
-      "p",
-      "hint",
-      "With a relay key configured, library queries leave your LAN toward Valve (ADR-0004 addendum) — the key is a revocable, read-scoped Web API key, never a password.",
-    ),
-  );
+  // D16a-2: the explanation sits behind (i); the status line below is state.
+  const steamHelp = helpDisclosure("settings-steam-identity", [STEAM_IDENTITY_HELP], "Steam identity");
+  const steamHead = el("h4", "sec", "Steam identity");
+  steamHead.append(steamHelp.btn);
+  wrap.append(steamHead, steamHelp.help);
 
   const statusLine = el("p", "foot-note", "");
 
@@ -723,34 +851,40 @@ function buildSteamSection() {
  */
 function buildSteamLibraryBlock() {
   const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "Steam library"));
-  wrap.append(
-    el(
-      "p",
-      "hint",
-      "The Library lists every game this SteamID64 owns, on every device that uses this vault. Leave it blank and save to list only the games the vault knows.",
-    ),
-  );
+  const libHelp = helpDisclosure("settings-steam-library", [STEAM_LIBRARY_HELP], "Steam library");
+  const libHead = el("h4", "sec", "Steam library");
+  libHead.append(libHelp.btn);
+  wrap.append(libHead, libHelp.help);
   const entry = entryByKey(STEAM_LIBRARY_SETTING_KEY);
   const readonly = state.settingsResponse.readonly;
+  // D16-WEB (Q1): set via env -> plain text, no input, no Save/Reset;
+  // Preview still checks the pinned id.
+  const pinned = !!entry && isPinned(entry);
 
-  const idField = el("div", "field");
-  const idLabel = el("label", null, "SteamID64");
-  idLabel.htmlFor = "settings-steam-steamid";
-  idField.append(idLabel);
-  const idInput = document.createElement("input");
-  idInput.id = "settings-steam-steamid";
-  idInput.className = "inp txt";
-  idInput.type = "text";
-  idInput.inputMode = "numeric";
-  idInput.autocomplete = "off";
-  idInput.spellcheck = false;
-  idInput.placeholder = "76561198042117903";
-  idInput.value = entry ? effectiveAsInputValue(entry) : "";
-  // Never disabled: Preview checks whatever is typed, and must work on a
-  // read-only vault and on an older vault-api without this setting too.
-  // Only Save/Reset are gated (WEB-FEAT-1 review S3).
-  idField.appendChild(idInput);
+  const idField = el("div", pinned ? "field is-pinned" : "field");
+  let idInput = null;
+  if (pinned) {
+    idField.append(el("span", "field-label", "SteamID64"));
+    buildPinnedBody(idField, entry);
+  } else {
+    const idLabel = el("label", null, "SteamID64");
+    idLabel.htmlFor = "settings-steam-steamid";
+    idField.append(idLabel);
+    idInput = document.createElement("input");
+    idInput.id = "settings-steam-steamid";
+    idInput.className = "inp txt";
+    idInput.type = "text";
+    idInput.inputMode = "numeric";
+    idInput.autocomplete = "off";
+    idInput.spellcheck = false;
+    idInput.placeholder = "76561198042117903";
+    idInput.value = entry ? effectiveAsInputValue(entry) : "";
+    // Never disabled: Preview checks whatever is typed, and must work on a
+    // read-only vault and on an older vault-api without this setting too.
+    // Only Save/Reset are gated (WEB-FEAT-1 review S3).
+    idField.appendChild(idInput);
+  }
+  const typedId = () => (idInput ? idInput.value.trim() : String((entry && entry.effective) || "").trim());
   const caption = el("p", "foot-note");
   caption.dataset.role = "steamid-caption";
   idField.appendChild(caption);
@@ -761,7 +895,7 @@ function buildSteamLibraryBlock() {
   const saveBtn = el("button", "btn sm", "Save SteamID64");
   saveBtn.type = "button";
   saveBtn.dataset.role = "steamid-save";
-  saveBtn.hidden = readonly || !entry;
+  saveBtn.hidden = readonly || !entry || pinned;
   const resetBtn = el("button", "btn ghost sm", "Reset");
   resetBtn.type = "button";
   resetBtn.dataset.role = "steamid-reset";
@@ -773,6 +907,11 @@ function buildSteamLibraryBlock() {
 
   function paintCaption() {
     const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
+    if (pinned) {
+      caption.hidden = true;
+      resetBtn.hidden = true;
+      return;
+    }
     caption.textContent = current
       ? `${sourceLabel(current.source)} · ${appliesText(current.applies)}`
       : `${LIBRARY_SETTING_ABSENT_MESSAGE} Preview still works.`;
@@ -789,6 +928,7 @@ function buildSteamLibraryBlock() {
 
   saveBtn.addEventListener("click", async () => {
     showIdError(null);
+    if (!idInput) return;
     const typed = idInput.value.trim();
     // Shared with onboarding step 2 (WP WEB-FEAT-2): validation, the same
     // body builder as the shared Save bar (only a real change is sent, the
@@ -827,7 +967,7 @@ function buildSteamLibraryBlock() {
     try {
       state.settingsResponse = await api.patchSettings(body);
       const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
-      idInput.value = current ? effectiveAsInputValue(current) : "";
+      if (idInput) idInput.value = current ? effectiveAsInputValue(current) : "";
       paintCaption();
       showToast("Library SteamID64 reset.");
     } catch (err) {
@@ -838,7 +978,7 @@ function buildSteamLibraryBlock() {
   });
 
   lookupBtn.addEventListener("click", async () => {
-    const steamid = validSteamId64(idInput.value.trim());
+    const steamid = validSteamId64(typedId());
     if (!steamid) {
       state.lookup = { error: INVALID_STEAMID64_MESSAGE };
       renderLookupResult();
@@ -1052,69 +1192,25 @@ function cellWithTitle(tag, className, cell) {
   return node;
 }
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-/** The (i) glyph: a 24-unit outline circle with an "i", stroked in
- * currentColor like the status-icon glyphs (components/status-icon.js:
- * viewBox 0 0 24 24, round caps), decorative (the button carries the
- * name). */
-function infoGlyph() {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  const attrs = {
-    viewBox: "0 0 24 24",
-    "aria-hidden": "true",
-    focusable: "false",
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": "2",
-    "stroke-linecap": "round",
-  };
-  for (const k in attrs) svg.setAttribute(k, attrs[k]);
-  const parts = [
-    ["circle", { cx: "12", cy: "12", r: "9" }],
-    ["path", { d: "M12 11v6" }],
-    ["path", { d: "M12 7.5v.01" }],
-  ];
-  for (const [tag, a] of parts) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const k in a) node.setAttribute(k, a[k]);
-    svg.appendChild(node);
-  }
-  return svg;
-}
-
 /** A DOM id from a component name (letters, digits and dashes only). */
 function aboutInfoId(name) {
   return "about-info-" + name.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
 }
 
 /**
- * The per-row (i) disclosure button (WP WEB-FIX-8): a native <button>, so
- * Enter/Space and the global :focus-visible ring come for free;
- * aria-expanded + aria-controls point at the row's details. Toggling flips
- * `hidden` on the details row and records the choice in `aboutInfoOpen`.
- * Until the user chooses, a "Check" row starts open (its reason must not
- * hide behind the (i)) and every other row collapsed.
+ * The per-row (i) disclosure (WP WEB-FIX-8). Until the user chooses, a
+ * "Check" row starts open (its reason must not hide behind the (i)) and
+ * every other row collapsed; the choice survives a Refresh.
  */
 function buildInfoButton(name, detailRow, openByDefault) {
-  const btn = el("button", "about-info-btn");
-  btn.type = "button";
-  btn.dataset.role = "about-info";
-  btn.setAttribute("aria-label", `Details for ${name}`);
-  btn.setAttribute("aria-controls", detailRow.id);
-  btn.appendChild(infoGlyph());
-  const apply = (open) => {
-    btn.setAttribute("aria-expanded", String(open));
-    detailRow.hidden = !open;
-  };
-  const isOpen = () => (aboutInfoOpen.has(name) ? aboutInfoOpen.get(name) : openByDefault);
-  apply(isOpen());
-  btn.addEventListener("click", () => {
-    const open = !isOpen();
-    aboutInfoOpen.set(name, open);
-    apply(open);
+  return buildDisclosure({
+    name,
+    detailEl: detailRow,
+    openByDefault,
+    memory: aboutInfoOpen,
+    role: "about-info",
+    label: `Details for ${name}`,
   });
-  return btn;
 }
 
 /**
@@ -1227,13 +1323,10 @@ function paintAbout() {
 }
 
 function buildAboutSection() {
-  const wrap = document.createDocumentFragment();
-  const heading = el("h4", "sec", "About");
-  heading.id = "settings-about";
-  // Programmatic focus target for the rail's version button only; never in
-  // the Tab order (same landing-spot technique as the sheets).
-  heading.tabIndex = -1;
-  wrap.append(heading);
+  // D16-WEB: a collapsible section like the others; its summary is the
+  // focus target of the rail's version button (fullRender opens it first).
+  const { details, body: wrap } = buildSection("about", { summaryId: "settings-about" });
+  const heading = details.querySelector("summary");
 
   const head = el("div", "about-head");
   const refreshBtn = el("button", "btn ghost sm", "Refresh");
@@ -1260,10 +1353,10 @@ function buildAboutSection() {
       "SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.",
     ),
   );
-  aboutEls = { heading, refreshBtn, status, content, checked };
+  aboutEls = { heading, details, refreshBtn, status, content, checked };
   setRefreshBusy(about.phase === "loading");
   paintAbout();
-  return wrap;
+  return details;
 }
 
 // The settings form is not polled, but the About "checked ... ago" text
@@ -1285,6 +1378,9 @@ function fullRender() {
   // The save bar is rebuilt below (or not at all: loading, error, read-only).
   els.saveBar = null;
   els.section.classList.remove("savebar-up");
+  els.dots = new Map();
+  els.sectionKeys = new Map();
+  els.sectionsById = new Map();
 
   if (state.loading) {
     els.body.appendChild(el("p", "empty", "Loading settings…"));
@@ -1310,7 +1406,27 @@ function fullRender() {
     );
   }
 
-  els.body.append(buildVaultSection(), buildScheduleSection(), buildWebhookSection());
+  const placed = placeEntries(state.settingsResponse.settings);
+  els.body.append(buildVaultSection(placed.sections.vault));
+  for (const [id, extra] of [
+    ["window", buildSweepStatusBlock()],
+    ["disk", null],
+    ["notify", null],
+    ["other", null],
+  ]) {
+    // A fragment with no children counts as "nothing extra".
+    const node = buildFormSection(id, placed.sections[id], extra && extra.childNodes.length > 0 ? extra : null);
+    if (node) els.body.append(node);
+  }
+
+  const steam = buildSection("steam", { summaryText: sectionSummary("steam", entryByKey) });
+  steam.body.append(buildSteamSection());
+  els.body.append(steam.details);
+  renderSteamStatusLine();
+  renderLookupResult();
+
+  const expertArea = buildExpertArea(placed.expert);
+  if (expertArea) els.body.append(expertArea);
 
   // WP WEB-FIX-8: the save bar keeps its place in the DOM (and so in the
   // Tab order) right after the form it saves, but is `position:fixed`
@@ -1340,14 +1456,11 @@ function fullRender() {
   }
   markDirty();
 
-  els.body.append(buildSteamSection());
-  renderSteamStatusLine();
-  renderLookupResult();
-
-  els.body.append(buildConnectionSection(), buildPcsSection(), buildAboutSection());
+  els.body.append(buildAboutSection());
 
   if (focusAboutOnRender) {
     focusAboutOnRender = false;
+    aboutEls.details.open = true;
     aboutEls.heading.focus();
     if (typeof aboutEls.heading.scrollIntoView === "function") aboutEls.heading.scrollIntoView({ block: "start" });
   }
@@ -1421,9 +1534,11 @@ export function renderSettings() {
   section.append(h1, body);
 
   sectionEl = section;
-  els = { section, heading: h1, body };
+  els = { section, heading: h1, body, dots: new Map(), sectionKeys: new Map(), sectionsById: new Map() };
   aboutEls = null;
   drafts = {};
+  openState = readOpenState(getStorage);
+  expertOn = readExpertSwitch(getStorage);
   loadSettings();
   // WP WEB-FEAT-3: About loads when Settings opens (in parallel with the
   // settings form), never on a timer.

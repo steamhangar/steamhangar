@@ -47,10 +47,11 @@ test("a freshly reset demo has no db-sourced overrides", async () => {
 });
 
 test("PATCH sets an override, and GET reflects it with source 'db'", async () => {
-  const patched = await demoRequest("PATCH", "/v1/settings", { body: { vault_name: "my-vault" } });
-  const entry = patched.settings.find((s) => s.key === "vault_name");
-  assert.equal(entry.effective, "my-vault");
+  const patched = await demoRequest("PATCH", "/v1/settings", { body: { bypass_window_days: "9" } });
+  const entry = patched.settings.find((s) => s.key === "bypass_window_days");
+  assert.equal(entry.effective, 9);
   assert.equal(entry.source, "db");
+  assert.equal(entry.value, 9, "D16b: `value` carries the stored Settings value");
 });
 
 test("PATCH with null clears an override back to env/default", async () => {
@@ -111,13 +112,13 @@ test("PATCH validates the WHOLE body before writing anything (all-or-nothing)", 
   await assert.rejects(
     () =>
       demoRequest("PATCH", "/v1/settings", {
-        body: { vault_name: "should-not-stick", auto_gc: "not-a-real-mode" },
+        body: { bypass_window_days: "11", auto_gc: "not-a-real-mode" },
       }),
     (err) => err.status === 422,
   );
   const after = await demoRequest("GET", "/v1/settings");
-  const vaultName = after.settings.find((s) => s.key === "vault_name");
-  assert.notEqual(vaultName.effective, "should-not-stick");
+  const bypass = after.settings.find((s) => s.key === "bypass_window_days");
+  assert.notEqual(bypass.effective, 11);
 });
 
 test("PATCH rejects an env-only key by name, distinct from 'unknown key'", async () => {
@@ -259,11 +260,76 @@ test("turning the relay off is immediate: DELETE then the very next call answers
 });
 
 test("resetDemoData() clears settings overrides and the steam relay key between test cases", async () => {
-  await demoRequest("PATCH", "/v1/settings", { body: { vault_name: "leftover" } });
+  await demoRequest("PATCH", "/v1/settings", { body: { bypass_window_days: "12" } });
   await demoRequest("PUT", "/v1/steam/key", { body: { key: VALID_KEY } });
   resetDemoData();
   const settings = await demoRequest("GET", "/v1/settings");
-  assert.notEqual(settings.settings.find((s) => s.key === "vault_name").effective, "leftover");
+  assert.notEqual(settings.settings.find((s) => s.key === "bypass_window_days").effective, 12);
   const steamKey = await demoRequest("GET", "/v1/steam/key");
   assert.equal(steamKey.configured, false);
+});
+
+// ---------------------------------------------------------------------
+// WP D16-WEB: the demo mirrors D16b (env wins, risky confirm, cross rules)
+// ---------------------------------------------------------------------
+
+test("D16b: an env-pinned key reports source env / editable false, and PATCH answers 409 with the server's wording", async () => {
+  const out = await demoRequest("GET", "/v1/settings");
+  const name = out.settings.find((s) => s.key === "vault_name");
+  assert.equal(name.source, "env");
+  assert.equal(name.editable, false);
+  await assert.rejects(
+    () => demoRequest("PATCH", "/v1/settings", { body: { vault_name: "x" } }),
+    (err) => err.status === 409 && err.detail === "'vault_name' is set via env (VAULT_NAME); env always wins. Remove the environment variable and restart to change it here.",
+  );
+  const timeout = out.settings.find((s) => s.key === "webhook_timeout_seconds");
+  assert.equal(timeout.shadowed, true, "a stored value under an env pin is reported shadowed");
+  assert.equal(timeout.effective, 10);
+});
+
+test("D16b: a risky key without confirm_risky answers 428 {message, risky_keys} and writes nothing; with it, it is stored", async () => {
+  await assert.rejects(
+    () => demoRequest("PATCH", "/v1/settings", { body: { upstream_max_conns: "24", bypass_window_days: "4" } }),
+    (err) => err.status === 428 && Array.isArray(err.detail.risky_keys) && err.detail.risky_keys.join() === "upstream_max_conns" && typeof err.detail.message === "string",
+  );
+  const before = await demoRequest("GET", "/v1/settings");
+  assert.equal(before.settings.find((s) => s.key === "bypass_window_days").source, "default", "428 writes nothing");
+  const out = await demoRequest("PATCH", "/v1/settings", { body: { upstream_max_conns: "24" }, params: { confirm_risky: "true" } });
+  const row = out.settings.find((s) => s.key === "upstream_max_conns");
+  assert.equal(row.effective, "24");
+  assert.equal(row.source, "db");
+  await assert.rejects(
+    () => demoRequest("PATCH", "/v1/settings", { body: { upstream_max_conns: null } }),
+    (err) => err.status === 428,
+    "clearing a risky key needs the confirmation too",
+  );
+});
+
+test("D16b: cross rules answer 422 (cap below threads, per-client TLS above total)", async () => {
+  await assert.rejects(
+    () => demoRequest("PATCH", "/v1/settings", { body: { upstream_max_conns: "4" }, params: { confirm_risky: "true" } }),
+    (err) => err.status === 422 && /PREFILL_MAX_THREADS/.test(err.detail),
+  );
+  await assert.rejects(
+    () => demoRequest("PATCH", "/v1/settings", { body: { tls_client_max_conns: "300" }, params: { confirm_risky: "true" } }),
+    (err) => err.status === 422,
+  );
+  await assert.rejects(
+    () => demoRequest("PATCH", "/v1/settings", { body: { tls_max_conns: "32" }, params: { confirm_risky: "true" } }),
+    (err) => err.status === 422 && /TLS_CLIENT_MAX_CONNS/.test(err.detail),
+  );
+});
+
+test("D16b: the webhook URL is env-only (422), schedule_window spells no window 'off', /v1/schedule follows", async () => {
+  await assert.rejects(
+    () => demoRequest("PATCH", "/v1/settings", { body: { webhook_url: "https://x.example/" } }),
+    (err) => err.status === 422 && /environment-only/.test(err.detail),
+  );
+  const out = await demoRequest("PATCH", "/v1/settings", { body: { schedule_window: "off" } });
+  assert.equal(out.settings.find((s) => s.key === "schedule_window").effective, "off");
+  const schedule = await demoRequest("GET", "/v1/schedule");
+  assert.equal(schedule.enabled, false);
+  assert.equal(schedule.window, null);
+  const reset = await demoRequest("PATCH", "/v1/settings", { body: { schedule_window: null } });
+  assert.equal(reset.settings.find((s) => s.key === "schedule_window").effective, "03:00-07:00", "null resets to the default window");
 });

@@ -138,3 +138,15 @@ test("MUTATION PIN: this test actually reads config.py's real, current text, not
   assert.match(configPy, /DEFAULT_AUTO_GC\s*(?::\s*\w+\s*)?=/);
   assert.match(configPy, /DEFAULT_SWEEP_INCLUDE_CACHED\s*(?::\s*\w+\s*)?=/);
 });
+
+// WP D16-WEB: the demo's download window is the shipped default (D16b moved
+// it from compose into config.py), not a demo-only window.
+test("demo schedule_window default equals config.py's DEFAULT_SCHEDULE_WINDOW", async () => {
+  const m = /^DEFAULT_SCHEDULE_WINDOW\s*=\s*"([^"]+)"/m.exec(configPy);
+  assert.ok(m, "GRAMMAR drift: DEFAULT_SCHEDULE_WINDOW is no longer a plain string literal — widen this regex");
+  const { demoRequest, resetDemoData } = await import("../js/demo-data.js");
+  resetDemoData();
+  const out = await demoRequest("GET", "/v1/settings");
+  const row = out.settings.find((s) => s.key === "schedule_window");
+  assert.equal(row.fallback, m[1], "VALUE drift: update DEMO_SETTING_SPECS schedule_window default in demo-data.js");
+});

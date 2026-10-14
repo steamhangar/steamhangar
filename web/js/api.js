@@ -252,7 +252,10 @@ export const api = {
   // read by the "Add a device" sheet for the app and agent downloads.
   dist: () => request("GET", "/v1/dist"),
   getSettings: () => request("GET", "/v1/settings"),
-  patchSettings: (body) => request("PATCH", "/v1/settings", { body }),
+  // D16b: a batch that sets or clears a risky key needs ?confirm_risky=true
+  // (else 428 naming the keys). Only sent after the user confirmed.
+  patchSettings: (body, { confirmRisky = false } = {}) =>
+    request("PATCH", "/v1/settings", { body, params: confirmRisky ? { confirm_risky: "true" } : undefined }),
   schedule: () => request("GET", "/v1/schedule"),
   // WP UPD-2: the always-on update check (WP UPD-1). No body; never starts a
   // download. A vault-api older than UPD-1 answers 404 on both (kind

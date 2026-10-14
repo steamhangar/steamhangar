@@ -110,7 +110,8 @@ test("outside a browser the baseline is unchanged: no key, no SteamID, gate off"
 test("WP UPD-5 mirror: the demo's update status says scheduled with the window cleared", async () => {
   resetDemoData();
   await demoRequest("PATCH", "/v1/settings", { body: { schedule_window: "" } });
-  assert.equal((await setting("schedule_window")).effective, null);
+  // D16b: no window is spelled "off" (blank PATCH value = off, D16b-1 review).
+  assert.equal((await setting("schedule_window")).effective, "off");
   const status = await demoRequest("GET", "/v1/updates/status");
   assert.equal(status.enabled, true);
   assert.equal(status.scheduled, true);
