@@ -111,6 +111,27 @@ name: Publish
 # cleanly no-ops, per its own signing-secret gate) before agent-binaries ever
 # calls the same action, so exactly one of them ever creates the release, in
 # a fixed order, every time.
+#
+# --- Build first, then publish (WP DIST-1a) --------------------------------
+# The vault-api image carries the APK and the vault-agent release files of
+# the SAME run (served in the LAN under /dist/, api/vault_api/dist.py), so
+# both are BUILT before any image and handed over as workflow artifacts:
+#
+#   build-version --+--> agent-build ----+
+#                   |                    +--> publish (4 images; the
+#   android-build --+--------------------+    vault-api leg stages both
+#                                             artifacts into api/dist/)
+#   publish --> android-release (attach APK) --> agent-binaries (attach
+#               agent files, append digests to the release body)
+#
+# android-build / agent-build carry everything the old android-release /
+# agent-binaries jobs built and verified, unchanged; the two release jobs
+# keep their names and only download the artifacts and attach them, so the
+# GitHub Release carries the same asset names and bytes as before. A
+# failed APK or agent build now stops the images too (before, the images
+# were pushed first): a release never ships images whose baked downloads
+# are missing. Artifacts are built fresh per run (no cache), so an image
+# can only ever carry files of its own version.
 on:
   push:
     tags:
@@ -206,7 +227,11 @@ jobs:
   publish:
     name: publish / ${{ matrix.image }} (ghcr.io)
     runs-on: ubuntu-latest
-    needs: build-version
+    # WP DIST-1a: android-build and agent-build first; the vault-api leg
+    # bakes their artifacts (see "Stage release downloads" below). The other
+    # three legs wait for them too -- one ordering for the whole matrix keeps
+    # the "a release is all or nothing" reading simple.
+    needs: [build-version, android-build, agent-build]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
@@ -451,6 +476,91 @@ jobs:
             exit 1
           fi
 
+      # WP DIST-1a: the release downloads vault-api serves in the LAN. Only
+      # the vault-api leg; the other images do not COPY api/dist. The
+      # directory must hold nothing but its tracked placeholder before the
+      # downloads land, so a stray file can never be baked by accident.
+      - name: Check api/dist holds only its placeholder (vault-api only)
+        if: matrix.image == 'vault-api'
+        run: |
+          set -eu
+          extra="$(find api/dist -mindepth 1 ! -path api/dist/README.md -print)"
+          if [ -n "$extra" ]; then
+            echo "::error::api/dist must hold only README.md before staging; found: ${extra}" >&2
+            exit 1
+          fi
+
+      - name: Download vault-agent release files (vault-api only)
+        if: matrix.image == 'vault-api'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-agent
+          path: api/dist
+
+      # android-build uploads an APK only when it was signed (the release
+      # keystore is configured); otherwise the image carries no APK and
+      # GET /v1/dist points at the release asset instead.
+      - name: Download signed APK (vault-api only)
+        if: matrix.image == 'vault-api' && needs.android-build.outputs.configured == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-apk
+          path: api/dist
+
+      # Verify what is about to be baked: SHA256SUMS (agent-build's own file,
+      # covering binaries and packaging files) must check, the APK must
+      # match android-build's recorded SHA-256, and on a v* tag every name
+      # must be the one vault_api/dist.py expects for the image's version
+      # (v<build version>; on a tag GITHUB_REF_NAME is exactly that). On a
+      # dispatch rehearsal off a branch the agent files carry the branch
+      # name, so the name check is skipped and the image serves none of
+      # them -- harmless, nothing is pushed. Files are made world-readable:
+      # the image COPYs them root-owned and uid 101 only reads them.
+      - name: Stage release downloads into api/dist (vault-api only)
+        if: matrix.image == 'vault-api'
+        working-directory: api/dist
+        env:
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
+          APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
+          APK_NAME: ${{ needs.android-build.outputs.apk_name }}
+          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          set -eu
+          sha256sum --check --strict SHA256SUMS
+          if [ "$APK_CONFIGURED" = "true" ]; then
+            got="$(sha256sum "$APK_NAME" | cut -d' ' -f1)"
+            if [ "$got" != "$APK_SHA256" ]; then
+              echo "::error::${APK_NAME}: sha256 ${got} differs from android-build's ${APK_SHA256}" >&2
+              exit 1
+            fi
+          fi
+          if [ "$IS_TAG" = "true" ]; then
+            tag="v${BUILD_VERSION}"
+            want="vault-agent-${tag}-windows-amd64.exe vault-agent-${tag}-linux-amd64 vault-agent-${tag}-linux-arm64 install-task.ps1 run-vault-agent.ps1 uninstall-task.ps1 vault-agent-report.service vault-agent-report.timer SHA256SUMS"
+            if [ "$APK_CONFIGURED" = "true" ]; then
+              want="${want} steamhangar-app-${tag}.apk"
+            fi
+            for f in $want; do
+              if [ ! -f "$f" ]; then
+                echo "::error::api/dist/${f} missing -- vault-api would not serve it for version ${BUILD_VERSION}" >&2
+                exit 1
+              fi
+            done
+          fi
+          chmod 0644 ./*
+          ls -l
+          total="$(find . -type f ! -name README.md -printf '%s\n' | awk '{s+=$1} END {print s+0}')"
+          {
+            echo "### vault-api: baked release downloads (/app/dist)"
+            echo ""
+            echo '```'
+            ls -l
+            echo '```'
+            echo ""
+            echo "Image size delta (uncompressed): ${total} bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build and push ${{ matrix.image }}
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -559,6 +669,24 @@ jobs:
             docker run --rm --platform "$PLATFORM" --entrypoint /opt/steamprefill/SteamPrefill "$REF" --version
           done
 
+      # WP DIST-1a: read the baked downloads back out of the PUSHED image:
+      # SHA256SUMS must check inside it (the image carries what was staged,
+      # byte for byte), and the APK must be there when one was built.
+      - name: Check the baked release downloads inside the pushed image (vault-api only)
+        if: matrix.image == 'vault-api' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
+          APK_NAME: ${{ needs.android-build.outputs.apk_name }}
+          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
+        run: |
+          set -eu
+          REF="${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
+          docker run --rm --platform linux/amd64 --entrypoint sh "$REF" -c 'cd /app/dist && sha256sum --check --strict SHA256SUMS'
+          if [ "$APK_CONFIGURED" = "true" ]; then
+            docker run --rm --platform linux/amd64 --entrypoint sh -e APK_NAME -e APK_SHA256 "$REF" \
+              -c 'cd /app/dist && echo "${APK_SHA256}  ${APK_NAME}" | sha256sum --check --strict -'
+          fi
+
       # Review round 2 (S5): softened. A digest is retrievable from the
       # registry at any time (`docker buildx imagetools inspect`, or the
       # GHCR web UI) regardless of whether this step exists -- this step
@@ -632,30 +760,23 @@ jobs:
   #     "Check for release signing secret" step below for exactly what this
   #     job checks on its own (one secret, not four) and why that split is
   #     still safe.
-  android-release:
-    name: android-release / signed APK -> GitHub Release
+  android-build:
+    name: android-build / signed APK (workflow artifact)
     runs-on: ubuntu-latest
-    # Review round 2 (N1): this job's own header comment already claims
-    # "an operator who pulls a version gets matching images and app in one
-    # place" -- `needs: publish` makes that literally true instead of
-    # merely aspirational. Without it the two jobs would run independently
-    # off the same tag, so a release could end up carrying a signed APK
-    # with no matching images (or vice versa) if one job failed and the
-    # other didn't. `publish` uses `fail-fast: false` across its own
-    # four-image matrix, so this job only starts once EVERY image has
-    # either succeeded or the whole matrix has finished trying.
-    needs: publish
+    # WP DIST-1a: no `needs:` any more -- this job only BUILDS, signs and
+    # verifies the APK and hands it on as the `release-apk` workflow
+    # artifact; `publish` bakes it into the vault-api image and
+    # `android-release` (below) attaches it to the GitHub Release. Review
+    # round 2's (N1) "matching images and app in one place" now holds the
+    # other way round: `publish` needs this job, so no image is pushed for
+    # a release whose APK build failed.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    # WIDER than the `publish` job above (which only ever adds
-    # `packages: write`) -- `contents: write` is what lets this job
-    # create/attach to a GitHub Release. Scoped to this job alone; the
-    # workflow's top-level `permissions:` stays `contents: read`, matching
-    # ci.yml's own "only the read access every job actually needs" rule for
-    # the default. (`agent-binaries`, below, needs the identical override
-    # for the identical reason -- this is no longer the only job in the
-    # file that widens beyond `publish`'s grant, just the first of two.)
+    # Read-only since WP DIST-1a: attaching to the release (the one step
+    # that needed `contents: write`) moved to `android-release` below, which
+    # holds no signing secret. The keystore and the write token are no
+    # longer in the same job.
     permissions:
-      contents: write
+      contents: read
     # WP SEC-FIX-2 (S1): the four ANDROID_* signing secrets live in the
     # `release` Environment, not in repository secrets (setup:
     # app/README.md, "CI signing secrets"). That Environment's deployment
@@ -671,7 +792,7 @@ jobs:
     # only once the secrets are REMOVED from repository secrets.
     environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
     # Exposes whether a real (secret-backed) signed build ran, for
-    # `agent-binaries` to read via `needs.android-release.outputs.configured`
+    # `agent-binaries` to read via `needs.android-build.outputs.configured`
     # -- see that job's own "Attach vault-agent binaries" step for why it
     # needs to know this (S2 fix, reviewer round 1: avoids asking
     # `softprops/action-gh-release` to `generate_release_notes` twice against
@@ -682,6 +803,11 @@ jobs:
       # WP SEC-FIX-2 (S5): the signing certificate's SHA-256, for the
       # release body (agent-binaries). Empty when no APK was built.
       cert_sha256: ${{ steps.verify.outputs.cert_sha256 }}
+      # WP DIST-1a: the asset name and SHA-256 of the uploaded APK, so
+      # `publish` and `android-release` can check the artifact they
+      # download is the one this job verified. Empty when no APK was built.
+      apk_name: ${{ steps.apk.outputs.name }}
+      apk_sha256: ${{ steps.apk.outputs.sha256 }}
     timeout-minutes: 30
     steps:
       # WP SEC-FIX-2 (P1): this job holds a write token, so the checkout
@@ -963,6 +1089,78 @@ jobs:
           mv app/app/build/outputs/apk/release/app-release.apk \
              "app/app/build/outputs/apk/release/steamhangar-app-${TAG}.apk"
 
+      # WP DIST-1a: hand the verified APK on. One file, uploaded as is;
+      # `publish` (vault-api leg) and `android-release` download it and
+      # check it against `apk_sha256`. Short retention: it only has to
+      # outlive this run.
+      - name: Record APK name and checksum
+        if: steps.signing_check.outputs.configured == 'true'
+        id: apk
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -eu
+          name="steamhangar-app-${TAG}.apk"
+          sha="$(sha256sum "app/app/build/outputs/apk/release/${name}" | cut -d' ' -f1)"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${sha}" >> "$GITHUB_OUTPUT"
+          echo "${sha}  ${name}"
+
+      - name: Upload signed APK (workflow artifact)
+        if: steps.signing_check.outputs.configured == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-apk
+          path: app/app/build/outputs/apk/release/${{ steps.apk.outputs.name }}
+          if-no-files-found: error
+          retention-days: 3
+
+      # Runs on every outcome, including a failed verify/build step above
+      # (`if: always()`), so the decoded private keystore never survives
+      # past this job regardless of how it ends. `rm -f` on a path that was
+      # never created (the skipped-signing case) is a harmless no-op, not
+      # an error.
+      - name: Remove decoded keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/vault-android-release.jks"
+
+  # WP DIST-1a: the release half of the former android-release job. Runs
+  # after `publish`, as before, so the release is written in the same fixed
+  # order (APK first, then agent-binaries); the attach steps below are the
+  # old ones unchanged except that the APK now comes from android-build's
+  # `release-apk` artifact. Skipped when android-build built no APK (no
+  # signing secret): the old job's per-step skips, lifted to the job.
+  android-release:
+    name: android-release / signed APK -> GitHub Release
+    runs-on: ubuntu-latest
+    needs: [android-build, publish]
+    if: needs.android-build.outputs.configured == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    timeout-minutes: 15
+    steps:
+      # WP SEC-FIX-2 (P1): this job holds a write token, so the checkout
+      # must not leave it in .git/config for every later step (and every
+      # third-party action) to read.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download signed APK
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-apk
+          path: release-apk
+
+      - name: Check the APK is the one android-build verified
+        working-directory: release-apk
+        env:
+          APK_NAME: ${{ needs.android-build.outputs.apk_name }}
+          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
+        run: |
+          set -eu
+          echo "${APK_SHA256}  ${APK_NAME}" | sha256sum --check --strict -
+
       # Pre-freeze project review, P2: does this tag's release already
       # exist? Read from the GitHub API (not inferred from which job ran
       # first), so that RE-pushing the same tag -- a rehearsal tag is
@@ -978,7 +1176,7 @@ jobs:
       # as the attach step below -- a branch-ref workflow_dispatch has no
       # release tag to look up.
       - name: Check whether this tag's release already exists
-        if: steps.signing_check.outputs.configured == 'true' && github.event_name == 'push'
+        if: github.event_name == 'push'
         id: release_check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1017,7 +1215,7 @@ jobs:
       # re-applies these fields, so a step that omitted them would flip a
       # pre-release back to latest on its own later run.
       - name: Attach signed APK to the GitHub Release
-        if: steps.signing_check.outputs.configured == 'true' && github.event_name == 'push'
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -1031,20 +1229,15 @@ jobs:
           # is what that step closes.
           generate_release_notes: ${{ steps.release_check.outputs.exists != 'true' }}
           fail_on_unmatched_files: true
-          files: app/app/build/outputs/apk/release/steamhangar-app-${{ steps.version.outputs.tag }}.apk
-
-      # Runs on every outcome, including a failed verify/build step above
-      # (`if: always()`), so the decoded private keystore never survives
-      # past this job regardless of how it ends. `rm -f` on a path that was
-      # never created (the skipped-signing case) is a harmless no-op, not
-      # an error.
-      - name: Remove decoded keystore
-        if: always()
-        run: rm -f "$RUNNER_TEMP/vault-android-release.jks"
+          files: release-apk/${{ needs.android-build.outputs.apk_name }}
 
   # --- Third deliverable: cross-compiled vault-agent binaries ------------------
-  # See this file's header ("Third deliverable") for why this job exists and
-  # why it depends on `android-release` rather than `publish` directly. The
+  # See this file's header ("Third deliverable") for why these files exist.
+  # WP DIST-1a split the old agent-binaries job in two: `agent-build` (here)
+  # builds and verifies everything and uploads it as the `release-agent`
+  # workflow artifact BEFORE `publish` (the vault-api image bakes it);
+  # `agent-binaries` (further below) attaches the same bytes to the release
+  # after android-release, exactly as before. The
   # targets and the CGO_ENABLED=0 requirement both come from agent/README.md
   # ("Go port (production)" -> "Cross-compile matrix") and ADR-0005 ("vault-
   # agent ships as a Go binary"), not from anything invented in this file:
@@ -1054,20 +1247,16 @@ jobs:
   # ARM64), and linux/arm64 (ADR-0005's own text: "SteamOS devices ... ARM64"
   # -- a general ARM64 SteamOS/Steam-Machine-class device, confirmed a real,
   # already-built-and-documented target and not this package's invention).
-  agent-binaries:
-    name: agent-binaries / cross-compiled vault-agent -> GitHub Release
+  agent-build:
+    name: agent-build / cross-compiled vault-agent (workflow artifact)
     runs-on: ubuntu-latest
-    # `publish` is listed only so its per-image digest outputs are readable
-    # here (WP SEC-FIX-2, S2); the ordering still comes from android-release,
-    # which itself needs publish.
     # build-version (WP VER-1) supplies the -ldflags version and commit.
-    needs: [build-version, publish, android-release]
+    needs: build-version
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    # WIDER than the default `contents: read` at the workflow level, scoped
-    # to this job alone -- same shape as `android-release`'s own override,
-    # for the same reason: attaching release assets needs `contents: write`.
+    # Read-only: this job writes nothing outside its own workspace and the
+    # run's artifact store (WP DIST-1a; attaching moved to agent-binaries).
     permissions:
-      contents: write
+      contents: read
     timeout-minutes: 15
     steps:
       # WP SEC-FIX-2 (P1): this job holds a write token, so the checkout
@@ -1273,6 +1462,54 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # WP DIST-1a: the whole dist/ directory (binaries, packaging scripts,
+      # systemd units, SHA256SUMS) as one artifact, flat. `publish` bakes it
+      # into vault-api, `agent-binaries` attaches it to the release.
+      - name: Upload vault-agent release files (workflow artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-agent
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
+
+  agent-binaries:
+    name: agent-binaries / cross-compiled vault-agent -> GitHub Release
+    runs-on: ubuntu-latest
+    # `publish` is listed so its per-image digest outputs are readable here
+    # (WP SEC-FIX-2, S2); android-build for the APK certificate and the
+    # notes decision; android-release keeps the release-writing order (APK
+    # first). android-release is SKIPPED when no APK was signed, and a
+    # skipped need would skip this job too -- hence the explicit `if:`
+    # that accepts success or skipped there and demands success elsewhere.
+    needs: [build-version, publish, android-build, android-release, agent-build]
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.publish.result == 'success'
+      && needs.agent-build.result == 'success'
+      && (needs.android-release.result == 'success' || needs.android-release.result == 'skipped') }}
+    # WIDER than the default `contents: read` at the workflow level, scoped
+    # to this job alone -- same shape as `android-release`'s own override,
+    # for the same reason: attaching release assets needs `contents: write`.
+    permissions:
+      contents: write
+    timeout-minutes: 15
+    steps:
+      # No checkout: every step below talks to the REST API (softprops,
+      # gh --repo) about files from the artifact, never the source tree.
+      - name: Download vault-agent release files
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-agent
+          path: dist
+
+      - name: Check the files against SHA256SUMS
+        working-directory: dist
+        run: |
+          set -eu
+          sha256sum --check --strict SHA256SUMS
+
       # Same tag-push-only gate as `android-release`'s own APK-attach step
       # above, and for the identical reason: a `workflow_dispatch` run off a
       # branch ref has no release to attach to. `tag_name` deliberately uses
@@ -1289,7 +1526,7 @@ jobs:
       # non-empty -- it APPENDS the generated notes to whatever body it
       # just resolved. Two ways to hit that append: (1) `android-release`
       # already created this release in this same run (the keystore-
-      # configured case) -- `needs.android-release.outputs.configured`
+      # configured case) -- `needs.android-build.outputs.configured`
       # tells us that; (2) a RE-push of the same tag, where the release
       # exists from an earlier run whichever job created it then -- the
       # pre-check step below asks the GitHub API. Notes are generated only
@@ -1340,7 +1577,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ !contains(github.ref_name, '-') }}
-          generate_release_notes: ${{ needs.android-release.outputs.configured != 'true' && steps.release_check.outputs.exists != 'true' }}
+          generate_release_notes: ${{ needs.android-build.outputs.configured != 'true' && steps.release_check.outputs.exists != 'true' }}
           fail_on_unmatched_files: true
           files: |
             dist/vault-agent-*
@@ -1365,7 +1602,7 @@ jobs:
           PIN_API: ${{ needs.publish.outputs.pin_vault_api }}
           PIN_DNS: ${{ needs.publish.outputs.pin_vault_dns }}
           PIN_PROXY: ${{ needs.publish.outputs.pin_vault_proxy }}
-          APK_CERT: ${{ needs.android-release.outputs.cert_sha256 }}
+          APK_CERT: ${{ needs.android-build.outputs.cert_sha256 }}
         run: |
           set -eu
           for pin in "$PIN_CORE" "$PIN_API" "$PIN_DNS" "$PIN_PROXY"; do

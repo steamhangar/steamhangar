@@ -24,6 +24,7 @@ from vault_api.config import Settings
 from vault_api.cover_art import CoverArtRefresher
 from vault_api.cover_cache import CoverFileFetcher
 from vault_api.db import get_connection, init_db
+from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
 from vault_api.manifest_ingest import log_cache_dir_canary
 from vault_api.routers import (
@@ -34,6 +35,7 @@ from vault_api.routers import (
     client_names as client_names_router,
     clients,
     covers,
+    dist as dist_router,
     games,
     health,
     history as history_router,
@@ -378,6 +380,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # see routers/app_return.py. Mounted unconditionally, unlike the web UI:
     # the app needs it on a headless vault-api too.
     app.include_router(app_return.router)
+    # WP DIST-1a: the release files baked into the image. The files are
+    # public and OUTSIDE /v1 (an unpaired phone or PC downloads them, see
+    # routers/dist.py); the index GET /v1/dist is behind the key. Mounted
+    # unconditionally: with nothing baked in, the index points at the
+    # GitHub Release and every /dist/ name is a 404.
+    app.state.dist_catalog = DistCatalog(settings.dist_dir, build)
+    app.include_router(dist_router.files_router)
+    app.include_router(dist_router.index_router)
     # WP 4a.1. Registered last, by convention (webui.mount_web_ui's own
     # docstring): every route it adds is an exact path or a narrow real
     # asset-subtree prefix (/, /index.html, the SPA view paths, /css, /js —

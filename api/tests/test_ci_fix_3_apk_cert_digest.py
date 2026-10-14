@@ -37,7 +37,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / ".github" / "scripts" / "apk-cert-digest.sh"
 PUBLISH_PATH = REPO_ROOT / ".github" / "workflows" / "publish.yml"
-JOB = "android-release"
+JOB = "android-build"
 STEP = "Verify APK signature (apksigner)"
 
 SH = shutil.which("sh")
