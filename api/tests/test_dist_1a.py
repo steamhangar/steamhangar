@@ -189,6 +189,17 @@ def test_head_answers_without_a_body(tmp_path: Path, monkeypatch) -> None:
     assert response.headers["content-length"] == str(len(_content(name)))
 
 
+def test_single_range_request_gets_206(tmp_path: Path, monkeypatch) -> None:
+    _bake(tmp_path / "dist")
+    client = _client(tmp_path, monkeypatch)
+    name = f"vault-agent-{TAG}-linux-amd64"
+    data = _content(name)
+    response = client.get(f"/dist/{name}", headers={"Range": "bytes=2-9"})
+    assert response.status_code == 206
+    assert response.content == data[2:10]
+    assert response.headers["content-range"] == f"bytes 2-9/{len(data)}"
+
+
 def test_absent_files_and_alias_are_404(tmp_path: Path, monkeypatch) -> None:
     _bake(tmp_path / "dist", names=["SHA256SUMS"])  # no APK baked
     client = _client(tmp_path, monkeypatch)
@@ -484,44 +495,73 @@ def test_publish_stages_both_artifacts_into_api_dist_before_the_build() -> None:
     assert 'vault-agent-${tag}-windows-amd64.exe' in stage
 
 
-def test_stage_step_refuses_a_missing_file_on_a_tag(tmp_path: Path) -> None:
-    """Run the staging shell for real: green with the full set, red (naming
-    the file) when one expected file is missing."""
+def _run_stage(tmp_path: Path, names: list[str], **overrides: str):
+    """Run publish.yml's staging shell for real in a baked temp dir."""
     import shutil
     import subprocess
 
     bash = shutil.which("bash")
     if bash is None or shutil.which("sha256sum") is None:
         pytest.skip("bash/sha256sum not available")
-    job = _publish()["publish"]
-    script = _step(job, "Stage release downloads into api/dist (vault-api only)")["run"]
+    script = _step(_publish()["publish"], "Stage release downloads into api/dist (vault-api only)")["run"]
+    dist = tmp_path / f"d{len(list(tmp_path.iterdir()))}"
+    _bake(dist, names=[n for n in names if n != "SHA256SUMS"])
+    sums = "".join(
+        f"{hashlib.sha256(_content(n)).hexdigest()}  {n}\n"
+        for n in names
+        if n != "SHA256SUMS" and not n.endswith(".apk")
+    )
+    (dist / "SHA256SUMS").write_text(sums, encoding="utf-8")
+    apk = f"steamhangar-app-{TAG}.apk"
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "BUILD_VERSION": VERSION,
+        "APK_CONFIGURED": "true",
+        "APK_NAME": apk,
+        "APK_SHA256": hashlib.sha256(_content(apk)).hexdigest(),
+        "IS_TAG": "true",
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+    }
+    env.update(overrides)
+    return subprocess.run([bash, "-e", "-c", script], cwd=dist, env=env, capture_output=True, text=True)
 
-    def run(names: list[str]) -> subprocess.CompletedProcess[str]:
-        dist = tmp_path / f"d{len(list(tmp_path.iterdir()))}"
-        _bake(dist, names=[n for n in names if n != "SHA256SUMS"])
-        sums = "".join(
-            f"{hashlib.sha256(_content(n)).hexdigest()}  {n}\n"
-            for n in names
-            if n not in ("SHA256SUMS",) and not n.endswith(".apk")
-        )
-        (dist / "SHA256SUMS").write_text(sums, encoding="utf-8")
-        apk = f"steamhangar-app-{TAG}.apk"
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "BUILD_VERSION": VERSION,
-            "APK_CONFIGURED": "true",
-            "APK_NAME": apk,
-            "APK_SHA256": hashlib.sha256(_content(apk)).hexdigest(),
-            "IS_TAG": "true",
-            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
-        }
-        return subprocess.run([bash, "-e", "-c", script], cwd=dist, env=env, capture_output=True, text=True)
 
-    ok = run(ALL_NAMES)
+def test_stage_step_passes_with_the_full_set(tmp_path: Path) -> None:
+    ok = _run_stage(tmp_path, ALL_NAMES)
     assert ok.returncode == 0, ok.stderr
-    missing = run([n for n in ALL_NAMES if n != "uninstall-task.ps1"])
+
+
+def test_stage_step_refuses_a_missing_file_on_a_tag(tmp_path: Path) -> None:
+    missing = _run_stage(tmp_path, [n for n in ALL_NAMES if n != "uninstall-task.ps1"])
     assert missing.returncode != 0
     assert "uninstall-task.ps1 missing" in missing.stderr
+
+
+def test_stage_step_refuses_an_apk_that_is_not_the_verified_one(tmp_path: Path) -> None:
+    bad = _run_stage(tmp_path, ALL_NAMES, APK_SHA256="0" * 64)
+    assert bad.returncode != 0
+    assert "differs from android-build's" in bad.stderr
+
+
+@pytest.mark.parametrize("version", ["0.1.0+meta", "0.1", "dev-1a2b3c4", "0.1.0-rc18_x"])
+def test_stage_step_refuses_a_non_release_version_on_a_tag(tmp_path: Path, version: str) -> None:
+    # Same grammar as is_release_version: such an image would serve nothing.
+    assert is_release_version(BuildInfo(version=version, commit=COMMIT)) is False
+    bad = _run_stage(tmp_path, ALL_NAMES, BUILD_VERSION=version)
+    assert bad.returncode != 0
+    assert "is not a release version" in bad.stderr
+    # It must stop THERE, not later on a missing-file check.
+    assert "missing" not in bad.stderr
+
+
+def test_in_image_check_runs_on_tags_for_vault_api_and_checks_the_sums() -> None:
+    job = _publish()["publish"]
+    step = _step(job, "Check the baked release downloads inside the pushed image (vault-api only)")
+    assert step["if"] == "matrix.image == 'vault-api' && startsWith(github.ref, 'refs/tags/v')"
+    assert "cd /app/dist && sha256sum --check --strict SHA256SUMS" in step["run"]
+    names = [s.get("name") for s in job["steps"]]
+    build = names.index("Build and push ${{ matrix.image }}")
+    assert names.index(step["name"]) > build
 
 
 def test_release_jobs_attach_the_same_asset_names_as_before() -> None:

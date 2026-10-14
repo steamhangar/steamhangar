@@ -248,10 +248,13 @@ RUN set -eux; \
 # before this build; a local build (compose, dev.sh build, verify) has only
 # the placeholder README there, so this COPY always has a source and the
 # image simply serves nothing (GET /v1/dist then points at the GitHub
-# Release). Copied AFTER the chown above on purpose: the files stay
-# root:root and read-only for uid 101, so the server can never alter what
-# it hands out, and the lstat-then-open in the handler has no writer to
-# race. Release cost: ~9 MB APK + ~27 MB of agent binaries, uncompressed.
+# Release). Copied AFTER the chown above, as defence in depth: the files
+# and the directory itself stay root:root, so uid 101 cannot write into
+# them. It is NOT a hard guarantee: /app is owned by 101 (chown above), so
+# a compromised uid 101 could rename /app/dist away and create its own --
+# the handler's lstat (regular file, no symlink) then still refuses links
+# but would serve that process's files. Release cost: ~9 MB APK + ~27 MB
+# of agent binaries, uncompressed.
 COPY api/dist /app/dist
 
 ENV PYTHONUNBUFFERED=1 \

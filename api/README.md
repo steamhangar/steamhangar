@@ -6288,6 +6288,10 @@ without the agent have no key yet, so the download itself cannot ask for
 one. Only the exact release names of the server's own version are served
 (nothing else, no listing); the bytes are the public GitHub Release assets
 of that version. Their index, `GET /v1/dist`, stays behind the key.
+Accepted trade-off: the names, `Content-Disposition` and `SHA256SUMS`
+reveal the exact release version without a key, which `/v1/health`
+deliberately does not (docs/security/threat-model.md §1; user decision
+APP-DIST-1 / AGENT-DIST-1, 2026-10-14).
 
 **Non-ASCII keys (WP 1.3 fix):** `hmac.compare_digest` raises `TypeError`
 for a non-ASCII `str` argument (confirmed empirically — a key containing
@@ -6638,7 +6642,9 @@ and a PC without the agent install from the vault instead of from GitHub
 (`android-build`) and the vault-agent release files (`agent-build`) first,
 hands them over as workflow artifacts, and the `publish` job's vault-api
 leg stages them into `api/dist/` before the image build; `api/Dockerfile`
-copies that directory to `/app/dist` (root-owned, read-only for uid 101)
+copies that directory to `/app/dist` (files and directory root-owned, so
+not writable by the server's uid 101 -- defence in depth only: `/app`
+itself belongs to uid 101, which could rename `/app/dist` and recreate it)
 and sets `VAULT_DIST_DIR=/app/dist`. The names are exactly the GitHub
 Release asset names of the same tag, and the release jobs attach the same
 bytes as before:

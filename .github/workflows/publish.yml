@@ -536,6 +536,13 @@ jobs:
             fi
           fi
           if [ "$IS_TAG" = "true" ]; then
+            # vault_api.dist.is_release_version's grammar: on any other tag
+            # shape (e.g. v0.1.0+meta) the image would silently serve
+            # nothing, so fail the release instead.
+            if ! printf '%s' "$BUILD_VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
+              echo "::error::build version '${BUILD_VERSION}' is not a release version vault-api serves downloads for" >&2
+              exit 1
+            fi
             tag="v${BUILD_VERSION}"
             want="vault-agent-${tag}-windows-amd64.exe vault-agent-${tag}-linux-amd64 vault-agent-${tag}-linux-arm64 install-task.ps1 run-vault-agent.ps1 uninstall-task.ps1 vault-agent-report.service vault-agent-report.timer SHA256SUMS"
             if [ "$APK_CONFIGURED" = "true" ]; then
