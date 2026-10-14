@@ -11,10 +11,7 @@ import java.util.concurrent.TimeUnit
 /** Something implementing the login-URL + verification steps, so [dev.steamvault.app.repo.SteamIdentityRepositoryImpl] tests can fake it. */
 interface SteamOpenIdVerifier {
     /** The `checkid_setup` URL to open in a Custom Tab -- pure, no network. */
-    fun buildLoginUrl(
-        returnTo: String = SteamOpenIdConfig.RETURN_TO,
-        realm: String = SteamOpenIdConfig.REALM,
-    ): String
+    fun buildLoginUrl(returnTo: String, realm: String): String
 
     /**
      * POSTs every `openid.*` param [SteamOpenIdCallback.parse] extracted

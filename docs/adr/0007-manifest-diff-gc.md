@@ -81,3 +81,14 @@ wants (consequence: re-download, never corruption); unknown-manifest and
 unmapped depots are skipped and reported; GC reclaims space but does not
 certify completeness; no atomicity against concurrent client writes
 (benign: re-fetch).
+
+## Addendum 2026-10-13 — oracle data and the grouped delete (WP TOOL-APPS-2b, ADR-0022)
+
+Decision B's oracle branch manifests still only ever ADD gids to a keep
+set; GC is unchanged and never reads content-package classification. The
+project-wide promise that oracle data can only add protection now has one
+recorded exception outside GC: the user-confirmed grouped delete
+(`DELETE /v1/cache/{appid}?with_packages=true&members=...`), where stored
+store or oracle classification decides which apps are packages and so can
+widen what is deleted. Its bounds are recorded in the ADR-0006 addendum of
+the same date and in ADR-0022 §4.

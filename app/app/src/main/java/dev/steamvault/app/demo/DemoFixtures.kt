@@ -34,6 +34,13 @@ import java.time.Instant
  *  - Marrowlight: `error` + `needs_force`, with a non-zero GC dry-run
  *    result (`gcReclaimableBytes`/`gcHeldBackBytes`) so the detail sheet's
  *    GC flow has something to find on the very first check.
+ *
+ * Plus one content-package group (WP TOOL-APPS-2d, ADR-0022; modeled on the
+ * prod library, fictional names): Emberline Cartography with three
+ * packages, Steam-style "<game> - <what>" names, own depots (one shared
+ * with the game, so the group size counts it once), one package failed --
+ * the grouped card ("+3 content packages · 1 failed"), the package list
+ * with its Retry button, and the grouped delete all have a demo case.
  */
 
 private fun isoAgo(secondsAgo: Long): String = Instant.now().minusSeconds(secondsAgo).toString()
@@ -126,6 +133,71 @@ internal fun seedGames(): MutableList<DemoGame> = mutableListOf(
         lastManifestCheck = null,
         gcReclaimableBytes = 30_000_000L,
         gcHeldBackBytes = 10_000_000L,
+    ),
+)
+
+/** WP TOOL-APPS-2d: the content-package group's parent (see the kdoc above). */
+internal const val DEMO_GROUP_PARENT_APPID = 4_010_080
+
+internal fun seedContentPackageGroup(): List<DemoGame> = listOf(
+    DemoGame(
+        appid = DEMO_GROUP_PARENT_APPID,
+        name = "Emberline Cartography",
+        status = DemoState.STATUS_DONE,
+        needsForce = false,
+        depots = mutableListOf(
+            DemoDepot(depotid = 4_010_081, shared = false, sizeBytes = 5_200_000_000L),
+            DemoDepot(depotid = 4_010_089, shared = true, sizeBytes = 150_000_000L),
+        ),
+        lastPrefillAt = isoAgo(5 * 3_600L),
+        lastManifestCheck = isoAgo(5 * 3_600L),
+        gcReclaimableBytes = 0L,
+        gcHeldBackBytes = 0L,
+        appType = "game",
+    ),
+    DemoGame(
+        appid = 4_010_082,
+        name = "Emberline Cartography - Danish Voice Pack",
+        status = DemoState.STATUS_DONE,
+        needsForce = false,
+        depots = mutableListOf(
+            DemoDepot(depotid = 4_010_083, shared = false, sizeBytes = 300_000_000L),
+            // Shared with the game: the group size counts it once.
+            DemoDepot(depotid = 4_010_089, shared = true, sizeBytes = 150_000_000L),
+        ),
+        lastPrefillAt = isoAgo(5 * 3_600L),
+        lastManifestCheck = isoAgo(5 * 3_600L),
+        gcReclaimableBytes = 0L,
+        gcHeldBackBytes = 0L,
+        installedOn = listOf(InstalledOnEntry(client_id = "demo-livingroom-pc", reported_at = isoAgo(900L))),
+        parentAppid = DEMO_GROUP_PARENT_APPID,
+        appType = "dlc",
+    ),
+    DemoGame(
+        appid = 4_010_084,
+        name = "Emberline Cartography - Original Soundtrack",
+        status = DemoState.STATUS_DONE,
+        needsForce = false,
+        depots = mutableListOf(DemoDepot(depotid = 4_010_085, shared = false, sizeBytes = 450_000_000L)),
+        lastPrefillAt = isoAgo(5 * 3_600L),
+        lastManifestCheck = isoAgo(5 * 3_600L),
+        gcReclaimableBytes = 0L,
+        gcHeldBackBytes = 0L,
+        parentAppid = DEMO_GROUP_PARENT_APPID,
+        appType = "music",
+    ),
+    DemoGame(
+        appid = 4_010_086,
+        name = "Emberline Cartography - Surveyor Outfits",
+        status = DemoState.STATUS_ERROR,
+        needsForce = true,
+        depots = mutableListOf(),
+        lastPrefillAt = null,
+        lastManifestCheck = null,
+        gcReclaimableBytes = 0L,
+        gcHeldBackBytes = 0L,
+        parentAppid = DEMO_GROUP_PARENT_APPID,
+        appType = "dlc",
     ),
 )
 

@@ -75,6 +75,14 @@
  * build one (every full `render()`, same treatment `buildHeader()`'s mini
  * cover already gets — never touched by `patchVolatile()`, so a poll tick
  * that doesn't change the structural key never re-fetches it).
+ *
+ * **Content packages (WP TOOL-APPS-2c, ADR-0022 §3).** For a game with
+ * content packages (the same grouping the Library uses, lib/content-groups.js
+ * `groupGames` over the store's rows), the sheet lists them in a "Content
+ * packages" section (components/package-list.js) with the total size of the
+ * group (the server's `group_size_bytes`) and a "Retry download"
+ * button per failed package. The package rows' structure is part of the
+ * structural key; their sizes are patched.
  */
 
 import { store } from "../store-singleton.js";
@@ -96,19 +104,32 @@ import {
   installedSectionPresence,
   INSTALLED_BADGE,
   isToolApp,
-  statusIconKind,
-  statusWordFor,
   TOOL_APP_NOTE,
+  showsUpdateState,
+  cardIconKind,
+  cardTextKind,
+  cardStatusWord,
 } from "../lib/game-status.js";
+import {
+  sheetUpdateAppids,
+  summarizeUpdateStart,
+  describeUpdateStartError,
+  UPDATE_NOW_LABEL,
+} from "../lib/updates-available.js";
 import { buildMultiPlan } from "../lib/multiplan.js";
 import { buildDepotPresentation, DEPOT_TAG } from "../lib/depot-presentation.js";
 import { findTrackedJob, detailJobActions, DETAIL_JOB_ACTION } from "../lib/detail-job.js";
 import { confirmedCurrentWording, CONFIRMED_CURRENT_WORDING } from "../lib/detail-wording.js";
+import { lastUpdateDownloadedText } from "../lib/decision-support.js";
 import { GC_STATE, GC_EVENT, idleGcState, reduceGcFlow } from "../lib/gc-flow.js";
 import { buildDetailStructuralKey } from "../lib/detail-render-plan.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { appTitle, fillMissingNames, ownedNamesByAppid } from "../lib/owned-library.js";
 import { ownedLibrary } from "../owned-singleton.js";
+import { groupGames, groupHasCacheContent, isGroup } from "../lib/content-groups.js";
+import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
+import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "./group-delete-plan.js";
+import { buildPackagesSection, packagesStructuralKey, patchPackagesSection } from "./package-list.js";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
 const GC_POLL_INTERVAL_MS = 1200;
@@ -226,7 +247,60 @@ dYes.addEventListener("click", confirmDelete);
  * no focus management at all before this WP). */
 let deleteInvokerEl = null;
 
+/** WP TOOL-APPS-2c: the grouped-delete plan the dialog currently shows
+ * (null for a plain delete), and a token so a superseded plan fetch drops
+ * its answer. */
+let pendingGroupPlan = null;
+let groupPlanGeneration = 0;
+
+/**
+ * WP TOOL-APPS-2c (ADR-0022 §4): delete a game with its content packages.
+ * Fetches the server's plan, lists every app it removes, the bytes freed and
+ * the depots kept; Delete stays disabled while a member has a job in flight.
+ * Also the re-confirm step after a 409 "members differ" (`notice`).
+ * @param {string} [notice]
+ */
+async function openGroupDeleteConfirm(notice) {
+  const myGen = ++groupPlanGeneration;
+  const appid = state.appid;
+  pendingGroupPlan = null;
+  dText.textContent = "Calculating what this would free…";
+  dNote.replaceChildren();
+  dYes.disabled = true;
+  if (!deleteBackdrop.classList.contains("on")) {
+    deleteInvokerEl = document.activeElement;
+    deleteBackdrop.classList.add("on");
+    pushModal(deleteBackdrop, closeDeleteConfirm);
+    dNo.focus();
+  }
+  try {
+    const plan = await api.deletePlan(appid);
+    if (myGen !== groupPlanGeneration || state.appid !== appid) return;
+    const gamesByAppid = namedGamesByAppid();
+    const nameFor = (id, serverName) => appTitle(id, gamesByAppid.get(id)?.name || serverName);
+    const block = buildGroupDeletePlan(plan, nameFor);
+    dText.textContent = groupDeleteIntro(block.subject, block.freedBytes);
+    const noticeEl = notice ? buildNotice(notice) : null;
+    if (noticeEl) dNote.appendChild(noticeEl);
+    dNote.appendChild(block.node);
+    pendingGroupPlan = plan;
+    dYes.disabled = isPlanBlocked(plan);
+    // Review fix (a11y): the re-confirm notice takes focus and is announced.
+    if (noticeEl) noticeEl.focus();
+  } catch (err) {
+    if (myGen !== groupPlanGeneration) return;
+    dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
+    dYes.disabled = true;
+  }
+}
+
 function openDeleteConfirm() {
+  // WP TOOL-APPS-2c: a game with content packages is deleted with them.
+  if (currentGroup()) {
+    openGroupDeleteConfirm();
+    return;
+  }
+  pendingGroupPlan = null;
   dText.textContent = "Calculating what this would free…";
   dNote.replaceChildren();
   dYes.disabled = true;
@@ -254,6 +328,8 @@ function openDeleteConfirm() {
 }
 
 function closeDeleteConfirm() {
+  groupPlanGeneration++;
+  pendingGroupPlan = null;
   deleteBackdrop.classList.remove("on");
   popModal(deleteBackdrop);
   if (deleteInvokerEl && typeof deleteInvokerEl.focus === "function") deleteInvokerEl.focus();
@@ -320,6 +396,10 @@ function renderDeletePlan(plan, gamesByAppid) {
 
 async function confirmDelete() {
   const appid = state.appid;
+  if (pendingGroupPlan) {
+    await confirmGroupDelete(appid, pendingGroupPlan);
+    return;
+  }
   dYes.disabled = true;
   dNo.disabled = true;
   try {
@@ -338,6 +418,32 @@ async function confirmDelete() {
   } finally {
     dYes.disabled = false;
     dNo.disabled = false;
+  }
+}
+
+/** WP TOOL-APPS-2c: send the grouped delete with exactly the confirmed
+ * members; on a 409 "members differ" fetch the plan again and ask again. */
+async function confirmGroupDelete(appid, plan) {
+  dYes.disabled = true;
+  dNo.disabled = true;
+  try {
+    const result = await api.deleteCacheWithPackages(appid, planMemberIds(plan));
+    dNo.disabled = false;
+    closeDeleteConfirm();
+    showToast(`Freed ${formatBytesGB(result.total_bytes_freed) || "0 GB"}`);
+    store.refreshNow();
+    closeDetail();
+  } catch (err) {
+    dNo.disabled = false;
+    if (isMembersMismatch(err)) {
+      // Keep focus inside the dialog while the plan is fetched again.
+      dNo.focus();
+      store.refreshNow();
+      await openGroupDeleteConfirm(MEMBERS_CHANGED_NOTICE);
+      return;
+    }
+    closeDeleteConfirm();
+    showToast(errorText(err), { warn: true });
   }
 }
 
@@ -468,6 +574,57 @@ function currentGameLike() {
   return state.games.find((g) => g.appid === state.appid) || state.detail;
 }
 
+/** WP TOOL-APPS-2c: the open game's group row (parent + content packages)
+ * from the store's rows, or null when it has no packages. */
+function currentGroup() {
+  if (!state.appid) return null;
+  const row = groupGames(state.games).rows.find((g) => g.appid === state.appid);
+  return isGroup(row) ? row : null;
+}
+
+/** WP UPD-6 review fix: the row whose `update_available` the header shows
+ * — the group row (OR over its members, like the Library card) or the
+ * game's own row. */
+function currentUpdateRow() {
+  return currentGroup() || currentGameLike();
+}
+
+/** WP UPD-6 review fix: the app ids the sheet's "Update now" sends — the
+ * game and, for a group, its packages, each while flagged and without an
+ * active job (lib/updates-available.js `sheetUpdateAppids`). */
+function currentUpdateAppids() {
+  const gameLike = currentGameLike();
+  if (!gameLike) return [];
+  const group = currentGroup();
+  return sheetUpdateAppids(group ? [gameLike, ...group.packages] : [gameLike], state.jobs);
+}
+
+/** The structural-key part for the update state: "" when nothing shows. */
+function updatesStructuralPart(kind) {
+  const header = showsUpdateState(currentUpdateRow(), kind);
+  const ids = currentUpdateAppids();
+  return header || ids.length ? `${header ? 1 : 0}:${ids.join(",")}` : "";
+}
+
+function packageJobLookups() {
+  return {
+    liveJobFor: (appid) => findLiveJob(state.jobs, appid),
+    trackedJobFor: (appid) => findTrackedJob(state.jobs, appid),
+  };
+}
+
+async function retryPackage(pkg, btn) {
+  await withButtonBusy(btn, async () => {
+    try {
+      await api.prefill([pkg.appid]);
+      showToast("Queued for download");
+      store.refreshNow();
+    } catch (err) {
+      showToast(errorText(err), { warn: true });
+    }
+  });
+}
+
 function currentDepotPresentations() {
   if (!state.detail || !state.detail.depots.length) return [];
   const gamesByAppid = namedGamesByAppid();
@@ -489,8 +646,13 @@ function computeStructuralKey() {
   const liveJob = findLiveJob(state.jobs, state.appid);
   const trackedJob = findTrackedJob(state.jobs, state.appid);
   const presentations = currentDepotPresentations();
+  const group = currentGroup();
   return buildDetailStructuralKey({
+    // WP TOOL-APPS-2c: which packages, their status and Retry offer.
+    packages: group ? packagesStructuralKey(group.packages, packageJobLookups()) : null,
     dispKind: dispKind(gameLike, liveJob),
+    // WP UPD-6 review fix: header state and the "Update now" targets.
+    updates: updatesStructuralPart(dispKind(gameLike, liveJob)),
     trackedJobStatus: trackedJob ? trackedJob.status : null,
     depotTags: presentations.map((p) => p.tag),
     // WP AG-2 (review S4 fix): ONLY whether the "Installed on" section
@@ -558,10 +720,26 @@ function buildHeader(gameLike, liveJob) {
   appidLine.textContent = `App ${state.appid}`;
   info.append(h2, appidLine);
 
-  const kind = dispKind(gameLike, liveJob);
+  info.appendChild(buildDetailStatusRow(currentUpdateRow() || gameLike, dispKind(gameLike, liveJob)));
+
+  dhead.appendChild(info);
+  return dhead;
+}
+
+/**
+ * The header's status icon and word. WP UPD-6 review fix: the same
+ * "Update available" overlay as the Library card (orange refresh glyph,
+ * `tx-stale` word) for a cached game whose row — the group row for a game
+ * with packages — carries `update_available: true`. Exported for
+ * web/tests/game-detail-sheet-update.test.js.
+ * @param {object} row the game's row (or its group row)
+ * @param {string} kind the game's dispKind
+ * @returns {HTMLElement}
+ */
+export function buildDetailStatusRow(row, kind) {
   const statusRow = document.createElement("div");
   statusRow.className = "detail-statusrow";
-  const statusIcon = createStatusIcon(statusIconKind(kind), { size: "sm" });
+  const statusIcon = createStatusIcon(cardIconKind(row, kind), { size: "sm" });
   // WP 4a.8 icon audit: the word right after this icon already says the
   // same thing visibly — hide the icon's own sr-only label so it is not
   // announced twice (same "avoid double announcement" posture as
@@ -569,13 +747,44 @@ function buildHeader(gameLike, liveJob) {
   statusIcon.setAttribute("aria-hidden", "true");
   statusRow.appendChild(statusIcon);
   const word = document.createElement("span");
-  word.className = "tx-" + kind;
-  word.textContent = statusWordFor(kind, STATUS_LABEL);
+  word.className = "tx-" + cardTextKind(row, kind);
+  word.textContent = cardStatusWord(row, kind, STATUS_LABEL);
   statusRow.appendChild(word);
-  info.appendChild(statusRow);
+  return statusRow;
+}
 
-  dhead.appendChild(info);
-  return dhead;
+/**
+ * WP UPD-6 review fix: "Update now" for a flagged cached game. `onStart`
+ * runs on click with the button busy (`disabled`, like the sheet's other
+ * action buttons). Exported for web/tests/game-detail-sheet-update.test.js.
+ * @param {number[]} appids what the press sends (`data-appids`)
+ * @param {() => Promise<void>} onStart
+ * @returns {HTMLButtonElement}
+ */
+export function buildUpdateNowButton(appids, onStart) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn primary sm detail-block";
+  btn.dataset.role = "update-now";
+  btn.textContent = UPDATE_NOW_LABEL;
+  btn.dataset.appids = appids.join(",");
+  btn.addEventListener("click", () => withButtonBusy(btn, onStart));
+  return btn;
+}
+
+/** `POST /v1/prefill` for the sheet's "Update now" — the same non-forced
+ * enqueue as Downloads' "Update now" and "Check & update". */
+async function startSheetUpdate(appids) {
+  try {
+    const refs = await api.prefill(appids);
+    const outcome = summarizeUpdateStart(refs, state.games);
+    showToast(outcome.message, { warn: outcome.warn });
+    store.refreshNow();
+  } catch (err) {
+    const outcome = describeUpdateStartError(err);
+    showToast(outcome.message, { warn: true });
+    if (outcome.refresh) store.refreshNow();
+  }
 }
 
 /** WP API-FIX-4: the tool app's server-supplied name, or null. */
@@ -602,6 +811,13 @@ export function buildToolAppNote(gameLike) {
   return note;
 }
 
+/** Fill (or hide) the "Last update downloaded …" fact line. */
+function syncUpdateDownloadedLine(el, gameLike) {
+  const text = lastUpdateDownloadedText(gameLike);
+  el.textContent = text || "";
+  el.hidden = !text;
+}
+
 function buildFactLines(gameLike) {
   const facts = document.createElement("div");
   facts.className = "facts detail-block";
@@ -622,6 +838,14 @@ function buildFactLines(gameLike) {
   confirmedLine.dataset.role = "confirmed";
   confirmedLine.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
   facts.appendChild(confirmedLine);
+
+  // WP WEB-FEAT-SUGGEST-2: the Phase 4h panel's "last changed N days ago",
+  // moved here. Hidden (not absent) when there is no real observation, so
+  // patchVolatile can fill it in place on a later tick.
+  const updateDownloadedLine = document.createElement("div");
+  updateDownloadedLine.dataset.role = "updatedl";
+  syncUpdateDownloadedLine(updateDownloadedLine, gameLike);
+  facts.appendChild(updateDownloadedLine);
 
   // WP API-FIX-4: no "next download" for a tool app, so no --force line.
   if (gameLike.needs_force && !isToolApp(gameLike)) {
@@ -1098,16 +1322,34 @@ function render() {
   const installedSection = buildInstalledSection(gameLike);
   if (installedSection) contentEl.append(installedSection);
 
+  // WP TOOL-APPS-2c: the game's content packages.
+  const group = currentGroup();
+  if (group) {
+    contentEl.append(
+      buildPackagesSection(group, {
+        groupSizeBytes: group.group_size_bytes,
+        ...packageJobLookups(),
+        onRetry: retryPackage,
+      }),
+    );
+  }
+
   if (trackedJob) {
     contentEl.append(buildJobControlRow(trackedJob));
   } else {
     const action = statusAction(gameLike, undefined, false);
     if (action) contentEl.append(buildDownloadButton(action));
+    else {
+      // WP UPD-6 review fix: a flagged cached game (or group) offers its update.
+      const updateAppids = currentUpdateAppids();
+      if (updateAppids.length) contentEl.append(buildUpdateNowButton(updateAppids, () => startSheetUpdate(updateAppids)));
+    }
   }
 
   contentEl.append(buildDepotsSection());
 
-  if (hasVisibleCacheContent(gameLike)) {
+  // WP TOOL-APPS-2c: a game whose packages hold bytes can be deleted too.
+  if (hasVisibleCacheContent(gameLike) || (group && groupHasCacheContent(group))) {
     contentEl.append(buildDeleteButton());
   }
 
@@ -1139,7 +1381,13 @@ function patchVolatile() {
   const confirmedEl = contentEl.querySelector('[data-role="confirmed"]');
   if (confirmedEl) confirmedEl.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
 
+  const updateDownloadedEl = contentEl.querySelector('[data-role="updatedl"]');
+  if (updateDownloadedEl) syncUpdateDownloadedLine(updateDownloadedEl, gameLike);
+
   patchInstalledSection(contentEl, gameLike);
+
+  const group = currentGroup();
+  if (group) patchPackagesSection(contentEl, group.packages, group.group_size_bytes);
 
   for (const p of currentDepotPresentations()) {
     const wrap = contentEl.querySelector(`.depotwrap[data-depotid="${p.depotid}"]`);

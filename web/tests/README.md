@@ -1615,6 +1615,9 @@ was corrected in place rather than left stale.
 
 ### WP 4h.2 — Suggestions panel (Phase 4h)
 
+*Removed by WP WEB-FEAT-SUGGEST-2 (2026-10-13); the files named below
+(`decision-panel*.test.js`) no longer exist. See that section at the end.*
+
 Plan-vs-brief conflict resolved before any code was written (recorded as
 D-16, `docs/WORKPACKAGES.md`): `docs/PROJECT_PLAN.md`:1867-1869 requires
 BOTH a right-hand column at BP-XL (>=1800px) AND a collapsible card below
@@ -3397,3 +3400,212 @@ Suite: **1382 tests, 1382 pass, 0 fail**.
 - Demo mode has no `/v1/updates/*` routes and no `update_available` on its
   games, so the feature is hidden there (the 404 path).
 - The wiring tests poll with the real 2 s interval (about 7 s for the file).
+
+### WP WEB-FIX-UPD-VIS — one Library toolbar row, visible check buttons, demo update check
+
+User feedback and layout 2026-10-13: the check buttons read as a full-width
+text bar. The Library toolbar is now one row, `.lib-bar`: `.lib-filters`
+(search, then the chips) on the left, `.lib-checkbtns` on the right with
+"Check updates" as `.btn.primary` (accent fill, check only) and "Check &
+update all cached games" as plain `.btn` (filled neutral, it downloads).
+Search, chips and buttons share `--tool-h` (40px below BP-M, 36px from
+BP-M) and one centre line; the chips never wrap any more (one scrolling
+line). Below BP-M search and chips take a line each and the buttons fill
+the next line (each on its own line when both labels do not fit); at BP-M
+the buttons stay in the row while search + every chip + buttons fit,
+otherwise they wrap onto their own line, right-aligned; from BP-L up the
+row stays ONE row (review fix): `.lib-filters` has a zero basis and a
+minimum of search + `--chips-min` (160px), so the chips scroll first and
+the buttons wrap only below that minimum. A focused chip draws its ring
+inside (`outline-offset:-2px`), the scroll clip would cut it otherwise. The status lines
+("Updates last checked …", the owned-list notice) sit under the row in
+`.lib-status`. WP 4e.2's BP-L named-area grid on `.view-library` is gone
+(the row lays itself out); `--search-w` is now the search width in the row
+(260px).
+
+Demo mode now serves `POST /v1/updates/check` / `GET /v1/updates/status`
+(a started check answers `running` to one read, then finishes) and
+`update_available` / `update_checked_at` on the rows, with Emberreach
+flagged; a finished prefill of it clears the flag.
+
+Tests: `demo-data-updates.test.js` 6 (keys equal `UpdateCheckStatusOut` /
+`UpdateCheckStartOut` and the GameSummary fields read from the Python
+source, the seed flag and chip, seeded status line, check run, flag
+cleared by a prefill), `library-update-check-wiring.test.js` +1 (row
+structure, primary/plain button classes), `css-layout-foundation.test.js`
+(no `.view-library` grid, `.lib-bar` rules, BP-M row rules, chips not
+wrapping, `--search-w: 260px`), child-order pins updated in
+`library-owned-wiring.test.js` and `css-downloads-settings-layout.test.js`.
+
+Mutations, all killed: "Check updates" back to `btn ghost sm`; no
+`margin-left:auto` on the BP-M button group; no flag clear after a demo
+prefill.
+
+#### Honest list
+
+- No browser run: the row's real wrap points depend on font metrics and
+  chip counts, only DOM and CSS rules were checked.
+
+### WP WEB-FEAT-SUGGEST-2 — suggestions panel removed, statements moved
+
+User decision 2026-10-13 (replaces WEB-FEAT-SUGGEST-1). The Phase 4h panel
+(`components/decision-panel.js`, its `<aside>` in index.html, the BP-L
+panel row, the BP-XL `.app.has-decision-panel` column, `--panel-w`, the
+two `steamvault.decisionPanel*` storage keys) is gone. `lib/decision-
+support.js` keeps only what the moved statements need:
+
+- detail sheet: "Last update downloaded today / yesterday / N days ago"
+  (`lastUpdateDownloadedText`, same gating as the panel: `changed` + a real
+  day count), a `data-role="updatedl"` fact line, patched per tick;
+- card: a "Never played" pill right of the status pill (`.capbadges` now
+  holds the status pill; ellipsis on its text boxes; "Unplayed" in Compact, a `.playbadge` twin in
+  the list layout, hidden in select mode), only for a cached card whose
+  owned-list `playtime_forever` is a real 0 (ADR-0010 gate on); the card's
+  accessible name gets "Fully cached, never played". The Library copies
+  the value as `owned_playtime_forever` (`withOwnedPlaytime`);
+- bell: ONE "Check due" entry for cached games whose last update check
+  (newer of `update_checked_at` and `last_manifest_check`) is 14+ days
+  old (`staleUpdateChecks`, `syncUpdateCheckDue`). Same games, a day
+  passing or a game leaving update it in place; it disappears when the
+  list empties. Opening the bell acknowledges its games, persisted in
+  `steamvault.updateCheckDueSeen` (guarded; pruned to the games still
+  overdue), so a reload raises it READ for the same games and only a NEW
+  game makes it unread (review fix). Its text names "Check updates" only
+  while that button exists (update-check phase idle/running); with the
+  oracle off it says update checks are turned off, otherwise nothing
+  extra;
+- "unchanged for N days" is dropped.
+
+Demo: Glass Meridian's last check is 20 days old (the seeded scheduled
+run failed for it), so the bell shows the entry; Frostline Convoy is owned
+with playtime 0. The pill needs the playtime gate, OFF by default as in a
+real install. (Superseded by the WP UPD-5 demo pill below: the browser
+demo now seeds the gate, a key and a SteamID itself; the manual steps
+described here are gone.)
+
+Tests: `decision-support.test.js` rewritten (18), `notification-log.test.js`
++6 (`syncUpdateCheckDue` both directions, no-spam pins, navigation),
+`game-card-never-played.test.js` 7, `suggestions-moved-wiring.test.js` 3
+(detail sheet and bell wiring, nothing of the panel left),
+`demo-data-change-frequency.test.js` end-to-end case rewritten; the two
+`decision-panel*` files and the panel pins in `css-bulk-bar-room`,
+`app-storage-guard`, `owned-names-wiring` and `css-mobile-overflow` were
+removed with the panel.
+
+Mutations, all killed: entry always re-raised (no-spam), pill call removed
+from `buildCard`, pill fragment removed from the card name, threshold 30,
+pill without the CACHED kind check.
+
+#### Honest list
+
+- No browser run: the pill's fit was reasoned from the CSS sizes (base
+  tile ~173px, Compact uses the short word), not measured.
+- The bell entry is not individually dismissible (no notification is);
+  opening the bell marks it read, and it stays read (across reloads)
+  until a new game joins it.
+- The detail line says "downloaded": `manifest_days_since_last_change`
+  comes from the vault's own prefill (`manifest_ingest`), not Steam's
+  publish date (review fix; first draft said "on Steam").
+
+### WP UPD-5 demo pill — "Never played" out of the box
+
+User decision 2026-10-14. A browser demo now starts with the ADR-0010
+playtime gate ON, a demo Steam Web API key (placeholder, `key_last4`
+`CDEF`) and a demo SteamID64 (`DEMO_STEAMID`, the top of the individual
+range, stored as a `db` override like a Settings save), so the Library
+loads the owned list on open and Frostline Convoy carries the pill with no
+manual step. `localStorage.steamvault.demoRelayPlaytime = "0"` opts out to
+the shipped shape (gate off, no key, no SteamID). Outside a browser (all
+bare-Node tests) the default stays OFF, so the existing baseline pins hold.
+Real installs are untouched: `VAULT_RELAY_EXPOSE_PLAYTIME` stays OFF by
+default. The demo's `GET /v1/updates/status` also mirrors WP UPD-5:
+`scheduled` equals `enabled`, window or not.
+
+Tests: `demo-data-never-played-seed.test.js` 6 (installs a fake browser
+`window` before importing demo-data.js: module-load seed, reset seed, only
+the fixture's playtime exposed, opt-out "0", bare-Node baseline,
+`scheduled` with the window cleared); `demo-data-updates.test.js` message
+updated.
+
+Mutations, all killed: module-load seed removed; preference back to opt-in
+(`=== "1"`); reset seed removed; demo `scheduled: false`.
+
+### WP UPD-6 (web) — visible update state, "Updates available" in Downloads
+
+User feedback on prod rc15: "Checked 14 games · 7 updates available", but
+the 7 were hard to find, and cards said both "Current" and "Update". A
+CACHED card with `update_available: true` (a group row: the OR over its
+members) now draws the orange "stale" refresh glyph on the pill and the
+list-layout meta icon, and its status word reads "Update available" in
+`--stale` (`lib/game-status.js` `showsUpdateState` / `cardIconKind` /
+`cardStatusWord`). Display overlay only: `dispKind`, `data-dk`, actions
+and filters stay `cached`. The UPD-2 `.updbadge` line remains only on a
+card whose word does not already say it (failed, running).
+
+Downloads gets "Updates available (N)" between Paused and Queue
+(`lib/updates-available.js`): the flagged games without a queued, running
+or paused prefill job, sorted by name, each with its size and "Update
+now", plus "Update all" and a note from `GET /v1/schedule` ("These download
+automatically in the schedule window HH:MM–HH:MM.", the installed-only
+variant when "Include cached games" is off, "Manual only — no schedule
+window is set" without a window, nothing when the read fails). Both
+buttons send `POST /v1/prefill` with the listed app ids (the enqueue
+"Check & update" uses; no force flag exists, `needs_force` decides). One
+request at a time, busy buttons `aria-disabled`, offline-gated; the
+section is rebuilt only when its content changes.
+
+Tests: `updates-available.test.js` 13 (list rules, wording, window
+format, schedule note incl. include-cached off and unknown, toast outcomes
+and forced note, 5xx re-read, list key, demo: Emberreach listed, demo
+window note, Update all queues and empties the list),
+`downloads-updates-wiring.test.js` 5 (rows, heading, position above
+Queue, hidden when cleared; schedule note three ways; Update now body,
+busy and focus, single request, row leaves for the Queue; Update all skips
+a paused game; offline gate), `game-card-update.test.js` rewritten (8:
+state word, orange pill and meta icon, no duplicate badge, failed card
+keeps the badge, aria-label, group OR, patch, CSS),
+`library-update-check-wiring.test.js` badge pins moved to the state word
+and pill glyph.
+
+Mutations, all killed: pill back to `statusIconKind`; status word without
+the overlay; badge also on cached cards; `prefillCached` instead of
+`prefill`; no active-job filter; no include-cached note; no offline gate.
+Survived (belt and braces): the in-flight guard in `startUpdates` alone
+(the click handler checks the same flag).
+
+#### Honest list
+
+- No browser run: the orange word and row fit at 360 px were reasoned from
+  the CSS, not measured.
+- `GET /v1/jobs` returns the newest 20 jobs; an older still-queued job
+  would leave its game listed, and "Update now" then reads "already
+  queued" (server dedupe).
+
+#### Review fixes (UPD-6 round 1)
+
+- Detail sheet: the header uses the card overlay (`buildDetailStatusRow`,
+  group-aware via the group row) and a flagged cached game without a job
+  offers "Update now" (`buildUpdateNowButton`, `POST /v1/prefill` with
+  `sheetUpdateAppids`: the game and its flagged packages without an active
+  job). The structural key gains an optional `updates` part, so a flag
+  flip re-renders an open sheet.
+- Focus: the in-flight state is patched in place (`paintUpdateBusy`), never
+  part of the rebuild key; on a rebuild the focused button's replacement
+  gets focus, else "Update all", else the Queue heading (`tabIndex -1`).
+- Note wording: "These download automatically in the schedule window
+  HH:MM–HH:MM." / "Those installed on a PC download automatically …".
+- `paintUpdates()` moved out of `fullRender()` to its explicit callers; the
+  jobs subscriber's call is pinned by a jobs-only tick with the games poll
+  held. `UPDATING_ALL_LABEL` renamed `STARTING_LABEL`.
+
+Tests: `game-detail-sheet-update.test.js` 9 (header overlay, plain, tool,
+group, button, four wiring pins), `detail-render-plan.test.js` +1,
+`updates-available.test.js` +1 (`sheetUpdateAppids`),
+`downloads-updates-wiring.test.js` +1 and focus assertions (same button
+while busy, "Update all" after the row leaves, Queue heading after the
+section empties).
+
+Mutations, all killed: no `paintUpdates()` in the jobs subscriber;
+in-flight state back in the rebuild key; no focus restore; no Queue
+anchor; header without the group row; no `updates` key part; sheet ids
+without the job filter.

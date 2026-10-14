@@ -57,7 +57,12 @@ const DRIFTWOOD = 2010030;
 const EMBERREACH = 2010040;
 const FROSTLINE = 2010050;
 const GLASS_MERIDIAN = 2010070;
-const ALL_CACHED_SORTED = [AURORA, DRIFTWOOD, EMBERREACH, GLASS_MERIDIAN];
+// WP TOOL-APPS-2c: the content-package group's cached members (Starfall
+// Legion and two of its packages; the failed package has no depots).
+const STARFALL = 2010080;
+const STARFALL_VOICE = 2010082;
+const STARFALL_OST = 2010084;
+const ALL_CACHED_SORTED = [AURORA, DRIFTWOOD, EMBERREACH, GLASS_MERIDIAN, STARFALL, STARFALL_VOICE, STARFALL_OST];
 const DRIFTWOOD_RUNNING_JOB_ID = 900001;
 
 test("selects every cached app, sorted ascending by appid, excludes the uncached one", async () => {
@@ -202,7 +207,7 @@ test("empty selection: no cached apps left ⇒ [] (never an error)", async () =>
   // while a job is queued/running/paused for that app).
   await demoRequest("DELETE", `/v1/jobs/${DRIFTWOOD_RUNNING_JOB_ID}`);
 
-  for (const appid of [AURORA, DRIFTWOOD, EMBERREACH, GLASS_MERIDIAN]) {
+  for (const appid of [AURORA, DRIFTWOOD, EMBERREACH, GLASS_MERIDIAN, STARFALL, STARFALL_VOICE, STARFALL_OST]) {
     await demoRequest("DELETE", `/v1/cache/${appid}`);
   }
   // Emberreach's deletion above skips the depot it shares with Frostline

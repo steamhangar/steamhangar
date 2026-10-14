@@ -48,9 +48,11 @@
             </intent-filter>
 
             <!-- WP 4b.3: Steam OpenID login callback. dev.steamvault.app.net.steam.SteamOpenIdConfig's
-                 RETURN_TO/REALM constants must stay in sync with this
-                 scheme/host/path; see that object's kdoc for why a custom
-                 scheme (not an https:// return_to) was chosen.
+                 APP_LINK constant must stay in sync with this
+                 scheme/host/path. Since WP D11 Steam itself returns to the
+                 vault's http(s) page /auth/steam/app-return (Steam refuses
+                 a custom-scheme return_to), and that page links on to this
+                 deep link with the query unchanged; see that object's kdoc.
                  android:launchMode="singleTask" above so Valve's redirect
                  delivers into MainActivity.onNewIntent on the app's
                  EXISTING task/instance instead of spawning a second one

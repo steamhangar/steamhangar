@@ -50,13 +50,14 @@
  * "already running" dedupe branch with zero extra setup.
  *
  * WP 4e.1 extends this with a large-library fixture — `generateSyntheticGames`
- * appends up to 394 deterministic synthetic games on top of the 6 curated
+ * appends up to 390 deterministic synthetic games on top of the 10 curated
  * ones below, gated behind a `localStorage`-read library-size preference (or
  * an explicit `resetDemoData({ librarySize })` argument for headless tests)
  * — see that function's own header for what it can and cannot measure, and
  * `web/tests/demo-data-large-library.test.js` for its coverage. Every
  * existing test in this suite that calls `resetDemoData()` with no argument
- * is unaffected: the default library size is still exactly 6.
+ * is unaffected: the default library size is exactly 10 (6 games plus the
+ * WP TOOL-APPS-2c content-package group).
  */
 
 import { ApiError, ERROR_KINDS } from "./errors.js";
@@ -129,6 +130,16 @@ function makeGame({
   // at it) — see buildCuratedGames() for which two games exercise the
   // cached/not-cached badge states.
   installedOn = [],
+  // WP WEB-FIX-UPD-VIS: the stored oracle verdict "stale" for this app (WP
+  // UPD-1's `update_available`). Demo-only flag: the projection below adds
+  // the real rule's second half (only while the app has bytes in the
+  // cache), and a finished prefill of this app clears it (advanceJob).
+  updateAvailable = false,
+  // WP TOOL-APPS-2c: `parent_appid` / `app_type` (WP TOOL-APPS-2a). Null
+  // (ungrouped, unknown type) for every game except the content-package
+  // fixture in buildContentPackageGames().
+  parentAppid = null,
+  appType = null,
 }) {
   return {
     appid,
@@ -150,7 +161,67 @@ function makeGame({
     depots,
     _demoGcReclaimableBytes: gcReclaimableBytes,
     _demoGcHeldBackBytes: gcHeldBackBytes,
+    _demoUpdateAvailable: updateAvailable,
+    // When the "oracle" last answered for this app; stamped by
+    // seedDemoUpdateCheck() and by every finished demo update check for the
+    // cached games, null for the rest (real: null = never asked).
+    update_checked_at: null,
+    parent_appid: parentAppid,
+    app_type: appType,
   };
+}
+
+/**
+ * WP TOOL-APPS-2c: one game with three content packages, so demo mode shows
+ * the grouped card ("+3 content packages · 1 failed"), the package list in
+ * the detail sheet with its Retry button, and the grouped delete. Modeled on
+ * the prod library (ADR-0022): packages are separate apps with their own
+ * depots (one shares a depot with the parent), Steam names them
+ * "<game> - <what>", one package failed. Fictional names and ids.
+ */
+function buildContentPackageGames() {
+  const parent = 2010080;
+  return [
+    makeGame({
+      appid: parent,
+      name: "Starfall Legion",
+      status: "done",
+      appType: "game",
+      depots: [
+        { depotid: 2010081, shared: false, size_bytes: 6_100_000_000 },
+        { depotid: 2010089, shared: true, size_bytes: 150_000_000 },
+      ],
+    }),
+    makeGame({
+      appid: 2010082,
+      name: "Starfall Legion - Brazilian Portuguese Voice Pack",
+      status: "done",
+      parentAppid: parent,
+      appType: "dlc",
+      depots: [
+        { depotid: 2010083, shared: false, size_bytes: 300_000_000 },
+        // Shared with the parent: the group size counts it once.
+        { depotid: 2010089, shared: true, size_bytes: 150_000_000 },
+      ],
+      installedOn: [{ client_id: "loft-laptop", reported_at: isoAgo(3_600_000) }],
+    }),
+    makeGame({
+      appid: 2010084,
+      name: "Starfall Legion - Original Soundtrack",
+      status: "done",
+      parentAppid: parent,
+      appType: "music",
+      depots: [{ depotid: 2010085, shared: false, size_bytes: 450_000_000 }],
+    }),
+    makeGame({
+      appid: 2010086,
+      name: "Starfall Legion - Officer Cosmetics",
+      status: "error",
+      parentAppid: parent,
+      appType: "dlc",
+      depots: [],
+    }),
+  ];
 }
 
 /** The 6 curated, hand-named seed games every existing demo test asserts
@@ -221,6 +292,13 @@ function buildCuratedGames() {
       appid: 2010040,
       name: "Emberreach",
       status: "done",
+      // WP WEB-FIX-UPD-VIS: the one demo game with an update available, so
+      // the "Update available" badge, the "Updates" chip and the update
+      // check line show in demo mode (the Android demo flags its own
+      // "Pale Meridian"; the web demo has no game of that name). Chosen
+      // because nothing else here contradicts it: Aurora Cascade is
+      // "stable" and Frostline Convoy was confirmed current an hour ago.
+      updateAvailable: true,
       depots: [
         { depotid: 2010041, shared: false, size_bytes: 800_000_000 },
         // Shared with Frostline Convoy (2010050) below — deleting Emberreach
@@ -272,10 +350,12 @@ function buildCuratedGames() {
 // in store.js) has only ever been exercised against the 6 curated games
 // above. Appended ON TOP of them (never replacing), so every existing demo
 // test that names an exact appid/count above is completely unaffected —
-// the default library size is still exactly DEFAULT_LIBRARY_SIZE (6).
+// the default library size is exactly DEFAULT_LIBRARY_SIZE (10).
 // ---------------------------------------------------------------------
 
-const DEFAULT_LIBRARY_SIZE = 6;
+// WP TOOL-APPS-2c: the curated list is the 6 hand-named games plus the 4
+// rows of the content-package group (buildContentPackageGames).
+const DEFAULT_LIBRARY_SIZE = 10;
 const MAX_LIBRARY_SIZE = 400;
 const LARGE_LIBRARY_STORAGE_KEY = "steamvault.demoLibrarySize";
 // Chosen well clear of every other fixture's appid range in this file (the
@@ -374,12 +454,13 @@ function readLibrarySizePreference() {
   }
 }
 
-/** The curated 6-game seed list, plus `librarySize - DEFAULT_LIBRARY_SIZE`
+/** The curated seed list (6 games plus the 4-row content-package group), plus `librarySize - DEFAULT_LIBRARY_SIZE`
  * synthetic games appended on top (0 more when `librarySize` is at or below
  * the default — every existing demo test, which never passes an argument
  * here, sees exactly the unmodified 6-game list it always has). */
 function buildGames(librarySize = DEFAULT_LIBRARY_SIZE) {
   return buildCuratedGames().concat(
+    buildContentPackageGames(),
     generateSyntheticGames(Math.max(0, librarySize - DEFAULT_LIBRARY_SIZE)),
   );
 }
@@ -622,6 +703,8 @@ let games = buildGames(readLibrarySizePreference());
 let jobs = buildJobs();
 let clients = buildClients();
 let nextJobId = 900002;
+// Seeded in the /v1/updates section below (its constants must exist first).
+let updateCheck = null;
 
 /** Restore all demo state to a fresh copy of the seed data. Exported for
  * tests (web/tests/demo-data.test.js and friends) so scenarios don't leak
@@ -644,15 +727,29 @@ let nextJobId = 900002;
  * `rtime_last_played` simply absent from every owned-games entry, matching
  * the real relay's `response_model_exclude_unset` behaviour, not a fabricated
  * `0`/`null`).
- * @param {{ librarySize?: number, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean }} [options]
+ *
+ * WP UPD-5 demo pill (user decision 2026-10-14): `demoSteamAccount` seeds a
+ * demo Steam Web API key and `steam_library_steamid` (see
+ * `seedDemoSteamAccount`). Like `relayExposePlaytime` it defaults to the
+ * browser preference (`readRelayPlaytimePreference`: ON in a browser demo,
+ * OFF outside a browser), so every bare-Node test still starts from the
+ * unconfigured, gate-off baseline unless it asks otherwise.
+ * @param {{ librarySize?: number, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean, demoSteamAccount?: boolean }} [options]
  */
-export function resetDemoData({ librarySize, relayExposePlaytime: rp = false, relayExposeLastPlayed: rl = false } = {}) {
+export function resetDemoData({
+  librarySize,
+  relayExposePlaytime: rp = readRelayPlaytimePreference(),
+  relayExposeLastPlayed: rl = false,
+  demoSteamAccount: seedAccount = readRelayPlaytimePreference(),
+} = {}) {
   games = buildGames(librarySize ?? readLibrarySizePreference());
   jobs = buildJobs();
   clients = buildClients();
   nextJobId = 900002;
+  updateCheck = seedDemoUpdateCheck();
   resetDemoSettings();
   resetDemoSteamRelay();
+  if (seedAccount) seedDemoSteamAccount();
   relayExposePlaytime = rp;
   relayExposeLastPlayed = rl;
 }
@@ -745,8 +842,30 @@ const BOOL_FALSE_SPELLINGS = ["0", "false", "no", "off"];
 // restart", the same one-way, boot-time-only knob ADR-0010 requires of the
 // real server (there is deliberately no PATCH path for either, in demo mode
 // or the real one).
-let relayExposePlaytime = false;
+// WP WEB-FEAT-SUGGEST-2 / WP UPD-5 demo pill (user decision 2026-10-14):
+// the browser demo shows the card's "Never played" pill out of the box. A
+// browser demo starts with the playtime gate ON, a demo Steam Web API key
+// and a demo SteamID64 (`seedDemoSteamAccount`), so the Library loads the
+// owned list on open and Frostline Convoy (cached, playtime 0) carries the
+// pill without any manual step. This is demo mode only: a real install
+// keeps `VAULT_RELAY_EXPOSE_PLAYTIME` at its shipped default, OFF (ADR-0010),
+// and nothing here reaches the server. A demo-only browser preference,
+// `steamvault.demoRelayPlaytime` = "0", opts the demo out (gate off, no key,
+// no SteamID: the real fresh-install shape); any other value or none means
+// on. Outside a browser (every bare-Node test) it is OFF, so the tests'
+// baseline stays the shipped gate-off, unconfigured shape. Read at module
+// load and on resetDemoData().
+let relayExposePlaytime = readRelayPlaytimePreference();
 let relayExposeLastPlayed = false;
+
+function readRelayPlaytimePreference() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    return window.localStorage.getItem("steamvault.demoRelayPlaytime") !== "0";
+  } catch {
+    return false;
+  }
+}
 
 // Mirrors settings_store.ENV_ONLY_INFO_KEYS — informational-only rows a
 // settings screen shows as "this exists but only the environment controls
@@ -1032,13 +1151,31 @@ function resetDemoSteamRelay() {
   steamKeyLast4 = null;
 }
 
+/** The browser demo's seeded Steam account (WP UPD-5 demo pill, see
+ * `readRelayPlaytimePreference`). Fictional: the key is a placeholder that
+ * only passes the 32-hex grammar (demo mode never calls Valve), and the
+ * SteamID64 is the top of the individual-account range
+ * (`STEAM_ID64_BASE + 0xffffffff`), not a person's account. */
+export const DEMO_STEAM_WEB_API_KEY = "0123456789abcdef0123456789abcdef";
+export const DEMO_STEAMID = "76561202255233023";
+
+/** Seed the demo Steam account the way an operator would set it up: the
+ * key through the same path as `PUT /v1/steam/key`, the SteamID as a stored
+ * (`db`) `steam_library_steamid` override, like a Settings save. */
+function seedDemoSteamAccount() {
+  handlePutSteamKey({ key: DEMO_STEAM_WEB_API_KEY });
+  settingsOverrides.steam_library_steamid = DEMO_STEAMID;
+}
+
+if (readRelayPlaytimePreference()) seedDemoSteamAccount();
+
 // Fictional owned-games fixture (LEARNINGS "Testing discipline": synthetic,
 // never real Steam data) — deliberately a DIFFERENT list from the cache
 // library's demo games above: this is what "the Steam Web API says this
 // account owns", which in real life is almost always a much bigger,
 // unrelated set from what happens to be cached. The two lists OVERLAP on
-// purpose (WP WEB-FEAT-1): 2010010/2010040 are vault games too, the other
-// three are owned-only, so the Library's merge shows both cases (dedupe by
+// purpose (WP WEB-FEAT-1): 2010010/2010040/2010050 are vault games too, the
+// other three are owned-only, so the Library's merge shows both cases (dedupe by
 // appid, plus "Not cached" owned-only rows).
 //
 // WP 4h.2 fix (named per the review that carried this defect forward): this
@@ -1056,6 +1193,9 @@ function resetDemoSteamRelay() {
 const DEMO_OWNED_GAMES = [
   { appid: 2010010, name: "Aurora Cascade", img_icon_url: "" },
   { appid: 2010040, name: "Emberreach", img_icon_url: "" },
+  // WP WEB-FEAT-SUGGEST-2: cached in the vault and never played (playtime
+  // 0 below), so the card's "Never played" pill has a demo case.
+  { appid: 2010050, name: "Frostline Convoy", img_icon_url: "" },
   { appid: 3300100, name: "Sable Undertow", img_icon_url: "" },
   { appid: 3300200, name: "Halcyon Foundry", img_icon_url: "" },
   { appid: 3300300, name: "Quietbrook", img_icon_url: "" },
@@ -1072,6 +1212,7 @@ const DEMO_OWNED_GAMES = [
 const DEMO_OWNED_GAMES_PLAYTIME = {
   2010010: { playtime_forever: 4312, rtime_last_played: 1_755_000_000 },
   2010040: { playtime_forever: 118, rtime_last_played: 1_754_000_000 },
+  2010050: { playtime_forever: 0 }, // cached and never played (WP WEB-FEAT-SUGGEST-2)
   3300100: { playtime_forever: 972 },
   3300200: { playtime_forever: 26, rtime_last_played: 1_753_000_000 },
   3300300: { playtime_forever: 0 }, // real, explicit "never played" — not absence
@@ -1149,6 +1290,33 @@ function appSizeBytes(depots) {
   return depots.reduce((sum, d) => sum + (d.size_bytes ?? 0), 0);
 }
 
+/** `update_available` / `update_checked_at` (WP UPD-1), mirroring
+ * `games._update_fields`: a stale verdict counts only while the app has
+ * bytes in the cache, and a game the oracle never answered for is
+ * `false`/`null`. */
+function demoUpdateFields(g) {
+  return {
+    update_available: g._demoUpdateAvailable === true && g.update_checked_at !== null && !!appSizeBytes(g.depots),
+    update_checked_at: g.update_checked_at,
+  };
+}
+
+/** `group_size_bytes` (WP TOOL-APPS-2, api/README.md "Group size"): on a
+ * top-level row the union of its depots and those of every row whose
+ * `parent_appid` is this app, each depot once; `null` on a grouped row and
+ * under the same `null` rule as `size_bytes` (no depots at all). */
+function demoGroupSizeBytes(g) {
+  if (g.parent_appid != null) return null;
+  const union = new Map();
+  for (const m of [g, ...games.filter((c) => c.parent_appid === g.appid)]) {
+    for (const d of m.depots) union.set(d.depotid, d.size_bytes ?? 0);
+  }
+  if (union.size === 0) return null;
+  let total = 0;
+  for (const v of union.values()) total += v;
+  return total;
+}
+
 function gameSummary(g) {
   return {
     appid: g.appid,
@@ -1183,6 +1351,10 @@ function gameSummary(g) {
     // WP API-FIX-5: additive on both game shapes. The demo has no server
     // lookup, so every demo game uses the legacy cover path.
     cover_url: null,
+    ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (WP UPD-1 fields)
+    parent_appid: g.parent_appid, // WP TOOL-APPS-2c (WP TOOL-APPS-2a fields)
+    app_type: g.app_type,
+    group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     // WP D10: additive on both game shapes; the demo stores no covers.
     cover_cached_url: null,
   };
@@ -1209,6 +1381,10 @@ function gameDetail(g) {
     tool_app: false, // WP API-FIX-4 (see gameSummary's own comment)
     tool_app_name: null,
     cover_url: null, // WP API-FIX-5 (see gameSummary's own comment)
+    ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (see gameSummary)
+    parent_appid: g.parent_appid, // WP TOOL-APPS-2c (see gameSummary)
+    app_type: g.app_type,
+    group_size_bytes: demoGroupSizeBytes(g), // WP TOOL-APPS-2
     cover_cached_url: null, // WP D10 (see gameSummary's own comment)
   };
 }
@@ -1413,6 +1589,9 @@ function advanceJob(job) {
     game.status = "done";
     game.last_prefill_at = job.finished_at;
     game.needs_force = false;
+    // WP WEB-FIX-UPD-VIS: the newer build is now cached (the Android demo
+    // does the same, DemoState.kt).
+    game._demoUpdateAvailable = false;
   }
 }
 
@@ -1505,6 +1684,142 @@ const JOB_RESUME_RE = /^\/v1\/jobs\/(\d+)\/resume$/;
 const GAME_ID_RE = /^\/v1\/games\/(\d+)$/;
 const CACHE_APPID_RE = /^\/v1\/cache\/(\d+)$/;
 const GC_APPID_RE = /^\/v1\/cache\/(\d+)\/gc$/;
+const DELETE_PLAN_RE = /^\/v1\/cache\/(\d+)\/delete-plan$/;
+
+// ---------------------------------------------------------------------
+// Grouped delete (WP TOOL-APPS-2c; api/README.md "Grouped delete",
+// WP TOOL-APPS-2b). Same contract as the real routes, against this demo's
+// one-list-per-game model: the delete set is the game plus every child
+// whose OWN type is a package type; children of another type are kept and
+// reported; members do not protect each other's depots, every app outside
+// the set protects under the same `hasCacheContent` rule the plain delete
+// uses.
+// ---------------------------------------------------------------------
+
+const PACKAGE_TYPES = new Set(["dlc", "config", "music", "video", "demo"]);
+
+function groupSelection(appid) {
+  const children = games.filter((g) => g.parent_appid === appid && g.appid !== appid);
+  const packages = children.filter((g) => PACKAGE_TYPES.has(g.app_type));
+  const kept = children
+    .filter((g) => !PACKAGE_TYPES.has(g.app_type))
+    .map((g) => ({
+      appid: g.appid,
+      name: g.name,
+      app_type: g.app_type,
+      reason: g.app_type == null ? "type_unknown" : "not_a_package_type",
+    }));
+  return { members: [findGame(appid), ...packages], kept };
+}
+
+function groupDeletePlan(appid, withPackages) {
+  const game = findGame(appid);
+  if (!game) throw notFound(`Unknown appid ${appid}`);
+  const { members, kept } = withPackages ? groupSelection(appid) : { members: [game], kept: [] };
+  const memberIds = new Set(members.map((m) => m.appid));
+  const depotOwners = new Map();
+  for (const m of members) {
+    for (const d of m.depots) {
+      if (!depotOwners.has(d.depotid)) depotOwners.set(d.depotid, { size: d.size_bytes ?? null, owners: [] });
+      depotOwners.get(d.depotid).owners.push(m.appid);
+    }
+  }
+  if (depotOwners.size === 0) throw notFound(`App ${appid} has no depot mappings, so there is nothing to delete.`);
+  const deleteDepots = [];
+  const skippedShared = [];
+  for (const [depotid, { size, owners }] of [...depotOwners.entries()].sort((a, b) => a[0] - b[0])) {
+    const outside = games.filter((g) => !memberIds.has(g.appid) && g.depots.some((d) => d.depotid === depotid));
+    if (outside.some(hasCacheContent)) {
+      skippedShared.push({ depotid, shared_with: outside.map((g) => g.appid) });
+    } else {
+      deleteDepots.push({ depotid, size_bytes: size, owners, shared_with_uncached: outside.map((g) => g.appid) });
+    }
+  }
+  const blockedBy = jobs
+    .filter((j) => memberIds.has(j.appid) && ["queued", "running", "paused"].includes(j.status))
+    .map((j) => ({ appid: j.appid, job_id: j.id, type: j.type, status: j.status }));
+  return {
+    appid,
+    with_packages: withPackages,
+    members: members.map((m) => ({
+      appid: m.appid,
+      role: m.appid === appid ? "parent" : "package",
+      name: m.name,
+      app_type: m.app_type,
+      depot_ids: m.depots.map((d) => d.depotid).sort((a, b) => a - b),
+    })),
+    kept_children: kept,
+    delete_depots: deleteDepots,
+    skipped_shared: skippedShared,
+    unusable: [],
+    total_bytes: deleteDepots.reduce((sum, d) => sum + (d.size_bytes || 0), 0),
+    blocked_by: blockedBy,
+  };
+}
+
+function parseMembers(raw) {
+  if (typeof raw !== "string" || !/^\d+(,\d+)*$/.test(raw)) throw validationError("members must be comma-separated app ids");
+  return new Set(raw.split(",").map(Number));
+}
+
+function handleGroupDelete(appid, membersRaw) {
+  const confirmed = parseMembers(membersRaw);
+  const plan = groupDeletePlan(appid, true);
+  const server = plan.members.map((m) => m.appid).sort((a, b) => a - b);
+  const same = server.length === confirmed.size && server.every((id) => confirmed.has(id));
+  if (!same) {
+    const detail = {
+      message:
+        "The apps this delete would remove differ from the confirmed list. Nothing was deleted; fetch the delete plan again and confirm the current list.",
+      server_members: server,
+      confirmed_members: [...confirmed].sort((a, b) => a - b),
+    };
+    throw new ApiError(ERROR_KINDS.VALIDATION, detail.message, { status: 409, detail });
+  }
+  if (plan.blocked_by.length) {
+    const job = plan.blocked_by[0];
+    throw conflict(`${job.type === "gc" ? "GC" : "Prefill"} job ${job.job_id} for app ${job.appid} is ${job.status}.`);
+  }
+  const deletedIds = new Set(plan.delete_depots.map((d) => d.depotid));
+  const lostByMember = new Map(plan.members.map((m) => [m.appid, m.depot_ids.filter((id) => deletedIds.has(id))]));
+  for (const g of games) g.depots = g.depots.filter((d) => !deletedIds.has(d.depotid));
+  for (const d of plan.delete_depots) {
+    for (const id of d.shared_with_uncached) {
+      const co = findGame(id);
+      if (co) co.needs_force = true;
+    }
+  }
+  for (const m of plan.members) {
+    const g = findGame(m.appid);
+    const lost = lostByMember.get(m.appid);
+    if (m.role === "parent" || lost.length) {
+      g.status = "idle";
+      g.last_prefill_at = null;
+      if (lost.length) g.needs_force = true;
+    }
+  }
+  return {
+    appid,
+    deleted_depots: plan.delete_depots.map((d) => ({
+      depotid: d.depotid,
+      size_bytes_freed: d.size_bytes || 0,
+      shared_with_uncached: d.shared_with_uncached,
+    })),
+    skipped_shared: plan.skipped_shared,
+    failed: [],
+    total_bytes_freed: plan.total_bytes,
+    with_packages: true,
+    members: plan.members.map((m) => ({
+      appid: m.appid,
+      role: m.role,
+      name: m.name,
+      app_type: m.app_type,
+      deleted_depots: lostByMember.get(m.appid),
+      failed_depots: [],
+    })),
+    kept_children: plan.kept_children,
+  };
+}
 // WP WEB-FEAT-4: one percent-encoded path segment, like the server's
 // `{client_id}` (which never matches a decoded "/").
 const CLIENT_ID_RE = /^\/v1\/clients\/([^/]+)$/;
@@ -1533,6 +1848,109 @@ function handleDeleteClient(encodedId) {
 function jobControlResponse(job, { status, outcome, detail }) {
   job.status = status;
   return { job_id: job.id, status, outcome, detail };
+}
+
+// ---------------------------------------------------------------------
+// /v1/updates/* (WP UPD-1 contract; demo added by WP WEB-FIX-UPD-VIS) —
+// "Check updates" in demo mode. Nothing is asked of any update source: a
+// started check answers `running: true` to exactly ONE status read (so the
+// busy button and the "Checking cached games…" line are visible for one
+// poll) and has finished by the next one, counting the cached games (the
+// same `selectCachedAppids()` definition "Check & update" uses, like the
+// real route) and stamping their `update_checked_at`. The verdicts
+// themselves never change here: the fixture's own flag (Emberreach) is the
+// one "update available". Shapes follow `UpdateCheckStartOut` /
+// `UpdateCheckStatusOut` (api/vault_api/routers/updates.py), keys pinned by
+// web/tests/demo-data-updates.test.js.
+// ---------------------------------------------------------------------
+
+/** Number of status reads a started demo check answers `running: true`. */
+export const DEMO_UPDATE_CHECK_RUNNING_READS = 1;
+
+function finishDemoUpdateRun(state, trigger, startedAt, finishedAt) {
+  const appids = selectCachedAppids();
+  for (const appid of appids) {
+    const g = findGame(appid);
+    if (g) g.update_checked_at = finishedAt;
+  }
+  const stale = appids.filter((appid) => demoUpdateFields(findGame(appid)).update_available).length;
+  Object.assign(state, {
+    running: false,
+    last_trigger: trigger,
+    last_started_at: startedAt,
+    last_finished_at: finishedAt,
+    last_outcome: "completed",
+    last_apps: appids.length,
+    last_ok: appids.length,
+    last_failed: 0,
+    last_stale: stale,
+  });
+}
+
+/** Demo game whose update check failed in the seeded run, so its last
+ * successful check is old enough for the "update check due" notification
+ * (WP WEB-FEAT-SUGGEST-2, 14 days). A manual demo check succeeds for it. */
+export const DEMO_UPDATE_CHECK_OVERDUE_APPID = 2010070; // Glass Meridian
+const DEMO_UPDATE_CHECK_OVERDUE_DAYS = 20;
+
+/** The demo's starting point: a scheduled check finished three hours ago
+ * (the demo ships a schedule window, so `scheduled` is true). The oracle
+ * did not answer for one game (Glass Meridian), whose last successful
+ * check is therefore 20 days old. */
+function seedDemoUpdateCheck() {
+  const state = { running: false, _readsLeft: 0 };
+  const startedAt = isoAgo(3 * 3_600_000).replace(/\.\d{3}Z$/, "Z");
+  const finishedAt = isoAgo(3 * 3_600_000 - 40_000).replace(/\.\d{3}Z$/, "Z");
+  finishDemoUpdateRun(state, "scheduled", startedAt, finishedAt);
+  const overdue = findGame(DEMO_UPDATE_CHECK_OVERDUE_APPID);
+  if (overdue && overdue.update_checked_at !== null) {
+    overdue.update_checked_at = isoAgo(DEMO_UPDATE_CHECK_OVERDUE_DAYS * 86_400_000).replace(/\.\d{3}Z$/, "Z");
+    state.last_ok -= 1;
+    state.last_failed += 1;
+  }
+  return state;
+}
+
+updateCheck = seedDemoUpdateCheck();
+
+function demoUpdateStatusOut() {
+  const s = updateCheck;
+  return {
+    enabled: true,
+    // WP UPD-5: `scheduled` means "the oracle is on" (it equals `enabled`),
+    // whether or not a schedule window is configured.
+    scheduled: true,
+    running: s.running,
+    last_trigger: s.last_trigger,
+    last_started_at: s.last_started_at,
+    last_finished_at: s.running ? null : s.last_finished_at,
+    last_outcome: s.running ? null : s.last_outcome,
+    last_apps: s.running ? null : s.last_apps,
+    last_ok: s.running ? null : s.last_ok,
+    last_failed: s.running ? null : s.last_failed,
+    last_stale: s.running ? null : s.last_stale,
+  };
+}
+
+function handleGetUpdatesStatus() {
+  const s = updateCheck;
+  if (s.running) {
+    if (s._readsLeft > 0) {
+      s._readsLeft -= 1;
+    } else {
+      finishDemoUpdateRun(s, "manual", s.last_started_at, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
+    }
+  }
+  return demoUpdateStatusOut();
+}
+
+function handlePostUpdatesCheck() {
+  if (updateCheck.running) return { status: "already_running", enabled: true };
+  updateCheck.running = true;
+  updateCheck._readsLeft = DEMO_UPDATE_CHECK_RUNNING_READS;
+  updateCheck.last_trigger = "manual";
+  updateCheck.last_started_at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return { status: "started", enabled: true };
 }
 
 /**
@@ -1693,6 +2111,14 @@ export async function demoRequest(method, path, { body, params } = {}) {
       outcome: "resumed",
       detail: "Job resumed at the front of the queue.",
     });
+  }
+
+  if (method === "GET" && (m = path.match(DELETE_PLAN_RE))) {
+    return groupDeletePlan(Number(m[1]), params?.with_packages === "true");
+  }
+
+  if (method === "DELETE" && (m = path.match(CACHE_APPID_RE)) && params?.with_packages === "true") {
+    return handleGroupDelete(Number(m[1]), params.members);
   }
 
   if (method === "DELETE" && (m = path.match(CACHE_APPID_RE))) {
@@ -1888,6 +2314,12 @@ export async function demoRequest(method, path, { body, params } = {}) {
     return handleGetAbout();
   }
 
+  if (method === "POST" && path === "/v1/updates/check") {
+    return handlePostUpdatesCheck();
+  }
+  if (method === "GET" && path === "/v1/updates/status") {
+    return handleGetUpdatesStatus();
+  }
   if (method === "GET" && path === "/v1/settings") {
     return handleGetSettings();
   }

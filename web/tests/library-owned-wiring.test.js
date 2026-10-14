@@ -248,13 +248,13 @@ test("detail-only download: opening an owned-only card offers 'Download to cache
   assert.deepEqual(server.prefillBodies.at(-1), { appids: [40] });
 });
 
-test("layout: the notice lives inside .lib-checkrow — .view-library keeps its six in-flow children for the BP-L area grid", async () => {
+test("layout: the notice lives in .lib-status, under the toolbar row (WP WEB-FIX-UPD-VIS)", async () => {
   const s = await openLibrary();
   assert.deepEqual(
     s.children.map((c) => c.className),
-    ["lib-head", "lib-checkrow", "search", "chips", "grid", "hint", "bulk"],
+    ["lib-head", "lib-bar", "lib-status", "grid", "hint", "bulk"],
   );
-  const row = s.querySelector(".lib-checkrow");
+  const row = s.querySelector(".lib-status");
   assert.equal(row.querySelectorAll("p.lib-owned").length, 1);
 });
 

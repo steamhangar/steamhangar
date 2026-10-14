@@ -107,10 +107,11 @@ test("generateSyntheticGames: last_prefill_at is a real ISO string for 'done' ga
   }
 });
 
-test("resetDemoData() with no argument still yields exactly the 6 curated games (regression pin)", async () => {
+test("resetDemoData() with no argument yields exactly the curated rows: 6 games plus the 4-row content-package group (regression pin)", async () => {
   resetDemoData();
   const rows = await demoRequest("GET", "/v1/games");
-  assert.equal(rows.length, 6);
+  // WP TOOL-APPS-2c: 6 hand-named games + Starfall Legion with 3 packages.
+  assert.equal(rows.length, 10);
   resetDemoData();
 });
 
@@ -130,11 +131,11 @@ test("resetDemoData({ librarySize: 400 }) appends synthetic games on top of the 
   }
 });
 
-test("resetDemoData({ librarySize }) below the default is a no-op (still exactly 6)", async () => {
+test("resetDemoData({ librarySize }) below the default is a no-op (still exactly the 10 curated rows)", async () => {
   resetDemoData({ librarySize: 3 });
   try {
     const rows = await demoRequest("GET", "/v1/games");
-    assert.equal(rows.length, 6);
+    assert.equal(rows.length, 10);
   } finally {
     resetDemoData();
   }

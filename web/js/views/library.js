@@ -55,14 +55,10 @@
  * every other decision-logic extraction in this codebase (job-partition.js,
  * gc-flow.js, ...).
  *
- * **WP 4e.2 (desktop layout, D-3/D-4):** the DOM this file builds does not
- * change — the six `.lib-head`/`.lib-checkrow`/`.search`/`.chips`/`.grid`/
- * `.hint` children (`.bulk` is a seventh, out-of-flow sibling) keep the
- * exact same classes and append order they always had; `css/app.css`'s
- * BP-L block now assigns each of them a named grid area BY CLASS, and
+ * **WP 4e.2 (desktop layout, D-3/D-4):** `css/app.css`'s BP-L block
  * turns `.grid` into a `repeat(auto-fill, minmax(var(--tile-min),1fr))`
- * density grid instead of the fixed 2/3-column switch. What DOES change
- * here is purely wording: `LAYOUT_LABEL` and the segmented control's own
+ * density grid instead of the fixed 2/3-column switch. In this file the change
+ * is purely wording: `LAYOUT_LABEL` and the segmented control's own
  * button titles/aria-labels, relabeled from a literal column count
  * ("Two columns"/"Three columns") to an honest density description
  * ("Comfortable"/"Compact") now that the actual on-screen column count is
@@ -80,8 +76,7 @@
  * in the detail sheet (its existing "not tracked" branch). A relay failure
  * leaves the vault games on screen and says why in the notice line.
  *
- * **WP UPD-2 ("Check updates", D14).** A second button in `.lib-checkrow`
- * calls `POST /v1/updates/check` (oracle refresh for every cached game, never
+ * **WP UPD-2 ("Check updates", D14).** A second button calls `POST /v1/updates/check` (oracle refresh for every cached game, never
  * a download), then polls `GET /v1/updates/status` until the run ends and
  * re-reads the games. All decisions (phases, bounded polling, detach on
  * view change, toast wording, the status line) live in
@@ -91,6 +86,26 @@
  * the "Updates" chip appears when the rows carry that field
  * (lib/library-filters.js). An older vault-api (404 on the routes, no field
  * on the rows) shows neither the button, the line nor the chip.
+ *
+ * **WP WEB-FIX-UPD-VIS (user layout 2026-10-13).** The toolbar is one row,
+ * `.lib-bar`: `.lib-filters` (search, chips) on the left and
+ * `.lib-checkbtns` ("Check updates" as the primary button, "Check & update
+ * all cached games" as a plain filled button because it downloads) on the
+ * right; the status lines sit under it in `.lib-status`. The section's
+ * in-flow children are now `.lib-head`/`.lib-bar`/`.lib-status`/`.grid`/
+ * `.hint` (the WP 4e.2 note above describes the earlier six-child BP-L
+ * grid, which is gone: the row lays itself out with flexbox).
+ *
+ * **WP TOOL-APPS-2c (content packages, ADR-0022).** `state.games` is the
+ * GROUPED list (`lib/content-groups.js` `groupGames`): a game with content
+ * packages is one card, its packages are hidden from the grid and listed in
+ * the detail sheet. `state.rawGames` keeps the ungrouped rows for every
+ * per-app decision: bulk download expands a picked group card into the
+ * parent and every package and classifies each one exactly as it would be
+ * ungrouped (`expandSelection`), names and the forced-run lookup read the
+ * raw rows. A games tick on a package patches or rebuilds its group card
+ * (`displayDiff`); a package moving in or out of a group re-renders. The
+ * group size is the server's `group_size_bytes` on the parent row.
  */
 
 import { store } from "../store-singleton.js";
@@ -129,12 +144,23 @@ import { openDetail } from "../components/game-detail-sheet.js";
 import {
   librarySubtitle,
   mergeOwnedLibrary,
+  withOwnedPlaytime,
   ownedNotice,
   NOTICE_ACTION,
   OWNED_STATUS,
 } from "../lib/owned-library.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { ownedLibrary } from "../owned-singleton.js";
+import {
+  expandSelection,
+  failedPackages,
+  groupCardKey,
+  groupGames,
+  groupHasCacheContent,
+  isGroup,
+} from "../lib/content-groups.js";
+import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
+import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "../components/group-delete-plan.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
@@ -209,7 +235,12 @@ const state = {
   // lib/owned-library.js's mergeOwnedLibrary). Every reader below uses
   // `games`; only the merge itself reads `vaultGames`.
   vaultGames: store.snapshot("games") || [],
+  // WP TOOL-APPS-2c: `rawGames` is the merged list before grouping (one row
+  // per app); `games` the grouped one the grid shows; `parentOf` maps a
+  // grouped package's appid to its parent's.
+  rawGames: store.snapshot("games") || [],
   games: store.snapshot("games") || [],
+  parentOf: new Map(),
   jobs: store.snapshot("jobs") || [],
   query: "",
   filterKey: "all",
@@ -249,7 +280,23 @@ ownedLibrary.subscribe((owned) => {
 
 function remerge() {
   mergedOwnedGames = ownedLibrary.current().games;
-  state.games = mergeOwnedLibrary(state.vaultGames, mergedOwnedGames);
+  // WP WEB-FEAT-SUGGEST-2: playtime (ADR-0010 gate) for the card's
+  // "Never played" pill.
+  state.rawGames = withOwnedPlaytime(mergeOwnedLibrary(state.vaultGames, mergedOwnedGames), mergedOwnedGames);
+  // WP TOOL-APPS-2c: group content packages under their parent game.
+  const grouped = groupGames(state.rawGames);
+  state.games = grouped.rows;
+  state.parentOf = grouped.parentOf;
+}
+
+/** Raw (ungrouped) rows by appid, for names and per-app decisions. */
+function rawByAppid() {
+  return new Map(state.rawGames.map((g) => [g.appid, g]));
+}
+
+/** How many of a group card's packages failed (0 for a plain card). */
+function failedCountFor(game) {
+  return failedPackages(game, liveJobsByAppid).length;
 }
 
 // Module-level, not per-mount: an in-flight "Check & update" call must stay
@@ -324,6 +371,11 @@ let currentBulkPrimaryTargets = [];
 let currentBulkSecondaryTargets = [];
 let currentBulkDeleteIds = [];
 let pendingDeleteIds = null;
+// WP TOOL-APPS-2c: appid -> the grouped-delete plan the dialog shows for a
+// picked group card (members confirmed on Delete), and a token so a
+// superseded plan fetch drops its answer.
+let pendingGroupPlans = new Map();
+let deletePlanGeneration = 0;
 
 // ---------------------------------------------------------------------
 // Bulk-delete confirm dialog — built ONCE at module load, appended
@@ -469,7 +521,7 @@ async function onCheckAndUpdate() {
     // on an empty or all-deduplicated outcome. `state.games` is passed
     // through only as the best-effort `needs_force` lookup table; the
     // module itself decides whether it applies at all.
-    const summary = summarizeCachedPrefillOutcome(result.refs, state.games);
+    const summary = summarizeCachedPrefillOutcome(result.refs, state.rawGames);
     // N3 (review round 1 nitpick): `summary.warn` means "the user needs to
     // go DO something" (a paused dedupe — resume or cancel it) — the one
     // outcome of this whole action that requires a follow-up action, not
@@ -620,6 +672,7 @@ function renderGrid() {
         onLongPress: enterSelect,
         onToggle,
         onAction,
+        failedPackageCount: failedCountFor(game),
       }),
     );
   }
@@ -647,9 +700,13 @@ function syncBulk() {
 
   const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
   const pickedGames = [...state.picked].map((id) => gamesByAppid.get(id)).filter(Boolean);
+  // WP TOOL-APPS-2c (ADR-0022 §4): a picked group card is its parent plus
+  // every package, each classified as it would be ungrouped, so the targets
+  // equal those of the same rows picked one by one.
+  const memberGames = expandSelection(pickedGames, rawByAppid());
 
-  const classification = classifyBulkSelection(pickedGames, state.jobs);
-  const plan = buildBulkDownloadPlan(classification, pickedGames.length);
+  const classification = classifyBulkSelection(memberGames, state.jobs);
+  const plan = buildBulkDownloadPlan(classification, memberGames.length);
 
   setButtonEnabled(els.bulkPrimary, plan.primaryEnabled, plan.primaryLabel);
   currentBulkPrimaryTargets = plan.primaryTargets;
@@ -668,7 +725,15 @@ function syncBulk() {
   // classifyBulkDeleteEligibility) — has-cache-content, not "status is not
   // none" (an `error` app with zero visible bytes has no depot mappings
   // left and would just 404; see that function's docstring).
-  const deletable = classifyBulkDeleteEligibility(pickedGames, state.jobs);
+  // WP TOOL-APPS-2c: a group card is deletable when any member has bytes
+  // and no member is busy (the grouped delete answers 409 otherwise).
+  const busyMembers = new Set(classification.busy.map((g) => g.appid));
+  const deletable = [
+    ...classifyBulkDeleteEligibility(pickedGames.filter((g) => !isGroup(g)), state.jobs),
+    ...pickedGames.filter(
+      (g) => isGroup(g) && groupHasCacheContent(g) && ![g.appid, ...g.packages.map((p) => p.appid)].some((id) => busyMembers.has(id)),
+    ),
+  ];
   if (deletable.length) {
     els.bulkDelete.style.display = "";
     els.bulkDelete.textContent =
@@ -872,21 +937,32 @@ function strong(text, extraClass) {
  * this WP: no Escape, no focus-on-open, no trap). */
 let deleteConfirmInvokerEl = null;
 
-async function openDeleteConfirm(ids) {
+async function openDeleteConfirm(ids, notice) {
+  const myGen = ++deletePlanGeneration;
   pendingDeleteIds = ids;
-  const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
+  pendingGroupPlans = new Map();
+  // WP TOOL-APPS-2c: names from the raw rows (packages too).
+  const gamesByAppid = rawByAppid();
+  const groupIds = ids.filter((id) => isGroup(state.games.find((g) => g.appid === id)));
   dTitle.textContent =
     ids.length > 1 ? `Delete ${ids.length} games from cache?` : "Delete from cache?";
   dText.textContent = "Calculating what this would free…";
   dNote.replaceChildren();
   dYes.disabled = true;
-  deleteConfirmInvokerEl = document.activeElement;
-  dialogBackdrop.classList.add("on");
-  // WP 4a.8: #app goes inert while this is up; Escape routes through
-  // lib/modal-stack.js's single dispatcher (see its header) rather than a
-  // listener bound here directly.
-  pushModal(dialogBackdrop, closeDeleteConfirm);
-  dNo.focus(); // "Keep" — the non-destructive default gets initial focus
+  if (!dialogBackdrop.classList.contains("on")) {
+    deleteConfirmInvokerEl = document.activeElement;
+    dialogBackdrop.classList.add("on");
+    // WP 4a.8: #app goes inert while this is up; Escape routes through
+    // lib/modal-stack.js's single dispatcher (see its header) rather than a
+    // listener bound here directly.
+    pushModal(dialogBackdrop, closeDeleteConfirm);
+    dNo.focus(); // "Keep" — the non-destructive default gets initial focus
+  }
+
+  if (groupIds.length) {
+    await openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice);
+    return;
+  }
 
   try {
     const [details, mapping] = await Promise.all([
@@ -905,7 +981,70 @@ async function openDeleteConfirm(ids) {
   }
 }
 
+/**
+ * WP TOOL-APPS-2c (ADR-0022 §4): the confirmation when the selection holds
+ * group cards. Each group is previewed by the server
+ * (`GET /v1/cache/{appid}/delete-plan?with_packages=true`) and listed with
+ * every content package it removes; the plain games keep the multiPlan
+ * preview above them. Delete stays disabled while a group member has a job
+ * in flight.
+ */
+async function openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice) {
+  const plainIds = ids.filter((id) => !groupIds.includes(id));
+  const nameFor = (id, serverName) => gamesByAppid.get(id)?.name || serverName || `App ${id}`;
+  try {
+    const activeJobAppids = new Set(
+      state.jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).map((j) => j.appid),
+    );
+    const [plans, plain] = await Promise.all([
+      Promise.all(groupIds.map((id) => api.deletePlan(id))),
+      plainIds.length
+        ? Promise.all([Promise.all(plainIds.map((id) => api.game(id))), api.mapping()]).then(([details, mapping]) =>
+            buildMultiPlan(plainIds, { details, mapping, gamesByAppid, activeJobAppids }),
+          )
+        : Promise.resolve(null),
+    ]);
+    if (myGen !== deletePlanGeneration) return;
+    let freed = 0;
+    let blocked = false;
+    dNote.replaceChildren();
+    if (plain) {
+      // The plain picks' multiPlan preview, as without groups, under a
+      // heading naming them (review nit).
+      renderDeletePlan(plain, plainIds, gamesByAppid);
+      freed += plain.freedBytes;
+      const heading = document.createElement("p");
+      heading.className = "cflabel";
+      heading.dataset.role = "plain-heading";
+      heading.textContent = namesFor(plainIds, gamesByAppid);
+      dNote.replaceChildren(heading, ...Array.from(dNote.childNodes));
+    }
+    const noticeEl = notice ? buildNotice(notice) : null;
+    if (noticeEl) dNote.replaceChildren(noticeEl, ...Array.from(dNote.childNodes));
+    const blocks = plans.map((plan) => buildGroupDeletePlan(plan, nameFor, { showSubject: ids.length > 1 }));
+    for (const [i, block] of blocks.entries()) {
+      dNote.appendChild(block.node);
+      freed += block.freedBytes;
+      blocked = blocked || block.blocked;
+      pendingGroupPlans.set(groupIds[i], plans[i]);
+    }
+    dText.textContent =
+      ids.length === 1
+        ? groupDeleteIntro(blocks[0].subject, freed)
+        : `Deleting ${ids.length} games and their content packages frees about ${formatBytesGB(freed) || "0 GB"}.`;
+    dYes.disabled = blocked || plans.some(isPlanBlocked);
+    // Review fix (a11y): the re-confirm notice takes focus and is announced.
+    if (noticeEl) noticeEl.focus();
+  } catch (err) {
+    if (myGen !== deletePlanGeneration) return;
+    dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
+    dYes.disabled = true;
+  }
+}
+
 function closeDeleteConfirm() {
+  deletePlanGeneration++;
+  pendingGroupPlans = new Map();
   dialogBackdrop.classList.remove("on");
   popModal(dialogBackdrop);
   if (deleteConfirmInvokerEl && typeof deleteConfirmInvokerEl.focus === "function") deleteConfirmInvokerEl.focus();
@@ -916,14 +1055,42 @@ function closeDeleteConfirm() {
 async function confirmDelete() {
   const ids = pendingDeleteIds;
   if (!ids) return;
+  const groupPlans = pendingGroupPlans;
   dYes.disabled = true;
   dNo.disabled = true;
-  const results = await Promise.allSettled(ids.map((id) => api.deleteCache(id)));
+  // WP TOOL-APPS-2c: a group card is deleted with exactly the members its
+  // plan listed; every other pick as before.
+  const results = await Promise.allSettled(
+    ids.map((id) =>
+      groupPlans.has(id) ? api.deleteCacheWithPackages(id, planMemberIds(groupPlans.get(id))) : api.deleteCache(id),
+    ),
+  );
   dYes.disabled = false;
   dNo.disabled = false;
+  // A group whose package list changed since the preview (409, nothing
+  // deleted for it): show its new plan and ask again.
+  const changed = ids.filter((id, i) => results[i].status === "rejected" && isMembersMismatch(results[i].reason));
+  if (changed.length) {
+    // Keep focus inside the dialog while the plans are fetched again, and
+    // drop the picks that were already deleted (review fixes).
+    dNo.focus();
+    ids.forEach((id, i) => {
+      if (results[i].status === "fulfilled") state.picked.delete(id);
+    });
+    if (mounted()) syncBulk();
+    store.refreshNow();
+    await openDeleteConfirm(changed, MEMBERS_CHANGED_NOTICE);
+    reportDeleteResults(results.filter((_, i) => !changed.includes(ids[i])));
+    return;
+  }
   closeDeleteConfirm();
   exitSelect();
   store.refreshNow();
+  reportDeleteResults(results);
+}
+
+function reportDeleteResults(results) {
+  if (!results.length) return;
 
   // Report what the SERVER actually did, not this dialog's preview — the
   // server re-checks every depot's co-owner state immediately before
@@ -1022,40 +1189,40 @@ function buildSection() {
   // labeled button, not an icon (module header: the visible wording IS the
   // honesty guarantee — "Check & update", never "Check" — so this cannot be
   // reduced to a glyph + aria-label the way the icon buttons above are).
-  // Its own full-width row rather than squeezed into `.lib-tools`'
-  // icon-button row: that row is `flex-wrap:nowrap` and already tight with
-  // the layout segments + select button, no room for this button's full
-  // honest label at phone widths.
-  const checkRow = document.createElement("div");
-  checkRow.className = "lib-checkrow";
+  // WP WEB-FIX-UPD-VIS (user layout, 2026-10-13): both check buttons sit at
+  // the right end of the toolbar row (`.lib-bar`: search, chips, buttons),
+  // no longer in a full-width row of their own. "Check updates" is the
+  // primary (accent) button: it only asks, never downloads. "Check &
+  // update" keeps the neutral filled `.btn` look so the one that DOWNLOADS
+  // never reads as the default action.
   const checkUpdateBtn = document.createElement("button");
   checkUpdateBtn.type = "button";
-  checkUpdateBtn.className = "btn ghost sm";
+  checkUpdateBtn.className = "btn sm";
+  checkUpdateBtn.dataset.action = "check-and-update";
   const startsBusy = checkAndUpdateAction.isInFlight();
   checkUpdateBtn.disabled = startsBusy;
   checkUpdateBtn.textContent = startsBusy ? CHECK_UPDATE_BUSY_LABEL : CHECK_UPDATE_LABEL;
-  // WP UPD-2: "Check updates" (oracle only, no download) next to it, hidden
-  // until GET /v1/updates/status answered (paintUpdateCheck). Both share one
-  // wrapping row, still inside `.lib-checkrow` (six in-flow children rule).
+  // WP UPD-2: "Check updates" (oracle only, no download), hidden until
+  // GET /v1/updates/status answered (paintUpdateCheck).
   const checkUpdatesBtn = document.createElement("button");
   checkUpdatesBtn.type = "button";
-  checkUpdatesBtn.className = "btn ghost sm";
+  checkUpdatesBtn.className = "btn primary sm";
   checkUpdatesBtn.dataset.action = "check-updates";
   checkUpdatesBtn.textContent = CHECK_UPDATES_LABEL;
   checkUpdatesBtn.hidden = true;
   const checkBtns = document.createElement("div");
   checkBtns.className = "lib-checkbtns";
   checkBtns.append(checkUpdatesBtn, checkUpdateBtn);
-  checkRow.appendChild(checkBtns);
+  // The status lines under the toolbar row (small text): the UPD-2 "Updates
+  // last checked …" line and the WP WEB-FEAT-1 owned-list notice.
+  const statusBlock = document.createElement("div");
+  statusBlock.className = "lib-status";
   const updLine = document.createElement("p");
   updLine.className = "lib-upd";
   updLine.hidden = true;
-  checkRow.appendChild(updLine);
+  statusBlock.appendChild(updLine);
   // WP WEB-FEAT-1: the owned-list status line (and its Reload / Open
-  // Settings buttons) lives INSIDE `.lib-checkrow`, not as a new child of
-  // the section: `.view-library`'s BP-L grid assigns its six in-flow
-  // children an area each, by class (css/app.css), and a seventh would land
-  // in an implicit row.
+  // Settings buttons).
   const ownedNote = document.createElement("p");
   ownedNote.className = "lib-owned";
   ownedNote.hidden = true;
@@ -1065,7 +1232,7 @@ function buildSection() {
   const ownedSettingsBtn = noticeButton(NOTICE_ACTION.SETTINGS);
   const ownedReloadBtn = noticeButton(NOTICE_ACTION.RELOAD);
   ownedNote.append(ownedText, ownedSettingsBtn, ownedReloadBtn);
-  checkRow.appendChild(ownedNote);
+  statusBlock.appendChild(ownedNote);
 
   const searchWrap = document.createElement("div");
   searchWrap.className = "search";
@@ -1145,7 +1312,18 @@ function buildSection() {
   // block near the top of this file (WP 4a.8: it must be a `document.body`
   // sibling of `#app`, not a child of this per-mount `<section>`, or
   // marking `#app` inert would also make the dialog itself inert).
-  section.append(head, checkRow, searchWrap, chips, grid, hint, bulkBar);
+  // WP WEB-FIX-UPD-VIS: one toolbar row — search and chips (`.lib-filters`)
+  // on the left, the two check buttons on the right; css/app.css wraps the
+  // buttons onto their own line when the row is too narrow. DOM order is
+  // the visual and Tab order.
+  const filters = document.createElement("div");
+  filters.className = "lib-filters";
+  filters.append(searchWrap, chips);
+  const bar = document.createElement("div");
+  bar.className = "lib-bar";
+  bar.append(filters, checkBtns);
+
+  section.append(head, bar, statusBlock, grid, hint, bulkBar);
 
   els = {
     sub,
@@ -1271,13 +1449,34 @@ function currentCardKeys() {
   const map = new Map();
   if (!els) return map;
   for (const card of els.grid.querySelectorAll(".card[data-appid]")) {
-    map.set(Number(card.dataset.appid), card.dataset.dk);
+    // WP TOOL-APPS-2c: the group part (`data-gk`) is structural too.
+    map.set(Number(card.dataset.appid), `${card.dataset.dk}|${card.dataset.gk || ""}`);
   }
   return map;
 }
 
 function computeCardKey(game) {
-  return cardStructuralKey(game, liveJobsByAppid.get(game.appid));
+  return `${cardStructuralKey(game, liveJobsByAppid.get(game.appid))}|${groupCardKey(game, liveJobsByAppid)}`;
+}
+
+/**
+ * WP TOOL-APPS-2c: the raw `GET /v1/games` diff in terms of the CARDS on
+ * screen. A package's row change becomes a change of its group card; a row
+ * whose `parent_appid` changed moves between cards, so the answer is a full
+ * render (`null`). Added/removed rows pass through (planGamesUpdate renders
+ * fully for them anyway).
+ */
+function displayDiff(diff) {
+  if (!diff || diff.isFirst) return diff;
+  const byAppid = new Map(state.games.map((g) => [g.appid, g]));
+  const updated = new Map();
+  for (const { prev, curr } of diff.updated || []) {
+    if ((prev?.parent_appid ?? null) !== (curr?.parent_appid ?? null)) return null;
+    const id = state.parentOf.get(curr.appid) ?? curr.appid;
+    const row = byAppid.get(id);
+    if (row) updated.set(id, { prev: row, curr: row });
+  }
+  return { isFirst: false, added: diff.added, removed: diff.removed, updated: [...updated.values()] };
 }
 
 /** Would `game` still be part of the currently visible (search + chip
@@ -1312,6 +1511,7 @@ function rebuildCard(appid) {
     onLongPress: enterSelect,
     onToggle,
     onAction,
+    failedPackageCount: failedCountFor(game),
   });
   cardEl.replaceWith(newCard);
 }
@@ -1340,7 +1540,12 @@ function applyGamesTick(diff) {
     fullRender();
     return;
   }
-  const plan = planGamesUpdate(diff, currentCardKeys(), computeCardKey);
+  const cardDiff = displayDiff(diff);
+  if (cardDiff === null) {
+    fullRender();
+    return;
+  }
+  const plan = planGamesUpdate(cardDiff, currentCardKeys(), computeCardKey);
   if (plan.full) {
     fullRender();
     return;
@@ -1444,6 +1649,13 @@ onViewChange((view) => {
   // WEB-FIX-6): stop observing the detached bar until the next mount.
   bulkHeight.unwatch();
 });
+
+/** The update check's current phase (lib/update-check.js UPDATE_PHASE), for
+ * the bell's "update check due" entry: it may point at the "Check updates"
+ * button only while that button exists (WP WEB-FEAT-SUGGEST-2 review). */
+export function currentUpdateCheckPhase() {
+  return updateCheck.snapshot().phase;
+}
 
 export function renderLibrary() {
   const section = buildSection();

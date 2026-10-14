@@ -26,11 +26,18 @@ import org.junit.Test
 class DemoStateTest {
 
     @Test
-    fun `fresh library has six curated games, each a fictional name`() {
+    fun `fresh library has six curated games plus one content-package group, each a fictional name`() {
         val state = DemoState.fresh()
         val names = state.listGameSummaries().map { it.name }
         assertEquals(
-            listOf("Duskfall Array", "Cobalt Isthmus", "Wrenfield Static", "Halcyon Ledger", "Pale Meridian", "Marrowlight"),
+            listOf(
+                "Duskfall Array", "Cobalt Isthmus", "Wrenfield Static", "Halcyon Ledger", "Pale Meridian", "Marrowlight",
+                // WP TOOL-APPS-2d: the content-package group (DemoContentGroupTest).
+                "Emberline Cartography",
+                "Emberline Cartography - Danish Voice Pack",
+                "Emberline Cartography - Original Soundtrack",
+                "Emberline Cartography - Surveyor Outfits",
+            ),
             names,
         )
     }

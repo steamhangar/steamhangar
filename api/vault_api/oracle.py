@@ -45,12 +45,41 @@ claim must never be indistinguishable from it. Oracle facts live in their own
 two tables (``oracle_app_state``, ``oracle_branch_manifests``, schema v8),
 each row additionally carrying a ``source`` provenance tag.
 
-## The one safety invariant, stated as a promise
+## The one safety invariant, stated as a promise -- and its one exception
 
-**Oracle data can only ADD protection, never remove it.** Its single effect
-on the deletion path is that extra manifest gids join a depot's GC keep set
-(``gc.resolve_depot_chunkset``'s ``extra_manifest_ids``), and a keep set can
-only grow. Consequences, each of which is a test in ``tests/test_oracle.py``:
+**On every automatic path, oracle data can only ADD protection, never remove
+it.** Its single effect on GC and the scheduler is that extra manifest gids
+join a depot's GC keep set (``gc.resolve_depot_chunkset``'s
+``extra_manifest_ids``), and a keep set can only grow.
+
+**The exception (WP TOOL-APPS-2b, ADR-0022 §4): the user-confirmed grouped
+delete.** ``DELETE /v1/cache/{appid}?with_packages=true`` removes a game
+together with its content packages, and which apps are packages is decided
+from stored classification (``app_classification.py``), which comes from the
+store lookup or -- while the oracle is on -- from this module's stored
+``common.type`` / ``common.parent`` and a cached parent's ``listofdlc`` /
+``dlcappid`` links. So a wrong or poisoned answer CAN now widen a deletion:
+it can put another app into the delete set, and members of the set do not
+protect each other's depots. The bounds (``group_delete.py``):
+
+- only on that one request, opt-in per call (``with_packages=true``); the
+  plain delete, GC and every automatic path never read classification (the
+  plain delete builds its one-member set before any classification read);
+- the request must name exactly the members the confirmation dialog listed
+  (``members=<csv>``, taken from ``GET /v1/cache/{appid}/delete-plan``); the
+  server builds its own set and refuses with ``409`` when the two differ, so
+  no app is deleted that the user was not shown;
+- a member must have its OWN type in ``dlc``/``config``/``music``/``video``/
+  ``demo`` (store type or its own PICS ``common.type``); a ``dlc`` inferred
+  only from a parent's link list never makes an app deletable, and a child
+  typed ``game``/``application``/``tool``/unknown stays an outside owner that
+  protects its depots;
+- fixed-list tool apps (``tool_apps``) never join a delete set;
+- a depot any app OUTSIDE the delete set still protects (ADR-0003 remnant
+  rule) is kept and reported in ``skipped_shared``.
+
+The GC-side consequences below are unchanged; each is a test in
+``tests/test_oracle.py``:
 
 - with the oracle on, the planned orphan set is always a **subset** of what
   the same cache plans with the oracle off;
@@ -123,7 +152,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
-from vault_api import deletion, jobs
+from vault_api import app_classification, deletion, jobs
 from vault_api.config import (
     MANIFEST_ORACLE_STEAMCMD_API,
     Settings,
@@ -172,6 +201,9 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_DEPOTS = 1024
 MAX_BRANCHES = 256
 MAX_BRANCH_MANIFEST_ROWS = 4096
+#: Bound on the content-package links one answer may name
+#: (``extended.listofdlc`` plus depot ``dlcappid``; WP TOOL-APPS-2a).
+MAX_DLC_LINKS = 4096
 
 #: Longest accepted branch name. Steam's own are short ("public", "beta",
 #: "prerelease"); this bounds a TEXT column and a JSON response field.
@@ -329,6 +361,20 @@ class OracleAppInfo:
     skipped_password_branches: int
     #: Bounded human-readable notes about what was ignored and why.
     warnings: tuple[str, ...] = ()
+    #: WP TOOL-APPS-2a (display data only, ``app_classification.py``):
+    #: ``common.type`` mapped onto the app-type vocabulary, ``None`` if absent
+    #: or unknown.
+    app_type: str | None = None
+    #: ``common.parent`` (the game this app is content of), ``None`` if absent,
+    #: invalid or the app itself.
+    parent_appid: int | None = None
+    #: ``common.name`` as plain display text (``app_classification.
+    #: valid_app_name``: control characters dropped, capped), ``None`` if
+    #: absent.
+    name: str | None = None
+    #: The content packages this answer names for its app: ``extended.
+    #: listofdlc`` plus every depot's ``dlcappid``, sorted, self excluded.
+    dlc_appids: tuple[int, ...] = ()
 
     @property
     def depotids(self) -> tuple[int, ...]:
@@ -571,6 +617,63 @@ def _warn(warnings: list[str], message: str) -> None:
         warnings.append("... further warnings suppressed")
 
 
+def _parse_dlc_list(value: object, warnings: list[str]) -> list[int]:
+    """``extended.listofdlc``: a comma-separated string of app ids (a single
+    id may also arrive as a number). Unusable entries are skipped."""
+    if value is None:
+        return []
+    if isinstance(value, int) and not isinstance(value, bool):
+        coerced = deletion.coerce_positive_id(value)
+        return [] if coerced is None else [coerced]
+    if not isinstance(value, str):
+        _warn(warnings, "ignored 'extended.listofdlc': not a string")
+        return []
+    found: list[int] = []
+    for raw in value.split(","):
+        raw = raw.strip(" ")
+        if not raw:
+            continue
+        coerced = deletion.coerce_positive_id(raw)
+        if coerced is None:
+            _warn(warnings, f"ignored unusable listofdlc entry {raw[:32]!r}")
+            continue
+        found.append(coerced)
+    return found
+
+
+def _parse_classification(
+    appid: int, app: Mapping[str, object], warnings: list[str]
+) -> tuple[str | None, int | None, str | None, list[int]]:
+    """``common.type``, ``common.parent``, ``common.name`` and
+    ``extended.listofdlc`` (WP TOOL-APPS-2a). A missing or malformed field
+    means "unknown", never an error: grouping degrades to the flat list."""
+    app_type: str | None = None
+    parent: int | None = None
+    name: str | None = None
+    common = app.get("common")
+    if isinstance(common, dict):
+        app_type = app_classification.app_type_from_pics(common.get("type"))
+        name = app_classification.valid_app_name(common.get("name"))
+        raw_parent = common.get("parent")
+        if isinstance(raw_parent, (str, int)) and not isinstance(raw_parent, bool):
+            parent = deletion.coerce_positive_id(raw_parent)
+        if parent == appid:
+            parent = None
+    extended = app.get("extended")
+    dlc: list[int] = []
+    if isinstance(extended, dict):
+        dlc = _parse_dlc_list(extended.get("listofdlc"), warnings)
+    return app_type, parent, name, dlc
+
+
+def _bounded_links(appid: int, links: Iterable[int], warnings: list[str]) -> tuple[int, ...]:
+    unique = sorted({link for link in links if link != appid})
+    if len(unique) > MAX_DLC_LINKS:
+        _warn(warnings, f"more than {MAX_DLC_LINKS} content-package links: the rest were ignored")
+        unique = unique[:MAX_DLC_LINKS]
+    return tuple(unique)
+
+
 def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
     """Validate one raw app-info response into an ``OracleAppInfo``.
 
@@ -585,6 +688,7 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
     app = _app_object(appid, document)
 
     warnings: list[str] = []
+    app_type, parent_appid, name, dlc_links = _parse_classification(appid, app, warnings)
     depots = app.get("depots")
     if not isinstance(depots, dict):
         _warn(warnings, "no usable 'depots' object: nothing was recorded")
@@ -595,6 +699,10 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
             open_branches=(),
             skipped_password_branches=0,
             warnings=tuple(warnings),
+            app_type=app_type,
+            parent_appid=parent_appid,
+            name=name,
+            dlc_appids=_bounded_links(appid, dlc_links, warnings),
         )
 
     open_state, buildid = _parse_branches(depots.get("branches"), warnings)
@@ -618,6 +726,19 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
         if not isinstance(raw_depot, dict):
             _warn(warnings, f"ignored depot {depotid}: not an object")
             continue
+        # WP TOOL-APPS-2a: a depot that belongs to a DLC names it, whether or
+        # not the depot has manifests of its own.
+        raw_dlc = raw_depot.get("dlcappid")
+        if raw_dlc is not None:
+            dlc = (
+                deletion.coerce_positive_id(raw_dlc)
+                if isinstance(raw_dlc, (str, int))
+                else None
+            )
+            if dlc is None:
+                _warn(warnings, f"ignored unusable dlcappid of depot {depotid}")
+            else:
+                dlc_links.append(dlc)
         manifests = raw_depot.get("manifests")
         if not isinstance(manifests, dict):
             # Perfectly normal: DLC-only and shared-install depots carry no
@@ -661,6 +782,10 @@ def parse_app_info(appid: int, payload: bytes) -> OracleAppInfo:
         open_branches=tuple(sorted(n for n, is_open in open_state.items() if is_open)),
         skipped_password_branches=skipped_password,
         warnings=tuple(warnings),
+        app_type=app_type,
+        parent_appid=parent_appid,
+        name=name,
+        dlc_appids=_bounded_links(appid, dlc_links, warnings),
     )
 
 
@@ -703,14 +828,18 @@ def store_app_info(
         conn.execute(
             """
             INSERT INTO oracle_app_state
-                (appid, buildid, checked_at, source, depot_count, branch_count)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (appid, buildid, checked_at, source, depot_count, branch_count,
+                 app_type, parent_appid, name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (appid) DO UPDATE SET
                 buildid      = excluded.buildid,
                 checked_at   = excluded.checked_at,
                 source       = excluded.source,
                 depot_count  = excluded.depot_count,
-                branch_count = excluded.branch_count
+                branch_count = excluded.branch_count,
+                app_type     = excluded.app_type,
+                parent_appid = excluded.parent_appid,
+                name         = excluded.name
             """,
             (
                 info.appid,
@@ -719,7 +848,19 @@ def store_app_info(
                 source,
                 len(info.depotids),
                 len(info.open_branches),
+                info.app_type,
+                info.parent_appid,
+                info.name,
             ),
+        )
+        # WP TOOL-APPS-2a: the content-package links, same snapshot semantics.
+        conn.execute("DELETE FROM oracle_dlc_links WHERE appid = ?", (info.appid,))
+        conn.executemany(
+            """
+            INSERT INTO oracle_dlc_links (appid, dlc_appid, recorded_at, source)
+            VALUES (?, ?, ?, ?)
+            """,
+            [(info.appid, dlc, checked_at, source) for dlc in info.dlc_appids],
         )
 
 
@@ -1078,4 +1219,5 @@ def clear_app(conn: sqlite3.Connection, appid: int) -> None:
     """
     with jobs.immediate_transaction(conn):
         conn.execute("DELETE FROM oracle_branch_manifests WHERE appid = ?", (appid,))
+        conn.execute("DELETE FROM oracle_dlc_links WHERE appid = ?", (appid,))
         conn.execute("DELETE FROM oracle_app_state WHERE appid = ?", (appid,))

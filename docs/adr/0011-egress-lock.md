@@ -732,3 +732,13 @@ Related decision recorded with it (user, 2026-10-13): the stored covers are
 served at `GET /v1/covers/{appid}/{signature}` with an HMAC of the API key
 in the path instead of the `X-Api-Key` header (an `<img>` cannot send one),
 accepted as a documented exception to plan §9 (api/README.md "Auth").
+
+## Note 2026-10-13 (WP TOOL-APPS-2a/2b): no egress change
+
+Content-package grouping (ADR-0022) changes no host, filter or allowlist.
+The cover-art lookup on the baked-in `api.steampowered.com` now sets two
+more `data_request` flags (`include_basic_info`, `include_related_items`)
+in the same `GetItems` request; the app ids sent are unchanged. The manifest
+oracle is not asked about any additional app (ADR-0022 Q8 B: classification
+uses the answers the update check already fetches for cached apps), so the
+2026-10-13 addendum's "it receives the cached app ids" stays true as written.

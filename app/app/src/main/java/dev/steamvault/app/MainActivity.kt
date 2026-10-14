@@ -560,7 +560,7 @@ class MainActivity : ComponentActivity() {
         }
         SettingsScreen(
             controller = controller,
-            onSignInSteamClick = { launchSteamLogin(controller.buildSteamLoginUrl()) },
+            onSignInSteamClick = { controller.buildSteamLoginUrl()?.let { launchSteamLogin(it) } },
             onReconnectClick = { openOnboarding(OnboardingMode.RECONNECT) },
             onDisconnected = {
                 refreshVaultApiClient()

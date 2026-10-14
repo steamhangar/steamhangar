@@ -196,7 +196,12 @@ def test_fetch_items_sends_exactly_the_keyless_getitems_request(monkeypatch) -> 
     assert json.loads(query["input_json"][0]) == {
         "ids": [{"appid": 730}, {"appid": 3527290}],
         "context": {"language": "english", "country_code": "US"},
-        "data_request": {"include_assets": True},
+        # WP TOOL-APPS-2a: two more flags, same ids, still no key/steamid.
+        "data_request": {
+            "include_assets": True,
+            "include_basic_info": True,
+            "include_related_items": True,
+        },
     }
 
 

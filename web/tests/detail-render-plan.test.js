@@ -103,3 +103,11 @@ test("a pre-AG-2 call site (no installedBadge field at all) still matches an exp
   const { installedBadge, ...withoutField } = { ...base, installedBadge: "none" };
   assert.equal(buildDetailStructuralKey(withoutField), buildDetailStructuralKey({ ...base, installedBadge: "none" }));
 });
+
+test("MUTATION TARGET -- WP UPD-6: the update part changes the key; an empty one leaves every other game's key as before", () => {
+  const plain = buildDetailStructuralKey(base);
+  assert.equal(buildDetailStructuralKey({ ...base, updates: "" }), plain, "empty part: key unchanged");
+  const flagged = buildDetailStructuralKey({ ...base, updates: "1:10" });
+  assert.notEqual(flagged, plain);
+  assert.notEqual(buildDetailStructuralKey({ ...base, updates: "1:" }), flagged, "a job taking the id out changes it too");
+});

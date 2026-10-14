@@ -46,6 +46,8 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.ui.downloads.logic.countPending
 import dev.steamvault.app.ui.library.logic.LibraryLayout
+import dev.steamvault.app.ui.library.logic.NEVER_PLAYED_COMPACT_LABEL
+import dev.steamvault.app.ui.library.logic.NEVER_PLAYED_LABEL
 import dev.steamvault.app.ui.nav.Destination
 import dev.steamvault.app.ui.nav.MainShell
 import dev.steamvault.app.ui.theme.SteamVaultTheme
@@ -142,6 +144,12 @@ class LibraryScreenshotTest {
 
     @Test
     fun library_411dp_font100_night() = shoot("library_411dp_font100_night", PIXEL_411, night = true)
+
+    // WP TOOL-APPS-2d review: the 3-column grid, where the "Never played"
+    // pill reads "Unplayed".
+    @Test
+    fun library_411dp_font100_grid3() =
+        shoot("library_411dp_font100_grid3", PIXEL_411, layout = LibraryLayout.GRID_3)
 
     @Test
     fun library_360dp_font130_list() =
@@ -260,7 +268,12 @@ class LibraryScreenshotTest {
         val badges = composeRule
             .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
             .fetchSemanticsNodes()
+        // WP TOOL-APPS-2d: the "Never played" pill rides on the cover too.
+        val playPills = composeRule
+            .onAllNodes(hasTestTag(NEVER_PLAYED_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
         assertTrue("no fallback titles rendered", titles.isNotEmpty())
+        assertContentPackages(layout)
         val grid = layout != LibraryLayout.LIST
         if (grid) {
             assertTrue("no capsule pills rendered", pills.isNotEmpty())
@@ -274,7 +287,11 @@ class LibraryScreenshotTest {
             }
         }
         // A node scrolled fully out of the viewport reports empty bounds.
-        val overlays = (pills.map { "capsule pill" to it } + badges.map { "update badge" to it })
+        val overlays = (
+            pills.map { "capsule pill" to it } +
+                badges.map { "update badge" to it } +
+                (if (grid) playPills.map { "never-played pill" to it } else emptyList())
+            )
             .filterNot { (_, node) -> node.boundsInRoot.isEmpty }
         for (title in titles.filterNot { it.boundsInRoot.isEmpty }) {
             val rendered = renderedTextBounds(title)
@@ -298,6 +315,65 @@ class LibraryScreenshotTest {
                 badgeLayout.lineCount == 1 && !badgeLayout.isLineEllipsized(0),
             )
             if (expectedBadgeText != null) assertEquals("update badge label", expectedBadgeText, text)
+        }
+    }
+
+    /**
+     * WP TOOL-APPS-2d, in every profile: the group card carries "+2 content
+     * packages · 1 failed" (one spoken label), its packages are not cards of
+     * their own, and the Lighthouse Keeper game (cached, owned playtime 0) shows "Never
+     * played" -- spoken "Fully cached, never played".
+     */
+    private fun assertContentPackages(layout: LibraryLayout) {
+        assertEquals(
+            "group lines rendered",
+            1,
+            composeRule.onAllNodes(hasTestTag(GROUP_PACKAGES_LINE_TAG), useUnmergedTree = true).fetchSemanticsNodes().size,
+        )
+        // Review fix (360 dp / 1.3 showed "+2 content packages · 1 fai"):
+        // both units are present and neither is clipped or ellipsized.
+        val units = composeRule
+            .onAllNodes(hasTestTag(GROUP_LINE_TEXT_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        assertEquals("group line units", listOf("+2 content packages", "· 1 failed"), units.map { it.text() })
+        for (unit in units) assertNotClipped("group line unit", unit)
+
+        // "Never played": the full label or "Unplayed", never "Never …";
+        // the 3-column grid always says "Unplayed".
+        val play = composeRule
+            .onAllNodes(hasTestTag(NEVER_PLAYED_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        assertTrue("no Never played pill/label rendered", play.isNotEmpty())
+        for (node in play) {
+            val text = node.text()
+            when (layout) {
+                LibraryLayout.GRID_3 -> assertEquals("3-column pill", NEVER_PLAYED_COMPACT_LABEL, text)
+                LibraryLayout.LIST -> assertEquals("list label", NEVER_PLAYED_LABEL, text)
+                else -> assertTrue("pill reads '$text'", text == NEVER_PLAYED_LABEL || text == NEVER_PLAYED_COMPACT_LABEL)
+            }
+            assertNotClipped("never-played '$text'", node)
+        }
+        assertEquals(
+            "a content package must not be a card of its own",
+            0,
+            composeRule
+                .onAllNodes(hasContentDescription("Expedition Pass", substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .size,
+        )
+    }
+
+    /** Every line of [node]'s text fits its node: no ellipsis, and the
+     * line's laid-out right edge (unconstrained when softWrap is off) is
+     * inside the text's own width -- a clipped "1 fai" fails here. */
+    private fun assertNotClipped(what: String, node: SemanticsNode) {
+        val layout = textLayout(node)
+        for (line in 0 until layout.lineCount) {
+            assertFalse("$what: line $line is ellipsized", layout.isLineEllipsized(line))
+            assertTrue(
+                "$what: line $line ends at ${layout.getLineRight(line)}px, past the text's ${layout.size.width}px",
+                layout.getLineRight(line) <= layout.size.width + 0.5f,
+            )
         }
     }
 
