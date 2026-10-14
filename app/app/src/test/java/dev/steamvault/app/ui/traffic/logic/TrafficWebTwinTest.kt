@@ -100,8 +100,6 @@ class TrafficWebTwinTest {
             "lib/clients-page.js",
             listOf(
                 "No agent · seen in the cache log",
-                // WP D15-NAMES: the unnamed agent's prefix.
-                "vault-agent",
                 // WP D15-RUNNER: the runner's line without an address.
                 "This server's prefill downloads",
                 "Connected",
@@ -118,7 +116,15 @@ class TrafficWebTwinTest {
             "lib/clients-page.js",
             listOf(
                 // WP D15-NAMES: "vault-agent" or "vault-agent on <PC>" + the rest.
-                "`vault-agent on \${isolate(client.client_id)}`",
+                // The unnamed prefix is pinned as the ternary's else-branch
+                // (`: "vault-agent";`), not as a bare quoted "vault-agent":
+                // that word alone would still match after the unnamed branch
+                // changed, as long as any other quoted "vault-agent" remained.
+                "`vault-agent on \${isolate(client.client_id)}` : \"vault-agent\";",
+                // WP D15-NAMES: clientName checks display_name FIRST (Kotlin
+                // `clientName`, pinned in ClientsPageTest); this fragment
+                // fails if the web moves another rule ahead of it.
+                "export function clientName(client) {\n  if (typeof client.display_name === \"string\" && client.display_name) return client.display_name;",
                 "`\${agent} · \${addrs.join(\", \")}`",
                 "`\${agent} · no address in the cache log`",
                 "`No agent · \${addrs.join(\", \")} · seen in the cache log`",
