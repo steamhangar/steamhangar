@@ -1392,6 +1392,14 @@ while [ "$i" -lt 30 ]; do
     i=$((i + 1)); sleep 2
 done
 assert_eq "healthy" "$core_h" "vault-core is healthy again after enabling VAULT_EVENT_LOG"
+# WP D15-ROT: the shipped image starts its rotation loop with the decided
+# default (64 MiB, one old file), and the loop is a child of PID 1 (the
+# nginx master reaps it; no second init). The rotation itself is proven
+# live with a tiny threshold in .github/scripts/verify-core-nginx.sh.
+rot_boot=$(dc logs --no-log-prefix vault-core 2>/dev/null | grep '^45-vault-eventlog-rotate.sh: rotating ' | tail -n 1)
+assert_contains "$rot_boot" "rotating /vault/logs/event.log at 67108864 bytes into /vault/logs/event.log.1 (one old file kept), checked every 60s" "vault-core starts the event-log rotation loop with the 64 MiB default (D15-ROT)"
+rot_ps=$(dc exec -T vault-core sh -c 'ps -o ppid,args | grep "[4]5-vault-eventlog-rotate.sh" | head -n 1' 2>&1 | tr -d '\r')
+assert_eq "1" "$(printf '%s' "$rot_ps" | awk '{print $1}')" "the rotation loop runs as a child of PID 1, the nginx master (D15-ROT)"
 
 say ''
 say 'Removing the object 5e already cached, so the next request is a genuine MISS'

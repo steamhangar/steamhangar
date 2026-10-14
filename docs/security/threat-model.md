@@ -1064,7 +1064,20 @@ following the shipped `.env.example` has this on, not off.
 review S3, inside a `logs/` directory that belongs to root since WP
 SEC-FIX-5 (§9) — and turns it into the derived, API-key-gated
 summaries at `GET /v1/clients` and `GET /v1/stats`. Nothing serves the raw
-log file itself over HTTP. At the filesystem level, whoever can read the
+log file itself over HTTP.
+
+**How much raw history it holds (WP D15-ROT):** bounded. vault-core renames
+the log to `event.log.1` at 64 MiB and keeps that ONE old file
+(`core/docker/45-vault-eventlog-rotate.sh`), so at most about 128 MiB of
+raw lines — client address, time, depot, Host per request — sit on the
+volume, i.e. the last few hundred thousand requests, not the whole history.
+Before, the raw file grew without bound wherever vault-api's truncation was
+denied (measured on a production instance, 2026-10-13). The rotation runs as
+root inside the root-only `logs/` directory (§9 / SEC-FIX-5: no other uid
+can swap a name there), signals only a process whose cmdline reads
+`nginx: master process`, and creates the fresh file 101:101 like the start
+hook does. The derived per-client rows in vault-api's database have their
+own retention (`VAULT_CLIENT_STATS_KEEP`), unchanged by this. At the filesystem level, whoever can read the
 shared Docker volume on the host can read the raw file directly — the same
 host-level trust boundary as §3's Steam session and §3's relay key; this
 document does not repeat that caveat as a new finding each time it
