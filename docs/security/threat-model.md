@@ -870,8 +870,9 @@ that vault-api makes on every install with no switch:**
    `none` turns it off. While it is on, `vault-api` sends the Steam
    **app id of every cached game** to a third party over HTTPS, in the
    background every `VAULT_SCHEDULE_INTERVAL_MINUTES` (the update check;
-   it runs when a schedule window is configured, open or closed, and not at
-   all without one) and on every manual check —
+   since WP UPD-5 it runs whenever the oracle is on, with or without a
+   schedule window, so the oracle switch is the only off switch) and on
+   every manual check —
    default `api.steamcmd.net`
    (`api/vault_api/oracle.py`'s module docstring, its "Privacy" section:
    "this is the one thing in SteamHangar

@@ -1,13 +1,14 @@
-"""The always-on update check (WP UPD-1, user decision 2026-10-13).
+"""The always-on update check (WP UPD-1, user decision 2026-10-13; WP UPD-5,
+user decision 2026-10-14).
 
 Two triggers, one background runner (``UpdateCheckRunner``):
 
 * the scheduler tick (``trigger="scheduled"``), once per
-  ``VAULT_SCHEDULE_INTERVAL_MINUTES``, **while a schedule window is
-  configured, open or closed** — a vault whose window is currently closed
-  still learns which cached games have an update; a vault with no window at
-  all (the dev instance) never checks on its own (review round 2, "only prod
-  checks");
+  ``VAULT_SCHEDULE_INTERVAL_MINUTES``, **whenever the oracle is on** — with a
+  schedule window open, closed or not configured at all (WP UPD-5 supersedes
+  the UPD-1 review-round-2 window gate: the dev instance, which has no
+  window, now checks in the background too; anonymous metadata, approved by
+  the user 2026-10-14);
 * ``POST /v1/updates/check`` (``trigger="manual"``, ``routers/updates.py``),
   on demand, not interval-limited.
 
@@ -25,11 +26,11 @@ current public manifest differs from the one vault-api recorded for the cache
 
 **What leaves the LAN.** A run talks to the manifest oracle and nothing else,
 one request per cached game (``POST /v1/oracle/{appid}/refresh`` is the
-single-app equivalent). ``VAULT_MANIFEST_ORACLE`` gates both triggers: with
-the oracle off, nothing runs, nothing is stamped, and the API says
-``enabled: false``; there is no fallback source. The scheduled trigger
-additionally needs a configured schedule window. Fetching is injectable
-(``fetch``) so no test ever touches the network.
+single-app equivalent). ``VAULT_MANIFEST_ORACLE`` gates both triggers, and it
+is the ONLY switch: with the oracle off, nothing runs, nothing is stamped, and
+the API says ``enabled: false``; there is no fallback source. The schedule
+window plays no part in the check (WP UPD-5); it only bounds downloads.
+Fetching is injectable (``fetch``) so no test ever touches the network.
 
 **Fail-soft and polite.** ``refresh_app`` never raises; a failed app keeps its
 previous snapshot. A dead oracle is not hammered once per cached game: after
@@ -85,10 +86,6 @@ STARTED = "started"
 ALREADY_RUNNING = "already-running"
 DISABLED = "oracle-disabled"
 INTERVAL_NOT_ELAPSED = "interval-not-elapsed"
-#: Scheduled trigger only: no schedule window is configured (WP UPD-1 review
-#: round 2, "only prod checks": a vault without a window, like the dev
-#: instance, never checks on its own; the manual trigger still works).
-NO_SCHEDULE_WINDOW = "no-schedule-window"
 #: The runner was stopped (shutdown): nothing new starts.
 STOPPING = "stopping"
 
@@ -231,7 +228,8 @@ def describe_update_check(settings: Settings) -> str:
     """The line saying whether the check is on (like
     ``scheduler.describe_resolved_schedule``); the scheduler logs it on its
     first tick and again whenever the answer changes (a window set or cleared
-    through ``PATCH /v1/settings``)."""
+    through ``PATCH /v1/settings`` changes the download half of the line, not
+    whether the check runs: WP UPD-5)."""
     if not settings.manifest_oracle_enabled:
         return (
             "Update check: OFF (VAULT_MANIFEST_ORACLE=off). No oracle request "
@@ -239,16 +237,19 @@ def describe_update_check(settings: Settings) -> str:
         )
     host = urlsplit(settings.manifest_oracle_url).hostname or settings.manifest_oracle_url
     if settings.schedule_window is None:
-        return (
-            "Update check: scheduled checks off, no schedule window; manual "
-            f"check available (POST /v1/updates/check asks the oracle at {host})."
+        downloads = (
+            "no schedule window is configured, so no automatic download starts"
+        )
+    else:
+        downloads = (
+            "downloads still only start inside the schedule window "
+            f"({settings.schedule_window.raw})"
         )
     return (
         f"Update check: ON (manifest oracle {settings.manifest_oracle!r} at "
-        f"{host}). Every {settings.schedule_interval_minutes} minute(s) while "
-        f"a schedule window is configured ({settings.schedule_window.raw}, "
-        "open or closed), each cached game's app id is sent to the oracle; "
-        "downloads still only start inside the window. Set "
+        f"{host}). Every {settings.schedule_interval_minutes} minute(s), with "
+        "or without a schedule window, each cached game's app id is sent to "
+        f"the oracle (metadata only); {downloads}. Set "
         "VAULT_MANIFEST_ORACLE=off to stop all oracle requests."
     )
 
@@ -465,14 +466,13 @@ class UpdateCheckRunner:
         require_interval: bool,
     ) -> str:
         """Start a run in the background; returns ``STARTED``,
-        ``ALREADY_RUNNING``, ``DISABLED``, ``STOPPING``,
-        ``NO_SCHEDULE_WINDOW`` (scheduled trigger only) or
+        ``ALREADY_RUNNING``, ``DISABLED``, ``STOPPING`` or
         ``INTERVAL_NOT_ELAPSED``.
 
-        The scheduled trigger runs only while a schedule window is configured
-        (``settings.schedule_window``, the tick's effective settings, so a
-        window set later through ``PATCH /v1/settings`` enables it without a
-        restart); whether that window is open right now does not matter.
+        The schedule window is not consulted (WP UPD-5, user decision
+        2026-10-14): the scheduled trigger runs whenever the oracle is on,
+        with or without a window. Only the oracle switch, the stop flag, the
+        interval (``require_interval``) and the run lock gate a start.
 
         ``conn`` is the CALLER's connection and is only used for the claim.
         With ``require_interval`` (the scheduler) the cheap interval read comes
@@ -484,8 +484,6 @@ class UpdateCheckRunner:
             return DISABLED
         if self._stop.is_set():
             return STOPPING
-        if trigger == TRIGGER_SCHEDULED and settings.schedule_window is None:
-            return NO_SCHEDULE_WINDOW
         interval = settings.schedule_interval_minutes if require_interval else None
         if interval is not None and not _interval_elapsed(
             read_last_check_at(conn), now, interval

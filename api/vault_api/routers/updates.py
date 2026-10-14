@@ -32,7 +32,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
-from vault_api import deletion, settings_store, tool_apps, update_check
+from vault_api import deletion, tool_apps, update_check
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import (
@@ -60,9 +60,11 @@ class UpdateCheckStatusOut(BaseModel):
     #: ``false`` iff ``VAULT_MANIFEST_ORACLE=off``: no check runs, scheduled or
     #: manual, and no game is flagged.
     enabled: bool
-    #: Scheduled checks are on: the oracle is on AND a schedule window is
-    #: configured (open or closed; the effective value, so a window set via
-    #: ``PATCH /v1/settings`` counts at once). ``false`` = only manual checks.
+    #: Scheduled (background) checks are on. Since WP UPD-5 (user decision
+    #: 2026-10-14) this is the same as ``enabled``: the check runs every
+    #: ``VAULT_SCHEDULE_INTERVAL_MINUTES`` whenever the oracle is on, with or
+    #: without a schedule window (the window only bounds downloads). Kept as
+    #: its own field so clients written against UPD-1 keep working.
     scheduled: bool
     #: A check is in flight right now.
     running: bool
@@ -162,12 +164,11 @@ def update_status(
     running_before = runner.running
     with open_db() as conn:
         row_status = update_check.read_status(conn, settings, running=True)
-        window = settings_store.effective_settings(conn, settings).schedule_window
     running = running_before or runner.running
     current = row_status if running else update_check.settle_status(row_status)
     return UpdateCheckStatusOut(
         enabled=current.enabled,
-        scheduled=current.enabled and window is not None,
+        scheduled=current.enabled,
         running=current.running,
         last_trigger=current.last_trigger,  # type: ignore[arg-type]
         last_started_at=current.last_started_at,
