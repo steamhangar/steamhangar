@@ -628,6 +628,44 @@ def test_announce_without_a_cache_sends_nothing_and_stores_no_token(
     assert conn.execute("SELECT COUNT(*) FROM runner_marks").fetchone()[0] == 0
 
 
+def test_a_failed_discovery_is_cached_for_five_minutes(conn: sqlite3.Connection) -> None:
+    """A run of jobs without a reachable cache must not pay the full
+    discovery (up to 4 x 3 s) per job: the negative result is reused for
+    NEGATIVE_CACHE_SECONDS, then discovery runs again."""
+    assert runner_mark.NEGATIVE_CACHE_SECONDS == 300.0
+    clock = [1000.0]
+    lookups: list[str] = []
+
+    def resolve(host: str) -> str | None:
+        lookups.append(host)
+        return None
+
+    def announce() -> str:
+        return runner_mark.announce(
+            conn, "r", resolve=resolve, names=["localhost"], clock=lambda: clock[0]
+        ).state
+
+    assert announce() == "no-cache" and lookups == ["localhost"]
+    clock[0] += 299.0
+    assert announce() == "no-cache-cached" and lookups == ["localhost"]
+    clock[0] += 1.0
+    assert announce() == "no-cache" and lookups == ["localhost", "localhost"]
+
+
+def test_a_found_cache_is_not_cached(conn: sqlite3.Connection) -> None:
+    net = FakeNet(
+        names={"localhost": "127.0.0.1"},
+        answers={
+            ("127.0.0.1", "/lancache-heartbeat"): HEARTBEAT_OK,
+            ("127.0.0.1", "mark"): MARK_OK,
+        },
+    )
+    for _ in range(2):
+        outcome = runner_mark.announce(conn, "r", resolve=net.resolve, fetch=net.fetch, names=["localhost"])
+        assert outcome.state == "sent"
+    assert [p for _i, _o, p in net.requests].count("/lancache-heartbeat") == 2
+
+
 def test_announce_against_an_old_vault_core_reports_not_supported(
     conn: sqlite3.Connection,
 ) -> None:

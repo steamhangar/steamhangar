@@ -4734,7 +4734,8 @@ host's NAT). So the runner says it (user decision 2026-10-14, option B):
    status `RUNNER` (core/README.md "The runner marker"). Fail-soft: no
    cache, a database error, a refused connection or an older vault-core
    (404, no `X-SteamHangar-Runner-Mark` header) are logged and the prefill
-   runs unmarked.
+   runs unmarked. When no cache was found, discovery is skipped for the
+   next 5 minutes (a queue of jobs does not pay up to 4 x 3 s each).
 2. **Sweep.** A `RUNNER` line is not traffic. In the cursor transaction it
    is accepted only if its token is in `runner_marks`, unused, and the
    line's time lies between 5 minutes before and 1 hour after the token
@@ -4742,7 +4743,11 @@ host's NAT). So the runner says it (user decision 2026-10-14, option B):
    tokens are counted and logged (one WARNING per sweep). **Spoofing:**
    the runner never held an API key; its credential is write access to the
    shared database, which a LAN host does not have. A forged marker
-   therefore marks nothing -- not even the sender itself.
+   therefore marks nothing. One exception: if another LanCache-compatible
+   host on the LAN wins discovery instead of vault-core, it receives an
+   unused token and can replay it to vault-core within the hour to flag
+   itself as the runner. That only hides its own traffic from the client
+   figures, and SteamPrefill would download through that host anyway.
 3. **Identity and expiry.** Each accepted marker extends a period of its
    address in `runner_address_periods`; a marker more than 7 days after
    the period's last one opens a new period. Rows of that address count as
@@ -4763,9 +4768,10 @@ Limits, stated honestly: traffic from before the first accepted marker
 (an install upgraded from an older build) stays with its address; if the
 runner's address is also a real client's (both reach vault-core through
 the same NAT, e.g. the Docker host itself), that client's traffic inside a
-window counts as the runner's -- vault-core sees one address; on the first
-day of a period, earlier traffic of that address the same day counts as
-the runner's; nothing is marked while the event log is off. The
+window counts as the runner's -- vault-core sees one address; nothing is
+marked while the event log is off. On the day the runner first marks a new
+address, traffic that address carried earlier that same day also counts as
+the runner's. The
 miss-triggered prefill still sees the runner's own MISS lines (a running
 job dedupes them). `GET /v1/clients` (agent clients) is unchanged.
 

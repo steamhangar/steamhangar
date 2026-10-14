@@ -107,7 +107,7 @@ def _no_host_routes_in_tests(monkeypatch, tmp_path) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_runner_mark_network_in_tests(monkeypatch) -> None:
+def _no_runner_mark_network_in_tests(monkeypatch):
     """WP D15-RUNNER: every prefill (runner and subprocess worker) first
     looks for vault-core by name and sends a marker request. Make every name
     unresolvable so no test does real DNS or HTTP to the host's port 80;
@@ -115,6 +115,9 @@ def _no_runner_mark_network_in_tests(monkeypatch) -> None:
     from vault_api import runner_mark
 
     monkeypatch.setattr(runner_mark, "resolve_v4", lambda host: None)
+    runner_mark.reset_negative_cache()
+    yield
+    runner_mark.reset_negative_cache()
 
 
 @pytest.fixture

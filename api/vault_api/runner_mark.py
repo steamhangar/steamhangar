@@ -20,7 +20,9 @@ in subprocess mode) calls :func:`announce`:
 **Never raises, never blocks a download for long.** Every step is
 fail-soft: no cache found, a database error, a refused connection or an old
 vault-core without the marker location (it answers 404) are logged once and
-the prefill runs unmarked -- the only loss is that its traffic counts as an
+the prefill runs unmarked -- a "no cache found" is remembered for
+:data:`NEGATIVE_CACHE_SECONDS` so a queue of jobs does not repeat the
+lookup each time -- the only loss is that its traffic counts as an
 ordinary client, exactly as before this package. Each HTTP step has a
 :data:`HTTP_TIMEOUT_SECONDS` timeout; name resolution uses the system
 resolver (the same one SteamPrefill uses).
@@ -37,6 +39,8 @@ import ipaddress
 import logging
 import socket
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -57,6 +61,24 @@ MARK_HEADER = "X-SteamHangar-Runner-Mark"
 
 HTTP_PORT = 80
 HTTP_TIMEOUT_SECONDS = 3.0
+
+#: After a discovery that found no cache, :func:`announce` skips discovery
+#: for this long: a run of queued jobs on an install without a reachable
+#: cache would otherwise pay up to four candidates x 3 s per job. Only the
+#: negative result is cached; a found cache is looked up again every time
+#: (it is cheap, and the route may change).
+NEGATIVE_CACHE_SECONDS = 300.0
+
+_negative_lock = threading.Lock()
+#: ``time.monotonic()`` value until which discovery is skipped, or ``None``.
+_negative_until: float | None = None
+
+
+def reset_negative_cache() -> None:
+    """Forget a cached "no cache found" (tests, and nothing else)."""
+    global _negative_until
+    with _negative_lock:
+        _negative_until = None
 
 _PRIVATE_V4 = tuple(
     ipaddress.IPv4Network(net)
@@ -148,7 +170,8 @@ def find_cache(
 
 @dataclass(frozen=True)
 class AnnounceOutcome:
-    #: "sent" | "no-cache" | "db-error" | "unreachable" | "not-supported"
+    #: "sent" | "no-cache" | "no-cache-cached" (skipped, see
+    #: NEGATIVE_CACHE_SECONDS) | "db-error" | "unreachable" | "not-supported"
     state: str
     cache_ip: str | None = None
 
@@ -161,15 +184,28 @@ def announce(
     fetch: Fetcher | None = None,
     port: int = HTTP_PORT,
     names: list[str] | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> AnnounceOutcome:
     """Send one marker through vault-core. Never raises (module docstring)."""
+    global _negative_until
     fetch = fetch if fetch is not None else http_get
+    now = clock()
+    with _negative_lock:
+        skip = _negative_until is not None and now < _negative_until
+    if skip:
+        logger.info(
+            "runner mark: no cache was found less than %.0fs ago; prefilling "
+            "unmarked without looking again.", NEGATIVE_CACHE_SECONDS,
+        )
+        return AnnounceOutcome("no-cache-cached")
     try:
         ip = find_cache(resolve=resolve, fetch=fetch, port=port, names=names)
     except Exception:  # noqa: BLE001 - a marker must never stop a prefill
         logger.exception("runner mark: cache discovery failed; prefilling unmarked")
         return AnnounceOutcome("no-cache")
     if ip is None:
+        with _negative_lock:
+            _negative_until = now + NEGATIVE_CACHE_SECONDS
         logger.warning(
             "runner mark: no candidate answered %s with %s (the same check "
             "SteamPrefill makes); prefill traffic will count as an ordinary "

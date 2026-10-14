@@ -34,10 +34,9 @@ time. That is the runner's existing credential, reused: the runner never
 held an API key (``prefill_runner.main``, ``require_api_key=False``); what
 it has that a LAN host lacks is write access to the shared SQLite file. A
 token is consumed by its first valid line, so replaying a token read from a
-log later does nothing. A guessed or stale token is counted and ignored. The
-worst case of a forged marker would be a LAN host flagging ITSELF as the
-runner (hiding its own traffic from the client figures); with the token that
-is not reachable either.
+log later does nothing. A guessed or stale token is counted and ignored. A
+host that never sees a token cannot mark anything, not even itself. One host
+does see one (next section).
 
 How long an address stays the runner
 ------------------------------------
@@ -70,6 +69,14 @@ What this does NOT do
   vault-core through the same NAT, e.g. the host itself), that client's
   traffic inside the window counts as the runner's. vault-core sees one
   address; nothing can split it.
+* It does not stop the host that WINS discovery from flagging itself. The
+  runner sends the token to whatever LanCache-compatible host answers the
+  heartbeat first. If that is another LAN machine rather than vault-core,
+  that machine receives an unused token and can replay it to vault-core
+  within :data:`MARK_VALID_AFTER` (1 h) to flag its own address as the
+  runner. The effect is limited to hiding that host's OWN traffic from the
+  client figures. SteamPrefill would download through that host anyway,
+  because it uses the same discovery.
 * No marker reaches vault-api while the event log is off
   (``VAULT_EVENT_LOG`` unset) -- like every D15 figure.
 """
