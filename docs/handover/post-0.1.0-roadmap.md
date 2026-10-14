@@ -608,6 +608,18 @@ truncated); one line per row where it fits, same columns in every row,
 column headers optional. Check at 360/768/1440 px; same idea for the
 Android list row.
 
+**CACHE-COMPLETE-1 (api + web + app, rc17; user report 2026-10-14):**
+Timberborn flipped from "Not cached" to "Cached" seconds after Demon
+started its update, although 1.3 GB could not have arrived: "cached"
+today only means size_bytes > 0 (hasVisibleCacheContent). User decision:
+both stages. (1) Completeness: vault-api compares the bytes on disk with
+the current build's manifest size per depot (manifest archive / oracle
+data) and exposes a completeness figure; cards show "Partially cached
+N %" and only 100 % gets the green check. (2) "Verify" action per game:
+the runner re-validates the game (non-forced prefill / SteamPrefill
+verify path — check what SteamPrefill offers) and fetches missing or
+damaged chunks; progress in Downloads.
+
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
 vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
