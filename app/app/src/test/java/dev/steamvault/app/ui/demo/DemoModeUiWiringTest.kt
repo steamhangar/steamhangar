@@ -39,6 +39,8 @@ class DemoModeUiWiringTest {
         "src/main/java/dev/steamvault/app/ui/settings/SettingsScreen.kt" to "SettingsScreen",
         "src/main/java/dev/steamvault/app/ui/detail/GameDetailSheet.kt" to "GameDetailSheet",
         "src/main/java/dev/steamvault/app/ui/clients/ClientsSheet.kt" to "ClientsSheet",
+        // WP D15d: the Clients page.
+        "src/main/java/dev/steamvault/app/ui/clients/ClientsScreen.kt" to "ClientsScreen",
     )
 
     /** Matches `@Composable` immediately followed (across whitespace/

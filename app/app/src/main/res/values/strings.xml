@@ -38,8 +38,10 @@
     <string name="identity_persona_unknown">Persona name not loaded yet</string>
 
     <!-- Bottom nav (WP 4b.4): three destinations per the frozen mockup and
-         the WP 4a.1 decision (Clients is a sheet, not a nav item). -->
+         the WP 4a.1 decision; WP D15d adds Clients after Library (user
+         decision 2026-10-13, D15: Clients is its own page, like on web). -->
     <string name="nav_library">Library</string>
+    <string name="nav_clients">Clients</string>
     <string name="nav_downloads">Downloads</string>
     <string name="nav_settings">Settings</string>
 
@@ -437,7 +439,6 @@
     <string name="downloads_section_history">History</string>
     <string name="downloads_active_empty">No download running. Start one from the Library.</string>
     <string name="downloads_queue_empty">Nothing waiting.</string>
-    <string name="downloads_history_empty">Nothing finished yet.</string>
     <string name="downloads_load_error">Could not reach vault-api: %1$s</string>
 
     <!-- The slot-release divergence note (api/README.md "The worker slot —
@@ -668,11 +669,25 @@
          per section" despite clients-view.js's own comment claiming so). -->
     <string name="clients_bypass_note">none of its downloads have reached the cache recently</string>
 
-    <!-- Settings' entry point (WP 4b.10 closes the WP 4b.8 routing gap:
-         bypass notifications used to land on Settings with no clients
-         detail to show; this button is the discoverable path for a user
-         who reaches this screen without a notification at all). -->
-    <string name="settings_section_clients">Clients</string>
+    <!-- Settings' pointer (WP D15d, twin of web settings.js "PCs (agents)"):
+         managing PCs moved to the Clients page; Settings keeps a short
+         pointer so the old way there still leads somewhere. -->
+    <string name="settings_section_clients">PCs (agents)</string>
+    <string name="settings_clients_desc">Managing PCs is on the Clients page now.</string>
+    <string name="settings_clients_open_button">Open Clients</string>
+
+    <!-- Clients page (WP D15d, twin of web views/clients.js). The texts
+         computed from server data are verbatim ports in
+         ui/clients/logic/ClientsPage.kt and ui/traffic/logic/TrafficView.kt;
+         these are the page's own chrome. -->
+    <string name="clients_page_title">Clients</string>
+    <string name="clients_manage_heading">Manage PCs</string>
+    <string name="clients_manage_title">PCs running vault-agent</string>
+    <string name="clients_manage_desc">Online or offline, last report, agent version and cache bypass state for every PC that has reported.</string>
+    <string name="clients_manage_button">Manage PCs</string>
+    <!-- Names of the range selectors for TalkBack (web aria-label). -->
+    <string name="traffic_range_statistics">Statistics range</string>
+    <string name="traffic_range_history">History range</string>
 
     <!-- Demo mode (WP APP-DEMO). demo_mode_banner is the persistent,
          visible indicator shown on every screen while browsing sample
@@ -692,8 +707,6 @@
          this demo session started); Reconnect stays, since it is the
          documented way to leave demo mode. -->
     <string name="settings_disconnect_unavailable_demo">Disconnect is not available while browsing demo data.</string>
-    <string name="settings_clients_desc">See which machines have reported to this vault, and whether any of them appear to be bypassing the cache.</string>
-    <string name="settings_clients_open_button">View clients</string>
 
     <!-- WP APP-FIX-2 (parity with web WEB-FIX-4): a known failure's Retry
          (a new prefill for the same app) and its toast, web downloads.js's

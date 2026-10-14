@@ -3,7 +3,7 @@ package dev.steamvault.app.ui.nav
 import dev.steamvault.app.R
 
 /**
- * The app's three top-level destinations (WP 4b.4 brief: "bottom nav
+ * The app's top-level destinations (WP 4b.4 brief: "bottom nav
  * Library / Downloads / Settings -- THREE items per the frozen mockup and
  * the recorded WP 4a.1 decision; Clients is a sheet later").
  *
@@ -38,6 +38,11 @@ import dev.steamvault.app.R
  */
 enum class Destination(val labelRes: Int) {
     LIBRARY(R.string.nav_library),
+
+    /** WP D15d: the Clients page, right after Library like the web nav
+     * (user decision 2026-10-13, D15, superseding the WP 4a.1 "Clients is a
+     * sheet" ruling quoted above; the PCs sheet stays, opened from it). */
+    CLIENTS(R.string.nav_clients),
     DOWNLOADS(R.string.nav_downloads),
     SETTINGS(R.string.nav_settings),
 }

@@ -477,6 +477,28 @@ class DemoState private constructor(
     @Synchronized
     fun clientsOut(): List<ClientOut> = clients
 
+    // ---- traffic (WP D15d) ----------------------------------------------------
+
+    /**
+     * What [DemoTrafficRepository] builds its synthetic statistics from: the
+     * running jobs, the games (names, installed_on) and the agents. Unlike
+     * [listJobSummaries] this does NOT tick the job simulation -- the
+     * statistics poll must not make the demo's downloads finish faster.
+     */
+    @Synchronized
+    fun trafficSnapshot(): DemoTrafficSnapshot = DemoTrafficSnapshot(
+        runningJobs = jobs.filter { it.status == STATUS_RUNNING }.map { it.toSummary() },
+        games = listGameSummaries(),
+        agents = clients,
+    )
+
+    /** `GET /v1/jobs?range=` in demo mode: the newest [limit] jobs, without a
+     * tick (see [trafficSnapshot]). The range itself is applied by the
+     * screen, the same way it treats a server that ignores `range`. */
+    @Synchronized
+    fun jobHistory(limit: Int): List<JobSummary> =
+        jobs.sortedByDescending { it.id }.take(limit).map { it.toSummary() }
+
     // ---- about (WP APP-FEAT-2) ------------------------------------------------
 
     @Synchronized

@@ -35,6 +35,7 @@ import dev.steamvault.app.demo.DemoScheduleRepository
 import dev.steamvault.app.demo.DemoSettingsRepository
 import dev.steamvault.app.demo.DemoState
 import dev.steamvault.app.demo.DemoSteamRelayRepository
+import dev.steamvault.app.demo.DemoTrafficRepository
 import dev.steamvault.app.demo.DemoUpdatesRepository
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.JobSummary
@@ -55,11 +56,13 @@ import dev.steamvault.app.repo.VaultMappingRepository
 import dev.steamvault.app.repo.VaultScheduleRepository
 import dev.steamvault.app.repo.VaultSettingsRepository
 import dev.steamvault.app.repo.VaultSteamRelayRepository
+import dev.steamvault.app.repo.VaultTrafficRepository
 import dev.steamvault.app.repo.VaultUpdatesRepository
 import dev.steamvault.app.storage.EncryptedCredentialStore
 import dev.steamvault.app.storage.SharedPreferencesLibraryPreferences
 import dev.steamvault.app.ui.clients.AndroidClientsStrings
 import dev.steamvault.app.ui.clients.ClientsController
+import dev.steamvault.app.ui.clients.ClientsScreen
 import dev.steamvault.app.ui.clients.ClientsSheet
 import dev.steamvault.app.ui.downloads.DownloadsScreen
 import dev.steamvault.app.ui.downloads.logic.countPending
@@ -306,6 +309,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         when (destination) {
                             Destination.LIBRARY -> LibraryDestinationContent()
+                            Destination.CLIENTS -> ClientsDestinationContent()
                             Destination.DOWNLOADS -> DownloadsDestinationContent()
                             Destination.SETTINGS -> SettingsDestinationContent()
                         }
@@ -526,6 +530,7 @@ class MainActivity : ComponentActivity() {
             DownloadsScreen(
                 jobsRepository = remember(demo) { DemoJobsRepository(demo) },
                 gamesRepository = remember(demo) { DemoGamesRepository(demo) },
+                trafficRepository = remember(demo) { DemoTrafficRepository(demo) },
                 ownedLibrary = ownedLibraryState,
                 onJobsSnapshot = { pendingJobsSnapshot = it },
                 demoMode = true,
@@ -540,8 +545,36 @@ class MainActivity : ComponentActivity() {
         DownloadsScreen(
             jobsRepository = remember(client) { VaultJobsRepository(client) },
             gamesRepository = remember(client) { VaultGamesRepository(client) },
+            trafficRepository = remember(client) { VaultTrafficRepository(client) },
             ownedLibrary = ownedLibraryState,
             onJobsSnapshot = { pendingJobsSnapshot = it },
+            demoMode = false,
+        )
+    }
+
+    /** WP D15d: the Clients page (`GET /v1/clients/overview`). Its "Manage
+     * PCs" button opens the PCs sheet hoisted at this level
+     * ([clientsControllerState]), the same sheet a bypass notification
+     * opens. */
+    @Composable
+    private fun ClientsDestinationContent() {
+        val demo = demoState
+        if (demo != null) {
+            ClientsScreen(
+                trafficRepository = remember(demo) { DemoTrafficRepository(demo) },
+                onManagePcs = { clientsControllerState?.open(lifecycleScope) },
+                demoMode = true,
+            )
+            return
+        }
+        val client = vaultApiClientState
+        if (client == null) {
+            NotConnectedPlaceholder()
+            return
+        }
+        ClientsScreen(
+            trafficRepository = remember(client) { VaultTrafficRepository(client) },
+            onManagePcs = { clientsControllerState?.open(lifecycleScope) },
             demoMode = false,
         )
     }
@@ -567,7 +600,8 @@ class MainActivity : ComponentActivity() {
                 openOnboarding(OnboardingMode.FIRST_RUN)
             },
             onRequestNotificationPermission = { requestNotificationPermission() },
-            onOpenClientsClick = { clientsControllerState?.open(lifecycleScope) },
+            // WP D15d: managing PCs moved to the Clients page.
+            onOpenClientsClick = { destination = Destination.CLIENTS },
             demoMode = demoState != null,
         )
     }

@@ -3974,6 +3974,42 @@ use manual onboarding. The dialog's look on a phone, the cold-start path,
 open, the Recents re-delivery guard, and the web twin (PAIR-1 is not on
 main yet, so there is no cross-pin to its link builder).
 
+## Clients page and Downloads statistics (WP D15d)
+
+Twin of the web's D15c (`web/js/views/clients.js`, the statistics block of
+`web/js/views/downloads.js`), over vault-api's D15b endpoints
+`GET /v1/clients/overview`, `GET /v1/throughput`, `GET /v1/throughput/series`
+and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
+
+- **Clients** is a fourth bottom-nav destination after Library
+  (`ui/clients/ClientsScreen.kt`; user decision 2026-10-13, D15). One card
+  per agent PC or agentless address: connected or not, loading now,
+  installed games (agents only), bytes and hit rate for the range, recently
+  loaded games, last active. "Manage PCs" opens the existing PCs sheet
+  (`ClientsSheet.kt`); Settings keeps a pointer to the page.
+- **Downloads** gets a statistics header under the bulk bar
+  (`ui/downloads/DownloadsStats.kt`): current, average and peak speed,
+  loaded, byte hit rate, saved by the cache, active clients, plus a line
+  graph; a speed line under a running job; and a History range filter.
+- Ranges 24 h / 7 days / 30 days / All (`ui/traffic/RangeChips.kt`).
+  Statistics poll every 30 s only while the screen is started
+  (`ui/traffic/TrafficPoll.kt`).
+- Honest states, the web's rules and words (`ui/traffic/logic/TrafficView.kt`,
+  `ui/clients/logic/ClientsPage.kt`, verbatim-port exception above): with
+  the event feed disabled or on a server older than D15b (404) there is one
+  note and no figures, and the statistics range selectors are hidden; a
+  failed refresh keeps the old figures and adds "Couldn't refresh: ...".
+  The History filter always shows (an old server ignores `range`; the app
+  filters by the same rule).
+- Demo mode answers all four reads with synthetic data
+  (`demo/DemoTraffic.kt`), so every new surface shows.
+
+Tests: `TrafficViewTest`, `ClientsPageTest`, `TrafficPollTest`,
+`TrafficApiTest`, `DemoTrafficTest`, the web twin `TrafficWebTwinTest`, and
+the wiring pins in `D15dWiringTest`. No screenshot test for the Clients
+page yet: the golden refresh jobs accept only `LibraryScreenshotTest`'s
+shots, so a second screenshot class needs a CI change first.
+
 ## Screenshot tests (WP APP-TEST-1)
 
 Roborazzi on Robolectric renders the Library screen to PNG on the JVM -- no

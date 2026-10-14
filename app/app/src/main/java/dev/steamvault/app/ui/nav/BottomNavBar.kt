@@ -13,7 +13,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import dev.steamvault.app.R
 
-/** The three-item bottom nav (WP 4b.4 brief) -- see [Destination]'s kdoc for
+/** The bottom nav (WP 4b.4 brief: three items; WP D15d added Clients) -- see [Destination]'s kdoc for
  * why this is a plain state switch, not Navigation Compose.
  *
  * @param pendingJobsCount the Downloads nav pip (WP 4b.5 brief:
@@ -49,6 +49,7 @@ fun BottomNavBar(current: Destination, pendingJobsCount: Int = 0, onSelect: (Des
                     val icon: @Composable () -> Unit = {
                         when (destination) {
                             Destination.LIBRARY -> LibraryNavIcon()
+                            Destination.CLIENTS -> ClientsNavIcon()
                             Destination.DOWNLOADS -> DownloadsNavIcon()
                             Destination.SETTINGS -> SettingsNavIcon()
                         }

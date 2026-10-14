@@ -22,9 +22,9 @@ import androidx.compose.ui.unit.dp
  * a coordinate-for-coordinate Canvas port, not an icon-pack lookup). The
  * extended icon pack is not a dependency of this project (only
  * material-icons-CORE ships transitively via material3, and core has no
- * "download"/grid glyph that fits), and hand-drawing three simple shapes is
+ * "download"/grid glyph that fits), and hand-drawing a few simple shapes is
  * cheaper and more controllable than adding a large new icon-pack
- * dependency for exactly three glyphs. Each icon reads
+ * dependency for a handful of glyphs. Each icon reads
  * [LocalContentColor] so `NavigationBarItem`'s own selected/unselected tint
  * (Material3's standard mechanism for icon slots) applies automatically,
  * the same as a stock `Icon(...)` would get.
@@ -54,6 +54,28 @@ fun LibraryNavIcon(modifier: Modifier = Modifier) {
                 )
             }
         }
+    }
+}
+
+/** Clients (WP D15d): a monitor on a stand -- "machines that load from
+ * the cache", the same idea as web's Clients nav glyph, drawn in this
+ * file's stroke style. */
+@Composable
+fun ClientsNavIcon(modifier: Modifier = Modifier) {
+    val color = LocalContentColor.current
+    Canvas(modifier.size(NAV_ICON_SIZE)) {
+        val scale = size.minDimension / 24f
+        val strokeWidth = 2.2f * scale
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(3.5f * scale, 4.5f * scale),
+            size = Size(17f * scale, 11.5f * scale),
+            cornerRadius = CornerRadius(1.8f * scale),
+            style = stroke,
+        )
+        drawLine(color, Offset(12f * scale, 16f * scale), Offset(12f * scale, 19.5f * scale), strokeWidth, StrokeCap.Round)
+        drawLine(color, Offset(8f * scale, 19.5f * scale), Offset(16f * scale, 19.5f * scale), strokeWidth, StrokeCap.Round)
     }
 }
 
