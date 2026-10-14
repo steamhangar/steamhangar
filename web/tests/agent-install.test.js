@@ -2,9 +2,9 @@
  * web/js/lib/agent-install.js (WP PAIR-1): the Windows vault-agent install
  * command shown in Settings → "Add a device".
  *
- *  - release guard: only a release version WITH a commit (a v* tag build)
- *    gets a command; dev-<sha>, a native run (base version, no commit),
- *    "invalid", a missing vault-api row or a non-About answer get the note;
+ *  - release grammar: isReleaseVersion accepts only the v* tag grammar
+ *    (the published-release check itself is the server's `release` flag,
+ *    WP DIST-1b); the builders refuse anything else (review B1);
  *  - asset names and URLs equal publish.yml's agent-binaries naming (tag =
  *    "v" + version; the exe carries the tag), pinned as LITERALS;
  *  - the command checks every downloaded file against SHA256SUMS before it
@@ -28,7 +28,8 @@ import {
   AGENT_SERVER_URL_NOTE,
   installKey,
   isInstallableKey,
-  agentReleaseFromAbout,
+  isReleaseVersion,
+  linuxDownloadSnippet,
   noReleaseText,
   psQuote,
   releaseAssets,
@@ -37,26 +38,20 @@ import {
 } from "../js/lib/agent-install.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const COMMIT = "3f9c2a71d4be08e5c6a1f02b9d7e4c18a5b6f3d0";
-const about = (version, commit = COMMIT) => ({
-  components: [
-    { name: "vault-core", version: "9.9.9", commit: COMMIT, status: "unknown" },
-    { name: "vault-api", version, commit, status: "ok" },
-  ],
+test("MUTATION TARGET: release grammar — only a v* tag version passes; the builders refuse the rest", () => {
+  for (const v of ["0.1.0", "0.1.0-rc10", "1.2.3-beta.2"]) assert.equal(isReleaseVersion(v), true, v);
+  const bad = ["dev-1a2b3c4", "invalid", "", null, 7, "0.1", "0.1.0\n", "0.1.0\ntouch /tmp/x #", "0.1.0'", "0.1.0-rc1/../x", " 0.1.0"];
+  for (const v of bad) {
+    assert.equal(isReleaseVersion(v), false, JSON.stringify(v));
+    assert.throws(() => windowsInstallSnippet({ version: v, serverUrl: "http://192.0.2.10:8080" }), /not a release version/);
+    assert.throws(() => linuxDownloadSnippet({ version: v }), /not a release version/);
+  }
 });
 
-test("MUTATION TARGET: release guard — only a tag build (release version + commit) gets a command", () => {
-  assert.deepEqual(agentReleaseFromAbout(about("0.1.0")), { ok: true, version: "0.1.0" });
-  assert.deepEqual(agentReleaseFromAbout(about("0.1.0-rc10")), { ok: true, version: "0.1.0-rc10" });
-  assert.deepEqual(agentReleaseFromAbout(about("1.2.3-beta.2")), { ok: true, version: "1.2.3-beta.2" });
-  assert.deepEqual(agentReleaseFromAbout(about("dev-1a2b3c4")), { ok: false, version: "dev-1a2b3c4" });
-  assert.deepEqual(agentReleaseFromAbout(about("0.1.0", null)), { ok: false, version: "0.1.0" }, "native run: no commit");
-  assert.deepEqual(agentReleaseFromAbout(about("0.1.0", "invalid")), { ok: false, version: "0.1.0" });
-  assert.deepEqual(agentReleaseFromAbout(about("invalid")), { ok: false, version: "invalid" });
-  assert.deepEqual(agentReleaseFromAbout(about(null)), { ok: false, version: null });
-  assert.deepEqual(agentReleaseFromAbout({ components: [] }), { ok: false, version: null });
-  assert.deepEqual(agentReleaseFromAbout(null), { ok: false, version: null });
-  assert.deepEqual(agentReleaseFromAbout({ detail: "Not Found" }), { ok: false, version: null });
+test("review B1: the raw version is in no comment line of either command", () => {
+  for (const s of [windowsInstallSnippet({ version: "0.1.0-rc10", serverUrl: "http://192.0.2.10:8080" }), linuxDownloadSnippet({ version: "0.1.0-rc10" })]) {
+    for (const line of s.split("\n").filter((l) => l.trim().startsWith("#"))) assert.equal(line.includes("0.1.0-rc10"), false, line);
+  }
 });
 
 test("no-release note names the version and points at agent/README.md", () => {

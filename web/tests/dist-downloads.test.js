@@ -232,3 +232,26 @@ test("MUTATION TARGET: Linux command, run: a tampered file or a missing sum line
     assert.ok(r.exists && (r.mode & 0o100) === 0, "binary not made executable");
   }
 });
+
+test("MUTATION TARGET (review B1): a release index with a version outside the grammar yields nothing", () => {
+  for (const evil of ["0.1.0\ntouch /tmp/PWNED #", "0.1.0'", "dev-1a2b3c4"]) {
+    for (const localIds of [[], ALL]) {
+      // Names and URLs built from the same bad version, release: true.
+      const ix = index({ version: evil, release: true, localIds });
+      assert.deepEqual(agentDownloadPlan(ix, AGENT, windowsArtifactNames), { ok: false, version: evil });
+      assert.deepEqual(agentDownloadPlan(ix, AGENT, linuxArtifactNames), { ok: false, version: evil });
+      assert.deepEqual(appDownloadPlan(ix, PAGE), { kind: "none", version: evil });
+    }
+  }
+});
+
+test("MUTATION TARGET (review N1): local:false with a local_url is not local", () => {
+  const ix = index();
+  for (const a of ix.artifacts) a.local_url = `/dist/${a.name}`;
+  ix.apk_alias_url = "/dist/steamhangar-app.apk";
+  assert.equal(appDownloadPlan(ix, PAGE).source, "release");
+  assert.equal(agentDownloadPlan(ix, AGENT, windowsArtifactNames).source, "release");
+  ix.release = false;
+  assert.equal(appDownloadPlan(ix, PAGE).kind, "none");
+  assert.equal(agentDownloadPlan(ix, AGENT, linuxArtifactNames).ok, false);
+});

@@ -98,31 +98,26 @@ export const AGENT_SERVER_URL_NOTE =
   "Must be vault-api's direct LAN address (e.g. http://<host-ip>:8080), not a reverse-proxy hostname. Otherwise per-PC cache stats and bypass detection cannot match this PC.";
 
 // A release version as publish.yml derives it from a v* tag: digits-dot
-// triple, optional pre-release (e.g. "0.1.0", "0.1.0-rc10").
+// triple, optional pre-release (e.g. "0.1.0", "0.1.0-rc10"). Same grammar
+// as api/vault_api/dist.py `_RELEASE_VERSION` (fullmatch; JS `$` without
+// the m flag does not match before a trailing newline).
 const RELEASE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$/;
-const COMMIT = /^[0-9a-f]{7,40}$/;
 
 /**
- * The vault-api release version from a `GET /v1/about` answer, if it names a
- * downloadable release.
- *
- * A build from a v* tag reports the tag without its "v" plus the commit
- * (WP VER-1). Anything else has no release to download from: a CI build of
- * a branch reports `dev-<sha>`, a native run reports the source tree's
- * base version WITHOUT a commit (indistinguishable from a release by the
- * version alone, so the commit is required too), an unusable baked value
- * reports `"invalid"`, and a server older than `/v1/about` has no answer.
- *
- * @param {unknown} response
- * @returns {{ok: true, version: string} | {ok: false, version: string | null}}
+ * True when `version` has the release grammar. Every version that ends up
+ * in a command or a download URL passes this first (WP DIST-1b review B1:
+ * a version from the server must never carry a newline, a quote or a path
+ * into a pasted command). Whether it is a PUBLISHED release (a known
+ * commit too) is the server's `release` flag in `GET /v1/dist`.
+ * @param {unknown} version
  */
-export function agentReleaseFromAbout(response) {
-  const components = response && typeof response === "object" && Array.isArray(response.components) ? response.components : [];
-  const api = components.find((c) => c && c.name === "vault-api");
-  const version = api && typeof api.version === "string" ? api.version : null;
-  const commit = api && typeof api.commit === "string" ? api.commit : null;
-  if (version && RELEASE_VERSION.test(version) && commit && COMMIT.test(commit)) return { ok: true, version };
-  return { ok: false, version };
+export function isReleaseVersion(version) {
+  return typeof version === "string" && RELEASE_VERSION.test(version);
+}
+
+/** Thrown by the command builders for a version outside the grammar. */
+function requireReleaseVersion(version) {
+  if (!isReleaseVersion(version)) throw new Error("not a release version");
 }
 
 /** Text shown instead of the command when there is no release to use. */
@@ -241,6 +236,7 @@ export function releaseDownloadBase(version) {
  * @returns {string}
  */
 export function windowsInstallSnippet({ version, serverUrl, downloadBase }) {
+  requireReleaseVersion(version);
   const assets = releaseAssets(version);
   const base = downloadBase || releaseDownloadBase(version);
   const lines = [
@@ -251,7 +247,7 @@ export function windowsInstallSnippet({ version, serverUrl, downloadBase }) {
     // lines up to the closing brace before running anything; the prompt
     // comes only after the whole paste is in. Comments go inside too.
     "& {",
-    `# SteamHangar: install vault-agent ${version} for this Windows user (no admin rights needed).`,
+    "# SteamHangar: install vault-agent for this Windows user (no admin rights needed).",
     "# Paste all of it into a normal PowerShell window. It contains no key: when it asks for the",
     "# hangar API key, press Copy key in SteamHangar and paste at the prompt.",
     "$ErrorActionPreference = 'Stop'",
@@ -341,11 +337,12 @@ export function shQuote(value) {
  * @returns {string}
  */
 export function linuxDownloadSnippet({ version, downloadBase }) {
+  requireReleaseVersion(version);
   const assets = linuxReleaseAssets(version);
   const base = downloadBase || releaseDownloadBase(version);
   const lines = [
     "(",
-    `# SteamHangar: download and check vault-agent ${version} for this Linux user.`,
+    "# SteamHangar: download and check vault-agent for this Linux user.",
     "set -eu",
     `base=${shQuote(base)}`,
     `dir="$HOME/.local/share/vault-agent/release-v"${shQuote(version)}`,

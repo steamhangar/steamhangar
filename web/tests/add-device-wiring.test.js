@@ -495,7 +495,9 @@ test("MUTATION TARGET (guard A): an index answer that lands after Hide paints no
   await until(() => server.held.length === 1, "index request in flight");
   click(showBtn("windows")); // Hide while the request is still open
   server.held.shift()(indexFor("0.1.0-rc10"));
-  await tick(30);
+  // The answer is painted (app download), so only paintWindows' own guard
+  // keeps the hidden option empty: callers no longer check `shown` (S1).
+  await until(() => appLink() !== null, "the answer arrived");
   assert.equal(reveal("windows").hidden, true);
   assert.equal(reveal("windows").childNodes.length, 0, "nothing painted into the hidden option");
   assert.equal(secretInDom(), false);
@@ -634,16 +636,18 @@ test("MUTATION TARGET: Linux — download-and-check command, local / release / d
   assert.equal(linuxSnippet(), null);
 });
 
-test("MUTATION TARGET: demo mode — the app download renders from the fake index, with no request", async () => {
+test("MUTATION TARGET: demo mode — the app download renders from the fake index as a note, with no request", async () => {
   const before = server.distGets;
   storage.set("steamvault.demoMode", "1");
   try {
     openAddDeviceSheet();
-    await until(() => appLink() !== null, "demo download button");
+    await until(() => q("app-download-demo") !== null, "demo download note");
     const demo = q("demo-app-download");
     assert.equal(demo.hidden, false);
-    assert.notEqual(demo.querySelector('[data-role="app-download-link"]'), null, "in the demo block");
-    assert.equal(appLink().href, `${ORIGIN}/dist/steamhangar-app.apk`);
+    assert.notEqual(demo.querySelector('[data-role="app-download-demo"]'), null, "in the demo block");
+    assert.match(q("app-download-demo").textContent, /^Demo mode: on a connected vault a "Download app" button here downloads steamhangar-app-v0\.1\.0\.apk from this vault\.$/);
+    assert.equal(appLink(), null, "review N3: no link into the fake index");
+    assert.equal(q("app-download-demo").querySelector("a"), null);
     assert.notEqual(q("app-download-qr"), null);
     assert.equal(sheet().querySelector(".pair-options").hidden, true, "the pairing options stay hidden");
     assert.equal(server.distGets, before, "demo mode makes no request");
@@ -663,4 +667,50 @@ test("a browser without a key fetches no index and shows no download", () => {
   openAddDeviceSheet();
   assert.equal(server.distGets, before);
   assert.equal(q("app-download").childNodes.length, 0);
+});
+
+// ---- DIST-1b review round 1 -----------------------------------------------
+
+test("MUTATION TARGET (review B1): a version outside the release grammar on the release path gives no command and no download", async () => {
+  for (const evil of ["0.1.0\ntouch /tmp/PWNED #", "0.1.0' ; Remove-Item x ; '", "0.1.0\"$(id)\""]) {
+    for (const local of [false, true]) {
+      // Every name, URL and the version carry the bad value consistently, as a
+      // lying server would send them (release: true), so only the grammar
+      // check stands between it and the commands.
+      server.index = JSON.parse(JSON.stringify(indexFor("0.1.0-rc10", { local })).split("0.1.0-rc10").join(JSON.stringify(evil).slice(1, -1)));
+      openAddDeviceSheet();
+      click(showBtn("windows"));
+      click(showBtn("linux"));
+      await until(() => reveal("windows").querySelector('[data-role="agent-no-release"]') !== null, "windows note");
+      await until(() => reveal("linux").querySelector('[data-role="agent-no-release"]') !== null, "linux note");
+      assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]'), null, JSON.stringify(evil));
+      assert.equal(reveal("linux").querySelector('[data-role="linux-snippet"]'), null, JSON.stringify(evil));
+      assert.notEqual(q("app-download-none"), null, "no app download either");
+      assert.equal(appLink(), null);
+      closeSheetIfOpen();
+    }
+  }
+});
+
+test("MUTATION TARGET (guard A, Linux): an index answer that lands after Hide paints nothing", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  click(showBtn("linux"));
+  await until(() => server.held.length === 1, "index request in flight");
+  click(showBtn("linux")); // Hide
+  server.held.shift()(indexFor("0.1.0-rc10", { local: true }));
+  await until(() => appLink() !== null, "the answer arrived (app download painted)");
+  assert.equal(reveal("linux").hidden, true);
+  assert.equal(reveal("linux").childNodes.length, 0, "nothing painted into the hidden option");
+});
+
+test("MUTATION TARGET: an index answer after the sheet closed paints nothing, not even the app download", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  await until(() => server.held.length === 1, "request in flight");
+  closeSheetIfOpen();
+  server.held.shift()(indexFor("0.1.0-rc10", { local: true }));
+  await tick(30);
+  assert.equal(appLink(), null, "the closed sheet keeps its loading line");
+  assert.match(q("app-download").textContent, /Looking up the app download/);
 });

@@ -272,7 +272,9 @@ function hideOption(option) {
 
 function hideAll() {
   for (const option of options) hideOption(option);
-  dist.gen++; // an index answer still in flight paints nothing
+  // MUTATION TARGET: an index answer still in flight when the sheet closes
+  // paints nothing (not even the app download) into the closed sheet.
+  dist.gen++;
 }
 
 // ---- The download index (GET /v1/dist) -------------------------------------
@@ -300,10 +302,12 @@ async function loadDist() {
   paintDistConsumers();
 }
 
+// Callers do NOT check `shown`: the one guard is inside paintWindows /
+// paintLinux (review S1, one layer, one pin).
 function paintDistConsumers() {
   paintAppDownload();
-  if (windowsOption.shown) paintWindows(windowsOption.reveal);
-  if (linuxOption.shown) paintLinux(linuxOption.reveal);
+  paintWindows(windowsOption.reveal);
+  paintLinux(linuxOption.reveal);
 }
 
 // ---- Phone: the app itself (not a secret) -----------------------------------
@@ -336,13 +340,20 @@ function paintAppDownload() {
   }
   const where = plan.source === "local" ? "from this vault" : "from the project's GitHub release (this vault has no copy)";
   const size = formatDownloadSize(plan.size);
-  const btn = el("a", "btn primary sm", "Download app");
-  btn.href = plan.url;
-  btn.dataset.role = "app-download-link";
-  btn.dataset.source = plan.source;
-  btn.title = `${plan.name}${size ? `, ${size}` : ""}, ${where}.`;
   const acts = el("div", "pair-acts");
-  acts.append(btn);
+  if (isDemoMode()) {
+    // Review N3: the demo's index is fake, so no link that leads nowhere.
+    const note = el("p", "foot-note", `Demo mode: on a connected vault a "Download app" button here downloads ${plan.name} ${where}.`);
+    note.dataset.role = "app-download-demo";
+    acts.append(note);
+  } else {
+    const btn = el("a", "btn primary sm", "Download app");
+    btn.href = plan.url;
+    btn.dataset.role = "app-download-link";
+    btn.dataset.source = plan.source;
+    btn.title = `${plan.name}${size ? `, ${size}` : ""}, ${where}.`;
+    acts.append(btn);
+  }
   const caption = el("p", "foot-note", "Scan the code with the phone's camera to download and install the app.");
   caption.title = `${plan.url}\nAndroid asks once to allow installs from the browser. ${plan.name} ${where}.`;
   appDownload.replaceChildren(
@@ -431,8 +442,8 @@ function agentUrlCheck() {
 agentUrlInput.addEventListener("input", () => {
   const result = agentUrlCheck();
   if (result.ok) writeAgentUrl(result.url);
-  if (windowsOption.shown) paintWindows(windowsOption.reveal);
-  if (linuxOption.shown) paintLinux(linuxOption.reveal);
+  paintWindows(windowsOption.reveal);
+  paintLinux(linuxOption.reveal);
 });
 
 function paintWindows(reveal) {
@@ -519,6 +530,7 @@ function sourceWords(plan) {
 // ---- Linux ---------------------------------------------------------------
 
 function paintLinux(reveal) {
+  // MUTATION TARGET (guard A, Linux): nothing is painted into a hidden option.
   if (!linuxOption.shown) return;
   if (!isUsableKey(getStoredApiKey())) return;
   const pre = agentPrecheck(reveal, linuxArtifactNames);

@@ -31,7 +31,7 @@
  * Pure: no DOM, no storage, no fetch.
  */
 
-import { linuxReleaseAssets, releaseAssets, releaseDownloadBase } from "./agent-install.js";
+import { isReleaseVersion, linuxReleaseAssets, releaseAssets, releaseDownloadBase } from "./agent-install.js";
 
 export const APP_ARTIFACT_ID = "app-android";
 /** The project's releases page (the note's link when nothing is offered). */
@@ -106,6 +106,9 @@ function releaseUrl(index, art) {
 export function appDownloadPlan(response, origin) {
   const index = readDistIndex(response);
   if (!index) return { kind: "none", version: null };
+  // Review B1: the version builds the release URLs and names; outside the
+  // release grammar nothing is offered (a dev server serves nothing anyway).
+  if (!isReleaseVersion(index.version)) return { kind: "none", version: index.version };
   const art = findArtifact(index, APP_ARTIFACT_ID);
   if (!art || typeof art.name !== "string") return { kind: "none", version: index.version };
   const size = typeof art.size === "number" ? art.size : null;
@@ -137,6 +140,9 @@ export function noAppText(version) {
 export function agentDownloadPlan(response, serverUrl, namesFor) {
   const index = readDistIndex(response);
   if (!index) return { ok: false, version: null };
+  // MUTATION TARGET (review B1): the version goes into a pasted command;
+  // outside the release grammar there is no command at all.
+  if (!isReleaseVersion(index.version)) return { ok: false, version: index.version };
   const names = namesFor(index.version);
   const arts = Object.entries(names).map(([id, name]) => {
     const art = findArtifact(index, id);

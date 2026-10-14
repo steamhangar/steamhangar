@@ -3868,3 +3868,24 @@ ignored; name check off; `local_base` prefix check off; demo block not
 attached; guard B removed; release-URL pin removed. Equivalent, survives:
 dropping `[ -z "$want" ]` in the Linux check (an empty sum never equals a
 computed one, so the file still fails).
+
+#### Review round 1 (B1, S1, S2, N1-N3)
+
+- B1: `isReleaseVersion` (agent-install.js, the grammar of api `dist.py`)
+  gates every app and agent plan; the command builders throw outside it
+  and no comment line carries the version. Pinned in
+  `agent-install.test.js` (newline, quote, path versions throw),
+  `dist-downloads.test.js` and `add-device-wiring.test.js` (a release
+  index whose names and URLs carry a newline or quote version gives no
+  Windows or Linux command and no app download). Removing the plan check
+  fails both.
+- S1: the callers no longer check `shown`, so the guard inside
+  `paintWindows` / `paintLinux` is the only layer, each pinned by a
+  late-answer-after-Hide test that waits until the answer has painted the
+  app download. `dist.gen++` in `hideAll` has its own pin (a late answer
+  after close leaves the loading line).
+- S2: `agentReleaseFromAbout` removed (no caller), with its test.
+- N1: `local:false` with a `local_url` stays non-local. N3: demo mode
+  shows a note instead of a link into the fake index.
+- Mutations killed: both grammar checks, both guards A, the hideAll
+  generation bump, the `local !== true` check, the demo branch.
