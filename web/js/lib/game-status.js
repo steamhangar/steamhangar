@@ -319,6 +319,21 @@ export function installedOnSummary(installedOn) {
 }
 
 /**
+ * EVERY client the game is installed on, comma-separated ("Demon, Frame,
+ * Laptop") — `null` when none. The un-truncated counterpart of
+ * {@link installedOnSummary}'s "first +N" (WP LIB-LIST-1): the list layout's
+ * installed-on column truncates with an ellipsis, so the badge's `title` and
+ * the card's accessible name carry this full form.
+ * @param {{client_id: string, reported_at: string}[] | null | undefined} installedOn
+ * @returns {string | null}
+ */
+export function installedOnNames(installedOn) {
+  const list = Array.isArray(installedOn) ? installedOn : [];
+  if (list.length === 0) return null;
+  return list.map((entry) => entry.client_id).join(", ");
+}
+
+/**
  * The installed badge's own display text for a given state — `null` for
  * NONE (module header: no badge, no sentence). Shared by the card badge and
  * the card's accessible-name builder so the two can never say something

@@ -30,8 +30,8 @@ function stripComments(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
 }
 
-test("VIEW_TITLES is exactly the three views, with the words each view's <h1> shows (literal pin)", () => {
-  assert.deepEqual(VIEW_TITLES, { library: "Library", downloads: "Downloads", settings: "Settings" });
+test("VIEW_TITLES is exactly the four views, with the words each view's <h1> shows (literal pin)", () => {
+  assert.deepEqual(VIEW_TITLES, { library: "Library", clients: "Clients", downloads: "Downloads", settings: "Settings" });
 });
 
 test("twin pin: VIEW_TITLES covers router.js's VIEWS list exactly (drift guard, read from source text)", () => {

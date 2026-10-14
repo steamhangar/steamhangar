@@ -153,6 +153,8 @@ def test_agent_reports_is_one_row_per_report_snapshot(tmp_path) -> None:
             "source_addr",
             "agent_version",
             "report_interval_seconds",
+            # schema v24 (WP AGENT-ADDR-1): the agent's stated LAN addresses.
+            "local_addrs",
         }
 
         conn.execute(

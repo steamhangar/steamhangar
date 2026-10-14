@@ -2067,7 +2067,10 @@ def bypass_suspected(
     # 4: nothing installed (or an unreadable snapshot) means nothing to bypass.
     if not summary.app_count:
         return False
-    # 5: no address on any retained report — correlation is impossible.
+    # 5: no usable address on any retained report — correlation is
+    # impossible. Since WP AGENT-ADDR-1 that includes an old agent whose only
+    # peer is a forwarding hop (the Docker bridge gateway behind a published
+    # port): agent_reports.effective_addrs never yields a hop.
     if not summary.source_addrs:
         return False
     # 6: it HAS been seen at the cache within the window.

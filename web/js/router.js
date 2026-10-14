@@ -10,7 +10,7 @@
  * to it will 404 instead of opening the app.
  */
 
-export const VIEWS = ["library", "downloads", "settings"];
+export const VIEWS = ["library", "clients", "downloads", "settings"];
 export const DEFAULT_VIEW = "library";
 
 function viewFromPath(pathname) {

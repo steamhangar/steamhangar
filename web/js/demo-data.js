@@ -63,6 +63,7 @@
 import { ApiError, ERROR_KINDS } from "./errors.js";
 import { validSteamId64 } from "./lib/steamid.js";
 import { validSteamWebApiKey } from "./lib/steam-key-form.js";
+import { demoClientsOverview, demoSeries, demoThroughput } from "./demo-traffic.js";
 
 function isoAgo(msAgo) {
   return new Date(Date.now() - msAgo).toISOString();
@@ -1678,6 +1679,9 @@ function conflict(detail) {
   return new ApiError(ERROR_KINDS.VALIDATION, detail, { status: 409, detail });
 }
 
+/** WP D15c: `GET /v1/jobs?range=` spans; `all` has none. */
+const HISTORY_RANGE_MS = Object.freeze({ "24h": 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000, all: null });
+
 const JOB_ID_RE = /^\/v1\/jobs\/(\d+)$/;
 const JOB_PAUSE_RE = /^\/v1\/jobs\/(\d+)\/pause$/;
 const JOB_RESUME_RE = /^\/v1\/jobs\/(\d+)\/resume$/;
@@ -1993,13 +1997,55 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
 
   if (method === "GET" && path === "/v1/jobs") {
-    tickAllJobs();
+    // WP D15c: the history filter (`range`, WP D15b). Its fetch does not
+    // advance the job simulation; only the store's plain poll does, so the
+    // demo job runs at the same pace with the Downloads view open.
+    const range = params?.range;
+    if (range !== undefined && !Object.hasOwn(HISTORY_RANGE_MS, range)) {
+      throw validationError("range must be one of 24h, 7d, 30d, all");
+    }
+    if (range === undefined) tickAllJobs();
     const limit = Number(params?.limit ?? 20);
+    const span = range === undefined ? null : HISTORY_RANGE_MS[range];
+    const cutoff = span ? Date.now() - span : null;
     return jobs
       .slice()
+      .filter((j) => {
+        if (cutoff === null || ["queued", "running", "paused"].includes(j.status)) return true;
+        return Date.parse(j.finished_at || j.started_at || j.created_at) >= cutoff;
+      })
       .sort((a, b) => b.id - a.id)
       .slice(0, limit)
       .map(jobSummary);
+  }
+
+  // WP D15c: the traffic endpoints (WP D15b), from demo-traffic.js.
+  if (method === "GET" && (path === "/v1/throughput" || path === "/v1/throughput/series" || path === "/v1/clients/overview")) {
+    const fallback = path === "/v1/clients/overview" ? "7d" : "24h";
+    const range = params?.range ?? fallback;
+    if (!Object.hasOwn(HISTORY_RANGE_MS, range)) throw validationError("range must be one of 24h, 7d, 30d, all");
+    if (path === "/v1/throughput/series") return demoSeries(range);
+    const running = jobs.filter((j) => j.status === "running" && j.type === "prefill");
+    if (path === "/v1/throughput") {
+      return demoThroughput(
+        range,
+        running.map((j) => ({ id: j.id, appid: j.appid, started_at: j.started_at, name: findGame(j.appid)?.name ?? null })),
+      );
+    }
+    const installed = new Map();
+    for (const g of games) {
+      for (const e of g.installed_on) {
+        if (!installed.has(e.client_id)) installed.set(e.client_id, []);
+        installed.get(e.client_id).push(g.appid);
+      }
+    }
+    const runningGame = running[0] ? { appid: running[0].appid, name: findGame(running[0].appid)?.name ?? null } : null;
+    return demoClientsOverview(range, {
+      agents: handleGetClients(),
+      runningGame,
+      games: games.map((g) => ({ appid: g.appid, name: g.name })),
+      installed,
+    });
   }
 
   if (method === "GET" && (m = path.match(JOB_ID_RE))) {

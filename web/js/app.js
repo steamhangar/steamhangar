@@ -8,6 +8,7 @@
 import { VIEWS, DEFAULT_VIEW, currentView, navigateTo, onViewChange } from "./router.js";
 import { initToast } from "./components/toast.js";
 import { renderLibrary } from "./views/library.js";
+import { renderClients } from "./views/clients.js";
 import { renderDownloads } from "./views/downloads.js";
 import { renderSettings, requestAboutFocus } from "./views/settings.js";
 import { maybeShowOnboardingOnStartup } from "./onboarding.js";
@@ -61,6 +62,7 @@ const getSessionStorage = () => window.sessionStorage;
 
 const RENDERERS = {
   library: renderLibrary,
+  clients: renderClients,
   downloads: renderDownloads,
   settings: renderSettings,
 };

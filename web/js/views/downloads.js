@@ -55,6 +55,22 @@
  * count; Resume all does not. The bar is built once per mount and patched
  * (`paintBulkBar`), so a poll tick does not take focus from its buttons.
  *
+ * **Statistics header, per-job speed, history filter (WP D15c, D13/D15).**
+ * Under the bulk bar: current, average ("while loading") and peak speed,
+ * GB loaded, hit rate, GB saved by the cache and active clients from
+ * `GET /v1/throughput`, plus a small inline-SVG graph of
+ * `GET /v1/throughput/series`, both for a 24 h / 7 days / 30 days / All
+ * range (`lib/traffic-view.js` has the wording and the honest-state rules:
+ * feed disabled -> a note and no numbers, stale/never-swept -> a dash for
+ * the current values). They are polled every 30 s only while this view is
+ * open (`createViewPoll`); the store's jobs poll is untouched. A running
+ * job's card gets a speed line from the same answer's `jobs[]`, patched in
+ * place (never the badge's status icon). The History list has its own range
+ * filter (default All): `GET /v1/jobs?range=&limit=200`, fetched when the
+ * view opens and when the filter changes, merged with the store's newest 20
+ * (the fresher copy wins) and filtered client-side by the same rule, so a
+ * job that finishes while the view is open appears at once.
+ *
  * **Updates available (WP UPD-6).** A section between Paused and Queue
  * lists the games whose `update_available` is set and that have no active
  * job (`lib/updates-available.js` `pendingUpdates`), each with "Update now",
@@ -66,6 +82,9 @@
  * The section is rebuilt only when its content changes
  * (`updatesListKey`), so a poll tick does not take a button's focus.
  *
+ * Section order, top to bottom: heading, bulk bar, statistics header,
+ * Active, Paused, Updates available, Queue, History.
+ *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
  * with the job highlighted" navigation target lands here without any
@@ -73,7 +92,28 @@
  */
 
 import { store } from "../store-singleton.js";
-import { api } from "../api.js";
+import { createViewPoll, VIEW_POLL_MS } from "../store.js";
+import { api, getStoredApiKey, isDemoMode } from "../api.js";
+import { ERROR_KINDS } from "../errors.js";
+import { createRangeSegs } from "../components/range-segs.js";
+import {
+  DASH,
+  FEED_TEXT,
+  emptyHistoryText,
+  feedNote,
+  feedState,
+  filterJobsByRange,
+  formatSpeed,
+  headerTiles,
+  isRange,
+  jobSpeedText,
+  joinNotes,
+  mergeJobLists,
+  refreshFailedText,
+  seriesGeometry,
+  seriesLabel,
+  seriesStartText,
+} from "../lib/traffic-view.js";
 import { showToast } from "../components/toast.js";
 import { createStatusIcon } from "../components/status-icon.js";
 import {
@@ -168,6 +208,20 @@ const state = {
   // WP UPD-6: `GET /v1/schedule`, read once per mount; null = not known.
   schedule: null,
 };
+
+/** WP D15c: the statistics header's last answer for `range`
+ * (`{throughput, series}`), and the History filter's fetched rows. Module
+ * state, so a re-mount keeps the chosen ranges. */
+const traffic = { range: "24h", throughput: null, series: null, error: null, unsupported: false, noFigures: false };
+const history = { range: "all", jobs: [], gen: 0 };
+
+/** WP D15c: the history fetch's page size (the API's maximum; no paging). */
+const HISTORY_LIMIT = 200;
+
+/** A job by id from the store's list or the history fetch. */
+function findJobById(jobId) {
+  return state.jobs.find((j) => j.id === jobId) || history.jobs.find((j) => j.id === jobId);
+}
 
 /** jobId -> {expanded, loading, error, excerpt}. Persists across re-mounts
  * AND across a full section rebuild triggered by an unrelated job
@@ -735,6 +789,17 @@ function buildJobCard(job, mode, gamesByAppid) {
   top.append(info, badge);
   card.appendChild(top);
 
+  // WP D15c (D13 SPEED-1): the job's speed at the cache, painted by
+  // paintJobSpeeds() from the statistics poll; hidden until there is one.
+  if (mode === "active") {
+    const speed = document.createElement("p");
+    speed.className = "jobspeed";
+    speed.dataset.role = "job-speed";
+    speed.title = "Measured at the cache over the last few minutes, on this game's own depots.";
+    speed.hidden = true;
+    card.appendChild(speed);
+  }
+
   if (mode === "held") {
     // The slot-release divergence, stated on the card itself — see
     // js/lib/job-partition.js's module header for the full "why".
@@ -820,7 +885,7 @@ function paintExcerpt(rowEl, jobId) {
     logEl.appendChild(p);
     return;
   }
-  const job = state.jobs.find((j) => j.id === jobId);
+  const job = findJobById(jobId);
   const hint = jobFailureHint(job, st.excerpt);
   const outputParent = hint ? appendFailureHint(logEl, hint, job, st) : logEl;
   if (display.truncated) {
@@ -1108,14 +1173,210 @@ function fullRender() {
 
   maybeLoadOwnedNames();
 
-  els.historyBody.replaceChildren();
-  if (!p.history.length) {
-    els.historyBody.appendChild(hintMessage("Nothing finished yet."));
-  } else {
-    for (const job of p.history) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
-  }
+  renderHistory(gamesByAppid);
+  paintJobSpeeds();
+}
 
+/** WP D15c: the History list for the chosen range — the store's newest jobs
+ * merged with the `?range=` fetch, filtered by the server's own rule. */
+function historyRows() {
+  return partitionJobs(filterJobsByRange(mergeJobLists(state.jobs, history.jobs), history.range)).history;
+}
+
+/** Identity of the rows on screen; a history fetch that changes nothing
+ * visible does not rebuild them. */
+function historyKey(rows) {
+  return rows.map((j) => `${j.id}:${j.status}`).join(",");
+}
+
+function renderHistory(gamesByAppid = gamesByAppidMap()) {
+  if (!mounted()) return;
+  const finished = historyRows();
+  els.historyKey = historyKey(finished);
+  els.historyBody.replaceChildren();
+  if (!finished.length) {
+    els.historyBody.appendChild(hintMessage(emptyHistoryText(history.range)));
+  } else {
+    for (const job of finished) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
+  }
   applyPendingHighlight();
+}
+
+async function loadHistory() {
+  const gen = ++history.gen;
+  const range = history.range;
+  let items = [];
+  try {
+    const answer = await api.jobs(HISTORY_LIMIT, { range });
+    items = Array.isArray(answer) ? answer : [];
+  } catch {
+    // The store's newest jobs still show; the filter applies to them.
+    items = [];
+  }
+  if (gen !== history.gen) return; // a newer range was chosen meanwhile
+  history.jobs = items;
+  if (mounted() && historyKey(historyRows()) !== els.historyKey) renderHistory();
+}
+
+function setHistoryRange(range) {
+  if (!isRange(range) || range === history.range) return;
+  history.range = range;
+  history.jobs = [];
+  renderHistory();
+  loadHistory();
+}
+
+// ---------------------------------------------------------------------
+// Statistics header (WP D15c)
+// ---------------------------------------------------------------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const GRAPH_W = 300;
+const GRAPH_H = 60;
+
+const trafficPoll = createViewPoll({
+  fetcher: async () => {
+    const range = traffic.range;
+    const [throughput, series] = await Promise.all([api.throughput(range), api.throughputSeries(range)]);
+    return { range, throughput, series };
+  },
+  intervalMs: VIEW_POLL_MS,
+  onTick: (answer) => {
+    // An answer for a range the user has since left: dropped, the refresh
+    // the range change asked for is queued behind it.
+    if (!answer || answer.range !== traffic.range) return;
+    traffic.throughput = answer.throughput;
+    traffic.series = answer.series;
+    traffic.error = null;
+    traffic.unsupported = false;
+    traffic.noFigures = headerTiles(answer.throughput) === null;
+    paintStats();
+    paintJobSpeeds();
+  },
+  onError: (err) => {
+    if (err && err.kind === ERROR_KINDS.NOT_FOUND) {
+      // A server older than D15b: polling again cannot change that answer
+      // (an upgrade restarts vault-api; the next visit to this view asks
+      // again), so the poll stops here.
+      traffic.unsupported = true;
+      traffic.noFigures = true;
+      trafficPoll.stop();
+    } else {
+      traffic.error = errorText(err);
+    }
+    paintStats();
+  },
+});
+
+function setStatsRange(range) {
+  if (!isRange(range) || range === traffic.range) return;
+  traffic.range = range;
+  traffic.throughput = null;
+  traffic.series = null;
+  traffic.error = null;
+  paintStats();
+  paintJobSpeeds();
+  trafficPoll.refresh();
+}
+
+function svgEl(tag, attrs) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+  return node;
+}
+
+/** Repaint the note, the tiles and the graph from `traffic`. Nothing in
+ * here is focusable, so rebuilding the tiles takes no focus. */
+function paintStats() {
+  if (!mounted() || !els.statsNote) return;
+  const t = traffic.throughput;
+  let note = null;
+  if (traffic.unsupported) note = FEED_TEXT.unsupported;
+  else if (traffic.error && !t) note = `Could not load the statistics: ${traffic.error}`;
+  else if (t) note = joinNotes(traffic.error ? refreshFailedText(traffic.error) : null, feedNote(t));
+  else note = "Loading statistics…";
+  els.statsNote.textContent = note || "";
+  els.statsNote.hidden = !note;
+  // No figures (feed disabled, or a server without the endpoints): no
+  // range to choose either, the note stands alone. While an answer is
+  // pending the last known verdict holds, so a range click never hides
+  // the control it came from.
+  els.statsRange.hidden = traffic.noFigures;
+
+  const tiles = traffic.unsupported ? null : headerTiles(t);
+  els.statsGrid.replaceChildren();
+  els.statsGrid.hidden = !tiles;
+  for (const tile of tiles || []) {
+    const box = document.createElement("div");
+    box.className = "stat";
+    box.dataset.stat = tile.key;
+    box.title = tile.title;
+    const dt = document.createElement("dt");
+    dt.textContent = tile.label;
+    const dd = document.createElement("dd");
+    if (tile.value === DASH) {
+      const dash = document.createElement("span");
+      dash.setAttribute("aria-hidden", "true");
+      dash.textContent = DASH;
+      const sr = document.createElement("span");
+      sr.className = "sr-only";
+      sr.textContent = "Not available";
+      dd.append(dash, sr);
+    } else {
+      dd.textContent = tile.value;
+    }
+    if (tile.detail) {
+      const detail = document.createElement("span");
+      detail.className = "stat-detail";
+      detail.textContent = tile.detail;
+      dd.appendChild(detail);
+    }
+    box.append(dt, dd);
+    els.statsGrid.appendChild(box);
+  }
+  paintGraph();
+}
+
+function paintGraph() {
+  const s = traffic.series;
+  const show = !traffic.unsupported && s && feedState(s) !== "disabled" && s.range === traffic.range;
+  const geo = show ? seriesGeometry(s.points, { width: GRAPH_W, height: GRAPH_H }) : null;
+  els.graph.replaceChildren();
+  // An all-zero series is a flat line on the floor: nothing to show.
+  els.graph.hidden = !geo || geo.maxBytesPerSecond === 0;
+  if (els.graph.hidden) return;
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${GRAPH_W} ${GRAPH_H}`,
+    preserveAspectRatio: "none",
+    role: "img",
+    "aria-label": seriesLabel(s, geo.maxBytesPerSecond),
+  });
+  svg.dataset.role = "graph-svg";
+  svg.append(svgEl("path", { class: "tg-area", d: geo.area }), svgEl("path", { class: "tg-line", d: geo.line }));
+  const axis = document.createElement("div");
+  axis.className = "tg-axis";
+  axis.setAttribute("aria-hidden", "true");
+  for (const text of [seriesStartText(s), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"]) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    axis.appendChild(span);
+  }
+  els.graph.append(svg, axis);
+}
+
+/** Patch every running job card's speed line (text only). */
+function paintJobSpeeds() {
+  if (!mounted()) return;
+  const t = traffic.throughput;
+  const state = feedState(t);
+  const entries = new Map(((t && t.jobs) || []).map((j) => [j.job_id, j]));
+  for (const card of els.activeBody.querySelectorAll(".jobcard")) {
+    const line = card.querySelector('[data-role="job-speed"]');
+    if (!line) continue;
+    const text = t && t.range === traffic.range ? jobSpeedText(entries.get(Number(card.dataset.jid)), state) : null;
+    line.textContent = text || "";
+    line.hidden = !text;
+  }
 }
 
 /** Patch just the named jobs' `.jobacts`/`.stopnote` (their `stop_request`
@@ -1193,6 +1454,32 @@ function buildSection() {
   bulkNote.textContent = BULK.schedulerNote;
   bulkBar.append(bulkActs, bulkNote);
 
+  // WP D15c: the statistics header.
+  const stats = document.createElement("div");
+  stats.className = "dl-stats";
+  stats.setAttribute("role", "region");
+  stats.setAttribute("aria-label", "Download statistics");
+  stats.dataset.role = "dl-stats";
+  const statsRange = createRangeSegs({
+    label: "Statistics range",
+    value: traffic.range,
+    onChange: setStatsRange,
+    role: "stats-range",
+  });
+  const statsNote = hintMessage("");
+  statsNote.dataset.role = "stats-note";
+  statsNote.hidden = true;
+  const statsGrid = document.createElement("dl");
+  statsGrid.className = "statgrid";
+  statsGrid.dataset.role = "stats-grid";
+  statsGrid.hidden = true;
+  const graph = document.createElement("figure");
+  graph.className = "tgraph";
+  graph.dataset.role = "stats-graph";
+  graph.hidden = true;
+  statsRange.el.hidden = traffic.noFigures;
+  stats.append(statsRange.el, statsNote, statsGrid, graph);
+
   const activeHeading = sectionHeading("Active");
   const activeBody = document.createElement("div");
 
@@ -1226,11 +1513,19 @@ function buildSection() {
   const queueHint = hintMessage("");
 
   const historyHeading = sectionHeading("History");
+  // WP D15c: the History filter (its own range, default All).
+  const historyRange = createRangeSegs({
+    label: "History range",
+    value: history.range,
+    onChange: setHistoryRange,
+    role: "history-range",
+  });
   const historyBody = document.createElement("div");
 
   section.append(
     head,
     bulkBar,
+    stats,
     activeHeading,
     activeBody,
     pausedHeading,
@@ -1240,6 +1535,7 @@ function buildSection() {
     queueBody,
     queueHint,
     historyHeading,
+    historyRange.el,
     historyBody,
   );
 
@@ -1256,6 +1552,10 @@ function buildSection() {
     queueBody,
     queueHint,
     historyBody,
+    statsRange: statsRange.el,
+    statsNote,
+    statsGrid,
+    graph,
     updates,
     updatesHeading,
     updatesNote,
@@ -1333,6 +1633,7 @@ onConnectionChange(() => {
 onViewChange((view) => {
   if (view === "downloads") return;
   sectionEl = null;
+  trafficPoll.stop();
 });
 
 // Paint the pip immediately from whatever snapshot already exists (e.g.
@@ -1346,5 +1647,13 @@ export function renderDownloads() {
   fullRender();
   paintUpdates(); // WP UPD-6
   loadSchedule(); // WP UPD-6: the section's schedule note
+  paintStats();
+  // Same gate as the store's loops (store-singleton.js): no key and no
+  // demo mode means the onboarding overlay is up.
+  if (getStoredApiKey() || isDemoMode()) {
+    trafficPoll.start();
+    trafficPoll.refresh();
+    loadHistory();
+  }
   return section;
 }

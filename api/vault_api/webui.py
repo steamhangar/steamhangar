@@ -30,6 +30,10 @@ exactly THREE bottom-nav destinations: Library, Downloads, Settings.
 "Clients" is reached from the bypass banner as a sheet, not a nav item, and
 belongs to WP 4a.7 — dropped from ``_SPA_ROUTES`` here and from the nav
 markup / router in ``web/``.
+
+**WP D15c (user decision 2026-10-13).** Clients became its own page under
+Library, so ``clients`` is a view again; the PCs sheet stays for the bypass
+banner and the notifications.
 """
 
 from __future__ import annotations
@@ -48,7 +52,7 @@ logger = logging.getLogger(__name__)
 #: (tests/test_webui.py) parses both and asserts equality, so adding a view
 #: on only one side fails the suite instead of silently deep-linking to a
 #: 404 or leaving a nav button with no server-side route.
-_SPA_ROUTES = ("library", "downloads", "settings")
+_SPA_ROUTES = ("library", "clients", "downloads", "settings")
 
 #: The app shell itself always revalidates: a stale cached copy after a
 #: deploy is the one caching mistake worth actively avoiding here.

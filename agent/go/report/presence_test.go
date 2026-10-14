@@ -2,6 +2,8 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -140,5 +142,53 @@ func TestValidAgentVersion_Grammar(t *testing.T) {
 		if ValidAgentVersion(v) {
 			t.Errorf("ValidAgentVersion(%q) = true, want false", v)
 		}
+	}
+}
+
+// WP AGENT-ADDR-1: only what the server accepts is sent, canonical,
+// de-duplicated, sorted and capped; nothing usable omits the field.
+func TestPayload_WithLocalAddrsFiltersLikeTheServer(t *testing.T) {
+	p := Payload{ClientID: "pc", AppIDs: []int{440}}.WithLocalAddrs([]string{
+		"fd00:10:0:0::42", "127.0.0.1", "fe80::1", "::ffff:192.168.1.42", "192.168.1.42", "junk",
+	})
+	if want := []string{"192.168.1.42", "fd00:10::42"}; !reflect.DeepEqual(p.LocalAddrs, want) {
+		t.Errorf("LocalAddrs = %v, want %v", p.LocalAddrs, want)
+	}
+	body, _ := json.Marshal(p)
+	if want := `{"client_id":"pc","appids":[440],"local_addrs":["192.168.1.42","fd00:10::42"]}`; string(body) != want {
+		t.Errorf("body = %s, want %s", body, want)
+	}
+
+	none := Payload{ClientID: "pc", AppIDs: []int{440}}.WithLocalAddrs([]string{"127.0.0.1"})
+	body, _ = json.Marshal(none)
+	if want := `{"client_id":"pc","appids":[440]}`; string(body) != want {
+		t.Errorf("body = %s, want the field omitted: %s", body, want)
+	}
+
+	var many []string
+	for i := 1; i <= 12; i++ {
+		many = append(many, fmt.Sprintf("10.0.0.%d", i))
+	}
+	if got := len(Payload{}.WithLocalAddrs(many).LocalAddrs); got != 8 {
+		t.Errorf("len = %d, want the cap 8", got)
+	}
+}
+
+func TestPayload_HasAndWithoutNameTheOptionalFields(t *testing.T) {
+	p, _ := Payload{ClientID: "pc", AppIDs: []int{440}}.WithPresence("0.1.0", 10*time.Minute, true)
+	p = p.WithLocalAddrs([]string{"192.168.1.42"})
+	for _, name := range OptionalFields {
+		if !p.Has(name) {
+			t.Errorf("Has(%q) = false on a full payload", name)
+		}
+		if p.Without(name).Has(name) {
+			t.Errorf("Without(%q) kept it", name)
+		}
+	}
+	if !p.Without("local_addrs").Has("agent_version") {
+		t.Error("Without(local_addrs) dropped agent_version too")
+	}
+	if p.Has("appids") {
+		t.Error("Has(appids) = true: appids is not optional")
 	}
 }

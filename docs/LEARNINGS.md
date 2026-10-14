@@ -416,9 +416,10 @@ These are not style preferences; each entry cost a review round to learn.
   %2e%2e-encoded forms or a raw ASGI scope with un-normalized raw_path
   (WP 4a.1 review).
 - The frozen mockup is binding for UI surfaces: scaffolding must not add
-  navigation items or views the mockup lacks (Clients is a sheet, not a nav
-  entry) — any divergence is a user decision, recorded like the paused-slot
-  one (WP 4a.1 blocker).
+  navigation items or views the mockup lacks — any divergence is a user
+  decision, recorded like the paused-slot one (WP 4a.1 blocker). Example:
+  Clients started as a sheet, not a nav entry; the user's 2026-10-13
+  decision made it its own nav page (D15c).
 - Security-constant pins must assert STRING LITERALS, not the module's own
   constants: a test comparing the built URL against STEAM_API_BASE stays
   green when STEAM_API_BASE itself is mutated to attacker.example or http.

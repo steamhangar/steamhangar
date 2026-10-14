@@ -747,3 +747,24 @@ def test_a_v23_database_gains_the_table(tmp_path: Path) -> None:
         conn.close()
     assert version == SCHEMA_VERSION == 25
     assert "cache_completeness" in names
+
+
+def test_a_v25_database_without_the_v24_column_still_gains_it(tmp_path: Path) -> None:
+    """Merge order (AGENT-ADDR-1 v24 vs this v25): a file this branch stamped
+    25 before v24 existed must still get ``agent_reports.local_addrs``."""
+    path = str(tmp_path / "v25-first.db")
+    init_db(path)
+    raw = get_connection(path)
+    raw.execute("ALTER TABLE agent_reports DROP COLUMN local_addrs")
+    raw.execute("UPDATE schema_version SET version = 25")
+    raw.commit()
+    raw.close()
+
+    init_db(path)
+
+    conn = get_connection(path)
+    try:
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(agent_reports)")}
+    finally:
+        conn.close()
+    assert "local_addrs" in columns

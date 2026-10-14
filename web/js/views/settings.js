@@ -32,8 +32,10 @@
  *  - Connection — a single "Reconnect / switch account" action that
  *    replays the onboarding overlay (onboarding.js), matching the
  *    mockup's Settings screen.
- *  - PCs (agents) — WP WEB-FEAT-3: the "Agents: N online, M offline" line
- *    and a "Show PCs" button that opens the existing clients sheet
+ *  - PCs (agents) — WP D15c: now only a pointer to the Clients page, where
+ *    the block described next moved. Before D15c: WP WEB-FEAT-3: the
+ *    "Agents: N online, M offline" line and a "Show PCs" button that
+ *    opens the existing clients sheet
  *    (components/clients-sheet.js). Reusing the sheet instead of a second
  *    list here keeps ONE rendering of a PC row (presence chip, last seen,
  *    version, games, bypass state) with one store subscription and one
@@ -56,8 +58,8 @@
  * The settings form itself is not polled (settings rarely change from
  * outside this screen, so fetch-on-mount plus fetch-after-save is enough).
  * The one store-singleton subscription here (WP WEB-FEAT-3, "clients")
- * only rewrites the agents-summary text and the About "checked ... ago"
- * line; it never rebuilds the form.
+ * only rewrites the About "checked ... ago" line; it never rebuilds the
+ * form.
  */
 
 import { api, isDemoMode } from "../api.js";
@@ -84,12 +86,9 @@ import {
   describeLookupError,
   saveLibrarySteamId,
 } from "../lib/owned-library.js";
-import { onViewChange } from "../router.js";
+import { navigateTo, onViewChange } from "../router.js";
 import { store } from "../store-singleton.js";
-import { openClientsSheet } from "../components/clients-sheet.js";
-import { openAddDeviceSheet } from "../components/add-device-sheet.js";
 import { createStatusIcon } from "../components/status-icon.js";
-import { agentsSummaryText } from "../lib/clients-view.js";
 import {
   ABOUT_TOO_OLD_MESSAGE,
   aboutComponents,
@@ -923,58 +922,27 @@ function buildConnectionSection() {
 }
 
 // ---------------------------------------------------------------------
-// PCs (agents) section (WP WEB-FEAT-3)
+// PCs (agents) pointer (WP D15c)
 // ---------------------------------------------------------------------
 
-/** Agents line text from the store's latest clients snapshot; a waiting
- * text before the first answer (never "none" before it knows). */
-function currentAgentsText() {
-  const snap = store.snapshot("clients");
-  return agentsSummaryText(Array.isArray(snap) ? snap : null) || "Agents: waiting for the first answer from the server…";
-}
-
+/** WP D15c: adding, pairing and removing PCs moved to the Clients page
+ * (views/clients.js). Settings keeps a short pointer so the old way there
+ * still leads somewhere. */
 function buildPcsSection() {
   const wrap = document.createDocumentFragment();
   wrap.append(el("h4", "sec", "PCs (agents)"));
-  const summaryLine = el("p", "foot-note", currentAgentsText());
-  summaryLine.dataset.role = "agents-summary";
-  wrap.append(summaryLine);
   const row = el("div", "srow");
   const grow = el("span", "grow");
   grow.append(
-    el("span", "ttl", "PCs running vault-agent"),
-    el(
-      "span",
-      "desc",
-      "Online or offline, last seen, agent version, games and cache bypass state for every PC that has reported — offline PCs included.",
-    ),
+    el("span", "ttl", "PCs and devices"),
+    el("span", "desc", "Adding, pairing and removing PCs is on the Clients page now."),
   );
-  const btn = el("button", "btn ghost sm", "Show PCs");
+  const btn = el("button", "btn ghost sm", "Open Clients");
   btn.type = "button";
-  btn.dataset.role = "open-pcs";
-  btn.addEventListener("click", () => openClientsSheet());
+  btn.dataset.role = "open-clients";
+  btn.addEventListener("click", () => navigateTo("clients"));
   row.append(grow, btn);
   wrap.append(row);
-  // WP PAIR-1: "Add a device" — pair the Android app or another browser, or
-  // install vault-agent on a Windows PC, from this already-connected page.
-  const addRow = el("div", "srow");
-  const addGrow = el("span", "grow");
-  addGrow.append(
-    el("span", "ttl", "Add a device"),
-    el(
-      "span",
-      "desc",
-      "Pair the Android app or another browser, or get the install command for vault-agent on a Windows PC, without typing the address and API key.",
-    ),
-  );
-  const addBtn = el("button", "btn ghost sm", "Add");
-  addBtn.type = "button";
-  addBtn.dataset.role = "add-device";
-  addBtn.setAttribute("aria-label", "Add a device");
-  addBtn.addEventListener("click", () => openAddDeviceSheet());
-  addRow.append(addGrow, addBtn);
-  wrap.append(addRow);
-  els.agentsLines.push(summaryLine);
   return wrap;
 }
 
@@ -1298,13 +1266,12 @@ function buildAboutSection() {
   return wrap;
 }
 
-// The settings form is not polled, but the agents line and the About
-// "checked ... ago" text follow the store's clients ticks (every 20 s):
-// text only, nothing rebuilt. An `{error}` tick keeps the last text.
+// The settings form is not polled, but the About "checked ... ago" text
+// follows the store's clients ticks (every 20 s): text only, nothing
+// rebuilt. An `{error}` tick keeps the last text. (The agents line moved to
+// the Clients page with the PC management, WP D15c.)
 store.subscribe("clients", (payload) => {
   if (!mounted() || !payload || payload.error) return;
-  const text = agentsSummaryText(Array.isArray(payload.items) ? payload.items : null);
-  if (text) for (const line of els.agentsLines) line.textContent = text;
   paintAboutChecked();
 });
 
@@ -1377,7 +1344,6 @@ function fullRender() {
   renderSteamStatusLine();
   renderLookupResult();
 
-  els.agentsLines = [];
   els.body.append(buildConnectionSection(), buildPcsSection(), buildAboutSection());
 
   if (focusAboutOnRender) {
@@ -1455,7 +1421,7 @@ export function renderSettings() {
   section.append(h1, body);
 
   sectionEl = section;
-  els = { section, heading: h1, body, agentsLines: [] };
+  els = { section, heading: h1, body };
   aboutEls = null;
   drafts = {};
   loadSettings();

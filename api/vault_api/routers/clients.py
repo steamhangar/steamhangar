@@ -13,6 +13,9 @@ WP AGENT-FEAT-1 (schema v17) adds four more, again next to the old ones:
 
     {"agent_version", "report_interval_seconds", "presence", "offline_after"}
 
+WP AGENT-ADDR-1 (schema v24) adds two diagnostic lists, ``peer_addrs`` and
+``reported_addrs``, and changes where ``source_addrs`` comes from (below).
+
 The WP 2.4 shape was chosen to be forward-compatible — a flat object per
 client — and that held: every new field sits next to the old ones and nothing
 was restructured.
@@ -30,10 +33,17 @@ flip without re-implementing the rule.
 
 How a client is correlated with cache traffic
 ---------------------------------------------
-The event log knows **addresses**; agent reports know **client_ids**. Schema
-v9's ``agent_reports.source_addr`` is the only bridge: each report records the
-address it arrived from, and a client's statistics are the sum over every
-address its retained reports came from (``agent_reports.source_addrs_for``).
+The event log knows **addresses**; agent reports know **client_ids**. Per
+retained report the bridge is ``agent_reports.effective_addrs`` (WP
+AGENT-ADDR-1): the LAN addresses the agent stated (``local_addrs``, schema
+v24) when it stated any, otherwise the TCP peer the report arrived from
+(``source_addr``, schema v9) -- unless that peer is a forwarding hop
+(``vault_api/peer_hops.py``: loopback, or a gateway of vault-api's own routing
+table, which is what Docker's published port connects from). A client's
+``source_addrs`` is the union over its retained reports, and its statistics
+are the sum over those addresses. ``peer_addrs`` (raw TCP peers, hops
+included) and ``reported_addrs`` (what the agent stated) are shown for
+diagnosis only.
 
 Bypass detection, and why it fails toward NOT accusing
 ------------------------------------------------------
@@ -61,8 +71,11 @@ disqualifications, and only a client that survives all of them is flagged:
    off cannot be bypassing anything, and would otherwise be accused forever;
 4. the client reports **no** installed games (or its snapshot was unreadable) —
    nothing to download, so nothing to download around;
-5. no retained report recorded a source address — including every report
-   written before schema v9 — so the client cannot be correlated at all;
+5. no retained report gives a usable address -- every report written before
+   schema v9, and an old agent (no ``local_addrs``) whose only peer is a
+   forwarding hop such as the Docker bridge gateway -- so the client cannot be
+   correlated at all (WP AGENT-ADDR-1: before it, the gateway counted as the
+   PC's address and every agent PC behind a published port was accused);
 6. the client HAS appeared in the cache log within the window.
 
 Only then: reporting, recently, with games, from a known address, and with
@@ -103,10 +116,19 @@ class ClientOut(BaseModel):
     #: Size of the client's latest snapshot. ``null`` only if that stored row's
     #: JSON was unreadable (corrupt/hand-edited database; logged at WARNING).
     app_count: int | None
-    #: Addresses this client's retained reports arrived from (schema v9). The
-    #: keys its cache statistics are summed over. Empty for reports stored
-    #: before schema v9, which is why such a client is never bypass_suspected.
+    #: The addresses this client is correlated on -- the keys its cache
+    #: statistics are summed over (WP AGENT-ADDR-1: the agent's stated LAN
+    #: addresses, else the TCP peer unless it is a forwarding hop). Empty when
+    #: no retained report gives a usable address, which is why such a client
+    #: is never bypass_suspected.
     source_addrs: list[str]
+    #: WP AGENT-ADDR-1, diagnostics: raw TCP peers of the retained reports,
+    #: forwarding hops included (behind Docker's published port: the bridge
+    #: gateway).
+    peer_addrs: list[str]
+    #: WP AGENT-ADDR-1, diagnostics: LAN addresses the agent stated itself in
+    #: its retained reports; empty for agents from before AGENT-ADDR-1.
+    reported_addrs: list[str]
     #: Cache HITs served to this client, summed over the RETAINED statistics
     #: windows (VAULT_CLIENT_STATS_KEEP). Not a lifetime counter — old windows
     #: are pruned, so this number can go down. 0 when the event feed is off.
@@ -180,6 +202,8 @@ def list_clients(
             last_reported_at=summary.last_reported_at,
             app_count=summary.app_count,
             source_addrs=summary.source_addrs,
+            peer_addrs=summary.peer_addrs,
+            reported_addrs=summary.reported_addrs,
             cache_hits=totals[summary.client_id].hits,
             cache_misses=totals[summary.client_id].misses,
             bytes_served=totals[summary.client_id].bytes_served,

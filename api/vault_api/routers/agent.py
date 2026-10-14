@@ -27,6 +27,7 @@ from vault_api import agent_reports, is_valid_version
 from vault_api.agent_reports import (
     MAX_APPIDS_PER_REPORT,
     MAX_CLIENT_ID_LENGTH,
+    MAX_LOCAL_ADDRS,
     MAX_REPORT_INTERVAL_SECONDS,
     MIN_REPORT_INTERVAL_SECONDS,
 )
@@ -68,6 +69,26 @@ class InstalledReportRequest(BaseModel):
         StrictInt,
         Field(ge=MIN_REPORT_INTERVAL_SECONDS, le=MAX_REPORT_INTERVAL_SECONDS),
     ] | None = None
+
+    #: WP AGENT-ADDR-1 (schema v24), optional: the LAN addresses this PC uses
+    #: toward the vault, as the agent determined them (the source address of
+    #: a route to each address the vault host resolves to). vault-api
+    #: correlates the client with cache traffic on these instead of the TCP
+    #: peer, which behind Docker's published ports is the bridge gateway for
+    #: every PC. At most 8 plain IP literals; loopback, link-local,
+    #: unspecified, multicast and zone ids are refused (the agent never sends
+    #: them). Absent, ``null`` or ``[]``: fall back to the TCP peer.
+    local_addrs: list[StrictStr] | None = Field(default=None, max_length=MAX_LOCAL_ADDRS)
+
+    @field_validator("local_addrs")
+    @classmethod
+    def _validate_local_addrs(cls, value: list[str] | None) -> list[str] | None:
+        """Canonical, de-duplicated, sorted (``agent_reports.normalize_local_addrs``):
+        the values become correlation keys and appear in API answers and log
+        lines, so anything but a plain unicast IP literal is refused."""
+        if value is None:
+            return None
+        return agent_reports.normalize_local_addrs(value)
 
     @field_validator("agent_version")
     @classmethod
@@ -170,6 +191,14 @@ def report_installed_apps(
     enough). An operator who runs vault-api under their own uvicorn command
     without that flag re-opens this. ``request.client`` is ``None`` on some
     transports; the report is stored anyway, with a NULL address.
+
+    **Since WP AGENT-ADDR-1 the agent also states its own LAN addresses**
+    (``local_addrs``, schema v24), and correlation prefers them: behind
+    Docker's published ports the TCP peer is the bridge gateway for every
+    PC (measured 2026-10-14). Unlike the peer, these ARE chosen by the
+    caller -- but only by a caller holding the API key, which can already
+    delete cache content; the worst a lying agent achieves is mislabelled
+    statistics (docs/security/threat-model.md).
     """
     peer = request.client.host if request.client is not None else None
     with open_db() as conn:
@@ -181,6 +210,7 @@ def report_installed_apps(
             source_addr=peer,
             agent_version=body.agent_version,
             report_interval_seconds=body.report_interval_seconds,
+            local_addrs=body.local_addrs,
         )
 
     return InstalledReportResponse(
