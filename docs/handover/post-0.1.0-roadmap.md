@@ -492,6 +492,10 @@ one commit; review weight by package type (`docs/LEARNINGS.md`).
 **Release cut (user decision 2026-10-13):** rc15 = wave 1; rc16 = D11 +
 D9; rc17 = D15 + D16 (both rework Settings and both wait on Anträge:
 `VAULT_EVENT_LOG` on prod, settings volume).
+Revised 2026-10-14 (user, multiple choice): rc17 = D15 (a-d, ROT,
+RUNNER, client names, history delete) + AGENT-ADDR-1 (agent change
+allowed; the Windows PC needs the new agent once) + CACHE-COMPLETE-1 +
+LIB-LIST-1 + LIB-FILTER-INST-1 + UPD-6 Android; rc18 = D16 + APP-DIST-1.
 
 **Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
