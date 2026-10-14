@@ -545,6 +545,19 @@ live under notifications. Today a dismiss is permanent per browser
   every env value with a proposed editable/env-only class for the user's
   review.
 
+**User decisions 2026-10-14 (morning):**
+- UPD-5 (api, rc16): the scheduled update check is always on (oracle on),
+  independent of the schedule window; automatic downloads stay bound to
+  the window. Supersedes the window gate from the UPD-1 review (dev then
+  checks in the background too: anonymous metadata, allowed).
+- The web demo shows the "Never played" pill out of the box (demo seeds
+  the playtime gate, key and SteamID; real installs keep the gate off).
+- D15: clients can be given a name (by IP address; by MAC where the
+  vault can learn it — agents can report it, the server itself only sees
+  IPs).
+- D15: "Delete history" in two variants: everything, and older than
+  30 days.
+
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check
 updates" a clearly visible primary button and give "Check & update all
