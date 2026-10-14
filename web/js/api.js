@@ -235,6 +235,13 @@ export const api = {
   // `null` (204); 404 rejects with kind `not_found` and the caller decides
   // what that means (the PCs sheet reads it as "already gone").
   deleteClient: (clientId) => request("DELETE", `/v1/clients/${encodeURIComponent(clientId)}`),
+  // WP D15-NAMES: a client name is stored per address (`name_addr` of a
+  // clients row). Clearing is DELETE; its 404 "No name stored ..." means
+  // already cleared. `scope` of deleteHistory: "all" | "older-than-30d".
+  setClientName: (addr, name) =>
+    request("PUT", `/v1/client-names/ip/${encodeURIComponent(addr)}`, { body: { name } }),
+  clearClientName: (addr) => request("DELETE", `/v1/client-names/ip/${encodeURIComponent(addr)}`),
+  deleteHistory: (scope) => request("DELETE", "/v1/history", { params: { scope } }),
   // WP WEB-FEAT-3: Settings → About. Fetched when the Settings view opens
   // and on its Refresh button, never polled (the server caches 60 s).
   about: () => request("GET", "/v1/about"),

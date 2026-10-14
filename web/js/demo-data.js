@@ -64,6 +64,7 @@ import { ApiError, ERROR_KINDS } from "./errors.js";
 import { validSteamId64 } from "./lib/steamid.js";
 import { validSteamWebApiKey } from "./lib/steam-key-form.js";
 import { demoClientsOverview, demoSeries, demoThroughput } from "./demo-traffic.js";
+import { normalizeClientName } from "./lib/client-names.js";
 
 function isoAgo(msAgo) {
   return new Date(Date.now() - msAgo).toISOString();
@@ -586,6 +587,9 @@ function buildClients() {
       last_reported_at: utcIsoSeconds(Date.now() - 4 * 60_000),
       app_count: 148,
       source_addrs: ["10.10.0.21"],
+      // WP AGENT-ADDR-1 diagnostics: a current agent states its LAN address.
+      peer_addrs: ["10.10.0.21"],
+      reported_addrs: ["10.10.0.21"],
       cache_hits: 4213,
       cache_misses: 96,
       bytes_served: 812_345_678_912,
@@ -601,6 +605,9 @@ function buildClients() {
       last_reported_at: utcIsoSeconds(Date.now() - 2 * 3_600_000),
       app_count: 42,
       source_addrs: ["10.10.0.44"],
+      // A legacy agent states nothing; it is correlated on its TCP peer.
+      peer_addrs: ["10.10.0.44"],
+      reported_addrs: [],
       cache_hits: 3,
       cache_misses: 1,
       bytes_served: 41_943_040,
@@ -622,8 +629,119 @@ function handleGetClients() {
     }
     const [presence, offlineAfter] = demoPresence(c.last_reported_at, c.report_interval_seconds, nowMs);
     const { _demoReportEveryMs, ...wire } = c;
-    return { ...wire, presence, offline_after: offlineAfter };
+    return { ...wire, presence, offline_after: offlineAfter, ...demoAgentName(c) };
   });
+}
+
+// ---------------------------------------------------------------------
+// Client names (WP D15-NAMES; api/vault_api/client_names.py). Demo agents
+// own exactly their first source address (the overview fixture's
+// `addresses` is the same slice), so the server's rule "first named owned
+// address, an explicit name wins" reduces to one lookup here.
+// ---------------------------------------------------------------------
+
+/** canonical address -> name. */
+let clientNameMap = new Map();
+
+/** A demo-sized `client_names.canonical_ip`: dotted-quad IPv4 (no leading
+ * zeros) or an IPv6 literal lowercased; `null` for anything else. */
+function demoCanonicalIp(raw) {
+  if (typeof raw !== "string" || raw !== raw.trim() || !raw || raw.includes("%")) return null;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(raw);
+  if (v4) {
+    const ok = v4.slice(1).every((part) => (part === "0" || !part.startsWith("0")) && Number(part) <= 255);
+    return ok ? raw : null;
+  }
+  if (raw.includes(":") && /^[0-9a-fA-F:.]+$/.test(raw)) return raw.toLowerCase();
+  return null;
+}
+
+function resolvedName(name, addr, fallback) {
+  return { name: name ?? null, name_addr: addr ?? null, display_name: name ?? fallback };
+}
+
+function demoAgentName(client) {
+  const addr = Array.isArray(client.source_addrs) && client.source_addrs[0] ? demoCanonicalIp(client.source_addrs[0]) : null;
+  return resolvedName(addr ? clientNameMap.get(addr) : null, addr, client.client_id);
+}
+
+function demoAddressName(addr) {
+  const canonical = demoCanonicalIp(addr);
+  return resolvedName(canonical ? clientNameMap.get(canonical) : null, canonical, addr);
+}
+
+const CLIENT_NAME_RE = /^\/v1\/client-names\/([^/]+)\/([^/]+)$/;
+
+/** The path key, validated like `routers/client_names.py`'s `_key`. */
+function demoNameKey(type, encodedKey) {
+  if (type === "mac") throw validationError("Naming by MAC address is not supported yet: no source reports MACs.");
+  if (type !== "ip") throw validationError(`Unknown key type '${type}'; use 'ip'.`);
+  let key;
+  try {
+    key = decodeURIComponent(encodedKey);
+  } catch {
+    key = encodedKey;
+  }
+  const canonical = demoCanonicalIp(key);
+  if (!canonical) throw validationError(`'${key}' is not an IP address`);
+  return canonical;
+}
+
+function handleListClientNames() {
+  return [...clientNameMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, name]) => ({ key_type: "ip", key, name, updated_at: utcIsoSeconds(Date.now()) }));
+}
+
+function handlePutClientName(type, encodedKey, body) {
+  const key = demoNameKey(type, encodedKey);
+  if (!body || typeof body !== "object" || Object.keys(body).some((k) => k !== "name")) {
+    throw validationError("Body must be {\"name\": \"...\"}");
+  }
+  const checked = normalizeClientName(body.name);
+  if (!checked.ok) throw validationError(checked.error);
+  clientNameMap.set(key, checked.value);
+  return { key_type: "ip", key, name: checked.value, updated_at: utcIsoSeconds(Date.now()) };
+}
+
+function handleDeleteClientName(type, encodedKey) {
+  const key = demoNameKey(type, encodedKey);
+  if (!clientNameMap.delete(key)) throw notFound(`No name stored for '${key}'`);
+  return null;
+}
+
+// ---------------------------------------------------------------------
+// Delete history (WP D15-NAMES; api/vault_api/history.py): finished jobs
+// and the traffic statistics. The demo traffic is synthetic, so deleting
+// it records a "since" moment the traffic fixtures zero everything before.
+// ---------------------------------------------------------------------
+
+/** Traffic before this moment (ms) was deleted; `null` = nothing deleted. */
+let historySinceMs = null;
+
+const DEMO_TERMINAL = new Set(["done", "error", "cancelled"]);
+
+function handleDeleteHistory(scope) {
+  if (scope !== "all" && scope !== "older-than-30d") {
+    throw validationError("scope must be one of all, older-than-30d");
+  }
+  const nowMs = Date.now();
+  const cutoffMs = scope === "all" ? null : nowMs - 30 * 86_400_000;
+  const before = jobs.length;
+  jobs = jobs.filter((j) => {
+    if (!DEMO_TERMINAL.has(j.status)) return true;
+    if (cutoffMs === null) return false;
+    return Date.parse(j.finished_at || j.started_at || j.created_at) >= cutoffMs;
+  });
+  const since = cutoffMs === null ? nowMs : cutoffMs;
+  historySinceMs = historySinceMs === null ? since : Math.max(historySinceMs, since);
+  return {
+    scope,
+    cutoff: cutoffMs === null ? null : utcIsoSeconds(cutoffMs),
+    jobs_deleted: before - jobs.length,
+    // The demo has no stored rows to count.
+    traffic_rows_deleted: { client_traffic: 0, client_depot_traffic: 0, server_traffic: 0 },
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -746,6 +864,8 @@ export function resetDemoData({
   games = buildGames(librarySize ?? readLibrarySizePreference());
   jobs = buildJobs();
   clients = buildClients();
+  clientNameMap = new Map();
+  historySinceMs = null;
   nextJobId = 900002;
   updateCheck = seedDemoUpdateCheck();
   resetDemoSettings();
@@ -2024,12 +2144,14 @@ export async function demoRequest(method, path, { body, params } = {}) {
     const fallback = path === "/v1/clients/overview" ? "7d" : "24h";
     const range = params?.range ?? fallback;
     if (!Object.hasOwn(HISTORY_RANGE_MS, range)) throw validationError("range must be one of 24h, 7d, 30d, all");
-    if (path === "/v1/throughput/series") return demoSeries(range);
+    if (path === "/v1/throughput/series") return demoSeries(range, Date.now(), historySinceMs);
     const running = jobs.filter((j) => j.status === "running" && j.type === "prefill");
     if (path === "/v1/throughput") {
       return demoThroughput(
         range,
         running.map((j) => ({ id: j.id, appid: j.appid, started_at: j.started_at, name: findGame(j.appid)?.name ?? null })),
+        Date.now(),
+        historySinceMs,
       );
     }
     const installed = new Map();
@@ -2045,6 +2167,8 @@ export async function demoRequest(method, path, { body, params } = {}) {
       runningGame,
       games: games.map((g) => ({ appid: g.appid, name: g.name })),
       installed,
+      addressName: demoAddressName,
+      historySinceMs,
     });
   }
 
@@ -2355,6 +2479,18 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
   if (method === "DELETE" && (m = path.match(CLIENT_ID_RE))) {
     return handleDeleteClient(m[1]);
+  }
+  if (method === "GET" && path === "/v1/client-names") {
+    return handleListClientNames();
+  }
+  if (method === "PUT" && (m = path.match(CLIENT_NAME_RE))) {
+    return handlePutClientName(m[1], m[2], body);
+  }
+  if (method === "DELETE" && (m = path.match(CLIENT_NAME_RE))) {
+    return handleDeleteClientName(m[1], m[2]);
+  }
+  if (method === "DELETE" && path === "/v1/history") {
+    return handleDeleteHistory(params?.scope);
   }
   if (method === "GET" && path === "/v1/about") {
     return handleGetAbout();

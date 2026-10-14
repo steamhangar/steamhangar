@@ -49,6 +49,8 @@ EXPECTED_TABLES = {
     "client_traffic",
     "client_depot_traffic",
     "server_traffic",
+    # v26 (WP D15-NAMES): operator-set client names.
+    "client_names",
 }
 
 

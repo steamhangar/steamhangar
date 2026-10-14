@@ -326,7 +326,7 @@ startup error rather than a soft "no data": unset or empty means the default
 is refused, so a typo can neither look like it worked nor silently mean "off". Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v24)
+## Database schema (v26)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -357,6 +357,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `app_cover_art` | `appid` (PK), `cover_url`, `outcome`, `attempts`, `checked_at`, `next_check_at` | **v18**, WP API-FIX-5. One row per app the cover-art lookup asked Steam about: the validated cover URL or NULL, `found`/`none`/`failed`, consecutive failures, when to ask again. Read by `GET /v1/games[/{appid}]` as `cover_url`. See "Cover art lookup" below |
 | `app_cover_file` | `appid` (PK), `source_url`, `sha256`, `content_type`, `size_bytes`, `stored_at`, `attempts`, `next_try_at` | **v21**, WP D10 COVER-CACHE-1. One row per app whose cover image vault-api stores in `<data dir>/covers/<appid>.img`: the URL it came from, the file's SHA-256, type and size (all NULL while nothing is stored), plus the download backoff. Read by `GET /v1/games[/{appid}]` as `cover_cached_url` and by `GET /v1/covers/...`. See "Stored covers" below |
 | `client_traffic` / `client_depot_traffic` / `server_traffic` | `tier`, `bucket_at`, then address (and depot) plus counters, see "Traffic tiers" | **v23**, WP D15b. Event-log statistics bucketed by event time in three tiers (5m for 48 h, 1h for 30 days, 1d forever), written in the sweep's cursor transaction. `server_traffic` also keeps `peak_bucket_bytes` and `active_buckets`. See "Traffic tiers: long-term client and server statistics" below |
+| `client_names` | `key_type`, `key`, `name`, `updated_at`, PK `(key_type, key)` | **v26**, WP D15-NAMES (v25 is CACHE-COMPLETE-1a on a parallel branch). An operator-set client name per address: `key_type` `ip` (canonical IP literal); `mac` is allowed by the `CHECK` but refused by the API until an agent reports MACs. Plain `CREATE TABLE IF NOT EXISTS`, run on every start, so it does not depend on the version stamp. See "Client names" below |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -651,7 +652,7 @@ route, see "Auth").
 | POST   | `/v1/cache/{appid}/gc`             | Queue a garbage-collection job. Body optional; `{"execute": true}` (a literal JSON boolean) is the only way to delete — **dry run by default**. `202` with `{appid, job_id, status, type, mode, execute, deduplicated}`; `404` unknown appid or no mappings; `422` for `appid < 1`, a non-boolean `execute`, or an unrecognized body field. See "Garbage collection" below |
 | GET    | `/v1/cache/summary`                | `total_bytes` (disk usage of `depot/`, each depot counted once), `top_consumers` (top 10 `{appid, name, size_bytes}`, largest first), `unmapped_depots` (`{count, size_bytes}` for depot dirs on disk with no mapping row for any app), `free_disk_bytes` (free space on the cache filesystem, `null` if undeterminable) |
 | POST   | `/v1/agent/installed`              | Body `{"client_id": str, "appids": [int, ...]}` — store one **full-list** snapshot of a client's installed games. `200` with `{client_id, received, added, removed, first_report}`; `422` for a bad `client_id` (empty, > 64 chars, control characters, surrounding whitespace, `.`/`..`), an appid `< 1` or a boolean, a missing/non-list `appids`, more than 10 000 ids, or an unrecognized body field. Optional `local_addrs` (WP AGENT-ADDR-1): up to 8 unicast IP literals the PC uses toward the vault; `422` for anything else. See "Agent reports" and "Agent LAN addresses" below |
-| GET    | `/v1/clients`                      | One row per reporting client, sorted by `client_id`: `{client_id, first_seen, last_reported_at, app_count}` (WP 2.4) plus `{source_addrs, cache_hits, cache_misses, bytes_served, last_seen_in_cache_log, bypass_suspected}` (WP 3.11, ADR-0008 — the hit statistics and bypass warnings plan §5/§6 promised). The cache fields are `0`/`null`/`false` when the event feed is off. Plus `{peer_addrs, reported_addrs}` (WP AGENT-ADDR-1, diagnostics). See "Cache-event sweep → Bypass detection" and "Agent LAN addresses" |
+| GET    | `/v1/clients`                      | One row per reporting client, sorted by `client_id`: `{client_id, first_seen, last_reported_at, app_count}` (WP 2.4) plus `{source_addrs, cache_hits, cache_misses, bytes_served, last_seen_in_cache_log, bypass_suspected}` (WP 3.11, ADR-0008 — the hit statistics and bypass warnings plan §5/§6 promised). The cache fields are `0`/`null`/`false` when the event feed is off. Plus `{peer_addrs, reported_addrs}` (WP AGENT-ADDR-1, diagnostics). See "Cache-event sweep → Bypass detection" and "Agent LAN addresses" WP D15-NAMES adds `name`, `name_addr`, `display_name` (see "Client names"). |
 | DELETE | `/v1/clients/{client_id}`          | Remove one client's rows (WP AG-1 — the rename-cleanup path AG-0 named). `204` on success; `404` if the `client_id` has no rows at all. **Not a ban** — a client that reports again under the same id simply reappears with a fresh diff chain. See "Deleting a client" below |
 | GET    | `/v1/oracle/{appid}`               | Stored manifest-oracle view (WP 3.9): `{appid, enabled, checked_at, source, buildid, verdict, depots[]}`, each depot `{depotid, recorded_manifestid, oracle_manifestid, verdict, beta_branches[]}`. `verdict` is `current`/`stale`/`not_cached`/`unknown`. **No network, no `404`** — an app nobody asked about answers `checked_at: null`, and `enabled: false` when the oracle is off. `422` for `appid < 1` |
 | POST   | `/v1/oracle/{appid}/refresh`       | Ask the oracle now (WP 3.9). **This request leaves the LAN** when the oracle is enabled. Always `200`: `{appid, enabled, ok, error, checked_at, depot_count, branch_manifest_count, open_branches[], skipped_password_branches, warnings[]}` — an unreachable or garbage answer is `ok: false` with a reason, never a 5xx. `422` for `appid < 1` |
@@ -662,7 +663,11 @@ route, see "Auth").
 | GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, rotations_detected_total, last_rotation_detected_at, traffic_since, top_unmapped_depots[]}` (the three before the list: WP D15b). **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
 | GET    | `/v1/throughput`                   | WP D15b (D13 SPEED-1): Downloads header numbers from the traffic tiers. `?range=24h` (default) `|7d|30d|all`. `{event_feed, range, tier, bucket_seconds, range_start, active_window_minutes, current, active_clients_now, summary, jobs[]}`; traffic fields are `null` with the event feed off. See "Clients overview and throughput (WP D15b)" below |
 | GET    | `/v1/throughput/series`            | WP D15b: server-wide traffic per bucket for graphs, zero-filled, oldest first. `?range=` as above (24h: 288 x 5 min, 7d: 168 x 1 h, 30d: 720 x 1 h, all: daily from the first recorded day) |
-| GET    | `/v1/clients/overview`             | WP D15b: agent clients merged with every event-log address (agentless machines too): connected, installed (agents), loading now, recently loaded apps, per-range stats. `?range=7d` (default) `|24h|30d|all`. `GET /v1/clients` is unchanged |
+| GET    | `/v1/clients/overview`             | WP D15b: agent clients merged with every event-log address (agentless machines too): connected, installed (agents), loading now, recently loaded apps, per-range stats. `?range=7d` (default) `|24h|30d|all`. `GET /v1/clients` is unchanged WP D15-NAMES adds `name`, `name_addr`, `display_name` per client. |
+| GET    | `/v1/client-names`                 | WP D15-NAMES: every stored client name, `[{key_type, key, name, updated_at}]`. See "Client names" |
+| PUT    | `/v1/client-names/ip/{addr}`       | WP D15-NAMES: set or rename, body `{"name": "..."}` (trimmed, 1-40 characters, no control/format characters; extra fields `422`). `addr` any IP literal, stored canonically. `mac/{...}` is `422` (reserved). Answers the stored row |
+| DELETE | `/v1/client-names/ip/{addr}`       | WP D15-NAMES: clear a name; `204`, `404 "No name stored ..."` when there is none |
+| DELETE | `/v1/history?scope=`               | WP D15-NAMES: delete finished jobs and traffic statistics, `scope` = `all` or `older-than-30d` (required, else `422`). Answers `{scope, cutoff, jobs_deleted, traffic_rows_deleted}`. See "Delete history" |
 | GET    | `/v1/steam/key`                    | Opt-in Steam Web API relay (WP 4a.6r): key status only — `{configured, key_last4}`. `key_last4` is `null` when unconfigured; the full key is never returned |
 | PUT    | `/v1/steam/key`                    | Body `{"key": str}` — set (or replace) the relay's Web API key. `200` with the same shape `GET` returns; `422` unless `key` is exactly 32 hexadecimal characters |
 | DELETE | `/v1/steam/key`                    | Clear the configured key. `204` whether or not one was set |
@@ -4493,9 +4498,9 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
   addresses). A forwarding hop (the Docker bridge gateway) is never assigned
   to an agent. An agent from before AGENT-ADDR-1 behind a published port or
   reverse proxy therefore gets no address and the PC shows twice (agent
-  entry without traffic, address entry with it) until the agent is updated. There is no
-  naming of agentless addresses yet (the
-  event log has IPs only, no reverse DNS by design).
+  entry without traffic, address entry with it) until the agent is updated.
+  Names are operator-set per address (WP D15-NAMES, "Client names" below);
+  there is still no reverse DNS, by design.
 - **The prefill runner is counted as a client (known gap).** SteamPrefill
   in vault-runner downloads through vault-core like any PC, so its traffic
   appears as one `kind: "address"` entry and counts in `active_clients` /
@@ -4536,6 +4541,83 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
 - `GET /v1/jobs` keeps its 1..200 `limit`; there is no paging for long
   history views.
 - No web or Android UI (D15c/D15d), no change to `GET /v1/clients`.
+
+## Client names (WP D15-NAMES, schema v26)
+
+`vault_api/client_names.py`, `vault_api/routers/client_names.py`. The
+operator can name a client. vault-api only ever sees addresses, so a name is
+stored per **address** (`client_names`, `key_type = "ip"`). MAC-keyed names
+are reserved in the schema (`key_type = "mac"`) for when an agent reports its
+MAC; no source does today, and the API answers `422` for them.
+
+Every row of `GET /v1/clients` and `GET /v1/clients/overview` carries three
+fields, resolved by one shared function per client kind
+(`client_names.resolve_agent` / `resolve_address`, pinned structurally):
+
+| Field | Meaning |
+|-------|---------|
+| `name` | The operator-set name, `null` when none. |
+| `name_addr` | The address a rename writes to (`PUT /v1/client-names/ip/{name_addr}`): the address the current name is stored under, else the client's first owned address. `null` = the client cannot be named (an agent with no correlated address, e.g. an agent from before AGENT-ADDR-1 behind a published port). |
+| `display_name` | `name` when set, else the agent's `client_id`, else the address. |
+
+**The rule, stated once.** An address client shows the name stored for its
+address. An agent client shows the name of the first (sorted) address it
+**owns** (`agent_reports.address_owners`, i.e. the agent whose newest report
+correlates on that address via `effective_addrs`). Owned, not every retained
+`source_addrs` entry: a DHCP address that moved to another PC takes its name
+along. **An explicit name wins** over the PC name the agent reports
+(`client_id`); the agent keeps reporting under its `client_id`, which stays
+the identity key (bypass webhooks, `DELETE /v1/clients/{client_id}`,
+`installed_on` still use it).
+
+Validation is strict: the name is trimmed, then must be 1-40 characters
+(code points) with no control (`Cc`), format (`Cf`, e.g. zero-width or bidi
+controls), surrogate, private-use, unassigned or line/paragraph separator
+characters. The body is `{"name": <string>}` and nothing else. The address
+must be a plain IP literal (no zone id, no whitespace) and is stored in the
+canonical spelling the event log and `effective_addrs` use (compressed IPv6,
+IPv4-mapped unwrapped), so `::ffff:192.0.2.7` and `192.0.2.7` are one key.
+Naming an address the vault has not seen yet is allowed. Clearing is
+`DELETE`, never an empty name. `DELETE /v1/clients/{client_id}` and
+`DELETE /v1/history` never touch names.
+
+## Delete history (WP D15-NAMES)
+
+`DELETE /v1/history?scope=all` or `?scope=older-than-30d`
+(`vault_api/history.py`); `scope` is required.
+
+```json
+{"scope": "older-than-30d", "cutoff": "2026-09-14T08:00:00Z", "jobs_deleted": 12,
+ "traffic_rows_deleted": {"client_traffic": 840, "client_depot_traffic": 2210,
+                          "server_traffic": 31}}
+```
+
+**What history is:** finished jobs (`status` done, error, cancelled; prefill
+and GC, with their log excerpts) and the three traffic tables
+(`client_traffic`, `client_depot_traffic`, `server_traffic`, every tier).
+
+**Never touched:** queued, running and paused jobs; cache content and
+`apps` (incl. `last_prefill_at`, `last_manifest_check`); mappings and
+manifests; agent reports and client names; `client_cache_stats`,
+`depot_miss_stats` and `client_bypass_state` (about four hours of
+operational state the bypass rule and the miss trigger decide on; emptying
+it could raise a false "bypassing the cache" warning, and it ages out on its
+own, so `GET /v1/clients`' `cache_hits`/`bytes_served` still show those
+hours after a delete); the event-sweep cursor and counters.
+
+- `all`: every finished job and every traffic row; `event_feed.traffic_since`
+  becomes `null` until the next sweep writes.
+- `older-than-30d`: finished jobs whose finish time (else start, else
+  creation, the same rule as `GET /v1/jobs?range=`, `jobs.HISTORY_TIME_SQL`)
+  is before `cutoff` = now - 30 days, and traffic buckets that end at or
+  before the cutoff. A bucket that straddles the cutoff (e.g. the daily row
+  of the cutoff's day) is kept whole, because it also holds newer data.
+  `traffic_since` moves forward to the start of the cutoff's day if it was
+  earlier.
+
+One `BEGIN IMMEDIATE` transaction; a concurrent sweep lands wholly before or
+after it. The web UI asks for confirmation (Downloads -> History -> "Delete
+history…").
 
 ## Webhooks (WP 3.13)
 

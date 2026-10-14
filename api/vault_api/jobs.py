@@ -129,6 +129,12 @@ ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_RUNNING, STATUS_PAUSED)
 #: Cancelling one is a 409 — an outcome is history, not something to rewrite.
 TERMINAL_STATUSES = (STATUS_DONE, STATUS_ERROR, STATUS_CANCELLED)
 
+#: A job's place in history: when it finished, else started, else was
+#: created. The ONE definition shared by the ``GET /v1/jobs`` history filter
+#: (``list_jobs``, WP D15b) and ``DELETE /v1/history`` (``history.py``,
+#: WP D15-NAMES), so "older than 30 days" means the same row set in both.
+HISTORY_TIME_SQL = "COALESCE(finished_at, started_at, created_at)"
+
 #: Placeholders for ``status IN (...)`` over ``ACTIVE_STATUSES`` — keeps the
 #: count and the bound values trivially in sync (same device as
 #: ``deletion._ACTIVE_JOB_PLACEHOLDERS``). Before WP 3.12 three queries in this
@@ -574,14 +580,14 @@ def list_jobs(
     small scalars, not multi-KB text, so the same size argument doesn't apply.
     """
     rows = conn.execute(
-        """
+        f"""
         SELECT id, appid, type, status, created_at, started_at, finished_at,
                updated, up_to_date, summary_parse_ok, gc_execute,
                paused_at, stop_request
         FROM jobs
         WHERE ? IS NULL
            OR status IN (?, ?, ?)
-           OR COALESCE(finished_at, started_at, created_at) >= ?
+           OR {HISTORY_TIME_SQL} >= ?
         ORDER BY id DESC
         LIMIT ?
         """,

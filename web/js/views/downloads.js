@@ -82,6 +82,18 @@
  * The section is rebuilt only when its content changes
  * (`updatesListKey`), so a poll tick does not take a button's focus.
  *
+ * **Delete history (WP D15-NAMES).** Under the History filter, a "Delete
+ * history…" button opens a confirm dialog (alertdialog, focus on "Keep")
+ * with two choices, "Older than 30 days" (preselected) and "Everything",
+ * and `DELETE /v1/history?scope=` behind the confirm button. It lives here
+ * and not on the Clients page because both halves of what it deletes
+ * (finished jobs and the traffic statistics, `api/vault_api/history.py`)
+ * are shown on this page, next to the History time filter they are
+ * measured against; the Clients page only reads part of the statistics.
+ * After a delete the history list, the statistics header and the store's
+ * jobs are fetched again; a failure keeps the dialog open with the error.
+ * Wording: `lib/history-delete.js`.
+ *
  * Section order, top to bottom: heading, bulk bar, statistics header,
  * Active, Paused, Updates available, Queue, History.
  *
@@ -150,6 +162,17 @@ import { ownedLibrary } from "../owned-singleton.js";
 import { contentPackageFallbackTitle } from "../lib/content-groups.js";
 import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp, offersRetryFor } from "../lib/job-failure.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
+import {
+  HISTORY_DELETE_KEEPS,
+  HISTORY_DELETE_OPTIONS,
+  HISTORY_DELETE_TITLE,
+  HISTORY_DELETE_WHAT,
+  SCOPE_OLDER,
+  historyDeleteButtonText,
+  historyDeleteErrorText,
+  historyDeletedText,
+  isHistoryScope,
+} from "../lib/history-delete.js";
 import {
   WORDING as BULK,
   bulkBarState,
@@ -1227,6 +1250,159 @@ function setHistoryRange(range) {
 }
 
 // ---------------------------------------------------------------------
+// Delete history (WP D15-NAMES) — built once at module load as a
+// `document.body` sibling of `#app`, like the Pause all confirm above.
+// ---------------------------------------------------------------------
+
+const histBackdrop = document.createElement("div");
+histBackdrop.className = "dialog-backdrop";
+const histDialog = document.createElement("div");
+histDialog.className = "dialog hist-delete-dialog";
+histDialog.setAttribute("role", "alertdialog");
+histDialog.setAttribute("aria-modal", "true");
+histDialog.setAttribute("aria-labelledby", "hist-delete-title");
+histDialog.setAttribute("aria-describedby", "hist-delete-what hist-delete-keeps");
+histDialog.dataset.role = "history-delete-confirm";
+const histTitle = document.createElement("h3");
+histTitle.id = "hist-delete-title";
+histTitle.textContent = HISTORY_DELETE_TITLE;
+const histWhat = document.createElement("p");
+histWhat.id = "hist-delete-what";
+histWhat.textContent = HISTORY_DELETE_WHAT;
+const histScope = document.createElement("fieldset");
+histScope.className = "hist-scope";
+const histLegend = document.createElement("legend");
+histLegend.textContent = "What to delete";
+histScope.appendChild(histLegend);
+const histRadios = HISTORY_DELETE_OPTIONS.map((option) => {
+  const row = document.createElement("label");
+  row.className = "srow";
+  const radio = document.createElement("input");
+  radio.type = "radio";
+  radio.name = "history-delete-scope";
+  radio.value = option.value;
+  radio.id = `hist-scope-${option.value}`;
+  radio.dataset.role = "history-scope";
+  radio.addEventListener("change", () => paintHistDeleteButton());
+  const grow = document.createElement("span");
+  grow.className = "grow";
+  const ttl = document.createElement("span");
+  ttl.className = "ttl";
+  ttl.textContent = option.label;
+  const desc = document.createElement("span");
+  desc.className = "desc";
+  desc.textContent = option.desc;
+  grow.append(ttl, desc);
+  row.append(radio, grow);
+  histScope.appendChild(row);
+  return radio;
+});
+const histKeeps = document.createElement("p");
+histKeeps.id = "hist-delete-keeps";
+histKeeps.textContent = HISTORY_DELETE_KEEPS;
+const histError = document.createElement("p");
+histError.className = "errline";
+histError.dataset.role = "history-delete-error";
+histError.setAttribute("role", "alert");
+histError.hidden = true;
+const histRow = document.createElement("div");
+histRow.className = "row";
+const histNo = document.createElement("button");
+histNo.type = "button";
+histNo.className = "btn ghost sm";
+histNo.textContent = "Keep";
+histNo.dataset.role = "history-delete-no";
+const histYes = document.createElement("button");
+histYes.type = "button";
+histYes.className = "btn danger sm";
+histYes.dataset.role = "history-delete-yes";
+histRow.append(histNo, histYes);
+histDialog.append(histTitle, histWhat, histScope, histKeeps, histError, histRow);
+histBackdrop.appendChild(histDialog);
+document.body.appendChild(histBackdrop);
+
+const histFlow = { open: false, busy: false, invokerEl: null };
+
+function chosenHistoryScope() {
+  const checked = histRadios.find((r) => r.checked);
+  return checked && isHistoryScope(checked.value) ? checked.value : SCOPE_OLDER;
+}
+
+function paintHistDeleteButton() {
+  histYes.textContent = histFlow.busy ? "Deleting…" : historyDeleteButtonText(chosenHistoryScope());
+}
+
+function setHistBusy(busy) {
+  histFlow.busy = busy;
+  // aria-disabled + click guards, not `disabled` (LEARNINGS, WP WEB-FEAT-1).
+  for (const b of [histNo, histYes]) {
+    if (busy) b.setAttribute("aria-disabled", "true");
+    else b.removeAttribute("aria-disabled");
+  }
+  paintHistDeleteButton();
+}
+
+function setHistError(message) {
+  histError.textContent = message || "";
+  histError.hidden = !message;
+}
+
+function openHistoryDelete() {
+  if (histFlow.open || histFlow.busy) return;
+  for (const radio of histRadios) radio.checked = radio.value === SCOPE_OLDER;
+  setHistError(null);
+  setHistBusy(false);
+  histFlow.invokerEl = document.activeElement;
+  histFlow.open = true;
+  histBackdrop.classList.add("on");
+  pushModal(histBackdrop, () => {
+    if (!histFlow.busy) closeHistoryDelete();
+  });
+  histNo.focus(); // the non-destructive default gets initial focus
+}
+
+function closeHistoryDelete({ restoreFocus = true } = {}) {
+  if (!histFlow.open) return;
+  histFlow.open = false;
+  histBackdrop.classList.remove("on");
+  popModal(histBackdrop);
+  const invoker = histFlow.invokerEl;
+  histFlow.invokerEl = null;
+  if (!restoreFocus) return;
+  const live = mounted() ? els.historyDeleteBtn : null;
+  const target = live || invoker;
+  if (target && typeof target.focus === "function" && target.isConnected !== false) target.focus();
+}
+
+async function confirmHistoryDelete() {
+  if (histFlow.busy || !histFlow.open) return;
+  const scope = chosenHistoryScope();
+  setHistError(null);
+  setHistBusy(true);
+  let result;
+  try {
+    result = await api.deleteHistory(scope);
+  } catch (err) {
+    setHistBusy(false);
+    setHistError(historyDeleteErrorText(err));
+    return;
+  }
+  setHistBusy(false);
+  closeHistoryDelete();
+  showToast(historyDeletedText(result));
+  history.jobs = [];
+  if (mounted()) renderHistory();
+  loadHistory();
+  trafficPoll.refresh();
+  store.refreshNow();
+}
+
+histNo.addEventListener("click", () => {
+  if (!histFlow.busy) closeHistoryDelete();
+});
+histYes.addEventListener("click", () => confirmHistoryDelete());
+
+// ---------------------------------------------------------------------
 // Statistics header (WP D15c)
 // ---------------------------------------------------------------------
 
@@ -1520,6 +1696,16 @@ function buildSection() {
     onChange: setHistoryRange,
     role: "history-range",
   });
+  // WP D15-NAMES: "Delete history…" under the filter.
+  const historyActs = document.createElement("div");
+  historyActs.className = "jobacts dl-history-acts";
+  const historyDeleteBtn = document.createElement("button");
+  historyDeleteBtn.type = "button";
+  historyDeleteBtn.className = "btn ghost sm";
+  historyDeleteBtn.textContent = "Delete history…";
+  historyDeleteBtn.dataset.role = "history-delete";
+  historyDeleteBtn.addEventListener("click", () => openHistoryDelete());
+  historyActs.appendChild(historyDeleteBtn);
   const historyBody = document.createElement("div");
 
   section.append(
@@ -1536,6 +1722,7 @@ function buildSection() {
     queueHint,
     historyHeading,
     historyRange.el,
+    historyActs,
     historyBody,
   );
 
@@ -1552,6 +1739,7 @@ function buildSection() {
     queueBody,
     queueHint,
     historyBody,
+    historyDeleteBtn,
     statsRange: statsRange.el,
     statsNote,
     statsGrid,
@@ -1632,6 +1820,9 @@ onConnectionChange(() => {
 
 onViewChange((view) => {
   if (view === "downloads") return;
+  // The history confirm belongs to this page; an in-flight delete still
+  // finishes and refreshes the store.
+  closeHistoryDelete({ restoreFocus: false });
   sectionEl = null;
   trafficPoll.stop();
 });

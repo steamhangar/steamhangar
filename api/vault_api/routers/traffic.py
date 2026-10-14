@@ -41,6 +41,11 @@ AGENT-ADDR-1 behind a reverse proxy or published port gets no address; the
 PC then appears twice (agent entry without cache traffic, address entry
 with it) until its agent is updated.
 
+Names (WP D15-NAMES): every client carries ``name``, ``name_addr`` and
+``display_name``, resolved by ``client_names.resolve_agent`` /
+``resolve_address`` -- the same functions ``GET /v1/clients`` uses, on the
+same ``address_owners`` map.
+
 Known gap: the prefill runner's own downloads appear as an ordinary address
 client and count as an active client. Its address as vault-core logs it
 depends on the host's routing/NAT and cannot be derived deterministically
@@ -59,7 +64,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
-from vault_api import agent_reports, event_sweep, peer_hops, traffic
+from vault_api import agent_reports, client_names, event_sweep, peer_hops, traffic
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener
@@ -246,6 +251,15 @@ class ClientActivityOut(BaseModel):
     #: Top apps by bytes over the selected range; null when disabled.
     recent_apps: list[RecentAppOut] | None
     recent_unattributed_bytes: int | None
+    #: WP D15-NAMES: the operator-set name, null when none
+    #: (``client_names.resolve_agent`` / ``resolve_address``).
+    name: str | None
+    #: WP D15-NAMES: the address a rename writes to; null = cannot be named
+    #: (an agent with no assigned address).
+    name_addr: str | None
+    #: WP D15-NAMES: ``name`` when set (an explicit name wins), else the
+    #: agent's client_id, else the address.
+    display_name: str
 
 
 class ClientsOverviewOut(BaseModel):
@@ -515,6 +529,7 @@ def get_clients_overview(
             for summary in summaries
         }
         owners = agent_reports.address_owners(conn, is_hop)
+        client_name_map = client_names.ip_names(conn)
 
         totals: dict[str, traffic.Totals] = {}
         last_seen: dict[str, str] = {}
@@ -614,6 +629,7 @@ def get_clients_overview(
         apps, unattributed = recent_apps(addrs)
         snapshot = snapshots.get(summary.client_id)
         installed = snapshot.appids if snapshot is not None else None
+        named = client_names.resolve_agent(client_name_map, owners, summary.client_id)
         clients.append(
             ClientActivityOut(
                 key=f"agent:{summary.client_id}",
@@ -634,12 +650,16 @@ def get_clients_overview(
                 loading_now=loading(addrs),
                 recent_apps=apps,
                 recent_unattributed_bytes=unattributed,
+                name=named.name,
+                name_addr=named.name_addr,
+                display_name=named.display_name,
             )
         )
 
     for addr in sorted(listed - set(owners)):
         cache_active, seen_in_log, stats = cache_view([addr])
         apps, unattributed = recent_apps([addr])
+        named = client_names.resolve_address(client_name_map, addr)
         clients.append(
             ClientActivityOut(
                 key=f"addr:{addr}",
@@ -658,6 +678,9 @@ def get_clients_overview(
                 loading_now=loading([addr]),
                 recent_apps=apps,
                 recent_unattributed_bytes=unattributed,
+                name=named.name,
+                name_addr=named.name_addr,
+                display_name=named.display_name,
             )
         )
 

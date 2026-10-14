@@ -25,8 +25,23 @@
  * Polling: the overview is fetched while this view is on screen only
  * (`createViewPoll`, 30 s, the store's own loop machinery), and stopped on
  * navigation. The agents summary follows the store's `clients` ticks, as
- * it did in Settings. The list is rebuilt per answer; its cards hold no
- * focusable control, so a rebuild cannot take focus from anything.
+ * it did in Settings. The list is rebuilt per answer.
+ *
+ * **Rename (WP D15-NAMES).** Every card whose row carries a `name_addr`
+ * has a "Rename" button. It opens a small dialog (the `.dialog-backdrop`/
+ * `.dialog` markup of the other confirm dialogs, stacked through
+ * `lib/modal-stack.js`: Escape closes it, the page behind is inert) with
+ * one labelled text field, the address the name is stored for, and Save /
+ * Cancel, plus "Remove name" when the client has one. Save sends
+ * `PUT /v1/client-names/ip/{name_addr}`, Remove `DELETE` (its own 404 =
+ * already removed); the dialog stays open on failure and shows the error
+ * in a `role=alert` line. The card title is the server's `display_name`;
+ * the rule "an explicit name wins over the agent's PC name" lives on the
+ * server (`api/vault_api/client_names.py`). Because the cards now hold a
+ * button, a rebuild puts focus back on the same card's Rename button when
+ * it had it, and closing the dialog focuses the CURRENT card's button (a
+ * poll may have rebuilt the list meanwhile). Wording:
+ * `lib/client-names.js`.
  */
 
 import { store } from "../store-singleton.js";
@@ -37,6 +52,19 @@ import { onViewChange } from "../router.js";
 import { openClientsSheet } from "../components/clients-sheet.js";
 import { openAddDeviceSheet } from "../components/add-device-sheet.js";
 import { createRangeSegs } from "../components/range-segs.js";
+import { showToast } from "../components/toast.js";
+import { pushModal, popModal } from "../lib/modal-stack.js";
+import {
+  canRename,
+  hasCustomName,
+  isNameAlreadyGone,
+  nameRemovedToastText,
+  normalizeClientName,
+  renameErrorText,
+  renameHint,
+  renamedToastText,
+  renameTitle,
+} from "../lib/client-names.js";
 import { agentsSummaryText } from "../lib/clients-view.js";
 import { FEED_TEXT, feedNote, feedState, isRange, joinNotes, refreshFailedText } from "../lib/traffic-view.js";
 import {
@@ -144,7 +172,25 @@ function buildCard(client, range, nowMs) {
   const recent = recentAppsText(client);
   if (recent) card.appendChild(line(recent, "recent"));
   card.appendChild(line(lastActiveText(client, nowMs), "last-active"));
+  if (canRename(client)) {
+    const acts = el("div", "jobacts");
+    const btn = el("button", "btn ghost sm", "Rename");
+    btn.type = "button";
+    btn.dataset.role = "rename-client";
+    // Every card has one: the accessible name says which (label-in-name).
+    btn.setAttribute("aria-label", `Rename ${clientName(client)}`);
+    btn.addEventListener("click", () => openRename(client));
+    acts.appendChild(btn);
+    card.appendChild(acts);
+  }
   return card;
+}
+
+/** The Rename button of the card with `key`, in the list as it is NOW. */
+function renameButtonFor(key) {
+  if (!els || key == null) return null;
+  const card = Array.from(els.list.querySelectorAll(".clcard")).find((c) => c.dataset.clientKey === key);
+  return card ? card.querySelector('[data-role="rename-client"]') : null;
 }
 
 /** Repaint the note, the sub-line and the list from `state`. */
@@ -160,6 +206,12 @@ function paint() {
   // No statistics (feed disabled, old server): no range selector either.
   els.range.hidden = state.noFigures;
 
+  // A rebuild must not take focus from a card's Rename button.
+  const active = document.activeElement;
+  const focusKey =
+    active && active.dataset && active.dataset.role === "rename-client" && els.list.contains(active)
+      ? active.parentNode && active.parentNode.parentNode && active.parentNode.parentNode.dataset.clientKey
+      : null;
   els.list.replaceChildren();
   if (state.unsupported) {
     els.sub.textContent = "";
@@ -178,7 +230,167 @@ function paint() {
   const nowMs = Date.now();
   for (const client of clients) els.list.appendChild(buildCard(client, data.range, nowMs));
   els.agentlessNote.hidden = !clients.some((c) => !isAgentClient(c));
+  if (focusKey) {
+    const again = renameButtonFor(focusKey);
+    if (again) again.focus();
+  }
 }
+
+// ---------------------------------------------------------------------
+// Rename dialog (WP D15-NAMES)
+// ---------------------------------------------------------------------
+
+const renameBackdrop = document.createElement("div");
+renameBackdrop.className = "dialog-backdrop";
+const renameDialog = document.createElement("form");
+renameDialog.className = "dialog cl-rename-dialog";
+renameDialog.setAttribute("role", "dialog");
+renameDialog.setAttribute("aria-modal", "true");
+renameDialog.setAttribute("aria-labelledby", "cl-rename-title");
+renameDialog.setAttribute("aria-describedby", "cl-rename-hint");
+renameDialog.dataset.role = "rename-dialog";
+renameDialog.noValidate = true;
+const renameTitleEl = el("h3");
+renameTitleEl.id = "cl-rename-title";
+const renameField = el("div", "field");
+const renameLabel = el("label", null, "Name");
+renameLabel.htmlFor = "cl-rename-input";
+const renameInput = document.createElement("input");
+renameInput.id = "cl-rename-input";
+renameInput.className = "inp txt";
+renameInput.type = "text";
+renameInput.autocomplete = "off";
+renameInput.spellcheck = false;
+renameInput.dataset.role = "rename-input";
+renameInput.setAttribute("aria-describedby", "cl-rename-hint cl-rename-error");
+renameField.append(renameLabel, renameInput);
+const renameHintEl = el("p", "foot-note");
+renameHintEl.id = "cl-rename-hint";
+const renameError = el("p", "errline");
+renameError.id = "cl-rename-error";
+renameError.dataset.role = "rename-error";
+renameError.setAttribute("role", "alert");
+renameError.hidden = true;
+const renameRow = el("div", "row");
+const renameClear = el("button", "btn ghost sm", "Remove name");
+renameClear.type = "button";
+renameClear.dataset.role = "rename-clear";
+const renameCancel = el("button", "btn ghost sm", "Cancel");
+renameCancel.type = "button";
+renameCancel.dataset.role = "rename-cancel";
+const renameSave = el("button", "btn primary sm", "Save");
+renameSave.type = "submit";
+renameSave.dataset.role = "rename-save";
+renameRow.append(renameClear, renameCancel, renameSave);
+renameDialog.append(renameTitleEl, renameField, renameHintEl, renameError, renameRow);
+renameBackdrop.appendChild(renameDialog);
+document.body.appendChild(renameBackdrop);
+
+const renameFlow = { client: null, invokerEl: null, busy: false };
+
+function setRenameError(message) {
+  renameError.textContent = message || "";
+  renameError.hidden = !message;
+}
+
+function setRenameBusy(busy, label) {
+  renameFlow.busy = busy;
+  // aria-disabled + click guards, not `disabled`: a disabled button drops
+  // keyboard focus (LEARNINGS, WP WEB-FEAT-1).
+  for (const b of [renameClear, renameCancel, renameSave]) {
+    if (busy) b.setAttribute("aria-disabled", "true");
+    else b.removeAttribute("aria-disabled");
+  }
+  renameSave.textContent = busy && label === "save" ? "Saving…" : "Save";
+  renameClear.textContent = busy && label === "clear" ? "Removing…" : "Remove name";
+}
+
+function openRename(client) {
+  if (renameFlow.busy || !canRename(client)) return;
+  renameFlow.client = client;
+  renameFlow.invokerEl = document.activeElement;
+  renameTitleEl.textContent = renameTitle(clientName(client));
+  renameInput.value = hasCustomName(client) ? client.name : "";
+  renameInput.placeholder = clientName(client);
+  renameHintEl.textContent = renameHint(client);
+  renameClear.hidden = !hasCustomName(client);
+  setRenameError(null);
+  setRenameBusy(false);
+  renameBackdrop.classList.add("on");
+  pushModal(renameBackdrop, () => {
+    if (!renameFlow.busy) closeRename();
+  });
+  renameInput.focus();
+  if (typeof renameInput.select === "function") renameInput.select();
+}
+
+function closeRename() {
+  if (!renameBackdrop.classList.contains("on")) return;
+  renameBackdrop.classList.remove("on");
+  popModal(renameBackdrop);
+  const key = renameFlow.client ? renameFlow.client.key : null;
+  const invoker = renameFlow.invokerEl;
+  renameFlow.client = null;
+  renameFlow.invokerEl = null;
+  // A poll may have rebuilt the list while the dialog was open: prefer the
+  // card's CURRENT button over the captured (maybe detached) one.
+  const target = renameButtonFor(key) || invoker;
+  if (target && typeof target.focus === "function") target.focus();
+}
+
+async function saveRename() {
+  const client = renameFlow.client;
+  if (renameFlow.busy || !client) return;
+  const checked = normalizeClientName(renameInput.value);
+  if (!checked.ok) {
+    setRenameError(checked.error);
+    renameInput.focus();
+    return;
+  }
+  setRenameBusy(true, "save");
+  try {
+    await api.setClientName(client.name_addr, checked.value);
+  } catch (err) {
+    setRenameBusy(false);
+    setRenameError(renameErrorText(err));
+    return;
+  }
+  setRenameBusy(false);
+  closeRename();
+  showToast(renamedToastText(checked.value));
+  poll.refresh();
+  store.refreshNow();
+}
+
+async function clearRename() {
+  const client = renameFlow.client;
+  if (renameFlow.busy || !client) return;
+  setRenameBusy(true, "clear");
+  try {
+    await api.clearClientName(client.name_addr);
+  } catch (err) {
+    if (!isNameAlreadyGone(err)) {
+      setRenameBusy(false);
+      setRenameError(renameErrorText(err));
+      return;
+    }
+  }
+  setRenameBusy(false);
+  closeRename();
+  const fallback = isAgentClient(client) && client.client_id ? client.client_id : client.name_addr;
+  showToast(nameRemovedToastText(fallback));
+  poll.refresh();
+  store.refreshNow();
+}
+
+renameDialog.addEventListener("submit", (event) => {
+  if (event && typeof event.preventDefault === "function") event.preventDefault();
+  saveRename();
+});
+renameClear.addEventListener("click", () => clearRename());
+renameCancel.addEventListener("click", () => {
+  if (!renameFlow.busy) closeRename();
+});
 
 // ---------------------------------------------------------------------
 // Manage PCs (moved from Settings → "PCs (agents)", WP WEB-FEAT-3/PAIR-1)
@@ -245,6 +457,13 @@ store.subscribe("clients", (payload) => {
 
 onViewChange((view) => {
   if (view === "clients") return;
+  // The rename dialog belongs to this page; an in-flight save still ends.
+  if (renameBackdrop.classList.contains("on")) {
+    renameBackdrop.classList.remove("on");
+    popModal(renameBackdrop);
+    if (!renameFlow.busy) renameFlow.client = null;
+    renameFlow.invokerEl = null;
+  }
   els = null;
   poll.stop();
 });

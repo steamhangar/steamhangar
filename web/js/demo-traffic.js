@@ -13,6 +13,12 @@
  * consistent story — workshop-pc downloading the running demo job's game,
  * loft-laptop offline, and two agentless addresses (one active, one not).
  * The feed is always `ok` in demo mode.
+ *
+ * WP D15-NAMES: "Delete history" in demo mode passes `sinceMs` (traffic
+ * before it was deleted): series buckets that start before it are zero,
+ * `traffic_since` moves up to it, and the per-client figures shrink to the
+ * part of the range after it. Client rows carry the server's name fields
+ * (`name`, `name_addr`, `display_name`).
  */
 
 const MIB = 1024 * 1024;
@@ -51,25 +57,26 @@ function rateAt(ms, bucketSeconds) {
   return Math.round(evening * dayFactor * 46 * MIB);
 }
 
-function feed(nowMs) {
+function feed(nowMs, sinceMs = null) {
+  const recorded = floorTo(nowMs - 45 * 86_400_000, 86400);
   return {
     enabled: true,
     state: "ok",
     // A sweep a minute ago: the feed is `ok` in demo mode.
     last_sweep_at: isoSeconds(nowMs - 60_000),
     sweep_interval_minutes: 5,
-    traffic_since: isoSeconds(floorTo(nowMs - 45 * 86_400_000, 86400)),
+    traffic_since: sinceMs === null || sinceMs <= recorded ? isoSeconds(recorded) : isoSeconds(sinceMs),
   };
 }
 
 /** `GET /v1/throughput/series` (demo). */
-export function demoSeries(range, nowMs = Date.now()) {
+export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
   const t = tierFor(range);
   const last = floorTo(nowMs, t.bucket);
   const points = [];
   for (let i = t.count - 1; i >= 0; i--) {
     const start = last - i * t.bucket * 1000;
-    const bps = rateAt(start, t.bucket);
+    const bps = sinceMs !== null && start < sinceMs ? 0 : rateAt(start, t.bucket);
     const served = Math.round(bps * t.bucket);
     const hit = Math.round(served * 0.82);
     points.push({
@@ -83,7 +90,7 @@ export function demoSeries(range, nowMs = Date.now()) {
     });
   }
   return {
-    event_feed: feed(nowMs),
+    event_feed: feed(nowMs, sinceMs),
     range: TIERS[range] ? range : "24h",
     tier: t.tier,
     bucket_seconds: t.bucket,
@@ -92,8 +99,8 @@ export function demoSeries(range, nowMs = Date.now()) {
   };
 }
 
-function summaryFor(range, nowMs) {
-  const { points, bucket_seconds: bucket } = demoSeries(range, nowMs);
+function summaryFor(range, nowMs, sinceMs) {
+  const { points, bucket_seconds: bucket } = demoSeries(range, nowMs, sinceMs);
   let served = 0;
   let hit = 0;
   let requests = 0;
@@ -119,15 +126,15 @@ function summaryFor(range, nowMs) {
     byte_hit_rate: served ? hit / served : null,
     average_bytes_per_second: active ? served / (active * 300) : null,
     peak_bytes_per_second: peak,
-    active_clients: range === "24h" ? 3 : 4,
+    active_clients: served === 0 ? 0 : range === "24h" ? 3 : 4,
   };
 }
 
 /** `GET /v1/throughput` (demo). `runningJobs`: `[{id, appid, started_at,
  * name}]`; each gets a speed while the workshop PC loads it. */
-export function demoThroughput(range, runningJobs, nowMs = Date.now()) {
+export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs = null) {
   const t = tierFor(range);
-  const f = feed(nowMs);
+  const f = feed(nowMs, sinceMs);
   const end = Date.parse(f.last_sweep_at);
   const windowSeconds = 300 + (Math.floor(end / 1000) % 300);
   const jobs = runningJobs.map((j) => ({
@@ -144,7 +151,7 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now()) {
     range: TIERS[range] ? range : "24h",
     tier: t.tier,
     bucket_seconds: t.bucket,
-    range_start: demoSeries(range, nowMs).range_start,
+    range_start: demoSeries(range, nowMs, sinceMs).range_start,
     active_window_minutes: 15,
     current: {
       bytes_per_second: jobs.length ? 38.2 * MIB : 2.1 * MIB,
@@ -153,7 +160,7 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now()) {
       window_seconds: windowSeconds,
     },
     active_clients_now: 2,
-    summary: summaryFor(range, nowMs),
+    summary: summaryFor(range, nowMs, sinceMs),
     jobs,
   };
 }
@@ -175,6 +182,15 @@ function stats(bytes, hitRate) {
 
 const RANGE_SCALE = Object.freeze({ "24h": 1, "7d": 4.2, "30d": 13, all: 19 });
 
+/** Share of `range` (0..1) that lies after `sinceMs` (WP D15-NAMES), in
+ * whole buckets: right after "Delete everything" it is exactly 0. */
+function keptShare(range, nowMs, sinceMs) {
+  if (sinceMs === null || sinceMs === undefined) return 1;
+  const t = tierFor(range);
+  const buckets = Math.floor((nowMs - sinceMs) / (t.bucket * 1000));
+  return Math.max(0, Math.min(1, buckets / t.count));
+}
+
 /**
  * `GET /v1/clients/overview` (demo).
  * @param {string} range
@@ -183,8 +199,10 @@ const RANGE_SCALE = Object.freeze({ "24h": 1, "7d": 4.2, "30d": 13, all: 19 });
  *   `agents` are demo `GET /v1/clients` rows (with presence).
  */
 export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
-  const f = feed(nowMs);
-  const scale = RANGE_SCALE[range] || 1;
+  const sinceMs = ctx.historySinceMs ?? null;
+  const f = feed(nowMs, sinceMs);
+  const scale = (RANGE_SCALE[range] || 1) * keptShare(range, nowMs, sinceMs);
+  const addressName = typeof ctx.addressName === "function" ? ctx.addressName : (addr) => ({ name: null, name_addr: addr, display_name: addr });
   const named = (appid) => {
     const g = ctx.games.find((x) => x.appid === appid);
     return g ? g.name ?? null : null;
@@ -226,8 +244,13 @@ export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
             unattributed_bytes_per_second: 2.2 * MIB,
           }
         : idle,
-      recent_apps: online ? recent(gameIds.slice(0, 4), 6 * GIB) : range === "24h" ? [] : recent(gameIds.slice(3, 4), 0.3 * GIB),
+      recent_apps:
+        scale <= 0 ? [] : online ? recent(gameIds.slice(0, 4), 6 * GIB) : range === "24h" ? [] : recent(gameIds.slice(3, 4), 0.3 * GIB),
       recent_unattributed_bytes: online ? Math.round(0.4 * GIB * scale) : 0,
+      // The demo /v1/clients row already carries the server's name fields.
+      name: a.name ?? null,
+      name_addr: a.name_addr ?? null,
+      display_name: a.display_name ?? a.client_id,
     };
   });
   // Two agentless addresses: a machine loading right now, and one last
@@ -247,11 +270,12 @@ export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
     installed_app_count: null,
     stats: stats(Math.round(3.1 * GIB * scale), 0.92),
     loading_now: { loading: true, bytes_per_second: 4.5 * MIB, apps: [], unattributed_bytes_per_second: 4.5 * MIB },
-    recent_apps: recent(gameIds.slice(0, 1), 2.4 * GIB),
+    recent_apps: scale > 0 ? recent(gameIds.slice(0, 1), 2.4 * GIB) : [],
     recent_unattributed_bytes: Math.round(0.7 * GIB * scale),
+    ...addressName("10.10.0.57"),
   });
   const oldMs = nowMs - 4 * 86_400_000;
-  const oldInRange = range !== "24h";
+  const oldInRange = range !== "24h" && (sinceMs === null || oldMs >= sinceMs);
   clients.push({
     key: "addr:10.10.0.63",
     kind: "address",
@@ -269,6 +293,7 @@ export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
     loading_now: idle,
     recent_apps: oldInRange ? recent(gameIds.slice(1, 2), 1.2 * GIB / scale) : [],
     recent_unattributed_bytes: 0,
+    ...addressName("10.10.0.63"),
   });
   // Server order: connected first, then newest last_active.
   clients.sort((a, b) => Number(b.connected === true) - Number(a.connected === true) || String(b.last_active).localeCompare(String(a.last_active)));
@@ -276,7 +301,7 @@ export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
     event_feed: f,
     range: TIERS[range] ? range : "7d",
     tier: tierFor(range).tier,
-    range_start: demoSeries(range, nowMs).range_start,
+    range_start: demoSeries(range, nowMs, sinceMs).range_start,
     active_window_minutes: 15,
     clients,
   };
