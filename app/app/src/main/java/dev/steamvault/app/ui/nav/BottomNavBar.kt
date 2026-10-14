@@ -11,6 +11,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import dev.steamvault.app.R
 
 /** The bottom nav (WP 4b.4 brief: three items; WP D15d added Clients) -- see [Destination]'s kdoc for
@@ -60,7 +61,18 @@ fun BottomNavBar(current: Destination, pendingJobsCount: Int = 0, onSelect: (Des
                         icon()
                     }
                 },
-                label = { Text(stringResource(destination.labelRes)) },
+                // WP D15d: with four items "Downloads" wrapped to
+                // "Download/s" at 360 dp and font 1.3. One line, never
+                // wrapped; a few dp of overflow are drawn into the item's
+                // own side padding instead of truncating the word.
+                label = {
+                    Text(
+                        stringResource(destination.labelRes),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Visible,
+                    )
+                },
             )
         }
     }
