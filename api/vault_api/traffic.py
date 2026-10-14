@@ -63,6 +63,18 @@ than three intervals (a stopped sweeper must not keep reporting the speed it
 saw an hour ago).
 
 Daily buckets are UTC days.
+
+The prefill runner's share (WP D15-RUNNER)
+------------------------------------------
+Rows are stored per address exactly as before; which rows are the prefill
+runner's is decided at READ time from ``runner_identity.windows`` (address
+plus a UTC-day-aligned time window). Every client-level reader takes a
+:class:`Scope`: ``all`` (every row), ``clients`` (rows outside every runner
+window) or ``runner`` (rows inside one). The two non-``all`` sides partition
+the rows, so ``clients + runner == all`` holds for every sum, in every tier
+(day-aligned windows select the same rows in each tier). ``server_traffic``
+has no address, so it stays the ALL figure; a client-only sum is
+``server - runner`` (``routers/traffic.py``).
 """
 
 from __future__ import annotations
@@ -73,6 +85,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from vault_api.jobs import parse_utc_iso, to_utc_iso
+from vault_api.runner_identity import RunnerWindow
 
 # --------------------------------------------------------------------------
 # Tiers
@@ -135,6 +148,54 @@ def active_window_minutes(sweep_interval_minutes: int) -> int:
     second interval keeps it from flickering between two sweeps.
     """
     return 2 * max(1, int(sweep_interval_minutes)) + 5
+
+
+# --------------------------------------------------------------------------
+# Runner scope (WP D15-RUNNER)
+# --------------------------------------------------------------------------
+
+SIDE_ALL = "all"
+SIDE_CLIENTS = "clients"
+SIDE_RUNNER = "runner"
+
+
+@dataclass(frozen=True)
+class Scope:
+    """Which rows of a per-address table a read covers (module docstring)."""
+
+    windows: tuple[RunnerWindow, ...] = ()
+    side: str = SIDE_ALL
+
+    def __post_init__(self) -> None:
+        if self.side not in (SIDE_ALL, SIDE_CLIENTS, SIDE_RUNNER):
+            raise ValueError(f"unknown scope side {self.side!r}")
+
+    def sql(self) -> tuple[str, list[str]]:
+        """``(" AND <condition>", params)`` for a query over ``client_addr``
+        and ``bucket_at``; ``("", [])`` when nothing needs filtering."""
+        if self.side == SIDE_ALL:
+            return "", []
+        if not self.windows:
+            return ("", []) if self.side == SIDE_CLIENTS else (" AND 0", [])
+        parts: list[str] = []
+        params: list[str] = []
+        for window in self.windows:
+            parts.append("(client_addr = ? AND bucket_at >= ? AND bucket_at < ?)")
+            params.extend((window.addr, window.start, window.end))
+        inside = "(" + " OR ".join(parts) + ")"
+        return (f" AND NOT {inside}" if self.side == SIDE_CLIENTS else f" AND {inside}"), params
+
+
+#: Every row (the pre-D15-RUNNER behaviour).
+ALL = Scope()
+
+
+def clients_scope(windows: tuple[RunnerWindow, ...]) -> Scope:
+    return Scope(windows=windows, side=SIDE_CLIENTS)
+
+
+def runner_scope(windows: tuple[RunnerWindow, ...]) -> Scope:
+    return Scope(windows=windows, side=SIDE_RUNNER)
 
 
 # --------------------------------------------------------------------------
@@ -536,8 +597,14 @@ class ServerSummary:
     distinct_clients: int
 
 
-def server_summary(conn: sqlite3.Connection, spec: RangeSpec) -> ServerSummary:
-    """Sums, peak and active-bucket count over one range."""
+def server_summary(
+    conn: sqlite3.Connection, spec: RangeSpec, scope: Scope = ALL
+) -> ServerSummary:
+    """Sums, peak and active-bucket count over one range.
+
+    Sums, peak and active buckets are server-wide (``server_traffic`` has no
+    address); ``scope`` applies to ``distinct_clients`` only.
+    """
     if spec.start is None:
         return ServerSummary(Totals(), 0, 0, 0)
     row = conn.execute(
@@ -549,12 +616,13 @@ def server_summary(conn: sqlite3.Connection, spec: RangeSpec) -> ServerSummary:
         """,
         (spec.tier, spec.start),
     ).fetchone()
+    where, params = scope.sql()
     clients = conn.execute(
-        """
+        f"""
         SELECT COUNT(DISTINCT client_addr) AS n FROM client_traffic
-        WHERE tier = ? AND bucket_at >= ? AND bytes_served > 0
+        WHERE tier = ? AND bucket_at >= ? AND bytes_served > 0{where}
         """,
-        (spec.tier, spec.start),
+        (spec.tier, spec.start, *params),
     ).fetchone()
     return ServerSummary(
         totals=_totals(row),
@@ -621,56 +689,130 @@ def server_bytes_since(conn: sqlite3.Connection, start: str) -> int:
 
 
 def client_totals(
-    conn: sqlite3.Connection, tier: str, start: str | None
+    conn: sqlite3.Connection, tier: str, start: str | None, scope: Scope = ALL
 ) -> dict[str, Totals]:
     """Per-address sums over one tier from ``start`` (``None`` = nothing)."""
     if start is None:
         return {}
+    where, params = scope.sql()
     rows = conn.execute(
         f"""
         SELECT client_addr, {_SUM_COLUMNS}, MAX(last_seen) AS last_seen
-        FROM client_traffic WHERE tier = ? AND bucket_at >= ?
+        FROM client_traffic WHERE tier = ? AND bucket_at >= ?{where}
         GROUP BY client_addr
         """,
-        (tier, start),
+        (tier, start, *params),
     ).fetchall()
     return {str(row["client_addr"]): _totals(row) for row in rows}
 
 
-def last_seen_by_addr(conn: sqlite3.Connection) -> dict[str, str]:
-    """Newest event time per address over everything kept (the daily tier)."""
+def scoped_totals(
+    conn: sqlite3.Connection, tier: str, start: str | None, scope: Scope
+) -> Totals:
+    """All addresses' sums in ``scope`` over one tier from ``start``."""
+    if start is None:
+        return Totals()
+    where, params = scope.sql()
+    row = conn.execute(
+        f"""
+        SELECT {_SUM_COLUMNS}, MAX(last_seen) AS last_seen
+        FROM client_traffic WHERE tier = ? AND bucket_at >= ?{where}
+        """,
+        (tier, start, *params),
+    ).fetchone()
+    return _totals(row)
+
+
+def scoped_bucket_totals(
+    conn: sqlite3.Connection, spec: RangeSpec, scope: Scope
+) -> dict[str, Totals]:
+    """``{bucket_at: sums}`` of the rows in ``scope`` over one range."""
+    if spec.start is None:
+        return {}
+    where, params = scope.sql()
     rows = conn.execute(
-        """
+        f"""
+        SELECT bucket_at, {_SUM_COLUMNS}
+        FROM client_traffic WHERE tier = ? AND bucket_at >= ? AND bucket_at <= ?{where}
+        GROUP BY bucket_at
+        """,
+        (spec.tier, spec.start, spec.end, *params),
+    ).fetchall()
+    return {str(row["bucket_at"]): _totals(row) for row in rows}
+
+
+def active_addrs(
+    conn: sqlite3.Connection, now: datetime, minutes: int, scope: Scope = ALL
+) -> dict[str, str]:
+    """Addresses whose newest line in ``scope`` is within ``minutes`` -> that
+    time (5-minute tier)."""
+    since = to_utc_iso(now - timedelta(minutes=minutes))
+    where, params = scope.sql()
+    rows = conn.execute(
+        f"""
+        SELECT client_addr, MAX(last_seen) AS seen FROM client_traffic
+        WHERE tier = '5m' AND bucket_at >= ?{where}
+        GROUP BY client_addr HAVING MAX(last_seen) >= ?
+        """,
+        (bucket_iso(now - timedelta(minutes=minutes), TIER_5M), *params, since),
+    ).fetchall()
+    return {str(row["client_addr"]): str(row["seen"]) for row in rows}
+
+
+def subtract(whole: Totals, part: Totals) -> Totals:
+    """``whole - part`` per counter, floored at 0 (``last_seen`` dropped)."""
+    return Totals(
+        requests=max(0, whole.requests - part.requests),
+        hits=max(0, whole.hits - part.hits),
+        misses=max(0, whole.misses - part.misses),
+        bypasses=max(0, whole.bypasses - part.bypasses),
+        errors=max(0, whole.errors - part.errors),
+        bytes_served=max(0, whole.bytes_served - part.bytes_served),
+        hit_bytes=max(0, whole.hit_bytes - part.hit_bytes),
+        miss_bytes=max(0, whole.miss_bytes - part.miss_bytes),
+    )
+
+
+def last_seen_by_addr(conn: sqlite3.Connection, scope: Scope = ALL) -> dict[str, str]:
+    """Newest event time per address over everything kept (the daily tier)."""
+    where, params = scope.sql()
+    rows = conn.execute(
+        f"""
         SELECT client_addr, MAX(last_seen) AS last_seen FROM client_traffic
-        WHERE tier = '1d' GROUP BY client_addr
-        """
+        WHERE tier = '1d'{where} GROUP BY client_addr
+        """,
+        params,
     ).fetchall()
     return {str(row["client_addr"]): str(row["last_seen"]) for row in rows}
 
 
-def addrs_seen_since(conn: sqlite3.Connection, since: str) -> set[str]:
+def addrs_seen_since(
+    conn: sqlite3.Connection, since: str, scope: Scope = ALL
+) -> set[str]:
     """Addresses with any line in the hourly tier from ``since`` on."""
+    where, params = scope.sql()
     rows = conn.execute(
-        """
+        f"""
         SELECT DISTINCT client_addr FROM client_traffic
-        WHERE tier = '1h' AND bucket_at >= ?
+        WHERE tier = '1h' AND bucket_at >= ?{where}
         """,
-        (since,),
+        (since, *params),
     ).fetchall()
     return {str(row["client_addr"]) for row in rows}
 
 
 def depot_bytes(
-    conn: sqlite3.Connection, tier: str, start: str
+    conn: sqlite3.Connection, tier: str, start: str, scope: Scope = ALL
 ) -> dict[str, dict[int, tuple[int, str]]]:
     """``{addr: {depotid: (bytes_served, last_seen)}}`` over one tier/range."""
+    where, params = scope.sql()
     rows = conn.execute(
-        """
+        f"""
         SELECT client_addr, depotid, SUM(bytes_served) AS b, MAX(last_seen) AS seen
-        FROM client_depot_traffic WHERE tier = ? AND bucket_at >= ?
+        FROM client_depot_traffic WHERE tier = ? AND bucket_at >= ?{where}
         GROUP BY client_addr, depotid
         """,
-        (tier, start),
+        (tier, start, *params),
     ).fetchall()
     result: dict[str, dict[int, tuple[int, str]]] = {}
     for row in rows:

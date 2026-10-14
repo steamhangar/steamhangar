@@ -720,6 +720,18 @@ render_and_test() {
                 probe 404 "S2 trailing slash (cached-depot oracle)" http://127.0.0.1/depot/70403/chunk/
                 probe 404 "S2 trailing slash, depot root"   http://127.0.0.1/depot/70403/
                 probe 200 "/health still answers"           http://127.0.0.1/health
+                # WP D15-RUNNER: the marker is answered locally with 204 and
+                # the header the runner checks; with the event log OFF (this
+                # scenario) it is logged nowhere but the access log.
+                mark=http://127.0.0.1/steamhangar/runner-mark/0123456789abcdef0123456789abcdef
+                probe 204 "D15-RUNNER marker answered locally" "$mark"
+                mark_hdr=$(curl -s -m 5 -o /dev/null -D - "$mark" | tr -d "\r" | sed -n "s/^[Xx]-[Ss]team[Hh]angar-[Rr]unner-[Mm]ark:[[:space:]]*//p")
+                if [ "$mark_hdr" = "steamhangar" ]; then
+                    echo "guard OK: D15-RUNNER marker header present"
+                else
+                    echo "FAIL: D15-RUNNER marker header is '"'"'$mark_hdr'"'"', expected steamhangar"
+                    status=1
+                fi
                 # WP VER-2: the version file is NOT served (decision: the
                 # authenticated GET /v1/about is the only place that shows it).
                 probe 404 "VER-2 no /vault-version location"  http://127.0.0.1/vault-version
@@ -997,11 +1009,11 @@ render_must_fail() {
 }
 
 render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guards
-render_and_test "cache-event log ON" "/vault/logs/event.log" 2
+render_and_test "cache-event log ON" "/vault/logs/event.log" 3
 # WP SEC-FIX-5: the upgrade -- a volume from an image before SEC-FIX-5
 # (everything 101:101, an existing event.log and version file) is migrated by
 # 21-vault-volume-ownership.sh, through the real entrypoint, event log on.
-render_and_test "upgrade from a 101-owned volume, event log ON" "/vault/logs/event.log" 2 "" "" "" off "" "" old
+render_and_test "upgrade from a 101-owned volume, event log ON" "/vault/logs/event.log" 3 "" "" "" off "" "" old
 # WP CORE-FIX-3: the passthrough switched off, live (the runs above use the
 # default, on).
 render_and_test "HTTPS passthrough OFF" "" 0 probe-guards "" "" off 0
@@ -1730,6 +1742,25 @@ docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
             || fail "the HIT line never reached the new $logf (nginx did not reopen)"
         if grep -q d15rot0001 "$logf.1"; then fail "the HIT line went into $logf.1"; fi
         [ "$(rotations)" = 1 ] || fail "a small log was rotated again ($(rotations) rotation lines)"
+
+        # WP D15-RUNNER: the runner marker lands in the event log as a
+        # 9-field v1 line with cache status RUNNER, no depot, status 204.
+        token=fedcba9876543210fedcba9876543210
+        code=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1/steamhangar/runner-mark/$token" || echo curl-error)
+        [ "$code" = 204 ] || fail "the runner marker answered $code"
+        wait_until 150 "grep -q $token $logf" || fail "the runner marker never reached $logf"
+        mline=$(grep "$token" "$logf" | tail -n 1)
+        mfields=$(printf "%s\n" "$mline" | awk -F "\t" "{ print NF }")
+        mstatus=$(printf "%s\n" "$mline" | cut -f 4)
+        mdepot=$(printf "%s\n" "$mline" | cut -f 5)
+        muri=$(printf "%s\n" "$mline" | cut -f 6)
+        mcode=$(printf "%s\n" "$mline" | cut -f 9)
+        if [ "$mfields" = 9 ] && [ "$mstatus" = RUNNER ] && [ "$mdepot" = - ] \
+            && [ "$muri" = "/steamhangar/runner-mark/$token" ] && [ "$mcode" = 204 ]; then
+            echo "D15-RUNNER OK: marker line v1, 9 fields, RUNNER, depot -, status 204"
+        else
+            fail "the runner marker line is malformed: $mline"
+        fi
 
         # Second rotation: event.log.1 is replaced, never a second old file.
         head -c "$seed" /dev/zero | tr "\0" "t" >> "$logf"

@@ -135,9 +135,30 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
 test("MUTATION TARGET: the hit-rate tile is the BYTE hit rate, the base 'Saved by the cache' uses", () => {
   const t = headerTiles(throughput("ok")).find((x) => x.key === "hit-rate");
   assert.equal(t.value, "83%", "byte_hit_rate 0.833, not hit_rate 0.5");
-  assert.equal(t.title, "Share of bytes served from the cache in the last 24 hours.");
+  assert.equal(
+    t.title,
+    "Share of the bytes your machines loaded in the last 24 hours that came from the cache. The server's own prefill downloads are not counted.",
+  );
   const noBytes = throughput("ok", { summary: { ...throughput("ok").summary, byte_hit_rate: null } });
   assert.equal(headerTiles(noBytes).find((x) => x.key === "hit-rate").value, DASH, "no fallback to the request rate");
+});
+
+test("MUTATION TARGET: D15-RUNNER — saved, hit rate and active clients say the runner is not counted; Loaded names its share", () => {
+  const base = throughput("ok");
+  const withRunner = throughput("ok", {
+    summary: { ...base.summary, prefill_runner: { bytes_served: 4 * GIB, hit_bytes: 3 * GIB, miss_bytes: GIB, requests: 9, hits: 6, misses: 3, errors: 0 } },
+  });
+  const tiles = Object.fromEntries(headerTiles(withRunner).map((t) => [t.key, t]));
+  assert.equal(tiles.loaded.detail, "4.0 GB by the prefill runner");
+  assert.match(tiles.loaded.title, /prefill downloads included/);
+  assert.match(tiles.saved.title, /prefill downloads are not counted/);
+  assert.match(tiles["hit-rate"].title, /prefill downloads are not counted/);
+  assert.match(tiles.clients.title, /prefill runner is not counted/);
+  assert.doesNotMatch(tiles.clients.title, /count as one of them/);
+  // Older server (no prefill_runner) or an idle runner: no detail line.
+  assert.equal(Object.fromEntries(headerTiles(base).map((t) => [t.key, t])).loaded.detail, null);
+  const idle = throughput("ok", { summary: { ...base.summary, prefill_runner: { ...withRunner.summary.prefill_runner, bytes_served: 0 } } });
+  assert.equal(Object.fromEntries(headerTiles(idle).map((t) => [t.key, t])).loaded.detail, null);
 });
 
 test("refresh note helpers: 'Couldn't refresh: …' and notes joined without empties", () => {

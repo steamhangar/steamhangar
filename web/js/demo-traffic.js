@@ -14,6 +14,12 @@
  * loft-laptop offline, and two agentless addresses (one active, one not).
  * The feed is always `ok` in demo mode.
  *
+ * WP D15-RUNNER: the server's prefill runner is its own overview entry
+ * (`kind: "runner"`), and its bytes stay out of every client figure: a
+ * tenth of each bucket is the runner's (`runner_bytes`), hit and miss bytes
+ * are the clients' share only, and the summary carries `client_bytes_served`
+ * and `prefill_runner` (bytes_served = client_bytes_served + runner bytes).
+ *
  * WP D15-NAMES: "Delete history" in demo mode passes `sinceMs` (traffic
  * before it was deleted): series buckets that start before it are zero,
  * `traffic_since` moves up to it, and the per-client figures shrink to the
@@ -78,13 +84,16 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
     const start = last - i * t.bucket * 1000;
     const bps = sinceMs !== null && start < sinceMs ? 0 : rateAt(start, t.bucket);
     const served = Math.round(bps * t.bucket);
-    const hit = Math.round(served * 0.82);
+    const runner = Math.round(served * 0.1);
+    const clients = served - runner;
+    const hit = Math.round(clients * 0.82);
     points.push({
       t: isoSeconds(start),
       bytes_served: served,
       hit_bytes: hit,
-      miss_bytes: served - hit,
-      requests: Math.round(served / (1.4 * MIB)),
+      miss_bytes: clients - hit,
+      requests: Math.round(clients / (1.4 * MIB)),
+      runner_bytes: runner,
       bytes_per_second: bps,
       peak_bytes_per_second: t.bucket === 300 ? bps : Math.round(bps * 1.35),
     });
@@ -102,31 +111,47 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
 function summaryFor(range, nowMs, sinceMs) {
   const { points, bucket_seconds: bucket } = demoSeries(range, nowMs, sinceMs);
   let served = 0;
+  let runner = 0;
   let hit = 0;
   let requests = 0;
   let active = 0;
   let peak = 0;
   for (const p of points) {
     served += p.bytes_served;
+    runner += p.runner_bytes;
     hit += p.hit_bytes;
     requests += p.requests;
     if (p.bytes_served > 0) active += bucket / 300;
     peak = Math.max(peak, p.peak_bytes_per_second);
   }
   const hits = Math.round(requests * 0.83);
+  const clients = served - runner;
+  const runnerHit = Math.round(runner * 0.6);
+  const runnerRequests = Math.round(runner / (1.4 * MIB));
+  const runnerHits = Math.round(runnerRequests * 0.6);
   return {
     bytes_served: served,
     hit_bytes: hit,
-    miss_bytes: served - hit,
+    miss_bytes: clients - hit,
     requests,
     hits,
     misses: requests - hits,
     errors: Math.round(requests / 4000),
     hit_rate: requests ? hits / requests : null,
-    byte_hit_rate: served ? hit / served : null,
+    byte_hit_rate: clients ? hit / clients : null,
     average_bytes_per_second: active ? served / (active * 300) : null,
     peak_bytes_per_second: peak,
     active_clients: served === 0 ? 0 : range === "24h" ? 3 : 4,
+    client_bytes_served: clients,
+    prefill_runner: {
+      bytes_served: runner,
+      hit_bytes: runnerHit,
+      miss_bytes: runner - runnerHit,
+      requests: runnerRequests,
+      hits: runnerHits,
+      misses: runnerRequests - runnerHits,
+      errors: 0,
+    },
   };
 }
 
@@ -160,6 +185,7 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
       window_seconds: windowSeconds,
     },
     active_clients_now: 2,
+    runner_active_now: jobs.length > 0,
     summary: summaryFor(range, nowMs, sinceMs),
     jobs,
   };
@@ -294,6 +320,38 @@ export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
     recent_apps: oldInRange ? recent(gameIds.slice(1, 2), 1.2 * GIB / scale) : [],
     recent_unattributed_bytes: 0,
     ...addressName("10.10.0.63"),
+  });
+  // WP D15-RUNNER: the server's own prefill runner, loading the running
+  // demo job's game while one runs.
+  const runnerGame = ctx.runningGame || null;
+  const runnerSeen = runnerGame ? isoSeconds(nowMs - 60_000) : isoSeconds(nowMs - 9 * 3_600_000);
+  clients.push({
+    key: "runner",
+    kind: "runner",
+    client_id: null,
+    addresses: ["172.18.0.1"],
+    connected: !!runnerGame,
+    agent_presence: null,
+    cache_active: !!runnerGame,
+    last_active: runnerSeen,
+    last_seen_in_cache_log: runnerSeen,
+    last_reported_at: null,
+    installed_appids: null,
+    installed_app_count: null,
+    stats: stats(Math.round(4.8 * GIB * scale), 0.6),
+    loading_now: runnerGame
+      ? {
+          loading: true,
+          bytes_per_second: 12.4 * MIB,
+          apps: [{ appid: runnerGame.appid, name: runnerGame.name ?? null, bytes_per_second: 12.4 * MIB }],
+          unattributed_bytes_per_second: 0,
+        }
+      : idle,
+    recent_apps: scale > 0 ? recent(gameIds.slice(0, 2), 3 * GIB) : [],
+    recent_unattributed_bytes: 0,
+    name: null,
+    name_addr: null,
+    display_name: "Prefill runner",
   });
   // Server order: connected first, then newest last_active.
   clients.sort((a, b) => Number(b.connected === true) - Number(a.connected === true) || String(b.last_active).localeCompare(String(a.last_active)));

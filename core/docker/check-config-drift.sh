@@ -162,9 +162,9 @@ expect_count "$work/template.norm" 2 'resolver ${VAULT_RESOLVER} ipv6=off valid=
 # log's own access_log in those locations REPLACES, not adds to, the
 # inherited one unless the "vault" log is re-stated alongside it; see the
 # blocker-fix comments at both sites in nginx.conf.template).
-expect_count "$work/template.norm" 3 "access_log /dev/stdout vault;"           "delta 5: access log to stdout (http level + re-stated in /depot/ and @miss)"
-expect_count "$work/template.norm" 2 'access_log ${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE' \
-    "delta 6: WP 3.10 cache-event log placeholder, one per location (/depot/, @miss)"
+expect_count "$work/template.norm" 4 "access_log /dev/stdout vault;"           "delta 5: access log to stdout (http level + re-stated in /depot/, @miss and the D15-RUNNER marker)"
+expect_count "$work/template.norm" 3 'access_log ${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE' \
+    "delta 6: WP 3.10 cache-event log placeholder, one per location (/depot/, @miss, D15-RUNNER marker)"
 expect_once "$work/template.norm" "access_log /dev/stdout vault_tls;"          "delta 7: WP CORE-FIX-3 stream log to stdout"
 
 # The native config must NOT already contain the container forms (would mean the
@@ -173,9 +173,9 @@ expect_once "$work/template.norm" "access_log /dev/stdout vault_tls;"          "
 expect_once "$work/native.norm" "pid logs/nginx.pid;"                          "native: pid under the prefix"
 expect_once "$work/native.norm" "error_log logs/error.log warn;"               "native: error log to a file"
 expect_count "$work/native.norm" 2 "resolver 1.1.1.1 ipv6=off valid=30s;"      "native: literal resolver (http + stream)"
-expect_count "$work/native.norm" 3 "access_log logs/access.log vault;"         "native: access log to a file (http level + re-stated in /depot/ and @miss)"
-expect_count "$work/native.norm" 2 "access_log logs/event.log vault_event buffer=64k flush=5s;" \
-    "native: WP 3.10 cache-event log, hardcoded ON, one per location (/depot/, @miss)"
+expect_count "$work/native.norm" 4 "access_log logs/access.log vault;"         "native: access log to a file (http level + re-stated in /depot/, @miss and the D15-RUNNER marker)"
+expect_count "$work/native.norm" 3 "access_log logs/event.log vault_event buffer=64k flush=5s;" \
+    "native: WP 3.10 cache-event log, hardcoded ON, one per location (/depot/, @miss, D15-RUNNER marker)"
 expect_once "$work/native.norm" "access_log logs/tls.log vault_tls;"           "native: WP CORE-FIX-3 stream log to a file"
 
 # --- 2b. WP TH-1a upstream rate cap: shared lines + the native include ----

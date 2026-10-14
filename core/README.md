@@ -488,7 +488,7 @@ field 1 below.
 | 1 | format version | literal `v1` | WP 3.11's sweeper MUST reject any line whose first field isn't exactly `v1` instead of guessing at a changed layout |
 | 2 | time | `$time_iso8601` | e.g. `2026-08-09T14:03:11+02:00` |
 | 3 | client address | `$remote_addr` | direct TCP peer; no `X-Forwarded-For` trust (vault-core is never behind another proxy) |
-| 4 | cache status | `$vault_event_status` | `HIT` / `MISS` / `BYPASS` -- see "Cache-status truth" below |
+| 4 | cache status | `$vault_event_status` | `HIT` / `MISS` / `BYPASS` -- see "Cache-status truth" below; `RUNNER` for the prefill runner's marker request (WP D15-RUNNER, "The runner marker" below) |
 | 5 | depot id | `$vault_event_depot` | digits captured from `/depot/<id>/...`, else `-` |
 | 6 | URI path | `$vault_event_uri` | `$uri` (decoded, query-string-free), bounded to 300 characters |
 | 7 | bytes sent | `$bytes_sent` | same variable/semantics as the `vault` log's `bytes_sent` field |
@@ -560,7 +560,8 @@ and the store-path guard's 301/302 branch above).
 ### Scope: what produces a line, what doesn't
 
 The `access_log ... vault_event ...` directive is declared **per-location**
-(inside `location /depot/` and `location @miss`), not at `server`/`http`
+(inside `location /depot/`, `location @miss` and the runner-marker
+location below), not at `server`/`http`
 level. `/health`, `/lancache-heartbeat` and `location ^~ /tmp/` never
 declare it at all, so they produce **zero** event-log lines -- not a typed
 "heartbeat" line the sweeper has to recognize and skip, but no line at all,
@@ -569,6 +570,22 @@ resolves locally never reaches `@miss` (nginx switches the request's
 "current location" on an internal redirect, including for the log phase),
 so exactly one of the two directives fires per request -- never both, never
 neither, for anything reaching `/depot/`.
+
+### The runner marker (WP D15-RUNNER)
+
+`location ^~ /steamhangar/runner-mark/` answers `204` locally (never
+upstream, no file access) with the header `X-SteamHangar-Runner-Mark:
+steamhangar`, and writes one event-log line with cache status `RUNNER`,
+depot `-`, the path (`/steamhangar/runner-mark/<32 hex>`) and status `204`.
+vault-runner sends it before each prefill over the same route SteamPrefill
+then uses, so the line carries the source address SteamPrefill's chunks
+will carry. vault-api's sweep accepts it only with a token the runner
+stored in the shared database first
+(`api/vault_api/runner_identity.py`); a LAN host requesting the path
+changes nothing. Older vault-api builds skip the line (`bad-cache-status`).
+It is the third `vault_event` directive, so the event-log ON render has
+three (`.github/scripts/verify-core-nginx.sh`, `check-config-drift.sh`),
+and the CI script checks the 204, the header and the logged line live.
 
 ### Performance: `buffer=64k flush=5s`
 

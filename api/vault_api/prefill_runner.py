@@ -49,6 +49,7 @@ from vault_api import (
     prefill,
     prefill_queue,
     reported_identity,
+    runner_mark,
     runner_presence,
     steamprefill_version,
 )
@@ -202,6 +203,11 @@ class PrefillRunner:
             "prefill_runner %s claimed job %s (appid %s, use_force=%s).",
             self._runner_id, job_id, appid, use_force,
         )
+
+        # WP D15-RUNNER: tell vault-core (and through its event log, the
+        # sweep) which source address this prefill's traffic will carry.
+        # Fail-soft and bounded; see runner_mark's module docstring.
+        runner_mark.announce(conn, self._runner_id)
 
         last_heartbeat = time.monotonic()
 
