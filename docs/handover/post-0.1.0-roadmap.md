@@ -566,6 +566,14 @@ live under notifications. Today a dismiss is permanent per browser
   env-only today, forwarded by compose; default stays off for everyone
   else). The user wants to test the "Never played" pill with real data.
 
+**APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
+the release pipeline builds and signs the APK first and bakes it into the
+vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
+in the LAN at a fixed path. Clients page -> "Add device" -> Android
+phone: "Download app" button plus a QR code to the vault's APK, then the
+existing pairing QR. Dev builds (no APK in the image) fall back to the
+GitHub release asset of the same version.
+
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check
 updates" a clearly visible primary button and give "Check & update all
