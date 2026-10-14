@@ -106,6 +106,17 @@ def _no_host_routes_in_tests(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(peer_hops, "IPV6_ROUTE_FILE", str(tmp_path / "no-ipv6_route"))
 
 
+@pytest.fixture(autouse=True)
+def _no_runner_mark_network_in_tests(monkeypatch) -> None:
+    """WP D15-RUNNER: every prefill (runner and subprocess worker) first
+    looks for vault-core by name and sends a marker request. Make every name
+    unresolvable so no test does real DNS or HTTP to the host's port 80;
+    tests of the marker pass their own ``resolve``/``fetch``."""
+    from vault_api import runner_mark
+
+    monkeypatch.setattr(runner_mark, "resolve_v4", lambda host: None)
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(

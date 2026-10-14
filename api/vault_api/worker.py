@@ -74,6 +74,7 @@ from vault_api import (
     prefill,
     prefill_queue,
     prefill_summary,
+    runner_mark,
     settings_store,
     webhooks,
 )
@@ -290,6 +291,10 @@ class PrefillWorker:
                     return
                 result, before = result_and_before
             else:
+                # WP D15-RUNNER: subprocess mode runs SteamPrefill from THIS
+                # process, so this process sends the runner marker (the
+                # queue-mode runner sends its own, prefill_runner._execute).
+                runner_mark.announce(conn, "vault-api")
                 result = prefill.run_prefill(
                     appid=appid,
                     steamprefill_path=self._settings.steamprefill_path,

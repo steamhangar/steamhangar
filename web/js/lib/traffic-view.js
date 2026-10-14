@@ -187,28 +187,48 @@ export function headerTiles(throughput) {
       `Average speed ${phrase}, counting only the 5-minute periods in which something was loaded.`,
     ),
     tile("peak", "Peak speed", formatSpeed(summary.peak_bytes_per_second), `The busiest 5 minutes ${phrase}.`),
-    tile("loaded", "Loaded", formatTrafficBytes(summary.bytes_served), `Everything the cache served ${phrase}.`),
+    tile(
+      "loaded",
+      "Loaded",
+      formatTrafficBytes(summary.bytes_served),
+      `Everything the cache served ${phrase}, the server's own prefill downloads included.`,
+      runnerDetail(summary),
+    ),
     tile(
       "hit-rate",
       "Hit rate",
       // Bytes, not requests: the same base as "Saved by the cache" next to it.
       formatRate(summary.byte_hit_rate),
-      `Share of bytes served from the cache ${phrase}.`,
+      `Share of the bytes your machines loaded ${phrase} that came from the cache. The server's own prefill downloads are not counted.`,
     ),
     tile(
       "saved",
       "Saved by the cache",
       formatTrafficBytes(summary.hit_bytes),
-      `Bytes ${phrase} that came from the cache's disk instead of the internet.`,
+      `Bytes your machines loaded ${phrase} from the cache's disk instead of the internet. The server's own prefill downloads are not counted.`,
     ),
     tile(
       "clients",
       "Active clients",
       Number.isInteger(throughput.active_clients_now) ? String(throughput.active_clients_now) : null,
-      "Machines that loaded from the cache in the last few minutes. The server's own prefill downloads count as one of them.",
+      "Machines that loaded from the cache in the last few minutes. The server's own prefill runner is not counted.",
       inRange === null ? null : `${inRange} ${phrase}`,
     ),
   ];
+}
+
+/**
+ * WP D15-RUNNER: "of which X by the prefill runner" under "Loaded"; `null`
+ * when the server sent no runner figures (older vault-api) or the runner
+ * loaded nothing in the range.
+ * @param {object} summary
+ * @returns {string | null}
+ */
+export function runnerDetail(summary) {
+  const runner = summary && summary.prefill_runner;
+  if (!runner || !Number.isFinite(runner.bytes_served) || runner.bytes_served <= 0) return null;
+  const size = formatTrafficBytes(runner.bytes_served);
+  return size ? `${size} by the prefill runner` : null;
 }
 
 /** The bucket a series point covers, for the graph's label. */

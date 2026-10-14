@@ -2,8 +2,8 @@
  * Unit tests for `web/js/lib/clients-page.js` (WP D15c): the Clients page's
  * per-client wording over `GET /v1/clients/overview` (WP D15b).
  *
- * Pins: an address client is named by its address and never called a PC
- * (the prefill runner can be one, api/README.md "known gap"); "installed"
+ * Pins: an address client is named by its address and never called a PC;
+ * the prefill runner (WP D15-RUNNER) is its own kind; "installed"
  * only for agent clients; a `null` from the server is a dash, a real zero
  * prints; the feed-disabled shape (stats/recent null) prints no stats line.
  *
@@ -20,6 +20,9 @@ import {
   clientsSummaryText,
   connectionChip,
   installedText,
+  isAddressClient,
+  isAgentClient,
+  isRunnerClient,
   lastActiveText,
   loadingNowText,
   recentAppsText,
@@ -72,6 +75,30 @@ test("MUTATION TARGET: an address client is 'No agent · seen in the cache log' 
   assert.equal(clientKindText(agent()), "vault-agent · 192.168.1.42");
   assert.equal(clientKindText(agent({ addresses: [] })), "vault-agent · no address in the cache log");
   assert.doesNotMatch(AGENTLESS_NOTE, /runner|prefill/i);
+});
+
+test("MUTATION TARGET: D15-RUNNER — the runner is titled by the server and described as the server's prefill downloads", () => {
+  const runner = agent({
+    key: "runner",
+    kind: "runner",
+    client_id: null,
+    addresses: ["172.18.0.1"],
+    agent_presence: null,
+    installed_appids: null,
+    installed_app_count: null,
+    name: null,
+    name_addr: null,
+    display_name: "Prefill runner",
+  });
+  assert.equal(clientName(runner), "Prefill runner");
+  assert.equal(clientKindText(runner), "This server's prefill downloads · 172.18.0.1");
+  assert.equal(clientKindText({ ...runner, addresses: [] }), "This server's prefill downloads");
+  assert.equal(installedText(runner), null);
+  assert.deepEqual(
+    [isRunnerClient(runner), isAgentClient(runner), isAddressClient(runner)],
+    [true, false, false],
+  );
+  assert.deepEqual([isAddressClient(address()), isAddressClient(agent())], [true, false]);
 });
 
 test("wording: no 'yet' that promises self-healing; the agentless note never tells a user to install an agent that may be installed", () => {
