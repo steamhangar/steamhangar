@@ -119,12 +119,37 @@ func TestReportInstalled_UnknownFieldNotCarriedIsFinal(t *testing.T) {
 	}
 }
 
-// A value error on local_addrs (a NEW server refusing an entry) is a real
-// rejection, never resent.
-func TestReportInstalled_LocalAddrsValueErrorIsFinal(t *testing.T) {
+// A server that refuses the addresses themselves (every error under
+// body.local_addrs, any type) gets the report again without them, keeping
+// the presence fields.
+func TestReportInstalled_LocalAddrsValueErrorResendsWithoutThem(t *testing.T) {
+	for _, loc := range []string{`["body","local_addrs"]`, `["body","local_addrs",0]`} {
+		var rs recordingServer
+		srv := rs.start(t, func(body []byte) (int, string) {
+			if strings.Contains(string(body), "local_addrs") {
+				return http.StatusUnprocessableEntity, `{"detail":[{"type":"value_error","loc":` + loc + `,"msg":"x"}]}`
+			}
+			return http.StatusOK, okBody
+		})
+		result, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload())
+		if err != nil {
+			t.Fatalf("loc %s: %v", loc, err)
+		}
+		bodies := rs.got()
+		if want := `{"client_id":"test-pc","appids":[440,730],"agent_version":"0.1.0","report_interval_seconds":600}`; len(bodies) != 2 || bodies[1] != want {
+			t.Errorf("loc %s: bodies = %q, want the resend %s", loc, bodies, want)
+		}
+		if !result.LocalAddrsDropped || result.PresenceDropped {
+			t.Errorf("loc %s: result = %+v", loc, result)
+		}
+	}
+}
+
+// A 422 that ALSO names another field is a real rejection: not resent.
+func TestReportInstalled_LocalAddrsPlusAnotherErrorIsFinal(t *testing.T) {
 	var rs recordingServer
 	srv := rs.start(t, func([]byte) (int, string) {
-		return http.StatusUnprocessableEntity, `{"detail":[{"type":"value_error","loc":["body","local_addrs"],"msg":"x"}]}`
+		return http.StatusUnprocessableEntity, `{"detail":[{"type":"value_error","loc":["body","local_addrs",0],"msg":"x"},{"type":"value_error","loc":["body","client_id"],"msg":"x"}]}`
 	})
 	if _, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload()); err == nil {
 		t.Fatal("expected the 422")

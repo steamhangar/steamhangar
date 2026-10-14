@@ -59,7 +59,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
-from vault_api import agent_reports, event_sweep, traffic
+from vault_api import agent_reports, event_sweep, peer_hops, traffic
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener
@@ -506,12 +506,15 @@ def get_clients_overview(
         feed_on = feed.enabled
         live = feed_on and window is not None
 
-        summaries = agent_reports.list_clients(conn)
+        # One routing-table snapshot for both lookups, so the agent list and
+        # the address mapping can never judge the same peer differently.
+        is_hop = peer_hops.forwarding_hop_filter()
+        summaries = agent_reports.list_clients(conn, is_hop)
         snapshots = {
             summary.client_id: agent_reports.latest_snapshot(conn, summary.client_id)
             for summary in summaries
         }
-        owners = agent_reports.address_owners(conn)
+        owners = agent_reports.address_owners(conn, is_hop)
 
         totals: dict[str, traffic.Totals] = {}
         last_seen: dict[str, str] = {}

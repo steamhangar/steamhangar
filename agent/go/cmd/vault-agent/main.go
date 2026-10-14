@@ -255,8 +255,8 @@ func reportOnce(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg a
 			"upgrade vault-api to see this machine's version and online state")
 	}
 	if result.LocalAddrsDropped {
-		logger.Printf("report local address note=%q", "the server does not accept local_addrs yet "+
-			"(vault-api older than AGENT-ADDR-1); the report was resent without it and accepted")
+		logger.Printf("report local address note=%q", "the server did not accept local_addrs "+
+			"(vault-api older than AGENT-ADDR-1, or it refused the addresses); the report was resent without it and accepted")
 	}
 	fmt.Fprintf(stdout, "reported %d installed app(s) for client_id=%s: added=%v removed=%v first_report=%v\n",
 		result.Received, result.ClientID, result.Added, result.Removed, result.FirstReport)

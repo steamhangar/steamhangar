@@ -599,10 +599,6 @@ Constraint (user, 2026-10-14): after v0.1.0 a real installer replaces
 the PowerShell task scripts. The address detection lives in the agent
 binary itself (no new script parameter, task argument or config entry),
 and old servers / old agents keep working (optional field).
-Constraint (user, 2026-10-14): a real installer replaces the
-PowerShell task scripts later. The address detection lives in the agent
-binary itself (no new script parameter, task argument or config entry
-needed), and old servers / old agents keep working (optional field).
 
 **LIB-FILTER-INST-1 (web + app, rc17; user request 2026-10-14):** a
 library filter chip "Installed, not cached" — games an agent reports as

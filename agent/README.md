@@ -524,6 +524,9 @@ twice on the Clients page).
 - **No configuration:** no flag, no environment variable, no scheduled-task
   argument. The PowerShell and systemd packaging is unchanged; replacing
   the binary is enough.
+- **Limit:** detection probes the vault-api host from `--server-url`. If
+  vault-core (the cache) answers on a different IP or VLAN, a multi-homed PC
+  may reach it from a different source address than the one reported.
 - **Log:** the `report built` line shows `local_addrs=...` (`-` when none);
   `report local address note=...` says why something was not detected
   (DNS failure, no route).
@@ -531,7 +534,9 @@ twice on the Clients page).
   `local_addrs` as unknown; the agent resends once without exactly the
   fields the `422` names (an rc9..rc16 server keeps getting
   `agent_version`/`report_interval_seconds`, an rc8 server gets the legacy
-  body) and logs `vault-api older than AGENT-ADDR-1`.
+  body) and logs `vault-api older than AGENT-ADDR-1`. A `422` whose every
+  error is located under `local_addrs` (a server refusing the addresses
+  themselves) is answered the same way: one resend without `local_addrs`.
 
 **Default `--client-id`:** the local hostname (`os.Hostname()`), trimmed,
 with any non-printable character replaced by `-`, truncated to 64

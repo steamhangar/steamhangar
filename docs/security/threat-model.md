@@ -790,11 +790,16 @@ to the peer (the peer is the Docker bridge gateway behind a published port,
 the same for every PC). These values ARE caller-chosen. What bounds them:
 only a caller holding the API key can send them, and that caller can already
 delete cache content and read every client's data, so a lying agent gains no
-new capability — the worst it achieves is mislabelled statistics: claiming
-another PC's address moves that PC's traffic onto its own entry, and
-claiming an address that never downloads lets its own client be accused
-(the bypass rule fails toward not accusing only for addresses it cannot
-correlate). Validation keeps the values from becoming an injection vector:
+new capability — the worst it achieves is mislabelled statistics. Two
+cases, precisely: (a) claiming another PC's address: in `GET /v1/clients`
+BOTH clients then list that address and its cache traffic counts for both
+(each client's totals are summed over its own address set); only the D15b
+overview (`agent_reports.address_owners`, one owner per address, newest
+report wins) moves the address and its traffic to the claiming agent.
+(b) an agent can hide its own bypass by claiming an address that does have
+cache traffic: the bypass rule then sees presence in the cache log and
+does not accuse it. Neither needs more than the API key, which is
+admin-level already, so this adds no new capability. Validation keeps the values from becoming an injection vector:
 at most 8 plain IP literals, no zone id, no loopback/link-local/unspecified/
 multicast, stored canonical; they appear in API answers (`source_addrs`,
 `reported_addrs`) and in the report's log line. Privacy-wise they add

@@ -44,6 +44,7 @@ gateway without a vault-api restart.
 from __future__ import annotations
 
 import ipaddress
+import sys
 from typing import Sequence
 
 #: IPv4 and IPv6 routing tables of this network namespace (Linux procfs).
@@ -96,20 +97,26 @@ def _read_lines(path: str) -> list[str]:
 def _ipv4_gateways(lines: Sequence[str]) -> set[str]:
     """Gateways from ``/proc/net/route``: header line, then whitespace-split
     columns ``Iface Destination Gateway Flags ...`` with the addresses as
-    8 hex digits in host (little-endian) byte order."""
+    8 hex digits of the kernel's in-memory ``__be32``, printed as a host-order
+    integer -- so the byte order to undo is the host's (``sys.byteorder``):
+    little-endian on x86/arm64, as-is on a big-endian host."""
     gateways: set[str] = set()
     for line in lines[1:]:
         fields = line.split()
         if len(fields) < 4:
             continue
+        if len(fields[2]) != 8:
+            continue
         try:
             flags = int(fields[3], 16)
-            raw = bytes.fromhex(fields[2])
+            value = int(fields[2], 16)
         except ValueError:
             continue
-        if not flags & RTF_GATEWAY or len(raw) != 4:
+        if not flags & RTF_GATEWAY:
             continue
-        address = ipaddress.IPv4Address(raw[::-1])
+        # The integer's in-memory bytes (host order) ARE the address in
+        # network order.
+        address = ipaddress.IPv4Address(value.to_bytes(4, sys.byteorder))
         if not address.is_unspecified:
             gateways.add(str(address))
     return gateways

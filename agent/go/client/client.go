@@ -63,6 +63,12 @@
 // report_interval_seconds (it names only local_addrs); an rc8 server names
 // all three and gets the legacy body. Still at most one resend.
 //
+// One more resend case, local_addrs only: a 422 whose every error sits
+// under body.local_addrs (any error type, e.g. a server with stricter
+// address rules than this agent) is answered by resending once without
+// local_addrs. The address is a correlation aid; the report itself must
+// not be lost over it.
+//
 // TLS uses Go's default system root CA pool (no custom TLSClientConfig is
 // set). Proxying respects the standard http_proxy/https_proxy/no_proxy
 // environment variables via http.ProxyFromEnvironment, same as any other
@@ -140,6 +146,10 @@ type APIError struct {
 	// set only when it names nothing else (see unknownOptionalFields): the
 	// one rejection ReportInstalled answers by resending without them.
 	unknownOptional []string
+	// localAddrsRejected is set on a 422 whose every error is located
+	// under body.local_addrs (any error type): a server whose rules for the
+	// field differ from this agent's. ReportInstalled resends without it.
+	localAddrsRejected bool
 }
 
 func (e *APIError) Error() string {
@@ -294,6 +304,16 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 func (c *Client) ReportInstalled(ctx context.Context, payload report.Payload) (Result, error) {
 	result, err := c.send(ctx, payload)
 	var apiErr *APIError
+	if err != nil && payload.Has("local_addrs") && errors.As(err, &apiErr) && apiErr.localAddrsRejected {
+		// A server that refuses our addresses (stricter or different rules
+		// than localaddr.Usable): the report matters more than the
+		// address, so resend once without it.
+		result, err = c.send(ctx, payload.Without("local_addrs"))
+		if err == nil {
+			result.LocalAddrsDropped = true
+		}
+		return result, err
+	}
 	if err != nil && errors.As(err, &apiErr) && len(apiErr.unknownOptional) > 0 {
 		names := apiErr.unknownOptional
 		for _, name := range names {
@@ -432,6 +452,7 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 		apiErr := &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
 		if resp.StatusCode == http.StatusUnprocessableEntity {
 			apiErr.unknownOptional = unknownOptionalFields(respBody)
+			apiErr.localAddrsRejected = onlyLocalAddrsErrors(respBody)
 		}
 		return Result{}, false, apiErr
 	case resp.StatusCode >= 300:
@@ -519,6 +540,26 @@ func unknownOptionalFields(body []byte) []string {
 		}
 	}
 	return names
+}
+
+// onlyLocalAddrsErrors reports whether a 422 body is FastAPI's validation
+// error with at least one entry and every entry located at
+// ["body", "local_addrs", ...], whatever the error type.
+func onlyLocalAddrsErrors(body []byte) bool {
+	var parsed struct {
+		Detail []struct {
+			Loc []any `json:"loc"`
+		} `json:"detail"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Detail) == 0 {
+		return false
+	}
+	for _, d := range parsed.Detail {
+		if len(d.Loc) < 2 || d.Loc[0] != "body" || d.Loc[1] != "local_addrs" {
+			return false
+		}
+	}
+	return true
 }
 
 // redirectTarget returns resp's Location header resolved against the

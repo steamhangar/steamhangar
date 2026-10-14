@@ -78,6 +78,15 @@ def test_gateways_are_read_from_both_routing_tables(routes) -> None:
     assert peer_hops.gateway_addrs() == frozenset({GATEWAY, GATEWAY6})
 
 
+def test_ipv4_gateways_follow_the_host_byte_order(tmp_path: Path, monkeypatch) -> None:
+    """The column is the kernel's __be32 printed as a host integer: on a
+    big-endian host the same address prints in network order."""
+    v4 = tmp_path / "route"
+    v4.write_text(IPV4_ROUTES.splitlines()[0] + "\neth0\t00000000\t0A580001\t0003\t0\t0\t0\t00000000\t0\t0\t0\n")
+    monkeypatch.setattr(peer_hops.sys, "byteorder", "big")
+    assert peer_hops.gateway_addrs(str(v4), str(tmp_path / "none")) == frozenset({GATEWAY})
+
+
 def test_missing_route_files_mean_no_gateways(tmp_path: Path) -> None:
     assert (
         peer_hops.gateway_addrs(str(tmp_path / "nope"), str(tmp_path / "nope6"))
