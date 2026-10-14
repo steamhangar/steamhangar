@@ -496,6 +496,18 @@ Revised 2026-10-14 (user, multiple choice): rc17 = D15 (a-d, ROT,
 RUNNER, client names, history delete) + AGENT-ADDR-1 (agent change
 allowed; the Windows PC needs the new agent once) + CACHE-COMPLETE-1 +
 LIB-LIST-1 + LIB-FILTER-INST-1 + UPD-6 Android; rc18 = D16 + APP-DIST-1.
+rc18 cut (user, multiple choice, 2026-10-14): everything in rc18 —
+UPD-FIX-1 first, D16a/b/c (incl. the core path; the tag waits for the
+settings-volume Antrag), APP-DIST-1 + AGENT-DIST-1 (one ci+api package
+DIST-1a, one web package DIST-1b). D16 UI ships for web in rc18; the app
+gets sections and expert mode in rc19. D16a classification principle
+"Tuning + Debug": editable = upstream rate and window, TLS and upstream
+caps, prefill threads and timeout, GC and retention, miss trigger, sweep,
+oracle timeout, webhook events, keep counters, plus the debug knobs
+UPSTREAM_EDGE / UPSTREAM_POOL_HOSTS, RESOLVER and LOG_LEVEL (marked risky,
+confirm dialog). Env-only = secrets, paths, binds and ports, build
+metadata, egress allowlist and subnet, webhook URL, DNS, TLS passthrough.
+The user signs off the full per-variable table from D16a-1.
 
 **Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
