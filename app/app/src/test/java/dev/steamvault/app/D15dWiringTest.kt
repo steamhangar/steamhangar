@@ -112,7 +112,7 @@ class D15dWiringTest {
         assertCalledFrom(downloads, "historyFilter.load()", "DownloadsScreen")
         assertCalledFrom(downloads, "jobSpeedLines(statsPoll)", "DownloadsScreen")
         assertCalledFrom(downloads, "filterJobsByRange(historyJobs, historyFilter.range)", "DownloadsScreen")
-        assertCalledFrom(downloads, "DownloadsStatsHeader(statsPoll, scope)", "DownloadsBody")
+        assertCalledFrom(downloads, "DownloadsStatsHeader(statsPoll, scope, onRangeChosen = { ranges.statistics = it })", "DownloadsBody")
         assertCalledFrom(downloads, "speedLine = speedLines[model.jobId]", "DownloadsBody")
         assertCalledFrom(downloads, "historyFilter.selectRange(scope, it)", "DownloadsBody")
         assertCalledFrom(downloads, "emptyHistoryText(historyFilter.range)", "DownloadsBody")
