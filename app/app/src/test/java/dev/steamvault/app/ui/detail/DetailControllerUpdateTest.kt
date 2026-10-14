@@ -35,6 +35,7 @@ private class PrefillJobs(private val gate: CompletableDeferred<Unit>? = null, p
         return appids.map { PrefillJobRef(appid = it, job_id = it, status = "queued", deduplicated = false) }
     }
     override suspend fun prefillCached(): List<PrefillJobRef> = unused()
+    override suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> = unused()
     override suspend fun cancel(id: Int): JobControlOut = unused()
     override suspend fun pause(id: Int): JobControlOut = unused()
     override suspend fun resume(id: Int): JobControlOut = unused()

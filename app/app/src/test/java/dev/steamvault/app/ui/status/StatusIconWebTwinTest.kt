@@ -76,6 +76,25 @@ class StatusIconWebTwinTest {
     }
 
     @Test
+    fun `WP CACHE-COMPLETE-1c -- partial and unverified glyphs, labels and discs match the web sources`() {
+        val js = read("../../web/js/components/status-icon.js")
+        for (line in listOf("partial: \"half\"", "unverified: \"question\"", "partial: \"Partially cached\"", "unverified: \"Not verified\"")) {
+            assertTrue("VALUE DRIFT: status-icon.js no longer contains '$line' -- update StatusKind/StatusIconLogic.kt", js.contains(line))
+        }
+        assertTrue("web buildHalf changed -- re-port GlyphShape.HALF", js.contains("M12 5.4a6.6 6.6 0 0 0 0 13.2Z") && js.contains("r: \"6.6\""))
+        assertTrue(
+            "web buildQuestion changed -- re-port GlyphShape.QUESTION",
+            js.contains("M9.1 9.2a2.9 2.9 0 1 1 4.3 2.6c-.9.5-1.4 1.1-1.4 2v.4"),
+        )
+        val css = read("../../web/css/theme.css")
+        assertTrue("VALUE DRIFT: theme.css .sic.k-partial no longer uses --stale", Regex("""\.sic\.k-partial\s*\{\s*background:var\(--stale\);""").containsMatchIn(css))
+        assertTrue(
+            "VALUE DRIFT: theme.css .sic.k-unverified no longer uses --dim-2 / --text",
+            Regex("""\.sic\.k-unverified\{\s*background:var\(--dim-2\);\s*color:var\(--text\);""").containsMatchIn(css),
+        )
+    }
+
+    @Test
     fun `MUTATION PIN -- StatusIcon draws the RUNNING arrows clipped to the disc from downloadArrowOffsets, with no alpha`() {
         val code = stripComments(read("src/main/java/dev/steamvault/app/ui/status/StatusIcon.kt"))
         val start = code.indexOf("GlyphShape.DOWNLOAD -> {")

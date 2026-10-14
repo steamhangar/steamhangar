@@ -65,6 +65,7 @@ class DemoJobsRepository(private val state: DemoState) : JobsRepository {
     override suspend fun detail(id: Int): JobDetail = state.jobDetail(id)
     override suspend fun prefill(appids: List<Int>): List<PrefillJobRef> = state.enqueuePrefill(appids)
     override suspend fun prefillCached(): List<PrefillJobRef> = state.enqueuePrefillCached()
+    override suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> = state.enqueueVerify(appids)
     override suspend fun cancel(id: Int): JobControlOut = state.controlJob(id, JobControlAction.CANCEL)
     override suspend fun pause(id: Int): JobControlOut = state.controlJob(id, JobControlAction.PAUSE)
     override suspend fun resume(id: Int): JobControlOut = state.controlJob(id, JobControlAction.RESUME)

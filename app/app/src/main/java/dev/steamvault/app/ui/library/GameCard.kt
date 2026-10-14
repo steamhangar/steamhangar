@@ -45,6 +45,7 @@ import dev.steamvault.app.ui.library.logic.showsUpdateBadge
 import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
+import dev.steamvault.app.ui.status.StatusKind
 import dev.steamvault.app.ui.theme.VaultColors
 
 /**
@@ -153,8 +154,10 @@ fun GameCard(
         // Mockup round 6: "the grids got the status word back" -- the pill
         // carries icon + size, the meta row underneath carries the word, so
         // nothing in the roomier layouts is said only once via colour/shape.
+        // WP CACHE-COMPLETE-1c: the 3-column grid uses the compact
+        // completeness word ("Partial 42%", web `.grid.cols3 .stcompact`).
         Text(
-            text = cardStatusWord(model),
+            text = cardStatusWord(model, compact = compact),
             style = MaterialTheme.typography.labelSmall,
             color = cardStatusWordColor(model),
             maxLines = 1,
@@ -195,20 +198,30 @@ internal const val CAPSULE_PILL_TAG = "capsule-pill"
  * -- decided by [toolAppStateWordFor] from the computed kind, so a live job
  * reads "Downloading". */
 @Composable
-internal fun cardStatusWord(model: GameCardModel): String =
+internal fun cardStatusWord(model: GameCardModel, compact: Boolean = false): String =
     if (model.updateState) {
         // WP UPD-6: "Update available" instead of "Current".
         stringResource(R.string.library_update_available_badge)
     } else {
-        toolAppStateWordFor(model.kind) ?: stringResource(model.kind.labelRes)
+        // WP CACHE-COMPLETE-1c: "Partially cached N%" / "Cached · not
+        // verified" (compact: "Partial N%" / "Not verified") instead of
+        // "Current".
+        model.completeness?.let { if (compact) it.compact else it.word }
+            ?: toolAppStateWordFor(model.kind)
+            ?: stringResource(model.kind.labelRes)
     }
 
 /** WP UPD-6 (twin of web `tx-stale`): the status word in the orange
- * "update ready" colour for the update state, the muted text colour
- * otherwise. */
+ * "update ready" colour for the update state -- and WP CACHE-COMPLETE-1c
+ * for "Partially cached" (web `tx-partial`) -- the muted text colour
+ * otherwise ("Cached · not verified" too, web `tx-unverified`). */
 @Composable
 internal fun cardStatusWordColor(model: GameCardModel): Color =
-    if (model.updateState) VaultColors.StatusStale else MaterialTheme.colorScheme.onSurfaceVariant
+    if (model.updateState || model.completeness?.icon == StatusKind.PARTIAL) {
+        VaultColors.StatusStale
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
 /** The status icon + size pill riding on the cover art (round-6 "one object
  * instead of a colour dot plus a duplicate line"). Inert (no click target)

@@ -49,6 +49,8 @@ import kotlinx.serialization.json.JsonPrimitive
  * content-package group of two packages, one failed ("+2 content packages
  * · 1 failed", sized by the server's `group_size_bytes`), and the Lighthouse Keeper game
  * is cached with an owned playtime of exactly 0 (the "Never played" pill).
+ * WP CACHE-COMPLETE-1c: Copperline Atlas, the third card, is cached and
+ * partially complete ("Partially cached 64%", the orange half-disc).
  * Names are invented, appids are
  * synthetic (docs/LEARNINGS.md "Fixtures: synthetic only").
  *
@@ -93,6 +95,15 @@ internal object LibraryScreenshotFixtures {
             status = "done", last_prefill_at = PREFILLED_AT, depot_count = 3, size_bytes = 12_700_000_000,
             // WP UPD-6: cached and flagged -> the card's update state.
             update_available = true, update_checked_at = PREFILLED_AT,
+        ),
+        // WP CACHE-COMPLETE-1c: cached, no job, 64 % of the current build
+        // on disk -> "Partially cached 64%" ("Partial 64%" in the list).
+        // Third card: the first row stays the two update witnesses.
+        GameSummary(
+            appid = 1_000_025, name = "Copperline Atlas", status = "done",
+            last_prefill_at = PREFILLED_AT, depot_count = 1, size_bytes = 7_100_000_000,
+            cache_complete_pct = 64, cache_expected_bytes = 11_100_000_000, cache_present_bytes = 7_100_000_000,
+            cache_complete_checked_at = PREFILLED_AT, cache_missing_chunks = 120,
         ),
         // First download, live job, never prefilled -> "Downloading".
         GameSummary(appid = 1_000_030, name = "Ironwood Hollow", status = "running", depot_count = 1),
@@ -163,6 +174,7 @@ internal class FixedJobsRepository(private val jobs: List<JobSummary>) : JobsRep
     override suspend fun detail(id: Int): JobDetail = notUsed()
     override suspend fun prefill(appids: List<Int>): List<PrefillJobRef> = notUsed()
     override suspend fun prefillCached(): List<PrefillJobRef> = notUsed()
+    override suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> = notUsed()
     override suspend fun cancel(id: Int): JobControlOut = notUsed()
     override suspend fun pause(id: Int): JobControlOut = notUsed()
     override suspend fun resume(id: Int): JobControlOut = notUsed()

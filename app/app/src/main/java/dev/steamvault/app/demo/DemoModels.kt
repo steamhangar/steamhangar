@@ -11,6 +11,18 @@ import dev.steamvault.app.net.model.JobSummary
 internal data class DemoDepot(val depotid: Int, val shared: Boolean, val sizeBytes: Long)
 
 /**
+ * WP CACHE-COMPLETE-1c: a stored completeness measurement that is NOT
+ * "every byte there" (web demo `{expected, present, missing}`): bytes of the
+ * current build, how many of them are on disk, and how many chunk files are
+ * missing (`0` with [presentBytes] < [expectedBytes] = short only of
+ * wrong-size chunks). [DemoState] applies the real null rules on top.
+ */
+internal data class DemoCompleteness(val expectedBytes: Long, val presentBytes: Long, val missingChunks: Int) {
+    /** Short only of wrong-size chunks: a forced run cannot change it. */
+    val damagedOnly: Boolean get() = missingChunks == 0 && presentBytes < expectedBytes
+}
+
+/**
  * Mutable demo-mode game state. [toSummary]/[toDetail] build the SAME real
  * response models [dev.steamvault.app.repo.GamesRepository] callers already
  * expect ([GameSummary]/[GameDetail]) — see `DemoState.kt`'s class kdoc for
@@ -46,6 +58,17 @@ internal class DemoGame(
     val parentAppid: Int? = null,
     /** WP TOOL-APPS-2d: the server's `app_type` vocabulary, null = unknown. */
     val appType: String? = null,
+    /** WP CACHE-COMPLETE-1c: the stored figure when it is not "complete";
+     * `null` (the default) = measured complete -- every byte of the game's
+     * depots is the current build. */
+    var completeness: DemoCompleteness? = null,
+    /** WP CACHE-COMPLETE-1c: the figure is not known (e.g. an announced
+     * build whose manifest nobody fetched yet) -- the API's null case. */
+    var completenessUnknown: Boolean = false,
+    /** WP CACHE-COMPLETE-1c: when the figure was measured; `null` = the
+     * seeded update check's time ([DemoState]). A finished demo prefill
+     * re-stamps it. */
+    var completenessCheckedAt: String? = null,
 ) {
     private fun totalSizeBytes(): Long? = depots.sumOf { it.sizeBytes }.takeIf { depots.isNotEmpty() }
 

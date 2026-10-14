@@ -21,6 +21,10 @@
     <string name="status_warn">Warning</string>
     <string name="status_cancelled">Cancelled</string>
     <string name="status_notinuse">Not in use</string>
+    <!-- WP CACHE-COMPLETE-1c: web STATUS_LABEL.partial / .unverified (the
+         icon fallbacks; the card shows its own words). -->
+    <string name="status_partial">Partially cached</string>
+    <string name="status_unverified">Not verified</string>
 
     <string name="reduced_motion_on">Reduced motion: ON (animations disabled)</string>
     <string name="reduced_motion_off">Reduced motion: OFF (animations enabled)</string>
