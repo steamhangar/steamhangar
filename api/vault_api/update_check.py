@@ -18,7 +18,9 @@ answers ``202`` at once and the scheduler tick is never stalled by oracle
 round trips. ``GET /v1/updates/status`` reads what the last run found.
 
 A run only **refreshes the manifest oracle** (``oracle.refresh_app``) for games
-that currently hold cache content. It never starts a download: the download
+that currently hold cache content, then measures their **cache completeness**
+against the current build (WP CACHE-COMPLETE-1a,
+``vault_api/cache_completeness.py``; local disk reads only). It never starts a download: the download
 enqueue stays in ``scheduler.maybe_sweep``, gated by the window exactly as
 before. "Update available" is the oracle's ``stale`` verdict — the oracle's
 current public manifest differs from the one vault-api recorded for the cache
@@ -59,7 +61,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable
 from urllib.parse import urlsplit
 
-from vault_api import jobs, oracle
+from vault_api import cache_completeness, jobs, oracle
 from vault_api.config import Settings
 from vault_api.db import get_connection
 
@@ -521,10 +523,11 @@ class UpdateCheckRunner:
         try:
             with closing(get_connection(self._db_path)) as conn:
                 try:
+                    appids = sorted(set(select_appids(conn)))
                     result = check_apps(
                         conn,
                         settings,
-                        select_appids(conn),
+                        appids,
                         fetch=self._fetch,
                         should_abort=self._stop.is_set,
                         pause=self._pause,
@@ -545,6 +548,9 @@ class UpdateCheckRunner:
                         stale=None,
                     )
                     return
+                completeness_count = self._evaluate_completeness(
+                    conn, settings, appids, result
+                )
                 finish_update_check(
                     conn,
                     finished_at=self._clock(),
@@ -555,10 +561,11 @@ class UpdateCheckRunner:
                 )
                 logger.info(
                     "update check (%s): %d cached app(s) checked, %d ok, %d "
-                    "failed, %d with an update available%s%s",
+                    "failed, %d with an update available, completeness "
+                    "measured for %d%s%s",
                     trigger,
                     len(result.apps), result.ok_count, result.failed_count,
-                    result.stale_count,
+                    result.stale_count, completeness_count,
                     " [ABORTED by shutdown]" if result.aborted else "",
                     " [STOPPED after repeated failures]" if result.bailed_out else "",
                 )
@@ -566,6 +573,30 @@ class UpdateCheckRunner:
             logger.exception("update check (%s): could not record the result", trigger)
         finally:
             self._lock.release()
+
+    def _evaluate_completeness(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        appids: list[int],
+        result: UpdateCheckResult,
+    ) -> int:
+        """WP CACHE-COMPLETE-1a: measure cache completeness for the selected
+        apps after the oracle refresh (``vault_api/cache_completeness.py``).
+
+        Runs even after a bail-out (it reads stored oracle rows and the local
+        disk, no network), skipped on shutdown. Its own failure is logged and
+        never changes the check's outcome.
+        """
+        if result.aborted or self._stop.is_set():
+            return 0
+        try:
+            return cache_completeness.evaluate_apps(
+                conn, settings, appids, should_abort=self._stop.is_set
+            )
+        except Exception:
+            logger.exception("update check: cache completeness evaluation failed")
+            return 0
 
     def wait(self, timeout: float | None = None) -> bool:
         """Join the current run, if any. True when no run is left."""

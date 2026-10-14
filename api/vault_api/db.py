@@ -236,7 +236,14 @@ import time
 #: ``client_cache_stats`` rows are NOT folded into the tiers: they are
 #: bucketed by sweep time, not event time, and hold about four hours; the
 #: tiers start empty and ``traffic_since`` says so.
-SCHEMA_VERSION = 23
+#: v24 is RESERVED for WP AGENT-ADDR-1 (built in parallel); this branch does
+#: not contain it.
+#: v25 (WP CACHE-COMPLETE-1a): added ``cache_completeness`` -- one row per
+#: (app, depot) the always-on update check measured: the target manifest id,
+#: its expected (``cb_compressed``) bytes and how many of them are on disk as
+#: exact-size chunk files (``vault_api/cache_completeness.py``). A brand-new
+#: table, so it needs no ``ALTER`` step and no version-keyed step.
+SCHEMA_VERSION = 25
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -881,6 +888,26 @@ CREATE TABLE IF NOT EXISTS server_traffic (
     peak_bucket_bytes INTEGER NOT NULL DEFAULT 0,
     active_buckets    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (tier, bucket_at)
+);
+
+-- v25 (WP CACHE-COMPLETE-1a): per (app, depot) completeness against the
+-- current build's manifest, written by the update check, read by GET
+-- /v1/games. Replaced per app in one transaction; see
+-- vault_api/cache_completeness.py for the formula and every status value.
+-- manifestid is TEXT for the same u64 reason as depot_manifests.manifestid.
+CREATE TABLE IF NOT EXISTS cache_completeness (
+    appid             INTEGER NOT NULL,
+    depotid           INTEGER NOT NULL,
+    manifestid        TEXT,
+    status            TEXT NOT NULL,
+    source            TEXT,
+    expected_bytes    INTEGER,
+    present_bytes     INTEGER,
+    chunk_count       INTEGER,
+    missing_chunks    INTEGER,
+    mismatched_chunks INTEGER,
+    checked_at        TEXT NOT NULL,
+    PRIMARY KEY (appid, depotid)
 );
 
 CREATE TABLE IF NOT EXISTS runner_presence (
