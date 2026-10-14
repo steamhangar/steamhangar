@@ -933,9 +933,16 @@ UNTIL the packaging work package that closed the actual
 `environment:` block, so the whole feature was unreachable in the shipped
 stack even though the code was correct — see `docs/LEARNINGS.md`
 "Containers"). To turn it back off, set BOTH variables to empty in `.env` —
-`.env.example` has the exact wording. It genuinely grows over time (one TSV
-line per request); `.env.example` also states plainly that vault-api can
-read the file but not truncate it, so rotation is on the operator.
+`.env.example` has the exact wording. It grows by one TSV line per
+request, and **since WP D15-ROT vault-core bounds it**: at 64 MiB it renames
+`event.log` to `event.log.1` (replacing the previous one) and has nginx
+reopen the log, so the two files together stay at about 128 MiB. One line
+per rotation in `docker compose logs vault-core`
+(`45-vault-eventlog-rotate.sh: rotated ...`). No `.env` change is needed;
+the knobs and the details are in `core/README.md` "Rotation and the USR1
+contract". vault-api's own in-place truncation
+(`VAULT_EVENT_LOG_MAX_BYTES`) is no longer needed for that; leaving it at
+its default is harmless, `0` switches it off.
 
 **Turning on auto-GC deletes files automatically once you pick `execute`.**
 Start with `dry-run` and read a few job logs (`GET /v1/jobs/{id}`) before

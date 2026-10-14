@@ -68,3 +68,25 @@ Option C. Consequences and boundaries:
 - The feed is optional at runtime: vault-core without the extra log (or
   vault-api without read access to it) degrades to today's behavior —
   serving, prefill, GC all unaffected.
+
+## Addendum 2026-10-13 (WP D15-ROT): vault-core rotates the log
+
+User decision 2026-10-13 (`docs/handover/post-0.1.0-roadmap.md`, "User
+decisions 2026-10-13 (late evening)"). The original decision gave rotation
+to the sweeper alone ("sweep, then truncate"). That is best-effort: where
+vault-api may not write the file, it never shrinks — measured on a
+production instance at 41 MB and growing, every sweep past 64 MiB would
+warn. Now:
+
+- vault-core rotates the event log itself: at 64 MiB (`45-vault-eventlog-
+  rotate.sh`, image-level `VAULT_EVENT_LOG_ROTATE_BYTES`, `0` = off) it
+  renames `event.log` to `event.log.1`, creates a fresh 101:101 file and
+  sends `USR1` to the nginx master. ONE old file is kept (about 128 MiB at
+  most). Rename, never copytruncate: no line is lost, and the old file stays
+  readable to the end.
+- The sweeper keeps its cursor; following the rotation by inode and
+  reading the tail of `event.log.1` before switching is WP D15b's part.
+  Its in-place truncation (`VAULT_EVENT_LOG_MAX_BYTES`) still exists and
+  coexists (whichever runs first wins); D15b decides whether it stays.
+- "Optional at runtime" is unchanged: with `VAULT_EVENT_LOG` empty, the
+  rotation hook does nothing.

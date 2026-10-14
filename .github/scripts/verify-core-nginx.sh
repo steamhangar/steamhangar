@@ -67,6 +67,8 @@ for f in "$dockerfile" \
          "$core_dir/tests/test-root-only-dir.sh" \
          "$core_dir/tests/volume-ownership-race-rig.sh" \
          "$core_dir/docker/40-vault-preflight.sh" \
+         "$core_dir/docker/45-vault-eventlog-rotate.sh" \
+         "$core_dir/tests/test-eventlog-rotate-hook.sh" \
          "$core_dir/docker/check-config-drift.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
 done
@@ -118,6 +120,12 @@ bash "$core_dir/tests/test-tls-caps-hook.sh"
 # its order, and render_must_fail checks that the collision stops the boot.
 echo "--- core/tests/test-build-version-hook.sh ---"
 bash "$core_dir/tests/test-build-version-hook.sh"
+
+# --- 0b-rot. the event-log rotation hook's start decisions (WP D15-ROT) ----
+# Grammar refusals and every "loop not started" case, docker-free; the
+# rotation itself runs live below ("event-log rotation").
+echo "--- core/tests/test-eventlog-rotate-hook.sh ---"
+bash "$core_dir/tests/test-eventlog-rotate-hook.sh"
 
 # --- 0b-own. the root-only directory predicate, docker-free (WP SEC-FIX-5) -----
 # 21-, 25- and 29- decide with one predicate whether root may act on names in
@@ -340,7 +348,8 @@ render_and_test() {
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
+            cp /workspace/core-docker/45-vault-eventlog-rotate.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
+            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
 
             # The REAL stock entrypoint: runs every /docker-entrypoint.d/*.sh
             # hook in sorted order (stock 10-/15-/20-envsubst, our 25-, stock
@@ -428,6 +437,22 @@ render_and_test() {
                 echo "SEC-FIX-5 OK: hook order 20-envsubst ($l20) < 21-volume-ownership ($l21) < 25-eventlog ($l25)"
             else
                 echo "FAIL (SEC-FIX-5): hook order wrong or a hook did not run: 20=$l20 21=$l21 25=$l25"
+                status=1
+            fi
+            # WP D15-ROT: 45- runs after the preflight and, for this
+            # `nginx -t` run, never forks its rotation loop (a forked loop
+            # would hold a reader of this output open).
+            l45=$(launch_line 45-vault-eventlog-rotate.sh)
+            if [ -n "$VAULT_EVENT_LOG" ]; then
+                want45="45-vault-eventlog-rotate.sh: not a server start"
+            else
+                want45="45-vault-eventlog-rotate.sh: VAULT_EVENT_LOG unset/empty -- no cache-event log, no rotation"
+            fi
+            if [ -n "$l40" ] && [ -n "$l45" ] && [ "$l40" -lt "$l45" ] && grep -qF "$want45" /tmp/entrypoint.log \
+               && ! grep -q "45-vault-eventlog-rotate.sh: rotating " /tmp/entrypoint.log; then
+                echo "D15-ROT OK: 40-preflight ($l40) < 45-eventlog-rotate ($l45), loop not started for nginx -t"
+            else
+                echo "FAIL (D15-ROT): 45-vault-eventlog-rotate.sh did not run after 40- (40=$l40 45=$l45) or did not log \"$want45\""
                 status=1
             fi
             vf=/vault/logs/vault-core-version.json
@@ -941,7 +966,8 @@ render_must_fail() {
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
-            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh
+            cp /workspace/core-docker/45-vault-eventlog-rotate.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
+            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
             rc=0
             /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf || rc=$?
             if [ -n "$RMF_POST" ] && ! sh -c "$RMF_POST"; then
@@ -1019,6 +1045,9 @@ render_must_fail "hard-linked event log"    "/vault/logs/event.log" 25-vault-eve
     ': > /vault/logs/event.log; ln /vault/logs/event.log /vault/cache/depot/other-name'
 render_must_fail "event log under cache/depot (owned by uid 101)" "/vault/cache/depot/event.log" 25-vault-eventlog.sh
 render_must_fail "event log under tmp/proxy (owned by uid 101)" "/vault/tmp/proxy/event.log" 25-vault-eventlog.sh
+# WP D15-ROT: a bad rotation threshold stops the boot in 45- (after 40-).
+render_must_fail "rotation threshold below 1 MiB" "/vault/logs/event.log" 45-vault-eventlog-rotate.sh "" "" \
+    -e VAULT_EVENT_LOG_ROTATE_BYTES=4096
 }
 
 # hook21_must_fail <label> <setup> <stub-install> <post> <expected FATAL text>
@@ -1621,6 +1650,113 @@ docker run --rm --network none \
         exit $status
     '
 
+# --- WP D15-ROT: event-log rotation, LIVE (offline) ---------------------------
+# The real entrypoint chain starts a real nginx server (not nginx -t) with the
+# event log on, a 1 MiB threshold and a 1 s check interval; the log is seeded
+# above the threshold before the start. Asserted: the hook starts its loop
+# (and only for the server start), rotates by rename into event.log.1 with one
+# log line per rotation, the fresh event.log is 101:101 0644 with one link,
+# nginx writes the next request's line into the NEW file (the reopen worked),
+# a second rotation replaces event.log.1 (one old file kept, no .2), and the
+# loop still rotates after an `nginx -s reload`. No DNS, no CDN.
+echo "--- event-log rotation (WP D15-ROT, live, loopback) ---"
+docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
+    -v "$core_dir/docker:/workspace/core-docker:ro" \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+    -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+    -e VAULT_RESOLVER="1.1.1.1" \
+    -e VAULT_EVENT_LOG=/vault/logs/event.log \
+    -e VAULT_EVENT_LOG_ROTATE_BYTES=1048576 \
+    -e VAULT_EVENT_LOG_ROTATE_INTERVAL=1 \
+    -e VAULT_BUILD_VERSION="0.1.0-rc9" \
+    -e VAULT_BUILD_COMMIT="0123456789abcdef0123456789abcdef01234567" \
+    --entrypoint sh \
+    "$IMAGE" -c '
+        set -eu
+        command -v curl >/dev/null 2>&1 || { echo "FAIL: curl missing in the base image"; exit 1; }
+        mkdir -p /etc/nginx/templates /vault/cache/depot/4242/chunk /vault/tmp /vault/logs
+        chmod 0755 /vault /vault/cache /vault/cache/depot /vault/tmp /vault/logs
+        chown root:root /vault /vault/cache /vault/tmp /vault/logs
+        printf rot > /vault/cache/depot/4242/chunk/d15rot0001
+        chown -R nginx:nginx /vault/cache/depot
+        cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        for h in 21-vault-volume-ownership 25-vault-eventlog 26-vault-tls-passthrough 27-vault-upstream-rate \
+                 28-vault-upstream-pool 29-vault-build-version 40-vault-preflight 45-vault-eventlog-rotate; do
+            cp "/workspace/core-docker/$h.sh" "/docker-entrypoint.d/$h.sh"
+            chmod 0755 "/docker-entrypoint.d/$h.sh"
+        done
+        seed=1153434
+        head -c "$seed" /dev/zero | tr "\0" "s" > /vault/logs/event.log
+        logf=/vault/logs/event.log
+        status=0
+        fail() { echo "FAIL: $*"; status=1; }
+        rotations() { grep -c "45-vault-eventlog-rotate.sh: rotated $logf " /tmp/ep.log || true; }
+        # wait_until <tenths> <shell test>: polls, true once the test holds.
+        wait_until() {
+            _n=0
+            while [ "$_n" -lt "$1" ]; do
+                if sh -c "$2"; then return 0; fi
+                sleep 0.1; _n=$((_n + 1))
+            done
+            return 1
+        }
+        export logf
+        /docker-entrypoint.sh nginx -g "daemon off;" -p /vault -c /etc/nginx/nginx.conf > /tmp/ep.log 2>&1 &
+        ep=$!
+
+        wait_until 300 "grep -q \"rotated $logf ($seed bytes) -> $logf.1, nginx master \" /tmp/ep.log" \
+            || fail "no rotation of the seeded $seed-byte log within 30 s"
+        grep -q "45-vault-eventlog-rotate.sh: rotating $logf at 1048576 bytes into $logf.1 (one old file kept), checked every 1s" /tmp/ep.log \
+            || fail "the loop start line is missing"
+        master=$(cat /var/run/nginx.pid 2>/dev/null || echo none)
+        [ "$master" = "$ep" ] || fail "nginx master pid $master is not the entrypoint process $ep"
+        grep -q "rotated $logf ($seed bytes) -> $logf.1, nginx master $ep reopened its logs" /tmp/ep.log \
+            || fail "the rotation line does not name the master $ep"
+        [ "$(rotations)" = 1 ] || fail "expected exactly 1 rotation line, found $(rotations)"
+        [ "$(head -c 8 "$logf.1")" = ssssssss ] || fail "$logf.1 does not hold the seeded content"
+        [ "$(stat -c %s "$logf.1")" -ge "$seed" ] || fail "$logf.1 is smaller than the seed"
+        got=$(stat -c "%u:%g %a %h %F" "$logf")
+        [ "$got" = "101:101 644 1 regular empty file" ] || [ "$got" = "101:101 644 1 regular file" ] \
+            || fail "the fresh $logf is \"$got\", expected 101:101 644, one link, a regular file"
+        [ ! -e "$logf.2" ] || fail "$logf.2 exists"
+
+        # The reopen: a HIT after the rotation lands in the NEW file
+        # (flush=5s, so a bounded wait -- LEARNINGS WP 4g).
+        code=$(curl -s -m 5 -o /dev/null -w "%{http_code}" -H "Host: cache2-ams1.steamcontent.com" \
+            http://127.0.0.1/depot/4242/chunk/d15rot0001 || echo curl-error)
+        [ "$code" = 200 ] || fail "the HIT request answered $code"
+        wait_until 150 "grep -q d15rot0001 $logf" \
+            || fail "the HIT line never reached the new $logf (nginx did not reopen)"
+        if grep -q d15rot0001 "$logf.1"; then fail "the HIT line went into $logf.1"; fi
+        [ "$(rotations)" = 1 ] || fail "a small log was rotated again ($(rotations) rotation lines)"
+
+        # Second rotation: event.log.1 is replaced, never a second old file.
+        head -c "$seed" /dev/zero | tr "\0" "t" >> "$logf"
+        wait_until 300 "[ \$(grep -c \"rotate.sh: rotated $logf \" /tmp/ep.log) -ge 2 ]" \
+            || fail "no second rotation within 30 s"
+        grep -q d15rot0001 "$logf.1" || fail "the second rotation did not move the HIT line into $logf.1"
+        if grep -q sss "$logf.1"; then fail "$logf.1 still holds the first seed (two old files kept?)"; fi
+        [ ! -e "$logf.2" ] || fail "$logf.2 exists after the second rotation"
+
+        # A reload in between changes nothing.
+        nginx -s reload -p /vault -c /etc/nginx/nginx.conf
+        sleep 1
+        head -c "$seed" /dev/zero | tr "\0" "u" >> "$logf"
+        wait_until 300 "[ \$(grep -c \"rotate.sh: rotated $logf \" /tmp/ep.log) -ge 3 ]" \
+            || fail "no rotation after nginx -s reload within 30 s"
+        [ "$(cat /var/run/nginx.pid)" = "$ep" ] || fail "the master pid changed across the reload"
+        [ "$(stat -c "%u:%g %a" "$logf")" = "101:101 644" ] || fail "after the third rotation $logf is $(stat -c "%u:%g %a" "$logf")"
+        [ "$(rotations)" = 3 ] || fail "expected exactly 3 rotation lines, found $(rotations)"
+
+        grep "45-vault-eventlog-rotate.sh" /tmp/ep.log | sed "s/^/    /"
+        kill -QUIT "$ep" 2>/dev/null || true
+        wait "$ep" 2>/dev/null || true
+        if [ "$status" != 0 ]; then echo "--- entrypoint/nginx output ---"; tail -n 40 /tmp/ep.log; fi
+        [ "$status" = 0 ] && echo "rotation OK: rename into event.log.1, fresh 101:101 file, reopen, one old file, survives a reload"
+        exit $status
+    '
+
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \
      "the event log is owned 101:101; the /depot/ request guards answer live;" \
@@ -1643,4 +1779,6 @@ echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "migrated volume under the compose capability set, planted links, a" \
      "hard-linked log, a log under a uid-101 directory, a refused chown and" \
      "an open probe stop the boot, and no root process follows a name a" \
-     "real uid-101 attacker swaps (race rigs)."
+     "real uid-101 attacker swaps (race rigs); the event log rotates by" \
+     "rename at its threshold into one old file, nginx reopens, and the" \
+     "rotation hook refuses bad values and starts only for a server start."

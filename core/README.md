@@ -586,28 +586,69 @@ the file concurrently with traffic, which is exactly WP 3.11's situation.)
 
 ### Rotation and the USR1 contract
 
-Per ADR-0008, **the sweeper (WP 3.11, `api/`) owns the cursor and
-truncation** -- nothing in `core/` rotates this file. Two consequences worth
-being explicit about:
+**vault-core rotates this file itself since WP D15-ROT** (user decision
+2026-10-13, ADR-0008 addendum of the same date). Before, rotation was
+only the sweeper's in-place truncation (WP 3.11, `api/`), which a
+deployment can deny -- the file then grew without bound (measured: 41 MB
+and climbing on a production instance).
 
-- nginx's stock `USR1`-reopen behavior (`kill -USR1 <master pid>`, or
-  `nginx -s reopen`) already covers every open `access_log` file handle,
-  including this one, for free -- no code in this work package changes
-  that. If a future rotation strategy ever renames the file instead of
-  truncating it in place, the sweeper (or whatever triggers rotation) MUST
-  signal vault-core's master process afterwards, or nginx keeps writing to
-  the renamed (now effectively deleted-on-most-filesystems) inode. This is
-  a boundary note, not something WP 3.10 needed to implement: the ADR's
-  chosen design is cursor+truncate, not rename.
-- Truncate-in-place is actually safe against nginx's own writer without any
-  reopen at all, and it's worth recording why: nginx opens `access_log`
-  files with `O_APPEND`, under which every `write()` targets the file's
-  *current* end-of-file as tracked by the kernel, not an offset cached by
-  the writing process. Truncating the file to zero bytes while nginx holds
-  it open changes that current end-of-file too, so the next line nginx
-  writes lands at the new offset 0 -- no gap, no sparse hole, no reopen
-  needed. This is *why* ADR-0008 could choose "sweep, then truncate" as the
-  whole rotation story instead of a logrotate-style rename dance.
+`docker/45-vault-eventlog-rotate.sh` forks a small loop before nginx
+starts. Every 60 s it checks the size; at or above 64 MiB it
+
+1. finds the running nginx master (`/var/run/nginx.pid`, accepted only if
+   `/proc/<pid>/cmdline` reads `nginx: master process`; without one it
+   does not rotate and logs a WARNING),
+2. removes the previous `event.log.1` and renames `event.log` to
+   `event.log.1` (one `rename(2)` in the root-only `logs/` directory),
+3. creates a fresh `event.log` owned 101:101 0644 (append-create, never a
+   truncate), and
+4. sends `SIGUSR1` to the master (`nginx -s reopen`): the master flushes
+   the buffered lines into the old file, reopens the name and has the
+   workers do the same.
+
+One line per rotation in `docker logs`:
+`45-vault-eventlog-rotate.sh: rotated /vault/logs/event.log (<n> bytes) ->
+/vault/logs/event.log.1, nginx master <pid> reopened its logs`. ONE old
+file is kept, so the log needs at most about 2 x 64 MiB on the volume.
+Nothing is ever truncated or copied (no copytruncate): until the reopen,
+nginx keeps writing through its open fd into the renamed file, so no line
+is lost, and a reader that follows the file by inode (the sweeper, WP
+D15b) reads the rest of `event.log.1` before it switches to the new file.
+
+The loop is not a second init: the stock entrypoint execs nginx, so the
+master is PID 1, the loop (forked by the hook) is its child, and the master
+reaps it like any unknown child. It dies with the container. An
+`nginx -s reload` changes nothing (same master, same name). It is started
+only for the server itself: an `nginx -t`/`-T`/`-s`/`-v`/`-V`/`-h` run
+(read from the entrypoint's argument list, `/proc/$PPID/cmdline`) logs
+"not a server start" instead, so a one-shot config check never leaves a
+loop behind.
+
+Knobs (image-level env, read at start, **not** forwarded by
+`deploy/compose.yaml` -- the decided defaults need none, in line with the
+"few env values" direction of D16; add them to a compose override only if
+you must):
+
+| Variable | Default | Grammar |
+|---|---|---|
+| `VAULT_EVENT_LOG_ROTATE_BYTES` | `67108864` (64 MiB) | digits; `0` = rotation off; otherwise >= 1048576 |
+| `VAULT_EVENT_LOG_ROTATE_INTERVAL` | `60` (seconds) | 1..3600 |
+
+An invalid value stops the boot (`45-vault-eventlog-rotate.sh: FATAL`),
+also while `VAULT_EVENT_LOG` is off. Keep the threshold large enough that
+two rotations never fall into one sweep interval (5 min by default): a
+second rotation replaces `event.log.1` whether or not it was read.
+
+The sweeper's own truncation (`VAULT_EVENT_LOG_MAX_BYTES`, default 64 MiB)
+still exists and is harmless next to this: whichever acts first wins, the
+other then sees a small file. Its documented race (lines flushed between
+its size check and the truncate are lost) does not exist for the rename,
+so with vault-core rotating, `VAULT_EVENT_LOG_MAX_BYTES=0` is the cleaner
+setting; it is optional, and D15b decides the sweeper side.
+
+The earlier note still holds for anyone truncating by hand: nginx opens
+`access_log` files with `O_APPEND`, so a truncate in place needs no reopen
+(the next write lands at the new end of file, offset 0).
 
 ### Docker: `VAULT_EVENT_LOG` (optional, default OFF)
 
@@ -757,6 +798,7 @@ core/
     ├── 28-vault-upstream-pool.sh    # VAULT_UPSTREAM_EDGE/_MAX_CONNS/_POOL_HOSTS -> pool + cap includes
     ├── 29-vault-build-version.sh    # version file for vault-api's GET /v1/about
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
+    ├── 45-vault-eventlog-rotate.sh  # rotates the event log at 64 MiB (D15-ROT)
     └── check-config-drift.sh        # keeps the template honest
 ```
 
@@ -923,6 +965,7 @@ ownership:
 | `/vault/tmp/{proxy,client_body,fastcgi,uwsgi,scgi}` | 101:101 0700 | workers (temp files) |
 | `/vault/logs` | root:root 0755 | -- |
 | `/vault/logs/event.log` | 101:101 | master's fd (lines), vault-api (`ftruncate`) |
+| `/vault/logs/event.log.1` | 101:101 | `45-vault-eventlog-rotate.sh` (rename of the full log; one old file) |
 | `/vault/logs/vault-core-version.json` | root:root 0644 | `29-vault-build-version.sh` |
 
 uid 101 keeps write access to exactly what it writes and cannot rename any
