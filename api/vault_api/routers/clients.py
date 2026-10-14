@@ -105,6 +105,7 @@ from pydantic import BaseModel
 from vault_api import agent_reports, client_names, event_sweep, peer_hops
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
+from vault_api import deps
 from vault_api.deps import DbOpener, db_opener
 from vault_api.jobs import to_utc_iso
 
@@ -184,7 +185,7 @@ def list_clients(
     open_db: DbOpener = Depends(db_opener),
 ) -> list[ClientOut]:
     """Every client that has reported installed apps, by ``client_id``."""
-    settings: Settings = request.app.state.settings
+    settings: Settings = deps.effective_settings(request)
     now = datetime.now(timezone.utc)
     cutoff_iso = to_utc_iso(now - timedelta(days=settings.bypass_window_days))
 

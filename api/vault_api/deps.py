@@ -38,16 +38,20 @@ safe default (see ``db.get_connection``), so a future regression is a loud
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import closing
 from typing import Callable, ContextManager
 
 from fastapi import Request
 
+from vault_api import settings_store
 from vault_api.config import Settings
 from vault_api.db import get_connection
 from vault_api.sizes import SizeCache
 from vault_api.steam_relay import RelayCache
+
+logger = logging.getLogger(__name__)
 
 #: What routers receive: call it to get a context-managed connection.
 DbOpener = Callable[[], ContextManager[sqlite3.Connection]]
@@ -95,8 +99,27 @@ def get_settings(request: Request) -> Settings:
     enable flag themselves (that is how "off" cannot be bypassed by a
     forgotten check), so handing it the object is the honest signature rather
     than three separate scalars re-assembled on the other side.
+
+    D16b: the EFFECTIVE settings (env > Settings > default), resolved per
+    request, so a Settings change to a key read here (oracle timeout, the
+    keep counters, the bypass window, the event-sweep interval) applies to
+    the next request.
     """
-    return request.app.state.settings
+    return effective_settings(request)
+
+
+def effective_settings(request: Request) -> Settings:
+    """Resolve the stored Settings values on top of ``app.state.settings``
+    with a connection opened, used and closed in this one call (the
+    thread-confinement rule of this module). Fail-soft: on a DB error the
+    env/default snapshot is returned."""
+    base: Settings = request.app.state.settings
+    try:
+        with closing(get_connection(base.db_path)) as conn:
+            return settings_store.effective_settings(conn, base)
+    except sqlite3.Error:
+        logger.exception("Could not resolve stored settings for this request.")
+        return base
 
 
 def get_agent_report_keep(request: Request) -> int:
@@ -106,7 +129,7 @@ def get_agent_report_keep(request: Request) -> int:
     ``POST /v1/agent/installed`` prunes inside its own insert transaction, so
     the endpoint needs the number rather than the whole ``Settings`` object.
     """
-    return request.app.state.settings.agent_report_keep
+    return effective_settings(request).agent_report_keep
 
 
 def db_opener(request: Request) -> DbOpener:

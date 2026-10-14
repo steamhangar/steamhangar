@@ -3,7 +3,8 @@
 
 Layout, mirroring ``docs/LEARNINGS.md``'s testing-discipline entries:
 
-1. **Precedence** — db > env > default, with an explicit test per direction
+1. **Precedence** — db > env > default before D16b; since D16b env > db >
+   default (test_d16b_settings.py pins that direction), with an explicit test per direction
    so flipping the priority order in ``settings_store._source_without_override``
    or ``effective_settings`` kills a NAMED test, not just "something in the
    suite".
@@ -45,6 +46,9 @@ from vault_api.schedule_window import parse_window
 
 AUTH = {"X-Api-Key": TEST_API_KEY}
 
+#: The row fields GET has had since ADR-0009 (D16b added more).
+ORIG_FIELDS = ("key", "effective", "source", "fallback", "applies", "env_only")
+
 
 def find(body: dict, key: str) -> dict:
     for row in body["settings"]:
@@ -85,7 +89,9 @@ def test_get_reports_defaults_on_a_fresh_install(client: TestClient) -> None:
     assert body["readonly"] is False
 
     vault_name = find(body, "vault_name")
-    assert vault_name == {
+    # D16b added expert fields (pinned in test_d16b_settings.py); this test
+    # keeps pinning the original six.
+    assert {k: vault_name[k] for k in ORIG_FIELDS} == {
         "key": "vault_name",
         "effective": "",
         "source": "default",
@@ -107,12 +113,13 @@ def test_get_reports_defaults_on_a_fresh_install(client: TestClient) -> None:
     assert auto_gc["applies"] == "immediately"
 
     window = find(body, "schedule_window")
-    assert window["effective"] is None
+    # A bare Settings has no window; D16b renders "no window" as "off".
+    assert window["effective"] == "off"
     assert window["applies"] == "next_sweep"
 
     # WP 4d / WP SWEEP-1.
     sweep_include_cached = find(body, "sweep_include_cached")
-    assert sweep_include_cached == {
+    assert {k: sweep_include_cached[k] for k in ORIG_FIELDS} == {
         "key": "sweep_include_cached",
         "effective": True,
         "source": "default",
@@ -217,6 +224,9 @@ def test_precedence_env_wins_over_default(tmp_path: Path) -> None:
         cache_root=str(tmp_path / "cache"),
         log_level="INFO",
         auto_gc="dry-run",
+        # D16b: "env" now means the variable is set, not "differs from the
+        # default" (ADR-0009 addendum).
+        env_pinned=frozenset({"VAULT_AUTO_GC"}),
     )
     with TestClient(create_app(settings)) as client:
         body = client.get("/v1/settings", headers=AUTH).json()
@@ -282,6 +292,7 @@ def test_precedence_env_wins_over_default_for_sweep_include_cached(
         cache_root=str(tmp_path / "cache"),
         log_level="INFO",
         sweep_include_cached=False,
+        env_pinned=frozenset({"VAULT_SWEEP_INCLUDE_CACHED"}),
     )
     with TestClient(create_app(settings)) as client:
         body = client.get("/v1/settings", headers=AUTH).json()
@@ -507,14 +518,13 @@ def test_patch_bad_webhook_url_is_422_and_not_persisted(
         conn.close()
 
 
-def test_patch_webhook_url_blank_is_accepted_and_disables(client: TestClient) -> None:
-    """Blank is the documented "off" spelling (mirrors ``VAULT_WEBHOOK_URL``
-    at startup) — accepted, not a validation failure."""
+def test_patch_webhook_url_is_refused_as_env_only(client: TestClient) -> None:
+    """D16b (Q2): VAULT_WEBHOOK_URL is env-only; the PATCH path is gone,
+    blank included."""
     response = client.patch("/v1/settings", json={"webhook_url": ""}, headers=AUTH)
-    assert response.status_code == 200
-    row = find(response.json(), "webhook_url")
-    assert row["effective"] == ""
-    assert row["source"] == "db"
+    assert response.status_code == 422
+    assert "environment-only" in response.json()["detail"]
+    assert find(client.get("/v1/settings", headers=AUTH).json(), "webhook_url")["env_only"] is True
 
 
 def test_patch_webhook_events_accepts_a_json_list(client: TestClient) -> None:
@@ -745,15 +755,14 @@ def test_webhook_url_userinfo_is_redacted_in_the_patch_response(
     response = client.patch(
         "/v1/settings", json={"webhook_url": secret_url}, headers=AUTH
     )
-    assert response.status_code == 200
+    # D16b (Q2): refused as env-only; the refusal must not echo the value.
+    assert response.status_code == 422
 
     # STRING-LITERAL pin (docs/LEARNINGS.md): the secret must be provably
     # absent from the raw text, not merely "different from what redact_url
     # would produce if the test called it again".
     assert "hunter2" not in response.text
     assert "opsbot" not in response.text
-    row = find(response.json(), "webhook_url")
-    assert row["effective"] == "https://***@example.invalid/hook"
 
 
 def test_webhook_url_userinfo_is_redacted_in_get_after_patch(
@@ -786,7 +795,9 @@ def test_webhook_url_userinfo_is_redacted_in_the_fallback_field(
 
     assert "envsecret" not in response.text
     row = find(response.json(), "webhook_url")
-    assert row["fallback"] == "https://***@example.invalid/hook"
+    # D16b (Q2): masked to scheme and host; the path can carry a token too.
+    assert row["fallback"] == "https://***@example.invalid/***"
+    assert row["effective"] == "https://***@example.invalid/***"
 
 
 def test_effective_settings_precedence_directly(tmp_path: Path) -> None:
@@ -1286,11 +1297,11 @@ def test_effective_settings_redacts_a_corrupt_secret_override_in_the_log(
     finally:
         conn.close()
 
+    # D16b (Q2): a stored webhook URL is ignored outright (never parsed, so
+    # never logged); the startup warning names the key, not the value.
     assert effective.webhook_url == ""
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert "webhook_url" in text
     assert "s3cr3t" not in text
-    assert "<redacted>" in text
 
 
 def test_effective_settings_redacts_a_corrupt_scheme_less_secret_override(
@@ -1317,7 +1328,5 @@ def test_effective_settings_redacts_a_corrupt_scheme_less_secret_override(
 
     assert effective.webhook_url == ""
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert "webhook_url" in text
     assert "s3cr3t" not in text
     assert "admin" not in text
-    assert "<redacted>" in text

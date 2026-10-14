@@ -227,12 +227,26 @@ class PrefillWorker:
             gc_execute.run_gc_job(
                 conn,
                 job,
-                settings=self._settings,
+                # D16b: gc_grace_days applies to the next GC job.
+                settings=self._job_settings(conn),
                 size_cache=self._size_cache,
                 webhook_notifier=self._webhook_notifier,
             )
             return
         self._fail_unknown_job_type(conn, job, job_type)
+
+    def _job_settings(self, conn: sqlite3.Connection) -> Settings:
+        """D16b: the effective settings for one job (env > Settings >
+        default), on this thread's connection. Fail-soft to the env/default
+        snapshot."""
+        try:
+            return settings_store.effective_settings(conn, self._settings)
+        except Exception:
+            logger.exception(
+                "Could not resolve stored settings for this job; using the "
+                "env/default configuration."
+            )
+            return self._settings
 
     def _fail_unknown_job_type(
         self, conn: sqlite3.Connection, job: dict[str, object], job_type: str
@@ -295,10 +309,12 @@ class PrefillWorker:
                 # process, so this process sends the runner marker (the
                 # queue-mode runner sends its own, prefill_runner._execute).
                 runner_mark.announce(conn, "vault-api")
+                # D16b: prefill threads/timeout apply to the next job.
+                job_settings = self._job_settings(conn)
                 result = prefill.run_prefill(
                     appid=appid,
                     steamprefill_path=self._settings.steamprefill_path,
-                    timeout_seconds=self._settings.prefill_timeout_seconds,
+                    timeout_seconds=job_settings.prefill_timeout_seconds,
                     should_abort=self._stop.is_set,
                     use_force=use_force,
                     # WP 3.12: read on the runner's own 0.2 s poll tick, from THIS
@@ -307,7 +323,7 @@ class PrefillWorker:
                     # never leaves it).
                     stop_request=lambda: jobs.read_stop_request(conn, job_id),
                     # WP CORE-FIX-2: same bound as vault-runner's queue mode.
-                    max_threads=self._settings.prefill_max_threads,
+                    max_threads=job_settings.prefill_max_threads,
                 )
 
             self._finalize_prefill_result(conn, job_id, appid, use_force, before, result)
@@ -564,7 +580,7 @@ class PrefillWorker:
                 # do exactly that if this were allowed to propagate).
                 try:
                     ingest_result = manifest_ingest.ingest_after_prefill(
-                        conn, appid=appid, settings=self._settings
+                        conn, appid=appid, settings=self._job_settings(conn)
                     )
                     log_parts.append(ingest_result.summary())
                 except Exception:

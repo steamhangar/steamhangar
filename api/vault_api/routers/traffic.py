@@ -92,6 +92,7 @@ from vault_api import (
 )
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
+from vault_api import deps
 from vault_api.deps import DbOpener, db_opener
 from vault_api.jobs import JOB_TYPE_PREFILL, STATUS_RUNNING, parse_utc_iso
 
@@ -484,7 +485,7 @@ def get_throughput(
     open_db: DbOpener = Depends(db_opener),
 ) -> ThroughputOut:
     """Downloads header numbers (D13 SPEED-1 + D15)."""
-    settings: Settings = request.app.state.settings
+    settings: Settings = deps.effective_settings(request)
     now = datetime.now(timezone.utc)
     minutes = traffic.active_window_minutes(settings.event_sweep_interval_minutes)
     with open_db() as conn:
@@ -537,7 +538,7 @@ def get_throughput_series(
     open_db: DbOpener = Depends(db_opener),
 ) -> SeriesOut:
     """Server-wide traffic per bucket for the Downloads graphs."""
-    settings: Settings = request.app.state.settings
+    settings: Settings = deps.effective_settings(request)
     now = datetime.now(timezone.utc)
     with open_db() as conn:
         state = event_sweep.read_state(conn)
@@ -584,7 +585,7 @@ def get_clients_overview(
     open_db: DbOpener = Depends(db_opener),
 ) -> ClientsOverviewOut:
     """Agent clients merged with every event-log address (D15 Clients page)."""
-    settings: Settings = request.app.state.settings
+    settings: Settings = deps.effective_settings(request)
     now = datetime.now(timezone.utc)
     minutes = traffic.active_window_minutes(settings.event_sweep_interval_minutes)
     listing_since = traffic.bucket_iso(

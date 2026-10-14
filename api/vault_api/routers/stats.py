@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from vault_api import event_sweep
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
+from vault_api import deps
 from vault_api.deps import DbOpener, db_opener
 
 router = APIRouter(dependencies=[Depends(require_api_key)], tags=["stats"])
@@ -107,7 +108,7 @@ def get_stats(
     open_db: DbOpener = Depends(db_opener),
 ) -> StatsOut:
     """Cache-event sweep configuration plus its bookkeeping (WP 3.11)."""
-    settings: Settings = request.app.state.settings
+    settings: Settings = deps.effective_settings(request)
 
     with open_db() as conn:
         state = event_sweep.read_state(conn)

@@ -47,6 +47,7 @@ from vault_api.routers import (
     traffic as traffic_router,
     updates,
 )
+from vault_api import settings_store
 from vault_api.scheduler import PrefillScheduler
 from vault_api.update_check import UpdateCheckRunner
 from vault_api.sizes import SizeCache
@@ -145,10 +146,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     else:
         logger.info(
-            "Scheduler disabled (VAULT_SCHEDULE_WINDOW is unset). Prefills "
-            "only run when something asks for them (POST /v1/prefill). Set a "
-            "window like '09:00-17:00' to have vault-api keep the gaming "
-            "machines' installed apps current on its own."
+            "Scheduler disabled by the environment (VAULT_SCHEDULE_WINDOW=off) "
+            "or, for a bare Settings, no window; a window stored in Settings "
+            "may still apply (see the resolved-schedule line of the first "
+            "tick). Prefills otherwise only run when something asks for them "
+            "(POST /v1/prefill)."
         )
 
     # WP 3.11 (ADR-0008). Independent of the window above: the cache-event
@@ -256,6 +258,29 @@ def log_build_info(build: BuildInfo) -> None:
         )
 
 
+def startup_settings(settings: Settings) -> Settings:
+    """D16b boot step: startup warnings, the core settings file, and the
+    effective snapshot for the boot-time readers. Fail-soft: a DB problem
+    here logs and falls back to the env/default snapshot."""
+    try:
+        conn = get_connection(settings.db_path)
+        try:
+            settings_store.warn_at_startup(conn, settings)
+            effective = settings_store.effective_settings(conn, settings)
+            settings_store.write_core_file(conn, settings)
+        finally:
+            conn.close()
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Could not resolve stored settings at startup; using the env/default "
+            "configuration for the boot-time readers."
+        )
+        return settings
+    if effective.log_level != settings.log_level:
+        logging.getLogger().setLevel(resolve_log_level(effective.log_level))
+    return effective
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI app. Pass `settings` explicitly in tests; omit it to read from env."""
     settings = settings or Settings.from_env()
@@ -266,6 +291,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     log_build_info(build)
 
     init_db(settings.db_path)
+
+    # D16b (ADR-0009 addendum): the Settings values that are read once at
+    # boot (log level, the webhook notifier's events and timeout) come from
+    # the effective resolution, env > Settings > default; warn once per
+    # stored value an env pin shadows, and write the core settings file
+    # (only when VAULT_CORE_SETTINGS_FILE is set). app.state.settings stays
+    # the pure env/default snapshot every per-call resolution starts from.
+    boot_settings = startup_settings(settings)
 
     # openapi_url=None also disables the derived /docs and /redoc routes.
     # Plan §9 ("no unauthenticated endpoints") only carves out /v1/health;
@@ -310,7 +343,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # WP 3.13: same reasoning as size_cache — constructed unconditionally so
     # it exists for a plain TestClient() too, but start() (called from the
     # lifespan below) is itself a no-op unless VAULT_WEBHOOK_URL is set.
-    app.state.webhook_notifier = WebhookNotifier(settings)
+    app.state.webhook_notifier = WebhookNotifier(boot_settings)
     # WP 3.5: created here rather than in the lifespan (same reasoning as
     # size_cache above) for two reasons: GET /v1/schedule needs it to answer
     # even when the scheduler is disabled or the lifespan never ran (a plain

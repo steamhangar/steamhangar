@@ -110,17 +110,17 @@ def test_bounds_are_one_and_sixty_four() -> None:
     assert (config.MIN_PREFILL_MAX_THREADS, config.MAX_PREFILL_MAX_THREADS) == (1, 64)
 
 
-def test_the_setting_is_env_only() -> None:
-    """Deliberately not a PATCH /v1/settings key: vault-runner (the shipped
-    consumer) never reads the settings table, so a stored value would be a
-    setting the process running SteamPrefill silently ignores."""
+def test_the_setting_is_editable_and_read_per_job() -> None:
+    """Was env-only because vault-runner never read the settings table. D16b
+    (audit 3.1) made it editable: the runner and the worker now resolve it per
+    job (test_d16b_settings.py pins both paths), and it also reaches
+    vault-core's cap floor through the core settings file (target api+core)."""
     from vault_api import settings_store
 
-    assert "prefill_max_threads" not in settings_store.OVERRIDABLE_SPECS
-    assert not any(
-        spec.env_var == "VAULT_PREFILL_MAX_THREADS"
-        for spec in settings_store.OVERRIDABLE_SPECS.values()
-    )
+    spec = settings_store.OVERRIDABLE_SPECS["prefill_max_threads"]
+    assert spec.env_var == "VAULT_PREFILL_MAX_THREADS"
+    assert spec.target == "api+core"
+    assert spec.applies == "next_job"
 
 
 # -- G3: run_prefill's argv ------------------------------------------------

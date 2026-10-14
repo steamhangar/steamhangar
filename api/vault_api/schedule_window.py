@@ -152,19 +152,45 @@ class ScheduleWindow:
         return self.start_minute <= minute < self.end_minute
 
 
+#: D16b (Q7, docs/handover/d16-settings-audit.md 3.6): the one keyword that
+#: spells "no window" for every place a download window is configured
+#: (``VAULT_SCHEDULE_WINDOW``, a ``PATCH /v1/settings`` value, and the core
+#: settings file's ``VAULT_UPSTREAM_RATE_WINDOW``). Exact and lowercase, after
+#: the caller's usual whitespace strip; ``OFF`` or ``off,x`` are refused by
+#: ``parse_window`` like any other bad value. Blank is NOT a spelling of
+#: "off" any more: blank means "not set" (use Settings, else the default).
+WINDOW_OFF = "off"
+
+
+def parse_window_or_off(raw: str) -> ScheduleWindow | None:
+    """``parse_window`` plus the ``off`` keyword (D16b, Q7).
+
+    Returns ``None`` for ``off`` (scheduler off; vault-core's rate cap then
+    applies around the clock) and a ``ScheduleWindow`` for a valid window.
+    A blank value is still a caller error here, exactly like in
+    ``parse_window``: what blank means ("not set") is decided by the caller,
+    ``config.Settings.from_env`` (default window) or the settings API (a
+    blank PATCH value is refused; clearing is spelled ``null``).
+    """
+    if raw.strip() == WINDOW_OFF:
+        return None
+    return parse_window(raw)
+
+
 def parse_window(raw: str) -> ScheduleWindow:
     """Parse ``"09:00-17:00"``. Raises ``ScheduleWindowError`` on anything else.
 
     An empty/whitespace-only value is a caller error here, not a window:
-    "unset means the scheduler is disabled" is a *configuration* decision and
+    what blank means ("not set", D16b/Q7) is a *configuration* decision and
     lives in ``config.Settings.from_env``, which never calls this for a blank
     value. Getting one anyway is a bug, so it raises like any other bad input.
+    The ``off`` keyword is handled one level up, in ``parse_window_or_off``.
     """
     text = raw.strip()
     if not text:
         raise ScheduleWindowError(
-            "the window is empty; expected 'HH:MM-HH:MM' (an unset "
-            "VAULT_SCHEDULE_WINDOW disables the scheduler instead)"
+            "the window is empty; expected 'HH:MM-HH:MM', or 'off' for "
+            "no window"
         )
 
     parts = text.split("-")

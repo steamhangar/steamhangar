@@ -64,7 +64,10 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
 
 def test_get_reports_the_unset_default(client: TestClient) -> None:
     body = client.get("/v1/settings", headers=AUTH).json()
-    assert row(body) == {
+    entry = row(body)
+    # D16b added expert fields to every row (test_d16b_settings.py pins
+    # them); this test keeps pinning the original ones.
+    assert {k: entry[k] for k in ("key", "effective", "source", "fallback", "applies", "env_only")} == {
         "key": KEY,
         "effective": "",
         "source": "default",
@@ -72,6 +75,9 @@ def test_get_reports_the_unset_default(client: TestClient) -> None:
         "applies": "immediately",
         "env_only": False,
     }
+    assert (entry["editable"], entry["risky"], entry["env_var"]) == (
+        True, False, "VAULT_STEAM_LIBRARY_STEAMID",
+    )
 
 
 # --------------------------------------------------------------------------
@@ -132,7 +138,11 @@ def test_corrupt_stored_value_is_not_logged_verbatim(
     assert "corrupt-xyz-123" not in caplog.text
 
 
-def test_null_clears_the_override_back_to_env(tmp_path: Path) -> None:
+def test_null_clears_the_override_back_to_the_base_value(tmp_path: Path) -> None:
+    """D16b (env always wins): a key set via env cannot be overridden at all
+    (test_d16b_settings.py), so "clear back to env" no longer exists. The
+    base value here is not an env pin, so clearing reverts to it as the
+    default."""
     with TestClient(create_app(make_settings(tmp_path, steam_library_steamid=VALID_HIGH))) as client:
         assert client.patch("/v1/settings", json={KEY: VALID_LOW}, headers=AUTH).status_code == 200
         response = client.patch("/v1/settings", json={KEY: None}, headers=AUTH)
@@ -140,7 +150,7 @@ def test_null_clears_the_override_back_to_env(tmp_path: Path) -> None:
         entry = row(response.json())
         assert stored(client) is None
     assert entry["effective"] == VALID_HIGH
-    assert entry["source"] == "env"
+    assert entry["source"] == "default"
 
 
 @pytest.mark.parametrize("blank", ["", "   "])
@@ -281,7 +291,12 @@ def test_config_and_patch_share_one_parser() -> None:
 
 
 def test_readonly_refuses_patch_with_403_and_persists_nothing(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, settings_readonly=True, steam_library_steamid=VALID_HIGH)
+    settings = make_settings(
+        tmp_path,
+        settings_readonly=True,
+        steam_library_steamid=VALID_HIGH,
+        env_pinned=frozenset({"VAULT_STEAM_LIBRARY_STEAMID"}),
+    )
     with TestClient(create_app(settings)) as client:
         response = client.patch("/v1/settings", json={KEY: VALID_LOW}, headers=AUTH)
         assert response.status_code == 403

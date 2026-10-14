@@ -16,6 +16,7 @@ from vault_api.schedule_window import (
     ScheduleWindow,
     ScheduleWindowError,
     parse_window,
+    parse_window_or_off,
 )
 
 try:
@@ -188,6 +189,16 @@ DEFAULT_MANIFEST_ORACLE_TIMEOUT = 10.0
 #: Plan §7 Phase 3 spells the cron window out as "e.g. 09:00-17:00, every 3 h"
 #: — 180 minutes is that "every 3 h", verbatim.
 DEFAULT_SCHEDULE_INTERVAL_MINUTES = 180
+
+#: D16b (Q3, Q7; docs/handover/d16-settings-audit.md 3.5, 5.3): the shipped
+#: download window, owned by the code since rc18. Before rc18 compose supplied
+#: it (``${VAULT_SCHEDULE_WINDOW-03:00-07:00}``) and an unset variable meant
+#: "scheduler off" here; compose now forwards ``${VAULT_SCHEDULE_WINDOW-}``,
+#: so blank or unset means "not set" and resolves to this window, and the
+#: scheduler-off state is spelled ``off``. It is the ONE download window:
+#: inside it automatic downloads at full speed, outside it no automatic
+#: downloads and vault-core's rate cap applies (``core_settings``).
+DEFAULT_SCHEDULE_WINDOW = "03:00-07:00"
 
 #: A client whose most recent agent report is older than this is left OUT of
 #: the scheduler's target set (WP 3.5). Rationale: the target set is "what is
@@ -1205,6 +1216,56 @@ DEFAULT_RUNNER_LEASE_TIMEOUT_SECONDS = 30.0
 DEFAULT_RUNNER_POLL_SECONDS = 1.0
 
 
+#: D16b. The Python log level vault-api and vault-runner start with when
+#: ``VAULT_LOG_LEVEL`` is blank or unset.
+DEFAULT_LOG_LEVEL = "INFO"
+
+#: The level names ``PATCH /v1/settings`` accepts for ``log_level`` (risky
+#: key). Startup stays lenient (``main.resolve_log_level`` warns and falls
+#: back to INFO); a stored override must be one of these exactly, compared
+#: case-insensitively.
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+
+def parse_log_level(raw: str) -> str:
+    """Grammar of a ``log_level`` override (D16b): one of ``LOG_LEVELS``,
+    case-insensitive, surrounding whitespace ignored. Returns the upper-case
+    name."""
+    text = raw.strip().upper()
+    if text not in LOG_LEVELS:
+        raise ValueError(f"must be one of {', '.join(LOG_LEVELS)}, got {raw!r}.")
+    return text
+
+
+def _env_schedule_window(name: str = "VAULT_SCHEDULE_WINDOW") -> ScheduleWindow | None:
+    """``VAULT_SCHEDULE_WINDOW`` (WP 3.5; D16b Q7).
+
+    Blank or unset = not set = ``DEFAULT_SCHEDULE_WINDOW``. ``off`` = no
+    window (scheduler off). Anything else must be a valid window or the boot
+    fails, so a typo cannot surface hours later in the scheduler thread.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return parse_window(DEFAULT_SCHEDULE_WINDOW)
+    try:
+        return parse_window_or_off(raw)
+    except ScheduleWindowError as exc:
+        raise RuntimeError(f"{name} is invalid: {exc}") from exc
+
+
+def env_pinned_names() -> frozenset[str]:
+    """D16b (Q1, Q7): every ``VAULT_*`` variable set to a non-blank value.
+
+    Blank and unset are the same answer ("not set"), because compose
+    forwards every editable key as ``${VAR-}`` and cannot tell them apart.
+    """
+    return frozenset(
+        name
+        for name, value in os.environ.items()
+        if name.startswith("VAULT_") and value.strip()
+    )
+
+
 @dataclass(frozen=True)
 class Settings:
     """Immutable snapshot of the environment at startup."""
@@ -1248,11 +1309,11 @@ class Settings:
     # addendum, decision A). 0 = no window, every planned orphan is deleted.
     gc_grace_days: int = DEFAULT_GC_GRACE_DAYS
     # WP 3.5. The daytime window the scheduler sweeps in (plan §7 Phase 3).
-    # ``None`` = scheduler disabled, and that is the DEFAULT on purpose: the
-    # scheduler starts Steam logins and downloads on its own schedule, which
-    # is not something a fresh install should begin doing because the operator
-    # never got around to reading the docs. Opt in by setting
-    # VAULT_SCHEDULE_WINDOW.
+    # ``None`` = scheduler disabled (``VAULT_SCHEDULE_WINDOW=off``). D16b:
+    # the SHIPPED default is ``DEFAULT_SCHEDULE_WINDOW``, applied by
+    # ``from_env`` to a blank or unset variable. This dataclass default stays
+    # ``None`` on purpose: it is what a bare ``Settings(...)`` built by a
+    # test gets, and those tests must not start sweeping by accident.
     schedule_window: ScheduleWindow | None = None
     # WP 3.5. Minimum spacing between two sweeps.
     schedule_interval_minutes: int = DEFAULT_SCHEDULE_INTERVAL_MINUTES
@@ -1366,6 +1427,18 @@ class Settings:
     # matching allowlist, in contexts that have nothing to do with EG-1
     # (e.g. `test_oracle.py`) — those must keep working unchanged.
     egress_allow: frozenset[str] = field(default_factory=frozenset)
+    # D16b (Q1, env always wins): the names of every ``VAULT_*`` variable
+    # that was set to a non-blank value when ``from_env`` ran. A key whose
+    # variable is in here is "set via env": ``settings_store`` ignores a
+    # stored override for it and reports it read-only. Blank or unset means
+    # "not set" (Q7). Empty for a ``Settings`` built directly (tests), i.e.
+    # nothing pinned.
+    env_pinned: frozenset[str] = field(default_factory=frozenset)
+    # D16b: where vault-api writes the core settings file for vault-core
+    # (``vault_api/core_settings.py``, design in docs/handover/
+    # d16-settings-audit.md 4.2). Env-only path; blank = the writer is off.
+    # D16c mounts the settings volume and sets it.
+    core_settings_file: str = ""
 
     @property
     def prefill_mode_queue(self) -> bool:
@@ -1542,13 +1615,7 @@ class Settings:
         # looking. The interval and staleness bound are validated even when no
         # window is set, so a typo in them surfaces immediately too rather
         # than the day the operator enables the window.
-        raw_window = os.environ.get("VAULT_SCHEDULE_WINDOW", "").strip()
-        schedule_window: ScheduleWindow | None = None
-        if raw_window:
-            try:
-                schedule_window = parse_window(raw_window)
-            except ScheduleWindowError as exc:
-                raise RuntimeError(f"VAULT_SCHEDULE_WINDOW is invalid: {exc}") from exc
+        schedule_window = _env_schedule_window()
 
         # WP EG-1 (ADR-0011), narrowed by WP UPD-1 (user decision 2026-10-13,
         # Weg A, refined in the ADR-0011 review). Computed here, ahead of the
@@ -1591,7 +1658,8 @@ class Settings:
             vault_api_key=api_key,
             db_path=db_path,
             cache_root=raw_cache_root,
-            log_level=os.environ.get("VAULT_LOG_LEVEL", "INFO"),
+            # D16b: blank = not set = INFO (compose forwards ${VAULT_LOG_LEVEL-}).
+            log_level=os.environ.get("VAULT_LOG_LEVEL", "").strip() or DEFAULT_LOG_LEVEL,
             steamprefill_path=os.environ.get("VAULT_STEAMPREFILL_PATH", "").strip(),
             prefill_timeout_seconds=_env_int(
                 "VAULT_PREFILL_TIMEOUT_SECONDS", DEFAULT_PREFILL_TIMEOUT_SECONDS
@@ -1744,4 +1812,6 @@ class Settings:
                 "VAULT_RUNNER_POLL_SECONDS", DEFAULT_RUNNER_POLL_SECONDS
             ),
             egress_allow=egress_allow,
+            env_pinned=env_pinned_names(),
+            core_settings_file=os.environ.get("VAULT_CORE_SETTINGS_FILE", "").strip(),
         )
