@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,11 +17,18 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +59,16 @@ fun GameCard(
     onAction: (Int, StatusActionType) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // WP APP-FIX-CARD: the fallback tile's title keeps clear of the capsule
+    // pill (bottom) and the update badge (top). Both are measured, not
+    // guessed: their heights follow the font scale.
+    val density = LocalDensity.current
+    var pillHeight by remember { mutableStateOf(0.dp) }
+    var badgeHeight by remember { mutableStateOf(0.dp) }
+    val titleInsets = PaddingValues(
+        top = if (model.updateAvailable) badgeHeight else 0.dp,
+        bottom = pillHeight,
+    )
     Column(
         modifier = modifier
             .combinedClickable(
@@ -66,8 +84,11 @@ fun GameCard(
         ) {
             CoverArtImage(
                 coverUrl = model.coverUrl,
+                cachedCoverUrl = model.cachedCoverUrl,
                 name = model.name,
                 fallbackHues = model.fallbackHues,
+                fallbackTitleInsets = titleInsets,
+                fallbackTitleMaxLines = FALLBACK_TITLE_MAX_LINES,
                 // WP API-FIX-4: a Steam tool app is shown muted, not hidden
                 // (web `.card.tool .cap`).
                 modifier = Modifier.fillMaxSize().alpha(if (model.toolApp) TOOL_APP_COVER_ALPHA else 1f),
@@ -87,6 +108,7 @@ fun GameCard(
                 UpdateAvailableBadge(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
+                        .onSizeChanged { badgeHeight = with(density) { it.height.toDp() } }
                         .padding(start = UPDATE_BADGE_START_CLEARANCE, top = 6.dp, end = 6.dp),
                 )
             }
@@ -97,6 +119,7 @@ fun GameCard(
                 selecting = selecting,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
+                    .onSizeChanged { pillHeight = with(density) { it.height.toDp() } }
                     .padding(6.dp),
             )
         }
@@ -144,6 +167,9 @@ fun GameCard(
  * .cap{ opacity:.55 }`). */
 internal const val TOOL_APP_COVER_ALPHA = 0.55f
 
+/** Test tag of the capsule pill (its bounds, without the outer padding). */
+internal const val CAPSULE_PILL_TAG = "capsule-pill"
+
 /** The card/list-row status word: [TOOL_APP_STATE_WORD] while a Steam tool
  * app shows the NOTINUSE kind (WP API-FIX-4), otherwise the kind's own label
  * -- decided by [toolAppStateWordFor] from the computed kind, so a live job
@@ -176,6 +202,7 @@ private fun CapsulePill(
     val groundModifier = if (hasGround) Modifier.background(Color.Black.copy(alpha = 0.55f)) else Modifier
     Row(
         modifier = modifier
+            .testTag(CAPSULE_PILL_TAG)
             .clip(RoundedCornerShape(50))
             .then(groundModifier)
             .then(clickableModifier)

@@ -307,10 +307,14 @@ Steam-only, prefill-first design can solve better:
 | GET | /v1/settings | Effective runtime settings with the source of each value (settings API, ADR-0009) |
 | PATCH | /v1/settings | Partial update of the runtime-editable keys, same grammar as startup; `403` under `VAULT_SETTINGS_READONLY` |
 | GET | /v1/about | Version, commit and status of vault-api (web UI), vault-core, vault-runner, SteamPrefill, vault-proxy and vault-dns (WP VER-2; vault-core from a file on the cache volume, the proxy by reachability only, vault-dns never probed) |
+| GET | /v1/covers/{appid}/{signature} | Cover image vault-api stored for a tracked app, ETag + long `Cache-Control` (WP D10 COVER-CACHE-1). No `X-Api-Key` header: the signature in the path is an HMAC of the API key, handed out only by the authenticated `GET /v1/games` (`cover_cached_url`) |
 | GET | /v1/health | Liveness (for external monitoring) — the one unauthenticated route, besides the web UI's static files |
 
 Auth: static API key in a header (v1) on every route except `/v1/health`
-and the web UI's static files (threat model §1/§7). Since everything is
+and the web UI's static files (threat model §1/§7). One route takes the key
+in derived form instead of the header: `GET /v1/covers/{appid}/{signature}`,
+whose path carries an HMAC of the key because an `<img>` cannot send a
+header (WP D10, api/README.md "Auth"). Since everything is
 only reachable over the LAN or a VPN, this is sufficient; OIDC/forward-auth
 is a later option for users who expose the API differently.
 
@@ -2432,7 +2436,7 @@ steamhangar/
 |---|---|---|
 | `proxy_store` incompatible with range requests | HIGH | Phase 0 resolves this; Plan A fallback defined |
 | Steam changes its CDN URL scheme | MEDIUM | Log schema anomalies with alerts; abstract the mapping layer |
-| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API has no unauthenticated endpoints except `/v1/health` and the web UI's static files (threat model §1/§7) |
+| Public-domain profile exposes the API to the internet | MEDIUM | TLS mandatory, strong bearer token, docs strongly recommend forward-auth/OIDC + rate limiting in the reverse proxy; API has no unauthenticated endpoints except `/v1/health` and the web UI's static files; stored covers are fetched by a key-derived signed URL (WP D10) (threat model §1/§7) |
 | Shared depots → incomplete deletion | LOW | Shared detection + transparent reporting |
 | tsnet gomobile build complexity | MEDIUM | Profile abstraction means tsnet can ship later; system-VPN profile works day one |
 | Single-maintainer risk | MEDIUM | Small scope (Steam only), good docs, permissive license lower the contribution barrier |

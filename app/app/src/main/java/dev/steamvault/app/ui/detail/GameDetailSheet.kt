@@ -72,6 +72,7 @@ import dev.steamvault.app.ui.library.logic.installedBadgeFor
 import dev.steamvault.app.ui.library.logic.isToolApp
 import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.library.logic.statusAction
+import dev.steamvault.app.ui.library.logic.vaultCoverUrl
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import kotlinx.coroutines.CoroutineScope
@@ -204,6 +205,7 @@ private fun gameSummaryFrom(detail: GameDetail): GameSummary = GameSummary(
     tool_app = detail.tool_app,
     tool_app_name = detail.tool_app_name,
     cover_url = detail.cover_url,
+    cover_cached_url = detail.cover_cached_url,
 )
 
 @Composable
@@ -273,6 +275,7 @@ private fun DetailHeader(appid: Int, name: String, detail: GameDetail?, jobs: Li
     Row(verticalAlignment = Alignment.Top) {
         CoverArtImage(
             coverUrl = coverArtUrl(appid, detail?.cover_url),
+            cachedCoverUrl = vaultCoverUrl(appid, detail?.cover_cached_url),
             name = name,
             fallbackHues = fallbackHues(appid),
             modifier = Modifier.size(width = 64.dp, height = 96.dp),

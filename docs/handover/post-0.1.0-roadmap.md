@@ -358,6 +358,17 @@ and cdn.akamai.steamstatic.com); signed cover URLs
 `/v1/covers/{appid}/{signature}` are accepted as a documented exception
 to plan section 9 (`<img>` cannot send the API key).
 
+Implemented on `wp/cover-cache-1` (WP D10, not reviewed yet): vault-api
+stores covers in `<data dir>/covers` (schema v21 `app_cover_file`, 512 MiB
+cap, background thread) and serves `GET /v1/covers/{appid}/{signature}`
+(HMAC of the API key in the path, since `<img>` cannot send the header;
+strong ETag, `304`, `private, max-age=31536000, immutable`);
+`cover_cached_url` on `/v1/games`; web and app try it first, then the CDN.
+The app's `VaultApplication` is Coil's `ImageLoaderFactory` with a sized
+disk cache. D10c: the user set vault-proxy's `BAKED_HOSTS` to include the
+two steamstatic hosts; tests, verify-stack check and the ADR-0011 addendum
+follow it.
+
 ## D11: APP-FIX-LOGIN, Steam login in the app fails with "Invalid return protocol"
 
 Cause: `steamvault://auth/openid-return` is used as the return URL, and
@@ -504,6 +515,83 @@ design exists. Wave-2 code stays on branches until rc15 is tagged.
     that deep-links into the app (decided; does not conflict with D2).
 11. **D9 TOOL-APPS-2** ADR first, then group DLC/content under the
     parent game (decided).
+
+**WEB-FEAT-SUGGEST-2 (web, rc16; user decision 2026-10-13, replaces
+SUGGEST-1 below):** the Phase 4h suggestions panel is removed. Its
+statements move: "last changed N days ago" -> detail sheet ("Last
+update"); "fully cached, never played" -> a second pill on the card,
+right of the status pill; "unchanged for N days" -> dropped; "not
+confirmed current for N days" -> a notification "Last update check was N
+days ago", raised from 14 days on (was 30 in the panel).
+
+~~WEB-FEAT-SUGGEST-1 (superseded the same evening):~~ once the
+4h suggestions panel is dismissed, its suggestions appear in the
+notifications (bell) instead, with a "Show suggestions panel again"
+action there; dismissing shows a short notice that the suggestions now
+live under notifications. Today a dismiss is permanent per browser
+(`steamvault.decisionPanelDismissed`, no re-enable).
+
+**User decisions 2026-10-13 (late evening):**
+- "Never played" card pill also on Android (small follow-up, rc16).
+- D15 statistics retention: 5-minute rows for 48 h, hourly rows for
+  30 days, daily rows forever (the "all" filter works).
+- D15 event-log rotation done by vault-core: rotate at 64 MiB, keep one
+  old file (about 128 MiB max).
+- D16 expert mode: as much as possible controllable from Settings. A
+  value set in the env is shown read-only in expert settings (env wins,
+  no input field); unset values are editable there. Rationale: easier
+  debugging now, good values can be pinned in the env later. Secrets,
+  network/egress, paths and subnets stay env-only by default; D16a lists
+  every env value with a proposed editable/env-only class for the user's
+  review.
+
+**User decisions 2026-10-14 (morning):**
+- UPD-5 (api, rc16): the scheduled update check is always on (oracle on),
+  independent of the schedule window; automatic downloads stay bound to
+  the window. Supersedes the window gate from the UPD-1 review (dev then
+  checks in the background too: anonymous metadata, allowed).
+- The web demo shows the "Never played" pill out of the box (demo seeds
+  the playtime gate, key and SteamID; real installs keep the gate off).
+- D15: clients can be given a name (by IP address; by MAC where the
+  vault can learn it — agents can report it, the server itself only sees
+  IPs).
+- D15: "Delete history" in two variants: everything, and older than
+  30 days.
+- D15 runner (option B): before each prefill the runner sends a
+  recognisable marker request through vault-core; vault-api records its
+  source address and flags that client as the runner (excluded from
+  "active clients"). Own small package D15-RUNNER (core/runner + api).
+- rc16 prod Antrag must also switch the playtime relay on for the user's
+  own install: `.env` `VAULT_RELAY_EXPOSE_PLAYTIME=true` (ADR-0010 gate,
+  env-only today, forwarded by compose; default stays off for everyone
+  else). The user wants to test the "Never played" pill with real data.
+
+**UPD-6 (web + app, rc16; user feedback 2026-10-14 on prod rc15:
+"Checked 14 games · 7 updates available", but the 7 were hard to find):**
+the status pill on the cover shows an orange "Update" (instead of the
+green check) and the status line reads "UPDATE AVAILABLE" instead of
+"CURRENT" for games with update_available; Downloads gets a section
+"Updates available (N)" listing them with "Update now" per game and
+"Update all", plus a note when they download automatically ("in the
+schedule window HH:MM-HH:MM" or "manual only" without a window). Starting
+an update moves the game into the normal download queue. Prod has no
+schedule window today (manual only); an automatic window needs its own
+Antrag and also enables the nightly prefill.
+
+**APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
+the release pipeline builds and signs the APK first and bakes it into the
+vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
+in the LAN at a fixed path. Clients page -> "Add device" -> Android
+phone: "Download app" button plus a QR code to the vault's APK, then the
+existing pairing QR. Dev builds (no APK in the image) fall back to the
+GitHub release asset of the same version.
+
+**WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
+check buttons do not read as buttons (full-width text bar). Make "Check
+updates" a clearly visible primary button and give "Check & update all
+cached games" a distinct style (it downloads); side by side, not a full
+row. The web demo mode gets the update check, one flagged game and the
+"Updates" chip (UPD-2 left demo out; the Android demo has it).
 
 **Before v0.1.0 (ongoing):** release notes, user device checks,
 verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding

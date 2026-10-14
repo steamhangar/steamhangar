@@ -1,9 +1,15 @@
 """API-key authentication dependency.
 
 Every endpoint requires the ``X-Api-Key`` header to match ``VAULT_API_KEY``
-— EXCEPT ``GET /v1/health``, which is deliberately left unauthenticated
-(see api/README.md, section "Auth exception", for the documented rationale
-against plan §9's "no unauthenticated endpoints" stance).
+— EXCEPT two routes:
+
+- ``GET /v1/health``, which is deliberately left unauthenticated (see
+  api/README.md, section "Auth", for the documented rationale against plan
+  §9's "no unauthenticated endpoints" stance);
+- ``GET /v1/covers/{appid}/{signature}`` (WP D10, ``routers/covers.py``),
+  which takes no header because an ``<img>`` cannot send one: the path
+  carries an HMAC keyed with ``VAULT_API_KEY`` instead, checked by the
+  handler (user-accepted exception to plan §9, 2026-10-13).
 """
 
 from __future__ import annotations

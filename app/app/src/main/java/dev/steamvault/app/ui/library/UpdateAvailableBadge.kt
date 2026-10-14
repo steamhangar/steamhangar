@@ -1,15 +1,21 @@
 package dev.steamvault.app.ui.library
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
@@ -22,26 +28,50 @@ import dev.steamvault.app.ui.theme.VaultColors
  * ([UpdateAvailableLabel]). Colour is the palette's `--stale` ("update
  * ready"), the same one the mockup gave the update state.
  *
- * The grid badge never grows past [UPDATE_BADGE_MAX_WIDTH] and ellipsizes;
- * [GameCard] additionally keeps it clear of the select checkbox
- * ([UPDATE_BADGE_START_CLEARANCE]), so a narrow card at a large font
- * scale shows "Upda…" rather than a badge under the checkbox.
+ * The grid badge never grows past [UPDATE_BADGE_MAX_WIDTH], and
+ * [GameCard] keeps it clear of the select checkbox
+ * ([UPDATE_BADGE_START_CLEARANCE]). When the full label does not fit the
+ * width that leaves (narrow card, large font scale), the badge says
+ * "Update" instead of an ellipsized "Update availa…" -- the word web uses
+ * in its compact layouts (WP APP-FIX-CARD). The full label stays the
+ * spoken one (contentDescription) either way.
  */
 @Composable
 fun UpdateAvailableBadge(modifier: Modifier = Modifier) {
-    Text(
-        text = stringResource(R.string.library_update_available_badge),
-        style = MaterialTheme.typography.labelSmall,
-        color = VaultColors.StatusIconInk,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier
-            .widthIn(max = UPDATE_BADGE_MAX_WIDTH)
-            .clip(RoundedCornerShape(50))
-            .background(VaultColors.StatusStale)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
+    val fullLabel = stringResource(R.string.library_update_available_badge)
+    val shortLabel = stringResource(R.string.library_update_available_badge_short)
+    val style = MaterialTheme.typography.labelSmall
+    val measurer = rememberTextMeasurer()
+    val fullLabelWidthPx = remember(fullLabel, style, measurer) {
+        measurer.measure(text = fullLabel, style = style, maxLines = 1, softWrap = false).size.width
+    }
+    BoxWithConstraints(modifier = modifier) {
+        val availableTextWidthPx = with(LocalDensity.current) {
+            (minOf(maxWidth, UPDATE_BADGE_MAX_WIDTH) - UPDATE_BADGE_HORIZONTAL_PADDING * 2).toPx()
+        }
+        Text(
+            text = if (updateBadgeFullLabelFits(fullLabelWidthPx, availableTextWidthPx)) fullLabel else shortLabel,
+            style = style,
+            color = VaultColors.StatusIconInk,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .semantics { contentDescription = fullLabel }
+                .widthIn(max = UPDATE_BADGE_MAX_WIDTH)
+                .clip(RoundedCornerShape(50))
+                .background(VaultColors.StatusStale)
+                .padding(horizontal = UPDATE_BADGE_HORIZONTAL_PADDING, vertical = 2.dp),
+        )
+    }
 }
+
+/** True when the full "Update available" label, [fullLabelWidthPx] wide
+ * on one line, fits the [availableTextWidthPx] the badge leaves for text. */
+internal fun updateBadgeFullLabelFits(fullLabelWidthPx: Int, availableTextWidthPx: Float): Boolean =
+    fullLabelWidthPx <= availableTextWidthPx
+
+/** Text inset at each side of the badge's pill. */
+internal val UPDATE_BADGE_HORIZONTAL_PADDING = 6.dp
 
 /** Widest the grid badge may get, on any card. */
 internal val UPDATE_BADGE_MAX_WIDTH = 120.dp

@@ -85,7 +85,7 @@ import { createSheetDialog } from "./sheet-dialog.js";
 import { buildHeaderArt } from "./header-art.js";
 import { onViewChange } from "../router.js";
 import { formatBytesGB, formatTimestamp } from "../lib/format.js";
-import { coverArtUrl, fallbackHues } from "../lib/cover-art.js";
+import { coverCandidates, fallbackHues, wireCoverFallback } from "../lib/cover-art.js";
 import {
   dispKind,
   findLiveJob,
@@ -519,7 +519,7 @@ function confirmedCurrentText(lastPrefillAt, lastManifestCheck) {
   return `Confirmed current at ${when}.`;
 }
 
-function buildMiniCover(appid, coverUrl) {
+function buildMiniCover(appid, coverUrl, cachedUrl) {
   const { h1, h2 } = fallbackHues(appid);
   const cap = document.createElement("div");
   cap.className = "cap";
@@ -530,8 +530,8 @@ function buildMiniCover(appid, coverUrl) {
   img.alt = "";
   img.loading = "lazy";
   img.decoding = "async";
-  img.addEventListener("error", () => img.remove(), { once: true });
-  img.src = coverArtUrl(appid, coverUrl);
+  // WP D10: stored copy, then server CDN cover, then legacy (cover-art.js).
+  wireCoverFallback(img, coverCandidates(appid, coverUrl, cachedUrl), () => img.remove());
   cap.appendChild(img);
   return cap;
 }
@@ -540,7 +540,14 @@ function buildHeader(gameLike, liveJob) {
   const dhead = document.createElement("div");
   dhead.className = "dhead";
   // WP API-FIX-5: the detail's server-resolved cover, else the list row's.
-  dhead.appendChild(buildMiniCover(state.appid, state.detail?.cover_url ?? gameLike?.cover_url));
+  // WP D10: plus vault-api's stored copy, same precedence.
+  dhead.appendChild(
+    buildMiniCover(
+      state.appid,
+      state.detail?.cover_url ?? gameLike?.cover_url,
+      state.detail?.cover_cached_url ?? gameLike?.cover_cached_url,
+    ),
+  );
 
   const info = document.createElement("div");
   const h2 = document.createElement("h2");

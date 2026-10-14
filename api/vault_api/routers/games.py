@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from vault_api import (
     app_classification,
     cover_art,
+    cover_cache,
     depot_manifests,
     oracle,
     scheduler,
@@ -241,6 +242,14 @@ class GameSummary(BaseModel):
     # cdn.akamai.steamstatic.com ever appear here (validated on write AND
     # on this read). UIs fall back to the legacy CDN path when it is null.
     cover_url: str | None = None
+    # WP D10 COVER-CACHE-1: the same cover, stored by vault-api and served
+    # over the LAN: a path relative to this API's base URL
+    # (``/v1/covers/{appid}/{signature}``, loadable without the X-Api-Key
+    # header because the signature is the credential; routers/covers.py).
+    # Null until vault-api has stored the image. UIs try it first, then
+    # ``cover_url``, then the legacy CDN path. ``cover_url`` keeps its
+    # meaning, so older clients are unaffected.
+    cover_cached_url: str | None = None
     # WP UPD-1: an update is available -- the manifest oracle's current public
     # manifest differs from the one vault-api recorded for this app's cache
     # (``oracle.app_view``'s ``stale`` verdict). ``false`` is "no known update",
@@ -344,6 +353,8 @@ class GameDetail(BaseModel):
     tool_app_name: str | None = None
     # See GameSummary.cover_url (WP API-FIX-5).
     cover_url: str | None = None
+    # See GameSummary.cover_cached_url (WP D10).
+    cover_cached_url: str | None = None
     # See GameSummary.update_available / .update_checked_at (WP UPD-1).
     update_available: bool = False
     update_checked_at: str | None = None
@@ -394,6 +405,10 @@ def list_games(
         installed_on = _installed_on_by_appid(conn, base_settings, now)
         # WP API-FIX-5: one query for every stored cover, re-validated.
         covers = cover_art.cover_urls_by_appid(conn)
+        # WP D10: one query for every stored cover file.
+        cached_covers = cover_cache.cached_cover_paths(
+            conn, request.app.state.settings.vault_api_key
+        )
         # WP UPD-1: stored oracle verdicts, three statements for the whole list.
         update_verdicts = oracle.verdicts_by_app(conn, settings=base_settings)
         # WP TOOL-APPS-2a: stored classification, nesting resolved, two
@@ -431,6 +446,7 @@ def list_games(
                 installed_on=installed_on.get(row["appid"], []),
                 **_tool_app_fields(row["appid"]),
                 cover_url=covers.get(row["appid"]),
+                cover_cached_url=cached_covers.get(row["appid"]),
                 **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
                 **_classification_fields(classifications.get(row["appid"])),
             )
@@ -487,6 +503,9 @@ def get_game(
         frequency = depot_manifests.change_frequency_for_app(conn, appid)
         installed_on = _installed_on_for_appid(conn, base_settings, now, appid)
         cover_url = cover_art.cover_url_for_appid(conn, appid)
+        cover_cached_url = cover_cache.cached_cover_path(
+            conn, request.app.state.settings.vault_api_key, appid
+        )
         update_view = oracle.app_view(conn, appid, settings=base_settings)
         # Same resolution as the list (the chain may pass through other apps).
         classification = app_classification.resolve_classifications(
@@ -520,6 +539,7 @@ def get_game(
         installed_on=installed_on,
         **_tool_app_fields(app_row["appid"]),
         cover_url=cover_url,
+        cover_cached_url=cover_cached_url,
         **_update_fields(
             (update_view.verdict, update_view.checked_at) if update_view.known else None,
             detail_size,

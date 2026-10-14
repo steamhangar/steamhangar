@@ -1878,8 +1878,9 @@ say ''
 say 'The test .env from section 3 sets no VAULT_EGRESS_ALLOW at all (empty,'
 say 'the shipped default) and no VAULT_MANIFEST_ORACLE either -- so every'
 say 'check below that succeeds through the proxy without any allowlist entry'
-say 'is exercising the ONE baked-in host, api.steampowered.com (the Steam Web'
-say 'API relay), not an operator-configured one.'
+say 'is exercising a baked-in host, api.steampowered.com (the Steam Web API'
+say 'relay), not an operator-configured one. Since WP D10 the proxy also bakes'
+say 'in the two cover image hosts; their filter lines are checked below.'
 
 say ''
 say '--- vault-proxy healthcheck ---'
@@ -1962,6 +1963,13 @@ say '--- WP UPD-1: the default oracle host is allowed exactly while the oracle i
 say '(filter files only; no request to the oracle is made here)'
 live_filter=$(dc exec -T vault-proxy cat /run/tinyproxy/filter 2>&1 || true)
 assert_contains "$live_filter" '^api\.steampowered\.com$' "precondition: the live proxy filter was read"
+# WP D10 COVER-CACHE-1 (user decision 2026-10-13): Steam's two cover image
+# hosts are baked in too, exact-host anchored. Filter lines only; no request
+# to the CDN is made here.
+assert_contains "$live_filter" '^shared\.akamai\.steamstatic\.com$' "WP D10: the live proxy filter allows shared.akamai.steamstatic.com with no VAULT_EGRESS_ALLOW entry"
+assert_contains "$live_filter" '^cdn\.akamai\.steamstatic\.com$' "WP D10: the live proxy filter allows cdn.akamai.steamstatic.com with no VAULT_EGRESS_ALLOW entry"
+steamstatic_lines=$(printf '%s\n' "$live_filter" | grep -c '^\^.*steamstatic' || true)
+assert_eq "2" "$steamstatic_lines" "WP D10: exactly two steamstatic patterns in the live filter (no wildcard, no third host)"
 assert_not_contains "$live_filter" 'steamcmd' "this stack runs with VAULT_MANIFEST_ORACLE=off (section 4), so the live proxy does NOT allow api.steamcmd.net"
 # A second render of the REAL entrypoint inside the running proxy container,
 # with the oracle at its shipped default (unset = on), into /tmp only (the
