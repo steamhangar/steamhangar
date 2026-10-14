@@ -11,7 +11,8 @@ name, and why an explicit name beats an agent's own PC name, is
 Validation is strict: the address must be an IP literal (stored in its
 canonical spelling, so ``::ffff:192.0.2.7`` and ``192.0.2.7`` are the same
 key), the name 1 to 40 characters after trimming with no control or
-invisible formatting characters. Clearing is ``DELETE``, never an empty
+invisible formatting characters and at least one letter, number, symbol or
+punctuation character. Clearing is ``DELETE``, never an empty
 name. Auth is attached at the router level (the one API key).
 """
 

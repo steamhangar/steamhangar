@@ -25,6 +25,21 @@ export const MAX_CLIENT_NAME_LENGTH = 40;
 // unassigned, line and paragraph separators: the server's
 // `_FORBIDDEN_CATEGORIES`.
 const FORBIDDEN = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]/u;
+// At least one Letter, Number, Symbol or Punctuation character: the
+// server's `_VISIBLE_MAJOR` rule (a name of combining marks alone renders
+// as nothing).
+const VISIBLE = /[\p{L}\p{N}\p{S}\p{P}]/u;
+
+/**
+ * Wrap operator-chosen text in Unicode first-strong isolates (FSI ... PDI)
+ * so a right-to-left name cannot reorder the words around it in a title,
+ * an aria-label or a toast. Written as escapes on purpose: no invisible
+ * characters in the source.
+ * @param {string} text
+ */
+export function isolate(text) {
+  return `\u2068${text}\u2069`;
+}
 
 /**
  * @param {unknown} raw
@@ -38,6 +53,7 @@ export function normalizeClientName(raw) {
     return { ok: false, error: `Use at most ${MAX_CLIENT_NAME_LENGTH} characters.` };
   }
   if (FORBIDDEN.test(value)) return { ok: false, error: "Remove line breaks, tabs and invisible characters." };
+  if (!VISIBLE.test(value)) return { ok: false, error: "Use at least one letter, digit, symbol or punctuation mark." };
   return { ok: true, value };
 }
 
@@ -53,24 +69,28 @@ export function hasCustomName(client) {
 
 /** Dialog title. */
 export function renameTitle(displayName) {
-  return `Rename ${displayName}`;
+  return `Rename ${isolate(displayName)}`;
 }
 
 /** What the name is stored for, under the field. */
 export function renameHint(client) {
   const base = `Stored for the address ${client.name_addr}: a machine that gets this address later shows this name too.`;
   if (client && client.kind === "agent" && typeof client.client_id === "string" && client.client_id) {
-    return `${base} vault-agent keeps reporting this PC as ${client.client_id}; the name you set is shown instead.`;
+    return `${base} vault-agent keeps reporting this PC as ${isolate(client.client_id)}; the name you set is shown instead.`;
   }
   return base;
 }
 
 /** Toasts. */
 export function renamedToastText(name) {
-  return `Renamed to ${name}.`;
+  return `Renamed to ${isolate(name)}.`;
 }
-export function nameRemovedToastText(fallback) {
-  return `Name removed. Showing ${fallback} again.`;
+/** After "Remove name": `displayName` is the client's `display_name` from
+ * the server's next answer; `null` when that answer is not available. */
+export function nameRemovedToastText(displayName) {
+  return typeof displayName === "string" && displayName
+    ? `Name removed. Now shown as ${isolate(displayName)}.`
+    : "Name removed.";
 }
 
 /** The server's own 404 for "no name stored": clearing it already happened. */

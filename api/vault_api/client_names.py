@@ -61,6 +61,10 @@ MAX_NAME_LENGTH = 40
 #: surrogates, private use, unassigned, and the line/paragraph separators.
 _FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
+#: Major Unicode categories that count as visible: Letter, Number, Symbol,
+#: Punctuation. A name needs at least one such character.
+_VISIBLE_MAJOR = frozenset("LNSP")
+
 #: Longest address text ``canonical_ip`` looks at (a full IPv6 literal is 39;
 #: the rest is slack). Anything longer is refused before parsing.
 _MAX_ADDR_TEXT = 64
@@ -70,8 +74,9 @@ def normalize_name(raw: object) -> str:
     """Validate a client name; return it trimmed. Raises ``ValueError``.
 
     Strict: a ``str`` that, after stripping surrounding whitespace, is 1 to
-    ``MAX_NAME_LENGTH`` characters and contains no control, format,
-    separator, private-use or unassigned character. Inner spaces are kept.
+    ``MAX_NAME_LENGTH`` characters, contains no control, format,
+    separator, private-use or unassigned character, and has at least one
+    letter, number, symbol or punctuation character. Inner spaces are kept.
     """
     if not isinstance(raw, str):
         raise ValueError("name must be a string")
@@ -85,6 +90,13 @@ def normalize_name(raw: object) -> str:
             raise ValueError(
                 "name must not contain control or invisible formatting characters"
             )
+    # Something visible must remain: a name of combining marks or odd
+    # spaces alone would render as nothing. Same rule as the web dialog
+    # (web/js/lib/client-names.js).
+    if not any(unicodedata.category(character)[0] in _VISIBLE_MAJOR for character in name):
+        raise ValueError(
+            "name must contain at least one letter, number, symbol or punctuation character"
+        )
     return name
 
 

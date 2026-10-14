@@ -1,7 +1,8 @@
 /**
  * "Delete history" (WP D15-NAMES): the two variants and the dialog's
  * wording. Pure: no DOM, no fetch. Unit-tested in
- * web/tests/history-delete.test.js.
+ * web/tests/client-names.test.js (wording) and
+ * web/tests/downloads-history-delete-wiring.test.js (the dialog).
  *
  * What the server deletes is defined in api/vault_api/history.py: finished
  * jobs (done, failed, cancelled) and the traffic statistics behind the

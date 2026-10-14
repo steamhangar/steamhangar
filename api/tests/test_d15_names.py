@@ -57,6 +57,8 @@ def client_for(settings: Settings) -> TestClient:
         ("x" * 40, "x" * 40),
         ("Jans Büro-PC", "Jans Büro-PC"),
         ("\U0001f3ae" * 40, "\U0001f3ae" * 40),  # 40 code points
+        ("-", "-"),  # punctuation alone is visible
+        ("e\u0301", "e\u0301"),  # a combining mark next to a letter
     ],
 )
 def test_names_are_trimmed_and_accepted_up_to_40_characters(raw: str, expected: str) -> None:
@@ -73,10 +75,12 @@ def test_names_are_trimmed_and_accepted_up_to_40_characters(raw: str, expected: 
         "tab\tinside",
         "nul\x00",
         "esc\x1b[31m",
-        "zero​width",  # Cf
-        "bidi‮flip",  # Cf
-        "line sep",  # Zl
-        "private",  # Co
+        "zero\u200bwidth",  # Cf
+        "bidi\u202eflip",  # Cf
+        "line\u2028sep",  # Zl
+        "private\ue000",  # Co
+        "\u0301\u0301",  # combining marks only: nothing visible
+        "\u3000",  # an ideographic space strips to nothing
         None,
         42,
         ["frame"],
@@ -386,8 +390,26 @@ def seeded(settings: Settings):
         _traffic(conn, traffic.TIER_5M, now - timedelta(minutes=10))
 
         conn.execute(
-            "INSERT INTO event_sweep_state (id, traffic_since) VALUES (1, ?)",
+            """
+            INSERT INTO event_sweep_state
+                (id, traffic_since, cursor_offset, lines_read_total, last_sweep_at)
+            VALUES (1, ?, 4096, 17, '2026-01-04T00:00:00Z')
+            """,
             (stamp(now - timedelta(days=50)),),
+        )
+        conn.execute(
+            """
+            INSERT INTO apps (appid, name, status, last_prefill_at, last_manifest_check)
+            VALUES (440, 'Kept Game', 'idle', '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z')
+            """
+        )
+        conn.execute(
+            "INSERT INTO depot_miss_stats (depotid, miss_count, first_seen, last_seen) VALUES (100, 2, ?, ?)",
+            (stamp(now), stamp(now)),
+        )
+        conn.execute(
+            "INSERT INTO client_bypass_state (client_id, bypass_suspected, updated_at) VALUES ('pc', 0, ?)",
+            (stamp(now),),
         )
         conn.execute(
             "INSERT INTO client_cache_stats (client_addr, window_at, requests, last_seen) VALUES ('10.0.0.5', ?, 3, ?)",
@@ -411,7 +433,17 @@ def _buckets(conn: sqlite3.Connection, table: str) -> set[tuple[str, str]]:
 
 def _untouched(conn: sqlite3.Connection) -> None:
     assert conn.execute("SELECT COUNT(*) FROM client_cache_stats").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM depot_miss_stats").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM client_bypass_state").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM agent_reports").fetchone()[0] == 1
+    app = conn.execute(
+        "SELECT name, last_prefill_at, last_manifest_check FROM apps WHERE appid = 440"
+    ).fetchone()
+    assert tuple(app) == ("Kept Game", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z")
+    state = conn.execute(
+        "SELECT cursor_offset, lines_read_total, last_sweep_at FROM event_sweep_state"
+    ).fetchone()
+    assert tuple(state) == (4096, 17, "2026-01-04T00:00:00Z")
     assert client_names.ip_names(conn) == {"10.0.0.5": "Desk"}
 
 

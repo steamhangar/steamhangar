@@ -154,7 +154,10 @@ function buildCard(client, range, nowMs) {
 
   const top = el("div", "jobtop");
   const info = el("div");
-  info.append(el("div", "nm", clientName(client)), line(clientKindText(client), "client-kind"));
+  const title = el("div", "nm", clientName(client));
+  // Operator-chosen text: its own direction, never the page's.
+  title.setAttribute("dir", "auto");
+  info.append(title, line(clientKindText(client), "client-kind"));
   const chip = connectionChip(client);
   const chipEl = el("span", chip.cls);
   chipEl.dataset.role = "connection";
@@ -178,7 +181,7 @@ function buildCard(client, range, nowMs) {
     btn.type = "button";
     btn.dataset.role = "rename-client";
     // Every card has one: the accessible name says which (label-in-name).
-    btn.setAttribute("aria-label", `Rename ${clientName(client)}`);
+    btn.setAttribute("aria-label", renameTitle(clientName(client)));
     btn.addEventListener("click", () => openRename(client));
     acts.appendChild(btn);
     card.appendChild(acts);
@@ -262,6 +265,7 @@ renameInput.type = "text";
 renameInput.autocomplete = "off";
 renameInput.spellcheck = false;
 renameInput.dataset.role = "rename-input";
+renameInput.setAttribute("dir", "auto");
 renameInput.setAttribute("aria-describedby", "cl-rename-hint cl-rename-error");
 renameField.append(renameLabel, renameInput);
 const renameHintEl = el("p", "foot-note");
@@ -375,10 +379,25 @@ async function clearRename() {
       return;
     }
   }
+  // The toast names what the card shows NOW: the client's display_name in
+  // the server's next answer (the DELETE itself answers 204, no body).
+  let shownAs = null;
+  const range = state.range;
+  try {
+    const data = await api.clientsOverview(range);
+    const row = data && Array.isArray(data.clients) ? data.clients.find((c) => c.key === client.key) : null;
+    shownAs = row && typeof row.display_name === "string" ? row.display_name : null;
+    if (data && data.range === state.range) {
+      state.data = data;
+      state.error = null;
+      paint();
+    }
+  } catch {
+    shownAs = null; // the toast then says only "Name removed."
+  }
   setRenameBusy(false);
   closeRename();
-  const fallback = isAgentClient(client) && client.client_id ? client.client_id : client.name_addr;
-  showToast(nameRemovedToastText(fallback));
+  showToast(nameRemovedToastText(shownAs));
   poll.refresh();
   store.refreshNow();
 }
@@ -461,7 +480,8 @@ onViewChange((view) => {
   if (renameBackdrop.classList.contains("on")) {
     renameBackdrop.classList.remove("on");
     popModal(renameBackdrop);
-    if (!renameFlow.busy) renameFlow.client = null;
+    // An in-flight save/remove keeps its own reference to the client.
+    renameFlow.client = null;
     renameFlow.invokerEl = null;
   }
   els = null;

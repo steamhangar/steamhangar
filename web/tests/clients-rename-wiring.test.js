@@ -137,8 +137,9 @@ beforeEach(() => {
 
 test("MUTATION TARGET: Rename buttons only where the server gives a name_addr, labelled per client", async () => {
   const s = await mount();
-  assert.equal(renameBtn(s, "agent:DEMON").getAttribute("aria-label"), "Rename DEMON");
-  assert.equal(renameBtn(s, "addr:10.0.0.9").getAttribute("aria-label"), "Rename 10.0.0.9");
+  assert.equal(renameBtn(s, "agent:DEMON").getAttribute("aria-label"), "Rename \u2068DEMON\u2069");
+  assert.equal(renameBtn(s, "addr:10.0.0.9").getAttribute("aria-label"), "Rename \u206810.0.0.9\u2069");
+  assert.equal(card(s, "agent:DEMON").querySelector(".nm").getAttribute("dir"), "auto", "the title keeps its own direction");
   assert.equal(renameBtn(s, "agent:old"), null, "no address: cannot be named");
 });
 
@@ -146,14 +147,15 @@ test("MUTATION TARGET: Rename opens a labelled modal dialog with focus in the pr
   server.names.set("10.0.0.5", "Living room PC");
   const s = await mount();
   await until(() => card(s, "agent:DEMON").querySelector(".nm").textContent === "Living room PC", "display_name title");
-  assert.equal(role(card(s, "agent:DEMON"), "client-kind").textContent, "vault-agent on DEMON · 10.0.0.5");
+  assert.equal(role(card(s, "agent:DEMON"), "client-kind").textContent, "vault-agent on \u2068DEMON\u2069 · 10.0.0.5");
   renameBtn(s, "agent:DEMON").dispatchEvent({ type: "click" });
   assert.equal(backdropOpen(), true);
   const d = dialog();
   assert.equal(d.getAttribute("role"), "dialog");
   assert.equal(d.getAttribute("aria-modal"), "true");
-  assert.equal(d.querySelector("h3").textContent, "Rename Living room PC");
+  assert.equal(d.querySelector("h3").textContent, "Rename \u2068Living room PC\u2069");
   const input = role(d, "rename-input");
+  assert.equal(input.getAttribute("dir"), "auto");
   assert.equal(dom.document.activeElement, input, "focus starts in the field");
   assert.equal(input.value, "Living room PC");
   assert.equal(role(d, "rename-clear").hidden, false, "Remove name offered when named");
@@ -213,9 +215,11 @@ test("MUTATION TARGET: Remove name sends DELETE; the handler's own 404 counts as
   await until(() => card(s, "agent:DEMON").querySelector(".nm").textContent === "Desk", "named");
   renameBtn(s, "agent:DEMON").dispatchEvent({ type: "click" });
   server.deleteStatus = 404; // another tab removed it meanwhile
+  const before = server.overviews;
   role(dialog(), "rename-clear").dispatchEvent({ type: "click" });
   await until(() => !backdropOpen(), "closed");
   assert.deepEqual(server.calls, ["DELETE 10.0.0.5"]);
+  assert.ok(server.overviews > before, "the next answer (for the toast's display name) was fetched before closing");
   assert.equal(role(dialog(), "rename-error").hidden, true);
 });
 
@@ -229,4 +233,16 @@ test("MUTATION TARGET: a rebuild keeps focus on the same card's Rename button", 
   const n = server.overviews;
   await until(() => server.overviews > n && renameBtn(s2, "addr:10.0.0.9") !== first, "list rebuilt");
   assert.equal(dom.document.activeElement, renameBtn(s2, "addr:10.0.0.9"), "focus moved to the rebuilt button");
+});
+
+test("leaving the page closes the dialog and forgets its client", async () => {
+  const s = await mount();
+  renameBtn(s, "agent:DEMON").dispatchEvent({ type: "click" });
+  assert.equal(backdropOpen(), true);
+  navigateTo("library");
+  assert.equal(backdropOpen(), false);
+  // A stale client would make a submit send a PUT for the old card.
+  submit();
+  await tick(20);
+  assert.deepEqual(server.calls, []);
 });

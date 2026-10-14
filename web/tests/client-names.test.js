@@ -12,6 +12,10 @@ import assert from "node:assert/strict";
 import { ApiError, ERROR_KINDS } from "../js/errors.js";
 import {
   MAX_CLIENT_NAME_LENGTH,
+  isolate,
+  nameRemovedToastText,
+  renameTitle,
+  renamedToastText,
   canRename,
   hasCustomName,
   isNameAlreadyGone,
@@ -43,13 +47,33 @@ test("MUTATION TARGET: names: empty, non-strings and control or invisible charac
   for (const raw of ["", "   ", null, undefined, 7]) {
     assert.deepEqual(normalizeClientName(raw), { ok: false, error: "Enter a name." }, String(raw));
   }
-  for (const raw of ["a\nb", "tab\tin", "nul\u0000", "zero​width", "bidi‮flip", "line sep", "pua"]) {
+  for (const raw of ["a\nb", "tab\tin", "nul\u0000", "zero\u200bwidth", "bidi\u202eflip", "line\u2028sep", "pua\ue000"]) {
     assert.deepEqual(
       normalizeClientName(raw),
       { ok: false, error: "Remove line breaks, tabs and invisible characters." },
       JSON.stringify(raw),
     );
   }
+});
+
+test("MUTATION TARGET: names need one letter, digit, symbol or punctuation mark (the server's rule)", () => {
+  assert.deepEqual(normalizeClientName("-"), { ok: true, value: "-" });
+  assert.deepEqual(normalizeClientName("e\u0301"), { ok: true, value: "e\u0301" });
+  for (const raw of ["\u0301\u0301", "\u0301"]) {
+    assert.deepEqual(
+      normalizeClientName(raw),
+      { ok: false, error: "Use at least one letter, digit, symbol or punctuation mark." },
+      JSON.stringify(raw),
+    );
+  }
+});
+
+test("MUTATION TARGET: operator text is wrapped in first-strong isolates in titles and toasts", () => {
+  assert.equal(isolate("x"), "\u2068x\u2069");
+  assert.equal(renameTitle("\u05e9\u05dc\u05d5\u05dd PC"), "Rename \u2068\u05e9\u05dc\u05d5\u05dd PC\u2069");
+  assert.equal(renamedToastText("Desk"), "Renamed to \u2068Desk\u2069.");
+  assert.equal(nameRemovedToastText("DEMON"), "Name removed. Now shown as \u2068DEMON\u2069.");
+  assert.equal(nameRemovedToastText(null), "Name removed.");
 });
 
 test("canRename / hasCustomName read the server's fields only", () => {
@@ -67,7 +91,7 @@ test("the hint names the address and, for an agent, the PC name it keeps reporti
   );
   assert.equal(
     renameHint({ kind: "agent", client_id: "DEMON", name_addr: "10.0.0.5" }),
-    "Stored for the address 10.0.0.5: a machine that gets this address later shows this name too. vault-agent keeps reporting this PC as DEMON; the name you set is shown instead.",
+    "Stored for the address 10.0.0.5: a machine that gets this address later shows this name too. vault-agent keeps reporting this PC as \u2068DEMON\u2069; the name you set is shown instead.",
   );
 });
 
@@ -85,7 +109,7 @@ test("MUTATION TARGET: only the handler's own 404 means 'already removed'; anoth
 test("MUTATION TARGET: the card title is the server's display_name; the kind line keeps what it replaced", () => {
   const agent = { kind: "agent", client_id: "DEMON", addresses: ["10.0.0.5"], name: "Living room PC", display_name: "Living room PC" };
   assert.equal(clientName(agent), "Living room PC");
-  assert.equal(clientKindText(agent), "vault-agent on DEMON · 10.0.0.5");
+  assert.equal(clientKindText(agent), "vault-agent on \u2068DEMON\u2069 · 10.0.0.5");
   const plain = { ...agent, name: null, display_name: "DEMON" };
   assert.equal(clientName(plain), "DEMON");
   assert.equal(clientKindText(plain), "vault-agent · 10.0.0.5");

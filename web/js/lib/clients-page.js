@@ -26,6 +26,7 @@
  */
 
 import { formatAgo } from "./format.js";
+import { isolate } from "./client-names.js";
 import { DASH, RANGE_PHRASES, formatRate, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
 
 /** How many recently loaded apps a card names before "+N more". */
@@ -61,7 +62,7 @@ export function clientKindText(client) {
   if (!isAgentClient(client)) {
     return named && addrs.length ? `No agent · ${addrs.join(", ")} · seen in the cache log` : "No agent · seen in the cache log";
   }
-  const agent = named && typeof client.client_id === "string" && client.client_id ? `vault-agent on ${client.client_id}` : "vault-agent";
+  const agent = named && typeof client.client_id === "string" && client.client_id ? `vault-agent on ${isolate(client.client_id)}` : "vault-agent";
   return addrs.length ? `${agent} · ${addrs.join(", ")}` : `${agent} · no address in the cache log`;
 }
 

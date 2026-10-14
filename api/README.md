@@ -4573,7 +4573,9 @@ the identity key (bypass webhooks, `DELETE /v1/clients/{client_id}`,
 Validation is strict: the name is trimmed, then must be 1-40 characters
 (code points) with no control (`Cc`), format (`Cf`, e.g. zero-width or bidi
 controls), surrogate, private-use, unassigned or line/paragraph separator
-characters. The body is `{"name": <string>}` and nothing else. The address
+characters, and must contain at least one letter, number, symbol or
+punctuation character (combining marks alone are refused). The web dialog
+applies the same rule. The body is `{"name": <string>}` and nothing else. The address
 must be a plain IP literal (no zone id, no whitespace) and is stored in the
 canonical spelling the event log and `effective_addrs` use (compressed IPv6,
 IPv4-mapped unwrapped), so `::ffff:192.0.2.7` and `192.0.2.7` are one key.

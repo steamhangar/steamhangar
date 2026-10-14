@@ -17,7 +17,7 @@
  */
 import { test, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createFakeDom } from "./fake-dom.js";
+import { createFakeDom, fakeKeyEvent } from "./fake-dom.js";
 
 const dom = createFakeDom();
 globalThis.document = dom.document;
@@ -169,4 +169,13 @@ test("MUTATION TARGET: an old server (404) keeps the dialog open with the update
   assert.equal(open(), true);
   role(dialog(), "history-delete-no").dispatchEvent({ type: "click" });
   assert.equal(open(), false);
+});
+
+test("MUTATION TARGET: Escape closes the dialog without deleting anything", async () => {
+  const s = await mount();
+  role(s, "history-delete").dispatchEvent({ type: "click" });
+  assert.equal(open(), true);
+  dom.document.dispatchEvent(fakeKeyEvent("Escape"));
+  assert.equal(open(), false);
+  assert.deepEqual(server.deletes, []);
 });
