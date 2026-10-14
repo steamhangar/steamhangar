@@ -14,8 +14,10 @@ make the flow work:
 - ci.yml uploads exactly that output directory (pinned action, never on
   cancel, nothing-found is not an error) and its summary step reports the
   two counts without ever failing the job itself,
-- every `shoot("<name>")` in the Kotlin test has a checked-in golden
-  `<name>.png` and no golden is left without a shot (WP APP-TEST-1b): a
+- every `shoot("<name>")` in every `*ScreenshotTest.kt` class (APP-TEST-2:
+  Library, Clients, ...) has a checked-in golden `<name>.png` and no golden
+  is left without a shot (WP APP-TEST-1b), and every such class captures
+  through the shared `ScreenshotGoldens` (so it writes where CI uploads): a
   missing golden only records and passes in Gradle, so without this check a
   lost PNG would silently turn a verify into a record.
 
@@ -40,6 +42,9 @@ CI_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 GRADLE_FILE = REPO_ROOT / "app" / "app" / "build.gradle.kts"
 TEST_FILE = (REPO_ROOT / "app" / "app" / "src" / "testDebug" / "java" / "dev" / "steamvault"
              / "app" / "ui" / "library" / "LibraryScreenshotTest.kt")
+#: APP-TEST-2: every screenshot class under testDebug, the same set the CI
+#: golden refresh records and accepts (`find ... -name '*ScreenshotTest.kt'`).
+SCREENSHOT_ROOT = REPO_ROOT / "app" / "app" / "src" / "testDebug" / "java"
 GOLDEN_DIR = REPO_ROOT / "app" / "app" / "src" / "testDebug" / "screenshots"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 JOB = "android-tests"
@@ -200,15 +205,32 @@ def test_summary_counts_compare_images_only_and_stays_exit_zero(tmp_path: Path) 
 # ---------------------------------------------------------------------------
 
 
+def _screenshot_files() -> list[Path]:
+    files = sorted(p for p in SCREENSHOT_ROOT.rglob("*ScreenshotTest.kt") if p.is_file())
+    assert TEST_FILE in files, files
+    return files
+
+
 def _shot_names() -> list[str]:
-    src = TEST_FILE.read_text(encoding="utf-8")
-    # Calls only: the definition is `shoot(\n    name: String, ...`.
-    return re.findall(r'\bshoot\(\s*"([^"]+)"', src)
+    names: list[str] = []
+    for f in _screenshot_files():
+        # Calls only: the definition is `shoot(\n    name: String, ...`.
+        names += re.findall(r'\bshoot\(\s*"([^"]+)"', f.read_text(encoding="utf-8"))
+    return names
+
+
+def test_every_screenshot_class_shoots_through_the_shared_golden_handling() -> None:
+    files = _screenshot_files()
+    assert len(files) >= 2, files  # Library + Clients (APP-TEST-2)
+    for f in files:
+        src = f.read_text(encoding="utf-8")
+        assert re.search(r'\bshoot\(\s*"', src), f"{f.name} has no shoot(\"...\") call"
+        assert "ScreenshotGoldens.capture(" in src, f"{f.name} must capture through ScreenshotGoldens"
 
 
 def test_every_shot_has_a_checked_in_golden() -> None:
     names = _shot_names()
-    assert len(names) >= 6, names
+    assert len(names) >= 10, names  # 7 Library + 4 Clients/Downloads statistics
     assert len(names) == len(set(names)), "duplicate shot names overwrite each other's golden"
     missing = [n for n in names if not (GOLDEN_DIR / f"{n}.png").is_file()]
     assert not missing, f"no golden in {GOLDEN_DIR.relative_to(REPO_ROOT)} for: {missing}"
