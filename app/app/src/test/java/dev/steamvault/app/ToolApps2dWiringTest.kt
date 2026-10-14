@@ -85,7 +85,7 @@ class ToolApps2dWiringTest {
         assertCalledFrom(card, "GroupPackagesLine(model)", "GameCard")
         assertCalledFrom(
             card,
-            "if (model.neverPlayed) NeverPlayedPill(compact = compact, modifier = Modifier.weight(1f, fill = false))",
+            "if (model.neverPlayed) NeverPlayedPill(compact = compact)",
             "GameCard",
         )
         assertCalledFrom(row, "GroupPackagesLine(model)", "GameListRow")

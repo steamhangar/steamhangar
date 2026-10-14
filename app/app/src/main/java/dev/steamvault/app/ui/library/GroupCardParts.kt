@@ -94,8 +94,10 @@ internal fun neverPlayedFullLabelFits(fullLabelWidthPx: Int, availableTextWidthP
  * ground; "Unplayed" in the 3-column grid ([compact]) and wherever the full
  * label does not fit the width left next to the status pill (measured, like
  * [UpdateAvailableBadge]) -- never an ellipsized "Never …". Spoken as
- * "Fully cached, never played". The caller gives it the remaining width
- * (`Modifier.weight(1f, fill = false)` in the pill row).
+ * "Fully cached, never played". [GameCard] lays the pills out in a FlowRow,
+ * so the pill moves onto its own line where it would not fit beside the
+ * status pill; the measured fallback covers a card narrower than the full
+ * label even on its own line.
  */
 @Composable
 internal fun NeverPlayedPill(compact: Boolean, modifier: Modifier = Modifier) {

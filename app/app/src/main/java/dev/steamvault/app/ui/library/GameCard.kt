@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -49,7 +51,7 @@ import dev.steamvault.app.ui.theme.VaultColors
  * `ui/library/logic/GameCardModel.kt`'s kdoc for why this composable is
  * skip-safe across a poll tick as long as [model] compares equal.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun GameCard(
     model: GameCardModel,
@@ -118,18 +120,21 @@ fun GameCard(
             }
 
             // WP TOOL-APPS-2d: the status pill, then the "Never played"
-            // pill to its right (web `.capbadges`); the row's height is what
-            // the fallback title keeps clear of.
-            Row(
+            // pill to its right (web `.capbadges`). A FlowRow: where even
+            // "Unplayed" does not fit beside the status pill (3-column grid,
+            // large font) it moves onto its own line instead of being
+            // ellipsized. The block's height is what the fallback title
+            // keeps clear of.
+            FlowRow(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .onSizeChanged { pillHeight = with(density) { it.height.toDp() } }
                     .padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 CapsulePill(model = model, onAction = onAction, selecting = selecting)
-                if (model.neverPlayed) NeverPlayedPill(compact = compact, modifier = Modifier.weight(1f, fill = false))
+                if (model.neverPlayed) NeverPlayedPill(compact = compact)
             }
         }
         Text(
