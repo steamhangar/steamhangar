@@ -186,8 +186,10 @@ class ScheduleState:
     """The ``schedule_state`` row. All fields ``None`` before the first sweep."""
 
     last_sweep_at: str | None
-    #: Size of the last sweep's target set. ``None`` while a sweep is running
-    #: (or if the process died during one) — see the table's DDL comment.
+    #: Size of the last sweep's target set plus the incomplete games it
+    #: completed that were no target (WP CACHE-COMPLETE-1b). ``None`` while a
+    #: sweep is running (or if the process died during one) — see the
+    #: table's DDL comment.
     last_sweep_targets: int | None
     #: How many NEW jobs the last sweep created (dedupe hits are not counted).
     last_sweep_enqueued: int | None
@@ -699,7 +701,8 @@ class SweepResult:
     #: WP CACHE-COMPLETE-1b. Games the stored completeness figures call
     #: incomplete with missing chunks (``completion_appids``), target or
     #: not; flagged ``needs_force = 1`` and enqueued with the targets so
-    #: their run fetches what is missing.
+    #: their run fetches what is missing. ``targets`` stays the target set
+    #: alone; the stored ``last_sweep_targets`` counts the union of both.
     completing: tuple[int, ...] = ()
 
 
@@ -861,7 +864,8 @@ def maybe_sweep(
     if completing:
         logger.info(
             "scheduler: %d incomplete game(s) run forced to fetch missing "
-            "chunks: %s",
+            "chunks (counted in last_sweep_targets, also when not a "
+            "target): %s",
             len(completing), ", ".join(str(a) for a in completing),
         )
 

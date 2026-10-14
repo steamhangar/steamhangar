@@ -68,10 +68,12 @@ class ScheduleOut(BaseModel):
     server_timezone: str
     #: When the last sweep STARTED (UTC). Null if none has ever run.
     last_sweep_at: str | None
-    #: Size of the last sweep's target set, and how many NEW jobs it created
-    #: (apps that already had a queued/running job are not counted — the queue
-    #: dedupes). Both null while a sweep is in flight, or if the process died
-    #: during one.
+    #: How many apps the last sweep enqueued for (its target set plus the
+    #: incomplete games it completed that were no target, WP
+    #: CACHE-COMPLETE-1b), and how many NEW jobs it created (apps that
+    #: already had a queued/running job are not counted — the queue dedupes).
+    #: Both null while a sweep is in flight, or if the process died during
+    #: one.
     last_sweep_targets: int | None
     last_sweep_enqueued: int | None
     #: Earliest UTC instant a sweep could next run (interval gate, then window

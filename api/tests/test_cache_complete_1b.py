@@ -277,6 +277,8 @@ def test_incomplete_games_are_completed_even_when_they_are_no_sweep_target(
     assert result.enqueued == (730,)
     assert (needs_force(conn, 730), needs_force(conn, 440)) == (1, 0)
     assert [int(r[0]) for r in conn.execute("SELECT appid FROM jobs")] == [730]
+    state = scheduler.read_state(conn)
+    assert (state.last_sweep_targets, state.last_sweep_enqueued) == (1, 1)
 
 
 def test_one_depot_walk_serves_targets_and_completion(
