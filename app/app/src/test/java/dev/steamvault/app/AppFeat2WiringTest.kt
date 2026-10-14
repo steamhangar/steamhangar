@@ -72,7 +72,8 @@ class AppFeat2WiringTest {
 
     @Test
     fun `MUTATION PIN -- Downloads history rows ask for the failure hint and render the hint block`() {
-        assertCalledFrom(downloads, "failureHintViewFor(job, excerptState.excerpt, controller.jobs)", "HistoryRow")
+        // WP D15d: the merged history list (the screen's jobs + the range fetch).
+        assertCalledFrom(downloads, "failureHintViewFor(job, excerptState.excerpt, historyJobs)", "HistoryRow")
         assertCalledFrom(downloads, "FailureHintBlock(", "HistoryRow")
         assertCalledFrom(downloads, "controller.retry(scope, model.appid)", "HistoryRow")
         assertCalledFrom(downloads, "controller.toggleRawOutput(model.jobId)", "HistoryRow")

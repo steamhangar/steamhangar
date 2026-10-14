@@ -3,13 +3,15 @@ package dev.steamvault.app.ui.nav
 import dev.steamvault.app.R
 
 /**
- * The app's three top-level destinations (WP 4b.4 brief: "bottom nav
- * Library / Downloads / Settings -- THREE items per the frozen mockup and
- * the recorded WP 4a.1 decision; Clients is a sheet later").
+ * The app's four top-level destinations: Library / Clients / Downloads /
+ * Settings. WP 4b.4 started with three (frozen mockup, WP 4a.1: "Clients is
+ * a sheet"); WP D15d added Clients as its own destination (user decision
+ * 2026-10-13, D15). The PCs sheet still exists: it opens from the Clients
+ * page's "Manage PCs" and from a bypass notification.
  *
  * **Navigation choice: a plain state-based switcher, not Navigation
  * Compose.** Justification for the reviewer:
- *   - There are exactly three FLAT, always-visible top-level destinations
+ *   - There are exactly four FLAT, always-visible top-level destinations
  *     with no back-stack semantics between them (tapping Library while on
  *     Settings does not "go back" anywhere -- it replaces the screen, same
  *     as the mockup's own `go()` which the design notes describe as a
@@ -20,7 +22,7 @@ import dev.steamvault.app.R
  *     links).
  *   - `MainActivity` already used exactly this pattern pre-4b.4 (a single
  *     `mutableStateOf` screen-state switch for the WP 4b.3 identity
- *     screen) -- this WP extends the SAME shape to three destinations
+ *     screen) -- this WP extends the SAME shape to the top-level destinations
  *     rather than introducing a second, heavier navigation system
  *     alongside it.
  *   - Adding `androidx.navigation:navigation-compose` now would pull in a
@@ -38,6 +40,11 @@ import dev.steamvault.app.R
  */
 enum class Destination(val labelRes: Int) {
     LIBRARY(R.string.nav_library),
+
+    /** WP D15d: the Clients page, right after Library like the web nav
+     * (user decision 2026-10-13, D15, superseding the WP 4a.1 "Clients is a
+     * sheet" ruling quoted above; the PCs sheet stays, opened from it). */
+    CLIENTS(R.string.nav_clients),
     DOWNLOADS(R.string.nav_downloads),
     SETTINGS(R.string.nav_settings),
 }

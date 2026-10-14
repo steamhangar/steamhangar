@@ -18,11 +18,11 @@ import kotlinx.coroutines.launch
  * `ui/clients/logic/ClientsView.kt`'s pure functions.
  *
  * **Hoisted at `MainActivity` level, not owned by a single [dev.steamvault.app.ui.nav.Destination].**
- * `ui/nav/Destination.kt`'s kdoc (and `docs/WORKPACKAGES.md`'s Phase 4a
- * header, "Clients is a sheet, not a nav item") is binding for this WP too
- * — this class is therefore held the same way [dev.steamvault.app.ui.settings.SettingsController]
- * is (`MainActivity.clientsControllerState`), reachable from wherever the
- * sheet needs to be opened FROM (a Settings button, a bypass notification
+ * The app has four destinations since WP D15d (Clients is one of them,
+ * `ui/clients/ClientsScreen.kt`); this PCs sheet is held the same way
+ * [dev.steamvault.app.ui.settings.SettingsController] is
+ * (`MainActivity.clientsControllerState`), reachable from wherever it needs
+ * to be opened FROM (the Clients page's "Manage PCs", a bypass notification
  * tap) regardless of which bottom-nav destination happens to be showing
  * underneath it — mirroring exactly how `web/js/components/clients-sheet.js`
  * floats over whatever view is current.

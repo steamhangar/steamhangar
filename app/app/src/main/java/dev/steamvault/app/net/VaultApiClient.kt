@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
@@ -20,7 +21,9 @@ import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.PrefillRequest
 import dev.steamvault.app.net.model.ScheduleOut
+import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.net.model.UpdateCheckOut
 import dev.steamvault.app.net.model.UpdateStatusOut
 import dev.steamvault.app.net.model.buildSettingsPatch
@@ -240,6 +243,28 @@ class VaultApiClient(
     // ---- clients ----------------------------------------------------------
 
     suspend fun clients(): List<ClientOut> = get("/v1/clients")
+
+    // ---- traffic (WP D15b API, WP D15d app) ------------------------------
+    // A server older than D15b answers 404 on all three; callers treat that
+    // as "no statistics on this server" (`ui/traffic/TrafficPoll.kt`).
+
+    /** `GET /v1/throughput?range=` -- the Downloads header's figures. */
+    suspend fun throughput(range: String): ThroughputOut =
+        get("/v1/throughput", params = mapOf("range" to range))
+
+    /** `GET /v1/throughput/series?range=` -- the Downloads graph. */
+    suspend fun throughputSeries(range: String): SeriesOut =
+        get("/v1/throughput/series", params = mapOf("range" to range))
+
+    /** `GET /v1/clients/overview?range=` -- the Clients page. */
+    suspend fun clientsOverview(range: String): ClientsOverviewOut =
+        get("/v1/clients/overview", params = mapOf("range" to range))
+
+    /** `GET /v1/jobs?range=&limit=` -- the Downloads history filter. A
+     * server older than D15b ignores `range` and returns the newest
+     * [limit] jobs; the app filters by the same rule client-side. */
+    suspend fun jobsInRange(range: String, limit: Int): List<JobSummary> =
+        get("/v1/jobs", params = mapOf("limit" to limit.toString(), "range" to range))
 
     // ---- settings ---------------------------------------------------------
 

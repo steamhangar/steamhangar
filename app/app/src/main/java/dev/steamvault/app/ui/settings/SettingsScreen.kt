@@ -231,17 +231,16 @@ private fun NotificationsSection(onRequestNotificationPermission: () -> Unit) {
 }
 
 // ---------------------------------------------------------------------
-// Clients section (WP 4b.10)
+// PCs (agents) pointer (WP D15d; WP 4b.10 before)
 // ---------------------------------------------------------------------
 
 /**
- * The discoverable entry point into the clients sheet
- * (`ui/clients/ClientsSheet.kt`) for a user who reaches Settings WITHOUT a
- * bypass notification to tap -- the sheet itself is hoisted at
- * `MainActivity` level (see `ClientsController.kt`'s kdoc: "Clients is a
- * sheet, not a nav item"), so this section is just a button, same minimal
- * shape [NotificationsSection] above already establishes for "one button
- * plus context, no live state read here".
+ * WP D15d: managing PCs moved to the Clients page (`ui/clients/ClientsScreen.kt`,
+ * a nav destination since D15), like web `settings.js`'s "PCs (agents)"
+ * pointer. Settings keeps this short pointer so the old way there still
+ * leads somewhere; [onOpenClientsClick] switches to the Clients
+ * destination (`MainActivity`). Before D15d this button opened the PCs
+ * sheet directly.
  */
 @Composable
 private fun ClientsSection(onOpenClientsClick: () -> Unit) {
