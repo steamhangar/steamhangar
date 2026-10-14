@@ -69,7 +69,13 @@ for f in "$dockerfile" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/45-vault-eventlog-rotate.sh" \
          "$core_dir/tests/test-eventlog-rotate-hook.sh" \
-         "$core_dir/docker/check-config-drift.sh"; do
+         "$core_dir/docker/check-config-drift.sh" \
+         "$core_dir/docker/vault-settings-lib.sh" \
+         "$core_dir/docker/15-vault-settings.envsh" \
+         "$core_dir/docker/47-vault-settings-watch.sh" \
+         "$core_dir/tests/fixtures/settings-grammar.tsv" \
+         "$core_dir/tests/test-settings-grammar.sh" \
+         "$core_dir/tests/test-settings-lib.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
 done
 
@@ -126,6 +132,17 @@ bash "$core_dir/tests/test-build-version-hook.sh"
 # rotation itself runs live below ("event-log rotation").
 echo "--- core/tests/test-eventlog-rotate-hook.sh ---"
 bash "$core_dir/tests/test-eventlog-rotate-hook.sh"
+
+# --- 0b-d16c. the core settings path, docker-free (D16c) --------------------
+# The shared grammar table against the real hooks (the Python twins run the
+# same rows in api/tests/test_d16b_core_grammar.py), and the settings
+# library + the boot hook 15- without a valid file. The render with a valid
+# file runs in the pinned image below ("D16c: core settings at boot"); the
+# runtime apply (watcher, reload, rollback) in deploy/tests/verify-stack.sh.
+echo "--- core/tests/test-settings-grammar.sh ---"
+bash "$core_dir/tests/test-settings-grammar.sh"
+echo "--- core/tests/test-settings-lib.sh ---"
+bash "$core_dir/tests/test-settings-lib.sh"
 
 # --- 0b-own. the root-only directory predicate, docker-free (WP SEC-FIX-5) -----
 # 21-, 25- and 29- decide with one predicate whether root may act on names in
@@ -341,6 +358,8 @@ render_and_test() {
             # `chmod 0755 /docker-entrypoint.d/25-... ... /docker-entrypoint.d/40-...`
             # RUN step, reproduced here instead of via a build).
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+            # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+            sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
             cp /workspace/core-docker/21-vault-volume-ownership.sh /docker-entrypoint.d/21-vault-volume-ownership.sh
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
             cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
@@ -971,6 +990,8 @@ render_must_fail() {
             chown -R nginx:nginx /vault
             eval "$RMF_SETUP"
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+            # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+            sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
             cp /workspace/core-docker/21-vault-volume-ownership.sh /docker-entrypoint.d/21-vault-volume-ownership.sh
             cp /workspace/core-docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
             cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
@@ -1238,6 +1259,8 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+        sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
@@ -1285,6 +1308,8 @@ docker run --rm \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+        sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
@@ -1411,6 +1436,8 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+        sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
@@ -1472,6 +1499,8 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+        sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
@@ -1536,6 +1565,8 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp /tmp/stub
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+        sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
@@ -1635,6 +1666,8 @@ docker run --rm --network none \
         mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp
         chown -R nginx:nginx /vault
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+        sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
@@ -1693,6 +1726,8 @@ docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
         printf rot > /vault/cache/depot/4242/chunk/d15rot0001
         chown -R nginx:nginx /vault/cache/depot
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+        # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
+        sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership 25-vault-eventlog 26-vault-tls-passthrough 27-vault-upstream-rate \
                  28-vault-upstream-pool 29-vault-build-version 40-vault-preflight 45-vault-eventlog-rotate; do
             cp "/workspace/core-docker/$h.sh" "/docker-entrypoint.d/$h.sh"
@@ -1787,6 +1822,76 @@ docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
         [ "$status" = 0 ] && echo "rotation OK: rename into event.log.1, fresh 101:101 file, reopen, one old file, survives a reload"
         exit $status
     '
+
+# --- D16c: core settings at boot, in the pinned image ----------------------
+# The real stock entrypoint with 15-vault-settings.envsh (sourced), the
+# library and 47-: a settings file as vault-api writes it reaches the
+# renders (file value, env pin over file, defaults for the rest), the
+# /health generation include carries its generation, and 47- does not fork
+# its watcher for `nginx -t`. A file the hooks refuse does not stop the
+# boot: vault-core starts on env + defaults with generation 0.
+d16c_boot() {
+    local label="$1" file_lines="$2"
+    echo "--- D16c: core settings at boot: $label ---"
+    docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
+        -v "$core_dir/docker:/workspace/core-docker:ro" \
+        -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
+        -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+        -e NGINX_ENVSUBST_FILTER='^VAULT_' \
+        -e VAULT_RESOLVER= -e VAULT_UPSTREAM_EDGE= -e VAULT_UPSTREAM_RATE_WINDOW= -e VAULT_UPSTREAM_RATE= \
+        -e VAULT_TLS_MAX_CONNS=300 -e VAULT_TLS_CLIENT_MAX_CONNS= -e VAULT_UPSTREAM_MAX_CONNS= \
+        -e VAULT_EVENT_LOG= \
+        -e FILE_LINES="$file_lines" -e LABEL="$label" \
+        --entrypoint sh "$IMAGE" -c '
+            set -eu
+            mkdir -p /etc/nginx/templates /vault/cache/depot /vault/tmp /vault/logs /etc/vault-settings /opt/vault
+            chmod 0755 /vault /vault/cache /vault/cache/depot /vault/tmp /vault/logs
+            chown root:root /vault /vault/cache /vault/tmp /vault/logs
+            chown nginx:nginx /vault/cache/depot
+            cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+            cp /workspace/core-docker/vault-settings-lib.sh /opt/vault/vault-settings-lib.sh
+            cp /workspace/core-docker/15-vault-settings.envsh /docker-entrypoint.d/15-vault-settings.envsh
+            for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 29-vault-build-version.sh 40-vault-preflight.sh 45-vault-eventlog-rotate.sh 47-vault-settings-watch.sh; do
+                cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
+                chmod 0755 "/docker-entrypoint.d/$h"
+            done
+            chmod 0755 /docker-entrypoint.d/15-vault-settings.envsh
+            printf "%s\n" "# generated by vault-api -- do not edit" $FILE_LINES > /etc/vault-settings/core-settings.env
+            # chmod before chown: the compose capability set has no CAP_FOWNER.
+            chmod 0644 /etc/vault-settings/core-settings.env
+            chown nginx:nginx /etc/vault-settings /etc/vault-settings/core-settings.env
+            rc=0
+            /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf > /tmp/ep.log 2>&1 || rc=$?
+            status=0
+            fail() { echo "FAIL (D16c $LABEL): $*"; status=1; }
+            [ "$rc" = 0 ] || fail "entrypoint/nginx -t exited $rc"
+            grep -q "Sourcing /docker-entrypoint.d/15-vault-settings.envsh" /tmp/ep.log || fail "the stock entrypoint did not source 15-"
+            grep -q "47-vault-settings-watch.sh: not a server start" /tmp/ep.log || fail "47- did not skip the watcher for nginx -t"
+            pool_default=$(grep "^    default " /etc/nginx/vault-upstream-pool.conf || true)
+            case "$LABEL" in
+                valid)
+                    grep -q "15-vault-settings.envsh: settings file: applied, generation 3" /tmp/ep.log || fail "no applied line for generation 3"
+                    grep -qx "    1 819200;" /etc/nginx/vault-upstream-rate.conf || fail "the file rate 800k is not rendered"
+                    grep -q "^# 03:00-07:00 (container local time" /etc/nginx/vault-upstream-rate.conf || fail "the default window 03:00-07:00 is not rendered"
+                    [ "$pool_default" = "    default \$vault_upstream_host;" ] || fail "VAULT_UPSTREAM_EDGE=off from the file did not select legacy mode ($pool_default)"
+                    grep -qE "^[[:space:]]*limit_conn vault_tls_total[[:space:]]+300;" /etc/nginx/nginx.conf || fail "the env pin VAULT_TLS_MAX_CONNS=300 did not win over the file value 128"
+                    grep -qF "add_header X-Vault-Settings-Generation \"3\" always;" /etc/nginx/vault-settings-generation.conf || fail "the generation include does not say 3"
+                    grep -q "VAULT_TLS_MAX_CONNS=300 (env)" /tmp/ep.log || fail "15- did not log the env source" ;;
+                refused)
+                    grep -q "15-vault-settings.envsh: WARNING: settings file generation 4 rejected: 27-vault-upstream-rate.sh: FATAL: VAULT_UPSTREAM_RATE=.0. starts with 0" /tmp/ep.log || fail "no rejected warning naming 27- and the value"
+                    grep -q "settings file: rejected, generation 0" /tmp/ep.log || fail "no rejected summary line"
+                    grep -qx "    default 0;" /etc/nginx/vault-upstream-rate.conf || fail "the rate is not the default (off) after the rejected file"
+                    [ "$pool_default" = "    default dist-fra1.discovery.steamserver.net;" ] || fail "the default edge is not rendered after the rejected file ($pool_default)"
+                    grep -qF "add_header X-Vault-Settings-Generation \"0\" always;" /etc/nginx/vault-settings-generation.conf || fail "the generation include does not say 0" ;;
+            esac
+            grep -c "resolver 1.1.1.1 ipv6=off valid=30s;" /etc/nginx/nginx.conf | grep -qx 2 || fail "the default resolver 1.1.1.1 is not rendered twice"
+            if [ "$status" != 0 ]; then sed "s/^/    /" /tmp/ep.log; fi
+            [ "$status" = 0 ] && echo "D16c boot ($LABEL) OK"
+            exit $status
+        '
+}
+d16c_boot valid "GENERATION=3 VAULT_UPSTREAM_RATE=800k VAULT_UPSTREAM_EDGE=off VAULT_TLS_MAX_CONNS=128"
+d16c_boot refused "GENERATION=4 VAULT_UPSTREAM_RATE=0"
 
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \

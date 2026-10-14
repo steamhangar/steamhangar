@@ -617,3 +617,22 @@ defaults. Tests: `core/tests/test-tls-caps-hook.sh` (docker-free),
 probe at the tuned value, one preflight tamper case), the image build
 checks, `verify-stack.sh` step 8f, and api pins for the compose lines and
 defaults.
+
+## Note 2026-10-15 — the rollback switch is now `VAULT_UPSTREAM_EDGE=off` (D16c)
+
+Since rc18 (D16 Q7, docs/handover/d16-settings-audit.md 3.5-3.7) every
+editable key is forwarded as `${VAR-}` and a blank or unset value means
+"not set": Settings, else the shipped default. So the rollback recipe
+above ("set `VAULT_UPSTREAM_EDGE=` empty") no longer selects the legacy
+mode; an empty line now gets the default edge. The rollback is:
+
+- `VAULT_UPSTREAM_EDGE=off` in `.env`, then `docker compose up -d
+  vault-core` (an env pin, wins over Settings), or
+- `upstream_edge` = `off` in Settings (risky key, confirm dialog), applied
+  by vault-core with `nginx -t` and a reload, no restart.
+
+The default edge `dist-fra1.discovery.steamserver.net` moved from
+compose into vault-core's `15-vault-settings.envsh`;
+`28-vault-upstream-pool.sh` accepts exactly `off` (and, run by hand, an
+empty value) as legacy mode, `VAULT_UPSTREAM_POOL_HOSTS=off` as "no pool
+hosts". Decisions 1-5 are unchanged.

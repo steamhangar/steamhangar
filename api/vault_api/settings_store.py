@@ -25,8 +25,9 @@ stats/traffic views). Each key's ``applies`` label says which.
 Keys with ``target == "core"`` have no ``Settings`` field: vault-core reads
 them (``vault_api/core_settings.py`` validates them with Python twins of the
 hook grammars and computes the core settings file). vault-api cannot see
-vault-core's environment, so for those keys GET reports ``env_visible:
-false``; D16c adds vault-core's status file, which reports the env pins.
+vault-core's environment, so for those keys GET reads vault-core's status
+file (D16c, ``core_settings.read_core_status``): a key vault-core's env pins
+shows ``source: "env"``; without the file GET reports ``env_visible: false``.
 
 Env-only keys are never in ``OVERRIDABLE_SPECS``. ``PATCH`` rejects them by
 name with a distinct ``422`` detail (``ENV_ONLY_KEYS``). Since D16b (Q2)
@@ -709,12 +710,26 @@ class SettingInfo:
     shadowed: bool
 
 
-def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingInfo]:
+def describe_settings(
+    conn: sqlite3.Connection,
+    base: Settings,
+    core_status: core_settings.CoreStatus | None = None,
+) -> list[SettingInfo]:
+    """The GET read model. ``core_status`` is vault-core's status file
+    (D16c, ``core_settings.read_core_status``): with it, a core key that
+    vault-core's own env pins is reported as ``source: "env"`` with the
+    pinned value and ``editable: false``, and every core key is
+    ``env_visible``. Without it (no file yet, older vault-core) core keys stay
+    ``env_visible: false``, as in D16b."""
     overrides = get_all_overrides(conn)
     infos: list[SettingInfo] = []
 
     for key, spec in OVERRIDABLE_SPECS.items():
         pinned = is_env_pinned(spec, base)
+        core_pin: str | None = None
+        if spec.target == TARGET_CORE and core_status is not None:
+            core_pin = core_status.env_pinned(spec.env_var)
+            pinned = pinned or core_pin is not None
         raw = overrides.get(key)
         stored_ok, stored_value = (False, None) if raw is None else _parse_stored(spec, raw)
         stored_json = spec.to_json(stored_value) if stored_ok else None
@@ -724,7 +739,9 @@ def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingI
         else:
             fallback = spec.to_json(getattr(base, key))
 
-        if pinned:
+        if core_pin is not None:
+            source, effective = "env", core_pin
+        elif pinned:
             source, effective = "env", fallback
         elif stored_ok:
             source, effective = "db", stored_json
@@ -746,7 +763,7 @@ def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingI
                 expert=spec.expert,
                 grammar=spec.grammar,
                 target=spec.target,
-                env_visible=spec.target != TARGET_CORE,
+                env_visible=spec.target != TARGET_CORE or core_status is not None,
                 shadowed=pinned and stored_ok,
             )
         )

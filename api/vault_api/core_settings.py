@@ -25,16 +25,26 @@ Three things live here:
    name is deprecated (still honoured by vault-core as an env pin).
 
 3. **The file writer** (audit 4.2), off unless ``VAULT_CORE_SETTINGS_FILE``
-   names a path. D16c mounts the shared volume, sets the path and teaches
-   vault-core to read the file.
+   names a path. Since D16c compose mounts the shared ``vault-settings``
+   volume and sets the path; vault-core reads the file
+   (``core/docker/15-vault-settings.envsh``, ``47-vault-settings-watch.sh``).
+
+4. **The status reader** (D16c, audit 4.4): vault-core reports the generation
+   it applied or rejected and the effective value and source of every core
+   key in ``<cache volume>/logs/settings-applied.json``
+   (``read_core_status``); GET /v1/settings uses it for the env pins vault-api
+   cannot see itself.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import stat
 import tempfile
+from dataclasses import dataclass
 from typing import Callable, Mapping
 
 from vault_api.schedule_window import WINDOW_OFF, ScheduleWindowError, parse_window
@@ -472,3 +482,128 @@ def write_core_settings_file(path: str, values: Mapping[str, str]) -> int | None
             pass
         raise
     return generation
+
+
+# --------------------------------------------------------------------------
+# vault-core's apply status (D16c, audit 4.4)
+# --------------------------------------------------------------------------
+
+#: Written by vault-core's ``47-vault-settings-watch.sh`` (root:root 0644 in
+#: the root-only ``logs/`` of the shared cache volume), read here.
+STATUS_FILE = os.path.join("logs", "settings-applied.json")
+STATUS_MAX_BYTES = 16384
+STATUS_STATES = frozenset({"applied", "rejected", "none"})
+STATUS_SOURCES = frozenset({"env", "file", "default"})
+_STATUS_KEYS = frozenset(
+    {"component", "state", "generation", "applied_generation", "reason", "updated_at", "keys"}
+)
+
+
+@dataclass(frozen=True)
+class CoreStatus:
+    """What vault-core reports about the core settings it runs with."""
+
+    #: ``applied`` | ``rejected`` | ``none`` (no settings file seen).
+    state: str
+    #: The generation vault-core last looked at (applied or rejected).
+    generation: int
+    #: The generation that is live (0 = env and defaults only).
+    applied_generation: int
+    reason: str
+    updated_at: str
+    #: env name -> (effective value, source ``env`` | ``file`` | ``default``)
+    #: of the LIVE config.
+    keys: dict[str, tuple[str, str]]
+
+    def env_pinned(self, env_var: str) -> str | None:
+        """The value vault-core's own env pins for ``env_var``, else ``None``."""
+        entry = self.keys.get(env_var)
+        if entry is None or entry[1] != "env":
+            return None
+        return entry[0]
+
+
+def core_status_path(cache_root: str) -> str:
+    """``<cache volume>/logs/settings-applied.json``: the cache root is
+    ``<volume>/cache`` in every image (same rule as ``about.core_version_path``)."""
+    volume = os.path.dirname(os.path.normpath(cache_root))
+    return os.path.join(volume, STATUS_FILE)
+
+
+def parse_core_status(raw: bytes) -> CoreStatus | None:
+    """The status file's content, or ``None`` when it is not exactly what
+    vault-core writes (strict: an unexpected shape is ignored, never half
+    trusted)."""
+    if len(raw) > STATUS_MAX_BYTES:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    if not isinstance(data, dict) or set(data) != _STATUS_KEYS:
+        return None
+    if data["component"] != "vault-core" or data["state"] not in STATUS_STATES:
+        return None
+    generation, applied = data["generation"], data["applied_generation"]
+    for number in (generation, applied):
+        if isinstance(number, bool) or not isinstance(number, int) or number < 0:
+            return None
+    if not isinstance(data["reason"], str) or not isinstance(data["updated_at"], str):
+        return None
+    raw_keys = data["keys"]
+    if not isinstance(raw_keys, dict):
+        return None
+    keys: dict[str, tuple[str, str]] = {}
+    for name, entry in raw_keys.items():
+        if name not in FILE_KEYS or not isinstance(entry, dict) or set(entry) != {"value", "source"}:
+            return None
+        value, source = entry["value"], entry["source"]
+        if not isinstance(value, str) or source not in STATUS_SOURCES:
+            return None
+        keys[name] = (value, source)
+    return CoreStatus(
+        state=data["state"],
+        generation=generation,
+        applied_generation=applied,
+        reason=data["reason"],
+        updated_at=data["updated_at"],
+        keys=keys,
+    )
+
+
+def read_core_status(path: str) -> CoreStatus | None:
+    """Read and parse the status file; ``None`` when it is missing or not
+    usable. Same reading rules as ``about._read_small_file``: a REGULAR file
+    in a REAL directory, ``O_NOFOLLOW`` + ``O_NONBLOCK`` (a planted FIFO must
+    not block a request), at most ``STATUS_MAX_BYTES + 1`` bytes."""
+    try:
+        if not stat.S_ISDIR(os.lstat(os.path.dirname(path) or ".").st_mode):
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks: list[bytes] = []
+        remaining = STATUS_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return parse_core_status(b"".join(chunks))
+
+
+def written_generation(path: str) -> int | None:
+    """The GENERATION of vault-api's own settings file, ``None`` without one."""
+    if not path:
+        return None
+    generation, _values = _read_file(path)
+    return generation or None

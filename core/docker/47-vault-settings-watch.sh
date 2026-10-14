@@ -1,0 +1,236 @@
+#!/bin/sh
+# SteamHangar vault-core container hook -- applies core settings from
+# vault-api at runtime, without a restart (D16c, docs/handover/
+# d16-settings-audit.md 4.3; core/README.md "Settings from vault-api").
+#
+# 1. Writes the boot result of 15-vault-settings.envsh to
+#    /vault/logs/settings-applied.json (the status file vault-api reads for
+#    GET /v1/settings). Written here, not in 15-, because 21- makes /vault/logs
+#    root-only only after 15- ran (SEC-FIX-5).
+# 2. Forks a watcher loop -- the same pattern as 45-vault-eventlog-rotate.sh:
+#    forked before the stock entrypoint execs nginx, re-parented to the nginx
+#    master, never started for an `nginx -t`/`-T`/`-s`/`-v` run. Every
+#    VS_POLL seconds it reads the settings file; when its content changed:
+#      a. parse it (vs_parse). Not exactly what vault-api writes: "rejected".
+#      b. resolve env > file > default (env pins recorded at boot by 15-),
+#         render 20 -> 25 -> 26 -> 27 -> 28 into a staging directory and run
+#         40's value checks there (vs_render).
+#      c. GATE: `nginx -t -p /vault -c <staging>/nginx.conf`. `nginx -s reload`
+#         is never the gate -- it returns 0 even when the master then refuses
+#         the new config. `-p /vault` like the image CMD, so the root master
+#         resolves the relative temp/log paths inside /vault (SEC-FIX-5).
+#      d. back up the live files, move the staged ones into /etc/nginx, send
+#         SIGHUP to the master (a reload: same master pid, 45- unaffected).
+#      e. poll http://127.0.0.1/health until X-Vault-Settings-Generation shows
+#         the new generation. Timeout: restore the backup, SIGHUP again,
+#         "rejected: reload failed".
+#      f. "applied" with the generation, the effective value and source of
+#         every key.
+#    On any failure the last good config stays live; it never fails open.
+#
+# Same file, same generation: nothing to do. A missing file (settings volume
+# not mounted, or vault-api not started yet) changes nothing either.
+
+set -eu
+
+ME="47-vault-settings-watch.sh"
+VS_LIB="${VS_LIB:-/opt/vault/vault-settings-lib.sh}"
+# shellcheck source=core/docker/vault-settings-lib.sh
+. "$VS_LIB"
+
+log()  { echo "$ME: $*"; }
+warn() { echo "$ME: WARNING: $*" >&2; }
+
+VS_POLL="${VS_POLL:-5}"
+PID_FILE=/var/run/nginx.pid
+HEALTH_URL="${VS_HEALTH_URL:-http://127.0.0.1/health}"
+BACKUP_DIR="$VS_CONF_DIR/.vault-settings-last-good"
+
+# --- Is this the server start? (same test as 45-) ---------------------------
+server_start=no
+if [ -r "/proc/$PPID/cmdline" ]; then
+    seen_nginx=no
+    info_flag=no
+    set -f
+    for arg in $(tr '\0 ' '\n\001' < "/proc/$PPID/cmdline"); do
+        if [ "$seen_nginx" = no ]; then
+            case "$arg" in nginx|nginx-debug|*/nginx|*/nginx-debug) seen_nginx=yes ;; esac
+            continue
+        fi
+        case "$arg" in
+            -*[tTsvVh?]*) info_flag=yes ;;
+        esac
+    done
+    set +f
+    if [ "$seen_nginx" = yes ] && [ "$info_flag" = no ]; then
+        server_start=yes
+    fi
+fi
+if [ "$server_start" != yes ]; then
+    log "not a server start (an nginx -t/-T/-s/-v run or no nginx command) -- settings watcher not started"
+    exit 0
+fi
+
+if [ -z "${VS_ENV_CAPTURED:-}" ]; then
+    warn "15-vault-settings.envsh did not run (no env capture) -- settings watcher not started"
+    exit 0
+fi
+
+# --- boot status ----------------------------------------------------------------
+APPLIED_GEN=${VS_BOOT_GEN:-0}
+if vs_write_status "${VS_BOOT_STATE:-none}" "$APPLIED_GEN" "$APPLIED_GEN" "${VS_BOOT_REASON:-}" "$VS_CONF_DIR/vault-settings.effective"; then
+    log "boot status written to $VS_STATUS_FILE (${VS_BOOT_STATE:-none}, generation $APPLIED_GEN)"
+else
+    warn "could not write $VS_STATUS_FILE; vault-api cannot show the core settings state"
+fi
+
+master_pid() {
+    [ -f "$PID_FILE" ] || return 1
+    _p=$(head -c 16 "$PID_FILE" 2>/dev/null | tr -d '\n')
+    case "$_p" in ''|*[!0-9]*) return 1 ;; esac
+    _c=$(tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null) || return 1
+    case "$_c" in "nginx: master process"*) echo "$_p" ;; *) return 1 ;; esac
+}
+
+# live_generation: the X-Vault-Settings-Generation the workers serve now.
+live_generation() {
+    wget -q -S -O /dev/null "$HEALTH_URL" 2>&1 \
+        | sed -n 's/^[[:space:]]*[Xx]-[Vv]ault-[Ss]ettings-[Gg]eneration:[[:space:]]*\([0-9]*\).*$/\1/p' \
+        | head -n 1
+}
+
+wait_generation() {
+    _i=0
+    while [ "$_i" -lt 30 ]; do
+        [ "$(live_generation)" = "$1" ] && return 0
+        sleep 1
+        _i=$((_i + 1))
+    done
+    return 1
+}
+
+reject() {
+    # reject <generation> <reason>
+    warn "settings generation $1 rejected: $2 -- generation $APPLIED_GEN stays live"
+    vs_write_status rejected "$1" "$APPLIED_GEN" "$2" "$VS_CONF_DIR/vault-settings.effective" \
+        || warn "could not write $VS_STATUS_FILE"
+}
+
+restore_backup() {
+    for _f in $VS_RENDERED; do
+        if [ -f "$BACKUP_DIR/$_f" ]; then
+            cp "$BACKUP_DIR/$_f" "$VS_CONF_DIR/.$_f.restore" && mv -f "$VS_CONF_DIR/.$_f.restore" "$VS_CONF_DIR/$_f"
+        fi
+    done
+}
+
+# apply_file <content>: one apply attempt (the steps a-f above).
+apply_file() {
+    if ! vs_parse "$1"; then
+        reject "${VS_GEN:-0}" "settings file rejected: $VS_ERR"
+        return 0
+    fi
+    _gen=$VS_GEN
+    if [ "$_gen" = "$APPLIED_GEN" ]; then
+        return 0
+    fi
+    log "settings generation $_gen found (live: $APPLIED_GEN) -- rendering"
+    _stage=$(mktemp -d) || { reject "$_gen" "could not create a staging directory"; return 0; }
+    vs_resolve yes
+    if ! (vs_export; vs_render "$_stage" "$_gen"); then
+        _why=$(grep -m 1 'FATAL' "$_stage/.render.log" 2>/dev/null | cut -c 1-300 || true)
+        sed 's/^/    /' "$_stage/.render.log" >&2 || true
+        rm -rf "$_stage"
+        reject "$_gen" "render failed${_why:+: $_why}"
+        return 0
+    fi
+    if ! _t=$(nginx -t -p /vault -c "$_stage/nginx.conf" 2>&1); then
+        printf '%s\n' "$_t" | sed 's/^/    /' >&2
+        rm -rf "$_stage"
+        reject "$_gen" "nginx -t failed: $(printf '%s\n' "$_t" | grep -m 1 'emerg' | cut -c 1-300)"
+        return 0
+    fi
+    _pid=$(master_pid) || { rm -rf "$_stage"; reject "$_gen" "no running nginx master found"; return 0; }
+
+    # Swap: back up the live files, move the staged ones in (rename per file).
+    rm -rf "$BACKUP_DIR"
+    if ! mkdir -m 0755 "$BACKUP_DIR"; then
+        rm -rf "$_stage"
+        reject "$_gen" "could not create $BACKUP_DIR"
+        return 0
+    fi
+    for _f in $VS_RENDERED; do
+        if [ -f "$VS_CONF_DIR/$_f" ] && ! cp -p "$VS_CONF_DIR/$_f" "$BACKUP_DIR/$_f"; then
+            rm -rf "$_stage"
+            reject "$_gen" "could not back up $VS_CONF_DIR/$_f"
+            return 0
+        fi
+    done
+    _swap_ok=yes
+    for _f in $VS_RENDERED; do
+        if ! { cp "$_stage/$_f" "$VS_CONF_DIR/.$_f.new" && chmod 0644 "$VS_CONF_DIR/.$_f.new" \
+                && mv -f "$VS_CONF_DIR/.$_f.new" "$VS_CONF_DIR/$_f"; }; then
+            _swap_ok=no
+            break
+        fi
+    done
+    rm -rf "$_stage"
+    if [ "$_swap_ok" != yes ]; then
+        # Nothing was reloaded yet: putting the old files back is enough.
+        restore_backup
+        reject "$_gen" "could not move the staged files into $VS_CONF_DIR; the old files are back"
+        return 0
+    fi
+    kill -HUP "$_pid"
+    if wait_generation "$_gen"; then
+        APPLIED_GEN=$_gen
+        vs_write_status applied "$_gen" "$_gen" "" "$VS_CONF_DIR/vault-settings.effective" \
+            || warn "could not write $VS_STATUS_FILE"
+        while IFS= read -r _line; do
+            log "  $(vs_shown "$_line")"
+        done < "$VS_CONF_DIR/vault-settings.effective"
+        log "settings generation $_gen applied (nginx reloaded, master $_pid)"
+        return 0
+    fi
+    restore_backup
+    kill -HUP "$_pid" || true
+    if wait_generation "$APPLIED_GEN"; then
+        reject "$_gen" "reload failed: generation $_gen was not live after 30s; restored generation $APPLIED_GEN (see the container log)"
+    else
+        reject "$_gen" "reload failed and generation $APPLIED_GEN is not confirmed live either after the restore (see the container log)"
+    fi
+    return 0
+}
+
+# watch_loop <content applied or rejected at boot>
+watch_loop() {
+    # One failing command must not end the loop.
+    set +e
+    _last=$1
+    while :; do
+        sleep "$VS_POLL"
+        _rc=0
+        _content=$(vs_read_file) || _rc=$?
+        case "$_rc" in
+            0) : ;;
+            1) continue ;;
+            *) _content="__unreadable__" ;;
+        esac
+        [ "$_content" != "$_last" ] || continue
+        _last=$_content
+        if [ "$_rc" != 0 ]; then
+            reject 0 "settings file $VS_SETTINGS_FILE is not a readable regular file of at most $VS_MAX_BYTES bytes"
+            continue
+        fi
+        apply_file "$_content"
+    done
+}
+
+# The boot already applied the file's current content (or rejected it), so
+# the loop starts from it: no reload for an unchanged file.
+_boot_rc=0
+_boot_content=$(vs_read_file) || _boot_rc=$?
+[ "$_boot_rc" = 0 ] || _boot_content=""
+watch_loop "$_boot_content" < /dev/null &
+log "settings watcher started (pid $!): $VS_SETTINGS_FILE checked every ${VS_POLL}s, live generation $APPLIED_GEN"
+exit 0

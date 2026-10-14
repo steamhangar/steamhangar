@@ -690,7 +690,7 @@ pool"](#upstream-keepalive-pool), "Why 4").
 
 ## Volumes and backup
 
-Three named volumes, created automatically (a fourth location,
+Four named volumes, created automatically (a fifth location,
 `vault-cache`, becomes a bind mount instead if `VAULT_CACHE_PATH` is set --
 see ["Using a dedicated cache mount"](#using-a-dedicated-cache-mount) above):
 
@@ -699,6 +699,7 @@ see ["Using a dedicated cache mount"](#using-a-dedicated-cache-mount) above):
 | `vault-cache` (or `VAULT_CACHE_PATH` if set) | `/vault` in vault-core, vault-api **and** vault-runner (WP S-2) | the depot cache (`cache/depot/…`) plus nginx's `tmp/` | **No** — it is a cache; large, and re-fillable by prefilling again |
 | `vault-db`           | `/data` in **both** vault-api and vault-runner (WP S-2) | `vault.db` — depot→app mapping, jobs, agent reports | **Yes** — small, and it is the knowledge the cache cannot rebuild |
 | `vault-steamprefill` | `/opt/steamprefill/Config` in **vault-runner** (moved here from vault-api in WP S-2, ADR-0012 §5 — see "First run" above) | SteamPrefill's Steam **session** and selection state | **Yes**, and treat it as a secret |
+| `vault-settings` (D16c) | `/var/lib/vault-settings` in vault-api (rw, the only writer), `/etc/vault-settings` in vault-core (read-only, `nocopy`) | `core-settings.env`, the Settings values vault-core applies (core/README.md "Settings from vault-api") | **No** — vault-api rewrites it from `vault-db` at every start |
 | `vault-steamprefill-home` | `/opt/steamprefill/home` in **both** vault-api and vault-runner (WP S-2 — see `deploy/compose.yaml`'s comment on this mount for why vault-api still needs it even though SteamPrefill itself now runs in vault-runner: manifest ingestion stays vault-api-side and reads the `.cache/SteamPrefill/v1` files vault-runner writes under this same shared directory) | `HOME` for the container user — SteamPrefill's manifest/depot cache | **No** — regenerable, and it grows |
 
 ```bash
@@ -1051,13 +1052,15 @@ New variables (all optional; vault-core only, recreate it after a change,
   `host="..."` (what the client sent), `limit_conn=` (`REJECTED` for a 503).
 - Socket bound: up to C in flight plus C idle (2C).
 
-**Rollback.** Set `VAULT_UPSTREAM_EDGE=` (empty, not commented out) in
-`.env` and recreate vault-core: the per-name pool of the next section
-applies again. The boot log says `upstream edge mode ON: ...` or
+**Rollback.** Set `VAULT_UPSTREAM_EDGE=off` in `.env` and recreate
+vault-core, or set `upstream_edge` to `off` in Settings (applied without a
+restart, D16c): the per-name pool of the next section applies again. Since
+rc18 an empty value no longer rolls back (it means "not set" = the default
+edge; ADR-0021 note 2026-10-15). The boot log says `upstream edge mode ON: ...` or
 `upstream keepalive pool ON (legacy per-name mode)`.
 
 **Keep the upload throttle on.** Recommended (user decision 2026-10-04):
-keep `VAULT_UPSTREAM_RATE=4m` and an **empty** `VAULT_UPSTREAM_RATE_WINDOW=`
+keep `VAULT_UPSTREAM_RATE=4m` and `VAULT_UPSTREAM_RATE_WINDOW=off` (before rc18: an empty value)
 (throttle round the clock, see "Upstream rate cap") even with edge mode and
 the cap on, until measurements after the rollout show that edge and cap are
 stable. Only then loosen or remove it. Both are production `.env`
@@ -1088,14 +1091,14 @@ docker compose exec vault-core netstat -tn | awk '$5 ~ /:80$/ && $6 == "ESTABLIS
   names. The update of the uncached app must finish without a hash
   mismatch, and `upstream_status` must show no 4xx/5xx for `host=` names
   other than the edge beyond the pre-change level. One such status that only
-  appears in edge mode: set `VAULT_UPSTREAM_EDGE=` empty.
+  appears in edge mode: set `VAULT_UPSTREAM_EDGE=off`.
 
 ---
 
 ## Upstream keepalive pool
 
 **Legacy mode** since ADR-0021: this per-name pool applies only while
-`VAULT_UPSTREAM_EDGE=` is set empty; with the shipped edge default the
+`VAULT_UPSTREAM_EDGE=off` (before rc18: set empty); with the shipped edge default the
 list is ignored (previous section).
 
 Stage 2 of the CGNAT fix (WP CORE-FEAT-1,
@@ -1962,6 +1965,6 @@ steamcontent.com` resolves to.
 | `up` fails with `... bind: address already in use` for port 443 | something else on the host owns 443 on the `VAULT_TLS_BIND` address. Use a dedicated address for vault-core (both `VAULT_CORE_BIND` and `VAULT_TLS_BIND`), or leave `VAULT_TLS_BIND` unset. |
 | A burst of `503` from vault-core on cache MISSes; `limiting connections by zone "vault_upstream_total"` in its log, `limit_conn=REJECTED` in the access log | the global cap is too low for the concurrent load (a Steam client plus a prefill). Raise `VAULT_UPSTREAM_MAX_CONNS` (max 64) or lower `VAULT_PREFILL_MAX_THREADS`, recreate vault-core. See ["Upstream edge and connection cap"](#upstream-edge-and-connection-cap). |
 | vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_EDGE` or `VAULT_UPSTREAM_MAX_CONNS` | the edge is not exactly one valid lowercase host name in `*.steamcontent.com` / `*.steamserver.net`, or the cap is not a whole number 1..64, or it is below `VAULT_PREFILL_MAX_THREADS`. The message names the value. Fix the line, recreate vault-core. |
-| MISSes answer 502 with `no live upstreams` or `could not be resolved` for the edge name | the edge name does not resolve (NXDOMAIN) or resolves to vault-core itself (a DNS rewrite loop). Check `dig +short <VAULT_UPSTREAM_EDGE>` from your resolver, use a name from `dig +short lancache.steamcontent.com`, or set `VAULT_UPSTREAM_EDGE=` empty to fall back. |
+| MISSes answer 502 with `no live upstreams` or `could not be resolved` for the edge name | the edge name does not resolve (NXDOMAIN) or resolves to vault-core itself (a DNS rewrite loop). Check `dig +short <VAULT_UPSTREAM_EDGE>` from your resolver, use a name from `dig +short lancache.steamcontent.com`, or set `VAULT_UPSTREAM_EDGE=off` to fall back. |
 | vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_POOL_HOSTS: ...` | the edge list in `.env` breaks a rule: uppercase, a scheme or port, a name outside `*.steamcontent.com` / `*.steamserver.net`, the marker `lancache.steamcontent.com` itself, a duplicate, or more than 4 names. The message names the value and the rule. Fix the line (or empty it = no pool), then `docker compose up -d vault-core`. See ["Upstream keepalive pool"](#upstream-keepalive-pool). |
 | Port 80 already in use on the host | use a dedicated IP, not a different port — see [Port 80](#port-80-and-the-dedicated-ip-question). |

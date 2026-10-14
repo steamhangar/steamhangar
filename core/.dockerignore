@@ -22,3 +22,5 @@ nginx/
 # nginx reads; nginx.conf itself stays excluded.
 !nginx/vault-upstream-pool.conf
 !nginx/vault-upstream-cap.conf
+# D16c: the native generation-0 include, cmp-ed against the library's render.
+!nginx/vault-settings-generation.conf

@@ -13,6 +13,14 @@ A PATCH that sets or clears a risky key needs the query parameter
 value ``"db"`` for "set in Settings" (the shipped web UI and Android app
 read it).
 
+**D16c.** Core keys (``target: "core"``) read vault-core's status file
+(``<cache volume>/logs/settings-applied.json``): a key vault-core's own env
+pins is ``source: "env"``, ``editable: false``, and every core key is
+``env_visible``. The top-level ``core_apply`` (``null`` until vault-core wrote
+the file) carries ``state`` (``applied`` | ``rejected`` | ``none``),
+``generation``, ``applied_generation``, ``reason``, ``updated_at``,
+``written_generation`` (vault-api's own file) and ``pending``.
+
 ``GET`` reports, per key, the effective value, where it came from (``db`` |
 ``env`` | ``default``), the value clearing the override would revert to, when
 a change takes effect (``immediately`` | ``next_sweep`` | ``restart-required``
@@ -95,7 +103,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from vault_api import settings_store
+from vault_api import core_settings, settings_store
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener
@@ -145,6 +153,20 @@ class SettingInfoOut(BaseModel):
     shadowed: bool
 
 
+class CoreApplyOut(BaseModel):
+    """D16c: vault-core's report on the core settings (``settings-applied.json``).
+    ``pending`` is true while vault-api's settings file carries a generation
+    vault-core has neither applied nor rejected yet."""
+
+    state: str
+    generation: int
+    applied_generation: int
+    reason: str
+    updated_at: str
+    written_generation: int | None
+    pending: bool
+
+
 class SettingsOut(BaseModel):
     #: Mirrors ``Settings.settings_readonly`` — true means PATCH answers 403.
     readonly: bool
@@ -155,14 +177,33 @@ class SettingsOut(BaseModel):
     #: ``vault_api.BASE_VERSION`` for a native run without that env.
     server_version: str
     settings: list[SettingInfoOut]
+    #: D16c: ``None`` until vault-core has written its status file.
+    core_apply: CoreApplyOut | None = None
+
+
+def _core_apply(core_status: core_settings.CoreStatus | None, base: Settings) -> CoreApplyOut | None:
+    if core_status is None:
+        return None
+    written = core_settings.written_generation(base.core_settings_file)
+    return CoreApplyOut(
+        state=core_status.state,
+        generation=core_status.generation,
+        applied_generation=core_status.applied_generation,
+        reason=core_status.reason,
+        updated_at=core_status.updated_at,
+        written_generation=written,
+        pending=written is not None and written > core_status.generation,
+    )
 
 
 def _build_response(conn, base: Settings, server_version: str) -> SettingsOut:
-    infos = settings_store.describe_settings(conn, base)
+    core_status = core_settings.read_core_status(core_settings.core_status_path(base.cache_root))
+    infos = settings_store.describe_settings(conn, base, core_status)
     return SettingsOut(
         readonly=base.settings_readonly,
         server_version=server_version,
         settings=[SettingInfoOut(**vars(info)) for info in infos],
+        core_apply=_core_apply(core_status, base),
     )
 
 

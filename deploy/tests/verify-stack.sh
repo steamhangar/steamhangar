@@ -167,6 +167,61 @@ dc() {
     docker compose --env-file "$env_file" -f "$compose_file" -p "$PROJECT" "$@"
 }
 
+# --- D16c helpers: vault-core's settings status file -----------------------------
+# d16c_status: vault-core's /vault/logs/settings-applied.json (empty if none).
+d16c_status() {
+    dc exec -T vault-core cat /vault/logs/settings-applied.json 2>/dev/null | tr -d '\r'
+}
+# d16c_state: "<state> <generation> <applied_generation>" from the status file.
+d16c_state() {
+    d16c_status | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    print(d["state"], d["generation"], d["applied_generation"])
+except Exception:
+    print("none -1 -1")' 2>/dev/null
+}
+# d16c_key <KEY>: "<value> <source>" of one key in the status file.
+d16c_key() {
+    d16c_status | python3 -c 'import json,sys
+try:
+    e = json.load(sys.stdin)["keys"][sys.argv[1]]
+    print(e["value"], e["source"])
+except Exception:
+    print("? ?")' "$1" 2>/dev/null
+}
+# d16c_wait_status <state> <generation|any> <seconds>: poll until the status
+# file says <state> for <generation>; returns 1 on timeout.
+d16c_wait_status() {
+    d16c_i=0
+    while [ "$d16c_i" -lt "$3" ]; do
+        d16c_now=$(d16c_state)
+        case "$2" in
+            any) [ "${d16c_now%% *}" = "$1" ] && return 0 ;;
+            *) [ "$(printf '%s' "$d16c_now" | cut -d' ' -f1-2)" = "$1 $2" ] && return 0 ;;
+        esac
+        d16c_i=$((d16c_i + 1))
+        sleep 1
+    done
+    return 1
+}
+# d16c_written_gen: GENERATION of vault-api's core settings file.
+d16c_written_gen() {
+    dc exec -T vault-api sh -c 'sed -n "s/^GENERATION=//p" /var/lib/vault-settings/core-settings.env' 2>/dev/null | tr -d '\r'
+}
+# d16c_wait_healthy <service> <seconds>: sets $d16c_h to the last health.
+d16c_wait_healthy() {
+    d16c_i=0
+    d16c_h=starting
+    while [ "$d16c_i" -lt "$2" ]; do
+        d16c_h=$(docker inspect --format '{{.State.Health.Status}}' "$(dc ps -q "$1")" 2>/dev/null || echo starting)
+        [ "$d16c_h" = healthy ] && return 0
+        d16c_i=$((d16c_i + 1))
+        sleep 1
+    done
+    return 1
+}
+
 # --- WP SEC-FIX-5 helpers: who may rename names on the cache volume ------------
 # Root (vault-core's start hooks, its nginx master) opens names in /vault,
 # cache/, tmp/ and logs/, so those four must be root:root 0755; uid 101 (the
@@ -725,21 +780,20 @@ assert_eq "1" "$blank_window_key_count" "vault-api: VAULT_SCHEDULE_WINDOW key is
 blank_window_val=$(printf '%s\n' "$api_block_blank_window" | grep 'VAULT_SCHEDULE_WINDOW:' | head -1 | sed -e 's/^[[:space:]]*VAULT_SCHEDULE_WINDOW:[[:space:]]*//' -e 's/"//g')
 assert_eq "" "$blank_window_val" "vault-api: an explicitly blank VAULT_SCHEDULE_WINDOW= renders EMPTY (D16b: not set; the disable spelling is off)"
 
-step "3e-ter. vault-core's VAULT_UPSTREAM_RATE_WINDOW nested default resolves per case (WP TH-1b, ADR-0015)"
-say 'The line is ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}:'
-say 'unset follows the schedule window (and its default), explicitly blank'
-say 'stays blank (= cap around the clock). The static pins in'
-say 'api/tests/test_p1_compose_env_defaults.py check the SYNTAX; this step'
-say 'renders four .env variants (section 3'"'"'s .env plus the lines named) and'
-say 'checks what Compose actually resolves. Same mechanics as 3e-bis. The'
-say 'image itself sets VAULT_UPSTREAM_RATE_WINDOW= (core/Dockerfile), so only'
-say 'a rendered value proves the compose line, not presence in the container.'
+step "3e-ter. vault-core's VAULT_UPSTREAM_RATE_WINDOW renders per case (WP TH-1b; D16c: \${VAR-}, deprecated)"
+say 'The line is ${VAULT_UPSTREAM_RATE_WINDOW-} since D16c: blank or unset'
+say 'renders blank (= not set: vault-core follows the download window from'
+say 'vault-api'"'"'s core settings file), a value (e.g. off) is an env pin. It no'
+say 'longer nests VAULT_SCHEDULE_WINDOW: a schedule window in .env reaches'
+say 'vault-core through the file, not through compose (6i-core, 6s). The static'
+say 'pins in api/tests/test_p1_compose_env_defaults.py check the SYNTAX; this'
+say 'step renders .env variants and checks what Compose actually resolves.'
 # Each case: <label>|<extra .env lines, \n-separated, may be empty>|<expected>
 for rate_window_case in \
-    'nothing set||03:00-07:00' \
-    'VAULT_SCHEDULE_WINDOW= (blank)|VAULT_SCHEDULE_WINDOW=\n|' \
-    'VAULT_SCHEDULE_WINDOW=01:00-02:00|VAULT_SCHEDULE_WINDOW=01:00-02:00\n|01:00-02:00' \
-    'VAULT_UPSTREAM_RATE_WINDOW= (blank) with VAULT_SCHEDULE_WINDOW=01:00-02:00|VAULT_SCHEDULE_WINDOW=01:00-02:00\nVAULT_UPSTREAM_RATE_WINDOW=\n|'
+    'nothing set||' \
+    'VAULT_SCHEDULE_WINDOW=01:00-02:00 (reaches vault-core through the file, not compose)|VAULT_SCHEDULE_WINDOW=01:00-02:00\n|' \
+    'VAULT_UPSTREAM_RATE_WINDOW=off (env pin)|VAULT_UPSTREAM_RATE_WINDOW=off\n|off' \
+    'VAULT_UPSTREAM_RATE_WINDOW= (blank = not set) with VAULT_SCHEDULE_WINDOW=01:00-02:00|VAULT_SCHEDULE_WINDOW=01:00-02:00\nVAULT_UPSTREAM_RATE_WINDOW=\n|'
 do
     rw_label=${rate_window_case%%|*}
     rw_rest=${rate_window_case#*|}
@@ -1151,6 +1205,60 @@ section "4. Stack up (vault-core + vault-api + vault-proxy + vault-runner)"
 # through a separate render of the entrypoint into /tmp.
 printf 'VAULT_MANIFEST_ORACLE=off\n' >> "$env_file"
 say 'Runtime .env adds VAULT_MANIFEST_ORACLE=off (WP UPD-1: no automatic oracle query from this test stack).'
+
+step "4-settings. D16c HARD GATE: the vault-settings volume is seeded 101:101 in BOTH start orders (fresh volume)"
+say 'vault-api mounts vault-settings rw at /var/lib/vault-settings (its image owns'
+say 'that directory 101:101), vault-core mounts it ro + nocopy at /etc/vault-settings'
+say 'and has no depends_on on vault-api, so either may be created first. Order A:'
+say 'vault-core first (its nocopy mount must leave the fresh volume EMPTY), then'
+say 'vault-api, whose mount must still seed it (owner 101:101) so it can write the'
+say 'file; vault-core then applies it WITHOUT a restart. Order B: vault-api first,'
+say 'then vault-core, which applies the file at boot. Each order on a fresh project'
+say '(down -v in between), services started one by one with --no-deps.'
+for d16c_order in core-first api-first; do
+    say ""
+    say "--- order: $d16c_order ---"
+    run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' down -v --remove-orphans"
+    if [ "$d16c_order" = core-first ]; then d16c_first=vault-core; d16c_second=vault-api; else d16c_first=vault-api; d16c_second=vault-core; fi
+    compose_up_or_die "$env_file" up -d --no-deps "$d16c_first"
+    d16c_wait_healthy "$d16c_first" 90 || true
+    assert_eq "healthy" "$d16c_h" "[$d16c_order] $d16c_first is healthy alone"
+    if [ "$d16c_order" = core-first ]; then
+        d16c_ls=$(dc exec -T vault-core sh -c 'ls -A /etc/vault-settings | wc -l' 2>&1 | tr -d '\r ')
+        assert_eq "0" "$d16c_ls" "[$d16c_order] vault-core's nocopy mount left the fresh volume empty"
+        d16c_wait_status none 0 30 || true
+        assert_eq "none 0 0" "$(d16c_state)" "[$d16c_order] vault-core reports 'none' (no settings file yet)"
+    fi
+    compose_up_or_die "$env_file" up -d --no-deps "$d16c_second"
+    d16c_wait_healthy "$d16c_second" 90 || true
+    assert_eq "healthy" "$d16c_h" "[$d16c_order] $d16c_second is healthy"
+    d16c_own=$(dc exec -T vault-api sh -c 'stat -c "%u:%g %a" /var/lib/vault-settings; stat -c "%u:%g %a" /var/lib/vault-settings/core-settings.env; id -u' 2>&1 | tr -d '\r')
+    printf '%s\n' "$d16c_own" | sed 's/^/    vault-api: /'
+    assert_eq "101:101 755
+101:101 644
+101" "$d16c_own" "[$d16c_order] the volume root is 101:101 0755 (seeded from the api image) and vault-api (uid 101) wrote core-settings.env"
+    # touch, not `: >`: a failed redirection on the special builtin `:`
+    # ends a non-interactive sh before the else branch runs (POSIX).
+    d16c_core_sees=$(dc exec -T vault-core sh -c 'head -n 2 /etc/vault-settings/core-settings.env; if touch /etc/vault-settings/.probe 2>/dev/null; then echo WRITABLE; else echo read-only; fi' 2>&1 | tr -d '\r')
+    printf '%s\n' "$d16c_core_sees" | sed 's/^/    vault-core: /'
+    assert_contains "$d16c_core_sees" "# generated by vault-api -- do not edit" "[$d16c_order] vault-core reads vault-api's file"
+    assert_contains "$d16c_core_sees" "read-only" "[$d16c_order] vault-core's mount is read-only"
+    d16c_gen=$(d16c_written_gen)
+    d16c_wait_status applied "$d16c_gen" 60 || true
+    assert_eq "applied $d16c_gen $d16c_gen" "$(d16c_state)" "[$d16c_order] vault-core applied generation $d16c_gen"
+    d16c_hdr=$(curl -s -o /dev/null -D - --max-time 5 "$CORE_URL/health" | tr -d '\r' | sed -n 's/^[Xx]-[Vv]ault-[Ss]ettings-[Gg]eneration: //p')
+    assert_eq "$d16c_gen" "$d16c_hdr" "[$d16c_order] /health serves X-Vault-Settings-Generation $d16c_gen"
+    d16c_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
+    if [ "$d16c_order" = core-first ]; then
+        assert_contains "$d16c_log" "47-vault-settings-watch.sh: settings generation $d16c_gen applied (nginx reloaded" "[$d16c_order] ...by a reload, not a restart"
+        assert_eq "0" "$(docker inspect --format '{{.RestartCount}}' "$(dc ps -q vault-core)")" "[$d16c_order] vault-core was not restarted"
+    else
+        assert_contains "$d16c_log" "15-vault-settings.envsh: settings file: applied, generation $d16c_gen" "[$d16c_order] ...at boot"
+    fi
+done
+run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' down -v --remove-orphans"
+say 'Both orders done; the stack below starts on fresh volumes again.'
+
 compose_up_or_die "$env_file" up -d
 
 say ''
@@ -1653,20 +1761,69 @@ assert_contains "$evpath_defined" "exit=0" "VAULT_EVENT_LOG_PATH is a defined en
 assert_contains "$oracle_defined" "exit=0" "VAULT_MANIFEST_ORACLE is a defined env var inside the running vault-api container"
 assert_contains "$settings_readonly_defined" "exit=0" "VAULT_SETTINGS_READONLY is a defined env var inside the running vault-api container"
 
-step "6i-core. Env-forwarding guard (WP TH-1b): TZ and VAULT_UPSTREAM_RATE_WINDOW reach vault-core's process environment WITH their compose values"
-say 'VALUES, not presence: core/Dockerfile sets VAULT_UPSTREAM_RATE= and'
-say 'VAULT_UPSTREAM_RATE_WINDOW= as image ENV, so a printenv exit code would'
-say 'pass even with the compose lines deleted. The test .env sets neither TZ'
-say 'nor either window variable, so the compose defaults must arrive: TZ=UTC'
-say '(the image sets no TZ) and the window 03:00-07:00 (the image default is'
-say 'blank). VAULT_UPSTREAM_RATE is not checked here: its compose default and'
-say 'the image ENV are both blank, so no value can tell them apart; 3e-ter and'
-say 'the static pins cover its line.'
-run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' exec -T vault-core sh -c 'printenv TZ; echo \"exit=\$?\"; printenv VAULT_UPSTREAM_RATE_WINDOW; echo \"exit=\$?\"'"
+step "6i-core. Env-forwarding guard (WP TH-1b, D16c): TZ reaches vault-core with its compose value; the cap window is the download window"
+say 'VALUES, not presence: TZ=UTC must arrive (the image sets no TZ). Since D16c'
+say 'compose forwards VAULT_UPSTREAM_RATE_WINDOW as ${VAULT_UPSTREAM_RATE_WINDOW-}'
+say '(deprecated, blank here): the window vault-core uses is the effective download'
+say 'window vault-api writes into the core settings file. The test .env sets no'
+say 'window, so vault-core must report 03:00-07:00 from the FILE (vault-api'"'"'s'
+say 'default), not a default of its own, in its status file.'
+run "docker compose --env-file '$env_file' -f '$compose_file' -p '$PROJECT' exec -T vault-core sh -c 'printenv TZ; echo \"exit=\$?\"; cat /etc/nginx/vault-settings.effective'"
 core_tz_val=$(dc exec -T vault-core printenv TZ 2>/dev/null | tr -d '\r')
-core_rate_window_val=$(dc exec -T vault-core printenv VAULT_UPSTREAM_RATE_WINDOW 2>/dev/null | tr -d '\r')
 assert_eq "UTC" "$core_tz_val" "vault-core: TZ inside the running container is the compose default"
-assert_eq "03:00-07:00" "$core_rate_window_val" "vault-core: VAULT_UPSTREAM_RATE_WINDOW inside the running container is the compose default (follows VAULT_SCHEDULE_WINDOW's default), not the image's blank ENV"
+d16c_wait_status applied any 60 || true
+core_window_src=$(d16c_key VAULT_UPSTREAM_RATE_WINDOW)
+assert_eq "03:00-07:00 file" "$core_window_src" "vault-core: the cap window is the download window 03:00-07:00, from vault-api's settings file"
+
+step "6s. D16c: a Settings change reaches vault-core WITHOUT a restart; a rejected file keeps the last good config"
+say 'PATCH /v1/settings upstream_rate=2m -> vault-api writes a new GENERATION ->'
+say 'vault-core'"'"'s watcher renders it into a staging dir, runs nginx -t, swaps,'
+say 'reloads and confirms the generation on /health. Same container, same master'
+say 'pid. Then a file vault-core must refuse (VAULT_UPSTREAM_RATE=0, written by'
+say 'hand as uid 101 the way a buggy writer could): status "rejected", the live'
+say 'config and the /health generation stay. Finally the rate is cleared again.'
+d16c_started=$(docker inspect --format '{{.State.StartedAt}}' "$(dc ps -q vault-core)")
+d16c_pid=$(dc exec -T vault-core cat /var/run/nginx.pid 2>/dev/null | tr -d '\r')
+d16c_patch=$(curl -s --max-time 10 -X PATCH "$API_URL/v1/settings" -H "X-Api-Key: $TEST_API_KEY" \
+    -H 'Content-Type: application/json' -d '{"upstream_rate": "2m"}')
+assert_contains "$d16c_patch" '"key":"upstream_rate"' "PATCH upstream_rate=2m accepted"
+d16c_gen=$(d16c_written_gen)
+say "    vault-api wrote generation $d16c_gen"
+d16c_wait_status applied "$d16c_gen" 60 || true
+assert_eq "applied $d16c_gen $d16c_gen" "$(d16c_state)" "vault-core applied generation $d16c_gen"
+assert_eq "2m file" "$(d16c_key VAULT_UPSTREAM_RATE)" "vault-core reports upstream_rate 2m from the file"
+d16c_bucket=$(dc exec -T vault-core sh -c 'grep -c "^    1 2097152;$" /etc/nginx/vault-upstream-rate.conf' 2>/dev/null | tr -d '\r')
+assert_eq "1" "$d16c_bucket" "the live rate include caps at 2097152 B/s"
+d16c_hdr=$(curl -s -o /dev/null -D - --max-time 5 "$CORE_URL/health" | tr -d '\r' | sed -n 's/^[Xx]-[Vv]ault-[Ss]ettings-[Gg]eneration: //p')
+assert_eq "$d16c_gen" "$d16c_hdr" "/health serves the new generation"
+assert_eq "$d16c_started" "$(docker inspect --format '{{.State.StartedAt}}' "$(dc ps -q vault-core)")" "vault-core was not restarted"
+assert_eq "$d16c_pid" "$(dc exec -T vault-core cat /var/run/nginx.pid 2>/dev/null | tr -d '\r')" "same nginx master pid (a reload)"
+d16c_get=$(curl -s --max-time 10 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/settings")
+assert_contains "$d16c_get" '"core_apply":{"state":"applied"' "GET /v1/settings reports core_apply applied"
+assert_contains "$d16c_get" '"pending":false' "...and nothing pending"
+
+d16c_bad=$((d16c_gen + 1))
+dc exec -T vault-api sh -c "printf '%s\n' '# generated by vault-api -- do not edit' 'GENERATION=$d16c_bad' 'VAULT_UPSTREAM_RATE=0' 'VAULT_UPSTREAM_RATE_WINDOW=03:00-07:00' > /var/lib/vault-settings/.bad && mv /var/lib/vault-settings/.bad /var/lib/vault-settings/core-settings.env"
+d16c_wait_status rejected "$d16c_bad" 60 || true
+assert_eq "rejected $d16c_bad $d16c_gen" "$(d16c_state)" "vault-core rejected generation $d16c_bad and keeps $d16c_gen live"
+assert_contains "$(d16c_status)" "27-vault-upstream-rate.sh: FATAL: VAULT_UPSTREAM_RATE=?0? starts with 0" "the status names the hook and the value"
+d16c_bucket=$(dc exec -T vault-core sh -c 'grep -c "^    1 2097152;$" /etc/nginx/vault-upstream-rate.conf' 2>/dev/null | tr -d '\r')
+assert_eq "1" "$d16c_bucket" "the live rate include still caps at 2097152 B/s (last good config)"
+d16c_hdr=$(curl -s -o /dev/null -D - --max-time 5 "$CORE_URL/health" | tr -d '\r' | sed -n 's/^[Xx]-[Vv]ault-[Ss]ettings-[Gg]eneration: //p')
+assert_eq "$d16c_gen" "$d16c_hdr" "/health still serves generation $d16c_gen"
+d16c_get=$(curl -s --max-time 10 -H "X-Api-Key: $TEST_API_KEY" "$API_URL/v1/settings")
+assert_contains "$d16c_get" '"core_apply":{"state":"rejected"' "GET /v1/settings reports core_apply rejected"
+
+d16c_patch=$(curl -s --max-time 10 -X PATCH "$API_URL/v1/settings" -H "X-Api-Key: $TEST_API_KEY" \
+    -H 'Content-Type: application/json' -d '{"upstream_rate": null}')
+d16c_gen=$(d16c_written_gen)
+say "    rate cleared: vault-api wrote generation $d16c_gen"
+d16c_wait_status applied "$d16c_gen" 60 || true
+assert_eq "applied $d16c_gen $d16c_gen" "$(d16c_state)" "vault-core applied generation $d16c_gen (rate cleared)"
+assert_eq "off default" "$(d16c_key VAULT_UPSTREAM_RATE)" "upstream_rate is back to the default (off)"
+d16c_nocap=$(dc exec -T vault-core sh -c 'grep -c "^    default 0;$" /etc/nginx/vault-upstream-rate.conf' 2>/dev/null | tr -d '\r')
+assert_eq "1" "$d16c_nocap" "the live rate include is uncapped again"
+assert_eq "0" "$(docker inspect --format '{{.RestartCount}}' "$(dc ps -q vault-core)")" "vault-core restart count is still 0"
 
 step "6v. WP VER-1: the running containers carry the build identity, and vault-api serves it"
 say 'printenv inside each running container (the process environment, not the'
@@ -2303,10 +2460,19 @@ printf '%s\n' "$split" | grep -E 'FATAL|st_dev|exit=' | sed 's/^/    /'
 assert_contains "$split" "DIFFERENT" "a split cache//tmp mount is refused at boot"
 assert_not_contains "$split" "exit=0" "...and exits non-zero"
 
-step "8b. An empty VAULT_RESOLVER"
-emptyres=$(docker run --rm -v "$PROJECT-scratch:/vault" -e VAULT_RESOLVER= "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
-printf '%s\n' "$emptyres" | grep -E 'FATAL|exit=' | sed 's/^/    /'
-assert_contains "$emptyres" "VAULT_RESOLVER is empty" "an empty resolver is refused"
+step "8b. An empty VAULT_RESOLVER is 'not set': the default 1.1.1.1 applies (D16c, Q7)"
+say 'Before rc18 compose supplied 1.1.1.1 and an empty value stopped the boot; now'
+say 'compose forwards ${VAULT_RESOLVER-} and 15-vault-settings.envsh supplies the'
+say 'default, so blank and whitespace-only render 1.1.1.1 (an `nginx -t` run, so the'
+say 'container exits). 40- still refuses an empty value if the hook chain were bypassed'
+say '(core/tests/test-settings-grammar.sh).'
+for emptyval in '' '   '; do
+    emptyres=$(docker run --rm -v "$PROJECT-scratch:/vault" -e "VAULT_RESOLVER=$emptyval" "ghcr.io/steamhangar/vault-core:$TAG" nginx -t -p /vault -c /etc/nginx/nginx.conf 2>&1; echo "exit=$?")
+    printf '%s\n' "$emptyres" | grep -E 'VAULT_RESOLVER|FATAL|resolver \(|exit=' | sed 's/^/    /'
+    assert_contains "$emptyres" "15-vault-settings.envsh: VAULT_RESOLVER=1.1.1.1 (default)" "VAULT_RESOLVER='$emptyval' is not set: 15- supplies the default"
+    assert_contains "$emptyres" "upstream resolver (ADR-0001 req 4): 1.1.1.1" "...and the preflight checks 1.1.1.1"
+    assert_contains "$emptyres" "exit=0" "...and nginx -t passes"
+done
 
 step "8c. A VAULT_RESOLVER carrying an nginx-config injection"
 inj=$(docker run --rm -v "$PROJECT-scratch:/vault" -e 'VAULT_RESOLVER=1.1.1.1; return 200 "pwned";' "ghcr.io/steamhangar/vault-core:$TAG" 2>&1; echo "exit=$?")
@@ -2770,15 +2936,16 @@ assert_eq "" "$probe_ans" "the boot probe's name (cache2-ams1.steamcontent.com) 
 
 step "10b. vault-core recreated with VAULT_RESOLVER=$POOL_RESOLVER_IP and the pool list, attached to $POOL_NET at $POOL_CORE_IP"
 say "Env: the stack's current env (section 9's bind-mode env when 9b came up,"
-say 'else the section-3 env) plus VAULT_RESOLVER, VAULT_UPSTREAM_EDGE= (EMPTY: the compose default is edge'
-say 'mode since CORE-FIX-4c, so legacy must be selected explicitly) and VAULT_UPSTREAM_POOL_HOSTS='
+say 'else the section-3 env) plus VAULT_RESOLVER, VAULT_UPSTREAM_EDGE=off (the default is edge'
+say 'mode since CORE-FIX-4c, so legacy must be selected explicitly; `off` since D16c, a blank'
+say 'value now means "not set") and VAULT_UPSTREAM_POOL_HOSTS='
 say '"fake1.steamcontent.com loop.steamcontent.com". fake2 is NOT listed on'
 say 'purpose: it is the unlisted control of 10d.'
 pool_base_env=$env_file
 [ "${bind_up:-no}" = yes ] && pool_base_env=$bind_live_env_file
 pool_env="$work/verify-pool.env"
 cp "$pool_base_env" "$pool_env"
-printf 'VAULT_RESOLVER=%s\nVAULT_UPSTREAM_EDGE=\nVAULT_UPSTREAM_POOL_HOSTS=fake1.steamcontent.com loop.steamcontent.com\n' "$POOL_RESOLVER_IP" >> "$pool_env"
+printf 'VAULT_RESOLVER=%s\nVAULT_UPSTREAM_EDGE=off\nVAULT_UPSTREAM_POOL_HOSTS=fake1.steamcontent.com loop.steamcontent.com\n' "$POOL_RESOLVER_IP" >> "$pool_env"
 pool_recreate_core "$pool_env"
 say "vault-core health: $core_h"
 assert_eq "healthy" "$core_h" "vault-core is healthy with the fake resolver and the pool list"
@@ -2895,7 +3062,7 @@ say 'the pooled group: at least 1.0 s (2 MiB at 1 MiB/s is ~2 s; uncapped, the'
 say 'same transfer over the bridge is far below 1 s -- measured first, printed).'
 say 'Only a LOWER bound is asserted: a slow runner can only make it slower, so'
 say 'this cannot fail for host speed, only for a missing cap. The window is set'
-say "blank (cap around the clock, 3e-ter), else the cap would depend on the"
+say "to off (cap around the clock, D16c; blank would follow the download window), else the cap would depend on the"
 say "runner's local time of day."
 big_name=$(printf 'd%039d' 1)
 uncapped=$(pool_get fake1.steamcontent.com "/depot/$POOL_DEPOT_BIG/chunk/$big_name" "$work/pool-uncapped.bin")
@@ -2905,7 +3072,7 @@ assert_contains "$uncapped" "bytes=$POOL_BIG_BYTES" "...and delivers all $POOL_B
 
 pool_rate_env="$work/verify-pool-rate.env"
 cp "$pool_env" "$pool_rate_env"
-printf 'VAULT_UPSTREAM_RATE=1m\nVAULT_UPSTREAM_RATE_WINDOW=\n' >> "$pool_rate_env"
+printf 'VAULT_UPSTREAM_RATE=1m\nVAULT_UPSTREAM_RATE_WINDOW=off\n' >> "$pool_rate_env"
 pool_recreate_core "$pool_rate_env"
 say "vault-core health: $core_h"
 assert_eq "healthy" "$core_h" "vault-core is healthy with the cap AND the pool configured"
