@@ -182,3 +182,37 @@ test("MUTATION TARGET: every demo row's offline_after is last_reported_at + 2 x 
     assert.equal(r.presence, expectedPresence, `${r.client_id}: presence agrees with offline_after`);
   }
 });
+
+// ---- WP DIST-1b: GET /v1/dist (DistOut / ArtifactOut, WP DIST-1a) ----------
+
+const distRouterSrc = readFileSync(path.join(apiDir, "routers", "dist.py"), "utf8");
+const distSrc = readFileSync(path.join(apiDir, "dist.py"), "utf8");
+
+test("MUTATION TARGET: demo GET /v1/dist keys equal DistOut / ArtifactOut, source is one of the Literal's members", async () => {
+  const index = await demoRequest("GET", "/v1/dist");
+  const outer = modelFields(distRouterSrc, "DistOut");
+  assert.deepEqual(sortedKeys(index), [...outer].sort(), driftMessage("demo /v1/dist", "DistOut", outer, "update handleGetDist in demo-data.js"));
+  const inner = modelFields(distRouterSrc, "ArtifactOut");
+  const sources = literalMembers(distRouterSrc, "ArtifactOut", "source");
+  assert.ok(index.artifacts.length > 0);
+  for (const a of index.artifacts) {
+    assert.deepEqual(sortedKeys(a), [...inner].sort(), driftMessage(`demo /v1/dist artifact ${a.id}`, "ArtifactOut", inner, "update handleGetDist in demo-data.js"));
+    assert.ok(sources.includes(a.source), `${a.source} not in ArtifactOut.source`);
+    assert.equal(a.url, a.local_url, "a baked file is served locally");
+    assert.match(a.sha256, /^[0-9a-f]{64}$/);
+  }
+});
+
+test("demo GET /v1/dist mirrors a release vault: the about version, the server's ten ids and names, the alias", async () => {
+  const index = await demoRequest("GET", "/v1/dist");
+  const about = (await demoRequest("GET", "/v1/about")).components.find((c) => c.name === "vault-api");
+  assert.equal(index.version, about.version, "same version as demo /v1/about");
+  assert.equal(index.release, true);
+  // The ids in the server's order, read from vault_api/dist.py's specs.
+  const ids = [...distSrc.matchAll(/ArtifactSpec\(\s*"([a-z0-9-]+)"/g)].map((m) => m[1]);
+  assert.ok(ids.length >= 10, `ids read from dist.py: [${ids.join(", ")}] — GRAMMAR drift if fewer than ten: widen this regex`);
+  assert.deepEqual(index.artifacts.map((a) => a.id), ids, "VALUE drift: the server's file list changed, update DEMO_DIST_FILES");
+  assert.equal(index.apk_alias_url, "/dist/steamhangar-app.apk");
+  assert.match(distSrc, /APK_ALIAS = "steamhangar-app\.apk"/);
+  assert.equal(index.artifacts[0].name, `steamhangar-app-v${index.version}.apk`);
+});

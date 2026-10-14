@@ -21,16 +21,20 @@
  *     as install-task.ps1 does) before anything is downloaded;
  *  2. downloads `vault-agent-v<version>-windows-amd64.exe`,
  *     `install-task.ps1`, `run-vault-agent.ps1`, `uninstall-task.ps1` and
- *     `SHA256SUMS` from the GitHub Release `v<version>` (asset names as
- *     .github/workflows/publish.yml's agent-binaries job writes them: the
- *     tag is "v" + the version vault-api reports, the exe carries the tag)
- *     into `%LOCALAPPDATA%\VaultAgent\release-v<version>` (under the user
+ *     `SHA256SUMS` (asset names as .github/workflows/publish.yml's
+ *     agent-binaries job writes them: the tag is "v" + the version vault-api
+ *     reports, the exe carries the tag) from `downloadBase`: the vault's own
+ *     `<agent server URL>/dist` when `GET /v1/dist` says the files are baked
+ *     into the image, else the GitHub Release `v<version>` (WP DIST-1b,
+ *     AGENT-DIST-1; the choice is lib/dist-downloads.js
+ *     `agentDownloadPlan`), into `%LOCALAPPDATA%\VaultAgent\release-v<version>` (under the user
  *     profile; agent/README.md: a folder under C:\ would inherit an ACL that
  *     lets every local user swap the binary);
  *  3. checks all four files against `SHA256SUMS` with `Get-FileHash` and
  *     stops before installing anything on a mismatch. Honest limit: the sums
- *     come from the same release, so this catches a broken or swapped
- *     download, not a compromised release;
+ *     come from the same place as the files (the vault serves the
+ *     release's own SHA256SUMS), so this catches a broken or swapped
+ *     download, not a compromised release or vault;
  *  4. `Unblock-File`s them, copies the exe to the VERSIONED path
  *     `%LOCALAPPDATA%\VaultAgent\vault-agent-v<version>.exe` (review
  *     finding 4: a re-install of another version never overwrites an exe
@@ -223,14 +227,22 @@ function keySourceLines() {
   ];
 }
 
+/** The GitHub Release download base of a version (no trailing slash). */
+export function releaseDownloadBase(version) {
+  return `${RELEASE_DOWNLOAD_BASE}/v${version}`;
+}
+
 /**
  * The install command. It takes no key: see the module header.
  *
- * @param {{version: string, serverUrl: string}} args
+ * @param {{version: string, serverUrl: string, downloadBase?: string}} args
+ *   `downloadBase`: where the files are fetched from, no trailing slash
+ *   (default: the GitHub Release of `version`).
  * @returns {string}
  */
-export function windowsInstallSnippet({ version, serverUrl }) {
+export function windowsInstallSnippet({ version, serverUrl, downloadBase }) {
   const assets = releaseAssets(version);
+  const base = downloadBase || releaseDownloadBase(version);
   const lines = [
     // ONE top-level statement (coordinator must-fix): a console that types a
     // multi-line paste line by line runs every complete statement as it
@@ -248,7 +260,7 @@ export function windowsInstallSnippet({ version, serverUrl }) {
     `$version = ${psQuote(version)}`,
     `$serverUrl = ${psQuote(serverUrl)}`,
     ...keySourceLines(),
-    `$base = ${psQuote(`${RELEASE_DOWNLOAD_BASE}/${assets.tag}`)}`,
+    `$base = ${psQuote(base)}`,
     `$exeName = ${psQuote(assets.exe)}`,
     "$dir = Join-Path $env:LOCALAPPDATA 'VaultAgent'",
     "$kit = Join-Path $dir ('release-v' + $version)",
@@ -289,6 +301,70 @@ export function windowsInstallSnippet({ version, serverUrl }) {
     `Start-ScheduledTask -TaskName ${psQuote(AGENT_TASK_NAME)}`,
     "Write-Host 'vault-agent is installed and its first report has started. You can close this window.'",
     "}",
+  ];
+  return lines.join("\n");
+}
+
+/** Linux release asset names for a version (publish.yml agent-binaries). */
+export function linuxReleaseAssets(version) {
+  return {
+    amd64: `vault-agent-v${version}-linux-amd64`,
+    arm64: `vault-agent-v${version}-linux-arm64`,
+    units: ["vault-agent-report.service", "vault-agent-report.timer"],
+    sums: "SHA256SUMS",
+  };
+}
+
+/**
+ * A POSIX shell single-quoted literal: inside one nothing is special but
+ * the quote itself, which is closed, escaped and reopened.
+ * @param {string} value
+ */
+export function shQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Linux / SteamOS (WP DIST-1b): a download-and-check command, NOT an
+ * installer. The systemd user-unit install needs an env file with the key
+ * and the unit edits agent/README.md describes; that stays the README's
+ * job (a real installer is the post-v0.1.0 follow-up of AGENT-DIST-1). The
+ * command fetches the binary for this machine's architecture plus the two
+ * systemd units and SHA256SUMS from `downloadBase` into
+ * `~/.local/share/vault-agent/release-v<version>`, checks the three files
+ * against SHA256SUMS (same rule as the Windows command: a file without a
+ * line, or with a different sum, stops it) and marks the binary
+ * executable. It runs in a subshell `( ... )`, so `set -eu` and `exit`
+ * never close the operator's terminal. Contains no key.
+ *
+ * @param {{version: string, downloadBase?: string}} args
+ * @returns {string}
+ */
+export function linuxDownloadSnippet({ version, downloadBase }) {
+  const assets = linuxReleaseAssets(version);
+  const base = downloadBase || releaseDownloadBase(version);
+  const lines = [
+    "(",
+    `# SteamHangar: download and check vault-agent ${version} for this Linux user.`,
+    "set -eu",
+    `base=${shQuote(base)}`,
+    `dir="$HOME/.local/share/vault-agent/release-v"${shQuote(version)}`,
+    'case "$(uname -m)" in',
+    `  x86_64|amd64) bin=${shQuote(assets.amd64)} ;;`,
+    `  aarch64|arm64) bin=${shQuote(assets.arm64)} ;;`,
+    '  *) echo "No vault-agent build for $(uname -m)." >&2; exit 1 ;;',
+    "esac",
+    'mkdir -p "$dir"',
+    'cd "$dir"',
+    `for n in "$bin" ${assets.units.map(shQuote).join(" ")} ${shQuote(assets.sums)}; do curl -fsSL -o "$n" "$base/$n"; done`,
+    `for n in "$bin" ${assets.units.map(shQuote).join(" ")}; do`,
+    `  want=$(awk -v n="$n" '{ f = $2; sub(/^\\*/, "", f); if (f == n) print tolower($1) }' ${shQuote(assets.sums)})`,
+    `  got=$(sha256sum "$n" | cut -d ' ' -f 1)`,
+    '  if [ -z "$want" ] || [ "$want" != "$got" ]; then echo "SHA256 check failed for $n." >&2; exit 1; fi',
+    "done",
+    'chmod +x "$bin"',
+    'echo "vault-agent is downloaded and checked in $dir. Install it as agent/README.md describes."',
+    ")",
   ];
   return lines.join("\n");
 }

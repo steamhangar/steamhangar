@@ -3833,3 +3833,38 @@ ignoring the window.
   extra line. Not measured with Roboto.
 - The Android twin and the `partial`/`unverified` status kinds on Android
   are not part of this package.
+
+### WP DIST-1b — app and agent downloads from the vault ("Add a device")
+
+Clients → "Add a device" reads `GET /v1/dist` (DIST-1a) once per open.
+Phone: "Download app" plus a QR code of the APK address, outside the Show
+gate (not a secret): page origin + `/dist/steamhangar-app.apk` when baked,
+the GitHub release asset of the same version otherwise, an honest note on
+a dev server. The pairing QR follows behind its Show button. Windows: the
+install command fetches from `<agent address>/dist` when every file it
+needs is baked, else from the GitHub release; SHA256SUMS check unchanged.
+Linux / SteamOS: a new download-and-check shell command (no installer, no
+key) from the same source; the install stays in agent/README.md. Demo
+mode: a fake index of a release vault with everything baked, so the app
+download renders; the pairing options stay hidden.
+
+- `dist-downloads.test.js` (new, 13): URL selection local / release / dev
+  none for app and agent, no mixing on a partial bake, fail-closed on a
+  path off `/dist/`, a foreign or other-version release URL, a renamed
+  file, a malformed index; the Linux command RUN in `sh` with a fake
+  `curl` (good sums pass and chmod; a tampered file or a missing sum line
+  stops before chmod; skipped on Windows).
+- `add-device-wiring.test.js` (+7, About replaced by `/v1/dist`): baked
+  APK button and QR (path compared with `encodeQrText` of the URL), release
+  fallback, dev note, Windows local base following the agent address,
+  Linux local / release / dev, demo download without a request, no index
+  without a key; guards A/B re-pinned on the index request.
+- `demo-data-shape-guard.test.js` (+2): demo `/v1/dist` keys equal
+  `DistOut` / `ArtifactOut`, ids in `artifact_specs` order, version equal
+  to demo `/v1/about`.
+
+Mutations killed: page origin instead of the agent address; alias
+ignored; name check off; `local_base` prefix check off; demo block not
+attached; guard B removed; release-URL pin removed. Equivalent, survives:
+dropping `[ -z "$want" ]` in the Linux check (an empty sum never equals a
+computed one, so the file still fails).
