@@ -278,7 +278,7 @@ class LibraryScreenshotTest {
         val grid = layout != LibraryLayout.LIST
         if (grid) {
             assertTrue("no capsule pills rendered", pills.isNotEmpty())
-            assertTrue("no update badge rendered (Glasswing: flagged and Updating)", badges.isNotEmpty())
+            assertTrue("no update badge rendered (Starfall Odyssey: flagged and Updating)", badges.isNotEmpty())
             for (badge in badges) {
                 assertEquals("update badge spoken label", UPDATE_BADGE_FULL, badge.config.getOrNull(SemanticsProperties.ContentDescription)?.single())
             }
@@ -323,7 +323,7 @@ class LibraryScreenshotTest {
     }
 
     /**
-     * WP UPD-6, in every profile: the cached, flagged Starfall Odyssey card
+     * WP UPD-6, in every profile: the cached, flagged Lighthouse Keeper card
      * says "Update available" as its status word (no "Current" for it), and
      * its status icon speaks the same word. The badge is not counted here:
      * it is found by [UPDATE_BADGE_TAG].
@@ -333,7 +333,7 @@ class LibraryScreenshotTest {
             .onAllNodes(SemanticsMatcher("text is \"$UPDATE_BADGE_FULL\"") { it.text() == UPDATE_BADGE_FULL }, useUnmergedTree = true)
             .fetchSemanticsNodes()
             .filterNot { it.config.getOrNull(SemanticsProperties.TestTag) == UPDATE_BADGE_TAG }
-        assertTrue("no card status word reads '$UPDATE_BADGE_FULL' (Starfall Odyssey is cached and flagged)", words.isNotEmpty())
+        assertTrue("no card status word reads '$UPDATE_BADGE_FULL' (the Lighthouse Keeper game is cached and flagged)", words.isNotEmpty())
         val icons = composeRule
             .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
             .fetchSemanticsNodes()
