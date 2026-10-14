@@ -3656,3 +3656,31 @@ removed; `mergeJobLists` sorted by id instead of keeping the store order
 - The History fetch is one page of 200 rows (the API maximum, no paging).
 - An old server (before D15b) ignores `?range=` on `/v1/jobs`; the client
   filter still applies to whatever comes back.
+
+#### Review fixes (D15c round 1)
+
+- Merged with rc17 (UPD-6): Downloads reads heading, bulk bar, statistics
+  header, Active, Paused, Updates available, Queue, History.
+- No figures, no range selector: hidden on Downloads when `headerTiles()`
+  has nothing (feed disabled, 404) and on Clients when the feed is
+  disabled or the endpoint is missing; while an answer is pending the last
+  verdict holds (a range click never hides its own control). The one-line
+  note stays.
+- An all-zero series draws no graph.
+- A failed refresh after an answer keeps the old figures/cards and the note
+  reads "Couldn't refresh: …" (`refreshFailedText`, `joinNotes`).
+- "Hit rate" is `byte_hit_rate` ("Share of bytes served from the cache …"),
+  the base "Saved by the cache" uses.
+- Clients wording: no "yet" that promises self-healing; the agentless note
+  no longer tells the user to install an agent.
+
+Tests: `downloads-stats-wiring.test.js` +2 (flat series, refresh note) and
+range-hidden pins in the ok/disabled/404 cases (request and byte hit rates
+now differ in the fixture); `clients-view-wiring.test.js` +1 (refresh note)
+and range-hidden pins (ok, disabled incl. a pending re-mount, 404);
+`traffic-view.test.js` +2 (byte hit rate, note helpers);
+`clients-page.test.js` +1 (wording). Suite 1516/1516.
+
+Mutations, all killed: range hide removed (Downloads, Clients); the
+Clients verdict never set; the zero-graph check removed; the refresh note
+dropped (Downloads, Clients); the tile back on `hit_rate`.

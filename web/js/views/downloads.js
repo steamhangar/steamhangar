@@ -107,7 +107,9 @@ import {
   headerTiles,
   isRange,
   jobSpeedText,
+  joinNotes,
   mergeJobLists,
+  refreshFailedText,
   seriesGeometry,
   seriesLabel,
   seriesStartText,
@@ -210,7 +212,7 @@ const state = {
 /** WP D15c: the statistics header's last answer for `range`
  * (`{throughput, series}`), and the History filter's fetched rows. Module
  * state, so a re-mount keeps the chosen ranges. */
-const traffic = { range: "24h", throughput: null, series: null, error: null, unsupported: false };
+const traffic = { range: "24h", throughput: null, series: null, error: null, unsupported: false, noFigures: false };
 const history = { range: "all", jobs: [], gen: 0 };
 
 /** WP D15c: the history fetch's page size (the API's maximum; no paging). */
@@ -1247,6 +1249,7 @@ const trafficPoll = createViewPoll({
     traffic.series = answer.series;
     traffic.error = null;
     traffic.unsupported = false;
+    traffic.noFigures = headerTiles(answer.throughput) === null;
     paintStats();
     paintJobSpeeds();
   },
@@ -1256,6 +1259,7 @@ const trafficPoll = createViewPoll({
       // (an upgrade restarts vault-api; the next visit to this view asks
       // again), so the poll stops here.
       traffic.unsupported = true;
+      traffic.noFigures = true;
       trafficPoll.stop();
     } else {
       traffic.error = errorText(err);
@@ -1289,10 +1293,15 @@ function paintStats() {
   let note = null;
   if (traffic.unsupported) note = FEED_TEXT.unsupported;
   else if (traffic.error && !t) note = `Could not load the statistics: ${traffic.error}`;
-  else if (t) note = feedNote(t);
+  else if (t) note = joinNotes(traffic.error ? refreshFailedText(traffic.error) : null, feedNote(t));
   else note = "Loading statistics…";
   els.statsNote.textContent = note || "";
   els.statsNote.hidden = !note;
+  // No figures (feed disabled, or a server without the endpoints): no
+  // range to choose either, the note stands alone. While an answer is
+  // pending the last known verdict holds, so a range click never hides
+  // the control it came from.
+  els.statsRange.hidden = traffic.noFigures;
 
   const tiles = traffic.unsupported ? null : headerTiles(t);
   els.statsGrid.replaceChildren();
@@ -1333,8 +1342,9 @@ function paintGraph() {
   const show = !traffic.unsupported && s && feedState(s) !== "disabled" && s.range === traffic.range;
   const geo = show ? seriesGeometry(s.points, { width: GRAPH_W, height: GRAPH_H }) : null;
   els.graph.replaceChildren();
-  els.graph.hidden = !geo;
-  if (!geo) return;
+  // An all-zero series is a flat line on the floor: nothing to show.
+  els.graph.hidden = !geo || geo.maxBytesPerSecond === 0;
+  if (els.graph.hidden) return;
   const svg = svgEl("svg", {
     viewBox: `0 0 ${GRAPH_W} ${GRAPH_H}`,
     preserveAspectRatio: "none",
@@ -1467,6 +1477,7 @@ function buildSection() {
   graph.className = "tgraph";
   graph.dataset.role = "stats-graph";
   graph.hidden = true;
+  statsRange.el.hidden = traffic.noFigures;
   stats.append(statsRange.el, statsNote, statsGrid, graph);
 
   const activeHeading = sectionHeading("Active");
@@ -1541,6 +1552,7 @@ function buildSection() {
     queueBody,
     queueHint,
     historyBody,
+    statsRange: statsRange.el,
     statsNote,
     statsGrid,
     graph,

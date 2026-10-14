@@ -49,7 +49,7 @@ export function clientName(client) {
 export function clientKindText(client) {
   if (!isAgentClient(client)) return "No agent · seen in the cache log";
   const addrs = Array.isArray(client.addresses) ? client.addresses.filter(Boolean) : [];
-  return addrs.length ? `vault-agent · ${addrs.join(", ")}` : "vault-agent · no address in the cache log yet";
+  return addrs.length ? `vault-agent · ${addrs.join(", ")}` : "vault-agent · no address in the cache log";
 }
 
 /** Connection chip: word and chip class (the `.pchip` vocabulary). */
@@ -151,7 +151,7 @@ export function clientsSummaryText(clients) {
 
 /** Note under the list, for the agentless rows. */
 export const AGENTLESS_NOTE =
-  "Machines without vault-agent show their address and cache traffic only. Install the agent on a PC (Add a device, below) to see its name and installed games.";
+  "Machines without vault-agent show their address and cache traffic only. A PC with vault-agent can also show up here by its address until the server can match the two.";
 
 /** Empty list: nothing reported and nothing in the cache log. */
-export const NO_CLIENTS_TEXT = "No clients yet. A machine appears here once it loads through the cache or runs vault-agent.";
+export const NO_CLIENTS_TEXT = "No clients to show. A machine appears here once it loads through the cache or runs vault-agent.";

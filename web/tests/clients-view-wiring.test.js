@@ -10,6 +10,8 @@
  *   - the range selector refetches with the new range and an answer for the
  *     old range is dropped (gated fetch);
  *   - a 404 (server older than D15b) shows the "update vault-api" note;
+ *   - no statistics (feed disabled, 404): the range selector is hidden;
+ *   - a failed refresh after an answer keeps the cards and says so;
  *   - the poll stops when the view is left;
  *   - the nav has a Clients button right after Library (index.html).
  *
@@ -81,7 +83,7 @@ globalThis.fetch = async (url) => {
     const range = u.searchParams.get("range");
     server.calls.push(range);
     if (server.gate) await server.gate;
-    if (server.status !== 200) return respond(server.status, { detail: "Not Found" });
+    if (server.status !== 200) return respond(server.status, { detail: server.status === 404 ? "Not Found" : "database is locked" });
     return respond(200, overview(range, server.state));
   }
   if (["/v1/clients", "/v1/jobs", "/v1/games"].includes(u.pathname)) return respond(200, []);
@@ -148,6 +150,7 @@ test("MUTATION TARGET: one card per client; the agent's lines, and the address n
   assert.equal(text(b, '[data-role="client-kind"]'), "No agent · seen in the cache log");
   assert.equal(b.querySelector('[data-role="installed"]'), null, "no installed line for an address");
   assert.equal(text(s, '[data-role="clients-sub"]'), "2 clients · 1 connected");
+  assert.equal(s.querySelector('[data-role="clients-range"]').hidden, false, "range selector shown with figures");
   assert.equal(s.querySelector('[data-role="clients-note"]').hidden, true, "no note when the feed is ok");
   assert.equal(s.querySelector('[data-role="agentless-note"]').hidden, false);
 });
@@ -164,11 +167,24 @@ test("MUTATION TARGET: feed disabled — the note, and no stats/recent lines (ne
   assert.equal(a.querySelector('[data-role="recent"]'), null);
   assert.equal(text(a, '[data-role="loading-now"]'), "Loading now: —");
   assert.equal(text(a, '[data-role="installed"]'), "2 games installed", "agent presence and games still shown");
+  assert.equal(s.querySelector('[data-role="clients-range"]').hidden, true, "no figures, no range selector");
+  // A re-mount while the next answer is pending keeps the last verdict
+  // (no flash of the selector), and an ok answer brings it back.
+  server.state = "ok";
+  let release;
+  server.gate = new Promise((r) => (release = r));
+  const s2 = await mount();
+  await until(() => server.calls.length >= 2, "second fetch held");
+  assert.equal(s2.querySelector('[data-role="clients-range"]').hidden, true, "still hidden while pending");
+  release();
+  await until(() => s2.querySelector('[data-role="clients-range"]').hidden === false, "shown once figures exist");
 });
 
 test("feed stale — the note says why, loading now is a dash, totals stay", async () => {
   server.state = "stale";
   const s = await mount();
+  // The last answer (module state) paints first; wait for the stale one.
+  await until(() => /out of date/.test(text(s, '[data-role="clients-note"]') || ""), "stale answer");
   await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
   assert.match(text(s, '[data-role="clients-note"]'), /out of date/);
   assert.equal(text(card(s, "agent:gaming-pc"), '[data-role="loading-now"]'), "Loading now: —");
@@ -211,7 +227,22 @@ test("MUTATION TARGET: a server without the endpoint (404) gets the update note,
   await until(() => s.querySelector('[data-role="clients-note"]').hidden === false, "note");
   assert.equal(text(s, '[data-role="clients-note"]'), "This server does not report traffic statistics yet. Update vault-api to see them.");
   assert.equal(s.querySelectorAll(".clcard").length, 0);
+  assert.equal(s.querySelector('[data-role="clients-range"]').hidden, true, "no range selector for an old server");
   assert.equal(s.querySelector('[data-role="open-pcs"]') === null, false, "PC management still there");
+});
+
+test("MUTATION TARGET: a failed refresh after an answer keeps the cards and adds a 'Couldn't refresh' note", async () => {
+  let s = await mount();
+  await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
+  server.status = 500;
+  s = await mount(); // a re-mount refreshes at once; the old answer is still held
+  await until(() => s.querySelector('[data-role="clients-note"]').hidden === false, "note");
+  assert.match(text(s, '[data-role="clients-note"]'), /^Couldn't refresh: /);
+  assert.equal(s.querySelectorAll(".clcard").length, 2, "the last answer stays on screen");
+  assert.equal(s.querySelector('[data-role="clients-range"]').hidden, false);
+  server.status = 200;
+  s = await mount();
+  await until(() => s.querySelector('[data-role="clients-note"]').hidden === true, "note gone after a good answer");
 });
 
 test("MUTATION TARGET: leaving the page stops its poll", async () => {

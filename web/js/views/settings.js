@@ -34,7 +34,8 @@
  *    mockup's Settings screen.
  *  - PCs (agents) — WP D15c: now only a pointer to the Clients page, where
  *    the block described next moved. Before D15c: WP WEB-FEAT-3: the
- *    "Agents: N online, M offline" line and a "Show PCs" button that opens the existing clients sheet
+ *    "Agents: N online, M offline" line and a "Show PCs" button that
+ *    opens the existing clients sheet
  *    (components/clients-sheet.js). Reusing the sheet instead of a second
  *    list here keeps ONE rendering of a PC row (presence chip, last seen,
  *    version, games, bypass state) with one store subscription and one

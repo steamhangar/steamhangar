@@ -13,6 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   AGENTLESS_NOTE,
+  NO_CLIENTS_TEXT,
   appLabel,
   clientKindText,
   clientName,
@@ -69,8 +70,14 @@ test("MUTATION TARGET: an address client is 'No agent · seen in the cache log' 
   assert.equal(text, "No agent · seen in the cache log");
   assert.doesNotMatch(text, /\bPC\b|computer|console|phone|runner/i);
   assert.equal(clientKindText(agent()), "vault-agent · 192.168.1.42");
-  assert.equal(clientKindText(agent({ addresses: [] })), "vault-agent · no address in the cache log yet");
+  assert.equal(clientKindText(agent({ addresses: [] })), "vault-agent · no address in the cache log");
   assert.doesNotMatch(AGENTLESS_NOTE, /runner|prefill/i);
+});
+
+test("wording: no 'yet' that promises self-healing; the agentless note never tells a user to install an agent that may be installed", () => {
+  for (const t of [AGENTLESS_NOTE, NO_CLIENTS_TEXT, clientKindText(agent({ addresses: [] }))]) assert.doesNotMatch(t, /\byet\b/i);
+  assert.doesNotMatch(AGENTLESS_NOTE, /\binstall\b/i);
+  assert.match(AGENTLESS_NOTE, /A PC with vault-agent can also show up here by its address until the server can match the two\./);
 });
 
 test("connection chip: true/false/null map to three words and the .pchip classes", () => {

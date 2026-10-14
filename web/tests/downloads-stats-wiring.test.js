@@ -60,7 +60,8 @@ function throughput(range, state) {
     active_clients_now: state === "ok" ? 2 : null,
     summary: off ? null : {
       bytes_served: 60 * GIB, hit_bytes: 50 * GIB, miss_bytes: 10 * GIB, requests: 100, hits: 83, misses: 17, errors: 0,
-      hit_rate: 0.83, byte_hit_rate: 0.83, average_bytes_per_second: 50 * MIB, peak_bytes_per_second: 100 * MIB, active_clients: 3,
+      // Request and byte rates differ on purpose: the tile shows the byte rate.
+      hit_rate: 0.5, byte_hit_rate: 50 / 60, average_bytes_per_second: 50 * MIB, peak_bytes_per_second: 100 * MIB, active_clients: 3,
     },
     jobs: [{ job_id: 1, appid: 11, name: null, started_at: iso(HOUR), bytes_per_second: state === "ok" ? 30 * MIB : null, bytes_since_start: state === "ok" ? 8.8 * GIB : null, exclusive_depots: 1 }],
   };
@@ -68,12 +69,13 @@ function throughput(range, state) {
 function series(range, state) {
   return {
     event_feed: feed(state), range, tier: "5m", bucket_seconds: 300, range_start: iso(24 * HOUR),
-    points: state === "disabled" ? [] : [0, 10, 5].map((v, i) => ({ t: iso((3 - i) * 300_000), bytes_served: v, hit_bytes: 0, miss_bytes: v, requests: 1, bytes_per_second: v * MIB, peak_bytes_per_second: v * MIB })),
+    points: state === "disabled" ? [] : (server.flat ? [0, 0, 0] : [0, 10, 5]).map((v, i) => ({ t: iso((3 - i) * 300_000), bytes_served: v, hit_bytes: 0, miss_bytes: v, requests: 1, bytes_per_second: v * MIB, peak_bytes_per_second: v * MIB })),
   };
 }
 
 const server = {
   state: "ok",
+  flat: false,
   status: 200,
   gate: null,
   calls: [],
@@ -93,7 +95,7 @@ globalThis.fetch = async (url) => {
   if (p === "/v1/throughput" || p === "/v1/throughput/series") {
     server.calls.push(`${p}?${range}`);
     if (server.gate) await server.gate;
-    if (server.status !== 200) return respond(server.status, { detail: "Not Found" });
+    if (server.status !== 200) return respond(server.status, { detail: server.status === 404 ? "Not Found" : "database is locked" });
     return respond(200, p === "/v1/throughput" ? throughput(range, server.state) : series(range, server.state));
   }
   if (p === "/v1/jobs") {
@@ -149,6 +151,7 @@ async function mount() {
 
 beforeEach(() => {
   server.state = "ok";
+  server.flat = false;
   server.status = 200;
   server.gate = null;
   server.calls = [];
@@ -176,6 +179,33 @@ test("MUTATION TARGET: feed ok — seven tiles, a labelled SVG graph, and the ru
   await until(() => speed(s) !== null, "speed line");
   assert.equal(speed(s), "30.0 MB/s · 8.8 GB loaded so far");
   assert.equal(q(s, "stats-range").getAttribute("aria-label"), "Statistics range");
+  assert.equal(q(s, "stats-range").hidden, false, "range selector shown with figures");
+});
+
+test("MUTATION TARGET: an all-zero series draws no graph; the tiles stay", async () => {
+  server.flat = true;
+  const s = await mount();
+  await until(() => !q(s, "stats-grid").hidden, "tiles");
+  await tick(20);
+  assert.equal(q(s, "stats-graph").hidden, true);
+  assert.equal(q(s, "stats-graph").querySelectorAll("path").length, 0);
+});
+
+test("MUTATION TARGET: a failed refresh after an answer keeps the figures and adds a 'Couldn't refresh' note", async () => {
+  let s = await mount();
+  // The previous test's flat series is still module state: wait for this
+  // mount's own answer (a drawn graph) before failing the next one.
+  await until(() => !q(s, "stats-grid").hidden && !q(s, "stats-graph").hidden, "tiles and graph");
+  server.status = 500;
+  s = await mount(); // a re-mount refreshes at once; the old answer is still held
+  await until(() => /^Couldn't refresh: /.test(q(s, "stats-note").textContent), "refresh note");
+  assert.equal(q(s, "stats-note").hidden, false);
+  assert.equal(q(s, "stats-grid").hidden, false, "old tiles stay");
+  assert.equal(tile(s, "loaded").querySelector("dd").textContent, "60.0 GB");
+  assert.equal(q(s, "stats-graph").hidden, false, "old graph stays");
+  server.status = 200;
+  s = await mount();
+  await until(() => q(s, "stats-note").hidden === true, "note gone after a good answer");
 });
 
 test("MUTATION TARGET: feed disabled — the note only: no tiles, no graph, no speed line", async () => {
@@ -187,6 +217,7 @@ test("MUTATION TARGET: feed disabled — the note only: no tiles, no graph, no s
   assert.equal(q(s, "stats-grid").querySelectorAll(".stat").length, 0);
   assert.equal(q(s, "stats-graph").hidden, true);
   assert.equal(speed(s), null);
+  assert.equal(q(s, "stats-range").hidden, true, "no figures, no range selector");
 });
 
 test("feed stale — note, a dash for the current speed (sr: Not available), totals kept, no job speed", async () => {
@@ -257,6 +288,7 @@ test("MUTATION TARGET: a 404 shows the update note and stops the poll; leaving t
   server.status = 404;
   let s = await mount();
   await until(() => q(s, "stats-note").textContent === "This server does not report traffic statistics yet. Update vault-api to see them.", "unsupported note");
+  assert.equal(q(s, "stats-range").hidden, true, "no range selector for an old server");
   const n = server.calls.length;
   await tick(60);
   assert.equal(server.calls.length, n, "no retries after a 404");

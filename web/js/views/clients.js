@@ -38,7 +38,7 @@ import { openClientsSheet } from "../components/clients-sheet.js";
 import { openAddDeviceSheet } from "../components/add-device-sheet.js";
 import { createRangeSegs } from "../components/range-segs.js";
 import { agentsSummaryText } from "../lib/clients-view.js";
-import { FEED_TEXT, feedNote, isRange } from "../lib/traffic-view.js";
+import { FEED_TEXT, feedNote, feedState, isRange, joinNotes, refreshFailedText } from "../lib/traffic-view.js";
 import {
   AGENTLESS_NOTE,
   NO_CLIENTS_TEXT,
@@ -67,8 +67,10 @@ function errorText(err) {
 }
 
 /** Module state; survives re-mounts. `data` is the last overview answer
- * for `range`; `unsupported` is a 404 (a server older than D15b). */
-const state = { range: "7d", data: null, error: null, unsupported: false };
+ * for `range`; `unsupported` is a 404 (a server older than D15b);
+ * `noFigures` is the last known verdict "no statistics to range over"
+ * (feed disabled or unsupported), kept while an answer is pending. */
+const state = { range: "7d", data: null, error: null, unsupported: false, noFigures: false };
 
 /** The mounted section's nodes, or null (see downloads.js on why
  * `onViewChange` nulling this is the whole staleness signal). */
@@ -84,6 +86,7 @@ const poll = createViewPoll({
     state.data = data;
     state.error = null;
     state.unsupported = false;
+    state.noFigures = feedState(data) === "disabled";
     paint();
   },
   onError: (err) => {
@@ -92,6 +95,7 @@ const poll = createViewPoll({
       // (an upgrade restarts vault-api; the next visit to this view asks
       // again), so the poll stops here.
       state.unsupported = true;
+      state.noFigures = true;
       poll.stop();
     } else {
       state.error = errorText(err);
@@ -150,9 +154,11 @@ function paint() {
   let note = null;
   if (state.unsupported) note = FEED_TEXT.unsupported;
   else if (state.error && !data) note = `Could not load clients: ${state.error}`;
-  else if (data) note = feedNote(data);
+  else if (data) note = joinNotes(state.error ? refreshFailedText(state.error) : null, feedNote(data));
   els.note.textContent = note || "";
   els.note.hidden = !note;
+  // No statistics (feed disabled, old server): no range selector either.
+  els.range.hidden = state.noFigures;
 
   els.list.replaceChildren();
   if (state.unsupported) {
@@ -268,9 +274,10 @@ export function renderClients() {
   agentlessNote.hidden = true;
 
   const manage = buildManageSection();
+  range.el.hidden = state.noFigures;
   section.append(head, range.el, note, list, agentlessNote, manage.fragment);
 
-  els = { section, sub, note, list, agentlessNote, agentsLine: manage.summaryLine };
+  els = { section, sub, range: range.el, note, list, agentlessNote, agentsLine: manage.summaryLine };
   paint();
   // Same gate as the store's own loops (store-singleton.js): no key and no
   // demo mode means the onboarding overlay is up and every request would

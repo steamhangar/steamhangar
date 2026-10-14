@@ -19,7 +19,9 @@ import {
   formatTrafficBytes,
   headerTiles,
   jobSpeedText,
+  joinNotes,
   mergeJobLists,
+  refreshFailedText,
   seriesGeometry,
   seriesLabel,
   seriesStartText,
@@ -51,7 +53,8 @@ const throughput = (state, extra = {}) => ({
       ? null
       : {
           bytes_served: 60 * GIB, hit_bytes: 50 * GIB, miss_bytes: 10 * GIB, requests: 100, hits: 83, misses: 17, errors: 0,
-          hit_rate: 0.83, byte_hit_rate: 0.833, average_bytes_per_second: 50 * MIB, peak_bytes_per_second: 100 * MIB, active_clients: 3,
+          // Request rate and byte rate differ on purpose (the tile uses bytes).
+          hit_rate: 0.5, byte_hit_rate: 0.833, average_bytes_per_second: 50 * MIB, peak_bytes_per_second: 100 * MIB, active_clients: 3,
         },
   jobs: [],
   ...extra,
@@ -122,11 +125,25 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
   assert.equal(stale.current, DASH);
   assert.equal(stale.clients, DASH);
   assert.equal(stale.loaded, "60.0 GB", "stored totals still shown");
-  const zero = throughput("ok", { active_clients_now: 0, summary: { ...throughput("ok").summary, average_bytes_per_second: null, hit_rate: null } });
+  const zero = throughput("ok", { active_clients_now: 0, summary: { ...throughput("ok").summary, average_bytes_per_second: null, byte_hit_rate: null } });
   const z = Object.fromEntries(headerTiles(zero).map((t) => [t.key, t.value]));
   assert.equal(z.clients, "0", "a real zero prints");
   assert.equal(z.average, DASH, "nothing loaded: no average");
   assert.equal(z["hit-rate"], DASH);
+});
+
+test("MUTATION TARGET: the hit-rate tile is the BYTE hit rate, the base 'Saved by the cache' uses", () => {
+  const t = headerTiles(throughput("ok")).find((x) => x.key === "hit-rate");
+  assert.equal(t.value, "83%", "byte_hit_rate 0.833, not hit_rate 0.5");
+  assert.equal(t.title, "Share of bytes served from the cache in the last 24 hours.");
+  const noBytes = throughput("ok", { summary: { ...throughput("ok").summary, byte_hit_rate: null } });
+  assert.equal(headerTiles(noBytes).find((x) => x.key === "hit-rate").value, DASH, "no fallback to the request rate");
+});
+
+test("refresh note helpers: 'Couldn't refresh: …' and notes joined without empties", () => {
+  assert.equal(refreshFailedText("database is locked"), "Couldn't refresh: database is locked");
+  assert.equal(joinNotes("a.", null, "", "b."), "a. b.");
+  assert.equal(joinNotes(null, undefined), null);
 });
 
 test("graph geometry: scaled to the highest point, area closed along the bottom; one point is a flat line; none is null", () => {

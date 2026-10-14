@@ -109,6 +109,26 @@ export const FEED_TEXT = Object.freeze({
 });
 
 /**
+ * The note when a refresh fails after an earlier answer: the old figures
+ * stay on screen, this line says they were not updated.
+ * @param {string} reason
+ * @returns {string}
+ */
+export function refreshFailedText(reason) {
+  return `Couldn't refresh: ${reason}`;
+}
+
+/**
+ * Several notes as one line, skipping the empty ones; `null` when none.
+ * @param {...(string | null | undefined)} notes
+ * @returns {string | null}
+ */
+export function joinNotes(...notes) {
+  const parts = notes.filter((n) => typeof n === "string" && n);
+  return parts.length ? parts.join(" ") : null;
+}
+
+/**
  * The feed's state, defensively: anything unreadable counts as `disabled`
  * (show no numbers rather than invent them).
  * @param {{event_feed?: {state?: string}} | null | undefined} response
@@ -171,8 +191,9 @@ export function headerTiles(throughput) {
     tile(
       "hit-rate",
       "Hit rate",
-      formatRate(summary.hit_rate),
-      `Share of requests ${phrase} that the cache answered from its disk.`,
+      // Bytes, not requests: the same base as "Saved by the cache" next to it.
+      formatRate(summary.byte_hit_rate),
+      `Share of bytes served from the cache ${phrase}.`,
     ),
     tile(
       "saved",
