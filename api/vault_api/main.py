@@ -42,6 +42,7 @@ from vault_api.routers import (
     settings as settings_router,
     stats,
     steam,
+    traffic as traffic_router,
     updates,
 )
 from vault_api.scheduler import PrefillScheduler
@@ -347,6 +348,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # WP VER-2: component versions and status, behind the key like settings.
     app.include_router(about.router)
     app.include_router(stats.router)
+    # WP D15b: clients overview + server-side throughput from the traffic
+    # tiers. Always mounted; with the event feed off the fields are null and
+    # event_feed.state says "disabled".
+    app.include_router(traffic_router.router)
     # WP 3.9. Always mounted, even with VAULT_MANIFEST_ORACLE=off: the routes
     # answer "enabled: false" rather than 404 in that case, so a client can
     # tell "this vault-api is too old to have an oracle" from "this operator

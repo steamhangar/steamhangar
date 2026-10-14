@@ -73,9 +73,17 @@ data" true rather than aspirational:
    Statistics rows and the new cursor are one ``BEGIN IMMEDIATE`` write. There
    is no state in which the effects are committed but the cursor is not, or the
    other way round — see "Idempotence" below.
-3. **A file that SHRANK below the cursor is treated as rotated**, and the
-   cursor resets to 0 rather than seeking past the new end. Otherwise a rotated
-   or externally-truncated log would be silently skipped forever.
+3. **A file that SHRANK below the cursor, or that is a different file (its
+   inode changed, WP D15b; never decided on ``st_dev``, which ZFS does not
+   keep stable across reboots), is treated as rotated**, and the cursor
+   resets to 0 rather than seeking past the new end. Otherwise a rotated or
+   externally-truncated log would be silently skipped forever -- and a
+   rename-rotated log whose new file had already grown past the old offset
+   would be read from the middle. Both cases are counted in
+   ``rotations_detected_total`` (``GET /v1/stats``). Before switching to a
+   renamed file's successor, the sweep reads the old file's unread tail if
+   it is still at ``<path>.1`` with the cursor's inode (``_drain_rotated``);
+   if it is gone, those lines are lost (at most one sweep interval).
 
 Rotation, and why truncate-in-place is safe
 -------------------------------------------
@@ -139,6 +147,7 @@ break if the log goes unread for the 16 hours a day the window is shut.
 
 from __future__ import annotations
 
+import dataclasses
 import errno
 import logging
 import os
@@ -147,7 +156,7 @@ import stat
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from vault_api import agent_reports, deletion, jobs, tool_apps, webhooks
+from vault_api import agent_reports, deletion, jobs, tool_apps, traffic, webhooks
 from vault_api.config import (
     WEBHOOK_EVENT_BYPASS_RESOLVED,
     WEBHOOK_EVENT_BYPASS_SUSPECTED,
@@ -422,6 +431,16 @@ class ReadBatch:
     missing: bool = False
     #: Read failed for another reason; the cursor must not move.
     error: str = ""
+    #: Why ``rotated`` is set: ``"shrank"`` (smaller than the cursor) or
+    #: ``"replaced"`` (another device/inode than the cursor's file, WP D15b).
+    rotation_reason: str = ""
+    #: ``st_dev``/``st_ino`` of the file this batch was read from (WP D15b);
+    #: committed with the cursor so the next sweep can tell a replaced file.
+    file_dev: int | None = None
+    file_ino: int | None = None
+    #: This batch came from the renamed-away ``<path>.1`` (its unread tail),
+    #: not from the live log; the cursor still refers to the old file.
+    drained_rotated: bool = False
     #: Bytes left unconsumed at the end of the read because they were a partial
     #: line. Diagnostic only.
     partial_tail_bytes: int = 0
@@ -499,8 +518,22 @@ def open_event_log(path: str, flags: int) -> int:
     return fd
 
 
-def read_batch(path: str, cursor: int) -> ReadBatch:
+def read_batch(path: str, cursor: int, known_ino: int | None = None) -> ReadBatch:
     """Read complete lines from ``cursor`` onward. Never raises.
+
+    ``known_ino`` is the ``st_ino`` of the file the cursor was committed
+    against (``None`` = unknown, e.g. the first sweep after the v23 upgrade).
+    A different inode means the path now names another file -- a rename
+    rotation -- and the read restarts at offset 0 (rule 3), after draining
+    the old file's unread tail if it still sits at ``<path>.1``
+    (``_drain_rotated``).
+
+    **Inode only, never ``st_dev``** (D15b review): on ZFS (the production
+    host) and other filesystems with anonymous device numbers, ``st_dev``
+    can change across a reboot for the very same file. Treating that as a
+    rotation would re-read the whole log from offset 0 and count it into the
+    traffic tiers a second time -- forever, in the daily tier. ``st_dev`` is
+    still stored (``log_dev``) for diagnostics only.
 
     Binary mode on purpose. The cursor is a **byte** offset, and decoding
     before splitting would make "how many bytes did I consume" depend on the
@@ -516,20 +549,42 @@ def read_batch(path: str, cursor: int) -> ReadBatch:
     except OSError as exc:
         return ReadBatch(new_cursor=cursor, error=str(exc))
     try:
-        size = os.fstat(fd).st_size
+        info = os.fstat(fd)
     except OSError as exc:
         os.close(fd)
         return ReadBatch(new_cursor=cursor, error=str(exc))
+    size = info.st_size
+    file_dev, file_ino = int(info.st_dev), int(info.st_ino)
 
     start = cursor
     rotated = False
-    if size < cursor:
+    rotation_reason = ""
+    if known_ino is not None and known_ino != file_ino:
+        # Rule 3, WP D15b: another file now sits at the path (vault-core
+        # renamed the old one away and reopened). Its size says nothing
+        # about the old cursor, so restart at the beginning even when it is
+        # already larger than the old offset -- but first finish the old
+        # file if it is still there with lines this sweeper has not read.
+        drained = _drain_rotated(path, cursor, known_ino)
+        if drained is not None:
+            os.close(fd)
+            return drained
+        start = 0
+        rotated = True
+        rotation_reason = "replaced"
+    elif size < cursor:
         # Rule 3: the file shrank. Either somebody rotated it out from under
         # us or vault-core was redeployed onto a fresh volume. Seeking to the
         # old offset would skip everything the new file has accumulated so far,
         # silently, so restart at the beginning.
         start = 0
         rotated = True
+        rotation_reason = "shrank"
+    identity = {
+        "rotation_reason": rotation_reason,
+        "file_dev": file_dev,
+        "file_ino": file_ino,
+    }
 
     try:
         # The fd is the one that passed open_event_log's checks; reading it
@@ -539,7 +594,7 @@ def read_batch(path: str, cursor: int) -> ReadBatch:
             handle.seek(start)
             chunk = handle.read(MAX_BATCH_BYTES)
     except OSError as exc:
-        return ReadBatch(new_cursor=cursor, rotated=rotated, error=str(exc))
+        return ReadBatch(new_cursor=cursor, rotated=rotated, error=str(exc), **identity)
 
     truncated_batch = len(chunk) == MAX_BATCH_BYTES
     end = chunk.rfind(b"\n")
@@ -554,6 +609,7 @@ def read_batch(path: str, cursor: int) -> ReadBatch:
                 partial_tail_bytes=len(chunk),
                 truncated_batch=False,
                 file_size=size,
+                **identity,
             )
         # A FULL batch with no newline anywhere in it is NOT a partial tail:
         # there is no amount of waiting that turns 4 MiB of newline-free bytes
@@ -562,7 +618,9 @@ def read_batch(path: str, cursor: int) -> ReadBatch:
         # every sweep re-read the same bytes, consumed nothing, statistics
         # stopped, bypass detection went blind, and rotation could never fire
         # because the file was never fully swept.
-        return _skip_oversized(path, start, len(chunk), rotated, size)
+        return dataclasses.replace(
+            _skip_oversized(path, start, len(chunk), rotated, size), **identity
+        )
 
     complete = chunk[: end + 1]
     text = complete.decode("utf-8", errors="replace")
@@ -575,6 +633,61 @@ def read_batch(path: str, cursor: int) -> ReadBatch:
         partial_tail_bytes=len(chunk) - len(complete),
         truncated_batch=truncated_batch,
         file_size=size,
+        **identity,
+    )
+
+
+#: Where a rename rotation leaves the previous file (D15-ROT decision:
+#: vault-core keeps exactly one old file).
+ROTATED_SUFFIX = ".1"
+
+
+def _drain_rotated(path: str, cursor: int, known_ino: int) -> ReadBatch | None:
+    """Read the unread tail of the renamed-away log, if it is still there.
+
+    Only ``<path>.1`` is looked at, and only when it is the very file the
+    cursor belongs to (same inode) -- otherwise ``None`` and the caller
+    switches to the new file. It is opened through ``open_event_log`` like
+    the live log (no symlink, regular file, same device as the directory).
+
+    The returned batch keeps the OLD inode as the file identity, so the next
+    sweep sees the path's new inode again and comes back here until the old
+    file holds no further complete line; only then does the switch happen
+    (and get counted). ``drained_rotated`` tells the sweep not to try its own
+    truncation while the cursor refers to the old file. A partial last line
+    in the old file is never completed (nginx has reopened), so it is
+    dropped when the switch happens.
+    """
+    old_path = path + ROTATED_SUFFIX
+    try:
+        fd = open_event_log(old_path, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if int(info.st_ino) != known_ino or info.st_size <= cursor:
+            return None
+        with os.fdopen(os.dup(fd), "rb") as handle:
+            handle.seek(cursor)
+            chunk = handle.read(MAX_BATCH_BYTES)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    end = chunk.rfind(b"\n")
+    if end == -1:
+        return None
+    complete = chunk[: end + 1]
+    text = complete.decode("utf-8", errors="replace")
+    return ReadBatch(
+        lines=tuple(line for line in text.split("\n") if line != ""),
+        new_cursor=cursor + len(complete),
+        partial_tail_bytes=len(chunk) - len(complete),
+        truncated_batch=len(chunk) == MAX_BATCH_BYTES,
+        file_size=int(info.st_size),
+        file_dev=int(info.st_dev),
+        file_ino=int(info.st_ino),
+        drained_rotated=True,
     )
 
 
@@ -662,6 +775,21 @@ class SweepState:
     #: Non-zero means the event log contains something nginx did not write.
     oversized_skips_total: int = 0
     last_oversized_at: str | None = None
+    #: WP D15b (schema v23): identity of the file the cursor points into,
+    #: ``None`` until the first sweep after the upgrade recorded it.
+    log_dev: int | None = None
+    log_ino: int | None = None
+    #: Rotations the sweeper DETECTED (shrank or replaced), not its own.
+    rotations_detected_total: int = 0
+    last_rotation_detected_at: str | None = None
+    #: When the traffic tiers (``vault_api/traffic.py``) started filling.
+    traffic_since: str | None = None
+
+    @property
+    def log_identity(self) -> tuple[int, int] | None:
+        if self.log_dev is None or self.log_ino is None:
+            return None
+        return (self.log_dev, self.log_ino)
 
 
 #: What ``read_state`` returns before the first sweep has ever claimed.
@@ -675,7 +803,9 @@ def read_state(conn: sqlite3.Connection) -> SweepState:
         SELECT cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at,
                lines_read_total, lines_skipped_total, last_lines, last_skipped,
                last_enqueued, last_dropped_by_cap, truncate_denied_count,
-               last_truncate_denied_at, oversized_skips_total, last_oversized_at
+               last_truncate_denied_at, oversized_skips_total, last_oversized_at,
+               log_dev, log_ino, rotations_detected_total,
+               last_rotation_detected_at, traffic_since
         FROM event_sweep_state WHERE id = 1
         """
     ).fetchone()
@@ -696,7 +826,16 @@ def read_state(conn: sqlite3.Connection) -> SweepState:
         last_truncate_denied_at=row["last_truncate_denied_at"],
         oversized_skips_total=int(row["oversized_skips_total"]),
         last_oversized_at=row["last_oversized_at"],
+        log_dev=_int_or_none(row["log_dev"]),
+        log_ino=_int_or_none(row["log_ino"]),
+        rotations_detected_total=int(row["rotations_detected_total"] or 0),
+        last_rotation_detected_at=row["last_rotation_detected_at"],
+        traffic_since=row["traffic_since"],
     )
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def interval_elapsed(state: SweepState, now: datetime, interval_minutes: int) -> bool:
@@ -801,6 +940,8 @@ class Aggregate:
     skip_reasons: dict[str, int] = field(default_factory=dict)
     #: Version strings seen in field 1 that were not ``v1``.
     unknown_versions: int = 0
+    #: WP D15b: the same lines bucketed by event time for the traffic tiers.
+    traffic_batch: traffic.TrafficBatch = field(default_factory=traffic.TrafficBatch)
 
 
 def aggregate_lines(
@@ -829,6 +970,15 @@ def aggregate_lines(
 
         result.parsed += 1
         seen_at = line.time_utc or fallback_time
+        result.traffic_batch.add(
+            addr=line.addr,
+            seen_at=seen_at,
+            now_iso=fallback_time,
+            served=line.served,
+            cache_status=line.cache_status,
+            bytes_sent=line.bytes_sent,
+            depotid=line.depotid,
+        )
 
         stats = result.addrs.get(line.addr)
         if stats is None:
@@ -1201,14 +1351,26 @@ def commit_batch(
             )
         _prune_depot_misses(conn)
 
+        # WP D15b: the same batch into the three traffic tiers, in THIS
+        # transaction, so the tiers inherit the cursor's exactly-once rule.
+        traffic.write_batch(conn, aggregate.traffic_batch, jobs.parse_utc_iso(now_iso))
+        if not batch.truncated_batch:
+            # Retention only once caught up -- see traffic.py's docstring for
+            # why a backlog keeps its old 5-minute rows until consumed.
+            moment = jobs.parse_utc_iso(now_iso)
+            if moment is not None:
+                traffic.prune(conn, moment)
+
         conn.execute(
             """
             INSERT INTO event_sweep_state (
                 id, cursor_offset, first_sweep_at, last_sweep_at,
                 lines_read_total, lines_skipped_total,
                 last_lines, last_skipped, last_enqueued, last_dropped_by_cap,
-                oversized_skips_total, last_oversized_at
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                oversized_skips_total, last_oversized_at,
+                log_dev, log_ino, rotations_detected_total,
+                last_rotation_detected_at, traffic_since
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 cursor_offset       = excluded.cursor_offset,
                 lines_read_total    = event_sweep_state.lines_read_total
@@ -1223,6 +1385,17 @@ def commit_batch(
                                         + excluded.oversized_skips_total,
                 last_oversized_at   = COALESCE(
                     excluded.last_oversized_at, event_sweep_state.last_oversized_at
+                ),
+                log_dev             = excluded.log_dev,
+                log_ino             = excluded.log_ino,
+                rotations_detected_total = event_sweep_state.rotations_detected_total
+                                           + excluded.rotations_detected_total,
+                last_rotation_detected_at = COALESCE(
+                    excluded.last_rotation_detected_at,
+                    event_sweep_state.last_rotation_detected_at
+                ),
+                traffic_since       = COALESCE(
+                    event_sweep_state.traffic_since, excluded.traffic_since
                 )
             """,
             (
@@ -1240,6 +1413,14 @@ def commit_batch(
                 # disagree about whether the skip happened.
                 1 if batch.oversized_skipped_bytes else 0,
                 now_iso if batch.oversized_skipped_bytes else None,
+                # WP D15b: the file identity travels with the cursor, and a
+                # detected rotation is counted with the reset it caused.
+                batch.file_dev,
+                batch.file_ino,
+                1 if batch.rotated else 0,
+                now_iso if batch.rotated else None,
+                # Only once tier rows were actually written (D15b review).
+                now_iso if aggregate.traffic_batch.cells else None,
             ),
         )
 
@@ -1550,7 +1731,7 @@ def sweep_once(
     """
     now_iso = to_utc_iso(now)
     state = read_state(conn)
-    batch = read_batch(settings.event_log_path, state.cursor_offset)
+    batch = read_batch(settings.event_log_path, state.cursor_offset, state.log_ino)
 
     if batch.missing:
         logger.info(
@@ -1580,7 +1761,24 @@ def sweep_once(
             swept_at=now_iso,
         )
 
-    if batch.rotated:
+    if batch.drained_rotated:
+        logger.info(
+            "event-sweep: %r was rotated; reading the unread tail of %r from "
+            "offset %d before switching to the new file.",
+            settings.event_log_path,
+            settings.event_log_path + ROTATED_SUFFIX,
+            state.cursor_offset,
+        )
+    if batch.rotated and batch.rotation_reason == "replaced":
+        logger.warning(
+            "event-sweep: %r is a different file than at the last sweep (inode "
+            "changed) -- it was rotated by renaming. Restarting from offset 0 "
+            "of the new file (the cursor was at %d of the old one, whose "
+            "readable tail has been drained if it was still there).",
+            settings.event_log_path,
+            state.cursor_offset,
+        )
+    elif batch.rotated:
         logger.warning(
             "event-sweep: %r is %d bytes but the cursor was at %d -- the file "
             "shrank, so it was rotated or truncated by something other than "
@@ -1596,7 +1794,13 @@ def sweep_once(
     commit_batch(conn, settings, aggregate, batch, trigger, now_iso)
     # Strictly AFTER the cursor is committed, and strictly best-effort: a
     # refused rotation must not affect anything above it.
-    rotation = maybe_truncate(conn, settings, batch.new_cursor, now_iso)
+    # Never while the cursor refers to the renamed-away file: its offset says
+    # nothing about the live log's size.
+    rotation = (
+        TruncateResult(reason=TRUNCATE_NOT_DUE)
+        if batch.drained_rotated
+        else maybe_truncate(conn, settings, batch.new_cursor, now_iso)
+    )
     truncated = rotation.truncated
 
     # WP 3.13's persist step: strictly AFTER the batch's own commit/truncate

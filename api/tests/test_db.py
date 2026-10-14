@@ -45,6 +45,10 @@ EXPECTED_TABLES = {
     # content-package links.
     "app_classification",
     "oracle_dlc_links",
+    # v23 (WP D15b CLIENTS-1): event-log traffic tiers (vault_api/traffic.py).
+    "client_traffic",
+    "client_depot_traffic",
+    "server_traffic",
 }
 
 
