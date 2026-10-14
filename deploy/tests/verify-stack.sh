@@ -1132,14 +1132,15 @@ assert_eq "" "$bare443" "compose.yaml has no other :443 port mapping"
 # =============================================================================
 section "4. Stack up (vault-core + vault-api + vault-proxy + vault-runner)"
 # =============================================================================
-# WP UPD-1: the manifest oracle is ON by default and this test .env leaves
-# VAULT_SCHEDULE_WINDOW unset, which renders the 03:00-07:00 default -- a
-# configured window, so the scheduled update check would send the app id of
-# every cached game to api.steamcmd.net on the first tick. This throwaway
-# stack must never do that on its own: the RUNTIME part runs with the oracle
-# off. Appended only now, after every section-3 render above has pinned the
-# shipped defaults (empty = on); step 6l still checks the oracle-on proxy
-# filter, through a separate render of the entrypoint into /tmp.
+# WP UPD-1: the manifest oracle is ON by default, and since WP UPD-5 the
+# scheduled update check runs whenever it is on -- with or without a schedule
+# window -- so it would send the app id of every cached game to
+# api.steamcmd.net on the first tick. This throwaway stack must never do that
+# on its own: the RUNTIME part runs with the oracle off (the oracle switch is
+# the only one that stops the check; a blank window would not). Appended
+# only now, after every section-3 render above has pinned the shipped
+# defaults (empty = on); step 6l still checks the oracle-on proxy filter,
+# through a separate render of the entrypoint into /tmp.
 printf 'VAULT_MANIFEST_ORACLE=off\n' >> "$env_file"
 say 'Runtime .env adds VAULT_MANIFEST_ORACLE=off (WP UPD-1: no automatic oracle query from this test stack).'
 compose_up_or_die "$env_file" up -d

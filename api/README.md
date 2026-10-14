@@ -655,8 +655,8 @@ route, see "Auth").
 | GET    | `/v1/oracle/{appid}`               | Stored manifest-oracle view (WP 3.9): `{appid, enabled, checked_at, source, buildid, verdict, depots[]}`, each depot `{depotid, recorded_manifestid, oracle_manifestid, verdict, beta_branches[]}`. `verdict` is `current`/`stale`/`not_cached`/`unknown`. **No network, no `404`** — an app nobody asked about answers `checked_at: null`, and `enabled: false` when the oracle is off. `422` for `appid < 1` |
 | POST   | `/v1/oracle/{appid}/refresh`       | Ask the oracle now (WP 3.9). **This request leaves the LAN** when the oracle is enabled. Always `200`: `{appid, enabled, ok, error, checked_at, depot_count, branch_manifest_count, open_branches[], skipped_password_branches, warnings[]}` — an unreachable or garbage answer is `ok: false` with a reason, never a 5xx. `422` for `appid < 1` |
 | DELETE | `/v1/oracle/{appid}`               | Forget everything the oracle said about one app (WP 3.9). `204` whether or not anything was stored — idempotent, and the way to withdraw the extra GC keep-set protection oracle rows grant |
-| POST   | `/v1/updates/check`                | Start the update check now (WP UPD-1): the manifest oracle is refreshed for every game that currently has cache content (tool packages excluded), **in the background**; **never starts a download**. Answers at once: `202 {status: "started", enabled: true}`, or `202 {status: "already_running", enabled: true}` when a scheduled or earlier manual check is still going (nothing new is started), or `200 {status: "disabled", enabled: false}` with the oracle off (nothing runs); `503` while vault-api shuts down. Poll `GET /v1/updates/status` until `running` is `false`, then re-read `GET /v1/games`. Not interval-limited, works with or without a schedule window, but stamps the interval (the next scheduled check is one interval later). **Leaves the LAN**: one oracle request per cached game — see "Always-on update check" |
-| GET    | `/v1/updates/status`               | Update check status (WP UPD-1): `{enabled, scheduled, running, last_trigger, last_started_at, last_finished_at, last_outcome, last_apps, last_ok, last_failed, last_stale}`. `scheduled` is `true` when the oracle is on AND a schedule window is configured (effective value, a `PATCH /v1/settings` window counts at once), `false` = manual checks only. `last_trigger` is `manual`/`scheduled`; `last_outcome` is `completed`, `bailed_out` (stopped after 5 failed oracle requests in a row), `aborted` (shutdown), `error` (bug, see the log) or `interrupted` (the process died during the run); outcome, finish stamp and counters are `null` while running. All `last_*` are `null` before the first run. No network |
+| POST   | `/v1/updates/check`                | Start the update check now (WP UPD-1): the manifest oracle is refreshed for every game that currently has cache content (tool packages excluded), **in the background**; **never starts a download**. Answers at once: `202 {status: "started", enabled: true}`, or `202 {status: "already_running", enabled: true}` when a scheduled or earlier manual check is still going (nothing new is started), or `200 {status: "disabled", enabled: false}` with the oracle off (nothing runs); `503` while vault-api shuts down. Poll `GET /v1/updates/status` until `running` is `false`, then re-read `GET /v1/games`. Not interval-limited, works with or without a schedule window (as does the scheduled check since WP UPD-5), but stamps the interval (the next scheduled check is one interval later). **Leaves the LAN**: one oracle request per cached game — see "Always-on update check" |
+| GET    | `/v1/updates/status`               | Update check status (WP UPD-1): `{enabled, scheduled, running, last_trigger, last_started_at, last_finished_at, last_outcome, last_apps, last_ok, last_failed, last_stale}`. `scheduled` is `true` whenever the oracle is on (WP UPD-5: the scheduled check no longer needs a schedule window, so today it always equals `enabled`; kept as its own field for UPD-1 clients). `last_trigger` is `manual`/`scheduled`; `last_outcome` is `completed`, `bailed_out` (stopped after 5 failed oracle requests in a row), `aborted` (shutdown), `error` (bug, see the log) or `interrupted` (the process died during the run); outcome, finish stamp and counters are `null` while running. All `last_*` are `null` before the first run. No network |
 | GET    | `/v1/schedule`                     | Scheduler config + last-sweep bookkeeping: `{enabled, window, overnight, interval_minutes, client_stale_days, server_timezone, last_sweep_at, last_sweep_targets, last_sweep_enqueued, next_eligible_at}`. **Read-only itself** — the window/interval/staleness values are now writable through `PATCH /v1/settings` (settings-API work package, ADR-0009; see "Persisted settings" below), this endpoint just reports the currently EFFECTIVE configuration, override included |
 | GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, top_unmapped_depots[]}`. **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
 | GET    | `/v1/steam/key`                    | Opt-in Steam Web API relay (WP 4a.6r): key status only — `{configured, key_last4}`. `key_last4` is `null` when unconfigured; the full key is never returned |
@@ -5051,12 +5051,11 @@ project).
   cache contents, no LAN addresses.
 - **It is sent automatically** (since WP UPD-1). With the oracle on, the
   scheduler's update check sends the app id of **every cached game** in the
-  background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`, while a schedule window
-  is configured (open or closed); `POST /v1/updates/check` and
+  background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`, with or without a
+  schedule window (WP UPD-5); `POST /v1/updates/check` and
   `POST /v1/oracle/{appid}/refresh` add on-demand requests. The job worker
-  never calls it. Turning the oracle off stops all of it; clearing the
-  schedule window stops only the background part (see "Always-on update
-  check").
+  never calls it. Turning the oracle off is the only way to stop it; the
+  schedule window does not (see "Always-on update check").
 - **Keeping it on your network:** point `VAULT_MANIFEST_ORACLE_URL` at your
   own mirror of the same API. Redirects are never followed, so the request
   cannot be handed to a host you did not configure.
@@ -5080,22 +5079,21 @@ project).
   `deploy/compose.yaml` forwards the oracle variables to vault-api and
   vault-proxy and the oracle is on by default).
 
-## Always-on update check (WP UPD-1, user decision 2026-10-13)
+## Always-on update check (WP UPD-1, user decision 2026-10-13; WP UPD-5, 2026-10-14)
 
-vault-api checks **cached games** for updates on its own **while a schedule
-window is configured — open or closed**. Whether the window is open right now
-plays no part in the check; it only decides whether a found update is also
-downloaded (that is `maybe_sweep`, unchanged). **No window configured = no
-scheduled check** (review round 2, implementing the user's "only prod
-checks": the dev instance has no window); the manual check still works. The
-window is read from the effective settings on every tick, so a window set
-later through `PATCH /v1/settings` turns the scheduled check on without a
-restart. **The oracle setting `VAULT_MANIFEST_ORACLE` gates both triggers**
-(see "Manifest oracle"): with it off, no check runs, scheduled or manual.
+vault-api checks **cached games** for updates on its own **whenever the
+oracle is on — with a schedule window open, closed or not configured at
+all** (WP UPD-5, user decision 2026-10-14, superseding UPD-1's review-round-2
+rule "no window = no scheduled check"). The window plays no part in the
+check; it only decides whether a found update is also downloaded (that is
+`maybe_sweep`, unchanged and strictly window-bound: without a window no
+automatic download or prefill sweep starts). **The oracle setting
+`VAULT_MANIFEST_ORACLE` is the one switch for both triggers** (see "Manifest
+oracle"): with it off, no check runs, scheduled or manual.
 
-- **Scheduled trigger.** While a window is configured, every scheduler tick
-  asks the shared `update_check.UpdateCheckRunner` whether a check is due
-  (once per `VAULT_SCHEDULE_INTERVAL_MINUTES`). On a due tick it stamps the claim and
+- **Scheduled trigger.** Every scheduler tick asks the shared
+  `update_check.UpdateCheckRunner` whether a check is due (once per
+  `VAULT_SCHEDULE_INTERVAL_MINUTES`). On a due tick it stamps the claim and
   hands the run to a background thread, so the tick itself never waits for the
   oracle and the event and prefill sweeps are never delayed by it. The run
   refreshes the manifest oracle for every game with cache content
@@ -5111,11 +5109,11 @@ restart. **The oracle setting `VAULT_MANIFEST_ORACLE` gates both triggers**
   runs is logged as "skipped" and records nothing (the running check's row
   stands).
 - **Status.** `GET /v1/updates/status` reports whether scheduled checks are on
-  (`scheduled`), whether a check is running and what the last one (either
-  trigger) found. The scheduler logs one line on its first tick (and again
-  when it changes): `Update check: ON (...)`, `Update check: scheduled checks
-  off, no schedule window; manual check available (...)` or `Update check:
-  OFF (...)`, and one
+  (`scheduled`, equal to `enabled` since WP UPD-5), whether a check is running
+  and what the last one (either trigger) found. The scheduler logs one line on
+  its first tick (and again when it changes): `Update check: ON (...)` (which
+  also says whether downloads start inside a schedule window or, with none
+  configured, not automatically at all) or `Update check: OFF (...)`, and one
   result line per run (`update check (manual|scheduled): N cached app(s)
   checked, ...`).
 - **Crash-safe.** `update_check_state.last_check_at` is stamped in a
@@ -5130,13 +5128,14 @@ restart. **The oracle setting `VAULT_MANIFEST_ORACLE` gates both triggers**
   differs from the one recorded for the cache), only for a game that currently
   has cache bytes (`depot_manifests` rows outlive a cache deletion).
 
-**What leaves the LAN.** With the oracle on and a schedule window configured,
-every cached game's app id goes to the oracle (`api.steamcmd.net` by default)
-**in the background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`**, plus on every
-manual check. Metadata only: no download starts, nothing else is sent. The dev
-instance has no window, so it never checks on its own; a manual "Check
-updates" click there may query the oracle (user decision 2026-10-13, metadata
-only). Tests inject a fake fetcher and fail on any socket connect.
+**What leaves the LAN.** With the oracle on, every cached game's app id goes to
+the oracle (`api.steamcmd.net` by default) **in the background, every
+`VAULT_SCHEDULE_INTERVAL_MINUTES`**, plus on every manual check, whether or not
+a schedule window is configured. Metadata only: no download starts, nothing
+else is sent. This includes an instance without a window, like the dev
+instance (user decision 2026-10-14: anonymous metadata, allowed). Tests inject
+a fake fetcher and fail on any socket connect; `deploy/tests/verify-stack.sh`
+runs every live stack with `VAULT_MANIFEST_ORACLE=off`.
 
 **On by default, `off` to opt out** (user decision 2026-10-13, superseding
 ADR-0006 decision 4's "default off"). `VAULT_MANIFEST_ORACLE` unset or empty
@@ -5151,10 +5150,10 @@ same host or a private mirror still needs a `VAULT_EGRESS_ALLOW` entry, see
 
 **Behaviour change on upgrade.** A vault that never set `VAULT_MANIFEST_ORACLE`
 (or set it empty, as the old `.env.example` did) turns the oracle on after this
-upgrade. If it also has a schedule window (the shipped default is
-`03:00-07:00`), it starts polling the oracle in the background: every
+upgrade and starts polling it in the background: every
 `VAULT_SCHEDULE_INTERVAL_MINUTES`, the app ids of all cached games go to
-`api.steamcmd.net`, whether the window is open or not. Set
+`api.steamcmd.net`, with or without a schedule window (since WP UPD-5; under
+UPD-1 a vault without a window did not poll). Set
 `VAULT_MANIFEST_ORACLE=off` before upgrading to keep the old behaviour.
 
 Not done in UPD-1: the web badge/button/chip (UPD-2), Android (UPD-3), the ADR

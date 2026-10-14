@@ -727,12 +727,20 @@ let updateCheck = null;
  * `rtime_last_played` simply absent from every owned-games entry, matching
  * the real relay's `response_model_exclude_unset` behaviour, not a fabricated
  * `0`/`null`).
- * @param {{ librarySize?: number, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean }} [options]
+ *
+ * WP UPD-5 demo pill (user decision 2026-10-14): `demoSteamAccount` seeds a
+ * demo Steam Web API key and `steam_library_steamid` (see
+ * `seedDemoSteamAccount`). Like `relayExposePlaytime` it defaults to the
+ * browser preference (`readRelayPlaytimePreference`: ON in a browser demo,
+ * OFF outside a browser), so every bare-Node test still starts from the
+ * unconfigured, gate-off baseline unless it asks otherwise.
+ * @param {{ librarySize?: number, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean, demoSteamAccount?: boolean }} [options]
  */
 export function resetDemoData({
   librarySize,
   relayExposePlaytime: rp = readRelayPlaytimePreference(),
   relayExposeLastPlayed: rl = false,
+  demoSteamAccount: seedAccount = readRelayPlaytimePreference(),
 } = {}) {
   games = buildGames(librarySize ?? readLibrarySizePreference());
   jobs = buildJobs();
@@ -741,6 +749,7 @@ export function resetDemoData({
   updateCheck = seedDemoUpdateCheck();
   resetDemoSettings();
   resetDemoSteamRelay();
+  if (seedAccount) seedDemoSteamAccount();
   relayExposePlaytime = rp;
   relayExposeLastPlayed = rl;
 }
@@ -833,23 +842,26 @@ const BOOL_FALSE_SPELLINGS = ["0", "false", "no", "off"];
 // restart", the same one-way, boot-time-only knob ADR-0010 requires of the
 // real server (there is deliberately no PATCH path for either, in demo mode
 // or the real one).
-// WP WEB-FEAT-SUGGEST-2: the playtime gate's demo starting value comes
-// from a demo-only browser preference, `steamvault.demoRelayPlaytime` = "1"
-// (same idea as `steamvault.demoLibrarySize`), so the card's "Never
-// played" pill can be shown in a browser demo without changing the shipped
-// default (OFF, ADR-0010). Outside a browser (every test) it is OFF.
-// To see the pill (on Frostline Convoy): in demo mode run
-// `localStorage.setItem("steamvault.demoRelayPlaytime", "1")`, reload,
-// then in Settings save any 32-hex-character demo Steam Web API key and a
-// SteamID64 (e.g. 76561197960287930); the Library loads the owned list on
-// open. Read at module load and on resetDemoData().
+// WP WEB-FEAT-SUGGEST-2 / WP UPD-5 demo pill (user decision 2026-10-14):
+// the browser demo shows the card's "Never played" pill out of the box. A
+// browser demo starts with the playtime gate ON, a demo Steam Web API key
+// and a demo SteamID64 (`seedDemoSteamAccount`), so the Library loads the
+// owned list on open and Frostline Convoy (cached, playtime 0) carries the
+// pill without any manual step. This is demo mode only: a real install
+// keeps `VAULT_RELAY_EXPOSE_PLAYTIME` at its shipped default, OFF (ADR-0010),
+// and nothing here reaches the server. A demo-only browser preference,
+// `steamvault.demoRelayPlaytime` = "0", opts the demo out (gate off, no key,
+// no SteamID: the real fresh-install shape); any other value or none means
+// on. Outside a browser (every bare-Node test) it is OFF, so the tests'
+// baseline stays the shipped gate-off, unconfigured shape. Read at module
+// load and on resetDemoData().
 let relayExposePlaytime = readRelayPlaytimePreference();
 let relayExposeLastPlayed = false;
 
 function readRelayPlaytimePreference() {
   try {
     if (typeof window === "undefined" || !window.localStorage) return false;
-    return window.localStorage.getItem("steamvault.demoRelayPlaytime") === "1";
+    return window.localStorage.getItem("steamvault.demoRelayPlaytime") !== "0";
   } catch {
     return false;
   }
@@ -1138,6 +1150,24 @@ function resetDemoSteamRelay() {
   steamKeyConfigured = false;
   steamKeyLast4 = null;
 }
+
+/** The browser demo's seeded Steam account (WP UPD-5 demo pill, see
+ * `readRelayPlaytimePreference`). Fictional: the key is a placeholder that
+ * only passes the 32-hex grammar (demo mode never calls Valve), and the
+ * SteamID64 is the top of the individual-account range
+ * (`STEAM_ID64_BASE + 0xffffffff`), not a person's account. */
+export const DEMO_STEAM_WEB_API_KEY = "0123456789abcdef0123456789abcdef";
+export const DEMO_STEAMID = "76561202255233023";
+
+/** Seed the demo Steam account the way an operator would set it up: the
+ * key through the same path as `PUT /v1/steam/key`, the SteamID as a stored
+ * (`db`) `steam_library_steamid` override, like a Settings save. */
+function seedDemoSteamAccount() {
+  handlePutSteamKey({ key: DEMO_STEAM_WEB_API_KEY });
+  settingsOverrides.steam_library_steamid = DEMO_STEAMID;
+}
+
+if (readRelayPlaytimePreference()) seedDemoSteamAccount();
 
 // Fictional owned-games fixture (LEARNINGS "Testing discipline": synthetic,
 // never real Steam data) — deliberately a DIFFERENT list from the cache
@@ -1884,11 +1914,12 @@ function seedDemoUpdateCheck() {
 updateCheck = seedDemoUpdateCheck();
 
 function demoUpdateStatusOut() {
-  const window = new Map(describeDemoSettings().map((i) => [i.key, i.effective])).get("schedule_window");
   const s = updateCheck;
   return {
     enabled: true,
-    scheduled: typeof window === "string" && window.length > 0,
+    // WP UPD-5: `scheduled` means "the oracle is on" (it equals `enabled`),
+    // whether or not a schedule window is configured.
+    scheduled: true,
     running: s.running,
     last_trigger: s.last_trigger,
     last_started_at: s.last_started_at,

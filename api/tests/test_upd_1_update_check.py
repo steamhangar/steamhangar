@@ -1,13 +1,15 @@
-"""WP UPD-1: the always-on update check.
+"""WP UPD-1: the always-on update check (WP UPD-5: independent of the window).
 
 Guarantees pinned here, by name:
 
-1. **Window configured, open or closed.** The scheduled check runs with a
-   closed window and with an open one, and NOT without a window (review round
-   2, "only prod checks"); the manual check runs either way. Besides that,
-   only the oracle switch and the interval gate it.
+1. **The window plays no part (WP UPD-5, user decision 2026-10-14).** The
+   scheduled check runs with a closed window, an open one and NO window at
+   all (superseding the UPD-1 review-round-2 window gate); the manual check
+   runs either way. Only the oracle switch and the interval gate it; with the
+   oracle off nothing runs, window or not.
 2. **It never downloads.** No code path of the check enqueues a job; the
-   windowed sweep alone does that, unchanged.
+   windowed sweep alone does that, unchanged, and without a window it
+   enqueues nothing even though the check now runs.
 3. **Cached games only.** Installed-but-uncached apps, apps with no content on
    disk and Steam tool packages are never asked about.
 4. **Claim-then-work.** The interval is stamped before any request, so a crash
@@ -32,7 +34,7 @@ from fastapi.testclient import TestClient
 
 from tests.conftest import TEST_API_KEY
 from tests.test_oracle import app_info, enabled_settings, one_depot
-from vault_api import depot_manifests, oracle, settings_store, update_check
+from vault_api import depot_manifests, oracle, scheduler, update_check
 from vault_api import jobs as jobs_queue
 from vault_api.config import Settings
 from vault_api.db import SCHEMA_VERSION, get_connection, init_db
@@ -76,8 +78,8 @@ def _no_network(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-#: A configured window that is CLOSED at ``NOW`` (10:00): the scheduled check
-#: needs a window to exist, not to be open.
+#: A configured window that is CLOSED at ``NOW`` (10:00). The scheduled check
+#: does not care (WP UPD-5); downloads do.
 CLOSED_WINDOW = "03:00-07:00"
 
 
@@ -397,25 +399,31 @@ def test_the_oracle_off_neither_checks_nor_claims(
     assert _no_network == []
 
 
-def test_no_window_means_no_scheduled_check_but_manual_works(
+def test_no_window_still_runs_the_scheduled_check(
     tmp_path: Path, conn: sqlite3.Connection
 ) -> None:
-    """Review round 2 ("only prod checks"): a vault without a schedule window
-    (the dev instance) never checks on its own."""
+    """WP UPD-5 (user decision 2026-10-14, superseding the UPD-1 review-round-2
+    gate): a vault without a schedule window (the dev instance) checks on its
+    own too, and the manual trigger keeps working."""
     settings = make_settings(tmp_path, schedule_window=None)
     seed_cached_app(conn, settings, 440, 441)
     fake = FakeOracle({440: "900"}, {440: 441})
     runner = update_check.UpdateCheckRunner(settings.db_path, fetch=fake, pause_seconds=0)
 
     scheduled = start_and_wait(runner, conn, settings, NOW, [440])
-    assert scheduled == update_check.NO_SCHEDULE_WINDOW
-    assert fake.urls == [] and update_check.read_last_check_at(conn) is None
+    assert scheduled == update_check.STARTED
+    assert fake.appids == [440]
+    current = status_of(conn, settings)
+    assert (current.last_trigger, current.last_outcome, current.last_stale) == (
+        "scheduled", "completed", 1,
+    )
+    assert job_count(conn) == 0
 
     manual = start_and_wait(
         runner, conn, settings, NOW, [440],
         trigger=update_check.TRIGGER_MANUAL, require_interval=False,
     )
-    assert manual == update_check.STARTED and fake.appids == [440]
+    assert manual == update_check.STARTED and fake.appids == [440, 440]
 
 
 def test_a_stopped_runner_starts_nothing_and_claims_nothing(
@@ -579,9 +587,12 @@ def test_the_tick_checks_cached_games_only(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_the_tick_without_a_window_makes_no_request(
+def test_the_tick_without_a_window_checks_but_enqueues_nothing(
     tmp_path: Path, _no_network: list[str]
 ) -> None:
+    """WP UPD-5: with no schedule window the tick still runs the update check
+    (the prefill sweep's "disabled" answer does not end the tick), while the
+    prefill sweep stays strictly window-bound: no claim, no job."""
     settings = make_settings(tmp_path, schedule_window=None)
     init_db(settings.db_path)
     conn = get_connection(settings.db_path)
@@ -591,11 +602,17 @@ def test_the_tick_without_a_window_makes_no_request(
             settings, clock=lambda: NOW, oracle_fetch=fake, update_check_pause_seconds=0
         )
         tick_and_wait(sched, conn)
-        assert fake.urls == [] and update_check.read_last_check_at(conn) is None
 
-        # A window set later through PATCH /v1/settings (a DB override) turns
-        # the scheduled check on at the next tick, no restart.
-        settings_store.set_override(conn, "schedule_window", CLOSED_WINDOW)
+        assert fake.appids == [440, 730]  # cached games only, as with a window
+        current = status_of(conn, settings)
+        assert (current.last_trigger, current.last_apps, current.last_stale) == (
+            "scheduled", 2, 1,
+        )
+        # The prefill sweep did not run: nothing queued, nothing claimed.
+        assert job_count(conn) == 0
+        assert scheduler.read_state(conn) == scheduler.EMPTY_STATE
+
+        # The interval still gates the next scheduled check.
         tick_and_wait(sched, conn)
         assert fake.appids == [440, 730]
     finally:
@@ -661,7 +678,7 @@ def test_the_tick_logs_whether_the_check_is_on_once(
 ) -> None:
     for oracle_value, window, expected in (
         ("steamcmd_api", parse_window(CLOSED_WINDOW), "Update check: ON"),
-        ("steamcmd_api", None, "Update check: scheduled checks off, no schedule window; manual check available"),
+        ("steamcmd_api", None, "Update check: ON"),
         ("", None, "Update check: OFF"),
     ):
         settings = make_settings(tmp_path, manifest_oracle=oracle_value, schedule_window=window)
@@ -680,6 +697,13 @@ def test_the_tick_logs_whether_the_check_is_on_once(
             conn.close()
         lines = [r.getMessage() for r in caplog.records if "Update check:" in r.getMessage()]
         assert len(lines) == 1 and lines[0].startswith(expected), lines
+        if oracle_value and window is None:
+            # WP UPD-5: the no-window line says the check runs and that no
+            # automatic download starts, not "scheduled checks off".
+            assert "with or without a schedule window" in lines[0], lines
+            assert "no automatic download starts" in lines[0], lines
+        if oracle_value and window is not None:
+            assert "only start inside the schedule window (03:00-07:00)" in lines[0], lines
 
 
 def test_an_open_window_still_enqueues_exactly_as_before(tmp_path: Path) -> None:
@@ -705,10 +729,16 @@ def test_an_open_window_still_enqueues_exactly_as_before(tmp_path: Path) -> None
         conn.close()
 
 
+@pytest.mark.parametrize(
+    "window", [CLOSED_WINDOW, None], ids=["window", "no-window"]
+)
 def test_the_tick_with_the_oracle_off_makes_no_request(
-    tmp_path: Path, _no_network: list[str]
+    tmp_path: Path, _no_network: list[str], window: str | None
 ) -> None:
-    settings = make_settings(tmp_path, manifest_oracle="")
+    settings = make_settings(
+        tmp_path, manifest_oracle="",
+        schedule_window=None if window is None else parse_window(window),
+    )
     init_db(settings.db_path)
     conn = get_connection(settings.db_path)
     try:
@@ -801,13 +831,14 @@ def test_the_endpoint_starts_a_background_check_and_no_download(
     assert client.get("/v1/jobs", headers=AUTH).json() == []
 
 
-def test_the_endpoint_works_without_a_window_and_reports_scheduled_false(
+def test_the_endpoint_works_without_a_window_and_reports_scheduled_true(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """WP UPD-5: ``scheduled`` means "the oracle is on", window or not."""
     client, fake = client_with_library(tmp_path, schedule_window=None)
     use_fake_oracle(monkeypatch, fake)
 
-    assert client.get("/v1/updates/status", headers=AUTH).json()["scheduled"] is False
+    assert client.get("/v1/updates/status", headers=AUTH).json()["scheduled"] is True
     assert client.post("/v1/updates/check", headers=AUTH).status_code == 202
     wait_for_check(client)
     assert fake.appids == [440, 730]
@@ -848,6 +879,7 @@ def test_the_endpoint_answers_disabled_when_the_oracle_is_off(
     assert client.app.state.update_checker._thread is None  # type: ignore[attr-defined]
     current = client.get("/v1/updates/status", headers=AUTH).json()
     assert current["enabled"] is False and current["last_started_at"] is None
+    assert current["scheduled"] is False
     assert _no_network == []
 
 

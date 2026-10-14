@@ -1316,12 +1316,14 @@ class PrefillScheduler:
                 self._tick_seconds,
             )
 
-        # WP UPD-1: the always-on update check. Runs while a schedule window
-        # is CONFIGURED (open or closed does not matter; no window = no
-        # scheduled check, review round 2) and is independent of the prefill
-        # sweep above: it only
-        # refreshes the manifest oracle for cached games, once per interval,
-        # and starts no download. This tick only DECIDES (an interval read,
+        # WP UPD-1: the always-on update check. Runs whenever the oracle is
+        # on, with a schedule window open, closed or not configured at all
+        # (WP UPD-5, user decision 2026-10-14, superseding the UPD-1 review's
+        # window gate). It does not depend on maybe_sweep above, which stays
+        # strictly window-bound (no window = "disabled", nothing enqueued) and
+        # never returns early from this tick: the check only refreshes the
+        # manifest oracle for cached games, once per interval, and starts no
+        # download. This tick only DECIDES (an interval read,
         # and on the rare due tick a claim): the cached-app selection and
         # every oracle request run on the runner's own thread, so the next
         # tick's event and prefill sweeps are never delayed by them. Last

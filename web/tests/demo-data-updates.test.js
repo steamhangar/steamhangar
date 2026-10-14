@@ -69,7 +69,7 @@ test("seed: exactly one demo game is flagged (Emberreach), so the badge and the 
 test("seed: the status reads as a finished scheduled check, and the line says when", async () => {
   const s = await status();
   assert.equal(s.enabled, true);
-  assert.equal(s.scheduled, true, "the demo ships a schedule window");
+  assert.equal(s.scheduled, true, "the demo's oracle is on (WP UPD-5: scheduled == enabled)");
   assert.equal(s.running, false);
   assert.equal(s.last_trigger, "scheduled");
   assert.equal(s.last_stale, 1);
