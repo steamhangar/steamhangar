@@ -3660,3 +3660,35 @@ for rows with a third line).
 - No column headers (optional in the brief); the BP-L full wording says
   what the installed-on column is.
 - Not checked on a real phone or in Firefox/Safari.
+
+### WP LIB-FILTER-INST-1 (web) — "Installed, not cached" library chip
+
+User request 2026-10-14: a Library filter for games an agent reports as
+installed on a PC (`installed_on` non-empty) with no bytes in the cache.
+`lib/library-filters.js` gains the chip `installed` ("Installed, not
+cached", right after "Not cached"). Its predicate is the card's own
+warning-badge state (`installedBadgeState` NOT_CACHED), so the chip lists
+exactly the cards with the orange "Installed but not cached · <PC>" badge
+and never a tool app. Like All/Cached/Not cached/Downloading/Failed it is
+always shown, with 0 when nothing matches (`installed_on` is on every
+GameSummary since AG-1; only the optional "Updates" chip depends on a
+field). A D9 group row counts once and reads the parent's row. The demo
+seed already has such a game (the AG-2 two-client fixture), so the chip
+shows 1 in demo mode without fixture changes.
+
+Tests: `library-filter-installed.test.js` 6 (definition and position;
+predicate over seven shapes incl. zero bytes, missing field, tool app,
+failed; always listed with 0; AND with search; group counts once; demo
+seed count). `library-installed-chip-wiring.test.js` 1 (the view renders
+"Installed, not cached 1", pressing it leaves only that card, aria-pressed
+follows, "All" restores). `library-filters.test.js`: the chip-order pin
+gains `installed`.
+
+Mutations, all killed: predicate on installed only; predicate on "no
+bytes" only; chip made optional; chip removed.
+
+#### Honest list
+
+- The chip row now holds six or seven chips; it already scrolls
+  horizontally inside the toolbar. Not measured in a browser.
+- The Android chip is not part of this package.
