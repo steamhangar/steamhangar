@@ -104,10 +104,18 @@ import {
   installedSectionPresence,
   INSTALLED_BADGE,
   isToolApp,
-  statusIconKind,
-  statusWordFor,
   TOOL_APP_NOTE,
+  showsUpdateState,
+  cardIconKind,
+  cardTextKind,
+  cardStatusWord,
 } from "../lib/game-status.js";
+import {
+  sheetUpdateAppids,
+  summarizeUpdateStart,
+  describeUpdateStartError,
+  UPDATE_NOW_LABEL,
+} from "../lib/updates-available.js";
 import { buildMultiPlan } from "../lib/multiplan.js";
 import { buildDepotPresentation, DEPOT_TAG } from "../lib/depot-presentation.js";
 import { findTrackedJob, detailJobActions, DETAIL_JOB_ACTION } from "../lib/detail-job.js";
@@ -574,6 +582,30 @@ function currentGroup() {
   return isGroup(row) ? row : null;
 }
 
+/** WP UPD-6 review fix: the row whose `update_available` the header shows
+ * — the group row (OR over its members, like the Library card) or the
+ * game's own row. */
+function currentUpdateRow() {
+  return currentGroup() || currentGameLike();
+}
+
+/** WP UPD-6 review fix: the app ids the sheet's "Update now" sends — the
+ * game and, for a group, its packages, each while flagged and without an
+ * active job (lib/updates-available.js `sheetUpdateAppids`). */
+function currentUpdateAppids() {
+  const gameLike = currentGameLike();
+  if (!gameLike) return [];
+  const group = currentGroup();
+  return sheetUpdateAppids(group ? [gameLike, ...group.packages] : [gameLike], state.jobs);
+}
+
+/** The structural-key part for the update state: "" when nothing shows. */
+function updatesStructuralPart(kind) {
+  const header = showsUpdateState(currentUpdateRow(), kind);
+  const ids = currentUpdateAppids();
+  return header || ids.length ? `${header ? 1 : 0}:${ids.join(",")}` : "";
+}
+
 function packageJobLookups() {
   return {
     liveJobFor: (appid) => findLiveJob(state.jobs, appid),
@@ -619,6 +651,8 @@ function computeStructuralKey() {
     // WP TOOL-APPS-2c: which packages, their status and Retry offer.
     packages: group ? packagesStructuralKey(group.packages, packageJobLookups()) : null,
     dispKind: dispKind(gameLike, liveJob),
+    // WP UPD-6 review fix: header state and the "Update now" targets.
+    updates: updatesStructuralPart(dispKind(gameLike, liveJob)),
     trackedJobStatus: trackedJob ? trackedJob.status : null,
     depotTags: presentations.map((p) => p.tag),
     // WP AG-2 (review S4 fix): ONLY whether the "Installed on" section
@@ -686,10 +720,26 @@ function buildHeader(gameLike, liveJob) {
   appidLine.textContent = `App ${state.appid}`;
   info.append(h2, appidLine);
 
-  const kind = dispKind(gameLike, liveJob);
+  info.appendChild(buildDetailStatusRow(currentUpdateRow() || gameLike, dispKind(gameLike, liveJob)));
+
+  dhead.appendChild(info);
+  return dhead;
+}
+
+/**
+ * The header's status icon and word. WP UPD-6 review fix: the same
+ * "Update available" overlay as the Library card (orange refresh glyph,
+ * `tx-stale` word) for a cached game whose row — the group row for a game
+ * with packages — carries `update_available: true`. Exported for
+ * web/tests/game-detail-sheet-update.test.js.
+ * @param {object} row the game's row (or its group row)
+ * @param {string} kind the game's dispKind
+ * @returns {HTMLElement}
+ */
+export function buildDetailStatusRow(row, kind) {
   const statusRow = document.createElement("div");
   statusRow.className = "detail-statusrow";
-  const statusIcon = createStatusIcon(statusIconKind(kind), { size: "sm" });
+  const statusIcon = createStatusIcon(cardIconKind(row, kind), { size: "sm" });
   // WP 4a.8 icon audit: the word right after this icon already says the
   // same thing visibly — hide the icon's own sr-only label so it is not
   // announced twice (same "avoid double announcement" posture as
@@ -697,13 +747,44 @@ function buildHeader(gameLike, liveJob) {
   statusIcon.setAttribute("aria-hidden", "true");
   statusRow.appendChild(statusIcon);
   const word = document.createElement("span");
-  word.className = "tx-" + kind;
-  word.textContent = statusWordFor(kind, STATUS_LABEL);
+  word.className = "tx-" + cardTextKind(row, kind);
+  word.textContent = cardStatusWord(row, kind, STATUS_LABEL);
   statusRow.appendChild(word);
-  info.appendChild(statusRow);
+  return statusRow;
+}
 
-  dhead.appendChild(info);
-  return dhead;
+/**
+ * WP UPD-6 review fix: "Update now" for a flagged cached game. `onStart`
+ * runs on click with the button busy (`disabled`, like the sheet's other
+ * action buttons). Exported for web/tests/game-detail-sheet-update.test.js.
+ * @param {number[]} appids what the press sends (`data-appids`)
+ * @param {() => Promise<void>} onStart
+ * @returns {HTMLButtonElement}
+ */
+export function buildUpdateNowButton(appids, onStart) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn primary sm detail-block";
+  btn.dataset.role = "update-now";
+  btn.textContent = UPDATE_NOW_LABEL;
+  btn.dataset.appids = appids.join(",");
+  btn.addEventListener("click", () => withButtonBusy(btn, onStart));
+  return btn;
+}
+
+/** `POST /v1/prefill` for the sheet's "Update now" — the same non-forced
+ * enqueue as Downloads' "Update now" and "Check & update". */
+async function startSheetUpdate(appids) {
+  try {
+    const refs = await api.prefill(appids);
+    const outcome = summarizeUpdateStart(refs, state.games);
+    showToast(outcome.message, { warn: outcome.warn });
+    store.refreshNow();
+  } catch (err) {
+    const outcome = describeUpdateStartError(err);
+    showToast(outcome.message, { warn: true });
+    if (outcome.refresh) store.refreshNow();
+  }
 }
 
 /** WP API-FIX-4: the tool app's server-supplied name, or null. */
@@ -1258,6 +1339,11 @@ function render() {
   } else {
     const action = statusAction(gameLike, undefined, false);
     if (action) contentEl.append(buildDownloadButton(action));
+    else {
+      // WP UPD-6 review fix: a flagged cached game (or group) offers its update.
+      const updateAppids = currentUpdateAppids();
+      if (updateAppids.length) contentEl.append(buildUpdateNowButton(updateAppids, () => startSheetUpdate(updateAppids)));
+    }
   }
 
   contentEl.append(buildDepotsSection());

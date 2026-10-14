@@ -3545,8 +3545,8 @@ card whose word does not already say it (failed, running).
 Downloads gets "Updates available (N)" between Paused and Queue
 (`lib/updates-available.js`): the flagged games without a queued, running
 or paused prefill job, sorted by name, each with its size and "Update
-now", plus "Update all" and a note from `GET /v1/schedule` ("Downloads
-automatically in the schedule window HH:MM–HH:MM", the installed-only
+now", plus "Update all" and a note from `GET /v1/schedule` ("These download
+automatically in the schedule window HH:MM–HH:MM.", the installed-only
 variant when "Include cached games" is off, "Manual only — no schedule
 window is set" without a window, nothing when the read fails). Both
 buttons send `POST /v1/prefill` with the listed app ids (the enqueue
@@ -3577,8 +3577,35 @@ Survived (belt and braces): the in-flight guard in `startUpdates` alone
 
 - No browser run: the orange word and row fit at 360 px were reasoned from
   the CSS, not measured.
-- The detail sheet header still says "Current" for a flagged game (out of
-  scope); the Library cards and Downloads carry the new state.
 - `GET /v1/jobs` returns the newest 20 jobs; an older still-queued job
   would leave its game listed, and "Update now" then reads "already
   queued" (server dedupe).
+
+#### Review fixes (UPD-6 round 1)
+
+- Detail sheet: the header uses the card overlay (`buildDetailStatusRow`,
+  group-aware via the group row) and a flagged cached game without a job
+  offers "Update now" (`buildUpdateNowButton`, `POST /v1/prefill` with
+  `sheetUpdateAppids`: the game and its flagged packages without an active
+  job). The structural key gains an optional `updates` part, so a flag
+  flip re-renders an open sheet.
+- Focus: the in-flight state is patched in place (`paintUpdateBusy`), never
+  part of the rebuild key; on a rebuild the focused button's replacement
+  gets focus, else "Update all", else the Queue heading (`tabIndex -1`).
+- Note wording: "These download automatically in the schedule window
+  HH:MM–HH:MM." / "Those installed on a PC download automatically …".
+- `paintUpdates()` moved out of `fullRender()` to its explicit callers; the
+  jobs subscriber's call is pinned by a jobs-only tick with the games poll
+  held. `UPDATING_ALL_LABEL` renamed `STARTING_LABEL`.
+
+Tests: `game-detail-sheet-update.test.js` 9 (header overlay, plain, tool,
+group, button, four wiring pins), `detail-render-plan.test.js` +1,
+`updates-available.test.js` +1 (`sheetUpdateAppids`),
+`downloads-updates-wiring.test.js` +1 and focus assertions (same button
+while busy, "Update all" after the row leaves, Queue heading after the
+section empties).
+
+Mutations, all killed: no `paintUpdates()` in the jobs subscriber;
+in-flight state back in the rebuild key; no focus restore; no Queue
+anchor; header without the group row; no `updates` key part; sheet ids
+without the job filter.

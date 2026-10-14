@@ -57,6 +57,7 @@ const server = {
   gated: false,
   held: [],
   posts: [], // {path, body}
+  gamesGate: null, // a promise: GET /v1/games waits for it
   nextJobId: 500,
 };
 function respond(status, data) {
@@ -74,7 +75,10 @@ globalThis.fetch = async (url, init = {}) => {
   const method = (init.method || "GET").toUpperCase();
   const p = u.pathname;
   if (method === "GET" && p === "/v1/jobs") return respond(200, server.jobs);
-  if (method === "GET" && p === "/v1/games") return respond(200, server.games);
+  if (method === "GET" && p === "/v1/games") {
+    if (server.gamesGate) await server.gamesGate;
+    return respond(200, server.games);
+  }
   if (method === "GET" && p === "/v1/clients") return respond(200, []);
   if (method === "GET" && p === "/v1/cache/summary") return respond(200, {});
   if (method === "GET" && p === "/v1/schedule") return respond(server.scheduleStatus, server.schedule);
@@ -182,7 +186,7 @@ test("schedule note: manual only without a window; the window when one is set; n
     server.schedule = { enabled: true, window: "22:00-06:00", sweep_include_cached: true };
     s = await open();
     await until(() => /22:00–06:00/.test(note(s).textContent), "window note");
-    assert.equal(note(s).textContent, "Downloads automatically in the schedule window 22:00–06:00.");
+    assert.equal(note(s).textContent, "These download automatically in the schedule window 22:00–06:00.");
     store.stop();
 
     server.scheduleStatus = 500;
@@ -209,6 +213,8 @@ test("MUTATION PIN: 'Update now' sends POST /v1/prefill with exactly that appid 
     assert.deepEqual(server.posts[0], { path: "/v1/prefill", body: { appids: [10] } });
     // Busy: the pressed row says so; every update button is aria-disabled, never `disabled`.
     assert.equal(nowBtn(s, 10).textContent, "Starting…");
+    assert.equal(nowBtn(s, 10), btn, "MUTATION PIN: busy is patched in place, the pressed button is not rebuilt");
+    assert.equal(dom.document.activeElement, btn, "focus stays on the pressed button while busy");
     assert.equal(nowBtn(s, 10).getAttribute("aria-disabled"), "true");
     assert.equal(nowBtn(s, 10).disabled === true, false);
     assert.equal(allBtn(s).getAttribute("aria-disabled"), "true");
@@ -221,6 +227,7 @@ test("MUTATION PIN: 'Update now' sends POST /v1/prefill with exactly that appid 
     assert.equal(toastText(), "1 queued for update");
     await until(() => rowNames(s).join() === "Zephyr Run", "the started game left the list once its job showed");
     assert.equal(heading(s), "Updates available (1)");
+    assert.equal(dom.document.activeElement, allBtn(s), "MUTATION PIN: the pressed row is gone, focus moved to 'Update all'");
     assert.ok(s.querySelector('.qrow .nm[data-appid="10"]'), "and sits in the Queue");
     assert.equal(nowBtn(s, 30).getAttribute("aria-disabled"), null, "idle again");
   } finally {
@@ -240,12 +247,34 @@ test("MUTATION PIN: 'Update all' sends every listed appid in one POST /v1/prefil
   try {
     const s = await open();
     await until(() => rows(s).length === 2, "the paused one is not listed");
+    allBtn(s).focus();
     click(allBtn(s));
     await until(() => server.posts.length === 1, "POST sent");
     assert.deepEqual(server.posts[0], { path: "/v1/prefill", body: { appids: [10, 30] } });
     await until(() => box(s).hidden === true, "all moved into the queue");
     assert.equal(toastText(), "2 queued for update");
+    const queueHeading = s.children.find((c) => c.tagName === "H4" && c.textContent.startsWith("Queue"));
+    assert.equal(dom.document.activeElement, queueHeading, "MUTATION PIN: section gone, focus on the Queue heading");
+    assert.equal(queueHeading.tabIndex, -1, "focusable by script only");
   } finally {
+    store.stop();
+  }
+});
+
+test("MUTATION PIN: a new job alone (games poll still out) takes the game out of the list", async () => {
+  reset();
+  server.games = [game(10, "Aurora", { update_available: true }), game(30, "Zephyr Run", { update_available: true })];
+  let release;
+  try {
+    const s = await open();
+    await until(() => rows(s).length === 2, "two rows");
+    server.gamesGate = new Promise((r) => (release = r));
+    server.jobs = [{ id: 7, appid: 30, type: "prefill", status: "queued", stop_request: null, created_at: T }];
+    store.refreshNow();
+    await until(() => rowNames(s).join() === "Aurora", "jobs tick alone removed Zephyr Run");
+  } finally {
+    server.gamesGate = null;
+    if (release) release();
     store.stop();
   }
 });

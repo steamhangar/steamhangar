@@ -62,7 +62,7 @@
  * @returns {string} an opaque, comparable signature — equal in and equal
  *   out is the only contract; never parse this string.
  */
-export function buildDetailStructuralKey({ dispKind, trackedJobStatus, depotTags, installedBadge, packages }) {
+export function buildDetailStructuralKey({ dispKind, trackedJobStatus, depotTags, installedBadge, packages, updates }) {
   const key = {
     k: dispKind,
     j: trackedJobStatus ?? null,
@@ -73,5 +73,9 @@ export function buildDetailStructuralKey({ dispKind, trackedJobStatus, depotTags
   // `packagesStructuralKey`), only for a game that has packages, so every
   // other game's key is unchanged.
   if (typeof packages === "string") key.p = packages;
+  // WP UPD-6 review fix: the "Update available" header state and the app
+  // ids the sheet's "Update now" would send, only when either is present,
+  // so every other game's key is unchanged.
+  if (typeof updates === "string" && updates) key.u = updates;
   return JSON.stringify(key);
 }

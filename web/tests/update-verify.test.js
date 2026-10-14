@@ -254,9 +254,12 @@ test("sheet wiring: the header and the structural key both take dispKind(gameLik
   const src = readFileSync(path.join(webDir, "js", "components", "game-detail-sheet.js"), "utf8");
   const header = functionBody(src, "function buildHeader(gameLike, liveJob) {");
   assert.ok(header, "buildHeader() not found");
-  assert.match(header, /const kind = dispKind\(gameLike, liveJob\);/);
-  assert.match(header, /createStatusIcon\(statusIconKind\(kind\)/);
-  assert.match(header, /word\.className = "tx-" \+ kind;/);
+  // WP UPD-6 review fix: the status row moved into buildDetailStatusRow.
+  assert.match(header, /buildDetailStatusRow\(currentUpdateRow\(\) \|\| gameLike, dispKind\(gameLike, liveJob\)\)/);
+  const row = functionBody(src, "export function buildDetailStatusRow(row, kind) {");
+  assert.ok(row, "buildDetailStatusRow() not found");
+  assert.match(row, /createStatusIcon\(cardIconKind\(row, kind\)/);
+  assert.match(row, /word\.className = "tx-" \+ cardTextKind\(row, kind\);/);
   const key = functionBody(src, "function computeStructuralKey() {");
   assert.ok(key, "computeStructuralKey() not found");
   assert.match(key, /dispKind: dispKind\(gameLike, liveJob\)/, "a Downloading->Verifying flip rebuilds the header");

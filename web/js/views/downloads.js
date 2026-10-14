@@ -99,7 +99,7 @@ import {
   updatesListKey,
   UPDATE_NOW_LABEL,
   UPDATE_ALL_LABEL,
-  UPDATING_ALL_LABEL,
+  STARTING_LABEL,
 } from "../lib/updates-available.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
@@ -529,9 +529,8 @@ function updateButton(label, variant, ariaLabel, onClick) {
   btn.className = "btn sm" + (variant ? " " + variant : "");
   btn.textContent = label;
   btn.setAttribute("aria-label", ariaLabel);
-  // Busy: aria-disabled plus this guard, not `disabled` (docs/LEARNINGS.md,
-  // WP WEB-FEAT-1), so a focused button keeps its focus.
-  if (updatesInFlight !== null) btn.setAttribute("aria-disabled", "true");
+  // Busy (paintUpdateBusy): aria-disabled plus this guard, not `disabled`
+  // (docs/LEARNINGS.md, WP WEB-FEAT-1), so a focused button keeps its focus.
   btn.addEventListener("click", () => {
     if (btn.disabled || updatesInFlight !== null) return;
     onClick();
@@ -552,31 +551,69 @@ function buildUpdateRow(game, gamesByAppid) {
   const size = document.createElement("span");
   size.className = "usize";
   size.textContent = sizeOfRow(game) || "—";
-  const busy = updatesInFlight === game.appid;
-  const btn = updateButton(busy ? UPDATING_ALL_LABEL : UPDATE_NOW_LABEL, "primary", updateNowAriaLabel(title), () =>
+  const btn = updateButton(UPDATE_NOW_LABEL, "primary", updateNowAriaLabel(title), () =>
     startUpdates([game.appid], game.appid),
   );
   btn.dataset.role = "update-now";
+  // Not `data-appid`: patchNames rewrites the text of every such node.
+  btn.dataset.updateAppid = String(game.appid);
   row.append(nm, size, btn);
   return row;
 }
 
-/** Sync the "Updates available" section with the games, jobs, schedule,
- * in-flight and connection state. Rebuilds only on a content change. */
+/** Which update button `btn` is: `"all"`, its row's appid, or null. Reads
+ * the button's own data attributes (no `closest`, see buildUpdateRow). */
+function updateButtonId(btn) {
+  if (!btn || !btn.dataset) return null;
+  if (btn.dataset.role === "update-all") return "all";
+  if (btn.dataset.role === "update-now" && btn.dataset.updateAppid) return Number(btn.dataset.updateAppid);
+  return null;
+}
+
+/** Which update button of this section has focus right now, or null. */
+function focusedUpdateButton() {
+  const el = document.activeElement;
+  for (const btn of els.updates.querySelectorAll("button")) if (btn === el) return updateButtonId(btn);
+  return null;
+}
+
+/** Label and busy state of the update buttons, patched in place (review
+ * fix): an in-flight change alone must not rebuild the buttons, or the one
+ * just pressed loses keyboard focus. */
+function paintUpdateBusy() {
+  const busy = updatesInFlight !== null;
+  for (const btn of els.updates.querySelectorAll("button")) {
+    const role = btn.dataset.role;
+    const which = updateButtonId(btn);
+    const idle = role === "update-all" ? UPDATE_ALL_LABEL : UPDATE_NOW_LABEL;
+    const label = updatesInFlight === which ? STARTING_LABEL : idle;
+    if (btn.textContent !== label) btn.textContent = label;
+    if (busy) btn.setAttribute("aria-disabled", "true");
+    else btn.removeAttribute("aria-disabled");
+  }
+}
+
+/**
+ * Sync the "Updates available" section with the games, jobs, schedule and
+ * connection state. Rebuilds only when its content changes; the in-flight
+ * state is patched in place (`paintUpdateBusy`). On a rebuild a focused
+ * update button keeps focus on its replacement; when its row is gone focus
+ * moves to "Update all", and when the whole section is gone to the Queue
+ * heading (the started game is there now).
+ */
 function paintUpdates() {
   if (!mounted() || !els.updates) return;
   const gamesByAppid = gamesByAppidMap();
   const titleOf = (g) => nameFor(g.appid, gamesByAppid);
   const rows = state.gamesKnown ? pendingUpdates(state.games, state.jobs, titleOf) : [];
   const note = scheduleNote(state.schedule);
-  const key = [
-    updatesListKey(rows, titleOf, sizeOfRow),
-    note ?? "",
-    String(updatesInFlight),
-    String(isConnectionLost()),
-  ].join("\u0000");
-  if (els.updatesKey === key) return;
+  const key = [updatesListKey(rows, titleOf, sizeOfRow), note ?? "", String(isConnectionLost())].join("\u0000");
+  if (els.updatesKey === key) {
+    paintUpdateBusy();
+    return;
+  }
   els.updatesKey = key;
+  const hadFocus = focusedUpdateButton();
 
   const { updates, updatesHeading, updatesNote, updatesActs, updatesBody } = els;
   updates.hidden = rows.length === 0;
@@ -585,16 +622,26 @@ function paintUpdates() {
   updatesNote.textContent = note ?? "";
   updatesActs.replaceChildren();
   updatesBody.replaceChildren();
-  if (!rows.length) return;
-  const all = updateButton(
-    updatesInFlight === "all" ? UPDATING_ALL_LABEL : UPDATE_ALL_LABEL,
-    "",
-    updateAllAriaLabel(rows.length),
-    () => startUpdates(rows.map((g) => g.appid), "all"),
-  );
-  all.dataset.role = "update-all";
-  updatesActs.appendChild(all);
-  for (const g of rows) updatesBody.appendChild(buildUpdateRow(g, gamesByAppid));
+  if (rows.length) {
+    const all = updateButton(UPDATE_ALL_LABEL, "", updateAllAriaLabel(rows.length), () =>
+      startUpdates(
+        rows.map((g) => g.appid),
+        "all",
+      ),
+    );
+    all.dataset.role = "update-all";
+    updatesActs.appendChild(all);
+    for (const g of rows) updatesBody.appendChild(buildUpdateRow(g, gamesByAppid));
+  }
+  paintUpdateBusy();
+
+  if (hadFocus === null) return;
+  const same =
+    hadFocus === "all"
+      ? updatesActs.querySelector('[data-role="update-all"]')
+      : Array.from(updatesBody.querySelectorAll('[data-role="update-now"]')).find((b) => updateButtonId(b) === hadFocus);
+  const target = same || updatesActs.querySelector('[data-role="update-all"]') || els.queueHeading;
+  target.focus();
 }
 
 // ---------------------------------------------------------------------
@@ -1068,7 +1115,6 @@ function fullRender() {
     for (const job of p.history) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
   }
 
-  paintUpdates();
   applyPendingHighlight();
 }
 
@@ -1171,6 +1217,7 @@ function buildSection() {
 
   const queueHeading = document.createElement("h4");
   queueHeading.className = "sec";
+  queueHeading.tabIndex = -1; // WP UPD-6: focus anchor when the updates section empties
   queueHeading.append("Queue ");
   const queueCount = document.createElement("span");
   queueCount.className = "n";
@@ -1215,6 +1262,7 @@ function buildSection() {
     updatesActs,
     updatesBody,
     updatesKey: null,
+    queueHeading,
   };
   return section;
 }
@@ -1234,10 +1282,12 @@ store.subscribe("jobs", ({ items, diff }) => {
   const plan = planJobsUpdate(diff);
   if (plan.full) {
     fullRender();
-  } else {
-    if (plan.patchStopRequest.length) patchStopRequests(plan.patchStopRequest);
-    paintUpdates(); // WP UPD-6: a new job takes its game out of the list
+  } else if (plan.patchStopRequest.length) {
+    patchStopRequests(plan.patchStopRequest);
   }
+  // WP UPD-6: a new job takes its game out of the list, without waiting for
+  // a games poll (pinned in downloads-updates-wiring.test.js).
+  paintUpdates();
 });
 
 /** WP WEB-FEAT-6: true when a job card's badge kind no longer matches its
@@ -1261,10 +1311,8 @@ store.subscribe("games", ({ items }) => {
   state.gamesKnown = true;
   if (mounted()) maybeLoadOwnedNames();
   if (jobCardKindsStale()) fullRender();
-  else {
-    patchNames();
-    paintUpdates(); // WP UPD-6: a flag set or cleared by this poll
-  }
+  else patchNames();
+  paintUpdates(); // WP UPD-6: a flag set or cleared by this poll
 });
 
 // WP WEB-FIX-4: an owned list that lands (from the Library or from this
@@ -1279,6 +1327,7 @@ ownedLibrary.subscribe(() => {
 // state (including Pausing…/Cancelling…) is re-derived from scratch.
 onConnectionChange(() => {
   fullRender();
+  paintUpdates(); // WP UPD-6: the offline gate
 });
 
 onViewChange((view) => {
@@ -1295,6 +1344,7 @@ export function renderDownloads() {
   const section = buildSection();
   sectionEl = section;
   fullRender();
+  paintUpdates(); // WP UPD-6
   loadSchedule(); // WP UPD-6: the section's schedule note
   return section;
 }

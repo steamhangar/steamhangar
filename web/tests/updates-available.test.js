@@ -19,7 +19,9 @@ import {
   summarizeUpdateStart,
   describeUpdateStartError,
   updatesListKey,
+  sheetUpdateAppids,
   MANUAL_ONLY_NOTE,
+  STARTING_LABEL,
 } from "../js/lib/updates-available.js";
 import { ERROR_KINDS } from "../js/errors.js";
 
@@ -63,7 +65,14 @@ test("pendingUpdates: sorts by the caller's title (unnamed apps), ties by appid"
   assert.deepEqual(rows.map((r) => r.appid), [7, 8, 9]);
 });
 
+test("MUTATION TARGET -- sheetUpdateAppids: flagged members without an active job, in appid order", () => {
+  const members = [g(500, "Parent", { update_available: false }), g(502, "Pack B"), g(501, "Pack A"), g(503, "Pack C")];
+  assert.deepEqual(sheetUpdateAppids(members, [job(503, "queued")]), [501, 502]);
+  assert.deepEqual(sheetUpdateAppids([g(1, "A", { update_available: false })], []), []);
+});
+
 test("wording: heading, aria-labels", () => {
+  assert.equal(STARTING_LABEL, "Starting…");
   assert.equal(updatesHeadingText(7), "Updates available (7)");
   assert.equal(updateAllAriaLabel(1), "Update all 1 game");
   assert.equal(updateAllAriaLabel(7), "Update all 7 games");
@@ -79,7 +88,7 @@ test("formatWindow: HH:MM-HH:MM gets an en dash; anything else is shown as confi
 test("MUTATION TARGET -- scheduleNote: a window -> automatic; none -> manual only; unknown -> no claim", () => {
   assert.equal(
     scheduleNote({ enabled: true, window: "22:00-06:00", sweep_include_cached: true }),
-    "Downloads automatically in the schedule window 22:00–06:00.",
+    "These download automatically in the schedule window 22:00–06:00.",
   );
   assert.equal(scheduleNote({ enabled: false, window: null, sweep_include_cached: true }), MANUAL_ONLY_NOTE);
   assert.equal(MANUAL_ONLY_NOTE, "Manual only — no schedule window is set.");
@@ -93,7 +102,7 @@ test("MUTATION TARGET -- scheduleNote: with 'Include cached games' off the sweep
   const note = scheduleNote({ enabled: true, window: "01:00-05:00", sweep_include_cached: false });
   assert.equal(
     note,
-    "Games installed on a PC download automatically in the schedule window 01:00–05:00; the others only when you start them here.",
+    "Those installed on a PC download automatically in the schedule window 01:00–05:00; the others only when you start them here.",
   );
 });
 
@@ -159,7 +168,7 @@ test("demo: the flagged game is listed, the demo window gives the automatic note
     assert.ok(rows.length >= 1, "at least one flagged demo game");
     assert.ok(rows.some((r) => r.name === "Emberreach"), "the demo's flagged game");
     const schedule = await demoRequest("GET", "/v1/schedule");
-    assert.equal(scheduleNote(schedule), "Downloads automatically in the schedule window 22:00–06:00.");
+    assert.equal(scheduleNote(schedule), "These download automatically in the schedule window 22:00–06:00.");
 
     const refs = await demoRequest("POST", "/v1/prefill", { body: { appids: rows.map((r) => r.appid) } });
     assert.match(summarizeUpdateStart(refs, games).message, /queued for update/);

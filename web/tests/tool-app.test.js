@@ -296,8 +296,12 @@ test("sheet wiring: the header uses the tool name, the dash glyph and the tool w
   const body = functionBody(detailJs, "function buildHeader(gameLike, liveJob) {");
   assert.ok(body, "buildHeader() not found in game-detail-sheet.js");
   assert.match(body, /toolAppName\(gameLike\)/);
-  assert.match(body, /createStatusIcon\(statusIconKind\(kind\)/);
-  assert.match(body, /statusWordFor\(kind, STATUS_LABEL\)/);
+  // WP UPD-6 review fix: the status row is buildDetailStatusRow; the card
+  // helpers fall through to statusIconKind/statusWordFor (TOOL -> dash, tool word).
+  const row = functionBody(detailJs, "export function buildDetailStatusRow(row, kind) {");
+  assert.ok(row, "buildDetailStatusRow() not found");
+  assert.match(row, /createStatusIcon\(cardIconKind\(row, kind\)/);
+  assert.match(row, /cardStatusWord\(row, kind, STATUS_LABEL\)/);
 });
 
 // ---------------------------------------------------------------------
@@ -351,6 +355,6 @@ test("MUTATION TARGET -- card: every status icon of a tool app is hidden from as
   }));
 
 test("sheet wiring: the header icon is aria-hidden next to its word", () => {
-  const body = functionBody(detailJs, "function buildHeader(gameLike, liveJob) {");
+  const body = functionBody(detailJs, "export function buildDetailStatusRow(row, kind) {");
   assert.match(body, /statusIcon\.setAttribute\("aria-hidden", "true"\);/);
 });

@@ -23,6 +23,11 @@
  * non-forced, changed-chunks-only run unless a deletion or GC touched the
  * app's depots — the toast says so, as "Check & update" does.
  *
+ * **Detail sheet (review fix).** `sheetUpdateAppids` picks the app ids the
+ * detail sheet's "Update now" sends for one game: the game itself and, for
+ * a group, its content packages — each only while flagged and without an
+ * active job, the same rule as the list.
+ *
  * **Schedule note.** From `GET /v1/schedule` (read once per view mount):
  * with a window (`enabled`) the sweep downloads automatically in it — for
  * every cached game when `sweep_include_cached` is on, otherwise only for
@@ -38,7 +43,7 @@ import { ERROR_KINDS } from "../errors.js";
 export const UPDATES_HEADING = "Updates available";
 export const UPDATE_NOW_LABEL = "Update now";
 export const UPDATE_ALL_LABEL = "Update all";
-export const UPDATING_ALL_LABEL = "Starting…";
+export const STARTING_LABEL = "Starting…";
 export const MANUAL_ONLY_NOTE = "Manual only — no schedule window is set.";
 
 /** Job statuses that put an app into the normal queue (Active / Paused /
@@ -66,6 +71,17 @@ export function pendingUpdates(games, jobs, titleOf = (g) => String(g.name ?? ""
     .map((g) => ({ g, t: titleOf(g).toLowerCase() }))
     .sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : a.g.appid - b.g.appid))
     .map(({ g }) => g);
+}
+
+/**
+ * The app ids the detail sheet's "Update now" sends (module header): the
+ * flagged members without an active job, in appid order.
+ * @param {object[]} members the game's raw row, plus its packages' raw rows for a group
+ * @param {object[] | null | undefined} jobs `GET /v1/jobs` rows
+ * @returns {number[]}
+ */
+export function sheetUpdateAppids(members, jobs) {
+  return pendingUpdates(members, jobs, () => "").map((g) => g.appid);
 }
 
 /** "Updates available (N)". */
@@ -108,11 +124,11 @@ export function scheduleNote(schedule) {
   const window = formatWindow(schedule.window);
   if (schedule.sweep_include_cached === false) {
     return (
-      `Games installed on a PC download automatically in the schedule window ${window}; ` +
+      `Those installed on a PC download automatically in the schedule window ${window}; ` +
       "the others only when you start them here."
     );
   }
-  return `Downloads automatically in the schedule window ${window}.`;
+  return `These download automatically in the schedule window ${window}.`;
 }
 
 /**
