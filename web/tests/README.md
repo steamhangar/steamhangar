@@ -1615,6 +1615,9 @@ was corrected in place rather than left stale.
 
 ### WP 4h.2 — Suggestions panel (Phase 4h)
 
+*Removed by WP WEB-FEAT-SUGGEST-2 (2026-10-13); the files named below
+(`decision-panel*.test.js`) no longer exist. See that section at the end.*
+
 Plan-vs-brief conflict resolved before any code was written (recorded as
 D-16, `docs/WORKPACKAGES.md`): `docs/PROJECT_PLAN.md`:1867-1869 requires
 BOTH a right-hand column at BP-XL (>=1800px) AND a collapsible card below
@@ -3397,3 +3400,108 @@ Suite: **1382 tests, 1382 pass, 0 fail**.
 - Demo mode has no `/v1/updates/*` routes and no `update_available` on its
   games, so the feature is hidden there (the 404 path).
 - The wiring tests poll with the real 2 s interval (about 7 s for the file).
+
+### WP WEB-FIX-UPD-VIS — one Library toolbar row, visible check buttons, demo update check
+
+User feedback and layout 2026-10-13: the check buttons read as a full-width
+text bar. The Library toolbar is now one row, `.lib-bar`: `.lib-filters`
+(search, then the chips) on the left, `.lib-checkbtns` on the right with
+"Check updates" as `.btn.primary` (accent fill, check only) and "Check &
+update all cached games" as plain `.btn` (filled neutral, it downloads).
+Search, chips and buttons share `--tool-h` (40px below BP-M, 36px from
+BP-M) and one centre line; the chips never wrap any more (one scrolling
+line). Below BP-M search and chips take a line each and the buttons fill
+the next line (each on its own line when both labels do not fit); at BP-M
+the buttons stay in the row while search + every chip + buttons fit,
+otherwise they wrap onto their own line, right-aligned; from BP-L up the
+row stays ONE row (review fix): `.lib-filters` has a zero basis and a
+minimum of search + `--chips-min` (160px), so the chips scroll first and
+the buttons wrap only below that minimum. A focused chip draws its ring
+inside (`outline-offset:-2px`), the scroll clip would cut it otherwise. The status lines
+("Updates last checked …", the owned-list notice) sit under the row in
+`.lib-status`. WP 4e.2's BP-L named-area grid on `.view-library` is gone
+(the row lays itself out); `--search-w` is now the search width in the row
+(260px).
+
+Demo mode now serves `POST /v1/updates/check` / `GET /v1/updates/status`
+(a started check answers `running` to one read, then finishes) and
+`update_available` / `update_checked_at` on the rows, with Emberreach
+flagged; a finished prefill of it clears the flag.
+
+Tests: `demo-data-updates.test.js` 6 (keys equal `UpdateCheckStatusOut` /
+`UpdateCheckStartOut` and the GameSummary fields read from the Python
+source, the seed flag and chip, seeded status line, check run, flag
+cleared by a prefill), `library-update-check-wiring.test.js` +1 (row
+structure, primary/plain button classes), `css-layout-foundation.test.js`
+(no `.view-library` grid, `.lib-bar` rules, BP-M row rules, chips not
+wrapping, `--search-w: 260px`), child-order pins updated in
+`library-owned-wiring.test.js` and `css-downloads-settings-layout.test.js`.
+
+Mutations, all killed: "Check updates" back to `btn ghost sm`; no
+`margin-left:auto` on the BP-M button group; no flag clear after a demo
+prefill.
+
+#### Honest list
+
+- No browser run: the row's real wrap points depend on font metrics and
+  chip counts, only DOM and CSS rules were checked.
+
+### WP WEB-FEAT-SUGGEST-2 — suggestions panel removed, statements moved
+
+User decision 2026-10-13 (replaces WEB-FEAT-SUGGEST-1). The Phase 4h panel
+(`components/decision-panel.js`, its `<aside>` in index.html, the BP-L
+panel row, the BP-XL `.app.has-decision-panel` column, `--panel-w`, the
+two `steamvault.decisionPanel*` storage keys) is gone. `lib/decision-
+support.js` keeps only what the moved statements need:
+
+- detail sheet: "Last update downloaded today / yesterday / N days ago"
+  (`lastUpdateDownloadedText`, same gating as the panel: `changed` + a real
+  day count), a `data-role="updatedl"` fact line, patched per tick;
+- card: a "Never played" pill right of the status pill (`.capbadges` now
+  holds the status pill; ellipsis on its text boxes; "Unplayed" in Compact, a `.playbadge` twin in
+  the list layout, hidden in select mode), only for a cached card whose
+  owned-list `playtime_forever` is a real 0 (ADR-0010 gate on); the card's
+  accessible name gets "Fully cached, never played". The Library copies
+  the value as `owned_playtime_forever` (`withOwnedPlaytime`);
+- bell: ONE "Check due" entry for cached games whose last update check
+  (newer of `update_checked_at` and `last_manifest_check`) is 14+ days
+  old (`staleUpdateChecks`, `syncUpdateCheckDue`). Same games, a day
+  passing or a game leaving update it in place; it disappears when the
+  list empties. Opening the bell acknowledges its games, persisted in
+  `steamvault.updateCheckDueSeen` (guarded; pruned to the games still
+  overdue), so a reload raises it READ for the same games and only a NEW
+  game makes it unread (review fix). Its text names "Check updates" only
+  while that button exists (update-check phase idle/running); with the
+  oracle off it says update checks are turned off, otherwise nothing
+  extra;
+- "unchanged for N days" is dropped.
+
+Demo: Glass Meridian's last check is 20 days old (the seeded scheduled
+run failed for it), so the bell shows the entry; Frostline Convoy is owned
+with playtime 0. The pill needs the playtime gate, OFF by default as in a
+real install: set `localStorage.steamvault.demoRelayPlaytime = "1"`,
+reload, then set a demo Steam key and SteamID in Settings.
+
+Tests: `decision-support.test.js` rewritten (18), `notification-log.test.js`
++6 (`syncUpdateCheckDue` both directions, no-spam pins, navigation),
+`game-card-never-played.test.js` 7, `suggestions-moved-wiring.test.js` 3
+(detail sheet and bell wiring, nothing of the panel left),
+`demo-data-change-frequency.test.js` end-to-end case rewritten; the two
+`decision-panel*` files and the panel pins in `css-bulk-bar-room`,
+`app-storage-guard`, `owned-names-wiring` and `css-mobile-overflow` were
+removed with the panel.
+
+Mutations, all killed: entry always re-raised (no-spam), pill call removed
+from `buildCard`, pill fragment removed from the card name, threshold 30,
+pill without the CACHED kind check.
+
+#### Honest list
+
+- No browser run: the pill's fit was reasoned from the CSS sizes (base
+  tile ~173px, Compact uses the short word), not measured.
+- The bell entry is not individually dismissible (no notification is);
+  opening the bell marks it read, and it stays read (across reloads)
+  until a new game joins it.
+- The detail line says "downloaded": `manifest_days_since_last_change`
+  comes from the vault's own prefill (`manifest_ingest`), not Steam's
+  publish date (review fix; first draft said "on Steam").

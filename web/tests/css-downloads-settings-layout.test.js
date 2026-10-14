@@ -111,11 +111,10 @@ test(".view-library is deliberately excluded from the capped-column rule — it 
   const body = ruleBody(bpL.body, ".view-downloads, .view-settings");
   assert.ok(body);
   assert.equal(/view-library/.test(bpL.body.slice(bpL.body.indexOf(".view-downloads, .view-settings"), bpL.body.indexOf(".view-downloads, .view-settings") + 200)), false);
-  // Structural cross-check the other direction too: .view-library's own
-  // BP-L rule (pinned by css-layout-foundation.test.js) must still exist
-  // and must NOT have been folded into this file's selector list.
-  const libraryBody = ruleBody(bpL.body, ".view-library");
-  assert.ok(libraryBody, ".view-library's own BP-L rule is missing — it must keep its independent grid layout, untouched by this WP");
+  // WP WEB-FIX-UPD-VIS removed .view-library's own BP-L grid (the toolbar
+  // row is `.lib-bar`'s flexbox now, css-layout-foundation.test.js); the
+  // library still must not appear in this capped-column list anywhere.
+  assert.equal(/\.view-library\b/.test(body), false);
 });
 
 // ---------------------------------------------------------------------

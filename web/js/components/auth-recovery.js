@@ -4,7 +4,7 @@
  * Before this module, a vault API key that was rotated or revoked server-
  * side left the web UI silently dead: every polling-store subscriber
  * (`views/library.js`, `views/downloads.js`, `components/bypass-banner.js`,
- * `clients-sheet.js`, `decision-panel.js`, `rail-panel.js`,
+ * `clients-sheet.js`, `rail-panel.js`,
  * `game-detail-sheet.js`) drops the store's `{error}` payloads on purpose
  * (a transient poll failure must not blank a working screen), and nothing
  * anywhere consumed `ERROR_KINDS.AUTH` except `checkVaultApiKey` itself. So
@@ -38,8 +38,8 @@
  *     unresolved and the next tick still 401s, the notice still gets its
  *     one chance.
  *
- * Same dependency-injected factory shape as `rail-panel.js`/
- * `decision-panel.js` (no import-time side effects, every collaborator
+ * Same dependency-injected factory shape as `rail-panel.js`
+ * (no import-time side effects, every collaborator
  * passed in) so `web/tests/auth-recovery.test.js` drives it with a fake
  * store and a recording `openOnboarding` — no `document`, no network.
  *

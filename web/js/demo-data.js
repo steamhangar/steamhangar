@@ -129,6 +129,11 @@ function makeGame({
   // at it) — see buildCuratedGames() for which two games exercise the
   // cached/not-cached badge states.
   installedOn = [],
+  // WP WEB-FIX-UPD-VIS: the stored oracle verdict "stale" for this app (WP
+  // UPD-1's `update_available`). Demo-only flag: the projection below adds
+  // the real rule's second half (only while the app has bytes in the
+  // cache), and a finished prefill of this app clears it (advanceJob).
+  updateAvailable = false,
 }) {
   return {
     appid,
@@ -150,6 +155,11 @@ function makeGame({
     depots,
     _demoGcReclaimableBytes: gcReclaimableBytes,
     _demoGcHeldBackBytes: gcHeldBackBytes,
+    _demoUpdateAvailable: updateAvailable,
+    // When the "oracle" last answered for this app; stamped by
+    // seedDemoUpdateCheck() and by every finished demo update check for the
+    // cached games, null for the rest (real: null = never asked).
+    update_checked_at: null,
   };
 }
 
@@ -221,6 +231,13 @@ function buildCuratedGames() {
       appid: 2010040,
       name: "Emberreach",
       status: "done",
+      // WP WEB-FIX-UPD-VIS: the one demo game with an update available, so
+      // the "Update available" badge, the "Updates" chip and the update
+      // check line show in demo mode (the Android demo flags its own
+      // "Pale Meridian"; the web demo has no game of that name). Chosen
+      // because nothing else here contradicts it: Aurora Cascade is
+      // "stable" and Frostline Convoy was confirmed current an hour ago.
+      updateAvailable: true,
       depots: [
         { depotid: 2010041, shared: false, size_bytes: 800_000_000 },
         // Shared with Frostline Convoy (2010050) below — deleting Emberreach
@@ -622,6 +639,8 @@ let games = buildGames(readLibrarySizePreference());
 let jobs = buildJobs();
 let clients = buildClients();
 let nextJobId = 900002;
+// Seeded in the /v1/updates section below (its constants must exist first).
+let updateCheck = null;
 
 /** Restore all demo state to a fresh copy of the seed data. Exported for
  * tests (web/tests/demo-data.test.js and friends) so scenarios don't leak
@@ -646,11 +665,16 @@ let nextJobId = 900002;
  * `0`/`null`).
  * @param {{ librarySize?: number, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean }} [options]
  */
-export function resetDemoData({ librarySize, relayExposePlaytime: rp = false, relayExposeLastPlayed: rl = false } = {}) {
+export function resetDemoData({
+  librarySize,
+  relayExposePlaytime: rp = readRelayPlaytimePreference(),
+  relayExposeLastPlayed: rl = false,
+} = {}) {
   games = buildGames(librarySize ?? readLibrarySizePreference());
   jobs = buildJobs();
   clients = buildClients();
   nextJobId = 900002;
+  updateCheck = seedDemoUpdateCheck();
   resetDemoSettings();
   resetDemoSteamRelay();
   relayExposePlaytime = rp;
@@ -745,8 +769,27 @@ const BOOL_FALSE_SPELLINGS = ["0", "false", "no", "off"];
 // restart", the same one-way, boot-time-only knob ADR-0010 requires of the
 // real server (there is deliberately no PATCH path for either, in demo mode
 // or the real one).
-let relayExposePlaytime = false;
+// WP WEB-FEAT-SUGGEST-2: the playtime gate's demo starting value comes
+// from a demo-only browser preference, `steamvault.demoRelayPlaytime` = "1"
+// (same idea as `steamvault.demoLibrarySize`), so the card's "Never
+// played" pill can be shown in a browser demo without changing the shipped
+// default (OFF, ADR-0010). Outside a browser (every test) it is OFF.
+// To see the pill (on Frostline Convoy): in demo mode run
+// `localStorage.setItem("steamvault.demoRelayPlaytime", "1")`, reload,
+// then in Settings save any 32-hex-character demo Steam Web API key and a
+// SteamID64 (e.g. 76561197960287930); the Library loads the owned list on
+// open. Read at module load and on resetDemoData().
+let relayExposePlaytime = readRelayPlaytimePreference();
 let relayExposeLastPlayed = false;
+
+function readRelayPlaytimePreference() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    return window.localStorage.getItem("steamvault.demoRelayPlaytime") === "1";
+  } catch {
+    return false;
+  }
+}
 
 // Mirrors settings_store.ENV_ONLY_INFO_KEYS — informational-only rows a
 // settings screen shows as "this exists but only the environment controls
@@ -1037,8 +1080,8 @@ function resetDemoSteamRelay() {
 // library's demo games above: this is what "the Steam Web API says this
 // account owns", which in real life is almost always a much bigger,
 // unrelated set from what happens to be cached. The two lists OVERLAP on
-// purpose (WP WEB-FEAT-1): 2010010/2010040 are vault games too, the other
-// three are owned-only, so the Library's merge shows both cases (dedupe by
+// purpose (WP WEB-FEAT-1): 2010010/2010040/2010050 are vault games too, the
+// other three are owned-only, so the Library's merge shows both cases (dedupe by
 // appid, plus "Not cached" owned-only rows).
 //
 // WP 4h.2 fix (named per the review that carried this defect forward): this
@@ -1056,6 +1099,9 @@ function resetDemoSteamRelay() {
 const DEMO_OWNED_GAMES = [
   { appid: 2010010, name: "Aurora Cascade", img_icon_url: "" },
   { appid: 2010040, name: "Emberreach", img_icon_url: "" },
+  // WP WEB-FEAT-SUGGEST-2: cached in the vault and never played (playtime
+  // 0 below), so the card's "Never played" pill has a demo case.
+  { appid: 2010050, name: "Frostline Convoy", img_icon_url: "" },
   { appid: 3300100, name: "Sable Undertow", img_icon_url: "" },
   { appid: 3300200, name: "Halcyon Foundry", img_icon_url: "" },
   { appid: 3300300, name: "Quietbrook", img_icon_url: "" },
@@ -1072,6 +1118,7 @@ const DEMO_OWNED_GAMES = [
 const DEMO_OWNED_GAMES_PLAYTIME = {
   2010010: { playtime_forever: 4312, rtime_last_played: 1_755_000_000 },
   2010040: { playtime_forever: 118, rtime_last_played: 1_754_000_000 },
+  2010050: { playtime_forever: 0 }, // cached and never played (WP WEB-FEAT-SUGGEST-2)
   3300100: { playtime_forever: 972 },
   3300200: { playtime_forever: 26, rtime_last_played: 1_753_000_000 },
   3300300: { playtime_forever: 0 }, // real, explicit "never played" — not absence
@@ -1149,6 +1196,17 @@ function appSizeBytes(depots) {
   return depots.reduce((sum, d) => sum + (d.size_bytes ?? 0), 0);
 }
 
+/** `update_available` / `update_checked_at` (WP UPD-1), mirroring
+ * `games._update_fields`: a stale verdict counts only while the app has
+ * bytes in the cache, and a game the oracle never answered for is
+ * `false`/`null`. */
+function demoUpdateFields(g) {
+  return {
+    update_available: g._demoUpdateAvailable === true && g.update_checked_at !== null && !!appSizeBytes(g.depots),
+    update_checked_at: g.update_checked_at,
+  };
+}
+
 function gameSummary(g) {
   return {
     appid: g.appid,
@@ -1185,6 +1243,7 @@ function gameSummary(g) {
     cover_url: null,
     // WP D10: additive on both game shapes; the demo stores no covers.
     cover_cached_url: null,
+    ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (WP UPD-1 fields)
   };
 }
 
@@ -1210,6 +1269,7 @@ function gameDetail(g) {
     tool_app_name: null,
     cover_url: null, // WP API-FIX-5 (see gameSummary's own comment)
     cover_cached_url: null, // WP D10 (see gameSummary's own comment)
+    ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (see gameSummary)
   };
 }
 
@@ -1413,6 +1473,9 @@ function advanceJob(job) {
     game.status = "done";
     game.last_prefill_at = job.finished_at;
     game.needs_force = false;
+    // WP WEB-FIX-UPD-VIS: the newer build is now cached (the Android demo
+    // does the same, DemoState.kt).
+    game._demoUpdateAvailable = false;
   }
 }
 
@@ -1533,6 +1596,108 @@ function handleDeleteClient(encodedId) {
 function jobControlResponse(job, { status, outcome, detail }) {
   job.status = status;
   return { job_id: job.id, status, outcome, detail };
+}
+
+// ---------------------------------------------------------------------
+// /v1/updates/* (WP UPD-1 contract; demo added by WP WEB-FIX-UPD-VIS) —
+// "Check updates" in demo mode. Nothing is asked of any update source: a
+// started check answers `running: true` to exactly ONE status read (so the
+// busy button and the "Checking cached games…" line are visible for one
+// poll) and has finished by the next one, counting the cached games (the
+// same `selectCachedAppids()` definition "Check & update" uses, like the
+// real route) and stamping their `update_checked_at`. The verdicts
+// themselves never change here: the fixture's own flag (Emberreach) is the
+// one "update available". Shapes follow `UpdateCheckStartOut` /
+// `UpdateCheckStatusOut` (api/vault_api/routers/updates.py), keys pinned by
+// web/tests/demo-data-updates.test.js.
+// ---------------------------------------------------------------------
+
+/** Number of status reads a started demo check answers `running: true`. */
+export const DEMO_UPDATE_CHECK_RUNNING_READS = 1;
+
+function finishDemoUpdateRun(state, trigger, startedAt, finishedAt) {
+  const appids = selectCachedAppids();
+  for (const appid of appids) {
+    const g = findGame(appid);
+    if (g) g.update_checked_at = finishedAt;
+  }
+  const stale = appids.filter((appid) => demoUpdateFields(findGame(appid)).update_available).length;
+  Object.assign(state, {
+    running: false,
+    last_trigger: trigger,
+    last_started_at: startedAt,
+    last_finished_at: finishedAt,
+    last_outcome: "completed",
+    last_apps: appids.length,
+    last_ok: appids.length,
+    last_failed: 0,
+    last_stale: stale,
+  });
+}
+
+/** Demo game whose update check failed in the seeded run, so its last
+ * successful check is old enough for the "update check due" notification
+ * (WP WEB-FEAT-SUGGEST-2, 14 days). A manual demo check succeeds for it. */
+export const DEMO_UPDATE_CHECK_OVERDUE_APPID = 2010070; // Glass Meridian
+const DEMO_UPDATE_CHECK_OVERDUE_DAYS = 20;
+
+/** The demo's starting point: a scheduled check finished three hours ago
+ * (the demo ships a schedule window, so `scheduled` is true). The oracle
+ * did not answer for one game (Glass Meridian), whose last successful
+ * check is therefore 20 days old. */
+function seedDemoUpdateCheck() {
+  const state = { running: false, _readsLeft: 0 };
+  const startedAt = isoAgo(3 * 3_600_000).replace(/\.\d{3}Z$/, "Z");
+  const finishedAt = isoAgo(3 * 3_600_000 - 40_000).replace(/\.\d{3}Z$/, "Z");
+  finishDemoUpdateRun(state, "scheduled", startedAt, finishedAt);
+  const overdue = findGame(DEMO_UPDATE_CHECK_OVERDUE_APPID);
+  if (overdue && overdue.update_checked_at !== null) {
+    overdue.update_checked_at = isoAgo(DEMO_UPDATE_CHECK_OVERDUE_DAYS * 86_400_000).replace(/\.\d{3}Z$/, "Z");
+    state.last_ok -= 1;
+    state.last_failed += 1;
+  }
+  return state;
+}
+
+updateCheck = seedDemoUpdateCheck();
+
+function demoUpdateStatusOut() {
+  const window = new Map(describeDemoSettings().map((i) => [i.key, i.effective])).get("schedule_window");
+  const s = updateCheck;
+  return {
+    enabled: true,
+    scheduled: typeof window === "string" && window.length > 0,
+    running: s.running,
+    last_trigger: s.last_trigger,
+    last_started_at: s.last_started_at,
+    last_finished_at: s.running ? null : s.last_finished_at,
+    last_outcome: s.running ? null : s.last_outcome,
+    last_apps: s.running ? null : s.last_apps,
+    last_ok: s.running ? null : s.last_ok,
+    last_failed: s.running ? null : s.last_failed,
+    last_stale: s.running ? null : s.last_stale,
+  };
+}
+
+function handleGetUpdatesStatus() {
+  const s = updateCheck;
+  if (s.running) {
+    if (s._readsLeft > 0) {
+      s._readsLeft -= 1;
+    } else {
+      finishDemoUpdateRun(s, "manual", s.last_started_at, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
+    }
+  }
+  return demoUpdateStatusOut();
+}
+
+function handlePostUpdatesCheck() {
+  if (updateCheck.running) return { status: "already_running", enabled: true };
+  updateCheck.running = true;
+  updateCheck._readsLeft = DEMO_UPDATE_CHECK_RUNNING_READS;
+  updateCheck.last_trigger = "manual";
+  updateCheck.last_started_at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return { status: "started", enabled: true };
 }
 
 /**
@@ -1888,6 +2053,12 @@ export async function demoRequest(method, path, { body, params } = {}) {
     return handleGetAbout();
   }
 
+  if (method === "POST" && path === "/v1/updates/check") {
+    return handlePostUpdatesCheck();
+  }
+  if (method === "GET" && path === "/v1/updates/status") {
+    return handleGetUpdatesStatus();
+  }
   if (method === "GET" && path === "/v1/settings") {
     return handleGetSettings();
   }

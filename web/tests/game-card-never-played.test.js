@@ -1,0 +1,135 @@
+/**
+ * Fake-DOM tests for the card's "Never played" pill (WP WEB-FEAT-SUGGEST-2,
+ * `components/game-card.js` `syncNeverPlayed`): the Phase 4h panel's
+ * "fully cached, never played" statement, moved onto the card. Same harness
+ * as game-card-update.test.js. Plus the Library's playtime merge
+ * (`lib/owned-library.js` `withOwnedPlaytime`) and its call site.
+ *
+ * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createFakeDom } from "./fake-dom.js";
+import { withOwnedPlaytime } from "../js/lib/owned-library.js";
+
+function noop() {}
+const ctx = { picked: false, selecting: false, onOpen: noop, onLongPress: noop, onToggle: noop, onAction: noop };
+
+function game(over = {}) {
+  return {
+    appid: 2010050,
+    name: "Frostline Convoy",
+    status: "done",
+    last_prefill_at: "2026-08-01T00:00:00Z",
+    size_bytes: 300_000_000,
+    needs_force: false,
+    installed_on: [],
+    owned_playtime_forever: 0,
+    ...over,
+  };
+}
+
+async function withFakeDom(fn) {
+  const dom = createFakeDom();
+  globalThis.document = dom.document;
+  globalThis.window = dom.window;
+  const gameCard = await import("../js/components/game-card.js");
+  return fn(gameCard);
+}
+
+test("MUTATION TARGET -- buildCard: a cached, never-played game gets the pill right after the status pill, plus the list twin", () =>
+  withFakeDom(({ buildCard }) => {
+    const card = buildCard(game(), ctx);
+    const badges = card.querySelector(".capbadges");
+    assert.ok(badges, "the pill row exists");
+    assert.deepEqual(badges.children.map((c) => c.className.split(" ")[0]), ["cappill", "playpill"]);
+    const pill = badges.querySelector(".playpill");
+    assert.equal(pill.querySelector(".ppfull").textContent, "Never played");
+    assert.equal(pill.querySelector(".ppcompact").textContent, "Unplayed");
+    assert.equal(pill.title, "Fully cached, never played");
+    assert.equal(pill.getAttribute("aria-hidden"), "true");
+    assert.equal(card.querySelector(".meta .playbadge .pbcompact").textContent, "Unplayed");
+    assert.match(card.getAttribute("aria-label"), /— Fully cached, never played/);
+  }));
+
+test("no pill without a real zero playtime (the ADR-0010 default), with playtime, or when not cached", () =>
+  withFakeDom(({ buildCard }) => {
+    for (const over of [
+      { owned_playtime_forever: undefined },
+      { owned_playtime_forever: 26 },
+      { size_bytes: null, status: "idle", last_prefill_at: null },
+      { status: "error" },
+      { tool_app: true },
+    ]) {
+      const card = buildCard(game(over), ctx);
+      assert.equal(card.querySelector(".playpill"), null, JSON.stringify(over));
+      assert.equal(card.querySelector(".playbadge"), null, JSON.stringify(over));
+      assert.doesNotMatch(card.getAttribute("aria-label"), /never played/i);
+    }
+  }));
+
+test("a running download is not 'fully cached': no pill while a live job exists", () =>
+  withFakeDom(({ buildCard }) => {
+    const card = buildCard(game(), { ...ctx, liveJob: { id: 1, appid: 2010050, type: "prefill", status: "running" } });
+    assert.equal(card.querySelector(".playpill"), null);
+  }));
+
+test("MUTATION TARGET -- patchCardVolatile adds and removes the pill without touching the status pill", () =>
+  withFakeDom(({ buildCard, patchCardVolatile }) => {
+    const card = buildCard(game({ owned_playtime_forever: undefined }), ctx);
+    const statusPill = card.querySelector(".cappill");
+    patchCardVolatile(card, game(), "cached");
+    assert.ok(card.querySelector(".playpill"), "appears");
+    assert.ok(card.querySelector(".playbadge"));
+    assert.equal(card.querySelector(".cappill") === statusPill, true, "status pill node kept");
+    patchCardVolatile(card, game(), "cached");
+    assert.equal(card.querySelectorAll(".playpill").length, 1, "no duplicate on a second tick");
+    patchCardVolatile(card, game({ owned_playtime_forever: 5 }), "cached");
+    assert.equal(card.querySelector(".playpill"), null, "disappears");
+    assert.equal(card.querySelector(".playbadge"), null);
+  }));
+
+test("withOwnedPlaytime copies only real playtime values onto matching rows", () => {
+  const rows = [{ appid: 1 }, { appid: 2 }, { appid: 3 }];
+  const owned = [
+    { appid: 1, playtime_forever: 0 },
+    { appid: 2 }, // gate off: no field at all
+    { appid: 3, playtime_forever: -4 },
+  ];
+  const out = withOwnedPlaytime(rows, owned);
+  assert.equal(out[0].owned_playtime_forever, 0);
+  assert.equal("owned_playtime_forever" in out[1], false, "absent stays absent, never a zero");
+  assert.equal("owned_playtime_forever" in out[2], false);
+  assert.equal(rows[0].owned_playtime_forever, undefined, "input rows are not mutated");
+  const none = [{ appid: 1 }];
+  assert.equal(withOwnedPlaytime(none, [{ appid: 1 }]), none, "nothing to copy: the same array");
+});
+
+test("wiring: the Library's remerge applies withOwnedPlaytime to the merged rows", () => {
+  const src = readFileSync(new URL("../js/views/library.js", import.meta.url), "utf8");
+  const body = /function remerge\(\) \{([\s\S]*?)\n\}/.exec(src);
+  assert.ok(body, "remerge not found");
+  assert.match(body[1], /state\.games = withOwnedPlaytime\(mergeOwnedLibrary\(state\.vaultGames, mergedOwnedGames\), mergedOwnedGames\);/);
+});
+
+test("css: pill row positioned, never-played pill shrinks with an ellipsis, compact word in cols3, list twin only in list, hidden in select mode", () => {
+  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (sel) => {
+    const m = new RegExp(`(^|\\})\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
+    assert.ok(m, `${sel} rule missing`);
+    return m[2];
+  };
+  assert.match(rule(".capbadges"), /position:absolute/);
+  assert.match(rule(".capbadges"), /display:flex/);
+  assert.doesNotMatch(rule(".cappill"), /position:absolute/, "positioning moved to .capbadges");
+  assert.match(rule(".playpill"), /text-overflow:ellipsis/);
+  assert.match(rule(".playpill"), /min-width:0/);
+  // The ellipsis on the text boxes themselves (the pill's flex items).
+  const text = rule(".playpill .ppfull, .playpill .ppcompact");
+  for (const d of [/min-width:0/, /overflow:hidden/, /text-overflow:ellipsis/, /white-space:nowrap/]) assert.match(text, d);
+  assert.match(rule(".grid.cols3 .playpill .ppcompact"), /display:inline/);
+  assert.match(rule(".playbadge"), /display:none/);
+  assert.match(rule(".grid.list .capbadges"), /display:none/);
+  assert.match(rule("body.selecting .playpill"), /display:none/);
+});

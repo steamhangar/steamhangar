@@ -104,6 +104,7 @@ import { buildMultiPlan } from "../lib/multiplan.js";
 import { buildDepotPresentation, DEPOT_TAG } from "../lib/depot-presentation.js";
 import { findTrackedJob, detailJobActions, DETAIL_JOB_ACTION } from "../lib/detail-job.js";
 import { confirmedCurrentWording, CONFIRMED_CURRENT_WORDING } from "../lib/detail-wording.js";
+import { lastUpdateDownloadedText } from "../lib/decision-support.js";
 import { GC_STATE, GC_EVENT, idleGcState, reduceGcFlow } from "../lib/gc-flow.js";
 import { buildDetailStructuralKey } from "../lib/detail-render-plan.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
@@ -602,6 +603,13 @@ export function buildToolAppNote(gameLike) {
   return note;
 }
 
+/** Fill (or hide) the "Last update downloaded …" fact line. */
+function syncUpdateDownloadedLine(el, gameLike) {
+  const text = lastUpdateDownloadedText(gameLike);
+  el.textContent = text || "";
+  el.hidden = !text;
+}
+
 function buildFactLines(gameLike) {
   const facts = document.createElement("div");
   facts.className = "facts detail-block";
@@ -622,6 +630,14 @@ function buildFactLines(gameLike) {
   confirmedLine.dataset.role = "confirmed";
   confirmedLine.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
   facts.appendChild(confirmedLine);
+
+  // WP WEB-FEAT-SUGGEST-2: the Phase 4h panel's "last changed N days ago",
+  // moved here. Hidden (not absent) when there is no real observation, so
+  // patchVolatile can fill it in place on a later tick.
+  const updateDownloadedLine = document.createElement("div");
+  updateDownloadedLine.dataset.role = "updatedl";
+  syncUpdateDownloadedLine(updateDownloadedLine, gameLike);
+  facts.appendChild(updateDownloadedLine);
 
   // WP API-FIX-4: no "next download" for a tool app, so no --force line.
   if (gameLike.needs_force && !isToolApp(gameLike)) {
@@ -1138,6 +1154,9 @@ function patchVolatile() {
 
   const confirmedEl = contentEl.querySelector('[data-role="confirmed"]');
   if (confirmedEl) confirmedEl.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
+
+  const updateDownloadedEl = contentEl.querySelector('[data-role="updatedl"]');
+  if (updateDownloadedEl) syncUpdateDownloadedLine(updateDownloadedEl, gameLike);
 
   patchInstalledSection(contentEl, gameLike);
 

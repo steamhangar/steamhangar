@@ -55,14 +55,10 @@
  * every other decision-logic extraction in this codebase (job-partition.js,
  * gc-flow.js, ...).
  *
- * **WP 4e.2 (desktop layout, D-3/D-4):** the DOM this file builds does not
- * change — the six `.lib-head`/`.lib-checkrow`/`.search`/`.chips`/`.grid`/
- * `.hint` children (`.bulk` is a seventh, out-of-flow sibling) keep the
- * exact same classes and append order they always had; `css/app.css`'s
- * BP-L block now assigns each of them a named grid area BY CLASS, and
+ * **WP 4e.2 (desktop layout, D-3/D-4):** `css/app.css`'s BP-L block
  * turns `.grid` into a `repeat(auto-fill, minmax(var(--tile-min),1fr))`
- * density grid instead of the fixed 2/3-column switch. What DOES change
- * here is purely wording: `LAYOUT_LABEL` and the segmented control's own
+ * density grid instead of the fixed 2/3-column switch. In this file the change
+ * is purely wording: `LAYOUT_LABEL` and the segmented control's own
  * button titles/aria-labels, relabeled from a literal column count
  * ("Two columns"/"Three columns") to an honest density description
  * ("Comfortable"/"Compact") now that the actual on-screen column count is
@@ -80,8 +76,7 @@
  * in the detail sheet (its existing "not tracked" branch). A relay failure
  * leaves the vault games on screen and says why in the notice line.
  *
- * **WP UPD-2 ("Check updates", D14).** A second button in `.lib-checkrow`
- * calls `POST /v1/updates/check` (oracle refresh for every cached game, never
+ * **WP UPD-2 ("Check updates", D14).** A second button calls `POST /v1/updates/check` (oracle refresh for every cached game, never
  * a download), then polls `GET /v1/updates/status` until the run ends and
  * re-reads the games. All decisions (phases, bounded polling, detach on
  * view change, toast wording, the status line) live in
@@ -91,6 +86,15 @@
  * the "Updates" chip appears when the rows carry that field
  * (lib/library-filters.js). An older vault-api (404 on the routes, no field
  * on the rows) shows neither the button, the line nor the chip.
+ *
+ * **WP WEB-FIX-UPD-VIS (user layout 2026-10-13).** The toolbar is one row,
+ * `.lib-bar`: `.lib-filters` (search, chips) on the left and
+ * `.lib-checkbtns` ("Check updates" as the primary button, "Check & update
+ * all cached games" as a plain filled button because it downloads) on the
+ * right; the status lines sit under it in `.lib-status`. The section's
+ * in-flow children are now `.lib-head`/`.lib-bar`/`.lib-status`/`.grid`/
+ * `.hint` (the WP 4e.2 note above describes the earlier six-child BP-L
+ * grid, which is gone: the row lays itself out with flexbox).
  */
 
 import { store } from "../store-singleton.js";
@@ -129,6 +133,7 @@ import { openDetail } from "../components/game-detail-sheet.js";
 import {
   librarySubtitle,
   mergeOwnedLibrary,
+  withOwnedPlaytime,
   ownedNotice,
   NOTICE_ACTION,
   OWNED_STATUS,
@@ -249,7 +254,9 @@ ownedLibrary.subscribe((owned) => {
 
 function remerge() {
   mergedOwnedGames = ownedLibrary.current().games;
-  state.games = mergeOwnedLibrary(state.vaultGames, mergedOwnedGames);
+  // WP WEB-FEAT-SUGGEST-2: playtime (ADR-0010 gate) for the card's
+  // "Never played" pill.
+  state.games = withOwnedPlaytime(mergeOwnedLibrary(state.vaultGames, mergedOwnedGames), mergedOwnedGames);
 }
 
 // Module-level, not per-mount: an in-flight "Check & update" call must stay
@@ -1022,40 +1029,40 @@ function buildSection() {
   // labeled button, not an icon (module header: the visible wording IS the
   // honesty guarantee — "Check & update", never "Check" — so this cannot be
   // reduced to a glyph + aria-label the way the icon buttons above are).
-  // Its own full-width row rather than squeezed into `.lib-tools`'
-  // icon-button row: that row is `flex-wrap:nowrap` and already tight with
-  // the layout segments + select button, no room for this button's full
-  // honest label at phone widths.
-  const checkRow = document.createElement("div");
-  checkRow.className = "lib-checkrow";
+  // WP WEB-FIX-UPD-VIS (user layout, 2026-10-13): both check buttons sit at
+  // the right end of the toolbar row (`.lib-bar`: search, chips, buttons),
+  // no longer in a full-width row of their own. "Check updates" is the
+  // primary (accent) button: it only asks, never downloads. "Check &
+  // update" keeps the neutral filled `.btn` look so the one that DOWNLOADS
+  // never reads as the default action.
   const checkUpdateBtn = document.createElement("button");
   checkUpdateBtn.type = "button";
-  checkUpdateBtn.className = "btn ghost sm";
+  checkUpdateBtn.className = "btn sm";
+  checkUpdateBtn.dataset.action = "check-and-update";
   const startsBusy = checkAndUpdateAction.isInFlight();
   checkUpdateBtn.disabled = startsBusy;
   checkUpdateBtn.textContent = startsBusy ? CHECK_UPDATE_BUSY_LABEL : CHECK_UPDATE_LABEL;
-  // WP UPD-2: "Check updates" (oracle only, no download) next to it, hidden
-  // until GET /v1/updates/status answered (paintUpdateCheck). Both share one
-  // wrapping row, still inside `.lib-checkrow` (six in-flow children rule).
+  // WP UPD-2: "Check updates" (oracle only, no download), hidden until
+  // GET /v1/updates/status answered (paintUpdateCheck).
   const checkUpdatesBtn = document.createElement("button");
   checkUpdatesBtn.type = "button";
-  checkUpdatesBtn.className = "btn ghost sm";
+  checkUpdatesBtn.className = "btn primary sm";
   checkUpdatesBtn.dataset.action = "check-updates";
   checkUpdatesBtn.textContent = CHECK_UPDATES_LABEL;
   checkUpdatesBtn.hidden = true;
   const checkBtns = document.createElement("div");
   checkBtns.className = "lib-checkbtns";
   checkBtns.append(checkUpdatesBtn, checkUpdateBtn);
-  checkRow.appendChild(checkBtns);
+  // The status lines under the toolbar row (small text): the UPD-2 "Updates
+  // last checked …" line and the WP WEB-FEAT-1 owned-list notice.
+  const statusBlock = document.createElement("div");
+  statusBlock.className = "lib-status";
   const updLine = document.createElement("p");
   updLine.className = "lib-upd";
   updLine.hidden = true;
-  checkRow.appendChild(updLine);
+  statusBlock.appendChild(updLine);
   // WP WEB-FEAT-1: the owned-list status line (and its Reload / Open
-  // Settings buttons) lives INSIDE `.lib-checkrow`, not as a new child of
-  // the section: `.view-library`'s BP-L grid assigns its six in-flow
-  // children an area each, by class (css/app.css), and a seventh would land
-  // in an implicit row.
+  // Settings buttons).
   const ownedNote = document.createElement("p");
   ownedNote.className = "lib-owned";
   ownedNote.hidden = true;
@@ -1065,7 +1072,7 @@ function buildSection() {
   const ownedSettingsBtn = noticeButton(NOTICE_ACTION.SETTINGS);
   const ownedReloadBtn = noticeButton(NOTICE_ACTION.RELOAD);
   ownedNote.append(ownedText, ownedSettingsBtn, ownedReloadBtn);
-  checkRow.appendChild(ownedNote);
+  statusBlock.appendChild(ownedNote);
 
   const searchWrap = document.createElement("div");
   searchWrap.className = "search";
@@ -1145,7 +1152,18 @@ function buildSection() {
   // block near the top of this file (WP 4a.8: it must be a `document.body`
   // sibling of `#app`, not a child of this per-mount `<section>`, or
   // marking `#app` inert would also make the dialog itself inert).
-  section.append(head, checkRow, searchWrap, chips, grid, hint, bulkBar);
+  // WP WEB-FIX-UPD-VIS: one toolbar row — search and chips (`.lib-filters`)
+  // on the left, the two check buttons on the right; css/app.css wraps the
+  // buttons onto their own line when the row is too narrow. DOM order is
+  // the visual and Tab order.
+  const filters = document.createElement("div");
+  filters.className = "lib-filters";
+  filters.append(searchWrap, chips);
+  const bar = document.createElement("div");
+  bar.className = "lib-bar";
+  bar.append(filters, checkBtns);
+
+  section.append(head, bar, statusBlock, grid, hint, bulkBar);
 
   els = {
     sub,
@@ -1444,6 +1462,13 @@ onViewChange((view) => {
   // WEB-FIX-6): stop observing the detached bar until the next mount.
   bulkHeight.unwatch();
 });
+
+/** The update check's current phase (lib/update-check.js UPDATE_PHASE), for
+ * the bell's "update check due" entry: it may point at the "Check updates"
+ * button only while that button exists (WP WEB-FEAT-SUGGEST-2 review). */
+export function currentUpdateCheckPhase() {
+  return updateCheck.snapshot().phase;
+}
 
 export function renderLibrary() {
   const section = buildSection();
