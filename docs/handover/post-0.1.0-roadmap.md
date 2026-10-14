@@ -557,6 +557,10 @@ live under notifications. Today a dismiss is permanent per browser
   IPs).
 - D15: "Delete history" in two variants: everything, and older than
   30 days.
+- D15 runner (option B): before each prefill the runner sends a
+  recognisable marker request through vault-core; vault-api records its
+  source address and flags that client as the runner (excluded from
+  "active clients"). Own small package D15-RUNNER (core/runner + api).
 
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check
