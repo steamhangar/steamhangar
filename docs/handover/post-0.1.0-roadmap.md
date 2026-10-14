@@ -508,6 +508,15 @@ UPSTREAM_EDGE / UPSTREAM_POOL_HOSTS, RESOLVER and LOG_LEVEL (marked risky,
 confirm dialog). Env-only = secrets, paths, binds and ports, build
 metadata, egress allowlist and subnet, webhook URL, DNS, TLS passthrough.
 The user signs off the full per-variable table from D16a-1.
+D16a-1 questions (user, 2026-10-14): env ALWAYS wins, also for the 9
+existing overrides (ADR-0009 addendum in D16b); an env-pinned value shows
+as plain text with a "set via env" note, never as a disabled input.
+`VAULT_WEBHOOK_URL` becomes env-only (shown masked; events stay
+editable). ONE download window: inside it automatic downloads at full
+speed, outside no automatic downloads and the rate cap applies;
+`VAULT_UPSTREAM_RATE_WINDOW` is deprecated (still honored as an env pin,
+startup warning). D8 later adds several windows per day with a per-window
+throttle checkbox. The core settings file lives on a new volume.
 
 **Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
