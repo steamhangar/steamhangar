@@ -256,7 +256,15 @@ import time
 #: ``local_addrs``, because that step is unconditional. Dev databases: a DB
 #: stamped 25 refuses to open under a v24-only build (the downgrade guard in
 #: ``init_db``).
-SCHEMA_VERSION = 25
+#: v26 (WP D15-NAMES): added ``client_names`` -- operator-set client names,
+#: keyed by ``(key_type, key)``: ``ip`` + a canonical IP literal today,
+#: ``mac`` reserved for when an agent reports MACs (no source does yet, and
+#: the API refuses it). **This step does not trust the version stamp:** the
+#: table is a plain ``CREATE TABLE IF NOT EXISTS`` in ``_DDL``, which runs on
+#: EVERY start, so a file a parallel branch already stamped v25 or v26
+#: without this table still gets it, and a second start is a no-op. No
+#: ``ALTER`` and no data step.
+SCHEMA_VERSION = 26
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -927,6 +935,20 @@ CREATE TABLE IF NOT EXISTS cache_completeness (
     mismatched_chunks INTEGER,
     checked_at        TEXT NOT NULL,
     PRIMARY KEY (appid, depotid)
+);
+
+-- WP D15-NAMES (schema v26): a name the operator gave a client. key_type
+-- 'ip' = key is a canonical IP literal (client_names.canonical_ip), the form
+-- agent_reports.effective_addrs and the event log use; 'mac' is reserved for
+-- MAC-keyed names once an agent reports MACs (the API refuses it today).
+-- A name follows the ADDRESS, not an agent's client_id: GET /v1/clients and
+-- GET /v1/clients/overview resolve it per client (client_names.py).
+CREATE TABLE IF NOT EXISTS client_names (
+    key_type   TEXT NOT NULL CHECK (key_type IN ('ip', 'mac')),
+    key        TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (key_type, key)
 );
 
 CREATE TABLE IF NOT EXISTS runner_presence (

@@ -5,9 +5,16 @@
  * Unit-tested in web/tests/clients-page.test.js.
  *
  * Wording rules:
- *  - An address client is named by its address. The server has no names for
- *    machines without an agent (the event log carries IPs only, no reverse
- *    DNS by design), so the page does not invent one.
+ *  - The card title is the server's `display_name` (WP D15-NAMES): the
+ *    operator-set name when there is one, else the agent's PC name, else
+ *    the address. Without an operator-set name an address client is named
+ *    by its address: the event log carries IPs only (no reverse DNS by
+ *    design), so the page does not invent one. A server older than
+ *    D15-NAMES sends no `display_name`; the title then falls back to the
+ *    pre-D15-NAMES rule.
+ *  - When an operator-set name replaces the title, the line under it keeps
+ *    what it replaced (the agent's PC name, or the address), so the machine
+ *    stays recognisable.
  *  - An address client is described as "No agent" and "seen in the cache
  *    log" and nothing more. The server's own prefill downloads can appear as
  *    one of these (api/README.md "The prefill runner is counted as a client
@@ -19,6 +26,7 @@
  */
 
 import { formatAgo } from "./format.js";
+import { isolate } from "./client-names.js";
 import { DASH, RANGE_PHRASES, formatRate, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
 
 /** How many recently loaded apps a card names before "+N more". */
@@ -30,11 +38,13 @@ export function isAgentClient(client) {
 }
 
 /**
- * The card's title: the agent's client_id, or the address.
+ * The card's title: the server's `display_name` (an operator-set name wins),
+ * else the agent's client_id, or the address.
  * @param {object} client
  * @returns {string}
  */
 export function clientName(client) {
+  if (typeof client.display_name === "string" && client.display_name) return client.display_name;
   if (isAgentClient(client) && typeof client.client_id === "string" && client.client_id) return client.client_id;
   if (Array.isArray(client.addresses) && client.addresses[0]) return client.addresses[0];
   const key = typeof client.key === "string" ? client.key : "";
@@ -47,9 +57,13 @@ export function clientName(client) {
  * @returns {string}
  */
 export function clientKindText(client) {
-  if (!isAgentClient(client)) return "No agent · seen in the cache log";
+  const named = typeof client.name === "string" && client.name !== "";
   const addrs = Array.isArray(client.addresses) ? client.addresses.filter(Boolean) : [];
-  return addrs.length ? `vault-agent · ${addrs.join(", ")}` : "vault-agent · no address in the cache log";
+  if (!isAgentClient(client)) {
+    return named && addrs.length ? `No agent · ${addrs.join(", ")} · seen in the cache log` : "No agent · seen in the cache log";
+  }
+  const agent = named && typeof client.client_id === "string" && client.client_id ? `vault-agent on ${isolate(client.client_id)}` : "vault-agent";
+  return addrs.length ? `${agent} · ${addrs.join(", ")}` : `${agent} · no address in the cache log`;
 }
 
 /** Connection chip: word and chip class (the `.pchip` vocabulary). */

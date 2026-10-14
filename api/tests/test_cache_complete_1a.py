@@ -745,7 +745,7 @@ def test_a_v23_database_gains_the_table(tmp_path: Path) -> None:
         }
     finally:
         conn.close()
-    assert version == SCHEMA_VERSION == 25
+    assert version == SCHEMA_VERSION >= 25
     assert "cache_completeness" in names
 
 

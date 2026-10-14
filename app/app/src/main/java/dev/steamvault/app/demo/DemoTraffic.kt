@@ -1,0 +1,318 @@
+package dev.steamvault.app.demo
+
+import dev.steamvault.app.net.model.ClientActivityOut
+import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.ClientStatsOut
+import dev.steamvault.app.net.model.ClientsOverviewOut
+import dev.steamvault.app.net.model.CurrentOut
+import dev.steamvault.app.net.model.EventFeedOut
+import dev.steamvault.app.net.model.GameSummary
+import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.net.model.JobThroughputOut
+import dev.steamvault.app.net.model.LoadingAppOut
+import dev.steamvault.app.net.model.LoadingNowOut
+import dev.steamvault.app.net.model.RecentAppOut
+import dev.steamvault.app.net.model.SeriesOut
+import dev.steamvault.app.net.model.SeriesPointOut
+import dev.steamvault.app.net.model.SummaryOut
+import dev.steamvault.app.net.model.ThroughputOut
+import java.time.Instant
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.roundToLong
+import kotlin.math.sin
+
+/**
+ * Demo-mode traffic fixtures (WP D15d), modeled on web `demo-traffic.js`
+ * (WP D15c): `GET /v1/throughput`, `GET /v1/throughput/series` and
+ * `GET /v1/clients/overview`, in the server's real shapes
+ * (`net/model/Traffic.kt`). The numbers are synthetic and deterministic per
+ * range and clock (no randomness): a daily rhythm with an evening peak,
+ * scaled so the header, the graph and the client cards tell one story --
+ * the online demo PC loading the running demo job's game, the offline one
+ * idle, and two agentless addresses (one loading now, one last seen days
+ * ago). The feed is always `ok` in demo mode, so every screen shows its
+ * figures. Addresses are fictional (10.0.0.x like [seedClients]).
+ */
+
+/** The demo state [DemoTrafficRepository] reads, taken in one lock. */
+data class DemoTrafficSnapshot(
+    val runningJobs: List<JobSummary>,
+    val games: List<GameSummary>,
+    val agents: List<ClientOut>,
+)
+
+private const val MIB = 1024.0 * 1024.0
+private const val GIB = 1024.0 * MIB
+
+private data class Tier(val tier: String, val bucket: Int, val count: Int)
+
+private val TIERS: Map<String, Tier> = mapOf(
+    "24h" to Tier("5m", 300, 288),
+    "7d" to Tier("1h", 3600, 168),
+    "30d" to Tier("1h", 3600, 720),
+    // Demo "all" covers 45 days.
+    "all" to Tier("1d", 86400, 45),
+)
+
+private fun tierFor(range: String): Tier = TIERS[range] ?: TIERS.getValue("24h")
+
+private fun knownRange(range: String, fallback: String): String = if (range in TIERS) range else fallback
+
+private fun iso(ms: Long): String = Instant.ofEpochSecond(Math.floorDiv(ms, 1000L)).toString()
+
+private fun floorTo(ms: Long, seconds: Int): Long {
+    val step = seconds * 1000L
+    return Math.floorDiv(ms, step) * step
+}
+
+/** Deterministic bytes/s for a bucket starting at [ms]: idle at night, an
+ * evening peak, nothing on some 5-minute buckets. A daily bucket starts at
+ * midnight (idle), so it is sampled at its evening and scaled to a
+ * plausible day average instead of reading as zero. */
+private fun rateAt(ms: Long, bucketSeconds: Int): Double {
+    if (bucketSeconds >= 86400) return (rateAt(ms + 18 * 3_600_000L, 3600) * 0.4).roundToLong().toDouble()
+    val hour = Math.floorMod(ms / 3_600_000L, 24L) + Math.floorMod(ms / 60_000L, 60L) / 60.0
+    val day = Math.floorDiv(ms, 86_400_000L)
+    val evening = max(0.0, sin(((hour - 12) / 12) * PI))
+    val dayFactor = 0.55 + 0.45 * abs(sin(day * 1.7))
+    val gap = bucketSeconds <= 300 && Math.floorMod(ms / 300_000L, 7L) == 3L
+    if (gap || evening < 0.08) return 0.0
+    return (evening * dayFactor * 46 * MIB).roundToLong().toDouble()
+}
+
+private fun feed(nowMs: Long) = EventFeedOut(
+    enabled = true,
+    state = "ok",
+    // A sweep a minute ago: the feed is `ok` in demo mode.
+    last_sweep_at = iso(nowMs - 60_000L),
+    sweep_interval_minutes = 5,
+    traffic_since = iso(floorTo(nowMs - 45 * 86_400_000L, 86400)),
+)
+
+/** `GET /v1/throughput/series` (demo). */
+fun demoSeries(range: String, nowMs: Long): SeriesOut {
+    val t = tierFor(range)
+    val last = floorTo(nowMs, t.bucket)
+    val points = (t.count - 1 downTo 0).map { i ->
+        val start = last - i * t.bucket * 1000L
+        val bps = rateAt(start, t.bucket)
+        val served = (bps * t.bucket).roundToLong()
+        val hit = (served * 0.82).roundToLong()
+        SeriesPointOut(
+            t = iso(start),
+            bytes_served = served,
+            hit_bytes = hit,
+            miss_bytes = served - hit,
+            requests = (served / (1.4 * MIB)).roundToLong(),
+            bytes_per_second = bps,
+            peak_bytes_per_second = if (t.bucket == 300) bps else (bps * 1.35).roundToLong().toDouble(),
+        )
+    }
+    return SeriesOut(
+        event_feed = feed(nowMs),
+        range = knownRange(range, "24h"),
+        tier = t.tier,
+        bucket_seconds = t.bucket,
+        range_start = points.firstOrNull()?.t,
+        points = points,
+    )
+}
+
+private fun summaryFor(range: String, nowMs: Long): SummaryOut {
+    val series = demoSeries(range, nowMs)
+    var served = 0L
+    var hit = 0L
+    var requests = 0L
+    var active = 0.0
+    var peak = 0.0
+    for (p in series.points) {
+        served += p.bytes_served
+        hit += p.hit_bytes
+        requests += p.requests
+        if (p.bytes_served > 0) active += series.bucket_seconds / 300.0
+        peak = max(peak, p.peak_bytes_per_second)
+    }
+    val hits = (requests * 0.83).roundToLong()
+    return SummaryOut(
+        bytes_served = served,
+        hit_bytes = hit,
+        miss_bytes = served - hit,
+        requests = requests,
+        hits = hits,
+        misses = requests - hits,
+        errors = requests / 4000,
+        hit_rate = if (requests > 0) hits.toDouble() / requests else null,
+        byte_hit_rate = if (served > 0) hit.toDouble() / served else null,
+        average_bytes_per_second = if (active > 0) served / (active * 300) else null,
+        peak_bytes_per_second = peak,
+        active_clients = if (range == "24h") 3 else 4,
+    )
+}
+
+private fun nameOf(appid: Int, games: List<GameSummary>): String? = games.firstOrNull { it.appid == appid }?.name
+
+/** `GET /v1/throughput` (demo). Each running job gets a speed while the
+ * online demo PC loads it. */
+fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): ThroughputOut {
+    val t = tierFor(range)
+    val f = feed(nowMs)
+    val end = nowMs - 60_000L
+    val windowSeconds = 300 + Math.floorMod(end / 1000L, 300L).toInt()
+    val jobs = snapshot.runningJobs.map { j ->
+        JobThroughputOut(
+            job_id = j.id,
+            appid = j.appid,
+            name = nameOf(j.appid, snapshot.games),
+            started_at = j.started_at,
+            bytes_per_second = 31.5 * MIB,
+            bytes_since_start = (8.8 * GIB).roundToLong(),
+            exclusive_depots = 1,
+        )
+    }
+    return ThroughputOut(
+        event_feed = f,
+        range = knownRange(range, "24h"),
+        tier = t.tier,
+        bucket_seconds = t.bucket,
+        range_start = demoSeries(range, nowMs).range_start,
+        active_window_minutes = 15,
+        current = CurrentOut(
+            bytes_per_second = if (jobs.isNotEmpty()) 38.2 * MIB else 2.1 * MIB,
+            window_start = iso(end - windowSeconds * 1000L),
+            window_end = iso(end),
+            window_seconds = windowSeconds,
+        ),
+        active_clients_now = 2,
+        summary = summaryFor(range, nowMs),
+        jobs = jobs,
+    )
+}
+
+private fun stats(bytes: Long, hitRate: Double): ClientStatsOut {
+    val hit = (bytes * hitRate).roundToLong()
+    val requests = (bytes / (1.4 * MIB)).roundToLong()
+    val hits = (requests * hitRate).roundToLong()
+    return ClientStatsOut(
+        bytes_served = bytes,
+        hit_bytes = hit,
+        miss_bytes = bytes - hit,
+        requests = requests,
+        hits = hits,
+        misses = requests - hits,
+        hit_rate = if (requests > 0) hits.toDouble() / requests else null,
+    )
+}
+
+private val RANGE_SCALE: Map<String, Double> = mapOf("24h" to 1.0, "7d" to 4.2, "30d" to 13.0, "all" to 19.0)
+
+private val IDLE = LoadingNowOut(loading = false, bytes_per_second = 0.0, apps = emptyList(), unattributed_bytes_per_second = 0.0)
+
+/** `GET /v1/clients/overview` (demo): the demo agents plus two agentless
+ * addresses, server order (connected first, then newest activity). */
+fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): ClientsOverviewOut {
+    val scale = RANGE_SCALE[range] ?: 1.0
+    val games = snapshot.games
+    val gameIds = games.map { it.appid }
+    fun recent(appids: List<Int>, base: Double): List<RecentAppOut> = appids.mapIndexed { i, appid ->
+        RecentAppOut(
+            appid = appid,
+            name = nameOf(appid, games),
+            bytes_served = (base * scale / (i + 1)).roundToLong(),
+            last_seen = iso(nowMs - (i + 1) * 3 * 3_600_000L),
+        )
+    }
+    val running = snapshot.runningJobs.firstOrNull()
+    val clients = snapshot.agents.map { a ->
+        val online = a.presence == "online"
+        val installed = games.filter { g -> g.installed_on.any { it.client_id == a.client_id } }.map { it.appid }
+        val lastCache = if (online) iso(nowMs - 60_000L) else a.last_seen_in_cache_log
+        val lastActive = listOfNotNull(lastCache, a.last_reported_at).maxOrNull()
+        ClientActivityOut(
+            key = "agent:${a.client_id}",
+            kind = "agent",
+            client_id = a.client_id,
+            addresses = a.source_addrs.take(1),
+            connected = online,
+            agent_presence = a.presence,
+            cache_active = online,
+            last_active = lastActive,
+            last_seen_in_cache_log = lastCache,
+            last_reported_at = a.last_reported_at,
+            installed_appids = installed,
+            installed_app_count = installed.size,
+            stats = if (online) {
+                stats((14.6 * GIB * scale).roundToLong(), 0.81)
+            } else {
+                stats(if (range == "24h") 0L else (0.3 * GIB * scale).roundToLong(), 0.5)
+            },
+            loading_now = if (online && running != null) {
+                LoadingNowOut(
+                    loading = true,
+                    bytes_per_second = 33.7 * MIB,
+                    apps = listOf(LoadingAppOut(running.appid, nameOf(running.appid, games), 31.5 * MIB)),
+                    unattributed_bytes_per_second = 2.2 * MIB,
+                )
+            } else {
+                IDLE
+            },
+            recent_apps = when {
+                online -> recent(gameIds.take(4), 6 * GIB)
+                range == "24h" -> emptyList()
+                else -> recent(gameIds.drop(3).take(1), 0.3 * GIB)
+            },
+            recent_unattributed_bytes = if (online) (0.4 * GIB * scale).roundToLong() else 0L,
+        )
+    }.toMutableList()
+    // Two agentless addresses: a machine loading right now, and one last
+    // active days ago (still listed: seen within 30 days).
+    clients.add(
+        ClientActivityOut(
+            key = "addr:10.0.0.61",
+            kind = "address",
+            addresses = listOf("10.0.0.61"),
+            connected = true,
+            cache_active = true,
+            last_active = iso(nowMs - 2 * 60_000L),
+            last_seen_in_cache_log = iso(nowMs - 2 * 60_000L),
+            stats = stats((3.1 * GIB * scale).roundToLong(), 0.92),
+            loading_now = LoadingNowOut(
+                loading = true,
+                bytes_per_second = 4.5 * MIB,
+                apps = emptyList(),
+                unattributed_bytes_per_second = 4.5 * MIB,
+            ),
+            recent_apps = recent(gameIds.take(1), 2.4 * GIB),
+            recent_unattributed_bytes = (0.7 * GIB * scale).roundToLong(),
+        ),
+    )
+    val oldMs = nowMs - 4 * 86_400_000L
+    val oldInRange = range != "24h"
+    clients.add(
+        ClientActivityOut(
+            key = "addr:10.0.0.63",
+            kind = "address",
+            addresses = listOf("10.0.0.63"),
+            connected = false,
+            cache_active = false,
+            last_active = iso(oldMs),
+            last_seen_in_cache_log = iso(oldMs),
+            stats = stats(if (oldInRange) (1.2 * GIB).roundToLong() else 0L, 0.64),
+            loading_now = IDLE,
+            recent_apps = if (oldInRange) recent(gameIds.drop(1).take(1), 1.2 * GIB / scale) else emptyList(),
+            recent_unattributed_bytes = 0L,
+        ),
+    )
+    val ordered = clients.sortedWith(
+        compareByDescending<ClientActivityOut> { it.connected == true }.thenByDescending { it.last_active ?: "" },
+    )
+    return ClientsOverviewOut(
+        event_feed = feed(nowMs),
+        range = knownRange(range, "7d"),
+        tier = tierFor(range).tier,
+        range_start = demoSeries(range, nowMs).range_start,
+        active_window_minutes = 15,
+        clients = ordered,
+    )
+}

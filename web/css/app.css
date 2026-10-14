@@ -1454,6 +1454,20 @@ body.onboarding .nav{ display:none; }
 .cl-note{ text-align:left; }
 .clcard .cl-line{ margin-top:4px; overflow-wrap:anywhere; }
 .clcard .jobtop .pchip{ margin-top:2px; }
+/* WP D15-NAMES: the card's Rename button, the rename dialog (its title
+   carries operator-chosen text that may be one long word) and the Delete
+   history confirm. `.dialog p` (0,1,1) would otherwise dim the error line,
+   and its three buttons wrap on a phone instead of overflowing. */
+.clcard .jobacts{ margin-top:9px; }
+.cl-rename-dialog h3{ overflow-wrap:anywhere; }
+.cl-rename-dialog .field{ margin-bottom:6px; }
+.dialog .errline{ color:var(--danger); }
+.dialog .row{ flex-wrap:wrap; }
+.dl-history-acts{ justify-content:flex-start; margin:8px 0; }
+.hist-scope{ border:0; margin:0 0 10px; padding:0; min-width:0; }
+.hist-scope legend{ padding:0; margin:0 0 6px; font-size:12px; color:var(--dim); }
+.hist-scope .srow{ cursor:pointer; }
+.srow input[type="radio"]{ width:17px; height:17px; flex:none; accent-color:var(--accent); }
 .dl-stats{ margin:10px 0 2px; }
 .dl-stats .hint{ text-align:left; }
 .statgrid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin:8px 0 0; }
