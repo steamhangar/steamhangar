@@ -598,6 +598,16 @@ installed on a PC (installed_on non-empty) that have no bytes in the
 cache. Uses the existing installed_on data; counts groups like the other
 chips (D9); same chip on Android.
 
+**LIB-LIST-1 (web + app, rc17; user feedback 2026-10-14 on prod rc15):**
+the list layout's right side is restless: status word, size, "Update",
+"not cached · Demon" and "Installed on" are right-aligned with varying
+widths, so nothing lines up from row to row. Rework into fixed columns
+(table-like grid): status (icon + word, fixed width), size
+(right-aligned, tabular figures), update state, installed on (PC names,
+truncated); one line per row where it fits, same columns in every row,
+column headers optional. Check at 360/768/1440 px; same idea for the
+Android list row.
+
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
 vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it
