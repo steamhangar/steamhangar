@@ -781,6 +781,32 @@ payload-scoping mitigation yet (that mitigation is explicitly planned only
 for Phase 6 webhooks, not for this existing
 endpoint).
 
+**Agent-stated LAN addresses cross the trust boundary (WP AGENT-ADDR-1).**
+Until this package every address in `GET /v1/clients` came from the TCP
+peer, which a client cannot choose. Since schema v24 a report may also
+carry `local_addrs`, the PC's own LAN addresses as the agent determined them,
+and vault-api correlates clients with cache traffic on those in preference
+to the peer (the peer is the Docker bridge gateway behind a published port,
+the same for every PC). These values ARE caller-chosen. What bounds them:
+only a caller holding the API key can send them, and that caller can already
+delete cache content and read every client's data, so a lying agent gains no
+new capability — the worst it achieves is mislabelled statistics. Two
+cases, precisely: (a) claiming another PC's address: in `GET /v1/clients`
+BOTH clients then list that address and its cache traffic counts for both
+(each client's totals are summed over its own address set); only the D15b
+overview (`agent_reports.address_owners`, one owner per address, newest
+report wins) moves the address and its traffic to the claiming agent.
+(b) an agent can hide its own bypass by claiming an address that does have
+cache traffic: the bypass rule then sees presence in the cache log and
+does not accuse it. Neither needs more than the API key, which is
+admin-level already, so this adds no new capability. Validation keeps the values from becoming an injection vector:
+at most 8 plain IP literals, no zone id, no loopback/link-local/unspecified/
+multicast, stored canonical; they appear in API answers (`source_addrs`,
+`reported_addrs`) and in the report's log line. Privacy-wise they add
+nothing new in kind — the same LAN addresses are already in the event log and
+the access logs — but they now reach the database for every agent PC even
+when the event log is off.
+
 **The plain access logs carry the same addresses (WP D15a).** Every line of
 vault-core's human-readable `vault` access log (port 80, on stdout, i.e.
 `docker logs vault-core`) ends with `client=$remote_addr`, the same field

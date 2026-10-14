@@ -8,12 +8,14 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/Riviera822/steamhangar/agent/agentconfig"
 	"github.com/Riviera822/steamhangar/agent/client"
+	"github.com/Riviera822/steamhangar/agent/localaddr"
 )
 
 // WP AGENT-FEAT-1: what `vault-agent report` actually puts on the wire.
@@ -44,12 +46,19 @@ func presenceServer(t *testing.T, legacy bool) (*httptest.Server, *capturedBodie
 		captured.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if legacy {
+			// Like FastAPI: ONE 422 listing every extra key (the agent
+			// drops exactly the keys it names, WP AGENT-ADDR-1).
+			var extras []string
 			for k := range body {
 				if k != "client_id" && k != "appids" {
-					w.WriteHeader(http.StatusUnprocessableEntity)
-					_, _ = w.Write([]byte(`{"detail":[{"type":"extra_forbidden","loc":["body","` + k + `"],"msg":"Extra inputs are not permitted","input":null}]}`))
-					return
+					extras = append(extras, `{"type":"extra_forbidden","loc":["body","`+k+`"],"msg":"Extra inputs are not permitted","input":null}`)
 				}
+			}
+			if len(extras) > 0 {
+				sort.Strings(extras)
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"detail":[` + strings.Join(extras, ",") + `]}`))
+				return
 			}
 		}
 		w.WriteHeader(http.StatusOK)
@@ -170,5 +179,78 @@ func TestRun_StartupLogNamesVersionAndIntervalProvenance(t *testing.T) {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("startup log lacks %q: %s", want, stderr.String())
 		}
+	}
+}
+
+// WP AGENT-ADDR-1: what the detector finds goes on the wire as
+// local_addrs, filtered like the server; the startup run needs no flag.
+func TestRun_OneShotSendsTheDetectedLocalAddrs(t *testing.T) {
+	var gotURL string
+	old := detectLocalAddrs
+	detectLocalAddrs = func(_ context.Context, serverURL string, _ localaddr.Resolver, _ localaddr.Dialer) ([]string, []string) {
+		gotURL = serverURL
+		return []string{"192.168.1.42", "127.0.0.1"}, []string{"no route to fd00::1: test"}
+	}
+	t.Cleanup(func() { detectLocalAddrs = old })
+
+	srv, captured := presenceServer(t, false)
+	var stdout, stderr bytes.Buffer
+	if code := run(runReportArgs(srv.URL, emptyLibraryRoot(t), "--interval", "10m"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if gotURL != srv.URL {
+		t.Errorf("detector asked about %q, want the server URL %q", gotURL, srv.URL)
+	}
+	got, _ := json.Marshal(captured.all()[0]["local_addrs"])
+	if string(got) != `["192.168.1.42"]` {
+		t.Errorf("local_addrs = %s, want only the usable address", got)
+	}
+	for _, want := range []string{"local_addrs=192.168.1.42", `report local address note="no route to fd00::1: test"`} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("log lacks %q: %s", want, stderr.String())
+		}
+	}
+}
+
+// An rc16 server forbids local_addrs: the report still lands, with the
+// presence fields, and the log says why the address is missing.
+func TestRun_OneShotAgainstAPreAddrServerStillSucceeds(t *testing.T) {
+	old := detectLocalAddrs
+	detectLocalAddrs = func(context.Context, string, localaddr.Resolver, localaddr.Dialer) ([]string, []string) {
+		return []string{"192.168.1.42"}, nil
+	}
+	t.Cleanup(func() { detectLocalAddrs = old })
+
+	captured := &capturedBodies{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		captured.mu.Lock()
+		captured.bodies = append(captured.bodies, body)
+		captured.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if _, ok := body["local_addrs"]; ok {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"detail":[{"type":"extra_forbidden","loc":["body","local_addrs"],"msg":"Extra inputs are not permitted","input":[]}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"client_id":"pc","received":0,"added":[],"removed":[],"first_report":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	var stdout, stderr bytes.Buffer
+	if code := run(runReportArgs(srv.URL, emptyLibraryRoot(t), "--interval", "10m"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	bodies := captured.all()
+	if len(bodies) != 2 {
+		t.Fatalf("server saw %d request(s), want 2", len(bodies))
+	}
+	if bodies[1]["agent_version"] != version {
+		t.Errorf("resend dropped agent_version: %v", bodies[1])
+	}
+	if !strings.Contains(stderr.String(), "older than AGENT-ADDR-1") {
+		t.Errorf("log does not explain the dropped field: %s", stderr.String())
 	}
 }

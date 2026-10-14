@@ -236,7 +236,18 @@ import time
 #: ``client_cache_stats`` rows are NOT folded into the tiers: they are
 #: bucketed by sweep time, not event time, and hold about four hours; the
 #: tiers start empty and ``traffic_since`` says so.
-SCHEMA_VERSION = 23
+#: v24 (WP AGENT-ADDR-1, on top of v23): ``agent_reports`` gained
+#: ``local_addrs`` -- the LAN addresses the agent states for itself (a JSON
+#: array of canonical IP literals, NULL when the report carried none). Behind
+#: Docker's published ports ``source_addr`` is the bridge gateway for every
+#: PC, so correlation now prefers what the agent states and falls back to
+#: ``source_addr`` only when it is not a forwarding hop
+#: (``agent_reports.effective_addrs``, ``vault_api/peer_hops.py``). The column
+#: comes from the per-column-guarded ``_add_missing_agent_report_columns``
+#: step, which now runs on every existing database whatever version it is
+#: stamped with (a parallel branch may stamp v25 first); existing rows keep
+#: NULL ("the agent stated nothing").
+SCHEMA_VERSION = 24
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -391,7 +402,13 @@ CREATE TABLE IF NOT EXISTS agent_reports (
     -- v17, a one-shot run without --interval); GET /v1/clients then shows
     -- "version unknown" and assumes a 30-minute interval for presence.
     agent_version           TEXT,
-    report_interval_seconds INTEGER
+    report_interval_seconds INTEGER,
+    -- v24 (WP AGENT-ADDR-1): the LAN addresses the agent stated for itself in
+    -- THIS report, a JSON array of canonical IP literals (at most 8, no
+    -- loopback/link-local). NULL when it stated none (agents from before
+    -- v24); correlation then falls back to source_addr unless that is a
+    -- forwarding hop (agent_reports.effective_addrs).
+    local_addrs             TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_reports_client_time
@@ -995,8 +1012,13 @@ def init_db(db_path: str) -> None:
         # it. The four NEW tables v9 also adds need no step at all -- they are
         # plain `CREATE TABLE IF NOT EXISTS` (the v6 situation).
         # v17 (WP AGENT-FEAT-1) reuses the same per-column-guarded step for
-        # agent_version / report_interval_seconds.
-        if row is not None and row["version"] < 17:
+        # agent_version / report_interval_seconds, and v24 (WP AGENT-ADDR-1)
+        # for local_addrs. Since v24 it runs on EVERY existing database, not
+        # keyed on the stored version: parallel branches stamp versions in
+        # a different order (CACHE-COMPLETE-1a takes v25 with a pure CREATE
+        # TABLE), so a file may already say v25 without this column. The
+        # per-column guard makes the step a no-op once the columns exist.
+        if row is not None:
             _add_missing_agent_report_columns(conn)
 
         # v14 (WP 4h.1): same situation once more, for `depot_manifests`. An
@@ -1100,12 +1122,15 @@ _POST_V1_AGENT_REPORT_COLUMNS = (
     # v17 (WP AGENT-FEAT-1)
     ("agent_version", "TEXT"),
     ("report_interval_seconds", "INTEGER"),
+    # v24 (WP AGENT-ADDR-1)
+    ("local_addrs", "TEXT"),
 )
 
 
 def _add_missing_agent_report_columns(conn: sqlite3.Connection) -> None:
-    """v1->v17 migration step: add ``agent_reports.source_addr`` (v9, WP 3.11)
-    and ``agent_version`` / ``report_interval_seconds`` (v17, WP AGENT-FEAT-1).
+    """v1->v24 migration step: add ``agent_reports.source_addr`` (v9, WP 3.11),
+    ``agent_version`` / ``report_interval_seconds`` (v17, WP AGENT-FEAT-1) and
+    ``local_addrs`` (v24, WP AGENT-ADDR-1).
 
     Guarded per column via ``PRAGMA table_info`` for exactly the reasons
     ``_add_missing_job_columns`` spells out, and carrying an explicit type for

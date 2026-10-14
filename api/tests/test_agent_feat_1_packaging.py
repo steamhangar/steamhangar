@@ -179,7 +179,13 @@ def test_go_presence_field_names_match_the_request_model() -> None:
 
     report_go = (GO / "report" / "report.go").read_text(encoding="utf-8")
     client_go = (GO / "client" / "client.go").read_text(encoding="utf-8")
-    for name in ("agent_version", "report_interval_seconds"):
+    # WP AGENT-ADDR-1: the legacy-resend allowlist moved into
+    # report.OptionalFields (client.go builds its set from it) and gained
+    # local_addrs.
+    optional = re.search(r"var OptionalFields = \[\]string\{([^}]*)\}", report_go)
+    assert optional, "report.OptionalFields not found in report.go"
+    assert "range report.OptionalFields" in client_go
+    for name in ("agent_version", "report_interval_seconds", "local_addrs"):
         assert name in InstalledReportRequest.model_fields
         assert f'`json:"{name},omitempty"`' in report_go
-        assert f'"{name}":' in client_go  # the legacy-resend allowlist
+        assert f'"{name}"' in optional.group(1)
