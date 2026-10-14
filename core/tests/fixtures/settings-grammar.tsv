@@ -126,3 +126,9 @@ VAULT_SCHEDULE_WINDOW	off,x	refused	-
 VAULT_SCHEDULE_WINDOW	03:00-07:00	ok	03:00-07:00
 VAULT_SCHEDULE_WINDOW	22:00-06:00	ok	22:00-06:00
 VAULT_SCHEDULE_WINDOW	09:00-09:00	refused	-
+VAULT_UPSTREAM_EDGE	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.steamcontent.com	ok	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.steamcontent.com
+VAULT_UPSTREAM_EDGE	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.steamcontent.com	refused	-
+VAULT_UPSTREAM_EDGE	bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.steamcontent.com	refused	-
+VAULT_UPSTREAM_POOL_HOSTS	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.steamcontent.com	refused	-
+VAULT_UPSTREAM_RATE_WINDOW	 03:00-07:00	refused	-
+VAULT_UPSTREAM_RATE_WINDOW	03:00-07:00 	refused	-
