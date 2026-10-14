@@ -87,8 +87,8 @@ def is_release_version(build: BuildInfo) -> bool:
     """True when ``build`` names a published release: a release-shaped
     version AND a real commit (a native run reports the base version with
     commit ``unknown``, which is indistinguishable from a release by the
-    version alone; ``agentReleaseFromAbout`` in the web applies the same
-    rule)."""
+    version alone). The web reads the resulting ``release`` flag from
+    ``GET /v1/dist`` and re-checks the version grammar (``isReleaseVersion``)."""
     return (
         _RELEASE_VERSION.fullmatch(build.version) is not None
         and build.commit != UNKNOWN_COMMIT

@@ -38,6 +38,8 @@ EXPECTED_TABLES = {
     # WP D15-RUNNER (v27)
     "runner_marks",
     "runner_address_periods",
+    # WP UPD-FIX-1 (v28): one-time maintenance steps (manifest repair).
+    "maintenance_steps",
     # v18 (WP API-FIX-5): real cover art per app (vault_api/cover_art.py).
     "app_cover_art",
     # v19 (WP UPD-1): always-on update check bookkeeping.

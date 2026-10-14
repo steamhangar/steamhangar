@@ -1,5 +1,5 @@
 & {
-# SteamHangar: install vault-agent 0.1.0-rc10 for this Windows user (no admin rights needed).
+# SteamHangar: install vault-agent for this Windows user (no admin rights needed).
 # Paste all of it into a normal PowerShell window. It contains no key: when it asks for the
 # hangar API key, press Copy key in SteamHangar and paste at the prompt.
 $ErrorActionPreference = 'Stop'
