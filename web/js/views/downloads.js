@@ -82,8 +82,21 @@
  * The section is rebuilt only when its content changes
  * (`updatesListKey`), so a poll tick does not take a button's focus.
  *
+ * **Incomplete (WP CACHE-COMPLETE-1c).** Right after "Updates available",
+ * same pattern: the games whose measured `cache_complete_pct` is below 100,
+ * with no active job and no update flag (lib/cache-completeness.js
+ * `pendingIncomplete`), each with its figure and "Complete now" (`POST
+ * /v1/prefill/verify`, a forced run), plus "Complete all" (`POST
+ * /v1/prefill/incomplete`) and a schedule note (`incompleteScheduleNote`:
+ * completed automatically in the window, or manual only). A game short only
+ * of damaged (wrong-size) chunks has no "Complete now" — a forced run
+ * cannot fix it — and says so in its row; "Complete all" is offered only
+ * while at least one row can be completed. Like every Downloads section
+ * since UPD-6 (user rule 2026-10-14) it is rendered only with at least one
+ * entry, and rebuilt only when its content changes.
+ *
  * Section order, top to bottom: heading, bulk bar, statistics header,
- * Active, Paused, Updates available, Queue, History.
+ * Active, Paused, Updates available, Incomplete, Queue, History.
  *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
@@ -141,6 +154,21 @@ import {
   UPDATE_ALL_LABEL,
   STARTING_LABEL,
 } from "../lib/updates-available.js";
+import {
+  pendingIncomplete,
+  incompleteHeadingText,
+  completeAllAriaLabel,
+  completeNowAriaLabel,
+  incompletePctText,
+  incompleteScheduleNote,
+  incompleteListKey,
+  isCompletable,
+  summarizeVerifyStart,
+  describeVerifyStartError,
+  COMPLETE_NOW_LABEL,
+  COMPLETE_ALL_LABEL,
+  DAMAGED_NOTE,
+} from "../lib/cache-completeness.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
@@ -551,6 +579,7 @@ async function loadSchedule() {
     state.schedule = null; // unknown: no note rather than a guess
   }
   paintUpdates();
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: its schedule note too
 }
 
 /**
@@ -695,6 +724,159 @@ function paintUpdates() {
       ? updatesActs.querySelector('[data-role="update-all"]')
       : Array.from(updatesBody.querySelectorAll('[data-role="update-now"]')).find((b) => updateButtonId(b) === hadFocus);
   const target = same || updatesActs.querySelector('[data-role="update-all"]') || els.queueHeading;
+  target.focus();
+}
+
+// ---------------------------------------------------------------------
+// Incomplete (WP CACHE-COMPLETE-1c)
+// ---------------------------------------------------------------------
+
+/** `null`, `"all"`, or the appid whose "Complete now" request is in flight.
+ * One request at a time; every button of the section is aria-disabled
+ * meanwhile. */
+let incompleteInFlight = null;
+
+/**
+ * Queue the completion: `POST /v1/prefill/verify` for one game ("Complete
+ * now"), `POST /v1/prefill/incomplete` for "Complete all" (the server's own
+ * selection, see lib/cache-completeness.js).
+ * @param {"all"|number} which
+ */
+async function startCompletion(which) {
+  if (incompleteInFlight !== null) return;
+  incompleteInFlight = which;
+  paintIncomplete();
+  try {
+    const refs = which === "all" ? await api.prefillIncomplete() : await api.prefillVerify([which]);
+    const outcome = summarizeVerifyStart(refs, "complete");
+    showToast(outcome.message, { warn: outcome.warn });
+    store.refreshNow();
+  } catch (err) {
+    const outcome = describeVerifyStartError(err);
+    showToast(outcome.message, { warn: true });
+    if (outcome.refresh) store.refreshNow();
+  } finally {
+    incompleteInFlight = null;
+    paintIncomplete();
+  }
+}
+
+function completionButton(label, variant, ariaLabel, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn sm" + (variant ? " " + variant : "");
+  btn.textContent = label;
+  btn.setAttribute("aria-label", ariaLabel);
+  // Busy: aria-disabled plus this guard, not `disabled` (see updateButton).
+  btn.addEventListener("click", () => {
+    if (btn.disabled || incompleteInFlight !== null) return;
+    onClick();
+  });
+  gateOffline(btn);
+  return btn;
+}
+
+function buildIncompleteRow(game, gamesByAppid) {
+  const row = document.createElement("div");
+  row.className = "urow";
+  row.dataset.incompleteAppid = String(game.appid);
+  const title = nameFor(game.appid, gamesByAppid);
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.dataset.appid = String(game.appid); // patchNames keeps it current
+  nm.textContent = title;
+  const pct = document.createElement("span");
+  pct.className = "usize";
+  pct.textContent = incompletePctText(game);
+  row.append(nm, pct);
+  if (isCompletable(game)) {
+    const btn = completionButton(COMPLETE_NOW_LABEL, "primary", completeNowAriaLabel(title), () =>
+      startCompletion(game.appid),
+    );
+    btn.dataset.role = "complete-now";
+    // Not `data-appid`: patchNames rewrites the text of every such node.
+    btn.dataset.incompleteAppid = String(game.appid);
+    row.appendChild(btn);
+  } else {
+    // Short only of wrong-size chunks: nothing a forced run fixes.
+    const note = document.createElement("span");
+    note.className = "unote";
+    note.dataset.role = "damaged-note";
+    note.textContent = DAMAGED_NOTE;
+    row.appendChild(note);
+  }
+  return row;
+}
+
+/** Which completion button `btn` is: `"all"`, its row's appid, or null. */
+function completionButtonId(btn) {
+  if (!btn || !btn.dataset) return null;
+  if (btn.dataset.role === "complete-all") return "all";
+  if (btn.dataset.role === "complete-now" && btn.dataset.incompleteAppid) return Number(btn.dataset.incompleteAppid);
+  return null;
+}
+
+function focusedCompletionButton() {
+  const el = document.activeElement;
+  for (const btn of els.incomplete.querySelectorAll("button")) if (btn === el) return completionButtonId(btn);
+  return null;
+}
+
+/** Label and busy state of the completion buttons, patched in place. */
+function paintIncompleteBusy() {
+  const busy = incompleteInFlight !== null;
+  for (const btn of els.incomplete.querySelectorAll("button")) {
+    const which = completionButtonId(btn);
+    const idle = btn.dataset.role === "complete-all" ? COMPLETE_ALL_LABEL : COMPLETE_NOW_LABEL;
+    const label = incompleteInFlight === which ? STARTING_LABEL : idle;
+    if (btn.textContent !== label) btn.textContent = label;
+    if (busy) btn.setAttribute("aria-disabled", "true");
+    else btn.removeAttribute("aria-disabled");
+  }
+}
+
+/**
+ * Sync the "Incomplete" section with the games, jobs, schedule and
+ * connection state — the same rebuild/focus rules as `paintUpdates`.
+ */
+function paintIncomplete() {
+  if (!mounted() || !els.incomplete) return;
+  const gamesByAppid = gamesByAppidMap();
+  const titleOf = (g) => nameFor(g.appid, gamesByAppid);
+  const rows = state.gamesKnown ? pendingIncomplete(state.games, state.jobs, titleOf) : [];
+  const note = incompleteScheduleNote(state.schedule);
+  const key = [incompleteListKey(rows, titleOf), note ?? "", String(isConnectionLost())].join("\u0000");
+  if (els.incompleteKey === key) {
+    paintIncompleteBusy();
+    return;
+  }
+  els.incompleteKey = key;
+  const hadFocus = focusedCompletionButton();
+
+  const { incomplete, incompleteHeading, incompleteNote, incompleteActs, incompleteBody } = els;
+  incomplete.hidden = rows.length === 0;
+  incompleteHeading.textContent = incompleteHeadingText(rows.length);
+  incompleteNote.hidden = !note;
+  incompleteNote.textContent = note ?? "";
+  incompleteActs.replaceChildren();
+  incompleteBody.replaceChildren();
+  const completable = rows.filter(isCompletable).length;
+  if (completable) {
+    const all = completionButton(COMPLETE_ALL_LABEL, "", completeAllAriaLabel(completable), () => startCompletion("all"));
+    all.dataset.role = "complete-all";
+    incompleteActs.appendChild(all);
+  }
+  for (const g of rows) incompleteBody.appendChild(buildIncompleteRow(g, gamesByAppid));
+  paintIncompleteBusy();
+
+  if (hadFocus === null) return;
+  const same =
+    hadFocus === "all"
+      ? incompleteActs.querySelector('[data-role="complete-all"]')
+      : Array.from(incompleteBody.querySelectorAll('[data-role="complete-now"]')).find(
+          (b) => completionButtonId(b) === hadFocus,
+        );
+  const target = same || incompleteActs.querySelector('[data-role="complete-all"]') || els.queueHeading;
   target.focus();
 }
 
@@ -1502,6 +1684,23 @@ function buildSection() {
   updatesBody.className = "dl-updates-list";
   updates.append(updatesHeading, updatesNote, updatesActs, updatesBody);
 
+  // WP CACHE-COMPLETE-1c: hidden until paintIncomplete finds a game. Styled
+  // like the updates section (`.dl-updates`), found by `.dl-incomplete`.
+  const incomplete = document.createElement("div");
+  incomplete.className = "dl-updates dl-incomplete";
+  incomplete.hidden = true;
+  const incompleteHeading = sectionHeading("");
+  incompleteHeading.id = "dl-incomplete-heading";
+  incomplete.setAttribute("role", "group");
+  incomplete.setAttribute("aria-labelledby", "dl-incomplete-heading");
+  const incompleteNote = hintMessage("");
+  incompleteNote.classList.add("dl-updates-note");
+  const incompleteActs = document.createElement("div");
+  incompleteActs.className = "dl-updates-acts";
+  const incompleteBody = document.createElement("div");
+  incompleteBody.className = "dl-updates-list";
+  incomplete.append(incompleteHeading, incompleteNote, incompleteActs, incompleteBody);
+
   const queueHeading = document.createElement("h4");
   queueHeading.className = "sec";
   queueHeading.tabIndex = -1; // WP UPD-6: focus anchor when the updates section empties
@@ -1531,6 +1730,7 @@ function buildSection() {
     pausedHeading,
     pausedBody,
     updates,
+    incomplete,
     queueHeading,
     queueBody,
     queueHint,
@@ -1562,6 +1762,12 @@ function buildSection() {
     updatesActs,
     updatesBody,
     updatesKey: null,
+    incomplete,
+    incompleteHeading,
+    incompleteNote,
+    incompleteActs,
+    incompleteBody,
+    incompleteKey: null,
     queueHeading,
   };
   return section;
@@ -1588,6 +1794,7 @@ store.subscribe("jobs", ({ items, diff }) => {
   // WP UPD-6: a new job takes its game out of the list, without waiting for
   // a games poll (pinned in downloads-updates-wiring.test.js).
   paintUpdates();
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: same rule
 });
 
 /** WP WEB-FEAT-6: true when a job card's badge kind no longer matches its
@@ -1613,6 +1820,7 @@ store.subscribe("games", ({ items }) => {
   if (jobCardKindsStale()) fullRender();
   else patchNames();
   paintUpdates(); // WP UPD-6: a flag set or cleared by this poll
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: a figure measured by this poll
 });
 
 // WP WEB-FIX-4: an owned list that lands (from the Library or from this
@@ -1620,6 +1828,7 @@ store.subscribe("games", ({ items }) => {
 ownedLibrary.subscribe(() => {
   patchNames();
   paintUpdates(); // WP UPD-6: names feed the sort order and aria-labels
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: same
 });
 
 // WP WEB-FIX-2: repaint the job controls on a connection transition. A full
@@ -1628,6 +1837,7 @@ ownedLibrary.subscribe(() => {
 onConnectionChange(() => {
   fullRender();
   paintUpdates(); // WP UPD-6: the offline gate
+  paintIncomplete(); // WP CACHE-COMPLETE-1c: same
 });
 
 onViewChange((view) => {
@@ -1646,6 +1856,7 @@ export function renderDownloads() {
   sectionEl = section;
   fullRender();
   paintUpdates(); // WP UPD-6
+  paintIncomplete(); // WP CACHE-COMPLETE-1c
   loadSchedule(); // WP UPD-6: the section's schedule note
   paintStats();
   // Same gate as the store's loops (store-singleton.js): no key and no

@@ -298,10 +298,14 @@ test("sheet wiring: the header uses the tool name, the dash glyph and the tool w
   assert.match(body, /toolAppName\(gameLike\)/);
   // WP UPD-6 review fix: the status row is buildDetailStatusRow; the card
   // helpers fall through to statusIconKind/statusWordFor (TOOL -> dash, tool word).
+  // WP CACHE-COMPLETE-1c: through lib/cache-completeness.js `cardDisplay`,
+  // which keeps every non-CACHED kind on those helpers (pinned in
+  // cache-completeness.test.js).
   const row = functionBody(detailJs, "export function buildDetailStatusRow(row, kind) {");
   assert.ok(row, "buildDetailStatusRow() not found");
-  assert.match(row, /createStatusIcon\(cardIconKind\(row, kind\)/);
-  assert.match(row, /cardStatusWord\(row, kind, STATUS_LABEL\)/);
+  assert.match(row, /const display = cardDisplay\(row, kind, STATUS_LABEL\);/);
+  assert.match(row, /createStatusIcon\(display\.icon/);
+  assert.match(row, /word\.textContent = display\.word;/);
 });
 
 // ---------------------------------------------------------------------

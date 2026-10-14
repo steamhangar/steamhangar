@@ -62,7 +62,7 @@
  * @returns {string} an opaque, comparable signature — equal in and equal
  *   out is the only contract; never parse this string.
  */
-export function buildDetailStructuralKey({ dispKind, trackedJobStatus, depotTags, installedBadge, packages, updates }) {
+export function buildDetailStructuralKey({ dispKind, trackedJobStatus, depotTags, installedBadge, packages, updates, completeness }) {
   const key = {
     k: dispKind,
     j: trackedJobStatus ?? null,
@@ -77,5 +77,9 @@ export function buildDetailStructuralKey({ dispKind, trackedJobStatus, depotTags
   // ids the sheet's "Update now" would send, only when either is present,
   // so every other game's key is unchanged.
   if (typeof updates === "string" && updates) key.u = updates;
+  // WP CACHE-COMPLETE-1c: the header's completeness overlay and the
+  // completeness block's shape (Verify targets, damaged note, group line),
+  // only when the block shows, so every other game's key is unchanged.
+  if (typeof completeness === "string" && completeness) key.c = completeness;
   return JSON.stringify(key);
 }

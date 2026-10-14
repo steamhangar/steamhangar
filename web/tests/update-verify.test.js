@@ -258,8 +258,10 @@ test("sheet wiring: the header and the structural key both take dispKind(gameLik
   assert.match(header, /buildDetailStatusRow\(currentUpdateRow\(\) \|\| gameLike, dispKind\(gameLike, liveJob\)\)/);
   const row = functionBody(src, "export function buildDetailStatusRow(row, kind) {");
   assert.ok(row, "buildDetailStatusRow() not found");
-  assert.match(row, /createStatusIcon\(cardIconKind\(row, kind\)/);
-  assert.match(row, /word\.className = "tx-" \+ cardTextKind\(row, kind\);/);
+  // WP CACHE-COMPLETE-1c: via cardDisplay (completeness after UPD-6).
+  assert.match(row, /const display = cardDisplay\(row, kind, STATUS_LABEL\);/);
+  assert.match(row, /createStatusIcon\(display\.icon/);
+  assert.match(row, /word\.className = "tx-" \+ display\.text;/);
   const key = functionBody(src, "function computeStructuralKey() {");
   assert.ok(key, "computeStructuralKey() not found");
   assert.match(key, /dispKind: dispKind\(gameLike, liveJob\)/, "a Downloading->Verifying flip rebuilds the header");

@@ -111,7 +111,7 @@
 import { store } from "../store-singleton.js";
 import { api } from "../api.js";
 import { showToast } from "../components/toast.js";
-import { buildCard, cardStructuralKey, patchCardVolatile } from "../components/game-card.js";
+import { buildCard, cardCompletenessKey, cardStructuralKey, patchCardVolatile } from "../components/game-card.js";
 import { indexLiveJobsByAppid, isJobStateTransition } from "../lib/game-status.js";
 import { chipCounts, normalizeQuery, visibleGames } from "../lib/library-filters.js";
 import {
@@ -1449,14 +1449,16 @@ function currentCardKeys() {
   const map = new Map();
   if (!els) return map;
   for (const card of els.grid.querySelectorAll(".card[data-appid]")) {
-    // WP TOOL-APPS-2c: the group part (`data-gk`) is structural too.
-    map.set(Number(card.dataset.appid), `${card.dataset.dk}|${card.dataset.gk || ""}`);
+    // WP TOOL-APPS-2c: the group part (`data-gk`) is structural too, and
+    // WP CACHE-COMPLETE-1c the completeness overlay (`data-ck`).
+    map.set(Number(card.dataset.appid), `${card.dataset.dk}|${card.dataset.gk || ""}|${card.dataset.ck || ""}`);
   }
   return map;
 }
 
 function computeCardKey(game) {
-  return `${cardStructuralKey(game, liveJobsByAppid.get(game.appid))}|${groupCardKey(game, liveJobsByAppid)}`;
+  const liveJob = liveJobsByAppid.get(game.appid);
+  return `${cardStructuralKey(game, liveJob)}|${groupCardKey(game, liveJobsByAppid)}|${cardCompletenessKey(game, liveJob)}`;
 }
 
 /**

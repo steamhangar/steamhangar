@@ -76,6 +76,19 @@
  * cover already gets — never touched by `patchVolatile()`, so a poll tick
  * that doesn't change the structural key never re-fetches it).
  *
+ * **Cache completeness (WP CACHE-COMPLETE-1c).** The header's status uses
+ * the Library card's overlay (lib/cache-completeness.js `cardDisplay`: only
+ * 100 % is the green check). Under the facts a completeness block
+ * (`buildCompletenessSection`) shows the game's own figure ("80% complete —
+ * 3.2 of 4.0 GB on disk · checked …", or "Completeness unknown …"), the
+ * group's figure for a game with content packages, the damaged-chunks note
+ * for a game short only of wrong-size chunks, and "Verify": `POST
+ * /v1/prefill/verify` for the game (and its packages) — a forced prefill
+ * that fetches whatever is missing. A verify that lands on a RUNNING job
+ * only forces the next run, and the toast says "verifies on the next run"
+ * (`summarizeVerifyStart`). The block's shape is part of the structural
+ * key; its line texts are patched.
+ *
  * **Content packages (WP TOOL-APPS-2c, ADR-0022 §3).** For a game with
  * content packages (the same grouping the Library uses, lib/content-groups.js
  * `groupGames` over the store's rows), the sheet lists them in a "Content
@@ -106,10 +119,20 @@ import {
   isToolApp,
   TOOL_APP_NOTE,
   showsUpdateState,
-  cardIconKind,
-  cardTextKind,
-  cardStatusWord,
 } from "../lib/game-status.js";
+import {
+  cardDisplay,
+  completenessLine,
+  groupCompletenessLine,
+  isDamagedOnly,
+  showsCompletenessBlock,
+  verifyAppids,
+  summarizeVerifyStart,
+  describeVerifyStartError,
+  DAMAGED_NOTE,
+  VERIFY_HINT,
+  VERIFY_LABEL,
+} from "../lib/cache-completeness.js";
 import {
   sheetUpdateAppids,
   summarizeUpdateStart,
@@ -599,6 +622,29 @@ function currentUpdateAppids() {
   return sheetUpdateAppids(group ? [gameLike, ...group.packages] : [gameLike], state.jobs);
 }
 
+/** WP CACHE-COMPLETE-1c: the app ids the sheet's "Verify" sends — the game
+ * and, for a group, its packages (lib/cache-completeness.js
+ * `verifyAppids`). */
+function currentVerifyAppids() {
+  const gameLike = currentGameLike();
+  if (!gameLike) return [];
+  const group = currentGroup();
+  return verifyAppids(group ? [gameLike, ...group.packages] : [gameLike]);
+}
+
+/** WP CACHE-COMPLETE-1c: the structural-key part for the completeness
+ * block — whether it shows, the header overlay, the Verify targets, the
+ * damaged note and the group line. "" when the block does not show. */
+function completenessStructuralPart(kind) {
+  const gameLike = currentGameLike();
+  const group = currentGroup();
+  if (!showsCompletenessBlock(gameLike, group)) return "";
+  const header = cardDisplay(currentUpdateRow() || gameLike, kind, STATUS_LABEL).key;
+  const damaged = isDamagedOnly(gameLike) ? 1 : 0;
+  const groupLine = groupCompletenessLine(group) ? 1 : 0;
+  return `${header}|${currentVerifyAppids().join(",")}|${damaged}|${groupLine}`;
+}
+
 /** The structural-key part for the update state: "" when nothing shows. */
 function updatesStructuralPart(kind) {
   const header = showsUpdateState(currentUpdateRow(), kind);
@@ -653,6 +699,8 @@ function computeStructuralKey() {
     dispKind: dispKind(gameLike, liveJob),
     // WP UPD-6 review fix: header state and the "Update now" targets.
     updates: updatesStructuralPart(dispKind(gameLike, liveJob)),
+    // WP CACHE-COMPLETE-1c: header overlay and the completeness block.
+    completeness: completenessStructuralPart(dispKind(gameLike, liveJob)),
     trackedJobStatus: trackedJob ? trackedJob.status : null,
     depotTags: presentations.map((p) => p.tag),
     // WP AG-2 (review S4 fix): ONLY whether the "Installed on" section
@@ -739,7 +787,9 @@ function buildHeader(gameLike, liveJob) {
 export function buildDetailStatusRow(row, kind) {
   const statusRow = document.createElement("div");
   statusRow.className = "detail-statusrow";
-  const statusIcon = createStatusIcon(cardIconKind(row, kind), { size: "sm" });
+  // WP CACHE-COMPLETE-1c: the card's overlay (completeness after UPD-6).
+  const display = cardDisplay(row, kind, STATUS_LABEL);
+  const statusIcon = createStatusIcon(display.icon, { size: "sm" });
   // WP 4a.8 icon audit: the word right after this icon already says the
   // same thing visibly — hide the icon's own sr-only label so it is not
   // announced twice (same "avoid double announcement" posture as
@@ -747,8 +797,8 @@ export function buildDetailStatusRow(row, kind) {
   statusIcon.setAttribute("aria-hidden", "true");
   statusRow.appendChild(statusIcon);
   const word = document.createElement("span");
-  word.className = "tx-" + cardTextKind(row, kind);
-  word.textContent = cardStatusWord(row, kind, STATUS_LABEL);
+  word.className = "tx-" + display.text;
+  word.textContent = display.word;
   statusRow.appendChild(word);
   return statusRow;
 }
@@ -782,6 +832,68 @@ async function startSheetUpdate(appids) {
     store.refreshNow();
   } catch (err) {
     const outcome = describeUpdateStartError(err);
+    showToast(outcome.message, { warn: true });
+    if (outcome.refresh) store.refreshNow();
+  }
+}
+
+/**
+ * WP CACHE-COMPLETE-1c: the completeness block (module header). `null` when
+ * the game shows none (a tool app, or nothing on disk). Exported for
+ * web/tests/game-detail-sheet-completeness.test.js.
+ * @param {object} gameLike the game's own row
+ * @param {object | null} group its group row, or null
+ * @param {number[]} appids what "Verify" sends; no button when empty
+ * @param {() => Promise<void>} onVerify
+ * @returns {HTMLElement | null}
+ */
+export function buildCompletenessSection(gameLike, group, appids, onVerify) {
+  if (!showsCompletenessBlock(gameLike, group)) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "facts detail-block";
+  wrap.dataset.role = "completeness";
+  const line = document.createElement("div");
+  line.dataset.role = "complete-line";
+  line.textContent = completenessLine(gameLike);
+  wrap.appendChild(line);
+  const groupText = groupCompletenessLine(group);
+  if (groupText) {
+    const groupLine = document.createElement("div");
+    groupLine.dataset.role = "complete-group";
+    groupLine.textContent = groupText;
+    wrap.appendChild(groupLine);
+  }
+  if (isDamagedOnly(gameLike)) {
+    const note = document.createElement("div");
+    note.className = "tx-partial";
+    note.dataset.role = "damaged-note";
+    note.textContent = DAMAGED_NOTE;
+    wrap.appendChild(note);
+  }
+  if (appids.length) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn sm detail-block";
+    btn.dataset.role = "verify";
+    btn.dataset.appids = appids.join(",");
+    btn.textContent = VERIFY_LABEL;
+    btn.title = VERIFY_HINT;
+    btn.addEventListener("click", () => withButtonBusy(btn, onVerify));
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+/** `POST /v1/prefill/verify` for the sheet's "Verify" (WP
+ * CACHE-COMPLETE-1c): a forced prefill per app id. */
+async function startSheetVerify(appids) {
+  try {
+    const refs = await api.prefillVerify(appids);
+    const outcome = summarizeVerifyStart(refs, "verify");
+    showToast(outcome.message, { warn: outcome.warn });
+    store.refreshNow();
+  } catch (err) {
+    const outcome = describeVerifyStartError(err);
     showToast(outcome.message, { warn: true });
     if (outcome.refresh) store.refreshNow();
   }
@@ -1318,6 +1430,10 @@ function render() {
   const toolNote = buildToolAppNote(gameLike);
   if (toolNote) contentEl.append(toolNote);
   contentEl.append(buildFactLines(gameLike));
+  // WP CACHE-COMPLETE-1c: completeness figure and "Verify".
+  const verifyIds = currentVerifyAppids();
+  const completeness = buildCompletenessSection(gameLike, currentGroup(), verifyIds, () => startSheetVerify(verifyIds));
+  if (completeness) contentEl.append(completeness);
 
   const installedSection = buildInstalledSection(gameLike);
   if (installedSection) contentEl.append(installedSection);
@@ -1385,6 +1501,12 @@ function patchVolatile() {
   if (updateDownloadedEl) syncUpdateDownloadedLine(updateDownloadedEl, gameLike);
 
   patchInstalledSection(contentEl, gameLike);
+
+  // WP CACHE-COMPLETE-1c: the figures move without a structural change.
+  const completeLineEl = contentEl.querySelector('[data-role="complete-line"]');
+  if (completeLineEl) completeLineEl.textContent = completenessLine(gameLike);
+  const completeGroupEl = contentEl.querySelector('[data-role="complete-group"]');
+  if (completeGroupEl) completeGroupEl.textContent = groupCompletenessLine(currentGroup()) || "";
 
   const group = currentGroup();
   if (group) patchPackagesSection(contentEl, group.packages, group.group_size_bytes);
