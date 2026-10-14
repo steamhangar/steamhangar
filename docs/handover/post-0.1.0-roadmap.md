@@ -663,6 +663,15 @@ cached games" a distinct style (it downloads); side by side, not a full
 row. The web demo mode gets the update check, one flagged game and the
 "Updates" chip (UPD-2 left demo out; the Android demo has it).
 
+**rc17 follow-ups (review findings deferred 2026-10-14, after rc17):**
+CACHE-REPAIR-1 (above); app list: fixture with installed_on + column
+assertions, compact installed-on wording below 1024 dp; stronger
+completeness twin pins; app parity gaps (client rename, Delete history,
+Manage PCs add/remove, focus handling on Downloads rebuilds); clock
+injection for the D15b/D15-NAMES endpoint tests (bucket-boundary edge
+cases); a permanent conftest hook that emits failed test names as CI
+annotations; per-app backoff for repeated forced completion runs.
+
 **Before v0.1.0 (ongoing):** release notes, user device checks,
 verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
 saves id), D7 measurement on `:443` (TLS cap TODO in WORKPACKAGES),
