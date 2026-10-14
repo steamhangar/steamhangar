@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from vault_api import (
     app_classification,
     cover_art,
+    cover_cache,
     depot_manifests,
     oracle,
     scheduler,
@@ -241,6 +242,14 @@ class GameSummary(BaseModel):
     # cdn.akamai.steamstatic.com ever appear here (validated on write AND
     # on this read). UIs fall back to the legacy CDN path when it is null.
     cover_url: str | None = None
+    # WP D10 COVER-CACHE-1: the same cover, stored by vault-api and served
+    # over the LAN: a path relative to this API's base URL
+    # (``/v1/covers/{appid}/{signature}``, loadable without the X-Api-Key
+    # header because the signature is the credential; routers/covers.py).
+    # Null until vault-api has stored the image. UIs try it first, then
+    # ``cover_url``, then the legacy CDN path. ``cover_url`` keeps its
+    # meaning, so older clients are unaffected.
+    cover_cached_url: str | None = None
     # WP UPD-1: an update is available -- the manifest oracle's current public
     # manifest differs from the one vault-api recorded for this app's cache
     # (``oracle.app_view``'s ``stale`` verdict). ``false`` is "no known update",
@@ -267,6 +276,34 @@ class GameSummary(BaseModel):
     # names the app. Display only: ``tool_app`` stays the fixed list (an
     # ``app_type`` of "tool" never stops a prefill).
     app_type: str | None = None
+    # WP TOOL-APPS-2 (ADR-0022 §2, "decided in the API package"): the size of
+    # the whole group this row heads -- the union of the depots mapped to this
+    # app and to every app whose ``parent_appid`` is this app, each depot
+    # counted ONCE (never the sum of the members' ``size_bytes``, which would
+    # double-count a depot shared inside the group). Same null rules as
+    # ``size_bytes``: null when no depot is mapped or none is on disk yet.
+    # For an ungrouped top-level row it equals ``size_bytes``; for a row that
+    # is itself grouped under a parent (``parent_appid`` set) it is null --
+    # its bytes are part of its parent's ``group_size_bytes``.
+    group_size_bytes: int | None = None
+
+
+def _group_size_bytes(
+    appid: int,
+    classifications: dict[int, app_classification.Classification],
+    app_depotids: dict[int, list[int]],
+    depot_bytes: dict[int, int],
+) -> int | None:
+    """``group_size_bytes`` for one row (see ``GameSummary``). Grouping is the
+    same ``parent_appid`` resolution the list returns."""
+    own = classifications.get(appid)
+    if own is not None and own.parent_appid is not None:
+        return None
+    members = {appid} | {
+        child for child, cls in classifications.items() if cls.parent_appid == appid
+    }
+    depots = {depotid for member in members for depotid in app_depotids.get(member, [])}
+    return app_size_bytes(sorted(depots), depot_bytes)
 
 
 def _classification_fields(
@@ -344,12 +381,16 @@ class GameDetail(BaseModel):
     tool_app_name: str | None = None
     # See GameSummary.cover_url (WP API-FIX-5).
     cover_url: str | None = None
+    # See GameSummary.cover_cached_url (WP D10).
+    cover_cached_url: str | None = None
     # See GameSummary.update_available / .update_checked_at (WP UPD-1).
     update_available: bool = False
     update_checked_at: str | None = None
     # See GameSummary.parent_appid / .app_type (WP TOOL-APPS-2a).
     parent_appid: int | None = None
     app_type: str | None = None
+    # See GameSummary.group_size_bytes (WP TOOL-APPS-2).
+    group_size_bytes: int | None = None
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -394,6 +435,10 @@ def list_games(
         installed_on = _installed_on_by_appid(conn, base_settings, now)
         # WP API-FIX-5: one query for every stored cover, re-validated.
         covers = cover_art.cover_urls_by_appid(conn)
+        # WP D10: one query for every stored cover file.
+        cached_covers = cover_cache.cached_cover_paths(
+            conn, request.app.state.settings.vault_api_key
+        )
         # WP UPD-1: stored oracle verdicts, three statements for the whole list.
         update_verdicts = oracle.verdicts_by_app(conn, settings=base_settings)
         # WP TOOL-APPS-2a: stored classification, nesting resolved, two
@@ -431,8 +476,12 @@ def list_games(
                 installed_on=installed_on.get(row["appid"], []),
                 **_tool_app_fields(row["appid"]),
                 cover_url=covers.get(row["appid"]),
+                cover_cached_url=cached_covers.get(row["appid"]),
                 **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
                 **_classification_fields(classifications.get(row["appid"])),
+                group_size_bytes=_group_size_bytes(
+                    row["appid"], classifications, app_depotids, depot_bytes
+                ),
             )
         )
     return games
@@ -487,11 +536,25 @@ def get_game(
         frequency = depot_manifests.change_frequency_for_app(conn, appid)
         installed_on = _installed_on_for_appid(conn, base_settings, now, appid)
         cover_url = cover_art.cover_url_for_appid(conn, appid)
+        cover_cached_url = cover_cache.cached_cover_path(
+            conn, request.app.state.settings.vault_api_key, appid
+        )
         update_view = oracle.app_view(conn, appid, settings=base_settings)
         # Same resolution as the list (the chain may pass through other apps).
-        classification = app_classification.resolve_classifications(
+        classifications = app_classification.resolve_classifications(
             conn, oracle_enabled=base_settings.manifest_oracle_enabled
-        ).get(appid)
+        )
+        classification = classifications.get(appid)
+        # The depots of every app this one heads (group_size_bytes).
+        group_members = sorted(
+            {appid} | {c for c, cls in classifications.items() if cls.parent_appid == appid}
+        )
+        group_depot_rows = conn.execute(
+            "SELECT appid, depotid FROM depot_app_map WHERE appid IN ({})".format(
+                ",".join("?" for _ in group_members)
+            ),
+            group_members,
+        ).fetchall()
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
@@ -505,6 +568,9 @@ def get_game(
     ]
 
     detail_size = app_size_bytes([row["depotid"] for row in depot_rows], depot_bytes)
+    group_depotids: dict[int, list[int]] = {}
+    for row in group_depot_rows:
+        group_depotids.setdefault(int(row["appid"]), []).append(int(row["depotid"]))
     return GameDetail(
         appid=app_row["appid"],
         name=app_classification.display_name(app_row["name"], classification),
@@ -520,9 +586,13 @@ def get_game(
         installed_on=installed_on,
         **_tool_app_fields(app_row["appid"]),
         cover_url=cover_url,
+        cover_cached_url=cover_cached_url,
         **_update_fields(
             (update_view.verdict, update_view.checked_at) if update_view.known else None,
             detail_size,
         ),
         **_classification_fields(classification),
+        group_size_bytes=_group_size_bytes(
+            appid, classifications, group_depotids, depot_bytes
+        ),
     )

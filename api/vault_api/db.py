@@ -201,8 +201,11 @@ import time
 #: triggers are recorded, read by ``GET /v1/updates/status``). A v18 database
 #: gets the full table from ``_DDL``; a v19 one gets the three columns from the
 #: per-column-guarded ``_add_missing_update_check_columns`` step.
-#: v22 (WP TOOL-APPS-2a, ADR-0022 §1; v21 is WP D10's ``app_cover_file``,
-#: on its own branch): added ``app_classification`` (which tracked app is a
+#: v21 (WP D10 COVER-CACHE-1): added ``app_cover_file`` -- one row per app
+#: whose cover image vault-api stores (``vault_api/cover_cache.py``): the URL
+#: it came from, its SHA-256, type and size (NULL while nothing is stored),
+#: plus the download backoff. A brand-new table, so it needs no ``ALTER`` step.
+#: v22 (WP TOOL-APPS-2a, ADR-0022 §1): added ``app_classification`` (which tracked app is a
 #: content package of which game, ``vault_api/app_classification.py``) and
 #: ``oracle_dlc_links`` (a cached parent's ``extended.listofdlc`` / depot
 #: ``dlcappid`` links), and ``oracle_app_state`` gained ``app_type``,
@@ -213,8 +216,8 @@ import time
 #: step runs once on upgrade: every ``app_cover_art.next_check_at`` still in
 #: the future is moved to "now", so the cover refresher re-asks every tracked
 #: app with the new store flags instead of over the next 30 days. Every step
-#: is keyed on ``version < 22``, not on ``== 21``, so a v20 database (this
-#: branch without D10) and a v21 one (after D10) both take it exactly once.
+#: is keyed on ``version < 22``, not on ``== 21``, so a v20 database (upgraded
+#: straight past D10) and a v21 one both take it exactly once.
 SCHEMA_VERSION = 22
 
 _DDL = """
@@ -716,6 +719,24 @@ CREATE TABLE IF NOT EXISTS app_cover_art (
 
 CREATE INDEX IF NOT EXISTS idx_app_cover_art_next_check
     ON app_cover_art (next_check_at);
+
+-- WP D10 COVER-CACHE-1 (schema v21): cover images stored by vault-api in
+-- <data dir>/covers/<appid>.img (vault_api/cover_cache.py). sha256,
+-- content_type and size_bytes describe the stored file and are NULL while
+-- none is stored; source_url is the cover_url it was downloaded from (a
+-- different current cover_url means "download again"). attempts and
+-- next_try_at are the download backoff. Served by GET /v1/covers/{appid}/
+-- {signature}; the file's hash is checked on every read.
+CREATE TABLE IF NOT EXISTS app_cover_file (
+    appid        INTEGER PRIMARY KEY,
+    source_url   TEXT,
+    sha256       TEXT,
+    content_type TEXT,
+    size_bytes   INTEGER,
+    stored_at    TEXT,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    next_try_at  TEXT
+);
 
 -- WP TOOL-APPS-2a (schema v22, ADR-0022 §1): which tracked app is a content
 -- package of which game, and a fallback display name. Written only by the

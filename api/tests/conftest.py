@@ -87,9 +87,11 @@ def _no_cover_art_lookup_in_tests(monkeypatch) -> None:
     refresher thread. Push its first tick an hour out, so no test ever calls
     Steam for real; tests of the lookup drive ``refresh_once``/``tick``
     directly with a fake fetch."""
-    from vault_api import cover_art
+    from vault_api import cover_art, cover_cache
 
     monkeypatch.setattr(cover_art, "INITIAL_DELAY_SECONDS", 3600.0)
+    # WP D10: the same for the cover download thread.
+    monkeypatch.setattr(cover_cache, "INITIAL_DELAY_SECONDS", 3600.0)
 
 
 @pytest.fixture

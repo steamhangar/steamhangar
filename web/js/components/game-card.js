@@ -108,7 +108,7 @@ import {
   packagesAriaText,
   packagesLineText,
 } from "../lib/content-groups.js";
-import { coverArtUrl, fallbackHues, fallbackPattern } from "../lib/cover-art.js";
+import { coverCandidates, fallbackHues, fallbackPattern, wireCoverFallback } from "../lib/cover-art.js";
 import {
   isNeverPlayedCached,
   NEVER_PLAYED_LABEL,
@@ -394,9 +394,11 @@ function buildCover(game) {
   img.alt = "";
   img.loading = "lazy";
   img.decoding = "async";
-  img.addEventListener("error", () => img.remove(), { once: true });
-  // WP API-FIX-5: the server-resolved cover when it has one.
-  img.src = coverArtUrl(game.appid, game.cover_url);
+  // WP D10: vault-api's stored copy first, then the server-resolved CDN
+  // cover (WP API-FIX-5), then the legacy path; removed only after all fail.
+  wireCoverFallback(img, coverCandidates(game.appid, game.cover_url, game.cover_cached_url), () =>
+    img.remove(),
+  );
   cap.appendChild(img);
 
   const scrim = document.createElement("div");

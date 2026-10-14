@@ -220,4 +220,26 @@ class GameCardModelTest {
         assertEquals(true, flagged.updateAvailable)
         assertEquals(false, plain.updateAvailable)
     }
+
+    @Test
+    fun `WP D10 -- cachedCoverUrl carries the vault's stored copy, coverUrl stays the CDN cover`() {
+        val sig = "0123456789abcdef0123456789abcdef"
+        val vault = "http://192.168.10.20:8080/v1/covers/570/$sig"
+        val model = buildGameCardModel(
+            runningGame(appid = 570).copy(cover_cached_url = vault),
+            null,
+            selected = false,
+            selecting = false,
+        )
+        assertEquals(vault, model.cachedCoverUrl)
+        assertEquals(coverArtUrl(570), model.coverUrl)
+        val foreign = buildGameCardModel(
+            runningGame(appid = 570).copy(cover_cached_url = "http://host/v1/covers/440/$sig"),
+            null,
+            selected = false,
+            selecting = false,
+        )
+        assertEquals(null, foreign.cachedCoverUrl)
+        assertEquals(null, buildGameCardModel(runningGame(appid = 570), null, false, false).cachedCoverUrl)
+    }
 }

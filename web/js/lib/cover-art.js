@@ -45,6 +45,15 @@
  * older server, an owned-only game, anything malformed). The image's own
  * error fallback in the components is unchanged. `headerArtUrl` still uses
  * the legacy path (no server lookup for it).
+ *
+ * **Covers stored by vault-api (WP D10 COVER-CACHE-1).** A row may also carry
+ * `cover_cached_url`: a same-origin path `/v1/covers/{appid}/{signature}`
+ * that vault-api serves from its own copy of the cover (LAN speed, works
+ * offline, long `Cache-Control` + ETag). The signature in the path is the
+ * credential (an `<img>` cannot send `X-Api-Key`). `coverCandidates` lists
+ * the URLs to try in order -- stored copy, server `cover_url`, legacy path --
+ * and `wireCoverFallback` moves an `<img>` to the next one on each load error
+ * before giving up. Same-origin, so the CSP's `img-src 'self'` covers it.
  */
 
 export const STEAM_CDN_HOST = "cdn.akamai.steamstatic.com";
@@ -87,6 +96,68 @@ export function serverCoverUrl(value) {
  */
 export function coverArtUrl(appid, coverUrl) {
   return serverCoverUrl(coverUrl) ?? `https://${STEAM_CDN_HOST}/steam/apps/${appid}/library_600x900.jpg`;
+}
+
+const CACHED_COVER_RE = /^\/v1\/covers\/([1-9][0-9]{0,9})\/[0-9a-f]{32}$/;
+
+/**
+ * A server-sent `cover_cached_url` if it is the exact same-origin path shape
+ * for this `appid`, else null (WP D10).
+ * @param {number} appid
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function cachedCoverPath(appid, value) {
+  if (typeof value !== "string") return null;
+  const match = CACHED_COVER_RE.exec(value);
+  if (match === null || match[1] !== String(appid)) return null;
+  return value;
+}
+
+/**
+ * Cover URLs to try, best first, without duplicates (WP D10): vault-api's
+ * stored copy, the server-resolved CDN URL, the legacy CDN path.
+ * @param {number} appid
+ * @param {unknown} [coverUrl] `cover_url` from a games row
+ * @param {unknown} [cachedUrl] `cover_cached_url` from a games row
+ * @returns {string[]}
+ */
+export function coverCandidates(appid, coverUrl, cachedUrl) {
+  const out = [];
+  for (const url of [cachedCoverPath(appid, cachedUrl), coverArtUrl(appid, coverUrl), coverArtUrl(appid)]) {
+    if (url !== null && !out.includes(url)) out.push(url);
+  }
+  return out;
+}
+
+/**
+ * Point `img` at `urls[0]`; on each load error move to the next URL, and
+ * after the last one call `onExhausted` (the callers remove the image so the
+ * styled fallback tile shows). DOM-light on purpose: only `src` and
+ * `addEventListener` are used.
+ * @param {{ src: string, addEventListener: Function }} img
+ * @param {string[]} urls
+ * @param {() => void} onExhausted
+ */
+export function wireCoverFallback(img, urls, onExhausted) {
+  let index = 0;
+  let done = false;
+  img.addEventListener("error", () => {
+    if (done) return;
+    index += 1;
+    if (index < urls.length) {
+      img.src = urls[index];
+    } else {
+      done = true;
+      onExhausted();
+    }
+  });
+  if (urls.length === 0) {
+    done = true;
+    onExhausted();
+    return;
+  }
+  img.src = urls[0];
 }
 
 /** Wide (460x215) header/hero capsule art for the game detail card

@@ -1308,6 +1308,8 @@ function gameSummary(g) {
     ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (WP UPD-1 fields)
     parent_appid: g.parent_appid, // WP TOOL-APPS-2c (WP TOOL-APPS-2a fields)
     app_type: g.app_type,
+    // WP D10: additive on both game shapes; the demo stores no covers.
+    cover_cached_url: null,
   };
 }
 
@@ -1335,6 +1337,7 @@ function gameDetail(g) {
     ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (see gameSummary)
     parent_appid: g.parent_appid, // WP TOOL-APPS-2c (see gameSummary)
     app_type: g.app_type,
+    cover_cached_url: null, // WP D10 (see gameSummary's own comment)
   };
 }
 

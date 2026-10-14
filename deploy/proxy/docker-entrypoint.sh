@@ -111,7 +111,7 @@ log "client allowlist rendered: Allow $egress_subnet (VAULT_EGRESS_SUBNET) + loo
 # key: the background cover-art lookup (IStoreBrowseService/GetItems,
 # api/vault_api/cover_art.py; threat-model §5 item 6; ADR-0011 addendum
 # 2026-10-10). Same host, so nothing here changed.
-BAKED_HOSTS="api.steampowered.com"
+BAKED_HOSTS="api.steampowered.com shared.akamai.steamstatic.com cdn.akamai.steamstatic.com"
 
 # Turns "host.name" into the anchored, dot-escaped BRE pattern described
 # above. Deliberately narrow: escapes only ".", the one BRE metacharacter a
@@ -136,9 +136,10 @@ to_pattern() {
     echo "# the LAN. See deploy/README.md \"verify in five minutes\" for how"
     echo "# to check that claim against the running container yourself."
     echo ""
-    echo "# --- baked in: SteamHangar's own Steam Web API relay (see this"
-    echo "# script's own comment on BAKED_HOSTS above for why this one host"
-    echo "# is not gated behind VAULT_EGRESS_ALLOW like the ones below) ---"
+    echo "# --- baked in: the Steam Web API relay / cover lookup host and"
+    echo "# Steam's two cover image hosts (see this script's own comment on"
+    echo "# BAKED_HOSTS above for why they are not gated behind"
+    echo "# VAULT_EGRESS_ALLOW like the ones below) ---"
     for h in $BAKED_HOSTS; do
         to_pattern "$h"
     done

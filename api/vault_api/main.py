@@ -22,6 +22,7 @@ from vault_api.about import AboutService
 from vault_api.body_guard import PreAuthBodyGuard
 from vault_api.config import Settings
 from vault_api.cover_art import CoverArtRefresher
+from vault_api.cover_cache import CoverFileFetcher
 from vault_api.db import get_connection, init_db
 from vault_api.jobs import recover_stale_jobs
 from vault_api.manifest_ingest import log_cache_dir_canary
@@ -30,6 +31,7 @@ from vault_api.routers import (
     agent,
     cache,
     clients,
+    covers,
     games,
     health,
     jobs,
@@ -176,6 +178,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # per failure streak, then backs off quietly (vault_api/cover_art.py).
     cover_refresher: CoverArtRefresher = app.state.cover_art_refresher
     cover_refresher.start()
+    # WP D10 COVER-CACHE-1: stores the resolved covers in <data dir>/covers
+    # and serves them over the LAN; same unconditional start, its first
+    # download waits cover_cache.INITIAL_DELAY_SECONDS (vault_api/cover_cache.py).
+    cover_fetcher: CoverFileFetcher = app.state.cover_file_fetcher
+    cover_fetcher.start()
 
     # WP 3.13.
     if settings.webhook_enabled:
@@ -193,6 +200,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        cover_fetcher.stop()
         cover_refresher.stop()
         scheduler.stop()  # also stops the shared update-check runner
         worker.stop()
@@ -321,6 +329,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.cover_art_refresher = CoverArtRefresher(
         settings.db_path, oracle_enabled=settings.manifest_oracle_enabled
     )
+    # WP D10 COVER-CACHE-1: same reasoning; GET /v1/covers reads its cache_dir.
+    app.state.cover_file_fetcher = CoverFileFetcher(settings.db_path)
     app.include_router(health.router)
     app.include_router(games.router)
     app.include_router(mapping.router)
@@ -348,6 +358,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # vault-api is too old to have the relay" from "this operator hasn't set
     # a key yet" -- same reasoning as the oracle router above.
     app.include_router(steam.router)
+    # WP D10 COVER-CACHE-1: stored covers. NOT behind require_api_key: the
+    # path carries an HMAC of the API key instead (routers/covers.py).
+    app.include_router(covers.router)
     # WP 4a.1. Registered last, by convention (webui.mount_web_ui's own
     # docstring): every route it adds is an exact path or a narrow real
     # asset-subtree prefix (/, /index.html, the SPA view paths, /css, /js —
