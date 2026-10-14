@@ -94,7 +94,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping, Sequence
 
-from vault_api import deletion, gc, jobs, oracle
+from vault_api import deletion, gc, jobs, oracle, sizes, tool_apps
 from vault_api.config import Settings
 from vault_api.manifest_archive import archive_filename
 
@@ -143,6 +143,11 @@ class Completeness:
     expected_bytes: int | None = None
     present_bytes: int | None = None
     checked_at: str | None = None
+    #: Chunks of the target manifests with no file on disk (WP
+    #: CACHE-COMPLETE-1b). Not in the API; the scheduler's automatic
+    #: completion keys on it (a forced prefill fetches missing chunks, it does
+    #: not replace a chunk file of the wrong size).
+    missing_chunks: int | None = None
 
 
 UNKNOWN = Completeness()
@@ -602,6 +607,7 @@ class CompletenessIndex:
         seen: set[tuple[int, str]] = set()
         expected = 0
         present = 0
+        missing: int | None = 0
         oldest: str | None = None
         any_pair = False
         for pair in pairs:
@@ -625,11 +631,19 @@ class CompletenessIndex:
             seen.add(key)
             expected += max(0, row.expected_bytes)
             present += max(0, min(row.present_bytes, row.expected_bytes))
+            if missing is not None:
+                missing = None if row.missing_chunks is None else missing + max(
+                    0, row.missing_chunks
+                )
         if not any_pair:
             return UNKNOWN
         pct = 100 if expected == 0 else (present * 100) // expected
         return Completeness(
-            pct=pct, expected_bytes=expected, present_bytes=present, checked_at=oldest
+            pct=pct,
+            expected_bytes=expected,
+            present_bytes=present,
+            checked_at=oldest,
+            missing_chunks=missing,
         )
 
 
@@ -658,3 +672,74 @@ def load_index(
                 mismatched_chunks=row["mismatched_chunks"],
             )
     return CompletenessIndex(rows=rows, targets=current_targets(conn, settings, ids))
+
+
+# --------------------------------------------------------------------------
+# Incomplete games (WP CACHE-COMPLETE-1b)
+# --------------------------------------------------------------------------
+
+
+def app_figure(
+    index: CompletenessIndex,
+    appid: int,
+    depotids: Iterable[int],
+    size_bytes: int | None,
+) -> Completeness:
+    """One app's figure as ``GET /v1/games`` reports it. A stored figure is
+    never shown for a game with no bytes on disk (rows survive a delete until
+    the next check)."""
+    if not size_bytes:
+        return UNKNOWN
+    return index.figure((appid, d) for d in depotids)
+
+
+def is_incomplete(figure: Completeness) -> bool:
+    """THE predicate behind ``GET /v1/games?incomplete=true``, ``POST
+    /v1/prefill/incomplete`` and the scheduler's automatic completion: a known
+    figure below 100. Unknown is never incomplete (nothing to act on)."""
+    return figure.pct is not None and figure.pct < 100
+
+
+@dataclass(frozen=True)
+class IncompleteApp:
+    appid: int
+    figure: Completeness
+
+
+def incomplete_apps(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    depot_bytes: Mapping[int, int],
+) -> list[IncompleteApp]:
+    """Every tracked app (``apps`` row) that ``is_incomplete``, in appid
+    order, computed exactly like the games list: ``depot_app_map`` depots,
+    ``size_bytes`` from ``depot_bytes`` (``sizes.app_size_bytes``),
+    ``app_figure``. Steam tool packages are left out (they are never
+    prefilled, so there is nothing to enqueue). Reads only."""
+    appids = [int(r["appid"]) for r in conn.execute("SELECT appid FROM apps ORDER BY appid")]
+    depots: dict[int, list[int]] = {}
+    for row in conn.execute("SELECT appid, depotid FROM depot_app_map"):
+        depots.setdefault(int(row["appid"]), []).append(int(row["depotid"]))
+    index = load_index(conn, settings)
+    disk = dict(depot_bytes)
+    found: list[IncompleteApp] = []
+    for appid in appids:
+        if tool_apps.is_tool_app(appid):
+            continue
+        app_depots = depots.get(appid, [])
+        size = sizes.app_size_bytes(app_depots, disk)
+        figure = app_figure(index, appid, app_depots, size)
+        if is_incomplete(figure):
+            found.append(IncompleteApp(appid=appid, figure=figure))
+    return found
+
+
+def any_stored_missing(conn: sqlite3.Connection) -> bool:
+    """Cheap pre-check for the scheduler: is any stored depot row short of a
+    chunk file? False means no app can be auto-completed, so the sweep skips
+    the depot walk ``incomplete_apps`` needs."""
+    row = conn.execute(
+        "SELECT 1 FROM cache_completeness WHERE status = ? AND missing_chunks > 0 LIMIT 1",
+        (STATUS_OK,),
+    ).fetchone()
+    return row is not None

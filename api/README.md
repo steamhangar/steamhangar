@@ -646,6 +646,8 @@ route, see "Auth").
 | DELETE | `/v1/mapping/{depotid}/{appid}`    | Remove one mapping pair (correction path for the additive `PUT`, see below); `204` on success, `404` if the pair doesn't exist, `422` for non-positive ids |
 | POST   | `/v1/prefill`                      | Body `{"appids": [int, ...]}` — queue one prefill job per app id. `202` with a list of `{appid, job_id, status, deduplicated}`. `422` for an empty list, an appid `< 1`, a non-list, or an unrecognized body field; `422` with a string `detail` (nothing queued) when the body names a Steam tool app (WP API-FIX-4, see "Steam tool apps" below) |
 | POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). Steam tool apps are never selected (WP API-FIX-4). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
+| POST   | `/v1/prefill/verify`               | WP CACHE-COMPLETE-1b. "Verify" / "Complete now". Body `{"appids": [int, ...]}` as for `POST /v1/prefill` (same `422`s, tool apps refused). Sets `needs_force = 1` for each app, then queues it through the same enqueue (same dedupe, same response). `202`. See "Verify and complete" below |
+| POST   | `/v1/prefill/incomplete`           | WP CACHE-COMPLETE-1b. "Complete all". **No request body** (ignored, like `/v1/prefill/cached`). Selects exactly the games `GET /v1/games?incomplete=true` lists and handles each like `POST /v1/prefill/verify`. `202`, `[]` when nothing is incomplete. See "Verify and complete" below |
 | GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
@@ -1604,6 +1606,7 @@ described next. The lifecycle:
 | `DELETE /v1/cache/{appid}` deleted (or attempted, or found already-absent) a last-remnant depot — every **other** app still mapping it (ADR-0003 addendum) | `1` |
 | `POST /v1/cache/{appid}/gc` with `execute: true` actually removed chunks from a depot — every app mapped to that depot, whether or not it is the app the GC job was queued for (ADR-0007) | `1` |
 | `POST /v1/cache/{appid}/gc` — dry run, or an executing run that removed nothing | unchanged |
+| `POST /v1/prefill/verify` / `POST /v1/prefill/incomplete` (WP CACHE-COMPLETE-1b), or the sweep completing an incomplete target | `1` |
 
 **This is routine maintenance, not a failure path — say so wherever this
 flag's "ordinary case" is described.** A GC execute run is expected to run
@@ -2195,6 +2198,91 @@ of the **current build** is there (`vault_api/cache_completeness.py`):
   in the manifest, 135,000 sparse 1 MiB chunk files on disk, page cache warm,
   4 cores, overlay fs): **about 2.4 s** for that one depot (manifest parse +
   `chunk/` scan + compare + store). Not measured on ZFS with a cold cache.
+
+### Verify and complete (WP CACHE-COMPLETE-1b)
+
+"Verify" (one game) and "Complete now" / "Complete all" (the incomplete list)
+are the same operation: a **forced prefill** of the game, queued as a normal
+download job (progress in Downloads, `GET /v1/jobs`).
+
+**Why `--force`, and what it costs.** SteamPrefill (v3.7.2) has no verify
+command. Without `--force` it skips an app whose current manifests are all
+in its own `Config/successfullyDownloadedDepots.json`, which knows nothing
+about chunks that later went missing from the cache, so a non-forced run is
+a no-op for exactly the games that need completing. With `--force` it skips
+that check and requests **every chunk of the current build** through
+vault-core (`SteamManager.DownloadSingleAppAsync`,
+`DepotHandler.BuildChunkDownloadQueueAsync`: the full chunk list of the
+current manifests, no diff against an older build -- the same list a
+non-forced run uses once an update exists). vault-core's `try_files` serves
+every chunk file that exists as a local HIT; only the missing ones go to
+Steam and are stored. So the internet traffic is exactly the missing chunks;
+the remaining cost is reading the whole game from disk once and passing it to
+the runner, which discards the bodies. The Steam client's own "verify"
+cannot be driven from the vault. Rejected: `--nocache` (a hidden flag that
+only re-downloads SteamPrefill's own manifest files) and `?nocache=1`
+(no option turns it on: SteamPrefill adds it only to its speed probes and its
+retries of failed chunk requests; applied to a whole game it would fetch every
+chunk from Steam again).
+
+**Mechanism.** Both routes set `apps.needs_force = 1` first, then call
+`jobs.enqueue_prefill` (one job per app; an app with a queued, running or
+paused job gets that job back with `deduplicated: true`, so repeated clicks
+are idempotent). A still-queued job reads the flag when the worker claims it
+and runs forced. A job that is already **running** keeps the mode it was
+claimed with; its end does not clear the flag (the worker's clear is a
+compare-and-swap against the value it read at claim time), so the app's
+**next** run is forced. A forced run that succeeds clears the flag like any
+other successful job.
+
+**Selection for "Complete all".** `cache_completeness.incomplete_apps`: every
+tracked app whose figure (`cache_completeness.app_figure`, the games list's
+own computation) passes `cache_completeness.is_incomplete` (known and below
+100), Steam tool packages left out. `GET /v1/games?incomplete=true` uses the
+same two functions with the same inputs (shared `SizeCache` snapshot, the
+scheduler's settings), so the button acts on exactly the listed rows. A
+`null` figure is never incomplete: with the oracle off nothing is listed.
+
+**Re-measured after the job.** The worker's post-success hook from 1a
+(`PrefillWorker._remeasure_completeness`) measures the app right after every
+successful prefill, forced or not, so the figure moves without waiting for
+the next update check (oracle on; with it off there are no figures).
+
+**Automatic completion (schedule window only).** Completion is a download,
+so it follows the rules updates have: nothing starts outside the schedule
+window, and without a window it is manual only. Inside the window,
+`scheduler.maybe_sweep` flags `needs_force = 1` on every sweep target that
+`incomplete_apps` lists **with at least one missing chunk file**
+(`scheduler.completion_appids`) before it enqueues the targets, so those
+runs complete the game; the log names them. Rules:
+
+- **Same scope as updates.** Only sweep targets complete automatically:
+  games installed on a reporting PC, plus every cached game while
+  `VAULT_SWEEP_INCLUDE_CACHED` is on (the default). Nothing is added to the
+  target set.
+- **Stored figures.** The sweep reads the figures the latest update check
+  (or a post-job re-measure) stored; it does not measure. The check runs on
+  its own thread in the same tick, so a sweep acts on the previous check's
+  figures (at most one `VAULT_SCHEDULE_INTERVAL_MINUTES` old). A figure whose
+  target changed since is unknown and not acted on. Cost: one depot walk per
+  sweep, skipped when no stored row is short of a chunk.
+- **Wrong-size chunks are not a reason.** A game short only of chunk files
+  with the wrong size is not auto-completed, because a forced run cannot fix
+  it (next point) and would otherwise replay the whole game every interval.
+  It stays in the incomplete list for a manual action.
+- **Known limit:** a game whose missing chunks a forced run does not fetch
+  (for example a mapped depot SteamPrefill no longer selects) is forced
+  again on every sweep while it stays incomplete.
+
+**Damaged chunks (wrong size) are NOT replaced.** 1a counts a chunk file
+whose size differs from the manifest's `cb_compressed` as damaged. A forced
+prefill does not fix it: `try_files` finds the file and serves it as a HIT,
+`proxy_store` is never reached, and SteamPrefill reads the body without
+checking its length or hash. Replacing one needs the file removed first, so
+the next request misses and stores a fresh copy: vault-api would delete the
+mismatched chunk files of the app's target manifests (re-checking each size
+right before the unlink, with the cache-root guards `deletion.py` uses) and
+then queue the forced run. Not built in 1b.
 
 ### `GET /v1/cache/summary`
 

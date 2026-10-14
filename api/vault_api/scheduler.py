@@ -110,10 +110,11 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Callable, Iterable
 
 from vault_api import (
     agent_reports,
+    cache_completeness,
     deletion,
     event_sweep,
     jobs,
@@ -685,6 +686,38 @@ class SweepResult:
     #: WP API-FIX-4. Mirrors ``TargetSet.skipped_tool_appids``: Steam tool
     #: apps a source named that were not enqueued.
     skipped_tool_appids: tuple[int, ...] = ()
+    #: WP CACHE-COMPLETE-1b. Targets the stored completeness figures call
+    #: incomplete with missing chunks; flagged ``needs_force = 1`` before the
+    #: enqueue so their run fetches what is missing (``completion_appids``).
+    completing: tuple[int, ...] = ()
+
+
+def completion_appids(
+    conn: sqlite3.Connection, settings: Settings, targets: Iterable[int]
+) -> tuple[int, ...]:
+    """The sweep targets to complete (WP CACHE-COMPLETE-1b): apps
+    ``cache_completeness.incomplete_apps`` lists (the predicate behind
+    ``GET /v1/games?incomplete=true``) whose figure has missing chunk files.
+
+    * **Only sweep targets.** Completion is a download and follows the scope
+      updates have: installed games, plus every cached game when
+      ``sweep_include_cached`` is on. Nothing is added to the target set.
+    * **Only missing chunks.** A game short only of chunk files with the wrong
+      size is left out: the forced run serves those files from disk as HITs
+      and cannot replace them, so forcing it every interval would replay the
+      whole game for nothing.
+    * **Stored figures.** The update check measures, this only reads (plus
+      one depot walk, skipped when no stored row is short of a chunk).
+    """
+    wanted = set(targets)
+    if not wanted or not cache_completeness.any_stored_missing(conn):
+        return ()
+    depot_bytes = sizes.scan_depot_dir_bytes(settings.cache_root)
+    return tuple(
+        app.appid
+        for app in cache_completeness.incomplete_apps(conn, settings, depot_bytes)
+        if app.appid in wanted and (app.figure.missing_chunks or 0) > 0
+    )
 
 
 def _never() -> bool:
@@ -726,6 +759,22 @@ def maybe_sweep(
         include_cached=settings.sweep_include_cached,
         cache_root=settings.cache_root,
     )
+
+    # WP CACHE-COMPLETE-1b: incomplete targets run forced, so the run
+    # fetches their missing chunks even when SteamPrefill's own bookkeeping
+    # calls the app up to date. Its own try: a failure here costs only the
+    # completion, never the sweep (which is already claimed).
+    completing: tuple[int, ...] = ()
+    try:
+        completing = completion_appids(conn, settings, target_set.appids)
+        if completing:
+            deletion.set_needs_force(conn, completing)
+    except Exception:
+        logger.exception(
+            "scheduler: selecting incomplete games to complete failed; the "
+            "sweep goes on without forcing any run."
+        )
+        completing = ()
 
     enqueued: list[int] = []
     already_active: list[int] = []
@@ -784,6 +833,12 @@ def maybe_sweep(
         ),
         " [ABORTED by shutdown]" if aborted else "",
     )
+    if completing:
+        logger.info(
+            "scheduler: %d incomplete game(s) run forced to fetch missing "
+            "chunks: %s",
+            len(completing), ", ".join(str(a) for a in completing),
+        )
 
     return SweepResult(
         swept=True,
@@ -795,6 +850,7 @@ def maybe_sweep(
         swept_at=swept_at,
         cached_only_appids=target_set.cached_only_appids,
         skipped_tool_appids=target_set.skipped_tool_appids,
+        completing=completing,
     )
 
 
