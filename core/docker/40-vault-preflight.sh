@@ -40,7 +40,65 @@ ME="40-vault-preflight.sh"
 log()  { echo "$ME: $*"; }
 die()  { echo "$ME: FATAL: $*" >&2; exit 1; }
 
-CONF="/etc/nginx/nginx.conf"
+# Modes (D16c, docs/handover/d16-settings-audit.md 4.3):
+#   (no argument)       the boot: value checks on /etc/nginx, then the
+#                       boot-only checks (sections 3-5: volume layout,
+#                       depot root, worker writability).
+#   --values <dir>      value checks only (sections 1-2b), against the config
+#                       files rendered into <dir>. The settings watcher
+#                       (47-vault-settings-watch.sh) runs this on its staging
+#                       directory before `nginx -t` and the reload.
+#   --grammar           section 2's VAULT_RESOLVER grammar only (the shared
+#                       fixture table, core/tests/test-settings-grammar.sh).
+MODE=boot
+CONF_DIR=/etc/nginx
+case "${1:-}" in
+    "") : ;;
+    --values)
+        [ -n "${2:-}" ] && [ -d "$2" ] || die "--values needs the directory holding the rendered config"
+        MODE=values
+        CONF_DIR=$2 ;;
+    --grammar) MODE=grammar ;;
+    *) die "unknown argument '$1' (expected none, --values <dir> or --grammar)" ;;
+esac
+
+# --- 2 (grammar). VAULT_RESOLVER is a plain IP-address list ---------------
+# Substituted verbatim into nginx.conf, so anything that could terminate a
+# directive (';') or open a block ('{') would be config injection. Allowed
+# characters: hex digits, '.', ':' and '[' ']' (IPv6 -- nginx's resolver
+# syntax needs the brackets whenever a port follows an IPv6 address, e.g.
+# '[2606:4700::1111]:53'; review N3 found the earlier allowlist claimed IPv6
+# support while rejecting exactly those brackets), space (nginx accepts
+# several addresses) and '-'. Hostnames are deliberately NOT accepted --
+# nginx would have to resolve them with the OS resolver at config-parse
+# time, which is exactly the dependency core/nginx.conf's loop-safety note
+# avoids. Spaces only (D16c, the shared fixture table) are refused too: they
+# would render an empty `resolver` directive.
+RESOLVER="${VAULT_RESOLVER:-}"
+check_resolver_grammar() {
+    case "$RESOLVER" in
+        "")
+            die "VAULT_RESOLVER is empty. It is substituted into nginx.conf's 'resolver'
+  directive, which cannot be empty. Set it to an upstream DNS server IP
+  (default 1.1.1.1) in deploy/.env." ;;
+        *[!]0-9a-fA-F.:[\ -]*)
+            die "VAULT_RESOLVER='$RESOLVER' contains characters that are not part of an
+  IP address list. This value is written verbatim into nginx.conf; refusing
+  rather than risking config injection. Use e.g. '1.1.1.1', '10.0.0.53 10.0.0.54'
+  or '[2606:4700::1111]:53'." ;;
+        *[!\ ]*) : ;;
+        *)
+            die "VAULT_RESOLVER='$RESOLVER' holds only spaces; nginx.conf's 'resolver'
+  directive cannot be empty. Set it to an upstream DNS server IP (default 1.1.1.1)." ;;
+    esac
+}
+if [ "$MODE" = grammar ]; then
+    check_resolver_grammar
+    log "VAULT_RESOLVER grammar OK: $RESOLVER"
+    exit 0
+fi
+
+CONF="$CONF_DIR/nginx.conf"
 PREFIX="/vault"
 CACHE_DIR="$PREFIX/cache"
 TMP_DIR="$PREFIX/tmp"
@@ -86,14 +144,17 @@ fi
 # UNLIMITED (TH-0b, measured). A cap that is configured but not rendered --
 # hook missing, renamed, or out of order -- must stop the boot, not ship an
 # uncapped vault.
-RATE_CONF="/etc/nginx/vault-upstream-rate.conf"
+RATE_CONF="$CONF_DIR/vault-upstream-rate.conf"
 [ -f "$RATE_CONF" ] || die "$RATE_CONF is missing. nginx.conf includes it for the upstream rate cap;
   /docker-entrypoint.d/27-vault-upstream-rate.sh renders it at start. Refusing to start."
 printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*include[[:space:]][[:space:]]*vault-upstream-rate\.conf;' \
     || die "$CONF has no 'include vault-upstream-rate.conf;' -- the upstream rate cap is not wired in."
 printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*proxy_limit_rate[[:space:]][[:space:]]*\$vault_upstream_rate;' \
     || die "$CONF has no 'proxy_limit_rate \$vault_upstream_rate;' -- the upstream rate cap is not wired in."
-if [ -n "${VAULT_UPSTREAM_RATE:-}" ]; then
+# D16c: `off` is the explicit spelling of "no cap" (Q7).
+RATE_SET="${VAULT_UPSTREAM_RATE:-}"
+[ "$RATE_SET" != off ] || RATE_SET=""
+if [ -n "$RATE_SET" ]; then
     grep -q '^map \$connections_[a-z]* \$vault_upstream_rate[_a-z]* {$' "$RATE_CONF" \
         && grep -qE '^    default [1-9][0-9]*;$' "$RATE_CONF" \
         || die "VAULT_UPSTREAM_RATE='$VAULT_UPSTREAM_RATE' is set but $RATE_CONF holds no capped
@@ -111,8 +172,8 @@ fi
 # out of order leaves @miss with no cap (the CGNAT port quota is then the
 # only limit), or edge mode configured but not rendered would silently dial
 # per-name again.
-POOL_CONF="/etc/nginx/vault-upstream-pool.conf"
-CAP_CONF="/etc/nginx/vault-upstream-cap.conf"
+POOL_CONF="$CONF_DIR/vault-upstream-pool.conf"
+CAP_CONF="$CONF_DIR/vault-upstream-cap.conf"
 [ -f "$POOL_CONF" ] || die "$POOL_CONF is missing; /docker-entrypoint.d/28-vault-upstream-pool.sh renders it at start. Refusing to start."
 [ -f "$CAP_CONF" ] || die "$CAP_CONF is missing; /docker-entrypoint.d/28-vault-upstream-pool.sh renders it at start. Refusing to start."
 printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*include[[:space:]][[:space:]]*vault-upstream-cap\.conf;' \
@@ -121,11 +182,20 @@ printf '%s\n' "$CONF_DIRECTIVES" | grep -q '^[[:space:]]*limit_conn_zone[[:space
     || die "$CONF defines no limit_conn_zone vault_upstream_total -- the global upstream connection cap is not wired in."
 grep -qE '^limit_conn vault_upstream_total ([1-9]|[1-5][0-9]|6[0-4]);$' "$CAP_CONF" \
     || die "$CAP_CONF holds no 'limit_conn vault_upstream_total <1..64>;' -- the cap would not apply. Refusing to start."
-if [ -n "${VAULT_UPSTREAM_EDGE:-}" ]; then
-    grep -qx "upstream $VAULT_UPSTREAM_EDGE {" "$POOL_CONF" \
-        && grep -qx "    default $VAULT_UPSTREAM_EDGE;" "$POOL_CONF" \
-        || die "VAULT_UPSTREAM_EDGE='$VAULT_UPSTREAM_EDGE' is set but $POOL_CONF holds no such pooled group as map default -- edge mode would not apply."
-    log "upstream edge mode: all MISS -> $VAULT_UPSTREAM_EDGE, $(grep '^limit_conn ' "$CAP_CONF")"
+# The edge the way 28- tokenises it (word split; exactly `off` = legacy).
+set -f
+# shellcheck disable=SC2086
+set -- ${VAULT_UPSTREAM_EDGE:-}
+set +f
+EDGE_SET=""
+if [ "$#" -eq 1 ] && [ "$1" != off ]; then
+    EDGE_SET=$1
+fi
+if [ -n "$EDGE_SET" ]; then
+    grep -qx "upstream $EDGE_SET {" "$POOL_CONF" \
+        && grep -qx "    default $EDGE_SET;" "$POOL_CONF" \
+        || die "VAULT_UPSTREAM_EDGE='$EDGE_SET' is set but $POOL_CONF holds no such pooled group as map default -- edge mode would not apply."
+    log "upstream edge mode: all MISS -> $EDGE_SET, $(grep '^limit_conn ' "$CAP_CONF")"
 else
     log "upstream edge mode off (per-name legacy), $(grep '^limit_conn ' "$CAP_CONF")"
 fi
@@ -178,28 +248,8 @@ if printf '%s\n' "$CONF_DIRECTIVES" | grep -q -E '^[[:space:]]*(ssl_certificate|
 fi
 
 # --- 2. VAULT_RESOLVER is a plain IP-address list ---------------------------
-# Substituted verbatim into nginx.conf, so anything that could terminate a
-# directive (';') or open a block ('{') would be config injection. Allowed
-# characters: hex digits, '.', ':' and '[' ']' (IPv6 -- nginx's resolver
-# syntax needs the brackets whenever a port follows an IPv6 address, e.g.
-# '[2606:4700::1111]:53'; review N3 found the earlier allowlist claimed IPv6
-# support while rejecting exactly those brackets), space (nginx accepts
-# several addresses) and '-'. Hostnames are deliberately NOT accepted --
-# nginx would have to resolve them with the OS resolver at config-parse
-# time, which is exactly the dependency core/nginx.conf's loop-safety note
-# avoids.
-RESOLVER="${VAULT_RESOLVER:-}"
-case "$RESOLVER" in
-    "")
-        die "VAULT_RESOLVER is empty. It is substituted into nginx.conf's 'resolver'
-  directive, which cannot be empty. Set it to an upstream DNS server IP
-  (default 1.1.1.1) in deploy/.env." ;;
-    *[!]0-9a-fA-F.:[\ -]*)
-        die "VAULT_RESOLVER='$RESOLVER' contains characters that are not part of an
-  IP address list. This value is written verbatim into nginx.conf; refusing
-  rather than risking config injection. Use e.g. '1.1.1.1', '10.0.0.53 10.0.0.54'
-  or '[2606:4700::1111]:53'." ;;
-esac
+# The grammar is check_resolver_grammar at the top (shared with --grammar).
+check_resolver_grammar
 log "upstream resolver (ADR-0001 req 4): $RESOLVER"
 
 # --- 2a. the rendered stream block is exactly the reviewed one (CORE-FIX-3) --
@@ -370,7 +420,14 @@ else
     fi
 fi
 
+if [ "$MODE" = values ]; then
+    log "value checks OK for $CONF_DIR"
+    exit 0
+fi
+
 # --- 3. cache/ and tmp/ must be on ONE filesystem ---------------------------
+# Boot-only from here on (volume layout and ownership): an apply at runtime
+# changes none of it.
 [ -d "$CACHE_DIR" ] || die "$CACHE_DIR is missing. Mount the SteamHangar cache volume at $PREFIX."
 [ -d "$TMP_DIR" ]   || die "$TMP_DIR is missing. Mount the SteamHangar cache volume at $PREFIX
   (it must contain both cache/ and tmp/)."
