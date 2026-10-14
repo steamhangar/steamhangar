@@ -173,3 +173,24 @@ orchestrator: the review-round rules below):
    `cache_complete_checked_at` (up to one check interval). Stored in
    `cache_completeness` (schema v25). Details: api/README.md "Cache
    completeness", `api/vault_api/cache_completeness.py`.
+
+## Addendum 2026-10-14 — verify and complete (WP CACHE-COMPLETE-1b)
+
+Decided: "Verify", "Complete now" and "Complete all" are a **forced
+prefill** (`needs_force = 1`, then the normal enqueue). SteamPrefill has no
+verify command and a non-forced run skips an app its own bookkeeping calls
+current, i.e. exactly the incomplete ones. A forced run requests the current
+build's full chunk list (as any run that downloads does); vault-core serves
+present chunks from disk, so only missing chunks are fetched from Steam.
+Rejected: `?nocache=1`/`--nocache` (full re-download, or manifests only).
+
+1. Automatic completion runs only inside the schedule window; without a
+   window it is manual only. In the window it covers every incomplete cached
+   game with missing chunk files, sweep target or not, also with
+   `VAULT_SWEEP_INCLUDE_CACHED` off (user decision 2026-10-14).
+2. Chunk files of the wrong size are not replaced by a forced run (served as
+   HITs). Such a game is skipped by "Complete all" and by the automatic
+   completion and has no repair action yet; the fix (vault-api removes the
+   mismatched files, then a forced run) is CACHE-REPAIR-1, after rc17 (user
+   decision 2026-10-14).
+3. No schema change. Details: api/README.md "Verify and complete".

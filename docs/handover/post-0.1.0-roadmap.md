@@ -638,6 +638,16 @@ UI rule (user, 2026-10-14): every new Downloads section ("Updates
 available", "Incomplete", and later ones) is shown only when it has at
 least one entry — no empty headings.
 
+**CACHE-REPAIR-1 (api, after rc17; user decision 2026-10-14):** repair
+games whose cache holds chunk files of the wrong size (CACHE-COMPLETE-1a
+counts them as damaged; `cache_missing_chunks: 0` on an incomplete row). A
+forced prefill cannot fix them: vault-core serves the existing file as a
+HIT. vault-api deletes the mismatched chunk files of the app's target
+manifests -- re-checking each file's size right before the delete, behind
+the cache-root guards of `deletion.py` -- and then queues a forced run, which
+misses on those chunks and stores fresh copies. Until then no action repairs
+such a game; "Complete all" and the automatic completion skip it.
+
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
 vault-api image (about +9 MB on ~100 MB compressed); vault-api serves it

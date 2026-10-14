@@ -302,6 +302,11 @@ class GameSummary(BaseModel):
     cache_present_bytes: int | None = None
     # When the oldest depot figure was measured (UTC), null when unknown.
     cache_complete_checked_at: str | None = None
+    # WP CACHE-COMPLETE-1b: chunk files of the current build with no file on
+    # disk; null exactly when ``cache_complete_pct`` is. An incomplete game
+    # with 0 here is short only of wrong-size chunk files, which no current
+    # action repairs (UIs do not offer "Complete now" for it).
+    cache_missing_chunks: int | None = None
     # Same figure over the whole group this row heads (D9): the depots of the
     # members that currently have bytes on disk (own size_bytes > 0, the same
     # members that add bytes to ``group_size_bytes``), each depot/manifest
@@ -310,24 +315,17 @@ class GameSummary(BaseModel):
     group_cache_complete_pct: int | None = None
 
 
-def _completeness_fields(
-    appid: int,
-    index: cache_completeness.CompletenessIndex,
-    app_depotids: dict[int, list[int]],
-    size_bytes: int | None,
-) -> dict[str, object]:
-    """``cache_complete_*`` for one app (WP CACHE-COMPLETE-1a). A stored
-    figure is never shown for a game with no bytes on disk (rows survive a
-    delete until the next check)."""
-    if not size_bytes:
-        figure = cache_completeness.UNKNOWN
-    else:
-        figure = index.figure((appid, d) for d in app_depotids.get(appid, []))
+def _completeness_fields(figure: cache_completeness.Completeness) -> dict[str, object]:
+    """``cache_complete_*`` for one app (WP CACHE-COMPLETE-1a) from its
+    ``cache_completeness.app_figure`` -- the same figure ``POST
+    /v1/prefill/incomplete`` and the scheduler act on (WP CACHE-COMPLETE-1b).
+    """
     return {
         "cache_complete_pct": figure.pct,
         "cache_expected_bytes": figure.expected_bytes,
         "cache_present_bytes": figure.present_bytes,
         "cache_complete_checked_at": figure.checked_at,
+        "cache_missing_chunks": figure.missing_chunks if figure.pct is not None else None,
     }
 
 
@@ -475,6 +473,7 @@ class GameDetail(BaseModel):
     cache_expected_bytes: int | None = None
     cache_present_bytes: int | None = None
     cache_complete_checked_at: str | None = None
+    cache_missing_chunks: int | None = None
     group_cache_complete_pct: int | None = None
 
 
@@ -558,11 +557,13 @@ def list_games(
     for row in rows:
         frequency = frequencies.get(row["appid"], no_manifest_data)
         size_bytes = app_size_bytes(app_depotids.get(row["appid"], []), depot_bytes)
-        completeness_fields = _completeness_fields(
-            row["appid"], completeness, app_depotids, size_bytes
+        # WP CACHE-COMPLETE-1b: the shared figure and predicate (also behind
+        # POST /v1/prefill/incomplete and the scheduler's completion).
+        figure = cache_completeness.app_figure(
+            completeness, row["appid"], app_depotids.get(row["appid"], []), size_bytes
         )
-        pct = completeness_fields["cache_complete_pct"]
-        if incomplete and (pct is None or pct >= 100):  # type: ignore[operator]
+        completeness_fields = _completeness_fields(figure)
+        if incomplete and not cache_completeness.is_incomplete(figure):
             continue
         group_size = _group_size_bytes(
             row["appid"], classifications, children_by_parent, app_depotids, depot_bytes
@@ -713,7 +714,11 @@ def get_game(
         ),
         **_classification_fields(classification),
         group_size_bytes=group_size,
-        **_completeness_fields(appid, completeness, group_depotids, detail_size),
+        **_completeness_fields(
+            cache_completeness.app_figure(
+                completeness, appid, group_depotids.get(appid, []), detail_size
+            )
+        ),
         group_cache_complete_pct=_group_completeness_pct(
             appid,
             classifications,
