@@ -45,9 +45,18 @@ run_hook() {
     env -i PATH="$PATH" "${envs[@]}" sh "$@" > "$work/out" 2>&1 || rc=$?
 }
 
+# is_blank <value>: "not set" the way vault-core's boot hook treats an env or
+# file value (vs_blank in core/docker/vault-settings-lib.sh, pinned there by
+# core/tests/test-settings-lib.sh): empty, or only the ASCII whitespace set
+# 27-'s strip() removes. Kept here so this runner needs nothing but the hooks.
 is_blank() {
-    # 15-'s vs_blank, from the library itself.
-    sh -c '. "$1"; vs_blank "$2"' sh "$docker_dir/vault-settings-lib.sh" "$1"
+    local ws
+    ws=$(printf ' \t\n\v\f\r\034\035\036\037X')
+    ws=${ws%X}
+    case "$1" in
+        *[!$ws]*) return 1 ;;
+    esac
+    return 0
 }
 
 # check_row <key> <raw> <verdict> <norm>
@@ -87,6 +96,7 @@ check_row() {
             run_hook "VAULT_UPSTREAM_EDGE=$raw" -- "$docker_dir/28-vault-upstream-pool.sh" "$conf/pool.conf"
             if [ "$verdict" = ok ] && [ "$rc" = 0 ]; then
                 if [ "$norm" = off ]; then
+                    # shellcheck disable=SC2016 # a literal nginx variable
                     grep -qxF '    default $vault_upstream_host;' "$conf/pool.conf" && ! grep -q '^upstream ' "$conf/pool.conf" \
                         && { ok; return; }
                 else
@@ -119,7 +129,7 @@ check_row() {
             if [ "$verdict" = ok ] && [ "$rc" = 0 ]; then
                 local zone=vault_tls_client
                 [ "$key" = VAULT_TLS_CLIENT_MAX_CONNS ] || zone=vault_tls_total
-                grep -qE "^[[:space:]]*limit_conn $zone[[:space:]]+$norm;$" "$conf/nginx.conf" && { ok; return; }
+                grep -qE "^[[:space:]]*limit_conn ${zone}[[:space:]]+${norm};$" "$conf/nginx.conf" && { ok; return; }
                 bad "$label: rendered, but not as $norm"; return
             fi ;;
         VAULT_RESOLVER)
@@ -157,9 +167,13 @@ while IFS=$'\t' read -r key raw verdict norm || [ -n "$key" ]; do
     check_row "$key" "$raw" "$verdict" "$norm"
 done < "$table"
 
-# Every core key of the settings file allowlist has rows (a key added to the
-# library without table rows would be a twin without a pin).
-for k in $(sh -c '. "$1"; echo "$VS_KEYS"' sh "$docker_dir/vault-settings-lib.sh"); do
+# Every core key of vault-api's settings file allowlist (FILE_KEYS in
+# api/vault_api/core_settings.py) has rows: a key without rows would be a
+# twin without a pin.
+api_keys=$(awk '/^FILE_KEYS = \(/ { f = 1; next } f && /^\)/ { exit } f { gsub(/[ ",]/, ""); if ($0 != "") print }' \
+    "$core_dir/../api/vault_api/core_settings.py")
+[ -n "$api_keys" ] || bad "could not read FILE_KEYS from api/vault_api/core_settings.py"
+for k in $api_keys; do
     [ "$k" = VAULT_PREFILL_MAX_THREADS ] && continue   # vault-api's own key, its floor check is in 28's tests
     case "$keys_seen" in
         *" $k "*) ok ;;

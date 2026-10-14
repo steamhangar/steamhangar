@@ -156,7 +156,8 @@ class SettingInfoOut(BaseModel):
 class CoreApplyOut(BaseModel):
     """D16c: vault-core's report on the core settings (``settings-applied.json``).
     ``pending`` is true while vault-api's settings file carries a generation
-    vault-core has neither applied nor rejected yet."""
+    other than the one vault-core last applied or rejected (not equal, not
+    greater: the generation restarts at 1 after a lost settings volume)."""
 
     state: str
     generation: int
@@ -192,7 +193,9 @@ def _core_apply(core_status: core_settings.CoreStatus | None, base: Settings) ->
         reason=core_status.reason,
         updated_at=core_status.updated_at,
         written_generation=written,
-        pending=written is not None and written > core_status.generation,
+        # "not equal", not "greater": vault-api restarts at 1 when the
+        # settings volume is lost.
+        pending=written is not None and written != core_status.generation,
     )
 
 

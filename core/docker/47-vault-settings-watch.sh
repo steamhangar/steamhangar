@@ -21,15 +21,19 @@
 #         resolves the relative temp/log paths inside /vault (SEC-FIX-5).
 #      d. back up the live files, move the staged ones into /etc/nginx, send
 #         SIGHUP to the master (a reload: same master pid, 45- unaffected).
-#      e. poll http://127.0.0.1/health until X-Vault-Settings-Generation shows
-#         the new generation. Timeout: restore the backup, SIGHUP again,
-#         "rejected: reload failed".
+#      e. poll http://127.0.0.1/health until X-Vault-Settings-Apply shows this
+#         attempt's unique id (X-Vault-Settings-Generation carries the
+#         generation for vault-api; a generation can repeat after a lost
+#         settings volume, the id cannot). Timeout: restore the backup,
+#         SIGHUP again, "rejected: reload failed".
 #      f. "applied" with the generation, the effective value and source of
 #         every key.
 #    On any failure the last good config stays live; it never fails open.
 #
-# Same file, same generation: nothing to do. A missing file (settings volume
-# not mounted, or vault-api not started yet) changes nothing either.
+# Unchanged content: nothing to do. A changed content is applied whatever its
+# GENERATION (not only a higher one: vault-api restarts at 1 when the
+# settings volume is lost). A missing file (settings volume not mounted, or
+# vault-api not started yet) changes nothing.
 
 set -eu
 
@@ -92,22 +96,27 @@ master_pid() {
     case "$_c" in "nginx: master process"*) echo "$_p" ;; *) return 1 ;; esac
 }
 
-# live_generation: the X-Vault-Settings-Generation the workers serve now.
-live_generation() {
+# live_apply_id: the X-Vault-Settings-Apply id the workers serve now.
+live_apply_id() {
     wget -q -S -O /dev/null "$HEALTH_URL" 2>&1 \
-        | sed -n 's/^[[:space:]]*[Xx]-[Vv]ault-[Ss]ettings-[Gg]eneration:[[:space:]]*\([0-9]*\).*$/\1/p' \
+        | sed -n 's/^[[:space:]]*[Xx]-[Vv]ault-[Ss]ettings-[Aa]pply:[[:space:]]*\([A-Za-z0-9.-]*\).*$/\1/p' \
         | head -n 1
 }
 
-wait_generation() {
+# wait_apply_id <id>: the new workers serve the config with this apply id.
+wait_apply_id() {
     _i=0
     while [ "$_i" -lt 30 ]; do
-        [ "$(live_generation)" = "$1" ] && return 0
+        [ "$(live_apply_id)" = "$1" ] && return 0
         sleep 1
         _i=$((_i + 1))
     done
     return 1
 }
+
+# The apply id of the live config ("boot" until the first apply).
+LIVE_ID=boot
+APPLY_N=0
 
 reject() {
     # reject <generation> <reason>
@@ -130,14 +139,16 @@ apply_file() {
         reject "${VS_GEN:-0}" "settings file rejected: $VS_ERR"
         return 0
     fi
+    # Any change of the file content is applied, also with the same or a
+    # LOWER generation: vault-api restarts at 1 when the settings volume is
+    # lost (the watcher only gets here when the content changed).
     _gen=$VS_GEN
-    if [ "$_gen" = "$APPLIED_GEN" ]; then
-        return 0
-    fi
+    APPLY_N=$((APPLY_N + 1))
+    _id="a$$-$APPLY_N-$(date +%s)"
     log "settings generation $_gen found (live: $APPLIED_GEN) -- rendering"
     _stage=$(mktemp -d) || { reject "$_gen" "could not create a staging directory"; return 0; }
     vs_resolve yes
-    if ! (vs_export; vs_render "$_stage" "$_gen"); then
+    if ! (vs_export; vs_render "$_stage" "$_gen" "$_id"); then
         _why=$(grep -m 1 'FATAL' "$_stage/.render.log" 2>/dev/null | cut -c 1-300 || true)
         sed 's/^/    /' "$_stage/.render.log" >&2 || true
         rm -rf "$_stage"
@@ -182,8 +193,9 @@ apply_file() {
         return 0
     fi
     kill -HUP "$_pid"
-    if wait_generation "$_gen"; then
+    if wait_apply_id "$_id"; then
         APPLIED_GEN=$_gen
+        LIVE_ID=$_id
         vs_write_status applied "$_gen" "$_gen" "" "$VS_CONF_DIR/vault-settings.effective" \
             || warn "could not write $VS_STATUS_FILE"
         while IFS= read -r _line; do
@@ -194,7 +206,7 @@ apply_file() {
     fi
     restore_backup
     kill -HUP "$_pid" || true
-    if wait_generation "$APPLIED_GEN"; then
+    if wait_apply_id "$LIVE_ID"; then
         reject "$_gen" "reload failed: generation $_gen was not live after 30s; restored generation $APPLIED_GEN (see the container log)"
     else
         reject "$_gen" "reload failed and generation $APPLIED_GEN is not confirmed live either after the restore (see the container log)"

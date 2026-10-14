@@ -1,4 +1,7 @@
 # shellcheck shell=sh
+# Variables set here (VS_RENDERED, VS_ERR, ...) are read by the scripts that
+# source this library.
+# shellcheck disable=SC2034
 # SteamHangar vault-core -- the core settings path (D16c), shared functions.
 #
 # Installed as /opt/vault/vault-settings-lib.sh and SOURCED (never executed)
@@ -204,7 +207,7 @@ vs_resolve() {
         # shellcheck disable=SC2154 # _ve is set by the eval above
         if ! vs_blank "$_ve"; then
             _vv=$_ve
-            _vs=env
+            _vs="env"
         else
             _vv=""
             _vs=""
@@ -213,7 +216,7 @@ vs_resolve() {
                 # shellcheck disable=SC2154 # _vh/_vf are set by the eval above
                 if [ -n "$_vh" ] && ! vs_blank "$_vf"; then
                     _vv=$_vf
-                    _vs=file
+                    _vs="file"
                 fi
             fi
             if [ -z "$_vs" ]; then
@@ -242,7 +245,7 @@ vs_effective_lines() {
     done
 }
 
-# vs_render <dir> <generation>: the boot chain 20 -> 25 -> 26 -> 27 -> 28 into
+# vs_render <dir> <generation> [apply id]: the boot chain 20 -> 25 -> 26 -> 27 -> 28 into
 # <dir>, plus the generation include and the effective-values file, then
 # 40's value checks against <dir>. Hook output goes to <dir>/.render.log.
 # Returns 1 with VS_ERR set (the first FATAL line) on any failure. Uses the
@@ -250,6 +253,7 @@ vs_effective_lines() {
 vs_render() {
     _vd=$1
     _vg=$2
+    _vapply=${3:-boot}
     _vlog="$_vd/.render.log"
     : > "$_vlog"
     VS_ERR=""
@@ -271,7 +275,7 @@ vs_render() {
             return 1
         fi
     done
-    vs_write_generation_conf "$_vd/vault-settings-generation.conf" "$_vg" || { vs_render_fail "could not write the generation include"; return 1; }
+    vs_write_generation_conf "$_vd/vault-settings-generation.conf" "$_vg" "$_vapply" || { vs_render_fail "could not write the generation include"; return 1; }
     vs_effective_lines > "$_vd/vault-settings.effective" || { vs_render_fail "could not write vault-settings.effective"; return 1; }
     if ! sh "$VS_HOOK_DIR/40-vault-preflight.sh" --values "$_vd" >> "$_vlog" 2>&1; then
         vs_render_fail "40-vault-preflight.sh's value checks failed"
@@ -286,16 +290,25 @@ vs_render_fail() {
     VS_ERR="$1${_vfatal:+: $_vfatal}"
 }
 
-# vs_write_generation_conf <file> <generation>: the /health header that lets
-# the watcher see which generation the running workers serve.
+# vs_write_generation_conf <file> <generation> [apply id]: the /health
+# headers that let the watcher see which config the running workers serve.
+# The generation is what vault-api compares; the apply id (default "boot",
+# else unique per apply attempt) makes the post-reload check exact even when
+# a generation repeats -- vault-api restarts at 1 when the settings volume is
+# lost, so "same generation" is not "same config".
 vs_write_generation_conf() {
     case "$2" in
         ''|*[!0-9]*) return 1 ;;
+    esac
+    _vid=${3:-boot}
+    case "$_vid" in
+        ''|*[!A-Za-z0-9.-]*) return 1 ;;
     esac
     {
         echo "# Rendered by vault-core (D16c) -- do not edit. Included in location = /health;"
         echo "# the settings watcher polls it after a reload (core/README.md \"Settings from vault-api\")."
         echo "add_header X-Vault-Settings-Generation \"$2\" always;"
+        echo "add_header X-Vault-Settings-Apply \"$_vid\" always;"
     } > "$1"
 }
 
