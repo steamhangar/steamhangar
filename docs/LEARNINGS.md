@@ -1034,3 +1034,31 @@ These are not style preferences; each entry cost a review round to learn.
 - verify-stack step 10h (global cap, live) still flakes under load
   despite 93542a1 (1 of 2 slow requests held after 15 s); a rerun was
   green. Open follow-up.
+
+## 2026-10-13/14 — rc15/rc16 (D9, D10, UPD-5, UPD-6, D15a-c)
+
+- `dev.sh verify` tears down the dev instance as a side effect; run
+  `dev.sh up` right after it. Only the orchestrator runs verify — coders
+  and reviewers never do, so a review cannot silently stop the instance
+  another agent is testing against.
+- Edits that widen egress (allowlists, relay hosts) are blocked by the
+  auto-mode safety classifier even after the operator agreed in chat. The
+  operator makes that one-line edit himself; the brief says so up front
+  instead of letting an agent retry.
+- Golden screenshots are refreshed on a dedicated `wp/*-goldens` branch
+  where CI commits them as a bot. Commits pushed with `GITHUB_TOKEN`
+  trigger no new CI run, so push an empty or follow-up commit to get the
+  branch checked.
+- A package branched from an older main must merge current main before it
+  joins an integration branch (D9 vs D10 conflicted only at integration).
+  Merge main into long-lived `wp/` branches before review, not after.
+- On ZFS `st_dev` is not stable across reboots; identify cached files by
+  inode (plus path) only, never by `(st_dev, st_ino)`.
+- Behind Docker published ports (userland proxy / NAT) vault-api sees the
+  bridge gateway as the peer, never the client's LAN address. Anything that
+  attributes traffic to a client (D15, "client bypasses the cache") must
+  take the address from a source that sees the real peer (proxy access
+  log, or the agent reporting its own LAN address — AGENT-ADDR-1).
+- Overnight, four parallel agents already hit the session limit; keep to
+  three and continue an interrupted agent with SendMessage instead of
+  spawning a fresh one.
