@@ -626,6 +626,9 @@ without one they are listed in Downloads next to "Updates available"
 (e.g. "Incomplete (N)" with "Complete now" / "Complete all") — the
 completion itself is a download and never runs outside the window
 unless started by hand.
+UI rule (user, 2026-10-14): every new Downloads section ("Updates
+available", "Incomplete", and later ones) is shown only when it has at
+least one entry — no empty headings.
 
 **APP-DIST-1 (ci + api + web, rc17; user decision 2026-10-14, option B):**
 the release pipeline builds and signs the APK first and bakes it into the
