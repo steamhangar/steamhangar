@@ -1,8 +1,12 @@
 package dev.steamvault.app.demo
 
+import dev.steamvault.app.ui.clients.logic.clientKindText
+import dev.steamvault.app.ui.clients.logic.clientName
 import dev.steamvault.app.ui.clients.logic.clientsHaveFigures
 import dev.steamvault.app.ui.clients.logic.installedText
+import dev.steamvault.app.ui.clients.logic.isAddressClient
 import dev.steamvault.app.ui.clients.logic.isAgentClient
+import dev.steamvault.app.ui.clients.logic.isRunnerClient
 import dev.steamvault.app.ui.traffic.logic.FeedState
 import dev.steamvault.app.ui.traffic.logic.TRAFFIC_RANGES
 import dev.steamvault.app.ui.traffic.logic.feedState
@@ -12,6 +16,7 @@ import dev.steamvault.app.ui.traffic.logic.jobSpeedText
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -54,7 +59,7 @@ class DemoTrafficTest {
         val o = DemoTrafficRepository(DemoState.fresh()).clientsOverview("7d")
         assertTrue(clientsHaveFigures(o))
         val agents = o.clients.filter { isAgentClient(it) }
-        val addresses = o.clients.filter { !isAgentClient(it) }
+        val addresses = o.clients.filter { isAddressClient(it) }
         assertEquals(2, agents.size)
         assertEquals(2, addresses.size)
         assertTrue(agents.any { it.connected == true } && agents.any { it.connected == false })
@@ -62,6 +67,37 @@ class DemoTrafficTest {
         assertTrue(agents.all { installedText(it) != null })
         assertTrue("connected first", o.clients.first().connected == true)
         assertTrue("someone is loading now", o.clients.any { it.loading_now?.loading == true })
+    }
+
+    @Test
+    fun `D15-RUNNER and D15-NAMES -- a runner entry, a named agent, runner figures that add up`() = runTest {
+        val state = DemoState.fresh()
+        val repo = DemoTrafficRepository(state)
+        val o = repo.clientsOverview("7d")
+        val runners = o.clients.filter { isRunnerClient(it) }
+        assertEquals(1, runners.size)
+        val runner = runners.single()
+        assertEquals("Prefill runner", clientName(runner))
+        assertEquals("This server's prefill downloads · 172.18.0.1", clientKindText(runner))
+        assertNull("the runner cannot be named", runner.name_addr)
+        assertTrue("the runner loads the running demo job", runner.loading_now?.loading == true)
+        val named = o.clients.filter { !it.name.isNullOrEmpty() }
+        assertEquals("one named demo client", 1, named.size)
+        assertEquals("Steam Deck", clientName(named.single()))
+        assertEquals("vault-agent on \u2068demo-steamdeck\u2069 · 10.0.0.57", clientKindText(named.single()))
+        assertTrue("every row carries display_name", o.clients.all { !it.display_name.isNullOrEmpty() })
+        for (range in TRAFFIC_RANGES) {
+            val t = repo.throughput(range)
+            val summary = t.summary!!
+            val runnerBytes = summary.prefill_runner!!.bytes_served
+            assertTrue("$range: the runner loaded something", runnerBytes > 0)
+            assertEquals(summary.bytes_served, summary.client_bytes_served!! + runnerBytes)
+            assertEquals(summary.client_bytes_served, summary.hit_bytes + summary.miss_bytes)
+            assertNotNull(headerTiles(t)!!.first { it.key == "loaded" }.detail)
+            assertTrue(t.runner_active_now == true)
+            val s = repo.series(range)
+            assertTrue(s.points.all { it.bytes_served == it.hit_bytes + it.miss_bytes + it.runner_bytes })
+        }
     }
 
     @Test

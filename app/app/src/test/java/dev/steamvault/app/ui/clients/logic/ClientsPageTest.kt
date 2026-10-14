@@ -67,6 +67,57 @@ class ClientsPageTest {
         assertEquals("No agent · seen in the cache log", clientKindText(address))
     }
 
+    private val runner = ClientActivityOut(
+        key = "runner",
+        kind = "runner",
+        addresses = listOf("172.18.0.1"),
+        connected = true,
+        name = null,
+        name_addr = null,
+        display_name = "Prefill runner",
+    )
+
+    @Test
+    fun `D15-NAMES the title is the server's display_name, the line keeps what it replaced`() {
+        val named = agent.copy(name = "Living room PC", name_addr = "192.168.1.20", display_name = "Living room PC")
+        assertEquals("Living room PC", clientName(named))
+        assertEquals("vault-agent on \u2068demon\u2069 · 192.168.1.20", clientKindText(named))
+        assertEquals(
+            "vault-agent on \u2068demon\u2069 · no address in the cache log",
+            clientKindText(named.copy(addresses = emptyList())),
+        )
+        // Unnamed, the server's display_name is the PC name: line unchanged.
+        val unnamed = agent.copy(name = null, name_addr = "192.168.1.20", display_name = "demon")
+        assertEquals("demon", clientName(unnamed))
+        assertEquals("vault-agent · 192.168.1.20", clientKindText(unnamed))
+        val namedAddr = address.copy(name = "frame", name_addr = "10.0.0.9", display_name = "frame")
+        assertEquals("frame", clientName(namedAddr))
+        assertEquals("No agent · 10.0.0.9 · seen in the cache log", clientKindText(namedAddr))
+        assertEquals("No agent · seen in the cache log", clientKindText(namedAddr.copy(addresses = emptyList())))
+        // An empty display_name (never sent, defensive) falls back.
+        assertEquals("demon", clientName(agent.copy(display_name = "")))
+        assertEquals("\u2068x\u2069", isolate("x"))
+    }
+
+    @Test
+    fun `D15-RUNNER the runner is titled by the server and described as the server's prefill downloads`() {
+        assertEquals("Prefill runner", clientName(runner))
+        assertEquals("This server's prefill downloads · 172.18.0.1", clientKindText(runner))
+        assertEquals("This server's prefill downloads", clientKindText(runner.copy(addresses = emptyList())))
+        assertNull(installedText(runner))
+        assertEquals(listOf(true, false, false), listOf(isRunnerClient(runner), isAgentClient(runner), isAddressClient(runner)))
+        assertEquals(listOf(true, false), listOf(isAddressClient(address), isAddressClient(agent)))
+        // The runner is not an agentless machine: no agentless note for it.
+        assertFalse(showAgentlessNote(listOf(agent, runner)))
+        assertTrue(showAgentlessNote(listOf(agent, runner, address)))
+        // Counted like the web counts it (every overview entry).
+        assertEquals("2 clients · 2 connected", clientsSummaryText(listOf(agent, runner)))
+        val card = buildClientCardModel(runner, "24h", now)
+        assertEquals("Prefill runner", card.name)
+        assertEquals("This server's prefill downloads · 172.18.0.1", card.kindText)
+        assertNull(card.installed)
+    }
+
     @Test
     fun `connection chip has three honest states`() {
         assertEquals(ConnectionChip("Connected", ConnectionLook.ON), connectionChip(agent))

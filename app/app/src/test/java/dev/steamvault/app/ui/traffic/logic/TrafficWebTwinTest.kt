@@ -88,6 +88,8 @@ class TrafficWebTwinTest {
                 "since \${day}",
                 " loaded so far",
                 "Nothing finished \${RANGE_PHRASES[range]}.",
+                // WP D15-RUNNER: the "Loaded" tile's second line.
+                "`\${size} by the prefill runner`",
             ),
         )
     }
@@ -98,7 +100,10 @@ class TrafficWebTwinTest {
             "lib/clients-page.js",
             listOf(
                 "No agent · seen in the cache log",
-                "vault-agent · no address in the cache log",
+                // WP D15-NAMES: the unnamed agent's prefix.
+                "vault-agent",
+                // WP D15-RUNNER: the runner's line without an address.
+                "This server's prefill downloads",
                 "Connected",
                 "Not connected",
                 "No current data",
@@ -112,7 +117,14 @@ class TrafficWebTwinTest {
         assertFragments(
             "lib/clients-page.js",
             listOf(
-                "vault-agent · \${addrs.join(\", \")}",
+                // WP D15-NAMES: "vault-agent" or "vault-agent on <PC>" + the rest.
+                "`vault-agent on \${isolate(client.client_id)}`",
+                "`\${agent} · \${addrs.join(\", \")}`",
+                "`\${agent} · no address in the cache log`",
+                "`No agent · \${addrs.join(\", \")} · seen in the cache log`",
+                // WP D15-RUNNER.
+                "`This server's prefill downloads · \${addrs.join(\", \")}`",
+                "client.kind === \"runner\"",
                 "Loading now: \${speed} · content not linked to one game",
                 " game\${n === 1 ? \"\" : \"s\"} installed",
                 " loaded \${phrase}",
@@ -127,9 +139,25 @@ class TrafficWebTwinTest {
     }
 
     @Test
+    fun `client-names isolate`() {
+        // WP D15-NAMES: `isolate` wraps the PC name in FSI ... PDI; the
+        // Kotlin `isolate` is pinned to the same two code points in
+        // ClientsPageTest.
+        assertFragments("lib/client-names.js", listOf("return `\\u2068\${text}\\u2069`;"))
+    }
+
+    @Test
     fun `view literals`() {
         assertQuoted("views/clients.js", listOf(LOADING_CLIENTS_TEXT, "Request failed."))
-        assertFragments("views/clients.js", listOf("Could not load clients: \${state.error}"))
+        assertFragments(
+            "views/clients.js",
+            listOf(
+                "Could not load clients: \${state.error}",
+                // WP D15-RUNNER: the agentless note is gated on address
+                // clients only (Kotlin `showAgentlessNote`, ClientsPageTest).
+                "els.agentlessNote.hidden = !clients.some((c) => isAddressClient(c));",
+            ),
+        )
         assertQuoted("views/downloads.js", listOf(LOADING_STATISTICS_TEXT, SERIES_END_TEXT, NOT_AVAILABLE))
         assertFragments(
             "views/downloads.js",
