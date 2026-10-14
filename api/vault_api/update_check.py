@@ -585,15 +585,17 @@ class UpdateCheckRunner:
         apps after the oracle refresh (``vault_api/cache_completeness.py``).
 
         Runs even after a bail-out (it reads stored oracle rows and the local
-        disk, no network), skipped on shutdown. Its own failure is logged and
-        never changes the check's outcome.
+        disk, no network), skipped on shutdown, and checks the stop flag
+        between depots. A run that completes also drops the rows of apps
+        outside the selection. Its own failure is logged and never changes the
+        check's outcome.
         """
         if result.aborted or self._stop.is_set():
             return 0
         try:
-            return cache_completeness.evaluate_apps(
+            return cache_completeness.evaluate_selection(
                 conn, settings, appids, should_abort=self._stop.is_set
-            )
+            ).stored
         except Exception:
             logger.exception("update check: cache completeness evaluation failed")
             return 0

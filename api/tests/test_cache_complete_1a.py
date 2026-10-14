@@ -352,7 +352,7 @@ def test_a_failing_completeness_step_does_not_change_the_outcome(
     def boom(*args: Any, **kwargs: Any) -> int:
         raise RuntimeError("bug")
 
-    monkeypatch.setattr(update_check.cache_completeness, "evaluate_apps", boom)
+    monkeypatch.setattr(update_check.cache_completeness, "evaluate_selection", boom)
 
     def fetch(url: str) -> bytes:
         raise update_check.oracle.OracleError("offline")
@@ -439,6 +439,173 @@ def test_group_figure_spans_the_members(
     # (200 + 100) / (200 + 400)
     assert games[440]["group_cache_complete_pct"] == 50
     assert games[730]["group_cache_complete_pct"] is None
+
+
+# --------------------------------------------------------------------------
+# Review round 1 (CACHE-COMPLETE-1a)
+# --------------------------------------------------------------------------
+
+
+def test_group_figure_skips_a_member_with_nothing_on_disk(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    """Parent + DLC both 100 %, the DLC's chunks are deleted, only the parent is
+    re-checked: the DLC's stale 800/800 rows must not enter the group figure."""
+    settings = settings_for(tmp_path)
+    cache = Path(settings.cache_root)
+    archive = Path(settings.manifest_archive_dir)
+    record(conn, 440, 441, OLD_GID, "2026-10-01T00:00:00Z")
+    write_archive_bin(archive, depotid=441, manifestid=OLD_GID, chunks=chunks(0, 2))
+    write_chunks(cache, 441, chunks(0, 2))
+    record(conn, 730, 731, "1001", "2026-10-01T00:00:00Z")
+    write_archive_bin(archive, depotid=731, manifestid="1001", chunks=chunks(10, 8))
+    write_chunks(cache, 731, chunks(10, 8))
+    conn.execute(
+        "INSERT INTO app_classification (appid, app_type, parent_appid, source, "
+        "checked_at) VALUES (730, 'dlc', 440, ?, '2026-10-14T00:00:00Z')",
+        (app_classification.SOURCE_STORE,),
+    )
+    conn.commit()
+    cache_completeness.evaluate_apps(conn, settings, [440, 730])
+
+    for path in (cache / "depot" / "731" / "chunk").iterdir():
+        path.unlink()
+    (cache / "depot" / "441" / "chunk" / _cid(1)).unlink()
+    cache_completeness.evaluate_apps(conn, settings, [440])  # no prune here
+    assert conn.execute(
+        "SELECT present_bytes FROM cache_completeness WHERE appid = 730"
+    ).fetchone()[0] == 800  # the stale row is still there
+
+    with api_client(settings) as client:
+        games = {g["appid"]: g for g in client.get("/v1/games", headers=AUTH).json()}
+    assert games[440]["cache_complete_pct"] == 50
+    # Only the parent: 100/200, not (100 + 800) / (200 + 800).
+    assert games[440]["group_cache_complete_pct"] == 50
+
+
+def test_a_completed_run_drops_rows_of_apps_outside_the_selection(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    cache_completeness.evaluate_selection(conn, settings, [440, 730])
+
+    outcome = cache_completeness.evaluate_selection(conn, settings, [440])
+
+    assert outcome == cache_completeness.RunOutcome(stored=1, aborted=False)
+    apps = {r[0] for r in conn.execute("SELECT appid FROM cache_completeness")}
+    assert apps == {440}
+
+
+def test_an_aborted_run_stores_no_partial_app_and_prunes_nothing(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    upsert_mapping(conn, 732, 730, None)  # 730 now has two depots
+    cache_completeness.evaluate_selection(conn, settings, [440, 730])
+    before = conn.execute("SELECT * FROM cache_completeness ORDER BY appid, depotid").fetchall()
+
+    calls = {"n": 0}
+
+    def abort_after_first_depot() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 2  # app check + first depot check pass, then stop
+
+    outcome = cache_completeness.evaluate_selection(
+        conn, settings, [730], should_abort=abort_after_first_depot
+    )
+
+    assert outcome.aborted
+    after = conn.execute("SELECT * FROM cache_completeness ORDER BY appid, depotid").fetchall()
+    assert [tuple(r) for r in after] == [tuple(r) for r in before]
+
+
+def test_delete_cache_drops_the_rows_of_the_app_and_its_depots(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    cache_completeness.evaluate_selection(conn, settings, [440, 730])
+
+    with api_client(settings) as client:
+        response = client.delete("/v1/cache/730", headers=AUTH)
+    assert response.status_code == 200, response.text
+
+    apps = {r[0] for r in conn.execute("SELECT appid FROM cache_completeness")}
+    assert apps == {440}
+
+
+def _runner_result(**kwargs: Any) -> update_check.UpdateCheckResult:
+    return update_check.UpdateCheckResult(enabled=True, ran=True, **kwargs)
+
+
+def test_evaluate_completeness_is_skipped_on_abort_and_on_shutdown(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    runner = update_check.UpdateCheckRunner(settings.db_path, pause_seconds=0)
+
+    assert runner._evaluate_completeness(
+        conn, settings, [440, 730], _runner_result(aborted=True)
+    ) == 0
+    runner.stop()
+    assert runner._evaluate_completeness(conn, settings, [440, 730], _runner_result()) == 0
+    assert conn.execute("SELECT COUNT(*) FROM cache_completeness").fetchone()[0] == 0
+
+    live = update_check.UpdateCheckRunner(settings.db_path, pause_seconds=0)
+    assert live._evaluate_completeness(conn, settings, [440, 730], _runner_result()) == 2
+
+
+def test_a_shared_depot_is_scanned_once_per_run_and_others_are_released(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    record(conn, 900, 441, OLD_GID, "2026-10-01T00:00:00Z")  # 441 shared by 440/900
+
+    run = cache_completeness.EvaluationRun(settings, shared_depots={441})
+    for appid in (440, 900, 730):
+        rows = cache_completeness.evaluate_app(conn, settings, appid, run=run)
+        assert rows and all(r.status == "ok" for r in rows)
+
+    assert run.chunk_scans == 2  # 441 once, 731 once
+    assert set(run._chunks) == {441}  # 731 was released after use
+
+
+def test_a_manifest_past_int64_is_unavailable_not_a_crash(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    settings = settings_for(tmp_path, oracle_on=False)
+    record(conn, APPID, DEPOT, OLD_GID, "2026-10-01T00:00:00Z")
+    write_archive_bin(Path(settings.manifest_archive_dir), depotid=DEPOT, manifestid=OLD_GID,
+                      chunks={_cid(0): 2**62, _cid(1): 2**62})
+    write_chunks(Path(settings.cache_root), DEPOT, chunks(5, 1))
+
+    outcome = cache_completeness.evaluate_apps(conn, settings, [APPID])
+
+    assert outcome.stored == 1
+    status = conn.execute("SELECT status FROM cache_completeness").fetchone()[0]
+    assert status == cache_completeness.STATUS_MANIFEST_UNAVAILABLE
+
+
+def test_the_worker_remeasures_an_app_after_its_prefill(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    from vault_api.worker import PrefillWorker
+
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    PrefillWorker(settings)._remeasure_completeness(conn, 730)
+    rows = conn.execute("SELECT appid, present_bytes FROM cache_completeness").fetchall()
+    assert [tuple(r) for r in rows] == [(730, 100)]
+
+    off = settings_for(tmp_path, oracle_on=False)
+    PrefillWorker(off)._remeasure_completeness(conn, 440)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM cache_completeness WHERE appid = 440"
+    ).fetchone()[0] == 0
 
 
 # --------------------------------------------------------------------------

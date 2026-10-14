@@ -15,7 +15,7 @@ For one (app, depot) pair:
    prefill ingested a manifest after the oracle was asked), or the oracle is
    off / has no row for the depot -- then the recorded manifest id.
 2. **Its chunk set**: the manifest is read the way GC reads it
-   (``gc._read_manifest_by_id``): the archived ``.bin`` first, else a
+   (``gc.read_manifest_by_id``): the archived ``.bin`` first, else a
    cache-stored client copy under ``depot/<id>/manifest/<gid>/5/``. A Steam
    client that downloads an update through the cache stores the NEW manifest
    there, which is exactly what makes a half-finished client update
@@ -55,31 +55,48 @@ the map and is not counted until a prefill fills it.
 - one unknown depot makes the whole app unknown -- a partial sum would claim
   a precision it does not have.
 
+**UI contract (for 1b):** ``null`` while ``size_bytes > 0`` means "not
+known", never "complete" -- it must not render as the green check. Only
+``cache_complete_pct == 100`` earns it.
+
 ## DLC groups (D9)
 
-``group_cache_complete_pct`` aggregates the union of the group members'
-(app, depot) pairs, each (depot, manifest) counted once, like
-``group_size_bytes``.
+``group_cache_complete_pct`` aggregates the (app, depot) pairs of the group
+members that currently have bytes on disk (own ``size_bytes`` > 0) -- the
+same members that contribute bytes to ``group_size_bytes`` -- each
+(depot, manifest) counted once. A member with nothing on disk is skipped, so
+a deleted DLC's last stored rows cannot keep a group at 100 %.
 
-## When it runs
+## When it runs, and how stale it can be
 
-As part of every update check (``update_check.UpdateCheckRunner._run``, UPD-5
-cadence, both triggers), for the cached games the check selected, after the
-oracle refresh. Results are stored per (app, depot) in ``cache_completeness``
-and the API only reads them. Between two checks the stored figure can lag
-(a prefill or client download that finished since); the next check corrects
-it. Nothing here downloads, deletes or writes anywhere but that table.
+- Every update check (``update_check.UpdateCheckRunner._run``, UPD-5 cadence,
+  both triggers) measures the cached games it selected, after the oracle
+  refresh (``evaluate_selection``), then drops the rows of every app outside
+  that selection. An aborted run (shutdown) stores no partial app and prunes
+  nothing.
+- The prefill worker re-measures an app right after a successful prefill job
+  for it (``remeasure_app``; same oracle switch as the check).
+- ``DELETE /v1/cache/{appid}`` drops the rows of the app and of every depot it
+  removed (``forget``).
+
+Anything else -- a Steam client finishing a download through the cache, GC --
+shows only at the next check: **a figure is as old as
+``cache_complete_checked_at``, up to one ``VAULT_SCHEDULE_INTERVAL_MINUTES``
+(default 180 min).** The API only reads the table. Nothing here downloads,
+deletes files or writes anywhere but that table.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping, Sequence
 
 from vault_api import deletion, gc, jobs, oracle
 from vault_api.config import Settings
+from vault_api.manifest_archive import archive_filename
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +112,9 @@ STATUS_UNREADABLE_CACHE = "unreadable_cache"
 
 #: ``cache_completeness.source`` for an evaluated row (which file was read).
 SOURCE_ARCHIVE = gc.SOURCE_ARCHIVE
+
+#: A manifest whose summed sizes exceed INT64 also lands on
+#: ``STATUS_MANIFEST_UNAVAILABLE`` (see ``INT64_MAX``).
 
 
 def _never() -> bool:
@@ -216,8 +236,73 @@ def current_targets(
 
 
 # --------------------------------------------------------------------------
-# Evaluation (update check thread)
+# Evaluation (update check thread, prefill worker)
 # --------------------------------------------------------------------------
+
+#: SQLite INTEGER is signed 64-bit. A manifest whose chunk sizes sum past it is
+#: corrupt or hostile (no real depot is 8 EiB); it is treated as unavailable,
+#: not stored (the insert would raise ``OverflowError``).
+INT64_MAX = 2**63 - 1
+
+
+class EvaluationRun:
+    """State shared by every app of ONE run.
+
+    One ``gc.ManifestReader`` and one listing per depot (stored manifests +
+    chunk scan). Only depots that more than one app of the run maps
+    (``shared_depots``) are kept after use, so a shared depot is scanned and
+    parsed once; every other depot's listing and parsed manifest is dropped
+    as soon as it is measured, which bounds memory to roughly one large depot
+    plus the shared ones (a 150k-chunk listing is tens of MB in Python).
+    ``should_abort`` is checked between depots.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        shared_depots: Iterable[int] = (),
+        should_abort: Callable[[], bool] = _never,
+    ) -> None:
+        self.settings = settings
+        self.reader = gc.ManifestReader()
+        self.shared_depots = frozenset(shared_depots)
+        self.should_abort = should_abort
+        try:
+            self.depot_root: str | None = deletion.resolve_depot_root(settings.cache_root)
+        except deletion.DeletionGuardError:
+            self.depot_root = None
+        self._stored: dict[int, Mapping[str, Sequence[gc.StoredManifestCopy]]] = {}
+        self._chunks: dict[int, dict[str, int]] = {}
+        #: How many chunk directories were scanned (tests pin "once per depot").
+        self.chunk_scans = 0
+
+    def stored_manifests(
+        self, depotid: int, depot_dir: str
+    ) -> Mapping[str, Sequence[gc.StoredManifestCopy]]:
+        cached = self._stored.get(depotid)
+        if cached is None:
+            cached = gc.scan_stored_manifests(depot_dir)
+            self._stored[depotid] = cached
+        return cached
+
+    def chunks_on_disk(self, depotid: int, depot_dir: str) -> dict[str, int]:
+        cached = self._chunks.get(depotid)
+        if cached is None:
+            cached = gc.scan_depot_chunks(depot_dir).chunks
+            self.chunk_scans += 1
+            self._chunks[depotid] = cached
+        return cached
+
+    def release(self, depotid: int, paths: Iterable[str | None]) -> None:
+        """Forget a non-shared depot's listing and parses after measuring it."""
+        if depotid in self.shared_depots:
+            return
+        self._stored.pop(depotid, None)
+        self._chunks.pop(depotid, None)
+        for path in paths:
+            if path:
+                self.reader.forget(path)
 
 
 def evaluate_depot(
@@ -225,9 +310,7 @@ def evaluate_depot(
     depotid: int,
     target: str | None,
     *,
-    depot_root: str | None,
-    archive_dir: str,
-    reader: "gc._ManifestReader",
+    run: EvaluationRun,
     checked_at: str,
 ) -> DepotCompleteness:
     """Measure one (app, depot) pair against its target manifest. Never raises
@@ -245,53 +328,66 @@ def evaluate_depot(
 
     if target is None:
         return row(STATUS_NO_TARGET)
-    if depot_root is None:
+    if run.depot_root is None:
         return row(STATUS_UNREADABLE_CACHE)
     try:
-        depot_dir = deletion.depot_dir_path(depot_root, depotid)
+        depot_dir = deletion.depot_dir_path(run.depot_root, depotid)
     except deletion.DeletionGuardError:
         return row(STATUS_UNREADABLE_CACHE)
     if gc.is_link_like(depot_dir):
         return row(STATUS_UNREADABLE_CACHE)
 
-    stored = gc.scan_stored_manifests(depot_dir)
-    parsed, source, _path, error = gc._read_manifest_by_id(
+    archive_dir = run.settings.manifest_archive_dir
+    archive_path = os.path.join(
+        archive_dir, archive_filename(depotid=depotid, manifestid=target)
+    )
+    parsed, source, path, error = gc.read_manifest_by_id(
         depotid,
         target,
         archive_dir=archive_dir,
-        stored_manifests=stored,
-        reader=reader,
+        stored_manifests=run.stored_manifests(depotid, depot_dir),
+        reader=run.reader,
     )
-    if parsed is None:
-        logger.debug(
-            "cache completeness: app %d depot %d manifest %s unreadable: %s",
-            appid, depotid, target, error,
-        )
-        return row(STATUS_MANIFEST_UNAVAILABLE)
+    try:
+        if parsed is None:
+            logger.debug(
+                "cache completeness: app %d depot %d manifest %s unreadable: %s",
+                appid, depotid, target, error,
+            )
+            return row(STATUS_MANIFEST_UNAVAILABLE)
 
-    on_disk = gc.scan_depot_chunks(depot_dir).chunks
-    expected = 0
-    present = 0
-    missing = 0
-    mismatched = 0
-    for chunk_id, size in parsed.chunks.items():
-        expected += size
-        disk_size = on_disk.get(chunk_id)
-        if disk_size is None:
-            missing += 1
-        elif disk_size != size:
-            mismatched += 1
-        else:
-            present += size
-    return row(
-        STATUS_OK,
-        source=source,
-        expected_bytes=expected,
-        present_bytes=present,
-        chunk_count=len(parsed.chunks),
-        missing_chunks=missing,
-        mismatched_chunks=mismatched,
-    )
+        expected = sum(parsed.chunks.values())
+        if expected > INT64_MAX:
+            logger.debug(
+                "cache completeness: app %d depot %d manifest %s declares %d "
+                "bytes (past INT64); treated as unavailable",
+                appid, depotid, target, expected,
+            )
+            return row(STATUS_MANIFEST_UNAVAILABLE)
+
+        on_disk = run.chunks_on_disk(depotid, depot_dir)
+        present = 0
+        missing = 0
+        mismatched = 0
+        for chunk_id, size in parsed.chunks.items():
+            disk_size = on_disk.get(chunk_id)
+            if disk_size is None:
+                missing += 1
+            elif disk_size != size:
+                mismatched += 1
+            else:
+                present += size
+        return row(
+            STATUS_OK,
+            source=source,
+            expected_bytes=expected,
+            present_bytes=present,
+            chunk_count=len(parsed.chunks),
+            missing_chunks=missing,
+            mismatched_chunks=mismatched,
+        )
+    finally:
+        run.release(depotid, (archive_path, path))
 
 
 def evaluate_app(
@@ -299,29 +395,24 @@ def evaluate_app(
     settings: Settings,
     appid: int,
     *,
+    run: EvaluationRun | None = None,
     checked_at: str | None = None,
-) -> list[DepotCompleteness]:
-    """Evaluate every mapped depot of one app (no writes)."""
+) -> list[DepotCompleteness] | None:
+    """Evaluate every mapped depot of one app (no writes). ``None`` when the
+    run was aborted between two depots: a partial app is never stored."""
     stamp = checked_at or jobs.utcnow_iso()
+    run = run or EvaluationRun(settings)
     targets = current_targets(conn, settings, [appid])
-    try:
-        depot_root: str | None = deletion.resolve_depot_root(settings.cache_root)
-    except deletion.DeletionGuardError:
-        depot_root = None
-    reader = gc._ManifestReader()
-    return [
-        evaluate_depot(
-            appid,
-            depotid,
-            target,
-            depot_root=depot_root,
-            archive_dir=settings.manifest_archive_dir,
-            reader=reader,
-            checked_at=stamp,
+    rows: list[DepotCompleteness] = []
+    for (owner, depotid), target in sorted(targets.items()):
+        if owner != appid:
+            continue
+        if run.should_abort():
+            return None
+        rows.append(
+            evaluate_depot(appid, depotid, target, run=run, checked_at=stamp)
         )
-        for (owner, depotid), target in sorted(targets.items())
-        if owner == appid
-    ]
+    return rows
 
 
 def store_app(
@@ -350,25 +441,112 @@ def store_app(
         )
 
 
+def _shared_depots(conn: sqlite3.Connection, appids: Sequence[int]) -> set[int]:
+    """Depots more than one of ``appids`` maps."""
+    if len(appids) < 2:
+        return set()
+    owners: dict[int, int] = {}
+    selected = set(appids)
+    for row in conn.execute("SELECT depotid, appid FROM depot_app_map"):
+        if row["appid"] in selected:
+            owners[row["depotid"]] = owners.get(row["depotid"], 0) + 1
+    return {depotid for depotid, count in owners.items() if count > 1}
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    stored: int
+    aborted: bool
+
+
 def evaluate_apps(
     conn: sqlite3.Connection,
     settings: Settings,
     appids: Iterable[int],
     *,
     should_abort: Callable[[], bool] = _never,
-) -> int:
-    """Evaluate and store each app; returns how many were stored. One app's
-    failure is logged and skipped, never fatal to the rest."""
+) -> RunOutcome:
+    """Evaluate and store each app with one shared ``EvaluationRun``. One
+    app's failure is logged and skipped, never fatal to the rest. No pruning
+    (see ``evaluate_selection``)."""
+    ids = sorted(set(appids))
+    run = EvaluationRun(
+        settings, shared_depots=_shared_depots(conn, ids), should_abort=should_abort
+    )
     stored = 0
-    for appid in sorted(set(appids)):
+    for appid in ids:
         if should_abort():
-            break
+            return RunOutcome(stored, aborted=True)
         try:
-            store_app(conn, appid, evaluate_app(conn, settings, appid))
+            rows = evaluate_app(conn, settings, appid, run=run)
+            if rows is None:
+                return RunOutcome(stored, aborted=True)
+            store_app(conn, appid, rows)
             stored += 1
         except Exception:  # noqa: BLE001 - one app must not stop the run
             logger.exception("cache completeness: evaluating app %d failed", appid)
-    return stored
+    return RunOutcome(stored, aborted=False)
+
+
+def evaluate_selection(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    appids: Iterable[int],
+    *,
+    should_abort: Callable[[], bool] = _never,
+) -> RunOutcome:
+    """The update check's step: evaluate the selected (cached) games, then --
+    only if the run was not aborted -- drop the rows of every app outside the
+    selection (no longer cached, or a tool package), so a stale figure cannot
+    outlive the content it describes."""
+    ids = sorted(set(appids))
+    outcome = evaluate_apps(conn, settings, ids, should_abort=should_abort)
+    if not outcome.aborted:
+        prune_except(conn, ids)
+    return outcome
+
+
+def remeasure_app(conn: sqlite3.Connection, settings: Settings, appid: int) -> None:
+    """Measure one app now and store it (the prefill worker, after a
+    successful job for that app). Never prunes other apps."""
+    rows = evaluate_app(conn, settings, appid)
+    if rows is not None:
+        store_app(conn, appid, rows)
+
+
+def prune_except(conn: sqlite3.Connection, appids: Iterable[int]) -> int:
+    """Delete the rows of every app NOT in ``appids``; returns how many apps."""
+    keep = set(appids)
+    stale = [
+        int(row["appid"])
+        for row in conn.execute("SELECT DISTINCT appid FROM cache_completeness")
+        if int(row["appid"]) not in keep
+    ]
+    if stale:
+        with jobs.immediate_transaction(conn):
+            conn.executemany(
+                "DELETE FROM cache_completeness WHERE appid = ?", [(a,) for a in stale]
+            )
+    return len(stale)
+
+
+def forget(
+    conn: sqlite3.Connection,
+    *,
+    appids: Iterable[int] = (),
+    depotids: Iterable[int] = (),
+) -> None:
+    """Delete the rows of these apps and of these depots (any app) -- used by
+    ``DELETE /v1/cache/{appid}``: a removed depot's figure is unknown until the
+    next check, for every app that maps it."""
+    with jobs.immediate_transaction(conn):
+        conn.executemany(
+            "DELETE FROM cache_completeness WHERE appid = ?", [(a,) for a in set(appids)]
+        )
+        conn.executemany(
+            "DELETE FROM cache_completeness WHERE depotid = ?",
+            [(d,) for d in set(depotids)],
+        )
 
 
 # --------------------------------------------------------------------------

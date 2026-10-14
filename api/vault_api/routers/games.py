@@ -302,8 +302,10 @@ class GameSummary(BaseModel):
     cache_present_bytes: int | None = None
     # When the oldest depot figure was measured (UTC), null when unknown.
     cache_complete_checked_at: str | None = None
-    # Same figure over the whole group this row heads (D9; union of the
-    # members' depots, each depot/manifest counted once). Null for a row
+    # Same figure over the whole group this row heads (D9): the depots of the
+    # members that currently have bytes on disk (own size_bytes > 0, the same
+    # members that add bytes to ``group_size_bytes``), each depot/manifest
+    # counted once; a member with nothing on disk is skipped. Null for a row
     # grouped under a parent, like ``group_size_bytes``.
     group_cache_complete_pct: int | None = None
 
@@ -336,13 +338,20 @@ def _group_completeness_pct(
     app_depotids: dict[int, list[int]],
     index: cache_completeness.CompletenessIndex,
     group_size: int | None,
+    depot_bytes: dict[int, int],
 ) -> int | None:
     """``group_cache_complete_pct`` for one row (same grouping as
-    ``_group_size_bytes``). Members with no mapped depot add nothing."""
+    ``_group_size_bytes``). Only members whose own ``size_bytes`` is > 0
+    count (CACHE-COMPLETE-1a review): a member with nothing on disk must not
+    contribute its last stored rows."""
     own = classifications.get(appid)
     if (own is not None and own.parent_appid is not None) or not group_size:
         return None
-    members = [appid, *children_by_parent.get(appid, [])]
+    members = [
+        m
+        for m in (appid, *children_by_parent.get(appid, []))
+        if app_size_bytes(app_depotids.get(m, []), depot_bytes)
+    ]
     pairs = [(m, d) for m in members for d in app_depotids.get(m, [])]
     return index.figure(pairs).pct
 
@@ -588,6 +597,7 @@ def list_games(
                     app_depotids,
                     completeness,
                     group_size,
+                    depot_bytes,
                 ),
             )
         )
@@ -711,5 +721,6 @@ def get_game(
             group_depotids,
             completeness,
             group_size,
+            depot_bytes,
         ),
     )

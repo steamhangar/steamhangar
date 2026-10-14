@@ -2163,14 +2163,32 @@ of the **current build** is there (`vault_api/cache_completeness.py`):
   client or prefill has fetched yet), or the target changed since the
   measurement. One unknown depot makes the game unknown. UIs then fall back to
   the `size_bytes` rule.
-- **Groups (D9):** `group_cache_complete_pct` over the union of the members'
-  depots, each depot/manifest once; `null` on a grouped row.
+- **UI contract:** `null` while `size_bytes > 0` means "not known", never
+  "complete" -- it must not render as the green check. Only 100 does.
+- **Groups (D9):** `group_cache_complete_pct` over the depots of the group
+  members that currently have bytes on disk (own `size_bytes` > 0, the same
+  members that add bytes to `group_size_bytes`), each depot/manifest once; a
+  member with nothing on disk is skipped. `null` on a grouped row.
 - **When:** every update check (UPD-5 cadence, scheduled and
   `POST /v1/updates/check`) measures the games it selected after the oracle
-  refresh -- local disk reads only -- and stores one row per (app, depot) in
-  `cache_completeness`. The API only reads those rows, so a figure can lag a
-  download that finished since the last check. With the oracle off no check
-  runs and the figures stay `null`.
+  refresh -- local disk reads only -- stores one row per (app, depot) in
+  `cache_completeness`, and then drops the rows of every app outside the
+  selection (an aborted run stores no partial app and drops nothing). The
+  prefill worker re-measures an app right after a successful prefill job for
+  it; `DELETE /v1/cache/{appid}` drops the rows of the app and of every depot
+  it removed. Anything else (a Steam client finishing through the cache, GC)
+  shows at the next check: **a figure is as old as
+  `cache_complete_checked_at`, up to one `VAULT_SCHEDULE_INTERVAL_MINUTES`
+  (default 180 min).** The API only reads the table. With the oracle off
+  neither the check nor the post-prefill re-measure runs and the figures stay
+  `null`.
+- **Cost:** one run shares one manifest reader; a depot several selected
+  apps map is scanned and parsed once, every other depot's listing is
+  released right after it is measured, and the stop flag is checked between
+  depots. Measured 2026-10-14 in the devbox (synthetic depot, 150,000 chunks
+  in the manifest, 135,000 sparse 1 MiB chunk files on disk, page cache warm,
+  4 cores, overlay fs): **about 2.4 s** for that one depot (manifest parse +
+  `chunk/` scan + compare + store). Not measured on ZFS with a cold cache.
 
 ### `GET /v1/cache/summary`
 

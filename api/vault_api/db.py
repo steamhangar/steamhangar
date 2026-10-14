@@ -237,7 +237,13 @@ import time
 #: bucketed by sweep time, not event time, and hold about four hours; the
 #: tiers start empty and ``traffic_since`` says so.
 #: v24 is RESERVED for WP AGENT-ADDR-1 (built in parallel); this branch does
-#: not contain it.
+#: not contain it. **Integration rule:** a database this branch has already
+#: stamped 25 never passes ``version < 24``, so AGENT-ADDR-1's v24 step must
+#: be keyed ``version < 25`` (or run unconditionally) and stay guarded per
+#: column (``PRAGMA table_info`` before each ``ALTER``), like the v20/v22/v23
+#: steps. Dev databases: a DB stamped 25 refuses to open under any build that
+#: only knows v24 (the downgrade guard in ``init_db``), so do not point an
+#: AGENT-ADDR-1-only build at a DB this branch touched -- merge first.
 #: v25 (WP CACHE-COMPLETE-1a): added ``cache_completeness`` -- one row per
 #: (app, depot) the always-on update check measured: the target manifest id,
 #: its expected (``cb_compressed``) bytes and how many of them are on disk as
