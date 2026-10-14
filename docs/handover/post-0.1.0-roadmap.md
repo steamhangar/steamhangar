@@ -685,14 +685,21 @@ appid 436780, depot 436781. `depot_manifests` holds 5788091679023567485
 (recorded 2026-10-14T19:39:10Z = the "Update now" job); oracle public =
 3589942376827713992; depot_app_map maps 436781 -> 436780 (so not an orphan
 row). Note: `apps.name` did not match 'Tavern Keeper%' (name column empty
-or different) — names shown in the UI come from elsewhere. Still open:
-which gid is Steam's current public one (the .bin list in SteamPrefill's
+or different) — names shown in the UI come from elsewhere. CONFIRMED cause 1 (user, 22:37): the runner's
+SteamPrefill temp dir holds four .bin files for depot 436781 —
+3589942376827713992 (Oct 14 07:36, newest = oracle's public gid),
+8766284553724588703 (Oct 12), 5788091679023567485 (Oct 5),
+8230470978449025486 (Oct 4). Ingestion stored 5788… (an old one) in the
+"Update now" job: last-file-wins over unsorted scandir. The game is in fact
+current; only the recorded gid is wrong. The runner container on prod is
+named `steamhangar-vault-runner` (no -1); the temp dir is the default
+$HOME/.cache/SteamPrefill/v1 (VAULT_STEAMPREFILL_CACHE_DIR unset).
+Formerly open question, kept for context: which gid is Steam's current public one (the .bin list in SteamPrefill's
 temp dir, or steamdb.info/depot/436781/manifests): if 3589… is among the
 .bin files -> ingestion picked an old file (cause 1); if not -> the oracle
 disagrees with Steam (cause 2: lagging/other branch at api.steamcmd.net).
 Fix scope:
-1. Confirm with prod data first (user runs one read-only command: stored vs
-   oracle gid per depot + the .bin files present).
+1. (done) prod data confirmed cause 1.
 2. Ingestion records only the manifest SteamPrefill actually used in this
    run (newest by SteamPrefill's own record `successfullyDownloadedDepots.json`
    or by file mtime, documented), never an arbitrary leftover; one-time
