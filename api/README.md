@@ -3396,7 +3396,9 @@ every **successful** prefill job, the worker (`vault_api/worker.py`) calls
    order, and lives next to the Steam session that vault-api does not mount.
    The other files are listed as "ignored ... older manifest file(s)" in the
    job log. If the chosen file does not parse, nothing is recorded for that
-   depot (never an older file instead). The chosen file is parsed with
+   depot (never an older file instead). Restoring the temp-cache volume
+   without preserving file mtimes breaks this rule until the next real
+   download. The chosen file is parsed with
    `manifests.parse_steamprefill_bin` (the validated payload, which
    independently re-checks the filename against the payload).
 3. Upserts a `depot_manifests` row (`vault_api/depot_manifests.py`) —
@@ -5793,9 +5795,11 @@ oracle"): with it off, no check runs, scheduled or manual.
 - **Library flag.** `update_available` on `GET /v1/games` and
   `GET /v1/games/{appid}` is the oracle's `stale` verdict (its public manifest
   differs from the one recorded for the cache), only for a game that currently
-  has cache bytes (`depot_manifests` rows outlive a cache deletion). Only
-  depots mapped to the app in `depot_app_map` are compared (WP UPD-FIX-1): a
-  leftover row for a depot the vault no longer prefills never flags.
+  has cache bytes (`depot_manifests` rows outlive a cache deletion). Every
+  recorded depot of the app is compared, not only those in `depot_app_map`:
+  the mapping drops depots a partial update did not write to, so filtering by
+  it would hide their later updates. Orphan rows (a depot the vault no longer
+  prefills) and mapping drift on partial updates are a tracked follow-up.
 - **Settled right after a download (WP UPD-FIX-1).** The verdict is computed
   live, so a successful prefill that recorded the oracle's build clears the
   flag at once. If the app still reads `stale` after the run, the worker asks

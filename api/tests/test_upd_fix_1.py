@@ -14,7 +14,9 @@ Guarantees pinned here, by name:
 2. **No fallback to a leftover**: an unreadable newest file records nothing.
 3. **One-time startup repair** re-derives old rows with the same rule, only
    from files that existed when the row was recorded, once per database.
-4. **Only mapped depots count** for the stale verdict.
+4. **A partial update never hides a later update** of an untouched depot
+   (review B1: the stale comparison is NOT limited to ``depot_app_map``,
+   because ``apply_observed_mapping`` drops untouched depots from the map).
 5. **"Update now" clears the flag end to end**, re-asks the oracle when the
    app still reads stale, and writes an honest job note when Steam and the
    oracle disagree.
@@ -338,25 +340,41 @@ def test_startup_runs_the_repair(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 4. Only mapped depots count
+# 4. A partial update never hides a later update (review B1)
 # --------------------------------------------------------------------------
 
 
-def test_a_stale_row_for_an_unmapped_depot_does_not_flag(tmp_path: Path) -> None:
+def test_a_later_update_of_a_depot_the_last_run_did_not_touch_still_flags(
+    tmp_path: Path,
+) -> None:
+    """Reviewer probe: two mapped depots; a run writes only depot A, so
+    ``apply_observed_mapping`` drops B from the map. When Steam later updates
+    B, the game must still read stale."""
+    from vault_api.prefill import apply_observed_mapping
+
     settings = _settings(tmp_path)
+    depot_a, depot_b = DEPOT, DEPOT + 1
     conn = _conn(settings)
     try:
-        _store_oracle(conn, NEWEST, "2026-10-14T20:00:00Z")
-        _record(conn, OLD, "2026-10-14T19:39:10Z")  # no depot_app_map row
+        upsert_mapping(conn, depot_a, APPID, None)
+        upsert_mapping(conn, depot_b, APPID, None)
+        _record(conn, NEWEST, "2026-10-14T19:39:10Z", depot=depot_a)
+        _record(conn, OLD, "2026-10-14T19:39:10Z", depot=depot_b)
+        apply_observed_mapping(conn, APPID, {depot_a})
+        assert [
+            row["depotid"]
+            for row in conn.execute("SELECT depotid FROM depot_app_map WHERE appid = ?", (APPID,))
+        ] == [depot_a]
 
-        view = oracle.app_view(conn, APPID, settings=settings)
-        assert view.verdict != oracle.VERDICT_STALE
-        assert [d.verdict for d in view.depots] == [oracle.VERDICT_NOT_CACHED]
-        assert oracle.verdicts_by_app(conn, settings=settings)[APPID][0] != oracle.VERDICT_STALE
+        depots = {
+            str(depot_a): {"name": "a", "manifests": {"public": {"gid": str(NEWEST)}}},
+            str(depot_b): {"name": "b", "manifests": {"public": {"gid": str(NEWER)}}},
+        }
+        payload = app_info(APPID, depots=depots, branches={"public": {"buildid": "100"}})
+        oracle.store_app_info(
+            conn, oracle.parse_app_info(APPID, payload), checked_at="2026-10-15T08:00:00Z"
+        )
 
-        # The same row flags once the vault prefills that depot: the filter is
-        # the mapping, not a blanket mute.
-        upsert_mapping(conn, DEPOT, APPID, None)
         assert oracle.app_view(conn, APPID, settings=settings).verdict == oracle.VERDICT_STALE
         assert oracle.verdicts_by_app(conn, settings=settings)[APPID][0] == oracle.VERDICT_STALE
     finally:
@@ -518,3 +536,126 @@ def test_completeness_target_is_the_newest_manifest_after_ingestion(tmp_path: Pa
     finally:
         conn.close()
     assert targets == {(APPID, DEPOT): str(NEWEST)}
+
+
+# --------------------------------------------------------------------------
+# 7. Review round 1: boundaries and the never-fail promises
+# --------------------------------------------------------------------------
+
+
+def test_repair_counts_a_file_written_in_the_same_second_as_the_row(tmp_path: Path) -> None:
+    """``recorded_at`` has second precision; a file written later within that
+    second existed when the row was recorded (N2: the not_after widening)."""
+    settings = _settings(tmp_path)
+    cache_dir = Path(settings.steamprefill_cache_dir)
+    _write_bin(cache_dir, OLD, _epoch("2026-10-09T00:00:00Z"))
+    same_second = _write_bin(cache_dir, NEWEST, _epoch("2026-10-10T00:00:00Z"))
+    late_ns = _epoch("2026-10-10T00:00:00Z") * 1_000_000_000 + 999_000_000
+    os.utime(same_second, ns=(late_ns, late_ns))
+    conn = _conn(settings)
+    try:
+        _record(conn, OLD, "2026-10-10T00:00:00Z")
+        result = repair_recorded_manifests(conn, settings)
+    finally:
+        conn.close()
+    assert result.repaired == ((APPID, DEPOT, str(OLD), str(NEWEST)),)
+
+
+def test_a_crashing_repair_never_stops_the_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vault_api import main
+
+    def boom(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("repair bug (test)")
+
+    monkeypatch.setattr(main, "repair_recorded_manifests", boom)
+    settings = _settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/v1/games", headers=AUTH).status_code == 200
+
+
+def test_a_crashing_recheck_never_fails_the_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    fetch = RecordingFetch(NEWEST)
+    settings = _flagged_app(tmp_path, monkeypatch, oracle_gid=NEWER, fetch=fetch)
+    calls: list[int] = []
+
+    def boom(_conn: Any, appid: int, **_kwargs: Any) -> None:
+        calls.append(appid)
+        raise RuntimeError("app_view bug (test)")
+
+    monkeypatch.setattr(worker.oracle, "app_view", boom)
+    with TestClient(create_app(settings)) as client:
+        job = _run_update_now(client)
+    assert APPID in calls
+    assert any(
+        record.name == "vault_api.worker" and "re-evaluating app" in record.getMessage()
+        for record in caplog.records
+    )
+    assert job["status"] == "done"
+    assert fetch.urls == []
+
+
+def test_update_check_wait_never_sees_an_unstarted_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review S1: ``UpdateCheckRunner.start`` published its thread before
+    starting it, so a shutdown ``wait`` in between raised "cannot join thread
+    before it is started". Hold ``Thread.start`` open and call ``wait`` then."""
+    import threading
+
+    from vault_api import update_check
+
+    settings = _settings(tmp_path)
+    conn = _conn(settings)
+    starting = threading.Event()
+    release = threading.Event()
+    real_thread = threading.Thread
+
+    class SlowStartThread(real_thread):
+        def start(self) -> None:
+            starting.set()
+            release.wait(5)
+            super().start()
+
+    monkeypatch.setattr(update_check.threading, "Thread", SlowStartThread)
+    runner = update_check.UpdateCheckRunner(
+        settings.db_path, fetch=RecordingFetch(NEWEST), pause_seconds=0
+    )
+    errors: list[BaseException] = []
+
+    def start_run() -> None:
+        own = get_connection(settings.db_path)
+        try:
+            runner.start(
+                own, settings, trigger=update_check.TRIGGER_MANUAL,
+                select_appids=lambda _c: [], now=datetime.now(timezone.utc),
+                require_interval=False,
+            )
+        except BaseException as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+        finally:
+            own.close()
+
+    def wait_run() -> None:
+        try:
+            runner.wait(5)
+        except BaseException as exc:
+            errors.append(exc)
+
+    starter = real_thread(target=start_run)
+    waiter = real_thread(target=wait_run)
+    try:
+        starter.start()
+        assert starting.wait(5)
+        waiter.start()
+        waiter.join(0.2)
+    finally:
+        release.set()
+        starter.join(5)
+        waiter.join(5)
+        runner.stop(5)
+        conn.close()
+    assert errors == []

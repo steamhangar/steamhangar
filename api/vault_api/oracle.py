@@ -149,7 +149,7 @@ import sqlite3
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from vault_api import app_classification, deletion, jobs
@@ -1065,7 +1065,6 @@ class AppOracleView:
 def _compare_depots(
     oracle_rows: Iterable[Mapping[str, object]],
     recorded_rows: Iterable[Mapping[str, object]],
-    mapped_depotids: Collection[int],
 ) -> list[DepotStaleness]:
     """Compare ONE app's oracle rows with its recorded manifests (pure).
 
@@ -1073,19 +1072,11 @@ def _compare_depots(
     two bulk reads) so the two can never disagree about what "stale" means.
     ``oracle_rows`` carry ``depotid``/``branch``/``manifestid``,
     ``recorded_rows`` carry ``depotid``/``manifestid``.
-
-    **Only depots the vault prefills for this app count (WP UPD-FIX-1).**
-    ``mapped_depotids`` is the app's ``depot_app_map`` set. A recorded row for
-    a depot outside it -- rows are never deleted, and the mapping drops a
-    depot Steam moved away or the account no longer downloads -- is ignored,
-    so it reads as "not cached" instead of raising a stale flag that no
-    download could ever clear.
     """
-    mapped = set(mapped_depotids)
     recorded: dict[int, str | None] = {}
     for row in recorded_rows:
         depotid = deletion.coerce_positive_id(row["depotid"])
-        if depotid is not None and depotid in mapped:
+        if depotid is not None:
             recorded[depotid] = valid_manifest_id(row["manifestid"])
 
     public: dict[int, str] = {}
@@ -1160,13 +1151,7 @@ def app_view(
         "SELECT depotid, manifestid FROM depot_manifests WHERE appid = ?",
         (appid,),
     ).fetchall()
-    mapped = [
-        int(row["depotid"])
-        for row in conn.execute(
-            "SELECT depotid FROM depot_app_map WHERE appid = ?", (appid,)
-        )
-    ]
-    depots = _compare_depots(rows, recorded_rows, mapped)
+    depots = _compare_depots(rows, recorded_rows)
 
     return AppOracleView(
         appid=appid,
@@ -1183,7 +1168,7 @@ def verdicts_by_app(
     conn: sqlite3.Connection, *, settings: Settings
 ) -> dict[int, tuple[str, str | None]]:
     """``{appid: (verdict, checked_at)}`` for every app the oracle has a stored
-    snapshot of — read-only, no network, four statements regardless of how
+    snapshot of — read-only, no network, three statements regardless of how
     many apps there are (the library listing calls this once, not per card).
 
     Empty when the oracle is off. An app with no snapshot is simply absent:
@@ -1204,17 +1189,12 @@ def verdicts_by_app(
     recorded_by_app: dict[int, list[sqlite3.Row]] = {}
     for row in conn.execute("SELECT appid, depotid, manifestid FROM depot_manifests"):
         recorded_by_app.setdefault(int(row["appid"]), []).append(row)
-    mapped_by_app: dict[int, set[int]] = {}
-    for row in conn.execute("SELECT appid, depotid FROM depot_app_map"):
-        mapped_by_app.setdefault(int(row["appid"]), set()).add(int(row["depotid"]))
 
     result: dict[int, tuple[str, str | None]] = {}
     for state in states:
         appid = int(state["appid"])
         depots = _compare_depots(
-            oracle_by_app.get(appid, ()),
-            recorded_by_app.get(appid, ()),
-            mapped_by_app.get(appid, ()),
+            oracle_by_app.get(appid, ()), recorded_by_app.get(appid, ())
         )
         result[appid] = (app_verdict(depots), state["checked_at"])
     return result

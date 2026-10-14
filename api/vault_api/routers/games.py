@@ -535,7 +535,7 @@ def list_games(
         cached_covers = cover_cache.cached_cover_paths(
             conn, request.app.state.settings.vault_api_key
         )
-        # WP UPD-1: stored oracle verdicts, four statements for the whole list.
+        # WP UPD-1: stored oracle verdicts, three statements for the whole list.
         update_verdicts = oracle.verdicts_by_app(conn, settings=base_settings)
         # WP TOOL-APPS-2a: stored classification, nesting resolved, two
         # statements for the whole list.

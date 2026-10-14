@@ -919,12 +919,8 @@ def test_keepset_revalidates_hand_edited_rows(
 
 
 def _record_manifest(conn: sqlite3.Connection, *, depotid: int, manifestid: str) -> None:
-    """A manifest vault-api recorded for a depot it prefills: the row AND the
-    ``depot_app_map`` entry (WP UPD-FIX-1: only mapped depots are compared)."""
     from vault_api.depot_manifests import upsert_depot_manifest
-    from vault_api.mapping import upsert_mapping
 
-    upsert_mapping(conn, depotid, 440, None)
     upsert_depot_manifest(
         conn,
         appid=440,

@@ -12,7 +12,7 @@ testable with an in-memory/temp-file Settings instance (see api/tests/).
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -101,9 +101,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # WP UPD-FIX-1: once per database, correct depot_manifests rows recorded
     # by the old last-file-wins ingestion. Before the worker starts, so no
     # ingestion runs concurrently. Never fails startup.
-    conn = get_connection(settings.db_path)
     try:
-        repair = repair_recorded_manifests(conn, settings)
+        with closing(get_connection(settings.db_path)) as repair_conn:
+            repair = repair_recorded_manifests(repair_conn, settings)
         if repair.repaired:
             logger.warning(
                 "Manifest repair corrected %d recorded manifest(s) (WP UPD-FIX-1).",
@@ -111,8 +111,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
     except Exception:  # noqa: BLE001 - a repair must never stop the API
         logger.exception("Manifest repair failed; it is retried on the next start.")
-    finally:
-        conn.close()
 
     # WP 3.13: started before the worker so the worker's very first job
     # finalization already has somewhere to enqueue a webhook. A no-op thread
