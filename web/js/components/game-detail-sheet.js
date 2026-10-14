@@ -75,6 +75,14 @@
  * build one (every full `render()`, same treatment `buildHeader()`'s mini
  * cover already gets — never touched by `patchVolatile()`, so a poll tick
  * that doesn't change the structural key never re-fetches it).
+ *
+ * **Content packages (WP TOOL-APPS-2c, ADR-0022 §3).** For a game with
+ * content packages (the same grouping the Library uses, lib/content-groups.js
+ * `groupGames` over the store's rows), the sheet lists them in a "Content
+ * packages" section (components/package-list.js) with the total size of the
+ * group (depot union, `group-sizes-singleton.js`) and a "Retry download"
+ * button per failed package. The package rows' structure is part of the
+ * structural key; their sizes are patched.
  */
 
 import { store } from "../store-singleton.js";
@@ -110,6 +118,9 @@ import { buildDetailStructuralKey } from "../lib/detail-render-plan.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { appTitle, fillMissingNames, ownedNamesByAppid } from "../lib/owned-library.js";
 import { ownedLibrary } from "../owned-singleton.js";
+import { groupSizes } from "../group-sizes-singleton.js";
+import { groupGames, isGroup } from "../lib/content-groups.js";
+import { buildPackagesSection, packagesStructuralKey, patchPackagesSection } from "./package-list.js";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
 const GC_POLL_INTERVAL_MS = 1200;
@@ -469,6 +480,37 @@ function currentGameLike() {
   return state.games.find((g) => g.appid === state.appid) || state.detail;
 }
 
+/** WP TOOL-APPS-2c: the open game's group row (parent + content packages)
+ * from the store's rows, or null when it has no packages. Requests the
+ * depot lists the group's size needs (cached, see group-sizes.js). */
+function currentGroup() {
+  if (!state.appid) return null;
+  const grouped = groupGames(state.games, { depotsFor: groupSizes.depotsFor });
+  const row = grouped.rows.find((g) => g.appid === state.appid);
+  if (!isGroup(row)) return null;
+  groupSizes.request(grouped.needDepots.filter((g) => g.appid === row.appid || row.packages.includes(g)));
+  return row;
+}
+
+function packageJobLookups() {
+  return {
+    liveJobFor: (appid) => findLiveJob(state.jobs, appid),
+    trackedJobFor: (appid) => findTrackedJob(state.jobs, appid),
+  };
+}
+
+async function retryPackage(pkg, btn) {
+  await withButtonBusy(btn, async () => {
+    try {
+      await api.prefill([pkg.appid]);
+      showToast("Queued for download");
+      store.refreshNow();
+    } catch (err) {
+      showToast(errorText(err), { warn: true });
+    }
+  });
+}
+
 function currentDepotPresentations() {
   if (!state.detail || !state.detail.depots.length) return [];
   const gamesByAppid = namedGamesByAppid();
@@ -490,7 +532,10 @@ function computeStructuralKey() {
   const liveJob = findLiveJob(state.jobs, state.appid);
   const trackedJob = findTrackedJob(state.jobs, state.appid);
   const presentations = currentDepotPresentations();
+  const group = currentGroup();
   return buildDetailStructuralKey({
+    // WP TOOL-APPS-2c: which packages, their status and Retry offer.
+    packages: group ? packagesStructuralKey(group.packages, packageJobLookups()) : null,
     dispKind: dispKind(gameLike, liveJob),
     trackedJobStatus: trackedJob ? trackedJob.status : null,
     depotTags: presentations.map((p) => p.tag),
@@ -1107,6 +1152,18 @@ function render() {
   const installedSection = buildInstalledSection(gameLike);
   if (installedSection) contentEl.append(installedSection);
 
+  // WP TOOL-APPS-2c: the game's content packages.
+  const group = currentGroup();
+  if (group) {
+    contentEl.append(
+      buildPackagesSection(group, {
+        groupSizeBytes: group.group_size_bytes,
+        ...packageJobLookups(),
+        onRetry: retryPackage,
+      }),
+    );
+  }
+
   if (trackedJob) {
     contentEl.append(buildJobControlRow(trackedJob));
   } else {
@@ -1152,6 +1209,9 @@ function patchVolatile() {
   if (updateDownloadedEl) syncUpdateDownloadedLine(updateDownloadedEl, gameLike);
 
   patchInstalledSection(contentEl, gameLike);
+
+  const group = currentGroup();
+  if (group) patchPackagesSection(contentEl, group.packages, group.group_size_bytes);
 
   for (const p of currentDepotPresentations()) {
     const wrap = contentEl.querySelector(`.depotwrap[data-depotid="${p.depotid}"]`);
@@ -1476,3 +1536,6 @@ store.subscribe("jobs", ({ items }) => {
   state.jobs = items;
   applyLiveTick();
 });
+
+// WP TOOL-APPS-2c: a depot list for the group's total size landed.
+groupSizes.subscribe(() => applyLiveTick());

@@ -1521,6 +1521,16 @@ body.onboarding .nav{ display:none; }
 .installed-row{ display:flex; align-items:center; gap:9px; padding:9px 11px; font-size:12.5px; background:var(--raised); }
 .installed-row .iname{ color:var(--text); }
 .installed-row .iwhen{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--dim-2); font-variant-numeric:tabular-nums; }
+/* Content packages in the detail sheet (WP TOOL-APPS-2c): same list look as
+   `.installed-list`; name and facts stacked, status word, optional Retry. */
+.pkgtotal{ margin:0 0 6px; }
+.pkg-list{ display:flex; flex-direction:column; gap:1px; background:var(--line-soft); border-radius:var(--r-s); overflow:hidden; }
+.pkg-row{ display:flex; align-items:center; gap:9px; padding:9px 11px; font-size:12.5px; background:var(--raised); }
+.pkg-row .pkgmain{ display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.pkg-row .pkgname{ color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pkg-row .pkgfacts{ font-size:11px; color:var(--dim-2); overflow-wrap:anywhere; }
+.pkg-row .pkgstate{ flex:none; font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
+.pkg-row .btn{ flex:none; }
 
 .unknown{ border:1px dashed var(--line); border-radius:var(--r-m); padding:14px 13px; }
 .unknown .u1{ margin:0 0 7px; font-size:13px; font-weight:600; color:var(--text); }
