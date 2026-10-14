@@ -683,6 +683,26 @@ sed \
     -e 's|^access_log /dev/stdout vault_tls;$|access_log logs/tls.log vault_tls;|' \
     "$work/template.norm" > "$work/template.unapplied"
 
+# --- 2b. core/Dockerfile's build-time count of event-log lines -----------------
+# The image build asserts how many '# VAULT_EVENT_LOG_LINE' lines the template
+# has. That RUN step only executes in a docker build, which the local core
+# gate does not do -- WP D15-RUNNER added a third line and only the CI image
+# build noticed. Derive the Dockerfile's number and compare it with the
+# template here, so the plain drift check catches the mismatch.
+DOCKERFILE="$core_dir/Dockerfile"
+if [ -f "$DOCKERFILE" ]; then
+    want=$(sed -n "s/.*grep -c '# VAULT_EVENT_LOG_LINE' [^)]*)\" = \"\([0-9][0-9]*\)\" ].*/\1/p" "$DOCKERFILE")
+    have=$(grep -c '# VAULT_EVENT_LOG_LINE' "$TEMPLATE" || true)
+    if [ -z "$want" ]; then
+        echo "check-config-drift: FAIL: no '# VAULT_EVENT_LOG_LINE' count assert found in $DOCKERFILE (GRAMMAR drift: the assert moved or changed shape -- re-point this check)" >&2
+        exit 1
+    fi
+    if [ "$want" != "$have" ]; then
+        echo "check-config-drift: FAIL: $DOCKERFILE asserts $want '# VAULT_EVENT_LOG_LINE' line(s), the template has $have -- the image build would fail; update the Dockerfile assert" >&2
+        exit 1
+    fi
+fi
+
 # --- 3. diff -----------------------------------------------------------------
 if diff -u "$work/native.norm" "$work/template.unapplied" > "$work/diff" 2>&1; then
     lines=$(wc -l < "$work/native.norm" | tr -d ' ')

@@ -104,11 +104,12 @@ RUN set -eux; \
     # placeholder or gains an unexpected one.
     grep -q '\${VAULT_RESOLVER}' /etc/nginx/templates/nginx.conf.template; \
     # Same for the WP 3.10 event-log placeholder -- it must appear exactly
-    # twice (location /depot/ and location @miss, see
-    # core/docker/check-config-drift.sh "delta 6"), each carrying the
-    # trailing marker comment 25-vault-eventlog.sh depends on to find it.
+    # three times (location /depot/, location @miss and the WP D15-RUNNER
+    # marker location, see core/docker/check-config-drift.sh "delta 6"),
+    # each carrying the trailing marker comment 25-vault-eventlog.sh depends
+    # on to find it. check-config-drift.sh cross-checks this number.
     grep -q '\${VAULT_EVENT_LOG}' /etc/nginx/templates/nginx.conf.template; \
-    [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "2" ]; \
+    [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "3" ]; \
     # WP TH-1a: the upstream rate cap is wired in exactly once (include at
     # http level, proxy_limit_rate in @miss), and the hook renders its cap-off
     # form in this image's own shell.
