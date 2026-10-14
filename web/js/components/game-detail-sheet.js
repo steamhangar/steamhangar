@@ -119,7 +119,9 @@ import { pushModal, popModal } from "../lib/modal-stack.js";
 import { appTitle, fillMissingNames, ownedNamesByAppid } from "../lib/owned-library.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import { groupSizes } from "../group-sizes-singleton.js";
-import { groupGames, isGroup } from "../lib/content-groups.js";
+import { groupGames, groupHasCacheContent, isGroup } from "../lib/content-groups.js";
+import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
+import { buildGroupDeletePlan, groupDeleteIntro } from "./group-delete-plan.js";
 import { buildPackagesSection, packagesStructuralKey, patchPackagesSection } from "./package-list.js";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
@@ -238,7 +240,62 @@ dYes.addEventListener("click", confirmDelete);
  * no focus management at all before this WP). */
 let deleteInvokerEl = null;
 
+/** WP TOOL-APPS-2c: the grouped-delete plan the dialog currently shows
+ * (null for a plain delete), and a token so a superseded plan fetch drops
+ * its answer. */
+let pendingGroupPlan = null;
+let groupPlanGeneration = 0;
+
+/**
+ * WP TOOL-APPS-2c (ADR-0022 §4): delete a game with its content packages.
+ * Fetches the server's plan, lists every app it removes, the bytes freed and
+ * the depots kept; Delete stays disabled while a member has a job in flight.
+ * Also the re-confirm step after a 409 "members differ" (`notice`).
+ * @param {string} [notice]
+ */
+async function openGroupDeleteConfirm(notice) {
+  const myGen = ++groupPlanGeneration;
+  const appid = state.appid;
+  pendingGroupPlan = null;
+  dText.textContent = "Calculating what this would free…";
+  dNote.replaceChildren();
+  dYes.disabled = true;
+  if (!deleteBackdrop.classList.contains("on")) {
+    deleteInvokerEl = document.activeElement;
+    deleteBackdrop.classList.add("on");
+    pushModal(deleteBackdrop, closeDeleteConfirm);
+    dNo.focus();
+  }
+  try {
+    const plan = await api.deletePlan(appid);
+    if (myGen !== groupPlanGeneration || state.appid !== appid) return;
+    const gamesByAppid = namedGamesByAppid();
+    const nameFor = (id, serverName) => appTitle(id, gamesByAppid.get(id)?.name || serverName);
+    const block = buildGroupDeletePlan(plan, nameFor);
+    dText.textContent = groupDeleteIntro(block.subject, block.freedBytes);
+    if (notice) {
+      const p = document.createElement("p");
+      p.className = "cfsolo cfnotice";
+      p.textContent = notice;
+      dNote.appendChild(p);
+    }
+    dNote.appendChild(block.node);
+    pendingGroupPlan = plan;
+    dYes.disabled = isPlanBlocked(plan);
+  } catch (err) {
+    if (myGen !== groupPlanGeneration) return;
+    dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
+    dYes.disabled = true;
+  }
+}
+
 function openDeleteConfirm() {
+  // WP TOOL-APPS-2c: a game with content packages is deleted with them.
+  if (currentGroup()) {
+    openGroupDeleteConfirm();
+    return;
+  }
+  pendingGroupPlan = null;
   dText.textContent = "Calculating what this would free…";
   dNote.replaceChildren();
   dYes.disabled = true;
@@ -266,6 +323,8 @@ function openDeleteConfirm() {
 }
 
 function closeDeleteConfirm() {
+  groupPlanGeneration++;
+  pendingGroupPlan = null;
   deleteBackdrop.classList.remove("on");
   popModal(deleteBackdrop);
   if (deleteInvokerEl && typeof deleteInvokerEl.focus === "function") deleteInvokerEl.focus();
@@ -332,6 +391,10 @@ function renderDeletePlan(plan, gamesByAppid) {
 
 async function confirmDelete() {
   const appid = state.appid;
+  if (pendingGroupPlan) {
+    await confirmGroupDelete(appid, pendingGroupPlan);
+    return;
+  }
   dYes.disabled = true;
   dNo.disabled = true;
   try {
@@ -350,6 +413,30 @@ async function confirmDelete() {
   } finally {
     dYes.disabled = false;
     dNo.disabled = false;
+  }
+}
+
+/** WP TOOL-APPS-2c: send the grouped delete with exactly the confirmed
+ * members; on a 409 "members differ" fetch the plan again and ask again. */
+async function confirmGroupDelete(appid, plan) {
+  dYes.disabled = true;
+  dNo.disabled = true;
+  try {
+    const result = await api.deleteCacheWithPackages(appid, planMemberIds(plan));
+    dNo.disabled = false;
+    closeDeleteConfirm();
+    showToast(`Freed ${formatBytesGB(result.total_bytes_freed) || "0 GB"}`);
+    store.refreshNow();
+    closeDetail();
+  } catch (err) {
+    dNo.disabled = false;
+    if (isMembersMismatch(err)) {
+      store.refreshNow();
+      await openGroupDeleteConfirm(MEMBERS_CHANGED_NOTICE);
+      return;
+    }
+    closeDeleteConfirm();
+    showToast(errorText(err), { warn: true });
   }
 }
 
@@ -1173,7 +1260,8 @@ function render() {
 
   contentEl.append(buildDepotsSection());
 
-  if (hasVisibleCacheContent(gameLike)) {
+  // WP TOOL-APPS-2c: a game whose packages hold bytes can be deleted too.
+  if (hasVisibleCacheContent(gameLike) || (group && groupHasCacheContent(group))) {
     contentEl.append(buildDeleteButton());
   }
 

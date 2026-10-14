@@ -1633,6 +1633,142 @@ const JOB_RESUME_RE = /^\/v1\/jobs\/(\d+)\/resume$/;
 const GAME_ID_RE = /^\/v1\/games\/(\d+)$/;
 const CACHE_APPID_RE = /^\/v1\/cache\/(\d+)$/;
 const GC_APPID_RE = /^\/v1\/cache\/(\d+)\/gc$/;
+const DELETE_PLAN_RE = /^\/v1\/cache\/(\d+)\/delete-plan$/;
+
+// ---------------------------------------------------------------------
+// Grouped delete (WP TOOL-APPS-2c; api/README.md "Grouped delete",
+// WP TOOL-APPS-2b). Same contract as the real routes, against this demo's
+// one-list-per-game model: the delete set is the game plus every child
+// whose OWN type is a package type; children of another type are kept and
+// reported; members do not protect each other's depots, every app outside
+// the set protects under the same `hasCacheContent` rule the plain delete
+// uses.
+// ---------------------------------------------------------------------
+
+const PACKAGE_TYPES = new Set(["dlc", "config", "music", "video", "demo"]);
+
+function groupSelection(appid) {
+  const children = games.filter((g) => g.parent_appid === appid && g.appid !== appid);
+  const packages = children.filter((g) => PACKAGE_TYPES.has(g.app_type));
+  const kept = children
+    .filter((g) => !PACKAGE_TYPES.has(g.app_type))
+    .map((g) => ({
+      appid: g.appid,
+      name: g.name,
+      app_type: g.app_type,
+      reason: g.app_type == null ? "type_unknown" : "not_a_package_type",
+    }));
+  return { members: [findGame(appid), ...packages], kept };
+}
+
+function groupDeletePlan(appid, withPackages) {
+  const game = findGame(appid);
+  if (!game) throw notFound(`Unknown appid ${appid}`);
+  const { members, kept } = withPackages ? groupSelection(appid) : { members: [game], kept: [] };
+  const memberIds = new Set(members.map((m) => m.appid));
+  const depotOwners = new Map();
+  for (const m of members) {
+    for (const d of m.depots) {
+      if (!depotOwners.has(d.depotid)) depotOwners.set(d.depotid, { size: d.size_bytes ?? null, owners: [] });
+      depotOwners.get(d.depotid).owners.push(m.appid);
+    }
+  }
+  if (depotOwners.size === 0) throw notFound(`App ${appid} has no depot mappings, so there is nothing to delete.`);
+  const deleteDepots = [];
+  const skippedShared = [];
+  for (const [depotid, { size, owners }] of [...depotOwners.entries()].sort((a, b) => a[0] - b[0])) {
+    const outside = games.filter((g) => !memberIds.has(g.appid) && g.depots.some((d) => d.depotid === depotid));
+    if (outside.some(hasCacheContent)) {
+      skippedShared.push({ depotid, shared_with: outside.map((g) => g.appid) });
+    } else {
+      deleteDepots.push({ depotid, size_bytes: size, owners, shared_with_uncached: outside.map((g) => g.appid) });
+    }
+  }
+  const blockedBy = jobs
+    .filter((j) => memberIds.has(j.appid) && ["queued", "running", "paused"].includes(j.status))
+    .map((j) => ({ appid: j.appid, job_id: j.id, type: j.type, status: j.status }));
+  return {
+    appid,
+    with_packages: withPackages,
+    members: members.map((m) => ({
+      appid: m.appid,
+      role: m.appid === appid ? "parent" : "package",
+      name: m.name,
+      app_type: m.app_type,
+      depot_ids: m.depots.map((d) => d.depotid).sort((a, b) => a - b),
+    })),
+    kept_children: kept,
+    delete_depots: deleteDepots,
+    skipped_shared: skippedShared,
+    unusable: [],
+    total_bytes: deleteDepots.reduce((sum, d) => sum + (d.size_bytes || 0), 0),
+    blocked_by: blockedBy,
+  };
+}
+
+function parseMembers(raw) {
+  if (typeof raw !== "string" || !/^\d+(,\d+)*$/.test(raw)) throw validationError("members must be comma-separated app ids");
+  return new Set(raw.split(",").map(Number));
+}
+
+function handleGroupDelete(appid, membersRaw) {
+  const confirmed = parseMembers(membersRaw);
+  const plan = groupDeletePlan(appid, true);
+  const server = plan.members.map((m) => m.appid).sort((a, b) => a - b);
+  const same = server.length === confirmed.size && server.every((id) => confirmed.has(id));
+  if (!same) {
+    const detail = {
+      message:
+        "The apps this delete would remove differ from the confirmed list. Nothing was deleted; fetch the delete plan again and confirm the current list.",
+      server_members: server,
+      confirmed_members: [...confirmed].sort((a, b) => a - b),
+    };
+    throw new ApiError(ERROR_KINDS.VALIDATION, detail.message, { status: 409, detail });
+  }
+  if (plan.blocked_by.length) {
+    const job = plan.blocked_by[0];
+    throw conflict(`${job.type === "gc" ? "GC" : "Prefill"} job ${job.job_id} for app ${job.appid} is ${job.status}.`);
+  }
+  const deletedIds = new Set(plan.delete_depots.map((d) => d.depotid));
+  const lostByMember = new Map(plan.members.map((m) => [m.appid, m.depot_ids.filter((id) => deletedIds.has(id))]));
+  for (const g of games) g.depots = g.depots.filter((d) => !deletedIds.has(d.depotid));
+  for (const d of plan.delete_depots) {
+    for (const id of d.shared_with_uncached) {
+      const co = findGame(id);
+      if (co) co.needs_force = true;
+    }
+  }
+  for (const m of plan.members) {
+    const g = findGame(m.appid);
+    const lost = lostByMember.get(m.appid);
+    if (m.role === "parent" || lost.length) {
+      g.status = "idle";
+      g.last_prefill_at = null;
+      if (lost.length) g.needs_force = true;
+    }
+  }
+  return {
+    appid,
+    deleted_depots: plan.delete_depots.map((d) => ({
+      depotid: d.depotid,
+      size_bytes_freed: d.size_bytes || 0,
+      shared_with_uncached: d.shared_with_uncached,
+    })),
+    skipped_shared: plan.skipped_shared,
+    failed: [],
+    total_bytes_freed: plan.total_bytes,
+    with_packages: true,
+    members: plan.members.map((m) => ({
+      appid: m.appid,
+      role: m.role,
+      name: m.name,
+      app_type: m.app_type,
+      deleted_depots: lostByMember.get(m.appid),
+      failed_depots: [],
+    })),
+    kept_children: plan.kept_children,
+  };
+}
 // WP WEB-FEAT-4: one percent-encoded path segment, like the server's
 // `{client_id}` (which never matches a decoded "/").
 const CLIENT_ID_RE = /^\/v1\/clients\/([^/]+)$/;
@@ -1923,6 +2059,14 @@ export async function demoRequest(method, path, { body, params } = {}) {
       outcome: "resumed",
       detail: "Job resumed at the front of the queue.",
     });
+  }
+
+  if (method === "GET" && (m = path.match(DELETE_PLAN_RE))) {
+    return groupDeletePlan(Number(m[1]), params?.with_packages === "true");
+  }
+
+  if (method === "DELETE" && (m = path.match(CACHE_APPID_RE)) && params?.with_packages === "true") {
+    return handleGroupDelete(Number(m[1]), params.members);
   }
 
   if (method === "DELETE" && (m = path.match(CACHE_APPID_RE))) {

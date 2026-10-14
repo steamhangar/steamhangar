@@ -37,12 +37,13 @@ test("notification panel: gameNameFor falls back to the owned list through appTi
   assert.match(body, /appTitle\(appid, game && game\.name, ownedNamesByAppid\(ownedLibrary\.current\(\)\.games\)\.get\(appid\)\)/);
 });
 
-test("detail sheet: openDetail takes the owned name when the opener has none; both delete plans use the named map", () => {
+test("detail sheet: openDetail takes the owned name when the opener has none; all three delete plans (plain, grouped) use the named map", () => {
   const src = read("components/game-detail-sheet.js");
   const open = functionBody(src, "export function openDetail(appid, name) {");
   assert.ok(open, "openDetail not found");
   assert.match(open, /state\.name = name \|\| ownedNamesByAppid\(ownedLibrary\.current\(\)\.games\)\.get\(appid\) \|\| null;/);
-  assert.equal((src.match(/const gamesByAppid = namedGamesByAppid\(\);/g) || []).length, 2);
+  // WP TOOL-APPS-2c: the grouped-delete plan is the third user of the map.
+  assert.equal((src.match(/const gamesByAppid = namedGamesByAppid\(\);/g) || []).length, 3);
   assert.equal((src.match(/new Map\(state\.games\.map/g) || []).length, 0, "no unnamed vault map left");
   assert.match(functionBody(src, "function namedGamesByAppid() {"), /fillMissingNames\(state\.games, ownedLibrary\.current\(\)\.games\)/);
 });

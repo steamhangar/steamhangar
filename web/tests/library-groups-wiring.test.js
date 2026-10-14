@@ -88,7 +88,34 @@ const DEPOTS = {
   ],
 };
 
-const server = { mode: "new", games: freshGames(), prefillBodies: [], calls: new Map() };
+const server = {
+  mode: "new",
+  games: freshGames(),
+  prefillBodies: [],
+  calls: new Map(),
+  // grouped delete: the server's current delete set, and the DELETE queries
+  planMembers: [20, 21, 22],
+  deletes: [],
+};
+function groupPlan() {
+  return {
+    appid: 20,
+    with_packages: true,
+    members: server.planMembers.map((appid) => ({
+      appid,
+      role: appid === 20 ? "parent" : "package",
+      name: appid === 23 ? "Starfall Legion - Late Pack" : null,
+      app_type: appid === 20 ? "game" : "dlc",
+      depot_ids: [],
+    })),
+    kept_children: [],
+    delete_depots: [{ depotid: 201, size_bytes: 2 * GIB, owners: [20], shared_with_uncached: [] }],
+    skipped_shared: [{ depotid: 299, shared_with: [10] }],
+    unusable: [],
+    total_bytes: 2 * GIB,
+    blocked_by: [],
+  };
+}
 const count = (key) => server.calls.get(key) || 0;
 function respond(status, data) {
   const text = data === undefined ? "" : JSON.stringify(data);
@@ -107,6 +134,19 @@ globalThis.fetch = async (url, init = {}) => {
     return g ? respond(200, { ...g, depots: DEPOTS[g.appid] || [] }) : respond(404, { detail: "nope" });
   }
   if (p === "/v1/jobs") return respond(200, []);
+  if (p === "/v1/cache/20/delete-plan" && method === "GET") {
+    if (u.searchParams.get("with_packages") !== "true") return respond(422, { detail: "rig: expected with_packages=true" });
+    return respond(200, groupPlan());
+  }
+  if (p === "/v1/cache/20" && method === "DELETE") {
+    server.deletes.push(u.search);
+    const confirmed = (u.searchParams.get("members") || "").split(",").map(Number).sort((a, b) => a - b);
+    const current = server.planMembers.slice().sort((a, b) => a - b);
+    if (u.searchParams.get("with_packages") !== "true" || JSON.stringify(confirmed) !== JSON.stringify(current)) {
+      return respond(409, { detail: { message: "differ", server_members: current, confirmed_members: confirmed } });
+    }
+    return respond(200, { appid: 20, deleted_depots: [], skipped_shared: [], failed: [], total_bytes_freed: 2 * GIB, with_packages: true });
+  }
   if (p === "/v1/prefill" && method === "POST") {
     const body = JSON.parse(init.body);
     server.prefillBodies.push(body);
@@ -208,4 +248,40 @@ test("MUTATION PIN (ADR-0022 §4) -- bulk download of a picked group card target
   primary.dispatchEvent({ type: "click" });
   await until(() => server.prefillBodies.length === 1, "POST /v1/prefill sent");
   assert.deepEqual(server.prefillBodies[0], { appids: [22] });
+});
+
+test("MUTATION PIN (ADR-0022 §4) -- deleting a group card: the server's plan lists every package, DELETE confirms exactly those members, a 409 re-fetches the plan and asks again", async () => {
+  server.mode = "new";
+  server.games = freshGames();
+  server.planMembers = [20, 21, 22];
+  server.deletes = [];
+  const s = await openLibrary(2);
+  card(s, 20).dispatchEvent({ type: "contextmenu", preventDefault() {} });
+  await until(() => s.querySelector(".bulk").classList.contains("up"), "select mode");
+  const del = s.querySelector(".bulkbtns .btn.danger");
+  assert.equal(del.textContent, "Delete 1 game");
+  del.dispatchEvent({ type: "click" });
+  const dialog = () => dom.document.body.querySelectorAll(".dialog-backdrop").find((b) => b.classList.contains("on"));
+  const members = () => dialog().querySelector('[data-role="members"]')?.querySelectorAll("li").map((li) => Number(li.dataset.appid)) || [];
+  await until(() => dialog() && members().length === 3, "plan listed");
+  const text = dialog().querySelector(".dialog p").textContent;
+  assert.equal(text, "Deleting Starfall Legion and its 2 content packages frees about 2.0 GB.");
+  assert.equal(dialog().querySelector('[data-role="kept-depots"] .why').textContent, "Aurora Cascade still uses it");
+  const yes = dialog().querySelector("button.btn.danger");
+  assert.equal(yes.disabled, false);
+
+  // A package was classified between preview and click: the server says 409.
+  server.planMembers = [20, 21, 22, 23];
+  yes.dispatchEvent({ type: "click" });
+  await until(() => server.deletes.length === 1, "first DELETE sent");
+  assert.equal(server.deletes[0], "?with_packages=true&members=20%2C21%2C22");
+  await until(() => members().length === 4, "plan fetched again after the 409");
+  assert.match(dialog().querySelector('[data-role="notice"]').textContent, /changed since this preview\. Nothing was deleted/);
+  assert.equal(count("GET /v1/cache/20/delete-plan"), 2);
+
+  dialog().querySelector("button.btn.danger").dispatchEvent({ type: "click" });
+  await until(() => server.deletes.length === 2, "second DELETE sent");
+  assert.equal(server.deletes[1], "?with_packages=true&members=20%2C21%2C22%2C23");
+  await until(() => !dialog(), "dialog closed after the delete");
+  assert.equal(toastText.textContent, "Freed 2.0 GB");
 });

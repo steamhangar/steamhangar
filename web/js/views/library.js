@@ -161,6 +161,8 @@ import {
   groupHasCacheContent,
   isGroup,
 } from "../lib/content-groups.js";
+import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
+import { buildGroupDeletePlan, groupDeleteIntro } from "../components/group-delete-plan.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
@@ -380,6 +382,11 @@ let currentBulkPrimaryTargets = [];
 let currentBulkSecondaryTargets = [];
 let currentBulkDeleteIds = [];
 let pendingDeleteIds = null;
+// WP TOOL-APPS-2c: appid -> the grouped-delete plan the dialog shows for a
+// picked group card (members confirmed on Delete), and a token so a
+// superseded plan fetch drops its answer.
+let pendingGroupPlans = new Map();
+let deletePlanGeneration = 0;
 
 // ---------------------------------------------------------------------
 // Bulk-delete confirm dialog — built ONCE at module load, appended
@@ -941,21 +948,32 @@ function strong(text, extraClass) {
  * this WP: no Escape, no focus-on-open, no trap). */
 let deleteConfirmInvokerEl = null;
 
-async function openDeleteConfirm(ids) {
+async function openDeleteConfirm(ids, notice) {
+  const myGen = ++deletePlanGeneration;
   pendingDeleteIds = ids;
-  const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
+  pendingGroupPlans = new Map();
+  // WP TOOL-APPS-2c: names from the raw rows (packages too).
+  const gamesByAppid = rawByAppid();
+  const groupIds = ids.filter((id) => isGroup(state.games.find((g) => g.appid === id)));
   dTitle.textContent =
     ids.length > 1 ? `Delete ${ids.length} games from cache?` : "Delete from cache?";
   dText.textContent = "Calculating what this would free…";
   dNote.replaceChildren();
   dYes.disabled = true;
-  deleteConfirmInvokerEl = document.activeElement;
-  dialogBackdrop.classList.add("on");
-  // WP 4a.8: #app goes inert while this is up; Escape routes through
-  // lib/modal-stack.js's single dispatcher (see its header) rather than a
-  // listener bound here directly.
-  pushModal(dialogBackdrop, closeDeleteConfirm);
-  dNo.focus(); // "Keep" — the non-destructive default gets initial focus
+  if (!dialogBackdrop.classList.contains("on")) {
+    deleteConfirmInvokerEl = document.activeElement;
+    dialogBackdrop.classList.add("on");
+    // WP 4a.8: #app goes inert while this is up; Escape routes through
+    // lib/modal-stack.js's single dispatcher (see its header) rather than a
+    // listener bound here directly.
+    pushModal(dialogBackdrop, closeDeleteConfirm);
+    dNo.focus(); // "Keep" — the non-destructive default gets initial focus
+  }
+
+  if (groupIds.length) {
+    await openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice);
+    return;
+  }
 
   try {
     const [details, mapping] = await Promise.all([
@@ -974,7 +992,67 @@ async function openDeleteConfirm(ids) {
   }
 }
 
+/**
+ * WP TOOL-APPS-2c (ADR-0022 §4): the confirmation when the selection holds
+ * group cards. Each group is previewed by the server
+ * (`GET /v1/cache/{appid}/delete-plan?with_packages=true`) and listed with
+ * every content package it removes; the plain games keep the multiPlan
+ * preview above them. Delete stays disabled while a group member has a job
+ * in flight.
+ */
+async function openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice) {
+  const plainIds = ids.filter((id) => !groupIds.includes(id));
+  const nameFor = (id, serverName) => gamesByAppid.get(id)?.name || serverName || `App ${id}`;
+  try {
+    const activeJobAppids = new Set(
+      state.jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).map((j) => j.appid),
+    );
+    const [plans, plain] = await Promise.all([
+      Promise.all(groupIds.map((id) => api.deletePlan(id))),
+      plainIds.length
+        ? Promise.all([Promise.all(plainIds.map((id) => api.game(id))), api.mapping()]).then(([details, mapping]) =>
+            buildMultiPlan(plainIds, { details, mapping, gamesByAppid, activeJobAppids }),
+          )
+        : Promise.resolve(null),
+    ]);
+    if (myGen !== deletePlanGeneration) return;
+    let freed = 0;
+    let blocked = false;
+    dNote.replaceChildren();
+    if (plain) {
+      // The plain picks' multiPlan preview, as without groups.
+      renderDeletePlan(plain, plainIds, gamesByAppid);
+      freed += plain.freedBytes;
+    }
+    if (notice) {
+      const p = document.createElement("p");
+      p.className = "cfsolo cfnotice";
+      p.dataset.role = "notice";
+      p.textContent = notice;
+      dNote.replaceChildren(p, ...Array.from(dNote.childNodes));
+    }
+    const blocks = plans.map((plan) => buildGroupDeletePlan(plan, nameFor, { showSubject: ids.length > 1 }));
+    for (const [i, block] of blocks.entries()) {
+      dNote.appendChild(block.node);
+      freed += block.freedBytes;
+      blocked = blocked || block.blocked;
+      pendingGroupPlans.set(groupIds[i], plans[i]);
+    }
+    dText.textContent =
+      ids.length === 1
+        ? groupDeleteIntro(blocks[0].subject, freed)
+        : `Deleting ${ids.length} games and their content packages frees about ${formatBytesGB(freed) || "0 GB"}.`;
+    dYes.disabled = blocked || plans.some(isPlanBlocked);
+  } catch (err) {
+    if (myGen !== deletePlanGeneration) return;
+    dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
+    dYes.disabled = true;
+  }
+}
+
 function closeDeleteConfirm() {
+  deletePlanGeneration++;
+  pendingGroupPlans = new Map();
   dialogBackdrop.classList.remove("on");
   popModal(dialogBackdrop);
   if (deleteConfirmInvokerEl && typeof deleteConfirmInvokerEl.focus === "function") deleteConfirmInvokerEl.focus();
@@ -985,14 +1063,35 @@ function closeDeleteConfirm() {
 async function confirmDelete() {
   const ids = pendingDeleteIds;
   if (!ids) return;
+  const groupPlans = pendingGroupPlans;
   dYes.disabled = true;
   dNo.disabled = true;
-  const results = await Promise.allSettled(ids.map((id) => api.deleteCache(id)));
+  // WP TOOL-APPS-2c: a group card is deleted with exactly the members its
+  // plan listed; every other pick as before.
+  const results = await Promise.allSettled(
+    ids.map((id) =>
+      groupPlans.has(id) ? api.deleteCacheWithPackages(id, planMemberIds(groupPlans.get(id))) : api.deleteCache(id),
+    ),
+  );
   dYes.disabled = false;
   dNo.disabled = false;
+  // A group whose package list changed since the preview (409, nothing
+  // deleted for it): show its new plan and ask again.
+  const changed = ids.filter((id, i) => results[i].status === "rejected" && isMembersMismatch(results[i].reason));
+  if (changed.length) {
+    store.refreshNow();
+    await openDeleteConfirm(changed, MEMBERS_CHANGED_NOTICE);
+    reportDeleteResults(results.filter((_, i) => !changed.includes(ids[i])));
+    return;
+  }
   closeDeleteConfirm();
   exitSelect();
   store.refreshNow();
+  reportDeleteResults(results);
+}
+
+function reportDeleteResults(results) {
+  if (!results.length) return;
 
   // Report what the SERVER actually did, not this dialog's preview — the
   // server re-checks every depot's co-owner state immediately before
