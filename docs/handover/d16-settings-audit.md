@@ -216,7 +216,7 @@ How each key is forwarded and what blank means: section 3.5.
 | `VAULT_MISS_TRIGGER_COOLDOWN_MINUTES` | api | 60 | per-app cooldown of the cache-miss prefill trigger; 0 = trigger off | E | next sweep | `config._env_int` (0..) |
 | `VAULT_MISS_TRIGGER_MAX_PER_SWEEP` | api | 5 | max prefill jobs one sweep may enqueue from misses | E | next sweep | `config._env_int` |
 | `VAULT_SWEEP_INCLUDE_CACHED` | api | true | scheduled sweep also refreshes games already on disk (override exists) | E | next sweep (already) | `config.parse_strict_bool` |
-| `VAULT_SCHEDULE_WINDOW` | api; core gets the effective value through the settings file (Q3) | `03:00-07:00` (compose) [code: unset = off] | **the one download window** (Q3): inside = automatic downloads + full speed, outside = no automatic downloads + rate cap; blank = scheduler off and cap around the clock (override exists) | E | next sweep (already) + core (27 include, via the file) | `schedule_window.parse_window`; `27` `parse_window` mirrors it |
+| `VAULT_SCHEDULE_WINDOW` | api; core gets the effective value through the settings file (Q3) | `03:00-07:00` (compose) [code: unset = off] | **the one download window** (Q3): inside = automatic downloads + full speed, outside = no automatic downloads + rate cap; `off` = scheduler off and cap around the clock; blank or unset = not set → Settings, else 03:00-07:00 (Q7, 3.5) (override exists) | E | next sweep (already) + core (27 include, via the file) | `schedule_window.parse_window`; `27` `parse_window` mirrors it |
 | `VAULT_SCHEDULE_INTERVAL_MINUTES` | api | 180 | minutes between scheduled sweeps (override exists) | E | next sweep (already) | `config._env_int` |
 | `VAULT_SCHEDULE_CLIENT_STALE_DAYS` | api | 7 | agent reports older than this are ignored by the sweep (override exists) | E | next sweep (already) | `config._env_int` |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | api | 10.0 | seconds per oracle request | E | api live | `config._env_float` |
@@ -376,6 +376,40 @@ Tests and fixtures that change:
 - `api/tests/test_schedule_window.py`, `api/tests/test_settings_api.py`
   (window `off` vs blank/reset), plus a new pytest for the core-key twins
   that reads the same `.tsv`.
+- Compose-form pins in `api/tests/test_p1_compose_env_defaults.py`, to be
+  **rewritten, not deleted**, so they pin the new `${VAR-}` form per key
+  (LEARNINGS SWEEP-1: pin the substitution form structurally):
+  - `SERVICE_EXPECTED_DEFAULTS` (line 274) and
+    `test_compose_default_matches_config_default` (471): after Q7 the
+    compose default of every editable key is empty, so the test pins
+    "forwarded as `${VAR-}`" and compares `config.DEFAULT_*` against the
+    documented default instead of the compose default.
+    `test_no_unexpected_forwarded_keys_are_silently_untested` (488) keeps
+    its coverage role over the same table.
+  - `test_config_py_own_schedule_window_default_is_still_disabled` (532):
+    inverted — `config.py` now owns the default 03:00-07:00, and `off`
+    gives `None`.
+  - `test_schedule_window_uses_the_no_colon_substitution_form` (745):
+    pins `${VAULT_SCHEDULE_WINDOW-}` (still no colon, now no default).
+  - `test_upstream_rate_window_follows_the_schedule_window_default` (822):
+    pins `${VAULT_UPSTREAM_RATE_WINDOW-}`; "follows the download window"
+    moves from compose into vault-api's file writer and gets its own test
+    there.
+  - `test_upstream_rate_keys_use_the_no_colon_form` (810), via
+    `UPSTREAM_RATE_CORE_LINES`/`UPSTREAM_EDGE_CORE_LINES` (around
+    790-805): the lines `VAULT_UPSTREAM_EDGE: ${…-dist-fra1…}`,
+    `VAULT_PREFILL_MAX_THREADS: ${…:-8}` and the nested
+    `VAULT_UPSTREAM_RATE_WINDOW` line change to `${VAR-}`; the comment
+    above them (blank = rollback) is rewritten for `off`.
+  - Other `:-` pins of editable keys found by grep: only
+    `deploy/tests/verify-stack.sh:698` (a message string about
+    `${VAULT_SCHEDULE_WINDOW:-03:00-07:00}`, reworded with the step it
+    belongs to). The `.env.example` "documented" tests
+    (`test_*_documented_in_env_example`, regex `^#?KEY=`) accept commented
+    lines and need no change; `test_core_fix_3_tls_passthrough.py`
+    `test_env_example_documents_the_cap_defaults` (217) and
+    `test_core_fix_2_max_threads.py` `test_deploy_env_example_documents_the_default`
+    (287) must be checked against the commented form.
 - Web: the window field's placeholder "blank to disable" becomes "off to
   disable"; `lib/settings-presentation.js` `effectiveAsInputValue` renders
   a `null` window as `off`.
@@ -402,10 +436,32 @@ can warn at runtime. Required mitigations:
    = default, no pin; `off` = pin no cap); the uncommented seed line
    `VAULT_UPSTREAM_POOL_HOSTS=dist-fra1… cache6-ams1…` (line 583) becomes
    a commented example; every other editable key stays commented.
-   `api/.env.example` `VAULT_SCHEDULE_WINDOW=` (line 210) becomes
-   `VAULT_SCHEDULE_WINDOW=off` if the dev intent is "scheduler off", see
-   5.3. The `.env.example` drift tests (LEARNINGS "Twin config files need
-   twin pins") must assert "no editable key set" for both files.
+   `api/.env.example` today **assigns** these editable keys uncommented;
+   each becomes a commented, documented example (`#KEY=<default>` plus
+   the existing prose), so a copied template pins nothing:
+   `VAULT_LOG_LEVEL` (27), `VAULT_PREFILL_TIMEOUT_SECONDS` (43),
+   `VAULT_PREFILL_MAX_THREADS` (51), `VAULT_AGENT_REPORT_KEEP` (104),
+   `VAULT_GC_GRACE_DAYS` (128), `VAULT_MANIFEST_ORACLE_TIMEOUT` (182),
+   `VAULT_SCHEDULE_WINDOW` (210, blank today = off: becomes `#VAULT_SCHEDULE_WINDOW=off`
+   documented as "write `off` for no scheduler", see 5.3),
+   `VAULT_SCHEDULE_INTERVAL_MINUTES` (220),
+   `VAULT_SCHEDULE_CLIENT_STALE_DAYS` (229), `VAULT_SWEEP_INCLUDE_CACHED`
+   (280), `VAULT_AUTO_GC` (345), `VAULT_EVENT_SWEEP_INTERVAL_MINUTES`
+   (389), `VAULT_MISS_TRIGGER_COOLDOWN_MINUTES` (408),
+   `VAULT_MISS_TRIGGER_MAX_PER_SWEEP` (417), `VAULT_BYPASS_WINDOW_DAYS`
+   (433), `VAULT_CLIENT_STATS_KEEP` (442), `VAULT_WEBHOOK_EVENTS` (491,
+   blank), `VAULT_WEBHOOK_TIMEOUT_SECONDS` (500), `VAULT_NAME` (511,
+   blank). The deprecated `VAULT_EVENT_LOG_MAX_BYTES` (462) is commented
+   too. Env-only assignments (paths, `VAULT_API_KEY`, `VAULT_PREFILL_MODE`,
+   runner timings, relay gates, `VAULT_SETTINGS_READONLY`, …) stay as
+   they are.
+   Two tests in `api/tests/test_config.py` read assignments from that file
+   and are **rewritten** to read the documented value from the commented
+   line instead: `test_every_env_example_value_still_parses` (478, asserts
+   ≥ 8 parsed values) and `test_env_example_value_matches_config_default`
+   (542). A new assertion in both `.env.example` drift tests (LEARNINGS
+   "Twin config files need twin pins") pins "no editable key assigned
+   uncommented" for `api/.env.example` and `deploy/.env.example`.
 3. **Antrag checklist item:** before the rc18 rollout the operator checks
    the dev and prod `.env` files and overlays for every editable key of
    section 3.1/3.2 that is present, blank or set: an intended "off"
@@ -451,8 +507,8 @@ VAULT_PREFILL_MAX_THREADS=8
 - Exception, Q3: vault-api always writes `VAULT_UPSTREAM_RATE_WINDOW`
   with the **effective download window** (env or Settings or default
   `VAULT_SCHEDULE_WINDOW`; `off` when the scheduler is off, which 27
-  renders as "cap around the clock"). The key name stays so 27 needs no
-  new input. A core env pin of the deprecated `VAULT_UPSTREAM_RATE_WINDOW`
+  renders as "cap around the clock"). No new key for 27,
+  one new keyword (`off`, 3.6). A core env pin of the deprecated `VAULT_UPSTREAM_RATE_WINDOW`
   still wins over the file, with a startup warning.
 - D8 (later) adds several windows per day, each with a "throttle"
   checkbox. Do not bake "exactly one window" into anything but the
