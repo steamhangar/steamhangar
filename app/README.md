@@ -4020,9 +4020,10 @@ and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
 
 Tests: `TrafficViewTest`, `ClientsPageTest`, `TrafficPollTest`,
 `TrafficApiTest`, `DemoTrafficTest`, the web twin `TrafficWebTwinTest`, and
-the wiring pins in `D15dWiringTest`. No screenshot test for the Clients
-page yet: the golden refresh jobs accept only `LibraryScreenshotTest`'s
-shots, so a second screenshot class needs a CI change first.
+the wiring pins in `D15dWiringTest`. Screenshots (APP-TEST-2):
+`ClientsScreenshotTest` renders the Clients page in the real shell and the
+Downloads statistics header, from the demo's traffic builders over a fixed
+snapshot and clock, at 411 dp / font 1.0 and 360 dp / font 1.3, dark.
 
 ## Screenshot tests (WP APP-TEST-1)
 
@@ -4118,7 +4119,9 @@ named `wp/<name>-goldens` (exactly one path segment after `wp/`, ending in
 2. **`android-goldens-push`** (`contents: write`, the only job with write
    access; it runs no Gradle and no repository build code): checks out the
    same commit, downloads the PNGs, accepts them only if the names are
-   exactly the `shoot("...")` names in `LibraryScreenshotTest.kt` and every
+   exactly the union of the shot names in every `*ScreenshotTest.kt` class
+   under `src/testDebug` (APP-TEST-2; the first, string-literal argument of
+   each `shoot` call) and every
    file is a PNG, commits changed ones as `github-actions[bot]`
    (`test(app): refresh screenshot goldens from CI`) and pushes to the same
    branch, fast-forward only. If the branch moved meanwhile the push is
