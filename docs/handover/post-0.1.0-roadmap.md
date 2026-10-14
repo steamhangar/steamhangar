@@ -680,6 +680,16 @@ Analysis (code, rc17; not yet confirmed with prod data):
   after a manual update check); a `depot_manifests` row for a depot
   SteamPrefill no longer downloads (rows are never deleted; depot_app_map
   is not consulted).
+Prod measurement (user, read-only, 2026-10-14 22:03): Tavern Keeper =
+appid 436780, depot 436781. `depot_manifests` holds 5788091679023567485
+(recorded 2026-10-14T19:39:10Z = the "Update now" job); oracle public =
+3589942376827713992; depot_app_map maps 436781 -> 436780 (so not an orphan
+row). Note: `apps.name` did not match 'Tavern Keeper%' (name column empty
+or different) — names shown in the UI come from elsewhere. Still open:
+which gid is Steam's current public one (the .bin list in SteamPrefill's
+temp dir, or steamdb.info/depot/436781/manifests): if 3589… is among the
+.bin files -> ingestion picked an old file (cause 1); if not -> the oracle
+disagrees with Steam (cause 2: lagging/other branch at api.steamcmd.net).
 Fix scope:
 1. Confirm with prod data first (user runs one read-only command: stored vs
    oracle gid per depot + the .bin files present).
