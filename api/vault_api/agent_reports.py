@@ -30,6 +30,7 @@ maximum rowid is monotonic and is never recycled.)
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import sqlite3
@@ -37,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Iterable, Literal, Sequence
 
-from vault_api import is_valid_version
+from vault_api import is_valid_version, peer_hops
 from vault_api.jobs import immediate_transaction, parse_utc_iso, to_utc_iso, utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,12 @@ MIN_REPORTS_KEPT = 2
 #: zone id fits in 45 characters; 64 leaves room for other peer spellings an
 #: ASGI server might report.
 MAX_SOURCE_ADDR_LENGTH = 64
+
+#: Most LAN addresses one report may state (schema v24, WP AGENT-ADDR-1). The
+#: agent sends the source address it would use toward each address the vault
+#: host resolves to -- normally one IPv4 and one IPv6. Eight leaves room for a
+#: host name with several A/AAAA records; mirrored by ``agent/go/report``.
+MAX_LOCAL_ADDRS = 8
 
 #: How many removed/added ids a single log line prints before it summarizes.
 _LOG_ID_SAMPLE = 50
@@ -133,13 +140,23 @@ class ClientSummary:
     last_reported_at: str
     #: Size of the latest snapshot; ``None`` if that row's JSON was unreadable.
     app_count: int | None
-    #: Every distinct address this client's RETAINED reports arrived from
-    #: (schema v9, WP 3.11). Usually one; more than one when the machine
-    #: changed address (DHCP lease, wifi vs. cable) within the retained window.
-    #: Empty when no retained report recorded an address — which includes every
-    #: report written before schema v9, and is the case that must never be read
-    #: as "this client is bypassing the cache" (see ``routers/clients.py``).
+    #: The addresses this client is correlated with cache traffic on: the
+    #: union of ``effective_addrs`` over its RETAINED reports (WP AGENT-ADDR-1;
+    #: before that, every report's TCP peer, schema v9). Per report that is
+    #: the LAN addresses the agent stated (``local_addrs``), else the TCP peer
+    #: unless it is a forwarding hop (``vault_api/peer_hops.py``). Usually
+    #: one or two; more when the machine changed address (DHCP lease, wifi vs.
+    #: cable) within the retained window. Empty when no retained report gives
+    #: a usable address -- every report written before schema v9, and an old
+    #: agent behind Docker's published port whose only peer is the bridge
+    #: gateway -- and that is the case that must never be read as "this
+    #: client is bypassing the cache" (see ``routers/clients.py``).
     source_addrs: list[str] = field(default_factory=list)
+    #: Raw TCP peers of the retained reports, hops included (diagnostics).
+    peer_addrs: list[str] = field(default_factory=list)
+    #: LAN addresses the agent itself stated in its retained reports
+    #: (schema v24); empty for agents from before AGENT-ADDR-1.
+    reported_addrs: list[str] = field(default_factory=list)
     #: From the LATEST snapshot (schema v17, WP AGENT-FEAT-1): the agent's
     #: build version and report interval, ``None`` when that report did not
     #: carry them. Deliberately not "the last value ever sent": an agent
@@ -173,6 +190,98 @@ def normalize_source_addr(raw: str | None) -> str | None:
     if any(character.isspace() for character in value):
         return None
     return value
+
+
+def normalize_local_addr(raw: str) -> str:
+    """Validate one agent-stated LAN address (WP AGENT-ADDR-1); canonical form.
+
+    Raises ``ValueError`` for anything but a plain unicast IP literal another
+    host could reach this PC on: not an IP literal, a zone id (``%eth0``),
+    surrounding whitespace, loopback, unspecified, link-local or multicast.
+    The agent applies the same filter before sending (``agent/go/report``),
+    so a rejection here means a broken or hostile agent, not a quirk.
+
+    The canonical form is what vault-core's event log writes for
+    ``$remote_addr``: Python's compressed spelling for IPv6, and the plain
+    IPv4 address for an IPv4-mapped one (``::ffff:192.0.2.7``).
+    """
+    if not isinstance(raw, str) or raw != raw.strip() or not raw.isascii():
+        raise ValueError("local_addrs entries must be plain IP address literals")
+    if "%" in raw:
+        raise ValueError("local_addrs entries must not carry a zone id")
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError:
+        raise ValueError(f"local_addrs entry {raw!r} is not an IP address") from None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    if (
+        address.is_loopback
+        or address.is_unspecified
+        or address.is_link_local
+        or address.is_multicast
+    ):
+        raise ValueError(
+            f"local_addrs entry {raw!r} is loopback, unspecified, link-local or "
+            "multicast; only addresses other hosts can reach count"
+        )
+    return str(address)
+
+
+def normalize_local_addrs(values: Sequence[str]) -> list[str]:
+    """Validate a ``local_addrs`` list: at most ``MAX_LOCAL_ADDRS`` entries,
+    each through ``normalize_local_addr``; returned de-duplicated and sorted.
+    Raises ``ValueError`` on the first bad entry."""
+    if len(values) > MAX_LOCAL_ADDRS:
+        raise ValueError(f"local_addrs holds at most {MAX_LOCAL_ADDRS} addresses")
+    return sorted({normalize_local_addr(value) for value in values})
+
+
+def _decode_local_addrs(raw: object) -> list[str] | None:
+    """A stored ``local_addrs`` column as a list, ``None`` when absent or not
+    a list the API would have accepted (a hand-edited row reads as "the agent
+    said nothing", the same degrade as ``_stored_version``)."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, RecursionError):
+        return None
+    if not isinstance(decoded, list):
+        return None
+    try:
+        addrs = normalize_local_addrs(decoded)
+    except (ValueError, TypeError):
+        return None
+    return addrs or None
+
+
+def effective_addrs(
+    source_addr: object, local_addrs: object, is_hop: "peer_hops.HopFilter"
+) -> list[str]:
+    """The addresses ONE stored report correlates on (WP AGENT-ADDR-1).
+
+    * The agent stated LAN addresses (``local_addrs``, schema v24): exactly
+      those. The TCP peer is ignored then -- behind Docker's published port it
+      is the bridge gateway, and every PC shares it.
+    * It did not (an agent from before AGENT-ADDR-1, or one that found no
+      usable address): the TCP peer, unless it is a forwarding hop
+      (``vault_api/peer_hops.py``: loopback or a gateway of vault-api's own
+      routing table).
+    * Neither: nothing. Such a report cannot be correlated, so it can neither
+      count traffic for the client nor make the bypass rule accuse it.
+
+    The ONE place this rule lives: ``list_clients`` (``GET /v1/clients``, the
+    bypass rule and its webhook) and ``address_owners`` (the D15b overview)
+    both call it.
+    """
+    stated = _decode_local_addrs(local_addrs)
+    if stated:
+        return stated
+    peer = normalize_source_addr(source_addr) if isinstance(source_addr, str) else None
+    if peer is None or is_hop(peer):
+        return []
+    return [peer]
 
 
 def valid_report_interval(value: object) -> bool:
@@ -357,6 +466,7 @@ def store_report(
     source_addr: str | None = None,
     agent_version: str | None = None,
     report_interval_seconds: int | None = None,
+    local_addrs: Sequence[str] | None = None,
 ) -> ReportResult:
     """Store one full-list snapshot and diff it against the previous one.
 
@@ -393,11 +503,20 @@ def store_report(
             f"{MIN_REPORT_INTERVAL_SECONDS}..{MAX_REPORT_INTERVAL_SECONDS}"
         )
 
+    # Schema v24 (WP AGENT-ADDR-1): validated by the request model already;
+    # re-checked for the same reason. An empty list stores NULL ("the agent
+    # stated nothing"), so correlation falls back to the TCP peer.
+    stated_addrs = normalize_local_addrs(local_addrs) if local_addrs is not None else []
+    stored_local = (
+        json.dumps(stated_addrs, separators=(",", ":")) if stated_addrs else None
+    )
+
     with immediate_transaction(conn):
         previous = latest_snapshot(conn, client_id)
         conn.execute(
             "INSERT INTO agent_reports (client_id, reported_at, appids, source_addr, "
-            "agent_version, report_interval_seconds) VALUES (?, ?, ?, ?, ?, ?)",
+            "agent_version, report_interval_seconds, local_addrs) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 client_id,
                 reported_at,
@@ -405,6 +524,7 @@ def store_report(
                 stored_addr,
                 agent_version,
                 report_interval_seconds,
+                stored_local,
             ),
         )
         pruned = prune_reports(conn, client_id, keep)
@@ -423,11 +543,13 @@ def store_report(
     logger.info(
         "agent-report client=%r stored snapshot: reported_at=%s apps=%d "
         "first_report=%s added=%d removed=%d pruned=%d agent_version=%s "
-        "report_interval_seconds=%s",
+        "report_interval_seconds=%s source_addr=%s local_addrs=%s",
         client_id, reported_at, len(stored), first_report,
         len(added), len(removed), pruned,
         agent_version if agent_version is not None else "-",
         report_interval_seconds if report_interval_seconds is not None else "-",
+        stored_addr if stored_addr is not None else "-",
+        ",".join(stated_addrs) if stated_addrs else "-",
     )
     if removed:
         # Audit line, deliberately separate and explicit about the boundary:
@@ -455,7 +577,9 @@ def store_report(
     )
 
 
-def list_clients(conn: sqlite3.Connection) -> list[ClientSummary]:
+def list_clients(
+    conn: sqlite3.Connection, is_hop: "peer_hops.HopFilter | None" = None
+) -> list[ClientSummary]:
     """Every client that has ever reported (and still has a retained row).
 
     Two steps rather than one clever query: a GROUP BY for ``first_seen``, then
@@ -464,7 +588,12 @@ def list_clients(conn: sqlite3.Connection) -> list[ClientSummary]:
     handful — and it keeps ``last_reported_at`` and ``app_count`` derived from
     the same row, which a ``MAX(reported_at)`` aggregate would not guarantee
     (see the rowid-vs-timestamp note in the module docstring).
+
+    ``is_hop`` defaults to the routing tables as they are now
+    (``peer_hops.forwarding_hop_filter``); a caller passes its own only to
+    share one snapshot across several lookups.
     """
+    hop = is_hop if is_hop is not None else peer_hops.forwarding_hop_filter()
     rows = conn.execute(
         """
         SELECT client_id, MIN(reported_at) AS first_seen
@@ -487,13 +616,16 @@ def list_clients(conn: sqlite3.Connection) -> list[ClientSummary]:
         # test_a_client_deleted_between_the_group_by_and_the_lookup_is_silently_skipped``.
         if latest is None:
             continue
+        addrs = _client_addrs(conn, client_id, hop)
         summaries.append(
             ClientSummary(
                 client_id=client_id,
                 first_seen=str(row["first_seen"]),
                 last_reported_at=latest.reported_at,
                 app_count=None if latest.appids is None else len(latest.appids),
-                source_addrs=source_addrs_for(conn, client_id),
+                source_addrs=addrs.effective,
+                peer_addrs=addrs.peers,
+                reported_addrs=addrs.reported,
                 agent_version=latest.agent_version,
                 report_interval_seconds=latest.report_interval_seconds,
             )
@@ -533,7 +665,7 @@ def delete_client(conn: sqlite3.Connection, client_id: str) -> bool:
       ``agent_reports.source_addr``, a column on the table THIS function
       does clear. Deleting the client's agent reports simply severs its
       contribution to ``GET /v1/clients``' per-client totals (computed via
-      ``event_sweep.totals_for_addrs`` over ``source_addrs_for``, which now
+      ``event_sweep.totals_for_addrs`` over ``ClientSummary.source_addrs``, which now
       returns nothing for this client_id); the address rows themselves are
       cache-traffic history, not client identity, and outlive the client
       exactly like they outlive an agent that simply stops reporting.
@@ -604,21 +736,67 @@ def delete_client(conn: sqlite3.Connection, client_id: str) -> bool:
     return True
 
 
-def source_addrs_for(conn: sqlite3.Connection, client_id: str) -> list[str]:
-    """Distinct source addresses across this client's RETAINED reports (v9).
+@dataclass(frozen=True)
+class _ClientAddrs:
+    effective: list[str]
+    peers: list[str]
+    reported: list[str]
+
+
+def _client_addrs(
+    conn: sqlite3.Connection, client_id: str, is_hop: "peer_hops.HopFilter"
+) -> _ClientAddrs:
+    """A client's addresses across its RETAINED reports.
 
     Every retained report, not only the newest: a laptop that moved from wifi
     to cable an hour ago still has cache-log traffic under the old address, and
     dropping it would make the machine look half-silent. Retention bounds the
-    set naturally — it can never hold more addresses than
-    ``VAULT_AGENT_REPORT_KEEP`` rows.
+    set naturally -- ``VAULT_AGENT_REPORT_KEEP`` rows, each with at most
+    ``MAX_LOCAL_ADDRS`` stated addresses plus one peer.
     """
     rows = conn.execute(
-        """
-        SELECT DISTINCT source_addr FROM agent_reports
-        WHERE client_id = ? AND source_addr IS NOT NULL
-        ORDER BY source_addr
-        """,
+        "SELECT source_addr, local_addrs FROM agent_reports WHERE client_id = ?",
         (client_id,),
     ).fetchall()
-    return [str(row["source_addr"]) for row in rows]
+    effective: set[str] = set()
+    peers: set[str] = set()
+    reported: set[str] = set()
+    for row in rows:
+        effective.update(effective_addrs(row["source_addr"], row["local_addrs"], is_hop))
+        if isinstance(row["source_addr"], str):
+            peers.add(row["source_addr"])
+        reported.update(_decode_local_addrs(row["local_addrs"]) or ())
+    return _ClientAddrs(sorted(effective), sorted(peers), sorted(reported))
+
+
+def address_owners(
+    conn: sqlite3.Connection, is_hop: "peer_hops.HopFilter | None" = None
+) -> dict[str, str]:
+    """``{address: client_id}`` for the D15b clients overview.
+
+    Each address belongs to the ONE client whose newest report correlates on
+    it (``effective_addrs``), so a DHCP address that moved from one PC to
+    another counts for the PC that has it now; on an exact ``reported_at`` tie
+    the smaller client_id wins, so the answer is deterministic. A forwarding
+    hop (the Docker bridge gateway an old agent's report arrived from) is
+    never anybody's address -- before WP AGENT-ADDR-1 it was assigned to
+    whichever agent reported last, which then carried every other PC's
+    traffic.
+    """
+    hop = is_hop if is_hop is not None else peer_hops.forwarding_hop_filter()
+    rows = conn.execute(
+        "SELECT client_id, reported_at, source_addr, local_addrs FROM agent_reports"
+    ).fetchall()
+    best: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        client_id = str(row["client_id"])
+        reported_at = str(row["reported_at"])
+        for addr in effective_addrs(row["source_addr"], row["local_addrs"], hop):
+            current = best.get(addr)
+            if (
+                current is None
+                or reported_at > current[0]
+                or (reported_at == current[0] and client_id < current[1])
+            ):
+                best[addr] = (reported_at, client_id)
+    return {addr: owner for addr, (_at, owner) in best.items()}

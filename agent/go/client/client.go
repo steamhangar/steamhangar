@@ -54,6 +54,15 @@
 // report, and rc8 has nothing to ask), and HTTP headers (old servers
 // ignore them, but the report contract would live in two places).
 //
+// WP AGENT-ADDR-1 adds a third optional field, local_addrs, that every
+// server up to rc16 forbids the same way. The rule is generalised rather
+// than duplicated: the resend drops EXACTLY the optional fields the 422
+// names (report.OptionalFields), and only when every error in it is
+// extra_forbidden on an optional field this payload actually carries. An
+// rc9..rc16 server therefore keeps receiving agent_version and
+// report_interval_seconds (it names only local_addrs); an rc8 server names
+// all three and gets the legacy body. Still at most one resend.
+//
 // TLS uses Go's default system root CA pool (no custom TLSClientConfig is
 // set). Proxying respects the standard http_proxy/https_proxy/no_proxy
 // environment variables via http.ProxyFromEnvironment, same as any other
@@ -104,6 +113,10 @@ type Result struct {
 	// presence fields as unknown and the report was resent without them
 	// (see the package doc: the server predates WP AGENT-FEAT-1).
 	PresenceDropped bool
+	// LocalAddrsDropped is true when the server rejected local_addrs as
+	// unknown and the report was resent without it (the server predates
+	// WP AGENT-ADDR-1).
+	LocalAddrsDropped bool
 }
 
 // APIError is returned for a non-2xx HTTP response. StatusCode is always
@@ -123,10 +136,10 @@ type APIError struct {
 	// report and fix --server-url to point there directly.
 	Location string
 
-	// presenceUnknown is set on a 422 whose body names nothing but the
-	// optional presence fields as unknown (see unknownPresenceFieldsOnly):
-	// the one rejection ReportInstalled answers by resending without them.
-	presenceUnknown bool
+	// unknownOptional lists the optional fields a 422 names as unknown,
+	// set only when it names nothing else (see unknownOptionalFields): the
+	// one rejection ReportInstalled answers by resending without them.
+	unknownOptional []string
 }
 
 func (e *APIError) Error() string {
@@ -281,12 +294,27 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 func (c *Client) ReportInstalled(ctx context.Context, payload report.Payload) (Result, error) {
 	result, err := c.send(ctx, payload)
 	var apiErr *APIError
-	if err != nil && payload.HasPresence() && errors.As(err, &apiErr) && apiErr.presenceUnknown {
-		// The server predates the presence fields (package doc): resend
-		// the same report without them, once.
-		result, err = c.send(ctx, payload.WithoutPresence())
+	if err != nil && errors.As(err, &apiErr) && len(apiErr.unknownOptional) > 0 {
+		names := apiErr.unknownOptional
+		for _, name := range names {
+			if !payload.Has(name) {
+				// The server named a field this payload does not carry:
+				// not the old-server shape, return the rejection as is.
+				return result, err
+			}
+		}
+		// The server predates these optional fields (package doc): resend
+		// the same report without exactly them, once.
+		result, err = c.send(ctx, payload.Without(names...))
 		if err == nil {
-			result.PresenceDropped = true
+			for _, name := range names {
+				switch name {
+				case "agent_version", "report_interval_seconds":
+					result.PresenceDropped = true
+				case "local_addrs":
+					result.LocalAddrsDropped = true
+				}
+			}
 		}
 	}
 	return result, err
@@ -400,12 +428,12 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 	case resp.StatusCode >= 400:
 		// Every other 4xx: never retryable (401/422 will not heal by
 		// resending the SAME body; ReportInstalled may resend a different
-		// one, see presenceUnknown).
-		return Result{}, false, &APIError{
-			StatusCode:      resp.StatusCode,
-			Body:            excerpt(respBody),
-			presenceUnknown: resp.StatusCode == http.StatusUnprocessableEntity && unknownPresenceFieldsOnly(respBody),
+		// one, see unknownOptional).
+		apiErr := &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
+		if resp.StatusCode == http.StatusUnprocessableEntity {
+			apiErr.unknownOptional = unknownOptionalFields(respBody)
 		}
+		return Result{}, false, apiErr
 	case resp.StatusCode >= 300:
 		// vault-api never issues a redirect for this endpoint, so a 3xx
 		// means a reverse proxy in front of it (http->https upgrade, a
@@ -448,19 +476,24 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 	}, false, nil
 }
 
-// presenceFieldNames are report.Payload's optional JSON keys (WP
-// AGENT-FEAT-1), the only fields a 422 may name for the legacy resend.
-var presenceFieldNames = map[string]bool{
-	"agent_version":           true,
-	"report_interval_seconds": true,
-}
+// optionalFieldNames are report.Payload's optional JSON keys
+// (report.OptionalFields), the only fields a 422 may name for the legacy
+// resend.
+var optionalFieldNames = func() map[string]bool {
+	m := map[string]bool{}
+	for _, name := range report.OptionalFields {
+		m[name] = true
+	}
+	return m
+}()
 
-// unknownPresenceFieldsOnly reports whether a 422 body is FastAPI's
-// validation error listing nothing but "extra_forbidden" at
-// ["body", <presence field>]: what a pre-AGENT-FEAT-1 vault-api answers to
-// a report carrying the presence fields. Anything else (another error type,
-// another location, an empty or non-list detail, a non-JSON body) is false.
-func unknownPresenceFieldsOnly(body []byte) bool {
+// unknownOptionalFields returns the optional fields a 422 body names when
+// it is FastAPI's validation error listing nothing but "extra_forbidden"
+// at ["body", <optional field>]: what a vault-api older than one of those
+// fields answers to a report carrying it. Anything else (another error
+// type, another location, an empty or non-list detail, a non-JSON body)
+// gives nil. Each name appears once.
+func unknownOptionalFields(body []byte) []string {
 	var parsed struct {
 		Detail []struct {
 			Type string `json:"type"`
@@ -468,18 +501,24 @@ func unknownPresenceFieldsOnly(body []byte) bool {
 		} `json:"detail"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Detail) == 0 {
-		return false
+		return nil
 	}
+	seen := map[string]bool{}
+	var names []string
 	for _, d := range parsed.Detail {
 		if d.Type != "extra_forbidden" || len(d.Loc) != 2 || d.Loc[0] != "body" {
-			return false
+			return nil
 		}
 		name, ok := d.Loc[1].(string)
-		if !ok || !presenceFieldNames[name] {
-			return false
+		if !ok || !optionalFieldNames[name] {
+			return nil
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
 		}
 	}
-	return true
+	return names
 }
 
 // redirectTarget returns resp's Location header resolved against the

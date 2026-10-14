@@ -27,14 +27,19 @@ three intervals) keep the stored totals but report ``current`` speed,
 
 Address -> agent mapping
 ------------------------
-The event log knows addresses only. An agent report records the address it
-arrived from (``agent_reports.source_addr``, schema v9). Each address is
-assigned to the ONE agent client whose newest report came from it, so a
-DHCP address that moved from one PC to another counts for the PC that has it
-now. Every other logged address is an agentless client (``kind:
-"address"``). If agents reach vault-api through a reverse proxy, the recorded
-address is the proxy's and no mapping is possible; the PC then appears twice
-(agent entry without cache traffic, address entry with it).
+The event log knows addresses only. Per agent report the addresses are
+``agent_reports.effective_addrs`` (WP AGENT-ADDR-1): the LAN addresses the
+agent stated (``local_addrs``, schema v24), else the TCP peer the report
+arrived from (``source_addr``, schema v9) unless that peer is a forwarding
+hop (``vault_api/peer_hops.py`` -- behind Docker's published port the
+bridge gateway, shared by every PC). Each address is assigned to the ONE
+agent client whose newest report correlates on it
+(``agent_reports.address_owners``), so a DHCP address that moved from one PC
+to another counts for the PC that has it now. Every other logged address is
+an agentless client (``kind: "address"``). An agent from before
+AGENT-ADDR-1 behind a reverse proxy or published port gets no address; the
+PC then appears twice (agent entry without cache traffic, address entry
+with it) until its agent is updated.
 
 Known gap: the prefill runner's own downloads appear as an ordinary address
 client and count as an active client. Its address as vault-core logs it
@@ -371,23 +376,6 @@ def _job_throughput(
     return result
 
 
-def _address_owners(conn: sqlite3.Connection) -> dict[str, str]:
-    """``{address: client_id}``: the client whose NEWEST report came from it
-    (on an exact tie the smaller client_id, so the answer is deterministic)."""
-    rows = conn.execute(
-        """
-        SELECT source_addr, client_id, MAX(reported_at) AS last
-        FROM agent_reports WHERE source_addr IS NOT NULL
-        GROUP BY source_addr, client_id
-        ORDER BY source_addr, last DESC, client_id ASC
-        """
-    ).fetchall()
-    owners: dict[str, str] = {}
-    for row in rows:
-        owners.setdefault(str(row["source_addr"]), str(row["client_id"]))
-    return owners
-
-
 def _sum_totals(items: list[traffic.Totals]) -> traffic.Totals:
     seen = [item.last_seen for item in items if item.last_seen]
     return traffic.Totals(
@@ -523,7 +511,7 @@ def get_clients_overview(
             summary.client_id: agent_reports.latest_snapshot(conn, summary.client_id)
             for summary in summaries
         }
-        owners = _address_owners(conn)
+        owners = agent_reports.address_owners(conn)
 
         totals: dict[str, traffic.Totals] = {}
         last_seen: dict[str, str] = {}

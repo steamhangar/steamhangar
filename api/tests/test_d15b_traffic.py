@@ -107,7 +107,7 @@ def test_a_v21_or_v22_database_gains_the_v23_columns_exactly_once(
     finally:
         conn.close()
 
-    assert version == SCHEMA_VERSION == 23
+    assert version == SCHEMA_VERSION == 24
     assert columns["log_dev"] == "INTEGER"
     assert columns["log_ino"] == "INTEGER"
     assert columns["rotations_detected_total"] == "INTEGER"

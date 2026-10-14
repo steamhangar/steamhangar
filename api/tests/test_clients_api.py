@@ -67,6 +67,9 @@ def test_lists_one_row_per_client_with_the_latest_snapshot_size(
         "report_interval_seconds",
         "presence",
         "offline_after",
+        # WP AGENT-ADDR-1 (schema v24): appended, nothing above moved.
+        "peer_addrs",
+        "reported_addrs",
     }
     # With no event feed configured there is nothing to correlate, and nobody
     # is accused of anything.

@@ -94,6 +94,18 @@ def _no_cover_art_lookup_in_tests(monkeypatch) -> None:
     monkeypatch.setattr(cover_cache, "INITIAL_DELAY_SECONDS", 3600.0)
 
 
+@pytest.fixture(autouse=True)
+def _no_host_routes_in_tests(monkeypatch, tmp_path) -> None:
+    """WP AGENT-ADDR-1: ``peer_hops`` reads the routing tables of the network
+    namespace it runs in. Point them at absent files so no test result
+    depends on which gateway the test host happens to have; tests of the
+    hop rule write their own route files."""
+    from vault_api import peer_hops
+
+    monkeypatch.setattr(peer_hops, "IPV4_ROUTE_FILE", str(tmp_path / "no-route"))
+    monkeypatch.setattr(peer_hops, "IPV6_ROUTE_FILE", str(tmp_path / "no-ipv6_route"))
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(

@@ -60,8 +60,19 @@ import (
 	"github.com/Riviera822/steamhangar/agent/acf"
 	"github.com/Riviera822/steamhangar/agent/agentconfig"
 	"github.com/Riviera822/steamhangar/agent/client"
+	"github.com/Riviera822/steamhangar/agent/localaddr"
 	"github.com/Riviera822/steamhangar/agent/report"
 )
+
+// detectLocalAddrs finds this PC's LAN address(es) toward the vault (WP
+// AGENT-ADDR-1). A variable only so main_test.go can prove the wiring
+// with a fixed answer: a test server on loopback would otherwise always
+// yield nothing.
+var detectLocalAddrs = localaddr.Detect
+
+// localAddrTimeout bounds the address detection (one DNS lookup plus a
+// UDP connect per resolved address, no packet sent).
+const localAddrTimeout = 5 * time.Second
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -209,8 +220,20 @@ func reportOnce(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg a
 	for _, note := range notes {
 		logger.Printf("report presence note=%q", note)
 	}
-	logger.Printf("report built installed_count=%d client_id=%q agent_version=%s report_interval_seconds=%s",
-		len(payload.AppIDs), payload.ClientID, optString(payload.AgentVersion), optInt(payload.ReportIntervalSeconds))
+	// WP AGENT-ADDR-1: the LAN address(es) this PC uses toward the vault,
+	// so vault-api can match this machine with its traffic in the cache log
+	// even when it only sees a Docker gateway as the report's sender.
+	// Detected in the binary, no configuration; nothing found is fine.
+	detectCtx, cancelDetect := context.WithTimeout(ctx, localAddrTimeout)
+	addrs, addrNotes := detectLocalAddrs(detectCtx, cfg.ServerURL, nil, nil)
+	cancelDetect()
+	for _, note := range addrNotes {
+		logger.Printf("report local address note=%q", note)
+	}
+	payload = payload.WithLocalAddrs(addrs)
+	logger.Printf("report built installed_count=%d client_id=%q agent_version=%s report_interval_seconds=%s local_addrs=%s",
+		len(payload.AppIDs), payload.ClientID, optString(payload.AgentVersion), optInt(payload.ReportIntervalSeconds),
+		optList(payload.LocalAddrs))
 
 	// A single HTTP attempt (with client.Client's own internal retries) is
 	// bounded generously - this is a small JSON POST, not a download; 2
@@ -231,6 +254,10 @@ func reportOnce(ctx context.Context, logger *log.Logger, stdout io.Writer, cfg a
 			"yet (vault-api older than AGENT-FEAT-1); the report was resent without them and accepted - "+
 			"upgrade vault-api to see this machine's version and online state")
 	}
+	if result.LocalAddrsDropped {
+		logger.Printf("report local address note=%q", "the server does not accept local_addrs yet "+
+			"(vault-api older than AGENT-ADDR-1); the report was resent without it and accepted")
+	}
 	fmt.Fprintf(stdout, "reported %d installed app(s) for client_id=%s: added=%v removed=%v first_report=%v\n",
 		result.Received, result.ClientID, result.Added, result.Removed, result.FirstReport)
 	logger.Printf("report accepted received=%d added=%d removed=%d first_report=%v",
@@ -245,6 +272,13 @@ func optString(v *string) string {
 		return "-"
 	}
 	return fmt.Sprintf("%q", *v)
+}
+
+func optList(v []string) string {
+	if len(v) == 0 {
+		return "-"
+	}
+	return strings.Join(v, ",")
 }
 
 func optInt(v *int) string {

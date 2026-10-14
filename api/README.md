@@ -326,7 +326,7 @@ startup error rather than a soft "no data": unset or empty means the default
 is refused, so a typo can neither look like it worked nor silently mean "off". Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v22)
+## Database schema (v24)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -338,7 +338,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `apps`           | `appid` (PK), `name`, `status`, `last_prefill_at`, `last_manifest_check`, `needs_force`     | One row per tracked Steam app. `needs_force` (**v5**, WP 3.4) is ADR-0006 decision 2's per-app flag — see "needs_force" below |
 | `depot_app_map`  | `depotid`, `appid`, PK `(depotid, appid)`                                                   | Depot→app mapping; a depot can map to multiple apps (shared depots, plan §4) |
 | `jobs`           | `id` (PK autoincrement), `appid`, `type`, `status`, `created_at`, `started_at`, `finished_at`, `log_excerpt`, `updated`, `up_to_date`, `summary_parse_ok`, `gc_execute`, `paused_at`, `stop_request`, `run_use_force`, `run_before_json`, `run_claimed_by`, `run_claimed_at`, `run_heartbeat_at`, `run_completed_at`, `run_result_json` | Prefill/GC job queue (plan §3, §6). `updated`/`up_to_date`/`summary_parse_ok` (**v4**, WP 3.3) are SteamPrefill's own summary-table counters — see "Job outcome honesty" above. `gc_execute` (**v7**, WP 3.8) is the GC dry-run/execute bit: `NULL` for every non-GC job, `0` = report only, `1` = delete — see "Garbage collection" below. `paused_at`/`stop_request` (**v8**, WP 3.12) are job control: when the job was last suspended, and the operator's pending `cancel`/`pause` request against a *running* job — see "Job control" below. The seven `run_*` columns (**v15**, WP S-1, ADR-0012) are queue-mode's job hand-off to a separate `prefill_runner` process — `NULL` for every job that never goes through queue mode (any GC job, any prefill job run in the default `subprocess` mode). See "Queue mode" below |
-| `agent_reports`  | `client_id`, `reported_at`, `appids` (JSON array of ints), `source_addr`, `agent_version`, `report_interval_seconds` | One row per agent report — a full installed-app-ID snapshot at that timestamp (ADR-0002: the agent is stateless/dumb, always reports the complete list). vault-api derives additions/removals by diffing the two most recent rows per `client_id`. `source_addr` (**v9**, WP 3.11) is the address the report arrived FROM — the only key correlating a `client_id` with the event log's addresses; `NULL` for pre-v9 rows, which is why such a client is never `bypass_suspected`. `agent_version` / `report_interval_seconds` (**v17**, WP AGENT-FEAT-1) are what the agent said about itself in that report; `NULL` = it did not say. See "Agent presence" below |
+| `agent_reports`  | `client_id`, `reported_at`, `appids` (JSON array of ints), `source_addr`, `agent_version`, `report_interval_seconds`, `local_addrs` | One row per agent report — a full installed-app-ID snapshot at that timestamp (ADR-0002: the agent is stateless/dumb, always reports the complete list). vault-api derives additions/removals by diffing the two most recent rows per `client_id`. `source_addr` (**v9**, WP 3.11) is the address the report arrived FROM — the only key correlating a `client_id` with the event log's addresses; `NULL` for pre-v9 rows, which is why such a client is never `bypass_suspected`. `agent_version` / `report_interval_seconds` (**v17**, WP AGENT-FEAT-1) are what the agent said about itself in that report; `NULL` = it did not say. See "Agent presence" below. `local_addrs` (**v24**, WP AGENT-ADDR-1, per-column-guarded `ALTER`) is a JSON array of the LAN addresses the agent stated for itself; `NULL` = it stated none. Correlation prefers it over `source_addr` — see "Agent LAN addresses" below |
 | `depot_manifests` | `appid`, `containing_appid`, `depotid`, `manifestid` (TEXT), `chunk_count`, `total_bytes`, `recorded_at`, `source`, `first_seen_at`, `manifest_changed_at`, `observation_count`, PK `(appid, depotid)` | **Latest**-known manifest state per (app, depot) — WP 3.2, ADR-0006 decision 3. `first_seen_at`/`manifest_changed_at`/`observation_count` (**v14**, WP 4h.1) are the change-frequency bookkeeping — see "Manifest ingestion" and "Change frequency" below |
 | `oracle_app_state` | `appid` (PK), `buildid`, `checked_at`, `source`, `depot_count`, `branch_count`, `app_type`, `parent_appid`, `name` | **v10**, WP 3.9. One row per app the manifest oracle has been asked about: when, by which oracle (`source` provenance), and what it said the public build id is. `app_type` / `parent_appid` / `name` (**v22**, WP TOOL-APPS-2a, per-column-guarded `ALTER`) are its `common.type` (mapped onto the app-type vocabulary), `common.parent` and `common.name` (plain text, capped); `NULL` when absent and on every pre-v22 row. Display data only. See "Manifest oracle" and "Content packages" below |
 | `oracle_dlc_links` | `appid`, `dlc_appid`, `recorded_at`, `source`, PK `(appid, dlc_appid)` | **v22**, WP TOOL-APPS-2a. The content packages one oracle answer names for its app: `extended.listofdlc` plus every depot's `dlcappid`. Snapshot semantics like `oracle_branch_manifests`; display data, never read by GC. See "Content packages" below |
@@ -650,8 +650,8 @@ route, see "Auth").
 | GET    | `/v1/cache/{appid}/delete-plan`    | WP TOOL-APPS-2b. Read-only preview of `DELETE /v1/cache/{appid}` (optionally `?with_packages=true`) for a confirmation dialog: `{appid, with_packages, members[], kept_children[], delete_depots[], skipped_shared[], unusable[], total_bytes, blocked_by[]}`. Same `404`s as the deletion; an in-flight job is listed in `blocked_by` instead of a `409`. See "Grouped delete" below |
 | POST   | `/v1/cache/{appid}/gc`             | Queue a garbage-collection job. Body optional; `{"execute": true}` (a literal JSON boolean) is the only way to delete — **dry run by default**. `202` with `{appid, job_id, status, type, mode, execute, deduplicated}`; `404` unknown appid or no mappings; `422` for `appid < 1`, a non-boolean `execute`, or an unrecognized body field. See "Garbage collection" below |
 | GET    | `/v1/cache/summary`                | `total_bytes` (disk usage of `depot/`, each depot counted once), `top_consumers` (top 10 `{appid, name, size_bytes}`, largest first), `unmapped_depots` (`{count, size_bytes}` for depot dirs on disk with no mapping row for any app), `free_disk_bytes` (free space on the cache filesystem, `null` if undeterminable) |
-| POST   | `/v1/agent/installed`              | Body `{"client_id": str, "appids": [int, ...]}` — store one **full-list** snapshot of a client's installed games. `200` with `{client_id, received, added, removed, first_report}`; `422` for a bad `client_id` (empty, > 64 chars, control characters, surrounding whitespace, `.`/`..`), an appid `< 1` or a boolean, a missing/non-list `appids`, more than 10 000 ids, or an unrecognized body field. See "Agent reports" below |
-| GET    | `/v1/clients`                      | One row per reporting client, sorted by `client_id`: `{client_id, first_seen, last_reported_at, app_count}` (WP 2.4) plus `{source_addrs, cache_hits, cache_misses, bytes_served, last_seen_in_cache_log, bypass_suspected}` (WP 3.11, ADR-0008 — the hit statistics and bypass warnings plan §5/§6 promised). The cache fields are `0`/`null`/`false` when the event feed is off. See "Cache-event sweep → Bypass detection" |
+| POST   | `/v1/agent/installed`              | Body `{"client_id": str, "appids": [int, ...]}` — store one **full-list** snapshot of a client's installed games. `200` with `{client_id, received, added, removed, first_report}`; `422` for a bad `client_id` (empty, > 64 chars, control characters, surrounding whitespace, `.`/`..`), an appid `< 1` or a boolean, a missing/non-list `appids`, more than 10 000 ids, or an unrecognized body field. Optional `local_addrs` (WP AGENT-ADDR-1): up to 8 unicast IP literals the PC uses toward the vault; `422` for anything else. See "Agent reports" and "Agent LAN addresses" below |
+| GET    | `/v1/clients`                      | One row per reporting client, sorted by `client_id`: `{client_id, first_seen, last_reported_at, app_count}` (WP 2.4) plus `{source_addrs, cache_hits, cache_misses, bytes_served, last_seen_in_cache_log, bypass_suspected}` (WP 3.11, ADR-0008 — the hit statistics and bypass warnings plan §5/§6 promised). The cache fields are `0`/`null`/`false` when the event feed is off. Plus `{peer_addrs, reported_addrs}` (WP AGENT-ADDR-1, diagnostics). See "Cache-event sweep → Bypass detection" and "Agent LAN addresses" |
 | DELETE | `/v1/clients/{client_id}`          | Remove one client's rows (WP AG-1 — the rename-cleanup path AG-0 named). `204` on success; `404` if the `client_id` has no rows at all. **Not a ban** — a client that reports again under the same id simply reappears with a fresh diff chain. See "Deleting a client" below |
 | GET    | `/v1/oracle/{appid}`               | Stored manifest-oracle view (WP 3.9): `{appid, enabled, checked_at, source, buildid, verdict, depots[]}`, each depot `{depotid, recorded_manifestid, oracle_manifestid, verdict, beta_branches[]}`. `verdict` is `current`/`stale`/`not_cached`/`unknown`. **No network, no `404`** — an app nobody asked about answers `checked_at: null`, and `enabled: false` when the oracle is off. `422` for `appid < 1` |
 | POST   | `/v1/oracle/{appid}/refresh`       | Ask the oracle now (WP 3.9). **This request leaves the LAN** when the oracle is enabled. Always `200`: `{appid, enabled, ok, error, checked_at, depot_count, branch_manifest_count, open_branches[], skipped_password_branches, warnings[]}` — an unreachable or garbage answer is `ok: false` with a reason, never a 5xx. `422` for `appid < 1` |
@@ -2918,6 +2918,61 @@ theoretically visible), `installed_on_stale: list[InstalledOn]` alongside
 `installed_on` is an additive two-liner then — same shape, opposite filter,
 no schema change to the existing field. Not built speculatively now.
 
+### Agent LAN addresses (WP AGENT-ADDR-1, schema v24)
+
+**The bug it fixes (measured 2026-10-14):** behind Docker's published ports
+vault-api sees every connection coming from the Docker bridge **gateway** —
+the userland proxy connects from the host side of the bridge — so
+`agent_reports.source_addr` was the same gateway address for every PC. The
+bypass rule never found that address in the cache log and accused every agent
+PC ("Client X is bypassing the cache"), and the clients overview gave the
+gateway to whichever agent reported last.
+
+**The report field.** `POST /v1/agent/installed` accepts an optional
+`local_addrs`: the LAN addresses the PC uses toward the vault, which the agent
+determines itself (no flag, no config — see `agent/README.md`). Rules, each a
+`422` when broken: a JSON list of at most **8** strings, each a plain IP
+literal (no zone id, no surrounding whitespace) that is not loopback,
+unspecified, link-local or multicast. Stored canonical (compressed IPv6, an
+IPv4-mapped IPv6 address as plain IPv4), de-duplicated and sorted; absent,
+`null` and `[]` all store `NULL`.
+
+**Which addresses a client is correlated on**
+(`agent_reports.effective_addrs`, one definition for `GET /v1/clients`, the
+bypass rule, its webhook and the clients overview), per retained report:
+
+1. the agent stated `local_addrs` → exactly those (the TCP peer is ignored);
+2. otherwise the TCP peer (`source_addr`) — **unless it is a forwarding hop**;
+3. otherwise nothing.
+
+**Forwarding hop** (`vault_api/peer_hops.py`): a loopback or unspecified
+address, or a next-hop **gateway** in vault-api's own routing table (every
+route with `RTF_GATEWAY` in `/proc/net/route` and `/proc/net/ipv6_route`,
+read per request). Inside a Docker bridge network that is the bridge gateway —
+exactly what a published port connects from; with `network_mode: host` it is
+the LAN router, never a gaming PC. No address range is hard-coded (Docker's
+pools are configurable, and `172.16.0.0/12` is also a real LAN range).
+Consequence for the bypass rule: an old agent whose only peer is the gateway
+has no usable address, so disqualification 5 applies and it is **never
+accused**; a new agent is judged on its stated address and still accused when
+that address never shows up in the cache log.
+
+**Not covered:** a reverse proxy in its own container on the same Docker
+network connects from that container's address, which is neither loopback
+nor a gateway. Old agents behind such a proxy are still correlated with the
+proxy's address; updated agents are not affected.
+
+**`GET /v1/clients`:** `source_addrs` now lists the correlated addresses
+above (the keys the statistics are summed over, as before). Two diagnostic
+lists are appended: `peer_addrs` (raw TCP peers, hops included) and
+`reported_addrs` (what the agent stated).
+
+**Compatibility.** Old agents keep working (the field is optional). A new
+agent against a server older than this package gets a `422` naming
+`local_addrs` as `extra_forbidden` and resends once without exactly the
+fields named (`agent/go/client`), so an rc9..rc16 server still receives
+`agent_version` / `report_interval_seconds`.
+
 ### Deleting a client (`DELETE /v1/clients/{client_id}`, WP AG-1)
 
 WP AG-0 made a client's reported identity (`client_id`) a visible, operator-
@@ -4198,10 +4253,12 @@ storm shape the setting exists to prevent and is therefore not selectable.
 
 `GET /v1/clients` gains `cache_hits`, `cache_misses`, `bytes_served`,
 `last_seen_in_cache_log`, `source_addrs` and `bypass_suspected`. The event log
-knows **addresses**; agent reports know **client_ids**; schema v9's
-`agent_reports.source_addr` is the only bridge, and a client's statistics are
-summed over **every** address its retained reports arrived from (a laptop that
-moved from wifi to cable still has traffic under the old address). The peer
+knows **addresses**; agent reports know **client_ids**; the bridge is the
+addresses each retained report correlates on — since WP AGENT-ADDR-1 the
+agent's stated `local_addrs`, else the TCP peer `source_addr` unless it is a
+forwarding hop (see "Agent LAN addresses") — and a client's statistics are
+summed over **every** such address (a laptop that moved from wifi to cable
+still has traffic under the old address). The peer
 address is taken from the TCP peer, **never** from `X-Forwarded-For` — trusting
 a client-settable header for an identity key would let any agent claim another
 machine's traffic, or disclaim its own to dodge detection.
@@ -4217,9 +4274,10 @@ surviving all six disqualifications:
 3. the client's own newest report is older than the window — a machine that has
    been off cannot be bypassing, and would otherwise be accused forever;
 4. it reports no installed games, or its snapshot was unreadable;
-5. no retained report recorded a source address — **including every pre-v9
+5. no retained report gives a usable address — **including every pre-v9
    row**, so an upgraded installation does not light up with accusations
-   against every machine at once;
+   against every machine at once, and (WP AGENT-ADDR-1) an old agent whose
+   only peer is a forwarding hop such as the Docker bridge gateway;
 6. it *has* appeared in the cache log within the window.
 
 Each of the six is separately mutation-tested: flip it and a named test in
@@ -4427,12 +4485,15 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
   address with event-log traffic in the last 30 days or in the range that no
   agent owns. Sorted connected first, then newest `last_active`.
 - **Address → agent:** an address belongs to the ONE agent whose newest
-  report arrived from it (`agent_reports.source_addr`), so a DHCP address
-  moving between PCs follows the PC that has it now. `addresses` therefore
-  can differ from `GET /v1/clients`' `source_addrs` (all retained
-  addresses). If agents reach vault-api through a reverse proxy, the
-  recorded address is the proxy's: no mapping is possible and the PC shows
-  twice (agent entry without traffic, address entry with it). There is no
+  report correlates on it (`agent_reports.address_owners` over
+  `effective_addrs`: the agent's stated `local_addrs`, else its TCP peer
+  unless that is a forwarding hop — see "Agent LAN addresses"), so a DHCP
+  address moving between PCs follows the PC that has it now. `addresses`
+  therefore can differ from `GET /v1/clients`' `source_addrs` (all retained
+  addresses). A forwarding hop (the Docker bridge gateway) is never assigned
+  to an agent. An agent from before AGENT-ADDR-1 behind a published port or
+  reverse proxy therefore gets no address and the PC shows twice (agent
+  entry without traffic, address entry with it) until the agent is updated. There is no
   naming of agentless addresses yet (the
   event log has IPs only, no reverse DNS by design).
 - **The prefill runner is counted as a client (known gap).** SteamPrefill

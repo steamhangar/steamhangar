@@ -185,8 +185,8 @@ func TestUnknownPresenceFieldsOnly(t *testing.T) {
 		{"empty", ``, false},
 	}
 	for _, tc := range cases {
-		if got := unknownPresenceFieldsOnly([]byte(tc.body)); got != tc.want {
-			t.Errorf("%s: unknownPresenceFieldsOnly = %v, want %v", tc.name, got, tc.want)
+		if got := len(unknownOptionalFields([]byte(tc.body))) > 0; got != tc.want {
+			t.Errorf("%s: unknownOptionalFields non-empty = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

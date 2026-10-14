@@ -501,6 +501,38 @@ report; nothing is remembered, so the first report after the server upgrade
 carries the fields again. Upgrade order therefore does not matter. (An old
 agent against a new server needs nothing: the fields are optional.)
 
+### LAN address in every report (WP AGENT-ADDR-1)
+
+Every report also carries `local_addrs`: the LAN address(es) this PC uses
+toward the vault. vault-api needs it because behind Docker's published ports
+it sees every report coming from the Docker bridge gateway, not from the PC,
+and could therefore not match the PC with its downloads in the cache log
+(the false "Client X is bypassing the cache" warning, and the PC appearing
+twice on the Clients page).
+
+- **How:** for each address the `--server-url` host resolves to (or the IP
+  in the URL), the agent asks the OS which local address it would send from
+  — a UDP "connect", which sends no packet — and keeps the answers. That is
+  the same source address the TCP connection uses, and the one vault-core
+  logs when Steam on this PC downloads through the cache on the same host.
+  IPv4 and IPv6 are both covered (`go/localaddr`).
+- **What is left out:** loopback (agent on the vault host itself),
+  link-local, unspecified and multicast addresses, and anything beyond 8
+  addresses — vault-api refuses those, and a refused value would reject the
+  whole report. Nothing usable found: the field is simply not sent and
+  vault-api falls back to the report's TCP peer.
+- **No configuration:** no flag, no environment variable, no scheduled-task
+  argument. The PowerShell and systemd packaging is unchanged; replacing
+  the binary is enough.
+- **Log:** the `report built` line shows `local_addrs=...` (`-` when none);
+  `report local address note=...` says why something was not detected
+  (DNS failure, no route).
+- **Against an older vault-api (up to rc16):** the `422` names
+  `local_addrs` as unknown; the agent resends once without exactly the
+  fields the `422` names (an rc9..rc16 server keeps getting
+  `agent_version`/`report_interval_seconds`, an rc8 server gets the legacy
+  body) and logs `vault-api older than AGENT-ADDR-1`.
+
 **Default `--client-id`:** the local hostname (`os.Hostname()`), trimmed,
 with any non-printable character replaced by `-`, truncated to 64
 characters. If
