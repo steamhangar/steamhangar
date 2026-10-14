@@ -10,11 +10,12 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from vault_api import (
     app_classification,
+    cache_completeness,
     cover_art,
     cover_cache,
     depot_manifests,
@@ -286,6 +287,73 @@ class GameSummary(BaseModel):
     # is itself grouped under a parent (``parent_appid`` set) it is null --
     # its bytes are part of its parent's ``group_size_bytes``.
     group_size_bytes: int | None = None
+    # WP CACHE-COMPLETE-1a: how much of the CURRENT build is on disk, 0-100
+    # (floor; 100 only when every byte is there). Measured by the update check
+    # per mapped depot against the current manifest's chunk list (compressed
+    # chunk bytes on both sides, exact-size chunk files only;
+    # vault_api/cache_completeness.py). Null = unknown: nothing on disk
+    # (``size_bytes`` null/0), not measured yet, the oracle announced a build
+    # whose manifest nobody has fetched yet, or the build changed since the
+    # last measurement. UIs then fall back to the ``size_bytes`` rule.
+    cache_complete_pct: int | None = None
+    # The current build's chunk bytes over the app's mapped depots, and how
+    # many of them are on disk. Null exactly when ``cache_complete_pct`` is.
+    cache_expected_bytes: int | None = None
+    cache_present_bytes: int | None = None
+    # When the oldest depot figure was measured (UTC), null when unknown.
+    cache_complete_checked_at: str | None = None
+    # Same figure over the whole group this row heads (D9): the depots of the
+    # members that currently have bytes on disk (own size_bytes > 0, the same
+    # members that add bytes to ``group_size_bytes``), each depot/manifest
+    # counted once; a member with nothing on disk is skipped. Null for a row
+    # grouped under a parent, like ``group_size_bytes``.
+    group_cache_complete_pct: int | None = None
+
+
+def _completeness_fields(
+    appid: int,
+    index: cache_completeness.CompletenessIndex,
+    app_depotids: dict[int, list[int]],
+    size_bytes: int | None,
+) -> dict[str, object]:
+    """``cache_complete_*`` for one app (WP CACHE-COMPLETE-1a). A stored
+    figure is never shown for a game with no bytes on disk (rows survive a
+    delete until the next check)."""
+    if not size_bytes:
+        figure = cache_completeness.UNKNOWN
+    else:
+        figure = index.figure((appid, d) for d in app_depotids.get(appid, []))
+    return {
+        "cache_complete_pct": figure.pct,
+        "cache_expected_bytes": figure.expected_bytes,
+        "cache_present_bytes": figure.present_bytes,
+        "cache_complete_checked_at": figure.checked_at,
+    }
+
+
+def _group_completeness_pct(
+    appid: int,
+    classifications: dict[int, app_classification.Classification],
+    children_by_parent: dict[int, list[int]],
+    app_depotids: dict[int, list[int]],
+    index: cache_completeness.CompletenessIndex,
+    group_size: int | None,
+    depot_bytes: dict[int, int],
+) -> int | None:
+    """``group_cache_complete_pct`` for one row (same grouping as
+    ``_group_size_bytes``). Only members whose own ``size_bytes`` is > 0
+    count (CACHE-COMPLETE-1a review): a member with nothing on disk must not
+    contribute its last stored rows."""
+    own = classifications.get(appid)
+    if (own is not None and own.parent_appid is not None) or not group_size:
+        return None
+    members = [
+        m
+        for m in (appid, *children_by_parent.get(appid, []))
+        if app_size_bytes(app_depotids.get(m, []), depot_bytes)
+    ]
+    pairs = [(m, d) for m in members for d in app_depotids.get(m, [])]
+    return index.figure(pairs).pct
 
 
 def _children_by_parent(
@@ -402,6 +470,12 @@ class GameDetail(BaseModel):
     app_type: str | None = None
     # See GameSummary.group_size_bytes (WP TOOL-APPS-2).
     group_size_bytes: int | None = None
+    # See GameSummary.cache_complete_* (WP CACHE-COMPLETE-1a).
+    cache_complete_pct: int | None = None
+    cache_expected_bytes: int | None = None
+    cache_present_bytes: int | None = None
+    cache_complete_checked_at: str | None = None
+    group_cache_complete_pct: int | None = None
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -410,8 +484,20 @@ def list_games(
     open_db: DbOpener = Depends(db_opener),
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
+    incomplete: bool = Query(
+        False,
+        description=(
+            "Only games whose measured cache_complete_pct is below 100 "
+            "(unknown figures are left out). For a Downloads 'Incomplete' list."
+        ),
+    ),
 ) -> list[GameSummary]:
-    """All tracked apps with their depot count and size (plan §6)."""
+    """All tracked apps with their depot count and size (plan §6).
+
+    ``?incomplete=true`` (WP CACHE-COMPLETE-1a) keeps only rows whose own
+    ``cache_complete_pct`` is known and below 100; grouping stays the
+    client's job, as for the rest of the list.
+    """
     # WP AG-1 review round 1, B1: the scheduler object, not app.state.settings
     # directly -- .settings is the boot snapshot _fresh_snapshots_now resolves
     # against the live DB override every call, and .now() is the SAME
@@ -458,6 +544,8 @@ def list_games(
             conn, oracle_enabled=base_settings.manifest_oracle_enabled
         )
         children_by_parent = _children_by_parent(classifications)
+        # WP CACHE-COMPLETE-1a: stored rows + current targets, bulk.
+        completeness = cache_completeness.load_index(conn, base_settings)
 
     app_depotids: dict[int, list[int]] = {}
     for row in depot_rows:
@@ -470,6 +558,15 @@ def list_games(
     for row in rows:
         frequency = frequencies.get(row["appid"], no_manifest_data)
         size_bytes = app_size_bytes(app_depotids.get(row["appid"], []), depot_bytes)
+        completeness_fields = _completeness_fields(
+            row["appid"], completeness, app_depotids, size_bytes
+        )
+        pct = completeness_fields["cache_complete_pct"]
+        if incomplete and (pct is None or pct >= 100):  # type: ignore[operator]
+            continue
+        group_size = _group_size_bytes(
+            row["appid"], classifications, children_by_parent, app_depotids, depot_bytes
+        )
         games.append(
             GameSummary(
                 appid=row["appid"],
@@ -491,8 +588,16 @@ def list_games(
                 cover_cached_url=cached_covers.get(row["appid"]),
                 **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
                 **_classification_fields(classifications.get(row["appid"])),
-                group_size_bytes=_group_size_bytes(
-                    row["appid"], classifications, children_by_parent, app_depotids, depot_bytes
+                group_size_bytes=group_size,
+                **completeness_fields,
+                group_cache_complete_pct=_group_completeness_pct(
+                    row["appid"],
+                    classifications,
+                    children_by_parent,
+                    app_depotids,
+                    completeness,
+                    group_size,
+                    depot_bytes,
                 ),
             )
         )
@@ -566,6 +671,7 @@ def get_game(
             ),
             group_members,
         ).fetchall()
+        completeness = cache_completeness.load_index(conn, base_settings, group_members)
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
@@ -582,6 +688,9 @@ def get_game(
     group_depotids: dict[int, list[int]] = {}
     for row in group_depot_rows:
         group_depotids.setdefault(int(row["appid"]), []).append(int(row["depotid"]))
+    group_size = _group_size_bytes(
+        appid, classifications, children_by_parent, group_depotids, depot_bytes
+    )
     return GameDetail(
         appid=app_row["appid"],
         name=app_classification.display_name(app_row["name"], classification),
@@ -603,7 +712,15 @@ def get_game(
             detail_size,
         ),
         **_classification_fields(classification),
-        group_size_bytes=_group_size_bytes(
-            appid, classifications, children_by_parent, group_depotids, depot_bytes
+        group_size_bytes=group_size,
+        **_completeness_fields(appid, completeness, group_depotids, detail_size),
+        group_cache_complete_pct=_group_completeness_pct(
+            appid,
+            classifications,
+            children_by_parent,
+            group_depotids,
+            completeness,
+            group_size,
+            depot_bytes,
         ),
     )

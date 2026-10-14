@@ -334,7 +334,7 @@ def test_the_names_table_is_created_whatever_version_the_file_is_stamped_with(
         version = conn.execute("SELECT version FROM schema_version").fetchone()[0]
     finally:
         conn.close()
-    assert version == SCHEMA_VERSION == 26
+    assert version == SCHEMA_VERSION >= 26
 
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,8 @@ EXPECTED_TABLES = {
     "client_traffic",
     "client_depot_traffic",
     "server_traffic",
+    # v25 (WP CACHE-COMPLETE-1a): cache completeness per (app, depot).
+    "cache_completeness",
     # v26 (WP D15-NAMES): operator-set client names.
     "client_names",
 }

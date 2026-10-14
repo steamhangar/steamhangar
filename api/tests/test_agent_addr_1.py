@@ -291,7 +291,7 @@ def test_a_v23_database_gains_the_column_and_keeps_its_rows(tmp_path: Path) -> N
         row = conn.execute("SELECT source_addr, local_addrs FROM agent_reports").fetchone()
     finally:
         conn.close()
-    assert version == SCHEMA_VERSION == 26
+    assert version == SCHEMA_VERSION >= 24
     assert columns["local_addrs"] == "TEXT"
     assert (row["source_addr"], row["local_addrs"]) == ("192.168.1.7", None)
 

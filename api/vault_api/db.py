@@ -247,9 +247,15 @@ import time
 #: step, which now runs on every existing database whatever version it is
 #: stamped with (a parallel branch may stamp v25 first); existing rows keep
 #: NULL ("the agent stated nothing").
-#: v25 is taken by WP CACHE-COMPLETE-1a on a parallel branch (a pure
-#: ``CREATE TABLE``); this branch skips it so the two can merge in either
-#: order.
+#: v25 (WP CACHE-COMPLETE-1a, on top of v24): added ``cache_completeness`` --
+#: one row per (app, depot) the always-on update check measured: the target
+#: manifest id, its expected (``cb_compressed``) bytes and how many of them are
+#: on disk as exact-size chunk files (``vault_api/cache_completeness.py``). A
+#: brand-new table, so it needs no ``ALTER`` step and no version-keyed step.
+#: A database stamped 25 before AGENT-ADDR-1 was merged still gains
+#: ``local_addrs``, because that step is unconditional. Dev databases: a DB
+#: stamped 25 refuses to open under a v24-only build (the downgrade guard in
+#: ``init_db``).
 #: v26 (WP D15-NAMES): added ``client_names`` -- operator-set client names,
 #: keyed by ``(key_type, key)``: ``ip`` + a canonical IP literal today,
 #: ``mac`` reserved for when an agent reports MACs (no source does yet, and
@@ -909,6 +915,26 @@ CREATE TABLE IF NOT EXISTS server_traffic (
     peak_bucket_bytes INTEGER NOT NULL DEFAULT 0,
     active_buckets    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (tier, bucket_at)
+);
+
+-- v25 (WP CACHE-COMPLETE-1a): per (app, depot) completeness against the
+-- current build's manifest, written by the update check, read by GET
+-- /v1/games. Replaced per app in one transaction; see
+-- vault_api/cache_completeness.py for the formula and every status value.
+-- manifestid is TEXT for the same u64 reason as depot_manifests.manifestid.
+CREATE TABLE IF NOT EXISTS cache_completeness (
+    appid             INTEGER NOT NULL,
+    depotid           INTEGER NOT NULL,
+    manifestid        TEXT,
+    status            TEXT NOT NULL,
+    source            TEXT,
+    expected_bytes    INTEGER,
+    present_bytes     INTEGER,
+    chunk_count       INTEGER,
+    missing_chunks    INTEGER,
+    mismatched_chunks INTEGER,
+    checked_at        TEXT NOT NULL,
+    PRIMARY KEY (appid, depotid)
 );
 
 -- WP D15-NAMES (schema v26): a name the operator gave a client. key_type
