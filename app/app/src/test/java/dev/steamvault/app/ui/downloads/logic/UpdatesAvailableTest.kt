@@ -142,4 +142,18 @@ class UpdatesAvailableTest {
         assertFalse(validation.refresh)
         assertEquals("Could not start the update.", describeUpdateStartError(null).message)
     }
+
+    @Test
+    fun `MUTATION PIN -- sheetUpdateAppids -- flagged members without an active job, in appid order`() {
+        val members = listOf(game(300, "Zeta"), game(101, "Alpha pack"), game(102, "Plain", flagged = false), game(103, "Busy pack"))
+        assertEquals(listOf(101, 300), sheetUpdateAppids(members, listOf(job(103, "running"))))
+        assertEquals(emptyList<Int>(), sheetUpdateAppids(listOf(game(1, "Tool", tool = true)), emptyList()))
+    }
+
+    @Test
+    fun `only the 5xx toast is a long one`() {
+        assertTrue(describeUpdateStartError(VaultApiError.Server("boom", 500)).long)
+        assertFalse(describeUpdateStartError(VaultApiError.Validation("bad", 422)).long)
+        assertFalse(summarizeUpdateStart(listOf(ref(1)), emptyList()).long)
+    }
 }

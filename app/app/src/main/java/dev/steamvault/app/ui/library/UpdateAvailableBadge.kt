@@ -94,6 +94,10 @@ fun UpdateAvailableLabel(modifier: Modifier = Modifier) {
         color = VaultColors.StatusStale,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = modifier,
+        modifier = modifier.testTag(UPDATE_LABEL_TAG),
     )
 }
+
+/** Test tag of the list row's "Update available" line (review fix: the
+ * screenshot test tells it apart from a status word saying the same). */
+internal const val UPDATE_LABEL_TAG = "update-label"

@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -90,11 +91,14 @@ internal fun UpdateRow(model: UpdateRowModel, inFlight: Int?, onUpdateNow: () ->
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        // An unknown size's dash is visual only: TalkBack would read it as
+        // "em dash" (review fix).
+        val sizeSemantics = if (model.sizeLabel == UPDATE_SIZE_UNKNOWN) Modifier.clearAndSetSemantics {} else Modifier
         Text(
             text = model.sizeLabel,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier = Modifier.padding(horizontal = 8.dp).then(sizeSemantics),
         )
         val starting = inFlight == model.appid
         val spoken = if (starting) UpdatesWording.STARTING else updateNowSpokenLabel(model.name)

@@ -115,6 +115,9 @@ data class GameCardModel(
  * kind is an icon-only pill and draws no ground; the status word stays in the line under
  * the cover, so nothing on the card is said twice.
  */
+fun capsulePillHasGround(model: GameCardModel): Boolean =
+    model.kind == StatusKind.CACHED && model.sizeLabel != null
+
 /** WP UPD-6 (twin of web `showsUpdateState`). */
 fun showsUpdateState(game: GameSummary, kind: StatusKind): Boolean =
     kind == StatusKind.CACHED && game.update_available
@@ -125,15 +128,17 @@ fun showsUpdateState(game: GameSummary, kind: StatusKind): Boolean =
 fun cardIconKind(model: GameCardModel): StatusKind =
     if (model.updateState) StatusKind.STALE else model.kind
 
+/** [cardIconKind] for a raw row and its kind -- the detail sheet's header,
+ * which has no [GameCardModel]. */
+fun cardIconKind(game: GameSummary, kind: StatusKind): StatusKind =
+    if (showsUpdateState(game, kind)) StatusKind.STALE else kind
+
 /** WP UPD-2/UPD-6 (twin of web `showsUpdateBadge`): whether the card needs
  * the separate "Update available" badge/line -- the flag is set and the
  * status word does not already say it (a failed or running app that still
  * carries the flag), so nothing on the card is said twice. */
 fun showsUpdateBadge(model: GameCardModel): Boolean =
     model.updateAvailable && !model.updateState
-
-fun capsulePillHasGround(model: GameCardModel): Boolean =
-    model.kind == StatusKind.CACHED && model.sizeLabel != null
 
 /**
  * @param selecting `true` while multi-select is active -- see

@@ -22,14 +22,20 @@ class UpdatesAvailableWebTwinTest {
     private val quoted = listOf(
         UpdatesWording.HEADING, UpdatesWording.UPDATE_NOW, UpdatesWording.UPDATE_ALL, UpdatesWording.STARTING,
         UpdatesWording.MANUAL_ONLY_NOTE, UpdatesWording.NOTE_INSTALLED_ONLY_SUFFIX, UpdatesWording.NOTHING_TO_UPDATE,
-        UpdatesWording.SERVER_PARTWAY, UpdatesWording.START_FAILED,
+        UpdatesWording.SERVER_PARTWAY, UpdatesWording.START_FAILED, UpdatesWording.GAME, UpdatesWording.GAMES,
+        UpdatesWording.PART_SEPARATOR,
     )
 
     /** Fragments of web template literals: must appear verbatim. */
     private val fragments = listOf(
         UpdatesWording.NOTE_INSTALLED_ONLY_PREFIX + "\${window}; ",
         UpdatesWording.NOTE_ALL_PREFIX + "\${window}.",
-        UpdatesWording.QUEUED_FOR_UPDATE,
+        "} ${UpdatesWording.QUEUED_FOR_UPDATE}`",
+        "} ${UpdatesWording.ALREADY_QUEUED}`",
+        "} ${UpdatesWording.ALREADY_IN_PROGRESS}`",
+        "} ${UpdatesWording.PAUSED_RESUME_OR_CANCEL} \${",
+        "} ${UpdatesWording.PAUSED_FIRST}`",
+        "} ${UpdatesWording.FORCED_NOTE})`",
     )
 
     @Test

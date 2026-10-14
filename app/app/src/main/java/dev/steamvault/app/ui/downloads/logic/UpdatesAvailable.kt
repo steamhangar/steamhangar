@@ -50,6 +50,14 @@ object UpdatesWording {
     const val NOTE_ALL_PREFIX = "These download automatically in the schedule window "
     const val NOTHING_TO_UPDATE = "Nothing to update."
     const val QUEUED_FOR_UPDATE = "queued for update"
+    const val ALREADY_QUEUED = "already queued"
+    const val ALREADY_IN_PROGRESS = "already in progress"
+    const val PAUSED_RESUME_OR_CANCEL = "paused — resume or cancel"
+    const val PAUSED_FIRST = "first"
+    const val FORCED_NOTE = "forced — those run full, disk-speed re-checks and may take longer"
+    const val PART_SEPARATOR = " · "
+    const val GAME = "game"
+    const val GAMES = "games"
     const val SERVER_PARTWAY =
         "The server had trouble partway through — some updates may already be queued. Re-checking Downloads…"
     const val START_FAILED = "Could not start the update."
@@ -82,7 +90,7 @@ fun updatesHeadingText(count: Int): String = "${UpdatesWording.HEADING} ($count)
 
 /** "Update all 7 games" -- the button's spoken label. */
 fun updateAllSpokenLabel(count: Int): String =
-    "${UpdatesWording.UPDATE_ALL} $count ${if (count == 1) "game" else "games"}"
+    "${UpdatesWording.UPDATE_ALL} $count ${if (count == 1) UpdatesWording.GAME else UpdatesWording.GAMES}"
 
 /** "Update now — Emberreach" -- the row button's spoken label. */
 fun updateNowSpokenLabel(title: String): String = "${UpdatesWording.UPDATE_NOW} — $title"
@@ -110,8 +118,15 @@ fun scheduleNote(schedule: ScheduleOut?): String? {
 }
 
 /** Toast for an update start, success or failure. [refresh]: re-read the
- * jobs (a 5xx can leave the first apps already queued). */
-data class UpdateStartOutcome(val message: String, val warn: Boolean, val refresh: Boolean)
+ * jobs (a 5xx can leave the first apps already queued). [long]: the toast
+ * stays [BULK_TOAST_MS] instead of [TOAST_MS] (the 5xx "partway" note is a
+ * long sentence, like the bulk results). */
+data class UpdateStartOutcome(
+    val message: String,
+    val warn: Boolean,
+    val refresh: Boolean,
+    val long: Boolean = false,
+)
 
 /** Toast for a successful `POST /v1/prefill` from this section. */
 fun summarizeUpdateStart(refs: List<PrefillJobRef>?, games: List<GameSummary>?): UpdateStartOutcome {
@@ -119,15 +134,16 @@ fun summarizeUpdateStart(refs: List<PrefillJobRef>?, games: List<GameSummary>?):
     if (p.total == 0) return UpdateStartOutcome(UpdatesWording.NOTHING_TO_UPDATE, warn = false, refresh = true)
     val parts = mutableListOf<String>()
     if (p.queued.isNotEmpty()) parts.add("${p.queued.size} ${UpdatesWording.QUEUED_FOR_UPDATE}")
-    if (p.alreadyQueued.isNotEmpty()) parts.add("${p.alreadyQueued.size} already queued")
-    if (p.alreadyRunning.isNotEmpty()) parts.add("${p.alreadyRunning.size} already in progress")
+    if (p.alreadyQueued.isNotEmpty()) parts.add("${p.alreadyQueued.size} ${UpdatesWording.ALREADY_QUEUED}")
+    if (p.alreadyRunning.isNotEmpty()) parts.add("${p.alreadyRunning.size} ${UpdatesWording.ALREADY_IN_PROGRESS}")
     if (p.alreadyPaused.isNotEmpty()) {
-        parts.add("${p.alreadyPaused.size} paused — resume or cancel ${if (p.alreadyPaused.size > 1) "them" else "it"} first")
+        val pronoun = if (p.alreadyPaused.size > 1) "them" else "it"
+        parts.add("${p.alreadyPaused.size} ${UpdatesWording.PAUSED_RESUME_OR_CANCEL} $pronoun ${UpdatesWording.PAUSED_FIRST}")
     }
-    var message = parts.joinToString(" · ")
+    var message = parts.joinToString(UpdatesWording.PART_SEPARATOR)
     if (p.queued.isNotEmpty()) {
         val forced = countForcedCachedGames(p.queued, games)
-        if (forced > 0) message += " ($forced forced — those run full, disk-speed re-checks and may take longer)"
+        if (forced > 0) message += " ($forced ${UpdatesWording.FORCED_NOTE})"
     }
     return UpdateStartOutcome(
         message.replaceFirstChar { it.uppercaseChar() },
@@ -138,8 +154,19 @@ fun summarizeUpdateStart(refs: List<PrefillJobRef>?, games: List<GameSummary>?):
 
 /** How to report a failed `POST /v1/prefill` from this section. */
 fun describeUpdateStartError(err: Throwable?): UpdateStartOutcome {
-    if (err is VaultApiError.Server) return UpdateStartOutcome(UpdatesWording.SERVER_PARTWAY, warn = true, refresh = true)
+    if (err is VaultApiError.Server) {
+        return UpdateStartOutcome(UpdatesWording.SERVER_PARTWAY, warn = true, refresh = true, long = true)
+    }
     val detail = (err as? VaultApiError)?.detail?.takeIf { it.isNotBlank() }
     val message = detail ?: err?.message?.takeIf { it.isNotBlank() } ?: UpdatesWording.START_FAILED
     return UpdateStartOutcome(message, warn = true, refresh = false)
 }
+
+/**
+ * The app ids the detail sheet's "Update now" sends (twin of web
+ * `sheetUpdateAppids`): the game's own row and, for a group, its packages'
+ * rows -- each only while flagged, not a tool app and without an active
+ * prefill job (the same rule as [pendingUpdates]), in appid order.
+ */
+fun sheetUpdateAppids(members: List<GameSummary>, jobs: List<JobSummary>): List<Int> =
+    pendingUpdates(members, jobs) { "" }.map { it.appid }

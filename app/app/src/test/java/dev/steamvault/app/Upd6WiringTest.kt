@@ -84,4 +84,24 @@ class Upd6WiringTest {
             Regex("""if \(model\.updateState\)\s*\{\s*stringResource\(R\.string\.library_update_available_badge\)""").containsMatchIn(cardCode),
         )
     }
+
+    private val sheet = "$base/ui/detail/GameDetailSheet.kt"
+
+    @Test
+    fun `MUTATION PIN -- the detail sheet header reads the group row, and offers Update now`() {
+        assertCalledFrom(sheet, "groupGames(games).rows.firstOrNull { it.appid == appid }", "GameDetailSheetBody")
+        assertCalledFrom(sheet, "updateRow = updateRow)", "GameDetailSheetBody")
+        assertCalledFrom(sheet, "val updateState = showsUpdateState(row, kind)", "DetailHeader")
+        assertCalledFrom(sheet, "StatusIcon(kind = cardIconKind(row, kind)", "DetailHeader")
+        assertCalledFrom(sheet, "sheetUpdateAppids(listOf(gameSummary) + packages, jobs)", "LoadedDetailBody")
+        assertCalledFrom(sheet, "controller.startUpdate(scope, updateAppids, games)", "LoadedDetailBody")
+        assertCalledFrom(sheet, "val pkgUpdate = showsUpdateState(pkg, kind)", "PackagesSection")
+    }
+
+    @Test
+    fun `MUTATION PIN -- the 5xx update toast stays long, the unknown-size dash is silent`() {
+        val controller = stripComments(read("$base/ui/downloads/DownloadsController.kt"))
+        assertTrue(controller.contains("showToast(outcome.message, if (outcome.long) BULK_TOAST_MS else TOAST_MS)"))
+        assertCalledFrom("$base/ui/downloads/DownloadsUpdates.kt", "Modifier.clearAndSetSemantics {}", "UpdateRow")
+    }
 }

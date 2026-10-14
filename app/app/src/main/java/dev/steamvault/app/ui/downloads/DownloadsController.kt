@@ -263,7 +263,7 @@ class DownloadsController(
                 } catch (e: VaultApiError) {
                     describeUpdateStartError(e)
                 }
-                showToast(outcome.message)
+                showToast(outcome.message, if (outcome.long) BULK_TOAST_MS else TOAST_MS)
                 if (outcome.refresh) refreshJobsOnce()
             } finally {
                 updatesInFlight = null

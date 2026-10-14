@@ -325,14 +325,14 @@ class LibraryScreenshotTest {
     /**
      * WP UPD-6, in every profile: the cached, flagged Lighthouse Keeper card
      * says "Update available" as its status word (no "Current" for it), and
-     * its status icon speaks the same word. The badge is not counted here:
-     * it is found by [UPDATE_BADGE_TAG].
+     * its status icon speaks the same word. The grid badge and the list's
+     * update line are not counted here ([UPDATE_BADGE_TAG], [UPDATE_LABEL_TAG]).
      */
     private fun assertUpdateState() {
         val words = composeRule
             .onAllNodes(SemanticsMatcher("text is \"$UPDATE_BADGE_FULL\"") { it.text() == UPDATE_BADGE_FULL }, useUnmergedTree = true)
             .fetchSemanticsNodes()
-            .filterNot { it.config.getOrNull(SemanticsProperties.TestTag) == UPDATE_BADGE_TAG }
+            .filterNot { it.config.getOrNull(SemanticsProperties.TestTag) in setOf(UPDATE_BADGE_TAG, UPDATE_LABEL_TAG) }
         assertTrue("no card status word reads '$UPDATE_BADGE_FULL' (the Lighthouse Keeper game is cached and flagged)", words.isNotEmpty())
         val icons = composeRule
             .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)

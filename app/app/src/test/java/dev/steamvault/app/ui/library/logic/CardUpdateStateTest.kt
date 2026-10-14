@@ -87,4 +87,11 @@ class CardUpdateStateTest {
         assertTrue(m.updateState)
         assertEquals(StatusKind.STALE, cardIconKind(m))
     }
+
+    @Test
+    fun `cardIconKind for a raw row (detail sheet header)`() {
+        assertEquals(StatusKind.STALE, cardIconKind(row(), StatusKind.CACHED))
+        assertEquals(StatusKind.CACHED, cardIconKind(row(flagged = false), StatusKind.CACHED))
+        assertEquals(StatusKind.UPDATING, cardIconKind(row(), StatusKind.UPDATING))
+    }
 }
