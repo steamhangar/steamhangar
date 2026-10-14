@@ -2,7 +2,8 @@
 
 Date: 2026-08-06
 Status: Accepted (orchestrator decision from evidence; see docs/research/phase3-manifests.md).
-Decision 4's "opt-in, default off" superseded by the addendum 2026-10-13 below.
+Decision 4's "opt-in, default off" superseded by the addendum 2026-10-13 below;
+that addendum's window gate superseded by the note 2026-10-14 (WP UPD-5).
 
 ## Decision
 
@@ -118,3 +119,26 @@ any app outside the set still protects its depots under the ADR-0003
 remnant rule. No new oracle request is made for this (ADR-0022 Q8 B: the
 update check still asks only about cached apps). `api/vault_api/oracle.py`
 states the exception in its safety-invariant docstring.
+
+## Note 2026-10-14 — the scheduled check no longer needs a window (WP UPD-5)
+
+User decision 2026-10-14 (morning, `docs/handover/post-0.1.0-roadmap.md`).
+Supersedes the window gate in points 1 and 3 of the 2026-10-13 addendum
+"always-on update check" (not the grouped-delete one)
+(the orchestrator's implementation of "only prod checks"), and point 2's
+rationale sentence "the dev instance has no schedule window configured,
+so it never checks on its own":
+
+- The scheduled update check runs every
+  `VAULT_SCHEDULE_INTERVAL_MINUTES` **whenever the oracle is on**, with a
+  schedule window open, closed or not configured at all. The oracle switch
+  (`VAULT_MANIFEST_ORACLE=off`) is the only way to stop it.
+- Automatic downloads and prefill sweeps stay strictly bound to the
+  window, unchanged: without a window, no automatic download starts.
+- The dev instance, which has no window, therefore also checks in the
+  background now. That sends only anonymous metadata (the app ids of
+  cached games) to the oracle; the user approved this.
+- `GET /v1/updates/status` keeps its `scheduled` field; it now means
+  "the oracle is on" and equals `enabled`.
+- Point 4 applies without its window condition: with the oracle on, the
+  background polling happens on every install.

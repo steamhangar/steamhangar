@@ -427,6 +427,22 @@ class FakeElement {
     if (idx !== -1) this.parentNode.childNodes.splice(idx, 1);
     this.parentNode = null;
   }
+  // WP TOOL-APPS-2c (library-groups-wiring.test.js): views/library.js's
+  // per-card rebuild calls `cardEl.replaceWith(newCard)`. One node only,
+  // same position; throws on anything else (this file's rule).
+  replaceWith(...nodes) {
+    if (nodes.length !== 1 || typeof nodes[0] === "string") {
+      throw new Error("fake-dom.js: replaceWith supports exactly one node");
+    }
+    const parent = this.parentNode;
+    if (!parent) throw new Error("fake-dom.js: replaceWith on a detached node");
+    const node = nodes[0];
+    if (node.parentNode) node.remove();
+    const idx = parent.childNodes.indexOf(this);
+    parent.childNodes.splice(idx, 1, node);
+    node.parentNode = parent;
+    this.parentNode = null;
+  }
   addEventListener(type, handler) {
     if (!this._listeners.has(type)) this._listeners.set(type, new Set());
     this._listeners.get(type).add(handler);

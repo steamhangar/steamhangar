@@ -39,12 +39,50 @@ import {
   unreadCount,
   markAllRead,
   navigationTargetFor,
+  syncUpdateCheckDue,
+  ackUpdateCheckDue,
+  pruneUpdateCheckDueSeen,
 } from "../lib/notification-log.js";
+import { staleUpdateChecks, updateCheckDueWording, UPDATE_CHECK_HINT } from "../lib/decision-support.js";
+import { currentUpdateCheckPhase } from "../views/library.js";
+import { UPDATE_PHASE } from "../lib/update-check.js";
+
+// WP WEB-FEAT-SUGGEST-2 review: the appids the user already saw in the
+// "update check due" entry survive a reload, so the same games do not raise
+// it as unread again (lib/notification-log.js syncUpdateCheckDue). Guarded:
+// reading localStorage itself throws with site data blocked (WEB-FIX-5).
+const UPDATE_DUE_SEEN_KEY = "steamvault.updateCheckDueSeen";
+
+function readSeen() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(UPDATE_DUE_SEEN_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((a) => Number.isInteger(a)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSeen(seen) {
+  try {
+    window.localStorage.setItem(UPDATE_DUE_SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    // persistence is a convenience; the in-memory list still works
+  }
+}
 
 const state = {
   log: [], // newest-first; starts empty on purpose, see notification-log.js
   nextId: 1,
+  updateDueSeen: readSeen(),
 };
+
+/** Only point at "Check updates" while that button exists. */
+function updateCheckHint() {
+  const phase = currentUpdateCheckPhase();
+  if (phase === UPDATE_PHASE.IDLE || phase === UPDATE_PHASE.RUNNING) return UPDATE_CHECK_HINT.AVAILABLE;
+  if (phase === UPDATE_PHASE.DISABLED) return UPDATE_CHECK_HINT.DISABLED;
+  return UPDATE_CHECK_HINT.NONE;
+}
 
 const bell = document.getElementById("btn-notifs");
 const pip = document.getElementById("npip");
@@ -99,6 +137,8 @@ function titleFor(entry) {
     case "bypass_suspected":
     case "bypass_resolved":
       return `Client ${entry.clientId}`;
+    case "update_check_due":
+      return updateCheckDueWording(entry.items, gameNameFor, updateCheckHint()).title;
     default:
       return "Notice";
   }
@@ -116,6 +156,8 @@ function textFor(entry) {
       return "Reports installed games, but none of its downloads have reached the cache.";
     case "bypass_resolved":
       return "Downloads from this client are reaching the cache again.";
+    case "update_check_due":
+      return updateCheckDueWording(entry.items, gameNameFor, updateCheckHint()).text;
     default:
       return "";
   }
@@ -184,7 +226,7 @@ function renderList() {
     const empty = document.createElement("p");
     empty.className = "hint";
     empty.textContent =
-      "Nothing to report. Downloads, updates and bypass warnings show up here.";
+      "Nothing to report. Downloads, updates, overdue update checks and bypass warnings show up here.";
     list.replaceChildren(empty);
     return;
   }
@@ -234,6 +276,11 @@ function openPanel() {
   renderList();
   dialog.open();
   state.log = markAllRead(state.log);
+  const seen = ackUpdateCheckDue(state.updateDueSeen, state.log);
+  if (seen.join() !== state.updateDueSeen.join()) {
+    state.updateDueSeen = seen;
+    writeSeen(seen);
+  }
   updateBadge();
 }
 
@@ -252,6 +299,31 @@ store.subscribe("notifications", (events) => {
     at: new Date().toISOString(),
     startId: state.nextId,
   });
+  state.log = log;
+  state.nextId = nextId;
+  updateBadge();
+  if (dialog.isOpen()) renderList();
+});
+
+// WP WEB-FEAT-SUGGEST-2: the "update check due" entry (the Phase 4h
+// panel's "not confirmed current" statement, now 14 days). One entry at
+// most; unread only while it names a game not yet acknowledged (opening
+// the bell acknowledges, persisted across reloads) — lib/notification-
+// log.js's syncUpdateCheckDue. A `{error}` payload changes nothing.
+store.subscribe("games", ({ items }) => {
+  if (!Array.isArray(items)) return;
+  const due = staleUpdateChecks(items);
+  const { log, nextId } = syncUpdateCheckDue(state.log, due, {
+    at: new Date().toISOString(),
+    startId: state.nextId,
+    seen: state.updateDueSeen,
+  });
+  const seen = pruneUpdateCheckDueSeen(state.updateDueSeen, due);
+  if (seen.join() !== state.updateDueSeen.join()) {
+    state.updateDueSeen = seen;
+    writeSeen(seen);
+  }
+  if (log === state.log) return;
   state.log = log;
   state.nextId = nextId;
   updateBadge();

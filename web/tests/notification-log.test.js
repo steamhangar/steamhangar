@@ -13,6 +13,10 @@ import {
   unreadCount,
   markAllRead,
   navigationTargetFor,
+  syncUpdateCheckDue,
+  UPDATE_CHECK_DUE_KEY,
+  ackUpdateCheckDue,
+  pruneUpdateCheckDueSeen,
 } from "../js/lib/notification-log.js";
 
 // ---------------------------------------------------------------------
@@ -27,16 +31,17 @@ test("metaFor: every real event type has literal icon/tx/word metadata", () => {
   assert.deepEqual(metaFor("update_ready"), { icon: "stale", tx: "tx-stale", word: "Update ready" });
   assert.deepEqual(metaFor("bypass_suspected"), { icon: "warn", tx: "tx-warn", word: "Warning" });
   assert.deepEqual(metaFor("bypass_resolved"), { icon: "cached", tx: "tx-cached", word: "Resolved" });
+  assert.deepEqual(metaFor("update_check_due"), { icon: "stale", tx: "tx-stale", word: "Check due" });
 });
 
 test("metaFor: an unknown event type falls back honestly instead of throwing", () => {
   assert.deepEqual(metaFor("something_new"), { icon: "none", tx: "tx-none", word: "Notice" });
 });
 
-test("NOTIFICATION_META covers exactly the taxonomy notifications.js emits", () => {
+test("NOTIFICATION_META covers exactly the taxonomy notifications.js emits, plus the standing update_check_due entry", () => {
   assert.deepEqual(
     Object.keys(NOTIFICATION_META).sort(),
-    ["bypass_resolved", "bypass_suspected", "job_failed", "job_finished", "update_ready"].sort(),
+    ["bypass_resolved", "bypass_suspected", "job_failed", "job_finished", "update_ready", "update_check_due"].sort(),
   );
 });
 
@@ -171,4 +176,95 @@ test("navigationTargetFor: bypass_suspected and bypass_resolved both open the cl
 
 test("navigationTargetFor: an unknown event type fails toward the Library, not a crash", () => {
   assert.deepEqual(navigationTargetFor({ type: "something_new" }), { kind: "library" });
+});
+
+// ---------------------------------------------------------------------
+// syncUpdateCheckDue (WP WEB-FEAT-SUGGEST-2) — the one standing "update
+// check due" entry: raised once, unread again only when a game joins it,
+// updated in place otherwise, removed when the list empties.
+// ---------------------------------------------------------------------
+
+const AT = "2026-10-13T12:00:00Z";
+const due = (log) => log.filter((e) => e.key === UPDATE_CHECK_DUE_KEY);
+
+test("syncUpdateCheckDue: first sight adds ONE unread entry on top", () => {
+  const log = [{ id: 1, type: "job_finished", jobId: 1, read: true, at: "x" }];
+  const r = syncUpdateCheckDue(log, [{ appid: 7, days: 20 }], { at: AT, startId: 2 });
+  assert.equal(r.log.length, 2);
+  assert.deepEqual(
+    { type: r.log[0].type, appids: r.log[0].appids, read: r.log[0].read, id: r.log[0].id, at: r.log[0].at },
+    { type: "update_check_due", appids: [7], read: false, id: 2, at: AT },
+  );
+  assert.equal(r.nextId, 3);
+  assert.equal(unreadCount(r.log), 1);
+});
+
+test("MUTATION PIN (no spam): the same games on the next poll change nothing — same log, still read once read", () => {
+  const first = syncUpdateCheckDue([], [{ appid: 7, days: 20 }], { at: AT, startId: 1 });
+  const read = markAllRead(first.log);
+  const again = syncUpdateCheckDue(read, [{ appid: 7, days: 20 }], { at: AT, startId: first.nextId });
+  assert.equal(again.log, read, "reference-equal: nothing to do");
+  assert.equal(again.nextId, first.nextId);
+  assert.equal(unreadCount(again.log), 0);
+});
+
+test("MUTATION PIN (no spam): a day passing or a game leaving updates the entry in place, read state and position kept", () => {
+  const start = syncUpdateCheckDue([], [{ appid: 7, days: 20 }, { appid: 8, days: 15 }], { at: AT, startId: 1 });
+  const read = markAllRead(start.log);
+  const withNews = appendNotifications(read, [{ type: "job_finished", key: "job:9:done", jobId: 9 }], { at: AT, startId: 2 });
+  const later = syncUpdateCheckDue(withNews.log, [{ appid: 7, days: 21 }], { at: "later", startId: withNews.nextId });
+  assert.equal(later.log.length, 2);
+  assert.equal(later.log[1].key, UPDATE_CHECK_DUE_KEY, "position kept (below the newer job entry)");
+  assert.deepEqual(later.log[1].items, [{ appid: 7, days: 21 }]);
+  assert.equal(later.log[1].read, true);
+  assert.equal(later.log[1].at, AT, "still the time it was raised");
+  assert.equal(later.nextId, withNews.nextId);
+});
+
+test("a game JOINING the list raises a fresh unread entry on top, replacing the old one", () => {
+  const start = syncUpdateCheckDue([], [{ appid: 7, days: 20 }], { at: AT, startId: 1 });
+  const read = markAllRead(start.log);
+  const r = syncUpdateCheckDue(read, [{ appid: 7, days: 21 }, { appid: 8, days: 14 }], { at: "later", startId: 2 });
+  assert.equal(due(r.log).length, 1, "never two such entries");
+  assert.deepEqual(r.log[0].appids, [7, 8]);
+  assert.equal(r.log[0].read, false);
+  assert.equal(r.log[0].at, "later");
+  assert.equal(r.nextId, 3);
+});
+
+test("an empty list removes the entry (the games were checked); with no entry it is a no-op", () => {
+  const start = syncUpdateCheckDue([], [{ appid: 7, days: 20 }], { at: AT, startId: 1 });
+  const r = syncUpdateCheckDue(start.log, [], { at: AT, startId: 2 });
+  assert.deepEqual(r.log, []);
+  const empty = [];
+  assert.equal(syncUpdateCheckDue(empty, [], { at: AT, startId: 1 }).log, empty);
+});
+
+test("navigationTargetFor: update_check_due opens the Library (where 'Check updates' is)", () => {
+  assert.deepEqual(navigationTargetFor({ type: "update_check_due", appids: [7] }), { kind: "library" });
+});
+
+test("MUTATION PIN (persisted acknowledgement): after a reload, the same games raise the entry READ; a new game makes it unread", () => {
+  // Session 1: raised, the user opens the bell.
+  const s1 = syncUpdateCheckDue([], [{ appid: 7, days: 20 }], { at: AT, startId: 1, seen: [] });
+  assert.equal(s1.log[0].read, false);
+  const seen = ackUpdateCheckDue([], markAllRead(s1.log));
+  assert.deepEqual(seen, [7]);
+  // Session 2 (reload: empty log, seen from storage).
+  const s2 = syncUpdateCheckDue([], [{ appid: 7, days: 21 }], { at: AT, startId: 1, seen });
+  assert.equal(s2.log.length, 1);
+  assert.equal(s2.log[0].read, true, "same games: not news again");
+  assert.equal(unreadCount(s2.log), 0);
+  // A new game joins: unread.
+  const s3 = syncUpdateCheckDue(s2.log, [{ appid: 7, days: 21 }, { appid: 8, days: 14 }], { at: AT, startId: 2, seen });
+  assert.equal(s3.log[0].read, false);
+  assert.deepEqual(s3.log[0].appids, [7, 8]);
+});
+
+test("ackUpdateCheckDue adds the entry's games; pruneUpdateCheckDueSeen forgets games that left the list", () => {
+  const log = syncUpdateCheckDue([], [{ appid: 9, days: 30 }, { appid: 3, days: 20 }], { at: AT, startId: 1 }).log;
+  assert.deepEqual(ackUpdateCheckDue([5, 3], log), [3, 5, 9]);
+  assert.deepEqual(ackUpdateCheckDue([5], []), [5], "no entry: unchanged");
+  assert.deepEqual(pruneUpdateCheckDueSeen([3, 5, 9], [{ appid: 9 }, { appid: 3 }]), [3, 9]);
+  assert.deepEqual(pruneUpdateCheckDueSeen([3, 9], []), [], "all checked: a later overdue episode is news again");
 });
