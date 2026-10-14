@@ -102,6 +102,10 @@ fun GameListRow(
             if (model.updateAvailable) {
                 UpdateAvailableLabel()
             }
+            // WP TOOL-APPS-2d: the group line and the "Never played" label,
+            // as on the grid card.
+            GroupPackagesLine(model)
+            if (model.neverPlayed) NeverPlayedLabel()
             // WP AG-3: same shared decision/text as GameCard.kt's grid pill --
             // see ui/library/InstalledBadgeText.kt.
             installedBadgeText(model.installedBadge)?.let { text ->

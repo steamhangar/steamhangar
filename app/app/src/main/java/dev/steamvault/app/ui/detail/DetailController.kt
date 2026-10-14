@@ -13,7 +13,12 @@ import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.ui.detail.logic.GcFlowEvent
 import dev.steamvault.app.ui.detail.logic.GcFlowState
 import dev.steamvault.app.ui.detail.logic.reduceGcFlow
+import dev.steamvault.app.net.model.DeletePlanOut
+import dev.steamvault.app.ui.library.logic.MEMBERS_CHANGED_NOTICE
 import dev.steamvault.app.ui.library.logic.formatBytesGB
+import dev.steamvault.app.ui.library.logic.isMembersMismatch
+import dev.steamvault.app.ui.library.logic.isPlanBlocked
+import dev.steamvault.app.ui.library.logic.planMemberIds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -93,6 +98,11 @@ class DetailController(
     var showDeleteConfirm by mutableStateOf(false)
         private set
 
+    /** WP TOOL-APPS-2d: the grouped-delete confirmation (a game with content
+     * packages), separate from [showDeleteConfirm]'s plain one. */
+    var groupDelete by mutableStateOf<GroupDeleteUiState>(GroupDeleteUiState.Hidden)
+        private set
+
     var gcState by mutableStateOf<GcFlowState>(GcFlowState.Idle)
         private set
 
@@ -127,6 +137,7 @@ class DetailController(
         notTracked = !isKnownToVault
         loadError = null
         showDeleteConfirm = false
+        groupDelete = GroupDeleteUiState.Hidden
         gcState = GcFlowState.Idle
 
         if (!isKnownToVault) return
@@ -161,6 +172,7 @@ class DetailController(
         notTracked = false
         loadError = null
         showDeleteConfirm = false
+        groupDelete = GroupDeleteUiState.Hidden
         gcState = GcFlowState.Idle
     }
 
@@ -238,6 +250,66 @@ class DetailController(
             } catch (e: VaultApiError) {
                 showDeleteConfirm = false
                 toast = e.message ?: strings.actionFailedFallback()
+            }
+        }
+    }
+
+    // ---- content packages (WP TOOL-APPS-2d, ADR-0022 §3/§4) -----------------------
+
+    /** "Retry download" on a failed package: its own `POST /v1/prefill`, the
+     * same request its own card would send. */
+    fun retryPackage(scope: CoroutineScope, packageAppid: Int, onLibraryChanged: () -> Unit) {
+        scope.launch {
+            try {
+                jobsRepository.prefill(listOf(packageAppid))
+                toast = strings.queuedForDownload()
+                onLibraryChanged()
+            } catch (e: VaultApiError) {
+                toast = e.message ?: strings.actionFailedFallback()
+            }
+        }
+    }
+
+    /** Fetch the server's grouped-delete plan for the open game and show
+     * it. Also the re-confirm step after a 409 "members differ" ([notice]). */
+    fun openGroupDeleteConfirm(scope: CoroutineScope, notice: String? = null) {
+        val appid = openAppid ?: return
+        groupDelete = GroupDeleteUiState.Loading
+        scope.launch {
+            groupDelete = try {
+                GroupDeleteUiState.Ready(cacheRepository.deletePlan(appid), notice)
+            } catch (e: VaultApiError) {
+                GroupDeleteUiState.Error(e.message ?: strings.actionFailedFallback())
+            }
+        }
+    }
+
+    fun closeGroupDeleteConfirm() {
+        groupDelete = GroupDeleteUiState.Hidden
+    }
+
+    /** Delete the game with exactly the confirmed members; on a 409 "members
+     * differ" fetch the plan again and ask again (nothing was deleted). */
+    fun confirmGroupDelete(scope: CoroutineScope, onLibraryChanged: () -> Unit) {
+        val appid = openAppid ?: return
+        val ready = groupDelete as? GroupDeleteUiState.Ready ?: return
+        if (isPlanBlocked(ready.plan)) return
+        groupDelete = GroupDeleteUiState.Loading
+        scope.launch {
+            try {
+                val result = cacheRepository.deleteWithPackages(appid, planMemberIds(ready.plan))
+                groupDelete = GroupDeleteUiState.Hidden
+                toast = strings.freed(formatBytesGB(result.total_bytes_freed) ?: strings.zeroBytesLabel())
+                onLibraryChanged()
+                close()
+            } catch (e: VaultApiError) {
+                if (isMembersMismatch(e)) {
+                    onLibraryChanged()
+                    openGroupDeleteConfirm(scope, MEMBERS_CHANGED_NOTICE)
+                } else {
+                    groupDelete = GroupDeleteUiState.Hidden
+                    toast = e.message ?: strings.actionFailedFallback()
+                }
             }
         }
     }
@@ -345,4 +417,12 @@ class DetailController(
             }
         }
     }
+}
+
+/** WP TOOL-APPS-2d: the detail sheet's grouped-delete confirmation. */
+sealed class GroupDeleteUiState {
+    data object Hidden : GroupDeleteUiState()
+    data object Loading : GroupDeleteUiState()
+    data class Ready(val plan: DeletePlanOut, val notice: String? = null) : GroupDeleteUiState()
+    data class Error(val message: String) : GroupDeleteUiState()
 }

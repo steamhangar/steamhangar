@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
@@ -211,6 +212,20 @@ class VaultApiClient(
     // ---- cache ----------------------------------------------------------
 
     suspend fun deleteCache(appid: Int): CacheDeletionOut = delete("/v1/cache/$appid")
+
+    /** WP TOOL-APPS-2b: the grouped-delete preview
+     * (`GET /v1/cache/{appid}/delete-plan?with_packages=true`). */
+    suspend fun deletePlan(appid: Int): DeletePlanOut =
+        get("/v1/cache/$appid/delete-plan", params = mapOf("with_packages" to "true"))
+
+    /** WP TOOL-APPS-2b: delete a game with its content packages; [members]
+     * must be exactly the plan's `members[].appid` (409 otherwise). */
+    suspend fun deleteCacheWithPackages(appid: Int, members: List<Int>): CacheDeletionOut =
+        execute<CacheDeletionOut>(
+            "DELETE",
+            "/v1/cache/$appid",
+            mapOf("with_packages" to "true", "members" to members.joinToString(",")),
+        ) { it.delete() }
 
     suspend fun cacheSummary(): CacheSummaryOut = get("/v1/cache/summary")
 

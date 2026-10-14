@@ -260,7 +260,12 @@ class LibraryScreenshotTest {
         val badges = composeRule
             .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
             .fetchSemanticsNodes()
+        // WP TOOL-APPS-2d: the "Never played" pill rides on the cover too.
+        val playPills = composeRule
+            .onAllNodes(hasTestTag(NEVER_PLAYED_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
         assertTrue("no fallback titles rendered", titles.isNotEmpty())
+        assertContentPackages()
         val grid = layout != LibraryLayout.LIST
         if (grid) {
             assertTrue("no capsule pills rendered", pills.isNotEmpty())
@@ -274,7 +279,11 @@ class LibraryScreenshotTest {
             }
         }
         // A node scrolled fully out of the viewport reports empty bounds.
-        val overlays = (pills.map { "capsule pill" to it } + badges.map { "update badge" to it })
+        val overlays = (
+            pills.map { "capsule pill" to it } +
+                badges.map { "update badge" to it } +
+                (if (grid) playPills.map { "never-played pill" to it } else emptyList())
+            )
             .filterNot { (_, node) -> node.boundsInRoot.isEmpty }
         for (title in titles.filterNot { it.boundsInRoot.isEmpty }) {
             val rendered = renderedTextBounds(title)
@@ -299,6 +308,41 @@ class LibraryScreenshotTest {
             )
             if (expectedBadgeText != null) assertEquals("update badge label", expectedBadgeText, text)
         }
+    }
+
+    /**
+     * WP TOOL-APPS-2d, in every profile: the group card carries "+2 content
+     * packages · 1 failed" (one spoken label), its packages are not cards of
+     * their own, and the Lighthouse Keeper game (cached, owned playtime 0) shows "Never
+     * played" -- spoken "Fully cached, never played".
+     */
+    private fun assertContentPackages() {
+        composeRule
+            .onAllNodes(hasTestTag(GROUP_PACKAGES_LINE_TAG), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .let { lines ->
+                assertEquals("group lines rendered", 1, lines.size)
+                assertEquals(
+                    "group line label",
+                    listOf("2 content packages, 1 failed"),
+                    lines.single().config.getOrNull(SemanticsProperties.ContentDescription),
+                )
+            }
+        assertEquals(
+            "a content package must not be a card of its own",
+            0,
+            composeRule
+                .onAllNodes(hasContentDescription("Expedition Pass", substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .size,
+        )
+        assertTrue(
+            "no Never played pill/label rendered",
+            composeRule
+                .onAllNodes(hasContentDescription("Fully cached, never played"), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty(),
+        )
     }
 
     private fun SemanticsNode.text(): String =

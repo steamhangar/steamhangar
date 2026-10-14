@@ -40,7 +40,11 @@ import kotlinx.serialization.json.JsonPrimitive
  * downloading, updating, paused, failed). One cached game carries the
  * "Update available" badge (WP UPD-3), which also gives the "Updates" chip
  * a count, and [FixedUpdatesRepository] keeps the top bar's "Check
- * updates" action visible. Names are invented, appids are
+ * updates" action visible. WP TOOL-APPS-2d: Starfall Odyssey heads a
+ * content-package group of two packages, one failed ("+2 content packages
+ * · 1 failed", sized by the server's `group_size_bytes`), and the Lighthouse Keeper game
+ * is cached with an owned playtime of exactly 0 (the "Never played" pill).
+ * Names are invented, appids are
  * synthetic (docs/LEARNINGS.md "Fixtures: synthetic only").
  *
  * Deliberately NOT time-dependent: no `Instant.now()` anywhere (the demo
@@ -63,6 +67,19 @@ internal object LibraryScreenshotFixtures {
             last_prefill_at = PREFILLED_AT, depot_count = 2, size_bytes = 48_300_000_000,
             // WP UPD-3: the oracle reports a newer build -> badge + "Updates 1".
             update_available = true, update_checked_at = PREFILLED_AT,
+            // WP TOOL-APPS-2d: heads the group below.
+            app_type = "game", group_size_bytes = 48_900_000_000,
+        ),
+        // WP TOOL-APPS-2d: two content packages of Starfall Odyssey -- not
+        // cards of their own; one failed.
+        GameSummary(
+            appid = 1_000_011, name = "Starfall Odyssey - Original Soundtrack", status = "done",
+            last_prefill_at = PREFILLED_AT, depot_count = 1, size_bytes = 600_000_000,
+            parent_appid = 1_000_010, app_type = "music",
+        ),
+        GameSummary(
+            appid = 1_000_012, name = "Starfall Odyssey - Expedition Pass", status = "error",
+            depot_count = 1, parent_appid = 1_000_010, app_type = "dlc",
         ),
         GameSummary(
             appid = 1_000_020,
@@ -100,7 +117,13 @@ internal object LibraryScreenshotFixtures {
 
     /** The Steam relay's owned list: every vault game plus three the vault
      * has never seen (the "Not cached" chip). */
-    val ownedGames: List<OwnedGame> = vaultGames.map { OwnedGame(appid = it.appid, name = it.name ?: "") } + listOf(
+    val ownedGames: List<OwnedGame> = vaultGames
+        // Steam's owned list names games, not their content packages.
+        .filter { it.parent_appid == null }
+        .map {
+            // WP TOOL-APPS-2d: the Lighthouse Keeper game was never played (a real 0).
+            OwnedGame(appid = it.appid, name = it.name ?: "", playtime_forever = if (it.appid == 1_000_020) 0 else null)
+        } + listOf(
         OwnedGame(appid = 1_000_080, name = "Mechanized Frontier Tactics: Remastered Collection"),
         OwnedGame(appid = 1_000_090, name = "Quiet Orchard"),
         OwnedGame(appid = 1_000_100, name = "Echoes of the Sunken Cathedral"),

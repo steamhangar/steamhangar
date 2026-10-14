@@ -71,6 +71,8 @@ import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.StatusActionType
 import dev.steamvault.app.ui.library.logic.buildGameCardModel
 import dev.steamvault.app.ui.library.logic.chipCounts
+import dev.steamvault.app.ui.library.logic.groupGames
+import dev.steamvault.app.ui.library.logic.ownedPlaytimeByAppid
 import dev.steamvault.app.ui.library.logic.hiddenChipKeys
 import dev.steamvault.app.ui.library.logic.indexLiveJobsByAppid
 import dev.steamvault.app.ui.library.logic.isKnownToVault
@@ -182,21 +184,35 @@ fun LibraryScreen(
     val merged = remember(controller.games, ownedState) {
         mergeLibrary(controller.games, ownedState.ownedGamesOrNull)
     }
+    // WP TOOL-APPS-2d (ADR-0022): content packages are grouped under their
+    // game -- one card per group, the packages listed in the detail sheet.
+    // `merged` stays the raw (ungrouped) list for every per-app decision.
+    val grouped = remember(merged) { groupGames(merged) }
+    val playtime = remember(ownedState) { ownedPlaytimeByAppid(ownedState.ownedGamesOrNull) }
     val liveJobsByAppid = remember(controller.jobs) { indexLiveJobsByAppid(controller.jobs) }
     val normalizedQuery = remember(controller.query) { normalizeQuery(controller.query) }
-    val visible = remember(merged, normalizedQuery, controller.filterKey, liveJobsByAppid) {
-        visibleGames(merged, normalizedQuery, controller.filterKey, liveJobsByAppid)
+    val visible = remember(grouped, normalizedQuery, controller.filterKey, liveJobsByAppid) {
+        visibleGames(grouped.rows, normalizedQuery, controller.filterKey, liveJobsByAppid, grouped.packagesByParent)
     }
-    val counts = remember(merged, normalizedQuery, liveJobsByAppid, controller.updatesSupported) {
-        chipCounts(merged, normalizedQuery, liveJobsByAppid, hiddenChipKeys(controller.updatesSupported))
+    val counts = remember(grouped, normalizedQuery, liveJobsByAppid, controller.updatesSupported) {
+        chipCounts(
+            grouped.rows,
+            normalizedQuery,
+            liveJobsByAppid,
+            hiddenChipKeys(controller.updatesSupported),
+            grouped.packagesByParent,
+        )
     }
-    val cardModels = remember(visible, liveJobsByAppid, controller.selectedAppids, controller.selecting) {
+    val cardModels = remember(visible, grouped, playtime, liveJobsByAppid, controller.selectedAppids, controller.selecting) {
         visible.map { g ->
             buildGameCardModel(
                 g,
                 liveJobsByAppid[g.appid],
                 selected = g.appid in controller.selectedAppids,
                 selecting = controller.selecting,
+                packages = grouped.packagesOf(g.appid),
+                liveJobsByAppid = liveJobsByAppid,
+                ownedPlaytimeForever = playtime[g.appid],
             )
         }
     }
@@ -250,7 +266,7 @@ fun LibraryScreen(
         },
         bottomBar = {
             if (controller.selecting) {
-                LibraryBulkBar(controller = controller, allGames = merged, scope = scope)
+                LibraryBulkBar(controller = controller, allGames = merged, grouped = grouped, scope = scope)
             }
         },
     ) { innerPadding ->
@@ -294,7 +310,7 @@ fun LibraryScreen(
     }
 
     if (controller.deletePlan !is DeletePlanUiState.Hidden) {
-        DeleteConfirmDialog(controller = controller, scope = scope)
+        DeleteConfirmDialog(controller = controller, allGames = merged, scope = scope)
     }
 
     if (detailController.openAppid != null) {
@@ -576,6 +592,7 @@ private fun LibraryGrid(
                         onLongPress = onLongPress,
                         onToggleSelect = onToggleSelect,
                         onAction = onAction,
+                        compact = layout == LibraryLayout.GRID_3,
                     )
                 }
             }
