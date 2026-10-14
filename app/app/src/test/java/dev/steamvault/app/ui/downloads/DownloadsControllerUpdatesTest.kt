@@ -96,7 +96,7 @@ class DownloadsControllerUpdatesTest {
     }
 
     @Test
-    fun `the schedule is read once; a failed read leaves it unknown`() = runTest {
+    fun `the schedule is read once, a failed read leaves it unknown`() = runTest {
         val sched = ScheduleOut(enabled = false, interval_minutes = 60, client_stale_days = 7, server_timezone = "UTC")
         val ok = DownloadsController(RecordingJobs(), NoGames(), Strings(), object : ScheduleRepository {
             override suspend fun get() = sched

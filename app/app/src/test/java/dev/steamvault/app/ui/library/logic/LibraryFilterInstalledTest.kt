@@ -56,7 +56,7 @@ class LibraryFilterInstalledTest {
     }
 
     @Test
-    fun `MUTATION PIN -- installed AND no bytes; not installed-and-cached, not uninstalled, not a tool app`() {
+    fun `MUTATION PIN -- installed AND no bytes, not installed-and-cached, not uninstalled, not a tool app`() {
         val rows = listOf(
             row(1, status = "idle", size = null, installedOn = pcs("Demon")), // yes
             row(2, size = 0L, installedOn = pcs("Demon", "Frame")), // yes: zero bytes is "no bytes"
