@@ -84,9 +84,23 @@ warn. Now:
   sends `USR1` to the nginx master. ONE old file is kept (about 128 MiB at
   most). Rename, never copytruncate: no line is lost, and the old file stays
   readable to the end.
-- The sweeper keeps its cursor; following the rotation by inode and
-  reading the tail of `event.log.1` before switching is WP D15b's part.
-  Its in-place truncation (`VAULT_EVENT_LOG_MAX_BYTES`) still exists and
-  coexists (whichever runs first wins); D15b decides whether it stays.
+- This supersedes "rotation happens only after a successful sweep" and
+  "the sweeper owns rotation" in Option C above: vault-core is now the
+  primary rotator, on its own schedule, independent of vault-api.
+- The sweeper follows the rename (WP D15b): it stores the file's inode and
+  treats a different inode at the path as a rotation (inode only, never
+  `st_dev`, which ZFS does not keep stable across reboots). Before
+  switching it reads the unread tail of `event.log.1` while that file still
+  has the cursor's inode, then restarts at offset 0 of the new file. Lines
+  are lost only if `event.log.1` is replaced again before the sweeper
+  drains it (two rotations within one sweep interval).
+- The sweeper's in-place truncation (`VAULT_EVENT_LOG_MAX_BYTES`, default
+  64 MiB) stays as a fallback for deployments without the vault-core hook
+  (`VAULT_EVENT_LOG_ROTATE_BYTES=0`, or an older core image). It never
+  truncates while its cursor still refers to the renamed-away file. In the
+  shipped containers vault-api cannot write the nginx-owned log, so a
+  truncation attempt is refused and counted (`truncate_denied_count`) as
+  before; with the core hook running the log rarely reaches the limit at
+  sweep time, because the hook checks every 60 s by default.
 - "Optional at runtime" is unchanged: with `VAULT_EVENT_LOG` empty, the
   rotation hook does nothing.

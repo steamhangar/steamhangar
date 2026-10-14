@@ -851,7 +851,8 @@ def _make_pre_v22(path: str, version: int) -> None:
 
 @pytest.mark.parametrize("old_version", [20, 21])
 def test_upgrade_to_v22_adds_schema_and_resets_cover_checks_once(tmp_path, old_version: int) -> None:
-    assert SCHEMA_VERSION == 22
+    # v22 is the step under test; later versions (v23 WP D15b) also apply.
+    assert SCHEMA_VERSION >= 22
     path = str(tmp_path / "old.db")
     _make_pre_v22(path, old_version)
     before = datetime.now(timezone.utc).replace(microsecond=0)
@@ -869,7 +870,7 @@ def test_upgrade_to_v22_adds_schema_and_resets_cover_checks_once(tmp_path, old_v
     finally:
         connection.close()
 
-    assert version == 22
+    assert version == SCHEMA_VERSION
     assert state_cols["app_type"] == "TEXT" and state_cols["parent_appid"] == "INTEGER"
     assert state_cols["name"] == "TEXT"
     assert class_cols == {
