@@ -561,6 +561,10 @@ live under notifications. Today a dismiss is permanent per browser
   recognisable marker request through vault-core; vault-api records its
   source address and flags that client as the runner (excluded from
   "active clients"). Own small package D15-RUNNER (core/runner + api).
+- rc16 prod Antrag must also switch the playtime relay on for the user's
+  own install: `.env` `VAULT_RELAY_EXPOSE_PLAYTIME=true` (ADR-0010 gate,
+  env-only today, forwarded by compose; default stays off for everyone
+  else). The user wants to test the "Never played" pill with real data.
 
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check
