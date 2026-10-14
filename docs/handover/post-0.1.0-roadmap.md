@@ -656,6 +656,76 @@ phone: "Download app" button plus a QR code to the vault's APK, then the
 existing pairing QR. Dev builds (no APK in the image) fall back to the
 GitHub release asset of the same version.
 
+**UPD-FIX-1 (api, rc18 FIRST; bug reported by the user on prod rc17,
+2026-10-14):** "Update now" does not clear "Update available". Prod showed
+7 games under "Updates available" (Assassin's Creed Black Flag Resync,
+Bongo Cat, Graveyard Keeper 2, No Man's Sky, Subnautica 2, Tavern Keeper,
+The Crust). "Update now" on Tavern Keeper ran job #108 in 3 s: SteamPrefill
+"Prefilled 1 apps totaling 0 b, Updated 0 | Up To Date 1"; vault-api
+"Manifest ingestion: recorded 4 manifest(s) for depot(s) [436781]"; the game
+stayed flagged.
+Analysis (code, rc17; not yet confirmed with prod data):
+- `update_available` = oracle public gid != `depot_manifests.manifestid`
+  per depot (oracle.py `_compare_depots`, ~1065-1118; recomputed live on
+  every GET /v1/games).
+- Likely root cause: `manifest_ingest.py` (~216-273) ingests EVERY
+  `{appid}_*.bin` in SteamPrefill's temp dir in unsorted `os.scandir` order
+  and upserts each into the single `(appid, depotid)` row — last file wins.
+  Old manifests from earlier runs accumulate there (nothing clears them),
+  so the stored gid can be an old one, the flag never clears, and a real
+  update run can overwrite the correct gid with a stale one. The only test
+  of a replaced manifest deletes the old file first
+  (tests/test_manifest_ingest.py ~186-189), so it hides this.
+- Other candidates: oracle snapshot disagrees with Steam (would change
+  after a manual update check); a `depot_manifests` row for a depot
+  SteamPrefill no longer downloads (rows are never deleted; depot_app_map
+  is not consulted).
+Prod measurement (user, read-only, 2026-10-14 22:03): Tavern Keeper =
+appid 436780, depot 436781. `depot_manifests` holds 5788091679023567485
+(recorded 2026-10-14T19:39:10Z = the "Update now" job); oracle public =
+3589942376827713992; depot_app_map maps 436781 -> 436780 (so not an orphan
+row). Note: `apps.name` did not match 'Tavern Keeper%' (name column empty
+or different) — names shown in the UI come from elsewhere. CONFIRMED cause 1 (user, 22:37): the runner's
+SteamPrefill temp dir holds four .bin files for depot 436781 —
+3589942376827713992 (Oct 14 07:36, newest = oracle's public gid),
+8766284553724588703 (Oct 12), 5788091679023567485 (Oct 5),
+8230470978449025486 (Oct 4). Ingestion stored 5788… (an old one) in the
+"Update now" job: last-file-wins over unsorted scandir. The game is in fact
+current; only the recorded gid is wrong. The runner container on prod is
+named `steamhangar-vault-runner` (no -1); the temp dir is the default
+$HOME/.cache/SteamPrefill/v1 (VAULT_STEAMPREFILL_CACHE_DIR unset).
+Formerly open question, kept for context: which gid is Steam's current public one (the .bin list in SteamPrefill's
+temp dir, or steamdb.info/depot/436781/manifests): if 3589… is among the
+.bin files -> ingestion picked an old file (cause 1); if not -> the oracle
+disagrees with Steam (cause 2: lagging/other branch at api.steamcmd.net).
+Fix scope:
+1. (done) prod data confirmed cause 1.
+2. Ingestion records only the manifest SteamPrefill actually used in this
+   run (newest by SteamPrefill's own record `successfullyDownloadedDepots.json`
+   or by file mtime, documented), never an arbitrary leftover; one-time
+   repair of existing rows at startup (re-derive from the same rule).
+3. The oracle comparison only considers depots the vault prefills
+   (depot_app_map) — a stale row for an unselected depot must not flag.
+4. After a successful "Update now", re-evaluate the verdict immediately
+   (no 3 h wait); if SteamPrefill says Up To Date but the oracle still says
+   stale, surface it honestly (e.g. a job note "Steam reports this build as
+   current — oracle and Steam disagree") instead of silently leaving the
+   game flagged.
+5. Tests: several .bin files for one depot in random order; end-to-end
+   "Update now clears the flag"; stale row for an unmapped depot.
+Interplay: CACHE-COMPLETE-1a uses the same target selection (recorded vs
+oracle gid) — check the completeness figure is not affected the same way.
+
+**AGENT-DIST-1 (ci + api + web, rc18; user decision 2026-10-14):** like
+APP-DIST-1 for the agent: the vault serves the vault-agent itself in the
+LAN instead of the GitHub release. rc18: the release binaries (Windows exe,
+Linux amd64/arm64) and the task scripts plus SHA256SUMS are baked into the
+vault-api image and served at a fixed path; the "Add a device" install
+snippet (web/js/lib/agent-install.js) downloads from the vault, with the
+GitHub release asset of the same version as fallback for dev builds. Later
+(after v0.1.0): a real installer replaces the snippet and the PowerShell
+task scripts (see AGENT-ADDR-1 constraint) and is served the same way.
+
 **WEB-FIX-UPD-VIS (web, rc16; user feedback 2026-10-13):** the library
 check buttons do not read as buttons (full-width text bar). Make "Check
 updates" a clearly visible primary button and give "Check & update all
