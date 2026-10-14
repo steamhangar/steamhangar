@@ -26,6 +26,10 @@ class CardUpdateStateTest {
             depot_count = 1,
             size_bytes = size,
             update_available = flagged,
+            // WP CACHE-COMPLETE-1c: measured complete, so an unflagged
+            // cached card is the green check (unknown would be "not verified").
+            cache_complete_pct = if (size != null) 100 else null,
+            cache_missing_chunks = if (size != null) 0 else null,
         )
 
     private fun liveJob(appid: Int = 7) = JobSummary(

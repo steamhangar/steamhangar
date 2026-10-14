@@ -92,7 +92,7 @@ class Upd6WiringTest {
         assertCalledFrom(sheet, "groupGames(games).rows.firstOrNull { it.appid == appid }", "GameDetailSheetBody")
         assertCalledFrom(sheet, "updateRow = updateRow)", "GameDetailSheetBody")
         assertCalledFrom(sheet, "val updateState = showsUpdateState(row, kind)", "DetailHeader")
-        assertCalledFrom(sheet, "StatusIcon(kind = cardIconKind(row, kind)", "DetailHeader")
+        assertCalledFrom(sheet, "StatusIcon(kind = cardIconKind(row, kind, isGroup)", "DetailHeader")
         assertCalledFrom(sheet, "sheetUpdateAppids(listOf(gameSummary) + packages, jobs)", "LoadedDetailBody")
         assertCalledFrom(sheet, "controller.startUpdate(scope, updateAppids, games)", "LoadedDetailBody")
         assertCalledFrom(sheet, "val pkgUpdate = showsUpdateState(pkg, kind)", "PackagesSection")

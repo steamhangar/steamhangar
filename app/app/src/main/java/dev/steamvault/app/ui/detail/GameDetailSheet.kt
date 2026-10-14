@@ -295,7 +295,7 @@ private fun GameDetailSheetBody(
         }
         // WP CACHE-COMPLETE-1c: a game with content packages shows the
         // group's completeness figure in the header (like its card).
-        val isGroup = remember(games, appid) { groupGames(games).packagesOf(appid).isNotEmpty() }
+        val isGroup = remember(games, appid) { groupGames(games).packagesByParent.containsKey(appid) }
         DetailHeader(appid = appid, name = name, detail = controller.detail, jobs = jobs, isGroup = isGroup, updateRow = updateRow)
         Spacer(Modifier.height(12.dp))
 
