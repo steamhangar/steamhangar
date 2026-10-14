@@ -1239,7 +1239,8 @@ version, readable by anyone in the LAN without a key (a 404/200 probe of a
 versioned name answers it too). Accepted because the device that downloads
 has no key by definition; user decision APP-DIST-1 / AGENT-DIST-1
 (option B, 2026-10-14). On the Public-domain profile the reverse proxy's
-forward-auth covers `/dist` like the web UI.
+forward-auth covers `/dist` if configured, like the web UI; an unpaired
+phone behind forward-auth then cannot download (LAN-only purpose).
 There is no CORS middleware configured anywhere in `vault_api`
 (verified by search across the package) — a browser will not send the
 custom `X-Api-Key` header to `vault-api` cross-origin without a CORS

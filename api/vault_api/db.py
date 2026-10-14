@@ -271,7 +271,14 @@ import time
 #: that runs on EVERY start, so the step does not trust the version stamp: a
 #: file a parallel branch already stamped v27 without them still gets them.
 #: No ``ALTER`` and no data step.
-SCHEMA_VERSION = 27
+#: v28 (WP UPD-FIX-1): added ``maintenance_steps`` -- one row per finished
+#: one-time step that needs runtime settings (so it cannot live in
+#: ``init_db``). First user: ``manifest_ingest.repair_recorded_manifests``,
+#: run once from the startup lifespan, which re-derives ``depot_manifests``
+#: rows recorded under the old last-file-wins ingestion. A plain
+#: ``CREATE TABLE IF NOT EXISTS`` in ``_DDL`` that runs on EVERY start, so the
+#: step does not trust the version stamp. No ``ALTER`` and no data step here.
+SCHEMA_VERSION = 28
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -991,6 +998,15 @@ CREATE TABLE IF NOT EXISTS runner_presence (
     steamprefill_version TEXT,
     started_at           TEXT NOT NULL,
     last_seen            TEXT NOT NULL
+);
+
+-- WP UPD-FIX-1 (schema v28): one-time maintenance steps that need runtime
+-- settings and therefore cannot run inside init_db (which only knows the
+-- database path). One row per finished step; the first user is
+-- manifest_ingest.repair_recorded_manifests.
+CREATE TABLE IF NOT EXISTS maintenance_steps (
+    name    TEXT PRIMARY KEY,
+    done_at TEXT NOT NULL
 );
 """
 

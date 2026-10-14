@@ -773,6 +773,50 @@ function handleDeleteHistory(scope) {
 }
 
 // ---------------------------------------------------------------------
+// GET /v1/dist (WP DIST-1b, mirroring WP DIST-1a's DistOut)
+// ---------------------------------------------------------------------
+
+/** The ten release files of a vault built from a release tag, all baked in
+ * (api/README.md "Release downloads"), in the server's order. Version
+ * equals the demo vault-api's /v1/about version; sizes are rounded rc17
+ * asset sizes, the SHA-256 values are fictional. */
+const DEMO_DIST_VERSION = "0.1.0";
+const DEMO_DIST_FILES = [
+  ["app-android", `steamhangar-app-v${DEMO_DIST_VERSION}.apk`, 9_300_000],
+  ["agent-windows-amd64", `vault-agent-v${DEMO_DIST_VERSION}-windows-amd64.exe`, 9_400_000],
+  ["agent-linux-amd64", `vault-agent-v${DEMO_DIST_VERSION}-linux-amd64`, 9_100_000],
+  ["agent-linux-arm64", `vault-agent-v${DEMO_DIST_VERSION}-linux-arm64`, 8_900_000],
+  ["install-task", "install-task.ps1", 21_000],
+  ["run-vault-agent", "run-vault-agent.ps1", 6_000],
+  ["uninstall-task", "uninstall-task.ps1", 4_000],
+  ["systemd-service", "vault-agent-report.service", 600],
+  ["systemd-timer", "vault-agent-report.timer", 400],
+  ["sha256sums", "SHA256SUMS", 900],
+];
+
+function handleGetDist() {
+  const releaseBase = `https://github.com/steamhangar/steamhangar/releases/download/v${DEMO_DIST_VERSION}/`;
+  return {
+    version: DEMO_DIST_VERSION,
+    release: true,
+    local_base: "/dist/",
+    release_base: releaseBase,
+    apk_alias_url: "/dist/steamhangar-app.apk",
+    artifacts: DEMO_DIST_FILES.map(([id, name, size], i) => ({
+      id,
+      name,
+      local: true,
+      size,
+      sha256: (i + 1).toString(16).padStart(2, "0").repeat(32),
+      local_url: `/dist/${name}`,
+      release_url: `${releaseBase}${name}`,
+      url: `/dist/${name}`,
+      source: "local",
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------
 // GET /v1/about (WP WEB-FEAT-3, mirroring WP VER-2's AboutOut)
 // ---------------------------------------------------------------------
 
@@ -2622,6 +2666,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
   if (method === "GET" && path === "/v1/about") {
     return handleGetAbout();
+  }
+  if (method === "GET" && path === "/v1/dist") {
+    return handleGetDist();
   }
 
   if (method === "POST" && path === "/v1/updates/check") {
