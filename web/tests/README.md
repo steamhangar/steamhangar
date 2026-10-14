@@ -3479,8 +3479,9 @@ support.js` keeps only what the moved statements need:
 Demo: Glass Meridian's last check is 20 days old (the seeded scheduled
 run failed for it), so the bell shows the entry; Frostline Convoy is owned
 with playtime 0. The pill needs the playtime gate, OFF by default as in a
-real install: set `localStorage.steamvault.demoRelayPlaytime = "1"`,
-reload, then set a demo Steam key and SteamID in Settings.
+real install. (Superseded by the WP UPD-5 demo pill below: the browser
+demo now seeds the gate, a key and a SteamID itself; the manual steps
+described here are gone.)
 
 Tests: `decision-support.test.js` rewritten (18), `notification-log.test.js`
 +6 (`syncUpdateCheckDue` both directions, no-spam pins, navigation),
@@ -3505,3 +3506,26 @@ pill without the CACHED kind check.
 - The detail line says "downloaded": `manifest_days_since_last_change`
   comes from the vault's own prefill (`manifest_ingest`), not Steam's
   publish date (review fix; first draft said "on Steam").
+
+### WP UPD-5 demo pill — "Never played" out of the box
+
+User decision 2026-10-14. A browser demo now starts with the ADR-0010
+playtime gate ON, a demo Steam Web API key (placeholder, `key_last4`
+`CDEF`) and a demo SteamID64 (`DEMO_STEAMID`, the top of the individual
+range, stored as a `db` override like a Settings save), so the Library
+loads the owned list on open and Frostline Convoy carries the pill with no
+manual step. `localStorage.steamvault.demoRelayPlaytime = "0"` opts out to
+the shipped shape (gate off, no key, no SteamID). Outside a browser (all
+bare-Node tests) the default stays OFF, so the existing baseline pins hold.
+Real installs are untouched: `VAULT_RELAY_EXPOSE_PLAYTIME` stays OFF by
+default. The demo's `GET /v1/updates/status` also mirrors WP UPD-5:
+`scheduled` equals `enabled`, window or not.
+
+Tests: `demo-data-never-played-seed.test.js` 6 (installs a fake browser
+`window` before importing demo-data.js: module-load seed, reset seed, only
+the fixture's playtime exposed, opt-out "0", bare-Node baseline,
+`scheduled` with the window cleared); `demo-data-updates.test.js` message
+updated.
+
+Mutations, all killed: module-load seed removed; preference back to opt-in
+(`=== "1"`); reset seed removed; demo `scheduled: false`.
