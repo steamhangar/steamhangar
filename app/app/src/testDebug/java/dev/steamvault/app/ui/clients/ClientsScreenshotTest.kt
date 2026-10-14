@@ -135,7 +135,10 @@ class ClientsScreenshotTest {
     private fun assertClientsPage() {
         // The answer arrived: cards of both kinds are on screen.
         composeRule.onNode(hasText("vault-agent · 10.0.0.42", substring = true), useUnmergedTree = true).assertExists()
-        composeRule.onNode(hasText("4 clients · 2 connected"), useUnmergedTree = true).assertExists()
+        // WP D15-RUNNER: the prefill runner is its own card (second: connected,
+        // as recent as the online PC) and counts like the web counts it.
+        composeRule.onNode(hasText("This server's prefill downloads · 172.18.0.1"), useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasText("5 clients · 3 connected"), useUnmergedTree = true).assertExists()
         // Review item: with four items every nav label is ONE line -- the
         // long "Downloads" is as tall as the short "Settings".
         val downloads = composeRule.onNode(hasText("Downloads"), useUnmergedTree = true).fetchSemanticsNode().size.height

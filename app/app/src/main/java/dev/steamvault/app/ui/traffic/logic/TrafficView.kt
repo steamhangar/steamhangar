@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.JobThroughputOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
+import dev.steamvault.app.net.model.SummaryOut
 import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.ui.clients.logic.formatAgo
 import dev.steamvault.app.ui.library.logic.formatBytesGB
@@ -199,7 +200,8 @@ fun headerTiles(throughput: ThroughputOut?): List<StatTile>? {
         tile("current", "Current speed", formatSpeed(throughput.current?.bytes_per_second)),
         tile("average", "Average while loading", formatSpeed(summary?.average_bytes_per_second)),
         tile("peak", "Peak speed", formatSpeed(summary?.peak_bytes_per_second)),
-        tile("loaded", "Loaded", formatTrafficBytes(summary?.bytes_served)),
+        // Everything the cache served, the runner included; its share below.
+        tile("loaded", "Loaded", formatTrafficBytes(summary?.bytes_served), runnerDetail(summary)),
         // Bytes, not requests: the same base as "Saved by the cache" next to it.
         tile("hit-rate", "Hit rate", formatRate(summary?.byte_hit_rate)),
         tile("saved", "Saved by the cache", formatTrafficBytes(summary?.hit_bytes)),
@@ -210,6 +212,17 @@ fun headerTiles(throughput: ThroughputOut?): List<StatTile>? {
             if (inRange == null) null else "$inRange $phrase",
         ),
     )
+}
+
+/**
+ * WP D15-RUNNER: "X by the prefill runner" under "Loaded"; `null` when the
+ * server sent no runner figures (older vault-api) or the runner loaded
+ * nothing in the range.
+ */
+fun runnerDetail(summary: SummaryOut?): String? {
+    val bytes = summary?.prefill_runner?.bytes_served ?: return null
+    if (bytes <= 0) return null
+    return formatTrafficBytes(bytes)?.let { "$it by the prefill runner" }
 }
 
 /** The bucket a series point covers, for the graph's label. */

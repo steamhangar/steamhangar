@@ -46,7 +46,27 @@ data class SummaryOut(
     val byte_hit_rate: Double? = null,
     val average_bytes_per_second: Double? = null,
     val peak_bytes_per_second: Double? = null,
+    /** Distinct addresses in the range, the prefill runner excluded. */
     val active_clients: Int? = null,
+    /** WP D15-RUNNER: bytes served to clients, the runner excluded;
+     * [bytes_served] (everything) = this + [prefill_runner]'s bytes. `null`
+     * from a server older than D15-RUNNER. */
+    val client_bytes_served: Long? = null,
+    /** WP D15-RUNNER: the prefill runner's own traffic in the range; `null`
+     * from a server older than D15-RUNNER. */
+    val prefill_runner: RunnerTrafficOut? = null,
+)
+
+/** WP D15-RUNNER: the server's own prefill downloads in a range. */
+@Serializable
+data class RunnerTrafficOut(
+    val bytes_served: Long = 0,
+    val hit_bytes: Long = 0,
+    val miss_bytes: Long = 0,
+    val requests: Long = 0,
+    val hits: Long = 0,
+    val misses: Long = 0,
+    val errors: Long = 0,
 )
 
 @Serializable
@@ -69,7 +89,11 @@ data class ThroughputOut(
     val range_start: String? = null,
     val active_window_minutes: Int? = null,
     val current: CurrentOut? = null,
+    /** Addresses active within the window, the prefill runner excluded. */
     val active_clients_now: Int? = null,
+    /** WP D15-RUNNER: the runner loaded within the window; `null` when the
+     * feed is not `ok` (or from an older server). */
+    val runner_active_now: Boolean? = null,
     val summary: SummaryOut? = null,
     val jobs: List<JobThroughputOut> = emptyList(),
 )
@@ -82,6 +106,9 @@ data class SeriesPointOut(
     val hit_bytes: Long = 0,
     val miss_bytes: Long = 0,
     val requests: Long = 0,
+    /** WP D15-RUNNER: the prefill runner's share of [bytes_served]; 0 from
+     * an older server. */
+    val runner_bytes: Long = 0,
     val bytes_per_second: Double = 0.0,
     val peak_bytes_per_second: Double = 0.0,
 )
@@ -133,9 +160,10 @@ data class RecentAppOut(
 
 @Serializable
 data class ClientActivityOut(
-    /** `agent:<client_id>` or `addr:<address>`. */
+    /** `agent:<client_id>`, `addr:<address>` or `runner`. */
     val key: String,
-    /** `agent` or `address`. */
+    /** `agent`, `address` or `runner` (WP D15-RUNNER: the server's own
+     * prefill runner, at most one entry). */
     val kind: String,
     val client_id: String? = null,
     val addresses: List<String> = emptyList(),
@@ -151,6 +179,14 @@ data class ClientActivityOut(
     val loading_now: LoadingNowOut? = null,
     val recent_apps: List<RecentAppOut>? = null,
     val recent_unattributed_bytes: Long? = null,
+    /** WP D15-NAMES: the operator-set name, `null` when none. */
+    val name: String? = null,
+    /** WP D15-NAMES: the address a rename writes to; `null` = cannot be
+     * named. Read by nothing in the app yet (renaming is web-only). */
+    val name_addr: String? = null,
+    /** WP D15-NAMES: [name] when set, else the agent's client_id, else the
+     * address. `null` from a server older than D15-NAMES. */
+    val display_name: String? = null,
 )
 
 @Serializable
