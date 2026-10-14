@@ -538,13 +538,16 @@ button.cappill:active{ transform:scale(.93); }
 /* Group card line (WP TOOL-APPS-2c): "+N content packages", own line like
    the badges above; "· N failed" in the error colour (user decision Q3 B
    variant: a small warning on the card, the list is in the detail sheet). */
+/* Review fix (360 px): the line wraps instead of clipping. "+N content
+   packages" and the warning are two nowrap units; the warning moves onto
+   its own line when the card is too narrow, never under an ellipsis. */
 .pkgline{
-  display:inline-flex; align-items:center; font-size:10px; font-weight:600;
-  letter-spacing:.2px; color:var(--dim-2); white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; max-width:100%; min-width:0;
-  flex-basis:100%; margin-top:1px;
+  display:flex; flex-wrap:wrap; align-items:center; gap:0 4px;
+  font-size:10px; font-weight:600; letter-spacing:.2px; color:var(--dim-2);
+  max-width:100%; min-width:0; flex-basis:100%; margin-top:1px;
 }
-.pkgline .pkgfail{ color:var(--danger); }
+.pkgline .pkgn{ white-space:nowrap; }
+.pkgline .pkgfail{ display:inline-flex; gap:4px; white-space:nowrap; color:var(--danger); }
 .grid.cols3 .pkgline{ font-size:9px; }
 .grid.list .pkgline{ flex-basis:auto; }
 .rowname{ display:none; }

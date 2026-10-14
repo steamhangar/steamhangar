@@ -355,9 +355,19 @@ function buildPackagesLine(game, failedCount) {
   n.textContent = packagesLineText(game.packages.length);
   line.appendChild(n);
   if (failedCount > 0) {
+    // Review fix: the separator is its own element (a leading space in a
+    // flex item's text is trimmed), and the warning is one unit that wraps
+    // onto its own line on a narrow card instead of being clipped
+    // (css/app.css `.pkgline`).
     const warn = document.createElement("span");
     warn.className = "pkgfail";
-    warn.textContent = ` · ${failedPackagesText(failedCount)}`;
+    const sep = document.createElement("span");
+    sep.className = "pkgsep";
+    sep.textContent = "·";
+    const text = document.createElement("span");
+    text.className = "pkgfailtext";
+    text.textContent = failedPackagesText(failedCount);
+    warn.append(sep, text);
     line.appendChild(warn);
   }
   return line;

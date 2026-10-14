@@ -175,3 +175,25 @@ test("wiring: the detail sheet deletes a game with packages through the plan, co
   assert.match(confirm, /api\.deleteCacheWithPackages\(appid, planMemberIds\(plan\)\)/);
   assert.match(confirm, /if \(isMembersMismatch\(err\)\) \{[\s\S]*openGroupDeleteConfirm\(MEMBERS_CHANGED_NOTICE\)/);
 });
+
+test("review fixes: 'Will be deleted (N)' heading, unusable entries shown, the notice is a focusable status", async () => {
+  const { buildNotice } = await import("../js/components/group-delete-plan.js");
+  const block = buildGroupDeletePlan({ ...PLAN, unusable: [{ depotid: 0, error: "bad id 'x'" }] }, nameFor);
+  assert.equal(block.node.querySelector(".cflabel").textContent, "Will be deleted (3)");
+  assert.equal(
+    block.node.querySelector('[data-role="unusable"]').textContent,
+    "1 unreadable depot entry — the delete will report it as failed.",
+  );
+  assert.equal(buildGroupDeletePlan(PLAN, nameFor).node.querySelector('[data-role="unusable"]'), null);
+  const n = buildNotice("changed");
+  assert.equal(n.getAttribute("role"), "status");
+  assert.equal(n.tabIndex, -1);
+});
+
+test("wiring (a11y): the detail sheet keeps focus in the dialog on a 409 and focuses the notice after the new plan", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../js/components/game-detail-sheet.js", import.meta.url), "utf8");
+  const body = (head) => src.slice(src.indexOf(head), src.indexOf("\n}\n", src.indexOf(head)));
+  assert.match(body("async function confirmGroupDelete(appid, plan) {"), /if \(isMembersMismatch\(err\)\) \{\s*\/\/[^\n]*\n\s*dNo\.focus\(\);/);
+  assert.match(body("async function openGroupDeleteConfirm(notice) {"), /const noticeEl = notice \? buildNotice\(notice\) : null;[\s\S]*if \(noticeEl\) noticeEl\.focus\(\);/);
+});

@@ -45,7 +45,8 @@ test("MUTATION TARGET -- a group card shows '+N content packages' and the failed
   const line = card.querySelector(".meta .pkgline");
   assert.ok(line);
   assert.equal(line.querySelector(".pkgn").textContent, "+2 content packages");
-  assert.equal(line.querySelector(".pkgfail").textContent, " · 1 failed");
+  const warn = line.querySelector(".pkgfail");
+  assert.deepEqual(warn.children.map((c) => [c.className, c.textContent]), [["pkgsep", "·"], ["pkgfailtext", "1 failed"]]);
   assert.equal(line.getAttribute("aria-hidden"), "true");
   assert.equal(card.dataset.gk, "2:1");
   assert.equal(card.dataset.dk, "cached", "the parent's status is the card's status");
@@ -73,4 +74,22 @@ test("MUTATION TARGET -- the size shown is the group's union once known, and a p
   assert.equal(unknown.querySelector(".meta .size").textContent, "2.4 GB");
   assert.equal(unknown.querySelector(".cappill .pv").textContent, "2.4 GB");
   assert.match(unknown.getAttribute("aria-label"), /2\.4 GB — 2 content packages, 1 failed/);
+});
+
+test("MUTATION PIN (review, 360 px) -- the line wraps, never clips: no ellipsis/nowrap on .pkgline, the warning is one nowrap unit with its own separator", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (sel) => {
+    const m = new RegExp(`(^|\\})\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
+    assert.ok(m, `${sel} rule missing`);
+    return m[2];
+  };
+  const line = rule(".pkgline");
+  assert.match(line, /flex-wrap:\s*wrap/);
+  assert.doesNotMatch(line, /text-overflow|white-space:\s*nowrap|overflow:\s*hidden/);
+  assert.match(line, /gap:/);
+  const fail = rule(".pkgline .pkgfail");
+  assert.match(fail, /white-space:\s*nowrap/);
+  assert.match(fail, /gap:/);
+  assert.doesNotMatch(fail, /text-overflow|overflow:\s*hidden/);
 });

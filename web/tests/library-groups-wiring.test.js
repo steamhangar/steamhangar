@@ -96,6 +96,7 @@ const server = {
   // grouped delete: the server's current delete set, and the DELETE queries
   planMembers: [20, 21, 22],
   deletes: [],
+  planBlocked: false,
 };
 function groupPlan() {
   return {
@@ -113,7 +114,7 @@ function groupPlan() {
     skipped_shared: [{ depotid: 299, shared_with: [10] }],
     unusable: [],
     total_bytes: 2 * GIB,
-    blocked_by: [],
+    blocked_by: server.planBlocked ? [{ appid: 22, job_id: 77, type: "prefill", status: "running" }] : [],
   };
 }
 const count = (key) => server.calls.get(key) || 0;
@@ -134,6 +135,11 @@ globalThis.fetch = async (url, init = {}) => {
     return g ? respond(200, { ...g, depots: DEPOTS[g.appid] || [] }) : respond(404, { detail: "nope" });
   }
   if (p === "/v1/jobs") return respond(200, []);
+  if (p === "/v1/mapping") return respond(200, []);
+  if (p === "/v1/cache/10" && method === "DELETE") {
+    server.deletes.push(`10${u.search}`);
+    return respond(200, { appid: 10, deleted_depots: [], skipped_shared: [], failed: [], total_bytes_freed: 1 * GIB });
+  }
   if (p === "/v1/cache/20/delete-plan" && method === "GET") {
     if (u.searchParams.get("with_packages") !== "true") return respond(422, { detail: "rig: expected with_packages=true" });
     return respond(200, groupPlan());
@@ -197,7 +203,7 @@ test("one card per group: packages hidden from the grid, the line and the failed
   assert.deepEqual(cards(s), [10, 20]);
   const g = card(s, 20);
   assert.equal(g.querySelector(".pkgline .pkgn").textContent, "+2 content packages");
-  assert.equal(g.querySelector(".pkgline .pkgfail").textContent, " · 1 failed");
+  assert.equal(g.querySelector(".pkgline .pkgfail .pkgfailtext").textContent, "1 failed");
   assert.equal(g.dataset.dk, "cached");
   const failedChip = s.querySelector('.chip[data-f="failed"] .n');
   assert.equal(failedChip.textContent, "1", "the Failed chip counts the group once");
@@ -276,7 +282,11 @@ test("MUTATION PIN (ADR-0022 §4) -- deleting a group card: the server's plan li
   await until(() => server.deletes.length === 1, "first DELETE sent");
   assert.equal(server.deletes[0], "?with_packages=true&members=20%2C21%2C22");
   await until(() => members().length === 4, "plan fetched again after the 409");
-  assert.match(dialog().querySelector('[data-role="notice"]').textContent, /changed since this preview\. Nothing was deleted/);
+  const notice = dialog().querySelector('[data-role="notice"]');
+  assert.match(notice.textContent, /changed since this preview\. Nothing was deleted/);
+  assert.equal(notice.getAttribute("role"), "status", "MUTATION PIN (a11y): the notice is announced");
+  assert.equal(dom.document.activeElement, notice, "MUTATION PIN (a11y): focus moves to the notice, not <body>");
+  assert.equal(dialog().querySelector('[data-role="members"]').parentNode.querySelector(".cflabel").textContent, "Will be deleted (4)");
   assert.equal(count("GET /v1/cache/20/delete-plan"), 2);
 
   dialog().querySelector("button.btn.danger").dispatchEvent({ type: "click" });
@@ -284,4 +294,48 @@ test("MUTATION PIN (ADR-0022 §4) -- deleting a group card: the server's plan li
   assert.equal(server.deletes[1], "?with_packages=true&members=20%2C21%2C22%2C23");
   await until(() => !dialog(), "dialog closed after the delete");
   assert.equal(toastText.textContent, "Freed 2.0 GB");
+});
+
+test("MUTATION PIN -- a group plan with a member job in flight (blocked_by) leaves Delete disabled and says why", async () => {
+  server.mode = "new";
+  server.games = freshGames();
+  server.planMembers = [20, 21, 22];
+  server.planBlocked = true;
+  try {
+    const s = await openLibrary(2);
+    card(s, 20).dispatchEvent({ type: "contextmenu", preventDefault() {} });
+    await until(() => s.querySelector(".bulk").classList.contains("up"), "select mode");
+    s.querySelector(".bulkbtns .btn.danger").dispatchEvent({ type: "click" });
+    const dialog = () => dom.document.body.querySelectorAll(".dialog-backdrop").find((b) => b.classList.contains("on"));
+    await until(() => dialog()?.querySelector('[data-role="blocked"]'), "blocked line shown");
+    assert.equal(dialog().querySelector("button.btn.danger").disabled, true);
+    assert.match(dialog().querySelector('[data-role="blocked"]').textContent, /Download running/);
+    dialog().querySelector("button.btn.ghost").dispatchEvent({ type: "click" });
+    s.querySelector(".bulkhead .btn").dispatchEvent({ type: "click" });
+  } finally {
+    server.planBlocked = false;
+  }
+});
+
+test("mixed bulk delete: the plain games get a heading naming them; after a group's 409 the already deleted plain pick is deselected", async () => {
+  server.mode = "new";
+  server.games = freshGames();
+  server.planMembers = [20, 21, 22];
+  server.deletes = [];
+  const s = await openLibrary(2);
+  card(s, 10).dispatchEvent({ type: "contextmenu", preventDefault() {} });
+  await until(() => s.querySelector(".bulk").classList.contains("up"), "select mode");
+  card(s, 20).dispatchEvent({ type: "click" });
+  await until(() => s.querySelector(".bulkhead .count b").textContent === "2", "two picked");
+  s.querySelector(".bulkbtns .btn.danger").dispatchEvent({ type: "click" });
+  const dialog = () => dom.document.body.querySelectorAll(".dialog-backdrop").find((b) => b.classList.contains("on"));
+  await until(() => dialog()?.querySelector('[data-role="members"]'), "plans shown");
+  assert.equal(dialog().querySelector('[data-role="plain-heading"]').textContent, "Aurora Cascade");
+  server.planMembers = [20, 21, 22, 23];
+  dialog().querySelector("button.btn.danger").dispatchEvent({ type: "click" });
+  await until(() => dialog()?.querySelector('[data-role="notice"]'), "re-confirm shown");
+  assert.ok(server.deletes.includes("10"), "the plain game was deleted");
+  assert.equal(s.querySelector(".bulkhead .count b").textContent, "1", "only the group card is still picked");
+  assert.equal(dialog().querySelector('[data-role="plain-heading"]'), null, "the re-confirm lists the group alone");
+  dialog().querySelector("button.btn.ghost").dispatchEvent({ type: "click" });
 });

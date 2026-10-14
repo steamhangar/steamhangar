@@ -162,7 +162,7 @@ import {
   isGroup,
 } from "../lib/content-groups.js";
 import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
-import { buildGroupDeletePlan, groupDeleteIntro } from "../components/group-delete-plan.js";
+import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "../components/group-delete-plan.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
@@ -1020,17 +1020,18 @@ async function openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice
     let blocked = false;
     dNote.replaceChildren();
     if (plain) {
-      // The plain picks' multiPlan preview, as without groups.
+      // The plain picks' multiPlan preview, as without groups, under a
+      // heading naming them (review nit).
       renderDeletePlan(plain, plainIds, gamesByAppid);
       freed += plain.freedBytes;
+      const heading = document.createElement("p");
+      heading.className = "cflabel";
+      heading.dataset.role = "plain-heading";
+      heading.textContent = namesFor(plainIds, gamesByAppid);
+      dNote.replaceChildren(heading, ...Array.from(dNote.childNodes));
     }
-    if (notice) {
-      const p = document.createElement("p");
-      p.className = "cfsolo cfnotice";
-      p.dataset.role = "notice";
-      p.textContent = notice;
-      dNote.replaceChildren(p, ...Array.from(dNote.childNodes));
-    }
+    const noticeEl = notice ? buildNotice(notice) : null;
+    if (noticeEl) dNote.replaceChildren(noticeEl, ...Array.from(dNote.childNodes));
     const blocks = plans.map((plan) => buildGroupDeletePlan(plan, nameFor, { showSubject: ids.length > 1 }));
     for (const [i, block] of blocks.entries()) {
       dNote.appendChild(block.node);
@@ -1043,6 +1044,8 @@ async function openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice
         ? groupDeleteIntro(blocks[0].subject, freed)
         : `Deleting ${ids.length} games and their content packages frees about ${formatBytesGB(freed) || "0 GB"}.`;
     dYes.disabled = blocked || plans.some(isPlanBlocked);
+    // Review fix (a11y): the re-confirm notice takes focus and is announced.
+    if (noticeEl) noticeEl.focus();
   } catch (err) {
     if (myGen !== deletePlanGeneration) return;
     dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
@@ -1079,6 +1082,13 @@ async function confirmDelete() {
   // deleted for it): show its new plan and ask again.
   const changed = ids.filter((id, i) => results[i].status === "rejected" && isMembersMismatch(results[i].reason));
   if (changed.length) {
+    // Keep focus inside the dialog while the plans are fetched again, and
+    // drop the picks that were already deleted (review fixes).
+    dNo.focus();
+    ids.forEach((id, i) => {
+      if (results[i].status === "fulfilled") state.picked.delete(id);
+    });
+    if (mounted()) syncBulk();
     store.refreshNow();
     await openDeleteConfirm(changed, MEMBERS_CHANGED_NOTICE);
     reportDeleteResults(results.filter((_, i) => !changed.includes(ids[i])));

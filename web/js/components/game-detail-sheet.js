@@ -121,7 +121,7 @@ import { ownedLibrary } from "../owned-singleton.js";
 import { groupSizes } from "../group-sizes-singleton.js";
 import { groupGames, groupHasCacheContent, isGroup } from "../lib/content-groups.js";
 import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
-import { buildGroupDeletePlan, groupDeleteIntro } from "./group-delete-plan.js";
+import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "./group-delete-plan.js";
 import { buildPackagesSection, packagesStructuralKey, patchPackagesSection } from "./package-list.js";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
@@ -273,15 +273,13 @@ async function openGroupDeleteConfirm(notice) {
     const nameFor = (id, serverName) => appTitle(id, gamesByAppid.get(id)?.name || serverName);
     const block = buildGroupDeletePlan(plan, nameFor);
     dText.textContent = groupDeleteIntro(block.subject, block.freedBytes);
-    if (notice) {
-      const p = document.createElement("p");
-      p.className = "cfsolo cfnotice";
-      p.textContent = notice;
-      dNote.appendChild(p);
-    }
+    const noticeEl = notice ? buildNotice(notice) : null;
+    if (noticeEl) dNote.appendChild(noticeEl);
     dNote.appendChild(block.node);
     pendingGroupPlan = plan;
     dYes.disabled = isPlanBlocked(plan);
+    // Review fix (a11y): the re-confirm notice takes focus and is announced.
+    if (noticeEl) noticeEl.focus();
   } catch (err) {
     if (myGen !== groupPlanGeneration) return;
     dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
@@ -431,6 +429,8 @@ async function confirmGroupDelete(appid, plan) {
   } catch (err) {
     dNo.disabled = false;
     if (isMembersMismatch(err)) {
+      // Keep focus inside the dialog while the plan is fetched again.
+      dNo.focus();
       store.refreshNow();
       await openGroupDeleteConfirm(MEMBERS_CHANGED_NOTICE);
       return;

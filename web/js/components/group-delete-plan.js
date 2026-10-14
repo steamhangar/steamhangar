@@ -34,7 +34,7 @@ export function buildGroupDeletePlan(plan, nameFor, { showSubject = false } = {}
   wrap.dataset.appid = String(plan.appid);
   if (showSubject) wrap.appendChild(el("p", "cflabel", d.subject));
 
-  wrap.appendChild(el("p", "cflabel", `Deleted (${1 + d.packages.length})`));
+  wrap.appendChild(el("p", "cflabel", `Will be deleted (${1 + d.packages.length})`));
   const ul = el("ul", "cflist");
   ul.dataset.role = "members";
   for (const m of [d.parent, ...d.packages]) {
@@ -68,6 +68,16 @@ export function buildGroupDeletePlan(plan, nameFor, { showSubject = false } = {}
     wrap.appendChild(p);
   }
 
+  // Review nit: mapping rows with an unusable depot id (poisoned database);
+  // the delete reports them in `failed`.
+  const unusable = Array.isArray(plan.unusable) ? plan.unusable.length : 0;
+  if (unusable) {
+    const p = el("p", "cfsolo");
+    p.dataset.role = "unusable";
+    p.textContent = `${unusable} unreadable depot ${unusable === 1 ? "entry" : "entries"} — the delete will report ${unusable === 1 ? "it" : "them"} as failed.`;
+    wrap.appendChild(p);
+  }
+
   const total = el("p", "cftotal");
   const b = el("b", null, formatBytesGBOrZero(d.freedBytes) || "0 GB");
   total.append(b, " freed");
@@ -80,6 +90,20 @@ export function buildGroupDeletePlan(plan, nameFor, { showSubject = false } = {}
     wrap.appendChild(warn);
   }
   return { node: wrap, blocked: d.blocked.length > 0, freedBytes: d.freedBytes, subject: d.subject };
+}
+
+/**
+ * The 409 re-confirm notice (review fix, a11y): a status line that takes
+ * focus, so it is announced and focus does not fall to <body> while the
+ * plan is fetched again.
+ * @param {string} text
+ */
+export function buildNotice(text) {
+  const p = el("p", "cfsolo cfnotice", text);
+  p.dataset.role = "notice";
+  p.setAttribute("role", "status");
+  p.tabIndex = -1;
+  return p;
 }
 
 /** "Deleting X and its N content packages frees about Y." */
