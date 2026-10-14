@@ -33,14 +33,19 @@ import kotlinx.serialization.json.JsonPrimitive
  * Fixed, synthetic library for the screenshot tests (WP APP-TEST-1).
  *
  * Built to make the D12 layout problems visible
- * (`docs/handover/post-0.1.0-roadmap.md` "D12"): every filter chip has a
- * non-zero count (so FilterChipsRow carries all six labels, the widest
- * being "Downloading 3"), titles range from short to very long, and every
- * card kind the grid can show appears at least once (cached, not cached,
- * downloading, updating, paused, failed). One cached game carries the
- * "Update available" badge (WP UPD-3), which also gives the "Updates" chip
- * a count, and [FixedUpdatesRepository] keeps the top bar's "Check
- * updates" action visible. WP TOOL-APPS-2d: Starfall Odyssey heads a
+ * (`docs/handover/post-0.1.0-roadmap.md` "D12"): every filter chip but
+ * "Installed, not cached" has a non-zero count (FilterChipsRow carries all
+ * seven labels, the widest being "Installed, not cached 0"), titles range
+ * from short to very long, and every card kind the grid can show appears
+ * at least once (cached, not cached, downloading, updating, paused,
+ * failed). WP UPD-6: both first-row cards carry update_available (the
+ * second row is not composed at 360 dp / font 1.3): the cached Lighthouse
+ * Keeper game shows the update state (orange refresh glyph, "Update
+ * available" instead of "Current"), and Starfall Odyssey, updating under a
+ * live job, keeps the separate "Update available" badge (WP UPD-3) because
+ * its status word does not say it. Both give the "Updates" chip a count,
+ * and [FixedUpdatesRepository] keeps the top bar's "Check updates" action
+ * visible. WP TOOL-APPS-2d: Starfall Odyssey heads a
  * content-package group of two packages, one failed ("+2 content packages
  * · 1 failed", sized by the server's `group_size_bytes`), and the Lighthouse Keeper game
  * is cached with an owned playtime of exactly 0 (the "Never played" pill).
@@ -65,7 +70,8 @@ internal object LibraryScreenshotFixtures {
         GameSummary(
             appid = 1_000_010, name = "Starfall Odyssey", status = "done",
             last_prefill_at = PREFILLED_AT, depot_count = 2, size_bytes = 48_300_000_000,
-            // WP UPD-3: the oracle reports a newer build -> badge + "Updates 1".
+            // WP UPD-6: flagged, but Updating under a live job (id 45) ->
+            // the separate badge.
             update_available = true, update_checked_at = PREFILLED_AT,
             // WP TOOL-APPS-2d: heads the group below.
             app_type = "game", group_size_bytes = 48_900_000_000,
@@ -85,6 +91,8 @@ internal object LibraryScreenshotFixtures {
             appid = 1_000_020,
             name = "The Unreasonably Long Chronicles of the Northern Lighthouse Keeper: Definitive Anniversary Edition",
             status = "done", last_prefill_at = PREFILLED_AT, depot_count = 3, size_bytes = 12_700_000_000,
+            // WP UPD-6: cached and flagged -> the card's update state.
+            update_available = true, update_checked_at = PREFILLED_AT,
         ),
         // First download, live job, never prefilled -> "Downloading".
         GameSummary(appid = 1_000_030, name = "Ironwood Hollow", status = "running", depot_count = 1),
@@ -113,6 +121,8 @@ internal object LibraryScreenshotFixtures {
             started_at = JOB_CREATED_AT, paused_at = JOB_CREATED_AT,
         ),
         JobSummary(id = 44, appid = 1_000_070, type = "prefill", status = "queued", created_at = JOB_CREATED_AT),
+        // WP UPD-6: Starfall Odyssey updating while flagged (the badge's card).
+        JobSummary(id = 45, appid = 1_000_010, type = "prefill", status = "running", created_at = JOB_CREATED_AT, started_at = JOB_CREATED_AT),
     )
 
     /** The Steam relay's owned list: every vault game plus three the vault

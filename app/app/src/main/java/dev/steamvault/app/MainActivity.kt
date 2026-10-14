@@ -541,6 +541,7 @@ class MainActivity : ComponentActivity() {
                 ownedLibrary = ownedLibraryState,
                 onJobsSnapshot = { pendingJobsSnapshot = it },
                 demoMode = true,
+                scheduleRepository = remember(demo) { DemoScheduleRepository(demo) },
             )
             return
         }
@@ -557,6 +558,7 @@ class MainActivity : ComponentActivity() {
             ownedLibrary = ownedLibraryState,
             onJobsSnapshot = { pendingJobsSnapshot = it },
             demoMode = false,
+            scheduleRepository = remember(client) { VaultScheduleRepository(client) },
         )
     }
 

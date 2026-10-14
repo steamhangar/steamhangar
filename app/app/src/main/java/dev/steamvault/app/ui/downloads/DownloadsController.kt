@@ -7,9 +7,11 @@ import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.polling.PollingIntervals
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
+import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.ui.downloads.logic.BULK_TOAST_MS
 import dev.steamvault.app.ui.downloads.logic.BulkKind
 import dev.steamvault.app.ui.downloads.logic.TOAST_MS
@@ -19,6 +21,8 @@ import dev.steamvault.app.ui.downloads.logic.bulkBarState
 import dev.steamvault.app.ui.downloads.logic.bulkPauseTargets
 import dev.steamvault.app.ui.downloads.logic.bulkResumeTargets
 import dev.steamvault.app.ui.downloads.logic.bulkSummary
+import dev.steamvault.app.ui.downloads.logic.describeUpdateStartError
+import dev.steamvault.app.ui.downloads.logic.summarizeUpdateStart
 import dev.steamvault.app.ui.downloads.logic.runBulkPause
 import dev.steamvault.app.ui.downloads.logic.runBulkResume
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +51,9 @@ class DownloadsController(
     private val jobsRepository: JobsRepository,
     private val gamesRepository: GamesRepository,
     private val strings: DownloadsStrings,
+    /** WP UPD-6: `GET /v1/schedule` for the "Updates available" note;
+     * `null` = no note (nothing to read it from). */
+    private val scheduleRepository: ScheduleRepository? = null,
 ) {
     var jobs by mutableStateOf<List<JobSummary>>(emptyList())
         private set
@@ -218,6 +225,52 @@ class DownloadsController(
         }
     }
 
+    // ---- Updates available (WP UPD-6, web downloads.js startUpdates) ----
+
+    /** `GET /v1/schedule`, read once per screen visit ([loadSchedule]);
+     * `null` = not known (not read yet, or the read failed): no note. */
+    var schedule by mutableStateOf<ScheduleOut?>(null)
+        private set
+
+    /** What an update request in flight is for: [UPDATES_ALL], an appid, or
+     * `null`. One request at a time; every update button is disabled
+     * meanwhile, the pressed one reads "Starting…". */
+    var updatesInFlight by mutableStateOf<Int?>(null)
+        private set
+
+    suspend fun loadSchedule() {
+        val repo = scheduleRepository ?: return
+        schedule = try {
+            repo.get()
+        } catch (_: VaultApiError) {
+            null // unknown: no note rather than a guess
+        }
+    }
+
+    /**
+     * "Update now" ([which] = the appid) or "Update all" ([which] =
+     * [UPDATES_ALL]): `POST /v1/prefill` with exactly [appids] -- the
+     * non-forced enqueue "Check & update" uses; the games then move into
+     * the normal queue. Then an out-of-cadence jobs refresh.
+     */
+    fun startUpdates(scope: CoroutineScope, appids: List<Int>, which: Int) {
+        if (updatesInFlight != null || appids.isEmpty()) return
+        updatesInFlight = which
+        scope.launch {
+            try {
+                val outcome = try {
+                    summarizeUpdateStart(jobsRepository.prefill(appids), games)
+                } catch (e: VaultApiError) {
+                    describeUpdateStartError(e)
+                }
+                showToast(outcome.message, if (outcome.long) BULK_TOAST_MS else TOAST_MS)
+                if (outcome.refresh) refreshJobsOnce()
+            } finally {
+                updatesInFlight = null
+            }
+        }
+    }
+
     // ---- Pause all / Resume all (WP WEB-FEAT-5, web downloads.js runBulk) --
 
     /** The bulk run in flight, or null. Both bulk buttons are disabled
@@ -286,3 +339,7 @@ class DownloadsController(
         }
     }
 }
+
+/** [DownloadsController.updatesInFlight] while "Update all" is in flight
+ * (never a real appid). */
+const val UPDATES_ALL = -1

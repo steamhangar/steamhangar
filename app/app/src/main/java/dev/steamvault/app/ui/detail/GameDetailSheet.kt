@@ -75,6 +75,12 @@ import dev.steamvault.app.ui.library.logic.packageFullName
 import dev.steamvault.app.ui.library.logic.packagesTotalText
 import dev.steamvault.app.ui.library.logic.shortPackageName
 import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.downloads.logic.UpdatesWording
+import dev.steamvault.app.ui.downloads.logic.sheetUpdateAppids
+import dev.steamvault.app.ui.library.logic.cardIconKind
+import dev.steamvault.app.ui.library.logic.showsUpdateState
+import dev.steamvault.app.ui.theme.VaultColors
+import androidx.compose.ui.graphics.Color
 import dev.steamvault.app.ui.library.installedBadgeText
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.MultiPlan
@@ -266,7 +272,13 @@ private fun GameDetailSheetBody(
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .padding(bottom = 24.dp),
     ) {
-        DetailHeader(appid = appid, name = name, detail = controller.detail, jobs = jobs)
+        // WP UPD-6 review fix: the row whose update flag the header shows --
+        // the group row (OR over its members, like the Library card) or the
+        // game's own row (web `currentUpdateRow`).
+        val updateRow = remember(games, appid) {
+            groupGames(games).rows.firstOrNull { it.appid == appid } ?: games.firstOrNull { it.appid == appid }
+        }
+        DetailHeader(appid = appid, name = name, detail = controller.detail, jobs = jobs, updateRow = updateRow)
         Spacer(Modifier.height(12.dp))
 
         when {
@@ -302,7 +314,13 @@ private fun GameDetailSheetBody(
 }
 
 @Composable
-private fun DetailHeader(appid: Int, name: String, detail: GameDetail?, jobs: List<JobSummary>) {
+private fun DetailHeader(
+    appid: Int,
+    name: String,
+    detail: GameDetail?,
+    jobs: List<JobSummary>,
+    updateRow: GameSummary?,
+) {
     Row(verticalAlignment = Alignment.Top) {
         CoverArtImage(
             coverUrl = coverArtUrl(appid, detail?.cover_url),
@@ -327,11 +345,22 @@ private fun DetailHeader(appid: Int, name: String, detail: GameDetail?, jobs: Li
                 ) {
                     // WP API-FIX-4: a tool app without a live job reads
                     // "Steam tool package" (from the kind, not the flag).
-                    val word = toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
-                    StatusIcon(kind = kind, size = StatusIconSize.SMALL, spokenLabel = word)
+                    // WP UPD-6 review fix: the Library card's "Update
+                    // available" overlay (orange glyph and word) for a
+                    // cached game whose row -- the group row for a game with
+                    // packages -- is flagged.
+                    val row = updateRow ?: gameSummaryFrom(detail)
+                    val updateState = showsUpdateState(row, kind)
+                    val word = if (updateState) {
+                        stringResource(R.string.library_update_available_badge)
+                    } else {
+                        toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                    }
+                    StatusIcon(kind = cardIconKind(row, kind), size = StatusIconSize.SMALL, spokenLabel = word)
                     Text(
                         text = word,
                         style = MaterialTheme.typography.bodyMedium,
+                        color = if (updateState) VaultColors.StatusStale else Color.Unspecified,
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
@@ -460,6 +489,18 @@ private fun LoadedDetailBody(
             }
             Button(onClick = { controller.startDownload(scope) }) {
                 Text(stringResource(labelRes))
+            }
+        } else {
+            // WP UPD-6 review fix (web `buildUpdateNowButton`): a flagged
+            // cached game (or group) offers its update.
+            val updateAppids = sheetUpdateAppids(listOf(gameSummary) + packages, jobs)
+            if (updateAppids.isNotEmpty()) {
+                Button(
+                    onClick = { controller.startUpdate(scope, updateAppids, games) },
+                    enabled = !controller.updateInFlight,
+                ) {
+                    Text(if (controller.updateInFlight) UpdatesWording.STARTING else UpdatesWording.UPDATE_NOW)
+                }
             }
         }
     }
@@ -738,11 +779,21 @@ private fun PackagesSection(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                val word = toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                // WP UPD-6 review fix: a cached, flagged package says so.
+                val pkgUpdate = showsUpdateState(pkg, kind)
+                val word = if (pkgUpdate) {
+                    stringResource(R.string.library_update_available_badge)
+                } else {
+                    toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                }
                 Text(
                     text = word,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (kind == StatusKind.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = when {
+                        kind == StatusKind.ERROR -> MaterialTheme.colorScheme.error
+                        pkgUpdate -> VaultColors.StatusStale
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     modifier = Modifier.padding(start = 8.dp),
                 )
                 if (offersPackageRetry(pkg, liveJob, findTrackedJob(jobs, pkg.appid))) {

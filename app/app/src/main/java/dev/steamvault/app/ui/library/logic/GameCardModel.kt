@@ -85,9 +85,16 @@ data class GameCardModel(
      * [TOOL_APP_STATE_WORD] instead of [kind]'s label, and is drawn muted
      * (shown, not hidden). */
     val toolApp: Boolean = false,
-    /** WP UPD-3: the "Update available" badge, straight from
-     * `GameSummary.update_available` (WP UPD-1). */
+    /** WP UPD-3: `GameSummary.update_available` (WP UPD-1), straight from
+     * the row (a group row ORs it over its members, [groupGames]). */
     val updateAvailable: Boolean = false,
+    /** WP UPD-6 (twin of web `showsUpdateState`): a CACHED card whose row is
+     * flagged -- the status icon draws the orange "stale" refresh glyph
+     * ([cardIconKind]) and the status word reads "Update available" instead
+     * of "Current". A DISPLAY overlay only: [kind] stays [StatusKind.CACHED]
+     * (the copy on disk is valid, just not the newest), so the pill keeps
+     * its size and the chips keep counting the game as Cached. */
+    val updateState: Boolean = false,
     /** WP TOOL-APPS-2d: how many content packages this group card holds
      * (0 = a plain card) -- the "+N content packages" line. */
     val packageCount: Int = 0,
@@ -110,6 +117,28 @@ data class GameCardModel(
  */
 fun capsulePillHasGround(model: GameCardModel): Boolean =
     model.kind == StatusKind.CACHED && model.sizeLabel != null
+
+/** WP UPD-6 (twin of web `showsUpdateState`). */
+fun showsUpdateState(game: GameSummary, kind: StatusKind): Boolean =
+    kind == StatusKind.CACHED && game.update_available
+
+/** WP UPD-6 (twin of web `cardIconKind`): the kind the card's status icon
+ * draws -- [StatusKind.STALE] (orange refresh glyph) for the update state,
+ * otherwise the card's own [GameCardModel.kind]. */
+fun cardIconKind(model: GameCardModel): StatusKind =
+    if (model.updateState) StatusKind.STALE else model.kind
+
+/** [cardIconKind] for a raw row and its kind -- the detail sheet's header,
+ * which has no [GameCardModel]. */
+fun cardIconKind(game: GameSummary, kind: StatusKind): StatusKind =
+    if (showsUpdateState(game, kind)) StatusKind.STALE else kind
+
+/** WP UPD-2/UPD-6 (twin of web `showsUpdateBadge`): whether the card needs
+ * the separate "Update available" badge/line -- the flag is set and the
+ * status word does not already say it (a failed or running app that still
+ * carries the flag), so nothing on the card is said twice. */
+fun showsUpdateBadge(model: GameCardModel): Boolean =
+    model.updateAvailable && !model.updateState
 
 /**
  * @param selecting `true` while multi-select is active -- see
@@ -146,6 +175,7 @@ fun buildGameCardModel(
         installedBadge = installedBadgeFor(game),
         toolApp = isToolApp(game),
         updateAvailable = game.update_available,
+        updateState = showsUpdateState(game, kind),
         packageCount = packages.size,
         failedPackageCount = failedPackages(packages, liveJobsByAppid).size,
         neverPlayed = showsNeverPlayed(game, kind, ownedPlaytimeForever),

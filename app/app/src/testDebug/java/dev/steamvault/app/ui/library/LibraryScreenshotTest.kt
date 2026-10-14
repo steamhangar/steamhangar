@@ -266,7 +266,7 @@ class LibraryScreenshotTest {
             .onAllNodes(hasTestTag(CAPSULE_PILL_TAG), useUnmergedTree = true)
             .fetchSemanticsNodes()
         val badges = composeRule
-            .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
+            .onAllNodes(hasTestTag(UPDATE_BADGE_TAG), useUnmergedTree = true)
             .fetchSemanticsNodes()
         // WP TOOL-APPS-2d: the "Never played" pill rides on the cover too.
         val playPills = composeRule
@@ -274,10 +274,14 @@ class LibraryScreenshotTest {
             .fetchSemanticsNodes()
         assertTrue("no fallback titles rendered", titles.isNotEmpty())
         assertContentPackages(layout)
+        assertUpdateState()
         val grid = layout != LibraryLayout.LIST
         if (grid) {
             assertTrue("no capsule pills rendered", pills.isNotEmpty())
-            assertTrue("no update badge rendered (fixture has update_available = true)", badges.isNotEmpty())
+            assertTrue("no update badge rendered (Starfall Odyssey: flagged and Updating)", badges.isNotEmpty())
+            for (badge in badges) {
+                assertEquals("update badge spoken label", UPDATE_BADGE_FULL, badge.config.getOrNull(SemanticsProperties.ContentDescription)?.single())
+            }
         } else {
             for (title in titles) {
                 assertFalse(
@@ -316,6 +320,25 @@ class LibraryScreenshotTest {
             )
             if (expectedBadgeText != null) assertEquals("update badge label", expectedBadgeText, text)
         }
+    }
+
+    /**
+     * WP UPD-6, in every profile: the cached, flagged Lighthouse Keeper card
+     * says "Update available" as its status word (no "Current" for it), and
+     * its status icon speaks the same word. The grid badge and the list's
+     * update line are not counted here ([UPDATE_BADGE_TAG], [UPDATE_LABEL_TAG]).
+     */
+    private fun assertUpdateState() {
+        val words = composeRule
+            .onAllNodes(SemanticsMatcher("text is \"$UPDATE_BADGE_FULL\"") { it.text() == UPDATE_BADGE_FULL }, useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .filterNot { it.config.getOrNull(SemanticsProperties.TestTag) in setOf(UPDATE_BADGE_TAG, UPDATE_LABEL_TAG) }
+        assertTrue("no card status word reads '$UPDATE_BADGE_FULL' (the Lighthouse Keeper game is cached and flagged)", words.isNotEmpty())
+        val icons = composeRule
+            .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .filterNot { it.config.getOrNull(SemanticsProperties.TestTag) == UPDATE_BADGE_TAG }
+        assertTrue("no status icon speaks '$UPDATE_BADGE_FULL'", icons.isNotEmpty())
     }
 
     /**
@@ -528,8 +551,9 @@ class LibraryScreenshotTest {
          * bug left ~130 dp here at 411 dp. */
         const val MAX_CHIPS_TO_CARDS_DP = 32
 
-        /** All, Cached, Not cached, Downloading, Failed, Updates. */
-        const val EXPECTED_CHIPS = 6
+        /** All, Cached, Not cached, Installed not cached, Downloading,
+         * Failed, Updates. */
+        const val EXPECTED_CHIPS = 7
 
         /** `R.string.library_update_available_badge` and its `_short` twin
          * -- literals, the words web uses too (game-card.js). */

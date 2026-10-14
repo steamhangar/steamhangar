@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.GameDetail
+import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
@@ -13,6 +14,8 @@ import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.ui.detail.logic.GcFlowEvent
 import dev.steamvault.app.ui.detail.logic.GcFlowState
 import dev.steamvault.app.ui.detail.logic.reduceGcFlow
+import dev.steamvault.app.ui.downloads.logic.describeUpdateStartError
+import dev.steamvault.app.ui.downloads.logic.summarizeUpdateStart
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.ui.library.logic.MEMBERS_CHANGED_NOTICE
 import dev.steamvault.app.ui.library.logic.formatBytesGB
@@ -186,6 +189,35 @@ class DetailController(
                 toast = strings.queuedForDownload()
             } catch (e: VaultApiError) {
                 toast = e.message ?: strings.actionFailedFallback()
+            }
+        }
+    }
+
+    /** WP UPD-6 review fix: an "Update now" request is in flight (the
+     * button is disabled meanwhile). */
+    var updateInFlight by mutableStateOf(false)
+        private set
+
+    /**
+     * WP UPD-6 review fix (twin of web `startSheetUpdate`): the sheet's
+     * "Update now" -- `POST /v1/prefill` with exactly [appids] (from
+     * `sheetUpdateAppids`: the game and its flagged packages), the same
+     * non-forced enqueue Downloads' "Update now" uses. The jobs poll then
+     * moves the game into the queue and the button away.
+     * @param games `GET /v1/games` snapshot, for the forced-run note.
+     */
+    fun startUpdate(scope: CoroutineScope, appids: List<Int>, games: List<GameSummary>) {
+        if (updateInFlight || appids.isEmpty()) return
+        updateInFlight = true
+        scope.launch {
+            try {
+                toast = try {
+                    summarizeUpdateStart(jobsRepository.prefill(appids), games).message
+                } catch (e: VaultApiError) {
+                    describeUpdateStartError(e).message
+                }
+            } finally {
+                updateInFlight = false
             }
         }
     }

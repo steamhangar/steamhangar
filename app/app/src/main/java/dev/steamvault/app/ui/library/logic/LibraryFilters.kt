@@ -49,6 +49,16 @@ import dev.steamvault.app.ui.status.StatusKind
  * matches a group when the parent or any of its packages matches, so typing
  * a package name finds its game. Without `packagesByParent` (an older
  * server, or no groups) everything behaves exactly as before.
+ *
+ * **WP LIB-FILTER-INST-1: "Installed, not cached"** (twin of the web chip).
+ * Games an agent reports as installed on a PC (`installed_on` non-empty)
+ * with no bytes in the cache -- exactly the cards that show the "Installed
+ * but not cached" warning badge ([installedBadgeFor] ==
+ * [InstalledBadge.InstalledNotCached], so a tool app never counts, like its
+ * badge). A group row counts once and reads the parent's own row, like
+ * every chip but "Failed". Always shown, "0" included: `installed_on` is
+ * part of every GameSummary since WP AG-1, so there is no older-API case to
+ * hide it for.
  */
 
 /** One filter chip: a stable key, its label, and a predicate over
@@ -64,12 +74,19 @@ val FILTER_DEFS: List<FilterDef> = listOf(
     FilterDef("all", "All") { _, _ -> true },
     FilterDef("cached", "Cached") { g, job -> dispKind(g, job) == StatusKind.CACHED },
     FilterDef("none", "Not cached") { g, job -> dispKind(g, job) == StatusKind.NONE },
+    // WP LIB-FILTER-INST-1: the same predicate as the card's warning badge.
+    FilterDef(INSTALLED_NOT_CACHED_FILTER_KEY, "Installed, not cached") { g, _ ->
+        installedBadgeFor(g) is InstalledBadge.InstalledNotCached
+    },
     // findLiveJob/indexLiveJobsByAppid already exclude queued/GC jobs (GameStatus.kt).
     FilterDef("downloading", "Downloading") { _, job -> job != null },
     FilterDef("failed", "Failed") { g, job -> dispKind(g, job) == StatusKind.ERROR },
     // WP UPD-3: the server sets the flag only for a game with cache bytes.
     FilterDef(UPDATES_FILTER_KEY, "Updates") { g, _ -> g.update_available },
 )
+
+/** Key of the "Installed, not cached" chip (WP LIB-FILTER-INST-1). */
+const val INSTALLED_NOT_CACHED_FILTER_KEY = "installed"
 
 /** Key of the "Updates" chip (WP UPD-3). */
 const val UPDATES_FILTER_KEY = "updates"

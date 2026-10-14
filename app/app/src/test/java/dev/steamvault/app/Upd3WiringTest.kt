@@ -65,7 +65,7 @@ class Upd3WiringTest {
 
     @Test
     fun `MUTATION PIN -- the grid card draws the badge when the model says so`() {
-        assertCalledFrom(card, "if (model.updateAvailable)", "GameCard")
+        assertCalledFrom(card, "if (showsUpdateBadge(model))", "GameCard")
         assertCalledFrom(card, "UpdateAvailableBadge(", "GameCard")
         // Review fix: the badge keeps clear of the select checkbox.
         assertCalledFrom(card, "padding(start = UPDATE_BADGE_START_CLEARANCE", "GameCard")
@@ -73,7 +73,7 @@ class Upd3WiringTest {
 
     @Test
     fun `MUTATION PIN -- the list row draws the update line when the model says so`() {
-        assertCalledFrom(row, "if (model.updateAvailable)", "GameListRow")
+        assertCalledFrom(row, "if (showsUpdateBadge(model))", "GameListRow")
         assertCalledFrom(row, "UpdateAvailableLabel(", "GameListRow")
     }
 

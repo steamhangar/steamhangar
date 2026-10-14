@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.ui.library.logic.GameCardModel
 import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.StatusActionType
+import dev.steamvault.app.ui.library.logic.cardIconKind
+import dev.steamvault.app.ui.library.logic.showsUpdateBadge
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 
@@ -88,7 +90,7 @@ fun GameListRow(
         // own semantics -- reused per the brief, no separate a11y string
         // needed here). The word is ALSO rendered visibly in the title
         // column below (mockup rule: every roomy layout keeps icon + word).
-        StatusIcon(kind = model.kind, size = StatusIconSize.MEDIUM, modifier = iconModifier, spokenLabel = statusWord)
+        StatusIcon(kind = cardIconKind(model), size = StatusIconSize.MEDIUM, modifier = iconModifier, spokenLabel = statusWord)
 
         Column(modifier = Modifier.weight(1f).padding(horizontal = 10.dp)) {
             Text(
@@ -100,10 +102,11 @@ fun GameListRow(
             Text(
                 text = statusWord,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = cardStatusWordColor(model), // WP UPD-6
             )
-            // WP UPD-3: same flag as GameCard's badge, as a text line here.
-            if (model.updateAvailable) {
+            // WP UPD-3: same flag as GameCard's badge, as a text line here
+            // (WP UPD-6: only where the status word does not already say it).
+            if (showsUpdateBadge(model)) {
                 UpdateAvailableLabel()
             }
             // WP TOOL-APPS-2d: the group line and the "Never played" label,
