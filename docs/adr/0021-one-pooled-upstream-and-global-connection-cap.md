@@ -617,3 +617,11 @@ defaults. Tests: `core/tests/test-tls-caps-hook.sh` (docker-free),
 probe at the tuned value, one preflight tamper case), the image build
 checks, `verify-stack.sh` step 8f, and api pins for the compose lines and
 defaults.
+
+## Addendum 2026-10-15 — rollback spelled `off` (D16b, rc18)
+
+Since rc18 a blank `VAULT_UPSTREAM_EDGE=` means "not set" (the default
+edge), ADR-0009 addendum 2026-10-14. The rollback to the legacy per-name
+pool is `VAULT_UPSTREAM_EDGE=off`; `28-vault-upstream-pool.sh` accepts the
+keyword, pinned by `core/tests/fixtures/settings-grammar.tsv`. Every
+"set it empty" in the text above reads as "set it to `off`".

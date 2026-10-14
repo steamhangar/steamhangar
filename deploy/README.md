@@ -977,11 +977,12 @@ VAULT_UPSTREAM_RATE=800k          # ONE aggregate limit, bytes/s; empty = no cap
   `VAULT_SCHEDULE_WINDOW` grammar. Full speed **inside** the window, capped
   outside. Unset (the line commented out) = it follows
   `VAULT_SCHEDULE_WINDOW`, default `03:00-07:00`, so the cap lifts while
-  the scheduler runs. Set it explicitly blank (`VAULT_UPSTREAM_RATE_WINDOW=`)
-  to cap around the clock. Only the env window is followed, not one stored
-  via `PATCH /v1/settings`. `VAULT_SCHEDULE_WINDOW=` (blank, scheduler
-  off) together with a set rate and this line unset also means the cap
-  applies around the clock.
+  the scheduler runs. Deprecated since rc18 (the cap follows the one
+  download window); set it to `off` (`VAULT_UPSTREAM_RATE_WINDOW=off`) to
+  cap around the clock (before rc18: an explicitly blank value). Only the env window is followed, not one stored
+  via `PATCH /v1/settings` (until D16c). `VAULT_SCHEDULE_WINDOW=off`
+  (scheduler off) together with a set rate and this line unset also means
+  the cap applies around the clock.
 - **Time zone:** the window is evaluated in vault-core's local time, which
   is `TZ` (forwarded to vault-core too, default `UTC`). Set `TZ` once in
   `.env` and the scheduler and the cap agree.
@@ -1051,14 +1052,15 @@ New variables (all optional; vault-core only, recreate it after a change,
   `host="..."` (what the client sent), `limit_conn=` (`REJECTED` for a 503).
 - Socket bound: up to C in flight plus C idle (2C).
 
-**Rollback.** Set `VAULT_UPSTREAM_EDGE=` (empty, not commented out) in
-`.env` and recreate vault-core: the per-name pool of the next section
+**Rollback.** Set `VAULT_UPSTREAM_EDGE=off` in `.env` (before rc18: an
+empty `VAULT_UPSTREAM_EDGE=`, which since rc18 means "not set" = the
+default edge) and recreate vault-core: the per-name pool of the next section
 applies again. The boot log says `upstream edge mode ON: ...` or
 `upstream keepalive pool ON (legacy per-name mode)`.
 
 **Keep the upload throttle on.** Recommended (user decision 2026-10-04):
-keep `VAULT_UPSTREAM_RATE=4m` and an **empty** `VAULT_UPSTREAM_RATE_WINDOW=`
-(throttle round the clock, see "Upstream rate cap") even with edge mode and
+keep `VAULT_UPSTREAM_RATE=4m` and `VAULT_UPSTREAM_RATE_WINDOW=off`
+(before rc18: an empty value; throttle round the clock, see "Upstream rate cap") even with edge mode and
 the cap on, until measurements after the rollout show that edge and cap are
 stable. Only then loosen or remove it. Both are production `.env`
 settings; the repo defaults are unchanged.
@@ -1088,14 +1090,14 @@ docker compose exec vault-core netstat -tn | awk '$5 ~ /:80$/ && $6 == "ESTABLIS
   names. The update of the uncached app must finish without a hash
   mismatch, and `upstream_status` must show no 4xx/5xx for `host=` names
   other than the edge beyond the pre-change level. One such status that only
-  appears in edge mode: set `VAULT_UPSTREAM_EDGE=` empty.
+  appears in edge mode: set `VAULT_UPSTREAM_EDGE=off`.
 
 ---
 
 ## Upstream keepalive pool
 
 **Legacy mode** since ADR-0021: this per-name pool applies only while
-`VAULT_UPSTREAM_EDGE=` is set empty; with the shipped edge default the
+`VAULT_UPSTREAM_EDGE=off` (before rc18: set empty); with the shipped edge default the
 list is ignored (previous section).
 
 Stage 2 of the CGNAT fix (WP CORE-FEAT-1,
@@ -1962,6 +1964,6 @@ steamcontent.com` resolves to.
 | `up` fails with `... bind: address already in use` for port 443 | something else on the host owns 443 on the `VAULT_TLS_BIND` address. Use a dedicated address for vault-core (both `VAULT_CORE_BIND` and `VAULT_TLS_BIND`), or leave `VAULT_TLS_BIND` unset. |
 | A burst of `503` from vault-core on cache MISSes; `limiting connections by zone "vault_upstream_total"` in its log, `limit_conn=REJECTED` in the access log | the global cap is too low for the concurrent load (a Steam client plus a prefill). Raise `VAULT_UPSTREAM_MAX_CONNS` (max 64) or lower `VAULT_PREFILL_MAX_THREADS`, recreate vault-core. See ["Upstream edge and connection cap"](#upstream-edge-and-connection-cap). |
 | vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_EDGE` or `VAULT_UPSTREAM_MAX_CONNS` | the edge is not exactly one valid lowercase host name in `*.steamcontent.com` / `*.steamserver.net`, or the cap is not a whole number 1..64, or it is below `VAULT_PREFILL_MAX_THREADS`. The message names the value. Fix the line, recreate vault-core. |
-| MISSes answer 502 with `no live upstreams` or `could not be resolved` for the edge name | the edge name does not resolve (NXDOMAIN) or resolves to vault-core itself (a DNS rewrite loop). Check `dig +short <VAULT_UPSTREAM_EDGE>` from your resolver, use a name from `dig +short lancache.steamcontent.com`, or set `VAULT_UPSTREAM_EDGE=` empty to fall back. |
+| MISSes answer 502 with `no live upstreams` or `could not be resolved` for the edge name | the edge name does not resolve (NXDOMAIN) or resolves to vault-core itself (a DNS rewrite loop). Check `dig +short <VAULT_UPSTREAM_EDGE>` from your resolver, use a name from `dig +short lancache.steamcontent.com`, or set `VAULT_UPSTREAM_EDGE=off` to fall back. |
 | vault-core refuses to start with `28-vault-upstream-pool.sh: FATAL: VAULT_UPSTREAM_POOL_HOSTS: ...` | the edge list in `.env` breaks a rule: uppercase, a scheme or port, a name outside `*.steamcontent.com` / `*.steamserver.net`, the marker `lancache.steamcontent.com` itself, a duplicate, or more than 4 names. The message names the value and the rule. Fix the line (or empty it = no pool), then `docker compose up -d vault-core`. See ["Upstream keepalive pool"](#upstream-keepalive-pool). |
 | Port 80 already in use on the host | use a dedicated IP, not a different port — see [Port 80](#port-80-and-the-dedicated-ip-question). |
