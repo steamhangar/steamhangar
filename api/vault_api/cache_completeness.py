@@ -105,16 +105,13 @@ STATUS_OK = "ok"
 #: Neither a recorded manifest nor an oracle ``public`` gid for the depot.
 STATUS_NO_TARGET = "no_target"
 #: The target manifest id is known, but neither the archive nor a cache-stored
-#: copy yields its chunk list.
+#: copy yields its chunk list -- or its chunk sizes sum past ``INT64_MAX``.
 STATUS_MANIFEST_UNAVAILABLE = "manifest_unavailable"
 #: The cache root or the depot directory cannot be used safely.
 STATUS_UNREADABLE_CACHE = "unreadable_cache"
 
 #: ``cache_completeness.source`` for an evaluated row (which file was read).
 SOURCE_ARCHIVE = gc.SOURCE_ARCHIVE
-
-#: A manifest whose summed sizes exceed INT64 also lands on
-#: ``STATUS_MANIFEST_UNAVAILABLE`` (see ``INT64_MAX``).
 
 
 def _never() -> bool:
@@ -240,8 +237,9 @@ def current_targets(
 # --------------------------------------------------------------------------
 
 #: SQLite INTEGER is signed 64-bit. A manifest whose chunk sizes sum past it is
-#: corrupt or hostile (no real depot is 8 EiB); it is treated as unavailable,
-#: not stored (the insert would raise ``OverflowError``).
+#: corrupt or hostile (no real depot is 8 EiB); it lands on
+#: ``STATUS_MANIFEST_UNAVAILABLE`` with a debug log line and its sizes are not
+#: stored (the insert would raise ``OverflowError``).
 INT64_MAX = 2**63 - 1
 
 
@@ -293,6 +291,15 @@ class EvaluationRun:
             self.chunk_scans += 1
             self._chunks[depotid] = cached
         return cached
+
+    def depot_exists(self, depotid: int) -> bool:
+        """Is the depot directory still there? (``store_app``'s race check.)"""
+        if self.depot_root is None:
+            return False
+        try:
+            return os.path.isdir(deletion.depot_dir_path(self.depot_root, depotid))
+        except deletion.DeletionGuardError:
+            return False
 
     def release(self, depotid: int, paths: Iterable[str | None]) -> None:
         """Forget a non-shared depot's listing and parses after measuring it."""
@@ -416,12 +423,39 @@ def evaluate_app(
 
 
 def store_app(
-    conn: sqlite3.Connection, appid: int, rows: Sequence[DepotCompleteness]
-) -> None:
+    conn: sqlite3.Connection,
+    appid: int,
+    rows: Sequence[DepotCompleteness],
+    *,
+    depot_exists: Callable[[int], bool] | None = None,
+) -> bool:
     """Replace the app's stored rows with ``rows`` in one transaction (a depot
-    no longer mapped stops being reported)."""
+    no longer mapped stops being reported). Returns False when nothing new was
+    stored.
+
+    **Race with ``DELETE /v1/cache/{appid}`` (``depot_exists``).** A delete
+    removes depot directories first and then drops their rows
+    (``forget``). A measurement read before the removal must not be stored
+    after the drop. So, inside this write transaction, every measured depot
+    that had bytes present is checked to still exist; if one is gone the app's
+    rows are dropped instead of stored. Holding ``BEGIN IMMEDIATE`` closes the
+    window: a removal after the check makes the delete's ``forget`` wait for
+    this commit and then drop these rows.
+    """
     with jobs.immediate_transaction(conn):
         conn.execute("DELETE FROM cache_completeness WHERE appid = ?", (appid,))
+        if depot_exists is not None:
+            vanished = [
+                r.depotid for r in rows
+                if (r.present_bytes or 0) > 0 and not depot_exists(r.depotid)
+            ]
+            if vanished:
+                logger.debug(
+                    "cache completeness: app %d depot(s) %s vanished during the "
+                    "measurement (cache delete); nothing stored",
+                    appid, vanished,
+                )
+                return False
         conn.executemany(
             """
             INSERT INTO cache_completeness (
@@ -439,6 +473,7 @@ def store_app(
                 for r in rows
             ],
         )
+    return True
 
 
 def _shared_depots(conn: sqlite3.Connection, appids: Sequence[int]) -> set[int]:
@@ -481,8 +516,8 @@ def evaluate_apps(
             rows = evaluate_app(conn, settings, appid, run=run)
             if rows is None:
                 return RunOutcome(stored, aborted=True)
-            store_app(conn, appid, rows)
-            stored += 1
+            if store_app(conn, appid, rows, depot_exists=run.depot_exists):
+                stored += 1
         except Exception:  # noqa: BLE001 - one app must not stop the run
             logger.exception("cache completeness: evaluating app %d failed", appid)
     return RunOutcome(stored, aborted=False)
@@ -509,9 +544,10 @@ def evaluate_selection(
 def remeasure_app(conn: sqlite3.Connection, settings: Settings, appid: int) -> None:
     """Measure one app now and store it (the prefill worker, after a
     successful job for that app). Never prunes other apps."""
-    rows = evaluate_app(conn, settings, appid)
+    run = EvaluationRun(settings)
+    rows = evaluate_app(conn, settings, appid, run=run)
     if rows is not None:
-        store_app(conn, appid, rows)
+        store_app(conn, appid, rows, depot_exists=run.depot_exists)
 
 
 def prune_except(conn: sqlite3.Connection, appids: Iterable[int]) -> int:

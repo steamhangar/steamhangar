@@ -609,6 +609,119 @@ def test_the_worker_remeasures_an_app_after_its_prefill(
 
 
 # --------------------------------------------------------------------------
+# Review round 2: wiring
+# --------------------------------------------------------------------------
+
+
+def test_a_successful_prefill_job_through_the_worker_stores_a_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """worker.py's post-success hook, end to end: enqueue -> stub SteamPrefill
+    writes one chunk and drops a manifest .bin -> ingestion records it -> the
+    hook measures the app. The update check is switched off for this test, so
+    the row can only come from the hook."""
+    from tests import stub_prefill
+    from tests.test_manifests import _bin_manifest_bytes
+    from tests.test_worker import enqueue, make_settings, wait_for_job
+    from vault_api import oracle
+    from vault_api.config import MANIFEST_ORACLE_STEAMCMD_API
+
+    monkeypatch.setattr(
+        update_check.UpdateCheckRunner, "start",
+        lambda self, *a, **k: update_check.DISABLED,
+    )
+
+    def no_fetch(url: str, *args: Any, **kwargs: Any) -> bytes:
+        raise AssertionError(f"network fetch attempted: {url}")
+
+    monkeypatch.setattr(oracle, "http_fetch", no_fetch)
+
+    cache_root = tmp_path / "cache"
+    temp_cache = tmp_path / "steamprefill-cache"
+    stub_chunk = "%040x" % (441 * 1000)  # what the stub writes first, 160 bytes
+    manifest = _bin_manifest_bytes(
+        depot_id=441, manifest_id=555,
+        files=[[(stub_chunk, 160), (_cid(7), 160)]],
+    )
+    executable = stub_prefill.make_stub(
+        tmp_path / "bin",
+        cache_root=str(cache_root),
+        depots_by_app={440: [441]},
+        manifest_bins=[{
+            "dir": str(temp_cache), "filename": "440_440_441_555.bin", "data": manifest,
+        }],
+    )
+    settings = dataclasses.replace(
+        make_settings(
+            tmp_path, cache_root, executable,
+            steamprefill_cache_dir=str(temp_cache),
+        ),
+        manifest_oracle=MANIFEST_ORACLE_STEAMCMD_API,
+    )
+
+    with TestClient(create_app(settings)) as client:
+        (job_id,) = enqueue(client, 440)
+        assert wait_for_job(client, job_id)["status"] == "done"
+        game = client.get("/v1/games/440", headers=AUTH).json()
+
+    conn = get_connection(settings.db_path)
+    try:
+        rows = conn.execute(
+            "SELECT appid, depotid, manifestid, expected_bytes, present_bytes "
+            "FROM cache_completeness"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [tuple(r) for r in rows] == [(440, 441, "555", 320, 160)]
+    assert game["cache_complete_pct"] == 50
+
+
+def test_delete_drops_a_second_apps_row_for_the_removed_shared_depot(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    """The depot arm of ``forget``: app 900 maps 730's depot 731 but has no
+    cache content of its own, so 731 goes as a last cached remnant -- and 900's
+    (900, 731) row must go with it, although 900 itself was not deleted."""
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    record(conn, 900, 731, "1001", "2026-10-01T00:00:00Z")
+    cache_completeness.evaluate_apps(conn, settings, [440, 730, 900])
+    assert conn.execute(
+        "SELECT COUNT(*) FROM cache_completeness WHERE appid = 900"
+    ).fetchone()[0] == 1
+
+    with api_client(settings) as client:
+        response = client.delete("/v1/cache/730", headers=AUTH)
+    assert response.status_code == 200, response.text
+    assert [d["depotid"] for d in response.json()["deleted_depots"]] == [731]
+
+    left = {tuple(r) for r in conn.execute("SELECT appid, depotid FROM cache_completeness")}
+    assert left == {(440, 441)}
+
+
+def test_a_measurement_of_a_depot_deleted_meanwhile_is_not_stored(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    import shutil
+
+    settings = settings_for(tmp_path)
+    seed_two_games(conn, settings)
+    run = cache_completeness.EvaluationRun(settings)
+    rows = cache_completeness.evaluate_app(conn, settings, 730, run=run)
+    assert rows and rows[0].present_bytes == 100
+
+    # DELETE /v1/cache/730 removes the directory between measure and store.
+    shutil.rmtree(Path(settings.cache_root) / "depot" / "731")
+
+    assert not cache_completeness.store_app(
+        conn, 730, rows, depot_exists=run.depot_exists
+    )
+    assert conn.execute("SELECT COUNT(*) FROM cache_completeness").fetchone()[0] == 0
+    # Without the check it would have been stored.
+    assert cache_completeness.store_app(conn, 730, rows)
+
+
+# --------------------------------------------------------------------------
 # Schema v25
 # --------------------------------------------------------------------------
 

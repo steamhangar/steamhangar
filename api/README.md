@@ -2176,7 +2176,9 @@ of the **current build** is there (`vault_api/cache_completeness.py`):
   selection (an aborted run stores no partial app and drops nothing). The
   prefill worker re-measures an app right after a successful prefill job for
   it; `DELETE /v1/cache/{appid}` drops the rows of the app and of every depot
-  it removed. Anything else (a Steam client finishing through the cache, GC)
+  it removed; a measurement that read a depot the delete removed meanwhile is
+  not stored (checked inside the write transaction). Anything else (a Steam
+  client finishing through the cache, GC)
   shows at the next check: **a figure is as old as
   `cache_complete_checked_at`, up to one `VAULT_SCHEDULE_INTERVAL_MINUTES`
   (default 180 min).** The API only reads the table. With the oracle off
