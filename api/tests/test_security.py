@@ -29,8 +29,13 @@ SIGNATURE_AUTH_PATHS = {"/v1/covers/{appid}/{signature}"}
 
 # WP D11: the Steam OpenID return page for the Android app (a fixed-target
 # hand-off to the app's deep link, routers/app_return.py). Literal on purpose.
+# WP DIST-1a: the baked release downloads (routers/dist.py), outside /v1 so
+# an unpaired device can fetch them; only exact release names are served.
+# Their index GET /v1/dist stays behind the key. Literal on purpose.
 PUBLIC_PATHS = (
-    {"/v1/health", "/auth/steam/app-return"} | _WEBUI_PUBLIC_PATHS | SIGNATURE_AUTH_PATHS
+    {"/v1/health", "/auth/steam/app-return", "/dist/{name}"}
+    | _WEBUI_PUBLIC_PATHS
+    | SIGNATURE_AUTH_PATHS
 )
 
 

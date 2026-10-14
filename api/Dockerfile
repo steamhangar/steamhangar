@@ -241,6 +241,22 @@ RUN set -eux; \
     test "$(getent passwd 101 | cut -d: -f6)" = "/opt/steamprefill/home"; \
     test "$(stat -c '%u:%g' /opt/steamprefill/home)" = "101:101"
 
+# WP DIST-1a: the release downloads vault-api serves under /dist/<name>
+# (api/vault_api/dist.py, api/README.md "Release downloads"). publish.yml
+# stages the signed APK, the vault-agent binaries, the task scripts, the
+# systemd units and SHA256SUMS of the SAME workflow run into api/dist/
+# before this build; a local build (compose, dev.sh build, verify) has only
+# the placeholder README there, so this COPY always has a source and the
+# image simply serves nothing (GET /v1/dist then points at the GitHub
+# Release). Copied AFTER the chown above, as defence in depth: the files
+# and the directory itself stay root:root, so uid 101 cannot write into
+# them. It is NOT a hard guarantee: /app is owned by 101 (chown above), so
+# a compromised uid 101 could rename /app/dist away and create its own --
+# the handler's lstat (regular file, no symlink) then still refuses links
+# but would serve that process's files. Release cost: ~9 MB APK + ~27 MB
+# of agent binaries, uncompressed.
+COPY api/dist /app/dist
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     # Must match the passwd entry above; see the blocker note there for why
@@ -261,6 +277,9 @@ ENV PYTHONUNBUFFERED=1 \
     # entirely rather than trying to make the relative math agree with the
     # image's layout.
     VAULT_WEB_DIR=/app/web \
+    # WP DIST-1a: see the COPY above. Image-internal, like VAULT_WEB_DIR;
+    # compose does not forward it.
+    VAULT_DIST_DIR=/app/dist \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 # VAULT_API_KEY is deliberately NOT given a default here. vault-api raises

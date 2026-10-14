@@ -517,6 +517,23 @@ speed, outside no automatic downloads and the rate cap applies;
 `VAULT_UPSTREAM_RATE_WINDOW` is deprecated (still honored as an env pin,
 startup warning). D8 later adds several windows per day with a per-window
 throttle checkbox. The core settings file lives on a new volume.
+Night run 2026-10-14 (user, multiple choice): tag v0.1.0-rc18 is allowed
+when every package passed review and CI, tests and `dev.sh verify` are
+green; then file the rc18 deploy Antrag (incl. the .env review). If D16c
+fails a hard gate (envsh sourcing, volume seeding) without a clean
+alternative, rc18 ships without D16c (core keys env-only, shown read-only)
+and D16c moves to rc19.
+D16a table sign-off (user, 2026-10-14, block by block): network and load
+keys editable, but PREFILL_MAX_THREADS, UPSTREAM_MAX_CONNS and both TLS
+caps are risky (confirm dialog; a too-high value can fill the CGNAT,
+incident 2026-10-04); UPSTREAM_RATE and the download window stay plain
+editable. Debug: UPSTREAM_EDGE, UPSTREAM_POOL_HOSTS, RESOLVER risky;
+LOG_LEVEL editable without dialog (still in the expert area).
+Housekeeping keys (GC grace, retention/keep counters, sweep and miss
+trigger, client staleness, oracle and prefill timeouts) all live behind
+the expert switch; the normal page shows the download window, auto-GC,
+the vault name and the block-4 keys. Block 4 (borderline) as proposed in
+docs/handover/d16-settings-audit.md section 3.
 
 **Wave 2 (rc16/rc17)** — runs in parallel where it does not touch wave 1
 (user decision 2026-10-13): D9 ADR, D15a, the D16c Antrag once its
