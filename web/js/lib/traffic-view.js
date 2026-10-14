@@ -303,17 +303,24 @@ export function filterJobsByRange(jobs, range, nowMs = Date.now()) {
 /**
  * One job list from the store's poll (newest 20, refreshed every few
  * seconds) and the history fetch (`?range=`, up to 200, fetched on demand).
- * The same job in both keeps the store's copy, which is the newer one.
- * Newest first by id, the order `GET /v1/jobs` uses.
+ * The same job in both keeps the store's copy, which is the newer one. The
+ * store's rows keep their order and come first (they are the newest), the
+ * fetched rows the store does not hold follow in their own order — both
+ * lists are newest first as `GET /v1/jobs` returns them.
  * @param {Array<object>} fresh
  * @param {Array<object>} deep
  * @returns {Array<object>}
  */
 export function mergeJobLists(fresh, deep) {
-  const byId = new Map();
-  for (const job of Array.isArray(deep) ? deep : []) byId.set(job.id, job);
-  for (const job of Array.isArray(fresh) ? fresh : []) byId.set(job.id, job);
-  return [...byId.values()].sort((a, b) => b.id - a.id);
+  const out = Array.isArray(fresh) ? fresh.slice() : [];
+  const seen = new Set(out.map((j) => j.id));
+  for (const job of Array.isArray(deep) ? deep : []) {
+    if (!seen.has(job.id)) {
+      seen.add(job.id);
+      out.push(job);
+    }
+  }
+  return out;
 }
 
 /** The history list's empty line for a range. */

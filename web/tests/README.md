@@ -3397,3 +3397,50 @@ Suite: **1382 tests, 1382 pass, 0 fail**.
 - Demo mode has no `/v1/updates/*` routes and no `update_available` on its
   games, so the feature is hidden there (the 404 path).
 - The wiring tests poll with the real 2 s interval (about 7 s for the file).
+
+### WP D15c — the Clients page, the Downloads statistics header, the History filter
+
+New files:
+
+- `traffic-view.test.js` — `lib/traffic-view.js`: speed/byte/percent
+  formatting (a real zero prints, `null` never becomes a number), the
+  event-feed states (anything unreadable counts as disabled), the header
+  tiles (none with the feed disabled, a dash only for the current values
+  when stale), the graph geometry, the per-job speed line, the History range
+  rule and the store/fetch merge.
+- `clients-page.test.js` — `lib/clients-page.js`: an address client is
+  named by its IP and never called a PC (the prefill runner can be one),
+  "installed" only for agents, the loading/stats/recent/last-active lines.
+- `clients-view-wiring.test.js` — fake-dom: one card per client, feed
+  disabled/stale, the range selector with a gated fetch (a late answer for
+  the old range never paints), the 404 note, the poll stopping on
+  navigation, the nav button order.
+- `downloads-stats-wiring.test.js` — fake-dom: seven tiles, the inline SVG
+  graph, the running job's speed, disabled/stale, the statistics range
+  (gated, late answer dropped), the History filter (`?range=&limit=200`,
+  fetched-only rows shown, older rows hidden, empty line), 404 and
+  navigation stop the poll.
+- `demo-data-traffic.test.js` — demo `/v1/throughput`, `/series`,
+  `/v1/clients/overview` keys equal `routers/traffic.py`'s models; the demo
+  `/v1/jobs?range=` filter does not advance the demo job.
+- `demo-traffic-render.test.js` — demo mode paints both views.
+
+Changed on purpose: `settings-about-pcs-wiring.test.js` and
+`add-device-wiring.test.js` open the PCs sheet and "Add a device" from the
+Clients page now (plus a pin for the Settings pointer);
+`css-layout-foundation.test.js` pins a 4-column bottom nav (one column per
+`.nav-btn`); `css-downloads-settings-layout.test.js` the capped column
+selector with `.view-clients`; `view-announcer.test.js` the four titles.
+
+Mutations checked, all killed: the range check on the overview and on the
+statistics answer removed (late answer painted); the History range filter
+removed; `mergeJobLists` sorted by id instead of keeping the store order
+(owned-names pins).
+
+#### Honest list
+
+- No browser run: the graph, the tile grid and the 4-item bottom nav were
+  not looked at on a screen, only DOM and CSS rules.
+- The History fetch is one page of 200 rows (the API maximum, no paging).
+- An old server (before D15b) ignores `?range=` on `/v1/jobs`; the client
+  filter still applies to whatever comes back.

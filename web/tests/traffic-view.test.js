@@ -168,9 +168,9 @@ test("MUTATION TARGET: history range filter — in-flight jobs always stay, fini
   assert.deepEqual(filterJobsByRange(jobs, "all", NOW).map((j) => j.id), [5, 4, 3, 2, 1]);
 });
 
-test("merge: the store's (fresher) copy wins, newest id first", () => {
-  const merged = mergeJobLists([{ id: 9, status: "done" }, { id: 7, status: "done" }], [{ id: 9, status: "running" }, { id: 8, status: "error" }]);
-  assert.deepEqual(merged.map((j) => `${j.id}:${j.status}`), ["9:done", "8:error", "7:done"]);
+test("MUTATION TARGET: merge — the store's (fresher) copy wins, store rows first in their order, then the fetched rest", () => {
+  const merged = mergeJobLists([{ id: 9, status: "done" }, { id: 7, status: "done" }], [{ id: 9, status: "running" }, { id: 6, status: "error" }, { id: 7, status: "error" }]);
+  assert.deepEqual(merged.map((j) => `${j.id}:${j.status}`), ["9:done", "7:done", "6:error"]);
   assert.equal(emptyHistoryText("7d"), "Nothing finished in the last 7 days.");
   assert.equal(emptyHistoryText("all"), "Nothing finished yet.");
 });

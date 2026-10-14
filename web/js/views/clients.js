@@ -87,8 +87,15 @@ const poll = createViewPoll({
     paint();
   },
   onError: (err) => {
-    if (err && err.kind === ERROR_KINDS.NOT_FOUND) state.unsupported = true;
-    else state.error = errorText(err);
+    if (err && err.kind === ERROR_KINDS.NOT_FOUND) {
+      // A server older than D15b: polling again cannot change that answer
+      // (an upgrade restarts vault-api; the next visit to this view asks
+      // again), so the poll stops here.
+      state.unsupported = true;
+      poll.stop();
+    } else {
+      state.error = errorText(err);
+    }
     paint();
   },
 });
