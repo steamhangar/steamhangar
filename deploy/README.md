@@ -886,8 +886,10 @@ still runs a plain installed-only sweep every night, which is not what
 ```
 VAULT_SWEEP_INCLUDE_CACHED=false
 VAULT_AUTO_GC=off
-VAULT_SCHEDULE_WINDOW=
+VAULT_SCHEDULE_WINDOW=off
 ```
+(Before rc18 the last line was `VAULT_SCHEDULE_WINDOW=`; since rc18 blank
+means "not set" and the scheduler-off spelling is `off`, see "Upgrading".)
 
 **A seventh and eighth, also newly forwarded here as a WP SWEEP-1 follow-up
 (review round S3 finding, operator decision): `VAULT_SCHEDULE_WINDOW`
@@ -902,8 +904,12 @@ comment on the `TZ` key for the full argument against guessing). A wrong
 or absent `TZ` is made visible, not silent: vault-api logs one line on its
 first tick naming the requested `TZ` value, the resolved zone/offset, and
 the next window opening in both local and UTC time (`api/README.md`
-"Timezone"). **The blank-disables-it path needs the exact right Compose
-syntax to actually work, and review round 2 caught a real bug here**: the
+"Timezone"). **Since rc18 (D16b) the window is disabled with
+`VAULT_SCHEDULE_WINDOW=off`; blank means "not set" and the default
+`03:00-07:00` now lives in `config.py`, compose forwards
+`${VAULT_SCHEDULE_WINDOW-}`.** History of the blank-disables path before
+rc18, kept for the record: it needed the exact right Compose
+syntax to actually work, and review round 2 caught a real bug here: the
 no-colon substitution form (`${VAULT_SCHEDULE_WINDOW-03:00-07:00}`, no
 colon before the dash) is required for `VAULT_SCHEDULE_WINDOW=` (present,
 blank) to actually disable the scheduler — the more common colon form
@@ -1334,6 +1340,34 @@ cd deploy
 git pull
 docker compose up -d --build
 ```
+
+**rc18: blank no longer means off — write `off` instead of a blank value**
+(D16, ADR-0009 addendum 2026-10-14). Every setting that can be changed in
+Settings is now forwarded as `${VAR-}`: a blank or missing value means "not
+set" (use the value from Settings, else the default), and a non-blank value
+pins the setting ("set via env", read-only in Settings; env always wins). For
+`VAULT_SCHEDULE_WINDOW`, `VAULT_UPSTREAM_EDGE`, `VAULT_UPSTREAM_RATE`,
+`VAULT_UPSTREAM_POOL_HOSTS` and the deprecated `VAULT_UPSTREAM_RATE_WINDOW`,
+a blank line used to select a behaviour; write `off` for it now:
+
+| Before rc18 | rc18 and later | Meaning |
+|-------------|----------------|---------|
+| `VAULT_SCHEDULE_WINDOW=` | `VAULT_SCHEDULE_WINDOW=off` | no download window: no automatic downloads, the rate cap applies around the clock |
+| `VAULT_UPSTREAM_EDGE=` | `VAULT_UPSTREAM_EDGE=off` | legacy per-name pool (the ADR-0021 rollback switch) |
+| `VAULT_UPSTREAM_RATE=` | `VAULT_UPSTREAM_RATE=off`, or delete the line | no cap (`off` pins it; a missing line lets Settings set a cap) |
+| `VAULT_UPSTREAM_POOL_HOSTS=` | `VAULT_UPSTREAM_POOL_HOSTS=off`, or delete the line | no pool hosts |
+| `VAULT_UPSTREAM_RATE_WINDOW=` | `VAULT_UPSTREAM_RATE_WINDOW=off` | cap around the clock (deprecated: the cap now follows the download window) |
+
+A blank line left in place after the upgrade flips to the default: the
+scheduler runs 03:00-07:00 instead of being off, edge mode replaces the
+legacy pool, and a blank rate window follows the download window. Before you
+upgrade, check your `.env` (and any override file) for every key listed in
+`docs/handover/d16-settings-audit.md` sections 3.1/3.2: turn an intended
+"off" into `off`, and delete values you did not mean to pin, because a set
+key shows as "set via env" and cannot be changed in Settings.
+`VAULT_WEBHOOK_URL` is env-only now; a URL stored in Settings is ignored
+(one startup warning). vault-api logs one warning for every Settings value
+an env variable now overrides.
 
 **Newly-enforced `.env` keys (2026-08-17 packaging work package).** A dozen
 settings that Compose used to silently drop — set them in `.env` and nothing

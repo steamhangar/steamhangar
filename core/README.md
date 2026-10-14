@@ -1297,7 +1297,7 @@ The per-name pool below (ADR-0017) still exists as **legacy mode**.
 |---|---|---|
 | `VAULT_UPSTREAM_EDGE` | Exactly ONE Steam CDN edge host name (lowercase, no port, ending in `.steamcontent.com` or `.steamserver.net`, not the marker `lancache.steamcontent.com`). compose ships `dist-fra1.discovery.steamserver.net`. | **empty = legacy per-name mode** (the rollback); unset in compose = the default name |
 | `VAULT_UPSTREAM_MAX_CONNS` | The global cap C on concurrent upstream connections, whole number 1..64, no off switch (`0`, `off`, garbage refuse to boot). | 16 |
-| `VAULT_PREFILL_MAX_THREADS` | Not a setting of vault-core: compose forwards it (`${VAULT_PREFILL_MAX_THREADS:-8}`) so the hook can refuse C below it. Empty counts as 8. | 8 |
+| `VAULT_PREFILL_MAX_THREADS` | Not a setting of vault-core: compose forwards it (`${VAULT_PREFILL_MAX_THREADS-}` since rc18, D16b) so the hook can refuse C below it. Empty counts as 8. | 8 |
 
 **Mechanism.** `28-vault-upstream-pool.sh` renders an `upstream` group for
 the edge (`keepalive C`, `keepalive_timeout 50s`) and a map
