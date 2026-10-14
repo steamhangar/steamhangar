@@ -43,9 +43,19 @@
  * but a content package failed (user decision Q3 B variant); every other
  * chip reads the parent's own row. A search matches a group when the parent
  * or any of its packages matches, so typing a package name finds its game.
+ *
+ * **WP LIB-FILTER-INST-1: "Installed, not cached".** Games an agent reports
+ * as installed on a PC (`installed_on` non-empty) with no bytes in the
+ * cache — exactly the cards that show the orange "Installed but not cached
+ * · <PC>" badge (lib/game-status.js `installedBadgeState` NOT_CACHED, so a
+ * tool app never counts, like its badge). A group row counts once and
+ * reads the parent's own row, like every chip but "Failed". Not optional:
+ * like All/Cached/Not cached/Downloading/Failed it is always shown, with
+ * "0" when nothing matches (`installed_on` is part of every GameSummary
+ * since WP AG-1, so there is no older-API case to hide it for).
  */
 
-import { dispKind, KIND } from "./game-status.js";
+import { dispKind, KIND, installedBadgeState, INSTALLED_BADGE } from "./game-status.js";
 import { hasUpdateField } from "./update-check.js";
 import { failedPackages } from "./content-groups.js";
 
@@ -68,6 +78,12 @@ export const FILTER_DEFS = Object.freeze([
   { key: "all", label: "All", predicate: () => true },
   { key: "cached", label: "Cached", predicate: (g, job) => dispKind(g, job) === KIND.CACHED },
   { key: "none", label: "Not cached", predicate: (g, job) => dispKind(g, job) === KIND.NONE },
+  {
+    key: "installed",
+    label: "Installed, not cached",
+    // WP LIB-FILTER-INST-1: the same predicate as the card's warning badge.
+    predicate: (g) => installedBadgeState(g) === INSTALLED_BADGE.NOT_CACHED,
+  },
   {
     key: "downloading",
     label: "Downloading",

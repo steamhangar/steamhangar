@@ -98,6 +98,7 @@ import {
   statusAction,
   installedBadgeState,
   installedOnSummary,
+  installedOnNames,
   installedBadgeText,
   installedBadgeCompactText,
   INSTALLED_BADGE,
@@ -194,12 +195,17 @@ function syncInstalledTag(metaEl, game) {
   }
   const summary = installedOnSummary(game.installed_on);
   const [full, compact] = buildInstalledTagChildren(state, summary);
+  // WP LIB-LIST-1: the list column truncates (ellipsis), so the badge's
+  // tooltip names EVERY client, not the "first +N" summary.
+  const title = installedBadgeText(state, installedOnNames(game.installed_on));
   if (existing) {
     existing.className = installedTagClass(state);
+    existing.title = title;
     existing.replaceChildren(full, compact);
   } else {
     const tag = document.createElement("span");
     tag.className = installedTagClass(state);
+    tag.title = title;
     tag.append(full, compact);
     metaEl.appendChild(tag);
   }
@@ -537,11 +543,12 @@ export function displayName(game) {
 function installedAriaFragment(game, kind) {
   const state = installedBadgeState(game);
   if (state === INSTALLED_BADGE.NONE) return null;
-  const summary = installedOnSummary(game.installed_on);
+  // WP LIB-LIST-1: every client by name (the visible column may truncate).
+  const names = installedOnNames(game.installed_on);
   if (state === INSTALLED_BADGE.NOT_CACHED && kind === KIND.NONE) {
-    return `Installed on ${summary}`;
+    return `Installed on ${names}`;
   }
-  return installedBadgeText(state, summary);
+  return installedBadgeText(state, names);
 }
 
 /** The card's explicit accessible name (module header, "Nested-interactive-

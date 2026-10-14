@@ -3684,3 +3684,86 @@ and range-hidden pins (ok, disabled incl. a pending re-mount, 404);
 Mutations, all killed: range hide removed (Downloads, Clients); the
 Clients verdict never set; the zero-graph check removed; the refresh note
 dropped (Downloads, Clients); the tile back on `hit_rate`.
+
+### WP LIB-LIST-1 (web) — fixed columns in the library list
+
+User feedback on prod rc15: the list row's right side (status word, size,
+"Update", "not cached · Demon", "Installed on") was a flex line of
+right-aligned items with varying widths, so nothing lined up from row to
+row. Each list row is now its own CSS grid with the same fixed-width
+tracks; `.meta` is `display:contents`, so its children are the row's grid
+items (css/app.css "list rows: fixed columns"). Grid layouts are untouched.
+
+- Phone (< 720 px): line 1 cover | name | size; line 2 icon | status word |
+  update cell ("Update" or "Unplayed", under the size); line 3 installed on
+  (full row width, only installed games); line 4 "+N content packages · N
+  failed" (group rows only).
+- BP-M (>= 720 px): one line — cover | name (all the slack) | icon | status
+  (118 px) | size (64 px, right-aligned, tabular figures) | update (72 px) |
+  installed on (132 px, compact wording, ellipsis). A group row's package
+  line sits under the name, inside the cover's height.
+- BP-L (>= 1024 px): installed-on column 210 px with the full wording
+  ("Installed on Demon", "Installed but not cached · Demon").
+- The installed badge's `title` and the card's aria-label name every client
+  (`lib/game-status.js` `installedOnNames`), since the column truncates.
+
+Tests: `game-card-list-columns.test.js` 11 (G1 grid + `display:contents`;
+G2 phone template; G3 BP-M tracks right of the name all resolve to px; G4
+every placed item has grid-column and grid-row; G4b no BP-M row spans; G5
+the lead custom property ends on a track; G6 size alignment, ellipsis,
+title and aria full client list, patch keeps the title; G7 `.updbadge` and
+`.playbadge` never co-occur over 216 state combinations; G8 BP-L full
+wording). `css-mobile-overflow.test.js`: the WEB-FIX-3 `.meta`
+flex-shrink pin replaced by its grid equivalent.
+
+Mutations, all killed: a BP-M track `auto`; the lead ending in line names;
+the patch path dropping the title; aria back to the "first +N" summary;
+`.meta` no longer `display:contents`; installed-on spanning two rows; size
+not right-aligned; the update badge ignoring the card kind; BP-L full
+wording dropped.
+
+Measured in headless Chromium (harness outside the repo) at 360, 720, 768,
+1024 and 1440 px: no horizontal scroll, every column at the same x in every
+row, no clipped status word or update cell; rows 59 px (61 px on a phone
+for rows with a third line).
+
+#### Honest list
+
+- Two measured traps, both pinned: adjacent line-name groups (`[a] [b]`)
+  invalidate the whole template; an item spanning an auto row that is
+  empty in most cards makes Chrome grow that row (the name sat 4 px high).
+- No column headers (optional in the brief); the BP-L full wording says
+  what the installed-on column is.
+- Not checked on a real phone or in Firefox/Safari.
+
+### WP LIB-FILTER-INST-1 (web) — "Installed, not cached" library chip
+
+User request 2026-10-14: a Library filter for games an agent reports as
+installed on a PC (`installed_on` non-empty) with no bytes in the cache.
+`lib/library-filters.js` gains the chip `installed` ("Installed, not
+cached", right after "Not cached"). Its predicate is the card's own
+warning-badge state (`installedBadgeState` NOT_CACHED), so the chip lists
+exactly the cards with the orange "Installed but not cached · <PC>" badge
+and never a tool app. Like All/Cached/Not cached/Downloading/Failed it is
+always shown, with 0 when nothing matches (`installed_on` is on every
+GameSummary since AG-1; only the optional "Updates" chip depends on a
+field). A D9 group row counts once and reads the parent's row. The demo
+seed already has such a game (the AG-2 two-client fixture), so the chip
+shows 1 in demo mode without fixture changes.
+
+Tests: `library-filter-installed.test.js` 6 (definition and position;
+predicate over seven shapes incl. zero bytes, missing field, tool app,
+failed; always listed with 0; AND with search; group counts once; demo
+seed count). `library-installed-chip-wiring.test.js` 1 (the view renders
+"Installed, not cached 1", pressing it leaves only that card, aria-pressed
+follows, "All" restores). `library-filters.test.js`: the chip-order pin
+gains `installed`.
+
+Mutations, all killed: predicate on installed only; predicate on "no
+bytes" only; chip made optional; chip removed.
+
+#### Honest list
+
+- The chip row now holds six or seven chips; it already scrolls
+  horizontally inside the toolbar. Not measured in a browser.
+- The Android chip is not part of this package.
