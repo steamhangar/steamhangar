@@ -247,7 +247,7 @@ def test_publish_checks_the_baked_version_against_metadata_action_on_tags() -> N
 
 
 def test_agent_binaries_are_stamped_with_the_build_version() -> None:
-    job = _job(_publish(), "agent-binaries")
+    job = _job(_publish(), "agent-build")
     assert "build-version" in _needs(job)
     step = _step(job, name="Cross-compile vault-agent (CGO_ENABLED=0, static binaries)")
     assert _norm(step["env"]["BUILD_VERSION"]) == "${{ needs.build-version.outputs.version }}"
@@ -261,7 +261,7 @@ def test_agent_binaries_are_stamped_with_the_build_version() -> None:
 
 
 def test_agent_binaries_run_the_stamped_binary() -> None:
-    job = _job(_publish(), "agent-binaries")
+    job = _job(_publish(), "agent-build")
     step = _step(job, name="Verify the stamped version (vault-agent --version)")
     assert '--version' in step["run"]
     assert 'want="vault-agent ${BUILD_VERSION} (commit ${BUILD_COMMIT})"' in step["run"]

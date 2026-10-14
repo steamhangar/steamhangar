@@ -678,6 +678,19 @@ def _default_web_dir() -> str:
     return os.path.join(repo_root, "web")
 
 
+def _default_dist_dir() -> str:
+    """Default location of the baked release downloads (WP DIST-1a,
+    ``vault_api/dist.py``): ``api/dist/`` in a native checkout, computed
+    relative to this file like :func:`_default_web_dir`. The image sets
+    ``VAULT_DIST_DIR=/app/dist`` itself (api/Dockerfile); compose does not
+    forward the variable because it is a fact about the image, not a
+    setting. A missing or empty directory only means "nothing baked in":
+    ``GET /v1/dist`` then points at the GitHub Release instead.
+    """
+    vault_api_dir = os.path.dirname(os.path.abspath(__file__))  # .../api/vault_api
+    return os.path.join(os.path.dirname(vault_api_dir), "dist")
+
+
 def _default_manifest_archive_dir(db_path: str) -> str:
     """Default archive location: a ``manifests`` sibling of the database file.
 
@@ -1324,6 +1337,10 @@ class Settings:
     # of process cwd. A missing directory is not an error — see
     # `_default_web_dir` and `webui.mount_web_ui`.
     web_dir: str = field(default_factory=_default_web_dir)
+    # WP DIST-1a. Directory of the baked release downloads; same
+    # default_factory reasoning and same "missing is not an error" rule as
+    # web_dir (see `_default_dist_dir`).
+    dist_dir: str = field(default_factory=_default_dist_dir)
     # Settings-API work package (ADR-0009 decision 3): the operator hard-lock
     # for PATCH /v1/settings. Env-only BY DEFINITION — a flag that disables
     # the settings-write API could not itself be turned back on through that
@@ -1716,6 +1733,8 @@ class Settings:
             # not-yet-populated value only means "no UI to serve", never a
             # reason to refuse to boot.
             web_dir=os.environ.get("VAULT_WEB_DIR", "").strip() or _default_web_dir(),
+            # WP DIST-1a. Blank/unset = the computed default, like web_dir.
+            dist_dir=os.environ.get("VAULT_DIST_DIR", "").strip() or _default_dist_dir(),
             # Settings-API work package. Env-only (see the field's own
             # docstring); False (read-write) unless explicitly turned on.
             settings_readonly=_env_bool("VAULT_SETTINGS_READONLY", False),

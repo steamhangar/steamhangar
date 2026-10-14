@@ -1224,6 +1224,22 @@ Outside `/v1`, besides the web UI's static files, `GET /auth/steam/app-return`
 (WP D11, ADR-0004 addendum 5) is public: it reads no key, no database and no
 network, and only echoes a validated query behind the fixed
 `steamvault://auth/openid-return?` deep link for the Android app.
+Since WP DIST-1a, `GET`/`HEAD /dist/<name>` is public too: the release
+files baked into the vault-api image (signed APK, vault-agent binaries,
+task scripts, systemd units, `SHA256SUMS`), served so an unpaired phone or
+PC can install from the vault. Only the exact release names of the
+server's own version are servable (no listing, no symlinks, no name taken
+from the request as a path); the bytes are the public GitHub Release
+assets of that version. Their index `GET /v1/dist` stays behind the key.
+**Accepted trade-off -- version disclosure.** Plan §8's version decision
+(WP 4e.7) keeps the version off the public `/v1/health` because a version
+there is free fingerprinting. `/dist` gives that up: the file names, the
+`Content-Disposition` names and `SHA256SUMS` carry the exact release
+version, readable by anyone in the LAN without a key (a 404/200 probe of a
+versioned name answers it too). Accepted because the device that downloads
+has no key by definition; user decision APP-DIST-1 / AGENT-DIST-1
+(option B, 2026-10-14). On the Public-domain profile the reverse proxy's
+forward-auth covers `/dist` like the web UI.
 There is no CORS middleware configured anywhere in `vault_api`
 (verified by search across the package) — a browser will not send the
 custom `X-Api-Key` header to `vault-api` cross-origin without a CORS

@@ -77,3 +77,8 @@ agent/go/**/*.test
 keystore.properties
 
 
+
+# WP DIST-1a: release files staged here by publish.yml before the vault-api
+# image build; only the placeholder README is tracked.
+api/dist/*
+!api/dist/README.md

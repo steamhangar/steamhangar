@@ -218,6 +218,7 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_RELAY_EXPOSE_LAST_PLAYED` | no      | `false`      | Strict boolean. Same gate for `rtime_last_played`, independent of the playtime switch. Env-only. See "The privacy gate" |
 | `VAULT_SETTINGS_READONLY`       | no       | `false`      | Strict boolean. Operator hard-lock: on = `PATCH /v1/settings` answers `403` (`GET` still works; the `/v1/steam/key` routes are not covered). Env-only by construction. See "`VAULT_SETTINGS_READONLY` — the operator hard-lock" |
 | `VAULT_WEB_DIR`                 | no       | the repo's `web/` directory (resolved relative to the package) outside the image; the image sets `/app/web` (api/Dockerfile) | Directory the web UI's static files are served from. Blank = the default. Env-only. See "Web UI static serving" |
+| `VAULT_DIST_DIR`                | no       | `api/dist/` (resolved relative to the package) outside the image; the image sets `/app/dist` (api/Dockerfile) | Directory of the baked release downloads (WP DIST-1a). Blank = the default. Image-internal: compose does not forward it. See "Release downloads" |
 
 **All twenty numeric settings are parsed strictly (WP 3.12).** Thirteen take a
 whole number (`VAULT_PREFILL_TIMEOUT_SECONDS`, WP CORE-FIX-2's
@@ -680,6 +681,7 @@ route, see "Auth").
 | GET    | `/v1/steam/player-summaries`       | `?steamid=<SteamID64>` — relay `GetPlayerSummaries`. `200` with `{configured: true, players: [{steamid, personaname, avatar, avatarmedium, avatarfull, personastate}]}`; same `409`/`422`/`502` shape as `owned-games`. See "Steam Web API relay" below |
 | GET    | `/v1/settings`                     | Settings-API work package (ADR-0009): `{readonly, settings: [{key, effective, source, fallback, applies, env_only}, ...]}` — every overridable key plus informational env-only ones. `source` is `db`/`env`/`default`; `applies` is `immediately`/`next_sweep`/`restart-required`. See "Persisted settings" below |
 | GET    | `/v1/about`                        | WP VER-2: `{components: [{name, version, commit, status, checked_at, detail}, ...]}` for `vault-api` (also the web UI), `vault-core`, `vault-runner`, `steamprefill`, `vault-proxy`, `vault-dns`, in that order. `status` is `ok`/`unreachable`/`not_in_use`/`unknown`; `version`/`commit` are a string, `"invalid"` or `null`. Cached 60 s; never slow, never `5xx` for a missing component. See "Component versions" below |
+| GET    | `/v1/dist`                         | WP DIST-1a: index of the release downloads: `{version, release, local_base, release_base, apk_alias_url, artifacts: [{id, name, local, size, sha256, local_url, release_url, url, source}, ...]}`. The files themselves are public under `/dist/<name>` (see "Auth" and "Release downloads") |
 | PATCH  | `/v1/settings`                     | Partial update: `null` clears an override (revert to env/default), any other value sets it, validated with the SAME grammar `config.py` applies at startup. `200` with the same shape `GET` returns. `422` for an invalid value, an unknown key, or a recognised-but-environment-only key (distinct detail); `403` if `VAULT_SETTINGS_READONLY` is set. See "Persisted settings" below |
 
 ## Prefill orchestration (WP 1.4, job outcome honesty WP 3.3)
@@ -6280,6 +6282,17 @@ without an `openid.mode` parameter, over 8 KiB, or with any character
 outside a percent-encoded query's ASCII set gets `400` and no link. The
 same path under `/v1` is not public (`401`).
 
+Since WP DIST-1a also `GET`/`HEAD /dist/<name>`, the release files baked
+into the image (see "Release downloads"): a phone without the app and a PC
+without the agent have no key yet, so the download itself cannot ask for
+one. Only the exact release names of the server's own version are served
+(nothing else, no listing); the bytes are the public GitHub Release assets
+of that version. Their index, `GET /v1/dist`, stays behind the key.
+Accepted trade-off: the names, `Content-Disposition` and `SHA256SUMS`
+reveal the exact release version without a key, which `/v1/health`
+deliberately does not (docs/security/threat-model.md §1; user decision
+APP-DIST-1 / AGENT-DIST-1, 2026-10-14).
+
 **Non-ASCII keys (WP 1.3 fix):** `hmac.compare_digest` raises `TypeError`
 for a non-ASCII `str` argument (confirmed empirically — a key containing
 e.g. "café" raised `TypeError: comparing strings with non-ASCII characters
@@ -6618,6 +6631,70 @@ rules ported from `docs/design/vault-app-mockup.html` round 7, including
 the `prefers-reduced-motion` kill switch in `web/css/theme.css`), and a
 toast component (`web/js/components/toast.js`) with no callers yet. No API
 calls, no data fetching, no polling — that is WP 4a.2's scope entirely.
+
+## Release downloads (WP DIST-1a)
+
+The vault serves its own release files in the LAN, so an unpaired phone
+and a PC without the agent install from the vault instead of from GitHub
+(user decisions APP-DIST-1 / AGENT-DIST-1, 2026-10-14).
+
+**What is baked.** `.github/workflows/publish.yml` builds the signed APK
+(`android-build`) and the vault-agent release files (`agent-build`) first,
+hands them over as workflow artifacts, and the `publish` job's vault-api
+leg stages them into `api/dist/` before the image build; `api/Dockerfile`
+copies that directory to `/app/dist` (files and directory root-owned, so
+not writable by the server's uid 101 -- defence in depth only: `/app`
+itself belongs to uid 101, which could rename `/app/dist` and recreate it)
+and sets `VAULT_DIST_DIR=/app/dist`. The names are exactly the GitHub
+Release asset names of the same tag, and the release jobs attach the same
+bytes as before:
+
+| id | file (for version `X`) |
+|----|------------------------|
+| `app-android` | `steamhangar-app-vX.apk` (only when the release keystore is configured) |
+| `agent-windows-amd64` | `vault-agent-vX-windows-amd64.exe` |
+| `agent-linux-amd64` | `vault-agent-vX-linux-amd64` |
+| `agent-linux-arm64` | `vault-agent-vX-linux-arm64` |
+| `install-task`, `run-vault-agent`, `uninstall-task` | `install-task.ps1`, `run-vault-agent.ps1`, `uninstall-task.ps1` |
+| `systemd-service`, `systemd-timer` | `vault-agent-report.service`, `vault-agent-report.timer` |
+| `sha256sums` | `SHA256SUMS` (the release's own file; covers everything but the APK) |
+
+On a `v*` tag the staging step fails the release when SHA256SUMS does not
+check, the APK differs from the SHA-256 `android-build` recorded, or a
+name is not the one vault-api expects for the image's version; after the
+push it re-checks SHA256SUMS inside the pushed image.
+
+**Serving.** `GET`/`HEAD /dist/<name>`, public (see "Auth"), for the names
+above, plus the version-free alias `/dist/steamhangar-app.apk` (answers with
+the versioned APK while it is baked in). The set of servable names is
+computed from the server's build version, never from the request or the
+directory: anything else is `404` without a listing, as are symlinks and
+non-regular files under a valid name. Versioned names are served with
+`Cache-Control: public, max-age=31536000, immutable`, the others (scripts,
+`SHA256SUMS`, the alias) with `no-cache`; every file is
+`Content-Disposition: attachment` under its versioned name, the APK as
+`application/vnd.android.package-archive`.
+
+**Index.** `GET /v1/dist` (behind the key) lists all ten files in the order
+above. A baked file has `local: true`, `size`, `sha256` and
+`local_url` (`/dist/<name>`, relative to the vault origin). A file that is
+not baked has `local: false` and, when the server version is a published
+release (release-shaped version AND a known commit, the rule the web's
+`agentReleaseFromAbout` uses), the GitHub Release asset URL of the same
+version as `release_url`. `url` is the one to use (`local_url`, else
+`release_url`), `source` says which (`local`/`release`/`none`).
+`apk_alias_url` is set while the APK is baked in.
+
+**Dev builds.** A local build (`docker compose build`, the dev and verify
+stacks) bakes nothing but `api/dist/README.md`, which is never served. A
+server whose version is not a published release (`dev`, `dev-<sha>`, a
+native run without a commit) serves nothing locally, even if files are
+present (the version-free names could belong to any release), and has no
+release to fall back to: every `url` is `null`.
+
+**Image size.** About +36.7 MB uncompressed per release (rc17 asset sizes:
+APK 9.3 MB, the three agent binaries 27.4 MB, scripts and sums < 0.1 MB);
+the publish run records the exact figure in its job summary.
 
 ## Running natively (Windows dev, no Docker until WP 1.9)
 
