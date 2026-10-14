@@ -53,6 +53,7 @@ import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
+import dev.steamvault.app.ui.traffic.TrafficRanges
 import dev.steamvault.app.ui.traffic.logic.emptyHistoryText
 import dev.steamvault.app.ui.traffic.logic.filterJobsByRange
 import dev.steamvault.app.ui.traffic.logic.mergeJobLists
@@ -106,6 +107,7 @@ fun DownloadsScreen(
     jobsRepository: JobsRepository,
     gamesRepository: GamesRepository,
     trafficRepository: TrafficRepository,
+    ranges: TrafficRanges,
     ownedLibrary: OwnedLibraryController?,
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
     demoMode: Boolean,
@@ -130,8 +132,9 @@ fun DownloadsScreen(
     LaunchedEffect(controller.jobs) { onJobsSnapshot(controller.jobs) }
 
     // WP D15d: statistics header + per-job speed (one poll), History filter.
-    val statsPoll = remember(trafficRepository) { downloadsStatsPoll(trafficRepository) }
-    val historyFilter = remember(trafficRepository) { HistoryFilter(trafficRepository) }
+    // The ranges chosen last survive a tab switch (WP D15d review, web parity).
+    val statsPoll = remember(trafficRepository) { downloadsStatsPoll(trafficRepository, ranges.statistics) }
+    val historyFilter = remember(trafficRepository) { HistoryFilter(trafficRepository, ranges.history) }
     LaunchedEffect(lifecycleOwner, statsPoll) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             statsPoll.pollForever()
@@ -219,6 +222,7 @@ fun DownloadsScreen(
                 statsPoll = statsPoll,
                 speedLines = speedLines,
                 historyFilter = historyFilter,
+                ranges = ranges,
             )
         }
     }
@@ -237,6 +241,7 @@ private fun DownloadsBody(
     statsPoll: TrafficPoll<StatsAnswer>,
     speedLines: Map<Int, String>,
     historyFilter: HistoryFilter,
+    ranges: TrafficRanges,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -244,7 +249,7 @@ private fun DownloadsBody(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item(key = "bulk-bar") { DownloadsBulkBar(controller, scope) }
-        item(key = "stats") { DownloadsStatsHeader(statsPoll, scope) }
+        item(key = "stats") { DownloadsStatsHeader(statsPoll, scope, onRangeChosen = { ranges.statistics = it }) }
         item(key = "active-heading") { SectionHeading(stringResource(R.string.downloads_section_active)) }
         if (activeModels.isEmpty()) {
             item(key = "active-empty") { EmptyLine(stringResource(R.string.downloads_active_empty)) }
@@ -304,7 +309,10 @@ private fun DownloadsBody(
             RangeChips(
                 label = stringResource(R.string.traffic_range_history),
                 selected = historyFilter.range,
-                onSelect = { historyFilter.selectRange(scope, it) },
+                onSelect = {
+                    historyFilter.selectRange(scope, it)
+                    ranges.history = historyFilter.range
+                },
             )
         }
         if (historyModels.isEmpty()) {

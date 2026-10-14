@@ -85,13 +85,14 @@ import dev.steamvault.app.ui.settings.AndroidSettingsStrings
 import dev.steamvault.app.ui.settings.SettingsController
 import dev.steamvault.app.ui.settings.SettingsScreen
 import dev.steamvault.app.ui.theme.SteamVaultTheme
+import dev.steamvault.app.ui.traffic.TrafficRanges
 import kotlinx.coroutines.launch
 
 /**
  * Single-activity app shell. As of WP 4b.7, [vaultApiClientState] and
  * [showOnboarding] are the two pieces of state that decide what the whole
  * app shows: onboarding (this WP's [OnboardingScreen]) when there is no
- * working vault-api connection, the normal three-destination shell
+ * working vault-api connection, the normal four-destination shell
  * otherwise -- see `ui/onboarding/logic/OnboardingSteps.kt::shouldShowOnboarding`
  * for the underlying pure rule this mirrors.
  *
@@ -110,7 +111,7 @@ import kotlinx.coroutines.launch
  * kdoc** for why this differs from `web/js/onboarding.js`'s dialog-overlay
  * approach: this codebase already committed to a plain state-based screen
  * switcher (`ui/nav/Destination.kt`'s kdoc), and onboarding is simply one
- * more top-level state alongside the three [Destination]s, gating them
+ * more top-level state alongside the four [Destination]s, gating them
  * entirely rather than floating above them.
  */
 class MainActivity : ComponentActivity() {
@@ -188,8 +189,9 @@ class MainActivity : ComponentActivity() {
      * [settingsControllerState] needs a stable, outside-composition
      * identity (`handleNotificationTap` opens it directly on a bypass
      * notification tap, per [ClientsController]'s kdoc: this sheet is
-     * hoisted at this level, not owned by any one [Destination], since
-     * "Clients is a sheet, not a nav item" per `ui/nav/Destination.kt`). */
+     * hoisted at this level, not owned by any one [Destination]). Since WP
+     * D15d it opens from the Clients page's "Manage PCs" and from a bypass
+     * notification; Clients itself is one of the four destinations. */
     private var clientsControllerState by mutableStateOf<ClientsController?>(null)
 
     /** WP APP-FEAT-1/APP-FIX-2: the owned-games list (vault's stored
@@ -243,6 +245,10 @@ class MainActivity : ComponentActivity() {
      * same foreground-only constraint every poll loop in this app has
      * before WP 4b.8's WorkManager wiring lands. */
     private var pendingJobsSnapshot by mutableStateOf<List<JobSummary>>(emptyList())
+
+    /** WP D15d review: the ranges chosen on Clients and Downloads, kept
+     * across tab switches (see [TrafficRanges]). */
+    private val trafficRanges = TrafficRanges()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -531,6 +537,7 @@ class MainActivity : ComponentActivity() {
                 jobsRepository = remember(demo) { DemoJobsRepository(demo) },
                 gamesRepository = remember(demo) { DemoGamesRepository(demo) },
                 trafficRepository = remember(demo) { DemoTrafficRepository(demo) },
+                ranges = trafficRanges,
                 ownedLibrary = ownedLibraryState,
                 onJobsSnapshot = { pendingJobsSnapshot = it },
                 demoMode = true,
@@ -546,6 +553,7 @@ class MainActivity : ComponentActivity() {
             jobsRepository = remember(client) { VaultJobsRepository(client) },
             gamesRepository = remember(client) { VaultGamesRepository(client) },
             trafficRepository = remember(client) { VaultTrafficRepository(client) },
+            ranges = trafficRanges,
             ownedLibrary = ownedLibraryState,
             onJobsSnapshot = { pendingJobsSnapshot = it },
             demoMode = false,
@@ -562,6 +570,7 @@ class MainActivity : ComponentActivity() {
         if (demo != null) {
             ClientsScreen(
                 trafficRepository = remember(demo) { DemoTrafficRepository(demo) },
+                ranges = trafficRanges,
                 onManagePcs = { clientsControllerState?.open(lifecycleScope) },
                 demoMode = true,
             )
@@ -574,6 +583,7 @@ class MainActivity : ComponentActivity() {
         }
         ClientsScreen(
             trafficRepository = remember(client) { VaultTrafficRepository(client) },
+            ranges = trafficRanges,
             onManagePcs = { clientsControllerState?.open(lifecycleScope) },
             demoMode = false,
         )

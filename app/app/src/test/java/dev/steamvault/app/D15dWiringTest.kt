@@ -72,11 +72,11 @@ class D15dWiringTest {
         val code = stripComments(read(main))
         assertTrue(
             "the real Clients screen must get VaultTrafficRepository(client)",
-            code.contains("trafficRepository = remember(client) { VaultTrafficRepository(client) },\n            onManagePcs"),
+            code.contains("trafficRepository = remember(client) { VaultTrafficRepository(client) },\n            ranges = trafficRanges,\n            onManagePcs"),
         )
         assertTrue(
             "the demo Clients screen must get DemoTrafficRepository(demo)",
-            code.contains("trafficRepository = remember(demo) { DemoTrafficRepository(demo) },\n                onManagePcs"),
+            code.contains("trafficRepository = remember(demo) { DemoTrafficRepository(demo) },\n                ranges = trafficRanges,\n                onManagePcs"),
         )
         assertCalledFrom(main, "onManagePcs = { clientsControllerState?.open(lifecycleScope) }", "ClientsDestinationContent")
     }
@@ -90,7 +90,7 @@ class D15dWiringTest {
     fun `MUTATION PIN -- the Clients screen polls, draws range, note, cards, agentless note and Manage PCs`() {
         assertCalledFrom(clients, "poll.pollForever()", "ClientsScreen")
         assertCalledFrom(clients, "clientsSummaryText(data.clients)", "ClientsScreen")
-        assertCalledFrom(clients, "ClientsBody(poll = poll, scope = scope, onManagePcs = onManagePcs)", "ClientsScreen")
+        assertCalledFrom(clients, "ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock)", "ClientsScreen")
         assertCalledFrom(clients, "if (!poll.noFigures) {", "ClientsBody")
         assertCalledFrom(clients, "poll.selectRange(scope, it)", "ClientsBody")
         assertCalledFrom(clients, "item(key = \"note\") { NoteLine(note) }", "ClientsBody")
@@ -117,8 +117,8 @@ class D15dWiringTest {
         assertCalledFrom(downloads, "historyFilter.selectRange(scope, it)", "DownloadsBody")
         assertCalledFrom(downloads, "emptyHistoryText(historyFilter.range)", "DownloadsBody")
         assertCalledFrom(downloads, "if (speedLine != null) {", "JobCard")
-        assertCalledFrom(main, "trafficRepository = remember(client) { VaultTrafficRepository(client) },\n            ownedLibrary", "DownloadsDestinationContent")
-        assertCalledFrom(main, "trafficRepository = remember(demo) { DemoTrafficRepository(demo) },\n                ownedLibrary", "DownloadsDestinationContent")
+        assertCalledFrom(main, "trafficRepository = remember(client) { VaultTrafficRepository(client) },\n            ranges = trafficRanges,\n            ownedLibrary", "DownloadsDestinationContent")
+        assertCalledFrom(main, "trafficRepository = remember(demo) { DemoTrafficRepository(demo) },\n                ranges = trafficRanges,\n                ownedLibrary", "DownloadsDestinationContent")
     }
 
     @Test
@@ -131,6 +131,36 @@ class D15dWiringTest {
         assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = description }", "StatTileView")
         assertCalledFrom(stats, "graphGeometryToShow(series, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return", "ThroughputGraph")
         assertCalledFrom(stats, "contentDescription = label", "ThroughputGraph")
+    }
+
+    /** Review should-fix: the polls run only while the screen is STARTED
+     * (no background traffic), the exact call wrapping, not just both words. */
+    @Test
+    fun `MUTATION PIN -- both statistics polls run under repeatOnLifecycle STARTED`() {
+        for ((path, poll, screen) in listOf(
+            Triple(clients, "poll", "ClientsScreen"),
+            Triple(downloads, "statsPoll", "DownloadsScreen"),
+        )) {
+            val code = stripComments(read(path))
+            val m = Regex("""repeatOnLifecycle\(Lifecycle\.State\.STARTED\)\s*\{\s*${poll}\.pollForever\(\)\s*\}""").find(code)
+            assertTrue("$path: $poll.pollForever() must be the body of repeatOnLifecycle(Lifecycle.State.STARTED)", m != null)
+            assertEquals("$path: the lifecycle-bound poll MOVED", screen, nearestEnclosingFun(code, m!!.range.first))
+        }
+    }
+
+    @Test
+    fun `MUTATION PIN -- chosen ranges survive a tab switch and relative times tick`() {
+        assertCalledFrom(clients, "clientsOverviewPoll(trafficRepository, ranges.clients)", "ClientsScreen")
+        assertCalledFrom(clients, "ranges.clients = poll.range", "ClientsBody")
+        assertCalledFrom(downloads, "downloadsStatsPoll(trafficRepository, ranges.statistics)", "DownloadsScreen")
+        assertCalledFrom(downloads, "HistoryFilter(trafficRepository, ranges.history)", "DownloadsScreen")
+        assertCalledFrom(downloads, "onRangeChosen = { ranges.statistics = it }", "DownloadsBody")
+        assertCalledFrom(downloads, "ranges.history = historyFilter.range", "DownloadsBody")
+        assertCalledFrom(stats, "onRangeChosen(poll.range)", "DownloadsStatsHeader")
+        assertTrue("MainActivity holds one TrafficRanges", stripComments(read(main)).contains("private val trafficRanges = TrafficRanges()"))
+        assertCalledFrom(clients, "delay(NOW_TICK_MS)", "ClientsBody")
+        assertCalledFrom(clients, "remember(data, nowMs)", "ClientsBody")
+        assertCalledFrom(clients, "nowMs = nowMs,", "ClientsBody")
     }
 
     @Test

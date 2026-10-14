@@ -4003,6 +4003,20 @@ and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
   filters by the same rule).
 - Demo mode answers all four reads with synthetic data
   (`demo/DemoTraffic.kt`), so every new surface shows.
+- The chosen ranges survive a tab switch (`ui/traffic/TrafficRanges.kt`,
+  held by `MainActivity` like `destination`; a recreation resets them).
+  "Last active ... ago" and the stale-feed note refresh every minute.
+- **Bottom-nav labels with four items** are one line, never wrapped
+  (`BottomNavBar.kt`): "Downloads" wrapped to "Download/s" at 360 dp and
+  font 1.3 before. Proven by the goldens up to font scale 1.3 at 360 dp;
+  at larger font scales the longest label may draw a few dp into its
+  neighbours' padding. Not measured beyond 1.3.
+- **Manage PCs parity gap vs web.** The web's Clients page has "Add a
+  device" (pairing QR and the agent install command) and a Remove button
+  per PC in its PCs sheet. The app has neither: "Manage PCs" opens the
+  read-only PCs sheet (presence, last report, version, bypass state), and
+  the app's `ClientsRepository` has no delete. Closing that gap is its own
+  package.
 
 Tests: `TrafficViewTest`, `ClientsPageTest`, `TrafficPollTest`,
 `TrafficApiTest`, `DemoTrafficTest`, the web twin `TrafficWebTwinTest`, and

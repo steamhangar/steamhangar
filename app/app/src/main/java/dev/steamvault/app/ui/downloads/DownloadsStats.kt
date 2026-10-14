@@ -65,8 +65,8 @@ data class StatsAnswer(val throughput: ThroughputOut, val series: SeriesOut)
 
 /** The header's poll, default range 24 h (web `traffic.range`). Figures
  * exist unless [headerTiles] has none (feed disabled). */
-fun downloadsStatsPoll(repository: TrafficRepository): TrafficPoll<StatsAnswer> = TrafficPoll(
-    initialRange = "24h",
+fun downloadsStatsPoll(repository: TrafficRepository, initialRange: String = "24h"): TrafficPoll<StatsAnswer> = TrafficPoll(
+    initialRange = initialRange,
     fetch = { range -> StatsAnswer(repository.throughput(range), repository.series(range)) },
     hasFigures = { headerTiles(it.throughput) != null },
 )
@@ -95,8 +95,8 @@ fun jobSpeedLines(poll: TrafficPoll<StatsAnswer>): Map<Int, String> {
  * while the screen is open appears at once. A failed fetch keeps the
  * poll's rows (the filter still applies to them).
  */
-class HistoryFilter(private val repository: TrafficRepository) {
-    var range by mutableStateOf("all")
+class HistoryFilter(private val repository: TrafficRepository, initialRange: String = "all") {
+    var range by mutableStateOf(initialRange)
         private set
     var jobs by mutableStateOf<List<JobSummary>>(emptyList())
         private set
@@ -128,7 +128,11 @@ class HistoryFilter(private val repository: TrafficRepository) {
  * here is focusable but the chips.
  */
 @Composable
-fun DownloadsStatsHeader(poll: TrafficPoll<StatsAnswer>, scope: CoroutineScope) {
+fun DownloadsStatsHeader(
+    poll: TrafficPoll<StatsAnswer>,
+    scope: CoroutineScope,
+    onRangeChosen: (String) -> Unit = {},
+) {
     val answer = poll.data
     val throughput = answer?.throughput
     val note = pollNote(
@@ -146,7 +150,10 @@ fun DownloadsStatsHeader(poll: TrafficPoll<StatsAnswer>, scope: CoroutineScope) 
             RangeChips(
                 label = stringResource(R.string.traffic_range_statistics),
                 selected = poll.range,
-                onSelect = { poll.selectRange(scope, it) },
+                onSelect = {
+                    poll.selectRange(scope, it)
+                    onRangeChosen(poll.range)
+                },
             )
         }
         if (note != null) {

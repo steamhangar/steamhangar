@@ -23,8 +23,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,13 +58,18 @@ import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.theme.VaultColors
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
+import dev.steamvault.app.ui.traffic.TrafficRanges
 import dev.steamvault.app.ui.traffic.logic.pollNote
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 
-/** The Clients page's poll: `GET /v1/clients/overview`, default range 7 days
- * (web `views/clients.js` `state.range`). */
-fun clientsOverviewPoll(repository: TrafficRepository): TrafficPoll<ClientsOverviewOut> =
-    TrafficPoll(initialRange = "7d", fetch = { range -> repository.clientsOverview(range) }, hasFigures = ::clientsHaveFigures)
+/** How often relative times ("4 min ago") on the Clients page refresh. */
+private const val NOW_TICK_MS = 60_000L
+
+/** The Clients page's poll: `GET /v1/clients/overview`, starting at the
+ * range chosen last ([TrafficRanges.clients], default 7 days like web). */
+fun clientsOverviewPoll(repository: TrafficRepository, initialRange: String = "7d"): TrafficPoll<ClientsOverviewOut> =
+    TrafficPoll(initialRange = initialRange, fetch = { range -> repository.clientsOverview(range) }, hasFigures = ::clientsHaveFigures)
 
 /**
  * The Clients page (WP D15d, twin of web `views/clients.js`, WP D15c): every
@@ -85,11 +94,13 @@ fun clientsOverviewPoll(repository: TrafficRepository): TrafficPoll<ClientsOverv
 @Composable
 fun ClientsScreen(
     trafficRepository: TrafficRepository,
+    ranges: TrafficRanges,
     onManagePcs: () -> Unit,
     demoMode: Boolean,
+    clock: () -> Long = { System.currentTimeMillis() },
 ) {
     val scope = rememberCoroutineScope()
-    val poll = remember(trafficRepository) { clientsOverviewPoll(trafficRepository) }
+    val poll = remember(trafficRepository) { clientsOverviewPoll(trafficRepository, ranges.clients) }
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, poll) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -119,7 +130,7 @@ fun ClientsScreen(
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             if (demoMode) DemoModeBanner()
-            ClientsBody(poll = poll, scope = scope, onManagePcs = onManagePcs)
+            ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock)
         }
     }
 }
@@ -128,9 +139,22 @@ fun ClientsScreen(
 private fun ClientsBody(
     poll: TrafficPoll<ClientsOverviewOut>,
     scope: CoroutineScope,
+    ranges: TrafficRanges,
     onManagePcs: () -> Unit,
+    clock: () -> Long,
 ) {
     val data = poll.data
+    // WP D15d review: "Last active 4 min ago" and the stale-feed note are
+    // relative to now; a minute tick (and every answer) keeps them current.
+    val currentClock by rememberUpdatedState(clock)
+    var nowMs by remember { mutableLongStateOf(clock()) }
+    LaunchedEffect(data) { nowMs = currentClock() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(NOW_TICK_MS)
+            nowMs = currentClock()
+        }
+    }
     val note = pollNote(
         unsupported = poll.unsupported,
         error = poll.error,
@@ -138,9 +162,9 @@ private fun ClientsBody(
         hasData = data != null,
         couldNotLoad = COULD_NOT_LOAD_CLIENTS,
         loadingText = null,
+        nowMs = nowMs,
     )
-    val nowMs = System.currentTimeMillis()
-    val cards = remember(data, nowMs / 60_000L) {
+    val cards = remember(data, nowMs) {
         data?.clients.orEmpty().map { buildClientCardModel(it, data?.range ?: poll.range, nowMs) }
     }
     val rangeLabel = stringResource(R.string.traffic_range_statistics)
@@ -153,7 +177,14 @@ private fun ClientsBody(
         // No statistics (feed disabled, old server): no range selector either.
         if (!poll.noFigures) {
             item(key = "range") {
-                RangeChips(label = rangeLabel, selected = poll.range, onSelect = { poll.selectRange(scope, it) })
+                RangeChips(
+                    label = rangeLabel,
+                    selected = poll.range,
+                    onSelect = {
+                        poll.selectRange(scope, it)
+                        ranges.clients = poll.range
+                    },
+                )
             }
         }
         if (note != null) {

@@ -622,10 +622,9 @@
     <string name="detail_zero_bytes_label">0 GB</string>
 
     <!-- Clients sheet (WP 4b.10). Kotlin port of web/js/components/
-         clients-sheet.js + web/js/lib/clients-view.js — Clients stays a
-         SHEET, not a nav item, per the WP 4a.1 decision restated in
-         nav_library/nav_downloads/nav_settings's comment above. Reached
-         from Settings' "View clients" button and from a bypass
+         clients-sheet.js + web/js/lib/clients-view.js. Since WP D15d the
+         app has four destinations (Clients is one); this PCs sheet opens
+         from the Clients page's "Manage PCs" and from a bypass
          notification tap (notifications/NotificationRouting.kt), same two
          entry points clients-sheet.js's own kdoc documents for the web
          twin (bypass banner "Details" / a bypass row in the notifications
