@@ -13,7 +13,7 @@ import dev.steamvault.app.ui.theme.VaultColors
 
 /** Which glyph shape a given [StatusKind] uses — ported from `KIND_GLYPH` in
  *  web/js/components/status-icon.js. */
-enum class GlyphShape { CHECK, DOWNLOAD, REFRESH, BANG, PAUSE, STOP, DASH }
+enum class GlyphShape { CHECK, DOWNLOAD, REFRESH, BANG, PAUSE, STOP, DASH, HALF, QUESTION }
 
 /** [StatusKind] -> [GlyphShape], 1:1 with web's `KIND_GLYPH` table. */
 fun glyphFor(kind: StatusKind): GlyphShape = when (kind) {
@@ -28,6 +28,9 @@ fun glyphFor(kind: StatusKind): GlyphShape = when (kind) {
     StatusKind.WARN -> GlyphShape.BANG
     StatusKind.CANCELLED -> GlyphShape.STOP
     StatusKind.NOTINUSE -> GlyphShape.DASH
+    // WP CACHE-COMPLETE-1c: web KIND_GLYPH `partial: "half"`, `unverified: "question"`.
+    StatusKind.PARTIAL -> GlyphShape.HALF
+    StatusKind.UNVERIFIED -> GlyphShape.QUESTION
 }
 
 /**
@@ -76,6 +79,10 @@ fun backgroundFor(kind: StatusKind): Color = when (kind) {
     StatusKind.CANCELLED -> VaultColors.Dim2
     // web theme.css: `.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); color:var(--text); }`
     StatusKind.NOTINUSE -> VaultColors.Dim2
+    // web theme.css (WP CACHE-COMPLETE-1c): `.sic.k-partial { background:var(--stale); }`,
+    // `.sic.k-unverified{ background:var(--dim-2); color:var(--text); }`
+    StatusKind.PARTIAL -> VaultColors.StatusStale
+    StatusKind.UNVERIFIED -> VaultColors.Dim2
 }
 
 /**
@@ -87,6 +94,7 @@ fun backgroundFor(kind: StatusKind): Color = when (kind) {
 fun inkFor(kind: StatusKind): Color = when (kind) {
     StatusKind.CANCELLED -> VaultColors.Text
     StatusKind.NOTINUSE -> VaultColors.Text
+    StatusKind.UNVERIFIED -> VaultColors.Text
     else -> VaultColors.StatusIconInk
 }
 
@@ -129,6 +137,22 @@ const val BADGE_DISC_RADIUS_UNITS = 12f / GLYPH_BOX_FRACTION
 
 /** Stroke width of every line glyph, in glyph units (web `stroke-width="2.7"`). */
 const val GLYPH_STROKE_WIDTH_UNITS = 2.7f
+
+/**
+ * WP CACHE-COMPLETE-1c: the question glyph's hook, web `buildQuestion`'s
+ * "M9.1 9.2a2.9 2.9 0 1 1 4.3 2.6" as a centre-parameterised arc (Compose's
+ * `arcTo` takes a bounding box and angles, not SVG's endpoint form). For
+ * endpoints P1 (9.1,9.2), P2 (13.4,11.8) and radius 2.9 the chord is 5.025,
+ * so the centre sits 1.448 from the chord's midpoint (11.25,10.5); the
+ * large-arc/sweep flags (1 1) pick the centre above the chord, (12.0,9.26).
+ * P1 lies at 181.2 deg, P2 at 61.1 deg; clockwise (y down) from P1 to P2 is
+ * 239.9 deg. `StatusIconLogicTest` checks both endpoints against these.
+ */
+const val QUESTION_ARC_CX = 12.0f
+const val QUESTION_ARC_CY = 9.26f
+const val QUESTION_ARC_R = 2.9f
+const val QUESTION_ARC_START_DEG = 181.2f
+const val QUESTION_ARC_SWEEP_DEG = 239.9f
 
 /** A straight stroke of a glyph, in glyph units. */
 data class GlyphSegment(val x1: Float, val y1: Float, val x2: Float, val y2: Float)

@@ -78,6 +78,14 @@ import dev.steamvault.app.ui.status.StatusKind
 import dev.steamvault.app.ui.downloads.logic.UpdatesWording
 import dev.steamvault.app.ui.downloads.logic.sheetUpdateAppids
 import dev.steamvault.app.ui.library.logic.cardIconKind
+import dev.steamvault.app.ui.library.logic.CompletenessWording
+import dev.steamvault.app.ui.library.logic.completenessLine
+import dev.steamvault.app.ui.library.logic.completenessOverlay
+import dev.steamvault.app.ui.library.logic.groupCompletenessLine
+import dev.steamvault.app.ui.library.logic.isDamagedOnly
+import dev.steamvault.app.ui.library.logic.showsCompletenessBlock
+import dev.steamvault.app.ui.library.logic.verifyAppids
+import dev.steamvault.app.ui.library.logic.verifySpokenLabel
 import dev.steamvault.app.ui.library.logic.showsUpdateState
 import dev.steamvault.app.ui.theme.VaultColors
 import androidx.compose.ui.graphics.Color
@@ -242,6 +250,13 @@ private fun gameSummaryFrom(detail: GameDetail): GameSummary = GameSummary(
     tool_app_name = detail.tool_app_name,
     cover_url = detail.cover_url,
     cover_cached_url = detail.cover_cached_url,
+    // WP CACHE-COMPLETE-1c: the completeness figure travels too.
+    cache_complete_pct = detail.cache_complete_pct,
+    cache_expected_bytes = detail.cache_expected_bytes,
+    cache_present_bytes = detail.cache_present_bytes,
+    cache_complete_checked_at = detail.cache_complete_checked_at,
+    cache_missing_chunks = detail.cache_missing_chunks,
+    group_cache_complete_pct = detail.group_cache_complete_pct,
 )
 
 @Composable
@@ -278,7 +293,10 @@ private fun GameDetailSheetBody(
         val updateRow = remember(games, appid) {
             groupGames(games).rows.firstOrNull { it.appid == appid } ?: games.firstOrNull { it.appid == appid }
         }
-        DetailHeader(appid = appid, name = name, detail = controller.detail, jobs = jobs, updateRow = updateRow)
+        // WP CACHE-COMPLETE-1c: a game with content packages shows the
+        // group's completeness figure in the header (like its card).
+        val isGroup = remember(games, appid) { groupGames(games).packagesOf(appid).isNotEmpty() }
+        DetailHeader(appid = appid, name = name, detail = controller.detail, jobs = jobs, isGroup = isGroup, updateRow = updateRow)
         Spacer(Modifier.height(12.dp))
 
         when {
@@ -294,6 +312,7 @@ private fun GameDetailSheetBody(
             else -> LoadedDetailBody(
                 controller = controller,
                 appid = appid,
+                title = name,
                 detail = controller.detail!!,
                 games = games,
                 jobs = jobs,
@@ -320,6 +339,7 @@ private fun DetailHeader(
     detail: GameDetail?,
     jobs: List<JobSummary>,
     updateRow: GameSummary?,
+    isGroup: Boolean,
 ) {
     Row(verticalAlignment = Alignment.Top) {
         CoverArtImage(
@@ -351,16 +371,23 @@ private fun DetailHeader(
                     // packages -- is flagged.
                     val row = updateRow ?: gameSummaryFrom(detail)
                     val updateState = showsUpdateState(row, kind)
-                    val word = if (updateState) {
-                        stringResource(R.string.library_update_available_badge)
-                    } else {
-                        toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                    // WP CACHE-COMPLETE-1c (web `buildDetailStatusRow` via
+                    // `cardDisplay`): the card's completeness overlay.
+                    val overlay = completenessOverlay(row, kind, isGroup)
+                    val word = when {
+                        updateState -> stringResource(R.string.library_update_available_badge)
+                        overlay != null -> overlay.word
+                        else -> toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
                     }
-                    StatusIcon(kind = cardIconKind(row, kind), size = StatusIconSize.SMALL, spokenLabel = word)
+                    StatusIcon(kind = cardIconKind(row, kind, isGroup), size = StatusIconSize.SMALL, spokenLabel = word)
                     Text(
                         text = word,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (updateState) VaultColors.StatusStale else Color.Unspecified,
+                        color = when {
+                            updateState || overlay?.icon == StatusKind.PARTIAL -> VaultColors.StatusStale
+                            overlay != null -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> Color.Unspecified
+                        },
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
@@ -395,6 +422,7 @@ private fun NotTrackedBody(controller: DetailController, scope: CoroutineScope) 
 private fun LoadedDetailBody(
     controller: DetailController,
     appid: Int,
+    title: String,
     detail: GameDetail,
     games: List<GameSummary>,
     jobs: List<JobSummary>,
@@ -443,6 +471,18 @@ private fun LoadedDetailBody(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
             modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+
+    // ---- cache completeness (WP CACHE-COMPLETE-1c) -----------------------------
+    if (showsCompletenessBlock(gameSummary, packages)) {
+        CompletenessSection(
+            game = gameSummary,
+            groupRow = if (packages.isNotEmpty()) groupGames(games).rows.firstOrNull { it.appid == appid } else null,
+            verifyIds = verifyAppids(listOf(gameSummary) + packages),
+            title = title,
+            inFlight = controller.verifyInFlight,
+            onVerify = { ids -> controller.startVerify(scope, ids) },
         )
     }
 
@@ -568,6 +608,68 @@ private fun LoadedDetailBody(
         GcSection(controller = controller, scope = scope)
     }
 }
+
+/**
+ * WP CACHE-COMPLETE-1c (twin of web `buildCompletenessSection`): the game's
+ * own completeness line ("80% complete — 3.2 of 4.0 GB on disk · checked
+ * …" or "Completeness unknown …"), the group's figure for a game with
+ * content packages, the damaged-chunks note for a game short only of
+ * wrong-size chunks, and "Verify" -- a forced prefill of [verifyIds] that
+ * fetches whatever is missing (no button when there is nothing it could
+ * help). The explanation is visible text under the button; the button is
+ * spoken "Verify — <game>".
+ */
+@Composable
+private fun CompletenessSection(
+    game: GameSummary,
+    groupRow: GameSummary?,
+    verifyIds: List<Int>,
+    title: String,
+    inFlight: Boolean,
+    onVerify: (List<Int>) -> Unit,
+) {
+    Column(modifier = Modifier.padding(top = 6.dp)) {
+        Text(
+            text = completenessLine(game),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag(DETAIL_COMPLETE_LINE_TAG),
+        )
+        groupCompletenessLine(groupRow, isGroup = groupRow != null)?.let { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (isDamagedOnly(game)) {
+            Text(
+                text = CompletenessWording.DAMAGED_NOTE,
+                style = MaterialTheme.typography.bodySmall,
+                color = VaultColors.StatusStale,
+            )
+        }
+        if (verifyIds.isNotEmpty()) {
+            val spoken = if (inFlight) UpdatesWording.STARTING else verifySpokenLabel(title)
+            OutlinedButton(
+                onClick = { onVerify(verifyIds) },
+                enabled = !inFlight,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .semantics { contentDescription = spoken },
+            ) {
+                Text(if (inFlight) UpdatesWording.STARTING else CompletenessWording.VERIFY_LABEL)
+            }
+            Text(
+                text = CompletenessWording.VERIFY_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Test tag of the detail sheet's completeness line. */
+internal const val DETAIL_COMPLETE_LINE_TAG = "detail-complete-line"
 
 @Composable
 private fun JobControlRow(

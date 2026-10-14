@@ -155,6 +155,11 @@ class LibraryScreenshotTest {
     fun library_360dp_font130_list() =
         shoot("library_360dp_font130_list", SMALL_360, fontScale = 1.3f, layout = LibraryLayout.LIST)
 
+    // WP LIB-LIST-1: the wide list row (every column on one line).
+    @Test
+    fun library_800dp_font100_list() =
+        shoot("library_800dp_font100_list", TABLET_800, layout = LibraryLayout.LIST)
+
     private fun shoot(
         name: String,
         screen: ScreenSize,
@@ -275,6 +280,7 @@ class LibraryScreenshotTest {
         assertTrue("no fallback titles rendered", titles.isNotEmpty())
         assertContentPackages(layout)
         assertUpdateState()
+        if (layout == LibraryLayout.LIST) assertListColumns()
         val grid = layout != LibraryLayout.LIST
         if (grid) {
             assertTrue("no capsule pills rendered", pills.isNotEmpty())
@@ -337,7 +343,7 @@ class LibraryScreenshotTest {
         val icons = composeRule
             .onAllNodes(hasContentDescription(UPDATE_BADGE_FULL), useUnmergedTree = true)
             .fetchSemanticsNodes()
-            .filterNot { it.config.getOrNull(SemanticsProperties.TestTag) == UPDATE_BADGE_TAG }
+            .filterNot { it.config.getOrNull(SemanticsProperties.TestTag) in setOf(UPDATE_BADGE_TAG, UPDATE_LABEL_TAG) }
         assertTrue("no status icon speaks '$UPDATE_BADGE_FULL'", icons.isNotEmpty())
     }
 
@@ -371,7 +377,8 @@ class LibraryScreenshotTest {
             val text = node.text()
             when (layout) {
                 LibraryLayout.GRID_3 -> assertEquals("3-column pill", NEVER_PLAYED_COMPACT_LABEL, text)
-                LibraryLayout.LIST -> assertEquals("list label", NEVER_PLAYED_LABEL, text)
+                // WP LIB-LIST-1: the list row's update cell says "Unplayed".
+                LibraryLayout.LIST -> assertEquals("list label", NEVER_PLAYED_COMPACT_LABEL, text)
                 else -> assertTrue("pill reads '$text'", text == NEVER_PLAYED_LABEL || text == NEVER_PLAYED_COMPACT_LABEL)
             }
             assertNotClipped("never-played '$text'", node)
@@ -383,6 +390,31 @@ class LibraryScreenshotTest {
                 .onAllNodes(hasContentDescription("Expedition Pass", substring = true), useUnmergedTree = true)
                 .fetchSemanticsNodes()
                 .size,
+        )
+    }
+
+    /**
+     * WP LIB-LIST-1 + CACHE-COMPLETE-1c, list layouts: the columns line up
+     * row to row -- every status word starts at the same x, every size ends
+     * at the same x -- no status word or size is ellipsized, and the
+     * partially cached Copperline Atlas reads "Partial 64%".
+     */
+    private fun assertListColumns() {
+        fun visible(tag: String) = composeRule
+            .onAllNodes(hasTestTag(tag), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .filterNot { it.boundsInRoot.isEmpty }
+        val words = visible(LIST_STATUS_TAG)
+        val sizes = visible(LIST_SIZE_TAG)
+        assertTrue("fewer than three list rows rendered", words.size >= 3 && sizes.size >= 3)
+        val lefts = words.map { it.boundsInRoot.left }
+        assertTrue("status words start at different x: $lefts", lefts.max() - lefts.min() <= 0.5f)
+        val rights = sizes.map { it.boundsInRoot.right }
+        assertTrue("sizes end at different x: $rights", rights.max() - rights.min() <= 0.5f)
+        for (node in words + sizes.filter { it.text().isNotEmpty() }) assertNotClipped("list cell '${node.text()}'", node)
+        assertTrue(
+            "no list row reads 'Partial 64%' (Copperline Atlas): ${words.map { it.text() }}",
+            words.any { it.text() == "Partial 64%" },
         )
     }
 
@@ -530,6 +562,10 @@ class LibraryScreenshotTest {
 
         /** Common small-phone width. */
         val SMALL_360 = ScreenSize(widthDp = 360, heightDp = 780)
+
+        /** WP LIB-LIST-1: a small tablet / landscape width, where the list
+         * row puts every column on one line (`LIST_WIDE_MIN_WIDTH`). */
+        val TABLET_800 = ScreenSize(widthDp = 800, heightDp = 1280)
 
         /** One density for every profile: layout depends on dp only, and a
          * shared density keeps the goldens comparable side by side. */

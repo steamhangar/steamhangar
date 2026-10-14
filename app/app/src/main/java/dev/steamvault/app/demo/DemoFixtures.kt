@@ -41,6 +41,13 @@ import java.time.Instant
  * with the game, so the group size counts it once), one package failed --
  * the grouped card ("+3 content packages · 1 failed"), the package list
  * with its Retry button, and the grouped delete all have a demo case.
+ *
+ * WP CACHE-COMPLETE-1c (mirroring the web demo): Halcyon Ledger is
+ * partially cached and completable (86 %), Emberline Cartography is short
+ * only of wrong-size chunks (99 %, no "Complete now"), Pale Meridian's
+ * figure is unknown (its newer build was announced, not fetched), Wrenfield
+ * Static is partial under its running job; every other cached game is
+ * measured complete.
  */
 
 private fun isoAgo(secondsAgo: Long): String = Instant.now().minusSeconds(secondsAgo).toString()
@@ -88,6 +95,10 @@ internal fun seedGames(): MutableList<DemoGame> = mutableListOf(
         // WP AG-3 state 3: no fresh signal -- installedOn stays [] (the
         // default). Never worded as "not installed anywhere" -- see
         // ui/library/logic/InstalledState.kt's copy rule.
+        // WP CACHE-COMPLETE-1c: mid-download, so only part of the build is
+        // on disk (37 %); its live job keeps it out of Downloads
+        // "Incomplete", and the finished demo job re-measures it complete.
+        completeness = DemoCompleteness(expectedBytes = 2_400_000_000L, presentBytes = 900_000_000L, missingChunks = 1_800),
     ),
     DemoGame(
         appid = 4_010_040,
@@ -108,6 +119,11 @@ internal fun seedGames(): MutableList<DemoGame> = mutableListOf(
             InstalledOnEntry(client_id = "demo-livingroom-pc", reported_at = isoAgo(4 * 3_600L)),
             InstalledOnEntry(client_id = "demo-steamdeck", reported_at = isoAgo(7_200L)),
         ),
+        // WP CACHE-COMPLETE-1c: the demo's partially cached game --
+        // "Partially cached 86%" on the card, listed under Downloads
+        // "Incomplete" with "Complete now" (chunk files are missing, so a
+        // forced run helps).
+        completeness = DemoCompleteness(expectedBytes = 1_100_000_000L, presentBytes = 950_000_000L, missingChunks = 412),
     ),
     DemoGame(
         appid = 4_010_050,
@@ -122,6 +138,11 @@ internal fun seedGames(): MutableList<DemoGame> = mutableListOf(
         // WP UPD-3: the one demo game with a newer build -> "Update
         // available" badge, "Updates 1" chip, and "Check updates" reports it.
         updateAvailable = true,
+        // WP CACHE-COMPLETE-1c: the announced build's manifest has not been
+        // fetched by anyone yet, so its completeness is not known (the
+        // API's null case); the card still says "Update available" (UPD-6
+        // wins), the detail sheet "Completeness unknown".
+        completenessUnknown = true,
     ),
     DemoGame(
         appid = 4_010_070,
@@ -154,6 +175,11 @@ internal fun seedContentPackageGroup(): List<DemoGame> = listOf(
         gcReclaimableBytes = 0L,
         gcHeldBackBytes = 0L,
         appType = "game",
+        // WP CACHE-COMPLETE-1c: the demo's "wrong-size chunks only" game --
+        // no chunk file missing, a few with the wrong size. The group card
+        // reads "Partially cached 99%"; Downloads lists it without "Complete
+        // now" and with the damaged-chunks note.
+        completeness = DemoCompleteness(expectedBytes = 5_364_000_000L, presentBytes = 5_350_000_000L, missingChunks = 0),
     ),
     DemoGame(
         appid = 4_010_082,

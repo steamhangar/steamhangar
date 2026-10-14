@@ -14,7 +14,10 @@ import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.ui.detail.logic.GcFlowEvent
 import dev.steamvault.app.ui.detail.logic.GcFlowState
 import dev.steamvault.app.ui.detail.logic.reduceGcFlow
+import dev.steamvault.app.ui.downloads.logic.VerifyMode
 import dev.steamvault.app.ui.downloads.logic.describeUpdateStartError
+import dev.steamvault.app.ui.downloads.logic.describeVerifyStartError
+import dev.steamvault.app.ui.downloads.logic.summarizeVerifyStart
 import dev.steamvault.app.ui.downloads.logic.summarizeUpdateStart
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.ui.library.logic.MEMBERS_CHANGED_NOTICE
@@ -218,6 +221,35 @@ class DetailController(
                 }
             } finally {
                 updateInFlight = false
+            }
+        }
+    }
+
+    /** WP CACHE-COMPLETE-1c: a "Verify" request is in flight (the button is
+     * disabled meanwhile and reads "Starting…"). */
+    var verifyInFlight by mutableStateOf(false)
+        private set
+
+    /**
+     * WP CACHE-COMPLETE-1c (twin of web `startSheetVerify`): the sheet's
+     * "Verify" -- `POST /v1/prefill/verify` with exactly [appids] (from
+     * `verifyAppids`: the game and its packages with bytes on disk, never a
+     * tool app or a damaged-only row), a forced prefill that fetches
+     * whatever is missing. The toast words a verify that lands on a RUNNING
+     * job as "verifies on the next run" (`summarizeVerifyStart`).
+     */
+    fun startVerify(scope: CoroutineScope, appids: List<Int>) {
+        if (verifyInFlight || appids.isEmpty()) return
+        verifyInFlight = true
+        scope.launch {
+            try {
+                toast = try {
+                    summarizeVerifyStart(jobsRepository.prefillVerify(appids), VerifyMode.VERIFY).message
+                } catch (e: VaultApiError) {
+                    describeVerifyStartError(e).message
+                }
+            } finally {
+                verifyInFlight = false
             }
         }
     }

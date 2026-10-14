@@ -4034,6 +4034,57 @@ the wiring pins in `D15dWiringTest`. Screenshots (APP-TEST-2):
 Downloads statistics header, from the demo's traffic builders over a fixed
 snapshot and clock, at 411 dp / font 1.0 and 360 dp / font 1.3, dark.
 
+## Fixed list columns and cache completeness (APP-17b: LIB-LIST-1, CACHE-COMPLETE-1c)
+
+Twin of the web's LIB-LIST-1 (`web/css/app.css` list grid,
+`web/js/components/game-card.js`) and CACHE-COMPLETE-1c
+(`web/js/lib/cache-completeness.js`).
+
+- **List rows with fixed columns** (`ui/library/GameListRow.kt`). Every
+  row uses the same fixed cells, so status, size, update and installed-on
+  line up from row to row; the name takes the slack. Phone: name and size
+  (right-aligned, tabular figures) on line 1; icon, status word and the
+  update cell (compact "Update", or "Unplayed") on line 2; installed-on
+  (truncated) and the group line below. From 720 dp row width every column
+  sits on one line, the installed-on column widening from 1000 dp. The
+  truncated installed-on text is spoken with every PC's name.
+- **Only 100 % gets the green check.** A cached card without "Update
+  available" reads "Partially cached N%" (orange half-disc, compact
+  "Partial N%") below 100 and "Cached · not verified" (grey question
+  glyph, compact "Not verified") when the figure is unknown -- including
+  on a server older than CACHE-COMPLETE-1a. A group card reads
+  `group_cache_complete_pct`. "Update available" still wins. "Never
+  played" is hidden on a partial card. Logic and words:
+  `ui/library/logic/CacheCompleteness.kt`; new status kinds `PARTIAL` and
+  `UNVERIFIED` (`ui/status/`).
+- **Detail sheet**: the header uses the same overlay; a completeness block
+  shows "N% complete — x of y GB on disk · checked …" (or "Completeness
+  unknown …"), the group's figure, the damaged-chunks note, and "Verify"
+  (`POST /v1/prefill/verify` for the game and its packages with bytes,
+  never tool apps or damaged-only rows) with its explanation as visible
+  text.
+- **Downloads "Incomplete (N)"** after "Updates available", only when
+  non-empty (`ui/downloads/DownloadsIncomplete.kt`,
+  `ui/downloads/logic/IncompleteGames.kt`): measured below 100 %, no active
+  job, no update flag, no tool app. "Complete now" only with missing chunk
+  files, otherwise "Damaged chunks — SteamHangar can't repair these yet.";
+  "Complete all" sends exactly the listed completable ids to the verify
+  route; a schedule note says whether they complete in the window. Toasts
+  say when a verify lands on a running job ("verifies on the next run").
+- **Demo mode** seeds Halcyon Ledger partially cached (86 %, completable),
+  the Emberline group short only of damaged chunks (99 %), Pale Meridian
+  unknown (its update was announced, not fetched) and answers Verify; a
+  finished demo job re-measures.
+
+Tests: `CacheCompletenessTest`, `IncompleteGamesTest`,
+`CacheCompletenessWebTwinTest` (every word against the web source),
+`CacheCompletenessApiTest` (the wire shape, old servers, the verify
+route), `DemoCompletenessTest`, `DetailControllerVerifyTest`,
+`DownloadsControllerIncompleteTest`, the status-kind pins, the wiring pins
+in `CacheComplete1cWiringTest`, and the screenshot test's list-column
+check (status words start, sizes end at the same x) in both list shots,
+including the new `library_800dp_font100_list`.
+
 ## Screenshot tests (WP APP-TEST-1)
 
 Roborazzi on Robolectric renders the Library screen to PNG on the JVM -- no
@@ -4075,6 +4126,7 @@ at 360 dp / 1.3. Six images:
 | `library_360dp_font130` | 360 dp | 1.3 | Grid 2 |
 | `library_411dp_font100_night` | 411 dp | 1.0 | Grid 2, night |
 | `library_360dp_font130_list` | 360 dp | 1.3 | List |
+| `library_800dp_font100_list` | 800 dp | 1.0 | List, one line per row (APP-17b) |
 
 **Verify or record, per image.**
 

@@ -52,6 +52,7 @@ private class NoJobs : JobsRepository {
     override suspend fun detail(id: Int): JobDetail = unused()
     override suspend fun prefill(appids: List<Int>): List<PrefillJobRef> = unused()
     override suspend fun prefillCached(): List<PrefillJobRef> = unused()
+    override suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> = unused()
     override suspend fun cancel(id: Int): JobControlOut = unused()
     override suspend fun pause(id: Int): JobControlOut = unused()
     override suspend fun resume(id: Int): JobControlOut = unused()

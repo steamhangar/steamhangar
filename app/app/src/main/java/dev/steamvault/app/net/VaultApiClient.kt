@@ -206,6 +206,17 @@ class VaultApiClient(
      */
     suspend fun prefillCached(): List<PrefillJobRef> = postEmpty("/v1/prefill/cached")
 
+    /**
+     * `POST /v1/prefill/verify` (WP CACHE-COMPLETE-1b/1c, api/README.md
+     * "Verify and complete"): a FORCED prefill per listed app -- the
+     * server flags `needs_force` first, then enqueues exactly like
+     * [prefill] (same dedupe, same 422 for a Steam tool app, same
+     * response). "Verify" in the detail sheet and "Complete now" /
+     * "Complete all" in Downloads all send exactly the ids they list.
+     */
+    suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> =
+        post("/v1/prefill/verify", PrefillRequest(appids))
+
     suspend fun cancelJob(id: Int): JobControlOut = delete("/v1/jobs/$id")
 
     suspend fun pauseJob(id: Int): JobControlOut = postEmpty("/v1/jobs/$id/pause")

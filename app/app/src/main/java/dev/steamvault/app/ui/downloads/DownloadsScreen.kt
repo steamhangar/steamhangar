@@ -72,6 +72,8 @@ import dev.steamvault.app.ui.downloads.logic.partitionJobs
 import dev.steamvault.app.ui.downloads.logic.selectExcerptDisplay
 import dev.steamvault.app.ui.downloads.logic.nameFor
 import dev.steamvault.app.ui.downloads.logic.pendingUpdates
+import dev.steamvault.app.ui.downloads.logic.pendingIncomplete
+import dev.steamvault.app.ui.downloads.logic.incompleteScheduleNote
 import dev.steamvault.app.ui.downloads.logic.scheduleNote
 import dev.steamvault.app.ui.library.logic.formatBytesGB
 import dev.steamvault.app.ui.status.StatusIcon
@@ -189,6 +191,16 @@ fun DownloadsScreen(
                 }
         }
     }
+    // WP CACHE-COMPLETE-1c: "Incomplete" -- measured below 100 %, no active
+    // job, no update flag.
+    val incompleteRows = remember(controller.gamesKnown, controller.games, controller.jobs, gamesByAppid, ownedNames) {
+        if (!controller.gamesKnown) {
+            emptyList()
+        } else {
+            pendingIncomplete(controller.games, controller.jobs) { nameFor(it.appid, gamesByAppid, ownedNames) }
+                .map { g -> incompleteRowModel(g, nameFor(g.appid, gamesByAppid, ownedNames)) }
+        }
+    }
     // WP D15d: the History list for the chosen range -- the newest jobs
     // merged with the `?range=` fetch, filtered by the server's own rule.
     val historyJobs = remember(controller.jobs, historyFilter.jobs) { mergeJobLists(controller.jobs, historyFilter.jobs) }
@@ -239,6 +251,7 @@ fun DownloadsScreen(
                 activeModels = activeModels,
                 pausedModels = pausedModels,
                 updateRows = updateRows,
+                incompleteRows = incompleteRows,
                 queueModels = queueModels,
                 historyModels = historyModels,
                 historyJobs = historyJobs,
@@ -259,6 +272,7 @@ private fun DownloadsBody(
     activeModels: List<JobCardModel>,
     pausedModels: List<JobCardModel>,
     updateRows: List<UpdateRowModel>,
+    incompleteRows: List<IncompleteRowModel>,
     queueModels: List<QueueRowModel>,
     historyModels: List<HistoryRowModel>,
     historyJobs: List<JobSummary>,
@@ -321,6 +335,26 @@ private fun DownloadsBody(
                     model = row,
                     inFlight = controller.updatesInFlight,
                     onUpdateNow = { controller.startUpdates(scope, listOf(row.appid), row.appid) },
+                )
+            }
+        }
+
+        // WP CACHE-COMPLETE-1c: right after "Updates available" (web
+        // order), only when non-empty.
+        if (incompleteRows.isNotEmpty()) {
+            item(key = "incomplete-heading") {
+                IncompleteHeader(
+                    rows = incompleteRows,
+                    note = incompleteScheduleNote(controller.schedule),
+                    inFlight = controller.incompleteInFlight,
+                    onCompleteAll = { ids -> controller.startCompletion(scope, ids, COMPLETE_ALL) },
+                )
+            }
+            items(incompleteRows, key = { "incomplete-${it.appid}" }) { row ->
+                IncompleteRow(
+                    model = row,
+                    inFlight = controller.incompleteInFlight,
+                    onCompleteNow = { controller.startCompletion(scope, listOf(row.appid), row.appid) },
                 )
             }
         }

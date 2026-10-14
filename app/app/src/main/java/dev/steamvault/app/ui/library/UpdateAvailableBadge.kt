@@ -86,15 +86,24 @@ internal val UPDATE_BADGE_MAX_WIDTH = 120.dp
  * checkbox (Material's 48 dp touch target plus a little air). */
 internal val UPDATE_BADGE_START_CLEARANCE = 52.dp
 
+/**
+ * The list row's update flag. WP LIB-LIST-1: [compact] = the short "Update"
+ * in the row's fixed update cell (web `.grid.list .updbadge .ubcompact`),
+ * still spoken as the full "Update available".
+ */
 @Composable
-fun UpdateAvailableLabel(modifier: Modifier = Modifier) {
+fun UpdateAvailableLabel(modifier: Modifier = Modifier, compact: Boolean = false) {
+    val full = stringResource(R.string.library_update_available_badge)
+    val text = if (compact) stringResource(R.string.library_update_available_badge_short) else full
     Text(
-        text = stringResource(R.string.library_update_available_badge),
+        text = text,
         style = MaterialTheme.typography.labelSmall,
         color = VaultColors.StatusStale,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = modifier.testTag(UPDATE_LABEL_TAG),
+        modifier = modifier
+            .testTag(UPDATE_LABEL_TAG)
+            .semantics { contentDescription = full },
     )
 }
 

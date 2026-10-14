@@ -29,7 +29,23 @@ enum class StatusKind(val wireName: String, val labelRes: Int) {
      * word for it ("Steam tool package", `GameStatus.kt`); this label is the
      * web STATUS_LABEL word. Web's "unknown" kind is still web-only.
      */
-    NOTINUSE("notinuse", R.string.status_notinuse);
+    NOTINUSE("notinuse", R.string.status_notinuse),
+
+    /**
+     * WP CACHE-COMPLETE-1c (twin of web `partial`): a cached game with only
+     * part of its current build on disk -- orange half-disc. A DISPLAY
+     * overlay of a CACHED card (`CacheCompleteness.kt`), never a game's
+     * own kind; the card shows its own word ("Partially cached N%"), this
+     * label is the icon's fallback.
+     */
+    PARTIAL("partial", R.string.status_partial),
+
+    /**
+     * WP CACHE-COMPLETE-1c (twin of web `unverified`): a cached game whose
+     * completeness is not known -- neutral question glyph. Overlay only,
+     * like [PARTIAL].
+     */
+    UNVERIFIED("unverified", R.string.status_unverified);
 
     companion object {
         /**

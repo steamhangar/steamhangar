@@ -19,6 +19,8 @@ interface JobsRepository {
     suspend fun prefill(appids: List<Int>): List<PrefillJobRef>
     /** `POST /v1/prefill/cached` (WP 4c-app) — see [VaultApiClient.prefillCached]'s kdoc. */
     suspend fun prefillCached(): List<PrefillJobRef>
+    /** `POST /v1/prefill/verify` (WP CACHE-COMPLETE-1c) — see [VaultApiClient.prefillVerify]'s kdoc. */
+    suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef>
     suspend fun cancel(id: Int): JobControlOut
     suspend fun pause(id: Int): JobControlOut
     suspend fun resume(id: Int): JobControlOut
@@ -29,6 +31,7 @@ class VaultJobsRepository(private val client: VaultApiClient) : JobsRepository {
     override suspend fun detail(id: Int): JobDetail = client.job(id)
     override suspend fun prefill(appids: List<Int>): List<PrefillJobRef> = client.prefill(appids)
     override suspend fun prefillCached(): List<PrefillJobRef> = client.prefillCached()
+    override suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> = client.prefillVerify(appids)
     override suspend fun cancel(id: Int): JobControlOut = client.cancelJob(id)
     override suspend fun pause(id: Int): JobControlOut = client.pauseJob(id)
     override suspend fun resume(id: Int): JobControlOut = client.resumeJob(id)

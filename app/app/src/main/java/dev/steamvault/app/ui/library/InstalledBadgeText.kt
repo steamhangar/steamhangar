@@ -28,6 +28,22 @@ fun installedBadgeText(badge: InstalledBadge, includeTimestamp: Boolean = false)
         installedLabel(R.string.library_installed_not_cached, badge.display, includeTimestamp)
 }
 
+/**
+ * WP LIB-LIST-1 (twin of web `installedAriaFragment`): the badge's spoken
+ * form naming EVERY client ([names], `installedOnNames`) -- "Installed on
+ * Demon, Frame" -- for the list row, whose installed-on column truncates.
+ * `null` for [InstalledBadge.NoSignal] or without names.
+ */
+@Composable
+fun installedBadgeSpokenText(badge: InstalledBadge, names: String?): String? {
+    if (names == null) return null
+    return when (badge) {
+        InstalledBadge.NoSignal -> null
+        is InstalledBadge.InstalledAndCached -> stringResource(R.string.library_installed_on, names)
+        is InstalledBadge.InstalledNotCached -> stringResource(R.string.library_installed_not_cached, names)
+    }
+}
+
 @Composable
 private fun installedLabel(baseRes: Int, display: InstalledOnDisplay, includeTimestamp: Boolean): String {
     var text = stringResource(baseRes, display.primaryClientId)

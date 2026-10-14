@@ -69,6 +69,31 @@ data class GameSummary(
      * [size_bytes] for an ungrouped row, null on a grouped row and on an
      * older server. */
     val group_size_bytes: Long? = null,
+    /** WP CACHE-COMPLETE-1a (api/README.md "Cache completeness"): how much
+     * of the CURRENT build is on disk, 0-100 (floored; 100 only when every
+     * byte is there), or null = not known (nothing on disk, never measured,
+     * oracle off, target changed). Null never means "complete". Defaulted:
+     * a server from before CACHE-COMPLETE-1a sends none, which reads as
+     * "not known". */
+    val cache_complete_pct: Int? = null,
+    /** WP CACHE-COMPLETE-1a: bytes of the current build; null exactly when
+     * [cache_complete_pct] is. */
+    val cache_expected_bytes: Long? = null,
+    /** WP CACHE-COMPLETE-1a: how many of them are on disk; null exactly
+     * when [cache_complete_pct] is. */
+    val cache_present_bytes: Long? = null,
+    /** WP CACHE-COMPLETE-1a: when the figure was measured; null exactly
+     * when [cache_complete_pct] is. */
+    val cache_complete_checked_at: String? = null,
+    /** WP CACHE-COMPLETE-1b: chunk files of the current build with no file
+     * on disk; null exactly when [cache_complete_pct] is. `0` on an
+     * incomplete row: short only of chunk files with the WRONG size, which
+     * no current action repairs. */
+    val cache_missing_chunks: Int? = null,
+    /** WP CACHE-COMPLETE-1a (D9): on a top-level row, the figure over the
+     * group's members with bytes on disk; null on a grouped row, when
+     * unknown, and on an older server. */
+    val group_cache_complete_pct: Int? = null,
 )
 
 /** One entry of [GameDetail.depots] — `vault_api/routers/games.py::DepotEntry`. */
@@ -121,4 +146,11 @@ data class GameDetail(
     val app_type: String? = null,
     /** See [GameSummary.group_size_bytes] (WP TOOL-APPS-2). */
     val group_size_bytes: Long? = null,
+    /** See [GameSummary.cache_complete_pct] (WP CACHE-COMPLETE-1a). */
+    val cache_complete_pct: Int? = null,
+    val cache_expected_bytes: Long? = null,
+    val cache_present_bytes: Long? = null,
+    val cache_complete_checked_at: String? = null,
+    val cache_missing_chunks: Int? = null,
+    val group_cache_complete_pct: Int? = null,
 )

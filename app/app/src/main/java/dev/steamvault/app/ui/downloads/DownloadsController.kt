@@ -21,7 +21,10 @@ import dev.steamvault.app.ui.downloads.logic.bulkBarState
 import dev.steamvault.app.ui.downloads.logic.bulkPauseTargets
 import dev.steamvault.app.ui.downloads.logic.bulkResumeTargets
 import dev.steamvault.app.ui.downloads.logic.bulkSummary
+import dev.steamvault.app.ui.downloads.logic.VerifyMode
 import dev.steamvault.app.ui.downloads.logic.describeUpdateStartError
+import dev.steamvault.app.ui.downloads.logic.describeVerifyStartError
+import dev.steamvault.app.ui.downloads.logic.summarizeVerifyStart
 import dev.steamvault.app.ui.downloads.logic.summarizeUpdateStart
 import dev.steamvault.app.ui.downloads.logic.runBulkPause
 import dev.steamvault.app.ui.downloads.logic.runBulkResume
@@ -271,6 +274,39 @@ class DownloadsController(
         }
     }
 
+    // ---- Incomplete (WP CACHE-COMPLETE-1c, web downloads.js startCompletion) --
+
+    /** What a completion request in flight is for: [COMPLETE_ALL], an
+     * appid, or `null`. One request at a time; every button of the section
+     * is disabled meanwhile, the pressed one reads "Starting…". */
+    var incompleteInFlight by mutableStateOf<Int?>(null)
+        private set
+
+    /**
+     * "Complete now" ([which] = the appid) or "Complete all" ([which] =
+     * [COMPLETE_ALL]): `POST /v1/prefill/verify` with exactly [appids] (for
+     * "Complete all": the listed rows "Complete now" is offered for, never
+     * the server's own selection), a forced run per game. Then an
+     * out-of-cadence jobs refresh, which moves the games into the queue.
+     */
+    fun startCompletion(scope: CoroutineScope, appids: List<Int>, which: Int) {
+        if (incompleteInFlight != null || appids.isEmpty()) return
+        incompleteInFlight = which
+        scope.launch {
+            try {
+                val outcome = try {
+                    summarizeVerifyStart(jobsRepository.prefillVerify(appids), VerifyMode.COMPLETE)
+                } catch (e: VaultApiError) {
+                    describeVerifyStartError(e)
+                }
+                showToast(outcome.message, if (outcome.long) BULK_TOAST_MS else TOAST_MS)
+                if (outcome.refresh) refreshJobsOnce()
+            } finally {
+                incompleteInFlight = null
+            }
+        }
+    }
+
     // ---- Pause all / Resume all (WP WEB-FEAT-5, web downloads.js runBulk) --
 
     /** The bulk run in flight, or null. Both bulk buttons are disabled
@@ -343,3 +379,7 @@ class DownloadsController(
 /** [DownloadsController.updatesInFlight] while "Update all" is in flight
  * (never a real appid). */
 const val UPDATES_ALL = -1
+
+/** [DownloadsController.incompleteInFlight] while "Complete all" is in
+ * flight (never a real appid). */
+const val COMPLETE_ALL = -1
