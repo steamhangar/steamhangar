@@ -95,6 +95,18 @@
  * in-flow children are now `.lib-head`/`.lib-bar`/`.lib-status`/`.grid`/
  * `.hint` (the WP 4e.2 note above describes the earlier six-child BP-L
  * grid, which is gone: the row lays itself out with flexbox).
+ *
+ * **WP TOOL-APPS-2c (content packages, ADR-0022).** `state.games` is the
+ * GROUPED list (`lib/content-groups.js` `groupGames`): a game with content
+ * packages is one card, its packages are hidden from the grid and listed in
+ * the detail sheet. `state.rawGames` keeps the ungrouped rows for every
+ * per-app decision: bulk download expands a picked group card into the
+ * parent and every package and classifies each one exactly as it would be
+ * ungrouped (`expandSelection`), names and the forced-run lookup read the
+ * raw rows. A games tick on a package patches or rebuilds its group card
+ * (`displayDiff`); a package moving in or out of a group re-renders. Group
+ * sizes need depot lists, read once per change through
+ * `group-sizes-singleton.js` and patched in when they land.
  */
 
 import { store } from "../store-singleton.js";
@@ -140,6 +152,15 @@ import {
 } from "../lib/owned-library.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { ownedLibrary } from "../owned-singleton.js";
+import { groupSizes } from "../group-sizes-singleton.js";
+import {
+  expandSelection,
+  failedPackages,
+  groupCardKey,
+  groupGames,
+  groupHasCacheContent,
+  isGroup,
+} from "../lib/content-groups.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
@@ -214,7 +235,12 @@ const state = {
   // lib/owned-library.js's mergeOwnedLibrary). Every reader below uses
   // `games`; only the merge itself reads `vaultGames`.
   vaultGames: store.snapshot("games") || [],
+  // WP TOOL-APPS-2c: `rawGames` is the merged list before grouping (one row
+  // per app); `games` the grouped one the grid shows; `parentOf` maps a
+  // grouped package's appid to its parent's.
+  rawGames: store.snapshot("games") || [],
   games: store.snapshot("games") || [],
+  parentOf: new Map(),
   jobs: store.snapshot("jobs") || [],
   query: "",
   filterKey: "all",
@@ -256,7 +282,30 @@ function remerge() {
   mergedOwnedGames = ownedLibrary.current().games;
   // WP WEB-FEAT-SUGGEST-2: playtime (ADR-0010 gate) for the card's
   // "Never played" pill.
-  state.games = withOwnedPlaytime(mergeOwnedLibrary(state.vaultGames, mergedOwnedGames), mergedOwnedGames);
+  state.rawGames = withOwnedPlaytime(mergeOwnedLibrary(state.vaultGames, mergedOwnedGames), mergedOwnedGames);
+  // WP TOOL-APPS-2c: group content packages under their parent game.
+  const grouped = groupGames(state.rawGames, { depotsFor: groupSizes.depotsFor });
+  state.games = grouped.rows;
+  state.parentOf = grouped.parentOf;
+  groupSizes.request(grouped.needDepots);
+}
+
+// WP TOOL-APPS-2c: a depot list for a group size landed. The size is not
+// structural, so the group cards on screen are patched, never rebuilt.
+groupSizes.subscribe(() => {
+  remerge();
+  if (!mounted()) return;
+  for (const game of state.games) if (isGroup(game)) patchCard(game.appid);
+});
+
+/** Raw (ungrouped) rows by appid, for names and per-app decisions. */
+function rawByAppid() {
+  return new Map(state.rawGames.map((g) => [g.appid, g]));
+}
+
+/** How many of a group card's packages failed (0 for a plain card). */
+function failedCountFor(game) {
+  return failedPackages(game, liveJobsByAppid).length;
 }
 
 // Module-level, not per-mount: an in-flight "Check & update" call must stay
@@ -476,7 +525,7 @@ async function onCheckAndUpdate() {
     // on an empty or all-deduplicated outcome. `state.games` is passed
     // through only as the best-effort `needs_force` lookup table; the
     // module itself decides whether it applies at all.
-    const summary = summarizeCachedPrefillOutcome(result.refs, state.games);
+    const summary = summarizeCachedPrefillOutcome(result.refs, state.rawGames);
     // N3 (review round 1 nitpick): `summary.warn` means "the user needs to
     // go DO something" (a paused dedupe — resume or cancel it) — the one
     // outcome of this whole action that requires a follow-up action, not
@@ -627,6 +676,7 @@ function renderGrid() {
         onLongPress: enterSelect,
         onToggle,
         onAction,
+        failedPackageCount: failedCountFor(game),
       }),
     );
   }
@@ -654,9 +704,13 @@ function syncBulk() {
 
   const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
   const pickedGames = [...state.picked].map((id) => gamesByAppid.get(id)).filter(Boolean);
+  // WP TOOL-APPS-2c (ADR-0022 §4): a picked group card is its parent plus
+  // every package, each classified as it would be ungrouped, so the targets
+  // equal those of the same rows picked one by one.
+  const memberGames = expandSelection(pickedGames, rawByAppid());
 
-  const classification = classifyBulkSelection(pickedGames, state.jobs);
-  const plan = buildBulkDownloadPlan(classification, pickedGames.length);
+  const classification = classifyBulkSelection(memberGames, state.jobs);
+  const plan = buildBulkDownloadPlan(classification, memberGames.length);
 
   setButtonEnabled(els.bulkPrimary, plan.primaryEnabled, plan.primaryLabel);
   currentBulkPrimaryTargets = plan.primaryTargets;
@@ -675,7 +729,15 @@ function syncBulk() {
   // classifyBulkDeleteEligibility) — has-cache-content, not "status is not
   // none" (an `error` app with zero visible bytes has no depot mappings
   // left and would just 404; see that function's docstring).
-  const deletable = classifyBulkDeleteEligibility(pickedGames, state.jobs);
+  // WP TOOL-APPS-2c: a group card is deletable when any member has bytes
+  // and no member is busy (the grouped delete answers 409 otherwise).
+  const busyMembers = new Set(classification.busy.map((g) => g.appid));
+  const deletable = [
+    ...classifyBulkDeleteEligibility(pickedGames.filter((g) => !isGroup(g)), state.jobs),
+    ...pickedGames.filter(
+      (g) => isGroup(g) && groupHasCacheContent(g) && ![g.appid, ...g.packages.map((p) => p.appid)].some((id) => busyMembers.has(id)),
+    ),
+  ];
   if (deletable.length) {
     els.bulkDelete.style.display = "";
     els.bulkDelete.textContent =
@@ -1289,13 +1351,34 @@ function currentCardKeys() {
   const map = new Map();
   if (!els) return map;
   for (const card of els.grid.querySelectorAll(".card[data-appid]")) {
-    map.set(Number(card.dataset.appid), card.dataset.dk);
+    // WP TOOL-APPS-2c: the group part (`data-gk`) is structural too.
+    map.set(Number(card.dataset.appid), `${card.dataset.dk}|${card.dataset.gk || ""}`);
   }
   return map;
 }
 
 function computeCardKey(game) {
-  return cardStructuralKey(game, liveJobsByAppid.get(game.appid));
+  return `${cardStructuralKey(game, liveJobsByAppid.get(game.appid))}|${groupCardKey(game, liveJobsByAppid)}`;
+}
+
+/**
+ * WP TOOL-APPS-2c: the raw `GET /v1/games` diff in terms of the CARDS on
+ * screen. A package's row change becomes a change of its group card; a row
+ * whose `parent_appid` changed moves between cards, so the answer is a full
+ * render (`null`). Added/removed rows pass through (planGamesUpdate renders
+ * fully for them anyway).
+ */
+function displayDiff(diff) {
+  if (!diff || diff.isFirst) return diff;
+  const byAppid = new Map(state.games.map((g) => [g.appid, g]));
+  const updated = new Map();
+  for (const { prev, curr } of diff.updated || []) {
+    if ((prev?.parent_appid ?? null) !== (curr?.parent_appid ?? null)) return null;
+    const id = state.parentOf.get(curr.appid) ?? curr.appid;
+    const row = byAppid.get(id);
+    if (row) updated.set(id, { prev: row, curr: row });
+  }
+  return { isFirst: false, added: diff.added, removed: diff.removed, updated: [...updated.values()] };
 }
 
 /** Would `game` still be part of the currently visible (search + chip
@@ -1330,6 +1413,7 @@ function rebuildCard(appid) {
     onLongPress: enterSelect,
     onToggle,
     onAction,
+    failedPackageCount: failedCountFor(game),
   });
   cardEl.replaceWith(newCard);
 }
@@ -1358,7 +1442,12 @@ function applyGamesTick(diff) {
     fullRender();
     return;
   }
-  const plan = planGamesUpdate(diff, currentCardKeys(), computeCardKey);
+  const cardDiff = displayDiff(diff);
+  if (cardDiff === null) {
+    fullRender();
+    return;
+  }
+  const plan = planGamesUpdate(cardDiff, currentCardKeys(), computeCardKey);
   if (plan.full) {
     fullRender();
     return;

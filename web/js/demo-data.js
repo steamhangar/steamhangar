@@ -50,13 +50,14 @@
  * "already running" dedupe branch with zero extra setup.
  *
  * WP 4e.1 extends this with a large-library fixture — `generateSyntheticGames`
- * appends up to 394 deterministic synthetic games on top of the 6 curated
+ * appends up to 390 deterministic synthetic games on top of the 10 curated
  * ones below, gated behind a `localStorage`-read library-size preference (or
  * an explicit `resetDemoData({ librarySize })` argument for headless tests)
  * — see that function's own header for what it can and cannot measure, and
  * `web/tests/demo-data-large-library.test.js` for its coverage. Every
  * existing test in this suite that calls `resetDemoData()` with no argument
- * is unaffected: the default library size is still exactly 6.
+ * is unaffected: the default library size is exactly 10 (6 games plus the
+ * WP TOOL-APPS-2c content-package group).
  */
 
 import { ApiError, ERROR_KINDS } from "./errors.js";
@@ -134,6 +135,11 @@ function makeGame({
   // the real rule's second half (only while the app has bytes in the
   // cache), and a finished prefill of this app clears it (advanceJob).
   updateAvailable = false,
+  // WP TOOL-APPS-2c: `parent_appid` / `app_type` (WP TOOL-APPS-2a). Null
+  // (ungrouped, unknown type) for every game except the content-package
+  // fixture in buildContentPackageGames().
+  parentAppid = null,
+  appType = null,
 }) {
   return {
     appid,
@@ -160,7 +166,62 @@ function makeGame({
     // seedDemoUpdateCheck() and by every finished demo update check for the
     // cached games, null for the rest (real: null = never asked).
     update_checked_at: null,
+    parent_appid: parentAppid,
+    app_type: appType,
   };
+}
+
+/**
+ * WP TOOL-APPS-2c: one game with three content packages, so demo mode shows
+ * the grouped card ("+3 content packages · 1 failed"), the package list in
+ * the detail sheet with its Retry button, and the grouped delete. Modeled on
+ * the prod library (ADR-0022): packages are separate apps with their own
+ * depots (one shares a depot with the parent), Steam names them
+ * "<game> - <what>", one package failed. Fictional names and ids.
+ */
+function buildContentPackageGames() {
+  const parent = 2010080;
+  return [
+    makeGame({
+      appid: parent,
+      name: "Starfall Legion",
+      status: "done",
+      appType: "game",
+      depots: [
+        { depotid: 2010081, shared: false, size_bytes: 6_100_000_000 },
+        { depotid: 2010089, shared: true, size_bytes: 150_000_000 },
+      ],
+    }),
+    makeGame({
+      appid: 2010082,
+      name: "Starfall Legion - Brazilian Portuguese Voice Pack",
+      status: "done",
+      parentAppid: parent,
+      appType: "dlc",
+      depots: [
+        { depotid: 2010083, shared: false, size_bytes: 300_000_000 },
+        // Shared with the parent: the group size counts it once.
+        { depotid: 2010089, shared: true, size_bytes: 150_000_000 },
+      ],
+      installedOn: [{ client_id: "loft-laptop", reported_at: isoAgo(3_600_000) }],
+    }),
+    makeGame({
+      appid: 2010084,
+      name: "Starfall Legion - Original Soundtrack",
+      status: "done",
+      parentAppid: parent,
+      appType: "music",
+      depots: [{ depotid: 2010085, shared: false, size_bytes: 450_000_000 }],
+    }),
+    makeGame({
+      appid: 2010086,
+      name: "Starfall Legion - Officer Cosmetics",
+      status: "error",
+      parentAppid: parent,
+      appType: "dlc",
+      depots: [],
+    }),
+  ];
 }
 
 /** The 6 curated, hand-named seed games every existing demo test asserts
@@ -289,10 +350,12 @@ function buildCuratedGames() {
 // in store.js) has only ever been exercised against the 6 curated games
 // above. Appended ON TOP of them (never replacing), so every existing demo
 // test that names an exact appid/count above is completely unaffected —
-// the default library size is still exactly DEFAULT_LIBRARY_SIZE (6).
+// the default library size is exactly DEFAULT_LIBRARY_SIZE (10).
 // ---------------------------------------------------------------------
 
-const DEFAULT_LIBRARY_SIZE = 6;
+// WP TOOL-APPS-2c: the curated list is the 6 hand-named games plus the 4
+// rows of the content-package group (buildContentPackageGames).
+const DEFAULT_LIBRARY_SIZE = 10;
 const MAX_LIBRARY_SIZE = 400;
 const LARGE_LIBRARY_STORAGE_KEY = "steamvault.demoLibrarySize";
 // Chosen well clear of every other fixture's appid range in this file (the
@@ -391,12 +454,13 @@ function readLibrarySizePreference() {
   }
 }
 
-/** The curated 6-game seed list, plus `librarySize - DEFAULT_LIBRARY_SIZE`
+/** The curated seed list (6 games plus the 4-row content-package group), plus `librarySize - DEFAULT_LIBRARY_SIZE`
  * synthetic games appended on top (0 more when `librarySize` is at or below
  * the default — every existing demo test, which never passes an argument
  * here, sees exactly the unmodified 6-game list it always has). */
 function buildGames(librarySize = DEFAULT_LIBRARY_SIZE) {
   return buildCuratedGames().concat(
+    buildContentPackageGames(),
     generateSyntheticGames(Math.max(0, librarySize - DEFAULT_LIBRARY_SIZE)),
   );
 }
@@ -1242,6 +1306,8 @@ function gameSummary(g) {
     // lookup, so every demo game uses the legacy cover path.
     cover_url: null,
     ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (WP UPD-1 fields)
+    parent_appid: g.parent_appid, // WP TOOL-APPS-2c (WP TOOL-APPS-2a fields)
+    app_type: g.app_type,
   };
 }
 
@@ -1267,6 +1333,8 @@ function gameDetail(g) {
     tool_app_name: null,
     cover_url: null, // WP API-FIX-5 (see gameSummary's own comment)
     ...demoUpdateFields(g), // WP WEB-FIX-UPD-VIS (see gameSummary)
+    parent_appid: g.parent_appid, // WP TOOL-APPS-2c (see gameSummary)
+    app_type: g.app_type,
   };
 }
 

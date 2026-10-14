@@ -73,6 +73,16 @@
  * `isNeverPlayedCached`; playtime reaches the app only with the operator's
  * ADR-0010 gate on). Plain text, no icon, `aria-hidden` — the card's
  * accessible name carries "Fully cached, never played" instead.
+ *
+ * **Group cards (WP TOOL-APPS-2c, ADR-0022 §3).** A row built by
+ * `lib/content-groups.js`'s `groupGames` (a parent game with its content
+ * packages) is one card: the parent's status, the group's size (the union of
+ * the members' depots, `displaySizeBytes`), and a `.pkgline` in the meta row
+ * — "+N content packages", followed by a warning "· N failed" when a package
+ * failed (user decision Q3 B variant). The package list itself lives in the
+ * detail sheet (Q4 A). `data-gk` carries the group's structural part
+ * (package count and failed count, `ctx.failedPackageCount`): a change
+ * rebuilds the card, never a patch.
  */
 
 import { createStatusIcon, STATUS_LABEL } from "./status-icon.js";
@@ -91,6 +101,13 @@ import {
   gameDisplayName,
 } from "../lib/game-status.js";
 import { formatBytesGB } from "../lib/format.js";
+import {
+  displaySizeBytes,
+  failedPackagesText,
+  isGroup,
+  packagesAriaText,
+  packagesLineText,
+} from "../lib/content-groups.js";
 import { coverArtUrl, fallbackHues, fallbackPattern } from "../lib/cover-art.js";
 import {
   isNeverPlayedCached,
@@ -111,7 +128,7 @@ function pillNumberText(game, kind) {
   // Honest per game-status.js's Divergence 2: no fabricated live percentage
   // for running/paused — only a genuinely cached game prints a number.
   if (kind !== "cached") return null;
-  return formatBytesGB(game.size_bytes);
+  return formatBytesGB(displaySizeBytes(game)); // WP TOOL-APPS-2c: a group's union
 }
 
 /** Installed-badge class for the `.instbadge` span (WP AG-2, css/app.css) —
@@ -295,7 +312,7 @@ export function patchCardVolatile(cardEl, game, kind) {
     pill.classList.toggle("bare", !newPillNum);
   }
   const sizeEl = cardEl.querySelector(".meta .size");
-  if (sizeEl) sizeEl.textContent = formatBytesGB(game.size_bytes) || "—";
+  if (sizeEl) sizeEl.textContent = formatBytesGB(displaySizeBytes(game)) || "—";
   const metaEl = cardEl.querySelector(".meta");
   if (metaEl) {
     syncInstalledTag(metaEl, game);
@@ -306,7 +323,44 @@ export function patchCardVolatile(cardEl, game, kind) {
   // is unchanged by definition on the patch path (round-7 rule), but the
   // SIZE this same tick just wrote above is part of the announced name and
   // would otherwise go stale until the next structural rebuild.
-  cardEl.setAttribute("aria-label", cardAccessibleLabel(game, kind));
+  cardEl.setAttribute("aria-label", cardAccessibleLabel(game, kind, failedCountFromKey(cardEl.dataset.gk)));
+}
+
+/** The failed-package count a card was built with (its `data-gk`). */
+function failedCountFromKey(gk) {
+  const m = typeof gk === "string" ? gk.match(/^\d+:(\d+)$/) : null;
+  return m ? Number(m[1]) : 0;
+}
+
+/** `data-gk`: a group card's structural part (lib/content-groups.js
+ * `groupCardKey` computes the same string from the live jobs). */
+function groupKeyFor(game, failedCount) {
+  return isGroup(game) ? `${game.packages.length}:${failedCount}` : "";
+}
+
+/**
+ * The "+N content packages" line of a group card (WP TOOL-APPS-2c), with a
+ * "· N failed" warning when a package failed. Plain text, `aria-hidden`
+ * (the card's accessible name carries the same facts).
+ * @param {object} game a group row
+ * @param {number} failedCount
+ * @returns {HTMLElement}
+ */
+function buildPackagesLine(game, failedCount) {
+  const line = document.createElement("span");
+  line.className = "pkgline";
+  line.setAttribute("aria-hidden", "true");
+  const n = document.createElement("span");
+  n.className = "pkgn";
+  n.textContent = packagesLineText(game.packages.length);
+  line.appendChild(n);
+  if (failedCount > 0) {
+    const warn = document.createElement("span");
+    warn.className = "pkgfail";
+    warn.textContent = ` · ${failedPackagesText(failedCount)}`;
+    line.appendChild(warn);
+  }
+  return line;
 }
 
 function buildCover(game) {
@@ -467,10 +521,11 @@ function installedAriaFragment(game, kind) {
  * visual placeholder, not spoken). Recomputed by `patchCardVolatile` too,
  * since a size-only tick (no structural change) would otherwise leave a
  * stale byte count in the announced name. */
-function cardAccessibleLabel(game, kind) {
+function cardAccessibleLabel(game, kind, failedCount = 0) {
   const parts = [displayName(game), statusWordFor(kind, STATUS_LABEL)];
-  const sizeText = formatBytesGB(game.size_bytes);
+  const sizeText = formatBytesGB(displaySizeBytes(game));
   if (sizeText) parts.push(sizeText);
+  if (isGroup(game)) parts.push(packagesAriaText(game.packages.length, failedCount));
   if (game.update_available === true) parts.push(UPDATE_BADGE_TEXT);
   if (showsNeverPlayed(game, kind)) parts.push(NEVER_PLAYED_DESCRIPTION);
   const installedText = installedAriaFragment(game, kind);
@@ -488,11 +543,14 @@ function cardAccessibleLabel(game, kind) {
  *   onLongPress: (appid: number) => void,
  *   onToggle: (appid: number) => void,
  *   onAction: (appid: number, actionType: string) => void,
- * }} ctx
+ *   failedPackageCount?: number,
+ * }} ctx `failedPackageCount` (WP TOOL-APPS-2c): how many of a group
+ *   card's packages failed (lib/content-groups.js `failedPackages`).
  * @returns {HTMLElement}
  */
 export function buildCard(game, ctx) {
   const { liveJob, picked, selecting, onOpen, onLongPress, onToggle, onAction } = ctx;
+  const failedCount = isGroup(game) ? ctx.failedPackageCount || 0 : 0;
   const kind = dispKind(game, liveJob);
   const action = statusAction(game, liveJob, selecting);
 
@@ -502,9 +560,10 @@ export function buildCard(game, ctx) {
   card.className = "card" + (picked ? " picked" : "") + (isToolApp(game) ? " tool" : "");
   card.dataset.appid = String(game.appid);
   card.dataset.dk = kind;
+  card.dataset.gk = groupKeyFor(game, failedCount);
   card.setAttribute("role", "button");
   card.tabIndex = 0;
-  card.setAttribute("aria-label", cardAccessibleLabel(game, kind));
+  card.setAttribute("aria-label", cardAccessibleLabel(game, kind, failedCount));
   // In multi-select mode the card's default action is "toggle selection",
   // not "open" — aria-pressed makes that a stated TOGGLE state instead of a
   // silent visual-only "picked" class (mirrors the `.pick` checkmark, which
@@ -561,8 +620,10 @@ export function buildCard(game, ctx) {
   // `num?...:""` check is what actually hides it on the cover).
   const size = document.createElement("span");
   size.className = "size";
-  size.textContent = formatBytesGB(game.size_bytes) || "—";
+  size.textContent = formatBytesGB(displaySizeBytes(game)) || "—";
   meta.appendChild(size);
+  // WP TOOL-APPS-2c: the group's own line, before the badges.
+  if (isGroup(game)) meta.appendChild(buildPackagesLine(game, failedCount));
   syncUpdateTag(meta, game); // WP UPD-2: appends `.updbadge` iff update_available
   syncInstalledTag(meta, game); // WP AG-2: appends `.instbadge` iff installed_on is non-empty
   card.appendChild(meta);

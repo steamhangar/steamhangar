@@ -110,7 +110,11 @@ test("wiring: the Library's remerge applies withOwnedPlaytime to the merged rows
   const src = readFileSync(new URL("../js/views/library.js", import.meta.url), "utf8");
   const body = /function remerge\(\) \{([\s\S]*?)\n\}/.exec(src);
   assert.ok(body, "remerge not found");
-  assert.match(body[1], /state\.games = withOwnedPlaytime\(mergeOwnedLibrary\(state\.vaultGames, mergedOwnedGames\), mergedOwnedGames\);/);
+  // WP TOOL-APPS-2c: the playtime-carrying merged rows are grouped next,
+  // and the grid shows the grouped rows built from exactly them.
+  assert.match(body[1], /state\.rawGames = withOwnedPlaytime\(mergeOwnedLibrary\(state\.vaultGames, mergedOwnedGames\), mergedOwnedGames\);/);
+  assert.match(body[1], /groupGames\(state\.rawGames,/);
+  assert.match(body[1], /state\.games = grouped\.rows;/);
 });
 
 test("css: pill row positioned, never-played pill shrinks with an ellipsis, compact word in cols3, list twin only in list, hidden in select mode", () => {

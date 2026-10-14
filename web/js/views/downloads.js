@@ -83,6 +83,7 @@ import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
 import { fillMissingNames, hasText, vaultRowTitle } from "../lib/owned-library.js";
 import { isToolApp, TOOL_APP_NOTE } from "../lib/game-status.js";
 import { ownedLibrary } from "../owned-singleton.js";
+import { contentPackageFallbackTitle } from "../lib/content-groups.js";
 import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp, offersRetryFor } from "../lib/job-failure.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import {
@@ -188,6 +189,15 @@ function gamesByAppidMap() {
   return new Map(fillMissingNames(state.games, ownedLibrary.current().games).map((g) => [g.appid, g]));
 }
 function nameFor(appid, gamesByAppid) {
+  const game = gamesByAppid.get(appid);
+  // WP TOOL-APPS-2c (ADR-0022 §2): a content package without a name of its
+  // own reads "<parent name> · content <appid>", not "App <appid>".
+  if (game && !hasText(game.name)) {
+    const grouped = contentPackageFallbackTitle(game, (p) =>
+      gamesByAppid.has(p) ? vaultRowTitle(p, gamesByAppid.get(p)) : null,
+    );
+    if (grouped) return grouped;
+  }
   // WP API-FIX-4: vaultRowTitle adds the Steam tool app's server-sent name.
   return vaultRowTitle(appid, gamesByAppid.get(appid));
 }
