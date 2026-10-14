@@ -6,8 +6,13 @@ and D16c (core settings path + the settings-volume Antrag).
 
 Applies the classification principle "Tuning + Debug" decided by the user
 on 2026-10-14 (`post-0.1.0-roadmap.md`, Wave plan, "rc18 cut"). Section 5
-lists the cases where the principle does not decide on its own. The user
-signs off the per-variable table in section 3.
+records the user's decisions on the cases the principle did not settle
+(Q1-Q6, 2026-10-14) and the one question still open (Q7). The user signs
+off the per-variable table in section 3.
+
+Revision 2: review round 1 findings (blank-vs-value per key, real
+compose forwarding forms, staging and reload gate in D16c) and the user
+decisions of 2026-10-14 worked in.
 
 Code state audited: `main` at 6502152.
 
@@ -72,11 +77,11 @@ section A only.
 | Section | Default | Contents |
 |---------|---------|----------|
 | A. Vault & connection | open | Vault name; Connection row; PCs pointer row |
-| B. Schedule & updates | closed | Sweep window, interval, client staleness, include cached, sweep status line + GC-risk warning |
+| B. Download window & updates | closed | Download window (Q3: the one window; inside = automatic downloads + full speed, outside = no automatic downloads + rate cap), sweep interval, client staleness, include cached, sweep status line + GC-risk warning |
 | C. Disk & cleanup | closed | Auto-GC (moved from Schedule), GC grace days (new), keep counters (new, expert) |
-| D. Notifications | closed | Webhook URL (read-only if Q2 = env-only), events |
+| D. Notifications | closed | Webhook URL as masked text, env-only (Q2), events (editable) |
 | E. Steam | closed | Steam identity key, Steam library SteamID64 |
-| F. Expert | closed, plus a separate "Show expert settings" switch | Bandwidth & connections (rate, rate window, upstream cap, TLS caps, prefill threads/timeout); Cache-miss trigger & event sweep; Oracle & webhook timeouts; Debug (risky: edge, pool hosts, resolver, log level) |
+| F. Expert | closed, plus a separate "Show expert settings" switch | Bandwidth & connections (upstream rate cap, upstream cap, TLS caps, prefill threads/timeout; no separate rate window, Q3); Cache-miss trigger & event sweep; Oracle & webhook timeouts; Debug (risky: edge, pool hosts, resolver, log level) |
 | G. About | closed (opened by the rail's version button, as today) | unchanged |
 
 Details for D16a-2/D16b:
@@ -88,8 +93,11 @@ Details for D16a-2/D16b:
 - The save bar stays global (one PATCH for every dirty field across
   sections). A collapsed section with a dirty field shows a dot in its
   summary, so a draft is never hidden.
-- Env-pinned values (D16 user decision 2026-10-13: "env wins, no input
-  field") render as text plus an "Env" chip, no input, no Reset.
+- Env-pinned values (user decisions 2026-10-13 and Q1 2026-10-14: env
+  always wins) render as **plain text with a "set via env" note** — not
+  as a disabled input box, no Reset. This applies to every key, the nine
+  existing overrides included. (The `VAULT_SETTINGS_READONLY` mode keeps
+  its disabled inputs; that is a different state.)
 - Risky fields: the Save of a batch that contains a risky key opens one
   confirm dialog listing those keys with old -> new values
   (`sheet-dialog.js`, inert-based trap, LEARNINGS 4a.8).
@@ -118,18 +126,31 @@ and never echoed.
 
 Two facts D16b must deal with:
 
-1. **Precedence conflict.** The expert-mode decision says "env wins" for
-   the new keys. The nine existing keys use "DB wins". See Q1.
-2. **"Is the env set?" cannot be answered today for most keys.** Compose
-   forwards most of them with `${VAR:-default}`, so the key is always
-   present in the container with the default value. vault-core's image
-   also sets `ENV` defaults (`VAULT_UPSTREAM_MAX_CONNS=16`,
-   `VAULT_TLS_*`, `VAULT_RESOLVER=1.1.1.1`). With "env wins", every such
-   key would be read-only forever. D16b/D16c therefore need the editable
-   keys forwarded as `${VAR-}` (unset or blank both mean "not set", LEARNINGS
-   SWEEP-1 on `:-` vs `-`), the defaults kept only in code and hooks, and
-   the image `ENV` defaults blanked. That is a compose change and goes into
-   the same Antrag as the volume (section 4.6).
+1. **Precedence flips (Q1, decided 2026-10-14).** Env always wins, for
+   every key including the nine existing overrides. That reverses
+   ADR-0009 decision 1; **the ADR-0009 addendum is a D16b deliverable**.
+   An existing DB override that an env value now shadows must not vanish
+   silently: vault-api logs one startup warning per shadowed key, and the
+   UI shows the env value with "set via env".
+2. **"Is the env set?" cannot be answered today for some keys.** Measured
+   per key in section 3.5. Most core caps are already forwarded as
+   `${VAR-}` (blank → hook default), so they are not pinned. Pinned with a
+   compose default today, i.e. always "set": in vault-core
+   `VAULT_RESOLVER`, `VAULT_PREFILL_MAX_THREADS`, `VAULT_UPSTREAM_EDGE`,
+   `VAULT_UPSTREAM_RATE_WINDOW`; in vault-api/runner every `:-` key of
+   section 3.1 (`VAULT_AUTO_GC`, `VAULT_SWEEP_INCLUDE_CACHED`,
+   `VAULT_GC_GRACE_DAYS`, the keep counters, sweep and trigger knobs, both
+   timeouts, `VAULT_LOG_LEVEL`) and `VAULT_SCHEDULE_WINDOW`. With env-wins
+   these would be read-only forever, so their forwarding form must change.
+   **The form is chosen per variable** (LEARNINGS SWEEP-1, 2026-08-22: blank
+   may be a value; `:-` vs `-` is a per-key decision with a recorded
+   reason). For keys where blank already means "default", `${VAR-}` is
+   enough. For keys where **blank is a value** (off / legacy), see Q7.
+   vault-core's image `ENV` defaults (`VAULT_UPSTREAM_MAX_CONNS=16`,
+   `VAULT_TLS_*`, `VAULT_RESOLVER=1.1.1.1`) are overridden by compose and
+   only matter for a plain `docker run`; D16c blanks or drops them so the
+   "set?" answer is the same with and without compose (image change, not
+   part of the Antrag).
 
 ---
 
@@ -154,8 +175,11 @@ Columns: **Read by** = container(s) that read the value at runtime.
 **Default** = shipped default (compose value; the code default in brackets
 where it differs). **Class**: `E` editable, `R` editable-risky (confirm
 dialog), `X` env-only. A dagger (†) marks a class that is proposed by
-analogy because the principle does not name the variable (section 5.2).
-"Q n" refers to an open question in section 5.1.
+analogy because the principle does not name the variable (section 5.3).
+"Q n" refers to a question in section 5 (Q1-Q6 decided in 5.1, Q7 open in 5.2).
+"(default)" marks a classification the user took over from the
+recommendation; the user may still object at table sign-off.
+How each key is forwarded and what blank means: section 3.5.
 
 **Apply path**:
 - `api live`: vault-api resolves the value at each use. Today only the 9
@@ -174,11 +198,10 @@ analogy because the principle does not name the variable (section 5.2).
 
 | Variable | Read by | Default | Meaning | Class | Apply path | Grammar |
 |----------|---------|---------|---------|-------|------------|---------|
-| `VAULT_UPSTREAM_RATE` | core | empty = no cap | aggregate byte rate of cache MISS reads from Steam, nginx size syntax (`800k`) | E | core (27 include) | `27-vault-upstream-rate.sh` `parse_rate` (min 1024 B/s, ≤9 digits, k/m) |
-| `VAULT_UPSTREAM_RATE_WINDOW` | core | `${VAULT_SCHEDULE_WINDOW-03:00-07:00}` [image: empty = around the clock] | full speed inside the window, capped outside | E (Q3) | core (27 include) | `27` `parse_window`, mirrors `schedule_window.parse_window` |
-| `VAULT_UPSTREAM_MAX_CONNS` | core | 16 (image ENV) | global cap on concurrent upstream connections, 1..64, must be ≥ prefill threads | E | core (28 cap include) | `28-vault-upstream-pool.sh` (digits, 1..64, floor check) |
-| `VAULT_TLS_CLIENT_MAX_CONNS` | core | 64 (image ENV) | HTTPS passthrough sessions per client address, 1..256, ≤ total | E | core (nginx.conf re-render, stream block) | `26-vault-tls-passthrough.sh` `tls_cap` |
-| `VAULT_TLS_MAX_CONNS` | core | 256 (image ENV) | HTTPS passthrough sessions in total, 1..400 | E | core (as above) | `26` `tls_cap` |
+| `VAULT_UPSTREAM_RATE` | core | blank = no cap | aggregate byte rate of cache MISS reads from Steam, nginx size syntax (`800k`); applies outside the download window | E | core (27 include) | `27-vault-upstream-rate.sh` `parse_rate` (min 1024 B/s, ≤9 digits, k/m) |
+| `VAULT_UPSTREAM_MAX_CONNS` | core | blank → hook default 16 (image ENV 16 only without compose) | global cap on concurrent upstream connections, 1..64, must be ≥ prefill threads | E | core (28 cap include) | `28-vault-upstream-pool.sh` (digits, 1..64, floor check) |
+| `VAULT_TLS_CLIENT_MAX_CONNS` | core | blank → hook default 64 (image ENV 64 only without compose) | HTTPS passthrough sessions per client address, 1..256, ≤ total | E | core (nginx.conf re-render, stream block) | `26-vault-tls-passthrough.sh` `tls_cap` |
+| `VAULT_TLS_MAX_CONNS` | core | blank → hook default 256 (image ENV 256 only without compose) | HTTPS passthrough sessions in total, 1..400 | E | core (as above) | `26` `tls_cap` |
 | `VAULT_PREFILL_MAX_THREADS` | api, runner, core | 8 | SteamPrefill worker threads per job, 1..64; also the floor for `VAULT_UPSTREAM_MAX_CONNS` in core | E | runner/job + core (floor check) | `config._env_int` (1..64); `28` floor |
 | `VAULT_PREFILL_TIMEOUT_SECONDS` | api, runner | 14400 | wall-clock limit per prefill job | E | runner/job (api worker too) | `config._env_int` |
 | `VAULT_GC_GRACE_DAYS` | api | 14 | days unreferenced chunks are protected before GC deletes them | E | api live | `config._env_int` (0..3650) |
@@ -190,7 +213,7 @@ analogy because the principle does not name the variable (section 5.2).
 | `VAULT_MISS_TRIGGER_COOLDOWN_MINUTES` | api | 60 | per-app cooldown of the cache-miss prefill trigger; 0 = trigger off | E | next sweep | `config._env_int` (0..) |
 | `VAULT_MISS_TRIGGER_MAX_PER_SWEEP` | api | 5 | max prefill jobs one sweep may enqueue from misses | E | next sweep | `config._env_int` |
 | `VAULT_SWEEP_INCLUDE_CACHED` | api | true | scheduled sweep also refreshes games already on disk (override exists) | E | next sweep (already) | `config.parse_strict_bool` |
-| `VAULT_SCHEDULE_WINDOW` | api (and core via the compose fallback above) | `03:00-07:00` | window for scheduled sweeps and automatic downloads (override exists) | E | next sweep (already) | `schedule_window.parse_window` |
+| `VAULT_SCHEDULE_WINDOW` | api; core gets the effective value through the settings file (Q3) | `03:00-07:00` (compose) [code: unset = off] | **the one download window** (Q3): inside = automatic downloads + full speed, outside = no automatic downloads + rate cap; blank = scheduler off and cap around the clock (override exists) | E | next sweep (already) + core (27 include, via the file) | `schedule_window.parse_window`; `27` `parse_window` mirrors it |
 | `VAULT_SCHEDULE_INTERVAL_MINUTES` | api | 180 | minutes between scheduled sweeps (override exists) | E | next sweep (already) | `config._env_int` |
 | `VAULT_SCHEDULE_CLIENT_STALE_DAYS` | api | 7 | agent reports older than this are ignored by the sweep (override exists) | E | next sweep (already) | `config._env_int` |
 | `VAULT_MANIFEST_ORACLE_TIMEOUT` | api | 10.0 | seconds per oracle request | E | api live | `config._env_float` |
@@ -199,14 +222,13 @@ analogy because the principle does not name the variable (section 5.2).
 | `VAULT_STEAM_LIBRARY_STEAMID` | api | empty | SteamID64 whose library the Library view lists (override exists) | E | api live (already) | `config.parse_steam_library_steamid` |
 | `VAULT_BYPASS_WINDOW_DAYS` | api | 3 | days of cache-log absence before a client is "bypass suspected" | E † | api live | `config._env_int` |
 | `VAULT_WEBHOOK_TIMEOUT_SECONDS` | api | 5.0 | seconds per webhook delivery | E † | restart today (notifier snapshot) | `config._env_float` |
-| `VAULT_EVENT_LOG_ROTATE_BYTES` | core | 64 MiB, not forwarded by compose | rotate the event log at this size; 0 = off | Q5 | core (45 loop reads it at start only) | `45-vault-eventlog-rotate.sh` `digits` |
-| `VAULT_EVENT_LOG_MAX_BYTES` | api | 64 MiB | vault-api's own truncation of the event log; mostly redundant since D15-ROT | Q5 | api live | `config._env_int` (0..) |
+| `VAULT_EVENT_LOG_ROTATE_BYTES` | core | 64 MiB, not forwarded by compose | rotate the event log at this size; 0 = off | E (Q5, default) | core (the 45 loop must re-read it; today read at start only) | `45-vault-eventlog-rotate.sh` `digits` |
 
 ### 3.2 Editable-risky (debug knobs, confirm dialog)
 
 | Variable | Read by | Default | Meaning | Class | Apply path | Grammar |
 |----------|---------|---------|---------|-------|------------|---------|
-| `VAULT_UPSTREAM_EDGE` | core | `dist-fra1.discovery.steamserver.net` (compose) [image: empty] | the one pooled Steam edge; empty = legacy per-name pool | R | core (28 pool include) | `28` `check_host` (one host, Steam families only) |
+| `VAULT_UPSTREAM_EDGE` | core | `dist-fra1.discovery.steamserver.net` (compose) [image: empty] | the one pooled Steam edge; blank = legacy per-name pool (rollback switch, Q7) | R | core (28 pool include) | `28` `check_host` (one host, Steam families only) |
 | `VAULT_UPSTREAM_POOL_HOSTS` | core | empty | legacy mode: up to 4 pooled edge names, used only while EDGE is empty | R | core (28) | `28` `check_host`, ceiling 4, no duplicates |
 | `VAULT_RESOLVER` | core | `1.1.1.1` | DNS server nginx uses for upstream names (http and stream); must not rewrite Steam names to the LAN | R | core (envsubst re-render of nginx.conf + 40 resolver probe) | `40-vault-preflight.sh` §2 (IP character allowlist) + §2b (rewrite probe) |
 | `VAULT_LOG_LEVEL` | api, runner | `INFO` | Python log level | R | api live (`setLevel`, D16b); runner per job or restart | `main.py` log-level check |
@@ -216,7 +238,9 @@ analogy because the principle does not name the variable (section 5.2).
 | Variable | Read by | Default | Meaning | Reason |
 |----------|---------|---------|---------|--------|
 | `VAULT_API_KEY` | api | none (compose refuses to start) | API key for every non-health endpoint | secret |
-| `VAULT_WEBHOOK_URL` | api | empty = off | webhook target; can carry credentials | webhook URL (principle); **override exists today**, Q2 |
+| `VAULT_WEBHOOK_URL` | api | empty = off | webhook target; can carry credentials | webhook URL (Q2 decided): D16b removes the PATCH path, an existing DB value is ignored with one startup warning; Settings shows it masked as text |
+| `VAULT_UPSTREAM_RATE_WINDOW` | core | `${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}` | separate full-speed window for the cap | **deprecated** (Q3): the download window replaces it. If set in env: startup warning, still honoured as an env pin of core's cap window. Not in Settings |
+| `VAULT_EVENT_LOG_MAX_BYTES` | api | 64 MiB | vault-api's own truncation of the event log, redundant since D15-ROT | **deprecated** (Q5, default): left at its default, no UI |
 | `VAULT_DB_PATH` | api, runner | `/data/vault.db` (image) [code `./vault.db`] | SQLite file | path |
 | `VAULT_CACHE_ROOT` | api, runner | `/vault/cache` (image) [code `./cache`] | cache tree root as vault-api sees it | path |
 | `VAULT_CACHE_PATH` | compose | named volume `vault-cache` | host path for `/vault` (bind mode) | path |
@@ -234,7 +258,7 @@ analogy because the principle does not name the variable (section 5.2).
 | `VAULT_EGRESS_ALLOW` | api, proxy | empty | extra hosts vault-api may reach through vault-proxy | egress allowlist |
 | `VAULT_EGRESS_SUBNET` | proxy, compose (network) | `172.30.238.0/24` | subnet of the internal egress network | egress subnet |
 | `VAULT_MANIFEST_ORACLE_URL` | api, proxy | `https://api.steamcmd.net/v1/info` | oracle endpoint; its host is auto-allowed only for the default | egress-coupled |
-| `VAULT_MANIFEST_ORACLE` | api, proxy | empty = on (`steamcmd_api`) | oracle on/off | egress-coupled, Q4 |
+| `VAULT_MANIFEST_ORACLE` | api, proxy | empty = on (`steamcmd_api`) | oracle on/off | egress-coupled (Q4, default) |
 | `VAULT_SETTINGS_READONLY` | api | false | locks every PATCH | security switch (ADR-0009) |
 | `VAULT_RELAY_EXPOSE_PLAYTIME` | api | false | relay passes playtime to clients | privacy gate, env-only by ADR-0010 |
 | `VAULT_RELAY_EXPOSE_LAST_PLAYED` | api | false | relay passes last-played time | privacy gate, ADR-0010 |
@@ -259,10 +283,15 @@ Grep hits that are not variables: `VAULT_EVENT_LOG_LINE`,
 `VAULT_TLS_PASSTHROUGH_BEGIN/END` (template markers),
 `VAULT_TLS_STREAM_EOF` (heredoc tag), `MAX_VAULT_NAME_LENGTH`,
 `VAULT_RETURN_PATH` (Kotlin constant), `VAULT_API`/`VAULT_SCHEDULE_`
-(prefixes in prose).
+(prefixes in prose), `VAULT_API_VERSION` (api constant). Outside the
+server containers: `VAULT_RELEASE_*` (CI publish workflow) and
+`VAULT_AGENT_SERVER_URL` with the other `VAULT_AGENT_*` (vault-agent on
+the PCs) — not server settings.
 
-Totals: 31 editable or risky candidates (27 E incl. the 2 in Q5, 4 R),
-of which 8 are already overridable (the ninth existing override, `webhook_url`, is Q2); the rest env-only or not settings.
+Totals: 29 editable or risky (25 E, 4 R), of which 8 are already
+overridable (the ninth existing override, `webhook_url`, becomes env-only,
+Q2); two deprecated (`VAULT_UPSTREAM_RATE_WINDOW`,
+`VAULT_EVENT_LOG_MAX_BYTES`); the rest env-only or not settings.
 
 ### 3.4 Cross-variable rules D16b must validate at PATCH time
 
@@ -283,6 +312,32 @@ grammars drift. Pin them with one shared fixture table (valid and invalid
 values) that both the pytest suite and the core shell tests run
 (LEARNINGS "Twin config files need twin pins").
 
+### 3.5 Forwarding form and the meaning of blank, per editable key
+
+Measured in `deploy/compose.yaml` at 6502152. "Blank is a value" means
+blank selects a behaviour that differs from "not set → default", so an
+env pin of that behaviour must stay expressible after the forwarding
+change (Q7).
+
+| Key | Compose today | Blank today means | Blank is a value? | Proposed |
+|-----|---------------|-------------------|-------------------|----------|
+| `VAULT_UPSTREAM_RATE` | `${VAR-}` | no cap (= default) | yes: "no cap" must stay pinnable against a Settings cap | Q7 |
+| `VAULT_UPSTREAM_POOL_HOSTS` | `${VAR-}` | no pool hosts (= default) | yes: "none" must stay pinnable | Q7 |
+| `VAULT_UPSTREAM_EDGE` | `${VAR-dist-fra1.discovery.steamserver.net}` | **legacy mode** (rollback switch, ADR-0021) | yes, and differs from the shipped default | Q7; shipped default edge on stays |
+| `VAULT_SCHEDULE_WINDOW` | `${VAR-03:00-07:00}` | **scheduler off** (code default for an absent key is off too) | yes, and differs from the shipped default | Q7; shipped default 03:00-07:00 stays |
+| `VAULT_UPSTREAM_RATE_WINDOW` | `${VAR-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}` | cap around the clock | deprecated (Q3) | `${VAR-}`; blank = not set = follow the download window |
+| `VAULT_UPSTREAM_MAX_CONNS`, `VAULT_TLS_CLIENT_MAX_CONNS`, `VAULT_TLS_MAX_CONNS` | `${VAR-}` | hook default | no | unchanged |
+| `VAULT_NAME`, `VAULT_SCHEDULE_INTERVAL_MINUTES`, `VAULT_SCHEDULE_CLIENT_STALE_DAYS`, `VAULT_WEBHOOK_EVENTS`, `VAULT_STEAM_LIBRARY_STEAMID` | `${VAR-}` | code default (events: all five) | no | unchanged |
+| `VAULT_RESOLVER` | `${VAR:-1.1.1.1}` | 1.1.1.1 | no (blank would render `resolver  ipv6=off`) | `${VAR-}`; the default moves into the `15-` hook (4.3) |
+| `VAULT_PREFILL_MAX_THREADS` (core, api, runner) | `${VAR:-8}` | 8 | no | `${VAR-}` |
+| `VAULT_PREFILL_TIMEOUT_SECONDS`, `VAULT_GC_GRACE_DAYS`, `VAULT_AUTO_GC`, `VAULT_SWEEP_INCLUDE_CACHED`, `VAULT_MANIFEST_KEEP`, `VAULT_AGENT_REPORT_KEEP`, `VAULT_CLIENT_STATS_KEEP`, `VAULT_EVENT_SWEEP_INTERVAL_MINUTES`, `VAULT_MISS_TRIGGER_COOLDOWN_MINUTES`, `VAULT_MISS_TRIGGER_MAX_PER_SWEEP`, `VAULT_BYPASS_WINDOW_DAYS`, `VAULT_MANIFEST_ORACLE_TIMEOUT`, `VAULT_WEBHOOK_TIMEOUT_SECONDS`, `VAULT_LOG_LEVEL` | `${VAR:-<default>}` | the default (`:-` turns blank into it) | no ("off" values are numeric, e.g. cooldown 0) | `${VAR-}`; defaults stay in `config.py` |
+| `VAULT_EVENT_LOG_ROTATE_BYTES` | not forwarded | hook default 64 MiB | no (0 = off is numeric) | forward as `${VAR-}` |
+
+Shipped defaults do not change: every default that compose supplies
+today (edge on, window 03:00-07:00, resolver 1.1.1.1, threads 8, ...) moves
+into the code or hook that reads the key, so an install without a `.env`
+behaves as before.
+
 ---
 
 ## 4. D16c sketch: core settings path
@@ -294,10 +349,10 @@ values) that both the pytest suite and the core shell tests run
 | `20-envsubst-on-templates.sh` (stock) | `VAULT_RESOLVER` | `nginx.conf` re-rendered from the template (both `resolver` lines) |
 | `25-vault-eventlog.sh` | none (no editable key) | must re-run after a re-render, because it edits the rendered `nginx.conf` |
 | `26-vault-tls-passthrough.sh` | `VAULT_TLS_CLIENT_MAX_CONNS`, `VAULT_TLS_MAX_CONNS` | rewrites the two `limit_conn` lines in the rendered `nginx.conf` (needs the fresh render, it dies on an already rewritten file) |
-| `27-vault-upstream-rate.sh` | `VAULT_UPSTREAM_RATE`, `VAULT_UPSTREAM_RATE_WINDOW` | `vault-upstream-rate.conf` |
+| `27-vault-upstream-rate.sh` | `VAULT_UPSTREAM_RATE`, the window (file key `VAULT_UPSTREAM_RATE_WINDOW` = the effective download window, Q3) | `vault-upstream-rate.conf` |
 | `28-vault-upstream-pool.sh` | `VAULT_UPSTREAM_EDGE`, `VAULT_UPSTREAM_POOL_HOSTS`, `VAULT_UPSTREAM_MAX_CONNS`, `VAULT_PREFILL_MAX_THREADS` (floor) | `vault-upstream-pool.conf`, `vault-upstream-cap.conf` |
 | `40-vault-preflight.sh` | `VAULT_RESOLVER` (§2, §2b), TLS caps, rate | the resolver checks must run again before a reload |
-| `45-vault-eventlog-rotate.sh` | `VAULT_EVENT_LOG_ROTATE_BYTES` only if Q5 = editable | the loop would have to re-read it |
+| `45-vault-eventlog-rotate.sh` | `VAULT_EVENT_LOG_ROTATE_BYTES` (Q5) | the loop has to re-read it on a generation change |
 | `21-`, `29-` | none | boot only |
 
 Since the order 20 → 25 → 26 → 27 → 28 → 40 is already the boot chain,
@@ -319,6 +374,18 @@ VAULT_PREFILL_MAX_THREADS=8
 - One `KEY=VALUE` per line. No quotes, no expansion, no comments other than
   the header. Only keys whose value is overridden in the DB appear. A
   missing key means "env, else default".
+- Exception, Q3: vault-api always writes `VAULT_UPSTREAM_RATE_WINDOW`
+  with the **effective download window** (env or Settings or default
+  `VAULT_SCHEDULE_WINDOW`; `off` when the scheduler is off, which 27
+  renders as "cap around the clock"). The key name stays so 27 needs no
+  new input. A core env pin of the deprecated `VAULT_UPSTREAM_RATE_WINDOW`
+  still wins over the file, with a startup warning.
+- D8 (later) adds several windows per day, each with a "throttle"
+  checkbox. Do not bake "exactly one window" into anything but the
+  grammar: the file value and the API field should be able to grow into a
+  list (for example `03:00-07:00,22:00-23:00!nothrottle`), and 27's window
+  map already renders arbitrary minute sets, so a list is a renderer
+  extension, not a redesign.
 - vault-core **never sources it** (`. file` would execute it). It reads it
   line by line, accepts only a fixed key allowlist, and runs every value
   through the hook's existing grammar. Unknown key or bad value: reject
@@ -331,15 +398,31 @@ VAULT_PREFILL_MAX_THREADS=8
   match.
 
 Precedence inside core: the env value wins over the file when the env
-key is set and not blank (D16 decision "env wins"). This only works after
-the `${VAR-}` forwarding change (1.4, point 2).
+key is "set" (Q1). What "set" means is per key (section 3.5): non-blank
+for keys where blank is not a value; for the four keys where blank is a
+value, as decided in Q7. This only works after the forwarding change
+(4.6, point 2).
 
 ### 4.3 Apply mechanism in vault-core
 
-- **Boot:** a new hook `15-vault-settings.envsh`. The stock nginx entrypoint
-  sources executable `*.envsh` files (verify this on the pinned 1.29.8 image
-  in D16c), so it can export the file's values before `20-envsubst` for
-  every key the env leaves unset. The existing hooks then run unchanged.
+- **Boot:** a new hook `15-vault-settings.envsh`. The plan relies on the
+  stock nginx entrypoint sourcing executable `*.envsh` files, so the hook
+  can export the file's values before `20-envsubst` for every key the env
+  leaves unset. **Hard D16c gate:** prove this on the pinned
+  `nginx:1.29.8-alpine3.23` image (a build-time check like the existing
+  ones in `core/Dockerfile`) before anything else is built on it; without
+  it the design needs a different boot path. The same hook supplies the
+  defaults compose stops supplying, above all `VAULT_RESOLVER=1.1.1.1`
+  when unset or blank: a blank value would render `resolver  ipv6=off`
+  (40 §2 dies on it, but the default must come from the hook, not from
+  compose).
+- **Prerequisite refactor:** `25-vault-eventlog.sh` hard-codes
+  `CONF=/etc/nginx/nginx.conf` (line 40), and `40-vault-preflight.sh`
+  hard-codes `/etc/nginx/nginx.conf` (line 43),
+  `/etc/nginx/vault-upstream-rate.conf` (line 89) and the pool/cap paths
+  (lines 114-115). Both get a config-directory parameter, and 40 is split
+  into value checks (resolver §2/§2b, wiring asserts; re-run on apply) and
+  boot-only checks (volume layout, ownership, writability; boot only).
 - **Runtime:** a watcher loop started from a hook, the same pattern as
   `45-vault-eventlog-rotate.sh` (forked before the exec, re-parented to
   the nginx master, not started for `nginx -t`/`-T`). Every few seconds it
@@ -347,13 +430,21 @@ the `${VAR-}` forwarding change (1.4, point 2).
   1. Parse and validate the file. On failure: status "rejected", nothing
      changes.
   2. Render 20 → 25 → 26 → 27 → 28 into a staging directory (26/27/28
-     already take an output path; envsubst via `NGINX_ENVSUBST_OUTPUT_DIR`).
-  3. Run the 40 checks that depend on values (resolver allowlist + probe,
-     wiring asserts) and `nginx -t -c <staging>/nginx.conf`.
-  4. Copy into `/etc/nginx` and run `nginx -s reload` (same master pid,
-     45's rotation is unaffected). Keep the previous files. If the reload
-     fails, restore them.
-  5. Write the status (4.4).
+     already take an output path, 25 after the refactor above; envsubst
+     via `NGINX_ENVSUBST_OUTPUT_DIR`).
+  3. Run 40's value checks against the staging directory.
+  4. **Gate: `nginx -t -c <staging>/nginx.conf`.** `nginx -s reload`
+     returns 0 even when the new config fails to load (the master only logs
+     the error and keeps the old workers), so the reload's exit code is
+     never the gate. Only a green `-t` on the staged files lets them be
+     copied into `/etc/nginx` (previous files kept as backup).
+  5. `nginx -s reload` (same master pid, 45's rotation unaffected), then a
+     **post-reload check**: the rendered config carries the generation
+     (e.g. `add_header X-Vault-Settings-Generation <n>` on `/health`), and
+     the watcher polls `http://127.0.0.1/health` until the header shows
+     `<n>`, with a timeout. Timeout: restore the backup, reload again,
+     status "rejected: reload failed" with the tail of the error log.
+  6. Only then status "applied" with `<n>` (4.4).
 - Read the settings file as the `nginx` user (busybox `su`, LEARNINGS
   VER-2/SEC-FIX-5). The volume is writable by uid 101, so a root read
   through a planted symlink would otherwise leak root-only files into
@@ -367,7 +458,7 @@ ADR-0013): named volumes `vault-<purpose>` declared under top-level
 project name. Only one container seeds a fresh named volume; every other
 consumer mounts it with `nocopy` (LEARNINGS TH-1-FIX copy-up race).
 
-Proposal (Weg A, Q6):
+Decided (Q6, Weg A, 2026-10-14):
 
 | | |
 |---|---|
@@ -377,12 +468,24 @@ Proposal (Weg A, Q6):
 | vault-runner, vault-proxy, vault-dns | not mounted. The runner gets its values from the DB, which it already mounts. |
 | Bind mode | none, named volume only. The file is derived from the DB, so it needs no backup and no `VAULT_*_PATH` variable. |
 
+Seeding order: vault-core has no depends_on on vault-api, so either may
+start first. Core mounts with `nocopy` and its image has nothing at the
+mount point, so a core-first start leaves the fresh volume empty; the
+api mount afterwards still finds it empty and should seed it (content and
+the `101:101` owner of the image directory). That is expected Docker
+behaviour, not yet measured here: **D16c must prove it live on a fresh
+volume in both start orders** (LEARNINGS TH-1-FIX/DEPLOY-FIX-3: every
+promised mode needs its own live run). If api-second does not seed, the
+api entrypoint must create the file itself, never a root hook in core.
+
 Status back-channel without making the volume writable for core:
 vault-core writes `settings-applied.json` (generation, ok/rejected,
 reason, and effective value plus source for each core key) to
-`/vault/logs/`. That directory is already root-owned in core and readable
-by vault-api through the existing `/vault` mount (same path as the event
-log), so no new mount is needed for it.
+`/vault/logs/`. Precedent: `29-vault-build-version.sh` already writes
+`/vault/logs/vault-core-version.json` (root:root 0644) and vault-api reads
+it for `/v1/about` (`about.py` `CORE_VERSION_FILE`). The directory is
+root-owned in core and readable by vault-api through the existing
+`/vault` mount, so no new mount is needed for it.
 
 ### 4.5 Compose change (`deploy/compose.yaml`)
 
@@ -416,10 +519,17 @@ The long syntax is used for core because it states `read_only` and
 ### 4.6 What the Antrag covers (dev and prod overlay)
 
 1. The new `vault-settings` volume and the two mounts above.
-2. Forwarding switch for the editable keys: `${VAR:-default}` →
-   `${VAR-}` in vault-core, vault-api and vault-runner, so "not set" can be
-   seen (section 1.4). Any value the operator wants pinned stays in `.env`
-   and then shows read-only.
+2. Forwarding change, per key as listed in section 3.5 — only the keys
+   pinned by a compose default today: `${VAR:-default}` → `${VAR-}` for
+   the keys where blank is not a value (`VAULT_RESOLVER`,
+   `VAULT_PREFILL_MAX_THREADS` and the api/runner `:-` keys), the
+   deprecated `VAULT_UPSTREAM_RATE_WINDOW` → `${VAR-}`, and the four
+   blank-is-a-value keys in the form Q7 decides. Keys already forwarded as
+   `${VAR-}` (TLS caps, upstream cap, rate, pool hosts, ...) need no change
+   unless Q7 says so. `VAULT_EVENT_LOG_ROTATE_BYTES` gets forwarded. The
+   shipped defaults (edge on, window 03:00-07:00, ...) stay, because they
+   move into code and hooks first. Any value the operator wants pinned
+   stays in `.env` and then shows as "set via env".
 3. The Antrag also checks that the existing overlays set none of the
    section 3.1/3.2 keys by accident, because a set key becomes a read-only
    pin in expert mode.
@@ -437,47 +547,61 @@ store is lost):
 
 ---
 
-## 5. Open points
+## 5. Decisions and open points
 
-### 5.1 Open questions for the user
+### 5.1 Decided by the user (2026-10-14)
 
-- **Q1 Precedence.** ADR-0009 says the DB override wins over env for the
-  9 existing keys. The expert-mode decision says env wins.
-  Weg A: env wins only for the new expert keys, and the 9 keep today's
-  behaviour. Weg B: env wins everywhere, so an existing DB override is
-  ignored once the env sets the same key (a behaviour change, ADR-0009
-  addendum). Recommendation: **Weg A**.
-- **Q2 Webhook URL.** The principle makes it env-only, but it is a DB
-  override today (redacted in GET).
-  Weg A: follow the principle. Remove the PATCH path, ignore an existing
-  DB value and log one warning at startup. Weg B: keep it as it is.
-  Recommendation: **Weg A**. Every webhook host needs a
-  `VAULT_EGRESS_ALLOW` entry anyway, so it is already env-bound in
-  practice.
-- **Q3 Rate window when unset.** Today compose fills it from
-  `VAULT_SCHEDULE_WINDOW`, and the core image default is "cap around the
-  clock". A schedule window changed in Settings never reaches core.
-  Weg A: an unset rate window follows the *effective* schedule window,
-  and vault-api writes it into the core file. Weg B: an unset rate window
-  means "around the clock". Recommendation: **Weg A**.
-- **Q4 Oracle on/off (`VAULT_MANIFEST_ORACLE`).** It is not named by the
-  principle. vault-proxy reads it at start to auto-allow
-  api.steamcmd.net, so a Settings toggle would not reach the proxy
-  without a restart. Recommendation: **env-only**.
-- **Q5 Event-log size knobs.** `VAULT_EVENT_LOG_ROTATE_BYTES` (core,
-  deliberately not forwarded since D15-ROT) and
-  `VAULT_EVENT_LOG_MAX_BYTES` (vault-api truncation, redundant since
-  D15-ROT). Retention would make them editable. Recommendation:
-  `ROTATE_BYTES` editable on the core path, `MAX_BYTES` deprecated (left
-  at the default, no UI).
-- **Q6 Where the file lives.** Weg A: the new `vault-settings` volume,
-  which needs the Antrag. Weg B: a 101-owned subdirectory of the existing
-  `/vault` volume, which needs no compose change. Against Weg B: `/vault`
-  is root-owned by design (SEC-FIX-5), it is a cache volume (wiped or
-  bind-mounted on NAS), and a 101-owned directory there brings back the
-  root-reads-in-a-101-directory class. Recommendation: **Weg A**.
+- **Q1 Precedence: env always wins**, for every key including the nine
+  existing ADR-0009 overrides. An env-pinned value is shown as plain text
+  with a "set via env" note, not as a disabled input. Reverses ADR-0009
+  decision 1: **ADR-0009 addendum is a D16b deliverable**, together with
+  one startup warning per DB override that an env value now shadows.
+- **Q2 Webhook URL: env-only** (Weg A). D16b removes the PATCH path; an
+  existing DB value is ignored with one startup warning; Settings shows
+  the URL masked, as text. Webhook events stay editable.
+- **Q3 One download window.** Inside: automatic downloads and full speed.
+  Outside: no automatic downloads and the rate cap applies.
+  `VAULT_SCHEDULE_WINDOW` is that window (env or Settings); its effective
+  value reaches core through the settings file (4.2).
+  `VAULT_UPSTREAM_RATE_WINDOW` is deprecated: if set in env, startup
+  warning, still honoured as an env pin. Later, D8 adds several windows
+  per day with a per-window "throttle" checkbox; D16 keeps the grammar and
+  file value extensible to a list (4.2) so it does not block that.
+- **Q4 Oracle on/off: env-only** (recommendation taken; default, the user
+  may object at table sign-off).
+- **Q5 `VAULT_EVENT_LOG_ROTATE_BYTES` editable on the core path,
+  `VAULT_EVENT_LOG_MAX_BYTES` deprecated** (recommendation taken; default,
+  the user may object at table sign-off).
+- **Q6 Settings file on a new `vault-settings` volume** (Weg A), section 4.4.
 
-### 5.2 Classified by analogy (no answer needed unless you disagree)
+### 5.2 Open question
+
+- **Q7 How an env pin of "off" stays expressible for the four keys where
+  blank is a value** (`VAULT_SCHEDULE_WINDOW` blank = scheduler off,
+  `VAULT_UPSTREAM_EDGE` blank = legacy rollback, `VAULT_UPSTREAM_RATE`
+  blank = no cap, `VAULT_UPSTREAM_POOL_HOSTS` blank = none; section 3.5).
+  With env-wins, "not set" (Settings decides) and "set to off" (env pins
+  off) must be two different spellings. Both ways keep the shipped
+  defaults (edge on, window 03:00-07:00) by moving them into code/hooks.
+  - Weg A: **`off` sentinel**. Compose forwards `${VAR-}`; blank or unset
+    = not set; an explicit `off` in the grammar pins off. Clean grammar,
+    but **breaking for existing `.env` files**: a blank line that means
+    "scheduler off" or "legacy edge" today silently becomes the default
+    (scheduler on, edge mode), and compose cannot tell blank from unset,
+    so nothing can warn. Needs a release note and a docs change for the
+    ADR-0021 rollback recipe.
+  - Weg B: **"not set" sentinel in compose**. Compose forwards
+    `${VAR-unset}` for these four keys: unset → the word `unset` = not set
+    (Settings/default decide); blank → off, exactly as today; a value →
+    pin. Backward compatible for every existing `.env` (blank keeps its
+    meaning, LEARNINGS SWEEP-1's per-key `-` form is kept), at the cost of
+    one reserved word the four grammars (api and hooks) must accept.
+    Without compose, an absent key also means "not set"; the core image
+    must then drop its blank `ENV` lines for these keys.
+  - Recommendation: **Weg B**, because it is the only way that cannot
+    silently flip a running install's scheduler or edge mode on upgrade.
+
+### 5.3 Classified by analogy (no answer needed unless you disagree)
 
 - Editable: `VAULT_BYPASS_WINDOW_DAYS` (sweep tuning),
   `VAULT_WEBHOOK_TIMEOUT_SECONDS` (like the oracle timeout).
@@ -486,11 +610,15 @@ store is lost):
   `VAULT_EVENT_LOG_ROTATE_INTERVAL` (internal timings, not operator
   tuning).
 
-### 5.3 Notes for later packages (not questions)
+### 5.4 Notes for later packages (not questions)
 
 - `VAULT_PREFILL_MODE` has a code default of `subprocess` and a compose
   default of `queue`. That is intended (ADR-0012), but the UI must show
   the effective value, not the code default.
-- `VAULT_SCHEDULE_WINDOW` has a compose default of `03:00-07:00` while the
-  code default is "off". D16b's "env set?" logic will report it as
-  env-set until the forwarding change (4.6, point 2) lands.
+- `VAULT_SCHEDULE_WINDOW`: the compose default `03:00-07:00` is the
+  shipped default, while the code default for an absent key is "off".
+  Before the forwarding change, D16b's "set via env" logic would report
+  the window as env-pinned on every compose install; the default has to
+  move into `config.py` first (3.5, Q7).
+- UPD-5 stays as decided: the update *check* runs regardless of the
+  window; only automatic downloads are bound to it.
