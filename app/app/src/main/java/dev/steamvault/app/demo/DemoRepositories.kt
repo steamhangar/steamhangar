@@ -10,6 +10,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.OwnedGamesRelayOut
@@ -69,6 +70,7 @@ class DemoJobsRepository(private val state: DemoState) : JobsRepository {
     override suspend fun cancel(id: Int): JobControlOut = state.controlJob(id, JobControlAction.CANCEL)
     override suspend fun pause(id: Int): JobControlOut = state.controlJob(id, JobControlAction.PAUSE)
     override suspend fun resume(id: Int): JobControlOut = state.controlJob(id, JobControlAction.RESUME)
+    override suspend fun moveJob(id: Int, position: Int): JobMoveOut = state.moveJob(id, position)
 }
 
 class DemoCacheRepository(private val state: DemoState) : CacheRepository {

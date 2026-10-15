@@ -6,6 +6,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.OwnedGame
@@ -26,6 +27,7 @@ import dev.steamvault.app.repo.UpdatesRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.LibrarySort
+import dev.steamvault.app.ui.library.logic.MetaFilter
 import dev.steamvault.app.ui.library.logic.STEAM_LIBRARY_SETTING_KEY
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -182,6 +184,7 @@ internal class FixedJobsRepository(private val jobs: List<JobSummary>) : JobsRep
     override suspend fun cancel(id: Int): JobControlOut = notUsed()
     override suspend fun pause(id: Int): JobControlOut = notUsed()
     override suspend fun resume(id: Int): JobControlOut = notUsed()
+    override suspend fun moveJob(id: Int, position: Int): JobMoveOut = notUsed()
 }
 
 internal class EmptyMappingRepository : MappingRepository {
@@ -227,4 +230,6 @@ internal class FixedLibraryPreferences(private val layout: LibraryLayout) : Libr
     override fun setLayout(layout: LibraryLayout) = Unit
     override fun getSort(): LibrarySort = LibrarySort.DEFAULT
     override fun setSort(sort: LibrarySort) = Unit
+    override fun getMetaFilter(): MetaFilter = MetaFilter.DEFAULT
+    override fun setMetaFilter(filter: MetaFilter) = Unit
 }

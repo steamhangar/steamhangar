@@ -194,6 +194,13 @@ test("partitionJobs orders the queue by queue_position, falling back to oldest i
   assert.deepEqual(legacy.queued.map((j) => j.id), [3, 4, 5], "an API without queue_position stays FIFO");
 });
 
+test("partitionJobs queue order is total over mixed positioned/unpositioned rows", () => {
+  const rows = [{ id: 2, status: "queued" }, mk(1, "queued", { queue_position: 5 }), mk(3, "queued", { queue_position: 0 })];
+  for (const perm of [rows, [...rows].reverse(), [rows[1], rows[2], rows[0]]]) {
+    assert.deepEqual(partitionJobs(perm).queued.map((j) => j.id), [3, 1, 2]);
+  }
+});
+
 test("planJobsUpdate: a queue_position change alone forces a full render", () => {
   const prev = mk(1, "queued", { queue_position: 0 });
   const curr = mk(1, "queued", { queue_position: 1 });

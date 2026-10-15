@@ -14,8 +14,10 @@ import dev.steamvault.app.net.model.GcRequest
 import dev.steamvault.app.net.model.HealthOut
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
+import dev.steamvault.app.net.model.MoveJobRequest
 import dev.steamvault.app.net.model.OwnedGamesRelayOut
 import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
@@ -222,6 +224,11 @@ class VaultApiClient(
     suspend fun pauseJob(id: Int): JobControlOut = postEmpty("/v1/jobs/$id/pause")
 
     suspend fun resumeJob(id: Int): JobControlOut = postEmpty("/v1/jobs/$id/resume")
+
+    /** WP D20: `POST /v1/jobs/{id}/move` -- reorder a queued job; [position]
+     * counts queued jobs only (0 = runs next). `404`/`409`/`422` per api/README.md. */
+    suspend fun moveJob(id: Int, position: Int): JobMoveOut =
+        post("/v1/jobs/$id/move", MoveJobRequest(position))
 
     // ---- cache ----------------------------------------------------------
 

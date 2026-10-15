@@ -75,10 +75,14 @@ import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.LibrarySort
 import dev.steamvault.app.ui.library.logic.LibrarySortKey
 import dev.steamvault.app.ui.library.logic.LibrarySortWording
+import dev.steamvault.app.ui.library.logic.MetaFilterResult
 import dev.steamvault.app.ui.library.logic.SortDirection
+import dev.steamvault.app.ui.library.logic.applyMetaFilter
 import dev.steamvault.app.ui.library.logic.availableSortKeys
 import dev.steamvault.app.ui.library.logic.lastPlayedAvailable
+import dev.steamvault.app.ui.library.logic.metaAvailable
 import dev.steamvault.app.ui.library.logic.normalizeSort
+import dev.steamvault.app.ui.library.logic.sortAfterKeyPick
 import dev.steamvault.app.ui.library.logic.ownedLastPlayedByAppid
 import dev.steamvault.app.ui.library.logic.sortGames
 import dev.steamvault.app.ui.library.logic.StatusActionType
@@ -208,19 +212,25 @@ fun LibraryScreen(
     // (relay_expose_last_played); a stored choice falls back to Name A-Z.
     val lastPlayed = remember(ownedState) { ownedLastPlayedByAppid(ownedState.ownedGamesOrNull) }
     val sortAvailable = lastPlayedAvailable(lastPlayed)
-    val activeSort = normalizeSort(controller.sort, sortAvailable)
-    val visible = remember(grouped, normalizedQuery, controller.filterKey, liveJobsByAppid, activeSort, lastPlayed) {
+    // WP D23: rating/year sort and the metadata filter panel exist only while
+    // some game carries stored metadata; a stored choice is a no-op otherwise.
+    val hasMeta = remember(controller.games) { metaAvailable(controller.games) }
+    val activeSort = normalizeSort(controller.sort, sortAvailable, hasMeta)
+    val metaResult = remember(grouped, controller.metaFilter, hasMeta) {
+        if (hasMeta) applyMetaFilter(grouped.rows, controller.metaFilter) else MetaFilterResult(grouped.rows, 0)
+    }
+    val visible = remember(metaResult, grouped, normalizedQuery, controller.filterKey, liveJobsByAppid, activeSort, lastPlayed) {
         sortGames(
-            visibleGames(grouped.rows, normalizedQuery, controller.filterKey, liveJobsByAppid, grouped.packagesByParent),
+            visibleGames(metaResult.games, normalizedQuery, controller.filterKey, liveJobsByAppid, grouped.packagesByParent),
             activeSort,
             liveJobsByAppid,
             grouped.packagesByParent,
             lastPlayed,
         )
     }
-    val counts = remember(grouped, normalizedQuery, liveJobsByAppid, controller.updatesSupported) {
+    val counts = remember(metaResult, grouped, normalizedQuery, liveJobsByAppid, controller.updatesSupported) {
         chipCounts(
-            grouped.rows,
+            metaResult.games,
             normalizedQuery,
             liveJobsByAppid,
             hiddenChipKeys(controller.updatesSupported),
@@ -296,9 +306,21 @@ fun LibraryScreen(
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             if (demoMode) DemoModeBanner()
-            LibraryToolbar(controller = controller, activeSort = activeSort, sortKeys = availableSortKeys(sortAvailable))
+            LibraryToolbar(
+                controller = controller,
+                activeSort = activeSort,
+                sortKeys = availableSortKeys(sortAvailable, hasMeta),
+            )
             CheckAndUpdateRow(controller = controller, scope = scope)
             FilterChipsRow(counts = counts, selectedKey = controller.filterKey, onSelect = { controller.filterKey = it })
+            if (hasMeta) {
+                LibraryMetaPanel(
+                    filter = controller.metaFilter,
+                    games = controller.games,
+                    unknownExcluded = metaResult.unknownExcluded,
+                    onChange = { controller.selectMetaFilter(it) },
+                )
+            }
             OwnedNoticeRow(
                 state = ownedState,
                 onOpenSettings = onOpenSettings,
@@ -430,7 +452,7 @@ private fun SortRow(active: LibrarySort, keys: List<LibrarySortKey>, onSelect: (
                         text = { Text(key.label) },
                         onClick = {
                             menuOpen = false
-                            onSelect(LibrarySort(key, active.dir))
+                            onSelect(sortAfterKeyPick(active, key))
                         },
                     )
                 }

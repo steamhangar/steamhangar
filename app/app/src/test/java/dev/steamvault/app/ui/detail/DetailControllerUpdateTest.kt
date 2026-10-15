@@ -7,6 +7,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.PrefillJobRef
@@ -39,6 +40,7 @@ private class PrefillJobs(private val gate: CompletableDeferred<Unit>? = null, p
     override suspend fun cancel(id: Int): JobControlOut = unused()
     override suspend fun pause(id: Int): JobControlOut = unused()
     override suspend fun resume(id: Int): JobControlOut = unused()
+    override suspend fun moveJob(id: Int, position: Int): JobMoveOut = unused()
 }
 
 private object NoGames : GamesRepository {

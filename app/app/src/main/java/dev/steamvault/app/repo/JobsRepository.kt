@@ -3,6 +3,7 @@ package dev.steamvault.app.repo
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.PrefillJobRef
 
@@ -24,6 +25,8 @@ interface JobsRepository {
     suspend fun cancel(id: Int): JobControlOut
     suspend fun pause(id: Int): JobControlOut
     suspend fun resume(id: Int): JobControlOut
+    /** `POST /v1/jobs/{id}/move` (WP D20) -- see [VaultApiClient.moveJob]'s kdoc. */
+    suspend fun moveJob(id: Int, position: Int): JobMoveOut
 }
 
 class VaultJobsRepository(private val client: VaultApiClient) : JobsRepository {
@@ -35,4 +38,5 @@ class VaultJobsRepository(private val client: VaultApiClient) : JobsRepository {
     override suspend fun cancel(id: Int): JobControlOut = client.cancelJob(id)
     override suspend fun pause(id: Int): JobControlOut = client.pauseJob(id)
     override suspend fun resume(id: Int): JobControlOut = client.resumeJob(id)
+    override suspend fun moveJob(id: Int, position: Int): JobMoveOut = client.moveJob(id, position)
 }

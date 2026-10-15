@@ -14,6 +14,7 @@ import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.ui.downloads.logic.BULK_TOAST_MS
 import dev.steamvault.app.ui.downloads.logic.BulkKind
+import dev.steamvault.app.ui.downloads.logic.QueueMove
 import dev.steamvault.app.ui.downloads.logic.TOAST_MS
 import dev.steamvault.app.ui.downloads.logic.ExcerptCache
 import dev.steamvault.app.ui.downloads.logic.ExcerptFetchState
@@ -26,6 +27,10 @@ import dev.steamvault.app.ui.downloads.logic.describeUpdateStartError
 import dev.steamvault.app.ui.downloads.logic.describeVerifyStartError
 import dev.steamvault.app.ui.downloads.logic.summarizeVerifyStart
 import dev.steamvault.app.ui.downloads.logic.summarizeUpdateStart
+import dev.steamvault.app.ui.downloads.logic.withQueuePositions
+import dev.steamvault.app.ui.downloads.logic.moveTargetIndex
+import dev.steamvault.app.ui.downloads.logic.partitionJobs
+import dev.steamvault.app.ui.downloads.logic.reorderIds
 import dev.steamvault.app.ui.downloads.logic.runBulkPause
 import dev.steamvault.app.ui.downloads.logic.runBulkResume
 import kotlinx.coroutines.CoroutineScope
@@ -159,6 +164,10 @@ class DownloadsController(
     }
 
     suspend fun refreshJobsOnce() {
+        // WP D20: while a move request is in flight the optimistic order must
+        // not be overwritten by a poll that may predate the move; the
+        // request's own refresh follows it.
+        if (moveInFlight) return
         try {
             jobs = jobsRepository.list()
             loadError = null
@@ -357,6 +366,43 @@ class DownloadsController(
                 bulkBusy = null
             }
             refreshJobsOnce() // out-of-cadence refresh, mirrors store.refreshNow()
+        }
+    }
+
+    // ---- queue reorder (WP D20, web downloads.js moveQueued) ---------------
+
+    /** `true` while a `POST /v1/jobs/{id}/move` is in flight: one move at a
+     * time, every move button is disabled meanwhile. */
+    var moveInFlight by mutableStateOf(false)
+        private set
+
+    /**
+     * Move the queued job [jobId] one place [move]. The list is reordered at
+     * once (optimistic, [withQueuePositions]) and the request sent; on a
+     * failure the previous list is restored and the reason toasted. The
+     * server's answer is authoritative, so a jobs refresh follows either way.
+     * Non-queued jobs, edge moves and a move already in flight are ignored.
+     */
+    fun moveQueued(scope: CoroutineScope, jobId: Int, move: QueueMove) {
+        if (moveInFlight) return
+        val ids = partitionJobs(jobs).queued.map { it.id }
+        val from = ids.indexOf(jobId)
+        if (from == -1) return
+        val to = moveTargetIndex(move, from, ids.size) ?: return
+        val next = reorderIds(ids, jobId, to)
+        val before = jobs
+        jobs = withQueuePositions(before, next)
+        moveInFlight = true
+        scope.launch {
+            try {
+                jobsRepository.moveJob(jobId, next.indexOf(jobId))
+            } catch (e: VaultApiError) {
+                jobs = before
+                showToast(e.message ?: strings.actionFailedFallback())
+            } finally {
+                moveInFlight = false
+            }
+            refreshJobsOnce() // the server is authoritative, mirrors store.refreshNow()
         }
     }
 

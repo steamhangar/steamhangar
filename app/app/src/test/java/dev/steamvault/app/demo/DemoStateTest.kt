@@ -340,3 +340,24 @@ class DemoStateTest {
         )
     }
 }
+
+/** WP D20: `POST /v1/jobs/{id}/move` in demo mode refuses what the real API refuses. */
+class DemoMoveJobTest {
+    @Test
+    fun `unknown job is 404, a running job is 409, a negative position is 422`() {
+        val state = DemoState.fresh()
+        val unknown = assertThrows(VaultApiError.NotFound::class.java) { state.moveJob(1, 0) }
+        assertEquals(404, unknown.status)
+        val running = state.listJobSummaries(50).first { it.status == "running" }
+        val notQueued = assertThrows(VaultApiError.Validation::class.java) { state.moveJob(running.id, 0) }
+        assertEquals(409, notQueued.status)
+        val negative = assertThrows(VaultApiError.Validation::class.java) { state.moveJob(running.id, -1) }
+        assertEquals(422, negative.status)
+    }
+
+    @Test
+    fun `only a queued job carries queue_position`() {
+        val state = DemoState.fresh()
+        assertTrue(state.listJobSummaries(50).all { it.queue_position == null })
+    }
+}

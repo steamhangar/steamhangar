@@ -7,6 +7,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.PrefillJobRef
@@ -50,6 +51,7 @@ private class VerifyJobs(
     override suspend fun cancel(id: Int): JobControlOut = notHere()
     override suspend fun pause(id: Int): JobControlOut = notHere()
     override suspend fun resume(id: Int): JobControlOut = notHere()
+    override suspend fun moveJob(id: Int, position: Int): JobMoveOut = notHere()
 }
 
 private object VerifyNoGames : GamesRepository {

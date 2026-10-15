@@ -19,6 +19,7 @@ import dev.steamvault.app.ui.library.logic.CheckAndUpdateAction
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateResult
 import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.LibrarySort
+import dev.steamvault.app.ui.library.logic.MetaFilter
 import dev.steamvault.app.ui.library.logic.MEMBERS_CHANGED_NOTICE
 import dev.steamvault.app.ui.library.logic.MultiPlan
 import dev.steamvault.app.ui.library.logic.StatusActionType
@@ -32,6 +33,7 @@ import dev.steamvault.app.ui.library.logic.formatBytesGB
 import dev.steamvault.app.ui.library.logic.groupGames
 import dev.steamvault.app.ui.library.logic.isMembersMismatch
 import dev.steamvault.app.ui.library.logic.isPlanBlocked
+import dev.steamvault.app.ui.library.logic.normalizeMetaFilter
 import dev.steamvault.app.ui.library.logic.planMemberIds
 import dev.steamvault.app.ui.library.logic.runUpdateCheck
 import dev.steamvault.app.ui.library.logic.updateCheckNoticeFor
@@ -81,6 +83,11 @@ class LibraryController(
     /** WP LIB-SORT: the STORED choice (raw); the screen normalizes it against
      * the live "last played" flag before use. */
     var sort by mutableStateOf(libraryPreferences.getSort())
+        private set
+
+    /** WP D23: the stored metadata filter; the screen applies it only while
+     * some game carries metadata ([dev.steamvault.app.ui.library.logic.metaAvailable]). */
+    var metaFilter by mutableStateOf(libraryPreferences.getMetaFilter())
         private set
 
     var selecting by mutableStateOf(false)
@@ -253,6 +260,14 @@ class LibraryController(
     fun selectSort(newSort: LibrarySort) {
         sort = newSort
         libraryPreferences.setSort(newSort)
+    }
+
+    // ---- metadata filter (WP D23) -------------------------------------------
+
+    fun selectMetaFilter(newFilter: MetaFilter) {
+        val safe = normalizeMetaFilter(newFilter)
+        metaFilter = safe
+        libraryPreferences.setMetaFilter(safe)
     }
 
     // ---- selection ----------------------------------------------------

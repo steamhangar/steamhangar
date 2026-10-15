@@ -2,6 +2,7 @@ package dev.steamvault.app.storage
 
 import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.LibrarySort
+import dev.steamvault.app.ui.library.logic.MetaFilter
 
 /**
  * In-memory [LibraryPreferences] fake for JVM tests (WP 4b.4), same shape
@@ -22,5 +23,12 @@ class InMemoryLibraryPreferences(initial: LibraryLayout = LibraryLayout.DEFAULT)
     override fun getSort(): LibrarySort = sort
     override fun setSort(sort: LibrarySort) {
         this.sort = sort
+    }
+
+    private var metaFilter: MetaFilter = MetaFilter.DEFAULT
+
+    override fun getMetaFilter(): MetaFilter = metaFilter
+    override fun setMetaFilter(filter: MetaFilter) {
+        this.metaFilter = filter
     }
 }

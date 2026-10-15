@@ -4,10 +4,14 @@ import android.content.Context
 import android.content.SharedPreferences
 import dev.steamvault.app.ui.library.logic.LibraryLayout
 import dev.steamvault.app.ui.library.logic.LibrarySort
+import dev.steamvault.app.ui.library.logic.MetaFilter
+import dev.steamvault.app.ui.library.logic.metaFilterFromPrefValue
+import dev.steamvault.app.ui.library.logic.toPrefValue
 
 private const val PREFS_FILE = "library_prefs"
 private const val KEY_LAYOUT = "layout"
 private const val KEY_SORT = "sort"
+private const val KEY_META_FILTER = "meta_filter"
 
 /**
  * Where the per-device Library layout choice is persisted (WP 4b.4 brief:
@@ -33,6 +37,12 @@ interface LibraryPreferences {
      * played" flag, so a stored "Last played" survives the flag turning off. */
     fun getSort(): LibrarySort
     fun setSort(sort: LibrarySort)
+
+    /** WP D23: the per-device metadata filter (categories, genres, rating,
+     * years, include-unknown), persisted like the sort. Stored raw-but-
+     * normalized; the screen ignores it while no game carries metadata. */
+    fun getMetaFilter(): MetaFilter
+    fun setMetaFilter(filter: MetaFilter)
 }
 
 class SharedPreferencesLibraryPreferences(context: Context) : LibraryPreferences {
@@ -49,5 +59,11 @@ class SharedPreferencesLibraryPreferences(context: Context) : LibraryPreferences
 
     override fun setSort(sort: LibrarySort) {
         prefs.edit().putString(KEY_SORT, sort.prefValue).apply()
+    }
+
+    override fun getMetaFilter(): MetaFilter = metaFilterFromPrefValue(prefs.getString(KEY_META_FILTER, null))
+
+    override fun setMetaFilter(filter: MetaFilter) {
+        prefs.edit().putString(KEY_META_FILTER, filter.toPrefValue()).apply()
     }
 }
