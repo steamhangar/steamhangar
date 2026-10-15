@@ -787,6 +787,18 @@ injection for the D15b/D15-NAMES endpoint tests (bucket-boundary edge
 cases); a permanent conftest hook that emits failed test names as CI
 annotations; per-app backoff for repeated forced completion runs.
 
+**rc18 status (2026-10-15 night run):** UPD-FIX-1 (scope point 3 dropped,
+see MAP-DRIFT-1), D16a-1 audit, D16b-1 settings API, D16c core settings
+path, D16-WEB (sections, expert mode, env pins, vault-core apply line),
+DIST-1a/1b (vault serves APK + agent) — all reviewed PASS and merged.
+**rc18 follow-ups:** MAP-DRIFT-1 (above); D16 Android UI (rc19); D16c
+nits: test for the watcher retry loop (transient failure retried on the
+next tick), log a transient apply failure once per streak instead of
+every poll, log a line when VS_WATCH_FUNCTIONS_ONLY is set; conftest-wide
+refusal of oracle.http_fetch with an opt-out for the oracle unit tests;
+webhook boot line witness test; demo core_apply generation bumps only
+when core keys change.
+
 **Before v0.1.0 (ongoing):** release notes, user device checks,
 verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
 saves id), D7 measurement on `:443` (TLS cap TODO in WORKPACKAGES),
