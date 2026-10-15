@@ -41,10 +41,7 @@ data class RiskyItem(val key: String, val label: String, val from: String, val t
  * never "Steam" (docs/handover/rc19-run-plan.md); `web/tests/
  * settings-android-twin.test.js` pins this file's literals against the web
  * module.
- *
- * NOT done yet (see the handover): Compose rendering, the expert switch
- * storage, the risky-confirm dialog and the save wiring (`?confirm_risky`).
- */
+ * */
 object SettingsLayout {
     val SECTIONS: List<SettingsSectionDef> = listOf(
         SettingsSectionDef("vault", "Vault & connection", true),
@@ -142,6 +139,21 @@ object SettingsLayout {
     fun fieldMeta(key: String): FieldMeta = FIELDS[key] ?: FieldMeta(key, "")
 
     fun riskText(key: String): String = RISK[key] ?: RISK_FALLBACK
+
+    /** Field placeholders (twin of `placeholder` in web FIELD_META). */
+    private val PLACEHOLDERS: Map<String, String> = mapOf(
+        "vault_name" to "e.g. vault-01",
+        "schedule_window" to "03:00-07:00, or off to disable",
+        "upstream_rate" to "800k, 2m or off",
+    )
+
+    /** Keys that accept the `off` keyword. */
+    private val OFF_KEYS: Set<String> = setOf("schedule_window", "upstream_rate")
+
+    fun placeholder(key: String): String? = PLACEHOLDERS[key]
+
+    /** One line under a field that accepts `off`, or null. */
+    fun offHint(key: String): String? = if (key in OFF_KEYS) "Type off to turn this off." else null
 
     /** Twin of `placeEntries`: normal rows by key, expert rows by group, unknown keys never lost. */
     fun placeEntries(entries: List<SettingInfoOut>): PlacedSettings {

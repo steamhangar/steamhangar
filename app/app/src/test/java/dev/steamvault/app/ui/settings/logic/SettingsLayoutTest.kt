@@ -129,4 +129,12 @@ class SettingsLayoutTest {
         assertEquals("a; b", SettingsLayout.detailMessage("""[{"msg":"a"},{"msg":"b"}]"""))
         assertNull(SettingsLayout.detailMessage(null))
     }
+
+    @Test
+    fun `placeholders and the off hint belong to the keys that take off`() {
+        assertEquals("800k, 2m or off", SettingsLayout.placeholder("upstream_rate"))
+        assertNull(SettingsLayout.placeholder("manifest_keep"))
+        assertEquals("Type off to turn this off.", SettingsLayout.offHint("schedule_window"))
+        assertNull(SettingsLayout.offHint("vault_name"))
+    }
 }

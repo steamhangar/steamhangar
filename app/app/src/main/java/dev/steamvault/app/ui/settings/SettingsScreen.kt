@@ -47,6 +47,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -69,6 +70,7 @@ import dev.steamvault.app.storage.ProfileKind
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.settings.logic.SettingDraft
 import dev.steamvault.app.ui.settings.logic.SettingsApplies
+import dev.steamvault.app.ui.settings.logic.SettingsLayout
 import dev.steamvault.app.ui.settings.logic.SettingsSource
 import dev.steamvault.app.ui.settings.logic.SteamLibraryStatus
 import dev.steamvault.app.ui.settings.logic.cachedSweepGcRiskWarning
@@ -120,6 +122,7 @@ fun SettingsScreen(
         // past the top; a screenshot taken anywhere but the very top of this
         // screen would then carry no indicator at all.
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            RiskyConfirmDialog(controller, scope)
             if (demoMode) DemoModeBanner()
             Column(
                 modifier = Modifier
@@ -177,7 +180,8 @@ private fun SettingsSaveBar(controller: SettingsController, scope: kotlinx.corou
             Text(
                 when {
                     controller.saving -> stringResource(R.string.settings_saving)
-                    error != null -> stringResource(R.string.settings_save_error, error)
+                    error != null -> error
+                    controller.riskyCancelled -> stringResource(R.string.settings_risky_cancelled)
                     else -> stringResource(R.string.settings_unsaved_changes)
                 },
                 style = MaterialTheme.typography.bodySmall,
@@ -262,90 +266,84 @@ private fun ClientsSection(onOpenClientsClick: () -> Unit) {
 @Composable
 private fun SettingsForm(controller: SettingsController) {
     val response = controller.settingsResponse ?: return
-    val entries = response.settings.associateBy { it.key }
+    val placed = SettingsLayout.placeEntries(response.settings)
+    val entriesByKey = response.settings.associateBy { it.key }
 
     if (response.readonly) {
         Text(stringResource(R.string.settings_readonly_banner), style = MaterialTheme.typography.bodySmall)
     }
 
-    Text(stringResource(R.string.settings_section_vault), style = MaterialTheme.typography.titleMedium)
-    entries["vault_name"]?.let {
-        SettingTextField(
-            entry = it,
-            draft = controller.drafts["vault_name"],
-            label = stringResource(R.string.settings_vault_name_label),
-            placeholder = stringResource(R.string.settings_vault_name_placeholder),
-            readonly = response.readonly,
-            onValueChange = { v -> controller.setDraft("vault_name", SettingDraft.Text(v)) },
-            onReset = { controller.resetDraft("vault_name") },
+    // D16c: vault-core's own report on the last settings change, as one line.
+    val applyLine = controller.coreApplyLine
+    if (applyLine != null) {
+        Text(
+            applyLine.text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (applyLine.warn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
 
-    Text(stringResource(R.string.settings_section_schedule), style = MaterialTheme.typography.titleMedium)
-    entries["schedule_window"]?.let {
-        SettingTextField(
-            entry = it,
-            draft = controller.drafts["schedule_window"],
-            label = stringResource(R.string.settings_schedule_window_label),
-            placeholder = stringResource(R.string.settings_schedule_window_placeholder),
-            hint = stringResource(R.string.settings_schedule_window_hint),
-            readonly = response.readonly,
-            onValueChange = { v -> controller.setDraft("schedule_window", SettingDraft.Text(v)) },
-            onReset = { controller.resetDraft("schedule_window") },
-        )
+    // D16: the normal sections, then the expert block (a switch, and the
+    // expert groups only while it is on). Titles, labels and notes come from
+    // SettingsLayout (twin of the web's settings-layout.js).
+    val blocks = ArrayList<SettingsBlock>()
+    for (section in SettingsLayout.SECTIONS) {
+        if (!section.form || section.id == "expert") continue
+        val rows = placed.sections[section.id].orEmpty()
+        if (rows.isNotEmpty()) blocks.add(SettingsBlock(section.id, section.title, rows))
     }
-    entries["schedule_interval_minutes"]?.let {
-        SettingTextField(
-            entry = it,
-            draft = controller.drafts["schedule_interval_minutes"],
-            label = stringResource(R.string.settings_schedule_interval_label),
-            readonly = response.readonly,
-            onValueChange = { v -> controller.setDraft("schedule_interval_minutes", SettingDraft.Text(v)) },
-            onReset = { controller.resetDraft("schedule_interval_minutes") },
-        )
-    }
-    entries["schedule_client_stale_days"]?.let {
-        SettingTextField(
-            entry = it,
-            draft = controller.drafts["schedule_client_stale_days"],
-            label = stringResource(R.string.settings_schedule_stale_days_label),
-            readonly = response.readonly,
-            onValueChange = { v -> controller.setDraft("schedule_client_stale_days", SettingDraft.Text(v)) },
-            onReset = { controller.resetDraft("schedule_client_stale_days") },
-        )
-    }
-    entries["auto_gc"]?.let { entry ->
-        AutoGcField(entry, controller.drafts["auto_gc"], response.readonly) { v ->
-            controller.setDraft("auto_gc", SettingDraft.Text(v))
+    blocks.add(SettingsBlock("expert", "Expert settings", emptyList()))
+    if (controller.expertOn) {
+        for (group in SettingsLayout.EXPERT_GROUPS) {
+            val rows = placed.expert[group.id].orEmpty()
+            if (rows.isNotEmpty()) blocks.add(SettingsBlock("expert_" + group.id, group.title, rows))
         }
     }
-    entries["sweep_include_cached"]?.let { entry ->
-        SweepIncludeCachedField(
-            entry = entry,
-            draft = controller.drafts["sweep_include_cached"],
-            readonly = response.readonly,
-            onSelect = { v -> controller.setDraft("sweep_include_cached", SettingDraft.Text(v)) },
-            onReset = { controller.resetDraft("sweep_include_cached") },
-        )
-    }
-    SweepStatusBlock(controller.schedule)
 
-    Text(stringResource(R.string.settings_section_webhook), style = MaterialTheme.typography.titleMedium)
-    entries["webhook_url"]?.let {
-        SettingTextField(
-            entry = it,
-            draft = controller.drafts["webhook_url"],
-            label = stringResource(R.string.settings_webhook_url_label),
-            placeholder = stringResource(R.string.settings_webhook_url_placeholder),
-            hint = stringResource(R.string.settings_webhook_url_hint),
-            readonly = response.readonly,
-            onValueChange = { v -> controller.setDraft("webhook_url", SettingDraft.Text(v)) },
-            onReset = { controller.resetDraft("webhook_url") },
-        )
-    }
-    entries["webhook_events"]?.let { entry ->
-        WebhookEventsField(entry, controller.drafts["webhook_events"], response.readonly) { v ->
-            controller.setDraft("webhook_events", SettingDraft.EventsList(v))
+    for (block in blocks) {
+        val open = controller.isSectionOpen(block.id)
+        SettingsSectionHeader(block.title, open) { controller.setSectionOpen(block.id, !open) }
+        if (!open) continue
+        if (block.id == "expert") {
+            ExpertSwitchRow(controller.expertOn) { on -> controller.setExpert(on) }
+        }
+        for (entry in block.rows) {
+            if (SettingsLayout.isPinned(entry)) {
+                PinnedSettingRow(entry)
+            } else if (entry.key == "auto_gc") {
+                AutoGcField(entry, controller.drafts["auto_gc"], response.readonly) { v ->
+                    controller.setDraft("auto_gc", SettingDraft.Text(v))
+                }
+            } else if (entry.key == "sweep_include_cached") {
+                SweepIncludeCachedField(
+                    entry = entry,
+                    draft = controller.drafts["sweep_include_cached"],
+                    readonly = response.readonly,
+                    onSelect = { v -> controller.setDraft("sweep_include_cached", SettingDraft.Text(v)) },
+                    onReset = { controller.resetDraft("sweep_include_cached") },
+                )
+            } else if (entry.key == "webhook_events") {
+                WebhookEventsField(entry, controller.drafts["webhook_events"], response.readonly) { v ->
+                    controller.setDraft("webhook_events", SettingDraft.EventsList(v))
+                }
+            } else {
+                val key = entry.key
+                SettingTextField(
+                    entry = entry,
+                    draft = controller.drafts[key],
+                    label = SettingsLayout.fieldMeta(key).label,
+                    placeholder = SettingsLayout.placeholder(key),
+                    hint = SettingsLayout.offHint(key),
+                    readonly = response.readonly,
+                    onValueChange = { v -> controller.setDraft(key, SettingDraft.Text(v)) },
+                    onReset = { controller.resetDraft(key) },
+                )
+            }
+            SettingHelpRow(entry)
+        }
+        if (block.id == "window" && entriesByKey.containsKey("schedule_window")) {
+            SweepStatusBlock(controller.schedule)
         }
     }
 
@@ -369,6 +367,130 @@ private fun captionFor(entry: SettingInfoOut): String {
         SettingsApplies.UNSPECIFIED -> stringResource(R.string.settings_applies_unspecified)
     }
     return stringResource(R.string.settings_caption, source, applies)
+}
+
+/** One collapsible block of the form: a section or an expert group. */
+private data class SettingsBlock(val id: String, val title: String, val rows: List<SettingInfoOut>)
+
+@Composable
+private fun SettingsSectionHeader(title: String, open: Boolean, onToggle: () -> Unit) {
+    val description = if (open) {
+        stringResource(R.string.settings_section_open, title)
+    } else {
+        stringResource(R.string.settings_section_closed, title)
+    }
+    TextButton(
+        onClick = onToggle,
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(if (open) "-" else "+", style = MaterialTheme.typography.titleMedium)
+        }
+    }
+}
+
+@Composable
+private fun ExpertSwitchRow(on: Boolean, onChange: (Boolean) -> Unit) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Switch(checked = on, onCheckedChange = onChange)
+            Text(stringResource(R.string.settings_expert_switch))
+        }
+        Text(
+            stringResource(R.string.settings_expert_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Env always wins, and the webhook URL is env-only: such a row is plain
+ * text (no input), with the env note and, when a stored value is ignored
+ * or overridden, the shadow note.
+ */
+@Composable
+private fun PinnedSettingRow(entry: SettingInfoOut) {
+    val label = SettingsLayout.fieldMeta(entry.key).label
+    val shadow = SettingsLayout.shadowNote(entry)
+    Column {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(SettingsLayout.displayValue(entry), style = MaterialTheme.typography.bodyLarge)
+        Text(
+            SettingsLayout.envNote(entry),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (shadow != null) {
+            Text(shadow, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** The (i) button of a row and, while open, its explanation paragraphs. */
+@Composable
+private fun SettingHelpRow(entry: SettingInfoOut) {
+    val paragraphs = SettingsLayout.fieldHelp(entry)
+    if (paragraphs.isEmpty()) return
+    var open by rememberSaveable(entry.key) { mutableStateOf(false) }
+    val label = SettingsLayout.fieldMeta(entry.key).label
+    val description = if (open) {
+        stringResource(R.string.settings_help_hide, label)
+    } else {
+        stringResource(R.string.settings_help_show, label)
+    }
+    Column {
+        IconButton(
+            onClick = { open = !open },
+            modifier = Modifier.semantics { contentDescription = description },
+        ) {
+            AboutInfoGlyph(
+                color = if (open) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (open) {
+            for (paragraph in paragraphs) {
+                Text(paragraph, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** The risky-confirm dialog: what changes, and what can break. Yes sends `?confirm_risky=true`. */
+@Composable
+private fun RiskyConfirmDialog(controller: SettingsController, scope: kotlinx.coroutines.CoroutineScope) {
+    val items = controller.riskyPending ?: return
+    AlertDialog(
+        onDismissRequest = { controller.cancelRisky() },
+        title = { Text(stringResource(R.string.settings_risky_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.settings_risky_intro))
+                for (item in items) {
+                    Text(
+                        stringResource(R.string.settings_risky_line, item.label, item.from, item.to),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(item.risk, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { scope.launch { controller.confirmRisky() } }) {
+                Text(stringResource(R.string.settings_risky_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { controller.cancelRisky() }) {
+                Text(stringResource(R.string.settings_risky_cancel))
+            }
+        },
+    )
 }
 
 @Composable

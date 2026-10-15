@@ -41,3 +41,10 @@ test("D16 neutral naming holds in the Android twin too", () => {
   assert.match(m, /Upstream \(WAN\) rate cap/);
   assert.doesNotMatch(m, /steam|valve/i);
 });
+
+test("placeholders match the web FIELD_META placeholders", () => {
+  for (const [key, m] of Object.entries(FIELD_META)) {
+    if (!m.placeholder) continue;
+    assert.ok(kt.includes(`${q(key)} to ${q(m.placeholder)}`), `placeholder ${key}`);
+  }
+});
