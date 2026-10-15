@@ -841,18 +841,14 @@ failed jobs Subnautica/Timberborn (measure live on the next run).
   whether the technical "appid" on job cards stays (it is a deliberate
   detail line).
 
-- LIB-SORT (Jan, 2026-10-15): the Library has filters but no sort control.
-  Wanted: alphabetical, last played, ascending/descending, newly bought.
-  Data check: A-Z/Z-A, size, state (cached/installed), "last cached or
-  updated" (job history) and an appid-descending proxy for "newest" need no
-  new data. "Last played" and playtime are OFF by default by an explicit
-  privacy decision (config.py `relay_expose_last_played`, shared-household
-  vault); sorting by them needs that opt-in, so offer the sort option only
-  when the setting is on. Steam's owned-games data has no purchase date, so
-  "newly bought" can only be approximated (first time the vault saw the app,
-  if stored; otherwise appid). Persist the choice per browser like the view
-  switch. Also seen in the same screenshot: "APP 1716750" and "APP 3990420"
-  cards without a name (ID-AUDIT).
+- LIB-SORT (Jan, 2026-10-15; decided): the Library has filters but no sort
+  control. Options: A-Z / Z-A, size, state (cached/installed), last cached
+  or updated (job history), ascending/descending, and "last played" ONLY
+  while the privacy setting `relay_expose_last_played` is on (off by
+  default, shared-household decision in config.py). "Newly bought" is
+  dropped (Steam has no purchase date). Persist the choice per browser like
+  the view switch. Same screenshot: "APP 1716750" / "APP 3990420" cards
+  without a name (ID-AUDIT).
 
 - NOT-OWNED-1 (Jan, 2026-10-15, SteamVR 250820 "failed"): job log ends with
   "Prefilled 0 apps ... SteamPrefill did not consider this app - is it owned
@@ -867,7 +863,14 @@ failed jobs Subnautica/Timberborn (measure live on the next run).
   Failed, no Retry, and excluded from scheduler/miss-trigger/"update all"
   until the library sync says it is owned; keeps working for the next such
   app without a code change. Recommend B, and A as the seed. Verify first
-  that 250820 is really absent from the owned list (437 owned, library sync).
+  that 250820 is really absent from the owned list (Library header says
+  437 owned vs 442 in All, so 5 cards are installed-but-not-owned). Open
+  question from Jan: it was installed via Steam on Demon, so why "not
+  owned"? Candidates: Demon's Steam account differs from the vault's Steam
+  ID; SteamPrefill only considers app types it can prefill (tools such as
+  SteamVR may not be listed in its owned set); no free license on the vault
+  account. Check which account Demon uses and the owned-list entry before
+  choosing A or B.
 
 **UI polish (Jan, 2026-10-15; later, not scheduled yet):** (1) Clients page
 and the "Add a device" sheet look busy: the same "Anyone who sees this can
