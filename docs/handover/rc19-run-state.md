@@ -47,3 +47,11 @@ Running (3 coders): Android D19 (wp/android-d19), D16 Android UI + neutral namin
 Then: reviews, merge into wp/rc19-w3-goldens, CI/goldens cycle, main; Android GRAPH-LIVE (optional after web passes); wave 4 close (diag read-only + inbox note, docs LEARNINGS/ADR/PLAN ticks, dev.sh verify once, tag only if everything passed, deploy Antrag with schema 29-33 + env VAULT_LIBRARY_META/DEPOT_PREVIEW/STORE_DETAILS + host + rollback via update.sh dump, handover).
 Open for Jan: cover refresher anonymous vs relay-key names (A/B/C) - not yet asked.
 Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM (00:10Z), trig_01M7qtqVfFQZVXax5UJCfuSj (03:00Z). Temp branch wp/ci-debug can be deleted by Jan.
+
+## Wave 3 part 3 (2026-10-16 morning)
+
+main = e7ef2a6, CI fully green, `dev.sh verify` 613/0: + D16 Android UI and neutral naming (About pin fixed), GRAPH-LIVE api+web (reviewed, re-review PASS), Android D19, test fix for an inode-reuse flake in test_graph_live (CI filesystem reuses the inode number after unlink).
+Temp branches wp/ci-debug and wp/ci-debug2 can be deleted by Jan.
+Running: Android GRAPH-LIVE (coder), then wave 4 close.
+Open for Jan: cover refresher anonymous vs relay-key names (A/B/C) - not yet asked.
+Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM, trig_01M7qtqVfFQZVXax5UJCfuSj.
