@@ -99,6 +99,26 @@ run takes unless Jan says otherwise:
   the last passed package, write the handover with the open list, and do
   NOT tag.
 
+## Autonomy, questions and restarts (Jan, 2026-10-15)
+
+- **Unattended first:** decide with the defaults in this plan; ask only when
+  blocked by something not covered here.
+- **Questions only as AskUserQuestion with options** (Jan gets a phone push).
+  Always a recommended option first. If no answer comes, continue with other
+  packages that do not depend on it; do not idle.
+- **The session limit cannot be read.** When it is hit the session just
+  stops. Therefore: keep `docs/handover/rc19-run-state.md` (gitignored not
+  needed, commit it on the wp branch merge) updated after EVERY passed
+  package: done list, running package, next package, open questions,
+  branch names. At run start and after every wave, schedule a fallback
+  restart with `send_later` (delay about 5 h, message: "continue the rc19
+  run from rc19-run-state.md"). Before scheduling a new one, delete the
+  previous trigger (`delete_trigger`) so only one is pending. When the run
+  finishes (tag + Antrag + handover done), delete the pending trigger.
+- **On a restart message:** read the state file, check `git status` and
+  running worktrees first, resume the open package (re-run its reviewer if
+  unsure), never redo passed packages.
+
 ## Waves (max 3 agents at once, resume instead of respawn)
 
 1. **Fixes and trust:** NOT-OWNED-1, METRIC-AUDIT, TILE-INTERNET, GRAPH-ZOOM.
