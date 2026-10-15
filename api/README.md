@@ -680,10 +680,10 @@ route, see "Auth").
 | DELETE | `/v1/steam/key`                    | Clear the configured key. `204` whether or not one was set |
 | GET    | `/v1/steam/owned-games`            | `?steamid=<SteamID64>` — relay `GetOwnedGames`. `200` with `{configured: true, game_count, games: [{appid, name, playtime_forever, img_icon_url, rtime_last_played}]}` (`rtime_last_played` added WP 4h.1: Unix-epoch seconds or `null` — see "rtime_last_played — absence is not zero" below); `409` if no key is configured; `422` for an unusable `steamid`; `502` for any upstream failure. **`playtime_forever`/`rtime_last_played` are each independently OMITTED from the JSON body entirely** (not sent as `0`/`null`) unless `VAULT_RELAY_EXPOSE_PLAYTIME`/`VAULT_RELAY_EXPOSE_LAST_PLAYED` are set — WP 4h.0, ADR-0010, see "The privacy gate" below. See "Steam Web API relay" below |
 | GET    | `/v1/steam/player-summaries`       | `?steamid=<SteamID64>` — relay `GetPlayerSummaries`. `200` with `{configured: true, players: [{steamid, personaname, avatar, avatarmedium, avatarfull, personastate}]}`; same `409`/`422`/`502` shape as `owned-games`. See "Steam Web API relay" below |
-| GET    | `/v1/settings`                     | Settings-API work package (ADR-0009): `{readonly, settings: [{key, effective, source, fallback, applies, env_only}, ...]}` — every overridable key plus informational env-only ones. `source` is `db`/`env`/`default`; `applies` is `immediately`/`next_sweep`/`restart-required`. See "Persisted settings" below |
+| GET    | `/v1/settings`                     | Settings-API work package (ADR-0009): `{readonly, server_version, settings: [{key, effective, source, fallback, applies, env_only, env_var, value, editable, risky, expert, grammar, target, env_visible, shadowed}, ...]}` — every overridable key plus informational env-only ones. `source` is `db`/`env`/`default`; `applies` is `immediately`/`next_sweep`/`restart-required`. See "Persisted settings" below |
 | GET    | `/v1/about`                        | WP VER-2: `{components: [{name, version, commit, status, checked_at, detail}, ...]}` for `vault-api` (also the web UI), `vault-core`, `vault-runner`, `steamprefill`, `vault-proxy`, `vault-dns`, in that order. `status` is `ok`/`unreachable`/`not_in_use`/`unknown`; `version`/`commit` are a string, `"invalid"` or `null`. Cached 60 s; never slow, never `5xx` for a missing component. See "Component versions" below |
 | GET    | `/v1/dist`                         | WP DIST-1a: index of the release downloads: `{version, release, local_base, release_base, apk_alias_url, artifacts: [{id, name, local, size, sha256, local_url, release_url, url, source}, ...]}`. The files themselves are public under `/dist/<name>` (see "Auth" and "Release downloads") |
-| PATCH  | `/v1/settings`                     | Partial update: `null` clears an override (revert to env/default), any other value sets it, validated with the SAME grammar `config.py` applies at startup. `200` with the same shape `GET` returns. `422` for an invalid value, an unknown key, or a recognised-but-environment-only key (distinct detail); `403` if `VAULT_SETTINGS_READONLY` is set. See "Persisted settings" below |
+| PATCH  | `/v1/settings`                     | Partial update: `null` clears an override (revert to env/default), any other value sets it, validated with the SAME grammar `config.py` applies at startup. `200` with the same shape `GET` returns. `422` for an invalid value, an unknown key, a recognised-but-environment-only key (distinct detail) or a broken cross-variable rule; `409` for a key set via env (D16b); `428` for a risky key without `?confirm_risky=true`; `403` if `VAULT_SETTINGS_READONLY` is set. See "Persisted settings" below |
 
 ## Prefill orchestration (WP 1.4, job outcome honesty WP 3.3)
 
@@ -7441,7 +7441,72 @@ named set of settings that used to be env-only. `GET /v1/schedule`,
 same `Settings` object they always were — this endpoint is what can now
 change a subset of it at runtime.
 
-### Precedence: DB override > env value > built-in default
+### D16b (rc18): env always wins, the expert keys, `off`
+
+This supersedes the precedence subsection below (ADR-0009 addendum
+2026-10-14). The rest of this section still describes the mechanics.
+
+- **Precedence: env value > Settings value > built-in default.** A key whose
+  `VAULT_*` variable is set to a non-blank value in vault-api's environment is
+  "set via env": GET reports `source: "env"`, `editable: false` (and
+  `shadowed: true` when a stored value exists), and PATCH answers `409`.
+  vault-api logs one startup warning per stored value an env pin shadows.
+  Blank or unset means "not set": compose forwards every editable key as
+  `${VAR-}`, and the defaults live in `config.py` (window `03:00-07:00`).
+- **29 editable keys** (audit `docs/handover/d16-settings-audit.md` 3.1/3.2),
+  in `settings_store.OVERRIDABLE_SPECS`. Every GET row now also carries
+  `env_var`, `value` (the stored Settings value or `null`), `editable`,
+  `risky`, `expert`, `grammar` (a hint for the UI), `target` (`api` | `core` |
+  `api+core`), `env_visible` (`false` for core-only keys: vault-api cannot
+  see vault-core's environment; D16c reports it) and `shadowed`. `source`
+  keeps `db` for "set in Settings". `applies` gained `next_job` (read per
+  prefill or GC job, by vault-api's worker and by vault-runner) and `core`
+  (applied by vault-core through the core settings file, D16c).
+- **Risky keys** (D16a table sign-off 2026-10-14: `prefill_max_threads`,
+  `upstream_max_conns`, `tls_client_max_conns`, `tls_max_conns`,
+  `upstream_edge`, `upstream_pool_hosts`, `resolver`): a PATCH that sets or
+  clears one needs `?confirm_risky=true`, else `428` with
+  `detail.risky_keys`. `log_level` is not risky but sits in the expert area.
+- **`expert`** per row places the key in the expert area of the Settings
+  page (network/load, debug and housekeeping keys); `false` = the normal
+  sections (download window, auto-GC, vault name, library SteamID, bypass
+  window, webhook events and timeout, event-log rotation size).
+- **Cross-variable rules** (`422`): `upstream_max_conns >= prefill_max_threads`
+  and `tls_client_max_conns <= tls_max_conns`, judged on the values the
+  batch leaves behind, only when the batch touches those keys.
+- **`off`** spells "no window" for `schedule_window`. A blank PATCH value
+  for `schedule_window` also means `off` (amendment of audit 3.6, review
+  decision B2: the rc17 Android app and web UI send `""` to disable); `null`
+  resets it to the default. Elsewhere `off` means "no cap" for `upstream_rate`, "legacy per-name
+  pool" for `upstream_edge` and "none" for `upstream_pool_hosts`. Core keys
+  are validated by `vault_api/core_settings.py`, Python twins of the hook
+  grammars pinned by `core/tests/fixtures/settings-grammar.tsv`.
+- **`webhook_url` is env-only** (Q2): no PATCH path, shown masked to scheme
+  and host (`scheme://[***@]host/***`; any `@` after the scheme counts as
+  userinfo); a stored value is ignored with one startup warning.
+- **`VAULT_UPSTREAM_RATE_WINDOW` is deprecated** (Q3): vault-core's rate cap
+  follows the download window. `settings_store.core_values` computes the
+  values for vault-core, with `VAULT_UPSTREAM_RATE_WINDOW` = the effective
+  download window (`off` when it is off). The deprecation warning for an env
+  value of it is vault-core's (D16c); compose does not forward it to
+  vault-api, so vault-api does not warn.
+- **Core keys need the core settings file** (review decision B3).
+  `VAULT_CORE_SETTINGS_FILE` (env-only path) makes vault-api write the core
+  values atomically at boot and after each PATCH; D16c wires the volume and
+  vault-core's reader. While it is blank (the shipped state until D16c) the
+  vault-core keys (`target: "core"`) are read-only: GET reports
+  `editable: false`, `reason: "core_file_disabled"`, `source: "default"`, and
+  PATCH answers `409`. The cross-variable rules then judge vault-api's own
+  env and the hook defaults, never stored core values. Every row carries
+  `reason` (`env` | `env_only` | `core_file_disabled` | `null`).
+- **Log level:** applies immediately in vault-api; vault-runner applies the
+  effective level at the start of each job (with prefill threads and
+  timeout, which it also resolves per job).
+- **Window default visible at boot:** when neither the env nor Settings sets
+  a download window, vault-api logs one WARNING that 03:00-07:00 is the rc18
+  default and that `off` disables it.
+
+### Precedence before D16b: DB override > env value > built-in default
 
 `settings_store.effective_settings(conn, base)` is the ONE accessor that
 resolves this, called at CALL TIME (never cached beyond one request/tick):

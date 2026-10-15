@@ -13,12 +13,20 @@
 #   VAULT_UPSTREAM_RATE         aggregate bytes per second, nginx size syntax:
 #                               digits with an optional k/K (x1024) or m/M
 #                               (x1048576) suffix, e.g. 800k = 819200 B/s.
-#                               Empty/unset = no cap.
+#                               Empty/unset or exactly `off` = no cap.
 #   VAULT_UPSTREAM_RATE_WINDOW  HH:MM-HH:MM, the SAME grammar as
 #                               VAULT_SCHEDULE_WINDOW (api/vault_api/
 #                               schedule_window.py): full speed INSIDE the
-#                               window, capped outside it. Empty/unset = the
-#                               cap applies around the clock.
+#                               window, capped outside it. Empty/unset or
+#                               `off` (after the whitespace strip) = the cap
+#                               applies around the clock.
+#
+# D16c: inside the container 15-vault-settings.envsh always hands this hook a
+# value -- the env pin, else vault-api's settings file (the window there IS
+# the effective download window, Q3), else the defaults `off` and
+# 03:00-07:00 -- so "empty" only happens when the hook is run by hand. The
+# grammar is pinned against vault-api's Python twin by
+# core/tests/fixtures/settings-grammar.tsv (core/tests/test-settings-grammar.sh).
 #
 # Why a generated include and not envsubst: nginx has no arithmetic, and the
 # aggregate must be divided by the live number of in-flight requests. The
@@ -85,14 +93,14 @@ WINDOW_RAW="${VAULT_UPSTREAM_RATE_WINDOW:-}"
 # --- VAULT_UPSTREAM_RATE ------------------------------------------------------
 # Strict: no whitespace, no leading zero (busybox/dash arithmetic would read
 # "0800" as octal), 1-9 digits, optional k/K/m/M. "0" is refused rather than
-# taken as "unlimited": leave the variable empty for that.
+# taken as "unlimited": write `off` for that (D16c, Q7).
 parse_rate() {
     _v=$1
     case "$_v" in
         *[!0123456789kKmM]*|"")
             die "VAULT_UPSTREAM_RATE='$_v' is not a byte rate. Use digits with an optional
-  k (x1024) or m (x1048576) suffix, e.g. 800k = 819200 bytes/s aggregate; leave
-  it empty for no cap. Refusing to start: nginx would treat an unparseable
+  k (x1024) or m (x1048576) suffix, e.g. 800k = 819200 bytes/s aggregate, or
+  'off' for no cap. Refusing to start: nginx would treat an unparseable
   rate as UNLIMITED." ;;
     esac
     _unit=""
@@ -105,8 +113,8 @@ parse_rate() {
             die "VAULT_UPSTREAM_RATE='$_v': the unit suffix must come last and only once
   (e.g. 800k or 2m). Refusing to start." ;;
         0*)
-            die "VAULT_UPSTREAM_RATE='$_v' starts with 0. Leave the variable empty for no
-  cap; a leading zero is refused instead of guessed at. Refusing to start." ;;
+            die "VAULT_UPSTREAM_RATE='$_v' starts with 0. Write 'off' for no cap; a
+  leading zero is refused instead of guessed at. Refusing to start." ;;
     esac
     if [ "${#_num}" -gt 9 ]; then
         die "VAULT_UPSTREAM_RATE='$_v' has more than 9 digits. Use a k or m suffix.
@@ -279,10 +287,13 @@ emit_share_map() {
 
 # --- render ------------------------------------------------------------------
 TOTAL=0
-[ -z "$RATE_RAW" ] || parse_rate "$RATE_RAW"
+if [ -n "$RATE_RAW" ] && [ "$RATE_RAW" != off ]; then
+    parse_rate "$RATE_RAW"
+fi
 
 W_START=""; W_END=""; WINDOW_NORM=""
-if [ -n "$(strip "$WINDOW_RAW")" ]; then
+WINDOW_STRIPPED=$(strip "$WINDOW_RAW")
+if [ -n "$WINDOW_STRIPPED" ] && [ "$WINDOW_STRIPPED" != off ]; then
     parse_window "$WINDOW_RAW"
     WINDOW_NORM="$(fmt_hhmm "$W_START")-$(fmt_hhmm "$W_END")"
 fi
@@ -359,9 +370,9 @@ trap - EXIT INT TERM
 
 if [ "$TOTAL" -eq 0 ]; then
     if [ -n "$WINDOW_NORM" ]; then
-        log "VAULT_UPSTREAM_RATE unset/empty -- no upstream cap; VAULT_UPSTREAM_RATE_WINDOW=$WINDOW_NORM is valid but has nothing to lift"
+        log "VAULT_UPSTREAM_RATE off/unset -- no upstream cap; VAULT_UPSTREAM_RATE_WINDOW=$WINDOW_NORM is valid but has nothing to lift"
     else
-        log "VAULT_UPSTREAM_RATE unset/empty -- no upstream cap (proxy_limit_rate 0)"
+        log "VAULT_UPSTREAM_RATE off/unset -- no upstream cap (proxy_limit_rate 0)"
     fi
 elif [ -z "$WINDOW_NORM" ]; then
     log "upstream cap ON: $TOTAL bytes/s aggregate, around the clock, per-request share = total / $DIVISOR_VAR (buckets 1..$BUCKETS, floor $((TOTAL / BUCKETS)))"

@@ -51,6 +51,7 @@ from vault_api import (
     reported_identity,
     runner_mark,
     runner_presence,
+    settings_store,
     steamprefill_version,
 )
 from vault_api.config import Settings
@@ -160,12 +161,12 @@ class PrefillRunner:
         conn = get_connection(self._settings.db_path)
         logger.info(
             "prefill_runner %s starting (poll every %.1fs, heartbeat every "
-            "%.1fs, SteamPrefill path %r, --max-threads %d).",
+            "%.1fs, SteamPrefill path %r; --max-threads, the prefill timeout "
+            "and the log level are resolved per job, env > Settings > default).",
             self._runner_id,
             self._settings.runner_poll_seconds,
             self._settings.runner_heartbeat_seconds,
             self._settings.steamprefill_path,
-            self._settings.prefill_max_threads,
         )
         logger.info(
             "prefill_runner %s: build %s (commit %s), SteamPrefill %s.",
@@ -256,15 +257,34 @@ class PrefillRunner:
                 )
                 return None
 
+        # D16b: prefill threads and timeout are read per job from the
+        # effective settings (env > Settings > default), so a Settings change
+        # applies to the next job without a runner restart.
+        try:
+            job_settings = settings_store.effective_settings(conn, self._settings)
+        except Exception:
+            logger.exception(
+                "prefill_runner %s: could not resolve stored settings for job "
+                "%s; using the env/default configuration.",
+                self._runner_id, job_id,
+            )
+            job_settings = self._settings
+        apply_log_level(job_settings.log_level)
+        logger.info(
+            "prefill_runner %s: job %s runs with --max-threads %d, timeout %ds.",
+            self._runner_id, job_id, job_settings.prefill_max_threads,
+            job_settings.prefill_timeout_seconds,
+        )
+
         result = prefill.run_prefill(
             appid=appid,
             steamprefill_path=self._settings.steamprefill_path,
-            timeout_seconds=self._settings.prefill_timeout_seconds,
+            timeout_seconds=job_settings.prefill_timeout_seconds,
             should_abort=self._stop.is_set,
             use_force=use_force,
             stop_request=stop_request_with_heartbeat,
             abort_reason=ABORT_REASON_RUNNER,
-            max_threads=self._settings.prefill_max_threads,
+            max_threads=job_settings.prefill_max_threads,
         )
 
         applied = self._record_result(conn, job_id, prefill_queue.encode_result(result))
@@ -339,6 +359,15 @@ class PrefillRunner:
             self._runner_id, job_id, RESULT_WRITE_ATTEMPTS,
         )
         return None
+
+
+def apply_log_level(name: str) -> None:
+    """D16b review S2: the runner applies the effective log level (env >
+    Settings > default) per job, so a Settings change reaches it without a
+    restart. An unknown name leaves the level unchanged."""
+    level = logging.getLevelNamesMapping().get(name.strip().upper())
+    if level is not None and logging.getLogger().level != level:
+        logging.getLogger().setLevel(level)
 
 
 def main() -> None:

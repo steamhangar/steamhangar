@@ -658,13 +658,16 @@ event_log_val=$(printf '%s\n' "$core_block" | grep 'VAULT_EVENT_LOG:' | head -1 
 grace_val=$(printf '%s\n' "$api_block" | grep 'VAULT_GC_GRACE_DAYS:' | head -1 | sed -e 's/^[[:space:]]*VAULT_GC_GRACE_DAYS:[[:space:]]*//' -e 's/"//g')
 autogc_val=$(printf '%s\n' "$api_block" | grep 'VAULT_AUTO_GC:' | head -1 | sed -e 's/^[[:space:]]*VAULT_AUTO_GC:[[:space:]]*//' -e 's/"//g')
 assert_eq "" "$event_log_val"    "vault-core: VAULT_EVENT_LOG renders empty (feature off) by default"
-assert_eq "14" "$grace_val"      "vault-api: VAULT_GC_GRACE_DAYS default (14) passes through"
+# D16b (rc18): every key editable from Settings is forwarded as ${VAR-} and
+# renders EMPTY here (= not set); config.py owns the defaults (14, execute,
+# true, 03:00-07:00), pinned in api/tests/test_p1_compose_env_defaults.py.
+assert_eq "" "$grace_val"      "vault-api: VAULT_GC_GRACE_DAYS renders empty (D16b: not set, default 14 in config.py)"
 # WP SWEEP-1 (ADR-0014, operator decision 2026-08-22): VAULT_AUTO_GC's own
 # default flipped from "off" to "execute", PAIRED with
 # VAULT_SWEEP_INCLUDE_CACHED below also flipping to "true" -- see that ADR
 # for the pairing argument and docs/PROJECT_PLAN.md/README.md for the
 # upgrade-behaviour-change this represents on an existing deployment.
-assert_eq "execute" "$autogc_val" "vault-api: VAULT_AUTO_GC default (execute, WP SWEEP-1) passes through"
+assert_eq "" "$autogc_val" "vault-api: VAULT_AUTO_GC renders empty (D16b: not set, default execute in config.py)"
 
 # WP SWEEP-1 (ADR-0014). Newly forwarded here as of this package -- see
 # deploy/compose.yaml's own comment on this key for why (the
@@ -676,7 +679,7 @@ assert_eq "execute" "$autogc_val" "vault-api: VAULT_AUTO_GC default (execute, WP
 sweep_include_cached_key_count=$(printf '%s\n' "$api_block" | grep -c 'VAULT_SWEEP_INCLUDE_CACHED:')
 assert_eq "1" "$sweep_include_cached_key_count" "vault-api: VAULT_SWEEP_INCLUDE_CACHED key is present exactly once in the rendered block (precondition; WP SWEEP-1 forwarding)"
 sweep_include_cached_val=$(printf '%s\n' "$api_block" | grep 'VAULT_SWEEP_INCLUDE_CACHED:' | head -1 | sed -e 's/^[[:space:]]*VAULT_SWEEP_INCLUDE_CACHED:[[:space:]]*//' -e 's/"//g')
-assert_eq "true" "$sweep_include_cached_val" "vault-api: VAULT_SWEEP_INCLUDE_CACHED default (true, WP SWEEP-1) passes through"
+assert_eq "" "$sweep_include_cached_val" "vault-api: VAULT_SWEEP_INCLUDE_CACHED renders empty (D16b: not set, default true in config.py)"
 
 # WP SWEEP-1 follow-up (ADR-0014 "Shipping an enabled nightly schedule", S3
 # review finding + operator decision): VAULT_SCHEDULE_WINDOW and TZ are what
@@ -686,14 +689,19 @@ assert_eq "true" "$sweep_include_cached_val" "vault-api: VAULT_SWEEP_INCLUDE_CAC
 schedule_window_key_count=$(printf '%s\n' "$api_block" | grep -c 'VAULT_SCHEDULE_WINDOW:')
 assert_eq "1" "$schedule_window_key_count" "vault-api: VAULT_SCHEDULE_WINDOW key is present exactly once in the rendered block (precondition; WP SWEEP-1 follow-up forwarding)"
 schedule_window_val=$(printf '%s\n' "$api_block" | grep 'VAULT_SCHEDULE_WINDOW:' | head -1 | sed -e 's/^[[:space:]]*VAULT_SCHEDULE_WINDOW:[[:space:]]*//' -e 's/"//g')
-assert_eq "03:00-07:00" "$schedule_window_val" "vault-api: VAULT_SCHEDULE_WINDOW default (03:00-07:00, WP SWEEP-1 follow-up) passes through"
+assert_eq "" "$schedule_window_val" "vault-api: VAULT_SCHEDULE_WINDOW renders empty (D16b: not set, default 03:00-07:00 in config.py)"
 
 tz_key_count=$(printf '%s\n' "$api_block" | grep -c '^[[:space:]]*TZ:')
 assert_eq "1" "$tz_key_count" "vault-api: TZ key is present exactly once in the rendered block (precondition; WP SWEEP-1 follow-up forwarding)"
 tz_val=$(printf '%s\n' "$api_block" | grep '^[[:space:]]*TZ:' | head -1 | sed -e 's/^[[:space:]]*TZ:[[:space:]]*//' -e 's/"//g')
 assert_eq "UTC" "$tz_val" "vault-api: TZ default (UTC, WP SWEEP-1 follow-up) passes through -- deliberately NOT a guessed populated zone, see deploy/compose.yaml's own comment on this key"
 
-step "3e-bis. An EXPLICITLY BLANK VAULT_SCHEDULE_WINDOW really disables the scheduler (review round 2, blocker R2-B1)"
+step "3e-bis. An EXPLICITLY BLANK VAULT_SCHEDULE_WINDOW passes through blank (review round 2, blocker R2-B1; D16b: blank = not set, off disables)"
+say 'D16b (rc18): blank now means "not set" (Settings, else 03:00-07:00 from'
+say 'config.py) and the scheduler is disabled with VAULT_SCHEDULE_WINDOW=off.'
+say 'The history below is why the line has no colon; the assertion still'
+say 'checks that a blank value reaches vault-api as blank, not as a default.'
+
 say 'Measured directly during review round 2: with the colon form'
 say '(${VAULT_SCHEDULE_WINDOW:-03:00-07:00}), a .env line reading'
 say 'VAULT_SCHEDULE_WINDOW= (present, explicitly blank) still rendered the'
@@ -715,7 +723,7 @@ api_block_blank_window=$(printf '%s\n' "$rendered_blank_window" | awk '/^  vault
 blank_window_key_count=$(printf '%s\n' "$api_block_blank_window" | grep -c 'VAULT_SCHEDULE_WINDOW:')
 assert_eq "1" "$blank_window_key_count" "vault-api: VAULT_SCHEDULE_WINDOW key is present exactly once in the rendered block against the blank-window .env (precondition)"
 blank_window_val=$(printf '%s\n' "$api_block_blank_window" | grep 'VAULT_SCHEDULE_WINDOW:' | head -1 | sed -e 's/^[[:space:]]*VAULT_SCHEDULE_WINDOW:[[:space:]]*//' -e 's/"//g')
-assert_eq "" "$blank_window_val" "vault-api: an explicitly blank VAULT_SCHEDULE_WINDOW= renders EMPTY, not the 03:00-07:00 default -- the scheduler-disable path documented in deploy/README.md and deploy/.env.example actually works"
+assert_eq "" "$blank_window_val" "vault-api: an explicitly blank VAULT_SCHEDULE_WINDOW= renders EMPTY (D16b: not set; the disable spelling is off)"
 
 step "3e-ter. vault-core's VAULT_UPSTREAM_RATE_WINDOW nested default resolves per case (WP TH-1b, ADR-0015)"
 say 'The line is ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}:'
@@ -783,16 +791,16 @@ assert_eq "" "$manifest_oracle_val"   "vault-api: VAULT_MANIFEST_ORACLE renders 
 # longest match from the back), which matters because the oracle URL's own
 # value contains colons ("https://...") and must not be mis-split by them.
 for pair in \
-    "VAULT_MANIFEST_KEEP:3" \
-    "VAULT_EVENT_SWEEP_INTERVAL_MINUTES:5" \
-    "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES:60" \
-    "VAULT_MISS_TRIGGER_MAX_PER_SWEEP:5" \
-    "VAULT_BYPASS_WINDOW_DAYS:3" \
-    "VAULT_CLIENT_STATS_KEEP:48" \
+    "VAULT_MANIFEST_KEEP:" \
+    "VAULT_EVENT_SWEEP_INTERVAL_MINUTES:" \
+    "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES:" \
+    "VAULT_MISS_TRIGGER_MAX_PER_SWEEP:" \
+    "VAULT_BYPASS_WINDOW_DAYS:" \
+    "VAULT_CLIENT_STATS_KEEP:" \
     "VAULT_EVENT_LOG_MAX_BYTES:67108864" \
     "VAULT_MANIFEST_ORACLE_URL:https://api.steamcmd.net/v1/info" \
-    "VAULT_MANIFEST_ORACLE_TIMEOUT:10.0" \
-    "VAULT_WEBHOOK_TIMEOUT_SECONDS:5.0" \
+    "VAULT_MANIFEST_ORACLE_TIMEOUT:" \
+    "VAULT_WEBHOOK_TIMEOUT_SECONDS:" \
     "VAULT_SETTINGS_READONLY:false"
 do
     key=${pair%%:*}
@@ -822,7 +830,7 @@ assert_eq "yes" "$runner_block_nonempty" "vault-runner: service block is present
 
 for pair in \
     "VAULT_PREFILL_MODE:queue" \
-    "VAULT_PREFILL_MAX_THREADS:8" \
+    "VAULT_PREFILL_MAX_THREADS:" \
     "VAULT_RUNNER_LEASE_TIMEOUT_SECONDS:30.0"
 do
     key=${pair%%:*}
@@ -834,10 +842,10 @@ do
 done
 
 for pair in \
-    "VAULT_LOG_LEVEL:INFO" \
+    "VAULT_LOG_LEVEL:" \
     "VAULT_PREFILL_MODE:queue" \
-    "VAULT_PREFILL_TIMEOUT_SECONDS:14400" \
-    "VAULT_PREFILL_MAX_THREADS:8" \
+    "VAULT_PREFILL_TIMEOUT_SECONDS:" \
+    "VAULT_PREFILL_MAX_THREADS:" \
     "VAULT_RUNNER_HEARTBEAT_SECONDS:5.0" \
     "VAULT_RUNNER_POLL_SECONDS:1.0"
 do

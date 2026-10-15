@@ -69,7 +69,9 @@ for f in "$dockerfile" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/45-vault-eventlog-rotate.sh" \
          "$core_dir/tests/test-eventlog-rotate-hook.sh" \
-         "$core_dir/docker/check-config-drift.sh"; do
+         "$core_dir/docker/check-config-drift.sh" \
+         "$core_dir/tests/fixtures/settings-grammar.tsv" \
+         "$core_dir/tests/test-settings-grammar.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
 done
 
@@ -126,6 +128,11 @@ bash "$core_dir/tests/test-build-version-hook.sh"
 # rotation itself runs live below ("event-log rotation").
 echo "--- core/tests/test-eventlog-rotate-hook.sh ---"
 bash "$core_dir/tests/test-eventlog-rotate-hook.sh"
+
+# --- 0b-grammar. the shared D16 grammar table against the hooks (D16c) -----
+# The Python twins run the same rows in api/tests/test_d16b_core_grammar.py.
+echo "--- core/tests/test-settings-grammar.sh ---"
+bash "$core_dir/tests/test-settings-grammar.sh"
 
 # --- 0b-own. the root-only directory predicate, docker-free (WP SEC-FIX-5) -----
 # 21-, 25- and 29- decide with one predicate whether root may act on names in

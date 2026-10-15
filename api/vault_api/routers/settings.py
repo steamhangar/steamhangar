@@ -1,4 +1,22 @@
-"""Persisted settings endpoints (ADR-0009): ``GET``/``PATCH /v1/settings``.
+"""Persisted settings endpoints (ADR-0009 + D16b addendum): ``GET``/``PATCH /v1/settings``.
+
+**D16b (rc18).** Env always wins (Q1): a key whose ``VAULT_*`` variable is
+set in vault-api's env is reported ``source: "env"``, ``editable: false``, and
+PATCH answers ``409`` for it. Every row now also carries ``env_var``,
+``value`` (the stored Settings value or ``null``), ``editable``, ``risky``,
+``expert`` (expert area of the page), ``grammar``, ``target`` (``api`` | ``core`` | ``api+core``), ``env_visible``
+(false for core-only keys, whose env vault-api cannot see), ``shadowed`` and
+``reason`` (why a row is not editable: ``env`` | ``env_only`` |
+``core_file_disabled``, else null). Core-only keys are read-only and PATCH
+answers ``409`` for them while ``VAULT_CORE_SETTINGS_FILE`` is blank
+(review decision B3).
+A PATCH that sets or clears a risky key needs the query parameter
+``confirm_risky=true``, else ``428`` with ``detail.risky_keys``. A blank
+``schedule_window`` value means ``off`` (backward compatible with the rc17
+frontends); ``null`` resets it to the default.
+``webhook_url`` is env-only (Q2) and shown masked. ``source`` keeps the wire
+value ``"db"`` for "set in Settings" (the shipped web UI and Android app
+read it).
 
 ``GET`` reports, per key, the effective value, where it came from (``db`` |
 ``env`` | ``default``), the value clearing the override would revert to, when
@@ -76,9 +94,10 @@ resolved once per app in ``create_app`` (``app.state.build_info``) via
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from vault_api import settings_store
@@ -103,6 +122,19 @@ _ENV_ONLY_DETAIL_TEMPLATE = (
     "environment variable and restart instead."
 )
 _UNKNOWN_KEY_DETAIL_TEMPLATE = "{key!r} is not a recognised setting."
+_ENV_PINNED_DETAIL_TEMPLATE = (
+    "{key!r} is set via env ({env_var}); env always wins. Remove the "
+    "environment variable and restart to change it here."
+)
+_CORE_FILE_DISABLED_DETAIL_TEMPLATE = (
+    "{key!r} is applied by vault-core through the core settings file, which "
+    "is not enabled (VAULT_CORE_SETTINGS_FILE is blank). Set it via env on "
+    "vault-core instead."
+)
+_RISKY_DETAIL = (
+    "This change includes debug settings that can break downloads. Repeat the "
+    "request with confirm_risky=true to apply it."
+)
 
 
 class SettingInfoOut(BaseModel):
@@ -112,6 +144,16 @@ class SettingInfoOut(BaseModel):
     fallback: Any
     applies: str
     env_only: bool
+    env_var: str
+    value: Any
+    editable: bool
+    risky: bool
+    expert: bool
+    grammar: str
+    target: str
+    env_visible: bool
+    shadowed: bool
+    reason: str | None
 
 
 class SettingsOut(BaseModel):
@@ -189,11 +231,20 @@ def _coerce_patch_value(key: str, value: Any) -> str:
     )
 
 
+def _apply_live_log_level(effective: Settings) -> None:
+    """``log_level`` applies immediately in vault-api (the runner picks it up
+    at its next start)."""
+    level = logging.getLevelNamesMapping().get(effective.log_level.strip().upper())
+    if level is not None:
+        logging.getLogger().setLevel(level)
+
+
 @router.patch("/v1/settings", response_model=SettingsOut)
 def patch_settings(
     payload: dict[str, Any],
     request: Request,
     open_db: DbOpener = Depends(db_opener),
+    confirm_risky: bool = Query(False),
 ) -> SettingsOut:
     base: Settings = request.app.state.settings
 
@@ -218,23 +269,61 @@ def patch_settings(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=_UNKNOWN_KEY_DETAIL_TEMPLATE.format(key=key),
             )
+        if settings_store.is_env_pinned(spec, base):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_ENV_PINNED_DETAIL_TEMPLATE.format(key=key, env_var=spec.env_var),
+            )
+        if settings_store.is_core_disabled(spec, base):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_CORE_FILE_DISABLED_DETAIL_TEMPLATE.format(key=key),
+            )
         if value is None:
             to_clear.append(key)
             continue
         raw = _coerce_patch_value(key, value)
+        if key == "schedule_window" and not raw.strip():
+            # Review decision B2 (amends audit 3.6): a blank PATCH value
+            # means "off", backward compatible with the shipped rc17 Android
+            # app and web UI, which send "" to disable the scheduler. null
+            # resets to the default.
+            raw = "off"
         try:
-            spec.parse(raw)  # validate only; the typed value is not needed here
+            parsed = spec.parse(raw)
         except SettingValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"{key!r}: {exc}",
             ) from exc
-        to_set.append((key, raw))
+        # Core keys are stored in their canonical form (the twin's), which
+        # is what the core settings file carries.
+        to_set.append((key, parsed if spec.target == settings_store.TARGET_CORE else raw))
+
+    risky = sorted(
+        key for key in [k for k, _ in to_set] + to_clear if OVERRIDABLE_SPECS[key].risky
+    )
+    if risky and not confirm_risky:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={"message": _RISKY_DETAIL, "risky_keys": risky},
+        )
 
     # Pass 2: everything validated — persist it all as ONE transaction
     # (reviewer should-fix S2: looping set_override/delete_override here
     # used to commit each key separately, so a mid-batch sqlite3.Error could
     # leave a partial write despite the response claiming nothing persisted).
     with open_db() as conn:
+        # Audit 3.4: cross-variable rules on the state the batch leaves.
+        try:
+            settings_store.check_cross_rules(conn, base, to_set, to_clear)
+        except SettingValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         settings_store.apply_updates(conn, to_set, to_clear)
+        touched = {key for key, _ in to_set} | set(to_clear)
+        if "log_level" in touched:
+            _apply_live_log_level(settings_store.effective_settings(conn, base))
+        settings_store.write_core_file(conn, base)
         return _build_response(conn, base, request.app.state.build_info.version)

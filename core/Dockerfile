@@ -116,7 +116,18 @@ RUN set -eux; \
     [ "$(grep -c '^[[:space:]]*include vault-upstream-rate\.conf;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
     [ "$(grep -c '^[[:space:]]*proxy_limit_rate[[:space:]]*\$vault_upstream_rate;' /etc/nginx/templates/nginx.conf.template)" = "1" ]; \
     VAULT_UPSTREAM_RATE= VAULT_UPSTREAM_RATE_WINDOW= sh /docker-entrypoint.d/27-vault-upstream-rate.sh /tmp/vault-upstream-rate.build-check.conf; \
-    rm -f /tmp/vault-upstream-rate.build-check.conf; \
+    # D16c (Q7): `off` is the explicit "no cap" and renders the same file; a
+    # window of `off` with a cap set caps around the clock.
+    VAULT_UPSTREAM_RATE=off VAULT_UPSTREAM_RATE_WINDOW=off sh /docker-entrypoint.d/27-vault-upstream-rate.sh /tmp/vault-upstream-rate.off-check.conf; \
+    cmp /tmp/vault-upstream-rate.build-check.conf /tmp/vault-upstream-rate.off-check.conf; \
+    VAULT_UPSTREAM_RATE=800k VAULT_UPSTREAM_RATE_WINDOW=' off ' sh /docker-entrypoint.d/27-vault-upstream-rate.sh /tmp/vault-upstream-rate.off-check.conf; \
+    grep -q '^# Cap 819200 bytes/s aggregate, around the clock' /tmp/vault-upstream-rate.off-check.conf; \
+    for bad in 'VAULT_UPSTREAM_RATE=OFF' 'VAULT_UPSTREAM_RATE= off ' 'VAULT_UPSTREAM_RATE=0' 'VAULT_UPSTREAM_RATE_WINDOW=off,x'; do \
+        if env VAULT_UPSTREAM_RATE=800k "$bad" sh /docker-entrypoint.d/27-vault-upstream-rate.sh /tmp/vault-upstream-rate.off-check.conf >/dev/null 2>&1; then \
+            echo "BUILD CHECK FAILED: 27-vault-upstream-rate.sh accepted $bad (D16c)" >&2; exit 1; \
+        fi; \
+    done; \
+    rm -f /tmp/vault-upstream-rate.build-check.conf /tmp/vault-upstream-rate.off-check.conf; \
     # WP CORE-FIX-3: the HTTPS passthrough block is marked exactly once for
     # 26-vault-tls-passthrough.sh, and this nginx build has the stream and
     # ssl_preread modules compiled in statically (no load_module needed).
@@ -161,6 +172,18 @@ RUN set -eux; \
     cmp "$pool_check" /opt/vault/vault-upstream-pool.native.conf; \
     cmp "$(dirname "$pool_check")/vault-upstream-cap.conf" /opt/vault/vault-upstream-cap.native.conf; \
     rm -f "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
+    # D16c (Q7): EDGE=off is the legacy per-name mode and POOL_HOSTS=off is
+    # "no pool hosts" -- together the same empty render as blank.
+    VAULT_UPSTREAM_EDGE=off VAULT_UPSTREAM_POOL_HOSTS=' off ' VAULT_UPSTREAM_MAX_CONNS= VAULT_PREFILL_MAX_THREADS= \
+        sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
+    cmp "$pool_check" /opt/vault/vault-upstream-pool.native.conf; \
+    rm -f "$pool_check" "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
+    for bad in 'VAULT_UPSTREAM_EDGE=OFF' 'VAULT_UPSTREAM_EDGE=off dist-fra1.discovery.steamserver.net' 'VAULT_UPSTREAM_POOL_HOSTS=off cache1-fra2.steamcontent.com'; do \
+        if env VAULT_UPSTREAM_EDGE=off "$bad" sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" >/dev/null 2>&1; then \
+            echo "BUILD CHECK FAILED: 28-vault-upstream-pool.sh accepted $bad (D16c)" >&2; exit 1; \
+        fi; \
+    done; \
+    rm -f "$pool_check" "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
     VAULT_UPSTREAM_EDGE= VAULT_UPSTREAM_POOL_HOSTS='cache1-fra2.steamcontent.com cache2-fra2.steamcontent.com cache3-fra2.steamcontent.com dist-fra1.discovery.steamserver.net' \
         sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
     [ "$(grep -c '^upstream ' "$pool_check")" = "4" ]; \
@@ -221,7 +244,9 @@ RUN set -eux; \
         if env VAULT_EVENT_LOG=/vault/logs/event.log "$bad" sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh >/dev/null 2>&1; then \
             echo "BUILD CHECK FAILED: 45-vault-eventlog-rotate.sh accepted $bad (D15-ROT)" >&2; exit 1; \
         fi; \
-    done
+    done; \
+    [ "$(VAULT_RESOLVER='   ' sh /docker-entrypoint.d/40-vault-preflight.sh --grammar >/dev/null 2>&1; echo $?)" = 1 ]; \
+    [ "$(VAULT_EVENT_LOG_ROTATE_BYTES=0001048576 sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh --grammar)" = 1048576 ]
 
 # Declared so that a plain `docker run` without -v cannot silently fill the
 # container's writable layer with depot chunks, and so that the default is one

@@ -1,60 +1,40 @@
-"""Persisted settings — the DB-override half of ADR-0009.
+"""Persisted settings — ADR-0009 with the D16b addendum (env always wins).
 
 ``GET``/``PATCH /v1/settings`` (``vault_api/routers/settings.py``) are the
 HTTP surface; this module is everything underneath it: the catalog of which
-``Settings`` fields may be overridden, how a raw string PATCH value is
+settings may be changed from Settings, how a raw string PATCH value is
 validated and turned into a typed value, how the ``settings`` table (schema
-v13) is read and written, and how a DB override, an env value and a built-in
-default combine into one "effective" answer.
+v13) is read and written, and how an env value, a stored Settings value and a
+built-in default combine into one "effective" answer.
 
-Precedence (ADR-0009 decision 1): **DB override > env value > built-in
-default.** ``effective_settings`` is the ONE accessor that resolves this —
-every consumer that wants a live-reloadable value goes through it rather than
-reading ``Settings`` fields directly. It is called at CALL TIME, not once at
-startup, which is what makes a ``PATCH`` visible without a restart to
-whichever caller re-invokes it. Two call sites do so on a recurring cadence
-of their own (documented per key below as ``applies``):
+Precedence (ADR-0009 addendum 2026-10-14, D16b, user decision Q1): **env
+value > Settings (DB) value > built-in default.** A key whose ``VAULT_*``
+variable is set to a non-blank value is "set via env": a stored value for it
+is ignored (one startup warning per shadowed key, ``warn_at_startup``), GET
+reports it with ``editable: false``, and PATCH refuses it. Blank or unset
+means "not set" (Q7). ``Settings.env_pinned`` carries the set of pinned
+variable names from ``Settings.from_env``.
 
-* ``vault_api/scheduler.py``'s tick loop — the schedule window/interval/
-  staleness keys, applies ``"next_sweep"``: the tick already opens its own
-  connection every ~60s, so resolving here is free and exactly matches the
-  scheduler's own "next sweep sees new config" cadence.
-* ``vault_api/worker.py``'s ``_maybe_queue_auto_gc`` — the auto-GC key,
-  applies ``"immediately"``: it already has an open connection for the job
-  it is about to finish, so the very next completed prefill picks up a
-  changed value.
+``effective_settings`` is the ONE accessor that resolves this for the
+vault-api side. It is called at CALL TIME: the scheduler tick (schedule
+keys, the event-sweep keys), the worker and runner per job (prefill threads
+and timeout, manifest keep, GC grace), the request dependencies in
+``vault_api/deps.py`` (agent report keep, bypass window, oracle timeout, the
+stats/traffic views). Each key's ``applies`` label says which.
 
-``vault_name`` and the webhook keys (``webhook_url``, ``webhook_events``) are
-overridable (PATCH persists them, GET reports them) but are honestly labelled
-``"restart-required"``: ``WebhookNotifier`` is constructed once with a fixed
-``Settings`` snapshot, and — more fundamentally — its delivery thread is only
-ever started by the FastAPI lifespan if ``settings.webhook_enabled`` was true
-at BOOT (``vault_api/main.py``). Turning the feature on from off via a DB
-override cannot start a thread that decided not to exist minutes or days
-earlier. Wiring live reload into that thread is real, scoped work (a second
-long-lived SQLite connection, a refresh cadence, its own tests) deliberately
-left for a follow-up rather than claimed here — see api/README.md's
-"Persisted settings" section for the full statement of this limitation.
+Keys with ``target == "core"`` have no ``Settings`` field: vault-core reads
+them (``vault_api/core_settings.py`` validates them with Python twins of the
+hook grammars and computes the core settings file). vault-api cannot see
+vault-core's environment, so for those keys GET reports ``env_visible:
+false``; D16c adds vault-core's status file, which reports the env pins.
 
-Env-only keys (ADR-0009 decision 5) are never in ``OVERRIDABLE_SPECS`` at
-all — ``PATCH`` rejects them by name with a distinct ``422`` detail
-(``ENV_ONLY_KEYS``), never the generic "unknown key" one, so an operator (or
-the web UI) can tell "this key exists but is locked to the environment" from
-"this key does not exist".
+Env-only keys are never in ``OVERRIDABLE_SPECS``. ``PATCH`` rejects them by
+name with a distinct ``422`` detail (``ENV_ONLY_KEYS``). Since D16b (Q2)
+``webhook_url`` is one of them; GET shows it masked (``mask_url``).
 
 **WP 4h.0 addendum (ADR-0010).** ``relay_expose_playtime`` and
-``relay_expose_last_played`` (the Steam relay's privacy gate,
-``vault_api/routers/steam.py``) join ``ENV_ONLY_INFO_KEYS`` for a DIFFERENT
-reason than the bootstrap/security keys ADR-0009 §5 already lists there:
-they are not about how the process finds its world or who may talk to it.
-ADR-0010 records the actual rationale — the ``settings`` table lives in a
-Docker volume that can be lost (``docker compose down -v``, a rebuild), and a
-setting whose loss silently RE-ENABLES a privacy-sensitive data flow with no
-notification cannot be backed by that volume. Both are still ordinary
-booleans reported by ``describe_settings`` exactly like every other
-``ENV_ONLY_INFO_KEYS`` row (``source``/``effective`` from the environment,
-``applies="restart-required"``) — the only thing missing, compared to
-``sweep_include_cached``/``auto_gc``, is a ``PATCH`` path.
+``relay_expose_last_played`` are env-only for a privacy reason (a lost DB
+volume must not silently re-enable a data flow); see ADR-0010.
 """
 
 from __future__ import annotations
@@ -63,298 +43,396 @@ import logging
 import os
 import sqlite3
 from dataclasses import dataclass, replace
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Mapping
+from urllib.parse import urlsplit
 
 from vault_api import config
+from vault_api import core_settings
 from vault_api import jobs
-from vault_api import webhooks
 from vault_api.config import Settings
-from vault_api.schedule_window import ScheduleWindow, ScheduleWindowError, parse_window
+from vault_api.core_settings import CoreGrammarError
+from vault_api.schedule_window import (
+    ScheduleWindow,
+    ScheduleWindowError,
+    parse_window,
+    parse_window_or_off,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class SettingValidationError(ValueError):
-    """A ``PATCH /v1/settings`` value that fails its key's grammar.
-
-    Always carries a human-readable message describing exactly what is wrong
-    (the router turns it into the ``422`` response body) — never a bare
-    ``ValueError`` from deep inside a parser, so every rejection reads the
-    same regardless of which key produced it.
-    """
+    """A ``PATCH /v1/settings`` value that fails its key's grammar."""
 
 
 # --------------------------------------------------------------------------
-# Per-key specs: validation, typed<->JSON conversion, apply semantics.
+# Per-key specs
 # --------------------------------------------------------------------------
+
+TARGET_API = "api"
+TARGET_CORE = "core"
+TARGET_BOTH = "api+core"
 
 
 @dataclass(frozen=True)
 class SettingSpec:
     """Everything ``GET``/``PATCH /v1/settings`` needs to know about one
-    overridable ``Settings`` field.
-
-    ``key`` doubles as the JSON key in both the request and response bodies
-    and as the ``Settings`` attribute name — one name, never translated,
-    so there is nothing to keep in sync between the two.
-    """
+    editable key. ``key`` is the JSON key and, for ``api``/``api+core``
+    targets, the ``Settings`` attribute name."""
 
     key: str
     env_var: str
-    #: "immediately" | "next_sweep" | "restart-required" — see the module
-    #: docstring for what each means and which keys get which, honestly.
+    #: "immediately" | "next_sweep" | "next_job" | "core" | "restart-required"
     applies: str
-    #: True for a value that can carry credentials (only ``webhook_url``
-    #: today) — redacted in every GET response (ADR-0009 decision 7).
     secret: bool
-    #: The built-in default, in TYPED form (matches ``Settings``'s own
-    #: dataclass default for this field). Compared against the resolved env
-    #: value to report ``source: "env"`` vs. ``"default"`` — see
-    #: ``_source_without_override``.
+    #: The built-in default. Typed for api keys (matches ``Settings``), the
+    #: JSON form for core keys (``None`` = the hook's "nothing").
     default: Any
-    #: Raw PATCH string -> typed value. Raises ``SettingValidationError`` on
-    #: anything the field's grammar does not accept.
+    #: Raw stored string -> typed value (api) or canonical string (core).
+    #: Raises ``SettingValidationError``.
     parse: Callable[[str], Any]
-    #: Typed value -> JSON-safe value for the GET response (redacts secrets).
+    #: Typed value -> JSON-safe value.
     to_json: Callable[[Any], Any]
+    target: str = TARGET_API
+    #: PATCH needs ``confirm_risky=true`` (D16a table sign-off 2026-10-14:
+    #: the network/load caps and the debug knobs except the log level).
+    risky: bool = False
+    #: Shown in the expert area of the Settings page (D16a sign-off):
+    #: network/load keys, debug keys and housekeeping. ``False`` = normal.
+    expert: bool = False
+    #: Short grammar hint for the UI.
+    grammar: str = ""
 
 
-#: Re-exported for callers/tests; the rule itself lives in ``config`` so
-#: ``VAULT_NAME`` at startup and ``PATCH /v1/settings`` share it (S2).
+#: Re-exported for callers/tests; the rule itself lives in ``config``.
 MAX_VAULT_NAME_LENGTH = config.MAX_VAULT_NAME_LENGTH
 
+_BLANK_DETAIL = "must not be blank; use null to clear the stored value instead of an empty string"
 
-def _parse_vault_name(raw: str) -> str:
-    try:
-        return config.parse_vault_name(raw)
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
+
+def _wrap(parser: Callable[[str], Any]) -> Callable[[str], Any]:
+    """Turn a config grammar's ``ValueError`` into ``SettingValidationError``."""
+
+    def parse(raw: str) -> Any:
+        try:
+            return parser(raw)
+        except SettingValidationError:
+            raise
+        except ValueError as exc:
+            raise SettingValidationError(str(exc)) from exc
+
+    return parse
+
+
+def _non_blank(parser: Callable[[str], Any]) -> Callable[[str], Any]:
+    def parse(raw: str) -> Any:
+        if not raw.strip():
+            raise SettingValidationError(_BLANK_DETAIL)
+        return parser(raw)
+
+    return _wrap(parse)
+
+
+def _int(minimum: int = 1, maximum: int | None = None) -> Callable[[str], int]:
+    return _non_blank(
+        lambda raw: config.parse_strict_int(raw, minimum=minimum, maximum=maximum)
+    )
+
+
+_float = _non_blank(config.parse_strict_float)
 
 
 def _parse_schedule_window_override(raw: str) -> ScheduleWindow | None:
-    """Mirrors ``Settings.from_env``'s own handling of ``VAULT_SCHEDULE_WINDOW``
-    exactly: blank means "disabled" and is accepted without ever calling the
-    parser, which is what makes "force the scheduler off via the API even
-    though the env var still has a window in it" expressible at all — the
-    same blank-is-the-off-switch convention ``VAULT_SCHEDULE_WINDOW`` and
-    ``VAULT_WEBHOOK_URL`` both use at startup.
+    """``off`` -> ``None`` (no window, Q7), else a window.
+
+    A blank STORED value is still read as ``None``: before rc18 that was how
+    a Settings change spelled "scheduler off", and such rows exist. A blank
+    PATCH value is stored as ``off`` by the router (review decision B2).
     """
     text = raw.strip()
     if not text:
         return None
     try:
-        return parse_window(text)
+        return parse_window_or_off(text)
     except ScheduleWindowError as exc:
         raise SettingValidationError(str(exc)) from exc
 
 
-def _parse_schedule_interval_override(raw: str) -> int:
-    if not raw.strip():
-        raise SettingValidationError(
-            "must not be blank; use null to clear the override instead of "
-            "an empty string"
-        )
-    try:
-        # Same ceiling Settings.from_env applies (config.MAX_INTERVAL_MINUTES,
-        # WP API-FIX-2 S2): this value goes straight into a timedelta on the
-        # scheduler tick and in GET /v1/schedule, GET /v1/games.
-        return config.parse_strict_int(
-            raw, minimum=1, maximum=config.MAX_INTERVAL_MINUTES
-        )
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
-
-
-def _parse_schedule_client_stale_days_override(raw: str) -> int:
-    if not raw.strip():
-        raise SettingValidationError(
-            "must not be blank; use null to clear the override instead of "
-            "an empty string"
-        )
-    try:
-        return config.parse_strict_int(raw, minimum=1, maximum=config.MAX_DAYS)
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
-
-
-def _parse_auto_gc_override(raw: str) -> str:
-    if not raw.strip():
-        raise SettingValidationError(
-            f"must be one of {', '.join(config.AUTO_GC_MODES)}; use null to "
-            "clear the override instead of an empty string"
-        )
-    try:
-        return config.parse_auto_gc(raw)
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
-
-
-def _parse_sweep_include_cached_override(raw: str) -> bool:
-    """WP 4d. Same "blank is not a value" rule as every other non-blank enum
-    key here (``auto_gc``, the two ``schedule_*`` ints): a settings override
-    that clears to blank is meaningless — clearing is spelled ``null``.
-    """
-    if not raw.strip():
-        raise SettingValidationError(
-            "must be one of true/false/yes/no/on/off/1/0; use null to clear "
-            "the override instead of an empty string"
-        )
-    try:
-        return config.parse_strict_bool(raw)
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
-
-
-def _parse_webhook_url_override(raw: str) -> str:
-    try:
-        return config.validate_webhook_url(raw)
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
-
-
-def _parse_webhook_events_override(raw: str) -> frozenset[str]:
-    try:
-        return config.parse_webhook_events(raw)
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
-
-
-def _parse_steam_library_steamid_override(raw: str) -> str:
-    """WP API-FEAT-1. Blank is a valid override (stored ``""`` = explicitly
-    not set, shadowing an env value), same convention as ``webhook_url``;
-    ``null`` deletes the row instead."""
-    try:
-        return config.parse_steam_library_steamid(raw)
-    except ValueError as exc:
-        raise SettingValidationError(str(exc)) from exc
-
-
-def _window_to_json(window: ScheduleWindow | None) -> str | None:
-    return None if window is None else window.raw
+def _window_to_json(window: ScheduleWindow | None) -> str:
+    """``off`` for no window (D16b): the JSON value is always a string the
+    PATCH grammar accepts back."""
+    return core_settings.OFF if window is None else window.raw
 
 
 def _events_to_json(events: frozenset[str]) -> list[str]:
     return sorted(events)
 
 
-#: The nine keys overridable today (ADR-0009 named the first seven; WP 4d
-#: added ``sweep_include_cached`` as "one more overridable key when it
-#: lands", per the ADR's own consequences section; WP API-FEAT-1 added
-#: ``steam_library_steamid`` under the ADR-0016 addendum), in the order they are
-#: documented in api/README.md and returned by GET /v1/settings. Keyed by
-#: ``Settings`` attribute name, which is also the JSON key both endpoints use.
+def _core(twin: Callable[[str], str | None]) -> Callable[[str], str]:
+    """A core key's PATCH grammar: the twin, blank refused, canonical value
+    returned (the twin's normalised form, except the rate, whose raw
+    ``800k`` spelling is kept because it is what the operator wrote)."""
+
+    def parse(raw: str) -> str:
+        try:
+            normalised = twin(raw)
+        except CoreGrammarError as exc:
+            raise SettingValidationError(str(exc)) from exc
+        if normalised is None:
+            raise SettingValidationError(_BLANK_DETAIL)
+        if twin is core_settings.parse_upstream_rate:
+            return raw
+        return normalised
+
+    return parse
+
+
+def _identity(value: Any) -> Any:
+    return value
+
+
+_INT_HINT = "whole number, ASCII digits"
+
+#: Every key editable from Settings (D16 audit 3.1/3.2), in display order.
 OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
-    "vault_name": SettingSpec(
-        key="vault_name",
-        env_var="VAULT_NAME",
-        applies="restart-required",
-        secret=False,
-        default="",
-        parse=_parse_vault_name,
-        to_json=lambda v: v,
-    ),
-    "schedule_window": SettingSpec(
-        key="schedule_window",
-        env_var="VAULT_SCHEDULE_WINDOW",
-        applies="next_sweep",
-        secret=False,
-        default=None,
-        parse=_parse_schedule_window_override,
-        to_json=_window_to_json,
-    ),
-    "schedule_interval_minutes": SettingSpec(
-        key="schedule_interval_minutes",
-        env_var="VAULT_SCHEDULE_INTERVAL_MINUTES",
-        applies="next_sweep",
-        secret=False,
-        default=config.DEFAULT_SCHEDULE_INTERVAL_MINUTES,
-        parse=_parse_schedule_interval_override,
-        to_json=lambda v: v,
-    ),
-    "schedule_client_stale_days": SettingSpec(
-        key="schedule_client_stale_days",
-        env_var="VAULT_SCHEDULE_CLIENT_STALE_DAYS",
-        applies="next_sweep",
-        secret=False,
-        default=config.DEFAULT_SCHEDULE_CLIENT_STALE_DAYS,
-        parse=_parse_schedule_client_stale_days_override,
-        to_json=lambda v: v,
-    ),
-    "auto_gc": SettingSpec(
-        key="auto_gc",
-        env_var="VAULT_AUTO_GC",
-        applies="immediately",
-        secret=False,
-        default=config.DEFAULT_AUTO_GC,
-        parse=_parse_auto_gc_override,
-        to_json=lambda v: v,
-    ),
-    "sweep_include_cached": SettingSpec(
-        key="sweep_include_cached",
-        env_var="VAULT_SWEEP_INCLUDE_CACHED",
-        # Same tick-loop resolution as the other scheduler keys above:
-        # scheduler.PrefillScheduler._tick resolves effective_settings fresh
-        # every ~60s tick and hands the result to maybe_sweep/compute_targets,
-        # so a PATCH is visible to the very next sweep, not only after a
-        # restart.
-        applies="next_sweep",
-        secret=False,
-        default=config.DEFAULT_SWEEP_INCLUDE_CACHED,
-        parse=_parse_sweep_include_cached_override,
-        to_json=lambda v: v,
-    ),
-    "webhook_url": SettingSpec(
-        key="webhook_url",
-        env_var="VAULT_WEBHOOK_URL",
-        applies="restart-required",
-        secret=True,
-        default="",
-        parse=_parse_webhook_url_override,
-        to_json=webhooks.redact_url,
-    ),
-    "webhook_events": SettingSpec(
-        key="webhook_events",
-        env_var="VAULT_WEBHOOK_EVENTS",
-        applies="restart-required",
-        secret=False,
-        default=frozenset(config.WEBHOOK_EVENTS_ALL),
-        parse=_parse_webhook_events_override,
-        to_json=_events_to_json,
-    ),
-    "steam_library_steamid": SettingSpec(
-        key="steam_library_steamid",
-        env_var="VAULT_STEAM_LIBRARY_STEAMID",
-        # Nothing in vault-api caches it: the frontends read it from GET
-        # /v1/settings, which resolves effective_settings per request.
-        applies="immediately",
-        # Not secret: a SteamID64 is a public Steam identifier (it is in
-        # every public profile URL), so GET returns it unredacted.
-        secret=False,
-        default="",
-        parse=_parse_steam_library_steamid_override,
-        # A JSON string, never a number: 17 digits exceed JavaScript's
-        # 2**53 safe-integer range and would be rounded by the web UI.
-        to_json=lambda v: v,
-    ),
+    spec.key: spec
+    for spec in (
+        SettingSpec(
+            "vault_name", "VAULT_NAME", "restart-required", False, "",
+            _wrap(config.parse_vault_name), _identity,
+            grammar=f"text, at most {config.MAX_VAULT_NAME_LENGTH} printable characters",
+        ),
+        SettingSpec(
+            "schedule_window", "VAULT_SCHEDULE_WINDOW", "next_sweep", False,
+            parse_window(config.DEFAULT_SCHEDULE_WINDOW),
+            _parse_schedule_window_override, _window_to_json,
+            target=TARGET_BOTH,
+            grammar="HH:MM-HH:MM (overnight allowed, 24:00 as end), or off",
+        ),
+        SettingSpec(
+            "schedule_interval_minutes", "VAULT_SCHEDULE_INTERVAL_MINUTES", "next_sweep",
+            False, config.DEFAULT_SCHEDULE_INTERVAL_MINUTES,
+            _int(1, config.MAX_INTERVAL_MINUTES), _identity,
+            grammar=f"{_INT_HINT}, 1..{config.MAX_INTERVAL_MINUTES}",
+            expert=True,
+        ),
+        SettingSpec(
+            "schedule_client_stale_days", "VAULT_SCHEDULE_CLIENT_STALE_DAYS", "next_sweep",
+            False, config.DEFAULT_SCHEDULE_CLIENT_STALE_DAYS,
+            _int(1, config.MAX_DAYS), _identity,
+            grammar=f"{_INT_HINT}, 1..{config.MAX_DAYS}",
+            expert=True,
+        ),
+        SettingSpec(
+            "sweep_include_cached", "VAULT_SWEEP_INCLUDE_CACHED", "next_sweep", False,
+            config.DEFAULT_SWEEP_INCLUDE_CACHED,
+            _non_blank(config.parse_strict_bool), _identity,
+            grammar="true/false (also yes/no, on/off, 1/0)",
+            expert=True,
+        ),
+        SettingSpec(
+            "auto_gc", "VAULT_AUTO_GC", "immediately", False, config.DEFAULT_AUTO_GC,
+            _non_blank(config.parse_auto_gc), _identity,
+            grammar="off, dry-run or execute",
+        ),
+        SettingSpec(
+            "gc_grace_days", "VAULT_GC_GRACE_DAYS", "next_job", False,
+            config.DEFAULT_GC_GRACE_DAYS, _int(0, config.MAX_DAYS), _identity,
+            grammar=f"{_INT_HINT}, 0..{config.MAX_DAYS} (0 = no grace)",
+            expert=True,
+        ),
+        SettingSpec(
+            "manifest_keep", "VAULT_MANIFEST_KEEP", "next_job", False,
+            config.DEFAULT_MANIFEST_KEEP, _int(config.MIN_MANIFEST_KEEP), _identity,
+            grammar=f"{_INT_HINT}, at least {config.MIN_MANIFEST_KEEP}",
+            expert=True,
+        ),
+        SettingSpec(
+            "agent_report_keep", "VAULT_AGENT_REPORT_KEEP", "immediately", False,
+            config.DEFAULT_AGENT_REPORT_KEEP, _int(config.MIN_AGENT_REPORT_KEEP), _identity,
+            grammar=f"{_INT_HINT}, at least {config.MIN_AGENT_REPORT_KEEP}",
+            expert=True,
+        ),
+        SettingSpec(
+            "client_stats_keep", "VAULT_CLIENT_STATS_KEEP", "next_sweep", False,
+            config.DEFAULT_CLIENT_STATS_KEEP, _int(1), _identity,
+            grammar=f"{_INT_HINT}, at least 1",
+            expert=True,
+        ),
+        SettingSpec(
+            "event_sweep_interval_minutes", "VAULT_EVENT_SWEEP_INTERVAL_MINUTES", "next_sweep",
+            False, config.DEFAULT_EVENT_SWEEP_INTERVAL_MINUTES,
+            _int(1, config.MAX_INTERVAL_MINUTES), _identity,
+            grammar=f"{_INT_HINT}, 1..{config.MAX_INTERVAL_MINUTES}",
+            expert=True,
+        ),
+        SettingSpec(
+            "miss_trigger_cooldown_minutes", "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES",
+            "next_sweep", False, config.DEFAULT_MISS_TRIGGER_COOLDOWN_MINUTES,
+            _int(0, config.MAX_COOLDOWN_MINUTES), _identity,
+            grammar=f"{_INT_HINT}, 0..{config.MAX_COOLDOWN_MINUTES} (0 = trigger off)",
+            expert=True,
+        ),
+        SettingSpec(
+            "miss_trigger_max_per_sweep", "VAULT_MISS_TRIGGER_MAX_PER_SWEEP", "next_sweep",
+            False, config.DEFAULT_MISS_TRIGGER_MAX_PER_SWEEP, _int(1), _identity,
+            grammar=f"{_INT_HINT}, at least 1",
+            expert=True,
+        ),
+        SettingSpec(
+            "bypass_window_days", "VAULT_BYPASS_WINDOW_DAYS", "immediately", False,
+            config.DEFAULT_BYPASS_WINDOW_DAYS, _int(1, config.MAX_DAYS), _identity,
+            grammar=f"{_INT_HINT}, 1..{config.MAX_DAYS}",
+        ),
+        SettingSpec(
+            "prefill_max_threads", "VAULT_PREFILL_MAX_THREADS", "next_job", False,
+            config.DEFAULT_PREFILL_MAX_THREADS,
+            _int(config.MIN_PREFILL_MAX_THREADS, config.MAX_PREFILL_MAX_THREADS), _identity,
+            target=TARGET_BOTH, risky=True, expert=True,
+            grammar=(
+                f"{_INT_HINT}, {config.MIN_PREFILL_MAX_THREADS}.."
+                f"{config.MAX_PREFILL_MAX_THREADS}, at most upstream_max_conns"
+            ),
+        ),
+        SettingSpec(
+            "prefill_timeout_seconds", "VAULT_PREFILL_TIMEOUT_SECONDS", "next_job", False,
+            config.DEFAULT_PREFILL_TIMEOUT_SECONDS, _int(1), _identity,
+            grammar=f"{_INT_HINT}, seconds, at least 1",
+            expert=True,
+        ),
+        SettingSpec(
+            "manifest_oracle_timeout", "VAULT_MANIFEST_ORACLE_TIMEOUT", "immediately", False,
+            config.DEFAULT_MANIFEST_ORACLE_TIMEOUT, _float, _identity,
+            grammar="positive number of seconds, e.g. 10 or 2.5",
+            expert=True,
+        ),
+        SettingSpec(
+            "webhook_events", "VAULT_WEBHOOK_EVENTS", "restart-required", False,
+            frozenset(config.WEBHOOK_EVENTS_ALL),
+            _wrap(config.parse_webhook_events), _events_to_json,
+            grammar="comma-separated event names (or a JSON list); blank = all",
+        ),
+        SettingSpec(
+            "webhook_timeout_seconds", "VAULT_WEBHOOK_TIMEOUT_SECONDS", "restart-required",
+            False, config.DEFAULT_WEBHOOK_TIMEOUT_SECONDS, _float, _identity,
+            grammar="positive number of seconds, e.g. 5",
+        ),
+        SettingSpec(
+            "steam_library_steamid", "VAULT_STEAM_LIBRARY_STEAMID", "immediately", False, "",
+            _wrap(config.parse_steam_library_steamid), _identity,
+            grammar="SteamID64 (17 digits) as a string; blank = not set",
+        ),
+        # --- vault-core (applied through the core settings file, D16c) ----
+        SettingSpec(
+            "upstream_rate", "VAULT_UPSTREAM_RATE", "core", False, None,
+            _core(core_settings.parse_upstream_rate), _identity, target=TARGET_CORE,
+            expert=True,
+            grammar="bytes/s with optional k or m suffix (800k, 2m), min 1024; off = no cap",
+        ),
+        SettingSpec(
+            "upstream_max_conns", "VAULT_UPSTREAM_MAX_CONNS", "core", False,
+            str(core_settings.UPSTREAM_CAP_DEFAULT),
+            _core(core_settings.parse_upstream_max_conns), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
+            grammar="whole number 1..64, no leading zero, at least prefill_max_threads",
+        ),
+        SettingSpec(
+            "tls_client_max_conns", "VAULT_TLS_CLIENT_MAX_CONNS", "core", False,
+            str(core_settings.TLS_CLIENT_DEFAULT),
+            _core(core_settings.parse_tls_client_max_conns), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
+            grammar="whole number 1..256, no leading zero, at most tls_max_conns",
+        ),
+        SettingSpec(
+            "tls_max_conns", "VAULT_TLS_MAX_CONNS", "core", False,
+            str(core_settings.TLS_TOTAL_DEFAULT),
+            _core(core_settings.parse_tls_max_conns), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
+            grammar="whole number 1..400, no leading zero",
+        ),
+        SettingSpec(
+            "event_log_rotate_bytes", "VAULT_EVENT_LOG_ROTATE_BYTES", "core", False,
+            str(core_settings.ROTATE_DEFAULT_BYTES),
+            _core(core_settings.parse_event_log_rotate_bytes), _identity, target=TARGET_CORE,
+            grammar="bytes, digits only, at least 1048576; 0 = rotation off",
+        ),
+        # --- risky (debug knobs, confirm dialog) ---------------------------
+        SettingSpec(
+            "upstream_edge", "VAULT_UPSTREAM_EDGE", "core", False,
+            core_settings.UPSTREAM_EDGE_DEFAULT,
+            _core(core_settings.parse_upstream_edge), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
+            grammar="one *.steamcontent.com or *.steamserver.net host; off = legacy per-name pool",
+        ),
+        SettingSpec(
+            "upstream_pool_hosts", "VAULT_UPSTREAM_POOL_HOSTS", "core", False, None,
+            _core(core_settings.parse_upstream_pool_hosts), _identity, target=TARGET_CORE,
+            risky=True, expert=True,
+            grammar="up to 4 space-separated Steam edge hosts, used only while upstream_edge is off; off = none",
+        ),
+        SettingSpec(
+            "resolver", "VAULT_RESOLVER", "core", False, core_settings.RESOLVER_DEFAULT,
+            _core(core_settings.parse_resolver), _identity, target=TARGET_CORE, risky=True,
+            expert=True,
+            grammar="IP address list, e.g. 1.1.1.1 or [2606:4700::1111]:53; never a resolver that rewrites Steam names",
+        ),
+        SettingSpec(
+            "log_level", "VAULT_LOG_LEVEL", "immediately", False, config.DEFAULT_LOG_LEVEL,
+            _non_blank(config.parse_log_level), _identity, expert=True,
+            grammar="DEBUG, INFO, WARNING, ERROR or CRITICAL",
+        ),
+    )
 }
+
+#: The core keys by their env name, for ``core_settings``.
+CORE_SPECS_BY_ENV: dict[str, SettingSpec] = {
+    spec.env_var: spec for spec in OVERRIDABLE_SPECS.values() if spec.target == TARGET_CORE
+}
+
+
+def mask_url(url: str) -> str:
+    """Q2: the webhook URL as GET shows it: scheme and host only.
+
+    Credentials can sit in the userinfo AND in the path or query (Discord
+    and Slack put the token in the path), so everything after the host is
+    replaced. ``https://u:p@hooks.example/x?t=1`` -> ``https://***@hooks.example/***``.
+    Any ``@`` after the scheme counts as userinfo, the same over-redaction
+    rule as ``webhooks.redact_url`` (review S3): an unencoded ``/``, ``?`` or
+    ``#`` in a password moves the userinfo out of what ``urlsplit`` calls
+    the netloc. Never raises.
+    """
+    if not url:
+        return ""
+    if "://" not in url:
+        return "***"
+    scheme, after = url.split("://", 1)
+    userinfo = "@" in after
+    if userinfo:
+        after = after.rsplit("@", 1)[1]
+    try:
+        parts = urlsplit(f"{scheme}://{after}")
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return "***"
+    if not scheme or not host:
+        return "***"
+    netloc = ("***@" if userinfo else "") + host + (f":{port}" if port else "")
+    rest = "/***" if (parts.path not in ("", "/") or parts.query or parts.fragment) else ""
+    return f"{scheme}://{netloc}{rest}"
 
 
 @dataclass(frozen=True)
 class EnvOnlySpec:
-    """Informational entry for a key ``PATCH`` refuses by name (ADR-0009
-    decision 5). ``VAULT_API_KEY`` is deliberately NOT one of these — it is
-    rejected by ``PATCH`` the same way, but never listed anywhere a ``GET``
-    response could echo it, redacted or not (see ``ENV_ONLY_KEYS`` below).
-    """
+    """Informational GET row for a key ``PATCH`` refuses by name.
+    ``VAULT_API_KEY`` is never one of these (never echoed)."""
 
     key: str
     env_var: str
+    display: Callable[[Any], Any] = _identity
 
 
-#: Shown in GET /v1/settings as read-only, informational rows (env_only=true)
-#: — a settings screen can render "this exists but only the environment
-#: controls it" instead of silently omitting these keys. ``VAULT_API_KEY``
-#: is excluded on purpose (see ``EnvOnlySpec``'s docstring).
+#: Shown in GET as read-only rows (``env_only: true``).
 ENV_ONLY_INFO_KEYS: tuple[EnvOnlySpec, ...] = (
     EnvOnlySpec("db_path", "VAULT_DB_PATH"),
     EnvOnlySpec("cache_root", "VAULT_CACHE_ROOT"),
@@ -363,21 +441,17 @@ ENV_ONLY_INFO_KEYS: tuple[EnvOnlySpec, ...] = (
     EnvOnlySpec("manifest_archive_dir", "VAULT_MANIFEST_ARCHIVE_DIR"),
     EnvOnlySpec("web_dir", "VAULT_WEB_DIR"),
     EnvOnlySpec("settings_readonly", "VAULT_SETTINGS_READONLY"),
-    # WP 4h.0 (ADR-0010) — see this module's own docstring addendum above
-    # for why these two are env-only for a DIFFERENT reason than every
-    # other row in this tuple.
+    # WP 4h.0 (ADR-0010): env-only for a privacy reason, see the docstring.
     EnvOnlySpec("relay_expose_playtime", "VAULT_RELAY_EXPOSE_PLAYTIME"),
     EnvOnlySpec("relay_expose_last_played", "VAULT_RELAY_EXPOSE_LAST_PLAYED"),
+    # D16b (Q2): can carry credentials; shown masked, never editable.
+    EnvOnlySpec("webhook_url", "VAULT_WEBHOOK_URL", mask_url),
 )
 
-#: Every key name PATCH refuses with the distinct "environment-only" 422 —
-#: ``ENV_ONLY_INFO_KEYS`` above, PLUS ``vault_api_key``, which never appears
-#: in a GET response (redacted or not) but must still be named, not silently
-#: folded into the generic "unknown key" error, if someone tries to PATCH it.
+#: Every key PATCH refuses with the distinct "environment-only" 422.
 ENV_ONLY_KEYS: frozenset[str] = frozenset(
     {"vault_api_key"} | {spec.key for spec in ENV_ONLY_INFO_KEYS}
 )
-
 
 # --------------------------------------------------------------------------
 # The `settings` table (schema v13)
@@ -395,11 +469,6 @@ def get_all_overrides(conn: sqlite3.Connection) -> dict[str, str]:
 
 
 def _write_override(conn: sqlite3.Connection, key: str, raw_value: str) -> None:
-    """The UPSERT itself, with no transaction/commit management of its own —
-    the two things that call this (``set_override`` and ``apply_updates``)
-    each own that decision, one commit per call or one commit for a whole
-    batch respectively.
-    """
     now = jobs.utcnow_iso()
     conn.execute(
         """
@@ -411,30 +480,18 @@ def _write_override(conn: sqlite3.Connection, key: str, raw_value: str) -> None:
 
 
 def _delete_override_row(conn: sqlite3.Connection, key: str) -> None:
-    """The DELETE itself — see ``_write_override``'s note on why this has no
-    transaction/commit management of its own."""
     conn.execute("DELETE FROM settings WHERE key = ?", (key,))
 
 
 def set_override(conn: sqlite3.Connection, key: str, raw_value: str) -> None:
-    """Persist a validated override, as its own committed transaction.
-
-    Caller must have already validated ``raw_value`` with the matching
-    ``SettingSpec.parse`` — this function does not re-validate, it only
-    stores. For a multi-key ``PATCH`` where several writes must succeed or
-    fail TOGETHER, use ``apply_updates`` instead — calling this in a loop is
-    exactly the bug reviewer blocker S2 caught (each call is its own
-    transaction, so a failure partway through a batch leaves a partial
-    write despite the ``422``/`500` response claiming nothing was persisted).
-    """
+    """Persist one already-validated value as its own transaction. For a
+    multi-key PATCH use ``apply_updates`` (one transaction for the batch)."""
     with jobs.immediate_transaction(conn):
         _write_override(conn, key, raw_value)
 
 
 def delete_override(conn: sqlite3.Connection, key: str) -> None:
-    """Idempotent: deleting a key with no override row is a silent no-op.
-    See ``set_override``'s note on ``apply_updates`` for the batch case.
-    """
+    """Idempotent."""
     with jobs.immediate_transaction(conn):
         _delete_override_row(conn, key)
 
@@ -442,24 +499,7 @@ def delete_override(conn: sqlite3.Connection, key: str) -> None:
 def apply_updates(
     conn: sqlite3.Connection, to_set: list[tuple[str, str]], to_clear: list[str]
 ) -> None:
-    """Apply a whole ``PATCH``'s worth of writes as ONE committed transaction
-    (reviewer should-fix S2).
-
-    ``PATCH /v1/settings`` validates every key in the request body before
-    writing anything (``routers/settings.py``), which only holds the promise
-    ADR-0009 makes ("a bad value... must be impossible to persist") for
-    VALIDATION failures. A ``sqlite3.Error`` partway through persisting an
-    already-validated batch (disk full, a locked database past
-    ``busy_timeout``) is a different failure mode, and looping
-    ``set_override``/``delete_override`` — each its OWN committed
-    transaction — would leave keys ``1..N-1`` durably written and key ``N``
-    missing while the ``500`` response tells the caller nothing was
-    persisted. ``jobs.immediate_transaction`` (the same ``BEGIN IMMEDIATE``
-    pattern every other check-then-act write in this codebase uses) makes
-    the whole batch all-or-nothing: any exception rolls back everything
-    written so far in this call, including keys that individually would have
-    validated and written fine.
-    """
+    """A whole PATCH as ONE ``BEGIN IMMEDIATE`` transaction (all or nothing)."""
     with jobs.immediate_transaction(conn):
         for key, raw_value in to_set:
             _write_override(conn, key, raw_value)
@@ -468,63 +508,221 @@ def apply_updates(
 
 
 # --------------------------------------------------------------------------
-# The one accessor: effective_settings (ADR-0009 decision 6)
+# Resolution
 # --------------------------------------------------------------------------
 
 
+#: ``SettingInfo.reason`` values for a row that is not editable.
+REASON_ENV = "env"
+REASON_ENV_ONLY = "env_only"
+REASON_CORE_FILE_DISABLED = "core_file_disabled"
+
+
+def core_file_enabled(base: Settings) -> bool:
+    """Review decision B3 (user night-run decision): core-only keys are
+    editable only while vault-api actually hands them to vault-core, i.e.
+    while ``VAULT_CORE_SETTINGS_FILE`` names a path. Otherwise a stored value
+    would reach nothing."""
+    return bool(base.core_settings_file)
+
+
+def is_core_disabled(spec: SettingSpec, base: Settings) -> bool:
+    return spec.target == TARGET_CORE and not core_file_enabled(base)
+
+
+def env_core_values(base: Settings) -> dict[str, str]:
+    """Core keys as vault-api's OWN environment sets them (non-blank and
+    valid), env name -> normalised value. Used for the cross rules while the
+    core file is disabled: then only defaults and env count, never stored
+    values."""
+    values: dict[str, str] = {}
+    for env_var in CORE_SPECS_BY_ENV:
+        if env_var not in base.env_pinned:
+            continue
+        try:
+            normalised = core_settings.TWINS[env_var](os.environ.get(env_var, ""))
+        except CoreGrammarError:
+            continue
+        if normalised is not None:
+            values[env_var] = normalised
+    return values
+
+
+def is_env_pinned(spec: SettingSpec, base: Settings) -> bool:
+    """Q1: the key's variable is set (non-blank) in vault-api's env."""
+    return spec.env_var in base.env_pinned
+
+
+def _shown(spec: SettingSpec, raw: str) -> str:
+    return "<invalid>" if spec.key == "steam_library_steamid" else repr(raw)
+
+
+def _parse_stored(spec: SettingSpec, raw: str) -> tuple[bool, Any]:
+    """(ok, value) for a stored row; a row that no longer parses is logged
+    and treated as absent (a bad row must not take the scheduler down)."""
+    try:
+        return True, spec.parse(raw)
+    except SettingValidationError:
+        logger.error(
+            "settings: stored value for %r is %s, which no longer passes "
+            "validation; using the env/default value for this key. Clear it "
+            "with PATCH /v1/settings (null).",
+            spec.key, _shown(spec, raw),
+        )
+        return False, None
+
+
 def effective_settings(conn: sqlite3.Connection, base: Settings) -> Settings:
-    """Resolve DB override > env value > built-in default into one snapshot.
+    """Resolve env > Settings > default into one ``Settings`` snapshot.
 
-    ``base`` is always the pure env/default resolution (``app.state.settings``
-    — the object ``Settings.from_env()`` produced once at startup, or a
-    test's hand-built ``Settings``). This function never mutates it; it
-    returns a NEW ``Settings`` via ``dataclasses.replace`` with only the
-    overridden fields swapped in, so every field this module does not know
-    about (and every overridable field with no DB row) passes through from
-    ``base`` unchanged.
-
-    A row whose stored value no longer parses (an operator hand-edited
-    ``vault.db`` with sqlite3 while the service was stopped, per the
-    documented emergency escape hatch, and typed something the current
-    grammar rejects) is logged and IGNORED for that one key rather than
-    raising — this function runs inside live request handling and the
-    scheduler tick, and a single bad row must not take either down. The
-    field falls back to ``base``'s own value for that key, exactly as if no
-    override existed.
+    ``base`` is the pure env/default resolution (``Settings.from_env()`` or
+    a test's hand-built object). Returns a NEW object with only the stored,
+    non-pinned api fields swapped in; core-only keys are not ``Settings``
+    fields and never touched here.
     """
     overrides = get_all_overrides(conn)
     if not overrides:
         return base
-
     updates: dict[str, Any] = {}
     for key, spec in OVERRIDABLE_SPECS.items():
-        raw = overrides.get(key)
-        if raw is None:
+        if spec.target == TARGET_CORE:
             continue
-        try:
-            updates[key] = spec.parse(raw)
-        except SettingValidationError:
-            # A secret-carrying key (webhook_url) is never logged, not even
-            # through redact_url: a corrupt stored value need not parse as a
-            # URL (scheme-less ``admin:s3cr3t@host/x`` passes redact_url
-            # unchanged), and this line lands in `docker logs`
-            # (WP API-FIX-2, P2/S1).
-            # steam_library_steamid (WP API-FEAT-1 N3): a malformed stored
-            # value is arbitrary text, so it is not echoed either.
-            if spec.secret:
-                shown = "<redacted>"
-            elif key == "steam_library_steamid":
-                shown = "<invalid>"
-            else:
-                shown = raw
-            logger.error(
-                "settings: stored override for %r is %r, which no longer "
-                "passes validation; falling back to the env/default value "
-                "for this key. Clear it with PATCH /v1/settings (null) or "
-                "the sqlite3 escape hatch documented in api/README.md.",
-                key, shown,
-            )
+        raw = overrides.get(key)
+        if raw is None or is_env_pinned(spec, base):
+            continue
+        ok, value = _parse_stored(spec, raw)
+        if ok:
+            updates[key] = value
     return replace(base, **updates) if updates else base
+
+
+def stored_core_values(
+    overrides: Mapping[str, str], base: Settings
+) -> dict[str, str]:
+    """env name -> stored canonical value for each valid core-key row."""
+    values: dict[str, str] = {}
+    for env_var, spec in CORE_SPECS_BY_ENV.items():
+        raw = overrides.get(spec.key)
+        if raw is None or is_env_pinned(spec, base):
+            continue
+        ok, value = _parse_stored(spec, raw)
+        if ok:
+            values[env_var] = value
+    return values
+
+
+def core_values(conn: sqlite3.Connection, base: Settings) -> dict[str, str]:
+    """Q3: the values vault-api hands vault-core (``core_settings``)."""
+    overrides = get_all_overrides(conn)
+    effective = effective_settings(conn, base)
+    threads_spec = OVERRIDABLE_SPECS["prefill_max_threads"]
+    threads_from_settings = (
+        "prefill_max_threads" in overrides and not is_env_pinned(threads_spec, base)
+    )
+    window = effective.schedule_window
+    return core_settings.core_file_values(
+        stored_core_values(overrides, base),
+        None if window is None else window.normalized,
+        effective.prefill_max_threads if threads_from_settings else None,
+    )
+
+
+def write_core_file(conn: sqlite3.Connection, base: Settings) -> int | None:
+    """Write the core settings file if ``VAULT_CORE_SETTINGS_FILE`` is set.
+    Never raises: a failed write is logged (D16c reports the apply state)."""
+    if not base.core_settings_file:
+        return None
+    try:
+        return core_settings.write_core_settings_file(
+            base.core_settings_file, core_values(conn, base)
+        )
+    except Exception:
+        logger.exception(
+            "Could not write the core settings file %s; vault-core keeps its "
+            "last applied values.", base.core_settings_file,
+        )
+        return None
+
+
+def check_cross_rules(
+    conn: sqlite3.Connection,
+    base: Settings,
+    to_set: Iterable[tuple[str, str]],
+    to_clear: Iterable[str],
+) -> None:
+    """Audit 3.4: refuse what vault-core would refuse, judged on the values
+    the batch would leave behind. Only rules whose keys the batch touches are
+    checked, so an unrelated PATCH is never blocked by an older state.
+    Raises ``SettingValidationError``."""
+    prospective = dict(get_all_overrides(conn))
+    touched: set[str] = set()
+    for key, raw in to_set:
+        prospective[key] = raw
+        touched.add(key)
+    for key in to_clear:
+        prospective.pop(key, None)
+        touched.add(key)
+    if core_file_enabled(base):
+        core = {**env_core_values(base), **stored_core_values(prospective, base)}
+    else:
+        core = env_core_values(base)
+    threads_spec = OVERRIDABLE_SPECS["prefill_max_threads"]
+    threads = base.prefill_max_threads
+    if "prefill_max_threads" in prospective and not is_env_pinned(threads_spec, base):
+        ok, value = _parse_stored(threads_spec, prospective["prefill_max_threads"])
+        if ok:
+            threads = value
+    try:
+        if touched & {"upstream_max_conns", "prefill_max_threads"}:
+            core_settings.check_cap_floor(core, threads)
+        if touched & {"tls_client_max_conns", "tls_max_conns"}:
+            core_settings.check_tls_order(core)
+    except CoreGrammarError as exc:
+        raise SettingValidationError(str(exc)) from exc
+
+
+# --------------------------------------------------------------------------
+# Startup warnings (Q1, Q2, rc18 window default)
+# --------------------------------------------------------------------------
+
+
+def warn_at_startup(conn: sqlite3.Connection, base: Settings) -> list[str]:
+    """One WARNING per stored value an env pin now shadows (Q1), one for a
+    stored webhook URL (Q2, ignored), and one when the download window comes
+    from the code default (rc18 upgrade visibility). The deprecation warning
+    for VAULT_UPSTREAM_RATE_WINDOW belongs to vault-core (D16c): compose
+    does not forward that variable to vault-api. Returns the messages."""
+    messages: list[str] = []
+    overrides = get_all_overrides(conn)
+    for key, spec in OVERRIDABLE_SPECS.items():
+        if key in overrides and is_env_pinned(spec, base):
+            messages.append(
+                f"settings: {spec.env_var} is set in the environment and wins "
+                f"over the value stored in Settings for {key!r} (env always "
+                "wins since rc18, ADR-0009 addendum). Remove the env variable "
+                "to use the Settings value, or clear it in Settings."
+            )
+    if "webhook_url" in overrides:
+        messages.append(
+            "settings: a webhook URL is stored in Settings; it is ignored since "
+            "rc18 (VAULT_WEBHOOK_URL is env-only). Set VAULT_WEBHOOK_URL in the "
+            "environment if webhooks should be delivered."
+        )
+    if (
+        "VAULT_SCHEDULE_WINDOW" not in base.env_pinned
+        and "schedule_window" not in overrides
+        and base.schedule_window is not None
+        and base.schedule_window.normalized == config.DEFAULT_SCHEDULE_WINDOW
+    ):
+        messages.append(
+            f"settings: the download window {config.DEFAULT_SCHEDULE_WINDOW} is "
+            "the rc18 default (neither VAULT_SCHEDULE_WINDOW nor Settings sets "
+            "one): vault-api downloads updates automatically inside it. "
+            "VAULT_SCHEDULE_WINDOW=off (or 'off' in Settings) disables it."
+        )
+    for message in messages:
+        logger.warning("%s", message)
+    return messages
 
 
 # --------------------------------------------------------------------------
@@ -536,71 +734,80 @@ def effective_settings(conn: sqlite3.Connection, base: Settings) -> Settings:
 class SettingInfo:
     key: str
     effective: Any
-    source: str  # "db" | "env" | "default"
+    #: "env" | "db" (= set in Settings) | "default"
+    source: str
+    #: What clearing the Settings value reverts to (env, else default).
     fallback: Any
     applies: str
     env_only: bool
-
-
-def _source_without_override(current: Any, default: Any) -> str:
-    """"env" if the resolved (non-override) value differs from the built-in
-    default, else "default".
-
-    Deliberately compares TYPED VALUES rather than re-inspecting
-    ``os.environ`` — ``base`` (a plain ``Settings.from_env()`` result, or a
-    hand-built one in tests) is already the complete answer to "what did the
-    environment produce", so re-deriving it from ``os.environ`` a second time
-    here would be a second source of truth for the exact same fact. The
-    trade-off, stated plainly: an operator who explicitly sets an env var to
-    the SAME value the default already has is reported as "default" rather
-    than "env" — cosmetically imprecise, but the effective value is identical
-    either way, so nothing an operator does differs from what this reports.
-    """
-    return "default" if current == default else "env"
+    env_var: str
+    #: The value stored in Settings (JSON form), ``None`` if none. Not echoed
+    #: for env-only keys.
+    value: Any
+    #: False when the key is set via env (or env-only).
+    editable: bool
+    risky: bool
+    grammar: str
+    target: str
+    #: Expert area of the Settings page (D16a table sign-off).
+    expert: bool
+    #: False for core-only keys: vault-api cannot see vault-core's env.
+    env_visible: bool
+    #: A stored value exists but env (or env-only status) overrides it.
+    shadowed: bool
+    #: Why the row is not editable: "env" (set via env), "env_only",
+    #: "core_file_disabled" (core key while VAULT_CORE_SETTINGS_FILE is
+    #: blank); null when editable.
+    reason: str | None
 
 
 def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingInfo]:
-    """Build the full ``GET /v1/settings`` read model: every overridable key,
-    plus the informational env-only ones.
-    """
     overrides = get_all_overrides(conn)
     infos: list[SettingInfo] = []
 
     for key, spec in OVERRIDABLE_SPECS.items():
-        base_value = getattr(base, key)
-        fallback_json = spec.to_json(base_value)
+        pinned = is_env_pinned(spec, base)
         raw = overrides.get(key)
-        if raw is not None:
-            try:
-                effective_value = spec.parse(raw)
-                source = "db"
-            except SettingValidationError:
-                # Same fail-soft rule as effective_settings: a corrupt stored
-                # value is reported as if it were absent, not surfaced as a
-                # crash in the settings screen itself.
-                effective_value = base_value
-                # spec.env_var: which VAULT_* env var this "env" vs.
-                # "default" call is deciding between (see the exhaustive
-                # OVERRIDABLE_SPECS table above for the mapping).
-                source = _source_without_override(base_value, spec.default)
+        stored_ok, stored_value = (False, None) if raw is None else _parse_stored(spec, raw)
+        stored_json = spec.to_json(stored_value) if stored_ok else None
+
+        if spec.target == TARGET_CORE:
+            fallback = spec.default
         else:
-            effective_value = base_value
-            # spec.env_var: same note as above.
-            source = _source_without_override(base_value, spec.default)
+            fallback = spec.to_json(getattr(base, key))
+
+        core_disabled = is_core_disabled(spec, base)
+        if pinned:
+            source, effective = "env", fallback
+        elif stored_ok and not core_disabled:
+            source, effective = "db", stored_json
+        else:
+            source, effective = "default", fallback
+        reason = REASON_ENV if pinned else (REASON_CORE_FILE_DISABLED if core_disabled else None)
 
         infos.append(
             SettingInfo(
                 key=key,
-                effective=spec.to_json(effective_value),
+                effective=effective,
                 source=source,
-                fallback=fallback_json,
+                fallback=fallback,
                 applies=spec.applies,
                 env_only=False,
+                env_var=spec.env_var,
+                value=stored_json,
+                editable=reason is None,
+                risky=spec.risky,
+                expert=spec.expert,
+                grammar=spec.grammar,
+                target=spec.target,
+                env_visible=spec.target != TARGET_CORE,
+                shadowed=(pinned or core_disabled) and stored_ok,
+                reason=reason,
             )
         )
 
     for env_spec in ENV_ONLY_INFO_KEYS:
-        value = getattr(base, env_spec.key)
+        value = env_spec.display(getattr(base, env_spec.key))
         infos.append(
             SettingInfo(
                 key=env_spec.key,
@@ -609,6 +816,16 @@ def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingI
                 fallback=value,
                 applies="restart-required",
                 env_only=True,
+                env_var=env_spec.env_var,
+                value=None,
+                editable=False,
+                risky=False,
+                expert=False,
+                grammar="",
+                target=TARGET_API,
+                env_visible=True,
+                shadowed=env_spec.key in overrides,
+                reason=REASON_ENV_ONLY,
             )
         )
 
@@ -616,9 +833,5 @@ def describe_settings(conn: sqlite3.Connection, base: Settings) -> list[SettingI
 
 
 def _env_var_is_set(name: str) -> bool:
-    """Purely informational (the ``ENV_ONLY_INFO_KEYS`` rows only, never the
-    overridable/mutation-tested set above, which uses
-    ``_source_without_override`` instead) — these fields have no DB-override
-    precedence to get wrong, so asking the environment directly is fine here.
-    """
+    """Informational, for the env-only rows only."""
     return bool(os.environ.get(name, "").strip())

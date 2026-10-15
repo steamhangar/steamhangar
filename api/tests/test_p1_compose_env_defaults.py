@@ -55,7 +55,7 @@ COMPOSE_PATH = Path(__file__).resolve().parents[2] / "deploy" / "compose.yaml"
 # (new in WP S-2) where compose's default is a DELIBERATE divergence from
 # config.py's own default rather than a copy of it.
 EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
-    "VAULT_LOG_LEVEL": "INFO",  # config.py: from_env()'s os.environ.get fallback (Settings.log_level has no dataclass default, and a from_env fallback is not introspectable — literal is defensible here)
+    "VAULT_LOG_LEVEL": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     # WP SWEEP-1 follow-up (ADR-0014 §"Shipping an enabled nightly
     # schedule"). NOT a vault_api/config.py setting at all — a bare OS/libc
     # env var Python's stdlib (datetime.astimezone(), zoneinfo) reads
@@ -64,10 +64,10 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     # honest, zone-agnostic default (deploy/compose.yaml's own comment on
     # this key has the full argument against guessing a populated zone).
     "TZ": "UTC",
-    "VAULT_PREFILL_TIMEOUT_SECONDS": str(config.DEFAULT_PREFILL_TIMEOUT_SECONDS),
+    "VAULT_PREFILL_TIMEOUT_SECONDS": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     # WP CORE-FIX-2: read here in subprocess mode only; same value as the
     # runner's copy below.
-    "VAULT_PREFILL_MAX_THREADS": str(config.DEFAULT_PREFILL_MAX_THREADS),
+    "VAULT_PREFILL_MAX_THREADS": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     "VAULT_WORKER_POLL_SECONDS": str(config.DEFAULT_WORKER_POLL_SECONDS),
     # WP S-2 (ADR-0012). Deliberately the literal "queue", NOT
     # config.PREFILL_MODE_SUBPROCESS (config.py's own built-in default) —
@@ -84,8 +84,8 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     # deploy/compose.yaml's comment on this key for the grep evidence).
     "VAULT_RUNNER_LEASE_TIMEOUT_SECONDS": str(config.DEFAULT_RUNNER_LEASE_TIMEOUT_SECONDS),
     "VAULT_SIZE_CACHE_TTL": str(config.DEFAULT_SIZE_CACHE_TTL_SECONDS),
-    "VAULT_AGENT_REPORT_KEEP": str(config.DEFAULT_AGENT_REPORT_KEEP),
-    "VAULT_MANIFEST_KEEP": str(config.DEFAULT_MANIFEST_KEEP),
+    "VAULT_AGENT_REPORT_KEEP": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_MANIFEST_KEEP": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     # WP SWEEP-1 follow-up (ADR-0014 §"Shipping an enabled nightly
     # schedule", S3 review finding). Deliberately the literal "03:00-07:00",
     # NOT config.py's own bare-metal default (disabled/no window,
@@ -96,9 +96,9 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     # window before. See
     # test_config_py_own_schedule_window_default_is_still_disabled below for
     # the pin on the OTHER half of that divergence.
-    "VAULT_SCHEDULE_WINDOW": "03:00-07:00",
-    "VAULT_GC_GRACE_DAYS": str(config.DEFAULT_GC_GRACE_DAYS),
-    "VAULT_AUTO_GC": str(config.DEFAULT_AUTO_GC),
+    "VAULT_SCHEDULE_WINDOW": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_GC_GRACE_DAYS": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_AUTO_GC": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     # WP SWEEP-1 (ADR-0014). Newly forwarded here as of this package -- see
     # deploy/compose.yaml's own comment on this key for why (the
     # VAULT_SETTINGS_READONLY trap this closes) and
@@ -106,20 +106,20 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     # argument with VAULT_AUTO_GC directly above. Still ALSO DB-overridable
     # at runtime via PATCH /v1/settings (ADR-0009) -- this line adds an env
     # path, it does not remove that one.
-    "VAULT_SWEEP_INCLUDE_CACHED": "true" if config.DEFAULT_SWEEP_INCLUDE_CACHED else "false",
+    "VAULT_SWEEP_INCLUDE_CACHED": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     "VAULT_EVENT_LOG_PATH": "",  # config.py: Settings.event_log_path dataclass default "", feature-off sentinel
-    "VAULT_EVENT_SWEEP_INTERVAL_MINUTES": str(config.DEFAULT_EVENT_SWEEP_INTERVAL_MINUTES),
-    "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES": str(config.DEFAULT_MISS_TRIGGER_COOLDOWN_MINUTES),
-    "VAULT_MISS_TRIGGER_MAX_PER_SWEEP": str(config.DEFAULT_MISS_TRIGGER_MAX_PER_SWEEP),
-    "VAULT_BYPASS_WINDOW_DAYS": str(config.DEFAULT_BYPASS_WINDOW_DAYS),
-    "VAULT_CLIENT_STATS_KEEP": str(config.DEFAULT_CLIENT_STATS_KEEP),
+    "VAULT_EVENT_SWEEP_INTERVAL_MINUTES": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_MISS_TRIGGER_MAX_PER_SWEEP": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_BYPASS_WINDOW_DAYS": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_CLIENT_STATS_KEEP": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     "VAULT_EVENT_LOG_MAX_BYTES": str(config.DEFAULT_EVENT_LOG_MAX_BYTES),
     # WP UPD-1: rendered EMPTY, and empty means config.DEFAULT_MANIFEST_ORACLE
     # (on) -- pinned by test_an_empty_oracle_value_from_compose_means_on.
     "VAULT_MANIFEST_ORACLE": "",
     "VAULT_MANIFEST_ORACLE_URL": config.DEFAULT_MANIFEST_ORACLE_URL,
-    "VAULT_MANIFEST_ORACLE_TIMEOUT": str(config.DEFAULT_MANIFEST_ORACLE_TIMEOUT),
-    "VAULT_WEBHOOK_TIMEOUT_SECONDS": str(config.DEFAULT_WEBHOOK_TIMEOUT_SECONDS),
+    "VAULT_MANIFEST_ORACLE_TIMEOUT": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    "VAULT_WEBHOOK_TIMEOUT_SECONDS": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     # WP 4h.0 (ADR-0010): env-only privacy gate, forwarded directly, like
     # VAULT_SWEEP_INCLUDE_CACHED/VAULT_AUTO_GC above -- but UNLIKE those two,
     # deliberately has no PATCH /v1/settings override at all (a privacy
@@ -198,12 +198,12 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
 # comment block on the vault-runner service for the per-key evidence of
 # which side reads what.
 EXPECTED_DEFAULTS_VAULT_RUNNER: dict[str, str] = {
-    "VAULT_LOG_LEVEL": "INFO",  # same literal/reasoning as vault-api's copy above
+    "VAULT_LOG_LEVEL": "",  # D16b: `${VAR-}`, as on vault-api
     "TZ": "UTC",  # log-timestamp consistency only, see the block comment above
     "VAULT_PREFILL_MODE": "queue",  # same deliberate-divergence literal as vault-api's copy above
-    "VAULT_PREFILL_TIMEOUT_SECONDS": str(config.DEFAULT_PREFILL_TIMEOUT_SECONDS),
+    "VAULT_PREFILL_TIMEOUT_SECONDS": "",  # D16b: `${VAR-}`, as on vault-api
     # WP CORE-FIX-2: the copy the shipped queue mode actually uses.
-    "VAULT_PREFILL_MAX_THREADS": str(config.DEFAULT_PREFILL_MAX_THREADS),
+    "VAULT_PREFILL_MAX_THREADS": "",  # D16b: `${VAR-}`, as on vault-api
     "VAULT_RUNNER_HEARTBEAT_SECONDS": str(config.DEFAULT_RUNNER_HEARTBEAT_SECONDS),
     "VAULT_RUNNER_POLL_SECONDS": str(config.DEFAULT_RUNNER_POLL_SECONDS),
 }
@@ -263,7 +263,60 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     "VAULT_UPSTREAM_MAX_CONNS": "",
     # Forwarded only for the hook's floor check (cap >= prefill threads);
     # same default as vault-api/vault-runner.
-    "VAULT_PREFILL_MAX_THREADS": "8",
+    "VAULT_PREFILL_MAX_THREADS": "",  # D16b: `${VAR-}`; the hook counts blank as 8
+    # D16b (Q5): forwarded since rc18; blank = the 45- hook's 64 MiB.
+    "VAULT_EVENT_LOG_ROTATE_BYTES": "",
+}
+
+#: D16b: the keys editable from Settings that each service forwards, all in
+#: the exact form `${VAR-}` (docs/handover/d16-settings-audit.md 3.5). The
+#: vault-core keys whose blank still means something else until D16c
+#: teaches the hooks `off` (VAULT_UPSTREAM_EDGE, VAULT_RESOLVER,
+#: VAULT_UPSTREAM_RATE_WINDOW) are NOT in this list; their forms are pinned
+#: by UPSTREAM_EDGE_CORE_LINES / UPSTREAM_RATE_CORE_LINES below.
+D16B_EDITABLE_FORWARDED: dict[str, tuple[str, ...]] = {
+    "vault-api": (
+        "VAULT_LOG_LEVEL", "VAULT_PREFILL_TIMEOUT_SECONDS", "VAULT_PREFILL_MAX_THREADS",
+        "VAULT_AGENT_REPORT_KEEP", "VAULT_MANIFEST_KEEP", "VAULT_SCHEDULE_WINDOW",
+        "VAULT_GC_GRACE_DAYS", "VAULT_AUTO_GC", "VAULT_SWEEP_INCLUDE_CACHED",
+        "VAULT_EVENT_SWEEP_INTERVAL_MINUTES", "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES",
+        "VAULT_MISS_TRIGGER_MAX_PER_SWEEP", "VAULT_BYPASS_WINDOW_DAYS",
+        "VAULT_CLIENT_STATS_KEEP", "VAULT_MANIFEST_ORACLE_TIMEOUT",
+        "VAULT_WEBHOOK_TIMEOUT_SECONDS", "VAULT_NAME", "VAULT_SCHEDULE_INTERVAL_MINUTES",
+        "VAULT_SCHEDULE_CLIENT_STALE_DAYS", "VAULT_WEBHOOK_EVENTS",
+        "VAULT_STEAM_LIBRARY_STEAMID",
+    ),
+    "vault-runner": (
+        "VAULT_LOG_LEVEL", "VAULT_PREFILL_TIMEOUT_SECONDS", "VAULT_PREFILL_MAX_THREADS",
+    ),
+    "vault-core": (
+        "VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_POOL_HOSTS", "VAULT_UPSTREAM_MAX_CONNS",
+        "VAULT_TLS_CLIENT_MAX_CONNS", "VAULT_TLS_MAX_CONNS", "VAULT_PREFILL_MAX_THREADS",
+        "VAULT_EVENT_LOG_ROTATE_BYTES",
+    ),
+}
+
+#: D16b: the documented default of every api/runner key above, as a STRING
+#: LITERAL (LEARNINGS "Security-constant pins must assert STRING LITERALS"):
+#: compose no longer carries them, so this table is what notices a silent
+#: change of a config.py default. Value -> Settings field.
+D16B_DOCUMENTED_DEFAULTS: dict[str, tuple[str, str]] = {
+    "VAULT_LOG_LEVEL": ("INFO", "log_level"),
+    "VAULT_PREFILL_TIMEOUT_SECONDS": ("14400", "prefill_timeout_seconds"),
+    "VAULT_PREFILL_MAX_THREADS": ("8", "prefill_max_threads"),
+    "VAULT_AGENT_REPORT_KEEP": ("20", "agent_report_keep"),
+    "VAULT_MANIFEST_KEEP": ("3", "manifest_keep"),
+    "VAULT_SCHEDULE_WINDOW": ("03:00-07:00", "schedule_window"),
+    "VAULT_GC_GRACE_DAYS": ("14", "gc_grace_days"),
+    "VAULT_AUTO_GC": ("execute", "auto_gc"),
+    "VAULT_SWEEP_INCLUDE_CACHED": ("true", "sweep_include_cached"),
+    "VAULT_EVENT_SWEEP_INTERVAL_MINUTES": ("5", "event_sweep_interval_minutes"),
+    "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES": ("60", "miss_trigger_cooldown_minutes"),
+    "VAULT_MISS_TRIGGER_MAX_PER_SWEEP": ("5", "miss_trigger_max_per_sweep"),
+    "VAULT_BYPASS_WINDOW_DAYS": ("3", "bypass_window_days"),
+    "VAULT_CLIENT_STATS_KEEP": ("48", "client_stats_keep"),
+    "VAULT_MANIFEST_ORACLE_TIMEOUT": ("10.0", "manifest_oracle_timeout"),
+    "VAULT_WEBHOOK_TIMEOUT_SECONDS": ("5.0", "webhook_timeout_seconds"),
 }
 
 #: One row per Compose service this file checks, in the sense used
@@ -529,8 +582,28 @@ def test_config_py_own_prefill_mode_default_is_still_subprocess() -> None:
     assert settings.prefill_mode == config.PREFILL_MODE_SUBPROCESS
 
 
-def test_config_py_own_schedule_window_default_is_still_disabled() -> None:
-    """Pins the OTHER half of the VAULT_SCHEDULE_WINDOW divergence above
+def test_config_py_owns_the_schedule_window_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D16b (inverted, audit 3.6): compose forwards `${VAULT_SCHEDULE_WINDOW-}`
+    and config.py owns the shipped default 03:00-07:00 (blank or unset);
+    `off` gives no window. Flip the default and this dies."""
+    monkeypatch.setenv("VAULT_API_KEY", "k")
+    monkeypatch.delenv("VAULT_SCHEDULE_WINDOW", raising=False)
+    window = config.Settings.from_env().schedule_window
+    assert window is not None and window.normalized == "03:00-07:00"
+    monkeypatch.setenv("VAULT_SCHEDULE_WINDOW", "")
+    window = config.Settings.from_env().schedule_window
+    assert window is not None and window.normalized == "03:00-07:00"
+    monkeypatch.setenv("VAULT_SCHEDULE_WINDOW", "off")
+    assert config.Settings.from_env().schedule_window is None
+
+
+def test_bare_settings_schedule_window_is_still_none() -> None:
+    """Was `test_config_py_own_schedule_window_default_is_still_disabled`.
+    D16b keeps the bare DATACLASS default at None (tests construct Settings
+    directly and must not start sweeping); the shipped default is applied by
+    from_env (test above).
+
+    Pins the OTHER half of the VAULT_SCHEDULE_WINDOW divergence above
     (WP SWEEP-1 follow-up, ADR-0014 §"Shipping an enabled nightly schedule"),
     same shape as `test_config_py_own_prefill_mode_default_is_still_subprocess`
     just above.
@@ -551,6 +624,44 @@ def test_config_py_own_schedule_window_default_is_still_disabled() -> None:
     )
     assert settings.schedule_window is None
     assert settings.scheduler_enabled is False
+
+
+@pytest.mark.parametrize(
+    "service_name,env_var",
+    sorted((svc, key) for svc, keys in D16B_EDITABLE_FORWARDED.items() for key in keys),
+)
+def test_d16b_editable_keys_are_forwarded_as_not_set(
+    service_name: str, env_var: str, compose_text: str
+) -> None:
+    """D16b (Q7): exactly `KEY: ${KEY-}` -- no colon, no default. A default
+    here would be an env pin for every install (env always wins, Q1) and
+    turn the key read-only in Settings."""
+    block = _extract_service_environment_block(compose_text, service_name)
+    lines = [line.strip() for line in block.splitlines() if re.match(rf"^\s{{6}}{env_var}:", line)]
+    assert lines == [f"{env_var}: ${{{env_var}-}}"], (
+        f"deploy/compose.yaml's {service_name} forwards {env_var} as {lines!r}; "
+        f"expected exactly ['{env_var}: ${{{env_var}-}}'] (D16b, audit 3.5)."
+    )
+
+
+@pytest.mark.parametrize("env_var", sorted(D16B_DOCUMENTED_DEFAULTS))
+def test_d16b_config_default_matches_the_documented_default(
+    env_var: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With compose forwarding blank, config.py's default is what applies:
+    resolve it through Settings.from_env with the variable blank (what
+    `${VAR-}` delivers for an unset key) and compare it with the literal."""
+    documented, field = D16B_DOCUMENTED_DEFAULTS[env_var]
+    monkeypatch.setenv("VAULT_API_KEY", "k")
+    monkeypatch.setenv(env_var, "")
+    value = getattr(config.Settings.from_env(), field)
+    if env_var == "VAULT_SCHEDULE_WINDOW":
+        shown = value.normalized
+    elif isinstance(value, bool):
+        shown = "true" if value else "false"
+    else:
+        shown = str(value)
+    assert shown == documented
 
 
 # WP S-2's own completeness discipline: every NEW `VAULT_*` variable this
@@ -763,13 +874,13 @@ def test_schedule_window_uses_the_no_colon_substitution_form(compose_text: str) 
     silently reopen the exact trap this test exists to catch.
     """
     api_block = _extract_service_environment_block(compose_text, "vault-api")
-    assert "VAULT_SCHEDULE_WINDOW: ${VAULT_SCHEDULE_WINDOW-03:00-07:00}" in api_block, (
-        "deploy/compose.yaml's vault-api service no longer uses the no-colon "
-        "substitution form for VAULT_SCHEDULE_WINDOW -- if it now reads "
-        "${VAULT_SCHEDULE_WINDOW:-03:00-07:00} (WITH a colon), an explicitly "
-        "blank VAULT_SCHEDULE_WINDOW= in .env silently renders the default "
-        "window instead of disabling the scheduler (review round 2, "
-        "blocker R2-B1, measured). Restore the no-colon form."
+    # D16b (Q7): still no colon, now no default either; blank = not set
+    # (the default window lives in config.py), off = scheduler off.
+    assert "VAULT_SCHEDULE_WINDOW: ${VAULT_SCHEDULE_WINDOW-}" in api_block, (
+        "deploy/compose.yaml's vault-api service no longer forwards "
+        "VAULT_SCHEDULE_WINDOW as ${VAULT_SCHEDULE_WINDOW-} (D16b). A colon "
+        "form would turn a blank line into a pin; a default here would pin "
+        "the window for every install and make it read-only in Settings."
     )
     assert "VAULT_SCHEDULE_WINDOW: ${VAULT_SCHEDULE_WINDOW:-" not in api_block, (
         "deploy/compose.yaml's vault-api service forwards VAULT_SCHEDULE_WINDOW "
@@ -798,7 +909,8 @@ UPSTREAM_RATE_CORE_LINES = (
 UPSTREAM_EDGE_CORE_LINES = (
     "VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}",
     "VAULT_UPSTREAM_MAX_CONNS: ${VAULT_UPSTREAM_MAX_CONNS-}",
-    "VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS:-8}",
+    # D16b: `${VAR-}` like every editable key; the hook counts blank as 8.
+    "VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS-}",
     # WP CORE-FIX-4d: blank and unset both mean the hook's default, so the
     # form is not load-bearing; pinned like the upstream cap for consistency.
     "VAULT_TLS_CLIENT_MAX_CONNS: ${VAULT_TLS_CLIENT_MAX_CONNS-}",
@@ -822,12 +934,18 @@ def test_upstream_rate_keys_use_the_no_colon_form(expected_line: str, compose_te
 def test_upstream_rate_window_follows_the_schedule_window_default(
     env_defaults_by_service: dict[str, dict[str, str]],
 ) -> None:
-    """The cap window's fallback must be vault-api's own schedule-window
-    forwarding, default included, so an operator who sets neither gets the
-    cap lifted exactly while the scheduler runs."""
-    api_window_default = env_defaults_by_service["vault-api"]["VAULT_SCHEDULE_WINDOW"]
+    """The cap window's fallback must be vault-api's own download-window
+    default, so an operator who sets neither gets the cap lifted exactly
+    while the scheduler runs. D16b: vault-api's default moved into config.py
+    (compose forwards `${VAULT_SCHEDULE_WINDOW-}` there), so this compares
+    against config.DEFAULT_SCHEDULE_WINDOW. D16c replaces this nested line
+    with `${VAULT_UPSTREAM_RATE_WINDOW-}` once vault-core reads the
+    effective window from the core settings file
+    (core_settings.core_file_values, pinned in test_d16b_core_grammar.py)
+    and its hook accepts `off`; until then a Settings window does not reach
+    vault-core."""
     core_window_default = env_defaults_by_service["vault-core"]["VAULT_UPSTREAM_RATE_WINDOW"]
-    assert core_window_default == f"${{VAULT_SCHEDULE_WINDOW-{api_window_default}}}"
+    assert core_window_default == f"${{VAULT_SCHEDULE_WINDOW-{config.DEFAULT_SCHEDULE_WINDOW}}}"
 
 
 @pytest.mark.parametrize(

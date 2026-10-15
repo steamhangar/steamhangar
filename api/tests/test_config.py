@@ -230,11 +230,13 @@ def test_steamprefill_cache_dir_override(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert Settings.from_env().steamprefill_cache_dir == override
 
 
-def test_scheduler_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The safe default (WP 3.5): no window = vault-api schedules nothing.
-
-    A fresh install must not start Steam logins and downloads on its own just
-    because nobody read the docs yet.
+def test_the_default_download_window_is_owned_by_the_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D16b (Q3, Q7; inverted from WP 3.5's "disabled by default"): an unset
+    VAULT_SCHEDULE_WINDOW is "not set" and resolves to the shipped download
+    window 03:00-07:00, which compose used to supply. Since ADR-0014 the
+    shipped stack has always run with this window; the default moved from
+    compose into config.py, so a native run behaves like the stack. Flip the
+    default back to None and this test dies (fail-closed default direction).
     """
     monkeypatch.setenv("VAULT_API_KEY", "some-key")
     for name in (
@@ -246,8 +248,10 @@ def test_scheduler_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> No
 
     settings = Settings.from_env()
 
-    assert settings.schedule_window is None
-    assert settings.scheduler_enabled is False
+    assert config.DEFAULT_SCHEDULE_WINDOW == "03:00-07:00"
+    assert settings.schedule_window is not None
+    assert settings.schedule_window.normalized == "03:00-07:00"
+    assert settings.scheduler_enabled is True
     # Plan §7 Phase 3's "every 3 h", and the documented staleness bound.
     assert settings.schedule_interval_minutes == 180
     assert settings.schedule_client_stale_days == 7
@@ -278,15 +282,34 @@ def test_an_overnight_window_is_accepted(monkeypatch: pytest.MonkeyPatch) -> Non
     assert window is not None and window.overnight is True
 
 
-def test_a_blank_window_disables_rather_than_failing(
+def test_a_blank_window_means_not_set_rather_than_failing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """'unset' and 'set to spaces' must mean the same thing (a commented-out
-    line in .env that kept a trailing space is not a config error)."""
+    line in .env that kept a trailing space is not a config error). D16b
+    (Q7): both mean "not set", i.e. the default window, no longer "off"."""
     monkeypatch.setenv("VAULT_API_KEY", "some-key")
     monkeypatch.setenv("VAULT_SCHEDULE_WINDOW", "   ")
 
+    window = Settings.from_env().schedule_window
+    assert window is not None and window.normalized == config.DEFAULT_SCHEDULE_WINDOW
+
+
+@pytest.mark.parametrize("spelling", ["off", " off "])
+def test_off_disables_the_scheduler(monkeypatch: pytest.MonkeyPatch, spelling: str) -> None:
+    """D16b (Q7): the scheduler-off state is spelled ``off``."""
+    monkeypatch.setenv("VAULT_API_KEY", "some-key")
+    monkeypatch.setenv("VAULT_SCHEDULE_WINDOW", spelling)
+
     assert Settings.from_env().scheduler_enabled is False
+
+
+@pytest.mark.parametrize("bad", ["OFF", "Off", "off,x", "no"])
+def test_off_is_exact_and_lowercase(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    monkeypatch.setenv("VAULT_API_KEY", "some-key")
+    monkeypatch.setenv("VAULT_SCHEDULE_WINDOW", bad)
+    with pytest.raises(RuntimeError, match="VAULT_SCHEDULE_WINDOW is invalid"):
+        Settings.from_env()
 
 
 def test_a_malformed_window_fails_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -487,17 +510,14 @@ def test_every_env_example_value_still_parses(monkeypatch: pytest.MonkeyPatch) -
     env_example = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.example"
     )
-    with open(env_example, encoding="utf-8") as handle:
-        lines = [
-            line.strip()
-            for line in handle
-            if line.strip() and not line.strip().startswith("#") and "=" in line
-        ]
+    # D16b (audit 3.7): editable keys are documented as COMMENTED
+    # `#KEY=value` lines now; read both forms, so every documented value
+    # still has to parse.
+    documented = _env_example_documented(env_example)
 
     monkeypatch.setenv("VAULT_API_KEY", "some-key")
     seen: dict[str, str] = {}
-    for line in lines:
-        name, _, value = line.partition("=")
+    for name, value in documented.items():
         if name == "VAULT_API_KEY":
             continue
         monkeypatch.setenv(name, value)
@@ -529,6 +549,54 @@ def test_every_env_example_value_still_parses(monkeypatch: pytest.MonkeyPatch) -
 #: just hit, not a retrofit of every pre-existing line in this file — same
 #: incremental-scope precedent `EXPECTED_DEFAULTS_VAULT_API` itself set
 #: (grown one work package at a time, never audited wholesale in one pass).
+def _env_example_documented(path: str) -> dict[str, str]:
+    """``KEY -> value`` for every ``KEY=value`` and every ``#KEY=value`` line
+    (the ``#`` directly in front of the name, so prose mentioning a variable
+    is not read). D16b: editable keys are documented commented. A key that
+    appears twice keeps its LAST documented value."""
+    import re
+
+    found: dict[str, str] = {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            m = re.match(r"^#?(VAULT_[A-Z0-9_]+)=(.*)$", line.rstrip("\r\n"))
+            if m:
+                found[m.group(1)] = m.group(2)
+    return found
+
+
+def _editable_env_vars() -> set[str]:
+    from vault_api import settings_store
+
+    return {spec.env_var for spec in settings_store.OVERRIDABLE_SPECS.values()}
+
+
+@pytest.mark.parametrize("which", ["api", "deploy"])
+def test_no_editable_key_is_assigned_uncommented(which: str) -> None:
+    """D16b (audit 3.7 point 2): a copied template pins nothing. Every key
+    editable in Settings appears in both .env.example files only as a
+    commented example; an uncommented line would be an env pin for every
+    install that copies the file (env always wins, Q1)."""
+    import os
+    import re
+
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(root, which, ".env.example")
+    editable = _editable_env_vars()
+    with open(path, encoding="utf-8") as handle:
+        assigned = {
+            m.group(1)
+            for line in handle
+            if (m := re.match(r"^\s*(VAULT_[A-Z0-9_]+)\s*=", line))
+        }
+    pinned = sorted(assigned & editable)
+    assert not pinned, (
+        f"{which}/.env.example assigns editable keys uncommented: {pinned}. "
+        "Document them as `#KEY=<default>` instead (D16b, audit 3.7)."
+    )
+    assert len(editable) == 29
+
+
 ENV_EXAMPLE_DEFAULT_PINS: dict[str, str] = {
     "VAULT_SWEEP_INCLUDE_CACHED": "true" if config.DEFAULT_SWEEP_INCLUDE_CACHED else "false",
     "VAULT_AUTO_GC": str(config.DEFAULT_AUTO_GC),
@@ -554,19 +622,11 @@ def test_env_example_value_matches_config_default(env_var: str) -> None:
     env_example = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.example"
     )
-    with open(env_example, encoding="utf-8") as handle:
-        lines = [
-            line.strip()
-            for line in handle
-            if line.strip() and not line.strip().startswith("#") and "=" in line
-        ]
-    documented: dict[str, str] = {}
-    for line in lines:
-        name, _, value = line.partition("=")
-        documented[name] = value
+    # D16b (audit 3.7): the documented value sits on the commented line.
+    documented = _env_example_documented(env_example)
 
     assert env_var in documented, (
-        f"api/.env.example no longer has an assignment line for {env_var}, "
+        f"api/.env.example no longer documents {env_var} (`#{env_var}=...`), "
         "but ENV_EXAMPLE_DEFAULT_PINS above expects one."
     )
     expected = ENV_EXAMPLE_DEFAULT_PINS[env_var]

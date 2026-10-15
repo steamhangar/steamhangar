@@ -116,3 +116,46 @@ means "not set", like `webhook_url`. It is not secret (decision 7 does not
 apply), because a SteamID64 is a public identifier. `applies` is
 `immediately`, since vault-api caches nothing for it; the frontends read it
 per request from `GET /v1/settings`.
+
+## Addendum 2026-10-14 — env always wins (D16b, user decisions Q1-Q3, Q7)
+
+Decided by the user on 2026-10-14 (`docs/handover/d16-settings-audit.md`
+section 5.1), implemented in D16b (rc18). It **reverses decision 1**.
+
+1. **Precedence: env value > Settings (DB) value > built-in default**, for
+   every key including the nine that were overridable before. A key whose
+   `VAULT_*` variable is set to a non-blank value is "set via env": the UI
+   shows it as plain text, PATCH answers `409`, and a stored value for it is
+   ignored. vault-api logs one startup warning per stored value an env pin
+   now shadows, so an existing override never vanishes silently. Reason: the
+   expert mode moves most tuning into Settings, and "a value in the env is
+   the operator's pin" is the rule that keeps a forgotten Compose line
+   visible instead of silently losing against it.
+2. **Blank means "not set"** (Q7). Compose forwards every editable key as
+   `${VAR-}`; the shipped defaults (download window `03:00-07:00`, ...) move
+   into the code. Where blank used to select a behaviour, the keyword `off`
+   spells it (`VAULT_SCHEDULE_WINDOW`, `VAULT_UPSTREAM_RATE`,
+   `VAULT_UPSTREAM_EDGE`, `VAULT_UPSTREAM_POOL_HOSTS`,
+   `VAULT_UPSTREAM_RATE_WINDOW`). Decision 2's `null` stays the way to clear
+   a Settings value.
+3. **`VAULT_WEBHOOK_URL` is env-only** (Q2), joining decision 5's allowlist:
+   it can carry credentials in the userinfo and in the path. GET shows it
+   masked to scheme and host; a stored value is ignored with one startup
+   warning. Decision 7 therefore has no PATCH-side case left.
+4. **One download window** (Q3): `VAULT_SCHEDULE_WINDOW` (env or Settings)
+   is also vault-core's rate-cap window, handed over through the core
+   settings file. `VAULT_UPSTREAM_RATE_WINDOW` is deprecated (vault-core
+   warns at startup and still honours it as an env pin, D16c; vault-api
+   does not see the variable). Core keys are editable only while
+   vault-api writes the core settings file (`VAULT_CORE_SETTINGS_FILE`
+   set); otherwise they are read-only (review decision B3).
+5. **Risky keys** (D16a table sign-off: the upstream and TLS connection
+   caps, the prefill thread count, and the debug knobs upstream edge, pool
+   hosts and resolver; the log level is not risky) need an explicit
+   confirmation flag on PATCH (`428` without it),
+   and core keys are validated at PATCH time with Python twins of the hook
+   grammars, pinned by one shared fixture table, so vault-api refuses what
+   vault-core would refuse at render time (decision 4 extended to core).
+
+Decisions 3 (read-only lock), 4, 5 (extended by point 3) and 6 stand.
+`applies` gains `next_job` and `core`.
