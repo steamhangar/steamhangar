@@ -449,6 +449,8 @@ ENV_ONLY_INFO_KEYS: tuple[EnvOnlySpec, ...] = (
     EnvOnlySpec("library_meta_enabled", "VAULT_LIBRARY_META"),
     # WP D19-1a: external-traffic gate (oracle query on card open), env-only.
     EnvOnlySpec("depot_preview_enabled", "VAULT_DEPOT_PREVIEW"),
+    # WP D19-1c: external-traffic gate (store.steampowered.com on card open).
+    EnvOnlySpec("store_details_enabled", "VAULT_STORE_DETAILS"),
     # D16b (Q2): can carry credentials; shown masked, never editable.
     EnvOnlySpec("webhook_url", "VAULT_WEBHOOK_URL", mask_url),
 )

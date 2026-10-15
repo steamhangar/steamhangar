@@ -869,6 +869,13 @@ query per opened card, cached 24 h per app. It needs the oracle on as well and
 adds no new host. It is off by default because it reveals which games are
 browsed, while the oracle itself is on by default.
 
+`VAULT_STORE_DETAILS` (WP D19-1c, default `false`, env-only) lets the game card
+show a short description, genres, release date, modes and the overall review
+rating. Opening a card sends that one app id to `store.steampowered.com`
+(Valve; two anonymous requests, cached 24 h per app). The proxy allows that
+host by default (baked in, like `api.steampowered.com`), but no request is made
+unless this switch is on. It is independent of the oracle switch.
+
 **A sixth, newly forwarded here by WP SWEEP-1: `VAULT_SWEEP_INCLUDE_CACHED`
 (WP 4d) now also passes through, defaulting to `true`, paired with
 `VAULT_AUTO_GC`'s own default above flipping to `execute` in the same

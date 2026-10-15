@@ -1699,6 +1699,12 @@ body.onboarding .nav{ display:none; }
 .detail-statusrow{ display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px; }
 
 .detail-block{ margin-top:14px; }
+.store-desc{ margin:0 0 8px; font-size:12.5px; line-height:1.55; color:var(--text);
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer; }
+.store-desc.expanded{ display:block; overflow:visible; }
+.store-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:0 0 8px; }
+.store-chip{ border:1px solid var(--line); border-radius:999px; padding:2px 9px; font-size:11px; color:var(--dim); }
+.store-line{ margin:2px 0 0; font-size:11.5px; color:var(--dim); }
 .facts{ display:flex; flex-direction:column; gap:3px; font-size:11.8px; color:var(--dim); }
 
 .depots{ display:flex; flex-direction:column; gap:1px; background:var(--line-soft); border-radius:var(--r-s); overflow:hidden; }

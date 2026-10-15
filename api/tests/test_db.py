@@ -63,6 +63,8 @@ EXPECTED_TABLES = {
     "app_meta_genres",
     "depot_preview",
     "depot_preview_state",
+    # v33 (WP D19-1c): store details for the game card.
+    "store_details",
 }
 
 

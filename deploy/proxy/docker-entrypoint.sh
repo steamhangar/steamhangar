@@ -111,7 +111,18 @@ log "client allowlist rendered: Allow $egress_subnet (VAULT_EGRESS_SUBNET) + loo
 # key: the background cover-art lookup (IStoreBrowseService/GetItems,
 # api/vault_api/cover_art.py; threat-model §5 item 6; ADR-0011 addendum
 # 2026-10-10). Same host, so nothing here changed.
-BAKED_HOSTS="api.steampowered.com shared.akamai.steamstatic.com cdn.akamai.steamstatic.com"
+# WP D19-1c: store.steampowered.com is baked in too (card enrichment:
+# appdetails and appreviews, one app id per opened card). Baked rather than
+# switch-derived for the same reason as api.steampowered.com: the switch lives
+# in vault-api, not here. The traffic itself stays off unless the operator sets
+# VAULT_STORE_DETAILS (env-only, default false); the host only becomes
+# reachable, no data flows without that switch (docs/security/privacy-review.md
+# O9).
+# Scope of the host entry: tinyproxy runs with FilterURLs Off, so the filter
+# only limits the destination host (plain host and CONNECT). It does not limit
+# paths. Path limits come only from the fixed URL templates and an integer app
+# id (ge=1) in vault-api.
+BAKED_HOSTS="api.steampowered.com shared.akamai.steamstatic.com cdn.akamai.steamstatic.com store.steampowered.com"
 
 # Turns "host.name" into the anchored, dot-escaped BRE pattern described
 # above. Deliberately narrow: escapes only ".", the one BRE metacharacter a

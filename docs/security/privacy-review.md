@@ -58,6 +58,8 @@ only (`:737`). The allow list is baked hosts
 | O12 | vault-dns upstream | `UPSTREAM_DNS_1/2`, default `1.1.1.1` and `8.8.8.8` (`compose.yaml:1212-1213`, `dns/dnsmasq.conf.template:81-82`) | every non-Steam DNS name any LAN client resolves, when the household uses vault-dns as its resolver | Browsing metadata of every device | **Defaults to two public third-party resolvers**; query logging itself is off (`dnsmasq.conf.template:165`) | `UPSTREAM_DNS_1/2` | Unreachable: resolution fails for non-Steam names | medium | document the default; recommend the router as upstream |
 | O13 | vault-core resolver and MISS traffic | `VAULT_RESOLVER` (required, no default, `40-vault-preflight.sh:77-81`) and Valve CDN over plain HTTP | depot URL, header `X-SteamHangar-Hop: 1` (`nginx.conf.template:703`); no client address is forwarded (no `X-Forwarded-For`, `nginx.conf.template:363,506`) | The cache as a product; not the client | on, product purpose | n/a | n/a | low | unchanged |
 
+Store requests (O9) send the same `User-Agent: SteamHangar-vault-api/0.1 (+https://github.com/, self-hosted)` as the oracle. This tells Valve the request comes from a SteamHangar install; it carries no personal data.
+
 Not found anywhere in `api/`, `core/`, `dns/`, `deploy/`, `agent/`, `app/` or
 `web/`: telemetry, crash reporting, analytics, web fonts or any CDN script.
 The CSP is `default-src 'self'` plus the two image hosts (`webui.py:103-114`).

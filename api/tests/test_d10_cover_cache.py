@@ -702,7 +702,14 @@ def _baked_hosts() -> set[str]:
 def test_proxy_bakes_in_exactly_the_relay_host_and_the_cover_hosts() -> None:
     from vault_api import cover_art, steam_relay
 
-    expected = {steam_relay.STEAM_API_HOST} | set(cover_art.ALLOWED_ASSET_HOSTS)
+    from vault_api import store_details
+
+    # D19-1c: the store host is baked in too; the switch (not the proxy) gates use.
+    expected = (
+        {steam_relay.STEAM_API_HOST}
+        | set(cover_art.ALLOWED_ASSET_HOSTS)
+        | {store_details.HOST}
+    )
     assert _baked_hosts() == expected
 
 

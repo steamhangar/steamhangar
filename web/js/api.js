@@ -207,6 +207,8 @@ export const api = {
   /** WP D19-1b: expected depots of a never-cached game (state "off" unless the
    * oracle and the depot-preview switches are both on). */
   depotPreview: (appid) => request("GET", `/v1/oracle/${encodeURIComponent(appid)}/preview`),
+  /** WP D19-1c: store details of a card (state "off" unless VAULT_STORE_DETAILS). */
+  storeDetails: (appid) => request("GET", `/v1/store/${encodeURIComponent(appid)}/details`),
   // WP D15c: `range` (24h|7d|30d|all) or `since` filters finished jobs by
   // age (WP D15b); omitted, the call is unchanged (the store's poll).
   jobs: (limit = 20, { range, since } = {}) => request("GET", "/v1/jobs", { params: { limit, range, since } }),

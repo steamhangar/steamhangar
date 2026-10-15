@@ -110,5 +110,5 @@ test("the sheet asks for a preview only after load, for games without depots, an
 
 test("the expected block replaces the unknown note and sits in the not-tracked card", () => {
   assert.match(sheetJs, /const expected = buildExpectedBlock\(\);\s*if \(expected\) \{\s*wrap\.appendChild\(expected\)/);
-  assert.match(sheetJs, /wrap\.append\(h3, p, expected, btn\)/);
+  assert.match(sheetJs, /\[h3, p, buildStoreBlock\(\), expected, btn\]\.filter/);
 });

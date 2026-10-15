@@ -134,6 +134,8 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     "VAULT_LIBRARY_META": "true" if config.DEFAULT_LIBRARY_META else "false",
     # WP D19-1a: env-only external-traffic gate, off by default.
     "VAULT_DEPOT_PREVIEW": "true" if config.DEFAULT_DEPOT_PREVIEW else "false",
+    # WP D19-1c: env-only external-traffic gate, off by default.
+    "VAULT_STORE_DETAILS": "true" if config.DEFAULT_STORE_DETAILS else "false",
     # Fable-audit follow-up (security lock that fails open if omitted):
     # VAULT_SETTINGS_READONLY is env-only BY DEFINITION (ADR-0009 decision 3
     # -- a lock on the settings-write API cannot be unlockable through that

@@ -150,6 +150,17 @@ import {
   expectedDlcDepotRows,
   wantsPreview,
 } from "../lib/depot-preview.js";
+import {
+  STORE_RETRY_MS,
+  STORE_STATE,
+  byLine,
+  descriptionText,
+  genreList,
+  hasStoreContent,
+  isReady as isStoreReady,
+  modeChips,
+  ratingText,
+} from "../lib/store-details.js";
 import { buildMultiPlan } from "../lib/multiplan.js";
 import { buildDepotPresentation, DEPOT_TAG } from "../lib/depot-presentation.js";
 import { findTrackedJob, detailJobActions, DETAIL_JOB_ACTION } from "../lib/detail-job.js";
@@ -206,6 +217,9 @@ const state = {
    * set for a game with no observed depots; the server gates it behind the
    * oracle and depot-preview switches (state "off" when either is off). */
   preview: null,
+  /** WP D19-1c: `GET /v1/store/{appid}/details` payload, or null (state "off"
+   * unless VAULT_STORE_DETAILS is on). Plain text only, via textContent. */
+  store: null,
 };
 
 /** appid -> "reachable" token. Bumped on every open()/close()/GC restart so
@@ -553,6 +567,7 @@ export function openDetail(appid, name) {
   state.loadError = null;
   state.gcState = idleGcState();
   state.preview = null;
+  state.store = null;
   depotExpanded.clear();
   lastStructuralKey = null;
 
@@ -584,6 +599,9 @@ export function openDetail(appid, name) {
     ) {
       loadPreview(myGeneration, myAppid, 0);
     }
+    if (generation === myGeneration && state.appid === myAppid && !state.loadError) {
+      loadStore(myGeneration, myAppid, 0);
+    }
   })();
 }
 
@@ -606,6 +624,72 @@ async function loadPreview(myGeneration, myAppid, attempt) {
   if (preview && preview.state === PREVIEW_STATE.PENDING && attempt < PENDING_RETRY_MS.length) {
     setTimeout(() => loadPreview(myGeneration, myAppid, attempt + 1), PENDING_RETRY_MS[attempt]);
   }
+}
+
+/**
+ * WP D19-1c: ask for the store details of the open game. Best effort: any
+ * failure, or the server saying "off", leaves the card exactly as it was.
+ * Never asked before the card's own data has loaded.
+ */
+async function loadStore(myGeneration, myAppid, attempt) {
+  let payload;
+  try {
+    payload = await api.storeDetails(myAppid);
+  } catch {
+    return;
+  }
+  if (generation !== myGeneration || state.appid !== myAppid) return;
+  state.store = payload;
+  if (isStoreReady(payload)) render();
+  if (payload && payload.state === STORE_STATE.PENDING && attempt < STORE_RETRY_MS.length) {
+    setTimeout(() => loadStore(myGeneration, myAppid, attempt + 1), STORE_RETRY_MS[attempt]);
+  }
+}
+
+/**
+ * The store block (description, mode chips, genres, developer/date, overall
+ * rating), or null. Every string goes in through `textContent`; the markup is
+ * ours.
+ */
+function buildStoreBlock() {
+  if (!hasStoreContent(state.store)) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "store-details detail-block";
+  const description = descriptionText(state.store);
+  if (description) {
+    const p = document.createElement("p");
+    p.className = "store-desc";
+    p.textContent = description;
+    p.title = "Click to expand";
+    p.addEventListener("click", () => p.classList.toggle("expanded"));
+    wrap.appendChild(p);
+  }
+  const chips = modeChips(state.store);
+  if (chips.length) {
+    const row = document.createElement("div");
+    row.className = "store-chips";
+    for (const label of chips) {
+      const chip = document.createElement("span");
+      chip.className = "store-chip";
+      chip.textContent = label;
+      row.appendChild(chip);
+    }
+    wrap.appendChild(row);
+  }
+  const lines = [
+    ["genres", genreList(state.store).join(", ")],
+    ["by", byLine(state.store)],
+    ["rating", ratingText(state.store)],
+  ];
+  for (const [role, line] of lines) {
+    if (!line) continue;
+    const p = document.createElement("p");
+    p.className = "u2 store-line";
+    p.dataset.role = role;
+    p.textContent = line;
+    wrap.appendChild(p);
+  }
+  return wrap;
 }
 
 /** The "Expected ..." block (size line, depot rows, DLC depots), or null. */
@@ -1487,8 +1571,9 @@ function renderNotTracked() {
       }
     }),
   );
-  if (expected) wrap.append(h3, p, expected, btn);
-  else wrap.append(h3, p, btn);
+  // WP D19-1c: the store block (when the switch is on and the store knew the
+  // app) sits between the note and the expected depots.
+  wrap.append(...[h3, p, buildStoreBlock(), expected, btn].filter((el) => el !== null));
   return wrap;
 }
 
@@ -1541,6 +1626,10 @@ function render() {
     sheetTitle(gameLike),
   );
   if (completeness) contentEl.append(completeness);
+
+  // WP D19-1c: store details (only when VAULT_STORE_DETAILS is on).
+  const storeBlock = buildStoreBlock();
+  if (storeBlock) contentEl.append(storeBlock);
 
   const installedSection = buildInstalledSection(gameLike);
   if (installedSection) contentEl.append(installedSection);

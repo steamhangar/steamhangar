@@ -1322,6 +1322,8 @@ const ENV_ONLY_DEMO = [
   { key: "library_meta_enabled", env_var: "VAULT_LIBRARY_META", value: false },
   // WP D19-1a: oracle query on card open (off in the demo: no external query).
   { key: "depot_preview_enabled", env_var: "VAULT_DEPOT_PREVIEW", value: false },
+  // WP D19-1c: store details on the card (off in the demo: no external query).
+  { key: "store_details_enabled", env_var: "VAULT_STORE_DETAILS", value: false },
   { key: "webhook_url", env_var: "VAULT_WEBHOOK_URL", value: DEMO_WEBHOOK_URL_MASKED },
 ];
 const ENV_ONLY_KEYS = new Set(["vault_api_key", ...ENV_ONLY_DEMO.map((e) => e.key)]);
@@ -2577,6 +2579,11 @@ export async function demoRequest(method, path, { body, params } = {}) {
 
   // WP D19-1b: the depot preview is off by default (own env switch).
   if (method === "GET" && /^\/v1\/oracle\/\d+\/preview$/.test(path)) {
+    return { state: "off" };
+  }
+
+  // WP D19-1c: store details are off by default too (own env switch).
+  if (method === "GET" && /^\/v1\/store\/\d+\/details$/.test(path)) {
     return { state: "off" };
   }
 

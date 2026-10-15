@@ -1167,6 +1167,15 @@ DEFAULT_LIBRARY_META = False
 #: the oracle on as well (docs/security/privacy-review.md O2 / F1).
 DEFAULT_DEPOT_PREVIEW = False
 
+#: WP D19-1c STORE-DETAILS: opening a game card asks Valve's store host
+#: (``store.steampowered.com``: ``appdetails`` and ``appreviews``, one app id)
+#: for a short description, genres, release date and the overall review
+#: rating. A different host and party than the oracle, and it reveals what is
+#: browsed, so it has its own env-only switch, off by default, independent of
+#: ``VAULT_MANIFEST_ORACLE`` (docs/security/privacy-review.md O9 / F1,
+#: ADR-0023 draft).
+DEFAULT_STORE_DETAILS = False
+
 
 # --------------------------------------------------------------------------
 # WP S-1 (ADR-0012): the runner split. vault-api's worker keeps owning job
@@ -1445,6 +1454,10 @@ class Settings:
     # per opened card of a never-downloaded game, see
     # ``vault_api/depot_preview.py``. Needs the oracle on as well.
     depot_preview_enabled: bool = DEFAULT_DEPOT_PREVIEW
+    # WP D19-1c. Env-only (VAULT_STORE_DETAILS), default off: store details on
+    # the card, see ``vault_api/store_details.py``. New host
+    # store.steampowered.com (baked into the proxy).
+    store_details_enabled: bool = DEFAULT_STORE_DETAILS
     # WP S-1 (ADR-0012). 'subprocess' (default, unchanged behaviour) |
     # 'queue' (hand off execution to a separate prefill_runner process). See
     # the PREFILL_MODE_* constants above.
@@ -1846,6 +1859,7 @@ class Settings:
             ),
             library_meta_enabled=_env_bool("VAULT_LIBRARY_META", DEFAULT_LIBRARY_META),
             depot_preview_enabled=_env_bool("VAULT_DEPOT_PREVIEW", DEFAULT_DEPOT_PREVIEW),
+            store_details_enabled=_env_bool("VAULT_STORE_DETAILS", DEFAULT_STORE_DETAILS),
             # WP S-1 (ADR-0012). Unset/blank = 'subprocess', byte-identical to
             # every version of vault-api before this work package.
             prefill_mode=_env_prefill_mode(),

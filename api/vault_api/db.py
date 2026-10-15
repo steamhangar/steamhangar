@@ -317,7 +317,17 @@ import time
 #: deletion, the update check or ``depot_app_map`` reads or writes them. A v32
 #: file is refused by older code (the downgrade guard), so a rollback to a v31
 #: build needs the SQLite dump ``update.sh`` takes before upgrading.
-SCHEMA_VERSION = 32
+#: v33 (WP D19-1c STORE-DETAILS): added ``store_details`` (one row per app: the
+#: outcome of the last store lookup on a card open, its time, and the
+#: sanitised plain-text fields: short description, genres, developers,
+#: release date, mode flags, overall review rating). One brand-new table,
+#: plain ``CREATE TABLE IF NOT EXISTS`` in ``_DDL`` that runs on EVERY start,
+#: so the step needs no ``ALTER`` and no data step: an upgraded file simply
+#: has no rows ("never asked"). Display data only; nothing in GC, deletion,
+#: the update check or ``depot_app_map`` reads or writes it. A v33 file is
+#: refused by older code (the downgrade guard), so a rollback to a v32 build
+#: needs the SQLite dump ``update.sh`` takes before upgrading.
+SCHEMA_VERSION = 33
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -841,6 +851,27 @@ CREATE TABLE IF NOT EXISTS depot_preview (
     download_bytes INTEGER,
     dlcappid       INTEGER,
     PRIMARY KEY (appid, depotid)
+);
+
+-- v33 (WP D19-1c): store details of a game card, from one appdetails and one
+-- appreviews answer fetched when the card was opened
+-- (vault_api/store_details.py). Third-party text, stored ALREADY sanitised
+-- (tags stripped, length-capped) and rendered as plain text. `outcome` is
+-- 'ok' | 'none' (store knows no such app: removed, region-locked, age-gated)
+-- | 'failed'; `fetched_at` drives the TTL. `genres`, `developers` and
+-- `modes` are JSON arrays of strings. No column records who opened the card.
+CREATE TABLE IF NOT EXISTS store_details (
+    appid           INTEGER PRIMARY KEY,
+    outcome         TEXT NOT NULL,
+    fetched_at      TEXT NOT NULL,
+    description     TEXT,
+    genres          TEXT,
+    developers      TEXT,
+    release_date    TEXT,
+    modes           TEXT,
+    review_summary  TEXT,
+    review_positive INTEGER,
+    review_negative INTEGER
 );
 
 -- WP 4a.6r / ADR-0004 addendum: opt-in Steam Web API relay (GetOwnedGames /
