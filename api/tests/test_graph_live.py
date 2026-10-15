@@ -203,7 +203,7 @@ def test_truncation_and_replacement_restart_at_the_top(tmp_path: Path) -> None:
     tier.touch(clock())
     assert tier.refresh(str(log), clock()) == 1
     clock.advance(3)
-    log.unlink()
+    log.rename(tmp_path / "event.log.1")  # keep the old inode alive so the new file cannot reuse its number
     write_log(log, line(1, 6), line(1, 7))  # new inode
     tier.touch(clock())
     assert tier.refresh(str(log), clock()) == 2
