@@ -119,6 +119,21 @@ run takes unless Jan says otherwise:
   running worktrees first, resume the open package (re-run its reviewer if
   unsure), never redo passed packages.
 
+## Limit economy (Jan, 2026-10-15: "save the limit, stay effective")
+
+- Briefs reference docs and LEARNINGS instead of repeating them; coder and
+  reviewer get only the package scope, file paths and acceptance criteria.
+- Review weight by package type: light for docs/CSS/web-only, full for
+  api/core/schema. Do not spawn a reviewer for pure doc commits.
+- Max 3 agents at once; resume a finished agent with SendMessage instead of
+  spawning a new one. No exploratory agents when a direct grep answers it.
+- No status messages between packages except one line per wave; the state
+  file carries the detail. Run test suites once per package, not per edit.
+- Prefer one verification pass per wave (`dev.sh test-*`), `dev.sh verify`
+  once at the close and after the last schema change only.
+- Order inside a wave: cheapest, highest-trust packages first, so that a
+  limit stop leaves the most valuable work finished.
+
 ## Waves (max 3 agents at once, resume instead of respawn)
 
 1. **Fixes and trust:** NOT-OWNED-1, METRIC-AUDIT, TILE-INTERNET, GRAPH-ZOOM.
