@@ -97,6 +97,8 @@ class StatsOut(BaseModel):
     #: WP D15b: when the traffic tiers behind /v1/throughput and
     #: /v1/clients/overview started filling (``null`` = not yet).
     traffic_since: str | None = None
+    #: GRAPH-ZOOM (schema v29): when the 1-minute tier started filling.
+    traffic_1m_since: str | None = None
     #: Most recently MISSed depots that map to no app — vault-api can neither
     #: attribute nor prefill these (plan §4's manual-mapping fallback case).
     top_unmapped_depots: list[DepotMissOut]
@@ -138,6 +140,7 @@ def get_stats(
         rotations_detected_total=state.rotations_detected_total,
         last_rotation_detected_at=state.last_rotation_detected_at,
         traffic_since=state.traffic_since,
+        traffic_1m_since=state.traffic_1m_since,
         top_unmapped_depots=[
             DepotMissOut(
                 depotid=row.depotid,

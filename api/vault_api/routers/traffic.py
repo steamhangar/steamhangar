@@ -11,9 +11,11 @@ fills from vault-core's event log:
   and a speed per running prefill job;
 * ``GET /v1/throughput/series`` -- the same numbers per bucket for graphs.
 
-All three take ``range`` = ``24h`` | ``7d`` | ``30d`` | ``all``; the range
-picks the tier (``24h`` -> 5-minute rows, ``7d``/``30d`` -> hourly rows,
-``all`` -> daily rows), see ``traffic.range_spec``.
+All three take ``range`` = ``24h`` | ``7d`` | ``30d`` | ``all``; the two
+throughput endpoints also take ``1h`` | ``6h`` (GRAPH-ZOOM). The range picks
+the tier (``1h``/``6h`` -> 1-minute rows, ``24h`` -> 5-minute rows,
+``7d``/``30d`` -> hourly rows, ``all`` -> daily rows), see
+``traffic.range_spec``.
 
 Fail-soft, and honest about it
 ------------------------------
@@ -99,6 +101,10 @@ from vault_api.jobs import JOB_TYPE_PREFILL, STATUS_RUNNING, parse_utc_iso
 router = APIRouter(dependencies=[Depends(require_api_key)], tags=["traffic"])
 
 RangeName = Literal["24h", "7d", "30d", "all"]
+#: GRAPH-ZOOM: the throughput endpoints additionally answer 1 h and 6 h from
+#: the 1-minute tier. The clients overview keeps ``RangeName`` (no per-depot
+#: rows in that tier).
+ThroughputRangeName = Literal["1h", "6h", "24h", "7d", "30d", "all"]
 FeedState = Literal["disabled", "never-swept", "ok", "stale"]
 
 #: How many recently loaded apps a client lists.
@@ -124,6 +130,9 @@ class EventFeedOut(BaseModel):
     #: When the traffic tiers started filling (schema v23 upgrade or first
     #: sweep); null while empty. Nothing before it was recorded.
     traffic_since: str | None
+    #: GRAPH-ZOOM: when the 1-minute tier (1 h / 6 h graph ranges) started
+    #: filling; null until the first sweep after the v29 upgrade wrote rows.
+    traffic_1m_since: str | None = None
 
 
 class CurrentOut(BaseModel):
@@ -206,7 +215,7 @@ class JobThroughputOut(BaseModel):
 
 class ThroughputOut(BaseModel):
     event_feed: EventFeedOut
-    range: RangeName
+    range: ThroughputRangeName
     tier: str
     bucket_seconds: int
     range_start: str | None
@@ -236,13 +245,14 @@ class SeriesPointOut(BaseModel):
     runner_bytes: int
     #: bytes_served / bucket_seconds (the bucket's wall-clock average).
     bytes_per_second: float
-    #: Largest 5-minute total inside the bucket / 300 s.
+    #: Largest 5-minute total inside the bucket / 300 s (the 1-minute tier's
+    #: rows are their own peak: bytes / 60 s).
     peak_bytes_per_second: float
 
 
 class SeriesOut(BaseModel):
     event_feed: EventFeedOut
-    range: RangeName
+    range: ThroughputRangeName
     tier: str
     bucket_seconds: int
     range_start: str | None
@@ -363,6 +373,7 @@ def _feed(
             last_sweep_at=state.last_sweep_at,
             sweep_interval_minutes=settings.event_sweep_interval_minutes,
             traffic_since=state.traffic_since,
+            traffic_1m_since=state.traffic_1m_since,
         ),
         window,
     )
@@ -386,12 +397,15 @@ def _runner_out(totals: traffic.Totals) -> RunnerTrafficOut:
     )
 
 
-def _summary(summary: traffic.ServerSummary, runner: traffic.Totals) -> SummaryOut:
+def _summary(
+    summary: traffic.ServerSummary, runner: traffic.Totals, tier: str = traffic.TIER_5M
+) -> SummaryOut:
     """``summary`` is server-wide; ``runner`` the runner's rows of the same
     range. Client figures are the difference (module docstring)."""
     everything = summary.totals
     totals = traffic.subtract(everything, runner)
-    seconds = summary.active_buckets * traffic.TIER_SECONDS[traffic.TIER_5M]
+    unit = traffic.peak_unit_seconds(tier)
+    seconds = summary.active_buckets * unit
     return SummaryOut(
         bytes_served=everything.bytes_served,
         hit_bytes=totals.hit_bytes,
@@ -403,8 +417,7 @@ def _summary(summary: traffic.ServerSummary, runner: traffic.Totals) -> SummaryO
         hit_rate=_ratio(totals.hits, totals.misses),
         byte_hit_rate=_ratio(totals.hit_bytes, totals.miss_bytes),
         average_bytes_per_second=(everything.bytes_served / seconds) if seconds else None,
-        peak_bytes_per_second=summary.peak_bucket_bytes
-        / traffic.TIER_SECONDS[traffic.TIER_5M],
+        peak_bytes_per_second=summary.peak_bucket_bytes / unit,
         active_clients=summary.distinct_clients,
         client_bytes_served=totals.bytes_served,
         prefill_runner=_runner_out(runner),
@@ -492,7 +505,7 @@ def _stats(totals: traffic.Totals) -> ClientStatsOut:
 @router.get("/v1/throughput", response_model=ThroughputOut)
 def get_throughput(
     request: Request,
-    range: RangeName = Query(default="24h"),  # noqa: A002 - the API's word
+    range: ThroughputRangeName = Query(default="24h"),  # noqa: A002 - the API's word
     open_db: DbOpener = Depends(db_opener),
 ) -> ThroughputOut:
     """Downloads header numbers (D13 SPEED-1 + D15)."""
@@ -515,6 +528,7 @@ def get_throughput(
             summary = _summary(
                 traffic.server_summary(conn, spec, clients),
                 traffic.scoped_totals(conn, spec.tier, spec.start, runner),
+                spec.tier,
             )
             if window is not None:
                 current = CurrentOut(
@@ -549,7 +563,7 @@ def get_throughput(
 @router.get("/v1/throughput/series", response_model=SeriesOut)
 def get_throughput_series(
     request: Request,
-    range: RangeName = Query(default="24h"),  # noqa: A002
+    range: ThroughputRangeName = Query(default="24h"),  # noqa: A002
     open_db: DbOpener = Depends(db_opener),
 ) -> SeriesOut:
     """Server-wide traffic per bucket for the Downloads graphs."""
@@ -567,7 +581,7 @@ def get_throughput_series(
             if feed.enabled
             else {}
         )
-    five = traffic.TIER_SECONDS[traffic.TIER_5M]
+    five = traffic.peak_unit_seconds(spec.tier)
     empty = traffic.Totals()
     return SeriesOut(
         event_feed=feed,

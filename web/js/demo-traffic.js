@@ -30,7 +30,12 @@
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
 
+// WP GRAPH-ZOOM: "1h" / "6h" read the 1-minute tier. `loadingMinutes` is how
+// long ago the demo's current download began: older minutes are empty, so
+// the graph's trimmed X axis is visible (the span with data, not the range).
 const TIERS = Object.freeze({
+  "1h": { tier: "1m", bucket: 60, count: 60, loadingMinutes: 40 },
+  "6h": { tier: "1m", bucket: 60, count: 360, loadingMinutes: 150 },
   "24h": { tier: "5m", bucket: 300, count: 288 },
   "7d": { tier: "1h", bucket: 3600, count: 168 },
   "30d": { tier: "1h", bucket: 3600, count: 720 },
@@ -63,6 +68,14 @@ function rateAt(ms, bucketSeconds) {
   return Math.round(evening * dayFactor * 46 * MIB);
 }
 
+/** Deterministic bytes/s of the 1-minute bucket `age` minutes before the
+ * newest one: nothing before the download began, a wavy rate since, and a
+ * short pause now and then. */
+function rateMinute(age, loadingMinutes) {
+  if (age > loadingMinutes || age % 11 === 5) return 0;
+  return Math.round((0.55 + 0.45 * Math.abs(Math.sin(age * 0.7))) * 38 * MIB);
+}
+
 function feed(nowMs, sinceMs = null) {
   const recorded = floorTo(nowMs - 45 * 86_400_000, 86400);
   return {
@@ -72,6 +85,8 @@ function feed(nowMs, sinceMs = null) {
     last_sweep_at: isoSeconds(nowMs - 60_000),
     sweep_interval_minutes: 5,
     traffic_since: sinceMs === null || sinceMs <= recorded ? isoSeconds(recorded) : isoSeconds(sinceMs),
+    // The 1-minute tier started recording a day and a half ago in the demo.
+    traffic_1m_since: isoSeconds(nowMs - 36 * 3_600_000),
   };
 }
 
@@ -82,7 +97,8 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
   const points = [];
   for (let i = t.count - 1; i >= 0; i--) {
     const start = last - i * t.bucket * 1000;
-    const bps = sinceMs !== null && start < sinceMs ? 0 : rateAt(start, t.bucket);
+    const raw = t.tier === "1m" ? rateMinute(i, t.loadingMinutes) : rateAt(start, t.bucket);
+    const bps = sinceMs !== null && start < sinceMs ? 0 : raw;
     const served = Math.round(bps * t.bucket);
     const runner = Math.round(served * 0.1);
     const clients = served - runner;
@@ -95,7 +111,7 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
       requests: Math.round(clients / (1.4 * MIB)),
       runner_bytes: runner,
       bytes_per_second: bps,
-      peak_bytes_per_second: t.bucket === 300 ? bps : Math.round(bps * 1.35),
+      peak_bytes_per_second: t.bucket <= 300 ? bps : Math.round(bps * 1.35),
     });
   }
   return {

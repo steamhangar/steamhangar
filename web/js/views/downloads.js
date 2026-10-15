@@ -132,6 +132,11 @@ import {
   formatSpeed,
   headerTiles,
   isRange,
+  isStatsRange,
+  readStoredStatsRange,
+  STATS_RANGES,
+  trimSeries,
+  writeStoredStatsRange,
   jobSpeedText,
   JOB_SPEED_NOTE,
   joinNotes,
@@ -265,7 +270,7 @@ const state = {
 /** WP D15c: the statistics header's last answer for `range`
  * (`{throughput, series}`), and the History filter's fetched rows. Module
  * state, so a re-mount keeps the chosen ranges. */
-const traffic = { range: "24h", throughput: null, series: null, error: null, unsupported: false, noFigures: false };
+const traffic = { range: readStoredStatsRange(), throughput: null, series: null, error: null, unsupported: false, noFigures: false };
 const history = { range: "all", jobs: [], gen: 0 };
 
 /** WP D15c: the history fetch's page size (the API's maximum; no paging). */
@@ -1631,8 +1636,9 @@ const trafficPoll = createViewPoll({
 });
 
 function setStatsRange(range) {
-  if (!isRange(range) || range === traffic.range) return;
+  if (!isStatsRange(range) || range === traffic.range) return;
   traffic.range = range;
+  writeStoredStatsRange(range);
   traffic.throughput = null;
   traffic.series = null;
   traffic.error = null;
@@ -1702,7 +1708,9 @@ function paintStats() {
 function paintGraph() {
   const s = traffic.series;
   const show = !traffic.unsupported && s && feedState(s) !== "disabled" && s.range === traffic.range;
-  const geo = show ? seriesGeometry(s.points, { width: GRAPH_W, height: GRAPH_H }) : null;
+  // WP GRAPH-ZOOM: only the span that has data; the axis caption follows it.
+  const shown = show ? { ...s, points: trimSeries(s.points) } : null;
+  const geo = shown ? seriesGeometry(shown.points, { width: GRAPH_W, height: GRAPH_H }) : null;
   els.graph.replaceChildren();
   // An all-zero series is a flat line on the floor: nothing to show.
   els.graph.hidden = !geo || geo.maxBytesPerSecond === 0;
@@ -1718,7 +1726,7 @@ function paintGraph() {
   const axis = document.createElement("div");
   axis.className = "tg-axis";
   axis.setAttribute("aria-hidden", "true");
-  for (const text of [seriesStartText(s), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"]) {
+  for (const text of [seriesStartText(shown), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"]) {
     const span = document.createElement("span");
     span.textContent = text;
     axis.appendChild(span);
@@ -1828,6 +1836,7 @@ function buildSection() {
     value: traffic.range,
     onChange: setStatsRange,
     role: "stats-range",
+    ranges: STATS_RANGES,
   });
   const statsNote = hintMessage("");
   statsNote.dataset.role = "stats-note";

@@ -25,11 +25,71 @@ import { formatAgo, formatBytesGB } from "./format.js";
 /** The four ranges every traffic endpoint and the jobs filter accept. */
 export const RANGES = Object.freeze(["24h", "7d", "30d", "all"]);
 
-/** Segmented-control labels, in `RANGES` order. */
-export const RANGE_LABELS = Object.freeze({ "24h": "24 h", "7d": "7 days", "30d": "30 days", all: "All" });
+/**
+ * WP GRAPH-ZOOM: the Downloads statistics (header tiles and graph) also
+ * offer 1 h and 6 h, answered by the server's 1-minute tier. The Clients
+ * page and the History filter keep `RANGES` (no 1-minute per-depot rows).
+ */
+export const STATS_RANGES = Object.freeze(["1h", "6h", "24h", "7d", "30d", "all"]);
+
+/** Segmented-control labels for every range of `STATS_RANGES`. */
+export const RANGE_LABELS = Object.freeze({
+  "1h": "1 h",
+  "6h": "6 h",
+  "24h": "24 h",
+  "7d": "7 days",
+  "30d": "30 days",
+  all: "All",
+});
+
+/** localStorage key of the Downloads statistics range (per browser). */
+export const STATS_RANGE_KEY = "steamvault.downloadsRange";
+
+/** The Downloads range when nothing valid is stored. */
+export const DEFAULT_STATS_RANGE = "6h";
+
+/** @param {unknown} value @returns {boolean} */
+export function isStatsRange(value) {
+  return STATS_RANGES.includes(value);
+}
+
+/**
+ * The range the user chose last on Downloads, or the default. Storage can be
+ * missing, blocked or throw (private window): any failure gives the default.
+ * @param {() => (Storage | null | undefined)} [getStorage]
+ * @returns {string}
+ */
+export function readStoredStatsRange(getStorage = () => globalThis.localStorage) {
+  try {
+    const value = getStorage()?.getItem(STATS_RANGE_KEY);
+    return isStatsRange(value) ? value : DEFAULT_STATS_RANGE;
+  } catch {
+    return DEFAULT_STATS_RANGE;
+  }
+}
+
+/**
+ * Remember the chosen range; a storage failure only loses the persistence.
+ * @param {string} range
+ * @param {() => (Storage | null | undefined)} [getStorage]
+ * @returns {boolean} whether it was stored
+ */
+export function writeStoredStatsRange(range, getStorage = () => globalThis.localStorage) {
+  if (!isStatsRange(range)) return false;
+  try {
+    const storage = getStorage();
+    if (!storage) return false;
+    storage.setItem(STATS_RANGE_KEY, range);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Phrases for running text ("1.2 GB loaded in the last 7 days"). */
 export const RANGE_PHRASES = Object.freeze({
+  "1h": "in the last hour",
+  "6h": "in the last 6 hours",
   "24h": "in the last 24 hours",
   "7d": "in the last 7 days",
   "30d": "in the last 30 days",
@@ -171,6 +231,7 @@ export function headerTiles(throughput) {
   const summary = throughput.summary || {};
   const current = throughput.current ? throughput.current.bytes_per_second : null;
   const phrase = RANGE_PHRASES[throughput.range] || "";
+  const fine = throughput.bucket_seconds === 60; // the 1-minute tier (1 h / 6 h once it has filled)
   const tile = (key, label, value, title, detail = null) => ({ key, label, value: value ?? DASH, title, detail });
   const windowMinutes = Number.isInteger(throughput.active_window_minutes) ? throughput.active_window_minutes : 15;
   const inRange = Number.isInteger(summary.active_clients) ? summary.active_clients : null;
@@ -186,9 +247,14 @@ export function headerTiles(throughput) {
       "average",
       "Average while loading",
       formatSpeed(summary.average_bytes_per_second),
-      `Average speed ${phrase}, counting only the 5-minute periods in which something was loaded.`,
+      `Average speed ${phrase}, counting only the ${fine ? "1-minute" : "5-minute"} periods in which something was loaded.`,
     ),
-    tile("peak", "Peak speed", formatSpeed(summary.peak_bytes_per_second), `The busiest 5 minutes ${phrase}.`),
+    tile(
+      "peak",
+      "Peak speed",
+      formatSpeed(summary.peak_bytes_per_second),
+      `The busiest ${fine ? "minute" : "5 minutes"} ${phrase}.`,
+    ),
     tile(
       "loaded",
       "Served (cache + prefill)",
@@ -277,6 +343,7 @@ export function runnerDetail(summary) {
 
 /** The bucket a series point covers, for the graph's label. */
 export function bucketWord(bucketSeconds) {
+  if (bucketSeconds === 60) return "minute";
   if (bucketSeconds === 300) return "5 minutes";
   if (bucketSeconds === 3600) return "hour";
   if (bucketSeconds === 86400) return "day";
@@ -320,18 +387,43 @@ export function seriesLabel(series, maxBytesPerSecond) {
 }
 
 /**
- * Left-edge caption for the graph: how far back it starts. "all" names the
- * first day instead of a duration.
- * @param {{range?: string, points?: Array<{t: string}>}} series
+ * WP GRAPH-ZOOM: the series without its empty lead-in. A zero-filled range
+ * whose traffic all fell into the last stretch would be a flat line with a
+ * spike at the edge; the graph shows only the span that has data, starting
+ * one bucket before the first non-zero point so the line rises from the
+ * floor. Trailing zeros stay (the cache really is idle now). An all-zero
+ * series is returned unchanged (nothing to zoom to).
+ * @param {Array<{bytes_per_second: number}>} points
+ * @returns {Array<object>}
+ */
+export function trimSeries(points) {
+  if (!Array.isArray(points)) return [];
+  const first = points.findIndex((p) => p && finiteNonNegative(p.bytes_per_second) && p.bytes_per_second > 0);
+  if (first <= 0) return points.slice();
+  return points.slice(first - 1);
+}
+
+/**
+ * Left-edge caption for the graph: how far back the SHOWN span starts. A
+ * span that starts at the range's own start keeps the plain wording
+ * ("24 h ago"); a trimmed one says how long ago its first point is. "all"
+ * names the first day instead of a duration.
+ * @param {{range?: string, range_start?: string | null, points?: Array<{t: string}>}} series
+ * @param {number} [nowMs]
  * @returns {string}
  */
-export function seriesStartText(series) {
-  if (series.range === "24h") return "24 h ago";
-  if (series.range === "7d") return "7 days ago";
-  if (series.range === "30d") return "30 days ago";
+export function seriesStartText(series, nowMs = Date.now()) {
   const first = Array.isArray(series.points) && series.points[0] ? series.points[0].t : null;
-  const day = typeof first === "string" ? first.slice(0, 10) : null;
-  return day ? `since ${day}` : "";
+  if (series.range === "all") {
+    const day = typeof first === "string" ? first.slice(0, 10) : null;
+    return day ? `since ${day}` : "";
+  }
+  const fixed =
+    { "1h": "1 h ago", "6h": "6 h ago", "24h": "24 h ago", "7d": "7 days ago", "30d": "30 days ago" }[series.range] || "";
+  if (typeof first === "string" && typeof series.range_start === "string" && first !== series.range_start) {
+    return formatAgo(first, nowMs) || fixed;
+  }
+  return fixed;
 }
 
 /**

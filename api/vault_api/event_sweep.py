@@ -800,6 +800,8 @@ class SweepState:
     last_rotation_detected_at: str | None = None
     #: When the traffic tiers (``vault_api/traffic.py``) started filling.
     traffic_since: str | None = None
+    #: GRAPH-ZOOM (v29): when the 1-minute tier started filling.
+    traffic_1m_since: str | None = None
 
     @property
     def log_identity(self) -> tuple[int, int] | None:
@@ -821,7 +823,7 @@ def read_state(conn: sqlite3.Connection) -> SweepState:
                last_enqueued, last_dropped_by_cap, truncate_denied_count,
                last_truncate_denied_at, oversized_skips_total, last_oversized_at,
                log_dev, log_ino, rotations_detected_total,
-               last_rotation_detected_at, traffic_since
+               last_rotation_detected_at, traffic_since, traffic_1m_since
         FROM event_sweep_state WHERE id = 1
         """
     ).fetchone()
@@ -847,6 +849,7 @@ def read_state(conn: sqlite3.Connection) -> SweepState:
         rotations_detected_total=int(row["rotations_detected_total"] or 0),
         last_rotation_detected_at=row["last_rotation_detected_at"],
         traffic_since=row["traffic_since"],
+        traffic_1m_since=row["traffic_1m_since"],
     )
 
 
@@ -1424,8 +1427,8 @@ def commit_batch(
                 last_lines, last_skipped, last_enqueued, last_dropped_by_cap,
                 oversized_skips_total, last_oversized_at,
                 log_dev, log_ino, rotations_detected_total,
-                last_rotation_detected_at, traffic_since
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_rotation_detected_at, traffic_since, traffic_1m_since
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 cursor_offset       = excluded.cursor_offset,
                 lines_read_total    = event_sweep_state.lines_read_total
@@ -1451,6 +1454,9 @@ def commit_batch(
                 ),
                 traffic_since       = COALESCE(
                     event_sweep_state.traffic_since, excluded.traffic_since
+                ),
+                traffic_1m_since    = COALESCE(
+                    event_sweep_state.traffic_1m_since, excluded.traffic_1m_since
                 )
             """,
             (
@@ -1476,6 +1482,7 @@ def commit_batch(
                 now_iso if batch.rotated else None,
                 # Only once tier rows were actually written (D15b review).
                 now_iso if aggregate.traffic_batch.cells else None,
+                now_iso if aggregate.traffic_batch.cells_1m else None,
             ),
         )
     return marks

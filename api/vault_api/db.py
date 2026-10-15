@@ -278,7 +278,18 @@ import time
 #: rows recorded under the old last-file-wins ingestion. A plain
 #: ``CREATE TABLE IF NOT EXISTS`` in ``_DDL`` that runs on EVERY start, so the
 #: step does not trust the version stamp. No ``ALTER`` and no data step here.
-SCHEMA_VERSION = 28
+#: v29 (WP GRAPH-ZOOM): a fourth traffic tier ``1m`` (1-minute buckets, kept
+#: 24 h, ``traffic.RETENTION_1M``) in the existing ``server_traffic`` and
+#: ``client_traffic`` tables -- ``tier`` is free text, so no table changes --
+#: plus ``event_sweep_state.traffic_1m_since`` (when the tier started filling,
+#: the honest start of a 1 h / 6 h graph). The column comes from the
+#: per-column-guarded ``_add_missing_event_sweep_state_columns`` step, keyed
+#: on ``version < 29``. No data step: the tier starts empty after the upgrade
+#: and fills from the next sweep. A v29 file is refused by older code (the
+#: downgrade guard), so a rollback to a v28 build needs the SQLite dump
+#: ``update.sh`` takes before upgrading. Order of the rc19 migrations:
+#: GRAPH-ZOOM (v29), then D20, then D23.
+SCHEMA_VERSION = 29
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -582,7 +593,9 @@ CREATE TABLE IF NOT EXISTS event_sweep_state (
     last_rotation_detected_at TEXT,
     -- v23: when the first sweep wrote into the traffic tiers; the honest
     -- start of every "all" range (NULL = the tiers are still empty).
-    traffic_since             TEXT
+    traffic_since             TEXT,
+    -- v29: when the first sweep wrote into the 1-minute tier (NULL = empty).
+    traffic_1m_since          TEXT
 );
 
 -- WP 3.11: per-client-address request statistics, one row per address per
@@ -866,7 +879,8 @@ CREATE TABLE IF NOT EXISTS update_check_state (
 
 -- WP D15b (schema v23): event-log traffic statistics in three retention
 -- tiers, bucketed by the EVENT time of each line (not the sweep time, unlike
--- client_cache_stats). tier is '5m', '1h' or '1d'; bucket_at is the UTC
+-- client_cache_stats). tier is '5m', '1h' or '1d' (v29 adds '1m', see
+-- vault_api/traffic.py; the column is free text); bucket_at is the UTC
 -- start of the bucket ('YYYY-MM-DDTHH:MM:SSZ'). Every batch is folded into
 -- ALL three tiers additively in the same transaction that advances the
 -- event-sweep cursor, so each tier is complete for its retention on its own
@@ -1143,7 +1157,8 @@ def init_db(db_path: str) -> None:
         # v23 (WP D15b): five new event_sweep_state columns (file identity,
         # detected rotations, traffic_since). Keyed `< 23` so it runs once
         # whether D9's v22 landed first or not; guarded per column.
-        if row is not None and row["version"] < 23:
+        # v29 (WP GRAPH-ZOOM) adds traffic_1m_since through the same step.
+        if row is not None and row["version"] < 29:
             _add_missing_event_sweep_state_columns(conn)
 
         conn.executescript(_DDL)
@@ -1418,6 +1433,8 @@ _V23_EVENT_SWEEP_STATE_COLUMNS = (
     ("rotations_detected_total", "INTEGER NOT NULL DEFAULT 0"),
     ("last_rotation_detected_at", "TEXT"),
     ("traffic_since", "TEXT"),
+    # v29 (WP GRAPH-ZOOM)
+    ("traffic_1m_since", "TEXT"),
 )
 
 

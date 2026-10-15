@@ -2579,7 +2579,14 @@ export async function demoRequest(method, path, { body, params } = {}) {
   if (method === "GET" && (path === "/v1/throughput" || path === "/v1/throughput/series" || path === "/v1/clients/overview")) {
     const fallback = path === "/v1/clients/overview" ? "7d" : "24h";
     const range = params?.range ?? fallback;
-    if (!Object.hasOwn(HISTORY_RANGE_MS, range)) throw validationError("range must be one of 24h, 7d, 30d, all");
+    // WP GRAPH-ZOOM: the throughput endpoints also take 1h and 6h (the
+    // 1-minute tier); the clients overview keeps the four.
+    const shortOk = path !== "/v1/clients/overview" && (range === "1h" || range === "6h");
+    if (!shortOk && !Object.hasOwn(HISTORY_RANGE_MS, range)) {
+      throw validationError(
+        path === "/v1/clients/overview" ? "range must be one of 24h, 7d, 30d, all" : "range must be one of 1h, 6h, 24h, 7d, 30d, all",
+      );
+    }
     if (path === "/v1/throughput/series") return demoSeries(range, Date.now(), historySinceMs);
     const running = jobs.filter((j) => j.status === "running" && j.type === "prefill");
     if (path === "/v1/throughput") {
