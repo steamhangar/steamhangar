@@ -85,13 +85,15 @@ APPLY_N=0
 APPLIED_GEN=${VS_BOOT_GEN:-0}
 
 # VS_QUIET=1 while the loop retries the same content after a transient failure
-# (apply_file returned 2): the first failure of a streak is logged and written
-# to the status file, the identical retries on the next ticks are not.
+# (apply_file returned 2). reject stays silent only for a reason IDENTICAL to
+# the last one it reported; a different failure in the streak is reported.
 VS_QUIET=0
+VS_LAST_REASON=""
 
 reject() {
     # reject <generation> <reason>
-    [ "$VS_QUIET" = 1 ] && return 0
+    if [ "$VS_QUIET" = 1 ] && [ "$2" = "$VS_LAST_REASON" ]; then return 0; fi
+    VS_LAST_REASON=$2
     warn "settings generation $1 rejected: $2 -- generation $APPLIED_GEN stays live"
     vs_write_status rejected "$1" "$APPLIED_GEN" "$2" "$VS_CONF_DIR/vault-settings.effective" \
         || warn "could not write $VS_STATUS_FILE"
@@ -225,6 +227,7 @@ watch_loop() {
             _streak_content=""
             _last=$_content
             VS_QUIET=0
+            VS_LAST_REASON=""
         fi
     done
 }

@@ -191,7 +191,9 @@ env PATH="$work/bin:$PATH" VS_LIB="$docker_dir/vault-settings-lib.sh" \
     VS_HEALTH_URL=http://stub/health VS_WATCH_FUNCTIONS_ONLY=1 VS_ENV_CAPTURED=1 VS_BOOT_GEN=1 \
     bash -c 'set -eu; . "$1"; watch_loop ""' sh "$docker_dir/47-vault-settings-watch.sh" > "$work/loop.log" 2>&1 &
 loop_pid=$!
-sleep 3.5   # at least three ticks with no master
+# wait (bounded) for the first warning, then let at least three more ticks pass
+for _ in $(seq 1 20); do grep -q 'no running nginx master found' "$work/loop.log" && break; sleep 0.5; done
+sleep 3.5
 transient_warns=$(grep -c 'no running nginx master found' "$work/loop.log" || true)
 echo "$master_pid" > "$work/late.pid"
 for _ in 1 2 3 4 5 6 7 8; do
@@ -209,6 +211,40 @@ if grep -q 'settings generation 5 applied (nginx reloaded' "$work/loop.log" && [
     ok "watch loop: the same content is retried on the next tick and applied once the master is back"
 else
     bad "watch loop retry: $(cat "$work/loop.log")"
+fi
+
+# --- 7. a different failure mid-streak is reported, not swallowed ----------------------
+live_files
+rm -f "$work/late.pid"
+printf '%s\n' "$file5" > "$work/core-settings.env"
+: > "$work/loop2.log"
+env PATH="$work/bin:$PATH" VS_LIB="$docker_dir/vault-settings-lib.sh" \
+    VS_HOOK_DIR="$work/hooks" VS_CONF_DIR="$work/etc" VS_STATUS_FILE="$work/logs/settings-applied.json" \
+    VS_SETTINGS_FILE="$work/core-settings.env" VS_PID_FILE="$work/late.pid" VS_POLL=1 VS_RELOAD_WAIT=2 \
+    VS_HEALTH_URL=http://stub/health VS_WATCH_FUNCTIONS_ONLY=1 VS_ENV_CAPTURED=1 VS_BOOT_GEN=1 \
+    bash -c 'set -eu; . "$1"; watch_loop ""' sh "$docker_dir/47-vault-settings-watch.sh" > "$work/loop2.log" 2>&1 &
+loop_pid=$!
+for _ in $(seq 1 20); do grep -q 'no running nginx master found' "$work/loop2.log" && break; sleep 0.5; done
+# same file, now a content the render refuses: a different reason in the streak
+printf '%s\n' "$HEADER" GENERATION=6 VAULT_UPSTREAM_RATE=refuse > "$work/core-settings.env"
+for _ in $(seq 1 20); do grep -q 'stub refusal' "$work/loop2.log" && break; sleep 0.5; done
+kill "$loop_pid" 2>/dev/null || true
+wait "$loop_pid" 2>/dev/null || true
+if grep -q 'stub refusal' "$work/loop2.log" && [ "$(status_field state)" = rejected ] \
+   && grep -q 'stub refusal' <<<"$(status_field reason)"; then
+    ok "watch loop: a different failure mid-streak is logged and written to the status file"
+else
+    bad "mid-streak failure swallowed: $(cat "$work/loop2.log") / $(cat "$work/logs/settings-applied.json")"
+fi
+
+# reject itself: quiet mode silences only an identical reason
+out=$(env VS_LIB="$docker_dir/vault-settings-lib.sh" VS_CONF_DIR="$work/etc" VS_STATUS_FILE="$work/logs/settings-applied.json" \
+    VS_WATCH_FUNCTIONS_ONLY=1 VS_ENV_CAPTURED=1 VS_BOOT_GEN=1 \
+    bash -c 'set -eu; . "$1"; reject 5 "reason A"; VS_QUIET=1; reject 5 "reason A"; reject 5 "reason B"' sh "$docker_dir/47-vault-settings-watch.sh" 2>&1)
+if [ "$(grep -c 'reason A' <<<"$out")" = 1 ] && [ "$(grep -c 'reason B' <<<"$out")" = 1 ] && [ "$(status_field reason)" = "reason B" ]; then
+    ok "reject: quiet mode swallows an identical repeat but reports a different reason"
+else
+    bad "reject quiet mode: $out"
 fi
 
 echo "test-settings-watch: $pass passed, $fail failed"
