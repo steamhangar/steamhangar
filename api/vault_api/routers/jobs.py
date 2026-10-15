@@ -92,6 +92,10 @@ class JobSummary(BaseModel):
     #: a job that still says ``running`` for no visible reason. Always ``null``
     #: once the job reaches a terminal status or is parked.
     stop_request: str | None = None
+    #: Place in the queue for a ``queued`` job (WP D20): ``0`` = runs next.
+    #: ``null`` for every other status. Set by ``GET /v1/jobs`` and
+    #: ``GET /v1/jobs/{id}``; the list itself stays newest-first.
+    queue_position: int | None = None
 
 
 class JobDetail(JobSummary):
@@ -514,7 +518,11 @@ def list_recent_jobs(
         )
     with open_db() as conn:
         rows = jobs_queue.list_jobs(conn, limit, since=cutoff)
-    return [JobSummary(**row) for row in rows]  # type: ignore[arg-type]
+        positions = jobs_queue.queue_positions(conn)
+    return [
+        JobSummary(**row, queue_position=positions.get(int(row["id"])))  # type: ignore[arg-type]
+        for row in rows
+    ]
 
 
 @router.get("/v1/jobs/{job_id}", response_model=JobDetail)
@@ -525,11 +533,12 @@ def get_job_status(
     """Status of one job incl. its log excerpt (plan §6: "for app polling")."""
     with open_db() as conn:
         job = jobs_queue.get_job(conn, job_id)
+        position = jobs_queue.queue_positions(conn).get(job_id)
     if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job id {job_id}"
         )
-    return JobDetail(**job)  # type: ignore[arg-type]
+    return JobDetail(**job, queue_position=position)  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------
@@ -552,6 +561,19 @@ class JobControlOut(BaseModel):
     outcome: str
     #: Plain-language explanation of exactly what happened and what to do next.
     detail: str
+
+
+class MoveOut(JobControlOut):
+    """``POST /v1/jobs/{id}/move`` reply: the job's queue position afterwards."""
+
+    queue_position: int | None = None
+
+
+class MoveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: Target place among the QUEUED jobs, 0 = runs next. Past the end = last.
+    position: int = Field(ge=0)
 
 
 def _control_response(
@@ -668,3 +690,25 @@ def resume_job(
     with open_db() as conn:
         result = jobs_queue.resume_job(conn, job_id)
     return _control_response(job_id, result)
+
+
+@router.post("/v1/jobs/{job_id}/move", response_model=MoveOut)
+def move_job(
+    job_id: int,
+    body: MoveRequest,
+    open_db: DbOpener = Depends(db_opener),
+) -> MoveOut:
+    """Move a QUEUED job to ``position`` in the queue (WP D20).
+
+    ``position`` counts queued jobs only (0 = runs next; larger than the
+    queue = last). ``404`` unknown job, ``409`` when the job is not queued
+    (the running job cannot be moved; a paused one has no place yet),
+    ``422`` for a negative or non-integer position. Completes inside the
+    request (``outcome: "immediate"``). Until a job is moved the queue is
+    plain FIFO by job id; a resumed job still comes back at its old place.
+    """
+    with open_db() as conn:
+        result = jobs_queue.move_queued_job(conn, job_id, body.position)
+        positions = jobs_queue.queue_positions(conn)
+    out = _control_response(job_id, result)
+    return MoveOut(**out.model_dump(), queue_position=positions.get(job_id))
