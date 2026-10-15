@@ -674,6 +674,7 @@ route, see "Auth").
 | GET    | `/v1/schedule`                     | Scheduler config + last-sweep bookkeeping: `{enabled, window, overnight, interval_minutes, client_stale_days, server_timezone, last_sweep_at, last_sweep_targets, last_sweep_enqueued, next_eligible_at}`. **Read-only itself** — the window/interval/staleness values are now writable through `PATCH /v1/settings` (settings-API work package, ADR-0009; see "Persisted settings" below), this endpoint just reports the currently EFFECTIVE configuration, override included |
 | GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, rotations_detected_total, last_rotation_detected_at, traffic_since, top_unmapped_depots[]}` (the three before the list: WP D15b). **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
 | GET    | `/v1/throughput`                   | WP D15b (D13 SPEED-1): Downloads header numbers from the traffic tiers. `?range=24h` (default) `|7d|30d|all`. `{event_feed, range, tier, bucket_seconds, range_start, active_window_minutes, current, active_clients_now, summary, jobs[]}`; traffic fields are `null` with the event feed off. See "Clients overview and throughput (WP D15b)" below |
+| GET    | `/v1/throughput/live`              | WP GRAPH-LIVE: one stitched series (5 s points for the last minute, 15 s up to 5 minutes, then the persisted 1-minute tier up to an hour) plus a 15-20 s "current speed". Request-driven: while a client polls it, the access log is tailed at most every 2 s into an in-memory ring (never persisted, lost on restart); 30 s after the last poll tailing stops. |
 | GET    | `/v1/throughput/series`            | WP D15b: server-wide traffic per bucket for graphs, zero-filled, oldest first. `?range=` as above (24h: 288 x 5 min, 7d: 168 x 1 h, 30d: 720 x 1 h, all: daily from the first recorded day) |
 | GET    | `/v1/clients/overview`             | WP D15b: agent clients merged with every event-log address (agentless machines too): connected, installed (agents), loading now, recently loaded apps, per-range stats. `?range=7d` (default) `|24h|30d|all`. `GET /v1/clients` is unchanged WP D15-NAMES adds `name`, `name_addr`, `display_name` per client. |
 | GET    | `/v1/client-names`                 | WP D15-NAMES: every stored client name, `[{key_type, key, name, updated_at}]`. See "Client names" |
@@ -4663,6 +4664,17 @@ before it was recorded, so "all" starts there.
   client loading the same game at the same time is counted in. `null` speeds
   when the feed is not `ok` or `exclusive_depots` is 0 (no mapping yet).
   `bytes_since_start` is bucket-aligned (5-minute buckets within 48 h).
+
+### `GET /v1/throughput/live`
+
+WP GRAPH-LIVE. No parameters, same auth as the other `/v1` routes. Each call
+marks a "watcher" (active for 30 s) and reads new access-log lines into an
+in-memory ring of 5 s cells (900 s, at most 64 addresses per cell), at most
+every 2 s. Idle cost is zero: with no poller nothing is tailed. Points older
+than the ring come from the persisted 1-minute tier; every point has one
+source (`live` or `persisted`), so nothing is counted twice. `current` is the
+last 15-20 s, split into total and prefill-runner speed. With the event feed
+disabled, `current` is null and `points` empty. No schema change.
 
 ### `GET /v1/throughput/series?range=24h`
 
