@@ -55,6 +55,7 @@ import dev.steamvault.app.ui.detail.logic.confirmedCurrentWording
 import dev.steamvault.app.ui.detail.logic.GcFlowState
 import dev.steamvault.app.ui.detail.logic.GcLogSummary
 import dev.steamvault.app.ui.detail.logic.buildDepotPresentation
+import dev.steamvault.app.ui.detail.logic.showsExpectedBlock
 import dev.steamvault.app.ui.detail.logic.detailJobActions
 import dev.steamvault.app.ui.detail.logic.findTrackedJob
 import dev.steamvault.app.ui.detail.logic.headerLiveJob
@@ -415,6 +416,12 @@ private fun NotTrackedBody(controller: DetailController, scope: CoroutineScope) 
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
     )
+    // WP D19: store details, then the expected depots (web renderNotTracked).
+    controller.store?.let { StoreDetailsBlock(it) }
+    controller.preview?.takeIf { showsExpectedBlock(it, controller.detail) }?.let {
+        ExpectedDepotsBlock(it)
+        Spacer(Modifier.height(12.dp))
+    }
     Button(onClick = { controller.startDownload(scope) }) {
         Text(stringResource(R.string.detail_action_download))
     }
@@ -487,6 +494,9 @@ private fun LoadedDetailBody(
             onVerify = { ids -> controller.startVerify(scope, ids) },
         )
     }
+
+    // ---- store details (WP D19-1c) ---------------------------------------------
+    controller.store?.let { StoreDetailsBlock(it) }
 
     // ---- installed-state (WP AG-3) -------------------------------------------
     val installedBadge = installedBadgeFor(gameSummary)
@@ -566,11 +576,19 @@ private fun LoadedDetailBody(
 
     // ---- depots ---------------------------------------------------------------
     if (detail.depots.isEmpty()) {
-        Text(
-            text = stringResource(R.string.detail_depots_unknown),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // WP D19: the oracle's EXPECTED depots stand in for "unknown" until the
+        // first download maps the observed ones (web buildDepotsSection).
+        val expected = controller.preview?.takeIf { showsExpectedBlock(it, detail) }
+        if (expected != null) {
+            Text(text = stringResource(R.string.detail_depots_heading), style = MaterialTheme.typography.titleSmall)
+            ExpectedDepotsBlock(expected)
+        } else {
+            Text(
+                text = stringResource(R.string.detail_depots_unknown),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     } else {
         val gamesByAppid = remember(games) { games.associateBy { it.appid } }
         val activeAppids = remember(jobs) { activeJobAppids(jobs) }

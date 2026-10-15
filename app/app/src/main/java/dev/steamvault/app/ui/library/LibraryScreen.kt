@@ -62,7 +62,9 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
+import dev.steamvault.app.repo.CardInfoRepository
 import dev.steamvault.app.repo.MappingRepository
+import dev.steamvault.app.repo.OffCardInfoRepository
 import dev.steamvault.app.repo.UpdatesRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.demo.DemoModeBanner
@@ -146,6 +148,7 @@ fun LibraryScreen(
     updatesRepository: UpdatesRepository,
     ownedLibrary: OwnedLibraryController,
     libraryPreferences: LibraryPreferences,
+    cardInfoRepository: CardInfoRepository = OffCardInfoRepository,
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     demoMode: Boolean,
@@ -172,6 +175,7 @@ fun LibraryScreen(
             jobsRepository,
             mappingRepository,
             cacheRepository,
+            cardInfoRepository,
             AndroidDetailStrings(resources),
         )
     }

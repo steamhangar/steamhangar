@@ -7,6 +7,7 @@ import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.DeletePlanOut
+import dev.steamvault.app.net.model.DepotPreviewOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
@@ -25,6 +26,7 @@ import dev.steamvault.app.net.model.PrefillRequest
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.model.StoreDetailsOut
 import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.net.model.UpdateCheckOut
 import dev.steamvault.app.net.model.UpdateStatusOut
@@ -313,6 +315,20 @@ class VaultApiClient(
     /** `GET /v1/updates/status` -- poll until `running` is false. No network
      * on the server side. `404` on a server from before UPD-1. */
     suspend fun updatesStatus(): UpdateStatusOut = get("/v1/updates/status")
+
+    // ---- card enrichment (WP D19) -------------------------------------------
+
+    /** `GET /v1/oracle/{appid}/preview` -- the EXPECTED depots and size of a
+     * never-downloaded game; may start one background oracle query on the
+     * server. `state` says whether it is `off`, `pending`, `ready`, ... and a
+     * flaky oracle is never an error. A server from before D19-1a answers
+     * `404` ([dev.steamvault.app.net.error.VaultApiError.NotFound]). */
+    suspend fun depotPreview(appid: Int): DepotPreviewOut = get("/v1/oracle/$appid/preview")
+
+    /** `GET /v1/store/{appid}/details` -- store description, modes, genres,
+     * developer, release date and overall rating (plain text); `state` is
+     * `off` unless the server enables it. `404` on a server from before D19-1c. */
+    suspend fun storeDetails(appid: Int): StoreDetailsOut = get("/v1/store/$appid/details")
 
     // ---- about (WP VER-2) ----------------------------------------------------
 

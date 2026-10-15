@@ -5,13 +5,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.GameDetail
+import dev.steamvault.app.net.model.DepotPreviewOut
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.MappingEntry
+import dev.steamvault.app.net.model.StoreDetailsOut
+import dev.steamvault.app.repo.CardInfoRepository
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.ui.detail.logic.GcFlowEvent
+import dev.steamvault.app.ui.detail.logic.PREVIEW_PENDING_RETRY_MS
+import dev.steamvault.app.ui.detail.logic.PreviewState
+import dev.steamvault.app.ui.detail.logic.STORE_RETRY_MS
+import dev.steamvault.app.ui.detail.logic.StoreState
+import dev.steamvault.app.ui.detail.logic.wantsPreview
 import dev.steamvault.app.ui.detail.logic.GcFlowState
 import dev.steamvault.app.ui.detail.logic.reduceGcFlow
 import dev.steamvault.app.ui.downloads.logic.VerifyMode
@@ -70,6 +78,7 @@ class DetailController(
     private val jobsRepository: JobsRepository,
     private val mappingRepository: MappingRepository,
     private val cacheRepository: CacheRepository,
+    private val cardInfoRepository: CardInfoRepository,
     private val strings: DetailStrings,
 ) {
     var openAppid by mutableStateOf<Int?>(null)
@@ -98,6 +107,21 @@ class DetailController(
 
     var loadError by mutableStateOf<String?>(null)
         private set
+
+    /** WP D19-1a/1b: `GET /v1/oracle/{appid}/preview` payload, or `null`.
+     * Asked only for a game with no observed depots; `state` `off` when the
+     * server has the oracle or the preview switched off. */
+    var preview by mutableStateOf<DepotPreviewOut?>(null)
+        private set
+
+    /** WP D19-1c: `GET /v1/store/{appid}/details` payload, or `null` (`state`
+     * `off` unless the server enables it). Plain third-party text. */
+    var store by mutableStateOf<StoreDetailsOut?>(null)
+        private set
+
+    /** The in-flight card-info reads (preview + store), cancelled on every
+     * [open] and on [close] so a superseded sheet never writes into the next. */
+    private var cardInfoJob: Job? = null
     var toast by mutableStateOf<String?>(null)
         private set
 
@@ -136,6 +160,10 @@ class DetailController(
     fun open(scope: CoroutineScope, appid: Int, name: String?, isKnownToVault: Boolean) {
         gcJob?.cancel()
         gcJob = null
+        cardInfoJob?.cancel()
+        cardInfoJob = null
+        preview = null
+        store = null
         openAppid = appid
         openName = name
         detail = null
@@ -146,7 +174,10 @@ class DetailController(
         groupDelete = GroupDeleteUiState.Hidden
         gcState = GcFlowState.Idle
 
-        if (!isKnownToVault) return
+        if (!isKnownToVault) {
+            loadCardInfo(scope, appid)
+            return
+        }
 
         scope.launch {
             try {
@@ -165,12 +196,68 @@ class DetailController(
             } catch (e: VaultApiError) {
                 loadError = e.message ?: strings.loadErrorFallback()
             }
+            // WP D19: never asked before the card's own data has loaded, nor
+            // after it failed to (web `open()`).
+            if (loadError == null && openAppid == appid) loadCardInfo(scope, appid)
+        }
+    }
+
+    /**
+     * WP D19 (twin of web `loadPreview` / `loadStore`): ask for the expected
+     * depots (only for a game with no observed depots) and the store details
+     * in the background. Best effort -- a failure, or the server saying
+     * `off`, leaves the sheet exactly as it was. While the server says
+     * `pending` (a background query runs) it asks again a few times, then
+     * stays plain.
+     */
+    private fun loadCardInfo(scope: CoroutineScope, appid: Int) {
+        cardInfoJob?.cancel()
+        cardInfoJob = scope.launch {
+            if (wantsPreview(detail)) launch { loadPreview(appid) }
+            launch { loadStore(appid) }
+        }
+    }
+
+    private suspend fun loadPreview(appid: Int) {
+        var attempt = 0
+        while (true) {
+            val answer = try {
+                cardInfoRepository.depotPreview(appid)
+            } catch (e: VaultApiError) {
+                return
+            }
+            // Superseded, or observed depots arrived meanwhile.
+            if (openAppid != appid || !wantsPreview(detail)) return
+            preview = answer
+            if (answer.state != PreviewState.PENDING || attempt >= PREVIEW_PENDING_RETRY_MS.size) return
+            delay(PREVIEW_PENDING_RETRY_MS[attempt])
+            attempt++
+        }
+    }
+
+    private suspend fun loadStore(appid: Int) {
+        var attempt = 0
+        while (true) {
+            val answer = try {
+                cardInfoRepository.storeDetails(appid)
+            } catch (e: VaultApiError) {
+                return
+            }
+            if (openAppid != appid) return
+            store = answer
+            if (answer.state != StoreState.PENDING || attempt >= STORE_RETRY_MS.size) return
+            delay(STORE_RETRY_MS[attempt])
+            attempt++
         }
     }
 
     fun close() {
         gcJob?.cancel()
         gcJob = null
+        cardInfoJob?.cancel()
+        cardInfoJob = null
+        preview = null
+        store = null
         openAppid = null
         openName = null
         detail = null

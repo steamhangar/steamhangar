@@ -45,10 +45,12 @@ import dev.steamvault.app.net.pairing.routeIncomingLink
 import dev.steamvault.app.net.profile.buildConnectivityProfile
 import dev.steamvault.app.net.steam.PendingLoginState
 import dev.steamvault.app.notifications.NotificationRouting
+import dev.steamvault.app.repo.OffCardInfoRepository
 import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.repo.SteamIdentityRepositoryImpl
 import dev.steamvault.app.repo.VaultAboutRepository
 import dev.steamvault.app.repo.VaultCacheRepository
+import dev.steamvault.app.repo.VaultCardInfoRepository
 import dev.steamvault.app.repo.VaultClientsRepository
 import dev.steamvault.app.repo.VaultGamesRepository
 import dev.steamvault.app.repo.VaultJobsRepository
@@ -503,6 +505,8 @@ class MainActivity : ComponentActivity() {
                 updatesRepository = remember(demo) { DemoUpdatesRepository(demo) },
                 ownedLibrary = owned,
                 libraryPreferences = libraryPreferences,
+                // Demo mode is network-free: no card enrichment, the sheet stays as before D19.
+                cardInfoRepository = OffCardInfoRepository,
                 onJobsSnapshot = { pendingJobsSnapshot = it },
                 onOpenSettings = { destination = Destination.SETTINGS },
                 demoMode = true,
@@ -522,6 +526,7 @@ class MainActivity : ComponentActivity() {
             updatesRepository = remember(client) { VaultUpdatesRepository(client) },
             ownedLibrary = owned,
             libraryPreferences = libraryPreferences,
+            cardInfoRepository = remember(client) { VaultCardInfoRepository(client) },
             onJobsSnapshot = { pendingJobsSnapshot = it },
             onOpenSettings = { destination = Destination.SETTINGS },
             demoMode = false,
