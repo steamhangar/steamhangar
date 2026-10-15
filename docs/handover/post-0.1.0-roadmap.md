@@ -1039,6 +1039,9 @@ failed jobs Subnautica/Timberborn (measure live on the next run).
   hour (linear scale to the peak, 5-minute buckets). Add 1 h and 6 h ranges,
   trim the X axis to the span with data, fill under the line. No API change;
   a 1-minute bucket tier is a separate decision.
+- GRAPH-LIVE (Jan, 2026-10-15): Steam-like live graph, 5 s points for the
+  first minute then coarser; design in docs/handover/rc19-run-plan.md
+  (in-memory live tier, faster log tail only while someone watches).
 - DIAG-SESSION: why downloads are far below LAN speed. Separate the miss
   path (throttled by VAULT_UPSTREAM_RATE=8m, internet) from the hit path
   (cache disk on HDDs + LAN). LAN baseline with `diag net iperf3`, hit-path

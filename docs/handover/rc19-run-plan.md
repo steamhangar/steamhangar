@@ -25,6 +25,25 @@ stop only for a plan deviation not covered here.
   prune for the new tier). The Antrag must say that rollback to rc18.1 needs
   the SQLite dump from update.sh (newer schema is refused by older code).
   Test the migration on a copy of a populated dev DB.
+- **GRAPH-LIVE (Jan, 2026-10-15, "Steam feeling"):** the graph must feel
+  live: 5-second points for the first minute, then gradually coarser.
+  Finding: the source is vault-core's access_log, written when a request
+  ends (chunks are small, so 5 s buckets are accurate) and read by
+  `event_sweep` only on the scheduler cadence, which is the real limit
+  today. Design to implement (the run may refine, not drop the goal):
+  (a) a LIVE tier held in memory only (ring buffer, lost on restart, never
+  persisted): 5 s buckets for the last minute, 15 s up to 5 min, then the
+  persisted 1-minute tier (Weg B) takes over; one stitched series from a
+  new endpoint, e.g. `GET /v1/throughput/live`; (b) the log is tailed every
+  ~2 s while at least one client polled the live endpoint in the last
+  ~30 s ("watcher active"), otherwise the normal cadence, so idle load
+  stays as today; (c) the web graph polls every 2-5 s only while the
+  Downloads page is visible (Page Visibility API) and the default range is
+  "Live" feeling inside the chosen range (1 h / 6 h / 24 h keep persisted
+  tiers); (d) "Current speed" tile reads the same live tier. Measure the
+  tail cost (CPU, SQLite writes) on a dev run with the runner active and
+  state it in the Antrag. Android gets the same series after the web part
+  passes.
 - **Downloads range default:** the range the user chose last, remembered per
   browser (fallback 6 h when nothing is stored).
 - **MAP-DRIFT-1 cleanup:** once at startup like the UPD-FIX-1 manifest
