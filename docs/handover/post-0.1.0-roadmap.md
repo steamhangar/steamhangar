@@ -804,6 +804,29 @@ verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
 saves id), D7 measurement on `:443` (TLS cap TODO in WORKPACKAGES),
 failed jobs Subnautica/Timberborn (measure live on the next run).
 
+**rc19 Downloads block (Jan's yes, 2026-10-15):**
+- METRIC-AUDIT: header "Current speed" (22.3 MB/s) vs the active job's own
+  rate (4.0 MB/s) and "Loaded" growing faster than the job's bytes (+6.9 GB
+  vs 1.8 GB); "Active clients 0" while Demon is "Connected, last active 2 min
+  ago" (different windows); hit rate 0% in the header vs 94% for the runner
+  on the Clients page (different scopes, not labelled). Measure against the
+  event log on prod (`dev.sh diag`, read-only), then fix or label.
+- TILE-INTERNET: eighth Downloads tile "Loaded from the internet" (bytes
+  that missed the cache, runner included) so the grid is 2x4 and Loaded =
+  internet + saved can be checked. Check first whether `server_summary`
+  already exposes the all-scope miss bytes.
+- GRAPH-ZOOM: 24 h graph is flat when all traffic fell into the last half
+  hour (linear scale to the peak, 5-minute buckets). Add 1 h and 6 h ranges,
+  trim the X axis to the span with data, fill under the line. No API change;
+  a 1-minute bucket tier is a separate decision.
+- DIAG-SESSION: why downloads are far below LAN speed. Separate the miss
+  path (throttled by VAULT_UPSTREAM_RATE=8m, internet) from the hit path
+  (cache disk on HDDs + LAN). LAN baseline with `diag net iperf3`, hit-path
+  read of an already cached game, pool read throughput (fio/iostat may be
+  missing in the diag container: Antrag), nginx connections and caps, miss
+  counter-test only via `dev.sh prod rate` with Jan's yes per step. Result
+  as an inbox note.
+
 **UI polish (Jan, 2026-10-15; later, not scheduled yet):** (1) Clients page
 and the "Add a device" sheet look busy: the same "Anyone who sees this can
 control your hangar" warning repeats in four sections, many equally weighted
