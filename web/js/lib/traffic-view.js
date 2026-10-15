@@ -195,6 +195,12 @@ export function headerTiles(throughput) {
       runnerDetail(summary),
     ),
     tile(
+      "internet",
+      "Loaded from the internet",
+      formatTrafficBytes(internetBytes(summary)),
+      `Bytes ${phrase} that were not in the cache and came from the internet, the server's own prefill downloads included.`,
+    ),
+    tile(
       "hit-rate",
       "Hit rate",
       // Bytes, not requests: the same base as "Saved by the cache" next to it.
@@ -215,6 +221,22 @@ export function headerTiles(throughput) {
       inRange === null ? null : `${inRange} ${phrase}`,
     ),
   ];
+}
+
+/**
+ * WP TILE-INTERNET: all-scope miss bytes. The server's `internet_bytes`;
+ * an older server without it falls back to client misses plus the runner's
+ * misses; `null` when neither is known (shown as a dash).
+ * @param {object} summary
+ * @returns {number | null}
+ */
+export function internetBytes(summary) {
+  if (!summary) return null;
+  if (finiteNonNegative(summary.internet_bytes)) return summary.internet_bytes;
+  const runner = summary.prefill_runner;
+  if (!finiteNonNegative(summary.miss_bytes)) return null;
+  if (runner && finiteNonNegative(runner.miss_bytes)) return summary.miss_bytes + runner.miss_bytes;
+  return runner ? null : summary.miss_bytes;
 }
 
 /**

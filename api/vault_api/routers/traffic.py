@@ -178,6 +178,10 @@ class SummaryOut(BaseModel):
     client_bytes_served: int
     #: WP D15-RUNNER: the prefill runner's own traffic in the range.
     prefill_runner: RunnerTrafficOut
+    #: WP TILE-INTERNET: bytes that missed the cache and came from the
+    #: internet, the prefill runner INCLUDED (the all-scope twin of
+    #: ``miss_bytes``): ``miss_bytes + prefill_runner.miss_bytes``.
+    internet_bytes: int
 
 
 class JobThroughputOut(BaseModel):
@@ -398,6 +402,7 @@ def _summary(summary: traffic.ServerSummary, runner: traffic.Totals) -> SummaryO
         active_clients=summary.distinct_clients,
         client_bytes_served=totals.bytes_served,
         prefill_runner=_runner_out(runner),
+        internet_bytes=everything.miss_bytes,
     )
 
 

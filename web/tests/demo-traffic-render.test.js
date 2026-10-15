@@ -2,7 +2,7 @@
  * Demo mode renders the Clients page and the Downloads statistics header
  * (WP D15c): no API key, `steamvault.demoMode=1`, every request served by
  * demo-data.js. Proves the demo routes exist for both views and carry
- * what they paint (agent and agentless cards, seven tiles, the graph, the
+ * what they paint (agent and agentless cards, eight tiles, the graph, the
  * running demo job's speed).
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
@@ -60,11 +60,11 @@ test("demo: the Clients page lists agent PCs and agentless addresses with traffi
   navigateTo("library");
 });
 
-test("demo: the Downloads header shows seven tiles, the graph and the running job's speed", async () => {
+test("demo: the Downloads header shows eight tiles, the graph and the running job's speed", async () => {
   const s = renderDownloads();
   dom.appRoot.replaceChildren(s);
   await until(() => !s.querySelector('[data-role="stats-grid"]').hidden, "tiles");
-  assert.equal(s.querySelector('[data-role="stats-grid"]').querySelectorAll(".stat").length, 7);
+  assert.equal(s.querySelector('[data-role="stats-grid"]').querySelectorAll(".stat").length, 8);
   assert.equal(s.querySelector('[data-role="stats-graph"]').hidden, false);
   await until(() => {
     const line = s.querySelector('[data-role="job-speed"]');

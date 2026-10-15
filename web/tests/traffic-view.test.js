@@ -115,6 +115,7 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
       ["Average while loading", "50.0 MB/s"],
       ["Peak speed", "100 MB/s"],
       ["Loaded", "60.0 GB"],
+      ["Loaded from the internet", "10.0 GB"],
       ["Hit rate", "83%"],
       ["Saved by the cache", "50.0 GB"],
       ["Active clients", "2"],
@@ -130,6 +131,20 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
   assert.equal(z.clients, "0", "a real zero prints");
   assert.equal(z.average, DASH, "nothing loaded: no average");
   assert.equal(z["hit-rate"], DASH);
+});
+
+test("MUTATION TARGET: TILE-INTERNET — the tile is the server's all-scope miss bytes, runner included, with a fallback for older servers", () => {
+  const base = throughput("ok");
+  const tile = (summary) =>
+    headerTiles(throughput("ok", { summary })).find((x) => x.key === "internet");
+  const runner = { bytes_served: 4 * GIB, hit_bytes: 3 * GIB, miss_bytes: GIB, requests: 9, hits: 6, misses: 3, errors: 0 };
+  assert.equal(tile({ ...base.summary, internet_bytes: 11 * GIB, prefill_runner: runner }).value, "11.0 GB");
+  assert.equal(tile({ ...base.summary, prefill_runner: runner }).value, "11.0 GB", "older server: client misses + runner misses");
+  assert.equal(tile(base.summary).value, "10.0 GB", "no runner figures: client misses");
+  assert.equal(tile({ ...base.summary, internet_bytes: 0 }).value, "0 GB", "a real zero prints");
+  assert.equal(tile({ ...base.summary, miss_bytes: undefined }).value, DASH);
+  assert.match(tile(base.summary).title, /came from the internet, the server's own prefill downloads included/);
+  assert.equal(headerTiles(throughput("ok")).length, 8, "2x4 grid");
 });
 
 test("MUTATION TARGET: the hit-rate tile is the BYTE hit rate, the base 'Saved by the cache' uses", () => {

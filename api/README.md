@@ -4611,6 +4611,7 @@ before it was recorded, so "all" starts there.
              "byte_hit_rate": 0.833, "average_bytes_per_second": 52428800.0,
              "peak_bytes_per_second": 104857600.0, "active_clients": 3,
              "client_bytes_served": 64424509440,
+             "internet_bytes": 11811160064,
              "prefill_runner": {"bytes_served": 5368709120,
                                 "hit_bytes": 4294967296,
                                 "miss_bytes": 1073741824, "requests": 2560,
@@ -4640,6 +4641,8 @@ before it was recorded, so "all" starts there.
   `byte_hit_rate` bytes; both `null` with no hits and no misses.
   `prefill_runner` is the runner's own share, so `bytes_served ==
   client_bytes_served + prefill_runner.bytes_served`.
+  `internet_bytes` is everything that missed the cache and came from the
+  internet, the runner included (`miss_bytes + prefill_runner.miss_bytes`).
   `average_bytes_per_second` is the average **while loading** (bytes over the
   5-minute buckets that carried traffic), `null` when nothing was loaded;
   `peak_bytes_per_second` the busiest 5-minute bucket. `active_clients`:

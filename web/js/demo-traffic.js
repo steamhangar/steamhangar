@@ -143,6 +143,7 @@ function summaryFor(range, nowMs, sinceMs) {
     peak_bytes_per_second: peak,
     active_clients: served === 0 ? 0 : range === "24h" ? 3 : 4,
     client_bytes_served: clients,
+    internet_bytes: clients - hit + (runner - runnerHit),
     prefill_runner: {
       bytes_served: runner,
       hit_bytes: runnerHit,

@@ -408,6 +408,11 @@ def test_throughput_keeps_the_runner_out_of_every_client_figure(feed) -> None:
     assert summary["bytes_served"] == (
         summary["client_bytes_served"] + summary["prefill_runner"]["bytes_served"]
     )
+    # WP TILE-INTERNET: all-scope miss bytes, the runner's included.
+    assert summary["internet_bytes"] == 600 + 2000
+    assert summary["internet_bytes"] == (
+        summary["miss_bytes"] + summary["prefill_runner"]["miss_bytes"]
+    )
     assert body["active_clients_now"] == 2
     assert body["runner_active_now"] is True
 

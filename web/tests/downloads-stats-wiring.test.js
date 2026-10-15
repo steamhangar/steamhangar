@@ -4,7 +4,7 @@
  * running job's speed line (D13 SPEED-1), and the History range filter
  * (`GET /v1/jobs?range=`):
  *
- *   - feed ok: seven tiles with the server's numbers, an inline-SVG graph
+ *   - feed ok: eight tiles with the server's numbers, an inline-SVG graph
  *     (role=img, labelled), the running job's speed on its card;
  *   - feed disabled: the note only — no tiles, no graph, no speed line;
  *   - feed stale: the note, a dash (aria-hidden, sr-only "Not available")
@@ -157,7 +157,7 @@ beforeEach(() => {
   server.calls = [];
 });
 
-test("MUTATION TARGET: feed ok — seven tiles, a labelled SVG graph, and the running job's speed", async () => {
+test("MUTATION TARGET: feed ok — eight tiles, a labelled SVG graph, and the running job's speed", async () => {
   const s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "tiles");
   assert.deepEqual(tiles(s), [
@@ -165,6 +165,7 @@ test("MUTATION TARGET: feed ok — seven tiles, a labelled SVG graph, and the ru
     "Average while loading=50.0 MB/s",
     "Peak speed=100 MB/s",
     "Loaded=60.0 GB",
+    "Loaded from the internet=10.0 GB",
     "Hit rate=83%",
     "Saved by the cache=50.0 GB",
     "Active clients=23 in the last 24 hours",

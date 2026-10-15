@@ -1820,7 +1820,8 @@ body.onboarding .nav{ display:none; }
   .about-table td[data-label]::before{ content:none; }
   .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
 
-  /* WP D15c: the Downloads statistics tiles in one row of four. */
+  /* WP D15c + TILE-INTERNET: the eight Downloads statistics tiles, two
+     rows of four (phones keep two columns, four rows). */
   .statgrid{ grid-template-columns:repeat(4, minmax(0, 1fr)); }
 
   /* WP LIB-LIST-1: the list columns on ONE line (top-level list rules
