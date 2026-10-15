@@ -35,6 +35,30 @@ data class SettingInfoOut(
     val fallback: JsonElement = JsonNull,
     val applies: String,
     val env_only: Boolean = false,
+    // D16 wire fields (GET /v1/settings since rc18). All defaulted so an
+    // older server, and every existing fixture, still parses.
+    val env_var: String = "",
+    val value: JsonElement = JsonNull,
+    val editable: Boolean = true,
+    val risky: Boolean = false,
+    val expert: Boolean = false,
+    val grammar: String = "",
+    val target: String = "",
+    val env_visible: Boolean = true,
+    val shadowed: Boolean = false,
+    val reason: String? = null,
+)
+
+/** D16c: vault-core's report on the core settings (`CoreApplyOut` in the API). */
+@Serializable
+data class CoreApplyOut(
+    val state: String = "",
+    val generation: Int = 0,
+    val applied_generation: Int = 0,
+    val reason: String = "",
+    val updated_at: String = "",
+    val written_generation: Int? = null,
+    val pending: Boolean = false,
 )
 
 /** `GET`/`PATCH /v1/settings` — `vault_api/routers/settings.py::SettingsOut`. */
@@ -42,6 +66,7 @@ data class SettingInfoOut(
 data class SettingsOut(
     val readonly: Boolean,
     val settings: List<SettingInfoOut> = emptyList(),
+    val core_apply: CoreApplyOut? = null,
 )
 
 /** Pure: a settings [JsonElement] as a `String`, or `null` for JSON null / a non-scalar. */
