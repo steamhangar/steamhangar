@@ -50,6 +50,9 @@ import kotlinx.serialization.json.JsonPrimitive
  * content-package group of two packages, one failed ("+2 content packages
  * · 1 failed", sized by the server's `group_size_bytes`), and the Lighthouse Keeper game
  * is cached with an owned playtime of exactly 0 (the "Never played" pill).
+ * WP LIB-SORT: the library now defaults to Name A-Z, so the two first-row
+ * cards are named to sort first ("Alpha Starfall Odyssey", "Ancient
+ * Chronicles ... Lighthouse Keeper"); the fixtures stay in the first row.
  * WP CACHE-COMPLETE-1c: Copperline Atlas, the third card, is cached and
  * partially complete ("Partially cached 64%", the orange half-disc).
  * Names are invented, appids are
@@ -71,7 +74,7 @@ internal object LibraryScreenshotFixtures {
 
     val vaultGames: List<GameSummary> = listOf(
         GameSummary(
-            appid = 1_000_010, name = "Starfall Odyssey", status = "done",
+            appid = 1_000_010, name = "Alpha Starfall Odyssey", status = "done",
             last_prefill_at = PREFILLED_AT, depot_count = 2, size_bytes = 48_300_000_000,
             // WP UPD-6: flagged, but Updating under a live job (id 45) ->
             // the separate badge.
@@ -82,17 +85,17 @@ internal object LibraryScreenshotFixtures {
         // WP TOOL-APPS-2d: two content packages of Starfall Odyssey -- not
         // cards of their own; one failed.
         GameSummary(
-            appid = 1_000_011, name = "Starfall Odyssey - Original Soundtrack", status = "done",
+            appid = 1_000_011, name = "Alpha Starfall Odyssey - Original Soundtrack", status = "done",
             last_prefill_at = PREFILLED_AT, depot_count = 1, size_bytes = 600_000_000,
             parent_appid = 1_000_010, app_type = "music",
         ),
         GameSummary(
-            appid = 1_000_012, name = "Starfall Odyssey - Expedition Pass", status = "error",
+            appid = 1_000_012, name = "Alpha Starfall Odyssey - Expedition Pass", status = "error",
             depot_count = 1, parent_appid = 1_000_010, app_type = "dlc",
         ),
         GameSummary(
             appid = 1_000_020,
-            name = "The Unreasonably Long Chronicles of the Northern Lighthouse Keeper: Definitive Anniversary Edition",
+            name = "Ancient Chronicles of the Unreasonably Long Northern Lighthouse Keeper: Definitive Anniversary Edition",
             status = "done", last_prefill_at = PREFILLED_AT, depot_count = 3, size_bytes = 12_700_000_000,
             // WP UPD-6: cached and flagged -> the card's update state.
             update_available = true, update_checked_at = PREFILLED_AT,
