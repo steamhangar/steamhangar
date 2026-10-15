@@ -35,9 +35,9 @@
 # waits on; an `nginx -s reload` in between changes nothing (same master pid,
 # the reload reopens the same name).
 #
-# Inputs (image-level, read once at start; deliberately NOT forwarded by
-# deploy/compose.yaml -- the decided default needs no knob, per the "few env
-# values" direction of D16):
+# Inputs (read at start; since D16 the size is editable in Settings: compose
+# forwards VAULT_EVENT_LOG_ROTATE_BYTES as an env pin, else vault-api's core
+# settings file supplies it and the loop re-reads it, see "D16c" below):
 #   VAULT_EVENT_LOG                  -- empty: the log is off, so is this.
 #   VAULT_EVENT_LOG_ROTATE_BYTES     -- rotate at or above this size.
 #                                       Empty/unset = 67108864 (64 MiB),
@@ -114,11 +114,50 @@ else
   (empty = $DEFAULT_INTERVAL)."
 fi
 
+# `--grammar` (the shared fixture table, core/tests/test-settings-grammar.sh):
+# the normalised rotation size, nothing else.
+if [ "${1:-}" = --grammar ]; then
+    echo "$BYTES"
+    exit 0
+fi
+
+# --- D16c: the size may change at runtime ---------------------------------------
+# 15-vault-settings.envsh writes the effective core settings, and the settings
+# watcher (47-) replaces the file on every applied generation. When the size
+# does NOT come from an env pin, the loop re-reads it before every check, so
+# a new value from Settings applies within one interval. An unreadable or
+# invalid line keeps the previous size (the watcher only installs values
+# this hook's grammar accepted).
+EFFECTIVE_FILE="${VS_EFFECTIVE_FILE:-/etc/nginx/vault-settings.effective}"
+TAB=$(printf '\t')
+SETTABLE=no
+if [ -f "$EFFECTIVE_FILE" ]; then
+    _src=$(grep -m 1 '^VAULT_EVENT_LOG_ROTATE_BYTES=' "$EFFECTIVE_FILE" 2>/dev/null || true)
+    case "$_src" in
+        "") : ;;
+        *"${TAB}env") : ;;
+        *) SETTABLE=yes ;;
+    esac
+fi
+
+# runtime_bytes: the size in the effective settings file, or return 1.
+runtime_bytes() {
+    _l=$(grep -m 1 '^VAULT_EVENT_LOG_ROTATE_BYTES=' "$EFFECTIVE_FILE" 2>/dev/null) || return 1
+    _v=${_l#*=}
+    _v=${_v%%"$TAB"*}
+    digits "$_v" 15 || return 1
+    _v=$(strip0 "$_v")
+    if [ "$_v" -ne 0 ] && [ "$_v" -lt "$MIN_BYTES" ]; then
+        return 1
+    fi
+    echo "$_v"
+}
+
 if [ -z "$LOG_PATH" ]; then
     log "VAULT_EVENT_LOG unset/empty -- no cache-event log, no rotation"
     exit 0
 fi
-if [ "$BYTES" -eq 0 ]; then
+if [ "$BYTES" -eq 0 ] && [ "$SETTABLE" = no ]; then
     log "VAULT_EVENT_LOG_ROTATE_BYTES=0 -- rotation of $LOG_PATH is OFF (the file grows until something else rotates it)"
     exit 0
 fi
@@ -177,6 +216,14 @@ master_pid() {
 }
 
 rotate_once() {
+    if [ "$SETTABLE" = yes ]; then
+        _nb=$(runtime_bytes) || _nb=$BYTES
+        if [ "$_nb" != "$BYTES" ]; then
+            log "rotation size changed by the core settings: $BYTES -> $_nb bytes (0 = off)"
+            BYTES=$_nb
+        fi
+    fi
+    [ "$BYTES" -ne 0 ] || return 0
     [ -f "$LOG_PATH" ] && [ ! -L "$LOG_PATH" ] || return 0
     size=$(stat -c %s "$LOG_PATH" 2>/dev/null) || return 0
     digits "$size" 19 || return 0
@@ -219,4 +266,7 @@ rotate_loop() {
 
 rotate_loop < /dev/null &
 log "rotating $LOG_PATH at $BYTES bytes into $OLD_PATH (one old file kept), checked every ${INTERVAL}s (pid $!)"
+if [ "$SETTABLE" = yes ]; then
+    log "the rotation size follows the core settings (re-read before every check; 0 = off for now)"
+fi
 exit 0

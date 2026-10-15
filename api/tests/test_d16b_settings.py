@@ -55,6 +55,14 @@ def _settings(tmp_path: Path, **kwargs) -> Settings:
     )
 
 
+@pytest.fixture
+def core_client(tmp_path: Path) -> TestClient:
+    """A vault-api with the core settings file enabled (review B3: core keys
+    are only editable then)."""
+    settings = _settings(tmp_path, core_settings_file=str(tmp_path / "core-settings.env"))
+    return TestClient(create_app(settings))
+
+
 def _store(settings: Settings, **values: str) -> None:
     init_db(settings.db_path)
     conn = get_connection(settings.db_path)
@@ -133,7 +141,7 @@ def test_from_env_pins_only_non_blank_variables(monkeypatch: pytest.MonkeyPatch)
 # -- G4 -----------------------------------------------------------------------
 
 
-def test_startup_warns_once_per_shadowed_key_and_for_deprecations(
+def test_startup_warns_once_per_shadowed_key_and_for_a_stored_webhook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     settings = _settings(
@@ -147,8 +155,33 @@ def test_startup_warns_once_per_shadowed_key_and_for_deprecations(
     shadow = [m for m in warnings if "wins over the value stored" in m]
     assert len(shadow) == 1 and "'auto_gc'" in shadow[0]
     assert sum("webhook URL is stored" in m for m in warnings) == 1
-    assert sum("VAULT_UPSTREAM_RATE_WINDOW is deprecated" in m for m in warnings) == 1
+    # Review S4: the RATE_WINDOW deprecation warning is vault-core's (D16c);
+    # compose does not forward the variable to vault-api.
+    assert not any("VAULT_UPSTREAM_RATE_WINDOW" in m for m in warnings)
     assert not any("u:p" in m for m in warnings)
+
+
+def test_startup_warns_when_the_window_is_the_code_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("VAULT_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("VAULT_DB_PATH", str(tmp_path / "vault.db"))
+    monkeypatch.setenv("VAULT_CACHE_ROOT", str(tmp_path / "cache"))
+    monkeypatch.delenv("VAULT_SCHEDULE_WINDOW", raising=False)
+    caplog.set_level(logging.WARNING, logger="vault_api.settings_store")
+    create_app(Settings.from_env())
+    assert sum("is the rc18 default" in r.getMessage() for r in caplog.records) == 1
+
+    caplog.clear()
+    monkeypatch.setenv("VAULT_SCHEDULE_WINDOW", "off")
+    create_app(Settings.from_env())
+    assert not any("rc18 default" in r.getMessage() for r in caplog.records)
+
+    caplog.clear()
+    monkeypatch.delenv("VAULT_SCHEDULE_WINDOW")
+    _store(Settings.from_env(), schedule_window="22:00-06:00")
+    create_app(Settings.from_env())
+    assert not any("rc18 default" in r.getMessage() for r in caplog.records)
 
 
 # -- G5 -----------------------------------------------------------------------
@@ -185,10 +218,18 @@ def test_webhook_url_is_env_only_and_masked(tmp_path: Path) -> None:
         ("https://discord.com/api/webhooks/1/tok", "https://discord.com/***"),
         ("https://a:b@h.example/?k=v", "https://***@h.example/***"),
         ("not a url", "***"),
+        # Review S3: an unencoded '/' or '#' in the password moves the
+        # userinfo out of urlsplit's netloc; any '@' still masks it.
+        ("https://s3cret/x@host.example/p", "https://***@host.example/***"),
+        ("https://tok3n#x@host.example/p", "https://***@host.example/***"),
+        ("https://u:p?q@host.example", "https://***@host.example"),
     ],
 )
 def test_mask_url(url: str, shown: str) -> None:
-    assert settings_store.mask_url(url) == shown
+    masked = settings_store.mask_url(url)
+    assert masked == shown
+    for secret in ("s3cret", "tok3n", "u:p"):
+        assert secret not in masked
 
 
 # -- G6 -----------------------------------------------------------------------
@@ -199,7 +240,8 @@ def test_mask_url(url: str, shown: str) -> None:
              {"resolver": None}, {"upstream_max_conns": "32"}, {"tls_max_conns": "300"},
              {"tls_client_max_conns": "32"}, {"prefill_max_threads": "4"}]
 )
-def test_risky_keys_need_the_confirm_flag(client: TestClient, body: dict) -> None:
+def test_risky_keys_need_the_confirm_flag(core_client: TestClient, body: dict) -> None:
+    client = core_client
     refused = client.patch("/v1/settings", json={"vault_name": "x", **body}, headers=AUTH)
     assert refused.status_code == 428
     assert refused.json()["detail"]["risky_keys"] == sorted(body)
@@ -211,7 +253,8 @@ def test_risky_keys_need_the_confirm_flag(client: TestClient, body: dict) -> Non
     assert accepted.status_code == 200, accepted.text
 
 
-def test_non_risky_keys_need_no_confirm(client: TestClient) -> None:
+def test_non_risky_keys_need_no_confirm(core_client: TestClient) -> None:
+    client = core_client
     response = client.patch(
         "/v1/settings",
         json={"upstream_rate": "800k", "schedule_window": "22:00-06:00"},
@@ -247,7 +290,8 @@ def test_expert_flags_follow_the_d16a_sign_off() -> None:
 CONFIRM = {"confirm_risky": "true"}
 
 
-def test_upstream_cap_must_cover_the_prefill_threads(client: TestClient) -> None:
+def test_upstream_cap_must_cover_the_prefill_threads(core_client: TestClient) -> None:
+    client = core_client
     low = client.patch(
         "/v1/settings", params=CONFIRM, json={"upstream_max_conns": "4"}, headers=AUTH
     )
@@ -265,7 +309,8 @@ def test_upstream_cap_must_cover_the_prefill_threads(client: TestClient) -> None
     assert client.patch("/v1/settings", json={"vault_name": "n"}, headers=AUTH).status_code == 200
 
 
-def test_tls_client_cap_must_not_exceed_the_total(client: TestClient) -> None:
+def test_tls_client_cap_must_not_exceed_the_total(core_client: TestClient) -> None:
+    client = core_client
     response = client.patch(
         "/v1/settings", params=CONFIRM, json={"tls_max_conns": "32"}, headers=AUTH
     )
@@ -279,7 +324,8 @@ def test_tls_client_cap_must_not_exceed_the_total(client: TestClient) -> None:
 
 def test_cap_floor_uses_the_env_pinned_thread_count(tmp_path: Path) -> None:
     settings = _settings(
-        tmp_path, prefill_max_threads=20, env_pinned=frozenset({"VAULT_PREFILL_MAX_THREADS"})
+        tmp_path, prefill_max_threads=20, env_pinned=frozenset({"VAULT_PREFILL_MAX_THREADS"}),
+        core_settings_file=str(tmp_path / "core-settings.env"),
     )
     with TestClient(create_app(settings)) as client:
         response = client.patch(
@@ -288,10 +334,55 @@ def test_cap_floor_uses_the_env_pinned_thread_count(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
+# -- B3: core keys while the core settings file is disabled ------------------
+
+
+def test_core_keys_are_read_only_while_the_core_file_is_disabled(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _store(settings, upstream_rate="800k")
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/v1/settings", headers=AUTH).json()
+        refused = client.patch("/v1/settings", json={"upstream_rate": "2m"}, headers=AUTH)
+        cleared = client.patch("/v1/settings", json={"upstream_rate": None}, headers=AUTH)
+    rate = _row(body, "upstream_rate")
+    assert (rate["editable"], rate["reason"], rate["source"], rate["effective"]) == (
+        False, "core_file_disabled", "default", None,
+    )
+    assert rate["shadowed"] is True and rate["value"] == "800k"
+    for key in ("upstream_max_conns", "tls_max_conns", "upstream_edge", "resolver",
+                "event_log_rotate_bytes", "upstream_pool_hosts", "tls_client_max_conns"):
+        assert _row(body, key)["reason"] == "core_file_disabled", key
+    # api+core stays editable: vault-api and the runner apply it themselves.
+    assert _row(body, "prefill_max_threads")["editable"] is True
+    assert _row(body, "auto_gc")["reason"] is None
+    assert _row(body, "db_path")["reason"] == "env_only"
+    for response in (refused, cleared):
+        assert response.status_code == 409
+        assert "VAULT_CORE_SETTINGS_FILE" in response.json()["detail"]
+
+
+def test_cross_rules_ignore_stored_core_values_while_the_file_is_disabled(tmp_path: Path) -> None:
+    """A stored cap of 4 reaches nothing while the file is off, so it must
+    not block raising the prefill threads; the hook default 16 counts."""
+    settings = _settings(tmp_path)
+    _store(settings, upstream_max_conns="4")
+    with TestClient(create_app(settings)) as client:
+        ok = client.patch(
+            "/v1/settings", params=CONFIRM, json={"prefill_max_threads": "12"}, headers=AUTH
+        )
+        too_many = client.patch(
+            "/v1/settings", params=CONFIRM, json={"prefill_max_threads": "17"}, headers=AUTH
+        )
+    assert ok.status_code == 200
+    assert too_many.status_code == 422
+
+
 # -- G8 -----------------------------------------------------------------------
 
 
-def test_window_off_and_blank_reset(tmp_path: Path) -> None:
+def test_window_off_blank_means_off_and_null_resets(tmp_path: Path) -> None:
+    """Review decision B2 (amends audit 3.6): blank in a PATCH means off (the
+    rc17 frontends send "" to disable); null resets to the default."""
     settings = _settings(tmp_path)
     with TestClient(create_app(settings)) as client:
         off = client.patch("/v1/settings", json={"schedule_window": "off"}, headers=AUTH)
@@ -302,7 +393,20 @@ def test_window_off_and_blank_reset(tmp_path: Path) -> None:
             assert settings_store.effective_settings(conn, settings).schedule_window is None
         finally:
             conn.close()
-        reset = client.patch("/v1/settings", json={"schedule_window": "  "}, headers=AUTH)
+        client.patch("/v1/settings", json={"schedule_window": "22:00-06:00"}, headers=AUTH)
+        blank = client.patch("/v1/settings", json={"schedule_window": ""}, headers=AUTH)
+        assert blank.status_code == 200
+        row = _row(blank.json(), "schedule_window")
+        assert (row["source"], row["effective"], row["value"]) == ("db", "off", "off")
+        conn = get_connection(settings.db_path)
+        try:
+            assert settings_store.get_override(conn, "schedule_window") == "off"
+            assert settings_store.effective_settings(conn, settings).schedule_window is None
+        finally:
+            conn.close()
+        spaces = client.patch("/v1/settings", json={"schedule_window": "  "}, headers=AUTH)
+        assert _row(spaces.json(), "schedule_window")["effective"] == "off"
+        reset = client.patch("/v1/settings", json={"schedule_window": None}, headers=AUTH)
         assert _row(reset.json(), "schedule_window")["source"] == "default"
         bad = client.patch("/v1/settings", json={"schedule_window": "OFF"}, headers=AUTH)
         assert bad.status_code == 422
@@ -321,14 +425,15 @@ def test_a_legacy_blank_stored_window_still_means_off(tmp_path: Path) -> None:
 # -- G9 -----------------------------------------------------------------------
 
 
-def test_get_rows_carry_the_expert_fields(client: TestClient) -> None:
-    body = client.get("/v1/settings", headers=AUTH).json()
+def test_get_rows_carry_the_expert_fields(core_client: TestClient) -> None:
+    body = core_client.get("/v1/settings", headers=AUTH).json()
     rate = _row(body, "upstream_rate")
     assert rate == {
         "key": "upstream_rate", "effective": None, "source": "default", "fallback": None,
         "applies": "core", "env_only": False, "env_var": "VAULT_UPSTREAM_RATE",
         "value": None, "editable": True, "risky": False, "expert": True,
         "grammar": rate["grammar"], "target": "core", "env_visible": False, "shadowed": False,
+        "reason": None,
     }
     assert "off" in rate["grammar"]
     edge = _row(body, "upstream_edge")
@@ -347,7 +452,8 @@ def test_get_rows_carry_the_expert_fields(client: TestClient) -> None:
 
 
 def test_core_file_is_off_by_default(client: TestClient, tmp_path: Path) -> None:
-    client.patch("/v1/settings", json={"upstream_rate": "800k"}, headers=AUTH)
+    client.patch("/v1/settings", json={"vault_name": "x"}, headers=AUTH)
+    assert client.app.state.settings.core_settings_file == ""
     assert not list(tmp_path.glob("**/core-settings.env"))
 
 
@@ -470,3 +576,178 @@ def test_subprocess_worker_reads_prefill_threads_per_job_from_settings(tmp_path:
         (job_id,) = enqueue(client, 440)
         assert wait_for_job(client, job_id)["status"] == "done"
     assert stub_prefill.read_argv(bindir)[-2:] == ["--max-threads", "6"]
+
+
+# -- Review S1/S2: named witnesses for the per-job and boot wiring ------------
+
+
+def _record_run_prefill(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    from vault_api import prefill
+
+    calls: list[dict] = []
+    original = prefill.run_prefill
+
+    def recording(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(prefill, "run_prefill", recording)
+    return calls
+
+
+def test_worker_reads_timeout_and_manifest_keep_per_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.test_worker import enqueue, make_settings, wait_for_job
+    from vault_api import manifest_ingest
+
+    calls = _record_run_prefill(monkeypatch)
+    keeps: list[int] = []
+    original_ingest = manifest_ingest.ingest_after_prefill
+
+    def recording_ingest(conn, *, appid, settings):
+        keeps.append(settings.manifest_keep)
+        return original_ingest(conn, appid=appid, settings=settings)
+
+    monkeypatch.setattr(manifest_ingest, "ingest_after_prefill", recording_ingest)
+    bindir = tmp_path / "bin"
+    cache_root = tmp_path / "cache"
+    executable = stub_prefill.make_stub(bindir, cache_root=str(cache_root), depots_by_app={440: [441]})
+    settings = make_settings(tmp_path, cache_root, executable)
+    with TestClient(create_app(settings)) as client:
+        assert client.patch(
+            "/v1/settings",
+            json={"prefill_timeout_seconds": "321", "manifest_keep": "9"},
+            headers=AUTH,
+        ).status_code == 200
+        (job_id,) = enqueue(client, 440)
+        assert wait_for_job(client, job_id)["status"] == "done"
+    assert calls and calls[-1]["timeout_seconds"] == 321
+    assert keeps == [9]
+
+
+def test_worker_reads_gc_grace_days_per_gc_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from vault_api import gc_execute
+
+    settings = _settings(tmp_path)
+    _store(settings, gc_grace_days="2")
+    seen: list[int] = []
+    monkeypatch.setattr(
+        gc_execute, "run_gc_job",
+        lambda conn, job, *, settings, size_cache, webhook_notifier: seen.append(settings.gc_grace_days),
+    )
+    worker = PrefillWorker(settings)
+    conn = get_connection(settings.db_path)
+    try:
+        worker._execute(conn, {"id": 1, "type": "gc", "appid": None})
+        settings_store.set_override(conn, "gc_grace_days", "0")
+        worker._execute(conn, {"id": 2, "type": "gc", "appid": None})
+    finally:
+        conn.close()
+    assert seen == [2, 0]
+
+
+def test_runner_reads_timeout_and_log_level_per_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vault_api import jobs
+
+    calls = _record_run_prefill(monkeypatch)
+    levels: list[int] = []
+    from vault_api import prefill_runner as runner_module
+
+    original_apply = runner_module.apply_log_level
+
+    def recording_apply(name: str) -> None:
+        original_apply(name)
+        levels.append(logging.getLogger().level)
+
+    monkeypatch.setattr(runner_module, "apply_log_level", recording_apply)
+    bindir = tmp_path / "bin"
+    cache_root = tmp_path / "cache"
+    executable = stub_prefill.make_stub(bindir, cache_root=str(cache_root), depots_by_app={440: [441]})
+    settings = _queue_settings(tmp_path, steamprefill_path=executable, cache_root=str(cache_root))
+    _store(settings, prefill_timeout_seconds="654", log_level="WARNING")
+    root = logging.getLogger()
+    before = root.level
+    worker = PrefillWorker(settings)
+    runner = PrefillRunner(settings, runner_id="d16b-runner-s1")
+    worker.start()
+    runner_thread = threading.Thread(target=runner.run_forever, daemon=True)
+    runner_thread.start()
+    try:
+        conn = get_connection(settings.db_path)
+        try:
+            job, _created = jobs.enqueue_prefill(conn, 440)
+        finally:
+            conn.close()
+        finished = _wait_for_job(settings.db_path, int(job["id"]))
+    finally:
+        worker.stop(timeout=5)
+        runner.stop()
+        runner_thread.join(timeout=5)
+        root.setLevel(before)
+    assert finished["status"] == jobs.STATUS_DONE, finished
+    assert calls[-1]["timeout_seconds"] == 654
+    assert levels == [logging.WARNING]
+
+
+def test_boot_log_level_comes_from_settings(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _store(settings, log_level="ERROR")
+    root = logging.getLogger()
+    before = root.level
+    try:
+        root.setLevel(logging.INFO)
+        app = create_app(settings)
+        assert root.level == logging.ERROR
+        assert app.state.boot_settings.log_level == "ERROR"
+    finally:
+        root.setLevel(before)
+
+
+# -- N1: env pin wins for every api-side key -----------------------------------
+
+_SAMPLES = {
+    "vault_name": "x", "schedule_window": "22:00-06:00", "schedule_interval_minutes": "99",
+    "schedule_client_stale_days": "9", "sweep_include_cached": "false", "auto_gc": "off",
+    "gc_grace_days": "1", "manifest_keep": "7", "agent_report_keep": "9",
+    "client_stats_keep": "9", "event_sweep_interval_minutes": "9",
+    "miss_trigger_cooldown_minutes": "9", "miss_trigger_max_per_sweep": "9",
+    "bypass_window_days": "9", "prefill_max_threads": "4", "prefill_timeout_seconds": "99",
+    "manifest_oracle_timeout": "2.5", "webhook_events": "job.done",
+    "webhook_timeout_seconds": "2.5", "steam_library_steamid": "76561197960287930",
+    "log_level": "ERROR",
+}
+_API_KEYS = sorted(k for k, s in settings_store.OVERRIDABLE_SPECS.items() if s.target != "core")
+
+
+def test_samples_cover_every_api_side_key() -> None:
+    assert sorted(_SAMPLES) == _API_KEYS
+
+
+@pytest.mark.parametrize("key", _API_KEYS)
+def test_env_pin_wins_for_every_api_side_key(tmp_path: Path, key: str) -> None:
+    spec = settings_store.OVERRIDABLE_SPECS[key]
+    settings = _settings(tmp_path, env_pinned=frozenset({spec.env_var}))
+    _store(settings, **{key: _SAMPLES[key]})
+    conn = get_connection(settings.db_path)
+    try:
+        effective = settings_store.effective_settings(conn, settings)
+        unpinned = settings_store.effective_settings(
+            conn, dataclasses.replace(settings, env_pinned=frozenset())
+        )
+    finally:
+        conn.close()
+    assert getattr(effective, key) == getattr(settings, key)
+    assert getattr(unpinned, key) != getattr(settings, key)
+    with TestClient(create_app(settings)) as client:
+        row = _row(client.get("/v1/settings", headers=AUTH).json(), key)
+        response = client.patch(
+            "/v1/settings", params=CONFIRM, json={key: _SAMPLES[key]}, headers=AUTH
+        )
+    logging.getLogger().setLevel(logging.WARNING)
+    assert (row["source"], row["editable"], row["reason"], row["shadowed"]) == (
+        "env", False, "env", True,
+    )
+    assert response.status_code == 409

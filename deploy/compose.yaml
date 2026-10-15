@@ -177,18 +177,21 @@ services:
       # Optional upstream (Steam CDN -> vault) rate cap (WP TH-1a/TH-1b,
       # ADR-0015, core/README.md "Upstream rate cap"). ONE aggregate limit in
       # bytes/s, nginx size syntax (k = 1024, m = 1048576), divided per
-      # request by the live request count. Empty or unset = no cap. An
+      # request by the live request count. `off` = no cap; empty or unset =
+      # not set (rc18: Settings via the core file from D16c on, else no cap). An
       # invalid value stops vault-core's boot (fail-closed). Env-only:
       # recreate vault-core after a change.
       VAULT_UPSTREAM_RATE: ${VAULT_UPSTREAM_RATE-}
       # Full speed INSIDE this HH:MM-HH:MM window, capped outside it.
       # DELIBERATELY THE NO-COLON FORM, twice (docs/LEARNINGS.md, the
       # `${VAR-}` vs `${VAR:-}` entry): UNSET follows VAULT_SCHEDULE_WINDOW
-      # (with the same `03:00-07:00` default as vault-api's line, so the
-      # cap lifts exactly when the scheduler's window opens); explicitly
-      # BLANK passes through as "" = the cap applies around the clock. A
-      # blank VAULT_SCHEDULE_WINDOW (scheduler disabled) with this one unset
-      # therefore also caps around the clock. Only the ENV window is
+      # (with the same `03:00-07:00` default as vault-api's code, so the
+      # cap lifts exactly when the scheduler's window opens). rc18 (Q3/Q7):
+      # this variable is deprecated, and `off` (here, or a
+      # VAULT_SCHEDULE_WINDOW=off passed through) caps around the clock;
+      # an explicitly blank value reaches the hook as "not set", which until
+      # D16c also caps around the clock. D16c replaces this nested line with
+      # `${VAULT_UPSTREAM_RATE_WINDOW-}` plus the core settings file. Only the ENV window is
       # followed: a window stored via `PATCH /v1/settings` is invisible to
       # vault-core. Nested interpolation `${A-${B-c}}` is part of the
       # Compose specification; verified on Compose 2.40.3, older Compose v2
@@ -235,7 +238,7 @@ services:
       # edge, 32 in total, ADR-0017 decision 3A). Env-only, baked at container
       # start: recreate vault-core after a change (`docker compose up -d
       # vault-core`, decision 4B), the same contract as VAULT_UPSTREAM_RATE
-      # above and the same `-` form (blank passes through as "" = off).
+      # above and the same `-` form (`off` = no pool; blank = not set).
       # deploy/.env.example ships a seed list (decision 2B).
       VAULT_UPSTREAM_POOL_HOSTS: ${VAULT_UPSTREAM_POOL_HOSTS-}
       # One pooled upstream edge for EVERY cache MISS plus a global upstream
@@ -244,9 +247,9 @@ services:
       # Steam client's discovery marker maps to. With an edge set, every
       # allowed MISS is dialled on that ONE name over keepalive connections,
       # whatever Host the client sent, and VAULT_UPSTREAM_POOL_HOSTS above is
-      # ignored. ROLLBACK to the per-name path: set VAULT_UPSTREAM_EDGE= EMPTY
-      # in .env. This is the `-` form on purpose: unset takes the default (on),
-      # an explicit blank passes through as "" (legacy mode). Exactly one
+      # ignored. ROLLBACK to the per-name path: set VAULT_UPSTREAM_EDGE=off in
+      # .env (rc18; before rc18 an explicit blank meant legacy mode). Unset
+      # takes the default (on). Exactly one
       # lowercase host name in the Host-allowlist families; anything else
       # stops the boot (`28-vault-upstream-pool.sh: FATAL`). Env-only: recreate
       # vault-core after a change.

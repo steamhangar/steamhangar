@@ -169,8 +169,9 @@ def parse_window_or_off(raw: str) -> ScheduleWindow | None:
     applies around the clock) and a ``ScheduleWindow`` for a valid window.
     A blank value is still a caller error here, exactly like in
     ``parse_window``: what blank means ("not set") is decided by the caller,
-    ``config.Settings.from_env`` (default window) or the settings API (a
-    blank PATCH value is refused; clearing is spelled ``null``).
+    ``config.Settings.from_env`` (blank = default window) or the settings
+    API (a blank PATCH value is stored as ``off``, review decision B2;
+    resetting is spelled ``null``).
     """
     if raw.strip() == WINDOW_OFF:
         return None

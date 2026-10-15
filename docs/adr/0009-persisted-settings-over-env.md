@@ -144,8 +144,11 @@ section 5.1), implemented in D16b (rc18). It **reverses decision 1**.
    warning. Decision 7 therefore has no PATCH-side case left.
 4. **One download window** (Q3): `VAULT_SCHEDULE_WINDOW` (env or Settings)
    is also vault-core's rate-cap window, handed over through the core
-   settings file. `VAULT_UPSTREAM_RATE_WINDOW` is deprecated (startup
-   warning; vault-core still honours it as an env pin).
+   settings file. `VAULT_UPSTREAM_RATE_WINDOW` is deprecated (vault-core
+   warns at startup and still honours it as an env pin, D16c; vault-api
+   does not see the variable). Core keys are editable only while
+   vault-api writes the core settings file (`VAULT_CORE_SETTINGS_FILE`
+   set); otherwise they are read-only (review decision B3).
 5. **Risky keys** (D16a table sign-off: the upstream and TLS connection
    caps, the prefill thread count, and the debug knobs upstream edge, pool
    hosts and resolver; the log level is not risky) need an explicit

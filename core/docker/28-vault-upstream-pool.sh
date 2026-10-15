@@ -21,7 +21,7 @@
 #                 one before it dials, so with one group the total stays near C
 #                 in steady state (at most C in flight + C idle = 2C only for a
 #                 burst after an idle pause, ADR-0021 "Socket bound").
-#     LEGACY MODE (VAULT_UPSTREAM_EDGE empty/unset, the rollback switch):
+#     LEGACY MODE (VAULT_UPSTREAM_EDGE=off or empty, the rollback switch):
 #                 today's per-name groups below, and the map's default is
 #                 $vault_upstream_host (identity: the client's own edge).
 #   vault-upstream-cap.conf   `limit_conn vault_upstream_total C;`, both modes,
@@ -62,7 +62,7 @@
 #   VAULT_UPSTREAM_POOL_HOSTS   space-separated edge host names, e.g.
 #                               "cache1-fra2.steamcontent.com
 #                                dist-fra1.discovery.steamserver.net".
-#                               Empty/unset = no pool (header-only render).
+#                               Empty/unset or `off` = no pool (header-only render).
 #
 # Rendered per host (ADR-0017 decisions 1A, 3A; (b), (c), (e)):
 #     upstream <host> {
@@ -299,6 +299,13 @@ fi
 # shellcheck disable=SC2086
 set -- $EDGE_RAW
 EDGE=""
+# D16c (Q7): exactly `off` (one token) = legacy per-name mode, the ADR-0021
+# rollback switch; an empty value means the same here (inside the container
+# 15-vault-settings.envsh never passes one: unset/blank there = the default
+# edge). Same for VAULT_UPSTREAM_POOL_HOSTS below: exactly `off` = none.
+if [ "$#" -eq 1 ] && [ "$1" = off ]; then
+    set --
+fi
 if [ "$#" -gt 1 ]; then
     die "VAULT_UPSTREAM_EDGE='$EDGE_RAW' names $# hosts; it takes exactly one (ADR-0021:
   one pooled edge for every MISS). Refusing to start."
@@ -307,6 +314,11 @@ elif [ "$#" -eq 1 ]; then
     check_host "VAULT_UPSTREAM_EDGE" "$EDGE"
 fi
 
+# shellcheck disable=SC2086
+set -- $HOSTS_RAW
+if [ "$#" -eq 1 ] && [ "$1" = off ]; then
+    HOSTS_RAW=""
+fi
 HOSTS=""
 COUNT=0
 if [ -n "$EDGE" ]; then
@@ -314,7 +326,7 @@ if [ -n "$EDGE" ]; then
     # shellcheck disable=SC2086
     set -- $HOSTS_RAW
     if [ "$#" -gt 0 ]; then
-        log "VAULT_UPSTREAM_POOL_HOSTS is ignored while VAULT_UPSTREAM_EDGE is set (edge mode); set VAULT_UPSTREAM_EDGE empty for the per-name pool"
+        log "VAULT_UPSTREAM_POOL_HOSTS is ignored while VAULT_UPSTREAM_EDGE is set (edge mode); set VAULT_UPSTREAM_EDGE=off for the per-name pool"
     fi
     GROUPS_N=1
 else
@@ -484,7 +496,7 @@ trap - EXIT INT TERM
 if [ -n "$EDGE" ]; then
     log "upstream edge mode ON: every MISS goes to $EDGE (keepalive $CAP, keepalive_timeout $KEEPALIVE_TIMEOUT), connection cap $CAP (503 above); rendered $OUT and $CAP_OUT"
 elif [ "$COUNT" -eq 0 ]; then
-    log "VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS unset/empty -- no upstream pool (every MISS opens its own connection), connection cap $CAP; rendered $OUT and $CAP_OUT"
+    log "VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS off/unset -- no upstream pool (every MISS opens its own connection), connection cap $CAP; rendered $OUT and $CAP_OUT"
 else
     log "upstream keepalive pool ON (legacy per-name mode): $COUNT edge group(s) [$HOSTS], keepalive $KEEPALIVE_PER_GROUP idle per group (ceiling $MAX_IDLE_TOTAL), keepalive_timeout $KEEPALIVE_TIMEOUT, connection cap $CAP; rendered $OUT and $CAP_OUT"
 fi

@@ -7474,19 +7474,37 @@ This supersedes the precedence subsection below (ADR-0009 addendum
 - **Cross-variable rules** (`422`): `upstream_max_conns >= prefill_max_threads`
   and `tls_client_max_conns <= tls_max_conns`, judged on the values the
   batch leaves behind, only when the batch touches those keys.
-- **`off`** spells "no window" for `schedule_window` (a blank PATCH value
-  resets it, like `null`), "no cap" for `upstream_rate`, "legacy per-name
+- **`off`** spells "no window" for `schedule_window`. A blank PATCH value
+  for `schedule_window` also means `off` (amendment of audit 3.6, review
+  decision B2: the rc17 Android app and web UI send `""` to disable); `null`
+  resets it to the default. Elsewhere `off` means "no cap" for `upstream_rate`, "legacy per-name
   pool" for `upstream_edge` and "none" for `upstream_pool_hosts`. Core keys
   are validated by `vault_api/core_settings.py`, Python twins of the hook
   grammars pinned by `core/tests/fixtures/settings-grammar.tsv`.
-- **`webhook_url` is env-only** (Q2): no PATCH path, shown masked
-  (`scheme://host/***`); a stored value is ignored with one startup warning.
+- **`webhook_url` is env-only** (Q2): no PATCH path, shown masked to scheme
+  and host (`scheme://[***@]host/***`; any `@` after the scheme counts as
+  userinfo); a stored value is ignored with one startup warning.
 - **`VAULT_UPSTREAM_RATE_WINDOW` is deprecated** (Q3): vault-core's rate cap
   follows the download window. `settings_store.core_values` computes the
   values for vault-core, with `VAULT_UPSTREAM_RATE_WINDOW` = the effective
-  download window (`off` when it is off). `VAULT_CORE_SETTINGS_FILE`
-  (env-only path, blank = off) makes vault-api write them atomically at boot
-  and after each PATCH; D16c wires the volume and vault-core's reader.
+  download window (`off` when it is off). The deprecation warning for an env
+  value of it is vault-core's (D16c); compose does not forward it to
+  vault-api, so vault-api does not warn.
+- **Core keys need the core settings file** (review decision B3).
+  `VAULT_CORE_SETTINGS_FILE` (env-only path) makes vault-api write the core
+  values atomically at boot and after each PATCH; D16c wires the volume and
+  vault-core's reader. While it is blank (the shipped state until D16c) the
+  vault-core keys (`target: "core"`) are read-only: GET reports
+  `editable: false`, `reason: "core_file_disabled"`, `source: "default"`, and
+  PATCH answers `409`. The cross-variable rules then judge vault-api's own
+  env and the hook defaults, never stored core values. Every row carries
+  `reason` (`env` | `env_only` | `core_file_disabled` | `null`).
+- **Log level:** applies immediately in vault-api; vault-runner applies the
+  effective level at the start of each job (with prefill threads and
+  timeout, which it also resolves per job).
+- **Window default visible at boot:** when neither the env nor Settings sets
+  a download window, vault-api logs one WARNING that 03:00-07:00 is the rc18
+  default and that `off` disables it.
 
 ### Precedence before D16b: DB override > env value > built-in default
 
