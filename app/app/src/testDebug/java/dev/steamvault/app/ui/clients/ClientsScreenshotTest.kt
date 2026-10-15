@@ -21,6 +21,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.demo.DemoTrafficSnapshot
 import dev.steamvault.app.demo.demoClientsOverview
+import dev.steamvault.app.demo.demoLive
 import dev.steamvault.app.demo.demoSeries
 import dev.steamvault.app.demo.demoThroughput
 import dev.steamvault.app.net.model.ClientOut
@@ -28,6 +29,7 @@ import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.InstalledOnEntry
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.repo.TrafficRepository
@@ -160,6 +162,7 @@ class ClientsScreenshotTest {
     private class FixedTrafficRepository : TrafficRepository {
         override suspend fun throughput(range: String): ThroughputOut = demoThroughput(range, SNAPSHOT, NOW)
         override suspend fun series(range: String): SeriesOut = demoSeries(range, NOW)
+        override suspend fun throughputLive(): LiveOut = demoLive(NOW)
         override suspend fun clientsOverview(range: String): ClientsOverviewOut = demoClientsOverview(range, SNAPSHOT, NOW)
         override suspend fun jobHistory(range: String, limit: Int): List<JobSummary> = emptyList()
     }

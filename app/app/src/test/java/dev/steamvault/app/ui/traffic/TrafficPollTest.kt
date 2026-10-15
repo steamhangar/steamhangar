@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.traffic
 
 import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
+import dev.steamvault.app.ui.traffic.logic.LIVE_POLL_MS
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -107,6 +108,47 @@ class TrafficPollTest {
         testScheduler.advanceUntilIdle()
         assertEquals(0, calls)
         assertFalse(poll.unsupported)
+    }
+
+    @Test
+    fun `WP GRAPH-LIVE -- the live range polls every few seconds, every other range every 30 s`() {
+        assertEquals(3_000L, TrafficPoll.intervalFor("live", TRAFFIC_POLL_MS, LIVE_POLL_MS))
+        assertEquals(30_000L, TrafficPoll.intervalFor("6h", TRAFFIC_POLL_MS, LIVE_POLL_MS))
+        assertEquals(30_000L, TrafficPoll.intervalFor("7d", TRAFFIC_POLL_MS, LIVE_POLL_MS))
+    }
+
+    @Test
+    fun `WP GRAPH-LIVE -- pollForever follows the current range and stops when its collector is cancelled`() = runTest {
+        var calls = 0
+        val poll = TrafficPoll(
+            initialRange = "live",
+            fetch = { r -> calls++; Answer(r) },
+            hasFigures = { true },
+            isValidRange = ::isStatsRange,
+        )
+        val job = launch { poll.pollForever() }
+        testScheduler.runCurrent()
+        assertEquals("one ask at once", 1, calls)
+        testScheduler.advanceTimeBy(2_900L)
+        assertEquals("nothing before 3 s", 1, calls)
+        testScheduler.advanceTimeBy(200L)
+        assertEquals("the second ask at 3 s", 2, calls)
+        testScheduler.advanceTimeBy(3_000L)
+        assertEquals(3, calls)
+
+        // Leaving the live range: the chip tap asks once, then the 30 s cadence.
+        poll.selectRange(this, "6h")
+        testScheduler.runCurrent()
+        assertEquals(4, calls)
+        testScheduler.advanceTimeBy(29_000L)
+        assertEquals("no 3 s polling outside the live range", 4, calls)
+        testScheduler.advanceTimeBy(2_000L)
+        assertEquals(5, calls)
+
+        // The screen left STARTED: the collector is cancelled and nothing more is asked.
+        job.cancel()
+        testScheduler.advanceTimeBy(120_000L)
+        assertEquals(5, calls)
     }
 
     @Test

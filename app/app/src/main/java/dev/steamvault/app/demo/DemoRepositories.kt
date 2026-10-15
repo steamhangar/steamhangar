@@ -12,6 +12,7 @@ import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
 import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.OwnedGamesRelayOut
 import dev.steamvault.app.net.model.PlayerSummariesRelayOut
@@ -147,6 +148,8 @@ class DemoTrafficRepository(private val state: DemoState) : TrafficRepository {
         demoThroughput(range, state.trafficSnapshot(), Instant.now().toEpochMilli())
 
     override suspend fun series(range: String): SeriesOut = demoSeries(range, Instant.now().toEpochMilli())
+
+    override suspend fun throughputLive(): LiveOut = demoLive(Instant.now().toEpochMilli())
 
     override suspend fun clientsOverview(range: String): ClientsOverviewOut =
         demoClientsOverview(range, state.trafficSnapshot(), Instant.now().toEpochMilli())

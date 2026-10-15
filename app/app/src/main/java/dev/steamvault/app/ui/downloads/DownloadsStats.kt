@@ -40,6 +40,9 @@ import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
 import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
 import dev.steamvault.app.ui.traffic.logic.HISTORY_LIMIT
+import dev.steamvault.app.ui.traffic.logic.LIVE_RANGE
+import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_MS
+import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_RANGE
 import dev.steamvault.app.ui.traffic.logic.SERIES_END_TEXT
 import dev.steamvault.app.ui.traffic.logic.STATS_RANGES
 import dev.steamvault.app.ui.traffic.logic.StatTile
@@ -49,6 +52,8 @@ import dev.steamvault.app.ui.traffic.logic.headerTiles
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
+import dev.steamvault.app.ui.traffic.logic.liveSeries
+import dev.steamvault.app.ui.traffic.logic.mergeLive
 import dev.steamvault.app.ui.traffic.logic.pollNote
 import dev.steamvault.app.ui.traffic.logic.seriesHighestText
 import dev.steamvault.app.ui.traffic.logic.seriesLabel
@@ -73,12 +78,38 @@ data class StatsAnswer(val throughput: ThroughputOut, val series: SeriesOut)
 fun downloadsStatsPoll(
     repository: TrafficRepository,
     initialRange: String = DEFAULT_STATS_RANGE,
-): TrafficPoll<StatsAnswer> = TrafficPoll(
-    initialRange = initialRange,
-    fetch = { range -> StatsAnswer(repository.throughput(range), repository.series(range)) },
-    hasFigures = { headerTiles(it.throughput) != null },
-    isValidRange = ::isStatsRange,
-)
+    nowMs: () -> Long = System::currentTimeMillis,
+): TrafficPoll<StatsAnswer> {
+    // WP GRAPH-LIVE (web `fetchLive` / `liveSummary`): the live view asks the
+    // live endpoint every tick and the persisted 1 h summary only every
+    // LIVE_SUMMARY_MS; any other range drops the cached summary.
+    var summary: ThroughputOut? = null
+    var summaryAt = 0L
+    return TrafficPoll(
+        initialRange = initialRange,
+        fetch = { range ->
+            if (range == LIVE_RANGE) {
+                val now = nowMs()
+                val live = repository.throughputLive()
+                val held = summary
+                val cached = if (held == null || now - summaryAt >= LIVE_SUMMARY_MS) {
+                    repository.throughput(LIVE_SUMMARY_RANGE).also {
+                        summary = it
+                        summaryAt = now
+                    }
+                } else {
+                    held
+                }
+                StatsAnswer(mergeLive(cached, live), liveSeries(live))
+            } else {
+                summary = null
+                StatsAnswer(repository.throughput(range), repository.series(range))
+            }
+        },
+        hasFigures = { headerTiles(it.throughput) != null },
+        isValidRange = ::isStatsRange,
+    )
+}
 
 /** Web "Loading statistics…" / "Could not load the statistics: ...". */
 const val LOADING_STATISTICS_TEXT = "Loading statistics…"

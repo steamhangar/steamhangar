@@ -1,8 +1,10 @@
 package dev.steamvault.app.ui.traffic.logic
 
+import dev.steamvault.app.net.model.CurrentOut
 import dev.steamvault.app.net.model.EventFeedOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.JobThroughputOut
+import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
 import dev.steamvault.app.net.model.SummaryOut
@@ -41,13 +43,19 @@ val TRAFFIC_RANGES: List<String> = listOf("24h", "7d", "30d", "all")
  * offer 1 h and 6 h, answered by the server's 1-minute tier. The Clients
  * page and the History filter keep [TRAFFIC_RANGES].
  */
-val STATS_RANGES: List<String> = listOf("1h", "6h", "24h", "7d", "30d", "all")
+val STATS_RANGES: List<String> = listOf("live", "1h", "6h", "24h", "7d", "30d", "all")
+
+/** WP GRAPH-LIVE: the first statistics range, answered by
+ * `GET /v1/throughput/live` (5 s points, polled every few seconds). It is
+ * never the default and never a Clients / History range. */
+const val LIVE_RANGE = "live"
 
 /** The Downloads statistics range when none was chosen yet. */
 const val DEFAULT_STATS_RANGE = "6h"
 
 /** Segmented-control labels, for every range of [STATS_RANGES]. */
 val RANGE_LABELS: Map<String, String> = mapOf(
+    "live" to "Live",
     "1h" to "1 h",
     "6h" to "6 h",
     "24h" to "24 h",
@@ -58,6 +66,8 @@ val RANGE_LABELS: Map<String, String> = mapOf(
 
 /** Phrases for running text ("1.2 GB loaded in the last 7 days"). */
 val RANGE_PHRASES: Map<String, String> = mapOf(
+    // WP GRAPH-LIVE: the live view's tiles summarise the last hour.
+    "live" to "in the last hour",
     "1h" to "in the last hour",
     "6h" to "in the last 6 hours",
     "24h" to "in the last 24 hours",
@@ -239,6 +249,12 @@ fun headerTiles(throughput: ThroughputOut?): List<StatTile>? {
 
 /** Detail line of "Current speed": scope and window, plus the runner's part. */
 fun currentDetail(throughput: ThroughputOut): String {
+    val liveSeconds = if (throughput.live) throughput.current?.window_seconds else null
+    if (liveSeconds != null && liveSeconds > 0) {
+        val liveScope = "all traffic incl. prefill runner, last $liveSeconds s"
+        val liveRunner = formatSpeed(throughput.current?.runner_bytes_per_second)
+        return if (liveRunner != null) "$liveScope · $liveRunner by the prefill runner" else liveScope
+    }
     val scope = "all traffic incl. prefill runner, 5-10 min window"
     val runner = formatSpeed(throughput.current?.runner_bytes_per_second)
     return if (runner != null) "$scope · $runner by the prefill runner" else scope
@@ -278,6 +294,8 @@ fun runnerDetail(summary: SummaryOut?): String? {
 
 /** The bucket a series point covers, for the graph's label. */
 fun bucketWord(bucketSeconds: Int): String = when (bucketSeconds) {
+    5 -> "5 seconds"
+    15 -> "15 seconds"
     60 -> "minute"
     300 -> "5 minutes"
     3600 -> "hour"
@@ -333,6 +351,7 @@ fun seriesStartText(series: SeriesOut, nowMs: Long = System.currentTimeMillis())
         return first?.takeIf { it.length >= 10 }?.let { "since ${it.substring(0, 10)}" } ?: ""
     }
     val fixed = when (series.range) {
+        "live" -> "1 h ago"
         "1h" -> "1 h ago"
         "6h" -> "6 h ago"
         "24h" -> "24 h ago"
@@ -386,6 +405,73 @@ fun jobSpeedText(entry: JobThroughputOut?, state: FeedState): String? {
     val speed = formatSpeed(bps) ?: return null
     val sofar = formatTrafficBytes(entry.bytes_since_start)
     return if (sofar != null) "$speed · $sofar loaded so far" else speed
+}
+
+// ---------------------------------------------------------------------
+// Live view (GET /v1/throughput/live, WP GRAPH-LIVE)
+// ---------------------------------------------------------------------
+
+/** The live view's poll cadence (web `LIVE_POLL_MS`); only while the screen is STARTED. */
+const val LIVE_POLL_MS = 3000L
+
+/** How often the live view refreshes its persisted 1 h summary tiles (web `LIVE_SUMMARY_MS`). */
+const val LIVE_SUMMARY_MS = 30_000L
+
+/** The persisted range whose summary backs the live view's tiles. */
+const val LIVE_SUMMARY_RANGE = "1h"
+
+/**
+ * The live answer as a series the graph can draw (web `liveSeries`). The
+ * stitched points have 5, 15 and 60 s buckets; [seriesGeometry] spaces
+ * points evenly, so every point is repeated to fill a uniform 5 s grid (a
+ * 15 s point three times, a minute twelve times) and the time axis stays
+ * true.
+ */
+fun liveSeries(live: LiveOut): SeriesOut {
+    val points = ArrayList<SeriesPointOut>()
+    for (p in live.points) {
+        val point = SeriesPointOut(
+            t = p.t,
+            bytes_served = p.bytes_served,
+            hit_bytes = p.hit_bytes,
+            miss_bytes = p.miss_bytes,
+            requests = p.requests,
+            runner_bytes = p.runner_bytes,
+            bytes_per_second = p.bytes_per_second,
+            peak_bytes_per_second = p.peak_bytes_per_second,
+        )
+        val repeat = maxOf(1, jsRound((if (p.bucket_seconds > 0) p.bucket_seconds else 5) / 5.0).toInt())
+        repeat(repeat) { points.add(point) }
+    }
+    return SeriesOut(
+        event_feed = live.event_feed,
+        range = LIVE_RANGE,
+        tier = "live",
+        bucket_seconds = 5,
+        range_start = live.range_start,
+        points = points,
+    )
+}
+
+/**
+ * The header's figures for the live view (web `mergeLive`): the persisted
+ * 1 h [summary] with "Current speed" taken from the live tier when the live
+ * feed is `ok`.
+ */
+fun mergeLive(summary: ThroughputOut, live: LiveOut): ThroughputOut {
+    val current = live.current
+    val merged = summary.copy(range = LIVE_RANGE, live = false)
+    if (current == null || feedState(live.event_feed) != FeedState.OK) return merged
+    return merged.copy(
+        live = true,
+        current = CurrentOut(
+            bytes_per_second = current.bytes_per_second,
+            window_start = current.window_start,
+            window_end = current.window_end,
+            window_seconds = current.window_seconds,
+            runner_bytes_per_second = current.runner_bytes_per_second,
+        ),
+    )
 }
 
 // ---------------------------------------------------------------------

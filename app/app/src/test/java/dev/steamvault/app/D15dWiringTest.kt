@@ -64,6 +64,7 @@ class D15dWiringTest {
     private val downloads = "$base/ui/downloads/DownloadsScreen.kt"
     private val stats = "$base/ui/downloads/DownloadsStats.kt"
     private val chips = "$base/ui/traffic/RangeChips.kt"
+    private val trafficPoll = "$base/ui/traffic/TrafficPoll.kt"
 
     @Test
     fun `MUTATION PIN -- Clients is a nav destination with its own icon and screen, real and demo`() {
@@ -171,5 +172,13 @@ class D15dWiringTest {
         assertCalledFrom(chips, ".semantics { contentDescription = label }", "RangeChips")
         assertCalledFrom(chips, ".selectableGroup()", "RangeChips")
         assertCalledFrom(chips, "onClick = { onSelect(range) }", "RangeChips")
+    }
+
+    @Test
+    fun `MUTATION PIN -- the live range asks the live endpoint, merges the held summary and polls faster`() {
+        assertCalledFrom(stats, "repository.throughputLive()", "downloadsStatsPoll")
+        assertCalledFrom(stats, "repository.throughput(LIVE_SUMMARY_RANGE)", "downloadsStatsPoll")
+        assertCalledFrom(stats, "StatsAnswer(mergeLive(cached, live), liveSeries(live))", "downloadsStatsPoll")
+        assertCalledFrom(trafficPoll, "intervalFor(waitedRange, intervalMs, liveIntervalMs)", "pollForever")
     }
 }

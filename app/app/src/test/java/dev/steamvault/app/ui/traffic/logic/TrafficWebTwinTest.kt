@@ -106,6 +106,30 @@ class TrafficWebTwinTest {
         )
     }
 
+    /** WP GRAPH-LIVE: the live range's keys, words, cadence and endpoint are the web's. */
+    @Test
+    fun `live view literals`() {
+        assertQuoted("lib/traffic-view.js", listOf("Live", "5 seconds", "15 seconds"))
+        assertFragments(
+            "lib/traffic-view.js",
+            listOf(
+                // The range keys, in the order the chips show them ("Live" first).
+                "export const STATS_RANGES = Object.freeze([\"live\", \"1h\", \"6h\", \"24h\", \"7d\", \"30d\", \"all\"]);",
+                "live: \"Live\",",
+                "live: \"in the last hour\",",
+                "{ live: \"1 h ago\",",
+                "`all traffic incl. prefill runner, last \${liveSeconds} s`",
+                "export const LIVE_POLL_MS = 3000;",
+                "export const LIVE_SUMMARY_MS = 30000;",
+                "export const LIVE_SUMMARY_RANGE = \"1h\";",
+                "Math.round((p.bucket_seconds || 5) / 5)",
+            ),
+        )
+        assertQuoted("api.js", listOf("/v1/throughput/live"))
+        // The default stays 6 h in the web too (not "live").
+        assertFragments("lib/traffic-view.js", listOf("DEFAULT_STATS_RANGE = \"6h\""))
+    }
+
     @Test
     fun `clients-page literals`() {
         assertQuoted(

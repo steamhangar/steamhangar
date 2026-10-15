@@ -262,4 +262,54 @@ class TrafficApiTest {
             assertEquals(404, e.status)
         }
     }
+
+    @Test
+    fun `WP GRAPH-LIVE -- the live endpoint decodes the stitched series and the live current`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":$okFeed,"range":"live","tier":"live","watcher_window_seconds":30,
+                "live_since":"2026-10-14T11:45:00Z","range_start":"2026-10-14T11:00:00Z",
+                "current":{"bytes_per_second":1048576.0,"runner_bytes_per_second":524288.0,
+                  "window_start":"2026-10-14T11:59:42Z","window_end":"2026-10-14T12:00:00Z","window_seconds":18},
+                "points":[
+                  {"t":"2026-10-14T11:00:00Z","bucket_seconds":60,"source":"persisted","bytes_served":6000,"hit_bytes":5000,
+                   "miss_bytes":1000,"requests":3,"runner_bytes":0,"bytes_per_second":100.0,"peak_bytes_per_second":150.0},
+                  {"t":"2026-10-14T11:59:55Z","bucket_seconds":5,"source":"live","bytes_served":500,"hit_bytes":500,
+                   "miss_bytes":0,"requests":1,"runner_bytes":100,"bytes_per_second":100.0,"peak_bytes_per_second":100.0}]}""",
+            ),
+        )
+        val live = client.throughputLive()
+        val req = server.takeRequest()
+        assertEquals("/v1/throughput/live", req.path)
+        assertEquals("k", req.getHeader("X-Api-Key"))
+        assertEquals("live", live.range)
+        assertEquals(30, live.watcher_window_seconds)
+        assertEquals("2026-10-14T11:45:00Z", live.live_since)
+        assertEquals(listOf(60, 5), live.points.map { it.bucket_seconds })
+        assertEquals(listOf("persisted", "live"), live.points.map { it.source })
+        assertEquals(100L, live.points.last().runner_bytes)
+        assertEquals(18, live.current!!.window_seconds)
+        assertEquals(524288.0, live.current!!.runner_bytes_per_second, 0.0)
+    }
+
+    @Test
+    fun `WP GRAPH-LIVE -- the feed-disabled live answer has no current and no points, a 404 is an old server`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":{"enabled":false,"state":"disabled"},"range":"live","tier":"live","watcher_window_seconds":30,
+                "live_since":null,"range_start":null,"current":null,"points":[]}""",
+            ),
+        )
+        val off = client.throughputLive()
+        assertNull(off.current)
+        assertTrue(off.points.isEmpty())
+        assertEquals("disabled", off.event_feed.state)
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"detail":"Not Found"}"""))
+        try {
+            client.throughputLive()
+            fail("expected NotFound")
+        } catch (e: VaultApiError.NotFound) {
+            assertEquals(404, e.status)
+        }
+    }
 }

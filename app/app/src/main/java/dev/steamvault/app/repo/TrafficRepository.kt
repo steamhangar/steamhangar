@@ -3,6 +3,7 @@ package dev.steamvault.app.repo
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.ThroughputOut
 
@@ -19,6 +20,9 @@ import dev.steamvault.app.net.model.ThroughputOut
 interface TrafficRepository {
     suspend fun throughput(range: String): ThroughputOut
     suspend fun series(range: String): SeriesOut
+
+    /** WP GRAPH-LIVE: `GET /v1/throughput/live`, the stitched live series. */
+    suspend fun throughputLive(): LiveOut
     suspend fun clientsOverview(range: String): ClientsOverviewOut
     suspend fun jobHistory(range: String, limit: Int): List<JobSummary>
 }
@@ -26,6 +30,7 @@ interface TrafficRepository {
 class VaultTrafficRepository(private val client: VaultApiClient) : TrafficRepository {
     override suspend fun throughput(range: String): ThroughputOut = client.throughput(range)
     override suspend fun series(range: String): SeriesOut = client.throughputSeries(range)
+    override suspend fun throughputLive(): LiveOut = client.throughputLive()
     override suspend fun clientsOverview(range: String): ClientsOverviewOut = client.clientsOverview(range)
     override suspend fun jobHistory(range: String, limit: Int): List<JobSummary> = client.jobsInRange(range, limit)
 }

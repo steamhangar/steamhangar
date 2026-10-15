@@ -17,6 +17,7 @@ import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
 import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.MoveJobRequest
 import dev.steamvault.app.net.model.OwnedGamesRelayOut
@@ -271,6 +272,10 @@ class VaultApiClient(
     /** `GET /v1/throughput?range=` -- the Downloads header's figures. */
     suspend fun throughput(range: String): ThroughputOut =
         get("/v1/throughput", params = mapOf("range" to range))
+
+    /** `GET /v1/throughput/live` -- the stitched live series (WP GRAPH-LIVE);
+     * polling it is what makes the server tail the cache's event log. */
+    suspend fun throughputLive(): LiveOut = get("/v1/throughput/live")
 
     /** `GET /v1/throughput/series?range=` -- the Downloads graph. */
     suspend fun throughputSeries(range: String): SeriesOut =

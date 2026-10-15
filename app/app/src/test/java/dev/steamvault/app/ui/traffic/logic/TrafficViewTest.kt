@@ -4,6 +4,9 @@ import dev.steamvault.app.net.model.CurrentOut
 import dev.steamvault.app.net.model.EventFeedOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.JobThroughputOut
+import dev.steamvault.app.net.model.LiveCurrentOut
+import dev.steamvault.app.net.model.LiveOut
+import dev.steamvault.app.net.model.LivePointOut
 import dev.steamvault.app.net.model.RunnerTrafficOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
@@ -356,8 +359,8 @@ class TrafficViewTest {
 
     @Test
     fun `WP GRAPH-ZOOM -- the statistics add 1 h and 6 h, the clients page keeps four ranges`() {
-        assertEquals(listOf("1h", "6h", "24h", "7d", "30d", "all"), STATS_RANGES)
-        assertEquals(listOf("1 h", "6 h", "24 h", "7 days", "30 days", "All"), STATS_RANGES.map { RANGE_LABELS.getValue(it) })
+        assertEquals(listOf("live", "1h", "6h", "24h", "7d", "30d", "all"), STATS_RANGES)
+        assertEquals(listOf("Live", "1 h", "6 h", "24 h", "7 days", "30 days", "All"), STATS_RANGES.map { RANGE_LABELS.getValue(it) })
         assertEquals("in the last hour", RANGE_PHRASES.getValue("1h"))
         assertEquals("in the last 6 hours", RANGE_PHRASES.getValue("6h"))
         assertEquals("6h", DEFAULT_STATS_RANGE)
@@ -365,5 +368,96 @@ class TrafficViewTest {
         assertFalse(isStatsRange("1y"))
         assertFalse(isRange("1h"))
         assertFalse(isRange("6h"))
+    }
+
+    // ---- WP GRAPH-LIVE ---------------------------------------------------
+
+    private fun livePoint(t: String, bucket: Int, bps: Double) =
+        LivePointOut(t = t, bucket_seconds = bucket, bytes_per_second = bps, bytes_served = (bps * bucket).toLong())
+
+    @Test
+    fun `WP GRAPH-LIVE -- Live is the first range, the default stays 6 h, Clients and History do not get it`() {
+        assertEquals("live", STATS_RANGES.first())
+        assertEquals("Live", RANGE_LABELS.getValue("live"))
+        assertEquals("in the last hour", RANGE_PHRASES.getValue("live"))
+        assertEquals("live", LIVE_RANGE)
+        assertEquals("6h", DEFAULT_STATS_RANGE)
+        assertTrue(isStatsRange("live"))
+        assertFalse(isRange("live"))
+        assertFalse(TRAFFIC_RANGES.contains("live"))
+        assertEquals(3000L, LIVE_POLL_MS)
+        assertEquals(30_000L, LIVE_SUMMARY_MS)
+        assertEquals("1h", LIVE_SUMMARY_RANGE)
+        assertEquals("5 seconds", bucketWord(5))
+        assertEquals("15 seconds", bucketWord(15))
+        val liveSeries = SeriesOut(range = "live", points = listOf(point("2026-10-14T11:00:00Z", 1.0)))
+        assertEquals("1 h ago", seriesStartText(liveSeries, now))
+    }
+
+    @Test
+    fun `WP GRAPH-LIVE -- liveSeries repeats every point to a uniform 5 s grid`() {
+        val live = LiveOut(
+            event_feed = feed("ok"),
+            range_start = "2026-10-14T11:00:00Z",
+            points = listOf(
+                livePoint("2026-10-14T11:00:00Z", 60, 1.0),
+                livePoint("2026-10-14T11:01:00Z", 15, 2.0),
+                livePoint("2026-10-14T11:01:15Z", 5, 3.0),
+            ),
+        )
+        val series = liveSeries(live)
+        assertEquals("live", series.range)
+        assertEquals(5, series.bucket_seconds)
+        assertEquals("2026-10-14T11:00:00Z", series.range_start)
+        assertEquals(12 + 3 + 1, series.points.size)
+        assertEquals(listOf(1.0, 2.0, 3.0), series.points.map { it.bytes_per_second }.distinct())
+        assertEquals(12, series.points.count { it.bytes_per_second == 1.0 })
+        assertEquals(3, series.points.count { it.bytes_per_second == 2.0 })
+        // An unusable bucket length counts as 5 s; an empty answer an empty series.
+        assertEquals(1, liveSeries(live.copy(points = listOf(livePoint("t", 0, 1.0)))).points.size)
+        assertEquals(emptyList<SeriesPointOut>(), liveSeries(LiveOut()).points)
+    }
+
+    @Test
+    fun `WP GRAPH-LIVE -- mergeLive takes Current speed from the live tier and keeps the 1 h summary`() {
+        val summary = throughput("ok", range = "1h")
+        val live = LiveOut(
+            event_feed = feed("ok"),
+            current = LiveCurrentOut(
+                bytes_per_second = 10 * mib,
+                runner_bytes_per_second = 2 * mib,
+                window_start = "2026-10-14T11:59:40Z",
+                window_end = "2026-10-14T12:00:00Z",
+                window_seconds = 18,
+            ),
+        )
+        val merged = mergeLive(summary, live)
+        assertEquals("live", merged.range)
+        assertTrue(merged.live)
+        assertEquals(summary.summary, merged.summary)
+        assertEquals(10 * mib, merged.current!!.bytes_per_second, 0.0)
+        val current = headerTiles(merged)!!.first { it.key == "current" }
+        assertEquals("10.0 MB/s", current.value)
+        assertEquals("all traffic incl. prefill runner, last 18 s · 2.0 MB/s by the prefill runner", current.detail)
+        assertEquals(
+            headerTiles(summary)!!.filter { it.key != "current" },
+            headerTiles(merged)!!.filter { it.key != "current" },
+        )
+    }
+
+    @Test
+    fun `WP GRAPH-LIVE -- mergeLive keeps the persisted current when the live feed has none`() {
+        val summary = throughput("ok", range = "1h")
+        val off = mergeLive(summary, LiveOut(event_feed = feed("disabled")))
+        assertFalse(off.live)
+        assertEquals("live", off.range)
+        assertEquals(summary.current, off.current)
+        assertEquals(
+            "all traffic incl. prefill runner, 5-10 min window",
+            headerTiles(off)!!.first { it.key == "current" }.detail,
+        )
+        val stale = mergeLive(summary, LiveOut(event_feed = feed("stale"), current = LiveCurrentOut(bytes_per_second = 1.0)))
+        assertFalse(stale.live)
+        assertEquals(summary.current, stale.current)
     }
 }

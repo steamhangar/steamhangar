@@ -16,12 +16,14 @@ import dev.steamvault.app.ui.traffic.logic.headerTiles
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
 import dev.steamvault.app.ui.traffic.logic.seriesStartText
 import dev.steamvault.app.ui.traffic.logic.trimSeries
+import dev.steamvault.app.ui.traffic.logic.liveSeries
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 /**
  * WP D15d brief: "demo mode gets data so the screens show". Pins that the
@@ -31,10 +33,53 @@ import org.junit.Test
  */
 class DemoTrafficTest {
 
+    /** The ranges `GET /v1/throughput?range=` answers (WP GRAPH-LIVE: "live" has its own endpoint). */
+    private val PERSISTED_STATS_RANGES = STATS_RANGES.filter { it != "live" }
+
+    @Test
+    fun `WP GRAPH-LIVE -- the demo live answer has the server's stitched geometry and a drawable graph`() = runTest {
+        val now = Instant.parse("2026-10-14T19:30:07Z").toEpochMilli()
+        val live = demoLive(now)
+        assertEquals(FeedState.OK, feedState(live.event_feed))
+        assertEquals("live", live.range)
+        // 5 s points for the last minute (+ the running cell), 15 s up to 5 min, 1-minute points up to an hour.
+        assertEquals(3, live.points.map { it.bucket_seconds }.distinct().size)
+        assertEquals(setOf(5, 15, 60), live.points.map { it.bucket_seconds }.toSet())
+        assertEquals(setOf("live", "persisted"), live.points.map { it.source }.toSet())
+        assertEquals(live.points.first().t, live.range_start)
+        val times = live.points.map { Instant.parse(it.t).toEpochMilli() }
+        assertEquals("oldest first", times.sorted(), times)
+        for ((p, next) in live.points.zip(live.points.drop(1))) {
+            assertEquals(
+                "no gap and no overlap between ${p.t} and ${next.t}",
+                Instant.parse(p.t).toEpochMilli() + p.bucket_seconds * 1000L,
+                Instant.parse(next.t).toEpochMilli(),
+            )
+        }
+        assertTrue("the last point is the running 5 s cell", live.points.last().bucket_seconds == 5)
+        assertTrue(live.points.all { it.bytes_served == it.hit_bytes + it.miss_bytes + it.runner_bytes })
+        assertNotNull(live.current)
+        assertTrue(live.current!!.window_seconds!! in 15..19)
+        // The graph shows (liveSeries -> trimSeries -> geometry), as the screen draws it.
+        val series = liveSeries(live)
+        assertNotNull(graphGeometryToShow(series.copy(points = trimSeries(series.points)), "live", false, 300f, 60f))
+    }
+
+    @Test
+    fun `WP GRAPH-LIVE -- the demo repository serves the live answer and it moves with the clock`() = runTest {
+        val repo = DemoTrafficRepository(DemoState.fresh())
+        val live = repo.throughputLive()
+        assertTrue(live.points.isNotEmpty())
+        val a = demoLive(1_792_000_000_000L)
+        val b = demoLive(1_792_000_005_000L)
+        assertTrue("the series advances by a 5 s cell", a.points.last().t != b.points.last().t)
+        assertEquals("deterministic per clock", a, demoLive(1_792_000_000_000L))
+    }
+
     @Test
     fun `every range answers with an ok feed, figures and a drawable graph`() = runTest {
         val repo = DemoTrafficRepository(DemoState.fresh())
-        for (range in STATS_RANGES) {
+        for (range in PERSISTED_STATS_RANGES) {
             val t = repo.throughput(range)
             assertEquals(range, t.range)
             assertEquals(FeedState.OK, feedState(t.event_feed))
@@ -105,7 +150,7 @@ class DemoTrafficTest {
         assertEquals("Steam Deck", clientName(named.single()))
         assertEquals("vault-agent on \u2068demo-steamdeck\u2069 · 10.0.0.57", clientKindText(named.single()))
         assertTrue("every row carries display_name", o.clients.all { !it.display_name.isNullOrEmpty() })
-        for (range in STATS_RANGES) {
+        for (range in PERSISTED_STATS_RANGES) {
             val t = repo.throughput(range)
             val summary = t.summary!!
             val runnerBytes = summary.prefill_runner!!.bytes_served

@@ -9,6 +9,9 @@ import dev.steamvault.app.net.model.EventFeedOut
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.JobThroughputOut
+import dev.steamvault.app.net.model.LiveCurrentOut
+import dev.steamvault.app.net.model.LiveOut
+import dev.steamvault.app.net.model.LivePointOut
 import dev.steamvault.app.net.model.LoadingAppOut
 import dev.steamvault.app.net.model.LoadingNowOut
 import dev.steamvault.app.net.model.RecentAppOut
@@ -155,6 +158,65 @@ fun demoSeries(range: String, nowMs: Long): SeriesOut {
         tier = t.tier,
         bucket_seconds = t.bucket,
         range_start = points.firstOrNull()?.t,
+        points = points,
+    )
+}
+
+/**
+ * `GET /v1/throughput/live` (demo, WP GRAPH-LIVE; web `demoLive`): the
+ * stitched series the server builds, in the same geometry (5 s points for
+ * the last minute, 15 s up to 5 minutes, then 1-minute points up to an
+ * hour), with a deterministic wavy rate so the demo graph moves.
+ */
+fun demoLive(nowMs: Long): LiveOut {
+    val fineStart = floorTo(nowMs, 15) - 45_000L
+    val mediumStart = floorTo(fineStart, 60) - 180_000L
+    val coarseStart = mediumStart - 3_240_000L
+    val spans = ArrayList<Triple<Long, Int, String>>()
+    var at = coarseStart
+    while (at < mediumStart) { spans.add(Triple(at, 60, "persisted")); at += 60_000L }
+    at = mediumStart
+    while (at < fineStart) { spans.add(Triple(at, 15, "live")); at += 15_000L }
+    at = fineStart
+    while (at <= floorTo(nowMs, 5)) { spans.add(Triple(at, 5, "live")); at += 5_000L }
+    val points = spans.map { (start, bucket, source) ->
+        val age = Math.floorDiv(nowMs - start, 60_000L)
+        val wave = 0.6 + 0.4 * abs(sin(start / 9_000.0))
+        val bps = if (age > 30) 0.0 else (wave * 36 * MIB).roundToLong().toDouble()
+        val served = (bps * bucket).roundToLong()
+        val runner = (served * 0.1).roundToLong()
+        val clients = served - runner
+        val hit = (clients * 0.82).roundToLong()
+        LivePointOut(
+            t = iso(start),
+            bucket_seconds = bucket,
+            source = source,
+            bytes_served = served,
+            hit_bytes = hit,
+            miss_bytes = clients - hit,
+            requests = (clients / (1.4 * MIB)).roundToLong(),
+            runner_bytes = runner,
+            bytes_per_second = bps,
+            peak_bytes_per_second = bps,
+        )
+    }
+    val recent = points.takeLast(4)
+    val windowSeconds = 15 + (Math.floorMod(nowMs, 5000L) / 1000L).toInt()
+    val bps = recent.sumOf { it.bytes_per_second } / recent.size
+    return LiveOut(
+        event_feed = feed(nowMs),
+        range = "live",
+        tier = "live",
+        watcher_window_seconds = 30,
+        live_since = iso(nowMs - 15 * 60_000L),
+        range_start = points.first().t,
+        current = LiveCurrentOut(
+            bytes_per_second = bps,
+            runner_bytes_per_second = bps * 0.1,
+            window_start = iso(nowMs - windowSeconds * 1000L),
+            window_end = iso(nowMs),
+            window_seconds = windowSeconds,
+        ),
         points = points,
     )
 }

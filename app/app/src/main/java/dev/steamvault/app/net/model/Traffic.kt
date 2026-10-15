@@ -108,6 +108,9 @@ data class ThroughputOut(
     val runner_active_now: Boolean? = null,
     val summary: SummaryOut? = null,
     val jobs: List<JobThroughputOut> = emptyList(),
+    /** WP GRAPH-LIVE: set by the app (never on the wire) when [current] was
+     * taken from the live tier (`mergeLive`); the header words follow it. */
+    val live: Boolean = false,
 )
 
 @Serializable
@@ -134,6 +137,50 @@ data class SeriesOut(
     val range_start: String? = null,
     /** Oldest first. */
     val points: List<SeriesPointOut> = emptyList(),
+)
+
+/** WP GRAPH-LIVE: one point of `GET /v1/throughput/live`; [bucket_seconds]
+ * is 5, 15 or 60 and varies along the series; [source] `live` | `persisted`. */
+@Serializable
+data class LivePointOut(
+    val t: String,
+    val bucket_seconds: Int = 5,
+    val source: String = "live",
+    val bytes_served: Long = 0,
+    val hit_bytes: Long = 0,
+    val miss_bytes: Long = 0,
+    val requests: Long = 0,
+    val runner_bytes: Long = 0,
+    val bytes_per_second: Double = 0.0,
+    val peak_bytes_per_second: Double = 0.0,
+)
+
+/** WP GRAPH-LIVE: the live "Current speed" (a window of 15-20 seconds). */
+@Serializable
+data class LiveCurrentOut(
+    val bytes_per_second: Double = 0.0,
+    val runner_bytes_per_second: Double = 0.0,
+    val window_start: String? = null,
+    val window_end: String? = null,
+    val window_seconds: Int? = null,
+)
+
+/**
+ * WP GRAPH-LIVE: `GET /v1/throughput/live` (`api/vault_api/routers/traffic.py`
+ * `LiveOut`): the stitched series (5 s points for the last minute, 15 s up
+ * to 5 minutes, then 1-minute points up to an hour), oldest first. With the
+ * feed disabled [current] is `null` and [points] empty.
+ */
+@Serializable
+data class LiveOut(
+    val event_feed: EventFeedOut = EventFeedOut(),
+    val range: String = "live",
+    val tier: String = "live",
+    val watcher_window_seconds: Int = 30,
+    val live_since: String? = null,
+    val range_start: String? = null,
+    val current: LiveCurrentOut? = null,
+    val points: List<LivePointOut> = emptyList(),
 )
 
 @Serializable

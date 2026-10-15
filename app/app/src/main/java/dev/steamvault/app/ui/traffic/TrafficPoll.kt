@@ -4,6 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.ui.traffic.logic.LIVE_POLL_MS
+import dev.steamvault.app.ui.traffic.logic.LIVE_RANGE
 import dev.steamvault.app.ui.traffic.logic.isRange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -71,13 +73,30 @@ class TrafficPoll<T : Any>(
         }
     }
 
-    /** Polls until [unsupported]; the screen runs it under
-     * `repeatOnLifecycle(STARTED)`, so it pauses in the background. */
-    suspend fun pollForever(intervalMs: Long = TRAFFIC_POLL_MS) {
+    /**
+     * Polls until [unsupported]; the screen runs it under
+     * `repeatOnLifecycle(STARTED)`, so it pauses in the background (WP
+     * GRAPH-LIVE: the fast live cadence never runs while the screen is not
+     * visible). The wait follows the CURRENT range, like web
+     * `createViewPoll`'s interval function: [liveIntervalMs] in the live
+     * range, [intervalMs] otherwise. A range change restarts the wait (the
+     * chip tap already asked once).
+     */
+    suspend fun pollForever(intervalMs: Long = TRAFFIC_POLL_MS, liveIntervalMs: Long = LIVE_POLL_MS) {
         while (!unsupported) {
             refreshOnce()
             if (unsupported) return
-            delay(intervalMs)
+            var waitedRange = range
+            var waited = 0L
+            while (waited < intervalFor(waitedRange, intervalMs, liveIntervalMs)) {
+                val slice = minOf(WAIT_SLICE_MS, intervalFor(waitedRange, intervalMs, liveIntervalMs) - waited)
+                delay(slice)
+                waited += slice
+                if (range != waitedRange) {
+                    waitedRange = range
+                    waited = 0L
+                }
+            }
         }
     }
 
@@ -91,6 +110,13 @@ class TrafficPoll<T : Any>(
     }
 
     companion object {
+        /** The wait is cut into slices so a range change takes effect at once. */
+        private const val WAIT_SLICE_MS = 250L
+
+        /** The pause after a poll of [range] (WP GRAPH-LIVE). */
+        fun intervalFor(range: String, intervalMs: Long, liveIntervalMs: Long): Long =
+            if (range == LIVE_RANGE) liveIntervalMs else intervalMs
+
         /** web `errorText`: the server's `detail`, else the message. */
         fun errorText(e: VaultApiError): String =
             e.detail?.takeIf { it.isNotBlank() } ?: e.message?.takeIf { it.isNotBlank() } ?: "Request failed."
