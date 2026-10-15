@@ -114,7 +114,7 @@ function valueOf(g, key, liveJob) {
 }
 
 function compareNames(a, b) {
-  return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+  return a.localeCompare(b, undefined, { sensitivity: "base" });
 }
 
 /** Name tie-break, A-Z, name-less last; 0 when equal. */
