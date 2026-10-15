@@ -1221,3 +1221,6 @@ def clear_app(conn: sqlite3.Connection, appid: int) -> None:
         conn.execute("DELETE FROM oracle_branch_manifests WHERE appid = ?", (appid,))
         conn.execute("DELETE FROM oracle_dlc_links WHERE appid = ?", (appid,))
         conn.execute("DELETE FROM oracle_app_state WHERE appid = ?", (appid,))
+        # WP D19-1a: the card's expectation is oracle data too.
+        conn.execute("DELETE FROM depot_preview WHERE appid = ?", (appid,))
+        conn.execute("DELETE FROM depot_preview_state WHERE appid = ?", (appid,))

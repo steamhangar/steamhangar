@@ -1159,6 +1159,14 @@ DEFAULT_RELAY_EXPOSE_LAST_PLAYED = False
 #: oracle itself on and a schedule window.
 DEFAULT_LIBRARY_META = False
 
+#: WP D19-1a DEPOT-PREVIEW-1a: opening the card of a never-downloaded game
+#: asks the manifest oracle (same host as the update check, no new host) for
+#: its expected depots and size. That reveals which games a household member
+#: browses, so it is NOT gated by ``VAULT_MANIFEST_ORACLE`` alone (that one is
+#: on by default): it has its own env-only switch, off by default, and needs
+#: the oracle on as well (docs/security/privacy-review.md O2 / F1).
+DEFAULT_DEPOT_PREVIEW = False
+
 
 # --------------------------------------------------------------------------
 # WP S-1 (ADR-0012): the runner split. vault-api's worker keeps owning job
@@ -1433,6 +1441,10 @@ class Settings:
     # nightly oracle fill of app metadata for the library filters, see
     # ``vault_api/library_meta.py``. Needs the oracle on and a schedule window.
     library_meta_enabled: bool = DEFAULT_LIBRARY_META
+    # WP D19-1a. Env-only (VAULT_DEPOT_PREVIEW), default off: one oracle query
+    # per opened card of a never-downloaded game, see
+    # ``vault_api/depot_preview.py``. Needs the oracle on as well.
+    depot_preview_enabled: bool = DEFAULT_DEPOT_PREVIEW
     # WP S-1 (ADR-0012). 'subprocess' (default, unchanged behaviour) |
     # 'queue' (hand off execution to a separate prefill_runner process). See
     # the PREFILL_MODE_* constants above.
@@ -1833,6 +1845,7 @@ class Settings:
                 "VAULT_RELAY_EXPOSE_LAST_PLAYED", DEFAULT_RELAY_EXPOSE_LAST_PLAYED
             ),
             library_meta_enabled=_env_bool("VAULT_LIBRARY_META", DEFAULT_LIBRARY_META),
+            depot_preview_enabled=_env_bool("VAULT_DEPOT_PREVIEW", DEFAULT_DEPOT_PREVIEW),
             # WP S-1 (ADR-0012). Unset/blank = 'subprocess', byte-identical to
             # every version of vault-api before this work package.
             prefill_mode=_env_prefill_mode(),

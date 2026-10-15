@@ -863,6 +863,12 @@ the same oracle path: when on AND the oracle is on AND a schedule window is
 set, vault-api also fetches genres, categories, rating and release year for
 the library filter/sort, inside the window. It adds no new host.
 
+`VAULT_DEPOT_PREVIEW` (WP D19-1a, default `false`, env-only) lets the card of
+a never-downloaded game ask the oracle for its expected depots and size, one
+query per opened card, cached 24 h per app. It needs the oracle on as well and
+adds no new host. It is off by default because it reveals which games are
+browsed, while the oracle itself is on by default.
+
 **A sixth, newly forwarded here by WP SWEEP-1: `VAULT_SWEEP_INCLUDE_CACHED`
 (WP 4d) now also passes through, defaulting to `true`, paired with
 `VAULT_AUTO_GC`'s own default above flipping to `execute` in the same

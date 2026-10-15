@@ -141,6 +141,15 @@ import {
   describeUpdateStartError,
   UPDATE_NOW_LABEL,
 } from "../lib/updates-available.js";
+import {
+  PREVIEW_STATE,
+  PENDING_RETRY_MS,
+  isReady,
+  expectedSizeText,
+  expectedDepotRows,
+  expectedDlcDepotRows,
+  wantsPreview,
+} from "../lib/depot-preview.js";
 import { buildMultiPlan } from "../lib/multiplan.js";
 import { buildDepotPresentation, DEPOT_TAG } from "../lib/depot-presentation.js";
 import { findTrackedJob, detailJobActions, DETAIL_JOB_ACTION } from "../lib/detail-job.js";
@@ -193,6 +202,10 @@ const state = {
   games: store.snapshot("games") || [],
   jobs: store.snapshot("jobs") || [],
   gcState: idleGcState(),
+  /** WP D19-1b: `GET /v1/oracle/{appid}/preview` payload, or null. Only ever
+   * set for a game with no observed depots; the server gates it behind the
+   * oracle and depot-preview switches (state "off" when either is off). */
+  preview: null,
 };
 
 /** appid -> "reachable" token. Bumped on every open()/close()/GC restart so
@@ -539,6 +552,7 @@ export function openDetail(appid, name) {
   state.notTracked = false;
   state.loadError = null;
   state.gcState = idleGcState();
+  state.preview = null;
   depotExpanded.clear();
   lastStructuralKey = null;
 
@@ -562,7 +576,71 @@ export function openDetail(appid, name) {
       }
     }
     if (generation === myGeneration && state.appid === myAppid) render();
+    if (
+      generation === myGeneration &&
+      state.appid === myAppid &&
+      !state.loadError &&
+      wantsPreview(state.detail)
+    ) {
+      loadPreview(myGeneration, myAppid, 0);
+    }
   })();
+}
+
+/**
+ * WP D19-1b: ask for the expected depots of a never-cached game. Best effort:
+ * any failure leaves the card exactly as it was. While the server says
+ * `pending` (background oracle query running) it asks again a few times.
+ */
+async function loadPreview(myGeneration, myAppid, attempt) {
+  let preview;
+  try {
+    preview = await api.depotPreview(myAppid);
+  } catch {
+    return;
+  }
+  if (generation !== myGeneration || state.appid !== myAppid) return;
+  if (!wantsPreview(state.detail)) return; // observed depots arrived meanwhile
+  state.preview = preview;
+  if (isReady(preview)) render();
+  if (preview && preview.state === PREVIEW_STATE.PENDING && attempt < PENDING_RETRY_MS.length) {
+    setTimeout(() => loadPreview(myGeneration, myAppid, attempt + 1), PENDING_RETRY_MS[attempt]);
+  }
+}
+
+/** The "Expected ..." block (size line, depot rows, DLC depots), or null. */
+function buildExpectedBlock() {
+  const sizeText = expectedSizeText(state.preview);
+  if (!sizeText) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "expected-depots";
+  const size = document.createElement("p");
+  size.className = "u1 expected-size";
+  size.textContent = sizeText;
+  wrap.appendChild(size);
+  const list = document.createElement("div");
+  list.className = "depots";
+  for (const r of expectedDepotRows(state.preview)) {
+    const row = document.createElement("div");
+    row.className = "depot expected-depot";
+    row.textContent = `Depot ${r.depotid} — ${r.sizeText || "—"}`;
+    list.appendChild(row);
+  }
+  wrap.appendChild(list);
+  const dlc = expectedDlcDepotRows(state.preview);
+  if (dlc.length) {
+    const note = document.createElement("p");
+    note.className = "u2 expected-dlc";
+    note.textContent =
+      "Not included in the size (DLC depots): " +
+      dlc.map((d) => (d.dlcappid ? `${d.depotid} (DLC ${d.dlcappid})` : String(d.depotid))).join(", ");
+    wrap.appendChild(note);
+  }
+  const hint = document.createElement("p");
+  hint.className = "u2";
+  hint.textContent = "An expectation from the public Steam branch, not a measurement.";
+  wrap.appendChild(hint);
+  return wrap;
 }
 
 function closeDetail() {
@@ -1327,6 +1405,11 @@ function buildDepotsSection() {
   wrap.appendChild(heading);
 
   if (!state.detail.depots.length) {
+    const expected = buildExpectedBlock();
+    if (expected) {
+      wrap.appendChild(expected);
+      return wrap;
+    }
     const unknown = document.createElement("div");
     unknown.className = "unknown";
     const u1 = document.createElement("p");
@@ -1387,6 +1470,7 @@ function renderNotTracked() {
     wrap.append(h3, p);
     return wrap;
   }
+  const expected = buildExpectedBlock();
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn primary sm";
@@ -1403,7 +1487,8 @@ function renderNotTracked() {
       }
     }),
   );
-  wrap.append(h3, p, btn);
+  if (expected) wrap.append(h3, p, expected, btn);
+  else wrap.append(h3, p, btn);
   return wrap;
 }
 

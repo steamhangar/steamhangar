@@ -23,6 +23,7 @@ from vault_api.body_guard import PreAuthBodyGuard
 from vault_api.config import Settings
 from vault_api.cover_art import CoverArtRefresher
 from vault_api.cover_cache import CoverFileFetcher
+from vault_api.depot_preview import DepotPreviewService
 from vault_api.db import get_connection, init_db
 from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
@@ -371,6 +372,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # TestClient() too, the same reasoning as app.state.settings above —
     # size-reporting endpoints don't need the worker running to be testable.
     app.state.size_cache = SizeCache(ttl_seconds=settings.size_cache_ttl_seconds)
+    # WP D19-1a: the on-open oracle query service (no thread until a card is
+    # opened with VAULT_DEPOT_PREVIEW and the oracle both on).
+    app.state.depot_preview = DepotPreviewService()
     # WP 4a.6r: same reasoning as size_cache above -- constructed
     # unconditionally (cheap, no thread, no I/O) so it exists for a plain
     # TestClient() too, and populated lazily on the first relay call.
