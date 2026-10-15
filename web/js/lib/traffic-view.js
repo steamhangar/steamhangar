@@ -30,10 +30,11 @@ export const RANGES = Object.freeze(["24h", "7d", "30d", "all"]);
  * offer 1 h and 6 h, answered by the server's 1-minute tier. The Clients
  * page and the History filter keep `RANGES` (no 1-minute per-depot rows).
  */
-export const STATS_RANGES = Object.freeze(["1h", "6h", "24h", "7d", "30d", "all"]);
+export const STATS_RANGES = Object.freeze(["live", "1h", "6h", "24h", "7d", "30d", "all"]);
 
 /** Segmented-control labels for every range of `STATS_RANGES`. */
 export const RANGE_LABELS = Object.freeze({
+  live: "Live",
   "1h": "1 h",
   "6h": "6 h",
   "24h": "24 h",
@@ -88,6 +89,8 @@ export function writeStoredStatsRange(range, getStorage = () => globalThis.local
 
 /** Phrases for running text ("1.2 GB loaded in the last 7 days"). */
 export const RANGE_PHRASES = Object.freeze({
+  // WP GRAPH-LIVE: the live view's tiles summarise the last hour.
+  live: "in the last hour",
   "1h": "in the last hour",
   "6h": "in the last 6 hours",
   "24h": "in the last 24 hours",
@@ -240,7 +243,9 @@ export function headerTiles(throughput) {
       "current",
       "Current speed",
       formatSpeed(current),
-      "Everything the cache served over the last 5-10 minutes (all traffic, the server's own prefill runner included), measured when the server last read the cache's event log.",
+      throughput.live
+        ? "Everything the cache served over the last 15-20 seconds (all traffic, the server's own prefill runner included), read live from the cache's event log."
+        : "Everything the cache served over the last 5-10 minutes (all traffic, the server's own prefill runner included), measured when the server last read the cache's event log.",
       currentDetail(throughput),
     ),
     tile(
@@ -294,6 +299,12 @@ export function headerTiles(throughput) {
 
 /** Detail line of "Current speed": scope and window, plus the runner's part. */
 function currentDetail(throughput) {
+  const liveSeconds = throughput.live && throughput.current ? throughput.current.window_seconds : null;
+  if (Number.isInteger(liveSeconds) && liveSeconds > 0) {
+    const liveScope = `all traffic incl. prefill runner, last ${liveSeconds} s`;
+    const liveRunner = formatSpeed(throughput.current.runner_bytes_per_second);
+    return liveRunner ? `${liveScope} · ${liveRunner} by the prefill runner` : liveScope;
+  }
   const scope = "all traffic incl. prefill runner, 5-10 min window";
   const runner = throughput.current ? formatSpeed(throughput.current.runner_bytes_per_second) : null;
   return runner ? `${scope} · ${runner} by the prefill runner` : scope;
@@ -343,6 +354,8 @@ export function runnerDetail(summary) {
 
 /** The bucket a series point covers, for the graph's label. */
 export function bucketWord(bucketSeconds) {
+  if (bucketSeconds === 5) return "5 seconds";
+  if (bucketSeconds === 15) return "15 seconds";
   if (bucketSeconds === 60) return "minute";
   if (bucketSeconds === 300) return "5 minutes";
   if (bucketSeconds === 3600) return "hour";
@@ -419,7 +432,7 @@ export function seriesStartText(series, nowMs = Date.now()) {
     return day ? `since ${day}` : "";
   }
   const fixed =
-    { "1h": "1 h ago", "6h": "6 h ago", "24h": "24 h ago", "7d": "7 days ago", "30d": "30 days ago" }[series.range] || "";
+    { live: "1 h ago", "1h": "1 h ago", "6h": "6 h ago", "24h": "24 h ago", "7d": "7 days ago", "30d": "30 days ago" }[series.range] || "";
   if (typeof first === "string" && typeof series.range_start === "string" && first !== series.range_start) {
     return formatAgo(first, nowMs) || fixed;
   }
@@ -503,4 +516,59 @@ export function mergeJobLists(fresh, deep) {
 /** The history list's empty line for a range. */
 export function emptyHistoryText(range) {
   return range === "all" || !RANGE_PHRASES[range] ? "Nothing finished yet." : `Nothing finished ${RANGE_PHRASES[range]}.`;
+}
+
+// ---------------------------------------------------------------------
+// Live view (GET /v1/throughput/live, WP GRAPH-LIVE)
+// ---------------------------------------------------------------------
+
+/** The live view's poll cadence (only while the page is visible). */
+export const LIVE_POLL_MS = 3000;
+
+/** How often the live view refreshes its persisted 1 h summary tiles. */
+export const LIVE_SUMMARY_MS = 30000;
+
+/** The persisted range whose summary backs the live view's tiles. */
+export const LIVE_SUMMARY_RANGE = "1h";
+
+/**
+ * The live answer as a series the graph can draw. The stitched points have
+ * 5, 15 and 60 s buckets; `seriesGeometry` spaces points evenly, so every
+ * point is repeated to fill a uniform 5 s grid (a 15 s point three times, a
+ * minute twelve times) and the time axis stays true.
+ * @param {object | null | undefined} live
+ * @returns {object | null}
+ */
+export function liveSeries(live) {
+  if (!live || !Array.isArray(live.points)) return null;
+  const points = [];
+  for (const p of live.points) {
+    const repeat = Math.max(1, Math.round((p.bucket_seconds || 5) / 5));
+    for (let i = 0; i < repeat; i += 1) points.push(p);
+  }
+  return {
+    event_feed: live.event_feed,
+    range: "live",
+    tier: "live",
+    bucket_seconds: 5,
+    range_start: live.range_start,
+    points,
+  };
+}
+
+/**
+ * The header's figures for the live view: the persisted 1 h summary with
+ * "Current speed" taken from the live tier. `null` until the summary is in.
+ * @param {object | null | undefined} summary `GET /v1/throughput?range=1h`
+ * @param {object | null | undefined} live
+ * @returns {object | null}
+ */
+export function mergeLive(summary, live) {
+  if (!summary) return null;
+  const merged = { ...summary, range: "live", live: false };
+  if (live && live.current && feedState(live) === "ok") {
+    merged.current = live.current;
+    merged.live = true;
+  }
+  return merged;
 }

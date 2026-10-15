@@ -63,7 +63,7 @@
 import { ApiError, ERROR_KINDS } from "./errors.js";
 import { validSteamId64 } from "./lib/steamid.js";
 import { validSteamWebApiKey } from "./lib/steam-key-form.js";
-import { demoClientsOverview, demoSeries, demoThroughput } from "./demo-traffic.js";
+import { demoClientsOverview, demoLive, demoSeries, demoThroughput } from "./demo-traffic.js";
 import { normalizeClientName } from "./lib/client-names.js";
 
 function isoAgo(msAgo) {
@@ -2609,6 +2609,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
       .slice(0, limit)
       .map(jobSummary);
   }
+
+  // WP GRAPH-LIVE: the stitched live series (no range parameter).
+  if (method === "GET" && path === "/v1/throughput/live") return demoLive(Date.now(), historySinceMs);
 
   // WP D15c: the traffic endpoints (WP D15b), from demo-traffic.js.
   if (method === "GET" && (path === "/v1/throughput" || path === "/v1/throughput/series" || path === "/v1/clients/overview")) {

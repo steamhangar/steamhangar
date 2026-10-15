@@ -240,6 +240,7 @@ export const api = {
   // `not_found`), which the views read as "not supported by this server".
   clientsOverview: (range) => request("GET", "/v1/clients/overview", { params: { range } }),
   throughput: (range) => request("GET", "/v1/throughput", { params: { range } }),
+  throughputLive: () => request("GET", "/v1/throughput/live"),
   throughputSeries: (range) => request("GET", "/v1/throughput/series", { params: { range } }),
   // WP WEB-FEAT-4: Remove in the PCs sheet. `client_id` is operator-chosen
   // free text, so it is percent-encoded as ONE path segment. Resolves

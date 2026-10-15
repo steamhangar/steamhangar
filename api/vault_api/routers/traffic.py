@@ -9,7 +9,12 @@ fills from vault-core's event log:
 * ``GET /v1/throughput`` -- the Downloads header: current, average and peak
   speed, bytes loaded, bytes saved by the cache, hit rate, active clients,
   and a speed per running prefill job;
-* ``GET /v1/throughput/series`` -- the same numbers per bucket for graphs.
+* ``GET /v1/throughput/series`` -- the same numbers per bucket for graphs;
+* ``GET /v1/throughput/live`` -- WP GRAPH-LIVE: one stitched series (5 s
+  points for the last minute, 15 s up to 5 minutes, then the persisted
+  1-minute tier up to an hour back) plus a ``current`` speed, from the
+  in-memory live tier (``vault_api/live_tier.py``). Polling it is what makes
+  the server tail the event log every ~2 s (only while somebody polls).
 
 All three take ``range`` = ``24h`` | ``7d`` | ``30d`` | ``all``; the two
 throughput endpoints also take ``1h`` | ``6h`` (GRAPH-ZOOM). The range picks
@@ -88,6 +93,7 @@ from vault_api import (
     agent_reports,
     client_names,
     event_sweep,
+    live_tier,
     peer_hops,
     runner_identity,
     traffic,
@@ -608,6 +614,144 @@ def get_throughput_series(
             for point in points
             for runner_part in (runner_rows.get(point.bucket_at, empty),)
             for clients in (traffic.subtract(point.totals, runner_part),)
+        ],
+    )
+
+
+class LivePointOut(BaseModel):
+    #: Bucket start (UTC).
+    t: str
+    #: 5, 15 or 60: the point's own bucket length.
+    bucket_seconds: int
+    #: ``live`` (in-memory ring) or ``persisted`` (1-minute tier).
+    source: Literal["live", "persisted"]
+    bytes_served: int
+    hit_bytes: int
+    miss_bytes: int
+    requests: int
+    runner_bytes: int
+    bytes_per_second: float
+    peak_bytes_per_second: float
+
+
+class LiveCurrentOut(BaseModel):
+    bytes_per_second: float
+    runner_bytes_per_second: float
+    window_start: str
+    window_end: str
+    window_seconds: int
+
+
+class LiveOut(BaseModel):
+    event_feed: EventFeedOut
+    #: Always ``live``; ``tier`` is ``live`` too (the stitched series).
+    range: Literal["live"] = "live"
+    tier: Literal["live"] = "live"
+    #: Seconds since the last poll after which the server stops tailing.
+    watcher_window_seconds: int
+    #: Minutes from here on come from the ring; earlier ones from the
+    #: persisted tier (null until the tailer has read the log once).
+    live_since: str | None
+    range_start: str | None
+    #: Null when the feed is disabled.
+    current: LiveCurrentOut | None
+    #: Oldest first, zero-filled, ending with the running 5 s cell. Empty
+    #: when the feed is disabled.
+    points: list[LivePointOut]
+
+
+def _live_points(
+    conn: sqlite3.Connection,
+    tier: live_tier.LiveTier,
+    now: datetime,
+    windows: tuple[runner_identity.RunnerWindow, ...],
+) -> tuple[list[live_tier.LivePoint], live_tier.LiveCurrent]:
+    def is_runner(addr: str, bucket_iso: str) -> bool:
+        return any(w.addr == addr and w.start <= bucket_iso < w.end for w in windows)
+
+    def persisted(start: int, end: int) -> dict[int, live_tier.PersistedMinute]:
+        first = traffic.to_utc_iso(datetime.fromtimestamp(start, tz=timezone.utc))
+        last = traffic.to_utc_iso(datetime.fromtimestamp(end - 60, tz=timezone.utc))
+        spec = traffic.RangeSpec(
+            name="live", tier=traffic.TIER_1M, bucket_seconds=60, start=first, end=last
+        )
+        runner_rows = traffic.scoped_bucket_totals(conn, spec, traffic.runner_scope(windows))
+        out: dict[int, live_tier.PersistedMinute] = {}
+        for point in traffic.series(conn, spec):
+            when = live_tier.minute_epoch(point.bucket_at)
+            if when is None:  # pragma: no cover - our own format
+                continue
+            run = runner_rows.get(point.bucket_at, traffic.Totals())
+            out[when] = live_tier.PersistedMinute(
+                all=_live_totals(point.totals),
+                runner=_live_totals(run),
+                peak=point.peak_bucket_bytes,
+            )
+        return out
+
+    return tier.stitch(now, persisted, is_runner), tier.current(now, is_runner)
+
+
+def _live_totals(totals: traffic.Totals) -> live_tier.LiveTotals:
+    return live_tier.LiveTotals(
+        requests=totals.requests,
+        bytes_served=totals.bytes_served,
+        hit_bytes=totals.hit_bytes,
+        miss_bytes=totals.miss_bytes,
+    )
+
+
+@router.get("/v1/throughput/live", response_model=LiveOut)
+def get_throughput_live(
+    request: Request,
+    open_db: DbOpener = Depends(db_opener),
+) -> LiveOut:
+    """The stitched live series (WP GRAPH-LIVE). Polling arms the watcher."""
+    settings: Settings = deps.effective_settings(request)
+    tier: live_tier.LiveTier = request.app.state.live_tier
+    now = tier.clock()
+    with open_db() as conn:
+        state = event_sweep.read_state(conn)
+        feed, _window = _feed(settings, state, now)
+        if not feed.enabled:
+            return LiveOut(
+                event_feed=feed,
+                watcher_window_seconds=int(live_tier.WATCHER_WINDOW_SECONDS),
+                live_since=None,
+                range_start=None,
+                current=None,
+                points=[],
+            )
+        tier.touch(now)
+        tier.refresh(settings.event_log_path, now)
+        windows = runner_identity.windows(conn)
+        points, current = _live_points(conn, tier, now, windows)
+    return LiveOut(
+        event_feed=feed,
+        watcher_window_seconds=int(live_tier.WATCHER_WINDOW_SECONDS),
+        live_since=tier.covered_from(),
+        range_start=points[0].t if points else None,
+        current=LiveCurrentOut(
+            bytes_per_second=current.bytes_per_second,
+            runner_bytes_per_second=current.runner_bytes_per_second,
+            window_start=current.window_start,
+            window_end=current.window_end,
+            window_seconds=current.window_seconds,
+        ),
+        points=[
+            LivePointOut(
+                t=p.t,
+                bucket_seconds=p.bucket_seconds,
+                source=p.source,  # type: ignore[arg-type]
+                bytes_served=p.all_totals.bytes_served,
+                hit_bytes=p.all_totals.hit_bytes - p.runner.hit_bytes,
+                miss_bytes=p.all_totals.miss_bytes - p.runner.miss_bytes,
+                requests=p.all_totals.requests - p.runner.requests,
+                runner_bytes=p.runner.bytes_served,
+                bytes_per_second=p.all_totals.bytes_served / p.bucket_seconds,
+                peak_bytes_per_second=p.peak_bytes_per_second,
+            )
+            for p in points
         ],
     )
 

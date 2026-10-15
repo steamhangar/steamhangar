@@ -32,8 +32,8 @@ const memory = (initial = {}) => {
   return { getItem: (k) => (data.has(k) ? data.get(k) : null), setItem: (k, v) => data.set(k, String(v)), data };
 };
 
-test("the stats ranges add 1 h and 6 h; the shared four stay the shared four", () => {
-  assert.deepEqual([...STATS_RANGES], ["1h", "6h", "24h", "7d", "30d", "all"]);
+test("the stats ranges add live, 1 h and 6 h; the shared four stay the shared four", () => {
+  assert.deepEqual([...STATS_RANGES], ["live", "1h", "6h", "24h", "7d", "30d", "all"]);
   assert.deepEqual([...RANGES], ["24h", "7d", "30d", "all"]);
   assert.equal(isRange("1h"), false, "the History filter and the clients page do not get 1 h");
   assert.equal(isStatsRange("1h"), true);

@@ -56,7 +56,7 @@ from vault_api.routers import (
     traffic as traffic_router,
     updates,
 )
-from vault_api import config, settings_store
+from vault_api import config, live_tier, settings_store
 from vault_api.scheduler import PrefillScheduler
 from vault_api.update_check import UpdateCheckRunner
 from vault_api.sizes import SizeCache
@@ -388,6 +388,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # lifespan below) is itself a no-op unless VAULT_WEBHOOK_URL is set.
     app.state.webhook_notifier = WebhookNotifier(boot_settings)
     app.state.boot_settings = boot_settings
+    # WP GRAPH-LIVE: the in-memory live traffic tier. No thread: it tails the
+    # event log inside GET /v1/throughput/live, only while somebody polls.
+    app.state.live_tier = live_tier.LiveTier()
     # WP 3.5: created here rather than in the lifespan (same reasoning as
     # size_cache above) for two reasons: GET /v1/schedule needs it to answer
     # even when the scheduler is disabled or the lifespan never ran (a plain
