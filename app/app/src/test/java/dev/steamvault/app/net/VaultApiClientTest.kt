@@ -265,6 +265,32 @@ class VaultApiClientTest {
     }
 
     @Test
+    fun `patchSettingsConfirmed sends confirm_risky and a 428 keeps its object detail`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"readonly":false,"settings":[]}"""),
+        )
+        client.patchSettingsConfirmed(linkedMapOf("upstream_max_conns" to settingPatchValue("24")))
+        val recorded = server.takeRequest()
+        assertEquals("/v1/settings?confirm_risky=true", recorded.path)
+
+        server.enqueue(
+            MockResponse().setResponseCode(428)
+                .setBody("""{"detail":{"message":"confirm","risky_keys":["resolver"]}}"""),
+        )
+        val error = try {
+            client.patchSettings(linkedMapOf("resolver" to settingPatchValue("9.9.9.9")))
+            null
+        } catch (e: dev.steamvault.app.net.error.VaultApiError) {
+            e
+        }
+        assertEquals(428, error?.status)
+        assertEquals(
+            listOf("resolver"),
+            dev.steamvault.app.ui.settings.logic.SettingsLayout.riskyKeysFrom428(error?.detail),
+        )
+    }
+
+    @Test
     fun `settings GET round-trips readonly and a null effective value`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(

@@ -1754,7 +1754,7 @@ summed independently — both run the identical suite);
 `app/app/build/reports/lint-results-debug.txt`: one pre-existing-pattern
 `PluralsCandidate` false positive on `notif_job_failed_body` (`%1$d` is an
 app id, not a count — same class of justified suppression as
-`settings_schedule_window_placeholder`'s `TypographyDashes` ignore),
+the `TypographyDashes` ignore the schedule-window strings carried before D16 removed them),
 suppressed with a documented `tools:ignore`; otherwise clean.
 `app/app/build/outputs/apk/debug/app-debug.apk` produced.
 

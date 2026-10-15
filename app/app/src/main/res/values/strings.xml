@@ -277,25 +277,10 @@
     <string name="settings_load_error">Could not load settings: %1$s</string>
     <string name="settings_readonly_banner">This vault-api is running with VAULT_SETTINGS_READONLY set — values below are shown for reference and cannot be changed here.</string>
 
-    <string name="settings_section_vault">Vault</string>
-    <string name="settings_section_schedule">Schedule</string>
-    <string name="settings_section_webhook">Webhook</string>
     <string name="settings_section_connection">Connection</string>
     <string name="settings_section_steam">Steam identity</string>
     <string name="settings_section_notifications">Notifications</string>
 
-    <string name="settings_vault_name_label">Vault name</string>
-    <string name="settings_vault_name_placeholder">e.g. vault-01</string>
-
-    <string name="settings_schedule_window_label">Sweep window</string>
-    <!-- tools:ignore="TypographyDashes": "22:00-06:00" is the LITERAL
-         schedule_window wire syntax (api/README.md's schedule_window.parse_window
-         grammar) — a real hyphen the user must type verbatim, not prose
-         lint's typographic-dash heuristic should "fix" into an en dash. -->
-    <string name="settings_schedule_window_placeholder" tools:ignore="TypographyDashes">22:00-06:00, blank to disable</string>
-    <string name="settings_schedule_window_hint" tools:ignore="TypographyDashes">Overnight windows are allowed (e.g. 22:00-06:00). Blank disables scheduled sweeps.</string>
-    <string name="settings_schedule_interval_label">Sweep interval (minutes)</string>
-    <string name="settings_schedule_stale_days_label">Client staleness (days)</string>
     <string name="settings_auto_gc_label">Auto-GC after a prefill</string>
     <string name="settings_auto_gc_off">Off</string>
     <string name="settings_auto_gc_dry_run">Dry run</string>
@@ -311,9 +296,6 @@
     <string name="settings_sweep_include_cached_on">On</string>
     <string name="settings_sweep_include_cached_hint">When on, the next sweep also refreshes every game that already has content on disk, not only games a PC agent reports as installed.</string>
 
-    <string name="settings_webhook_url_label">Webhook URL</string>
-    <string name="settings_webhook_url_placeholder">https://… , blank to disable</string>
-    <string name="settings_webhook_url_hint">Restart-required: vault-api only starts the delivery thread at boot if a webhook was already configured then.</string>
     <string name="settings_webhook_events_label">Events sent</string>
     <string name="settings_webhook_event_job_done">Job finished</string>
     <string name="settings_webhook_event_job_error">Job failed</string>
@@ -321,10 +303,25 @@
     <string name="settings_webhook_event_bypass_suspected">Cache bypass suspected</string>
     <string name="settings_webhook_event_bypass_resolved">Cache bypass resolved</string>
 
+    <!-- WP D16 (Android half): chrome around the layout. Section titles, field
+         labels, help and env notes come from ui/settings/logic/SettingsLayout.kt
+         (twin of web settings-layout.js), not from here. -->
+    <string name="settings_expert_switch">Show expert settings</string>
+    <string name="settings_expert_hint">Expert settings are for tuning and debugging. The defaults are fine for most vaults.</string>
+    <string name="settings_help_show">Explain %1$s</string>
+    <string name="settings_help_hide">Hide explanation of %1$s</string>
+    <string name="settings_section_open">Collapse %1$s</string>
+    <string name="settings_section_closed">Expand %1$s</string>
+    <string name="settings_risky_title">Confirm risky settings</string>
+    <string name="settings_risky_intro">These changes can break downloads. Apply them?</string>
+    <string name="settings_risky_line">%1$s: %2$s to %3$s</string>
+    <string name="settings_risky_confirm">Apply anyway</string>
+    <string name="settings_risky_cancel">Cancel</string>
+    <string name="settings_risky_cancelled">Not saved: the risky change was not confirmed.</string>
+
     <string name="settings_reset">Reset</string>
     <string name="settings_save_changes">Save changes</string>
     <string name="settings_discard_changes">Discard changes</string>
-    <string name="settings_save_error">Could not save: %1$s</string>
     <!-- WP WEB-FIX-8: the save bar's status line (web settings.js UNSAVED_TEXT). -->
     <string name="settings_unsaved_changes">Unsaved changes</string>
     <string name="settings_saving">Saving…</string>

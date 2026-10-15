@@ -26,6 +26,11 @@ import dev.steamvault.app.repo.STEAM_LOGIN_NEEDS_VAULT_ADDRESS
 import dev.steamvault.app.repo.SteamIdentityRepository
 import dev.steamvault.app.repo.SteamLoginResult
 import dev.steamvault.app.storage.CredentialStore
+import dev.steamvault.app.storage.InMemorySettingsViewPreferences
+import dev.steamvault.app.storage.SettingsViewPreferences
+import dev.steamvault.app.ui.settings.logic.CoreApplyLine
+import dev.steamvault.app.ui.settings.logic.RiskyItem
+import dev.steamvault.app.ui.settings.logic.SettingsLayout
 import dev.steamvault.app.ui.settings.logic.SettingDraft
 import dev.steamvault.app.ui.settings.logic.SteamLibraryStatus
 import dev.steamvault.app.ui.settings.logic.buildSettingsPatchDraft
@@ -98,6 +103,8 @@ class SettingsController(
     private val steamRelayRepository: SteamRelayRepository,
     /** WP APP-FEAT-2: `GET /v1/about` for the About section. */
     private val aboutRepository: AboutRepository,
+    /** WP D16: remembered open sections and the expert switch (per device). */
+    private val viewPrefs: SettingsViewPreferences = InMemorySettingsViewPreferences(),
 ) {
     var loading by mutableStateOf(true)
         private set
@@ -117,6 +124,49 @@ class SettingsController(
         private set
     var toast by mutableStateOf<String?>(null)
         private set
+
+    // ---- D16: sections, expert switch, risky confirm, apply line ------------
+
+    /** Sections the user opened or closed (stored per device); the rest use the default. */
+    private var openOverrides by mutableStateOf(readOpenOverrides())
+
+    /** The "Show expert settings" switch (stored per device). */
+    var expertOn by mutableStateOf(viewPrefs.getExpert())
+        private set
+
+    /** Risky changes waiting for the user's yes (the confirm dialog), or `null`. */
+    var riskyPending by mutableStateOf<List<RiskyItem>?>(null)
+        private set
+
+    /** True after the user cancelled the confirm dialog: nothing was sent. Cleared by the next edit. */
+    var riskyCancelled by mutableStateOf(false)
+        private set
+
+    /** vault-core's apply state as one line, or `null` before it has reported. */
+    val coreApplyLine: CoreApplyLine? get() = SettingsLayout.coreApplyLine(settingsResponse?.core_apply)
+
+    private fun readOpenOverrides(): Map<String, Boolean> {
+        val result = LinkedHashMap<String, Boolean>()
+        for (section in SettingsLayout.SECTIONS) {
+            val stored = viewPrefs.getSectionOpen(section.id)
+            if (stored != null) result[section.id] = stored
+        }
+        return result
+    }
+
+    /** Expert groups show open once the switch is on (like the web); the user can still collapse them. */
+    fun isSectionOpen(id: String): Boolean =
+        openOverrides[id] ?: (id in SettingsLayout.DEFAULT_OPEN || id.startsWith("expert_"))
+
+    fun setSectionOpen(id: String, open: Boolean) {
+        openOverrides = openOverrides + (id to open)
+        viewPrefs.setSectionOpen(id, open)
+    }
+
+    fun setExpert(on: Boolean) {
+        expertOn = on
+        viewPrefs.setExpert(on)
+    }
 
     var identityState by mutableStateOf(identityRepository.state())
         private set
@@ -192,24 +242,42 @@ class SettingsController(
     fun setDraft(key: String, draft: SettingDraft) {
         drafts = drafts + (key to draft)
         saveError = null
+        riskyCancelled = false
     }
 
     fun resetDraft(key: String) {
         drafts = drafts + (key to SettingDraft.Reset)
         saveError = null
+        riskyCancelled = false
     }
 
     fun discard() {
         drafts = emptyMap()
         saveError = null
+        riskyPending = null
+        riskyCancelled = false
     }
 
-    suspend fun save() {
+    /**
+     * Saves the drafts. A body that sets or clears a risky key (D16b) first
+     * opens the confirm dialog ([riskyPending]) and sends nothing; the
+     * user's yes comes back through [confirmRisky], which calls this again
+     * with [confirmed] set, so the PATCH carries `?confirm_risky=true`.
+     */
+    suspend fun save(confirmed: Boolean = false) {
         val entries = settingsResponse?.settings ?: return
         val patch = buildSettingsPatchDraft(entries, drafts)
         if (patch.isEmpty()) {
             drafts = emptyMap()
             return
+        }
+        riskyCancelled = false
+        if (!confirmed) {
+            val riskyKeys = SettingsLayout.riskyKeysInBody(entries, patch)
+            if (riskyKeys.isNotEmpty()) {
+                riskyPending = SettingsLayout.riskyItems(entries, patch, riskyKeys)
+                return
+            }
         }
         // WP WEB-FIX-8: the drafts this PATCH carries. An edit made while it
         // is in flight replaces its key's draft, so after success only the
@@ -219,7 +287,7 @@ class SettingsController(
         saving = true
         saveError = null
         try {
-            settingsResponse = settingsRepository.patch(patch)
+            settingsResponse = if (confirmed) settingsRepository.patchConfirmed(patch) else settingsRepository.patch(patch)
             drafts = drafts.filter { (key, draft) -> sent[key] != draft }
             toast = strings.savedToast()
             // A saved PATCH can change sweep_include_cached/auto_gc, which
@@ -239,7 +307,14 @@ class SettingsController(
             // request... with a DISTINCT detail") are surfaced verbatim --
             // vault_api's detail string already names the offending key
             // (e.g. "'schedule_window': ...").
-            saveError = e.detail ?: strings.saveFailedFallback()
+            val detail = SettingsLayout.detailMessage(e.detail)
+            val serverRisky = SettingsLayout.riskyKeysFrom428(e.detail)
+            if (e.status == 428 && !confirmed && serverRisky.isNotEmpty()) {
+                // The server knows a risky key the client did not: ask, never auto-confirm.
+                riskyPending = SettingsLayout.riskyItems(entries, patch, serverRisky)
+            } else {
+                saveError = SettingsLayout.describeSaveError(e.status, detail, e.message ?: strings.saveFailedFallback(), confirmed)
+            }
         } finally {
             saving = false
         }
@@ -247,6 +322,18 @@ class SettingsController(
 
     fun dismissToast() {
         toast = null
+    }
+
+    /** The user said yes in the risky-confirm dialog: send the same PATCH with `?confirm_risky=true`. */
+    suspend fun confirmRisky() {
+        riskyPending = null
+        save(true)
+    }
+
+    /** The user said no: nothing is sent, and the save bar says so. */
+    fun cancelRisky() {
+        riskyPending = null
+        riskyCancelled = true
     }
 
     // ---- Steam library block (WP APP-FEAT-1) ---------------------------------

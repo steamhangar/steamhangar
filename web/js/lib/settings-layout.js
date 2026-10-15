@@ -141,8 +141,8 @@ export const FIELD_META = Object.freeze({
     placeholder: "03:00-07:00, or off to disable",
     help:
       "One window for automatic downloads and bandwidth. Inside it, automatic downloads run at full speed. " +
-      "Outside it, no automatic downloads start and the upstream rate cap applies. Overnight windows are allowed " +
-      "(22:00-06:00). off (or an empty field) turns the scheduler off; the rate cap then applies around the clock. " +
+      "Outside it, no automatic downloads start and the upstream (WAN) rate cap applies. Overnight windows are allowed " +
+      "(22:00-06:00). off (or an empty field) turns the scheduler off; the upstream rate cap then applies around the clock. " +
       "Times are in the server's time zone. Reset goes back to the default window.",
   },
   schedule_interval_minutes: {
@@ -224,15 +224,15 @@ export const FIELD_META = Object.freeze({
   },
   webhook_timeout_seconds: { label: "Webhook timeout (seconds)", help: "Seconds per webhook delivery attempt." },
   upstream_rate: {
-    label: "Upstream rate cap",
+    label: "Upstream (WAN) rate cap",
     placeholder: "800k, 2m or off",
     help:
-      "Total bytes per second vault-core fetches from Steam for cache misses outside the download window. " +
+      "The vault's upstream (WAN) budget: total bytes per second vault-core fetches from the internet for cache misses outside the download window. " +
       "k and m are nginx units (k = 1024). off = no cap.",
   },
   upstream_max_conns: {
-    label: "Upstream connection cap",
-    help: "Connections from vault-core to Steam at the same time. At least the prefill threads.",
+    label: "Upstream (WAN) connection cap",
+    help: "The vault's upstream (WAN) budget: connections from vault-core to the internet at the same time. At least the prefill threads.",
   },
   tls_client_max_conns: {
     label: "HTTPS sessions per client",
@@ -253,7 +253,7 @@ export const FIELD_META = Object.freeze({
   },
   resolver: {
     label: "DNS resolver for vault-core",
-    help: "DNS server vault-core uses to find Steam. Never one that answers Steam names with a LAN address, such as this vault's own DNS.",
+    help: "DNS server vault-core uses to find upstream servers. Never one that answers their names with a LAN address, such as this vault's own DNS.",
   },
   log_level: {
     label: "Log level",
@@ -277,7 +277,7 @@ export const RISK_TEXT = Object.freeze({
   tls_max_conns: "Too many parallel connections can use up the port quota of a CGNAT internet line and stop every download.",
   upstream_edge: "A wrong edge host makes every cache miss fail, so downloads stop until it is fixed.",
   upstream_pool_hosts: "Wrong hosts make cache misses fail while the older per-name pool is in use.",
-  resolver: "A resolver that answers Steam names with a LAN address makes vault-core fetch from itself, and downloads fail.",
+  resolver: "A resolver that answers upstream names with a LAN address makes vault-core fetch from itself, and downloads fail.",
 });
 export const RISK_FALLBACK_TEXT = "This debug setting can break downloads.";
 

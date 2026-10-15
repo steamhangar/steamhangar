@@ -18,9 +18,18 @@ import kotlinx.serialization.json.JsonElement
 interface SettingsRepository {
     suspend fun get(): SettingsOut
     suspend fun patch(updates: Map<String, JsonElement?>): SettingsOut
+
+    /**
+     * D16: the PATCH after the user confirmed a risky change (`?confirm_risky=true`).
+     * Default = the plain [patch], so a repository without a server-side
+     * confirmation step (demo, fixtures) needs no override.
+     */
+    suspend fun patchConfirmed(updates: Map<String, JsonElement?>): SettingsOut = patch(updates)
 }
 
 class VaultSettingsRepository(private val client: VaultApiClient) : SettingsRepository {
     override suspend fun get(): SettingsOut = client.settings()
     override suspend fun patch(updates: Map<String, JsonElement?>): SettingsOut = client.patchSettings(updates)
+    override suspend fun patchConfirmed(updates: Map<String, JsonElement?>): SettingsOut =
+        client.patchSettingsConfirmed(updates)
 }

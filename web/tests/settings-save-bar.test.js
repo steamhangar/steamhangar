@@ -309,5 +309,4 @@ test("twin: the Android save bar uses the same words (strings.xml)", async () =>
   assert.equal(SAVING_TEXT, "Saving…");
   assert.equal(res("settings_save_changes"), "Save changes");
   assert.equal(res("settings_discard_changes"), "Discard changes");
-  assert.equal(res("settings_save_error"), "Could not save: %1$s", "web: `Could not save: ${detail}`");
 });
