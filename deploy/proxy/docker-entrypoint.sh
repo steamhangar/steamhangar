@@ -118,6 +118,10 @@ log "client allowlist rendered: Allow $egress_subnet (VAULT_EGRESS_SUBNET) + loo
 # VAULT_STORE_DETAILS (env-only, default false); the host only becomes
 # reachable, no data flows without that switch (docs/security/privacy-review.md
 # O9).
+# Scope of the host entry: tinyproxy runs with FilterURLs Off, so the filter
+# only limits the destination host (plain host and CONNECT). It does not limit
+# paths. Path limits come only from the fixed URL templates and an integer app
+# id (ge=1) in vault-api.
 BAKED_HOSTS="api.steampowered.com shared.akamai.steamstatic.com cdn.akamai.steamstatic.com store.steampowered.com"
 
 # Turns "host.name" into the anchored, dot-escaped BRE pattern described

@@ -1700,8 +1700,7 @@ body.onboarding .nav{ display:none; }
 
 .detail-block{ margin-top:14px; }
 .store-desc{ margin:0 0 8px; font-size:12.5px; line-height:1.55; color:var(--text);
-  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-.store-desc{ cursor:pointer; }
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer; }
 .store-desc.expanded{ display:block; overflow:visible; }
 .store-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:0 0 8px; }
 .store-chip{ border:1px solid var(--line); border-radius:999px; padding:2px 9px; font-size:11px; color:var(--dim); }
