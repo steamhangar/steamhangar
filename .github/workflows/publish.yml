@@ -516,25 +516,29 @@ jobs:
       # name, so the name check is skipped and the image serves none of
       # them -- harmless, nothing is pushed. Files are made world-readable:
       # the image COPYs them root-owned and uid 101 only reads them.
+      # WP CI-FIX-DIST: the APK name is DERIVED here from the build version
+      # (steamhangar-app-v<version>.apk, android-build's own rule), never
+      # read from a job output -- see the rule at android-build's
+      # `outputs:`. An empty/garbled output this step relies on fails it
+      # with a message naming the output, never a `sha256sum ""`.
       - name: Stage release downloads into api/dist (vault-api only)
         if: matrix.image == 'vault-api'
         working-directory: api/dist
         env:
           BUILD_VERSION: ${{ needs.build-version.outputs.version }}
           APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
-          APK_NAME: ${{ needs.android-build.outputs.apk_name }}
           APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
           IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           set -eu
-          sha256sum --check --strict SHA256SUMS
-          if [ "$APK_CONFIGURED" = "true" ]; then
-            got="$(sha256sum "$APK_NAME" | cut -d' ' -f1)"
-            if [ "$got" != "$APK_SHA256" ]; then
-              echo "::error::${APK_NAME}: sha256 ${got} differs from android-build's ${APK_SHA256}" >&2
-              exit 1
-            fi
+          if [ -z "$BUILD_VERSION" ]; then
+            echo "::error::build-version's version output is empty -- cannot derive the release file names" >&2
+            exit 1
           fi
+          case "$APK_CONFIGURED" in
+            true|false) ;;
+            *) echo "::error::android-build's configured output is '${APK_CONFIGURED}', not true/false -- was it dropped as secret-like?" >&2; exit 1 ;;
+          esac
           if [ "$IS_TAG" = "true" ]; then
             # vault_api.dist.is_release_version's grammar: on any other tag
             # shape (e.g. v0.1.0+meta) the image would silently serve
@@ -543,6 +547,25 @@ jobs:
               echo "::error::build version '${BUILD_VERSION}' is not a release version vault-api serves downloads for" >&2
               exit 1
             fi
+          fi
+          sha256sum --check --strict SHA256SUMS
+          if [ "$APK_CONFIGURED" = "true" ]; then
+            apk="steamhangar-app-v${BUILD_VERSION}.apk"
+            if ! printf '%s' "$APK_SHA256" | grep -Eqx '[0-9a-f]{64}'; then
+              echo "::error::android-build's apk_sha256 output is '${APK_SHA256}', not a SHA-256 -- was it dropped as secret-like?" >&2
+              exit 1
+            fi
+            if [ ! -f "$apk" ]; then
+              echo "::error::api/dist/${apk} missing -- the release-apk artifact does not carry the APK name derived from the build version" >&2
+              exit 1
+            fi
+            got="$(sha256sum "$apk" | cut -d' ' -f1)"
+            if [ "$got" != "$APK_SHA256" ]; then
+              echo "::error::${apk}: sha256 ${got} differs from android-build's ${APK_SHA256}" >&2
+              exit 1
+            fi
+          fi
+          if [ "$IS_TAG" = "true" ]; then
             tag="v${BUILD_VERSION}"
             want="vault-agent-${tag}-windows-amd64.exe vault-agent-${tag}-linux-amd64 vault-agent-${tag}-linux-arm64 install-task.ps1 run-vault-agent.ps1 uninstall-task.ps1 vault-agent-report.service vault-agent-report.timer SHA256SUMS"
             if [ "$APK_CONFIGURED" = "true" ]; then
@@ -683,7 +706,9 @@ jobs:
         if: matrix.image == 'vault-api' && startsWith(github.ref, 'refs/tags/v')
         env:
           APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
-          APK_NAME: ${{ needs.android-build.outputs.apk_name }}
+          # WP CI-FIX-DIST: derived, never a job output (android-build's
+          # `outputs:` rule). The staging step already proved both non-empty.
+          APK_NAME: steamhangar-app-v${{ needs.build-version.outputs.version }}.apk
           APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
         run: |
           set -eu
@@ -770,13 +795,15 @@ jobs:
   android-build:
     name: android-build / signed APK (workflow artifact)
     runs-on: ubuntu-latest
-    # WP DIST-1a: no `needs:` any more -- this job only BUILDS, signs and
-    # verifies the APK and hands it on as the `release-apk` workflow
+    # WP DIST-1a: no `needs:` on `publish` -- this job only BUILDS, signs
+    # and verifies the APK and hands it on as the `release-apk` workflow
     # artifact; `publish` bakes it into the vault-api image and
     # `android-release` (below) attaches it to the GitHub Release. Review
     # round 2's (N1) "matching images and app in one place" now holds the
     # other way round: `publish` needs this job, so no image is pushed for
-    # a release whose APK build failed.
+    # a release whose APK build failed. WP CI-FIX-DIST: `build-version` is
+    # needed for the APK's file name (see "Record APK checksum" below).
+    needs: [build-version]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     # Read-only since WP DIST-1a: attaching to the release (the one step
     # that needed `contents: write`) moved to `android-release` below, which
@@ -810,11 +837,26 @@ jobs:
       # WP SEC-FIX-2 (S5): the signing certificate's SHA-256, for the
       # release body (agent-binaries). Empty when no APK was built.
       cert_sha256: ${{ steps.verify.outputs.cert_sha256 }}
-      # WP DIST-1a: the asset name and SHA-256 of the uploaded APK, so
-      # `publish` and `android-release` can check the artifact they
-      # download is the one this job verified. Empty when no APK was built.
-      apk_name: ${{ steps.apk.outputs.name }}
+      # WP DIST-1a: the SHA-256 of the uploaded APK, so `publish` and
+      # `android-release` can check the artifact they download is the one
+      # this job verified. Empty when no APK was built.
       apk_sha256: ${{ steps.apk.outputs.sha256 }}
+      #
+      # WP CI-FIX-DIST -- RULE for every output of this job (it runs in
+      # the `release` Environment and holds its secrets): GitHub DROPS a
+      # job output whose value contains any secret value of the job as a
+      # substring ("Skip output '...' since it may contain secret") and
+      # the consumer reads an empty string. v0.1.0-rc18 lost its whole
+      # release that way: the old `apk_name` output
+      # (steamhangar-app-v<version>.apk) contained a `release` secret's
+      # value. So an output here may only be a fixed literal
+      # (`configured`: true/false) or a hex digest (`cert_sha256`,
+      # `apk_sha256`) -- never a name, path, version or anything built
+      # from the project's name. Consumers derive the APK name themselves
+      # from `needs.build-version.outputs.version`
+      # (steamhangar-app-v<version>.apk, the same rule as the "Record APK
+      # checksum" step) and fail loudly when an output they rely on
+      # arrives empty. api/tests/test_dist_1a.py pins this list.
     timeout-minutes: 30
     steps:
       # WP SEC-FIX-2 (P1): this job holds a write token, so the checkout
@@ -916,16 +958,16 @@ jobs:
       #     (app/README.md "Release version comes from the environment").
       #     A re-run of the same tag gets a higher code, which is correct:
       #     it is a different build.
-      # `tag` (with the `v`, sanitised) is what the APK's release-asset
-      # filename below uses, matching the `vault-agent-v1.2.3-...` naming
-      # on the same release page.
+      # The APK's release-asset filename does NOT come from here (WP
+      # CI-FIX-DIST): it is steamhangar-app-v<build-version>.apk, the one
+      # rule every consumer of the artifact applies too (see this job's
+      # `outputs:` comment). On a v* tag push both agree.
       - name: Compute release version (sanitized)
         if: steps.signing_check.outputs.configured == 'true'
         id: version
         run: |
           set -eu
           tag="${GITHUB_REF_NAME//\//-}"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
       - name: Set up JDK 17 (temurin)
@@ -1090,24 +1132,30 @@ jobs:
       - name: Rename APK to its release-asset name
         if: steps.signing_check.outputs.configured == 'true'
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
         run: |
           set -eu
+          if [ -z "$BUILD_VERSION" ]; then
+            echo "::error::build-version's version output is empty -- cannot name the APK" >&2
+            exit 1
+          fi
           mv app/app/build/outputs/apk/release/app-release.apk \
-             "app/app/build/outputs/apk/release/steamhangar-app-${TAG}.apk"
+             "app/app/build/outputs/apk/release/steamhangar-app-v${BUILD_VERSION}.apk"
 
       # WP DIST-1a: hand the verified APK on. One file, uploaded as is;
       # `publish` (vault-api leg) and `android-release` download it and
       # check it against `apk_sha256`. Short retention: it only has to
-      # outlive this run.
-      - name: Record APK name and checksum
+      # outlive this run. The `name` STEP output is used only inside this
+      # job (upload path) and is deliberately NOT a job output -- see the
+      # rule at this job's `outputs:`.
+      - name: Record APK checksum
         if: steps.signing_check.outputs.configured == 'true'
         id: apk
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
         run: |
           set -eu
-          name="steamhangar-app-${TAG}.apk"
+          name="steamhangar-app-v${BUILD_VERSION}.apk"
           sha="$(sha256sum "app/app/build/outputs/apk/release/${name}" | cut -d' ' -f1)"
           echo "name=${name}" >> "$GITHUB_OUTPUT"
           echo "sha256=${sha}" >> "$GITHUB_OUTPUT"
@@ -1140,7 +1188,9 @@ jobs:
   android-release:
     name: android-release / signed APK -> GitHub Release
     runs-on: ubuntu-latest
-    needs: [android-build, publish]
+    # WP CI-FIX-DIST: build-version for the APK name (derived, see
+    # android-build's `outputs:` rule).
+    needs: [build-version, android-build, publish]
     if: needs.android-build.outputs.configured == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
@@ -1162,11 +1212,19 @@ jobs:
       - name: Check the APK is the one android-build verified
         working-directory: release-apk
         env:
-          APK_NAME: ${{ needs.android-build.outputs.apk_name }}
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
           APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
         run: |
           set -eu
-          echo "${APK_SHA256}  ${APK_NAME}" | sha256sum --check --strict -
+          if [ -z "$BUILD_VERSION" ]; then
+            echo "::error::build-version's version output is empty -- cannot derive the APK name" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$APK_SHA256" | grep -Eqx '[0-9a-f]{64}'; then
+            echo "::error::android-build's apk_sha256 output is '${APK_SHA256}', not a SHA-256 -- was it dropped as secret-like?" >&2
+            exit 1
+          fi
+          echo "${APK_SHA256}  steamhangar-app-v${BUILD_VERSION}.apk" | sha256sum --check --strict -
 
       # Pre-freeze project review, P2: does this tag's release already
       # exist? Read from the GitHub API (not inferred from which job ran
@@ -1236,7 +1294,7 @@ jobs:
           # is what that step closes.
           generate_release_notes: ${{ steps.release_check.outputs.exists != 'true' }}
           fail_on_unmatched_files: true
-          files: release-apk/${{ needs.android-build.outputs.apk_name }}
+          files: release-apk/steamhangar-app-v${{ needs.build-version.outputs.version }}.apk
 
   # --- Third deliverable: cross-compiled vault-agent binaries ------------------
   # See this file's header ("Third deliverable") for why these files exist.
@@ -1610,8 +1668,16 @@ jobs:
           PIN_DNS: ${{ needs.publish.outputs.pin_vault_dns }}
           PIN_PROXY: ${{ needs.publish.outputs.pin_vault_proxy }}
           APK_CERT: ${{ needs.android-build.outputs.cert_sha256 }}
+          APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
         run: |
           set -eu
+          # WP CI-FIX-DIST: an APK was signed but its certificate output is
+          # empty (e.g. dropped as secret-like) -- say so instead of
+          # printing "No signed Android APK" on a release that has one.
+          if [ "$APK_CONFIGURED" = "true" ] && ! printf '%s' "$APK_CERT" | grep -Eqx '[0-9a-f]{64}'; then
+            echo "::error::android-build's cert_sha256 output is '${APK_CERT}', not a SHA-256 -- was it dropped as secret-like?" >&2
+            exit 1
+          fi
           for pin in "$PIN_CORE" "$PIN_API" "$PIN_DNS" "$PIN_PROXY"; do
             case "$pin" in
               */*@sha256:?*) ;;

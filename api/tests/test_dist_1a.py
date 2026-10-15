@@ -495,8 +495,12 @@ def test_publish_stages_both_artifacts_into_api_dist_before_the_build() -> None:
     assert 'vault-agent-${tag}-windows-amd64.exe' in stage
 
 
-def _run_stage(tmp_path: Path, names: list[str], **overrides: str):
-    """Run publish.yml's staging shell for real in a baked temp dir."""
+def _run_stage(tmp_path: Path, names: list[str], *, apk: str | None = None, **overrides: str):
+    """Run publish.yml's staging shell for real in a baked temp dir.
+
+    `apk` is the APK file name to checksum for APK_SHA256 (default: the
+    tag's); the step itself derives the name from BUILD_VERSION.
+    """
     import shutil
     import subprocess
 
@@ -512,12 +516,11 @@ def _run_stage(tmp_path: Path, names: list[str], **overrides: str):
         if n != "SHA256SUMS" and not n.endswith(".apk")
     )
     (dist / "SHA256SUMS").write_text(sums, encoding="utf-8")
-    apk = f"steamhangar-app-{TAG}.apk"
+    apk = apk or f"steamhangar-app-{TAG}.apk"
     env = {
         "PATH": os.environ.get("PATH", ""),
         "BUILD_VERSION": VERSION,
         "APK_CONFIGURED": "true",
-        "APK_NAME": apk,
         "APK_SHA256": hashlib.sha256(_content(apk)).hexdigest(),
         "IS_TAG": "true",
         "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
@@ -567,11 +570,11 @@ def test_in_image_check_runs_on_tags_for_vault_api_and_checks_the_sums() -> None
 def test_release_jobs_attach_the_same_asset_names_as_before() -> None:
     jobs = _publish()
     rel = jobs["android-release"]
-    assert set(_needs(rel)) == {"android-build", "publish"}
+    assert set(_needs(rel)) == {"build-version", "android-build", "publish"}
     attach = _step(rel, "Attach signed APK to the GitHub Release")
-    assert attach["with"]["files"] == "release-apk/${{ needs.android-build.outputs.apk_name }}"
+    assert attach["with"]["files"] == f"release-apk/{APK_FROM_BUILD_VERSION}"
     rename = _step(jobs["android-build"], "Rename APK to its release-asset name")["run"]
-    assert 'steamhangar-app-${TAG}.apk' in rename
+    assert 'steamhangar-app-v${BUILD_VERSION}.apk' in rename
     agent = jobs["agent-binaries"]
     assert {"publish", "android-release", "agent-build"} <= set(_needs(agent))
     files = _step(agent, "Attach vault-agent binaries to the GitHub Release")["with"]["files"]
@@ -590,3 +593,93 @@ def test_signing_secrets_and_write_token_are_in_different_jobs() -> None:
     assert jobs["android-release"]["permissions"] == {"contents": "write"}
     text = yaml.safe_dump(jobs["android-release"])
     assert "ANDROID_" not in text
+
+
+# --- WP CI-FIX-DIST: no job output may carry the APK name ---------------------
+# v0.1.0-rc18's publish run lost its release: GitHub dropped android-build's
+# `apk_name` output ("Skip output 'apk_name' since it may contain secret")
+# because the name contained a `release` Environment secret's value, and the
+# staging step then ran `sha256sum ""`. Every consumer now derives the name
+# from build-version; the secret-holding job only outputs a literal and hex
+# digests.
+
+APK_FROM_BUILD_VERSION = "steamhangar-app-v${{ needs.build-version.outputs.version }}.apk"
+
+
+def test_no_job_output_or_reference_carries_the_apk_name() -> None:
+    jobs = _publish()
+    # yaml drops comments, so this sees only live keys and expressions.
+    assert "apk_name" not in yaml.safe_dump(jobs)
+    for job in jobs.values():
+        for value in (job.get("outputs") or {}).values():
+            assert "steamhangar-app" not in value
+
+
+def test_secret_holding_jobs_output_only_literals_and_digests() -> None:
+    jobs = _publish()
+    holders = {name for name, job in jobs.items() if "environment" in job}
+    assert holders == {"android-build"}
+    assert jobs["android-build"]["outputs"] == {
+        "configured": "${{ steps.signing_check.outputs.configured }}",
+        "cert_sha256": "${{ steps.verify.outputs.cert_sha256 }}",
+        "apk_sha256": "${{ steps.apk.outputs.sha256 }}",
+    }
+
+
+def test_every_apk_consumer_derives_the_name_from_build_version() -> None:
+    jobs = _publish()
+    assert "build-version" in _needs(jobs["android-build"])
+    record = _step(jobs["android-build"], "Record APK checksum")
+    assert record["env"] == {"BUILD_VERSION": "${{ needs.build-version.outputs.version }}"}
+    assert 'name="steamhangar-app-v${BUILD_VERSION}.apk"' in record["run"]
+    in_image = _step(
+        jobs["publish"], "Check the baked release downloads inside the pushed image (vault-api only)"
+    )
+    assert in_image["env"]["APK_NAME"] == APK_FROM_BUILD_VERSION
+    stage = _step(jobs["publish"], "Stage release downloads into api/dist (vault-api only)")
+    assert "APK_NAME" not in stage["env"]
+    assert 'apk="steamhangar-app-v${BUILD_VERSION}.apk"' in stage["run"]
+    check = _step(jobs["android-release"], "Check the APK is the one android-build verified")
+    assert check["env"]["BUILD_VERSION"] == "${{ needs.build-version.outputs.version }}"
+    assert "steamhangar-app-v${BUILD_VERSION}.apk" in check["run"]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"APK_SHA256": ""}, "apk_sha256 output is '', not a SHA-256"),
+        ({"APK_CONFIGURED": ""}, "configured output is '', not true/false"),
+        ({"BUILD_VERSION": ""}, "version output is empty"),
+    ],
+)
+def test_stage_step_names_an_empty_output_instead_of_hashing_nothing(
+    tmp_path: Path, overrides: dict[str, str], message: str
+) -> None:
+    bad = _run_stage(tmp_path, ALL_NAMES, **overrides)
+    assert bad.returncode != 0
+    assert message in bad.stderr
+    assert "sha256sum: ''" not in bad.stderr
+    assert "differs from" not in bad.stderr
+
+
+def test_stage_step_refuses_an_artifact_whose_name_is_not_the_derived_one(tmp_path: Path) -> None:
+    other = "steamhangar-app-v0.1.0-rc17.apk"
+    names = [other if n.endswith(".apk") else n for n in ALL_NAMES]
+    bad = _run_stage(tmp_path, names, apk=other)
+    assert bad.returncode != 0
+    assert f"steamhangar-app-{TAG}.apk missing" in bad.stderr
+
+
+def test_stage_step_accepts_a_dispatch_rehearsal_apk(tmp_path: Path) -> None:
+    # Off a tag the version is dev-<sha7>; android-build names the APK by the
+    # same rule, so the derived name still matches.
+    apk = "steamhangar-app-vdev-1a2b3c4.apk"
+    names = [apk if n.endswith(".apk") else n for n in ALL_NAMES]
+    ok = _run_stage(tmp_path, names, apk=apk, BUILD_VERSION="dev-1a2b3c4", IS_TAG="false")
+    assert ok.returncode == 0, ok.stderr
+
+
+def test_release_body_step_refuses_a_signed_apk_without_its_certificate() -> None:
+    step = _step(_publish()["agent-binaries"], "Append image digests and APK certificate to the release body")
+    assert step["env"]["APK_CONFIGURED"] == "${{ needs.android-build.outputs.configured }}"
+    assert "cert_sha256 output is" in step["run"]
