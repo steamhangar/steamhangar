@@ -1117,3 +1117,9 @@ These are not style preferences; each entry cost a review round to learn.
 - `nginx -s reload` returns 0 even when the new config is refused; gate on
   `nginx -t -p <prefix> -c <staged>` and confirm the new config is live
   (unique header) before reporting "applied" (D16c).
+- GitHub silently drops a job output whose value contains any secret of
+  that job as a substring ("Skip output ... may contain secret", only a
+  warning annotation); the consumer reads "". A job holding Environment
+  secrets outputs only literals and hex digests; consumers derive names
+  from a secret-free job (build-version) and format-check every output
+  (rc18 publish failure, CI-FIX-DIST, re-cut as v0.1.0-rc18.1).
