@@ -69,13 +69,40 @@ def keyed_rows(conn: sqlite3.Connection) -> int:
 # --- migration -------------------------------------------------------------
 
 
+def _rebuild_jobs_without_order_key(c: sqlite3.Connection) -> None:
+    """Make ``jobs`` look like a v30 table, without ``ALTER ... DROP COLUMN``.
+
+    DROP COLUMN rewrites the stored CREATE TABLE text and older SQLite builds
+    (about 3.45, as on CI) reject that for this table's commented DDL, so the
+    old table is rebuilt by hand from ``PRAGMA table_info`` and the rows are
+    copied across. Indexes go with the dropped table; ``init_db`` recreates
+    them.
+    """
+    cols = [r for r in c.execute("PRAGMA table_info(jobs)") if r["name"] != "order_key"]
+    defs = []
+    for r in cols:
+        text = f'{r["name"]} {r["type"]}'
+        if r["pk"]:
+            text += " PRIMARY KEY AUTOINCREMENT"
+        if r["notnull"]:
+            text += " NOT NULL"
+        if r["dflt_value"] is not None:
+            text += f' DEFAULT {r["dflt_value"]}'
+        defs.append(text)
+    names = ", ".join(r["name"] for r in cols)
+    c.execute(f"CREATE TABLE jobs_v30 ({', '.join(defs)})")
+    c.execute(f"INSERT INTO jobs_v30 ({names}) SELECT {names} FROM jobs")
+    c.execute("DROP TABLE jobs")
+    c.execute("ALTER TABLE jobs_v30 RENAME TO jobs")
+
+
 def test_v30_database_with_jobs_gains_order_key_idempotently(tmp_path) -> None:
     path = str(tmp_path / "old.db")
     init_db(path)
     c = get_connection(path)
     try:
         queue(c, 10, 20, 30)
-        c.execute("ALTER TABLE jobs DROP COLUMN order_key")
+        _rebuild_jobs_without_order_key(c)
         c.execute("UPDATE schema_version SET version = 30")
         c.commit()
         assert "order_key" not in {
