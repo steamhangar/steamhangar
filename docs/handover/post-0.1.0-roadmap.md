@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D22)
+# Handover: post-v0.1.0 roadmap (items D1-D23)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -1291,3 +1291,43 @@ D1, D3 (incl. device/account note per game), D2, D4, D5, D6.
 5. D7 BEFORE the `v0.1.0` tag (user decision 2026-10-04, superseding the
    earlier "after the tag"; ADR-0021, CORE-FIX-4a..4d); D8 after the tag.
    D7 is the only item with a measured harm on the production line.
+
+## D23: LIBRARY-META-1, durable app metadata and library filters (after rc19)
+
+User request 2026-10-15 (Weg A, scope decided): store the card data of D19-1c
+long term, fill it overnight, and filter the library by category, genre and
+rating. Not in rc19; builds on D19, D21 and D22.
+
+Scope: **every app the vault knows**, not the Steam ownership list. Known =
+cached games, apps in `depot_app_map`, apps with job history, apps whose card
+was opened. No relay key and no ownership data are needed, so no SteamID goes
+anywhere; the set of appids sent is the same kind the oracle poll sends today
+plus the browsed ones.
+
+Design (proposed):
+- Durable table keyed by appid (columns, not a JSON blob, so filters can use
+  indexes): category flags (single-player, multiplayer, co-op, VR), genre
+  ids, review percentage and score, release year, plus text columns for
+  description, developer and date; `fetched_at`, `source`, per-appid failure
+  count and next-try time. Refresh every ~30 days or on demand. Kept apart
+  from `depot_app_map` (expected/observed rule of D19 stays).
+- Stage 1 (oracle only, no new host): nightly job in the schedule window
+  fills flags, genres and rating for all known apps, ~1 app per 2 s,
+  resumable, backoff on 429 or errors; this alone powers the filters.
+- Stage 2 (store, `VAULT_STORE_DETAILS`): description, developer and date on
+  card open as in D19-1c; a nightly store fill for all known apps is a
+  separate explicit switch and follows the privacy mode of D22.
+- API: filter and sort parameters on the library list (category, genre,
+  minimum rating, release year range), indexes, migration; unknown metadata
+  never excludes an app silently (an "unknown" bucket).
+- Web: filter chips and a rating sort on the Library view; Android follows.
+- Privacy: the nightly bulk sends all known appids at once to a third party,
+  more than browsing does; the D21 inventory and the D22 mode table must list
+  it. `strict` runs nothing; failure direction for every store comes before
+  the coder brief (LEARNINGS).
+
+Packages: **LIBRARY-META-1a (api)** table, migration, nightly oracle job,
+tests; **LIBRARY-META-1b (api)** filter and sort parameters; **LIBRARY-META-1c
+(web)** chips and sort; **LIBRARY-META-1d (api)** optional store night fill
+after D22.
+
