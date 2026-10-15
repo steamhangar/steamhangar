@@ -80,7 +80,7 @@ import dev.steamvault.app.ui.status.StatusKind
  * Steam tool apps (WP API-FIX-4) -- port of `web/js/lib/game-status.js`'s
  * tool-app helpers. `GET /v1/games` flags an app vault-api never prefills
  * (`api/vault_api/tool_apps.py`: 228980, "Steamworks Common
- * Redistributables", installed on every Windows PC, its depots cached
+ * Redistributables", and since WP NOT-OWNED-1 250820, "SteamVR"; installed on every Windows PC, its depots cached
  * together with the games that use them) with `tool_app` +
  * `tool_app_name`. The server owns the list; the app only reads the flag.
  * Such a row maps to [StatusKind.NOTINUSE] (web's neutral dash kind; web
@@ -106,8 +106,20 @@ const val TOOL_APP_NOTE = "Steam tool package — cached together with the games
  * tool flag, so a live job on a tool app reads "Downloading"/"Paused" (web
  * `statusWordFor`).
  */
-fun toolAppStateWordFor(kind: StatusKind): String? =
-    if (kind == StatusKind.NOTINUSE) TOOL_APP_STATE_WORD else null
+fun toolAppStateWordFor(kind: StatusKind, notOwned: Boolean = false): String? =
+    if (kind != StatusKind.NOTINUSE) null else if (notOwned) NOT_OWNED_STATE_WORD else TOOL_APP_STATE_WORD
+
+/**
+ * WP NOT-OWNED-1 (web `NOT_OWNED_STATE_WORD`): the status word of an app whose
+ * last prefill ended `not_owned` (SteamPrefill did not consider it). Drawn
+ * with the neutral NOTINUSE kind like a tool app, never as an error; the word
+ * is picked by [toolAppStateWordFor] when its `notOwned` flag is set.
+ */
+const val NOT_OWNED_STATE_WORD = "Not available to prefill (not owned)"
+
+/** True for a games row whose last prefill ended `not_owned`. A tool app
+ * is never reported as not owned (it has its own word). */
+fun isNotOwned(game: GameSummary): Boolean = !isToolApp(game) && game.status == "not_owned"
 
 /** True for a games row the server flags as a Steam tool app. */
 fun isToolApp(game: GameSummary): Boolean = game.tool_app
@@ -206,6 +218,8 @@ fun dispKind(game: GameSummary, liveJob: JobSummary?): StatusKind {
     // WP API-FIX-4: before the error check, so old failed jobs for a tool
     // app never make its card red.
     if (isToolApp(game)) return StatusKind.NOTINUSE
+    // WP NOT-OWNED-1: a distinct outcome, never red and never a Retry.
+    if (isNotOwned(game)) return StatusKind.NOTINUSE
     if (game.status == "error") return StatusKind.ERROR
     return if (hasVisibleCacheContent(game)) StatusKind.CACHED else StatusKind.NONE
 }
@@ -213,7 +227,7 @@ fun dispKind(game: GameSummary, liveJob: JobSummary?): StatusKind {
 /** What tapping the capsule pill / list-row icon does — `null` when there is
  * no honest action (mirrors the mockup's rule: a non-actionable icon renders
  * as a plain, non-clickable icon, never a button). */
-enum class StatusActionType { DOWNLOAD, RETRY, PAUSE, RESUME }
+enum class StatusActionType { DOWNLOAD, RETRY, CHECK_AGAIN, PAUSE, RESUME }
 
 data class StatusAction(val type: StatusActionType)
 
@@ -236,6 +250,9 @@ fun statusAction(game: GameSummary, liveJob: JobSummary?, selecting: Boolean): S
     return when (dispKind(game, null)) {
         StatusKind.NONE -> StatusAction(StatusActionType.DOWNLOAD)
         StatusKind.ERROR -> StatusAction(StatusActionType.RETRY)
+        // WP NOT-OWNED-1 (web "Check again", muted): an explicit prefill
+        // request, which the server answers by clearing the not_owned state.
+        StatusKind.NOTINUSE -> if (isNotOwned(game)) StatusAction(StatusActionType.CHECK_AGAIN) else null
         else -> null // cached — never a silent re-download (mockup round 5 rule)
     }
 }

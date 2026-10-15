@@ -433,8 +433,10 @@ def test_selecting_cached_apps_is_not_a_per_app_query(client: TestClient) -> Non
             conn.set_trace_callback(None)
 
         assert selected == list(range(100_000, 100_000 + app_count))
-        # The whole point: exactly one statement, regardless of app_count.
-        assert len(statements) == 1, statements
+        # The whole point: a constant number of statements, regardless of
+        # app_count: the selection itself plus the not-owned lookup (WP
+        # NOT-OWNED-1), never one per app.
+        assert len(statements) == 2, statements
     finally:
         conn.close()
 

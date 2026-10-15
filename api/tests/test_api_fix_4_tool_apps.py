@@ -80,8 +80,11 @@ def _job_appids(conn: sqlite3.Connection) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
-def test_the_tool_app_list_is_exactly_the_steamworks_redistributables() -> None:
-    assert set(tool_apps.TOOL_APPS) == {228980}
+def test_the_tool_app_list_is_exactly_the_known_tool_packages() -> None:
+    # 250820 (SteamVR) joined with WP NOT-OWNED-1.
+    assert set(tool_apps.TOOL_APPS) == {228980, 250820}
+    steamvr = tool_apps.get_tool_app(250820)
+    assert steamvr is not None and steamvr.name == "SteamVR" and steamvr.reason
     entry = tool_apps.get_tool_app(228980)
     assert entry is not None
     assert entry.appid == 228980

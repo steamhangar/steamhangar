@@ -64,7 +64,7 @@ test("KIND gains exactly updating and verify, with the status-icon wire names", 
   assert.equal(KIND.VERIFY, "verify");
   assert.deepEqual(
     Object.values(KIND).sort(),
-    ["cached", "error", "none", "paused", "running", "tool", "updating", "verify"],
+    ["cached", "error", "none", "not_owned", "paused", "running", "tool", "updating", "verify"],
   );
 });
 

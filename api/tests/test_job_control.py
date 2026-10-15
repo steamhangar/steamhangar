@@ -1239,7 +1239,7 @@ def run_one_prefill(
     settings = make_settings(tmp_path, cache_root, executable, auto_gc=auto_gc)
     with TestClient(create_app(settings)) as client:
         job_id = enqueue(client, 440)
-        job = wait_for_status(client, job_id, ("done", "error", "cancelled"))
+        job = wait_for_status(client, job_id, ("done", "error", "cancelled", "not_owned"))
     return settings, job
 
 
@@ -1326,7 +1326,7 @@ def test_auto_gc_does_not_fire_on_an_unowned_app(
         tmp_path, bindir, cache_root, auto_gc="execute", summary_text=TABLE_UNOWNED
     )
 
-    assert job["status"] == "error"
+    assert job["status"] == "not_owned"
     conn = get_connection(settings.db_path)
     try:
         assert gc_jobs_for(conn, 440) == []

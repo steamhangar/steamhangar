@@ -517,6 +517,7 @@ function buildPill(game, kind, action) {
     pill.type = "button";
     pill.title = action.title;
     pill.setAttribute("aria-label", `${action.title} — ${displayName(game)}`);
+    if (action.muted) pill.classList.add("muted");
   }
   // WP UPD-6: orange for an update; WP CACHE-COMPLETE-1c: completeness.
   const icon = createStatusIcon(cardDisplay(game, kind, STATUS_LABEL).icon);

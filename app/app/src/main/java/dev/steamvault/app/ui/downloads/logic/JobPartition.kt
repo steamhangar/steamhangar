@@ -71,8 +71,8 @@ data class PartitionedJobs(
  * other (same reasoning `web/js/lib/job-partition.js`'s header gives for
  * its own `PENDING_STATUSES` copy). */
 private val PENDING_STATUSES = setOf("queued", "running", "paused")
-private val HISTORY_STATUSES = setOf("done", "error", "cancelled")
-private val KNOWN_STATUSES = setOf("queued", "running", "paused", "done", "error", "cancelled")
+private val HISTORY_STATUSES = setOf("done", "error", "cancelled", "not_owned")
+private val KNOWN_STATUSES = setOf("queued", "running", "paused", "done", "error", "cancelled", "not_owned")
 
 /**
  * @param jobs `GET /v1/jobs` snapshot.
@@ -111,6 +111,7 @@ fun jobIconKind(job: JobSummary): String = when (job.status) {
     "done" -> "cached"
     "error" -> "error"
     "cancelled" -> "cancelled"
+    "not_owned" -> "notinuse" // WP NOT-OWNED-1: neutral, not a failure
     else -> "none"
 }
 
@@ -125,6 +126,7 @@ private val PREFILL_WORD = mapOf(
     "done" to "Done",
     "error" to "Failed",
     "cancelled" to "Cancelled",
+    "not_owned" to "Not available to prefill (not owned)",
 )
 private val GC_WORD = mapOf(
     "queued" to "Garbage collection queued",

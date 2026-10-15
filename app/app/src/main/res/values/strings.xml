@@ -553,6 +553,7 @@
 
     <string name="detail_action_download">Download to cache</string>
     <string name="detail_action_retry">Retry download</string>
+    <string name="detail_action_check_again">Check again</string>
     <string name="detail_action_delete">Delete from cache</string>
 
     <!-- Depot sharing wording (docs/design/vault-app-mockup-NOTES.md rounds

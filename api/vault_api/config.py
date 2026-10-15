@@ -210,6 +210,10 @@ DEFAULT_SCHEDULE_WINDOW = "03:00-07:00"
 #: without the Steam Deck dropping out of the set.
 DEFAULT_SCHEDULE_CLIENT_STALE_DAYS = 7
 
+#: WP NOT-OWNED-1: automatic callers retry an app whose prefill ended
+#: ``not_owned`` once that outcome is older than this many days (no env).
+NOT_OWNED_RECHECK_DAYS = 7
+
 #: Upper bounds for every integer setting that ends up inside a
 #: ``datetime.timedelta`` (WP API-FIX-2, review finding S2). ``timedelta``
 #: raises ``OverflowError`` past ~999 999 999 days, and a digits-only grammar

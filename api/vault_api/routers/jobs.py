@@ -215,7 +215,8 @@ def _select_appids_with_cache_content(
     selected, _tools = tool_apps.split_tool_apps(
         deletion.appids_with_cache_content(conn, depot_bytes)
     )
-    return sorted(selected)
+    # WP NOT-OWNED-1: SteamPrefill did not consider these last time.
+    return sorted(selected - jobs_queue.not_owned_appids(conn))
 
 
 @router.post(

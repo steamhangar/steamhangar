@@ -63,6 +63,15 @@ _TOOL_APPS: dict[int, ToolApp] = {
             "that use them"
         ),
     ),
+    250820: ToolApp(
+        appid=250820,
+        name="SteamVR",
+        reason=(
+            "Steam installs it as a tool next to VR games; SteamPrefill does "
+            "not consider it (Updated=0 and Up To Date=0, job outcome "
+            "not_owned), so it is never prefilled on its own"
+        ),
+    ),
 }
 
 #: Read-only view of every tool app, keyed by app id.

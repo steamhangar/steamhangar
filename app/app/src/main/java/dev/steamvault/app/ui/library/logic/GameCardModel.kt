@@ -86,6 +86,8 @@ data class GameCardModel(
      * [TOOL_APP_STATE_WORD] instead of [kind]'s label, and is drawn muted
      * (shown, not hidden). */
     val toolApp: Boolean = false,
+    /** WP NOT-OWNED-1: last prefill ended `not_owned` (word, not a tool app). */
+    val notOwned: Boolean = false,
     /** WP UPD-3: `GameSummary.update_available` (WP UPD-1), straight from
      * the row (a group row ORs it over its members, [groupGames]). */
     val updateAvailable: Boolean = false,
@@ -193,6 +195,7 @@ fun buildGameCardModel(
         isKnownToVault = isKnownToVault(game),
         installedBadge = installedBadgeFor(game),
         toolApp = isToolApp(game),
+        notOwned = isNotOwned(game),
         updateAvailable = game.update_available,
         updateState = showsUpdateState(game, kind),
         packageCount = packages.size,

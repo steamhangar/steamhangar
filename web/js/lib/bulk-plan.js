@@ -64,9 +64,13 @@ export function classifyBulkSelection(games, jobs) {
   // answers 422 for it, and one 422 fails the whole bulk request) — its own
   // bucket, never `needsDownload` or `current`.
   const toolApps = [];
+  // WP NOT-OWNED-1: an app SteamPrefill did not consider (`status:
+  // "not_owned"`) is no download target either: a job would end the same way.
+  const notOwned = [];
   for (const g of games) {
     if (g && g.owned_only === true) notOnVault.push(g);
     else if (isToolApp(g)) toolApps.push(g);
+    else if (g && g.status === "not_owned" && !busyAppids.has(g.appid)) notOwned.push(g);
     else (busyAppids.has(g.appid) ? busy : rest).push(g);
   }
 
@@ -81,7 +85,7 @@ export function classifyBulkSelection(games, jobs) {
     const kind = dispKind(g, undefined);
     (kind === KIND.CACHED ? current : needsDownload).push(g);
   }
-  return { busy, needsDownload, current, notOnVault, toolApps };
+  return { busy, needsDownload, current, notOnVault, toolApps, notOwned };
 }
 
 /**
@@ -138,8 +142,14 @@ export function buildBulkDownloadPlan(classification, totalPicked) {
   const toolAppsNote = toolApps.length
     ? `${toolApps.length === 1 ? "1 Steam tool package" : `${toolApps.length} Steam tool packages`} — cached together with the games that use ${toolApps.length === 1 ? "it" : "them"}.`
     : "";
-  const withNotOnVault = (note) => [note, notOnVaultNote, toolAppsNote].filter(Boolean).join(" ");
-  const notTargets = notOnVault.length + toolApps.length;
+  // WP NOT-OWNED-1: same shape for picked not-owned apps.
+  const notOwned = classification.notOwned || [];
+  const notOwnedNote = notOwned.length
+    ? `${plural(notOwned.length, "game")} not available to prefill (not owned).`
+    : "";
+  const withNotOnVault = (note) =>
+    [note, notOnVaultNote, toolAppsNote, notOwnedNote].filter(Boolean).join(" ");
+  const notTargets = notOnVault.length + toolApps.length + notOwned.length;
 
   if (needsDownload.length) {
     const skipped = totalPicked - needsDownload.length - notTargets;

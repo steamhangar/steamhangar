@@ -68,7 +68,7 @@ def wait_for_job(client: TestClient, job_id: int, timeout: float = 30.0) -> dict
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         job = client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()
-        if job["status"] in ("done", "error"):
+        if job["status"] in ("done", "error", "not_owned"):
             return job
         time.sleep(0.05)
     pytest.fail(f"job {job_id} did not finish within {timeout}s: {job}")
@@ -283,7 +283,7 @@ def test_unparseable_summary_falls_back_to_the_exit_code_rule(
         assert "Could not parse SteamPrefill's summary table" in job["log_excerpt"]
 
 
-def test_zero_zero_summary_ends_error_not_done(
+def test_zero_zero_summary_ends_not_owned_not_done(
     tmp_path: Path, bindir: Path, cache_root: Path
 ) -> None:
     """ADR-0006 decision 1's exact trigger, replayed from the real capture:
@@ -304,14 +304,14 @@ def test_zero_zero_summary_ends_error_not_done(
         (job_id,) = enqueue(client, 440)
         job = wait_for_job(client, job_id)
 
-        assert job["status"] == "error"
+        assert job["status"] == "not_owned"
         assert job["updated"] == 0
         assert job["up_to_date"] == 0
         assert job["summary_parse_ok"] is True
         assert "is it owned by the logged-in account" in job["log_excerpt"]
 
         detail = client.get("/v1/games/440", headers=AUTH).json()
-        assert detail["status"] == "error"
+        assert detail["status"] == "not_owned"
         assert detail["last_prefill_at"] is None
 
 
@@ -360,7 +360,7 @@ def test_zero_zero_summary_leaves_mapping_and_manifests_untouched_even_with_plan
         (job_id,) = enqueue(client, 440)
         job = wait_for_job(client, job_id)
 
-        assert job["status"] == "error"
+        assert job["status"] == "not_owned"
         assert "Depot mapping and manifest state were NOT touched" in job["log_excerpt"]
         assert "Manifest ingestion" not in job["log_excerpt"]
 
@@ -557,7 +557,7 @@ def test_unowned_outcome_leaves_needs_force_unchanged(
         )
         (job_id_2,) = enqueue(client, 550)
         job2 = wait_for_job(client, job_id_2)
-        assert job2["status"] == "error"
+        assert job2["status"] == "not_owned"
         assert client.get("/v1/games/550", headers=AUTH).json()["needs_force"] is False
 
 
