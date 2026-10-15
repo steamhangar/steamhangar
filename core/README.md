@@ -1578,9 +1578,20 @@ last good config live (never fail-open) and is reported as `rejected` with
 the reason. `45-` re-reads the rotation size from
 `/etc/nginx/vault-settings.effective` before each check.
 
+**Before vault-api's first write** (review N2). vault-core has no
+`depends_on` on vault-api, so on a fresh `vault-settings` volume (first
+install, or the volume was removed) vault-core can boot before the file
+exists. It then runs on env + defaults (status `none`, generation 0): no
+upstream rate cap unless env sets one, the default window and edge. As soon
+as vault-api has started and written the file (at its every boot), the
+watcher applies it within one poll (5 s) by reload. The same window opens
+after a lost settings volume until vault-api rewrites the file from its
+database. An operator who must never run uncapped, not even for that
+window, pins the cap in `.env`.
+
 **Status file** (`/vault/logs/settings-applied.json`, root:root 0644, read
 by vault-api for `GET /v1/settings`): `state` (`applied` | `rejected` |
-`none`), `generation` (last looked at), `applied_generation` (live),
+`none`), `generation` (the file generation last looked at, also a rejected one, also at boot), `applied_generation` (live),
 `reason`, `updated_at`, and per key `value` + `source` (`env` | `file` |
 `default`) of the live config. vault-api shows a key whose source is `env`
 as "set via env".

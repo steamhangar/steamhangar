@@ -332,6 +332,9 @@ services:
       # Long syntax, so read_only and nocopy are stated, not comma-combined.
       # Named volume only (no bind mode): the file is derived from the
       # database, needs no backup, and vault-api rewrites it at every start.
+      # Until vault-api has written it (fresh volume, vault-core started
+      # first) vault-core runs on env + defaults and applies the file by
+      # reload once it appears (core/README.md "Settings from vault-api").
       - type: volume
         source: vault-settings
         target: /etc/vault-settings

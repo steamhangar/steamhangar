@@ -71,6 +71,34 @@ vs_default() {
     esac
 }
 
+# vs_is_key <word>: true iff <word> is EXACTLY one of VS_KEYS. A literal case
+# list on the whole word, after a [A-Z0-9_] character check: a key holding
+# spaces, '=', '$' or several allowlisted names never matches, so the eval
+# lines that use a key to name a variable only ever see one of these ten
+# literals (review D16c B2).
+vs_is_key() {
+    case "$1" in
+        ""|*[!A-Z0-9_]*) return 1 ;;
+    esac
+    case "$1" in
+        VAULT_UPSTREAM_RATE|VAULT_UPSTREAM_RATE_WINDOW|VAULT_UPSTREAM_EDGE|\
+        VAULT_UPSTREAM_POOL_HOSTS|VAULT_UPSTREAM_MAX_CONNS|VAULT_PREFILL_MAX_THREADS|\
+        VAULT_TLS_CLIENT_MAX_CONNS|VAULT_TLS_MAX_CONNS|VAULT_RESOLVER|\
+        VAULT_EVENT_LOG_ROTATE_BYTES) return 0 ;;
+    esac
+    return 1
+}
+
+# vs_check_prefill <value>: the prefill thread count vault-core's floor check
+# uses, 1..64, digits only, no leading zero (28- silently ignores anything
+# else, so the render refuses it instead -- review D16c N1).
+vs_check_prefill() {
+    case "$1" in
+        ""|*[!0-9]*|0*) return 1 ;;
+    esac
+    [ "${#1}" -le 2 ] && [ "$1" -le 64 ]
+}
+
 # vs_blank <value>: true for "" and for ASCII whitespace only ("not set").
 vs_blank() {
     case "$1" in
@@ -80,11 +108,11 @@ vs_blank() {
 }
 
 # vs_shown <text>: safe to put into a log line or the status file -- only
-# [A-Za-z0-9 ./:_+=,[]-] ('[' ']' as octal: IPv6 resolver addresses), every
+# [A-Za-z0-9 ./:;()_+=,[]-] ('[' ']' as octal: IPv6 resolver addresses), every
 # other byte (quotes, backslashes, control characters, non-ASCII) as '?', at
 # most 200 characters.
 vs_shown() {
-    printf '%s' "$1" | tr -c 'A-Za-z0-9 ./:_+=,\133\135-' '?' | cut -c 1-200
+    printf '%s' "$1" | tr -c 'A-Za-z0-9 ./:;()_+=,\133\135-' '?' | cut -c 1-200
 }
 
 # vs_capture_env: record the operator's env value of every key (boot only).
@@ -174,10 +202,13 @@ vs_parse() {
             VS_GEN=$_vv
             continue
         fi
-        case " $VS_KEYS " in
-            *" $_vk "*) : ;;
-            *) VS_ERR="line $_vn: key '$(vs_shown "$_vk")' is not a core setting"; return 1 ;;
-        esac
+        # The key must be EXACTLY one allowlisted name (vs_is_key: a literal
+        # case list, no substring match) before it is used to name a
+        # variable below; anything else rejects the whole file.
+        if ! vs_is_key "$_vk"; then
+            VS_ERR="line $_vn: key '$(vs_shown "$_vk")' is not a core setting"
+            return 1
+        fi
         eval "_vh=\$VS_HAS_$_vk"
         # shellcheck disable=SC2154 # _vh is set by the eval above
         if [ -n "$_vh" ]; then
@@ -275,6 +306,18 @@ vs_render() {
             return 1
         fi
     done
+    # 45- only runs at boot (its loop re-reads the size), so its grammar is
+    # checked here; a value it would refuse must never be "applied" (review
+    # D16c B1). Same for the prefill thread count 28- ignores when invalid.
+    if ! sh "$VS_HOOK_DIR/45-vault-eventlog-rotate.sh" --grammar >> "$_vlog" 2>&1; then
+        vs_render_fail "45-vault-eventlog-rotate.sh refused the values"
+        return 1
+    fi
+    if ! vs_check_prefill "${VAULT_PREFILL_MAX_THREADS:-}"; then
+        echo "vault-settings-lib.sh: FATAL: VAULT_PREFILL_MAX_THREADS='$(vs_shown "${VAULT_PREFILL_MAX_THREADS:-}")' is not a whole number 1..64" >> "$_vlog"
+        vs_render_fail "the prefill thread count is invalid"
+        return 1
+    fi
     vs_write_generation_conf "$_vd/vault-settings-generation.conf" "$_vg" "$_vapply" || { vs_render_fail "could not write the generation include"; return 1; }
     vs_effective_lines > "$_vd/vault-settings.effective" || { vs_render_fail "could not write vault-settings.effective"; return 1; }
     if ! sh "$VS_HOOK_DIR/40-vault-preflight.sh" --values "$_vd" >> "$_vlog" 2>&1; then

@@ -71,6 +71,12 @@ reject "unknown key"          "key 'VAULT_API_KEY' is not a core setting" "$(pri
 reject "env-only core key"    "key 'VAULT_TLS_PASSTHROUGH' is not a core setting" "$(printf '%s\n' "$HEADER" GENERATION=1 VAULT_TLS_PASSTHROUGH=0)"
 reject "lowercase key"        "is not a core setting" "$(printf '%s\n' "$HEADER" GENERATION=1 vault_upstream_rate=1m)"
 reject "PATH injection"       "key 'PATH' is not a core setting" "$(printf '%s\n' "$HEADER" GENERATION=1 PATH=/tmp)"
+# Review D16c B2: a "key" made of several allowlisted names, or with other
+# characters, never matches the allowlist (exact literal match only).
+reject "multi-key line"       "is not a core setting" "$(printf '%s\n' "$HEADER" GENERATION=1 'VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW=800k')"
+reject "key with a \$"        "is not a core setting" "$(printf '%s\n' "$HEADER" GENERATION=1 'VAULT_UPSTREAM_RATE$(id)=1m')"
+reject "key with a ;"         "is not a core setting" "$(printf '%s\n' "$HEADER" GENERATION=1 'VAULT_UPSTREAM_RATE;x=1m')"
+reject "key with spaces"      "is not a core setting" "$(printf '%s\n' "$HEADER" GENERATION=1 ' VAULT_UPSTREAM_RATE=1m')"
 reject "duplicate key"        "VAULT_UPSTREAM_RATE is listed twice" "$(printf '%s\n' "$HEADER" GENERATION=1 VAULT_UPSTREAM_RATE=1m VAULT_UPSTREAM_RATE=2m)"
 reject "a comment line"       "is not KEY=VALUE" "$(printf '%s\n' "$HEADER" GENERATION=1 '# note')"
 reject "an empty line"        "is not KEY=VALUE" "$(printf '%s\n' "$HEADER" GENERATION=1 '' VAULT_UPSTREAM_RATE=1m)"
@@ -111,6 +117,11 @@ else
     bad "resolve: got
 $resolve_out"
 fi
+
+# vs_is_key's literal list equals VS_KEYS exactly (both directions).
+iskey=$(env -i PATH="$PATH" sh -c '. "$1"; for k in $VS_KEYS; do vs_is_key "$k" || echo "missing $k"; done
+    for k in VAULT_API_KEY VAULT_UPSTREAM VAULT_UPSTREAM_RATEX "VAULT_UPSTREAM_RATE VAULT_RESOLVER" ""; do vs_is_key "$k" && echo "extra [$k]"; done; true' sh "$LIB")
+if [ -z "$iskey" ]; then ok "vs_is_key accepts exactly the VS_KEYS names"; else bad "vs_is_key: $iskey"; fi
 
 # Every allowlisted key has a default (the hooks never see a blank value).
 missing=$(env -i PATH="$PATH" sh -c '. "$1"; for k in $VS_KEYS; do vs_default "$k" >/dev/null || echo "$k"; done' sh "$LIB")
@@ -164,7 +175,7 @@ boot15() {
         set -e
         exec 3>&1
         . "$1"
-        echo "STATE=$VS_BOOT_STATE GEN=$VS_BOOT_GEN"
+        echo "STATE=$VS_BOOT_STATE GEN=$VS_BOOT_GEN SEEN=$VS_BOOT_SEEN"
         echo "REASON=$VS_BOOT_REASON"
         for k in VAULT_UPSTREAM_RATE VAULT_UPSTREAM_RATE_WINDOW VAULT_UPSTREAM_EDGE VAULT_RESOLVER VAULT_TLS_MAX_CONNS; do
             eval "echo EXPORT \$k=\$$k"
@@ -173,7 +184,7 @@ boot15() {
     ' sh "$HOOK15" 2>&1
 }
 out=$(boot15 "$work/absent.env" VAULT_UPSTREAM_RATE=2m VAULT_UPSTREAM_EDGE= ) || true
-for want in "STATE=none GEN=0" "EXPORT VAULT_UPSTREAM_RATE=2m" "EXPORT VAULT_UPSTREAM_RATE_WINDOW=03:00-07:00" \
+for want in "STATE=none GEN=0 SEEN=0" "EXPORT VAULT_UPSTREAM_RATE=2m" "EXPORT VAULT_UPSTREAM_RATE_WINDOW=03:00-07:00" \
             "EXPORT VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net" "EXPORT VAULT_RESOLVER=1.1.1.1" \
             "EXPORT VAULT_TLS_MAX_CONNS=256" \
             "CHILD VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net VS_ENV_VAULT_UPSTREAM_RATE=2m"; do
@@ -203,7 +214,9 @@ fi
 
 printf '%s\n' "$HEADER" GENERATION=4 VAULT_API_KEY=x > "$work/bad.env"
 out=$(boot15 "$work/bad.env" VAULT_UPSTREAM_RATE=) || true
-if grep -qxF 'STATE=rejected GEN=4' <<<"$out" || grep -qxF 'STATE=rejected GEN=0' <<<"$out"; then
+# Review D16c S1: the rejected file's generation is reported as seen (so
+# vault-api's "pending" ends), the live generation stays 0.
+if grep -qxF 'STATE=rejected GEN=0 SEEN=4' <<<"$out"; then
     if grep -q "REASON=settings file rejected: line 3: key 'VAULT_API_KEY' is not a core setting" <<<"$out" \
        && grep -qxF 'EXPORT VAULT_UPSTREAM_RATE=off' <<<"$out"; then
         ok "15- with a malformed file: boots on env + defaults, reports rejected with the reason"
@@ -221,7 +234,7 @@ fi
 
 mkfifo "$work/fifo.env"
 out=$(boot15 "$work/fifo.env") || true
-if grep -qxF 'STATE=rejected GEN=0' <<<"$out" && grep -q 'not a readable regular file' <<<"$out"; then
+if grep -qxF 'STATE=rejected GEN=0 SEEN=0' <<<"$out" && grep -q 'not a readable regular file' <<<"$out"; then
     ok "15- with a FIFO as the settings file: rejected, no hang"
 else
     bad "15- with a FIFO: $out"

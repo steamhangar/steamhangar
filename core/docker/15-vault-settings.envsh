@@ -48,7 +48,11 @@ else
     fi
 
     VS_BOOT_STATE=none
+    # VS_BOOT_GEN: the generation that is live (0 = env and defaults only).
+    # VS_BOOT_SEEN: the file generation looked at, also when it was rejected,
+    # so vault-api's "pending" ends after a rejection (review D16c S1).
     VS_BOOT_GEN=0
+    VS_BOOT_SEEN=0
     VS_BOOT_REASON="no settings file from vault-api"
     vs_use_file=no
     vs_rc=0
@@ -56,8 +60,11 @@ else
     if [ "$vs_rc" = 0 ]; then
         if vs_parse "$vs_content"; then
             VS_BOOT_GEN=$VS_GEN
+            VS_BOOT_SEEN=$VS_GEN
             vs_use_file=yes
         else
+            # A file that fails the parse may still have a readable GENERATION.
+            VS_BOOT_SEEN=${VS_GEN:-0}
             VS_BOOT_STATE=rejected
             VS_BOOT_REASON="settings file rejected: $VS_ERR"
         fi
@@ -94,13 +101,13 @@ else
         || echo "$VS_ME: WARNING: could not write $VS_CONF_DIR/vault-settings-generation.conf" >&2
     vs_effective_lines > "$VS_CONF_DIR/vault-settings.effective" \
         || echo "$VS_ME: WARNING: could not write $VS_CONF_DIR/vault-settings.effective" >&2
-    export VS_BOOT_STATE VS_BOOT_GEN VS_BOOT_REASON
+    export VS_BOOT_STATE VS_BOOT_GEN VS_BOOT_SEEN VS_BOOT_REASON
     for vs_k in $VS_KEYS; do
         eval "vs_v=\$VS_V_$vs_k; vs_s=\$VS_S_$vs_k"
         # shellcheck disable=SC2154 # vs_v/vs_s are set by the eval above
         echo "$VS_ME: $vs_k=$(vs_shown "$vs_v") ($vs_s)"
     done
-    echo "$VS_ME: settings file: $VS_BOOT_STATE, generation $VS_BOOT_GEN${VS_BOOT_REASON:+ ($VS_BOOT_REASON)}"
+    echo "$VS_ME: settings file: $VS_BOOT_STATE, generation $VS_BOOT_GEN (file generation $VS_BOOT_SEEN)${VS_BOOT_REASON:+ ($VS_BOOT_REASON)}"
     unset vs_use_file vs_rc vs_content vs_stage vs_k vs_v vs_s
 fi
 unset VS_ME VS_LIB

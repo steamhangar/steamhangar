@@ -75,7 +75,8 @@ for f in "$dockerfile" \
          "$core_dir/docker/47-vault-settings-watch.sh" \
          "$core_dir/tests/fixtures/settings-grammar.tsv" \
          "$core_dir/tests/test-settings-grammar.sh" \
-         "$core_dir/tests/test-settings-lib.sh"; do
+         "$core_dir/tests/test-settings-lib.sh" \
+         "$core_dir/tests/test-settings-watch.sh"; do
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
 done
 
@@ -143,6 +144,8 @@ echo "--- core/tests/test-settings-grammar.sh ---"
 bash "$core_dir/tests/test-settings-grammar.sh"
 echo "--- core/tests/test-settings-lib.sh ---"
 bash "$core_dir/tests/test-settings-lib.sh"
+echo "--- core/tests/test-settings-watch.sh ---"
+bash "$core_dir/tests/test-settings-watch.sh"
 
 # --- 0b-own. the root-only directory predicate, docker-free (WP SEC-FIX-5) -----
 # 21-, 25- and 29- decide with one predicate whether root may act on names in
@@ -1879,10 +1882,18 @@ d16c_boot() {
                     grep -q "VAULT_TLS_MAX_CONNS=300 (env)" /tmp/ep.log || fail "15- did not log the env source" ;;
                 refused)
                     grep -q "15-vault-settings.envsh: WARNING: settings file generation 4 rejected: 27-vault-upstream-rate.sh: FATAL: VAULT_UPSTREAM_RATE=.0. starts with 0" /tmp/ep.log || fail "no rejected warning naming 27- and the value"
-                    grep -q "settings file: rejected, generation 0" /tmp/ep.log || fail "no rejected summary line"
+                    grep -q "settings file: rejected, generation 0 (file generation 4)" /tmp/ep.log || fail "no rejected summary line naming the file generation 4"
                     grep -qx "    default 0;" /etc/nginx/vault-upstream-rate.conf || fail "the rate is not the default (off) after the rejected file"
                     [ "$pool_default" = "    default dist-fra1.discovery.steamserver.net;" ] || fail "the default edge is not rendered after the rejected file ($pool_default)"
                     grep -qF "add_header X-Vault-Settings-Generation \"0\" always;" /etc/nginx/vault-settings-generation.conf || fail "the generation include does not say 0" ;;
+                rotate)
+                    # Review D16c B1: 45- refuses the size; the render must
+                    # refuse the FILE, so the boot goes on with the default
+                    # instead of dying in 45- (a boot loop).
+                    grep -q "15-vault-settings.envsh: WARNING: settings file generation 9 rejected: 45-vault-eventlog-rotate.sh: FATAL: VAULT_EVENT_LOG_ROTATE_BYTES=.abc." /tmp/ep.log || fail "no rejected warning naming 45- and the size"
+                    grep -q "settings file: rejected, generation 0 (file generation 9)" /tmp/ep.log || fail "no rejected summary line"
+                    grep -q "VAULT_EVENT_LOG_ROTATE_BYTES=67108864 (default)" /tmp/ep.log || fail "the rotation size is not the default after the rejected file"
+                    grep -qx "$(printf "VAULT_EVENT_LOG_ROTATE_BYTES=67108864\tdefault")" /etc/nginx/vault-settings.effective || fail "vault-settings.effective does not carry the default rotation size" ;;
             esac
             grep -c "resolver 1.1.1.1 ipv6=off valid=30s;" /etc/nginx/nginx.conf | grep -qx 2 || fail "the default resolver 1.1.1.1 is not rendered twice"
             if [ "$status" != 0 ]; then sed "s/^/    /" /tmp/ep.log; fi
@@ -1892,6 +1903,7 @@ d16c_boot() {
 }
 d16c_boot valid "GENERATION=3 VAULT_UPSTREAM_RATE=800k VAULT_UPSTREAM_EDGE=off VAULT_TLS_MAX_CONNS=128"
 d16c_boot refused "GENERATION=4 VAULT_UPSTREAM_RATE=0"
+d16c_boot rotate "GENERATION=9 VAULT_EVENT_LOG_ROTATE_BYTES=abc"
 
 echo "OK: rendered core/docker/nginx.conf.template passes 'nginx -t' and the" \
      "access_log/vault_event invariant for both VAULT_EVENT_LOG states;" \

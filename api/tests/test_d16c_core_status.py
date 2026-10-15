@@ -379,3 +379,44 @@ def test_compose_mounts_the_settings_volume() -> None:
 def test_api_image_owns_the_mount_point() -> None:
     text = (REPO_ROOT / "api" / "Dockerfile").read_text(encoding="utf-8")
     assert '"$(stat -c \'%u:%g %a\' /var/lib/vault-settings)" = "101:101 755"' in text
+
+
+# -- S10: review witnesses (D16c review S3/S4) ---------------------------------
+
+
+def test_pending_is_not_equal_after_a_lost_volume(tmp_path: Path) -> None:
+    """vault-api restarts at GENERATION 1 when the settings volume is lost
+    while vault-core last saw 5: still pending (not "greater than")."""
+    settings = _file_settings(tmp_path)
+    core_settings.write_core_settings_file(settings.core_settings_file, {"VAULT_UPSTREAM_RATE": "1m"})
+    assert core_settings.written_generation(settings.core_settings_file) == 1
+    _write_status(tmp_path / "cache", _status(generation=5, applied_generation=5))
+    apply = _get(settings)["core_apply"]
+    # vault-api's boot rewrites the file once more (generation 2): still a
+    # LOWER generation than the 5 vault-core last saw.
+    assert apply["written_generation"] < 5 and apply["generation"] == 5
+    assert apply["pending"] is True
+
+
+def test_core_pinned_prefill_threads_feed_the_cap_floor(tmp_path: Path) -> None:
+    """vault-core's floor check uses ITS prefill thread count: pinned to 20
+    in core's env, a Settings cap of 16 is refused although vault-api's own
+    thread count (8) would allow it."""
+    settings = _file_settings(tmp_path)
+    keys = dict(_status()["keys"])
+    keys["VAULT_PREFILL_MAX_THREADS"] = {"value": "20", "source": "env"}
+    _write_status(tmp_path / "cache", _status(keys=keys))
+    response = _patch(settings, {"upstream_max_conns": "16"}, confirm=True)
+    assert response.status_code == 422, response.text
+    assert "prefill_max_threads (20)" in response.json()["detail"]
+    assert _patch(settings, {"upstream_max_conns": "24"}, confirm=True).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "key", ("VAULT_RESOLVER", "VAULT_UPSTREAM_MAX_CONNS", "VAULT_TLS_CLIENT_MAX_CONNS", "VAULT_TLS_MAX_CONNS")
+)
+def test_core_image_env_does_not_pin_editable_keys(key: str) -> None:
+    """Review S4: the core image states these EMPTY (= not set); a non-blank
+    image ENV would show as an env pin in every plain image run."""
+    text = (REPO_ROOT / "core" / "Dockerfile").read_text(encoding="utf-8")
+    assert re.findall(rf"^\s*{key}=(\S*?)\s*\\?\s*$", text, re.MULTILINE) == [""]

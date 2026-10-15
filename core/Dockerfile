@@ -331,7 +331,10 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     # ADR-0001 req 4. Overridable per deployment (deploy/.env). Must be a real
     # upstream resolver -- never vault-dns, which would answer *.steamcontent.com
     # with vault-core's own address and loop every miss back into this server.
-    VAULT_RESOLVER=1.1.1.1 \
+    # D16c: EMPTY here = not set; 15-vault-settings.envsh supplies the default
+    # 1.1.1.1 (Settings, else default), so an image run without compose does
+    # not report an "env" pin for it. Same for the caps below.
+    VAULT_RESOLVER= \
     # WP 3.10 (ADR-0008): path for the optional cache-event log. DEFAULT EMPTY
     # -- feature OFF -- deliberately, not "on by default with a sane path":
     # the ADR explicitly frames this feed as "optional at runtime" (written
@@ -369,14 +372,15 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     VAULT_UPSTREAM_EDGE= \
     # Global cap C on concurrent upstream connections (1..64, default 16, no
     # off switch; must be >= VAULT_PREFILL_MAX_THREADS, empty = 8). Over the
-    # cap the client gets 503. Rendered by the same hook.
-    VAULT_UPSTREAM_MAX_CONNS=16 \
+    # cap the client gets 503. Rendered by the same hook. Empty = not set (D16c:
+    # 15- supplies 16).
+    VAULT_UPSTREAM_MAX_CONNS= \
     # WP CORE-FIX-4d (ADR-0021 addendum 2026-10-09): the passthrough's
     # connection caps, rendered by 26-vault-tls-passthrough.sh. Per client address 1..256
     # (empty = 64), in total 1..400 (empty = 256), client <= total; anything
-    # else refuses to boot.
-    VAULT_TLS_CLIENT_MAX_CONNS=64 \
-    VAULT_TLS_MAX_CONNS=256 \
+    # else refuses to boot. Empty = not set (D16c: 15- supplies 64 / 256).
+    VAULT_TLS_CLIENT_MAX_CONNS= \
+    VAULT_TLS_MAX_CONNS= \
     # WP CORE-FIX-3 (ADR-0020): HTTPS passthrough on port 443 for
     # *.steamcontent.com SNI names, TLS not terminated. DEFAULT ON (1);
     # 0/false/off/no removes the stream block at start
