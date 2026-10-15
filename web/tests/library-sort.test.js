@@ -82,7 +82,7 @@ test("last played: 0 means never played (last); gate detection and normalization
   const off = withOwnedLastPlayed([row(1)], [{ appid: 1, name: "x" }]);
   assert.equal(lastPlayedAvailable(off), false);
   assert.deepEqual(availableSortOptions({ lastPlayed: false }).map((o) => o.key), ["name", "size", "state", "updated"]);
-  assert.equal(availableSortOptions({ lastPlayed: true }).length, SORT_OPTIONS.length);
+  assert.equal(availableSortOptions({ lastPlayed: true, meta: true }).length, SORT_OPTIONS.length);
   // A stored 'played' falls back to A-Z while off, and is honoured when on.
   assert.deepEqual(normalizeSort({ key: "played", dir: "desc" }, { lastPlayed: false }), DEFAULT_SORT);
   assert.deepEqual(normalizeSort({ key: "played", dir: "desc" }, { lastPlayed: true }), { key: "played", dir: "desc" });

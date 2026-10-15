@@ -17,6 +17,11 @@
  *     relay OMITS that key while the flag is off, so "the flag is on" is
  *     exactly "some owned row carries it" ({@link lastPlayedAvailable}).
  *
+ * **WP D23: rating and year.** "Rating" (overall review percentage) and
+ * "Release year" read `meta` of `GET /v1/games` and are offered only while
+ * some row carries metadata; they default to descending (best/newest first,
+ * the API's default). Games without a value sort last in both directions.
+ *
  * **Ordering rules.** Stable: ties fall back to the name, then the appid.
  * Rows without a value for the chosen key (no size, never cached, never
  * played) and name-less cards (ID fallbacks "App 123") sort LAST in both
@@ -31,6 +36,8 @@ export const SORT_KEY = Object.freeze({
   STATE: "state",
   UPDATED: "updated",
   PLAYED: "played",
+  RATING: "rating",
+  YEAR: "year",
 });
 export const SORT_DIR = Object.freeze({ ASC: "asc", DESC: "desc" });
 
@@ -43,7 +50,20 @@ export const SORT_OPTIONS = Object.freeze([
   { key: SORT_KEY.STATE, label: "State" },
   { key: SORT_KEY.UPDATED, label: "Last cached or updated" },
   { key: SORT_KEY.PLAYED, label: "Last played", needsLastPlayed: true },
+  // WP D23: only while some game carries stored metadata (`meta` not null).
+  { key: SORT_KEY.RATING, label: "Rating", needsMeta: true },
+  { key: SORT_KEY.YEAR, label: "Release year", needsMeta: true },
 ]);
+
+/** Rating and year read best newest/best first, like the API's default. */
+export function defaultDirFor(key) {
+  return key === SORT_KEY.RATING || key === SORT_KEY.YEAR ? SORT_DIR.DESC : SORT_DIR.ASC;
+}
+
+/** True when any row carries stored library metadata (WP D23). */
+export function metaAvailable(rows) {
+  return Array.isArray(rows) && rows.some((g) => g && g.meta && typeof g.meta === "object");
+}
 export const SORT_LABEL = "Sort";
 export const SORT_DIR_LABEL = Object.freeze({ asc: "Ascending", desc: "Descending" });
 /** The Name option reads as an alphabet direction. */
@@ -59,16 +79,17 @@ export function lastPlayedAvailable(rows) {
  * to the default; "played" while the flag is off falls back to Name A-Z.
  * @returns {{key: string, dir: string}}
  */
-export function normalizeSort(choice, { lastPlayed }) {
+export function normalizeSort(choice, { lastPlayed, meta = false }) {
   const key = SORT_OPTIONS.some((o) => o.key === choice?.key) ? choice.key : DEFAULT_SORT.key;
   const dir = choice?.dir === SORT_DIR.DESC ? SORT_DIR.DESC : SORT_DIR.ASC;
   if (key === SORT_KEY.PLAYED && !lastPlayed) return { ...DEFAULT_SORT };
+  if ((key === SORT_KEY.RATING || key === SORT_KEY.YEAR) && !meta) return { ...DEFAULT_SORT };
   return { key, dir };
 }
 
 /** Options the control offers right now. */
-export function availableSortOptions({ lastPlayed }) {
-  return SORT_OPTIONS.filter((o) => !o.needsLastPlayed || lastPlayed);
+export function availableSortOptions({ lastPlayed, meta = false }) {
+  return SORT_OPTIONS.filter((o) => (!o.needsLastPlayed || lastPlayed) && (!o.needsMeta || meta));
 }
 
 function realName(g) {
@@ -108,6 +129,10 @@ function valueOf(g, key, liveJob) {
     case SORT_KEY.PLAYED:
       // 0 is Steam's "never played": no value, not the oldest date.
       return Number.isFinite(g.owned_last_played) && g.owned_last_played > 0 ? g.owned_last_played : null;
+    case SORT_KEY.RATING:
+      return Number.isFinite(g.meta?.review_percent) ? g.meta.review_percent : null;
+    case SORT_KEY.YEAR:
+      return Number.isFinite(g.meta?.release_year) ? g.meta.release_year : null;
     default:
       return null;
   }

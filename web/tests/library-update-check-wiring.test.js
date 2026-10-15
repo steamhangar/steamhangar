@@ -221,7 +221,7 @@ test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; '
   assert.deepEqual(first.className.split(" ").sort(), ["btn", "primary", "sm"], "MUTATION PIN: the check-only button is the primary one");
   assert.equal(second.textContent, "Check & update all cached games");
   assert.deepEqual(second.className.split(" ").sort(), ["btn", "sm"], "MUTATION PIN: the downloading button is NOT primary and not a see-through ghost");
-  assert.equal(s.querySelector(".lib-status").children.map((c) => c.className).join(" "), "lib-upd lib-owned");
+  assert.equal(s.querySelector(".lib-status").children.map((c) => c.className).join(" "), "lib-upd lib-owned lib-meta");
 });
 
 test("badge + 'Updates' chip from update_available; the chip filters the grid", async () => {
