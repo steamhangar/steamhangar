@@ -44,7 +44,7 @@ def test_steamvr_is_a_seeded_tool_app() -> None:
 
 
 def test_not_owned_appids_reads_only_that_status(conn: sqlite3.Connection) -> None:
-    jobs.set_app_status(conn, 10, jobs.STATUS_NOT_OWNED)
+    _finish_not_owned_job(conn, 10, jobs.utcnow_iso())
     jobs.set_app_status(conn, 20, jobs.STATUS_ERROR)
     jobs.set_app_status(conn, 30, jobs.STATUS_DONE)
     assert jobs.not_owned_appids(conn) == {10}
@@ -55,7 +55,7 @@ def test_the_scheduler_drops_a_not_owned_app_and_keeps_the_rest(
 ) -> None:
     """MUTATION TARGET: drop the not-owned filter in compute_targets."""
     insert_report(conn, "pc", [440, 730, 999], utc_iso(9))
-    jobs.set_app_status(conn, 999, jobs.STATUS_NOT_OWNED)
+    _finish_not_owned_job(conn, 999, jobs.utcnow_iso())
     jobs.set_app_status(conn, 730, jobs.STATUS_ERROR)  # a real failure stays a target
 
     result = compute_targets(conn, local(10), stale_after_days=7)
@@ -70,7 +70,7 @@ def test_the_miss_trigger_skips_a_not_owned_app_without_using_the_cap(
     settings = make_sweep_settings(tmp_path, cap=1)
     upsert_mapping(conn, depotid=1001, appid=999, name=None)
     upsert_mapping(conn, depotid=70403, appid=440, name=None)
-    jobs.set_app_status(conn, 999, jobs.STATUS_NOT_OWNED)
+    _finish_not_owned_job(conn, 999, jobs.utcnow_iso())
     write_log(
         Path(settings.event_log_path),
         event_line(depot="1001"),
@@ -81,7 +81,8 @@ def test_the_miss_trigger_skips_a_not_owned_app_without_using_the_cap(
 
     assert outcome.enqueued == (440,)
     assert outcome.dropped_by_cap == ()
-    assert _job_appids(conn) == [440]
+    assert [a for a in _job_appids(conn) if a != 999] == [440]
+    assert conn.execute("SELECT COUNT(*) FROM jobs WHERE appid = 999 AND status = 'queued'").fetchone()[0] == 0
 
 
 def test_cached_prefill_leaves_a_not_owned_app_out(client) -> None:
@@ -93,7 +94,7 @@ def test_cached_prefill_leaves_a_not_owned_app_out(client) -> None:
 
     db = get_connection(client.app.state.settings.db_path)
     try:
-        jobs.set_app_status(db, 999, jobs.STATUS_NOT_OWNED)
+        _finish_not_owned_job(db, 999, jobs.utcnow_iso())
     finally:
         db.close()
 
@@ -135,7 +136,7 @@ def test_explicit_prefill_clears_not_owned_and_requeues(client) -> None:
     path = client.app.state.settings.db_path
     db = get_connection(path)
     try:
-        jobs.set_app_status(db, 777, jobs.STATUS_NOT_OWNED)
+        _finish_not_owned_job(db, 777, jobs.utcnow_iso())
         assert 777 in jobs.not_owned_appids(db)
     finally:
         db.close()
@@ -152,3 +153,10 @@ def test_explicit_prefill_clears_not_owned_and_requeues(client) -> None:
         ).fetchone() is not None
     finally:
         db.close()
+
+
+def test_not_owned_without_a_job_row_counts_as_expired(conn: sqlite3.Connection) -> None:
+    """History pruned (DELETE /v1/history): no timestamp left, so recheck."""
+    jobs.set_app_status(conn, 5, jobs.STATUS_NOT_OWNED)
+
+    assert jobs.not_owned_appids(conn) == set()

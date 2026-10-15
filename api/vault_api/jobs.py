@@ -306,9 +306,9 @@ def not_owned_appids(
 
     The state is not permanent for automatic callers: once the app's latest
     ``not_owned`` prefill job finished more than ``NOT_OWNED_RECHECK_DAYS``
-    ago, the app is no longer returned, so the next sweep tries it again (the
-    user may have bought it since). An app with no such job row (no timestamp
-    to age) stays excluded.
+    ago, or has no such job row left (pruned history), the app is no longer returned, so the next sweep tries it again (the
+    user may have bought it since). (No timestamp
+    to age counts as expired, not as excluded forever.)
     """
     cutoff = ((now or datetime.now(timezone.utc)) - timedelta(
         days=config.NOT_OWNED_RECHECK_DAYS
@@ -325,7 +325,7 @@ def not_owned_appids(
     return {
         int(appid)
         for appid, finished in rows
-        if finished is None or finished >= cutoff
+        if finished is not None and finished >= cutoff
     }
 
 
