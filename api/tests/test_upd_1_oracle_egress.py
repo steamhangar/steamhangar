@@ -32,7 +32,7 @@ from vault_api.config import Settings
 DEFAULT_HOST_PATTERN = r"^api\.steamcmd\.net$"
 #: The hosts vault-proxy always allows: the relay/cover-lookup host and, since
 #: WP D10 COVER-CACHE-1, Steam's two cover image hosts.
-BAKED_COUNT = 3
+BAKED_COUNT = 4  # + store.steampowered.com (WP D19-1c)
 
 
 def from_env(

@@ -24,6 +24,7 @@ from vault_api.config import Settings
 from vault_api.cover_art import CoverArtRefresher
 from vault_api.cover_cache import CoverFileFetcher
 from vault_api.depot_preview import DepotPreviewService
+from vault_api.store_details import StoreDetailsService
 from vault_api.db import get_connection, init_db
 from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
@@ -51,6 +52,7 @@ from vault_api.routers import (
     settings as settings_router,
     stats,
     steam,
+    store_details as store_details_router,
     traffic as traffic_router,
     updates,
 )
@@ -375,6 +377,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # WP D19-1a: the on-open oracle query service (no thread until a card is
     # opened with VAULT_DEPOT_PREVIEW and the oracle both on).
     app.state.depot_preview = DepotPreviewService()
+    # WP D19-1c: same pattern for the store-details lookup (own switch).
+    app.state.store_details = StoreDetailsService()
     # WP 4a.6r: same reasoning as size_cache above -- constructed
     # unconditionally (cheap, no thread, no I/O) so it exists for a plain
     # TestClient() too, and populated lazily on the first relay call.
@@ -435,6 +439,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # tell "this vault-api is too old to have an oracle" from "this operator
     # chose not to enable it" — which are different things to show a user.
     app.include_router(oracle.router)
+    # WP D19-1c: store details for the card (own switch, off by default).
+    app.include_router(store_details_router.router)
     # WP UPD-1: bulk update check (oracle refresh for cached games, no download).
     app.include_router(updates.router)
     # WP 4a.6r. Always mounted, even with no key configured: the relay routes

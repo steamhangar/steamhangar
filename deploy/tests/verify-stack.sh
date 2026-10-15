@@ -2149,6 +2149,7 @@ assert_contains "$live_filter" '^api\.steampowered\.com$' "precondition: the liv
 assert_contains "$live_filter" '^shared\.akamai\.steamstatic\.com$' "WP D10: the live proxy filter allows shared.akamai.steamstatic.com with no VAULT_EGRESS_ALLOW entry"
 assert_contains "$live_filter" '^cdn\.akamai\.steamstatic\.com$' "WP D10: the live proxy filter allows cdn.akamai.steamstatic.com with no VAULT_EGRESS_ALLOW entry"
 steamstatic_lines=$(printf '%s\n' "$live_filter" | grep -c '^\^.*steamstatic' || true)
+assert_contains "$live_filter" '^store\.steampowered\.com$' "WP D19-1c: the live proxy filter allows store.steampowered.com with no VAULT_EGRESS_ALLOW entry (traffic stays off without VAULT_STORE_DETAILS)"
 assert_eq "2" "$steamstatic_lines" "WP D10: exactly two steamstatic patterns in the live filter (no wildcard, no third host)"
 assert_not_contains "$live_filter" 'steamcmd' "this stack runs with VAULT_MANIFEST_ORACLE=off (section 4), so the live proxy does NOT allow api.steamcmd.net"
 # A second render of the REAL entrypoint inside the running proxy container,
