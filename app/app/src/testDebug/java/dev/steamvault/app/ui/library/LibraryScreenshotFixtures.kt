@@ -6,6 +6,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.OwnedGame
@@ -183,6 +184,7 @@ internal class FixedJobsRepository(private val jobs: List<JobSummary>) : JobsRep
     override suspend fun cancel(id: Int): JobControlOut = notUsed()
     override suspend fun pause(id: Int): JobControlOut = notUsed()
     override suspend fun resume(id: Int): JobControlOut = notUsed()
+    override suspend fun moveJob(id: Int, position: Int): JobMoveOut = notUsed()
 }
 
 internal class EmptyMappingRepository : MappingRepository {

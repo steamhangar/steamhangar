@@ -63,6 +63,7 @@ import dev.steamvault.app.ui.downloads.logic.ExcerptState
 import dev.steamvault.app.ui.downloads.logic.HistoryRowModel
 import dev.steamvault.app.ui.downloads.logic.JobCardModel
 import dev.steamvault.app.ui.downloads.logic.PartitionedJobs
+import dev.steamvault.app.ui.downloads.logic.QueueMove
 import dev.steamvault.app.ui.downloads.logic.QueueRowModel
 import dev.steamvault.app.ui.downloads.logic.buildHistoryRowModel
 import dev.steamvault.app.ui.downloads.logic.buildJobCardModel
@@ -368,7 +369,10 @@ private fun DownloadsBody(
             items(queueModels, key = { "queue-${it.jobId}" }) { model ->
                 QueueRow(
                     model = model,
+                    total = queueModels.size,
                     busy = model.jobId in controller.busyJobIds,
+                    moveBusy = controller.moveInFlight,
+                    onMove = { move -> controller.moveQueued(scope, model.jobId, move) },
                     onRemove = { controller.cancel(scope, model.jobId) },
                 )
             }
@@ -546,14 +550,45 @@ private fun StopNote(text: String) {
     )
 }
 
+/**
+ * WP D20: a queue row with accessible move-up / move-down buttons (the app's
+ * counterpart of web's drag handle). The first row cannot go up, the last
+ * cannot go down, and a single queued job shows no move buttons; every move
+ * button is disabled while one move request is in flight.
+ */
 @Composable
-private fun QueueRow(model: QueueRowModel, busy: Boolean, onRemove: () -> Unit) {
+private fun QueueRow(
+    model: QueueRowModel,
+    total: Int,
+    busy: Boolean,
+    moveBusy: Boolean,
+    onMove: (QueueMove) -> Unit,
+    onRemove: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("#${model.position}  ${model.name}", style = MaterialTheme.typography.bodyMedium)
+        Text(
+            "#${model.position}  ${model.name}",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        if (total > 1) {
+            val upLabel = stringResource(R.string.downloads_queue_move_up, model.name, model.position, total)
+            val downLabel = stringResource(R.string.downloads_queue_move_down, model.name, model.position, total)
+            IconButton(
+                onClick = { onMove(QueueMove.UP) },
+                enabled = !moveBusy && model.position > 1,
+                modifier = Modifier.semantics { contentDescription = upLabel },
+            ) { Text("▲") }
+            IconButton(
+                onClick = { onMove(QueueMove.DOWN) },
+                enabled = !moveBusy && model.position < total,
+                modifier = Modifier.semantics { contentDescription = downLabel },
+            ) { Text("▼") }
+        }
         OutlinedButton(onClick = onRemove, enabled = !busy) {
             Text(stringResource(R.string.downloads_action_remove))
         }

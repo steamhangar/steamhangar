@@ -55,8 +55,9 @@ import dev.steamvault.app.ui.library.logic.liveRunKind
 data class PartitionedJobs(
     val running: List<JobSummary>,
     val paused: List<JobSummary>,
-    /** FIFO draw order (oldest job id first, api/README.md "Queue
-     * semantics"), independent of the snapshot's own order. */
+    /** Queue draw order ([QUEUE_ORDER]: the server's `queue_position`, else
+     * oldest job id first -- api/README.md "Queue order"), independent of the
+     * snapshot's own order. */
     val queued: List<JobSummary>,
     /** Keeps the snapshot's own order (`GET /v1/jobs` is newest-first per
      * api/README.md, so a job's most recent occurrence is already first). */
@@ -80,7 +81,7 @@ private val KNOWN_STATUSES = setOf("queued", "running", "paused", "done", "error
 fun partitionJobs(jobs: List<JobSummary>): PartitionedJobs {
     val running = jobs.filter { it.status == "running" }
     val paused = jobs.filter { it.status == "paused" }
-    val queued = jobs.filter { it.status == "queued" }.sortedBy { it.id }
+    val queued = jobs.filter { it.status == "queued" }.sortedWith(QUEUE_ORDER)
     // Improvement over the web port (see module kdoc): an unrecognized
     // status lands in history too, instead of matching no filter at all.
     val history = jobs.filter { it.status in HISTORY_STATUSES || it.status !in KNOWN_STATUSES }

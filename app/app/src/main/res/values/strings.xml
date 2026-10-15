@@ -451,12 +451,18 @@
          "held" mode note — same words on both frontends, on purpose. -->
     <string name="downloads_paused_hold_note">Paused — this does not hold the worker slot. vault-api released it immediately, so another queued job may already be running. Resume puts this job back at the front of the queue.</string>
 
-    <!-- Queue hint, verbatim port of web/js/views/downloads.js::fullRender's
-         els.queueHint text (base sentence + a conditional second sentence
-         when a paused job exists — the app composes the two with a single
-         space, see DownloadsScreen.kt). -->
-    <string name="downloads_queue_hint_base">vault-api runs one job at a time, oldest first. Drag-to-reorder is not built yet — the queue is FIFO.</string>
-    <string name="downloads_queue_hint_paused_suffix">A paused job does not hold this queue back — it keeps draining oldest-first.</string>
+    <!-- Queue hint (WP D20), twin of web/js/views/downloads.js::fullRender's
+         els.queueHint text: the base sentence differs on purpose (web drags a
+         row by its handle, the app has move buttons); the conditional second
+         sentence about a paused job is verbatim. The app composes the two
+         with a single space, see DownloadsScreen.kt. -->
+    <string name="downloads_queue_hint_base">vault-api runs one job at a time, top of the list first. Use the up and down buttons on a row to change the order.</string>
+    <string name="downloads_queue_hint_paused_suffix">A paused job does not hold this queue back — the queue keeps draining.</string>
+
+    <!-- WP D20: spoken labels of a queue row's move buttons (%1$s name,
+         %2$d current position, %3$d queue length). -->
+    <string name="downloads_queue_move_up">Move %1$s up, currently position %2$d of %3$d</string>
+    <string name="downloads_queue_move_down">Move %1$s down, currently position %2$d of %3$d</string>
 
     <string name="downloads_job_subtitle">job #%1$d · appid %2$d</string>
     <string name="downloads_history_subtitle">job #%1$d · %2$s · %3$s</string>

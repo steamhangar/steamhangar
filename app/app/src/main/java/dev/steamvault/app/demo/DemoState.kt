@@ -20,6 +20,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
+import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.PrefillJobRef
@@ -200,7 +201,7 @@ class DemoState private constructor(
     @Synchronized
     fun listJobSummaries(limit: Int): List<JobSummary> {
         tick()
-        return jobs.sortedByDescending { it.id }.take(limit).map { it.toSummary() }
+        return jobs.sortedByDescending { it.id }.take(limit).map { it.toSummary(queuePosition(it)) }
     }
 
     @Synchronized
@@ -208,7 +209,37 @@ class DemoState private constructor(
         tick()
         val job = jobs.find { it.id == id }
             ?: throw VaultApiError.NotFound("no such job in the demo library", 404, "job $id not found")
-        return job.toDetail()
+        return job.toDetail(queuePosition(job))
+    }
+
+    /**
+     * Queued jobs in run order (D20, twin of web demo `_demoOrder`): jobs the
+     * user moved first by their order stamp, the rest behind them by id.
+     */
+    private fun queuedInOrder(): List<DemoJob> =
+        jobs.filter { it.status == STATUS_QUEUED }
+            .sortedWith(compareBy<DemoJob> { it.queueOrder ?: Int.MAX_VALUE }.thenBy { it.id })
+
+    /** 0-based place in the queue; `null` unless the job is queued. */
+    private fun queuePosition(job: DemoJob): Int? =
+        if (job.status != STATUS_QUEUED) null else queuedInOrder().indexOf(job).takeIf { it >= 0 }
+
+    /** `POST /v1/jobs/{id}/move` in demo mode (same errors as the real API). */
+    @Synchronized
+    fun moveJob(id: Int, position: Int): JobMoveOut {
+        val job = jobs.find { it.id == id }
+            ?: throw VaultApiError.NotFound("no such job in the demo library", 404, "job $id not found")
+        if (position < 0) {
+            throw VaultApiError.Validation("invalid position", 422, "position must be an integer >= 0")
+        }
+        if (job.status != STATUS_QUEUED) {
+            throw VaultApiError.Validation("job is not queued", 409, "Job $id is ${job.status}, only a queued job can be moved")
+        }
+        val ids = queuedInOrder().map { it.id }.toMutableList()
+        ids.remove(id)
+        ids.add(position.coerceIn(0, ids.size), id)
+        ids.forEachIndexed { i, jid -> jobs.find { it.id == jid }?.queueOrder = i }
+        return JobMoveOut(job_id = id, status = STATUS_QUEUED, outcome = "immediate", detail = "Moved.", queue_position = ids.indexOf(id))
     }
 
     @Synchronized
@@ -589,7 +620,7 @@ class DemoState private constructor(
      * screen, the same way it treats a server that ignores `range`. */
     @Synchronized
     fun jobHistory(limit: Int): List<JobSummary> =
-        jobs.sortedByDescending { it.id }.take(limit).map { it.toSummary() }
+        jobs.sortedByDescending { it.id }.take(limit).map { it.toSummary(queuePosition(it)) }
 
     // ---- about (WP APP-FEAT-2) ------------------------------------------------
 
@@ -761,11 +792,12 @@ class DemoState private constructor(
     companion object {
         internal const val STATUS_DONE = "done"
         internal const val STATUS_IDLE = "idle"
+        internal const val STATUS_QUEUED = "queued"
         internal const val STATUS_RUNNING = "running"
         internal const val STATUS_ERROR = "error"
         internal const val STATUS_PAUSED = "paused"
         internal const val STATUS_CANCELLED = "cancelled"
-        private val ACTIVE_JOB_STATUSES = setOf(STATUS_RUNNING, STATUS_PAUSED, "queued")
+        private val ACTIVE_JOB_STATUSES = setOf(STATUS_RUNNING, STATUS_PAUSED, STATUS_QUEUED)
 
         /** The server's package types (api/README.md "Grouped delete"). */
         private val DEMO_PACKAGE_TYPES = setOf("dlc", "config", "music", "video", "demo")

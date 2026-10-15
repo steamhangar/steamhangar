@@ -37,6 +37,9 @@ data class JobSummary(
     val gc_execute: Boolean? = null,
     val paused_at: String? = null,
     val stop_request: String? = null,
+    /** WP D20: 0-based place among the QUEUED jobs (0 = runs next); null
+     * unless the job is queued and for an older API that sends none. */
+    val queue_position: Int? = null,
 )
 
 /**
@@ -62,6 +65,7 @@ data class JobDetail(
     val gc_execute: Boolean? = null,
     val paused_at: String? = null,
     val stop_request: String? = null,
+    val queue_position: Int? = null,
     val log_excerpt: String? = null,
 )
 
@@ -77,4 +81,23 @@ data class JobControlOut(
     val status: String,
     val outcome: String,
     val detail: String,
+)
+
+/** Body of `POST /v1/jobs/{id}/move` (WP D20): `position` counts queued jobs only. */
+@Serializable
+data class MoveJobRequest(
+    val position: Int,
+)
+
+/**
+ * Response of `POST /v1/jobs/{id}/move` (WP D20): the [JobControlOut] shape
+ * plus `queue_position`, the place the server gave the job.
+ */
+@Serializable
+data class JobMoveOut(
+    val job_id: Int,
+    val status: String,
+    val outcome: String,
+    val detail: String,
+    val queue_position: Int? = null,
 )

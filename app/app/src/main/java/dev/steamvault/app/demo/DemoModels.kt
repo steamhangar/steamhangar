@@ -122,8 +122,10 @@ internal class DemoJob(
     var pausedAt: String? = null,
     var logExcerpt: String? = null,
     var ticksLeft: Int,
+    /** Demo-only: set on a job the user moved (D20); see DemoState.queuedInOrder. */
+    var queueOrder: Int? = null,
 ) {
-    fun toSummary(): JobSummary = JobSummary(
+    fun toSummary(queuePosition: Int? = null): JobSummary = JobSummary(
         id = id,
         appid = appid,
         type = type,
@@ -137,9 +139,10 @@ internal class DemoJob(
         gc_execute = gcExecute,
         paused_at = pausedAt,
         stop_request = null,
+        queue_position = queuePosition,
     )
 
-    fun toDetail(): JobDetail = JobDetail(
+    fun toDetail(queuePosition: Int? = null): JobDetail = JobDetail(
         id = id,
         appid = appid,
         type = type,
@@ -154,5 +157,6 @@ internal class DemoJob(
         paused_at = pausedAt,
         stop_request = null,
         log_excerpt = logExcerpt,
+        queue_position = queuePosition,
     )
 }
