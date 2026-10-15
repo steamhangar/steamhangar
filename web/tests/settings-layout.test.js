@@ -162,3 +162,16 @@ test("open state and expert switch: guarded storage (throwing getter, bad JSON, 
   assert.equal(isSectionOpen({}, "expert"), false);
   assert.equal(isSectionOpen({ vault: false }, "vault"), false);
 });
+
+test("coreApplyLine: pending wins, rejected warns with the reason, applied, none, unknown -> no claim", async () => {
+  const { coreApplyLine } = await import("../js/lib/settings-layout.js");
+  assert.equal(coreApplyLine(null), null);
+  assert.deepEqual(coreApplyLine({ state: "applied", pending: true }), { text: "vault-core: a change is waiting to be applied.", warn: false });
+  assert.deepEqual(coreApplyLine({ state: "rejected", reason: "cap below threads", pending: false }), {
+    text: "vault-core rejected the last settings change: cap below threads It keeps running with the settings it had.",
+    warn: true,
+  });
+  assert.equal(coreApplyLine({ state: "applied", pending: false }).text, "vault-core: settings applied.");
+  assert.match(coreApplyLine({ state: "none", pending: false }).text, /has not seen a settings file/);
+  assert.equal(coreApplyLine({ state: "weird", pending: false }), null);
+});

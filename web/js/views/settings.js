@@ -72,6 +72,7 @@ import {
 } from "../lib/settings-presentation.js";
 import {
   EXPERT_GROUPS,
+  coreApplyLine,
   SECTIONS,
   describeSaveError,
   displayValue,
@@ -714,6 +715,13 @@ function buildExpertArea(groups) {
     keys: all.map((e) => e.key),
   });
   details.hidden = !expertOn;
+  // D16c: what vault-core reported about the core settings (state only).
+  const apply = coreApplyLine(state.settingsResponse.core_apply);
+  if (apply) {
+    const line = el("p", apply.warn ? "settings-warn" : "foot-note", apply.text);
+    line.dataset.role = "core-apply";
+    body.appendChild(line);
+  }
   for (const group of EXPERT_GROUPS) {
     const rows = groups[group.id];
     if (rows.length === 0) continue;

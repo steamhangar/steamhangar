@@ -3922,3 +3922,11 @@ core-file-disabled note; Escape = Cancel, initial focus on Cancel; a 428
 after confirming says the server still asked; section titles are `h2`
 inside the summary; `settings-diff.test.js` (+1) pins blank/`OFF` over
 `off` as no change and blank over a window as `""`.
+
+Integration with D16c: demo `/v1/settings` carries `core_apply` (applied,
+not pending, one generation per write), pinned against `CoreApplyOut` in
+`demo-data-shape-guard.test.js` (+1; `modelFields` now drops docstrings,
+a wrapped docstring line read as a field). The Expert section shows
+vault-core's apply state (`coreApplyLine`: pending / rejected with reason
+/ applied / none; no line before vault-core reported), pinned in
+`settings-sections-wiring.test.js` (+1) and `settings-layout.test.js` (+1).

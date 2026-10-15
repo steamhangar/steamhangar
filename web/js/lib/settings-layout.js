@@ -489,6 +489,30 @@ export function describeSaveError(err, { confirmed = false } = {}) {
   return `Could not save: ${detail || (err && err.message) || "Request failed."}`;
 }
 
+/**
+ * vault-core's apply state for the core settings (D16c `core_apply`), as
+ * one line for the Expert section, or null when vault-core has not
+ * reported yet. State only: what vault-core said, never a guess.
+ * @returns {{text: string, warn: boolean} | null}
+ */
+export function coreApplyLine(coreApply) {
+  if (!coreApply || typeof coreApply !== "object") return null;
+  if (coreApply.pending === true) {
+    return { text: "vault-core: a change is waiting to be applied.", warn: false };
+  }
+  if (coreApply.state === "rejected") {
+    const why = coreApply.reason ? `: ${coreApply.reason}` : ".";
+    return { text: `vault-core rejected the last settings change${why} It keeps running with the settings it had.`, warn: true };
+  }
+  if (coreApply.state === "applied") {
+    return { text: "vault-core: settings applied.", warn: false };
+  }
+  if (coreApply.state === "none") {
+    return { text: "vault-core has not seen a settings file yet; it runs on its environment and defaults.", warn: false };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------
 // Remembered open state (guarded storage, LEARNINGS WEB-FIX-5)
 // ---------------------------------------------------------------------

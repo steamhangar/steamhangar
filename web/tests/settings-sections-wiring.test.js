@@ -97,9 +97,9 @@ function rows(over = {}) {
   return base.map((r) => (over[r.key] ? { ...r, ...over[r.key] } : r));
 }
 
-const server = { over: {}, patches: [], patchUrls: [], patchAnswer: null, serverRisky: [] };
+const server = { over: {}, patches: [], patchUrls: [], patchAnswer: null, serverRisky: [], coreApply: null };
 function settingsBody() {
-  return { readonly: false, server_version: "0.0.0-test", settings: rows(server.over) };
+  return { readonly: false, server_version: "0.0.0-test", settings: rows(server.over), core_apply: server.coreApply };
 }
 function respond(status, data) {
   const text = JSON.stringify(data);
@@ -167,6 +167,7 @@ beforeEach(() => {
   server.patchUrls = [];
   server.patchAnswer = null;
   server.serverRisky = [];
+  server.coreApply = null;
   if (isRiskyConfirmOpen()) click(q(dialog(), "risky-cancel"));
   resetModalStack(dom.document);
 });
@@ -444,4 +445,18 @@ test("section titles are headings (h2 inside the summary)", async () => {
   const s = await mount();
   assert.equal(s.querySelectorAll("summary h2.sec-title").length, sectionTitles(s).length);
   assert.ok(sectionTitles(s).length >= 6);
+});
+
+test("MUTATION TARGET: the Expert section shows vault-core's apply state (D16c core_apply); none before vault-core reported", async () => {
+  storage.set("steamvault.settingsExpert", "1");
+  let s = await mount();
+  assert.equal(q(section(s, "expert"), "core-apply") === null, true, "core_apply null -> no line");
+  server.coreApply = { state: "rejected", generation: 3, applied_generation: 2, reason: "upstream cap below prefill threads", updated_at: "2026-10-15T10:00:00Z", written_generation: 3, pending: false };
+  s = await mount();
+  const line = q(section(s, "expert"), "core-apply");
+  assert.equal(line.textContent, "vault-core rejected the last settings change: upstream cap below prefill threads It keeps running with the settings it had.");
+  assert.equal(line.className, "settings-warn");
+  server.coreApply = { ...server.coreApply, state: "applied", generation: 3, applied_generation: 3, reason: "", written_generation: 4, pending: true };
+  s = await mount();
+  assert.equal(q(section(s, "expert"), "core-apply").textContent, "vault-core: a change is waiting to be applied.");
 });

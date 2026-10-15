@@ -46,7 +46,10 @@ const agentReportsSrc = readFileSync(path.join(apiDir, "agent_reports.py"), "utf
 function modelFields(src, name) {
   const m = new RegExp(`class ${name}\\(BaseModel\\):([\\s\\S]*?)(?=\\n\\S)`).exec(src);
   assert.ok(m, `class ${name}(BaseModel) not found — VALUE drift (it moved or was renamed): re-point this guard`);
-  const fields = [...m[1].matchAll(/^ {4}([a-z_][a-z0-9_]*)\s*:\s*\S/gm)].map((x) => x[1]);
+  // Docstrings are dropped first: a wrapped docstring line can read like
+  // `ident: text` (CoreApplyOut's "greater: the generation ...", D16c).
+  const body = m[1].replace(/"""[\s\S]*?"""/g, "");
+  const fields = [...body.matchAll(/^ {4}([a-z_][a-z0-9_]*)\s*:\s*\S/gm)].map((x) => x[1]);
   assert.ok(
     fields.length > 0,
     `no fields read from ${name} — GRAMMAR drift (the field syntax changed): widen modelFields, do not touch demo-data.js`,
@@ -281,4 +284,17 @@ test("the demo's env-only rows equal ENV_ONLY_INFO_KEYS (webhook_url included, m
   const url = out.settings.find((r) => r.key === "webhook_url");
   assert.match(url.effective, /^https:\/\/[^/@]+\/\*\*\*$/, "masked like settings_store.mask_url");
   assert.equal(url.editable, false);
+});
+
+test("MUTATION TARGET: demo core_apply has EXACTLY CoreApplyOut's keys, applied and not pending (D16c)", async () => {
+  const out = await demoRequest("GET", "/v1/settings");
+  const fields = modelFields(settingsRouterSrc, "CoreApplyOut");
+  assert.deepEqual(sortedKeys(out.core_apply), [...fields].sort(), driftMessage("demo core_apply", "CoreApplyOut", fields, "update demoCoreApply in demo-data.js"));
+  assert.equal(out.core_apply.state, "applied");
+  assert.equal(out.core_apply.pending, false);
+  assert.match(settingsStoreSrc + readFileSync(path.join(apiDir, "core_settings.py"), "utf8"), /STATUS_STATES = frozenset\(\{[^}]*"applied"/, "VALUE drift: 'applied' is no longer a core status state");
+  const before = out.core_apply.generation;
+  const after = await demoRequest("PATCH", "/v1/settings", { body: { bypass_window_days: "4" } });
+  assert.equal(after.core_apply.generation, before + 1, "each write is a new generation");
+  assert.equal(after.core_apply.applied_generation, after.core_apply.generation);
 });

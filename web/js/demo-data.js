@@ -1332,6 +1332,8 @@ const settingsReadonly = false; // demo mode never ships VAULT_SETTINGS_READONLY
 
 function resetDemoSettings() {
   settingsOverrides = freshDemoOverrides();
+  demoCoreGeneration = 1;
+  demoCoreAppliedAt = DEMO_CORE_APPLIED_AT;
 }
 
 function demoEnvPinned(spec) {
@@ -1450,8 +1452,32 @@ function coercePatchValue(key, value) {
 // key" rejection in spirit: this fixture simply never accepts writes to it).
 const DEMO_SERVER_VERSION = "0.1.0";
 
+// D16c `core_apply`: the demo's vault-core applies every core settings
+// write at once (applied, never pending); the generation counts the writes
+// like vault-api's settings file does.
+let demoCoreGeneration = 1;
+const DEMO_CORE_APPLIED_AT = isoAgo(3 * 3_600_000);
+let demoCoreAppliedAt = DEMO_CORE_APPLIED_AT;
+
+function demoCoreApply() {
+  return {
+    state: "applied",
+    generation: demoCoreGeneration,
+    applied_generation: demoCoreGeneration,
+    reason: "",
+    updated_at: demoCoreAppliedAt,
+    written_generation: demoCoreGeneration,
+    pending: false,
+  };
+}
+
 function handleGetSettings() {
-  return { readonly: settingsReadonly, server_version: DEMO_SERVER_VERSION, settings: describeDemoSettings() };
+  return {
+    readonly: settingsReadonly,
+    server_version: DEMO_SERVER_VERSION,
+    settings: describeDemoSettings(),
+    core_apply: demoCoreApply(),
+  };
 }
 
 const DEMO_RISKY_DETAIL =
@@ -1534,6 +1560,10 @@ function handlePatchSettings(body, params) {
   // Everything validated above before anything is written (ADR-0009: a bad
   // value in a multi-key PATCH must persist nothing).
   settingsOverrides = prospective;
+  // vault-api rewrites the core file after every PATCH; the demo core
+  // applies it at once.
+  demoCoreGeneration += 1;
+  demoCoreAppliedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   return handleGetSettings();
 }
 
