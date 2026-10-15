@@ -804,6 +804,14 @@ verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
 saves id), D7 measurement on `:443` (TLS cap TODO in WORKPACKAGES),
 failed jobs Subnautica/Timberborn (measure live on the next run).
 
+**UI polish (Jan, 2026-10-15; later, not scheduled yet):** (1) Clients page
+and the "Add a device" sheet look busy: the same "Anyone who sees this can
+control your hangar" warning repeats in four sections, many equally weighted
+buttons, no clear hierarchy. Verify with static HTML mockups (2 variants,
+real theme.css, demo data) BEFORE implementing. (2) After 0.1.0 closes: one
+full UI pass over spacing and the features added since rc10, so they read as
+one design.
+
 **After v0.1.0:** D8 (incl. rate window in Settings, may fold into D16),
 D1, D3 (incl. device/account note per game), D2, D4, D5, D6.
 
