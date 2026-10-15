@@ -1086,3 +1086,34 @@ These are not style preferences; each entry cost a review round to learn.
   front and make every step idempotent without trusting the stamp
   (CREATE TABLE IF NOT EXISTS, per-column guards); version pins in tests
   use `>=`.
+
+## 2026-10-14/15 — rc18 night run (UPD-FIX-1, D16a-c, DIST-1a/b)
+
+- "Blank vs unset" cannot be told apart once compose forwards `${VAR-}`.
+  When a blank value means something (scheduler off, legacy edge), give the
+  grammar an explicit keyword (`off`) and teach EVERY parser of that key
+  the keyword in the same package — api twins AND the core shell hooks.
+  A keyword the docs recommend but core refuses crashes vault-core
+  (D16b-1 review B1).
+- Changing what a blank value means also changes it for shipped clients
+  that send blank on purpose (rc17 app, older web). Keep the old wire
+  meaning in the API (blank PATCH = `off`, null = reset) even when env
+  semantics change (D16b-1 B2).
+- A setting the API accepts but nothing applies is worse than a read-only
+  one: phantom values also feed cross-rules (threads vs connection cap)
+  and break real jobs. Lock keys whose apply path is disabled (D16b-1 B3).
+- Values from a server index that land in generated shell or PowerShell
+  commands need the same grammar check the server uses, even in comment
+  lines: a newline ends the comment (DIST-1b B1).
+- A filter added "to be safe" can hide real signals when its input is
+  lossy: depot_app_map is rewritten after partial updates, so filtering
+  the stale verdict by it hid real updates (UPD-FIX-1 B1, MAP-DRIFT-1).
+- Publishing a thread before `start()` lets a concurrent `join()` raise
+  "cannot join thread before it is started"; start first, publish under a
+  lock (UPD-FIX-1 S1, the long-standing test_upd flake).
+- Reviewer mutation scripts must `set -e` and assert the scratch path
+  before mutating; a failed `cd` once applied mutations to a real
+  worktree (DIST-1a review).
+- `nginx -s reload` returns 0 even when the new config is refused; gate on
+  `nginx -t -p <prefix> -c <staged>` and confirm the new config is live
+  (unique header) before reporting "applied" (D16c).
