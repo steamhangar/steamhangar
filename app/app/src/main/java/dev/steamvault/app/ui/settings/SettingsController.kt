@@ -154,7 +154,9 @@ class SettingsController(
         return result
     }
 
-    fun isSectionOpen(id: String): Boolean = openOverrides[id] ?: (id in SettingsLayout.DEFAULT_OPEN)
+    /** Expert groups show open once the switch is on (like the web); the user can still collapse them. */
+    fun isSectionOpen(id: String): Boolean =
+        openOverrides[id] ?: (id in SettingsLayout.DEFAULT_OPEN || id.startsWith("expert_"))
 
     fun setSectionOpen(id: String, open: Boolean) {
         openOverrides = openOverrides + (id to open)

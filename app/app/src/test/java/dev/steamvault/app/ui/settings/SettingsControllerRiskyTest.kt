@@ -149,6 +149,8 @@ class SettingsControllerRiskyTest {
         val first = controller(RiskyRepo(DemoSettingsRepository(demo)), demo, prefs)
         assertTrue("the vault section is open by default", first.isSectionOpen("vault"))
         assertFalse(first.expertOn)
+        assertTrue("expert groups are open by default", first.isSectionOpen("expert_bandwidth"))
+        assertFalse("other sections are closed by default", first.isSectionOpen("disk"))
         first.setSectionOpen("vault", false)
         first.setExpert(true)
         val second = controller(RiskyRepo(DemoSettingsRepository(demo)), demo, prefs)

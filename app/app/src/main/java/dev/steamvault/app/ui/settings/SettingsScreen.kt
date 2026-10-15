@@ -293,7 +293,8 @@ private fun SettingsForm(controller: SettingsController) {
         val rows = placed.sections[section.id].orEmpty()
         if (rows.isNotEmpty()) blocks.add(SettingsBlock(section.id, section.title, rows))
     }
-    blocks.add(SettingsBlock("expert", "Expert settings", emptyList()))
+    // The switch is its own always-visible row, outside any collapsible block.
+    blocks.add(SettingsBlock(EXPERT_SWITCH_ID, "", emptyList()))
     if (controller.expertOn) {
         for (group in SettingsLayout.EXPERT_GROUPS) {
             val rows = placed.expert[group.id].orEmpty()
@@ -302,12 +303,13 @@ private fun SettingsForm(controller: SettingsController) {
     }
 
     for (block in blocks) {
+        if (block.id == EXPERT_SWITCH_ID) {
+            ExpertSwitchRow(controller.expertOn) { on -> controller.setExpert(on) }
+            continue
+        }
         val open = controller.isSectionOpen(block.id)
         SettingsSectionHeader(block.title, open) { controller.setSectionOpen(block.id, !open) }
         if (!open) continue
-        if (block.id == "expert") {
-            ExpertSwitchRow(controller.expertOn) { on -> controller.setExpert(on) }
-        }
         for (entry in block.rows) {
             if (SettingsLayout.isPinned(entry)) {
                 PinnedSettingRow(entry)
@@ -370,6 +372,8 @@ private fun captionFor(entry: SettingInfoOut): String {
 }
 
 /** One collapsible block of the form: a section or an expert group. */
+private const val EXPERT_SWITCH_ID = "expert_switch"
+
 private data class SettingsBlock(val id: String, val title: String, val rows: List<SettingInfoOut>)
 
 @Composable

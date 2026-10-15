@@ -281,7 +281,6 @@
     <string name="settings_section_steam">Steam identity</string>
     <string name="settings_section_notifications">Notifications</string>
 
-
     <string name="settings_auto_gc_label">Auto-GC after a prefill</string>
     <string name="settings_auto_gc_off">Off</string>
     <string name="settings_auto_gc_dry_run">Dry run</string>

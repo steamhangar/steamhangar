@@ -135,6 +135,9 @@ class SettingsLayoutTest {
         assertEquals("800k, 2m or off", SettingsLayout.placeholder("upstream_rate"))
         assertNull(SettingsLayout.placeholder("manifest_keep"))
         assertEquals("Type off to turn this off.", SettingsLayout.offHint("schedule_window"))
+        assertEquals("Type off to turn this off.", SettingsLayout.offHint("upstream_rate"))
         assertNull(SettingsLayout.offHint("vault_name"))
+        assertNull(SettingsLayout.offHint("manifest_keep"))
+        assertNull(SettingsLayout.offHint("webhook_events"))
     }
 }
