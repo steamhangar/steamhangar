@@ -82,10 +82,27 @@ run takes unless Jan says otherwise:
   Two schema bumps in one release: the Antrag states both and the rollback
   note (SQLite dump) once.
 
+## Jan's answers on the card block (2026-10-15, final)
+
+- **D23 LIBRARY-META-1 is IN rc19, complete (1a-1c):** table, migration,
+  nightly oracle job, filter/sort parameters, web chips and sort. Third
+  schema bump in the release: the Antrag lists all three (GRAPH-ZOOM, D20,
+  D23) and the rollback note once. Order of migrations: GRAPH-ZOOM, D20, D23.
+  D23-1d (optional store night fill) stays out unless D19-1c has passed.
+- **Shipped defaults all off:** `VAULT_STORE_DETAILS` default off, no new
+  external traffic by default. The deploy Antrag proposes, for Jan's own
+  prod instance, the values that enable store details, last played and
+  names (his decision to apply; D21 findings are attached to the Antrag).
+- **Recent reviews = option A** (overall rating only), confirmed.
+- **All or nothing:** no tag `v0.1.0-rc19` before the card block, D23 and
+  the Android parts have passed. If the limit runs out, stop cleanly after
+  the last passed package, write the handover with the open list, and do
+  NOT tag.
+
 ## Waves (max 3 agents at once, resume instead of respawn)
 
 1. **Fixes and trust:** NOT-OWNED-1, METRIC-AUDIT, TILE-INTERNET, GRAPH-ZOOM.
-2. **Data and handling:** ID-AUDIT, LIB-SORT (web + app), MAP-DRIFT-1.
+2. **Data and handling:** ID-AUDIT, LIB-SORT (web + app), MAP-DRIFT-1, D23 (api first, web after).
 3. **Android and rest:** D16 Android UI, rc18 follow-ups (watcher retry test,
    log once per failure streak, VS_WATCH_FUNCTIONS_ONLY line, conftest
    `http_fetch` guard, webhook boot witness test, demo `core_apply`).
