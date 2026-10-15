@@ -827,6 +827,20 @@ failed jobs Subnautica/Timberborn (measure live on the next run).
   counter-test only via `dev.sh prod rate` with Jan's yes per step. Result
   as an inbox note.
 
+- ID-AUDIT (Jan, 2026-10-15): find out why Steam IDs still show where a
+  game name belongs: Clients page "Loaded recently: App 1465470 / App
+  3419430", Downloads job card "job #111 · appid 1962700". Reading the code:
+  the UI falls back to `App <id>` whenever the `apps` table has no name for
+  the id (api/vault_api/traffic.py `app_names`; web: clients-page.js:95,
+  library.js:222/867/994, game-status.js:218, owned-library.js:165,
+  depot-presentation.js:76). Hypotheses: apps seen only in cache traffic
+  (not in the synced library, or tool/runtime apps like 3419430) never get a
+  name; the name lookup (oracle/relay) is not run for traffic-only ids.
+  Audit: list which ids on prod lack a name and why, then resolve names for
+  traffic-seen ids (metadata-only lookup, same oracle rules) and decide
+  whether the technical "appid" on job cards stays (it is a deliberate
+  detail line).
+
 **UI polish (Jan, 2026-10-15; later, not scheduled yet):** (1) Clients page
 and the "Add a device" sheet look busy: the same "Anyone who sees this can
 control your hangar" warning repeats in four sections, many equally weighted
