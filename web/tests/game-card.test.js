@@ -27,12 +27,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { displayName } from "../js/components/game-card.js";
 
-test("displayName: null name falls back to 'App {appid}'", () => {
-  assert.equal(displayName({ name: null, appid: 440 }), "App 440");
+test("displayName: null name falls back to 'Unknown app'", () => {
+  assert.equal(displayName({ name: null, appid: 440 }), "Unknown app");
 });
 
-test("displayName: whitespace-only name falls back to 'App {appid}' (not the blank string)", () => {
-  assert.equal(displayName({ name: "   ", appid: 440 }), "App 440");
+test("displayName: whitespace-only name falls back to 'Unknown app' (not the blank string)", () => {
+  assert.equal(displayName({ name: "   ", appid: 440 }), "Unknown app");
 });
 
 test("displayName: a real name is used verbatim, trimmed", () => {
@@ -41,5 +41,5 @@ test("displayName: a real name is used verbatim, trimmed", () => {
 });
 
 test("displayName: undefined name (field absent entirely) also falls back", () => {
-  assert.equal(displayName({ appid: 7 }), "App 7");
+  assert.equal(displayName({ appid: 7 }), "Unknown app");
 });

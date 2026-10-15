@@ -100,6 +100,7 @@
 
 import { store } from "../store-singleton.js";
 import { api } from "../api.js";
+import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
 import { showToast } from "./toast.js";
 import { createStatusIcon, STATUS_LABEL } from "./status-icon.js";
 import { createSheetDialog } from "./sheet-dialog.js";
@@ -363,7 +364,7 @@ function closeDeleteConfirm() {
 function renderDeletePlan(plan, gamesByAppid) {
   const freedText = formatBytesGB(plan.freedBytes) || "0 GB";
   const occupiedText = formatBytesGB(plan.occupiedBytes) || "0 GB";
-  const name = state.detail?.name || state.name || `App ${state.appid}`;
+  const name = state.detail?.name || state.name || UNKNOWN_APP_NAME;
   dText.textContent = `Deleting ${name} frees about ${freedText} of the ${occupiedText} it occupies.`;
 
   dNote.replaceChildren();
@@ -911,7 +912,7 @@ async function startSheetVerify(appids) {
 /** The sheet's game title (header and the Verify button's name). WP
  * API-FIX-4: a tool app's name comes from the server's tool list. */
 function sheetTitle(gameLike) {
-  return state.detail?.name?.trim() || toolAppName(gameLike) || state.name || `App ${state.appid}`;
+  return state.detail?.name?.trim() || toolAppName(gameLike) || state.name || UNKNOWN_APP_NAME;
 }
 
 /** WP API-FIX-4: the tool app's server-supplied name, or null. */
@@ -1373,7 +1374,7 @@ function renderLoadError() {
 function renderNotTracked() {
   const wrap = document.createElement("div");
   const h3 = document.createElement("h3");
-  h3.textContent = state.name || `App ${state.appid}`;
+  h3.textContent = state.name || UNKNOWN_APP_NAME;
   const p = document.createElement("p");
   p.className = "hint";
   p.textContent = "vault-api does not track this app yet — nothing has been downloaded or manually mapped.";

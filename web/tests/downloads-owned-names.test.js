@@ -197,18 +197,18 @@ test("MUTATION PIN (title order + live names): no vault name -> owned name, pain
     const s = renderDownloads();
     await until(() => count(RELAY) === 1, "the one owned-list load started (held at the relay)");
     await until(() => historyNames(s).length === 4, "rows");
-    assert.deepEqual(historyNames(s), ["Vault Ten", "App 20", "App 30", "App 40"], "before the list lands");
+    assert.deepEqual(historyNames(s), ["Vault Ten", "Unknown app", "Unknown app", "Unknown app"], "before the list lands");
     // Job 2 (not_logged_in) expanded while the list is still held: its
     // Retry label is painted with the fallback title first.
     await expand(s, 2);
     const retryLabel = () => retryButtons(row(s, 2))[0].getAttribute("aria-label");
-    assert.equal(retryLabel(), "Retry App 20", "label before the list lands");
+    assert.equal(retryLabel(), "Retry Unknown app", "label before the list lands");
     const gamesCallsAtRelease = count("/v1/games");
     release();
     await until(() => historyNames(s).includes("Owned Twenty"), "owned name painted from the owned-list subscription");
     assert.equal(count("/v1/games"), gamesCallsAtRelease, "painted by the subscription, not by a games poll");
     assert.equal(retryLabel(), "Retry Owned Twenty", "MUTATION PIN: patchNames updates the Retry aria-label too");
-    assert.deepEqual(historyNames(s), ["Vault Ten", "Owned Twenty", "App 30", "App 40"]);
+    assert.deepEqual(historyNames(s), ["Vault Ten", "Owned Twenty", "Unknown app", "Unknown app"]);
   } finally {
     server.ownedGate = null;
     if (release) release();

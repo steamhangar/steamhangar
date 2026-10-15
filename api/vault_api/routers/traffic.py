@@ -417,12 +417,15 @@ def _job_throughput(
     window: traffic.CurrentWindow | None,
     now: datetime,
     feed_on: bool,
+    oracle_enabled: bool = False,
 ) -> list[JobThroughputOut]:
     rows = conn.execute(
         "SELECT id, appid, started_at FROM jobs WHERE status = ? AND type = ? ORDER BY id",
         (STATUS_RUNNING, JOB_TYPE_PREFILL),
     ).fetchall()
-    names = traffic.app_names(conn, [int(row["appid"]) for row in rows])
+    names = traffic.app_names(
+        conn, [int(row["appid"]) for row in rows], oracle_enabled=oracle_enabled
+    )
     result: list[JobThroughputOut] = []
     for row in rows:
         appid = int(row["appid"])
@@ -530,7 +533,9 @@ def get_throughput(
                 )
                 active_now = len(traffic.active_addrs(conn, now, minutes, clients))
                 runner_now = bool(traffic.active_addrs(conn, now, minutes, runner))
-        jobs = _job_throughput(conn, window, now, feed_on)
+        jobs = _job_throughput(
+            conn, window, now, feed_on, settings.manifest_oracle_enabled
+        )
     return ThroughputOut(
         event_feed=feed,
         range=range,
@@ -643,7 +648,9 @@ def get_clients_overview(
         }
         depot_owners = traffic.depot_owners(conn, depots)
         app_ids = {a for apps in depot_owners.values() if len(apps) == 1 for a in apps}
-        names = traffic.app_names(conn, app_ids)
+        names = traffic.app_names(
+            conn, app_ids, oracle_enabled=settings.manifest_oracle_enabled
+        )
 
     def loading(side: _Side, addrs: list[str]) -> LoadingNowOut | None:
         if not live or window is None:

@@ -131,7 +131,7 @@ test("MUTATION TARGET: loading now — null (feed not ok) is a dash, idle says n
     loadingNowText(address({ loading_now: { loading: true, bytes_per_second: 4 * MIB, apps: [], unattributed_bytes_per_second: 4 * MIB } })),
     "Loading now: 4.0 MB/s · content not linked to one game",
   );
-  assert.equal(appLabel({ appid: 7, name: null }), "App 7");
+  assert.equal(appLabel({ appid: 7, name: null }), "Unknown app");
 });
 
 test("stats over the range; none with the feed disabled (stats null)", () => {

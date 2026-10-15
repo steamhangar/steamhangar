@@ -84,6 +84,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
+from vault_api import app_classification, tool_apps
 from vault_api.jobs import parse_utc_iso, to_utc_iso
 from vault_api.runner_identity import RunnerWindow
 
@@ -838,7 +839,15 @@ def depot_owners(conn: sqlite3.Connection, depotids: Iterable[int]) -> dict[int,
     return owners
 
 
-def app_names(conn: sqlite3.Connection, appids: Iterable[int]) -> dict[int, str | None]:
+def app_names(
+    conn: sqlite3.Connection, appids: Iterable[int], *, oracle_enabled: bool = False
+) -> dict[int, str | None]:
+    """Display name per app id, ``None`` when nothing knows it.
+
+    Same order as ``GET /v1/games`` (WP ID-AUDIT): ``apps.name``, then the
+    name already stored from Steam's lookups (``app_classification``), then
+    the fixed tool-app list. Reads stored rows only; no lookup is made here.
+    """
     ids = sorted(set(appids))
     names: dict[int, str | None] = {appid: None for appid in ids}
     for offset in range(0, len(ids), 500):
@@ -849,7 +858,17 @@ def app_names(conn: sqlite3.Connection, appids: Iterable[int]) -> dict[int, str 
             tuple(chunk),
         ):
             name = row["name"]
-            names[int(row["appid"])] = str(name) if isinstance(name, str) and name else None
+            names[int(row["appid"])] = (
+                str(name) if isinstance(name, str) and name.strip() else None
+            )
+    missing = [appid for appid, name in names.items() if name is None]
+    if missing:
+        stored = app_classification.fallback_names(
+            conn, missing, oracle_enabled=oracle_enabled
+        )
+        for appid in missing:
+            tool = tool_apps.get_tool_app(appid)
+            names[appid] = stored.get(appid) or (tool.name if tool is not None else None)
     return names
 
 
