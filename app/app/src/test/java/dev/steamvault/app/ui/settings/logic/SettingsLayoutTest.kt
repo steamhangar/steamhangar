@@ -117,4 +117,16 @@ class SettingsLayoutTest {
         assertTrue(SettingsLayout.fieldMeta("upstream_edge").label.contains("Steam"))
         assertFalse(SettingsLayout.riskText("resolver").contains("Steam"))
     }
+
+    @Test
+    fun `a 428 detail names the risky keys and error details unwrap`() {
+        val detail = """{"message":"confirm","risky_keys":["upstream_max_conns","resolver"]}"""
+        assertEquals(listOf("upstream_max_conns", "resolver"), SettingsLayout.riskyKeysFrom428(detail))
+        assertEquals(emptyList<String>(), SettingsLayout.riskyKeysFrom428("plain text"))
+        assertEquals(emptyList<String>(), SettingsLayout.riskyKeysFrom428(null))
+        assertEquals("confirm", SettingsLayout.detailMessage(detail))
+        assertEquals("'x': bad", SettingsLayout.detailMessage("'x': bad"))
+        assertEquals("a; b", SettingsLayout.detailMessage("""[{"msg":"a"},{"msg":"b"}]"""))
+        assertNull(SettingsLayout.detailMessage(null))
+    }
 }

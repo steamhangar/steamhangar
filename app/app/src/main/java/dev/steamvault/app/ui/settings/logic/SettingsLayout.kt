@@ -5,7 +5,11 @@ import dev.steamvault.app.net.model.SettingInfoOut
 import dev.steamvault.app.net.model.settingAsStringListOrNull
 import dev.steamvault.app.net.model.settingAsStringOrNull
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
 
 /** One section of the D16 page (twin of `SECTIONS` in web/js/lib/settings-layout.js). */
 data class SettingsSectionDef(val id: String, val title: String, val form: Boolean)
@@ -260,6 +264,53 @@ object SettingsLayout {
             )
             else -> null
         }
+    }
+
+    private fun parseDetail(detail: String?): JsonElement? {
+        if (detail.isNullOrBlank()) return null
+        return try {
+            Json.parseToJsonElement(detail)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** The keys a 428 answer names (`detail.risky_keys`), else an empty list. */
+    fun riskyKeysFrom428(detail: String?): List<String> {
+        val obj = parseDetail(detail) as? JsonObject ?: return emptyList()
+        val array = obj["risky_keys"] as? JsonArray ?: return emptyList()
+        val out = ArrayList<String>()
+        for (item in array) {
+            val primitive = item as? JsonPrimitive
+            if (primitive != null && primitive.isString) out.add(primitive.content)
+        }
+        return out
+    }
+
+    /**
+     * A human message out of an error detail (the client keeps an object
+     * detail as its JSON text): a plain string stays as it is, `{"message"}`
+     * and FastAPI's `[{"msg"}]` list are unwrapped. Null when there is none.
+     */
+    fun detailMessage(detail: String?): String? {
+        if (detail.isNullOrBlank()) return null
+        val parsed = parseDetail(detail) ?: return detail
+        if (parsed is JsonPrimitive) return if (parsed.isString) parsed.content else detail
+        if (parsed is JsonObject) {
+            val m = parsed["message"] as? JsonPrimitive
+            if (m != null && m.isString) return m.content
+            return null
+        }
+        if (parsed is JsonArray) {
+            val msgs = ArrayList<String>()
+            for (item in parsed) {
+                val obj = item as? JsonObject ?: continue
+                val m = obj["msg"] as? JsonPrimitive
+                if (m != null && m.isString) msgs.add(m.content)
+            }
+            if (msgs.isNotEmpty()) return msgs.joinToString("; ")
+        }
+        return null
     }
 
     /** The save bar's line for a failed PATCH (409/422/428/403 are answered before anything is written). */

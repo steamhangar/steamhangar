@@ -292,6 +292,14 @@ class VaultApiClient(
     suspend fun patchSettings(updates: Map<String, JsonElement?>): SettingsOut =
         patch("/v1/settings", buildSettingsPatch(updates))
 
+    /**
+     * D16: the same PATCH with `?confirm_risky=true` -- sent only after the
+     * user confirmed the risky-change dialog for a `428` answer
+     * (`detail.risky_keys`). Never sent speculatively.
+     */
+    suspend fun patchSettingsConfirmed(updates: Map<String, JsonElement?>): SettingsOut =
+        patch("/v1/settings", buildSettingsPatch(updates), mapOf("confirm_risky" to "true"))
+
     // ---- schedule (WP AG-3) -----------------------------------------------
 
     /** `GET /v1/schedule` — scheduler config + last-sweep bookkeeping,
@@ -366,9 +374,13 @@ class VaultApiClient(
     private suspend inline fun <reified T> postEmpty(path: String): T =
         execute("POST", path, emptyMap()) { it.post(ByteArray(0).toRequestBody(null)) }
 
-    private suspend inline fun <reified T> patch(path: String, body: JsonObject): T {
+    private suspend inline fun <reified T> patch(
+        path: String,
+        body: JsonObject,
+        params: Map<String, String> = emptyMap(),
+    ): T {
         val encoded = VaultJson.encodeToString(JsonObject.serializer(), body)
-        return execute("PATCH", path, emptyMap()) { it.patch(encoded.toRequestBody(JSON_MEDIA_TYPE)) }
+        return execute("PATCH", path, params) { it.patch(encoded.toRequestBody(JSON_MEDIA_TYPE)) }
     }
 
     private suspend inline fun <reified T> execute(
