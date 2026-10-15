@@ -172,13 +172,15 @@ export function headerTiles(throughput) {
   const current = throughput.current ? throughput.current.bytes_per_second : null;
   const phrase = RANGE_PHRASES[throughput.range] || "";
   const tile = (key, label, value, title, detail = null) => ({ key, label, value: value ?? DASH, title, detail });
+  const windowMinutes = Number.isInteger(throughput.active_window_minutes) ? throughput.active_window_minutes : 15;
   const inRange = Number.isInteger(summary.active_clients) ? summary.active_clients : null;
   return [
     tile(
       "current",
       "Current speed",
       formatSpeed(current),
-      "Everything the cache served over the last few minutes, measured when the server last read the cache's event log.",
+      "Everything the cache served over the last 5-10 minutes (all traffic, the server's own prefill runner included), measured when the server last read the cache's event log.",
+      currentDetail(throughput),
     ),
     tile(
       "average",
@@ -189,9 +191,9 @@ export function headerTiles(throughput) {
     tile("peak", "Peak speed", formatSpeed(summary.peak_bytes_per_second), `The busiest 5 minutes ${phrase}.`),
     tile(
       "loaded",
-      "Loaded",
+      "Served (cache + prefill)",
       formatTrafficBytes(summary.bytes_served),
-      `Everything the cache served ${phrase}, the server's own prefill downloads included.`,
+      `Everything the cache served ${phrase}, the server's own prefill downloads included. "Loaded from the internet" plus "Saved by the cache" adds up to this only when the prefill runner had no cache hits (see the line below).`,
       runnerDetail(summary),
     ),
     tile(
@@ -206,6 +208,7 @@ export function headerTiles(throughput) {
       // Bytes, not requests: the same base as "Saved by the cache" next to it.
       formatRate(summary.byte_hit_rate),
       `Share of the bytes your machines loaded ${phrase} that came from the cache. The server's own prefill downloads are not counted.`,
+      hitRateDetail(summary),
     ),
     tile(
       "saved",
@@ -215,13 +218,30 @@ export function headerTiles(throughput) {
     ),
     tile(
       "clients",
-      "Active clients",
+      "Loading now",
       Number.isInteger(throughput.active_clients_now) ? String(throughput.active_clients_now) : null,
-      "Machines that loaded from the cache in the last few minutes. The server's own prefill runner is not counted.",
-      inRange === null ? null : `${inRange} ${phrase}`,
+      `Machines with cache traffic in the last ${windowMinutes} minutes. The server's own prefill runner is not counted.${inRange === null ? "" : ` ${inRange} machines loaded something ${phrase}.`}`,
+      `machines with cache traffic in the last ${windowMinutes} min`,
     ),
   ];
 }
+
+/** Detail line of "Current speed": scope and window, plus the runner's part. */
+function currentDetail(throughput) {
+  const scope = "all traffic incl. prefill runner, 5-10 min window";
+  const runner = throughput.current ? formatSpeed(throughput.current.runner_bytes_per_second) : null;
+  return runner ? `${scope} · ${runner} by the prefill runner` : scope;
+}
+
+/** Detail line of "Hit rate": the scope, and the runner's own rate. */
+function hitRateDetail(summary) {
+  const runner = summary.prefill_runner;
+  const rate = runner ? formatRate(runner.byte_hit_rate) : null;
+  return rate ? `clients only, runner excluded (runner: ${rate})` : "clients only, runner excluded";
+}
+
+/** Tooltip of a job card's speed line. */
+export const JOB_SPEED_NOTE = "Exclusive depots only: bytes on depots that belong to this game alone, from every address.";
 
 /**
  * WP TILE-INTERNET: all-scope miss bytes. The server's `internet_bytes`;
@@ -250,7 +270,9 @@ export function runnerDetail(summary) {
   const runner = summary && summary.prefill_runner;
   if (!runner || !Number.isFinite(runner.bytes_served) || runner.bytes_served <= 0) return null;
   const size = formatTrafficBytes(runner.bytes_served);
-  return size ? `${size} by the prefill runner` : null;
+  if (!size) return null;
+  const cached = Number.isFinite(runner.hit_bytes) && runner.hit_bytes > 0 ? formatTrafficBytes(runner.hit_bytes) : null;
+  return cached ? `${size} by the prefill runner, ${cached} of that from the cache` : `${size} by the prefill runner`;
 }
 
 /** The bucket a series point covers, for the graph's label. */

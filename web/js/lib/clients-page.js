@@ -85,8 +85,10 @@ export function clientKindText(client) {
 
 /** Connection chip: word and chip class (the `.pchip` vocabulary). */
 export function connectionChip(client) {
-  if (client.connected === true) return { word: "Connected", cls: "pchip pchip-on" };
-  if (client.connected === false) return { word: "Not connected", cls: "pchip pchip-off" };
+  // "Agent" wording only for a vault-agent client; an address has no agent.
+  const agent = isAgentClient(client);
+  if (client.connected === true) return { word: agent ? "Agent online" : "Loading", cls: "pchip pchip-on" };
+  if (client.connected === false) return { word: agent ? "Agent offline" : "No agent", cls: "pchip pchip-off" };
   return { word: "No current data", cls: "pchip pchip-unknown" };
 }
 

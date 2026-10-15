@@ -403,18 +403,22 @@ def test_throughput_keeps_the_runner_out_of_every_client_figure(feed) -> None:
     # The runner's own share.
     assert summary["prefill_runner"] == {
         "bytes_served": 5000, "hit_bytes": 3000, "miss_bytes": 2000,
-        "requests": 2, "hits": 1, "misses": 1, "errors": 0,
+        "requests": 2, "hits": 1, "misses": 1, "errors": 0, "byte_hit_rate": 0.6,
     }
     assert summary["bytes_served"] == (
         summary["client_bytes_served"] + summary["prefill_runner"]["bytes_served"]
     )
     # WP TILE-INTERNET: all-scope miss bytes, the runner's included.
+    assert summary["prefill_runner"]["byte_hit_rate"] == pytest.approx(3000 / 5000)
     assert summary["internet_bytes"] == 600 + 2000
     assert summary["internet_bytes"] == (
         summary["miss_bytes"] + summary["prefill_runner"]["miss_bytes"]
     )
     assert body["active_clients_now"] == 2
     assert body["runner_active_now"] is True
+    # WP METRIC-AUDIT: the runner's part of the (all-traffic) current speed.
+    current = body["current"]
+    assert 0 < current["runner_bytes_per_second"] <= current["bytes_per_second"]
 
 
 @pytest.mark.parametrize("which", ["feed", "old_feed"])

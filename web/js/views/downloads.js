@@ -133,6 +133,7 @@ import {
   headerTiles,
   isRange,
   jobSpeedText,
+  JOB_SPEED_NOTE,
   joinNotes,
   mergeJobLists,
   refreshFailedText,
@@ -1737,6 +1738,7 @@ function paintJobSpeeds() {
     const text = t && t.range === traffic.range ? jobSpeedText(entries.get(Number(card.dataset.jid)), state) : null;
     line.textContent = text || "";
     line.hidden = !text;
+    line.title = text ? JOB_SPEED_NOTE : "";
   }
 }
 

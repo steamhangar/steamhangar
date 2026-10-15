@@ -4603,7 +4603,8 @@ before it was recorded, so "all" starts there.
  "range_start": "2026-10-12T20:10:00Z", "active_window_minutes": 15,
  "current": {"bytes_per_second": 41943040.0,
              "window_start": "2026-10-13T20:00:00Z",
-             "window_end": "2026-10-13T20:08:00Z", "window_seconds": 480},
+             "window_end": "2026-10-13T20:08:00Z", "window_seconds": 480,
+             "runner_bytes_per_second": 4194304.0},
  "active_clients_now": 2, "runner_active_now": true,
  "summary": {"bytes_served": 69793218560, "hit_bytes": 53687091200,
              "miss_bytes": 10737418240, "requests": 120034, "hits": 100100,
@@ -4615,7 +4616,8 @@ before it was recorded, so "all" starts there.
              "prefill_runner": {"bytes_served": 5368709120,
                                 "hit_bytes": 4294967296,
                                 "miss_bytes": 1073741824, "requests": 2560,
-                                "hits": 2048, "misses": 512, "errors": 0}},
+                                "hits": 2048, "misses": 512, "errors": 0,
+                                "byte_hit_rate": 0.8}},
  "jobs": [{"job_id": 812, "appid": 440, "name": "Some Game",
            "started_at": "2026-10-13T19:55:00Z", "bytes_per_second": 31457280.0,
            "bytes_since_start": 9437184000, "exclusive_depots": 2}]}
@@ -4625,7 +4627,8 @@ before it was recorded, so "all" starts there.
   part of the bucket the last sweep fell into (`window_seconds` 300..600),
   ending at the last sweep. It is not a live gauge: the sweep runs every
   `VAULT_EVENT_SWEEP_INTERVAL_MINUTES` and nginx flushes every 5 s. `null`
-  unless `event_feed.state` is `ok`.
+  unless `event_feed.state` is `ok`. `bytes_per_second` is ALL traffic, the
+  prefill runner included; `runner_bytes_per_second` is the runner's part.
 - **`active_clients_now`**: addresses with a line within
   `active_window_minutes` (2 x sweep interval + 5 = 15 by default), the
   prefill runner not counted; `runner_active_now` says whether the runner
@@ -4641,7 +4644,8 @@ before it was recorded, so "all" starts there.
   `byte_hit_rate` bytes; both `null` with no hits and no misses.
   `prefill_runner` is the runner's own share, so `bytes_served ==
   client_bytes_served + prefill_runner.bytes_served`.
-  `internet_bytes` is everything that missed the cache and came from the
+  `prefill_runner.byte_hit_rate` is the runner's own byte hit rate (`null`
+  without hits and misses). `internet_bytes` is everything that missed the cache and came from the
   internet, the runner included (`miss_bytes + prefill_runner.miss_bytes`).
   `average_bytes_per_second` is the average **while loading** (bytes over the
   5-minute buckets that carried traffic), `null` when nothing was loaded;

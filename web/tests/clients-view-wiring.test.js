@@ -142,7 +142,7 @@ test("MUTATION TARGET: one card per client; the agent's lines, and the address n
   await until(() => s.querySelectorAll(".clcard").length === 2, "two cards");
   const a = card(s, "agent:gaming-pc");
   assert.equal(text(a, ".nm"), "gaming-pc");
-  assert.equal(text(a, '[data-role="connection"]'), "Connected");
+  assert.equal(text(a, '[data-role="connection"]'), "Agent online");
   assert.deepEqual(lines(a), [
     "client-kind=vault-agent · 192.168.1.42",
     "loading-now=Loading now: 30.0 MB/s · Some Game",
@@ -153,7 +153,7 @@ test("MUTATION TARGET: one card per client; the agent's lines, and the address n
   ]);
   const b = card(s, "addr:192.168.1.77");
   assert.equal(text(b, ".nm"), "192.168.1.77");
-  assert.equal(text(b, '[data-role="connection"]'), "Not connected");
+  assert.equal(text(b, '[data-role="connection"]'), "No agent");
   assert.equal(text(b, '[data-role="client-kind"]'), "No agent · seen in the cache log");
   assert.equal(b.querySelector('[data-role="installed"]'), null, "no installed line for an address");
   assert.equal(text(s, '[data-role="clients-sub"]'), "2 clients · 1 connected");

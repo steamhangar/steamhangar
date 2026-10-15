@@ -161,14 +161,14 @@ test("MUTATION TARGET: feed ok — eight tiles, a labelled SVG graph, and the ru
   const s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "tiles");
   assert.deepEqual(tiles(s), [
-    "Current speed=40.0 MB/s",
+    "Current speed=40.0 MB/sall traffic incl. prefill runner, 5-10 min window",
     "Average while loading=50.0 MB/s",
     "Peak speed=100 MB/s",
-    "Loaded=60.0 GB",
+    "Served (cache + prefill)=60.0 GB",
     "Loaded from the internet=10.0 GB",
-    "Hit rate=83%",
+    "Hit rate=83%clients only, runner excluded",
     "Saved by the cache=50.0 GB",
-    "Active clients=23 in the last 24 hours",
+    "Loading now=2machines with cache traffic in the last 15 min",
   ]);
   assert.equal(q(s, "stats-note").hidden, true);
   const svg = q(s, "graph-svg");
@@ -254,9 +254,9 @@ test("MUTATION TARGET: the statistics range refetches both endpoints; a late ans
   release30();
   await until(() => !q(s, "stats-grid").hidden, "30d painted");
   assert.deepEqual(server.calls.slice().sort(), ["/v1/throughput/series?30d", "/v1/throughput/series?7d", "/v1/throughput?30d", "/v1/throughput?7d"]);
-  assert.match(tile(s, "clients").querySelector(".stat-detail").textContent, /in the last 30 days/);
+  assert.match(tile(s, "clients").title, /in the last 30 days/);
   seg(s, "stats-range", "24h").dispatchEvent({ type: "click" });
-  await until(() => /in the last 24 hours/.test(tile(s, "clients")?.querySelector(".stat-detail")?.textContent || ""), "back to 24h");
+  await until(() => /in the last 24 hours/.test(tile(s, "clients")?.title || ""), "back to 24h");
 });
 
 test("MUTATION TARGET: History filter — default All with the fetched rows; 24 h fetches ?range=24h&limit=200 and hides older jobs", async () => {

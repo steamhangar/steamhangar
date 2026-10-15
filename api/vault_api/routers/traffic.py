@@ -133,6 +133,9 @@ class CurrentOut(BaseModel):
     #: The last sweep -- data is never newer than this.
     window_end: str
     window_seconds: int
+    #: WP METRIC-AUDIT: the prefill runner's part of ``bytes_per_second``
+    #: (the latter is ALL traffic, runner included).
+    runner_bytes_per_second: float
 
 
 class RunnerTrafficOut(BaseModel):
@@ -147,6 +150,8 @@ class RunnerTrafficOut(BaseModel):
     hits: int
     misses: int
     errors: int
+    #: WP METRIC-AUDIT: hit_bytes / (hit_bytes + miss_bytes); null without either.
+    byte_hit_rate: float | None = None
 
 
 class SummaryOut(BaseModel):
@@ -377,6 +382,7 @@ def _runner_out(totals: traffic.Totals) -> RunnerTrafficOut:
         hits=totals.hits,
         misses=totals.misses,
         errors=totals.errors,
+        byte_hit_rate=_ratio(totals.hit_bytes, totals.miss_bytes),
     )
 
 
@@ -517,6 +523,10 @@ def get_throughput(
                     window_start=window.start,
                     window_end=window.end,
                     window_seconds=window.seconds,
+                    runner_bytes_per_second=traffic.scoped_totals(
+                        conn, traffic.TIER_5M, window.start, runner
+                    ).bytes_served
+                    / window.seconds,
                 )
                 active_now = len(traffic.active_addrs(conn, now, minutes, clients))
                 runner_now = bool(traffic.active_addrs(conn, now, minutes, runner))

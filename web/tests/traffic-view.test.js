@@ -18,6 +18,7 @@ import {
   formatSpeed,
   formatTrafficBytes,
   headerTiles,
+  JOB_SPEED_NOTE,
   jobSpeedText,
   joinNotes,
   mergeJobLists,
@@ -46,7 +47,7 @@ const throughput = (state, extra = {}) => ({
   bucket_seconds: 300,
   range_start: "2026-10-12T20:10:00Z",
   active_window_minutes: 15,
-  current: state === "ok" ? { bytes_per_second: 40 * MIB, window_start: "x", window_end: "y", window_seconds: 480 } : null,
+  current: state === "ok" ? { bytes_per_second: 40 * MIB, window_start: "x", window_end: "y", window_seconds: 480, runner_bytes_per_second: 10 * MIB } : null,
   active_clients_now: state === "ok" ? 2 : null,
   summary:
     state === "disabled"
@@ -114,14 +115,17 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
       ["Current speed", "40.0 MB/s"],
       ["Average while loading", "50.0 MB/s"],
       ["Peak speed", "100 MB/s"],
-      ["Loaded", "60.0 GB"],
+      ["Served (cache + prefill)", "60.0 GB"],
       ["Loaded from the internet", "10.0 GB"],
       ["Hit rate", "83%"],
       ["Saved by the cache", "50.0 GB"],
-      ["Active clients", "2"],
+      ["Loading now", "2"],
     ],
   );
-  assert.equal(ok.clients.detail, "3 in the last 24 hours");
+  assert.equal(ok.clients.detail, "machines with cache traffic in the last 15 min");
+  assert.match(ok.clients.title, /3 machines loaded something in the last 24 hours/);
+  assert.equal(ok.current.detail, "all traffic incl. prefill runner, 5-10 min window · 10.0 MB/s by the prefill runner");
+  assert.equal(ok["hit-rate"].detail, "clients only, runner excluded");
   const stale = Object.fromEntries(headerTiles(throughput("stale")).map((t) => [t.key, t.value]));
   assert.equal(stale.current, DASH);
   assert.equal(stale.clients, DASH);
@@ -164,7 +168,12 @@ test("MUTATION TARGET: D15-RUNNER — saved, hit rate and active clients say the
     summary: { ...base.summary, prefill_runner: { bytes_served: 4 * GIB, hit_bytes: 3 * GIB, miss_bytes: GIB, requests: 9, hits: 6, misses: 3, errors: 0 } },
   });
   const tiles = Object.fromEntries(headerTiles(withRunner).map((t) => [t.key, t]));
-  assert.equal(tiles.loaded.detail, "4.0 GB by the prefill runner");
+  assert.equal(tiles.loaded.detail, "4.0 GB by the prefill runner, 3.0 GB of that from the cache");
+  assert.match(tiles.loaded.title, /only when the prefill runner had no cache hits/);
+  assert.equal(tiles["hit-rate"].detail, "clients only, runner excluded");
+  const rated = headerTiles(throughput("ok", { summary: { ...base.summary, prefill_runner: { ...withRunner.summary.prefill_runner, byte_hit_rate: 0.75 } } }));
+  assert.equal(rated.find((t) => t.key === "hit-rate").detail, "clients only, runner excluded (runner: 75%)");
+  assert.equal(JOB_SPEED_NOTE, "Exclusive depots only: bytes on depots that belong to this game alone, from every address.");
   assert.match(tiles.loaded.title, /prefill downloads included/);
   assert.match(tiles.saved.title, /prefill downloads are not counted/);
   assert.match(tiles["hit-rate"].title, /prefill downloads are not counted/);

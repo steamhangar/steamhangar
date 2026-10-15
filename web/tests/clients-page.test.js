@@ -108,8 +108,10 @@ test("wording: no 'yet' that promises self-healing; the agentless note never tel
 });
 
 test("connection chip: true/false/null map to three words and the .pchip classes", () => {
-  assert.deepEqual(connectionChip(agent()), { word: "Connected", cls: "pchip pchip-on" });
-  assert.deepEqual(connectionChip(agent({ connected: false })), { word: "Not connected", cls: "pchip pchip-off" });
+  assert.deepEqual(connectionChip(agent()), { word: "Agent online", cls: "pchip pchip-on" });
+  assert.deepEqual(connectionChip(agent({ connected: false })), { word: "Agent offline", cls: "pchip pchip-off" });
+  assert.deepEqual(connectionChip(address({ connected: false })), { word: "No agent", cls: "pchip pchip-off" });
+  assert.deepEqual(connectionChip(address({ connected: true })), { word: "Loading", cls: "pchip pchip-on" });
   assert.deepEqual(connectionChip(address({ connected: null })), { word: "No current data", cls: "pchip pchip-unknown" });
 });
 

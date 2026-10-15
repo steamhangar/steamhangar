@@ -151,6 +151,7 @@ function summaryFor(range, nowMs, sinceMs) {
       requests: runnerRequests,
       hits: runnerHits,
       misses: runnerRequests - runnerHits,
+      byte_hit_rate: runner ? runnerHit / runner : null,
       errors: 0,
     },
   };
@@ -184,6 +185,7 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
       window_start: isoSeconds(end - windowSeconds * 1000),
       window_end: isoSeconds(end),
       window_seconds: windowSeconds,
+      runner_bytes_per_second: jobs.length ? 6.4 * MIB : 0,
     },
     active_clients_now: 2,
     runner_active_now: jobs.length > 0,
