@@ -51,6 +51,12 @@ function valueChanged(key, draftValue, effective) {
   }
   const draftText = typeof draftValue === "string" ? draftValue : String(draftValue ?? "");
   const effectiveText = effective === null || effective === undefined ? "" : String(effective);
+  if (key === "schedule_window") {
+    // D16b: no window is "off"; a blank value means off too (D16b-1
+    // review), so a cleared field over an "off" window is no change.
+    const norm = (t) => (t.trim() === "" ? "off" : t.trim().toLowerCase());
+    return norm(draftText) !== norm(effectiveText);
+  }
   return draftText.trim() !== effectiveText.trim();
 }
 

@@ -125,6 +125,14 @@ export function sweepTargetsMessage(schedule) {
  *   stray truthy non-boolean from a future API change cannot silently start
  *   showing this).
  */
+/**
+ * The one visible sentence of that warning (WP D16-WEB, audit 1.2: state
+ * stays visible, the explanation above goes behind (i)). Same rule: a
+ * configuration statement, never an activity claim.
+ */
+export const CACHED_SWEEP_GC_RISK_SHORT =
+  "Include cached games is on while Auto-GC is not set to Execute: a refreshed game would leave its old chunks on disk.";
+
 export function cachedSweepGcRiskWarning(schedule) {
   if (!schedule || schedule.sweep_cached_gc_risk !== true) return null;
   return (

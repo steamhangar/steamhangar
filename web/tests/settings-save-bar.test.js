@@ -277,8 +277,14 @@ test("read-only settings never build a save bar", async () => {
 test("demo mode: the bar appears on an edit and goes away after the demo PATCH", async () => {
   storage.clear();
   storage.set("steamvault.demoMode", "1");
-  const s = await mount();
-  type(nameInput(s), "demo-vault-renamed");
+  // D16-WEB: the demo pins the vault name via env (plain text), so the
+  // edit goes to another normal-page field.
+  const s = renderSettings();
+  dom.appRoot.replaceChildren(s);
+  const bypass = () => s.querySelectorAll("input").find((i) => i.id === "settings-bypass_window_days") || null;
+  await until(() => bypass() !== null, "demo settings form");
+  assert.equal(nameInput(s) === null, true, "the env-pinned demo vault name has no input");
+  type(bypass(), "9");
   assert.equal(barShown(s), true);
   bar(s).querySelector('[data-role="settings-save"]').dispatchEvent({ type: "click" });
   await until(() => !barShown(s), "demo save");

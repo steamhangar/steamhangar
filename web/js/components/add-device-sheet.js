@@ -354,8 +354,17 @@ function paintAppDownload() {
     btn.title = `${plan.name}${size ? `, ${size}` : ""}, ${where}.`;
     acts.append(btn);
   }
-  const caption = el("p", "foot-note", "Scan the code with the phone's camera to download and install the app.");
-  caption.title = `${plan.url}\nAndroid asks once to allow installs from the browser. ${plan.name} ${where}.`;
+  // DIST-1b review nit: the demo's code points into a fake index, so the
+  // demo caption must not invite a scan.
+  const caption = el(
+    "p",
+    "foot-note",
+    isDemoMode()
+      ? "Demo: the code shows where a connected vault offers the app."
+      : "Scan the code with the phone's camera to download and install the app.",
+  );
+  caption.dataset.role = "app-download-caption";
+  if (!isDemoMode()) caption.title = `${plan.url}\nAndroid asks once to allow installs from the browser. ${plan.name} ${where}.`;
   appDownload.replaceChildren(
     caption,
     buildQrSvg(plan.url, { label: "QR code to download the SteamHangar app", role: "app-download-qr" }),

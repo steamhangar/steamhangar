@@ -948,12 +948,24 @@ export function resetDemoData({
 }
 
 // ---------------------------------------------------------------------
-// /v1/settings (WP 4a.6; ADR-0009) — a small in-memory mirror of
-// vault_api/settings_store.py's precedence rule (db override > env value >
-// built-in default), enough to exercise the Settings view's real code path
-// in demo mode. `env` below stands in for "what Settings.from_env() would
-// have produced" — fixed per key rather than reading real env vars (demo
-// mode has no process env of its own to read).
+// /v1/settings (WP 4a.6; ADR-0009; D16b row shape since WP D16-WEB) — an
+// in-memory mirror of vault_api/settings_store.py, enough to exercise the
+// Settings view's real code path in demo mode:
+//   - precedence env > Settings value > default (Q1, D16b): a key with a
+//     demo `env` value is "set via env" (`source: "env"`, `editable:
+//     false`, PATCH 409; `shadowed` while a stored value exists);
+//   - every row carries the D16b fields (`env_var`, `value`, `editable`,
+//     `risky`, `expert`, `grammar`, `target`, `env_visible`, `shadowed`);
+//   - PATCH: 422 for a bad value / unknown or env-only key / broken cross
+//     rule, 409 for an env-pinned key, 428 `{message, risky_keys}` for a
+//     risky key without `confirm_risky=true` — all before anything is
+//     written.
+// `env` stands in for "what Settings.from_env() would have produced",
+// fixed per key (demo mode has no process env). The demo pins vault_name
+// via env and keeps a stored, env-shadowed webhook timeout, so both
+// states show on the normal page. Key list, env names, `applies`,
+// `target`, `risky` and `expert` are pinned against settings_store.py by
+// web/tests/demo-data-shape-guard.test.js.
 // ---------------------------------------------------------------------
 
 const WEBHOOK_EVENTS_ALL = Object.freeze([
@@ -964,57 +976,284 @@ const WEBHOOK_EVENTS_ALL = Object.freeze([
   "client.bypass_resolved",
 ]);
 const AUTO_GC_MODES = Object.freeze(["off", "dry-run", "execute"]);
+const LOG_LEVELS = Object.freeze(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]);
 
-// key -> {default, env}. `env` != `default` for vault_name/schedule_window
-// on purpose, so a fresh demo session shows a realistic mix of "default"
-// and "env" sourced rows, not everything defaulted.
-// **The `default`/`env` values below for `auto_gc`/`sweep_include_cached`
-// are NOT this file's own opinion — they must equal
-// `api/vault_api/config.py`'s `DEFAULT_AUTO_GC`/`DEFAULT_SWEEP_INCLUDE_CACHED`
-// constants, whatever those currently are (ADR-0014 flipped both to
-// `"execute"`/`true` together, 2026-08-22 — see that module's own comments
-// on `DEFAULT_AUTO_GC`/`DEFAULT_SWEEP_INCLUDE_CACHED` for the full "why",
-// and docs/adr/0014-sweep-cached-and-auto-gc-default-on.md). A demo fixture
-// asserting the WRONG default is worse than no fixture — it teaches the
-// reader something false on exactly the surface used for screenshots
-// (docs/LEARNINGS.md, "demo fixtures are a shipped surface"). This file has
-// no access to Python at test time, so it cannot import those constants —
-// `web/tests/demo-data-config-defaults.test.js` instead reads
-// `api/vault_api/config.py` as plain TEXT and regex-extracts the same
-// constants, asserting equality against the two literals below on every
-// suite run; if you change either default here, that test tells you within
-// the same `node --test` run whether it still agrees with config.py, and if
-// you change config.py's default, THAT test (not this comment) is what
-// catches a forgotten update here.
+// **The `auto_gc`/`sweep_include_cached` defaults below are NOT this
+// file's own opinion — they must equal `api/vault_api/config.py`'s
+// `DEFAULT_AUTO_GC`/`DEFAULT_SWEEP_INCLUDE_CACHED` constants (ADR-0014).**
+// `web/tests/demo-data-config-defaults.test.js` reads config.py as text and
+// asserts equality against these two literals on every suite run (a demo
+// fixture asserting the wrong default teaches the reader something false on
+// the surface used for screenshots, docs/LEARNINGS.md).
 export const CONFIG_DEFAULT_AUTO_GC = "execute";
 export const CONFIG_DEFAULT_SWEEP_INCLUDE_CACHED = true;
 
-const SETTINGS_BASE = {
-  vault_name: { default: "", env: "steamhangar-demo" },
-  schedule_window: { default: null, env: "22:00-06:00" },
-  schedule_interval_minutes: { default: 180, env: 180 },
-  schedule_client_stale_days: { default: 7, env: 7 },
-  sweep_include_cached: { default: CONFIG_DEFAULT_SWEEP_INCLUDE_CACHED, env: CONFIG_DEFAULT_SWEEP_INCLUDE_CACHED },
-  auto_gc: { default: CONFIG_DEFAULT_AUTO_GC, env: CONFIG_DEFAULT_AUTO_GC },
-  webhook_url: { default: "", env: "" },
-  webhook_events: { default: [...WEBHOOK_EVENTS_ALL], env: [...WEBHOOK_EVENTS_ALL] },
-  // WP WEB-FEAT-1 (mirrors WP API-FEAT-1's `steam_library_steamid`): blank by
-  // default, like a fresh real vault — set it in Settings (after a demo Steam
-  // key) to see the owned-games merge in the Library.
-  steam_library_steamid: { default: "", env: "" },
-};
+const MAX_INTERVAL_MINUTES = 527040;
+const MAX_DAYS = 3650;
+const INT_HINT = "whole number, ASCII digits";
 
-const SETTINGS_APPLIES = {
-  vault_name: "restart-required",
-  schedule_window: "next_sweep",
-  schedule_interval_minutes: "next_sweep",
-  schedule_client_stale_days: "next_sweep",
-  sweep_include_cached: "next_sweep",
-  auto_gc: "immediately",
-  webhook_url: "restart-required",
-  webhook_events: "restart-required",
-  steam_library_steamid: "immediately",
-};
+function demoInt(key, raw, min, max) {
+  const text = raw.trim();
+  if (!text) throw validationError(`'${key}': must not be blank; use null to clear the stored value instead of an empty string`);
+  if (!/^[0-9]+$/.test(text)) throw validationError(`'${key}': ${JSON.stringify(raw)} is not a whole number.`);
+  const n = Number(text);
+  if (n < min || (max !== undefined && n > max)) {
+    throw validationError(`'${key}': must be ${max !== undefined ? `${min}..${max}` : `at least ${min}`}, got ${n}.`);
+  }
+  return n;
+}
+
+function demoFloat(key, raw) {
+  const text = raw.trim();
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(text) || Number(text) <= 0) {
+    throw validationError(`'${key}': must be a positive number of seconds, got ${JSON.stringify(raw)}.`);
+  }
+  return Number(text);
+}
+
+function demoCap(key, raw, max) {
+  const text = raw.trim();
+  if (!/^[1-9][0-9]*$/.test(text) || Number(text) > max) {
+    throw validationError(`'${key}': ${JSON.stringify(raw)} is not a whole number 1..${max} without leading zeros.`);
+  }
+  return text;
+}
+
+const STEAM_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.(steamcontent\.com|steamserver\.net)$/;
+
+/** Demo mirror of settings_store.OVERRIDABLE_SPECS, in its order. `parse`
+ * returns the JSON value GET reports, or throws a 422. */
+const DEMO_SETTING_SPECS = [
+  {
+    key: "vault_name", env_var: "VAULT_NAME", applies: "restart-required", default: "", env: "steamhangar-demo",
+    grammar: "text, at most 64 printable characters",
+    parse: (key, raw) => {
+      const text = raw.trim();
+      if (text.length > 64) throw validationError(`'${key}': at most 64 characters.`);
+      return text;
+    },
+  },
+  {
+    key: "schedule_window", env_var: "VAULT_SCHEDULE_WINDOW", applies: "next_sweep", default: "03:00-07:00", target: "api+core",
+    grammar: "HH:MM-HH:MM (overnight allowed, 24:00 as end), or off",
+    parse: (key, raw) => {
+      const text = raw.trim();
+      if (text === "" || text.toLowerCase() === "off") return "off";
+      if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(text)) {
+        throw validationError(`'${key}': expected 'HH:MM-HH:MM' (e.g. '22:00-06:00') or 'off', got ${JSON.stringify(raw)}.`);
+      }
+      return text;
+    },
+  },
+  {
+    key: "schedule_interval_minutes", env_var: "VAULT_SCHEDULE_INTERVAL_MINUTES", applies: "next_sweep", default: 180, expert: true,
+    grammar: `${INT_HINT}, 1..${MAX_INTERVAL_MINUTES}`, parse: (key, raw) => demoInt(key, raw, 1, MAX_INTERVAL_MINUTES),
+  },
+  {
+    key: "schedule_client_stale_days", env_var: "VAULT_SCHEDULE_CLIENT_STALE_DAYS", applies: "next_sweep", default: 7, expert: true,
+    grammar: `${INT_HINT}, 1..${MAX_DAYS}`, parse: (key, raw) => demoInt(key, raw, 1, MAX_DAYS),
+  },
+  {
+    key: "sweep_include_cached", env_var: "VAULT_SWEEP_INCLUDE_CACHED", applies: "next_sweep",
+    default: CONFIG_DEFAULT_SWEEP_INCLUDE_CACHED, expert: true, grammar: "true/false (also yes/no, on/off, 1/0)",
+    parse: (key, raw) => {
+      const text = raw.trim().toLowerCase();
+      if (BOOL_TRUE_SPELLINGS.includes(text)) return true;
+      if (BOOL_FALSE_SPELLINGS.includes(text)) return false;
+      throw validationError(
+        `'${key}' must be one of ${BOOL_TRUE_SPELLINGS.join(", ")} (true) or ` +
+          `${BOOL_FALSE_SPELLINGS.join(", ")} (false), case-insensitive. Got ${JSON.stringify(raw)}.`,
+      );
+    },
+  },
+  {
+    key: "auto_gc", env_var: "VAULT_AUTO_GC", applies: "immediately", default: CONFIG_DEFAULT_AUTO_GC,
+    grammar: "off, dry-run or execute",
+    parse: (key, raw) => {
+      const text = raw.trim();
+      if (!AUTO_GC_MODES.includes(text)) {
+        throw validationError(`'${key}' must be one of ${AUTO_GC_MODES.join(", ")}, got ${JSON.stringify(raw)}.`);
+      }
+      return text;
+    },
+  },
+  {
+    key: "gc_grace_days", env_var: "VAULT_GC_GRACE_DAYS", applies: "next_job", default: 14, expert: true,
+    grammar: `${INT_HINT}, 0..${MAX_DAYS} (0 = no grace)`, parse: (key, raw) => demoInt(key, raw, 0, MAX_DAYS),
+  },
+  {
+    key: "manifest_keep", env_var: "VAULT_MANIFEST_KEEP", applies: "next_job", default: 3, expert: true,
+    grammar: `${INT_HINT}, at least 1`, parse: (key, raw) => demoInt(key, raw, 1),
+  },
+  {
+    key: "agent_report_keep", env_var: "VAULT_AGENT_REPORT_KEEP", applies: "immediately", default: 20, expert: true,
+    grammar: `${INT_HINT}, at least 2`, parse: (key, raw) => demoInt(key, raw, 2),
+  },
+  {
+    key: "client_stats_keep", env_var: "VAULT_CLIENT_STATS_KEEP", applies: "next_sweep", default: 48, expert: true,
+    grammar: `${INT_HINT}, at least 1`, parse: (key, raw) => demoInt(key, raw, 1),
+  },
+  {
+    key: "event_sweep_interval_minutes", env_var: "VAULT_EVENT_SWEEP_INTERVAL_MINUTES", applies: "next_sweep", default: 5,
+    expert: true, grammar: `${INT_HINT}, 1..${MAX_INTERVAL_MINUTES}`, parse: (key, raw) => demoInt(key, raw, 1, MAX_INTERVAL_MINUTES),
+  },
+  {
+    key: "miss_trigger_cooldown_minutes", env_var: "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES", applies: "next_sweep", default: 60,
+    expert: true, grammar: `${INT_HINT}, 0..${MAX_INTERVAL_MINUTES} (0 = trigger off)`,
+    parse: (key, raw) => demoInt(key, raw, 0, MAX_INTERVAL_MINUTES),
+  },
+  {
+    key: "miss_trigger_max_per_sweep", env_var: "VAULT_MISS_TRIGGER_MAX_PER_SWEEP", applies: "next_sweep", default: 5,
+    expert: true, grammar: `${INT_HINT}, at least 1`, parse: (key, raw) => demoInt(key, raw, 1),
+  },
+  {
+    key: "bypass_window_days", env_var: "VAULT_BYPASS_WINDOW_DAYS", applies: "immediately", default: 3,
+    grammar: `${INT_HINT}, 1..${MAX_DAYS}`, parse: (key, raw) => demoInt(key, raw, 1, MAX_DAYS),
+  },
+  {
+    key: "prefill_max_threads", env_var: "VAULT_PREFILL_MAX_THREADS", applies: "next_job", default: 8, target: "api+core",
+    risky: true, expert: true, grammar: `${INT_HINT}, 1..64, at most upstream_max_conns`,
+    parse: (key, raw) => demoInt(key, raw, 1, 64),
+  },
+  {
+    key: "prefill_timeout_seconds", env_var: "VAULT_PREFILL_TIMEOUT_SECONDS", applies: "next_job", default: 14400, expert: true,
+    grammar: `${INT_HINT}, seconds, at least 1`, parse: (key, raw) => demoInt(key, raw, 1),
+  },
+  {
+    key: "manifest_oracle_timeout", env_var: "VAULT_MANIFEST_ORACLE_TIMEOUT", applies: "immediately", default: 10, expert: true,
+    grammar: "positive number of seconds, e.g. 10 or 2.5", parse: demoFloat,
+  },
+  {
+    key: "webhook_events", env_var: "VAULT_WEBHOOK_EVENTS", applies: "restart-required", default: [...WEBHOOK_EVENTS_ALL],
+    grammar: "comma-separated event names (or a JSON list); blank = all",
+    parse: (key, raw) => {
+      const text = raw.trim();
+      if (!text) return [...WEBHOOK_EVENTS_ALL];
+      const tokens = text.split(",").map((t) => t.trim());
+      if (tokens.some((t) => !t)) {
+        throw validationError(`'${key}' must be a comma-separated list with no empty entries.`);
+      }
+      const unknown = tokens.filter((t) => !WEBHOOK_EVENTS_ALL.includes(t));
+      if (unknown.length) {
+        throw validationError(`'${key}' contains unknown event name(s): ${unknown.join(", ")}.`);
+      }
+      return [...new Set(tokens)].sort();
+    },
+  },
+  {
+    key: "webhook_timeout_seconds", env_var: "VAULT_WEBHOOK_TIMEOUT_SECONDS", applies: "restart-required", default: 5, env: 10,
+    grammar: "positive number of seconds, e.g. 5", parse: demoFloat,
+  },
+  {
+    key: "steam_library_steamid", env_var: "VAULT_STEAM_LIBRARY_STEAMID", applies: "immediately", default: "",
+    grammar: "SteamID64 (17 digits) as a string; blank = not set",
+    parse: (key, raw) => {
+      // Mirrors config.parse_steam_library_steamid: trimmed, blank = not set.
+      const text = raw.trim();
+      if (!text) return "";
+      if (!validSteamId64(text)) {
+        throw validationError(
+          `'${key}': must be a SteamID64: exactly 17 ASCII digits in the individual-account range; blank (or null over the API) clears it`,
+        );
+      }
+      return text;
+    },
+  },
+  {
+    key: "upstream_rate", env_var: "VAULT_UPSTREAM_RATE", applies: "core", default: null, target: "core", expert: true,
+    grammar: "bytes/s with optional k or m suffix (800k, 2m), min 1024; off = no cap",
+    parse: (key, raw) => {
+      const text = raw.trim();
+      if (text === "off") return "off";
+      const m = /^([1-9][0-9]{0,8})([kKmM]?)$/.exec(text);
+      const bytes = m ? Number(m[1]) * (m[2] ? (/[kK]/.test(m[2]) ? 1024 : 1048576) : 1) : 0;
+      if (!m || bytes < 1024) throw validationError(`'${key}': ${JSON.stringify(raw)} is not a rate like 800k or 2m (min 1024 bytes/s), or off.`);
+      return text;
+    },
+  },
+  {
+    key: "upstream_max_conns", env_var: "VAULT_UPSTREAM_MAX_CONNS", applies: "core", default: "16", target: "core",
+    risky: true, expert: true, grammar: "whole number 1..64, no leading zero, at least prefill_max_threads",
+    parse: (key, raw) => demoCap(key, raw, 64),
+  },
+  {
+    key: "tls_client_max_conns", env_var: "VAULT_TLS_CLIENT_MAX_CONNS", applies: "core", default: "64", target: "core",
+    risky: true, expert: true, grammar: "whole number 1..256, no leading zero, at most tls_max_conns",
+    parse: (key, raw) => demoCap(key, raw, 256),
+  },
+  {
+    key: "tls_max_conns", env_var: "VAULT_TLS_MAX_CONNS", applies: "core", default: "256", target: "core",
+    risky: true, expert: true, grammar: "whole number 1..400, no leading zero",
+    parse: (key, raw) => demoCap(key, raw, 400),
+  },
+  {
+    key: "event_log_rotate_bytes", env_var: "VAULT_EVENT_LOG_ROTATE_BYTES", applies: "core", default: "67108864", target: "core",
+    grammar: "bytes, digits only, at least 1048576; 0 = rotation off",
+    parse: (key, raw) => {
+      const text = raw.trim();
+      if (!/^[0-9]{1,15}$/.test(text) || (Number(text) !== 0 && Number(text) < 1048576)) {
+        throw validationError(`'${key}': ${JSON.stringify(raw)} must be 0 (off) or at least 1048576 bytes.`);
+      }
+      return String(Number(text));
+    },
+  },
+  {
+    key: "upstream_edge", env_var: "VAULT_UPSTREAM_EDGE", applies: "core", default: "dist-fra1.discovery.steamserver.net",
+    target: "core", risky: true, expert: true,
+    grammar: "one *.steamcontent.com or *.steamserver.net host; off = legacy per-name pool",
+    parse: (key, raw) => {
+      const text = raw.trim().toLowerCase();
+      if (text === "off" || STEAM_HOST.test(text)) return text;
+      throw validationError(`'${key}': ${JSON.stringify(raw)} is not one Steam edge host (*.steamcontent.com or *.steamserver.net), or off.`);
+    },
+  },
+  {
+    key: "upstream_pool_hosts", env_var: "VAULT_UPSTREAM_POOL_HOSTS", applies: "core", default: null, target: "core",
+    risky: true, expert: true,
+    grammar: "up to 4 space-separated Steam edge hosts, used only while upstream_edge is off; off = none",
+    parse: (key, raw) => {
+      const tokens = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      if (tokens.length === 1 && tokens[0] === "off") return "off";
+      if (tokens.length === 0 || tokens.length > 4 || new Set(tokens).size !== tokens.length || !tokens.every((t) => STEAM_HOST.test(t))) {
+        throw validationError(`'${key}': up to 4 different Steam edge hosts, or off.`);
+      }
+      return tokens.join(" ");
+    },
+  },
+  {
+    key: "resolver", env_var: "VAULT_RESOLVER", applies: "core", default: "1.1.1.1", target: "core", risky: true, expert: true,
+    grammar: "IP address list, e.g. 1.1.1.1 or [2606:4700::1111]:53; never a resolver that rewrites Steam names",
+    parse: (key, raw) => {
+      const text = raw.trim();
+      if (!text || !/^[0-9a-fA-F.:[\] ]+$/.test(text)) throw validationError(`'${key}': ${JSON.stringify(raw)} is not an IP address list.`);
+      return text;
+    },
+  },
+  {
+    key: "log_level", env_var: "VAULT_LOG_LEVEL", applies: "immediately", default: "INFO", expert: true,
+    grammar: "DEBUG, INFO, WARNING, ERROR or CRITICAL",
+    parse: (key, raw) => {
+      const text = raw.trim().toUpperCase();
+      if (!LOG_LEVELS.includes(text)) throw validationError(`'${key}': must be one of ${LOG_LEVELS.join(", ")}, got ${JSON.stringify(raw)}.`);
+      return text;
+    },
+  },
+];
+const DEMO_SPEC_BY_KEY = new Map(DEMO_SETTING_SPECS.map((s) => [s.key, s]));
+
+/** Test seam: the demo's editable keys in order, with their flags. */
+export function demoSettingSpecs() {
+  return DEMO_SETTING_SPECS.map(({ key, env_var, applies, target = "api", risky = false, expert = false }) => ({
+    key,
+    env_var,
+    applies,
+    target,
+    risky,
+    expert,
+  }));
+}
+
+
 
 // Same true/false spellings as api/vault_api/config.py's parse_strict_bool
 // (config.py's _BOOL_TRUE_VALUES/_BOOL_FALSE_VALUES) — the grammar
@@ -1060,139 +1299,103 @@ function readRelayPlaytimePreference() {
   }
 }
 
+
 // Mirrors settings_store.ENV_ONLY_INFO_KEYS — informational-only rows a
 // settings screen shows as "this exists but only the environment controls
 // it" (api/README.md "Env-only keys"). `vault_api_key` is excluded here
 // too, same reasoning as the real endpoint: it never appears in ANY GET
-// response, not even redacted.
+// response, not even redacted. `webhook_url` is env-only since D16b (Q2)
+// and shown masked like `settings_store.mask_url` does (scheme and host,
+// everything after the host replaced).
+const DEMO_WEBHOOK_URL_MASKED = "https://hooks.example.net/***";
 const ENV_ONLY_DEMO = [
-  { key: "db_path", value: "/data/vault.db" },
-  { key: "cache_root", value: "/vault/cache" },
-  { key: "steamprefill_path", value: "/usr/local/bin/steamprefill" },
-  { key: "steamprefill_cache_dir", value: "/root/.local/share/SteamPrefill" },
-  { key: "manifest_archive_dir", value: "/vault/manifest-archive" },
-  { key: "web_dir", value: "/app/web" },
-  { key: "settings_readonly", value: false },
-  { key: "relay_expose_playtime", get value() { return relayExposePlaytime; } },
-  { key: "relay_expose_last_played", get value() { return relayExposeLastPlayed; } },
+  { key: "db_path", env_var: "VAULT_DB_PATH", value: "/data/vault.db" },
+  { key: "cache_root", env_var: "VAULT_CACHE_ROOT", value: "/vault/cache" },
+  { key: "steamprefill_path", env_var: "VAULT_STEAMPREFILL_PATH", value: "/usr/local/bin/steamprefill" },
+  { key: "steamprefill_cache_dir", env_var: "VAULT_STEAMPREFILL_CACHE_DIR", value: "/root/.local/share/SteamPrefill" },
+  { key: "manifest_archive_dir", env_var: "VAULT_MANIFEST_ARCHIVE_DIR", value: "/vault/manifest-archive" },
+  { key: "web_dir", env_var: "VAULT_WEB_DIR", value: "/app/web" },
+  { key: "settings_readonly", env_var: "VAULT_SETTINGS_READONLY", value: false },
+  { key: "relay_expose_playtime", env_var: "VAULT_RELAY_EXPOSE_PLAYTIME", get value() { return relayExposePlaytime; } },
+  { key: "relay_expose_last_played", env_var: "VAULT_RELAY_EXPOSE_LAST_PLAYED", get value() { return relayExposeLastPlayed; } },
+  { key: "webhook_url", env_var: "VAULT_WEBHOOK_URL", value: DEMO_WEBHOOK_URL_MASKED },
 ];
 const ENV_ONLY_KEYS = new Set(["vault_api_key", ...ENV_ONLY_DEMO.map((e) => e.key)]);
 
-let settingsOverrides = {}; // key -> raw string, mirrors the `settings` table's TEXT column
+/** A fresh demo: no stored values except one the env shadows (the webhook
+ * timeout), so the "overridden by env" note shows without a manual step. */
+function freshDemoOverrides() {
+  return { webhook_timeout_seconds: "3" };
+}
+let settingsOverrides = freshDemoOverrides(); // key -> raw string, mirrors the `settings` table's TEXT column
 const settingsReadonly = false; // demo mode never ships VAULT_SETTINGS_READONLY
 
 function resetDemoSettings() {
-  settingsOverrides = {};
+  settingsOverrides = freshDemoOverrides();
 }
 
-/** Raw PATCH-body value -> the typed value, or throw a 422 ApiError — the
- * demo-mode mirror of each `SettingSpec.parse` in settings_store.py. Typed
- * values are only used internally (to decide "did this change") and for
- * the GET projection; PATCH itself stores the raw string, same as the real
- * `settings` table. */
-function parseSettingValue(key, raw) {
-  if (key === "vault_name") return raw.trim();
-  if (key === "schedule_window") {
-    const text = raw.trim();
-    if (!text) return null;
-    if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(text)) {
-      throw validationError(`'${key}': expected 'HH:MM-HH:MM' (e.g. '22:00-06:00'), got ${JSON.stringify(raw)}.`);
-    }
-    return text;
-  }
-  if (key === "schedule_interval_minutes" || key === "schedule_client_stale_days") {
-    const text = raw.trim();
-    if (!/^[0-9]+$/.test(text) || Number(text) < 1) {
-      throw validationError(`'${key}' must be a positive whole number, got ${JSON.stringify(raw)}.`);
-    }
-    return Number(text);
-  }
-  if (key === "auto_gc") {
-    const text = raw.trim();
-    if (!AUTO_GC_MODES.includes(text)) {
-      throw validationError(`'${key}' must be one of ${AUTO_GC_MODES.join(", ")}, got ${JSON.stringify(raw)}.`);
-    }
-    return text;
-  }
-  if (key === "sweep_include_cached") {
-    const text = raw.trim().toLowerCase();
-    if (BOOL_TRUE_SPELLINGS.includes(text)) return true;
-    if (BOOL_FALSE_SPELLINGS.includes(text)) return false;
-    throw validationError(
-      `'${key}' must be one of ${BOOL_TRUE_SPELLINGS.join(", ")} (true) or ` +
-        `${BOOL_FALSE_SPELLINGS.join(", ")} (false), case-insensitive. Got ${JSON.stringify(raw)}.`,
-    );
-  }
-  if (key === "webhook_url") {
-    const text = raw.trim();
-    if (text && !/^https?:\/\//i.test(text)) {
-      throw validationError(`'${key}' must be a http(s) URL or blank to disable, got ${JSON.stringify(raw)}.`);
-    }
-    return text;
-  }
-  if (key === "webhook_events") {
-    const text = raw.trim();
-    if (!text) return [...WEBHOOK_EVENTS_ALL];
-    const tokens = text.split(",").map((t) => t.trim());
-    if (tokens.some((t) => !t)) {
-      throw validationError(`'${key}' must be a comma-separated list with no empty entries.`);
-    }
-    const unknown = tokens.filter((t) => !WEBHOOK_EVENTS_ALL.includes(t));
-    if (unknown.length) {
-      throw validationError(`'${key}' contains unknown event name(s): ${unknown.join(", ")}.`);
-    }
-    return [...new Set(tokens)];
-  }
-  if (key === "steam_library_steamid") {
-    // Mirrors config.parse_steam_library_steamid: trimmed, blank = not set,
-    // otherwise the relay's own SteamID64 grammar (lib/steamid.js here).
-    const text = raw.trim();
-    if (!text) return "";
-    if (!validSteamId64(text)) {
-      throw validationError(
-        `'${key}': must be a SteamID64: exactly 17 ASCII digits in the individual-account range; blank (or null over the API) clears it`,
-      );
-    }
-    return text;
-  }
-  throw validationError(`unrecognised setting key ${JSON.stringify(key)}`); // unreachable: callers only pass known keys
+function demoEnvPinned(spec) {
+  return spec.env !== undefined;
 }
 
-/** One entry's `effective`/`source`/`fallback`, mirroring
- * settings_store.describe_settings's precedence exactly (db > env > default). */
+/** settings_store.describe_settings, demo edition (env > stored > default). */
 function describeDemoSettings() {
   const infos = [];
-  for (const key of Object.keys(SETTINGS_BASE)) {
-    const base = SETTINGS_BASE[key];
-    const raw = settingsOverrides[key];
-    let effective;
-    let source;
+  for (const spec of DEMO_SETTING_SPECS) {
+    const pinned = demoEnvPinned(spec);
+    const raw = settingsOverrides[spec.key];
+    let stored = null;
+    let storedOk = false;
     if (raw !== undefined) {
-      effective = parseSettingValue(key, raw);
+      try {
+        stored = spec.parse(spec.key, raw);
+        storedOk = true;
+      } catch {
+        storedOk = false; // the real server logs and ignores a bad row
+      }
+    }
+    const target = spec.target || "api";
+    const fallback = pinned ? spec.env : spec.default;
+    let source;
+    let effective;
+    if (pinned) {
+      source = "env";
+      effective = spec.env;
+    } else if (storedOk) {
       source = "db";
+      effective = stored;
     } else {
-      effective = base.env;
-      source = JSON.stringify(base.env) === JSON.stringify(base.default) ? "default" : "env";
+      source = "default";
+      effective = spec.default;
     }
     infos.push({
-      key,
+      key: spec.key,
       effective,
       source,
-      fallback: base.env,
-      applies: SETTINGS_APPLIES[key],
+      fallback,
+      applies: spec.applies,
       env_only: false,
+      env_var: spec.env_var,
+      value: storedOk ? stored : null,
+      editable: !pinned,
+      risky: spec.risky === true,
+      expert: spec.expert === true,
+      grammar: spec.grammar,
+      target,
+      env_visible: target !== "core",
+      shadowed: pinned && storedOk,
+      // D16b-1 review: why a row is not editable. The demo hands core keys
+      // to vault-core (as with VAULT_CORE_SETTINGS_FILE set), so it never
+      // reports core_file_disabled.
+      reason: pinned ? "env" : null,
     });
   }
   for (const entry of ENV_ONLY_DEMO) {
     // The two ADR-0010 relay-privacy keys report "env" whenever
     // resetDemoData() turned them on, mirroring the real server's
-    // `_env_var_is_set(...)` check — every other row here has no demo
-    // "restart" analogue at all, so it stays "default" the way it always
-    // has (unchanged by this fix).
-    const source =
-      (entry.key === "relay_expose_playtime" || entry.key === "relay_expose_last_played") && entry.value === true
-        ? "env"
-        : "default";
+    // `_env_var_is_set(...)`; the demo webhook URL is "set in env" too.
+    const isRelay = entry.key === "relay_expose_playtime" || entry.key === "relay_expose_last_played";
+    const source = (isRelay && entry.value === true) || entry.key === "webhook_url" ? "env" : "default";
     infos.push({
       key: entry.key,
       effective: entry.value,
@@ -1200,6 +1403,16 @@ function describeDemoSettings() {
       fallback: entry.value,
       applies: "restart-required",
       env_only: true,
+      env_var: entry.env_var,
+      value: null,
+      editable: false,
+      risky: false,
+      expert: false,
+      grammar: "",
+      target: "api",
+      env_visible: true,
+      shadowed: entry.key in settingsOverrides,
+      reason: "env_only",
     });
   }
   return infos;
@@ -1241,7 +1454,35 @@ function handleGetSettings() {
   return { readonly: settingsReadonly, server_version: DEMO_SERVER_VERSION, settings: describeDemoSettings() };
 }
 
-function handlePatchSettings(body) {
+const DEMO_RISKY_DETAIL =
+  "This change includes debug settings that can break downloads. Repeat the request with confirm_risky=true to apply it.";
+
+/** Audit 3.4 cross rules on the values the batch leaves behind, only when
+ * the batch touches them (settings_store.check_cross_rules). */
+function checkDemoCrossRules(prospective, touched) {
+  const value = (key) => {
+    const spec = DEMO_SPEC_BY_KEY.get(key);
+    if (demoEnvPinned(spec)) return Number(spec.env);
+    const raw = prospective[key];
+    return Number(raw === undefined ? spec.default : spec.parse(key, raw));
+  };
+  if (touched.has("upstream_max_conns") || touched.has("prefill_max_threads")) {
+    if (value("upstream_max_conns") < value("prefill_max_threads")) {
+      throw validationError(
+        `VAULT_UPSTREAM_MAX_CONNS=${value("upstream_max_conns")} is below VAULT_PREFILL_MAX_THREADS=${value("prefill_max_threads")}: the cap must be at least the prefill threads.`,
+      );
+    }
+  }
+  if (touched.has("tls_client_max_conns") || touched.has("tls_max_conns")) {
+    if (value("tls_client_max_conns") > value("tls_max_conns")) {
+      throw validationError(
+        `VAULT_TLS_CLIENT_MAX_CONNS=${value("tls_client_max_conns")} is above VAULT_TLS_MAX_CONNS=${value("tls_max_conns")}.`,
+      );
+    }
+  }
+}
+
+function handlePatchSettings(body, params) {
   if (settingsReadonly) {
     throw new ApiError(ERROR_KINDS.VALIDATION, "The settings API is read-only.", { status: 403 });
   }
@@ -1249,31 +1490,50 @@ function handlePatchSettings(body) {
   const toClear = [];
   for (const [key, value] of Object.entries(body || {})) {
     if (ENV_ONLY_KEYS.has(key)) {
-      // WP 4h.2 fix: byte-identical to routers/settings.py's
-      // `_ENV_ONLY_DETAIL_TEMPLATE` (read at that file's own definition, not
-      // guessed) — the previous, shorter demo string was already wrong for
-      // the seven pre-existing env-only keys, not just the two ADR-0010
-      // relay ones this fix set out to add; fixing the ONE template fixes
-      // parity for all nine at once.
+      // Byte-identical to routers/settings.py's `_ENV_ONLY_DETAIL_TEMPLATE`.
       throw validationError(
         `'${key}' is environment-only and cannot be changed via the API; set its environment variable and restart instead.`,
       );
     }
-    if (!(key in SETTINGS_BASE)) {
+    const spec = DEMO_SPEC_BY_KEY.get(key);
+    if (!spec) {
       throw validationError(`'${key}' is not a recognised setting.`);
+    }
+    if (demoEnvPinned(spec)) {
+      // routers/settings.py `_ENV_PINNED_DETAIL_TEMPLATE`.
+      throw new ApiError(
+        ERROR_KINDS.VALIDATION,
+        "PATCH /v1/settings failed (409)",
+        {
+          status: 409,
+          detail: `'${key}' is set via env (${spec.env_var}); env always wins. Remove the environment variable and restart to change it here.`,
+        },
+      );
     }
     if (value === null) {
       toClear.push(key);
       continue;
     }
     const raw = coercePatchValue(key, value);
-    parseSettingValue(key, raw); // validate only, same "validate everything first" order
-    toSet.push([key, raw]);
+    // schedule_window: blank means off (D16b-1 review), null resets it.
+    const parsed = spec.parse(key, raw); // validate only, same "validate everything first" order
+    toSet.push([key, spec.target === "core" ? String(parsed) : raw]);
   }
+  const risky = [...toSet.map(([k]) => k), ...toClear].filter((k) => DEMO_SPEC_BY_KEY.get(k).risky).sort();
+  const confirmed = params && String(params.confirm_risky).toLowerCase() === "true";
+  if (risky.length > 0 && !confirmed) {
+    throw new ApiError(ERROR_KINDS.VALIDATION, "PATCH /v1/settings failed (428)", {
+      status: 428,
+      detail: { message: DEMO_RISKY_DETAIL, risky_keys: risky },
+    });
+  }
+  const prospective = { ...settingsOverrides };
+  for (const [key, raw] of toSet) prospective[key] = raw;
+  for (const key of toClear) delete prospective[key];
+  checkDemoCrossRules(prospective, new Set([...toSet.map(([k]) => k), ...toClear]));
   // Everything validated above before anything is written (ADR-0009: a bad
   // value in a multi-key PATCH must persist nothing).
-  for (const [key, raw] of toSet) settingsOverrides[key] = raw;
-  for (const key of toClear) delete settingsOverrides[key];
+  settingsOverrides = prospective;
   return handleGetSettings();
 }
 
@@ -1314,8 +1574,9 @@ function handleGetSchedule() {
   const sweepIncludeCached = effective.get("sweep_include_cached") === true;
   const autoGc = effective.get("auto_gc");
   return {
-    enabled: typeof window === "string" && window.length > 0,
-    window: window ?? null,
+    // D16b: "off" (no window) is how GET /v1/settings spells it now.
+    enabled: typeof window === "string" && window.length > 0 && window !== "off",
+    window: typeof window === "string" && window.length > 0 && window !== "off" ? window : null,
     overnight: false,
     interval_minutes: effective.get("schedule_interval_minutes"),
     client_stale_days: effective.get("schedule_client_stale_days"),
@@ -2681,7 +2942,7 @@ export async function demoRequest(method, path, { body, params } = {}) {
     return handleGetSettings();
   }
   if (method === "PATCH" && path === "/v1/settings") {
-    return handlePatchSettings(body);
+    return handlePatchSettings(body, params);
   }
   if (method === "GET" && path === "/v1/schedule") {
     return handleGetSchedule();

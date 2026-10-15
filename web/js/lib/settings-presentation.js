@@ -10,9 +10,13 @@ const APPLIES_TEXT = Object.freeze({
   immediately: "Takes effect immediately.",
   next_sweep: "Takes effect at the next scheduled sweep.",
   "restart-required": "Takes effect after vault-api restarts.",
+  // D16b: read per prefill or GC job (vault-api's worker and vault-runner).
+  next_job: "Takes effect with the next prefill or GC job.",
+  // D16b/D16c: only when the API itself says vault-core applies the key.
+  core: "Applies to vault-core without restart.",
 });
 
-/** @param {string} applies one of "immediately"|"next_sweep"|"restart-required" */
+/** @param {string} applies one of "immediately"|"next_sweep"|"restart-required"|"next_job"|"core" */
 export function appliesText(applies) {
   return APPLIES_TEXT[applies] || "Takes effect at an unspecified time.";
 }

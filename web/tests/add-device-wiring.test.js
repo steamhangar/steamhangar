@@ -557,6 +557,7 @@ test("MUTATION TARGET: phone — a baked APK: 'Download app' and its QR point at
   await until(() => appLink() !== null, "download button");
   const url = `${ORIGIN}/dist/steamhangar-app.apk`;
   assert.equal(appLink().textContent, "Download app");
+  assert.equal(q("app-download-caption").textContent, "Scan the code with the phone's camera to download and install the app.", "a connected vault invites the scan");
   assert.equal(appLink().href, url);
   assert.equal(appLink().getAttribute("data-source"), "local");
   assert.match(appLink().title, /^steamhangar-app-v0\.1\.0-rc10\.apk, 9\.3 MB, from this vault\.$/);
@@ -649,6 +650,9 @@ test("MUTATION TARGET: demo mode — the app download renders from the fake inde
     assert.equal(appLink(), null, "review N3: no link into the fake index");
     assert.equal(q("app-download-demo").querySelector("a"), null);
     assert.notEqual(q("app-download-qr"), null);
+    // DIST-1b review nit: the demo caption must not invite a scan.
+    assert.equal(q("app-download-caption").textContent, "Demo: the code shows where a connected vault offers the app.");
+    assert.doesNotMatch(q("app-download-caption").textContent, /scan/i);
     assert.equal(sheet().querySelector(".pair-options").hidden, true, "the pairing options stay hidden");
     assert.equal(server.distGets, before, "demo mode makes no request");
   } finally {
