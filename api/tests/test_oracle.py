@@ -382,6 +382,7 @@ def test_app_info_url_builds_from_a_positive_int_only() -> None:
         oracle.app_info_url("https://x/v1/info", 0)
 
 
+@pytest.mark.real_http_fetch
 def test_http_fetch_refuses_a_non_http_scheme() -> None:
     """The guard that means a misconfigured URL can never make vault-api read
     a local file. (No network is used: the scheme check runs first.)"""

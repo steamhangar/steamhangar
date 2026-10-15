@@ -33,6 +33,7 @@ def test_redact_url_over_redacts_an_unencoded_delimiter(sep: str) -> None:
     assert redacted.endswith("@hooks.example.net/x")
 
 
+@pytest.mark.real_http_fetch
 def test_the_oracle_error_hides_userinfo_and_query() -> None:
     url = f"http://user:{SECRET}@127.0.0.1:1/app/440?token={SECRET}"
     with pytest.raises(oracle.OracleError) as caught:

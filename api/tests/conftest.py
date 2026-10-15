@@ -137,6 +137,26 @@ def _no_post_run_oracle_network_in_tests(monkeypatch):
     monkeypatch.setattr(worker, "_default_oracle_fetch", refuse)
 
 
+@pytest.fixture(autouse=True)
+def _no_oracle_http_fetch_in_tests(request, monkeypatch) -> None:
+    """Tests must never hit the real network through the manifest oracle:
+    ``oracle.http_fetch`` raises ``OracleError`` unless the test says
+    ``@pytest.mark.real_http_fetch`` (the oracle unit tests of its scheme and
+    error-redaction rules, which never reach a remote host) or patches it
+    itself with a fake (a later monkeypatch overrides this guard)."""
+    if request.node.get_closest_marker("real_http_fetch"):
+        return
+    from vault_api import oracle
+
+    def refuse(url: str, *args, **kwargs) -> bytes:
+        raise oracle.OracleError(
+            "oracle.http_fetch called in a test without a fake; patch it, or mark the "
+            "test @pytest.mark.real_http_fetch"
+        )
+
+    monkeypatch.setattr(oracle, "http_fetch", refuse)
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(

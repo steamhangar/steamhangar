@@ -1086,3 +1086,34 @@ def test_webhook_opener_keeps_the_stock_proxy_handler(
     live_types = {type(h) for h in webhooks._OPENER.handlers}
     assert webhooks._RefuseRedirects in live_types
     assert urllib.request.HTTPRedirectHandler not in live_types
+
+
+# --------------------------------------------------------------------------
+# Boot witness: the lifespan states whether webhooks are on (rc18 follow-up)
+# --------------------------------------------------------------------------
+
+
+def _boot_lines(settings: Settings, caplog: pytest.LogCaptureFixture) -> list[str]:
+    with caplog.at_level("INFO", logger="vault_api.main"):
+        with TestClient(create_app(settings)):
+            pass
+    return [r.getMessage() for r in caplog.records if "Webhook notifications" in r.getMessage()]
+
+
+def test_boot_logs_webhooks_enabled_with_a_redacted_url(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    settings = make_settings(
+        tmp_path, webhook_url="http://user:s3cr3t@hooks.invalid:9/hook"
+    )
+    lines = _boot_lines(settings, caplog)
+    assert len(lines) == 1 and lines[0].startswith("Webhook notifications enabled:")
+    assert "hooks.invalid" in lines[0]
+    assert "s3cr3t" not in lines[0]
+
+
+def test_boot_logs_webhooks_disabled_when_the_url_is_unset(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    lines = _boot_lines(make_settings(tmp_path, webhook_url=""), caplog)
+    assert lines == ["Webhook notifications disabled (VAULT_WEBHOOK_URL is unset)."]
