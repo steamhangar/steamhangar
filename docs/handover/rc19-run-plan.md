@@ -26,7 +26,7 @@ stop only for a plan deviation not covered here.
   the SQLite dump from update.sh (newer schema is refused by older code).
   Test the migration on a copy of a populated dev DB.
 - **Downloads range default:** the range the user chose last, remembered per
-  browser (fallback 24 h when nothing is stored).
+  browser (fallback 6 h when nothing is stored).
 - **MAP-DRIFT-1 cleanup:** once at startup like the UPD-FIX-1 manifest
   repair: only orphan rows without a mapping and without bytes on disk,
   counters in the log, a non-lossy filter with a partial-update regression
