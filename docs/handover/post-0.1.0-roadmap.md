@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D20)
+# Handover: post-v0.1.0 roadmap (items D1-D22)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -687,14 +687,14 @@ Design (proposed, to settle in the package brief):
   (public branch, DLC depots without manifest listed apart), and switches to
   the observed values after the first download.
 - Privacy: each opened card sends one appid to a third party. Same data as
-  the cached-game poll, but triggered by browsing; needs a Settings switch
-  (default on, follows `VAULT_MANIFEST_ORACLE=off`) and dedupe/rate limit
-  per appid.
+  the cached-game poll, but triggered by browsing. No separate switch of its
+  own: it follows the privacy mode of D22 (until D22 lands it follows
+  `VAULT_MANIFEST_ORACLE=off`), plus dedupe/rate limit per appid.
 - Dev: anonymous metadata queries are allowed (user decision 2026-10-13);
   no downloads.
 
 Packages: **DEPOT-PREVIEW-1a (api)** on-demand query, TTL storage, response
-fields; **DEPOT-PREVIEW-1b (web)** "expected" display and the Settings switch;
+fields; **DEPOT-PREVIEW-1b (web)** "expected" display;
 Android follows in the app track.
 
 ## D20: QUEUE-ORDER-1, make the Downloads queue sortable
@@ -724,6 +724,68 @@ Design (proposed):
 Packages: **QUEUE-ORDER-1a (api)** migration, claim order, move endpoint,
 tests; **QUEUE-ORDER-1b (web)** drag and drop, keyboard path, tests; Android
 follows in the app track.
+
+## D21: PRIVACY-REVIEW-1, review of all privacy concerns (before D19 ships)
+
+User request 2026-10-15. Read-only review package (reviewer, no production
+code). Scope: every flow that leaves the LAN or shows personal data to
+another person in the household, including the new D19 on-open oracle query.
+Inventory as of rc18.1 (from `api/README.md`, `cover_art.py`, `steam_relay.py`,
+ADR-0010, ADR-0011; to be re-verified in the review, not taken as final):
+
+| Flow | Data | Recipient | Control today |
+|------|------|-----------|---------------|
+| Manifest oracle, cached games, every `VAULT_SCHEDULE_INTERVAL_MINUTES` | appids | api.steamcmd.net (third party) | `VAULT_MANIFEST_ORACLE`, `_URL`, `_TIMEOUT` |
+| Oracle on card open (D19, new) | appids of browsed games | same | none yet |
+| Cover lookup `IStoreBrowseService/GetItems` and cover images | appids | api.steampowered.com, steamstatic CDN (Valve) | egress lock only |
+| Steam Web API relay (library preview) | SteamID64, optional web key | api.steampowered.com | `VAULT_STEAM_LIBRARY_STEAMID`, key routes |
+| Playtime and last played in the relay response | household members' habits | people in the living room | `VAULT_RELAY_EXPOSE_PLAYTIME`, `_LAST_PLAYED` (env-only, ADR-0010) |
+| Webhooks | job and client events, client addresses | operator-chosen URL | `VAULT_WEBHOOK_URL`, `_EVENTS`, `VAULT_NAME` |
+| Extra egress hosts | any | any named host | `VAULT_EGRESS_ALLOW` |
+| Downloads, Steam login | account session | Valve | not optional (product purpose) |
+
+The review answers: which flows carry personal data, which are optional,
+which are on by default, whether each control fails towards "more
+collection" when its store is lost (the `docs/LEARNINGS.md` rule: a
+failure-mode analysis per store, env, db volume, image default, BEFORE any
+coder brief), and which controls overlap or contradict. Output:
+`docs/security/privacy-review.md` plus findings for the D22 design.
+
+## D22: PRIVACY-MODE-1, one privacy mode instead of many switches
+
+User idea 2026-10-15: replace the many single privacy controls with a mode,
+for example `off`, `light`, `secure`, `strict`, each a bundle. Proposed, not
+decided; the ADR comes after D21. Starting sketch, to be corrected by the
+review:
+
+| Flow | off | light | secure | strict |
+|------|-----|-------|--------|--------|
+| Oracle poll, cached games | on | on | on | off |
+| Oracle on card open (D19) | on | on | off | off |
+| Covers (lookup and images) | on | on | on | placeholders |
+| Library relay | on | on | on | off |
+| Playtime, last played | allowed | hidden | hidden | hidden |
+| Webhook payload with client addresses | included | omitted | omitted | webhooks off |
+| `VAULT_EGRESS_ALLOW` extra hosts | honoured | honoured | honoured | ignored |
+
+Design questions for the ADR:
+- Where the mode lives. A mode stored only in the db volume reverts to its
+  default when the volume is lost, so the default must be the safe direction,
+  or the floor is an env value and the UI may only tighten it (ADR-0010 chose
+  env-only for the playtime gate for this reason).
+- Which existing env keys stay as expert overrides (`VAULT_MANIFEST_ORACLE`
+  and so on) and which are removed; how the mode and an explicit override
+  rank (an explicit env value wins, as in the rc18 settings rule) and how the
+  Settings page shows "set via mode" versus "set via env".
+- The default mode for a new install and the migration of the current
+  rc18.1 production values (today's behaviour is closest to `light`).
+- Whether `off` should exist at all, or "light" is the loosest level.
+
+Packages: **PRIVACY-MODE-1a (docs)** ADR with the failure-mode analysis;
+**1b (api)** mode resolver, mapping to the existing controls, tests per mode
+and per store loss; **1c (web)** one Settings control and the "set via"
+display; Android follows in the app track. Order: D21, then D22, then D19
+ships on top of the mode.
 
 ## Wave plan (user-approved 2026-10-13)
 
