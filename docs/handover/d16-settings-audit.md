@@ -410,6 +410,12 @@ Tests and fixtures that change:
     `test_env_example_documents_the_cap_defaults` (217) and
     `test_core_fix_2_max_threads.py` `test_deploy_env_example_documents_the_default`
     (287) must be checked against the commented form.
+- **Amendment (D16b review decision B2, 2026-10-15):** in a `PATCH
+  /v1/settings` body a blank `schedule_window` means `off`, not "not set".
+  The shipped rc17 Android app and the current web UI send `""` to disable
+  the scheduler, and they must keep working against an rc18 vault-api.
+  `null` resets the key to the default. The env side is unchanged: a blank
+  `VAULT_SCHEDULE_WINDOW` is "not set".
 - Web: the window field's placeholder "blank to disable" becomes "off to
   disable"; `lib/settings-presentation.js` `effectiveAsInputValue` renders
   a `null` window as `off`.

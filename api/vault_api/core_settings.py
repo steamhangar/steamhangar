@@ -354,14 +354,6 @@ def check_tls_order(core: Mapping[str, str | None]) -> None:
         )
 
 
-def check_cross_rules(core: Mapping[str, str | None], prefill_max_threads: int) -> None:
-    """Both rules of audit 3.4 that vault-core enforces at render time.
-    (The third, "pool hosts are ignored while an edge is set", is not an
-    error; the UI greys the field out.)"""
-    check_cap_floor(core, prefill_max_threads)
-    check_tls_order(core)
-
-
 # --------------------------------------------------------------------------
 # The file (audit 4.2)
 # --------------------------------------------------------------------------

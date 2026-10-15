@@ -180,7 +180,8 @@ services:
       # Optional upstream (Steam CDN -> vault) rate cap (WP TH-1a/TH-1b,
       # ADR-0015, core/README.md "Upstream rate cap"). ONE aggregate limit in
       # bytes/s, nginx size syntax (k = 1024, m = 1048576), divided per
-      # request by the live request count. Empty or unset = no cap. An
+      # request by the live request count. `off` = no cap; empty or unset =
+      # not set (rc18: Settings via the core file from D16c on, else no cap). An
       # invalid value stops vault-core's boot (fail-closed). Env-only:
       # recreate vault-core after a change.
       VAULT_UPSTREAM_RATE: ${VAULT_UPSTREAM_RATE-}
@@ -230,7 +231,7 @@ services:
       # edge, 32 in total, ADR-0017 decision 3A). Env-only, baked at container
       # start: recreate vault-core after a change (`docker compose up -d
       # vault-core`, decision 4B), the same contract as VAULT_UPSTREAM_RATE
-      # above and the same `-` form (blank passes through as "" = off).
+      # above and the same `-` form (`off` = no pool; blank = not set).
       # deploy/.env.example ships a seed list (decision 2B).
       VAULT_UPSTREAM_POOL_HOSTS: ${VAULT_UPSTREAM_POOL_HOSTS-}
       # One pooled upstream edge for EVERY cache MISS plus a global upstream

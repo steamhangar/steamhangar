@@ -327,7 +327,7 @@ startup error rather than a soft "no data": unset or empty means the default
 is refused, so a typo can neither look like it worked nor silently mean "off". Once the
 oracle is running, every failure it can have is soft — see below.
 
-## Database schema (v27)
+## Database schema (v28)
 
 Created idempotently at startup by `vault_api/db.py::init_db` (safe to call
 on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
@@ -362,6 +362,7 @@ on every process start — uses `CREATE TABLE IF NOT EXISTS` and only seeds
 | `client_names` | `key_type`, `key`, `name`, `updated_at`, PK `(key_type, key)` | **v26**, WP D15-NAMES (on top of v25 CACHE-COMPLETE-1a). An operator-set client name per address: `key_type` `ip` (canonical IP literal); `mac` is allowed by the `CHECK` but refused by the API until an agent reports MACs. Plain `CREATE TABLE IF NOT EXISTS`, run on every start, so it does not depend on the version stamp. See "Client names" below |
 | `runner_marks` | `token` PK, `issued_at`, `runner_id`, `consumed_at`, `consumed_addr` | **v27**, WP D15-RUNNER. One row per marker token the prefill runner issued before `GET /steamhangar/runner-mark/<token>`; the sweep consumes it on its first valid marker line. Rows older than 7 days are deleted when the next token is issued |
 | `runner_address_periods` | `id`, `addr`, `first_marked_at`, `last_marked_at` | **v27**, WP D15-RUNNER. Which cache-log address was the prefill runner, when (one row per continuous period). Kept forever. Both v27 tables are plain `CREATE TABLE IF NOT EXISTS`, run on every start, so they do not depend on the version stamp. See "The prefill runner in the client figures" |
+| `maintenance_steps` | `name` (PK), `done_at` | **v28**, WP UPD-FIX-1. One row per finished one-time step that needs runtime settings (so it cannot run inside `init_db`). First user: the startup repair of `depot_manifests` rows recorded by the old last-file-wins ingestion (see "Manifest ingestion"). |
 
 Indexes beyond the primary keys: `idx_depot_app_map_appid` on
 `depot_app_map(appid)` (plan §4's main lookup direction is appid → depots,
@@ -3385,9 +3386,23 @@ every **successful** prefill job, the worker (`vault_api/worker.py`) calls
 
 1. Scans `VAULT_STEAMPREFILL_CACHE_DIR` for files named `{appid}_*.bin` —
    only this job's own app, never every file in the (shared) directory.
-2. Parses each candidate with `manifests.parse_bin_filename` (recovers
-   `containing_appid`) and `manifests.parse_steamprefill_bin` (the validated
-   payload, which independently re-checks the filename against the payload).
+2. Parses each candidate's name with `manifests.parse_bin_filename`
+   (recovers `containing_appid`) and groups the files per depot. **Per depot
+   only ONE file is recorded (WP UPD-FIX-1): the newest by file mtime**
+   (`select_current_manifest`; an mtime tie goes to the larger manifest id).
+   SteamPrefill's temp cache keeps every manifest it ever downloaded, and
+   recording all of them in directory order let a leftover overwrite the
+   current one ("Update now" never cleared the flag on prod).
+   SteamPrefill's own `Config/successfullyDownloadedDepots.json` cannot pick
+   the current one: it is a set of every manifest ever finished, with no
+   order, and lives next to the Steam session that vault-api does not mount.
+   The other files are listed as "ignored ... older manifest file(s)" in the
+   job log. If the chosen file does not parse, nothing is recorded for that
+   depot (never an older file instead). Restoring the temp-cache volume
+   without preserving file mtimes breaks this rule until the next real
+   download. The chosen file is parsed with
+   `manifests.parse_steamprefill_bin` (the validated payload, which
+   independently re-checks the filename against the payload).
 3. Upserts a `depot_manifests` row (`vault_api/depot_manifests.py`) —
    **latest-per-`(appid, depotid)`, replacing any older row** (ADR-0006
    decision 3; this is not a manifest history table).
@@ -3399,6 +3414,13 @@ every **successful** prefill job, the worker (`vault_api/worker.py`) calls
    package, still driven by the before/after depot-directory diff).
 5. Archives the source `.bin` file durably (`vault_api/manifest_archive.py`)
    and prunes older archives for that depot down to `VAULT_MANIFEST_KEEP`.
+
+**One-time repair (WP UPD-FIX-1, schema v28):** at startup, before the
+worker runs, `repair_recorded_manifests` re-derives every `steamprefill_bin`
+row once with the same rule, using only files that already existed when the
+row was recorded (a later file may come from a failed run). It is stamped in
+`maintenance_steps` once the temp-cache directory could be listed; a host
+without the directory retries on the next start.
 
 **A file that fails to parse is warned about and skipped — it never fails the
 job.** Two kinds of "skip" are tracked *separately*, not conflated
@@ -5775,12 +5797,25 @@ oracle"): with it off, no check runs, scheduled or manual.
 - **Library flag.** `update_available` on `GET /v1/games` and
   `GET /v1/games/{appid}` is the oracle's `stale` verdict (its public manifest
   differs from the one recorded for the cache), only for a game that currently
-  has cache bytes (`depot_manifests` rows outlive a cache deletion).
+  has cache bytes (`depot_manifests` rows outlive a cache deletion). Every
+  recorded depot of the app is compared, not only those in `depot_app_map`:
+  the mapping drops depots a partial update did not write to, so filtering by
+  it would hide their later updates. Orphan rows (a depot the vault no longer
+  prefills) and mapping drift on partial updates are a tracked follow-up.
+- **Settled right after a download (WP UPD-FIX-1).** The verdict is computed
+  live, so a successful prefill that recorded the oracle's build clears the
+  flag at once. If the app still reads `stale` after the run, the worker asks
+  the oracle once more for that app only (the snapshot may predate a newer
+  build) instead of waiting for the next check. If it is still stale, the job
+  log says so: "Steam reports this build as current - oracle and Steam
+  disagree" when SteamPrefill reported the app Up To Date, otherwise that the
+  oracle still lists a different build.
 
 **What leaves the LAN.** With the oracle on, every cached game's app id goes to
 the oracle (`api.steamcmd.net` by default) **in the background, every
-`VAULT_SCHEDULE_INTERVAL_MINUTES`**, plus on every manual check, whether or not
-a schedule window is configured. Metadata only: no download starts, nothing
+`VAULT_SCHEDULE_INTERVAL_MINUTES`**, plus on every manual check, and once
+after a successful prefill of a game that still reads stale (WP UPD-FIX-1),
+whether or not a schedule window is configured. Metadata only: no download starts, nothing
 else is sent. This includes an instance without a window, like the dev
 instance (user decision 2026-10-14: anonymous metadata, allowed). Tests inject
 a fake fetcher and fail on any socket connect; `deploy/tests/verify-stack.sh`
@@ -6679,8 +6714,9 @@ non-regular files under a valid name. Versioned names are served with
 above. A baked file has `local: true`, `size`, `sha256` and
 `local_url` (`/dist/<name>`, relative to the vault origin). A file that is
 not baked has `local: false` and, when the server version is a published
-release (release-shaped version AND a known commit, the rule the web's
-`agentReleaseFromAbout` uses), the GitHub Release asset URL of the same
+release (release-shaped version AND a known commit; the web reads this
+`release` flag and checks the version grammar again with
+`isReleaseVersion`), the GitHub Release asset URL of the same
 version as `release_url`. `url` is the one to use (`local_url`, else
 `release_url`), `source` says which (`local`/`release`/`none`).
 `apk_alias_url` is set while the APK is baked in.
@@ -7438,19 +7474,37 @@ This supersedes the precedence subsection below (ADR-0009 addendum
 - **Cross-variable rules** (`422`): `upstream_max_conns >= prefill_max_threads`
   and `tls_client_max_conns <= tls_max_conns`, judged on the values the
   batch leaves behind, only when the batch touches those keys.
-- **`off`** spells "no window" for `schedule_window` (a blank PATCH value
-  resets it, like `null`), "no cap" for `upstream_rate`, "legacy per-name
+- **`off`** spells "no window" for `schedule_window`. A blank PATCH value
+  for `schedule_window` also means `off` (amendment of audit 3.6, review
+  decision B2: the rc17 Android app and web UI send `""` to disable); `null`
+  resets it to the default. Elsewhere `off` means "no cap" for `upstream_rate`, "legacy per-name
   pool" for `upstream_edge` and "none" for `upstream_pool_hosts`. Core keys
   are validated by `vault_api/core_settings.py`, Python twins of the hook
   grammars pinned by `core/tests/fixtures/settings-grammar.tsv`.
-- **`webhook_url` is env-only** (Q2): no PATCH path, shown masked
-  (`scheme://host/***`); a stored value is ignored with one startup warning.
+- **`webhook_url` is env-only** (Q2): no PATCH path, shown masked to scheme
+  and host (`scheme://[***@]host/***`; any `@` after the scheme counts as
+  userinfo); a stored value is ignored with one startup warning.
 - **`VAULT_UPSTREAM_RATE_WINDOW` is deprecated** (Q3): vault-core's rate cap
   follows the download window. `settings_store.core_values` computes the
   values for vault-core, with `VAULT_UPSTREAM_RATE_WINDOW` = the effective
-  download window (`off` when it is off). `VAULT_CORE_SETTINGS_FILE`
-  (env-only path, blank = off) makes vault-api write them atomically at boot
-  and after each PATCH; D16c wires the volume and vault-core's reader.
+  download window (`off` when it is off). The deprecation warning for an env
+  value of it is vault-core's (D16c); compose does not forward it to
+  vault-api, so vault-api does not warn.
+- **Core keys need the core settings file** (review decision B3).
+  `VAULT_CORE_SETTINGS_FILE` (env-only path) makes vault-api write the core
+  values atomically at boot and after each PATCH; D16c wires the volume and
+  vault-core's reader. While it is blank (the shipped state until D16c) the
+  vault-core keys (`target: "core"`) are read-only: GET reports
+  `editable: false`, `reason: "core_file_disabled"`, `source: "default"`, and
+  PATCH answers `409`. The cross-variable rules then judge vault-api's own
+  env and the hook defaults, never stored core values. Every row carries
+  `reason` (`env` | `env_only` | `core_file_disabled` | `null`).
+- **Log level:** applies immediately in vault-api; vault-runner applies the
+  effective level at the start of each job (with prefill threads and
+  timeout, which it also resolves per job).
+- **Window default visible at boot:** when neither the env nor Settings sets
+  a download window, vault-api logs one WARNING that 03:00-07:00 is the rc18
+  default and that `off` disables it.
 
 ### Precedence before D16b: DB override > env value > built-in default
 

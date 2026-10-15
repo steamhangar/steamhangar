@@ -12,7 +12,7 @@ testable with an in-memory/temp-file Settings instance (see api/tests/).
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -26,7 +26,7 @@ from vault_api.cover_cache import CoverFileFetcher
 from vault_api.db import get_connection, init_db
 from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
-from vault_api.manifest_ingest import log_cache_dir_canary
+from vault_api.manifest_ingest import log_cache_dir_canary, repair_recorded_manifests
 from vault_api.routers import (
     about,
     agent,
@@ -49,7 +49,7 @@ from vault_api.routers import (
     traffic as traffic_router,
     updates,
 )
-from vault_api import settings_store
+from vault_api import config, settings_store
 from vault_api.scheduler import PrefillScheduler
 from vault_api.update_check import UpdateCheckRunner
 from vault_api.sizes import SizeCache
@@ -101,6 +101,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # see manifest_ingest.log_cache_dir_canary's docstring.
     log_cache_dir_canary(settings.steamprefill_cache_dir)
 
+    # WP UPD-FIX-1: once per database, correct depot_manifests rows recorded
+    # by the old last-file-wins ingestion. Before the worker starts, so no
+    # ingestion runs concurrently. Never fails startup.
+    try:
+        with closing(get_connection(settings.db_path)) as repair_conn:
+            repair = repair_recorded_manifests(repair_conn, settings)
+        if repair.repaired:
+            logger.warning(
+                "Manifest repair corrected %d recorded manifest(s) (WP UPD-FIX-1).",
+                len(repair.repaired),
+            )
+    except Exception:  # noqa: BLE001 - a repair must never stop the API
+        logger.exception("Manifest repair failed; it is retried on the next start.")
+
     # WP 3.13: started before the worker so the worker's very first job
     # finalization already has somewhere to enqueue a webhook. A no-op thread
     # (start() itself checks settings.webhook_enabled) when VAULT_WEBHOOK_URL
@@ -134,25 +148,26 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # thread already has on an idle queue.
     scheduler: PrefillScheduler = app.state.scheduler
     scheduler.start()
-    if scheduler.enabled:
-        window = settings.schedule_window
-        assert window is not None  # implied by scheduler_enabled
+    # D16b review S6: the boot lines report the EFFECTIVE values (env >
+    # Settings > default), not the env snapshot.
+    boot: Settings = getattr(app.state, "boot_settings", settings)
+    if boot.schedule_window is not None:
+        window = boot.schedule_window
         logger.info(
             "Scheduler enabled: window %s (server-local time%s), sweeping "
             "every %d minute(s); clients silent for more than %d day(s) are "
             "excluded from the target set.",
             window.raw,
             ", overnight" if window.overnight else "",
-            settings.schedule_interval_minutes,
-            settings.schedule_client_stale_days,
+            boot.schedule_interval_minutes,
+            boot.schedule_client_stale_days,
         )
     else:
         logger.info(
-            "Scheduler disabled by the environment (VAULT_SCHEDULE_WINDOW=off) "
-            "or, for a bare Settings, no window; a window stored in Settings "
-            "may still apply (see the resolved-schedule line of the first "
-            "tick). Prefills otherwise only run when something asks for them "
-            "(POST /v1/prefill)."
+            "Scheduler window is off (VAULT_SCHEDULE_WINDOW=off or 'off' in "
+            "Settings; blank or unset would mean the default %s). Prefills "
+            "only run when something asks for them (POST /v1/prefill).",
+            config.DEFAULT_SCHEDULE_WINDOW,
         )
 
     # WP 3.11 (ADR-0008). Independent of the window above: the cache-event
@@ -193,12 +208,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     cover_fetcher.start()
 
     # WP 3.13.
-    if settings.webhook_enabled:
+    if boot.webhook_enabled:
         logger.info(
             "Webhook notifications enabled: %s, events=%s, timeout=%.1fs.",
-            redact_url(settings.webhook_url),
-            sorted(settings.webhook_events),
-            settings.webhook_timeout_seconds,
+            redact_url(boot.webhook_url),
+            sorted(boot.webhook_events),
+            boot.webhook_timeout_seconds,
         )
     else:
         logger.info(
@@ -346,6 +361,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # it exists for a plain TestClient() too, but start() (called from the
     # lifespan below) is itself a no-op unless VAULT_WEBHOOK_URL is set.
     app.state.webhook_notifier = WebhookNotifier(boot_settings)
+    app.state.boot_settings = boot_settings
     # WP 3.5: created here rather than in the lifespan (same reasoning as
     # size_cache above) for two reasons: GET /v1/schedule needs it to answer
     # even when the scheduler is disabled or the lifespan never ran (a plain

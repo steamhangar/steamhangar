@@ -978,11 +978,12 @@ VAULT_UPSTREAM_RATE=800k          # ONE aggregate limit, bytes/s; empty = no cap
   `VAULT_SCHEDULE_WINDOW` grammar. Full speed **inside** the window, capped
   outside. Unset (the line commented out) = it follows
   `VAULT_SCHEDULE_WINDOW`, default `03:00-07:00`, so the cap lifts while
-  the scheduler runs. Set it explicitly blank (`VAULT_UPSTREAM_RATE_WINDOW=`)
-  to cap around the clock. Only the env window is followed, not one stored
-  via `PATCH /v1/settings`. `VAULT_SCHEDULE_WINDOW=` (blank, scheduler
-  off) together with a set rate and this line unset also means the cap
-  applies around the clock.
+  the scheduler runs. Deprecated since rc18 (the cap follows the one
+  download window); set it to `off` (`VAULT_UPSTREAM_RATE_WINDOW=off`) to
+  cap around the clock (before rc18: an explicitly blank value). Only the env window is followed, not one stored
+  via `PATCH /v1/settings` (until D16c). `VAULT_SCHEDULE_WINDOW=off`
+  (scheduler off) together with a set rate and this line unset also means
+  the cap applies around the clock.
 - **Time zone:** the window is evaluated in vault-core's local time, which
   is `TZ` (forwarded to vault-core too, default `UTC`). Set `TZ` once in
   `.env` and the scheduler and the cap agree.

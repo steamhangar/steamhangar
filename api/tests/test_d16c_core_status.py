@@ -21,6 +21,9 @@ S5  GET without the file: unchanged from D16b (``env_visible: false``,
 S6  ``core_apply.pending`` is true exactly while vault-api's own settings file
     has a newer generation than vault-core last looked at.
 S7  the shell defaults (``vs_default``) equal vault-api's constants.
+S9  PATCH refuses (409) a core key vault-core's env pins, like GET shows it;
+    the cross rules use core's pinned values; B3 still locks core rows while
+    the file is disabled.
 S8  compose: the vault-settings volume, rw for vault-api, ro + nocopy for
     vault-core, nobody else; VAULT_CORE_SETTINGS_FILE set; the api image owns
     the mount point 101:101.
@@ -210,8 +213,14 @@ def _get(settings: Settings) -> dict:
     return response.json()
 
 
+def _file_settings(tmp_path: Path) -> Settings:
+    """The core settings file enabled, as compose ships it (B3 lock lifted)."""
+    (tmp_path / "settings").mkdir(exist_ok=True)
+    return _settings(tmp_path, core_settings_file=str(tmp_path / "settings" / "core-settings.env"))
+
+
 def test_core_env_pin_is_reported(tmp_path: Path) -> None:
-    settings = _settings(tmp_path)
+    settings = _file_settings(tmp_path)
     init_db(settings.db_path)
     conn = get_connection(settings.db_path)
     try:
@@ -223,17 +232,77 @@ def test_core_env_pin_is_reported(tmp_path: Path) -> None:
     rate = _row(body, "upstream_rate")
     assert rate["source"] == "env" and rate["effective"] == "4m"
     assert rate["editable"] is False and rate["shadowed"] is True and rate["env_visible"] is True
+    assert rate["reason"] == "env"
     edge = _row(body, "upstream_edge")
     assert edge["source"] == "default" and edge["editable"] is True and edge["env_visible"] is True
+    assert edge["reason"] is None
     assert body["core_apply"]["state"] == "applied"
     assert body["core_apply"]["applied_generation"] == 4
 
 
 def test_without_status_file_nothing_changes(tmp_path: Path) -> None:
-    body = _get(_settings(tmp_path))
+    body = _get(_file_settings(tmp_path))
     rate = _row(body, "upstream_rate")
     assert rate["env_visible"] is False and rate["source"] == "default" and rate["editable"] is True
+    assert rate["reason"] is None
     assert body["core_apply"] is None
+
+
+def test_b3_lock_still_applies_without_the_file(tmp_path: Path) -> None:
+    """The status file does not lift B3: with VAULT_CORE_SETTINGS_FILE blank
+    a core row stays core_file_disabled (unless core's env pins it)."""
+    _write_status(tmp_path / "cache", _status())
+    body = _get(_settings(tmp_path))
+    assert _row(body, "upstream_edge")["reason"] == "core_file_disabled"
+    assert _row(body, "upstream_rate")["reason"] == "env"
+
+
+# -- S9: PATCH agrees with GET on vault-core's env pins ------------------------
+
+
+def _patch(settings: Settings, body: dict, confirm: bool = False):
+    app = create_app(settings)
+    with TestClient(app) as client:
+        return client.patch(
+            "/v1/settings" + ("?confirm_risky=true" if confirm else ""), headers=AUTH, json=body
+        )
+
+
+def test_patch_refuses_a_key_core_env_pins(tmp_path: Path) -> None:
+    settings = _file_settings(tmp_path)
+    _write_status(tmp_path / "cache", _status())
+    response = _patch(settings, {"upstream_rate": "800k"})
+    assert response.status_code == 409, response.text
+    assert "VAULT_UPSTREAM_RATE" in response.json()["detail"]
+    assert "vault-core" in response.json()["detail"]
+    # Clearing it is refused too (same as an api-side env pin).
+    assert _patch(settings, {"upstream_rate": None}).status_code == 409
+    # A key core does not pin stays editable.
+    ok = _patch(settings, {"upstream_edge": "off"}, confirm=True)
+    assert ok.status_code == 200, ok.text
+    assert _row(ok.json(), "upstream_edge")["source"] == "db"
+
+
+def test_patch_without_status_file_is_not_guarded(tmp_path: Path) -> None:
+    settings = _file_settings(tmp_path)
+    assert _patch(settings, {"upstream_rate": "800k"}).status_code == 200
+
+
+def test_cross_rules_use_core_pinned_values(tmp_path: Path) -> None:
+    settings = _file_settings(tmp_path)
+    keys = dict(_status()["keys"])
+    keys["VAULT_UPSTREAM_MAX_CONNS"] = {"value": "8", "source": "env"}
+    keys["VAULT_TLS_MAX_CONNS"] = {"value": "100", "source": "env"}
+    _write_status(tmp_path / "cache", _status(keys=keys))
+    # Core's cap 8 (env) stays below 12 threads, whatever Settings could say.
+    response = _patch(settings, {"prefill_max_threads": "12"}, confirm=True)
+    assert response.status_code == 422, response.text
+    assert "upstream_max_conns (8)" in response.json()["detail"]
+    # Core's total 100 (env) is below a per-client cap of 128.
+    response = _patch(settings, {"tls_client_max_conns": "128"}, confirm=True)
+    assert response.status_code == 422, response.text
+    assert "tls_max_conns (100)" in response.json()["detail"]
+    assert _patch(settings, {"tls_client_max_conns": "64"}, confirm=True).status_code == 200
 
 
 def test_pending_follows_the_written_generation(tmp_path: Path) -> None:

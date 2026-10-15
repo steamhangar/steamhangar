@@ -248,6 +248,9 @@ export const api = {
   // WP WEB-FEAT-3: Settings → About. Fetched when the Settings view opens
   // and on its Refresh button, never polled (the server caches 60 s).
   about: () => request("GET", "/v1/about"),
+  // WP DIST-1b: the release files this vault serves (GET /v1/dist, DIST-1a),
+  // read by the "Add a device" sheet for the app and agent downloads.
+  dist: () => request("GET", "/v1/dist"),
   getSettings: () => request("GET", "/v1/settings"),
   patchSettings: (body) => request("PATCH", "/v1/settings", { body }),
   schedule: () => request("GET", "/v1/schedule"),

@@ -1985,7 +1985,9 @@ runner_logs=$(dc logs --no-log-prefix vault-runner 2>/dev/null)
 say "$runner_logs" | sed 's/^/    /'
 assert_contains "$runner_logs" "starting (poll every" "vault-runner logged its startup/poll-loop line"
 assert_contains "$runner_logs" "SteamPrefill path '/opt/steamprefill/SteamPrefill'" "the logged startup line names the real SteamPrefill path (not an empty/misconfigured one)"
-assert_contains "$runner_logs" "--max-threads 8)" "the logged startup line names the --max-threads value prefills will use (WP CORE-FIX-2 default 8)"
+# D16b: the thread count is resolved per job (env > Settings > default), so
+# the startup line names the per-job resolution instead of a boot value.
+assert_contains "$runner_logs" "--max-threads, the prefill timeout and the log level are resolved per job" "the logged startup line says --max-threads is resolved per job (D16b, WP CORE-FIX-2)"
 
 say ''
 say '--- env forwarding: VAULT_PREFILL_MODE reaches BOTH processes; VAULT_API_KEY reaches NEITHER runner ---'

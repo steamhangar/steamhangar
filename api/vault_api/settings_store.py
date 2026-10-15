@@ -148,7 +148,7 @@ def _parse_schedule_window_override(raw: str) -> ScheduleWindow | None:
 
     A blank STORED value is still read as ``None``: before rc18 that was how
     a Settings change spelled "scheduler off", and such rows exist. A blank
-    PATCH value never gets here (the router treats it as a reset, Q7).
+    PATCH value is stored as ``off`` by the router (review decision B2).
     """
     text = raw.strip()
     if not text:
@@ -397,21 +397,30 @@ def mask_url(url: str) -> str:
     Credentials can sit in the userinfo AND in the path or query (Discord
     and Slack put the token in the path), so everything after the host is
     replaced. ``https://u:p@hooks.example/x?t=1`` -> ``https://***@hooks.example/***``.
-    Never raises.
+    Any ``@`` after the scheme counts as userinfo, the same over-redaction
+    rule as ``webhooks.redact_url`` (review S3): an unencoded ``/``, ``?`` or
+    ``#`` in a password moves the userinfo out of what ``urlsplit`` calls
+    the netloc. Never raises.
     """
     if not url:
         return ""
+    if "://" not in url:
+        return "***"
+    scheme, after = url.split("://", 1)
+    userinfo = "@" in after
+    if userinfo:
+        after = after.rsplit("@", 1)[1]
     try:
-        parts = urlsplit(url)
+        parts = urlsplit(f"{scheme}://{after}")
         host = parts.hostname or ""
         port = parts.port
     except ValueError:
         return "***"
-    if not parts.scheme or not host:
+    if not scheme or not host:
         return "***"
-    netloc = ("***@" if "@" in parts.netloc else "") + host + (f":{port}" if port else "")
+    netloc = ("***@" if userinfo else "") + host + (f":{port}" if port else "")
     rest = "/***" if (parts.path not in ("", "/") or parts.query or parts.fragment) else ""
-    return f"{parts.scheme}://{netloc}{rest}"
+    return f"{scheme}://{netloc}{rest}"
 
 
 @dataclass(frozen=True)
@@ -444,17 +453,6 @@ ENV_ONLY_INFO_KEYS: tuple[EnvOnlySpec, ...] = (
 ENV_ONLY_KEYS: frozenset[str] = frozenset(
     {"vault_api_key"} | {spec.key for spec in ENV_ONLY_INFO_KEYS}
 )
-
-#: Deprecated env variables (Q3, Q5). One startup warning when set.
-DEPRECATED_ENV = {
-    "VAULT_UPSTREAM_RATE_WINDOW": (
-        "is deprecated since rc18: vault-core's rate cap now follows the one "
-        "download window (VAULT_SCHEDULE_WINDOW or Settings). It is still "
-        "honoured by vault-core as an env pin; remove it to let the cap follow "
-        "the download window."
-    ),
-}
-
 
 # --------------------------------------------------------------------------
 # The `settings` table (schema v13)
@@ -513,6 +511,42 @@ def apply_updates(
 # --------------------------------------------------------------------------
 # Resolution
 # --------------------------------------------------------------------------
+
+
+#: ``SettingInfo.reason`` values for a row that is not editable.
+REASON_ENV = "env"
+REASON_ENV_ONLY = "env_only"
+REASON_CORE_FILE_DISABLED = "core_file_disabled"
+
+
+def core_file_enabled(base: Settings) -> bool:
+    """Review decision B3 (user night-run decision): core-only keys are
+    editable only while vault-api actually hands them to vault-core, i.e.
+    while ``VAULT_CORE_SETTINGS_FILE`` names a path. Otherwise a stored value
+    would reach nothing."""
+    return bool(base.core_settings_file)
+
+
+def is_core_disabled(spec: SettingSpec, base: Settings) -> bool:
+    return spec.target == TARGET_CORE and not core_file_enabled(base)
+
+
+def env_core_values(base: Settings) -> dict[str, str]:
+    """Core keys as vault-api's OWN environment sets them (non-blank and
+    valid), env name -> normalised value. Used for the cross rules while the
+    core file is disabled: then only defaults and env count, never stored
+    values."""
+    values: dict[str, str] = {}
+    for env_var in CORE_SPECS_BY_ENV:
+        if env_var not in base.env_pinned:
+            continue
+        try:
+            normalised = core_settings.TWINS[env_var](os.environ.get(env_var, ""))
+        except CoreGrammarError:
+            continue
+        if normalised is not None:
+            values[env_var] = normalised
+    return values
 
 
 def is_env_pinned(spec: SettingSpec, base: Settings) -> bool:
@@ -616,10 +650,14 @@ def check_cross_rules(
     base: Settings,
     to_set: Iterable[tuple[str, str]],
     to_clear: Iterable[str],
+    core_status: core_settings.CoreStatus | None = None,
 ) -> None:
     """Audit 3.4: refuse what vault-core would refuse, judged on the values
     the batch would leave behind. Only rules whose keys the batch touches are
     checked, so an unrelated PATCH is never blocked by an older state.
+    ``core_status`` (D16c): a value vault-core's own env pins wins over env
+    and stored values here too, as it does inside vault-core (also the
+    prefill thread count vault-core's floor check uses).
     Raises ``SettingValidationError``."""
     prospective = dict(get_all_overrides(conn))
     touched: set[str] = set()
@@ -629,13 +667,24 @@ def check_cross_rules(
     for key in to_clear:
         prospective.pop(key, None)
         touched.add(key)
-    core = stored_core_values(prospective, base)
+    if core_file_enabled(base):
+        core = {**env_core_values(base), **stored_core_values(prospective, base)}
+    else:
+        core = env_core_values(base)
     threads_spec = OVERRIDABLE_SPECS["prefill_max_threads"]
     threads = base.prefill_max_threads
     if "prefill_max_threads" in prospective and not is_env_pinned(threads_spec, base):
         ok, value = _parse_stored(threads_spec, prospective["prefill_max_threads"])
         if ok:
             threads = value
+    if core_status is not None:
+        for env_var in CORE_SPECS_BY_ENV:
+            pinned_value = core_status.env_pinned(env_var)
+            if pinned_value is not None:
+                core[env_var] = pinned_value
+        core_threads = core_status.env_pinned("VAULT_PREFILL_MAX_THREADS")
+        if core_threads is not None and core_threads.isascii() and core_threads.isdigit():
+            threads = int(core_threads)
     try:
         if touched & {"upstream_max_conns", "prefill_max_threads"}:
             core_settings.check_cap_floor(core, threads)
@@ -646,14 +695,16 @@ def check_cross_rules(
 
 
 # --------------------------------------------------------------------------
-# Startup warnings (Q1, Q2, Q3)
+# Startup warnings (Q1, Q2, rc18 window default)
 # --------------------------------------------------------------------------
 
 
 def warn_at_startup(conn: sqlite3.Connection, base: Settings) -> list[str]:
     """One WARNING per stored value an env pin now shadows (Q1), one for a
-    stored webhook URL (Q2, ignored), one per deprecated env variable (Q3).
-    Returns the messages (for tests)."""
+    stored webhook URL (Q2, ignored), and one when the download window comes
+    from the code default (rc18 upgrade visibility). The deprecation warning
+    for VAULT_UPSTREAM_RATE_WINDOW belongs to vault-core (D16c): compose
+    does not forward that variable to vault-api. Returns the messages."""
     messages: list[str] = []
     overrides = get_all_overrides(conn)
     for key, spec in OVERRIDABLE_SPECS.items():
@@ -670,9 +721,18 @@ def warn_at_startup(conn: sqlite3.Connection, base: Settings) -> list[str]:
             "rc18 (VAULT_WEBHOOK_URL is env-only). Set VAULT_WEBHOOK_URL in the "
             "environment if webhooks should be delivered."
         )
-    for env_var, text in DEPRECATED_ENV.items():
-        if os.environ.get(env_var, "").strip():
-            messages.append(f"settings: {env_var} {text}")
+    if (
+        "VAULT_SCHEDULE_WINDOW" not in base.env_pinned
+        and "schedule_window" not in overrides
+        and base.schedule_window is not None
+        and base.schedule_window.normalized == config.DEFAULT_SCHEDULE_WINDOW
+    ):
+        messages.append(
+            f"settings: the download window {config.DEFAULT_SCHEDULE_WINDOW} is "
+            "the rc18 default (neither VAULT_SCHEDULE_WINDOW nor Settings sets "
+            "one): vault-api downloads updates automatically inside it. "
+            "VAULT_SCHEDULE_WINDOW=off (or 'off' in Settings) disables it."
+        )
     for message in messages:
         logger.warning("%s", message)
     return messages
@@ -708,6 +768,10 @@ class SettingInfo:
     env_visible: bool
     #: A stored value exists but env (or env-only status) overrides it.
     shadowed: bool
+    #: Why the row is not editable: "env" (set via env), "env_only",
+    #: "core_file_disabled" (core key while VAULT_CORE_SETTINGS_FILE is
+    #: blank); null when editable.
+    reason: str | None
 
 
 def describe_settings(
@@ -739,14 +803,16 @@ def describe_settings(
         else:
             fallback = spec.to_json(getattr(base, key))
 
+        core_disabled = is_core_disabled(spec, base)
         if core_pin is not None:
             source, effective = "env", core_pin
         elif pinned:
             source, effective = "env", fallback
-        elif stored_ok:
+        elif stored_ok and not core_disabled:
             source, effective = "db", stored_json
         else:
             source, effective = "default", fallback
+        reason = REASON_ENV if pinned else (REASON_CORE_FILE_DISABLED if core_disabled else None)
 
         infos.append(
             SettingInfo(
@@ -758,13 +824,14 @@ def describe_settings(
                 env_only=False,
                 env_var=spec.env_var,
                 value=stored_json,
-                editable=not pinned,
+                editable=reason is None,
                 risky=spec.risky,
                 expert=spec.expert,
                 grammar=spec.grammar,
                 target=spec.target,
                 env_visible=spec.target != TARGET_CORE or core_status is not None,
-                shadowed=pinned and stored_ok,
+                shadowed=(pinned or core_disabled) and stored_ok,
+                reason=reason,
             )
         )
 
@@ -787,6 +854,7 @@ def describe_settings(
                 target=TARGET_API,
                 env_visible=True,
                 shadowed=env_spec.key in overrides,
+                reason=REASON_ENV_ONLY,
             )
         )
 

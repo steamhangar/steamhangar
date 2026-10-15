@@ -751,6 +751,13 @@ Fix scope:
    game flagged.
 5. Tests: several .bin files for one depot in random order; end-to-end
    "Update now clears the flag"; stale row for an unmapped depot.
+Scope change 2026-10-15 (review UPD-FIX-1): point 3 dropped. Filtering
+the comparison by depot_app_map hides real updates, because
+`apply_observed_mapping` replaces an app's mapping with only the depots
+that got new bytes in a run, so an untouched depot drops out after a
+partial update. Follow-up MAP-DRIFT-1 (after rc18): orphan
+depot_manifests rows and mapping drift on partial updates; a non-lossy
+filter (mapped OR bytes on disk) with a partial-update regression test.
 Interplay: CACHE-COMPLETE-1a uses the same target selection (recorded vs
 oracle gid) — check the completeness figure is not affected the same way.
 

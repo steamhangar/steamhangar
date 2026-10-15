@@ -5,10 +5,15 @@ set in vault-api's env is reported ``source: "env"``, ``editable: false``, and
 PATCH answers ``409`` for it. Every row now also carries ``env_var``,
 ``value`` (the stored Settings value or ``null``), ``editable``, ``risky``,
 ``expert`` (expert area of the page), ``grammar``, ``target`` (``api`` | ``core`` | ``api+core``), ``env_visible``
-(false for core-only keys, whose env vault-api cannot see) and ``shadowed``.
+(false for core-only keys, whose env vault-api cannot see), ``shadowed`` and
+``reason`` (why a row is not editable: ``env`` | ``env_only`` |
+``core_file_disabled``, else null). Core-only keys are read-only and PATCH
+answers ``409`` for them while ``VAULT_CORE_SETTINGS_FILE`` is blank
+(review decision B3).
 A PATCH that sets or clears a risky key needs the query parameter
 ``confirm_risky=true``, else ``428`` with ``detail.risky_keys``. A blank
-``schedule_window`` value is a reset (like ``null``); "no window" is ``off``.
+``schedule_window`` value means ``off`` (backward compatible with the rc17
+frontends); ``null`` resets it to the default.
 ``webhook_url`` is env-only (Q2) and shown masked. ``source`` keeps the wire
 value ``"db"`` for "set in Settings" (the shipped web UI and Android app
 read it).
@@ -129,6 +134,16 @@ _ENV_PINNED_DETAIL_TEMPLATE = (
     "{key!r} is set via env ({env_var}); env always wins. Remove the "
     "environment variable and restart to change it here."
 )
+_CORE_ENV_PINNED_DETAIL_TEMPLATE = (
+    "{key!r} is set via env on vault-core ({env_var}); env always wins. "
+    "Remove the variable from vault-core's environment and recreate it to "
+    "change it here."
+)
+_CORE_FILE_DISABLED_DETAIL_TEMPLATE = (
+    "{key!r} is applied by vault-core through the core settings file, which "
+    "is not enabled (VAULT_CORE_SETTINGS_FILE is blank). Set it via env on "
+    "vault-core instead."
+)
 _RISKY_DETAIL = (
     "This change includes debug settings that can break downloads. Repeat the "
     "request with confirm_risky=true to apply it."
@@ -151,6 +166,7 @@ class SettingInfoOut(BaseModel):
     target: str
     env_visible: bool
     shadowed: bool
+    reason: str | None
 
 
 class CoreApplyOut(BaseModel):
@@ -290,6 +306,9 @@ def patch_settings(
     # multi-key PATCH must not partially apply the good ones.
     to_set: list[tuple[str, str]] = []
     to_clear: list[str] = []
+    # D16c: vault-core's own env pins, from its status file -- the same
+    # source GET uses, so PATCH refuses exactly the rows GET shows as env.
+    core_status = core_settings.read_core_status(core_settings.core_status_path(base.cache_root))
     for key, value in payload.items():
         if key in ENV_ONLY_KEYS:
             raise HTTPException(
@@ -307,14 +326,30 @@ def patch_settings(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=_ENV_PINNED_DETAIL_TEMPLATE.format(key=key, env_var=spec.env_var),
             )
+        if (
+            spec.target == settings_store.TARGET_CORE
+            and core_status is not None
+            and core_status.env_pinned(spec.env_var) is not None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_CORE_ENV_PINNED_DETAIL_TEMPLATE.format(key=key, env_var=spec.env_var),
+            )
+        if settings_store.is_core_disabled(spec, base):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_CORE_FILE_DISABLED_DETAIL_TEMPLATE.format(key=key),
+            )
         if value is None:
             to_clear.append(key)
             continue
         raw = _coerce_patch_value(key, value)
         if key == "schedule_window" and not raw.strip():
-            # Q7: blank = not set; "no window" is spelled off.
-            to_clear.append(key)
-            continue
+            # Review decision B2 (amends audit 3.6): a blank PATCH value
+            # means "off", backward compatible with the shipped rc17 Android
+            # app and web UI, which send "" to disable the scheduler. null
+            # resets to the default.
+            raw = "off"
         try:
             parsed = spec.parse(raw)
         except SettingValidationError as exc:
@@ -342,7 +377,7 @@ def patch_settings(
     with open_db() as conn:
         # Audit 3.4: cross-variable rules on the state the batch leaves.
         try:
-            settings_store.check_cross_rules(conn, base, to_set, to_clear)
+            settings_store.check_cross_rules(conn, base, to_set, to_clear, core_status)
         except SettingValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)

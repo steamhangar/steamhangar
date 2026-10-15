@@ -11,11 +11,18 @@
  *   - phone: an inline SVG QR code (role=img) for the exact pairing URI,
  *     the URI as "Open on this phone" link and as copyable text;
  *   - browser: the `#pair=` link as copyable text;
- *   - Windows: the command for the release vault-api reports; a dev build
- *     gets the note; a failing /v1/about an error line; the agent address
- *     field is prefilled with the page origin, validated, remembered in
- *     localStorage and used in the command;
- *   - demo mode and a missing key show the note and no option;
+ *   - Windows: the command for the release GET /v1/dist reports, fetching
+ *     from the vault (agent address + /dist) when the index says local and
+ *     from the GitHub release otherwise (WP DIST-1b); a dev build gets the
+ *     note; a failing /v1/dist an error line; the agent address field is
+ *     prefilled with the page origin, validated, remembered in localStorage
+ *     and used in the command;
+ *   - phone (WP DIST-1b): "Download app" + a QR of the APK address, outside
+ *     the Show gate: page origin + /dist/steamhangar-app.apk when baked,
+ *     the release asset otherwise, a note on a dev server; Linux: the
+ *     download-and-check command from the same source;
+ *   - demo mode and a missing key show the note and no option; demo mode
+ *     still shows the app download from its fake index;
  *   - the pairing confirm is an alertdialog, focus on "Keep current key",
  *     Keep/Escape answer false, Replace true.
  *
@@ -60,10 +67,47 @@ globalThis.window = {
   removeEventListener() {},
 };
 
-const COMMIT = "3f9c2a71d4be08e5c6a1f02b9d7e4c18a5b6f3d0";
-const aboutFor = (version, commit = COMMIT) => ({
-  components: [{ name: "vault-api", version, commit, status: "ok", checked_at: "2026-10-04T10:00:00Z", detail: null }],
-});
+const RELEASE_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$/;
+const DIST_NAMES = (v) => [
+  ["app-android", `steamhangar-app-v${v}.apk`],
+  ["agent-windows-amd64", `vault-agent-v${v}-windows-amd64.exe`],
+  ["agent-linux-amd64", `vault-agent-v${v}-linux-amd64`],
+  ["agent-linux-arm64", `vault-agent-v${v}-linux-arm64`],
+  ["install-task", "install-task.ps1"],
+  ["run-vault-agent", "run-vault-agent.ps1"],
+  ["uninstall-task", "uninstall-task.ps1"],
+  ["systemd-service", "vault-agent-report.service"],
+  ["systemd-timer", "vault-agent-report.timer"],
+  ["sha256sums", "SHA256SUMS"],
+];
+/** A GET /v1/dist answer as DIST-1a builds it: `local` bakes every file,
+ * a release-shaped version gets release URLs, anything else neither. */
+function indexFor(version, { local = false } = {}) {
+  const release = RELEASE_RE.test(version);
+  const base = release ? `https://github.com/steamhangar/steamhangar/releases/download/v${version}/` : null;
+  return {
+    version,
+    release,
+    local_base: "/dist/",
+    release_base: base,
+    apk_alias_url: local ? "/dist/steamhangar-app.apk" : null,
+    artifacts: DIST_NAMES(version).map(([id, name]) => {
+      const localUrl = local ? `/dist/${name}` : null;
+      const releaseUrl = base ? base + name : null;
+      return {
+        id,
+        name,
+        local,
+        size: local ? 9_300_000 : null,
+        sha256: local ? "ab".repeat(32) : null,
+        local_url: localUrl,
+        release_url: releaseUrl,
+        url: localUrl || releaseUrl,
+        source: local ? "local" : releaseUrl ? "release" : "none",
+      };
+    }),
+  };
+}
 const KEYS = [
   ["vault_name", "vault-01"],
   ["schedule_window", null],
@@ -79,20 +123,20 @@ const SETTINGS = {
   server_version: "0.1.0-rc10",
   settings: KEYS.map(([key, effective]) => ({ key, effective, source: "default", fallback: effective, applies: "immediately", env_only: false })),
 };
-const server = { about: aboutFor("0.1.0-rc10"), aboutStatus: 200, aboutGets: 0, hold: false, held: [] };
+const server = { index: indexFor("0.1.0-rc10"), distStatus: 200, distGets: 0, hold: false, held: [] };
 function respond(status, data) {
   const text = JSON.stringify(data);
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => text };
 }
 globalThis.fetch = async (url) => {
   const p = new URL(String(url)).pathname;
-  if (p === "/v1/about") {
-    server.aboutGets += 1;
+  if (p === "/v1/dist") {
+    server.distGets += 1;
     if (server.hold) {
       // Gated: the test answers each held request itself, in any order.
-      return new Promise((resolve) => server.held.push((about) => resolve(respond(200, about))));
+      return new Promise((resolve) => server.held.push((index) => resolve(respond(200, index))));
     }
-    return server.aboutStatus === 200 ? respond(200, server.about) : respond(server.aboutStatus, { detail: "Not Found" });
+    return server.distStatus === 200 ? respond(200, server.index) : respond(server.distStatus, { detail: "Not Found" });
   }
   if (p === "/v1/settings") return respond(200, SETTINGS);
   if (p === "/v1/steam/key") return respond(200, { configured: false, key_last4: null });
@@ -107,6 +151,7 @@ const { openAddDeviceSheet } = await import("../js/components/add-device-sheet.j
 const { confirmPairReplace } = await import("../js/components/pair-confirm.js");
 const { resetModalStack } = await import("../js/lib/modal-stack.js");
 const { navigateTo } = await import("../js/router.js");
+const { encodeQrText, qrSvgGeometry } = await import("../js/lib/qr-encode.js");
 
 after(() => store.stop());
 
@@ -152,8 +197,8 @@ beforeEach(() => {
   storage.set("steamvault.apiKey", KEY);
   storage.delete("steamvault.demoMode");
   storage.delete("steamvault.agentServerUrl");
-  server.about = aboutFor("0.1.0-rc10");
-  server.aboutStatus = 200;
+  server.index = indexFor("0.1.0-rc10");
+  server.distStatus = 200;
   server.hold = false;
   server.held = [];
 });
@@ -209,7 +254,7 @@ test("MUTATION TARGET: phone — Show renders the QR (SVG, role=img) and the exa
   click(showBtn("phone"));
   assert.equal(reveal("phone").hidden, true);
   assert.equal(reveal("phone").childNodes.length, 0);
-  assert.equal(showBtn("phone").textContent, "Show QR code");
+  assert.equal(showBtn("phone").textContent, "Show pairing QR code");
   assert.equal(secretInDom(), false, "Hide takes the secret out of the DOM");
 });
 
@@ -290,7 +335,7 @@ test("MUTATION TARGET: Windows — the agent address is validated, remembered an
 });
 
 test("MUTATION TARGET: Windows — a dev build gets the note, never a command", async () => {
-  server.about = aboutFor("dev-1a2b3c4");
+  server.index = indexFor("dev-1a2b3c4");
   openAddDeviceSheet();
   click(showBtn("windows"));
   await until(() => reveal("windows").querySelector('[data-role="agent-no-release"]') !== null, "note");
@@ -299,12 +344,13 @@ test("MUTATION TARGET: Windows — a dev build gets the note, never a command", 
   assert.equal(secretInDom(), false, "the note carries no key");
 });
 
-test("Windows — a server without /v1/about shows an error line", async () => {
-  server.aboutStatus = 404;
+test("Windows — a server without /v1/dist shows an error line", async () => {
+  server.distStatus = 404;
   openAddDeviceSheet();
   click(showBtn("windows"));
   await until(() => reveal("windows").querySelector('[data-role="agent-error"]') !== null, "error");
-  assert.match(reveal("windows").querySelector('[data-role="agent-error"]').textContent, /older than GET \/v1\/about/);
+  assert.match(reveal("windows").querySelector('[data-role="agent-error"]').textContent, /older than GET \/v1\/dist/);
+  assert.match(q("app-download-error").textContent, /older than GET \/v1\/dist/, "the app download says so too");
 });
 
 test("MUTATION TARGET: demo mode and a missing key show the note and no option", () => {
@@ -437,47 +483,50 @@ test("Windows — a key the command cannot take gets a note, no command, no Copy
   assert.equal(reveal("windows").querySelector('[data-role="agent-copy-key"]') === null, true);
 });
 
-// ---- Review finding 2: late /v1/about answers (gated fetch) ---------------
+// ---- Review finding 2: late /v1/dist answers (gated fetch) ----------------
 
 const snippetShown = () => reveal("windows").querySelector('[data-role="agent-snippet"]') !== null;
-const readingShown = () => /Reading the server's release version/.test(reveal("windows").textContent);
+const readingShown = () => /Reading the vault's download list/.test(reveal("windows").textContent);
 
-test("MUTATION TARGET (guard A): an About answer that lands after Hide paints nothing", async () => {
+test("MUTATION TARGET (guard A): an index answer that lands after Hide paints nothing", async () => {
   server.hold = true;
   openAddDeviceSheet();
   click(showBtn("windows"));
-  await until(() => server.held.length === 1, "About request in flight");
+  await until(() => server.held.length === 1, "index request in flight");
   click(showBtn("windows")); // Hide while the request is still open
-  server.held.shift()(aboutFor("0.1.0-rc10"));
-  await tick(30);
+  server.held.shift()(indexFor("0.1.0-rc10"));
+  // The answer is painted (app download), so only paintWindows' own guard
+  // keeps the hidden option empty: callers no longer check `shown` (S1).
+  await until(() => appLink() !== null, "the answer arrived");
   assert.equal(reveal("windows").hidden, true);
   assert.equal(reveal("windows").childNodes.length, 0, "nothing painted into the hidden option");
   assert.equal(secretInDom(), false);
 });
 
-test("MUTATION TARGET (guard B): an answer for an earlier Show is dropped; only the latest request paints", async () => {
+test("MUTATION TARGET (guard B): an answer for an earlier open is dropped; only the latest request paints", async () => {
   server.hold = true;
   openAddDeviceSheet();
-  click(showBtn("windows"));
   await until(() => server.held.length === 1, "first request");
-  click(showBtn("windows")); // Hide
-  click(showBtn("windows")); // Show again: a second request
+  closeSheetIfOpen();
+  openAddDeviceSheet(); // a second request
   await until(() => server.held.length === 2, "second request");
-  server.held.shift()(aboutFor("0.1.0-rc10")); // the stale one answers first
+  click(showBtn("windows"));
+  server.held.shift()(indexFor("0.1.0-rc10")); // the stale one answers first
   await tick(30);
   assert.equal(snippetShown(), false, "the stale answer does not paint the command");
   assert.equal(readingShown(), true, "still waiting for the current request");
-  server.held.shift()(aboutFor("0.1.0-rc10"));
+  assert.equal(q("app-download-link"), null, "nor the app download");
+  server.held.shift()(indexFor("0.1.0-rc10"));
   await until(snippetShown, "the current answer paints");
 });
 
-test("a late About answer after the sheet closed leaves no secret in the DOM", async () => {
+test("a late index answer after the sheet closed leaves no secret in the DOM", async () => {
   server.hold = true;
   openAddDeviceSheet();
   click(showBtn("windows"));
   await until(() => server.held.length === 1, "request in flight");
   closeSheetIfOpen();
-  server.held.shift()(aboutFor("0.1.0-rc10"));
+  server.held.shift()(indexFor("0.1.0-rc10"));
   await tick(30);
   assert.equal(secretInDom(), false);
   assert.equal(reveal("windows").childNodes.length, 0);
@@ -495,4 +544,173 @@ test("MUTATION TARGET: phone — a key the app does not accept gets a note, neve
     closeSheetIfOpen();
     resetModalStack(dom.document);
   }
+});
+
+// ---- WP DIST-1b: the app download and the download source ------------------
+
+const appLink = () => q("app-download-link");
+const qrPathFor = (text) => qrSvgGeometry(encodeQrText(text, { ecl: "M" }).modules).d;
+
+test("MUTATION TARGET: phone — a baked APK: 'Download app' and its QR point at page origin + /dist/steamhangar-app.apk, before any Show", async () => {
+  server.index = indexFor("0.1.0-rc10", { local: true });
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button");
+  const url = `${ORIGIN}/dist/steamhangar-app.apk`;
+  assert.equal(appLink().textContent, "Download app");
+  assert.equal(appLink().href, url);
+  assert.equal(appLink().getAttribute("data-source"), "local");
+  assert.match(appLink().title, /^steamhangar-app-v0\.1\.0-rc10\.apk, 9\.3 MB, from this vault\.$/);
+  const qr = q("app-download-qr");
+  assert.equal(qr.tagName, "SVG");
+  assert.equal(qr.getAttribute("aria-label"), "QR code to download the SteamHangar app");
+  assert.equal(qr.children[1].getAttribute("d"), qrPathFor(url), "the QR encodes exactly the download URL");
+  // Inside the phone option, ahead of the (still hidden) pairing code.
+  const phone = sheet().querySelectorAll("div").find((d) => d.getAttribute("data-option") === "phone");
+  assert.notEqual(phone.querySelector('[data-role="app-download"]'), null, "inside the phone option");
+  assert.equal(reveal("phone").hidden, true, "the pairing QR still waits for Show");
+  assert.equal(secretInDom(), false, "the download carries no key");
+  click(showBtn("phone"));
+  assert.notEqual(reveal("phone").querySelector('[data-role="pair-qr"]'), null, "the pairing QR follows");
+});
+
+test("MUTATION TARGET: phone — no APK in the image: the GitHub release asset of the same version", async () => {
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button");
+  const url = "https://github.com/steamhangar/steamhangar/releases/download/v0.1.0-rc10/steamhangar-app-v0.1.0-rc10.apk";
+  assert.equal(appLink().href, url);
+  assert.equal(appLink().getAttribute("data-source"), "release");
+  assert.match(appLink().title, /from the project's GitHub release/);
+  assert.equal(q("app-download-qr").children[1].getAttribute("d"), qrPathFor(url));
+});
+
+test("MUTATION TARGET: phone — a dev server with nothing gets an honest note, no button, no QR", async () => {
+  server.index = indexFor("dev-1a2b3c4");
+  openAddDeviceSheet();
+  await until(() => q("app-download-none") !== null, "note");
+  assert.match(q("app-download-none").textContent, /version "dev-1a2b3c4" and has no app file to offer/);
+  assert.equal(appLink(), null);
+  assert.equal(q("app-download-qr"), null);
+  assert.equal(q("app-download-none").querySelector("a").href, "https://github.com/steamhangar/steamhangar/releases");
+});
+
+test("MUTATION TARGET: Windows — baked agent files: the command downloads from the agent address + /dist", async () => {
+  server.index = indexFor("0.1.0-rc10", { local: true });
+  openAddDeviceSheet();
+  click(showBtn("windows"));
+  await until(snippetShown, "snippet");
+  const snippet = () => reveal("windows").querySelector('[data-role="agent-snippet"]').value;
+  assert.match(snippet(), /\n\$base = 'http:\/\/vault\.test\/dist'\n/);
+  assert.equal(snippet().includes("github.com"), false, "nothing from GitHub");
+  assert.match(snippet(), /Get-FileHash -Algorithm SHA256/, "SHA256SUMS check kept");
+  assert.match(reveal("windows").textContent, /from this vault \(http:\/\/vault\.test\/dist\)/);
+  const input = q("agent-url");
+  input.value = "http://192.0.2.10:8080";
+  input.dispatchEvent({ type: "input" });
+  assert.match(snippet(), /\n\$base = 'http:\/\/192\.0\.2\.10:8080\/dist'\n/, "follows the agent address, not the page origin");
+});
+
+test("MUTATION TARGET: Linux — download-and-check command, local / release / dev none; no warning, no key", async () => {
+  const linuxSnippet = () => reveal("linux").querySelector('[data-role="linux-snippet"]');
+  server.index = indexFor("0.1.0-rc10", { local: true });
+  openAddDeviceSheet();
+  const linux = sheet().querySelectorAll("div").find((d) => d.getAttribute("data-option") === "linux");
+  assert.equal(linux.querySelector(".pair-warn"), null, "not a secret: no warning");
+  click(showBtn("linux"));
+  await until(() => linuxSnippet() !== null, "linux snippet");
+  assert.match(linuxSnippet().value, /\nbase='http:\/\/vault\.test\/dist'\n/);
+  assert.match(linuxSnippet().value, /sha256sum/);
+  assert.equal(secretInDom(), false);
+  closeSheetIfOpen();
+
+  server.index = indexFor("0.1.0-rc10");
+  openAddDeviceSheet();
+  click(showBtn("linux"));
+  await until(() => linuxSnippet() !== null, "linux snippet (release)");
+  assert.match(linuxSnippet().value, /\nbase='https:\/\/github\.com\/steamhangar\/steamhangar\/releases\/download\/v0\.1\.0-rc10'\n/);
+  closeSheetIfOpen();
+
+  server.index = indexFor("dev-1a2b3c4");
+  openAddDeviceSheet();
+  click(showBtn("linux"));
+  await until(() => reveal("linux").querySelector('[data-role="agent-no-release"]') !== null, "note");
+  assert.equal(linuxSnippet(), null);
+});
+
+test("MUTATION TARGET: demo mode — the app download renders from the fake index as a note, with no request", async () => {
+  const before = server.distGets;
+  storage.set("steamvault.demoMode", "1");
+  try {
+    openAddDeviceSheet();
+    await until(() => q("app-download-demo") !== null, "demo download note");
+    const demo = q("demo-app-download");
+    assert.equal(demo.hidden, false);
+    assert.notEqual(demo.querySelector('[data-role="app-download-demo"]'), null, "in the demo block");
+    assert.match(q("app-download-demo").textContent, /^Demo mode: on a connected vault a "Download app" button here downloads steamhangar-app-v0\.1\.0\.apk from this vault\.$/);
+    assert.equal(appLink(), null, "review N3: no link into the fake index");
+    assert.equal(q("app-download-demo").querySelector("a"), null);
+    assert.notEqual(q("app-download-qr"), null);
+    assert.equal(sheet().querySelector(".pair-options").hidden, true, "the pairing options stay hidden");
+    assert.equal(server.distGets, before, "demo mode makes no request");
+  } finally {
+    closeSheetIfOpen();
+    storage.delete("steamvault.demoMode");
+  }
+  openAddDeviceSheet();
+  assert.equal(q("demo-app-download").hidden, true, "outside demo mode the block is hidden");
+  const phone = sheet().querySelectorAll("div").find((d) => d.getAttribute("data-option") === "phone");
+  assert.notEqual(phone.querySelector('[data-role="app-download"]'), null, "moved back into the phone option");
+});
+
+test("a browser without a key fetches no index and shows no download", () => {
+  const before = server.distGets;
+  storage.set("steamvault.apiKey", "");
+  openAddDeviceSheet();
+  assert.equal(server.distGets, before);
+  assert.equal(q("app-download").childNodes.length, 0);
+});
+
+// ---- DIST-1b review round 1 -----------------------------------------------
+
+test("MUTATION TARGET (review B1): a version outside the release grammar on the release path gives no command and no download", async () => {
+  for (const evil of ["0.1.0\ntouch /tmp/PWNED #", "0.1.0' ; Remove-Item x ; '", "0.1.0\"$(id)\""]) {
+    for (const local of [false, true]) {
+      // Every name, URL and the version carry the bad value consistently, as a
+      // lying server would send them (release: true), so only the grammar
+      // check stands between it and the commands.
+      server.index = JSON.parse(JSON.stringify(indexFor("0.1.0-rc10", { local })).split("0.1.0-rc10").join(JSON.stringify(evil).slice(1, -1)));
+      openAddDeviceSheet();
+      click(showBtn("windows"));
+      click(showBtn("linux"));
+      await until(() => reveal("windows").querySelector('[data-role="agent-no-release"]') !== null, "windows note");
+      await until(() => reveal("linux").querySelector('[data-role="agent-no-release"]') !== null, "linux note");
+      assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]'), null, JSON.stringify(evil));
+      assert.equal(reveal("linux").querySelector('[data-role="linux-snippet"]'), null, JSON.stringify(evil));
+      assert.notEqual(q("app-download-none"), null, "no app download either");
+      assert.equal(appLink(), null);
+      closeSheetIfOpen();
+    }
+  }
+});
+
+test("MUTATION TARGET (guard A, Linux): an index answer that lands after Hide paints nothing", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  click(showBtn("linux"));
+  await until(() => server.held.length === 1, "index request in flight");
+  click(showBtn("linux")); // Hide
+  server.held.shift()(indexFor("0.1.0-rc10", { local: true }));
+  await until(() => appLink() !== null, "the answer arrived (app download painted)");
+  assert.equal(reveal("linux").hidden, true);
+  assert.equal(reveal("linux").childNodes.length, 0, "nothing painted into the hidden option");
+});
+
+test("MUTATION TARGET: an index answer after the sheet closed paints nothing, not even the app download", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  await until(() => server.held.length === 1, "request in flight");
+  closeSheetIfOpen();
+  server.held.shift()(indexFor("0.1.0-rc10", { local: true }));
+  await tick(30);
+  assert.equal(appLink(), null, "the closed sheet keeps its loading line");
+  assert.match(q("app-download").textContent, /Looking up the app download/);
 });
