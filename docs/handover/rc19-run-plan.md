@@ -60,6 +60,28 @@ stop only for a plan deviation not covered here.
   renaming it. Steam-only settings stay in the Steam section.
 - NOT-OWNED-1: Weg B (`not_owned` outcome) plus 250820 as seed.
 
+## Card block (prepared 2026-10-15, scope to confirm by Jan before Saturday)
+
+Source: `post-0.1.0-roadmap.md` D19 (with 1c), D20, D21, D22. Defaults the
+run takes unless Jan says otherwise:
+
+- **Recent reviews = option A:** only the overall rating (Steam's summary does
+  not expose a recent figure, measured 2026-10-15). No review sampling.
+- **D19-1c switch:** own env `VAULT_STORE_DETAILS`, default off, until D22
+  folds it into the modes. New host `store.steampowered.com` goes into the
+  proxy allow list and the deploy Antrag. Plain-text rendering only.
+- **Order inside the block:** D21 (read-only review, produces
+  `docs/security/privacy-review.md` and the failure-mode analysis per store)
+  -> D19-1a/1b (expected depots/size, oracle only) -> D19-1c (enrichment) in
+  parallel with D20-1a/1b (queue order, independent). D22 is NOT built in
+  rc19: only its ADR draft comes out of D21; the modes follow after rc19.
+- Android for D19 and D20 follows in the app track after the web parts pass.
+- Place in the waves: D21 at the start of wave 2, D19 and D20 in wave 3
+  (after the Wave 1 api schema work for GRAPH-ZOOM has landed, so the two
+  migrations do not collide: GRAPH-ZOOM first, then D20's `jobs` column).
+  Two schema bumps in one release: the Antrag states both and the rollback
+  note (SQLite dump) once.
+
 ## Waves (max 3 agents at once, resume instead of respawn)
 
 1. **Fixes and trust:** NOT-OWNED-1, METRIC-AUDIT, TILE-INTERNET, GRAPH-ZOOM.

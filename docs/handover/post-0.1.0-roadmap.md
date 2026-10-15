@@ -695,7 +695,55 @@ Design (proposed, to settle in the package brief):
 
 Packages: **DEPOT-PREVIEW-1a (api)** on-demand query, TTL storage, response
 fields; **DEPOT-PREVIEW-1b (web)** "expected" display;
+**DEPOT-PREVIEW-1c (api + web)** card enrichment, see below;
 Android follows in the app track.
+
+### D19-1c: card enrichment (description, modes, ratings)
+
+User request 2026-10-15: make the card livelier with a short description,
+single player / multiplayer / VR and ratings, also recent ones. Measured
+2026-10-15 from the devbox, anonymous GETs without key or login, appids
+292030, 250820, 1366540:
+
+| Source | Delivers | Measured |
+|---|---|---|
+| Oracle `api.steamcmd.net/v1/info/<id>` (D19 queries it anyway) | `common`: type, `category_<id>` flags (2 single-player, 22 achievements, 62 family sharing, 31 VR support, 52 tracked controllers), genre ids, `review_percentage` (97 for 1366540), `review_score` (0-9), `steam_deck_compatibility`, `oslist`. No description text, no localized names (ids only: the web needs its own id to label map) | no extra request, no new host |
+| `store.steampowered.com/api/appdetails?appids=<id>&l=<lang>` | `short_description` (156-284 chars), `categories` (id plus localized text), `genres`, `developers`, `release_date`, `metacritic`, `recommendations.total` | 200 in 0.31-0.39 s (one 4.4 s outlier on the first call), 11-54 KB; `german` and `english` both complete for these three, German texts differ in length |
+| `store.steampowered.com/appreviews/<id>?json=1&num_per_page=0` | `query_summary`: `review_score_desc` ("Overwhelmingly Positive"), `total_positive`, `total_negative` | 200 in ~0.35 s, 0.2 KB |
+
+Finding that changes the plan: **a "recent reviews" figure is NOT available
+from the summary.** `day_range=30` and `filter=recent` leave `query_summary`
+unchanged (all-time totals, tested with `num_per_page` 0, 1, 20). The store
+page's "recent" rating is not exposed by this endpoint. Options: (A) show
+only the overall rating (honest, recommended); (B) approximate recent
+sentiment from a sample of `filter=recent` reviews (e.g. 100 per open, share
+positive) and label it "sample of the last N reviews" - more traffic, more
+code, and it is our own estimate, not Steam's number. Decision for Jan.
+
+Design (proposed):
+- New host `store.steampowered.com`: needs an egress-allow entry baked into
+  the proxy like `api.steampowered.com` (ADR-0011) or a `VAULT_EGRESS_ALLOW`
+  value; a deploy Antrag must list it. Opening a card sends one appid (two
+  requests: appdetails, appreviews) to Valve from the household WAN IP;
+  nothing else, no SteamID, no key. Never use the relay key for this.
+- Same on-open, background, deduped, TTL (24 h) storage as 1a, in a
+  separate table from `depot_app_map`; failures back off per appid; never
+  more than the on-open pattern (appdetails is limited to roughly 200
+  requests per 5 minutes per IP from memory, unverified: no bulk fills).
+- Language: ask `l=<ui language>`, fall back to English when the field is
+  empty. Texts are third-party: render as plain text (`textContent`), never
+  HTML; cap the length.
+- Card: description (3 lines, expandable), chips for single-player /
+  multiplayer / co-op / VR, genres, developer and release date, overall
+  rating with counts. Missing fields are omitted, never shown as
+  placeholders. Removed, region-locked or age-gated apps (`success:false`)
+  show nothing extra.
+- Privacy: gated like 1a. Until D22 lands behind `VAULT_MANIFEST_ORACLE` is
+  too weak (a different host and party): ship 1c behind its own env
+  `VAULT_STORE_DETAILS` (default off, a failure of every store leaves it
+  off), and let D22 fold it into the modes (light/secure on, strict off).
+  The failure-mode analysis per store required by LEARNINGS comes before the
+  coder brief. Entry in the D21 inventory table.
 
 ## D20: QUEUE-ORDER-1, make the Downloads queue sortable
 
