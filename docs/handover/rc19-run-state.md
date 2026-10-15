@@ -38,3 +38,12 @@ Passed: D19-1a/1b (wp/d19-1ab, schema 32, ADR-0024), merged on wp/rc19-w3-golden
 Running: Android D23/D20 comparator fix on wp/android-d23-d20 (then merge into wp/rc19-w3-goldens, CI cycle, goldens).
 Next: D19-1c (store details), Android D19, D16 Android UI + neutral naming, rc18 follow-ups, GRAPH-LIVE, wave 4 close.
 Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM (00:10Z), trig_01M7qtqVfFQZVXax5UJCfuSj (03:00Z).
+
+## Wave 3 part 2 (2026-10-16 night)
+
+main = 3e7df1e (CI green incl. Android): + D19-1a/1b (schema 32), Android D23/D20 (+ comparator, pin fix), rc18 follow-ups (watcher streak logging, conftest http_fetch guard marker real_http_fetch, webhook boot witness, demo core_apply; reviewed after fix).
+Passed + merged on wp/rc19-w3-goldens (not yet main): D19-1c store details (schema 33, VAULT_STORE_DETAILS default off, host store.steampowered.com baked into proxy, UA line in privacy-review O9; reviewer: keep baked).
+Running (3 coders): Android D19 (wp/android-d19), D16 Android UI + neutral naming (wp/d16-android), GRAPH-LIVE api+web (wp/graph-live).
+Then: reviews, merge into wp/rc19-w3-goldens, CI/goldens cycle, main; Android GRAPH-LIVE (optional after web passes); wave 4 close (diag read-only + inbox note, docs LEARNINGS/ADR/PLAN ticks, dev.sh verify once, tag only if everything passed, deploy Antrag with schema 29-33 + env VAULT_LIBRARY_META/DEPOT_PREVIEW/STORE_DETAILS + host + rollback via update.sh dump, handover).
+Open for Jan: cover refresher anonymous vs relay-key names (A/B/C) - not yet asked.
+Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM (00:10Z), trig_01M7qtqVfFQZVXax5UJCfuSj (03:00Z). Temp branch wp/ci-debug can be deleted by Jan.
