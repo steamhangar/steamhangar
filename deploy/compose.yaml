@@ -153,7 +153,10 @@ services:
       # make every cache miss proxy back into this container: the boot
       # preflight then refuses to start, and a rewrite that appears after
       # boot gets every miss answered 508 Loop Detected after one hop.
-      VAULT_RESOLVER: ${VAULT_RESOLVER:-1.1.1.1}
+      # D16c: the `-` form like every editable key (Q7). Blank or unset = not
+      # set: Settings (the core settings file), else the default 1.1.1.1,
+      # supplied by core/docker/15-vault-settings.envsh.
+      VAULT_RESOLVER: ${VAULT_RESOLVER-}
       # Optional cache-event log (WP 3.10, ADR-0008; core/README.md
       # "Cache-event log"). Empty (the default from core/Dockerfile) means
       # OFF: core/docker/25-vault-eventlog.sh strips the access_log
@@ -182,24 +185,14 @@ services:
       # invalid value stops vault-core's boot (fail-closed). Env-only:
       # recreate vault-core after a change.
       VAULT_UPSTREAM_RATE: ${VAULT_UPSTREAM_RATE-}
-      # Full speed INSIDE this HH:MM-HH:MM window, capped outside it.
-      # DELIBERATELY THE NO-COLON FORM, twice (docs/LEARNINGS.md, the
-      # `${VAR-}` vs `${VAR:-}` entry): UNSET follows VAULT_SCHEDULE_WINDOW
-      # (with the same `03:00-07:00` default as vault-api's code, so the
-      # cap lifts exactly when the scheduler's window opens). rc18 (Q3/Q7):
-      # this variable is deprecated, and `off` (here, or a
-      # VAULT_SCHEDULE_WINDOW=off passed through) caps around the clock;
-      # an explicitly blank value reaches the hook as "not set", which until
-      # D16c also caps around the clock. D16c replaces this nested line with
-      # `${VAULT_UPSTREAM_RATE_WINDOW-}` plus the core settings file. Only the ENV window is
-      # followed: a window stored via `PATCH /v1/settings` is invisible to
-      # vault-core. Nested interpolation `${A-${B-c}}` is part of the
-      # Compose specification; verified on Compose 2.40.3, older Compose v2
-      # releases may not support nested defaults. The deploy-static CI job
-      # only checks that this file is accepted; the resolved values (unset,
-      # blank, set, for both variables) are checked by verify-stack.sh step
-      # 3e-ter.
-      VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}
+      # DEPRECATED since rc18 (D16 Q3). The cap lifts inside the ONE download
+      # window: vault-api hands vault-core the effective VAULT_SCHEDULE_WINDOW
+      # (env, Settings or the default 03:00-07:00; `off` = cap around the
+      # clock) through the core settings file. Set here, this variable still
+      # wins as an env pin (HH:MM-HH:MM, or `off` = cap around the clock) and
+      # vault-core logs a deprecation warning at start. Blank or unset = not
+      # set (follow the download window). `-` form, like every editable key.
+      VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-}
       # HTTPS passthrough on port 443 (WP CORE-FIX-3, ADR-0020): TLS for
       # *.steamcontent.com SNI names is copied to Valve unchanged (no
       # certificate, nothing cached), everything else is closed at once.
@@ -247,13 +240,14 @@ services:
       # Steam client's discovery marker maps to. With an edge set, every
       # allowed MISS is dialled on that ONE name over keepalive connections,
       # whatever Host the client sent, and VAULT_UPSTREAM_POOL_HOSTS above is
-      # ignored. ROLLBACK to the per-name path: set VAULT_UPSTREAM_EDGE=off in
-      # .env (rc18; before rc18 an explicit blank meant legacy mode). Unset
-      # takes the default (on). Exactly one
-      # lowercase host name in the Host-allowlist families; anything else
-      # stops the boot (`28-vault-upstream-pool.sh: FATAL`). Env-only: recreate
-      # vault-core after a change.
-      VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}
+      # ignored. ROLLBACK to the per-name path: VAULT_UPSTREAM_EDGE=off in .env
+      # (since rc18, D16 Q7; a blank value no longer means legacy mode) or
+      # `off` in Settings. Blank or unset = not set: Settings, else the default
+      # edge, supplied by core/docker/15-vault-settings.envsh. Exactly one
+      # lowercase host name in the Host-allowlist families or `off`; anything
+      # else stops the boot (`28-vault-upstream-pool.sh: FATAL`), or, coming
+      # from Settings, is rejected while the last good config stays live.
+      VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-}
       # The global cap C on concurrent upstream connections (both modes),
       # whole number 1..64, NO off switch; over the cap vault-core answers
       # 503. Empty or unset = 16 (the hook's default, so `-` and `:-` agree).
@@ -331,6 +325,22 @@ services:
       # See deploy/README.md "Using a dedicated cache mount" for the required
       # host-side `mkdir` + `chown 101:101` before first start.
       - ${VAULT_CACHE_PATH:-vault-cache}:/vault
+      # D16c: the core settings file vault-api writes (core-settings.env, see
+      # core/README.md "Settings from vault-api"). Read-only here, and
+      # `nocopy`: vault-api is this volume's only seeder (its image owns the
+      # mount point 101:101), whichever container Compose creates first.
+      # Long syntax, so read_only and nocopy are stated, not comma-combined.
+      # Named volume only (no bind mode): the file is derived from the
+      # database, needs no backup, and vault-api rewrites it at every start.
+      # Until vault-api has written it (fresh volume, vault-core started
+      # first) vault-core runs on env + defaults and applies the file by
+      # reload once it appears (core/README.md "Settings from vault-api").
+      - type: volume
+        source: vault-settings
+        target: /etc/vault-settings
+        read_only: true
+        volume:
+          nocopy: true
     security_opt:
       # nginx's master drops privileges to uid 101 for its workers; nothing here
       # ever needs to gain privileges via a setuid binary.
@@ -638,6 +648,10 @@ services:
       # ever removed. Off (read-write) by default, matching config.py's own
       # default.
       VAULT_SETTINGS_READONLY: ${VAULT_SETTINGS_READONLY:-false}
+      # D16c: where vault-api writes the core settings file for vault-core
+      # (the vault-settings volume below). A fixed container path, not an
+      # operator knob: blank would switch the core settings path off.
+      VAULT_CORE_SETTINGS_FILE: /var/lib/vault-settings/core-settings.env
       # The five remaining settings-API keys (settings_store.OVERRIDABLE_SPECS:
       # vault_name, schedule_interval_minutes, schedule_client_stale_days,
       # webhook_url, webhook_events). Through the pre-freeze review these
@@ -811,6 +825,10 @@ services:
       - ${VAULT_CACHE_PATH:-vault-cache:/vault:nocopy}${VAULT_CACHE_PATH:+:/vault}
       # SQLite database (mapping, jobs, agent reports). Small; back this up.
       - vault-db:/data
+      # D16c: the core settings file for vault-core (VAULT_CORE_SETTINGS_FILE
+      # above). vault-api is the only writer and the seeder of a fresh volume
+      # (the image directory is 101:101); vault-core mounts it read-only.
+      - vault-settings:/var/lib/vault-settings
       # SteamPrefill's Config/ (the Steam SESSION) is NOT mounted here anymore
       # as of WP S-2 (ADR-0012 §5) -- it moved to the vault-runner service
       # below. Evidence, not assumption: in VAULT_PREFILL_MODE=queue (this
@@ -1246,3 +1264,6 @@ volumes:
   vault-db:
   vault-steamprefill:
   vault-steamprefill-home:
+  # D16c (Q6): the core settings file, vault-api -> vault-core. No backup
+  # needed: vault-api rewrites it from the database at every start.
+  vault-settings:

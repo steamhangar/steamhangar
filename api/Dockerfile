@@ -232,9 +232,16 @@ COPY web /app/web
 #                                cache/depot to uid 101 (core/README.md
 #                                "Volume ownership"). This chown never
 #                                reaches that volume.
+# D16c: /var/lib/vault-settings is the mount point of the shared
+# vault-settings volume (deploy/compose.yaml). Created here owned 101:101, so
+# Docker seeds a FRESH named volume with that owner when vault-api mounts it
+# (vault-core mounts it read-only with nocopy and never seeds it); vault-api
+# then writes core-settings.env into it (VAULT_CORE_SETTINGS_FILE).
 RUN set -eux; \
-    mkdir -p /data /opt/steamprefill/Config /opt/steamprefill/home /vault/cache/depot /vault/tmp; \
-    chown -R 101:101 /data /opt/steamprefill /vault /app; \
+    mkdir -p /data /opt/steamprefill/Config /opt/steamprefill/home /vault/cache/depot /vault/tmp /var/lib/vault-settings; \
+    chown -R 101:101 /data /opt/steamprefill /vault /app /var/lib/vault-settings; \
+    chmod 0755 /var/lib/vault-settings; \
+    test "$(stat -c '%u:%g %a' /var/lib/vault-settings)" = "101:101 755"; \
     # Assert the two halves of the HOME fix agree with each other and with the
     # directory that actually exists -- a build-time guard, because getting this
     # wrong is silent until someone tries to prefill.

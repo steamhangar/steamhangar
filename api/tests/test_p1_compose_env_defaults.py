@@ -232,17 +232,20 @@ EXPECTED_DEFAULTS_VAULT_PROXY: dict[str, str] = {
 # WP TH-1b (ADR-0015). vault-core's own `environment:` block. None of these
 # is a vault_api/config.py setting (vault-core is nginx), so every expected
 # value is a literal, same class as TZ/VAULT_LOG_LEVEL above.
-# VAULT_UPSTREAM_RATE_WINDOW's default is itself a substitution: unset follows
-# vault-api's VAULT_SCHEDULE_WINDOW forwarding (same `03:00-07:00` default,
-# cross-checked by test_upstream_rate_window_follows_the_schedule_window_default
-# below). Both rate keys use the no-colon form (pinned separately by
-# test_upstream_rate_keys_use_the_no_colon_form).
+# D16c (Q7): every editable key is forwarded as `${VAR-}` (blank or unset =
+# not set); the shipped defaults (resolver 1.1.1.1, edge
+# dist-fra1.discovery.steamserver.net, window 03:00-07:00) moved into
+# core/docker/vault-settings-lib.sh vs_default, cross-checked against
+# vault-api's constants by test_d16c_core_status.py. The deprecated
+# VAULT_UPSTREAM_RATE_WINDOW no longer nests VAULT_SCHEDULE_WINDOW: the
+# download window reaches vault-core through the core settings file
+# (test_upstream_rate_window_follows_the_schedule_window_default below).
 EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
-    "VAULT_RESOLVER": "1.1.1.1",
+    "VAULT_RESOLVER": "",
     "VAULT_EVENT_LOG": "",
     "TZ": "UTC",  # nginx's $time_iso8601 is local time; same `:-` form as vault-api
     "VAULT_UPSTREAM_RATE": "",
-    "VAULT_UPSTREAM_RATE_WINDOW": "${VAULT_SCHEDULE_WINDOW-03:00-07:00}",
+    "VAULT_UPSTREAM_RATE_WINDOW": "",
     # WP CORE-FIX-3 (ADR-0020): the HTTPS passthrough switch, default on.
     # The `:-` form and the image/hook defaults are pinned in
     # test_core_fix_3_tls_passthrough.py.
@@ -255,10 +258,10 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     # WP CORE-FEAT-1d (ADR-0017): the keepalive-pool edge list, same `-`
     # form as VAULT_UPSTREAM_RATE (blank passes through as "" = no pool).
     "VAULT_UPSTREAM_POOL_HOSTS": "",
-    # WP CORE-FIX-4c (ADR-0021): edge mode ON by default; the `-` form keeps
-    # an explicitly blank value = legacy mode (rollback), pinned in
-    # UPSTREAM_EDGE_CORE_LINES below.
-    "VAULT_UPSTREAM_EDGE": "dist-fra1.discovery.steamserver.net",
+    # WP CORE-FIX-4c (ADR-0021): edge mode ON by default -- since D16c the
+    # default comes from vault-core's 15- hook; the rollback is
+    # VAULT_UPSTREAM_EDGE=off (Q7), pinned in UPSTREAM_EDGE_CORE_LINES below.
+    "VAULT_UPSTREAM_EDGE": "",
     # The cap: blank = the hook's default 16 (rendered by 28-vault-upstream-pool.sh).
     "VAULT_UPSTREAM_MAX_CONNS": "",
     # Forwarded only for the hook's floor check (cap >= prefill threads);
@@ -269,11 +272,10 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
 }
 
 #: D16b: the keys editable from Settings that each service forwards, all in
-#: the exact form `${VAR-}` (docs/handover/d16-settings-audit.md 3.5). The
-#: vault-core keys whose blank still means something else until D16c
-#: teaches the hooks `off` (VAULT_UPSTREAM_EDGE, VAULT_RESOLVER,
-#: VAULT_UPSTREAM_RATE_WINDOW) are NOT in this list; their forms are pinned
-#: by UPSTREAM_EDGE_CORE_LINES / UPSTREAM_RATE_CORE_LINES below.
+#: the exact form `${VAR-}` (docs/handover/d16-settings-audit.md 3.5). D16c
+#: added the three vault-core keys whose blank used to mean something else
+#: (VAULT_UPSTREAM_EDGE, VAULT_RESOLVER, VAULT_UPSTREAM_RATE_WINDOW) now that
+#: the hooks accept `off`.
 D16B_EDITABLE_FORWARDED: dict[str, tuple[str, ...]] = {
     "vault-api": (
         "VAULT_LOG_LEVEL", "VAULT_PREFILL_TIMEOUT_SECONDS", "VAULT_PREFILL_MAX_THREADS",
@@ -293,6 +295,7 @@ D16B_EDITABLE_FORWARDED: dict[str, tuple[str, ...]] = {
         "VAULT_UPSTREAM_RATE", "VAULT_UPSTREAM_POOL_HOSTS", "VAULT_UPSTREAM_MAX_CONNS",
         "VAULT_TLS_CLIENT_MAX_CONNS", "VAULT_TLS_MAX_CONNS", "VAULT_PREFILL_MAX_THREADS",
         "VAULT_EVENT_LOG_ROTATE_BYTES",
+        "VAULT_UPSTREAM_EDGE", "VAULT_RESOLVER", "VAULT_UPSTREAM_RATE_WINDOW",
     ),
 }
 
@@ -892,22 +895,22 @@ def test_schedule_window_uses_the_no_colon_substitution_form(compose_text: str) 
 
 #: WP TH-1b (ADR-0015): the exact forwarding lines on vault-core. The
 #: substitution FORM is the contract (docs/LEARNINGS.md, `${VAR-}` vs
-#: `${VAR:-}`): for both rate keys unset and blank must stay distinguishable
-#: (a blank window = cap around the clock), TZ keeps the `:-` form because
-#: blank TZ == UTC.
+#: `${VAR:-}`). D16c (Q7): blank or unset = not set (Settings, else the
+#: default); "no cap" and "cap around the clock" are spelled `off`. TZ keeps
+#: the `:-` form because blank TZ == UTC.
 UPSTREAM_RATE_CORE_LINES = (
     "TZ: ${TZ:-UTC}",
     "VAULT_UPSTREAM_RATE: ${VAULT_UPSTREAM_RATE-}",
-    "VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-${VAULT_SCHEDULE_WINDOW-03:00-07:00}}",
+    "VAULT_UPSTREAM_RATE_WINDOW: ${VAULT_UPSTREAM_RATE_WINDOW-}",
+    "VAULT_RESOLVER: ${VAULT_RESOLVER-}",
 )
 
 
-#: WP CORE-FIX-4c (ADR-0021): the edge key MUST be the no-colon form, else an
-#: explicitly blank VAULT_UPSTREAM_EDGE= (the documented rollback to legacy
-#: mode) would silently become the default edge. The prefill floor uses the
-#: colon form like vault-api (blank counts as 8 in the hook too).
+#: WP CORE-FIX-4c (ADR-0021) / D16c: the edge key is `${VAR-}` with NO
+#: default: the default edge comes from vault-core's 15- hook so that
+#: Settings can change it, and the rollback to legacy mode is `off` (Q7).
 UPSTREAM_EDGE_CORE_LINES = (
-    "VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-dist-fra1.discovery.steamserver.net}",
+    "VAULT_UPSTREAM_EDGE: ${VAULT_UPSTREAM_EDGE-}",
     "VAULT_UPSTREAM_MAX_CONNS: ${VAULT_UPSTREAM_MAX_CONNS-}",
     # D16b: `${VAR-}` like every editable key; the hook counts blank as 8.
     "VAULT_PREFILL_MAX_THREADS: ${VAULT_PREFILL_MAX_THREADS-}",
@@ -934,18 +937,19 @@ def test_upstream_rate_keys_use_the_no_colon_form(expected_line: str, compose_te
 def test_upstream_rate_window_follows_the_schedule_window_default(
     env_defaults_by_service: dict[str, dict[str, str]],
 ) -> None:
-    """The cap window's fallback must be vault-api's own download-window
-    default, so an operator who sets neither gets the cap lifted exactly
-    while the scheduler runs. D16b: vault-api's default moved into config.py
-    (compose forwards `${VAULT_SCHEDULE_WINDOW-}` there), so this compares
-    against config.DEFAULT_SCHEDULE_WINDOW. D16c replaces this nested line
-    with `${VAULT_UPSTREAM_RATE_WINDOW-}` once vault-core reads the
-    effective window from the core settings file
-    (core_settings.core_file_values, pinned in test_d16b_core_grammar.py)
-    and its hook accepts `off`; until then a Settings window does not reach
-    vault-core."""
-    core_window_default = env_defaults_by_service["vault-core"]["VAULT_UPSTREAM_RATE_WINDOW"]
-    assert core_window_default == f"${{VAULT_SCHEDULE_WINDOW-{config.DEFAULT_SCHEDULE_WINDOW}}}"
+    """The cap window follows the ONE download window (Q3). Since D16c that
+    no longer happens in compose (the nested `${..-${VAULT_SCHEDULE_WINDOW-..}}`
+    line is gone): vault-api writes the effective download window into the
+    core settings file (core_settings.core_file_values, pinned in
+    test_d16b_core_grammar.py), and vault-core's own fallback when no file
+    exists is the SAME default as vault-api's config.DEFAULT_SCHEDULE_WINDOW
+    (vs_default in core/docker/vault-settings-lib.sh, read here as a string
+    literal of that file)."""
+    assert env_defaults_by_service["vault-core"]["VAULT_UPSTREAM_RATE_WINDOW"] == ""
+    lib = (COMPOSE_PATH.parents[1] / "core" / "docker" / "vault-settings-lib.sh").read_text(encoding="utf-8")
+    match = re.search(r"^\s*VAULT_UPSTREAM_RATE_WINDOW\) echo (\S+) ;;$", lib, re.MULTILINE)
+    assert match, "vault-settings-lib.sh vs_default has no VAULT_UPSTREAM_RATE_WINDOW line"
+    assert match.group(1) == config.DEFAULT_SCHEDULE_WINDOW == "03:00-07:00"
 
 
 @pytest.mark.parametrize(

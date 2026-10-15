@@ -690,7 +690,7 @@ pool"](#upstream-keepalive-pool), "Why 4").
 
 ## Volumes and backup
 
-Three named volumes, created automatically (a fourth location,
+Four named volumes, created automatically (a fifth location,
 `vault-cache`, becomes a bind mount instead if `VAULT_CACHE_PATH` is set --
 see ["Using a dedicated cache mount"](#using-a-dedicated-cache-mount) above):
 
@@ -699,6 +699,7 @@ see ["Using a dedicated cache mount"](#using-a-dedicated-cache-mount) above):
 | `vault-cache` (or `VAULT_CACHE_PATH` if set) | `/vault` in vault-core, vault-api **and** vault-runner (WP S-2) | the depot cache (`cache/depot/…`) plus nginx's `tmp/` | **No** — it is a cache; large, and re-fillable by prefilling again |
 | `vault-db`           | `/data` in **both** vault-api and vault-runner (WP S-2) | `vault.db` — depot→app mapping, jobs, agent reports | **Yes** — small, and it is the knowledge the cache cannot rebuild |
 | `vault-steamprefill` | `/opt/steamprefill/Config` in **vault-runner** (moved here from vault-api in WP S-2, ADR-0012 §5 — see "First run" above) | SteamPrefill's Steam **session** and selection state | **Yes**, and treat it as a secret |
+| `vault-settings` (D16c) | `/var/lib/vault-settings` in vault-api (rw, the only writer), `/etc/vault-settings` in vault-core (read-only, `nocopy`) | `core-settings.env`, the Settings values vault-core applies (core/README.md "Settings from vault-api") | **No** — vault-api rewrites it from `vault-db` at every start |
 | `vault-steamprefill-home` | `/opt/steamprefill/home` in **both** vault-api and vault-runner (WP S-2 — see `deploy/compose.yaml`'s comment on this mount for why vault-api still needs it even though SteamPrefill itself now runs in vault-runner: manifest ingestion stays vault-api-side and reads the `.cache/SteamPrefill/v1` files vault-runner writes under this same shared directory) | `HOME` for the container user — SteamPrefill's manifest/depot cache | **No** — regenerable, and it grows |
 
 ```bash
@@ -1052,15 +1053,16 @@ New variables (all optional; vault-core only, recreate it after a change,
   `host="..."` (what the client sent), `limit_conn=` (`REJECTED` for a 503).
 - Socket bound: up to C in flight plus C idle (2C).
 
-**Rollback.** Set `VAULT_UPSTREAM_EDGE=off` in `.env` (before rc18: an
-empty `VAULT_UPSTREAM_EDGE=`, which since rc18 means "not set" = the
-default edge) and recreate vault-core: the per-name pool of the next section
-applies again. The boot log says `upstream edge mode ON: ...` or
+**Rollback.** Set `VAULT_UPSTREAM_EDGE=off` in `.env` and recreate
+vault-core, or set `upstream_edge` to `off` in Settings (applied without a
+restart, D16c): the per-name pool of the next section applies again. Since
+rc18 an empty value no longer rolls back (it means "not set" = the default
+edge; ADR-0021 note 2026-10-15). The boot log says `upstream edge mode ON: ...` or
 `upstream keepalive pool ON (legacy per-name mode)`.
 
 **Keep the upload throttle on.** Recommended (user decision 2026-10-04):
-keep `VAULT_UPSTREAM_RATE=4m` and `VAULT_UPSTREAM_RATE_WINDOW=off`
-(before rc18: an empty value; throttle round the clock, see "Upstream rate cap") even with edge mode and
+keep `VAULT_UPSTREAM_RATE=4m` and `VAULT_UPSTREAM_RATE_WINDOW=off` (before rc18: an empty value)
+(throttle round the clock, see "Upstream rate cap") even with edge mode and
 the cap on, until measurements after the rollout show that edge and cap are
 stable. Only then loosen or remove it. Both are production `.env`
 settings; the repo defaults are unchanged.

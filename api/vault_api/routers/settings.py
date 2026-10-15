@@ -18,6 +18,14 @@ frontends); ``null`` resets it to the default.
 value ``"db"`` for "set in Settings" (the shipped web UI and Android app
 read it).
 
+**D16c.** Core keys (``target: "core"``) read vault-core's status file
+(``<cache volume>/logs/settings-applied.json``): a key vault-core's own env
+pins is ``source: "env"``, ``editable: false``, and every core key is
+``env_visible``. The top-level ``core_apply`` (``null`` until vault-core wrote
+the file) carries ``state`` (``applied`` | ``rejected`` | ``none``),
+``generation``, ``applied_generation``, ``reason``, ``updated_at``,
+``written_generation`` (vault-api's own file) and ``pending``.
+
 ``GET`` reports, per key, the effective value, where it came from (``db`` |
 ``env`` | ``default``), the value clearing the override would revert to, when
 a change takes effect (``immediately`` | ``next_sweep`` | ``restart-required``
@@ -100,7 +108,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from vault_api import settings_store
+from vault_api import core_settings, settings_store
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener
@@ -125,6 +133,11 @@ _UNKNOWN_KEY_DETAIL_TEMPLATE = "{key!r} is not a recognised setting."
 _ENV_PINNED_DETAIL_TEMPLATE = (
     "{key!r} is set via env ({env_var}); env always wins. Remove the "
     "environment variable and restart to change it here."
+)
+_CORE_ENV_PINNED_DETAIL_TEMPLATE = (
+    "{key!r} is set via env on vault-core ({env_var}); env always wins. "
+    "Remove the variable from vault-core's environment and recreate it to "
+    "change it here."
 )
 _CORE_FILE_DISABLED_DETAIL_TEMPLATE = (
     "{key!r} is applied by vault-core through the core settings file, which "
@@ -156,6 +169,21 @@ class SettingInfoOut(BaseModel):
     reason: str | None
 
 
+class CoreApplyOut(BaseModel):
+    """D16c: vault-core's report on the core settings (``settings-applied.json``).
+    ``pending`` is true while vault-api's settings file carries a generation
+    other than the one vault-core last applied or rejected (not equal, not
+    greater: the generation restarts at 1 after a lost settings volume)."""
+
+    state: str
+    generation: int
+    applied_generation: int
+    reason: str
+    updated_at: str
+    written_generation: int | None
+    pending: bool
+
+
 class SettingsOut(BaseModel):
     #: Mirrors ``Settings.settings_readonly`` — true means PATCH answers 403.
     readonly: bool
@@ -166,14 +194,35 @@ class SettingsOut(BaseModel):
     #: ``vault_api.BASE_VERSION`` for a native run without that env.
     server_version: str
     settings: list[SettingInfoOut]
+    #: D16c: ``None`` until vault-core has written its status file.
+    core_apply: CoreApplyOut | None = None
+
+
+def _core_apply(core_status: core_settings.CoreStatus | None, base: Settings) -> CoreApplyOut | None:
+    if core_status is None:
+        return None
+    written = core_settings.written_generation(base.core_settings_file)
+    return CoreApplyOut(
+        state=core_status.state,
+        generation=core_status.generation,
+        applied_generation=core_status.applied_generation,
+        reason=core_status.reason,
+        updated_at=core_status.updated_at,
+        written_generation=written,
+        # "not equal", not "greater": vault-api restarts at 1 when the
+        # settings volume is lost.
+        pending=written is not None and written != core_status.generation,
+    )
 
 
 def _build_response(conn, base: Settings, server_version: str) -> SettingsOut:
-    infos = settings_store.describe_settings(conn, base)
+    core_status = core_settings.read_core_status(core_settings.core_status_path(base.cache_root))
+    infos = settings_store.describe_settings(conn, base, core_status)
     return SettingsOut(
         readonly=base.settings_readonly,
         server_version=server_version,
         settings=[SettingInfoOut(**vars(info)) for info in infos],
+        core_apply=_core_apply(core_status, base),
     )
 
 
@@ -257,6 +306,9 @@ def patch_settings(
     # multi-key PATCH must not partially apply the good ones.
     to_set: list[tuple[str, str]] = []
     to_clear: list[str] = []
+    # D16c: vault-core's own env pins, from its status file -- the same
+    # source GET uses, so PATCH refuses exactly the rows GET shows as env.
+    core_status = core_settings.read_core_status(core_settings.core_status_path(base.cache_root))
     for key, value in payload.items():
         if key in ENV_ONLY_KEYS:
             raise HTTPException(
@@ -273,6 +325,15 @@ def patch_settings(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=_ENV_PINNED_DETAIL_TEMPLATE.format(key=key, env_var=spec.env_var),
+            )
+        if (
+            spec.target == settings_store.TARGET_CORE
+            and core_status is not None
+            and core_status.env_pinned(spec.env_var) is not None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_CORE_ENV_PINNED_DETAIL_TEMPLATE.format(key=key, env_var=spec.env_var),
             )
         if settings_store.is_core_disabled(spec, base):
             raise HTTPException(
@@ -316,7 +377,7 @@ def patch_settings(
     with open_db() as conn:
         # Audit 3.4: cross-variable rules on the state the batch leaves.
         try:
-            settings_store.check_cross_rules(conn, base, to_set, to_clear)
+            settings_store.check_cross_rules(conn, base, to_set, to_clear, core_status)
         except SettingValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)

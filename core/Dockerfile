@@ -24,6 +24,29 @@ LABEL org.opencontainers.image.title="SteamHangar vault-core" \
       org.opencontainers.image.source="https://github.com/steamhangar/steamhangar" \
       org.opencontainers.image.licenses="Apache-2.0"
 
+# --- D16c hard gate: the stock entrypoint SOURCES executable *.envsh ---------
+# 15-vault-settings.envsh (D16c) exports the core settings (settings file,
+# env pins, defaults) for every later hook. That works only if this pinned
+# image's own /docker-entrypoint.sh sources an executable *.envsh in sorted
+# order AND a later *.sh hook sees what it exported. Proved here against the
+# unmodified stock entrypoint, before anything else is added to the image: the
+# hook directory is swapped for two probes for one run of the real
+# entrypoint, then restored. A base-image bump that drops the mechanism fails
+# the BUILD, not the first boot. (The probe names sort like the real hooks:
+# 15-...envsh before 20-...sh.)
+RUN set -eu; \
+    mv /docker-entrypoint.d /docker-entrypoint.d.stock; \
+    mkdir /docker-entrypoint.d; \
+    printf '%s\n' '#!/bin/sh' 'export VAULT_ENVSH_PROBE=sourced' > /docker-entrypoint.d/15-vault-envsh-probe.envsh; \
+    printf '%s\n' '#!/bin/sh' 'set -eu' '[ "${VAULT_ENVSH_PROBE:-}" = sourced ]' 'echo "$VAULT_ENVSH_PROBE" > /tmp/vault-envsh-probe.out' > /docker-entrypoint.d/20-vault-envsh-probe.sh; \
+    chmod 0755 /docker-entrypoint.d/15-vault-envsh-probe.envsh /docker-entrypoint.d/20-vault-envsh-probe.sh; \
+    /docker-entrypoint.sh nginx -v; \
+    [ "$(cat /tmp/vault-envsh-probe.out)" = sourced ]; \
+    rm -rf /docker-entrypoint.d /tmp/vault-envsh-probe.out; \
+    mv /docker-entrypoint.d.stock /docker-entrypoint.d; \
+    [ -x /docker-entrypoint.d/20-envsubst-on-templates.sh ]; \
+    echo "D16c gate: the stock entrypoint sources *.envsh and later hooks see its exports"
+
 # --- Config -------------------------------------------------------------------
 # The config is baked into the image, not mounted: it is reviewed, test-covered
 # code (core/tests/test-core.ps1), not a knob. The single deployment-specific
@@ -35,6 +58,15 @@ COPY docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
 # WP SEC-FIX-5: makes /vault, cache/, tmp/ and logs/ root:root 0755 at every
 # start (migrating a volume from an earlier image) and refuses to start when
 # it cannot. Runs before every other hook that touches /vault.
+# D16c: the core settings from vault-api (core/README.md "Settings from
+# vault-api"). 15- is SOURCED by the stock entrypoint (the gate above) and
+# exports env > settings file > default for every later hook; 47- reports the
+# boot result and forks the watcher that applies a new settings generation
+# with `nginx -t` + reload, never a restart. Both use the shared library.
+COPY docker/vault-settings-lib.sh /opt/vault/vault-settings-lib.sh
+COPY docker/15-vault-settings.envsh /docker-entrypoint.d/15-vault-settings.envsh
+COPY docker/47-vault-settings-watch.sh /docker-entrypoint.d/47-vault-settings-watch.sh
+COPY nginx/vault-settings-generation.conf /opt/vault/vault-settings-generation.native.conf
 COPY docker/21-vault-volume-ownership.sh /docker-entrypoint.d/21-vault-volume-ownership.sh
 COPY docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
 COPY docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
@@ -66,6 +98,8 @@ COPY nginx/vault-upstream-pool.conf /opt/vault/vault-upstream-pool.native.conf
 COPY nginx/vault-upstream-cap.conf /opt/vault/vault-upstream-cap.native.conf
 
 RUN set -eux; \
+    chmod 0755 /docker-entrypoint.d/15-vault-settings.envsh /docker-entrypoint.d/47-vault-settings-watch.sh; \
+    chmod 0644 /opt/vault/vault-settings-lib.sh; \
     chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh /opt/vault/check-config-drift.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
@@ -245,6 +279,23 @@ RUN set -eux; \
             echo "BUILD CHECK FAILED: 45-vault-eventlog-rotate.sh accepted $bad (D15-ROT)" >&2; exit 1; \
         fi; \
     done; \
+    # D16c: the core settings library in this image's own shell -- a file as
+    # vault-api writes it parses, an unknown key and a missing header are
+    # refused (the whole file), env beats file beats default, and the
+    # generation-0 include equals the native core/nginx file byte for byte.
+    sh -c 'set -eu; . /opt/vault/vault-settings-lib.sh; \
+        VAULT_UPSTREAM_RATE=4m; vs_capture_env; \
+        vs_parse "$(printf "%s\n" "$VS_FILE_HEADER" GENERATION=7 VAULT_UPSTREAM_RATE=800k VAULT_UPSTREAM_EDGE=off)"; \
+        [ "$VS_GEN" = 7 ]; vs_resolve yes; \
+        [ "$VS_V_VAULT_UPSTREAM_RATE/$VS_S_VAULT_UPSTREAM_RATE" = 4m/env ]; \
+        [ "$VS_V_VAULT_UPSTREAM_EDGE/$VS_S_VAULT_UPSTREAM_EDGE" = off/file ]; \
+        [ "$VS_V_VAULT_RESOLVER/$VS_S_VAULT_RESOLVER" = 1.1.1.1/default ]; \
+        if vs_parse "$(printf "%s\n" "$VS_FILE_HEADER" GENERATION=8 VAULT_API_KEY=x)"; then exit 1; fi; \
+        if vs_parse "$(printf "%s\n" GENERATION=8 VAULT_UPSTREAM_RATE=1m)"; then exit 1; fi; \
+        [ "$(vs_shown "[2606:4700::1111]:53 \"x\"")" = "[2606:4700::1111]:53 ?x?" ]; \
+        vs_write_generation_conf /tmp/vault-settings-generation.check.conf 0; \
+        cmp /tmp/vault-settings-generation.check.conf /opt/vault/vault-settings-generation.native.conf; \
+        rm -f /tmp/vault-settings-generation.check.conf'; \
     [ "$(VAULT_RESOLVER='   ' sh /docker-entrypoint.d/40-vault-preflight.sh --grammar >/dev/null 2>&1; echo $?)" = 1 ]; \
     [ "$(VAULT_EVENT_LOG_ROTATE_BYTES=0001048576 sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh --grammar)" = 1048576 ]
 
@@ -280,7 +331,10 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     # ADR-0001 req 4. Overridable per deployment (deploy/.env). Must be a real
     # upstream resolver -- never vault-dns, which would answer *.steamcontent.com
     # with vault-core's own address and loop every miss back into this server.
-    VAULT_RESOLVER=1.1.1.1 \
+    # D16c: EMPTY here = not set; 15-vault-settings.envsh supplies the default
+    # 1.1.1.1 (Settings, else default), so an image run without compose does
+    # not report an "env" pin for it. Same for the caps below.
+    VAULT_RESOLVER= \
     # WP 3.10 (ADR-0008): path for the optional cache-event log. DEFAULT EMPTY
     # -- feature OFF -- deliberately, not "on by default with a sane path":
     # the ADR explicitly frames this feed as "optional at runtime" (written
@@ -318,14 +372,15 @@ ENV NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates \
     VAULT_UPSTREAM_EDGE= \
     # Global cap C on concurrent upstream connections (1..64, default 16, no
     # off switch; must be >= VAULT_PREFILL_MAX_THREADS, empty = 8). Over the
-    # cap the client gets 503. Rendered by the same hook.
-    VAULT_UPSTREAM_MAX_CONNS=16 \
+    # cap the client gets 503. Rendered by the same hook. Empty = not set (D16c:
+    # 15- supplies 16).
+    VAULT_UPSTREAM_MAX_CONNS= \
     # WP CORE-FIX-4d (ADR-0021 addendum 2026-10-09): the passthrough's
     # connection caps, rendered by 26-vault-tls-passthrough.sh. Per client address 1..256
     # (empty = 64), in total 1..400 (empty = 256), client <= total; anything
-    # else refuses to boot.
-    VAULT_TLS_CLIENT_MAX_CONNS=64 \
-    VAULT_TLS_MAX_CONNS=256 \
+    # else refuses to boot. Empty = not set (D16c: 15- supplies 64 / 256).
+    VAULT_TLS_CLIENT_MAX_CONNS= \
+    VAULT_TLS_MAX_CONNS= \
     # WP CORE-FIX-3 (ADR-0020): HTTPS passthrough on port 443 for
     # *.steamcontent.com SNI names, TLS not terminated. DEFAULT ON (1);
     # 0/false/off/no removes the stream block at start

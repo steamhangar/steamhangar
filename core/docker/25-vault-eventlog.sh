@@ -37,7 +37,15 @@ ME="25-vault-eventlog.sh"
 log()  { echo "$ME: $*"; }
 die()  { echo "$ME: FATAL: $*" >&2; exit 1; }
 
-CONF="/etc/nginx/nginx.conf"
+# Usage: 25-vault-eventlog.sh [config-file]
+#   No argument (docker-entrypoint.sh): edit /etc/nginx/nginx.conf AND prepare
+#   the log file and its directory (boot only).
+#   With an argument (D16c: the settings watcher's staging render): edit that
+#   rendered config only. The file work below is skipped -- VAULT_EVENT_LOG is
+#   env-only, so the boot already did it for exactly this path.
+CONF="${1:-/etc/nginx/nginx.conf}"
+RENDER_ONLY=no
+[ "$#" -eq 0 ] || RENDER_ONLY=yes
 MARKER="# VAULT_EVENT_LOG_LINE"
 VALUE="${VAULT_EVENT_LOG:-}"
 WORKER_USER="nginx"
@@ -159,6 +167,11 @@ sed -i "s/[[:space:]]*${MARKER}\$//" "$CONF"
 still_marked=$(grep -c "$MARKER" "$CONF" 2>/dev/null || true)
 if [ "${still_marked:-0}" != "0" ]; then
     die "failed to strip the cache-event-log marker comment from $CONF while enabling it ($still_marked remain)."
+fi
+
+if [ "$RENDER_ONLY" = yes ]; then
+    log "cache-event log ENABLED in $CONF ($VALUE); render only, the log file was prepared at boot"
+    exit 0
 fi
 
 # --- The directory and the file (WP SEC-FIX-5) -------------------------------

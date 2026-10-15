@@ -207,10 +207,14 @@ def test_hook_cap_defaults_and_ranges_are_the_reviewed_literals() -> None:
     }
 
 
-@pytest.mark.parametrize(("key", "default"), (("VAULT_TLS_CLIENT_MAX_CONNS", "64"), ("VAULT_TLS_MAX_CONNS", "256")))
-def test_image_env_cap_defaults(key: str, default: str) -> None:
+@pytest.mark.parametrize("key", ("VAULT_TLS_CLIENT_MAX_CONNS", "VAULT_TLS_MAX_CONNS"))
+def test_image_env_cap_defaults(key: str) -> None:
+    """D16c (review S4): the image ENV states the caps EMPTY = not set, so a
+    plain image run reports no env pin; the defaults 64/256 come from
+    15-vault-settings.envsh (vs_default, pinned in test_d16c_core_status.py)
+    and the hook's own TLS_*_DEFAULT (above)."""
     text = CORE_DOCKERFILE.read_text(encoding="utf-8")
-    assert re.findall(rf"^\s*{key}=(\S*?)\s*\\?\s*$", text, re.MULTILINE) == [default]
+    assert re.findall(rf"^\s*{key}=(\S*?)\s*\\?\s*$", text, re.MULTILINE) == [""]
 
 
 @pytest.mark.parametrize(("key", "default"), (("VAULT_TLS_CLIENT_MAX_CONNS", "64"), ("VAULT_TLS_MAX_CONNS", "256")))

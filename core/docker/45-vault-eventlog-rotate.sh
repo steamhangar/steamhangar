@@ -125,9 +125,11 @@ fi
 # 15-vault-settings.envsh writes the effective core settings, and the settings
 # watcher (47-) replaces the file on every applied generation. When the size
 # does NOT come from an env pin, the loop re-reads it before every check, so
-# a new value from Settings applies within one interval. An unreadable or
-# invalid line keeps the previous size (the watcher only installs values
-# this hook's grammar accepted).
+# a new value from Settings applies within one interval. Both writers of
+# that file render through vs_render (core/docker/vault-settings-lib.sh),
+# which runs this hook's `--grammar` and refuses the whole generation when
+# it fails, so a value this hook would refuse is never installed; an
+# unreadable or invalid line (defence in depth) keeps the previous size.
 EFFECTIVE_FILE="${VS_EFFECTIVE_FILE:-/etc/nginx/vault-settings.effective}"
 TAB=$(printf '\t')
 SETTABLE=no

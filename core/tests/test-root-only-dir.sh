@@ -6,6 +6,7 @@
 #   core/docker/21-vault-volume-ownership.sh
 #   core/docker/25-vault-eventlog.sh
 #   core/docker/29-vault-build-version.sh
+#   core/docker/vault-settings-lib.sh (D16c: the status file of 47-)
 #
 # 1. The three copies are byte-identical (a fix in one must reach all).
 # 2. The function itself, extracted from 21-, under `sh`: a `stat` stub
@@ -21,7 +22,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 docker_dir="$(cd "$script_dir/../docker" && pwd)"
-hooks=(21-vault-volume-ownership.sh 25-vault-eventlog.sh 29-vault-build-version.sh)
+hooks=(21-vault-volume-ownership.sh 25-vault-eventlog.sh 29-vault-build-version.sh vault-settings-lib.sh)
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM

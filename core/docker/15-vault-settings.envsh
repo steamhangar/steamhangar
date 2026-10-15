@@ -1,0 +1,113 @@
+#!/bin/sh
+# shellcheck shell=sh
+# SteamHangar vault-core container hook -- the core settings at boot (D16c,
+# docs/handover/d16-settings-audit.md 4.3).
+#
+# A *.envsh file: the stock /docker-entrypoint.sh SOURCES it (core/Dockerfile
+# proves that at build time), so what it exports reaches every later hook --
+# 20-envsubst (VAULT_RESOLVER), 26 (TLS caps), 27 (rate and window), 28 (edge,
+# pool hosts, cap, prefill floor), 40 (checks), 45 (rotation size) and 47 (the
+# watcher, which keeps applying changes at runtime). Being sourced, it must
+# never `exit` and never leave `set -e`/`set -u` changed: every statement
+# here is guarded, and its helpers live in /opt/vault/vault-settings-lib.sh.
+#
+# What it does, per key of VS_KEYS:
+#   1. records the operator's env value (VS_ENV_<KEY>) once;
+#   2. reads the settings file vault-api writes (/etc/vault-settings/
+#      core-settings.env, never sourced) and resolves env > file > default
+#      (the defaults compose stopped supplying in rc18: resolver 1.1.1.1,
+#      edge dist-fra1.discovery.steamserver.net, window 03:00-07:00, ...);
+#   3. renders the whole chain once into a scratch directory with those
+#      values (the hooks' own grammars plus 40's value checks). If that
+#      fails, the FILE is rejected: vault-core boots on env + defaults and
+#      the watcher reports "rejected" with the reason. A bad Settings value
+#      therefore never stops the boot; a bad ENV value still does (as
+#      before, in the real chain below);
+#   4. exports the effective values under the keys' own names, writes
+#      /etc/nginx/vault-settings-generation.conf (the X-Vault-Settings-
+#      Generation header of /health) and /etc/nginx/vault-settings.effective.
+#
+# The deprecated VAULT_UPSTREAM_RATE_WINDOW (Q3) still wins as an env pin,
+# with a warning: the download window from Settings no longer reaches the cap.
+#
+# Nothing under /vault is touched here: 21- fixes the volume's ownership
+# later, so the status file is written by 47-, not by this hook.
+
+VS_ME="15-vault-settings.envsh"
+VS_LIB="${VS_LIB:-/opt/vault/vault-settings-lib.sh}"
+
+if [ ! -r "$VS_LIB" ]; then
+    echo "$VS_ME: WARNING: $VS_LIB is missing -- core settings from vault-api are not applied" >&2
+else
+    # shellcheck source=core/docker/vault-settings-lib.sh
+    . "$VS_LIB"
+    vs_capture_env
+
+    if ! vs_blank "${VS_ENV_VAULT_UPSTREAM_RATE_WINDOW:-}"; then
+        echo "$VS_ME: WARNING: VAULT_UPSTREAM_RATE_WINDOW='$(vs_shown "$VS_ENV_VAULT_UPSTREAM_RATE_WINDOW")' is set in the environment. It is deprecated since rc18 (the download window VAULT_SCHEDULE_WINDOW / Settings now decides when the cap lifts) and still wins as an env pin; remove it from .env to follow the download window." >&2
+    fi
+
+    VS_BOOT_STATE=none
+    # VS_BOOT_GEN: the generation that is live (0 = env and defaults only).
+    # VS_BOOT_SEEN: the file generation looked at, also when it was rejected,
+    # so vault-api's "pending" ends after a rejection (review D16c S1).
+    VS_BOOT_GEN=0
+    VS_BOOT_SEEN=0
+    VS_BOOT_REASON="no settings file from vault-api"
+    vs_use_file=no
+    vs_rc=0
+    vs_content=$(vs_read_file) || vs_rc=$?
+    if [ "$vs_rc" = 0 ]; then
+        if vs_parse "$vs_content"; then
+            VS_BOOT_GEN=$VS_GEN
+            VS_BOOT_SEEN=$VS_GEN
+            vs_use_file=yes
+        else
+            # A file that fails the parse may still have a readable GENERATION.
+            VS_BOOT_SEEN=${VS_GEN:-0}
+            VS_BOOT_STATE=rejected
+            VS_BOOT_REASON="settings file rejected: $VS_ERR"
+        fi
+    elif [ "$vs_rc" = 2 ]; then
+        VS_BOOT_STATE=rejected
+        VS_BOOT_REASON="settings file $VS_SETTINGS_FILE is not a readable regular file of at most $VS_MAX_BYTES bytes"
+    fi
+
+    if [ "$vs_use_file" = yes ]; then
+        vs_resolve yes
+        vs_stage=$(mktemp -d) || vs_stage=""
+        if [ -z "$vs_stage" ]; then
+            VS_BOOT_STATE=rejected
+            VS_BOOT_REASON="could not create a scratch directory to check the settings file"
+            vs_resolve no
+        elif (vs_export; vs_render "$vs_stage" "$VS_BOOT_GEN"); then
+            VS_BOOT_STATE=applied
+            VS_BOOT_REASON=""
+        else
+            VS_BOOT_STATE=rejected
+            VS_BOOT_REASON="settings file generation $VS_BOOT_GEN rejected: $(grep -m 1 'FATAL' "$vs_stage/.render.log" 2>/dev/null | cut -c 1-300 || true)"
+            echo "$VS_ME: WARNING: $VS_BOOT_REASON -- booting on env and defaults" >&2
+            sed 's/^/    /' "$vs_stage/.render.log" >&2 2>/dev/null || true
+            VS_BOOT_GEN=0
+            vs_resolve no
+        fi
+        [ -z "$vs_stage" ] || rm -rf "$vs_stage"
+    else
+        vs_resolve no
+    fi
+
+    vs_export
+    vs_write_generation_conf "$VS_CONF_DIR/vault-settings-generation.conf" "$VS_BOOT_GEN" \
+        || echo "$VS_ME: WARNING: could not write $VS_CONF_DIR/vault-settings-generation.conf" >&2
+    vs_effective_lines > "$VS_CONF_DIR/vault-settings.effective" \
+        || echo "$VS_ME: WARNING: could not write $VS_CONF_DIR/vault-settings.effective" >&2
+    export VS_BOOT_STATE VS_BOOT_GEN VS_BOOT_SEEN VS_BOOT_REASON
+    for vs_k in $VS_KEYS; do
+        eval "vs_v=\$VS_V_$vs_k; vs_s=\$VS_S_$vs_k"
+        # shellcheck disable=SC2154 # vs_v/vs_s are set by the eval above
+        echo "$VS_ME: $vs_k=$(vs_shown "$vs_v") ($vs_s)"
+    done
+    echo "$VS_ME: settings file: $VS_BOOT_STATE, generation $VS_BOOT_GEN (file generation $VS_BOOT_SEEN)${VS_BOOT_REASON:+ ($VS_BOOT_REASON)}"
+    unset vs_use_file vs_rc vs_content vs_stage vs_k vs_v vs_s
+fi
+unset VS_ME VS_LIB
