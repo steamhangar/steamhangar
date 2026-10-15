@@ -124,7 +124,7 @@ class HistoryFilter(private val repository: TrafficRepository, initialRange: Str
 
 /**
  * The header under the bulk bar: range chips (hidden without figures), the
- * note, the seven figures in a two-column grid, and the graph. Nothing in
+ * note, the eight figures in a two-column grid, and the graph. Nothing in
  * here is focusable but the chips.
  */
 @Composable

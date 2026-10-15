@@ -120,8 +120,10 @@ class ClientsPageTest {
 
     @Test
     fun `connection chip has three honest states`() {
-        assertEquals(ConnectionChip("Connected", ConnectionLook.ON), connectionChip(agent))
-        assertEquals(ConnectionChip("Not connected", ConnectionLook.OFF), connectionChip(agent.copy(connected = false)))
+        assertEquals(ConnectionChip("Agent online", ConnectionLook.ON), connectionChip(agent))
+        assertEquals(ConnectionChip("Agent offline", ConnectionLook.OFF), connectionChip(agent.copy(connected = false)))
+        assertEquals(ConnectionChip("No agent", ConnectionLook.OFF), connectionChip(address.copy(connected = false)))
+        assertEquals(ConnectionChip("Loading", ConnectionLook.ON), connectionChip(address.copy(connected = true)))
         assertEquals(ConnectionChip("No current data", ConnectionLook.UNKNOWN), connectionChip(address))
     }
 

@@ -196,22 +196,49 @@ fun headerTiles(throughput: ThroughputOut?): List<StatTile>? {
     val phrase = RANGE_PHRASES[throughput.range] ?: ""
     fun tile(key: String, label: String, value: String?, detail: String? = null) = StatTile(key, label, value ?: DASH, detail)
     val inRange = summary?.active_clients
+    val windowMinutes = throughput.active_window_minutes ?: 15
     return listOf(
-        tile("current", "Current speed", formatSpeed(throughput.current?.bytes_per_second)),
+        tile("current", "Current speed", formatSpeed(throughput.current?.bytes_per_second), currentDetail(throughput)),
         tile("average", "Average while loading", formatSpeed(summary?.average_bytes_per_second)),
         tile("peak", "Peak speed", formatSpeed(summary?.peak_bytes_per_second)),
         // Everything the cache served, the runner included; its share below.
-        tile("loaded", "Loaded", formatTrafficBytes(summary?.bytes_served), runnerDetail(summary)),
+        tile("loaded", "Served (cache + prefill)", formatTrafficBytes(summary?.bytes_served), runnerDetail(summary)),
+        tile("internet", "Loaded from the internet", formatTrafficBytes(internetBytes(summary))),
         // Bytes, not requests: the same base as "Saved by the cache" next to it.
-        tile("hit-rate", "Hit rate", formatRate(summary?.byte_hit_rate)),
+        tile("hit-rate", "Hit rate", formatRate(summary?.byte_hit_rate), hitRateDetail(summary)),
         tile("saved", "Saved by the cache", formatTrafficBytes(summary?.hit_bytes)),
         tile(
             "clients",
-            "Active clients",
+            "Loading now",
             throughput.active_clients_now?.toString(),
-            if (inRange == null) null else "$inRange $phrase",
+            "machines with cache traffic in the last $windowMinutes min",
         ),
     )
+}
+
+/** Detail line of "Current speed": scope and window, plus the runner's part. */
+fun currentDetail(throughput: ThroughputOut): String {
+    val scope = "all traffic incl. prefill runner, 5-10 min window"
+    val runner = formatSpeed(throughput.current?.runner_bytes_per_second)
+    return if (runner != null) "$scope · $runner by the prefill runner" else scope
+}
+
+/** Detail line of "Hit rate": the scope, and the runner's own rate. */
+fun hitRateDetail(summary: SummaryOut?): String {
+    val rate = formatRate(summary?.prefill_runner?.byte_hit_rate)
+    return if (rate != null) "clients only, runner excluded (runner: $rate)" else "clients only, runner excluded"
+}
+
+/**
+ * WP TILE-INTERNET: all-scope miss bytes. The server's `internet_bytes`; an
+ * older server without it falls back to client misses plus the runner's
+ * misses; `null` without a summary.
+ */
+fun internetBytes(summary: SummaryOut?): Long? {
+    if (summary == null) return null
+    summary.internet_bytes?.let { return it }
+    val runner = summary.prefill_runner
+    return if (runner != null) summary.miss_bytes + runner.miss_bytes else summary.miss_bytes
 }
 
 /**
@@ -222,7 +249,10 @@ fun headerTiles(throughput: ThroughputOut?): List<StatTile>? {
 fun runnerDetail(summary: SummaryOut?): String? {
     val bytes = summary?.prefill_runner?.bytes_served ?: return null
     if (bytes <= 0) return null
-    return formatTrafficBytes(bytes)?.let { "$it by the prefill runner" }
+    val size = formatTrafficBytes(bytes) ?: return null
+    val hitBytes = summary?.prefill_runner?.hit_bytes ?: 0L
+    val cached = if (hitBytes > 0) formatTrafficBytes(hitBytes) else null
+    return if (cached != null) "$size by the prefill runner, $cached of that from the cache" else "$size by the prefill runner"
 }
 
 /** The bucket a series point covers, for the graph's label. */

@@ -31,6 +31,9 @@ data class CurrentOut(
     val window_start: String? = null,
     val window_end: String? = null,
     val window_seconds: Int? = null,
+    /** WP METRIC-AUDIT: the prefill runner's part of [bytes_per_second]
+     * (which is ALL traffic); `null` from an older server. */
+    val runner_bytes_per_second: Double? = null,
 )
 
 @Serializable
@@ -55,6 +58,9 @@ data class SummaryOut(
     /** WP D15-RUNNER: the prefill runner's own traffic in the range; `null`
      * from a server older than D15-RUNNER. */
     val prefill_runner: RunnerTrafficOut? = null,
+    /** WP TILE-INTERNET: bytes that missed the cache and came from the
+     * internet, the runner included; `null` from an older server. */
+    val internet_bytes: Long? = null,
 )
 
 /** WP D15-RUNNER: the server's own prefill downloads in a range. */
@@ -67,6 +73,9 @@ data class RunnerTrafficOut(
     val hits: Long = 0,
     val misses: Long = 0,
     val errors: Long = 0,
+    /** WP METRIC-AUDIT: the runner's own byte hit rate; `null` from an
+     * older server or without hits and misses. */
+    val byte_hit_rate: Double? = null,
 )
 
 @Serializable

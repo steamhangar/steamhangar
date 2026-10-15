@@ -64,10 +64,13 @@ class TrafficWebTwinTest {
                 "Current speed",
                 "Average while loading",
                 "Peak speed",
-                "Loaded",
+                "Served (cache + prefill)",
+                "Loaded from the internet",
                 "Hit rate",
                 "Saved by the cache",
-                "Active clients",
+                "Loading now",
+                "all traffic incl. prefill runner, 5-10 min window",
+                "clients only, runner excluded",
                 "5 minutes",
                 "hour",
                 "day",
@@ -89,7 +92,12 @@ class TrafficWebTwinTest {
                 " loaded so far",
                 "Nothing finished \${RANGE_PHRASES[range]}.",
                 // WP D15-RUNNER: the "Loaded" tile's second line.
+                "`\${size} by the prefill runner, \${cached} of that from the cache`",
                 "`\${size} by the prefill runner`",
+                // WP METRIC-AUDIT: the scope details.
+                "`\${scope} · \${runner} by the prefill runner`",
+                "`clients only, runner excluded (runner: \${rate})`",
+                "machines with cache traffic in the last \${windowMinutes} min",
             ),
         )
     }
@@ -102,8 +110,10 @@ class TrafficWebTwinTest {
                 "No agent · seen in the cache log",
                 // WP D15-RUNNER: the runner's line without an address.
                 "This server's prefill downloads",
-                "Connected",
-                "Not connected",
+                "Agent online",
+                "Agent offline",
+                "Loading",
+                "No agent",
                 "No current data",
                 "Loading now: nothing",
                 "Installed games: not reported",

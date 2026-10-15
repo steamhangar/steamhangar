@@ -179,6 +179,7 @@ private fun summaryFor(range: String, nowMs: Long): SummaryOut {
         peak_bytes_per_second = peak,
         active_clients = if (range == "24h") 3 else 4,
         client_bytes_served = clients,
+        internet_bytes = clients - hit + (runner - runnerHit),
         prefill_runner = RunnerTrafficOut(
             bytes_served = runner,
             hit_bytes = runnerHit,
@@ -187,6 +188,7 @@ private fun summaryFor(range: String, nowMs: Long): SummaryOut {
             hits = runnerHits,
             misses = runnerRequests - runnerHits,
             errors = 0,
+            byte_hit_rate = if (runner > 0) runnerHit.toDouble() / runner else null,
         ),
     )
 }
@@ -223,6 +225,7 @@ fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): T
             window_start = iso(end - windowSeconds * 1000L),
             window_end = iso(end),
             window_seconds = windowSeconds,
+            runner_bytes_per_second = if (jobs.isNotEmpty()) 6.4 * MIB else 0.0,
         ),
         active_clients_now = 2,
         runner_active_now = jobs.isNotEmpty(),

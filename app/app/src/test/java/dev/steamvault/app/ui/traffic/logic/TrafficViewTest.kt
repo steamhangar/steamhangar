@@ -143,14 +143,45 @@ class TrafficViewTest {
     }
 
     @Test
-    fun `headerTiles -- seven figures in the web's order and words`() {
+    fun `headerTiles -- eight figures in the web's order and words`() {
         val tiles = headerTiles(throughput("ok"))!!
         assertEquals(
-            listOf("Current speed", "Average while loading", "Peak speed", "Loaded", "Hit rate", "Saved by the cache", "Active clients"),
+            listOf(
+                "Current speed", "Average while loading", "Peak speed", "Served (cache + prefill)", "Loaded from the internet",
+                "Hit rate", "Saved by the cache", "Loading now",
+            ),
             tiles.map { it.label },
         )
-        assertEquals(listOf("40.0 MB/s", "20.0 MB/s", "60.0 MB/s", "5.0 GB", "80%", "4.0 GB", "2"), tiles.map { it.value })
-        assertEquals("3 in the last 7 days", tiles.last().detail)
+        assertEquals(listOf("40.0 MB/s", "20.0 MB/s", "60.0 MB/s", "5.0 GB", "0 GB", "80%", "4.0 GB", "2"), tiles.map { it.value })
+        assertEquals("machines with cache traffic in the last 15 min", tiles.last().detail)
+        assertEquals("all traffic incl. prefill runner, 5-10 min window", tiles.first().detail)
+        assertEquals("clients only, runner excluded", tiles.first { it.key == "hit-rate" }.detail)
+    }
+
+    @Test
+    fun `METRIC-AUDIT -- runner speed and rate details, window minutes from the server`() {
+        val base = throughput("ok")
+        val t = base.copy(
+            active_window_minutes = 20,
+            current = CurrentOut(bytes_per_second = 40 * mib, runner_bytes_per_second = 10 * mib),
+            summary = base.summary!!.copy(prefill_runner = RunnerTrafficOut(bytes_served = 4 * gib, hit_bytes = 3 * gib, byte_hit_rate = 0.75)),
+        )
+        val tiles = headerTiles(t)!!.associateBy { it.key }
+        assertEquals("all traffic incl. prefill runner, 5-10 min window · 10.0 MB/s by the prefill runner", tiles.getValue("current").detail)
+        assertEquals("clients only, runner excluded (runner: 75%)", tiles.getValue("hit-rate").detail)
+        assertEquals("machines with cache traffic in the last 20 min", tiles.getValue("clients").detail)
+        assertEquals("4.0 GB by the prefill runner, 3.0 GB of that from the cache", tiles.getValue("loaded").detail)
+    }
+
+    @Test
+    fun `TILE-INTERNET -- the server's figure, else client plus runner misses, else client misses`() {
+        val s = SummaryOut(miss_bytes = 10 * gib)
+        assertEquals(11 * gib, internetBytes(s.copy(internet_bytes = 11 * gib, prefill_runner = RunnerTrafficOut(miss_bytes = 1 * gib))))
+        assertEquals(11 * gib, internetBytes(s.copy(prefill_runner = RunnerTrafficOut(miss_bytes = 1 * gib))))
+        assertEquals(10 * gib, internetBytes(s))
+        assertEquals(0L, internetBytes(s.copy(internet_bytes = 0)))
+        assertNull(internetBytes(null))
+        assertEquals("11.0 GB", headerTiles(throughput("ok").copy(summary = s.copy(internet_bytes = 11 * gib)))!!.first { it.key == "internet" }.value)
     }
 
     @Test
@@ -161,7 +192,7 @@ class TrafficViewTest {
         )
         val tiles = headerTiles(withRunner)!!.associateBy { it.key }
         assertEquals("4.0 GB by the prefill runner", tiles.getValue("loaded").detail)
-        assertEquals("Loaded: 5.0 GB, 4.0 GB by the prefill runner", tileDescription(tiles.getValue("loaded")))
+        assertEquals("Served (cache + prefill): 5.0 GB, 4.0 GB by the prefill runner", tileDescription(tiles.getValue("loaded")))
         // An older server (no runner figures) and a range without runner traffic: no line.
         assertNull(headerTiles(base)!!.first { it.key == "loaded" }.detail)
         assertNull(runnerDetail(base.summary!!.copy(prefill_runner = RunnerTrafficOut(bytes_served = 0))))
@@ -182,8 +213,8 @@ class TrafficViewTest {
         assertEquals("Peak speed: 60.0 MB/s", tileDescription(StatTile("peak", "Peak speed", "60.0 MB/s")))
         assertEquals("Current speed: Not available", tileDescription(StatTile("current", "Current speed", DASH)))
         assertEquals(
-            "Active clients: 2, 3 in the last 7 days",
-            tileDescription(StatTile("clients", "Active clients", "2", "3 in the last 7 days")),
+            "Loading now: 2, machines with cache traffic in the last 15 min",
+            tileDescription(StatTile("clients", "Loading now", "2", "machines with cache traffic in the last 15 min")),
         )
     }
 

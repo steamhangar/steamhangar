@@ -82,12 +82,12 @@ class TrafficApiTest {
             MockResponse().setBody(
                 """{"event_feed":$okFeed,"range":"24h","tier":"5m","bucket_seconds":300,"range_start":"2026-10-13T12:00:00Z",
                 "active_window_minutes":15,
-                "current":{"bytes_per_second":1048576.0,"window_start":"2026-10-14T11:54:00Z","window_end":"2026-10-14T11:59:00Z","window_seconds":300},
+                "current":{"bytes_per_second":1048576.0,"window_start":"2026-10-14T11:54:00Z","window_end":"2026-10-14T11:59:00Z","window_seconds":300,"runner_bytes_per_second":524288.0},
                 "active_clients_now":1,"runner_active_now":true,
                 "summary":{"bytes_served":5368709120,"hit_bytes":858993459,"miss_bytes":214748365,"requests":10,"hits":8,"misses":2,
                   "errors":0,"hit_rate":0.8,"byte_hit_rate":0.8,"average_bytes_per_second":2.0E7,"peak_bytes_per_second":6.0E7,"active_clients":1,
-                  "client_bytes_served":1073741824,
-                  "prefill_runner":{"bytes_served":4294967296,"hit_bytes":1000,"miss_bytes":4294966296,"requests":7,"hits":1,"misses":6,"errors":2}},
+                  "client_bytes_served":1073741824,"internet_bytes":5000000000,
+                  "prefill_runner":{"bytes_served":4294967296,"hit_bytes":1000,"miss_bytes":4294966296,"requests":7,"hits":1,"misses":6,"errors":2,"byte_hit_rate":0.0002}},
                 "jobs":[]}""",
             ),
         )
@@ -105,7 +105,10 @@ class TrafficApiTest {
         assertEquals(6L, runner.misses)
         assertEquals(2L, runner.errors)
         assertEquals(summary.bytes_served, summary.client_bytes_served!! + runner.bytes_served)
-        assertEquals("4.0 GB by the prefill runner", headerTiles(t)!!.first { it.key == "loaded" }.detail)
+        assertEquals("4.0 GB by the prefill runner, < 1 MB of that from the cache", headerTiles(t)!!.first { it.key == "loaded" }.detail)
+        assertEquals(5000000000L, summary.internet_bytes)
+        assertEquals(524288.0, t.current!!.runner_bytes_per_second!!, 0.0)
+        assertEquals(0.0002, runner.byte_hit_rate!!, 0.0)
     }
 
     @Test

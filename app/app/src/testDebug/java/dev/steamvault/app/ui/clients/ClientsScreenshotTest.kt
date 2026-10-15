@@ -147,7 +147,7 @@ class ClientsScreenshotTest {
     }
 
     private fun assertStatsHeader() {
-        for (label in listOf("Current speed", "Average while loading", "Peak speed", "Loaded", "Hit rate", "Saved by the cache", "Active clients")) {
+        for (label in listOf("Current speed", "Average while loading", "Peak speed", "Served (cache + prefill)", "Loaded from the internet", "Hit rate", "Saved by the cache", "Loading now")) {
             composeRule.onNode(hasContentDescription("$label: ", substring = true)).assertExists()
         }
         val graph = composeRule.onNode(hasContentDescription("Average speed per 5 minutes in the last 24 hours.", substring = true))

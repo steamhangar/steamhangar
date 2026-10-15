@@ -93,10 +93,14 @@ enum class ConnectionLook { ON, OFF, UNKNOWN }
 
 data class ConnectionChip(val word: String, val look: ConnectionLook)
 
-fun connectionChip(client: ClientActivityOut): ConnectionChip = when (client.connected) {
-    true -> ConnectionChip("Connected", ConnectionLook.ON)
-    false -> ConnectionChip("Not connected", ConnectionLook.OFF)
-    null -> ConnectionChip("No current data", ConnectionLook.UNKNOWN)
+fun connectionChip(client: ClientActivityOut): ConnectionChip {
+    // "Agent" wording only for a vault-agent client; an address has no agent.
+    val agent = isAgentClient(client)
+    return when (client.connected) {
+        true -> ConnectionChip(if (agent) "Agent online" else "Loading", ConnectionLook.ON)
+        false -> ConnectionChip(if (agent) "Agent offline" else "No agent", ConnectionLook.OFF)
+        null -> ConnectionChip("No current data", ConnectionLook.UNKNOWN)
+    }
 }
 
 /** Name of an app in a list: the server's name, else "App <id>". */
