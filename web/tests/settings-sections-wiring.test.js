@@ -361,7 +361,7 @@ test("MUTATION TARGET: a risky change opens the confirm dialog; Cancel sends not
   await until(() => isRiskyConfirmOpen(), "risky dialog");
   assert.equal(dom.document.activeElement === q(dialog(), "risky-cancel"), true, "initial focus on the non-destructive Cancel");
   const list = q(dialog(), "risky-list").textContent;
-  assert.match(list, /Upstream connection cap: 16 → 24\./);
+  assert.match(list, /Upstream \(WAN\) connection cap: 16 → 24\./);
   assert.match(list, /CGNAT/, "the dialog names the risk");
   click(q(dialog(), "risky-cancel"));
   await until(() => barText(s) === NOT_CONFIRMED_TEXT, "not-confirmed line");

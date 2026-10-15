@@ -120,7 +120,7 @@ test("risky helpers: set and cleared risky keys, old -> new with a default label
   const body = { upstream_max_conns: "24", resolver: null, vault_name: "x" };
   assert.deepEqual(riskyKeysInBody(entries, body), ["upstream_max_conns", "resolver"]);
   const items = riskyItems(entries, body, ["upstream_max_conns", "resolver"]);
-  assert.equal(`${items[0].label}: ${items[0].from} → ${items[0].to}`, "Upstream connection cap: 16 → 24");
+  assert.equal(`${items[0].label}: ${items[0].from} → ${items[0].to}`, "Upstream (WAN) connection cap: 16 → 24");
   assert.equal(items[1].to, "1.1.1.1 (default)");
   assert.match(items[1].risk, /LAN address/);
   assert.deepEqual(riskyKeysFrom428({ status: 428, detail: { message: "m", risky_keys: ["resolver", 3] } }), ["resolver"]);
@@ -174,4 +174,16 @@ test("coreApplyLine: pending wins, rejected warns with the reason, applied, none
   assert.equal(coreApplyLine({ state: "applied", pending: false }).text, "vault-core: settings applied.");
   assert.match(coreApplyLine({ state: "none", pending: false }).text, /has not seen a settings file/);
   assert.equal(coreApplyLine({ state: "weird", pending: false }), null);
+});
+
+test("D16 neutral naming: the upstream budget never says Steam", async () => {
+  const { FIELD_META, RISK_TEXT } = await import("../js/lib/settings-layout.js");
+  for (const key of ["upstream_rate", "upstream_max_conns", "schedule_window", "resolver"]) {
+    const m = FIELD_META[key];
+    assert.doesNotMatch(`${m.label} ${m.help}`, /steam|valve/i, key);
+  }
+  assert.match(FIELD_META.upstream_rate.label, /WAN/);
+  assert.match(FIELD_META.upstream_max_conns.label, /WAN/);
+  assert.doesNotMatch(RISK_TEXT.resolver, /steam/i);
+  assert.match(FIELD_META.upstream_edge.label, /Steam/, "Steam-only settings keep the Steam name");
 });
