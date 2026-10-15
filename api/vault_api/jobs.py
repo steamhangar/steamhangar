@@ -651,7 +651,10 @@ def list_jobs(
 
 
 def claim_next_job(conn: sqlite3.Connection) -> dict[str, object] | None:
-    """Atomically claim the oldest queued job (FIFO by id). None if empty.
+    """Atomically claim the first queued job (see ``move_queued_job``). None if empty.
+
+    Order is ``COALESCE(order_key, id), id``: FIFO by id for every job nobody
+    moved (``order_key`` NULL), the operator's order for the ones moved.
 
     The claim is a conditional UPDATE (``WHERE id = ? AND status = 'queued'``)
     inside an immediate transaction, so it is safe even if a second worker ever
@@ -669,7 +672,7 @@ def claim_next_job(conn: sqlite3.Connection) -> dict[str, object] | None:
             """
             SELECT id FROM jobs
             WHERE status = ?
-            ORDER BY id
+            ORDER BY COALESCE(order_key, id), id
             LIMIT 1
             """,
             (STATUS_QUEUED,),
@@ -1087,12 +1090,93 @@ def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
         )
 
 
+#: Claim order of queued jobs: the operator-set ``order_key`` when a job was
+#: moved, else the job's own id (plain FIFO). ``id`` breaks ties.
+_QUEUE_ORDER_SQL = "COALESCE(order_key, id), id"
+
+
+def queue_positions(conn: sqlite3.Connection) -> dict[int, int]:
+    """``{job_id: position}`` of every queued job, 0 = runs next (WP D20)."""
+    rows = conn.execute(
+        f"SELECT id FROM jobs WHERE status = ? ORDER BY {_QUEUE_ORDER_SQL}",
+        (STATUS_QUEUED,),
+    ).fetchall()
+    return {int(row["id"]): index for index, row in enumerate(rows)}
+
+
+def move_queued_job(
+    conn: sqlite3.Connection, job_id: int, position: int
+) -> ControlResult:
+    """``POST /v1/jobs/{id}/move``: put a QUEUED job at ``position`` (WP D20).
+
+    ``position`` counts queued jobs only, 0 = runs next; a value past the end
+    means "last" (clamped), so a stale client cannot fail on a queue that just
+    shrank. Unknown id -> ``CONTROL_UNKNOWN``; any status but ``queued``
+    (running, paused, finished) -> ``CONTROL_CONFLICT``: the running job
+    cannot be moved, and a paused job keeps its place for its resume.
+
+    How: the queued jobs are ordered by their claim key, the job is taken out
+    and re-inserted, and the SAME set of keys is handed out again in the new
+    order (made strictly increasing if duplicates exist). Reusing the existing
+    keys keeps the moved block in the id range it already occupied, so jobs
+    enqueued later (higher ids) still queue behind it. Only rows whose key
+    changes are written; a no-op move writes nothing. Shipped behaviour is
+    unchanged until someone moves a job: ``order_key`` stays NULL.
+    """
+    with immediate_transaction(conn):
+        row = conn.execute(
+            f"SELECT {_JOB_COLUMNS} FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return ControlResult(CONTROL_UNKNOWN)
+        job_status = str(row["status"])
+        if job_status != STATUS_QUEUED:
+            return ControlResult(
+                CONTROL_CONFLICT,
+                _row_to_dict(row),
+                detail=(
+                    f"Job {job_id} is '{job_status}', not 'queued', so it "
+                    "cannot be moved. Only queued jobs have a queue position."
+                ),
+            )
+        queued = conn.execute(
+            f"""
+            SELECT id, order_key, COALESCE(order_key, id) AS key FROM jobs
+            WHERE status = ? ORDER BY {_QUEUE_ORDER_SQL}
+            """,
+            (STATUS_QUEUED,),
+        ).fetchall()
+        ids = [int(r["id"]) for r in queued]
+        ids.remove(job_id)
+        ids.insert(max(0, min(position, len(ids))), job_id)
+        keys: list[int] = []
+        for r in queued:
+            key = int(r["key"])
+            keys.append(key if not keys or key > keys[-1] else keys[-1] + 1)
+        current = {int(r["id"]): int(r["key"]) for r in queued}
+        for new_id, key in zip(ids, keys):
+            if current[new_id] != key:
+                conn.execute(
+                    "UPDATE jobs SET order_key = ? WHERE id = ? AND status = ?",
+                    (key, new_id, STATUS_QUEUED),
+                )
+        after = conn.execute(
+            f"SELECT {_JOB_COLUMNS} FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+    return ControlResult(
+        CONTROL_IMMEDIATE,
+        _row_to_dict(after),
+        detail=f"Job {job_id} moved to queue position {ids.index(job_id)}.",
+    )
+
+
 def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
     """``POST /v1/jobs/{id}/resume``: put a paused job back in the queue.
 
-    **Priority comes for free, and that is why there is no priority column.**
-    The queue is FIFO by ``jobs.id`` (``claim_next_job``) and a resumed job
-    keeps the id it was created with — which is, by construction, older than
+    **A resumed job lands at its old place (WP 3.12; ``order_key`` since WP D20).**
+    The queue is FIFO by ``jobs.id`` unless an operator moved jobs
+    (``move_queued_job``), and a resumed job keeps the id (and any key) it was
+    created with — which is, by construction, older than
     everything enqueued while it was paused. Flipping the status back to
     ``queued`` therefore puts it at the FRONT of the queue, which is what a
     resume should mean: the operator suspended this job to let something else

@@ -996,6 +996,15 @@ h4.sec[hidden]{ display:none; }
   border-radius:var(--r-m); margin-bottom:7px;
 }
 .qrow .grip{ color:var(--dim-2); flex:none; display:grid; place-items:center; }
+/* WP D20: the grip is the reorder handle. touch-action:none keeps a touch
+   drag from scrolling the page; the row being dragged is lifted. */
+.qrow .grip-live{ cursor:grab; touch-action:none; padding:6px 4px; margin:-6px -4px; border-radius:var(--r-s, 6px); }
+@media (hover:hover) and (pointer:fine){
+  .qrow .grip-live:hover{ color:var(--text, inherit); }
+}
+.qrow .grip-live:focus-visible{ outline:2px solid var(--accent, currentColor); outline-offset:1px; }
+.qrow.dragging{ opacity:.85; box-shadow:0 4px 14px rgba(0,0,0,.35); position:relative; z-index:1; }
+.qrow.dragging .grip-live{ cursor:grabbing; }
 .qrow .nm{ font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .qrow .pos{ font-family:var(--mono); font-size:11px; color:var(--dim-2); flex:none; }
 

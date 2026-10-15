@@ -84,6 +84,14 @@ export function planJobsUpdate(diff) {
   // instant the server acknowledged the request — the exact round-7
   // mockup bug, reintroduced on the one live field this view has.
   // ---------------------------------------------------------------------
+  // A `queue_position` change (WP D20: another client or a move reordered
+  // the queue) changes which row sits where, so it needs a full render.
+  for (const { prev, curr } of updated) {
+    if (prev.queue_position !== curr.queue_position) {
+      return { full: true, patchStopRequest: [] };
+    }
+  }
+
   const patchStopRequest = [];
   for (const { prev, curr } of updated) {
     if (prev.stop_request !== curr.stop_request) {

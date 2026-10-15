@@ -300,7 +300,14 @@ import time
 #: the nightly job (off by default) or a later feature fills them. A v30 file
 #: is refused by older code (the downgrade guard), so a rollback to a v29
 #: build needs the SQLite dump ``update.sh`` takes before upgrading.
-SCHEMA_VERSION = 30
+#: v31 (WP D20 QUEUE-ORDER-1a): added ``jobs.order_key`` (nullable INTEGER,
+#: the operator-set queue position key; NULL = FIFO by id, so every existing
+#: row and every shipped default behaves exactly as before). Reuses the
+#: per-column-guarded ``_add_missing_job_columns`` step, keyed on
+#: ``version < 31``. No data step. A v31 file is refused by older code (the
+#: downgrade guard), so a rollback to a v30 build needs the SQLite dump
+#: ``update.sh`` takes before upgrading.
+SCHEMA_VERSION = 31
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -419,7 +426,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     run_claimed_at    TEXT,
     run_heartbeat_at  TEXT,
     run_completed_at  TEXT,
-    run_result_json   TEXT
+    run_result_json   TEXT,
+    -- v31 (WP D20 QUEUE-ORDER-1a): operator-set queue order. NULL = never
+    -- moved, the job queues by its own id (plain FIFO). A moved job carries
+    -- an explicit integer key; the claim order is COALESCE(order_key, id),
+    -- then id (vault_api/jobs.py, "Queue order").
+    order_key         INTEGER
 );
 
 -- The job worker polls "give me the oldest queued job" on every tick and the
@@ -1160,7 +1172,8 @@ def init_db(db_path: str) -> None:
         # v15 (WP S-1, ADR-0012) reuses the same step once more -- same
         # per-column guard, so one call also brings a v8..v14 database up to
         # date by adding just the seven queue-mode ``run_*`` columns it lacks.
-        if row is not None and row["version"] < 15:
+        # v31 (WP D20) adds ``order_key`` through the same step.
+        if row is not None and row["version"] < 31:
             _add_missing_job_columns(conn)
 
         # v5 (WP 3.4): same situation as the v4 step above -- an existing
@@ -1252,6 +1265,8 @@ _POST_V1_JOB_COLUMNS = (
     ("run_heartbeat_at", "TEXT"),
     ("run_completed_at", "TEXT"),
     ("run_result_json", "TEXT"),
+    # v31 (WP D20 QUEUE-ORDER-1a)
+    ("order_key", "INTEGER"),
 )
 
 

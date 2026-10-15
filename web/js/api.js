@@ -216,6 +216,9 @@ export const api = {
   cancelJob: (id) => request("DELETE", `/v1/jobs/${id}`),
   pauseJob: (id) => request("POST", `/v1/jobs/${id}/pause`),
   resumeJob: (id) => request("POST", `/v1/jobs/${id}/resume`),
+  // WP D20 (api/README.md "Queue order"): `position` is 0-based among the
+  // QUEUED jobs, 0 = runs next. 409 when the job is no longer queued.
+  moveJob: (id, position) => request("POST", `/v1/jobs/${id}/move`, { body: { position } }),
   deleteCache: (appid) => request("DELETE", `/v1/cache/${appid}`),
   // WP TOOL-APPS-2c (api/README.md "Grouped delete"): the preview of a
   // delete together with the game's content packages, and the delete

@@ -1967,7 +1967,22 @@ function jobSummary(j) {
     gc_execute,
     paused_at,
     stop_request,
+    queue_position: demoQueuePosition(j),
   };
+}
+
+/** WP D20: the queued jobs in draw order. A job the user moved carries a
+ * `_demoOrder`; one that was never moved queues behind them, oldest first. */
+function demoQueuedInOrder() {
+  return jobs
+    .filter((j) => j.status === "queued")
+    .sort((a, b) => (a._demoOrder ?? Infinity) - (b._demoOrder ?? Infinity) || a.id - b.id);
+}
+
+/** 0 = runs next; null for a job that is not queued (as the real API). */
+function demoQueuePosition(j) {
+  if (j.status !== "queued") return null;
+  return demoQueuedInOrder().findIndex((q) => q.id === j.id);
 }
 
 function jobDetail(j) {
@@ -2239,6 +2254,7 @@ const HISTORY_RANGE_MS = Object.freeze({ "24h": 86_400_000, "7d": 7 * 86_400_000
 const JOB_ID_RE = /^\/v1\/jobs\/(\d+)$/;
 const JOB_PAUSE_RE = /^\/v1\/jobs\/(\d+)\/pause$/;
 const JOB_RESUME_RE = /^\/v1\/jobs\/(\d+)\/resume$/;
+const JOB_MOVE_RE = /^\/v1\/jobs\/(\d+)\/move$/;
 const GAME_ID_RE = /^\/v1\/games\/(\d+)$/;
 const CACHE_APPID_RE = /^\/v1\/cache\/(\d+)$/;
 const GC_APPID_RE = /^\/v1\/cache\/(\d+)\/gc$/;
@@ -2753,6 +2769,21 @@ export async function demoRequest(method, path, { body, params } = {}) {
       outcome: "resumed",
       detail: "Job resumed at the front of the queue.",
     });
+  }
+
+  if (method === "POST" && (m = path.match(JOB_MOVE_RE))) {
+    const id = Number(m[1]);
+    const job = findJob(id);
+    if (!job) throw notFound(`Unknown job id ${id}`);
+    const position = body?.position;
+    if (!Number.isInteger(position) || position < 0) throw validationError("position must be an integer >= 0");
+    if (job.status !== "queued") throw conflict(`Job ${id} is ${job.status}, only a queued job can be moved`);
+    const order = demoQueuedInOrder().filter((q) => q.id !== id);
+    order.splice(Math.min(position, order.length), 0, job);
+    order.forEach((q, i) => {
+      q._demoOrder = i;
+    });
+    return { ...jobControlResponse(job, { status: "queued", outcome: "immediate", detail: "Moved." }), queue_position: demoQueuePosition(job) };
   }
 
   if (method === "GET" && (m = path.match(DELETE_PLAN_RE))) {
