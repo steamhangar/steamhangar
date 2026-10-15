@@ -17,7 +17,7 @@ stop only for a plan deviation not covered here.
 - **Diagnosis session:** only the read-only parts run here (`dev.sh diag`:
   iperf3 LAN baseline, nginx connections/caps, logs, pool read figures).
   Result as an inbox note. The hit-path test (needs a game load on Demon) and
-  every `dev.sh prod rate` step wait for Jan. Always `diag down` at the end.
+  every `dev.sh prod rate` step wait for Jan. Never `diag down` (other sessions measure in parallel).
 - **Not in this run:** Clients / Add-a-device mockups and redesign, the full
   UI pass after 0.1.0, CACHE-REPAIR-1.
 - **GRAPH-ZOOM = Weg B:** besides the web changes (1 h / 6 h ranges, trimmed
