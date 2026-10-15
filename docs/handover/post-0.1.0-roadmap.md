@@ -869,8 +869,12 @@ failed jobs Subnautica/Timberborn (measure live on the next run).
   owned"? Candidates: Demon's Steam account differs from the vault's Steam
   ID; SteamPrefill only considers app types it can prefill (tools such as
   SteamVR may not be listed in its owned set); no free license on the vault
-  account. Check which account Demon uses and the owned-list entry before
-  choosing A or B.
+  account. Jan confirmed 2026-10-15: Demon and the vault use the SAME
+  Steam account, so the account candidate is out; most likely SteamPrefill
+  skips tool-type apps (or there is no license entry). Decision: Weg B
+  (distinct `not_owned` outcome) plus 250820 as the seed entry. Still
+  verify the cause with one read of the SteamPrefill owned list / library
+  sync entry for 250820 while implementing.
 
 **UI polish (Jan, 2026-10-15; later, not scheduled yet):** (1) Clients page
 and the "Add a device" sheet look busy: the same "Anyone who sees this can
