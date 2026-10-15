@@ -8,9 +8,11 @@ automatically.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 
 from vault_api import (
@@ -19,6 +21,7 @@ from vault_api import (
     cover_art,
     cover_cache,
     depot_manifests,
+    library_meta,
     oracle,
     scheduler,
     settings_store,
@@ -130,6 +133,27 @@ def _installed_on_for_appid(
         for snapshot in fresh
         if appid in snapshot.appids
     ]
+
+
+class GameMeta(BaseModel):
+    """Stored library metadata of one app (WP D23 LIBRARY-META-1b).
+
+    Present on a game only once a fetch succeeded (``GameSummary.meta`` is
+    null otherwise: "unknown"). A null field inside means that answer did not
+    carry it. ``genres`` are Steam's numeric genre ids (labels are the
+    client's job). ``review_percent`` is the overall positive share (0-100),
+    ``review_score`` Steam's 0-9 bucket, ``fetched_at`` when it was stored.
+    """
+
+    single_player: bool | None = None
+    multiplayer: bool | None = None
+    coop: bool | None = None
+    vr: bool | None = None
+    genres: list[int] = []
+    review_percent: int | None = None
+    review_score: int | None = None
+    release_year: int | None = None
+    fetched_at: str | None = None
 
 
 class GameSummary(BaseModel):
@@ -313,6 +337,8 @@ class GameSummary(BaseModel):
     # counted once; a member with nothing on disk is skipped. Null for a row
     # grouped under a parent, like ``group_size_bytes``.
     group_cache_complete_pct: int | None = None
+    # Stored library metadata (WP D23), null = unknown.
+    meta: GameMeta | None = None
 
 
 def _completeness_fields(figure: cache_completeness.Completeness) -> dict[str, object]:
@@ -480,6 +506,7 @@ class GameDetail(BaseModel):
 @router.get("/v1/games", response_model=list[GameSummary])
 def list_games(
     request: Request,
+    response: Response,
     open_db: DbOpener = Depends(db_opener),
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
@@ -490,13 +517,71 @@ def list_games(
             "(unknown figures are left out). For a Downloads 'Incomplete' list."
         ),
     ),
+    category: list[Literal["single", "multi", "coop", "vr"]] = Query(
+        [],
+        description=(
+            "Library filter (WP D23): keep games with ALL of these categories "
+            "(single-player, multiplayer, co-op, VR). Repeat the parameter."
+        ),
+    ),
+    genre: list[int] = Query(
+        [],
+        max_length=library_meta.MAX_GENRES,
+        description="Library filter: keep games with ANY of these Steam genre ids.",
+    ),
+    min_rating: int | None = Query(
+        None, ge=0, le=100, description="Library filter: overall review percentage at least this."
+    ),
+    year_from: int | None = Query(None, ge=1970, le=2100, description="Release year, inclusive."),
+    year_to: int | None = Query(None, ge=1970, le=2100, description="Release year, inclusive."),
+    include_unknown: bool = Query(
+        False,
+        description=(
+            "With a library filter, also keep games whose value for it is "
+            "unknown (no metadata stored yet). Default: leave them out; the "
+            "count of games left out for that reason is in the "
+            "X-Meta-Unknown-Excluded response header."
+        ),
+    ),
+    sort: Literal["appid", "name", "rating", "year"] = Query(
+        "appid",
+        description=(
+            "Sort key. Games without a value for rating/year always come last."
+        ),
+    ),
+    order: Literal["asc", "desc"] | None = Query(
+        None, description="Default: asc, except rating and year which default to desc."
+    ),
 ) -> list[GameSummary]:
     """All tracked apps with their depot count and size (plan §6).
 
     ``?incomplete=true`` (WP CACHE-COMPLETE-1a) keeps only rows whose own
     ``cache_complete_pct`` is known and below 100; grouping stays the
     client's job, as for the rest of the list.
+
+    Library filters and sort (WP D23 LIBRARY-META-1b), all optional and
+    combined with AND: ``category`` (repeatable, ALL must hold), ``genre``
+    (repeatable, ANY), ``min_rating``, ``year_from``/``year_to``. A game whose
+    metadata is unknown (never fetched; the nightly fill is off by default) is
+    left out of a filtered list unless ``include_unknown=true``, and the
+    header ``X-Meta-Unknown-Excluded`` says how many such games a filter left
+    out, so unknown never hides a game silently. ``sort`` is ``appid``
+    (default), ``name``, ``rating`` or ``year``; games without a value sort
+    last in either direction.
     """
+    meta_filter = library_meta.MetaFilter(
+        categories=tuple(dict.fromkeys(category)),
+        genres=tuple(dict.fromkeys(genre)),
+        min_rating=min_rating,
+        year_from=year_from,
+        year_to=year_to,
+        include_unknown=include_unknown,
+    )
+    if year_from is not None and year_to is not None and year_from > year_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="year_from must not be greater than year_to",
+        )
     # WP AG-1 review round 1, B1: the scheduler object, not app.state.settings
     # directly -- .settings is the boot snapshot _fresh_snapshots_now resolves
     # against the live DB override every call, and .now() is the SAME
@@ -545,6 +630,20 @@ def list_games(
         children_by_parent = _children_by_parent(classifications)
         # WP CACHE-COMPLETE-1a: stored rows + current targets, bulk.
         completeness = cache_completeness.load_index(conn, base_settings)
+        # WP D23: stored metadata and the filter's match set (indexed SQL).
+        app_meta = library_meta.meta_by_appid(conn)
+        matching: set[int] | None = None
+        if meta_filter.active:
+            matching = library_meta.matching_appids(conn, meta_filter)
+            if not include_unknown:
+                with_unknown = library_meta.matching_appids(
+                    conn, replace(meta_filter, include_unknown=True)
+                )
+                response.headers["X-Meta-Unknown-Excluded"] = str(
+                    len(with_unknown - matching)
+                )
+            else:
+                response.headers["X-Meta-Unknown-Excluded"] = "0"
 
     app_depotids: dict[int, list[int]] = {}
     for row in depot_rows:
@@ -565,9 +664,12 @@ def list_games(
         completeness_fields = _completeness_fields(figure)
         if incomplete and not cache_completeness.is_incomplete(figure):
             continue
+        if matching is not None and row["appid"] not in matching:
+            continue
         group_size = _group_size_bytes(
             row["appid"], classifications, children_by_parent, app_depotids, depot_bytes
         )
+        stored_meta = app_meta.get(row["appid"])
         games.append(
             GameSummary(
                 appid=row["appid"],
@@ -600,9 +702,32 @@ def list_games(
                     group_size,
                     depot_bytes,
                 ),
+                meta=GameMeta(**stored_meta) if stored_meta is not None else None,
             )
         )
-    return games
+    return _sorted_games(games, sort, order)
+
+
+def _sorted_games(
+    games: list[GameSummary], sort: str, order: str | None
+) -> list[GameSummary]:
+    """Apply ``sort``/``order``; games without a sort value always come last."""
+    if sort == "appid":
+        return sorted(games, key=lambda g: g.appid, reverse=order == "desc")
+    descending = (order or ("desc" if sort in ("rating", "year") else "asc")) == "desc"
+
+    def value(game: GameSummary) -> object:
+        if sort == "name":
+            return (game.name or "").casefold() or None
+        stored = game.meta
+        if stored is None:
+            return None
+        return stored.review_percent if sort == "rating" else stored.release_year
+
+    known = [g for g in games if value(g) is not None]
+    unknown = [g for g in games if value(g) is None]
+    known.sort(key=lambda g: (value(g), g.appid), reverse=descending)
+    return known + unknown
 
 
 @router.get("/v1/games/{appid}", response_model=GameDetail)

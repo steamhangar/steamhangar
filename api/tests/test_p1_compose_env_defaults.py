@@ -130,6 +130,8 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     "VAULT_RELAY_EXPOSE_LAST_PLAYED": (
         "true" if config.DEFAULT_RELAY_EXPOSE_LAST_PLAYED else "false"
     ),
+    # WP D23 LIBRARY-META-1a: env-only external-traffic gate, off by default.
+    "VAULT_LIBRARY_META": "true" if config.DEFAULT_LIBRARY_META else "false",
     # Fable-audit follow-up (security lock that fails open if omitted):
     # VAULT_SETTINGS_READONLY is env-only BY DEFINITION (ADR-0009 decision 3
     # -- a lock on the settings-write API cannot be unlockable through that

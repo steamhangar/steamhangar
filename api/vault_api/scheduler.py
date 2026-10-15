@@ -118,6 +118,7 @@ from vault_api import (
     deletion,
     event_sweep,
     jobs,
+    library_meta,
     oracle,
     settings_store,
     sizes,
@@ -1171,8 +1172,14 @@ class PrefillScheduler:
         update_checker: "update_check.UpdateCheckRunner | None" = None,
         oracle_fetch: "oracle.Fetcher | None" = None,
         update_check_pause_seconds: float | None = None,
+        library_meta_runner: "library_meta.LibraryMetaRunner | None" = None,
     ) -> None:
         self._settings = settings
+        #: WP D23: the nightly library-metadata fill (off unless
+        #: ``VAULT_LIBRARY_META`` is on; inside the schedule window only).
+        self._library_meta = library_meta_runner or library_meta.LibraryMetaRunner(
+            settings.db_path, fetch=oracle_fetch, pause_seconds=update_check_pause_seconds
+        )
         #: WP UPD-1: the background runner of the always-on update check.
         #: ``main.create_app`` passes the instance it also gives
         #: ``POST /v1/updates/check`` (one run at a time across both
@@ -1296,6 +1303,7 @@ class PrefillScheduler:
         """
         self._stop.set()
         self._update_checker.stop()
+        self._library_meta.stop()
         thread = self._thread
         if thread is None:
             return
@@ -1461,5 +1469,18 @@ class PrefillScheduler:
         except Exception:
             logger.exception(
                 "Could not start the scheduled update check (WP UPD-1). The "
+                "thread survives and retries next tick."
+            )
+
+        # WP D23: the nightly library-metadata fill. Decides here (switches,
+        # window, lock), works on its own thread; own try so it can never
+        # affect the sweeps or the update check above.
+        try:
+            self._library_meta.maybe_start(
+                effective, effective.schedule_window, now, self._clock
+            )
+        except Exception:
+            logger.exception(
+                "Could not start the library metadata fill (WP D23). The "
                 "thread survives and retries next tick."
             )

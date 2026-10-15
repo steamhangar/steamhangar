@@ -858,6 +858,11 @@ this table on purpose — see `.env.example`'s privacy and upgrade notes: while
 it is on, vault-api asks `api.steamcmd.net` about every cached game in the
 background, and vault-proxy allows that one host by itself.
 
+`VAULT_LIBRARY_META` (WP D23, default `false`, env-only) is a further gate on
+the same oracle path: when on AND the oracle is on AND a schedule window is
+set, vault-api also fetches genres, categories, rating and release year for
+the library filter/sort, inside the window. It adds no new host.
+
 **A sixth, newly forwarded here by WP SWEEP-1: `VAULT_SWEEP_INCLUDE_CACHED`
 (WP 4d) now also passes through, defaulting to `true`, paired with
 `VAULT_AUTO_GC`'s own default above flipping to `execute` in the same

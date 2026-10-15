@@ -289,7 +289,18 @@ import time
 #: downgrade guard), so a rollback to a v28 build needs the SQLite dump
 #: ``update.sh`` takes before upgrading. Order of the rc19 migrations:
 #: GRAPH-ZOOM (v29), then D20, then D23.
-SCHEMA_VERSION = 29
+#: v30 (WP D23 LIBRARY-META-1a): added ``app_meta`` (one durable row per app:
+#: category flags, release year, review figures, fetch bookkeeping) and
+#: ``app_meta_genres`` (one row per app and genre id) -- ``vault_api/
+#: library_meta.py``. Two brand-new tables, plain ``CREATE TABLE IF NOT
+#: EXISTS`` in ``_DDL`` that runs on EVERY start, so the step does not trust
+#: the version stamp (a file a parallel branch stamped 30 or 31 without them
+#: still gets them) and needs no ``ALTER`` and no data step: an upgraded file
+#: simply has no rows, which reads as "metadata unknown" for every app until
+#: the nightly job (off by default) or a later feature fills them. A v30 file
+#: is refused by older code (the downgrade guard), so a rollback to a v29
+#: build needs the SQLite dump ``update.sh`` takes before upgrading.
+SCHEMA_VERSION = 30
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -746,6 +757,44 @@ CREATE TABLE IF NOT EXISTS oracle_branch_manifests (
 -- the appid-first primary key above does not serve that direction.
 CREATE INDEX IF NOT EXISTS idx_oracle_branch_manifests_depotid
     ON oracle_branch_manifests (depotid);
+
+-- v30 (WP D23 LIBRARY-META-1a): durable per-app metadata for the library
+-- filters, kept apart from depot_app_map and oracle_app_state (it is display
+-- data only: nothing in GC, deletion or the update check reads it).
+-- Flags are 0/1 once a fetch succeeded; the whole row's absence means
+-- "unknown". A column that is NULL on an existing row means "that answer did
+-- not carry it" (e.g. no review figure yet), never "false". description,
+-- developer and release_date are reserved for the optional store fill
+-- (LIBRARY-META-1d) and stay NULL here. fail_count / next_try_at back off a
+-- failing app so one bad id cannot be re-asked every night.
+CREATE TABLE IF NOT EXISTS app_meta (
+    appid          INTEGER PRIMARY KEY,
+    flag_single    INTEGER,
+    flag_multi     INTEGER,
+    flag_coop      INTEGER,
+    flag_vr        INTEGER,
+    review_percent INTEGER,
+    review_score   INTEGER,
+    release_year   INTEGER,
+    description    TEXT,
+    developer      TEXT,
+    release_date   TEXT,
+    fetched_at     TEXT,
+    source         TEXT,
+    fail_count     INTEGER NOT NULL DEFAULT 0,
+    next_try_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_meta_review_percent ON app_meta (review_percent);
+CREATE INDEX IF NOT EXISTS idx_app_meta_release_year ON app_meta (release_year);
+
+CREATE TABLE IF NOT EXISTS app_meta_genres (
+    appid    INTEGER NOT NULL,
+    genre_id INTEGER NOT NULL,
+    PRIMARY KEY (appid, genre_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_meta_genres_genre ON app_meta_genres (genre_id);
 
 -- WP 4a.6r / ADR-0004 addendum: opt-in Steam Web API relay (GetOwnedGames /
 -- GetPlayerSummaries) for the web UI, which cannot call the Steam Web API

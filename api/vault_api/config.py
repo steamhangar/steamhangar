@@ -1152,6 +1152,13 @@ DEFAULT_RELAY_EXPOSE_PLAYTIME = False
 #: play" reads as surveillance in a way an aggregate hour count does not.
 DEFAULT_RELAY_EXPOSE_LAST_PLAYED = False
 
+#: WP D23 LIBRARY-META-1a: the nightly library-metadata fill sends every app
+#: the vault knows to the manifest oracle, over the schedule window, which is
+#: far more appids at once than browsing does -- so it has its own switch,
+#: env-only like the relay gates, and is off by default. It also needs the
+#: oracle itself on and a schedule window.
+DEFAULT_LIBRARY_META = False
+
 
 # --------------------------------------------------------------------------
 # WP S-1 (ADR-0012): the runner split. vault-api's worker keeps owning job
@@ -1422,6 +1429,10 @@ class Settings:
     # _LAST_PLAYED above).
     relay_expose_playtime: bool = DEFAULT_RELAY_EXPOSE_PLAYTIME
     relay_expose_last_played: bool = DEFAULT_RELAY_EXPOSE_LAST_PLAYED
+    # WP D23 LIBRARY-META-1a. Env-only (VAULT_LIBRARY_META), default off: the
+    # nightly oracle fill of app metadata for the library filters, see
+    # ``vault_api/library_meta.py``. Needs the oracle on and a schedule window.
+    library_meta_enabled: bool = DEFAULT_LIBRARY_META
     # WP S-1 (ADR-0012). 'subprocess' (default, unchanged behaviour) |
     # 'queue' (hand off execution to a separate prefill_runner process). See
     # the PREFILL_MODE_* constants above.
@@ -1821,6 +1832,7 @@ class Settings:
             relay_expose_last_played=_env_bool(
                 "VAULT_RELAY_EXPOSE_LAST_PLAYED", DEFAULT_RELAY_EXPOSE_LAST_PLAYED
             ),
+            library_meta_enabled=_env_bool("VAULT_LIBRARY_META", DEFAULT_LIBRARY_META),
             # WP S-1 (ADR-0012). Unset/blank = 'subprocess', byte-identical to
             # every version of vault-api before this work package.
             prefill_mode=_env_prefill_mode(),
