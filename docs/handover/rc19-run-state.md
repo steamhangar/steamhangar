@@ -30,3 +30,11 @@ Passed and merged on wp/rc19-w2-goldens (test-api 3922, test-web 1747): D23 api 
 Android parity still owed: D23 (chips/sort), D20 (reorder UI; strings.xml still says "not built yet"), D19, D16 UI.
 Open for Jan: cover refresher anonymous vs "names only with relay key" (A keep+document, B gate on key, C defer to D22).
 Next: CI green on this branch -> ff-merge to main; then wave 3 (D19-1a/1b/1c, D16 Android UI + neutral naming, rc18 follow-ups, GRAPH-LIVE, Android for D19/D20/D23), wave 4 close.
+
+## Wave 3 part 1 (2026-10-16 ~00:00 Berlin... see git log)
+
+main = e77e357: wave 2 fully merged (GRAPH-ZOOM, LIB-SORT, MAP-DRIFT-1, ID-AUDIT, D23 api+web, D20 api+web). CI-only api failure was SQLite 3.45 vs DROP COLUMN in test_d20 fixture (fixed). Tip for diagnosing CI test failures without log access: temp branch with `::error::` annotations from pytest FAILED lines (wp/ci-debug, delete later).
+Passed: D19-1a/1b (wp/d19-1ab, schema 32, ADR-0024), merged on wp/rc19-w3-goldens (integration branch, in /mnt/ssd_pool/app_data/devbox/work/w2-integ).
+Running: Android D23/D20 comparator fix on wp/android-d23-d20 (then merge into wp/rc19-w3-goldens, CI cycle, goldens).
+Next: D19-1c (store details), Android D19, D16 Android UI + neutral naming, rc18 follow-ups, GRAPH-LIVE, wave 4 close.
+Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM (00:10Z), trig_01M7qtqVfFQZVXax5UJCfuSj (03:00Z).
