@@ -26,7 +26,11 @@ from vault_api.cover_cache import CoverFileFetcher
 from vault_api.db import get_connection, init_db
 from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
-from vault_api.manifest_ingest import log_cache_dir_canary, repair_recorded_manifests
+from vault_api.manifest_ingest import (
+    log_cache_dir_canary,
+    remove_orphan_depot_manifests,
+    repair_recorded_manifests,
+)
 from vault_api.routers import (
     about,
     agent,
@@ -114,6 +118,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
     except Exception:  # noqa: BLE001 - a repair must never stop the API
         logger.exception("Manifest repair failed; it is retried on the next start.")
+
+    # WP MAP-DRIFT-1: drop depot_manifests rows no app maps and no bytes back.
+    # Every start (idempotent, no stamp); one summary line; never fails startup.
+    try:
+        with closing(get_connection(settings.db_path)) as orphan_conn:
+            orphans = remove_orphan_depot_manifests(orphan_conn, settings)
+        if orphans.found or orphans.cache_unavailable:
+            logger.info(
+                "Orphan depot cleanup: found=%d removed=%d skipped=%d%s (WP MAP-DRIFT-1).",
+                orphans.found, orphans.removed, orphans.skipped,
+                " (depot cache unavailable)" if orphans.cache_unavailable else "",
+            )
+    except Exception:  # noqa: BLE001 - a cleanup must never stop the API
+        logger.exception("Orphan depot cleanup failed; it is retried on the next start.")
 
     # WP 3.13: started before the worker so the worker's very first job
     # finalization already has somewhere to enqueue a webhook. A no-op thread

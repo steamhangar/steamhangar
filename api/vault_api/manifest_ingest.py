@@ -609,6 +609,103 @@ def repair_recorded_manifests(conn: sqlite3.Connection, settings: Settings) -> R
     return RepairResult(repaired=tuple(repaired))
 
 
+@dataclass(frozen=True)
+class OrphanCleanupResult:
+    """Counters of ``remove_orphan_depot_manifests`` (logged once per start)."""
+
+    #: ``depot_manifests`` rows whose depot no app maps (candidates).
+    found: int = 0
+    #: Candidates deleted (no mapping AND no bytes on disk).
+    removed: int = 0
+    #: Candidates kept: bytes on disk, or the depot id was unusable.
+    skipped: int = 0
+    #: The depot cache root could not be resolved; nothing was touched.
+    cache_unavailable: bool = False
+
+
+def _has_bytes_on_disk(path: str) -> bool:
+    """True when a regular file exists anywhere below ``path``.
+
+    Stops at the first file, so a populated depot costs one ``scandir`` chain,
+    not a walk. Links are never followed. Any ``OSError`` counts as "there may
+    be bytes": an unreadable directory must never make a row deletable.
+    """
+    stack = [path]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                    else:
+                        return True
+        except FileNotFoundError:
+            continue  # absent (or vanished mid-scan): no bytes there
+        except OSError:
+            return True
+    return False
+
+
+def remove_orphan_depot_manifests(
+    conn: sqlite3.Connection, settings: Settings
+) -> OrphanCleanupResult:
+    """WP MAP-DRIFT-1: delete ``depot_manifests`` rows nothing needs any more.
+
+    A row is an orphan only when BOTH hold: no ``depot_app_map`` row names its
+    depot (for any app), and the depot has no bytes on disk. A partial update
+    replaces an app's mapping with the depots that got new bytes
+    (``apply_observed_mapping``), so an untouched depot drops out of the map
+    while its cached bytes and its recorded manifest still matter -- the
+    bytes-on-disk test keeps exactly those rows. Whenever the disk cannot be
+    judged (cache root unresolved, directory unreadable) the row is kept.
+
+    Runs on every start, no stamp: a second pass finds nothing. One SELECT for
+    the candidates, one filesystem probe per distinct depot, then a single
+    bounded ``BEGIN IMMEDIATE`` transaction whose DELETEs repeat the
+    no-mapping test, so a mapping written in between wins.
+    """
+    from vault_api import deletion  # local: deletion imports jobs, keep import order simple
+
+    candidates = [
+        (int(r["appid"]), r["depotid"])
+        for r in conn.execute(
+            "SELECT dm.appid, dm.depotid FROM depot_manifests dm "
+            "WHERE NOT EXISTS (SELECT 1 FROM depot_app_map m WHERE m.depotid = dm.depotid)"
+        )
+    ]
+    if not candidates:
+        return OrphanCleanupResult()
+    try:
+        depot_root = deletion.resolve_depot_root(settings.cache_root)
+    except Exception as exc:  # noqa: BLE001 - unjudgeable disk keeps every row
+        logger.info("orphan depot cleanup skipped, depot cache unavailable: %s", exc)
+        return OrphanCleanupResult(found=len(candidates), skipped=len(candidates), cache_unavailable=True)
+
+    verdict: dict[object, bool] = {}
+    doomed: list[tuple[int, int]] = []
+    for appid, raw_depot in candidates:
+        if raw_depot not in verdict:
+            try:
+                keep = _has_bytes_on_disk(deletion.depot_dir_path(depot_root, raw_depot))
+            except deletion.DeletionGuardError:
+                keep = True  # unusable id: leave the row for an operator
+            verdict[raw_depot] = keep
+        if not verdict[raw_depot]:
+            doomed.append((appid, int(raw_depot)))
+
+    removed = 0
+    with immediate_transaction(conn):
+        for appid, depotid in doomed:
+            removed += conn.execute(
+                "DELETE FROM depot_manifests WHERE appid = ? AND depotid = ? "
+                "AND NOT EXISTS (SELECT 1 FROM depot_app_map WHERE depotid = ?)",
+                (appid, depotid, depotid),
+            ).rowcount
+    return OrphanCleanupResult(
+        found=len(candidates), removed=removed, skipped=len(candidates) - removed
+    )
+
+
 # --------------------------------------------------------------------------
 # Startup coupling canary (research doc risk 6)
 # --------------------------------------------------------------------------
