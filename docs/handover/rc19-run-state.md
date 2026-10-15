@@ -15,3 +15,11 @@ Fallback restart trigger: trig_01LbKjgPvpJSQEcLhqp7ni7E (23:55 Berlin).
 
 ## Open questions
 none
+
+## Wave 2 status (2026-10-15 ~20:45Z)
+
+Passed (reviewed), merged on wp/rc19-w2-goldens: GRAPH-ZOOM (wp/graph-zoom, schema 28->29, 1m tier), LIB-SORT web+app (wp/lib-sort), MAP-DRIFT-1 (wp/map-drift-1; nit: fail-safe branches unreadable-dir and DeletionGuardError untested), ID-AUDIT (wp/id-audit; nit: stale "App <id>" comments in owned-singleton.js, downloads.js, owned-library.js, demo-data.js).
+Merged tree: test-api 3875 pass, test-web 1722 pass. Next: push wp/rc19-w2-goldens, bot refreshes goldens, empty commit re-runs CI, ff-merge to main.
+Open for Jan (ask in one AskUserQuestion batch): anonymous cover refresher (ADR-0016 addendum) vs "names only with relay key": A keep + document, B gate on key, C defer to D22.
+Not started: D23 (api then web), wave 3 (D19, D20, D16 Android UI, rc18 follow-ups, GRAPH-LIVE, D16 neutral naming), wave 4 close.
+Restart triggers pending: trig_01LbKjgPvpJSQEcLhqp7ni7E (2026-10-15T21:55Z) and trig_01HTJMhrGFUuhdEc7Rv788DM (2026-10-16T00:10Z, Jan's request, weekly reset). Keep the 00:10Z one.
