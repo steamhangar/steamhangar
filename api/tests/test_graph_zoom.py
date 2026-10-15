@@ -49,8 +49,10 @@ def db(tmp_path: Path):
         conn.close()
 
 
-def test_schema_is_v29() -> None:
-    assert SCHEMA_VERSION == 29
+def test_schema_is_at_least_v29() -> None:
+    # Later work packages bump the version again (D23: v30); the 1m tier
+    # arrived with v29 and stays.
+    assert SCHEMA_VERSION >= 29
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +341,7 @@ def test_a_copy_of_a_populated_v28_database_migrates_and_keeps_its_data(
         one_minute = tier_rows(conn, "server_traffic", "1m")
     finally:
         conn.close()
-    assert version == SCHEMA_VERSION == 29
+    assert version == SCHEMA_VERSION
     assert columns["traffic_1m_since"] == "TEXT"
     assert (state.cursor_offset, state.traffic_since) == (4321, "2026-10-01T00:00:00Z")
     assert state.traffic_1m_since is None

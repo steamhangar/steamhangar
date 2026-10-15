@@ -122,10 +122,23 @@ import {
   SORT_LABEL,
   SORT_NAME_DIR_LABEL,
   availableSortOptions,
+  defaultDirFor,
   lastPlayedAvailable,
+  metaAvailable,
   normalizeSort,
   sortGames,
 } from "../lib/library-sort.js";
+import {
+  CATEGORY_OPTIONS,
+  DEFAULT_META_FILTER,
+  FILTER_LABELS,
+  RATING_STEPS,
+  applyMetaFilter,
+  availableGenres,
+  metaFilterActive,
+  normalizeMetaFilter,
+  unknownNote,
+} from "../lib/library-meta.js";
 import { chipCounts, normalizeQuery, visibleGames } from "../lib/library-filters.js";
 import {
   classifyBulkSelection,
@@ -178,6 +191,7 @@ import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "../componen
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const SORT_STORAGE_KEY = "steamvault.librarySort";
+const META_FILTER_STORAGE_KEY = "steamvault.libraryMetaFilter";
 const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
 // D-3 (docs/WORKPACKAGES.md, user-approved 2026-08-18): this control ships
 // literal column-count wording ("Two columns"/"Three columns") since the
@@ -248,6 +262,23 @@ function writeStoredSort(v) {
   }
 }
 
+// WP D23: the metadata filter is stored raw and normalized at every read.
+function readStoredMetaFilter() {
+  try {
+    const raw = window.localStorage.getItem(META_FILTER_STORAGE_KEY);
+    return normalizeMetaFilter(raw ? JSON.parse(raw) : null);
+  } catch {
+    return normalizeMetaFilter(null);
+  }
+}
+function writeStoredMetaFilter(v) {
+  try {
+    window.localStorage.setItem(META_FILTER_STORAGE_KEY, JSON.stringify(v));
+  } catch {
+    // Persistence only; the filter itself must still work.
+  }
+}
+
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
   return (err && err.message) || "Request failed";
@@ -281,6 +312,7 @@ const state = {
   filterKey: "all",
   layout: readStoredLayout(),
   sort: readStoredSort(),
+  metaFilter: readStoredMetaFilter(),
   selecting: false,
   picked: new Set(),
   visibleAppids: new Set(),
@@ -623,7 +655,7 @@ async function onCheckUpdates() {
 // ---------------------------------------------------------------------
 
 function renderChips() {
-  const counts = chipCounts(state.games, { query: state.query, liveJobsByAppid });
+  const counts = chipCounts(metaFiltered().games, { query: state.query, liveJobsByAppid });
   // WP UPD-2: an optional chip (e.g. "Updates") can disappear when the API
   // stops carrying its field; never leave the grid filtered by a chip the
   // user can no longer see or press.
@@ -687,7 +719,7 @@ function renderEmptyState() {
 // for the measured cost of a full rebuild at N=400 (~30ms synchronous).
 function renderGrid() {
   const list = sortGames(
-    visibleGames(state.games, {
+    visibleGames(metaFiltered().games, {
       query: state.query,
       filterKey: state.filterKey,
       liveJobsByAppid,
@@ -856,6 +888,7 @@ function fullRender() {
   // Chips before the grid: renderChips may reset a filter that vanished.
   renderChips();
   renderSortControl();
+  renderMetaPanel();
   renderGrid();
   syncBulk();
   paintUpdateCheck();
@@ -878,7 +911,10 @@ function clearSearch() {
 
 /** The sort in force: the stored choice made safe against the live flag. */
 function currentSort() {
-  return normalizeSort(state.sort, { lastPlayed: lastPlayedAvailable(state.rawGames) });
+  return normalizeSort(state.sort, {
+    lastPlayed: lastPlayedAvailable(state.rawGames),
+    meta: metaAvailable(state.rawGames),
+  });
 }
 
 /** Paint the sort control from `currentSort()` (options, selection, toggle). */
@@ -886,7 +922,7 @@ function renderSortControl() {
   const { sortSelect, sortDirBtn } = els;
   const lastPlayed = lastPlayedAvailable(state.rawGames);
   const cur = currentSort();
-  const opts = availableSortOptions({ lastPlayed });
+  const opts = availableSortOptions({ lastPlayed, meta: metaAvailable(state.rawGames) });
   const shown = sortSelect.children;
   if (shown.length !== opts.length || opts.some((o, i) => shown[i].value !== o.key)) {
     sortSelect.replaceChildren(
@@ -906,8 +942,141 @@ function renderSortControl() {
   sortDirBtn.setAttribute("aria-label", `${SORT_LABEL} direction: ${text}`);
 }
 
+/**
+ * The metadata filter in force: the stored choice, but a no-op while no game
+ * carries metadata (so a stored filter never hides games of a vault whose
+ * metadata is off or empty).
+ */
+function metaFiltered() {
+  if (!metaAvailable(state.rawGames)) return { games: state.games, unknownExcluded: 0 };
+  return applyMetaFilter(state.games, state.metaFilter);
+}
+
+function setMetaFilter(next) {
+  state.metaFilter = normalizeMetaFilter(next);
+  writeStoredMetaFilter(state.metaFilter);
+  fullRender();
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+/** Paint the metadata filter panel (hidden when no game has metadata). */
+function renderMetaPanel() {
+  const panel = els.metaPanel;
+  if (!panel) return;
+  const available = metaAvailable(state.rawGames);
+  panel.hidden = !available;
+  if (!available) {
+    panel.replaceChildren();
+    return;
+  }
+  const f = state.metaFilter;
+  const apply = (patch) => setMetaFilter({ ...f, ...patch });
+  const kids = [];
+
+  const cats = el("div", "lib-meta-cats");
+  cats.setAttribute("role", "group");
+  cats.setAttribute("aria-label", FILTER_LABELS.category);
+  for (const o of CATEGORY_OPTIONS) {
+    const b = el("button", "chip", o.label);
+    b.type = "button";
+    b.dataset.cat = o.key;
+    b.setAttribute("aria-pressed", String(f.categories.includes(o.key)));
+    b.addEventListener("click", () =>
+      apply({
+        categories: f.categories.includes(o.key)
+          ? f.categories.filter((k) => k !== o.key)
+          : [...f.categories, o.key],
+      }),
+    );
+    cats.appendChild(b);
+  }
+  kids.push(cats);
+
+  const genreSel = el("select", "lib-sort-sel");
+  genreSel.setAttribute("aria-label", FILTER_LABELS.genre);
+  genreSel.dataset.role = "genre";
+  const genres = availableGenres(state.rawGames);
+  const opt0 = el("option", "", FILTER_LABELS.anyGenre);
+  opt0.value = "";
+  genreSel.appendChild(opt0);
+  for (const g of genres) {
+    const o = el("option", "", g.label);
+    o.value = String(g.id);
+    genreSel.appendChild(o);
+  }
+  genreSel.value = f.genres.length === 1 && genres.some((g) => g.id === f.genres[0]) ? String(f.genres[0]) : "";
+  genreSel.addEventListener("change", () => apply({ genres: genreSel.value ? [Number(genreSel.value)] : [] }));
+  kids.push(genreSel);
+
+  const ratingSel = el("select", "lib-sort-sel");
+  ratingSel.setAttribute("aria-label", FILTER_LABELS.rating);
+  ratingSel.dataset.role = "rating";
+  const r0 = el("option", "", FILTER_LABELS.anyRating);
+  r0.value = "";
+  ratingSel.appendChild(r0);
+  for (const n of RATING_STEPS) {
+    const o = el("option", "", `${n}%+`);
+    o.value = String(n);
+    ratingSel.appendChild(o);
+  }
+  ratingSel.value = f.minRating !== null && RATING_STEPS.includes(f.minRating) ? String(f.minRating) : "";
+  ratingSel.addEventListener("change", () => apply({ minRating: ratingSel.value ? Number(ratingSel.value) : null }));
+  kids.push(ratingSel);
+
+  for (const [field, label] of [
+    ["yearFrom", FILTER_LABELS.yearFrom],
+    ["yearTo", FILTER_LABELS.yearTo],
+  ]) {
+    const inp = el("input", "lib-meta-year");
+    inp.type = "number";
+    inp.inputMode = "numeric";
+    inp.min = "1970";
+    inp.max = "2100";
+    inp.placeholder = label;
+    inp.setAttribute("aria-label", label);
+    inp.dataset.role = field;
+    inp.value = f[field] === null ? "" : String(f[field]);
+    inp.addEventListener("change", () => apply({ [field]: inp.value === "" ? null : inp.value }));
+    kids.push(inp);
+  }
+
+  const unk = el("label", "lib-meta-unk");
+  const cb = el("input");
+  cb.type = "checkbox";
+  cb.dataset.role = "include-unknown";
+  cb.checked = f.includeUnknown;
+  cb.addEventListener("change", () => apply({ includeUnknown: cb.checked }));
+  unk.append(cb, document.createTextNode(" " + FILTER_LABELS.includeUnknown));
+  kids.push(unk);
+
+  if (metaFilterActive(f) || f.includeUnknown) {
+    const clear = el("button", "btn sm", FILTER_LABELS.clear);
+    clear.type = "button";
+    clear.dataset.role = "clear-meta";
+    clear.addEventListener("click", () => setMetaFilter({ ...DEFAULT_META_FILTER }));
+    kids.push(clear);
+  }
+
+  const note = unknownNote(metaFiltered().unknownExcluded);
+  const noteEl = el("p", "lib-meta-note", note);
+  noteEl.setAttribute("role", "status");
+  noteEl.hidden = !note;
+  kids.push(noteEl);
+
+  panel.replaceChildren(...kids);
+}
+
 function setSort(next) {
-  state.sort = normalizeSort(next, { lastPlayed: lastPlayedAvailable(state.rawGames) });
+  state.sort = normalizeSort(next, {
+    lastPlayed: lastPlayedAvailable(state.rawGames),
+    meta: metaAvailable(state.rawGames),
+  });
   writeStoredSort(state.sort);
   fullRender();
 }
@@ -1415,9 +1584,20 @@ function buildSection() {
   bar.className = "lib-bar";
   bar.append(filters, checkBtns);
 
+  // WP D23: metadata filters, hidden until some game carries metadata.
+  const metaPanel = document.createElement("div");
+  metaPanel.className = "lib-meta";
+  metaPanel.setAttribute("role", "group");
+  metaPanel.setAttribute("aria-label", "Metadata filters");
+  metaPanel.hidden = true;
+
+  // Lives inside the status block (under the toolbar row) so the section's
+  // child order stays head, bar, status, grid.
+  statusBlock.appendChild(metaPanel);
   section.append(head, bar, statusBlock, grid, hint, bulkBar);
 
   els = {
+    metaPanel,
     sub,
     ownedNote,
     ownedText,
@@ -1469,7 +1649,12 @@ function buildSection() {
   });
 
   sortSelect.addEventListener("change", () => {
-    setSort({ key: sortSelect.value, dir: currentSort().dir });
+    const key = sortSelect.value;
+    const cur = currentSort();
+    // Rating/year start best/newest first; moving between the two groups
+    // resets the direction, the other keys keep it.
+    const dir = defaultDirFor(key) !== defaultDirFor(cur.key) ? defaultDirFor(key) : cur.dir;
+    setSort({ key, dir });
   });
   sortDirBtn.addEventListener("click", () => {
     const cur = currentSort();

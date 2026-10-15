@@ -637,6 +637,13 @@ services:
       # container; there is no runtime switch.
       VAULT_RELAY_EXPOSE_PLAYTIME: ${VAULT_RELAY_EXPOSE_PLAYTIME:-false}
       VAULT_RELAY_EXPOSE_LAST_PLAYED: ${VAULT_RELAY_EXPOSE_LAST_PLAYED:-false}
+      # WP D23 LIBRARY-META-1a: nightly fill of app metadata (categories,
+      # genres, rating, release year) for the library filters, from the
+      # manifest oracle only (no new host). Sends every known app id over the
+      # schedule window, so it is off by default, env-only, and also needs
+      # VAULT_MANIFEST_ORACLE on and a schedule window (config.py
+      # DEFAULT_LIBRARY_META).
+      VAULT_LIBRARY_META: ${VAULT_LIBRARY_META:-false}
       # Settings-API operator hard-lock (ADR-0009 decision 3; api/README.md
       # "The operator hard-lock"). Env-only BY DEFINITION: a lock on the
       # settings-write API can never be unlockable through that same API

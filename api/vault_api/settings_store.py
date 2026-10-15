@@ -445,6 +445,8 @@ ENV_ONLY_INFO_KEYS: tuple[EnvOnlySpec, ...] = (
     # WP 4h.0 (ADR-0010): env-only for a privacy reason, see the docstring.
     EnvOnlySpec("relay_expose_playtime", "VAULT_RELAY_EXPOSE_PLAYTIME"),
     EnvOnlySpec("relay_expose_last_played", "VAULT_RELAY_EXPOSE_LAST_PLAYED"),
+    # WP D23: external-traffic gate, env-only for the same privacy reason.
+    EnvOnlySpec("library_meta_enabled", "VAULT_LIBRARY_META"),
     # D16b (Q2): can carry credentials; shown masked, never editable.
     EnvOnlySpec("webhook_url", "VAULT_WEBHOOK_URL", mask_url),
 )

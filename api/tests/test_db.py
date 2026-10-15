@@ -58,6 +58,9 @@ EXPECTED_TABLES = {
     "cache_completeness",
     # v26 (WP D15-NAMES): operator-set client names.
     "client_names",
+    # v30 (WP D23 LIBRARY-META-1): app metadata for library filter/sort.
+    "app_meta",
+    "app_meta_genres",
 }
 
 

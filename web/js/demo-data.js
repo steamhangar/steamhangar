@@ -1318,6 +1318,8 @@ const ENV_ONLY_DEMO = [
   { key: "settings_readonly", env_var: "VAULT_SETTINGS_READONLY", value: false },
   { key: "relay_expose_playtime", env_var: "VAULT_RELAY_EXPOSE_PLAYTIME", get value() { return relayExposePlaytime; } },
   { key: "relay_expose_last_played", env_var: "VAULT_RELAY_EXPOSE_LAST_PLAYED", get value() { return relayExposeLastPlayed; } },
+  // WP D23: library metadata fill switch (off in the demo: no metadata).
+  { key: "library_meta_enabled", env_var: "VAULT_LIBRARY_META", value: false },
   { key: "webhook_url", env_var: "VAULT_WEBHOOK_URL", value: DEMO_WEBHOOK_URL_MASKED },
 ];
 const ENV_ONLY_KEYS = new Set(["vault_api_key", ...ENV_ONLY_DEMO.map((e) => e.key)]);
