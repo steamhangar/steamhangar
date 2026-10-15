@@ -172,7 +172,7 @@ class DownloadsController(
             games = gamesRepository.list()
             gamesKnown = true
         } catch (_: VaultApiError) {
-            // A games-poll hiccup degrades name lookups to "App {id}"
+            // A games-poll hiccup degrades name lookups to "Unknown app"
             // (nameFor's own fallback) rather than blanking the screen --
             // this screen's own error banner is owned by the jobs poll.
         }

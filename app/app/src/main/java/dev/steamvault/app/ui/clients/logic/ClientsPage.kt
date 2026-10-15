@@ -4,6 +4,7 @@ import dev.steamvault.app.net.model.ClientActivityOut
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.LoadingAppOut
 import dev.steamvault.app.net.model.RecentAppOut
+import dev.steamvault.app.ui.library.logic.UNKNOWN_APP_NAME
 import dev.steamvault.app.ui.traffic.logic.DASH
 import dev.steamvault.app.ui.traffic.logic.FeedState
 import dev.steamvault.app.ui.traffic.logic.RANGE_PHRASES
@@ -104,7 +105,7 @@ fun connectionChip(client: ClientActivityOut): ConnectionChip {
 }
 
 /** Name of an app in a list: the server's name, else "App <id>". */
-fun appLabel(appid: Int, name: String?): String = if (!name.isNullOrBlank()) name else "App $appid"
+fun appLabel(appid: Int, name: String?): String = if (!name.isNullOrBlank()) name else UNKNOWN_APP_NAME
 
 private fun LoadingAppOut.label() = appLabel(appid, name)
 private fun RecentAppOut.label() = appLabel(appid, name)

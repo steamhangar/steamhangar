@@ -140,8 +140,8 @@ class ToolAppTest {
     fun `gameDisplayName uses the vault name, then the tool name, then App id`() {
         assertEquals("Steamworks Common Redistributables", gameDisplayName(redist()))
         assertEquals("Redist (vault)", gameDisplayName(redist(name = "  Redist (vault)  ")))
-        assertEquals("App 228980", gameDisplayName(redist(toolAppName = "  ")))
-        assertEquals("App 440", gameDisplayName(failedGame().copy(name = null, tool_app_name = "X")))
+        assertEquals("Unknown app", gameDisplayName(redist(toolAppName = "  ")))
+        assertEquals("Unknown app", gameDisplayName(failedGame().copy(name = null, tool_app_name = "X")))
     }
 
     // ---------- GameCardModel.kt ----------

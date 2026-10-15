@@ -79,7 +79,7 @@ class GameCardModelTest {
     fun `a blank name falls back to a stable placeholder, not blank text`() {
         val blank = runningGame().copy(name = "   ")
         val model = buildGameCardModel(blank, null, selected = false, selecting = false)
-        assertEquals("App 42", model.name)
+        assertEquals("Unknown app", model.name)
     }
 
     @Test

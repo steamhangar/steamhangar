@@ -54,8 +54,8 @@ class OwnedLibraryTest {
         assertEquals("Vault Five", appTitle(5, "Vault Five", "Steam Five"))
         assertEquals("Steam Five", appTitle(5, null, "Steam Five"))
         assertEquals("Steam Five", appTitle(5, "   ", "Steam Five"))
-        assertEquals("App 5", appTitle(5, null, null))
-        assertEquals("App 5", appTitle(5, "", " "))
+        assertEquals("Unknown app", appTitle(5, null, null))
+        assertEquals("Unknown app", appTitle(5, "", " "))
     }
 
     @Test

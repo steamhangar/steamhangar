@@ -68,7 +68,7 @@ class DepotPresentationTest {
             others = listOf(999), holderAppids = emptyList(), free = true,
         )
         val presentation = buildDepotPresentation(row, emptyMap(), thisAppIsHolder = true)
-        assertEquals("App 999", presentation.coOwners.single().name)
+        assertEquals("Unknown app", presentation.coOwners.single().name)
     }
 
     @Test

@@ -22,7 +22,7 @@ class ContentPackageJobNameTest {
             .associateBy { it.appid }
         assertEquals("Starfall - Pack", nameFor(101, games))
         assertEquals("Owned Pack", nameFor(102, games, mapOf(102 to "Owned Pack")))
-        assertEquals("App 102", nameFor(102, games))
+        assertEquals("Unknown app", nameFor(102, games))
         assertEquals("Owned Starfall · content 103", nameFor(103, mapOf(103 to g(103, null, parent = 100)), mapOf(100 to "Owned Starfall")))
     }
 }
