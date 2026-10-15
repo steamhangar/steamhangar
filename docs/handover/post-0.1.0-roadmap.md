@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D18)
+# Handover: post-v0.1.0 roadmap (items D1-D20)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -664,6 +664,66 @@ Name availability (checked 2026-10-15, re-check before the ADR):
 Steps: inventory with grep, ADR with the open questions (volume strategy,
 `applicationId`, old image tags, redirect period), user decision, then one
 package per component. Not during the v0.1.0 release chain.
+
+## D19: DEPOT-PREVIEW-1, expected depots and size on a never-cached game
+
+User request 2026-10-15 (Weg A chosen). Today the detail card of a game that
+was never downloaded says "Size unknown" and "Depots unknown until the first
+download": the worker learns depots only after a job, by diffing the cache
+(`worker.py` `apply_observed_mapping`), and the oracle (`api.steamcmd.net`,
+UPD-1) is polled every 180 min for cached games only. Measured 2026-10-15
+from the diag container: one oracle query takes ~0.35 s (DNS 0.06, connect
+0.15), 10 KB; the answer carries depot ids, per branch manifest gid, `size`
+and `download` (appid 1366540: depot 1366541 public 4.68 GB, 1.82 GB
+download; depot 1366542 is a DLC depot without manifests).
+
+Design (proposed, to settle in the package brief):
+- Opening the card of an uncached game triggers ONE oracle query in the
+  background; the card opens at once and fills in when the answer arrives.
+  Stored with a TTL (24 h) in the existing oracle storage; a repeat open
+  inside the TTL asks nothing. Oracle off or timeout: card stays "unknown".
+- The answer is an EXPECTATION. It never writes `depot_app_map` (delete and
+  GC trust that table as observed). The card shows "expected" depots and size
+  (public branch, DLC depots without manifest listed apart), and switches to
+  the observed values after the first download.
+- Privacy: each opened card sends one appid to a third party. Same data as
+  the cached-game poll, but triggered by browsing; needs a Settings switch
+  (default on, follows `VAULT_MANIFEST_ORACLE=off`) and dedupe/rate limit
+  per appid.
+- Dev: anonymous metadata queries are allowed (user decision 2026-10-13);
+  no downloads.
+
+Packages: **DEPOT-PREVIEW-1a (api)** on-demand query, TTL storage, response
+fields; **DEPOT-PREVIEW-1b (web)** "expected" display and the Settings switch;
+Android follows in the app track.
+
+## D20: QUEUE-ORDER-1, make the Downloads queue sortable
+
+User request 2026-10-15. The queue rows in Downloads show a drag grip
+(`web/js/views/downloads.js` `buildQueueRow`, `GRIP_SVG`) but the queue is
+FIFO and the footer says "Drag-to-reorder is not built yet". Rule from the
+user: a control that looks like a feature has to be that feature.
+
+Constraint found in code: the queue is FIFO by `jobs.id` (`claim_next_job`)
+and there is deliberately no priority column; `resume_job` relies on a
+resumed job keeping its old id to land at the front (`jobs.py`, router
+`resume`).
+
+Design (proposed):
+- Schema: a nullable order key on `jobs` (migration), claim order
+  `ORDER BY order_key, id`; NULL keeps today's FIFO, so resume semantics and
+  existing rows stay unchanged.
+- API: `POST /v1/jobs/{id}/move` (to a position, queued jobs only, `409`
+  otherwise, `404` unknown); the running job cannot be moved.
+- Web: drag and drop on the grip (pointer events, touch included), plus a
+  keyboard alternative (grip focusable, move up/down) for a11y; optimistic
+  reorder with rollback on error; polling must not fight an active drag.
+- Interim until the package lands: nothing hidden, the footer text stays
+  honest.
+
+Packages: **QUEUE-ORDER-1a (api)** migration, claim order, move endpoint,
+tests; **QUEUE-ORDER-1b (web)** drag and drop, keyboard path, tests; Android
+follows in the app track.
 
 ## Wave plan (user-approved 2026-10-13)
 
