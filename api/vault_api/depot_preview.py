@@ -106,7 +106,7 @@ def _other_os_only(raw_depot: dict[str, object]) -> bool:
     """A depot restricted to other operating systems than Windows.
 
     ``config.oslist`` is a comma list; an absent or empty list means every OS.
-    Assumption (documented in the ADR note of this package): the prefill tool
+    Assumption (documented in ADR-0024): the prefill tool
     fetches the Windows depots, so macOS/Linux-only depots would inflate the
     expected size and are left out.
     """
@@ -330,10 +330,14 @@ class DepotPreviewService:
         """Answer one card open. The only place a query can start."""
         if not enabled(settings):
             return PreviewResult(STATE_OFF)
-        if _observed_depots(conn, appid):
-            return PreviewResult(STATE_CACHED)
-
-        stored = load_preview(conn, appid)
+        try:
+            if _observed_depots(conn, appid):
+                return PreviewResult(STATE_CACHED)
+            stored = load_preview(conn, appid)
+        except sqlite3.Error as exc:
+            # The endpoint promises an answer, never an error.
+            logger.warning("depot preview: could not read app %s: %s", appid, exc)
+            return PreviewResult(STATE_UNAVAILABLE)
         if stored is not None and _is_fresh(stored, self._clock()):
             return PreviewResult(self._state_of(stored), stored)
 
@@ -363,7 +367,11 @@ class DepotPreviewService:
             still_running = appid in self._in_flight
         if still_running:
             return PreviewResult(STATE_PENDING)
-        fresh = load_preview(conn, appid)
+        try:
+            fresh = load_preview(conn, appid)
+        except sqlite3.Error as exc:
+            logger.warning("depot preview: could not re-read app %s: %s", appid, exc)
+            return PreviewResult(STATE_UNAVAILABLE)
         return PreviewResult(self._state_of(fresh) if fresh else STATE_UNAVAILABLE, fresh)
 
     @staticmethod

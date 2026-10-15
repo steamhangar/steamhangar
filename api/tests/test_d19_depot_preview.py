@@ -19,6 +19,7 @@ Pinned by name:
 from __future__ import annotations
 
 import dataclasses
+from contextlib import closing
 import json
 import shutil
 import sqlite3
@@ -203,6 +204,17 @@ def test_an_unexpected_exception_in_the_fetcher_is_contained(tmp_path: Path) -> 
     fetch = Counter(RuntimeError("weird"))
     client = make_client(tmp_path, on(tmp_path), fetch)
     assert preview(client)["state"] == "unavailable"
+
+
+def test_a_database_error_is_unavailable_not_an_error(tmp_path: Path) -> None:
+    settings = on(tmp_path)
+    fetch = Counter()
+    client = make_client(tmp_path, settings, fetch)
+    with closing(get_connection(settings.db_path)) as conn:
+        conn.execute("DROP TABLE depot_preview_state")
+        conn.commit()
+    assert preview(client)["state"] == "unavailable"
+    assert fetch.urls == []
 
 
 def test_garbage_answers_are_unavailable_not_errors(tmp_path: Path) -> None:
