@@ -294,7 +294,9 @@ test("MUTATION TARGET: demo core_apply has EXACTLY CoreApplyOut's keys, applied 
   assert.equal(out.core_apply.pending, false);
   assert.match(settingsStoreSrc + readFileSync(path.join(apiDir, "core_settings.py"), "utf8"), /STATUS_STATES = frozenset\(\{[^}]*"applied"/, "VALUE drift: 'applied' is no longer a core status state");
   const before = out.core_apply.generation;
-  const after = await demoRequest("PATCH", "/v1/settings", { body: { bypass_window_days: "4" } });
-  assert.equal(after.core_apply.generation, before + 1, "each write is a new generation");
+  const apiOnly = await demoRequest("PATCH", "/v1/settings", { body: { bypass_window_days: "4" } });
+  assert.equal(apiOnly.core_apply.generation, before, "an api-only write does not bump the core generation");
+  const after = await demoRequest("PATCH", "/v1/settings", { body: { event_log_rotate_bytes: "2097152" } });
+  assert.equal(after.core_apply.generation, before + 1, "a core key write is a new generation");
   assert.equal(after.core_apply.applied_generation, after.core_apply.generation);
 });

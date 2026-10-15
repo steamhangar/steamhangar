@@ -84,8 +84,16 @@ LIVE_ID=boot
 APPLY_N=0
 APPLIED_GEN=${VS_BOOT_GEN:-0}
 
+# VS_QUIET=1 while the loop retries the same content after a transient failure
+# (apply_file returned 2). reject stays silent only for a reason IDENTICAL to
+# the last one it reported; a different failure in the streak is reported.
+VS_QUIET=0
+VS_LAST_REASON=""
+
 reject() {
     # reject <generation> <reason>
+    if [ "$VS_QUIET" = 1 ] && [ "$2" = "$VS_LAST_REASON" ]; then return 0; fi
+    VS_LAST_REASON=$2
     warn "settings generation $1 rejected: $2 -- generation $APPLIED_GEN stays live"
     vs_write_status rejected "$1" "$APPLIED_GEN" "$2" "$VS_CONF_DIR/vault-settings.effective" \
         || warn "could not write $VS_STATUS_FILE"
@@ -115,7 +123,7 @@ apply_file() {
     _gen=$VS_GEN
     APPLY_N=$((APPLY_N + 1))
     _id="a$$-$APPLY_N-$(date +%s)"
-    log "settings generation $_gen found (live: $APPLIED_GEN) -- rendering"
+    [ "$VS_QUIET" = 1 ] || log "settings generation $_gen found (live: $APPLIED_GEN) -- rendering"
     _stage=$(mktemp -d) || { reject "$_gen" "could not create a staging directory (will retry)"; return 2; }
     vs_resolve yes
     if ! (vs_export; vs_render "$_stage" "$_gen" "$_id"); then
@@ -189,6 +197,7 @@ watch_loop() {
     # One failing command must not end the loop.
     set +e
     _last=$1
+    _streak_content=""
     while :; do
         sleep "$VS_POLL"
         _rc=0
@@ -206,15 +215,27 @@ watch_loop() {
         fi
         # _last moves only when this content got a final answer; a transient
         # failure (return 2) leaves it, so the next tick retries.
+        # A retry of the content that already failed transiently stays quiet
+        # (one log line and status per failure streak, not one per poll).
+        VS_QUIET=0
+        [ "$_content" != "$_streak_content" ] || VS_QUIET=1
         _arc=0
         apply_file "$_content" || _arc=$?
-        [ "$_arc" = 2 ] || _last=$_content
+        if [ "$_arc" = 2 ]; then
+            _streak_content=$_content
+        else
+            _streak_content=""
+            _last=$_content
+            VS_QUIET=0
+            VS_LAST_REASON=""
+        fi
     done
 }
 
 # core/tests/test-settings-watch.sh sources this file for its functions only
 # (a deterministic rollback test with stubbed nginx, wget and master).
 if [ "${VS_WATCH_FUNCTIONS_ONLY:-}" = 1 ]; then
+    log "VS_WATCH_FUNCTIONS_ONLY=1: functions loaded, watcher not started (test mode)"
     # shellcheck disable=SC2317 # exit only when run, not sourced
     return 0 2>/dev/null || exit 0
 fi

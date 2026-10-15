@@ -1564,10 +1564,13 @@ function handlePatchSettings(body, params) {
   // Everything validated above before anything is written (ADR-0009: a bad
   // value in a multi-key PATCH must persist nothing).
   settingsOverrides = prospective;
-  // vault-api rewrites the core file after every PATCH; the demo core
-  // applies it at once.
-  demoCoreGeneration += 1;
-  demoCoreAppliedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  // vault-api rewrites the core file only when a core key changed; the demo
+  // core applies that at once. An api-only write leaves the generation alone.
+  const touchesCore = [...toSet.map(([k]) => k), ...toClear].some((k) => DEMO_SPEC_BY_KEY.get(k).target?.includes("core"));
+  if (touchesCore) {
+    demoCoreGeneration += 1;
+    demoCoreAppliedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
   return handleGetSettings();
 }
 
