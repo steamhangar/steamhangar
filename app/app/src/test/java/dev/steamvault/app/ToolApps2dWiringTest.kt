@@ -71,7 +71,7 @@ class ToolApps2dWiringTest {
     @Test
     fun `MUTATION PIN -- the Library groups the list and feeds every consumer the packages`() {
         assertCalledFrom(library, "groupGames(merged)", "LibraryScreen")
-        assertCalledFrom(library, "visibleGames(grouped.rows, normalizedQuery, controller.filterKey, liveJobsByAppid, grouped.packagesByParent)", "LibraryScreen")
+        assertCalledFrom(library, "visibleGames(metaResult.games, normalizedQuery, controller.filterKey, liveJobsByAppid, grouped.packagesByParent)", "LibraryScreen")
         assertCalledFrom(library, "grouped.packagesByParent,", "LibraryScreen")
         assertCalledFrom(library, "packages = grouped.packagesOf(g.appid)", "LibraryScreen")
         assertCalledFrom(library, "ownedPlaytimeForever = playtime[g.appid]", "LibraryScreen")
