@@ -61,6 +61,8 @@ EXPECTED_TABLES = {
     # v30 (WP D23 LIBRARY-META-1): app metadata for library filter/sort.
     "app_meta",
     "app_meta_genres",
+    "depot_preview",
+    "depot_preview_state",
 }
 
 

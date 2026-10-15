@@ -447,6 +447,8 @@ ENV_ONLY_INFO_KEYS: tuple[EnvOnlySpec, ...] = (
     EnvOnlySpec("relay_expose_last_played", "VAULT_RELAY_EXPOSE_LAST_PLAYED"),
     # WP D23: external-traffic gate, env-only for the same privacy reason.
     EnvOnlySpec("library_meta_enabled", "VAULT_LIBRARY_META"),
+    # WP D19-1a: external-traffic gate (oracle query on card open), env-only.
+    EnvOnlySpec("depot_preview_enabled", "VAULT_DEPOT_PREVIEW"),
     # D16b (Q2): can carry credentials; shown masked, never editable.
     EnvOnlySpec("webhook_url", "VAULT_WEBHOOK_URL", mask_url),
 )

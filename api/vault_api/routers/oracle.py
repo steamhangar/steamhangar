@@ -28,10 +28,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Request, status
 from pydantic import BaseModel
 
-from vault_api import oracle
+from vault_api import depot_preview, oracle
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener, get_settings
@@ -127,6 +127,79 @@ def get_oracle_view(
                 beta_branches=list(depot.beta_branches),
             )
             for depot in view.depots
+        ],
+    )
+
+
+class PreviewDepotOut(BaseModel):
+    depotid: int
+    size_bytes: int | None
+    download_bytes: int | None
+
+
+class PreviewDlcDepotOut(BaseModel):
+    depotid: int
+    dlcappid: int | None
+
+
+class DepotPreviewOut(BaseModel):
+    """EXPECTED depots and size of a never-downloaded game (WP D19-1a)."""
+
+    appid: int
+    #: ``off`` (switch or oracle off: nothing was asked) | ``cached`` (the
+    #: vault observed depots, no preview) | ``pending`` (ask again in a few
+    #: seconds) | ``ready`` | ``unavailable``.
+    state: str
+    #: Always true: an oracle expectation, never an observation.
+    expected: bool = True
+    checked_at: str | None = None
+    #: Public branch, depots with a manifest only.
+    total_size_bytes: int | None = None
+    total_download_bytes: int | None = None
+    depots: list[PreviewDepotOut] = []
+    #: Depots without a public manifest (DLC depots), listed apart.
+    dlc_depots: list[PreviewDlcDepotOut] = []
+
+
+@router.get("/v1/oracle/{appid}/preview", response_model=DepotPreviewOut)
+def get_depot_preview(
+    request: Request,
+    appid: int = AppIdPath,
+    open_db: DbOpener = Depends(db_opener),
+    settings: Settings = Depends(get_settings),
+) -> DepotPreviewOut:
+    """Expected depots and size for a game that was never downloaded.
+
+    Called when a card opens. **May start one background oracle query** (that
+    request leaves the LAN), but only when ``VAULT_DEPOT_PREVIEW`` AND the
+    oracle are both on, the vault has observed no depots for the app, and no
+    answer or failure younger than the TTL is stored. Otherwise it only reads.
+    Never ``404`` and never an error for a flaky oracle: the card just stays
+    "unknown". Never writes ``depot_app_map``.
+    """
+    service: depot_preview.DepotPreviewService = request.app.state.depot_preview
+    with open_db() as conn:
+        result = service.lookup(conn, appid, settings)
+    stored = result.stored if result.state == depot_preview.STATE_READY else None
+    if stored is None:
+        return DepotPreviewOut(appid=appid, state=result.state)
+    return DepotPreviewOut(
+        appid=appid,
+        state=result.state,
+        checked_at=stored.fetched_at,
+        total_size_bytes=stored.total_size_bytes,
+        total_download_bytes=stored.total_download_bytes,
+        depots=[
+            PreviewDepotOut(
+                depotid=d.depotid, size_bytes=d.size_bytes, download_bytes=d.download_bytes
+            )
+            for d in stored.depots
+            if d.manifest
+        ],
+        dlc_depots=[
+            PreviewDlcDepotOut(depotid=d.depotid, dlcappid=d.dlcappid)
+            for d in stored.depots
+            if not d.manifest
         ],
     )
 

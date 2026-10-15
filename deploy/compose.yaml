@@ -644,6 +644,12 @@ services:
       # VAULT_MANIFEST_ORACLE on and a schedule window (config.py
       # DEFAULT_LIBRARY_META).
       VAULT_LIBRARY_META: ${VAULT_LIBRARY_META:-false}
+      # WP D19-1a: opening the card of a never-downloaded game sends that one
+      # app id to the manifest oracle (same host as the update check, no new
+      # host) to show expected depots and size. Reveals what a household
+      # member browses, so it is off by default, env-only, and needs
+      # VAULT_MANIFEST_ORACLE on as well (config.py DEFAULT_DEPOT_PREVIEW).
+      VAULT_DEPOT_PREVIEW: ${VAULT_DEPOT_PREVIEW:-false}
       # Settings-API operator hard-lock (ADR-0009 decision 3; api/README.md
       # "The operator hard-lock"). Env-only BY DEFINITION: a lock on the
       # settings-write API can never be unlockable through that same API

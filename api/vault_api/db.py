@@ -307,7 +307,17 @@ import time
 #: ``version < 31``. No data step. A v31 file is refused by older code (the
 #: downgrade guard), so a rollback to a v30 build needs the SQLite dump
 #: ``update.sh`` takes before upgrading.
-SCHEMA_VERSION = 31
+#: v32 (WP D19-1a DEPOT-PREVIEW-1a): added ``depot_preview_state`` (one row
+#: per app: when the oracle was last asked on a card open and how it went) and
+#: ``depot_preview`` (the expected depots, public branch, with oracle-stated
+#: size and download). Two brand-new tables, plain ``CREATE TABLE IF NOT
+#: EXISTS`` in ``_DDL`` that runs on EVERY start, so the step does not trust
+#: the version stamp and needs no ``ALTER`` and no data step: an upgraded file
+#: simply has no rows ("never asked"). Display data only; nothing in GC,
+#: deletion, the update check or ``depot_app_map`` reads or writes them. A v32
+#: file is refused by older code (the downgrade guard), so a rollback to a v31
+#: build needs the SQLite dump ``update.sh`` takes before upgrading.
+SCHEMA_VERSION = 32
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -807,6 +817,31 @@ CREATE TABLE IF NOT EXISTS app_meta_genres (
 );
 
 CREATE INDEX IF NOT EXISTS idx_app_meta_genres_genre ON app_meta_genres (genre_id);
+
+-- v32 (WP D19-1a): the EXPECTED depots of a game that was never downloaded,
+-- from one oracle answer fetched when a card was opened
+-- (vault_api/depot_preview.py). An expectation, not an observation: never
+-- merged into depot_app_map, never read by GC or deletion. `outcome` is
+-- 'ok' | 'failed'; `fetched_at` drives the TTL. No column records who opened
+-- the card.
+CREATE TABLE IF NOT EXISTS depot_preview_state (
+    appid      INTEGER PRIMARY KEY,
+    outcome    TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    source     TEXT NOT NULL
+);
+
+-- One row per depot of the public branch. `manifest` = 0 for a depot without
+-- a public manifest (DLC depots), whose sizes are NULL.
+CREATE TABLE IF NOT EXISTS depot_preview (
+    appid          INTEGER NOT NULL,
+    depotid        INTEGER NOT NULL,
+    manifest       INTEGER NOT NULL,
+    size_bytes     INTEGER,
+    download_bytes INTEGER,
+    dlcappid       INTEGER,
+    PRIMARY KEY (appid, depotid)
+);
 
 -- WP 4a.6r / ADR-0004 addendum: opt-in Steam Web API relay (GetOwnedGames /
 -- GetPlayerSummaries) for the web UI, which cannot call the Steam Web API
