@@ -60,6 +60,7 @@ import dev.steamvault.app.repo.VaultTrafficRepository
 import dev.steamvault.app.repo.VaultUpdatesRepository
 import dev.steamvault.app.storage.EncryptedCredentialStore
 import dev.steamvault.app.storage.SharedPreferencesLibraryPreferences
+import dev.steamvault.app.storage.SharedPreferencesSettingsViewPreferences
 import dev.steamvault.app.ui.clients.AndroidClientsStrings
 import dev.steamvault.app.ui.clients.ClientsController
 import dev.steamvault.app.ui.clients.ClientsScreen
@@ -141,6 +142,7 @@ class MainActivity : ComponentActivity() {
         )
     }
     private val libraryPreferences by lazy { SharedPreferencesLibraryPreferences(applicationContext) }
+    private val settingsViewPreferences by lazy { SharedPreferencesSettingsViewPreferences(applicationContext) }
 
     /** Long-lived for this Activity INSTANCE (same category as
      * [identityRepository]/[credentialStore] -- not the process: a
@@ -436,6 +438,7 @@ class MainActivity : ComponentActivity() {
                 AndroidSettingsStrings(resources),
                 VaultSteamRelayRepository(it),
                 VaultAboutRepository(it),
+                settingsViewPreferences,
             )
         }
         ownedLibraryState = client?.let { OwnedLibraryController(VaultSettingsRepository(it), VaultSteamRelayRepository(it)) }
@@ -477,6 +480,7 @@ class MainActivity : ComponentActivity() {
             AndroidSettingsStrings(resources),
             DemoSteamRelayRepository(demo),
             DemoAboutRepository(demo),
+            settingsViewPreferences,
         )
         ownedLibraryState = OwnedLibraryController(DemoSettingsRepository(demo), DemoSteamRelayRepository(demo))
         clientsControllerState = ClientsController(DemoClientsRepository(demo), AndroidClientsStrings(resources))

@@ -84,7 +84,7 @@ class SettingsControllerSaveBarTest {
         c.setDraft("vault_name", SettingDraft.Text("renamed-vault"))
         assertTrue(c.isDirty)
         c.save()
-        assertEquals("disk full", c.saveError)
+        assertEquals("Could not save: disk full", c.saveError)
         assertTrue("still dirty: the bar stays", c.isDirty)
         c.setDraft("vault_name", SettingDraft.Text("renamed-vault-2"))
         assertNull("an edit clears the old error", c.saveError)

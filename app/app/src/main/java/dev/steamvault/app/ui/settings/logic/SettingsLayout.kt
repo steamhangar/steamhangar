@@ -167,7 +167,8 @@ object SettingsLayout {
             sections.getValue(named ?: "other").add(entry)
         }
         val rank = { e: SettingInfoOut -> order[e.key] ?: 1000 }
-        for (list in sections.values + expert.values) list.sortBy(rank)
+        for (list in sections.values) list.sortBy(rank)
+        for (list in expert.values) list.sortBy(rank)
         return PlacedSettings(sections, expert)
     }
 
