@@ -25,6 +25,7 @@ import dev.steamvault.app.repo.SteamRelayRepository
 import dev.steamvault.app.repo.UpdatesRepository
 import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.library.logic.LibraryLayout
+import dev.steamvault.app.ui.library.logic.LibrarySort
 import dev.steamvault.app.ui.library.logic.STEAM_LIBRARY_SETTING_KEY
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -221,4 +222,6 @@ internal class FixedUpdatesRepository : UpdatesRepository {
 internal class FixedLibraryPreferences(private val layout: LibraryLayout) : LibraryPreferences {
     override fun getLayout(): LibraryLayout = layout
     override fun setLayout(layout: LibraryLayout) = Unit
+    override fun getSort(): LibrarySort = LibrarySort.DEFAULT
+    override fun setSort(sort: LibrarySort) = Unit
 }
