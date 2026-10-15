@@ -174,9 +174,10 @@ class LiveTier:
                 return 0
             if self._last_tail is not None and 0 <= epoch - self._last_tail < self._tail_interval:
                 return 0
+            gap = self._last_tail is None or not 0 <= epoch - self._last_tail <= self._watcher_window
             self._last_tail = epoch
             try:
-                return self._tail(path, now, epoch)
+                return self._tail(path, now, epoch, gap)
             except Exception:  # noqa: BLE001 - best effort, never break a request
                 logger.exception("live-tier: tailing %r failed; retried on the next poll.", path)
                 return 0
@@ -187,7 +188,7 @@ class LiveTier:
         self._ino = None
         self._covered_from = None
 
-    def _tail(self, path: str, now: datetime, epoch: float) -> int:
+    def _tail(self, path: str, now: datetime, epoch: float, gap: bool = False) -> int:
         if path != self._path:
             self._cells.clear()
             self._reset(path)
@@ -203,13 +204,26 @@ class LiveTier:
             info = os.fstat(fd)
             size = info.st_size
             fresh = self._cursor is None
-            if self._ino is not None and info.st_ino != self._ino:
+            # The ring has a hole in front of the new lines: the stitched
+            # series must take the minutes before them from the persisted tier.
+            hole = False
+            if self._cursor is not None and gap:
+                # Idle gap: the sweep may have consumed and truncated the log
+                # (a regrown file can even be past the old cursor), so the old
+                # cursor means nothing. Start over, drop the stale cells.
+                self._cells.clear()
+                self._cursor = max(0, size - self._max_backfill)
+                fresh = True
+                hole = True
+            elif self._ino is not None and info.st_ino != self._ino:
                 # Another file at the path (rotation): start over on it.
                 self._cursor = 0
                 fresh = False
+                hole = True
             elif self._cursor is not None and size < self._cursor:
                 self._cursor = 0  # truncated by the sweep or rotated
                 fresh = False
+                hole = True
             self._ino = info.st_ino
             if self._cursor is None:
                 self._cursor = max(0, size - self._max_backfill)
@@ -217,12 +231,30 @@ class LiveTier:
                 # A backlog we will not chew through: keep its end only.
                 self._cursor = max(0, size - self._max_backfill)
                 fresh = True
+                hole = True
             started_mid_file = self._cursor > 0 and (fresh or self._covered_from is None)
+            align = False
+            if started_mid_file:
+                # A read that starts inside the file must begin at a line start.
+                prev = os.pread(fd, 1, self._cursor - 1)
+                align = prev != b"\n"
             first_line_epoch: float | None = None
             for _ in range(MAX_READS_PER_REFRESH):
                 data = os.pread(fd, self._max_read, self._cursor)
                 if not data:
                     break
+                if align:
+                    nl = data.find(b"\n")
+                    if nl < 0:
+                        if len(data) >= self._max_read:
+                            self._cursor += len(data)
+                            continue
+                        break
+                    self._cursor += nl + 1
+                    data = data[nl + 1 :]
+                    align = False
+                    if not data:
+                        continue
                 end = data.rfind(b"\n")
                 if end < 0:
                     if len(data) >= self._max_read:
@@ -242,7 +274,9 @@ class LiveTier:
                             first_line_epoch = seen
                 if len(data) < self._max_read:
                     break
-            if self._covered_from is None or fresh:
+            if hole:
+                self._covered_from = float(_floor(epoch, 60) + 60)
+            elif self._covered_from is None or fresh:
                 if not started_mid_file:
                     # Read from the file's first byte: everything the file
                     # holds is in the ring (older lines are persisted).

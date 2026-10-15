@@ -164,7 +164,8 @@ def test_an_idle_stretch_is_caught_up_by_event_time(tmp_path: Path) -> None:
     clock.advance(200)  # nobody polls for 200 s
     append_log(log, line(150, 500, now=clock()), line(20, 300, now=clock()))
     tier.touch(clock())
-    assert tier.refresh(str(log), clock()) == 2
+    # After an idle gap the log is read afresh (the sweep may have rewritten it).
+    assert tier.refresh(str(log), clock()) == 3
     points = tier.stitch(clock(), no_rows, never_runner)
     assert total_bytes(points) == 100 + 500 + 300
 
@@ -206,6 +207,57 @@ def test_truncation_and_replacement_restart_at_the_top(tmp_path: Path) -> None:
     write_log(log, line(1, 6), line(1, 7))  # new inode
     tier.touch(clock())
     assert tier.refresh(str(log), clock()) == 2
+
+
+def test_a_sweep_truncation_during_an_idle_gap_hands_the_gap_to_the_persisted_tier(tmp_path: Path) -> None:
+    log = tmp_path / "event.log"
+    write_log(log, line(1, 100))
+    tier, clock = tier_at()
+    tier.touch(clock())
+    tier.refresh(str(log), clock())
+    first_cover = tier.covered_from()
+    clock.advance(600)  # idle: the sweep consumes and truncates the log (same inode)
+    with open(log, "r+b") as handle:
+        handle.truncate(0)
+    append_log(log, line(2, 40, now=clock()))
+    tier.touch(clock())
+    assert tier.refresh(str(log), clock()) == 1
+    assert tier.covered_from() != first_cover
+    gap_minute = int((NOW + timedelta(minutes=5)).replace(second=0).timestamp())
+
+    def persisted(start: int, end: int) -> dict[int, PersistedMinute]:
+        return {gap_minute: PersistedMinute(LiveTotals(1, 700, 700, 0), LiveTotals(0, 0, 0, 0), 20)}
+
+    points = tier.stitch(clock(), persisted, never_runner)
+    row = next(p for p in points if p.t.startswith(iso(datetime.fromtimestamp(gap_minute, tz=UTC))[:16]))
+    assert row.source == "persisted"
+    assert row.all_totals.bytes_served == 700
+
+
+def test_a_log_that_regrew_past_the_old_cursor_is_not_resumed_mid_line(tmp_path: Path) -> None:
+    log = tmp_path / "event.log"
+    write_log(log, line(1, 100))
+    tier, clock = tier_at()
+    tier.touch(clock())
+    tier.refresh(str(log), clock())
+    clock.advance(120)
+    with open(log, "r+b") as handle:
+        handle.truncate(0)
+    append_log(log, *[line(3, 11, now=clock()) for _ in range(8)])  # bigger than before
+    tier.touch(clock())
+    assert tier.refresh(str(log), clock()) == 8
+    assert total_bytes(tier.stitch(clock(), no_rows, never_runner)) == 88
+
+
+def test_a_read_starting_mid_file_aligns_to_the_next_line(tmp_path: Path) -> None:
+    log = tmp_path / "event.log"
+    write_log(log, *[line(5, 1) for _ in range(300)])
+    tier, clock = tier_at(max_read_bytes=2048, max_backfill_bytes=1000)
+    tier.touch(clock())
+    folded = tier.refresh(str(log), clock())
+    assert folded > 0
+    # Every folded line is whole: bytes_sent=1 each, no torn fragment parsed.
+    assert total_bytes(tier.stitch(clock(), no_rows, never_runner)) == folded
 
 
 def test_a_huge_backlog_is_skipped_to_its_end(tmp_path: Path) -> None:
