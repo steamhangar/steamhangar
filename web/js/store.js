@@ -249,7 +249,7 @@ class ResourceLoop {
 export function createViewPoll({ fetcher, intervalMs, onTick, onError, backoffOptions }) {
   const loop = new ResourceLoop({
     fetcher,
-    getIntervalMs: () => intervalMs,
+    getIntervalMs: () => (typeof intervalMs === "function" ? intervalMs() : intervalMs),
     backoffOptions,
     onTick: ({ curr }) => onTick(curr),
     onError,

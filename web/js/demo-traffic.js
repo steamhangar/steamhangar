@@ -124,6 +124,62 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
   };
 }
 
+/**
+ * `GET /v1/throughput/live` (demo, WP GRAPH-LIVE): the stitched series the
+ * server builds, in the same geometry (5 s for the last minute, 15 s up to
+ * 5 minutes, then 1-minute points up to an hour), with a deterministic wavy
+ * rate so the demo graph moves.
+ */
+export function demoLive(nowMs = Date.now(), sinceMs = null) {
+  const fineStart = floorTo(nowMs, 15) - 45_000;
+  const mediumStart = floorTo(fineStart, 60) - 180_000;
+  const coarseStart = mediumStart - 3_240_000;
+  const spans = [];
+  for (let at = coarseStart; at < mediumStart; at += 60_000) spans.push([at, 60, "persisted"]);
+  for (let at = mediumStart; at < fineStart; at += 15_000) spans.push([at, 15, "live"]);
+  for (let at = fineStart; at <= floorTo(nowMs, 5); at += 5_000) spans.push([at, 5, "live"]);
+  const points = spans.map(([start, bucket, source]) => {
+    const age = Math.floor((nowMs - start) / 60_000);
+    const wave = 0.6 + 0.4 * Math.abs(Math.sin(start / 9_000));
+    const bps = sinceMs !== null && start < sinceMs ? 0 : age > 30 ? 0 : Math.round(wave * 36 * MIB);
+    const served = Math.round(bps * bucket);
+    const runner = Math.round(served * 0.1);
+    const clients = served - runner;
+    const hit = Math.round(clients * 0.82);
+    return {
+      t: isoSeconds(start),
+      bucket_seconds: bucket,
+      source,
+      bytes_served: served,
+      hit_bytes: hit,
+      miss_bytes: clients - hit,
+      requests: Math.round(clients / (1.4 * MIB)),
+      runner_bytes: runner,
+      bytes_per_second: bps,
+      peak_bytes_per_second: bps,
+    };
+  });
+  const recent = points.slice(-4);
+  const windowSeconds = 15 + Math.floor((nowMs % 5000) / 1000);
+  const bps = recent.reduce((sum, p) => sum + p.bytes_per_second, 0) / recent.length;
+  return {
+    event_feed: feed(nowMs, sinceMs),
+    range: "live",
+    tier: "live",
+    watcher_window_seconds: 30,
+    live_since: isoSeconds(nowMs - 15 * 60_000),
+    range_start: points[0].t,
+    current: {
+      bytes_per_second: bps,
+      runner_bytes_per_second: bps * 0.1,
+      window_start: isoSeconds(nowMs - windowSeconds * 1000),
+      window_end: isoSeconds(nowMs),
+      window_seconds: windowSeconds,
+    },
+    points,
+  };
+}
+
 function summaryFor(range, nowMs, sinceMs) {
   const { points, bucket_seconds: bucket } = demoSeries(range, nowMs, sinceMs);
   let served = 0;

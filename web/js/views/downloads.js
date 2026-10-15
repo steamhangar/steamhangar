@@ -135,6 +135,11 @@ import {
   isStatsRange,
   readStoredStatsRange,
   STATS_RANGES,
+  LIVE_POLL_MS,
+  LIVE_SUMMARY_MS,
+  LIVE_SUMMARY_RANGE,
+  liveSeries,
+  mergeLive,
   trimSeries,
   writeStoredStatsRange,
   jobSpeedText,
@@ -1738,13 +1743,31 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const GRAPH_W = 300;
 const GRAPH_H = 60;
 
+/** Cached persisted 1 h summary of the live view (refreshed every 30 s). */
+const liveSummary = { at: 0, value: null };
+
+/** One live tick: the live series every time, the persisted summary rarely. */
+async function fetchLive() {
+  const now = Date.now();
+  const stale = !liveSummary.value || now - liveSummary.at >= LIVE_SUMMARY_MS;
+  const [live, summary] = await Promise.all([api.throughputLive(), stale ? api.throughput(LIVE_SUMMARY_RANGE) : null]);
+  if (summary) {
+    liveSummary.value = summary;
+    liveSummary.at = now;
+  }
+  return { range: "live", throughput: mergeLive(liveSummary.value, live), series: liveSeries(live) };
+}
+
 const trafficPoll = createViewPoll({
   fetcher: async () => {
     const range = traffic.range;
+    if (range === "live") return fetchLive();
     const [throughput, series] = await Promise.all([api.throughput(range), api.throughputSeries(range)]);
     return { range, throughput, series };
   },
-  intervalMs: VIEW_POLL_MS,
+  // WP GRAPH-LIVE: fast only in the live view; the loop already parks
+  // while the tab is hidden.
+  intervalMs: () => (traffic.range === "live" ? LIVE_POLL_MS : VIEW_POLL_MS),
   onTick: (answer) => {
     // An answer for a range the user has since left: dropped, the refresh
     // the range change asked for is queued behind it.
@@ -1779,6 +1802,7 @@ function setStatsRange(range) {
   traffic.throughput = null;
   traffic.series = null;
   traffic.error = null;
+  liveSummary.value = null;
   paintStats();
   paintJobSpeeds();
   trafficPoll.refresh();
