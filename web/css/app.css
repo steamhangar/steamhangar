@@ -128,6 +128,7 @@
 
 .lib-head{
   display:flex; align-items:flex-end; justify-content:space-between; gap:10px;
+  flex-wrap:wrap; /* LIB-SORT: the tools drop below the title on 320-360px */
   margin-bottom:14px;
 }
 .lib-head h1{ margin:0 0 2px; }
@@ -143,6 +144,7 @@
   font:inherit; font-size:12px;
 }
 .lib-sort-dir{ font-size:15px; line-height:1; }
+@media (max-width:400px){ .lib-sort-sel{ max-width:104px; } }
 
 /* The update-check status line ("Updates last checked 5 min ago", oracle
    off, still running). Not a live region: results are announced by the
