@@ -288,8 +288,8 @@ async function saveDrafts() {
   const sent = { ...drafts };
   saving = true;
   els.saveBtn.setAttribute("aria-disabled", "true");
+  let confirmed = false;
   try {
-    let confirmed = false;
     const risky = riskyKeysInBody(entries, body);
     if (risky.length > 0) {
       confirmed = await confirmRisky(entries, body, risky);
@@ -311,6 +311,7 @@ async function saveDrafts() {
         setBarLine(NOT_CONFIRMED_TEXT, true);
         return;
       }
+      confirmed = true;
       setBarLine(SAVING_TEXT, false);
       updated = await api.patchSettings(body, { confirmRisky: true });
     }
@@ -338,7 +339,7 @@ async function saveDrafts() {
   } catch (err) {
     // The bar stays up with the drafts; its own role=status line says what
     // failed (no warn toast on top: at BP-L the toast would sit over it).
-    setBarLine(describeSaveError(err), true);
+    setBarLine(describeSaveError(err, { confirmed }), true);
   } finally {
     saving = false;
     if (mounted() && els.saveBtn) els.saveBtn.removeAttribute("aria-disabled");
@@ -598,7 +599,9 @@ function buildSection(id, { summaryText = "", keys = [], summaryId } = {}) {
   details.open = isSectionOpen(openState, id);
   const summary = el("summary", "sec-summary");
   if (summaryId) summary.id = summaryId;
-  summary.append(el("span", "sec-title", meta.title));
+  // A real heading inside <summary> (allowed: one heading element), so
+  // heading navigation still reaches every section title.
+  summary.append(el("h2", "sec-title", meta.title));
   if (summaryText) {
     const st = el("span", "sec-state", summaryText);
     st.dataset.role = "section-state";
@@ -614,6 +617,12 @@ function buildSection(id, { summaryText = "", keys = [], summaryId } = {}) {
     els.sectionKeys.set(id, new Set(keys));
   }
   details.addEventListener("toggle", () => {
+    // Opened by the rail's version button: not the user's choice, so not
+    // remembered (the browser fires this toggle asynchronously).
+    if (id === "about" && aboutOpenedByRail) {
+      aboutOpenedByRail = false;
+      return;
+    }
     openState = { ...openState, [id]: details.open };
     writeOpenState(getStorage, openState);
   });
@@ -1104,6 +1113,9 @@ let aboutEls = null;
 /** Set by the rail's version button (requestAboutFocus) before it
  * navigates here: the next full render moves focus to the About heading. */
 let focusAboutOnRender = false;
+/** True between the rail opening a closed About section and the toggle
+ * event that opening fires (see buildSection). */
+let aboutOpenedByRail = false;
 
 /**
  * Ask the Settings view to bring the About section into view and focus its
@@ -1460,7 +1472,10 @@ function fullRender() {
 
   if (focusAboutOnRender) {
     focusAboutOnRender = false;
-    aboutEls.details.open = true;
+    if (!aboutEls.details.open) {
+      aboutOpenedByRail = true;
+      aboutEls.details.open = true;
+    }
     aboutEls.heading.focus();
     if (typeof aboutEls.heading.scrollIntoView === "function") aboutEls.heading.scrollIntoView({ block: "start" });
   }

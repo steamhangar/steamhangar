@@ -1384,6 +1384,10 @@ function describeDemoSettings() {
       target,
       env_visible: target !== "core",
       shadowed: pinned && storedOk,
+      // D16b-1 review: why a row is not editable. The demo hands core keys
+      // to vault-core (as with VAULT_CORE_SETTINGS_FILE set), so it never
+      // reports core_file_disabled.
+      reason: pinned ? "env" : null,
     });
   }
   for (const entry of ENV_ONLY_DEMO) {
@@ -1408,6 +1412,7 @@ function describeDemoSettings() {
       target: "api",
       env_visible: true,
       shadowed: entry.key in settingsOverrides,
+      reason: "env_only",
     });
   }
   return infos;

@@ -76,6 +76,8 @@ test("envNote / shadowNote / core-file-disabled wording", () => {
   assert.match(envNote(core), /^Applies to vault-core only via env in this build \(VAULT_UPSTREAM_MAX_CONNS\)\./);
   assert.equal(isCoreFileDisabled({ ...core, source: "env" }), false, "a real env pin stays 'set via env'");
   assert.equal(isCoreFileDisabled(e("vault_name", { editable: false, reason: "core_file_disabled" })), true, "the API's reason wins");
+  assert.equal(isCoreFileDisabled({ ...core, reason: null }), false, "with a reason field, only core_file_disabled counts");
+  assert.equal(isCoreFileDisabled({ ...core, reason: "env" }), false);
   assert.equal(shadowNote(e("a")), null);
   assert.equal(shadowNote(e("a", { shadowed: true })), "A value stored in Settings is overridden by env.");
   assert.match(shadowNote(e("webhook_url", { shadowed: true, env_only: true })), /ignored/);
@@ -130,6 +132,7 @@ test("MUTATION TARGET: describeSaveError — 409/422/428 say nothing was saved, 
   assert.equal(describeSaveError({ status: 422, detail: "bad value." }), "Not saved: bad value. Nothing was saved.");
   assert.equal(describeSaveError({ status: 422, detail: [{ msg: "field required" }] }), "Not saved: field required Nothing was saved.");
   assert.match(describeSaveError({ status: 428, detail: { message: "m", risky_keys: [] } }), /not confirmed\. Nothing was saved\.$/);
+  assert.match(describeSaveError({ status: 428, detail: {} }, { confirmed: true }), /server still asked for confirmation/);
   assert.equal(describeSaveError({ status: 500, detail: "disk full" }), "Could not save: disk full");
   assert.doesNotMatch(describeSaveError({ status: null, message: "Network request failed" }), /Nothing was saved/);
 });

@@ -24,7 +24,7 @@
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createFakeDom } from "./fake-dom.js";
+import { createFakeDom, fakeKeyEvent } from "./fake-dom.js";
 import { resetModalStack } from "../js/lib/modal-stack.js";
 
 const dom = createFakeDom();
@@ -59,6 +59,7 @@ function row(key, effective, extra = {}) {
     target: "api",
     env_visible: true,
     shadowed: false,
+    reason: null,
     ...extra,
   };
 }
@@ -89,8 +90,9 @@ function rows(over = {}) {
       source: "env",
       applies: "restart-required",
       env_var: "VAULT_WEBHOOK_URL",
+      reason: "env_only",
     }),
-    row("db_path", "/data/vault.db", { env_only: true, editable: false, applies: "restart-required" }),
+    row("db_path", "/data/vault.db", { env_only: true, editable: false, applies: "restart-required", reason: "env_only" }),
   ];
   return base.map((r) => (over[r.key] ? { ...r, ...over[r.key] } : r));
 }
@@ -125,7 +127,7 @@ globalThis.fetch = async (url, init = {}) => {
   return respond(404, { detail: "Not Found" });
 };
 
-const { renderSettings, NOT_CONFIRMED_TEXT } = await import("../js/views/settings.js");
+const { renderSettings, requestAboutFocus, NOT_CONFIRMED_TEXT } = await import("../js/views/settings.js");
 const { isRiskyConfirmOpen } = await import("../js/components/risky-confirm.js");
 
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
@@ -141,7 +143,7 @@ const q = (root, role) => root.querySelector(`[data-role="${role}"]`);
 const section = (s, id) => s.querySelectorAll("details").find((d) => d.getAttribute("data-section") === id) || null;
 const field = (s, key) => s.querySelectorAll("div").find((d) => d.getAttribute("data-key") === key) || null;
 const inputById = (s, id) => s.querySelectorAll("input").find((i) => i.id === id) || null;
-const sectionTitles = (s) => s.querySelectorAll("summary span.sec-title").map((t) => t.textContent);
+const sectionTitles = (s) => s.querySelectorAll("summary h2.sec-title").map((t) => t.textContent);
 const barText = (s) => q(s, "save-status").textContent;
 function type(input, value) {
   input.value = value;
@@ -250,7 +252,7 @@ test("an expert draft stays visible as a dot when the switch is turned off; coll
 });
 
 test("MUTATION TARGET: an env-pinned row is plain text with 'Set via env (VAULT_…)' — no input element, no Reset", async () => {
-  server.over = { vault_name: { source: "env", editable: false, effective: "hangar-env", fallback: "hangar-env" } };
+  server.over = { vault_name: { source: "env", editable: false, reason: "env", effective: "hangar-env", fallback: "hangar-env" } };
   const s = await mount();
   assert.equal(inputById(s, "settings-vault_name") === null, true, "no <input> for an env-pinned value");
   const f = field(s, "vault_name");
@@ -263,8 +265,8 @@ test("MUTATION TARGET: an env-pinned row is plain text with 'Set via env (VAULT_
 
 test("a shadowed env pin says the stored value is overridden; segmented and checkbox rows pin the same way", async () => {
   server.over = {
-    auto_gc: { source: "env", editable: false, shadowed: true, effective: "dry-run" },
-    webhook_events: { source: "env", editable: false },
+    auto_gc: { source: "env", editable: false, reason: "env", shadowed: true, effective: "dry-run" },
+    webhook_events: { source: "env", editable: false, reason: "env" },
   };
   const s = await mount();
   const gc = field(s, "auto_gc");
@@ -328,6 +330,7 @@ test("MUTATION TARGET: a risky change opens the confirm dialog; Cancel sends not
   type(inputById(s, "settings-upstream_max_conns"), "24");
   click(q(s, "settings-save"));
   await until(() => isRiskyConfirmOpen(), "risky dialog");
+  assert.equal(dom.document.activeElement === q(dialog(), "risky-cancel"), true, "initial focus on the non-destructive Cancel");
   const list = q(dialog(), "risky-list").textContent;
   assert.match(list, /Upstream connection cap: 16 → 24\./);
   assert.match(list, /CGNAT/, "the dialog names the risk");
@@ -400,7 +403,7 @@ test("a 428 after the user already confirmed is reported, not looped", async () 
   click(q(dialog(), "risky-ok"));
   await until(() => /^Not saved/.test(barText(s)), "428 line");
   assert.equal(server.patches.length, 1, "no second request");
-  assert.match(barText(s), /was not confirmed\. Nothing was saved\.$/);
+  assert.equal(barText(s), "Not saved: the server still asked for confirmation of settings that can break downloads. Nothing was saved.");
 });
 
 test("demo mode: matching fake rows render — vault name pinned via env, shadowed timeout, masked webhook URL", async () => {
@@ -411,4 +414,34 @@ test("demo mode: matching fake rows render — vault name pinned via env, shadow
   assert.equal(q(field(s, "webhook_timeout_seconds"), "shadow-note").textContent, "A value stored in Settings is overridden by env.");
   assert.match(q(field(s, "webhook_url"), "setting-value").textContent, /\/\*\*\*$/);
   assert.ok(inputById(s, "settings-schedule_window"), "the download window stays editable in the demo");
+});
+
+test("MUTATION TARGET: Escape in the risky dialog is Cancel — no PATCH, the not-confirmed line", async () => {
+  storage.set("steamvault.settingsExpert", "1");
+  const s = await mount();
+  type(inputById(s, "settings-resolver"), "9.9.9.9");
+  click(q(s, "settings-save"));
+  await until(() => isRiskyConfirmOpen(), "risky dialog");
+  dom.document.dispatchEvent(fakeKeyEvent("Escape"));
+  await until(() => barText(s) === NOT_CONFIRMED_TEXT, "not-confirmed line");
+  assert.equal(isRiskyConfirmOpen(), false);
+  assert.equal(server.patches.length, 0, "Escape sends no PATCH");
+});
+
+test("opening About from the rail's version button does not remember About as open; a user toggle does", async () => {
+  requestAboutFocus();
+  const s = await mount();
+  const about = section(s, "about");
+  await until(() => about.open === true, "About opened by the rail");
+  about.dispatchEvent({ type: "toggle" }); // the browser's async toggle for that open
+  assert.equal("about" in JSON.parse(storage.get("steamvault.settingsOpen") || "{}"), false);
+  about.open = false;
+  about.dispatchEvent({ type: "toggle" });
+  assert.equal(JSON.parse(storage.get("steamvault.settingsOpen")).about, false, "the user's own toggle is remembered");
+});
+
+test("section titles are headings (h2 inside the summary)", async () => {
+  const s = await mount();
+  assert.equal(s.querySelectorAll("summary h2.sec-title").length, sectionTitles(s).length);
+  assert.ok(sectionTitles(s).length >= 6);
 });

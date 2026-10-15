@@ -1183,7 +1183,7 @@ input.inp.txt:disabled{ opacity:.55; }
   transform:rotate(-45deg); transition:transform .18s;
 }
 .settings-sec[open] > .sec-summary::before{ transform:rotate(45deg); }
-.sec-title{ flex:none; font-size:13.5px; font-weight:650; color:var(--text); }
+.sec-title{ flex:none; margin:0; font-size:13.5px; font-weight:650; line-height:1.3; letter-spacing:0; color:var(--text); }
 .sec-state{
   flex:1 1 auto; min-width:0; text-align:right; font-size:11.5px; color:var(--dim-2);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;

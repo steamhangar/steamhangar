@@ -128,3 +128,12 @@ test("S3: an array draft (webhook_events as a list) is still passed through verb
   const body = buildSettingsPatch(ENTRIES, { webhook_events: { value: ["job.done"] } });
   assert.deepEqual(body, { webhook_events: ["job.done"] });
 });
+
+// WP D16-WEB (D16b-1): no window is "off", and a blank value means off too.
+test("schedule_window: blank or 'OFF' over an 'off' window is no change; blank over a real window is sent as \"\"", () => {
+  const off = ENTRIES.map((e) => (e.key === "schedule_window" ? { ...e, effective: "off", source: "db" } : e));
+  assert.deepEqual(buildSettingsPatch(off, { schedule_window: { value: "" } }), {});
+  assert.deepEqual(buildSettingsPatch(off, { schedule_window: { value: "OFF" } }), {});
+  const on = ENTRIES.map((e) => (e.key === "schedule_window" ? { ...e, effective: "03:00-07:00" } : e));
+  assert.deepEqual(buildSettingsPatch(on, { schedule_window: { value: "" } }), { schedule_window: "" });
+});

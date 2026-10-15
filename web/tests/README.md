@@ -3892,7 +3892,7 @@ computed one, so the file still fails).
 
 ### WP D16-WEB (D16a-2 + D16b-2, rc18): Settings sections, expert mode, env pins
 
-- `settings-sections-wiring.test.js` (18): `<details>` sections (Vault &
+- `settings-sections-wiring.test.js` (21): `<details>` sections (Vault &
   connection open, no empty section, one-line state, open state
   remembered); no expert row on the normal page, the "Show expert
   settings" switch (remembered, hidden drafts keep a dot); env-pinned and
@@ -3914,4 +3914,11 @@ computed one, so the file still fails).
 
 Mutations killed: `isPinned` ignoring `editable`; the Expert section not
 hidden while the switch is off; `confirmRisky` always false; Cancel
-ignored.
+ignored; Escape settling as confirm; the rail-opened About remembered.
+
+Review round 1 (PASS with should-fix): rows carry the API's `reason`
+(`env` | `env_only` | `core_file_disabled` | null) and only that names the
+core-file-disabled note; Escape = Cancel, initial focus on Cancel; a 428
+after confirming says the server still asked; section titles are `h2`
+inside the summary; `settings-diff.test.js` (+1) pins blank/`OFF` over
+`off` as no change and blank over a window as `""`.

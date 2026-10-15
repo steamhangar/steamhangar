@@ -322,16 +322,14 @@ export function isPinned(entry) {
 }
 
 /**
- * True for a vault-core key this build cannot hand to vault-core (the core
- * settings file is off, D16b-1 review): `editable: false` without an env
- * pin. Read from the API's reason when it sends one, else from the shape
- * (core target, not editable, not from env), so the row is never
- * mislabelled "set via env".
+ * True for a vault-core key this build cannot hand to vault-core (D16b-1
+ * review B3: `VAULT_CORE_SETTINGS_FILE` is blank): the API's
+ * `reason: "core_file_disabled"`. A row without a `reason` field (a server
+ * between D16b and its review) is judged by its shape (core target, not
+ * editable, not from env), so it is never mislabelled "set via env".
  */
 export function isCoreFileDisabled(entry) {
-  for (const field of ["reason", "editable_reason", "locked_reason", "not_editable_reason"]) {
-    if (entry[field] === "core_file_disabled") return true;
-  }
+  if ("reason" in entry) return entry.reason === "core_file_disabled";
   return entry.editable === false && !entry.env_only && entry.source !== "env" && entry.target === "core";
 }
 
@@ -470,7 +468,7 @@ function detailText(detail) {
  * first), so those say "Nothing was saved"; any other failure does not
  * claim to know.
  */
-export function describeSaveError(err) {
+export function describeSaveError(err, { confirmed = false } = {}) {
   const status = err && err.status;
   const detail = detailText(err && err.detail);
   if (status === 409) {
@@ -480,6 +478,9 @@ export function describeSaveError(err) {
     return `Not saved: ${detail || "the server refused a value."} Nothing was saved.`;
   }
   if (status === 428) {
+    if (confirmed) {
+      return "Not saved: the server still asked for confirmation of settings that can break downloads. Nothing was saved.";
+    }
     return "Not saved: the change includes settings that can break downloads and was not confirmed. Nothing was saved.";
   }
   if (status === 403) {
