@@ -1,6 +1,8 @@
 package dev.steamvault.app.ui.traffic
 
 import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
+import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -105,5 +107,26 @@ class TrafficPollTest {
         testScheduler.advanceUntilIdle()
         assertEquals(0, calls)
         assertFalse(poll.unsupported)
+    }
+
+    @Test
+    fun `WP GRAPH-ZOOM -- the statistics poll takes 1 h and 6 h, the default poll does not`() = runTest {
+        val clients = TrafficPoll(initialRange = "7d", fetch = { r -> Answer(r) }, hasFigures = { true })
+        clients.selectRange(this, "1h")
+        testScheduler.advanceUntilIdle()
+        assertEquals("the Clients page keeps its four ranges", "7d", clients.range)
+        val stats = TrafficPoll(
+            initialRange = DEFAULT_STATS_RANGE,
+            fetch = { r -> Answer(r) },
+            hasFigures = { true },
+            isValidRange = ::isStatsRange,
+        )
+        assertEquals("6h", stats.range)
+        stats.selectRange(this, "1h")
+        testScheduler.advanceUntilIdle()
+        assertEquals("1h", stats.range)
+        assertEquals(Answer("1h"), stats.data)
+        stats.selectRange(this, "1y")
+        assertEquals("1h", stats.range)
     }
 }

@@ -39,6 +39,8 @@ class TrafficPoll<T : Any>(
     initialRange: String,
     private val fetch: suspend (String) -> T,
     private val hasFigures: (T) -> Boolean,
+    /** Which range names a chip may select (the statistics also take 1 h / 6 h). */
+    private val isValidRange: (String) -> Boolean = ::isRange,
 ) {
     var range by mutableStateOf(initialRange)
         private set
@@ -81,7 +83,7 @@ class TrafficPoll<T : Any>(
 
     /** A range chip was tapped: forget the old range's answer, ask now. */
     fun selectRange(scope: CoroutineScope, newRange: String) {
-        if (!isRange(newRange) || newRange == range) return
+        if (!isValidRange(newRange) || newRange == range) return
         range = newRange
         data = null
         error = null

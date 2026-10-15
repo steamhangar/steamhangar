@@ -8,11 +8,14 @@ import dev.steamvault.app.ui.clients.logic.isAddressClient
 import dev.steamvault.app.ui.clients.logic.isAgentClient
 import dev.steamvault.app.ui.clients.logic.isRunnerClient
 import dev.steamvault.app.ui.traffic.logic.FeedState
+import dev.steamvault.app.ui.traffic.logic.STATS_RANGES
 import dev.steamvault.app.ui.traffic.logic.TRAFFIC_RANGES
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
+import dev.steamvault.app.ui.traffic.logic.seriesStartText
+import dev.steamvault.app.ui.traffic.logic.trimSeries
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -31,7 +34,7 @@ class DemoTrafficTest {
     @Test
     fun `every range answers with an ok feed, figures and a drawable graph`() = runTest {
         val repo = DemoTrafficRepository(DemoState.fresh())
-        for (range in TRAFFIC_RANGES) {
+        for (range in STATS_RANGES) {
             val t = repo.throughput(range)
             assertEquals(range, t.range)
             assertEquals(FeedState.OK, feedState(t.event_feed))
@@ -41,6 +44,22 @@ class DemoTrafficTest {
             val s = repo.series(range)
             assertEquals(range, s.range)
             assertNotNull("$range: the graph must show", graphGeometryToShow(s, range, false, 300f, 60f))
+        }
+    }
+
+    @Test
+    fun `WP GRAPH-ZOOM -- 1 h and 6 h come from the 1-minute tier and the graph zooms to the data`() = runTest {
+        val repo = DemoTrafficRepository(DemoState.fresh())
+        for ((range, count) in listOf("1h" to 60, "6h" to 360)) {
+            val s = repo.series(range)
+            assertEquals("1m", s.tier)
+            assertEquals(60, s.bucket_seconds)
+            assertEquals(count, s.points.size)
+            assertNotNull("$range: the 1-minute tier has been recording", repo.throughput(range).event_feed.traffic_1m_since)
+            // The demo download began part-way in: the empty lead-in is trimmed.
+            val shown = s.copy(points = trimSeries(s.points))
+            assertTrue("$range: trimmed", shown.points.size < s.points.size)
+            assertTrue("$range: the caption follows the data", seriesStartText(shown) != seriesStartText(s))
         }
     }
 
@@ -86,7 +105,7 @@ class DemoTrafficTest {
         assertEquals("Steam Deck", clientName(named.single()))
         assertEquals("vault-agent on \u2068demo-steamdeck\u2069 · 10.0.0.57", clientKindText(named.single()))
         assertTrue("every row carries display_name", o.clients.all { !it.display_name.isNullOrEmpty() })
-        for (range in TRAFFIC_RANGES) {
+        for (range in STATS_RANGES) {
             val t = repo.throughput(range)
             val summary = t.summary!!
             val runnerBytes = summary.prefill_runner!!.bytes_served

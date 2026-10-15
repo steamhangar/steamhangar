@@ -68,7 +68,7 @@ function throughput(range, state) {
 }
 function series(range, state) {
   return {
-    event_feed: feed(state), range, tier: "5m", bucket_seconds: 300, range_start: iso(24 * HOUR),
+    event_feed: feed(state), range, tier: "5m", bucket_seconds: 300, range_start: iso(3 * 300_000), // the first point: nothing is trimmed
     points: state === "disabled" ? [] : (server.flat ? [0, 0, 0] : [0, 10, 5]).map((v, i) => ({ t: iso((3 - i) * 300_000), bytes_served: v, hit_bytes: 0, miss_bytes: v, requests: 1, bytes_per_second: v * MIB, peak_bytes_per_second: v * MIB })),
   };
 }
@@ -174,9 +174,9 @@ test("MUTATION TARGET: feed ok — eight tiles, a labelled SVG graph, and the ru
   const svg = q(s, "graph-svg");
   assert.equal(svg.tagName, "SVG");
   assert.equal(svg.getAttribute("role"), "img");
-  assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 24 hours. Highest: 10.0 MB/s.");
+  assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s."); // default range: 6 h (GRAPH-ZOOM)
   assert.equal(svg.children[1].getAttribute("d"), "M0 60 L150 0 L300 30");
-  assert.equal(q(s, "stats-graph").querySelector(".tg-axis").textContent, "24 h agohighest 10.0 MB/snow");
+  assert.equal(q(s, "stats-graph").querySelector(".tg-axis").textContent, "6 h agohighest 10.0 MB/snow");
   await until(() => speed(s) !== null, "speed line");
   assert.equal(speed(s), "30.0 MB/s · 8.8 GB loaded so far");
   assert.equal(q(s, "stats-range").getAttribute("aria-label"), "Statistics range");

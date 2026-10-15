@@ -129,7 +129,10 @@ class D15dWiringTest {
         assertCalledFrom(stats, "headerTiles(throughput)", "DownloadsStatsHeader")
         assertCalledFrom(stats, "StatTileView(tile, Modifier.weight(1f))", "StatTiles")
         assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = description }", "StatTileView")
-        assertCalledFrom(stats, "graphGeometryToShow(series, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return", "ThroughputGraph")
+        // WP GRAPH-ZOOM: the graph draws the trimmed series, and its caption follows it.
+        assertCalledFrom(stats, "series?.let { it.copy(points = trimSeries(it.points)) } ?: return", "ThroughputGraph")
+        assertCalledFrom(stats, "graphGeometryToShow(shown, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return", "ThroughputGraph")
+        assertCalledFrom(stats, "ranges = STATS_RANGES,", "DownloadsStatsHeader")
         assertCalledFrom(stats, "contentDescription = label", "ThroughputGraph")
     }
 

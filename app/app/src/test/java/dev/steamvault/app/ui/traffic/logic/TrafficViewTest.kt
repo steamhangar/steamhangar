@@ -10,8 +10,10 @@ import dev.steamvault.app.net.model.SeriesPointOut
 import dev.steamvault.app.net.model.SummaryOut
 import dev.steamvault.app.net.model.ThroughputOut
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
@@ -264,6 +266,37 @@ class TrafficViewTest {
         )
         assertEquals("highest 40.0 MB/s", seriesHighestText(40 * mib))
         assertEquals("hour", bucketWord(3600))
+        assertEquals("minute", bucketWord(60))
+        assertEquals("5 minutes", bucketWord(300))
+        assertEquals(
+            "Average speed per minute in the last 6 hours. Highest: 0 MB/s.",
+            seriesLabel(all.copy(range = "6h", bucket_seconds = 60), 0.0),
+        )
+    }
+
+    @Test
+    fun `WP GRAPH-ZOOM -- trimSeries drops the empty lead-in but keeps one zero before the data`() {
+        val pts = listOf(0.0, 0.0, 0.0, 5.0, 0.0, 7.0, 0.0).mapIndexed { i, v -> point("t$i", v) }
+        assertEquals(listOf("t2", "t3", "t4", "t5", "t6"), trimSeries(pts).map { it.t })
+        // Data from the first point on, or nothing at all: unchanged.
+        assertEquals(listOf("t0", "t1"), trimSeries(listOf(point("t0", 1.0), point("t1", 0.0))).map { it.t })
+        assertEquals(listOf("t0", "t1"), trimSeries(listOf(point("t0", 0.0), point("t1", 0.0))).map { it.t })
+        assertEquals(emptyList<SeriesPointOut>(), trimSeries(emptyList()))
+    }
+
+    @Test
+    fun `WP GRAPH-ZOOM -- seriesStartText says how long ago a trimmed span starts`() {
+        val start = "2026-10-14T06:00:00Z"
+        val full = SeriesOut(
+            range = "6h",
+            bucket_seconds = 60,
+            range_start = start,
+            points = listOf(point(start, 1.0)),
+        )
+        assertEquals("6 h ago", seriesStartText(full, now))
+        assertEquals("1 h ago", seriesStartText(full.copy(range = "1h"), now))
+        val trimmed = full.copy(points = listOf(point("2026-10-14T10:00:00Z", 1.0)))
+        assertEquals("2 h ago", seriesStartText(trimmed, now))
     }
 
     // ---- per-job speed ----------------------------------------------------
@@ -319,5 +352,18 @@ class TrafficViewTest {
         assertEquals(listOf("24h", "7d", "30d", "all"), TRAFFIC_RANGES)
         assertEquals(listOf("24 h", "7 days", "30 days", "All"), TRAFFIC_RANGES.map { RANGE_LABELS.getValue(it) })
         assertEquals(false, isRange("1y"))
+    }
+
+    @Test
+    fun `WP GRAPH-ZOOM -- the statistics add 1 h and 6 h, the clients page keeps four ranges`() {
+        assertEquals(listOf("1h", "6h", "24h", "7d", "30d", "all"), STATS_RANGES)
+        assertEquals(listOf("1 h", "6 h", "24 h", "7 days", "30 days", "All"), STATS_RANGES.map { RANGE_LABELS.getValue(it) })
+        assertEquals("in the last hour", RANGE_PHRASES.getValue("1h"))
+        assertEquals("in the last 6 hours", RANGE_PHRASES.getValue("6h"))
+        assertEquals("6h", DEFAULT_STATS_RANGE)
+        assertTrue(isStatsRange("1h"))
+        assertFalse(isStatsRange("1y"))
+        assertFalse(isRange("1h"))
+        assertFalse(isRange("6h"))
     }
 }

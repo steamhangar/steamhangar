@@ -112,6 +112,35 @@ class TrafficApiTest {
     }
 
     @Test
+    fun `WP GRAPH-ZOOM -- the 1h and 6h ranges, the 1-minute tier and traffic_1m_since`() = runTest {
+        val feed1m = okFeed.dropLast(1) + ""","traffic_1m_since":"2026-10-14T06:30:00Z"}"""
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":$feed1m,"range":"6h","tier":"1m","bucket_seconds":60,"range_start":"2026-10-14T06:00:00Z",
+                "points":[{"t":"2026-10-14T06:30:00Z","bytes_served":6000,"hit_bytes":6000,"miss_bytes":0,"requests":1,
+                "bytes_per_second":100.0,"peak_bytes_per_second":100.0}]}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":$okFeed,"range":"1h","tier":"5m","bucket_seconds":300,"range_start":"2026-10-14T11:00:00Z",
+                "points":[]}""",
+            ),
+        )
+        val s = client.throughputSeries("6h")
+        assertEquals("/v1/throughput/series?range=6h", server.takeRequest().path)
+        assertEquals("1m", s.tier)
+        assertEquals(60, s.bucket_seconds)
+        assertEquals("2026-10-14T06:30:00Z", s.event_feed.traffic_1m_since)
+        // The server falls back to the 5m tier until the 1m tier covers the window.
+        val fallback = client.throughputSeries("1h")
+        assertEquals("/v1/throughput/series?range=1h", server.takeRequest().path)
+        assertEquals(300, fallback.bucket_seconds)
+        // An older server (or an empty 1m tier) sends no stamp: null.
+        assertNull(fallback.event_feed.traffic_1m_since)
+    }
+
+    @Test
     fun `throughput -- the feed-disabled shape decodes and yields no tiles`() = runTest {
         server.enqueue(
             MockResponse().setBody(

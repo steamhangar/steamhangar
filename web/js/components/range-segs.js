@@ -12,18 +12,20 @@
 import { RANGES, RANGE_LABELS } from "../lib/traffic-view.js";
 
 /**
- * @param {{label: string, value: string, onChange: (range: string) => void, role?: string}} options
- *   `label` names the group for assistive tech ("Statistics range").
+ * @param {{label: string, value: string, onChange: (range: string) => void, role?: string, ranges?: readonly string[]}} options
+ *   `label` names the group for assistive tech ("Statistics range");
+ *   `ranges` defaults to `RANGES` (the Downloads statistics pass
+ *   `STATS_RANGES`, WP GRAPH-ZOOM).
  * @returns {{el: HTMLElement, set: (range: string) => void}}
  */
-export function createRangeSegs({ label, value, onChange, role }) {
+export function createRangeSegs({ label, value, onChange, role, ranges = RANGES }) {
   const group = document.createElement("div");
   group.className = "segs rangesegs";
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", label);
   if (role) group.dataset.role = role;
   let current = value;
-  const buttons = RANGES.map((range) => {
+  const buttons = ranges.map((range) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = RANGE_LABELS[range];

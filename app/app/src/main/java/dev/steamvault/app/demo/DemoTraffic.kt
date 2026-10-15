@@ -67,9 +67,14 @@ internal const val DEMO_RUNNER_ADDRESS = "172.18.0.1"
 private const val MIB = 1024.0 * 1024.0
 private const val GIB = 1024.0 * MIB
 
-private data class Tier(val tier: String, val bucket: Int, val count: Int)
+/** [loadingMinutes]: for the 1-minute tier, how long ago the demo download
+ * began (older minutes are empty, so the trimmed graph axis is visible). */
+private data class Tier(val tier: String, val bucket: Int, val count: Int, val loadingMinutes: Int = 0)
 
 private val TIERS: Map<String, Tier> = mapOf(
+    // WP GRAPH-ZOOM: "1h" / "6h" read the 1-minute tier.
+    "1h" to Tier("1m", 60, 60, loadingMinutes = 40),
+    "6h" to Tier("1m", 60, 360, loadingMinutes = 150),
     "24h" to Tier("5m", 300, 288),
     "7d" to Tier("1h", 3600, 168),
     "30d" to Tier("1h", 3600, 720),
@@ -103,6 +108,14 @@ private fun rateAt(ms: Long, bucketSeconds: Int): Double {
     return (evening * dayFactor * 46 * MIB).roundToLong().toDouble()
 }
 
+/** Deterministic bytes/s of the 1-minute bucket [age] minutes before the
+ * newest one: nothing before the download began, a wavy rate since, and a
+ * short pause now and then (web `rateMinute`). */
+private fun rateMinute(age: Int, loadingMinutes: Int): Double {
+    if (age > loadingMinutes || age % 11 == 5) return 0.0
+    return ((0.55 + 0.45 * abs(sin(age * 0.7))) * 38 * MIB).roundToLong().toDouble()
+}
+
 private fun feed(nowMs: Long) = EventFeedOut(
     enabled = true,
     state = "ok",
@@ -110,6 +123,8 @@ private fun feed(nowMs: Long) = EventFeedOut(
     last_sweep_at = iso(nowMs - 60_000L),
     sweep_interval_minutes = 5,
     traffic_since = iso(floorTo(nowMs - 45 * 86_400_000L, 86400)),
+    // The 1-minute tier started recording a day and a half ago in the demo.
+    traffic_1m_since = iso(nowMs - 36 * 3_600_000L),
 )
 
 /** `GET /v1/throughput/series` (demo). */
@@ -118,7 +133,7 @@ fun demoSeries(range: String, nowMs: Long): SeriesOut {
     val last = floorTo(nowMs, t.bucket)
     val points = (t.count - 1 downTo 0).map { i ->
         val start = last - i * t.bucket * 1000L
-        val bps = rateAt(start, t.bucket)
+        val bps = if (t.tier == "1m") rateMinute(i, t.loadingMinutes) else rateAt(start, t.bucket)
         val served = (bps * t.bucket).roundToLong()
         val runner = (served * 0.1).roundToLong()
         val clients = served - runner
@@ -131,7 +146,7 @@ fun demoSeries(range: String, nowMs: Long): SeriesOut {
             requests = (clients / (1.4 * MIB)).roundToLong(),
             runner_bytes = runner,
             bytes_per_second = bps,
-            peak_bytes_per_second = if (t.bucket == 300) bps else (bps * 1.35).roundToLong().toDouble(),
+            peak_bytes_per_second = if (t.bucket <= 300) bps else (bps * 1.35).roundToLong().toDouble(),
         )
     }
     return SeriesOut(

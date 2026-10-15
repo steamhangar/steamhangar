@@ -8,6 +8,7 @@ and the Downloads header need (roadmap D15, D13 SPEED-1 folded in):
 ========  ==================  =====================================
 tier      bucket              kept
 ========  ==================  =====================================
+``1m``    1 minute            24 hours (GRAPH-ZOOM, schema v29)
 ``5m``    5 minutes           48 hours
 ``1h``    1 hour              30 days
 ``1d``    1 day (UTC)         forever
@@ -91,27 +92,40 @@ from vault_api.runner_identity import RunnerWindow
 # Tiers
 # --------------------------------------------------------------------------
 
+TIER_1M = "1m"
 TIER_5M = "5m"
 TIER_1H = "1h"
 TIER_1D = "1d"
-TIERS = (TIER_5M, TIER_1H, TIER_1D)
+TIERS = (TIER_1M, TIER_5M, TIER_1H, TIER_1D)
 
-TIER_SECONDS = {TIER_5M: 300, TIER_1H: 3600, TIER_1D: 86400}
+TIER_SECONDS = {TIER_1M: 60, TIER_5M: 300, TIER_1H: 3600, TIER_1D: 86400}
+
+#: How long 1-minute rows are kept (GRAPH-ZOOM). Just enough for the 1 h and
+#: 6 h graph ranges; the 5-minute tier answers everything longer.
+RETENTION_1M = timedelta(hours=24)
 
 #: Retention per tier (user decision 2026-10-13). ``None`` = forever.
 TIER_RETENTION: dict[str, timedelta | None] = {
+    TIER_1M: RETENTION_1M,
     TIER_5M: timedelta(hours=48),
     TIER_1H: timedelta(days=30),
     TIER_1D: None,
 }
 
 #: The time filters the UI offers, and which tier answers each one.
+RANGE_1H = "1h"
+RANGE_6H = "6h"
 RANGE_24H = "24h"
 RANGE_7D = "7d"
 RANGE_30D = "30d"
 RANGE_ALL = "all"
-RANGES = (RANGE_24H, RANGE_7D, RANGE_30D, RANGE_ALL)
+RANGES = (RANGE_1H, RANGE_6H, RANGE_24H, RANGE_7D, RANGE_30D, RANGE_ALL)
+#: Ranges answered by the 1-minute tier. That tier has server and per-address
+#: rows but no per-depot rows, so the clients overview does not offer them.
+SHORT_RANGES = (RANGE_1H, RANGE_6H)
 _RANGE_TIER = {
+    RANGE_1H: (TIER_1M, 60),  # 1 h of 1-minute buckets
+    RANGE_6H: (TIER_1M, 360),
     RANGE_24H: (TIER_5M, 288),  # 24 h of 5-minute buckets
     RANGE_7D: (TIER_1H, 168),
     RANGE_30D: (TIER_1H, 720),
@@ -126,6 +140,8 @@ STALE_AFTER_INTERVALS = 3
 def floor_bucket(moment: datetime, tier: str) -> datetime:
     """Start of ``moment``'s bucket in ``tier`` (UTC)."""
     moment = moment.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    if tier == TIER_1M:
+        return moment
     if tier == TIER_5M:
         return moment.replace(minute=moment.minute - moment.minute % 5)
     if tier == TIER_1H:
@@ -137,6 +153,12 @@ def floor_bucket(moment: datetime, tier: str) -> datetime:
 
 def bucket_iso(moment: datetime, tier: str) -> str:
     return to_utc_iso(floor_bucket(moment, tier))
+
+
+def peak_unit_seconds(tier: str) -> int:
+    """Length of the bucket ``peak_bucket_bytes`` is a total of: the 5-minute
+    bucket for every tier except ``1m``, whose rows are their own peak."""
+    return TIER_SECONDS[TIER_1M] if tier == TIER_1M else TIER_SECONDS[TIER_5M]
 
 
 def active_window_minutes(sweep_interval_minutes: int) -> int:
@@ -228,11 +250,33 @@ class DepotCell:
     last_seen: str = ""
 
 
+def _count(
+    cell: TrafficCell, seen_at: str, served: bool, cache_status: str, bytes_sent: int
+) -> None:
+    cell.requests += 1
+    if seen_at > cell.last_seen:
+        cell.last_seen = seen_at
+    if not served:
+        cell.errors += 1
+        return
+    cell.bytes_served += bytes_sent
+    if cache_status == "HIT":
+        cell.hits += 1
+        cell.hit_bytes += bytes_sent
+    elif cache_status == "MISS":
+        cell.misses += 1
+        cell.miss_bytes += bytes_sent
+    else:
+        cell.bypasses += 1
+
+
 @dataclass
 class TrafficBatch:
     """Everything one sweep batch adds to the tiers."""
 
     cells: dict[tuple[str, str], TrafficCell] = field(default_factory=dict)
+    #: The same lines per (address, 1-minute bucket) -- the GRAPH-ZOOM tier.
+    cells_1m: dict[tuple[str, str], TrafficCell] = field(default_factory=dict)
     depot_cells: dict[tuple[str, int, str], DepotCell] = field(default_factory=dict)
 
     def add(
@@ -263,26 +307,14 @@ class TrafficBatch:
             seen_at = now_iso
         bucket = bucket_iso(moment, TIER_5M)
 
-        cell = self.cells.get((addr, bucket))
-        if cell is None:
-            cell = self.cells[(addr, bucket)] = TrafficCell()
-        cell.requests += 1
-        if seen_at > cell.last_seen:
-            cell.last_seen = seen_at
-        if not served:
-            cell.errors += 1
-            return
-        cell.bytes_served += bytes_sent
-        if cache_status == "HIT":
-            cell.hits += 1
-            cell.hit_bytes += bytes_sent
-        elif cache_status == "MISS":
-            cell.misses += 1
-            cell.miss_bytes += bytes_sent
-        else:
-            cell.bypasses += 1
+        minute = bucket_iso(moment, TIER_1M)
+        for cells, key in ((self.cells, bucket), (self.cells_1m, minute)):
+            cell = cells.get((addr, key))
+            if cell is None:
+                cell = cells[(addr, key)] = TrafficCell()
+            _count(cell, seen_at, served, cache_status, bytes_sent)
 
-        if depotid is None:
+        if not served or depotid is None:
             return
         depot = self.depot_cells.get((addr, depotid, bucket))
         if depot is None:
@@ -328,11 +360,13 @@ ON CONFLICT(tier, client_addr, depotid, bucket_at) DO UPDATE SET
     last_seen    = MAX(client_depot_traffic.last_seen, excluded.last_seen)
 """
 
+#: The tier's own row is its peak and its activity: used for ``5m`` (peak =
+#: the bucket's total) and ``1m`` (GRAPH-ZOOM), which share these semantics.
 _SERVER_UPSERT_5M = """
 INSERT INTO server_traffic (
     tier, bucket_at, requests, hits, misses, bypasses, errors, bytes_served,
     hit_bytes, miss_bytes, peak_bucket_bytes, active_buckets
-) VALUES ('5m', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(tier, bucket_at) DO UPDATE SET
     requests     = server_traffic.requests + excluded.requests,
     hits         = server_traffic.hits + excluded.hits,
@@ -414,6 +448,8 @@ def write_batch(
         total.hit_bytes += cell.hit_bytes
         total.miss_bytes += cell.miss_bytes
 
+    _write_1m(conn, batch, now)
+
     for (addr, depotid, bucket), depot in batch.depot_cells.items():
         values = (depot.requests, depot.bytes_served, depot.hit_bytes, depot.last_seen)
         conn.execute(_DEPOT_UPSERT, (TIER_5M, bucket, addr, depotid, *values))
@@ -443,7 +479,7 @@ def write_batch(
             total.miss_bytes,
         )
         conn.execute(
-            _SERVER_UPSERT_5M, (bucket, *sums, after, 1 if after > 0 else 0)
+            _SERVER_UPSERT_5M, (TIER_5M, bucket, *sums, after, 1 if after > 0 else 0)
         )
         newly_active = 1 if before == 0 and after > 0 else 0
         expired = cutoff_5m is not None and bucket < cutoff_5m
@@ -456,6 +492,50 @@ def write_batch(
                 ).fetchone()
                 active = 0 if exists is not None else 1
             conn.execute(_SERVER_UPSERT_COARSE, (tier, coarse, *sums, after, active))
+
+
+def _write_1m(conn: sqlite3.Connection, batch: TrafficBatch, now: datetime | None) -> None:
+    """GRAPH-ZOOM: the batch into the 1-minute tier (server and per-address
+    rows; no depots). Minutes already past the tier's retention are skipped --
+    ``prune`` would only delete them again, and a backlog skips pruning."""
+    cutoff = (
+        to_utc_iso(floor_bucket(now, TIER_1M) - RETENTION_1M) if now is not None else None
+    )
+    server: dict[str, TrafficCell] = {}
+    for (addr, bucket), cell in batch.cells_1m.items():
+        if cutoff is not None and bucket < cutoff:
+            continue
+        conn.execute(
+            _CLIENT_UPSERT,
+            (
+                TIER_1M, bucket, addr, cell.requests, cell.hits, cell.misses,
+                cell.bypasses, cell.errors, cell.bytes_served, cell.hit_bytes,
+                cell.miss_bytes, cell.last_seen,
+            ),
+        )
+        total = server.setdefault(bucket, TrafficCell())
+        total.requests += cell.requests
+        total.hits += cell.hits
+        total.misses += cell.misses
+        total.bypasses += cell.bypasses
+        total.errors += cell.errors
+        total.bytes_served += cell.bytes_served
+        total.hit_bytes += cell.hit_bytes
+        total.miss_bytes += cell.miss_bytes
+    for bucket, total in sorted(server.items()):
+        row = conn.execute(
+            "SELECT bytes_served FROM server_traffic WHERE tier = ? AND bucket_at = ?",
+            (TIER_1M, bucket),
+        ).fetchone()
+        after = (int(row["bytes_served"]) if row is not None else 0) + total.bytes_served
+        conn.execute(
+            _SERVER_UPSERT_5M,
+            (
+                TIER_1M, bucket, total.requests, total.hits, total.misses,
+                total.bypasses, total.errors, total.bytes_served, total.hit_bytes,
+                total.miss_bytes, after, 1 if after > 0 else 0,
+            ),
+        )
 
 
 def prune(conn: sqlite3.Connection, now: datetime) -> int:
@@ -497,11 +577,36 @@ class RangeSpec:
     end: str
 
 
+#: 1h / 6h fall back to the 5-minute tier while the 1-minute tier does not
+#: yet cover the whole window (after the v29 upgrade it starts empty).
+_SHORT_FALLBACK_BUCKETS = {RANGE_1H: 12, RANGE_6H: 72}
+
+
+def _one_minute_covers(conn: sqlite3.Connection, window_start: str) -> bool:
+    """Whether the 1-minute tier has been filling since before ``window_start``."""
+    row = conn.execute(
+        "SELECT traffic_1m_since AS since FROM event_sweep_state WHERE id = 1"
+    ).fetchone()
+    since = row["since"] if row is not None else None
+    return since is not None and since <= window_start
+
+
 def range_spec(conn: sqlite3.Connection, name: str, now: datetime) -> RangeSpec:
-    """Map ``24h``/``7d``/``30d``/``all`` onto a tier and a start bucket."""
+    """Map a range name onto a tier and a start bucket.
+
+    ``1h``/``6h`` use the 1-minute tier once it covers the whole window and
+    the 5-minute tier before that, so right after the upgrade the graph
+    shows real (coarser) data instead of an empty tier.
+    """
     if name not in _RANGE_TIER:
         raise ValueError(f"unknown range {name!r}")
     tier, buckets = _RANGE_TIER[name]
+    if name in _SHORT_FALLBACK_BUCKETS:
+        first = to_utc_iso(
+            floor_bucket(now, TIER_1M) - timedelta(seconds=60 * (buckets - 1))
+        )
+        if not _one_minute_covers(conn, first):
+            tier, buckets = TIER_5M, _SHORT_FALLBACK_BUCKETS[name]
     seconds = TIER_SECONDS[tier]
     end = floor_bucket(now, tier)
     if buckets is not None:

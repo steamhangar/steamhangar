@@ -36,11 +36,30 @@ import java.util.Locale
 /** The four ranges every traffic endpoint and the jobs filter accept. */
 val TRAFFIC_RANGES: List<String> = listOf("24h", "7d", "30d", "all")
 
-/** Segmented-control labels, in [TRAFFIC_RANGES] order. */
-val RANGE_LABELS: Map<String, String> = mapOf("24h" to "24 h", "7d" to "7 days", "30d" to "30 days", "all" to "All")
+/**
+ * WP GRAPH-ZOOM: the Downloads statistics (header tiles and graph) also
+ * offer 1 h and 6 h, answered by the server's 1-minute tier. The Clients
+ * page and the History filter keep [TRAFFIC_RANGES].
+ */
+val STATS_RANGES: List<String> = listOf("1h", "6h", "24h", "7d", "30d", "all")
+
+/** The Downloads statistics range when none was chosen yet. */
+const val DEFAULT_STATS_RANGE = "6h"
+
+/** Segmented-control labels, for every range of [STATS_RANGES]. */
+val RANGE_LABELS: Map<String, String> = mapOf(
+    "1h" to "1 h",
+    "6h" to "6 h",
+    "24h" to "24 h",
+    "7d" to "7 days",
+    "30d" to "30 days",
+    "all" to "All",
+)
 
 /** Phrases for running text ("1.2 GB loaded in the last 7 days"). */
 val RANGE_PHRASES: Map<String, String> = mapOf(
+    "1h" to "in the last hour",
+    "6h" to "in the last 6 hours",
     "24h" to "in the last 24 hours",
     "7d" to "in the last 7 days",
     "30d" to "in the last 30 days",
@@ -48,6 +67,8 @@ val RANGE_PHRASES: Map<String, String> = mapOf(
 )
 
 fun isRange(value: String?): Boolean = value in TRAFFIC_RANGES
+
+fun isStatsRange(value: String?): Boolean = value in STATS_RANGES
 
 /** The text a `null` value shows. */
 const val DASH = "—"
@@ -257,6 +278,7 @@ fun runnerDetail(summary: SummaryOut?): String? {
 
 /** The bucket a series point covers, for the graph's label. */
 fun bucketWord(bucketSeconds: Int): String = when (bucketSeconds) {
+    60 -> "minute"
     300 -> "5 minutes"
     3600 -> "hour"
     86400 -> "day"
@@ -288,13 +310,39 @@ fun seriesLabel(series: SeriesOut, maxBytesPerSecond: Double): String {
     return "Average speed per $per $phrase. Highest: ${formatSpeed(maxBytesPerSecond) ?: "0 MB/s"}."
 }
 
-/** Left-edge caption for the graph: how far back it starts. "all" names the
- * first day instead of a duration. */
-fun seriesStartText(series: SeriesOut): String = when (series.range) {
-    "24h" -> "24 h ago"
-    "7d" -> "7 days ago"
-    "30d" -> "30 days ago"
-    else -> series.points.firstOrNull()?.t?.takeIf { it.length >= 10 }?.let { "since ${it.substring(0, 10)}" } ?: ""
+/**
+ * WP GRAPH-ZOOM: the series without its empty lead-in (web `trimSeries`). The
+ * graph shows only the span that has data, starting one bucket before the
+ * first non-zero point so the line rises from the floor. Trailing zeros stay.
+ * An all-zero series is returned unchanged.
+ */
+fun trimSeries(points: List<SeriesPointOut>): List<SeriesPointOut> {
+    val first = points.indexOfFirst { finiteNonNegative(it.bytes_per_second) && it.bytes_per_second > 0.0 }
+    return if (first <= 0) points.toList() else points.subList(first - 1, points.size).toList()
+}
+
+/**
+ * Left-edge caption for the graph: how far back the SHOWN span starts. A span
+ * that starts at the range's own start keeps the plain wording ("24 h ago"); a
+ * trimmed one says how long ago its first point is. "all" names the first day
+ * instead of a duration.
+ */
+fun seriesStartText(series: SeriesOut, nowMs: Long = System.currentTimeMillis()): String {
+    val first = series.points.firstOrNull()?.t
+    if (series.range == "all") {
+        return first?.takeIf { it.length >= 10 }?.let { "since ${it.substring(0, 10)}" } ?: ""
+    }
+    val fixed = when (series.range) {
+        "1h" -> "1 h ago"
+        "6h" -> "6 h ago"
+        "24h" -> "24 h ago"
+        "7d" -> "7 days ago"
+        "30d" -> "30 days ago"
+        else -> ""
+    }
+    val start = series.range_start
+    if (first != null && start != null && first != start) return formatAgo(first, nowMs) ?: fixed
+    return fixed
 }
 
 /** The graph's middle caption ("highest 40.0 MB/s"). */
