@@ -713,6 +713,9 @@ body.selecting .grid.list .card{ --lc-lead:[cover] 30px [pick] 21px; }
 /* WP API-FIX-4: a Steam tool package (228980): shown, but muted. It is
    never downloaded on its own; its depots arrive with the games. */
 .tx-tool{ color:var(--dim-2); }
+/* WP NOT-OWNED-1: not available to prefill (not owned): muted, not red. */
+.tx-not_owned{ color:var(--dim-2); }
+.card .pill.muted{ opacity:.65; }
 .card.tool .cap{ opacity:.55; filter:grayscale(.6); }
 
 /* selection */

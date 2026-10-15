@@ -66,8 +66,8 @@ import { KIND, liveRunKind } from "./game-status.js";
  * to the same value by api/README.md's "ACTIVE_STATUSES" table, not by
  * each other. */
 const PENDING_STATUSES = new Set(["queued", "running", "paused"]);
-const HISTORY_STATUSES = new Set(["done", "error", "cancelled"]);
-const KNOWN_STATUSES = new Set(["queued", "running", "paused", "done", "error", "cancelled"]);
+const HISTORY_STATUSES = new Set(["done", "error", "cancelled", "not_owned"]);
+const KNOWN_STATUSES = new Set(["queued", "running", "paused", "done", "error", "cancelled", "not_owned"]);
 
 /**
  * @param {object[] | null | undefined} jobs `GET /v1/jobs` snapshot.
@@ -122,6 +122,8 @@ export function jobIconKind(job) {
       return "error";
     case "cancelled":
       return "cancelled";
+    case "not_owned":
+      return "notinuse"; // WP NOT-OWNED-1: neutral, not a failure
     default:
       return "none";
   }
@@ -141,6 +143,7 @@ const PREFILL_WORD = Object.freeze({
   done: "Done",
   error: "Failed",
   cancelled: "Cancelled",
+  not_owned: "Not available to prefill (not owned)",
 });
 const GC_WORD = Object.freeze({
   queued: "Garbage collection queued",

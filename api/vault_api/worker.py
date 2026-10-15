@@ -544,11 +544,12 @@ class PrefillWorker:
                     # Updated==0 AND Up To Date==0 means SteamPrefill never
                     # actually considered this app — reporting that as a
                     # successful prefill is precisely the trap above. The job
-                    # ends 'error'; apps.status follows it to 'error' too
+                    # ends 'not_owned' (WP NOT-OWNED-1: a distinct outcome,
+                    # not a failure, no Retry); apps.status follows it too
                     # (deliberately NOT 'done' — this run accomplished
                     # nothing for the app; NOT left at 'running' or reset to
                     # 'idle' either, since a run did execute, it just found
-                    # nothing to do, and 'error' is the status this file
+                    # nothing to do, and a terminal status is the one this file
                     # already uses elsewhere for "a run happened and produced
                     # no usable outcome"). Neither last_prefill_at nor
                     # last_manifest_check are touched — nothing was prefilled
@@ -565,16 +566,16 @@ class PrefillWorker:
                         "- is it owned by the logged-in account? Depot "
                         "mapping and manifest state were NOT touched."
                     )
-                    jobs.set_app_status(conn, appid, jobs.STATUS_ERROR)
+                    jobs.set_app_status(conn, appid, jobs.STATUS_NOT_OWNED)
                     webhooks.finish_job_and_notify(
                         conn, self._webhook_notifier,
-                        job_id, jobs.STATUS_ERROR, "\n".join(log_parts),
+                        job_id, jobs.STATUS_NOT_OWNED, "\n".join(log_parts),
                         updated=summary.updated,
                         up_to_date=summary.up_to_date,
                         summary_parse_ok=summary.parse_ok,
                     )
                     logger.warning(
-                        "Prefill job %s for appid %s ended 'error': "
+                        "Prefill job %s for appid %s ended 'not_owned': "
                         "SteamPrefill reported Updated=0 and Up To Date=0 "
                         "(app not considered).",
                         job_id, appid,

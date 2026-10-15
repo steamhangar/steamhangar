@@ -80,10 +80,10 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterator, Mapping
 
-from vault_api import tool_apps
+from vault_api import config, tool_apps
 
 #: The job type WP 1.4 creates. ``jobs.type`` exists because plan §6 also
 #: lists a GC job (``POST /v1/cache/{appid}/gc``) sharing this queue.
@@ -111,6 +111,16 @@ STATUS_RUNNING = "running"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
 
+#: WP NOT-OWNED-1. Terminal, and deliberately NOT ``error``: SteamPrefill ran
+#: and did not consider the app (Updated=0 and Up To Date=0), i.e. the vault's
+#: Steam account has no usable license for it (a tool app such as SteamVR is
+#: the usual case). Nothing broke, so it is neither a failure nor retryable.
+#: Used for ``jobs.status`` and ``apps.status``; both columns are free text,
+#: so no schema change. Automatic callers skip apps in this state
+#: (``not_owned_appids``); an explicit ``POST /v1/prefill`` still queues one,
+#: and the run's own outcome then replaces the state.
+STATUS_NOT_OWNED = "not_owned"
+
 #: WP 3.12. Non-terminal: the job's subprocess was terminated on operator
 #: request and the job is parked until ``POST /v1/jobs/{id}/resume``. Job
 #: statuses only — never an ``apps.status`` value.
@@ -127,7 +137,7 @@ ACTIVE_STATUSES = (STATUS_QUEUED, STATUS_RUNNING, STATUS_PAUSED)
 
 #: A job in one of these states has an outcome and will never run again.
 #: Cancelling one is a 409 — an outcome is history, not something to rewrite.
-TERMINAL_STATUSES = (STATUS_DONE, STATUS_ERROR, STATUS_CANCELLED)
+TERMINAL_STATUSES = (STATUS_DONE, STATUS_ERROR, STATUS_CANCELLED, STATUS_NOT_OWNED)
 
 #: A job's place in history: when it finished, else started, else was
 #: created. The ONE definition shared by the ``GET /v1/jobs`` history filter
@@ -281,6 +291,44 @@ def ensure_app_row(conn: sqlite3.Connection, appid: int) -> None:
     )
 
 
+def not_owned_appids(
+    conn: sqlite3.Connection, now: datetime | None = None
+) -> set[int]:
+    """Apps whose last prefill ended ``not_owned`` (``apps.status``).
+
+    The scheduler, the miss trigger, ``POST /v1/prefill/cached`` and the
+    update check leave these out: SteamPrefill cannot prefill them, so a job
+    would only repeat the same outcome. The state clears when an explicit
+    ``POST /v1/prefill`` re-queues the app (``enqueue_prefill``), a later run
+    ends differently, or the cache of the app is deleted. vault-api keeps no
+    owned-games list of its own (the relay is a pass-through), so this is the
+    only server-side signal.
+
+    The state is not permanent for automatic callers: once the app's latest
+    ``not_owned`` prefill job finished more than ``NOT_OWNED_RECHECK_DAYS``
+    ago, the app is no longer returned, so the next sweep tries it again (the
+    user may have bought it since). An app with no such job row (no timestamp
+    to age) stays excluded.
+    """
+    cutoff = ((now or datetime.now(timezone.utc)) - timedelta(
+        days=config.NOT_OWNED_RECHECK_DAYS
+    )).strftime(TIMESTAMP_FORMAT)
+    rows = conn.execute(
+        """
+        SELECT a.appid,
+               (SELECT MAX(j.finished_at) FROM jobs j
+                 WHERE j.appid = a.appid AND j.type = ? AND j.status = ?)
+        FROM apps a WHERE a.status = ?
+        """,
+        (JOB_TYPE_PREFILL, STATUS_NOT_OWNED, STATUS_NOT_OWNED),
+    ).fetchall()
+    return {
+        int(appid)
+        for appid, finished in rows
+        if finished is None or finished >= cutoff
+    }
+
+
 def set_app_status(
     conn: sqlite3.Connection,
     appid: int,
@@ -423,6 +471,12 @@ def enqueue_prefill(conn: sqlite3.Connection, appid: int) -> tuple[dict[str, obj
         raise tool_apps.ToolAppNotPrefillable(appid)
     with immediate_transaction(conn):
         ensure_app_row(conn, appid)
+        # An explicit request is the user's "check again": it lifts a sticky
+        # not_owned state (the worker sets the real outcome when it runs).
+        conn.execute(
+            "UPDATE apps SET status = 'idle' WHERE appid = ? AND status = ?",
+            (appid, STATUS_NOT_OWNED),
+        )
 
         existing = conn.execute(
             f"""

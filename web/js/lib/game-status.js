@@ -132,11 +132,18 @@ export const KIND = Object.freeze({
   // WP API-FIX-4: a Steam tool package (see module header). A DISPLAY kind
   // only, not a status-icon kind: `statusIconKind` maps it to "notinuse".
   TOOL: "tool",
+  // WP NOT-OWNED-1: SteamPrefill did not consider the app (the account has
+  // no usable license). Not a failure, no retry; drawn like TOOL.
+  NOT_OWNED: "not_owned",
 });
 
 /** The status word a tool app's card and detail header show instead of a
  * STATUS_LABEL word (WP API-FIX-4). */
 export const TOOL_APP_STATE_WORD = "Steam tool package";
+
+/** The status word of an app whose last prefill ended `not_owned`
+ * (WP NOT-OWNED-1). */
+export const NOT_OWNED_STATE_WORD = "Not available to prefill (not owned)";
 
 /** The neutral note a tool app's detail sheet shows (WP API-FIX-4). */
 export const TOOL_APP_NOTE = "Steam tool package — cached together with the games that use it.";
@@ -151,7 +158,7 @@ export function isToolApp(game) {
  * draws a display kind: KIND.TOOL uses the neutral "notinuse" dash, every
  * other kind is its own icon kind. */
 export function statusIconKind(kind) {
-  return kind === KIND.TOOL ? "notinuse" : kind;
+  return kind === KIND.TOOL || kind === KIND.NOT_OWNED ? "notinuse" : kind;
 }
 
 /**
@@ -163,6 +170,7 @@ export function statusIconKind(kind) {
  */
 export function statusWordFor(kind, labels) {
   if (kind === KIND.TOOL) return TOOL_APP_STATE_WORD;
+  if (kind === KIND.NOT_OWNED) return NOT_OWNED_STATE_WORD;
   return labels[kind] || labels.none;
 }
 
@@ -411,6 +419,8 @@ export function dispKind(game, liveJob) {
   // WP API-FIX-4: before the error check, so old failed jobs for a tool app
   // never make its card red.
   if (isToolApp(game)) return KIND.TOOL;
+  // WP NOT-OWNED-1: a distinct outcome, never red and never a Retry.
+  if (game.status === "not_owned") return KIND.NOT_OWNED;
   if (game.status === "error") return KIND.ERROR;
   return hasVisibleCacheContent(game) ? KIND.CACHED : KIND.NONE;
 }
@@ -454,6 +464,9 @@ export function statusAction(game, liveJob, selecting) {
   const kind = dispKind(game, undefined);
   if (kind === KIND.NONE) return { type: "download", title: "Download to cache" };
   if (kind === KIND.ERROR) return { type: "download", title: "Retry download" };
+  // WP NOT-OWNED-1: an explicit "check again" (POST /v1/prefill clears the
+  // sticky state server-side) — muted, and deliberately not a Retry.
+  if (kind === KIND.NOT_OWNED) return { type: "download", title: "Check again", muted: true };
   return null; // cached — never a silent re-download (mockup round 5 rule)
 }
 

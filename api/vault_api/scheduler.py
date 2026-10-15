@@ -348,6 +348,10 @@ class TargetSet:
     #: ``()`` when none was named. Not in ``appids`` or
     #: ``cached_only_appids``.
     skipped_tool_appids: tuple[int, ...] = ()
+    #: WP NOT-OWNED-1. Apps a source named whose last prefill ended
+    #: ``not_owned`` (``jobs.not_owned_appids``): dropped, SteamPrefill cannot
+    #: prefill them. Sorted; ``()`` when none. Not in ``appids``.
+    skipped_not_owned_appids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -539,7 +543,7 @@ def update_check_appids(conn: sqlite3.Connection, cache_root: str) -> list[int]:
     tool packages (never prefilled, so never "updated" on their own). Not the
     whole library, not the installed-on-clients set."""
     ordinary, _tools = tool_apps.split_tool_apps(cached_appids(conn, cache_root))
-    return sorted(ordinary)
+    return sorted(ordinary - jobs.not_owned_appids(conn))
 
 
 def compute_targets(
@@ -622,6 +626,10 @@ def compute_targets(
     reported installed on every Windows PC) is never a target: SteamPrefill
     cannot prefill it, and its depots are cached together with the games
     that use them. Dropped ones are listed in ``skipped_tool_appids``.
+
+    **Not-owned apps are dropped too (WP NOT-OWNED-1).** An app whose last
+    prefill ended ``not_owned`` (``jobs.not_owned_appids``) is never a
+    target, from either source; listed in ``skipped_not_owned_appids``.
     """
     fresh, excluded = fresh_client_snapshots(conn, now, stale_after_days)
 
@@ -631,6 +639,9 @@ def compute_targets(
         included.append(snapshot.client_id)
         reported.update(snapshot.appids)
     appids, skipped_tools = tool_apps.split_tool_apps(reported)
+    not_owned = jobs.not_owned_appids(conn)
+    skipped_not_owned = set(appids & not_owned)
+    appids -= not_owned
 
     cached_only: tuple[int, ...] = ()
     if include_cached:
@@ -655,6 +666,8 @@ def compute_targets(
         cached, cached_tools = tool_apps.split_tool_apps(
             cached_appids(conn, cache_root, depot_bytes)
         )
+        skipped_not_owned |= cached & not_owned
+        cached -= not_owned
         skipped_tools = tuple(sorted(set(skipped_tools) | set(cached_tools)))
         cached_only = tuple(sorted(cached - appids))
         appids.update(cached)
@@ -665,6 +678,7 @@ def compute_targets(
         excluded_clients=excluded,
         cached_only_appids=cached_only,
         skipped_tool_appids=skipped_tools,
+        skipped_not_owned_appids=tuple(sorted(skipped_not_owned)),
     )
 
 
@@ -803,7 +817,11 @@ def maybe_sweep(
         completing = ()
 
     target_ids = set(target_set.appids)
-    to_enqueue = list(target_set.appids) + [a for a in completing if a not in target_ids]
+    # WP NOT-OWNED-1: completing never re-queues an app SteamPrefill skips.
+    not_owned_now = jobs.not_owned_appids(conn)
+    to_enqueue = list(target_set.appids) + [
+        a for a in completing if a not in target_ids and a not in not_owned_now
+    ]
     enqueued: list[int] = []
     already_active: list[int] = []
     aborted = False
@@ -822,7 +840,7 @@ def maybe_sweep(
 
     logger.info(
         "scheduler: sweep at %s enqueued %d new job(s), %d app(s) already "
-        "queued/running, from %d target app(s) across %d client(s)%s%s%s%s",
+        "queued/running, from %d target app(s) across %d client(s)%s%s%s%s%s",
         swept_at, len(enqueued), len(already_active), len(target_set.appids),
         len(target_set.included_clients),
         (
@@ -857,6 +875,14 @@ def maybe_sweep(
             + ", ".join(str(a) for a in target_set.skipped_tool_appids)
             + ")"
             if target_set.skipped_tool_appids
+            else ""
+        ),
+        (
+            # WP NOT-OWNED-1: SteamPrefill did not consider these apps.
+            " (not owned, skipped until a run ends differently: "
+            + ", ".join(str(a) for a in target_set.skipped_not_owned_appids)
+            + ")"
+            if target_set.skipped_not_owned_appids
             else ""
         ),
         " [ABORTED by shutdown]" if aborted else "",

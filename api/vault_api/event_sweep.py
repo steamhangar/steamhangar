@@ -1211,7 +1211,9 @@ def run_miss_trigger(
     Before the guards, a Steam tool app (``tool_apps.TOOL_APPS``, WP
     API-FIX-4) is skipped outright and reported in ``skipped_tool``: it is
     never prefilled, so it must not use up the per-sweep cap either. A miss
-    on its depot is a miss on a depot that the games using it fill.
+    on its depot is a miss on a depot that the games using it fill. An app
+    whose last prefill ended ``not_owned`` (WP NOT-OWNED-1) is skipped the
+    same way.
 
     In order, cheapest and most decisive first:
 
@@ -1244,11 +1246,18 @@ def run_miss_trigger(
     skipped_active: list[int] = []
     skipped_current: list[int] = []
     skipped_tool: list[int] = []
+    skipped_not_owned: list[int] = []
+    not_owned = jobs.not_owned_appids(conn)
     triggered = 0
 
     for appid in candidates:
         if tool_apps.is_tool_app(appid):
             skipped_tool.append(appid)
+            continue
+        if appid in not_owned:
+            # WP NOT-OWNED-1: SteamPrefill did not consider it last time;
+            # a job would end the same way. Not counted against the cap.
+            skipped_not_owned.append(appid)
             continue
         if triggered >= settings.miss_trigger_max_per_sweep:
             dropped.append(appid)
@@ -1283,6 +1292,14 @@ def run_miss_trigger(
             "prefilled, cached together with the games that use them: %s",
             len(skipped_tool),
             _sample(skipped_tool),
+        )
+
+    if skipped_not_owned:
+        logger.info(
+            "event-sweep: miss trigger skipped %d not-owned app(s) "
+            "(SteamPrefill did not consider them): %s",
+            len(skipped_not_owned),
+            _sample(skipped_not_owned),
         )
 
     if dropped:

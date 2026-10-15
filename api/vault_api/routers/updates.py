@@ -32,7 +32,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
-from vault_api import deletion, tool_apps, update_check
+from vault_api import deletion, jobs, tool_apps, update_check
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
 from vault_api.deps import (
@@ -128,7 +128,8 @@ def check_updates(
         ordinary, _tools = tool_apps.split_tool_apps(
             deletion.appids_with_cache_content(conn, depot_bytes)
         )
-        return sorted(ordinary)
+        # WP NOT-OWNED-1: apps SteamPrefill does not consider are left out.
+        return sorted(ordinary - jobs.not_owned_appids(conn))
 
     with open_db() as conn:
         started = runner.start(

@@ -400,14 +400,14 @@ def test_success_without_failed_column_is_done_and_maps(tmp_path: Path) -> None:
 def test_genuine_not_considered_keeps_its_wording(tmp_path: Path, text: str) -> None:
     job, game, mapped, _manifest_row, needs_force = _run_job(tmp_path, text)
     excerpt = job["log_excerpt"]
-    assert job["status"] == "error"
+    assert job["status"] == "not_owned"
     assert _last_line(excerpt) == (
         "[vault-api] SteamPrefill did not consider this app - is it owned by the "
         "logged-in account? Depot mapping and manifest state were NOT touched."
     )
     assert "reason=prefill_failed" not in excerpt
     assert mapped == []
-    assert game["status"] == "error"
+    assert game["status"] == "not_owned"
     assert needs_force == 1
 
 
