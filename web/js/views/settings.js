@@ -4,7 +4,9 @@
  * Layout (WP D16-WEB, docs/handover/d16-settings-audit.md 1.3 and the D16a
  * table sign-off 2026-10-14): collapsible sections as native
  * `<details>/<summary>` — Vault & connection (open by default), Download
- * window & updates, Disk & cleanup, Notifications, Steam, Expert, About.
+ * window & updates, Disk & cleanup, Notifications, Steam, About, then the
+ * "Show expert settings" switch row and the Expert section at the very
+ * bottom.
  * A collapsed section shows a one-line state in its summary
  * (`sectionSummary`, same-section fields only) and a dot while it holds an
  * unsaved draft, so a draft is never hidden. Open state is remembered per
@@ -15,8 +17,10 @@
  *   `expert: true` row sits in the Expert section, which exists only while
  *   the separate "Show expert settings" switch is on (remembered per
  *   browser), split into Bandwidth & connections, Housekeeping and Debug.
- *   Switching it off hides the section but keeps its drafts (the switch row
- *   then shows the unsaved-changes dot).
+ *   Turning it on shows the section collapsed; the user opens it, and that
+ *   open state is remembered like any other section's. Switching it off
+ *   hides the section but keeps its drafts (the switch row then shows the
+ *   unsaved-changes dot).
  * - Env pins (Q1 2026-10-14: env always wins): a row with `editable: false`
  *   or `env_only: true` is plain text with a "Set via env (VAULT_…)" note —
  *   no input, no Reset. `shadowed` adds a note that a stored value is
@@ -736,7 +740,6 @@ function buildExpertArea(groups) {
     writeExpertSwitch(getStorage, expertOn);
     sw.setAttribute("aria-checked", String(expertOn));
     details.hidden = !expertOn;
-    if (expertOn && !details.open) details.open = true;
   });
   wrap.append(row, details);
   return wrap;
@@ -1445,11 +1448,14 @@ function fullRender() {
   renderSteamStatusLine();
   renderLookupResult();
 
+  els.body.append(buildAboutSection());
+
+  // The expert switch row and the Expert section close the page, below About.
   const expertArea = buildExpertArea(placed.expert);
   if (expertArea) els.body.append(expertArea);
 
-  // WP WEB-FIX-8: the save bar keeps its place in the DOM (and so in the
-  // Tab order) right after the form it saves, but is `position:fixed`
+  // WP WEB-FIX-8: the save bar sits last in the DOM (and so in the
+  // Tab order), after every field incl. the Expert section, but is `position:fixed`
   // above the bottom nav (app.css "Settings save bar"), so it is visible
   // without scrolling while anything is dirty. Never built read-only.
   if (!state.settingsResponse.readonly) {
@@ -1475,8 +1481,6 @@ function fullRender() {
     els.body.appendChild(els.saveBar);
   }
   markDirty();
-
-  els.body.append(buildAboutSection());
 
   if (focusAboutOnRender) {
     focusAboutOnRender = false;

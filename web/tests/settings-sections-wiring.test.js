@@ -180,8 +180,8 @@ test("sections: native <details>, Vault & connection open by default, the rest c
     "Disk & cleanup",
     "Notifications",
     "Steam",
-    "Expert settings",
     "About",
+    "Expert settings",
   ]);
   assert.equal(section(s, "other") === null, true, "no row lands in 'other', so the section is not built");
   assert.equal(section(s, "vault").open, true);
@@ -232,10 +232,38 @@ test("MUTATION TARGET: the normal page carries no expert row; the switch shows t
   click(sw);
   assert.equal(sw.getAttribute("aria-checked"), "true");
   assert.equal(expert.hidden, false);
-  assert.equal(expert.open, true, "switching on opens the section");
+  assert.equal(expert.open, false, "switching on shows the section collapsed");
   assert.equal(storage.get("steamvault.settingsExpert"), "1");
   const again = await mount();
   assert.equal(section(again, "expert").hidden, false, "remembered");
+});
+
+test("the expert switch never opens the section; a remembered open state still applies on mount", async () => {
+  const s = await mount();
+  const expert = section(s, "expert");
+  const chain = (n) => { const c = []; for (; n; n = n.parentNode) c.unshift(n); return c; };
+  const before = (x, y) => {
+    const cx = chain(x), cy = chain(y);
+    let i = 0;
+    while (cx[i + 1] && cx[i + 1] === cy[i + 1]) i++;
+    const kids = cx[i].childNodes;
+    return kids.indexOf(cx[i + 1]) < kids.indexOf(cy[i + 1]);
+  };
+  assert.ok(before(section(s, "about"), q(s, "expert-switch")), "the switch row sits below About");
+  assert.ok(before(q(s, "expert-switch"), expert), "the Expert section follows its switch row");
+  assert.ok(before(section(s, "steam"), section(s, "about")), "About follows Steam");
+  click(q(s, "expert-switch"));
+  assert.equal(expert.hidden, false);
+  assert.equal(expert.open, false, "first switch-on: collapsed");
+  click(q(s, "expert-switch"));
+  click(q(s, "expert-switch"));
+  assert.equal(expert.open, false, "off/on again: still collapsed");
+  expert.open = true;
+  expert.dispatchEvent({ type: "toggle" });
+  assert.equal(JSON.parse(storage.get("steamvault.settingsOpen")).expert, true);
+  const again = await mount();
+  assert.equal(section(again, "expert").hidden, false);
+  assert.equal(section(again, "expert").open, true, "the user's own open is remembered");
 });
 
 test("an expert draft stays visible as a dot when the switch is turned off; collapsed sections show their own dot", async () => {
