@@ -103,6 +103,7 @@ import dev.steamvault.app.ui.library.logic.hasProtectedCacheContent
 import dev.steamvault.app.ui.library.logic.hasVisibleCacheContent
 import dev.steamvault.app.ui.library.logic.installedBadgeFor
 import dev.steamvault.app.ui.library.logic.isToolApp
+import dev.steamvault.app.ui.library.logic.isNotOwned
 import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.library.logic.statusAction
 import dev.steamvault.app.ui.library.logic.vaultCoverUrl
@@ -377,7 +378,7 @@ private fun DetailHeader(
                     val word = when {
                         updateState -> stringResource(R.string.library_update_available_badge)
                         overlay != null -> overlay.word
-                        else -> toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                        else -> toolAppStateWordFor(kind, isNotOwned(row)) ?: stringResource(kind.labelRes)
                     }
                     StatusIcon(kind = cardIconKind(row, kind, isGroup), size = StatusIconSize.SMALL, spokenLabel = word)
                     Text(
@@ -524,6 +525,8 @@ private fun LoadedDetailBody(
         if (action != null) {
             val labelRes = if (action.type == StatusActionType.RETRY) {
                 R.string.detail_action_retry
+            } else if (action.type == StatusActionType.CHECK_AGAIN) {
+                R.string.detail_action_check_again
             } else {
                 R.string.detail_action_download
             }
@@ -886,7 +889,7 @@ private fun PackagesSection(
                 val word = if (pkgUpdate) {
                     stringResource(R.string.library_update_available_badge)
                 } else {
-                    toolAppStateWordFor(kind) ?: stringResource(kind.labelRes)
+                    toolAppStateWordFor(kind, isNotOwned(pkg)) ?: stringResource(kind.labelRes)
                 }
                 Text(
                     text = word,

@@ -207,7 +207,7 @@ internal fun cardStatusWord(model: GameCardModel, compact: Boolean = false): Str
         // verified" (compact: "Partial N%" / "Not verified") instead of
         // "Current".
         model.completeness?.let { if (compact) it.compact else it.word }
-            ?: toolAppStateWordFor(model.kind)
+            ?: toolAppStateWordFor(model.kind, model.notOwned)
             ?: stringResource(model.kind.labelRes)
     }
 

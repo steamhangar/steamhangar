@@ -333,7 +333,7 @@ class LibraryController(
         scope.launch {
             try {
                 when (actionType) {
-                    StatusActionType.DOWNLOAD, StatusActionType.RETRY -> {
+                    StatusActionType.DOWNLOAD, StatusActionType.RETRY, StatusActionType.CHECK_AGAIN -> {
                         jobsRepository.prefill(listOf(appid))
                         toast = LibraryToast(strings.queuedForDownload())
                     }
