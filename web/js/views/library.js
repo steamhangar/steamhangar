@@ -113,6 +113,18 @@ import { api } from "../api.js";
 import { showToast } from "../components/toast.js";
 import { buildCard, cardCompletenessKey, cardStructuralKey, patchCardVolatile } from "../components/game-card.js";
 import { indexLiveJobsByAppid, isJobStateTransition } from "../lib/game-status.js";
+import {
+  DEFAULT_SORT,
+  SORT_DIR,
+  SORT_DIR_LABEL,
+  SORT_KEY,
+  SORT_LABEL,
+  SORT_NAME_DIR_LABEL,
+  availableSortOptions,
+  lastPlayedAvailable,
+  normalizeSort,
+  sortGames,
+} from "../lib/library-sort.js";
 import { chipCounts, normalizeQuery, visibleGames } from "../lib/library-filters.js";
 import {
   classifyBulkSelection,
@@ -145,6 +157,7 @@ import {
   librarySubtitle,
   mergeOwnedLibrary,
   withOwnedPlaytime,
+  withOwnedLastPlayed,
   ownedNotice,
   NOTICE_ACTION,
   OWNED_STATUS,
@@ -163,6 +176,7 @@ import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE
 import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "../components/group-delete-plan.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
+const SORT_STORAGE_KEY = "steamvault.librarySort";
 const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
 // D-3 (docs/WORKPACKAGES.md, user-approved 2026-08-18): this control ships
 // literal column-count wording ("Two columns"/"Three columns") since the
@@ -213,6 +227,26 @@ function writeStoredLayout(v) {
   }
 }
 
+// WP LIB-SORT: the stored choice is raw ({key, dir}); it is normalized
+// against the live "last played" flag at every use, so a stored "played"
+// falls back to Name A-Z while the flag is off and comes back when it is on.
+function readStoredSort() {
+  try {
+    const raw = window.localStorage.getItem(SORT_STORAGE_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    return v && typeof v === "object" ? { key: v.key, dir: v.dir } : { ...DEFAULT_SORT };
+  } catch {
+    return { ...DEFAULT_SORT };
+  }
+}
+function writeStoredSort(v) {
+  try {
+    window.localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ key: v.key, dir: v.dir }));
+  } catch {
+    // Persistence only; the sort itself must still work.
+  }
+}
+
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
   return (err && err.message) || "Request failed";
@@ -245,6 +279,7 @@ const state = {
   query: "",
   filterKey: "all",
   layout: readStoredLayout(),
+  sort: readStoredSort(),
   selecting: false,
   picked: new Set(),
   visibleAppids: new Set(),
@@ -283,6 +318,8 @@ function remerge() {
   // WP WEB-FEAT-SUGGEST-2: playtime (ADR-0010 gate) for the card's
   // "Never played" pill.
   state.rawGames = withOwnedPlaytime(mergeOwnedLibrary(state.vaultGames, mergedOwnedGames), mergedOwnedGames);
+  // WP LIB-SORT: last played (relay_expose_last_played gate) for the sort.
+  state.rawGames = withOwnedLastPlayed(state.rawGames, mergedOwnedGames);
   // WP TOOL-APPS-2c: group content packages under their parent game.
   const grouped = groupGames(state.rawGames);
   state.games = grouped.rows;
@@ -648,11 +685,15 @@ function renderEmptyState() {
 // exists here regardless of column count — see the coder's WP 4e.1 report
 // for the measured cost of a full rebuild at N=400 (~30ms synchronous).
 function renderGrid() {
-  const list = visibleGames(state.games, {
-    query: state.query,
-    filterKey: state.filterKey,
+  const list = sortGames(
+    visibleGames(state.games, {
+      query: state.query,
+      filterKey: state.filterKey,
+      liveJobsByAppid,
+    }),
+    currentSort(),
     liveJobsByAppid,
-  });
+  );
   state.visibleAppids = new Set(list.map((g) => g.appid));
   els.grid.className = ("grid " + (LAYOUT_CLASS[state.layout] || "")).trim();
   els.grid.replaceChildren();
@@ -813,6 +854,7 @@ function fullRender() {
   renderOwnedNotice();
   // Chips before the grid: renderChips may reset a filter that vanished.
   renderChips();
+  renderSortControl();
   renderGrid();
   syncBulk();
   paintUpdateCheck();
@@ -831,6 +873,42 @@ function clearSearch() {
   els.searchInput.value = "";
   applySearch("");
   els.searchInput.focus();
+}
+
+/** The sort in force: the stored choice made safe against the live flag. */
+function currentSort() {
+  return normalizeSort(state.sort, { lastPlayed: lastPlayedAvailable(state.rawGames) });
+}
+
+/** Paint the sort control from `currentSort()` (options, selection, toggle). */
+function renderSortControl() {
+  const { sortSelect, sortDirBtn } = els;
+  const lastPlayed = lastPlayedAvailable(state.rawGames);
+  const cur = currentSort();
+  const opts = availableSortOptions({ lastPlayed });
+  const shown = sortSelect.children;
+  if (shown.length !== opts.length || opts.some((o, i) => shown[i].value !== o.key)) {
+    sortSelect.replaceChildren(
+      ...opts.map((o) => {
+        const opt = document.createElement("option");
+        opt.value = o.key;
+        opt.textContent = o.label;
+        return opt;
+      }),
+    );
+  }
+  sortSelect.value = cur.key;
+  const labels = cur.key === SORT_KEY.NAME ? SORT_NAME_DIR_LABEL : SORT_DIR_LABEL;
+  const text = labels[cur.dir];
+  sortDirBtn.textContent = cur.dir === SORT_DIR.ASC ? "\u2191" : "\u2193";
+  sortDirBtn.title = text;
+  sortDirBtn.setAttribute("aria-label", `${SORT_LABEL} direction: ${text}`);
+}
+
+function setSort(next) {
+  state.sort = normalizeSort(next, { lastPlayed: lastPlayedAvailable(state.rawGames) });
+  writeStoredSort(state.sort);
+  fullRender();
 }
 
 function setLayout(value, announce) {
@@ -1182,7 +1260,20 @@ function buildSection() {
   selectBtn.innerHTML =
     '<svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="2.5" width="15" height="15" rx="3.5"/><path d="m6.4 10.2 2.4 2.5 4.8-5"/></svg>';
 
-  tools.append(layoutSegs, selectBtn);
+  // WP LIB-SORT: option select plus an ascending/descending toggle.
+  const sortWrap = document.createElement("div");
+  sortWrap.className = "lib-sort";
+  sortWrap.setAttribute("role", "group");
+  sortWrap.setAttribute("aria-label", "Sort library");
+  const sortSelect = document.createElement("select");
+  sortSelect.className = "lib-sort-sel";
+  sortSelect.setAttribute("aria-label", SORT_LABEL);
+  const sortDirBtn = document.createElement("button");
+  sortDirBtn.type = "button";
+  sortDirBtn.className = "iconbtn lib-sort-dir";
+  sortWrap.append(sortSelect, sortDirBtn);
+
+  tools.append(sortWrap, layoutSegs, selectBtn);
   head.append(titles, tools);
 
   // "Check & update all cached games" (Phase 4c, WP 4c-web) — a plain
@@ -1332,6 +1423,8 @@ function buildSection() {
     ownedSettingsBtn,
     ownedReloadBtn,
     layoutSegs,
+    sortSelect,
+    sortDirBtn,
     selectBtn,
     checkUpdateBtn,
     checkUpdatesBtn,
@@ -1372,6 +1465,14 @@ function buildSection() {
     const btn = e.target.closest("button[data-layout]");
     if (!btn) return;
     setLayout(btn.dataset.layout, true);
+  });
+
+  sortSelect.addEventListener("change", () => {
+    setSort({ key: sortSelect.value, dir: currentSort().dir });
+  });
+  sortDirBtn.addEventListener("click", () => {
+    const cur = currentSort();
+    setSort({ key: cur.key, dir: cur.dir === SORT_DIR.ASC ? SORT_DIR.DESC : SORT_DIR.ASC });
   });
 
   selectBtn.addEventListener("click", () => {
