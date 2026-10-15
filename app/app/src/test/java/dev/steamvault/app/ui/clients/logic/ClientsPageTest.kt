@@ -151,7 +151,7 @@ class ClientsPageTest {
         assertEquals("3.0 GB loaded in the last 7 days · hit rate 90%", statsText(agent, "7d"))
         assertNull(statsText(address, "7d"))
         assertEquals(
-            "Loaded recently: Graveyard Keeper 2 (2.0 GB), App 11 (300 MB), Third (0 GB), +1 more, 1.0 GB not linked to one game",
+            "Loaded recently: Graveyard Keeper 2 (2.0 GB), Unknown app (300 MB), Third (0 GB), +1 more, 1.0 GB not linked to one game",
             recentAppsText(agent),
         )
         assertNull(recentAppsText(address))
