@@ -150,7 +150,8 @@ class ClientsScreenshotTest {
         for (label in listOf("Current speed", "Average while loading", "Peak speed", "Served (cache + prefill)", "Loaded from the internet", "Hit rate", "Saved by the cache", "Loading now")) {
             composeRule.onNode(hasContentDescription("$label: ", substring = true)).assertExists()
         }
-        val graph = composeRule.onNode(hasContentDescription("Average speed per 5 minutes in the last 24 hours.", substring = true))
+        // WP GRAPH-ZOOM: a fresh TrafficRanges opens on 6 h, the 1-minute tier.
+        val graph = composeRule.onNode(hasContentDescription("Average speed per minute in the last 6 hours.", substring = true))
         graph.assertExists()
         assertTrue(composeRule.onAllNodes(hasContentDescription("Not available", substring = true)).fetchSemanticsNodes().isEmpty())
     }
