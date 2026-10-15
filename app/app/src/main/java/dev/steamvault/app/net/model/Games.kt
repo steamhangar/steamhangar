@@ -94,6 +94,29 @@ data class GameSummary(
      * group's members with bytes on disk; null on a grouped row, when
      * unknown, and on an older server. */
     val group_cache_complete_pct: Int? = null,
+    /** WP D23 LIBRARY-META-1b: stored library metadata, null = unknown (never
+     * fetched; the nightly fill is off by default) and on a server from
+     * before D23, which sends no field. */
+    val meta: GameMeta? = null,
+)
+
+/**
+ * `vault_api/routers/games.py::GameMeta` (WP D23): present on a game only
+ * once a fetch succeeded. A null field means that answer did not carry it;
+ * [genres] are Steam's numeric genre ids (labels are the client's job,
+ * `LibraryMeta.kt`), [review_percent] the overall positive share 0-100.
+ */
+@Serializable
+data class GameMeta(
+    val single_player: Boolean? = null,
+    val multiplayer: Boolean? = null,
+    val coop: Boolean? = null,
+    val vr: Boolean? = null,
+    val genres: List<Int> = emptyList(),
+    val review_percent: Int? = null,
+    val review_score: Int? = null,
+    val release_year: Int? = null,
+    val fetched_at: String? = null,
 )
 
 /** One entry of [GameDetail.depots] — `vault_api/routers/games.py::DepotEntry`. */

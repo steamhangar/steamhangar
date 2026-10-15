@@ -37,6 +37,19 @@ enum class LibrarySortKey(val prefValue: String, val label: String) {
     STATE("state", "State"),
     UPDATED("updated", "Last cached or updated"),
     PLAYED("played", "Last played"),
+
+    /** WP D23: overall review percentage, offered only while some game carries `meta`. */
+    RATING("rating", "Rating"),
+
+    /** WP D23: release year, offered only while some game carries `meta`. */
+    YEAR("year", "Release year"),
+    ;
+
+    /** Rating and year read best/newest first, like the API's default (web `defaultDirFor`). */
+    val defaultDir: SortDirection
+        get() = if (this == RATING || this == YEAR) SortDirection.DESC else SortDirection.ASC
+
+    val needsMeta: Boolean get() = this == RATING || this == YEAR
 }
 
 enum class SortDirection(val prefValue: String) {
@@ -92,14 +105,32 @@ fun ownedLastPlayedByAppid(ownedGames: List<OwnedGame>?): Map<Int, Int> {
 /** Whether the "Last played" option is offered: the relay sent the field. */
 fun lastPlayedAvailable(lastPlayedByAppid: Map<Int, Int>): Boolean = lastPlayedByAppid.isNotEmpty()
 
-/** Options the control offers right now. */
-fun availableSortKeys(lastPlayedAvailable: Boolean): List<LibrarySortKey> =
-    LibrarySortKey.entries.filter { it != LibrarySortKey.PLAYED || lastPlayedAvailable }
+/** Options the control offers right now ("Rating"/"Release year" only while
+ * some game carries stored metadata, WP D23). */
+fun availableSortKeys(lastPlayedAvailable: Boolean, metaAvailable: Boolean = false): List<LibrarySortKey> =
+    LibrarySortKey.entries.filter {
+        (it != LibrarySortKey.PLAYED || lastPlayedAvailable) && (!it.needsMeta || metaAvailable)
+    }
 
-/** A stored choice made safe: "Last played" while the flag is off falls back
- * to Name A-Z (and comes back when the flag does). */
-fun normalizeSort(choice: LibrarySort, lastPlayedAvailable: Boolean): LibrarySort =
-    if (choice.key == LibrarySortKey.PLAYED && !lastPlayedAvailable) LibrarySort.DEFAULT else choice
+/** A stored choice made safe: "Last played" while the flag is off, and
+ * "Rating"/"Release year" while no game has metadata, fall back to Name A-Z
+ * (and come back when the data does). */
+fun normalizeSort(choice: LibrarySort, lastPlayedAvailable: Boolean, metaAvailable: Boolean = false): LibrarySort =
+    if ((choice.key == LibrarySortKey.PLAYED && !lastPlayedAvailable) ||
+        (choice.key.needsMeta && !metaAvailable)
+    ) {
+        LibrarySort.DEFAULT
+    } else {
+        choice
+    }
+
+/** The sort a pick of [key] gives: moving between the best-first group
+ * (rating, year) and the others resets the direction, otherwise [current]'s
+ * direction is kept (web library.js sort select handler). */
+fun sortAfterKeyPick(current: LibrarySort, key: LibrarySortKey): LibrarySort {
+    val dir = if (key.defaultDir != current.key.defaultDir) key.defaultDir else current.dir
+    return LibrarySort(key, dir)
+}
 
 private fun realName(g: GameSummary): String? = g.name?.takeIf { it.isNotBlank() }
 
@@ -135,6 +166,8 @@ private fun valueOf(
     LibrarySortKey.UPDATED -> (listOf(g) + packages).mapNotNull { parseMillis(it.last_prefill_at) }.maxOrNull()
     // 0 is Steam's "never played": no value, not the oldest date.
     LibrarySortKey.PLAYED -> lastPlayed[g.appid]?.takeIf { it > 0 }?.toLong()
+    LibrarySortKey.RATING -> g.meta?.review_percent?.toLong()
+    LibrarySortKey.YEAR -> g.meta?.release_year?.toLong()
 }
 
 private class SortRow(val game: GameSummary, val name: String?, val value: Long?)
