@@ -1,6 +1,7 @@
 package dev.steamvault.app.ui.detail.logic
 
 import dev.steamvault.app.net.model.GameSummary
+import dev.steamvault.app.ui.library.logic.UNKNOWN_APP_NAME
 import dev.steamvault.app.ui.library.logic.MultiPlanDepotRow
 
 /**
@@ -53,7 +54,7 @@ data class DepotPresentation(
 /**
  * @param row one [MultiPlanDepotRow] from `buildMultiPlan(listOf(thisAppid), ...)`.
  * @param gamesByAppid for resolving a co-owner's display name -- falls back
- *   to "App {appid}" for one never seen on a `GET /v1/games` poll, same
+ *   to "Unknown app" for one never seen on a `GET /v1/games` poll, same
  *   literal convention `ui/library/logic/GameCardModel.kt` and
  *   `ui/downloads/logic/JobCardModel.kt::nameFor` already use.
  * @param thisAppIsHolder whether the game THIS sheet is showing currently
@@ -75,7 +76,7 @@ fun buildDepotPresentation(
     val coOwners = row.others.map { appid ->
         CoOwnerRow(
             appid = appid,
-            name = gamesByAppid[appid]?.name?.takeIf { it.isNotBlank() } ?: "App $appid",
+            name = gamesByAppid[appid]?.name?.takeIf { it.isNotBlank() } ?: UNKNOWN_APP_NAME,
             cached = appid in row.holderAppids,
         )
     }

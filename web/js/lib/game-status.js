@@ -118,6 +118,8 @@
  * was queued before the upgrade). `installedBadgeState` never says "not cached" for it.
  */
 
+import { UNKNOWN_APP_NAME } from "./app-names.js";
+
 /** Display-status kinds this module ever returns. Intentionally NOT the
  * mockup's full set (no "stale" — see module header). */
 export const KIND = Object.freeze({
@@ -215,7 +217,7 @@ export function cardStatusWord(game, kind, labels) {
 
 /**
  * Display name of a games row: the vault's own name, else the tool app's
- * name from the server (WP API-FIX-4), else `App {appid}`.
+ * name from the server (WP API-FIX-4), else "Unknown app".
  * @param {{appid: number, name?: string|null, tool_app_name?: string|null}} game
  */
 export function gameDisplayName(game) {
@@ -223,7 +225,7 @@ export function gameDisplayName(game) {
   if (isToolApp(game) && typeof game.tool_app_name === "string" && game.tool_app_name.trim()) {
     return game.tool_app_name.trim();
   }
-  return `App ${game?.appid}`;
+  return UNKNOWN_APP_NAME;
 }
 
 /** Job statuses that occupy this app's card with a live indicator. Queued

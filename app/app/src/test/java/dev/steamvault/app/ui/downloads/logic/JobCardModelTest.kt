@@ -126,7 +126,7 @@ class JobCardModelTest {
     @Test
     fun `name falls back to a stable placeholder when the app hasn't landed on a games poll yet`() {
         val model = buildJobCardModel(runningJob().copy(appid = 999), emptyMap(), JobCardMode.ACTIVE)
-        assertEquals("App 999", model.name)
+        assertEquals("Unknown app", model.name)
     }
 
     @Test

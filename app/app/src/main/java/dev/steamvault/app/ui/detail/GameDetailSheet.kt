@@ -58,6 +58,7 @@ import dev.steamvault.app.ui.detail.logic.buildDepotPresentation
 import dev.steamvault.app.ui.detail.logic.detailJobActions
 import dev.steamvault.app.ui.detail.logic.findTrackedJob
 import dev.steamvault.app.ui.detail.logic.headerLiveJob
+import dev.steamvault.app.ui.library.logic.UNKNOWN_APP_NAME
 import dev.steamvault.app.ui.library.CoverArtImage
 import dev.steamvault.app.ui.library.GroupDeletePlanBlock
 import dev.steamvault.app.ui.library.logic.PACKAGES_HEADING
@@ -273,7 +274,7 @@ private fun GameDetailSheetBody(
         // WP API-FIX-4: a Steam tool app's name comes from the server's list.
         ?: controller.detail?.takeIf { it.tool_app }?.tool_app_name?.takeIf { it.isNotBlank() }
         ?: controller.openName?.takeIf { it.isNotBlank() }
-        ?: "App $appid"
+        ?: UNKNOWN_APP_NAME
 
     // WP APP-DEMO review round 3 (F2): no wrapper Column of this file's
     // own -- the banner (WP brief constraint 1) now lives one level up, in

@@ -37,6 +37,8 @@
  * Pure — no DOM, no fetch. Covered in web/tests/depot-presentation.test.js.
  */
 
+import { UNKNOWN_APP_NAME } from "./app-names.js";
+
 export const DEPOT_TAG = Object.freeze({
   EXCLUSIVE: "exclusive",
   SOLE_HOLDER: "sole_holder",
@@ -49,7 +51,7 @@ export const DEPOT_TAG = Object.freeze({
  *   `buildMultiPlan([thisAppid], ...)` — `{depotid, sizeBytes, shared,
  *   others, holderAppids, free}`.
  * @param {Map<number, object>} gamesByAppid for resolving a co-owner's
- *   display name — falls back to "App {appid}" for one never seen on a
+ *   display name — falls back to "Unknown app" for one never seen on a
  *   `GET /v1/games` poll, same literal convention `views/library.js` and
  *   `views/downloads.js` already use.
  * @param {boolean} thisAppIsHolder whether the game THIS sheet is showing
@@ -73,7 +75,7 @@ export function buildDepotPresentation(row, gamesByAppid, thisAppIsHolder) {
 
   const coOwners = row.others.map((appid) => ({
     appid,
-    name: gamesByAppid.get(appid)?.name || `App ${appid}`,
+    name: gamesByAppid.get(appid)?.name || UNKNOWN_APP_NAME,
     cached: row.holderAppids.includes(appid),
   }));
 

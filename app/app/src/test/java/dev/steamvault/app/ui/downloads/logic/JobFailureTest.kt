@@ -131,13 +131,13 @@ class JobFailureTest {
         assertEquals(setOf("not_logged_in", "public_ip"), FailureHint.entries.map { it.wireName }.toSet())
     }
 
-    // ---- titles (WP APP-FIX-2): vault name, then owned name, then "App N" ----
+    // ---- titles (WP APP-FIX-2): vault name, then owned name, then "Unknown app" ----
 
     @Test
     fun `MUTATION PIN -- a job title falls back to the owned name before App N`() {
         val unnamed = mapOf(20 to GameSummary(appid = 20, name = null, status = "error", depot_count = 0))
         assertEquals("Steam Twenty", nameFor(20, unnamed, mapOf(20 to "Steam Twenty")))
-        assertEquals("App 20", nameFor(20, unnamed, emptyMap()))
+        assertEquals("Unknown app", nameFor(20, unnamed, emptyMap()))
         val named = mapOf(20 to GameSummary(appid = 20, name = "Vault Twenty", status = "done", depot_count = 1))
         assertEquals("Vault Twenty", nameFor(20, named, mapOf(20 to "Steam Twenty")))
         assertEquals("Steam Twenty", buildHistoryRowModel(failed, unnamed, mapOf(20 to "Steam Twenty")).name)

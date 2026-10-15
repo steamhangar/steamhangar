@@ -53,6 +53,7 @@
  */
 
 import { dispKind, isToolApp, KIND } from "./game-status.js";
+import { UNKNOWN_APP_NAME } from "./app-names.js";
 import { buildSettingsPatch } from "./settings-diff.js";
 import { validSteamId64 } from "./steamid.js";
 
@@ -149,7 +150,7 @@ export function ownedNamesByAppid(ownedGames) {
 
 /**
  * The title every surface shows for an app (WP WEB-FIX-4): the vault's
- * name, then the owned list's name, then "App <id>". vault-api has no name
+ * name, then the owned list's name, then "Unknown app". vault-api has no name
  * for an app it never resolved: `POST /v1/prefill` inserts the `apps` row
  * with `name = NULL` (api/vault_api/jobs.py), and only a depot mapping
  * names it. A job for an owned-only game therefore has a vault row with no
@@ -162,7 +163,7 @@ export function ownedNamesByAppid(ownedGames) {
 export function appTitle(appid, vaultName, ownedName) {
   if (hasText(vaultName)) return vaultName.trim();
   if (hasText(ownedName)) return ownedName.trim();
-  return `App ${appid}`;
+  return UNKNOWN_APP_NAME;
 }
 
 /**

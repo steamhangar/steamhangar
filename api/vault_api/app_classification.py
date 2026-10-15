@@ -79,7 +79,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from vault_api import deletion, tool_apps
 from vault_api.config import MANIFEST_ORACLE_STEAMCMD_API
@@ -402,6 +402,39 @@ def display_name(own: str | None, classification: Classification | None) -> str 
     if own is not None and own.strip():
         return own
     return None if classification is None else classification.name
+
+
+def fallback_names(
+    conn: sqlite3.Connection, appids: Iterable[int], *, oracle_enabled: bool
+) -> dict[int, str]:
+    """Steam's name for the given apps from the rows already stored (store
+    first, then the oracle's while it is on). Read-only, no network, no
+    lookup of its own: ids no source ever named are simply absent. Used by
+    the traffic read paths, which only had ``apps.name`` before (ID-AUDIT)."""
+    ids = sorted({a for a in appids if isinstance(a, int) and a > 0})
+    names: dict[int, str] = {}
+    for offset in range(0, len(ids), 500):
+        chunk = ids[offset : offset + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        store: dict[int, str] = {}
+        oracle: dict[int, str] = {}
+        for row in conn.execute(
+            "SELECT appid, source, name FROM app_classification "
+            f"WHERE appid IN ({placeholders})",
+            tuple(chunk),
+        ):
+            name = valid_app_name(row["name"])
+            if name is None:
+                continue
+            if row["source"] == SOURCE_STORE:
+                store[int(row["appid"])] = name
+            elif row["source"] == SOURCE_STEAMCMD_API and oracle_enabled:
+                oracle[int(row["appid"])] = name
+        for appid in chunk:
+            name = store.get(appid) or oracle.get(appid)
+            if name:
+                names[appid] = name
+    return names
 
 
 @dataclass(frozen=True)

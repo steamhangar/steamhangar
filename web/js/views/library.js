@@ -110,6 +110,7 @@
 
 import { store } from "../store-singleton.js";
 import { api } from "../api.js";
+import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
 import { showToast } from "../components/toast.js";
 import { buildCard, cardCompletenessKey, cardStructuralKey, patchCardVolatile } from "../components/game-card.js";
 import { indexLiveJobsByAppid, isJobStateTransition } from "../lib/game-status.js";
@@ -253,7 +254,7 @@ function errorText(err) {
 }
 
 function namesFor(appids, gamesByAppid) {
-  return appids.map((id) => gamesByAppid.get(id)?.name || `App ${id}`).join(", ");
+  return appids.map((id) => gamesByAppid.get(id)?.name || UNKNOWN_APP_NAME).join(", ");
 }
 
 // ---------------------------------------------------------------------
@@ -942,7 +943,7 @@ function renderDeletePlan(plan, ids, gamesByAppid) {
       " they occupy.",
     );
   } else {
-    const name = gamesByAppid.get(ids[0])?.name || `App ${ids[0]}`;
+    const name = gamesByAppid.get(ids[0])?.name || UNKNOWN_APP_NAME;
     dText.append(
       "Deleting ",
       strong(name),
@@ -1069,7 +1070,7 @@ async function openDeleteConfirm(ids, notice) {
  */
 async function openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice) {
   const plainIds = ids.filter((id) => !groupIds.includes(id));
-  const nameFor = (id, serverName) => gamesByAppid.get(id)?.name || serverName || `App ${id}`;
+  const nameFor = (id, serverName) => gamesByAppid.get(id)?.name || serverName || UNKNOWN_APP_NAME;
   try {
     const activeJobAppids = new Set(
       state.jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).map((j) => j.appid),

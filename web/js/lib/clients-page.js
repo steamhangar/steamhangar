@@ -31,6 +31,7 @@
 
 import { formatAgo } from "./format.js";
 import { isolate } from "./client-names.js";
+import { UNKNOWN_APP_NAME } from "./app-names.js";
 import { DASH, RANGE_PHRASES, formatRate, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
 
 /** How many recently loaded apps a card names before "+N more". */
@@ -92,9 +93,9 @@ export function connectionChip(client) {
   return { word: "No current data", cls: "pchip pchip-unknown" };
 }
 
-/** Name of an app in a list: the server's name, else "App <id>". */
+/** Name of an app in a list: the server's name, else the neutral "Unknown app" (never a bare id). */
 export function appLabel(app) {
-  return typeof app.name === "string" && app.name.trim() ? app.name : `App ${app.appid}`;
+  return typeof app.name === "string" && app.name.trim() ? app.name : UNKNOWN_APP_NAME;
 }
 
 /**

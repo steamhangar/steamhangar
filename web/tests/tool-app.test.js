@@ -7,7 +7,7 @@
  * "App 228980 / Failed / Installed but not cached / Retry download". These
  * tests pin what the card, the detail sheet and the bulk bar show instead:
  *
- *   - the server's name, not "App 228980";
+ *   - the server's name, not "Unknown app";
  *   - the neutral word "Steam tool package" and the "notinuse" dash glyph,
  *     never "Failed", even with `status: "error"` left by old failed jobs;
  *   - no download/retry action, on the card or in the sheet;
@@ -137,12 +137,12 @@ test("statusIconKind / statusWordFor: TOOL draws the neutral dash and reads 'Ste
   assert.equal(statusWordFor("nonsense", labels), "Not cached");
 });
 
-test("gameDisplayName: vault name, then the tool app's name, then App {appid}", () => {
+test("gameDisplayName: vault name, then the tool app's name, then Unknown app", () => {
   assert.equal(gameDisplayName(redist()), "Steamworks Common Redistributables");
   assert.equal(gameDisplayName(redist({ name: "  Redist (vault)  " })), "Redist (vault)");
-  assert.equal(gameDisplayName(redist({ tool_app_name: "  " })), "App 228980");
+  assert.equal(gameDisplayName(redist({ tool_app_name: "  " })), "Unknown app");
   // tool_app_name is ignored without the flag.
-  assert.equal(gameDisplayName(game({ name: null, tool_app_name: "X" })), "App 440");
+  assert.equal(gameDisplayName(game({ name: null, tool_app_name: "X" })), "Unknown app");
 });
 
 test("library filters: a tool app is in 'All' only, never in 'Failed' or 'Not cached'", () => {
@@ -320,8 +320,8 @@ test("MUTATION TARGET -- downloads: a tool app's job is titled from its games ro
   assert.equal(vaultRowTitle(228980, redist()), "Steamworks Common Redistributables");
   assert.equal(vaultRowTitle(440, game()), "Team Fortress 2");
   // No games row (or an older server without the flag): no client-side list.
-  assert.equal(vaultRowTitle(228980, undefined), "App 228980");
-  assert.equal(vaultRowTitle(228980, { appid: 228980, name: null, tool_app_name: "X" }), "App 228980");
+  assert.equal(vaultRowTitle(228980, undefined), "Unknown app");
+  assert.equal(vaultRowTitle(228980, { appid: 228980, name: null, tool_app_name: "X" }), "Unknown app");
 });
 
 test("MUTATION TARGET -- downloads: no Retry for a tool app's failed job", () => {

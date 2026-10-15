@@ -104,14 +104,13 @@ fun hasText(name: String?): Boolean = name != null && name.isNotBlank()
  * for an owned-only game therefore has a vault row with no name, and the
  * job itself carries none (`JobSummary` has no name field).
  *
- * "App <id>" stays a Kotlin literal under app/README.md's verbatim-port
- * exception: it is web's own fallback, pinned by string equality in
- * `OwnedNamesTest`.
+ * [UNKNOWN_APP_NAME] is web's own fallback ("Unknown app"), pinned by string
+ * equality in `OwnedLibraryTest`.
  */
 fun appTitle(appid: Int, vaultName: String?, ownedName: String? = null): String {
     if (vaultName != null && hasText(vaultName)) return vaultName.trim()
     if (ownedName != null && hasText(ownedName)) return ownedName.trim()
-    return "App $appid"
+    return UNKNOWN_APP_NAME
 }
 
 /** appid -> name from the owned list; the first non-blank name per appid

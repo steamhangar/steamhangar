@@ -49,7 +49,7 @@ test("ORPHANED (recorded WP 4b.6 divergence, adopted here): a shared depot with 
   assert.equal(buildDepotPresentation(r, gamesByAppid, false).tag, DEPOT_TAG.ORPHANED);
 });
 
-test("coOwners: resolves names from gamesByAppid, falls back to 'App {appid}' for an unknown one", () => {
+test("coOwners: resolves names from gamesByAppid, falls back to 'Unknown app' (never a bare id) for an unknown one", () => {
   const gamesByAppid = new Map([[730, { name: "Known Game" }]]);
   const r = row({ shared: true, others: [730, 999], holderAppids: [730] });
   const p = buildDepotPresentation(r, gamesByAppid, false);
@@ -57,7 +57,7 @@ test("coOwners: resolves names from gamesByAppid, falls back to 'App {appid}' fo
     p.coOwners.map((c) => ({ appid: c.appid, name: c.name, cached: c.cached })),
     [
       { appid: 730, name: "Known Game", cached: true },
-      { appid: 999, name: "App 999", cached: false },
+      { appid: 999, name: "Unknown app", cached: false },
     ],
   );
 });

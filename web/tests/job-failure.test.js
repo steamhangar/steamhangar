@@ -179,12 +179,12 @@ test("DRIFT GUARD: the public-IP hint's README section heading exists (backticks
   assert.equal(headings.includes(PUBLIC_IP_README_SECTION), true, `no heading "${PUBLIC_IP_README_SECTION}" in deploy/README.md`);
 });
 
-test("appTitle order: vault name, then owned name, then 'App <id>'; blank counts as missing", () => {
+test("appTitle order: vault name, then owned name, then 'Unknown app'; blank counts as missing", () => {
   assert.equal(appTitle(5, "Vault Five", "Steam Five"), "Vault Five");
   assert.equal(appTitle(5, null, "Steam Five"), "Steam Five");
   assert.equal(appTitle(5, "   ", "Steam Five"), "Steam Five");
-  assert.equal(appTitle(5, undefined, undefined), "App 5");
-  assert.equal(appTitle(5, "", " "), "App 5");
+  assert.equal(appTitle(5, undefined, undefined), "Unknown app");
+  assert.equal(appTitle(5, "", " "), "Unknown app");
 });
 
 test("fillMissingNames fills a missing vault name only, adds no rows, and never mutates its input", () => {

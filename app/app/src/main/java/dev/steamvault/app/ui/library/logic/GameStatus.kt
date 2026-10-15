@@ -125,13 +125,13 @@ fun isNotOwned(game: GameSummary): Boolean = !isToolApp(game) && game.status == 
 fun isToolApp(game: GameSummary): Boolean = game.tool_app
 
 /** Display name: the vault's own name, else the tool app's name from the
- * server, else `App {appid}` (web `gameDisplayName`). */
+ * server, else "Unknown app" (web `gameDisplayName`). */
 fun gameDisplayName(game: GameSummary): String {
     game.name?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     if (isToolApp(game)) {
         game.tool_app_name?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     }
-    return "App ${game.appid}"
+    return UNKNOWN_APP_NAME
 }
 
 /** Job statuses that occupy this app's card with a live indicator. Queued
