@@ -23,3 +23,10 @@ Merged tree: test-api 3875 pass, test-web 1722 pass. Next: push wp/rc19-w2-golde
 Open for Jan (ask in one AskUserQuestion batch): anonymous cover refresher (ADR-0016 addendum) vs "names only with relay key": A keep + document, B gate on key, C defer to D22.
 Not started: D23 (api then web), wave 3 (D19, D20, D16 Android UI, rc18 follow-ups, GRAPH-LIVE, D16 neutral naming), wave 4 close.
 Restart triggers pending: trig_01LbKjgPvpJSQEcLhqp7ni7E (2026-10-15T21:55Z) and trig_01HTJMhrGFUuhdEc7Rv788DM (2026-10-16T00:10Z, Jan's request, weekly reset). Keep the 00:10Z one.
+
+## Wave 2 part 2 (2026-10-15 late)
+
+Passed and merged on wp/rc19-w2-goldens (test-api 3922, test-web 1747): D23 api (schema 30, VAULT_LIBRARY_META default off, bail-out pause fix), D23 web (client-side filter; genre label map is client-side; should-fix: genre select vs multi-genre stored filter), D20 api+web (schema 31, jobs.order_key, POST /v1/jobs/{id}/move; nit: no claim-vs-move race test, no aria-live).
+Android parity still owed: D23 (chips/sort), D20 (reorder UI; strings.xml still says "not built yet"), D19, D16 UI.
+Open for Jan: cover refresher anonymous vs "names only with relay key" (A keep+document, B gate on key, C defer to D22).
+Next: CI green on this branch -> ff-merge to main; then wave 3 (D19-1a/1b/1c, D16 Android UI + neutral naming, rc18 follow-ups, GRAPH-LIVE, Android for D19/D20/D23), wave 4 close.
