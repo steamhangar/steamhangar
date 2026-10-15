@@ -1320,6 +1320,8 @@ const ENV_ONLY_DEMO = [
   { key: "relay_expose_last_played", env_var: "VAULT_RELAY_EXPOSE_LAST_PLAYED", get value() { return relayExposeLastPlayed; } },
   // WP D23: library metadata fill switch (off in the demo: no metadata).
   { key: "library_meta_enabled", env_var: "VAULT_LIBRARY_META", value: false },
+  // WP D19-1a: oracle query on card open (off in the demo: no external query).
+  { key: "depot_preview_enabled", env_var: "VAULT_DEPOT_PREVIEW", value: false },
   { key: "webhook_url", env_var: "VAULT_WEBHOOK_URL", value: DEMO_WEBHOOK_URL_MASKED },
 ];
 const ENV_ONLY_KEYS = new Set(["vault_api_key", ...ENV_ONLY_DEMO.map((e) => e.key)]);
@@ -2568,6 +2570,11 @@ export async function demoRequest(method, path, { body, params } = {}) {
     const rows = [];
     for (const g of games) for (const d of g.depots) rows.push({ depotid: d.depotid, appid: g.appid });
     return rows;
+  }
+
+  // WP D19-1b: the depot preview is off by default (own env switch).
+  if (method === "GET" && /^\/v1\/oracle\/\d+\/preview$/.test(path)) {
+    return { state: "off" };
   }
 
   if (method === "GET" && path === "/v1/jobs") {
