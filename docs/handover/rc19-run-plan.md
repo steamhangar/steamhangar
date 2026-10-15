@@ -20,6 +20,17 @@ stop only for a plan deviation not covered here.
   every `dev.sh prod rate` step wait for Jan. Always `diag down` at the end.
 - **Not in this run:** Clients / Add-a-device mockups and redesign, the full
   UI pass after 0.1.0, CACHE-REPAIR-1.
+- **GRAPH-ZOOM = Weg B:** besides the web changes (1 h / 6 h ranges, trimmed
+  X axis, filled area) the API gets a 1-minute traffic tier (schema bump,
+  prune for the new tier). The Antrag must say that rollback to rc18.1 needs
+  the SQLite dump from update.sh (newer schema is refused by older code).
+  Test the migration on a copy of a populated dev DB.
+- **Downloads range default:** the range the user chose last, remembered per
+  browser (fallback 24 h when nothing is stored).
+- **MAP-DRIFT-1 cleanup:** once at startup like the UPD-FIX-1 manifest
+  repair: only orphan rows without a mapping and without bytes on disk,
+  counters in the log, a non-lossy filter with a partial-update regression
+  test.
 - LIB-SORT: "last played" only while `relay_expose_last_played` is on;
   "newly bought" is dropped.
 - NOT-OWNED-1: Weg B (`not_owned` outcome) plus 250820 as seed.
