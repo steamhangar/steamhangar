@@ -246,7 +246,8 @@ test("MUTATION PIN -- an older vault-api (no parent_appid / app_type fields) ren
   server.mode = "old";
   server.games = freshGames();
   const s = await openLibrary(4);
-  assert.deepEqual(cards(s), [10, 20, 21, 22]);
+  // WP LIB-SORT: the default order is Name A-Z now ("Cosmetics" before "Voice Pack").
+  assert.deepEqual(cards(s), [10, 20, 22, 21]);
   assert.equal(s.querySelector(".pkgline"), null);
   server.mode = "new";
 });

@@ -1,6 +1,7 @@
 package dev.steamvault.app.storage
 
 import dev.steamvault.app.ui.library.logic.LibraryLayout
+import dev.steamvault.app.ui.library.logic.LibrarySort
 
 /**
  * In-memory [LibraryPreferences] fake for JVM tests (WP 4b.4), same shape
@@ -14,5 +15,12 @@ class InMemoryLibraryPreferences(initial: LibraryLayout = LibraryLayout.DEFAULT)
     override fun getLayout(): LibraryLayout = layout
     override fun setLayout(layout: LibraryLayout) {
         this.layout = layout
+    }
+
+    private var sort: LibrarySort = LibrarySort.DEFAULT
+
+    override fun getSort(): LibrarySort = sort
+    override fun setSort(sort: LibrarySort) {
+        this.sort = sort
     }
 }

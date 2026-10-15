@@ -128,6 +128,7 @@
 
 .lib-head{
   display:flex; align-items:flex-end; justify-content:space-between; gap:10px;
+  flex-wrap:wrap; /* LIB-SORT: the tools drop below the title on 320-360px */
   margin-bottom:14px;
 }
 .lib-head h1{ margin:0 0 2px; }
@@ -135,6 +136,15 @@
   display:block; font-size:11px; font-weight:500; color:var(--dim-2); letter-spacing:.3px;
 }
 .lib-tools{ display:flex; gap:4px; flex-wrap:nowrap; flex:none; align-items:center; }
+/* WP LIB-SORT: option select + direction toggle left of the layout switch. */
+.lib-sort{ display:flex; align-items:center; gap:2px; margin-right:6px; min-width:0; }
+.lib-sort-sel{
+  height:32px; max-width:150px; padding:0 8px; border-radius:10px;
+  background:var(--raised); color:var(--text); border:1px solid var(--line);
+  font:inherit; font-size:12px;
+}
+.lib-sort-dir{ font-size:15px; line-height:1; }
+@media (max-width:400px){ .lib-sort-sel{ max-width:104px; } }
 
 /* The update-check status line ("Updates last checked 5 min ago", oracle
    off, still running). Not a live region: results are announced by the

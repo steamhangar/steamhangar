@@ -242,6 +242,27 @@ export function withOwnedPlaytime(rows, ownedGames) {
   return list.map((g) => (g && playtime.has(g.appid) ? { ...g, owned_playtime_forever: playtime.get(g.appid) } : g));
 }
 
+/**
+ * WP LIB-SORT: copy the owned list's `rtime_last_played` (unix seconds) onto
+ * the matching rows as `owned_last_played`. The relay carries the key only
+ * with the operator's `relay_expose_last_played` gate on, so a row set with
+ * no such field means the gate is off (lib/library-sort.js
+ * `lastPlayedAvailable`). Only a real non-negative number is copied.
+ * @param {object[]} rows the merged library rows
+ * @param {object[] | null | undefined} ownedGames relay `games`
+ * @returns {object[]}
+ */
+export function withOwnedLastPlayed(rows, ownedGames) {
+  const list = Array.isArray(rows) ? rows : [];
+  const played = new Map();
+  for (const g of validOwnedEntries(ownedGames)) {
+    const v = g.rtime_last_played;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0 && !played.has(g.appid)) played.set(g.appid, v);
+  }
+  if (played.size === 0) return list;
+  return list.map((g) => (g && played.has(g.appid) ? { ...g, owned_last_played: played.get(g.appid) } : g));
+}
+
 const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /**

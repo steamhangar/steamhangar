@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
@@ -38,6 +40,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -68,6 +72,15 @@ import dev.steamvault.app.ui.detail.GameDetailSheet
 import dev.steamvault.app.ui.library.logic.ChipCount
 import dev.steamvault.app.ui.library.logic.GameCardModel
 import dev.steamvault.app.ui.library.logic.LibraryLayout
+import dev.steamvault.app.ui.library.logic.LibrarySort
+import dev.steamvault.app.ui.library.logic.LibrarySortKey
+import dev.steamvault.app.ui.library.logic.LibrarySortWording
+import dev.steamvault.app.ui.library.logic.SortDirection
+import dev.steamvault.app.ui.library.logic.availableSortKeys
+import dev.steamvault.app.ui.library.logic.lastPlayedAvailable
+import dev.steamvault.app.ui.library.logic.normalizeSort
+import dev.steamvault.app.ui.library.logic.ownedLastPlayedByAppid
+import dev.steamvault.app.ui.library.logic.sortGames
 import dev.steamvault.app.ui.library.logic.StatusActionType
 import dev.steamvault.app.ui.library.logic.buildGameCardModel
 import dev.steamvault.app.ui.library.logic.chipCounts
@@ -191,8 +204,19 @@ fun LibraryScreen(
     val playtime = remember(ownedState) { ownedPlaytimeByAppid(ownedState.ownedGamesOrNull) }
     val liveJobsByAppid = remember(controller.jobs) { indexLiveJobsByAppid(controller.jobs) }
     val normalizedQuery = remember(controller.query) { normalizeQuery(controller.query) }
-    val visible = remember(grouped, normalizedQuery, controller.filterKey, liveJobsByAppid) {
-        visibleGames(grouped.rows, normalizedQuery, controller.filterKey, liveJobsByAppid, grouped.packagesByParent)
+    // WP LIB-SORT: "Last played" exists only while the relay sends it
+    // (relay_expose_last_played); a stored choice falls back to Name A-Z.
+    val lastPlayed = remember(ownedState) { ownedLastPlayedByAppid(ownedState.ownedGamesOrNull) }
+    val sortAvailable = lastPlayedAvailable(lastPlayed)
+    val activeSort = normalizeSort(controller.sort, sortAvailable)
+    val visible = remember(grouped, normalizedQuery, controller.filterKey, liveJobsByAppid, activeSort, lastPlayed) {
+        sortGames(
+            visibleGames(grouped.rows, normalizedQuery, controller.filterKey, liveJobsByAppid, grouped.packagesByParent),
+            activeSort,
+            liveJobsByAppid,
+            grouped.packagesByParent,
+            lastPlayed,
+        )
     }
     val counts = remember(grouped, normalizedQuery, liveJobsByAppid, controller.updatesSupported) {
         chipCounts(
@@ -272,7 +296,7 @@ fun LibraryScreen(
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             if (demoMode) DemoModeBanner()
-            LibraryToolbar(controller = controller)
+            LibraryToolbar(controller = controller, activeSort = activeSort, sortKeys = availableSortKeys(sortAvailable))
             CheckAndUpdateRow(controller = controller, scope = scope)
             FilterChipsRow(counts = counts, selectedKey = controller.filterKey, onSelect = { controller.filterKey = it })
             OwnedNoticeRow(
@@ -330,7 +354,7 @@ fun LibraryScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LibraryToolbar(controller: LibraryController) {
+private fun LibraryToolbar(controller: LibraryController, activeSort: LibrarySort, sortKeys: List<LibrarySortKey>) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
@@ -374,6 +398,53 @@ private fun LibraryToolbar(controller: LibraryController) {
                 // IconButton's own semantics above, not on this glyph text.
                 Text(if (controller.selecting) "✕" else "☐")
             }
+        }
+        SortRow(
+            active = activeSort,
+            keys = sortKeys,
+            onSelect = { controller.selectSort(it) },
+        )
+    }
+}
+
+/**
+ * WP LIB-SORT: the sort option (dropdown) plus the ascending/descending
+ * toggle. Labels are the web twin's literals (`LibrarySortWording`,
+ * `LibrarySortKey.label`). Persistence goes through the controller.
+ */
+@Composable
+private fun SortRow(active: LibrarySort, keys: List<LibrarySortKey>, onSelect: (LibrarySort) -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val directionLabel = LibrarySortWording.directionLabel(active)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            OutlinedButton(onClick = { menuOpen = true }) {
+                Text("${LibrarySortWording.SORT_LABEL}: ${active.key.label}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                for (key in keys) {
+                    DropdownMenuItem(
+                        text = { Text(key.label) },
+                        onClick = {
+                            menuOpen = false
+                            onSelect(LibrarySort(key, active.dir))
+                        },
+                    )
+                }
+            }
+        }
+        val toggleDescription = "${LibrarySortWording.SORT_LABEL} direction: $directionLabel"
+        TextButton(
+            onClick = {
+                val next = if (active.dir == SortDirection.ASC) SortDirection.DESC else SortDirection.ASC
+                onSelect(LibrarySort(active.key, next))
+            },
+            modifier = Modifier.semantics { contentDescription = toggleDescription },
+        ) {
+            Text((if (active.dir == SortDirection.ASC) "↑ " else "↓ ") + directionLabel)
         }
     }
 }

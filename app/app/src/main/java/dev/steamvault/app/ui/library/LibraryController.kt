@@ -18,6 +18,7 @@ import dev.steamvault.app.storage.LibraryPreferences
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateAction
 import dev.steamvault.app.ui.library.logic.CheckAndUpdateResult
 import dev.steamvault.app.ui.library.logic.LibraryLayout
+import dev.steamvault.app.ui.library.logic.LibrarySort
 import dev.steamvault.app.ui.library.logic.MEMBERS_CHANGED_NOTICE
 import dev.steamvault.app.ui.library.logic.MultiPlan
 import dev.steamvault.app.ui.library.logic.StatusActionType
@@ -75,6 +76,11 @@ class LibraryController(
     var query by mutableStateOf("")
     var filterKey by mutableStateOf("all")
     var layout by mutableStateOf(libraryPreferences.getLayout())
+        private set
+
+    /** WP LIB-SORT: the STORED choice (raw); the screen normalizes it against
+     * the live "last played" flag before use. */
+    var sort by mutableStateOf(libraryPreferences.getSort())
         private set
 
     var selecting by mutableStateOf(false)
@@ -240,6 +246,13 @@ class LibraryController(
     fun selectLayout(newLayout: LibraryLayout) {
         layout = newLayout
         libraryPreferences.setLayout(newLayout)
+    }
+
+    // ---- sort (WP LIB-SORT) -----------------------------------------------
+
+    fun selectSort(newSort: LibrarySort) {
+        sort = newSort
+        libraryPreferences.setSort(newSort)
     }
 
     // ---- selection ----------------------------------------------------
