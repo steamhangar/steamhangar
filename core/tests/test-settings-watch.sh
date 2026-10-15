@@ -15,7 +15,10 @@
 #      files are live, one SIGHUP;
 #   3. transient failure (no master): apply_file returns 2 (the loop retries
 #      the same content), the live files untouched, no SIGHUP;
-#   4. a content failure (render refused) returns 0 (no retry).
+#   4. a content failure (render refused) returns 0 (no retry);
+#   6. the watch loop: a transient failure is retried on the next ticks (same
+#      content, no change needed), logged and written to the status file
+#      ONCE for the whole streak, and applied as soon as the master is back.
 #
 #     bash core/tests/test-settings-watch.sh
 # The bash -c snippets expand their variables in the child shell on purpose.
@@ -175,6 +178,37 @@ if [ "$(status_field state)" = rejected ] && grep -q 'VAULT_PREFILL_MAX_THREADS=
     ok "prefill threads 65 from the file: rejected in the render (28- would ignore it)"
 else
     bad "prefill threads: $out / $(cat "$work/logs/settings-applied.json")"
+fi
+
+# --- 6. watch_loop retries a transient failure, logs it once ---------------------------
+live_files
+: > "$work/hups"
+printf '%s\n' "$file5" > "$work/core-settings.env"
+rm -f "$work/late.pid" "$work/logs/settings-applied.json"
+env PATH="$work/bin:$PATH" VS_LIB="$docker_dir/vault-settings-lib.sh" \
+    VS_HOOK_DIR="$work/hooks" VS_CONF_DIR="$work/etc" VS_STATUS_FILE="$work/logs/settings-applied.json" \
+    VS_SETTINGS_FILE="$work/core-settings.env" VS_PID_FILE="$work/late.pid" VS_POLL=1 VS_RELOAD_WAIT=2 \
+    VS_HEALTH_URL=http://stub/health VS_WATCH_FUNCTIONS_ONLY=1 VS_ENV_CAPTURED=1 VS_BOOT_GEN=1 \
+    bash -c 'set -eu; . "$1"; watch_loop ""' sh "$docker_dir/47-vault-settings-watch.sh" > "$work/loop.log" 2>&1 &
+loop_pid=$!
+sleep 3.5   # at least three ticks with no master
+transient_warns=$(grep -c 'no running nginx master found' "$work/loop.log" || true)
+echo "$master_pid" > "$work/late.pid"
+for _ in 1 2 3 4 5 6 7 8; do
+    grep -q 'applied (nginx reloaded' "$work/loop.log" && break
+    sleep 1
+done
+kill "$loop_pid" 2>/dev/null || true
+wait "$loop_pid" 2>/dev/null || true
+if [ "$transient_warns" = 1 ] && [ "$(grep -c 'no running nginx master found' "$work/loop.log")" = 1 ]; then
+    ok "watch loop: a transient failure over several ticks is logged once per streak"
+else
+    bad "watch loop: transient warning count $transient_warns: $(cat "$work/loop.log")"
+fi
+if grep -q 'settings generation 5 applied (nginx reloaded' "$work/loop.log" && [ "$(status_field state)" = applied ]; then
+    ok "watch loop: the same content is retried on the next tick and applied once the master is back"
+else
+    bad "watch loop retry: $(cat "$work/loop.log")"
 fi
 
 echo "test-settings-watch: $pass passed, $fail failed"
