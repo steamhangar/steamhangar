@@ -24,8 +24,8 @@ export const SECTIONS = Object.freeze([
   { id: "notify", title: "Notifications", form: true },
   { id: "other", title: "Other settings", form: true },
   { id: "steam", title: "Steam", form: false },
-  { id: "expert", title: "Expert settings", form: true },
   { id: "about", title: "About", form: false },
+  { id: "expert", title: "Expert settings", form: true },
 ]);
 
 /** Open by default (audit 1.3: "Default open: section A only"). */

@@ -1171,7 +1171,10 @@ input.inp.txt:disabled{ opacity:.55; }
    display-styled and [hidden]-toggled, hence its guard (LEARNINGS 4a.8);
    the Expert section itself is [hidden] while the expert switch is off. */
 .settings-sec{ border-top:1px solid var(--line-soft); }
-.settings-sec:last-child{ border-bottom:1px solid var(--line-soft); }
+/* Closing rules do not use :last-child (the save bar and the hidden Expert
+   section both sit after About): About and Expert carry their own. */
+.settings-sec[data-section="about"],
+.settings-sec[data-section="expert"]{ border-bottom:1px solid var(--line-soft); }
 .sec-summary{
   display:flex; align-items:center; gap:10px; min-height:44px; padding:10px 0;
   cursor:pointer; list-style:none;

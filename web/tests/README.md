@@ -2989,6 +2989,9 @@ Android words), `css-settings-save-bar.test.js` (6: fixed above the nav and
 the inset, same bottom as `.bulk` and only one bar per view, `[hidden]`
 guard, scroll room token, BP-L rail, theme tokens). `css-hygiene`'s sanity
 pin now names `.savebar` (the hidden toggle moved off `.onbnav`).
+`css-settings-section-borders.test.js` (1): no `:last-child` closing border
+on `.settings-sec`; About and Expert carry their own bottom border, so
+About keeps it while the Expert section is hidden.
 
 Mutation evidence (each alone, the seven affected files run): all 24
 killed — core OK on version only; null commits comparable; dns rule
