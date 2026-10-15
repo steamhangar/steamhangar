@@ -854,6 +854,21 @@ failed jobs Subnautica/Timberborn (measure live on the next run).
   switch. Also seen in the same screenshot: "APP 1716750" and "APP 3990420"
   cards without a name (ID-AUDIT).
 
+- NOT-OWNED-1 (Jan, 2026-10-15, SteamVR 250820 "failed"): job log ends with
+  "Prefilled 0 apps ... SteamPrefill did not consider this app - is it owned
+  by the logged-in account? Depot mapping and manifest state were NOT
+  touched." Same class as 228980 (API-FIX-4): the Demon agent reports it as
+  installed, the scheduler or miss-trigger enqueues it, SteamPrefill cannot
+  prefill an app the account does not own, the job ends `error`, the Library
+  shows "Failed" + Retry. SteamVR is not in `tool_apps.py`. Weg A: add
+  250820 to the fixed list (one entry, same review path). Weg B (better):
+  make "SteamPrefill did not consider this app" a distinct outcome
+  (`not_owned`), shown as "Not available to prefill (not owned)" instead of
+  Failed, no Retry, and excluded from scheduler/miss-trigger/"update all"
+  until the library sync says it is owned; keeps working for the next such
+  app without a code change. Recommend B, and A as the seed. Verify first
+  that 250820 is really absent from the owned list (437 owned, library sync).
+
 **UI polish (Jan, 2026-10-15; later, not scheduled yet):** (1) Clients page
 and the "Add a device" sheet look busy: the same "Anyone who sees this can
 control your hangar" warning repeats in four sections, many equally weighted
