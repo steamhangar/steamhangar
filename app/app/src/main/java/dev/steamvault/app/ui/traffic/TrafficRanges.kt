@@ -1,5 +1,7 @@
 package dev.steamvault.app.ui.traffic
 
+import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
+
 /**
  * The ranges the user chose on the Clients page, the Downloads statistics
  * and the Downloads history (WP D15d review). Held by `MainActivity` above
@@ -13,8 +15,10 @@ class TrafficRanges {
     /** Clients page, web `views/clients.js` default. */
     var clients: String = "7d"
 
-    /** Downloads statistics header, web `traffic.range` default. */
-    var statistics: String = "24h"
+    /** Downloads statistics header, web `traffic.range` default (6 h, WP
+     * GRAPH-ZOOM). Kept for the Activity's lifetime like the other ranges;
+     * the web additionally remembers it per browser. */
+    var statistics: String = DEFAULT_STATS_RANGE
 
     /** Downloads history filter, web `history.range` default. */
     var history: String = "all"

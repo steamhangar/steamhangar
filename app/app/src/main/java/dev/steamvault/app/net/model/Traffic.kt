@@ -23,6 +23,9 @@ data class EventFeedOut(
     val last_sweep_at: String? = null,
     val sweep_interval_minutes: Int = 5,
     val traffic_since: String? = null,
+    /** WP GRAPH-ZOOM: when the 1-minute tier (1 h / 6 h ranges) started
+     * filling; `null` before its first row or from an older server. */
+    val traffic_1m_since: String? = null,
 )
 
 @Serializable

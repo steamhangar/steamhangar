@@ -71,9 +71,13 @@ class TrafficWebTwinTest {
                 "Loading now",
                 "all traffic incl. prefill runner, 5-10 min window",
                 "clients only, runner excluded",
+                // WP GRAPH-ZOOM: the 1-minute tier's bucket word and the new range captions.
+                "minute",
                 "5 minutes",
                 "hour",
                 "day",
+                "1 h ago",
+                "6 h ago",
                 "24 h ago",
                 "7 days ago",
                 "30 days ago",

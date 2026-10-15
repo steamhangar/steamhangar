@@ -38,18 +38,22 @@ import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.theme.VaultColors
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
+import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
 import dev.steamvault.app.ui.traffic.logic.HISTORY_LIMIT
 import dev.steamvault.app.ui.traffic.logic.SERIES_END_TEXT
+import dev.steamvault.app.ui.traffic.logic.STATS_RANGES
 import dev.steamvault.app.ui.traffic.logic.StatTile
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
 import dev.steamvault.app.ui.traffic.logic.isRange
+import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
 import dev.steamvault.app.ui.traffic.logic.pollNote
 import dev.steamvault.app.ui.traffic.logic.seriesHighestText
 import dev.steamvault.app.ui.traffic.logic.seriesLabel
 import dev.steamvault.app.ui.traffic.logic.seriesStartText
+import dev.steamvault.app.ui.traffic.logic.trimSeries
 import dev.steamvault.app.ui.traffic.logic.tileDescription
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -63,12 +67,17 @@ import kotlinx.coroutines.launch
 /** One answer of the statistics poll: header figures and graph, same range. */
 data class StatsAnswer(val throughput: ThroughputOut, val series: SeriesOut)
 
-/** The header's poll, default range 24 h (web `traffic.range`). Figures
- * exist unless [headerTiles] has none (feed disabled). */
-fun downloadsStatsPoll(repository: TrafficRepository, initialRange: String = "24h"): TrafficPoll<StatsAnswer> = TrafficPoll(
+/** The header's poll, default range 6 h (web `traffic.range`). Figures
+ * exist unless [headerTiles] has none (feed disabled). Accepts the 1 h and
+ * 6 h ranges too (WP GRAPH-ZOOM). */
+fun downloadsStatsPoll(
+    repository: TrafficRepository,
+    initialRange: String = DEFAULT_STATS_RANGE,
+): TrafficPoll<StatsAnswer> = TrafficPoll(
     initialRange = initialRange,
     fetch = { range -> StatsAnswer(repository.throughput(range), repository.series(range)) },
     hasFigures = { headerTiles(it.throughput) != null },
+    isValidRange = ::isStatsRange,
 )
 
 /** Web "Loading statistics…" / "Could not load the statistics: ...". */
@@ -154,6 +163,7 @@ fun DownloadsStatsHeader(
                     poll.selectRange(scope, it)
                     onRangeChosen(poll.range)
                 },
+                ranges = STATS_RANGES,
             )
         }
         if (note != null) {
@@ -208,8 +218,9 @@ private const val GRAPH_H = 60f
  */
 @Composable
 private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupported: Boolean) {
-    val geo = graphGeometryToShow(series, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return
-    val shown = series ?: return
+    // WP GRAPH-ZOOM: only the span that has data; the axis caption follows it.
+    val shown = series?.let { it.copy(points = trimSeries(it.points)) } ?: return
+    val geo = graphGeometryToShow(shown, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return
     val label = seriesLabel(shown, geo.maxBytesPerSecond)
     Column(modifier = Modifier.fillMaxWidth()) {
         Canvas(
@@ -240,7 +251,7 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
             modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            for (text in listOf(seriesStartText(shown), seriesHighestText(geo.maxBytesPerSecond), SERIES_END_TEXT)) {
+            for (text in listOf(seriesStartText(shown, System.currentTimeMillis()), seriesHighestText(geo.maxBytesPerSecond), SERIES_END_TEXT)) {
                 Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
