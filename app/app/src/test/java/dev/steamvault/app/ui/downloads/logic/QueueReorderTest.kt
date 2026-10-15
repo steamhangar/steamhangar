@@ -53,7 +53,21 @@ class QueueReorderTest {
         val legacy = listOf(job(3), job(1), job(2)).sortedWith(QUEUE_ORDER)
         assertEquals(listOf(1, 2, 3), legacy.map { it.id })
         val mixed = listOf(job(3, pos = 0), job(1)).sortedWith(QUEUE_ORDER)
-        assertEquals(listOf(1, 3), mixed.map { it.id })
+        assertEquals(listOf(3, 1), mixed.map { it.id })
+        val tie = listOf(job(5, pos = 1), job(4, pos = 1)).sortedWith(QUEUE_ORDER)
+        assertEquals(listOf(4, 5), tie.map { it.id })
+    }
+
+    @Test
+    fun `QUEUE_ORDER is total and antisymmetric over mixed rows`() {
+        // The old comparator was cyclic here: 1 < 2 (id), 3 < 1 (pos), 2 < 3 (id).
+        val rows = listOf(job(2), job(1, pos = 5), job(3, pos = 0))
+        for (a in rows) for (b in rows) {
+            assertEquals(-Integer.signum(QUEUE_ORDER.compare(b, a)), Integer.signum(QUEUE_ORDER.compare(a, b)))
+        }
+        for (perm in listOf(rows, rows.reversed(), listOf(rows[1], rows[2], rows[0]))) {
+            assertEquals(listOf(3, 1, 2), perm.sortedWith(QUEUE_ORDER).map { it.id })
+        }
     }
 
     @Test

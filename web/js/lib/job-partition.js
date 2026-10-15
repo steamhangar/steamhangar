@@ -70,15 +70,18 @@ const HISTORY_STATUSES = new Set(["done", "error", "cancelled", "not_owned"]);
 const KNOWN_STATUSES = new Set(["queued", "running", "paused", "done", "error", "cancelled", "not_owned"]);
 
 /**
- * Queue draw order (WP D20): the server's `queue_position` (0 = runs next,
- * api/README.md "Queue order") when both rows carry it, else the legacy
- * oldest-id-first FIFO. A snapshot from an older API has no
- * `queue_position`, so the id fallback keeps it rendering exactly as before.
+ * Queue draw order (WP D20), a total order: rows carrying the server's
+ * `queue_position` (0 = runs next, api/README.md "Queue order") come first by
+ * position, rows without one follow, and ties break by oldest id. A snapshot
+ * from an older API has no `queue_position`, so it renders as the legacy
+ * oldest-id-first FIFO.
  */
 function byQueueOrder(a, b) {
   const pa = Number.isInteger(a.queue_position) ? a.queue_position : null;
   const pb = Number.isInteger(b.queue_position) ? b.queue_position : null;
   if (pa !== null && pb !== null && pa !== pb) return pa - pb;
+  if (pa !== null && pb === null) return -1;
+  if (pa === null && pb !== null) return 1;
   return a.id - b.id;
 }
 

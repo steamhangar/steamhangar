@@ -55,12 +55,18 @@ fun withQueuePositions(jobs: List<JobSummary>, orderedIds: List<Int>): List<JobS
     }
 
 /**
- * Queue draw order (web `byQueueOrder`): the server's `queue_position` when
- * both rows carry it, else the legacy oldest-job-id-first FIFO (an older API
- * sends none, so it renders exactly as before).
+ * Queue draw order (web `byQueueOrder`), a total order: rows carrying the
+ * server's `queue_position` come first by position, rows without one follow,
+ * and ties (equal position, or both without) break by oldest job id. An older
+ * API sends no positions, so it renders as the legacy id-first FIFO.
  */
 val QUEUE_ORDER: Comparator<JobSummary> = Comparator { a, b ->
     val pa = a.queue_position
     val pb = b.queue_position
-    if (pa != null && pb != null && pa != pb) pa.compareTo(pb) else a.id.compareTo(b.id)
+    when {
+        pa != null && pb != null && pa != pb -> pa.compareTo(pb)
+        pa != null && pb == null -> -1
+        pa == null && pb != null -> 1
+        else -> a.id.compareTo(b.id)
+    }
 }
