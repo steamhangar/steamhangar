@@ -19,7 +19,16 @@ class LibrarySortWebTwinTest {
 
     @Test
     fun `sort labels and keys are still in the web source`() {
-        val literals = LibrarySortKey.entries.flatMap { listOf(it.label, it.prefValue) } + listOf(
+        // Label-key pairs must sit together inside the SORT_OPTIONS block.
+        val block = js.substringAfter("export const SORT_OPTIONS").substringBefore("]);")
+        val badPairs = LibrarySortKey.entries.filter {
+            !Regex("key:\\s*SORT_KEY\\.${it.name},\\s*label:\\s*\"${Regex.escape(it.label)}\"").containsMatchIn(block)
+        }
+        assertTrue("Not in SORT_OPTIONS as key/label pair: $badPairs", badPairs.isEmpty())
+        val keyBlock = js.substringAfter("export const SORT_KEY").substringBefore("});")
+        val badKeys = LibrarySortKey.entries.filter { !Regex("${it.name}:\\s*\"${it.prefValue}\"").containsMatchIn(keyBlock) }
+        assertTrue("Not in SORT_KEY: $badKeys", badKeys.isEmpty())
+        val literals = listOf(
             LibrarySortWording.SORT_LABEL,
             LibrarySortWording.ASCENDING,
             LibrarySortWording.DESCENDING,

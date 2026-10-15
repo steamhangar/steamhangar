@@ -43,6 +43,12 @@ class LibrarySortTest {
     }
 
     @Test
+    fun `name compare ignores accents like web base sensitivity`() {
+        val rows = listOf(row(1, "Zebra"), row(2, "\u00c9clair"), row(3, "eagle"), row(4, "Dog"))
+        assertEquals(listOf(4, 3, 2, 1), sort(rows, LibrarySortKey.NAME, SortDirection.ASC))
+    }
+
+    @Test
     fun `size flips with direction, missing last, group size wins, ties by name`() {
         val rows = listOf(
             row(1, "B", sizeBytes = 10),

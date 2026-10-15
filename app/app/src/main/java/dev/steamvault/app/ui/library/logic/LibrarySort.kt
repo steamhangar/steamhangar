@@ -139,11 +139,18 @@ private fun valueOf(
 
 private class SortRow(val game: GameSummary, val name: String?, val value: Long?)
 
+// Primary strength: case and accents are ignored, like web's
+// localeCompare(..., { sensitivity: "base" }). Collator is not thread-safe,
+// but sorting runs on the composition thread; guard anyway via synchronized.
+private val NAME_COLLATOR: java.text.Collator = java.text.Collator.getInstance(java.util.Locale.ROOT).apply {
+    strength = java.text.Collator.PRIMARY
+}
+
 private fun compareNamesAsc(a: String?, b: String?): Int = when {
     a == null && b == null -> 0
     a == null -> 1
     b == null -> -1
-    else -> a.compareTo(b, ignoreCase = true)
+    else -> NAME_COLLATOR.compare(a, b)
 }
 
 private fun compareRows(x: SortRow, y: SortRow, byName: Boolean, sign: Int): Int {
@@ -187,5 +194,7 @@ fun sortGames(
         )
     }
     // sortedWith is stable, like Array.prototype.sort in web.
-    return rows.sortedWith(Comparator { x, y -> compareRows(x, y, byName, sign) }).map { it.game }
+    return synchronized(NAME_COLLATOR) {
+        rows.sortedWith(Comparator { x, y -> compareRows(x, y, byName, sign) }).map { it.game }
+    }
 }
