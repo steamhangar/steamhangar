@@ -2449,7 +2449,9 @@ steamhangar/
 | SteamPrefill upstream dependency | LOW | Used only as a CLI subprocess, replaceable |
 
 **Deliberately OUT of scope (v1):** multi-service (Epic etc.), multi-tenant
-setups. *(The web UI moved INTO scope as Phase 4a by user decision on
+setups. Multi-launcher caching (Ubisoft, Battle.net, Epic) is a roadmap
+item for v0.2 or later (`docs/handover/post-0.1.0-roadmap.md` D17,
+user decision 2026-10-15). *(The web UI moved INTO scope as Phase 4a by user decision on
 2026-08-06 — it shares the app's design language and API surface and is
 served by vault-api itself.)*
 

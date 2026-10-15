@@ -33,6 +33,12 @@ stop only for a plan deviation not covered here.
   test.
 - LIB-SORT: "last played" only while `relay_expose_last_played` is on;
   "newly bought" is dropped.
+- **D16 neutral naming (D17 prep):** the upstream rate cap, its window and
+  the connection caps are labelled as the vault's upstream (WAN) budget in
+  the web UI and the Android UI, never as "Steam"; help texts likewise.
+  Stored settings keys keep their names (they are persisted since rc18.1);
+  only if a key itself is Steam-named, report it in the handover instead of
+  renaming it. Steam-only settings stay in the Steam section.
 - NOT-OWNED-1: Weg B (`not_owned` outcome) plus 250820 as seed.
 
 ## Waves (max 3 agents at once, resume instead of respawn)

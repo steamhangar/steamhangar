@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D16)
+# Handover: post-v0.1.0 roadmap (items D1-D18)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -444,6 +444,226 @@ is an Antrag to the user, never a self-service edit. Also audit the
 Settings page structure (web/js/views/settings.js, 1466 lines; 9
 override keys in settings_store.py vs 47 env vars): collapsible sections,
 tooltips instead of text walls. Order: Wave 2, before D15.
+
+## D17: MULTI-LAUNCHER-1, cache more launchers than Steam ("GameHangar")
+
+Roadmap only, **not before v0.2** (user decision 2026-10-15). No work
+package exists yet. This section keeps the plan readable months later:
+why it came up, what was measured, what the code does today, which
+options exist and what should be prepared earlier so the later step stays
+cheap.
+
+### Origin and goal
+
+The user's documentation session proposed it on 2026-10-15 after a
+Ubisoft Connect download on the LAN ("it is slowly becoming the
+GameHangar, not Steam"). Goal: the vault also caches downloads of other
+launchers (first Ubisoft Connect, Battle.net, Epic; later possibly
+Rockstar, Riot and others), so the second download of the same game on
+the LAN is served from the vault, while every Steam function stays as it
+is. Done means: a repeat download per launcher shows `cache=HIT` in the
+vault-core log, and the Steam tests and `verify` stay green.
+
+Not part of D17: a product rename (own decision, see "Prepare earlier"),
+new hardware, library or update-check features for other launchers. The
+first step is a transparent cache only; the web UI may show traffic per
+launcher, nothing more.
+
+### What was measured (user, 2026-10-15)
+
+Ubisoft Connect, Anno 117 (4.69 GB) on a Windows client:
+
+- The content download is plain **HTTP on port 80**: the `upc` process
+  held 8 connections to one CDN address on :80 (PowerShell
+  `Get-NetTCPConnection` during the download; the address looked like
+  Akamai, unverified).
+- The download host `uplaypc-s-ubisoft.cdn.ubi.com` (A record) showed up
+  in the LAN resolver's query log, last at the moment the paused download
+  resumed. A DNS rewrite to vault-core would therefore reach it.
+- Control traffic runs on 443 to several `*.ubi.com` / `*.ubisoft.com`
+  hosts. It is not cacheable and does not need to be.
+- Throughput straight from the internet: about 14 MB/s.
+- Open: for six hours before that, no Ubisoft name appeared in the
+  resolver log although part of the download already ran. Cause unknown;
+  Wi-Fi was ruled out. Short TTLs or a client-side cache are candidates.
+- There is no prefill tool for Ubisoft (as far as known), so its cache
+  only fills on the first real client download.
+
+Battle.net and Epic: not measured. lancache's `cache-domains` list has
+entries for both (`blizzard`, `epicgames`) and treats them as cacheable
+over HTTP. The SteamPrefill author also publishes BattleNetPrefill and
+EpicPrefill (versions, license and Epic login need checking). All of
+this is from memory, not verified.
+
+### What is Steam-specific today (state rc18.1)
+
+- **vault-core storage model.** A `proxy_store` path mirror (ADR-0001):
+  each file sits under its URL path (`/vault/cache/depot/<id>/chunk/...`),
+  a hit is served by `try_files` straight from disk, a miss fetches the
+  whole file and stores it. On a miss the client's `Range` header is
+  stripped (`core/docker/nginx.conf.template`, location `@miss`), because
+  Steam chunks are small whole files. There is no cache key, no `slice`,
+  and no `max_size`/`inactive` bound; those exist only for nginx's other
+  cache type, `proxy_cache`.
+- **vault-core routing.** The port-80 server serves `/depot/` only; the
+  upstream map and the port-443 SNI passthrough (ADR-0020) accept
+  `*.steamcontent.com` only. The upstream pool, the connection cap and
+  the rate cap (ADR-0015, ADR-0017, ADR-0021) are tuned for Steam edges.
+- **DNS.** The LAN rewrite covers `*.steamcontent.com` only (`dns/`
+  README; the operator's resolver config lives outside the repo).
+- **vault-api.** Manifests, the update check, library, agent reports,
+  miss trigger and GC are all keyed by Steam app and depot ids.
+- **GC.** Only ever touches files named by exactly 40 hex characters
+  directly in `depot/<id>/chunk/` (`api/vault_api/gc.py`). Files of other
+  launchers outside `depot/` are safe from it, but nothing bounds or
+  cleans them either.
+- **Log and event feed.** The vault log line already carries `host=`, so
+  traffic per launcher can be counted later. The event sweep only accepts
+  `/depot/<id>/chunk/...` URIs (`api/vault_api/event_sweep.py`) and
+  ignores everything else.
+- **Prefill.** The runner's egress is a network-enforced allowlist
+  (ADR-0011); Steam credentials never enter the vault (ADR-0004).
+
+### Options
+
+- **Weg A, extend vault-core.** One cache path per launcher in
+  vault-core, DNS rewrites per launcher, the same rate and connection
+  caps for all. Prefill for Battle.net and Epic in the runner later.
+  Ubisoft on demand only.
+- **Weg B, a lancache sidecar for the other launchers.** Faster to
+  build; lancache already knows the domains and the `slice` setup. Cost:
+  a second cache to maintain, its own size bound, no shared UI.
+- **Mix.** Launchers whose files fit the path mirror (likely Epic) in
+  vault-core, the rest through a lancache sidecar.
+
+Assessment from the code check (2026-10-15): Weg A is bigger than it
+looks. Battle.net reads byte ranges out of large archive files; lancache
+needs `slice` for it. The path mirror cannot store partial responses, so
+Weg A would add a second, `proxy_cache`-based cache path to core. That
+weighs towards Weg B or the mix. Whichever way: keep vault-core as the
+single front door (see below).
+
+### Decisions (user, 2026-10-15)
+
+- **Timing:** roadmap, not before v0.2.
+- **One front door:** vault-core stays the only listener on the vault
+  address for :80 and :443 and dispatches by Host/SNI; a later lancache
+  sidecar sits behind it, never on its own address. The global connection
+  and rate caps cover every launcher. Goes into the D17 ADR as a fixed
+  premise.
+- **Neutral cap names:** done in the rc19 run (D16 labels, see
+  `rc19-run-plan.md`).
+- **Name:** the product becomes **GameHangar**; the rename is item D18.
+
+### Prepare earlier (cheap now, expensive later)
+
+These do not need D17 to start; they keep the door open.
+
+1. **One front door.** Decide (ADR) that vault-core stays the only
+   listener on the vault address for :80 and :443 and dispatches by Host
+   or SNI, also if a lancache sidecar comes later. A second cache with
+   its own address would bypass the global connection and rate caps
+   (ADR-0021), which exist because of the CGNAT line. If the user
+   prefers a separate address instead, reserve it in the network plan
+   early (request to the operator).
+2. **Neutral names in D16.** The upstream rate and connection caps are
+   moving into Settings right now (D16). Label them as the vault's WAN
+   budget ("Upstream", not "Steam"), so later launchers share the same
+   knobs without a rename. Steam-only things stay in the Steam section.
+3. **Cache namespace rule.** Write down now: content of other launchers
+   never goes under `depot/`; it gets sibling trees
+   (`/vault/cache/<launcher>/...`). GC and the event sweep then need no
+   change to stay safe. Size reporting must not assume `depot/` is the
+   whole cache.
+4. **Name before public release.** Decided: GameHangar (D18). It must
+   land before the first public release, not after.
+   Component names are already neutral (`vault-core`, `vault-api`, ...).
+   What a rename touches: GitHub org and repo, `ghcr.io/steamhangar/*`,
+   the Compose project name (it prefixes volume names; volumes cannot be
+   renamed, see ADR-0013 for the copy procedure), the Android
+   `applicationId` (still `dev.steamvault.app`; it cannot change once
+   users install from a store), the Windows agent's service name and the
+   docs. The public domain can stay.
+5. **HTTPS-only launchers are out.** Caching works only for plain-HTTP
+   content downloads. TLS interception is a permanent non-goal. Every
+   new launcher gets a short measurement first (ports, DNS names, Range
+   headers); EA app and GOG are expected to fail this test, Rockstar and
+   Riot are listed in lancache's `cache-domains` (unverified).
+6. **No provider column yet.** A `provider` dimension in the database is
+   an additive migration (default `steam`) when it is needed. Do not
+   build it ahead of time.
+
+### Before the ADR (checklist)
+
+- Measure per launcher during a real download: ports (80 vs. 443), DNS
+  names from the resolver log, and whether the client sends `Range`
+  (needs the HTTP headers, not just the connection list).
+- Settle Weg A / Weg B / mix (user).
+- Size bound for non-Steam content (dataset quota is shared with Steam).
+- Runner egress hosts for prefill; for EpicPrefill the login question,
+  decided like ADR-0004 decided it for Steam.
+- New phase in `docs/PROJECT_PLAN.md` (multi-service is out of scope for
+  v1), ADR, and requests to the operator for DNS rewrites and the SNI
+  passthrough list (network changes are never self-service).
+- Rename D18 done or scheduled (item 4 above).
+
+## D18: RENAME-2, SteamHangar -> GameHangar
+
+User decision 2026-10-15: the product is renamed to GameHangar, because
+D17 makes it more than a Steam cache. Timing is still open; it must land
+before the first public release, and it does not depend on D17 being
+built. Model: ADR-0013 (SteamVault -> SteamHangar), which lists what a
+rename touches and how volumes are carried over.
+
+What it touches (inventory 2026-10-15, check again before starting):
+
+- GitHub org and repo `steamhangar/steamhangar` (GitHub redirects old
+  URLs, but update every link), the Go module path of `agent/`.
+- Container images `ghcr.io/steamhangar/vault-*` (component names
+  `vault-*` stay; only the namespace moves). Old tags stay pullable for
+  existing deployments.
+- Compose project name `steamhangar`: it prefixes named volumes. Volumes
+  cannot be renamed (ADR-0013 copy procedure), so either keep `name:`
+  overrides on the volumes or plan the copy. The operator's production
+  stack, its volume labels and its cache dataset are the operator's
+  business: request, never self-service.
+- Android `applicationId` is still `dev.steamvault.app` (never changed in
+  RN-1). Changing it means a new app for Android: users uninstall and
+  reinstall. Do it in the same step, before any store publication.
+- Windows agent: service name, install paths, winget/installer ids.
+- Product strings in web UI, app, docs, README, `about` endpoint, the
+  `/dist` download names, webhooks' user agent.
+- The public domain can stay.
+
+Name availability (checked 2026-10-15, re-check before the ADR):
+
+- "GameVault" was considered and rejected: an established self-hosted,
+  Docker-based game platform of that name exists (gamevau.lt), the same
+  kind of collision that ended "SteamVault" (ADR-0013).
+- "GameHangar": no self-hosted or cache project of that name found in a
+  web search; only a small hobby repo (`Koubae/game-hangar`) and unrelated
+  shops with similar names. Not a trademark search.
+- GitHub org `GameHangar` is **taken** (empty organisation, created
+  2025-06-04, no public repos). Free: `gamehangar-app`, `gamehangar-dev`,
+  `gamehangar-io`, `gamehangarhq`. The ghcr namespace follows the org, so
+  images would be `ghcr.io/<new-org>/vault-*`. Options for the ADR: ask
+  GitHub for the inactive name, pick one of the free orgs, or keep the
+  `steamhangar` org and rename only product and repo.
+- Domains: `gamehangar.com` is **taken** (registered 2009, redirects to
+  the games publisher Wired Productions; check for a trademark before
+  going public). `.net`, `.org`, `.io`, `.app`, `.dev`, `.de` had no
+  registration in RDAP. The public instance domain does not depend on it.
+- Domain hack `gamehang.ar` (Argentina, in the style of `gamevau.lt`):
+  not registered, nor `gamehangar.ar` / `gamehangar.com.ar` (NIC
+  Argentina RDAP 404; cross-check with registered `.ar` names returned
+  200). Caveat, unverified: NIC Argentina is understood to require an
+  Argentine tax login, so a foreign owner registers through a registrar
+  with a trustee/local-presence service (higher cost, dependence on the
+  trustee). Confirm with a registrar before deciding.
+
+Steps: inventory with grep, ADR with the open questions (volume strategy,
+`applicationId`, old image tags, redirect period), user decision, then one
+package per component. Not during the v0.1.0 release chain.
 
 ## Wave plan (user-approved 2026-10-13)
 
