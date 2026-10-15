@@ -360,6 +360,22 @@ class FakeElement {
     node.parentNode = this;
     return node;
   }
+  // WP D20 (downloads-queue-reorder.test.js): `insertBefore(node, ref)` with
+  // move semantics (a node already in the tree is detached first). `ref`
+  // must be a child of this node, as in the DOM (else it throws).
+  insertBefore(node, ref) {
+    if (ref === null || ref === undefined) return this.appendChild(node);
+    if (node.parentNode) {
+      const oldParent = node.parentNode;
+      const at = oldParent.childNodes.indexOf(node);
+      if (at !== -1) oldParent.childNodes.splice(at, 1);
+    }
+    const idx = this.childNodes.indexOf(ref);
+    if (idx === -1) throw new Error("fake-dom.js: insertBefore ref is not a child of this node");
+    this.childNodes.splice(idx, 0, node);
+    node.parentNode = this;
+    return node;
+  }
   // WP WEB-FIX-1 (onboarding-wiring.test.js): onboarding.js's `staticIcon`
   // does `span.innerHTML = "<svg ...>...</svg>"; return span.firstElementChild`
   // to turn an SVG string constant into a node. This shim does not parse

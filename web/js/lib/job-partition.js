@@ -70,6 +70,19 @@ const HISTORY_STATUSES = new Set(["done", "error", "cancelled", "not_owned"]);
 const KNOWN_STATUSES = new Set(["queued", "running", "paused", "done", "error", "cancelled", "not_owned"]);
 
 /**
+ * Queue draw order (WP D20): the server's `queue_position` (0 = runs next,
+ * api/README.md "Queue order") when both rows carry it, else the legacy
+ * oldest-id-first FIFO. A snapshot from an older API has no
+ * `queue_position`, so the id fallback keeps it rendering exactly as before.
+ */
+function byQueueOrder(a, b) {
+  const pa = Number.isInteger(a.queue_position) ? a.queue_position : null;
+  const pb = Number.isInteger(b.queue_position) ? b.queue_position : null;
+  if (pa !== null && pb !== null && pa !== pb) return pa - pb;
+  return a.id - b.id;
+}
+
+/**
  * @param {object[] | null | undefined} jobs `GET /v1/jobs` snapshot.
  * @returns {{running: object[], paused: object[], queued: object[], history: object[]}}
  *   `queued` is sorted oldest-job-id-first (FIFO draw order,
@@ -84,7 +97,7 @@ export function partitionJobs(jobs) {
   const list = Array.isArray(jobs) ? jobs : [];
   const running = list.filter((j) => j.status === "running");
   const paused = list.filter((j) => j.status === "paused");
-  const queued = list.filter((j) => j.status === "queued").sort((a, b) => a.id - b.id);
+  const queued = list.filter((j) => j.status === "queued").sort(byQueueOrder);
   const history = list.filter((j) => HISTORY_STATUSES.has(j.status) || !KNOWN_STATUSES.has(j.status));
   return { running, paused, queued, history };
 }

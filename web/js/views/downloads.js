@@ -158,6 +158,7 @@ import {
   activeJobWord,
 } from "../lib/job-partition.js";
 import { planJobsUpdate } from "../lib/downloads-render-plan.js";
+import { reorderIds, keyTargetIndex, dropIndex, withQueuePositions } from "../lib/queue-reorder.js";
 import { selectExcerptDisplay, EXCERPT_STATE } from "../lib/log-excerpt.js";
 import { formatTimestamp, formatBytesGB } from "../lib/format.js";
 import {
@@ -1041,7 +1042,7 @@ function buildJobCard(job, mode, gamesByAppid) {
 // Queue row
 // ---------------------------------------------------------------------
 
-function buildQueueRow(job, position, gamesByAppid) {
+function buildQueueRow(job, position, gamesByAppid, total = 1) {
   const row = document.createElement("div");
   row.className = "qrow";
   row.dataset.jid = String(job.id);
@@ -1056,6 +1057,26 @@ function buildQueueRow(job, position, gamesByAppid) {
   nm.dataset.appid = String(job.appid);
   nm.textContent = nameFor(job.appid, gamesByAppid);
 
+  // WP D20: the grip is the reorder handle (pointer drag, or focus + arrow
+  // keys). With one queued job, or while the connection is lost, there is
+  // nothing to move: it stays a plain icon and is not focusable.
+  if (total > 1 && !isConnectionLost()) {
+    gripWrap.className = "grip grip-live";
+    gripWrap.setAttribute("role", "button");
+    gripWrap.setAttribute("tabindex", "0");
+    gripWrap.setAttribute(
+      "aria-label",
+      `Reorder ${nm.textContent}, position ${position} of ${total}. Use the up and down arrow keys, Home or End.`,
+    );
+    gripWrap.addEventListener("keydown", (e) => {
+      const target = keyTargetIndex(e.key, position - 1, total);
+      if (target === null) return;
+      e.preventDefault();
+      void moveQueued(job.id, target, { refocus: true });
+    });
+    gripWrap.addEventListener("pointerdown", (e) => startQueueDrag(e, row, job.id));
+  }
+
   const pos = document.createElement("span");
   pos.className = "pos";
   pos.textContent = `#${position}`;
@@ -1064,6 +1085,118 @@ function buildQueueRow(job, position, gamesByAppid) {
 
   row.append(gripWrap, nm, pos, removeBtn);
   return row;
+}
+
+// ---------------------------------------------------------------------
+// Queue reorder (WP D20)
+// ---------------------------------------------------------------------
+
+/** While a drag or a move request is in flight a jobs poll must not repaint
+ * the queue (it would snap the row back or drop the optimistic order).
+ * `holds` counts those; a poll that arrives meanwhile sets `dirty` and the
+ * repaint happens on release. */
+const reorder = { holds: 0, dirty: false };
+
+/** The job id whose reorder handle has keyboard focus, else null. */
+function focusedGripJid() {
+  const active = document.activeElement;
+  if (!active || !active.classList || !active.classList.contains("grip-live")) return null;
+  const row = active.parentNode;
+  return row && row.dataset && row.dataset.jid ? Number(row.dataset.jid) : null;
+}
+
+function focusGrip(jobId) {
+  if (!mounted()) return;
+  const grip = els.queueBody.querySelector(`.qrow[data-jid="${jobId}"] .grip`);
+  if (grip && typeof grip.focus === "function") grip.focus();
+}
+
+/**
+ * Move a queued job to `toIndex` (0-based among the queued jobs). The list
+ * is reordered at once (optimistic) and `POST /v1/jobs/{id}/move` is sent;
+ * on failure the previous order is restored and the error shown. The
+ * server's answer is authoritative, so a refresh follows either way.
+ * @returns {Promise<boolean>} true when a request was sent and accepted
+ */
+async function moveQueued(jobId, toIndex, { refocus = false } = {}) {
+  if (reorder.holds > 0) return false; // one move at a time
+  const ids = partitionJobs(state.jobs).queued.map((j) => j.id);
+  const next = reorderIds(ids, jobId, toIndex);
+  if (next.every((id, i) => id === ids[i])) return false;
+
+  const before = state.jobs;
+  state.jobs = withQueuePositions(before, next);
+  fullRender();
+  if (refocus) focusGrip(jobId);
+
+  reorder.holds += 1;
+  let ok = false;
+  try {
+    await api.moveJob(jobId, next.indexOf(jobId));
+    ok = true;
+  } catch (err) {
+    state.jobs = store.snapshot("jobs") || before;
+    showToast(errorText(err), { warn: true });
+  }
+  reorder.holds -= 1;
+  reorder.dirty = false;
+  if (!ok) {
+    fullRender();
+    if (refocus) focusGrip(jobId);
+  }
+  store.refreshNow();
+  return ok;
+}
+
+/** Pointer drag of a queue row by its grip. The row follows the pointer in
+ * the DOM (moved between its siblings); on release the final index is sent
+ * through {@link moveQueued}. Escape or a cancelled pointer puts it back. */
+function startQueueDrag(e, row, jobId) {
+  if (e.button !== undefined && e.button !== 0) return;
+  if (reorder.holds > 0) return;
+  e.preventDefault();
+  reorder.holds += 1;
+  row.classList.add("dragging");
+  let index = Array.from(els.queueBody.querySelectorAll(".qrow")).indexOf(row);
+
+  const others = () => Array.from(els.queueBody.querySelectorAll(".qrow")).filter((r) => r !== row);
+
+  const onMove = (ev) => {
+    const rows = others();
+    const mids = rows.map((r) => {
+      const box = r.getBoundingClientRect();
+      return box.top + box.height / 2;
+    });
+    index = dropIndex(mids, ev.clientY);
+    const anchor = rows[index] || null;
+    if (anchor) els.queueBody.insertBefore(row, anchor);
+    else els.queueBody.appendChild(row);
+  };
+  const finish = (commit) => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onCancelDrag);
+    document.removeEventListener("keydown", onKey);
+    row.classList.remove("dragging");
+    reorder.holds -= 1;
+    reorder.dirty = false;
+    if (commit) {
+      void moveQueued(jobId, index).then((sent) => {
+        if (!sent) fullRender();
+      });
+    } else {
+      fullRender();
+    }
+  };
+  const onUp = () => finish(true);
+  const onCancelDrag = () => finish(false);
+  const onKey = (ev) => {
+    if (ev.key === "Escape") finish(false);
+  };
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
+  document.addEventListener("pointercancel", onCancelDrag);
+  document.addEventListener("keydown", onKey);
 }
 
 // ---------------------------------------------------------------------
@@ -1370,20 +1503,24 @@ function fullRender() {
   for (const job of p.paused) els.pausedBody.appendChild(buildJobCard(job, "held", gamesByAppid));
 
   els.queueCount.textContent = String(p.queued.length);
+  // WP D20: a rebuild must not drop keyboard focus from a reorder handle.
+  const focusedJid = focusedGripJid();
   els.queueBody.replaceChildren();
   if (!p.queued.length) {
     els.queueBody.appendChild(hintMessage("Nothing waiting."));
     els.queueHint.textContent = "";
   } else {
     for (const job of p.queued) {
-      els.queueBody.appendChild(buildQueueRow(job, queuePosition(p.queued, job.id), gamesByAppid));
+      els.queueBody.appendChild(buildQueueRow(job, queuePosition(p.queued, job.id), gamesByAppid, p.queued.length));
     }
     els.queueHint.textContent =
-      "vault-api runs one job at a time, oldest first. Drag-to-reorder is not built yet — the queue is FIFO." +
+      "vault-api runs one job at a time, top of the list first. Drag a row by its handle, or focus the handle and use the arrow keys, to change the order." +
       (hasPaused
-        ? " A paused job does not hold this queue back — it keeps draining oldest-first."
+        ? " A paused job does not hold this queue back — the queue keeps draining."
         : "");
   }
+
+  if (focusedJid !== null) focusGrip(focusedJid);
 
   maybeLoadOwnedNames();
 
@@ -1988,7 +2125,10 @@ store.subscribe("jobs", ({ items, diff }) => {
 
   if (!mounted()) return;
   const plan = planJobsUpdate(diff);
-  if (plan.full) {
+  if (plan.full && reorder.holds > 0) {
+    // WP D20: a drag or a move request holds the queue; the release repaints.
+    reorder.dirty = true;
+  } else if (plan.full) {
     fullRender();
   } else if (plan.patchStopRequest.length) {
     patchStopRequests(plan.patchStopRequest);
