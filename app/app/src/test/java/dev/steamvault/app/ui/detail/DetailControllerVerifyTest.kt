@@ -15,6 +15,7 @@ import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
+import dev.steamvault.app.repo.OffCardInfoRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -82,7 +83,7 @@ private object VerifyStrings : DetailStrings {
 /** WP CACHE-COMPLETE-1c: the detail sheet's "Verify" (web `startSheetVerify`). */
 class DetailControllerVerifyTest {
 
-    private fun controller(jobs: JobsRepository) = DetailController(VerifyNoGames, jobs, VerifyNoMapping, VerifyNoCache, VerifyStrings)
+    private fun controller(jobs: JobsRepository) = DetailController(VerifyNoGames, jobs, VerifyNoMapping, VerifyNoCache, OffCardInfoRepository, VerifyStrings)
 
     @Test
     fun `MUTATION PIN -- Verify posts exactly the given ids to prefill verify, never a plain prefill`() = runTest {

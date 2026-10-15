@@ -15,6 +15,7 @@ import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
+import dev.steamvault.app.repo.OffCardInfoRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -71,7 +72,7 @@ private object Strings : DetailStrings {
 /** WP UPD-6 review fix: the detail sheet's "Update now" (web `startSheetUpdate`). */
 class DetailControllerUpdateTest {
 
-    private fun controller(jobs: JobsRepository) = DetailController(NoGames, jobs, NoMapping, NoCache, Strings)
+    private fun controller(jobs: JobsRepository) = DetailController(NoGames, jobs, NoMapping, NoCache, OffCardInfoRepository, Strings)
 
     @Test
     fun `MUTATION PIN -- sends exactly the given ids and toasts the update wording`() = runTest {
