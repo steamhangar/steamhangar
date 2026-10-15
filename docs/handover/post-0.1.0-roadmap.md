@@ -841,6 +841,19 @@ failed jobs Subnautica/Timberborn (measure live on the next run).
   whether the technical "appid" on job cards stays (it is a deliberate
   detail line).
 
+- LIB-SORT (Jan, 2026-10-15): the Library has filters but no sort control.
+  Wanted: alphabetical, last played, ascending/descending, newly bought.
+  Data check: A-Z/Z-A, size, state (cached/installed), "last cached or
+  updated" (job history) and an appid-descending proxy for "newest" need no
+  new data. "Last played" and playtime are OFF by default by an explicit
+  privacy decision (config.py `relay_expose_last_played`, shared-household
+  vault); sorting by them needs that opt-in, so offer the sort option only
+  when the setting is on. Steam's owned-games data has no purchase date, so
+  "newly bought" can only be approximated (first time the vault saw the app,
+  if stored; otherwise appid). Persist the choice per browser like the view
+  switch. Also seen in the same screenshot: "APP 1716750" and "APP 3990420"
+  cards without a name (ID-AUDIT).
+
 **UI polish (Jan, 2026-10-15; later, not scheduled yet):** (1) Clients page
 and the "Add a device" sheet look busy: the same "Anyone who sees this can
 control your hangar" warning repeats in four sections, many equally weighted
