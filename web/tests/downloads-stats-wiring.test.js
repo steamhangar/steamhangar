@@ -28,7 +28,9 @@ import { createFakeDom } from "./fake-dom.js";
 
 const dom = createFakeDom();
 globalThis.document = dom.document;
-const storage = new Map([["steamvault.apiKey", "test-key"]]);
+// Downloads now defaults to the live range; these tests fake the persisted
+// endpoints, so they start from a stored "6h" choice (which must keep working).
+const storage = new Map([["steamvault.apiKey", "test-key"], ["steamvault.downloadsRange", "6h"]]);
 globalThis.window = {
   localStorage: {
     getItem: (k) => (storage.has(k) ? storage.get(k) : null),
@@ -39,6 +41,8 @@ globalThis.window = {
   addEventListener() {},
   removeEventListener() {},
 };
+
+globalThis.localStorage = globalThis.window.localStorage; // what readStoredStatsRange reads
 
 const MIB = 1024 ** 2;
 const GIB = 1024 ** 3;
@@ -177,7 +181,7 @@ test("MUTATION TARGET: feed ok — eight tiles, a labelled SVG graph, and the ru
   const svg = q(s, "graph-svg");
   assert.equal(svg.tagName, "SVG");
   assert.equal(svg.getAttribute("role"), "img");
-  assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s."); // default range: 6 h (GRAPH-ZOOM)
+  assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s."); // stored range: 6 h (the default is live since LIVE-DELAY-1)
   assert.equal(svg.children[1].getAttribute("d"), "M0 60 L150 0 L300 30");
   assert.equal(q(s, "stats-graph").querySelector(".tg-axis").textContent, "6 h agohighest 10.0 MB/snow");
   await until(() => speed(s) !== null, "speed line");

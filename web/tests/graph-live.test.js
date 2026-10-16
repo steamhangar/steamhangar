@@ -72,6 +72,9 @@ test("mergeLive takes Current speed from the live tier, the rest from the 1 h su
   assert.equal(merged.live, true);
   assert.equal(merged.current.bytes_per_second, live.current.bytes_per_second);
   assert.deepEqual(merged.summary, summary.summary);
+  // "Loading now" comes from the live ring, not the lagging persisted summary.
+  assert.equal(merged.active_clients_now, live.active_clients);
+  assert.equal(merged.active_window_minutes, live.active_window_minutes);
   const tiles = headerTiles(merged);
   const current = tiles.find((t) => t.key === "current");
   assert.match(current.detail, /last \d+ s/);
@@ -81,6 +84,7 @@ test("mergeLive takes Current speed from the live tier, the rest from the 1 h su
   const fallback = mergeLive(summary, { ...live, event_feed: { ...live.event_feed, state: "disabled" } });
   assert.equal(fallback.live, false);
   assert.equal(fallback.current.bytes_per_second, summary.current.bytes_per_second);
+  assert.equal(fallback.active_clients_now, summary.active_clients_now);
 });
 
 test("the axis caption of the live view", () => {

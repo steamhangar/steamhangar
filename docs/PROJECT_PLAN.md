@@ -3379,10 +3379,25 @@ below carry their own later dates, item 12 is the current one).
       SHEET-MOTION-1 first (shared base), then the page packages;
       LIVE-DELAY-1 lands before DOWNLOADS-1. The three non-web packages
       below (user decisions 2026-10-16) ride in the same rc.
-      - [ ] **LIVE-DELAY-1** (moved from rc19.3, user decision
+      - [x] **LIVE-DELAY-1** (moved from rc19.3, user decision
         2026-10-16) analysis, then fix: the Downloads page shows client
         downloads more than 1 min late. Analysis and fix land BEFORE
         DOWNLOADS-1, so the redesign builds on the fixed data path.
+        Analysis done (2026-10-16): no bug, a by-design latency. The
+        default range (6h) and every non-live range read the sweep-fed
+        tiers (sweep every 5 min, +60 s scheduler tick, +5 s nginx flush,
+        +30 s web poll): up to ~6 min late. The `live` range is ~10 s. Fix
+        was decided Weg A (Jan, 2026-10-16) and is done: the Downloads
+        default range is now `live` (`DEFAULT_STATS_RANGE`; a stored "6h"
+        or other choice in localStorage still wins), and
+        `GET /v1/throughput/live` has an additive `active_clients` (+
+        `active_window_minutes`, 5) counted from the ring, which
+        `mergeLive` uses for `active_clients_now` / the "Loading now" tile.
+        No schema change, no new env value. **For DOWNLOADS-1:** the page
+        now starts on `live` (polls `/v1/throughput/live` every 3 s plus the
+        1h summary every 30 s); tests that fake only the persisted endpoints
+        must store `steamvault.downloadsRange` = "6h" and set
+        `globalThis.localStorage` (see `downloads-stats-wiring.test.js`).
       - [ ] **BOOT-RATE-1** (core, roadmap D24) vault-core renders the
         default rate window 03:00-07:00 at boot until settings generation 1
         is applied, so a restart between 03:00 and 07:00 runs unthrottled

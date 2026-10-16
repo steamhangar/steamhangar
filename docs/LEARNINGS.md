@@ -1171,3 +1171,19 @@ These are not style preferences; each entry cost a review round to learn.
   the `VAULT_NGINX_AIO=threads` switch therefore also sets `sendfile off`.
 - busybox `iostat` has no `-x`, and Glances rates are averaged since the last
   query: neither shows peaks. Use short repeated samples for peak load.
+
+- LIVE-DELAY-1 (root cause): "client downloads show late" on Downloads is
+  the event sweep cadence, not a bug. Every non-live range (default 6h)
+  reads tiers that the sweep fills (5 min interval, 60 s scheduler tick,
+  nginx flush 5 s, web poll 30 s, `traffic.py` module doc, `current_window`),
+  so figures and `active_clients_now` lag up to ~6 min. Only the `live`
+  range (`live_tier.py`, 3 s poll, 2 s tail) is ~10 s, and even there
+  `active_clients_now` still comes from the persisted summary. Check which
+  tier feeds a figure before hunting for a poll or cache bug: no
+  Cache-Control or proxy buffering is involved on the JSON endpoints.
+  Fix (Weg A, Jan 2026-10-16): Downloads defaults to `live`;
+  `GET /v1/throughput/live` carries `active_clients` (distinct non-runner
+  addresses in the ring over 5 min) and `mergeLive` uses it. A test that
+  mounts the Downloads view must set `globalThis.localStorage` itself:
+  `readStoredStatsRange` reads that, not `window.localStorage`, so a fake
+  window alone silently gets the default range.

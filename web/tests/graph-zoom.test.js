@@ -41,18 +41,19 @@ test("the stats ranges add live, 1 h and 6 h; the shared four stay the shared fo
   assert.equal(bucketWord(60), "minute");
 });
 
-test("MUTATION TARGET: the range default is 6 h; a stored valid range wins; junk falls back", () => {
-  assert.equal(DEFAULT_STATS_RANGE, "6h");
-  assert.equal(readStoredStatsRange(() => memory()), "6h");
+test("MUTATION TARGET: the range default is live; a stored valid range wins; junk falls back", () => {
+  assert.equal(DEFAULT_STATS_RANGE, "live");
+  assert.equal(readStoredStatsRange(() => memory()), "live");
   assert.equal(readStoredStatsRange(() => memory({ [STATS_RANGE_KEY]: "7d" })), "7d");
   assert.equal(readStoredStatsRange(() => memory({ [STATS_RANGE_KEY]: "1h" })), "1h");
-  assert.equal(readStoredStatsRange(() => memory({ [STATS_RANGE_KEY]: "2h" })), "6h");
-  assert.equal(readStoredStatsRange(() => null), "6h", "no storage");
+  assert.equal(readStoredStatsRange(() => memory({ [STATS_RANGE_KEY]: "6h" })), "6h", "a stored 6 h choice keeps working");
+  assert.equal(readStoredStatsRange(() => memory({ [STATS_RANGE_KEY]: "2h" })), "live");
+  assert.equal(readStoredStatsRange(() => null), "live", "no storage");
   assert.equal(
     readStoredStatsRange(() => {
       throw new Error("blocked");
     }),
-    "6h",
+    "live",
     "storage that throws",
   );
   assert.ok(STATS_RANGE_KEY.startsWith("steamvault."));

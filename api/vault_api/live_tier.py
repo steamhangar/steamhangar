@@ -76,6 +76,10 @@ MEDIUM_BUCKET = 15
 COARSE_BUCKET = 60
 #: The "Current speed" window: this many seconds plus the running cell.
 CURRENT_SECONDS = 15
+#: "Loading now": client addresses with traffic in this many seconds (plus the
+#: running cell). Five minutes bridges the gaps between a client's chunks
+#: and keeps the number from flickering; the ring holds 15.
+ACTIVE_SECONDS = 5 * 60
 
 #: Per-address counters, in this order.
 _REQ, _BYTES, _HIT, _MISS = range(4)
@@ -432,6 +436,26 @@ class LiveTier:
             window_end=to_utc_iso(now),
             window_seconds=int(round(seconds)),
         )
+
+    def active_clients(self, now: datetime, is_runner: Callable[[str, str], bool]) -> int:
+        """Distinct client addresses with traffic in the last ``ACTIVE_SECONDS``.
+
+        The prefill runner is not counted; the anonymous overflow entry is not
+        an address. Best effort, like the rest of the ring: it only knows what
+        the tailer has read since ``covered_from``.
+        """
+        now_cell = _floor(_epoch(now), CELL_SECONDS)
+        cells, _covered = self._copy()
+        seen: set[str] = set()
+        for key in range(now_cell - ACTIVE_SECONDS, now_cell + CELL_SECONDS, CELL_SECONDS):
+            by_addr = cells.get(key)
+            if not by_addr:
+                continue
+            iso = _iso(key)
+            for addr, c in by_addr.items():
+                if addr != OVERFLOW_ADDR and c[_REQ] > 0 and not is_runner(addr, iso):
+                    seen.add(addr)
+        return len(seen)
 
     def covered_from(self) -> str | None:
         with self._lock:
