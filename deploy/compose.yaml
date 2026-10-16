@@ -256,6 +256,14 @@ services:
       # D16b (Q5): event-log rotation size, editable in Settings from D16c
       # on. Blank or unset = the 45- hook's default 64 MiB; 0 = rotation off.
       VAULT_EVENT_LOG_ROTATE_BYTES: ${VAULT_EVENT_LOG_ROTATE_BYTES-}
+      # WP THROUGHPUT-DEBUG-1: opt-in throughput debug log, OFF by default
+      # (blank/unset = off; 1/true/on/yes = on; anything else stops the
+      # boot). Writes /vault/logs/throughput-debug/ only, capped by size and
+      # age, never touches the database. Read core/tools/throughput-report.py and
+      # core/README.md "Throughput debug log". Needs a restart to change.
+      VAULT_DEBUG_THROUGHPUT: ${VAULT_DEBUG_THROUGHPUT-}
+      VAULT_DEBUG_THROUGHPUT_MAX_MB: ${VAULT_DEBUG_THROUGHPUT_MAX_MB-}
+      VAULT_DEBUG_THROUGHPUT_MAX_DAYS: ${VAULT_DEBUG_THROUGHPUT_MAX_DAYS-}
       # Read here only for that floor check (the prefill threads of vault-api
       # and vault-runner are what the cap must not starve). Same variable and
       # default as on those services; empty counts as 8 (the hook's own

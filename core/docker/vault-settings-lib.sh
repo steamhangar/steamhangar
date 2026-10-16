@@ -299,6 +299,7 @@ vs_render() {
     fi
     for _vhook in "25-vault-eventlog.sh:$_vd/nginx.conf" \
                   "26-vault-tls-passthrough.sh:$_vd/nginx.conf" \
+                  "31-vault-debug-throughput.sh:$_vd/nginx.conf" \
                   "27-vault-upstream-rate.sh:$_vd/vault-upstream-rate.conf" \
                   "28-vault-upstream-pool.sh:$_vd/vault-upstream-pool.conf"; do
         if ! sh "$VS_HOOK_DIR/${_vhook%%:*}" "${_vhook#*:}" >> "$_vlog" 2>&1; then

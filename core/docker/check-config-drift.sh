@@ -9,7 +9,7 @@
 # The container variant exists because a handful of directives cannot be
 # shared (log destinations, pid path, worker user, and the resolver and
 # event-log path becoming env placeholders). The deltas enumerated in step 2
-# below are the ONLY allowed differences -- seven kinds today; this list, not
+# below are the ONLY allowed differences -- eight kinds today; this list, not
 # any prose count elsewhere, is authoritative. Everything else -- every map,
 # every proxy_set_header, the store guard, the Host allowlist, the nocache
 # bypass, the request guards, the log_format -- MUST stay identical, or the
@@ -166,6 +166,8 @@ expect_count "$work/template.norm" 4 "access_log /dev/stdout vault;"           "
 expect_count "$work/template.norm" 3 'access_log ${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE' \
     "delta 6: WP 3.10 cache-event log placeholder, one per location (/depot/, @miss, D15-RUNNER marker)"
 expect_once "$work/template.norm" "access_log /dev/stdout vault_tls;"          "delta 7: WP CORE-FIX-3 stream log to stdout"
+expect_count "$work/template.norm" 2 'access_log /vault/logs/throughput-debug/throughput.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE' \
+    "delta 8: WP THROUGHPUT-DEBUG-1 opt-in debug log, one per location (/depot/, @miss); native has none (off)"
 
 # The native config must NOT already contain the container forms (would mean the
 # two files drifted in the other direction, e.g. someone containerised the
@@ -681,6 +683,7 @@ sed \
     -e 's|^access_log /dev/stdout vault;$|access_log logs/access.log vault;|' \
     -e 's|^access_log \${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE$|access_log logs/event.log vault_event buffer=64k flush=5s;|' \
     -e 's|^access_log /dev/stdout vault_tls;$|access_log logs/tls.log vault_tls;|' \
+    -e '/^access_log \/vault\/logs\/throughput-debug\/throughput\.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE$/d' \
     "$work/template.norm" > "$work/template.unapplied"
 
 # --- 2b. core/Dockerfile's build-time count of event-log lines -----------------

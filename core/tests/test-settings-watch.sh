@@ -63,7 +63,7 @@ cat > "$work/hooks/28-vault-upstream-pool.sh" <<'EOF'
 printf 'staged pool\n' > "$1"
 printf 'staged cap\n' > "$(dirname "$1")/vault-upstream-cap.conf"
 EOF
-cp "$docker_dir/45-vault-eventlog-rotate.sh" "$work/hooks/"
+cp "$docker_dir/31-vault-debug-throughput.sh" "$docker_dir/45-vault-eventlog-rotate.sh" "$work/hooks/"
 chmod 0755 "$work/hooks"/*
 printf '#!/bin/sh\nexit 0\n' > "$work/bin/nginx"
 cat > "$work/bin/wget" <<'EOF'

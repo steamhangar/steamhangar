@@ -16,6 +16,7 @@ core/
 ├── nginx/
 │   ├── nginx.conf                        # the config itself
 │   └── vault-upstream-rate.conf          # static "no cap" include (see "Upstream rate cap")
+├── tools/throughput-report.py             # throughput debug log analysis (see "Throughput debug log")
 ├── tests/
 │   ├── test-core.ps1                     # automated suite, runs against the real Steam CDN
 │   ├── fixtures/
@@ -1609,6 +1610,88 @@ table, `tests/fixtures/settings-grammar.tsv`, run against the hooks by
 (`.github/scripts/verify-core-nginx.sh`, "D16c"); the volume seeding in
 both start orders, a live apply without restart and a rejected file
 (`deploy/tests/verify-stack.sh` steps 4-settings and 6s).
+
+## Throughput debug log (WP THROUGHPUT-DEBUG-1, opt-in, default OFF)
+
+A Steam client that downloads a fully cached game (all HIT) through
+vault-core reached ~300 Mbit/s on a 1 Gbit/s LAN. To tell the client, the
+cache disk, the nginx settings, TCP and "too few parallel connections" apart,
+vault-core can write one compact line per depot request and a stdlib-only
+script turns the file into per-client numbers and a verdict list.
+
+**Switch on** (container env, read at start; changing it needs a restart of
+vault-core, which re-renders the config):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VAULT_DEBUG_THROUGHPUT` | off | `1`/`true`/`on`/`yes` = on; unset/empty/`0`/`false`/`off`/`no` = off; anything else stops the boot |
+| `VAULT_DEBUG_THROUGHPUT_MAX_MB` | 64 | ceiling for ALL debug files together (1..1024) |
+| `VAULT_DEBUG_THROUGHPUT_MAX_DAYS` | 3 | rotated files older than this are deleted (1..30) |
+
+In the compose deployment set them in `.env` (see `deploy/.env.example`) and
+recreate vault-core.
+
+**Where:** everything is in ONE directory, `/vault/logs/throughput-debug/`
+(on the shared volume, readable through `vault-core`'s `/vault/logs`): the
+current file `throughput.log`, rotated files `throughput.<epoch>.log`. No
+SQLite row, no schema, nothing else on disk. The first line after each start
+is `# start ...`: the rendered nginx settings that matter (worker_processes,
+sendfile, aio, directio, output_buffers, limit_rate, ...; `unset` = nginx
+default) and the field list.
+
+**Fields** (tab separated, format `tp1`): `msec`, client, depot id (the first
+number after `/depot/`, never the path or query), method, status, range,
+`bytes_sent`, `request_time`, `upstream_response_time`, cache status
+(`HIT`/`MISS`/... from the same map as the cache-event log), `$connection`,
+`$connection_requests`, `$request_length`, and from the kernel
+`$tcpinfo_rtt`, `$tcpinfo_rttvar` (microseconds), `$tcpinfo_snd_cwnd`
+(segments), `$tcpinfo_rcv_space` (bytes). The `$tcpinfo_*` variables exist in
+the pinned nginx build (`nginx -t` with the flag on is part of
+`verify-core-nginx.sh`). It is a separate `log_format vault_tp` and two extra
+`access_log` lines (`/depot/` and `@miss`); the normal access log and the
+cache-event log are unchanged.
+
+**Analyse:**
+
+```
+cat /vault/logs/throughput-debug/throughput.*.log /vault/logs/throughput-debug/throughput.log \
+  | python3 core/tools/throughput-report.py --link-mbit 1000 -
+```
+
+Per client it prints total MB, minutes covered, aggregate Mbit/s per 10 s
+bucket (average and p95; the partial first and last bucket are dropped),
+per-request throughput percentiles (requests >= 256 KB, `--min-request-kb`),
+maximum concurrent connections, requests per connection, rtt/cwnd medians,
+the HIT/MISS share and a plain-English verdict list. The verdicts are
+heuristics that name the first thing to look at (client limited by stream
+count, server or disk limited, TCP window, connections not reused, not a
+pure cache-read run); the numbers above them are the evidence. Do a clean
+test run (one client, one game, everything cached) for a meaningful result.
+
+**Cost:** ~190 bytes per request. At ~40 requests/s (a 1 Gbit/s download in
+1 MiB slices) that is ~7.5 KB/s, ~27 MB/hour, written through
+`buffer=64k flush=5s` (no per-request disk write on the request path). The
+hard limits above cap the directory regardless. Flag off: the two lines are
+removed at render time, nothing is created or written, and the config is
+what it was before.
+
+**Housekeeping while ON:** a 30 s loop (same rename + USR1 technique as the
+event log) rotates `throughput.log` at MAX_MB/4 (min 1 MiB) or daily, deletes
+rotations older than MAX_DAYS, then the oldest rotations until the directory
+is below MAX_MB. Only names this hook created (`throughput.<digits>.log`)
+are ever deleted.
+
+**Off again / rollback:** set `VAULT_DEBUG_THROUGHPUT` off (or remove it),
+recreate vault-core (the config is re-rendered without the lines), then
+delete the files. Files left behind by an earlier ON run are ignored while
+the flag is off and are NOT deleted automatically. Manual cleanup, debug
+files only:
+
+```
+rm -rf /vault/logs/throughput-debug
+```
+
+(inside vault-core, or the same path on the volume.)
 
 ## What this work package does NOT cover
 
