@@ -151,7 +151,12 @@ once decided (the decision then lives in the item it belongs to).
   only. See D18.
 - **D2/D3 questions** (v0.3.0): D2 1-5 and D3 1-6 from the ADR drafts on
   `wp/docs-adr-post-0.1.0-d1-d3`; settle them in the D2/D3 planning session.
-- **D6 desktop client**: service plus tray, or tray-only. See D6.
+- **D6 desktop client**: service plus tray, or tray-only; and code signing
+  as a cost decision (paid OV/EV certificate, Store/winget signing, or
+  accept the SmartScreen warning). See D6.
+- **D17 cache path** (v0.4.0+): Weg A extend vault-core, Weg B a lancache
+  sidecar behind vault-core, or a mix; the 2026-10-15 assessment favours
+  Weg B or the mix. See D17.
 - **VERIFY-SPEED-TEXT-1** (rc20, DOWNLOADS-1): more honest wording, or show
   the total speed while Verifying.
 - **Tuning defaults** (rc20.x / rc21): whether `VAULT_NGINX_AIO` /
@@ -545,7 +550,8 @@ follow it.
 Cause: `steamvault://auth/openid-return` is used as the return URL, and
 Steam only accepts http(s) (`SteamOpenIdLoginUrl.kt:44-48`). Three
 options are open: a detour through vault-api, typing the SteamID64 by
-hand, or QR login (D2). The user decides.
+hand, or QR login (D2). Decided: the detour through vault-api (wave plan
+item 10, shipped as D11).
 
 ## D12: APP-FIX-LAYOUT, Android library layout
 

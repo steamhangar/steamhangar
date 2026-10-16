@@ -42,7 +42,7 @@ features (user decision 2026-10-16, after an audit found items that lived
 only in old sessions):
 - **Open decisions:** every Weg A / Weg B question put to the user that is
   not answered in the same session is recorded as an "open decision" in
-  the roadmap (ID, options, recommendation) until the user decides.
+  the roadmap (ID, options, recommendation if any) until the user decides.
 - **Findings:** a measurement, Antrag result or inbox note that implies a
   repo task gets an ID in the roadmap (or a LEARNINGS entry if it is
   knowledge only), never just a chat message or an Antrag line.
