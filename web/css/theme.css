@@ -390,6 +390,14 @@ a{ color:var(--accent); }
   animation:vault-turn 2.2s linear infinite;
 }
 
+/* Overlay motion (SHEET-MOTION-1): sheets, drawers, scrims and confirm
+   dialogs. Read by app.css and, as a computed style, by sheet-dialog.js. */
+:root{
+  --dur-sheet:.28s;
+  --dur-fade:.18s;
+  --ease-sheet:cubic-bezier(.2,.8,.2,1);
+}
+
 /* Every animation on the page is switched off under reduced-motion,
    globally — not just on the status icons (WP 4a.1 brief: "motion incl.
    reduced-motion" is a whole-app rule, matching the mockup's own

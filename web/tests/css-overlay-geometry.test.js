@@ -10,11 +10,9 @@
  * (`docs/PROJECT_PLAN.md`'s Phase 4e section): the game detail sheet becomes
  * a CENTRED CARD at eye level; the notifications panel and the clients sheet
  * become a DRAWER at the right edge; mobile keeps its bottom sheets,
- * unchanged. No motion anywhere in this — every overlay in this app,
- * including these two variants, is a plain `display` toggle with no
- * transition (Opus review, WP 4e.3 fix round: this file's own comments used
- * to say "sliding in", which overclaimed an animation `css/app.css` does not
- * have — fixed in both places). `sheet-dialog.js`'s new `variant` option
+ * unchanged. Motion (the drawer slides, the card fades) arrived later with
+ * SHEET-MOTION-1 and is pinned in `sheet-motion.test.js`; this file pins
+ * geometry only. `sheet-dialog.js`'s new `variant` option
  * ("center" | "drawer") appends a second, static class at construction time
  * — see that module's header for why this is presentation only, not a
  * second state model (the existing `lib/modal-stack.js` push/pop/Escape

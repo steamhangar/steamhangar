@@ -876,12 +876,15 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
   position:fixed; inset:0; z-index:45; background:rgba(3,7,10,.62);
   display:none; align-items:center; justify-content:center; padding:22px;
 }
-.dialog-backdrop.on{ display:flex; }
+.dialog-backdrop.on{ display:flex; animation:dialog-fade var(--dur-fade) var(--ease-sheet); }
+@keyframes dialog-fade{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes dialog-card{ from{ opacity:0; transform:translateY(12px); } to{ opacity:1; transform:none; } }
 .dialog{
   width:100%; max-width:420px;
   background:var(--raised); border:1px solid var(--line); border-radius:var(--r-l);
   padding:20px 18px 16px;
   box-shadow:0 24px 50px -12px rgba(0,0,0,.75);
+  animation:dialog-card var(--dur-sheet) var(--ease-sheet); /* runs each time the hidden backdrop is shown */
 }
 .dialog h3{ margin:0 0 9px; font-size:16.5px; letter-spacing:-.2px; }
 .dialog p{ margin:0 0 10px; font-size:13px; line-height:1.5; color:var(--dim); }
@@ -1441,9 +1444,13 @@ body.onboarding .nav{ display:none; }
   position:fixed; inset:0; z-index:40;
   background:rgba(3,7,10,.62);
   display:none; align-items:flex-end; justify-content:center;
+  opacity:0; transition:opacity var(--dur-fade) var(--ease-sheet);
 }
 .sheet-backdrop.on{ display:flex; }
+.sheet-backdrop.shown{ opacity:1; }
+.sheet-backdrop:not(.shown){ pointer-events:none; } /* a closing scrim must not swallow clicks */
 .sheet{
+  transform:translateY(100%); transition:transform var(--dur-sheet) var(--ease-sheet);
   width:100%; max-width:var(--w-sheet); max-height:88vh;
   display:flex; flex-direction:column;
   background:var(--surface);
@@ -1451,6 +1458,7 @@ body.onboarding .nav{ display:none; }
   border:1px solid var(--line); border-bottom:none;
   box-shadow:0 -18px 40px -12px rgba(0,0,0,.7);
 }
+.sheet-backdrop.shown .sheet{ transform:none; }
 .sheet .grab{ width:38px; height:4px; border-radius:2px; background:var(--line); margin:9px auto 2px; flex:none; }
 .sheet .body{ overflow-y:auto; padding:10px 18px 22px; scrollbar-width:none; }
 .sheet .body::-webkit-scrollbar{ display:none; }
@@ -2479,12 +2487,9 @@ body.onboarding .nav{ display:none; }
      its own grab handle. */
   .sheet--center .grab{ display:none; }
 
-  /* Right-edge drawer — appears at, not slides in from, the right edge:
-     like every overlay in this app, it is shown/hidden by a plain `display`
-     toggle (`.sheet-backdrop.on{display:flex}`, this file's "sheets"
-     section) with no transition anywhere in that path (Opus review, WP
-     4e.3 fix round — the module comments describing this variant used to
-     say "slides in", which overclaimed an animation that does not exist).
+  /* Right-edge drawer — slides in from the right edge (SHEET-MOTION-1:
+     `.shown` on the backdrop drives the transform, see "sheets" section;
+     the centred card only fades).
      `align-items:stretch` (cross axis) with no explicit height lets
      flexbox fill the backdrop's own cross size (the full viewport height);
      `max-height:100vh` lifts the base rule's 88vh cap so it actually
@@ -2520,7 +2525,10 @@ body.onboarding .nav{ display:none; }
     align-items:stretch;
     justify-content:flex-end;
   }
+  .sheet--center{ transform:none; opacity:0; transition:opacity var(--dur-fade) var(--ease-sheet); }
+  .sheet-backdrop.shown .sheet--center{ opacity:1; }
   .sheet--drawer{
+    transform:translateX(100%);
     max-height:100vh;
     border-top:none;
     border-right:none;
