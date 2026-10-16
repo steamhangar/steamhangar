@@ -189,3 +189,75 @@ export const AGENTLESS_NOTE =
 
 /** Empty list: nothing reported and nothing in the cache log. */
 export const NO_CLIENTS_TEXT = "No clients to show. A machine appears here once it loads through the cache or runs vault-agent.";
+
+// ---------------------------------------------------------------------
+// One card per device (WP CLIENTS-1)
+// ---------------------------------------------------------------------
+
+/**
+ * Merge the agent rows (`GET /v1/clients`) into the overview rows
+ * (`GET /v1/clients/overview`) so a device shows once.
+ *
+ * Matching rule: an overview row of `kind: "agent"` and an agent row are the
+ * same device when their `client_id` is exactly equal (the overview builds
+ * its agent rows from the same reports). The address-to-agent mapping is done
+ * by the server (`address_owners`), so an address row never joins an agent
+ * card here: an agent's `source_addrs` can be a shared forwarding hop, and a
+ * guess would fold two PCs into one. The documented leftover (an old agent
+ * behind a proxy: an agent card without traffic plus an address card) stays
+ * two cards.
+ *
+ * - client only (address, runner, or an agent row without agent data):
+ *   returned with `agent: null`.
+ * - both: the overview row plus `agent` (the `GET /v1/clients` row).
+ * - agent only (the overview has no row for it, e.g. it is unavailable):
+ *   a card built from the agent row alone, with no traffic figures (never
+ *   zeros).
+ *
+ * Inputs are not mutated. A `null` agent list (no answer yet) leaves every
+ * card as the overview sent it.
+ * @param {object[] | null | undefined} overviewClients
+ * @param {object[] | null | undefined} agentClients
+ * @returns {object[]}
+ */
+export function mergeAgentData(overviewClients, agentClients) {
+  const rows = Array.isArray(overviewClients) ? overviewClients : [];
+  const agents = new Map();
+  for (const a of Array.isArray(agentClients) ? agentClients : []) {
+    if (a && typeof a.client_id === "string" && a.client_id && !agents.has(a.client_id)) agents.set(a.client_id, a);
+  }
+  const used = new Set();
+  const merged = rows.map((row) => {
+    if (!isAgentClient(row) || typeof row.client_id !== "string") return { ...row, agent: null };
+    const agent = agents.get(row.client_id) || null;
+    if (agent) used.add(row.client_id);
+    return { ...row, agent };
+  });
+  for (const [id, a] of agents) {
+    if (used.has(id)) continue;
+    const known = a.presence === "online" || a.presence === "offline";
+    merged.push({
+      key: `agent:${id}`,
+      kind: "agent",
+      client_id: id,
+      addresses: Array.isArray(a.source_addrs) ? a.source_addrs : [],
+      connected: known ? a.presence === "online" : null,
+      agent_presence: known ? a.presence : null,
+      cache_active: null,
+      last_active: a.last_reported_at || null,
+      last_seen_in_cache_log: a.last_seen_in_cache_log || null,
+      last_reported_at: a.last_reported_at || null,
+      installed_appids: null,
+      installed_app_count: Number.isInteger(a.app_count) ? a.app_count : null,
+      stats: null,
+      loading_now: null,
+      recent_apps: null,
+      recent_unattributed_bytes: null,
+      name: a.name ?? null,
+      name_addr: a.name_addr ?? null,
+      display_name: a.display_name,
+      agent: a,
+    });
+  }
+  return merged;
+}
