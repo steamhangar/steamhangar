@@ -37,6 +37,21 @@ the current integration branch), so every other session finds the same
 plan. When scope moves between versions, update both places in the same
 commit.
 
+The same applies to everything that is still open, not only to agreed
+features (user decision 2026-10-16, after an audit found items that lived
+only in old sessions):
+- **Open decisions:** every Weg A / Weg B question put to the user that is
+  not answered in the same session is recorded as an "open decision" in
+  the roadmap (ID, options, recommendation) until the user decides.
+- **Findings:** a measurement, Antrag result or inbox note that implies a
+  repo task gets an ID in the roadmap (or a LEARNINGS entry if it is
+  knowledge only), never just a chat message or an Antrag line.
+- **Deferred review items:** should-fix and nit findings that are not fixed
+  in the package go to the nits list of the matching version block.
+- **Handover check:** before every handover ("Übergabe") or session end,
+  the orchestrator checks that all open items of the session are in the
+  repo as above and pushed; the status report says so explicitly.
+
 ## Work mode (applies to the whole project)
 
 - Work strictly phase by phase per `docs/PROJECT_PLAN.md`. Phase 0

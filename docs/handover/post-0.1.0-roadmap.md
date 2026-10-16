@@ -140,6 +140,26 @@ announcement (WP 5.6, r/selfhosted) is NOT made at 0.1.0**; it waits for
   with measurement).
 - Sunday cold-game test per ADR-0027 (feeds rc20.x / rc21).
 
+## Open decisions (waiting for the user)
+
+Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
+question that is not answered in its session is listed here and removed
+once decided (the decision then lives in the item it belongs to).
+
+- **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
+  name, pick a free org, or keep `steamhangar` and rename product and repo
+  only. See D18.
+- **D2/D3 questions** (v0.3.0): D2 1-5 and D3 1-6 from the ADR drafts on
+  `wp/docs-adr-post-0.1.0-d1-d3`; settle them in the D2/D3 planning session.
+- **D6 desktop client**: service plus tray, or tray-only. See D6.
+- **VERIFY-SPEED-TEXT-1** (rc20, DOWNLOADS-1): more honest wording, or show
+  the total speed while Verifying.
+- **Tuning defaults** (rc20.x / rc21): whether `VAULT_NGINX_AIO` /
+  `VAULT_NGINX_WORKERS` become defaults; decided by the Sunday test.
+- **Runner retry** on "Unable to detect Lancache server!" (rc21): only if
+  the heartbeat evidence supports it.
+- **"Client downloading" row** (rc21, optional): in or out.
+
 ## Context: what the rollout taught us (2026-10-01/02)
 
 - **Network.** The operator's internet line is DS-Lite: IPv4 runs through
