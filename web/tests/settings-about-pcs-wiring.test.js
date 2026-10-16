@@ -13,7 +13,7 @@
  *     error line;
  *   - no polling: one `/v1/about` request per Settings mount, a second only
  *     on Refresh (whose role=status line then says what happened);
- *   - Clients → "Manage PCs" (moved from Settings → "PCs (agents)" in WP
+ *   - Clients page (moved from Settings → "PCs (agents)" in WP
  *     D15c; Settings keeps a pointer) opens the clients sheet with NO bypass
  *     banner in play; each PC shows the SERVER's presence (fixtures
  *     contradict the timestamps), "last seen", "version not reported", and the
