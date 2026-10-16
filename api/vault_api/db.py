@@ -461,6 +461,11 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_status_id ON jobs (status, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_appid_status ON jobs (appid, status);
 
+-- not_owned_appids() filters finished jobs by status and a finished_at window
+-- on every sweep and scheduler pass. Additive (IF NOT EXISTS runs on every
+-- init_db), so it needs no schema version bump. NITS-1.
+CREATE INDEX IF NOT EXISTS idx_jobs_status_finished ON jobs (status, finished_at);
+
 -- One row per report (full-list snapshot), matching ADR-0002 literally:
 -- the agent reports its complete installed-app-ID list every time; vault-api
 -- derives additions/removals by diffing the two most recent rows per

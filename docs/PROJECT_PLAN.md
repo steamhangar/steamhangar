@@ -3293,7 +3293,38 @@ below carry their own later dates, item 12 is the current one).
         plus `core/tools/throughput-report.py`; flag off renders the
         template byte-identical to rc19; removal = flag off, recreate
         vault-core, delete `/vault/logs/throughput-debug/`
-      - [ ] tag `v0.1.0-rc19.2` after main CI is green
+      - [x] tag `v0.1.0-rc19.2` after main CI is green (pushed on main)
+
+    - [ ] **rc19.3** (2026-10-16, throughput diagnostics and tuning switches)
+      - [x] TUNE-1a: heartbeat in the opt-in debug log, `VAULT_NGINX_AIO`
+        and `VAULT_NGINX_WORKERS` switches (off by default), report
+        Heartbeat section (merged)
+      - [x] TUNE-1b: ADR-0027, learnings, plan block
+      - [x] NITS-1: index on `jobs (status, finished_at)` for
+        `not_owned_appids` (additive, no schema bump)
+      - [ ] tag `v0.1.0-rc19.3` after main CI is green
+      - [ ] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
+        WORKERS=2)
+      - [ ] LIVE-DELAY-1 analysis: the Downloads page shows client downloads
+        more than 1 min late, unresolved; rc20 unless tiny
+
+    - [ ] **rc20 candidates** (2026-10-16, unprioritised; the user decides
+      scope and order; larger themes live in
+      `docs/handover/post-0.1.0-roadmap.md`, D1-D23)
+      - [ ] D22 privacy modes
+      - [ ] CACHE-REPAIR-1
+      - [ ] Clients / Add-a-device redesign (mockups come first)
+      - [ ] optional "Client downloading" row on the Downloads page (needs
+        the user's yes)
+      - [ ] honesty flag for unmapped depots in the completeness display
+      - [ ] package names for "Unknown app" entries (HELLDIVERS 2)
+      - [ ] D20 queue order
+      - [ ] LIVE-DELAY-1 fix (after the analysis above)
+      - [ ] runner retry on "Unable to detect Lancache server!", only if the
+        heartbeat log confirms the late-heartbeat hypothesis (ADR-0027)
+      - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
+        test, aria-live on queue move, D19WiringTest pin,
+        regrow-without-idle-gap test
 
     - [ ] **rc20 web redesign** (decided 2026-10-16, mockup round with the
       operator; reference: `docs/design/rc20/`, run notes:

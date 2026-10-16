@@ -1150,3 +1150,17 @@ These are not style preferences; each entry cost a review round to learn.
   starts mid-file must align to the next newline or it folds a torn line into
   the ring; cap bytes per read and reads per refresh and skip an oversized
   backlog to its tail.
+
+## 2026-10-16 - rc19.3 throughput tuning (TUNE-1a/1b)
+
+- Cold and warm reads differ by a large factor (ZFS ARC): the same game on
+  the same PC measured p50 3.3 MB/s cold and 12.6 MB/s warm. A single run
+  proves nothing; always label a measurement cold or warm and compare like
+  with like.
+- The heartbeat request has no access log on main. It is only visible in the
+  opt-in debug log (`VAULT_DEBUG_THROUGHPUT`), so enable the flag before a
+  test, not after.
+- `aio threads` is a no-op while `sendfile on` is used without `directio`;
+  the `VAULT_NGINX_AIO=threads` switch therefore also sets `sendfile off`.
+- busybox `iostat` has no `-x`, and Glances rates are averaged since the last
+  query: neither shows peaks. Use short repeated samples for peak load.

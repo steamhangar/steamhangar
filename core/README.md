@@ -1648,8 +1648,19 @@ number after `/depot/`, never the path or query), method, status, range,
 (segments), `$tcpinfo_rcv_space` (bytes). The `$tcpinfo_*` variables exist in
 the pinned nginx build (`nginx -t` with the flag on is part of
 `verify-core-nginx.sh`). It is a separate `log_format vault_tp` and two extra
-`access_log` lines (`/depot/` and `@miss`); the normal access log and the
-cache-event log are unchanged.
+`access_log` lines (`/depot/` and `@miss`) plus the heartbeat line above; the
+normal access log and the cache-event log are unchanged.
+
+**Heartbeat timing (WP TUNE-1a).** With the flag on, `location = /lancache-heartbeat`
+also writes to the same file, format `vault_tp_hb`, tag `hb1`, fields `msec`,
+client, `status`, `request_time`, `$connection`, `$connection_requests`,
+`$tcpinfo_rtt` (us). Reason: SteamPrefill failed with "Unable to detect
+Lancache server" while the single worker was busy with cold HDD reads, and the
+heartbeat was not logged anywhere. The location's own `access_log` replaces the
+inherited one, so the normal `vault` log is restated next to it (both lines
+carry the marker, so the flag-off render is unchanged); the response (200,
+`X-LanCache-Processed-By`) is untouched. The `tp1` parser never sees these
+lines (it checks the tag); the report prints them in a "Heartbeat" section.
 
 **Analyse:**
 
@@ -1663,10 +1674,11 @@ bucket (average and p95; the partial first and last bucket are dropped),
 per-request throughput percentiles (requests >= 256 KB, `--min-request-kb`),
 maximum concurrent connections, requests per connection, rtt/cwnd medians,
 the HIT/MISS share and a plain-English verdict list. The verdicts are
-heuristics that name the first thing to look at (client limited by stream
-count, server or disk limited, TCP window, connections not reused, not a
-pure cache-read run); the numbers above them are the evidence. "Client
-limited" is only said when few connections come with FAST single streams
+heuristics that name the first thing to look at (few streams but fast ones,
+server or disk limited, TCP window, connections not reused, not a
+pure cache-read run); the numbers above them are the evidence. "Not limited
+by the cache path in this log (client or network side cannot be told apart
+here)" is only said when few connections come with FAST single streams
 (per-request p50 >= half the link); few connections with slow streams is
 reported as "server, disk or client receive window". No verdict is given
 below 30 large requests or 3 full 10 s buckets ("sample too small"). Two
@@ -1686,10 +1698,10 @@ MAX_MB=1 the 1 MiB minimum segment is the whole budget). If the nginx master
 cannot be found, the loop cannot rotate; it logs a WARNING and truncates the
 current file in place once it is over the segment size, so the limit still
 holds. Flag off: every line the feature adds to the template (comments,
-`log_format`, both `access_log` lines) carries the marker `# VAULT_DEBUG_TP_LINE`
+both `log_format`s, all three `access_log` lines) carries the marker `# VAULT_DEBUG_TP_LINE`
 and is deleted at render time, so the rendered config is byte-identical to
 the one without the feature (`core/tests/test-debug-throughput-hook.sh`
-compares it with main's template while main has none), nothing is created or
+compares it with the flag-off render of main's template and hook), nothing is created or
 written.
 
 **Housekeeping while ON:** a 30 s loop (same rename + USR1 technique as the
@@ -1736,3 +1748,49 @@ explicit scope boundary (this work package touches `core/` only):
 - A real end-to-end Docker build/run of the container template + the new
   `25-vault-eventlog.sh` hook (no Docker available in this work package's
   environment at the time; since closed -- see "Since closed" above).
+
+### Throughput tuning switches (WP TUNE-1a, opt-in, default OFF)
+
+Two experiments for the cold-read question (~300 Mbit/s from a cold HDD cache
+vs ~880 Mbit/s warm, with one nginx worker blocking on disk reads). Both are
+read by `docker/31-vault-debug-throughput.sh` at start, work with the debug log
+on or off, and with both unset the rendered config is byte-identical to a
+build without them. A bad value stops the boot.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VAULT_NGINX_AIO` | off | `threads` adds `aio threads;` and switches `sendfile on` to `off`; unset/empty/`off` = nothing |
+| `VAULT_NGINX_WORKERS` | unset (`worker_processes 1`) | `auto` or a whole number 1..16 sets `worker_processes` |
+
+The debug startup line (`# start ...`) shows the effective `aio` and
+`worker_processes`; with more than one worker it adds a `workers_note`.
+
+**What `VAULT_NGINX_AIO=threads` does.** It adds `aio threads;` to the `http`
+block AND switches `sendfile on;` to `sendfile off;` (the hook stops the boot
+if the sendfile line is not found exactly once). Both are needed: with
+`sendfile on`, nginx uses AIO only for files at least as large as `directio`,
+which defaults to `off`, so `aio threads` alone would change nothing. With
+sendfile off, cache file reads are done by the thread pool instead of blocking
+the single worker in `sendfile()`, and they still go through the kernel page
+cache / ARC (no `directio`, so the warm path keeps its caching). The price is
+one extra copy (kernel to nginx buffer to socket) and therefore more CPU per
+Mbit/s than sendfile; expect higher CPU use on warm hits, which is what the
+experiment has to weigh against the cold-read gain. The startup line shows
+`sendfile=off aio=threads`. Unset/empty/`off` leaves the config byte-identical.
+
+**More than one worker: what stays aggregate, what does not.**
+- The 16 MB/s style upstream cap (`VAULT_UPSTREAM_RATE`): `proxy_limit_rate`
+  is per request, the hook divides the total by `$connections_writing`.
+  That counter is nginx's shared-memory connection statistic, i.e. counted
+  over ALL workers, so the sum over all workers still stays at or below the
+  total. It also counts HIT responses being written, which only makes a MISS
+  slower, never faster. The bucket table has 1024 entries; above 1024 writing
+  connections (only reachable with more workers) the default bucket applies,
+  still `total/1024` per request.
+- `limit_conn` zones (`vault_upstream_total`, per-client TLS passthrough
+  caps): shared memory, aggregate over workers.
+- `worker_connections 1024` is PER worker, so capacity grows with workers.
+- The upstream keepalive pool (`keepalive 8` per edge) is PER WORKER: idle
+  upstream connections can reach 8 x workers per edge, each a CGNAT port
+  mapping on DS-Lite lines. `auto` uses one worker per CPU thread, so prefer
+  an explicit small number for tests.

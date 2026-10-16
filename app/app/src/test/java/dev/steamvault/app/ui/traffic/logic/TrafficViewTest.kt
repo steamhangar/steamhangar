@@ -302,6 +302,20 @@ class TrafficViewTest {
         assertEquals("2 h ago", seriesStartText(trimmed, now))
     }
 
+    @Test
+    fun `FIX-SHOT-1 -- seriesStartText derives the trimmed caption from the nowMs it is given`() {
+        val trimmed = SeriesOut(
+            range = "6h",
+            bucket_seconds = 60,
+            range_start = "2026-10-14T06:00:00Z",
+            points = listOf(point("2026-10-14T10:00:00Z", 1.0)),
+        )
+        val hour = 3_600_000L
+        assertEquals("2 h ago", seriesStartText(trimmed, now))
+        assertEquals("3 h ago", seriesStartText(trimmed, now + hour))
+        assertEquals("2 days ago", seriesStartText(trimmed, now + 48 * hour))
+    }
+
     // ---- per-job speed ----------------------------------------------------
 
     @Test

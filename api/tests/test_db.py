@@ -235,6 +235,7 @@ def test_jobs_has_the_queue_indexes(tmp_path) -> None:
         conn.close()
 
     assert {"idx_jobs_status_id", "idx_jobs_appid_status"} <= index_names
+    assert "idx_jobs_status_finished" in index_names
 
 
 def test_init_db_upgrades_a_v1_database_in_place(tmp_path) -> None:

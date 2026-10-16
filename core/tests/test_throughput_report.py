@@ -45,7 +45,7 @@ class ReportTests(unittest.TestCase):
         text = " ".join(a["verdicts"])
         self.assertIn("few connections", text)
         self.assertIn("slow single streams", text)
-        self.assertNotIn("client-limited", text)
+        self.assertNotIn("not limited by the cache path", text)
 
     def test_four_slow_connections(self):
         by, _, _ = load()
@@ -53,14 +53,16 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(a["conc_max"], 4)
         text = " ".join(a["verdicts"])
         self.assertIn("slow single streams", text)
-        self.assertNotIn("client-limited", text)
+        self.assertNotIn("not limited by the cache path", text)
 
     def test_few_fast_streams_is_client_limited(self):
         by, _, _ = load()
         a = tpr.analyse(by["192.0.2.30"], 1000, 256)
         self.assertEqual(a["conc_max"], 1)
         self.assertGreaterEqual(a["per_req_p50"], 500)
-        self.assertTrue(any("client-limited" in v for v in a["verdicts"]), a["verdicts"])
+        self.assertTrue(any("not limited by the cache path in this log" in v and "cannot be told apart" in v
+                            for v in a["verdicts"]), a["verdicts"])
+        self.assertFalse(any("client-limited" in v for v in a["verdicts"]), a["verdicts"])
 
     def test_small_sample_gives_no_verdict(self):
         by, _, _ = load()
@@ -112,6 +114,77 @@ class ReportTests(unittest.TestCase):
     def test_dash_value_and_retry_list(self):
         self.assertIsNone(tpr._num("-"))
         self.assertAlmostEqual(tpr._num("0.1, 0.2"), 0.3)
+
+
+def tp(end, client, status, nbytes, rt, conn="1"):
+    return "\t".join(["tp1", end, client, "731", "GET", status, "-", str(nbytes), rt, "-", "HIT", conn, "1", "300", "300", "40", "50", "65535"])
+
+
+def hb(end, rt, status="200"):
+    return "\t".join(["hb1", end, "192.0.2.10", status, rt, "9", "1", "250"])
+
+
+class HeartbeatTests(unittest.TestCase):
+    LOG = [
+        "# start x",
+        tp("1760000003.0", "192.0.2.10", "206", 1048576, "0.5"),
+        tp("1760000004.0", "192.0.2.10", "200", 512, "1.700", "2"),     # small, same bucket as the slow heartbeat
+        hb("1760000004.5", "1.800"),
+        hb("1760000005.0", "0.001"),
+        hb("1760000015.0", "0.002"),
+        hb("1760000025.0", "0.060", "499"),
+        hb("1760000035.0", "0.003"),
+    ]
+
+    def test_parse_all_splits_tags_and_hb_is_not_malformed(self):
+        reqs, hbs, starts, bad = tpr.parse_all(self.LOG + ["hb1\tshort", "tp1\tshort"])
+        self.assertEqual((len(reqs), len(hbs), len(starts), bad), (2, 5, 1, 2))
+        # the old three-tuple API still works and ignores hb lines without calling them junk
+        reqs, starts, bad = tpr.parse(self.LOG)
+        self.assertEqual((len(reqs), bad), (2, 0))
+
+    def test_heartbeat_section_numbers(self):
+        reqs, hbs, _, _ = tpr.parse_all(self.LOG)
+        out = tpr.heartbeat_section(hbs, reqs, 256)
+        self.assertIn("lines: 5", out)
+        self.assertIn("max 1800.0 ms", out)
+        self.assertIn("status 499 (client gave up): 1", out)
+        first = out.splitlines()[4]   # largest bucket first
+        self.assertIn("heartbeat max 1800.0 ms", first)
+        self.assertIn("small requests max 1700.0 ms (n=1)", first)
+        self.assertEqual(len([l for l in out.splitlines() if "Z  heartbeat max" in l]), 3)
+
+    def test_no_heartbeat_lines(self):
+        reqs, hbs, _, _ = tpr.parse_all([l for l in self.LOG if not l.startswith("hb1")])
+        self.assertEqual(tpr.heartbeat_section(hbs, reqs, 256), "== Heartbeat ==\n  no heartbeat lines")
+
+    def test_main_prints_heartbeat_section_with_and_without_hb_lines(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            for name, lines, want in (("with.log", self.LOG, "status 499"), ("without.log", [l for l in self.LOG if not l.startswith("hb1")], "no heartbeat lines")):
+                path = os.path.join(d, name)
+                pathlib.Path(path).write_text("\n".join(lines) + "\n")
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    self.assertEqual(tpr.main([path]), 0)
+                self.assertIn("== Heartbeat ==", buf.getvalue())
+                self.assertIn(want, buf.getvalue())
+                self.assertNotIn("malformed", buf.getvalue())
+            # the shipped sample has no hb lines either
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                tpr.main([str(FIXTURE)])
+            self.assertIn("no heartbeat lines", buf.getvalue())
+
+    def test_heartbeat_only_log(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "hb.log")
+            pathlib.Path(path).write_text("\n".join(l for l in self.LOG if l.startswith("hb1")) + "\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(tpr.main([path]), 0)
+            self.assertIn("lines: 5", buf.getvalue())
 
 
 if __name__ == "__main__":

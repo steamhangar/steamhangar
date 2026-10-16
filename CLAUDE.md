@@ -26,6 +26,17 @@ coder and reviewer reads it before their first task of a session; work
 package briefs reference it instead of repeating its content. The
 orchestrator appends newly distilled findings after each review cycle.
 
+## Roadmap rule (mandatory)
+
+Every feature or package planned for a future version or rc is written to
+the repo the moment it is agreed, never only to chat or session memory:
+a checkbox in the matching version block of `docs/PROJECT_PLAN.md` and, for
+larger themes, an entry in `docs/handover/post-0.1.0-roadmap.md`. Both go
+to `main` with the next release-chain push (docs-only changes may ride on
+the current integration branch), so every other session finds the same
+plan. When scope moves between versions, update both places in the same
+commit.
+
 ## Work mode (applies to the whole project)
 
 - Work strictly phase by phase per `docs/PROJECT_PLAN.md`. Phase 0

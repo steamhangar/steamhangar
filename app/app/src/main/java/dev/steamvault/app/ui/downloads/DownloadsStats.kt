@@ -173,6 +173,7 @@ fun DownloadsStatsHeader(
     scope: CoroutineScope,
     rateCap: String? = null,
     onRangeChosen: (String) -> Unit = {},
+    nowMs: () -> Long = System::currentTimeMillis,
 ) {
     val answer = poll.data
     val throughput = answer?.throughput
@@ -207,7 +208,7 @@ fun DownloadsStatsHeader(
             )
         }
         if (tiles != null) StatTiles(tiles)
-        ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported)
+        ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported, nowMs = nowMs)
     }
 }
 
@@ -252,7 +253,7 @@ private const val GRAPH_H = 60f
  * decoration (web `aria-hidden`), the label already says the same.
  */
 @Composable
-private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupported: Boolean) {
+private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupported: Boolean, nowMs: () -> Long) {
     // WP GRAPH-ZOOM: only the span that has data; the axis caption follows it.
     val shown = series?.let { it.copy(points = trimSeries(it.points)) } ?: return
     val geo = graphGeometryToShow(shown, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return
@@ -286,7 +287,7 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
             modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            for (text in listOf(seriesStartText(shown, System.currentTimeMillis()), seriesHighestText(geo.maxBytesPerSecond), SERIES_END_TEXT)) {
+            for (text in listOf(seriesStartText(shown, nowMs()), seriesHighestText(geo.maxBytesPerSecond), SERIES_END_TEXT)) {
                 Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
