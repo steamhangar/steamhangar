@@ -126,10 +126,19 @@ class D15dWiringTest {
     }
 
     @Test
+    fun `MUTATION PIN -- the graph caption reads the injected clock, not the wall clock`() {
+        assertCalledFrom(stats, "seriesStartText(shown, nowMs())", "ThroughputGraph")
+        assertTrue(
+            "ThroughputGraph reads System.currentTimeMillis() again -- screenshot goldens go stale hourly",
+            !stripComments(read(stats)).contains("seriesStartText(shown, System.currentTimeMillis())"),
+        )
+    }
+
+    @Test
     fun `MUTATION PIN -- the statistics header hides the range without figures and draws tiles and graph`() {
         assertCalledFrom(stats, "if (!poll.noFigures) {", "DownloadsStatsHeader")
         assertCalledFrom(stats, "if (tiles != null) StatTiles(tiles)", "DownloadsStatsHeader")
-        assertCalledFrom(stats, "ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported)", "DownloadsStatsHeader")
+        assertCalledFrom(stats, "ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported, nowMs = nowMs)", "DownloadsStatsHeader")
         assertCalledFrom(stats, "headerTiles(throughput, rateCap)", "DownloadsStatsHeader")
         assertCalledFrom(stats, "StatTileView(tile, Modifier.weight(1f))", "StatTiles")
         assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = description }", "StatTileView")
