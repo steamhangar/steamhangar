@@ -49,7 +49,6 @@ import dev.steamvault.app.ui.traffic.logic.StatTile
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
-import dev.steamvault.app.ui.traffic.logic.rateCapLine
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText

@@ -341,7 +341,10 @@ export function insideWindow(window, serverTimezone, nowMs) {
  * rate cap. The cap applies only OUTSIDE the download window (the one window,
  * `schedule.window`; none = capped around the clock), so the line says "in
  * force now" or "not in force now" and names the window; without a readable
- * schedule it states the value and the rule and claims neither. `null`
+ * schedule it states the value and the rule and claims neither. Known limit:
+ * the deprecated env pin `VAULT_UPSTREAM_RATE_WINDOW` can make vault-core use
+ * a window other than the schedule window; the API does not expose it, so the
+ * in-force statement may then be wrong. `null`
  * while the settings are not known.
  * @param {{settings?: object[], core_apply?: {pending?: unknown} | null} | null | undefined} settings `GET /v1/settings`
  * @param {{window?: unknown, server_timezone?: unknown} | null | undefined} schedule `GET /v1/schedule`

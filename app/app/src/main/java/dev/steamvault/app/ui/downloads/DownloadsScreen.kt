@@ -59,6 +59,7 @@ import dev.steamvault.app.ui.traffic.TrafficRanges
 import dev.steamvault.app.ui.traffic.logic.emptyHistoryText
 import dev.steamvault.app.ui.traffic.logic.filterJobsByRange
 import dev.steamvault.app.ui.traffic.logic.mergeJobLists
+import dev.steamvault.app.ui.traffic.logic.rateCapLine
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.downloads.logic.ExcerptState
 import dev.steamvault.app.ui.downloads.logic.HistoryRowModel

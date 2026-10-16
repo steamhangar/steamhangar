@@ -9,9 +9,13 @@ import dev.steamvault.app.net.model.settingAsStringOrNull
  * (twin of web `parseRateCap` / `insideWindow` / `rateCapLine` in
  * `web/js/lib/traffic-view.js`). The cap applies only OUTSIDE the download
  * window (the one window, `ScheduleOut.window`; none = capped around the
- * clock), so the line says "in force now" or "not in force now" and never
+ * clock), so the line says "in force now"  or "not in force now" and never
  * claims a limit that is not in force; without a readable schedule it
  * states the value and the rule and claims neither.
+ *
+ * Known limit: the deprecated env pin `VAULT_UPSTREAM_RATE_WINDOW` can make
+ * vault-core use a window other than the schedule window, and the API does
+ * not expose it, so the in-force statement may then be wrong.
  */
 
 private val RATE_RE = Regex("^([1-9][0-9]*)([kKmM]?)$")
