@@ -101,8 +101,8 @@ prune_dir() {
     _now=${VAULT_DEBUG_NOW:-$(date +%s)}
     _maxage=$((MAX_DAYS * 86400))
     _maxbytes=$((MAX_MB * 1048576))
-    for _f in $(ls -1 "$1" 2>/dev/null | sort); do
-        case "$_f" in throughput.[0-9]*.log) : ;; *) continue ;; esac
+    for _p in "$1"/throughput.[0-9]*.log; do
+        _f=${_p##*/}
         _e=${_f#throughput.}; _e=${_e%.log}
         case "$_e" in ''|*[!0-9]*) continue ;; esac
         [ -f "$1/$_f" ] && [ ! -L "$1/$_f" ] || continue
@@ -112,15 +112,15 @@ prune_dir() {
     done
     while :; do
         _total=0
-        for _f in $(ls -1 "$1" 2>/dev/null); do
-            case "$_f" in throughput.log|throughput.[0-9]*.log) : ;; *) continue ;; esac
+        for _p in "$1"/throughput.log "$1"/throughput.[0-9]*.log; do
+            _f=${_p##*/}
             [ -f "$1/$_f" ] && [ ! -L "$1/$_f" ] || continue
             _total=$((_total + $(stat -c %s "$1/$_f" 2>/dev/null || echo 0)))
         done
         [ "$_total" -gt "$_maxbytes" ] || break
         _oldest=""
-        for _f in $(ls -1 "$1" 2>/dev/null | sort); do
-            case "$_f" in throughput.[0-9]*.log) : ;; *) continue ;; esac
+        for _p in "$1"/throughput.[0-9]*.log; do
+            _f=${_p##*/}
             [ -f "$1/$_f" ] && [ ! -L "$1/$_f" ] || continue
             _oldest=$_f; break
         done
