@@ -168,6 +168,13 @@ expect_count "$work/template.norm" 3 'access_log ${VAULT_EVENT_LOG} vault_event 
 expect_once "$work/template.norm" "access_log /dev/stdout vault_tls;"          "delta 7: WP CORE-FIX-3 stream log to stdout"
 expect_count "$work/template.norm" 2 'access_log /vault/logs/throughput-debug/throughput.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE' \
     "delta 8: WP THROUGHPUT-DEBUG-1 opt-in debug log, one per location (/depot/, @miss); native has none (off)"
+# delta 8b (WP TUNE-1a): the heartbeat location times itself while the flag is
+# on. Its own access_log REPLACES the inherited http-level one, so the normal
+# log is restated (marked) next to the hb1 line; both vanish with the flag off.
+expect_once "$work/template.norm" 'access_log /vault/logs/throughput-debug/throughput.log vault_tp_hb buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE' \
+    "delta 8b: WP TUNE-1a heartbeat timing line (location = /lancache-heartbeat); native has none (off)"
+expect_once "$work/template.norm" 'access_log /dev/stdout vault; # VAULT_DEBUG_TP_LINE' \
+    "delta 8b: WP TUNE-1a restated normal log in the heartbeat location; native keeps the inherited one"
 
 # The native config must NOT already contain the container forms (would mean the
 # two files drifted in the other direction, e.g. someone containerised the
@@ -684,6 +691,8 @@ sed \
     -e 's|^access_log \${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE$|access_log logs/event.log vault_event buffer=64k flush=5s;|' \
     -e 's|^access_log /dev/stdout vault_tls;$|access_log logs/tls.log vault_tls;|' \
     -e '/^access_log \/vault\/logs\/throughput-debug\/throughput\.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE$/d' \
+    -e '/^access_log \/vault\/logs\/throughput-debug\/throughput\.log vault_tp_hb buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE$/d' \
+    -e '/^access_log \/dev\/stdout vault; # VAULT_DEBUG_TP_LINE$/d' \
     -e 's| # VAULT_DEBUG_TP_LINE$||' \
     "$work/template.norm" > "$work/template.unapplied"
 

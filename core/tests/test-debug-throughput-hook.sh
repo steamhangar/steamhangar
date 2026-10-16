@@ -8,6 +8,10 @@
 #     validated;
 #   - anything else for the flag, and out-of-range / non-numeric limits, is
 #     refused with a FATAL line naming the variable;
+#   - WP TUNE-1a: the heartbeat line (vault_tp_hb) is kept/stripped like the
+#     other two; VAULT_NGINX_AIO / VAULT_NGINX_WORKERS are opt-in, validated,
+#     work with the debug flag off, and unset leave the render byte-identical
+#     to main's;
 #   - --prune deletes by age and by total size, oldest first, and ONLY files
 #     named throughput.<epoch>.log (the current file and strangers stay).
 # Not covered here (needs a real nginx and /vault): the directory creation,
@@ -17,7 +21,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOK="$(cd "$script_dir/.." && pwd)/docker/31-vault-debug-throughput.sh"
 [ -f "$HOOK" ] || { echo "missing $HOOK" >&2; exit 1; }
-unset VAULT_DEBUG_THROUGHPUT VAULT_DEBUG_THROUGHPUT_MAX_MB VAULT_DEBUG_THROUGHPUT_MAX_DAYS VAULT_DEBUG_NOW
+unset VAULT_NGINX_AIO VAULT_NGINX_WORKERS VAULT_DEBUG_THROUGHPUT VAULT_DEBUG_THROUGHPUT_MAX_MB VAULT_DEBUG_THROUGHPUT_MAX_DAYS VAULT_DEBUG_NOW
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -35,6 +39,11 @@ http {
     location @miss {
         access_log /dev/stdout vault;
         access_log /vault/logs/throughput-debug/throughput.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE
+    }
+    location = /lancache-heartbeat {
+        access_log /dev/stdout vault; # VAULT_DEBUG_TP_LINE
+        access_log /vault/logs/throughput-debug/throughput.log vault_tp_hb buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE
+        return 200;
     }
 }
 CONF
@@ -63,8 +72,9 @@ VAULT_DEBUG_THROUGHPUT=off sh "$HOOK" "$conf" >/dev/null 2>&1
 for v in 1 true on yes; do
     conf="$work/on.conf"; mkconf "$conf"
     if out=$(VAULT_DEBUG_THROUGHPUT="$v" sh "$HOOK" "$conf" 2>&1) \
-        && [ "$(grep -c 'access_log .*vault_tp' "$conf")" = 2 ] && [ "$(grep -c VAULT_DEBUG_TP_LINE "$conf" || true)" = 0 ]; then
-        ok "on '$v' (render only): 2 directives kept, markers stripped"
+        && [ "$(grep -c 'access_log .*vault_tp' "$conf")" = 3 ] && [ "$(grep -c 'access_log .*vault_tp_hb' "$conf")" = 1 ] \
+        && [ "$(grep -c 'access_log /dev/stdout vault;' "$conf")" = 3 ] && [ "$(grep -c VAULT_DEBUG_TP_LINE "$conf" || true)" = 0 ]; then
+        ok "on '$v' (render only): 3 directives (incl. heartbeat + restated vault log) kept, markers stripped"
     else bad "on '$v': $out"; fi
 done
 
@@ -133,6 +143,86 @@ VAULT_DEBUG_NOW=$now sh "$HOOK" --prune "$d" >/dev/null
 [ -L "$d/throughput.1.log" ] && [ -f "$work/target" ] && ok "prune leaves symlinks alone" || bad "prune touched a symlink"
 
 
+# --- WP TUNE-1a: heartbeat guard and the opt-in tuning switches -------------------
+# ON with the heartbeat line missing is refused (3 directives are expected).
+mkconf "$work/nohb.conf"; grep -v 'vault_tp_hb' "$work/nohb.conf" > "$work/nohb2.conf"
+VAULT_DEBUG_THROUGHPUT=on sh "$HOOK" "$work/nohb2.conf" >/dev/null 2>&1 \
+    && bad "on accepted a config without the heartbeat directive" || ok "on refuses a config without the vault_tp_hb directive"
+
+tconf() { cat > "$1" <<'CONF'
+worker_processes  1;
+events {
+    worker_connections  1024;
+}
+http {
+    sendfile      on;
+    location / {
+        access_log /dev/stdout vault;
+    }
+}
+CONF
+}
+# unset / empty / off: file untouched, byte for byte
+for v in unset "" off; do
+    tconf "$work/t0.conf"; cp "$work/t0.conf" "$work/t0.ref"
+    if [ "$v" = unset ]; then out=$(sh "$HOOK" "$work/t0.conf" 2>&1)
+    elif [ "$v" = off ]; then out=$(VAULT_NGINX_AIO=off VAULT_NGINX_WORKERS= sh "$HOOK" "$work/t0.conf" 2>&1)
+    else out=$(VAULT_NGINX_AIO= VAULT_NGINX_WORKERS= sh "$HOOK" "$work/t0.conf" 2>&1); fi
+    if cmp -s "$work/t0.conf" "$work/t0.ref"; then ok "tuning '$v': config byte-identical (aio and workers off)"; else bad "tuning '$v': config changed: $out"; fi
+done
+# AIO threads works with the debug flag OFF (no debug lines needed in the config)
+tconf "$work/t1.conf"
+if out=$(VAULT_NGINX_AIO=threads VAULT_DEBUG_THROUGHPUT=off sh "$HOOK" "$work/t1.conf" 2>&1) \
+    && [ "$(grep -c '^    aio threads;$' "$work/t1.conf")" = 1 ] \
+    && awk '/^http \{$/ { getline; if ($0 == "    aio threads;") ok_=1 } END { exit !ok_ }' "$work/t1.conf" \
+    && [ "$(grep -c '^    sendfile      off;$' "$work/t1.conf")" = 1 ] && ! grep -q '^    sendfile      on;$' "$work/t1.conf" \
+    && [ "$(grep -c '^worker_processes  1;$' "$work/t1.conf")" = 1 ]; then
+    ok "AIO=threads with the debug flag off: aio threads right after 'http {', sendfile switched off, workers untouched"
+else bad "AIO=threads, debug off: $out"; fi
+# AIO threads plus debug ON on a full config: both land
+mkconf "$work/t2.conf"; sed -i '1i worker_processes  1;' "$work/t2.conf"; awk '{ print } /^http \{$/ && !d { print "    sendfile      on;"; d=1 }' "$work/t2.conf" > "$work/t2.tmp" && cat "$work/t2.tmp" > "$work/t2.conf"
+VAULT_NGINX_AIO=threads VAULT_DEBUG_THROUGHPUT=on sh "$HOOK" "$work/t2.conf" >/dev/null 2>&1 \
+    && [ "$(grep -c '^    aio threads;$' "$work/t2.conf")" = 1 ] && [ "$(grep -c 'vault_tp_hb' "$work/t2.conf")" = 1 ] \
+    && ok "AIO=threads and debug on together" || bad "AIO=threads + debug on: $(cat "$work/t2.conf")"
+# workers
+for w in auto 1 2 8 16; do
+    tconf "$work/t3.conf"
+    if out=$(VAULT_NGINX_WORKERS="$w" sh "$HOOK" "$work/t3.conf" 2>&1) \
+        && [ "$(grep -c "^worker_processes  $w;\$" "$work/t3.conf")" = 1 ] && [ "$(grep -c '^worker_processes' "$work/t3.conf")" = 1 ] \
+        && ! grep -q aio "$work/t3.conf"; then
+        ok "WORKERS=$w: worker_processes rendered, no aio"
+    else bad "WORKERS=$w: $out"; fi
+done
+tconf "$work/t4.conf"
+out=$(VAULT_NGINX_WORKERS=4 sh "$HOOK" "$work/t4.conf" 2>&1)
+printf '%s' "$out" | grep -q 'PER WORKER' && ok "WORKERS=4 logs the per-worker keepalive note" || bad "WORKERS=4: no per-worker note: $out"
+# refusals
+refuse_t() {
+    local label="$1" want="$2"; shift 2
+    tconf "$work/tr.conf"
+    if out=$(env "$@" sh "$HOOK" "$work/tr.conf" 2>&1); then bad "$label: accepted"
+    elif printf '%s' "$out" | grep -q "FATAL.*$want"; then ok "$label: refused naming $want"
+    else bad "$label: refused without $want: $out"; fi
+}
+for v in on 1 true Threads thread yes; do refuse_t "AIO='$v'" VAULT_NGINX_AIO VAULT_NGINX_AIO="$v"; done
+for v in 0 17 100 -1 abc 1.5 02 AUTO Auto "2 3"; do refuse_t "WORKERS='$v'" VAULT_NGINX_WORKERS VAULT_NGINX_WORKERS="$v"; done
+# AIO=threads refuses when the sendfile line is missing or duplicated
+printf 'worker_processes  1;\nhttp {\n    gzip off;\n}\n' > "$work/ns.conf"
+if out=$(VAULT_NGINX_AIO=threads sh "$HOOK" "$work/ns.conf" 2>&1); then bad "AIO=threads without a sendfile line was accepted"
+else case "$out" in *sendfile*) ok "AIO=threads refuses when the sendfile line is not found exactly once" ;; *) bad "refused without naming sendfile: $out" ;; esac; fi
+printf 'worker_processes  1;\nhttp {\n    sendfile      on;\n    sendfile      on;\n}\n' > "$work/ds.conf"
+if out=$(VAULT_NGINX_AIO=threads sh "$HOOK" "$work/ds.conf" 2>&1); then bad "AIO=threads with two sendfile lines was accepted"
+else ok "AIO=threads refuses a duplicated sendfile line"; fi
+# the shipped template has exactly one worker_processes line and one http block, one aio is added
+tmplt="$(cd "$script_dir/.." && pwd)/docker/nginx.conf.template"
+cp "$tmplt" "$work/real-tune.conf"
+VAULT_NGINX_AIO=threads VAULT_NGINX_WORKERS=auto VAULT_DEBUG_THROUGHPUT=off sh "$HOOK" "$work/real-tune.conf" >/dev/null 2>&1 \
+    && [ "$(grep -c '^worker_processes  auto;$' "$work/real-tune.conf")" = 1 ] && [ "$(grep -cE '^[[:space:]]*aio threads;$' "$work/real-tune.conf")" = 1 ] \
+    && [ "$(grep -c '^    sendfile      off;$' "$work/real-tune.conf")" = 1 ] && ! grep -q '^    sendfile      on;$' "$work/real-tune.conf" \
+    && [ "$(diff "$tmplt" "$work/real-tune.conf" | grep -c '^[<>]' || true)" -ge 4 ] \
+    && ok "real template: aio threads + sendfile off + worker_processes auto render" || bad "real template tuning render failed"
+
+
 # --- the REAL template: OFF must leave nothing behind ---------------------------
 tmpl="$(cd "$script_dir/.." && pwd)/docker/nginx.conf.template"
 cp "$tmpl" "$work/real-off.conf"
@@ -141,25 +231,30 @@ VAULT_DEBUG_THROUGHPUT=off sh "$HOOK" "$work/real-off.conf" >/dev/null 2>&1 \
 if [ "$(grep -cE 'vault_tp|throughput|VAULT_DEBUG' "$work/real-off.conf" || true)" = 0 ]; then
     ok "real template, off: no vault_tp / throughput / VAULT_DEBUG text is left"
 else bad "real template, off: leftovers: $(grep -nE 'vault_tp|throughput|VAULT_DEBUG' "$work/real-off.conf" | head -3)"; fi
-# Byte identity with the template as it was before this feature. The reference
-# is the commit that introduced the feature's parent; it can only be read from
-# a git checkout that still has the template without markers on `main`.
+# Byte identity with main: render main's template through main's hook with the
+# flag off and compare with this tree's template + hook, flag off AND both new
+# variables unset. (main's own off render is the reference, so the check stays
+# meaningful after the markers landed on main.)
 repo_root="$(cd "$script_dir/../.." && pwd)"
 if git -C "$repo_root" show main:core/docker/nginx.conf.template > "$work/main-template.conf" 2>/dev/null \
-    && ! grep -q VAULT_DEBUG_TP_LINE "$work/main-template.conf"; then
+    && git -C "$repo_root" show main:core/docker/31-vault-debug-throughput.sh > "$work/main-hook.sh" 2>/dev/null; then
+    VAULT_DEBUG_THROUGHPUT=off sh "$work/main-hook.sh" "$work/main-template.conf" >/dev/null 2>&1 \
+        || bad "main's hook failed on main's template"
     if cmp -s "$work/main-template.conf" "$work/real-off.conf"; then
-        ok "real template, off: byte-identical to main's template (no feature)"
-    else bad "real template, off: differs from main: $(diff "$work/main-template.conf" "$work/real-off.conf" | head -5)"; fi
+        ok "real template, off, new vars unset: byte-identical to main's off render"
+    else bad "real template, off: differs from main's off render: $(diff "$work/main-template.conf" "$work/real-off.conf" | head -5)"; fi
 else
-    echo "skip: main's template already carries the feature (or no git); byte-identity checked pre-merge only"
+    echo "skip: no git checkout with a main branch; byte-identity vs main not checked"
 fi
 # ON: markers gone, log_format and both directives present
 cp "$tmpl" "$work/real-on.conf"
 VAULT_DEBUG_THROUGHPUT=on sh "$HOOK" "$work/real-on.conf" >/dev/null 2>&1 \
-    && [ "$(grep -c 'log_format vault_tp' "$work/real-on.conf")" = 1 ] \
+    && [ "$(grep -c 'log_format vault_tp escape' "$work/real-on.conf")" = 1 ] \
     && [ "$(grep -c 'VAULT_DEBUG_TP_LINE' "$work/real-on.conf" || true)" = 0 ] \
-    && [ "$(grep -cE '^[[:space:]]*access_log .*vault_tp' "$work/real-on.conf")" = 2 ] \
-    && ok "real template, on: log_format + 2 directives, no marker" || bad "real template, on: unexpected render"
+    && [ "$(grep -cE '^[[:space:]]*access_log .*vault_tp' "$work/real-on.conf")" = 3 ] \
+    && [ "$(grep -c 'log_format vault_tp_hb' "$work/real-on.conf")" = 1 ] \
+    && [ "$(awk '/^ *location = \/lancache-heartbeat \{/,/return 200;/' "$work/real-on.conf" | grep -cE '^[[:space:]]*access_log ')" = 2 ] \
+    && ok "real template, on: 2 log_formats + 3 directives (heartbeat location keeps the vault log), no marker" || bad "real template, on: unexpected render"
 
 echo "debug-throughput hook: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

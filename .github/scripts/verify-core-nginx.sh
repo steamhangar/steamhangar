@@ -337,6 +337,8 @@ render_and_test() {
         -e VAULT_RESOLVER="1.1.1.1" \
         -e VAULT_EVENT_LOG="$event_log" \
         -e VAULT_DEBUG_THROUGHPUT="${DEBUG_TP:-}" \
+        -e VAULT_NGINX_AIO="${TUNE_AIO:-}" \
+        -e VAULT_NGINX_WORKERS="${TUNE_WORKERS:-}" \
         -e EXPECTED_TP="${DEBUG_TP_EXPECT:-0}" \
         -e EXPECTED_DIRECTIVES="$expected_directives" \
         -e PROBE_GUARDS="${4:-}" \
@@ -455,7 +457,7 @@ render_and_test() {
 
             # --- WP THROUGHPUT-DEBUG-1: the opt-in debug log -----------------
             # OFF (flag unset): no vault_tp directive, no marker, and nothing
-            # on disk. ON: exactly 2 directives (each in its own location),
+            # on disk. ON: exactly 3 directives (/depot/, @miss, heartbeat),
             # the directory exists (nginx -t opened the log), and this
             # `nginx -t` run wrote no startup line (not a server start).
             tp_count=$(grep -cE "^[[:space:]]*access_log[[:space:]].*vault_tp" "$conf" || true)
@@ -483,6 +485,24 @@ render_and_test() {
                 # nginx -t above already parsed them (an unknown variable is a config error).
                 grep -q "tcpinfo_rtt" "$conf" || { echo "FAIL: log_format lacks tcpinfo_rtt"; status=1; }
             fi
+
+            # --- WP TUNE-1a: the opt-in tuning switches ------------------------
+            # Unset (the default): the shipped lines stay. Set: the rendered
+            # config carries the lines, and nginx -t above accepted them.
+            if [ -n "$VAULT_NGINX_AIO" ]; then
+                grep -qx "    aio threads;" "$conf" || { echo "FAIL: VAULT_NGINX_AIO=$VAULT_NGINX_AIO but no aio threads line"; status=1; }
+                grep -qx "    sendfile      off;" "$conf" || { echo "FAIL: aio threads but sendfile is not off"; status=1; }
+                ! grep -qx "    sendfile      on;" "$conf" || { echo "FAIL: sendfile on survived"; status=1; }
+            else
+                ! grep -qE "^[[:space:]]*aio[[:space:]]" "$conf" || { echo "FAIL: aio set while VAULT_NGINX_AIO is unset"; status=1; }
+                grep -qx "    sendfile      on;" "$conf" || { echo "FAIL: shipped sendfile on line missing"; status=1; }
+            fi
+            if [ -n "$VAULT_NGINX_WORKERS" ]; then
+                grep -qx "worker_processes  $VAULT_NGINX_WORKERS;" "$conf" || { echo "FAIL: worker_processes  $VAULT_NGINX_WORKERS; not rendered"; status=1; }
+            else
+                grep -qx "worker_processes  1;" "$conf" || { echo "FAIL: shipped worker_processes  1; missing"; status=1; }
+            fi
+            echo "tuning: aio=${VAULT_NGINX_AIO:-} workers=${VAULT_NGINX_WORKERS:-} checked"
 
             # --- WP VER-2: the build-version hook ran in the real chain ------
             # The stock entrypoint logs "Launching <hook>" per hook in sorted
@@ -1085,8 +1105,15 @@ render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guard
 render_and_test "cache-event log ON" "/vault/logs/event.log" 3
 # WP THROUGHPUT-DEBUG-1: the opt-in throughput log, on top of the event log
 # off and on (two independent features, one config).
-DEBUG_TP=1 DEBUG_TP_EXPECT=2 render_and_test "throughput debug ON" "" 0
-DEBUG_TP=1 DEBUG_TP_EXPECT=2 render_and_test "throughput debug ON, event log ON" "/vault/logs/event.log" 3
+DEBUG_TP=1 DEBUG_TP_EXPECT=3 render_and_test "throughput debug ON" "" 0
+DEBUG_TP=1 DEBUG_TP_EXPECT=3 render_and_test "throughput debug ON, event log ON" "/vault/logs/event.log" 3
+# WP TUNE-1a: the opt-in tuning switches through the real entrypoint, with
+# the debug flag off (they are independent of it): nginx -t accepts the
+# render, which carries aio threads, sendfile off and worker_processes 2.
+TUNE_AIO=threads TUNE_WORKERS=2 render_and_test "tuning AIO=threads WORKERS=2" "" 0
+# Bad values stop the boot in hook 31.
+render_must_fail "bad VAULT_NGINX_AIO" "" 31-vault-debug-throughput.sh "" "" -e VAULT_NGINX_AIO=on
+render_must_fail "bad VAULT_NGINX_WORKERS" "" 31-vault-debug-throughput.sh "" "" -e VAULT_NGINX_WORKERS=17
 # WP SEC-FIX-5: the upgrade -- a volume from an image before SEC-FIX-5
 # (everything 101:101, an existing event.log and version file) is migrated by
 # 21-vault-volume-ownership.sh, through the real entrypoint, event log on.

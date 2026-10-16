@@ -15,6 +15,12 @@ Fields (tp1): msec client depot method status range bytes_sent request_time
 upstream_response_time cache connection connection_requests request_length
 tcp_rtt_us tcp_rttvar_us tcp_snd_cwnd tcp_rcv_space
 
+Heartbeat lines (tag hb1, one per GET /lancache-heartbeat, same file): msec
+client status request_time connection connection_requests tcp_rtt_us. They get
+their own "Heartbeat" section (count, p50/p95/max request_time, number of 499,
+and the worst 10 s buckets next to the slowest small depot requests of the
+same bucket); logs without hb lines print "no heartbeat lines".
+
 Per client it prints total MB, minutes covered, aggregate Mbit/s per 10 s
 bucket (average and p95 over the full buckets, edge buckets dropped), per-request throughput
 (bytes / request_time, requests >= --min-request-kb), connection counts,
@@ -27,6 +33,7 @@ from __future__ import annotations
 import argparse
 import statistics
 import sys
+import time
 from collections import defaultdict
 from typing import Iterable, Optional
 
@@ -74,9 +81,20 @@ class Req:
         self.start = self.end - self.rt
 
 
-def parse(lines: Iterable[str]) -> tuple[list[Req], list[str], int]:
-    """(requests, startup lines, number of malformed lines)."""
+class Heartbeat:
+    __slots__ = ("end", "client", "status", "rt")
+
+    def __init__(self, f: list[str]) -> None:
+        self.end = float(f[1])
+        self.client = f[2]
+        self.status = f[3]
+        self.rt = _num(f[4]) or 0.0
+
+
+def parse_all(lines: Iterable[str]) -> tuple[list[Req], list[Heartbeat], list[str], int]:
+    """(requests, heartbeats, startup lines, number of malformed lines)."""
     reqs: list[Req] = []
+    hbs: list[Heartbeat] = []
     starts: list[str] = []
     bad = 0
     for raw in lines:
@@ -88,13 +106,21 @@ def parse(lines: Iterable[str]) -> tuple[list[Req], list[str], int]:
                 starts.append(line[2:])
             continue
         f = line.split("\t")
-        if len(f) != 18 or f[0] != "tp1":
-            bad += 1
-            continue
         try:
-            reqs.append(Req(f))
+            if f[0] == "tp1" and len(f) == 18:
+                reqs.append(Req(f))
+            elif f[0] == "hb1" and len(f) == 8:
+                hbs.append(Heartbeat(f))
+            else:
+                bad += 1
         except ValueError:
             bad += 1
+    return reqs, hbs, starts, bad
+
+
+def parse(lines: Iterable[str]) -> tuple[list[Req], list[str], int]:
+    """(requests, startup lines, number of malformed lines); heartbeat lines are valid and skipped here."""
+    reqs, _hbs, starts, bad = parse_all(lines)
     return reqs, starts, bad
 
 
@@ -206,7 +232,8 @@ def verdicts(a: dict) -> list[str]:
     if a["conc_max"] <= 5:
         if p50 >= 0.5 * link:
             out.append(f"only {a['conc_max']} parallel connection(s) at most, but each stream is fast "
-                       f"(per-request p50 {p50:.0f} Mbit/s): client-limited, the cap is the number of streams")
+                       f"(per-request p50 {p50:.0f} Mbit/s): not limited by the cache path in this log (client or "
+                       "network side cannot be told apart here); the cap is the number of streams")
         else:
             out.append(f"few connections ({a['conc_max']} at most) AND slow single streams (per-request p50 "
                        f"{p50:.0f} Mbit/s, below half the {link:.0f} Mbit/s link): server, disk or the client's "
@@ -231,6 +258,38 @@ def verdicts(a: dict) -> list[str]:
     if not out:
         out.append("no single bottleneck stands out in this data")
     return out
+
+
+def heartbeat_section(hbs: list[Heartbeat], reqs: list[Req], min_kb: int, top: int = 3) -> str:
+    """The "Heartbeat" report section. Per 10 s bucket: the slowest heartbeat and
+    the slowest small (< min_kb) depot request that ENDED in the same bucket."""
+    if not hbs:
+        return "== Heartbeat ==\n  no heartbeat lines"
+    rts = [h.rt for h in hbs]
+    n499 = sum(1 for h in hbs if h.status == "499")
+    other = sum(1 for h in hbs if h.status not in ("200", "499"))
+    small: dict[int, list[float]] = defaultdict(list)
+    for r in reqs:
+        if r.bytes < min_kb * 1024:
+            small[int(r.end // BUCKET_S)].append(r.rt)
+    worst: dict[int, float] = {}
+    for h in hbs:
+        b = int(h.end // BUCKET_S)
+        worst[b] = max(worst.get(b, 0.0), h.rt)
+    lines = [
+        "== Heartbeat ==",
+        f"  lines: {len(hbs)}   request_time p50 {pct(rts, 50) * 1000:.1f} ms, p95 {pct(rts, 95) * 1000:.1f} ms, "
+        f"max {max(rts) * 1000:.1f} ms",
+        f"  status 499 (client gave up): {n499}" + (f"   other non-200: {other}" if other else ""),
+        f"  largest {min(top, len(worst))} {BUCKET_S}s bucket(s) by heartbeat max "
+        f"(small = depot requests under {min_kb} kB ending in the same bucket):",
+    ]
+    for b in sorted(worst, key=lambda k: -worst[k])[:top]:
+        sm = small.get(b)
+        sm_txt = (f"small requests max {max(sm) * 1000:.1f} ms (n={len(sm)})" if sm else "no small requests in this bucket")
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(b * BUCKET_S))
+        lines.append(f"    {stamp}  heartbeat max {worst[b] * 1000:.1f} ms; {sm_txt}")
+    return "\n".join(lines)
 
 
 NOTES = (
@@ -276,12 +335,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         else:
             with open(name, encoding="utf-8", errors="replace") as fh:
                 lines += fh.read().splitlines()
-    reqs, starts, bad = parse(lines)
+    reqs, hbs, starts, bad = parse_all(lines)
     if args.client:
         reqs = [r for r in reqs if r.client == args.client]
-    if not reqs:
+        hbs = [h for h in hbs if h.client == args.client]
+    if not reqs and not hbs:
         print("no usable requests found" + (f" ({bad} malformed line(s))" if bad else ""))
         return 1
+    if not reqs:
+        for s in dict.fromkeys(starts):
+            print(s)
+        print("no depot requests in this log (heartbeat lines only)")
+        print(heartbeat_section(hbs, reqs, args.min_request_kb))
+        return 0
     for s in dict.fromkeys(starts):  # unique, in order
         print(s)
     by_client: dict[str, list[Req]] = defaultdict(list)
@@ -289,6 +355,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         by_client[r.client].append(r)
     for client in sorted(by_client, key=lambda c: -sum(r.bytes for r in by_client[c])):
         print(render(client, analyse(by_client[client], args.link_mbit, args.min_request_kb)))
+    print(heartbeat_section(hbs, reqs, args.min_request_kb))
     print("\n".join(NOTES))
     if bad:
         print(f"({bad} malformed line(s) skipped)")
