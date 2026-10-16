@@ -145,9 +145,8 @@ else bad "real template, off: leftovers: $(grep -nE 'vault_tp|throughput|VAULT_D
 # is the commit that introduced the feature's parent; it can only be read from
 # a git checkout that still has the template without markers on `main`.
 repo_root="$(cd "$script_dir/../.." && pwd)"
-if ref=$(git -C "$repo_root" show main:core/docker/nginx.conf.template 2>/dev/null) \
-    && ! printf '%s\n' "$ref" | grep -q VAULT_DEBUG_TP_LINE; then
-    printf '%s\n' "$ref" > "$work/main-template.conf"
+if git -C "$repo_root" show main:core/docker/nginx.conf.template > "$work/main-template.conf" 2>/dev/null \
+    && ! grep -q VAULT_DEBUG_TP_LINE "$work/main-template.conf"; then
     if cmp -s "$work/main-template.conf" "$work/real-off.conf"; then
         ok "real template, off: byte-identical to main's template (no feature)"
     else bad "real template, off: differs from main: $(diff "$work/main-template.conf" "$work/real-off.conf" | head -5)"; fi
