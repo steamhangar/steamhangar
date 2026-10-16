@@ -1153,10 +1153,10 @@ DEFAULT_RELAY_EXPOSE_PLAYTIME = False
 DEFAULT_RELAY_EXPOSE_LAST_PLAYED = False
 
 #: WP D23 LIBRARY-META-1a: the nightly library-metadata fill sends every app
-#: the vault knows to the manifest oracle, over the schedule window, which is
-#: far more appids at once than browsing does -- so it has its own switch,
+#: the vault knows to the manifest oracle, independent of the schedule
+#: window, which is far more appids at once than browsing does -- so it has its own switch,
 #: env-only like the relay gates, and is off by default. It also needs the
-#: oracle itself on and a schedule window.
+#: oracle itself on.
 DEFAULT_LIBRARY_META = False
 
 #: WP D19-1a DEPOT-PREVIEW-1a: opening the card of a never-downloaded game
@@ -1448,7 +1448,8 @@ class Settings:
     relay_expose_last_played: bool = DEFAULT_RELAY_EXPOSE_LAST_PLAYED
     # WP D23 LIBRARY-META-1a. Env-only (VAULT_LIBRARY_META), default off: the
     # nightly oracle fill of app metadata for the library filters, see
-    # ``vault_api/library_meta.py``. Needs the oracle on and a schedule window.
+    # ``vault_api/library_meta.py``. Needs the oracle on;
+    # independent of the schedule window.
     library_meta_enabled: bool = DEFAULT_LIBRARY_META
     # WP D19-1a. Env-only (VAULT_DEPOT_PREVIEW), default off: one oracle query
     # per opened card of a never-downloaded game, see

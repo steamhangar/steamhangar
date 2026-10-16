@@ -34,7 +34,7 @@ from vault_api.config import Settings
 from vault_api.db import SCHEMA_VERSION, get_connection, init_db
 from vault_api.main import create_app
 from vault_api.mapping import upsert_mapping
-from vault_api.schedule_window import parse_window
+from vault_api.schedule_window import parse_window, parse_window_or_off
 from vault_api.scheduler import PrefillScheduler
 
 AUTH = {"X-Api-Key": TEST_API_KEY}
@@ -365,19 +365,65 @@ def test_fill_stops_when_the_window_closes(tmp_path: Path, conn: sqlite3.Connect
 # --------------------------------------------------------------------------
 
 
-def test_runner_gates_window_and_switches(tmp_path: Path) -> None:
+def test_runner_ignores_the_window_and_gates_on_switches_and_once_a_day(
+    tmp_path: Path,
+) -> None:
     path = str(tmp_path / "vault.db")
     init_db(path)
     fake = FakeOracle()
     runner = library_meta.LibraryMetaRunner(path, fetch=fake, pause_seconds=0)
-    window = parse_window("03:00-07:00")
     clock = lambda: NOW  # noqa: E731
-    assert runner.maybe_start(enabled_settings(tmp_path), window, NOW, clock) == "disabled"
+    assert runner.maybe_start(enabled_settings(tmp_path), NOW, clock) == "disabled"
     on = meta_settings(tmp_path)
-    assert runner.maybe_start(on, None, NOW, clock) == "no-window"
-    noon = NOW.replace(hour=12)
-    assert runner.maybe_start(on, window, noon, clock) == "outside-window"
+    # Own switch off, oracle on: nothing runs.
+    own_off = dataclasses.replace(on, library_meta_enabled=False)
+    assert runner.maybe_start(own_off, NOW, clock) == "disabled"
     assert fake.asked == []
+    # The first pass starts, the second the same day does not.
+    assert runner.maybe_start(on, NOW, clock) == "started"
+    assert runner.wait(10)
+    assert runner.maybe_start(on, NOW + timedelta(hours=3), clock) == "done-today"
+    # The next calendar day it runs again.
+    assert runner.maybe_start(on, NOW + timedelta(days=1), clock) == "started"
+    assert runner.wait(10)
+
+
+def test_a_run_crossing_midnight_does_not_skip_the_next_days_pass(
+    tmp_path: Path,
+) -> None:
+    settings = meta_settings(tmp_path)
+    init_db(settings.db_path)
+    runner = library_meta.LibraryMetaRunner(
+        settings.db_path, fetch=FakeOracle(), pause_seconds=0
+    )
+    start = datetime(2026, 10, 15, 23, 59, tzinfo=timezone.utc)
+    after_midnight = start + timedelta(minutes=5)
+    assert runner.maybe_start(settings, start, lambda: after_midnight) == "started"
+    assert runner.wait(10)
+    # Recorded as the start day: the next calendar day is not skipped.
+    assert runner.maybe_start(settings, after_midnight, lambda: after_midnight) == "idle"
+    runner._idle_until = None
+    assert runner.maybe_start(settings, after_midnight, lambda: after_midnight) == "started"
+    assert runner.wait(10)
+
+
+def test_a_crashing_run_backs_off_instead_of_retrying_every_tick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = meta_settings(tmp_path)
+    init_db(settings.db_path)
+    runner = library_meta.LibraryMetaRunner(
+        settings.db_path, fetch=FakeOracle(), pause_seconds=0
+    )
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(library_meta, "fill", boom)
+    clock = lambda: NOW  # noqa: E731
+    assert runner.maybe_start(settings, NOW, clock) == "started"
+    assert runner.wait(10)
+    assert runner.maybe_start(settings, NOW + timedelta(minutes=1), clock) == "idle"
 
 
 def test_after_a_bail_out_the_runner_does_not_restart_on_the_next_tick(
@@ -393,41 +439,40 @@ def test_after_a_bail_out_the_runner_does_not_restart_on_the_next_tick(
     runner = library_meta.LibraryMetaRunner(
         settings.db_path, fetch=fake, pause_seconds=0
     )
-    window = parse_window("03:00-07:00")
     clock = lambda: NOW  # noqa: E731
-    assert runner.maybe_start(settings, window, NOW, clock) == "started"
+    assert runner.maybe_start(settings, NOW, clock) == "started"
     assert runner.wait(10)
     assert runner.last_run.bailed_out
     asked = list(fake.asked)
-    assert runner.maybe_start(settings, window, NOW + timedelta(minutes=1), clock) == "idle"
-    assert runner.maybe_start(settings, window, NOW + timedelta(minutes=2), clock) == "idle"
+    assert runner.maybe_start(settings, NOW + timedelta(minutes=1), clock) == "idle"
+    assert runner.maybe_start(settings, NOW + timedelta(minutes=2), clock) == "idle"
     assert fake.asked == asked  # no further requests to a failing oracle
 
 
-def test_the_scheduler_tick_fills_inside_the_window_and_only_then(tmp_path: Path) -> None:
-    settings = meta_settings(tmp_path)
+@pytest.mark.parametrize(
+    "window", ["03:00-07:00", "off"], ids=["inside-or-outside-window", "window-off"]
+)
+@pytest.mark.parametrize("hour", [4, 12])
+def test_the_scheduler_tick_fills_at_any_hour_and_with_the_window_off(
+    tmp_path: Path, window: str, hour: int
+) -> None:
+    settings = dataclasses.replace(
+        meta_settings(tmp_path), schedule_window=parse_window_or_off(window)
+    )
     init_db(settings.db_path)
     conn = get_connection(settings.db_path)
     add_app(conn, 440)
     fake = FakeOracle({440: payload(440, **FULL)})
-
-    def sched(clock_now: datetime) -> PrefillScheduler:
-        return PrefillScheduler(
+    clock_now = datetime(2026, 10, 15, hour, 0).astimezone()
+    try:
+        sched = PrefillScheduler(
             settings,
             clock=lambda: clock_now,
             oracle_fetch=fake,
             update_check_pause_seconds=0,
         )
-
-    try:
-        closed = sched(datetime(2026, 10, 15, 12, 0).astimezone())
-        closed._tick(conn)
-        assert closed._library_meta.wait(10)
-        assert library_meta.meta_by_appid(conn) == {}
-
-        opened = sched(datetime(2026, 10, 15, 4, 0).astimezone())
-        opened._tick(conn)
-        assert opened._library_meta.wait(10)
+        sched._tick(conn)
+        assert sched._library_meta.wait(10)
         assert library_meta.meta_by_appid(conn)[440]["vr"] is False
     finally:
         conn.close()
