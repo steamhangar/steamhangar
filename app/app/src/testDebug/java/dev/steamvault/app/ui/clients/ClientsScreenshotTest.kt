@@ -118,9 +118,9 @@ class ClientsScreenshotTest {
                     }
                     Page.STATS -> Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
                         val scope = rememberCoroutineScope()
-                        val poll = remember { downloadsStatsPoll(repo) }
+                        val poll = remember { downloadsStatsPoll(repo, nowMs = { NOW }) }
                         LaunchedEffect(poll) { poll.refreshOnce() }
-                        Box(Modifier.statusBarsPadding().padding(12.dp)) { DownloadsStatsHeader(poll, scope) }
+                        Box(Modifier.statusBarsPadding().padding(12.dp)) { DownloadsStatsHeader(poll, scope, nowMs = { NOW }) }
                     }
                 }
             }
