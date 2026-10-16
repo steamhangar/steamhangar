@@ -102,9 +102,9 @@ test("BP-L (min-width:1024px) exists and gives .view-downloads/.view-settings th
     body,
     "no '.view-downloads, .view-settings, .view-clients{...}' rule found in the BP-L block — this is the WP 4e.5 layout itself; reverting/deleting it must fail exactly this test",
   );
-  assert.match(body, /max-width:\s*var\(--w-text\)/, "must reference the live --w-text token, never a re-typed literal");
+  assert.match(body, /max-width:\s*var\(--w-page\)/, "must reference the live --w-page token (LAYOUT-1), never a re-typed literal");
   assert.match(body, /margin:\s*0\s+auto\b/, "must self-centre (margin:0 auto) — without it the capped column would hug the left edge of .view-root's own, wider box instead of sitting centred inside it");
-  assert.equal(/\b\d+px\b/.test(body), false, "the rule must contain no bare px literal at all — width comes ONLY from --w-text, not a hand-typed number that could drift from it");
+  assert.equal(/\b\d+px\b/.test(body), false, "the rule must contain no bare px literal at all — width comes ONLY from --w-page, not a hand-typed number that could drift from it");
 });
 
 test(".view-library is deliberately excluded from the capped-column rule — it still needs --w-wall for its own auto-fill tile grid", () => {
@@ -238,4 +238,13 @@ test("the capped-column rule exists ONLY inside the BP-L block, never at the top
   // @media would false-positive on it. This checks specifically for the
   // WP 4e.5 selector pair, not any reference to either class.
   assert.equal(appTop.includes(".view-downloads, .view-settings, .view-clients{"), false, "the capped-column selector must not exist outside @media — the base/mobile column width for both views is unaffected by this WP, exactly as before");
+});
+
+test("--w-page (LAYOUT-1) is declared once, as 1400px, in theme.css and never redeclared in any breakpoint", () => {
+  const assignments = [...codeOnlyAll.matchAll(/--w-page\s*:\s*([^;]+);/g)].map((m) => m[1].trim());
+  assert.deepEqual(assignments, ["1400px"]);
+  assert.match(themeTop, /--w-page:\s*1400px/);
+  assert.equal(/--w-page/.test(bpXl.body), false, "BP-XL must not redeclare --w-page");
+  const wall = ruleBody(bpL.body, ".view-root");
+  assert.ok(wall && /max-width:\s*var\(--w-wall\)/.test(wall), "Library/.view-root keeps --w-wall");
 });

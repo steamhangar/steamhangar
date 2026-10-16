@@ -2009,7 +2009,7 @@ body.onboarding .nav{ display:none; }
      inherit .view-root's width... unreviewed for their own content shape at
      desktop widths") — and, separately, makes this file's OWN BP-XL comment
      below finally true: it already claims Settings/Downloads are
-     "--w-text-based content" that "nothing there benefits from more width",
+     "--w-text-based content" (superseded by LAYOUT-1: --w-page now) that "nothing there benefits from more width",
      while the actual rule in force for them (`.view-root` immediately
      above, shared by every view) put them on `--w-wall` regardless, exactly
      like Library. That claim was aspirational, never implemented, until
@@ -2042,7 +2042,7 @@ body.onboarding .nav{ display:none; }
      past, that same ~90-character outer bound. Full table in
      `docs/WORKPACKAGES.md`'s D-15.
 
-     DECISION: both get the SAME capped, centred column, `--w-text`
+     DECISION (superseded by LAYOUT-1: the cap is now `--w-page`): both get the SAME capped, centred column, `--w-text`
      (unchanged, still 760px from BP-M up) — a "capped readable measure",
      not a multi-column arrangement or a hybrid, for reasons specific to
      each (D-15): Downloads' four sections vary in item count independently
@@ -2071,8 +2071,9 @@ body.onboarding .nav{ display:none; }
      property on the same element: the two rules target two different
      elements, so there is no cascade tie to resolve here, and none is
      created by adding this. */
+  /* LAYOUT-1: the cap is --w-page now; every --w-text mention in the comment above is superseded. */
   .view-downloads, .view-settings, .view-clients{
-    max-width:var(--w-text);
+    max-width:var(--w-page);
     margin:0 auto;
   }
 
@@ -2579,6 +2580,7 @@ body.onboarding .nav{ display:none; }
    Settings/Downloads at the time was `.view-root`'s own `--w-wall`, same
    as Library, not `--w-text` at all — the BP-L block's
    `.view-downloads, .view-settings{ max-width:var(--w-text); ... }` rule
+   (superseded by LAYOUT-1: that rule now reads --w-page)
    (added by WP 4e.5) is what makes THAT half true; --w-text itself is
    still never redefined here, so nothing about THIS block needed to
    change. **The banner is a THIRD case, and this sentence still misstates
