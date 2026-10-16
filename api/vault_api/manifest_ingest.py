@@ -90,6 +90,12 @@ class IngestResult:
     #: the common, unremarkable case on a host where VAULT_STEAMPREFILL_PATH
     #: itself is unset or SteamPrefill has never run. Not an error.
     cache_dir_unavailable: bool = False
+    #: Depots this pass newly mapped to the job's own app (WP
+    #: MAP-FROM-MANIFEST-1): the manifest names the app as the original
+    #: requester and the depot has bytes in the cache, but no
+    #: ``depot_app_map`` row existed (an all-hit run observes nothing, so the
+    #: before/after diff never maps it). Already-mapped depots are not listed.
+    mapped_own: list[int] = field(default_factory=list)
 
     def summary(self) -> str:
         if self.cache_dir_unavailable:
@@ -111,6 +117,12 @@ class IngestResult:
             parts.append(
                 f"[vault-api] Manifest ingestion: recorded {len(self.ingested)} "
                 f"manifest(s) for depot(s) {depots}."
+            )
+        if self.mapped_own:
+            parts.append(
+                "[vault-api] Manifest ingestion: mapped depot(s) "
+                f"{sorted(self.mapped_own)} to this app (they are cached and "
+                "named by this app's manifests, but were not mapped yet)."
             )
         if self.superseded:
             shown = self.superseded[:MAX_LOGGED_NAMES]
@@ -142,7 +154,11 @@ class IngestResult:
 
 
 def ingest_after_prefill(
-    conn: sqlite3.Connection, *, appid: int, settings: Settings
+    conn: sqlite3.Connection,
+    *,
+    appid: int,
+    settings: Settings,
+    skip_own_mapping: Iterable[int] = (),
 ) -> IngestResult:
     """Scan ``settings.steamprefill_cache_dir`` for ``{appid}_*.bin`` files
     belonging to this job's app, record ONE manifest per depot, and archive
@@ -170,6 +186,31 @@ def ingest_after_prefill(
        replace-set mapping (``vault_api.prefill.apply_observed_mapping``,
        which is unaffected by this function and still comes from the
        before/after depot diff exactly as before WP 3.2).
+    ``skip_own_mapping``: depots step 5b must not map in THIS call -- the
+    worker passes the depots ``apply_observed_mapping`` just removed from this
+    app in the same job (a depot Steam reassigned away), so ingestion does not
+    undo that decision from a leftover ``.bin``. A depot someone deleted by
+    hand is not in this set: with its ``.bin`` and bytes still present it
+    reappears on the next run (documented behaviour).
+
+    5b. **Also map the depot to the job's own app** (WP MAP-FROM-MANIFEST-1),
+       additively (``INSERT OR IGNORE``, never a delete or reassignment): a
+       manifest whose ORIGINAL app is this job's app says "this app's depot
+       list contains depot D". Without it an all-hit run (verify/force over a
+       fully cached game) observes no new bytes, ``apply_observed_mapping``
+       returns early, and a depot cached by an earlier run stays unmapped for
+       good (size, completeness and exclusive-depot counts were wrong). It
+       runs after ``apply_observed_mapping`` in the worker, so the
+       replace-within-app step cannot undo it in the same job. It is only
+       done when the depot has bytes in the cache (a leftover ``.bin`` for a
+       depot that is gone must not create a phantom row) and never when the
+       cache cannot be judged. MAP-DRIFT-1's orphan cleanup only deletes
+       ``depot_manifests`` rows for depots NO app maps, so a mapped depot is
+       never an orphan; rows of other apps are never touched. Covers both
+       ``containing == original`` (the depot is exclusive to this app unless
+       another app also maps it) and ``containing != original`` (the
+       containing app is mapped by step 5 and this app is mapped too, so the
+       depot reads as shared by both).
     6. Archive the ``.bin`` file durably and prune old archives for that
        depot to ``settings.manifest_keep``.
 
@@ -242,10 +283,14 @@ def ingest_after_prefill(
     parse_failures: list[str] = list(scan.parse_failures)
     vanished_during_scan: list[str] = list(scan.vanished)
     superseded: list[str] = []
+    mapped_own: list[int] = []
+    skip_own = {int(d) for d in skip_own_mapping}
+    depot_root: str | None = None
+    depot_root_resolved = False
 
     # WP UPD-FIX-1: one manifest per depot, chosen by ``select_current_manifest``
     # -- never "every file, last one wins". See that function for the rule.
-    for (_original_appid, depotid), group in sorted(scan.groups.items()):
+    for (original_appid, depotid), group in sorted(scan.groups.items()):
         chosen = select_current_manifest(group)
         if chosen is None:  # pragma: no cover - a group is never empty
             continue
@@ -309,6 +354,24 @@ def ingest_after_prefill(
         if containing_app_id != appid:
             upsert_mapping(conn, depotid=manifest.depot_id, appid=containing_app_id, name=None)
 
+        # WP MAP-FROM-MANIFEST-1: the job's own app owns the depot too (see
+        # the docstring, step 5b). Only when the manifest's original app IS
+        # this job's app and the depot has bytes on disk.
+        if original_appid == appid and manifest.depot_id not in skip_own:
+            if not depot_root_resolved:
+                depot_root_resolved = True
+                depot_root = _resolve_depot_root_or_none(settings)
+            if (
+                depot_root is not None
+                and _depot_has_bytes(depot_root, manifest.depot_id)
+                and conn.execute(
+                    "SELECT 1 FROM depot_app_map WHERE depotid = ? AND appid = ?",
+                    (manifest.depot_id, appid),
+                ).fetchone() is None
+            ):
+                upsert_mapping(conn, depotid=manifest.depot_id, appid=appid, name=None)
+                mapped_own.append(manifest.depot_id)
+
         archived_path = _archive_quietly(
             settings, appid=appid, depotid=manifest.depot_id,
             manifestid=manifestid, src_path=chosen.path,
@@ -330,7 +393,29 @@ def ingest_after_prefill(
         parse_failures=parse_failures,
         vanished_during_scan=vanished_during_scan,
         superseded=superseded,
+        mapped_own=mapped_own,
     )
+
+
+def _resolve_depot_root_or_none(settings: Settings) -> str | None:
+    """The cache's depot root, or ``None`` when it cannot be judged (then
+    nothing is mapped from manifests: no evidence, no row)."""
+    from vault_api import deletion  # local: deletion imports jobs, keep import order simple
+
+    try:
+        return deletion.resolve_depot_root(settings.cache_root)
+    except Exception as exc:  # noqa: BLE001 - unjudgeable disk maps nothing
+        logger.info("manifest-ingest: depot cache unavailable, own-app mapping skipped: %s", exc)
+        return None
+
+
+def _depot_has_bytes(depot_root: str, depotid: int) -> bool:
+    from vault_api import deletion
+
+    try:
+        return _has_bytes_on_disk(deletion.depot_dir_path(depot_root, depotid))
+    except deletion.DeletionGuardError:
+        return False
 
 
 def _archive_quietly(

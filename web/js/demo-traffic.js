@@ -244,6 +244,7 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
     bytes_per_second: 31.5 * MIB,
     bytes_since_start: Math.round(8.8 * GIB),
     exclusive_depots: 1,
+    mapped_depots: 1,
   }));
   return {
     event_feed: f,

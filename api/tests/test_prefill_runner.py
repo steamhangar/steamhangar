@@ -456,6 +456,10 @@ def test_apply_observed_mapping_leaves_everything_alone_when_nothing_observed(co
 
     assert change.skipped_empty is True
     assert "left unchanged" in change.summary()
+    # WP MAP-FROM-MANIFEST-1: when manifests added depots, the line says so.
+    extended = change.summary([3751951])
+    assert "left unchanged" not in extended
+    assert "added=[3751951]" in extended
     depots = {
         row["depotid"]
         for row in conn.execute("SELECT depotid FROM depot_app_map WHERE appid = 440")

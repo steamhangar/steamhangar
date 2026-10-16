@@ -179,11 +179,12 @@ test("MUTATION TARGET C8 -- completable vs damaged-only", () => {
   }
 });
 
-test("detail line: own figure with bytes and time; unknown says so; 100 omits 'of'", () => {
+test("detail line: own figure with bytes and time; unknown says so; 100 shows 'of' too", () => {
   const p = row({ cache_complete_pct: 80, cache_expected_bytes: 4 * GB, cache_present_bytes: 3.2 * GB, cache_missing_chunks: 9 });
   assert.match(completenessLine(p), /^80% complete — 3\.2 GB of 4\.0 GB on disk · checked .+$/);
-  assert.match(completenessLine(row()), /^100% complete — 3\.0 GB on disk · checked /);
-  assert.equal(completenessLine(row({ cache_complete_checked_at: null })), "100% complete — 3.0 GB on disk");
+  assert.match(completenessLine(row()), /^100% complete — 3\.0 GB of 3\.0 GB on disk · checked /);
+  assert.equal(completenessLine(row({ cache_complete_checked_at: null })), "100% complete — 3.0 GB of 3.0 GB on disk");
+  assert.equal(completenessLine(row({ cache_complete_checked_at: null, cache_expected_bytes: null })), "100% complete — 3.0 GB on disk");
   assert.equal(completenessLine(unknown()), UNKNOWN_LINE);
   assert.equal(UNKNOWN_LINE, "Completeness unknown — not measured for the current build.");
 });

@@ -288,6 +288,7 @@ fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): T
             bytes_per_second = 31.5 * MIB,
             bytes_since_start = (8.8 * GIB).roundToLong(),
             exclusive_depots = 1,
+            mapped_depots = 1,
         )
     }
     return ThroughputOut(

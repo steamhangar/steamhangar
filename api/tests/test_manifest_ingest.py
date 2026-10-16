@@ -17,6 +17,7 @@ from tests.test_manifests import _bin_manifest_bytes, _chunk_id
 from vault_api.config import Settings
 from vault_api.db import get_connection, init_db
 from vault_api.depot_manifests import get_depot_manifest
+from vault_api.mapping import upsert_mapping
 from vault_api.manifest_ingest import (
     find_canary_mismatches,
     ingest_after_prefill,
@@ -106,27 +107,169 @@ def test_ingest_happy_path_records_row_additive_mapping_and_archives(tmp_path: P
     assert archived.read_bytes() == (cache_dir / "107100_228980_229002_987.bin").read_bytes()
 
 
-def test_ingest_own_depot_containing_appid_equals_appid_no_extra_mapping(
+def _make_cached_depot(tmp_path: Path, depotid: int) -> None:
+    chunk_dir = tmp_path / "cache" / "depot" / str(depotid) / "chunk"
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    (chunk_dir / "c0").write_bytes(b"x")
+
+
+def _owners(conn, depotid: int) -> set[int]:
+    return {
+        int(r["appid"])
+        for r in conn.execute("SELECT appid FROM depot_app_map WHERE depotid = ?", (depotid,))
+    }
+
+
+def test_ingest_own_depot_containing_equals_appid_is_mapped_to_the_app(
     tmp_path: Path,
 ) -> None:
-    """The common case: a depot that belongs to the app being prefilled.
-    containing_appid == appid, so no additive mapping call happens (nothing
-    to add on top of the job's own mapping)."""
+    """WP MAP-FROM-MANIFEST-1: a manifest of the job's own app maps its cached
+    depot to that app (the all-hit-run hole: nothing else ever maps it)."""
     cache_dir = tmp_path / "steamprefill-cache"
-    archive_dir = tmp_path / "archive"
-    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=archive_dir)
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
     _write_bin_file(cache_dir, "440_440_441_123.bin", depot_id=441, manifest_id=123)
+    _make_cached_depot(tmp_path, 441)
 
     conn = _conn(settings.db_path)
     try:
         result = ingest_after_prefill(conn, appid=440, settings=settings)
-        assert len(result.ingested) == 1
-        assert result.ingested[0].containing_appid == 440
+        assert result.mapped_own == [441]
+        assert _owners(conn, 441) == {440}
+        assert "mapped depot(s) [441] to this app" in result.summary()
 
-        mapping_rows = conn.execute(
-            "SELECT appid FROM depot_app_map WHERE depotid = 441"
-        ).fetchall()
-        assert mapping_rows == []  # this module never writes the job's own mapping
+        # Idempotent: a second pass maps nothing new and changes nothing.
+        again = ingest_after_prefill(conn, appid=440, settings=settings)
+        assert again.mapped_own == []
+        assert _owners(conn, 441) == {440}
+        assert "mapped depot(s)" not in again.summary()
+    finally:
+        conn.close()
+
+
+def test_ingest_own_depot_without_bytes_or_cache_root_is_not_mapped(tmp_path: Path) -> None:
+    """No evidence, no row: a leftover .bin for a depot with no cached bytes
+    (or an unjudgeable cache root) creates no mapping."""
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "440_440_441_123.bin", depot_id=441, manifest_id=123)
+
+    conn = _conn(settings.db_path)
+    try:
+        # cache root has no depot/ directory at all
+        assert ingest_after_prefill(conn, appid=440, settings=settings).mapped_own == []
+        # depot/ exists but depot 441 is empty
+        (tmp_path / "cache" / "depot" / "441").mkdir(parents=True)
+        assert ingest_after_prefill(conn, appid=440, settings=settings).mapped_own == []
+        assert _owners(conn, 441) == set()
+    finally:
+        conn.close()
+
+
+def test_ingest_shared_depot_keeps_both_owners_and_adds_the_job_app(tmp_path: Path) -> None:
+    """containing != original: the containing app (step 5) AND the job's app
+    both own the depot; an unrelated third owner is untouched."""
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "107100_228980_229002_987.bin", depot_id=229002, manifest_id=987)
+    _make_cached_depot(tmp_path, 229002)
+
+    conn = _conn(settings.db_path)
+    try:
+        upsert_mapping(conn, depotid=229002, appid=999, name=None)
+        result = ingest_after_prefill(conn, appid=107100, settings=settings)
+        assert result.mapped_own == [229002]
+        assert _owners(conn, 229002) == {999, 228980, 107100}
+    finally:
+        conn.close()
+
+
+def test_ingest_does_not_map_a_depot_owned_by_another_app_to_the_job_app_without_own_manifest(
+    tmp_path: Path,
+) -> None:
+    """A manifest whose ORIGINAL app is a different app never maps the job's
+    app (the scan only looks at ``{appid}_*`` files, and the original-app
+    check is repeated before mapping)."""
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "730_730_731_5.bin", depot_id=731, manifest_id=5)
+    _make_cached_depot(tmp_path, 731)
+
+    conn = _conn(settings.db_path)
+    try:
+        result = ingest_after_prefill(conn, appid=440, settings=settings)
+        assert result.ingested == [] and result.mapped_own == []
+        assert _owners(conn, 731) == set()
+    finally:
+        conn.close()
+
+
+def test_ingest_skip_own_mapping_does_not_readd_a_depot_the_job_just_removed(
+    tmp_path: Path,
+) -> None:
+    """Delete-then-readd: apply_observed_mapping removed depot 441 from app 440
+    in this job; ingestion (given ``skip_own_mapping``) must not map it back
+    even though its .bin and bytes exist. Without the skip it would."""
+    from vault_api import prefill
+
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "440_440_441_123.bin", depot_id=441, manifest_id=123)
+    _make_cached_depot(tmp_path, 441)
+
+    conn = _conn(settings.db_path)
+    try:
+        upsert_mapping(conn, depotid=441, appid=440, name=None)
+        change = prefill.apply_observed_mapping(conn, 440, {442})
+        assert change.removed == {441}
+        assert _owners(conn, 441) == set()
+
+        result = ingest_after_prefill(
+            conn, appid=440, settings=settings, skip_own_mapping=change.removed
+        )
+        assert result.mapped_own == []
+        assert _owners(conn, 441) == set()
+    finally:
+        conn.close()
+
+
+def test_ingest_readds_a_manually_deleted_mapping_on_the_next_run(tmp_path: Path) -> None:
+    """Documented behaviour: a hand-deleted (depot, app) row comes back on the
+    next job while the .bin and the depot's bytes are still there."""
+    from vault_api.mapping import delete_mapping
+
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "440_440_441_123.bin", depot_id=441, manifest_id=123)
+    _make_cached_depot(tmp_path, 441)
+
+    conn = _conn(settings.db_path)
+    try:
+        ingest_after_prefill(conn, appid=440, settings=settings)
+        assert delete_mapping(conn, 441, 440) is True
+        assert ingest_after_prefill(conn, appid=440, settings=settings).mapped_own == [441]
+        assert _owners(conn, 441) == {440}
+    finally:
+        conn.close()
+
+
+def test_ingest_own_mapping_survives_the_map_drift_cleanup(tmp_path: Path) -> None:
+    """MAP-DRIFT-1's orphan cleanup deletes depot_manifests rows of depots no
+    app maps; a depot mapped from its manifest is never an orphan, so the row
+    and the mapping both stay."""
+    from vault_api.manifest_ingest import remove_orphan_depot_manifests
+
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "440_440_441_123.bin", depot_id=441, manifest_id=123)
+    _make_cached_depot(tmp_path, 441)
+
+    conn = _conn(settings.db_path)
+    try:
+        ingest_after_prefill(conn, appid=440, settings=settings)
+        cleanup = remove_orphan_depot_manifests(conn, settings)
+        assert cleanup.found == 0 and cleanup.removed == 0
+        assert get_depot_manifest(conn, appid=440, depotid=441) is not None
+        assert _owners(conn, 441) == {440}
     finally:
         conn.close()
 

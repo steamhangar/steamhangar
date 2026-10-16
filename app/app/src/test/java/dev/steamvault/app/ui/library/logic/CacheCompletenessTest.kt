@@ -179,11 +179,12 @@ class CacheCompletenessTest {
     }
 
     @Test
-    fun `detail line -- own figure with bytes and time, unknown says so, 100 omits of`() {
+    fun `detail line -- own figure with bytes and time, unknown says so, 100 shows of too`() {
         val p = row(pct = 80, missing = 9).copy(cache_expected_bytes = 4 * gb, cache_present_bytes = (3.2 * gb).toLong())
         assertTrue(completenessLine(p), completenessLine(p).matches(Regex("""^80% complete — 3\.2 GB of 4\.0 GB on disk · checked .+$""")))
-        assertTrue(completenessLine(row()).startsWith("100% complete — 3.0 GB on disk · checked "))
-        assertEquals("100% complete — 3.0 GB on disk", completenessLine(row().copy(cache_complete_checked_at = null)))
+        assertTrue(completenessLine(row()).startsWith("100% complete — 3.0 GB of 3.0 GB on disk · checked "))
+        assertEquals("100% complete — 3.0 GB of 3.0 GB on disk", completenessLine(row().copy(cache_complete_checked_at = null)))
+        assertEquals("100% complete — 3.0 GB on disk", completenessLine(row().copy(cache_complete_checked_at = null, cache_expected_bytes = null)))
         assertEquals("Completeness unknown — not measured for the current build.", completenessLine(row(pct = null)))
         assertEquals(
             "nothing present still prints a figure",

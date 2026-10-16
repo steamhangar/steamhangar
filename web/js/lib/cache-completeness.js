@@ -197,7 +197,10 @@ export function completenessLine(row) {
   if (pct === null) return UNKNOWN_LINE;
   const present = formatBytesGB(row.cache_present_bytes) || "0.0 GB";
   const expected = formatBytesGB(row.cache_expected_bytes);
-  const amount = pct === 100 || !expected ? `${present} on disk` : `${present} of ${expected} on disk`;
+  // Always "X of Y" when the expected size is known, also at 100%: the figure
+  // only covers the depots the server maps to the game, so the size it is
+  // measured against must stay visible (WP MAP-FROM-MANIFEST-1).
+  const amount = !expected ? `${present} on disk` : `${present} of ${expected} on disk`;
   const checked = row.cache_complete_checked_at ? ` · checked ${formatTimestamp(row.cache_complete_checked_at)}` : "";
   return `${pct}% complete — ${amount}${checked}`;
 }

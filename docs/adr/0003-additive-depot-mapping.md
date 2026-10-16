@@ -23,6 +23,13 @@ the affected depot could never be deleted by WP 1.6's cache deletion.
    that job replaces X's previous mapping rows, so stale mappings from
    Steam-side depot reassignments do not accumulate.
 
+   Note (MAP-FROM-MANIFEST-1): this replace step stays the only pruning path
+   and still ignores empty observations. Manifest ingestion additionally maps
+   the app's own depots (additive only, requires the `.bin` and cached bytes
+   on disk) after the replace step, so an all-hit run can fill gaps. It never
+   re-adds a depot the same job's replace step removed; a hand-deleted row
+   reappears on the next run while `.bin` and bytes remain.
+
 ## Addendum (2026-08-06): last-remnant shared depots are deletable
 
 ### Problem

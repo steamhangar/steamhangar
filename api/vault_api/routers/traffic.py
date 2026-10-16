@@ -217,6 +217,11 @@ class JobThroughputOut(BaseModel):
     #: buckets within 48 h, hourly before that). Null like above.
     bytes_since_start: int | None
     exclusive_depots: int
+    #: Depots mapped to this app at all, exclusive or shared (WP
+    #: MAP-FROM-MANIFEST-1): lets a client tell "the server knows no depots
+    #: of this game" (0) from "all of them are shared" (> 0 with
+    #: ``exclusive_depots`` 0).
+    mapped_depots: int = 0
 
 
 class ThroughputOut(BaseModel):
@@ -474,6 +479,11 @@ def _job_throughput(
                 bytes_per_second=rate,
                 bytes_since_start=since_start,
                 exclusive_depots=len(depots),
+                mapped_depots=int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM depot_app_map WHERE appid = ?", (appid,)
+                    ).fetchone()[0]
+                ),
             )
         )
     return result

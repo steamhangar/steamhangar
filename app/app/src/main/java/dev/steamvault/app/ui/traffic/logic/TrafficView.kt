@@ -400,7 +400,11 @@ fun jobSpeedText(entry: JobThroughputOut?, state: FeedState): String? {
     if (entry == null || state != FeedState.OK) return null
     val bps = entry.bytes_per_second
         ?: return if (entry.exclusive_depots == 0) {
-            "Speed not measured yet: the server does not know this game's depots yet."
+            if (entry.mapped_depots > 0) {
+                "Speed not measured: this game's depots are shared with other apps."
+            } else {
+                "Speed not measured yet: the server does not know this game's depots yet."
+            }
         } else {
             null
         }

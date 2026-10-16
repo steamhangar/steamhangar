@@ -198,6 +198,7 @@ def test_a_running_job_gets_the_speed_of_its_exclusive_depots(feed) -> None:
     assert job["appid"] == 440
     assert job["name"] == "Game Four Forty"
     assert job["exclusive_depots"] == 1  # depot 300 is shared, not counted
+    assert job["mapped_depots"] == 2  # exclusive + shared (WP MAP-FROM-MANIFEST-1)
     assert job["bytes_per_second"] == pytest.approx(1000 / window)
     assert job["bytes_since_start"] == 1000
 

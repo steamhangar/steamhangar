@@ -90,6 +90,8 @@ data class JobThroughputOut(
     val bytes_per_second: Double? = null,
     val bytes_since_start: Long? = null,
     val exclusive_depots: Int = 0,
+    /** Depots mapped to the app at all (shared or not); 0 on an older server. */
+    val mapped_depots: Int = 0,
 )
 
 @Serializable

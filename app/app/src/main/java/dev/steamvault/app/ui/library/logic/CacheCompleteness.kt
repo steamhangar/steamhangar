@@ -143,7 +143,7 @@ fun completenessLine(row: GameSummary): String {
     val pct = knownPct(row.cache_complete_pct) ?: return CompletenessWording.UNKNOWN_LINE
     val present = formatBytesGB(row.cache_present_bytes) ?: CompletenessWording.ZERO_GB
     val expected = formatBytesGB(row.cache_expected_bytes)
-    val amount = if (pct == 100 || expected == null) {
+    val amount = if (expected == null) {
         "$present${CompletenessWording.ON_DISK}"
     } else {
         "$present${CompletenessWording.OF}$expected${CompletenessWording.ON_DISK}"

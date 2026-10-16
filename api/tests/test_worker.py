@@ -381,6 +381,49 @@ def test_zero_zero_summary_leaves_mapping_and_manifests_untouched_even_with_plan
     assert not (manifest_archive_dir / "441_555.bin").exists()
 
 
+def test_all_hit_run_maps_a_cached_unmapped_depot_from_its_manifest(
+    tmp_path: Path, bindir: Path, cache_root: Path
+) -> None:
+    """WP MAP-FROM-MANIFEST-1: a verify over a fully cached game observes no
+    new depot bytes (apply_observed_mapping returns early), yet the depot named
+    by the app's own manifest gets mapped, and the job log says so instead of
+    claiming the mapping was left unchanged."""
+    from tests.test_manifests import _bin_manifest_bytes, _chunk_id
+
+    chunk_dir = cache_root / "depot" / "3751951" / "chunk"
+    chunk_dir.mkdir(parents=True)
+    (chunk_dir / "c0").write_bytes(b"x")
+    steamprefill_cache_dir = tmp_path / "steamprefill-cache"
+    executable = stub_prefill.make_stub(
+        bindir,
+        cache_root=str(cache_root),
+        manifest_bins=[
+            {
+                "dir": str(steamprefill_cache_dir),
+                "filename": "440_440_3751951_555.bin",
+                "data": _bin_manifest_bytes(
+                    depot_id=3751951, manifest_id=555, files=[[(_chunk_id(1), 1000)]]
+                ),
+            }
+        ],
+        summary_text=_CLEAN_TABLE_UP_TO_DATE,
+    )
+    settings = make_settings(
+        tmp_path, cache_root, executable,
+        steamprefill_cache_dir=str(steamprefill_cache_dir),
+        manifest_archive_dir=str(tmp_path / "manifest-archive"),
+    )
+    with TestClient(create_app(settings)) as client:
+        (job_id,) = enqueue(client, 440)
+        job = wait_for_job(client, job_id)
+        assert job["status"] == "done"
+        log = job["log_excerpt"]
+        assert "left unchanged" not in log
+        assert "extended from its recorded manifests: added=[3751951]" in log
+        mapping = client.get("/v1/mapping", headers=AUTH).json()
+        assert [e["appid"] for e in mapping if e["depotid"] == 3751951] == [440]
+
+
 def test_up_to_date_summary_is_done_and_touches_last_manifest_check(
     tmp_path: Path, bindir: Path, cache_root: Path
 ) -> None:

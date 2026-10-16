@@ -1701,8 +1701,14 @@ Edge cases, stated honestly:
 
 - **Nothing observed → nothing changed.** A fully-cached app re-prefilled with
   `--force` serves every chunk from disk, writes nothing, and therefore yields
-  an empty observation. The existing mapping is then left *completely* alone —
-  wiping it on the strength of no evidence would delete correct data. The cost:
+  an empty observation. The existing mapping is then not replaced or pruned —
+  wiping it on the strength of no evidence would delete correct data. Manifest
+  ingestion (which runs right afterwards) may still *add* the app's own depots
+  whose `.bin` and cached bytes are on disk but which are unmapped (additive
+  only, never removes; the log line then says "extended from its recorded
+  manifests"). A depot the same job just removed is not re-added, but one
+  deleted by hand via `DELETE /v1/mapping/{depotid}/{appid}` reappears on the
+  next run while its `.bin` and bytes are still there. The cost:
   a stale depot row only disappears once a prefill actually writes something for
   that app again (a game update), or via
   `DELETE /v1/mapping/{depotid}/{appid}`. The job log says so explicitly.
@@ -4626,7 +4632,8 @@ before it was recorded, so "all" starts there.
                                 "byte_hit_rate": 0.8}},
  "jobs": [{"job_id": 812, "appid": 440, "name": "Some Game",
            "started_at": "2026-10-13T19:55:00Z", "bytes_per_second": 31457280.0,
-           "bytes_since_start": 9437184000, "exclusive_depots": 2}]}
+           "bytes_since_start": 9437184000, "exclusive_depots": 2,
+           "mapped_depots": 2}]}
 ```
 
 - **`current`** is the average over the previous 5-minute bucket plus the
@@ -4662,7 +4669,10 @@ before it was recorded, so "all" starts there.
   is by depot: bytes on the app's **exclusive** depots (in `depot_app_map`
   for this app only) from any address. A shared depot is not counted, and a
   client loading the same game at the same time is counted in. `null` speeds
-  when the feed is not `ok` or `exclusive_depots` is 0 (no mapping yet).
+  when the feed is not `ok` or `exclusive_depots` is 0. `mapped_depots` is
+  the number of depots mapped to the app at all: `exclusive_depots` 0 with
+  `mapped_depots` > 0 means every depot is shared (no per-app speed is
+  attributable), while both 0 means no mapping yet.
   `bytes_since_start` is bucket-aligned (5-minute buckets within 48 h).
 
 ### `GET /v1/throughput/live`
@@ -6841,6 +6851,10 @@ curl -H "X-Api-Key: <your key>" "http://localhost:8000/v1/jobs?limit=5"
 curl -H "X-Api-Key: <your key>" http://localhost:8000/v1/jobs/1
 # {"id":1,"appid":440,...,"status":"done","log_excerpt":"...\n[vault-api] Depot mapping
 #  updated (replace-semantics for this app): added=[441, 442] removed=[] unchanged=[]"}
+# An all-hit re-run (nothing written, so nothing observed) instead logs:
+#  "[vault-api] No new or changed depot directories were observed during this run
+#  (everything requested was already cached); the depot mapping for this app was
+#  extended from its recorded manifests: added=[441]."
 
 curl -H "X-Api-Key: <your key>" http://localhost:8000/v1/jobs/9999
 # 404
