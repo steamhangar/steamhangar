@@ -3484,20 +3484,45 @@ below carry their own later dates, item 12 is the current one).
       box in the rc19.3 block) says so, with a new ADR carrying the numbers;
       otherwise the item moves to rc21.
 
-    - [ ] **rc21 — Android parity and cache health** (packages to be cut in
-      the version's planning session)
+    - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
+      and API packages first, Android packages and golden images only after
+      the operator's rc20 visual check; no rc21 tag without the operator's yes)
+      - [ ] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
+        wrong-size chunk files of an app's target manifests behind the
+        `deletion.py` cache-root guards (size re-checked right before the
+        delete), then queue a forced run; "Complete all" and automatic
+        completion keep skipping such a game until repaired. Full review.
+      - [ ] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
+        in the completeness display: when depots of a game have no mapping
+        the percentage says so instead of showing a clean figure.
+      - [ ] **APP-NAMES-1** (api + web) package names for "Unknown app"
+        entries (HELLDIVERS 2 content packages, roadmap D9).
+      - [ ] **VERSION-HEALTH-1** (api) version and schema readable without
+        the key (roadmap "VERSION-HEALTH-1"; `/v1/health` or a startup log
+        line).
+      - [ ] **CLIENT-ROW-1** (web + api if needed) "Client downloading" row on
+        the Downloads page (operator decision 2026-10-16: in rc21; after
+        DOWNLOADS-1; shown only while a client downloads, no empty heading).
+      - [ ] nit (rc20 reviews): CLIENTS-3 `tab:null` wiring check is a regex
+        over source (use a spy); `getSettings` call on Clients has no guard
+        against a detached view; tile wording "Version differs from the
+        server" could read "differs from the server version"
+      - [ ] nit (rc20 reviews): SETTINGS-1 nav label "Other settings" is
+        vague; stale comment about the `api.schedule()` refetch after save
+        in `settings.js` (check whether `state.schedule` is still needed)
+      - [ ] nit (rc20 reviews): LIVE-DELAY-1 `active_clients` under-reports
+        for up to 5 minutes after a vault-api restart (ring not filled yet);
+        no test for a live answer with the feed ok but `active_clients`
+        null or missing
+      - [ ] Android Downloads follows LIVE-DELAY-1 (default range live,
+        `active_clients` in the live answer); the Kotlin twin test no longer
+        pins the web default
       - [ ] Android follow-up of the rc20 redesign: Clients cards, Add a
         device tabs, Downloads, Settings section nav, Library toolbar and
         detail tabs, sheet motion where it fits Material
       - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
         rename and Delete history in the app
       - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
-      - [ ] CACHE-REPAIR-1
-      - [ ] honesty flag for unmapped depots in the completeness display
-      - [ ] package names for "Unknown app" entries (HELLDIVERS 2)
-      - [ ] optional "Client downloading" row on the Downloads page (needs
-        the user's yes)
-      - [ ] VERSION-HEALTH-1 version and schema readable without the key
       - tuning defaults from the Sunday test, if not shipped in rc20.x
         (the rc20.x box moves here)
       - [ ] runner retry on "Unable to detect Lancache server!", only if the
