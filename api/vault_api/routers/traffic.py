@@ -665,6 +665,11 @@ class LiveOut(BaseModel):
     range_start: str | None
     #: Null when the feed is disabled.
     current: LiveCurrentOut | None
+    #: Machines with cache traffic in the last ``active_window_minutes``,
+    #: counted from the ring (the persisted figure lags a sweep). The prefill
+    #: runner is not counted. Null when the feed is disabled.
+    active_clients: int | None = None
+    active_window_minutes: int = live_tier.ACTIVE_SECONDS // 60
     #: Oldest first, zero-filled, ending with the running 5 s cell. Empty
     #: when the feed is disabled.
     points: list[LivePointOut]
@@ -675,7 +680,7 @@ def _live_points(
     tier: live_tier.LiveTier,
     now: datetime,
     windows: tuple[runner_identity.RunnerWindow, ...],
-) -> tuple[list[live_tier.LivePoint], live_tier.LiveCurrent]:
+) -> tuple[list[live_tier.LivePoint], live_tier.LiveCurrent, int]:
     def is_runner(addr: str, bucket_iso: str) -> bool:
         return any(w.addr == addr and w.start <= bucket_iso < w.end for w in windows)
 
@@ -699,7 +704,11 @@ def _live_points(
             )
         return out
 
-    return tier.stitch(now, persisted, is_runner), tier.current(now, is_runner)
+    return (
+        tier.stitch(now, persisted, is_runner),
+        tier.current(now, is_runner),
+        tier.active_clients(now, is_runner),
+    )
 
 
 def _live_totals(totals: traffic.Totals) -> live_tier.LiveTotals:
@@ -735,12 +744,13 @@ def get_throughput_live(
         tier.touch(now)
         tier.refresh(settings.event_log_path, now)
         windows = runner_identity.windows(conn)
-        points, current = _live_points(conn, tier, now, windows)
+        points, current, active = _live_points(conn, tier, now, windows)
     return LiveOut(
         event_feed=feed,
         watcher_window_seconds=int(live_tier.WATCHER_WINDOW_SECONDS),
         live_since=tier.covered_from(),
         range_start=points[0].t if points else None,
+        active_clients=active,
         current=LiveCurrentOut(
             bytes_per_second=current.bytes_per_second,
             runner_bytes_per_second=current.runner_bytes_per_second,

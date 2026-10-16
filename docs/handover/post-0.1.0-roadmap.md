@@ -45,7 +45,7 @@ Antrag filed and the rollout on the operator's stack checked.
 - **Packages:** LAYOUT-1, SHEET-MOTION-1, CLIENTS-1, CLIENTS-2, CLIENTS-3,
   ADD-DEVICE-1, DOWNLOADS-1 (includes VERIFY-SPEED-TEXT-1 and
   QUEUE-KBD-KEEP), SETTINGS-1, LIBRARY-1, LIBRARY-DETAIL-1; plus
-  LIVE-DELAY-1 (analysis and fix, before DOWNLOADS-1), BOOT-RATE-1 (D24),
+  LIVE-DELAY-1 (done 2026-10-16: Weg A, Downloads defaults to the live range; decided by Jan 2026-10-16), BOOT-RATE-1 (D24),
   LIB-META-WINDOW-1 (D23 note). Cut and ordered in
   `docs/handover/rc20-run-plan.md`.
 - **Entry:** rc19.3 tagged (done).

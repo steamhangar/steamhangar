@@ -176,6 +176,8 @@ export function demoLive(nowMs = Date.now(), sinceMs = null) {
       window_end: isoSeconds(nowMs),
       window_seconds: windowSeconds,
     },
+    active_clients: 2,
+    active_window_minutes: 5,
     points,
   };
 }

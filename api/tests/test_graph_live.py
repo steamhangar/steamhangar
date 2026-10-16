@@ -387,6 +387,25 @@ def test_current_speed_reads_the_last_seconds_and_splits_the_runner(tmp_path: Pa
     assert current.runner_bytes_per_second == pytest.approx(3000 / 17)
 
 
+def test_active_clients_counts_distinct_addresses_in_five_minutes_without_the_runner(tmp_path: Path) -> None:
+    log = tmp_path / "event.log"
+    write_log(
+        log,
+        line(2, 1000, addr="10.0.0.5"),
+        line(3, 1000, addr="10.0.0.5"),  # same machine: counted once
+        line(200, 1000, addr="10.0.0.6"),  # inside 5 minutes
+        line(400, 1000, addr="10.0.0.7"),  # outside 5 minutes
+        line(4, 3000, addr="10.0.0.9"),  # the runner
+    )
+    tier, clock = tier_at()
+    tier.touch(clock())
+    tier.refresh(str(log), clock())
+    assert tier.active_clients(clock(), lambda addr, _iso: addr == "10.0.0.9") == 2
+    assert tier.active_clients(clock(), never_runner) == 3
+    clock.advance(400)
+    assert tier.active_clients(clock(), never_runner) == 0
+
+
 def test_concurrent_polls_and_reads_do_not_corrupt_the_ring(tmp_path: Path) -> None:
     log = tmp_path / "event.log"
     write_log(log, *[line(i % 50, 10) for i in range(500)])
@@ -444,6 +463,7 @@ def test_a_disabled_feed_answers_null_and_empty(tmp_path: Path) -> None:
     body = client.get("/v1/throughput/live", headers=AUTH).json()
     assert body["event_feed"]["state"] == "disabled"
     assert body["current"] is None and body["points"] == []
+    assert body["active_clients"] is None
 
 
 def test_polling_tails_the_log_and_returns_the_stitched_series(served, tmp_path: Path) -> None:
@@ -471,6 +491,9 @@ def test_polling_tails_the_log_and_returns_the_stitched_series(served, tmp_path:
     assert body["current"]["runner_bytes_per_second"] == pytest.approx(3000 / 17)
     assert body["live_since"] is not None
     assert body["range_start"] == body["points"][0]["t"]
+    # The runner (10.0.0.9) is not a client: one machine is loading.
+    assert body["active_clients"] == 1
+    assert body["active_window_minutes"] == 5
 
     # A second poll within 2 s does not re-read; new lines show after 2 s.
     append_log(tmp_path / "event.log", line(0, 500, now=clock()))

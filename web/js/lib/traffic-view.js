@@ -47,7 +47,7 @@ export const RANGE_LABELS = Object.freeze({
 export const STATS_RANGE_KEY = "steamvault.downloadsRange";
 
 /** The Downloads range when nothing valid is stored. */
-export const DEFAULT_STATS_RANGE = "6h";
+export const DEFAULT_STATS_RANGE = "live";
 
 /** @param {unknown} value @returns {boolean} */
 export function isStatsRange(value) {
@@ -637,7 +637,7 @@ export function liveSeries(live) {
 
 /**
  * The header's figures for the live view: the persisted 1 h summary with
- * "Current speed" taken from the live tier. `null` until the summary is in.
+ * "Current speed" and "Loading now" taken from the live tier. `null` until the summary is in.
  * @param {object | null | undefined} summary `GET /v1/throughput?range=1h`
  * @param {object | null | undefined} live
  * @returns {object | null}
@@ -648,6 +648,11 @@ export function mergeLive(summary, live) {
   if (live && live.current && feedState(live) === "ok") {
     merged.current = live.current;
     merged.live = true;
+    // "Loading now" from the ring too: the persisted count lags a sweep.
+    if (Number.isInteger(live.active_clients)) {
+      merged.active_clients_now = live.active_clients;
+      if (Number.isInteger(live.active_window_minutes)) merged.active_window_minutes = live.active_window_minutes;
+    }
   }
   return merged;
 }

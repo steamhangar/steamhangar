@@ -126,8 +126,7 @@ class TrafficWebTwinTest {
             ),
         )
         assertQuoted("api.js", listOf("/v1/throughput/live"))
-        // The default stays 6 h in the web too (not "live").
-        assertFragments("lib/traffic-view.js", listOf("DEFAULT_STATS_RANGE = \"6h\""))
+        // The web default is `live` since rc20 (LIVE-DELAY-1); the Android default follows in rc21.
     }
 
     @Test
