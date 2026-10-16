@@ -1537,8 +1537,8 @@ Fix: at boot read the core settings file if it is present and render from
 it; if it is missing or unreadable, start on the throttled side until the
 first generation is applied (fail towards the cap, never away from it).
 Tests: boot render with and without the settings file, inside and outside
-the default window. Depends on D16c (core settings file). State: open,
-rc20.
+the default window. Depends on D16c (core settings file). State: done in
+rc20 (generation 0 boots on window `off`, `vs_boot_throttle`).
 
 ## D25: TSNET-1, embedded tailscale (requirement A6)
 

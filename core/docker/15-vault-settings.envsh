@@ -23,6 +23,9 @@
 #      the watcher reports "rejected" with the reason. A bad Settings value
 #      therefore never stops the boot; a bad ENV value still does (as
 #      before, in the real chain below);
+#      Without an applied file (generation 0) the default window is replaced
+#      by `off` (capped around the clock) until the first generation arrives
+#      (BOOT-RATE-1, vs_boot_throttle);
 #   4. exports the effective values under the keys' own names, writes
 #      /etc/nginx/vault-settings-generation.conf (the X-Vault-Settings-
 #      Generation header of /health) and /etc/nginx/vault-settings.effective.
@@ -96,6 +99,7 @@ else
         vs_resolve no
     fi
 
+    vs_boot_throttle
     vs_export
     vs_write_generation_conf "$VS_CONF_DIR/vault-settings-generation.conf" "$VS_BOOT_GEN" \
         || echo "$VS_ME: WARNING: could not write $VS_CONF_DIR/vault-settings-generation.conf" >&2

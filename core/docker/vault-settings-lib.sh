@@ -259,6 +259,19 @@ vs_resolve() {
     done
 }
 
+# vs_boot_throttle: BOOT-RATE-1 (D24). Boot only, after vs_resolve. While no
+# settings file has been applied (generation 0: file absent, unreadable or
+# rejected) and the operator pinned no window, the shipped default window
+# 03:00-07:00 must not lift the cap: the real window is unknown until
+# vault-api's first generation arrives, so start throttled around the clock
+# (window `off`) and let the watcher apply the real one. Fail towards the
+# cap. The reported source stays "default". No effect without a rate cap.
+vs_boot_throttle() {
+    [ "${VS_BOOT_GEN:-0}" = 0 ] || return 0
+    [ "$VS_S_VAULT_UPSTREAM_RATE_WINDOW" = default ] || return 0
+    VS_V_VAULT_UPSTREAM_RATE_WINDOW=off
+}
+
 # vs_export: export the effective values under the keys' own names, for the
 # hooks (export only works for the calling shell and its children: the boot
 # hook is sourced, the watcher calls this in a subshell per attempt).
