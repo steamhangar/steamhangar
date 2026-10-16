@@ -445,6 +445,11 @@ private fun LoadedDetailBody(
     // Library uses), empty for a game without any.
     val packages = remember(games, appid) { groupGames(games).packagesOf(appid) }
 
+    // ---- the GAME block, directly under the header (WP CARD-LAYOUT-1) -------------
+    // Store details (WP D19-1c) first, then everything about the hangar below;
+    // absent when the lookup is off or unavailable (web render()).
+    controller.store?.let { StoreDetailsBlock(it) }
+
     // ---- Steam tool app note (WP API-FIX-4) -----------------------------------
     // Where a game offers Download/Retry, a tool app says why it has none
     // (web buildToolAppNote). statusAction is null for it, so no button below.
@@ -494,9 +499,6 @@ private fun LoadedDetailBody(
             onVerify = { ids -> controller.startVerify(scope, ids) },
         )
     }
-
-    // ---- store details (WP D19-1c) ---------------------------------------------
-    controller.store?.let { StoreDetailsBlock(it) }
 
     // ---- installed-state (WP AG-3) -------------------------------------------
     val installedBadge = installedBadgeFor(gameSummary)

@@ -3,9 +3,11 @@ package dev.steamvault.app.ui.detail
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +36,9 @@ import dev.steamvault.app.ui.detail.logic.storeModeChips
 
 /** Lines of the store description before it is tapped open (web CSS `-webkit-line-clamp:3`). */
 internal const val STORE_DESCRIPTION_COLLAPSED_LINES = 3
+
+/** Card width from which the store facts sit beside the description (web `@media (min-width:600px)`). */
+internal const val STORE_TWO_COLUMN_MIN_WIDTH_DP = 600
 
 internal const val EXPECTED_DEPOTS_TAG = "expected-depots"
 internal const val STORE_DETAILS_TAG = "store-details"
@@ -76,54 +81,75 @@ internal fun ExpectedDepotsBlock(preview: DepotPreviewOut) {
 
 /**
  * WP D19-1c (twin of web `buildStoreBlock`): description (three lines, a tap
- * opens it), mode chips, then genres / developer and date / rating lines.
+ * opens it), then the facts: mode chips and genres / developer and date /
+ * rating lines. WP CARD-LAYOUT-1: from [STORE_TWO_COLUMN_MIN_WIDTH_DP] up the
+ * facts are a second column beside the description (web CSS
+ * `@media (min-width:600px)`), narrower they stack under it.
  * Third-party text drawn as plain [Text] only: no links, no images, no HTML.
  * Draw it only when `hasStoreContent` says so.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun StoreDetailsBlock(store: StoreDetailsOut) {
     if (!hasStoreContent(store)) return
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).testTag(STORE_DETAILS_TAG)) {
-        storeDescription(store)?.let { description ->
-            var expanded by remember(description) { mutableStateOf(false) }
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = if (expanded) Int.MAX_VALUE else STORE_DESCRIPTION_COLLAPSED_LINES,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(bottom = 8.dp),
-            )
-        }
-        val chips = storeModeChips(store)
-        if (chips.isNotEmpty()) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.padding(bottom = 8.dp),
-            ) {
-                for (label in chips) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(50))
-                            .padding(horizontal = 9.dp, vertical = 2.dp),
-                    )
-                }
+    val description = storeDescription(store)
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).testTag(STORE_DETAILS_TAG)) {
+        if (description != null && maxWidth >= STORE_TWO_COLUMN_MIN_WIDTH_DP.dp) {
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(3f)) { StoreDescription(description) }
+                Column(modifier = Modifier.weight(2f)) { StoreFacts(store) }
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (description != null) StoreDescription(description)
+                StoreFacts(store)
             }
         }
-        for (line in storeInfoLines(store)) {
-            Text(
-                text = line,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+    }
+}
+
+@Composable
+private fun StoreDescription(description: String) {
+    var expanded by remember(description) { mutableStateOf(false) }
+    Text(
+        text = description,
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = if (expanded) Int.MAX_VALUE else STORE_DESCRIPTION_COLLAPSED_LINES,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+            .padding(bottom = 8.dp),
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StoreFacts(store: StoreDetailsOut) {
+    val chips = storeModeChips(store)
+    if (chips.isNotEmpty()) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(bottom = 8.dp),
+        ) {
+            for (label in chips) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(50))
+                        .padding(horizontal = 9.dp, vertical = 2.dp),
+                )
+            }
         }
+    }
+    for (line in storeInfoLines(store)) {
+        Text(
+            text = line,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
     }
 }

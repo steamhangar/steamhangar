@@ -122,3 +122,29 @@ test("the demo has the env-only row and keeps the lookup off", () => {
   assert.match(demoJs, /key: "store_details_enabled", env_var: "VAULT_STORE_DETAILS", value: false/);
   assert.match(demoJs, /\/v1\\\/store\\\/\\d\+\\\/details\$\/\.test\(path\)\) \{\s*return \{ state: "off" \}/);
 });
+
+// WP CARD-LAYOUT-1: game block first, hangar blocks after.
+test("render() puts the store block directly under the header, before the cache facts", () => {
+  const body = sheetJs.slice(sheetJs.indexOf("function render()"));
+  const at = (needle) => body.indexOf(needle);
+  assert.ok(at("buildHeader(gameLike, liveJob)") > -1);
+  assert.ok(at("buildHeader(gameLike, liveJob)") < at("buildStoreBlock()"));
+  assert.ok(at("buildStoreBlock()") < at("buildFactLines(gameLike)"));
+  assert.ok(at("buildFactLines(gameLike)") < at("buildCompletenessSection("));
+  assert.ok(at("buildCompletenessSection(") < at("buildInstalledSection(gameLike)"));
+  assert.ok(at("buildInstalledSection(gameLike)") < at("buildPackagesSection("));
+  assert.ok(at("buildPackagesSection(") < at("buildDepotsSection()"));
+  assert.ok(at("buildDepotsSection()") < at("buildDeleteButton()"));
+  assert.ok(at("buildDeleteButton()") < at("renderGcSection()"));
+  assert.equal(body.split("buildStoreBlock()").length - 1, 1);
+});
+
+test("the store facts are a second column on wide screens and stack on narrow ones", () => {
+  const body = sheetJs.slice(sheetJs.indexOf("function buildStoreBlock"), sheetJs.indexOf("/** The \"Expected ...\" block"));
+  assert.match(body, /facts\.className = "store-facts"/);
+  assert.match(body, /store-nodesc/);
+  const css = readFileSync(path.join(webDir, "css", "app.css"), "utf8");
+  assert.doesNotMatch(css, /^\.store-details\s*\{[^}]*grid/m);
+  const m = css.match(/@media \(min-width:600px\)\{\s*\.store-details:not\(\.store-nodesc\)\{[^}]*grid-template-columns:[^}]*\}/);
+  assert.ok(m, "wide two-column rule inside @media (min-width:600px)");
+});
