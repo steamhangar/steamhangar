@@ -95,6 +95,8 @@ import {
   mergeAgentData,
   recentAppsText,
   statsText,
+  outdatedAgentInfo,
+  outdatedAgentText,
   summaryTiles,
 } from "../lib/clients-page.js";
 
@@ -115,6 +117,10 @@ function errorText(err) {
  * `noFigures` is the last known verdict "no statistics to range over"
  * (feed disabled or unsupported), kept while an answer is pending. */
 const state = { range: "7d", data: null, error: null, unsupported: false, noFigures: false };
+
+/** `server_version` of `GET /v1/settings`, read on each visit; null while
+ * unknown (no outdated-agent warning then). */
+let serverVersion = null;
 
 /** Inline remove errors by client_id (kept across list rebuilds). */
 const removeErrors = new Map();
@@ -212,6 +218,18 @@ function buildCard(client, range, nowMs) {
   const recent = recentAppsText(client);
   if (recent) card.appendChild(line(recent, "recent"));
   card.appendChild(line(lastActiveText(client, nowMs), "last-active"));
+  const outdated = outdatedAgentInfo(client, serverVersion);
+  if (outdated) {
+    const upd = el("div", "cl-upd");
+    upd.dataset.role = "agent-outdated";
+    const btn = el("button", "btn ghost sm", "Update command");
+    btn.type = "button";
+    btn.dataset.role = "update-command";
+    btn.setAttribute("aria-label", `Update command for ${clientName(client)}`);
+    btn.addEventListener("click", () => openAddDeviceSheet({ tab: null }));
+    upd.append(el("strong", null, "Agent outdated"), el("p", null, outdatedAgentText(outdated)), btn);
+    card.appendChild(upd);
+  }
   if (agent) {
     // Server verdicts, read as sent (lib/clients-view.js): never recomputed.
     card.appendChild(line(presenceLine(agent, nowMs), "agent-presence"));
@@ -292,9 +310,9 @@ function renameButtonFor(key) {
 
 function paintTiles(clients, range) {
   els.tiles.replaceChildren();
-  const tiles = clients ? summaryTiles(clients, range) : [];
+  const tiles = clients ? summaryTiles(clients, range, serverVersion) : [];
   for (const t of tiles) {
-    const tile = el("div", "cl-tile");
+    const tile = el("div", t.warn ? "cl-tile warn" : "cl-tile");
     tile.dataset.tile = t.key;
     tile.append(el("div", "k", t.label), el("div", "v", t.value), el("div", "n", t.detail));
     els.tiles.appendChild(tile);
@@ -614,6 +632,16 @@ export function renderClients() {
   if (getStoredApiKey() || isDemoMode()) {
     poll.start();
     poll.refresh();
+    api.getSettings().then(
+      (s) => {
+        serverVersion = s && typeof s.server_version === "string" ? s.server_version : null;
+        paint();
+      },
+      () => {
+        serverVersion = null;
+        paint();
+      },
+    );
   }
   return section;
 }

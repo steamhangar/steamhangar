@@ -32,6 +32,7 @@
 import { formatAgo } from "./format.js";
 import { isolate } from "./client-names.js";
 import { UNKNOWN_APP_NAME } from "./app-names.js";
+import { isReleaseVersion } from "./agent-install.js";
 import { DASH, RANGE_PHRASES, formatRate, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
 
 /** How many recently loaded apps a card names before "+N more". */
@@ -189,9 +190,10 @@ export function clientsSummaryText(clients) {
  * statistics (feed on); "Agents" needs at least one agent client.
  * @param {Array<object>} clients
  * @param {string} range
- * @returns {Array<{key: string, label: string, value: string, detail: string}>}
+ * @param {unknown} [serverVersion] needed for the outdated-agents tile
+ * @returns {Array<{key: string, label: string, value: string, detail: string, warn?: boolean}>}
  */
-export function summaryTiles(clients, range) {
+export function summaryTiles(clients, range, serverVersion) {
   const list = Array.isArray(clients) ? clients : [];
   const tiles = [];
   const connected = list.filter((c) => c.connected === true).length;
@@ -216,8 +218,50 @@ export function summaryTiles(clients, range) {
   if (agents.length) {
     const online = agents.filter((c) => c.connected === true).length;
     tiles.push({ key: "agents", label: "Agents", value: `${online} online`, detail: `${agents.length} paired` });
+    const outdated = agents.filter((c) => outdatedAgentInfo(c, serverVersion)).length;
+    const serverKnown = isReleaseVersion(typeof serverVersion === "string" ? serverVersion.trim() : "");
+    tiles.push({
+      key: "outdated",
+      label: "Outdated agents",
+      value: serverKnown ? String(outdated) : DASH,
+      detail: !serverKnown ? "Server version not known" : outdated ? "Version differs from the server" : "All match the server",
+      warn: outdated > 0,
+    });
   }
   return tiles;
+}
+
+/**
+ * WP CLIENTS-3 (Weg A, frontend only): an agent is outdated when its reported
+ * version differs from the server's. "Differs", not "older": a newer agent is
+ * flagged too, because that pair is untested. A version that is missing or
+ * outside the release grammar (`0.1.0`, `0.1.0-rc19.3`; not `dev`) is unknown
+ * and never warns.
+ * @param {unknown} agentVersion
+ * @param {unknown} serverVersion
+ * @returns {boolean}
+ */
+export function isAgentOutdated(agentVersion, serverVersion) {
+  const a = typeof agentVersion === "string" ? agentVersion.trim() : "";
+  const s = typeof serverVersion === "string" ? serverVersion.trim() : "";
+  return isReleaseVersion(a) && isReleaseVersion(s) && a !== s;
+}
+
+/**
+ * The version pair of an outdated agent card, else `null`.
+ * @param {object} client a merged card (`agent` = the `GET /v1/clients` row)
+ * @param {unknown} serverVersion
+ * @returns {{agent: string, server: string} | null}
+ */
+export function outdatedAgentInfo(client, serverVersion) {
+  const agent = client && client.agent ? client.agent.agent_version : null;
+  if (!isAgentOutdated(agent, serverVersion)) return null;
+  return { agent: agent.trim(), server: serverVersion.trim() };
+}
+
+/** Wording of the outdated-agent warning on a card. */
+export function outdatedAgentText(info) {
+  return `Agent ${info.agent} · server ${info.server}. Update vault-agent on this PC to match the server.`;
 }
 
 /** Note under the list, for the agentless rows. */

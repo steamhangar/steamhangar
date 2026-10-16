@@ -3414,7 +3414,7 @@ below carry their own later dates, item 12 is the current one).
       - [x] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
         (connected, outdated agents, ...), "Add a device" as the header
         button. Real data only, no tile without a source.
-      - [ ] **CLIENTS-3** outdated-agent warning, Weg A: the agent version
+      - [x] **CLIENTS-3** outdated-agent warning, Weg A: the agent version
         differs from the server version, compared in the frontend only; the
         "Update command" button opens the Add-a-device dialog without a
         preselected tab (the agent reports no OS). Unknown version shows no
