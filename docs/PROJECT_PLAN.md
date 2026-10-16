@@ -3308,6 +3308,24 @@ below carry their own later dates, item 12 is the current one).
       - [ ] LIVE-DELAY-1 analysis: the Downloads page shows client downloads
         more than 1 min late, unresolved; rc20 unless tiny
 
+    - [ ] **rc20 candidates** (2026-10-16, unprioritised; the user decides
+      scope and order; larger themes live in
+      `docs/handover/post-0.1.0-roadmap.md`, D1-D23)
+      - [ ] D22 privacy modes
+      - [ ] CACHE-REPAIR-1
+      - [ ] Clients / Add-a-device redesign (mockups come first)
+      - [ ] optional "Client downloading" row on the Downloads page (needs
+        the user's yes)
+      - [ ] honesty flag for unmapped depots in the completeness display
+      - [ ] package names for "Unknown app" entries (HELLDIVERS 2)
+      - [ ] D20 queue order
+      - [ ] LIVE-DELAY-1 fix (after the analysis above)
+      - [ ] runner retry on "Unable to detect Lancache server!", only if the
+        heartbeat log confirms the late-heartbeat hypothesis (ADR-0027)
+      - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
+        test, aria-live on queue move, D19WiringTest pin,
+        regrow-without-idle-gap test
+
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
     user decision on 2026-10-02 (ADR-0016 addendum, ships in
