@@ -176,7 +176,7 @@ fun showsCompletenessBlock(game: GameSummary, packages: List<GameSummary>): Bool
  */
 fun verifyAppids(members: List<GameSummary>): List<Int> =
     members
-        .filter { hasVisibleCacheContent(it) && !isToolApp(it) && !isDamagedOnly(it) }
+        .filter { hasVisibleCacheContent(it) && !isToolApp(it) && !isDamagedOnly(it) && !isNotOwned(it) }
         .map { it.appid }
         .sorted()
 

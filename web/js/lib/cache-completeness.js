@@ -67,7 +67,7 @@
  * the verify.
  */
 
-import { KIND, hasVisibleCacheContent, isToolApp, showsUpdateState, cardIconKind, cardTextKind, cardStatusWord } from "./game-status.js";
+import { KIND, hasVisibleCacheContent, isToolApp, isNotOwnedApp, showsUpdateState, cardIconKind, cardTextKind, cardStatusWord } from "./game-status.js";
 import { isGroup } from "./content-groups.js";
 import { partitionCachedPrefillOutcome } from "./cached-prefill-outcome.js";
 import { formatBytesGB, formatTimestamp } from "./format.js";
@@ -234,7 +234,11 @@ export function showsCompletenessBlock(gameLike, group) {
  */
 export function verifyAppids(members) {
   return (Array.isArray(members) ? members : [])
-    .filter((m) => m && hasVisibleCacheContent(m) && !isToolApp(m) && !isDamagedOnly(m))
+    // WP NOT-OWNED-2: a known-not-owned package would only end not_owned again.
+    .filter(
+      (m) =>
+        m && hasVisibleCacheContent(m) && !isToolApp(m) && !isDamagedOnly(m) && !isNotOwnedApp(m),
+    )
     .map((m) => m.appid)
     .sort((a, b) => a - b);
 }

@@ -105,7 +105,9 @@ import dev.steamvault.app.ui.library.logic.hasProtectedCacheContent
 import dev.steamvault.app.ui.library.logic.hasVisibleCacheContent
 import dev.steamvault.app.ui.library.logic.installedBadgeFor
 import dev.steamvault.app.ui.library.logic.isToolApp
+import dev.steamvault.app.ui.library.logic.NOT_OWNED_LIBRARY_NOTE
 import dev.steamvault.app.ui.library.logic.isNotOwned
+import dev.steamvault.app.ui.library.logic.showsNotOwnedNote
 import dev.steamvault.app.ui.library.logic.toolAppStateWordFor
 import dev.steamvault.app.ui.library.logic.statusAction
 import dev.steamvault.app.ui.library.logic.vaultCoverUrl
@@ -250,6 +252,7 @@ private fun gameSummaryFrom(detail: GameDetail): GameSummary = GameSummary(
     needs_force = detail.needs_force,
     installed_on = detail.installed_on,
     tool_app = detail.tool_app,
+    not_owned = detail.not_owned,
     tool_app_name = detail.tool_app_name,
     cover_url = detail.cover_url,
     cover_cached_url = detail.cover_cached_url,
@@ -904,6 +907,14 @@ private fun PackagesSection(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // WP NOT-OWNED-2: stays Cached, with a small neutral note.
+                    if (showsNotOwnedNote(pkg)) {
+                        Text(
+                            text = NOT_OWNED_LIBRARY_NOTE,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 // WP UPD-6 review fix: a cached, flagged package says so.
                 val pkgUpdate = showsUpdateState(pkg, kind)

@@ -164,5 +164,6 @@ export function isNewestJobForApp(job, jobs) {
  */
 export function offersRetryFor(game) {
   // WP NOT-OWNED-1: an app SteamPrefill does not consider has nothing to retry.
-  return !isToolApp(game) && game?.status !== "not_owned";
+  // WP NOT-OWNED-2: also the kept-status flag (`not_owned: true`).
+  return !isToolApp(game) && game?.status !== "not_owned" && game?.not_owned !== true;
 }

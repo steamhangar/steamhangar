@@ -117,4 +117,51 @@ class NotOwnedTest {
         assertEquals("notinuse", jobIconKind(job))
         assertEquals("Not available to prefill (not owned)", jobStatusWord(job))
     }
+
+    // ---- WP NOT-OWNED-2: a package with bytes stays Cached plus a note ----
+
+    private fun keptNotOwned(appid: Int = 11, bytes: Long? = 300_000_000L): GameSummary = GameSummary(
+        appid = appid,
+        name = "Pack",
+        status = "done",
+        depot_count = 1,
+        size_bytes = bytes,
+        needs_force = false,
+        not_owned = true,
+    )
+
+    @Test
+    fun `the library note equals web game-status js`() {
+        assertEquals("Not part of your library", NOT_OWNED_LIBRARY_NOTE)
+        val file = File("../../web/js/lib/game-status.js")
+        check(file.exists()) { "expected a file at ${file.absolutePath}" }
+        val m = Regex("""export const NOT_OWNED_LIBRARY_NOTE = "([^"]*)";""").find(file.readText(Charsets.UTF_8))
+            ?: error("GRAMMAR DRIFT: no NOT_OWNED_LIBRARY_NOTE in web/js/lib/game-status.js")
+        assertEquals("VALUE DRIFT: update GameStatus.kt", m.groupValues[1], NOT_OWNED_LIBRARY_NOTE)
+    }
+
+    @Test
+    fun `MUTATION TARGET -- a not_owned app with bytes stays CACHED with the note and no action`() {
+        val g = keptNotOwned()
+        assertTrue(isNotOwned(g))
+        assertEquals(StatusKind.CACHED, dispKind(g, null))
+        assertTrue(showsNotOwnedNote(g))
+        assertNull(statusAction(g, null, selecting = false))
+        assertFalse(offersPackageRetry(g, null, null))
+        // the legacy flip (status itself not_owned) with bytes is treated the same
+        assertEquals(StatusKind.CACHED, dispKind(notOwned().copy(size_bytes = 300_000_000L), null))
+    }
+
+    @Test
+    fun `a not_owned app without bytes keeps the not-owned kind and no note`() {
+        val g = keptNotOwned(bytes = null).copy(status = "idle")
+        assertEquals(StatusKind.NOTINUSE, dispKind(g, null))
+        assertFalse(showsNotOwnedNote(g))
+    }
+
+    @Test
+    fun `verify drops a known-not-owned package`() {
+        val ok = keptNotOwned(appid = 1).copy(not_owned = false)
+        assertEquals(listOf(1), verifyAppids(listOf(ok, keptNotOwned(appid = 2), notOwned().copy(size_bytes = 5L))))
+    }
 }

@@ -147,6 +147,24 @@ export const TOOL_APP_STATE_WORD = "Steam tool package";
  * (WP NOT-OWNED-1). */
 export const NOT_OWNED_STATE_WORD = "Not available to prefill (not owned)";
 
+/** WP NOT-OWNED-2: the small neutral note on a card/row that stays Cached
+ * although its last prefill ended `not_owned` (a content package of a game
+ * the account does not own). */
+export const NOT_OWNED_LIBRARY_NOTE = "Not part of your library";
+
+/** True for a non-tool `GET /v1/games` row whose last prefill ended
+ * `not_owned`: `status === "not_owned"` (no cache bytes) or the additive
+ * `not_owned: true` flag (WP NOT-OWNED-2, status kept because of bytes). */
+export function isNotOwnedApp(game) {
+  return !isToolApp(game) && (game?.status === "not_owned" || game?.not_owned === true);
+}
+
+/** WP NOT-OWNED-2: a known-not-owned app that still has cache bytes shows
+ * Cached plus {@link NOT_OWNED_LIBRARY_NOTE}, not the not_owned word. */
+export function showsNotOwnedNote(game) {
+  return isNotOwnedApp(game) && hasVisibleCacheContent(game);
+}
+
 /** The neutral note a tool app's detail sheet shows (WP API-FIX-4). */
 export const TOOL_APP_NOTE = "Steam tool package — cached together with the games that use it.";
 
@@ -422,7 +440,8 @@ export function dispKind(game, liveJob) {
   // never make its card red.
   if (isToolApp(game)) return KIND.TOOL;
   // WP NOT-OWNED-1: a distinct outcome, never red and never a Retry.
-  if (game.status === "not_owned") return KIND.NOT_OWNED;
+  // WP NOT-OWNED-2: with cache bytes the app stays Cached (plus a note).
+  if (isNotOwnedApp(game)) return hasVisibleCacheContent(game) ? KIND.CACHED : KIND.NOT_OWNED;
   if (game.status === "error") return KIND.ERROR;
   return hasVisibleCacheContent(game) ? KIND.CACHED : KIND.NONE;
 }

@@ -21,6 +21,7 @@ from vault_api import (
     cover_art,
     cover_cache,
     depot_manifests,
+    jobs,
     library_meta,
     oracle,
     scheduler,
@@ -164,6 +165,10 @@ class GameSummary(BaseModel):
     # Steam spells it). Null when no source knows it.
     name: str | None
     status: str
+    # WP NOT-OWNED-2: the app's last prefill ended not_owned (fresh, see
+    # jobs.not_owned_appids). Independent of `status`: an app that holds cache
+    # bytes keeps its cached status and only carries this flag.
+    not_owned: bool = False
     last_prefill_at: str | None
     # Timestamp of the last run that CONFIRMED this app current (schema v4,
     # WP 3.3; surfaced here WP 4c). ADR-0006's tier-1 semantics are "current
@@ -464,6 +469,8 @@ class GameDetail(BaseModel):
     appid: int
     name: str | None
     status: str
+    # See GameSummary.not_owned.
+    not_owned: bool = False
     last_prefill_at: str | None
     # See GameSummary.last_manifest_check.
     last_manifest_check: str | None
@@ -630,6 +637,7 @@ def list_games(
         children_by_parent = _children_by_parent(classifications)
         # WP CACHE-COMPLETE-1a: stored rows + current targets, bulk.
         completeness = cache_completeness.load_index(conn, base_settings)
+        not_owned_set = jobs.not_owned_appids(conn)
         # WP D23: stored metadata and the filter's match set (indexed SQL).
         app_meta = library_meta.meta_by_appid(conn)
         matching: set[int] | None = None
@@ -677,6 +685,7 @@ def list_games(
                     row["name"], classifications.get(row["appid"])
                 ),
                 status=row["status"],
+                not_owned=row["appid"] in not_owned_set,
                 last_prefill_at=row["last_prefill_at"],
                 last_manifest_check=row["last_manifest_check"],
                 depot_count=row["depot_count"],
@@ -798,6 +807,7 @@ def get_game(
             group_members,
         ).fetchall()
         completeness = cache_completeness.load_index(conn, base_settings, group_members)
+        detail_not_owned = appid in jobs.not_owned_appids(conn)
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
@@ -821,6 +831,7 @@ def get_game(
         appid=app_row["appid"],
         name=app_classification.display_name(app_row["name"], classification),
         status=app_row["status"],
+        not_owned=detail_not_owned,
         last_prefill_at=app_row["last_prefill_at"],
         last_manifest_check=app_row["last_manifest_check"],
         depots=depots,

@@ -17,7 +17,14 @@
  */
 
 import { STATUS_LABEL } from "./status-icon.js";
-import { dispKind, KIND, statusWordFor, installedOnSummary } from "../lib/game-status.js";
+import {
+  dispKind,
+  KIND,
+  statusWordFor,
+  installedOnSummary,
+  showsNotOwnedNote,
+  NOT_OWNED_LIBRARY_NOTE,
+} from "../lib/game-status.js";
 import { formatBytesGB } from "../lib/format.js";
 import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
 import { shortPackageName } from "../lib/content-groups.js";
@@ -76,7 +83,7 @@ export function packagesStructuralKey(packages, { liveJobFor, trackedJobFor }) {
   return packages
     .map((p) => {
       const live = liveJobFor(p.appid);
-      return `${p.appid}:${dispKind(p, live)}:${offersPackageRetry(p, live, trackedJobFor(p.appid)) ? 1 : 0}`;
+      return `${p.appid}:${dispKind(p, live)}:${offersPackageRetry(p, live, trackedJobFor(p.appid)) ? 1 : 0}${showsNotOwnedNote(p) ? ":n" : ""}`;
     })
     .join(",");
 }
@@ -139,6 +146,14 @@ function buildPackageRow(pkg, parentName, ctx) {
   facts.dataset.role = "pkgfacts";
   facts.textContent = packageFactsText(pkg);
   main.append(name, srName, facts);
+  // WP NOT-OWNED-2: stays Cached, with a small neutral note (no red, no Retry).
+  if (showsNotOwnedNote(pkg)) {
+    const note = document.createElement("span");
+    note.className = "pkgnote";
+    note.dataset.role = "pkgnote";
+    note.textContent = NOT_OWNED_LIBRARY_NOTE;
+    main.appendChild(note);
+  }
   row.appendChild(main);
 
   const state = document.createElement("span");
