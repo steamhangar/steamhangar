@@ -605,9 +605,9 @@ def test_worker_reads_timeout_and_manifest_keep_per_job(
     keeps: list[int] = []
     original_ingest = manifest_ingest.ingest_after_prefill
 
-    def recording_ingest(conn, *, appid, settings):
+    def recording_ingest(conn, *, appid, settings, **kwargs):
         keeps.append(settings.manifest_keep)
-        return original_ingest(conn, appid=appid, settings=settings)
+        return original_ingest(conn, appid=appid, settings=settings, **kwargs)
 
     monkeypatch.setattr(manifest_ingest, "ingest_after_prefill", recording_ingest)
     bindir = tmp_path / "bin"

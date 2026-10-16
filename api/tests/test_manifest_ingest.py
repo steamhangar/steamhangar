@@ -203,6 +203,55 @@ def test_ingest_does_not_map_a_depot_owned_by_another_app_to_the_job_app_without
         conn.close()
 
 
+def test_ingest_skip_own_mapping_does_not_readd_a_depot_the_job_just_removed(
+    tmp_path: Path,
+) -> None:
+    """Delete-then-readd: apply_observed_mapping removed depot 441 from app 440
+    in this job; ingestion (given ``skip_own_mapping``) must not map it back
+    even though its .bin and bytes exist. Without the skip it would."""
+    from vault_api import prefill
+
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "440_440_441_123.bin", depot_id=441, manifest_id=123)
+    _make_cached_depot(tmp_path, 441)
+
+    conn = _conn(settings.db_path)
+    try:
+        upsert_mapping(conn, depotid=441, appid=440, name=None)
+        change = prefill.apply_observed_mapping(conn, 440, {442})
+        assert change.removed == {441}
+        assert _owners(conn, 441) == set()
+
+        result = ingest_after_prefill(
+            conn, appid=440, settings=settings, skip_own_mapping=change.removed
+        )
+        assert result.mapped_own == []
+        assert _owners(conn, 441) == set()
+    finally:
+        conn.close()
+
+
+def test_ingest_readds_a_manually_deleted_mapping_on_the_next_run(tmp_path: Path) -> None:
+    """Documented behaviour: a hand-deleted (depot, app) row comes back on the
+    next job while the .bin and the depot's bytes are still there."""
+    from vault_api.mapping import delete_mapping
+
+    cache_dir = tmp_path / "steamprefill-cache"
+    settings = _settings(tmp_path, cache_dir=cache_dir, archive_dir=tmp_path / "archive")
+    _write_bin_file(cache_dir, "440_440_441_123.bin", depot_id=441, manifest_id=123)
+    _make_cached_depot(tmp_path, 441)
+
+    conn = _conn(settings.db_path)
+    try:
+        ingest_after_prefill(conn, appid=440, settings=settings)
+        assert delete_mapping(conn, 441, 440) is True
+        assert ingest_after_prefill(conn, appid=440, settings=settings).mapped_own == [441]
+        assert _owners(conn, 441) == {440}
+    finally:
+        conn.close()
+
+
 def test_ingest_own_mapping_survives_the_map_drift_cleanup(tmp_path: Path) -> None:
     """MAP-DRIFT-1's orphan cleanup deletes depot_manifests rows of depots no
     app maps; a depot mapped from its manifest is never an orphan, so the row

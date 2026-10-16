@@ -154,7 +154,11 @@ class IngestResult:
 
 
 def ingest_after_prefill(
-    conn: sqlite3.Connection, *, appid: int, settings: Settings
+    conn: sqlite3.Connection,
+    *,
+    appid: int,
+    settings: Settings,
+    skip_own_mapping: Iterable[int] = (),
 ) -> IngestResult:
     """Scan ``settings.steamprefill_cache_dir`` for ``{appid}_*.bin`` files
     belonging to this job's app, record ONE manifest per depot, and archive
@@ -182,6 +186,13 @@ def ingest_after_prefill(
        replace-set mapping (``vault_api.prefill.apply_observed_mapping``,
        which is unaffected by this function and still comes from the
        before/after depot diff exactly as before WP 3.2).
+    ``skip_own_mapping``: depots step 5b must not map in THIS call -- the
+    worker passes the depots ``apply_observed_mapping`` just removed from this
+    app in the same job (a depot Steam reassigned away), so ingestion does not
+    undo that decision from a leftover ``.bin``. A depot someone deleted by
+    hand is not in this set: with its ``.bin`` and bytes still present it
+    reappears on the next run (documented behaviour).
+
     5b. **Also map the depot to the job's own app** (WP MAP-FROM-MANIFEST-1),
        additively (``INSERT OR IGNORE``, never a delete or reassignment): a
        manifest whose ORIGINAL app is this job's app says "this app's depot
@@ -273,6 +284,7 @@ def ingest_after_prefill(
     vanished_during_scan: list[str] = list(scan.vanished)
     superseded: list[str] = []
     mapped_own: list[int] = []
+    skip_own = {int(d) for d in skip_own_mapping}
     depot_root: str | None = None
     depot_root_resolved = False
 
@@ -345,7 +357,7 @@ def ingest_after_prefill(
         # WP MAP-FROM-MANIFEST-1: the job's own app owns the depot too (see
         # the docstring, step 5b). Only when the manifest's original app IS
         # this job's app and the depot has bytes on disk.
-        if original_appid == appid:
+        if original_appid == appid and manifest.depot_id not in skip_own:
             if not depot_root_resolved:
                 depot_root_resolved = True
                 depot_root = _resolve_depot_root_or_none(settings)

@@ -601,7 +601,8 @@ class PrefillWorker:
                 # do exactly that if this were allowed to propagate).
                 try:
                     ingest_result = manifest_ingest.ingest_after_prefill(
-                        conn, appid=appid, settings=self._job_settings(conn)
+                        conn, appid=appid, settings=self._job_settings(conn),
+                        skip_own_mapping=change.removed,
                     )
                     mapped_from_manifests = list(ingest_result.mapped_own)
                     mapping_line = change.summary(mapped_from_manifests)
