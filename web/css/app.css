@@ -1583,6 +1583,18 @@ body.onboarding .nav{ display:none; }
   font-size:12px; line-height:1.45; color:var(--text);
 }
 .pair-reveal{ min-width:0; margin-top:10px; }
+/* ADD-DEVICE-1: device-type tabs and the single security notice. */
+.pair-tabs{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin:0 0 14px; padding:4px;
+  background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--r-s);
+}
+.pair-tab{
+  min-width:0; padding:8px 4px; border:0; border-radius:var(--r-s); background:none;
+  color:var(--dim); font:inherit; font-size:12px; cursor:pointer;
+}
+.pair-tab[aria-selected="true"]{ background:var(--raised-2); color:var(--accent); }
+.pair-tab:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+@media(max-width:440px){ .pair-tabs{ grid-template-columns:repeat(2,1fr); } }
 .pair-qr{
   display:block; width:100%; max-width:264px; height:auto; margin:0 auto 10px;
   background:#ffffff; border-radius:var(--r-s);
