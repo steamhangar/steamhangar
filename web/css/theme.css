@@ -104,7 +104,7 @@
      parametric on this token and therefore survives the narrowing by
      construction, not by re-verification alone. */
   --rail-w:180px;
-  --w-text:960px;   /* single-column content width (.view-root/.onb/.banner-wrap) — replaces the four hand-copied "960"/"928"/"78" numbers below BP-M; narrows to 760px at BP-M for a comfortable reading column. NOT exhaustive (Opus review nitpick N5, WP 4e.1 fix round): .view-root's own "20px 16px 32px" padding and .bulk's "left/right:12px" insets are still separate, untouched literals — this token replaces the FOUR that were copies of the SAME number, not every dimensional literal in app.css. Never redefined past BP-M (only two assignments exist anywhere: this one and BP-M's 760px, css-downloads-settings-layout.test.js pins the count) — that flatness is exactly why WP 4e.5 picks THIS token, not a new one, for Downloads'/Settings' own BP-L cap: it stays 760px through BP-L/BP-XL by construction, unlike --w-wall below, which is deliberately NOT flat past BP-M. `.view-root` itself stops reading this token at BP-L (app.css's BP-L block puts it on --w-wall instead, for the Library grid's benefit) — see that block's own ".view-downloads, .view-settings" rule for how the two text-first views get it back on their own, additive selector rather than fighting `.view-root`'s rule for the same property. */
+  --w-text:960px;   /* (LAYOUT-1: the Downloads/Settings/Clients BP-L cap described below moved to --w-page; the rest still holds.) single-column content width (.view-root/.onb/.banner-wrap) — replaces the four hand-copied "960"/"928"/"78" numbers below BP-M; narrows to 760px at BP-M for a comfortable reading column. NOT exhaustive (Opus review nitpick N5, WP 4e.1 fix round): .view-root's own "20px 16px 32px" padding and .bulk's "left/right:12px" insets are still separate, untouched literals — this token replaces the FOUR that were copies of the SAME number, not every dimensional literal in app.css. Never redefined past BP-M (only two assignments exist anywhere: this one and BP-M's 760px, css-downloads-settings-layout.test.js pins the count) — that flatness is exactly why WP 4e.5 picks THIS token, not a new one, for Downloads'/Settings' own BP-L cap: it stays 760px through BP-L/BP-XL by construction, unlike --w-wall below, which is deliberately NOT flat past BP-M. `.view-root` itself stops reading this token at BP-L (app.css's BP-L block puts it on --w-wall instead, for the Library grid's benefit) — see that block's own ".view-downloads, .view-settings" rule for how the two text-first views get it back on their own, additive selector rather than fighting `.view-root`'s rule for the same property. */
   /* ceiling for the tile "wall" (library grid). Base/pre-BP-L value only —
      the 960px-everywhere era ended with WP 4e.2: app.css's BP-L block raises
      this to 1600px (and BP-XL to 2000px) now that the auto-fill grid below
@@ -114,6 +114,8 @@
      BP-L/BP-XL blocks for the real story and
      web/tests/css-layout-foundation.test.js for the updated pins. */
   --w-wall:960px;
+  /* page width of the wide Clients/Downloads/Settings column (LAYOUT-1); only read inside app.css's BP-L block, flat (never redefined). */
+  --w-page:1400px;
   /* floor for `repeat(auto-fill,minmax(var(--tile-min),1fr))` — wired into
      `.grid`'s BP-L `grid-template-columns` by WP 4e.2 (declared-but-unwired
      since WP 4e.1). This is the COMFORTABLE density's floor (the "Two

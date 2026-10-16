@@ -3392,7 +3392,7 @@ below carry their own later dates, item 12 is the current one).
         `library_meta` job runs independent of the download window, once
         per night like UPD-5; today it skips with `no-window` and never
         runs with `VAULT_SCHEDULE_WINDOW=off`.
-      - [ ] **LAYOUT-1** wide page width: new token `--w-page` (~1400px) in
+      - [x] **LAYOUT-1** wide page width: new token `--w-page` (~1400px) in
         `theme.css`; the BP-L rule at `app.css` (`.view-downloads,
         .view-settings, .view-clients` capped to `--w-text`) uses it and
         Library keeps `--w-wall`. Adapt
