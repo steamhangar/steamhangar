@@ -55,3 +55,7 @@ Temp branches wp/ci-debug and wp/ci-debug2 can be deleted by Jan.
 rc19 DONE: main 5498033 CI green, tag v0.1.0-rc19 pushed, Antrag A-20261016-01 written, no restart triggers pending. Open nits: see memory handover-current.
 Open for Jan: cover refresher anonymous vs relay-key names (A/B/C) - not yet asked.
 Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM, trig_01M7qtqVfFQZVXax5UJCfuSj.
+
+Note (audit 2026-10-16): the cover refresher question above is resolved by
+ADR-0026 (the refresher stays anonymous); the "not yet asked" lines are
+historical.

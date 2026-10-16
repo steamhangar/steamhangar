@@ -3061,7 +3061,7 @@ Suite: **1158 tests, 1158 pass, 0 fail**.
 
 User decision 2026-10-04, "Weg A": a new device is set up from this
 already-connected web UI with the ONE shared vault API key, no API change
-(ADR-0016 freeze). Per-device keys and short-lived codes are D9 PAIR-2.
+(ADR-0016 freeze). Per-device keys and short-lived codes are D29 PAIR-2.
 
 Settings → PCs (agents) → "Add a device" opens a drawer sheet
 (`components/add-device-sheet.js`) with three options. Each shows its

@@ -1,4 +1,4 @@
-# Handover: post-v0.1.0 roadmap (items D1-D23)
+# Handover: post-v0.1.0 roadmap (items D1-D29)
 
 Written 2026-10-02 by the orchestrator session that ran the first
 production rollout. For whoever picks up the work after `v0.1.0`. Read
@@ -176,6 +176,14 @@ possible). Upstream is unlikely to take a QR patch: the maintainer
 declined multi-account (#113), credential storage (#303) and
 non-interactive select-apps (#427).
 
+**State (audit 2026-10-16), applies to D2 and D3.** The ADR drafts 0018
+(D2) and 0019 (D3) and a package cut exist only on the unmerged branches
+`origin/wp/docs-adr-post-0.1.0-d1-d3` and
+`origin/wp/docs-roadmap-d2-d3-packages`; do not merge them as they are. 11
+user questions are still open there (D2 1-5, D3 1-6), and the cut assumes
+schema v18/v19 while `main` is far beyond that. A D2/D3 session must redo
+the cut against the current schema and settle the questions first.
+
 ## D3: MULTI-1, several Steam accounts per household
 
 **Goal.** Each household member's games can be prefilled with their own
@@ -207,7 +215,8 @@ game needs a visible note on which device or account it belongs to.
 - Steam Families sharing is deliberately not pursued (user decision
   2026-10-02).
 
-**Depends on D2** for a usable login per account.
+**Depends on D2** for a usable login per account. ADR draft and package
+cut: see the state note at the end of D2 (redo needed).
 
 ## D4: IPv6 egress (operator network, optional)
 
@@ -217,6 +226,14 @@ this is a network decision for the operator's documentation and process,
 not a code change. If it ever happens, vault-core would need
 `resolver ... ipv6=on` and IPv6-capable Docker networks; check the
 egress-lock networks, which set `enable_ipv6: false` on purpose.
+
+**Operator follow-up DUAL-STACK-1 (audit 2026-10-16, no decision yet).**
+The operator's line is expected to change from DS-Lite to dual stack.
+After the switch: (1) verify that AAAA suppression for the Steam CDN names
+still holds (clients must keep resolving to the cache); (2) then raise
+prefill threads and the upstream caps (D7) step by step, with a
+measurement before and after each step. The current caps were justified
+by the CGNAT port quota, which a native IPv4 path no longer has.
 
 ## D5: named, scoped API keys and per-target payload scoping
 
@@ -290,6 +307,14 @@ separate pooled forward proxy); whether a per-edge-name pool is the right
 model when a client spreads over 14 edges; how to measure safely on the
 production line.
 
+**Measured 2026-10-10 (operator line, client on `:80`):** 0x `113`
+errors, upstream connect time ~0 (reused connections), 16-23 upstream
+sockets, no SYN floods at the gateway. Still open: a measurement on
+`:443` (the passthrough caps) and the default of
+`VAULT_TLS_CLIENT_MAX_CONNS`. After a line change see DUAL-STACK-1
+under D4; a related open measurement is CAP-503-LOOP-1 (audit list at the
+end of this file).
+
 ## D8: SCHED-FEAT-1, weekday schedules and several windows per day
 
 User request 2026-10-04: a nightly-only check misses updates published
@@ -304,6 +329,16 @@ of `{days, from, to}` entries, validated like today's window), how the
 Settings UI edits it on web and Android, and keeping vault-core's
 download-rate cap window (`VAULT_UPSTREAM_RATE_WINDOW`, env-only today) in
 step with it.
+
+**Rate per window (user 2026-10-14 "nachts ungedrosselt tagsüber
+gedrosselt", 2026-10-15 "off testen für das nachtfenster"; folded into D8
+by the audit 2026-10-16).** D8 also owns the rate question: several
+windows per day, each with its own "throttle" checkbox, and a window can
+be unthrottled even when the scheduler is off (no automatic downloads;
+the window then only lifts the rate cap for manual and client downloads).
+Since rc18 there is ONE download window (D16a-1); the deprecated
+`VAULT_UPSTREAM_RATE_WINDOW` stays an env pin until D8 replaces it.
+vault-core's boot behaviour around the window is D24.
 
 ## D9: TOOL-APPS-2, bare "APP 25062xx" cards and dynamic tool-package grading
 
@@ -1191,8 +1226,9 @@ when core keys change.
 
 **Before v0.1.0 (ongoing):** release notes, user device checks,
 verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
-saves id), D7 measurement on `:443` (TLS cap TODO in WORKPACKAGES),
-failed jobs Subnautica/Timberborn (measure live on the next run).
+saves id; now ANDROID-GAPS-1 in the audit list), D7 measurement on `:443`
+(TLS cap TODO in WORKPACKAGES), failed jobs Subnautica/Timberborn/Hogwarts
+Legacy (measure live on the next run).
 
 **rc19 Downloads block (Jan's yes, 2026-10-15):**
 - METRIC-AUDIT: header "Current speed" (22.3 MB/s) vs the active job's own
@@ -1330,4 +1366,136 @@ Packages: **LIBRARY-META-1a (api)** table, migration, nightly oracle job,
 tests; **LIBRARY-META-1b (api)** filter and sort parameters; **LIBRARY-META-1c
 (web)** chips and sort; **LIBRARY-META-1d (api)** optional store night fill
 after D22.
+
+**Window decoupling, LIB-META-WINDOW-1 (api, rc20; user decision
+2026-10-16, Weg B).** As built in rc19 the nightly `library_meta` job runs
+only inside the download schedule window and otherwise skips with
+`no-window`; with `VAULT_SCHEDULE_WINDOW=off` it never runs, so the library
+filters stay empty. Decision: run it independent of the download window,
+once per night, like the always-on update check (UPD-5). It still sends
+metadata queries only (no downloads) and stays behind its own switch and
+the privacy rules above.
+
+## D24: BOOT-RATE-1, rate window at vault-core boot (core, rc20)
+
+Found 2026-10-15 in the A-20261015-01 check; scheduled by user decision
+2026-10-16. At start vault-core renders its nginx config with the shipped
+default rate window 03:00-07:00 and keeps it for a few seconds, until
+settings generation 1 is applied. A restart between 03:00 and 07:00 so
+runs unthrottled for those seconds, whatever the operator's settings say.
+Fix: at boot read the core settings file if it is present and render from
+it; if it is missing or unreadable, start on the throttled side until the
+first generation is applied (fail towards the cap, never away from it).
+Tests: boot render with and without the settings file, inside and outside
+the default window. Depends on D16c (core settings file). State: open,
+rc20.
+
+## D25: TSNET-1, embedded tailscale (requirement A6)
+
+From the old post-v1 backlog in `docs/WORKPACKAGES.md` (2026-08-09). Embed
+tailscale (`tsnet`) so the app's "homecall" reaches the hangar from
+outside the house without a separate VPN setup (requirement A6 also names
+Twingate and a public domain as connectivity profiles). Needs an ADR (auth
+key handling, which component joins the tailnet, interplay with the
+egress lock). Dependencies: none scheduled. State: later, unscheduled.
+
+## D26: NOTIFY-CURSOR-1, server-side notification cursor
+
+From the old post-v1 backlog in `docs/WORKPACKAGES.md` (2026-08-09). The
+read state of notifications lives per browser and per app today; a
+server-side cursor (per device or per key, see D5 and D29) keeps it in
+step across devices. Needs an API addition and a schema change.
+Dependencies: D5 or D29 for a per-device identity. State: later,
+unscheduled.
+
+## D27: DEPOT-GRACE-1, per-depot grace windows
+
+From the old post-v1 backlog in `docs/WORKPACKAGES.md` (2026-08-09).
+Garbage collection uses one grace period for every depot; allow a grace
+window per depot (or per app), so for example a large, rarely played game
+is kept longer. Touches GC, the API and the Settings UI. Dependencies:
+none. State: later, unscheduled.
+
+## D28: CLIENT-NAME-MAC-1, client names that survive DHCP changes
+
+User wish 2026-10-14 (D15 names: "by MAC where the vault can learn it").
+The agent reports its MAC address(es) in the report payload (optional
+field; old servers and old agents keep working, as in AGENT-ADDR-1).
+vault-api accepts `key_type = "mac"`, which is reserved today and answered
+with 422 (`api/vault_api/client_names.py`), and resolves a name by MAC
+before IP, so a named PC keeps its name after a DHCP change. Agentless
+clients stay IP-keyed. Pairs well with the installer and the v0.2.0 agent
+work (agent reports its OS). Dependencies: an agent release. Schedule:
+after rc20. State: open.
+
+## D29: PAIR-2, proper device pairing
+
+User decision 2026-10-04 (follows PAIR-1); the user agreed to build the
+pairing ways one after the other ("Die wege nacheinander klingen gut",
+2026-10-04). Until the audit of 2026-10-16 this item had no roadmap entry
+and was labelled "D9 PAIR-2" in `docs/PROJECT_PLAN.md`, which clashed with
+D9 TOOL-APPS-2 here. Scope: short-lived pairing codes (the web UI shows a
+code or QR valid for minutes, the device trades it for its own key) and
+one named, revocable key per device, so removing a phone or PC revokes
+only its key; the `steamhangar://pair` URI gets a `v=2` with a code
+instead of a key. Dependencies: D5 (named, scoped keys); D6's desktop
+client builds on it. Needs an ADR. State: open, unscheduled.
+
+## Audit 2026-10-16: open follow-ups
+
+Found when the orchestrator went through all past sessions on 2026-10-16.
+None of these has a user decision yet; each needs a brief (and the user's
+go where it changes behaviour) before any code. The rc-relevant ones are
+mirrored as unchecked boxes in the "rc20 candidates" block of
+`docs/PROJECT_PLAN.md`.
+
+- **DUAL-STACK-1 (operator):** AAAA check and stepwise cap raise after the
+  line change, see D4.
+- **ANDROID-GAPS-1 (app):** "Remove PC" is missing (`VaultApiClient.kt` has
+  no `DELETE /v1/clients`), onboarding does not store the SteamID, client
+  rename and Delete history are missing in the app. The rc17 follow-ups
+  ("app parity gaps") and "Before v0.1.0" list parts of this; this entry
+  is the single record.
+- **APP-NIGHT-GOLDEN-1 (app, CI):** `library_411dp_font100_night.png` is
+  byte-identical to the day golden, so the dark theme is probably not
+  applied in the screenshot test. Make the night profile render dark, then
+  refresh the golden.
+- **CAP-503-LOOP-1 (measurement):** on 2026-10-10, with the 4m upstream
+  rate and the global cap 16 on `:80` combined, vault-core rejected about
+  14k-21k requests per minute with 503 and the clients retried at once;
+  the rate was raised to 8m afterwards. Open: does the loop still occur at
+  the current rate. See `docs/LEARNINGS.md` (production rollout) and
+  ADR-0021 "Consequences and honest limits".
+- **VERIFY-COLD-1 (operator):** a verify over many games on cold data runs
+  against the single nginx worker. Keep the verify window off until the
+  worker tuning (ADR-0027 Sunday test) decides.
+- **HIT-PATH-1 (measurement):** the server-to-client HIT throughput (~91
+  Mbit/s seen) has only an idle baseline. Missing: iperf3 LAN baseline,
+  nginx counters during a hit, and the hit-path read of an already cached
+  game (DIAG-SESSION in the rc19 block).
+- **VERSION-HEALTH-1 (api):** `/v1/health` returns only a status and
+  `/v1/about` needs the key, so rollout checks could not read version and
+  schema. Candidate: a startup log line with version and schema, or the
+  version in `/v1/health`.
+- **VERIFY-SPEED-TEXT-1 (web, candidate for DOWNLOADS-1):** while
+  Verifying, a job shows "Speed not measured yet". Undecided: more honest
+  wording, or show the total speed.
+- **QUEUE-KBD-KEEP (web, DOWNLOADS-1):** `web/js/lib/queue-reorder.js`
+  already moves a focused row with ArrowUp/ArrowDown. DOWNLOADS-1 must keep
+  that path when it drops the arrow buttons; it is not a new follow-up.
+- **NITS-AUDIT-1 (small, any rc):**
+  - dead code `packagesAriaText` (app `ContentGroups.kt`);
+  - web test that "Update now" in the group sheet sends the package ids
+    (`web/tests/game-detail-sheet-update.test.js`);
+  - optional origin check in `isVaultReturnTo` (D11 review);
+  - GameHangar logo and header briefing task for D18;
+  - web `api.js` has no client-side request timeout;
+  - Android tablet/foldable layout (WindowSizeClass) is unplanned;
+  - TalkBack group semantics are unverified;
+  - `DownloadsStatsLiveTest` has a trivial last assertion;
+  - AGENT-FIX-2 follow-up: registry lookup in the Go agent itself;
+  - CI-FIX-3 follow-up: pin the APK signing certificate fingerprint in CI;
+  - `analyze.ps1` log format gap;
+  - Hogwarts Legacy was missing next to Subnautica/Timberborn in the
+    failed-jobs measurement note (added in "Before v0.1.0" above).
 

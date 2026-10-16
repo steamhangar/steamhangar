@@ -1342,6 +1342,10 @@ merged first, and 4a.7 wants 3.11.
 Post-v1 backlog (documented, undispatched): embedded tailscale (tsnet),
 iOS app, queue reordering, drag-to-reorder, server-side notification
 cursor, per-depot grace windows.
+Moved 2026-10-16: embedded tailscale, the notification cursor and per-depot
+grace windows are now roadmap items D25-D27 in
+`docs/handover/post-0.1.0-roadmap.md` (later, unscheduled); queue reordering
+and drag-to-reorder shipped as D20 in rc19.
 
 ## Carry-overs (post-2026-08-09)
 

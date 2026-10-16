@@ -2010,7 +2010,9 @@ surface (playtime and last-played now flow through the API response).
   undocumented, rate-limited, no CORS, so they need their own relay endpoint
   and privacy note — and a screenshot does not help anyone manage a cache.
   If wanted at all, they belong to Phase 6 with the other external
-  integrations.
+  integrations. **Dropped (user decision 2026-10-16):** Steam-like
+  screenshots on the detail card are rejected and will not be built in
+  any phase.
 
 ### Phase 5 — Community Release
 - [x] README with architecture diagram, quickstart (compose up in 5 minutes),
@@ -2721,10 +2723,15 @@ below carry their own later dates, item 12 is the current one).
       is green and merged): verify digests, new override/.env templates
       for the operator's rollout request. Tagged 2026-10-02 on a7856fc
       (contains 6965ea7); later candidates up to `v0.1.0-rc12` followed.
-    - [ ] Operator re-tests on rc6: prefill of one real game completes,
+    - [x] ~~Operator re-tests on rc6: prefill of one real game completes,
       Steam client downloads the same game from the cache (HIT), job
       titles show game names, the failure hints read correctly, the
-      Desktop-site banner appears on the phone with the mode on.
+      Desktop-site banner appears on the phone with the mode on.~~
+      Obsolete (audit 2026-10-16): superseded by the later production
+      rollouts of newer candidates (real prefills completed, client HITs
+      measured on prod, e.g. 94 % HIT on 2026-10-13); open device checks
+      ride on each rc's deploy Antrag and the "Before v0.1.0" list in the
+      roadmap.
     - [x] **AGENT-FIX-2** (operator's rc9 agent install on Windows 11,
       non-admin, PS 5.1, 2026-10-04; follows AGENT-FIX-1/AGENT-FEAT-1) —
       `install-task.ps1` takes the library root from
@@ -3194,8 +3201,12 @@ below carry their own later dates, item 12 is the current one).
       (user decision 2026-10-09, "Weg A"): instead of lowering the 443
       passthrough caps to 32/16 they are operator-tunable
       (`VAULT_TLS_CLIENT_MAX_CONNS` default 64, `VAULT_TLS_MAX_CONNS`
-      default 256, ADR-0021 addendum 2026-10-09). **The operator's
-      post-rollout measurement is open**, so the box stays unticked.
+      default 256, ADR-0021 addendum 2026-10-09). **Measured 2026-10-10**
+      (operator line, client on `:80`): 0x `113` errors, upstream connect
+      time ~0, 16-23 upstream sockets, no SYN floods. **Still open**, so
+      the box stays unticked: the `:443` measurement and the default of
+      `VAULT_TLS_CLIENT_MAX_CONNS` (WORKPACKAGES carry-over 2). Related
+      open measurement: CAP-503-LOOP-1 (roadmap audit list).
     - [ ] **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
       2026-10-04: "the night check is no use if I come home at 17:00 and
       the update came during the day"). Today `schedule_window` is one
@@ -3206,17 +3217,26 @@ below carry their own later dates, item 12 is the current one).
       22:00-06:00, weekend all day). The download-rate cap window
       (`VAULT_UPSTREAM_RATE_WINDOW`, env-only in vault-core) must follow
       the same schedule, or be replaced by it.
-    - [ ] **D9 PAIR-2 — proper device pairing** (follows PAIR-1, user
-      decision 2026-10-04). PAIR-1 hands every new device the one shared
-      API key. Replace that with short-lived pairing codes (the web UI shows
-      a code or QR valid for minutes, the device trades it for its own
+      **Rate per window** (user 2026-10-14 "nachts ungedrosselt tagsüber
+      gedrosselt", 2026-10-15 "off testen für das nachtfenster"; folded in
+      2026-10-16): several windows per day, a "throttle" checkbox per
+      window, and an unthrottled window also works with the scheduler off
+      (it then only lifts the rate cap). Since rc18 there is one download
+      window (D16a-1); `VAULT_UPSTREAM_RATE_WINDOW` stays a deprecated env
+      pin until D8 replaces it.
+    - [ ] **D29 PAIR-2 — proper device pairing** (labelled "D9 PAIR-2"
+      here until 2026-10-16, which clashed with roadmap D9 TOOL-APPS-2;
+      follows PAIR-1, user decision 2026-10-04). PAIR-1 hands every new
+      device the one shared API key. Replace that with short-lived pairing
+      codes (the web UI shows a code or QR valid for minutes, the device
+      trades it for its own
       key) and one named, revocable key per device, so removing a phone or
       PC revokes only its key. Builds on D5 (named, scoped API keys) and is
       the pairing step D6's desktop client needs. Needs new endpoints, so
       an ADR and the freeze opened; the `steamhangar://pair` URI gets a
       `v=2` with a code instead of a key.
 
-    - [ ] **D14 UPD-1..4 — always-on update check** (user decision
+    - [x] **D14 UPD-1..4 — always-on update check** (user decision
       2026-10-13; details in `docs/handover/post-0.1.0-roadmap.md`).
       - [x] **UPD-1 (API)** — vault-api checks cached games for updates
         every `VAULT_SCHEDULE_INTERVAL_MINUTES` (at UPD-1 only while a
@@ -3240,8 +3260,15 @@ below carry their own later dates, item 12 is the current one).
         background too, anonymous metadata). Downloads and prefill sweeps
         stay window-bound; `GET /v1/updates/status` `scheduled` now equals
         `enabled`. ADR-0006 note 2026-10-14.
-      - [ ] UPD-2 (web badge, button, filter chip), UPD-3 (Android), UPD-4
-        (docs, ADR addendum superseding the 2026-08-18 "never bare Check" rule).
+      - [x] UPD-2 (web badge, button, filter chip; merged a4f1e38), UPD-3
+        (Android; merged 624a90a), UPD-4 (docs, ADR addendum superseding
+        the 2026-08-18 "never bare Check" rule; merged 50e6a49).
+
+    Record for rc15-rc18: their packages (D9-D13, D15, D16, UPD-6,
+    AGENT-ADDR-1, CACHE-COMPLETE-1, LIB-LIST-1, LIB-FILTER-INST-1,
+    APP-DIST-1, UPD-FIX-1, DIST-1a/b and the rest) are not repeated here as
+    boxes; `docs/handover/post-0.1.0-roadmap.md` (wave plan, rc status
+    lines) is the record for them.
 
     - [ ] **rc19 Downloads and card block** (run 2026-10-15/16; details in
       `docs/handover/rc19-run-plan.md` and
@@ -3305,13 +3332,16 @@ below carry their own later dates, item 12 is the current one).
       - [x] FIX-SHOT-1: stats graph caption reads the injected clock (goldens refreshed)
       - [x] tag `v0.1.0-rc19.3` after main CI is green (pushed on main d409f30)
       - [ ] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
-        WORKERS=2)
-      - [ ] LIVE-DELAY-1 analysis: the Downloads page shows client downloads
-        more than 1 min late, unresolved; rc20 unless tiny
+        WORKERS=2). Until it decides the worker tuning, keep the verify
+        window off: a verify over many games on cold data runs against the
+        single nginx worker (VERIFY-COLD-1, audit 2026-10-16).
+      - LIVE-DELAY-1 (client downloads show more than 1 min late on the
+        Downloads page) moved to the rc20 block below (user decision
+        2026-10-16): analysis and fix before DOWNLOADS-1.
 
     - [ ] **rc20 candidates** (2026-10-16, unprioritised; the user decides
       scope and order; larger themes live in
-      `docs/handover/post-0.1.0-roadmap.md`, D1-D23)
+      `docs/handover/post-0.1.0-roadmap.md`, D1-D29)
       - [ ] D22 privacy modes
       - [ ] CACHE-REPAIR-1
       - [ ] Clients / Add-a-device redesign (mockups come first)
@@ -3319,19 +3349,50 @@ below carry their own later dates, item 12 is the current one).
         the user's yes)
       - [ ] honesty flag for unmapped depots in the completeness display
       - [ ] package names for "Unknown app" entries (HELLDIVERS 2)
-      - [ ] D20 queue order
-      - [ ] LIVE-DELAY-1 fix (after the analysis above)
+      - D20 queue order: shipped in rc19 (see the rc19 block); only its
+        nits remain (claim-vs-move race test, aria-live, below)
+      - LIVE-DELAY-1: scheduled in the rc20 block below
       - [ ] runner retry on "Unable to detect Lancache server!", only if the
         heartbeat log confirms the late-heartbeat hypothesis (ADR-0027)
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test
+      - [ ] audit 2026-10-16 follow-ups (no decision yet; scope in the
+        roadmap's "Audit 2026-10-16: open follow-ups"):
+        - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID,
+          client rename and Delete history in the app
+        - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
+        - [ ] CAP-503-LOOP-1 measure whether the 503 retry loop still
+          occurs at the current rate
+        - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
+          nginx counters, hit-path read)
+        - [ ] VERSION-HEALTH-1 version and schema readable without the key
+        - [ ] VERIFY-SPEED-TEXT-1 "Speed not measured yet" while Verifying
+          (decide with DOWNLOADS-1)
+        - [ ] NITS-AUDIT-1 small items (list in the roadmap)
+        - [ ] DUAL-STACK-1 (operator, after the line change) AAAA check,
+          then stepwise cap raise with measurement
 
     - [ ] **rc20 web redesign** (decided 2026-10-16, mockup round with the
       operator; reference: `docs/design/rc20/`, run notes:
-      `docs/handover/rc20-run-plan.md`). Web only, no schema change, no new
-      env value. Order: LAYOUT-1 and SHEET-MOTION-1 first (shared base),
-      then the page packages.
+      `docs/handover/rc20-run-plan.md`). The redesign packages are web
+      only, no schema change, no new env value. Order: LAYOUT-1 and
+      SHEET-MOTION-1 first (shared base), then the page packages;
+      LIVE-DELAY-1 lands before DOWNLOADS-1. The three non-web packages
+      below (user decisions 2026-10-16) ride in the same rc.
+      - [ ] **LIVE-DELAY-1** (moved from rc19.3, user decision
+        2026-10-16) analysis, then fix: the Downloads page shows client
+        downloads more than 1 min late. Analysis and fix land BEFORE
+        DOWNLOADS-1, so the redesign builds on the fixed data path.
+      - [ ] **BOOT-RATE-1** (core, roadmap D24) vault-core renders the
+        default rate window 03:00-07:00 at boot until settings generation 1
+        is applied, so a restart between 03:00 and 07:00 runs unthrottled
+        for a few seconds. Fix: read the settings file at boot if present,
+        otherwise start throttled until the first generation.
+      - [ ] **LIB-META-WINDOW-1** (api, roadmap D23 note, Weg B) the nightly
+        `library_meta` job runs independent of the download window, once
+        per night like UPD-5; today it skips with `no-window` and never
+        runs with `VAULT_SCHEDULE_WINDOW=off`.
       - [ ] **LAYOUT-1** wide page width: new token `--w-page` (~1400px) in
         `theme.css`; the BP-L rule at `app.css` (`.view-downloads,
         .view-settings, .view-clients` capped to `--w-text`) uses it and
@@ -3366,8 +3427,11 @@ below carry their own later dates, item 12 is the current one).
         per-game Update and Verify buttons; Queue reordered by drag and drop
         only (no arrows); History differs between idle and active, rows
         expand to failure hint, Retry, log excerpt and raw output
-        (`downloads.js`, `traffic-view.js`, `job-failure.js`). Keyboard
-        alternative for the drag is a separate follow-up (flagged).
+        (`downloads.js`, `traffic-view.js`, `job-failure.js`). Keep the
+        existing keyboard path for reordering (`web/js/lib/queue-reorder.js`
+        moves a focused row with ArrowUp/ArrowDown; QUEUE-KBD-KEEP). Decide
+        the "Speed not measured yet" wording while Verifying here
+        (VERIFY-SPEED-TEXT-1).
       - [ ] **SETTINGS-1** left sticky section nav (Vault & connection,
         Download window, Disk & cleanup, Notifications, Steam, About) and
         the expert switch revealing "Expert settings"; auto-fit 2-column
@@ -3401,6 +3465,14 @@ below carry their own later dates, item 12 is the current one).
       version that replaces the Weg A "differs from server" check. Needs a
       schema bump and an agent release; already-running agents report no OS
       until updated.
+    - [ ] **CLIENT-NAME-MAC-1** (roadmap D28, after rc20, user wish
+      2026-10-14; pairs with the installer and the v0.2.0 agent work): the
+      agent reports its MAC, vault-api accepts `key_type = "mac"` (reserved
+      today, answered with 422), so client names survive DHCP changes.
+    - [ ] **Later, unscheduled** (old post-v1 backlog, moved from
+      `docs/WORKPACKAGES.md` on 2026-10-16): D25 TSNET-1 embedded
+      tailscale (requirement A6), D26 NOTIFY-CURSOR-1 server-side
+      notification cursor, D27 DEPOT-GRACE-1 per-depot grace windows.
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by

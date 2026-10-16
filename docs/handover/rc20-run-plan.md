@@ -7,8 +7,12 @@ delegating (repo rule); after that the run follows the rules below.
 
 ## Decisions
 
-- **Scope:** web only (vanilla JS views, CSS, tests). No api, core or agent
-  change, no schema bump, no new env value. Android is not part of rc20.
+- **Scope:** the redesign is web only (vanilla JS views, CSS, tests): no
+  schema bump, no new env value. Android is not part of rc20. Added by the
+  user on 2026-10-16, outside the redesign: LIVE-DELAY-1 (analysis + fix,
+  before DOWNLOADS-1), BOOT-RATE-1 (core, roadmap D24) and
+  LIB-META-WINDOW-1 (api, roadmap D23 note); see the PROJECT_PLAN rc20
+  block.
 - **Outdated agent = Weg A** (frontend version comparison). Weg B (agent
   reports its OS, API serves a minimum version) is v0.2.0 with the installer.
 - **Clients:** one card per device; no separate agent list, no "Manage PCs".
@@ -26,7 +30,13 @@ delegating (repo rule); after that the run follows the rules below.
 2. **Clients:** CLIENTS-1 -> CLIENTS-2 -> CLIENTS-3, ADD-DEVICE-1 in parallel
    (touches `add-device-sheet.js` only; CLIENTS-3 depends on it for the
    no-tab open, so land ADD-DEVICE-1 first if both are ready).
-3. **Downloads and Settings:** DOWNLOADS-1, SETTINGS-1 (independent).
+3. **Downloads and Settings:** LIVE-DELAY-1 (analysis, then fix) first,
+   then DOWNLOADS-1 on top of it; SETTINGS-1 independent. DOWNLOADS-1 keeps
+   the existing keyboard reorder path (`web/js/lib/queue-reorder.js`,
+   ArrowUp/ArrowDown) and settles the "Speed not measured yet" wording
+   while Verifying (VERIFY-SPEED-TEXT-1).
+   BOOT-RATE-1 (core) and LIB-META-WINDOW-1 (api) touch no web file and can
+   run in any wave next to the web packages (still max 3 agents).
 4. **Library:** LIBRARY-1, then LIBRARY-DETAIL-1 (both touch `library.js`;
    run sequentially).
 5. **Close:** `dev.sh test-web`, `dev.sh verify`, visual check, docs.
@@ -57,5 +67,7 @@ stays on `VAULT_SCHEDULE_WINDOW=off`; no downloads in dev. Tag
 
 ## Open follow-ups (not in rc20)
 
-- Keyboard alternative for the queue drag and drop.
+- ~~Keyboard alternative for the queue drag and drop.~~ Corrected
+  2026-10-16: not a follow-up. The keyboard path already exists
+  (`queue-reorder.js`, ArrowUp/ArrowDown) and DOWNLOADS-1 must keep it.
 - v0.2.0 Weg B items (plan block "v0.2.0, Weg B for agents").
