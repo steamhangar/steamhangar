@@ -566,7 +566,16 @@ class PrefillWorker:
                         "- is it owned by the logged-in account? Depot "
                         "mapping and manifest state were NOT touched."
                     )
-                    jobs.set_app_status(conn, appid, jobs.STATUS_NOT_OWNED)
+                    # WP NOT-OWNED-2: an app that already holds cache bytes
+                    # or was prefilled before (typically a content package
+                    # of a game the account owns) keeps a cached-equivalent
+                    # apps.status, so its card does not flip; the not_owned
+                    # fact lives on the job (jobs.not_owned_appids reads the
+                    # newest prefill job), which still ends not_owned below.
+                    if self._app_holds_cache(conn, appid, before):
+                        jobs.set_app_status(conn, appid, self._kept_status(conn, appid))
+                    else:
+                        jobs.set_app_status(conn, appid, jobs.STATUS_NOT_OWNED)
                     webhooks.finish_job_and_notify(
                         conn, self._webhook_notifier,
                         job_id, jobs.STATUS_NOT_OWNED, "\n".join(log_parts),
@@ -734,6 +743,29 @@ class PrefillWorker:
                 )
             except Exception:  # pragma: no cover - DB itself is broken
                 logger.exception("Could not even record the failure of job %s", job_id)
+
+    @staticmethod
+    def _app_holds_cache(
+        conn: sqlite3.Connection, appid: int, before: dict[int, DepotSignature]
+    ) -> bool:
+        """True when the app was prefilled before or a mapped depot is on disk."""
+        row = conn.execute(
+            "SELECT last_prefill_at FROM apps WHERE appid = ?", (appid,)
+        ).fetchone()
+        if row is not None and row[0] is not None:
+            return True
+        mapped = conn.execute(
+            "SELECT depotid FROM depot_app_map WHERE appid = ?", (appid,)
+        ).fetchall()
+        return any(int(r[0]) in before for r in mapped)
+
+    @staticmethod
+    def _kept_status(conn: sqlite3.Connection, appid: int) -> str:
+        """``done`` for a previously prefilled app, else ``idle``."""
+        row = conn.execute(
+            "SELECT last_prefill_at FROM apps WHERE appid = ?", (appid,)
+        ).fetchone()
+        return jobs.STATUS_DONE if row is not None and row[0] is not None else jobs.STATUS_IDLE
 
     def _finish_prefill_failed(
         self,

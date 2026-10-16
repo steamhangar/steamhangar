@@ -294,33 +294,38 @@ def ensure_app_row(conn: sqlite3.Connection, appid: int) -> None:
 def not_owned_appids(
     conn: sqlite3.Connection, now: datetime | None = None
 ) -> set[int]:
-    """Apps whose last prefill ended ``not_owned`` (``apps.status``).
+    """Apps whose last prefill ended ``not_owned``.
 
-    The scheduler, the miss trigger, ``POST /v1/prefill/cached`` and the
-    update check leave these out: SteamPrefill cannot prefill them, so a job
-    would only repeat the same outcome. The state clears when an explicit
-    ``POST /v1/prefill`` re-queues the app (``enqueue_prefill``), a later run
-    ends differently, or the cache of the app is deleted. vault-api keeps no
-    owned-games list of its own (the relay is a pass-through), so this is the
-    only server-side signal.
+    The scheduler, the miss trigger, ``POST /v1/prefill/cached``, verify and
+    "complete all" and the update check leave these out: SteamPrefill cannot
+    prefill them, so a job would only repeat the same outcome. vault-api keeps
+    no owned-games list of its own (the relay is a pass-through), so this is
+    the only server-side signal.
 
-    The state is not permanent for automatic callers: once the app's latest
-    ``not_owned`` prefill job finished more than ``NOT_OWNED_RECHECK_DAYS``
-    ago, or has no such job row left (pruned history), the app is no longer returned, so the next sweep tries it again (the
-    user may have bought it since). (No timestamp
-    to age counts as expired, not as excluded forever.)
+    WP NOT-OWNED-2: the fact is derived from the app's NEWEST prefill job, not
+    from ``apps.status``. An app that already holds cache bytes (or was
+    prefilled before) keeps its previous ``apps.status`` when a run ends
+    unowned (a content package of a game the account does not own; its card
+    must stay "Cached"), so ``apps.status`` alone cannot carry the state. The
+    app is returned while its newest prefill job (any status, by id) is a
+    ``not_owned`` one that finished within ``NOT_OWNED_RECHECK_DAYS``. A newer
+    job of any kind (an explicit ``POST /v1/prefill`` queues one, a later run
+    ends differently) supersedes it, so the state clears exactly as before; a
+    pruned job row counts as expired, not as excluded forever, and after the
+    7 days the next sweep tries the app again (the user may have bought it).
     """
     cutoff = ((now or datetime.now(timezone.utc)) - timedelta(
         days=config.NOT_OWNED_RECHECK_DAYS
     )).strftime(TIMESTAMP_FORMAT)
     rows = conn.execute(
         """
-        SELECT a.appid,
-               (SELECT MAX(j.finished_at) FROM jobs j
-                 WHERE j.appid = a.appid AND j.type = ? AND j.status = ?)
-        FROM apps a WHERE a.status = ?
+        SELECT j.appid, j.finished_at FROM jobs j
+        WHERE j.type = ?
+          AND j.id = (SELECT MAX(j2.id) FROM jobs j2
+                       WHERE j2.appid = j.appid AND j2.type = ?)
+          AND j.status = ?
         """,
-        (JOB_TYPE_PREFILL, STATUS_NOT_OWNED, STATUS_NOT_OWNED),
+        (JOB_TYPE_PREFILL, JOB_TYPE_PREFILL, STATUS_NOT_OWNED),
     ).fetchall()
     return {
         int(appid)

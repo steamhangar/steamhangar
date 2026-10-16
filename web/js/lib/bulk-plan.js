@@ -29,7 +29,7 @@
  * (`DELETE /v1/cache/{appid}` 404s: "appid has no depot_app_map rows").
  */
 
-import { dispKind, findLiveJob, hasVisibleCacheContent, isToolApp, KIND } from "./game-status.js";
+import { dispKind, findLiveJob, hasVisibleCacheContent, isNotOwnedApp, isToolApp, KIND } from "./game-status.js";
 
 /** Appids with a prefill job that is queued, running or paused right now —
  * shared by both classifiers below (queued jobs count as busy here, unlike
@@ -70,7 +70,7 @@ export function classifyBulkSelection(games, jobs) {
   for (const g of games) {
     if (g && g.owned_only === true) notOnVault.push(g);
     else if (isToolApp(g)) toolApps.push(g);
-    else if (g && g.status === "not_owned" && !busyAppids.has(g.appid)) notOwned.push(g);
+    else if (g && isNotOwnedApp(g) && !busyAppids.has(g.appid)) notOwned.push(g);
     else (busyAppids.has(g.appid) ? busy : rest).push(g);
   }
 

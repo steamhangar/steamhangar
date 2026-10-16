@@ -26,7 +26,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from vault_api import cache_completeness, deletion, tool_apps
@@ -395,6 +395,18 @@ def _enqueue_forced(conn: sqlite3.Connection, appids: list[int]) -> list[Prefill
     return refs
 
 
+#: WP NOT-OWNED-2. The verify/incomplete bodies are bare lists, so the apps
+#: they left out (last prefill ended not_owned) travel in a response header,
+#: comma-separated appids -- additive, older clients ignore it. Only present
+#: when something was skipped.
+SKIPPED_NOT_OWNED_HEADER = "X-Skipped-Not-Owned"
+
+
+def _set_skipped_header(response: Response, skipped: list[int]) -> None:
+    if skipped:
+        response.headers[SKIPPED_NOT_OWNED_HEADER] = ",".join(str(a) for a in skipped)
+
+
 @router.post(
     "/v1/prefill/verify",
     status_code=status.HTTP_202_ACCEPTED,
@@ -402,6 +414,7 @@ def _enqueue_forced(conn: sqlite3.Connection, appids: list[int]) -> list[Prefill
 )
 def create_verify_jobs(
     body: PrefillRequest,
+    response: Response,
     open_db: DbOpener = Depends(db_opener),
 ) -> list[PrefillJobRef]:
     """"Verify" / "Complete now" for the listed games (WP CACHE-COMPLETE-1b):
@@ -423,12 +436,20 @@ def create_verify_jobs(
             )
     appids = list(dict.fromkeys(body.appids))
     with open_db() as conn:
+        # WP NOT-OWNED-2: an app whose last prefill ended not_owned (fresh,
+        # NOT_OWNED_RECHECK_DAYS) would only end the same way again.
+        skipped = sorted(set(appids) & jobs_queue.not_owned_appids(conn))
+        appids = [a for a in appids if a not in skipped]
         refs = {r.appid: r for r in _enqueue_forced(conn, appids)}
-    # One entry per requested id, in request order (POST /v1/prefill's rule):
-    # a repeated id points at the same job, marked deduplicated.
+    _set_skipped_header(response, skipped)
+    # One entry per requested (and not skipped) id, in request order
+    # (POST /v1/prefill's rule): a repeated id points at the same job,
+    # marked deduplicated.
     out: list[PrefillJobRef] = []
     seen: set[int] = set()
     for appid in body.appids:
+        if appid not in refs:
+            continue
         ref = refs[appid]
         out.append(ref if appid not in seen else ref.model_copy(update={"deduplicated": True}))
         seen.add(appid)
@@ -442,6 +463,7 @@ def create_verify_jobs(
 )
 def create_incomplete_jobs(
     request: Request,
+    response: Response,
     open_db: DbOpener = Depends(db_opener),
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
@@ -466,6 +488,9 @@ def create_incomplete_jobs(
             for app in cache_completeness.incomplete_apps(conn, settings, depot_bytes)
             if cache_completeness.is_completable(app.figure)
         ]
+        skipped = sorted(set(appids) & jobs_queue.not_owned_appids(conn))
+        appids = [a for a in appids if a not in skipped]
+        _set_skipped_header(response, skipped)
         if not appids:
             return []
         return _enqueue_forced(conn, appids)

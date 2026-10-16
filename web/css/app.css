@@ -1767,6 +1767,7 @@ body.onboarding .nav{ display:none; }
 .pkg-row .pkgname{ color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pkg-row .pkgfacts{ font-size:11px; color:var(--dim-2); overflow-wrap:anywhere; }
 .pkg-row .pkgstate{ flex:none; font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
+.pkg-row .pkgnote{ font-size:11px; color:var(--dim-2); font-style:italic; }
 .pkg-row .btn{ flex:none; }
 
 .unknown{ border:1px dashed var(--line); border-radius:var(--r-m); padding:14px 13px; }

@@ -119,6 +119,8 @@ import {
   INSTALLED_BADGE,
   isToolApp,
   TOOL_APP_NOTE,
+  NOT_OWNED_LIBRARY_NOTE,
+  showsNotOwnedNote,
   showsUpdateState,
 } from "../lib/game-status.js";
 import {
@@ -1108,6 +1110,21 @@ export function buildToolAppNote(gameLike) {
   return note;
 }
 
+/**
+ * WP NOT-OWNED-2: the small neutral note under the header of an app that
+ * stays Cached although its last prefill ended `not_owned`.
+ * @param {object} gameLike
+ * @returns {HTMLElement | null}
+ */
+export function buildNotOwnedNote(gameLike) {
+  if (!showsNotOwnedNote(gameLike)) return null;
+  const note = document.createElement("p");
+  note.className = "hint detail-block";
+  note.dataset.role = "not-owned-note";
+  note.textContent = NOT_OWNED_LIBRARY_NOTE;
+  return note;
+}
+
 /** Fill (or hide) the "Last update downloaded …" fact line. */
 function syncUpdateDownloadedLine(el, gameLike) {
   const text = lastUpdateDownloadedText(gameLike);
@@ -1628,6 +1645,8 @@ function render() {
   if (storeBlock) contentEl.append(storeBlock);
   const toolNote = buildToolAppNote(gameLike);
   if (toolNote) contentEl.append(toolNote);
+  const notOwnedNote = buildNotOwnedNote(gameLike);
+  if (notOwnedNote) contentEl.append(notOwnedNote);
   contentEl.append(buildFactLines(gameLike));
   // WP CACHE-COMPLETE-1c: completeness figure and "Verify".
   const verifyIds = currentVerifyAppids();

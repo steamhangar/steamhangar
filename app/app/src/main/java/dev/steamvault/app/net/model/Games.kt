@@ -32,6 +32,9 @@ data class GameSummary(
      * (`api/vault_api/tool_apps.py`, 228980). Defaulted: older servers send
      * no flag. */
     val tool_app: Boolean = false,
+    /** WP NOT-OWNED-2: the app's last prefill ended `not_owned` while it kept a
+     * cached status (it holds cache bytes). Defaulted: older servers send none. */
+    val not_owned: Boolean = false,
     /** WP API-FIX-4: the tool package's display name, null for every
      * ordinary app. */
     val tool_app_name: String? = null,
@@ -157,6 +160,8 @@ data class GameDetail(
     val installed_on: List<InstalledOnEntry> = emptyList(),
     /** See [GameSummary.tool_app] (WP API-FIX-4). */
     val tool_app: Boolean = false,
+    /** See [GameSummary.not_owned] (WP NOT-OWNED-2). */
+    val not_owned: Boolean = false,
     /** See [GameSummary.tool_app_name] (WP API-FIX-4). */
     val tool_app_name: String? = null,
     /** See [GameSummary.cover_url] (WP API-FIX-5). */

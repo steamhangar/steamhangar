@@ -119,7 +119,15 @@ const val NOT_OWNED_STATE_WORD = "Not available to prefill (not owned)"
 
 /** True for a games row whose last prefill ended `not_owned`. A tool app
  * is never reported as not owned (it has its own word). */
-fun isNotOwned(game: GameSummary): Boolean = !isToolApp(game) && game.status == "not_owned"
+fun isNotOwned(game: GameSummary): Boolean =
+    !isToolApp(game) && (game.status == "not_owned" || game.not_owned)
+
+/** WP NOT-OWNED-2 (web `NOT_OWNED_LIBRARY_NOTE`): the small neutral note on a
+ * row that stays Cached although its last prefill ended `not_owned`. */
+const val NOT_OWNED_LIBRARY_NOTE = "Not part of your library"
+
+/** WP NOT-OWNED-2 (web `showsNotOwnedNote`): known not owned, bytes on disk. */
+fun showsNotOwnedNote(game: GameSummary): Boolean = isNotOwned(game) && hasVisibleCacheContent(game)
 
 /** True for a games row the server flags as a Steam tool app. */
 fun isToolApp(game: GameSummary): Boolean = game.tool_app
@@ -219,7 +227,8 @@ fun dispKind(game: GameSummary, liveJob: JobSummary?): StatusKind {
     // app never make its card red.
     if (isToolApp(game)) return StatusKind.NOTINUSE
     // WP NOT-OWNED-1: a distinct outcome, never red and never a Retry.
-    if (isNotOwned(game)) return StatusKind.NOTINUSE
+    // WP NOT-OWNED-2: with cache bytes the app stays Cached (plus a note).
+    if (isNotOwned(game)) return if (hasVisibleCacheContent(game)) StatusKind.CACHED else StatusKind.NOTINUSE
     if (game.status == "error") return StatusKind.ERROR
     return if (hasVisibleCacheContent(game)) StatusKind.CACHED else StatusKind.NONE
 }
