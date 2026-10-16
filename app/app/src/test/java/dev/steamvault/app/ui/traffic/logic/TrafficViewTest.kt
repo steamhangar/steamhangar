@@ -315,6 +315,10 @@ class TrafficViewTest {
             jobSpeedText(entry.copy(bytes_per_second = null, exclusive_depots = 0), FeedState.OK),
         )
         assertNull(jobSpeedText(entry.copy(bytes_per_second = null, exclusive_depots = 2), FeedState.OK))
+        assertEquals(
+            "Speed not measured: this game's depots are shared with other apps.",
+            jobSpeedText(entry.copy(bytes_per_second = null, exclusive_depots = 0, mapped_depots = 2), FeedState.OK),
+        )
     }
 
     // ---- history filter ----------------------------------------------------

@@ -585,7 +585,12 @@ class PrefillWorker:
                 after = prefill.scan_depots(self._settings.cache_root)
                 observed = prefill.diff_depots(before, after)
                 change = prefill.apply_observed_mapping(conn, appid, observed)
-                log_parts.append(change.summary())
+                # The mapping line is appended after ingestion (below) so it
+                # can say what ingestion added; the order stays
+                # replace-within-app first, manifest mapping second (WP
+                # MAP-FROM-MANIFEST-1), also on all-hit runs.
+                mapped_from_manifests: list[int] = []
+                mapping_line: str | None = None
 
                 # WP 3.2: learn what SteamPrefill just wrote (manifest state
                 # for staleness/GC, ADR-0006/0007) from its temp-cache .bin
@@ -598,6 +603,9 @@ class PrefillWorker:
                     ingest_result = manifest_ingest.ingest_after_prefill(
                         conn, appid=appid, settings=self._job_settings(conn)
                     )
+                    mapped_from_manifests = list(ingest_result.mapped_own)
+                    mapping_line = change.summary(mapped_from_manifests)
+                    log_parts.append(mapping_line)
                     log_parts.append(ingest_result.summary())
                 except Exception:
                     logger.exception(
@@ -605,6 +613,8 @@ class PrefillWorker:
                         "prefill job itself still succeeded.",
                         appid, job_id,
                     )
+                    if mapping_line is None:
+                        log_parts.append(change.summary())
                     log_parts.append(
                         "[vault-api] Manifest ingestion crashed; see server logs "
                         "(the prefill job itself still succeeded)."

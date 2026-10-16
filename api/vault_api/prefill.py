@@ -85,7 +85,7 @@ import sqlite3
 import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Iterable
 
 from vault_api.config import (
     DEFAULT_PREFILL_MAX_THREADS,
@@ -747,15 +747,28 @@ class MappingChange:
     #: True when nothing was observed and the mapping was left untouched.
     skipped_empty: bool = False
 
-    def summary(self) -> str:
+    def summary(self, manifest_mapped: Iterable[int] = ()) -> str:
+        """``manifest_mapped``: depots the same job's manifest ingestion
+        mapped to the app afterwards (WP MAP-FROM-MANIFEST-1); named so the
+        line does not claim the mapping was left alone when it was not."""
+        extra = sorted(manifest_mapped)
         if self.skipped_empty:
+            if extra:
+                return (
+                    "[vault-api] No new or changed depot directories were observed during "
+                    "this run (everything requested was already cached); the depot mapping "
+                    f"for this app was extended from its recorded manifests: added={extra}."
+                )
             return (
                 "[vault-api] No new or changed depot directories were observed during "
                 "this run (everything requested was already cached), so the existing "
                 "depot mapping for this app was left unchanged."
             )
-        return (
+        text = (
             "[vault-api] Depot mapping updated (replace-semantics for this app): "
             f"added={sorted(self.added)} removed={sorted(self.removed)} "
             f"unchanged={sorted(self.kept)}"
         )
+        if extra:
+            text += f" (+ from manifests: {extra})"
+        return text

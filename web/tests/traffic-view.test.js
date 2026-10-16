@@ -217,6 +217,10 @@ test("MUTATION TARGET: per-job speed only with the feed ok; unknown depots say w
   assert.equal(jobSpeedText(entry, "stale"), null);
   assert.equal(jobSpeedText({ ...entry, bytes_per_second: null, bytes_since_start: null, exclusive_depots: 0 }, "ok"), "Speed not measured yet: the server does not know this game's depots yet.");
   assert.equal(jobSpeedText({ ...entry, bytes_per_second: null }, "ok"), null);
+  // WP MAP-FROM-MANIFEST-1: depots mapped but all shared is not "unknown".
+  const sharedOnly = { ...entry, bytes_per_second: null, bytes_since_start: null, exclusive_depots: 0, mapped_depots: 2 };
+  assert.equal(jobSpeedText(sharedOnly, "ok"), "Speed not measured: this game's depots are shared with other apps.");
+  assert.equal(jobSpeedText({ ...sharedOnly, mapped_depots: 0 }, "ok"), "Speed not measured yet: the server does not know this game's depots yet.");
   assert.equal(jobSpeedText(null, "ok"), null);
 });
 

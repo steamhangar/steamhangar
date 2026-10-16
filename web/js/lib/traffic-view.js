@@ -527,9 +527,12 @@ export function seriesStartText(series, nowMs = Date.now()) {
 export function jobSpeedText(entry, state) {
   if (!entry || state !== "ok") return null;
   if (entry.bytes_per_second === null || entry.bytes_per_second === undefined) {
-    return entry.exclusive_depots === 0
-      ? "Speed not measured yet: the server does not know this game's depots yet."
-      : null;
+    if (entry.exclusive_depots !== 0) return null;
+    // `mapped_depots` (server >= MAP-FROM-MANIFEST-1) tells "no depots known"
+    // from "all depots shared"; an older server omits it and keeps the old line.
+    return Number(entry.mapped_depots) > 0
+      ? "Speed not measured: this game's depots are shared with other apps."
+      : "Speed not measured yet: the server does not know this game's depots yet.";
   }
   const speed = formatSpeed(entry.bytes_per_second);
   if (speed === null) return null;
