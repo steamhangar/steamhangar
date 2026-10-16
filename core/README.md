@@ -1553,7 +1553,12 @@ seeder); vault-core mounts it read-only with `nocopy` at
 else the file, else the default (`vs_default` in
 `docker/vault-settings-lib.sh`; resolver 1.1.1.1, edge
 dist-fra1.discovery.steamserver.net, window 03:00-07:00, rate and pool
-hosts `off`, caps 16/64/256, rotation 64 MiB).
+hosts `off`, caps 16/64/256, rotation 64 MiB). Exception (BOOT-RATE-1):
+at generation 0 (file absent or rejected) with no env pin of the window,
+the boot uses window `off` (capped around the clock) instead of
+03:00-07:00 until generation 1 is applied, so a restart inside the default
+window never runs unthrottled. A standalone core with no vault-api and no
+file is therefore capped permanently (fail towards the cap).
 
 **Boot.** `15-vault-settings.envsh` is *sourced* by the stock entrypoint
 (`core/Dockerfile` proves at build time that this nginx image sources

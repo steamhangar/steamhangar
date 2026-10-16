@@ -3398,12 +3398,12 @@ below carry their own later dates, item 12 is the current one).
         1h summary every 30 s); tests that fake only the persisted endpoints
         must store `steamvault.downloadsRange` = "6h" and set
         `globalThis.localStorage` (see `downloads-stats-wiring.test.js`).
-      - [ ] **BOOT-RATE-1** (core, roadmap D24) vault-core renders the
+      - [x] **BOOT-RATE-1** (core, roadmap D24) vault-core renders the
         default rate window 03:00-07:00 at boot until settings generation 1
         is applied, so a restart between 03:00 and 07:00 runs unthrottled
         for a few seconds. Fix: read the settings file at boot if present,
         otherwise start throttled until the first generation.
-      - [ ] **LIB-META-WINDOW-1** (api, roadmap D23 note, Weg B) the nightly
+      - [x] **LIB-META-WINDOW-1** (api, roadmap D23 note, Weg B) the nightly
         `library_meta` job runs independent of the download window, once
         per night like UPD-5; today it skips with `no-window` and never
         runs with `VAULT_SCHEDULE_WINDOW=off`.
@@ -3420,14 +3420,16 @@ below carry their own later dates, item 12 is the current one).
         (`.dialog-backdrop`/`.dialog`) use the same classes; focus trap,
         Escape and `modal-stack.js` order must not change. Close waits for
         the transition end with a timeout fallback.
-      - [ ] **CLIENTS-1** one card per device: agent data is merged into the
+      - [x] **CLIENTS-1** one card per device: agent data is merged into the
         client card (`clients.js`, `clients-view.js`, `clients-sheet.js`);
         the "PCs running vault-agent" list and "Manage PCs" are removed;
-        a PC that is both client and agent shows once. Adapt `clients-*.test.js`.
-      - [ ] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
+        a PC that is both client and agent shows once (match: equal
+        `client_id`, `mergeAgentData` in `clients-page.js`). The PCs sheet
+        stays for the bypass banner and notifications. Adapt `clients-*.test.js`.
+      - [x] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
         (connected, outdated agents, ...), "Add a device" as the header
         button. Real data only, no tile without a source.
-      - [ ] **CLIENTS-3** outdated-agent warning, Weg A: the agent version
+      - [x] **CLIENTS-3** outdated-agent warning, Weg A: the agent version
         differs from the server version, compared in the frontend only; the
         "Update command" button opens the Add-a-device dialog without a
         preselected tab (the agent reports no OS). Unknown version shows no
@@ -3446,7 +3448,7 @@ below carry their own later dates, item 12 is the current one).
         moves a focused row with ArrowUp/ArrowDown; QUEUE-KBD-KEEP). Decide
         the "Speed not measured yet" wording while Verifying here
         (VERIFY-SPEED-TEXT-1).
-      - [ ] **SETTINGS-1** left sticky section nav (Vault & connection,
+      - [x] **SETTINGS-1** left sticky section nav (Vault & connection,
         Download window, Disk & cleanup, Notifications, Steam, About) and
         the expert switch revealing "Expert settings"; auto-fit 2-column
         field grids; chips (Default / Changed here / From env); (i) hint

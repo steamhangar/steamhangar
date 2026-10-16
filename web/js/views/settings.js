@@ -1,34 +1,39 @@
 /**
  * Settings view (WP 4a.6; sections, expert mode and env pins WP D16-WEB).
  *
- * Layout (WP D16-WEB, docs/handover/d16-settings-audit.md 1.3 and the D16a
- * table sign-off 2026-10-14): collapsible sections as native
- * `<details>/<summary>` — Vault & connection (open by default), Download
- * window & updates, Disk & cleanup, Notifications, Steam, About, then the
- * "Show expert settings" switch row and the Expert section at the very
- * bottom.
- * A collapsed section shows a one-line state in its summary
- * (`sectionSummary`, same-section fields only) and a dot while it holds an
- * unsaved draft, so a draft is never hidden. Open state is remembered per
- * browser (guarded storage). Placement and wording live in
- * lib/settings-layout.js; a section with nothing to show is not built.
+ * Layout (WP SETTINGS-1, rc20 mockup docs/design/rc20/settings.html; before
+ * it WP D16-WEB, docs/handover/d16-settings-audit.md 1.3): a left section
+ * navigation (`nav.snav`, buttons with `aria-current` on the active one; a
+ * horizontal strip below 1000px) and ONE panel at a time — Vault &
+ * connection (first), Download window & updates, Disk & cleanup,
+ * Notifications, Steam, About, and Expert settings while the "Show expert
+ * settings" switch under the nav is on. Every panel stays in the DOM
+ * (inactive ones `hidden`), so a draft is never lost by switching.
+ * Each nav item shows a one-line state (`sectionSummary`, same-section
+ * fields only) and a dot while its section holds an unsaved draft.
+ * Placement and wording live in lib/settings-layout.js; a section with
+ * nothing to show is not built. The selected section is per mount, not
+ * remembered; the expert switch is (guarded storage).
  *
  * - Normal page: only rows the API marks `expert: false`. Every
- *   `expert: true` row sits in the Expert section, which exists only while
- *   the separate "Show expert settings" switch is on (remembered per
- *   browser), split into Bandwidth & connections, Housekeeping and Debug.
- *   Turning it on shows the section collapsed; the user opens it, and that
- *   open state is remembered like any other section's. Switching it off
- *   hides the section but keeps its drafts (the switch row then shows the
+ *   `expert: true` row sits in the Expert section, reachable only while
+ *   the switch is on (remembered per browser), split into Bandwidth &
+ *   connections, Housekeeping and Debug. Switching it off leaves the
+ *   section but keeps its drafts (the switch row then shows the
  *   unsaved-changes dot).
+ * - Fields sit in an auto-fit grid; each carries a state chip (Default /
+ *   Changed here / From env, `fieldChip`). The apply timing and the help
+ *   text sit behind the (i).
  * - Env pins (Q1 2026-10-14: env always wins): a row with `editable: false`
  *   or `env_only: true` is plain text with a "Set via env (VAULT_…)" note —
  *   no input, no Reset. `shadowed` adds a note that a stored value is
  *   overridden. The masked webhook URL is such a row. (The
  *   VAULT_SETTINGS_READONLY mode keeps its disabled inputs: another state.)
  * - Explanations sit behind a per-field (i) disclosure (the About table's
- *   button, WP WEB-FIX-8); state (source and apply caption, sweep status,
- *   GC-risk warning, env notes) stays visible.
+ *   button, WP WEB-FIX-8); state (chip, sweep status, the live GC-risk
+ *   warning, env notes) stays visible. The GC-risk warning shows while
+ *   "include cached" is on and Auto-GC is not Execute (`gcRiskActive`),
+ *   from the current draft or saved values.
  * - Risky keys (API `risky: true`): Save opens one confirm dialog naming
  *   each risky key with old -> new value and what can break
  *   (components/risky-confirm.js); only "Save anyway" sends the PATCH, with
@@ -53,7 +58,6 @@
  *  - Connection — "Reconnect / switch account" replays onboarding; it also
  *    renders in the load-error state (WP WEB-FIX-1 B2), and says so in demo
  *    mode (B1).
- *  - PCs — a pointer to the Clients page (WP D15c).
  *  - About — the component table from `GET /v1/about` (WP WEB-FEAT-3),
  *    fetched when this view opens and on Refresh, never polled; a 404 shows
  *    "server too old". The rail's version button opens and focuses it.
@@ -75,26 +79,27 @@ import {
   missingSettingKeys,
 } from "../lib/settings-presentation.js";
 import {
+  DEFAULT_SECTION,
   EXPERT_GROUPS,
   coreApplyLine,
   SECTIONS,
   describeSaveError,
   displayValue,
   envNote,
+  fieldChip,
   fieldHelp,
   fieldMeta,
+  gcRiskActive,
   isPinned,
-  isSectionOpen,
+  navTarget,
   placeEntries,
   readExpertSwitch,
-  readOpenState,
   riskyItems,
   riskyKeysFrom428,
   riskyKeysInBody,
   sectionSummary,
   shadowNote,
   writeExpertSwitch,
-  writeOpenState,
 } from "../lib/settings-layout.js";
 import {
   sweepTargetsMessage,
@@ -113,7 +118,7 @@ import {
   describeLookupError,
   saveLibrarySteamId,
 } from "../lib/owned-library.js";
-import { navigateTo, onViewChange } from "../router.js";
+import { onViewChange } from "../router.js";
 import { store } from "../store-singleton.js";
 import { createStatusIcon } from "../components/status-icon.js";
 import {
@@ -164,8 +169,8 @@ const state = {
  * populated by an actual user edit; see the module header. */
 let drafts = {};
 
-/** Remembered open sections, re-read on every mount. */
-let openState = {};
+/** The section whose panel is shown; reset on every mount. */
+let activeSection = DEFAULT_SECTION;
 /** The "Show expert settings" switch, re-read on every mount. */
 let expertOn = false;
 /** Field key -> the user's open/closed choice for its (i) text. */
@@ -231,6 +236,7 @@ function paintDirtyDots() {
  */
 function markDirty() {
   paintDirtyDots();
+  paintGcWarn();
   if (!mounted() || !els.saveBar) return;
   const dirty = isDirty();
   els.saveBar.hidden = !dirty;
@@ -413,11 +419,13 @@ function buildDisclosure({ name, detailEl, openByDefault, memory, role, label })
   return btn;
 }
 
-/** The (i) button plus its hidden text block for one help id. */
-function helpDisclosure(id, paragraphs, label) {
+/** The (i) button plus its hidden text block for one help id; `lead` is an
+ * optional node placed before the paragraphs (a field's timing line). */
+function helpDisclosure(id, paragraphs, label, lead = null) {
   const help = el("div", "field-help");
   help.id = `${id}-help`;
   help.dataset.role = "field-help";
+  if (lead) help.appendChild(lead);
   for (const text of paragraphs) help.appendChild(el("p", "foot-note", text));
   const btn = buildDisclosure({
     name: id,
@@ -433,7 +441,8 @@ function helpDisclosure(id, paragraphs, label) {
 // ---------------------------------------------------------------------
 // One field. Pinned rows (env / env-only) are plain text; everything else
 // is a text input, a segmented group or the event checkboxes, each with a
-// "<source> · <applies>" caption and a Reset button for a stored value.
+// state chip, its timing text behind the (i) and a Reset button for a
+// stored value.
 // ---------------------------------------------------------------------
 
 function draftValue(key) {
@@ -445,10 +454,34 @@ function setDraft(key, draft) {
   markDirty();
 }
 
+/** The timing line that opens a field's (i) block. */
 function buildCaption(entry) {
-  const caption = el("p", "foot-note", `${sourceLabel(entry.source)} · ${appliesText(entry.applies)}`);
+  const caption = el("p", "foot-note", appliesText(entry.applies));
   caption.dataset.role = "field-caption";
   return caption;
+}
+
+function buildChip(entry) {
+  const chip = fieldChip(entry);
+  const node = el("span", `chip chip-${chip.kind}`, chip.text);
+  node.dataset.role = "field-chip";
+  node.dataset.chip = chip.kind;
+  return node;
+}
+
+/** The saved or drafted value of `key` as the form currently shows it. */
+function currentValue(key) {
+  const entry = entryByKey(key);
+  if (!entry) return undefined;
+  const draft = drafts[key];
+  if (draft && draft.reset) return entry.fallback;
+  if (draft && "value" in draft) return draft.value;
+  return entry.effective;
+}
+
+function paintGcWarn() {
+  if (!mounted() || !els.gcWarn) return;
+  els.gcWarn.hidden = !gcRiskActive(currentValue("sweep_include_cached"), currentValue("auto_gc"));
 }
 
 function buildResetButton(entry, onReset) {
@@ -489,7 +522,7 @@ function buildTextBody(field, entry, meta, fieldId) {
   input.value = effectiveAsInputValue(entry);
   input.disabled = readonly();
   input.addEventListener("input", () => setDraft(entry.key, { value: input.value }));
-  field.append(input, buildCaption(entry));
+  field.append(input);
   field.append(
     buildResetButton(entry, () => {
       input.value = effectiveAsInputValue({ ...entry, effective: entry.fallback });
@@ -520,7 +553,7 @@ function buildSegsBody(field, entry, meta, labelId) {
     segs.appendChild(btn);
   }
   press(current);
-  field.append(segs, buildCaption(entry));
+  field.append(segs);
   field.append(buildResetButton(entry, () => press(String(entry.fallback))));
 }
 
@@ -544,7 +577,6 @@ function buildEventsBody(field, entry, meta) {
     row.append(cb, grow);
     field.appendChild(row);
   }
-  field.append(buildCaption(entry));
   field.append(
     buildResetButton(entry, () => {
       const back = new Set(Array.isArray(entry.fallback) ? entry.fallback : []);
@@ -557,7 +589,8 @@ function buildSettingField(entry) {
   const meta = fieldMeta(entry);
   const fieldId = `settings-${entry.key}`;
   const pinned = isPinned(entry);
-  const field = el("div", pinned ? "field is-pinned" : "field");
+  const wide = !pinned && meta.kind === "events";
+  const field = el("div", `field${pinned ? " is-pinned" : ""}${wide ? " field-wide" : ""}`);
   field.dataset.key = entry.key;
   const head = el("div", "field-head");
   let labelEl;
@@ -576,11 +609,14 @@ function buildSettingField(entry) {
   }
   const paragraphs = fieldHelp(entry);
   let help = null;
-  if (paragraphs.length > 0) {
-    const d = helpDisclosure(fieldId, paragraphs, meta.label);
+  // Pinned rows are not editable, so they have no timing line; they keep
+  // the (i) only when there is help text.
+  if (!pinned || paragraphs.length > 0) {
+    const d = helpDisclosure(fieldId, paragraphs, meta.label, pinned ? null : buildCaption(entry));
     head.append(d.btn);
     help = d.help;
   }
+  head.append(buildChip(entry));
   if (pinned) buildPinnedBody(field, entry);
   else if (meta.kind === "segs" && meta.options) buildSegsBody(field, entry, meta, labelEl.id);
   else if (meta.kind === "events" && meta.options) buildEventsBody(field, entry, meta);
@@ -593,68 +629,52 @@ function buildSettingField(entry) {
 // Sections
 // ---------------------------------------------------------------------
 
+
 /**
- * One collapsible section. `keys` are the settings keys it carries (for the
- * unsaved-changes dot); `summaryText` is the collapsed one-liner.
+ * One settings panel (hidden unless it is the active section). `keys` are
+ * the settings keys it carries (nav dot); `summaryText` is the nav item's
+ * one-line state. The nav is built from what was registered here.
  */
-function buildSection(id, { summaryText = "", keys = [], summaryId } = {}) {
+function buildSection(id, { summaryText = "", keys = [] } = {}) {
   const meta = SECTIONS.find((s) => s.id === id);
-  const details = el("details", "settings-sec");
-  details.dataset.section = id;
-  details.open = isSectionOpen(openState, id);
-  const summary = el("summary", "sec-summary");
-  if (summaryId) summary.id = summaryId;
-  // A real heading inside <summary> (allowed: one heading element), so
-  // heading navigation still reaches every section title.
-  summary.append(el("h2", "sec-title", meta.title));
-  if (summaryText) {
-    const st = el("span", "sec-state", summaryText);
-    st.dataset.role = "section-state";
-    summary.append(st);
+  const panel = el("section", "settings-panel");
+  panel.dataset.section = id;
+  panel.hidden = id !== activeSection;
+  const title = el("h2", "sec-title", meta.title);
+  if (id === "about") {
+    // Focus target of the rail's version button.
+    title.id = "settings-about";
+    title.tabIndex = -1;
   }
-  if (keys.length > 0) {
-    const dot = el("span", "sec-dirty");
-    dot.dataset.role = "section-dirty";
-    dot.hidden = true;
-    dot.append(el("span", "sr-only", "(unsaved changes)"));
-    summary.append(dot);
-    els.dots.set(id, dot);
-    els.sectionKeys.set(id, new Set(keys));
-  }
-  details.addEventListener("toggle", () => {
-    // Opened by the rail's version button: not the user's choice, so not
-    // remembered (the browser fires this toggle asynchronously).
-    if (id === "about" && aboutOpenedByRail) {
-      aboutOpenedByRail = false;
-      return;
-    }
-    openState = { ...openState, [id]: details.open };
-    writeOpenState(getStorage, openState);
-  });
   const body = el("div", "sec-body");
-  details.append(summary, body);
-  els.sectionsById.set(id, details);
-  return { details, body };
+  panel.append(title, el("p", "sec-blurb", meta.blurb), body);
+  els.panels.set(id, panel);
+  els.navInfo.set(id, { summaryText, keys });
+  return { panel, title, body };
+}
+
+/** The auto-fit field grid for a list of rows. */
+function buildFieldGrid(rows) {
+  const grid = el("div", "fg");
+  for (const entry of rows) grid.appendChild(buildSettingField(entry));
+  return grid;
 }
 
 /** A form section from its placed rows; null when it has none. */
 function buildFormSection(id, rows, extra) {
   if (rows.length === 0 && !extra) return null;
-  const { details, body } = buildSection(id, {
+  const { panel, body } = buildSection(id, {
     summaryText: sectionSummary(id, entryByKey, rows),
     keys: rows.map((e) => e.key),
   });
-  for (const entry of rows) body.appendChild(buildSettingField(entry));
   if (extra) body.append(extra);
-  return details;
+  if (rows.length > 0) body.append(buildFieldGrid(rows));
+  return panel;
 }
 
-/**
- * The "did the last scheduled sweep do anything" line and the
- * cached-sweep GC-risk warning (WP 4d-web), from `GET /v1/schedule`
- * verbatim. The warning is one visible sentence; its explanation sits
- * behind (i). Renders nothing while the schedule is unknown.
- */
+/** The "did the last scheduled sweep do anything" line (WP 4d-web), from
+ * `GET /v1/schedule` verbatim. Renders nothing while the schedule is
+ * unknown. */
 function buildSweepStatusBlock() {
   const wrap = document.createDocumentFragment();
   const statusText = sweepTargetsMessage(state.schedule);
@@ -663,38 +683,71 @@ function buildSweepStatusBlock() {
     p.dataset.role = "sweep-status";
     wrap.append(p);
   }
-  const riskText = cachedSweepGcRiskWarning(state.schedule);
-  if (riskText) {
-    const warn = el("div", "settings-warn");
-    warn.dataset.role = "gc-risk";
-    const head = el("div", "field-head");
-    head.append(el("span", null, CACHED_SWEEP_GC_RISK_SHORT));
-    const d = helpDisclosure("settings-gc-risk", [riskText], "this warning");
-    head.append(d.btn);
-    warn.append(head, d.help);
-    wrap.append(warn);
-  }
   return wrap;
 }
 
-/** Vault & connection: vault name (+ any other row placed here), the
- * Connection row and the PCs pointer. Always built. */
+/**
+ * The cached-sweep GC-risk warning: one visible sentence, its explanation
+ * behind (i). Always built; `paintGcWarn` shows it exactly while
+ * "include cached" is on and Auto-GC is not Execute, live from the drafts.
+ */
+function buildGcWarn() {
+  const warn = el("div", "settings-warn");
+  warn.dataset.role = "gc-risk";
+  const head = el("div", "field-head");
+  head.append(el("span", null, CACHED_SWEEP_GC_RISK_SHORT));
+  const long = cachedSweepGcRiskWarning({ sweep_cached_gc_risk: true });
+  const d = helpDisclosure("settings-gc-risk", long ? [long] : [], "this warning");
+  head.append(d.btn);
+  warn.append(head, d.help);
+  els.gcWarn = warn;
+  return warn;
+}
+
+/** Vault & connection: vault name (+ any other row placed here) and the
+ * Connection row. Always built. */
 function buildVaultSection(rows) {
-  const { details, body } = buildSection("vault", {
+  const { panel, body } = buildSection("vault", {
     summaryText: sectionSummary("vault", entryByKey, rows),
     keys: rows.map((e) => e.key),
   });
-  for (const entry of rows) body.appendChild(buildSettingField(entry));
-  body.append(buildConnectionSection(), buildPcsSection());
-  return details;
+  if (rows.length > 0) body.append(buildFieldGrid(rows));
+  body.append(buildConnectionSection());
+  return panel;
 }
 
-/** The Expert switch row + the Expert section (hidden while off). */
-function buildExpertArea(groups) {
+/** The Expert panel (null when the API has no expert rows). Reached only
+ * while the switch is on. */
+function buildExpertPanel(groups) {
   const all = EXPERT_GROUPS.flatMap((g) => groups[g.id]);
   if (all.length === 0) return null;
-  const wrap = document.createDocumentFragment();
+  const { panel, body } = buildSection("expert", {
+    summaryText: sectionSummary("expert", entryByKey, all),
+    keys: all.map((e) => e.key),
+  });
+  // D16c: what vault-core reported about the core settings (state only).
+  const apply = coreApplyLine(state.settingsResponse.core_apply);
+  if (apply) {
+    const line = el("p", apply.warn ? "settings-warn" : "foot-note", apply.text);
+    line.dataset.role = "core-apply";
+    body.appendChild(line);
+  }
+  for (const group of EXPERT_GROUPS) {
+    const rows = groups[group.id];
+    if (rows.length === 0) continue;
+    const sub = el("div", "expert-group");
+    sub.dataset.group = group.id;
+    sub.append(el("h4", "sec", group.title), buildFieldGrid(rows));
+    body.appendChild(sub);
+  }
+  return panel;
+}
 
+/** The "Show expert settings" switch row under the nav; null without
+ * expert rows. */
+function buildExpertSwitch(groups) {
+  const all = EXPERT_GROUPS.flatMap((g) => groups[g.id]);
+  if (all.length === 0) return null;
   const row = el("div", "srow expert-switch");
   const grow = el("span", "grow");
   const ttl = el("span", "ttl", "Show expert settings");
@@ -713,36 +766,79 @@ function buildExpertArea(groups) {
   row.append(grow, dot, sw);
   els.dots.set("expert-switch", dot);
   els.sectionKeys.set("expert-switch", new Set(all.map((e) => e.key)));
-
-  const { details, body } = buildSection("expert", {
-    summaryText: sectionSummary("expert", entryByKey, all),
-    keys: all.map((e) => e.key),
-  });
-  details.hidden = !expertOn;
-  // D16c: what vault-core reported about the core settings (state only).
-  const apply = coreApplyLine(state.settingsResponse.core_apply);
-  if (apply) {
-    const line = el("p", apply.warn ? "settings-warn" : "foot-note", apply.text);
-    line.dataset.role = "core-apply";
-    body.appendChild(line);
-  }
-  for (const group of EXPERT_GROUPS) {
-    const rows = groups[group.id];
-    if (rows.length === 0) continue;
-    const sub = el("div", "expert-group");
-    sub.dataset.group = group.id;
-    sub.append(el("h4", "sec", group.title));
-    for (const entry of rows) sub.appendChild(buildSettingField(entry));
-    body.appendChild(sub);
-  }
   sw.addEventListener("click", () => {
     expertOn = !expertOn;
     writeExpertSwitch(getStorage, expertOn);
     sw.setAttribute("aria-checked", String(expertOn));
-    details.hidden = !expertOn;
+    const item = els.navItems.get("expert");
+    if (item) item.hidden = !expertOn;
+    if (!expertOn && activeSection === "expert") selectSection(DEFAULT_SECTION);
   });
-  wrap.append(row, details);
-  return wrap;
+  return row;
+}
+
+// ---------------------------------------------------------------------
+// Section navigation
+// ---------------------------------------------------------------------
+
+/** Show one panel, mark its nav item `aria-current`. */
+function selectSection(id) {
+  if (!els.panels.has(id)) return;
+  activeSection = id;
+  for (const [pid, panel] of els.panels) panel.hidden = pid !== id;
+  for (const [nid, item] of els.navItems) {
+    if (nid === id) item.setAttribute("aria-current", "true");
+    else item.removeAttribute("aria-current");
+  }
+}
+
+function onNavKey(ev) {
+  const current = ev.target && ev.target.dataset ? ev.target.dataset.nav : undefined;
+  const ids = [...els.navItems].filter(([, item]) => !item.hidden).map(([id]) => id);
+  const next = navTarget(ids, current, ev.key);
+  if (!next) return;
+  ev.preventDefault();
+  selectSection(next);
+  els.navItems.get(next).focus();
+}
+
+/** The section nav: one button per built panel (Expert only while the
+ * switch is on), then the expert switch row. */
+function buildNav(switchRow) {
+  const nav = el("nav", "snav");
+  nav.setAttribute("aria-label", "Settings sections");
+  const list = el("div", "snav-list");
+  els.navItems = new Map();
+  for (const meta of SECTIONS) {
+    const info = els.navInfo.get(meta.id);
+    if (!info) continue;
+    const item = el("button", "snav-item");
+    item.type = "button";
+    item.dataset.nav = meta.id;
+    item.append(el("span", "snav-label", meta.nav));
+    if (info.summaryText) {
+      const st = el("span", "snav-state", info.summaryText);
+      st.dataset.role = "section-state";
+      item.append(st);
+    }
+    if (info.keys.length > 0) {
+      const dot = el("span", "sec-dirty");
+      dot.dataset.role = "section-dirty";
+      dot.hidden = true;
+      dot.append(el("span", "sr-only", "(unsaved changes)"));
+      item.append(dot);
+      els.dots.set(meta.id, dot);
+      els.sectionKeys.set(meta.id, new Set(info.keys));
+    }
+    if (meta.id === "expert") item.hidden = !expertOn;
+    item.addEventListener("click", () => selectSection(meta.id));
+    item.addEventListener("keydown", onNavKey);
+    els.navItems.set(meta.id, item);
+    list.append(item);
+  }
+  nav.append(list);
+  if (switchRow) nav.append(switchRow);
+  return nav;
 }
 
 // ---------------------------------------------------------------------
@@ -1082,31 +1178,6 @@ function buildConnectionSection() {
 }
 
 // ---------------------------------------------------------------------
-// PCs (agents) pointer (WP D15c)
-// ---------------------------------------------------------------------
-
-/** WP D15c: adding, pairing and removing PCs moved to the Clients page
- * (views/clients.js). Settings keeps a short pointer so the old way there
- * still leads somewhere. */
-function buildPcsSection() {
-  const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "PCs (agents)"));
-  const row = el("div", "srow");
-  const grow = el("span", "grow");
-  grow.append(
-    el("span", "ttl", "PCs and devices"),
-    el("span", "desc", "Adding, pairing and removing PCs is on the Clients page now."),
-  );
-  const btn = el("button", "btn ghost sm", "Open Clients");
-  btn.type = "button";
-  btn.dataset.role = "open-clients";
-  btn.addEventListener("click", () => navigateTo("clients"));
-  row.append(grow, btn);
-  wrap.append(row);
-  return wrap;
-}
-
-// ---------------------------------------------------------------------
 // About section (WP WEB-FEAT-3: GET /v1/about)
 // ---------------------------------------------------------------------
 
@@ -1124,9 +1195,6 @@ let aboutEls = null;
 /** Set by the rail's version button (requestAboutFocus) before it
  * navigates here: the next full render moves focus to the About heading. */
 let focusAboutOnRender = false;
-/** True between the rail opening a closed About section and the toggle
- * event that opening fires (see buildSection). */
-let aboutOpenedByRail = false;
 
 /**
  * Ask the Settings view to bring the About section into view and focus its
@@ -1346,10 +1414,9 @@ function paintAbout() {
 }
 
 function buildAboutSection() {
-  // D16-WEB: a collapsible section like the others; its summary is the
-  // focus target of the rail's version button (fullRender opens it first).
-  const { details, body: wrap } = buildSection("about", { summaryId: "settings-about" });
-  const heading = details.querySelector("summary");
+  // Its heading is the focus target of the rail's version button
+  // (fullRender selects this section first).
+  const { panel, title: heading, body: wrap } = buildSection("about");
 
   const head = el("div", "about-head");
   const refreshBtn = el("button", "btn ghost sm", "Refresh");
@@ -1376,10 +1443,10 @@ function buildAboutSection() {
       "SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.",
     ),
   );
-  aboutEls = { heading, details, refreshBtn, status, content, checked };
+  aboutEls = { heading, panel, refreshBtn, status, content, checked };
   setRefreshBusy(about.phase === "loading");
   paintAbout();
-  return details;
+  return panel;
 }
 
 // The settings form is not polled, but the About "checked ... ago" text
@@ -1395,15 +1462,22 @@ store.subscribe("clients", (payload) => {
 // Top-level render
 // ---------------------------------------------------------------------
 
+function resetPanelState() {
+  els.dots = new Map();
+  els.sectionKeys = new Map();
+  els.panels = new Map();
+  els.navInfo = new Map();
+  els.navItems = new Map();
+  els.gcWarn = null;
+}
+
 function fullRender() {
   if (!mounted()) return;
   els.body.replaceChildren();
   // The save bar is rebuilt below (or not at all: loading, error, read-only).
   els.saveBar = null;
   els.section.classList.remove("savebar-up");
-  els.dots = new Map();
-  els.sectionKeys = new Map();
-  els.sectionsById = new Map();
+  resetPanelState();
 
   if (state.loading) {
     els.body.appendChild(el("p", "empty", "Loading settings…"));
@@ -1429,30 +1503,40 @@ function fullRender() {
     );
   }
 
+  // The rail's version button asks for About: select it before building.
+  if (focusAboutOnRender) activeSection = "about";
+  else if (activeSection === "expert" && !expertOn) activeSection = DEFAULT_SECTION;
+
   const placed = placeEntries(state.settingsResponse.settings);
-  els.body.append(buildVaultSection(placed.sections.vault));
+  const main = el("div", "settings-main");
+  main.append(buildVaultSection(placed.sections.vault));
   for (const [id, extra] of [
     ["window", buildSweepStatusBlock()],
-    ["disk", null],
+    ["disk", buildGcWarn()],
     ["notify", null],
     ["other", null],
   ]) {
     // A fragment with no children counts as "nothing extra".
-    const node = buildFormSection(id, placed.sections[id], extra && extra.childNodes.length > 0 ? extra : null);
-    if (node) els.body.append(node);
+    const hasExtra = extra && (extra.childNodes ? extra.childNodes.length > 0 : true);
+    const node = buildFormSection(id, placed.sections[id], hasExtra ? extra : null);
+    if (node) main.append(node);
   }
 
   const steam = buildSection("steam", { summaryText: sectionSummary("steam", entryByKey) });
   steam.body.append(buildSteamSection());
-  els.body.append(steam.details);
+  main.append(steam.panel);
   renderSteamStatusLine();
   renderLookupResult();
 
-  els.body.append(buildAboutSection());
+  main.append(buildAboutSection());
 
-  // The expert switch row and the Expert section close the page, below About.
-  const expertArea = buildExpertArea(placed.expert);
-  if (expertArea) els.body.append(expertArea);
+  const expertPanel = buildExpertPanel(placed.expert);
+  if (expertPanel) main.append(expertPanel);
+
+  const lay = el("div", "settings-lay");
+  lay.append(buildNav(buildExpertSwitch(placed.expert)), main);
+  els.body.append(lay);
+  selectSection(els.panels.has(activeSection) ? activeSection : DEFAULT_SECTION);
 
   // WP WEB-FIX-8: the save bar sits last in the DOM (and so in the
   // Tab order), after every field incl. the Expert section, but is `position:fixed`
@@ -1484,10 +1568,6 @@ function fullRender() {
 
   if (focusAboutOnRender) {
     focusAboutOnRender = false;
-    if (!aboutEls.details.open) {
-      aboutOpenedByRail = true;
-      aboutEls.details.open = true;
-    }
     aboutEls.heading.focus();
     if (typeof aboutEls.heading.scrollIntoView === "function") aboutEls.heading.scrollIntoView({ block: "start" });
   }
@@ -1561,10 +1641,11 @@ export function renderSettings() {
   section.append(h1, body);
 
   sectionEl = section;
-  els = { section, heading: h1, body, dots: new Map(), sectionKeys: new Map(), sectionsById: new Map() };
+  els = { section, heading: h1, body };
+  resetPanelState();
   aboutEls = null;
   drafts = {};
-  openState = readOpenState(getStorage);
+  activeSection = DEFAULT_SECTION;
   expertOn = readExpertSwitch(getStorage);
   loadSettings();
   // WP WEB-FEAT-3: About loads when Settings opens (in parallel with the

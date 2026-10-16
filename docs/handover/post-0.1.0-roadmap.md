@@ -1524,7 +1524,8 @@ only inside the download schedule window and otherwise skips with
 filters stay empty. Decision: run it independent of the download window,
 once per night, like the always-on update check (UPD-5). It still sends
 metadata queries only (no downloads) and stays behind its own switch and
-the privacy rules above.
+the privacy rules above. State: done in rc20 (no window check; at most one
+finished pass per calendar day, own switch and oracle switch unchanged).
 
 ## D24: BOOT-RATE-1, rate window at vault-core boot (core, rc20)
 
@@ -1537,8 +1538,8 @@ Fix: at boot read the core settings file if it is present and render from
 it; if it is missing or unreadable, start on the throttled side until the
 first generation is applied (fail towards the cap, never away from it).
 Tests: boot render with and without the settings file, inside and outside
-the default window. Depends on D16c (core settings file). State: open,
-rc20.
+the default window. Depends on D16c (core settings file). State: done in
+rc20 (generation 0 boots on window `off`, `vs_boot_throttle`).
 
 ## D25: TSNET-1, embedded tailscale (requirement A6)
 

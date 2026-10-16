@@ -384,11 +384,26 @@ const removeFlow = {
   clientId: null, // the PC the open dialog is about
   invokerEl: null,
   busy: false,
+  hooks: null, // set when the Clients page opens the confirm (WP CLIENTS-1)
 };
 
-function openRemoveConfirm(clientId) {
+/**
+ * Open the remove confirm for a PC from outside the sheet (the Clients page
+ * card, WP CLIENTS-1). Same dialog, same request; the hooks replace the
+ * sheet row's inline error and focus handling:
+ * `onRemoved()` after a success, `onError(message)` after a failure,
+ * `focusTarget()` the element to refocus on cancel.
+ * @param {string} clientId
+ * @param {{onRemoved?: () => void, onError?: (message: string) => void, focusTarget?: () => (HTMLElement | null)}} [hooks]
+ */
+export function requestPcRemoval(clientId, hooks) {
+  openRemoveConfirm(clientId, hooks);
+}
+
+function openRemoveConfirm(clientId, hooks = null) {
   if (removeFlow.busy) return;
   removeFlow.clientId = clientId;
+  removeFlow.hooks = hooks;
   removeFlow.invokerEl = document.activeElement;
   removeTitle.textContent = removeConfirmTitle(clientId);
   removeYes.textContent = "Remove";
@@ -409,10 +424,17 @@ function closeRemoveConfirm({ restoreFocus = true } = {}) {
   removeFlow.invokerEl = null;
   if (removeFlow.busy) return; // the in-flight request decides where focus goes
   removeFlow.clientId = null;
+  const hooks = removeFlow.hooks;
+  removeFlow.hooks = null;
   if (!restoreFocus) return;
   // Review fix: a poll tick may have rebuilt the list while the dialog was
   // open, detaching the captured invoker. Prefer the row's CURRENT button.
-  const live = clientId != null ? rowFor(clientId)?.querySelector('[data-role="remove-pc"]') : null;
+  const live =
+    hooks && typeof hooks.focusTarget === "function"
+      ? hooks.focusTarget()
+      : clientId != null
+        ? rowFor(clientId)?.querySelector('[data-role="remove-pc"]')
+        : null;
   const target = live || invoker;
   if (target && typeof target.focus === "function") target.focus();
 }
@@ -445,6 +467,7 @@ function paintRemoveError(clientId) {
 async function confirmRemove() {
   const clientId = removeFlow.clientId;
   if (removeFlow.busy || clientId == null) return;
+  const hooks = removeFlow.hooks;
   setRemoveBusy(true);
   let failure = null;
   try {
@@ -460,7 +483,14 @@ async function confirmRemove() {
   closeRemoveConfirm({ restoreFocus: false });
 
   if (failure) {
-    state.removeErrors.set(clientId, removeErrorText(clientId, errorText(failure)));
+    const message = removeErrorText(clientId, errorText(failure));
+    if (hooks) {
+      if (typeof hooks.onError === "function") hooks.onError(message);
+      const back = typeof hooks.focusTarget === "function" ? hooks.focusTarget() : null;
+      if (back && typeof back.focus === "function") back.focus();
+      return;
+    }
+    state.removeErrors.set(clientId, message);
     paintRemoveError(clientId);
     const btn = rowFor(clientId)?.querySelector('[data-role="remove-pc"]');
     if (btn) btn.focus();
@@ -468,6 +498,7 @@ async function confirmRemove() {
   }
 
   state.removeErrors.delete(clientId);
+  if (hooks && typeof hooks.onRemoved === "function") hooks.onRemoved();
   state.clients = state.clients.filter((c) => c.client_id !== clientId);
   state.forceFullRender = true;
   if (dialog.isOpen()) {

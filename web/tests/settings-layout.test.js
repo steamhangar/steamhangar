@@ -8,22 +8,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_SECTION,
   EXPERT_GROUPS,
+  SECTIONS,
   describeSaveError,
   displayValue,
   envNote,
+  fieldChip,
+  gcRiskActive,
   isCoreFileDisabled,
   isPinned,
+  navTarget,
   placeEntries,
   readExpertSwitch,
-  readOpenState,
   riskyItems,
   riskyKeysFrom428,
   riskyKeysInBody,
   sectionSummary,
   shadowNote,
-  writeOpenState,
-  isSectionOpen,
+  writeExpertSwitch,
 } from "../js/lib/settings-layout.js";
 import { appliesText } from "../js/lib/settings-presentation.js";
 
@@ -142,25 +145,60 @@ test("applies texts: next_job and core (D16b)", () => {
   assert.equal(appliesText("core"), "Applies to vault-core without restart.");
 });
 
-test("open state and expert switch: guarded storage (throwing getter, bad JSON, wrong types)", () => {
+test("expert switch: guarded storage (throwing getter, missing value)", () => {
   const store = new Map();
   const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
-  assert.deepEqual(readOpenState(() => storage), {});
-  writeOpenState(() => storage, { disk: true });
-  assert.deepEqual(readOpenState(() => storage), { disk: true });
-  store.set("steamvault.settingsOpen", '{"disk":"yes","window":false}');
-  assert.deepEqual(readOpenState(() => storage), { window: false }, "non-boolean values are dropped");
-  store.set("steamvault.settingsOpen", "{broken");
-  assert.deepEqual(readOpenState(() => storage), {});
+  assert.equal(readExpertSwitch(() => storage), false);
+  writeExpertSwitch(() => storage, true);
+  assert.equal(readExpertSwitch(() => storage), true);
+  writeExpertSwitch(() => storage, false);
+  assert.equal(readExpertSwitch(() => storage), false);
   const throwing = () => {
     throw new Error("SecurityError");
   };
-  assert.deepEqual(readOpenState(throwing), {});
   assert.equal(readExpertSwitch(throwing), false);
-  writeOpenState(throwing, { a: true }); // must not throw
-  assert.equal(isSectionOpen({}, "vault"), true, "Vault & connection opens by default");
-  assert.equal(isSectionOpen({}, "expert"), false);
-  assert.equal(isSectionOpen({ vault: false }, "vault"), false);
+  writeExpertSwitch(throwing, true); // must not throw
+});
+
+test("SECTIONS: nav order, labels and the default section", () => {
+  assert.deepEqual(
+    SECTIONS.map((s) => s.nav),
+    ["Vault & connection", "Download window", "Disk & cleanup", "Notifications", "Other settings", "Steam", "About", "Expert settings"],
+  );
+  assert.equal(DEFAULT_SECTION, "vault");
+  assert.equal(SECTIONS.find((s) => s.id === "window").title, "Download window & updates");
+});
+
+test("fieldChip: env wins, a stored override is 'Changed here', everything else 'Default'", () => {
+  assert.deepEqual(fieldChip({ source: "default" }), { kind: "default", text: "Default" });
+  assert.deepEqual(fieldChip({ source: "db" }), { kind: "changed", text: "Changed here" });
+  assert.deepEqual(fieldChip({ source: "env" }), { kind: "env", text: "From env" });
+  assert.deepEqual(fieldChip({ source: "default", env_only: true }), { kind: "env", text: "From env" });
+  assert.deepEqual(fieldChip({ source: "db", env_only: true }), { kind: "env", text: "From env" }, "env-only beats a stored row");
+});
+
+test("navTarget: arrows wrap, Home/End jump, other keys and unknown ids give null", () => {
+  const ids = ["a", "b", "c"];
+  assert.equal(navTarget(ids, "a", "ArrowDown"), "b");
+  assert.equal(navTarget(ids, "c", "ArrowDown"), "a");
+  assert.equal(navTarget(ids, "a", "ArrowRight"), "b");
+  assert.equal(navTarget(ids, "a", "ArrowUp"), "c");
+  assert.equal(navTarget(ids, "b", "ArrowLeft"), "a");
+  assert.equal(navTarget(ids, "b", "Home"), "a");
+  assert.equal(navTarget(ids, "b", "End"), "c");
+  assert.equal(navTarget(ids, "b", "Enter"), null);
+  assert.equal(navTarget(ids, "zzz", "ArrowDown"), null);
+  assert.equal(navTarget([], "a", "ArrowDown"), null);
+});
+
+test("gcRiskActive: include cached on and Auto-GC not Execute", () => {
+  assert.equal(gcRiskActive(true, "dry-run"), true);
+  assert.equal(gcRiskActive("true", "off"), true);
+  assert.equal(gcRiskActive(true, "execute"), false);
+  assert.equal(gcRiskActive(false, "off"), false);
+  assert.equal(gcRiskActive("false", "dry-run"), false);
+  assert.equal(gcRiskActive(null, "off"), false);
+  assert.equal(gcRiskActive(undefined, undefined), false);
 });
 
 test("coreApplyLine: pending wins, rejected warns with the reason, applied, none, unknown -> no claim", async () => {

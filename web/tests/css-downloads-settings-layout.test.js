@@ -248,3 +248,10 @@ test("--w-page (LAYOUT-1) is declared once, as 1400px, in theme.css and never re
   const wall = ruleBody(bpL.body, ".view-root");
   assert.ok(wall && /max-width:\s*var\(--w-wall\)/.test(wall), "Library/.view-root keeps --w-wall");
 });
+
+test("CLIENTS-2: the card list is an auto-fill grid with a ~440px minimum", () => {
+  const appCss = readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
+  const m = appCss.match(/\.cl-list\{([^}]*)\}/);
+  assert.ok(m, "no .cl-list rule");
+  assert.match(m[1], /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(min\(440px,\s*100%\),\s*1fr\)\)/);
+});

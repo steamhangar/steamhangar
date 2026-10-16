@@ -9,11 +9,12 @@ depot tables: nothing in GC, deletion or the update check reads it.
 
 **What leaves the LAN.** The nightly job asks the oracle for every app the
 vault knows (see ``known_appids``), one request per app, spaced
-``PAUSE_SECONDS`` apart, only inside the schedule window. That is more appids
+``PAUSE_SECONDS`` apart, independent of the download schedule window
+(LIB-META-WINDOW-1), at most one finished pass a day. That is more appids
 at once than browsing or the cached-game poll sends, so it has its OWN switch,
 ``VAULT_LIBRARY_META`` (env-only, **default off**), and it additionally needs
-the oracle itself to be on (``oracle.manifest_oracle_enabled``) and a schedule
-window to be configured. With any of the three missing, nothing runs and
+the oracle itself to be on (``oracle.manifest_oracle_enabled``). With either
+missing, nothing runs and
 nothing is written; the filters then simply see "unknown" for every app. No
 SteamID, key or ownership data is involved.
 
@@ -24,7 +25,7 @@ endpoint reports how many a filter left out (``X-Meta-Unknown-Excluded``).
 
 **Resumable and polite.** There is no run-level state: each app carries its
 own ``fetched_at`` (re-asked after ``REFRESH_DAYS``), ``fail_count`` and
-``next_try_at`` (exponential backoff), so a run that the window end, a
+``next_try_at`` (exponential backoff), so a run that a
 shutdown or ``CONSECUTIVE_FAILURE_LIMIT`` failures in a row stops simply
 continues from the same selection the next night.
 """
@@ -36,13 +37,12 @@ import sqlite3
 import threading
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Iterable
 
 from vault_api import jobs, oracle
 from vault_api.config import Settings
 from vault_api.db import get_connection
-from vault_api.schedule_window import ScheduleWindow
 
 logger = logging.getLogger(__name__)
 
@@ -359,7 +359,7 @@ def fill(
     pause: Callable[[], None] = _no_pause,
     appids: Iterable[int] | None = None,
 ) -> FetchRun:
-    """Fetch every due app, in order, until done, out of window, aborted or
+    """Fetch every due app, in order, until done, aborted or
     ``CONSECUTIVE_FAILURE_LIMIT`` failures in a row. A no-op unless
     ``enabled(settings)``."""
     if not enabled(settings):
@@ -400,9 +400,9 @@ def fill(
 class LibraryMetaRunner:
     """Runs the nightly fill on a daemon thread, one run at a time.
 
-    The scheduler tick only DECIDES (``maybe_start``: switches, window, lock);
+    The scheduler tick only DECIDES (``maybe_start``: switches, daily gate, lock);
     the selection and every request run on the thread, which opens its own
-    SQLite connection and stops at the window end or on shutdown.
+    SQLite connection and stops on shutdown.
     """
 
     #: A pass that found nothing due is not repeated within this many minutes
@@ -423,6 +423,7 @@ class LibraryMetaRunner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._idle_until: datetime | None = None
+        self._done_on: date | None = None
         self.last_run: FetchRun | None = None
 
     @property
@@ -432,20 +433,22 @@ class LibraryMetaRunner:
     def maybe_start(
         self,
         settings: Settings,
-        window: ScheduleWindow | None,
         now: datetime,
         clock: Callable[[], datetime],
     ) -> str:
-        """``started``, or why not: ``disabled``, ``no-window``,
-        ``outside-window``, ``idle``, ``stopping`` or ``already-running``."""
+        """``started``, or why not: ``disabled``, ``done-today``, ``idle``,
+        ``stopping`` or ``already-running``.
+
+        Independent of the download schedule window (WP LIB-META-WINDOW-1,
+        like the update check, UPD-5): it runs with the window off or
+        outside it, and at most one finished pass per calendar day.
+        """
         if not enabled(settings):
             return "disabled"
-        if window is None:
-            return "no-window"
-        if not window.contains(now):
-            return "outside-window"
         if self._stop.is_set():
             return "stopping"
+        if self._done_on == now.date():
+            return "done-today"
         if self._idle_until is not None and now < self._idle_until:
             return "idle"
         if not self._lock.acquire(blocking=False):
@@ -453,7 +456,7 @@ class LibraryMetaRunner:
         try:
             thread = threading.Thread(
                 target=self._run,
-                args=(settings, window, clock),
+                args=(settings, clock, now.date()),
                 name="vault-library-meta",
                 daemon=True,
             )
@@ -470,7 +473,7 @@ class LibraryMetaRunner:
             self._stop.wait(seconds)
 
     def _run(
-        self, settings: Settings, window: ScheduleWindow, clock: Callable[[], datetime]
+        self, settings: Settings, clock: Callable[[], datetime], started_on: date
     ) -> None:
         try:
             with closing(get_connection(self._db_path)) as conn:
@@ -479,11 +482,12 @@ class LibraryMetaRunner:
                     settings,
                     now=clock,
                     fetch=self._fetch,
-                    should_continue=lambda: window.contains(clock()),
                     should_abort=self._stop.is_set,
                     pause=self._pause,
                 )
             self.last_run = result
+            if not result.aborted and not result.bailed_out:
+                self._done_on = started_on  # the day it began, not ended
             if result.selected == 0:
                 self._idle_until = clock() + timedelta(minutes=self.IDLE_RECHECK_MINUTES)
             elif result.bailed_out:
@@ -497,7 +501,8 @@ class LibraryMetaRunner:
                 " [STOPPED after repeated failures]" if result.bailed_out else "",
             )
         except Exception:
-            logger.exception("library meta: run failed; retried next tick")
+            logger.exception("library meta: run failed; retried later")
+            self._idle_until = clock() + timedelta(hours=BACKOFF_BASE_HOURS)
         finally:
             self._lock.release()
 
