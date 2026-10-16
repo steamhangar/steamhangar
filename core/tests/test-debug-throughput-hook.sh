@@ -132,5 +132,35 @@ ln -s "$work/target" "$d/throughput.1.log"
 VAULT_DEBUG_NOW=$now sh "$HOOK" --prune "$d" >/dev/null
 [ -L "$d/throughput.1.log" ] && [ -f "$work/target" ] && ok "prune leaves symlinks alone" || bad "prune touched a symlink"
 
+
+# --- the REAL template: OFF must leave nothing behind ---------------------------
+tmpl="$(cd "$script_dir/.." && pwd)/docker/nginx.conf.template"
+cp "$tmpl" "$work/real-off.conf"
+VAULT_DEBUG_THROUGHPUT=off sh "$HOOK" "$work/real-off.conf" >/dev/null 2>&1 \
+    && ok "real template, off: hook succeeds" || bad "real template, off: hook failed"
+if [ "$(grep -cE 'vault_tp|throughput|VAULT_DEBUG' "$work/real-off.conf" || true)" = 0 ]; then
+    ok "real template, off: no vault_tp / throughput / VAULT_DEBUG text is left"
+else bad "real template, off: leftovers: $(grep -nE 'vault_tp|throughput|VAULT_DEBUG' "$work/real-off.conf" | head -3)"; fi
+# Byte identity with the template as it was before this feature. The reference
+# is the commit that introduced the feature's parent; it can only be read from
+# a git checkout that still has the template without markers on `main`.
+repo_root="$(cd "$script_dir/../.." && pwd)"
+if ref=$(git -C "$repo_root" show main:core/docker/nginx.conf.template 2>/dev/null) \
+    && ! printf '%s\n' "$ref" | grep -q VAULT_DEBUG_TP_LINE; then
+    printf '%s\n' "$ref" > "$work/main-template.conf"
+    if cmp -s "$work/main-template.conf" "$work/real-off.conf"; then
+        ok "real template, off: byte-identical to main's template (no feature)"
+    else bad "real template, off: differs from main: $(diff "$work/main-template.conf" "$work/real-off.conf" | head -5)"; fi
+else
+    echo "skip: main's template already carries the feature (or no git); byte-identity checked pre-merge only"
+fi
+# ON: markers gone, log_format and both directives present
+cp "$tmpl" "$work/real-on.conf"
+VAULT_DEBUG_THROUGHPUT=on sh "$HOOK" "$work/real-on.conf" >/dev/null 2>&1 \
+    && [ "$(grep -c 'log_format vault_tp' "$work/real-on.conf")" = 1 ] \
+    && [ "$(grep -c 'VAULT_DEBUG_TP_LINE' "$work/real-on.conf" || true)" = 0 ] \
+    && [ "$(grep -cE '^[[:space:]]*access_log .*vault_tp' "$work/real-on.conf")" = 2 ] \
+    && ok "real template, on: log_format + 2 directives, no marker" || bad "real template, on: unexpected render"
+
 echo "debug-throughput hook: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

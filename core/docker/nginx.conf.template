@@ -520,19 +520,19 @@ http {
         'upstream_addr="$upstream_addr" upstream_connect_time=$upstream_connect_time '
         'upstream_host="$vault_upstream_target" host="$host" limit_conn=$limit_conn_status '
         'client=$remote_addr';
-
-    # --- Throughput debug log (opt-in, WP THROUGHPUT-DEBUG-1) ----------------
-    # One compact tab-separated line per depot request, written ONLY when
-    # VAULT_DEBUG_THROUGHPUT is on (the access_log lines in /depot/ and @miss
-    # exist only in the container render, see core/docker/31-vault-debug-
-    # throughput.sh and delta 8 in check-config-drift.sh). The format itself
-    # is inert while no access_log names it. Fields, in order:
-    #   tp1 msec client depot method status range bytes_sent request_time
-    #   upstream_response_time cache connection connection_requests
-    #   request_length tcp_rtt_us tcp_rttvar_us tcp_snd_cwnd tcp_rcv_space
-    # Read by core/tools/throughput-report.py. Absent values log "-".
-    log_format vault_tp escape=default
-        'tp1	$msec	$remote_addr	$vault_event_depot	$request_method	$status	$http_range	$bytes_sent	$request_time	$upstream_response_time	$vault_event_status	$connection	$connection_requests	$request_length	$tcpinfo_rtt	$tcpinfo_rttvar	$tcpinfo_snd_cwnd	$tcpinfo_rcv_space';
+    # VAULT_DEBUG_TP_LINE
+    # --- Throughput debug log (opt-in, WP THROUGHPUT-DEBUG-1) ---------------- # VAULT_DEBUG_TP_LINE
+    # One compact tab-separated line per depot request, written ONLY when # VAULT_DEBUG_TP_LINE
+    # VAULT_DEBUG_THROUGHPUT is on (the access_log lines in /depot/ and @miss # VAULT_DEBUG_TP_LINE
+    # exist only in the container render, see core/docker/31-vault-debug- # VAULT_DEBUG_TP_LINE
+    # throughput.sh and delta 8 in check-config-drift.sh). The format itself # VAULT_DEBUG_TP_LINE
+    # is inert while no access_log names it. Fields, in order: # VAULT_DEBUG_TP_LINE
+    #   tp1 msec client depot method status range bytes_sent request_time # VAULT_DEBUG_TP_LINE
+    #   upstream_response_time cache connection connection_requests # VAULT_DEBUG_TP_LINE
+    #   request_length tcp_rtt_us tcp_rttvar_us tcp_snd_cwnd tcp_rcv_space # VAULT_DEBUG_TP_LINE
+    # Read by core/tools/throughput-report.py. Absent values log "-". # VAULT_DEBUG_TP_LINE
+    log_format vault_tp escape=default # VAULT_DEBUG_TP_LINE
+        'tp1	$msec	$remote_addr	$vault_event_depot	$request_method	$status	$http_range	$bytes_sent	$request_time	$upstream_response_time	$vault_event_status	$connection	$connection_requests	$request_length	$tcpinfo_rtt	$tcpinfo_rttvar	$tcpinfo_snd_cwnd	$tcpinfo_rcv_space'; # VAULT_DEBUG_TP_LINE
 
     # CONTAINER DELTA: stdout instead of logs/access.log. `docker logs` is the
     # single place both nginx logs appear, and the json-file driver's
@@ -663,7 +663,7 @@ http {
             # reasoning. The marker itself is inert to nginx (a normal
             # trailing comment) and is stripped when the feature stays on.
             access_log ${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE
-            # Opt-in throughput log (delta 8): removed unless VAULT_DEBUG_THROUGHPUT is on.
+            # Opt-in throughput log (delta 8): removed unless VAULT_DEBUG_THROUGHPUT is on. # VAULT_DEBUG_TP_LINE
             access_log /vault/logs/throughput-debug/throughput.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE
         }
 
@@ -688,7 +688,7 @@ http {
             # yet" test/expectation would be flaky; don't write one.
             access_log /dev/stdout vault;
             access_log ${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE
-            # Opt-in throughput log (delta 8): removed unless VAULT_DEBUG_THROUGHPUT is on.
+            # Opt-in throughput log (delta 8): removed unless VAULT_DEBUG_THROUGHPUT is on. # VAULT_DEBUG_TP_LINE
             access_log /vault/logs/throughput-debug/throughput.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE
 
             # ADR req 4 abuse guard: refuse to proxy anywhere for a Host

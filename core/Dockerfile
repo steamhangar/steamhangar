@@ -149,7 +149,7 @@ RUN set -eux; \
     [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "3" ]; \
     # WP THROUGHPUT-DEBUG-1: the opt-in debug log's two access_log lines carry
     # the marker 31-vault-debug-throughput.sh strips or deletes.
-    [ "$(grep -c '# VAULT_DEBUG_TP_LINE' /etc/nginx/templates/nginx.conf.template)" = "2" ]; \
+    [ "$(grep -c '# VAULT_DEBUG_TP_LINE' /etc/nginx/templates/nginx.conf.template)" = "17" ]; \
     # WP TH-1a: the upstream rate cap is wired in exactly once (include at
     # http level, proxy_limit_rate in @miss), and the hook renders its cap-off
     # form in this image's own shell.

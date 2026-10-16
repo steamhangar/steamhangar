@@ -34,6 +34,8 @@ FIELDS = ("msec client depot method status range bytes_sent request_time "
           "upstream_response_time cache connection connection_requests "
           "request_length rtt rttvar cwnd rcv_space").split()
 BUCKET_S = 10
+MIN_BIG_REQUESTS = 30   # large requests before a verdict is given
+MIN_FULL_BUCKETS = 3    # complete 10 s buckets before a verdict is given
 MSS = 1448  # bytes per segment on Ethernet, for the cwnd ceiling estimate
 
 
@@ -142,6 +144,7 @@ def analyse(reqs: list[Req], link_mbit: float, min_kb: int) -> dict:
     if len(keys) >= 4:
         keys = keys[1:-1]
     buckets = [bm[k] for k in keys]
+    n_buckets = len(buckets)
     big = [r for r in reqs if r.bytes >= min_kb * 1024 and r.rt > 0 and r.status in ("200", "206")]
     per_req = [r.bytes * 8 / r.rt / 1e6 for r in big]  # Mbit/s
     conc = list(concurrency(reqs).values())
@@ -157,6 +160,7 @@ def analyse(reqs: list[Req], link_mbit: float, min_kb: int) -> dict:
         "requests": n,
         "mb": total / 1e6,
         "minutes": (t1 - t0) / 60.0,
+        "full_buckets": n_buckets,
         "bucket_avg": statistics.fmean(buckets) if buckets else 0.0,
         "bucket_p95": pct(buckets, 95),
         "bucket_max": max(buckets) if buckets else 0.0,
@@ -185,8 +189,9 @@ def verdicts(a: dict) -> list[str]:
     link = a["link"]
     low_agg = a["bucket_p95"] < 0.8 * link
     rtt, cwnd = a["rtt_ms"], a["cwnd"]
-    if a["big_n"] == 0:
-        out.append("no requests of the minimum size: too little data for a throughput verdict")
+    if a["big_n"] < MIN_BIG_REQUESTS or a["full_buckets"] < MIN_FULL_BUCKETS:
+        out.append(f"sample too small for a verdict ({a['big_n']} large requests, {a['full_buckets']} full "
+                   f"{BUCKET_S}s buckets; need {MIN_BIG_REQUESTS} and {MIN_FULL_BUCKETS}): record a longer run")
         return out
     if a["miss_n"] >= 10:
         out.append(f"{a['miss_n']:.0f}% of the requests were not HITs: this run is not a pure cache-read test")
@@ -199,10 +204,13 @@ def verdicts(a: dict) -> list[str]:
         return out
     p50 = a["per_req_p50"]
     if a["conc_max"] <= 5:
-        out.append(f"only {a['conc_max']} parallel connection(s) at most: client-limited "
-                   f"(per-request p50 is {p50:.0f} Mbit/s; {a['conc_max']} x that is about the aggregate)")
         if p50 >= 0.5 * link:
-            out.append("single streams are fast, so the cap is the number of streams, not the server")
+            out.append(f"only {a['conc_max']} parallel connection(s) at most, but each stream is fast "
+                       f"(per-request p50 {p50:.0f} Mbit/s): client-limited, the cap is the number of streams")
+        else:
+            out.append(f"few connections ({a['conc_max']} at most) AND slow single streams (per-request p50 "
+                       f"{p50:.0f} Mbit/s, below half the {link:.0f} Mbit/s link): server, disk or the client's "
+                       "receive window; the client opening more connections would not be the whole story")
     elif p50 * a["conc_median"] < 0.8 * link or p50 < 0.3 * link:
         if rtt is not None and rtt <= 5 and a["hit_n"] >= 90:
             out.append(f"per-request p50 {p50 / 8:.1f} MB/s over {a['conc_max']} connections with low rtt "
@@ -223,6 +231,14 @@ def verdicts(a: dict) -> list[str]:
     if not out:
         out.append("no single bottleneck stands out in this data")
     return out
+
+
+NOTES = (
+    "notes:",
+    "  - Aggregate Mbit/s is a busy-time figure: buckets with no traffic at all are absent, so idle gaps are not averaged in.",
+    "  - $connection numbers restart at 1 after an nginx restart: when files of different runs are mixed, "
+    "connections of different runs can look like one (fewer connections, more requests per connection).",
+)
 
 
 def render(client: str, a: dict) -> str:
@@ -273,6 +289,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         by_client[r.client].append(r)
     for client in sorted(by_client, key=lambda c: -sum(r.bytes for r in by_client[c])):
         print(render(client, analyse(by_client[client], args.link_mbit, args.min_request_kb)))
+    print("\n".join(NOTES))
     if bad:
         print(f"({bad} malformed line(s) skipped)")
     return 0

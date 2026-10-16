@@ -464,6 +464,9 @@ render_and_test() {
             [ "$tp_count" = "$EXPECTED_TP" ] || { echo "FAIL: vault_tp directive count $tp_count, expected $EXPECTED_TP"; status=1; }
             [ "$tp_marker" = 0 ] || { echo "FAIL: VAULT_DEBUG_TP_LINE marker(s) survived"; status=1; }
             if [ "$EXPECTED_TP" = 0 ]; then
+                if grep -qE "vault_tp|throughput|VAULT_DEBUG" "$conf"; then
+                    echo "FAIL: debug flag off but the rendered config still mentions vault_tp/throughput/VAULT_DEBUG"; status=1
+                fi
                 if [ -e /vault/logs/throughput-debug ]; then
                     echo "FAIL: debug flag off but /vault/logs/throughput-debug exists"; status=1
                 fi

@@ -10,7 +10,7 @@
 #
 # Input (env only, read at start; changing it needs a container restart):
 #   VAULT_DEBUG_THROUGHPUT           unset, empty, 0, false, off, no -> OFF (default):
-#                                    this hook only deletes the two marker lines
+#                                    this hook only deletes the marker lines
 #                                    from the rendered nginx.conf; the config,
 #                                    the logs and the disk are exactly what they
 #                                    were before. Old debug files are neither
@@ -27,9 +27,12 @@
 # directory removes every trace; there is no database row and no schema.
 #
 # What it does when ON:
-#   1. keeps the two `access_log ... vault_tp ...` lines in the rendered
-#      nginx.conf (location /depot/ and location @miss; the template carries
-#      them with the marker comment `# VAULT_DEBUG_TP_LINE`, same mechanism as
+#   1. keeps the log_format and the two `access_log ... vault_tp ...` lines in
+#      the rendered nginx.conf (location /depot/ and location @miss). EVERY
+#      line this feature adds to the template (comments, the log_format, the
+#      access_log lines) ends in the marker comment `# VAULT_DEBUG_TP_LINE`,
+#      so the OFF render is byte-identical to the template without the
+#      feature; the ON render strips the marker. Same mechanism as
 #      25-vault-eventlog.sh and check-config-drift.sh delta 8);
 #   2. creates the directory (a plain mkdir; `nginx -t` opens the log too);
 #   3. on a real server start only: appends ONE `# start ...` line to the log
@@ -55,6 +58,12 @@
 # Cost when ON: about 190 bytes per request. At ~40 requests/s (a 1 Gbit/s
 # Steam download in 1 MiB slices) that is ~7.5 KB/s, 27 MB/hour; the buffer
 # (64k, flushed at least every 5 s) keeps it off the request path.
+#
+# Limits are approximate: the CURRENT file is never deleted by the pruning, only
+# rotated (or, when nginx cannot be signalled, truncated), and it is checked
+# every 30 s, so the directory can exceed MAX_MB by up to one segment
+# (MAX_MB/4, at least 1 MiB) plus 30 s of writes. With MAX_MB=1 the 1 MiB
+# minimum segment alone is the whole budget.
 #
 # Cleanup by hand (debug files only):  rm -rf /vault/logs/throughput-debug
 # Rollback: VAULT_DEBUG_THROUGHPUT off, restart vault-core (re-renders the
@@ -143,8 +152,8 @@ if [ "$MODE" = off ]; then
     sed -i "/${MARKER}\$/d" "$CONF"
     left=$(grep -c "$MARKER" "$CONF" 2>/dev/null || true)
     [ "${left:-0}" = 0 ] || die "$left marker line(s) remain in $CONF while the debug log is off."
-    survivors=$(grep -cE '^[[:space:]]*access_log[[:space:]].*vault_tp' "$CONF" 2>/dev/null || true)
-    [ "${survivors:-0}" = 0 ] || die "VAULT_DEBUG_THROUGHPUT is off but $survivors access_log directive(s) naming vault_tp remain in $CONF.
+    survivors=$(grep -cE 'vault_tp|throughput-debug' "$CONF" 2>/dev/null || true)
+    [ "${survivors:-0}" = 0 ] || die "VAULT_DEBUG_THROUGHPUT is off but $survivors line(s) naming vault_tp or throughput-debug remain in $CONF.
   Refusing to start half-disabled."
     log "VAULT_DEBUG_THROUGHPUT off -- no throughput debug log rendered"
     exit 0
@@ -241,6 +250,7 @@ master_pid() {
 SEG_BYTES=$((MAX_MB * 1048576 / 4))
 [ "$SEG_BYTES" -ge 1048576 ] || SEG_BYTES=1048576
 LAST_ROT=$(date +%s)
+NO_MASTER=0
 
 rotate_once() {
     [ -f "$LOG_PATH" ] && [ ! -L "$LOG_PATH" ] || return 0
@@ -249,7 +259,20 @@ rotate_once() {
     if [ "$size" -lt "$SEG_BYTES" ] && { [ $((now - LAST_ROT)) -lt 86400 ] || [ "$size" -eq 0 ]; }; then
         return 0
     fi
-    pid=$(master_pid) || return 0
+    if ! pid=$(master_pid); then
+        # Cannot signal nginx, so no rename (it would keep writing into the
+        # renamed file). The size limit must still hold: cut the current file
+        # in place (nginx writes with O_APPEND, so this is safe) once it is
+        # over the segment size, and say so every ~5 minutes.
+        NO_MASTER=$((NO_MASTER + 1))
+        if [ "$size" -ge "$SEG_BYTES" ]; then
+            : > "$LOG_PATH" && log "WARNING: nginx master not found; truncated $LOG_PATH ($size bytes) to keep the $MAX_MB MiB limit"
+        elif [ $((NO_MASTER % 10)) -eq 1 ]; then
+            log "WARNING: nginx master not found (pid file $PID_FILE); cannot rotate $LOG_PATH"
+        fi
+        return 0
+    fi
+    NO_MASTER=0
     new="$LOG_DIR/throughput.$now.log"
     [ ! -e "$new" ] || return 0
     mv "$LOG_PATH" "$new" || return 0

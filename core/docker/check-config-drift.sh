@@ -684,6 +684,7 @@ sed \
     -e 's|^access_log \${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE$|access_log logs/event.log vault_event buffer=64k flush=5s;|' \
     -e 's|^access_log /dev/stdout vault_tls;$|access_log logs/tls.log vault_tls;|' \
     -e '/^access_log \/vault\/logs\/throughput-debug\/throughput\.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE$/d' \
+    -e 's| # VAULT_DEBUG_TP_LINE$||' \
     "$work/template.norm" > "$work/template.unapplied"
 
 # --- 2b. core/Dockerfile's build-time count of event-log lines -----------------

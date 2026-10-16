@@ -28,21 +28,45 @@ class ReportTests(unittest.TestCase):
         by, starts, bad = load()
         self.assertEqual(bad, 1)
         self.assertEqual(len(starts), 1)
-        self.assertEqual(set(by), {"192.0.2.10", "192.0.2.20"})
+        self.assertEqual(set(by), {"192.0.2.10", "192.0.2.20", "192.0.2.30", "192.0.2.40", "192.0.2.50"})
 
     def test_percentile(self):
         self.assertEqual(tpr.pct([1, 2, 3, 4, 5], 50), 3)
         self.assertEqual(tpr.pct([], 95), 0.0)
         self.assertAlmostEqual(tpr.pct([0, 10], 95), 9.5)
 
-    def test_client_limited(self):
+    def test_few_connections_slow_streams_is_not_called_client_limited(self):
         by, _, _ = load()
         a = tpr.analyse(by["192.0.2.10"], 1000, 256)
         self.assertEqual(a["conc_max"], 2)
         self.assertAlmostEqual(a["bucket_avg"], 200, delta=25)
         self.assertAlmostEqual(a["per_req_p50"], 100, delta=12)
         self.assertEqual(a["hit_n"], 100)
-        self.assertTrue(any("parallel connection" in v for v in a["verdicts"]), a["verdicts"])
+        text = " ".join(a["verdicts"])
+        self.assertIn("few connections", text)
+        self.assertIn("slow single streams", text)
+        self.assertNotIn("client-limited", text)
+
+    def test_four_slow_connections(self):
+        by, _, _ = load()
+        a = tpr.analyse(by["192.0.2.40"], 1000, 256)
+        self.assertEqual(a["conc_max"], 4)
+        text = " ".join(a["verdicts"])
+        self.assertIn("slow single streams", text)
+        self.assertNotIn("client-limited", text)
+
+    def test_few_fast_streams_is_client_limited(self):
+        by, _, _ = load()
+        a = tpr.analyse(by["192.0.2.30"], 1000, 256)
+        self.assertEqual(a["conc_max"], 1)
+        self.assertGreaterEqual(a["per_req_p50"], 500)
+        self.assertTrue(any("client-limited" in v for v in a["verdicts"]), a["verdicts"])
+
+    def test_small_sample_gives_no_verdict(self):
+        by, _, _ = load()
+        a = tpr.analyse(by["192.0.2.50"], 1000, 256)
+        self.assertEqual(len(a["verdicts"]), 1)
+        self.assertIn("sample too small", a["verdicts"][0])
 
     def test_server_limited(self):
         by, _, _ = load()
@@ -75,6 +99,8 @@ class ReportTests(unittest.TestCase):
         self.assertIn("== client 192.0.2.20 ==", out)
         self.assertIn("verdict:", out)
         self.assertIn("1 malformed", out)
+        self.assertIn("busy-time", out)
+        self.assertIn("restart at 1", out)
 
     def test_main_client_filter_and_empty(self):
         buf = io.StringIO()

@@ -1665,15 +1665,32 @@ maximum concurrent connections, requests per connection, rtt/cwnd medians,
 the HIT/MISS share and a plain-English verdict list. The verdicts are
 heuristics that name the first thing to look at (client limited by stream
 count, server or disk limited, TCP window, connections not reused, not a
-pure cache-read run); the numbers above them are the evidence. Do a clean
+pure cache-read run); the numbers above them are the evidence. "Client
+limited" is only said when few connections come with FAST single streams
+(per-request p50 >= half the link); few connections with slow streams is
+reported as "server, disk or client receive window". No verdict is given
+below 30 large requests or 3 full 10 s buckets ("sample too small"). Two
+caveats are printed with every report: buckets without any traffic are
+absent (the averages are busy-time figures), and `$connection` numbers
+restart after an nginx restart, so files of different runs must not be mixed
+when you count connections. Do a clean
 test run (one client, one game, everything cached) for a meaningful result.
 
 **Cost:** ~190 bytes per request. At ~40 requests/s (a 1 Gbit/s download in
 1 MiB slices) that is ~7.5 KB/s, ~27 MB/hour, written through
 `buffer=64k flush=5s` (no per-request disk write on the request path). The
-hard limits above cap the directory regardless. Flag off: the two lines are
-removed at render time, nothing is created or written, and the config is
-what it was before.
+limits above cap the directory, with one caveat: the CURRENT file is never
+pruned, only rotated (at MAX_MB/4, at least 1 MiB) and checked every 30 s, so
+the directory can exceed MAX_MB by up to one segment plus 30 s of writes (with
+MAX_MB=1 the 1 MiB minimum segment is the whole budget). If the nginx master
+cannot be found, the loop cannot rotate; it logs a WARNING and truncates the
+current file in place once it is over the segment size, so the limit still
+holds. Flag off: every line the feature adds to the template (comments,
+`log_format`, both `access_log` lines) carries the marker `# VAULT_DEBUG_TP_LINE`
+and is deleted at render time, so the rendered config is byte-identical to
+the one without the feature (`core/tests/test-debug-throughput-hook.sh`
+compares it with main's template while main has none), nothing is created or
+written.
 
 **Housekeeping while ON:** a 30 s loop (same rename + USR1 technique as the
 event log) rotates `throughput.log` at MAX_MB/4 (min 1 MiB) or daily, deletes
