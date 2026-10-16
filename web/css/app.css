@@ -1185,13 +1185,13 @@ input.inp.txt:disabled{ opacity:.55; }
    the neutral tone those two notes carry. The sweep is never refused and
    GC is never turned on automatically (docs/PROJECT_PLAN.md Phase 3) — this
    is a warning, not a gate, so it is plain text with no disabled control
-   and no dialog. Never `[hidden]`-toggled (the caller simply omits the node
-   when there is nothing to warn about), so it needs no `[hidden]` display
-   guard (css-hygiene.test.js's rule does not apply here). */
+   and no dialog. WP SETTINGS-1: the GC-risk instance is always built and
+   `[hidden]`-toggled live from the form, hence the guard below. */
 .settings-warn{
   margin:10px 0 0; padding:8px 0 8px 9px; border-left:2px solid var(--stale);
   font-size:11.5px; line-height:1.5; color:var(--dim);
 }
+.settings-warn[hidden]{ display:none; }
 
 .bullets{ margin:0; padding-left:16px; }
 .bullets li{ font-size:12px; line-height:1.55; color:var(--dim); margin-bottom:6px; }
@@ -1199,40 +1199,62 @@ input.inp.txt:disabled{ opacity:.55; }
 
 .view-settings h4.sec:first-of-type{ margin-top:2px; }
 
-/* ---------- Settings sections (WP D16-WEB) ----------
-   Native <details>/<summary> per section (audit 1.3): keyboard and screen
-   readers get the disclosure for free. The summary carries the title, a
-   one-line state that only shows while the section is collapsed, and a
-   dot while the section holds an unsaved draft. `.sec-dirty` is
-   display-styled and [hidden]-toggled, hence its guard (LEARNINGS 4a.8);
-   the Expert section itself is [hidden] while the expert switch is off. */
-.settings-sec{ border-top:1px solid var(--line-soft); }
-/* Closing rules do not use :last-child (the save bar and the hidden Expert
-   section both sit after About): About and Expert carry their own. */
-.settings-sec[data-section="about"],
-.settings-sec[data-section="expert"]{ border-bottom:1px solid var(--line-soft); }
-.sec-summary{
-  display:flex; align-items:center; gap:10px; min-height:44px; padding:10px 0;
-  cursor:pointer; list-style:none;
+/* ---------- Settings layout (WP SETTINGS-1) ----------
+   rc20 mockup docs/design/rc20/settings.html: a section nav beside ONE
+   panel at a time. Below 1000px the nav is a horizontal strip that
+   scrolls inside itself (never the page); from 1000px it is a sticky left
+   column. Every grid item carries `min-width:0` so a long value can never
+   widen the page. Fields sit in an auto-fit grid: two columns when the
+   panel is wide enough for two 300px fields, one otherwise. `.sec-dirty`,
+   `.snav-item` and the `.settings-warn` note are display-styled and
+   [hidden]-toggled, hence their guards (LEARNINGS 4a.8). */
+.settings-lay{ display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
+.settings-main{ min-width:0; }
+.snav{ min-width:0; }
+.snav-list{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; scrollbar-width:thin; }
+.snav-item{
+  flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; min-height:44px; padding:8px 12px;
+  border:1px solid var(--line-soft); border-radius:var(--r-m); background:var(--surface);
+  color:var(--dim); font-size:13px; font-weight:600; text-align:left; white-space:nowrap;
 }
-.sec-summary::-webkit-details-marker{ display:none; }
-.sec-summary::before{
-  content:""; flex:none; width:7px; height:7px; margin:0 3px 0 2px;
-  border-right:2px solid var(--dim-2); border-bottom:2px solid var(--dim-2);
-  transform:rotate(-45deg); transition:transform .18s;
+.snav-item[hidden]{ display:none; }
+.snav-item[aria-current="true"]{ border-color:var(--accent); background:var(--accent-glow); color:var(--text); }
+.snav-label{ flex:1 1 auto; min-width:0; }
+.snav-state{ display:none; order:3; flex:1 0 100%; min-width:0; font-size:11px; font-weight:400; color:var(--dim-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.snav .expert-switch{ margin:10px 0 0; }
+@media (hover:hover) and (pointer:fine){
+  .snav-item:hover{ color:var(--text); border-color:var(--line); }
 }
-.settings-sec[open] > .sec-summary::before{ transform:rotate(45deg); }
-.sec-title{ flex:none; margin:0; font-size:13.5px; font-weight:650; line-height:1.3; letter-spacing:0; color:var(--text); }
-.sec-state{
-  flex:1 1 auto; min-width:0; text-align:right; font-size:11.5px; color:var(--dim-2);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+@media (min-width:1000px){
+  .settings-lay{ grid-template-columns:240px minmax(0,1fr); gap:24px; }
+  .snav{ position:sticky; top:16px; }
+  .snav-list{ flex-direction:column; overflow:visible; padding-bottom:0; }
+  .snav-item{ flex:0 0 auto; white-space:normal; }
+  .snav-state{ display:block; }
 }
-.settings-sec[open] > .sec-summary .sec-state{ visibility:hidden; }
+.settings-panel > .sec-title{ margin:0 0 4px; font-size:18px; font-weight:650; line-height:1.3; letter-spacing:0; color:var(--text); }
+.settings-panel > .sec-title:focus{ outline:none; }
+.sec-blurb{ margin:0 0 14px; font-size:12.5px; line-height:1.5; color:var(--dim); }
 .sec-dirty{ display:inline-block; flex:none; width:8px; height:8px; border-radius:50%; background:var(--accent); }
 .sec-dirty[hidden]{ display:none; }
-.sec-body{ padding:2px 0 16px; }
-.field-head{ display:flex; align-items:center; gap:2px; }
+.snav-item .sec-dirty{ order:2; }
+.sec-body{
+  min-width:0; padding:14px; border:1px solid var(--line-soft); border-radius:var(--r-m);
+  background:var(--surface);
+}
+.fg{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:14px 18px; }
+.fg > .field{ min-width:0; margin-bottom:0; }
+.fg > .field-wide{ grid-column:1 / -1; }
+.settings-main .sec-body > * + *{ margin-top:14px; }
+.settings-main .sec-body .srow{ margin-bottom:0; }
+.field-head{ display:flex; flex-wrap:wrap; align-items:center; gap:2px; }
 .field-head .about-info-btn{ margin:-6px 0 -1px 2px; }
+.chip{
+  margin-left:auto; flex:none; padding:2px 7px; border-radius:999px; border:1px solid var(--line);
+  font-size:9.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--dim-2);
+}
+.chip-changed{ color:var(--accent); border-color:var(--accent); background:var(--accent-glow); }
+.chip-env{ color:var(--dim); border-style:dashed; }
 .field .field-label{
   display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.8px;
   color:var(--dim-2); margin-bottom:5px; font-weight:600;
@@ -1242,6 +1264,7 @@ input.inp.txt:disabled{ opacity:.55; }
 .field-reset{ margin-top:6px; }
 .expert-switch{ align-items:center; gap:10px; margin:14px 0 4px; }
 .expert-group h4.sec:first-child{ margin-top:4px; }
+.expert-group + .expert-group{ margin-top:18px; }
 .risky-list{ margin:0 0 12px; }
 
 /* ---------- Settings save bar (WP WEB-FIX-8) ----------

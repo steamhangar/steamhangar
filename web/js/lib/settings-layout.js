@@ -4,10 +4,11 @@
  * Pure: no DOM, no fetch. `views/settings.js` builds the page from this.
  *
  * Layout (docs/handover/d16-settings-audit.md 1.3, D16a table sign-off
- * 2026-10-14): collapsible sections, the normal page carries only the rows
- * the API marks `expert: false`; every `expert: true` row sits in the
- * Expert section, which only renders while the "Show expert settings"
- * switch is on, split into three sub-groups. Placement is by KEY for the
+ * 2026-10-14; rc20 mockup docs/design/rc20/settings.html): a left section
+ * navigation shows one section at a time; the normal sections carry only
+ * the rows the API marks `expert: false`; every `expert: true` row sits in
+ * the Expert section, which is only reachable while the "Show expert
+ * settings" switch is on, split into three sub-groups. Placement is by KEY for the
  * known keys and by the API's `expert` flag for the rest, so a key the API
  * adds later still shows up (in Housekeeping or Other), never silently not
  * at all.
@@ -16,20 +17,24 @@
  * the (i) disclosure. `FIELD_META[key].help` is the explanation.
  */
 
-/** Sections in page order. `form: true` = carries /v1/settings fields. */
+/**
+ * Sections in page order. `nav` is the navigation label, `title` the panel
+ * heading, `blurb` the line under it. `form: true` = carries /v1/settings
+ * fields.
+ */
 export const SECTIONS = Object.freeze([
-  { id: "vault", title: "Vault & connection", form: true },
-  { id: "window", title: "Download window & updates", form: true },
-  { id: "disk", title: "Disk & cleanup", form: true },
-  { id: "notify", title: "Notifications", form: true },
-  { id: "other", title: "Other settings", form: true },
-  { id: "steam", title: "Steam", form: false },
-  { id: "about", title: "About", form: false },
-  { id: "expert", title: "Expert settings", form: true },
+  { id: "vault", nav: "Vault & connection", title: "Vault & connection", blurb: "Name of this vault and the account it is connected to.", form: true },
+  { id: "window", nav: "Download window", title: "Download window & updates", blurb: "When the scheduled sweep may start downloads.", form: true },
+  { id: "disk", nav: "Disk & cleanup", title: "Disk & cleanup", blurb: "What happens to old chunks after a prefill.", form: true },
+  { id: "notify", nav: "Notifications", title: "Notifications", blurb: "Webhook calls for job and cache events.", form: true },
+  { id: "other", nav: "Other settings", title: "Other settings", blurb: "Settings without a named place on this page.", form: true },
+  { id: "steam", nav: "Steam", title: "Steam", blurb: "Identity used to list the games you own.", form: false },
+  { id: "about", nav: "About", title: "About", blurb: "Component versions and their status.", form: false },
+  { id: "expert", nav: "Expert settings", title: "Expert settings", blurb: "Bandwidth, housekeeping and debug. Changing connection caps asks for confirmation.", form: true },
 ]);
 
-/** Open by default (audit 1.3: "Default open: section A only"). */
-export const DEFAULT_OPEN = Object.freeze({ vault: true });
+/** The section shown first. */
+export const DEFAULT_SECTION = "vault";
 
 /** Normal (non-expert) keys -> section. */
 const NORMAL_PLACEMENT = Object.freeze({
@@ -514,10 +519,9 @@ export function coreApplyLine(coreApply) {
 }
 
 // ---------------------------------------------------------------------
-// Remembered open state (guarded storage, LEARNINGS WEB-FIX-5)
+// Remembered expert switch (guarded storage, LEARNINGS WEB-FIX-5)
 // ---------------------------------------------------------------------
 
-export const OPEN_STORAGE_KEY = "steamvault.settingsOpen";
 export const EXPERT_STORAGE_KEY = "steamvault.settingsExpert";
 
 function safeStorage(getStorage) {
@@ -527,35 +531,6 @@ function safeStorage(getStorage) {
   } catch {
     return null;
   }
-}
-
-/** @returns {Record<string, boolean>} the remembered open sections */
-export function readOpenState(getStorage) {
-  const s = safeStorage(getStorage);
-  if (!s) return {};
-  try {
-    const parsed = JSON.parse(s.getItem(OPEN_STORAGE_KEY) || "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out = {};
-    for (const [k, v] of Object.entries(parsed)) if (typeof v === "boolean") out[k] = v;
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-export function writeOpenState(getStorage, state) {
-  const s = safeStorage(getStorage);
-  if (!s) return;
-  try {
-    s.setItem(OPEN_STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // storage full or blocked: the page still works, it just forgets
-  }
-}
-
-export function isSectionOpen(state, id) {
-  return Object.prototype.hasOwnProperty.call(state, id) ? state[id] : DEFAULT_OPEN[id] === true;
 }
 
 export function readExpertSwitch(getStorage) {
@@ -574,6 +549,47 @@ export function writeExpertSwitch(getStorage, on) {
   try {
     s.setItem(EXPERT_STORAGE_KEY, on ? "1" : "0");
   } catch {
-    // see writeOpenState
+    // storage full or blocked: the page still works, it just forgets
   }
+}
+
+/**
+ * Per-field state chip. Env-only rows and env-sourced values read "From
+ * env"; a stored override reads "Changed here"; everything else "Default".
+ * @param {{source?: string, env_only?: boolean}} entry
+ * @returns {{kind: "default"|"changed"|"env", text: string}}
+ */
+export function fieldChip(entry) {
+  if (entry && (entry.env_only === true || entry.source === "env")) {
+    return { kind: "env", text: "From env" };
+  }
+  if (entry && entry.source === "db") return { kind: "changed", text: "Changed here" };
+  return { kind: "default", text: "Default" };
+}
+
+/**
+ * Next nav item for a keyboard key (vertical list, arrows wrap).
+ * @param {readonly string[]} ids visible nav ids in order
+ * @param {string} current focused id
+ * @param {string} key KeyboardEvent.key
+ * @returns {string|null} id to move to, or null when the key does not navigate
+ */
+export function navTarget(ids, current, key) {
+  const i = ids.indexOf(current);
+  if (i < 0 || ids.length === 0) return null;
+  const n = ids.length;
+  if (key === "ArrowDown" || key === "ArrowRight") return ids[(i + 1) % n];
+  if (key === "ArrowUp" || key === "ArrowLeft") return ids[(i - 1 + n) % n];
+  if (key === "Home") return ids[0];
+  if (key === "End") return ids[n - 1];
+  return null;
+}
+
+/**
+ * Whether the "cached sweep can be collected by GC" warning applies: the
+ * sweep includes cached games while Auto-GC is anything but Execute.
+ */
+export function gcRiskActive(includeCached, autoGc) {
+  if (includeCached === null || includeCached === undefined) return false;
+  return String(includeCached) === "true" && String(autoGc) !== "execute";
 }

@@ -3433,7 +3433,7 @@ below carry their own later dates, item 12 is the current one).
         moves a focused row with ArrowUp/ArrowDown; QUEUE-KBD-KEEP). Decide
         the "Speed not measured yet" wording while Verifying here
         (VERIFY-SPEED-TEXT-1).
-      - [ ] **SETTINGS-1** left sticky section nav (Vault & connection,
+      - [x] **SETTINGS-1** left sticky section nav (Vault & connection,
         Download window, Disk & cleanup, Notifications, Steam, About) and
         the expert switch revealing "Expert settings"; auto-fit 2-column
         field grids; chips (Default / Changed here / From env); (i) hint
