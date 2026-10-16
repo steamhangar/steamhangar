@@ -3405,10 +3405,12 @@ below carry their own later dates, item 12 is the current one).
         (`.dialog-backdrop`/`.dialog`) use the same classes; focus trap,
         Escape and `modal-stack.js` order must not change. Close waits for
         the transition end with a timeout fallback.
-      - [ ] **CLIENTS-1** one card per device: agent data is merged into the
+      - [x] **CLIENTS-1** one card per device: agent data is merged into the
         client card (`clients.js`, `clients-view.js`, `clients-sheet.js`);
         the "PCs running vault-agent" list and "Manage PCs" are removed;
-        a PC that is both client and agent shows once. Adapt `clients-*.test.js`.
+        a PC that is both client and agent shows once (match: equal
+        `client_id`, `mergeAgentData` in `clients-page.js`). The PCs sheet
+        stays for the bypass banner and notifications. Adapt `clients-*.test.js`.
       - [ ] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
         (connected, outdated agents, ...), "Add a device" as the header
         button. Real data only, no tile without a source.

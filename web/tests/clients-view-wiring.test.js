@@ -248,7 +248,8 @@ test("MUTATION TARGET: a server without the endpoint (404) gets the update note,
   assert.equal(text(s, '[data-role="clients-note"]'), "This server does not report traffic statistics yet. Update vault-api to see them.");
   assert.equal(s.querySelectorAll(".clcard").length, 0);
   assert.equal(s.querySelector('[data-role="clients-range"]').hidden, true, "no range selector for an old server");
-  assert.equal(s.querySelector('[data-role="open-pcs"]') === null, false, "PC management still there");
+  assert.equal(s.querySelector('[data-role="open-pcs"]'), null, "no Manage PCs (WP CLIENTS-1)");
+  assert.equal(s.querySelector('[data-role="add-device"]') === null, false, "Add a device still there");
 });
 
 test("MUTATION TARGET: a failed refresh after an answer keeps the cards and adds a 'Couldn't refresh' note", async () => {

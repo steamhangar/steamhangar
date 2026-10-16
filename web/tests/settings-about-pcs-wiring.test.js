@@ -13,7 +13,7 @@
  *     error line;
  *   - no polling: one `/v1/about` request per Settings mount, a second only
  *     on Refresh (whose role=status line then says what happened);
- *   - Clients → "Manage PCs" (moved from Settings → "PCs (agents)" in WP
+ *   - Clients page (moved from Settings → "PCs (agents)" in WP
  *     D15c; Settings keeps a pointer) opens the clients sheet with NO bypass
  *     banner in play; each PC shows the SERVER's presence (fixtures
  *     contradict the timestamps), "last seen", "version not reported", and the
@@ -132,6 +132,7 @@ globalThis.fetch = async (url) => {
 const { store } = await import("../js/store-singleton.js");
 const { renderSettings, requestAboutFocus } = await import("../js/views/settings.js");
 const { renderClients } = await import("../js/views/clients.js");
+const { openClientsSheet } = await import("../js/components/clients-sheet.js");
 const { createRailPanel } = await import("../js/components/rail-panel.js");
 const { resetModalStack } = await import("../js/lib/modal-stack.js");
 
@@ -439,16 +440,15 @@ test("MUTATION TARGET: Settings keeps a pointer to the Clients page instead of t
   assert.deepEqual(seen, ["clients"], "the button navigates to the Clients page");
 });
 
-test("MUTATION TARGET: the PCs list is reachable from the Clients page with no bypass anywhere", async () => {
+test("MUTATION TARGET: the Clients page has no separate PC list and no Manage PCs (WP CLIENTS-1); the sheet stays reachable for the bypass banner", async () => {
   await until(() => Array.isArray(store.snapshot("clients")), "first clients poll");
-  assert.equal(store.snapshot("clients").some((c) => c.bypass_suspected), false, "precondition: nobody is bypassing (no banner)");
   const s = mountClients();
+  assert.equal(s.querySelector('[data-role="open-pcs"]'), null, "no Manage PCs button");
+  assert.equal(s.querySelectorAll('[data-role="agents-summary"]').length, 0, "no agents line on the page");
+  assert.equal(s.querySelectorAll("h4").some((h) => h.textContent === "Manage PCs"), false);
+  assert.equal(s.querySelector('[data-role="add-device"]') === null, false, "Add a device stays");
   assert.equal(sheetIsOpen(), false);
-  const btn = s.querySelector('[data-role="open-pcs"]');
-  assert.equal(btn === null, false, "a 'Manage PCs' button on the Clients page");
-  assert.equal(btn.textContent, "Manage PCs");
-  assert.equal(btn.tagName, "BUTTON");
-  btn.dispatchEvent({ type: "click" });
+  openClientsSheet();
   assert.equal(sheetIsOpen(), true, "the clients sheet opens");
   assert.equal(sheetRows().length, 2, "both PCs listed, the offline one too");
 });
@@ -456,27 +456,26 @@ test("MUTATION TARGET: the PCs list is reachable from the Clients page with no b
 test("MUTATION TARGET: each PC's presence chip is the server's field, not a recompute from last_reported_at", async () => {
   await until(() => Array.isArray(store.snapshot("clients")), "first clients poll");
   const s = mountClients();
-  s.querySelector('[data-role="open-pcs"]').dispatchEvent({ type: "click" });
+  openClientsSheet();
   await until(() => sheetRow("fresh-but-offline") !== null, "rows");
   assert.equal(textOf(sheetRow("old-but-online"), '[data-role="presence-word"]'), "Online");
   assert.equal(textOf(sheetRow("fresh-but-offline"), '[data-role="presence-word"]'), "Offline");
   assert.equal(sheetRow("old-but-online").querySelector("[data-presence-chip]").className, "pchip pchip-on");
   assert.equal(textOf(pcsSheet(), '[data-role="agents-summary"]'), "Agents: 1 online, 1 offline");
-  assert.equal(textOf(s, '[data-role="agents-summary"]'), "Agents: 1 online, 1 offline", "the Clients page line");
-  assert.equal(s.querySelectorAll('[data-role="agents-summary"]').length, 1, "one agents line on the Clients page");
+  assert.equal(s.querySelectorAll('[data-role="agents-summary"]').length, 0, "no agents line on the Clients page");
 });
 
 test("MUTATION TARGET: the sheet's heading reads 'PCs (agents)'", async () => {
   await until(() => Array.isArray(store.snapshot("clients")), "first clients poll");
   const s = mountClients();
-  s.querySelector('[data-role="open-pcs"]').dispatchEvent({ type: "click" });
+  openClientsSheet();
   assert.equal(textOf(pcsSheet(), "h2"), "PCs (agents)");
 });
 
 test("MUTATION TARGET: 'version not reported' and 'last seen … ago' on the row; the stats line keeps the games count", async () => {
   await until(() => Array.isArray(store.snapshot("clients")), "first clients poll");
   const s = mountClients();
-  s.querySelector('[data-role="open-pcs"]').dispatchEvent({ type: "click" });
+  openClientsSheet();
   await until(() => sheetRow("fresh-but-offline") !== null, "rows");
   assert.equal(textOf(sheetRow("fresh-but-offline"), "[data-presence-line]"), "last seen just now · version not reported");
   assert.equal(textOf(sheetRow("old-but-online"), "[data-presence-line]"), "last seen 3 days ago · agent 0.1.0");
@@ -487,14 +486,13 @@ test("MUTATION TARGET: 'version not reported' and 'last seen … ago' on the row
 test("an open sheet follows a presence flip on the next tick (patch, no rebuild needed)", async () => {
   await until(() => Array.isArray(store.snapshot("clients")), "first clients poll");
   const s = mountClients();
-  s.querySelector('[data-role="open-pcs"]').dispatchEvent({ type: "click" });
+  openClientsSheet();
   await until(() => sheetRow("old-but-online") !== null, "rows");
   server.clients = [{ ...CLIENTS[0], presence: "offline" }, CLIENTS[1]];
   try {
     store.refreshNow();
     await until(() => textOf(sheetRow("old-but-online"), '[data-role="presence-word"]') === "Offline", "flip painted");
     assert.equal(textOf(pcsSheet(), '[data-role="agents-summary"]'), "Agents: 0 online, 2 offline");
-    await until(() => textOf(s, '[data-role="agents-summary"]') === "Agents: 0 online, 2 offline", "clients page line follows");
   } finally {
     server.clients = CLIENTS;
     store.refreshNow();
