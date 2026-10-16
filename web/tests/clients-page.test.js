@@ -27,6 +27,7 @@ import {
   loadingNowText,
   recentAppsText,
   statsText,
+  summaryTiles,
 } from "../js/lib/clients-page.js";
 
 const MIB = 1024 * 1024;
@@ -155,4 +156,26 @@ test("last active and the page summary", () => {
   assert.equal(lastActiveText(agent({ last_active: null }), NOW), "Last active: never");
   assert.equal(clientsSummaryText([agent(), address({ connected: false })]), "2 clients · 1 connected");
   assert.equal(clientsSummaryText([agent()]), "1 client · 1 connected");
+});
+
+test("summaryTiles: connected, loaded and agents come from the cards only (CLIENTS-2)", () => {
+  const tiles = summaryTiles(
+    [
+      agent({ connected: true, loading_now: { loading: true }, stats: { bytes_served: 2 * GIB, hit_rate: 0.5 } }),
+      address({ connected: false, loading_now: { loading: false }, stats: { bytes_served: GIB, hit_rate: 1 } }),
+    ],
+    "7d",
+  );
+  assert.deepEqual(tiles.map((t) => t.key), ["connected", "loaded", "agents"]);
+  assert.equal(tiles[0].value, "1 of 2");
+  assert.equal(tiles[0].detail, "1 loading now");
+  assert.equal(tiles[1].value, "3.0 GB");
+  assert.equal(tiles[1].detail, "in the last 7 days");
+  assert.equal(tiles[2].value, "1 online");
+});
+
+test("summaryTiles: no statistics and no agent means no Loaded and no Agents tile", () => {
+  const tiles = summaryTiles([address({ connected: true, loading_now: { loading: false }, stats: null })], "7d");
+  assert.deepEqual(tiles.map((t) => t.key), ["connected"]);
+  assert.equal(tiles[0].detail, "Nothing loading now");
 });

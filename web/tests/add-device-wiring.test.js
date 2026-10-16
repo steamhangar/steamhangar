@@ -203,12 +203,12 @@ beforeEach(() => {
   server.held = [];
 });
 
-test("MUTATION TARGET: the Clients page has an 'Add' button that opens the 'Add a device' sheet", async () => {
+test("MUTATION TARGET: the Clients page has an 'Add a device' header button that opens the 'Add a device' sheet", async () => {
   const s = renderClients();
   dom.appRoot.replaceChildren(s);
   await until(() => s.querySelector('[data-role="add-device"]') !== null, "clients page built");
   const btn = s.querySelector('[data-role="add-device"]');
-  assert.equal(btn.textContent, "Add");
+  assert.equal(btn.textContent, "Add a device");
   assert.equal(btn.getAttribute("aria-label"), "Add a device");
   click(btn);
   assert.equal(sheetOpen(), true);

@@ -23,9 +23,10 @@
  * Library. The PCs sheet (`components/clients-sheet.js`) stays, reached
  * from the bypass banner and the notifications.
  *
- * **Add a device (D15).** The row opening `components/add-device-sheet.js`
- * (pairing and the agent install) is built by this view; Settings keeps a
- * pointer.
+ * **Add a device (D15, CLIENTS-2).** The header button opens
+ * `components/add-device-sheet.js` (pairing and the agent install);
+ * Settings keeps a pointer. Cards sit in an auto-fill grid under summary
+ * tiles (`summaryTiles`, real figures only).
  *
  * Polling: the overview is fetched while this view is on screen only
  * (`createViewPoll`, 30 s, the store's own loop machinery), and stopped on
@@ -94,6 +95,7 @@ import {
   mergeAgentData,
   recentAppsText,
   statsText,
+  summaryTiles,
 } from "../lib/clients-page.js";
 
 function el(tag, className, text) {
@@ -288,6 +290,18 @@ function renameButtonFor(key) {
   return cardButton(key, "rename-client");
 }
 
+function paintTiles(clients, range) {
+  els.tiles.replaceChildren();
+  const tiles = clients ? summaryTiles(clients, range) : [];
+  for (const t of tiles) {
+    const tile = el("div", "cl-tile");
+    tile.dataset.tile = t.key;
+    tile.append(el("div", "k", t.label), el("div", "v", t.value), el("div", "n", t.detail));
+    els.tiles.appendChild(tile);
+  }
+  els.tiles.hidden = !tiles.length;
+}
+
 /** Repaint the note, the sub-line and the list from `state`. */
 function paint() {
   if (!els) return;
@@ -315,6 +329,7 @@ function paint() {
     // No overview: the agent PCs alone, still listed and removable.
     const only = mergeAgentData([], agentRows);
     els.sub.textContent = only.length ? clientsSummaryText(only) : "";
+    paintTiles(only.length ? only : null, state.range);
     const nowMs = Date.now();
     for (const client of only) els.list.appendChild(buildCard(client, state.range, nowMs));
     els.agentlessNote.hidden = true;
@@ -322,6 +337,7 @@ function paint() {
   }
   if (!data) {
     els.sub.textContent = "";
+    paintTiles(null, state.range);
     if (!state.error) els.list.appendChild(el("p", "empty", "Loading clients…"));
     els.agentlessNote.hidden = true;
     return;
@@ -329,6 +345,7 @@ function paint() {
   const shownRows = (Array.isArray(data.clients) ? data.clients : []).filter((c) => !(isAgentClient(c) && hiddenRemoved(c.client_id)));
   const clients = mergeAgentData(shownRows, agentRows);
   els.sub.textContent = clientsSummaryText(clients);
+  paintTiles(clients.length ? clients : null, data.range);
   if (!clients.length) els.list.appendChild(el("p", "hint", NO_CLIENTS_TEXT));
   const nowMs = Date.now();
   for (const client of clients) els.list.appendChild(buildCard(client, data.range, nowMs));
@@ -522,26 +539,6 @@ function agentSnapshot() {
   return Array.isArray(snap) ? snap.filter((a) => !hiddenRemoved(a.client_id)) : null;
 }
 
-function buildAddSection() {
-  const row = el("div", "srow");
-  const grow = el("span", "grow");
-  grow.append(
-    el("span", "ttl", "Add a device"),
-    el(
-      "span",
-      "desc",
-      "Pair the Android app or another browser, or get the install command for vault-agent on a Windows PC, without typing the address and API key.",
-    ),
-  );
-  const addBtn = el("button", "btn ghost sm", "Add");
-  addBtn.type = "button";
-  addBtn.dataset.role = "add-device";
-  addBtn.setAttribute("aria-label", "Add a device");
-  addBtn.addEventListener("click", () => openAddDeviceSheet());
-  row.append(grow, addBtn);
-  return row;
-}
-
 store.subscribe("clients", (payload) => {
   if (!els || !payload || payload.error) return;
   if (Array.isArray(payload.items)) {
@@ -571,12 +568,24 @@ onViewChange((view) => {
 
 export function renderClients() {
   const section = el("section", "view view-clients");
-  const head = el("div", "dl-head");
+  const head = el("div", "dl-head cl-head");
+  const title = el("div");
   const h1 = el("h1", null, "Clients");
   h1.tabIndex = -1;
   const sub = el("span", "dl-sub");
   sub.dataset.role = "clients-sub";
-  head.append(h1, sub);
+  title.append(h1, sub);
+  const addBtn = el("button", "btn primary", "Add a device");
+  addBtn.type = "button";
+  addBtn.dataset.role = "add-device";
+  addBtn.setAttribute("aria-label", "Add a device");
+  addBtn.addEventListener("click", () => openAddDeviceSheet());
+  head.append(title, addBtn);
+
+  const tiles = el("section", "cl-tiles");
+  tiles.dataset.role = "clients-tiles";
+  tiles.setAttribute("aria-label", "Summary");
+  tiles.hidden = true;
 
   const range = createRangeSegs({
     label: "Statistics range",
@@ -595,9 +604,9 @@ export function renderClients() {
   agentlessNote.hidden = true;
 
   range.el.hidden = state.noFigures;
-  section.append(head, range.el, note, list, agentlessNote, buildAddSection());
+  section.append(head, tiles, range.el, note, list, agentlessNote);
 
-  els = { section, h1, sub, range: range.el, note, list, agentlessNote };
+  els = { section, h1, sub, tiles, range: range.el, note, list, agentlessNote };
   paint();
   // Same gate as the store's own loops (store-singleton.js): no key and no
   // demo mode means the onboarding overlay is up and every request would

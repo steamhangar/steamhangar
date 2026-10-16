@@ -241,6 +241,17 @@ test("MUTATION TARGET: the range selector refetches; an answer for the old range
   await until(() => /in the last 7 days/.test(stats()), "back to 7d");
 });
 
+test("MUTATION TARGET: summary tiles and the header Add a device button render (CLIENTS-2)", async () => {
+  const s = await mount();
+  await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
+  const tiles = s.querySelector('[data-role="clients-tiles"]');
+  assert.equal(tiles.hidden, false);
+  assert.ok(tiles.querySelectorAll(".cl-tile").length >= 1, "at least the Connected tile");
+  assert.equal(tiles.querySelector('[data-tile="connected"] .k').textContent, "Connected");
+  assert.equal(s.querySelector('[data-tile="outdated"]'), null, "no outdated tile before CLIENTS-3");
+  assert.equal(s.querySelector(".cl-head").querySelector('[data-role="add-device"]').textContent, "Add a device");
+});
+
 test("MUTATION TARGET: a server without the endpoint (404) gets the update note, no cards", async () => {
   server.status = 404;
   const s = await mount();

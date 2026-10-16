@@ -183,6 +183,43 @@ export function clientsSummaryText(clients) {
   return `${list.length} client${list.length === 1 ? "" : "s"} · ${connected} connected`;
 }
 
+/**
+ * Summary tiles of the page (WP CLIENTS-2), computed from the merged cards
+ * only: no tile without a source. "Loaded" needs at least one client with
+ * statistics (feed on); "Agents" needs at least one agent client.
+ * @param {Array<object>} clients
+ * @param {string} range
+ * @returns {Array<{key: string, label: string, value: string, detail: string}>}
+ */
+export function summaryTiles(clients, range) {
+  const list = Array.isArray(clients) ? clients : [];
+  const tiles = [];
+  const connected = list.filter((c) => c.connected === true).length;
+  const loading = list.filter((c) => c.loading_now && c.loading_now.loading === true).length;
+  tiles.push({
+    key: "connected",
+    label: "Connected",
+    value: `${connected} of ${list.length}`,
+    detail: loading ? `${loading} loading now` : "Nothing loading now",
+  });
+  const withStats = list.filter((c) => c.stats && Number.isFinite(c.stats.bytes_served));
+  if (withStats.length) {
+    const total = withStats.reduce((sum, c) => sum + c.stats.bytes_served, 0);
+    tiles.push({
+      key: "loaded",
+      label: "Loaded",
+      value: formatTrafficBytes(total) || DASH,
+      detail: RANGE_PHRASES[range] || "",
+    });
+  }
+  const agents = list.filter((c) => isAgentClient(c));
+  if (agents.length) {
+    const online = agents.filter((c) => c.connected === true).length;
+    tiles.push({ key: "agents", label: "Agents", value: `${online} online`, detail: `${agents.length} paired` });
+  }
+  return tiles;
+}
+
 /** Note under the list, for the agentless rows. */
 export const AGENTLESS_NOTE =
   "Machines without vault-agent show their address and cache traffic only. A PC with vault-agent can also show up here by its address until the server can match the two.";
