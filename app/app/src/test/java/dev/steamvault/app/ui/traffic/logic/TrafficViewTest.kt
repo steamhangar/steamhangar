@@ -313,7 +313,7 @@ class TrafficViewTest {
         val hour = 3_600_000L
         assertEquals("2 h ago", seriesStartText(trimmed, now))
         assertEquals("3 h ago", seriesStartText(trimmed, now + hour))
-        assertEquals("50 h ago", seriesStartText(trimmed, now + 48 * hour))
+        assertEquals("2 days ago", seriesStartText(trimmed, now + 48 * hour))
     }
 
     // ---- per-job speed ----------------------------------------------------

@@ -127,10 +127,17 @@ class D15dWiringTest {
 
     @Test
     fun `MUTATION PIN -- the graph caption reads the injected clock, not the wall clock`() {
-        assertCalledFrom(stats, "seriesStartText(shown, nowMs())", "ThroughputGraph")
+        // The call sits inside ThroughputGraph's Canvas, whose local `fun Path.trace()`
+        // fools the nearest-`fun` helper, so slice the function's own text instead.
+        val code = stripComments(read(stats))
+        val start = code.indexOf("private fun ThroughputGraph(")
+        assertTrue("ThroughputGraph is DELETED", start >= 0)
+        val next = Regex("""\n(?:@Composable|(?:private )?fun )""").find(code, start + 1)
+        val body = code.substring(start, next?.range?.first ?: code.length)
+        assertTrue("ThroughputGraph no longer draws the caption from nowMs()", body.contains("seriesStartText(shown, nowMs())"))
         assertTrue(
             "ThroughputGraph reads System.currentTimeMillis() again -- screenshot goldens go stale hourly",
-            !stripComments(read(stats)).contains("seriesStartText(shown, System.currentTimeMillis())"),
+            !body.contains("System.currentTimeMillis()"),
         )
     }
 
