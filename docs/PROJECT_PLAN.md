@@ -3278,7 +3278,22 @@ below carry their own later dates, item 12 is the current one).
       - [x] Android GRAPH-LIVE (8ebe38e), diag read-only note, `dev.sh verify`
         (613/0, schema 33), deploy Antrag (schema 29-33, new env values, store
         host, rollback via the update.sh SQLite dump)
-      - [ ] tag `v0.1.0-rc19` after main CI is green
+      - [x] tag `v0.1.0-rc19` (b29379b) after main CI is green
+
+    - [ ] **rc19.2 follow-ups** (2026-10-16, patch release on top of rc19)
+      - [x] RATE-TILE and CARD-LAYOUT (already on main)
+      - [x] MAP-FROM-MANIFEST-1: a job's own depots are mapped from its
+        ingested manifests (ADR-0003 addendum); completeness always reads
+        "X of Y on disk"
+      - [x] NOT-OWNED-2: unowned packages (language packs, content
+        packages) keep a Cached game Cached, Verify skips them, neutral
+        note "Not part of your library"; additive `not_owned` on the game
+        API
+      - [x] THROUGHPUT-DEBUG-1: opt-in `VAULT_DEBUG_THROUGHPUT` nginx log
+        plus `core/tools/throughput-report.py`; flag off renders the
+        template byte-identical to rc19; removal = flag off, recreate
+        vault-core, delete `/vault/logs/throughput-debug/`
+      - [ ] tag `v0.1.0-rc19.2` after main CI is green
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
