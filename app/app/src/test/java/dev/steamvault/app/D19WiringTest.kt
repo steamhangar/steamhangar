@@ -64,6 +64,20 @@ class D19WiringTest {
     }
 
     @Test
+    fun `MUTATION PIN -- CARD-LAYOUT-1 the game block comes before the hangar blocks in the loaded body`() {
+        val code = stripComments(read(sheet))
+        val loaded = code.substring(code.indexOf("private fun LoadedDetailBody"))
+        val store = loaded.indexOf("StoreDetailsBlock(")
+        assertTrue(store >= 0)
+        assertEquals("one call site only", store, loaded.lastIndexOf("StoreDetailsBlock("))
+        for (hangar in listOf("TOOL_APP_NOTE", "detail_last_download", "CompletenessSection(", "installedBadgeFor(", "PackagesSection(")) {
+            val at = loaded.indexOf(hangar)
+            assertTrue("$hangar present", at >= 0)
+            assertTrue("StoreDetailsBlock must precede $hangar", store < at)
+        }
+    }
+
+    @Test
     fun `MUTATION PIN -- the repository reaches the controller, real in the app and off in demo`() {
         val lib = stripComments(read("$base/ui/library/LibraryScreen.kt"))
         assertTrue(lib.contains("cardInfoRepository: CardInfoRepository = OffCardInfoRepository"))

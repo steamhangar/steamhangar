@@ -82,4 +82,14 @@ class CardInfoWebTwinTest {
         assertTrue(api.contains("`/v1/oracle/\${encodeURIComponent(appid)}/preview`"))
         assertTrue(api.contains("`/v1/store/\${encodeURIComponent(appid)}/details`"))
     }
+
+    @Test
+    fun `the two-column breakpoint and the game-first order match the web source`() {
+        val css = read("../../web/css/app.css")
+        assertTrue(css.contains("@media (min-width:600px){\n  .store-details:not(.store-nodesc){ display:grid;"))
+        assertEquals(600, dev.steamvault.app.ui.detail.STORE_TWO_COLUMN_MIN_WIDTH_DP)
+        val render = sheet.substring(sheet.indexOf("function render()"))
+        assertTrue(render.indexOf("buildHeader(gameLike, liveJob)") < render.indexOf("buildStoreBlock()"))
+        assertTrue(render.indexOf("buildStoreBlock()") < render.indexOf("buildFactLines(gameLike)"))
+    }
 }

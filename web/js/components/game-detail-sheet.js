@@ -664,6 +664,11 @@ function buildStoreBlock() {
     p.addEventListener("click", () => p.classList.toggle("expanded"));
     wrap.appendChild(p);
   }
+  // WP CARD-LAYOUT-1: the facts (mode chips, genres, developer/date, rating)
+  // are a second column beside the description on wide screens and stack
+  // under it on narrow ones (CSS `.store-details` / `.store-facts`).
+  const facts = document.createElement("div");
+  facts.className = "store-facts";
   const chips = modeChips(state.store);
   if (chips.length) {
     const row = document.createElement("div");
@@ -674,7 +679,7 @@ function buildStoreBlock() {
       chip.textContent = label;
       row.appendChild(chip);
     }
-    wrap.appendChild(row);
+    facts.appendChild(row);
   }
   const lines = [
     ["genres", genreList(state.store).join(", ")],
@@ -687,8 +692,10 @@ function buildStoreBlock() {
     p.className = "u2 store-line";
     p.dataset.role = role;
     p.textContent = line;
-    wrap.appendChild(p);
+    facts.appendChild(p);
   }
+  if (facts.childNodes.length) wrap.appendChild(facts);
+  if (!description) wrap.classList.add("store-nodesc");
   return wrap;
 }
 
@@ -1613,6 +1620,12 @@ function render() {
 
   contentEl.append(buildHeaderArt(state.appid));
   contentEl.append(buildHeader(gameLike, liveJob));
+  // WP CARD-LAYOUT-1: everything about the GAME (store details, only when
+  // VAULT_STORE_DETAILS is on and the store knew the app) comes directly
+  // under the header; everything about the HANGAR (cache facts, installed
+  // on, packages, depots, delete, GC) follows. Absent block: order unchanged.
+  const storeBlock = buildStoreBlock();
+  if (storeBlock) contentEl.append(storeBlock);
   const toolNote = buildToolAppNote(gameLike);
   if (toolNote) contentEl.append(toolNote);
   contentEl.append(buildFactLines(gameLike));
@@ -1626,10 +1639,6 @@ function render() {
     sheetTitle(gameLike),
   );
   if (completeness) contentEl.append(completeness);
-
-  // WP D19-1c: store details (only when VAULT_STORE_DETAILS is on).
-  const storeBlock = buildStoreBlock();
-  if (storeBlock) contentEl.append(storeBlock);
 
   const installedSection = buildInstalledSection(gameLike);
   if (installedSection) contentEl.append(installedSection);
