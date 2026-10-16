@@ -1538,6 +1538,16 @@ body.onboarding .nav{ display:none; }
 }
 .segs.rangesegs[hidden]{ display:none; }
 .cl-note{ text-align:left; }
+/* CLIENTS-2: header with the Add a device button, summary tiles, card grid. */
+.cl-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.cl-tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:14px 0; }
+.cl-tiles[hidden]{ display:none; }
+.cl-tile{ min-width:0; padding:12px 14px; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line-soft); }
+.cl-tile .k{ font-size:10.5px; font-weight:600; letter-spacing:.7px; text-transform:uppercase; color:var(--dim-2); }
+.cl-tile .v{ margin-top:2px; font-size:22px; font-weight:500; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.cl-tile .n{ margin-top:1px; font-size:12px; color:var(--dim); }
+.cl-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(min(440px, 100%), 1fr)); gap:14px; align-items:start; }
+.cl-list > p{ grid-column:1 / -1; }
 .clcard .cl-line{ margin-top:4px; overflow-wrap:anywhere; }
 .clcard .jobtop .pchip{ margin-top:2px; }
 /* WP D15-NAMES: the card's Rename button, the rename dialog (its title

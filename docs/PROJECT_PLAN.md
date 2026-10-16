@@ -3411,7 +3411,7 @@ below carry their own later dates, item 12 is the current one).
         a PC that is both client and agent shows once (match: equal
         `client_id`, `mergeAgentData` in `clients-page.js`). The PCs sheet
         stays for the bypass banner and notifications. Adapt `clients-*.test.js`.
-      - [ ] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
+      - [x] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
         (connected, outdated agents, ...), "Add a device" as the header
         button. Real data only, no tile without a source.
       - [ ] **CLIENTS-3** outdated-agent warning, Weg A: the agent version
