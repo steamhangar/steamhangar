@@ -3275,9 +3275,10 @@ below carry their own later dates, item 12 is the current one).
       - [x] **rc18 follow-ups** watcher streak logging, `real_http_fetch`
         marker and webhook boot witness, demo `core_apply` generation, queue
         comparator (51db3bd, a9bebc5, 7377ab9, 35ccf31, 1cf5c1e)
-      - [ ] Android GRAPH-LIVE, diag read-only note, `dev.sh verify`, tag
-        `v0.1.0-rc19`, deploy Antrag (schema 29-33, new env values, store
+      - [x] Android GRAPH-LIVE (8ebe38e), diag read-only note, `dev.sh verify`
+        (613/0, schema 33), deploy Antrag (schema 29-33, new env values, store
         host, rollback via the update.sh SQLite dump)
+      - [ ] tag `v0.1.0-rc19` after main CI is green
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
