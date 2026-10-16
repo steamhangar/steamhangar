@@ -3417,7 +3417,7 @@ below carry their own later dates, item 12 is the current one).
         "Update command" button opens the Add-a-device dialog without a
         preselected tab (the agent reports no OS). Unknown version shows no
         warning.
-      - [ ] **ADD-DEVICE-1** Add a device as tabs (Phone / Browser / Windows /
+      - [x] **ADD-DEVICE-1** Add a device as tabs (Phone / Browser / Windows /
         Linux-SteamOS) with a single security notice; secrets (API key,
         commands containing it) revealed on demand and copyable
         (`add-device-sheet.js`). Adapt `add-device-wiring.test.js`.
@@ -3457,6 +3457,8 @@ below carry their own later dates, item 12 is the current one).
         `dialog-wiring.test.js`.
       - [ ] nit: Exit animation for the nine confirm-dialog call sites
         (.dialog-backdrop toggles .on directly; currently animates in only)
+      - [ ] nit: Add-a-device tabs have no icons and the dialog has no
+        numbered steps, unlike the mockup (`docs/design/rc20/`)
       - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
         page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
         after main CI is green

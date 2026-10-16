@@ -218,16 +218,20 @@ const closeBtn = el("button", "btn wide ghost", "Close");
 closeBtn.type = "button";
 closeBtn.addEventListener("click", () => dialog.close());
 
-/** One option: heading, description, the warning, a Show/Hide toggle and the
- * (initially empty) reveal area. `build(revealEl)` fills it on Show. */
-function buildOption({ id, title, desc, showLabel, extra, build, secret = true }) {
+/** One option (a tab panel): heading, description, a Show/Hide toggle and the
+ * (initially empty) reveal area. `build(revealEl)` fills it on Show. The one
+ * security notice lives above the tabs, not in each option. */
+function buildOption({ id, title, desc, showLabel, extra, build }) {
   const wrap = el("div", "pair-option");
   wrap.dataset.option = id;
+  wrap.id = `pair-panel-${id}`;
+  wrap.setAttribute("role", "tabpanel");
+  wrap.setAttribute("aria-labelledby", `pair-tab-${id}`);
+  wrap.hidden = true;
   const h = el("h4", "sec", title);
   const p = el("p", "foot-note", desc);
   wrap.append(h, p);
   if (extra) wrap.append(extra);
-  const warn = secret ? el("p", "pair-warn", SECRET_WARNING) : null;
   const reveal = el("div", "pair-reveal");
   reveal.id = `pair-reveal-${id}`;
   reveal.dataset.role = `reveal-${id}`;
@@ -237,18 +241,80 @@ function buildOption({ id, title, desc, showLabel, extra, build, secret = true }
   toggle.dataset.role = `show-${id}`;
   toggle.setAttribute("aria-expanded", "false");
   toggle.setAttribute("aria-controls", reveal.id);
-  const option = { id, toggle, reveal, showLabel, build, shown: false };
+  const option = { id, panel: wrap, toggle, reveal, showLabel, build, shown: false };
   toggle.addEventListener("click", () => {
     if (option.shown) hideOption(option);
     else showOption(option);
   });
-  if (warn) wrap.append(warn);
   wrap.append(toggle, reveal);
   options.push(option);
   return wrap;
 }
 
 const options = [];
+
+// ---- Tabs (WAI-ARIA tab pattern, automatic activation) -----------------------
+
+const TABS = [
+  { id: "phone", label: "Phone" },
+  { id: "browser", label: "Browser" },
+  { id: "windows", label: "Windows" },
+  { id: "linux", label: "Linux / SteamOS" },
+];
+const notice = el("p", "pair-warn", SECRET_WARNING);
+notice.dataset.role = "pair-notice";
+const tablist = el("div", "pair-tabs");
+tablist.setAttribute("role", "tablist");
+tablist.setAttribute("aria-label", "Device type");
+const tabButtons = TABS.map((t, i) => {
+  const btn = el("button", "pair-tab", t.label);
+  btn.type = "button";
+  btn.id = `pair-tab-${t.id}`;
+  btn.dataset.role = `tab-${t.id}`;
+  btn.setAttribute("role", "tab");
+  btn.setAttribute("aria-controls", `pair-panel-${t.id}`);
+  btn.addEventListener("click", () => selectTab(t.id));
+  btn.addEventListener("keydown", (event) => {
+    let next = null;
+    if (event.key === "ArrowRight") next = (i + 1) % TABS.length;
+    else if (event.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = TABS.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    selectTab(TABS[next].id);
+    tabButtons[next].focus();
+  });
+  return btn;
+});
+tablist.append(...tabButtons);
+// Shown instead of a panel when the sheet opens with no tab (the caller
+// does not know the device's operating system).
+const tabPick = el("p", "hint pair-left", "The command depends on the device's operating system. Choose a device type above.");
+tabPick.dataset.role = "tab-pick";
+tabPick.hidden = true;
+
+/** Select a tab, or none with `null`. Secrets revealed in the panels being
+ * left leave the DOM (not only the screen). */
+function selectTab(id) {
+  TABS.forEach((t, i) => {
+    const on = t.id === id;
+    tabButtons[i].setAttribute("aria-selected", on ? "true" : "false");
+    // Roving tabindex: the selected tab, or the first one when none is.
+    tabButtons[i].tabIndex = on || (id === null && i === 0) ? 0 : -1;
+  });
+  for (const option of options) {
+    const on = option.id === id;
+    option.panel.hidden = !on;
+    if (!on && option.shown) hideOption(option);
+  }
+  tabPick.hidden = id !== null;
+  // The agent address field is shared by the Windows and Linux commands.
+  if (id === "windows" || id === "linux") {
+    const panel = id === "windows" ? windowsOption.panel : linuxOption.panel;
+    if (agentUrlField.parentNode !== panel) panel.insertBefore(agentUrlField, panel.childNodes[2] || null);
+  }
+}
 
 function showOption(option) {
   const key = getStoredApiKey();
@@ -596,17 +662,21 @@ const linuxWrap = buildOption({
   title: "Linux / SteamOS PC (vault-agent)",
   desc: "A shell command that downloads and checks vault-agent from the agent address above; the systemd install follows agent/README.md.",
   showLabel: "Show command",
-  secret: false,
   build: (reveal) => paintLinux(reveal),
 });
 const linuxOption = options[options.length - 1];
 optionsWrap.append(windowsWrap, linuxWrap);
 
+const firstPanel = optionsWrap.childNodes[0];
+for (const node of [notice, tablist, tabPick]) optionsWrap.insertBefore(node, firstPanel);
+
 dialog.body.append(heading, intro, unavailable, demoPhone, optionsWrap, closeBtn);
 
-/** Open the sheet with every option hidden. */
-export function openAddDeviceSheet() {
+/** Open the sheet with every option hidden. `tab` is "phone" (default),
+ * "browser", "windows" or "linux"; `null` opens with no tab selected. */
+export function openAddDeviceSheet({ tab = "phone" } = {}) {
   hideAll();
+  selectTab(TABS.some((t) => t.id === tab) ? tab : null);
   const demo = isDemoMode();
   const hasKey = isUsableKey(getStoredApiKey());
   if (demo || !hasKey) {

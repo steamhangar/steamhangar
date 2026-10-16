@@ -216,7 +216,7 @@ test("MUTATION TARGET: Clients → Manage PCs has an 'Add' button that opens the
   assert.equal(sheet().querySelector("h2").textContent, "Add a device");
 });
 
-test("MUTATION TARGET: nothing secret in the DOM until Show; every option starts hidden with the warning", () => {
+test("MUTATION TARGET: nothing secret in the DOM until Show; every option starts hidden, one security notice for all", () => {
   openAddDeviceSheet();
   assert.equal(secretInDom(), false);
   for (const id of ["phone", "browser", "windows"]) {
@@ -226,7 +226,7 @@ test("MUTATION TARGET: nothing secret in the DOM until Show; every option starts
     assert.equal(showBtn(id).getAttribute("aria-controls"), reveal(id).id);
   }
   const warnings = sheet().querySelectorAll(".pair-warn").map((p) => p.textContent);
-  assert.equal(warnings.length, 3);
+  assert.equal(warnings.length, 1, "a single notice, not one per option");
   for (const w of warnings) assert.match(w, /Anyone who sees this can control your hangar\. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync\./);
 });
 
@@ -717,4 +717,120 @@ test("MUTATION TARGET: an index answer after the sheet closed paints nothing, no
   await tick(30);
   assert.equal(appLink(), null, "the closed sheet keeps its loading line");
   assert.match(q("app-download").textContent, /Looking up the app download/);
+});
+
+// ---- ADD-DEVICE-1: tabs ------------------------------------------------------
+
+const tabBtn = (id) => q(`tab-${id}`);
+const panel = (id) => sheet().querySelector(`[data-option="${id}"]`);
+const TAB_IDS = ["phone", "browser", "windows", "linux"];
+const selectedTabs = () => TAB_IDS.filter((id) => tabBtn(id).getAttribute("aria-selected") === "true");
+const visiblePanels = () => TAB_IDS.filter((id) => panel(id).hidden !== true);
+
+test("MUTATION TARGET: tabs — ARIA roles, the Phone tab is selected by default, only its panel shows", () => {
+  openAddDeviceSheet();
+  const list = sheet().querySelector('[role="tablist"]');
+  assert.equal(list.getAttribute("aria-label"), "Device type");
+  assert.equal(
+    TAB_IDS.map((id) => tabBtn(id).textContent).join("|"),
+    "Phone|Browser|Windows|Linux / SteamOS",
+  );
+  for (const id of TAB_IDS) {
+    assert.equal(tabBtn(id).getAttribute("role"), "tab");
+    assert.equal(tabBtn(id).getAttribute("aria-controls"), panel(id).id);
+    assert.equal(panel(id).getAttribute("role"), "tabpanel");
+    assert.equal(panel(id).getAttribute("aria-labelledby"), tabBtn(id).id);
+  }
+  assert.deepEqual(selectedTabs(), ["phone"]);
+  assert.deepEqual(visiblePanels(), ["phone"]);
+  assert.equal(q("tab-pick").hidden, true);
+});
+
+test("MUTATION TARGET: tabs — click switches the panel and the selection; roving tabindex follows", () => {
+  openAddDeviceSheet();
+  click(tabBtn("windows"));
+  assert.deepEqual(selectedTabs(), ["windows"]);
+  assert.deepEqual(visiblePanels(), ["windows"]);
+  assert.equal(tabBtn("windows").tabIndex, 0);
+  assert.equal(tabBtn("phone").tabIndex, -1);
+  click(tabBtn("linux"));
+  assert.deepEqual(visiblePanels(), ["linux"]);
+});
+
+test("MUTATION TARGET: tabs — ArrowRight/ArrowLeft wrap, Home/End jump, focus moves with the selection", () => {
+  openAddDeviceSheet();
+  const press = (from, key) => {
+    const ev = fakeKeyEvent(key);
+    tabBtn(from).dispatchEvent(ev);
+    return ev;
+  };
+  assert.equal(press("phone", "ArrowRight").defaultPrevented, true);
+  assert.deepEqual(selectedTabs(), ["browser"]);
+  assert.equal(dom.document.activeElement === tabBtn("browser"), true);
+  press("browser", "End");
+  assert.deepEqual(selectedTabs(), ["linux"]);
+  press("linux", "ArrowRight");
+  assert.deepEqual(selectedTabs(), ["phone"], "wraps forward");
+  press("phone", "ArrowLeft");
+  assert.deepEqual(selectedTabs(), ["linux"], "wraps backward");
+  press("linux", "Home");
+  assert.deepEqual(selectedTabs(), ["phone"]);
+  assert.equal(press("phone", "a").defaultPrevented, false, "other keys are left alone");
+  assert.deepEqual(selectedTabs(), ["phone"]);
+});
+
+test("MUTATION TARGET: open without a tab — none selected, no panel, a pick prompt; the tablist stays reachable", () => {
+  openAddDeviceSheet({ tab: null });
+  assert.deepEqual(selectedTabs(), []);
+  assert.deepEqual(visiblePanels(), []);
+  assert.equal(q("tab-pick").hidden, false);
+  assert.match(q("tab-pick").textContent, /operating system/);
+  assert.equal(tabBtn("phone").tabIndex, 0, "keyboard can enter the tablist");
+  assert.equal(secretInDom(), false);
+  click(tabBtn("linux"));
+  assert.deepEqual(visiblePanels(), ["linux"]);
+  assert.equal(q("tab-pick").hidden, true);
+  closeSheetIfOpen();
+  openAddDeviceSheet();
+  assert.deepEqual(selectedTabs(), ["phone"], "a default open resets the selection");
+});
+
+test("open with a given tab; the agent address field follows Windows and Linux", () => {
+  openAddDeviceSheet({ tab: "linux" });
+  assert.deepEqual(visiblePanels(), ["linux"]);
+  assert.equal(q("agent-url").parentNode.parentNode === panel("linux"), true);
+  click(tabBtn("windows"));
+  assert.equal(q("agent-url").parentNode.parentNode === panel("windows"), true);
+});
+
+test("MUTATION TARGET: tabs — leaving a tab removes its revealed secret from the DOM", () => {
+  openAddDeviceSheet();
+  click(showBtn("phone"));
+  assert.equal(secretInDom(), true, "revealed");
+  click(tabBtn("browser"));
+  assert.equal(secretInDom(), false, "switching away hides it");
+  assert.equal(showBtn("phone").getAttribute("aria-expanded"), "false");
+  assert.equal(reveal("phone").childNodes.length, 0);
+  click(tabBtn("phone"));
+  assert.equal(secretInDom(), false, "coming back does not reveal on its own");
+});
+
+test("MUTATION TARGET: reveal on demand + copy — the browser link is absent until Show, then copyable", async () => {
+  openAddDeviceSheet({ tab: "browser" });
+  assert.equal(secretInDom(), false);
+  assert.equal(reveal("browser").querySelector('[data-role="pair-browser-link"]') === null, true);
+  click(showBtn("browser"));
+  const link = `${ORIGIN}/#pair=${encodeURIComponent(KEY)}`;
+  const copied = [];
+  const nav = globalThis.navigator;
+  Object.defineProperty(nav, "clipboard", { value: { writeText: async (t) => copied.push(t) }, configurable: true });
+  window.isSecureContext = true;
+  try {
+    click(reveal("browser").querySelectorAll("button").find((b) => b.textContent === "Copy link"));
+    await until(() => copied.length === 1, "clipboard write");
+    assert.equal(copied[0] === link, true, "exactly the pairing link");
+  } finally {
+    delete nav.clipboard;
+    window.isSecureContext = false;
+  }
 });
