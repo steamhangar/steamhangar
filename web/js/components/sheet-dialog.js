@@ -55,6 +55,28 @@
 
 import { pushModal, popModal } from "../lib/modal-stack.js";
 
+/** Slack added to the computed transition time before the timeout fallback
+ * finishes a close whose `transitionend` never arrived. */
+const CLOSE_FALLBACK_SLACK_MS = 100;
+
+/** Longest duration+delay (ms) of the element's `transition-*` lists, or 0
+ * when it cannot be measured (no `getComputedStyle`, e.g. the fake DOM) or no
+ * transition runs (`transition: none`, reduced motion's ~0.001ms). */
+function transitionMs(el) {
+  const gcs = globalThis.getComputedStyle || (globalThis.window && globalThis.window.getComputedStyle);
+  if (typeof gcs !== "function") return 0;
+  const cs = gcs.call(globalThis.window || globalThis, el);
+  const list = (v) => String(v || "").split(",").map((t) => {
+    const n = parseFloat(t);
+    return Number.isFinite(n) ? (/ms\s*$/.test(t) ? n : n * 1000) : 0;
+  });
+  const durs = list(cs.transitionDuration);
+  const delays = list(cs.transitionDelay);
+  let max = 0;
+  durs.forEach((d, i) => { max = Math.max(max, d + (delays[i % delays.length] || 0)); });
+  return max < 1 ? 0 : max; // below 1ms is the reduced-motion clamp: no visible motion
+}
+
 /**
  * `onClose` (WP PAIR-1, optional) runs on EVERY close path — the sheet's own
  * buttons, Escape (modal-stack), a backdrop tap, navigation — after the
@@ -97,13 +119,29 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
    * open it first. */
   let invokerEl = null;
 
+  /** Pending finish of a running close animation, or null. */
+  let cancelClose = null;
+  let closing = false;
+
+  // `on` = displayed, `shown` = animated-in state (css/app.css "sheets"):
+  // `shown` is added one frame after `on` so the transition has a start
+  // state, and removed first on close so `on` (display) can wait for it.
   function isOpen() {
-    return backdrop.classList.contains("on");
+    return backdrop.classList.contains("on") && !closing;
+  }
+
+  function finishClose() {
+    if (cancelClose) { cancelClose(); cancelClose = null; }
+    closing = false;
+    backdrop.classList.remove("on");
   }
 
   function open() {
+    if (cancelClose) finishClose();
     invokerEl = document.activeElement;
     backdrop.classList.add("on");
+    void backdrop.offsetWidth; // commit the hidden state before `shown` (no-op without layout)
+    backdrop.classList.add("shown");
     // WP 4a.8: #app (and any overlay under this one) goes inert, and Escape
     // is now routed through the shared stack's single dispatcher — see that
     // module's header for why a listener bound here directly is the bug.
@@ -113,7 +151,24 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
 
   function close() {
     if (!isOpen()) return;
-    backdrop.classList.remove("on");
+    // Modal-stack bookkeeping, onClose and focus return stay synchronous;
+    // only the visual hide waits for the transition.
+    closing = true;
+    backdrop.classList.remove("shown");
+    const ms = Math.max(transitionMs(backdrop), transitionMs(sheet));
+    if (ms === 0) {
+      finishClose();
+    } else {
+      const onEnd = (event) => {
+        if (event.target === sheet) finishClose(); // the sheet transition is the longest; the scrim fade ends earlier
+      };
+      const timer = setTimeout(finishClose, ms + CLOSE_FALLBACK_SLACK_MS);
+      backdrop.addEventListener("transitionend", onEnd);
+      cancelClose = () => {
+        clearTimeout(timer);
+        if (typeof backdrop.removeEventListener === "function") backdrop.removeEventListener("transitionend", onEnd);
+      };
+    }
     popModal(backdrop);
     if (typeof onClose === "function") onClose();
     if (invokerEl && typeof invokerEl.focus === "function") invokerEl.focus();

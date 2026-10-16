@@ -3398,7 +3398,7 @@ below carry their own later dates, item 12 is the current one).
         Library keeps `--w-wall`. Adapt
         `css-downloads-settings-layout.test.js` (it pins the `--w-text`
         assignments). Narrow breakpoints unchanged.
-      - [ ] **SHEET-MOTION-1** slide/fade for every overlay: drawers slide in
+      - [x] **SHEET-MOTION-1** slide/fade for every overlay: drawers slide in
         from their edge, bottom sheets slide up, the centre card and the
         scrim fade; one implementation in `sheet-dialog.js` + `app.css`,
         `prefers-reduced-motion` disables it. Check that the confirm dialogs
@@ -3455,6 +3455,8 @@ below carry their own later dates, item 12 is the current one).
         `game-detail-sheet.js`) become one shared component. Adapt
         `game-detail-sheet-*.test.js`, `css-overlay-geometry.test.js`,
         `dialog-wiring.test.js`.
+      - [ ] nit: Exit animation for the nine confirm-dialog call sites
+        (.dialog-backdrop toggles .on directly; currently animates in only)
       - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
         page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
         after main CI is green
