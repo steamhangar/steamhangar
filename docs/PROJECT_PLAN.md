@@ -3243,6 +3243,42 @@ below carry their own later dates, item 12 is the current one).
       - [ ] UPD-2 (web badge, button, filter chip), UPD-3 (Android), UPD-4
         (docs, ADR addendum superseding the 2026-08-18 "never bare Check" rule).
 
+    - [ ] **rc19 Downloads and card block** (run 2026-10-15/16; details in
+      `docs/handover/rc19-run-plan.md` and
+      `docs/handover/post-0.1.0-roadmap.md`; tag not yet cut).
+      - [x] **NOT-OWNED-1** `not_owned` job outcome, SteamVR tool-app seed,
+        Android parity (2a23eb3, 19ef097, 64c90f6)
+      - [x] **METRIC-AUDIT** metric labels by scope, web and Android (dfeed99,
+        a7a115a)
+      - [x] **TILE-INTERNET** "Loaded from the internet" tile, web and Android
+        (167625a, a7a115a)
+      - [x] **GRAPH-ZOOM** 1 min traffic tier, 1 h / 6 h ranges, schema 29
+        (c127c6d, 4d08701)
+      - [x] **GRAPH-LIVE** in-memory live tier, `GET /v1/throughput/live`,
+        web graph (9f8d6c4, 902623a, 5f772de; ADR-0025). Android part open.
+      - [x] **LIB-SORT** library sort, web and Android (319c11e, 90e9665)
+      - [x] **MAP-DRIFT-1** orphan depot mapping cleanup at startup (6bf0b65)
+      - [x] **ID-AUDIT** traffic-seen apps are named, never a bare id as title
+        (e6c0085, 2601e25)
+      - [x] **D16** neutral upstream-budget wording (web f34317d) and Android
+        settings UI with expert switch and risky confirm (3c25459, 30e3357,
+        6566a2f, 2c8bd69, b988579)
+      - [x] **D19** expected depots and size 1a/1b (22afcab, 202ef0f), store
+        details 1c (2c5ee64, 4ec9281), Android card (e1ef20a); schema 32/33,
+        ADR-0024
+      - [x] **D20** queue order, api + web (ff0e8c1, c2eb090) and Android
+        (8bd40c9)
+      - [x] **D21** privacy review (038dcb0); D22 modes stay a draft ADR-0023,
+        not built
+      - [x] **D23** library metadata table, filters, rating/year sort, schema
+        30 (96ca39a, 9441331, 32ef087)
+      - [x] **rc18 follow-ups** watcher streak logging, `real_http_fetch`
+        marker and webhook boot witness, demo `core_apply` generation, queue
+        comparator (51db3bd, a9bebc5, 7377ab9, 35ccf31, 1cf5c1e)
+      - [ ] Android GRAPH-LIVE, diag read-only note, `dev.sh verify`, tag
+        `v0.1.0-rc19`, deploy Antrag (schema 29-33, new env values, store
+        host, rollback via the update.sh SQLite dump)
+
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
     user decision on 2026-10-02 (ADR-0016 addendum, ships in
