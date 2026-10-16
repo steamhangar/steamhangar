@@ -79,7 +79,7 @@ function overview(range, state = "ok") {
   return { event_feed: feed(state), range, tier: "1h", range_start: null, active_window_minutes: 15, clients };
 }
 
-const server = { state: "ok", status: 200, calls: [], gate: null };
+const server = { state: "ok", status: 200, calls: [], gate: null, serverVersion: null, agentVersion: undefined };
 function respond(status, data) {
   const text = JSON.stringify(data);
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => text };
@@ -93,6 +93,8 @@ globalThis.fetch = async (url) => {
     if (server.status !== 200) return respond(server.status, { detail: server.status === 404 ? "Not Found" : "database is locked" });
     return respond(200, overview(range, server.state));
   }
+  if (u.pathname === "/v1/settings" && server.serverVersion) return respond(200, { readonly: false, settings: [], server_version: server.serverVersion });
+  if (u.pathname === "/v1/clients" && server.agentVersion !== undefined) return respond(200, [{ client_id: "gaming-pc", agent_version: server.agentVersion }]);
   if (["/v1/clients", "/v1/jobs", "/v1/games"].includes(u.pathname)) return respond(200, []);
   if (u.pathname === "/v1/cache/summary") return respond(200, {});
   return respond(404, { detail: "Not Found" });
@@ -135,6 +137,8 @@ beforeEach(() => {
   server.status = 200;
   server.calls = [];
   server.gate = null;
+  server.serverVersion = null;
+  server.agentVersion = undefined;
 });
 
 test("MUTATION TARGET: one card per client; the agent's lines, and the address named by its IP with no agent and no installed line", async () => {
@@ -248,8 +252,45 @@ test("MUTATION TARGET: summary tiles and the header Add a device button render (
   assert.equal(tiles.hidden, false);
   assert.ok(tiles.querySelectorAll(".cl-tile").length >= 1, "at least the Connected tile");
   assert.equal(tiles.querySelector('[data-tile="connected"] .k').textContent, "Connected");
-  assert.equal(s.querySelector('[data-tile="outdated"]'), null, "no outdated tile before CLIENTS-3");
+  const unknownTile = s.querySelector('[data-tile="outdated"]');
+  assert.equal(unknownTile.querySelector(".v").textContent, "—", "server version unknown (settings 404): no count");
+  assert.equal(unknownTile.className, "cl-tile", "no warn state without a count");
   assert.equal(s.querySelector(".cl-head").querySelector('[data-role="add-device"]').textContent, "Add a device");
+});
+
+test("MUTATION TARGET: an agent whose version differs from the server's shows the warning, the tile and the Update command button (CLIENTS-3)", async () => {
+  server.serverVersion = "0.1.0-rc19.2";
+  server.agentVersion = "0.1.0-rc18.1";
+  const s = await mount();
+  store.refreshNow();
+  await until(() => card(s, "agent:gaming-pc") && card(s, "agent:gaming-pc").querySelector('[data-role="agent-outdated"]'), "outdated block");
+  const a = card(s, "agent:gaming-pc");
+  assert.match(text(a, '[data-role="agent-outdated"]'), /^Agent outdated.*0\.1\.0-rc18\.1.*0\.1\.0-rc19\.2/);
+  const btn = a.querySelector('[data-role="update-command"]');
+  assert.equal(btn.textContent, "Update command");
+  assert.equal(btn.getAttribute("aria-label"), "Update command for gaming-pc");
+  assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="agent-outdated"]'), null, "an address never warns");
+  const tile = s.querySelector('[data-tile="outdated"]');
+  assert.equal(tile.querySelector(".v").textContent, "1");
+  assert.match(tile.className, /\bwarn\b/);
+  const src = readFileSync(new URL("../js/views/clients.js", import.meta.url), "utf8");
+  assert.match(src, /openAddDeviceSheet\(\{ tab: null \}\)/, "opens the dialog without a preselected tab");
+});
+
+test("an agent with the server's version shows no warning and a calm 0 tile (CLIENTS-3)", async () => {
+  server.serverVersion = "0.1.0-rc19.2";
+  server.agentVersion = "0.1.0-rc19.2";
+  const s = await mount();
+  store.refreshNow();
+  await until(() => s.querySelector('[data-tile="outdated"] .v') && s.querySelector('[data-tile="outdated"] .v').textContent === "0", "zero tile");
+  await until(() => store.snapshot("clients").some((a) => a.agent_version === "0.1.0-rc19.2"), "agent row in the store");
+  await tick(30);
+  assert.equal(s.querySelector('[data-role="agent-outdated"]'), null);
+  assert.doesNotMatch(s.querySelector('[data-tile="outdated"]').className, /warn/);
+  // Later tests expect an empty agent list: let the store drop the row.
+  server.agentVersion = undefined;
+  store.refreshNow();
+  await until(() => store.snapshot("clients").length === 0, "agent row gone from the store");
 });
 
 test("MUTATION TARGET: a server without the endpoint (404) gets the update note, no cards", async () => {

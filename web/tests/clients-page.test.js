@@ -27,6 +27,8 @@ import {
   loadingNowText,
   recentAppsText,
   statsText,
+  isAgentOutdated,
+  outdatedAgentInfo,
   summaryTiles,
 } from "../js/lib/clients-page.js";
 
@@ -166,12 +168,47 @@ test("summaryTiles: connected, loaded and agents come from the cards only (CLIEN
     ],
     "7d",
   );
-  assert.deepEqual(tiles.map((t) => t.key), ["connected", "loaded", "agents"]);
+  assert.deepEqual(tiles.map((t) => t.key), ["connected", "loaded", "agents", "outdated"]);
   assert.equal(tiles[0].value, "1 of 2");
   assert.equal(tiles[0].detail, "1 loading now");
   assert.equal(tiles[1].value, "3.0 GB");
   assert.equal(tiles[1].detail, "in the last 7 days");
   assert.equal(tiles[2].value, "1 online");
+});
+
+test("isAgentOutdated: differs only; unknown or non-release versions never warn (CLIENTS-3)", () => {
+  assert.equal(isAgentOutdated("0.1.0-rc19.3", "0.1.0-rc19.3"), false, "equal");
+  assert.equal(isAgentOutdated("0.1.0-rc18.1", "0.1.0-rc19.2"), true, "differs");
+  assert.equal(isAgentOutdated("0.1.0", "0.1.0-rc19.2"), true, "release vs rc differs");
+  assert.equal(isAgentOutdated("0.2.0", "0.1.0"), true, "newer agent differs too: the rule is 'differs'");
+  assert.equal(isAgentOutdated(" 0.1.0 ", "0.1.0"), false, "whitespace ignored");
+  for (const unknown of [null, undefined, "", "  ", 7, "dev", "v0.1.0", "dev-1a2b3c4"]) {
+    assert.equal(isAgentOutdated(unknown, "0.1.0"), false, `agent ${String(unknown)}`);
+    assert.equal(isAgentOutdated("0.1.0", unknown), false, `server ${String(unknown)}`);
+  }
+});
+
+test("outdatedAgentInfo reads the agent row's version; agentless cards never warn", () => {
+  const withVersion = (v) => agent({ agent: { agent_version: v } });
+  assert.deepEqual(outdatedAgentInfo(withVersion("0.1.0-rc18.1"), "0.1.0-rc19.2"), { agent: "0.1.0-rc18.1", server: "0.1.0-rc19.2" });
+  assert.equal(outdatedAgentInfo(withVersion(null), "0.1.0"), null);
+  assert.equal(outdatedAgentInfo(withVersion("0.1.0"), null), null);
+  assert.equal(outdatedAgentInfo(agent({ agent: null }), "0.1.0"), null);
+  assert.equal(outdatedAgentInfo(address(), "0.1.0"), null);
+});
+
+test("summaryTiles: the outdated-agents tile needs an agent, warns only above zero (CLIENTS-3)", () => {
+  const tile = (list, server) => summaryTiles(list, "7d", server).find((t) => t.key === "outdated");
+  assert.equal(tile([address()], "0.1.0"), undefined, "no agent, no tile");
+  const old = agent({ agent: { agent_version: "0.0.9" } });
+  const current = agent({ key: "agent:b", agent: { agent_version: "0.1.0" } });
+  assert.deepEqual(tile([old, current], "0.1.0"), { key: "outdated", label: "Outdated agents", value: "1", detail: "Version differs from the server", warn: true });
+  const none = tile([current], "0.1.0");
+  assert.equal(none.value, "0");
+  assert.equal(none.warn, false);
+  const unknown = tile([old], null);
+  assert.equal(unknown.value, "—", "unknown server version: no count claimed");
+  assert.equal(unknown.warn, false);
 });
 
 test("summaryTiles: no statistics and no agent means no Loaded and no Agents tile", () => {
