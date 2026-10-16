@@ -66,6 +66,11 @@ for f in "$dockerfile" \
          "$core_dir/tests/build-version-race-rig.sh" \
          "$core_dir/tests/test-root-only-dir.sh" \
          "$core_dir/tests/volume-ownership-race-rig.sh" \
+         "$core_dir/docker/31-vault-debug-throughput.sh" \
+         "$core_dir/tests/test-debug-throughput-hook.sh" \
+         "$core_dir/tests/test_throughput_report.py" \
+         "$core_dir/tests/fixtures/throughput-sample.log" \
+         "$core_dir/tools/throughput-report.py" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/45-vault-eventlog-rotate.sh" \
          "$core_dir/tests/test-eventlog-rotate-hook.sh" \
@@ -133,6 +138,15 @@ bash "$core_dir/tests/test-build-version-hook.sh"
 # rotation itself runs live below ("event-log rotation").
 echo "--- core/tests/test-eventlog-rotate-hook.sh ---"
 bash "$core_dir/tests/test-eventlog-rotate-hook.sh"
+
+# --- 0b-tp. the throughput debug hook (WP THROUGHPUT-DEBUG-1) ----------------
+# Flag grammar, limits, marker rendering and the age/size pruning, docker-free;
+# the directory, the startup line and the real nginx -t run in render_and_test
+# ("throughput debug ON/OFF"). Then the analysis script's unit tests.
+echo "--- core/tests/test-debug-throughput-hook.sh ---"
+bash "$core_dir/tests/test-debug-throughput-hook.sh"
+echo "--- core/tests/test_throughput_report.py ---"
+python3 -m unittest "$core_dir/tests/test_throughput_report.py"
 
 # --- 0b-d16c. the core settings path, docker-free (D16c) --------------------
 # The shared grammar table against the real hooks (the Python twins run the
@@ -322,6 +336,8 @@ render_and_test() {
         -e NGINX_ENVSUBST_FILTER='^VAULT_' \
         -e VAULT_RESOLVER="1.1.1.1" \
         -e VAULT_EVENT_LOG="$event_log" \
+        -e VAULT_DEBUG_THROUGHPUT="${DEBUG_TP:-}" \
+        -e EXPECTED_TP="${DEBUG_TP_EXPECT:-0}" \
         -e EXPECTED_DIRECTIVES="$expected_directives" \
         -e PROBE_GUARDS="${4:-}" \
         -e VAULT_UPSTREAM_RATE="$rate" \
@@ -369,9 +385,10 @@ render_and_test() {
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
             cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
+            cp /workspace/core-docker/31-vault-debug-throughput.sh /docker-entrypoint.d/31-vault-debug-throughput.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
             cp /workspace/core-docker/45-vault-eventlog-rotate.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
-            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
+            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/31-vault-debug-throughput.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
 
             # The REAL stock entrypoint: runs every /docker-entrypoint.d/*.sh
             # hook in sorted order (stock 10-/15-/20-envsubst, our 25-, stock
@@ -434,6 +451,37 @@ render_and_test() {
             if [ "${marker_count:-0}" != "0" ]; then
                 echo "FAIL: $marker_count VAULT_EVENT_LOG_LINE marker(s) survived -- half-rendered config"
                 status=1
+            fi
+
+            # --- WP THROUGHPUT-DEBUG-1: the opt-in debug log -----------------
+            # OFF (flag unset): no vault_tp directive, no marker, and nothing
+            # on disk. ON: exactly 2 directives (each in its own location),
+            # the directory exists (nginx -t opened the log), and this
+            # `nginx -t` run wrote no startup line (not a server start).
+            tp_count=$(grep -cE "^[[:space:]]*access_log[[:space:]].*vault_tp" "$conf" || true)
+            tp_marker=$(grep -c "VAULT_DEBUG_TP_LINE" "$conf" || true)
+            echo "debug throughput: directives=$tp_count (expected $EXPECTED_TP), markers=$tp_marker (expected 0)"
+            [ "$tp_count" = "$EXPECTED_TP" ] || { echo "FAIL: vault_tp directive count $tp_count, expected $EXPECTED_TP"; status=1; }
+            [ "$tp_marker" = 0 ] || { echo "FAIL: VAULT_DEBUG_TP_LINE marker(s) survived"; status=1; }
+            if [ "$EXPECTED_TP" = 0 ]; then
+                if grep -qE "vault_tp|throughput|VAULT_DEBUG" "$conf"; then
+                    echo "FAIL: debug flag off but the rendered config still mentions vault_tp/throughput/VAULT_DEBUG"; status=1
+                fi
+                if [ -e /vault/logs/throughput-debug ]; then
+                    echo "FAIL: debug flag off but /vault/logs/throughput-debug exists"; status=1
+                fi
+                grep -q "31-vault-debug-throughput.sh: VAULT_DEBUG_THROUGHPUT off" /tmp/entrypoint.log \
+                    || { echo "FAIL: 31- did not report the flag off"; status=1; }
+            else
+                [ -d /vault/logs/throughput-debug ] || { echo "FAIL: debug flag on but the directory is missing"; status=1; }
+                if [ -s /vault/logs/throughput-debug/throughput.log ]; then
+                    echo "FAIL: nginx -t wrote into the debug log"; status=1
+                fi
+                grep -q "31-vault-debug-throughput.sh: throughput debug log ENABLED (not a server start" /tmp/entrypoint.log \
+                    || { echo "FAIL: 31- did not report ON / not-a-server-start"; status=1; }
+                # The $tcpinfo_* variables must exist in this nginx build:
+                # nginx -t above already parsed them (an unknown variable is a config error).
+                grep -q "tcpinfo_rtt" "$conf" || { echo "FAIL: log_format lacks tcpinfo_rtt"; status=1; }
             fi
 
             # --- WP VER-2: the build-version hook ran in the real chain ------
@@ -1000,10 +1048,11 @@ render_must_fail() {
             cp /workspace/core-docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
             cp /workspace/core-docker/27-vault-upstream-rate.sh /docker-entrypoint.d/27-vault-upstream-rate.sh
             cp /workspace/core-docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-pool.sh
+            cp /workspace/core-docker/31-vault-debug-throughput.sh /docker-entrypoint.d/31-vault-debug-throughput.sh
             cp /workspace/core-docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
             cp /workspace/core-docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
             cp /workspace/core-docker/45-vault-eventlog-rotate.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
-            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
+            chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/31-vault-debug-throughput.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
             rc=0
             /docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf || rc=$?
             if [ -n "$RMF_POST" ] && ! sh -c "$RMF_POST"; then
@@ -1034,6 +1083,10 @@ render_must_fail() {
 
 render_and_test "cache-event log OFF (core/Dockerfile default)" "" 0 probe-guards
 render_and_test "cache-event log ON" "/vault/logs/event.log" 3
+# WP THROUGHPUT-DEBUG-1: the opt-in throughput log, on top of the event log
+# off and on (two independent features, one config).
+DEBUG_TP=1 DEBUG_TP_EXPECT=2 render_and_test "throughput debug ON" "" 0
+DEBUG_TP=1 DEBUG_TP_EXPECT=2 render_and_test "throughput debug ON, event log ON" "/vault/logs/event.log" 3
 # WP SEC-FIX-5: the upgrade -- a volume from an image before SEC-FIX-5
 # (everything 101:101, an existing event.log and version file) is migrated by
 # 21-vault-volume-ownership.sh, through the real entrypoint, event log on.
@@ -1264,7 +1317,7 @@ docker run --rm \
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
         # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
         sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
-        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 31-vault-debug-throughput.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1313,7 +1366,7 @@ docker run --rm \
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
         # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
         sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
-        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 31-vault-debug-throughput.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1441,7 +1494,7 @@ docker run --rm --network none \
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
         # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
         sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
-        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 31-vault-debug-throughput.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1504,7 +1557,7 @@ docker run --rm --network none \
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
         # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
         sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
-        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 31-vault-debug-throughput.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1570,7 +1623,7 @@ docker run --rm --network none \
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
         # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
         sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
-        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 31-vault-debug-throughput.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1671,7 +1724,7 @@ docker run --rm --network none \
         cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
         # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
         sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
-        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 40-vault-preflight.sh; do
+        for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 31-vault-debug-throughput.sh 40-vault-preflight.sh; do
             cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
             chmod 0755 "/docker-entrypoint.d/$h"
         done
@@ -1732,7 +1785,7 @@ docker run --rm --network none "${CORE_CAP_ARGS[@]}" \
         # D16c: the /health generation include 15-vault-settings.envsh writes (generation 0, no settings file).
         sh -c ". /workspace/core-docker/vault-settings-lib.sh && vs_write_generation_conf /etc/nginx/vault-settings-generation.conf 0"
         for h in 21-vault-volume-ownership 25-vault-eventlog 26-vault-tls-passthrough 27-vault-upstream-rate \
-                 28-vault-upstream-pool 29-vault-build-version 40-vault-preflight 45-vault-eventlog-rotate; do
+                 28-vault-upstream-pool 29-vault-build-version 31-vault-debug-throughput 40-vault-preflight 45-vault-eventlog-rotate; do
             cp "/workspace/core-docker/$h.sh" "/docker-entrypoint.d/$h.sh"
             chmod 0755 "/docker-entrypoint.d/$h.sh"
         done
@@ -1854,7 +1907,7 @@ d16c_boot() {
             cp /workspace/core-docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
             cp /workspace/core-docker/vault-settings-lib.sh /opt/vault/vault-settings-lib.sh
             cp /workspace/core-docker/15-vault-settings.envsh /docker-entrypoint.d/15-vault-settings.envsh
-            for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 29-vault-build-version.sh 40-vault-preflight.sh 45-vault-eventlog-rotate.sh 47-vault-settings-watch.sh; do
+            for h in 21-vault-volume-ownership.sh 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 27-vault-upstream-rate.sh 28-vault-upstream-pool.sh 29-vault-build-version.sh 31-vault-debug-throughput.sh 40-vault-preflight.sh 45-vault-eventlog-rotate.sh 47-vault-settings-watch.sh; do
                 cp "/workspace/core-docker/$h" "/docker-entrypoint.d/$h"
                 chmod 0755 "/docker-entrypoint.d/$h"
             done

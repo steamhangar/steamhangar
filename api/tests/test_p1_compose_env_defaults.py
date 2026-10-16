@@ -252,6 +252,10 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     "TZ": "UTC",  # nginx's $time_iso8601 is local time; same `:-` form as vault-api
     "VAULT_UPSTREAM_RATE": "",
     "VAULT_UPSTREAM_RATE_WINDOW": "",
+    # WP THROUGHPUT-DEBUG-1: opt-in debug log, `-` form, blank = off / hook defaults.
+    "VAULT_DEBUG_THROUGHPUT": "",
+    "VAULT_DEBUG_THROUGHPUT_MAX_MB": "",
+    "VAULT_DEBUG_THROUGHPUT_MAX_DAYS": "",
     # WP CORE-FIX-3 (ADR-0020): the HTTPS passthrough switch, default on.
     # The `:-` form and the image/hook defaults are pinned in
     # test_core_fix_3_tls_passthrough.py.

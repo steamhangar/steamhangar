@@ -76,6 +76,9 @@ COPY docker/28-vault-upstream-pool.sh /docker-entrypoint.d/28-vault-upstream-poo
 # /vault/logs/vault-core-version.json at every start for vault-api's
 # GET /v1/about. Touches no nginx config.
 COPY docker/29-vault-build-version.sh /docker-entrypoint.d/29-vault-build-version.sh
+# WP THROUGHPUT-DEBUG-1: opt-in throughput debug log (VAULT_DEBUG_THROUGHPUT,
+# default off = deletes two marker lines from the rendered config, nothing else).
+COPY docker/31-vault-debug-throughput.sh /docker-entrypoint.d/31-vault-debug-throughput.sh
 COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
 # WP D15-ROT (ADR-0008 addendum 2026-10-13): rotates the cache-event log at
 # 64 MiB into ONE old file (rename + nginx reopen), from a background loop
@@ -100,7 +103,7 @@ COPY nginx/vault-upstream-cap.conf /opt/vault/vault-upstream-cap.native.conf
 RUN set -eux; \
     chmod 0755 /docker-entrypoint.d/15-vault-settings.envsh /docker-entrypoint.d/47-vault-settings-watch.sh; \
     chmod 0644 /opt/vault/vault-settings-lib.sh; \
-    chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh /opt/vault/check-config-drift.sh; \
+    chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh /docker-entrypoint.d/31-vault-debug-throughput.sh /opt/vault/check-config-drift.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
     # image honest about what it serves.
@@ -144,6 +147,9 @@ RUN set -eux; \
     # on to find it. check-config-drift.sh cross-checks this number.
     grep -q '\${VAULT_EVENT_LOG}' /etc/nginx/templates/nginx.conf.template; \
     [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "3" ]; \
+    # WP THROUGHPUT-DEBUG-1: the opt-in debug log's two access_log lines carry
+    # the marker 31-vault-debug-throughput.sh strips or deletes.
+    [ "$(grep -c '# VAULT_DEBUG_TP_LINE' /etc/nginx/templates/nginx.conf.template)" = "17" ]; \
     # WP TH-1a: the upstream rate cap is wired in exactly once (include at
     # http level, proxy_limit_rate in @miss), and the hook renders its cap-off
     # form in this image's own shell.
