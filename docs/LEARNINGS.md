@@ -1123,3 +1123,30 @@ These are not style preferences; each entry cost a review round to learn.
   secrets outputs only literals and hex digests; consumers derive names
   from a secret-free job (build-version) and format-check every output
   (rc18 publish failure, CI-FIX-DIST, re-cut as v0.1.0-rc18.1).
+- CI runs SQLite ~3.45, local runs 3.53. Tests and migrations must not use
+  `ALTER TABLE ... DROP COLUMN` (or other newer syntax) even if the local
+  run is green; build old-schema fixtures with CREATE TABLE instead (D20
+  fixture, CI-only failure).
+- The CI filesystem reuses inode numbers after an unlink. A test that
+  replaces a file and expects "different inode" must keep the old file
+  alive (rename it aside) until the check is done, or it passes locally and
+  fails in CI (GRAPH-LIVE replacement test).
+- To diagnose a CI-only pytest failure without log access: read the
+  check-run annotations; if they are empty, push a temp branch whose job
+  echoes the pytest FAILED lines as `::error::` annotations and delete the
+  branch afterwards.
+- The Android twin and pin tests (source scans of the web copy and of
+  Kotlin files) break on almost every UI or label change and only run in
+  CI. Before editing UI text, a row or a screen, grep the pins
+  (`*WebTwinTest`, `*PinTest`, wiring pins) for the touched string and
+  update them in the same package.
+- Screenshot goldens are refreshed by the bot only on `wp/*-goldens`
+  branches, and bot commits do not trigger CI: push the branch, wait for the
+  bot commit, then push an empty commit to get a CI run on the new goldens.
+- Tailing a log for a live view (GRAPH-LIVE): an idle gap leaves a hole in
+  the ring, so restart from the file's end window, drop stale cells and move
+  the "covered from" mark to the next minute so the persisted tier fills the
+  gap; a shrunk file or a changed inode restarts at offset 0; a read that
+  starts mid-file must align to the next newline or it folds a torn line into
+  the ring; cap bytes per read and reads per refresh and skip an oversized
+  backlog to its tail.
