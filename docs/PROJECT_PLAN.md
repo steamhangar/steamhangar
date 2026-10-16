@@ -3293,7 +3293,20 @@ below carry their own later dates, item 12 is the current one).
         plus `core/tools/throughput-report.py`; flag off renders the
         template byte-identical to rc19; removal = flag off, recreate
         vault-core, delete `/vault/logs/throughput-debug/`
-      - [ ] tag `v0.1.0-rc19.2` after main CI is green
+      - [x] tag `v0.1.0-rc19.2` after main CI is green (pushed on main)
+
+    - [ ] **rc19.3** (2026-10-16, throughput diagnostics and tuning switches)
+      - [x] TUNE-1a: heartbeat in the opt-in debug log, `VAULT_NGINX_AIO`
+        and `VAULT_NGINX_WORKERS` switches (off by default), report
+        Heartbeat section (merged)
+      - [x] TUNE-1b: ADR-0027, learnings, plan block
+      - [x] NITS-1: index on `jobs (status, finished_at)` for
+        `not_owned_appids` (additive, no schema bump)
+      - [ ] tag `v0.1.0-rc19.3` after main CI is green
+      - [ ] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
+        WORKERS=2)
+      - [ ] LIVE-DELAY-1 analysis: the Downloads page shows client downloads
+        more than 1 min late, unresolved; rc20 unless tiny
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
