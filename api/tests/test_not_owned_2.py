@@ -34,7 +34,7 @@ from tests.test_worker import (  # noqa: F401  (fixtures)
     make_settings,
     wait_for_job,
 )
-from vault_api import jobs
+from vault_api import deletion, jobs
 from vault_api.db import get_connection
 from vault_api.main import create_app
 
@@ -87,10 +87,10 @@ def test_worker_keeps_status_for_an_app_with_cache_bytes(
 
         assert job["status"] == "not_owned"
         game = client.get("/v1/games/440", headers=AUTH).json()
-        assert game["status"] == "idle"
+        assert game["status"] == "done"
         assert game["not_owned"] is True
         listed = {g["appid"]: g for g in client.get("/v1/games", headers=AUTH).json()}
-        assert listed[440]["status"] == "idle"
+        assert listed[440]["status"] == "done"
         assert listed[440]["not_owned"] is True
         db = get_connection(client.app.state.settings.db_path)
         try:
@@ -208,3 +208,70 @@ def test_scheduler_and_cached_prefill_drop_a_kept_status_app(client: TestClient)
 
     assert response.status_code == 202
     assert [r["appid"] for r in response.json()] == []
+
+
+def test_kept_status_keeps_the_shared_depot_protection(
+    tmp_path: Path, bindir: Path, cache_root: Path
+) -> None:
+    """Bytes without last_prefill_at must end ``done``, not ``idle``: idle and
+    never prefilled reads as "no content" and would unprotect a shared depot."""
+    executable = stub_prefill.make_stub(
+        bindir, cache_root=str(cache_root), summary_text=_MOJIBAKE_TABLE_UNOWNED
+    )
+    with TestClient(create_app(make_settings(tmp_path, cache_root, executable))) as client:
+        _seed_mapping(client, 441, 440)
+        _seed_cache_bytes(client, 441)
+        (job_id,) = enqueue(client, 440)
+        assert wait_for_job(client, job_id)["status"] == "not_owned"
+
+        db = get_connection(client.app.state.settings.db_path)
+        try:
+            states = deletion.load_co_owner_states(db, [440])
+            assert states == {440: True}
+            plan = deletion.plan_deletion(
+                [(900, 441), (900, 440)], appid=441, co_owner_states=states
+            )
+        finally:
+            db.close()
+        assert plan.remnant == []
+        assert [(x.depotid, x.shared_with) for x in plan.shared] == [(900, [440])]
+
+
+def test_cache_deletion_frees_a_kept_app_but_a_never_cached_one_stays(
+    conn: sqlite3.Connection,
+) -> None:
+    now = jobs.utcnow_iso()
+    _kept_not_owned(conn, 10, now, status="done")
+    conn.execute("UPDATE apps SET last_prefill_at = ? WHERE appid = 10", (now,))
+    conn.commit()
+    jobs.set_app_status(conn, 11, jobs.STATUS_NOT_OWNED)
+    conn.execute(
+        "INSERT INTO jobs (appid, type, status, created_at, finished_at) "
+        "VALUES (11, 'prefill', ?, ?, ?)",
+        (jobs.STATUS_NOT_OWNED, now, now),
+    )
+    conn.commit()
+    assert jobs.not_owned_appids(conn) == {10, 11}
+
+    deletion.reset_app_after_deletion(conn, 10, jobs.STATUS_IDLE, set_needs_force=True)
+
+    assert jobs.not_owned_appids(conn) == {11}
+
+
+def test_flag_does_not_come_from_a_stale_not_owned_status(
+    tmp_path: Path, bindir: Path, cache_root: Path
+) -> None:
+    executable = stub_prefill.make_stub(bindir, cache_root=str(cache_root))
+    with TestClient(create_app(make_settings(tmp_path, cache_root, executable))) as client:
+        old = (datetime.now(timezone.utc) - timedelta(days=9)).strftime(jobs.TIMESTAMP_FORMAT)
+        db = get_connection(client.app.state.settings.db_path)
+        try:
+            _kept_not_owned(db, 440, old, status=jobs.STATUS_NOT_OWNED)
+        finally:
+            db.close()
+
+        game = client.get("/v1/games/440", headers=AUTH).json()
+        assert game["status"] == "not_owned"
+        assert game["not_owned"] is False
+        listed = {g["appid"]: g for g in client.get("/v1/games", headers=AUTH).json()}
+        assert listed[440]["not_owned"] is False

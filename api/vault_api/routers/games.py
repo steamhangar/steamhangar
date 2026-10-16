@@ -685,8 +685,7 @@ def list_games(
                     row["name"], classifications.get(row["appid"])
                 ),
                 status=row["status"],
-                not_owned=row["appid"] in not_owned_set
-                or row["status"] == jobs.STATUS_NOT_OWNED,
+                not_owned=row["appid"] in not_owned_set,
                 last_prefill_at=row["last_prefill_at"],
                 last_manifest_check=row["last_manifest_check"],
                 depot_count=row["depot_count"],
@@ -832,7 +831,7 @@ def get_game(
         appid=app_row["appid"],
         name=app_classification.display_name(app_row["name"], classification),
         status=app_row["status"],
-        not_owned=detail_not_owned or app_row["status"] == jobs.STATUS_NOT_OWNED,
+        not_owned=detail_not_owned,
         last_prefill_at=app_row["last_prefill_at"],
         last_manifest_check=app_row["last_manifest_check"],
         depots=depots,

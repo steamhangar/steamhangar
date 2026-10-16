@@ -761,11 +761,10 @@ class PrefillWorker:
 
     @staticmethod
     def _kept_status(conn: sqlite3.Connection, appid: int) -> str:
-        """``done`` for a previously prefilled app, else ``idle``."""
-        row = conn.execute(
-            "SELECT last_prefill_at FROM apps WHERE appid = ?", (appid,)
-        ).fetchone()
-        return jobs.STATUS_DONE if row is not None and row[0] is not None else jobs.STATUS_IDLE
+        """Always ``done``: ``idle`` + never prefilled reads as "no content" to
+        ``deletion._has_cache_content`` and would drop the shared-depot
+        protection of an app that does hold bytes (ADR-0003)."""
+        return jobs.STATUS_DONE
 
     def _finish_prefill_failed(
         self,

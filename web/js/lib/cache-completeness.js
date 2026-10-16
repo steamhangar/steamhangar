@@ -234,7 +234,7 @@ export function showsCompletenessBlock(gameLike, group) {
  */
 export function verifyAppids(members) {
   return (Array.isArray(members) ? members : [])
-        // WP NOT-OWNED-2: a known-not-owned package would only end not_owned again.
+    // WP NOT-OWNED-2: a known-not-owned package would only end not_owned again.
     .filter(
       (m) =>
         m && hasVisibleCacheContent(m) && !isToolApp(m) && !isDamagedOnly(m) && !isNotOwnedApp(m),

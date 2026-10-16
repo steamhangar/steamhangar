@@ -1499,7 +1499,7 @@ is the authoritative list of which outcomes set it:
 | non-zero / timeout / aborted / not-logged-in | — | — | `error` (unchanged, WP 1.4) | `error` | untouched | untouched |
 | `0` | ok or failed | Failed column `>0`, or a Failed column whose count cannot be read | **`error`**, reason `prefill_failed` (WP API-FIX-3): the last line names what failed and, for two exact SteamPrefill phrases, the likely cause | `error` | untouched | untouched |
 | `0` | failed (`parse_ok=False`), no Failed column | — | `done` (exit-code rule, unchanged) | `done` | set | untouched |
-| `0` | ok | `0` / `0`, no Failed column or Failed `0` | **`error`** — "SteamPrefill did not consider this app — is it owned by the logged-in account?" | `error` | untouched | untouched |
+| `0` | ok | `0` / `0`, no Failed column or Failed `0` | **`not_owned`** (WP NOT-OWNED-1) — "SteamPrefill did not consider this app — is it owned by the logged-in account?" | `not_owned`; an app that holds cache bytes or was prefilled before keeps `done` (WP NOT-OWNED-2) | untouched | untouched |
 | `0` | ok | `0` / `>0` | `done` | `done` | set | **set** (ADR-0006 "current as of \<timestamp\>") |
 | `0` | ok | `>0` / anything | `done` | `done` | set | untouched |
 
@@ -1570,7 +1570,11 @@ Two independent fixes land in this package:
    doesn't recognize this way returns `parse_ok=False` with every field
    `None` — **never a guessed zero**, since `Updated==0 AND Up To Date==0`
    has the specific "app not owned" meaning above and an unparseable table
-   never earned the right to claim it.
+   never earned the right to claim it. The not_owned fact is derived from the
+   app's newest prefill job (finished within 7 days, and the app is not idle
+   and never prefilled, which a cache deletion resets it to), not from
+   `apps.status`; it feeds the `not_owned` flag of `GET /v1/games` and the
+   skips of the scheduler, verify (`X-Skipped-Not-Owned`) and "Complete all".
 
 `GET /v1/jobs/{id}` and `GET /v1/jobs` both expose the parsed result as three
 additive fields: `updated`, `up_to_date` (`int | null`), `summary_parse_ok`

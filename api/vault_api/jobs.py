@@ -115,10 +115,11 @@ STATUS_ERROR = "error"
 #: and did not consider the app (Updated=0 and Up To Date=0), i.e. the vault's
 #: Steam account has no usable license for it (a tool app such as SteamVR is
 #: the usual case). Nothing broke, so it is neither a failure nor retryable.
-#: Used for ``jobs.status`` and ``apps.status``; both columns are free text,
-#: so no schema change. Automatic callers skip apps in this state
-#: (``not_owned_appids``); an explicit ``POST /v1/prefill`` still queues one,
-#: and the run's own outcome then replaces the state.
+#: ``jobs.status`` always; ``apps.status`` only for an app without cache bytes
+#: (WP NOT-OWNED-2: an app with bytes keeps its cached status). The fact is
+#: derived from the newest prefill job (``not_owned_appids``), so no schema
+#: change. Automatic callers skip such apps; an explicit ``POST /v1/prefill``
+#: still queues one, and the new job supersedes the fact.
 STATUS_NOT_OWNED = "not_owned"
 
 #: WP 3.12. Non-terminal: the job's subprocess was terminated on operator
@@ -306,7 +307,8 @@ def not_owned_appids(
     from ``apps.status``. An app that already holds cache bytes (or was
     prefilled before) keeps its previous ``apps.status`` when a run ends
     unowned (a content package of a game the account does not own; its card
-    must stay "Cached"), so ``apps.status`` alone cannot carry the state. The
+    must stay "Cached"), so ``apps.status`` alone cannot carry the state. A
+    cache deletion (idle, never prefilled) frees the app again. The
     app is returned while its newest prefill job (any status, by id) is a
     ``not_owned`` one that finished within ``NOT_OWNED_RECHECK_DAYS``. A newer
     job of any kind (an explicit ``POST /v1/prefill`` queues one, a later run
@@ -317,21 +319,23 @@ def not_owned_appids(
     cutoff = ((now or datetime.now(timezone.utc)) - timedelta(
         days=config.NOT_OWNED_RECHECK_DAYS
     )).strftime(TIMESTAMP_FORMAT)
+    # The cutoff is in the outer WHERE, so only not_owned jobs inside the
+    # window reach the correlated "newest job" check. An app that holds no
+    # content any more (idle and never prefilled: the state a cache deletion
+    # resets to) is free again, unless apps.status itself is not_owned.
     rows = conn.execute(
         """
-        SELECT j.appid, j.finished_at FROM jobs j
-        WHERE j.type = ?
+        SELECT j.appid FROM jobs j
+        JOIN apps a ON a.appid = j.appid
+        WHERE j.status = ? AND j.type = ? AND j.finished_at >= ?
           AND j.id = (SELECT MAX(j2.id) FROM jobs j2
                        WHERE j2.appid = j.appid AND j2.type = ?)
-          AND j.status = ?
+          AND (a.status = ? OR a.status != ? OR a.last_prefill_at IS NOT NULL)
         """,
-        (JOB_TYPE_PREFILL, JOB_TYPE_PREFILL, STATUS_NOT_OWNED),
+        (STATUS_NOT_OWNED, JOB_TYPE_PREFILL, cutoff, JOB_TYPE_PREFILL,
+         STATUS_NOT_OWNED, STATUS_IDLE),
     ).fetchall()
-    return {
-        int(appid)
-        for appid, finished in rows
-        if finished is not None and finished >= cutoff
-    }
+    return {int(r[0]) for r in rows}
 
 
 def set_app_status(
