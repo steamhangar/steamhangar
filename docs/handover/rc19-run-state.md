@@ -52,6 +52,6 @@ Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM (00:10Z), trig_01M7qtqVf
 
 main = e7ef2a6, CI fully green, `dev.sh verify` 613/0: + D16 Android UI and neutral naming (About pin fixed), GRAPH-LIVE api+web (reviewed, re-review PASS), Android D19, test fix for an inode-reuse flake in test_graph_live (CI filesystem reuses the inode number after unlink).
 Temp branches wp/ci-debug and wp/ci-debug2 can be deleted by Jan.
-Android GRAPH-LIVE passed (8ebe38e, light review PASS). Docs close (LEARNINGS, ADR-0025/0026, plan ticks), diag note and Antrag A-20261016-01 written. Jan chose cover refresher option A. Remaining: main CI green, tag v0.1.0-rc19, handover.
+rc19 DONE: main 5498033 CI green, tag v0.1.0-rc19 pushed, Antrag A-20261016-01 written, no restart triggers pending. Open nits: see memory handover-current.
 Open for Jan: cover refresher anonymous vs relay-key names (A/B/C) - not yet asked.
 Restart triggers pending: trig_01HTJMhrGFUuhdEc7Rv788DM, trig_01M7qtqVfFQZVXax5UJCfuSj.
