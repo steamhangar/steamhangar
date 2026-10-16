@@ -3339,39 +3339,37 @@ below carry their own later dates, item 12 is the current one).
         Downloads page) moved to the rc20 block below (user decision
         2026-10-16): analysis and fix before DOWNLOADS-1.
 
-    - [ ] **rc20 candidates** (2026-10-16, unprioritised; the user decides
-      scope and order; larger themes live in
-      `docs/handover/post-0.1.0-roadmap.md`, D1-D29)
-      - [ ] D22 privacy modes
-      - [ ] CACHE-REPAIR-1
-      - [ ] Clients / Add-a-device redesign (mockups come first)
-      - [ ] optional "Client downloading" row on the Downloads page (needs
-        the user's yes)
-      - [ ] honesty flag for unmapped depots in the completeness display
-      - [ ] package names for "Unknown app" entries (HELLDIVERS 2)
-      - D20 queue order: shipped in rc19 (see the rc19 block); only its
-        nits remain (claim-vs-move race test, aria-live, below)
-      - LIVE-DELAY-1: scheduled in the rc20 block below
-      - [ ] runner retry on "Unable to detect Lancache server!", only if the
-        heartbeat log confirms the late-heartbeat hypothesis (ADR-0027)
-      - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
-        test, aria-live on queue move, D19WiringTest pin,
-        regrow-without-idle-gap test
-      - [ ] audit 2026-10-16 follow-ups (no decision yet; scope in the
-        roadmap's "Audit 2026-10-16: open follow-ups"):
-        - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID,
-          client rename and Delete history in the app
-        - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
-        - [ ] CAP-503-LOOP-1 measure whether the 503 retry loop still
-          occurs at the current rate
-        - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
-          nginx counters, hit-path read)
-        - [ ] VERSION-HEALTH-1 version and schema readable without the key
-        - [ ] VERIFY-SPEED-TEXT-1 "Speed not measured yet" while Verifying
-          (decide with DOWNLOADS-1)
-        - [ ] NITS-AUDIT-1 small items (list in the roadmap)
-        - [ ] DUAL-STACK-1 (operator, after the line change) AAAA check,
-          then stepwise cap raise with measurement
+    **Release plan from rc20 on (user decisions 2026-10-16).** The blocks
+    below are grouped by version; theme, goal, entry and exit criterion
+    per version are in `docs/handover/post-0.1.0-roadmap.md`, section
+    "Release plan (user decisions 2026-10-16)". Packages of rc21, rc22 and
+    v0.2.0 are cut in each version's planning session.
+    - rc20 web redesign: LAYOUT-1, SHEET-MOTION-1, CLIENTS-1..3,
+      ADD-DEVICE-1, DOWNLOADS-1 (with VERIFY-SPEED-TEXT-1, QUEUE-KBD-KEEP),
+      SETTINGS-1, LIBRARY-1, LIBRARY-DETAIL-1, LIVE-DELAY-1 (before
+      DOWNLOADS-1), BOOT-RATE-1 (D24), LIB-META-WINDOW-1; optional rc20.x
+      tuning defaults (ADR-0027)
+    - rc21 Android parity and cache health: Android rc20 follow-up,
+      ANDROID-GAPS-1, APP-NIGHT-GOLDEN-1, CACHE-REPAIR-1, unmapped-depot
+      honesty flag, "Unknown app" package names, optional "Client
+      downloading" row, VERSION-HEALTH-1, tuning defaults, runner retry
+      (conditional)
+    - rc22 release hardening: D7 `:443` + TLS default, CAP-503-LOOP-1,
+      HIT-PATH-1, NITS-AUDIT-1, remaining nits, the open B boxes; then
+      `v0.1.0` final; v0.1.x bug fixes only, no public announcement yet
+    - v0.2.0 GameHangar, privacy, schedules, agents: D18, D22 then
+      LIBRARY-META-1d, D8, Weg B for agents with the installer (D6 part),
+      D28, D29, D5; public announcement (WP 5.6)
+    - v0.3.0 Steam accounts: D2, D3 (after a new package cut)
+    - v0.4.0+: D17, D4 / DUAL-STACK-1 follow-ups, D25, D26, D27, Phase 6,
+      iOS app
+    - operator items: DUAL-STACK-1, Sunday cold-game test
+
+    The former "rc20 candidates" block (2026-10-16) is split into these
+    version blocks; nothing was dropped. D22 moved to v0.2.0; the Clients /
+    Add-a-device redesign is CLIENTS-1..3 and ADD-DEVICE-1 in rc20;
+    VERIFY-SPEED-TEXT-1 is decided inside DOWNLOADS-1; D20 shipped in rc19
+    (its nits are in rc22); DUAL-STACK-1 is an operator item.
 
     - [ ] **rc20 web redesign** (decided 2026-10-16, mockup round with the
       operator; reference: `docs/design/rc20/`, run notes:
@@ -3459,20 +3457,98 @@ below carry their own later dates, item 12 is the current one).
       - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
         page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
         after main CI is green
-    - [ ] **v0.2.0, Weg B for agents** (decided 2026-10-16, with the
-      installer): the agent reports its OS, the API stores it, and the
-      Clients page opens the matching tab; the API serves a minimum agent
-      version that replaces the Weg A "differs from server" check. Needs a
-      schema bump and an agent release; already-running agents report no OS
-      until updated.
-    - [ ] **CLIENT-NAME-MAC-1** (roadmap D28, after rc20, user wish
-      2026-10-14; pairs with the installer and the v0.2.0 agent work): the
-      agent reports its MAC, vault-api accepts `key_type = "mac"` (reserved
-      today, answered with 422), so client names survive DHCP changes.
-    - [ ] **Later, unscheduled** (old post-v1 backlog, moved from
-      `docs/WORKPACKAGES.md` on 2026-10-16): D25 TSNET-1 embedded
-      tailscale (requirement A6), D26 NOTIFY-CURSOR-1 server-side
-      notification cursor, D27 DEPOT-GRACE-1 per-depot grace windows.
+    - [ ] **rc20.x (optional patch)**: new defaults for `VAULT_NGINX_AIO` /
+      `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027,
+      box in the rc19.3 block) says so, with a new ADR carrying the numbers;
+      otherwise the item moves to rc21.
+
+    - [ ] **rc21 — Android parity and cache health** (packages to be cut in
+      the version's planning session)
+      - [ ] Android follow-up of the rc20 redesign: Clients cards, Add a
+        device tabs, Downloads, Settings section nav, Library toolbar and
+        detail tabs, sheet motion where it fits Material
+      - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
+        rename and Delete history in the app
+      - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
+      - [ ] CACHE-REPAIR-1
+      - [ ] honesty flag for unmapped depots in the completeness display
+      - [ ] package names for "Unknown app" entries (HELLDIVERS 2)
+      - [ ] optional "Client downloading" row on the Downloads page (needs
+        the user's yes)
+      - [ ] VERSION-HEALTH-1 version and schema readable without the key
+      - [ ] tuning defaults from the Sunday test, if not shipped in rc20.x
+      - [ ] runner retry on "Unable to detect Lancache server!", only if the
+        heartbeat log confirms the late-heartbeat hypothesis (ADR-0027)
+      - [ ] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21`
+
+    - [ ] **rc22 — release hardening, no new features** (packages to be cut
+      in the version's planning session)
+      - [ ] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
+        default (closes the D7 box above)
+      - [ ] CAP-503-LOOP-1 measure whether the 503 retry loop still occurs
+        at the current rate
+      - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
+        nginx counters, hit-path read)
+      - [ ] NITS-AUDIT-1 small items (list in the roadmap; the GameHangar
+        logo briefing goes to v0.2.0)
+      - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
+        test, aria-live on queue move, D19WiringTest pin,
+        regrow-without-idle-gap test
+      - the open boxes of **B** above (signed APK, standard-user check,
+        real-device checks, rollout gates (h) and (i), release notes) and
+        the failed-jobs measurement (Subnautica, Timberborn, Hogwarts
+        Legacy; roadmap "Before v0.1.0") are part of rc22; their boxes stay
+        in B and are ticked there, not repeated here
+      - [ ] close: release gate, every open B box ticked or moved by the
+        user, measurements written up; then tag **`v0.1.0` final**
+    - **v0.1.x:** bug fixes only. The public announcement (WP 5.6,
+      r/selfhosted) is NOT made at 0.1.0; it waits for 0.2.0.
+
+    - [ ] **v0.2.0 — GameHangar, privacy, schedules, agents** (packages to
+      be cut in the version's planning session; entry: `v0.1.0` final and
+      the D18 org decision)
+      - [ ] **D18 RENAME-2** SteamHangar -> GameHangar (user decision
+        2026-10-16: with 0.2.0, before the announcement; GitHub org choice
+        A/B/C still open), incl. the GameHangar logo and header briefing
+      - [ ] **D22** privacy mode (ADR-0023 draft), then
+        **LIBRARY-META-1d** store night fill on top of it
+      - D8 schedules incl. rate per window (box D8 above)
+      - [ ] **Weg B for agents** (decided 2026-10-16, with the
+        installer): the agent reports its OS, the API stores it, and the
+        Clients page opens the matching tab; the API serves a minimum agent
+        version that replaces the Weg A "differs from server" check. Needs a
+        schema bump and an agent release; already-running agents report no
+        OS until updated. Ships with the real installer (the installer part
+        of D6, box above).
+      - [ ] **CLIENT-NAME-MAC-1** (roadmap D28, user wish 2026-10-14;
+        pairs with the installer and the Weg B agent work): the agent
+        reports its MAC, vault-api accepts `key_type = "mac"` (reserved
+        today, answered with 422), so client names survive DHCP changes.
+      - D29 PAIR-2 and D5 named, scoped API keys (boxes above; D29 builds
+        on D5)
+      - [ ] close: release gate, migration from 0.1.x tested (volumes,
+        `applicationId`, image namespace), then the public announcement
+        (WP 5.6)
+
+    - [ ] **v0.3.0 — Steam accounts**: D2 QR login and D3 several accounts
+      (boxes above). Entry: the package cut is redone against the current
+      schema and the 11 open user questions (D2 1-5, D3 1-6) are settled;
+      the ADR drafts 0018/0019 live on unmerged branches. Exit: release
+      gate, plus a real QR login and a prefill per account on the
+      operator's stack.
+
+    - [ ] **v0.4.0 and later — beyond Steam and integrations** (order not
+      set): D17 multi-launcher (needs D18; not before v0.2), D4 IPv6 and
+      the DUAL-STACK-1 follow-ups, Phase 6 external integrations, the iOS
+      app, and the old post-v1 backlog moved from `docs/WORKPACKAGES.md`
+      on 2026-10-16: D25 TSNET-1 embedded tailscale (requirement A6), D26
+      NOTIFY-CURSOR-1 server-side notification cursor, D27 DEPOT-GRACE-1
+      per-depot grace windows.
+
+    - [ ] **Operator items (independent of versions)**
+      - [ ] DUAL-STACK-1 (after the line change) AAAA check, then stepwise
+        cap raise with measurement
+      - Sunday cold-game test per ADR-0027 (box in the rc19.3 block)
 
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by

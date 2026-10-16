@@ -24,6 +24,122 @@ implements, reviewer reviews every package, one commit per passed package.
 - **Language.** Communicate with the user in German. The repo, code and
   commits are in English.
 
+## Release plan (user decisions 2026-10-16)
+
+Supersedes "Suggested order" and the release cuts in the wave plan for
+everything after rc19.3. Mirrored as version blocks in
+`docs/PROJECT_PLAN.md` §11 item 13; when scope moves, update both in the
+same commit (roadmap rule in `CLAUDE.md`). Where a version's packages are
+not cut yet, they are cut in that version's planning session (each
+package at most ~1-2 h, list shown to the user before delegating).
+
+Default exit criterion for every rc below (called "release gate"): every
+package reviewed PASS and merged, `dev.sh test-*` and `dev.sh verify`
+green, main CI green (incl. Android), tag with the user's yes, deploy
+Antrag filed and the rollout on the operator's stack checked.
+
+### rc20: web redesign
+
+- **Goal:** the web UI gets the approved rc20 layout (`docs/design/rc20/`)
+  on a correct live data path.
+- **Packages:** LAYOUT-1, SHEET-MOTION-1, CLIENTS-1, CLIENTS-2, CLIENTS-3,
+  ADD-DEVICE-1, DOWNLOADS-1 (includes VERIFY-SPEED-TEXT-1 and
+  QUEUE-KBD-KEEP), SETTINGS-1, LIBRARY-1, LIBRARY-DETAIL-1; plus
+  LIVE-DELAY-1 (analysis and fix, before DOWNLOADS-1), BOOT-RATE-1 (D24),
+  LIB-META-WINDOW-1 (D23 note). Cut and ordered in
+  `docs/handover/rc20-run-plan.md`.
+- **Entry:** rc19.3 tagged (done).
+- **Exit:** release gate, plus the operator's browser check of every page
+  at 1400 / 1000 / 400 px on the dev instance.
+- **rc20.x (optional patch):** new defaults for `VAULT_NGINX_AIO` /
+  `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027) says
+  so; a default change needs a new ADR with the numbers. Otherwise this
+  moves to rc21.
+
+### rc21: Android parity and cache health
+
+- **Goal:** the Android app matches the rc20 web redesign, and the cache
+  state the UIs show is honest and repairable.
+- **Packages (to be cut in the version's planning session):** Android
+  follow-up of the rc20 redesign (Clients cards, Add a device tabs,
+  Downloads, Settings section nav, Library toolbar and detail tabs, sheet
+  motion where it fits Material); ANDROID-GAPS-1; APP-NIGHT-GOLDEN-1;
+  CACHE-REPAIR-1; honesty flag for unmapped depots in the completeness
+  display; package names for "Unknown app" entries; optional "Client
+  downloading" row on Downloads (needs the user's yes); VERSION-HEALTH-1;
+  tuning defaults from the Sunday test if not shipped in rc20.x; runner
+  retry on "Unable to detect Lancache server!" only if the heartbeat log
+  supports the late-heartbeat hypothesis (ADR-0027).
+- **Entry:** rc20 tagged; Sunday test result known (for the tuning item).
+- **Exit:** release gate; Android screenshot goldens refreshed, incl. a
+  night golden that really renders dark.
+
+### rc22: release hardening (no new features)
+
+- **Goal:** close every measurement and open check that stands between the
+  candidates and `v0.1.0` final.
+- **Packages (to be cut in the version's planning session):** D7 `:443`
+  measurement and the `VAULT_TLS_CLIENT_MAX_CONNS` default;
+  CAP-503-LOOP-1; HIT-PATH-1; NITS-AUDIT-1 (except the GameHangar logo
+  briefing, which goes to v0.2.0); remaining nits (MAP-DRIFT-1 fail-safe
+  tests, claim-vs-move race test, aria-live on queue move, D19WiringTest
+  pin, regrow-without-idle-gap test); the open boxes of
+  `docs/PROJECT_PLAN.md` §11 item 13 B (signed APK, standard-user check,
+  real-device checks, rollout gates (h) and (i), release notes) and the
+  failed-jobs measurement (Subnautica, Timberborn, Hogwarts Legacy).
+- **Entry:** rc21 tagged.
+- **Exit:** release gate; every open item 13 B box ticked or explicitly
+  moved by the user; measurements written up (inbox note or ADR addendum).
+  Then tag **`v0.1.0` final**.
+
+### v0.1.x: bug fixes only
+
+No features, no schema bump unless a fix needs one. **The public
+announcement (WP 5.6, r/selfhosted) is NOT made at 0.1.0**; it waits for
+0.2.0, so no public user ever has to migrate through the rename.
+
+### v0.2.0: GameHangar, privacy, schedules, agents
+
+- **Goal:** the product goes public under its final name with a privacy
+  mode, real schedules and a proper agent install.
+- **Packages (to be cut in the version's planning session):** D18
+  rename to GameHangar (user decision 2026-10-16: with 0.2.0; GitHub org
+  choice A/B/C in D18 still open), incl. the GameHangar logo and header
+  briefing; D22 privacy mode (ADR-0023 draft), then LIBRARY-META-1d store
+  night fill on top of it; D8 schedules incl. rate per window; Weg B for
+  agents (agent reports its OS, API serves a minimum agent version)
+  together with the real installer (the installer part of D6); D28
+  CLIENT-NAME-MAC-1; D29 PAIR-2; D5 named, scoped API keys (D29 builds on
+  it).
+- **Entry:** `v0.1.0` final tagged; D18 org decision taken.
+- **Exit:** release gate; migration from 0.1.x (volumes, `applicationId`,
+  image namespace) tested; then the public announcement (WP 5.6).
+
+### v0.3.0: Steam accounts
+
+- **Goal:** Steam login without a terminal, and several Steam accounts
+  per household.
+- **Packages:** D2 QR login, D3 several accounts. Not cut yet.
+- **Entry:** the package cut is redone against the current schema and the
+  11 open user questions (D2 1-5, D3 1-6) are settled; the ADR drafts
+  0018/0019 live on unmerged branches (see the state note under D2).
+- **Exit:** release gate, plus a real QR login and a prefill per account
+  on the operator's stack.
+
+### v0.4.0 and later: beyond Steam and integrations (order not set)
+
+- **Goal:** more launchers and outside integrations, each when wanted.
+- **Items:** D17 multi-launcher (needs D18; user: not before v0.2); D4
+  IPv6 and DUAL-STACK-1 follow-ups; D25 TSNET-1; D26 NOTIFY-CURSOR-1; D27
+  DEPOT-GRACE-1; Phase 6 external integrations; iOS app.
+- **Entry / exit:** set when a version is planned.
+
+### Operator items (independent of versions)
+
+- DUAL-STACK-1 after the line change (AAAA check, then stepwise cap raise
+  with measurement).
+- Sunday cold-game test per ADR-0027 (feeds rc20.x / rc21).
+
 ## Context: what the rollout taught us (2026-10-01/02)
 
 - **Network.** The operator's internet line is DS-Lite: IPv4 runs through
@@ -645,10 +761,11 @@ These do not need D17 to start; they keep the door open.
 ## D18: RENAME-2, SteamHangar -> GameHangar
 
 User decision 2026-10-15: the product is renamed to GameHangar, because
-D17 makes it more than a Steam cache. Timing is still open; it must land
-before the first public release, and it does not depend on D17 being
-built. Model: ADR-0013 (SteamVault -> SteamHangar), which lists what a
-rename touches and how volumes are carried over.
+D17 makes it more than a Steam cache. Timing (user decision 2026-10-16):
+with v0.2.0, before the public announcement (see "Release plan"); it
+does not depend on D17 being built. Model: ADR-0013 (SteamVault ->
+SteamHangar), which lists what a rename touches and how volumes are
+carried over.
 
 What it touches (inventory 2026-10-15, check again before starting):
 
@@ -1318,6 +1435,11 @@ D1, D3 (incl. device/account note per game), D2, D4, D5, D6.
 
 ## Suggested order
 
+**Superseded (2026-10-16)** by "Release plan (user decisions 2026-10-16)"
+near the top of this file; kept for the record. Items 1, 3 and 5 are
+done (DOCS-FIX-3, D1, D7 apart from the `:443` measurement); D2/D3 are
+v0.3.0, D8 is v0.2.0.
+
 1. DOCS-FIX-3 lands before `v0.1.0` (it is in item 13 B).
 2. Write the ADR drafts for D1, D2 and D3, review them, and settle the
    open questions with the user.
@@ -1445,9 +1567,11 @@ client builds on it. Needs an ADR. State: open, unscheduled.
 
 Found when the orchestrator went through all past sessions on 2026-10-16.
 None of these has a user decision yet; each needs a brief (and the user's
-go where it changes behaviour) before any code. The rc-relevant ones are
-mirrored as unchecked boxes in the "rc20 candidates" block of
-`docs/PROJECT_PLAN.md`.
+go where it changes behaviour) before any code. Each one is assigned to a
+version in "Release plan (user decisions 2026-10-16)" at the top of this
+file and mirrored as an unchecked box in that version's block of
+`docs/PROJECT_PLAN.md` (VERIFY-SPEED-TEXT-1 and QUEUE-KBD-KEEP sit inside
+DOWNLOADS-1).
 
 - **DUAL-STACK-1 (operator):** AAAA check and stepwise cap raise after the
   line change, see D4.
