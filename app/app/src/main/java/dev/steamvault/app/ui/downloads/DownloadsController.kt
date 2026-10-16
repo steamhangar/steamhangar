@@ -8,10 +8,12 @@ import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.ScheduleOut
+import dev.steamvault.app.net.model.SettingsOut
 import dev.steamvault.app.polling.PollingIntervals
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
+import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.ui.downloads.logic.BULK_TOAST_MS
 import dev.steamvault.app.ui.downloads.logic.BulkKind
 import dev.steamvault.app.ui.downloads.logic.QueueMove
@@ -62,6 +64,9 @@ class DownloadsController(
     /** WP UPD-6: `GET /v1/schedule` for the "Updates available" note;
      * `null` = no note (nothing to read it from). */
     private val scheduleRepository: ScheduleRepository? = null,
+    /** WP RATE-TILE: `GET /v1/settings` for the upstream rate cap line on
+     * "Current speed"; `null` = no line. */
+    private val settingsRepository: SettingsRepository? = null,
 ) {
     var jobs by mutableStateOf<List<JobSummary>>(emptyList())
         private set
@@ -243,6 +248,20 @@ class DownloadsController(
      * `null` = not known (not read yet, or the read failed): no note. */
     var schedule by mutableStateOf<ScheduleOut?>(null)
         private set
+
+    /** WP RATE-TILE: `GET /v1/settings`, read once per screen visit
+     * ([loadRateCap]); `null` = not known: no cap line rather than a guess. */
+    var settings by mutableStateOf<SettingsOut?>(null)
+        private set
+
+    suspend fun loadRateCap() {
+        val repo = settingsRepository ?: return
+        settings = try {
+            repo.get()
+        } catch (_: VaultApiError) {
+            null
+        }
+    }
 
     /** What an update request in flight is for: [UPDATES_ALL], an appid, or
      * `null`. One request at a time; every update button is disabled

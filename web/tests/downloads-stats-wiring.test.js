@@ -107,6 +107,8 @@ globalThis.fetch = async (url) => {
     }
     return respond(200, server.jobs);
   }
+  if (p === "/v1/settings") return respond(200, { readonly: false, server_version: "t", settings: [{ key: "upstream_rate", effective: "8m" }], core_apply: null });
+  if (p === "/v1/schedule") return respond(200, { enabled: false, window: null, server_timezone: "UTC" });
   if (p === "/v1/games" || p === "/v1/clients") return respond(200, []);
   if (p === "/v1/cache/summary") return respond(200, {});
   return respond(404, { detail: "Not Found" });
@@ -160,8 +162,9 @@ beforeEach(() => {
 test("MUTATION TARGET: feed ok — eight tiles, a labelled SVG graph, and the running job's speed", async () => {
   const s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "tiles");
+  await until(() => tiles(s)[0]?.includes("Limit 8 MB/s"), "cap line");
   assert.deepEqual(tiles(s), [
-    "Current speed=40.0 MB/sall traffic incl. prefill runner, 5-10 min window",
+    "Current speed=40.0 MB/sall traffic incl. prefill runner, 5-10 min windowLimit 8 MB/s, all day",
     "Average while loading=50.0 MB/s",
     "Peak speed=100 MB/s",
     "Served (cache + prefill)=60.0 GB",

@@ -206,13 +206,14 @@ fun pollNote(
 
 /** One Downloads header figure. [value] is [DASH] for a `null` the server
  * sent; [detail] is an optional second line. */
-data class StatTile(val key: String, val label: String, val value: String, val detail: String? = null)
+data class StatTile(val key: String, val label: String, val value: String, val detail: String? = null, val limit: String? = null)
 
 /** What a screen reader says for one tile: "Peak speed: 40.0 MB/s", the
  * dash spoken as [NOT_AVAILABLE], the detail line appended. */
 fun tileDescription(tile: StatTile): String {
     val value = if (tile.value == DASH) NOT_AVAILABLE else tile.value
-    return if (tile.detail != null) "${tile.label}: $value, ${tile.detail}" else "${tile.label}: $value"
+    val parts = listOfNotNull(tile.detail, tile.limit)
+    return if (parts.isNotEmpty()) "${tile.label}: $value, ${parts.joinToString(", ")}" else "${tile.label}: $value"
 }
 
 /**
@@ -221,15 +222,16 @@ fun tileDescription(tile: StatTile): String {
  * Labels and order are web `headerTiles`'s; the web's hover titles have no
  * Android counterpart and are not ported.
  */
-fun headerTiles(throughput: ThroughputOut?): List<StatTile>? {
+fun headerTiles(throughput: ThroughputOut?, rateCap: String? = null): List<StatTile>? {
     if (throughput == null || feedState(throughput.event_feed) == FeedState.DISABLED) return null
     val summary = throughput.summary
     val phrase = RANGE_PHRASES[throughput.range] ?: ""
-    fun tile(key: String, label: String, value: String?, detail: String? = null) = StatTile(key, label, value ?: DASH, detail)
+    fun tile(key: String, label: String, value: String?, detail: String? = null, limit: String? = null) =
+        StatTile(key, label, value ?: DASH, detail, limit)
     val inRange = summary?.active_clients
     val windowMinutes = throughput.active_window_minutes ?: 15
     return listOf(
-        tile("current", "Current speed", formatSpeed(throughput.current?.bytes_per_second), currentDetail(throughput)),
+        tile("current", "Current speed", formatSpeed(throughput.current?.bytes_per_second), currentDetail(throughput), rateCap),
         tile("average", "Average while loading", formatSpeed(summary?.average_bytes_per_second)),
         tile("peak", "Peak speed", formatSpeed(summary?.peak_bytes_per_second)),
         // Everything the cache served, the runner included; its share below.

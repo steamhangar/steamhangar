@@ -49,6 +49,7 @@ import dev.steamvault.app.ui.traffic.logic.StatTile
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
+import dev.steamvault.app.ui.traffic.logic.rateCapLine
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
@@ -171,6 +172,7 @@ class HistoryFilter(private val repository: TrafficRepository, initialRange: Str
 fun DownloadsStatsHeader(
     poll: TrafficPoll<StatsAnswer>,
     scope: CoroutineScope,
+    rateCap: String? = null,
     onRangeChosen: (String) -> Unit = {},
 ) {
     val answer = poll.data
@@ -183,7 +185,7 @@ fun DownloadsStatsHeader(
         couldNotLoad = COULD_NOT_LOAD_STATISTICS,
         loadingText = LOADING_STATISTICS_TEXT,
     )
-    val tiles = if (poll.unsupported) null else headerTiles(throughput)
+    val tiles = if (poll.unsupported) null else headerTiles(throughput, rateCap)
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // No figures (feed disabled, old server): no range to choose either.
         if (!poll.noFigures) {
@@ -232,6 +234,9 @@ private fun StatTileView(tile: StatTile, modifier: Modifier = Modifier) {
             Text(tile.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(tile.value, style = MaterialTheme.typography.titleMedium)
             tile.detail?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            tile.limit?.let { // WP RATE-TILE
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

@@ -51,6 +51,7 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
+import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
@@ -122,13 +123,15 @@ fun DownloadsScreen(
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
     demoMode: Boolean,
     scheduleRepository: ScheduleRepository? = null,
+    settingsRepository: SettingsRepository? = null,
 ) {
     val scope = rememberCoroutineScope()
     val resources = LocalContext.current.resources
     val controller = remember {
-        DownloadsController(jobsRepository, gamesRepository, AndroidDownloadsStrings(resources), scheduleRepository)
+        DownloadsController(jobsRepository, gamesRepository, AndroidDownloadsStrings(resources), scheduleRepository, settingsRepository)
     }
     LaunchedEffect(controller) { controller.loadSchedule() } // WP UPD-6
+    LaunchedEffect(controller) { controller.loadRateCap() } // WP RATE-TILE
 
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, controller) {
@@ -290,7 +293,10 @@ private fun DownloadsBody(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item(key = "bulk-bar") { DownloadsBulkBar(controller, scope) }
-        item(key = "stats") { DownloadsStatsHeader(statsPoll, scope, onRangeChosen = { ranges.statistics = it }) }
+        item(key = "stats") {
+            val rateCap = rateCapLine(controller.settings, controller.schedule, System.currentTimeMillis())
+            DownloadsStatsHeader(statsPoll, scope, rateCap, onRangeChosen = { ranges.statistics = it })
+        }
         item(key = "active-heading") { SectionHeading(stringResource(R.string.downloads_section_active)) }
         if (activeModels.isEmpty()) {
             item(key = "active-empty") { EmptyLine(stringResource(R.string.downloads_active_empty)) }

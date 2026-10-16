@@ -160,7 +160,8 @@ test("every job has a vault name: Downloads shows them and never calls the relay
     await tick(20);
     assert.deepEqual(historyNames(s), ["Vault Ten", "Vault Twenty"], "vault name wins over the owned name");
     assert.equal(count(RELAY), 0, "no relay call while every name is known");
-    assert.equal(count("/v1/settings"), 0, "not even the settings read");
+    // WP RATE-TILE: the only settings read is the rate-cap tile's, one per mount (two mounts here); the owned-names read stays off.
+    assert.equal(count("/v1/settings"), 2, "only the rate-cap read, once per mount");
   } finally {
     store.stop();
   }

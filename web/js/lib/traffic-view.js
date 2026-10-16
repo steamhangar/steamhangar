@@ -227,15 +227,17 @@ export function feedNote(response, nowMs = Date.now()) {
  * Each tile: `{key, label, value, title, detail}`; `value` is the dash for
  * a `null` the server sent; `detail` is an optional second line.
  * @param {object | null | undefined} throughput
- * @returns {Array<{key: string, label: string, value: string, title: string, detail: string | null}> | null}
+ * @param {string | null} [rateCap] WP RATE-TILE: `rateCapLine(...)`, its own
+ *   line on the "Current speed" tile only; `null` = not known.
+ * @returns {Array<{key: string, label: string, value: string, title: string, detail: string | null, limit: string | null}> | null}
  */
-export function headerTiles(throughput) {
+export function headerTiles(throughput, rateCap = null) {
   if (!throughput || feedState(throughput) === "disabled") return null;
   const summary = throughput.summary || {};
   const current = throughput.current ? throughput.current.bytes_per_second : null;
   const phrase = RANGE_PHRASES[throughput.range] || "";
   const fine = throughput.bucket_seconds === 60; // the 1-minute tier (1 h / 6 h once it has filled)
-  const tile = (key, label, value, title, detail = null) => ({ key, label, value: value ?? DASH, title, detail });
+  const tile = (key, label, value, title, detail = null, limit = null) => ({ key, label, value: value ?? DASH, title, detail, limit });
   const windowMinutes = Number.isInteger(throughput.active_window_minutes) ? throughput.active_window_minutes : 15;
   const inRange = Number.isInteger(summary.active_clients) ? summary.active_clients : null;
   return [
@@ -247,6 +249,7 @@ export function headerTiles(throughput) {
         ? "Everything the cache served over the last 15-20 seconds (all traffic, the server's own prefill runner included), read live from the cache's event log."
         : "Everything the cache served over the last 5-10 minutes (all traffic, the server's own prefill runner included), measured when the server last read the cache's event log.",
       currentDetail(throughput),
+      rateCap,
     ),
     tile(
       "average",
@@ -295,6 +298,76 @@ export function headerTiles(throughput) {
       `machines with cache traffic in the last ${windowMinutes} min`,
     ),
   ];
+}
+
+/**
+ * WP RATE-TILE: bytes per second of an `upstream_rate` value (digits with an
+ * optional k = x1024 or m = x1048576); `null` for no cap, blank, `off` or
+ * anything unreadable (a cap is never guessed).
+ * @param {unknown} raw
+ * @returns {number | null}
+ */
+export function parseRateCap(raw) {
+  if (typeof raw !== "string") return null;
+  const m = /^([1-9][0-9]*)([kKmM]?)$/.exec(raw.trim());
+  if (!m) return null;
+  const bytes = Number(m[1]) * { k: 1024, m: 1048576, "": 1 }[m[2].toLowerCase()];
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : null;
+}
+
+/**
+ * Is `nowMs` inside the daily `HH:MM-HH:MM` window, read on the server's own
+ * clock (`server_timezone` = "UTC+02:00")? Start inclusive, end exclusive,
+ * overnight windows wrap (twin of the API's `ScheduleWindow.contains`).
+ * `null` when the window or the zone cannot be read: no claim either way.
+ * @param {unknown} window
+ * @param {unknown} serverTimezone
+ * @param {number} nowMs
+ * @returns {boolean | null}
+ */
+export function insideWindow(window, serverTimezone, nowMs) {
+  const w = /^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$/.exec(String(window ?? ""));
+  const z = /^UTC(?:([+-])(\d{2}):(\d{2}))?$/.exec(String(serverTimezone ?? ""));
+  if (!w || !z || !Number.isFinite(nowMs)) return null;
+  const offset = z[1] ? (z[1] === "-" ? -1 : 1) * (Number(z[2]) * 60 + Number(z[3])) : 0;
+  const start = Number(w[1]) * 60 + Number(w[2]);
+  const end = Number(w[3]) * 60 + Number(w[4]);
+  const minute = ((((Math.floor(nowMs / 60000) + offset) % 1440) + 1440) % 1440);
+  return end < start ? minute >= start || minute < end : minute >= start && minute < end;
+}
+
+/**
+ * WP RATE-TILE: the line under "Current speed" about the upstream (internet)
+ * rate cap. The cap applies only OUTSIDE the download window (the one window,
+ * `schedule.window`; none = capped around the clock), so the line says "in
+ * force now" or "not in force now" and names the window; without a readable
+ * schedule it states the value and the rule and claims neither. `null`
+ * while the settings are not known.
+ * @param {{settings?: object[], core_apply?: {pending?: unknown} | null} | null | undefined} settings `GET /v1/settings`
+ * @param {{window?: unknown, server_timezone?: unknown} | null | undefined} schedule `GET /v1/schedule`
+ * @param {number} nowMs
+ * @returns {string | null}
+ */
+export function rateCapLine(settings, schedule, nowMs) {
+  const row = settings && Array.isArray(settings.settings) ? settings.settings.find((r) => r && r.key === "upstream_rate") : null;
+  if (!row) return null;
+  const bytes = parseRateCap(row.effective);
+  if (bytes === null) {
+    const none = row.effective === null || row.effective === undefined || row.effective === "" || row.effective === "off";
+    return none ? "No limit" : null;
+  }
+  const limit = `Limit ${formatSpeed(bytes).replace(".0 ", " ")}`; // a cap reads "8 MB/s", not "8.0 MB/s"
+  const pending = settings.core_apply && settings.core_apply.pending === true ? " (change not applied yet)" : "";
+  if (!schedule) return `${limit}, outside the download window${pending}`;
+  const window = typeof schedule.window === "string" && schedule.window.trim() ? schedule.window : null;
+  if (window === null) return `${limit}, all day${pending}`;
+  const inside = insideWindow(window, schedule.server_timezone, nowMs);
+  const m = /^\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*$/.exec(window);
+  const span = `download window ${m ? `${m[1]}–${m[2]}` : window.trim()}`;
+  if (inside === null) return `${limit}, outside the ${span}${pending}`;
+  return inside
+    ? `${limit}, not in force now (inside the ${span})${pending}`
+    : `${limit}, in force now (outside the ${span})${pending}`;
 }
 
 /** Detail line of "Current speed": scope and window, plus the runner's part. */

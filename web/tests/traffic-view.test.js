@@ -19,6 +19,9 @@ import {
   formatTrafficBytes,
   headerTiles,
   JOB_SPEED_NOTE,
+  insideWindow,
+  parseRateCap,
+  rateCapLine,
   jobSpeedText,
   joinNotes,
   mergeJobLists,
@@ -235,4 +238,49 @@ test("MUTATION TARGET: merge — the store's (fresher) copy wins, store rows fir
   assert.deepEqual(merged.map((j) => `${j.id}:${j.status}`), ["9:done", "7:done", "6:error"]);
   assert.equal(emptyHistoryText("7d"), "Nothing finished in the last 7 days.");
   assert.equal(emptyHistoryText("all"), "Nothing finished yet.");
+});
+
+// WP RATE-TILE
+const capSettings = (effective, extra = {}) => ({ settings: [{ key: "upstream_rate", effective }], core_apply: null, ...extra });
+const MIN = 60_000;
+// 2026-10-16 01:00 UTC = 03:00 on a UTC+02:00 server
+const AT_0100Z = Date.UTC(2026, 9, 16, 1, 0);
+
+test("RATE-TILE: parseRateCap reads digits with k/m and refuses everything else", () => {
+  assert.equal(parseRateCap("8m"), 8 * 1048576);
+  assert.equal(parseRateCap("800k"), 819200);
+  assert.equal(parseRateCap("5000"), 5000);
+  for (const bad of [null, undefined, "", "off", "0", "08m", "1.5m", "8mb", 8]) assert.equal(parseRateCap(bad), null, String(bad));
+});
+
+test("RATE-TILE: insideWindow uses the server clock, end exclusive, overnight wraps, unknown is null", () => {
+  assert.equal(insideWindow("03:00-07:00", "UTC+02:00", AT_0100Z), true);
+  assert.equal(insideWindow("03:00-07:00", "UTC+02:00", AT_0100Z - 1 * MIN), false, "02:59 server time");
+  assert.equal(insideWindow("03:00-07:00", "UTC+02:00", AT_0100Z + 4 * 60 * MIN), false, "07:00 end is outside");
+  assert.equal(insideWindow("22:00-06:00", "UTC", Date.UTC(2026, 9, 16, 23, 0)), true);
+  assert.equal(insideWindow("22:00-06:00", "UTC", Date.UTC(2026, 9, 16, 12, 0)), false);
+  assert.equal(insideWindow("03:00-07:00", "UTC-05:30", Date.UTC(2026, 9, 16, 8, 30)), true);
+  assert.equal(insideWindow("03:00-07:00", "CEST", AT_0100Z), null);
+  assert.equal(insideWindow("garbage", "UTC", AT_0100Z), null);
+});
+
+test("MUTATION TARGET: RATE-TILE rateCapLine never claims a cap that is not in force now", () => {
+  const sched = { window: "03:00-07:00", server_timezone: "UTC+02:00" };
+  assert.equal(rateCapLine(capSettings("8m"), sched, AT_0100Z), "Limit 8 MB/s, not in force now (inside the download window 03:00–07:00)");
+  assert.equal(rateCapLine(capSettings("8m"), sched, AT_0100Z + 10 * 60 * MIN), "Limit 8 MB/s, in force now (outside the download window 03:00–07:00)");
+  assert.equal(rateCapLine(capSettings("800k"), { window: null, server_timezone: "UTC" }, AT_0100Z), "Limit 800 KB/s, all day");
+  assert.equal(rateCapLine(capSettings("8m"), null, AT_0100Z), "Limit 8 MB/s, outside the download window", "schedule unknown: no in-force claim");
+  assert.equal(rateCapLine(capSettings("8m"), { window: "03:00-07:00", server_timezone: "?" }, AT_0100Z), "Limit 8 MB/s, outside the download window 03:00–07:00");
+  assert.equal(rateCapLine(capSettings("8m", { core_apply: { pending: true } }), { window: null }, AT_0100Z), "Limit 8 MB/s, all day (change not applied yet)");
+  assert.equal(rateCapLine(capSettings(null), sched, AT_0100Z), "No limit");
+  assert.equal(rateCapLine(capSettings("off"), sched, AT_0100Z), "No limit");
+  assert.equal(rateCapLine(capSettings("???"), sched, AT_0100Z), null, "unreadable value: no line");
+  assert.equal(rateCapLine({ settings: [] }, sched, AT_0100Z), null);
+  assert.equal(rateCapLine(null, sched, AT_0100Z), null);
+});
+
+test("RATE-TILE: headerTiles puts the cap line on Current speed only", () => {
+  const tiles = headerTiles(throughput("ok"), "No limit");
+  assert.deepEqual(tiles.map((t) => t.limit), ["No limit", null, null, null, null, null, null, null]);
+  assert.equal(headerTiles(throughput("ok")).find((t) => t.key === "current").limit, null);
 });

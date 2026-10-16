@@ -131,6 +131,7 @@ import {
   filterJobsByRange,
   formatSpeed,
   headerTiles,
+  rateCapLine,
   isRange,
   isStatsRange,
   readStoredStatsRange,
@@ -271,6 +272,8 @@ const state = {
   gamesKnown: Array.isArray(store.snapshot("games")),
   // WP UPD-6: `GET /v1/schedule`, read once per mount; null = not known.
   schedule: null,
+  // WP RATE-TILE: `GET /v1/settings`, read once per mount; null = not known.
+  settings: null,
 };
 
 /** WP D15c: the statistics header's last answer for `range`
@@ -601,6 +604,7 @@ let updatesInFlight = null;
 /** Bumped per mount so a late `GET /v1/schedule` answer for an old mount
  * is dropped. */
 let scheduleGen = 0;
+let settingsGen = 0;
 
 const sizeOfRow = (g) => formatBytesGB(g.size_bytes);
 
@@ -616,6 +620,21 @@ async function loadSchedule() {
   }
   paintUpdates();
   paintIncomplete(); // WP CACHE-COMPLETE-1c: its schedule note too
+  paintStats(); // WP RATE-TILE: the cap line reads the window
+}
+
+/** WP RATE-TILE: the upstream rate cap for the "Current speed" tile. */
+async function loadRateCap() {
+  const my = ++settingsGen;
+  try {
+    const settings = await api.getSettings();
+    if (my !== settingsGen) return;
+    state.settings = settings;
+  } catch {
+    if (my !== settingsGen) return;
+    state.settings = null; // unknown: no line rather than a guess
+  }
+  paintStats();
 }
 
 /**
@@ -1832,7 +1851,8 @@ function paintStats() {
   // the control it came from.
   els.statsRange.hidden = traffic.noFigures;
 
-  const tiles = traffic.unsupported ? null : headerTiles(t);
+  const cap = state.settings ? rateCapLine(state.settings, state.schedule, Date.now()) : null;
+  const tiles = traffic.unsupported ? null : headerTiles(t, cap);
   els.statsGrid.replaceChildren();
   els.statsGrid.hidden = !tiles;
   for (const tile of tiles || []) {
@@ -1859,6 +1879,13 @@ function paintStats() {
       detail.className = "stat-detail";
       detail.textContent = tile.detail;
       dd.appendChild(detail);
+    }
+    if (tile.limit) {
+      const limit = document.createElement("span");
+      limit.className = "stat-detail";
+      limit.dataset.stat = "limit";
+      limit.textContent = tile.limit;
+      dd.appendChild(limit);
     }
     box.append(dt, dd);
     els.statsGrid.appendChild(box);
@@ -2227,6 +2254,7 @@ export function renderDownloads() {
   paintUpdates(); // WP UPD-6
   paintIncomplete(); // WP CACHE-COMPLETE-1c
   loadSchedule(); // WP UPD-6: the section's schedule note
+  loadRateCap(); // WP RATE-TILE
   paintStats();
   // Same gate as the store's loops (store-singleton.js): no key and no
   // demo mode means the onboarding overlay is up.

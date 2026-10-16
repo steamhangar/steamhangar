@@ -551,6 +551,7 @@ class MainActivity : ComponentActivity() {
                 onJobsSnapshot = { pendingJobsSnapshot = it },
                 demoMode = true,
                 scheduleRepository = remember(demo) { DemoScheduleRepository(demo) },
+                settingsRepository = remember(demo) { DemoSettingsRepository(demo) },
             )
             return
         }
@@ -568,6 +569,7 @@ class MainActivity : ComponentActivity() {
             onJobsSnapshot = { pendingJobsSnapshot = it },
             demoMode = false,
             scheduleRepository = remember(client) { VaultScheduleRepository(client) },
+            settingsRepository = remember(client) { VaultSettingsRepository(client) },
         )
     }
 

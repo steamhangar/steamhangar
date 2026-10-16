@@ -113,7 +113,10 @@ class D15dWiringTest {
         assertCalledFrom(downloads, "historyFilter.load()", "DownloadsScreen")
         assertCalledFrom(downloads, "jobSpeedLines(statsPoll)", "DownloadsScreen")
         assertCalledFrom(downloads, "filterJobsByRange(historyJobs, historyFilter.range)", "DownloadsScreen")
-        assertCalledFrom(downloads, "DownloadsStatsHeader(statsPoll, scope, onRangeChosen = { ranges.statistics = it })", "DownloadsBody")
+        assertCalledFrom(downloads, "DownloadsStatsHeader(statsPoll, scope, rateCap, onRangeChosen = { ranges.statistics = it })", "DownloadsBody")
+        // WP RATE-TILE: the cap line reads the controller's settings and schedule, loaded once per visit.
+        assertCalledFrom(downloads, "rateCapLine(controller.settings, controller.schedule, System.currentTimeMillis())", "DownloadsBody")
+        assertCalledFrom(downloads, "controller.loadRateCap()", "DownloadsScreen")
         assertCalledFrom(downloads, "speedLine = speedLines[model.jobId]", "DownloadsBody")
         assertCalledFrom(downloads, "historyFilter.selectRange(scope, it)", "DownloadsBody")
         assertCalledFrom(downloads, "emptyHistoryText(historyFilter.range)", "DownloadsBody")
@@ -127,7 +130,7 @@ class D15dWiringTest {
         assertCalledFrom(stats, "if (!poll.noFigures) {", "DownloadsStatsHeader")
         assertCalledFrom(stats, "if (tiles != null) StatTiles(tiles)", "DownloadsStatsHeader")
         assertCalledFrom(stats, "ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported)", "DownloadsStatsHeader")
-        assertCalledFrom(stats, "headerTiles(throughput)", "DownloadsStatsHeader")
+        assertCalledFrom(stats, "headerTiles(throughput, rateCap)", "DownloadsStatsHeader")
         assertCalledFrom(stats, "StatTileView(tile, Modifier.weight(1f))", "StatTiles")
         assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = description }", "StatTileView")
         // WP GRAPH-ZOOM: the graph draws the trimmed series, and its caption follows it.
