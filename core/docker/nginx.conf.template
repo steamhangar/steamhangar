@@ -533,6 +533,12 @@ http {
     # Read by core/tools/throughput-report.py. Absent values log "-". # VAULT_DEBUG_TP_LINE
     log_format vault_tp escape=default # VAULT_DEBUG_TP_LINE
         'tp1	$msec	$remote_addr	$vault_event_depot	$request_method	$status	$http_range	$bytes_sent	$request_time	$upstream_response_time	$vault_event_status	$connection	$connection_requests	$request_length	$tcpinfo_rtt	$tcpinfo_rttvar	$tcpinfo_snd_cwnd	$tcpinfo_rcv_space'; # VAULT_DEBUG_TP_LINE
+    # Heartbeat format (same file, tag hb1): one line per GET /lancache-heartbeat, # VAULT_DEBUG_TP_LINE
+    # so a slow answer to the cache-discovery probe is visible. Fields, in order: # VAULT_DEBUG_TP_LINE
+    #   hb1 msec client status request_time connection connection_requests # VAULT_DEBUG_TP_LINE
+    #   tcp_rtt_us. The tp1 parser must never see these (it checks the tag). # VAULT_DEBUG_TP_LINE
+    log_format vault_tp_hb escape=default # VAULT_DEBUG_TP_LINE
+        'hb1	$msec	$remote_addr	$status	$request_time	$connection	$connection_requests	$tcpinfo_rtt'; # VAULT_DEBUG_TP_LINE
 
     # CONTAINER DELTA: stdout instead of logs/access.log. `docker logs` is the
     # single place both nginx logs appear, and the json-file driver's
@@ -880,6 +886,11 @@ http {
         # GETs this before trusting an IP as a real cache and requires the
         # X-LanCache-Processed-By response header to be present.
         location = /lancache-heartbeat {
+            # Opt-in heartbeat timing (delta 8, VAULT_DEBUG_THROUGHPUT on): a # VAULT_DEBUG_TP_LINE
+            # location's own access_log REPLACES the inherited one, so the # VAULT_DEBUG_TP_LINE
+            # normal log is restated next to the hb1 line. # VAULT_DEBUG_TP_LINE
+            access_log /dev/stdout vault; # VAULT_DEBUG_TP_LINE
+            access_log /vault/logs/throughput-debug/throughput.log vault_tp_hb buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE
             add_header X-LanCache-Processed-By "steamhangar";
             return 200;
         }

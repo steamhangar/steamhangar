@@ -22,13 +22,41 @@
 #   VAULT_DEBUG_THROUGHPUT_MAX_DAYS  ON only. Rotated files older than this are
 #                                    deleted, 1..30, default 3.
 #
+# Same file, second job (WP TUNE-1a): two OPT-IN nginx throughput switches that
+# are independent of the debug flag (they also work with it off). They exist
+# to test whether the cold-read throughput (HDD, ~300 Mbit/s) is limited by
+# the single worker blocking on disk reads. Both default OFF, and with both
+# unset this hook does not touch the config for them at all, so the render is
+# byte-identical to the one without the feature.
+#   VAULT_NGINX_AIO       unset, empty, off -> nothing. `threads` -> adds
+#                         `aio threads;` to the http block AND switches
+#                         `sendfile on;` to `sendfile off;`. Both are needed:
+#                         with sendfile on, nginx uses aio only for files >=
+#                         directio (default off), so aio alone would change
+#                         nothing. With sendfile off, file reads go through
+#                         the thread pool and the page cache (no directio),
+#                         at the price of one extra copy. Anything else
+#                         stops the boot; so does a missing/duplicated
+#                         sendfile line.
+#   VAULT_NGINX_WORKERS   unset, empty -> `worker_processes 1;` as in the
+#                         template. `auto` or a whole number 1..16 -> that
+#                         value. Anything else stops the boot. Rate cap and
+#                         limit_conn stay aggregate with more workers (their
+#                         counters and zones are shared memory), but the
+#                         upstream keepalive pool is PER WORKER, see
+#                         core/README.md "Throughput tuning switches".
+# The debug startup line shows the effective aio / worker_processes values.
+#
 # Everything lives in ONE directory, /vault/logs/throughput-debug/ (current
 # file throughput.log, rotated files throughput.<epoch>.log). Removing that
 # directory removes every trace; there is no database row and no schema.
 #
 # What it does when ON:
-#   1. keeps the log_format and the two `access_log ... vault_tp ...` lines in
-#      the rendered nginx.conf (location /depot/ and location @miss). EVERY
+#   1. keeps the log_formats and the three `access_log ... vault_tp[_hb] ...`
+#      lines in the rendered nginx.conf (location /depot/, location @miss and,
+#      with the normal `vault` log restated beside it because a location's own
+#      access_log replaces the inherited one, location = /lancache-heartbeat,
+#      format vault_tp_hb, tag hb1). EVERY
 #      line this feature adds to the template (comments, the log_format, the
 #      access_log lines) ends in the marker comment `# VAULT_DEBUG_TP_LINE`,
 #      so the OFF render is byte-identical to the template without the
@@ -139,6 +167,38 @@ fi
 
 [ -f "$CONF" ] || die "$CONF does not exist -- expected to run after envsubst rendering."
 
+# --- opt-in nginx tuning (WP TUNE-1a), independent of the debug flag ---------
+aio_raw="${VAULT_NGINX_AIO:-}"
+case "$aio_raw" in
+    ""|off) AIO=off ;;
+    threads) AIO=threads ;;
+    *) die "VAULT_NGINX_AIO='$(printf '%s' "$aio_raw" | tr -c 'A-Za-z0-9._-' '?')' is not one of
+  threads (adds 'aio threads;') or off/empty (default, nothing added). Lowercase only. Refusing to start." ;;
+esac
+workers_raw="${VAULT_NGINX_WORKERS:-}"
+case "$workers_raw" in
+    "") WORKERS="" ;;
+    auto) WORKERS=auto ;;
+    *) WORKERS=$(bounded "$workers_raw" 1 1 16 VAULT_NGINX_WORKERS) ;;
+esac
+if [ "$AIO" = threads ]; then
+    [ "$(grep -cE '^[[:space:]]*aio[[:space:]]' "$CONF" || true)" = 0 ] || die "$CONF already has an aio directive; refusing to add a second one."
+    [ "$(grep -c '^http {$' "$CONF" || true)" = 1 ] || die "expected exactly one 'http {' line in $CONF to add 'aio threads;' after."
+    [ "$(grep -c '^    sendfile      on;$' "$CONF" || true)" = 1 ] || die "expected exactly one '    sendfile      on;' line in $CONF to switch off for VAULT_NGINX_AIO=threads."
+    awk '{ if ($0 == "    sendfile      on;") print "    sendfile      off;"; else print } /^http \{$/ { print "    aio threads;" }' "$CONF" > "$CONF.tune.$$" \
+        && cat "$CONF.tune.$$" > "$CONF" && rm -f "$CONF.tune.$$" || die "could not add aio threads to $CONF."
+    [ "$(grep -c '^    sendfile      off;$' "$CONF" || true)" = 1 ] || die "could not switch sendfile off in $CONF."
+    log "VAULT_NGINX_AIO=threads: 'aio threads;' added to http and 'sendfile on' switched to 'sendfile off' (reads go through the thread pool and page cache; one extra copy, more CPU)."
+fi
+if [ -n "$WORKERS" ]; then
+    [ "$(grep -c '^worker_processes  1;$' "$CONF" || true)" = 1 ] || die "expected exactly one 'worker_processes  1;' line in $CONF."
+    sed -i "s/^worker_processes  1;\$/worker_processes  $WORKERS;/" "$CONF"
+    [ "$(grep -c "^worker_processes  $WORKERS;\$" "$CONF" || true)" = 1 ] || die "could not set worker_processes $WORKERS in $CONF."
+    if [ "$WORKERS" != 1 ]; then
+        log "VAULT_NGINX_WORKERS=$WORKERS: worker_processes $WORKERS. Upstream rate cap and limit_conn stay aggregate (shared memory); the upstream keepalive pool is PER WORKER (idle upstream connections up to 8 x workers per edge)."
+    fi
+fi
+
 raw="${VAULT_DEBUG_THROUGHPUT:-}"
 case "$raw" in
     ""|0|false|off|no) MODE=off ;;
@@ -162,8 +222,10 @@ fi
 sed -i "s/[[:space:]]*${MARKER}\$//" "$CONF"
 left=$(grep -c "$MARKER" "$CONF" 2>/dev/null || true)
 [ "${left:-0}" = 0 ] || die "failed to strip the marker comment from $CONF ($left remain)."
-n=$(grep -cE '^[[:space:]]*access_log[[:space:]].*vault_tp' "$CONF" 2>/dev/null || true)
+n=$(grep -cE '^[[:space:]]*access_log[[:space:]].*vault_tp([[:space:]]|;|$)' "$CONF" 2>/dev/null || true)
 [ "${n:-0}" = 2 ] || die "expected 2 access_log directives naming vault_tp in $CONF (location /depot/ and @miss), found ${n:-0}."
+nh=$(grep -cE '^[[:space:]]*access_log[[:space:]].*vault_tp_hb([[:space:]]|;|$)' "$CONF" 2>/dev/null || true)
+[ "${nh:-0}" = 1 ] || die "expected 1 access_log directive naming vault_tp_hb in $CONF (location = /lancache-heartbeat), found ${nh:-0}."
 
 MAX_MB=$(bounded "${VAULT_DEBUG_THROUGHPUT_MAX_MB:-}" $DEFAULT_MAX_MB 1 1024 VAULT_DEBUG_THROUGHPUT_MAX_MB)
 MAX_DAYS=$(bounded "${VAULT_DEBUG_THROUGHPUT_MAX_DAYS:-}" $DEFAULT_MAX_DAYS 1 30 VAULT_DEBUG_THROUGHPUT_MAX_DAYS)
@@ -234,6 +296,11 @@ rate_note=$(grep -m 1 -E '^# (Cap|No cap)' "$CONF_DIR/vault-upstream-rate.conf" 
         printf '%s=%s ' "$d" "$(directive "$d" | tr ' ' '_')"
     done
     printf 'upstream_rate_cap="%s" ' "${rate_note:-unknown}"
+    case "$(directive worker_processes)" in
+        1|unset) ;;
+        *) printf 'workers_note="rate cap and limit_conn are aggregate (shared memory); upstream keepalive pool is per worker" ' ;;
+    esac
+    printf 'hb_fields=hb1,msec,client,status,request_time,connection,connection_requests,tcp_rtt_us '
     printf 'fields=tp1,msec,client,depot,method,status,range,bytes_sent,request_time,upstream_response_time,cache,connection,connection_requests,request_length,tcp_rtt_us,tcp_rttvar_us,tcp_snd_cwnd,tcp_rcv_space\n'
 } >> "$LOG_PATH"
 chmod 0644 "$LOG_PATH" 2>/dev/null || true
