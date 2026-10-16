@@ -184,7 +184,7 @@ boot15() {
     ' sh "$HOOK15" 2>&1
 }
 out=$(boot15 "$work/absent.env" VAULT_UPSTREAM_RATE=2m VAULT_UPSTREAM_EDGE= ) || true
-for want in "STATE=none GEN=0 SEEN=0" "EXPORT VAULT_UPSTREAM_RATE=2m" "EXPORT VAULT_UPSTREAM_RATE_WINDOW=03:00-07:00" \
+for want in "STATE=none GEN=0 SEEN=0" "EXPORT VAULT_UPSTREAM_RATE=2m" "EXPORT VAULT_UPSTREAM_RATE_WINDOW=off" \
             "EXPORT VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net" "EXPORT VAULT_RESOLVER=1.1.1.1" \
             "EXPORT VAULT_TLS_MAX_CONNS=256" \
             "CHILD VAULT_UPSTREAM_EDGE=dist-fra1.discovery.steamserver.net VS_ENV_VAULT_UPSTREAM_RATE=2m"; do
@@ -204,6 +204,25 @@ else
     bad "15- log line missing: $out"
 fi
 
+# BOOT-RATE-1 unit: vs_boot_throttle called directly.
+bt() { # <gen> <source> -> resulting window
+    env -i PATH="$PATH" sh -c '. "$1"; VS_BOOT_GEN=$2; VS_S_VAULT_UPSTREAM_RATE_WINDOW=$3; VS_V_VAULT_UPSTREAM_RATE_WINDOW=03:00-07:00; vs_boot_throttle; echo "$VS_V_VAULT_UPSTREAM_RATE_WINDOW"' sh "$LIB" "$1" "$2"
+}
+if [ "$(bt 1 default)" = 03:00-07:00 ]; then ok "throttle: generation 1 + default keeps 03:00-07:00"; else bad "throttle gen 1 default"; fi
+if [ "$(bt 0 env)" = 03:00-07:00 ]; then ok "throttle: generation 0 + env pin keeps the pinned window"; else bad "throttle gen 0 env"; fi
+if [ "$(bt 0 default)" = off ]; then ok "throttle: generation 0 + default -> off"; else bad "throttle gen 0 default"; fi
+
+# BOOT-RATE-1: without an applied file the default window is replaced by `off`
+# (capped around the clock). A VALID file's window at boot needs the image
+# (the render), so that half runs in verify-core-nginx.sh / verify-stack.sh.
+out=$(boot15 "$work/absent.env") || true
+if grep -qxF 'EXPORT VAULT_UPSTREAM_RATE_WINDOW=off' <<<"$out" \
+   && grep -qxF "$(printf 'VAULT_UPSTREAM_RATE_WINDOW=off\tdefault')" "$work/etc/vault-settings.effective"; then
+    ok "15- BOOT-RATE-1: no file -> window off (throttled), source stays default"
+else
+    bad "15- BOOT-RATE-1 no file: $out"
+fi
+
 out=$(boot15 "$work/absent.env" VAULT_UPSTREAM_RATE_WINDOW=22:00-06:00) || true
 if grep -q 'WARNING: VAULT_UPSTREAM_RATE_WINDOW=.22:00-06:00. is set in the environment. It is deprecated' <<<"$out" \
    && grep -qxF 'EXPORT VAULT_UPSTREAM_RATE_WINDOW=22:00-06:00' <<<"$out"; then
@@ -218,7 +237,8 @@ out=$(boot15 "$work/bad.env" VAULT_UPSTREAM_RATE=) || true
 # vault-api's "pending" ends), the live generation stays 0.
 if grep -qxF 'STATE=rejected GEN=0 SEEN=4' <<<"$out"; then
     if grep -q "REASON=settings file rejected: line 3: key 'VAULT_API_KEY' is not a core setting" <<<"$out" \
-       && grep -qxF 'EXPORT VAULT_UPSTREAM_RATE=off' <<<"$out"; then
+       && grep -qxF 'EXPORT VAULT_UPSTREAM_RATE=off' <<<"$out" \
+       && grep -qxF 'EXPORT VAULT_UPSTREAM_RATE_WINDOW=off' <<<"$out"; then
         ok "15- with a malformed file: boots on env + defaults, reports rejected with the reason"
     else
         bad "15- with a malformed file: $out"

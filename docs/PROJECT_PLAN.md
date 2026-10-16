@@ -3383,7 +3383,7 @@ below carry their own later dates, item 12 is the current one).
         2026-10-16) analysis, then fix: the Downloads page shows client
         downloads more than 1 min late. Analysis and fix land BEFORE
         DOWNLOADS-1, so the redesign builds on the fixed data path.
-      - [ ] **BOOT-RATE-1** (core, roadmap D24) vault-core renders the
+      - [x] **BOOT-RATE-1** (core, roadmap D24) vault-core renders the
         default rate window 03:00-07:00 at boot until settings generation 1
         is applied, so a restart between 03:00 and 07:00 runs unthrottled
         for a few seconds. Fix: read the settings file at boot if present,
