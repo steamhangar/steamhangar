@@ -1176,7 +1176,8 @@ class PrefillScheduler:
     ) -> None:
         self._settings = settings
         #: WP D23: the nightly library-metadata fill (off unless
-        #: ``VAULT_LIBRARY_META`` is on; inside the schedule window only).
+        #: ``VAULT_LIBRARY_META`` is on; independent of the schedule window,
+        #: LIB-META-WINDOW-1).
         self._library_meta = library_meta_runner or library_meta.LibraryMetaRunner(
             settings.db_path, fetch=oracle_fetch, pause_seconds=update_check_pause_seconds
         )
@@ -1472,13 +1473,12 @@ class PrefillScheduler:
                 "thread survives and retries next tick."
             )
 
-        # WP D23: the nightly library-metadata fill. Decides here (switches,
-        # window, lock), works on its own thread; own try so it can never
-        # affect the sweeps or the update check above.
+        # WP D23: the nightly library-metadata fill, independent of the download
+        # window (LIB-META-WINDOW-1). Decides here (switches, daily gate,
+        # lock), works on its own thread; own try so it can never affect the
+        # sweeps or the update check above.
         try:
-            self._library_meta.maybe_start(
-                effective, effective.schedule_window, now, self._clock
-            )
+            self._library_meta.maybe_start(effective, now, self._clock)
         except Exception:
             logger.exception(
                 "Could not start the library metadata fill (WP D23). The "

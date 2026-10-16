@@ -3388,7 +3388,7 @@ below carry their own later dates, item 12 is the current one).
         is applied, so a restart between 03:00 and 07:00 runs unthrottled
         for a few seconds. Fix: read the settings file at boot if present,
         otherwise start throttled until the first generation.
-      - [ ] **LIB-META-WINDOW-1** (api, roadmap D23 note, Weg B) the nightly
+      - [x] **LIB-META-WINDOW-1** (api, roadmap D23 note, Weg B) the nightly
         `library_meta` job runs independent of the download window, once
         per night like UPD-5; today it skips with `no-window` and never
         runs with `VAULT_SCHEDULE_WINDOW=off`.
