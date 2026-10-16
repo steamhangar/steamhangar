@@ -422,22 +422,13 @@ test("Refresh while a request is in flight is ignored (aria-disabled + click gua
   }
 });
 
-test("MUTATION TARGET: Settings keeps a pointer to the Clients page instead of the PC block (WP D15c)", async () => {
-  const { onViewChange } = await import("../js/router.js");
+test("MUTATION TARGET: Settings has no PC block and no pointer row to the Clients page (WP SETTINGS-1)", async () => {
   const s = await mountSettings();
   assert.equal(s.querySelector('[data-role="open-pcs"]'), null, "no PC management left in Settings");
   assert.equal(s.querySelector('[data-role="add-device"]'), null);
   assert.equal(s.querySelectorAll('[data-role="agents-summary"]').length, 0);
-  const btn = s.querySelector('[data-role="open-clients"]');
-  assert.equal(btn.textContent, "Open Clients");
-  const seen = [];
-  const off = onViewChange((v) => seen.push(v));
-  try {
-    btn.dispatchEvent({ type: "click" });
-  } finally {
-    off();
-  }
-  assert.deepEqual(seen, ["clients"], "the button navigates to the Clients page");
+  assert.equal(s.querySelector('[data-role="open-clients"]'), null, "the Open Clients row is dropped");
+  assert.equal(s.querySelectorAll("h4").some((h) => h.textContent === "PCs (agents)"), false);
 });
 
 test("MUTATION TARGET: the Clients page has no separate PC list and no Manage PCs (WP CLIENTS-1); the sheet stays reachable for the bypass banner", async () => {

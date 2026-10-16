@@ -1,12 +1,14 @@
 /**
- * DOM-wiring pins for the D16 Settings page (WP D16-WEB = D16a-2 + D16b-2):
+ * DOM-wiring pins for the D16 Settings page (WP D16-WEB = D16a-2 + D16b-2,
+ * restructured by WP SETTINGS-1 into a section nav + one panel at a time):
  *
- *   - collapsible <details> sections, Vault & connection open by default,
- *     no empty section, one-line state in the summary, open state and the
- *     expert switch remembered per browser;
+ *   - a left section nav, Vault & connection shown by default, no empty
+ *     section, one-line state and dot on each nav item, the expert switch
+ *     remembered per browser;
  *   - the normal page carries no expert row; the "Show expert settings"
- *     switch shows the Expert section with its three sub-groups, and a
- *     hidden expert draft still shows its dot on the switch row;
+ *     switch makes the Expert section reachable, with its three
+ *     sub-groups, and a hidden expert draft still shows its dot on the
+ *     switch row;
  *   - env pins (Q1/Q2) render as plain text with a "Set via env (VAULT_…)"
  *     note and NO input element; shadowed rows say so; a vault-core key the
  *     build cannot apply says that instead of "set via env";
@@ -140,10 +142,13 @@ async function until(pred, label, timeoutMs = 2000) {
 }
 
 const q = (root, role) => root.querySelector(`[data-role="${role}"]`);
-const section = (s, id) => s.querySelectorAll("details").find((d) => d.getAttribute("data-section") === id) || null;
+const section = (s, id) => s.querySelectorAll("section").find((d) => d.getAttribute("data-section") === id) || null;
+const navItem = (s, id) => s.querySelectorAll("button").find((b) => b.getAttribute("data-nav") === id) || null;
+const navIds = (s) => s.querySelectorAll("button").filter((b) => b.getAttribute("data-nav") && !b.hidden).map((b) => b.getAttribute("data-nav"));
+const activeIds = (s) => s.querySelectorAll("section").filter((p) => p.getAttribute("data-section") && !p.hidden).map((p) => p.getAttribute("data-section"));
 const field = (s, key) => s.querySelectorAll("div").find((d) => d.getAttribute("data-key") === key) || null;
 const inputById = (s, id) => s.querySelectorAll("input").find((i) => i.id === id) || null;
-const sectionTitles = (s) => s.querySelectorAll("summary h2.sec-title").map((t) => t.textContent);
+const sectionTitles = (s) => s.querySelectorAll("section h2.sec-title").map((t) => t.textContent);
 const barText = (s) => q(s, "save-status").textContent;
 function type(input, value) {
   input.value = value;
@@ -172,7 +177,7 @@ beforeEach(() => {
   resetModalStack(dom.document);
 });
 
-test("sections: native <details>, Vault & connection open by default, the rest closed, no empty section", async () => {
+test("sections: a nav item and a panel per section, Vault & connection shown by default, no empty section", async () => {
   const s = await mount();
   assert.deepEqual(sectionTitles(s), [
     "Vault & connection",
@@ -184,36 +189,66 @@ test("sections: native <details>, Vault & connection open by default, the rest c
     "Expert settings",
   ]);
   assert.equal(section(s, "other") === null, true, "no row lands in 'other', so the section is not built");
-  assert.equal(section(s, "vault").open, true);
-  for (const id of ["window", "disk", "notify", "steam", "about"]) assert.equal(section(s, id).open, false, id);
+  assert.deepEqual(navIds(s), ["vault", "window", "disk", "notify", "steam", "about"], "Expert is not in the nav while the switch is off");
+  assert.deepEqual(activeIds(s), ["vault"], "one panel at a time");
+  assert.equal(navItem(s, "vault").getAttribute("aria-current"), "true");
+  for (const id of ["window", "disk", "notify", "steam", "about"]) assert.equal(navItem(s, id).getAttribute("aria-current"), null, id);
+  assert.equal(s.querySelectorAll("nav").find((n) => n.getAttribute("aria-label") === "Settings sections") !== undefined, true);
 });
 
-test("a collapsed section shows a one-line state read from its own fields", async () => {
+test("clicking a nav item shows that panel and moves aria-current; every panel stays in the DOM", async () => {
   const s = await mount();
-  const state = (id) => q(section(s, id), "section-state").textContent;
+  click(navItem(s, "disk"));
+  assert.deepEqual(activeIds(s), ["disk"]);
+  assert.equal(navItem(s, "disk").getAttribute("aria-current"), "true");
+  assert.equal(navItem(s, "vault").getAttribute("aria-current"), null);
+  assert.ok(field(s, "vault_name"), "a field of a hidden panel is still built");
+  assert.ok(section(s, "vault").hidden);
+});
+
+test("section nav keyboard: arrows wrap, Home/End jump, focus follows, other keys do nothing", async () => {
+  const s = await mount();
+  const press = (id, key) => {
+    const ev = fakeKeyEvent(key);
+    navItem(s, id).dispatchEvent(ev);
+    return ev.defaultPrevented;
+  };
+  assert.equal(press("vault", "ArrowDown"), true);
+  assert.deepEqual(activeIds(s), ["window"]);
+  assert.equal(dom.document.activeElement === navItem(s, "window"), true);
+  assert.equal(press("window", "ArrowUp"), true);
+  assert.deepEqual(activeIds(s), ["vault"]);
+  press("vault", "ArrowUp");
+  assert.deepEqual(activeIds(s), ["about"], "wraps from first to last visible item");
+  press("about", "Home");
+  assert.deepEqual(activeIds(s), ["vault"]);
+  press("vault", "End");
+  assert.deepEqual(activeIds(s), ["about"]);
+  assert.equal(press("about", "x"), false);
+  assert.deepEqual(activeIds(s), ["about"]);
+});
+
+test("each nav item shows a one-line state read from its own fields", async () => {
+  const s = await mount();
+  const state = (id) => q(navItem(s, id), "section-state").textContent;
   assert.equal(state("vault"), "Name: vault-01");
   assert.equal(state("window"), "Window 03:00-07:00");
   assert.equal(state("disk"), "Auto-GC: Execute");
   assert.equal(state("notify"), "Webhook on · 2 events");
 });
 
-test("MUTATION TARGET: open state is remembered per browser (toggle -> storage -> next mount)", async () => {
+test("the section choice is per mount and not remembered", async () => {
   const s = await mount();
-  const disk = section(s, "disk");
-  disk.open = true;
-  disk.dispatchEvent({ type: "toggle" });
-  assert.equal(JSON.parse(storage.get("steamvault.settingsOpen")).disk, true);
+  click(navItem(s, "notify"));
   const again = await mount();
-  assert.equal(section(again, "disk").open, true);
-  storage.set("steamvault.settingsOpen", "not json");
-  const third = await mount();
-  assert.equal(section(third, "disk").open, false, "unreadable storage falls back to the defaults");
+  assert.deepEqual(activeIds(again), ["vault"]);
+  assert.equal(storage.has("steamvault.settingsOpen"), false);
 });
 
 test("MUTATION TARGET: the normal page carries no expert row; the switch shows the Expert section and is remembered", async () => {
   const s = await mount();
   const expert = section(s, "expert");
-  assert.equal(expert.hidden, true, "the Expert section is hidden while the switch is off");
+  assert.equal(expert.hidden, true, "the Expert panel is not the active panel while the switch is off");
   for (const key of ["vault_name", "schedule_window", "auto_gc", "bypass_window_days", "webhook_events", "webhook_timeout_seconds", "event_log_rotate_bytes"]) {
     const f = field(s, key);
     assert.ok(f, `${key} renders`);
@@ -229,55 +264,50 @@ test("MUTATION TARGET: the normal page carries no expert row; the switch shows t
   const sw = q(s, "expert-switch");
   assert.equal(sw.getAttribute("role"), "switch");
   assert.equal(sw.getAttribute("aria-checked"), "false");
+  assert.equal(navItem(s, "expert").hidden, true);
   click(sw);
   assert.equal(sw.getAttribute("aria-checked"), "true");
-  assert.equal(expert.hidden, false);
-  assert.equal(expert.open, false, "switching on shows the section collapsed");
+  assert.equal(navItem(s, "expert").hidden, false, "the nav now offers Expert settings");
+  assert.deepEqual(activeIds(s), ["vault"], "switching on does not move the user");
   assert.equal(storage.get("steamvault.settingsExpert"), "1");
   const again = await mount();
-  assert.equal(section(again, "expert").hidden, false, "remembered");
+  assert.equal(navItem(again, "expert").hidden, false, "remembered");
 });
 
-test("the expert switch never opens the section; a remembered open state still applies on mount", async () => {
+test("expert switch: Expert settings is reachable through the nav; switching off while on it returns to Vault", async () => {
   const s = await mount();
-  const expert = section(s, "expert");
-  const chain = (n) => { const c = []; for (; n; n = n.parentNode) c.unshift(n); return c; };
-  const before = (x, y) => {
-    const cx = chain(x), cy = chain(y);
-    let i = 0;
-    while (cx[i + 1] && cx[i + 1] === cy[i + 1]) i++;
-    const kids = cx[i].childNodes;
-    return kids.indexOf(cx[i + 1]) < kids.indexOf(cy[i + 1]);
-  };
-  assert.ok(before(section(s, "about"), q(s, "expert-switch")), "the switch row sits below About");
-  assert.ok(before(q(s, "expert-switch"), expert), "the Expert section follows its switch row");
-  assert.ok(before(section(s, "steam"), section(s, "about")), "About follows Steam");
+  assert.ok(navIds(s).indexOf("expert") < 0);
   click(q(s, "expert-switch"));
-  assert.equal(expert.hidden, false);
-  assert.equal(expert.open, false, "first switch-on: collapsed");
+  assert.equal(navIds(s).at(-1), "expert", "Expert settings is the last nav item");
+  click(navItem(s, "expert"));
+  assert.deepEqual(activeIds(s), ["expert"]);
+  assert.equal(navItem(s, "expert").getAttribute("aria-current"), "true");
   click(q(s, "expert-switch"));
-  click(q(s, "expert-switch"));
-  assert.equal(expert.open, false, "off/on again: still collapsed");
-  expert.open = true;
-  expert.dispatchEvent({ type: "toggle" });
-  assert.equal(JSON.parse(storage.get("steamvault.settingsOpen")).expert, true);
-  const again = await mount();
-  assert.equal(section(again, "expert").hidden, false);
-  assert.equal(section(again, "expert").open, true, "the user's own open is remembered");
+  assert.equal(navItem(s, "expert").hidden, true);
+  assert.deepEqual(activeIds(s), ["vault"]);
+  assert.equal(navItem(s, "vault").getAttribute("aria-current"), "true");
+  assert.equal(storage.get("steamvault.settingsExpert"), "0");
 });
 
-test("an expert draft stays visible as a dot when the switch is turned off; collapsed sections show their own dot", async () => {
+test("the switch row sits in the nav, not in a panel", async () => {
+  const s = await mount();
+  const nav = s.querySelectorAll("nav").find((n) => n.getAttribute("aria-label") === "Settings sections");
+  assert.ok(q(nav, "expert-switch"), "the switch is inside the section nav");
+  assert.equal(q(section(s, "about"), "expert-switch"), null);
+});
+
+test("an expert draft stays visible as a dot when the switch is turned off; nav items show their own dot", async () => {
   storage.set("steamvault.settingsExpert", "1");
   const s = await mount();
   type(inputById(s, "settings-gc_grace_days"), "21");
-  assert.equal(q(section(s, "expert"), "section-dirty").hidden, false);
+  assert.equal(q(navItem(s, "expert"), "section-dirty").hidden, false);
   click(q(s, "expert-switch"));
-  assert.equal(section(s, "expert").hidden, true);
+  assert.equal(navItem(s, "expert").hidden, true);
   assert.equal(q(s, "expert-dirty").hidden, false, "the switch row says a hidden draft exists");
   assert.equal(q(s, "save-bar").hidden, false, "the draft is still saveable");
   type(inputById(s, "settings-bypass_window_days"), "5");
-  assert.equal(q(section(s, "notify"), "section-dirty").hidden, false);
-  assert.equal(q(section(s, "disk"), "section-dirty").hidden, true, "only sections holding a draft");
+  assert.equal(q(navItem(s, "notify"), "section-dirty").hidden, false);
+  assert.equal(q(navItem(s, "disk"), "section-dirty").hidden, true, "only sections holding a draft");
 });
 
 test("MUTATION TARGET: an env-pinned row is plain text with 'Set via env (VAULT_…)' — no input element, no Reset", async () => {
@@ -343,14 +373,17 @@ test("explanations sit behind the (i) disclosure, collapsed by default", async (
   assert.match(text, /vault-api cannot see vault-core's environment/, "env_visible:false is explained");
 });
 
-test("apply captions follow `applies`: core only when the API says core, next job, restart", async () => {
+test("timing text follows `applies`: core only when the API says core, next job, restart; it sits behind the (i)", async () => {
   storage.set("steamvault.settingsExpert", "1");
   const s = await mount();
   const cap = (key) => q(field(s, key), "field-caption").textContent;
-  assert.equal(cap("event_log_rotate_bytes"), "Default value · Applies to vault-core without restart.");
-  assert.equal(cap("gc_grace_days"), "Default value · Takes effect with the next prefill or GC job.");
-  assert.equal(cap("vault_name"), "Default value · Takes effect after vault-api restarts.");
-  assert.equal(cap("schedule_window"), "Default value · Takes effect at the next scheduled sweep.", "api+core key: the API says next_sweep, so no core claim");
+  assert.equal(cap("event_log_rotate_bytes"), "Applies to vault-core without restart.");
+  assert.equal(cap("gc_grace_days"), "Takes effect with the next prefill or GC job.");
+  assert.equal(cap("vault_name"), "Takes effect after vault-api restarts.");
+  assert.equal(cap("schedule_window"), "Takes effect at the next scheduled sweep.", "api+core key: the API says next_sweep, so no core claim");
+  const f = field(s, "gc_grace_days");
+  assert.equal(q(f, "field-help").querySelectorAll("p").includes(q(f, "field-caption")), true, "the timing line is inside the (i) block");
+  assert.equal(q(f, "field-help").hidden, true, "collapsed by default");
 });
 
 test("MUTATION TARGET: a risky change opens the confirm dialog; Cancel sends nothing and says so", async () => {
@@ -457,22 +490,68 @@ test("MUTATION TARGET: Escape in the risky dialog is Cancel — no PATCH, the no
   assert.equal(server.patches.length, 0, "Escape sends no PATCH");
 });
 
-test("opening About from the rail's version button does not remember About as open; a user toggle does", async () => {
+test("opening About from the rail's version button selects the About panel and focuses its heading", async () => {
   requestAboutFocus();
   const s = await mount();
-  const about = section(s, "about");
-  await until(() => about.open === true, "About opened by the rail");
-  about.dispatchEvent({ type: "toggle" }); // the browser's async toggle for that open
-  assert.equal("about" in JSON.parse(storage.get("steamvault.settingsOpen") || "{}"), false);
-  about.open = false;
-  about.dispatchEvent({ type: "toggle" });
-  assert.equal(JSON.parse(storage.get("steamvault.settingsOpen")).about, false, "the user's own toggle is remembered");
+  assert.deepEqual(activeIds(s), ["about"]);
+  assert.equal(navItem(s, "about").getAttribute("aria-current"), "true");
+  assert.equal(dom.document.activeElement.id, "settings-about");
 });
 
-test("section titles are headings (h2 inside the summary)", async () => {
+test("section titles are h2 headings, one per panel", async () => {
   const s = await mount();
-  assert.equal(s.querySelectorAll("summary h2.sec-title").length, sectionTitles(s).length);
+  assert.equal(s.querySelectorAll("section h2.sec-title").length, s.querySelectorAll("section").filter((p) => p.getAttribute("data-section")).length);
   assert.ok(sectionTitles(s).length >= 6);
+});
+
+test("fields sit in an auto-fit grid and carry a state chip", async () => {
+  const s = await mount();
+  const grid = section(s, "vault").querySelectorAll("div").find((d) => d.className === "fg");
+  assert.ok(grid, "vault panel has a .fg grid");
+  assert.equal(grid.querySelectorAll("div").includes(field(s, "vault_name")), true);
+  const chip = (key) => q(field(s, key), "field-chip");
+  assert.equal(chip("vault_name").textContent, "Default");
+  assert.equal(chip("vault_name").getAttribute("data-chip"), "default");
+  assert.equal(chip("webhook_url").textContent, "From env");
+});
+
+test("a stored override reads 'Changed here', an env value 'From env'", async () => {
+  server.over = {
+    bypass_window_days: { source: "db", effective: 5 },
+    vault_name: { source: "env", editable: false, reason: "env", effective: "x", fallback: "x" },
+  };
+  const s = await mount();
+  assert.equal(q(field(s, "bypass_window_days"), "field-chip").textContent, "Changed here");
+  assert.equal(q(field(s, "vault_name"), "field-chip").textContent, "From env");
+});
+
+test("GC warning: shown while 'include cached' is on and Auto-GC is not Execute, live from the draft", async () => {
+  storage.set("steamvault.settingsExpert", "1");
+  server.over = { auto_gc: { effective: "dry-run", fallback: "dry-run" } };
+  const s = await mount();
+  const warn = q(section(s, "disk"), "gc-risk");
+  assert.ok(warn, "the warning lives in the Disk panel");
+  assert.equal(warn.hidden, false, "include cached is on, GC is dry-run");
+  const execute = field(s, "auto_gc").querySelectorAll("button").find((b) => b.dataset.value === "execute");
+  click(execute);
+  assert.equal(warn.hidden, true, "choosing Execute clears the warning at once");
+  const dry = field(s, "auto_gc").querySelectorAll("button").find((b) => b.dataset.value === "dry-run");
+  click(dry);
+  assert.equal(warn.hidden, false);
+});
+
+test("GC warning stays hidden when Auto-GC is Execute", async () => {
+  const s = await mount();
+  assert.equal(q(section(s, "disk"), "gc-risk").hidden, true);
+});
+
+test("the save bar appears on the first change and goes when the draft is reverted", async () => {
+  const s = await mount();
+  assert.equal(q(s, "save-bar").hidden, true);
+  type(inputById(s, "settings-bypass_window_days"), "4");
+  assert.equal(q(s, "save-bar").hidden, false);
+  type(inputById(s, "settings-bypass_window_days"), "3");
+  assert.equal(q(s, "save-bar").hidden, true);
 });
 
 test("MUTATION TARGET: the Expert section shows vault-core's apply state (D16c core_apply); none before vault-core reported", async () => {

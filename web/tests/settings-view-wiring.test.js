@@ -140,7 +140,7 @@ test("B1: in demo mode the Connection section says so and offers 'Connect to a v
   const btn = connectBtn(s);
   assert.equal(btn.textContent, "Connect");
   // D16-WEB: the Connection row sits in the "Vault & connection" section.
-  const titles = s.querySelectorAll("summary h2.sec-title").map((t) => t.textContent);
+  const titles = s.querySelectorAll("section h2.sec-title").map((t) => t.textContent);
   assert.ok(titles.includes("Vault & connection") && sectionHeadings(s).includes("Connection"));
   const ttl = s.querySelectorAll("span.ttl").find((t) => t.textContent === "Connect to a vault");
   assert.ok(ttl, "row title must not read 'Reconnect / switch account' when no vault is attached");
