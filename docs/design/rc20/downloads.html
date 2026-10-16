@@ -1,0 +1,303 @@
+<title>Downloads Mockup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#0A1016; --surface:#111C24; --raised:#17252F; --raised-2:#1D303C;
+  --line:#24363F; --line-soft:#1B2A33; --text:#E4EFF3; --dim:#8AA1AD; --dim-2:#63798A;
+  --accent:#2ED9CE; --accent-deep:#12A79F; --accent-ink:#04211F; --accent-glow:rgba(46,217,206,.16);
+  --ok:#57DD8A; --run:#F2CE5B; --stale:#F07B2E; --none:#8296A6; --danger:#FF6F6F;
+  --ui:"Roboto","Segoe UI",system-ui,sans-serif; --mono:"Roboto Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 var(--ui);padding-inline:16px;padding-block:0 64px}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bar{max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:12px;padding-block:14px;flex-wrap:wrap}
+.bar b{font-size:12px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim-2);font-weight:500}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+.seg button{background:none;border:0;padding:6px 14px;border-radius:8px;color:var(--dim);font-size:13px}
+.seg button[aria-pressed=true],.seg button[aria-selected=true]{background:var(--raised-2);color:var(--text)}
+.wrap{max-width:1040px;margin:0 auto;border:1px solid var(--line);border-radius:18px;background:var(--bg);overflow:hidden;position:relative}
+.app{display:grid;grid-template-columns:168px 1fr;min-height:760px}
+.side{border-right:1px solid var(--line-soft);padding:18px 12px;display:flex;flex-direction:column;gap:4px;background:var(--bg)}
+.side .brand{font-size:10.5px;letter-spacing:.9px;color:var(--dim-2);padding:0 10px 14px;font-weight:500}
+.side a{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:10px;color:var(--dim);font-size:13px}
+.side a.on{background:var(--accent-glow);color:var(--accent)}
+.side .sp{flex:1}
+.side .st{font:11px var(--mono);color:var(--dim-2);padding:0 10px;line-height:1.7}
+@media(max-width:720px){.app{grid-template-columns:1fr}.side{display:none}}
+main{padding:26px clamp(16px,3vw,36px) 40px;max-width:820px;width:100%;margin:0 auto}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+h1{margin:0;font-size:24px;letter-spacing:-.5px}
+.sub{color:var(--dim);font-size:13px;margin-top:2px}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--raised);padding:8px 14px;border-radius:10px;font-size:13px;font-weight:500}
+.btn:hover{background:var(--raised-2)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.pri:hover{background:#5CEBE1}
+.btn.sm{padding:5px 10px;font-size:12px;border-radius:8px}
+.btn.ghost{background:none}
+.sum{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:22px 0}
+@media(max-width:620px){.sum{grid-template-columns:repeat(2,1fr)}}
+.tile{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:12px 14px}
+.tile .k{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim-2);font-weight:500}
+.tile .v{font-size:22px;font-weight:500;letter-spacing:-.4px;margin-top:2px;font-variant-numeric:tabular-nums}
+.tile .v small{font-size:13px;color:var(--dim);font-weight:400;margin-left:3px}
+.tile .n{font-size:12px;color:var(--dim);margin-top:1px}
+.tool{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.sec{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim-2);font-weight:500}
+.cards{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--line-soft);border-radius:14px;padding:16px 18px;display:grid;gap:14px}
+.ch{display:flex;gap:12px;align-items:center}
+.ico{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--raised);color:var(--accent);flex:none;box-shadow:inset 0 0 0 1px var(--line)}
+.ico svg{width:20px;height:20px}
+.nm{font-weight:500;font-size:15px}
+.meta{font:11.5px var(--mono);color:var(--dim-2);margin-top:1px;overflow-wrap:anywhere}
+.grow{flex:1;min-width:0}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 10px 3px 8px;border-radius:99px;background:var(--raised);white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+.pill.ok{--c:var(--ok);color:var(--ok)}
+.pill.run{--c:var(--accent);color:var(--accent);background:var(--accent-glow)}
+.pill.run i{animation:pulse 1.6s infinite}
+.pill.off{--c:var(--none);color:var(--dim)}
+@keyframes pulse{50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.pill.run i{animation:none}}
+.now{display:flex;align-items:center;gap:12px;background:var(--raised);border-radius:10px;padding:10px 12px}
+.now .t{flex:1;min-width:0}
+.now .t b{font-weight:500}
+.now .t span{display:block;font-size:12px;color:var(--dim)}
+.now .sp{font:500 15px var(--mono);color:var(--accent);font-variant-numeric:tabular-nums}
+.now.idle{background:none;border:1px dashed var(--line);color:var(--dim)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:560px){.stats{grid-template-columns:1fr 1fr}}
+.st .k{font-size:11px;color:var(--dim-2);text-transform:uppercase;letter-spacing:.6px}
+.st .v{font-size:17px;font-weight:500;margin-top:1px;font-variant-numeric:tabular-nums}
+.st .v small{font-size:12px;color:var(--dim);font-weight:400}
+.meter{height:4px;border-radius:2px;background:var(--line-soft);margin-top:7px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--ok);border-radius:2px}
+.meter.mid i{background:var(--run)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{font-size:12px;background:var(--raised);border-radius:8px;padding:3px 9px;color:var(--text)}
+.chip em{font-style:normal;color:var(--dim-2);margin-left:5px;font-family:var(--mono);font-size:11px}
+.chip.more{background:none;border:1px dashed var(--line);color:var(--dim)}
+.cf{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--line-soft);padding-top:12px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+.pill.stale{--c:var(--stale);color:var(--stale);background:rgba(240,123,46,.12)}
+.tile.warnt{border-color:rgba(240,123,46,.35)}
+.upd{display:flex;gap:12px;align-items:center;background:rgba(240,123,46,.08);border:1px solid rgba(240,123,46,.3);border-radius:10px;padding:10px 12px;color:var(--stale);flex-wrap:wrap}
+.upd svg{flex:none}
+.upd .grow{display:grid;gap:1px;min-width:200px}
+.upd b{font-weight:500;color:var(--text);font-size:13px}
+.upd span{font-size:12px;color:var(--dim)}
+.upd code{font:11.5px var(--mono);color:var(--text)}
+.pick{display:grid;gap:4px;background:var(--bg);border:1px dashed var(--line);border-radius:10px;padding:14px}.pick b{font-weight:500}.pick span{font-size:12.5px;color:var(--dim)}
+.agent{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;font-size:12px;color:var(--dim);background:var(--bg);border-radius:10px;padding:9px 12px}
+.agent .sec{margin-right:-4px}
+.cf .acts{display:flex;gap:8px}
+.pcs{margin-top:28px}
+.pcs .box{margin-top:10px;background:var(--surface);border:1px solid var(--line-soft);border-radius:14px;overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px;flex-wrap:wrap}
+.row+.row{border-top:1px solid var(--line-soft)}
+.row .grow .a{font-weight:500}.row .grow .b{font-size:12px;color:var(--dim)}
+.health{color:var(--ok);font-size:12px;display:inline-flex;gap:5px;align-items:center}
+.scrim{position:absolute;inset:0;background:rgba(3,7,10,.62);opacity:0;pointer-events:none;transition:opacity .2s;z-index:5}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(460px,100%);background:var(--surface);border-left:1px solid var(--line);z-index:6;transform:translateX(104%);transition:transform .25s ease;display:flex;flex-direction:column}
+.drawer.on{transform:none}
+@media(prefers-reduced-motion:reduce){.drawer,.scrim{transition:none}}
+.dh{padding:20px 22px 0}
+.dh h2{margin:0;font-size:19px;letter-spacing:-.3px}
+.dh p{margin:3px 0 14px;color:var(--dim);font-size:13px}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--bg);border:1px solid var(--line-soft);border-radius:12px;padding:4px}
+.tabs button{background:none;border:0;border-radius:9px;padding:8px 4px;display:grid;justify-items:center;gap:3px;font-size:11.5px;color:var(--dim)}
+.tabs button svg{width:18px;height:18px}
+.tabs button[aria-selected=true]{background:var(--raised-2);color:var(--accent)}
+.db{padding:16px 22px;overflow-y:auto;flex:1;display:grid;gap:14px;align-content:start}
+.warn{display:flex;gap:10px;background:rgba(240,123,46,.08);border:1px solid rgba(240,123,46,.28);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--dim)}
+.warn svg{width:16px;height:16px;color:var(--stale);flex:none;margin-top:1px}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.steps li{display:grid;grid-template-columns:24px 1fr;gap:10px}
+.steps .n{width:24px;height:24px;border-radius:50%;background:var(--raised-2);color:var(--accent);display:grid;place-items:center;font-size:12px;font-weight:700}
+.steps h3{margin:2px 0 2px;font-size:13.5px;font-weight:500}
+.steps p{margin:0;font-size:12.5px;color:var(--dim)}
+.qrbox{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;margin-top:10px}
+@media(max-width:440px){.qrbox{grid-template-columns:1fr}}
+.qr{background:#fff;border-radius:12px;padding:10px;width:164px;height:164px}
+.qr canvas{width:100%;height:100%;display:block;image-rendering:pixelated}
+.qr.hid{filter:blur(9px);opacity:.55}
+.field{display:grid;gap:5px}
+.field label{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim-2);font-weight:500}
+.in{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font:13px var(--mono);color:var(--text);width:100%}
+.hint{font-size:11.5px;color:var(--dim-2)}
+.code{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font:12px/1.6 var(--mono);color:var(--dim);overflow-x:auto;white-space:pre}
+.code.hid{filter:blur(5px);user-select:none}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.df{padding:14px 22px;border-top:1px solid var(--line-soft);display:flex;justify-content:space-between;align-items:center;gap:10px}
+[hidden]{display:none!important}
+</style>
+<style>
+.hero{background:var(--surface);border:1px solid var(--line-soft);border-radius:16px;padding:18px 20px;display:grid;gap:14px;margin:20px 0 10px}
+.hh{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.live{display:grid;grid-template-columns:auto 1fr;gap:6px 24px;align-items:end}
+@media(max-width:620px){.live{grid-template-columns:1fr}}
+.big{font-size:38px;font-weight:500;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1}
+.big small{font-size:16px;color:var(--dim);font-weight:400;margin-left:4px}
+.cap{font-size:12px;color:var(--dim);margin-top:6px}
+.cap b{font-weight:500;color:var(--text)}
+svg.g{width:100%;height:84px;display:block}
+.g .l{fill:none;stroke:var(--accent);stroke-width:1.6;vector-effect:non-scaling-stroke}
+.g .a{fill:var(--accent-glow)}
+.g .grid{stroke:var(--line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
+.ax{display:flex;justify-content:space-between;font-size:10.5px;color:var(--dim-2);margin-top:3px}
+.mini{display:flex;gap:6px 22px;flex-wrap:wrap;font-size:12.5px;color:var(--dim);border-top:1px solid var(--line-soft);padding-top:12px}
+.mini b{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums}
+.four{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:6px}
+@media(max-width:620px){.four{grid-template-columns:repeat(2,1fr)}}
+.note{font-size:12px;color:var(--dim-2);margin:4px 2px 18px}
+.attn{display:grid;gap:8px;margin-bottom:22px}
+.arow{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:10px 14px;flex-wrap:wrap}
+.arow .cnt{min-width:26px;height:26px;border-radius:13px;display:grid;place-items:center;font-size:12.5px;font-weight:700;background:rgba(240,123,46,.14);color:var(--stale)}
+.arow.inc .cnt{background:rgba(242,206,91,.14);color:var(--run)}
+.arow .grow b{font-weight:500}.arow .grow span{display:block;font-size:12px;color:var(--dim)}
+.job{background:var(--surface);border:1px solid var(--line-soft);border-radius:14px;padding:14px 16px;display:grid;gap:10px;margin-bottom:10px}
+.jt{display:flex;gap:12px;align-items:center}
+.bar2{height:6px;border-radius:3px;background:var(--line-soft);overflow:hidden}
+.bar2 i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.jm{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);gap:8px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.q{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;margin-bottom:6px}
+.q .p{font:12px var(--mono);color:var(--dim-2);width:20px}
+.q .sz{font:12px var(--mono);color:var(--dim)}
+.h{display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.h .sz{font:12px var(--mono);color:var(--dim)}
+.h .when{font-size:12px;color:var(--dim-2);width:92px;text-align:right}
+.ok-i{color:var(--ok);display:inline-flex}
+.sechd{display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px;gap:10px;flex-wrap:wrap}
+details.arow{display:block}details.arow summary{display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;flex-wrap:wrap}
+details.arow summary::-webkit-details-marker{display:none}
+.more{font-size:12px;color:var(--dim);margin-left:auto}
+.more::after{content:" ▾"}details[open] .more::after{content:" ▴"}
+.dlist{margin-top:10px;display:grid;gap:6px;border-top:1px solid var(--line-soft);padding-top:10px;font-size:13px}
+.dlist div{display:flex;justify-content:space-between;gap:10px}
+.dlist span{color:var(--dim);font:12px var(--mono)}
+.wrap[data-s=idle] .ob,.wrap[data-s=busy] .oi{display:none!important}
+.empty{text-align:center;color:var(--dim);font-size:13px;padding:18px 0}
+.hist{display:grid;gap:8px}
+.hrow{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:11px 14px;text-align:left;width:100%;font:inherit;color:var(--text)}
+.hrow:hover{background:var(--raised)}
+.hrow .grow{display:grid;gap:1px}
+.seg{flex-wrap:wrap}
+.q{cursor:default}.q.drag{opacity:.4}
+.grip{color:var(--dim-2);cursor:grab;display:grid;place-items:center;padding:4px}
+.q .p{width:16px;text-align:right}
+.dlist .dr{display:grid;grid-template-columns:1fr auto 72px;align-items:center;column-gap:14px;min-height:34px}
+.dlist .dr .grow{min-width:0}
+.dlist .dr span{color:var(--dim);font:12px var(--mono);text-align:right;white-space:nowrap}
+.dlist .dr .btn{justify-self:end;width:72px;justify-content:center;padding:4px 0;font-size:12px;line-height:1.2;border-radius:8px}
+.hrow .chev{transition:transform .15s;flex:none}
+.hrow[aria-expanded=true]{background:var(--raised);border-bottom-left-radius:0;border-bottom-right-radius:0}
+.hrow[aria-expanded=true] .chev{transform:rotate(90deg)}
+.hpanel{margin-top:-8px;background:var(--surface);border:1px solid var(--line-soft);border-top:0;border-radius:0 0 12px 12px;padding:12px 14px 14px;display:grid;gap:10px;font-size:13px}
+.hpanel p{margin:0;color:var(--dim);line-height:1.5}
+.hpanel .ft{color:var(--text);font-weight:500}
+.hpanel .cmd{display:block;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:12px var(--mono);color:var(--text);overflow-wrap:anywhere}
+.hpanel .log{background:var(--bg);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;font:12px/1.55 var(--mono);color:var(--dim);white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto;margin:0}
+.hpanel .acts{display:flex;gap:8px}
+.hpanel summary{cursor:pointer;color:var(--dim);font-size:12px}
+.hpanel details .log{margin-top:8px}
+.bar,.wrap{max-width:1480px}
+main{max-width:none}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:start}
+.cl,.cr{min-width:0}.cr .sechd{margin-top:0}
+@media(max-width:1000px){.cols{grid-template-columns:1fr;gap:0}.cr .sechd{margin-top:22px}}
+</style>
+
+<div class="bar"><b>Mockup</b><div class="seg" role="group" aria-label="Zustand"><button id="s-idle" aria-pressed="true">Ruhig</button><button id="s-busy" aria-pressed="false">Aktiv</button></div><span class="hint">Ruhig = Zahlen aus deinem Screenshot. Aktiv = Beispieldaten (Download, Warteschlange, Updates).</span></div>
+<div class="wrap" id="w" data-s="idle"><div class="app">
+<nav class="side" aria-label="Navigation">
+    <div class="brand">STEAMVAULT</div>
+    <a><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Library</a>
+    <a ><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Clients</a>
+    <a class="on"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>Downloads</a>
+    <a><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>Settings</a>
+    <div class="sp"></div>
+    <div class="st">Used 380 GB<br>Free 1518 GB<br>v0.1.0-rc19.2</div>
+  </nav>
+<main>
+  <div class="head">
+    <div><h1>Downloads</h1><div class="sub"><span class="oi">Idle · 20 in history</span><span class="ob">1 aktiv · 3 in der Warteschlange · 20 in history</span></div></div>
+    <div class="acts ob"><button class="btn">Pause all</button><button class="btn pri">Resume all</button></div>
+  </div>
+
+  <section class="hero" aria-label="Download statistics">
+    <div class="hh"><span class="sec">Geschwindigkeit</span>
+      <div class="seg" role="group" aria-label="Statistics range"><button aria-pressed="true">Live</button><button aria-pressed="false">1 h</button><button aria-pressed="false">6 h</button><button aria-pressed="false">24 h</button><button aria-pressed="false">7 days</button><button aria-pressed="false">30 days</button><button aria-pressed="false">All</button></div></div>
+    <div class="live">
+      <div>
+        <div class="big"><span class="oi">0</span><span class="ob">28.8</span><small>MB/s</small></div>
+        <div class="cap"><span class="pill off oi"><i></i>Idle</span><span class="pill run ob"><i></i>Lädt jetzt</span></div>
+        <div class="cap">Limit <b>16 MB/s</b>, ganztägig · <span class="oi">kein Gerät lädt</span><span class="ob">1 Gerät lädt gerade</span></div>
+      </div>
+      <div>
+        <svg class="g" viewBox="0 0 400 84" preserveAspectRatio="none" aria-label="Speed over the selected range">
+          <line class="grid" x1="0" y1="21" x2="400" y2="21"/><line class="grid" x1="0" y1="42" x2="400" y2="42"/><line class="grid" x1="0" y1="63" x2="400" y2="63"/>
+          <g class="oi"><path class="a" d="M0 84 L0 80 L20 80 L20 74 L60 74 L60 80 L120 80 L130 62 L170 62 L180 70 L200 70 L205 30 L215 30 L215 6 L225 6 L230 74 L250 80 L290 80 L290 48 L330 48 L330 52 L370 52 L370 80 L400 80 L400 84Z"/><path class="l" d="M0 80 L20 80 L20 74 L60 74 L60 80 L120 80 L130 62 L170 62 L180 70 L200 70 L205 30 L215 30 L215 6 L225 6 L230 74 L250 80 L290 80 L290 48 L330 48 L330 52 L370 52 L370 80 L400 80"/></g><g class="ob"><path class="a" d="M0 84 L0 70 L30 66 L60 72 L90 40 L120 36 L150 60 L180 74 L210 30 L240 22 L270 34 L300 58 L330 28 L360 20 L400 30 L400 84Z"/><path class="l" d="M0 70 L30 66 L60 72 L90 40 L120 36 L150 60 L180 74 L210 30 L240 22 L270 34 L300 58 L330 28 L360 20 L400 30"/></g>
+        </svg>
+        <div class="ax"><span>vor 55 min</span><span>Spitze 104 MB/s</span><span>jetzt</span></div>
+      </div>
+    </div>
+    <div class="mini"><span>Ø beim Laden <b>37.3 MB/s</b></span><span>Spitze <b>104 MB/s</b></span><span>Prefill-Runner <b>23.1 GB</b> davon, Cache <b>25.0 GB</b></span></div>
+  </section>
+
+  <section class="four" aria-label="Totals">
+    <div class="tile"><div class="k">Ausgeliefert</div><div class="v">48.1<small>GB</small></div><div class="n">Cache + Prefill</div></div>
+    <div class="tile"><div class="k">Aus dem Internet</div><div class="v">6<small>MB</small></div><div class="n">nicht im Cache</div></div>
+    <div class="tile"><div class="k">Vom Cache gespart</div><div class="v">25.0<small>GB</small></div><div class="n">statt Internet</div></div>
+    <div class="tile"><div class="k">Trefferquote</div><div class="v">100<small>%</small></div><div class="meter"><i style="width:100%"></i></div></div>
+  </section>
+  <p class="note">Details zu jeder Zahl stehen im Tooltip. Pause stoppt den Scheduler nicht: sein nächster Lauf kann neue Downloads einreihen.</p>
+
+  <section class="attn ob" aria-label="Braucht Aufmerksamkeit">
+    <details class="arow">
+      <summary><span class="cnt">3</span><div class="grow"><b>Updates verfügbar</b><span>Steam hat neue Versionen für 3 Spiele im Cache.</span></div><button class="btn sm pri" type="button">Update all</button><span class="more">Anzeigen</span></summary>
+      <div class="dlist"><div class="dr"><div class="grow">Satisfactory</div><span>4.2 GB</span><button class="btn sm" type="button">Update</button></div><div class="dr"><div class="grow">Enshrouded</div><span>1.1 GB</span><button class="btn sm" type="button">Update</button></div><div class="dr"><div class="grow">The Riftbreaker</div><span>320 MB</span><button class="btn sm" type="button">Update</button></div></div>
+    </details>
+    <details class="arow inc">
+      <summary><span class="cnt">2</span><div class="grow"><b>Unvollständig im Cache</b><span>Für 2 Spiele fehlen Teile auf der Platte.</span></div><button class="btn sm" type="button">Verify all</button><span class="more">Anzeigen</span></summary>
+      <div class="dlist"><div class="dr"><div class="grow">Dyson Sphere Program</div><span>9 von 11 Depots</span><button class="btn sm " type="button">Verify</button></div><div class="dr"><div class="grow">The Witcher 3: Wild Hunt</div><span>12 von 13 Depots</span><button class="btn sm " type="button">Verify</button></div></div>
+    </details>
+  </section>
+
+  <div class="cols"><div class="cl"><div class="sechd" style="margin-top:0"><span class="sec">Active</span></div>
+  <div class="empty oi">Kein Download läuft. Starte einen aus der Library.</div>
+  <article class="job ob">
+    <div class="jt"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg></div>
+      <div class="grow"><div class="nm">HELLDIVERS™ 2</div><div class="meta">Download · gestartet vor 14 min</div></div>
+      <span class="pill run"><i></i>Loading</span></div>
+    <div class="bar2"><i style="width:62%"></i></div>
+    <div class="jm"><span>62 % · 38.4 von 61.9 GB</span><span>28.8 MB/s · noch ca. 14 min</span></div>
+    <div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost">Stop</button></div>
+  </article>
+
+  <div class="sechd"><span class="sec">Queue · <span class="oi">0</span><span class="ob" id="qn">3</span></span></div>
+  <div class="empty oi">Nichts wartet.</div>
+  <div class="ob" id="queue"><div class="q" draggable="true"><span class="grip" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></span><span class="p"></span><div class="grow">Assassin's Creed Black Flag Resynced</div><span class="sz">157 GB</span><button class="btn sm ghost">Remove</button></div><div class="q" draggable="true"><span class="grip" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></span><span class="p"></span><div class="grow">Enshrouded</div><span class="sz">1.1 GB</span><button class="btn sm ghost">Remove</button></div><div class="q" draggable="true"><span class="grip" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg></span><span class="p"></span><div class="grow">The Witcher 3: Wild Hunt</div><span class="sz">119 GB</span><button class="btn sm ghost">Remove</button></div><p class="note" style="margin:6px 2px 0">Ziehen am Griff ändert die Reihenfolge.</p></div>
+
+  </div><div class="cr"><div class="sechd"><span class="sec">History</span>
+    <div class="acts"><div class="seg" role="group" aria-label="History range"><button aria-pressed="false">24 h</button><button aria-pressed="false">7 days</button><button aria-pressed="false">30 days</button><button aria-pressed="true">All</button></div><button class="btn sm ghost">Delete history…</button></div></div>
+  <div class="hist oi"><button class="hrow"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">HELLDIVERS™ 2</div><div class="meta">job #191 · Garbage collected · 16.10.2026, 18:49</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button><button class="hrow" aria-expanded="true"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">HELLDIVERS™ 2</div><div class="meta">job #190 · Done · 16.10.2026, 18:49</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button><div class="hpanel"><pre class="log">Sample excerpt: the last lines of the job's log appear here.
+Loaded lazily when the row is opened; long output is truncated to its last portion.</pre></div><button class="hrow" aria-expanded="true"><span class="ok-i" style="color:var(--danger)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 6v8M12 18h.01"/></svg></span><div class="grow"><div class="nm">HELLDIVERS™ 2</div><div class="meta">job #189 · Failed · 16.10.2026, 18:28</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button><div class="hpanel"><div class="ft">Steam login missing</div><p>SteamPrefill on the server has no Steam session yet. It needs a one-time interactive login on the server. vault-api never sees or stores your Steam credentials.</p><p>In the folder with SteamHangar's compose.yaml (deploy/ by default), run:</p><code class="cmd">docker compose run --rm -it prefill login</code><p>Enter your account name, password and Steam Guard code, then exit the app selector.</p><p>Then press Retry.</p><div class="acts"><button class="btn primary">Retry</button></div><details><summary>Show the full SteamPrefill output</summary><pre class="log">[vault-api] Prefill failed (reason=not_logged_in); ...</pre></details></div><button class="hrow"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">Sir, We Have an Orc Problem</div><div class="meta">job #188 · Done · 16.10.2026, 17:21</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button><button class="hrow"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">Graveyard Keeper 2</div><div class="meta">job #187 · Done · 16.10.2026, 17:21</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button><button class="hrow"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">Assassin's Creed Black Flag Resynced</div><div class="meta">job #186 · Done · 16.10.2026, 17:21</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button></div><div class="hist ob"><button class="hrow"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">Satisfactory (Update)</div><div class="meta">job #192 · Done · 16.10.2026, 17:21</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button><button class="hrow"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">Graveyard Keeper 2</div><div class="meta">job #191 · Done · 16.10.2026, 17:21</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button><button class="hrow"><span class="ok-i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg></span><div class="grow"><div class="nm">Assassin's Creed Black Flag Resynced</div><div class="meta">job #190 · Done · 16.10.2026, 17:21</div></div><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--dim-2)" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button></div>
+</div></div></main></div></div>
+<script>
+const w=document.getElementById('w');
+function st(x){w.dataset.s=x;document.getElementById('s-idle').setAttribute('aria-pressed',x==='idle');document.getElementById('s-busy').setAttribute('aria-pressed',x==='busy')}
+document.getElementById('s-idle').onclick=()=>st('idle');document.getElementById('s-busy').onclick=()=>st('busy');
+
+const qb=document.getElementById('queue');let dragEl=null;
+function renum(){[...qb.querySelectorAll('.q')].forEach((q,i)=>q.querySelector('.p').textContent=i+1)}
+qb.addEventListener('dragstart',e=>{dragEl=e.target.closest('.q');if(dragEl)dragEl.classList.add('drag')});
+qb.addEventListener('dragend',()=>{if(dragEl)dragEl.classList.remove('drag');qb.querySelectorAll('.over').forEach(x=>x.classList.remove('over'));dragEl=null;renum()});
+qb.addEventListener('dragover',e=>{e.preventDefault();const t=e.target.closest('.q');if(!t||t===dragEl||!dragEl)return;
+  const r=t.getBoundingClientRect();qb.insertBefore(dragEl,e.clientY<r.top+r.height/2?t:t.nextSibling);renum()});
+renum();
+</script><script>document.querySelectorAll('.hrow').forEach(b=>{b.setAttribute('aria-expanded',b.getAttribute('aria-expanded')||'false');b.addEventListener('click',()=>{let p=b.nextElementSibling;if(!p||!p.classList.contains('hpanel')){p=document.createElement('div');p.className='hpanel';p.hidden=true;p.innerHTML=`<pre class="log">Sample excerpt: the last lines of the job's log appear here.
+Loaded lazily when the row is opened; long output is truncated to its last portion.</pre>`;b.after(p)}const o=b.getAttribute('aria-expanded')==='true';b.setAttribute('aria-expanded',!o);p.hidden=o})});</script>

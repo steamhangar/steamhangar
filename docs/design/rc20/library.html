@@ -1,0 +1,206 @@
+<!doctype html><title>Library Mockup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+:root{--bg:#0A1016;--surface:#111C24;--raised:#17252F;--raised-2:#1D303C;--line:#24363F;--line-soft:#1B2A33;--text:#E4EFF3;--dim:#8AA1AD;--dim-2:#63798A;--accent:#2ED9CE;--accent-ink:#04211F;--accent-glow:rgba(46,217,206,.16);--ok:#57DD8A;--run:#F2CE5B;--stale:#F07B2E;--none:#8296A6;--danger:#FF6F6F;--ui:"Roboto","Segoe UI",system-ui,sans-serif;--mono:"Roboto Mono",ui-monospace,Consolas,monospace;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 var(--ui);padding-inline:16px;padding-block:0 64px}
+button,input,select{font:inherit;color:inherit}button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+.note{max-width:1480px;margin:0 auto;padding-block:14px;color:var(--dim-2);font-size:12px}
+.wrap{max-width:1480px;margin:0 auto;border:1px solid var(--line);border-radius:18px;background:var(--bg);overflow:hidden;position:relative}
+.app{display:grid;grid-template-columns:168px 1fr;min-height:820px}
+.side{border-right:1px solid var(--line-soft);padding:18px 12px;display:flex;flex-direction:column;gap:4px}
+.side .brand{font-size:10.5px;letter-spacing:.9px;color:var(--dim-2);padding:0 10px 14px;font-weight:500}
+.side a{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:10px;color:var(--dim);font-size:13px}
+.side a.on{background:var(--accent-glow);color:var(--accent)}
+.side .sp{flex:1}.side .st{font:11px var(--mono);color:var(--dim-2);padding:0 10px;line-height:1.7}
+@media(max-width:720px){.app{grid-template-columns:1fr}.side{display:none}}
+main{padding:26px clamp(16px,3vw,40px) 40px;min-width:0}
+h1{margin:0;font-size:24px;letter-spacing:-.5px}.sub{color:var(--dim);font-size:13px;margin-top:2px}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--raised);padding:8px 14px;border-radius:10px;font-size:13px;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--raised-2)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.pri:hover{background:#5CEBE1}.btn.sm{padding:5px 10px;font-size:12px;border-radius:8px}
+.btn.ghost{background:none}.btn.danger{color:var(--danger);background:none;border-color:rgba(255,111,111,.4)}
+.sec{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim-2);font-weight:500}
+.mono{font-family:var(--mono)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 10px 3px 8px;border-radius:99px;background:var(--raised);white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+.pill.ok{--c:var(--ok);color:var(--ok)}.pill.warn{--c:var(--run);color:var(--run)}.pill.off{--c:var(--none);color:var(--dim)}.pill.bad{--c:var(--danger);color:var(--danger)}.pill.run{--c:var(--accent);color:var(--accent)}
+
+main{max-width:none;position:relative}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.split{display:inline-flex;position:relative}
+.split .btn:first-child{border-radius:10px 0 0 10px}
+.split .btn.m{border-radius:0 10px 10px 0;padding-inline:9px;border-left:1px solid rgba(4,33,31,.35)}
+.menu{position:absolute;right:0;top:calc(100% + 6px);z-index:5;background:var(--raised-2);border:1px solid var(--line);border-radius:12px;padding:6px;min-width:260px;box-shadow:0 14px 30px rgba(0,0,0,.5)}
+.menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:9px 12px;border-radius:8px;font-size:13px}
+.menu button:hover{background:var(--raised)}
+.bar2{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:20px 0 8px}
+.search{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 12px;width:260px;max-width:100%}
+.search input{background:none;border:0;padding:9px 0;width:100%;outline:0;font-size:13px}
+.search:focus-within{border-color:var(--accent)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:12.5px;color:var(--dim);display:inline-flex;gap:7px;align-items:center}
+.chip small{font:11px var(--mono);color:var(--dim-2)}
+.chip[aria-pressed=true]{background:var(--accent-glow);border-color:var(--accent);color:var(--accent)}
+.chip[aria-pressed=true] small{color:var(--accent)}
+.sp{flex:1}
+.sortg{display:inline-flex;align-items:stretch;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sortg select{background:none;border:0;padding:8px 8px 8px 12px;font-size:13px;outline:0;min-width:0}
+.sortg button{display:inline-flex;align-items:center;gap:6px;background:none;border:0;border-left:1px solid var(--line);padding:0 12px;font-size:12.5px;color:var(--dim);width:40px;justify-content:center;padding:0}
+.sortg button:hover{background:var(--raised);color:var(--text)}
+.sortg button svg{transition:transform .15s}
+.sortg button[aria-pressed=true] svg{transform:rotate(180deg)}
+.sortg:focus-within{border-color:var(--accent)}
+.sel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px}
+.ib{background:var(--surface);border:1px solid var(--line);border-radius:10px;width:36px;height:36px;display:grid;place-items:center;color:var(--dim)}
+.ib[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:var(--accent-glow)}
+.segi{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:2px;gap:2px}
+.segi button{background:none;border:0;border-radius:8px;width:32px;height:30px;display:grid;place-items:center;color:var(--dim)}
+.segi button[aria-pressed=true]{background:var(--raised-2);color:var(--text)}
+.stat{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:var(--dim);font-size:12.5px;margin-bottom:16px}
+.stat a{color:var(--accent);text-decoration:underline;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:22px 16px}
+.grid.compact{grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:16px 12px}
+.card{display:grid;gap:8px;text-align:left;background:none;border:0;padding:0;align-content:start}
+.cap{position:relative;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:linear-gradient(160deg,hsl(var(--h) 55% 38%),hsl(calc(var(--h) + 40) 50% 14%));box-shadow:0 0 0 1px var(--line)}
+.cap::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 55%,rgba(5,9,13,.85))}
+.cap .t{position:absolute;left:10px;right:10px;bottom:10px;z-index:1;font-weight:700;font-size:13.5px;text-transform:uppercase;line-height:1.15;letter-spacing:.2px}
+.sz{position:absolute;top:8px;left:8px;z-index:1;background:rgba(5,9,13,.72);border-radius:99px;padding:3px 9px;font:500 11px var(--mono)}
+.card:hover .cap{box-shadow:0 0 0 2px var(--accent)}
+.pick{position:absolute;top:8px;right:8px;z-index:2;width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.5);background:rgba(5,9,13,.5);display:none;place-items:center}
+.sm .pick{display:grid}
+.card.on .pick{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.card.on .cap{box-shadow:0 0 0 2px var(--accent)}
+.info{display:grid;gap:3px;padding-inline:2px}
+.stt{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+.stt i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+.stt.cur{--c:var(--ok)}.stt.nv{--c:var(--none)}.stt.upd{--c:var(--stale);color:var(--stale)}
+.sub2{font-size:11.5px;color:var(--dim-2)}
+.compact .sub2,.compact .pk{display:none}
+.grid.list{grid-template-columns:1fr;gap:6px}
+.list .card{grid-template-columns:44px 1fr;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:8px 14px 8px 8px}
+.list .cap{aspect-ratio:1;border-radius:8px}.list .cap .t,.list .sz{display:none}
+.list .info{grid-template-columns:minmax(0,1fr) 120px 150px 110px;align-items:center;gap:14px}
+.list .info .ln{display:block!important;font-weight:500;font-size:14px}
+.ln{display:none}
+.bulkbar{position:sticky;bottom:16px;margin-top:22px;display:flex;align-items:center;gap:12px;background:var(--raised-2);border:1px solid var(--line);border-radius:14px;padding:12px 16px;box-shadow:0 10px 30px rgba(0,0,0,.45);flex-wrap:wrap}
+.bulkbar .m{margin-right:auto;font-weight:500}
+.fp{position:absolute;right:0;top:calc(100% + 8px);z-index:5;width:340px;max-width:calc(100vw - 32px);background:var(--raised-2);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:14px;box-shadow:0 14px 30px rgba(0,0,0,.5)}
+.fp .sec{margin-bottom:6px}.fp .row{display:flex;gap:6px;flex-wrap:wrap}
+.fp input[type=number]{width:90px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+/* sheet */
+.scrim{position:fixed;inset:0;background:rgba(3,6,9,.62);display:flex;align-items:center;justify-content:center;padding:20px;z-index:20;opacity:0;visibility:hidden;transition:opacity .2s,visibility 0s .2s}
+.scrim.on{opacity:1;visibility:visible;transition:opacity .2s}
+.sheet{width:min(920px,100%);max-height:calc(100vh - 40px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:18px;transform:translateY(14px) scale(.98);transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+.scrim.on .sheet{transform:none}
+@media(prefers-reduced-motion:reduce){.scrim,.sheet{transition:none}}
+.hero{height:140px;background:linear-gradient(160deg,hsl(var(--h) 55% 38%),hsl(calc(var(--h) + 40) 50% 14%));position:relative}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 40%,var(--surface))}
+.xb{position:absolute;top:12px;right:12px;z-index:2;background:rgba(5,9,13,.6);border:1px solid var(--line);border-radius:10px;width:34px;height:34px}
+.dh{display:flex;gap:16px;align-items:flex-end;padding:0 26px;margin-top:-52px;position:relative;z-index:1;flex-wrap:wrap}
+.mini{width:78px;aspect-ratio:2/3;border-radius:9px;background:linear-gradient(160deg,hsl(var(--h) 55% 38%),hsl(calc(var(--h) + 40) 50% 14%));box-shadow:0 0 0 1px var(--line);flex:none}
+.dh h2{margin:0;font-size:22px;letter-spacing:-.4px}
+.dh .sp3{flex:1;min-width:200px;display:grid;gap:6px;padding-bottom:4px}
+.tabs{display:flex;gap:4px;padding:18px 26px 0;border-bottom:1px solid var(--line-soft)}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;color:var(--dim);font-size:13.5px;margin-bottom:-1px}
+.tabs button[aria-selected=true]{color:var(--accent);border-color:var(--accent)}
+.body{padding:22px 26px 26px;display:grid;gap:22px}
+.two{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:26px}
+@media(max-width:780px){.two{grid-template-columns:1fr}}
+.col{display:grid;gap:20px;align-content:start}
+.facts{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.facts .k{font-size:11px;color:var(--dim-2);text-transform:uppercase;letter-spacing:.6px}.facts .v{font-size:15px;font-weight:500;margin-top:1px}
+.p{color:var(--dim);font-size:13px;line-height:1.55;margin:0}
+.lst{display:grid;gap:8px}
+.li{display:flex;gap:12px;align-items:center;background:var(--raised);border-radius:10px;padding:10px 12px}
+.li .grow{flex:1;min-width:0}.li b{font-weight:500;display:block;font-size:13.5px}.li span.s{font-size:11.5px;color:var(--dim-2);font-family:var(--mono)}
+.tagrow{display:flex;gap:6px;flex-wrap:wrap}.tg{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--raised);color:var(--dim)}
+.box{background:var(--raised);border-radius:12px;padding:14px 16px;display:grid;gap:10px}
+.box.dz{background:none;border:1px solid rgba(255,111,111,.35)}
+.box h4{margin:0;font-size:14px}
+.cf{display:grid;gap:6px;font-size:13px}.cf div{display:flex;justify-content:space-between;gap:12px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.cf .fr{color:var(--ok)}
+.dlg{position:fixed;inset:0;background:rgba(3,6,9,.7);display:none;align-items:center;justify-content:center;padding:20px;z-index:30}
+.dlg.on{display:flex}
+.dlg .dd{width:min(460px,100%);background:var(--raised);border:1px solid var(--line);border-radius:16px;padding:22px;display:grid;gap:14px}
+.dlg h3{margin:0;font-size:17px}.dlg .acts{display:flex;gap:10px;justify-content:flex-end}
+</style>
+<div class="note">Beispieldaten (Spiele aus dem echten Screenshot, Cover als Farbflaechen). Klick auf ein Spiel: Detailkarte. Select: Mehrfachauswahl.</div>
+<div class="wrap"><div class="app"><aside class="side"><div class="brand">STEAMVAULT</div>
+<a class="on" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Library</a>
+<a href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg>Clients</a>
+<a href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>Downloads</a>
+<a class="" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Settings</a>
+<div class="sp"></div><div class="st">Used&nbsp;&nbsp;&nbsp;380 GB<br>Free&nbsp;&nbsp;1518 GB<br>v0.1.0-rc19.2</div></aside><main>
+<div class="top"><div><h1>Library</h1><div class="sub">437 owned · 22 on the cache</div></div>
+<div class="split"><button class="btn pri">Check updates</button><button class="btn pri m" id="mb" aria-label="More update actions"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button><div class="menu" id="mm" hidden><button>Check &amp; update all cached games</button></div></div></div>
+<div class="bar2"><label class="search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><input placeholder="Search your library" id="q" aria-label="Search library by title"></label>
+<div class="chips" id="chips"></div><div class="sp"></div>
+<div class="sortg"><select id="sk" aria-label="Sort"><option>Name</option><option>Size</option><option selected>State</option><option>Last cached or updated</option></select><button id="sd" aria-label="Sort direction" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>
+<div class="segi" id="lay" aria-label="Library layout"><button data-l="" aria-pressed="true" title="Comfortable"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="16" rx="1.5"/><rect x="13" y="4" width="7" height="16" rx="1.5"/></svg></button><button data-l="compact" aria-pressed="false" title="Compact"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="9.5" y="4" width="5" height="16" rx="1"/><rect x="16" y="4" width="5" height="16" rx="1"/></svg></button><button data-l="list" aria-pressed="false" title="List"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button></div>
+<div style="position:relative"><button class="btn" id="fb">Filters <span class="mono" style="color:var(--dim-2)">0</span></button><div class="fp" id="fp" hidden>
+<div><div class="sec">Mode</div><div class="row"><button class="chip" aria-pressed="false">Single-player</button><button class="chip" aria-pressed="false">Multiplayer</button><button class="chip" aria-pressed="false">Co-op</button><button class="chip" aria-pressed="false">VR</button></div></div>
+<div class="row"><select class="sel"><option>Any genre</option></select><select class="sel"><option>Any rating</option></select></div>
+<div class="row" style="align-items:center">From <input type="number" placeholder="year"> to <input type="number" placeholder="year"></div>
+<label style="display:flex;gap:8px;font-size:13px"><input type="checkbox" style="accent-color:var(--accent)"> Include unknown</label></div></div>
+<button class="btn" id="selb" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l3 3 5-6"/></svg>Select</button></div>
+<div class="stat"><span>Updates last checked 2 h ago · automatic checks on</span><span>·</span><a>Reload Steam library</a></div>
+<div class="grid" id="grid"></div>
+<div class="bulkbar" id="bb" hidden><span class="m" id="bc">0 selected</span><button class="btn ghost" id="bx">Cancel</button><button class="btn danger">Delete</button><button class="btn">Re-download</button><button class="btn pri">Download</button></div>
+</main></div></div>
+<div class="scrim" id="sc" role="dialog" aria-label="Game detail" aria-modal="true"><div class="sheet" id="sh">
+<div class="hero"><button class="xb" id="cl" aria-label="Close">✕</button></div>
+<div class="dh"><div class="mini"></div><div class="sp3"><h2 id="dn"></h2><div class="row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="mono" style="color:var(--dim-2);font-size:12px">App 553850</span><span class="pill ok" id="dp"><i></i>Current</span></div></div><div style="display:flex;gap:8px;flex-wrap:wrap;padding-bottom:4px"><button class="btn" id="vb">Verify</button><button class="btn pri" id="pb">Update now</button></div></div>
+<div class="tabs" role="tablist"><button role="tab" aria-selected="true" data-t="o">Overview</button><button role="tab" aria-selected="false" data-t="d">Depots</button><button role="tab" aria-selected="false" data-t="m">Maintenance</button></div>
+<div class="body">
+<div data-tp="o" class="two"><div class="col"><div class="facts"><div><div class="k">Size</div><div class="v" id="dsz"></div></div><div><div class="k">Last downloaded</div><div class="v">16.10.2026, 17:21</div></div><div><div class="k">Confirmed current</div><div class="v">16.10.2026, 18:49</div></div><div><div class="k">Cache</div><div class="v" id="dca">Complete</div></div></div>
+<div><div class="sec" style="margin-bottom:8px">Installed on</div><div class="lst"><div class="li"><div class="grow"><b>Desk PC</b><span class="s">Windows PC</span></div><span class="pill ok"><i></i>Cached</span></div></div></div>
+<div><div class="sec" style="margin-bottom:8px">About</div><p class="p">Store description appears here, collapsed to three lines. Click to expand.</p><div class="tagrow" style="margin-top:10px"><span class="tg">Multiplayer</span><span class="tg">Co-op</span><span class="tg">Action</span><span class="tg">87%</span></div></div></div>
+<div class="col" id="pkgs"><div><div class="sec" style="margin-bottom:8px">Content packages · <span id="pn"></span></div><div class="lst" id="pl"></div><p class="p" style="margin-top:8px">Total with content packages: <b id="pt" style="color:var(--text)"></b></p></div></div></div>
+<div data-tp="d" hidden class="col"><div class="box"><h4>Depots</h4><div class="lst"><div class="li"><div class="grow"><b>Depot 553851</b><span class="s">shared · 14.2 GB</span></div></div><div class="li"><div class="grow"><b>Depot 553852</b><span class="s">own · 8.9 GB</span></div></div></div><p class="p">Expected: an expectation from the public Steam branch, not a measurement.</p></div></div>
+<div data-tp="m" hidden class="col" style="max-width:640px"><div class="box"><h4>Verify</h4><p class="p">Re-checks the cached chunks against Steam. Damaged chunks — SteamHangar can't repair these yet.</p><div><button class="btn">Verify</button></div></div>
+<div class="box"><h4>Garbage collection</h4><p class="p" id="gcm">Find chunks no game uses any more.</p><div style="display:flex;gap:8px"><button class="btn" id="gcb">Check for orphaned chunks</button><button class="btn danger" id="gce" hidden>Execute</button></div></div>
+<div class="box dz"><h4>Delete from cache</h4><p class="p">Removes this game's chunks from the vault. Shared depots stay.</p><div><button class="btn danger" id="del">Delete from cache</button></div></div></div>
+</div></div></div>
+<div class="dlg" id="dl" role="alertdialog" aria-label="Delete from cache"><div class="dd"><h3>Delete from cache?</h3><p class="p" id="dm"></p><div class="cf"><div><span>Depot 553851 (shared)</span><span>keep</span></div><div><span>Depot 553852</span><span class="fr">free 8.9 GB</span></div></div><div class="acts"><button class="btn" id="keep">Keep</button><button class="btn danger" id="yes">Delete</button></div></div></div>
+<script>
+const D=[{"n": "Assassin's Creed Black Flag Resynced", "s": 52.8, "st": "cur", "i": 1, "p": 0, "h": 262}, {"n": "Bongo Cat", "s": 0.1, "st": "cur", "i": 1, "p": 0, "h": 201}, {"n": "Dyson Sphere Program", "s": 1.7, "st": "cur", "i": 1, "p": 0, "h": 204}, {"n": "Enshrouded", "s": 42.9, "st": "cur", "i": 1, "p": 0, "h": 357}, {"n": "Factorio", "s": 5.5, "st": "nv", "i": 0, "p": 1, "h": 211}, {"n": "Gothic 1 Remake", "s": 30.7, "st": "cur", "i": 1, "p": 0, "h": 92}, {"n": "Graveyard Keeper 2", "s": 1.2, "st": "cur", "i": 1, "p": 0, "h": 247}, {"n": "HELLDIVERS\u2122 2", "s": 23.1, "st": "nv", "i": 1, "p": 8, "h": 246}, {"n": "Hogwarts Legacy", "s": 67.9, "st": "cur", "i": 1, "p": 0, "h": 252}, {"n": "No Man's Sky", "s": 30.0, "st": "cur", "i": 1, "p": 0, "h": 354}, {"n": "Sandustry Demo", "s": 0.1, "st": "cur", "i": 1, "p": 0, "h": 98}, {"n": "Satisfactory", "s": 12.3, "st": "cur", "i": 0, "p": 0, "h": 52}, {"n": "Sir, We Have an Orc Problem", "s": 0.1, "st": "cur", "i": 1, "p": 0, "h": 214}, {"n": "Smart Factory Tycoon", "s": 0.5, "st": "cur", "i": 0, "p": 0, "h": 39}, {"n": "Subnautica 2", "s": 14.7, "st": "cur", "i": 1, "p": 0, "h": 77}, {"n": "Tavern Keeper", "s": 4.6, "st": "upd", "i": 1, "p": 0, "h": 180}, {"n": "The Crust", "s": 8.6, "st": "cur", "i": 1, "p": 0, "h": 130}, {"n": "The Riftbreaker", "s": 9.6, "st": "cur", "i": 1, "p": 0, "h": 306}, {"n": "The Witcher 3: Wild Hunt \u2014 Remastered", "s": 60.1, "st": "nv", "i": 1, "p": 18, "h": 183}, {"n": "Timberborn", "s": 1.2, "st": "cur", "i": 1, "p": 0, "h": 108}, {"n": "Wanderburg", "s": 0.5, "st": "cur", "i": 1, "p": 0, "h": 357}, {"n": "Unknown App", "s": 0.4, "st": "nv", "i": 0, "p": 0, "h": 101}];const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+let f='cached',q='',sel=false,picked=new Set();
+const chips=[['all','All',442],['cached','Cached',22],['nc','Not cached',417],['inc','Installed, not cached',5],['dl','Downloading',0],['fail','Failed',1],['upd','Updates',1]];
+const STT={cur:'Current',nv:'Cached · not verified',upd:'Update available'};
+function ch(){$('#chips').innerHTML=chips.map(c=>`<button class="chip" data-f="${c[0]}" aria-pressed="${c[0]===f}">${c[1]} <small>${c[2]}</small></button>`).join('');$$('#chips .chip').forEach(b=>b.onclick=()=>{f=b.dataset.f;ch();draw()})}
+function draw(){const g=$('#grid');const list=D.filter(d=>d.n.toLowerCase().includes(q.toLowerCase())&&(f!=='upd'||d.st==='upd'));
+ if(!list.length){g.innerHTML='<p class="sub">No game in your library matches "'+q+'" with this filter. <a style="color:var(--accent);cursor:pointer" id="cs">Clear search</a></p>';$('#cs').onclick=()=>{q='';$('#q').value='';draw()};return}
+ g.innerHTML=list.map(d=>{const i=D.indexOf(d);return `<button class="card${picked.has(i)?' on':''}" data-i="${i}" style="--h:${d.h}"><div class="cap"><span class="sz">${d.s.toFixed(1)} GB</span><span class="pick">${picked.has(i)?'✓':''}</span><span class="t">${d.n}</span></div><div class="info"><span class="ln">${d.n}</span><span class="stt ${d.st}"><i></i>${STT[d.st]}</span>${d.i?'<span class="sub2">Installed on Desk PC</span>':'<span class="sub2"></span>'}${d.p?`<span class="sub2 pk">+${d.p} content package${d.p>1?'s':''}</span>`:'<span class="sub2 pk"></span>'}</div></button>`}).join('');
+ $$('.card').forEach(c=>c.onclick=()=>{const i=+c.dataset.i;if(sel){picked.has(i)?picked.delete(i):picked.add(i);bulk();draw()}else openS(i)});}
+function bulk(){$('#bb').hidden=!sel;$('#bc').textContent=picked.size+' selected'}
+$('#q').oninput=e=>{q=e.target.value;draw()};
+$$('#lay button').forEach(b=>b.onclick=()=>{$$('#lay button').forEach(x=>x.setAttribute('aria-pressed',x===b));$('#grid').classList.remove('compact','list');if(b.dataset.l)$('#grid').classList.add(b.dataset.l)});
+$('#selb').onclick=()=>{sel=!sel;if(!sel)picked.clear();$('#selb').setAttribute('aria-pressed',sel);$('#grid').classList.toggle('sm',sel);bulk();draw()};
+$('#bx').onclick=()=>$('#selb').click();
+$('#mb').onclick=()=>{$('#mm').hidden=!$('#mm').hidden};$('#fb').onclick=()=>{$('#fp').hidden=!$('#fp').hidden};
+document.addEventListener('click',e=>{if(!e.target.closest('.split'))$('#mm').hidden=true;if(!e.target.closest('#fb,#fp'))$('#fp').hidden=true});
+$$('#fp .chip').forEach(c=>c.onclick=()=>c.setAttribute('aria-pressed',c.getAttribute('aria-pressed')!=='true'));
+function tab(k){$$('[data-tp]').forEach(p=>p.hidden=p.dataset.tp!==k);$$('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.t===k))}
+$$('.tabs button').forEach(b=>b.onclick=()=>tab(b.dataset.t));
+let last=null;
+function openS(i){const d=D[i];last=document.activeElement;$('#sh').style.setProperty('--h',d.h);$$('.hero,.mini').forEach(e=>e.style.setProperty('--h',d.h));$('#dn').textContent=d.n;$('#dsz').textContent=d.s.toFixed(1)+' GB';
+ const st=d.st;$('#dp').className='pill '+(st==='cur'?'ok':st==='upd'?'warn':'off');$('#dp').lastChild.textContent=' '+STT[st];
+ $('#pb').textContent=st==='upd'?'Update now':'Re-download';$('#pb').className='btn'+(st==='upd'?' pri':'');
+ $('#dca').textContent=st==='nv'?'Not verified':'Complete';
+ $('#pkgs').hidden=!d.p;$('#pn').textContent=d.p;$('#pt').textContent=(d.s+d.p*0.4).toFixed(1)+' GB';
+ $('#pl').innerHTML=Array.from({length:Math.min(d.p,4)},(_,k)=>`<div class="li"><div class="grow"><b>Content package ${k+1}</b><span class="s">Type: DLC · ${(0.3+k*0.2).toFixed(1)} GB</span></div><span class="pill off"><i></i>Not cached</span><button class="btn sm">Retry download</button></div>`).join('')+(d.p>4?`<p class="p">… and ${d.p-4} more</p>`:'');
+ $('#dm').textContent='Deleting '+d.n+' frees about 8.9 GB of the '+d.s.toFixed(1)+' GB it occupies.';
+ tab('o');$('#sc').classList.add('on');$('#cl').focus()}
+function closeS(){$('#sc').classList.remove('on');if(last)last.focus()}
+$('#cl').onclick=closeS;$('#sc').onclick=e=>{if(e.target.id==='sc')closeS()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#dl').classList.contains('on'))$('#dl').classList.remove('on');else closeS()}});
+$('#gcb').onclick=()=>{$('#gcm').textContent='Found 12 orphaned chunks — about 340 MB.';$('#gce').hidden=false;$('#gcb').textContent='Check again'};
+$('#del').onclick=()=>$('#dl').classList.add('on');$('#keep').onclick=$('#yes').onclick=()=>$('#dl').classList.remove('on');
+function sl(){const n=$('#sk').value==='Name',d=$('#sd').getAttribute('aria-pressed')==='true';const t=n?(d?'Z–A':'A–Z'):(d?'Descending':'Ascending');$('#sd').setAttribute('aria-label','Sort direction: '+t);$('#sd').title=t}
+$('#sd').onclick=()=>{const b=$('#sd');b.setAttribute('aria-pressed',b.getAttribute('aria-pressed')!=='true');sl()};$('#sk').onchange=sl;
+ch();draw();
+</script>

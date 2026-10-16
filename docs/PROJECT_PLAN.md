@@ -3295,6 +3295,81 @@ below carry their own later dates, item 12 is the current one).
         vault-core, delete `/vault/logs/throughput-debug/`
       - [ ] tag `v0.1.0-rc19.2` after main CI is green
 
+    - [ ] **rc20 web redesign** (decided 2026-10-16, mockup round with the
+      operator; reference: `docs/design/rc20/`, run notes:
+      `docs/handover/rc20-run-plan.md`). Web only, no schema change, no new
+      env value. Order: LAYOUT-1 and SHEET-MOTION-1 first (shared base),
+      then the page packages.
+      - [ ] **LAYOUT-1** wide page width: new token `--w-page` (~1400px) in
+        `theme.css`; the BP-L rule at `app.css` (`.view-downloads,
+        .view-settings, .view-clients` capped to `--w-text`) uses it and
+        Library keeps `--w-wall`. Adapt
+        `css-downloads-settings-layout.test.js` (it pins the `--w-text`
+        assignments). Narrow breakpoints unchanged.
+      - [ ] **SHEET-MOTION-1** slide/fade for every overlay: drawers slide in
+        from their edge, bottom sheets slide up, the centre card and the
+        scrim fade; one implementation in `sheet-dialog.js` + `app.css`,
+        `prefers-reduced-motion` disables it. Check that the confirm dialogs
+        (`.dialog-backdrop`/`.dialog`) use the same classes; focus trap,
+        Escape and `modal-stack.js` order must not change. Close waits for
+        the transition end with a timeout fallback.
+      - [ ] **CLIENTS-1** one card per device: agent data is merged into the
+        client card (`clients.js`, `clients-view.js`, `clients-sheet.js`);
+        the "PCs running vault-agent" list and "Manage PCs" are removed;
+        a PC that is both client and agent shows once. Adapt `clients-*.test.js`.
+      - [ ] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
+        (connected, outdated agents, ...), "Add a device" as the header
+        button. Real data only, no tile without a source.
+      - [ ] **CLIENTS-3** outdated-agent warning, Weg A: the agent version
+        differs from the server version, compared in the frontend only; the
+        "Update command" button opens the Add-a-device dialog without a
+        preselected tab (the agent reports no OS). Unknown version shows no
+        warning.
+      - [ ] **ADD-DEVICE-1** Add a device as tabs (Phone / Browser / Windows /
+        Linux-SteamOS) with a single security notice; secrets (API key,
+        commands containing it) revealed on demand and copyable
+        (`add-device-sheet.js`). Adapt `add-device-wiring.test.js`.
+      - [ ] **DOWNLOADS-1** declutter the header cards; two-column layout
+        (Active and Queue left, History right, one column below 1000px);
+        per-game Update and Verify buttons; Queue reordered by drag and drop
+        only (no arrows); History differs between idle and active, rows
+        expand to failure hint, Retry, log excerpt and raw output
+        (`downloads.js`, `traffic-view.js`, `job-failure.js`). Keyboard
+        alternative for the drag is a separate follow-up (flagged).
+      - [ ] **SETTINGS-1** left sticky section nav (Vault & connection,
+        Download window, Disk & cleanup, Notifications, Steam, About) and
+        the expert switch revealing "Expert settings"; auto-fit 2-column
+        field grids; chips (Default / Changed here / From env); (i) hint
+        shows timing text only; savebar appears on change; GC warning when
+        Auto-GC is not Execute; Steam keeps its inline Save/Preview/Reset;
+        the "PCs and devices / Open Clients" row is dropped. All settings
+        keys, validation, risky-key confirm and wording stay. Adapt
+        `settings-*.test.js`, `steam-*.test.js`, `about-view.test.js`,
+        `css-settings-*.test.js`, `demo-data-settings.test.js`.
+      - [ ] **LIBRARY-1** one toolbar row: search, chips with counts, sort
+        group (select + icon-only direction button with `aria-label` and
+        `title`), layout control, Filters popover for the metadata filters,
+        Select button (replaces the permanent long-press hint); split
+        primary "Check updates" with a menu entry "Check & update all cached
+        games"; one status line per card. Long-press and right-click
+        selection stay. Adapt `library-*.test.js`, `game-card*.test.js`,
+        `css-bulk-bar-room.test.js`, `keyboard-pointer-model.test.js`.
+      - [ ] **LIBRARY-DETAIL-1** game detail sheet with tabs Overview /
+        Depots / Maintenance (Verify, GC check, red "Delete from cache"
+        zone); the two duplicate delete-confirm dialogs (`library.js`,
+        `game-detail-sheet.js`) become one shared component. Adapt
+        `game-detail-sheet-*.test.js`, `css-overlay-geometry.test.js`,
+        `dialog-wiring.test.js`.
+      - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
+        page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
+        after main CI is green
+    - [ ] **v0.2.0, Weg B for agents** (decided 2026-10-16, with the
+      installer): the agent reports its OS, the API stores it, and the
+      Clients page opens the matching tab; the API serves a minimum agent
+      version that replaces the Weg A "differs from server" check. Needs a
+      schema bump and an agent release; already-running agents report no OS
+      until updated.
+
     **Parallel work on the post-v0.1.0 items:** design and ADR drafts can
     start on their own branches now. D1 was pulled ahead of `v0.1.0` by
     user decision on 2026-10-02 (ADR-0016 addendum, ships in
