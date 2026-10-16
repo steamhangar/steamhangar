@@ -727,7 +727,8 @@ These do not need D17 to start; they keep the door open.
    change to stay safe. Size reporting must not assume `depot/` is the
    whole cache.
 4. **Name before public release.** Decided: GameHangar (D18). It must
-   land before the first public release, not after.
+   land before the public announcement (v0.2.0, see Release plan), not
+   after.
    Component names are already neutral (`vault-core`, `vault-api`, ...).
    What a rename touches: GitHub org and repo, `ghcr.io/steamhangar/*`,
    the Compose project name (it prefixes volume names; volumes cannot be
@@ -815,7 +816,8 @@ Name availability (checked 2026-10-15, re-check before the ADR):
 
 Steps: inventory with grep, ADR with the open questions (volume strategy,
 `applicationId`, old image tags, redirect period), user decision, then one
-package per component. Not during the v0.1.0 release chain.
+package per component. Not during the v0.1.0 release chain; planned with
+v0.2.0 (Release plan).
 
 ## D19: DEPOT-PREVIEW-1, expected depots and size on a never-cached game
 
@@ -1566,12 +1568,12 @@ client builds on it. Needs an ADR. State: open, unscheduled.
 ## Audit 2026-10-16: open follow-ups
 
 Found when the orchestrator went through all past sessions on 2026-10-16.
-None of these has a user decision yet; each needs a brief (and the user's
-go where it changes behaviour) before any code. Each one is assigned to a
-version in "Release plan (user decisions 2026-10-16)" at the top of this
-file and mirrored as an unchecked box in that version's block of
-`docs/PROJECT_PLAN.md` (VERIFY-SPEED-TEXT-1 and QUEUE-KBD-KEEP sit inside
-DOWNLOADS-1).
+Each one's version slot is decided ("Release plan (user decisions
+2026-10-16)" at the top of this file); its behaviour is not: each needs a
+brief (and the user's go where it changes behaviour) before any code. In
+`docs/PROJECT_PLAN.md` most appear as unchecked boxes in their version's
+block; VERIFY-SPEED-TEXT-1 and QUEUE-KBD-KEEP are text inside DOWNLOADS-1,
+and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
 
 - **DUAL-STACK-1 (operator):** AAAA check and stepwise cap raise after the
   line change, see D4.
@@ -1607,7 +1609,7 @@ DOWNLOADS-1).
 - **QUEUE-KBD-KEEP (web, DOWNLOADS-1):** `web/js/lib/queue-reorder.js`
   already moves a focused row with ArrowUp/ArrowDown. DOWNLOADS-1 must keep
   that path when it drops the arrow buttons; it is not a new follow-up.
-- **NITS-AUDIT-1 (small, any rc):**
+- **NITS-AUDIT-1 (small, rc22):**
   - dead code `packagesAriaText` (app `ContentGroups.kt`);
   - web test that "Update now" in the group sheet sends the package ids
     (`web/tests/game-detail-sheet-update.test.js`);

@@ -1297,7 +1297,8 @@ OpenID in a Custom Tab; the PHONE fetches the library from Valve
   (user, 2026-08-09): no announcement until the user has personally
   tested the stack end-to-end WITH the Android app** — i.e. after the
   first real-world rollout AND Phase 4b are usable; the post carries the user's own
-  real-world numbers.
+  real-world numbers. Waits for v0.2.0 (user decision 2026-10-16, after
+  the D18 rename).
 
 ---
 
@@ -1337,7 +1338,8 @@ merged first, and 4a.7 wants 3.11.
    after the rename; org creation + repo move are user-performed
    account actions).
 3. **5.6** announcement: **only after the user has personally tested
-   end-to-end with the Android app** (post-rollout, post-4b).
+   end-to-end with the Android app** (post-rollout, post-4b). Waits for
+   v0.2.0 (user decision 2026-10-16, after the D18 rename).
 
 Post-v1 backlog (documented, undispatched): embedded tailscale (tsnet),
 iOS app, queue reordering, drag-to-reorder, server-side notification

@@ -4,7 +4,7 @@
  * User decision 2026-10-04 ("Weg A"): a new device is set up from this
  * already-configured web UI, with the ONE shared vault API key it already
  * holds, and no API change (ADR-0016 freeze). Short-lived codes and one
- * revocable key per device are the later D9 PAIR-2 (docs/PROJECT_PLAN.md).
+ * revocable key per device are the later D29 PAIR-2 (docs/PROJECT_PLAN.md).
  *
  * Two carriers, both built here:
  *

@@ -143,8 +143,9 @@ These are not style preferences; each entry cost a review round to learn.
   16 on `:80` combined, vault-core rejected about 14k-21k requests per
   minute with 503 (likely because throttled transfers hold the slots
   longer), and the clients retried at once (measured 2026-10-10; the rate
-  was raised to 8m). Lower the rate only together with a look at the 503 count. Whether the loop
-  still occurs at the current rate is open (roadmap CAP-503-LOOP-1).
+  was raised to 8m). Lower the rate only together with a look at the 503
+  count. Whether the loop still occurs at the current rate is open (roadmap
+  CAP-503-LOOP-1).
 
 ## CI / GitHub Actions
 - The stock nginx image entrypoint soft-fails: `20-envsubst-on-templates.sh`

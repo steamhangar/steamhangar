@@ -3,7 +3,7 @@
  *
  * Three ways to set up another device with this hangar's address and the
  * ONE shared API key this browser already holds (user decision 2026-10-04,
- * "Weg A": no API change; per-device keys are the later D9 PAIR-2):
+ * "Weg A": no API change; per-device keys are the later D29 PAIR-2):
  *
  *  - Phone (Android app): first the app itself (WP DIST-1b): a "Download
  *    app" button and a QR code of the APK's address, from this vault when

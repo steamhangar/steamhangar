@@ -2298,7 +2298,8 @@ surface (playtime and last-played now flow through the API response).
       the per-level `O_NOFOLLOW` GC walk, the deletion byte-count lock.
       See §11 item 6.
 - [ ] Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
-      frame as a complement/alternative, not a "LanCache killer")
+      frame as a complement/alternative, not a "LanCache killer").
+      Waits for v0.2.0 (user decision 2026-10-16, after the D18 rename).
 
 ### Phase 6 — External Integrations (post-release, user decision 2026-08-10)
 
@@ -3476,14 +3477,15 @@ below carry their own later dates, item 12 is the current one).
       - [ ] optional "Client downloading" row on the Downloads page (needs
         the user's yes)
       - [ ] VERSION-HEALTH-1 version and schema readable without the key
-      - [ ] tuning defaults from the Sunday test, if not shipped in rc20.x
+      - tuning defaults from the Sunday test, if not shipped in rc20.x
+        (the rc20.x box moves here)
       - [ ] runner retry on "Unable to detect Lancache server!", only if the
         heartbeat log confirms the late-heartbeat hypothesis (ADR-0027)
       - [ ] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
       in the version's planning session)
-      - [ ] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
+      - D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
         default (closes the D7 box above)
       - [ ] CAP-503-LOOP-1 measure whether the 503 retry loop still occurs
         at the current rate

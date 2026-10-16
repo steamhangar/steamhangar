@@ -70,4 +70,5 @@ stays on `VAULT_SCHEDULE_WINDOW=off`; no downloads in dev. Tag
 - ~~Keyboard alternative for the queue drag and drop.~~ Corrected
   2026-10-16: not a follow-up. The keyboard path already exists
   (`queue-reorder.js`, ArrowUp/ArrowDown) and DOWNLOADS-1 must keep it.
-- v0.2.0 Weg B items (plan block "v0.2.0, Weg B for agents").
+- v0.2.0 Weg B items (the "Weg B for agents" box inside the PROJECT_PLAN
+  block "v0.2.0 — GameHangar, privacy, schedules, agents").
