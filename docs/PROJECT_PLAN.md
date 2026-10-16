@@ -3302,7 +3302,8 @@ below carry their own later dates, item 12 is the current one).
       - [x] TUNE-1b: ADR-0027, learnings, plan block
       - [x] NITS-1: index on `jobs (status, finished_at)` for
         `not_owned_appids` (additive, no schema bump)
-      - [ ] tag `v0.1.0-rc19.3` after main CI is green
+      - [x] FIX-SHOT-1: stats graph caption reads the injected clock (goldens refreshed)
+      - [x] tag `v0.1.0-rc19.3` after main CI is green (pushed on main d409f30)
       - [ ] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
         WORKERS=2)
       - [ ] LIVE-DELAY-1 analysis: the Downloads page shows client downloads

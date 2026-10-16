@@ -7,7 +7,7 @@ rules: `CLAUDE.md` (incl. the roadmap rule). Language with the user: German.
 
 - `v0.1.0-rc19` (b29379b) and `v0.1.0-rc19.2` (1a22561) are tagged and never
   move. rc19.2 is rolled out on the test and prod stacks per the user.
-- rc19.3 is built on `wp/rc19-3-integration` (not yet on `main`, not tagged):
+- rc19.3 content:
   - TUNE-1a: heartbeat in the opt-in debug log, `VAULT_NGINX_AIO=threads`
     (= `aio threads` + `sendfile off`), `VAULT_NGINX_WORKERS`, report
     Heartbeat section. All off by default, byte-identical render when unset.
@@ -15,10 +15,8 @@ rules: `CLAUDE.md` (incl. the roadmap rule). Language with the user: German.
     finished_at)`.
   - FIX-SHOT-1: the stats graph caption used the real clock, so two
     Roborazzi goldens (`downloads_stats_*_night`) went stale every hour.
-- Release chain still to do: refresh goldens on `wp/rc19-3-goldens` (bot
-  commit, then an empty commit for a CI run), merge back, branch CI green,
-  `main`, main CI green, annotated tag `v0.1.0-rc19.3`, rollout Antrag
-  (new env vars stay off).
+- rc19.3 is on `main` (d409f30, CI green) and tagged `v0.1.0-rc19.3`.
+  Rollout Antrag: A-20261016-03 (switches stay off until the Sunday test).
 - Open measurements: Sunday cold-game test per ADR-0027; LIVE-DELAY-1
   (Downloads page shows client downloads >1 min late, cause unknown);
   root cause of the HELLDIVERS 2 "Unable to detect Lancache server!" failure
