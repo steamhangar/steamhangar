@@ -23,7 +23,7 @@
 import { createPill } from "./pill.js";
 import { BYPASS_EXPLANATION, UNREMOVABLE_SLASH_NOTE } from "../lib/clients-view.js";
 import { renameTitle } from "../lib/client-names.js";
-import { OUTDATED_BOX_TITLE, moreChipText } from "../lib/clients-page.js";
+import { NO_STATS_TEXT, OUTDATED_BOX_TITLE, moreChipText } from "../lib/clients-page.js";
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -117,8 +117,10 @@ function identityZone(model, handlers) {
     row.append(head, span);
     z.appendChild(row);
     if (model.health.bypass) {
-      const hint = el("p", "hint", BYPASS_EXPLANATION);
+      // Closed by default: the long explanation would dominate zone 1.
+      const hint = el("details", "hint");
       hint.dataset.role = "bypass-hint";
+      hint.append(el("summary", null, "What does this mean?"), el("p", null, BYPASS_EXPLANATION));
       z.appendChild(hint);
     }
   }
@@ -168,7 +170,7 @@ function recentZone(model) {
   z.appendChild(el("span", "sec", "Recently loaded"));
   const r = model.recent;
   if (!r) {
-    const p = el("p", "hint", "No traffic statistics");
+    const p = el("p", "hint", NO_STATS_TEXT);
     p.dataset.role = "recent-none";
     z.appendChild(p);
   } else if (!r.chips.length) {

@@ -91,7 +91,7 @@
 .kit .seg button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); }
 
 /* ---------- tiles and meter ---------- */
-.kit .tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap:var(--sp-3); }
+.kit .tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap:var(--sp-3); }
 .kit .tile{
   background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m);
   padding:14px 16px; display:grid; gap:4px; align-content:start; min-width:0;
@@ -206,11 +206,12 @@
 .kit .ccard .stats .v{ font:500 var(--fs-5)/1.1 var(--ui); margin-top:5px; font-variant-numeric:tabular-nums; }
 .kit .ccard .stats .v small{ font-size:var(--fs-2); color:var(--dim); margin-left:3px; }
 .kit .ccard .agent{ display:flex; gap:10px; align-items:center; font-size:var(--fs-2); color:var(--dim); background:var(--raised); border-radius:var(--r-s); padding:8px 10px; }
-.kit .ccard .agent b{ color:var(--ok); font-weight:500; white-space:nowrap; flex:none; }
-.kit .ccard .agent b{ display:inline-flex; align-items:center; gap:4px; }
+.kit .ccard .agent b{ color:var(--ok); font-weight:500; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:4px; }
 .kit .ccard .agent .ok-ico{ display:flex; }
 .kit .ccard .agent.bad b{ color:var(--stale); }
 .kit .ccard .agent span{ min-width:0; }
+.kit .ccard details.hint summary{ cursor:pointer; color:var(--dim); }
+.kit .ccard details.hint p{ margin:var(--sp-1) 0 0; }
 .kit .ccard .gchip{ max-width:100%; overflow:hidden; text-overflow:ellipsis; }
 .kit .ccard .cf{
   grid-column:1 / -1; display:flex; justify-content:space-between; align-items:center; gap:var(--sp-3); flex-wrap:wrap;

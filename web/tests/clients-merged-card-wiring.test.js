@@ -191,7 +191,11 @@ test("MUTATION TARGET: a bypass-suspected agent says so on its card, with the ca
   const health = a.querySelector('[data-role="agent-health"]');
   assert.equal(text(health, "b"), "Bypassing the cache");
   assert.match(text(a, '[data-role="bypass"]'), /^2 games reported · none of its downloads have reached the cache recently$/);
-  assert.match(text(a, '[data-role="bypass-hint"]'), /does not necessarily mean anything is wrong/);
+  const hint = a.querySelector('[data-role="bypass-hint"]');
+  assert.equal(hint.tagName, "DETAILS", "the explanation is collapsed behind a summary");
+  assert.equal(hint.hasAttribute("open"), false);
+  assert.equal(text(hint, "summary"), "What does this mean?");
+  assert.match(text(hint, "p"), /does not necessarily mean anything is wrong/);
   assert.match(a.className, /\bwarn\b/, "the card border warns");
   assert.equal(a.querySelector('[data-role="agent-presence"]'), null, "the bypass row replaces the healthy one");
   assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="bypass"]'), null);

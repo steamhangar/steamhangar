@@ -150,7 +150,11 @@ test("the agent health row exists only with agent data; bypass replaces healthy"
   const bypass = render(agentClient({ agent: { client_id: "desk-pc", bypass_suspected: true, app_count: 2 } }));
   assert.equal(q(bypass, "agent-health").className, "agent bad");
   assert.equal(text(q(bypass, "agent-health"), "b"), "Bypassing the cache");
-  assert.ok(q(bypass, "bypass-hint"));
+  const hint = q(bypass, "bypass-hint");
+  assert.equal(hint.tagName, "DETAILS");
+  assert.equal(hint.hasAttribute("open"), false, "the explanation starts closed");
+  assert.equal(text(hint, "summary"), "What does this mean?");
+  assert.match(text(hint, "p"), /does not necessarily mean anything is wrong/);
   assert.equal(q(bypass, "agent-presence"), null);
 });
 

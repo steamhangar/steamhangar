@@ -259,7 +259,7 @@ export function summaryTiles(clients, range, serverVersion) {
     const total = withStats.reduce((sum, c) => sum + c.stats.bytes_served, 0);
     tiles.push({ key: "loaded", label: "Loaded", ...splitValueUnit(formatTrafficBytes(total)), detail: phrase });
   } else {
-    tiles.push({ key: "loaded", label: "Loaded", value: DASH, unit: "", detail: "No traffic statistics" });
+    tiles.push({ key: "loaded", label: "Loaded", value: DASH, unit: "", detail: NO_STATS_TEXT });
   }
   const rate = combinedHitRate(withStats);
   const pct = ratePercent(rate);
@@ -271,7 +271,7 @@ export function summaryTiles(clients, range, serverVersion) {
       label: "Hit rate",
       value: DASH,
       unit: "",
-      detail: withStats.length ? "No cache requests yet" : "No traffic statistics",
+      detail: withStats.length ? "No cache requests yet" : NO_STATS_TEXT,
     });
   }
   const agents = list.filter((c) => isAgentClient(c));
@@ -324,6 +324,9 @@ export function outdatedAgentInfo(client, serverVersion) {
 export function outdatedAgentText(info) {
   return `Agent ${info.agent} · server ${info.server}. Update vault-agent on this PC to match the server.`;
 }
+
+/** A figure or list the server sent no statistics for (feed disabled). */
+export const NO_STATS_TEXT = "No traffic statistics";
 
 /** Note under the list, for the agentless rows. */
 export const AGENTLESS_NOTE =
