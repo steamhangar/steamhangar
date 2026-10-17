@@ -246,7 +246,10 @@ function primitives() {
 
 /** @returns {HTMLElement} the view root for app.js's renderView. */
 export function renderKit() {
-  const root = el("section", "view-kit kit kit-page");
+  // `view` like every other view root: tools/web-shot.mjs waits for
+  // `#view-root .view`. app.css's `.view h1` (19px) loses to kit.css's
+  // `.kit .page-head h1` (higher specificity); its weight 700 is the UA's.
+  const root = el("section", "view view-kit kit kit-page");
   const head = el("div", "page-head");
   const left = el("div");
   left.appendChild(el("h1", null, "UI kit"));
