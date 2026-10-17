@@ -152,11 +152,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.join(__dirname, "..");
 const appCssPath = path.join(webDir, "css", "app.css");
 const themeCssPath = path.join(webDir, "css", "theme.css");
+const kitCssPath = path.join(webDir, "css", "kit.css");
 const indexHtmlPath = path.join(webDir, "index.html");
 const jsDir = path.join(webDir, "js");
 
 const appCss = readFileSync(appCssPath, "utf8");
 const themeCss = readFileSync(themeCssPath, "utf8");
+const kitCss = readFileSync(kitCssPath, "utf8");
 const indexHtml = readFileSync(indexHtmlPath, "utf8");
 const combinedCss = `${themeCss}\n${appCss}`;
 
@@ -229,6 +231,12 @@ function extractAllRules(cssText) {
 }
 
 const allRules = extractAllRules(combinedCss);
+// WP SETTINGS-2 review: pages moved onto kit.css keep their [hidden] guards
+// there, scoped under `.kit` (`.kit.view-settings .savebar[hidden]`). Every
+// kit rule is read too; a scoped selector is tracked by its LAST compound's
+// class, and its guard must be the same scoped selector + `[hidden]`.
+// (@container blocks hold no guards and are skipped like other at-rules.)
+const kitRules = extractAllRules(kitCss);
 
 // Selectors this lint understands as "a single compound selector directly
 // naming one class" — optionally tag-qualified (`h4.sec`), never a
@@ -263,6 +271,39 @@ for (const { selector, body } of allRules) {
   const cls = m[2];
   if (!displayRulesByClass.has(cls)) displayRulesByClass.set(cls, new Set());
   displayRulesByClass.get(cls).add(selector);
+}
+for (const { selector, body } of kitRules) {
+  if (!/display\s*:/.test(body)) continue;
+  const norm = selector.replace(/\s+/g, " ");
+  if (norm.includes("[hidden]")) {
+    if (/display\s*:\s*none\b/.test(body)) guardSelectors.add(norm);
+    continue;
+  }
+  const parts = norm.split(" ");
+  if (parts.length < 2 || !/^\.kit\b/.test(parts[0])) continue; // only `.kit <...> <last>`
+  const m = SIMPLE_CLASS_SELECTOR_RE.exec(parts[parts.length - 1]);
+  if (!m) continue;
+  const cls = m[2];
+  if (!displayRulesByClass.has(cls)) displayRulesByClass.set(cls, new Set());
+  displayRulesByClass.get(cls).add(norm);
+}
+
+/**
+ * A kit display rule `.kit <rest>` is also covered by a guard that names
+ * the same `<rest>[hidden]` under a NARROWER kit scope, e.g.
+ * `.kit.add-device .ad-panel[hidden]` for `.kit .ad-panel`: the page root
+ * carries both classes, and the extra class makes the guard more specific,
+ * so it wins whatever the source order.
+ */
+function kitScopedGuardCovers(selector) {
+  const parts = selector.split(" ");
+  if (parts.length < 2 || parts[0] !== ".kit") return false;
+  const rest = `${parts.slice(1).join(" ")}[hidden]`;
+  for (const guard of guardSelectors) {
+    const g = guard.split(" ");
+    if (g.length >= 2 && /^\.kit\.[\w-]+$/.test(g[0]) && g.slice(1).join(" ") === rest) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------
@@ -522,7 +563,7 @@ test("every CSS class with an author `display` rule that is hidden-toggled in we
     const displaySelectors = displayRulesByClass.get(cls);
     if (!displaySelectors) continue; // no author display rule for this class — the UA [hidden] default already works
     for (const selector of displaySelectors) {
-      if (!guardSelectors.has(guardSelectorFor(selector))) {
+      if (!guardSelectors.has(guardSelectorFor(selector)) && !kitScopedGuardCovers(selector)) {
         missing.push({ class: cls, selector, sites: sites.map((s) => `${s.file}:${s.ident}`) });
       }
     }
@@ -540,11 +581,10 @@ test("every CSS class with an author `display` rule that is hidden-toggled in we
 // present in both sides of the cross-reference. WP WEB-FIX-8: the Settings
 // save bar's hidden toggle moved from its `.onbnav` row to the new
 // `.savebar` container (the `.onbnav` row inside it is never toggled now),
-// so `.savebar` stood in as the third live instance of the class until WP
-// SETTINGS-2 moved the bar (and its [hidden] guard) into kit.css, which this
-// lint does not read; the two app.css instances remain.
-test("sanity: the historically-buggy classes (.btn, h4.sec) are found on BOTH sides of the cross-reference", () => {
-  for (const cls of ["btn", "sec"]) {
+// so `.savebar` stands in as the third live instance of the class (since WP
+// SETTINGS-2 its rule and guard live in kit.css, which this lint reads too).
+test("sanity: the historically-buggy classes (.btn, h4.sec, and the save bar's .savebar) are found on BOTH sides of the cross-reference", () => {
+  for (const cls of ["btn", "sec", "savebar"]) {
     assert.ok(displayRulesByClass.has(cls), `no display rule found for .${cls} — CSS parsing regressed`);
     assert.ok(hiddenToggledClasses.has(cls), `no hidden-toggle site found for .${cls} — JS scanning regressed`);
   }

@@ -194,9 +194,32 @@ function fieldCard() {
     field("Vault name", "chip ch", "Changed here", "SteamVAULT"),
     field("Rate limit", "chip", "Default", "16 MB/s", { num: true, hint: "Takes effect within a minute." }),
     field("Cache root", "chip env", "From env", "/vault/cache", { disabled: true }),
+    openField(),
   );
   card.appendChild(grid);
   return card;
+}
+
+/** WP SETTINGS-2's field extensions: a wide field (`.field.wide`) with its
+ * (i) open (`.ib[aria-expanded]`, the `.fhelp` block: timing line first,
+ * then the help) and the control row (`.frow`: mono input + Reset). */
+function openField() {
+  const f = el("div", "field wide");
+  const lh = el("div", "lh");
+  const info = button("ib", "i");
+  info.setAttribute("aria-label", "More about Webhook timeout (seconds)");
+  info.setAttribute("aria-expanded", "true");
+  lh.append(el("label", null, "Webhook timeout (seconds)"), info, el("span", "chip ch", "Changed here"));
+  const frow = el("div", "frow");
+  const input = el("input", "in mono");
+  input.type = "text";
+  input.value = "15";
+  input.setAttribute("value", "15");
+  frow.append(input, button("btn ghost sm", "Reset"));
+  const help = el("div", "hint fhelp");
+  help.append(el("p", null, "Takes effect immediately."), el("p", null, "Seconds per webhook delivery attempt."));
+  f.append(lh, frow, help);
+  return f;
 }
 
 function jobRow(name, meta, size, actionLabel, actionClass, withGrip) {
