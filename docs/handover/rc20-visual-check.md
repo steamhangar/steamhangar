@@ -88,6 +88,16 @@ tests only. This list is the browser check that closes rc20 (release gate in
 - [ ] Game detail sheet: tabs Overview / Depots / Maintenance; red "Delete
       from cache" zone; both delete entry points use the same confirm.
 
+- [ ] Game detail Overview shows the cache status line (and a damaged note
+      when applicable); Verify stays in Maintenance.
+
+## rc21 web additions already on main (look while you are there)
+
+- [ ] Downloads: a "Client downloading" row above "Active" appears only
+      while a machine has cache traffic (CLIENT-ROW-1).
+- [ ] A game with depots mapped to no app reads "... not counted: N unmapped
+      depot(s)" in the detail completeness line (UNMAPPED-FLAG-1).
+
 ## Result
 
 Note per page: pass / issue (with width and a short description). Findings go
