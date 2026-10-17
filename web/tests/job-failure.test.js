@@ -22,6 +22,9 @@ import {
   jobFailureReason,
   jobFailureHint,
   isNewestJobForApp,
+  isFailedPrefill,
+  retryOffer,
+  GENERIC_FAILURE,
   FAILURE_REASON,
   FAILURE_HINT,
   HINTS,
@@ -216,4 +219,16 @@ test("mergeOwnedLibrary (refactored onto fillMissingNames) still adds owned-only
   const merged2 = mergeOwnedLibrary(vault2, [{ appid: 9 }]);
   assert.deepEqual(merged2.map((g) => g.appid), [1, 9]);
   assert.equal(vault2.length, 1, "nameless owned list: the vault array is still not pushed into");
+});
+
+test("DOWNLOADS-1: isFailedPrefill and retryOffer decide the Retry line of a failure block", () => {
+  const failed = { id: 2, appid: 10, type: "prefill", status: "error" };
+  assert.equal(isFailedPrefill(failed), true);
+  assert.equal(isFailedPrefill({ ...failed, type: "verify" }), false);
+  assert.equal(isFailedPrefill({ ...failed, status: "done" }), false);
+  assert.equal(isFailedPrefill(undefined), false);
+  assert.equal(retryOffer(failed, [failed], undefined), "retry");
+  assert.equal(retryOffer(failed, [failed, { id: 3, appid: 10, type: "prefill", status: "queued" }], undefined), "newer");
+  assert.equal(typeof GENERIC_FAILURE.title, "string");
+  assert.match(GENERIC_FAILURE.retry, /Retry/);
 });

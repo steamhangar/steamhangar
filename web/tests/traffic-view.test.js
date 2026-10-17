@@ -23,6 +23,7 @@ import {
   parseRateCap,
   rateCapLine,
   jobSpeedText,
+  VERIFY_SPEED_TEXT,
   joinNotes,
   mergeJobLists,
   refreshFailedText,
@@ -287,4 +288,14 @@ test("RATE-TILE: headerTiles puts the cap line on Current speed only", () => {
   const tiles = headerTiles(throughput("ok"), "No limit");
   assert.deepEqual(tiles.map((t) => t.limit), ["No limit", null, null, null, null, null, null, null]);
   assert.equal(headerTiles(throughput("ok")).find((t) => t.key === "current").limit, null);
+});
+
+test("MUTATION TARGET -- DOWNLOADS-1 VERIFY-SPEED-TEXT-1: a Verifying card reads 'Verifying files, no download speed' unless a speed was measured", () => {
+  assert.equal(VERIFY_SPEED_TEXT, "Verifying files, no download speed");
+  assert.equal(jobSpeedText(undefined, "disabled", { verifying: true }), VERIFY_SPEED_TEXT);
+  const unmeasured = { job_id: 1, appid: 440, bytes_per_second: null, bytes_since_start: null, exclusive_depots: 0 };
+  assert.equal(jobSpeedText(unmeasured, "ok", { verifying: true }), VERIFY_SPEED_TEXT);
+  assert.equal(jobSpeedText(unmeasured, "ok"), "Speed not measured yet: the server does not know this game's depots yet.");
+  const measured = { ...unmeasured, bytes_per_second: 30 * MIB, bytes_since_start: 8.8 * GIB, exclusive_depots: 2 };
+  assert.equal(jobSpeedText(measured, "ok", { verifying: true }), "30.0 MB/s · 8.8 GB loaded so far");
 });

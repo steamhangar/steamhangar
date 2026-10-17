@@ -199,10 +199,10 @@ import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
 import { fillMissingNames, hasText, vaultRowTitle } from "../lib/owned-library.js";
-import { isToolApp, TOOL_APP_NOTE } from "../lib/game-status.js";
+import { isToolApp, TOOL_APP_NOTE, KIND } from "../lib/game-status.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import { contentPackageFallbackTitle } from "../lib/content-groups.js";
-import { jobFailureHint, HINTS, NEWER_JOB_LINE, isNewestJobForApp, offersRetryFor } from "../lib/job-failure.js";
+import { jobFailureHint, HINTS, NEWER_JOB_LINE, GENERIC_FAILURE, isFailedPrefill, retryOffer } from "../lib/job-failure.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import {
   HISTORY_DELETE_KEEPS,
@@ -608,6 +608,38 @@ let settingsGen = 0;
 
 const sizeOfRow = (g) => formatBytesGB(g.size_bytes);
 
+/** WP DOWNLOADS-1: the "Updates available" and "Incomplete" lists start
+ * folded (their "all" button and the count stay in the head), like the
+ * mockup's attention rows. Module state, so a rebuild or a re-mount keeps
+ * what the user opened. */
+const attentionOpen = { updates: false, incomplete: false };
+
+function buildAttentionToggle(key, body) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn ghost sm attn-toggle";
+  btn.dataset.role = `${key}-toggle`;
+  btn.setAttribute("aria-controls", body.id);
+  btn.addEventListener("click", () => {
+    attentionOpen[key] = !attentionOpen[key];
+    syncAttention(key);
+  });
+  return btn;
+}
+
+/** Text, state and list visibility of one fold, from `attentionOpen`. */
+function syncAttention(key) {
+  if (!mounted()) return;
+  const toggle = key === "updates" ? els.updatesToggle : els.incompleteToggle;
+  const body = key === "updates" ? els.updatesBody : els.incompleteBody;
+  const heading = key === "updates" ? els.updatesHeading : els.incompleteHeading;
+  const open = attentionOpen[key];
+  body.hidden = !open;
+  toggle.textContent = open ? "Hide" : "Show";
+  toggle.setAttribute("aria-expanded", String(open));
+  toggle.setAttribute("aria-label", `${open ? "Hide" : "Show"} ${heading.textContent}`);
+}
+
 async function loadSchedule() {
   const my = ++scheduleGen;
   try {
@@ -722,6 +754,7 @@ function paintUpdateBusy() {
   const busy = updatesInFlight !== null;
   for (const btn of els.updates.querySelectorAll("button")) {
     const role = btn.dataset.role;
+    if (role !== "update-all" && role !== "update-now") continue; // the show/hide toggle
     const which = updateButtonId(btn);
     const idle = role === "update-all" ? UPDATE_ALL_LABEL : UPDATE_NOW_LABEL;
     const label = updatesInFlight === which ? STARTING_LABEL : idle;
@@ -772,6 +805,7 @@ function paintUpdates() {
     for (const g of rows) updatesBody.appendChild(buildUpdateRow(g, gamesByAppid));
   }
   paintUpdateBusy();
+  syncAttention("updates");
 
   if (hadFocus === null) return;
   const same =
@@ -881,6 +915,7 @@ function focusedCompletionButton() {
 function paintIncompleteBusy() {
   const busy = incompleteInFlight !== null;
   for (const btn of els.incomplete.querySelectorAll("button")) {
+    if (btn.dataset.role !== "complete-all" && btn.dataset.role !== "complete-now") continue; // the toggle
     const which = completionButtonId(btn);
     const idle = btn.dataset.role === "complete-all" ? COMPLETE_ALL_LABEL : COMPLETE_NOW_LABEL;
     const label = incompleteInFlight === which ? STARTING_LABEL : idle;
@@ -925,6 +960,7 @@ function paintIncomplete() {
   }
   for (const g of rows) incompleteBody.appendChild(buildIncompleteRow(g, gamesByAppid));
   paintIncompleteBusy();
+  syncAttention("incomplete");
 
   if (hadFocus === null) return;
   const same =
@@ -1250,6 +1286,8 @@ function paintExcerpt(rowEl, jobId) {
     return;
   }
   if (display.state === EXCERPT_STATE.EMPTY) {
+    const failed = findJobById(jobId);
+    if (isFailedPrefill(failed)) appendGenericFailure(logEl, failed);
     const p = document.createElement("p");
     p.className = "emptymsg";
     p.textContent = "No log output for this job.";
@@ -1258,6 +1296,7 @@ function paintExcerpt(rowEl, jobId) {
   }
   const job = findJobById(jobId);
   const hint = jobFailureHint(job, st.excerpt);
+  if (!hint && isFailedPrefill(job)) appendGenericFailure(logEl, job);
   const outputParent = hint ? appendFailureHint(logEl, hint, job, st) : logEl;
   if (display.truncated) {
     const note = document.createElement("p");
@@ -1276,27 +1315,23 @@ function paintExcerpt(rowEl, jobId) {
  * puts the output into. Text only (textContent), no markup from the log.
  * Retry only on the newest prefill job for the app: an older failed row
  * would queue a second run of a game that already has a newer job. */
-function appendFailureHint(logEl, hintKind, job, st) {
-  const text = HINTS[hintKind];
-  const box = document.createElement("div");
-  box.className = "failhint";
-  box.dataset.hint = hintKind;
-  const para = (value, className) => {
-    const p = document.createElement("p");
-    if (className) p.className = className;
-    p.textContent = value;
-    return p;
-  };
-  const code = document.createElement("code");
-  code.className = "cmd";
-  code.textContent = text.code;
-  box.append(para(text.title, "failhint-title"), para(text.body), para(text.codeIntro), code, para(text.after));
-  if (!offersRetryFor(gamesByAppidMap().get(job.appid))) {
-    // WP API-FIX-4: a tool app's job is never retried (POST /v1/prefill
-    // answers 422); say why instead of offering the button.
-    box.appendChild(para(TOOL_APP_NOTE));
-  } else if (isNewestJobForApp(job, state.jobs)) {
-    box.appendChild(para(text.retry));
+function failPara(value, className) {
+  const p = document.createElement("p");
+  if (className) p.className = className;
+  p.textContent = value;
+  return p;
+}
+
+/** The Retry line of a failure block (WP WEB-FIX-4, WP DOWNLOADS-1): the
+ * button on the newest job of an app, else why there is none. A tool app's
+ * job is never retried (`POST /v1/prefill` answers 422, WP API-FIX-4), so
+ * the block says why instead of offering the button. */
+function appendRetryOffer(box, job, retryLine) {
+  const offer = retryOffer(job, state.jobs, gamesByAppidMap().get(job.appid));
+  if (offer === "tool") {
+    box.appendChild(failPara(TOOL_APP_NOTE));
+  } else if (offer === "retry") {
+    box.appendChild(failPara(retryLine));
     const acts = document.createElement("div");
     acts.className = "jobacts";
     const retry = actionButton("Retry", "primary", () => onRetry(job.appid));
@@ -1305,8 +1340,33 @@ function appendFailureHint(logEl, hintKind, job, st) {
     acts.appendChild(retry);
     box.appendChild(acts);
   } else {
-    box.appendChild(para(NEWER_JOB_LINE));
+    box.appendChild(failPara(NEWER_JOB_LINE));
   }
+}
+
+/** WP DOWNLOADS-1: a failed prefill with no known cause still gets the
+ * failure line and the Retry offer; its output follows unfolded (there the
+ * output is the diagnosis). */
+function appendGenericFailure(logEl, job) {
+  const box = document.createElement("div");
+  box.className = "failhint";
+  box.dataset.hint = "generic";
+  box.append(failPara(GENERIC_FAILURE.title, "failhint-title"), failPara(GENERIC_FAILURE.body));
+  appendRetryOffer(box, job, GENERIC_FAILURE.retry);
+  logEl.appendChild(box);
+}
+
+function appendFailureHint(logEl, hintKind, job, st) {
+  const text = HINTS[hintKind];
+  const box = document.createElement("div");
+  box.className = "failhint";
+  box.dataset.hint = hintKind;
+  const para = failPara;
+  const code = document.createElement("code");
+  code.className = "cmd";
+  code.textContent = text.code;
+  box.append(para(text.title, "failhint-title"), para(text.body), para(text.codeIntro), code, para(text.after));
+  appendRetryOffer(box, job, text.retry);
 
   const raw = document.createElement("details");
   raw.className = "rawlog";
@@ -1511,6 +1571,8 @@ function fullRender() {
   const gamesByAppid = gamesByAppidMap();
 
   els.sub.textContent = subtitleText(p);
+  // WP DOWNLOADS-1: History differs idle vs active (css/app.css).
+  els.section.dataset.state = p.running.length || p.paused.length || p.queued.length ? "busy" : "idle";
   paintBulkBar();
 
   els.activeBody.replaceChildren();
@@ -1931,7 +1993,11 @@ function paintJobSpeeds() {
   for (const card of els.activeBody.querySelectorAll(".jobcard")) {
     const line = card.querySelector('[data-role="job-speed"]');
     if (!line) continue;
-    const text = t && t.range === traffic.range ? jobSpeedText(entries.get(Number(card.dataset.jid)), state) : null;
+    // WP DOWNLOADS-1: a Verifying card says so, with or without statistics.
+    const fresh = t && t.range === traffic.range;
+    const text = jobSpeedText(fresh ? entries.get(Number(card.dataset.jid)) : undefined, fresh ? state : "disabled", {
+      verifying: card.dataset.dk === KIND.VERIFY,
+    });
     line.textContent = text || "";
     line.hidden = !text;
     line.title = text ? JOB_SPEED_NOTE : "";
@@ -2060,7 +2126,9 @@ function buildSection() {
   updatesActs.className = "dl-updates-acts";
   const updatesBody = document.createElement("div");
   updatesBody.className = "dl-updates-list";
-  updates.append(updatesHeading, updatesNote, updatesActs, updatesBody);
+  updatesBody.id = "dl-updates-list";
+  const updatesToggle = buildAttentionToggle("updates", updatesBody);
+  updates.append(updatesHeading, updatesNote, updatesActs, updatesToggle, updatesBody);
 
   // WP CACHE-COMPLETE-1c: hidden until paintIncomplete finds a game. Styled
   // like the updates section (`.dl-updates`), found by `.dl-incomplete`.
@@ -2077,7 +2145,9 @@ function buildSection() {
   incompleteActs.className = "dl-updates-acts";
   const incompleteBody = document.createElement("div");
   incompleteBody.className = "dl-updates-list";
-  incomplete.append(incompleteHeading, incompleteNote, incompleteActs, incompleteBody);
+  incompleteBody.id = "dl-incomplete-list";
+  const incompleteToggle = buildAttentionToggle("incomplete", incompleteBody);
+  incomplete.append(incompleteHeading, incompleteNote, incompleteActs, incompleteToggle, incompleteBody);
 
   const queueHeading = document.createElement("h4");
   queueHeading.className = "sec";
@@ -2109,10 +2179,12 @@ function buildSection() {
   historyActs.appendChild(historyDeleteBtn);
   const historyBody = document.createElement("div");
 
-  section.append(
-    head,
-    bulkBar,
-    stats,
+  // WP DOWNLOADS-1: two columns from 1000px up (css/app.css `.dl-cols`):
+  // the work in progress on the left, the finished jobs on the right; one
+  // column below, in this DOM order.
+  const mainCol = document.createElement("div");
+  mainCol.className = "dl-col dl-col-main";
+  mainCol.append(
     activeHeading,
     activeBody,
     pausedHeading,
@@ -2122,11 +2194,15 @@ function buildSection() {
     queueHeading,
     queueBody,
     queueHint,
-    historyHeading,
-    historyRange.el,
-    historyActs,
-    historyBody,
   );
+  const sideCol = document.createElement("div");
+  sideCol.className = "dl-col dl-col-side";
+  sideCol.append(historyHeading, historyRange.el, historyActs, historyBody);
+  const cols = document.createElement("div");
+  cols.className = "dl-cols";
+  cols.append(mainCol, sideCol);
+
+  section.append(head, bulkBar, stats, cols);
 
   els = {
     section,
@@ -2151,12 +2227,14 @@ function buildSection() {
     updatesNote,
     updatesActs,
     updatesBody,
+    updatesToggle,
     updatesKey: null,
     incomplete,
     incompleteHeading,
     incompleteNote,
     incompleteActs,
     incompleteBody,
+    incompleteToggle,
     incompleteKey: null,
     queueHeading,
   };
