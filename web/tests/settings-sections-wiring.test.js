@@ -9,9 +9,10 @@
  *     switch makes the Expert section reachable, with its three
  *     sub-groups, and a hidden expert draft still shows its dot on the
  *     switch row;
- *   - env pins (Q1/Q2) render as plain text with a "Set via env (VAULT_…)"
- *     note and NO input element; shadowed rows say so; a vault-core key the
- *     build cannot apply says that instead of "set via env";
+ *   - env pins (Q1/Q2) render as a DISABLED input (WP SETTINGS-2) with the
+ *     "Set via env (VAULT_…)" note behind the (i), no Reset and no seg or
+ *     checkbox control; shadowed rows say so; a vault-core key the build
+ *     cannot apply says that instead of "set via env";
  *   - explanations sit behind the (i) disclosure;
  *   - risky keys: confirm dialog naming the risk, Cancel sends nothing,
  *     "Save anyway" sends ?confirm_risky=true; an unforeseen 428 asks for
@@ -257,9 +258,9 @@ test("MUTATION TARGET: the normal page carries no expert row; the switch shows t
   for (const key of ["schedule_interval_minutes", "gc_grace_days", "prefill_max_threads", "upstream_rate", "upstream_max_conns", "resolver", "log_level"]) {
     assert.ok(expert.querySelectorAll("div").includes(field(s, key)), `${key} sits in the Expert section`);
   }
-  const groups = expert.querySelectorAll("div.expert-group").map((g) => g.getAttribute("data-group"));
-  assert.deepEqual(groups, ["bandwidth", "housekeeping", "debug"]);
-  assert.deepEqual(expert.querySelectorAll("h4.sec").map((h) => h.textContent), ["Bandwidth & connections", "Housekeeping", "Debug"]);
+  const groups = expert.querySelectorAll("div.fcard").map((g) => g.getAttribute("data-group"));
+  assert.deepEqual(groups, ["bandwidth", "housekeeping", "debug"], "one field card per expert group");
+  assert.deepEqual(expert.querySelectorAll("h3").map((h) => h.textContent), ["Bandwidth & connections", "Housekeeping", "Debug"]);
 
   const sw = q(s, "expert-switch");
   assert.equal(sw.getAttribute("role"), "switch");
@@ -310,16 +311,25 @@ test("an expert draft stays visible as a dot when the switch is turned off; nav 
   assert.equal(q(navItem(s, "disk"), "section-dirty").hidden, true, "only sections holding a draft");
 });
 
-test("MUTATION TARGET: an env-pinned row is plain text with 'Set via env (VAULT_…)' — no input element, no Reset", async () => {
+test("MUTATION TARGET: an env-pinned row is a DISABLED input with 'Set via env (VAULT_…)' behind the (i) — no Reset, an edit sends nothing", async () => {
   server.over = { vault_name: { source: "env", editable: false, reason: "env", effective: "hangar-env", fallback: "hangar-env" } };
   const s = await mount();
-  assert.equal(inputById(s, "settings-vault_name") === null, true, "no <input> for an env-pinned value");
+  const input = inputById(s, "settings-vault_name");
+  assert.ok(input, "the pinned value shows in an input");
+  assert.equal(input.disabled, true, "env always wins: the input is disabled");
   const f = field(s, "vault_name");
-  assert.equal(f.querySelectorAll("input").length, 0);
+  assert.equal(f.querySelectorAll("input").length, 1);
   assert.equal(f.querySelectorAll("button").filter((b) => b.textContent === "Reset").length, 0);
-  assert.equal(q(f, "setting-value").textContent, "hangar-env");
+  assert.equal(q(f, "setting-value").value, "hangar-env");
   assert.equal(q(f, "env-note").textContent, "Set via env (VAULT_NAME)");
+  assert.equal(q(f, "field-help").querySelectorAll("p").includes(q(f, "env-note")), true, "the env note sits behind the (i)");
+  assert.equal(q(f, "field-help").hidden, true);
+  assert.equal(q(f, "field-chip").textContent, "From env");
   assert.equal(q(f, "shadow-note") === null, true, "nothing stored, nothing shadowed");
+  // A forced input event (a disabled input fires none) still drafts nothing:
+  // the pinned input has no listener.
+  type(input, "edited");
+  assert.equal(q(s, "save-bar").hidden, true);
 });
 
 test("a shadowed env pin says the stored value is overridden; segmented and checkbox rows pin the same way", async () => {
@@ -330,18 +340,19 @@ test("a shadowed env pin says the stored value is overridden; segmented and chec
   const s = await mount();
   const gc = field(s, "auto_gc");
   assert.equal(gc.querySelectorAll("button").filter((b) => b.getAttribute("aria-pressed") !== null).length, 0, "no segmented buttons");
-  assert.equal(q(gc, "setting-value").textContent, "Dry run");
+  assert.equal(q(gc, "setting-value").value, "Dry run");
+  assert.equal(q(gc, "setting-value").disabled, true);
   assert.equal(q(gc, "shadow-note").textContent, "A value stored in Settings is overridden by env.");
   const ev = field(s, "webhook_events");
-  assert.equal(ev.querySelectorAll("input").length, 0, "no checkboxes");
-  assert.equal(q(ev, "setting-value").textContent, "Job finished, Job failed");
+  assert.equal(ev.querySelectorAll("input").filter((i) => i.type === "checkbox").length, 0, "no checkboxes");
+  assert.equal(q(ev, "setting-value").value, "Job finished, Job failed");
 });
 
-test("the env-only webhook URL is masked plain text with its env note", async () => {
+test("the env-only webhook URL is a masked, disabled input with its env note", async () => {
   const s = await mount();
   const f = field(s, "webhook_url");
-  assert.equal(f.querySelectorAll("input").length, 0);
-  assert.equal(q(f, "setting-value").textContent, "https://hooks.example/***");
+  assert.equal(q(f, "setting-value").disabled, true);
+  assert.equal(q(f, "setting-value").value, "https://hooks.example/***");
   assert.equal(q(f, "env-note").textContent, "Set via env (VAULT_WEBHOOK_URL)");
   assert.equal(field(s, "db_path") === null, true, "path rows stay off the page");
 });
@@ -351,7 +362,7 @@ test("a vault-core key this build cannot apply says so — not 'set via env'", a
   server.over = { upstream_max_conns: { editable: false, reason: "core_file_disabled" } };
   const s = await mount();
   const f = field(s, "upstream_max_conns");
-  assert.equal(f.querySelectorAll("input").length, 0);
+  assert.equal(q(f, "setting-value").disabled, true);
   assert.match(q(f, "env-note").textContent, /^Applies to vault-core only via env in this build \(VAULT_UPSTREAM_MAX_CONNS\)\./);
   assert.doesNotMatch(q(f, "env-note").textContent, /^Set via env/);
 });
@@ -471,10 +482,10 @@ test("a 428 after the user already confirmed is reported, not looped", async () 
 test("demo mode: matching fake rows render — vault name pinned via env, shadowed timeout, masked webhook URL", async () => {
   storage.set("steamvault.demoMode", "1");
   const s = await mount();
-  assert.equal(inputById(s, "settings-vault_name") === null, true);
+  assert.equal(inputById(s, "settings-vault_name").disabled, true);
   assert.equal(q(field(s, "vault_name"), "env-note").textContent, "Set via env (VAULT_NAME)");
   assert.equal(q(field(s, "webhook_timeout_seconds"), "shadow-note").textContent, "A value stored in Settings is overridden by env.");
-  assert.match(q(field(s, "webhook_url"), "setting-value").textContent, /\/\*\*\*$/);
+  assert.match(q(field(s, "webhook_url"), "setting-value").value, /\/\*\*\*$/);
   assert.ok(inputById(s, "settings-schedule_window"), "the download window stays editable in the demo");
 });
 
@@ -562,26 +573,40 @@ test("MUTATION TARGET: the Expert section shows vault-core's apply state (D16c c
   s = await mount();
   const line = q(section(s, "expert"), "core-apply");
   assert.equal(line.textContent, "vault-core rejected the last settings change: upstream cap below prefill threads It keeps running with the settings it had.");
-  assert.equal(line.className, "settings-warn");
+  assert.equal(line.classList.contains("warn"), true, "a rejection is a .warn box");
   server.coreApply = { ...server.coreApply, state: "applied", generation: 3, applied_generation: 3, reason: "", written_generation: 4, pending: true };
   s = await mount();
   assert.equal(q(section(s, "expert"), "core-apply").textContent, "vault-core: a change is waiting to be applied.");
 });
 
-test("compact layout: the expert switch is the last item of About, not in the nav; same state and ids", async () => {
-  const handlers = [];
-  const mql = { matches: true, addEventListener: (_t, fn) => handlers.push(fn) };
-  window.matchMedia = () => mql;
+test("compact layout: at a container width of 760px or less the expert switch is the last item of About, not in the nav; same state and ids", async () => {
+  // The view measures its own root with a ResizeObserver (the same 760px
+  // as kit.css's @container settings); this fake hands it a width.
+  const observers = [];
+  globalThis.ResizeObserver = class {
+    constructor(cb) {
+      this.cb = cb;
+      observers.push(this);
+    }
+    observe(target) {
+      this.target = target;
+    }
+    disconnect() {}
+  };
+  const resize = (width) => {
+    const o = observers.at(-1);
+    o.cb([{ target: o.target, contentRect: { width } }]);
+  };
   try {
     const s = await mount();
+    resize(500);
     const about = section(s, "about");
     const nav = s.querySelectorAll("nav")[0];
     const sw = q(s, "expert-switch");
     assert.ok(sw, "switch rendered");
     assert.equal(nav.querySelectorAll("button").includes(sw), false, "not in the nav when compact");
-    const body = about.querySelector("div.sec-body");
-    const last = body.children[body.children.length - 1];
-    assert.ok(last.classList.contains("expert-switch"), "last child of the About body");
+    const last = about.children[about.children.length - 1];
+    assert.ok(last.classList.contains("exp"), "last child of the About panel");
     assert.ok(last.querySelectorAll("button").includes(sw));
     assert.equal(s.querySelectorAll("button").filter((b) => b.getAttribute("data-role") === "expert-switch").length, 1);
     const ids = s.querySelectorAll("span").map((x) => x.id).filter(Boolean);
@@ -591,13 +616,17 @@ test("compact layout: the expert switch is the last item of About, not in the na
     click(sw);
     assert.equal(storage.get("steamvault.settingsExpert"), "1", "same storage key");
     assert.equal(navItem(s, "expert").hidden, false);
-    // Crossing to the wide layout moves the same row under the nav.
-    mql.matches = false;
-    handlers.forEach((fn) => fn({ matches: false }));
+    // Growing past the threshold moves the same row back under the nav.
+    resize(761);
     assert.equal(nav.querySelectorAll("button").includes(sw), true, "wide: under the nav");
     assert.equal(about.querySelectorAll("button").includes(sw), false);
     assert.equal(sw.getAttribute("aria-checked"), "true", "state kept");
+    resize(760);
+    assert.equal(about.querySelectorAll("button").includes(sw), true, "760px itself is compact (the CSS max-width is inclusive)");
+    resize(0);
+    assert.equal(about.querySelectorAll("button").includes(sw), true, "a zero width (detached) changes nothing");
+    resize(1200);
   } finally {
-    delete window.matchMedia;
+    delete globalThis.ResizeObserver;
   }
 });

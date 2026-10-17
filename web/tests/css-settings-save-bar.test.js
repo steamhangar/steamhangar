@@ -1,14 +1,14 @@
 /**
- * Layout pins for the Settings save bar (WP WEB-FIX-8). No browser here
- * (same posture as css-about-pcs.test.js): these pin the declarations in
- * the right selector and the right (or no) media block.
+ * Layout pins for the Settings save bar (WP WEB-FIX-8; moved into the
+ * right column by WP SETTINGS-2). No browser here (same posture as
+ * css-about-pcs.test.js): these pin the declarations in the right selector.
  *
  * Expected look, for the real-device check: as soon as a Settings field
- * differs from its saved value, a rounded bar with "Unsaved changes" above
- * "Discard changes | Save changes" floats 14px above the bottom nav on a
- * phone (14px above the viewport bottom from 1024px up, right of the rail),
- * as wide as the Settings column; scrolling to the very end leaves the
- * last line (the trademark note) above the bar.
+ * differs from its saved value, one rounded row "● Unsaved changes |
+ * Discard changes | Save changes" appears at the end of the right column
+ * and sticks to the bottom of the viewport (above the phone's bottom nav)
+ * while the column is longer than the screen. At 460px container width or
+ * less the status line takes its own row above the two buttons.
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -20,42 +20,12 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.join(__dirname, "..");
-const appCss = readFileSync(path.join(webDir, "css", "app.css"), "utf8");
-const themeCss = readFileSync(path.join(webDir, "css", "theme.css"), "utf8");
+const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+const kitCss = strip(readFileSync(path.join(webDir, "css", "kit.css"), "utf8"));
+const appCss = strip(readFileSync(path.join(webDir, "css", "app.css"), "utf8"));
+const themeCss = strip(readFileSync(path.join(webDir, "css", "theme.css"), "utf8"));
 
-function stripComments(css) {
-  return css.replace(/\/\*[\s\S]*?\*\//g, "");
-}
-
-/** Brace-balanced @media splitter (per-file copy, suite convention). */
-function splitMedia(cssText) {
-  const css = stripComments(cssText);
-  let topLevel = "";
-  const mediaBlocks = [];
-  let i = 0;
-  while (i < css.length) {
-    const atIdx = css.indexOf("@media", i);
-    if (atIdx === -1) {
-      topLevel += css.slice(i);
-      break;
-    }
-    topLevel += css.slice(i, atIdx);
-    const openBrace = css.indexOf("{", atIdx);
-    const header = css.slice(atIdx, openBrace + 1).trim();
-    let depth = 1;
-    let j = openBrace + 1;
-    while (depth > 0 && j < css.length) {
-      if (css[j] === "{") depth++;
-      else if (css[j] === "}") depth--;
-      j++;
-    }
-    mediaBlocks.push({ header, body: css.slice(openBrace + 1, j - 1) });
-    i = j;
-  }
-  return { topLevel, mediaBlocks };
-}
-
-/** Body of the rule whose selector list is EXACTLY `selector`; null when absent. */
+/** Body of the first top-level rule whose selector list is EXACTLY `selector`. */
 function ruleBody(text, selector) {
   const re = /(^|\})\s*([^{}]+)\{([^{}]*)\}/g;
   let m;
@@ -65,32 +35,41 @@ function ruleBody(text, selector) {
   }
   return null;
 }
-
-const app = splitMedia(appCss);
-const theme = splitMedia(themeCss);
-const bpL = app.mediaBlocks.find((b) => /min-width:\s*1024px/.test(b.header) && !/and/.test(b.header));
+/** True when a top-level rule lists `selector` (alone or in a comma list)
+ * with `display:none`. */
+function guarded(text, selector) {
+  const re = /(^|\})\s*([^{}]+)\{([^{}]*)\}/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const sels = m[2].split(",").map((x) => x.trim().replace(/\s+/g, " "));
+    if (sels.includes(selector) && /display:\s*none/.test(m[3])) return true;
+    re.lastIndex = m.index + m[0].length - 1;
+  }
+  return false;
+}
 const norm = (s) => (s || "").replace(/\s+/g, "");
 const decl = (body, prop) => {
   const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(body || "");
   return m ? m[1].trim() : null;
 };
+const BAR = ".kit.view-settings .savebar";
 
-test("MUTATION TARGET: phone — the bar is fixed, never in the page flow, and sits above the bottom nav plus the safe-area inset", () => {
-  const body = ruleBody(app.topLevel, ".savebar");
-  assert.ok(body, ".savebar rule missing at top level");
-  assert.equal(decl(body, "position"), "fixed", "fixed: visible without scrolling wherever the user is on the page");
-  assert.equal(
-    norm(decl(body, "bottom")),
-    "calc(var(--nav-h)+var(--bulk-gap)+env(safe-area-inset-bottom,0px))",
-    "clears the nav (--nav-h) and the home-indicator inset the nav keeps in its own padding",
-  );
-  assert.match(norm(decl(body, "left")), /safe-area-inset-left/);
-  assert.match(norm(decl(body, "right")), /safe-area-inset-right/);
-  assert.equal(norm(decl(body, "max-width")), "calc(var(--w-text)-(var(--gutter)*2))", "as wide as the Settings column");
+test("MUTATION TARGET: the bar is sticky at the bottom of the column, above the bottom nav and the safe-area inset — never fixed", () => {
+  const body = ruleBody(kitCss, BAR);
+  assert.ok(body, `${BAR} rule missing in kit.css`);
+  assert.equal(decl(body, "position"), "sticky", "sticky: it stays in the right column and in the page flow");
+  assert.equal(norm(decl(body, "bottom")), "calc(var(--nav-h)+var(--sp-4)+env(safe-area-inset-bottom,0px))");
+  assert.equal(ruleBody(appCss, ".savebar"), null, "the old fixed bar rule is gone from app.css");
 });
 
-test("the bar's bottom placement is the bulk bar's own formula (one rule for 'above the nav', two views that never coexist)", () => {
-  assert.equal(norm(decl(ruleBody(app.topLevel, ".savebar"), "bottom")), norm(decl(ruleBody(app.topLevel, ".bulk"), "bottom")));
+test("one row: a wrapping flex row, status line first and growing, buttons at the end", () => {
+  const body = ruleBody(kitCss, BAR);
+  assert.match(body, /display:\s*flex/);
+  assert.match(body, /justify-content:\s*flex-end/);
+  assert.match(ruleBody(kitCss, `${BAR} .m`) ?? "", /flex:\s*1 1 200px/);
+});
+
+test("the bar is built only on Settings, inside the right column", () => {
   const jsDir = path.join(webDir, "js");
   const files = [];
   const walk = (d) => {
@@ -101,45 +80,28 @@ test("the bar's bottom placement is the bulk bar's own formula (one rule for 'ab
     }
   };
   walk(jsDir);
-  // Construction sites: `el("div", "savebar")` / `x.className = "bulk"`.
-  const using = (re) => files.filter((f) => re.test(readFileSync(f, "utf8"))).map((f) => path.relative(jsDir, f));
-  assert.deepEqual(using(/el\(\s*"div"\s*,\s*"savebar"\s*\)/), ["views/settings.js"], "the save bar is built only on Settings");
-  assert.deepEqual(using(/className\s*=\s*"bulk"/), ["views/library.js"], "the bulk bar is built only on the Library");
+  const using = files.filter((f) => /el\(\s*"div"\s*,\s*"savebar"\s*\)/.test(readFileSync(f, "utf8"))).map((f) => path.relative(jsDir, f));
+  assert.deepEqual(using, [path.join("views", "settings.js")]);
 });
 
 test("MUTATION TARGET: hidden really hides it (author display:flex beats the UA [hidden] rule)", () => {
-  assert.match(ruleBody(app.topLevel, ".savebar") ?? "", /display:\s*flex/);
-  assert.match(ruleBody(app.topLevel, ".savebar[hidden]") ?? "", /display:\s*none/);
-});
-
-test("MUTATION TARGET: while the bar is up the page reserves room for it, so the last content is never under it", () => {
-  assert.equal(norm(decl(ruleBody(app.topLevel, ".savebar-up"), "padding-bottom")), "calc(var(--savebar-h)+var(--bulk-gap)*2)");
-  const token = /--savebar-h:\s*(\d+)px\s*;/.exec(stripComments(themeCss));
-  assert.ok(token, "--savebar-h must be a px length (a unitless value breaks the calc)");
-  assert.ok(Number(token[1]) >= 86, "room for one status line + one button row at 360px");
-});
-
-test("from BP-L up the bar clears the side rail", () => {
-  assert.ok(bpL, "BP-L block not found");
-  const body = ruleBody(bpL.body, ".savebar") ?? "";
-  assert.equal(norm(decl(body, "left")), "calc(var(--rail-w)+var(--gutter))");
-  assert.equal(norm(decl(body, "right")), "var(--gutter)");
-});
-
-test("theme tokens only (no hard-coded colours), the error line uses the danger token", () => {
-  const body = ruleBody(app.topLevel, ".savebar") ?? "";
-  assert.match(decl(body, "background") ?? "", /^var\(--/);
-  assert.match(decl(body, "border") ?? "", /var\(--/);
-  assert.match(ruleBody(app.topLevel, ".savebar-msg.is-error") ?? "", /color:\s*var\(--danger\)/);
-  assert.ok(theme.topLevel.includes("--savebar-h"));
+  assert.match(ruleBody(kitCss, BAR) ?? "", /display:\s*flex/);
+  assert.equal(guarded(kitCss, `${BAR}[hidden]`), true, "the [hidden] guard for the bar is missing");
 });
 
 test("MUTATION TARGET: while the bar is up the root scroll padding keeps a focused control above it (WCAG 2.4.11)", () => {
-  const body = ruleBody(app.topLevel, ":root:has(.savebar-up)");
+  const body = ruleBody(appCss, ":root:has(.savebar-up)");
   assert.ok(body, ":root:has(.savebar-up) rule missing at top level");
   assert.equal(
     norm(decl(body, "scroll-padding-bottom")),
     "calc(var(--savebar-h)+var(--bulk-gap)*2+var(--nav-h)+env(safe-area-inset-bottom,0px))",
-    "bar height + its gaps + the nav + the bottom inset",
   );
+  assert.ok(themeCss.includes("--savebar-h"));
+});
+
+test("theme tokens only, the error line uses the danger token", () => {
+  const body = ruleBody(kitCss, BAR) ?? "";
+  assert.match(decl(body, "background") ?? "", /^var\(--/);
+  assert.match(decl(body, "border") ?? "", /var\(--/);
+  assert.match(ruleBody(kitCss, ".kit.view-settings .savebar-msg.is-error") ?? "", /color:\s*var\(--danger\)/);
 });

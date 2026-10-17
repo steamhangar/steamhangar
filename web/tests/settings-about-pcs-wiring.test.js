@@ -155,12 +155,9 @@ const aboutRow = (s, name) => s.querySelector(`tr[data-component="${name}"]`);
 const aboutRowText = (s, name) => {
   const row = aboutRow(s, name);
   if (!row) return null;
-  // The status cell's icon carries a (hidden-from-AT) sr-only word of the
-  // shared vocabulary; the visible word is the badge's last child.
-  return row.children.map((c) => {
-    const badge = c.querySelector('[data-role="about-status"]');
-    return badge ? badge.children[badge.children.length - 1].textContent : visibleText(c);
-  });
+  // WP SETTINGS-2: the status cell is a kit pill (createPill): the icon
+  // plus the visible word; visibleText skips any sr-only fallback.
+  return row.children.map((c) => visibleText(c));
 };
 /** Text a sighted user sees: skips `hidden` subtrees and screen-reader-only
  * spans (fake-dom keeps `hidden` as a plain property). WP WEB-FIX-8: a dash
@@ -223,7 +220,9 @@ test("MUTATION TARGET: vault-core differing from vault-api reads a neutral 'Chec
   let s = await mountSettings();
   await until(() => aboutRow(s, "vault-dns") !== null, "about table");
   assert.deepEqual(aboutRowText(s, "vault-core"), ["vault-core", "0.0.9", "3f9c2a7", "Check"]);
-  assert.equal(aboutRow(s, "vault-core").querySelector('[data-role="about-status"]').className, "badge tx-cancelled", "neutral, not red");
+  assert.equal(aboutRow(s, "vault-core").querySelector('[data-role="about-status"]').className, "pill", "neutral, not red");
+  assert.equal(aboutRow(s, "vault-runner").querySelector('[data-role="about-status"]').className, "pill danger", "unreachable is the red pill");
+  assert.equal(aboutRow(s, "vault-api").querySelector('[data-role="about-status"]').className, "pill ok");
   assert.match(detailText(s, "vault-core"), /differs from vault-api's/);
   server.about = {
     components: ABOUT_ALL_STATUSES.components.map((c) => (c.name === "vault-core" ? { ...c, version: null, commit: null } : c)),
@@ -240,12 +239,12 @@ test("About: status cells carry the matching icon kind, aria-hidden, next to the
     const icon = aboutRow(s, name).querySelector('[data-role="about-status"] span.sic');
     return icon ? `${icon.className}|${icon.getAttribute("aria-hidden")}` : null;
   };
-  assert.equal(kindOf("vault-api"), "sic k-cached sic-sm|true");
-  assert.equal(kindOf("vault-core"), "sic k-cached sic-sm|true");
-  assert.equal(kindOf("vault-runner"), "sic k-error sic-sm|true");
-  assert.equal(kindOf("steamprefill"), "sic k-unknown sic-sm|true");
-  assert.equal(kindOf("vault-proxy"), "sic k-notinuse sic-sm|true");
-  assert.equal(kindOf("vault-dns"), "sic k-notinuse sic-sm|true");
+  assert.equal(kindOf("vault-api"), "sic k-cached|true");
+  assert.equal(kindOf("vault-core"), "sic k-cached|true");
+  assert.equal(kindOf("vault-runner"), "sic k-error|true");
+  assert.equal(kindOf("steamprefill"), "sic k-unknown|true");
+  assert.equal(kindOf("vault-proxy"), "sic k-notinuse|true");
+  assert.equal(kindOf("vault-dns"), "sic k-notinuse|true");
 });
 
 test("About: the (i) details hold the note, the dash reason and the server detail as plain text; relative checked time with the 60 s cache", async () => {
@@ -521,7 +520,7 @@ test("requestAboutFocus(): the next Settings render focuses the About heading", 
   const s = await mountSettings();
   await until(() => dom.document.activeElement && dom.document.activeElement.id === "settings-about", "About heading focused");
   assert.equal(dom.document.activeElement.textContent, "About");
-  assert.equal(s.querySelector("h4.sec").textContent === "About", false, "About is not the first section; focus had to move");
+  assert.equal(s.querySelector("h2.sec-title").textContent === "About", false, "About is not the first section; focus had to move");
 });
 
 test("leaving Settings drops a pending About focus request (no focus jump on a later visit)", async () => {

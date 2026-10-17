@@ -540,9 +540,11 @@ test("every CSS class with an author `display` rule that is hidden-toggled in we
 // present in both sides of the cross-reference. WP WEB-FIX-8: the Settings
 // save bar's hidden toggle moved from its `.onbnav` row to the new
 // `.savebar` container (the `.onbnav` row inside it is never toggled now),
-// so `.savebar` stands in as the third live instance of the class.
-test("sanity: the historically-buggy classes (.btn, h4.sec, and the save bar's .savebar) are found on BOTH sides of the cross-reference", () => {
-  for (const cls of ["btn", "sec", "savebar"]) {
+// so `.savebar` stood in as the third live instance of the class until WP
+// SETTINGS-2 moved the bar (and its [hidden] guard) into kit.css, which this
+// lint does not read; the two app.css instances remain.
+test("sanity: the historically-buggy classes (.btn, h4.sec) are found on BOTH sides of the cross-reference", () => {
+  for (const cls of ["btn", "sec"]) {
     assert.ok(displayRulesByClass.has(cls), `no display rule found for .${cls} — CSS parsing regressed`);
     assert.ok(hiddenToggledClasses.has(cls), `no hidden-toggle site found for .${cls} — JS scanning regressed`);
   }

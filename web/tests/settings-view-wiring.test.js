@@ -103,7 +103,8 @@ const errLine = (s) =>
 const errText = (s) => (errLine(s) ? errLine(s).textContent : null);
 const demoNotice = (s) => s.querySelector('[data-role="demo-notice"]');
 const connectBtn = (s) => s.querySelector('[data-role="connect"]');
-const sectionHeadings = (s) => s.querySelectorAll("h4.sec").map((h) => h.textContent);
+// WP SETTINGS-2: every group is a kit field card with an h3 title.
+const sectionHeadings = (s) => s.querySelectorAll("div.fcard h3").map((h) => h.textContent);
 
 beforeEach(() => {
   storage.clear();
@@ -142,7 +143,7 @@ test("B1: in demo mode the Connection section says so and offers 'Connect to a v
   // D16-WEB: the Connection row sits in the "Vault & connection" section.
   const titles = s.querySelectorAll("section h2.sec-title").map((t) => t.textContent);
   assert.ok(titles.includes("Vault & connection") && sectionHeadings(s).includes("Connection"));
-  const ttl = s.querySelectorAll("span.ttl").find((t) => t.textContent === "Connect to a vault");
+  const ttl = s.querySelectorAll("div.act b").find((t) => t.textContent === "Connect to a vault");
   assert.ok(ttl, "row title must not read 'Reconnect / switch account' when no vault is attached");
 });
 
@@ -152,7 +153,7 @@ test("with a real key (demo off) the Connection section is the plain reconnect r
   assert.equal(errText(s), null);
   assert.equal(demoNotice(s) === null, true, "no demo notice with a real key");
   assert.equal(connectBtn(s).textContent, "Start");
-  assert.ok(s.querySelectorAll("span.ttl").some((t) => t.textContent === "Reconnect / switch account"));
+  assert.ok(s.querySelectorAll("div.act b").some((t) => t.textContent === "Reconnect / switch account"));
 });
 
 test("P2 MUTATION PIN: a settings response missing one of the eight keys falls to the error path naming the key — never a throw that leaves 'Loading settings…' up", async () => {

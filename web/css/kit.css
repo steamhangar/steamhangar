@@ -256,3 +256,163 @@
 .kit .ccard .upd[hidden], .kit .ccard .upd-ico[hidden], .kit .ccard .upd b[hidden], .kit .ccard .now[hidden], .kit .ccard .now b[hidden],
 .kit .ccard .stats[hidden], .kit .ccard .agent[hidden], .kit .ccard .agent b[hidden], .kit .ccard .agent .ok-ico[hidden], .kit .ccard .cf[hidden], .kit .ccard .cf .acts[hidden], .kit .btn .btn-ico[hidden],
 .kit .kit-frame[hidden], .kit .kit-section[hidden], .kit .kit-row[hidden], .kit .kit-list[hidden], .kit.kit-page[hidden]{ display:none; }
+
+/* ---------- Settings page (WP SETTINGS-2) ----------
+   Ported from docs/design/rc20/settings.html onto the kit primitives above;
+   rendered by views/settings.js (fields: components/settings-field.js).
+   The page root `section.view-settings.kit` is the `settings` inline-size
+   container: at 760px or narrower the nav becomes a scrolling strip
+   without states (views/settings.js COMPACT_MAX_WIDTH is the same number:
+   it moves the expert switch row into the About panel there). Page-only
+   names (.warn .checks .act .exp .sw .dot .irow .pillrow .savebar) are
+   scoped to `.kit.view-settings`, because `.warn` and `.dot` already mean
+   something else on other kit pages (`.ccard.warn`). */
+.kit.view-settings{ container:settings / inline-size; display:grid; gap:var(--sp-5); }
+.kit.view-settings .settings-body{ display:grid; gap:var(--sp-4); min-width:0; }
+.kit.view-settings .settings-lay{ display:grid; grid-template-columns:240px minmax(0, 1fr); gap:var(--sp-7); align-items:start; }
+.kit.view-settings .settings-main{ display:grid; gap:var(--sp-5); min-width:0; }
+
+/* Section nav: flat items, no card borders; the state sits on the same
+   line, right-aligned; selection is the accent glow. */
+.kit.view-settings .snav{ position:sticky; top:var(--sp-4); display:flex; flex-direction:column; gap:2px; min-width:0; }
+.kit.view-settings .snav-list{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.kit.view-settings .snav-item{
+  display:flex; align-items:center; gap:10px; width:100%; min-width:0; text-align:left;
+  background:none; border:0; border-radius:10px; padding:10px 12px;
+  font:400 var(--fs-3)/1.3 var(--ui); color:var(--dim); cursor:pointer; white-space:nowrap;
+}
+@media (hover:hover) and (pointer:fine){
+  .kit.view-settings .snav-item:hover{ background:var(--surface); color:var(--text); }
+}
+.kit.view-settings .snav-item[aria-current="true"]{ background:var(--accent-glow); color:var(--accent); }
+.kit.view-settings .snav-label{ flex:none; }
+.kit.view-settings .snav-state{ margin-left:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:var(--fs-1); color:var(--dim-2); }
+.kit.view-settings .snav-item[aria-current="true"] .snav-state{ color:var(--accent); opacity:.8; }
+.kit.view-settings .dot{ width:7px; height:7px; border-radius:50%; background:var(--run); flex:none; display:inline-block; }
+
+/* "Show expert settings" row with the small switch. */
+.kit.view-settings .exp{
+  margin-top:14px; padding:14px 12px 0; border-top:1px solid var(--line-soft);
+  display:flex; align-items:center; gap:10px; color:var(--dim); font-size:var(--fs-3);
+}
+.kit.view-settings .exp .tx{ flex:1; min-width:0; line-height:1.3; }
+.kit.view-settings .exp .ttl{ display:block; }
+.kit.view-settings .exp small{ display:block; color:var(--dim-2); font-size:var(--fs-1); margin-top:2px; }
+.kit.view-settings .settings-panel > .exp{ margin-top:0; padding-inline:0; }
+.kit.view-settings .sw{
+  width:36px; height:20px; border-radius:999px; background:var(--raised-2); border:1px solid var(--line);
+  position:relative; padding:0; flex:none; cursor:pointer;
+}
+.kit.view-settings .sw::after{
+  content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%;
+  background:var(--dim); transition:transform .15s, background .15s;
+}
+.kit.view-settings .sw[aria-checked="true"]{ background:var(--accent-glow); border-color:var(--accent); }
+.kit.view-settings .sw[aria-checked="true"]::after{ transform:translateX(16px); background:var(--accent); }
+
+/* Panels: h2 + blurb, then one field card per group. */
+.kit.view-settings .settings-panel{ display:grid; gap:18px; min-width:0; }
+.kit.view-settings .ph h2{ margin:0; font:600 var(--fs-5)/1.3 var(--ui); letter-spacing:-.3px; color:var(--text); }
+.kit.view-settings .ph h2:focus{ outline:none; }
+.kit.view-settings .ph p{ margin:3px 0 0; color:var(--dim); font-size:var(--fs-3); }
+
+/* Field extensions (kit `.field`): a wide field spans the grid, a group's
+   name is a span styled like the label, a plain value line, mono inputs,
+   the open (i), the control row (control + Reset), the (i) text block. */
+.kit .field{ align-content:start; }
+.kit .field.wide{ grid-column:1 / -1; }
+.kit .field .lbl{ font:500 var(--fs-3) var(--ui); color:var(--text); }
+.kit .field .val{ margin:0; font-size:var(--fs-3); line-height:1.45; color:var(--text); overflow-wrap:anywhere; }
+.kit .in.mono{ font-family:var(--mono); }
+.kit .ib[aria-expanded="true"]{ color:var(--accent); border-color:var(--accent); }
+@media (hover:hover) and (pointer:fine){
+  .kit .ib:hover{ color:var(--accent); border-color:var(--accent); }
+}
+.kit .frow{ display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap; min-width:0; }
+.kit .frow > .in{ flex:1 1 160px; }
+/* A grid, not a column flexbox: a column flexbox sizes the auto-fill
+   `.checks` grid at its one-column height and then stretches its rows. */
+.kit .frow.frow-col{ display:grid; grid-template-columns:minmax(0, 1fr); }
+.kit .frow.frow-col > .btn{ justify-self:start; }
+.kit .fhelp{ display:grid; gap:var(--sp-1); }
+.kit .fhelp p{ margin:0; }
+.kit .seg button:disabled{ opacity:.55; cursor:default; }
+
+/* Webhook events: an auto-fill grid of check pills. */
+.kit.view-settings .checks{ display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap:var(--sp-2); }
+.kit.view-settings .field label.check{
+  display:flex; align-items:center; gap:10px; min-width:0; margin:0;
+  background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:9px 12px;
+  font:400 var(--fs-3)/1.3 var(--ui); color:var(--text); text-transform:none; letter-spacing:0; cursor:pointer;
+}
+.kit.view-settings .check input{ accent-color:var(--accent); width:16px; height:16px; margin:0; flex:none; }
+
+/* Inline rows (Steam: input + buttons), the status pill above them, the
+   Connection action row, the tinted warning box. */
+.kit.view-settings .irow{ display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap; min-width:0; }
+.kit.view-settings .irow > .in{ flex:1 1 220px; }
+.kit.view-settings .pillrow{ display:flex; flex-wrap:wrap; gap:var(--sp-2); min-width:0; }
+.kit.view-settings .pillrow .pill{ white-space:normal; line-height:1.3; max-width:100%; }
+.kit.view-settings .lookup{ display:grid; gap:var(--sp-1); }
+.kit.view-settings .lookup p, .kit.view-settings .lookup ul{ margin:0; }
+.kit.view-settings .act{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap;
+  background:var(--raised); border-radius:var(--r-m); padding:14px 16px;
+}
+.kit.view-settings .act > div{ flex:1 1 220px; min-width:0; }
+.kit.view-settings .act b{ display:block; font:500 var(--fs-3)/1.4 var(--ui); }
+.kit.view-settings .act span{ font-size:var(--fs-2); color:var(--dim); }
+.kit.view-settings .warn{
+  display:flex; align-items:flex-start; gap:10px;
+  background:color-mix(in srgb, var(--run) 8%, var(--surface)); border:1px solid color-mix(in srgb, var(--run) 30%, var(--line));
+  border-radius:var(--r-m); padding:12px 14px; font-size:var(--fs-3); color:var(--run);
+}
+.kit.view-settings .warn > svg{ flex:none; margin-top:2px; }
+.kit.view-settings .warn .wt{ display:grid; gap:6px; min-width:0; }
+.kit.view-settings .warn .wt > p{ margin:0; line-height:1.45; }
+.kit.view-settings .warn .ib{ vertical-align:middle; margin-left:2px; color:var(--run); border-color:color-mix(in srgb, var(--run) 45%, var(--line)); }
+.kit.view-settings .warn .fhelp{ color:var(--dim); }
+.kit.view-settings .about-head{ display:flex; justify-content:space-between; align-items:center; gap:var(--sp-3); flex-wrap:wrap; margin:0; }
+.kit.view-settings .about-head-text{ display:grid; gap:2px; min-width:0; }
+.kit.view-settings .about-head-text p{ margin:0; }
+.kit.view-settings .about-table{ margin-top:0; font-size:var(--fs-3); }
+.kit.view-settings .about-table .about-row > th, .kit.view-settings .about-table .about-row > td{ vertical-align:middle; }
+
+/* Save bar: one row (dot + status | Discard | Save), sticky at the bottom
+   of the right column, above the phone's bottom nav (--nav-h is 0 once the
+   nav is the side rail). */
+.kit.view-settings .savebar{
+  position:sticky; bottom:calc(var(--nav-h) + var(--sp-4) + env(safe-area-inset-bottom, 0px)); z-index:5;
+  display:flex; align-items:center; justify-content:flex-end; gap:var(--sp-3); flex-wrap:wrap;
+  background:var(--raised-2); border:1px solid var(--line); border-radius:14px; padding:12px 16px;
+  box-shadow:0 10px 30px color-mix(in srgb, var(--bg) 80%, transparent);
+}
+.kit.view-settings .savebar .m{ flex:1 1 200px; min-width:0; display:flex; align-items:center; gap:8px; }
+.kit.view-settings .savebar-msg{ margin:0; min-width:0; font:500 var(--fs-3)/1.35 var(--ui); color:var(--text); overflow-wrap:anywhere; }
+.kit.view-settings .savebar-msg.is-error{ color:var(--danger); }
+
+@container settings (max-width: 760px){
+  .kit.view-settings .settings-lay{ grid-template-columns:minmax(0, 1fr); gap:var(--sp-4); }
+  .kit.view-settings .snav{ position:static; }
+  .kit.view-settings .snav-list{ flex-direction:row; overflow-x:auto; padding-bottom:4px; scrollbar-width:thin; }
+  .kit.view-settings .snav-item{ width:auto; flex:none; }
+  .kit.view-settings .snav-state{ display:none; }
+}
+@container settings (max-width: 460px){
+  .kit.view-settings .fcard{ padding:16px 14px; }
+  .kit.view-settings .irow > .in{ flex-basis:100%; }
+  .kit.view-settings .savebar{ padding:10px 12px; }
+  .kit.view-settings .savebar .m{ flex-basis:100%; }
+  .kit.view-settings .savebar .btn{ flex:1; justify-content:center; }
+}
+
+/* [hidden] guards for the Settings block (same reason as the list above). */
+.kit.view-settings .settings-body[hidden], .kit.view-settings .settings-lay[hidden], .kit.view-settings .settings-main[hidden],
+.kit.view-settings .snav[hidden], .kit.view-settings .snav-list[hidden], .kit.view-settings .snav-item[hidden],
+.kit.view-settings .dot[hidden], .kit.view-settings .exp[hidden], .kit.view-settings .exp .ttl[hidden],
+.kit.view-settings .settings-panel[hidden], .kit .frow[hidden], .kit .fhelp[hidden],
+.kit.view-settings .checks[hidden], .kit.view-settings .field label.check[hidden], .kit.view-settings .irow[hidden],
+.kit.view-settings .pillrow[hidden], .kit.view-settings .lookup[hidden], .kit.view-settings .act[hidden],
+.kit.view-settings .act b[hidden], .kit.view-settings .warn[hidden], .kit.view-settings .warn .wt[hidden],
+.kit.view-settings .about-head[hidden], .kit.view-settings .about-head-text[hidden],
+.kit.view-settings .savebar[hidden], .kit.view-settings .savebar .m[hidden]{ display:none; }

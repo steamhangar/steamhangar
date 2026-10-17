@@ -1,39 +1,38 @@
 /**
- * Settings view (WP 4a.6; sections, expert mode and env pins WP D16-WEB).
+ * Settings view (WP 4a.6; sections, expert mode and env pins WP D16-WEB;
+ * section nav WP SETTINGS-1; UI kit anatomy WP SETTINGS-2).
  *
- * Layout (WP SETTINGS-1, rc20 mockup docs/design/rc20/settings.html; before
- * it WP D16-WEB, docs/handover/d16-settings-audit.md 1.3): a left section
- * navigation (`nav.snav`, buttons with `aria-current` on the active one; a
- * horizontal strip below 1000px) and ONE panel at a time — Vault &
- * connection (first), Download window & updates, Disk & cleanup,
- * Notifications, Steam, About, and Expert settings while the "Show expert
- * settings" switch under the nav is on. Every panel stays in the DOM
- * (inactive ones `hidden`), so a draft is never lost by switching.
- * Each nav item shows a one-line state (`sectionSummary`, same-section
- * fields only) and a dot while its section holds an unsaved draft.
- * Placement and wording live in lib/settings-layout.js; a section with
- * nothing to show is not built. The selected section is per mount, not
- * remembered; the expert switch is (guarded storage).
+ * Anatomy (WP SETTINGS-2, docs/design/rc20/settings.html + kit.html; the
+ * root carries `kit`, ADR-0028): page head (h1 + subline), then a left
+ * section nav (`nav.snav`: flat 13px items, the one-line state on the same
+ * line right-aligned, accent-glow selection, `aria-current` on the active
+ * one) with the `.exp` "Show expert settings" row under it, and ONE panel
+ * at a time on the right — Vault & connection (first), Download window &
+ * updates, Disk & cleanup, Notifications, Steam, About, and Expert settings
+ * while the switch is on. Each panel is its h2 + blurb and one `.fcard` per
+ * group (lib/settings-layout.js `CARD_TITLES`, the Expert groups'
+ * `EXPERT_GROUPS` titles). When the Settings container is 760px or
+ * narrower (kit.css `@container settings`), the nav is a scrolling strip
+ * and the switch row moves to the end of the About panel — one DOM node,
+ * moved, never duplicated. Every panel stays in the DOM (inactive ones
+ * `hidden`), so a draft is never lost by switching; a nav item shows a dot
+ * while its section holds an unsaved draft. A section with nothing to show
+ * is not built. The selected section is per mount, not remembered; the
+ * expert switch is (guarded storage).
  *
  * - Normal page: only rows the API marks `expert: false`. Every
  *   `expert: true` row sits in the Expert section, reachable only while
- *   the switch is on (remembered per browser), split into Bandwidth &
- *   connections, Housekeeping and Debug. Switching it off leaves the
- *   section but keeps its drafts (the switch row then shows the
- *   unsaved-changes dot).
- * - Fields sit in an auto-fit grid; each carries a state chip (Default /
- *   Changed here / From env, `fieldChip`). The apply timing and the help
- *   text sit behind the (i).
- * - Env pins (Q1 2026-10-14: env always wins): a row with `editable: false`
- *   or `env_only: true` is plain text with a "Set via env (VAULT_…)" note —
- *   no input, no Reset. `shadowed` adds a note that a stored value is
- *   overridden. The masked webhook URL is such a row. (The
- *   VAULT_SETTINGS_READONLY mode keeps its disabled inputs: another state.)
- * - Explanations sit behind a per-field (i) disclosure (the About table's
- *   button, WP WEB-FIX-8); state (chip, sweep status, the live GC-risk
- *   warning, env notes) stays visible. The GC-risk warning shows while
- *   "include cached" is on and Auto-GC is not Execute (`gcRiskActive`),
- *   from the current draft or saved values.
+ *   the switch is on. Switching it off keeps its drafts (the switch row
+ *   then shows the unsaved-changes dot).
+ * - One field = components/settings-field.js: label, (i), state chip
+ *   (Default / Changed here / From env), control, Reset for a stored value;
+ *   the (i) holds the timing line first, then the help text. Env pins
+ *   (Q1 2026-10-14: env always wins) are disabled inputs with the env note
+ *   behind the (i). (VAULT_SETTINGS_READONLY keeps its disabled controls.)
+ * - State stays visible: chips, the "Last sweep" grid field, the live
+ *   GC-risk `.warn` box below the Garbage collection grid (while "include
+ *   cached" is on and Auto-GC is not Execute, `gcRiskActive`, from the
+ *   current draft or saved values), vault-core's apply state.
  * - Risky keys (API `risky: true`): Save opens one confirm dialog naming
  *   each risky key with old -> new value and what can break
  *   (components/risky-confirm.js); only "Save anyway" sends the PATCH, with
@@ -41,6 +40,9 @@
  *   dialog for the keys the server names, then retries once. 409/422/428
  *   answers say "Nothing was saved" (the API validates the whole body
  *   first); anything else does not claim to know.
+ * - The save bar sits at the end of the right column, `position:sticky` at
+ *   the bottom (one row: dot + status line | Discard | Save), and exists
+ *   only while something is dirty.
  *
  * The form itself (unchanged mechanics, WP 4a.6): the PATCH body is built
  * by `lib/settings-diff.js` from a `drafts` map populated ONLY by fields the
@@ -69,6 +71,8 @@
 import { api, isDemoMode } from "../api.js";
 import { showToast } from "../components/toast.js";
 import { confirmRiskyChange } from "../components/risky-confirm.js";
+import { createSettingsField, createInfoDisclosure, createFieldChip } from "../components/settings-field.js";
+import { createPill } from "../components/pill.js";
 import { openOnboarding } from "../onboarding.js";
 import { buildSettingsPatch } from "../lib/settings-diff.js";
 import {
@@ -79,16 +83,16 @@ import {
   missingSettingKeys,
 } from "../lib/settings-presentation.js";
 import {
+  CARD_TITLES,
   DEFAULT_SECTION,
   EXPERT_GROUPS,
+  LAST_SWEEP_LABEL,
+  PAGE_SUBLINE,
   coreApplyLine,
   SECTIONS,
   describeSaveError,
   displayValue,
   envNote,
-  fieldChip,
-  fieldHelp,
-  fieldMeta,
   gcRiskActive,
   isPinned,
   navTarget,
@@ -120,7 +124,6 @@ import {
 } from "../lib/owned-library.js";
 import { onViewChange } from "../router.js";
 import { store } from "../store-singleton.js";
-import { createStatusIcon } from "../components/status-icon.js";
 import {
   ABOUT_TOO_OLD_MESSAGE,
   aboutComponents,
@@ -161,7 +164,7 @@ const state = {
   steamStatus: { configured: false, key_last4: null },
   lookup: null,
   // WP 4d-web: last GET /v1/schedule response, or null (best-effort; a
-  // failure only means the sweep status line and GC-risk warning are empty).
+  // failure only means the "Last sweep" field is not shown).
   schedule: null,
 };
 
@@ -229,10 +232,11 @@ function paintDirtyDots() {
 }
 
 /**
- * Show the save bar exactly while something is dirty (WP WEB-FIX-8: the
- * bar is `position:fixed` above the bottom nav, app.css "Settings save
- * bar"). `.savebar-up` on the section reserves scroll room under the
- * page's last content. Any edit clears a previous save error from the bar.
+ * Show the save bar exactly while something is dirty (WP WEB-FIX-8). The
+ * bar is sticky at the bottom of the right column (kit.css `.savebar`, WP
+ * SETTINGS-2); `.savebar-up` on the section only feeds the root's scroll
+ * padding (app.css), so a control that receives focus is never under it.
+ * Any edit clears a previous save error from the bar.
  */
 function markDirty() {
   paintDirtyDots();
@@ -333,8 +337,9 @@ async function saveDrafts() {
     const hadFocus = barHasFocus();
     // The toast (role=status) announces the success; the bar is gone.
     showToast("Settings saved.");
-    // WP 4d-web: a saved PATCH can change sweep_cached_gc_risk server-side,
-    // so re-fetch the schedule (best-effort: stale beats a failed save).
+    // WP 4d-web: a saved PATCH can change the sweep's state server-side,
+    // so re-fetch the schedule for the "Last sweep" field (best-effort:
+    // stale beats a failed save).
     try {
       state.schedule = await api.schedule();
     } catch {
@@ -349,7 +354,7 @@ async function saveDrafts() {
     }
   } catch (err) {
     // The bar stays up with the drafts; its own role=status line says what
-    // failed (no warn toast on top: at BP-L the toast would sit over it).
+    // failed (no warn toast on top of it).
     setBarLine(describeSaveError(err, { confirmed }), true);
   } finally {
     saving = false;
@@ -357,92 +362,36 @@ async function saveDrafts() {
   }
 }
 
-// ---------------------------------------------------------------------
-// (i) disclosure — the About table's button (WP WEB-FIX-8), shared by the
-// field help texts (WP D16-WEB).
-// ---------------------------------------------------------------------
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-/** The (i) glyph: a 24-unit outline circle with an "i", stroked in
- * currentColor like the status-icon glyphs, decorative (the button
- * carries the name). */
-function infoGlyph() {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  const attrs = {
-    viewBox: "0 0 24 24",
-    "aria-hidden": "true",
-    focusable: "false",
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": "2",
-    "stroke-linecap": "round",
-  };
-  for (const k in attrs) svg.setAttribute(k, attrs[k]);
-  const parts = [
-    ["circle", { cx: "12", cy: "12", r: "9" }],
-    ["path", { d: "M12 11v6" }],
-    ["path", { d: "M12 7.5v.01" }],
-  ];
-  for (const [tag, a] of parts) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const k in a) node.setAttribute(k, a[k]);
-    svg.appendChild(node);
-  }
-  return svg;
-}
-
-/**
- * A disclosure button: a native <button> (Enter/Space and the global
- * :focus-visible ring for free) with aria-expanded + aria-controls; a click
- * flips `hidden` on `detailEl` and records the choice in `memory` under
- * `name`, so a re-render keeps it.
- */
-function buildDisclosure({ name, detailEl, openByDefault, memory, role, label }) {
-  const btn = el("button", "about-info-btn");
-  btn.type = "button";
-  btn.dataset.role = role;
-  btn.setAttribute("aria-label", label);
-  btn.setAttribute("aria-controls", detailEl.id);
-  btn.appendChild(infoGlyph());
-  const apply = (open) => {
-    btn.setAttribute("aria-expanded", String(open));
-    detailEl.hidden = !open;
-  };
-  const isOpen = () => (memory.has(name) ? memory.get(name) : openByDefault);
-  apply(isOpen());
-  btn.addEventListener("click", () => {
-    const open = !isOpen();
-    memory.set(name, open);
-    apply(open);
-  });
-  return btn;
-}
-
-/** The (i) button plus its hidden text block for one help id; `lead` is an
- * optional node placed before the paragraphs (a field's timing line). */
-function helpDisclosure(id, paragraphs, label, lead = null) {
-  const help = el("div", "field-help");
-  help.id = `${id}-help`;
-  help.dataset.role = "field-help";
-  if (lead) help.appendChild(lead);
-  for (const text of paragraphs) help.appendChild(el("p", "foot-note", text));
-  const btn = buildDisclosure({
-    name: id,
-    detailEl: help,
-    openByDefault: false,
-    memory: fieldInfoOpen,
-    role: "field-info",
-    label: `More about ${label}`,
-  });
-  return { btn, help };
+/** The bar: dot + status line | Discard | Save, one row (kit.css). Never
+ * built read-only. */
+function buildSaveBar() {
+  const bar = el("div", "savebar");
+  bar.hidden = true; // markDirty() decides
+  bar.dataset.role = "save-bar";
+  bar.setAttribute("role", "region");
+  bar.setAttribute("aria-label", "Unsaved settings");
+  const msgWrap = el("div", "m");
+  const dot = el("span", "dot");
+  dot.setAttribute("aria-hidden", "true");
+  els.saveMsg = el("p", "savebar-msg", UNSAVED_TEXT);
+  els.saveMsg.dataset.role = "save-status";
+  els.saveMsg.setAttribute("role", "status");
+  msgWrap.append(dot, els.saveMsg);
+  const discardBtn = el("button", "btn ghost", "Discard changes");
+  discardBtn.type = "button";
+  discardBtn.dataset.role = "settings-discard";
+  discardBtn.addEventListener("click", discardDrafts);
+  els.saveBtn = el("button", "btn pri", "Save changes");
+  els.saveBtn.type = "button";
+  els.saveBtn.dataset.role = "settings-save";
+  els.saveBtn.addEventListener("click", saveDrafts);
+  bar.append(msgWrap, discardBtn, els.saveBtn);
+  els.saveBar = bar;
+  return bar;
 }
 
 // ---------------------------------------------------------------------
-// One field. Pinned rows (env / env-only) are plain text; everything else
-// is a text input, a segmented group or the event checkboxes, each with a
-// state chip, its timing text behind the (i) and a Reset button for a
-// stored value.
+// Fields and cards
 // ---------------------------------------------------------------------
 
 function draftValue(key) {
@@ -452,21 +401,6 @@ function draftValue(key) {
 function setDraft(key, draft) {
   drafts[key] = draft;
   markDirty();
-}
-
-/** The timing line that opens a field's (i) block. */
-function buildCaption(entry) {
-  const caption = el("p", "foot-note", appliesText(entry.applies));
-  caption.dataset.role = "field-caption";
-  return caption;
-}
-
-function buildChip(entry) {
-  const chip = fieldChip(entry);
-  const node = el("span", `chip chip-${chip.kind}`, chip.text);
-  node.dataset.role = "field-chip";
-  node.dataset.chip = chip.kind;
-  return node;
 }
 
 /** The saved or drafted value of `key` as the form currently shows it. */
@@ -484,309 +418,250 @@ function paintGcWarn() {
   els.gcWarn.hidden = !gcRiskActive(currentValue("sweep_include_cached"), currentValue("auto_gc"));
 }
 
-function buildResetButton(entry, onReset) {
-  const resetBtn = el("button", "btn ghost sm field-reset", "Reset");
-  resetBtn.type = "button";
-  resetBtn.dataset.role = "field-reset";
-  resetBtn.hidden = !canReset(entry) || readonly();
-  resetBtn.addEventListener("click", () => {
-    onReset();
-    setDraft(entry.key, { reset: true });
+function buildField(entry) {
+  return createSettingsField(entry, {
+    readonly: readonly(),
+    draftValue: draftValue(entry.key),
+    onDraft: (draft) => setDraft(entry.key, draft),
+    memory: fieldInfoOpen,
   });
-  return resetBtn;
 }
 
-/** Plain text for an env-pinned or env-only row (Q1/Q2): no input. */
-function buildPinnedBody(field, entry) {
-  const value = el("p", "setting-value", displayValue(entry));
-  value.dataset.role = "setting-value";
-  const note = el("p", "foot-note", envNote(entry));
-  note.dataset.role = "env-note";
-  field.append(value, note);
-  const shadow = shadowNote(entry);
-  if (shadow) {
-    const s = el("p", "foot-note", shadow);
-    s.dataset.role = "shadow-note";
-    field.append(s);
-  }
+/** One field card: an optional h3 title, then its content nodes. */
+function fcard(title, ...nodes) {
+  const card = el("div", "fcard");
+  if (title) card.appendChild(el("h3", null, title));
+  card.append(...nodes);
+  return card;
 }
 
-function buildTextBody(field, entry, meta, fieldId) {
-  const input = document.createElement("input");
-  input.id = fieldId;
-  input.className = "inp txt";
-  input.type = "text";
-  input.autocomplete = "off";
-  input.spellcheck = false;
-  if (meta.placeholder) input.placeholder = meta.placeholder;
-  input.value = effectiveAsInputValue(entry);
-  input.disabled = readonly();
-  input.addEventListener("input", () => setDraft(entry.key, { value: input.value }));
-  field.append(input);
-  field.append(
-    buildResetButton(entry, () => {
-      input.value = effectiveAsInputValue({ ...entry, effective: entry.fallback });
-    }),
-  );
+/** The auto-fit field grid (kit `.fg`) for a list of rows. */
+function buildFieldGrid(rows, extra = []) {
+  const grid = el("div", "fg");
+  for (const entry of rows) grid.appendChild(buildField(entry));
+  grid.append(...extra);
+  return grid;
 }
 
-function buildSegsBody(field, entry, meta, labelId) {
-  const segs = el("div", "segs");
-  segs.setAttribute("role", "group");
-  segs.setAttribute("aria-labelledby", labelId);
-  const current = draftValue(entry.key) ?? String(entry.effective);
-  const buttons = [];
-  const press = (value) => {
-    for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.value === value));
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** The warning triangle of a `.warn` box (decorative). */
+function warnGlyph() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs = {
+    viewBox: "0 0 24 24",
+    width: "16",
+    height: "16",
+    "aria-hidden": "true",
+    focusable: "false",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
   };
-  for (const [value, label] of meta.options) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = label;
-    btn.dataset.value = value;
-    btn.disabled = readonly();
-    btn.addEventListener("click", () => {
-      press(value);
-      setDraft(entry.key, { value });
-    });
-    buttons.push(btn);
-    segs.appendChild(btn);
+  for (const k in attrs) svg.setAttribute(k, attrs[k]);
+  for (const d of ["M12 3l10 18H2z", "M12 10v5", "M12 18h.01"]) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    svg.appendChild(p);
   }
-  press(current);
-  field.append(segs);
-  field.append(buildResetButton(entry, () => press(String(entry.fallback))));
+  return svg;
 }
 
-function buildEventsBody(field, entry, meta) {
-  const selected = new Set(draftValue(entry.key) ?? (Array.isArray(entry.effective) ? entry.effective : []));
-  const checkboxes = [];
-  for (const [value, label] of meta.options) {
-    const row = el("label", "srow");
-    row.style.cursor = "pointer";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = selected.has(value);
-    cb.disabled = readonly();
-    cb.dataset.event = value;
-    cb.addEventListener("change", () => {
-      setDraft(entry.key, { value: checkboxes.filter((c) => c.checked).map((c) => c.dataset.event) });
-    });
-    checkboxes.push(cb);
-    const grow = el("span", "grow");
-    grow.append(el("span", "ttl", label));
-    row.append(cb, grow);
-    field.appendChild(row);
-  }
-  field.append(
-    buildResetButton(entry, () => {
-      const back = new Set(Array.isArray(entry.fallback) ? entry.fallback : []);
-      for (const cb of checkboxes) cb.checked = back.has(cb.dataset.event);
-    }),
-  );
-}
-
-function buildSettingField(entry) {
-  const meta = fieldMeta(entry);
-  const fieldId = `settings-${entry.key}`;
-  const pinned = isPinned(entry);
-  const wide = !pinned && meta.kind === "events";
-  const field = el("div", `field${pinned ? " is-pinned" : ""}${wide ? " field-wide" : ""}`);
-  field.dataset.key = entry.key;
-  const head = el("div", "field-head");
-  let labelEl;
-  if (!pinned && meta.kind === "text") {
-    labelEl = el("label", null, meta.label);
-    labelEl.htmlFor = fieldId;
-  } else {
-    labelEl = el("span", "field-label", meta.label);
-  }
-  labelEl.id = `${fieldId}-label`;
-  head.append(labelEl);
-  field.append(head);
-  if (meta.kind === "events" && !pinned) {
-    field.setAttribute("role", "group");
-    field.setAttribute("aria-labelledby", labelEl.id);
-  }
-  const paragraphs = fieldHelp(entry);
-  let help = null;
-  // Pinned rows are not editable, so they have no timing line; they keep
-  // the (i) only when there is help text.
-  if (!pinned || paragraphs.length > 0) {
-    const d = helpDisclosure(fieldId, paragraphs, meta.label, pinned ? null : buildCaption(entry));
-    head.append(d.btn);
-    help = d.help;
-  }
-  head.append(buildChip(entry));
-  if (pinned) buildPinnedBody(field, entry);
-  else if (meta.kind === "segs" && meta.options) buildSegsBody(field, entry, meta, labelEl.id);
-  else if (meta.kind === "events" && meta.options) buildEventsBody(field, entry, meta);
-  else buildTextBody(field, entry, meta, fieldId);
-  if (help) field.append(help);
-  return field;
+/** A tinted `.warn` box: glyph, then the sentence (and optional (i)). */
+function warnBox(text, info = null) {
+  const box = el("div", "warn");
+  const body = el("div", "wt");
+  const line = el("p", null, text);
+  if (info) line.append(" ", info.btn);
+  body.append(line);
+  if (info) body.append(info.help);
+  box.append(warnGlyph(), body);
+  return box;
 }
 
 // ---------------------------------------------------------------------
 // Sections
 // ---------------------------------------------------------------------
 
-
 /**
- * One settings panel (hidden unless it is the active section). `keys` are
- * the settings keys it carries (nav dot); `summaryText` is the nav item's
- * one-line state. The nav is built from what was registered here.
+ * One settings panel (hidden unless it is the active section): h2 + blurb.
+ * `keys` are the settings keys it carries (nav dot); `summaryText` is the
+ * nav item's one-line state. The nav is built from what was registered here.
  */
 function buildSection(id, { summaryText = "", keys = [] } = {}) {
   const meta = SECTIONS.find((s) => s.id === id);
   const panel = el("section", "settings-panel");
   panel.dataset.section = id;
   panel.hidden = id !== activeSection;
+  const head = el("div", "ph");
   const title = el("h2", "sec-title", meta.title);
   if (id === "about") {
     // Focus target of the rail's version button.
     title.id = "settings-about";
     title.tabIndex = -1;
   }
-  const body = el("div", "sec-body");
-  panel.append(title, el("p", "sec-blurb", meta.blurb), body);
+  head.append(title, el("p", "sec-blurb", meta.blurb));
+  panel.append(head);
   els.panels.set(id, panel);
   els.navInfo.set(id, { summaryText, keys });
-  return { panel, title, body };
+  return { panel, title };
 }
 
-/** The auto-fit field grid for a list of rows. */
-function buildFieldGrid(rows) {
-  const grid = el("div", "fg");
-  for (const entry of rows) grid.appendChild(buildSettingField(entry));
-  return grid;
-}
-
-/** A form section from its placed rows; null when it has none. */
-function buildFormSection(id, rows, extra) {
-  if (rows.length === 0 && !extra) return null;
-  const { panel, body } = buildSection(id, {
+/** A form section with its one card; null when it has nothing to show. */
+function buildFormSection(id, rows, { gridExtra = [], below = [] } = {}) {
+  if (rows.length === 0 && gridExtra.length === 0 && below.length === 0) return null;
+  const { panel } = buildSection(id, {
     summaryText: sectionSummary(id, entryByKey, rows),
     keys: rows.map((e) => e.key),
   });
-  if (extra) body.append(extra);
-  if (rows.length > 0) body.append(buildFieldGrid(rows));
+  const content = [];
+  if (rows.length > 0 || gridExtra.length > 0) content.push(buildFieldGrid(rows, gridExtra));
+  content.push(...below);
+  const card = fcard(CARD_TITLES[id], ...content);
+  card.dataset.group = id;
+  panel.append(card);
   return panel;
 }
 
-/** The "did the last scheduled sweep do anything" line (WP 4d-web), from
- * `GET /v1/schedule` verbatim. Renders nothing while the schedule is
- * unknown. */
-function buildSweepStatusBlock() {
-  const wrap = document.createDocumentFragment();
+/** "Last sweep" as a grid field (WP 4d-web's line, `GET /v1/schedule`
+ * verbatim); nothing while the schedule is unknown. */
+function buildLastSweepField() {
   const statusText = sweepTargetsMessage(state.schedule);
-  if (statusText) {
-    const p = el("p", "foot-note", statusText);
-    p.dataset.role = "sweep-status";
-    wrap.append(p);
-  }
-  return wrap;
+  if (!statusText) return [];
+  const field = el("div", "field");
+  const head = el("div", "lh");
+  head.append(el("span", "lbl", LAST_SWEEP_LABEL));
+  const value = el("p", "val", statusText);
+  value.dataset.role = "sweep-status";
+  field.append(head, value);
+  return [field];
 }
 
 /**
- * The cached-sweep GC-risk warning: one visible sentence, its explanation
- * behind (i). Always built; `paintGcWarn` shows it exactly while
- * "include cached" is on and Auto-GC is not Execute, live from the drafts.
+ * The cached-sweep GC-risk warning: one visible sentence in a `.warn` box
+ * below the Garbage collection grid, its explanation behind (i). Always
+ * built; `paintGcWarn` shows it exactly while "include cached" is on and
+ * Auto-GC is not Execute, live from the drafts.
  */
 function buildGcWarn() {
-  const warn = el("div", "settings-warn");
-  warn.dataset.role = "gc-risk";
-  const head = el("div", "field-head");
-  head.append(el("span", null, CACHED_SWEEP_GC_RISK_SHORT));
   const long = cachedSweepGcRiskWarning({ sweep_cached_gc_risk: true });
-  const d = helpDisclosure("settings-gc-risk", long ? [long] : [], "this warning");
-  head.append(d.btn);
-  warn.append(head, d.help);
+  const info = createInfoDisclosure({
+    id: "settings-gc-risk",
+    label: "this warning",
+    paragraphs: long ? [long] : [],
+    memory: fieldInfoOpen,
+  });
+  const warn = warnBox(CACHED_SWEEP_GC_RISK_SHORT, info);
+  warn.dataset.role = "gc-risk";
   els.gcWarn = warn;
   return warn;
 }
 
-/** Vault & connection: vault name (+ any other row placed here) and the
- * Connection row. Always built. */
+/** Vault & connection: the Identity card (vault name + any other row placed
+ * here) and the Connection card. Always built. */
 function buildVaultSection(rows) {
-  const { panel, body } = buildSection("vault", {
+  const { panel } = buildSection("vault", {
     summaryText: sectionSummary("vault", entryByKey, rows),
     keys: rows.map((e) => e.key),
   });
-  if (rows.length > 0) body.append(buildFieldGrid(rows));
-  body.append(buildConnectionSection());
+  if (rows.length > 0) {
+    const card = fcard(CARD_TITLES.vault, buildFieldGrid(rows));
+    card.dataset.group = "vault";
+    panel.append(card);
+  }
+  panel.append(buildConnectionCard());
   return panel;
 }
 
-/** The Expert panel (null when the API has no expert rows). Reached only
- * while the switch is on. */
+/** The Expert panel (null when the API has no expert rows): vault-core's
+ * apply state, then one card per group. Reached only while the switch is
+ * on. */
 function buildExpertPanel(groups) {
   const all = EXPERT_GROUPS.flatMap((g) => groups[g.id]);
   if (all.length === 0) return null;
-  const { panel, body } = buildSection("expert", {
+  const { panel } = buildSection("expert", {
     summaryText: sectionSummary("expert", entryByKey, all),
     keys: all.map((e) => e.key),
   });
   // D16c: what vault-core reported about the core settings (state only).
   const apply = coreApplyLine(state.settingsResponse.core_apply);
   if (apply) {
-    const line = el("p", apply.warn ? "settings-warn" : "foot-note", apply.text);
+    const line = apply.warn ? warnBox(apply.text) : el("p", "hint", apply.text);
     line.dataset.role = "core-apply";
-    body.appendChild(line);
+    panel.appendChild(line);
   }
   for (const group of EXPERT_GROUPS) {
     const rows = groups[group.id];
     if (rows.length === 0) continue;
-    const sub = el("div", "expert-group");
-    sub.dataset.group = group.id;
-    sub.append(el("h4", "sec", group.title), buildFieldGrid(rows));
-    body.appendChild(sub);
+    const card = fcard(group.title, buildFieldGrid(rows));
+    card.dataset.group = group.id;
+    panel.appendChild(card);
   }
   return panel;
 }
 
-/** Compact layout = below the width where the section nav becomes a sidebar
- * (app.css `min-width:1000px`). No `matchMedia` (tests) = wide. */
-const COMPACT_QUERY = "(max-width: 999.98px)";
-let compactMql = null;
-let compactListening = false;
+// ---------------------------------------------------------------------
+// Expert switch and its placement
+// ---------------------------------------------------------------------
 
-function isCompactLayout() {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-  compactMql = compactMql || window.matchMedia(COMPACT_QUERY);
-  return compactMql.matches === true;
+/** Compact = the Settings container is at most this wide: the SAME number
+ * as kit.css's `@container settings (max-width: 760px)`, which turns the
+ * nav into a strip. Measured on the view root with a ResizeObserver (no
+ * observer, e.g. the node test harness = wide). */
+export const COMPACT_MAX_WIDTH = 760;
+let compact = false;
+let resizeObserver = null;
+
+function observeWidth(section) {
+  if (resizeObserver) resizeObserver.disconnect();
+  resizeObserver = null;
+  if (typeof ResizeObserver !== "function") return;
+  resizeObserver = new ResizeObserver((entries) => {
+    const last = entries[entries.length - 1];
+    const width = last && last.contentRect ? last.contentRect.width : 0;
+    if (width <= 0) return; // detached or not laid out: keep the placement
+    const next = width <= COMPACT_MAX_WIDTH;
+    if (next === compact) return;
+    compact = next;
+    if (mounted()) placeExpertSwitch();
+  });
+  resizeObserver.observe(section);
 }
 
 /** Wide: the switch row sits under the nav. Compact: it is the LAST item of
- * the About section instead (never persistently visible). One DOM node, so
+ * the About panel instead (never persistently visible). One DOM node, so
  * state, ids and listeners stay single. */
 function placeExpertSwitch() {
   const row = els.expertRow;
   if (!row) return;
-  const aboutBody = aboutEls && aboutEls.panel ? aboutEls.panel.querySelector("div.sec-body") : null;
-  if (isCompactLayout() && aboutBody) aboutBody.append(row);
+  const aboutPanel = aboutEls && aboutEls.panel;
+  if (compact && aboutPanel) aboutPanel.append(row);
   else if (els.navEl) els.navEl.append(row);
 }
 
-/** The "Show expert settings" switch row (under the nav, or in About when
- * compact); null without expert rows. */
+/** The "Show expert settings" row (`.exp`: text + small switch); null
+ * without expert rows. */
 function buildExpertSwitch(groups) {
   const all = EXPERT_GROUPS.flatMap((g) => groups[g.id]);
   if (all.length === 0) return null;
-  const row = el("div", "srow expert-switch");
-  const grow = el("span", "grow");
+  const row = el("div", "exp");
+  const tx = el("div", "tx");
   const ttl = el("span", "ttl", "Show expert settings");
   ttl.id = "settings-expert-switch-label";
-  grow.append(ttl, el("span", "desc", "Bandwidth and connections, housekeeping and debug settings."));
-  const dot = el("span", "sec-dirty");
+  tx.append(ttl, el("small", null, "Bandwidth and connections, housekeeping and debug settings."));
+  const dot = el("span", "dot");
   dot.dataset.role = "expert-dirty";
   dot.hidden = true;
   dot.append(el("span", "sr-only", "(unsaved expert changes)"));
-  const sw = el("button", "toggle");
+  const sw = el("button", "sw");
   sw.type = "button";
   sw.dataset.role = "expert-switch";
   sw.setAttribute("role", "switch");
   sw.setAttribute("aria-labelledby", ttl.id);
   sw.setAttribute("aria-checked", String(expertOn));
-  row.append(grow, dot, sw);
+  row.append(tx, dot, sw);
   els.dots.set("expert-switch", dot);
   els.sectionKeys.set("expert-switch", new Set(all.map((e) => e.key)));
   sw.addEventListener("click", () => {
@@ -814,6 +689,11 @@ function selectSection(id) {
     if (nid === id) item.setAttribute("aria-current", "true");
     else item.removeAttribute("aria-current");
   }
+  // Compact: the nav is a scrolling strip; keep the chosen item in it.
+  const current = els.navItems.get(id);
+  if (compact && current && typeof current.scrollIntoView === "function") {
+    current.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
 }
 
 function onNavKey(ev) {
@@ -826,8 +706,8 @@ function onNavKey(ev) {
   els.navItems.get(next).focus();
 }
 
-/** The section nav: one button per built panel (Expert only while the
- * switch is on), then the expert switch row. */
+/** The section nav: one flat item per built panel (Expert only while the
+ * switch is on): label, unsaved dot, state on the right. */
 function buildNav() {
   const nav = el("nav", "snav");
   nav.setAttribute("aria-label", "Settings sections");
@@ -840,19 +720,19 @@ function buildNav() {
     item.type = "button";
     item.dataset.nav = meta.id;
     item.append(el("span", "snav-label", meta.nav));
-    if (info.summaryText) {
-      const st = el("span", "snav-state", info.summaryText);
-      st.dataset.role = "section-state";
-      item.append(st);
-    }
     if (info.keys.length > 0) {
-      const dot = el("span", "sec-dirty");
+      const dot = el("span", "dot");
       dot.dataset.role = "section-dirty";
       dot.hidden = true;
       dot.append(el("span", "sr-only", "(unsaved changes)"));
       item.append(dot);
       els.dots.set(meta.id, dot);
       els.sectionKeys.set(meta.id, new Set(info.keys));
+    }
+    if (info.summaryText) {
+      const st = el("span", "snav-state", info.summaryText);
+      st.dataset.role = "section-state";
+      item.append(st);
     }
     if (meta.id === "expert") item.hidden = !expertOn;
     item.addEventListener("click", () => selectSection(meta.id));
@@ -866,23 +746,24 @@ function buildNav() {
 }
 
 // ---------------------------------------------------------------------
-// Steam identity section (WP 4a.6r relay)
+// Steam (WP 4a.6r relay, WP WEB-FEAT-1 library SteamID64)
 // ---------------------------------------------------------------------
 
 function renderSteamStatusLine() {
-  const { statusLine, removeBtn } = els.steam;
-  if (state.steamStatus.configured) {
-    statusLine.textContent = `Relay key configured (••••${state.steamStatus.key_last4}).`;
-    removeBtn.hidden = false;
-  } else {
-    statusLine.textContent = NO_STEAM_KEY_MESSAGE;
-    removeBtn.hidden = true;
-  }
+  const { statusRow, removeBtn } = els.steam;
+  const pill = state.steamStatus.configured
+    ? createPill({ kind: "cached", text: `Relay key configured (••••${state.steamStatus.key_last4}).`, tone: "ok" })
+    : createPill({ kind: "notinuse", text: NO_STEAM_KEY_MESSAGE, tone: null });
+  pill.dataset.role = "steam-status";
+  statusRow.replaceChildren(pill);
+  removeBtn.hidden = !state.steamStatus.configured;
 }
 
 function renderLookupResult() {
   const { lookupBody } = els.steam;
   lookupBody.replaceChildren();
+  // Empty = hidden, so the card keeps no gap for it.
+  lookupBody.hidden = !state.lookup;
   if (!state.lookup) return;
   if (state.lookup.error) {
     lookupBody.appendChild(el("p", "errline", state.lookup.error));
@@ -890,15 +771,11 @@ function renderLookupResult() {
   }
   if (state.lookup.persona) {
     lookupBody.appendChild(
-      el(
-        "p",
-        "foot-note",
-        `Signed in as ${state.lookup.persona.personaname} · SteamID64 ${state.lookup.persona.steamid}`,
-      ),
+      el("p", "hint", `Signed in as ${state.lookup.persona.personaname} · SteamID64 ${state.lookup.persona.steamid}`),
     );
   }
-  lookupBody.appendChild(el("p", "foot-note", `${state.lookup.gameCount} games found.`));
-  if (state.lookup.gameCount === 0) lookupBody.appendChild(el("p", "foot-note", PRIVATE_PROFILE_MESSAGE));
+  lookupBody.appendChild(el("p", "hint", `${state.lookup.gameCount} games found.`));
+  if (state.lookup.gameCount === 0) lookupBody.appendChild(el("p", "hint", PRIVATE_PROFILE_MESSAGE));
   const list = el("ul", "bullets");
   for (const g of state.lookup.preview) {
     list.appendChild(el("li", null, g.name));
@@ -911,32 +788,32 @@ const STEAM_IDENTITY_HELP =
 const STEAM_LIBRARY_HELP =
   "The Library lists every game this SteamID64 owns, on every device that uses this vault. Leave it blank and save to list only the games the vault knows.";
 
-function buildSteamSection() {
-  const wrap = document.createDocumentFragment();
-  // D16a-2: the explanation sits behind (i); the status line below is state.
-  const steamHelp = helpDisclosure("settings-steam-identity", [STEAM_IDENTITY_HELP], "Steam identity");
-  const steamHead = el("h4", "sec", "Steam identity");
-  steamHead.append(steamHelp.btn);
-  wrap.append(steamHead, steamHelp.help);
-
-  const statusLine = el("p", "foot-note", "");
+/** The Steam identity card: relay status pill above, then the key field
+ * (input + Save key [primary] + Remove key on one row). */
+function buildSteamIdentityCard() {
+  const statusRow = el("div", "pillrow");
 
   const keyField = el("div", "field");
+  const keyHead = el("div", "lh");
   const keyLabel = el("label", null, "Web API key (32 hex characters)");
   keyLabel.htmlFor = "settings-steam-key";
-  keyField.append(keyLabel);
-  const keyInput = document.createElement("input");
+  const keyInfo = createInfoDisclosure({
+    id: "settings-steam-identity",
+    label: "the Steam Web API key",
+    paragraphs: [STEAM_IDENTITY_HELP],
+    memory: fieldInfoOpen,
+  });
+  keyHead.append(keyLabel, keyInfo.btn);
+  const keyInput = el("input", "in mono");
   keyInput.id = "settings-steam-key";
-  keyInput.className = "inp txt";
   keyInput.type = "password";
   keyInput.autocomplete = "off";
   keyInput.spellcheck = false;
   keyInput.placeholder = "from steamcommunity.com/dev/apikey";
-  keyField.appendChild(keyInput);
 
-  const saveBtn = el("button", "btn sm", "Save key");
+  const saveBtn = el("button", "btn pri", "Save key");
   saveBtn.type = "button";
-  const removeBtn = el("button", "btn ghost sm", "Remove key");
+  const removeBtn = el("button", "btn ghost", "Remove key");
   removeBtn.type = "button";
   const keyErr = el("p", "errline");
   keyErr.hidden = true;
@@ -971,93 +848,119 @@ function buildSteamSection() {
     }
   });
 
-  const keyRow = document.createElement("div");
-  keyRow.style.display = "flex";
-  keyRow.style.gap = "8px";
-  keyRow.append(saveBtn, removeBtn);
-  wrap.append(keyField, keyRow, keyErr, statusLine);
+  const row = el("div", "irow");
+  row.append(keyInput, saveBtn, removeBtn);
+  keyField.append(keyHead, row, keyInfo.help);
 
-  wrap.append(buildSteamLibraryBlock());
-  els.steam = { ...els.steam, statusLine, removeBtn };
-  return wrap;
+  els.steam = { ...els.steam, statusRow, removeBtn };
+  const card = fcard(CARD_TITLES.steamIdentity, statusRow, keyField, keyErr);
+  card.dataset.group = "steam-identity";
+  return card;
 }
 
 /**
- * The library SteamID64 (WP WEB-FEAT-1): input pre-filled from the
- * `steam_library_steamid` setting, "Save" (its own PATCH, independent of the
- * shared Save bar above, like "Save key"), and "Preview" for the typed id.
- * Saving never rebuilds the rest of the form, so unsaved drafts elsewhere
- * on the screen survive it.
+ * The Steam library card (WP WEB-FEAT-1): the SteamID64 input pre-filled
+ * from the `steam_library_steamid` setting, then "Save SteamID64" (its own
+ * PATCH, independent of the shared save bar, like "Save key"), "Preview"
+ * for the typed id and "Reset" on the same row. Saving never rebuilds the
+ * rest of the form, so unsaved drafts elsewhere on the screen survive it.
  */
-function buildSteamLibraryBlock() {
-  const wrap = document.createDocumentFragment();
-  const libHelp = helpDisclosure("settings-steam-library", [STEAM_LIBRARY_HELP], "Steam library");
-  const libHead = el("h4", "sec", "Steam library");
-  libHead.append(libHelp.btn);
-  wrap.append(libHead, libHelp.help);
+function buildSteamLibraryCard() {
   const entry = entryByKey(STEAM_LIBRARY_SETTING_KEY);
-  const readonly = state.settingsResponse.readonly;
-  // D16-WEB (Q1): set via env -> plain text, no input, no Save/Reset;
-  // Preview still checks the pinned id.
+  const ro = state.settingsResponse.readonly;
+  // D16-WEB (Q1): set via env -> a disabled input with the env note behind
+  // (i), no Save/Reset; Preview still checks the pinned id.
   const pinned = !!entry && isPinned(entry);
 
-  const idField = el("div", pinned ? "field is-pinned" : "field");
-  let idInput = null;
+  const idField = el("div", "field");
+  const head = el("div", "lh");
+  const idLabel = el("label", null, "SteamID64");
+  idLabel.htmlFor = "settings-steam-steamid";
+  // The timing line (or, pinned, the env note) opens the (i) block, like
+  // every other field's; with no setting on the server it is shown below
+  // the row instead, because it explains why Save is missing.
+  const caption = el("p");
+  caption.dataset.role = "steamid-caption";
+  const lead = [];
   if (pinned) {
-    idField.append(el("span", "field-label", "SteamID64"));
-    buildPinnedBody(idField, entry);
+    const note = el("p", null, envNote(entry));
+    note.dataset.role = "env-note";
+    lead.push(note);
+    const shadow = shadowNote(entry);
+    if (shadow) {
+      const s = el("p", null, shadow);
+      s.dataset.role = "shadow-note";
+      lead.push(s);
+    }
+  }
+  const info = createInfoDisclosure({
+    id: "settings-steam-library",
+    label: "SteamID64",
+    paragraphs: [STEAM_LIBRARY_HELP],
+    lead,
+    memory: fieldInfoOpen,
+  });
+  head.append(idLabel, info.btn);
+  if (entry) head.append(createFieldChip(entry));
+
+  const idInput = el("input", "in mono");
+  idInput.id = "settings-steam-steamid";
+  idInput.type = "text";
+  idInput.inputMode = "numeric";
+  idInput.autocomplete = "off";
+  idInput.spellcheck = false;
+  idInput.placeholder = "76561198042117903";
+  if (pinned) {
+    idInput.disabled = true;
+    idInput.value = displayValue(entry);
+    idInput.dataset.role = "setting-value";
   } else {
-    const idLabel = el("label", null, "SteamID64");
-    idLabel.htmlFor = "settings-steam-steamid";
-    idField.append(idLabel);
-    idInput = document.createElement("input");
-    idInput.id = "settings-steam-steamid";
-    idInput.className = "inp txt";
-    idInput.type = "text";
-    idInput.inputMode = "numeric";
-    idInput.autocomplete = "off";
-    idInput.spellcheck = false;
-    idInput.placeholder = "76561198042117903";
-    idInput.value = entry ? effectiveAsInputValue(entry) : "";
     // Never disabled: Preview checks whatever is typed, and must work on a
     // read-only vault and on an older vault-api without this setting too.
     // Only Save/Reset are gated (WEB-FEAT-1 review S3).
-    idField.appendChild(idInput);
+    idInput.value = entry ? effectiveAsInputValue(entry) : "";
   }
-  const typedId = () => (idInput ? idInput.value.trim() : String((entry && entry.effective) || "").trim());
-  const caption = el("p", "foot-note");
-  caption.dataset.role = "steamid-caption";
-  idField.appendChild(caption);
+  const typedId = () => (pinned ? String((entry && entry.effective) || "").trim() : idInput.value.trim());
   const idErr = el("p", "errline");
   idErr.dataset.role = "steamid-error";
   idErr.hidden = true;
 
-  const saveBtn = el("button", "btn sm", "Save SteamID64");
+  const saveBtn = el("button", "btn pri", "Save SteamID64");
   saveBtn.type = "button";
   saveBtn.dataset.role = "steamid-save";
-  saveBtn.hidden = readonly || !entry || pinned;
-  const resetBtn = el("button", "btn ghost sm", "Reset");
+  saveBtn.hidden = ro || !entry || pinned;
+  const lookupBtn = el("button", "btn", "Preview");
+  lookupBtn.type = "button";
+  lookupBtn.dataset.role = "steamid-preview";
+  const resetBtn = el("button", "btn ghost", "Reset");
   resetBtn.type = "button";
   resetBtn.dataset.role = "steamid-reset";
   resetBtn.title = "Remove the override — back to the environment or default value";
-  const lookupBtn = el("button", "btn ghost sm", "Preview");
-  lookupBtn.type = "button";
-  lookupBtn.dataset.role = "steamid-preview";
-  const lookupBody = document.createElement("div");
+  const lookupBody = el("div", "lookup");
+  const visibleCaption = el("div", "capslot");
 
   function paintCaption() {
     const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
     if (pinned) {
       caption.hidden = true;
+      visibleCaption.hidden = true;
       resetBtn.hidden = true;
       return;
     }
-    caption.textContent = current
-      ? `${sourceLabel(current.source)} · ${appliesText(current.applies)}`
-      : `${LIBRARY_SETTING_ABSENT_MESSAGE} Preview still works.`;
+    if (current) {
+      caption.className = "";
+      caption.textContent = `${sourceLabel(current.source)} · ${appliesText(current.applies)}`;
+      if (caption.parentNode !== info.help) info.help.insertBefore(caption, info.help.firstChild);
+      visibleCaption.hidden = true;
+    } else {
+      caption.className = "hint";
+      caption.textContent = `${LIBRARY_SETTING_ABSENT_MESSAGE} Preview still works.`;
+      visibleCaption.replaceChildren(caption);
+      visibleCaption.hidden = false;
+    }
     // Same rule as every other setting's Reset (settings-presentation.js's
     // canReset): only a `db` override has anything to clear.
-    resetBtn.hidden = readonly || !current || !canReset(current);
+    resetBtn.hidden = ro || !current || !canReset(current);
   }
   paintCaption();
 
@@ -1068,7 +971,7 @@ function buildSteamLibraryBlock() {
 
   saveBtn.addEventListener("click", async () => {
     showIdError(null);
-    if (!idInput) return;
+    if (pinned) return;
     const typed = idInput.value.trim();
     // Shared with onboarding step 2 (WP WEB-FEAT-2): validation, the same
     // body builder as the shared Save bar (only a real change is sent, the
@@ -1107,7 +1010,7 @@ function buildSteamLibraryBlock() {
     try {
       state.settingsResponse = await api.patchSettings(body);
       const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
-      if (idInput) idInput.value = current ? effectiveAsInputValue(current) : "";
+      idInput.value = current ? effectiveAsInputValue(current) : "";
       paintCaption();
       showToast("Library SteamID64 reset.");
     } catch (err) {
@@ -1146,30 +1049,30 @@ function buildSteamLibraryBlock() {
     }
   });
 
-  const row = el("div", "btnrow");
-  row.append(saveBtn, resetBtn, lookupBtn);
-  wrap.append(idField, row, idErr, lookupBody);
+  const row = el("div", "irow");
+  row.append(idInput, saveBtn, lookupBtn, resetBtn);
+  idField.append(head, row, info.help, visibleCaption);
 
   els.steam = { ...els.steam, lookupBody };
-  return wrap;
+  const card = fcard(CARD_TITLES.steamLibrary, idField, idErr, lookupBody);
+  card.dataset.group = "steam-library";
+  return card;
 }
 
 // ---------------------------------------------------------------------
-// Connection + About sections
+// Connection
 // ---------------------------------------------------------------------
 
 /**
- * Connection section — the ONLY manual way back into the connect flow, so
+ * The Connection card — the ONLY manual way back into the connect flow, so
  * (WP WEB-FIX-1, B2) it renders in the load-error state too, not just under
  * a successful `GET /v1/settings` (a 401 from a rotated key is exactly when
  * it is needed). In demo mode (B1) it says so, in plain words, and offers
  * the connect action instead of a "reconnect" that would suggest a vault
- * is already attached — until this WP nothing in the UI ever cleared the
- * demo flag, so this was the door out of a one-way room.
+ * is already attached.
  */
-function buildConnectionSection() {
-  const wrap = document.createDocumentFragment();
-  wrap.append(el("h4", "sec", "Connection"));
+function buildConnectionCard() {
+  const nodes = [];
   const demo = isDemoMode();
   if (demo) {
     const notice = el(
@@ -1178,27 +1081,29 @@ function buildConnectionSection() {
       "Demo mode — every screen shows built-in sample data, not a vault. Connect to a vault to manage a real cache.",
     );
     notice.dataset.role = "demo-notice";
-    wrap.append(notice);
+    nodes.push(notice);
   }
-  const row = el("div", "srow");
-  const grow = el("span", "grow");
-  grow.append(
-    el("span", "ttl", demo ? "Connect to a vault" : "Reconnect / switch account"),
+  const row = el("div", "act");
+  const text = el("div");
+  text.append(
+    el("b", null, demo ? "Connect to a vault" : "Reconnect / switch account"),
     el(
       "span",
-      "desc",
+      null,
       demo
         ? "Enter your vault's API key to leave demo mode."
         : "Run the first-launch flow again to change the vault API key or the Steam relay identity.",
     ),
   );
-  const btn = el("button", "btn ghost sm", demo ? "Connect" : "Start");
+  const btn = el("button", "btn", demo ? "Connect" : "Start");
   btn.type = "button";
   btn.dataset.role = "connect";
   btn.addEventListener("click", () => openOnboarding({ mode: "reconnect" }));
-  row.append(grow, btn);
-  wrap.append(row);
-  return wrap;
+  row.append(text, btn);
+  nodes.push(row);
+  const card = fcard(CARD_TITLES.connection, ...nodes);
+  card.dataset.group = "connection";
+  return card;
 }
 
 // ---------------------------------------------------------------------
@@ -1282,15 +1187,18 @@ async function loadAbout({ announce = false } = {}) {
   if (announce && aboutEls) aboutEls.status.textContent = aboutAnnouncement();
 }
 
-/** One status cell: the badge pattern of the clients sheet — glyph
+/** about-view.js tone -> kit pill tone: OK green, Unreachable red, every
+ * other state the neutral pill (never red for "not reported"). */
+const ABOUT_PILL_TONE = Object.freeze({ "tx-cached": "ok", "tx-error": "danger" });
+
+/** One status cell: a kit pill wrapping the status icon; the glyph is
  * aria-hidden, the visible word is the accessible text. */
-function buildStatusBadge(view) {
-  const badge = el("span", `badge ${view.statusTone}`);
-  badge.dataset.role = "about-status";
-  const icon = createStatusIcon(view.statusIcon, { size: "sm" });
-  icon.setAttribute("aria-hidden", "true");
-  badge.append(icon, el("span", null, view.statusWord));
-  return badge;
+function buildStatusPill(view) {
+  const pill = createPill({ kind: view.statusIcon, text: view.statusWord, tone: ABOUT_PILL_TONE[view.statusTone] ?? null });
+  pill.dataset.role = "about-status";
+  const icon = pill.querySelector(".sic");
+  if (icon) icon.setAttribute("aria-hidden", "true");
+  return pill;
 }
 
 function cellWithTitle(tag, className, cell) {
@@ -1312,20 +1220,59 @@ function aboutInfoId(name) {
   return "about-info-" + name.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
 }
 
+/** The (i) glyph of the About rows: a 24-unit outline circle with an "i",
+ * stroked in currentColor, decorative (the button carries the name). */
+function infoGlyph() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs = {
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true",
+    focusable: "false",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+  };
+  for (const k in attrs) svg.setAttribute(k, attrs[k]);
+  const parts = [
+    ["circle", { cx: "12", cy: "12", r: "9" }],
+    ["path", { d: "M12 11v6" }],
+    ["path", { d: "M12 7.5v.01" }],
+  ];
+  for (const [tag, a] of parts) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k in a) node.setAttribute(k, a[k]);
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
 /**
- * The per-row (i) disclosure (WP WEB-FIX-8). Until the user chooses, a
- * "Check" row starts open (its reason must not hide behind the (i)) and
- * every other row collapsed; the choice survives a Refresh.
+ * The per-row (i) disclosure (WP WEB-FIX-8): a native <button> with
+ * aria-expanded + aria-controls flipping `hidden` on the details row. Until
+ * the user chooses, a "Check" row starts open (its reason must not hide
+ * behind the (i)) and every other row collapsed; the choice survives a
+ * Refresh.
  */
 function buildInfoButton(name, detailRow, openByDefault) {
-  return buildDisclosure({
-    name,
-    detailEl: detailRow,
-    openByDefault,
-    memory: aboutInfoOpen,
-    role: "about-info",
-    label: `Details for ${name}`,
+  const btn = el("button", "about-info-btn");
+  btn.type = "button";
+  btn.dataset.role = "about-info";
+  btn.setAttribute("aria-label", `Details for ${name}`);
+  btn.setAttribute("aria-controls", detailRow.id);
+  btn.appendChild(infoGlyph());
+  const isOpen = () => (aboutInfoOpen.has(name) ? aboutInfoOpen.get(name) : openByDefault);
+  const apply = (open) => {
+    btn.setAttribute("aria-expanded", String(open));
+    detailRow.hidden = !open;
+  };
+  apply(isOpen());
+  btn.addEventListener("click", () => {
+    const open = !isOpen();
+    aboutInfoOpen.set(name, open);
+    apply(open);
   });
+  return btn;
 }
 
 /**
@@ -1374,7 +1321,7 @@ function buildAboutTable(components) {
     const statusCell = el("td", "about-status");
     statusCell.setAttribute("role", "cell");
     statusCell.dataset.label = "Status";
-    statusCell.appendChild(buildStatusBadge(view));
+    statusCell.appendChild(buildStatusPill(view));
     tr.append(nameCell, versionCell, commitCell, statusCell);
     tbody.appendChild(tr);
 
@@ -1388,11 +1335,11 @@ function buildAboutTable(components) {
       const td = el("td");
       td.setAttribute("role", "cell");
       td.colSpan = 4;
-      if (view.note) td.appendChild(el("p", "foot-note", view.note));
-      if (view.dashNote) td.appendChild(el("p", "foot-note", view.dashNote));
+      if (view.note) td.appendChild(el("p", "hint", view.note));
+      if (view.dashNote) td.appendChild(el("p", "hint", view.dashNote));
       // Server text, rendered with textContent (el() never parses markup).
       if (view.detail) {
-        const d = el("p", "foot-note", view.detail);
+        const d = el("p", "hint", view.detail);
         d.dataset.role = "about-detail";
         td.appendChild(d);
       }
@@ -1437,36 +1384,45 @@ function paintAbout() {
   paintAboutChecked();
 }
 
+/** The About panel: one card whose head row has the "Checked …" line on
+ * the left and Refresh on the right, then the table and the trademark
+ * note. */
 function buildAboutSection() {
   // Its heading is the focus target of the rail's version button
   // (fullRender selects this section first).
-  const { panel, title: heading, body: wrap } = buildSection("about");
+  const { panel, title: heading } = buildSection("about");
 
   const head = el("div", "about-head");
-  const refreshBtn = el("button", "btn ghost sm", "Refresh");
+  const left = el("div", "about-head-text");
+  const checked = el("p", "hint");
+  checked.dataset.role = "about-checked";
+  // The one live region of this section: written only by a Refresh click.
+  const status = el("p", "hint about-status-line");
+  status.setAttribute("role", "status");
+  status.dataset.role = "about-refresh-status";
+  left.append(checked, status);
+  const refreshBtn = el("button", "btn sm", "Refresh");
   refreshBtn.type = "button";
   refreshBtn.dataset.role = "about-refresh";
   refreshBtn.addEventListener("click", () => {
     if (refreshBtn.getAttribute("aria-disabled") === "true") return;
     loadAbout({ announce: true });
   });
-  // The one live region of this section: written only by a Refresh click.
-  const status = el("span", "foot-note about-status-line");
-  status.setAttribute("role", "status");
-  status.dataset.role = "about-refresh-status";
-  head.append(refreshBtn, status);
+  head.append(left, refreshBtn);
 
   const content = el("div", "about-content");
-  const checked = el("p", "foot-note");
-  checked.dataset.role = "about-checked";
-  wrap.append(head, content, checked);
-  wrap.append(
+  const card = fcard(
+    null,
+    head,
+    content,
     el(
       "p",
       "hint",
       "SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.",
     ),
   );
+  card.dataset.group = "about";
+  panel.append(card);
   aboutEls = { heading, panel, refreshBtn, status, content, checked };
   setRefreshBusy(about.phase === "loading");
   paintAbout();
@@ -1514,7 +1470,7 @@ function fullRender() {
     // WP WEB-FIX-1 (B2): the reconnect entry must survive a failed load —
     // before this line the early return hid the one control that fixes the
     // most likely cause (a 401 from a rotated key).
-    els.body.append(buildConnectionSection());
+    els.body.append(buildConnectionCard());
     focusAboutOnRender = false; // no About section in the error state
     return;
   }
@@ -1536,20 +1492,19 @@ function fullRender() {
   const placed = placeEntries(state.settingsResponse.settings);
   const main = el("div", "settings-main");
   main.append(buildVaultSection(placed.sections.vault));
-  for (const [id, extra] of [
-    ["window", buildSweepStatusBlock()],
-    ["disk", buildGcWarn()],
-    ["notify", null],
-    ["other", null],
-  ]) {
-    // A fragment with no children counts as "nothing extra".
-    const hasExtra = extra && (extra.childNodes ? extra.childNodes.length > 0 : true);
-    const node = buildFormSection(id, placed.sections[id], hasExtra ? extra : null);
+  const sections = [
+    ["window", { gridExtra: buildLastSweepField() }],
+    ["disk", { below: [buildGcWarn()] }],
+    ["notify", {}],
+    ["other", {}],
+  ];
+  for (const [id, extra] of sections) {
+    const node = buildFormSection(id, placed.sections[id], extra);
     if (node) main.append(node);
   }
 
   const steam = buildSection("steam", { summaryText: sectionSummary("steam", entryByKey) });
-  steam.body.append(buildSteamSection());
+  steam.panel.append(buildSteamIdentityCard(), buildSteamLibraryCard());
   main.append(steam.panel);
   renderSteamStatusLine();
   renderLookupResult();
@@ -1559,44 +1514,18 @@ function fullRender() {
   const expertPanel = buildExpertPanel(placed.expert);
   if (expertPanel) main.append(expertPanel);
 
+  // WP WEB-FIX-8 / SETTINGS-2: the save bar is the last node of the right
+  // column (so the last in the Tab order, after every field incl. the
+  // Expert section) and sticks to the bottom of the viewport while the
+  // column is in view. Never built read-only.
+  if (!state.settingsResponse.readonly) main.append(buildSaveBar());
+
   const lay = el("div", "settings-lay");
   buildExpertSwitch(placed.expert);
   lay.append(buildNav(), main);
   placeExpertSwitch();
-  // Re-place when the viewport crosses the breakpoint (one listener).
-  if (!compactListening && compactMql && compactMql.addEventListener) {
-    compactMql.addEventListener("change", () => { if (mounted()) placeExpertSwitch(); });
-    compactListening = true;
-  }
   els.body.append(lay);
   selectSection(els.panels.has(activeSection) ? activeSection : DEFAULT_SECTION);
-
-  // WP WEB-FIX-8: the save bar sits last in the DOM (and so in the
-  // Tab order), after every field incl. the Expert section, but is `position:fixed`
-  // above the bottom nav (app.css "Settings save bar"), so it is visible
-  // without scrolling while anything is dirty. Never built read-only.
-  if (!state.settingsResponse.readonly) {
-    els.saveBar = el("div", "savebar");
-    els.saveBar.hidden = true; // markDirty() below decides
-    els.saveBar.dataset.role = "save-bar";
-    els.saveBar.setAttribute("role", "region");
-    els.saveBar.setAttribute("aria-label", "Unsaved settings");
-    els.saveMsg = el("p", "savebar-msg", UNSAVED_TEXT);
-    els.saveMsg.dataset.role = "save-status";
-    els.saveMsg.setAttribute("role", "status");
-    const btns = el("div", "onbnav");
-    const discardBtn = el("button", "btn ghost wide", "Discard changes");
-    discardBtn.type = "button";
-    discardBtn.dataset.role = "settings-discard";
-    discardBtn.addEventListener("click", discardDrafts);
-    els.saveBtn = el("button", "btn primary wide", "Save changes");
-    els.saveBtn.type = "button";
-    els.saveBtn.dataset.role = "settings-save";
-    els.saveBtn.addEventListener("click", saveDrafts);
-    btns.append(discardBtn, els.saveBtn);
-    els.saveBar.append(els.saveMsg, btns);
-    els.body.appendChild(els.saveBar);
-  }
   markDirty();
 
   if (focusAboutOnRender) {
@@ -1612,30 +1541,18 @@ async function loadSettings() {
   fullRender();
   try {
     // WP 4d-web review fix (S1): GET /v1/schedule joins this SAME
-    // Promise.all with its own `.catch(() => null)`, rather than a second
-    // `await` chained after this whole block settles. Chaining it after
-    // used to gate first paint of the ENTIRE screen (including the readonly
-    // banner and even a "Could not load settings" error) on a THIRD round
-    // trip that api.js itself documents has no client-side timeout — a
-    // stalled /v1/schedule left the screen on the loading skeleton
-    // indefinitely, with no error at all, exactly the outcome this
-    // function's error handling exists to avoid. Catching it INSIDE the
-    // array (not letting it reject the whole Promise.all) keeps both the
-    // parallelism and the independent failure: a schedule failure still
-    // never turns into "Could not load settings" for the rest of the
-    // screen — it only means buildSweepStatusBlock() has nothing to show
-    // (sweepTargetsMessage/cachedSweepGcRiskWarning both already treat a
-    // null schedule as "print nothing").
+    // Promise.all with its own `.catch(() => null)`, so a stalled or failed
+    // /v1/schedule never gates the first paint of the screen and never
+    // turns into "Could not load settings" — it only means the "Last sweep"
+    // field has nothing to show.
     const [settingsResponse, steamStatus, schedule] = await Promise.all([
       api.getSettings(),
       api.getSteamKey(),
       api.schedule().catch(() => null),
     ]);
-    // WP WEB-FIX-1 (P2): every section below dereferences `entryByKey(k).key`
-    // unguarded. A response lacking one of the eight keys used to throw
-    // INSIDE fullRender(), after this try/catch had already passed — an
-    // uncaught error and "Loading settings…" on screen forever. Fail into
-    // the same error path a rejected fetch takes, naming the gap.
+    // WP WEB-FIX-1 (P2): a response lacking one of the required keys fails
+    // into the same error path a rejected fetch takes, naming the gap,
+    // instead of throwing inside fullRender() after this try/catch.
     const missing = missingSettingKeys(settingsResponse);
     if (missing.length > 0) {
       throw new Error(`the server's settings response is missing: ${missing.join(", ")}`);
@@ -1659,19 +1576,26 @@ onViewChange((view) => {
   if (view === "settings") return;
   sectionEl = null;
   aboutEls = null;
+  if (resizeObserver) resizeObserver.disconnect();
+  resizeObserver = null;
   // A rail click that navigated here and then away before Settings loaded
   // must not move focus on some later, unrelated visit (review nit).
   focusAboutOnRender = false;
 });
 
 export function renderSettings() {
-  const section = el("section", "view view-settings");
+  // `kit`: this page composes from css/kit.css (ADR-0028, WP SETTINGS-2).
+  const section = el("section", "view view-settings kit");
+  const head = el("div", "page-head");
+  const title = el("div");
   const h1 = el("h1", null, "Settings");
   // Focus target after Save/Discard removed the focused bar (WP WEB-FIX-8);
   // never in the Tab order.
   h1.tabIndex = -1;
-  const body = document.createElement("div");
-  section.append(h1, body);
+  title.append(h1, el("div", "sub", PAGE_SUBLINE));
+  head.append(title);
+  const body = el("div", "settings-body");
+  section.append(head, body);
 
   sectionEl = section;
   els = { section, heading: h1, body };
@@ -1680,6 +1604,7 @@ export function renderSettings() {
   drafts = {};
   activeSection = DEFAULT_SECTION;
   expertOn = readExpertSwitch(getStorage);
+  observeWidth(section);
   loadSettings();
   // WP WEB-FEAT-3: About loads when Settings opens (in parallel with the
   // settings form), never on a timer.

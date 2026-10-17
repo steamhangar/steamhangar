@@ -12,8 +12,8 @@
  *   - Save is aria-disabled while in flight and a second click is ignored;
  *   - Discard hides the bar and restores the field;
  *   - read-only settings never build a bar; demo mode saves the same way.
- * The layout half (fixed above the bottom nav, never under the bulk bar's
- * placement rules) is pinned in css-settings-save-bar.test.js.
+ * The layout half (sticky at the bottom of the right column, WP SETTINGS-2)
+ * is pinned in css-settings-save-bar.test.js.
  *
  * Harness: fake-dom.js, Map-backed localStorage, a routing fetch fake with
  * a gate for the in-flight case. Assertions compare text/booleans/counts.
@@ -149,13 +149,16 @@ test("the bar is a labelled region right after the form, with Discard then Save,
     ["Discard changes", "Save changes"],
     "focus order: Discard, then Save",
   );
-  // Document order of the section headings and the bar (the body's direct
-  // children; every section is appended flat from a fragment).
-  const body = s.children[1];
-  const order = body.children
-    .filter((n) => n.tagName === "H4" || n === b)
-    .map((n) => (n === b ? "BAR" : n.textContent));
-  assert.equal(order[order.indexOf("Webhook") + 1], "BAR", `DOM/Tab order: the bar follows the form it saves (${order.join(", ")})`);
+  // WP SETTINGS-2: the bar is the LAST node of the right column, after
+  // every panel (so after every field in DOM/Tab order).
+  const main = s.querySelectorAll("div").find((d) => d.className === "settings-main");
+  const kids = main.children;
+  assert.equal(kids[kids.length - 1] === b, true, "the bar is the right column's last child");
+  assert.deepEqual(
+    kids.slice(0, -1).map((n) => n.tagName),
+    kids.slice(0, -1).map(() => "SECTION"),
+    "every node before it is a settings panel",
+  );
 });
 
 test("MUTATION TARGET: Save sends one PATCH, then the bar is gone and focus moves from the bar to the page heading", async () => {
@@ -277,13 +280,13 @@ test("read-only settings never build a save bar", async () => {
 test("demo mode: the bar appears on an edit and goes away after the demo PATCH", async () => {
   storage.clear();
   storage.set("steamvault.demoMode", "1");
-  // D16-WEB: the demo pins the vault name via env (plain text), so the
-  // edit goes to another normal-page field.
+  // D16-WEB: the demo pins the vault name via env (a disabled input since
+  // WP SETTINGS-2), so the edit goes to another normal-page field.
   const s = renderSettings();
   dom.appRoot.replaceChildren(s);
   const bypass = () => s.querySelectorAll("input").find((i) => i.id === "settings-bypass_window_days") || null;
   await until(() => bypass() !== null, "demo settings form");
-  assert.equal(nameInput(s) === null, true, "the env-pinned demo vault name has no input");
+  assert.equal(nameInput(s).disabled, true, "the env-pinned demo vault name is a disabled input");
   type(bypass(), "9");
   assert.equal(barShown(s), true);
   bar(s).querySelector('[data-role="settings-save"]').dispatchEvent({ type: "click" });
