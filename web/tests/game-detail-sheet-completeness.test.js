@@ -127,13 +127,14 @@ test("MUTATION TARGET -- header: a partial game shows 'Partially cached N%' with
   withFakeDom(({ buildDetailStatusRow }) => {
     const p = buildDetailStatusRow(row(), "cached");
     assert.match(p.querySelector(".sic").className, /\bk-partial\b/);
-    assert.equal(p.children[1].textContent, "Partially cached 80%");
-    assert.equal(p.children[1].className, "tx-partial");
+    assert.equal(p.textContent, "Partially cached 80%");
+    assert.equal(p.dataset.text, "partial");
+    assert.match(p.className, /\bpill\b/, "WP LIBRARY-2: a kit status pill");
     const u = buildDetailStatusRow(row({ cache_complete_pct: null }), "cached");
     assert.match(u.querySelector(".sic").className, /\bk-unverified\b/);
-    assert.equal(u.children[1].textContent, "Cached · not verified");
+    assert.equal(u.textContent, "Cached · not verified");
     const c = buildDetailStatusRow(row({ cache_complete_pct: 100 }), "cached");
-    assert.equal(c.children[1].textContent, "Current");
+    assert.equal(c.textContent, "Current");
   }));
 
 test("MUTATION TARGET -- wiring: render() builds the block after the facts with the current Verify ids", () => {

@@ -142,11 +142,8 @@ test("app.css's top-level .nav rule is still the base bottom bar, one column per
   assert.ok(body.includes("order:1"), "base .nav needs the D-11 order compensation for the DOM reorder");
 });
 
-test("app.css's top-level .chips rule still scrolls horizontally (BP-M's flex-wrap override lives only in its own media block)", () => {
-  const body = ruleBody(appTop, ".chips");
-  assert.ok(body, ".chips rule not found at top level");
-  assert.ok(body.includes("overflow-x:auto"));
-  assert.equal(body.includes("flex-wrap:wrap"), false);
+test("app.css has no Library filter-chip row any more (WP LIBRARY-2: kit .fchip, wrapping, css/kit.css)", () => {
+  assert.equal(ruleBody(appTop, ".chips"), null);
 });
 
 test("app.css's top-level .app rule is still a plain column flexbox (grid conversion lives only in the BP-L media block)", () => {
@@ -164,15 +161,11 @@ function findMediaBlock(minWidthPx) {
   return appMedia.find((b) => new RegExp(`min-width:\\s*${minWidthPx}px`).test(b.header) && !/and/.test(b.header));
 }
 
-test("BP-M (min-width:720px) narrows --w-text to 760px and does NOT wrap the filter chips (WP WEB-FIX-UPD-VIS)", () => {
+test("BP-M (min-width:720px) narrows --w-text to 760px and carries no Library toolbar rules (WP LIBRARY-2)", () => {
   const block = findMediaBlock(720);
   assert.ok(block, "no bare min-width:720px block found");
   assert.match(block.body, /--w-text:\s*760px/);
-  // Until WP WEB-FIX-UPD-VIS this block wrapped the chips. The toolbar row
-  // now keeps them on ONE scrolling line at every width, or a second chip
-  // line would leave the search field's centre line (user layout).
-  assert.equal(/(^|\})\s*\.chips\s*\{/.test(block.body), false, "BP-M must not override .chips any more (no flex-wrap:wrap)");
-  assert.equal(/flex-wrap:\s*wrap/.test(ruleBody(block.body, ".lib-bar .chips") ?? ""), false);
+  assert.equal(/\.lib-|\.chips|\.grid\b/.test(block.body), false, "the Library lays itself out with container queries in kit.css");
 });
 
 test("BP-L (min-width:1024px) turns #app into a rail grid and zeroes --nav-h (WITH a unit)", () => {
@@ -292,7 +285,8 @@ test("--w-wall progresses 960px (base) -> 1600px (BP-L) -> 2000px (BP-XL), never
   // sweep would no longer delete it on its own reasoning — but this
   // assertion stays, pinning the COMFORTABLE-density base value the BP-L
   // block's `.grid.cols3{--tile-min:150px}` override departs from.
-  assert.match(codeOnly, /--tile-min\s*:\s*176px/, "--tile-min's base (comfortable-density) value missing or changed from 176px in theme.css");
+  // WP LIBRARY-2: library.html's minmax(168px,1fr) (Compact: 124px in kit.css).
+  assert.match(codeOnly, /--tile-min\s*:\s*168px/, "--tile-min's base (comfortable-density) value missing or changed from 168px in theme.css");
 });
 
 test(".view-root's BP-L max-width (--w-wall) is 1600px — a deliberate widening from the 960px base, not a repeat of it", () => {
@@ -302,111 +296,15 @@ test(".view-root's BP-L max-width (--w-wall) is 1600px — a deliberate widening
   assert.equal(wWallInBlock[1].trim(), "1600px");
 });
 
-test("the auto-fill library grid is wired at BP-L: .grid and .grid.cols3 both use repeat(auto-fill,minmax(var(--tile-min),1fr)), with DIFFERENT --tile-min values (D-3's density control), and .grid.list is left alone", () => {
-  const block = findMediaBlock(1024);
-  const gridBody = ruleBody(block.body, ".grid, .grid.cols3");
-  assert.ok(gridBody, ".grid, .grid.cols3 combined rule not found in the BP-L block");
-  assert.match(gridBody, /grid-template-columns:\s*repeat\(\s*auto-fill\s*,\s*minmax\(\s*var\(--tile-min\)\s*,\s*1fr\s*\)\s*\)/);
-  // NOT `ruleBody(block.body, ".grid.cols3")`: that helper does a plain
-  // `indexOf(selector + "{")`, and the combined selector line just above
-  // (`.grid, .grid.cols3{`) already CONTAINS the substring ".grid.cols3{"
-  // inside it (right after the comma) — it would match there first and
-  // return the WRONG rule's body (the shared grid-template-columns one, not
-  // the density override). Rather than fight that with a fragile
-  // "preceded by a non-comma boundary" regex, this pins the exact literal
-  // text of the standalone override rule this file's app.css actually
-  // contains — a white-box check, deliberately, since the point is that
-  // THIS specific rule exists with THIS specific value.
-  assert.ok(
-    block.body.includes(".grid.cols3{ --tile-min:150px; }"),
-    ".grid.cols3's own standalone `{ --tile-min:150px; }` override not found verbatim in the BP-L block — it must override --tile-min to a DIFFERENT (smaller/denser) value than the 176px comfortable default",
-  );
-  // .grid.list keeps its top-level grid-template-columns:1fr by SPECIFICITY
-  // (two classes beats this block's one-class `.grid` rule) — asserting
-  // there is no BP-L override for it at all is the structural proof that
-  // this is relied on deliberately, not an accidental omission.
-  assert.equal(/\.grid\.list\s*\{[^}]*grid-template-columns/.test(block.body), false, ".grid.list must not get its own BP-L grid-template-columns override — it relies on specificity over the plain .grid rule");
-});
-
-// ---------------------------------------------------------------------
-// Opus review S3, WP 4e.2 fix round: BOTH of this package's "headline
-// guarantees" were completely unpinned and two real mutations survived
-// 456/456 as a result:
-//   (a) deleting the BASE `.grid` rule's `repeat(2,1fr)` (i.e. switching the
-//       mockup-frozen PHONE surface itself to auto-fill) — nothing failed;
-//   (b) deleting all eight of `.grid.cols3`'s BP-L reset rules (the "fix the
-//       tile guarantee made concrete, not merely asserted" comment right
-//       above them in app.css) — nothing failed either.
-// The house pattern this file already uses for `.nav`/`.chips`/`.app`
-// ("app.css's top-level X rule is still ...") is extended to `.grid` here,
-// and a new pin restates every one of the eight reset values so deleting
-// (or silently drifting) any of them fails by name.
-// ---------------------------------------------------------------------
-
-test("app.css's top-level .grid/.grid.cols3 rules are still the base fixed 2/3-column switch with the phone typography, untouched by auto-fill", () => {
-  const gridBody = ruleBody(appTop, ".grid");
-  assert.ok(gridBody, ".grid rule not found at top level");
-  // WP WEB-FIX-3: minmax(0,1fr), not 1fr — the phone grid must not blow out
-  // past the viewport on a nowrap card child (css-mobile-overflow.test.js).
-  assert.match(gridBody, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/, "base .grid must still be the fixed 2-column switch, not auto-fill");
-  assert.equal(/auto-fill/.test(gridBody), false, "auto-fill must not appear in the base (phone) .grid rule");
-
-  const cols3Body = ruleBody(appTop, ".grid.cols3");
-  assert.ok(cols3Body, ".grid.cols3 rule not found at top level");
-  assert.match(cols3Body, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/, "base .grid.cols3 must still be the fixed 3-column switch, not auto-fill");
-  assert.equal(/auto-fill/.test(cols3Body), false, "auto-fill must not appear in the base (phone) .grid.cols3 rule");
-
-  // The mobile-only compact typography WP 4e.2's BP-L block resets (Opus
-  // review S3's other survived mutation targets the RESET, this half pins
-  // the thing being reset FROM still exists, unmoved, at the base level).
-  const nameBody = ruleBody(appTop, ".grid.cols3 .cap .name");
-  assert.ok(nameBody, ".grid.cols3 .cap .name base rule not found");
-  assert.match(nameBody, /font-size:\s*11px/, "base .cols3 .cap .name must still be the phone-tuned 11px");
-  const pillBody = ruleBody(appTop, ".grid.cols3 .cappill");
-  assert.ok(pillBody, ".grid.cols3 .cappill base rule not found");
-  assert.match(pillBody, /min-height:\s*20px/, "base .cols3 .cappill must still be the phone-tuned 20px pill");
-});
-
-test("BP-L's .grid.cols3 reset restates EVERY one of the base card's own values — deleting any one of the eight reset rules must fail this test by name", () => {
-  const block = findMediaBlock(1024);
-  // Each check below names the exact base value it is restating (per
-  // app.css's own comment: "reset back to the exact base value") — a
-  // literal includes(), deliberately, not a derived comparison against the
-  // base rule (a derived check could not tell "restated correctly" apart
-  // from "restated to something else that happens to also be right").
-  const expectedResets = [
-    ".grid.cols3 .cap{ border-radius:var(--r-m); }",
-    ".grid.cols3 .cap .name{ left:9px; right:9px; bottom:8px; font-size:14.5px; letter-spacing:.4px; }",
-    // WP WEB-FEAT-SUGGEST-2: the pill row's offsets moved from .cappill to
-    // .capbadges; the "Never played" pill resets with it (its compact word
-    // stays at every width, see app.css).
-    ".grid.cols3 .capbadges{ left:7px; top:7px; right:7px; gap:5px; }",
-    ".grid.cols3 .cappill{ min-height:23px; padding:3px 8px 3px 3px; gap:5px; font-size:10.5px; }",
-    ".grid.cols3 .playpill{ min-height:23px; padding:3px 8px; font-size:10.5px; }",
-    ".grid.cols3 .cappill .sic{ --sz:17px; }",
-    ".grid.cols3 .card{ gap:7px; }",
-    ".grid.cols3 .meta{ gap:6px; font-size:11px; }",
-    ".grid.cols3 .pick{ top:7px; right:7px; width:21px; height:21px; }",
-    // WP AG-2 / WP UPD-2: both meta-row badges get their full wording back.
-    ".grid.cols3 .instbadge{ font-size:11px; }",
-    ".grid.cols3 .instbadge .ibfull{ display:inline; }",
-    ".grid.cols3 .instbadge .ibcompact{ display:none; }",
-    ".grid.cols3 .updbadge{ font-size:11px; }",
-    ".grid.cols3 .updbadge .ubfull{ display:inline; }",
-    ".grid.cols3 .updbadge .ubcompact{ display:none; }",
-  ];
-  for (const rule of expectedResets) {
-    assert.ok(block.body.includes(rule), `missing or changed BP-L .grid.cols3 reset rule: ${rule}`);
-  }
-  // `.grid.cols3 .meta .size` has NO reset rule at all (Opus nitpick, WP
-  // 4e.2 fix round: it inherits font-size from `.meta` above, restating it
-  // would just be redundant) — assert that absence is deliberate, not a
-  // ninth rule quietly missing from the list above.
-  assert.equal(
-    block.body.includes(".grid.cols3 .meta .size{"),
-    false,
-    ".grid.cols3 .meta .size must NOT have its own BP-L reset rule — it inherits font-size from the .meta reset instead",
-  );
+test("the auto-fill library grid lives in kit.css at every width: repeat(auto-fill,minmax(min(100%, var(--tile-min)),1fr)), Compact overrides --tile-min to a smaller value, List is one column (WP LIBRARY-2)", () => {
+  const kitCss = stripComments(readFileSync(new URL("../css/kit.css", import.meta.url), "utf8"));
+  const grid = ruleBody(kitCss, ".kit.view-library > .grid");
+  assert.ok(grid, "Library grid rule missing in kit.css");
+  assert.match(grid, /grid-template-columns:repeat\(auto-fill, minmax\(min\(100%, var\(--tile-min\)\), 1fr\)\)/);
+  assert.match(grid, /gap:22px 16px/, "library.html's gaps");
+  assert.match(ruleBody(kitCss, ".kit.view-library > .grid.compact") ?? "", /--tile-min:124px; gap:16px 12px/);
+  assert.match(ruleBody(kitCss, ".kit.view-library > .grid.list") ?? "", /grid-template-columns:minmax\(0, 1fr\)/);
+  for (const b of appMedia) assert.equal(/\.grid[.{ ,]/.test(b.body), false, `${b.header} still styles the Library grid`);
 });
 
 test(".bulk is re-derived from --w-wall (not --w-text) at BP-L, with rail/gutter-based insets instead of the base's own 12px", () => {
@@ -419,9 +317,9 @@ test(".bulk is re-derived from --w-wall (not --w-text) at BP-L, with rail/gutter
   assert.equal(/--w-text/.test(bulkBody), false, ".bulk's BP-L override must not reference --w-text any more");
 });
 
-// WP WEB-FIX-UPD-VIS (user layout 2026-10-13) replaced WP 4e.2's BP-L
-// named-area grid on .view-library with one flex toolbar row, `.lib-bar`
-// (search + chips in `.lib-filters`, then `.lib-checkbtns`), at every width.
+// WP WEB-FIX-UPD-VIS replaced WP 4e.2's BP-L named-area grid on
+// .view-library with one flex toolbar row; WP LIBRARY-2 moved that row to
+// css/kit.css (container queries, no viewport breakpoints).
 test("no breakpoint turns .view-library into a grid any more — the toolbar row is .lib-bar's own flexbox", () => {
   for (const b of appMedia) {
     assert.equal(ruleBody(b.body, ".view-library"), null, `${b.header} still has a .view-library rule`);
@@ -429,50 +327,21 @@ test("no breakpoint turns .view-library into a grid any more — the toolbar row
   }
 });
 
-test(".lib-bar: one wrapping flex row, centre-aligned, one shared --tool-h height for search, chips and buttons", () => {
-  const bar = ruleBody(appTop, ".lib-bar");
-  assert.ok(bar, ".lib-bar rule missing at top level");
-  assert.match(bar, /display:\s*flex/);
-  assert.match(bar, /flex-wrap:\s*wrap/, "the buttons must be able to wrap onto their own line");
-  assert.match(bar, /align-items:\s*center/, "search, chips and buttons share one centre line");
-  assert.match(bar, /--tool-h:\s*40px/);
-  for (const sel of [".lib-bar .search", ".lib-bar .chip", ".lib-tools .btn"]) {
-    const body = ruleBody(appTop, sel);
-    assert.ok(body, `${sel} rule missing`);
-    assert.match(body, /(^|[;\s])height:\s*var\(--tool-h\)/, `${sel} must be exactly --tool-h tall`);
-  }
-  // The chips container is symmetric (2px all round), so its chips keep the
-  // search field's centre line; it never wraps (top-level .chips scrolls).
-  assert.match(ruleBody(appTop, ".lib-bar .chips"), /padding:\s*2px\s*;/);
-  assert.match(ruleBody(appTop, ".lib-filters"), /flex-wrap:\s*wrap/, "below BP-M: search on its own line, chips on the next");
-  assert.match(ruleBody(appTop, ".lib-bar .search"), /flex:\s*1 1 100%/);
-  assert.match(ruleBody(appTop, ".lib-tools"), /flex-wrap:\s*wrap/, "below BP-M the tools wrap onto their own line");
-  assert.match(ruleBody(appTop, ".lib-tools .btn"), /white-space:\s*nowrap/);
-  assert.match(bar, /position:\s*relative/, "the Filters popover anchors to the bar");
+test("the Library toolbar row wraps (never clips a chip) and the chips scroll only in a narrow container (WP LIBRARY-2)", () => {
+  const kitCss = stripComments(readFileSync(new URL("../css/kit.css", import.meta.url), "utf8"));
+  assert.match(ruleBody(kitCss, ".kit .lib-bar") ?? "", /display:flex; flex-wrap:wrap/);
+  assert.match(ruleBody(kitCss, ".kit .lib-chips") ?? "", /flex-wrap:wrap/);
+  assert.doesNotMatch(ruleBody(kitCss, ".kit .lib-chips") ?? "", /overflow/, "at full width the chips wrap, they never scroll or clip");
+  assert.match(ruleBody(kitCss, ".kit .lib-tools") ?? "", /margin-left:auto/);
+  assert.match(ruleBody(kitCss, ".kit .lib-search") ?? "", /flex:0 1 var\(--search-w\)/);
+  const narrow = kitCss.slice(kitCss.indexOf("@container lib (max-width:560px)"));
+  assert.ok(narrow.length > 40, "narrow-container block missing");
+  assert.match(narrow, /\.kit \.lib-chips\{ flex-wrap:nowrap; overflow-x:auto;/);
+  assert.match(narrow, /\.kit \.lib-chips \.fchip:focus-visible\{ outline-offset:-2px; \}/, "a focused chip keeps its ring inside the scrolling row");
 });
 
-test("BP-M: search + chips on one line, search at --search-w, tools pushed right as one group", () => {
-  const block = findMediaBlock(720);
-  assert.match(ruleBody(block.body, ".lib-bar") ?? "", /--tool-h:\s*36px/);
-  assert.match(ruleBody(block.body, ".lib-filters") ?? "", /flex-wrap:\s*nowrap/);
-  assert.match(ruleBody(block.body, ".lib-bar .search") ?? "", /flex:\s*0 1 var\(--search-w\)/);
-  const btns = ruleBody(block.body, ".lib-tools") ?? "";
-  assert.match(btns, /margin-left:\s*auto/, "a wrapped button group must sit at the right end");
-  assert.match(btns, /flex:\s*0 0 auto/);
-  assert.match(btns, /flex-wrap:\s*nowrap/);
-});
 
-test("BP-L: ONE row first — .lib-filters has no basis, only a minimum (search + --chips-min), so the chips scroll before the buttons wrap", () => {
-  const block = findMediaBlock(1024);
-  assert.match(ruleBody(block.body, ".lib-bar") ?? "", /--chips-min:\s*160px/);
-  const filters = ruleBody(block.body, ".lib-filters") ?? "";
-  assert.match(filters, /flex:\s*1 1 0\s*;/, "a zero basis: the line break is decided by the minimum, not by every chip's width");
-  assert.match(filters, /min-width:\s*calc\(var\(--search-w\)\s*\+\s*12px\s*\+\s*var\(--chips-min\)\)/);
-});
 
-test("a focused chip keeps its whole focus ring inside the scrolling chips line", () => {
-  assert.match(ruleBody(appTop, ".lib-bar .chip:focus-visible") ?? "", /outline-offset:\s*-2px/);
-});
 
 test("theme.css declares --search-w (the library search width in the toolbar row from BP-M up)", () => {
   assert.match(themeTop, /--search-w\s*:\s*260px/);

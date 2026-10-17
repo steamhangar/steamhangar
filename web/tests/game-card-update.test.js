@@ -45,10 +45,9 @@ test("MUTATION TARGET -- WP UPD-6: a flagged CACHED card says 'Update available'
     const state = card.querySelector(".meta .state");
     assert.equal(state.textContent, "Update available");
     assert.match(state.className, /\btx-stale\b/);
-    assert.match(card.querySelector(".cappill .sic").className, /\bk-stale\b/, "pill: orange refresh, not the green check");
-    assert.match(card.querySelector(".meta .sic").className, /\bk-stale\b/, "list-layout meta icon too");
+    assert.match(card.querySelector(".stt .dot").className, /\btx-stale\b/, "dot: orange, not the green one (WP LIBRARY-2)");
     assert.equal(card.querySelector(".updbadge"), null, "said once, not twice");
-    assert.equal(card.querySelector(".cappill .pv").textContent, "0.5 GB", "the pill keeps the size");
+    assert.equal(card.querySelector(".cap .sz").textContent, "0.5 GB", "the cover keeps the size");
   }));
 
 test("buildCard: false, missing (older vault-api) or a truthy non-boolean keep 'Current' and the green check", () =>
@@ -57,7 +56,7 @@ test("buildCard: false, missing (older vault-api) or a truthy non-boolean keep '
       const card = buildCard(game(over), ctx);
       assert.equal(card.querySelector(".updbadge"), null, JSON.stringify(over));
       assert.equal(card.querySelector(".state").textContent, "Current", JSON.stringify(over));
-      assert.match(card.querySelector(".cappill .sic").className, /\bk-cached\b/, JSON.stringify(over));
+      assert.match(card.querySelector(".stt .dot").className, /\btx-cached\b/, JSON.stringify(over));
     }
   }));
 
@@ -65,7 +64,7 @@ test("not a status kind: dispKind/data-dk stay 'cached' (filters, actions and th
   withFakeDom(({ buildCard }) => {
     const flagged = buildCard(game({ update_available: true }), ctx);
     assert.equal(flagged.dataset.dk, "cached");
-    assert.equal(flagged.querySelector("button.cappill"), null, "no action on a cached card (never a silent re-download)");
+    assert.ok(!flagged.querySelector("button.icnact"), "no action on a cached card (never a silent re-download)");
   }));
 
 test("MUTATION TARGET -- a flagged card that is NOT cached (failed) keeps its own word and shows the .updbadge line", () =>
@@ -95,7 +94,7 @@ test("group card: a flag on any member (groupGames' OR) turns the group's pill a
     const [row] = groupGames([parent, dlc]).rows;
     const card = buildCard(row, { ...ctx, failedPackageCount: 0 });
     assert.equal(card.querySelector(".state").textContent, "Update available");
-    assert.match(card.querySelector(".cappill .sic").className, /\bk-stale\b/);
+    assert.match(card.querySelector(".stt .dot").className, /\btx-stale\b/);
     assert.equal(card.querySelector(".updbadge"), null);
   }));
 
@@ -120,17 +119,14 @@ test("MUTATION TARGET -- patchCardVolatile keeps the .updbadge line of a non-cac
 
 test("css: the 'Update available' word is drawn in --stale", async () => {
   const { readFileSync } = await import("node:fs");
-  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.match(css, /\.meta \.state\.tx-stale\{\s*color:var\(--stale\);/);
+  const css = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(css, /\.kit \.stt \.state\.tx-stale, \.kit \.stt \.state\.tx-partial\{ color:var\(--stale\);/);
 });
 
-test("css: .updbadge exists, compact word in cols3 and list, no fixed width", async () => {
+test("css: .updbadge is a sub-line in --stale, the full word, no fixed width (WP LIBRARY-2)", async () => {
   const { readFileSync } = await import("node:fs");
-  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const base = /(^|\})\s*\.updbadge\s*\{([^}]*)\}/.exec(css);
-  assert.ok(base, ".updbadge rule missing");
-  assert.doesNotMatch(base[2], /(^|[;\s])width:/);
-  assert.match(css, /\.updbadge \.ubcompact\{\s*display:none;/);
-  assert.match(css, /\.grid\.cols3 \.updbadge \.ubcompact\{\s*display:inline;/);
-  assert.match(css, /\.grid\.list \.updbadge \.ubcompact\{\s*display:inline;/);
+  const css = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(css, /\.kit \.card \.updbadge\{ color:var\(--stale\); \}/);
+  assert.match(css, /\.kit \.card \.ibcompact, \.kit \.card \.ubcompact, \.kit \.card \.pbcompact\{ display:none; \}/);
+  assert.doesNotMatch(css, /\.updbadge[^{}]*\{[^}]*(?:^|;|\s)width:/);
 });

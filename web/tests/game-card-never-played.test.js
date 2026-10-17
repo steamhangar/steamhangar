@@ -38,18 +38,16 @@ async function withFakeDom(fn) {
   return fn(gameCard);
 }
 
-test("MUTATION TARGET -- buildCard: a cached, never-played game gets the pill right after the status pill, plus the list twin", () =>
+test("MUTATION TARGET -- buildCard: a cached, never-played game gets the 'Never played' sub-line, never a cover pill (WP LIBRARY-2)", () =>
   withFakeDom(({ buildCard }) => {
     const card = buildCard(game(), ctx);
-    const badges = card.querySelector(".capbadges");
-    assert.ok(badges, "the pill row exists");
-    assert.deepEqual(badges.children.map((c) => c.className.split(" ")[0]), ["cappill", "playpill"]);
-    const pill = badges.querySelector(".playpill");
-    assert.equal(pill.querySelector(".ppfull").textContent, "Never played");
-    assert.equal(pill.querySelector(".ppcompact").textContent, "Unplayed");
-    assert.equal(pill.title, "Fully cached, never played");
-    assert.equal(pill.getAttribute("aria-hidden"), "true");
-    assert.equal(card.querySelector(".meta .playbadge .pbcompact").textContent, "Unplayed");
+    assert.ok(!card.querySelector(".cap .playpill"), "no pill on the cover any more");
+    const line = card.querySelector(".meta .playbadge");
+    assert.ok(line, "the sub-line exists");
+    assert.equal(line.querySelector(".pbfull").textContent, "Never played");
+    assert.equal(line.querySelector(".pbcompact").textContent, "Unplayed");
+    assert.equal(line.title, "Fully cached, never played");
+    assert.equal(line.getAttribute("aria-hidden"), "true");
     assert.match(card.getAttribute("aria-label"), /— Fully cached, never played/);
   }));
 
@@ -63,8 +61,7 @@ test("no pill without a real zero playtime (the ADR-0010 default), with playtime
       { tool_app: true },
     ]) {
       const card = buildCard(game(over), ctx);
-      assert.equal(card.querySelector(".playpill"), null, JSON.stringify(over));
-      assert.equal(card.querySelector(".playbadge"), null, JSON.stringify(over));
+      assert.ok(!card.querySelector(".playbadge"), JSON.stringify(over));
       assert.doesNotMatch(card.getAttribute("aria-label"), /never played/i);
     }
   }));
@@ -72,22 +69,20 @@ test("no pill without a real zero playtime (the ADR-0010 default), with playtime
 test("a running download is not 'fully cached': no pill while a live job exists", () =>
   withFakeDom(({ buildCard }) => {
     const card = buildCard(game(), { ...ctx, liveJob: { id: 1, appid: 2010050, type: "prefill", status: "running" } });
-    assert.equal(card.querySelector(".playpill"), null);
+    assert.ok(!card.querySelector(".playbadge"));
   }));
 
-test("MUTATION TARGET -- patchCardVolatile adds and removes the pill without touching the status pill", () =>
+test("MUTATION TARGET -- patchCardVolatile adds and removes the line without touching the status line", () =>
   withFakeDom(({ buildCard, patchCardVolatile }) => {
     const card = buildCard(game({ owned_playtime_forever: undefined }), ctx);
-    const statusPill = card.querySelector(".cappill");
+    const status = card.querySelector(".stt");
     patchCardVolatile(card, game(), "cached");
-    assert.ok(card.querySelector(".playpill"), "appears");
-    assert.ok(card.querySelector(".playbadge"));
-    assert.equal(card.querySelector(".cappill") === statusPill, true, "status pill node kept");
+    assert.ok(card.querySelector(".playbadge"), "appears");
+    assert.equal(card.querySelector(".stt") === status, true, "status line node kept");
     patchCardVolatile(card, game(), "cached");
-    assert.equal(card.querySelectorAll(".playpill").length, 1, "no duplicate on a second tick");
+    assert.equal(card.querySelectorAll(".playbadge").length, 1, "no duplicate on a second tick");
     patchCardVolatile(card, game({ owned_playtime_forever: 5 }), "cached");
-    assert.equal(card.querySelector(".playpill"), null, "disappears");
-    assert.equal(card.querySelector(".playbadge"), null);
+    assert.ok(!card.querySelector(".playbadge"), "disappears");
   }));
 
 test("withOwnedPlaytime copies only real playtime values onto matching rows", () => {
@@ -117,23 +112,16 @@ test("wiring: the Library's remerge applies withOwnedPlaytime to the merged rows
   assert.match(body[1], /state\.games = grouped\.rows;/);
 });
 
-test("css: pill row positioned, never-played pill shrinks with an ellipsis, compact word in cols3, list twin only in list, hidden in select mode", () => {
-  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+test("css: the 'Never played' line ellipsizes, shows the full word, and Compact hides it with the other sub-lines", () => {
+  const css = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const rule = (sel) => {
     const m = new RegExp(`(^|\\})\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
     assert.ok(m, `${sel} rule missing`);
     return m[2];
   };
-  assert.match(rule(".capbadges"), /position:absolute/);
-  assert.match(rule(".capbadges"), /display:flex/);
-  assert.doesNotMatch(rule(".cappill"), /position:absolute/, "positioning moved to .capbadges");
-  assert.match(rule(".playpill"), /text-overflow:ellipsis/);
-  assert.match(rule(".playpill"), /min-width:0/);
-  // The ellipsis on the text boxes themselves (the pill's flex items).
-  const text = rule(".playpill .ppfull, .playpill .ppcompact");
-  for (const d of [/min-width:0/, /overflow:hidden/, /text-overflow:ellipsis/, /white-space:nowrap/]) assert.match(text, d);
-  assert.match(rule(".grid.cols3 .playpill .ppcompact"), /display:inline/);
-  assert.match(rule(".playbadge"), /display:none/);
-  assert.match(rule(".grid.list .capbadges"), /display:none/);
-  assert.match(rule("body.selecting .playpill"), /display:none/);
+  const line = rule(".kit .card .updbadge, .kit .card .instbadge, .kit .card .playbadge");
+  for (const d of [/min-width:0/, /overflow:hidden/, /text-overflow:ellipsis/, /white-space:nowrap/]) assert.match(line, d);
+  assert.match(rule(".kit .card .ibcompact, .kit .card .ubcompact, .kit .card .pbcompact"), /display:none/);
+  assert.match(rule(".kit .grid.compact .card .meta > :not(.stt)"), /display:none/);
+  assert.doesNotMatch(css, /playpill|capbadges/, "no cover pill rules left");
 });

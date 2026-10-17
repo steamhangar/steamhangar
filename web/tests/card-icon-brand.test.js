@@ -28,7 +28,7 @@ const dom = createFakeDom();
 globalThis.document = dom.document;
 globalThis.window = dom.window;
 
-const { buildCard, patchCardVolatile, pillClassName } = await import("../js/components/game-card.js");
+const { buildCard, patchCardVolatile } = await import("../js/components/game-card.js");
 const { createStatusIcon } = await import("../js/components/status-icon.js");
 
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -86,7 +86,7 @@ const app = splitMedia(appCss);
 const bpL = app.mediaBlocks.find((b) => /min-width:\s*1024px/.test(b.header) && !/and/.test(b.header));
 
 // ---------------------------------------------------------------------
-// 1. Capsule pill: bare when there is no number
+// 1. Cover: size badge only (WP LIBRARY-2; WEB-FIX-9's bare pill is gone)
 // ---------------------------------------------------------------------
 
 function noop() {}
@@ -120,65 +120,53 @@ const ICON_ONLY = [
   ["not cached while selecting (inert span)", game(), undefined, { selecting: true }],
 ];
 
-test("MUTATION TARGET: an icon-only pill is .bare for every kind without a number (paused, running, none, error, inert)", () => {
+// WP LIBRARY-2 superseded the bare/ground pill: the cover carries the size
+// badge only, the status (dot + word) and the quick action live under it.
+test("MUTATION TARGET: no status icon on the cover for any kind; the size badge only for a game with a number", () => {
   let checked = 0;
   for (const [label, g, job, over] of ICON_ONLY) {
     const card = buildCard(g, ctx(job, over));
-    const pill = card.querySelector(".cappill");
-    if (pill.querySelector(".pv")) continue; // a kind that does print a number is covered below
+    const cap = card.querySelector(".cap");
+    assert.ok(!cap.querySelector(".sic"), `${label}: no status icon on the cover`);
+    assert.ok(!cap.querySelector(".cappill"), `${label}: no cover pill`);
+    if (!g.size_bytes) assert.ok(!cap.querySelector(".sz"), `${label}: no number, no badge`);
+    assert.ok(card.querySelector(".meta .stt .dot"), `${label}: the status line has its dot`);
     checked++;
-    assert.ok(pill.classList.contains("bare"), `${label}: icon-only pill must be .bare (no grey ground)`);
-    assert.ok(pill.querySelector(".sic"), `${label}: the status icon is still there`);
   }
   assert.ok(checked >= 5, `the loop must not pass vacuously (checked ${checked})`);
 });
 
-test("the paused card from the report: pause glyph, .bare, a resume button, and the word 'Paused' in the meta row", () => {
+test("the paused card from the report: a resume button with the pause glyph in the status line, the word 'Paused'", () => {
   const card = buildCard(game({ status: "running" }), ctx({ status: "paused", appid: 275850 }));
-  const pill = card.querySelector(".cappill");
-  assert.equal(pill.tagName, "BUTTON");
-  assert.ok(pill.classList.contains("bare"));
-  assert.ok(pill.querySelector(".sic.k-paused"));
-  assert.equal(pill.querySelector(".pv"), null, "no fabricated number");
+  const act = card.querySelector(".stt button.icnact");
+  assert.ok(act, "the quick action stays on the card");
+  assert.ok(act.querySelector(".sic.k-paused"));
+  assert.equal(act.getAttribute("aria-label"), "Resume download — No Man's Sky");
   assert.equal(card.querySelector(".meta .state").textContent, "Paused", "the status word lives under the cover");
 });
 
-test("MUTATION TARGET: a cached pill with a size keeps its ground (not .bare)", () => {
-  const card = buildCard(game({ status: "done", size_bytes: 3.9e9 }), ctx(undefined));
-  const pill = card.querySelector(".cappill");
-  assert.ok(pill.querySelector(".pv"), "cached pill prints the size");
-  assert.equal(pill.classList.contains("bare"), false);
+test("MUTATION TARGET: a cached game's cover carries its size badge", () => {
+  const card = buildCard(game({ status: "done", size_bytes: 3.9 * 2 ** 30 }), ctx(undefined));
+  assert.equal(card.querySelector(".cap .sz").textContent, "3.9 GB");
+  assert.ok(!card.querySelector(".stt .icnact"), "cached: no quick action");
 });
 
-test("pillClassName: bare iff there is no number, independent of the button state", () => {
-  assert.equal(pillClassName(true, null), "cappill act bare");
-  assert.equal(pillClassName(false, null), "cappill bare");
-  assert.equal(pillClassName(false, "3.9 GB"), "cappill");
-  assert.equal(pillClassName(true, "3.9 GB"), "cappill act");
-});
-
-test("MUTATION TARGET: patchCardVolatile keeps .bare in step with the number", () => {
+test("MUTATION TARGET: patchCardVolatile keeps the size badge in step with the number", () => {
   const g = game({ status: "done", size_bytes: 3.9e9 });
   const card = buildCard(g, ctx(undefined));
-  const pill = card.querySelector(".cappill");
-  // Same structural kind, number gone (a patch-path tick the planner allows
-  // only for an unchanged kind; forced here to prove the toggle both ways).
   patchCardVolatile(card, { ...g, size_bytes: null }, "none");
-  assert.ok(pill.classList.contains("bare"), "number removed -> bare");
-  patchCardVolatile(card, g, "cached");
-  assert.equal(pill.classList.contains("bare"), false, "number back -> ground back");
+  assert.ok(!card.querySelector(".cap .sz"), "number removed -> badge gone");
+  patchCardVolatile(card, { ...g, size_bytes: 4.2 * 2 ** 30 }, "cached");
+  assert.equal(card.querySelector(".cap .sz").textContent, "4.2 GB", "number back -> badge back");
 });
 
-test("MUTATION TARGET: CSS — a bare pill has no ground and symmetric padding, in every layout", () => {
-  const bare = allRuleBodies(app.topLevel, ".cap .cappill.bare");
-  assert.match(bare, /background:\s*transparent/);
-  assert.match(bare, /box-shadow:\s*none/);
-  assert.match(bare, /(^|;|\s)backdrop-filter:\s*none/);
-  assert.match(bare, /padding:\s*3px\s*;/, "symmetric, same inset as the base pill's left edge");
-  assert.match(bare, /filter:\s*drop-shadow\(/, "contrast for the bare disc on light art");
-  assert.match(allRuleBodies(app.topLevel, ".grid.cols3 .cap .cappill.bare"), /padding:\s*2px\s*;/, "phone compact grid");
-  assert.ok(bpL, "BP-L block not found");
-  assert.match(allRuleBodies(bpL.body, ".grid.cols3 .cap .cappill.bare"), /padding:\s*3px\s*;/, "BP-L compact grid resets to base");
+test("MUTATION TARGET: CSS — the size badge sits top-left on the cover in mono, from tokens", () => {
+  const kit = stripComments(readFileSync(path.join(webDir, "css", "kit.css"), "utf8"));
+  const body = allRuleBodies(kit, ".kit .cap .sz");
+  assert.match(body, /position:absolute/);
+  assert.match(body, /top:8px; left:8px/);
+  assert.match(body, /var\(--mono\)/);
+  assert.match(allRuleBodies(kit, ".kit .grid.list .card .cap .name, .kit .grid.list .card .cap .sz"), /display:none/);
 });
 
 // ---------------------------------------------------------------------

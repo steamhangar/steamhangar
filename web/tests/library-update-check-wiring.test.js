@@ -164,9 +164,9 @@ async function until(pred, label, timeoutMs = 3000) {
 }
 
 const updBtn = (s) => s.querySelector('button.btn[data-action="check-updates"]');
-const updLine = (s) => s.querySelector("p.lib-upd");
-const chipKeys = (s) => s.querySelectorAll(".chip").map((c) => c.dataset.f);
-const chip = (s, key) => s.querySelector(`.chip[data-f="${key}"]`);
+const updLine = (s) => s.querySelector(".lib-upd");
+const chipKeys = (s) => s.querySelectorAll(".fchip").map((c) => c.dataset.f);
+const chip = (s, key) => s.querySelector(`.fchip[data-f="${key}"]`);
 // fake-dom has no bubbling/closest: dispatch on the delegating container.
 const pressChip = (s, key) => {
   const el = chip(s, key);
@@ -177,7 +177,8 @@ const statusReads = () => count("GET /v1/updates/status");
 // WP UPD-6: a flagged cached card says "Update available" as its status
 // word with the orange refresh glyph; the separate .updbadge is gone there.
 const stateWord = (s, appid) => card(s, appid).querySelector(".state").textContent;
-const pillKind = (s, appid) => card(s, appid).querySelector(".cappill .sic").className;
+// WP LIBRARY-2: the card's kind shows as the status dot's tone.
+const pillKind = (s, appid) => card(s, appid).querySelector(".stt .dot").className;
 
 async function openLibrary() {
   pathname = "/library";
@@ -186,6 +187,29 @@ async function openLibrary() {
   await until(() => section.querySelectorAll(".card").length >= server.games.length, "cards on screen");
   return section;
 }
+
+// First in the file on purpose: the update-check runner is module-level, so
+// only the first mount of this process sees the status still unknown.
+test("LIBRARY-2: before GET /v1/updates/status answers, the primary half is shown, loading and aria-disabled (never caret-only)", async () => {
+  server.mode = "ok";
+  server.enabled = true;
+  server.statusQueue = [IDLE];
+  pathname = "/library";
+  navigateTo("library");
+  const s = renderLibrary();
+  // Synchronously after the build, before any fetch settles.
+  assert.equal(updBtn(s).hidden, false, "the primary half is there from the first paint");
+  assert.equal(updBtn(s).textContent, "Check updates");
+  assert.equal(updBtn(s).getAttribute("aria-disabled"), "true");
+  assert.equal(s.querySelector(".lib-split").classList.contains("loading"), true);
+  assert.equal(s.querySelector(".lib-split").classList.contains("solo"), false);
+  const before = count("POST /v1/updates/check");
+  updBtn(s).dispatchEvent({ type: "click" });
+  await tick(20);
+  assert.equal(count("POST /v1/updates/check"), before, "MUTATION PIN: a press while loading sends nothing");
+  await until(() => updBtn(s).getAttribute("aria-disabled") === "false", "status answered");
+  assert.equal(s.querySelector(".lib-split").classList.contains("loading"), false);
+});
 
 test("UPD-1 vault-api: the button shows next to the unchanged 'Check & update' button, with the 'last checked' line", async () => {
   server.mode = "ok";
@@ -202,8 +226,8 @@ test("UPD-1 vault-api: the button shows next to the unchanged 'Check & update' b
   assert.equal(updLine(s).hidden, false);
   assert.deepEqual(
     s.children.map((c) => c.className),
-    ["lib-head", "lib-bar", "lib-status", "grid", "bulk"],
-    "toolbar row, then the status lines (WP WEB-FIX-UPD-VIS)",
+    ["page-head lib-head", "lib-bar", "lib-stat", "grid", "bulk"],
+    "toolbar row, then ONE status line (WP LIBRARY-2)",
   );
   const statuses = s.querySelectorAll('[role="status"]').map((n) => n.className);
   assert.deepEqual(statuses, ["lib-owned-text"], "no new live region: results go to the toast");
@@ -217,31 +241,31 @@ test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; '
   await until(() => updBtn(s).hidden === false, "button shown");
   const bar = s.querySelector(".lib-bar");
   assert.deepEqual(bar.children.map((c) => c.className), ["lib-filters", "lib-tools"]);
-  assert.deepEqual(bar.children[0].children.map((c) => c.className.split(" ")[0]), ["search", "chips"]);
+  assert.deepEqual(bar.children[0].children.map((c) => c.className), ["search lib-search", "chips lib-chips"]);
   // WP LIBRARY-1: the check buttons are one split button in the header.
   const split = s.querySelector(".lib-head").querySelector(".lib-split");
   assert.ok(split, "split button lives in the header");
   const [first, more, menu] = split.children;
   assert.equal(first.textContent, "Check updates");
-  assert.deepEqual(first.className.split(" ").sort(), ["btn", "primary", "sm"], "MUTATION PIN: the check-only button is the primary one");
+  assert.deepEqual(first.className.split(" ").sort(), ["btn", "pri"], "MUTATION PIN: the check-only button is the primary one (full size, kit)");
   assert.equal(more.getAttribute("aria-haspopup"), "menu");
   assert.equal(more.getAttribute("aria-expanded"), "false");
   assert.equal(menu.hidden, true, "the downloading action is behind the caret");
   const second = menu.children[0];
   assert.equal(second.textContent, "Check & update all cached games");
   assert.equal(second.getAttribute("role"), "menuitem");
-  assert.equal(second.className.includes("primary"), false, "MUTATION PIN: the downloading entry is never the primary action");
-  assert.equal(s.querySelector(".lib-status").children.map((c) => c.className).join(" "), "lib-upd lib-owned");
+  assert.equal(/\bpri(mary)?\b/.test(second.className), false, "MUTATION PIN: the downloading entry is never the primary action");
+  assert.equal(s.querySelector(".lib-stat").children.map((c) => c.className).join(" "), "lib-upd lib-owned-text linkbtn linkbtn");
 });
 
 test("badge + 'Updates' chip from update_available; the chip filters the grid", async () => {
   server.mode = "ok";
   const s = await openLibrary();
   assert.equal(stateWord(s, 10), "Update available", "state on the flagged game");
-  assert.match(pillKind(s, 10), /\bk-stale\b/);
+  assert.match(pillKind(s, 10), /\btx-stale\b/);
   assert.equal(card(s, 10).querySelector(".updbadge"), null, "WP UPD-6: no second 'Update' line");
   assert.equal(stateWord(s, 30), "Current");
-  assert.match(pillKind(s, 30), /\bk-cached\b/);
+  assert.match(pillKind(s, 30), /\btx-cached\b/);
   assert.ok(chipKeys(s).includes("updates"));
   assert.equal(chip(s, "updates").querySelector(".n").textContent, "1");
   pressChip(s, "updates");
@@ -277,7 +301,7 @@ test("press: POST once (no body), busy while running, polls to the end, re-reads
   await until(() => count("GET /v1/games") > gamesBefore, "games re-read after the run");
   await until(() => chip(s, "updates").querySelector(".n").textContent === "2", "chip count follows the new verdicts");
   await until(() => stateWord(s, 30) === "Update available", "state appeared on the newly flagged game");
-  assert.match(pillKind(s, 30), /\bk-stale\b/);
+  assert.match(pillKind(s, 30), /\btx-stale\b/);
   const readsAfter = statusReads();
   await tick(2300);
   assert.equal(statusReads(), readsAfter, "MUTATION PIN: no polling after running=false");
@@ -421,14 +445,18 @@ test("LIBRARY-1: the tools live in the toolbar row in order sort, layout, filter
   const s = await openLibrary();
   assert.deepEqual(
     s.querySelector(".lib-tools").children.map((c) => c.className.split(" ")[0]),
-    ["lib-sort", "segs", "lib-filtersbtn", "btn"],
+    ["sortg", "segi", "lib-filtersbtn", "btn"],
   );
 });
 
-test("LIBRARY-1: css pins — update badge shares the status line, popover hidden guard, solo label", async () => {
+test("LIBRARY-1/2: css pins — popover hidden guard, solo label, one status line with separators", async () => {
   const { readFileSync } = await import("node:fs");
-  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.match(css, /\.meta \.updbadge\{\s*flex-basis:auto;/);
-  assert.match(css, /\.pop\[hidden\]\{\s*display:none;/);
-  assert.match(css, /\.lib-split:not\(\.solo\) \.split-lbl\{\s*display:none;/);
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "");
+  const app = strip(readFileSync(new URL("../css/app.css", import.meta.url), "utf8"));
+  const kit = strip(readFileSync(new URL("../css/kit.css", import.meta.url), "utf8"));
+  assert.match(app, /\.pop\[hidden\]\{\s*display:none;/);
+  assert.match(kit, /\.kit \.lib-split \.split-lbl\{ display:none; \}/);
+  assert.match(kit, /\.kit \.lib-split\.solo \.split-lbl\{ display:inline; \}/);
+  assert.match(kit, /\.kit \.lib-stat > \*:not\(\[hidden\]\):not\(:empty\) ~ \*:not\(\[hidden\]\):not\(:empty\)::before\{\s*content:"·";/);
+  assert.match(kit, /\.kit \.lib-stat\{[^}]*font-size:var\(--fs-3\)[^}]*color:var\(--dim\)/);
 });

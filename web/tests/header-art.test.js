@@ -165,26 +165,24 @@ test("game-detail-sheet.js imports header-art.js and calls buildHeaderArt(state.
   );
   assert.match(
     detailJs,
-    /contentEl\.append\(\s*buildHeaderArt\(state\.appid\)\s*\)/,
-    "game-detail-sheet.js no longer appends buildHeaderArt(state.appid) into contentEl — the header art has no real caller",
+    /hero\.append\(\s*buildHeaderArt\(state\.appid\)\s*\);\s*contentEl\.append\(hero\)/,
+    "game-detail-sheet.js no longer appends buildHeaderArt(state.appid) into the hero band in contentEl — the header art has no real caller",
   );
 });
 
 // ---------------------------------------------------------------------
-// 3. CSS: the load-then-reveal resolution, pinned structurally.
+// 3. CSS: the hero band and the art overlay (WP LIBRARY-2), pinned structurally.
 // ---------------------------------------------------------------------
 
-const appCssPath = path.join(webDir, "css", "app.css");
-const appCss = readFileSync(appCssPath, "utf8");
+const kitCssPath = path.join(webDir, "css", "kit.css");
+const kitCss = readFileSync(kitCssPath, "utf8");
 
 function stripComments(css) {
   return css.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 /** Same brace-balanced single-rule extractor css-overlay-geometry.test.js
- * uses — duplicated locally per this codebase's own convention (neither
- * file exports test helpers; each CSS test file carries its own small
- * parsing utilities, see that file's header). */
+ * uses — duplicated locally per this codebase's own convention. */
 function ruleBody(text, selector) {
   const idx = text.indexOf(selector + "{");
   if (idx === -1) return null;
@@ -199,46 +197,51 @@ function ruleBody(text, selector) {
   return text.slice(openBrace + 1, j - 1);
 }
 
-const strippedAppCss = stripComments(appCss);
+const strippedKitCss = stripComments(kitCss);
 
-test(".header-art reserves NOTHING in its base (unloaded) state — no aspect-ratio, no height/min-height (mutation: reserve aspect-ratio on the base rule -> dies)", () => {
-  const body = ruleBody(strippedAppCss, ".header-art");
-  assert.ok(body, ".header-art rule not found in app.css");
-  assert.doesNotMatch(body, /aspect-ratio\s*:/, ".header-art's BASE rule must not reserve space via aspect-ratio — that is the whole point of WP 4h.5's load-then-reveal design (WP 4h.3's premature reservation is exactly what was superseded)");
-  assert.doesNotMatch(body, /\bheight\s*:/, ".header-art must not declare height on its base rule");
-  assert.doesNotMatch(body, /min-height\s*:/, ".header-art must not declare min-height on its base rule");
+// WP LIBRARY-2: the hero band is permanent (`.gd-hero`, fixed height, the
+// fallback-hue gradient), and the header art is an overlay inside it — the
+// WP 4h.5 grow-in (0fr -> 1fr) is gone because nothing grows any more.
+
+test(".gd-hero is a fixed-height band with a gradient of its own (the band never depends on the art)", () => {
+  const body = ruleBody(strippedKitCss, ".kit .gd-hero");
+  assert.ok(body, ".kit .gd-hero rule not found in kit.css");
+  assert.match(body, /height:140px/);
+  assert.match(body, /overflow:hidden/);
+  assert.match(body, /linear-gradient\(160deg, hsl\(var\(--h1\)/);
 });
 
-test(".header-art's base rule starts its grid row at 0fr — genuinely zero height, not a 1px seam (mutation: start at a nonzero fr/px value -> dies)", () => {
-  const body = ruleBody(strippedAppCss, ".header-art");
-  assert.ok(body, ".header-art rule not found in app.css");
-  assert.match(body, /grid-template-rows\s*:\s*0fr\b/, ".header-art must start its row track at 0fr");
+test(".header-art is an absolutely positioned overlay that starts invisible (mutation: start at opacity 1 -> dies)", () => {
+  const body = ruleBody(strippedKitCss, ".kit .header-art");
+  assert.ok(body, ".kit .header-art rule not found in kit.css");
+  assert.match(body, /position:absolute/);
+  assert.match(body, /inset:0/);
+  assert.match(body, /opacity:0/);
+  assert.doesNotMatch(body, /aspect-ratio\s*:|(^|;|\s)height\s*:/, "the overlay reserves nothing of its own");
 });
 
-test(".header-art.loaded reveals the box via grid-template-rows:1fr and opacity:1 (mutation: reveal to any other row value -> dies)", () => {
-  const body = ruleBody(strippedAppCss, ".header-art.loaded");
-  assert.ok(body, ".header-art.loaded rule not found in app.css");
-  assert.match(body, /grid-template-rows\s*:\s*1fr\b/, ".header-art.loaded must reveal via grid-template-rows:1fr");
-  assert.match(body, /opacity\s*:\s*1\b/, ".header-art.loaded must reveal via opacity:1");
+test(".header-art.loaded reveals it via opacity:1", () => {
+  const body = ruleBody(strippedKitCss, ".kit .header-art.loaded");
+  assert.ok(body, ".kit .header-art.loaded rule not found");
+  assert.match(body, /opacity\s*:\s*1\b/);
 });
 
-test(".header-art img carries the true 460/215 aspect-ratio — the expanded box's real shape (mutation: wrong ratio -> dies)", () => {
-  const body = ruleBody(strippedAppCss, ".header-art img");
-  assert.ok(body, ".header-art img rule not found in app.css");
-  assert.match(body, /aspect-ratio\s*:\s*460\s*\/\s*215/, ".header-art img has no aspect-ratio:460/215 declaration");
+test(".header-art declares its own fade with NO !important, so the reduced-motion wildcard governs it (mutation: add !important -> dies)", () => {
+  const body = ruleBody(strippedKitCss, ".kit .header-art");
+  assert.match(body, /transition\s*:/);
+  assert.doesNotMatch(body, /!important/);
 });
 
-test(".header-art declares its own reveal transition with NO !important, so the standing whole-app reduced-motion wildcard governs it (mutation: add !important -> dies)", () => {
-  const body = ruleBody(strippedAppCss, ".header-art");
-  assert.ok(body, ".header-art rule not found in app.css");
-  assert.match(body, /transition\s*:/, ".header-art must declare a transition — the grow-in this WP's brief asks for");
-  assert.doesNotMatch(body, /!important/, ".header-art's own transition must carry no !important — the reduced-motion wildcard's !important is what must win, unconditionally");
-});
-
-test(".header-art img fills the expanded box (object-fit:cover), is a block element (no inline-baseline gap), and can shrink to 0 with its parent (min-height:0)", () => {
-  const body = ruleBody(strippedAppCss, ".header-art img");
-  assert.ok(body, ".header-art img rule not found in app.css");
+test(".header-art img fills the band (object-fit:cover), is a block element and can shrink (min-height:0)", () => {
+  const body = ruleBody(strippedKitCss, ".kit .header-art img");
+  assert.ok(body, ".kit .header-art img rule not found");
   assert.match(body, /display\s*:\s*block/);
   assert.match(body, /object-fit\s*:\s*cover/);
-  assert.match(body, /min-height\s*:\s*0\b/, ".header-art img needs min-height:0 or the grid row could never actually reach zero height");
+  assert.match(body, /min-height\s*:\s*0\b/);
+  assert.match(body, /height:100%/);
+});
+
+test("app.css carries no header-art rules any more (one owner: kit.css)", () => {
+  const appCss = stripComments(readFileSync(path.join(webDir, "css", "app.css"), "utf8"));
+  assert.doesNotMatch(appCss, /\.header-art/);
 });

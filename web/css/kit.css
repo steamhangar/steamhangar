@@ -143,6 +143,11 @@
   border:1px solid var(--line-soft); border-radius:999px; padding:8px 12px; white-space:nowrap; cursor:pointer;
 }
 .kit .fchip b{ font:400 var(--fs-1) var(--mono); margin-left:6px; color:var(--dim-2); }
+/* Hover before the pressed state: equal specificity, so a pressed chip keeps
+   its cue under the cursor (keyboard-pointer-model.test.js). */
+@media (hover:hover) and (pointer:fine){
+  .kit .fchip:hover{ color:var(--text); border-color:var(--line); }
+}
 .kit .fchip[aria-pressed="true"]{ color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .kit .gchip{
   display:inline-block; font:400 var(--fs-2)/1 var(--ui); color:var(--text); background:var(--raised);
@@ -602,12 +607,6 @@
 .kit .fhelp{ display:grid; gap:var(--sp-1); }
 .kit .fhelp p{ margin:0; }
 .kit .seg button:disabled{ opacity:.55; cursor:default; }
-/* The field chips are state, not controls: app.css's filter-chip hover
-   (`.chip:hover`, colour + border) must not recolour them. Restated per
-   tone, because `color:inherit` would drop the "Changed here" accent. */
-.kit .chip:hover{ color:var(--dim); }
-.kit .chip.ch:hover{ color:var(--accent); }
-
 /* Webhook events: an auto-fill grid of check pills. */
 .kit.view-settings .checks{ display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap:var(--sp-2); }
 .kit.view-settings .field label.check{
@@ -690,3 +689,335 @@
    review): the Add-a-device demo block's `.sec` label is display-styled
    and `.sec` is a hidden-toggled class elsewhere. */
 .kit .ad-demo > .sec[hidden]{ display:none; }
+
+/* ---------- Library (WP LIBRARY-2) ----------
+   docs/design/rc20/library.html on the kit: views/library.js puts `kit` on
+   the section, components/library-toolbar.js builds the head, toolbar row
+   and status line, components/game-card.js the cards. The section is the
+   inline-size container (`lib`) the toolbar and the list rows query; the
+   card grid itself is an auto-fill grid (no breakpoints). app.css keeps
+   only the shared pieces (search field, popover/menu surface, `.linkbtn`,
+   `.tx-*` colours, the fixed bulk bar and its scroll room). */
+.kit.view-library{ container:lib / inline-size; display:grid; gap:var(--sp-4); align-content:start; }
+.kit.view-library > .page-head{ align-items:flex-end; }
+.kit .lib-head h1{ margin:0; }
+
+/* split button: "Check updates" + caret; the menu holds the downloading entry */
+.kit .lib-split{ position:relative; display:inline-flex; flex:none; }
+.kit .lib-split > .btn:first-child:not([hidden]){ border-top-right-radius:0; border-bottom-right-radius:0; }
+.kit .lib-split > .btn:not([hidden]) + .split-more{
+  border-top-left-radius:0; border-bottom-left-radius:0; padding-inline:9px;
+  border-left:1px solid color-mix(in srgb, var(--accent-ink) 35%, var(--accent));
+}
+.kit .lib-split .split-lbl{ display:none; }
+.kit .lib-split.solo .split-lbl{ display:inline; }
+.kit .lib-split .ico{ display:flex; }
+.kit .lib-split.loading > .btn:first-child{ opacity:.6; cursor:progress; }
+.kit .lib-split .pop.menu{ top:calc(100% + 6px); min-width:260px; padding:6px; border-radius:var(--r-m); box-shadow:0 14px 30px color-mix(in srgb, var(--bg) 70%, transparent); }
+.kit .lib-split .menuitem{ font:400 var(--fs-3)/1.3 var(--ui); padding:9px 12px; }
+
+/* toolbar row: search + chips, then the tools; wraps to a second row */
+.kit .lib-bar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; min-width:0; }
+.kit .lib-filters{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; flex:1 1 auto; min-width:0; }
+.kit .lib-search{
+  flex:0 1 var(--search-w); min-width:180px; margin:0; height:38px; padding:0 12px;
+  border-radius:10px; gap:8px; cursor:text;
+}
+.kit .lib-search .ico{ display:flex; color:var(--dim-2); }
+.kit .lib-search:focus-within .ico{ color:var(--accent); }
+.kit .lib-chips{ display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+.kit .lib-chips .fchip{ display:inline-flex; align-items:center; }
+.kit .lib-chips .fchip b{ font-variant-numeric:tabular-nums; margin-left:3px; } /* plus the space in the label: the a11y name reads "Cached 22" */
+.kit .lib-chips .fchip[aria-pressed="true"] b{ color:var(--accent); }
+.kit .lib-tools{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-left:auto; }
+.kit .lib-tools .btn{ height:38px; }
+.kit .lib-tools .ico{ display:flex; }
+.kit .lib-tools .btn.on{ color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.kit .fcount{ font:400 var(--fs-1) var(--mono); color:var(--dim-2); margin-left:2px; }
+.kit .btn.on .fcount{ color:var(--accent); }
+
+/* sort: one fused box, select + icon-only direction button */
+.kit .sortg{ display:inline-flex; align-items:stretch; height:38px; background:var(--surface); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.kit .sortg:focus-within{ border-color:var(--accent); }
+.kit .sortg select{ background:none; border:0; outline:0; padding:0 8px 0 12px; font:400 var(--fs-3) var(--ui); color:var(--text); min-width:0; max-width:190px; cursor:pointer; }
+.kit .sortg select option{ background:var(--raised-2); color:var(--text); }
+.kit .sortg button{ display:grid; place-items:center; width:40px; background:none; border:0; border-left:1px solid var(--line); color:var(--dim); cursor:pointer; padding:0; }
+@media (hover:hover) and (pointer:fine){
+  .kit .sortg button:hover{ background:var(--raised); color:var(--text); }
+}
+.kit .sortg button:focus-visible{ outline-offset:-2px; }
+
+/* icon segmented control (layout) */
+.kit .segi{ display:inline-flex; gap:2px; padding:2px; background:var(--surface); border:1px solid var(--line); border-radius:10px; }
+.kit .segi button{ display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:var(--r-s); background:none; color:var(--dim); cursor:pointer; padding:0; }
+@media (hover:hover) and (pointer:fine){
+  .kit .segi button:hover{ color:var(--text); }
+}
+.kit .segi button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); }
+
+/* Filters popover */
+.kit .lib-filtersbtn{ position:relative; }
+.kit .lib-meta.pop{
+  top:calc(100% + 8px); width:340px; max-width:calc(100cqi - 2 * var(--sp-2)); padding:var(--sp-4);
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px; border-radius:14px; box-shadow:0 14px 30px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.kit .lib-meta-cats{ display:flex; flex-wrap:wrap; gap:6px; flex-basis:100%; }
+.kit .lib-meta select, .kit .lib-meta-year{
+  height:34px; padding:0 10px; border-radius:var(--r-s); background:var(--bg); color:var(--text);
+  border:1px solid var(--line); font:400 var(--fs-3) var(--ui);
+}
+.kit .lib-meta-year{ width:96px; font-family:var(--mono); }
+.kit .lib-meta-unk{ display:flex; align-items:center; gap:6px; font-size:var(--fs-3); color:var(--dim); }
+.kit .lib-meta-unk input{ accent-color:var(--accent); }
+.kit .lib-meta-note{ flex-basis:100%; margin:0; font-size:var(--fs-2); line-height:1.45; color:var(--dim); }
+
+/* ONE status line under the toolbar; a "·" between the visible parts */
+/* No column gap: the empty live-region span (never hidden) must not add
+   space; the separator carries the spacing. */
+.kit .lib-stat{ display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 0; min-width:0; font-size:var(--fs-3); line-height:1.5; color:var(--dim); overflow-wrap:anywhere; }
+.kit .lib-stat > *:not([hidden]):not(:empty) ~ *:not([hidden]):not(:empty)::before{
+  content:"·"; display:inline-block; margin:0 10px; color:var(--dim-2); font-weight:400; text-decoration:none;
+}
+.kit .lib-stat.warn .lib-owned-text{ color:var(--stale); }
+.kit .lib-stat .linkbtn{ font-weight:400; }
+
+/* card grid: auto-fill with library.html's gaps; Compact = smaller tiles */
+/* Scoped to the section's own grid: Downloads' graph has an SVG `g.grid`. */
+.kit.view-library > .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, var(--tile-min)), 1fr)); gap:22px 16px; }
+.kit.view-library > .grid.compact{ --tile-min:124px; gap:16px 12px; }
+.kit .grid > .empty, .kit .grid > .noresult{ grid-column:1 / -1; }
+.kit .card{ position:relative; display:grid; gap:8px; align-content:start; min-width:0; text-align:left; cursor:pointer; border-radius:var(--r-m); }
+.kit .card:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
+.kit .card .cap{
+  position:relative; aspect-ratio:2 / 3; border-radius:var(--r-m); overflow:hidden;
+  background:
+    radial-gradient(120% 70% at 22% -6%, hsl(var(--h1) 62% 42%), transparent 62%),
+    linear-gradient(158deg, hsl(var(--h1) 46% 26%), hsl(var(--h2) 66% 8%));
+  box-shadow:0 0 0 1px var(--line);
+  transition:box-shadow .15s ease;
+}
+@media (hover:hover) and (pointer:fine){
+  .kit .card:hover .cap{ box-shadow:0 0 0 2px var(--accent); }
+}
+.kit .cap .art, .kit .cap img.cover, .kit .cap .scrim{ position:absolute; inset:0; }
+.kit .cap.p0 .art{ background:linear-gradient(112deg, transparent 38%, hsl(var(--h1) 90% 62% / .34) 39%, hsl(var(--h1) 90% 62% / .34) 46%, transparent 47%); }
+.kit .cap.p1 .art{ background:radial-gradient(120% 62% at 50% 112%, hsl(var(--h2) 92% 58% / .5), transparent 62%); }
+.kit .cap.p2 .art{ background:linear-gradient(180deg, transparent 52%, hsl(var(--h1) 85% 55% / .3) 52.6%, transparent 54%), radial-gradient(80% 40% at 50% 55%, hsl(var(--h2) 95% 62% / .35), transparent 70%); }
+.kit .cap.p3 .art{ background:radial-gradient(90% 70% at 8% 6%, hsl(var(--h1) 95% 60% / .48), transparent 58%); }
+.kit .cap.p4 .art{ background:repeating-linear-gradient(96deg, hsl(var(--h2) 80% 55% / .16) 0 3px, transparent 3px 13px); }
+.kit .cap.p5 .art{ background:radial-gradient(circle at 50% 38%, transparent 24%, hsl(var(--h1) 88% 58% / .30) 25%, transparent 27%), radial-gradient(circle at 50% 38%, transparent 40%, hsl(var(--h2) 88% 60% / .26) 41%, transparent 43%); }
+.kit .cap img.cover{ width:100%; height:100%; object-fit:cover; }
+.kit .cap .scrim{ background:linear-gradient(transparent 55%, color-mix(in srgb, var(--bg) 85%, transparent)); }
+.kit .cap .name{
+  position:absolute; left:10px; right:10px; bottom:10px; z-index:1;
+  font:700 var(--fs-3)/1.15 var(--ui); letter-spacing:.2px; text-transform:uppercase; color:var(--text);
+  text-shadow:0 1px 5px color-mix(in srgb, var(--bg) 80%, transparent); text-wrap:balance; overflow-wrap:anywhere;
+}
+.kit .cap .sz{
+  position:absolute; top:8px; left:8px; z-index:1; padding:3px 9px; border-radius:999px;
+  background:color-mix(in srgb, var(--bg) 72%, transparent); color:var(--text);
+  font:500 var(--fs-1)/1.3 var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.kit .card.tool .cap{ opacity:.55; filter:grayscale(.6); }
+/* selection: the pick circle shows in select mode (`.grid.selecting`) */
+.kit .card .pick{
+  position:absolute; top:8px; right:8px; z-index:2; width:22px; height:22px; border-radius:50%;
+  border:2px solid color-mix(in srgb, var(--text) 50%, transparent); background:color-mix(in srgb, var(--bg) 50%, transparent);
+  display:none; place-items:center; color:var(--accent-ink);
+}
+.kit .grid.selecting .card .pick{ display:grid; }
+.kit .card .pick svg{ opacity:0; }
+.kit .card.picked .pick{ background:var(--accent); border-color:var(--accent); }
+.kit .card.picked .pick svg{ opacity:1; }
+.kit .card.picked .cap{ box-shadow:0 0 0 2px var(--accent); }
+
+/* under the cover: the status line and the sub-lines */
+.kit .card .rowname{ display:none; }
+.kit .card .meta{ display:grid; gap:3px; padding-inline:2px; min-width:0; }
+.kit .stt{ display:flex; align-items:center; gap:6px; min-width:0; font:400 var(--fs-2)/1.35 var(--ui); color:var(--dim); }
+.kit .stt .dot{ width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
+.kit .stt .dot.tx-unverified, .kit .stt .dot.tx-none{ color:var(--none); }
+.kit .stt .state{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); }
+.kit .stt .state.tx-stale, .kit .stt .state.tx-partial{ color:var(--stale); }
+.kit .stt .state.tx-error{ color:var(--danger); }
+.kit .stt .state .stcompact{ display:none; }
+.kit .stt .icnact{
+  margin:-2px 0 -2px auto; flex:none; display:grid; place-items:center; width:22px; height:22px; padding:0;
+  border:1px solid var(--line); border-radius:50%; background:var(--surface); cursor:pointer;
+}
+.kit .stt .icnact .sic{ --sz:16px; }
+.kit .stt .icnact.muted{ opacity:.65; }
+@media (hover:hover) and (pointer:fine){
+  .kit .icnact:hover{ border-color:var(--accent); background:var(--raised); }
+}
+.kit .card .meta .size{ display:none; font:400 var(--fs-2) var(--mono); color:var(--dim); font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+.kit .card .updbadge, .kit .card .instbadge, .kit .card .playbadge{
+  display:block; min-width:0; font:400 var(--fs-2)/1.35 var(--ui); color:var(--dim-2);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+/* "+N content packages · N failed" wraps on a narrow card, never clips
+   (TOOL-APPS-2c review, 360px): the warning is one nowrap unit. */
+.kit .card .pkgline{ display:flex; flex-wrap:wrap; gap:0 4px; min-width:0; font:400 var(--fs-2)/1.35 var(--ui); color:var(--dim-2); }
+.kit .card .pkgline .pkgfail{ display:inline-flex; gap:4px; white-space:nowrap; color:var(--stale); }
+.kit .card .instbadge.warn{ color:var(--stale); }
+.kit .card .updbadge{ color:var(--stale); }
+.kit .card .ibcompact, .kit .card .ubcompact, .kit .card .pbcompact{ display:none; }
+/* Compact: covers and the status line only */
+.kit .grid.compact .card .meta > :not(.stt){ display:none; }
+.kit .grid.compact .stt .state .stfull{ display:none; }
+.kit .grid.compact .stt .state .stcompact{ display:inline; }
+.kit .grid.compact .cap .name{ left:8px; right:8px; bottom:8px; font-size:var(--fs-2); }
+
+/* List: one row per game — cover, name, status, size, sub-lines */
+.kit.view-library > .grid.list{ grid-template-columns:minmax(0, 1fr); gap:6px; }
+.kit .grid.list .card{
+  grid-template-columns:44px minmax(0, 1fr); align-items:center; gap:2px 14px;
+  background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m); padding:8px 14px 8px 8px;
+}
+.kit .grid.list .card .cap{ grid-row:1 / span 2; aspect-ratio:1; border-radius:var(--r-s); box-shadow:none; }
+.kit .grid.list .card .cap .name, .kit .grid.list .card .cap .sz{ display:none; }
+.kit .grid.list .card .rowname{ display:block; grid-column:2; min-width:0; font:500 var(--fs-4)/1.3 var(--ui); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kit .grid.list .card .meta{ grid-column:2; display:flex; flex-wrap:wrap; align-items:center; gap:2px 14px; padding:0; }
+.kit .grid.list .card .meta .size{ display:block; }
+.kit .grid.list .card .pick{ top:50%; right:12px; transform:translateY(-50%); }
+.kit .grid.list.selecting .card{ padding-right:46px; }
+.kit .grid.list .card.picked{ border-color:var(--accent); }
+.kit .grid.list .card.picked .cap{ box-shadow:none; }
+@media (hover:hover) and (pointer:fine){
+  .kit .grid.list .card:hover{ background:var(--raised); }
+  .kit .grid.list .card:hover .cap{ box-shadow:none; }
+}
+@container lib (min-width:720px){
+  .kit .grid.list .card{ grid-template-columns:44px minmax(0, 1fr) minmax(0, 2fr); }
+  .kit .grid.list .card .cap{ grid-row:1; }
+  .kit .grid.list .card .rowname{ grid-column:2; }
+  .kit .grid.list .card .meta{
+    grid-column:3; display:grid; grid-template-columns:170px 80px minmax(0, 1fr); align-items:center; column-gap:14px;
+  }
+  .kit .grid.list .card .meta > .stt{ grid-column:1; }
+  .kit .grid.list .card .meta > .size{ grid-column:2; }
+  .kit .grid.list .card .meta > :not(.stt):not(.size){ grid-column:3; }
+}
+@container lib (max-width:560px){
+  /* phone: the chips scroll inside their own row instead of wrapping */
+  .kit .lib-filters{ flex-basis:100%; }
+  .kit .lib-search{ flex:1 1 100%; }
+  .kit .lib-chips{ flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; flex:1 1 100%; padding:2px; margin:-2px; }
+  .kit .lib-chips::-webkit-scrollbar{ display:none; }
+  .kit .lib-chips .fchip{ flex:none; }
+  .kit .lib-chips .fchip:focus-visible{ outline-offset:-2px; }
+  .kit .lib-tools{ margin-left:0; }
+  .kit .sortg select{ max-width:150px; }
+  .kit .lib-tools .btn{ padding-inline:10px; }
+}
+
+/* bulk bar text follows the scale; the bar's geometry stays app.css's */
+.kit .bulk .count{ font-size:var(--fs-3); }
+.kit .bulk .bulknote{ font-size:var(--fs-2); color:var(--dim); }
+
+/* ---------- Game detail sheet (WP LIBRARY-2) ----------
+   library.html's sheet: components/game-detail-sheet.js puts `kit
+   game-detail` on the sheet. ~920px wide (--w-sheet-l) as a centred card
+   and as a bottom sheet alike; the body scrolls, the X stays put. The body
+   is the inline-size container (`gd`) the header row and the two Overview
+   columns query. */
+.kit.game-detail{ position:relative; max-width:var(--w-sheet-l); }
+.kit.game-detail .grab{ position:absolute; top:0; left:0; right:0; z-index:3; margin:9px auto 0; background:color-mix(in srgb, var(--text) 45%, transparent); }
+.kit.game-detail .body{ container:gd / inline-size; padding:0; }
+.kit .gd-x{
+  position:absolute; top:12px; right:12px; z-index:4; display:grid; place-items:center; width:34px; height:34px; padding:0;
+  border:1px solid var(--line); border-radius:10px; color:var(--text); cursor:pointer;
+  background:color-mix(in srgb, var(--bg) 60%, transparent);
+}
+@media (hover:hover) and (pointer:fine){
+  .kit .gd-x:hover{ background:var(--raised-2); }
+}
+.kit .gd-hero{
+  position:relative; height:140px; overflow:hidden;
+  background:linear-gradient(160deg, hsl(var(--h1) 55% 38%), hsl(var(--h2) 50% 14%));
+}
+.kit .gd-hero::after{ content:""; position:absolute; inset:0; background:linear-gradient(transparent 40%, var(--surface)); }
+/* The Steam header art layered over the band (components/header-art.js):
+   invisible until it has decoded, then fades in; on failure the module
+   removes it and the gradient stays. No !important: the reduced-motion
+   wildcard in theme.css collapses the fade. */
+.kit .header-art{ position:absolute; inset:0; opacity:0; transition:opacity .25s ease; }
+.kit .header-art.loaded{ opacity:1; }
+.kit .header-art img{ display:block; width:100%; height:100%; min-height:0; object-fit:cover; }
+
+.kit .gd-head{
+  position:relative; z-index:1; display:flex; flex-wrap:wrap; align-items:flex-end; gap:var(--sp-4);
+  margin:-52px 0 0; padding:0 26px;
+}
+.kit .gd-head .gd-mini{ width:78px; flex:none; aspect-ratio:2 / 3; border-radius:9px; overflow:hidden; box-shadow:0 0 0 1px var(--line); }
+.kit .gd-mini{
+  position:relative;
+  background:linear-gradient(158deg, hsl(var(--h1) 46% 26%), hsl(var(--h2) 66% 8%));
+}
+.kit .gd-mini img.cover{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.kit .gd-id{ flex:1 1 200px; min-width:0; display:grid; gap:6px; padding-bottom:4px; }
+.kit .gd-id h2{ margin:0; font:700 var(--fs-6)/1.15 var(--ui); letter-spacing:-.4px; text-wrap:balance; overflow-wrap:anywhere; }
+.kit .gd-sub{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.kit .gd-sub .appid{ font:400 var(--fs-2) var(--mono); color:var(--dim-2); }
+.kit .gd-acts{ display:flex; flex-wrap:wrap; gap:8px; padding-bottom:4px; }
+.kit .gd-acts .jobacts{ display:flex; flex-wrap:wrap; gap:8px; margin:0; }
+
+.kit.game-detail .tabs{ margin:18px 0 0; padding:0 26px; gap:4px; }
+.kit.game-detail .tab{ font:400 var(--fs-3) var(--ui); padding:10px 14px; }
+.kit .gd-body{ padding:22px 26px 26px; display:grid; gap:22px; }
+.kit .gd-state{ padding-top:var(--sp-5); }
+.kit .gd-state h3{ margin:0 0 var(--sp-2); font:500 var(--fs-5)/1.25 var(--ui); }
+.kit.game-detail .detail-panel{ padding-top:0; gap:var(--sp-5); }
+.kit.game-detail .detail-block{ margin-top:0; }
+.kit.game-detail h4.sec{ display:block; margin:0 0 var(--sp-2); }
+.kit.game-detail .hint{ font-size:var(--fs-3); line-height:1.55; }
+
+/* Overview: two columns from 720px of sheet, facts as a 2x2 grid */
+.kit .gd-ov{ display:grid; grid-template-columns:minmax(0, 1fr); gap:var(--sp-5); }
+.kit .gd-col{ display:grid; gap:var(--sp-5); align-content:start; min-width:0; }
+.kit.game-detail .facts{ display:grid; gap:var(--sp-2); font-size:var(--fs-2); color:var(--dim); }
+.kit.game-detail .facts > .btn{ justify-self:start; }
+.kit .gd-facts{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; margin-bottom:var(--sp-1); }
+.kit .gd-fact .k{ font:500 var(--fs-1)/1.2 var(--ui); letter-spacing:.6px; text-transform:uppercase; color:var(--dim-2); }
+.kit .gd-fact .v{ margin-top:2px; font:500 var(--fs-4)/1.3 var(--ui); color:var(--text); overflow-wrap:anywhere; }
+.kit .gd-fact .v.long{ font:400 var(--fs-3)/1.4 var(--ui); }
+@container gd (min-width:720px){
+  .kit .gd-ov:not(.one){ grid-template-columns:minmax(0, 1.1fr) minmax(0, 1fr); gap:26px; }
+}
+@container gd (max-width:520px){
+  .kit .gd-head{ padding:0 var(--sp-4); }
+  .kit .gd-id h2{ font-size:var(--fs-5); }
+  .kit.game-detail .tabs{ padding:0 var(--sp-3); }
+  .kit .gd-body{ padding:var(--sp-5) var(--sp-4) var(--sp-6); }
+}
+/* the About block: a column is too narrow for description + store facts side by side */
+.kit .gd-about .store-details:not(.store-nodesc){ display:block; }
+.kit .gd-about .store-desc{ font-size:var(--fs-3); color:var(--dim); }
+.kit .gd-about .store-chip{ font-size:var(--fs-2); border:0; background:var(--raised); padding:3px 10px; }
+.kit .gd-about .store-line{ font-size:var(--fs-2); }
+
+/* list rows (installed on, content packages) as raised tiles */
+.kit.game-detail .installed-list, .kit.game-detail .pkg-list{ gap:8px; background:none; }
+.kit.game-detail .installed-row, .kit.game-detail .pkg-row{ border-radius:10px; padding:10px 12px; font-size:var(--fs-3); }
+.kit.game-detail .installed-row .iwhen, .kit.game-detail .pkg-row .pkgfacts{ font-size:var(--fs-1); }
+.kit.game-detail .pkg-row .pkgstate{ font-size:var(--fs-2); text-transform:none; letter-spacing:0; }
+.kit.game-detail .pkg-row .pkgnote{ font-size:var(--fs-1); }
+.kit.game-detail .detail-box{ border-radius:var(--r-m); padding:14px 16px; gap:10px; }
+.kit.game-detail .detail-box-title{ font:500 var(--fs-4)/1.3 var(--ui); }
+.kit.game-detail .detail-box > .btn, .kit.game-detail .detail-box .jobacts{ align-self:flex-start; }
+.kit.game-detail .detail-panel[data-role="maintenance"]{ max-width:640px; }
+
+/* [hidden] guards for the Library and detail-sheet classes above that carry
+   an author display (same rule as the kit's guard block). */
+.kit.view-library[hidden], .kit .lib-split[hidden], .kit .lib-split .split-lbl[hidden], .kit .lib-split .ico[hidden],
+.kit .lib-bar[hidden], .kit .lib-filters[hidden], .kit .lib-search[hidden], .kit .lib-search .ico[hidden],
+.kit .lib-chips[hidden], .kit .lib-chips .fchip[hidden], .kit .lib-tools[hidden], .kit .lib-tools .ico[hidden],
+.kit .sortg[hidden], .kit .sortg button[hidden], .kit .segi[hidden], .kit .segi button[hidden], .kit .lib-filtersbtn[hidden],
+.kit .lib-meta.pop[hidden], .kit .lib-meta-cats[hidden], .kit .lib-meta-unk[hidden], .kit .lib-stat[hidden],
+.kit .grid[hidden], .kit .card[hidden], .kit .card .pick[hidden], .kit .card .rowname[hidden], .kit .card .meta[hidden],
+.kit .stt[hidden], .kit .stt .icnact[hidden], .kit .card .meta .size[hidden], .kit .card .pkgline[hidden],
+.kit .card .pkgfail[hidden], .kit .card .updbadge[hidden], .kit .card .instbadge[hidden], .kit .card .playbadge[hidden],
+.kit .grid.list .card .rowname[hidden], .kit .grid.list .card .meta[hidden], .kit .grid.list .card .meta .size[hidden],
+.kit .gd-x[hidden], .kit .gd-head[hidden], .kit .gd-id[hidden], .kit .gd-sub[hidden], .kit .gd-acts[hidden],
+.kit .gd-acts .jobacts[hidden], .kit .gd-body[hidden], .kit .gd-ov[hidden], .kit .gd-col[hidden], .kit.game-detail .facts[hidden],
+.kit .gd-facts[hidden], .kit.game-detail h4.sec[hidden], .kit.game-detail .detail-panel[hidden]{ display:none; }

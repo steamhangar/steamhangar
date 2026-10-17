@@ -205,7 +205,9 @@ test("patchCardVolatile: not_cached -> not_cached (unrelated field drift) preser
 
 test("MUTATION TARGET -- patchCardVolatile touches NO new SVG node (the protected status-icon subtree is genuinely untouched, instrumented)", () =>
   withFakeDom(({ buildCard, patchCardVolatile }, dom) => {
-    const card = buildCard(game({ installed_on: [], size_bytes: 500_000_000, status: "done" }), baseCtx());
+    // WP LIBRARY-2: only the status line's action button carries an icon (a
+    // failed game's Retry), so that is the subtree to protect.
+    const card = buildCard(game({ installed_on: [], size_bytes: 500_000_000, status: "error" }), baseCtx());
     const iconBefore = card.querySelector(".sic");
     assert.ok(iconBefore, "sanity: the card has a status-icon node to protect");
     // WP 4a.3 review technique (game-card.test.js's own header references
@@ -217,8 +219,8 @@ test("MUTATION TARGET -- patchCardVolatile touches NO new SVG node (the protecte
       throw new Error("patchCardVolatile must never call createElementNS — the icon subtree must be untouched");
     };
     assert.doesNotThrow(() =>
-      patchCardVolatile(card, game({ installed_on: installedOn(1), size_bytes: 600_000_000, status: "done" }), "cached"),
+      patchCardVolatile(card, game({ installed_on: installedOn(1), size_bytes: 600_000_000, status: "error" }), "error"),
     );
     const iconAfter = card.querySelector(".sic");
-    assert.equal(iconAfter, iconBefore, "the status-icon node itself must be the exact same object after the patch");
+    assert.ok(iconAfter === iconBefore, "the status-icon node itself must be the exact same object after the patch");
   }));

@@ -90,6 +90,9 @@ const themeCssPath = path.join(webDir, "css", "theme.css");
 
 const appCss = readFileSync(appCssPath, "utf8");
 const themeCss = readFileSync(themeCssPath, "utf8");
+// WP LIBRARY-2: the Library's hover rules live in the kit (load order of
+// index.html: theme.css, kit.css, app.css).
+const kitCss = readFileSync(path.join(webDir, "css", "kit.css"), "utf8");
 
 // ---------------------------------------------------------------------
 // CSS parsing: rule -> its enclosing @media header CHAIN, plus its source
@@ -187,7 +190,7 @@ function isHoverPointerGated(mediaStack) {
   });
 }
 
-const combinedCss = `${themeCss}\n${appCss}`;
+const combinedCss = `${themeCss}\n${kitCss}\n${appCss}`;
 const allRules = extractRulesWithMediaContext(combinedCss);
 const hoverRules = allRules.filter((r) => r.selector.includes(":hover"));
 
@@ -270,9 +273,9 @@ test("named pin: .nav-btn:hover (the pre-existing precedent this WP generalizes)
 // is kit.css's `.kit .hrow`, whose hover rule is gated there too.)
 for (const selector of [
   ".banner .acts button:hover",
-  ".icnact:hover",
-  ".card:hover .cap",
-  ".grid.list .card:hover",
+  ".kit .icnact:hover",
+  ".kit .card:hover .cap",
+  ".kit .grid.list .card:hover",
 ]) {
   test(`named pin: new hover affordance ${selector} exists and is hover/pointer-gated`, () => {
     const rule = hoverRules.find((r) => r.selector === selector);
@@ -297,7 +300,7 @@ for (const selector of [
 const ORDER_DEPENDENT_PAIRS = [
   { hover: ".iconbtn:hover", state: ".iconbtn.on" },
   { hover: ".segs button:hover", state: '.segs button[aria-pressed="true"]' },
-  { hover: ".chip:hover", state: '.chip[aria-pressed="true"]' },
+  { hover: ".kit .fchip:hover", state: '.kit .fchip[aria-pressed="true"]' },
   { hover: ".btn:hover", state: ".btn:disabled" },
   { hover: ".btn:hover", state: '.btn[aria-disabled="true"]' },
   { hover: ".notif:hover", state: ".notif.unread" },

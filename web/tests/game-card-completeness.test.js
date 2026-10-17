@@ -45,16 +45,16 @@ async function withFakeDom(fn) {
 }
 
 const stateEl = (card) => card.querySelector(".meta .state");
-const pillIcon = (card) => card.querySelector(".cappill .sic").className;
-const metaIcon = (card) => card.querySelector(".meta .sic").className;
+// WP LIBRARY-2: the card's status shows as a tone dot (`tx-<kind>`) in the
+// status line; the cover carries no status icon any more.
+const dotTone = (card) => card.querySelector(".meta .stt .dot").className;
 
 test("MUTATION TARGET -- 100 %: the green check and 'Current', plain text, data-ck 'cached'", () =>
   withFakeDom(({ buildCard }) => {
     const card = buildCard(game(), ctx);
     assert.equal(stateEl(card).textContent, "Current");
     assert.equal(stateEl(card).querySelector(".stfull"), null, "no twin spans for a plain word");
-    assert.match(pillIcon(card), /\bk-cached\b/);
-    assert.match(metaIcon(card), /\bk-cached\b/);
+    assert.match(dotTone(card), /\btx-cached\b/);
     assert.equal(card.dataset.ck, "cached");
     assert.equal(card.dataset.dk, "cached");
   }));
@@ -66,9 +66,8 @@ test("MUTATION TARGET -- below 100: half-disc kind, full and compact word, tx-pa
     assert.match(st.className, /\btx-partial\b/);
     assert.equal(st.querySelector(".stfull").textContent, "Partially cached 42%");
     assert.equal(st.querySelector(".stcompact").textContent, "Partial 42%");
-    assert.match(pillIcon(card), /\bk-partial\b/);
-    assert.doesNotMatch(pillIcon(card), /\bk-cached\b/);
-    assert.match(metaIcon(card), /\bk-partial\b/);
+    assert.match(dotTone(card), /\btx-partial\b/);
+    assert.doesNotMatch(dotTone(card), /\btx-cached\b/);
     assert.equal(card.dataset.ck, "partial:42");
     assert.equal(card.dataset.dk, "cached", "a display overlay, not a status kind");
     assert.equal(card.getAttribute("aria-label"), "Aurora Cascade — Partially cached 42% — 0.5 GB");
@@ -79,8 +78,8 @@ test("MUTATION TARGET -- unknown with bytes on disk: never the green check, 'Cac
   withFakeDom(({ buildCard }) => {
     for (const over of [{ cache_complete_pct: null, cache_missing_chunks: null }, { cache_complete_pct: undefined }]) {
       const card = buildCard(game(over), ctx);
-      assert.match(pillIcon(card), /\bk-unverified\b/, JSON.stringify(over));
-      assert.doesNotMatch(pillIcon(card), /\bk-cached\b/);
+      assert.match(dotTone(card), /\btx-unverified\b/, JSON.stringify(over));
+      assert.doesNotMatch(dotTone(card), /\btx-cached\b/);
       assert.equal(stateEl(card).querySelector(".stfull").textContent, "Cached · not verified");
       assert.equal(stateEl(card).querySelector(".stcompact").textContent, "Not verified");
       assert.match(stateEl(card).className, /\btx-unverified\b/);
@@ -106,7 +105,7 @@ test("MUTATION TARGET -- 'Update available' wins on the card over a partial figu
   withFakeDom(({ buildCard }) => {
     const card = buildCard(game({ update_available: true, cache_complete_pct: 42, cache_missing_chunks: 3 }), ctx);
     assert.equal(stateEl(card).textContent, "Update available");
-    assert.match(pillIcon(card), /\bk-stale\b/);
+    assert.match(dotTone(card), /\btx-stale\b/);
     assert.equal(card.dataset.ck, "stale");
   }));
 
@@ -137,14 +136,13 @@ test("cardCompletenessKey equals what buildCard paints (the library's rebuild ch
     assert.equal(cardCompletenessKey(game({ cache_complete_pct: 42 }), { status: "running", appid: 2010010 }), "updating", "a live job overrides");
   }));
 
-test("MUTATION TARGET -- the 'Never played' pill ('Fully cached, never played') is not shown on a partial card", () =>
+test("MUTATION TARGET -- the 'Never played' line ('Fully cached, never played') is not shown on a partial card", () =>
   withFakeDom(({ buildCard }) => {
     const played0 = { owned_playtime_forever: 0 };
-    assert.ok(buildCard(game(played0), ctx).querySelector(".playpill"), "complete: shown");
-    assert.ok(buildCard(game({ ...played0, cache_complete_pct: null }), ctx).querySelector(".playpill"), "unknown: kept");
+    assert.ok(buildCard(game(played0), ctx).querySelector(".playbadge"), "complete: shown");
+    assert.ok(buildCard(game({ ...played0, cache_complete_pct: null }), ctx).querySelector(".playbadge"), "unknown: kept");
     const partial = buildCard(game({ ...played0, cache_complete_pct: 60, cache_missing_chunks: 4 }), ctx);
-    assert.equal(partial.querySelector(".playpill"), null);
-    assert.equal(partial.querySelector(".playbadge"), null);
+    assert.ok(!partial.querySelector(".playbadge"));
     assert.doesNotMatch(partial.getAttribute("aria-label"), /Fully cached/);
   }));
 
@@ -184,20 +182,20 @@ function rule(text, selector) {
   return m ? m[1] : null;
 }
 
-test("MUTATION TARGET -- css: the compact word everywhere in list and cols3, the full one otherwise", () => {
-  const top = topLevel(appCss);
-  assert.match(rule(top, ".meta .state .stcompact") ?? "", /display:\s*none/);
-  assert.match(rule(top, ".grid.list .meta .state .stfull") ?? "", /display:\s*none/);
-  assert.match(rule(top, ".grid.list .meta .state .stcompact") ?? "", /display:\s*inline/);
-  assert.match(rule(top, ".grid.cols3 .meta .state .stfull") ?? "", /display:\s*none/);
-  assert.match(rule(top, ".grid.cols3 .meta .state .stcompact") ?? "", /display:\s*inline/);
-  // No media block brings the full word back into the list's 118px column.
-  assert.doesNotMatch(appCss.replace(top, ""), /\.grid\.list \.meta \.state \.stfull\s*\{[^}]*display:\s*inline/);
+const kitCss = strip(readFileSync(new URL("../css/kit.css", import.meta.url), "utf8"));
+
+test("MUTATION TARGET -- css: the compact word in the Compact layout, the full one otherwise (WP LIBRARY-2)", () => {
+  assert.match(rule(kitCss, ".kit .stt .state .stcompact") ?? "", /display:\s*none/);
+  assert.match(rule(kitCss, ".kit .grid.compact .stt .state .stfull") ?? "", /display:\s*none/);
+  assert.match(rule(kitCss, ".kit .grid.compact .stt .state .stcompact") ?? "", /display:\s*inline/);
+  // The list column (170px) holds the full word: nothing hides it there.
+  assert.doesNotMatch(kitCss, /\.grid\.list[^{}]*\.stfull\s*\{[^}]*display:\s*none/);
 });
 
 test("MUTATION TARGET -- css: partial is --stale and unverified neutral, neither is --ok", () => {
   assert.match(rule(themeCss, ".sic.k-partial") ?? "", /background:\s*var\(--stale\)/);
   assert.match(rule(themeCss, ".sic.k-unverified") ?? "", /background:\s*var\(--dim-2\)/);
-  assert.match(rule(appCss, ".meta .state.tx-partial") ?? "", /color:\s*var\(--stale\)/);
+  assert.match(rule(appCss, ".tx-partial") ?? "", /color:\s*var\(--stale\)/);
+  assert.match(kitCss, /\.kit \.stt \.state\.tx-stale, \.kit \.stt \.state\.tx-partial\{ color:var\(--stale\); \}/);
   assert.doesNotMatch(themeCss, /k-(partial|unverified)[^{]*\{[^}]*--ok/);
 });
