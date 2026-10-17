@@ -185,3 +185,103 @@
 .kit .tiles[hidden], .kit .tile[hidden], .kit .meter i[hidden], .kit .fcard[hidden], .kit .fg[hidden],
 .kit .field[hidden], .kit .field .lh[hidden], .kit .field label[hidden], .kit .gchip[hidden], .kit .badge[hidden], .kit .jr[hidden],
 .kit .kit-frame[hidden], .kit .kit-section[hidden], .kit .kit-row[hidden], .kit .kit-list[hidden], .kit.kit-page[hidden]{ display:none; }
+
+/* ---------- Add a device drawer (WP ADD-DEVICE-2) ----------
+   docs/design/rc20/clients.html "Add a device", built by
+   components/add-device-sheet.js + add-device-steps.js. The sheet itself
+   carries `kit add-device`; sheet-dialog.js's `.body` becomes a column of
+   fixed header, scrolling body and fixed footer. The scrolling body is the
+   container (`addev`) the QR boxes size against: the drawer is the sheet
+   width (--w-sheet) on a desktop and full width on a phone. */
+.kit.add-device .body{ display:flex; flex-direction:column; flex:1 1 auto; min-height:0; overflow:hidden; padding:0; }
+.kit .ad-head{ flex:none; padding:var(--sp-5) var(--sp-5) 0; }
+.kit .ad-head h2{ margin:0; font:500 var(--fs-5)/1.2 var(--ui); letter-spacing:-.3px; }
+.kit .ad-head .ad-intro{ margin:3px 0 14px; font-size:var(--fs-3); }
+.kit .ad-tabs{
+  display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:4px; margin:0; padding:4px;
+  background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--r-m);
+}
+.kit .ad-tabs .tab{
+  display:grid; justify-items:center; gap:3px; min-width:0; margin:0; padding:8px 4px;
+  border:0; border-radius:9px; background:none; color:var(--dim);
+  font:500 var(--fs-1)/1.2 var(--ui); text-align:center; cursor:pointer;
+}
+.kit .ad-tabs .tab svg{ width:18px; height:18px; }
+.kit .ad-tabs .tab[aria-selected="true"]{ background:var(--raised-2); color:var(--accent); }
+.kit .ad-tabs .tab:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+.kit .ad-scroll{
+  flex:1 1 auto; min-height:0; overflow-y:auto; container:addev / inline-size;
+  padding:var(--sp-4) var(--sp-5); display:grid; gap:14px; align-content:start;
+}
+.kit .ad-foot{
+  flex:none; display:flex; justify-content:space-between; align-items:center; gap:var(--sp-3);
+  padding:14px var(--sp-5); border-top:1px solid var(--line-soft);
+}
+.kit .pair-options{ display:grid; gap:14px; min-width:0; }
+.kit .ad-panel{ display:grid; gap:14px; min-width:0; }
+.kit .ad-demo > .sec{ display:block; margin:0 0 var(--sp-3); }
+
+/* one security notice, tinted, with the triangle */
+.kit .ad-warn{
+  display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:10px;
+  background:color-mix(in srgb, var(--stale) 8%, var(--surface));
+  border:1px solid color-mix(in srgb, var(--stale) 28%, var(--surface));
+  font-size:var(--fs-2); line-height:1.45; color:var(--dim);
+}
+.kit .ad-warn svg{ width:16px; height:16px; color:var(--stale); flex:none; margin-top:1px; }
+.kit .ad-warn p{ margin:0; }
+
+/* OS pick box (opened without a tab) */
+.kit .ad-pick{ display:grid; gap:4px; padding:14px; background:var(--bg); border:1px dashed var(--line); border-radius:10px; }
+.kit .ad-pick b{ font:500 var(--fs-3)/1.35 var(--ui); }
+.kit .ad-pick span{ font-size:var(--fs-2); line-height:1.45; color:var(--dim); }
+
+/* numbered steps */
+.kit .steps{ list-style:none; margin:0; padding:0; display:grid; gap:14px; }
+.kit .steps > li{ display:grid; grid-template-columns:24px minmax(0, 1fr); gap:10px; }
+.kit .steps .n{
+  width:24px; height:24px; border-radius:50%; background:var(--raised-2); color:var(--accent);
+  display:grid; place-items:center; font:700 var(--fs-2)/1 var(--ui);
+}
+.kit .steps > li > div{ display:grid; gap:var(--sp-2); align-content:start; min-width:0; }
+.kit .steps h3{ margin:2px 0 0; font:500 var(--fs-3)/1.35 var(--ui); }
+.kit .ad-desc{ margin:0; font-size:var(--fs-2); line-height:1.45; color:var(--dim); }
+.kit .steps h3 + .ad-desc, .kit .steps h3 + .ad-slot{ margin-top:-6px; }
+.kit .pair-open{ color:var(--accent); font-weight:500; font-size:var(--fs-3); }
+
+/* the secret: blurred stand-in, revealed code, Show + Copy side by side */
+.kit .ad-secret, .kit .pair-reveal, .kit .ad-qrmore, .kit .pair-download, .kit .ad-slot{ display:grid; gap:var(--sp-2); min-width:0; }
+.kit .code{
+  display:block; box-sizing:border-box; width:100%; min-width:0; margin:0; padding:12px;
+  background:var(--bg); border:1px solid var(--line); border-radius:10px; color:var(--text);
+  font:400 var(--fs-2)/1.6 var(--mono); white-space:pre; overflow:auto; resize:vertical;
+}
+.kit input.code{ resize:none; }
+.kit .code.hid{ color:var(--dim); filter:blur(5px); user-select:none; overflow:hidden; resize:none; }
+.kit .ad-acts{ display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2); }
+.kit .ad-copies{ display:contents; }
+.kit .pair-download .btn{ text-decoration:none; }
+
+/* QR boxes: 164px code beside a button column; stacked in a narrow drawer */
+.kit .ad-qrbox{ display:grid; grid-template-columns:164px minmax(0, 1fr); gap:var(--sp-3) var(--sp-4); align-items:center; }
+.kit .ad-qrbox .pair-qr{ grid-column:1; grid-row:1; display:block; width:164px; height:164px; border-radius:var(--r-m); }
+.kit .ad-qrmask{ grid-column:1; grid-row:1; display:block; width:164px; height:164px; }
+.kit .ad-qrmask .pair-qr{ filter:blur(9px); opacity:.55; }
+.kit .ad-qrside{ grid-column:2; grid-row:1; display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-2); min-width:0; }
+.kit .ad-qrbox .pair-reveal{ display:contents; }
+.kit .ad-qrbox .pair-reveal > :not(svg){ grid-column:1 / -1; }
+@container addev (max-width:420px){
+  .kit .ad-qrbox{ grid-template-columns:minmax(0, 1fr); }
+  .kit .ad-qrside{ grid-column:1; grid-row:2; }
+}
+
+/* [hidden] guards for the drawer's display-styled classes (same rule as the
+   kit's guard block above; these come later, so they win). */
+.kit.add-device .ad-head[hidden], .kit.add-device .ad-tabs[hidden], .kit.add-device .ad-scroll[hidden],
+.kit.add-device .ad-foot[hidden], .kit.add-device .pair-options[hidden], .kit.add-device .ad-panel[hidden],
+.kit.add-device .ad-warn[hidden], .kit.add-device .ad-pick[hidden], .kit.add-device .steps[hidden],
+.kit.add-device .ad-secret[hidden], .kit.add-device .pair-reveal[hidden], .kit.add-device .ad-qrmore[hidden],
+.kit.add-device .pair-download[hidden], .kit.add-device .code[hidden], .kit.add-device .ad-acts[hidden],
+.kit.add-device .ad-qrbox[hidden], .kit.add-device .ad-qrbox .pair-qr[hidden], .kit.add-device .ad-qrside[hidden],
+.kit.add-device .ad-qrbox .pair-reveal[hidden], .kit.add-device .ad-demo[hidden], .kit.add-device .ad-slot[hidden],
+.kit.add-device .ad-qrmask[hidden]{ display:none; }

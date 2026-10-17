@@ -104,6 +104,27 @@ test("wiring: Overview shows the cache status as a fact line with its own data-r
   assert.match(src, /heading\.className = "detail-box-title";\s*heading\.textContent = "Garbage collection";/);
 });
 
+test("ADD-DEVICE-2: select(null) selects no tab and hides every panel; the first tab stays reachable", () => {
+  const { tabs, panels, buttons } = make("b");
+  tabs.select(null);
+  assert.equal(tabs.selectedId(), null);
+  assert.deepEqual(selectedIds(buttons), []);
+  assert.deepEqual(panels.map((p) => p.hidden), [true, true, true]);
+  assert.deepEqual(buttons.map((b) => b.tabIndex), [0, -1, -1]);
+  tabs.select("c");
+  assert.deepEqual(selectedIds(buttons), ["tab-c"]);
+});
+
+test("ADD-DEVICE-2: an optional icon goes in front of the label; the name stays the label", () => {
+  const icon = dom.document.createElement("svg");
+  icon.setAttribute("aria-hidden", "true");
+  const panel = dom.document.createElement("div");
+  const tabs = createTabs({ idPrefix: "i", label: "L", tabs: [{ id: "x", label: "Ex", panel, icon }], selected: "x" });
+  const btn = tabs.tablist.children[0];
+  assert.equal(btn.children[0] === icon, true, "icon first");
+  assert.equal(btn.textContent, "Ex");
+});
+
 test("wiring: Maintenance holds Verify, the GC box and a red delete zone whose button opens the shared confirm", () => {
   const src = readFileSync(new URL("../js/components/game-detail-sheet.js", import.meta.url), "utf8");
   const m = src.slice(src.indexOf("function buildMaintenancePanel("), src.indexOf("/** Full rebuild of the sheet body"));
