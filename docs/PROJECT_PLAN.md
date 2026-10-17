@@ -3599,9 +3599,10 @@ below carry their own later dates, item 12 is the current one).
           the kit page and the goldens; LEARNINGS entries for "structure
           is not anatomy", "mockup CSS must be the real CSS", "no visual
           package without a rendered screenshot".
-      - [ ] close: `dev.sh test-web`, `dev.sh verify`, web goldens green,
-        browser check of every page at 1400 / 1000 / 400px, docs, LEARNINGS,
-        tag `v0.1.0-rc20` after main CI is green
+      - [x] close: `dev.sh test-web`, `dev.sh verify` (613/0), web goldens
+        green, rendered check of every page at 1400 / 1000 / 400px, docs,
+        LEARNINGS, tag `v0.1.0-rc20` (operator's browser check follows on
+        the dev instance, `docs/handover/rc20-visual-check.md`)
     - [ ] **rc20.x (optional patch)**: new defaults for `VAULT_NGINX_AIO` /
       `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027,
       box in the rc19.3 block) says so, with a new ADR carrying the numbers;
@@ -3610,6 +3611,15 @@ below carry their own later dates, item 12 is the current one).
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
       the operator's rc20 visual check; no rc21 tag without the operator's yes)
+      - [ ] **MOBILE-1** (web, first package of rc21; user decision
+        2026-10-17) phone fine-tuning on top of the kit: 44px touch targets
+        via `@media (pointer:coarse)` (segs, chips, (i), `.btn.sm`, card
+        quick action); the QR pairing flow end to end at 400px; detail
+        sheet, confirm dialogs and expanded History rows as bottom sheets
+        with scrolling tabs; safe-area insets for the bottom nav and the
+        savebar, landscape and 200% text; visible overflow cue on scrolling
+        segs; goldens for one open sheet and dialog per page at 400px.
+        Phone mockup from the kit first, operator approves.
       - [x] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
         wrong-size chunk files of an app's target manifests behind the
         `deletion.py` cache-root guards (size re-checked right before the
