@@ -11,11 +11,12 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 - TOKENS-SYNC-1 (061b4ce, c1a3eaf, Android golden 58eb2ee)
 - CLIENTS-4 (3751e12, 3a89818)
 - ADD-DEVICE-2 (0a26cba, b6e01ea; branch wp/rc20-add-device-2b)
+- DOWNLOADS-2 (f72735f, d021c2a; branch wp/rc20-downloads-2b)
 
 ## Running (2026-10-17, resumed 13:40 after a session-limit stop)
 
-- DOWNLOADS-2: review FAIL (A-D layout fixes), fixes + rebase in progress -> `wp/rc20-downloads-2b`.
 - SETTINGS-2: coder on `wp/rc20-settings-2`.
+- LIBRARY-2: coder on `wp/rc20-library-2`.
 
 ## Next
 

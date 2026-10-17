@@ -3553,7 +3553,8 @@ below carry their own later dates, item 12 is the current one).
           box; secret as a blurred `.code` block with Show + Copy side by
           side; Phone tab with two side-by-side QR boxes; OS pick panel as
           a dashed box. Tabs on `components/tabs.js`.
-        - [ ] **DOWNLOADS-2** per `kit.html` "Downloads, width-aware":
+        - [x] **DOWNLOADS-2** (f72735f, d021c2a; three columns from a 1100px
+          container, wide page at BP-M) per `kit.html` "Downloads, width-aware":
           page head with Pause all right; hero = label + range seg row,
           big number + pill + limit caption, graph (96px, grid lines) in
           the middle, four totals as 2x2 tiles on the right, mini line
@@ -3588,6 +3589,8 @@ below carry their own later dates, item 12 is the current one).
           + X close, overlapping mini cover, status pill, Verify + Update in
           the header row, two-column Overview with a 2x2 facts grid, no
           bottom Close button.
+        - [ ] nit (DOWNLOADS-2 review): the bypass banner (`.banner-wrap`,
+          `--w-text`) is narrower than the Downloads page at BP-M.
         - [ ] nit (WEB-GOLDENS-1 review): goldens for one open sheet per page
           (library detail, add a device) deferred; `dev.sh test-web-shots`
           is operator infrastructure, requested as Antrag A-20261017-01.
