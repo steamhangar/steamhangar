@@ -106,7 +106,7 @@ test("heroModel: no figures before an answer, with the feed off, or for an old s
   assert.match(heroModel({ unsupported: true }).note, /does not report traffic statistics/);
 });
 
-test("MUTATION PIN: graphModel — 600x96 geometry, peak caption, null for another range or an all-zero series", () => {
+test("MUTATION PIN: graphModel — 600x96 geometry, highest caption (Android twin wording), null for another range or an all-zero series", () => {
   const series = {
     event_feed: { state: "ok" },
     range: "6h",
@@ -117,7 +117,7 @@ test("MUTATION PIN: graphModel — 600x96 geometry, peak caption, null for anoth
   series.range_start = series.points[0].t;
   const g = graphModel(series, "6h");
   assert.equal(g.line, "M0 96 L300 0 L600 48");
-  assert.deepEqual(g.axis, ["6 h ago", "peak 10.0 MB/s", "now"]);
+  assert.deepEqual(g.axis, ["6 h ago", "highest 10.0 MB/s", "now"]);
   assert.equal(graphModel(series, "24h"), null, "an answer for another range is not drawn");
   assert.equal(graphModel({ ...series, points: series.points.map((p) => ({ ...p, bytes_per_second: 0 })) }, "6h"), null);
   assert.deepEqual(GRAPH_GRID, [24, 48, 72]);

@@ -201,10 +201,13 @@ class TrafficWebTwinTest {
                 "els.agentlessNote.hidden = !clients.some((c) => isAddressClient(c));",
             ),
         )
-        assertQuoted("views/downloads.js", listOf(LOADING_STATISTICS_TEXT, SERIES_END_TEXT, NOT_AVAILABLE))
+        // WP DOWNLOADS-2: the statistics moved from views/downloads.js into
+        // the hero component; its state comes in as `error`, not
+        // `traffic.error`.
+        assertQuoted("components/downloads-hero.js", listOf(LOADING_STATISTICS_TEXT, SERIES_END_TEXT, NOT_AVAILABLE))
         assertFragments(
-            "views/downloads.js",
-            listOf("Could not load the statistics: \${traffic.error}", "`highest \${formatSpeed(geo.maxBytesPerSecond) || \"0 MB/s\"}`"),
+            "components/downloads-hero.js",
+            listOf("Could not load the statistics: \${error}", "`highest \${formatSpeed(geo.maxBytesPerSecond) || \"0 MB/s\"}`"),
         )
     }
 }
