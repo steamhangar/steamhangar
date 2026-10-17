@@ -137,11 +137,13 @@ test("MUTATION TARGET -- header: a partial game shows 'Partially cached N%' with
   }));
 
 test("MUTATION TARGET -- wiring: render() builds the block after the facts with the current Verify ids", () => {
-  const r = body("function render() {");
+  // LIBRARY-DETAIL-1: the block lives in the Maintenance tab ("Verify" box).
+  const r = body("function buildMaintenancePanel(gameLike, group) {");
   assert.match(
     r,
-    /contentEl\.append\(buildFactLines\(gameLike\)\);\s*\/\/[^\n]*\n\s*const verifyIds = currentVerifyAppids\(\);\s*const completeness = buildCompletenessSection\(\s*gameLike,\s*currentGroup\(\),\s*verifyIds,\s*\(\) => startSheetVerify\(verifyIds\),\s*sheetTitle\(gameLike\),\s*\);\s*if \(completeness\) contentEl\.append\(completeness\);/,
+    /const verifyIds = currentVerifyAppids\(\);\s*const completeness = buildCompletenessSection\(\s*gameLike,\s*group,\s*verifyIds,\s*\(\) => startSheetVerify\(verifyIds\),\s*sheetTitle\(gameLike\),\s*\);\s*if \(completeness\) panel\.append\(buildMaintenanceBox\("Verify", \[completeness\]\)\);/,
   );
+  assert.match(body("function render() {"), /const maintenance = buildMaintenancePanel\(gameLike, group\);/);
 });
 
 test("MUTATION TARGET -- wiring: Verify ids are verifyAppids over the game (and its packages)", () => {

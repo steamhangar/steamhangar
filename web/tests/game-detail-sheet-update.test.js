@@ -111,10 +111,13 @@ test("MUTATION TARGET -- wiring: the header uses buildDetailStatusRow with the g
 });
 
 test("MUTATION TARGET -- wiring: render() offers 'Update now' when there is no job and no download action", () => {
-  const r = body("function render() {");
+  // LIBRARY-DETAIL-1: the primary action row sits above the tabs and is
+  // built by buildPrimaryAction (job controls, download, then update).
+  assert.match(body("function render() {"), /const actions = buildPrimaryAction\(gameLike, trackedJob\);\s*if \(actions\) contentEl\.append\(actions\);/);
+  const r = body("function buildPrimaryAction(gameLike, trackedJob) {");
   assert.match(
     r,
-    /if \(action\) contentEl\.append\(buildDownloadButton\(action\)\);\s*else \{[\s\S]*?const updateAppids = currentUpdateAppids\(\);\s*if \(updateAppids\.length\) contentEl\.append\(buildUpdateNowButton\(updateAppids, \(\) => startSheetUpdate\(updateAppids\)\)\);/,
+    /if \(action\) return buildDownloadButton\(action\);[\s\S]*?const updateAppids = currentUpdateAppids\(\);\s*if \(updateAppids\.length\) return buildUpdateNowButton\(updateAppids, \(\) => startSheetUpdate\(updateAppids\)\);/,
   );
 });
 

@@ -3466,7 +3466,7 @@ below carry their own later dates, item 12 is the current one).
         games"; one status line per card. Long-press and right-click
         selection stay. Adapt `library-*.test.js`, `game-card*.test.js`,
         `css-bulk-bar-room.test.js`, `keyboard-pointer-model.test.js`.
-      - [ ] **LIBRARY-DETAIL-1** game detail sheet with tabs Overview /
+      - [x] **LIBRARY-DETAIL-1** game detail sheet with tabs Overview /
         Depots / Maintenance (Verify, GC check, red "Delete from cache"
         zone); the two duplicate delete-confirm dialogs (`library.js`,
         `game-detail-sheet.js`) become one shared component. Adapt
