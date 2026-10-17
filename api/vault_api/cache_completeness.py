@@ -705,7 +705,7 @@ def is_completable(figure: Completeness) -> bool:
     and the scheduler's automatic completion act on. A game short only of
     chunk files with the wrong size is incomplete but not completable: a
     forced prefill serves those files from disk and cannot replace them
-    (repair is the CACHE-REPAIR-1 follow-up)."""
+    (repair: POST /v1/cache/{appid}/repair, CACHE-REPAIR-1)."""
     return is_incomplete(figure) and (figure.missing_chunks or 0) > 0
 
 
