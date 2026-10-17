@@ -1,9 +1,10 @@
 /**
  * A small WAI-ARIA tab set (WP LIBRARY-DETAIL-1): automatic activation,
- * roving tabindex, Left/Right (wrapping), Home and End, the same model the
- * Add-a-device sheet uses (`components/add-device-sheet.js`). Built for the
- * game detail sheet, which rebuilds its body on structural changes and so
- * needs the selected tab handed back in on every build.
+ * roving tabindex, Left/Right (wrapping), Home and End. Built for the game
+ * detail sheet, which rebuilds its body on structural changes and so needs
+ * the selected tab handed back in on every build; the Add-a-device drawer
+ * (`components/add-device-sheet.js`, WP ADD-DEVICE-2) uses it too, with an
+ * icon per tab and `select(null)` for "no tab chosen yet".
  *
  * Every panel is built by the caller and passed in; the helper only wires
  * ids, `aria-controls`/`aria-labelledby`, `hidden` and the keyboard. All
@@ -15,10 +16,12 @@
  * @param {object} opts
  * @param {string} opts.idPrefix unique per tab set, e.g. "detail"
  * @param {string} opts.label accessible name of the tab list
- * @param {{id: string, label: string, panel: HTMLElement}[]} opts.tabs
+ * @param {{id: string, label: string, panel: HTMLElement, icon?: Node}[]} opts.tabs
+ *   `icon` (optional) is put in front of the label; it should carry no text
+ *   (aria-hidden), so the tab's name stays the label.
  * @param {string} opts.selected id of the tab shown first (falls back to the first)
  * @param {(id: string) => void} [opts.onSelect] called after a user selection
- * @returns {{tablist: HTMLElement, select: (id: string) => void, selectedId: () => string}}
+ * @returns {{tablist: HTMLElement, select: (id: string|null) => void, selectedId: () => string|null}}
  */
 export function createTabs({ idPrefix, label, tabs, selected, onSelect }) {
   const tablist = document.createElement("div");
@@ -32,7 +35,8 @@ export function createTabs({ idPrefix, label, tabs, selected, onSelect }) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "tab";
-    btn.textContent = t.label;
+    if (t.icon) btn.append(t.icon, t.label);
+    else btn.textContent = t.label;
     btn.id = `${idPrefix}-tab-${t.id}`;
     btn.dataset.role = `tab-${t.id}`;
     btn.setAttribute("role", "tab");
@@ -56,13 +60,15 @@ export function createTabs({ idPrefix, label, tabs, selected, onSelect }) {
   });
   tablist.append(...buttons);
 
+  /** Select a tab by id; `null` selects none (every panel hidden). */
   function select(id) {
-    current = id;
+    current = tabs.some((t) => t.id === id) ? id : null;
     tabs.forEach((t, i) => {
-      const on = t.id === id;
+      const on = t.id === current;
       buttons[i].setAttribute("aria-selected", on ? "true" : "false");
-      // Roving tabindex: only the selected tab is in the Tab order.
-      buttons[i].tabIndex = on ? 0 : -1;
+      // Roving tabindex: only the selected tab is in the Tab order, or the
+      // first one when none is selected, so the keyboard can still enter.
+      buttons[i].tabIndex = on || (current === null && i === 0) ? 0 : -1;
       t.panel.hidden = !on;
     });
   }

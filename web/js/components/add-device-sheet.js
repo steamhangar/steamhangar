@@ -1,5 +1,6 @@
 /**
- * Settings → "Add a device" sheet (WP PAIR-1).
+ * Clients → "Add a device" drawer (WP PAIR-1; rebuilt on the UI kit in
+ * WP ADD-DEVICE-2).
  *
  * Three ways to set up another device with this hangar's address and the
  * ONE shared API key this browser already holds (user decision 2026-10-04,
@@ -35,11 +36,21 @@
  * earlier open is dropped (generation token).
  *
  * The key is a secret, so every option's content is built only after an
- * explicit "Show" press, next to a warning, and removed from the DOM again
- * on "Hide" and whenever the sheet closes (any path: sheet-dialog.js
- * `onClose`). Nothing here logs the key. In demo mode, or with no key
- * stored, the sheet says there is nothing to share and shows no option;
- * demo mode still shows the app download (from the demo's fake index).
+ * explicit "Show" press, below one security notice, and removed from the DOM
+ * again on "Hide", when another tab is chosen and whenever the sheet closes
+ * (any path: sheet-dialog.js `onClose`). Until "Show" a blurred stand-in
+ * (bullets, or a QR code of a harmless sentence) holds the secret's place
+ * and the Copy button is disabled. Nothing here logs the key. In demo mode,
+ * or with no key stored, the sheet says there is nothing to share and shows
+ * no option; demo mode still shows the app download (from the demo's fake
+ * index).
+ *
+ * Layout (WP ADD-DEVICE-2, `docs/design/rc20/clients.html` "Add a device"):
+ * a UI-kit drawer (the sheet carries `kit`) with a fixed header (title,
+ * intro, the device-type tabs with icons on `components/tabs.js`), a
+ * scrolling body (notice, numbered steps per tab, the OS pick box when
+ * opened without a tab) and a fixed footer (hint + Close). The step, icon
+ * and stand-in building blocks live in `components/add-device-steps.js`.
  *
  * Same module-singleton shape as clients-sheet.js; DOM wiring pinned with
  * fake-dom in web/tests/add-device-wiring.test.js.
@@ -49,7 +60,8 @@ import { api, getStoredApiKey, isDemoMode } from "../api.js";
 import { onViewChange } from "../router.js";
 import { showToast } from "./toast.js";
 import { createSheetDialog } from "./sheet-dialog.js";
-import { encodeQrText, qrSvgGeometry } from "../lib/qr-encode.js";
+import { createTabs } from "./tabs.js";
+import { buildQrSvg, codeMask, el, icon, qrMask, stepList } from "./add-device-steps.js";
 import {
   APP_KEY_UNSUPPORTED_TEXT,
   apiBaseUrl,
@@ -82,15 +94,6 @@ import {
 
 export const SECRET_WARNING =
   "Anyone who sees this can control your hangar. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync.";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function readAgentUrl() {
   try {
@@ -146,7 +149,7 @@ async function copyText(text, field) {
 }
 
 function copyButton(label, getText, field) {
-  const btn = el("button", "btn ghost sm", label);
+  const btn = el("button", "btn ghost", label);
   btn.type = "button";
   btn.addEventListener("click", async () => {
     const ok = await copyText(getText(), field);
@@ -156,9 +159,20 @@ function copyButton(label, getText, field) {
   return btn;
 }
 
+/** The Copy button's place before "Show": disabled, so the row reads
+ * "Show + Copy" as in the mockup while there is nothing to copy yet. */
+function idleCopyButton() {
+  const btn = el("button", "btn ghost", "Copy");
+  btn.type = "button";
+  btn.disabled = true;
+  btn.title = "Press Show first.";
+  btn.dataset.role = "copy-idle";
+  return btn;
+}
+
 function readonlyField(value, { multiline = false, label }) {
   const field = document.createElement(multiline ? "textarea" : "input");
-  field.className = multiline ? "inp txt pair-snippet" : "inp txt pair-value";
+  field.className = "code";
   if (!multiline) field.type = "text";
   field.readOnly = true;
   field.spellcheck = false;
@@ -168,152 +182,58 @@ function readonlyField(value, { multiline = false, label }) {
   return field;
 }
 
-/** The QR code as an inline SVG: dark modules on a white plate including
- * the quiet zone, in every theme (scanners want dark-on-light). */
-function buildQrSvg(text, { label = "QR code for pairing the SteamHangar app", role = "pair-qr" } = {}) {
-  const qr = encodeQrText(text, { ecl: "M" });
-  const { side, d } = qrSvgGeometry(qr.modules);
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("class", "pair-qr");
-  svg.setAttribute("viewBox", `0 0 ${side} ${side}`);
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", label);
-  svg.setAttribute("shape-rendering", "crispEdges");
-  svg.dataset.role = role;
-  svg.dataset.qrVersion = String(qr.version);
-  const bg = document.createElementNS(SVG_NS, "rect");
-  bg.setAttribute("width", String(side));
-  bg.setAttribute("height", String(side));
-  bg.setAttribute("fill", "#ffffff");
-  const path = document.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", d);
-  path.setAttribute("fill", "#000000");
-  svg.append(bg, path);
-  return svg;
-}
-
 // ---------------------------------------------------------------------
-// Sheet scaffold
+// Options and their Show gate
 // ---------------------------------------------------------------------
 
-const dialog = createSheetDialog({ ariaLabel: "Add a device", variant: "drawer", onClose: hideAll });
+const options = [];
 
-const heading = el("h2", null, "Add a device");
-const intro = el(
-  "p",
-  "hint pair-intro",
-  "Set up a phone, another browser or a PC with this hangar's address and API key, without typing them.",
-);
-const unavailable = el("p", "hint");
-unavailable.dataset.role = "pair-unavailable";
-unavailable.hidden = true;
-const optionsWrap = el("div", "pair-options");
-// Demo mode (and only there): the phone's app download on its own, since
-// the options themselves are hidden (nothing to share).
-const demoPhone = el("div", "pair-option");
-demoPhone.dataset.role = "demo-app-download";
-demoPhone.append(el("h4", "sec", "Phone (Android app)"));
-demoPhone.hidden = true;
-const closeBtn = el("button", "btn wide ghost", "Close");
-closeBtn.type = "button";
-closeBtn.addEventListener("click", () => dialog.close());
-
-/** One option (a tab panel): heading, description, a Show/Hide toggle and the
- * (initially empty) reveal area. `build(revealEl)` fills it on Show. The one
- * security notice lives above the tabs, not in each option. */
-function buildOption({ id, title, desc, showLabel, extra, build }) {
-  const wrap = el("div", "pair-option");
-  wrap.dataset.option = id;
-  wrap.id = `pair-panel-${id}`;
-  wrap.setAttribute("role", "tabpanel");
-  wrap.setAttribute("aria-labelledby", `pair-tab-${id}`);
-  wrap.hidden = true;
-  const h = el("h4", "sec", title);
-  const p = el("p", "foot-note", desc);
-  wrap.append(h, p);
-  if (extra) wrap.append(extra);
+/** One option (a tab panel) and its Show/Hide gate. `mask` is the blurred
+ * stand-in shown until "Show"; `reveal` the (initially empty) area that
+ * `build(reveal, key, option)` fills on Show; `copies` the slot next to the
+ * toggle that holds the Copy buttons while shown (an idle, disabled Copy
+ * before). The one security notice lives above the panels. */
+function makeOption({ id, showLabel, mask, build, copies = true }) {
+  const panel = el("div", "pair-option ad-panel");
+  panel.dataset.option = id;
+  panel.hidden = true;
   const reveal = el("div", "pair-reveal");
   reveal.id = `pair-reveal-${id}`;
   reveal.dataset.role = `reveal-${id}`;
   reveal.hidden = true;
-  const toggle = el("button", "btn ghost sm", showLabel);
+  const toggle = el("button", "btn", showLabel);
   toggle.type = "button";
   toggle.dataset.role = `show-${id}`;
   toggle.setAttribute("aria-expanded", "false");
   toggle.setAttribute("aria-controls", reveal.id);
-  const option = { id, panel: wrap, toggle, reveal, showLabel, build, shown: false };
+  let slot = null;
+  if (copies) {
+    slot = el("span", "ad-copies");
+    slot.dataset.role = `copies-${id}`;
+    slot.append(idleCopyButton());
+  }
+  const option = { id, panel, toggle, reveal, mask, copies: slot, showLabel, build, shown: false };
   toggle.addEventListener("click", () => {
     if (option.shown) hideOption(option);
     else showOption(option);
   });
-  wrap.append(toggle, reveal);
   options.push(option);
-  return wrap;
+  return option;
 }
 
-const options = [];
+/** The secret block of a link or command: blurred stand-in, reveal area,
+ * then Show + Copy side by side. */
+function secretBlock(option) {
+  const block = el("div", "ad-secret");
+  const acts = el("div", "ad-acts");
+  acts.append(option.toggle, option.copies);
+  block.append(option.mask, option.reveal, acts);
+  return block;
+}
 
-// ---- Tabs (WAI-ARIA tab pattern, automatic activation) -----------------------
-
-const TABS = [
-  { id: "phone", label: "Phone" },
-  { id: "browser", label: "Browser" },
-  { id: "windows", label: "Windows" },
-  { id: "linux", label: "Linux / SteamOS" },
-];
-const notice = el("p", "pair-warn", SECRET_WARNING);
-notice.dataset.role = "pair-notice";
-const tablist = el("div", "pair-tabs");
-tablist.setAttribute("role", "tablist");
-tablist.setAttribute("aria-label", "Device type");
-const tabButtons = TABS.map((t, i) => {
-  const btn = el("button", "pair-tab", t.label);
-  btn.type = "button";
-  btn.id = `pair-tab-${t.id}`;
-  btn.dataset.role = `tab-${t.id}`;
-  btn.setAttribute("role", "tab");
-  btn.setAttribute("aria-controls", `pair-panel-${t.id}`);
-  btn.addEventListener("click", () => selectTab(t.id));
-  btn.addEventListener("keydown", (event) => {
-    let next = null;
-    if (event.key === "ArrowRight") next = (i + 1) % TABS.length;
-    else if (event.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = TABS.length - 1;
-    if (next === null) return;
-    event.preventDefault();
-    selectTab(TABS[next].id);
-    tabButtons[next].focus();
-  });
-  return btn;
-});
-tablist.append(...tabButtons);
-// Shown instead of a panel when the sheet opens with no tab (the caller
-// does not know the device's operating system).
-const tabPick = el("p", "hint pair-left", "The command depends on the device's operating system. Choose a device type above.");
-tabPick.dataset.role = "tab-pick";
-tabPick.hidden = true;
-
-/** Select a tab, or none with `null`. Secrets revealed in the panels being
- * left leave the DOM (not only the screen). */
-function selectTab(id) {
-  TABS.forEach((t, i) => {
-    const on = t.id === id;
-    tabButtons[i].setAttribute("aria-selected", on ? "true" : "false");
-    // Roving tabindex: the selected tab, or the first one when none is.
-    tabButtons[i].tabIndex = on || (id === null && i === 0) ? 0 : -1;
-  });
-  for (const option of options) {
-    const on = option.id === id;
-    option.panel.hidden = !on;
-    if (!on && option.shown) hideOption(option);
-  }
-  tabPick.hidden = id !== null;
-  // The agent address field is shared by the Windows and Linux commands.
-  if (id === "windows" || id === "linux") {
-    const panel = id === "windows" ? windowsOption.panel : linuxOption.panel;
-    if (agentUrlField.parentNode !== panel) panel.insertBefore(agentUrlField, panel.childNodes[2] || null);
-  }
+/** Put the Copy buttons of a shown option next to its toggle. */
+function setCopies(option, buttons) {
+  if (option.copies) option.copies.replaceChildren(...buttons);
 }
 
 function showOption(option) {
@@ -321,7 +241,9 @@ function showOption(option) {
   if (isDemoMode() || !isUsableKey(key)) return; // the sheet shows the note instead
   option.shown = true;
   option.reveal.replaceChildren();
-  option.build(option.reveal, key);
+  setCopies(option, []);
+  option.mask.hidden = true;
+  option.build(option.reveal, key, option);
   option.reveal.hidden = false;
   option.toggle.textContent = "Hide";
   option.toggle.setAttribute("aria-expanded", "true");
@@ -332,6 +254,8 @@ function hideOption(option) {
   // MUTATION TARGET: the secret leaves the DOM, not only the screen.
   option.reveal.replaceChildren();
   option.reveal.hidden = true;
+  setCopies(option, [idleCopyButton()]);
+  option.mask.hidden = false;
   option.toggle.textContent = option.showLabel;
   option.toggle.setAttribute("aria-expanded", "false");
 }
@@ -372,8 +296,8 @@ async function loadDist() {
 // paintLinux (review S1, one layer, one pin).
 function paintDistConsumers() {
   paintAppDownload();
-  paintWindows(windowsOption.reveal);
-  paintLinux(linuxOption.reveal);
+  paintWindows();
+  paintLinux();
 }
 
 // ---- Phone: the app itself (not a secret) -----------------------------------
@@ -383,7 +307,7 @@ appDownload.dataset.role = "app-download";
 
 function paintAppDownload() {
   if (dist.state === null) {
-    appDownload.replaceChildren(el("p", "foot-note", "Looking up the app download…"));
+    appDownload.replaceChildren(el("p", "hint", "Looking up the app download…"));
     return;
   }
   if (dist.state.error) {
@@ -394,7 +318,7 @@ function paintAppDownload() {
   }
   const plan = appDownloadPlan(dist.state.response, window.location.origin);
   if (plan.kind !== "download") {
-    const note = el("p", "hint pair-left", noAppText(plan.version) + " ");
+    const note = el("p", "hint", noAppText(plan.version) + " ");
     note.dataset.role = "app-download-none";
     const link = el("a", null, "Releases");
     link.href = RELEASES_PAGE_URL;
@@ -406,98 +330,123 @@ function paintAppDownload() {
   }
   const where = plan.source === "local" ? "from this vault" : "from the project's GitHub release (this vault has no copy)";
   const size = formatDownloadSize(plan.size);
-  const acts = el("div", "pair-acts");
+  const side = el("div", "ad-qrside");
   if (isDemoMode()) {
     // Review N3: the demo's index is fake, so no link that leads nowhere.
-    const note = el("p", "foot-note", `Demo mode: on a connected vault a "Download app" button here downloads ${plan.name} ${where}.`);
+    const note = el("p", "hint", `Demo mode: on a connected vault a "Download app" button here downloads ${plan.name} ${where}.`);
     note.dataset.role = "app-download-demo";
-    acts.append(note);
+    side.append(note);
   } else {
-    const btn = el("a", "btn primary sm", "Download app");
+    const btn = el("a", "btn pri", "Download app");
     btn.href = plan.url;
     btn.dataset.role = "app-download-link";
     btn.dataset.source = plan.source;
     btn.title = `${plan.name}${size ? `, ${size}` : ""}, ${where}.`;
-    acts.append(btn);
+    side.append(btn);
   }
+  side.append(el("p", "hint", `Android app${size ? ` · ${size}` : ""}`));
   // DIST-1b review nit: the demo's code points into a fake index, so the
   // demo caption must not invite a scan.
   const caption = el(
     "p",
-    "foot-note",
+    "ad-desc",
     isDemoMode()
       ? "Demo: the code shows where a connected vault offers the app."
       : "Scan the code with the phone's camera to download and install the app.",
   );
   caption.dataset.role = "app-download-caption";
   if (!isDemoMode()) caption.title = `${plan.url}\nAndroid asks once to allow installs from the browser. ${plan.name} ${where}.`;
-  appDownload.replaceChildren(
-    caption,
-    buildQrSvg(plan.url, { label: "QR code to download the SteamHangar app", role: "app-download-qr" }),
-    acts,
-  );
+  const box = el("div", "ad-qrbox");
+  box.append(buildQrSvg(plan.url, { label: "QR code to download the SteamHangar app", role: "app-download-qr" }), side);
+  appDownload.replaceChildren(caption, box);
 }
 
-// ---- Phone ---------------------------------------------------------------
+// ---- Phone: pairing ----------------------------------------------------------
 
 function buildPhone(reveal, key) {
   // Review finding 8: mirror the app's key rule; a code the app refuses is
   // worse than a plain note.
   if (!isAppPairableKey(key)) {
-    const note = el("p", "hint pair-left", APP_KEY_UNSUPPORTED_TEXT);
+    const note = el("p", "hint", APP_KEY_UNSUPPORTED_TEXT);
     note.dataset.role = "pair-app-unsupported";
     reveal.append(note);
     return;
   }
   const uri = buildAppPairUri(apiBaseUrl(window.location), key);
-  reveal.append(buildQrSvg(uri));
   const link = el("a", "pair-open", "Open on this phone");
   link.href = uri;
   link.dataset.role = "pair-app-link";
   const field = readonlyField(uri, { label: "Pairing link for the SteamHangar app" });
   field.dataset.role = "pair-app-uri";
-  const acts = el("div", "pair-acts");
+  const acts = el("div", "ad-acts");
   acts.append(link, copyButton("Copy link", () => uri, field));
-  reveal.append(
-    el("p", "foot-note", "Scan it with the phone, or open the link on a phone that already has the SteamHangar app."),
-    acts,
+  const more = el("div", "ad-qrmore");
+  more.append(
+    el("p", "hint", "Scan it with the phone, or open the link on a phone that already has the SteamHangar app."),
     field,
+    acts,
+  );
+  reveal.append(buildQrSvg(uri), more);
+}
+
+const phoneOption = makeOption({ id: "phone", showLabel: "Show pairing QR code", mask: qrMask(), build: buildPhone, copies: false });
+// Step 1's home of the app download (it moves to the demo block in demo mode).
+const phoneInstallSlot = el("div", "ad-slot");
+{
+  const box = el("div", "ad-qrbox");
+  const side = el("div", "ad-qrside");
+  side.append(phoneOption.toggle, el("p", "hint", "The code is only visible while you show it."));
+  box.append(phoneOption.mask, phoneOption.reveal, side);
+  phoneOption.panel.append(
+    stepList([
+      { title: "Install the app", extra: [phoneInstallSlot] },
+      {
+        title: "Pair the app",
+        desc: "Open the app and scan the pairing code. The app then knows this hangar's address and API key.",
+        extra: [box],
+      },
+    ]),
   );
 }
 
 // ---- Browser -------------------------------------------------------------
 
-function buildBrowser(reveal, key) {
+function buildBrowser(reveal, key, option) {
   const link = buildBrowserPairLink(window.location.origin, key);
   const field = readonlyField(link, { label: "Pairing link for another browser" });
   field.dataset.role = "pair-browser-link";
-  const acts = el("div", "pair-acts");
-  acts.append(copyButton("Copy link", () => link, field));
-  reveal.append(
-    field,
-    acts,
-    el(
-      "p",
-      "foot-note",
-      "Open it in the other browser. The key sits after the #, which browsers never send to a server. The page removes it from the address bar and from this tab's history at once and asks before replacing a different key, but the browser's own history (and its sync) still holds the link: delete it there afterwards, and from wherever you sent it.",
-    ),
-  );
+  reveal.append(field);
+  setCopies(option, [copyButton("Copy link", () => link, field)]);
 }
 
-// ---- Windows -------------------------------------------------------------
+// The stand-in shows the (non-secret) origin, then bullets for the key.
+const browserMask = codeMask([24]);
+const browserOption = makeOption({ id: "browser", showLabel: "Show link", mask: browserMask, build: buildBrowser });
+browserOption.panel.append(
+  stepList([
+    { title: "Show the link", desc: "A link that connects another browser to this hangar." },
+    {
+      title: "Open it in the other browser",
+      desc: "The key sits after the #, which browsers never send to a server. The page removes it from the address bar and from this tab's history at once and asks before replacing a different key, but the browser's own history (and its sync) still holds the link: delete it there afterwards, and from wherever you sent it.",
+      extra: [secretBlock(browserOption)],
+    },
+  ]),
+);
+
+// ---- Agent address (shared by Windows and Linux) ---------------------------
 
 const agentUrlField = el("div", "field pair-agent-url");
 const agentUrlLabel = el("label", null, "vault-api address for the agent");
 agentUrlLabel.htmlFor = "pair-agent-url";
 const agentUrlInput = document.createElement("input");
 agentUrlInput.id = "pair-agent-url";
-agentUrlInput.className = "inp txt";
+agentUrlInput.className = "in";
 agentUrlInput.type = "url";
 agentUrlInput.autocomplete = "off";
 agentUrlInput.spellcheck = false;
 agentUrlInput.dataset.role = "agent-url";
 agentUrlInput.setAttribute("aria-describedby", "pair-agent-url-note pair-agent-url-error");
-const agentUrlNote = el("p", "foot-note", AGENT_SERVER_URL_NOTE);
+const agentUrlNote = el("p", "hint", AGENT_SERVER_URL_NOTE);
 agentUrlNote.id = "pair-agent-url-note";
 const agentUrlError = el("p", "errline");
 agentUrlError.id = "pair-agent-url-error";
@@ -517,60 +466,18 @@ function agentUrlCheck() {
 agentUrlInput.addEventListener("input", () => {
   const result = agentUrlCheck();
   if (result.ok) writeAgentUrl(result.url);
-  paintWindows(windowsOption.reveal);
-  paintLinux(linuxOption.reveal);
+  paintWindows();
+  paintLinux();
 });
-
-function paintWindows(reveal) {
-  // MUTATION TARGET (guard A): an index answer that lands after "Hide"
-  // must not paint the command (with the key) back into a hidden option.
-  if (!windowsOption.shown) return;
-  const key = getStoredApiKey();
-  if (!isUsableKey(key)) return;
-  const pre = agentPrecheck(reveal, windowsArtifactNames);
-  if (!pre) return;
-  const { plan, url } = pre;
-  if (!isInstallableKey(key)) {
-    const note = el(
-      "p",
-      "hint pair-left",
-      "This hangar's API key has characters the install command does not accept (printable ASCII only). Install the agent by hand as agent/README.md describes.",
-    );
-    note.dataset.role = "agent-key-unsupported";
-    reveal.replaceChildren(note);
-    return;
-  }
-  // User decision "Weg A" (review finding 1): the command carries NO key;
-  // it asks for it, and the key travels only through "Copy key".
-  const snippet = windowsInstallSnippet({ version: plan.version, serverUrl: url.url, downloadBase: plan.base });
-  const field = readonlyField(snippet, { multiline: true, label: "PowerShell install command" });
-  field.dataset.role = "agent-snippet";
-  const acts = el("div", "pair-acts");
-  const copyKey = copyButton("Copy key", () => installKey(getStoredApiKey()), null);
-  copyKey.dataset.role = "agent-copy-key";
-  acts.append(copyButton("Copy command", () => snippet, field), copyKey);
-  reveal.replaceChildren(
-    el(
-      "p",
-      "foot-note",
-      `1. Copy the command and paste it into a normal PowerShell window on the PC (not "Run as administrator"). It downloads vault-agent ${plan.version} ${sourceWords(plan)}, checks it against the release's SHA256SUMS, installs the scheduled task for this Windows user and starts the first report.`,
-    ),
-    el(
-      "p",
-      "foot-note",
-      `2. Paste the whole command at once; it runs only after the last line is in (press Enter once more if nothing happens). When it then asks "${KEY_PROMPT}", press Copy key here and paste into the window (it shows only asterisks). The key is never part of the command, so it is not in PowerShell's history, a transcript or a script-block log; the copy stays in the clipboard (and clipboard history or cloud clipboard sync, where on) until you copy something else.`,
-    ),
-    field,
-    acts,
-  );
-}
 
 /** Shared by the Windows and Linux commands: the index state, the release
  * and download source, and the agent address. Paints the reason and returns
  * null when there is no command to show. */
-function agentPrecheck(reveal, namesFor) {
+function agentPrecheck(option, namesFor) {
+  const reveal = option.reveal;
+  setCopies(option, []);
   if (dist.state === null) {
-    reveal.replaceChildren(el("p", "foot-note", "Reading the vault's download list…"));
+    reveal.replaceChildren(el("p", "hint", "Reading the vault's download list…"));
     return null;
   }
   if (dist.state.error) {
@@ -583,14 +490,14 @@ function agentPrecheck(reveal, namesFor) {
   // The URL only matters for a local download, but the Windows command
   // always needs it; a bad address blocks both commands alike.
   if (!url.ok) {
-    const note = el("p", "foot-note", "Fix the agent address above to see the command.");
+    const note = el("p", "hint", "Fix the agent address above to see the command.");
     note.dataset.role = "agent-url-blocked";
     reveal.replaceChildren(note);
     return null;
   }
   const plan = agentDownloadPlan(dist.state.response, url.url, namesFor);
   if (!plan.ok) {
-    const note = el("p", "hint pair-left", noReleaseText(plan.version));
+    const note = el("p", "hint", noReleaseText(plan.version));
     note.dataset.role = "agent-no-release";
     reveal.replaceChildren(note);
     return null;
@@ -602,81 +509,203 @@ function sourceWords(plan) {
   return plan.source === "local" ? `from this vault (${plan.base})` : "from the project's GitHub release";
 }
 
+// ---- Windows -------------------------------------------------------------
+
+function paintWindows() {
+  const option = windowsOption;
+  // MUTATION TARGET (guard A): an index answer that lands after "Hide"
+  // must not paint the command (with the key) back into a hidden option.
+  if (!option.shown) return;
+  const key = getStoredApiKey();
+  if (!isUsableKey(key)) return;
+  const pre = agentPrecheck(option, windowsArtifactNames);
+  if (!pre) return;
+  const { plan, url } = pre;
+  if (!isInstallableKey(key)) {
+    const note = el(
+      "p",
+      "hint",
+      "This hangar's API key has characters the install command does not accept (printable ASCII only). Install the agent by hand as agent/README.md describes.",
+    );
+    note.dataset.role = "agent-key-unsupported";
+    option.reveal.replaceChildren(note);
+    return;
+  }
+  // User decision "Weg A" (review finding 1): the command carries NO key;
+  // it asks for it, and the key travels only through "Copy key".
+  const snippet = windowsInstallSnippet({ version: plan.version, serverUrl: url.url, downloadBase: plan.base });
+  const field = readonlyField(snippet, { multiline: true, label: "PowerShell install command" });
+  field.dataset.role = "agent-snippet";
+  const copyKey = copyButton("Copy key", () => installKey(getStoredApiKey()), null);
+  copyKey.dataset.role = "agent-copy-key";
+  option.reveal.replaceChildren(
+    el(
+      "p",
+      "hint",
+      `It downloads vault-agent ${plan.version} ${sourceWords(plan)}, checks it against the release's SHA256SUMS, installs the scheduled task for this Windows user and starts the first report.`,
+    ),
+    field,
+  );
+  setCopies(option, [copyButton("Copy command", () => snippet, field), copyKey]);
+}
+
+const windowsOption = makeOption({
+  id: "windows",
+  showLabel: "Show command",
+  mask: codeMask([30, 44, 38, 26]),
+  build: () => paintWindows(),
+});
+windowsOption.panel.append(
+  agentUrlField, // moves to the Linux panel with that tab (afterSelect)
+  stepList([
+    {
+      title: "Open PowerShell on the PC",
+      desc: 'A normal PowerShell window, not "Run as administrator". The command installs vault-agent, which reports the PC\'s installed games to the hangar.',
+    },
+    {
+      title: "Paste the command",
+      desc: `Paste the whole command at once; it runs only after the last line is in (press Enter once more if nothing happens). When it then asks "${KEY_PROMPT}", press Copy key here and paste into the window (it shows only asterisks). The key is never part of the command, so it is not in PowerShell's history, a transcript or a script-block log; the copy stays in the clipboard (and clipboard history or cloud clipboard sync, where on) until you copy something else.`,
+      extra: [secretBlock(windowsOption)],
+    },
+  ]),
+);
+
 // ---- Linux ---------------------------------------------------------------
 
-function paintLinux(reveal) {
+function paintLinux() {
+  const option = linuxOption;
   // MUTATION TARGET (guard A, Linux): nothing is painted into a hidden option.
-  if (!linuxOption.shown) return;
+  if (!option.shown) return;
   if (!isUsableKey(getStoredApiKey())) return;
-  const pre = agentPrecheck(reveal, linuxArtifactNames);
+  const pre = agentPrecheck(option, linuxArtifactNames);
   if (!pre) return;
   const { plan } = pre;
   const snippet = linuxDownloadSnippet({ version: plan.version, downloadBase: plan.base });
   const field = readonlyField(snippet, { multiline: true, label: "Shell download command" });
   field.dataset.role = "linux-snippet";
   field.title = "Fetches the binary for this machine (amd64 or arm64) and the systemd units, checks them against SHA256SUMS, installs nothing.";
-  const acts = el("div", "pair-acts");
+  option.reveal.replaceChildren(
+    el("p", "hint", `Paste it into a terminal on the PC. It downloads vault-agent ${plan.version} ${sourceWords(plan)} and checks it; the install itself follows agent/README.md.`),
+    field,
+  );
+  setCopies(option, [copyButton("Copy command", () => snippet, field)]);
+}
+
+const linuxOption = makeOption({
+  id: "linux",
+  showLabel: "Show command",
+  mask: codeMask([34, 40, 28]),
+  build: () => paintLinux(),
+});
+{
   const readme = el("a", "pair-open", "Install steps (agent/README.md)");
   readme.href = AGENT_README_URL;
   readme.target = "_blank";
   readme.rel = "noopener noreferrer";
-  acts.append(copyButton("Copy command", () => snippet, field), readme);
-  reveal.replaceChildren(
-    el("p", "foot-note", `Paste it into a terminal on the PC. It downloads vault-agent ${plan.version} ${sourceWords(plan)} and checks it; the install itself follows agent/README.md.`),
-    field,
-    acts,
+  readme.dataset.role = "agent-readme";
+  linuxOption.panel.append(
+    stepList([
+      {
+        title: "Open a terminal on the PC",
+        desc: "A shell command that downloads and checks vault-agent from the agent address above; the systemd install follows agent/README.md.",
+      },
+      { title: "Paste the command", extra: [secretBlock(linuxOption)] },
+      { title: "Install the agent", desc: "The command installs nothing. Follow the agent's install steps to set up the systemd timer.", extra: [readme] },
+    ]),
   );
 }
 
-// ---- Assemble --------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Sheet scaffold: header (title, intro, tabs), scrolling body, footer
+// ---------------------------------------------------------------------
 
-const phoneSlot = el("div");
-optionsWrap.append(
-  buildOption({
-    id: "phone",
-    title: "Phone (Android app)",
-    desc: "Install the SteamHangar app, then pair it with this hangar.",
-    showLabel: "Show pairing QR code",
-    extra: phoneSlot,
-    build: buildPhone,
-  }),
-  buildOption({
-    id: "browser",
-    title: "Another browser",
-    desc: "A link that connects another browser to this hangar.",
-    showLabel: "Show link",
-    build: buildBrowser,
-  }),
+const dialog = createSheetDialog({ ariaLabel: "Add a device", variant: "drawer", onClose: hideAll });
+dialog.sheet.classList.add("kit", "add-device");
+
+const TABS = [
+  { option: phoneOption, label: "Phone" },
+  { option: browserOption, label: "Browser" },
+  { option: windowsOption, label: "Windows" },
+  { option: linuxOption, label: "Linux / SteamOS" },
+];
+const tabs = createTabs({
+  idPrefix: "pair",
+  label: "Device type",
+  tabs: TABS.map(({ option, label }) => ({ id: option.id, label, panel: option.panel, icon: icon(option.id) })),
+  selected: "phone",
+  onSelect: afterSelect,
+});
+tabs.tablist.classList.add("ad-tabs");
+
+const notice = el("div", "ad-warn");
+notice.dataset.role = "pair-notice";
+notice.append(icon("warn"), el("p", null, SECRET_WARNING));
+
+// Shown instead of a panel when the sheet opens with no tab (the caller
+// does not know the device's operating system, e.g. a card's "Update
+// command" for an outdated agent).
+const tabPick = el("div", "ad-pick");
+tabPick.dataset.role = "tab-pick";
+tabPick.append(
+  el("b", null, "Choose the device type"),
+  el("span", null, "The command depends on the device's operating system. Choose a device type above."),
 );
-const windowsWrap = buildOption({
-  id: "windows",
-  title: "Windows PC (vault-agent)",
-  desc: "A PowerShell command that installs vault-agent, which reports the PC's installed games to the hangar.",
-  showLabel: "Show command",
-  extra: agentUrlField,
-  build: (reveal) => paintWindows(reveal),
-});
-const windowsOption = options[options.length - 1];
-const linuxWrap = buildOption({
-  id: "linux",
-  title: "Linux / SteamOS PC (vault-agent)",
-  desc: "A shell command that downloads and checks vault-agent from the agent address above; the systemd install follows agent/README.md.",
-  showLabel: "Show command",
-  build: (reveal) => paintLinux(reveal),
-});
-const linuxOption = options[options.length - 1];
-optionsWrap.append(windowsWrap, linuxWrap);
+tabPick.hidden = true;
 
-const firstPanel = optionsWrap.childNodes[0];
-for (const node of [notice, tablist, tabPick]) optionsWrap.insertBefore(node, firstPanel);
+const unavailable = el("p", "hint");
+unavailable.dataset.role = "pair-unavailable";
+unavailable.hidden = true;
+// Demo mode (and only there): the phone's app download on its own, since
+// the options themselves are hidden (nothing to share).
+const demoPhone = el("div", "ad-demo");
+demoPhone.dataset.role = "demo-app-download";
+demoPhone.append(el("h3", "sec", "Phone (Android app)"));
+demoPhone.hidden = true;
 
-dialog.body.append(heading, intro, unavailable, demoPhone, optionsWrap, closeBtn);
+const optionsWrap = el("div", "pair-options");
+optionsWrap.append(notice, tabPick, ...options.map((o) => o.panel));
+
+const head = el("div", "ad-head");
+head.append(
+  el("h2", null, "Add a device"),
+  el("p", "hint ad-intro", "Set up a phone, another browser or a PC with this hangar's address and API key, without typing them."),
+  tabs.tablist,
+);
+const scroll = el("div", "ad-scroll");
+scroll.append(unavailable, demoPhone, optionsWrap);
+const closeBtn = el("button", "btn", "Close");
+closeBtn.type = "button";
+closeBtn.dataset.role = "add-device-close";
+closeBtn.addEventListener("click", () => dialog.close());
+const foot = el("div", "ad-foot");
+foot.append(el("p", "hint", "A PC with vault-agent appears under Clients after its first report."), closeBtn);
+dialog.body.append(head, scroll, foot);
+
+/** After a selection (user or open): secrets revealed in the panels being
+ * left leave the DOM (not only the screen); the pick box shows when no tab
+ * is selected; the agent address field follows Windows and Linux. */
+function afterSelect(id) {
+  for (const option of options) {
+    if (option.id !== id && option.shown) hideOption(option);
+  }
+  tabPick.hidden = id !== null;
+  if (id === "windows" || id === "linux") {
+    const panel = id === "windows" ? windowsOption.panel : linuxOption.panel;
+    if (agentUrlField.parentNode !== panel) panel.insertBefore(agentUrlField, panel.firstChild);
+  }
+}
+
+/** Select a tab, or none with `null`. */
+function selectTab(id) {
+  tabs.select(id);
+  afterSelect(tabs.selectedId());
+}
 
 /** Open the sheet with every option hidden. `tab` is "phone" (default),
  * "browser", "windows" or "linux"; `null` opens with no tab selected. */
 export function openAddDeviceSheet({ tab = "phone" } = {}) {
   hideAll();
-  selectTab(TABS.some((t) => t.id === tab) ? tab : null);
+  selectTab(options.some((o) => o.id === tab) ? tab : null);
   const demo = isDemoMode();
   const hasKey = isUsableKey(getStoredApiKey());
   if (demo || !hasKey) {
@@ -685,15 +714,19 @@ export function openAddDeviceSheet({ tab = "phone" } = {}) {
       : "This browser has no API key stored, so there is nothing to share. Connect to a vault first (Settings → Connection).";
     unavailable.hidden = false;
     optionsWrap.hidden = true;
+    tabs.tablist.hidden = true;
   } else {
     unavailable.hidden = true;
     optionsWrap.hidden = false;
+    tabs.tablist.hidden = false;
   }
+  // The stand-in of the browser link names the (non-secret) origin.
+  browserMask.textContent = `${window.location.origin}/#pair=${"•".repeat(24)}`;
   // The app download needs the index (behind the key): demo mode answers it
   // from its fixtures, a browser without a key gets nothing to show.
   demoPhone.hidden = !demo;
   if (demo) demoPhone.append(appDownload);
-  else phoneSlot.append(appDownload);
+  else phoneInstallSlot.append(appDownload);
   if (demo || hasKey) loadDist();
   else appDownload.replaceChildren();
   const stored = readAgentUrl();

@@ -24,7 +24,12 @@
  *   - demo mode and a missing key show the note and no option; demo mode
  *     still shows the app download from its fake index;
  *   - the pairing confirm is an alertdialog, focus on "Keep current key",
- *     Keep/Escape answer false, Replace true.
+ *     Keep/Escape answer false, Replace true;
+ *   - WP ADD-DEVICE-2 (drawer per docs/design/rc20/clients.html): kit scope,
+ *     header / scrolling body / footer with Close, tab icons, one tinted
+ *     notice, numbered steps per tab, blurred stand-ins (code and pairing
+ *     QR) until Show, Show + Copy side by side with an idle Copy before
+ *     Show, two QR boxes on the Phone tab, the dashed OS pick box.
  *
  * Harness: fake-dom.js, Map-backed localStorage, routing `fetch` fake; the
  * REAL store-singleton polls it and is stopped in `after()`. Assertions
@@ -34,6 +39,7 @@
  */
 import { test, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createFakeDom, fakeKeyEvent } from "./fake-dom.js";
 
 const KEY = "s3cr3t+key/&=(x) ~!";
@@ -171,6 +177,8 @@ const q = (role) => sheet().querySelector(`[data-role="${role}"]`);
 const click = (el) => el.dispatchEvent({ type: "click" });
 const reveal = (id) => q(`reveal-${id}`);
 const showBtn = (id) => q(`show-${id}`);
+/** The Copy slot beside an option's Show toggle (ADD-DEVICE-2). */
+const copies = (id) => q(`copies-${id}`);
 
 /** Every string the DOM under `root` exposes: text nodes, attribute values,
  * and the value/href properties the components set directly. */
@@ -225,7 +233,7 @@ test("MUTATION TARGET: nothing secret in the DOM until Show; every option starts
     assert.equal(showBtn(id).getAttribute("aria-expanded"), "false");
     assert.equal(showBtn(id).getAttribute("aria-controls"), reveal(id).id);
   }
-  const warnings = sheet().querySelectorAll(".pair-warn").map((p) => p.textContent);
+  const warnings = sheet().querySelectorAll(".ad-warn").map((p) => p.textContent);
   assert.equal(warnings.length, 1, "a single notice, not one per option");
   for (const w of warnings) assert.match(w, /Anyone who sees this can control your hangar\. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync\./);
 });
@@ -263,13 +271,14 @@ test("browser — Show renders the #pair= link as copyable text", () => {
   click(showBtn("browser"));
   assert.equal(reveal("browser").querySelector('[data-role="pair-browser-link"]').value, `${ORIGIN}/#pair=${encodeURIComponent(KEY)}`);
   assert.equal(
-    reveal("browser").querySelectorAll("button").map((b) => b.textContent).join(","),
+    copies("browser").querySelectorAll("button").map((b) => b.textContent).join(","),
     "Copy link",
+    "Copy sits next to the toggle",
   );
 });
 
-test("MUTATION TARGET: closing the sheet (button, Escape, navigation) drops every revealed secret", async () => {
-  for (const closeBy of ["button", "escape", "navigation"]) {
+test("MUTATION TARGET: closing the sheet (button, Escape, scrim, navigation) drops every revealed secret", async () => {
+  for (const closeBy of ["button", "escape", "scrim", "navigation"]) {
     openAddDeviceSheet();
     click(showBtn("phone"));
     click(showBtn("browser"));
@@ -278,6 +287,7 @@ test("MUTATION TARGET: closing the sheet (button, Escape, navigation) drops ever
     assert.equal(secretInDom(), true, "shown");
     if (closeBy === "button") closeSheetIfOpen();
     else if (closeBy === "escape") dom.document.dispatchEvent(fakeKeyEvent("Escape"));
+    else if (closeBy === "scrim") click(sheet().parentNode); // a tap on the backdrop itself
     else navigateTo("library");
     assert.equal(sheetOpen(), false, `closed by ${closeBy}`);
     assert.equal(secretInDom(), false, `no secret after closing by ${closeBy}`);
@@ -406,12 +416,13 @@ test("MUTATION TARGET: 'Copy key' exists only after Show and copies the stored k
   openAddDeviceSheet();
   assert.equal(sheet().querySelector('[data-role="agent-copy-key"]') === null, true, "no Copy key before Show");
   click(showBtn("windows"));
-  await until(() => reveal("windows").querySelector('[data-role="agent-copy-key"]') !== null, "Copy key shown");
-  const btn = reveal("windows").querySelector('[data-role="agent-copy-key"]');
+  await until(() => copies("windows").querySelector('[data-role="agent-copy-key"]') !== null, "Copy key shown");
+  const btn = copies("windows").querySelector('[data-role="agent-copy-key"]');
   assert.equal(btn.textContent, "Copy key");
-  assert.match(reveal("windows").textContent, /never part of the command/);
-  assert.match(reveal("windows").textContent, /Paste the whole command at once; it runs only after the last line is in \(press Enter once more if nothing happens\)\. When it then asks "Hangar API key \(paste it, then press Enter\)", press Copy key/);
-  assert.match(reveal("windows").textContent, /clipboard history or cloud clipboard sync/);
+  const panelText = sheet().querySelector('[data-option="windows"]').textContent;
+  assert.match(panelText, /never part of the command/);
+  assert.match(panelText, /Paste the whole command at once; it runs only after the last line is in \(press Enter once more if nothing happens\)\. When it then asks "Hangar API key \(paste it, then press Enter\)", press Copy key/);
+  assert.match(panelText, /clipboard history or cloud clipboard sync/);
 
   // Async clipboard (secure context).
   const copied = [];
@@ -452,20 +463,20 @@ test("MUTATION TARGET: 'Copy key' exists only after Show and copies the stored k
   }
 
   click(showBtn("windows")); // Hide
-  assert.equal(reveal("windows").querySelector('[data-role="agent-copy-key"]') === null, true, "gone with Hide");
+  assert.equal(sheet().querySelector('[data-role="agent-copy-key"]') === null, true, "gone with Hide");
 });
 
 test("MUTATION TARGET: WEB-FIX-10 — 'Copy key' copies the key without edge whitespace, as install-task.ps1 would use it", async () => {
   storage.set("steamvault.apiKey", `  ${KEY} `);
   openAddDeviceSheet();
   click(showBtn("windows"));
-  await until(() => reveal("windows").querySelector('[data-role="agent-copy-key"]') !== null, "Copy key shown");
+  await until(() => copies("windows").querySelector('[data-role="agent-copy-key"]') !== null, "Copy key shown");
   const copied = [];
   const nav = globalThis.navigator;
   Object.defineProperty(nav, "clipboard", { value: { writeText: async (t) => copied.push(t) }, configurable: true });
   window.isSecureContext = true;
   try {
-    click(reveal("windows").querySelector('[data-role="agent-copy-key"]'));
+    click(copies("windows").querySelector('[data-role="agent-copy-key"]'));
     await until(() => copied.length === 1, "clipboard write");
     assert.equal(copied[0] === KEY, true, "edges trimmed, inner characters kept");
   } finally {
@@ -480,7 +491,7 @@ test("Windows — a key the command cannot take gets a note, no command, no Copy
   click(showBtn("windows"));
   await until(() => reveal("windows").querySelector('[data-role="agent-key-unsupported"]') !== null, "note");
   assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]') === null, true);
-  assert.equal(reveal("windows").querySelector('[data-role="agent-copy-key"]') === null, true);
+  assert.equal(sheet().querySelector('[data-role="agent-copy-key"]') === null, true);
 });
 
 // ---- Review finding 2: late /v1/dist answers (gated fetch) ----------------
@@ -615,7 +626,7 @@ test("MUTATION TARGET: Linux — download-and-check command, local / release / d
   server.index = indexFor("0.1.0-rc10", { local: true });
   openAddDeviceSheet();
   const linux = sheet().querySelectorAll("div").find((d) => d.getAttribute("data-option") === "linux");
-  assert.equal(linux.querySelector(".pair-warn"), null, "not a secret: no warning");
+  assert.equal(linux.querySelector(".ad-warn"), null, "not a secret: no warning");
   click(showBtn("linux"));
   await until(() => linuxSnippet() !== null, "linux snippet");
   assert.match(linuxSnippet().value, /\nbase='http:\/\/vault\.test\/dist'\n/);
@@ -826,11 +837,166 @@ test("MUTATION TARGET: reveal on demand + copy — the browser link is absent un
   Object.defineProperty(nav, "clipboard", { value: { writeText: async (t) => copied.push(t) }, configurable: true });
   window.isSecureContext = true;
   try {
-    click(reveal("browser").querySelectorAll("button").find((b) => b.textContent === "Copy link"));
+    click(copies("browser").querySelectorAll("button").find((b) => b.textContent === "Copy link"));
     await until(() => copied.length === 1, "clipboard write");
     assert.equal(copied[0] === link, true, "exactly the pairing link");
   } finally {
     delete nav.clipboard;
     window.isSecureContext = false;
   }
+});
+
+// ---- ADD-DEVICE-2: drawer anatomy (docs/design/rc20/clients.html) ------------
+
+const { QR_MASK_TEXT } = await import("../js/components/add-device-steps.js");
+const kitCss = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8");
+const stepsOf = (id) => panel(id).querySelector("ol.steps");
+const stepTitles = (id) => stepsOf(id).querySelectorAll("h3").map((h) => h.textContent);
+const stepNumbers = (id) => stepsOf(id).querySelectorAll("span.n").map((n) => n.textContent);
+const idleCopy = (id) => copies(id).querySelector('[data-role="copy-idle"]');
+const codeMaskOf = (id) => panel(id).querySelectorAll("div.code.hid")[0] || null;
+
+test("MUTATION TARGET: drawer — opted into the kit; header (h2, intro, tabs), scrolling body, footer (hint + Close)", () => {
+  openAddDeviceSheet();
+  assert.equal(sheet().classList.contains("kit"), true, "the kit applies inside the drawer");
+  const head = sheet().querySelector(".ad-head");
+  assert.equal(head.querySelector("h2").textContent, "Add a device");
+  assert.match(head.querySelector(".ad-intro").textContent, /without typing them/);
+  assert.notEqual(head.querySelector('[role="tablist"]'), null, "the tabs are part of the fixed header");
+  const body = sheet().querySelector(".ad-scroll");
+  assert.notEqual(body.querySelector('[data-role="pair-notice"]'), null, "the notice scrolls with the steps");
+  assert.notEqual(body.querySelector('[data-option="phone"]'), null);
+  const foot = sheet().querySelector(".ad-foot");
+  assert.match(foot.querySelector("p").textContent, /appears under Clients after its first report/);
+  const close = foot.querySelector('[data-role="add-device-close"]');
+  assert.equal(close.textContent, "Close");
+  click(close);
+  assert.equal(sheetOpen(), false, "the footer Close closes the drawer");
+});
+
+test("MUTATION TARGET: tabs — an icon per tab (decorative), the label stays the tab's name", () => {
+  openAddDeviceSheet();
+  for (const id of TAB_IDS) {
+    const svg = tabBtn(id).querySelector("svg");
+    assert.notEqual(svg, null, `${id} has an icon`);
+    assert.equal(svg.getAttribute("data-icon"), id);
+    assert.equal(svg.getAttribute("aria-hidden"), "true");
+  }
+  assert.equal(TAB_IDS.map((id) => tabBtn(id).textContent).join("|"), "Phone|Browser|Windows|Linux / SteamOS");
+});
+
+test("MUTATION TARGET: one tinted security notice with the triangle icon", () => {
+  openAddDeviceSheet();
+  const notes = sheet().querySelectorAll(".ad-warn");
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].querySelector("svg").getAttribute("data-icon"), "warn");
+  assert.match(kitCss, /\.kit \.ad-warn\{[^}]*background:color-mix\(in srgb, var\(--stale\)/, "tinted box");
+});
+
+test("MUTATION TARGET: numbered steps per tab (ol.steps, circle numbers 1..n, h3 titles)", () => {
+  openAddDeviceSheet();
+  assert.deepEqual(stepTitles("phone"), ["Install the app", "Pair the app"]);
+  assert.deepEqual(stepTitles("browser"), ["Show the link", "Open it in the other browser"]);
+  assert.deepEqual(stepTitles("windows"), ["Open PowerShell on the PC", "Paste the command"]);
+  assert.deepEqual(stepTitles("linux"), ["Open a terminal on the PC", "Paste the command", "Install the agent"]);
+  for (const id of TAB_IDS) {
+    assert.deepEqual(stepNumbers(id), stepTitles(id).map((_, i) => String(i + 1)), `${id} numbering`);
+    assert.equal(stepsOf(id).querySelector("span.n").getAttribute("aria-hidden"), "true", "the ol carries the order for assistive tech");
+  }
+  assert.match(kitCss, /\.kit\.add-device \.steps \.n\{[^}]*border-radius:50%/, "circle numbers");
+  assert.equal(panel("linux").querySelector('[data-role="agent-readme"]').href, "https://github.com/steamhangar/steamhangar/blob/main/agent/README.md");
+});
+
+test("MUTATION TARGET: secret block — blurred stand-in until Show, Show + Copy side by side, Copy idle until Show", () => {
+  openAddDeviceSheet({ tab: "browser" });
+  const mask = codeMaskOf("browser");
+  assert.equal(mask.hidden, false, "the stand-in shows before Show");
+  assert.equal(mask.getAttribute("aria-hidden"), "true");
+  assert.match(mask.textContent, /^http:\/\/vault\.test\/#pair=•+$/, "origin plus bullets, never the key");
+  assert.equal(showBtn("browser").parentNode === copies("browser").parentNode, true, "toggle and Copy share one row");
+  assert.equal(idleCopy("browser").disabled, true, "Copy is disabled before Show");
+  assert.equal(secretInDom(), false);
+
+  click(showBtn("browser"));
+  assert.equal(mask.hidden, true, "the stand-in gives way to the real link");
+  assert.equal(idleCopy("browser"), null);
+  assert.equal(copies("browser").querySelectorAll("button").map((b) => `${b.textContent}:${b.disabled === true}`).join(","), "Copy link:false");
+
+  click(showBtn("browser")); // Hide
+  assert.equal(mask.hidden, false);
+  assert.equal(idleCopy("browser").disabled, true, "back to the idle Copy");
+  assert.equal(secretInDom(), false);
+  assert.match(kitCss, /\.kit\.add-device \.code\.hid\{[^}]*filter:blur\(/, "the stand-in is blurred");
+});
+
+test("MUTATION TARGET: Windows — Show puts Copy command and Copy key next to the toggle; a tab switch takes them away", async () => {
+  openAddDeviceSheet({ tab: "windows" });
+  assert.notEqual(codeMaskOf("windows"), null);
+  click(showBtn("windows"));
+  await until(snippetShown, "snippet");
+  assert.equal(codeMaskOf("windows").hidden, true);
+  assert.equal(copies("windows").querySelectorAll("button").map((b) => b.textContent).join(","), "Copy command,Copy key");
+  assert.equal(reveal("windows").querySelector('[data-role="agent-snippet"]').className, "code");
+  click(tabBtn("linux"));
+  assert.equal(sheet().querySelector('[data-role="agent-copy-key"]'), null, "leaving the tab drops the key button");
+  assert.equal(idleCopy("windows").disabled, true);
+});
+
+test("MUTATION TARGET: phone — two QR boxes; the pairing QR is a blurred stand-in until Show", async () => {
+  server.index = indexFor("0.1.0-rc10", { local: true });
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button");
+  const boxes = panel("phone").querySelectorAll(".ad-qrbox");
+  assert.equal(boxes.length, 2, "app download + pairing");
+  assert.notEqual(boxes[0].querySelector('[data-role="app-download-qr"]'), null);
+  assert.notEqual(boxes[0].querySelector(".ad-qrside").querySelector('[data-role="app-download-link"]'), null, "Download app beside the code");
+  assert.match(boxes[0].querySelector(".ad-qrside").textContent, /Android app · 9\.3 MB/);
+
+  const mask = boxes[1].querySelector('[data-role="pair-qr-mask"]');
+  assert.equal(mask.className, "ad-qrmask");
+  assert.equal(mask.getAttribute("aria-hidden"), "true");
+  const maskQr = mask.children[0];
+  assert.equal(maskQr.getAttribute("role"), null, "not announced as an image");
+  assert.equal(mask.hidden, false, "blurred stand-in before Show");
+  assert.equal(maskQr.children[1].getAttribute("d"), qrPathFor(QR_MASK_TEXT), "it encodes the harmless sentence");
+  assert.doesNotMatch(QR_MASK_TEXT, /steamhangar:\/\/|s3cr3t/);
+  assert.equal(boxes[1].querySelector(".ad-qrside").querySelector('[data-role="show-phone"]') === showBtn("phone"), true, "Show sits beside the code");
+  assert.equal(secretInDom(), false);
+
+  click(showBtn("phone"));
+  assert.equal(mask.hidden, true, "the real code replaces the stand-in");
+  assert.notEqual(boxes[1].querySelector('[data-role="pair-qr"]'), null, "in the same box");
+  click(showBtn("phone"));
+  assert.equal(mask.hidden, false, "Hide brings the stand-in back");
+  assert.match(kitCss, /\.kit \.ad-qrmask \.pair-qr\{[^}]*filter:blur\(/, "blurred");
+  assert.match(kitCss, /\.kit\.add-device \.ad-qrmask\[hidden\]/, "the wrapper's [hidden] beats its display rule");
+  assert.match(kitCss, /\.kit \.ad-qrbox\{[^}]*grid-template-columns:164px minmax\(0, 1fr\)/, "164px code beside the column");
+  assert.match(kitCss, /@container addev \(max-width:420px\)\{\s*\.kit \.ad-qrbox\{ grid-template-columns:minmax\(0, 1fr\)/, "stacked in a narrow drawer");
+});
+
+test("MUTATION TARGET: open without a tab shows the OS pick box (dashed) in the body, under the notice", () => {
+  openAddDeviceSheet({ tab: null });
+  const pick = q("tab-pick");
+  assert.equal(pick.hidden, false);
+  assert.equal(pick.className, "ad-pick");
+  assert.equal(pick.querySelector("b").textContent, "Choose the device type");
+  assert.equal(pick.parentNode === sheet().querySelector(".pair-options"), true);
+  const kids = sheet().querySelector(".pair-options").children;
+  assert.equal(kids.indexOf(pick), kids.indexOf(q("pair-notice")) + 1, "right below the notice");
+  assert.match(kitCss, /\.kit \.ad-pick\{[^}]*border:1px dashed var\(--line\)/);
+  click(tabBtn("windows"));
+  assert.equal(pick.hidden, true);
+});
+
+test("demo mode hides the tabs with the options; a keyed open shows them again", () => {
+  storage.set("steamvault.demoMode", "1");
+  try {
+    openAddDeviceSheet();
+    assert.equal(sheet().querySelector('[role="tablist"]').hidden, true);
+  } finally {
+    closeSheetIfOpen();
+    storage.delete("steamvault.demoMode");
+  }
+  openAddDeviceSheet();
+  assert.equal(sheet().querySelector('[role="tablist"]').hidden, false);
 });
