@@ -3609,7 +3609,7 @@ below carry their own later dates, item 12 is the current one).
       otherwise the item moves to rc21.
 
     - [ ] **rc20.1** (patch, operator report on prod 2026-10-17)
-      - [ ] **DOWNLOADS-3** (web) History head "Delete…" clipped; History
+      - [x] **DOWNLOADS-3** (95a012e, 6eb3979, goldens 92d9db9) (web) History head "Delete…" clipped; History
         unbounded (first 10, then "Show 20 more"); subline count ("20 in
         history") disagrees with the list; History glyph words use library
         vocabulary ("Current", "Not in use") instead of the job outcome;
