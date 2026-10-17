@@ -1124,130 +1124,29 @@ input.inp.txt:disabled{ opacity:.55; }
 
 .foot-note{ font-size:11px; line-height:1.5; color:var(--dim-2); margin:6px 0 0; }
 
-/* WP 4d-web: the "keeping the cache current without collecting" risk note
-   (sweep_include_cached on, auto_gc not executing — GET /v1/schedule's
-   sweep_cached_gc_risk). Same left-accent note shape as `.holdnote`/
-   `.stopnote` (jobcard section above: "what pause/cancel actually cost the
-   queue — stated, not hidden"), but keyed to `--stale`, the hue
-   `.sic.k-warn`/`.toast.warn` already use for "not an error, but pay
-   attention" — this is a real, ongoing risk (unbounded disk growth), not
-   the neutral tone those two notes carry. The sweep is never refused and
-   GC is never turned on automatically (docs/PROJECT_PLAN.md Phase 3) — this
-   is a warning, not a gate, so it is plain text with no disabled control
-   and no dialog. WP SETTINGS-1: the GC-risk instance is always built and
-   `[hidden]`-toggled live from the form, hence the guard below. */
-.settings-warn{
-  margin:10px 0 0; padding:8px 0 8px 9px; border-left:2px solid var(--stale);
-  font-size:11.5px; line-height:1.5; color:var(--dim);
-}
-.settings-warn[hidden]{ display:none; }
-
 .bullets{ margin:0; padding-left:16px; }
 .bullets li{ font-size:12px; line-height:1.55; color:var(--dim); margin-bottom:6px; }
 .bullets b{ color:var(--text); font-weight:600; }
 
-.view-settings h4.sec:first-of-type{ margin-top:2px; }
-
-/* ---------- Settings layout (WP SETTINGS-1) ----------
-   rc20 mockup docs/design/rc20/settings.html: a section nav beside ONE
-   panel at a time. Below 1000px the nav is a horizontal strip that
-   scrolls inside itself (never the page); from 1000px it is a sticky left
-   column. Every grid item carries `min-width:0` so a long value can never
-   widen the page. Fields sit in an auto-fit grid: two columns when the
-   panel is wide enough for two 300px fields, one otherwise. `.sec-dirty`,
-   `.snav-item` and the `.settings-warn` note are display-styled and
-   [hidden]-toggled, hence their guards (LEARNINGS 4a.8). */
-.settings-lay{ display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
-.settings-main{ min-width:0; }
-.snav{ min-width:0; }
-.snav-list{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; scrollbar-width:thin; }
-.snav-item{
-  flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; min-height:44px; padding:8px 12px;
-  border:1px solid var(--line-soft); border-radius:var(--r-m); background:var(--surface);
-  color:var(--dim); font-size:13px; font-weight:600; text-align:left; white-space:nowrap;
-}
-.snav-item[hidden]{ display:none; }
-.snav-item[aria-current="true"]{ border-color:var(--accent); background:var(--accent-glow); color:var(--text); }
-.snav-label{ flex:1 1 auto; min-width:0; }
-.snav-state{ display:none; order:3; flex:1 0 100%; min-width:0; font-size:11px; font-weight:400; color:var(--dim-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.snav .expert-switch{ margin:10px 0 0; }
-@media (hover:hover) and (pointer:fine){
-  .snav-item:hover{ color:var(--text); border-color:var(--line); }
-}
-@media (min-width:1000px){
-  .settings-lay{ grid-template-columns:240px minmax(0,1fr); gap:24px; }
-  .snav{ position:sticky; top:16px; }
-  .snav-list{ flex-direction:column; overflow:visible; padding-bottom:0; }
-  .snav-item{ flex:0 0 auto; white-space:normal; }
-  .snav-state{ display:block; }
-}
-.settings-panel > .sec-title{ margin:0 0 4px; font-size:18px; font-weight:650; line-height:1.3; letter-spacing:0; color:var(--text); }
-.settings-panel > .sec-title:focus{ outline:none; }
-.sec-blurb{ margin:0 0 14px; font-size:12.5px; line-height:1.5; color:var(--dim); }
-.sec-dirty{ display:inline-block; flex:none; width:8px; height:8px; border-radius:50%; background:var(--accent); }
-.sec-dirty[hidden]{ display:none; }
-.snav-item .sec-dirty{ order:2; }
-.sec-body{
-  min-width:0; padding:14px; border:1px solid var(--line-soft); border-radius:var(--r-m);
-  background:var(--surface);
-}
-.fg{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:14px 18px; }
-.fg > .field{ min-width:0; margin-bottom:0; }
-.fg > .field-wide{ grid-column:1 / -1; }
-.settings-main .sec-body > * + *{ margin-top:14px; }
-.settings-main .sec-body .srow{ margin-bottom:0; }
-.field-head{ display:flex; flex-wrap:wrap; align-items:center; gap:2px; }
-.field-head .about-info-btn{ margin:-6px 0 -1px 2px; }
+/* Left over from the Settings field chips (WP SETTINGS-1). Settings now
+   uses kit.css's `.kit .chip` (WP SETTINGS-2) and no longer reads this
+   rule, but it still reaches the Library's `.chip` filter buttons by
+   cascade (it comes after the filter-chip block above), so deleting it
+   would restyle the Library: left for LIBRARY-2. */
 .chip{
   margin-left:auto; flex:none; padding:2px 7px; border-radius:999px; border:1px solid var(--line);
   font-size:9.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--dim-2);
 }
-.chip-changed{ color:var(--accent); border-color:var(--accent); background:var(--accent-glow); }
-.chip-env{ color:var(--dim); border-style:dashed; }
-.field .field-label{
-  display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.8px;
-  color:var(--dim-2); margin-bottom:5px; font-weight:600;
-}
-.field-help .foot-note{ margin:4px 0 0; }
-.setting-value{ margin:0; font-size:13px; line-height:1.5; color:var(--text); overflow-wrap:anywhere; }
-.field-reset{ margin-top:6px; }
-.expert-switch{ align-items:center; gap:10px; margin:14px 0 4px; }
-.expert-group h4.sec:first-child{ margin-top:4px; }
-.expert-group + .expert-group{ margin-top:18px; }
 .risky-list{ margin:0 0 12px; }
 
-/* ---------- Settings save bar (WP WEB-FIX-8) ----------
-   User request: Save must be visible as soon as something changed, on a
-   page that is several screens long. Same placement as `.bulk` (fixed,
-   one --bulk-gap above wherever the bottom nav ends, the bottom safe-area
-   inset added because --nav-h does not carry it, horizontal insets for a
-   notched landscape phone), so the two never fight: `.bulk` only exists in
-   the Library's select mode and this bar only on Settings — one view at a
-   time. Width follows the Settings column (--w-text), not the Library's
-   --w-wall. While it is up, `.savebar-up` adds the same room under the
-   page's last content so scrolling to the end never hides anything behind
-   it. `display:flex` defeats the UA [hidden] rule, hence the guard. */
-.savebar{
-  position:fixed; z-index:20;
-  left:calc(12px + env(safe-area-inset-left, 0px));
-  right:calc(12px + env(safe-area-inset-right, 0px));
-  bottom:calc(var(--nav-h) + var(--bulk-gap) + env(safe-area-inset-bottom, 0px));
-  max-width:calc(var(--w-text) - (var(--gutter) * 2));
-  margin:0 auto;
-  display:flex; flex-direction:column; gap:8px;
-  padding:10px; border-radius:var(--r-l);
-  background:var(--raised-2);
-  border:1px solid var(--line);
-  box-shadow:0 12px 28px -8px rgba(0,0,0,.7);
-}
-.savebar[hidden]{ display:none; }
-.savebar-msg{ margin:0 4px; font-size:12.5px; line-height:1.35; color:var(--dim); min-width:0; overflow-wrap:anywhere; }
-.savebar-msg.is-error{ color:var(--danger); }
-.savebar-up{ padding-bottom:calc(var(--savebar-h) + var(--bulk-gap) * 2); }
-/* Review fix (WCAG 2.4.11 focus not obscured): the page scrolls on the
-   root, so the root's scroll padding keeps a control that receives focus
-   (Tab, or the browser scrolling it into view) above the bar and the nav
-   below it: bar height + its two gaps + the nav + the bottom inset. */
+/* ---------- Settings save bar (WP WEB-FIX-8; WP SETTINGS-2) ----------
+   The bar itself is kit.css's `.kit.view-settings .savebar`, sticky at the
+   bottom of the Settings column. Review fix (WCAG 2.4.11 focus not
+   obscured): the page scrolls on the root, so while the bar is up
+   (`.savebar-up` on the view) the root's scroll padding keeps a control
+   that receives focus (Tab, or the browser scrolling it into view) above
+   the bar and the nav below it: bar height + its two gaps + the nav + the
+   bottom inset. */
 :root:has(.savebar-up){
   scroll-padding-bottom:calc(var(--savebar-h) + var(--bulk-gap) * 2 + var(--nav-h) + env(safe-area-inset-bottom, 0px));
 }
@@ -1544,7 +1443,6 @@ body.onboarding .nav{ display:none; }
    two-track grid of minmax(0,1fr), so nothing can push the page wider).
    The header row is visually hidden here (each cell carries its own
    data-label) and becomes a real table header from BP-M up (below). */
-.about-head{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; min-width:0; margin-top:8px; }
 .about-status-line{ margin:0; min-width:0; overflow-wrap:anywhere; }
 .about-content{ min-width:0; }
 .about-table{ width:100%; border-collapse:collapse; margin-top:10px; font-size:12.5px; }
@@ -1746,7 +1644,7 @@ body.onboarding .nav{ display:none; }
    "api/README.md", digit runs joined by commas, error text echoing a value)
    break inside these text blocks instead of widening their box past a
    phone viewport. Only changes rendering when a word does not fit. */
-.hint, .foot-note, .errline, .settings-warn, .notif .nx, .banner .body, .jobtop .nm{
+.hint, .foot-note, .errline, .notif .nx, .banner .body, .jobtop .nm{
   overflow-wrap:anywhere;
 }
 
@@ -2156,14 +2054,6 @@ body.onboarding .nav{ display:none; }
     right:var(--gutter);
     max-width:calc(var(--w-wall) - (var(--gutter) * 2));
   }
-  /* WP WEB-FIX-8: the Settings save bar clears the side rail the same way
-     and centres in the main column, like `.view-settings` itself; its cap
-     stays --w-text (the Settings column), not --w-wall. */
-  .savebar{
-    left:calc(var(--rail-w) + var(--gutter));
-    right:var(--gutter);
-  }
-
   /* Library toolbar (WP 4e.2 put search + chips side by side here with a
      named-area grid on `.view-library`). Since WP WEB-FIX-UPD-VIS the row
      is its own flex container (`.lib-bar`, base rules + BP-M block), so
@@ -2673,5 +2563,3 @@ body.onboarding .nav{ display:none; }
   }
 }
 
-/* Compact: the expert switch row lives at the end of the About section. */
-.settings-panel .sec-body > .expert-switch{ margin:18px 0 0; padding-top:14px; border-top:1px solid var(--line); }

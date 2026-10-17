@@ -36,6 +36,31 @@ export const SECTIONS = Object.freeze([
 /** The section shown first. */
 export const DEFAULT_SECTION = "vault";
 
+/** The line under the page title (WP SETTINGS-2, rc20 settings.html). */
+export const PAGE_SUBLINE = "Vault, Downloads, Disk, Notifications, Steam";
+
+/**
+ * Field-card titles (WP SETTINGS-2, rc20 settings.html + kit.html "field
+ * card"): every panel is its h2 + blurb and one `.fcard` per group. A form
+ * section's rows all go into its one card, so a key that does not strictly
+ * fit the title stays in its section's card (the event-log rotation size in
+ * "Garbage collection", the bypass warning in "Webhook") — placement is
+ * `placeEntries`'s, unchanged. The Expert cards are `EXPERT_GROUPS`' titles.
+ */
+export const CARD_TITLES = Object.freeze({
+  vault: "Identity",
+  connection: "Connection",
+  window: "Schedule",
+  disk: "Garbage collection",
+  notify: "Webhook",
+  other: "Other settings",
+  steamIdentity: "Steam identity",
+  steamLibrary: "Steam library",
+});
+
+/** Label of the "Last sweep" grid field in the Schedule card. */
+export const LAST_SWEEP_LABEL = "Last sweep";
+
 /** Normal (non-expert) keys -> section. */
 const NORMAL_PLACEMENT = Object.freeze({
   vault_name: "vault",

@@ -171,19 +171,16 @@ test("WP DOWNLOADS-2: at BP-M only Downloads leaves the 760px column (a delibera
   assert.equal(/view-(settings|clients|library)/.test(bpM.body), false, "BP-M must not widen any other view");
 });
 
-test("no cascade tie: .view-settings' only OTHER reference is the pre-existing, unrelated h4.sec descendant rule — nothing else sets max-width/margin on the bare class", () => {
+test("no cascade tie: .view-settings is referenced exactly once in app.css — nothing else sets max-width/margin on the bare class", () => {
+  // WP SETTINGS-2 removed the old `.view-settings h4.sec:first-of-type`
+  // descendant rule (the page has no h4.sec any more); the page's own kit
+  // rules live in kit.css under `.kit.view-settings` and set neither
+  // max-width nor margin on the section.
   const stCount = (codeOnlyAll.match(/\.view-settings\b/g) || []).length;
   assert.equal(
     stCount,
-    2,
-    `".view-settings" appears ${stCount} times in theme.css+app.css — expected exactly 2 (the pre-existing WP 4a.6 "h4.sec:first-of-type" descendant rule, plus this WP's own selector); a third occurrence means some other rule now ALSO targets it and needs a deliberate cascade review`,
-  );
-  // The one pre-existing reference is a DESCENDANT selector styling h4.sec
-  // (margin-top only) — it does not set max-width/margin on .view-settings
-  // itself, so it cannot tie with this WP's rule regardless of source order.
-  assert.ok(
-    appTop.includes(".view-settings h4.sec:first-of-type{ margin-top:2px; }"),
-    "the known pre-existing .view-settings reference (a descendant rule styling h4.sec, not the section itself) changed or moved — re-check for a real tie before updating this pin",
+    1,
+    `".view-settings" appears ${stCount} times in theme.css+app.css — expected exactly 1 (this WP's own selector); a second occurrence means some other rule now ALSO targets it and needs a deliberate cascade review`,
   );
 });
 
@@ -243,11 +240,8 @@ test("base .field/.srow keep every pre-WP property value (the Settings form shap
 });
 
 test("the capped-column rule exists ONLY inside the BP-L block, never at the top level", () => {
-  // NB: `.view-settings h4.sec:first-of-type` (a pre-existing, WP 4a.6 rule,
-  // unrelated to this WP) IS a legitimate top-level ".view-settings"
-  // occurrence — asserting no mention of either class name at all outside
-  // @media would false-positive on it. This checks specifically for the
-  // WP 4e.5 selector pair, not any reference to either class.
+  // This checks specifically for the WP 4e.5 selector pair, not any
+  // reference to either class.
   assert.equal(appTop.includes(".view-downloads, .view-settings, .view-clients{"), false, "the capped-column selector must not exist outside @media — the base/mobile column width for both views is unaffected by this WP, exactly as before");
 });
 
