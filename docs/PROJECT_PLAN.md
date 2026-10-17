@@ -3615,6 +3615,11 @@ below carry their own later dates, item 12 is the current one).
         vocabulary ("Current", "Not in use") instead of the job outcome;
         empty graph area when idle (flat baseline + "No traffic in this
         range").
+      - [ ] **GOLDENS-LOCAL-1** (tools + ci) local `dev.sh test-web-shots`
+        (Antrag A-20261017-01) fails on all 15 CI goldens with 0.3-0.8 %
+        diff, only on glyph edges (Debian 12 FreeType vs. the Ubuntu runner).
+        Deterministic font flags in web-shot + fontconfig, a text-tolerant
+        png-diff mode for local runs, CI stays strict; goldens re-recorded.
       - [ ] tag `v0.1.0-rc20.1` after main CI is green (operator's yes)
 
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
