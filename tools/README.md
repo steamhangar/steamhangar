@@ -83,14 +83,21 @@ Measured with it (same day, against the then-current goldens):
 
 Against an identical local baseline the tolerant mode keeps most of what
 strict sees: a 4-px tile shift 61-66 % of strict's pixels, a tile
-background change 90-92 %, a hidden element 100 %. Its blind spot is a
-whole element moved by exactly 1 px (indistinguishable from an edge drawn
-with other coverage); like strict, it also cannot see a change smaller than
-`--threshold` (one changed letter, a hidden 16-px wordmark at 1000 px width).
+background change 90-92 %, a hidden element 100 %. Its blind spots:
 
-CI keeps `strict` (CI shots vs CI goldens are bit-identical). Use
-`aa-tolerant` only where the shots come from another machine, i.e. the
-operator's local check:
+- a whole element moved by exactly 1 px (indistinguishable from an edge
+  drawn with other coverage);
+- a subtle colour change of thin text, e.g. `--dim` -> `--dim-2`: ~99 % of
+  its pixels are excused, because every pixel of a 1-2 px stem is an edge
+  and the local ink barely moves (pinned by a test in
+  `web/tests/png-diff.test.js`);
+- a mid-tone 1-px border that changed colour or moved by 1 px;
+- like strict, any change smaller than `--threshold` (one changed letter,
+  a hidden 16-px wordmark at 1000 px width).
+
+Only local runs against CI goldens use it. CI keeps `strict` (CI shots vs
+CI goldens are bit-identical) and is the authority: a local pass in this
+mode is a hint, not a verdict. The operator's local check:
 
 ```
 node tools/png-diff.mjs --expected web/tests/goldens --actual <out> --diff <out>-diff --missing warn --mode aa-tolerant

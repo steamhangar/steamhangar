@@ -228,12 +228,12 @@ const INK = [230, 236, 240, 255];
  * Each stem covers [left, right) in fractional pixels over rows y0..y1, so
  * a fractional `left` gives antialiased edge pixels.
  */
-function glyphs(width, height, stems, { y0 = 4, y1 = height - 4 } = {}) {
+function glyphs(width, height, stems, { y0 = 4, y1 = height - 4, ink = INK } = {}) {
   const image = solid(width, height, BG);
   for (const [left, right] of stems) {
     for (let x = Math.floor(left); x < Math.ceil(right); x += 1) {
       const coverage = Math.max(0, Math.min(x + 1, right) - Math.max(x, left));
-      const px = BG.map((b, c) => (c === 3 ? 255 : Math.round(b + (INK[c] - b) * coverage)));
+      const px = BG.map((b, c) => (c === 3 ? 255 : Math.round(b + (ink[c] - b) * coverage)));
       for (let y = y0; y < y1; y += 1) image.data.set(px, (y * width + x) * 4);
     }
   }
@@ -317,6 +317,22 @@ test("aa-tolerant: a missing element fails, and so does missing text", () => {
   // A missing stem next to a remaining one is still caught.
   const oneLess = glyphs(40, 30, TEXT.slice(0, -1));
   assert.equal(compareImages(text, oneLess, AA).pass, false);
+});
+
+test("aa-tolerant blind spot (documented): a subtle colour change of thin text is excused", () => {
+  // --dim #8AA1AD -> --dim-2 #7A91A0 on 1-2 px stems: every stem pixel is
+  // an edge pixel and the local ink moves by less than INK_TOLERANCE, so
+  // the mode cannot tell it from rasterisation noise. Strict sees it. If
+  // this test starts failing, update the blind-spot list in png-diff.mjs's
+  // header and tools/README.md.
+  const thin = [[5.3, 6.7], [10.1, 11.4], [26.5, 27.6]];
+  const dim = glyphs(40, 30, thin, { ink: [0x8a, 0xa1, 0xad, 255] });
+  const dim2 = glyphs(40, 30, thin, { ink: [0x7a, 0x91, 0xa0, 255] });
+  const strict = compareImages(dim, dim2, { threshold: 0 });
+  assert.ok(strict.differing > 0);
+  const tolerant = compareImages(dim, dim2, AA);
+  assert.equal(tolerant.differing, 0);
+  assert.equal(tolerant.pass, true);
 });
 
 test("aa-tolerant: sizes still have to match; unknown modes are rejected", () => {

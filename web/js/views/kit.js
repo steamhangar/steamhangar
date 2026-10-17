@@ -14,6 +14,7 @@
  * the meter widths go through the CSSOM.
  */
 import { createPill } from "../components/pill.js";
+import { GRIP_SVG, svgIcon } from "../lib/icons.js";
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -226,7 +227,9 @@ function jobRow(name, meta, size, actionLabel, actionClass, withGrip) {
   const r = el("div", "jr");
   const left = el("div");
   if (withGrip) {
-    left.appendChild(el("span", "grip", "⋮⋮"));
+    const grip = el("span", "grip");
+    grip.appendChild(svgIcon(GRIP_SVG));
+    left.appendChild(grip);
     left.append(" ");
   }
   left.appendChild(el(withGrip ? "span" : "div", "nm", name));

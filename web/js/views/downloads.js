@@ -245,6 +245,7 @@ import {
   resumeAriaLabel,
   confirmTitle,
 } from "../lib/bulk-jobs.js";
+import { GRIP_SVG } from "../lib/icons.js";
 
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
@@ -272,8 +273,6 @@ function staticIcon(svgMarkup) {
   span.innerHTML = svgMarkup;
   return span.firstElementChild;
 }
-const GRIP_SVG =
-  '<svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="7" cy="4" r="1.5"/><circle cx="13" cy="4" r="1.5"/><circle cx="7" cy="10" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="7" cy="16" r="1.5"/><circle cx="13" cy="16" r="1.5"/></svg>';
 
 // ---------------------------------------------------------------------
 // Module-level state. Persists across re-mounts (navigating away and back

@@ -30,9 +30,14 @@
 // or moved by up to 1 px passes both tests; a box moved by more than 1 px,
 // a recoloured area or a missing element fails at least one of them on
 // every pixel away from its outline, and those still count against
-// --threshold. A 1-px shift of a whole element is invisible in this mode,
-// as are changes too small for --threshold in strict mode too; strict on
-// CI stays the authority.
+// --threshold. Blind spots of this mode (it trades them for passing on
+// another OS): a whole element moved by exactly 1 px; a subtle colour
+// change of thin text (--dim -> --dim-2: ~99 % of the pixels excused,
+// every stem pixel is an edge and its local ink barely moves); a mid-tone
+// 1-px border that changed colour or moved by 1 px; and, as in strict
+// mode, anything below --threshold. Only local runs against CI goldens use
+// it; CI compares CI shots with CI goldens in strict mode and stays the
+// authority.
 //
 // --missing decides what an actual PNG without a golden means: `fail`
 // (default) or `warn` (CI verify mode: the first run after a new page is
