@@ -70,6 +70,22 @@ test("pointercancel snaps back even past the threshold", () => {
   assert.equal(dlg.sheet.style.transform, "");
 });
 
+test("pointermove during a running close animation does not re-apply the drag transform", () => {
+  const { dlg, ev } = setup();
+  globalThis.getComputedStyle = () => ({ transitionDuration: "300ms", transitionDelay: "0s" });
+  try {
+    ev("pointerdown", 100, 0);
+    ev("pointermove", 150, 500);
+    dlg.close();
+    assert.equal(dlg.sheet.style.transform, "");
+    ev("pointermove", 200, 600);
+    assert.equal(dlg.sheet.style.transform, "");
+    assert.equal(dlg.sheet.style.transition, "");
+  } finally {
+    delete globalThis.getComputedStyle;
+  }
+});
+
 test("the backdrop tap still closes", () => {
   const { dlg } = setup();
   dlg.backdrop.dispatchEvent({ type: "click", target: dlg.backdrop });

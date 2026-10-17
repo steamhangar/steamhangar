@@ -167,6 +167,7 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
 
   function close() {
     if (!isOpen()) return;
+    resetDrag();
     // Modal-stack bookkeeping, onClose and focus return stay synchronous;
     // only the visual hide waits for the transition.
     closing = true;
@@ -218,7 +219,7 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
     }
   });
   grab.addEventListener("pointermove", (event) => {
-    if (!drag || (event.pointerId !== undefined && event.pointerId !== drag.id)) return;
+    if (!drag || closing || (event.pointerId !== undefined && event.pointerId !== drag.id)) return;
     drag.dy = Math.max(0, event.clientY - drag.startY);
     sheet.style.transition = "none";
     sheet.style.transform = `translateY(${drag.dy}px)`;
