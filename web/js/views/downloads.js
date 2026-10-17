@@ -223,6 +223,17 @@ import {
   isHistoryScope,
 } from "../lib/history-delete.js";
 import {
+  HISTORY_LIMIT,
+  HISTORY_FIRST_PAGE,
+  HISTORY_CAPPED_TEXT,
+  historyPage,
+  idleSubtitle,
+  isHistoryCapped,
+  nextShown,
+  showMoreLabel,
+  showMoreText,
+} from "../lib/history-paging.js";
+import {
   WORDING as BULK,
   bulkBarState,
   bulkPauseTargets,
@@ -285,10 +296,10 @@ const state = {
  * (`{throughput, series}`), and the History filter's fetched rows. Module
  * state, so a re-mount keeps the chosen ranges. */
 const traffic = { range: readStoredStatsRange(), throughput: null, series: null, error: null, unsupported: false, noFigures: false };
-const history = { range: "all", jobs: [], gen: 0 };
-
-/** WP D15c: the history fetch's page size (the API's maximum; no paging). */
-const HISTORY_LIMIT = 200;
+/** WP DOWNLOADS-3: `shown` = rows on screen (first page, then +20 per
+ * "Show more"); `loaded` = the range fetch has answered at least once, so
+ * the subline may count the list. */
+const history = { range: "all", jobs: [], gen: 0, shown: HISTORY_FIRST_PAGE, loaded: false };
 
 /** A job by id from the store's list or the history fetch. */
 function findJobById(jobId) {
@@ -1310,7 +1321,8 @@ function buildHistoryRow(job, gamesByAppid) {
   const item = createHistoryItem({
     job,
     title: nameFor(job.appid, gamesByAppid),
-    kind: jobIconKind(job), // "cached" | "error" | "cancelled"
+    kind: jobIconKind(job), // "cached" | "error" | "cancelled" | "notinuse"
+    word: jobStatusWord(job),
     meta: `job #${job.id} · ${jobStatusWord(job)} · ${formatTimestamp(job.finished_at)}`,
     expanded: st.expanded,
     onToggle: () => toggleHistoryRow(job.id),
@@ -1337,13 +1349,21 @@ function hintMessage(text) {
   return p;
 }
 
+/** WP DOWNLOADS-3: the idle count is the History list's own set for the
+ * selected range (`historyRows()`), not the store's 20-job poll. */
 function subtitleText(p) {
   const bits = [];
   if (p.running.length) bits.push(`${p.running.length} running`);
   if (p.paused.length) bits.push(`${p.paused.length} paused`);
   if (p.queued.length) bits.push(`${p.queued.length} queued`);
-  if (!bits.length) return `Idle · ${p.history.length} in history`;
+  if (!bits.length) {
+    return idleSubtitle({ loaded: history.loaded, count: historyRows().length, capped: isHistoryCapped(history.jobs.length) });
+  }
   return bits.join(" · ");
+}
+
+function paintSubtitle() {
+  if (mounted()) els.sub.textContent = subtitleText(partitionJobs(state.jobs));
 }
 
 /** A section-head count badge; hidden at zero. */
@@ -1408,6 +1428,25 @@ function historyKey(rows) {
   return rows.map((j) => `${j.id}:${j.status}`).join(",");
 }
 
+/** WP DOWNLOADS-3: the "Show N more" button, or the capped note, after the
+ * rows on screen; `null` when every row is shown and nothing is cut off. */
+function historyFooter(page) {
+  if (page.next > 0) {
+    const btn = el("button", "btn sm ghost hmore", showMoreText(page.next));
+    btn.type = "button";
+    btn.dataset.role = "history-more";
+    btn.setAttribute("aria-label", showMoreLabel(page.next, page.remaining));
+    btn.addEventListener("click", () => showMoreHistory());
+    return btn;
+  }
+  if (page.capped) {
+    const note = hintMessage(HISTORY_CAPPED_TEXT);
+    note.dataset.role = "history-capped";
+    return note;
+  }
+  return null;
+}
+
 function renderHistory(gamesByAppid = gamesByAppidMap()) {
   if (!mounted()) return;
   const finished = historyRows();
@@ -1416,9 +1455,30 @@ function renderHistory(gamesByAppid = gamesByAppidMap()) {
   if (!finished.length) {
     els.historyBody.appendChild(emptyMessage(emptyHistoryText(history.range)));
   } else {
-    for (const job of finished) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
+    // WP DOWNLOADS-3: the first page, then 20 more per click. An expanded
+    // row keeps its state across the rebuild (`getExcerptState`). A row a
+    // deep link asked to open (`pendingHighlightJobId`) is paged in first.
+    const wanted = pendingHighlightJobId == null ? -1 : finished.findIndex((j) => j.id === pendingHighlightJobId);
+    while (wanted >= history.shown) history.shown = nextShown(history.shown);
+    const page = historyPage(finished.length, history.shown, { capped: isHistoryCapped(history.jobs.length) });
+    for (const job of finished.slice(0, page.visible)) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
+    const footer = historyFooter(page);
+    if (footer) els.historyBody.appendChild(footer);
   }
+  paintSubtitle();
   applyPendingHighlight();
+}
+
+/** Append the next 20 rows; focus moves to the first new row, so keyboard
+ * users continue where the list grew (the button is rebuilt). */
+function showMoreHistory() {
+  if (!mounted()) return;
+  const before = history.shown;
+  history.shown = nextShown(history.shown);
+  renderHistory();
+  const rows = els.historyBody.querySelectorAll(".hitem .hrow");
+  const first = rows[before];
+  if (first) first.focus();
 }
 
 async function loadHistory() {
@@ -1434,13 +1494,19 @@ async function loadHistory() {
   }
   if (gen !== history.gen) return; // a newer range was chosen meanwhile
   history.jobs = items;
-  if (mounted() && historyKey(historyRows()) !== els.historyKey) renderHistory();
+  const firstAnswer = !history.loaded;
+  history.loaded = true;
+  if (!mounted()) return;
+  if (historyKey(historyRows()) !== els.historyKey) renderHistory();
+  else if (firstAnswer) paintSubtitle();
 }
 
 function setHistoryRange(range) {
   if (!isRange(range) || range === history.range) return;
   history.range = range;
   history.jobs = [];
+  history.shown = HISTORY_FIRST_PAGE;
+  history.loaded = false;
   renderHistory();
   loadHistory();
 }
@@ -1998,6 +2064,8 @@ updateNavPip(state.jobs);
 export function renderDownloads() {
   const section = buildSection();
   sectionEl = section;
+  // WP DOWNLOADS-3: every visit starts at the first History page.
+  history.shown = HISTORY_FIRST_PAGE;
   fullRender();
   paintUpdates(); // WP UPD-6
   paintIncomplete(); // WP CACHE-COMPLETE-1c

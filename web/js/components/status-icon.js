@@ -208,10 +208,13 @@ const GLYPH_BUILDERS = {
  *
  * @param {string} kind one of STATUS_LABEL's keys (an unknown kind falls
  *   back to "none", never to a blank/invalid icon).
- * @param {{size?: "sm"|"md"|"lg"}} [options]
+ * @param {{size?: "sm"|"md"|"lg", label?: string}} [options] `label`
+ *   replaces the kind's own screen-reader word (WP DOWNLOADS-3: a History
+ *   row's check is a DONE job, not a "Current" game); glyph and colour
+ *   still follow `kind`. Empty or missing keeps STATUS_LABEL's word.
  * @returns {HTMLSpanElement}
  */
-export function createStatusIcon(kind, { size = "md" } = {}) {
+export function createStatusIcon(kind, { size = "md", label: word = "" } = {}) {
   const knownKind = kind in STATUS_LABEL ? kind : "none";
   const shape = KIND_GLYPH[knownKind];
   const build = GLYPH_BUILDERS[shape] || buildDownload;
@@ -234,7 +237,7 @@ export function createStatusIcon(kind, { size = "md" } = {}) {
 
   const label = document.createElement("span");
   label.className = "sr-only";
-  label.textContent = STATUS_LABEL[knownKind];
+  label.textContent = typeof word === "string" && word !== "" ? word : STATUS_LABEL[knownKind];
   wrap.appendChild(label);
 
   return wrap;

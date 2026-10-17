@@ -17,7 +17,7 @@ import { createFakeDom } from "./fake-dom.js";
 const dom = createFakeDom();
 globalThis.document = dom.document;
 
-const { heroModel, graphModel, splitFigure, devicesLoading, createDownloadsHero, GRAPH_GRID } = await import("../js/components/downloads-hero.js");
+const { heroModel, graphModel, splitFigure, devicesLoading, createDownloadsHero, GRAPH_GRID, NO_TRAFFIC_TEXT } = await import("../js/components/downloads-hero.js");
 const { jobProgress, createJobCard, createAttentionRow, createQueueRow, verifyAllAriaLabel } = await import("../js/components/job-row.js");
 const { createHistoryItem, setHistoryItemExpanded, paintHistoryPanel, TRUNCATED_NOTE } = await import("../js/components/history-list.js");
 const { selectExcerptDisplay } = await import("../js/lib/log-excerpt.js");
@@ -106,7 +106,7 @@ test("heroModel: no figures before an answer, with the feed off, or for an old s
   assert.match(heroModel({ unsupported: true }).note, /does not report traffic statistics/);
 });
 
-test("MUTATION PIN: graphModel — 600x96 geometry, highest caption (Android twin wording), null for another range or an all-zero series", () => {
+test("MUTATION PIN: graphModel — 600x96 geometry, highest caption (Android twin wording), null for another range, idle baseline for an all-zero series", () => {
   const series = {
     event_feed: { state: "ok" },
     range: "6h",
@@ -119,8 +119,38 @@ test("MUTATION PIN: graphModel — 600x96 geometry, highest caption (Android twi
   assert.equal(g.line, "M0 96 L300 0 L600 48");
   assert.deepEqual(g.axis, ["6 h ago", "highest 10.0 MB/s", "now"]);
   assert.equal(graphModel(series, "24h"), null, "an answer for another range is not drawn");
-  assert.equal(graphModel({ ...series, points: series.points.map((p) => ({ ...p, bytes_per_second: 0 })) }, "6h"), null);
+  // WP DOWNLOADS-3: no traffic is a flat baseline at 0 with a note, not nothing.
+  const flat = graphModel({ ...series, points: series.points.map((p) => ({ ...p, bytes_per_second: 0 })) }, "6h");
+  assert.equal(flat.idle, true);
+  assert.equal(flat.line, "M0 96 L600 96", "baseline on the floor (0), full width");
+  assert.equal(flat.area, null);
+  assert.equal(flat.note, NO_TRAFFIC_TEXT);
+  assert.equal(NO_TRAFFIC_TEXT, "No traffic in this range");
+  assert.equal(flat.label, "No traffic in this range.");
+  assert.deepEqual(flat.axis, ["6 h ago", "now"]);
+  const live = graphModel({ event_feed: { state: "ok" }, range: "live", bucket_seconds: 10, range_start: null, points: [] }, "live");
+  assert.equal(live.idle, true, "an empty live window is idle too");
+  assert.deepEqual(live.axis, ["1 h ago", "now"]);
+  assert.equal(graphModel({ ...series, event_feed: { state: "disabled" }, points: [] }, "6h"), null, "feed off: no graph");
   assert.deepEqual(GRAPH_GRID, [24, 48, 72]);
+});
+
+test("createDownloadsHero: an idle series paints the grid, a baseline, the axis and the centred note", () => {
+  const hero = createDownloadsHero({ range: "live", onRangeChange() {} });
+  const q = (role) => hero.el.querySelector(`[data-role="${role}"]`);
+  const series = { event_feed: { state: "ok" }, range: "live", bucket_seconds: 10, range_start: null, points: [] };
+  hero.paint({ throughput: { ...throughput({ current: 0, clients: 0 }), range: "live" }, series, range: "live", rateCap: null, unsupported: false, error: null, noFigures: false });
+  const graph = q("stats-graph");
+  assert.equal(graph.hidden, false);
+  assert.ok(graph.classList.contains("idle"));
+  assert.equal(q("graph-svg").getAttribute("aria-label"), "No traffic in this range.");
+  assert.equal(graph.querySelectorAll("line").length, GRAPH_GRID.length, "grid lines stay");
+  const paths = graph.querySelectorAll("path");
+  assert.equal(paths.length, 1, "no area under a flat line");
+  assert.equal(paths[0].getAttribute("class"), "line base");
+  assert.equal(q("graph-note").textContent, "No traffic in this range");
+  assert.equal(q("graph-note").getAttribute("aria-hidden"), "true");
+  assert.equal(graph.querySelector(".ax").textContent, "1 h agonow");
 });
 
 test("createDownloadsHero: paint fills the card; the pill is rebuilt only when its kind changes", () => {

@@ -551,7 +551,44 @@ function buildJobs() {
       stop_request: null,
       log_excerpt: "[vault-api] worker claimed job 899999\nPrefilled 12 apps.",
     },
+    ...buildOlderHistory(),
   ];
+}
+
+/** WP DOWNLOADS-3: older finished jobs, so the History list has more than
+ * one page (first 10 rows, then "Show 20 more") in demo mode and in the
+ * screenshot goldens. 24 jobs, one every 5 hours from 9 hours ago (all
+ * inside 7 days), on curated demo games (Aurora Cascade, Emberreach,
+ * Frostline Convoy, Starfall Legion); mostly Done, with one
+ * Cancelled, one Failed and one garbage collection. */
+export const DEMO_OLDER_HISTORY_COUNT = 24;
+// Not Copper Horizon (2010020): the demo keeps it a never-run game.
+const OLDER_HISTORY_APPS = [2010010, 2010040, 2010050, 2010080];
+function buildOlderHistory() {
+  const rows = [];
+  for (let i = 0; i < DEMO_OLDER_HISTORY_COUNT; i += 1) {
+    const id = 899998 - i;
+    const finishedAgo = (9 + 5 * i) * 3_600_000;
+    const status = i === 4 ? "cancelled" : i === 11 ? "error" : "done";
+    const gc = i === 7;
+    rows.push({
+      id,
+      appid: OLDER_HISTORY_APPS[i % OLDER_HISTORY_APPS.length],
+      type: gc ? "gc" : "prefill",
+      status,
+      created_at: isoAgo(finishedAgo + 60_000),
+      started_at: isoAgo(finishedAgo + 50_000),
+      finished_at: isoAgo(finishedAgo),
+      updated: status === "done" && !gc ? i % 3 : 0,
+      up_to_date: status === "done" && !gc ? 1 : 0,
+      summary_parse_ok: !gc,
+      gc_execute: gc ? true : null,
+      paused_at: null,
+      stop_request: status === "cancelled" ? "cancel" : null,
+      log_excerpt: `[vault-api] worker claimed job ${id}\n${gc ? "GC finished." : status === "done" ? "Prefill finished." : "SteamPrefill stopped."}`,
+    });
+  }
+  return rows;
 }
 
 // ---------------------------------------------------------------------

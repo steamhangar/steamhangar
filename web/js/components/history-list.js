@@ -52,11 +52,13 @@ function chevron() {
 
 /**
  * One History item (row + its hanging panel).
- * @param {{job: object, title: string, kind: string, meta: string, expanded: boolean, onToggle: () => void}} options
- *   `kind` is `jobIconKind(job)`; `meta` the "job #N · word · time" line.
+ * @param {{job: object, title: string, kind: string, word?: string, meta: string, expanded: boolean, onToggle: () => void}} options
+ *   `kind` is `jobIconKind(job)`; `word` the job outcome
+ *   (`jobStatusWord(job)`, the same word as in the meta line); `meta` the
+ *   "job #N · word · time" line.
  * @returns {HTMLDivElement}
  */
-export function createHistoryItem({ job, title, kind, meta, expanded, onToggle }) {
+export function createHistoryItem({ job, title, kind, word = "", meta, expanded, onToggle }) {
   const item = el("div", expanded ? "hitem open" : "hitem");
   item.dataset.jid = String(job.id);
 
@@ -66,13 +68,15 @@ export function createHistoryItem({ job, title, kind, meta, expanded, onToggle }
   const panelId = `hpanel-${job.id}`;
   row.setAttribute("aria-controls", panelId);
 
-  // The disc reuses the "cached" check for a DONE job; that kind's own
-  // screen-reader word ("Current") would be wrong here, so the icon is
-  // decorative and the meta line ("Done"/"Failed"/"Cancelled") carries the
-  // word (WP 4a.5).
+  // The disc reuses library glyphs (the "cached" check for a DONE job, the
+  // "notinuse" dash for a not-owned one). Their library words ("Current",
+  // "Not in use") are wrong for a job and leaked into copy/paste, so the
+  // icon's label is the job outcome (WP DOWNLOADS-3). The icon stays
+  // decorative for screen readers: the meta line already says the word
+  // (WP 4a.5).
   const icon = el("span", "hic");
   icon.setAttribute("aria-hidden", "true");
-  icon.appendChild(createStatusIcon(kind, { size: "sm" }));
+  icon.appendChild(createStatusIcon(kind, { size: "sm", label: word }));
 
   const info = el("span", "hinfo");
   const nm = el("span", "nm", title);

@@ -196,13 +196,14 @@ test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four til
   assert.equal(q(s, "stats-range").hidden, false, "range selector shown with figures");
 });
 
-test("MUTATION TARGET: an all-zero series draws no graph; the tiles stay", async () => {
+test("MUTATION TARGET: an all-zero series draws the idle baseline with its note (WP DOWNLOADS-3); the tiles stay", async () => {
   server.flat = true;
   const s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "tiles");
-  await tick(20);
-  assert.equal(q(s, "stats-graph").hidden, true);
-  assert.equal(q(s, "stats-graph").children.length, 0);
+  await until(() => q(s, "graph-note") !== null, "idle note");
+  assert.equal(q(s, "stats-graph").hidden, false);
+  assert.equal(q(s, "graph-note").textContent, "No traffic in this range");
+  assert.equal(q(s, "stats-graph").querySelectorAll("path.area").length, 0, "no area under the flat line");
 });
 
 test("MUTATION TARGET: a failed refresh after an answer keeps the figures and adds a 'Couldn't refresh' note", async () => {

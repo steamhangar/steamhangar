@@ -100,5 +100,12 @@ test("MUTATION TARGET: demo /v1/jobs?range= keeps in-flight jobs, filters finish
   const again = await demoRequest("GET", "/v1/jobs", { params: { limit: 50, range: "all" } });
   assert.equal(again.find((j) => j.id === running.id).status, "running", "filtered fetches never tick the demo job");
   const day = await demoRequest("GET", "/v1/jobs", { params: { limit: 50, range: "24h" } });
-  assert.deepEqual(day.map((j) => j.id), all.map((j) => j.id), "seed jobs are all within 24 h");
+  // WP DOWNLOADS-3: the seed history reaches back ~5 days, so 24h keeps the
+  // in-flight job plus the finished ones of the last day only.
+  const cutoff = Date.now() - 24 * 3_600_000;
+  const expected = all.filter((j) => !j.finished_at || Date.parse(j.finished_at) >= cutoff).map((j) => j.id);
+  assert.deepEqual(day.map((j) => j.id), expected, "24h = in-flight + finished within 24 h");
+  assert.ok(day.length < all.length, "older seed history is filtered out");
+  const week = await demoRequest("GET", "/v1/jobs", { params: { limit: 50, range: "7d" } });
+  assert.equal(week.length, all.length, "the whole seed history is within 7 days");
 });
