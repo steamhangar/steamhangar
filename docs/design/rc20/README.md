@@ -47,3 +47,10 @@ generator: `web/tests/design-tokens-contract.test.js` checks `theme.css`,
 `StatusVocabularyContractTest` check `Color.kt`, `StatusKind`, `strings.xml`
 and the status-icon logic, so a value changed on one side only fails CI.
 Change a value in the JSON first, then on both sides.
+
+## Status (2026-10-17)
+
+All page packages of the rework are on main. The live reference for the
+primitives is the hidden `/kit` page of the app (rendered from the real
+stylesheets); `kit.html` stays the design spec and must use the same
+values as `web/css/kit.css`.

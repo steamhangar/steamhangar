@@ -1204,3 +1204,46 @@ These are not style preferences; each entry cost a review round to learn.
   (`` `...` + note ``); a source-grep review cannot catch this, only the
   Android job can, so grep `app/app/src/test` for the exact literal before
   editing a template.
+
+## 2026-10-17 — rc20 rework (UI-KIT-1, WEB-GOLDENS-1, TOKENS-SYNC-1, CLIENTS-4, ADD-DEVICE-2, DOWNLOADS-2, SETTINGS-2, LIBRARY-2)
+
+- **Structure is not anatomy.** The first rc20 pass shipped every mockup's
+  columns, tabs, nav and split buttons and still looked "old" on every
+  page, because titles, tiles, pills, labels and segs were re-styled per
+  page from the old primitives. A visual package is only done when its
+  rendered screenshot matches the reference; DOM tests prove wiring, never
+  looks. Pages now compose from `web/css/kit.css` (ADR-0028), and the
+  kit's own reference (`docs/design/rc20/kit.html`) uses the same values
+  as the real CSS: change one, change both.
+- **Render before review, on this box.** Headless Chromium is in
+  `~/.cache/ms-playwright/chromium-*`; `tools/web-shot.mjs` drives it over
+  CDP in demo mode (`steamvault.demoMode=1`). The devbox fontconfig maps
+  `sans-serif` to Liberation Mono, so always set
+  `FONTCONFIG_FILE=tools/web-shot-fonts.conf`, or every page renders in a
+  monospace font and looks wrong. Coders attach 1400/1000/400 shots,
+  reviewers look at them. Kill stray `chrome-linux64` processes after an
+  aborted run; dozens piled up and blocked later screenshots.
+- **Moving or rewording a web string can turn main red through Android.**
+  Kotlin `*WebTwinTest` files read web files by path and pin literals.
+  DOWNLOADS-2 moved the statistics literals from `views/downloads.js` into
+  `components/downloads-hero.js` and changed "highest" to "peak"; the web
+  suite and the web review stayed green, the Android job failed on main.
+  Every web package that moves code between files or touches wording greps
+  `app/app/src/test` for its files and checks each pinned literal before
+  merge. Mockup copy is never a reason to change shipped wording.
+- **Kit rules are opt-in by scope.** Every kit.css selector starts with
+  `.kit`, so a page migrates by adding `kit` to its root and legacy pages
+  are untouched; the cost is that an old app.css rule with the same class
+  name (`.chip`, `.btn:hover`) can still leak in by load order. Remove the
+  old rule when the last legacy user migrates instead of adding overrides.
+  `css-hygiene.test.js` reads kit.css too, so moved rules keep their
+  `[hidden]` guards.
+- **Appending blocks to one shared CSS file conflicts on every parallel
+  merge.** Four packages appended to the end of kit.css; each merge after
+  the first conflicted at the same spot and needed "keep both, mine last".
+  Cheap to resolve, but plan it: merge in a fixed order and rebase the
+  next branch right after each merge.
+- **Unauthenticated GitHub API polling is 60 requests per hour per IP,
+  shared by everything on ZEUS.** Polling CI every 30 s for several
+  branches burned it in minutes. Poll every 2-3 minutes and only one run
+  at a time.

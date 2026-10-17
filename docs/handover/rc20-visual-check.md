@@ -35,7 +35,12 @@ tests only. This list is the browser check that closes rc20 (release gate in
 - [ ] Reduced motion: no animation, overlays still open and close.
 - [ ] Known gap (nit): confirm dialogs animate in only.
 
-## Clients (CLIENTS-1..3, ADD-DEVICE-1)
+## Clients (CLIENTS-1..4, ADD-DEVICE-1/2)
+
+- [ ] One card per row, three zones (identity / activity / recent games);
+      zones stack below about 700 px; tiles 2x2 at 400 px.
+- [ ] Add a device: tab icons, numbered steps, one notice, Show + Copy,
+      pairing QR blurred until Show, footer with Close.
 
 - [ ] One card per device; a PC that is client and agent shows once.
 - [ ] No "PCs running vault-agent" list, no "Manage PCs".
@@ -50,9 +55,11 @@ tests only. This list is the browser check that closes rc20 (release gate in
 - [ ] Add a device: four tabs (Phone / Browser / Windows / Linux-SteamOS),
       arrow keys move between tabs, one security notice, secrets hidden until
       "Show", copy works, switching tabs hides them again.
-- [ ] Known gap (nit): no tab icons or numbered steps compared to the mockup.
 
-## Downloads (LIVE-DELAY-1, DOWNLOADS-1)
+## Downloads (LIVE-DELAY-1, DOWNLOADS-1/2)
+
+- [ ] Hero: big number + pill + limit left, graph middle, four totals 2x2
+      right; three columns at 1400, two at 1000, one at 400.
 
 - [ ] Default range is live; a client download shows within about 10 s.
 - [ ] Header cards decluttered; two columns (Active + Queue left, History
@@ -65,7 +72,10 @@ tests only. This list is the browser check that closes rc20 (release gate in
 - [ ] History differs idle vs active; rows expand to failure hint, Retry,
       log excerpt, raw output.
 
-## Settings (SETTINGS-1)
+## Settings (SETTINGS-1/2)
+
+- [ ] Flat nav with the state on the right; one field card per group;
+      hints behind (i); savebar inside the right column only when dirty.
 
 - [ ] Sticky section nav on the left (Vault & connection, Download window,
       Disk & cleanup, Notifications, Steam, About); collapses sensibly
@@ -77,7 +87,11 @@ tests only. This list is the browser check that closes rc20 (release gate in
 - [ ] Steam keeps inline Save / Preview / Reset.
 - [ ] No "PCs and devices / Open Clients" row.
 
-## Library (LIBRARY-1, LIBRARY-DETAIL-1)
+## Library (LIBRARY-1/2, LIBRARY-DETAIL-1)
+
+- [ ] Chips wrap, Filters always visible, one status line; cards with one
+      status line and a dot; detail sheet 920 px with hero band, tabs and a
+      two-column Overview.
 
 - [ ] One toolbar row: search, chips with counts, sort select plus an
       icon-only direction button (label and tooltip present), layout control,
@@ -102,6 +116,12 @@ tests only. This list is the browser check that closes rc20 (release gate in
       under prefers-reduced-motion (VERIFY-LABEL-1).
 - [ ] Unnamed content/DLC package rows read "Content package" instead of
       "Unknown app"; real unknown apps keep "Unknown app" (APP-NAMES-1).
+
+## UI kit page
+
+- [ ] Open `/kit` (hidden route): every primitive full width and inside a
+      400 px container; compare with `docs/design/rc20/kit.html`.
+- [ ] Web goldens: CI job `web / goldens` green on main.
 
 ## Result
 

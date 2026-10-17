@@ -3594,7 +3594,7 @@ below carry their own later dates, item 12 is the current one).
         - [ ] nit (WEB-GOLDENS-1 review): goldens for one open sheet per page
           (library detail, add a device) deferred; `dev.sh test-web-shots`
           is operator infrastructure, requested as Antrag A-20261017-01.
-        - [ ] **rc20 docs:** `docs/design/rc20/README.md` points to
+        - [x] **rc20 docs:** `docs/design/rc20/README.md` points to
           `kit.html` as the primary reference; `rc20-visual-check.md` gets
           the kit page and the goldens; LEARNINGS entries for "structure
           is not anatomy", "mockup CSS must be the real CSS", "no visual
