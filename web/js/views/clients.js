@@ -188,6 +188,13 @@ function line(text, role) {
   return node;
 }
 
+const ICON_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+const ICONS = {
+  agent: `<svg ${ICON_ATTRS}><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>`,
+  runner: `<svg ${ICON_ATTRS}><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg>`,
+  address: `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>`,
+};
+
 function buildCard(client, range, nowMs) {
   const card = el("div", "jobcard clcard");
   card.dataset.clientKey = String(client.key);
@@ -195,8 +202,11 @@ function buildCard(client, range, nowMs) {
   const agent = client.agent || null;
   if (agent && agent.bypass_suspected) card.classList.add("bypass");
 
-  const top = el("div", "jobtop");
-  const info = el("div");
+  const top = el("div", "jobtop cl-top");
+  const ico = el("span", "cl-ico");
+  ico.setAttribute("aria-hidden", "true");
+  ico.innerHTML = ICONS[card.dataset.kind];
+  const info = el("div", "cl-info");
   const title = el("div", "nm", clientName(client));
   // Operator-chosen text: its own direction, never the page's.
   title.setAttribute("dir", "auto");
@@ -207,10 +217,13 @@ function buildCard(client, range, nowMs) {
   const dot = el("span", "pdot");
   dot.setAttribute("aria-hidden", "true");
   chipEl.append(dot, el("span", null, chip.word));
-  top.append(info, chipEl);
+  top.append(ico, info, chipEl);
   card.appendChild(top);
 
-  card.appendChild(line(loadingNowText(client), "loading-now"));
+  const nowLine = line(loadingNowText(client), "loading-now");
+  nowLine.classList.add("cl-now");
+  if (client.loading_now && client.loading_now.loading === true) nowLine.classList.add("busy");
+  card.appendChild(nowLine);
   const installed = installedText(client);
   if (installed) card.appendChild(line(installed, "installed"));
   const stats = statsText(client, range);
@@ -240,7 +253,7 @@ function buildCard(client, range, nowMs) {
   }
   const removable = agent && isRemovableClientId(agent.client_id);
   if (canRename(client) || removable) {
-    const acts = el("div", "jobacts");
+    const acts = el("div", "jobacts cl-acts");
     if (canRename(client)) {
       const btn = el("button", "btn ghost sm", "Rename");
       btn.type = "button";
@@ -274,6 +287,17 @@ function buildCard(client, range, nowMs) {
     card.appendChild(err);
   }
   return card;
+}
+
+function buildEmptyState() {
+  const box = el("div", "cl-empty");
+  box.dataset.role = "clients-empty";
+  const btn = el("button", "btn primary sm", "Add a device");
+  btn.type = "button";
+  btn.dataset.role = "add-device-empty";
+  btn.addEventListener("click", () => openAddDeviceSheet());
+  box.append(el("p", "hint", NO_CLIENTS_TEXT), btn);
+  return box;
 }
 
 /** The button with `role` of the card with `key`, in the list as it is NOW. */
@@ -364,7 +388,7 @@ function paint() {
   const clients = mergeAgentData(shownRows, agentRows);
   els.sub.textContent = clientsSummaryText(clients);
   paintTiles(clients.length ? clients : null, data.range);
-  if (!clients.length) els.list.appendChild(el("p", "hint", NO_CLIENTS_TEXT));
+  if (!clients.length) els.list.appendChild(buildEmptyState());
   const nowMs = Date.now();
   for (const client of clients) els.list.appendChild(buildCard(client, data.range, nowMs));
   els.agentlessNote.hidden = !clients.some((c) => isAddressClient(c));
