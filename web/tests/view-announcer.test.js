@@ -30,8 +30,9 @@ function stripComments(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
 }
 
-test("VIEW_TITLES is exactly the four views, with the words each view's <h1> shows (literal pin)", () => {
-  assert.deepEqual(VIEW_TITLES, { library: "Library", clients: "Clients", downloads: "Downloads", settings: "Settings" });
+test("VIEW_TITLES is exactly the five views, with the words each view's <h1> shows (literal pin)", () => {
+  // WP UI-KIT-1: `kit` is the hidden UI kit page (URL only, no nav button).
+  assert.deepEqual(VIEW_TITLES, { library: "Library", clients: "Clients", downloads: "Downloads", settings: "Settings", kit: "UI kit" });
 });
 
 test("twin pin: VIEW_TITLES covers router.js's VIEWS list exactly (drift guard, read from source text)", () => {

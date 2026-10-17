@@ -16,6 +16,11 @@
   docs/design/vault-app-mockup-NOTES.md for the rationale behind each.
 -->
 <link rel="stylesheet" href="/css/theme.css">
+<!-- WP UI-KIT-1: the UI kit (docs/design/rc20/kit.html, ADR-0028). Loads
+     BEFORE app.css on purpose: every kit rule is scoped under `.kit`, and
+     at equal specificity app.css must still win so its [hidden] guards and
+     :disabled rules keep working inside a page that opted in. -->
+<link rel="stylesheet" href="/css/kit.css">
 <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>

@@ -11,6 +11,8 @@ import { renderLibrary } from "./views/library.js";
 import { renderClients } from "./views/clients.js";
 import { renderDownloads } from "./views/downloads.js";
 import { renderSettings, requestAboutFocus } from "./views/settings.js";
+// WP UI-KIT-1: hidden /kit route (no nav button), see router.js.
+import { renderKit } from "./views/kit.js";
 import { maybeShowOnboardingOnStartup } from "./onboarding.js";
 // WP 4a.7 — side-effect imports: both components bind their DOM elements
 // and store subscriptions at module load (same posture as views/downloads.js's
@@ -65,6 +67,7 @@ const RENDERERS = {
   clients: renderClients,
   downloads: renderDownloads,
   settings: renderSettings,
+  kit: renderKit,
 };
 
 const viewRoot = document.getElementById("view-root");

@@ -1,0 +1,187 @@
+/* ============================================================
+   SteamHangar web app — UI kit (WP UI-KIT-1, ADR-0028)
+   Ported from docs/design/rc20/kit.html, the binding visual reference for
+   the rc20 page packages (CLIENTS-4, DOWNLOADS-2, SETTINGS-2, ...). Its
+   class names and values are the spec; colours, radii and the type/spacing
+   scale come from css/theme.css (--fs-1..7, --sp-1..8) — this file holds
+   no hex colour and no raw px font size (web/tests/css-kit-scale.test.js).
+
+   OPT-IN SCOPE. Every rule here is scoped under `.kit`: a page (or a sheet
+   rendered outside the view root) composes from the kit by putting `kit`
+   on its root element. Nothing in this file reaches a page that has not
+   opted in, which is how it ships next to app.css without restyling the
+   existing Library/Clients/Downloads/Settings pages (they migrate one
+   package at a time). The reason is name collisions with app.css:
+
+     collides in app.css           kit meaning here
+     .btn (.sm .ghost .danger)     same role, kit geometry (9/14, r-s, 500)
+     .pill (.card .pill.muted)     status pill wrapping the status icon
+     .chip (.lib-bar / settings)   field-header chip (.ch changed, .env)
+     .sec (h4.sec)                 section label, inline (span)
+     .field, .field label, .fg     form field and field grid
+     .hint, .empty, .badge         kit sizes from the scale
+     .grip (.qrow .grip)           drag handle
+
+   The non-colliding names (.page-head .sechd .seg .tiles .tile .meter
+   .fcard .ib .in .fchip .gchip .jr .lh) are scoped the same way for one
+   rule everybody can remember: "inside .kit, kit.html's names apply".
+   Load order (index.html): theme.css, kit.css, app.css — so at EQUAL
+   specificity app.css still wins, which keeps its `[hidden]` guards and
+   `.btn:disabled` working inside an opted-in page too.
+
+   Primitives are intrinsically responsive (auto-fit grids, flex-wrap);
+   page compositions size themselves with `@container` queries on their
+   own root, never with viewport breakpoints (the /kit page shows every
+   primitive at full width and inside a 400px container).
+   ============================================================ */
+
+/* ---------- page head and section labels ---------- */
+.kit .page-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:var(--sp-4); flex-wrap:wrap; }
+.kit .page-head h1{ font-size:var(--fs-6); margin:0; letter-spacing:-.5px; }
+.kit .page-head .sub{ color:var(--dim); font-size:var(--fs-3); margin-top:2px; }
+.kit .sec{ font:500 var(--fs-1)/1 var(--ui); letter-spacing:.9px; text-transform:uppercase; color:var(--dim); }
+.kit .sechd{ display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); min-height:34px; }
+
+/* ---------- buttons ---------- */
+.kit .btn{
+  font:500 var(--fs-3)/1 var(--ui); color:var(--text);
+  background:var(--raised); border:1px solid var(--line); border-radius:var(--r-s);
+  padding:9px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; white-space:nowrap;
+}
+@media (hover:hover) and (pointer:fine){
+  .kit .btn:hover{ background:var(--raised-2); }
+}
+.kit .btn.pri{ background:var(--accent); color:var(--accent-ink); border-color:transparent; font-weight:700; }
+.kit .btn.ghost{ background:transparent; }
+.kit .btn.sm{ padding:6px 10px; font-size:var(--fs-2); border-radius:var(--r-s); }
+.kit .btn.danger{ background:transparent; color:var(--danger); border-color:color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.kit .btn.w72{ width:72px; justify-content:center; }
+
+/* ---------- status pill (wraps components/status-icon.js, see
+   components/pill.js) ----------
+   Shape first, word second, colour third: the disc keeps its own kind
+   colour from theme.css; the pill adds the word and a tinted background so
+   the state reads at card size. Motion stays theme.css's (running arrows
+   fall, updating/verify turn, reduced motion stops it). */
+.kit .pill{
+  display:inline-flex; align-items:center; gap:6px;
+  font:500 var(--fs-2)/1 var(--ui); padding:5px 10px; border-radius:999px;
+  background:var(--raised-2); color:var(--dim); white-space:nowrap;
+}
+.kit .pill.ok{ color:var(--ok); background:color-mix(in srgb, var(--ok) 14%, var(--surface)); }
+.kit .pill.run{ color:var(--run); background:color-mix(in srgb, var(--run) 14%, var(--surface)); }
+.kit .pill.acc{ color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+.kit .pill.stale{ color:var(--stale); background:color-mix(in srgb, var(--stale) 14%, var(--surface)); }
+.kit .pill.danger{ color:var(--danger); background:color-mix(in srgb, var(--danger) 14%, var(--surface)); }
+.kit .pill.none{ color:var(--none); }
+/* Disc rule (kit.html "Status vocabulary"): 16px disc, glyph box 60% of
+   the diameter (9.6px), so at least 3px of disc stays visible around every
+   shape. theme.css's default is --sz:17px with a 64% glyph box. The
+   running clip (clip-path:circle(50%)) and the fall period still hold: in
+   viewBox units the disc radius becomes 12/0.6 = 20, the parked arrow's
+   lowest ink (y ~ -17.4) stays above the disc top (-8) and the leading
+   arrow's highest ink at the end frame (y ~ 34.2) stays below its bottom
+   (32). */
+.kit .pill .sic{ --sz:16px; margin-left:-3px; }
+.kit .pill .sic svg{ width:60%; height:60%; }
+
+/* ---------- segmented control ---------- */
+.kit .seg{ display:inline-flex; gap:2px; padding:3px; background:var(--surface); border:1px solid var(--line-soft); border-radius:10px; }
+.kit .seg button{ font:500 var(--fs-2)/1 var(--ui); color:var(--dim); background:none; border:0; border-radius:7px; padding:7px 12px; cursor:pointer; }
+.kit .seg button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); }
+
+/* ---------- tiles and meter ---------- */
+.kit .tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap:var(--sp-3); }
+.kit .tile{
+  background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m);
+  padding:14px 16px; display:grid; gap:4px; align-content:start; min-width:0;
+}
+.kit .tile .k{ font:500 var(--fs-1)/1 var(--ui); letter-spacing:.8px; text-transform:uppercase; color:var(--dim); }
+/* kit.html draws the value at 22px; the scale has no 22, so the nearest
+   step (--fs-6, 24px) is used — a value is a small headline, not body. */
+.kit .tile .v{ font:500 var(--fs-6)/1.1 var(--ui); letter-spacing:-.3px; font-variant-numeric:tabular-nums; }
+.kit .tile .v small{ font-size:var(--fs-2); color:var(--dim); margin-left:4px; letter-spacing:0; }
+.kit .tile .n{ font-size:var(--fs-2); color:var(--dim); }
+.kit .tile.hi{ border-color:color-mix(in srgb, var(--stale) 55%, var(--line)); }
+.kit .meter{ height:4px; border-radius:2px; background:var(--raised-2); overflow:hidden; margin-top:6px; }
+.kit .meter i{ display:block; height:100%; background:var(--ok); border-radius:2px; }
+.kit .meter.acc i{ background:var(--accent); }
+
+/* ---------- field card, field grid, field ---------- */
+.kit .fcard{
+  background:var(--surface); border:1px solid var(--line-soft); border-radius:14px;
+  padding:18px 20px; display:grid; gap:var(--sp-4);
+}
+.kit .fcard > h3{ margin:0; font:500 var(--fs-1)/1 var(--ui); letter-spacing:.9px; text-transform:uppercase; color:var(--dim); }
+.kit .fg{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:18px 28px; }
+.kit .field{ display:grid; gap:7px; margin:0; min-width:0; }
+.kit .field .lh{ display:flex; align-items:center; gap:8px; }
+.kit .field label{ display:inline; font:500 var(--fs-3) var(--ui); letter-spacing:0; text-transform:none; color:var(--text); margin:0; }
+.kit .ib{
+  width:18px; height:18px; border-radius:50%; border:1px solid var(--line); color:var(--dim);
+  font:500 var(--fs-1)/16px var(--mono); text-align:center; background:none; cursor:pointer; padding:0; flex:none;
+}
+.kit .chip{
+  margin-left:auto; font:400 var(--fs-1)/1 var(--ui); padding:4px 8px; border-radius:999px;
+  border:0; background:var(--raised-2); color:var(--dim); white-space:nowrap; letter-spacing:0; text-transform:none;
+}
+.kit .chip.ch{ color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+.kit .chip.env{ color:var(--dim); }
+.kit .in{
+  font:400 var(--fs-3) var(--ui); color:var(--text); background:var(--bg);
+  border:1px solid var(--line); border-radius:var(--r-s); padding:9px 12px; width:100%; min-width:0;
+}
+.kit .in.num{ font-family:var(--mono); max-width:160px; }
+.kit .in:disabled{ color:var(--dim); background:var(--surface); }
+.kit .hint{ font-size:var(--fs-2); line-height:1.45; color:var(--dim); margin:0; text-align:left; }
+
+/* ---------- filter chip, game chip, count badge ---------- */
+.kit .fchip{
+  font:500 var(--fs-2)/1 var(--ui); color:var(--dim); background:var(--surface);
+  border:1px solid var(--line-soft); border-radius:999px; padding:8px 12px; white-space:nowrap; cursor:pointer;
+}
+.kit .fchip b{ font:400 var(--fs-1) var(--mono); margin-left:6px; color:var(--dim-2); }
+.kit .fchip[aria-pressed="true"]{ color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.kit .gchip{
+  display:inline-block; font:400 var(--fs-2)/1 var(--ui); color:var(--text); background:var(--raised);
+  border:1px solid var(--line-soft); border-radius:999px; padding:6px 10px; white-space:nowrap;
+}
+.kit .gchip b{ font:400 var(--fs-1) var(--mono); color:var(--dim); margin-left:6px; }
+.kit .gchip.more{ color:var(--dim); border-style:dashed; background:none; }
+.kit .badge{ display:inline-block; font:500 var(--fs-1) var(--mono); background:var(--raised-2); color:var(--dim); border-radius:999px; padding:3px 8px; }
+
+/* ---------- attention row (Updates / Incomplete / Queue share it) ---------- */
+.kit .jr{
+  display:grid; grid-template-columns:minmax(0, 1fr) auto 72px; align-items:center; gap:var(--sp-3);
+  background:var(--raised); border:1px solid var(--line-soft); border-radius:var(--r-m); padding:10px 12px;
+}
+.kit .jr .nm{ font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kit .jr .meta{ font:var(--fs-1) var(--mono); color:var(--dim); }
+.kit .jr .sz{ font:var(--fs-2) var(--mono); color:var(--dim); }
+.kit .grip{ color:var(--dim-2); cursor:grab; letter-spacing:-2px; user-select:none; }
+
+/* ---------- empty state ---------- */
+.kit .empty{ color:var(--dim); font-size:var(--fs-2); text-align:center; padding:18px; border:1px dashed var(--line); border-radius:var(--r-m); }
+
+/* ---------- /kit page frame (views/kit.js) ----------
+   A 400px inline-size container: the same markup renders inside it so the
+   container-query behaviour of later page compositions can be checked
+   next to the full-width rendering. */
+.kit .kit-frame{ container-type:inline-size; width:400px; max-width:100%; border:1px dashed var(--line); border-radius:var(--r-l); padding:var(--sp-3); display:grid; gap:var(--sp-6); }
+.kit .kit-section{ display:grid; gap:var(--sp-4); }
+.kit .kit-section > h2{ font-size:var(--fs-5); margin:0; padding-bottom:var(--sp-2); border-bottom:1px solid var(--line-soft); }
+.kit .kit-row{ display:flex; flex-wrap:wrap; gap:var(--sp-3); align-items:center; }
+.kit .kit-list{ display:grid; gap:var(--sp-2); }
+/* The page root itself carries `.kit` (section.view-kit.kit.kit-page), so
+   this is a compound selector, not a descendant one. */
+.kit.kit-page{ display:grid; gap:var(--sp-8); }
+
+/* ---------- [hidden] guards ----------
+   Every class above that carries an author `display` declaration would
+   otherwise beat the UA's `[hidden]{display:none}` (css-hygiene.test.js's
+   bug class). Listed explicitly, last in the file, so they win at equal
+   specificity. */
+.kit .page-head[hidden], .kit .sechd[hidden], .kit .btn[hidden], .kit .pill[hidden], .kit .seg[hidden],
+.kit .tiles[hidden], .kit .tile[hidden], .kit .meter i[hidden], .kit .fcard[hidden], .kit .fg[hidden],
+.kit .field[hidden], .kit .field .lh[hidden], .kit .field label[hidden], .kit .gchip[hidden], .kit .badge[hidden], .kit .jr[hidden],
+.kit .kit-frame[hidden], .kit .kit-section[hidden], .kit .kit-row[hidden], .kit .kit-list[hidden], .kit.kit-page[hidden]{ display:none; }

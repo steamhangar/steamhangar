@@ -17,7 +17,11 @@
   --line-soft:#1B2A33;
   --text:#E4EFF3;
   --dim:#8AA1AD;
-  --dim-2:#63798A;
+  /* WP UI-KIT-1: lifted from #63798A (3.8:1 on --surface, fails WCAG AA for
+     11px captions) to #7A91A0 (5.0:1). Tertiary text and grips only. The
+     Android twin's Color.kt still carries the old value; it follows in its
+     own package. */
+  --dim-2:#7A91A0;
 
   --accent:#2ED9CE;
   --accent-deep:#12A79F;
@@ -42,6 +46,22 @@
   --mono: "Roboto Mono","Cascadia Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
 
   --r-s:8px; --r-m:12px; --r-l:18px; --r-xl:26px;
+
+  /* ---------- type and spacing scale (WP UI-KIT-1, ADR-0028) ----------
+     The only font sizes new CSS may use (css/kit.css is built from them;
+     web/tests/css-kit-scale.test.js rejects raw px there and pins app.css's
+     legacy literal count so it only shrinks). Roles, from
+     docs/design/rc20/kit.html:
+       --fs-1 captions, mono meta, chips (never below this)
+       --fs-2 hints, pills, secondary lines
+       --fs-3 body text, labels, buttons
+       --fs-4 card titles, row names
+       --fs-5 section titles, card stats
+       --fs-6 page title
+       --fs-7 hero number
+     Spacing sits on a 4px grid. */
+  --fs-1:11px; --fs-2:12px; --fs-3:13px; --fs-4:15px; --fs-5:18px; --fs-6:24px; --fs-7:32px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-7:32px; --sp-8:48px;
 
   /* ---------- spatial tokens (WP 4e.1 — desktop layout foundation) ----------
      Purely dimensional; NOT colour/font/radius (those hexes above are the
