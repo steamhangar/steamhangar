@@ -260,7 +260,7 @@ export function verifyAppids(members) {
 // ---------------------------------------------------------------------
 
 export const INCOMPLETE_HEADING = "Incomplete";
-export const COMPLETE_NOW_LABEL = "Complete now";
+export const COMPLETE_NOW_LABEL = "Verify";
 export const COMPLETE_ALL_LABEL = "Complete all";
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "paused"]);

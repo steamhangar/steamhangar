@@ -90,7 +90,7 @@ class IncompleteGamesTest {
         assertEquals("Incomplete (3)", incompleteHeadingText(3))
         assertEquals("Complete all 1 game", completeAllSpokenLabel(1))
         assertEquals("Complete all 2 games", completeAllSpokenLabel(2))
-        assertEquals("Complete now — Aurora", completeNowSpokenLabel("Aurora"))
+        assertEquals("Verify — Aurora", completeNowSpokenLabel("Aurora"))
         assertEquals("42%", incompletePctText(game(1, "A", 42)))
         assertEquals("—", incompletePctText(game(1, "A", null)))
     }

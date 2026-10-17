@@ -146,10 +146,6 @@ Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
 question that is not answered in its session is listed here and removed
 once decided (the decision then lives in the item it belongs to).
 
-- **Downloads action name** (rc20 visual check): the Downloads button reads
-  "Complete now", the mockup says "Verify". Weg A keep "Complete now",
-  Weg B rename to "Verify" to match the mockup and the Verifying state word.
-  Recommendation: Weg B if the visual check finds the label confusing.
 - **APP-NAMES-1 scope** (rc21, blocks the package): the entry names no name
   source, and the coder found none that is allowed. HD2-style content
   packages have no `apps.name`, the store answers without a name, and
@@ -181,6 +177,9 @@ Decided 2026-10-16 (removed from the list above): VERIFY-SPEED-TEXT-1 reads
 "Verifying files, no download speed" (DOWNLOADS-1); LIVE-DELAY-1 Weg A
 (default range live, `active_clients` in `/v1/throughput/live`); the
 "Client downloading" row is in rc21 (CLIENT-ROW-1, after DOWNLOADS-1).
+
+Decided 2026-10-17: Verify, Verifying with animated circular arrows
+(VERIFY-LABEL-1, rc21).
 
 ## Context: what the rollout taught us (2026-10-01/02)
 

@@ -3544,6 +3544,9 @@ below carry their own later dates, item 12 is the current one).
       - [ ] Android follow-up of the rc20 redesign: Clients cards, Add a
         device tabs, Downloads, Settings section nav, Library toolbar and
         detail tabs, sheet motion where it fits Material
+      - [x] **VERIFY-LABEL-1** (web; roadmap "Decided 2026-10-17") the Downloads
+        button "Complete now" is renamed "Verify"; the Verifying state keeps
+        its animated circular arrows
       - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
         rename and Delete history in the app
       - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden

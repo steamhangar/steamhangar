@@ -256,7 +256,7 @@ test("Incomplete texts: heading, aria labels, the row's figure", () => {
   assert.equal(incompleteHeadingText(3), "Incomplete (3)");
   assert.equal(completeAllAriaLabel(1), "Complete all 1 game");
   assert.equal(completeAllAriaLabel(2), "Complete all 2 games");
-  assert.equal(completeNowAriaLabel("Aurora"), "Complete now — Aurora");
+  assert.equal(completeNowAriaLabel("Aurora"), "Verify — Aurora");
   assert.equal(incompletePctText(partial(42)), "42%");
   assert.equal(incompletePctText(unknown()), "—");
   assert.equal(DAMAGED_NOTE, "Damaged chunks — SteamHangar can't repair these yet.");
