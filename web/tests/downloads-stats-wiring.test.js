@@ -308,3 +308,15 @@ test("MUTATION TARGET: a 404 shows the update note and stops the poll; leaving t
   await tick(60);
   assert.equal(server.calls.length, m, "no requests after leaving");
 });
+
+test("MUTATION TARGET: CLIENT-ROW-1 — the 'Client downloading' row shows while a machine loads and is hidden otherwise", async () => {
+  let s = await mount();
+  await until(() => !q(s, "stats-grid").hidden, "tiles");
+  assert.equal(q(s, "client-row").hidden, false);
+  assert.equal(q(s, "client-row").textContent, "Client downloading2 machines with cache traffic in the last 15 min");
+  server.state = "disabled";
+  s = await mount();
+  await until(() => q(s, "stats-note").textContent !== "" && q(s, "stats-grid").hidden, "disabled feed");
+  assert.equal(q(s, "client-row").hidden, true, "no row, no figures");
+  assert.equal(q(s, "client-row").textContent, "");
+});

@@ -18,6 +18,7 @@ import {
   formatSpeed,
   formatTrafficBytes,
   headerTiles,
+  clientDownloadingRow,
   JOB_SPEED_NOTE,
   insideWindow,
   parseRateCap,
@@ -298,4 +299,16 @@ test("MUTATION TARGET -- DOWNLOADS-1 VERIFY-SPEED-TEXT-1: a Verifying card reads
   assert.equal(jobSpeedText(unmeasured, "ok"), "Speed not measured yet: the server does not know this game's depots yet.");
   const measured = { ...unmeasured, bytes_per_second: 30 * MIB, bytes_since_start: 8.8 * GIB, exclusive_depots: 2 };
   assert.equal(jobSpeedText(measured, "ok", { verifying: true }), "30.0 MB/s · 8.8 GB loaded so far");
+});
+
+test("MUTATION TARGET -- CLIENT-ROW-1: clientDownloadingRow shows only for an ok feed with at least one active machine", () => {
+  const withClients = (state, n, extra = {}) => ({ ...throughput(state), active_clients_now: n, ...extra });
+  assert.equal(clientDownloadingRow(withClients("ok", 2, { active_window_minutes: 5 })).detail, "2 machines with cache traffic in the last 5 min");
+  assert.equal(clientDownloadingRow(withClients("ok", 1)).detail, "1 machine with cache traffic in the last 15 min");
+  assert.equal(clientDownloadingRow(withClients("ok", 1)).label, "Client downloading");
+  assert.equal(clientDownloadingRow(withClients("ok", 0)), null, "zero: no row");
+  assert.equal(clientDownloadingRow(withClients("ok", null)), null, "unknown: no row");
+  assert.equal(clientDownloadingRow(withClients("stale", 2)), null);
+  assert.equal(clientDownloadingRow(withClients("disabled", 2)), null);
+  assert.equal(clientDownloadingRow(null), null);
 });

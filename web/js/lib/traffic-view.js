@@ -301,6 +301,28 @@ export function headerTiles(throughput, rateCap = null) {
 }
 
 /**
+ * WP CLIENT-ROW-1: the Downloads page's "Client downloading" row. `null`
+ * (no row, no heading) unless the feed is `ok` and at least one machine had
+ * cache traffic inside the active window; the server's own prefill runner
+ * is not counted (it is the job cards' business). Same source as the
+ * "Loading now" tile: `active_clients_now`, which `mergeLive` takes from
+ * the live ring.
+ * @param {object | null | undefined} throughput
+ * @returns {{label: string, detail: string, title: string} | null}
+ */
+export function clientDownloadingRow(throughput) {
+  if (!throughput || feedState(throughput) !== "ok") return null;
+  const n = throughput.active_clients_now;
+  if (!Number.isInteger(n) || n < 1) return null;
+  const minutes = Number.isInteger(throughput.active_window_minutes) ? throughput.active_window_minutes : 15;
+  return {
+    label: "Client downloading",
+    detail: `${n} ${n === 1 ? "machine" : "machines"} with cache traffic in the last ${minutes} min`,
+    title: "Machines other than this server that loaded something from the cache recently. The server's own prefill runner is not counted.",
+  };
+}
+
+/**
  * WP RATE-TILE: bytes per second of an `upstream_rate` value (digits with an
  * optional k = x1024 or m = x1048576); `null` for no cap, blank, `off` or
  * anything unreadable (a cap is never guessed).

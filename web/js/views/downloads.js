@@ -131,6 +131,7 @@ import {
   filterJobsByRange,
   formatSpeed,
   headerTiles,
+  clientDownloadingRow,
   rateCapLine,
   isRange,
   isStatsRange,
@@ -1953,6 +1954,7 @@ function paintStats() {
     els.statsGrid.appendChild(box);
   }
   paintGraph();
+  paintClientRow();
 }
 
 function paintGraph() {
@@ -1982,6 +1984,17 @@ function paintGraph() {
     axis.appendChild(span);
   }
   els.graph.append(svg, axis);
+}
+
+/** WP CLIENT-ROW-1: show or hide the "Client downloading" row. */
+function paintClientRow() {
+  if (!mounted() || !els.clientRow) return;
+  const t = traffic.throughput;
+  const row = !traffic.unsupported && t && t.range === traffic.range ? clientDownloadingRow(t) : null;
+  els.clientRow.hidden = !row;
+  els.clientRowLabel.textContent = row ? row.label : "";
+  els.clientRowDetail.textContent = row ? row.detail : "";
+  els.clientRow.title = row ? row.title : "";
 }
 
 /** Patch every running job card's speed line (text only). */
@@ -2106,6 +2119,15 @@ function buildSection() {
   statsRange.el.hidden = traffic.noFigures;
   stats.append(statsRange.el, statsNote, statsGrid, graph);
 
+  // WP CLIENT-ROW-1: hidden (no heading either) until a machine downloads.
+  const clientRow = document.createElement("div");
+  clientRow.className = "dl-client-row";
+  clientRow.dataset.role = "client-row";
+  clientRow.hidden = true;
+  const clientRowLabel = document.createElement("strong");
+  const clientRowDetail = document.createElement("span");
+  clientRow.append(clientRowLabel, clientRowDetail);
+
   const activeHeading = sectionHeading("Active");
   const activeBody = document.createElement("div");
 
@@ -2185,6 +2207,7 @@ function buildSection() {
   const mainCol = document.createElement("div");
   mainCol.className = "dl-col dl-col-main";
   mainCol.append(
+    clientRow,
     activeHeading,
     activeBody,
     pausedHeading,
@@ -2222,6 +2245,9 @@ function buildSection() {
     statsNote,
     statsGrid,
     graph,
+    clientRow,
+    clientRowLabel,
+    clientRowDetail,
     updates,
     updatesHeading,
     updatesNote,

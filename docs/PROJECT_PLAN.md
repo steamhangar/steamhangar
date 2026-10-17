@@ -3521,9 +3521,11 @@ below carry their own later dates, item 12 is the current one).
       - [x] **VERSION-HEALTH-1** (api) version and schema readable without
         the key (roadmap "VERSION-HEALTH-1"; `/v1/health` or a startup log
         line).
-      - [ ] **CLIENT-ROW-1** (web + api if needed) "Client downloading" row on
+      - [x] **CLIENT-ROW-1** (web + api if needed) "Client downloading" row on
         the Downloads page (operator decision 2026-10-16: in rc21; after
         DOWNLOADS-1; shown only while a client downloads, no empty heading).
+        Web only: `clientDownloadingRow` in `lib/traffic-view.js` over
+        `active_clients_now` (live ring via `mergeLive`).
       - [ ] nit (rc20 reviews): CLIENTS-3 `tab:null` wiring check is a regex
         over source (use a spy); `getSettings` call on Clients has no guard
         against a detached view; tile wording "Version differs from the
