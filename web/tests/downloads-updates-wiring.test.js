@@ -119,7 +119,8 @@ async function until(pred, label, timeoutMs = 2000) {
 }
 const click = (el) => el.dispatchEvent({ type: "click" });
 const box = (s) => s.querySelector(".dl-updates");
-const heading = (s) => box(s).querySelector("h4.sec").textContent;
+// WP DOWNLOADS-2: the kit head is the label plus a count badge.
+const heading = (s) => `${box(s).querySelector("h2.sec").textContent} (${box(s).querySelector('[data-role="updates-count"]').textContent})`;
 const note = (s) => box(s).querySelector(".dl-updates-note");
 const rows = (s) => box(s).querySelectorAll(".urow");
 const rowNames = (s) => rows(s).map((r) => r.querySelector(".nm").textContent);
@@ -156,18 +157,16 @@ test("MUTATION PIN: lists the flagged games (name, size), heading count, between
     await until(() => box(s).hidden === false, "section shown");
     assert.equal(heading(s), "Updates available (2)");
     assert.deepEqual(rowNames(s), ["Aurora", "Zephyr Run"]);
-    assert.equal(rows(s)[0].querySelector(".usize").textContent, "3.0 GB");
-    assert.equal(nowBtn(s, 10).textContent, "Update now");
+    assert.equal(rows(s)[0].querySelector(".meta").textContent, "3.0 GB");
+    assert.equal(nowBtn(s, 10).textContent, "Update");
     assert.equal(nowBtn(s, 10).getAttribute("aria-label"), "Update now — Aurora");
     assert.equal(allBtn(s).textContent, "Update all");
     assert.equal(allBtn(s).getAttribute("aria-label"), "Update all 2 games");
-    const main = s.querySelector(".dl-col-main");
-    const order = main.children.map((c) => c.className || c.tagName);
-    const at = order.indexOf("dl-updates");
-    assert.ok(at > 0, "in the main column");
-    // WP CACHE-COMPLETE-1c: the (here hidden) Incomplete section sits between.
-    assert.equal(main.children[at + 1].className, "dl-updates dl-incomplete", "directly above the Incomplete section");
-    assert.equal(main.children[at + 2].textContent.startsWith("Queue"), true, "then the Queue heading");
+    // WP DOWNLOADS-2: the middle column holds Updates, then (here hidden)
+    // Incomplete; the Queue lives in the first column.
+    const col = s.querySelector(".dl-col-attn");
+    assert.deepEqual(col.children.map((c) => c.className), ["blk dl-updates", "blk dl-incomplete"]);
+    assert.equal(col.hidden, false, "the column is shown with an update");
 
     server.games = server.games.map((g) => ({ ...g, update_available: false }));
     store.refreshNow();
@@ -256,7 +255,7 @@ test("MUTATION PIN: 'Update all' sends every listed appid in one POST /v1/prefil
     assert.deepEqual(server.posts[0], { path: "/v1/prefill", body: { appids: [10, 30] } });
     await until(() => box(s).hidden === true, "all moved into the queue");
     assert.equal(toastText(), "2 queued for update");
-    const queueHeading = s.querySelector(".dl-col-main").children.find((c) => c.tagName === "H4" && c.textContent.startsWith("Queue"));
+    const queueHeading = s.querySelector(".dl-queue h2.sec");
     assert.equal(dom.document.activeElement, queueHeading, "MUTATION PIN: section gone, focus on the Queue heading");
     assert.equal(queueHeading.tabIndex, -1, "focusable by script only");
   } finally {

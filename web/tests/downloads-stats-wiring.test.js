@@ -1,11 +1,14 @@
 /**
  * DOM-wiring pins for WP D15c in `web/js/views/downloads.js`: the
- * statistics header (`GET /v1/throughput` + `/v1/throughput/series`), the
+ * statistics (`GET /v1/throughput` + `/v1/throughput/series`), since WP
+ * DOWNLOADS-2 drawn as the kit hero (components/downloads-hero.js), the
  * running job's speed line (D13 SPEED-1), and the History range filter
  * (`GET /v1/jobs?range=`):
  *
- *   - feed ok: eight tiles with the server's numbers, an inline-SVG graph
- *     (role=img, labelled), the running job's speed on its card;
+ *   - feed ok: the big current speed, the pill, the limit + devices
+ *     caption, the mini line, four tiles with the server's numbers, an
+ *     inline-SVG graph (role=img, labelled, grid lines), the running job's
+ *     speed on its card;
  *   - feed disabled: the note only — no tiles, no graph, no speed line;
  *   - feed stale: the note, a dash (aria-hidden, sr-only "Not available")
  *     for the current speed, stored totals kept;
@@ -137,12 +140,13 @@ async function until(pred, label, timeoutMs = 3000) {
 }
 const q = (s, role) => s.querySelector(`[data-role="${role}"]`);
 const tiles = (s) =>
-  q(s, "stats-grid").querySelectorAll(".stat").map((t) => `${t.querySelector("dt").textContent}=${t.querySelector("dd").textContent}`);
-const tile = (s, key) => q(s, "stats-grid").querySelectorAll(".stat").find((t) => t.getAttribute("data-stat") === key);
+  q(s, "stats-grid").querySelectorAll(".tile").map((t) => `${t.querySelector(".k").textContent}=${t.querySelector(".v").textContent}`);
+const tile = (s, key) => q(s, "stats-grid").querySelectorAll(".tile").find((t) => t.getAttribute("data-stat") === key);
+const mini = (s, key) => q(s, "stats-mini").querySelector(`[data-stat="${key}"]`);
 const seg = (s, role, r) => q(s, role).querySelectorAll("button").find((b) => b.getAttribute("data-range") === r);
-const historyIds = (s) => s.querySelectorAll(".hrow").map((r) => r.getAttribute("data-jid")).join(",");
+const historyIds = (s) => s.querySelectorAll(".hitem").map((r) => r.getAttribute("data-jid")).join(",");
 const speed = (s) => {
-  const line = s.querySelector('.jobcard[data-jid="1"]')?.querySelector('[data-role="job-speed"]');
+  const line = s.querySelector('.job[data-jid="1"]')?.querySelector('[data-role="job-speed"]');
   return line && !line.hidden ? line.textContent : null;
 };
 
@@ -151,7 +155,7 @@ async function mount() {
   store.start();
   const s = renderDownloads();
   dom.appRoot.replaceChildren(s);
-  await until(() => s.querySelector('.jobcard[data-jid="1"]') !== null, "jobs painted");
+  await until(() => s.querySelector('.job[data-jid="1"]') !== null, "jobs painted");
   return s;
 }
 
@@ -163,27 +167,29 @@ beforeEach(() => {
   server.calls = [];
 });
 
-test("MUTATION TARGET: feed ok — eight tiles, a labelled SVG graph, and the running job's speed", async () => {
+test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four tiles, a labelled SVG graph, and the running job's speed", async () => {
   const s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "tiles");
-  await until(() => tiles(s)[0]?.includes("Limit 8 MB/s"), "cap line");
-  assert.deepEqual(tiles(s), [
-    "Current speed=40.0 MB/sall traffic incl. prefill runner, 5-10 min windowLimit 8 MB/s, all day",
-    "Average while loading=50.0 MB/s",
-    "Peak speed=100 MB/s",
-    "Served (cache + prefill)=60.0 GB",
-    "Loaded from the internet=10.0 GB",
-    "Hit rate=83%clients only, runner excluded",
-    "Saved by the cache=50.0 GB",
-    "Loading now=2machines with cache traffic in the last 15 min",
-  ]);
+  await until(() => q(s, "stats-caption").textContent.includes("Limit 8 MB/s"), "cap line");
+  assert.equal(q(s, "stats-current").textContent, "40.0MB/s");
+  assert.match(q(s, "stats-current").title, /^Everything the cache served over the last 5-10 minutes/);
+  assert.equal(q(s, "stats-pill").textContent, "Downloading");
+  assert.equal(q(s, "stats-caption").textContent, "Limit 8 MB/s, all day · 2 devices loading");
+  assert.equal(q(s, "stats-caption").querySelector("b").textContent, "8 MB/s", "the limit value in bold");
+  assert.equal(q(s, "stats-mini").textContent, "Avg while loading 50.0 MB/sPeak 100 MB/s");
+  assert.deepEqual(tiles(s), ["Served=60.0GB", "From internet=10.0GB", "Saved by cache=50.0GB", "Hit rate=83%"]);
+  assert.match(tile(s, "hit-rate").title, /clients only, runner excluded/, "the scope stays in the tooltip");
+  assert.equal(tile(s, "hit-rate").querySelector(".meter i").style.getPropertyValue("width"), "83%");
+  assert.equal(tile(s, "loaded").querySelector(".n").textContent, "cache + prefill");
   assert.equal(q(s, "stats-note").hidden, true);
   const svg = q(s, "graph-svg");
   assert.equal(svg.tagName, "SVG");
   assert.equal(svg.getAttribute("role"), "img");
+  assert.equal(svg.getAttribute("viewBox"), "0 0 600 96");
   assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s."); // stored range: 6 h (the default is live since LIVE-DELAY-1)
-  assert.equal(svg.children[1].getAttribute("d"), "M0 60 L150 0 L300 30");
-  assert.equal(q(s, "stats-graph").querySelector(".tg-axis").textContent, "6 h agohighest 10.0 MB/snow");
+  assert.deepEqual(svg.children[0].children.map((l) => l.getAttribute("y1")), ["24", "48", "72"], "grid lines");
+  assert.equal(svg.children[2].getAttribute("d"), "M0 96 L300 0 L600 48");
+  assert.equal(q(s, "stats-graph").querySelector(".ax").textContent, "6 h agopeak 10.0 MB/snow");
   await until(() => speed(s) !== null, "speed line");
   assert.equal(speed(s), "30.0 MB/s · 8.8 GB loaded so far");
   assert.equal(q(s, "stats-range").getAttribute("aria-label"), "Statistics range");
@@ -196,7 +202,7 @@ test("MUTATION TARGET: an all-zero series draws no graph; the tiles stay", async
   await until(() => !q(s, "stats-grid").hidden, "tiles");
   await tick(20);
   assert.equal(q(s, "stats-graph").hidden, true);
-  assert.equal(q(s, "stats-graph").querySelectorAll("path").length, 0);
+  assert.equal(q(s, "stats-graph").children.length, 0);
 });
 
 test("MUTATION TARGET: a failed refresh after an answer keeps the figures and adds a 'Couldn't refresh' note", async () => {
@@ -209,20 +215,22 @@ test("MUTATION TARGET: a failed refresh after an answer keeps the figures and ad
   await until(() => /^Couldn't refresh: /.test(q(s, "stats-note").textContent), "refresh note");
   assert.equal(q(s, "stats-note").hidden, false);
   assert.equal(q(s, "stats-grid").hidden, false, "old tiles stay");
-  assert.equal(tile(s, "loaded").querySelector("dd").textContent, "60.0 GB");
+  assert.equal(tile(s, "loaded").querySelector(".v").textContent, "60.0GB");
   assert.equal(q(s, "stats-graph").hidden, false, "old graph stays");
   server.status = 200;
   s = await mount();
   await until(() => q(s, "stats-note").hidden === true, "note gone after a good answer");
 });
 
-test("MUTATION TARGET: feed disabled — the note only: no tiles, no graph, no speed line", async () => {
+test("MUTATION TARGET: feed disabled — the note only: no big number, no tiles, no graph, no speed line", async () => {
   server.state = "disabled";
   const s = await mount();
   await until(() => /^Traffic statistics are off/.test(q(s, "stats-note").textContent), "disabled note");
   assert.equal(q(s, "stats-note").hidden, false);
   assert.equal(q(s, "stats-grid").hidden, true);
-  assert.equal(q(s, "stats-grid").querySelectorAll(".stat").length, 0);
+  assert.equal(q(s, "stats-grid").querySelectorAll(".tile").length, 0);
+  assert.equal(q(s, "stats-live").hidden, true);
+  assert.equal(q(s, "stats-mini").hidden, true);
   assert.equal(q(s, "stats-graph").hidden, true);
   assert.equal(speed(s), null);
   assert.equal(q(s, "stats-range").hidden, true, "no figures, no range selector");
@@ -233,11 +241,13 @@ test("feed stale — note, a dash for the current speed (sr: Not available), tot
   const s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "tiles");
   assert.match(q(s, "stats-note").textContent, /out of date/);
-  const cur = tile(s, "current").querySelector("dd");
+  const cur = q(s, "stats-current");
   assert.equal(cur.children[0].getAttribute("aria-hidden"), "true");
   assert.equal(cur.children[0].textContent, "—");
   assert.equal(cur.querySelector(".sr-only").textContent, "Not available");
-  assert.equal(tile(s, "loaded").querySelector("dd").textContent, "60.0 GB");
+  assert.equal(q(s, "stats-pill").hidden, true, "no pill without a current figure");
+  assert.equal(q(s, "stats-caption").textContent.includes("loading"), false, "no device count from a stale feed");
+  assert.equal(tile(s, "loaded").querySelector(".v").textContent, "60.0GB");
   assert.equal(speed(s), null);
 });
 
@@ -261,9 +271,9 @@ test("MUTATION TARGET: the statistics range refetches both endpoints; a late ans
   release30();
   await until(() => !q(s, "stats-grid").hidden, "30d painted");
   assert.deepEqual(server.calls.slice().sort(), ["/v1/throughput/series?30d", "/v1/throughput/series?7d", "/v1/throughput?30d", "/v1/throughput?7d"]);
-  assert.match(tile(s, "clients").title, /in the last 30 days/);
+  assert.match(mini(s, "average").title, /in the last 30 days/);
   seg(s, "stats-range", "24h").dispatchEvent({ type: "click" });
-  await until(() => /in the last 24 hours/.test(tile(s, "clients")?.title || ""), "back to 24h");
+  await until(() => /in the last 24 hours/.test(mini(s, "average")?.title || ""), "back to 24h");
 });
 
 test("MUTATION TARGET: History filter — default All with the fetched rows; 24 h fetches ?range=24h&limit=200 and hides older jobs", async () => {
@@ -282,8 +292,8 @@ test("MUTATION TARGET: History filter — default All with the fetched rows; 24 
     seg(s, "history-range", "7d").dispatchEvent({ type: "click" });
     await until(() => historyIds(s) === "3", "7d shows job 3");
     seg(s, "history-range", "24h").dispatchEvent({ type: "click" });
-    await until(() => s.querySelectorAll(".hrow").length === 0, "nothing in 24 h");
-    assert.ok(s.querySelectorAll("p.hint").some((p) => p.textContent === "Nothing finished in the last 24 hours."));
+    await until(() => s.querySelectorAll(".hitem").length === 0, "nothing in 24 h");
+    assert.ok(s.querySelectorAll("p.empty").some((p) => p.textContent === "Nothing finished in the last 24 hours."));
   } finally {
     server.jobs = saved;
     server.deep = savedDeep;
@@ -309,14 +319,15 @@ test("MUTATION TARGET: a 404 shows the update note and stops the poll; leaving t
   assert.equal(server.calls.length, m, "no requests after leaving");
 });
 
-test("MUTATION TARGET: CLIENT-ROW-1 — the 'Client downloading' row shows while a machine loads and is hidden otherwise", async () => {
+test("MUTATION TARGET: CLIENT-ROW-1 folded into the hero caption (DOWNLOADS-2) — 'N devices loading' while a machine loads, gone otherwise", async () => {
   let s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "tiles");
-  assert.equal(q(s, "client-row").hidden, false);
-  assert.equal(q(s, "client-row").textContent, "Client downloading2 machines with cache traffic in the last 15 min");
+  await until(() => q(s, "stats-caption").textContent.includes("2 devices loading"), "devices in the caption");
+  assert.match(q(s, "stats-caption").title, /^2 machines with cache traffic in the last 15 min\. Machines other than this server/);
+  assert.equal(s.querySelector('[data-role="client-row"]'), null, "no separate row any more");
   server.state = "disabled";
   s = await mount();
   await until(() => q(s, "stats-note").textContent !== "" && q(s, "stats-grid").hidden, "disabled feed");
-  assert.equal(q(s, "client-row").hidden, true, "no row, no figures");
-  assert.equal(q(s, "client-row").textContent, "");
+  assert.equal(q(s, "stats-live").hidden, true, "no caption, no figures");
+  assert.equal(q(s, "stats-caption").textContent, "");
 });

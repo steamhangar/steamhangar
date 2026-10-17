@@ -44,11 +44,12 @@ const RAW_FONT_SHORTHAND = /(^|[^-\w])font\s*:\s*(?:[a-z0-9-]+\s+)*\d[\d.]*px(?:
 
 /**
  * Pinned count of raw `font-size:Npx` declarations in app.css, measured
- * comment-stripped on 2026-10-17 (WP UI-KIT-1: 172; CLIENTS-4: 167). THIS NUMBER ONLY GOES DOWN:
- * lower it in the same package that migrates a page onto the kit's scale
- * tokens; never raise it.
+ * comment-stripped on 2026-10-17 (WP UI-KIT-1: 172; CLIENTS-4: 167;
+ * DOWNLOADS-2: 146 after the Downloads rules moved to kit.css). THIS NUMBER
+ * ONLY GOES DOWN: lower it in the same package that migrates a page onto
+ * the kit's scale tokens; never raise it.
  */
-const APP_CSS_RAW_FONT_SIZE_PIN = 167;
+const APP_CSS_RAW_FONT_SIZE_PIN = 146;
 
 // ---------------------------------------------------------------------
 // (a) scale tokens and --dim-2

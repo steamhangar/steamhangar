@@ -256,3 +256,170 @@
 .kit .ccard .upd[hidden], .kit .ccard .upd-ico[hidden], .kit .ccard .upd b[hidden], .kit .ccard .now[hidden], .kit .ccard .now b[hidden],
 .kit .ccard .stats[hidden], .kit .ccard .agent[hidden], .kit .ccard .agent b[hidden], .kit .ccard .agent .ok-ico[hidden], .kit .ccard .cf[hidden], .kit .ccard .cf .acts[hidden], .kit .btn .btn-ico[hidden],
 .kit .kit-frame[hidden], .kit .kit-section[hidden], .kit .kit-row[hidden], .kit .kit-list[hidden], .kit.kit-page[hidden]{ display:none; }
+
+/* ============================================================
+   Downloads, width-aware (WP DOWNLOADS-2)
+   Ported from docs/design/rc20/kit.html "Downloads, width-aware" (layout)
+   and docs/design/rc20/downloads.html (expanded History row, idle and
+   empty states). The view root is `section.view-downloads.kit.dl` and is
+   its own inline-size container, so the page folds with @container
+   queries on its own width, not the viewport: 1200px two columns (History
+   full width), 900px hero stacks, 760px one column, 460px phone hero.
+   Built by views/downloads.js with components/downloads-hero.js,
+   components/job-row.js and components/history-list.js.
+   ============================================================ */
+.kit.dl{ container-type:inline-size; display:grid; gap:var(--sp-5); align-content:start; font-size:var(--fs-3); line-height:1.45; }
+.kit.dl h2.sec{ margin:0; }
+
+/* page head: Pause all / Resume all and the scheduler note on the right */
+.kit .dl-bulk{ display:grid; justify-items:end; gap:var(--sp-1); max-width:100%; }
+.kit .dl-bulk-acts{ display:flex; flex-wrap:wrap; gap:var(--sp-2); justify-content:flex-end; }
+.kit .dl-bulk-note{ max-width:44ch; text-align:right; }
+
+/* hero: head row, live block + graph, mini line, 2x2 tiles on the right */
+.kit .hero{
+  background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-l);
+  padding:18px 20px; display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(300px, 1fr);
+  gap:var(--sp-5); min-width:0; margin:0;
+}
+.kit .hero .hh{ grid-column:1 / -1; display:flex; justify-content:space-between; align-items:center; gap:var(--sp-3); flex-wrap:wrap; }
+.kit .hero .hh > .hint{ flex:1 0 100%; }
+/* Range segs never wrap a label onto a second row: they scroll sideways in
+   a narrow container instead (same rule as app.css's `.segs.rangesegs`). */
+.kit.dl .seg.rangesegs{ max-width:100%; min-width:0; overflow-x:auto; scrollbar-width:none; }
+.kit.dl .seg.rangesegs button{ flex:none; white-space:nowrap; }
+.kit .dl-history .sechd{ flex-wrap:wrap; }
+.kit .live{ display:grid; grid-template-columns:170px minmax(0, 1fr); gap:var(--sp-5); align-items:end; min-width:0; }
+.kit .live .lv{ min-width:0; }
+.kit .live .big{ font:500 var(--fs-7)/1 var(--ui); letter-spacing:-1px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.kit .live .big small{ font-size:var(--fs-3); color:var(--dim); margin-left:4px; letter-spacing:0; }
+.kit .live .hpill{ margin-top:var(--sp-2); }
+.kit .live .hcap{ font-size:var(--fs-2); color:var(--dim); margin-top:var(--sp-2); line-height:1.45; overflow-wrap:anywhere; }
+.kit .live .hcap b{ color:var(--text); font-weight:500; }
+.kit .graph{ margin:0; min-width:0; }
+.kit .graph svg{ width:100%; height:96px; display:block; overflow:visible; }
+.kit .graph .grid line{ stroke:var(--line-soft); stroke-width:1; vector-effect:non-scaling-stroke; }
+.kit .graph .line{ fill:none; stroke:var(--accent); stroke-width:2; vector-effect:non-scaling-stroke; }
+.kit .graph .area{ fill:var(--accent); opacity:.12; stroke:none; }
+.kit .graph .ax{ display:flex; justify-content:space-between; gap:var(--sp-2); font:var(--fs-1) var(--mono); color:var(--dim); margin-top:4px; }
+.kit .mini{
+  grid-column:1; display:flex; gap:var(--sp-2) var(--sp-5); flex-wrap:wrap; font-size:var(--fs-2); color:var(--dim);
+  border-top:1px solid var(--line-soft); padding-top:var(--sp-3);
+}
+.kit .mini b{ color:var(--text); font-weight:500; font-variant-numeric:tabular-nums; }
+.kit .hero .tiles{ grid-column:2; grid-row:2 / 4; grid-template-columns:1fr 1fr; align-content:start; }
+.kit .hero .tile{ background:var(--raised); border-color:transparent; }
+
+/* three equal columns; the middle one is left out while it has nothing */
+.kit .cols3{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:var(--sp-7); align-items:start; }
+.kit .cols3.no-attn{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+.kit .col{ display:grid; gap:var(--sp-5); align-content:start; min-width:0; }
+.kit .blk{ display:grid; gap:10px; min-width:0; }
+.kit .rowlist{ display:grid; gap:var(--sp-2); min-width:0; }
+.kit .sechd .hacts{ display:flex; align-items:center; justify-content:flex-end; gap:var(--sp-2); flex-wrap:wrap; min-width:0; }
+.kit .dl-updates-acts{ display:flex; gap:var(--sp-2); }
+
+/* active job card; the progress bar exists only with real progress data */
+.kit .job{
+  background:var(--raised); border:1px solid color-mix(in srgb, var(--run) 40%, var(--line));
+  border-radius:var(--r-m); padding:12px 14px; display:grid; gap:10px; min-width:0;
+}
+.kit .job.held{ border-color:var(--line-soft); }
+.kit .job .t{ display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.kit .job .t > div{ min-width:0; }
+.kit .job .nm{ font-weight:500; overflow-wrap:anywhere; }
+.kit .job .meta{ font:var(--fs-1) var(--mono); color:var(--dim); }
+.kit .bar{ height:6px; border-radius:3px; background:var(--raised-2); overflow:hidden; }
+.kit .bar i{ display:block; height:100%; background:var(--accent); }
+.kit .job .m2{ margin:0; font:var(--fs-2) var(--mono); color:var(--dim); overflow-wrap:anywhere; }
+.kit .job .holdnote, .kit .job .stopnote{ border-left:2px solid var(--line); padding-left:var(--sp-2); }
+.kit .job .acts{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
+
+/* attention and queue rows (.jr from the kit) */
+.kit .jr > div{ min-width:0; }
+.kit .jr .btn.w72{ padding-inline:var(--sp-1); }
+.kit .jr .unote{ font-size:var(--fs-1); color:var(--dim); margin-top:2px; }
+.kit .qrow .qlead{ display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
+.kit .qrow .grip{ display:grid; place-items:center; flex:none; }
+.kit .qrow .grip-live{ cursor:grab; touch-action:none; padding:6px 4px; margin:-6px -4px; border-radius:var(--r-s); }
+@media (hover:hover) and (pointer:fine){
+  .kit .qrow .grip-live:hover{ color:var(--text); }
+  .kit .hrow:hover{ background:var(--raised-2); }
+}
+.kit .qrow .grip-live:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+.kit .qrow.dragging{ opacity:.85; box-shadow:0 4px 14px color-mix(in srgb, var(--bg) 70%, transparent); position:relative; z-index:1; }
+.kit .qrow.dragging .grip-live{ cursor:grabbing; }
+
+/* History: row + hanging panel */
+.kit .hitem{ display:grid; min-width:0; }
+.kit .hrow{
+  display:flex; align-items:center; gap:12px; width:100%; min-width:0; margin:0; text-align:left;
+  font:inherit; color:var(--text); background:var(--raised); border:1px solid var(--line-soft);
+  border-radius:var(--r-m); padding:12px 14px; cursor:pointer;
+}
+.kit .hrow .hic{ display:grid; flex:none; }
+.kit .hrow .hinfo{ display:grid; flex:1; min-width:0; }
+.kit .hrow .nm{ font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kit .hrow .meta{ font:var(--fs-1) var(--mono); color:var(--dim); margin-top:2px; overflow-wrap:anywhere; }
+.kit .hrow .chev{ margin-left:auto; color:var(--dim); flex:none; display:grid; transition:transform .15s; }
+.kit .hrow[aria-expanded="true"]{ background:var(--raised-2); border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.kit .hrow[aria-expanded="true"] .chev{ transform:rotate(90deg); }
+.kit .hpanel{
+  background:var(--surface); border:1px solid var(--line-soft); border-top:0; border-radius:0 0 var(--r-m) var(--r-m);
+  padding:12px 14px 14px; display:grid; gap:10px; font-size:var(--fs-3); min-width:0;
+}
+.kit .hpanel p{ margin:0; color:var(--dim); line-height:1.5; overflow-wrap:anywhere; }
+.kit .hpanel .failhint{ display:grid; gap:10px; min-width:0; }
+.kit .hpanel .failhint-title{ color:var(--text); font-weight:500; }
+.kit .hpanel .cmd{
+  display:block; max-width:100%; min-width:0; background:var(--bg); border:1px solid var(--line);
+  border-radius:var(--r-s); padding:8px 10px; font:var(--fs-2) var(--mono); color:var(--text);
+  white-space:pre-wrap; overflow-wrap:anywhere; user-select:all;
+}
+.kit .hpanel .acts{ display:flex; gap:var(--sp-2); }
+.kit .hpanel summary{ cursor:pointer; color:var(--dim); font-size:var(--fs-2); }
+.kit .hpanel .logbox{
+  margin:0; background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--r-s);
+  padding:10px 12px; font:var(--fs-2)/1.55 var(--mono); color:var(--dim);
+  white-space:pre-wrap; overflow-wrap:anywhere; max-height:160px; overflow:auto;
+}
+.kit .hpanel details .logbox, .kit .hpanel details .truncnote{ margin-top:var(--sp-2); }
+.kit .hpanel .loading, .kit .hpanel .errmsg, .kit .hpanel .emptymsg{ font-style:italic; }
+.kit .hpanel .truncnote{ font-size:var(--fs-2); }
+
+@container (max-width:1200px){
+  .kit .cols3{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .kit .cols3 > .col:last-child{ grid-column:1 / -1; }
+  .kit .cols3.no-attn > .col:last-child{ grid-column:auto; }
+}
+@container (max-width:900px){
+  .kit .hero{ grid-template-columns:minmax(0, 1fr); }
+  .kit .hero .tiles{ grid-column:1; grid-row:auto; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); }
+  .kit .mini{ grid-column:1; }
+}
+@container (max-width:760px){
+  .kit .cols3, .kit .cols3.no-attn{ grid-template-columns:minmax(0, 1fr); }
+  .kit .cols3 > .col:last-child, .kit .cols3.no-attn > .col:last-child{ grid-column:auto; }
+}
+@container (max-width:460px){
+  .kit .live{ grid-template-columns:minmax(0, 1fr); }
+  .kit .hero, .kit .hero .tile{ padding:14px; }
+  .kit .hero .tiles{ grid-template-columns:1fr 1fr; }
+  .kit .hero .tile .n{ display:none; }
+  .kit .dl-history .sechd .hacts{ flex:1 0 100%; justify-content:space-between; flex-wrap:nowrap; }
+  .kit .dl-bulk{ justify-items:start; }
+  .kit .dl-bulk-acts{ justify-content:flex-start; }
+  .kit .dl-bulk-note{ text-align:left; }
+}
+@media (prefers-reduced-motion:reduce){
+  .kit .hrow .chev{ transition:none; }
+}
+
+/* [hidden] guards for the display-styled Downloads classes above (same
+   reason as the guard list before this block). */
+.kit.dl[hidden], .kit .dl-bulk[hidden], .kit .dl-bulk-acts[hidden], .kit .hero[hidden], .kit .hero .hh[hidden],
+.kit .live[hidden], .kit .graph[hidden], .kit .mini[hidden], .kit .cols3[hidden], .kit .col[hidden], .kit .blk[hidden],
+.kit .rowlist[hidden], .kit .sechd .hacts[hidden], .kit .dl-updates-acts[hidden], .kit .job[hidden], .kit .bar[hidden],
+.kit .job .t[hidden], .kit .job .acts[hidden], .kit .qrow .qlead[hidden], .kit .qrow .grip[hidden], .kit .hitem[hidden],
+.kit .hrow[hidden], .kit .hpanel[hidden], .kit .hpanel .failhint[hidden], .kit .hpanel .acts[hidden], .kit .hpanel .cmd[hidden],
+.kit .hrow .chev[hidden], .kit .hrow .hinfo[hidden], .kit .hrow .hic[hidden]{ display:none; }
