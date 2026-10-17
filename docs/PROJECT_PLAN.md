@@ -3522,6 +3522,18 @@ below carry their own later dates, item 12 is the current one).
           tolerance, diff images as artifacts, annotation on failure).
           Local use: `dev.sh test-web-shots` against the dev instance.
           Reviewers of every later web package attach the screenshots.
+        - [ ] **TOKENS-SYNC-1** (web + app, after UI-KIT-1; user decision
+          2026-10-17) one source for design tokens: `docs/design/tokens.json`
+          (colours incl. the new `--dim-2`, type scale `fs-1..7`, spacing
+          `sp-1..8`, radii) and `docs/design/status-vocabulary.json` (kind,
+          word, tone, glyph, animated). Web: a node test checks `theme.css`
+          and `status-icon.js` against both files. Android: a JVM test
+          checks `ui/theme/Color.kt`, `Type.kt` and `ui/status/StatusKind.kt`
+          against the same files (extend `StatusIconWebTwinTest`); `Dim2`
+          moves to #7A91A0 with it. No generator, no build step: the tests
+          are the contract, and a value changed on one side fails CI. The
+          Compose anatomy (three-zone card, tiles, hero) stays the rc21
+          Android follow-up; the kit page is its spec.
         - [ ] **CLIENTS-4** (replaces the earlier CLIENTS-4 nit list) card
           per `kit.html` "Clients card, three zones": zone 1 identity, pills
           (`Online`/`Offline`, `Agent outdated`), update box, agent health
