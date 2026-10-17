@@ -157,13 +157,15 @@ once decided (the decision then lives in the item it belongs to).
 - **D17 cache path** (v0.4.0+): Weg A extend vault-core, Weg B a lancache
   sidecar behind vault-core, or a mix; the 2026-10-15 assessment favours
   Weg B or the mix. See D17.
-- **VERIFY-SPEED-TEXT-1** (rc20, DOWNLOADS-1): more honest wording, or show
-  the total speed while Verifying.
 - **Tuning defaults** (rc20.x / rc21): whether `VAULT_NGINX_AIO` /
   `VAULT_NGINX_WORKERS` become defaults; decided by the Sunday test.
 - **Runner retry** on "Unable to detect Lancache server!" (rc21): only if
   the heartbeat evidence supports it.
-- **"Client downloading" row** (rc21, optional): in or out.
+
+Decided 2026-10-16 (removed from the list above): VERIFY-SPEED-TEXT-1 reads
+"Verifying files, no download speed" (DOWNLOADS-1); LIVE-DELAY-1 Weg A
+(default range live, `active_clients` in `/v1/throughput/live`); the
+"Client downloading" row is in rc21 (CLIENT-ROW-1, after DOWNLOADS-1).
 
 ## Context: what the rollout taught us (2026-10-01/02)
 
