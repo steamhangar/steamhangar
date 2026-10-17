@@ -172,7 +172,7 @@
 .kit .kit-section > h2{ font-size:var(--fs-5); margin:0; padding-bottom:var(--sp-2); border-bottom:1px solid var(--line-soft); }
 .kit .kit-row{ display:flex; flex-wrap:wrap; gap:var(--sp-3); align-items:center; }
 .kit .kit-list{ display:grid; gap:var(--sp-2); }
-/* The page root itself carries `.kit` (section.view-kit.kit.kit-page), so
+/* The page root itself carries `.kit` (section.view.view-kit.kit.kit-page), so
    this is a compound selector, not a descendant one. */
 .kit.kit-page{ display:grid; gap:var(--sp-8); }
 

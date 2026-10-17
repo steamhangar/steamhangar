@@ -55,7 +55,9 @@ test("createPill: tone defaults per kind, null means the neutral pill, unknown t
 
 test("renderKit: a .kit root with the demo strings, every primitive twice (full width + 400px frame)", () => {
   const root = renderKit();
-  assert.equal(root.className, "view-kit kit kit-page");
+  // `view` is load-bearing: tools/web-shot.mjs (goldens) waits for `#view-root .view`.
+  assert.equal(root.className, "view view-kit kit kit-page");
+  assert.ok(root.classList.contains("view"), "kit root lost the shared `view` class");
   assert.equal(root.querySelector("h1").textContent, "UI kit");
   const text = root.textContent;
   for (const s of ["Page title", "Connected", "Hit rate", "Agent outdated", "Partially cached", "Changed here", "From env", "Takes effect within a minute.", "Drag the handle to change the order.", "Satisfactory", "+2 more"]) {
