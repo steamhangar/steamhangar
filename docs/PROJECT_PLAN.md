@@ -3512,7 +3512,7 @@ below carry their own later dates, item 12 is the current one).
           `font-size:Npx` outside `theme.css`/`kit.css` (allow-list of the
           existing ones, shrinking). ADR-0028 "Web UI kit, scale and visual
           regression". Reference: `docs/design/rc20/kit.html`.
-        - [ ] **WEB-GOLDENS-1** (ci + tools, parallel to UI-KIT-1)
+        - [x] **WEB-GOLDENS-1** (ci + tools, parallel to UI-KIT-1; 50b198b, 31d5eff)
           `tools/web-shot.mjs` drives the Playwright Chromium over CDP (no
           playwright npm dependency): demo mode via localStorage, pages
           library/clients/downloads/settings/kit (+ one open sheet each

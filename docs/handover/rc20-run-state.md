@@ -7,12 +7,11 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 ## Done (on main)
 
 - UI-KIT-1 (07fde55, 1e82f57; merge 82f4849)
+- WEB-GOLDENS-1 (50b198b, 31d5eff); baseline goldens recorded via `wp/rc20-base-goldens`
 
 ## Running (2026-10-17, resumed 13:40 after a session-limit stop)
 
-- WEB-GOLDENS-1: coded (`wp/rc20-web-goldens-1`, 50b198b, not pushed),
-  full review running.
-- TOKENS-SYNC-1: coder on `wp/rc20-tokens-sync-1`.
+- TOKENS-SYNC-1: review PASS (061b4ce, c1a3eaf), waiting for branch CI.
 - CLIENTS-4: coder on `wp/rc20-clients-4` (screenshots mandatory).
 
 ## Next
