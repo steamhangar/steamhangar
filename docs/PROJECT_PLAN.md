@@ -3586,6 +3586,9 @@ below carry their own later dates, item 12 is the current one).
           + X close, overlapping mini cover, status pill, Verify + Update in
           the header row, two-column Overview with a 2x2 facts grid, no
           bottom Close button.
+        - [ ] nit (WEB-GOLDENS-1 review): goldens for one open sheet per page
+          (library detail, add a device) deferred; `dev.sh test-web-shots`
+          is operator infrastructure, requested as Antrag A-20261017-01.
         - [ ] **rc20 docs:** `docs/design/rc20/README.md` points to
           `kit.html` as the primary reference; `rc20-visual-check.md` gets
           the kit page and the goldens; LEARNINGS entries for "structure
