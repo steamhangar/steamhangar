@@ -2,7 +2,11 @@
  * Clients page presentation (WP D15c), one row per entry of
  * `GET /v1/clients/overview` (WP D15b): agent PCs, agentless addresses and
  * the server's own prefill runner (WP D15-RUNNER, `kind: "runner"`).
- * Pure: no DOM; `views/clients.js` builds the cards from these strings.
+ * Pure: no DOM. WP CLIENTS-4: `clientCardModel` and `summaryTiles` are
+ * what the page renders (`components/client-card.js`, `views/clients.js`);
+ * the one-line texts (`loadingNowText`, `statsText`, `recentAppsText`,
+ * `installedText`, `connectionChip`) are the wording reference the Android
+ * twin (`ClientsPage.kt`) ports and stay pinned here for it.
  * Unit-tested in web/tests/clients-page.test.js.
  *
  * Wording rules:
@@ -30,10 +34,11 @@
  */
 
 import { formatAgo } from "./format.js";
-import { isolate } from "./client-names.js";
+import { canRename, isolate } from "./client-names.js";
 import { UNKNOWN_APP_NAME } from "./app-names.js";
 import { isReleaseVersion } from "./agent-install.js";
 import { DASH, RANGE_PHRASES, formatRate, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
+import { describeBypassClient, isRemovableClientId, presenceLine } from "./clients-view.js";
 
 /** How many recently loaded apps a card names before "+N more". */
 export const RECENT_APPS_SHOWN = 3;
@@ -185,13 +190,56 @@ export function clientsSummaryText(clients) {
 }
 
 /**
- * Summary tiles of the page (WP CLIENTS-2), computed from the merged cards
- * only: no tile without a source. "Loaded" needs at least one client with
- * statistics (feed on); "Agents" needs at least one agent client.
+ * Split a formatted figure into the number and its unit for the kit's
+ * `value<small>unit</small>` anatomy: "38.2 GB" -> {value "38.2", unit "GB"},
+ * "75%" -> {value "75", unit "%"}, "< 1 MB" -> {value "< 1", unit "MB"}.
+ * Anything else (the dash, a bare number) stays whole with no unit.
+ * @param {string | null | undefined} text
+ * @returns {{value: string, unit: string}}
+ */
+export function splitValueUnit(text) {
+  if (typeof text !== "string" || !text) return { value: DASH, unit: "" };
+  const pct = /^(\d+)%$/.exec(text);
+  if (pct) return { value: pct[1], unit: "%" };
+  const m = /^(<?\s?[\d.]+)\s([A-Za-z/]+)$/.exec(text);
+  return m ? { value: m[1], unit: m[2] } : { value: text, unit: "" };
+}
+
+/**
+ * Request hit rate over several clients' statistics: the sum of hits over
+ * the sum of hits and misses (the same request-based rule as the server's
+ * per-client `hit_rate`), `null` without a request to rate.
+ * @param {Array<object>} clients
+ * @returns {number | null}
+ */
+export function combinedHitRate(clients) {
+  let hits = 0;
+  let misses = 0;
+  for (const c of clients) {
+    const s = c && c.stats;
+    if (!s) continue;
+    if (Number.isFinite(s.hits) && s.hits > 0) hits += s.hits;
+    if (Number.isFinite(s.misses) && s.misses > 0) misses += s.misses;
+  }
+  return hits + misses > 0 ? hits / (hits + misses) : null;
+}
+
+/** Hit rate as a whole percentage for a meter width, or null. */
+function ratePercent(rate) {
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0) return null;
+  return Math.round(Math.min(rate, 1) * 100);
+}
+
+/**
+ * The four summary tiles of the page (WP CLIENTS-4, kit.html / clients.html:
+ * Connected, Loaded, Hit rate with meter, Agents with the outdated pill),
+ * computed from the merged cards only. The set is fixed; a tile without a
+ * source shows the dash and says why (never a zero it cannot back).
  * @param {Array<object>} clients
  * @param {string} range
- * @param {unknown} [serverVersion] needed for the outdated-agents tile
- * @returns {Array<{key: string, label: string, value: string, detail: string, warn?: boolean}>}
+ * @param {unknown} [serverVersion] needed for the outdated count
+ * @returns {Array<{key: string, label: string, value: string, unit: string, detail: string,
+ *   meter?: number, outdated?: number | null, hi?: boolean}>}
  */
 export function summaryTiles(clients, range, serverVersion) {
   const list = Array.isArray(clients) ? clients : [];
@@ -201,34 +249,47 @@ export function summaryTiles(clients, range, serverVersion) {
   tiles.push({
     key: "connected",
     label: "Connected",
-    value: `${connected} of ${list.length}`,
+    value: String(connected),
+    unit: `of ${list.length}`,
     detail: loading ? `${loading} loading now` : "Nothing loading now",
   });
   const withStats = list.filter((c) => c.stats && Number.isFinite(c.stats.bytes_served));
+  const phrase = RANGE_PHRASES[range] || "";
   if (withStats.length) {
     const total = withStats.reduce((sum, c) => sum + c.stats.bytes_served, 0);
+    tiles.push({ key: "loaded", label: "Loaded", ...splitValueUnit(formatTrafficBytes(total)), detail: phrase });
+  } else {
+    tiles.push({ key: "loaded", label: "Loaded", value: DASH, unit: "", detail: "No traffic statistics" });
+  }
+  const rate = combinedHitRate(withStats);
+  const pct = ratePercent(rate);
+  if (pct !== null) {
+    tiles.push({ key: "hitrate", label: "Hit rate", value: String(pct), unit: "%", detail: "from the cache", meter: pct });
+  } else {
     tiles.push({
-      key: "loaded",
-      label: "Loaded",
-      value: formatTrafficBytes(total) || DASH,
-      detail: RANGE_PHRASES[range] || "",
+      key: "hitrate",
+      label: "Hit rate",
+      value: DASH,
+      unit: "",
+      detail: withStats.length ? "No cache requests yet" : "No traffic statistics",
     });
   }
   const agents = list.filter((c) => isAgentClient(c));
-  if (agents.length) {
-    const online = agents.filter((c) => c.connected === true).length;
-    tiles.push({ key: "agents", label: "Agents", value: `${online} online`, detail: `${agents.length} paired` });
-    const outdated = agents.filter((c) => outdatedAgentInfo(c, serverVersion)).length;
-    const serverKnown = isReleaseVersion(typeof serverVersion === "string" ? serverVersion.trim() : "");
-    tiles.push({
-      key: "outdated",
-      label: "Outdated agents",
-      value: serverKnown ? String(outdated) : DASH,
-      detail: !serverKnown ? "Server version not known" : outdated ? "Version differs from the server" : "All match the server",
-      warn: outdated > 0,
-    });
-  }
+  const online = agents.filter((c) => c.connected === true).length;
+  const serverKnown = isReleaseVersion(typeof serverVersion === "string" ? serverVersion.trim() : "");
+  const outdated = serverKnown ? agents.filter((c) => outdatedAgentInfo(c, serverVersion)).length : null;
+  let detail;
+  if (!agents.length) detail = "No agent paired";
+  else if (outdated === null) detail = `${agents.length} paired · server version not known`;
+  else if (outdated === 0) detail = `${agents.length} paired · all match the server`;
+  else detail = `${agents.length} paired`;
+  tiles.push({ key: "agents", label: "Agents", value: String(online), unit: "online", detail, outdated, hi: !!outdated });
   return tiles;
+}
+
+/** Pill text of the Agents tile for `n` outdated agents. */
+export function outdatedAgentsPillText(n) {
+  return `${n} outdated`;
 }
 
 /**
@@ -341,4 +402,165 @@ export function mergeAgentData(overviewClients, agentClients) {
     });
   }
   return merged;
+}
+
+// ---------------------------------------------------------------------
+// Three-zone card model (WP CLIENTS-4, kit.html "Clients card, three zones")
+// ---------------------------------------------------------------------
+
+/**
+ * Status pill of a card. Agent: "Online"/"Offline" from the server's
+ * presence verdict (`agent_presence`, else `connected`), never computed
+ * here. Runner and address: "Downloading" while the cache sees them load
+ * (kit.html's runner card), else "Online"/"Offline" from `connected`
+ * (cache activity within the server's active window). Null: the server
+ * has no current data (feed not `ok`).
+ * @param {object} client
+ * @returns {{kind: string, text: string, tone?: string | null}}
+ */
+export function connectionPill(client) {
+  if (!isAgentClient(client) && client.loading_now && client.loading_now.loading === true) {
+    return { kind: "running", text: "Downloading" };
+  }
+  let on = client.connected;
+  if (isAgentClient(client) && (client.agent_presence === "online" || client.agent_presence === "offline")) {
+    on = client.agent_presence === "online";
+  }
+  if (on === true) return { kind: "cached", text: "Online" };
+  if (on === false) return { kind: "notinuse", text: "Offline" };
+  return { kind: "unknown", text: "No current data" };
+}
+
+/** Text of the dashed box when nothing loads, and when nothing is known. */
+export const IDLE_TEXT = "Loading nothing right now";
+export const NOW_UNKNOWN_TEXT = `Loading now: ${DASH}`;
+
+/**
+ * Zone 2's "now" box: the game(s) and speed while loading, else the dashed
+ * idle box (with the dash when the feed has no current data).
+ * @param {object} client
+ * @returns {{loading: true, title: string, sub: string, speed: string} | {loading: false, text: string}}
+ */
+export function nowBox(client) {
+  const now = client.loading_now;
+  if (!now) return { loading: false, text: NOW_UNKNOWN_TEXT };
+  if (!now.loading) return { loading: false, text: IDLE_TEXT };
+  const apps = Array.isArray(now.apps) ? now.apps.map(appLabel) : [];
+  return {
+    loading: true,
+    title: apps.length ? apps.join(", ") : "Content not linked to one game",
+    sub: "Loading into the cache",
+    speed: formatSpeed(now.bytes_per_second) || DASH,
+  };
+}
+
+/**
+ * Zone 2's three figures. Agent: Installed games, Loaded, Hit rate.
+ * Runner and address (no installed list): Loaded, Hit rate, Unlinked (bytes
+ * not linked to one game), as kit.html's runner card. A figure the server
+ * did not send is the dash, never a zero.
+ * @param {object} client
+ * @returns {Array<{key: string, label: string, value: string, unit: string, meter?: number}>}
+ */
+export function cardStats(client) {
+  const s = client.stats || null;
+  const loaded = { key: "loaded", label: "Loaded", ...splitValueUnit(s ? formatTrafficBytes(s.bytes_served) : null) };
+  const pct = s ? ratePercent(s.hit_rate) : null;
+  const rate = pct === null ? { key: "hitrate", label: "Hit rate", value: DASH, unit: "" } : { key: "hitrate", label: "Hit rate", value: String(pct), unit: "%", meter: pct };
+  if (isAgentClient(client)) {
+    const n = client.installed_app_count;
+    const installed = Number.isInteger(n)
+      ? { key: "installed", label: "Installed", value: String(n), unit: n === 1 ? "game" : "games" }
+      : { key: "installed", label: "Installed", value: DASH, unit: "" };
+    return [installed, loaded, rate];
+  }
+  const unlinked = { key: "unlinked", label: "Unlinked", ...splitValueUnit(formatTrafficBytes(client.recent_unattributed_bytes)) };
+  return [loaded, rate, unlinked];
+}
+
+/**
+ * Zone 3: the top recently loaded games as chips plus "+N more"; `null`
+ * when the server sent no list (feed disabled).
+ * @param {object} client
+ * @returns {{chips: Array<{name: string, size: string | null}>, more: number} | null}
+ */
+export function recentChips(client) {
+  const apps = Array.isArray(client.recent_apps) ? client.recent_apps : null;
+  if (!apps) return null;
+  return {
+    chips: apps.slice(0, RECENT_APPS_SHOWN).map((a) => ({ name: appLabel(a), size: formatTrafficBytes(a.bytes_served) })),
+    more: Math.max(0, apps.length - RECENT_APPS_SHOWN),
+  };
+}
+
+/** "+2 more" chip text. */
+export function moreChipText(n) {
+  return `+${n} more`;
+}
+
+/** Zone 3 with an empty list. */
+export function noRecentText(range) {
+  const phrase = RANGE_PHRASES[range];
+  return phrase ? `Nothing loaded ${phrase}` : "Nothing loaded";
+}
+
+/**
+ * The agent health row (agent data only): "Healthy" or the careful
+ * "Bypassing the cache" observation, with the server's presence line.
+ * Verdicts are read as sent (lib/clients-view.js), never recomputed.
+ * @param {object | null} agent the `GET /v1/clients` row
+ * @param {number} nowMs
+ * @returns {{bypass: boolean, head: string, text: string} | null}
+ */
+export function agentHealth(agent, nowMs) {
+  if (!agent) return null;
+  if (agent.bypass_suspected) return { bypass: true, head: "Bypassing the cache", text: describeBypassClient(agent) };
+  return { bypass: false, head: "Healthy", text: presenceLine(agent, nowMs) };
+}
+
+/** Footer note for bytes of an agent card not linked to one game (runner
+ * and address cards show them as the Unlinked figure instead). */
+export function unlinkedNote(client) {
+  if (!isAgentClient(client)) return null;
+  const b = client.recent_unattributed_bytes;
+  const text = formatTrafficBytes(b);
+  return text && b > 0 ? `${text} not linked to a game` : null;
+}
+
+/** Heading of the outdated-agent box ("differs", not "older": CLIENTS-3). */
+export const OUTDATED_BOX_TITLE = "Agent version differs from the server";
+
+/**
+ * Everything one card shows, as data (`components/client-card.js` renders
+ * it). Pure: no DOM.
+ * @param {object} client a merged card (`mergeAgentData`)
+ * @param {{range: string, serverVersion?: unknown, nowMs?: number, removeError?: string | null}} ctx
+ *   `removeError`: the inline error of a failed Remove, kept by the view.
+ */
+export function clientCardModel(client, { range, serverVersion = null, nowMs = Date.now(), removeError = null } = {}) {
+  const agent = client.agent || null;
+  const kind = isAgentClient(client) ? "agent" : isRunnerClient(client) ? "runner" : "address";
+  const outdated = outdatedAgentInfo(client, serverVersion);
+  const removeId = agent && typeof agent.client_id === "string" ? agent.client_id : null;
+  return {
+    key: String(client.key),
+    kind,
+    name: clientName(client),
+    meta: clientKindText(client),
+    pill: connectionPill(client),
+    outdated: outdated ? { ...outdated, text: outdatedAgentText(outdated) } : null,
+    health: agentHealth(agent, nowMs),
+    now: nowBox(client),
+    stats: cardStats(client),
+    recent: recentChips(client),
+    noRecent: noRecentText(range),
+    lastActive: lastActiveText(client, nowMs),
+    unlinked: unlinkedNote(client),
+    rename: canRename(client),
+    removeId: removeId && isRemovableClientId(removeId) ? removeId : null,
+    removeBlocked: !!agent && !(removeId && isRemovableClientId(removeId)),
+    // The error line exists on every agent card (hidden when empty), so a
+    // later failure has a stable role=alert node to land in.
+    removeError: agent ? removeError || "" : null,
+  };
 }

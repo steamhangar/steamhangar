@@ -124,7 +124,22 @@ const text = (root, sel) => {
   return n ? n.textContent : null;
 };
 const card = (s, key) => s.querySelectorAll(".clcard").find((c) => c.getAttribute("data-client-key") === key) || null;
-const lines = (c) => c.querySelectorAll(".cl-line").map((l) => `${l.getAttribute("data-role")}=${l.textContent}`);
+/** "key=value unit" per figure of a card's stats grid (CLIENTS-4). */
+const stats = (c) => {
+  const grid = c.querySelector('[data-role="stats"]');
+  return grid
+    .querySelectorAll("div")
+    .filter((d) => d.getAttribute("data-stat"))
+    .map((d) => {
+      const v = d.querySelector(".v");
+      const unit = v.querySelector("small");
+      return `${d.getAttribute("data-stat")}=${unit ? v.textContent.slice(0, -unit.textContent.length) + " " + unit.textContent : v.textContent}`;
+    });
+};
+const chips = (c) => {
+  const list = c.querySelector('[data-role="recent"]');
+  return list ? list.querySelectorAll("span").filter((x) => /\bgchip\b/.test(x.className)).map((x) => x.textContent) : null;
+};
 
 async function mount() {
   navigateTo("library"); // leave first: stops any earlier poll
@@ -147,20 +162,22 @@ test("MUTATION TARGET: one card per client; the agent's lines, and the address n
   await until(() => s.querySelectorAll(".clcard").length === 2, "two cards");
   const a = card(s, "agent:gaming-pc");
   assert.equal(text(a, ".nm"), "gaming-pc");
-  assert.equal(text(a, '[data-role="connection"]'), "Agent online");
-  assert.deepEqual(lines(a), [
-    "client-kind=vault-agent · 192.168.1.42",
-    "loading-now=Loading now: 30.0 MB/s · Some Game",
-    "installed=2 games installed",
-    "stats=1.0 GB loaded in the last 7 days · hit rate 75%",
-    "recent=Loaded recently: Some Game (1.0 GB)",
-    "last-active=Last active 2 min ago",
-  ]);
+  assert.equal(text(a, '[data-role="connection"]'), "Online");
+  assert.equal(text(a, '[data-role="client-kind"]'), "vault-agent · 192.168.1.42");
+  const now = a.querySelector('[data-role="loading-now"]');
+  assert.equal(now.className, "now", "loading: the solid now box");
+  assert.equal(text(now, "b"), "Some Game");
+  assert.equal(text(now, ".spd"), "30.0 MB/s");
+  assert.deepEqual(stats(a), ["installed=2 games", "loaded=1.0 GB", "hitrate=75 %"]);
+  assert.deepEqual(chips(a), ["Some Game1.0 GB"]);
+  assert.equal(text(a, '[data-role="last-active"]'), "Last active 2 min ago");
   const b = card(s, "addr:192.168.1.77");
   assert.equal(text(b, ".nm"), "192.168.1.77");
-  assert.equal(text(b, '[data-role="connection"]'), "No agent");
+  assert.equal(text(b, '[data-role="connection"]'), "Offline");
   assert.equal(text(b, '[data-role="client-kind"]'), "No agent · seen in the cache log");
-  assert.equal(b.querySelector('[data-role="installed"]'), null, "no installed line for an address");
+  assert.deepEqual(stats(b), ["loaded=1.0 GB", "hitrate=75 %", "unlinked=0 GB"], "an address: no installed figure, the unlinked bytes instead");
+  assert.equal(text(b, '[data-role="loading-now"]'), "Loading nothing right now");
+  assert.match(text(b, '[data-role="recent-empty"]'), /^Nothing loaded in the last 7 days$/);
   assert.equal(text(s, '[data-role="clients-sub"]'), "2 clients · 1 connected");
   assert.equal(s.querySelector('[data-role="clients-range"]').hidden, false, "range selector shown with figures");
   assert.equal(s.querySelector('[data-role="clients-note"]').hidden, true, "no note when the feed is ok");
@@ -188,10 +205,10 @@ test("MUTATION TARGET: feed disabled — the note, and no stats/recent lines (ne
   assert.equal(note.hidden, false);
   assert.match(note.textContent, /^Traffic statistics are off/);
   const a = card(s, "agent:gaming-pc");
-  assert.equal(a.querySelector('[data-role="stats"]'), null);
+  assert.deepEqual(stats(a), ["installed=2 games", "loaded=—", "hitrate=—"], "dashes, never zeros; the installed count still shown");
   assert.equal(a.querySelector('[data-role="recent"]'), null);
+  assert.equal(text(a, '[data-role="recent-none"]'), "No traffic statistics");
   assert.equal(text(a, '[data-role="loading-now"]'), "Loading now: —");
-  assert.equal(text(a, '[data-role="installed"]'), "2 games installed", "agent presence and games still shown");
   assert.equal(s.querySelector('[data-role="clients-range"]').hidden, true, "no figures, no range selector");
   // A re-mount while the next answer is pending keeps the last verdict
   // (no flash of the selector), and an ok answer brings it back.
@@ -213,7 +230,7 @@ test("feed stale — the note says why, loading now is a dash, totals stay", asy
   await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
   assert.match(text(s, '[data-role="clients-note"]'), /out of date/);
   assert.equal(text(card(s, "agent:gaming-pc"), '[data-role="loading-now"]'), "Loading now: —");
-  assert.match(text(card(s, "agent:gaming-pc"), '[data-role="stats"]'), /^1\.0 GB loaded/);
+  assert.deepEqual(stats(card(s, "agent:gaming-pc")).slice(1), ["loaded=1.0 GB", "hitrate=75 %"]);
 });
 
 test("MUTATION TARGET: the range selector refetches; an answer for the old range is dropped", async () => {
@@ -224,7 +241,8 @@ test("MUTATION TARGET: the range selector refetches; an answer for the old range
   let release;
   server.gate = new Promise((r) => (release = r));
   server.calls = [];
-  const stats = () => text(card(s, "agent:gaming-pc") || s, '[data-role="stats"]') || "";
+  // The range shows in the Loaded tile's caption (CLIENTS-4).
+  const rangeText = () => text(s, '[data-tile="loaded"] .n') || "";
   seg("30d").dispatchEvent({ type: "click" }); // its fetch is held in flight
   await until(() => server.calls.length === 1, "held 30d fetch");
   assert.equal(text(s, ".empty"), "Loading clients…", "the old range's cards are gone while loading");
@@ -236,27 +254,41 @@ test("MUTATION TARGET: the range selector refetches; an answer for the old range
   release(); // the 30d answer lands now, after the user left 30d
   await until(() => server.calls.length === 2, "24h fetch issued after the 30d answer");
   await tick(20);
-  assert.doesNotMatch(stats(), /30 days/, "the late 30d answer must not paint");
+  assert.doesNotMatch(rangeText(), /30 days/, "the late 30d answer must not paint");
   assert.equal(text(s, ".empty"), "Loading clients…");
   server.gate = null;
   release24();
-  await until(() => /in the last 24 hours/.test(stats()), "24h painted");
+  await until(() => /in the last 24 hours/.test(rangeText()), "24h painted");
   assert.deepEqual(server.calls, ["30d", "24h"]);
   seg("7d").dispatchEvent({ type: "click" });
-  await until(() => /in the last 7 days/.test(stats()), "back to 7d");
+  await until(() => /in the last 7 days/.test(rangeText()), "back to 7d");
 });
 
-test("MUTATION TARGET: summary tiles and the header Add a device button render (CLIENTS-2)", async () => {
+test("MUTATION TARGET: the kit page frame: page head, the four fixed tiles, Devices label with the range seg (CLIENTS-4)", async () => {
   const s = await mount();
   await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
+  assert.match(s.className, /\bkit\b/, "the view opts into css/kit.css");
   const tiles = s.querySelector('[data-role="clients-tiles"]');
   assert.equal(tiles.hidden, false);
-  assert.ok(tiles.querySelectorAll(".cl-tile").length >= 1, "at least the Connected tile");
-  assert.equal(tiles.querySelector('[data-tile="connected"] .k').textContent, "Connected");
-  const unknownTile = s.querySelector('[data-tile="outdated"]');
-  assert.equal(unknownTile.querySelector(".v").textContent, "—", "server version unknown (settings 404): no count");
-  assert.equal(unknownTile.className, "cl-tile", "no warn state without a count");
-  assert.equal(s.querySelector(".cl-head").querySelector('[data-role="add-device"]').textContent, "Add a device");
+  const all = tiles.querySelectorAll(".tile");
+  assert.deepEqual(all.map((t) => t.getAttribute("data-tile")), ["connected", "loaded", "hitrate", "agents"]);
+  assert.deepEqual(all.map((t) => t.querySelector(".k").textContent), ["Connected", "Loaded", "Hit rate", "Agents"]);
+  assert.equal(text(tiles, '[data-tile="connected"] .v'), "1of 2");
+  assert.equal(text(tiles, '[data-tile="hitrate"] .v'), "75%");
+  assert.ok(tiles.querySelector('[data-tile="hitrate"] .meter'), "hit rate tile carries a meter");
+  const agents = tiles.querySelector('[data-tile="agents"]');
+  assert.equal(agents.className, "tile", "no .hi without an outdated count");
+  assert.match(text(agents, ".n"), /server version not known$/, "server version unknown (settings 404): no count claimed");
+  assert.equal(agents.querySelector('[data-role="agents-outdated"]'), null);
+  const head = s.querySelector(".page-head");
+  assert.equal(text(head, "h1"), "Clients");
+  assert.equal(head.querySelector('[data-role="add-device"]').textContent, "Add a device");
+  assert.match(head.querySelector('[data-role="add-device"]').className, /\bpri\b/);
+  const sechd = s.querySelector(".sechd");
+  assert.equal(text(sechd, ".sec"), "Devices");
+  assert.ok(sechd.querySelector('[data-role="clients-range"]'), "the range seg sits in the Devices header");
+  assert.equal(sechd.querySelector('[data-role="clients-range"]').className, "seg");
+  assert.equal(s.querySelector('[data-role="clients-list"]').className, "ccards", "one column, not the auto-fill grid");
 });
 
 test("MUTATION TARGET: an agent whose version differs from the server's shows the warning, the tile and the Update command button (CLIENTS-3)", async () => {
@@ -266,14 +298,17 @@ test("MUTATION TARGET: an agent whose version differs from the server's shows th
   store.refreshNow();
   await until(() => card(s, "agent:gaming-pc") && card(s, "agent:gaming-pc").querySelector('[data-role="agent-outdated"]'), "outdated block");
   const a = card(s, "agent:gaming-pc");
-  assert.match(text(a, '[data-role="agent-outdated"]'), /^Agent outdated.*0\.1\.0-rc18\.1.*0\.1\.0-rc19\.2/);
+  assert.match(text(a, '[data-role="agent-outdated"]'), /^Agent version differs from the server.*0\.1\.0-rc18\.1.*0\.1\.0-rc19\.2/);
+  assert.equal(text(a, '[data-role="outdated-pill"]'), "Agent outdated");
+  assert.match(a.className, /\bwarn\b/);
   const btn = a.querySelector('[data-role="update-command"]');
-  assert.equal(btn.textContent, "Update command");
-  assert.equal(btn.getAttribute("aria-label"), "Update command for gaming-pc");
+  assert.equal(btn.textContent, "Show update command");
+  assert.equal(btn.getAttribute("aria-label"), "Show update command for gaming-pc");
   assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="agent-outdated"]'), null, "an address never warns");
-  const tile = s.querySelector('[data-tile="outdated"]');
-  assert.equal(tile.querySelector(".v").textContent, "1");
-  assert.match(tile.className, /\bwarn\b/);
+  assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="outdated-pill"]'), null);
+  const tile = s.querySelector('[data-tile="agents"]');
+  assert.equal(text(tile, '[data-role="agents-outdated"]'), "1 outdated");
+  assert.match(tile.className, /\bhi\b/);
   const src = readFileSync(new URL("../js/views/clients.js", import.meta.url), "utf8");
   assert.match(src, /openAddDeviceSheet\(\{ tab: null \}\)/, "opens the dialog without a preselected tab");
 });
@@ -283,11 +318,12 @@ test("an agent with the server's version shows no warning and a calm 0 tile (CLI
   server.agentVersion = "0.1.0-rc19.2";
   const s = await mount();
   store.refreshNow();
-  await until(() => s.querySelector('[data-tile="outdated"] .v') && s.querySelector('[data-tile="outdated"] .v').textContent === "0", "zero tile");
+  await until(() => /all match the server$/.test(text(s, '[data-tile="agents"] .n') || ""), "calm agents tile");
   await until(() => store.snapshot("clients").some((a) => a.agent_version === "0.1.0-rc19.2"), "agent row in the store");
   await tick(30);
   assert.equal(s.querySelector('[data-role="agent-outdated"]'), null);
-  assert.doesNotMatch(s.querySelector('[data-tile="outdated"]').className, /warn/);
+  assert.equal(s.querySelector('[data-tile="agents"]').className, "tile");
+  assert.equal(s.querySelector('[data-role="outdated-pill"]'), null);
   // Later tests expect an empty agent list: let the store drop the row.
   server.agentVersion = undefined;
   store.refreshNow();
@@ -346,11 +382,16 @@ test("empty instance: header, Add a device and an empty-state entry still render
   assert.match(text(s, '[data-role="clients-empty"] .hint'), /^No clients to show\./);
 });
 
-test("device card carries the rc20 structure: icon, name, now box", async () => {
+test("device card carries the three zones and the footer (CLIENTS-4)", async () => {
   const s = await mount();
   await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
   const c = card(s, "agent:gaming-pc");
-  assert.ok(c.querySelector(".jobtop .cl-ico"), "icon in the header");
-  assert.ok(c.querySelector('[data-role="loading-now"].cl-now.busy'), "loading box is highlighted while loading");
-  assert.ok(!card(s, "addr:192.168.1.77").querySelector(".cl-now.busy"));
+  assert.match(c.className, /\bccard\b/);
+  assert.deepEqual(c.children.map((z) => z.getAttribute("data-zone") || z.className), ["identity", "activity", "recent", "cf"]);
+  assert.ok(c.querySelector(".ch .ico"), "icon tile in the identity zone");
+  assert.ok(c.querySelector(".now"), "loading box while loading");
+  assert.equal(c.querySelector(".now.idle"), null);
+  assert.ok(card(s, "addr:192.168.1.77").querySelector(".now.idle"), "the idle card gets the dashed box");
+  assert.ok(c.querySelector('.cf [data-role="last-active"]'), "last-active text in the footer");
+  assert.equal(c.querySelector(".cf .acts"), null, "no name_addr and no agent row: no actions (rename/remove wiring tests cover them)");
 });

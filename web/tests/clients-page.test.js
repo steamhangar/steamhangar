@@ -30,6 +30,8 @@ import {
   isAgentOutdated,
   outdatedAgentInfo,
   summaryTiles,
+  splitValueUnit,
+  outdatedAgentsPillText,
 } from "../js/lib/clients-page.js";
 
 const MIB = 1024 * 1024;
@@ -160,20 +162,61 @@ test("last active and the page summary", () => {
   assert.equal(clientsSummaryText([agent()]), "1 client · 1 connected");
 });
 
-test("summaryTiles: connected, loaded and agents come from the cards only (CLIENTS-2)", () => {
+test("summaryTiles: the four fixed tiles come from the cards only (CLIENTS-4)", () => {
   const tiles = summaryTiles(
     [
-      agent({ connected: true, loading_now: { loading: true }, stats: { bytes_served: 2 * GIB, hit_rate: 0.5 } }),
-      address({ connected: false, loading_now: { loading: false }, stats: { bytes_served: GIB, hit_rate: 1 } }),
+      agent({ connected: true, loading_now: { loading: true }, stats: { bytes_served: 2 * GIB, hits: 3, misses: 1, hit_rate: 0.75 } }),
+      address({ connected: false, loading_now: { loading: false }, stats: { bytes_served: GIB, hits: 1, misses: 3, hit_rate: 0.25 } }),
     ],
     "7d",
   );
-  assert.deepEqual(tiles.map((t) => t.key), ["connected", "loaded", "agents", "outdated"]);
-  assert.equal(tiles[0].value, "1 of 2");
-  assert.equal(tiles[0].detail, "1 loading now");
-  assert.equal(tiles[1].value, "3.0 GB");
-  assert.equal(tiles[1].detail, "in the last 7 days");
-  assert.equal(tiles[2].value, "1 online");
+  assert.deepEqual(tiles.map((t) => t.key), ["connected", "loaded", "hitrate", "agents"]);
+  assert.deepEqual([tiles[0].value, tiles[0].unit, tiles[0].detail], ["1", "of 2", "1 loading now"]);
+  assert.deepEqual([tiles[1].value, tiles[1].unit, tiles[1].detail], ["3.0", "GB", "in the last 7 days"]);
+  // Request-based over all requests (4 hits of 8), not the mean of the rates.
+  assert.deepEqual([tiles[2].value, tiles[2].unit, tiles[2].meter], ["50", "%", 50]);
+  assert.deepEqual([tiles[3].value, tiles[3].unit], ["1", "online"]);
+});
+
+test("summaryTiles: the Agents tile counts outdated agents only against a known server version (CLIENTS-3/4)", () => {
+  const tile = (list, server) => summaryTiles(list, "7d", server).find((t) => t.key === "agents");
+  const none = tile([address()], "0.1.0");
+  assert.equal(none.detail, "No agent paired");
+  assert.equal(none.hi, false);
+  const old = agent({ agent: { agent_version: "0.0.9" } });
+  const current = agent({ key: "agent:b", agent: { agent_version: "0.1.0" } });
+  const warn = tile([old, current], "0.1.0");
+  assert.equal(warn.outdated, 1);
+  assert.equal(warn.hi, true);
+  assert.equal(warn.detail, "2 paired");
+  assert.equal(outdatedAgentsPillText(warn.outdated), "1 outdated");
+  const calm = tile([current], "0.1.0");
+  assert.equal(calm.outdated, 0);
+  assert.equal(calm.hi, false);
+  assert.equal(calm.detail, "1 paired · all match the server");
+  const unknown = tile([old], null);
+  assert.equal(unknown.outdated, null, "unknown server version: no count claimed");
+  assert.equal(unknown.hi, false);
+  assert.equal(unknown.detail, "1 paired · server version not known");
+});
+
+test("summaryTiles: no statistics shows dashes and says why, never zeros", () => {
+  const tiles = summaryTiles([address({ connected: true, loading_now: { loading: false }, stats: null })], "7d");
+  assert.deepEqual(tiles.map((t) => t.key), ["connected", "loaded", "hitrate", "agents"]);
+  assert.equal(tiles[0].detail, "Nothing loading now");
+  assert.deepEqual([tiles[1].value, tiles[1].detail], ["\u2014", "No traffic statistics"]);
+  assert.deepEqual([tiles[2].value, tiles[2].detail, tiles[2].meter], ["\u2014", "No traffic statistics", undefined]);
+  const noReq = summaryTiles([address({ stats: { bytes_served: 0, hits: 0, misses: 0, hit_rate: null } })], "7d");
+  assert.deepEqual([noReq[2].value, noReq[2].detail], ["\u2014", "No cache requests yet"]);
+});
+
+test("splitValueUnit: number and unit for the kit's value<small>unit</small>", () => {
+  assert.deepEqual(splitValueUnit("38.2 GB"), { value: "38.2", unit: "GB" });
+  assert.deepEqual(splitValueUnit("75%"), { value: "75", unit: "%" });
+  assert.deepEqual(splitValueUnit("< 1 MB"), { value: "< 1", unit: "MB" });
+  assert.deepEqual(splitValueUnit("30.0 MB/s"), { value: "30.0", unit: "MB/s" });
+  assert.deepEqual(splitValueUnit(null), { value: "\u2014", unit: "" });
+  assert.deepEqual(splitValueUnit("\u2014"), { value: "\u2014", unit: "" });
 });
 
 test("isAgentOutdated: differs only; unknown or non-release versions never warn (CLIENTS-3)", () => {
@@ -197,22 +240,3 @@ test("outdatedAgentInfo reads the agent row's version; agentless cards never war
   assert.equal(outdatedAgentInfo(address(), "0.1.0"), null);
 });
 
-test("summaryTiles: the outdated-agents tile needs an agent, warns only above zero (CLIENTS-3)", () => {
-  const tile = (list, server) => summaryTiles(list, "7d", server).find((t) => t.key === "outdated");
-  assert.equal(tile([address()], "0.1.0"), undefined, "no agent, no tile");
-  const old = agent({ agent: { agent_version: "0.0.9" } });
-  const current = agent({ key: "agent:b", agent: { agent_version: "0.1.0" } });
-  assert.deepEqual(tile([old, current], "0.1.0"), { key: "outdated", label: "Outdated agents", value: "1", detail: "Version differs from the server", warn: true });
-  const none = tile([current], "0.1.0");
-  assert.equal(none.value, "0");
-  assert.equal(none.warn, false);
-  const unknown = tile([old], null);
-  assert.equal(unknown.value, "—", "unknown server version: no count claimed");
-  assert.equal(unknown.warn, false);
-});
-
-test("summaryTiles: no statistics and no agent means no Loaded and no Agents tile", () => {
-  const tiles = summaryTiles([address({ connected: true, loading_now: { loading: false }, stats: null })], "7d");
-  assert.deepEqual(tiles.map((t) => t.key), ["connected"]);
-  assert.equal(tiles[0].detail, "Nothing loading now");
-});

@@ -163,6 +163,73 @@
 /* ---------- empty state ---------- */
 .kit .empty{ color:var(--dim); font-size:var(--fs-2); text-align:center; padding:18px; border:1px dashed var(--line); border-radius:var(--r-m); }
 
+/* ---------- Clients card, three zones (WP CLIENTS-4) ----------
+   Ported from kit.html "Clients card, three zones"; rendered by
+   components/client-card.js. Zone 1 identity and health, zone 2 activity
+   and numbers, zone 3 recent games, footer across all three. One card per
+   row: `.ccards` is a single column and the inline-size container the
+   zone stacking queries (700px: zones stack; 460px: tighter padding,
+   full-width actions). */
+.kit .ccards{ container-type:inline-size; display:grid; gap:var(--sp-4); }
+.kit .ccard{
+  background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-l); padding:18px 20px;
+  display:grid; grid-template-columns:minmax(260px, 1.1fr) minmax(220px, 1fr) minmax(220px, 1fr); gap:var(--sp-5) var(--sp-7);
+}
+.kit .ccard.warn{ border-color:color-mix(in srgb, var(--stale) 45%, var(--line)); }
+.kit .ccard .z{ display:grid; gap:var(--sp-3); align-content:start; min-width:0; }
+.kit .ccard .ch{ display:flex; gap:12px; align-items:center; min-width:0; }
+.kit .ccard .ch .id{ min-width:0; }
+.kit .ccard .ico{ width:38px; height:38px; border-radius:10px; background:var(--raised); display:grid; place-items:center; color:var(--accent); flex:none; }
+.kit .ccard .ch .nm{ font:500 var(--fs-4)/1.2 var(--ui); overflow-wrap:anywhere; }
+.kit .ccard .ch .meta{ font:var(--fs-1) var(--mono); color:var(--dim); margin-top:3px; overflow-wrap:anywhere; }
+.kit .ccard .pills{ display:flex; gap:6px; flex-wrap:wrap; }
+.kit .ccard .upd{
+  display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start;
+  background:color-mix(in srgb, var(--stale) 9%, var(--surface)); border:1px solid color-mix(in srgb, var(--stale) 40%, var(--line));
+  border-radius:var(--r-m); padding:10px 12px; font-size:var(--fs-2);
+}
+.kit .ccard .upd-ico{ color:var(--stale); margin-top:2px; display:flex; }
+.kit .ccard .upd b{ display:block; font-weight:500; color:var(--text); }
+.kit .ccard .upd span{ color:var(--dim); overflow-wrap:anywhere; }
+.kit .ccard .upd .btn{ grid-column:2; justify-self:start; }
+.kit .ccard .now{
+  background:color-mix(in srgb, var(--accent) 8%, var(--surface)); border:1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius:var(--r-m); padding:10px 12px; display:flex; justify-content:space-between; gap:10px; align-items:center;
+}
+.kit .ccard .now > div{ min-width:0; }
+.kit .ccard .now b{ display:block; font-weight:500; overflow-wrap:anywhere; }
+.kit .ccard .now span{ font-size:var(--fs-2); color:var(--dim); }
+.kit .ccard .now .spd{ font:500 var(--fs-4) var(--mono); color:var(--accent); white-space:nowrap; }
+.kit .ccard .now.idle{ background:none; border-style:dashed; color:var(--dim); justify-content:center; font-size:var(--fs-2); }
+.kit .ccard .stats{ display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--sp-3); }
+.kit .ccard .stats .k{ font:500 var(--fs-1)/1 var(--ui); letter-spacing:.8px; text-transform:uppercase; color:var(--dim); }
+.kit .ccard .stats .v{ font:500 var(--fs-5)/1.1 var(--ui); margin-top:5px; font-variant-numeric:tabular-nums; }
+.kit .ccard .stats .v small{ font-size:var(--fs-2); color:var(--dim); margin-left:3px; }
+.kit .ccard .agent{ display:flex; gap:10px; align-items:center; font-size:var(--fs-2); color:var(--dim); background:var(--raised); border-radius:var(--r-s); padding:8px 10px; }
+.kit .ccard .agent b{ color:var(--ok); font-weight:500; white-space:nowrap; flex:none; }
+.kit .ccard .agent b{ display:inline-flex; align-items:center; gap:4px; }
+.kit .ccard .agent .ok-ico{ display:flex; }
+.kit .ccard .agent.bad b{ color:var(--stale); }
+.kit .ccard .agent span{ min-width:0; }
+.kit .ccard .gchip{ max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+.kit .ccard .cf{
+  grid-column:1 / -1; display:flex; justify-content:space-between; align-items:center; gap:var(--sp-3); flex-wrap:wrap;
+  border-top:1px solid var(--line-soft); padding-top:var(--sp-3); font-size:var(--fs-2); color:var(--dim);
+}
+.kit .ccard .cf .acts{ display:flex; gap:8px; margin-left:auto; }
+.kit .ccard .cf > p{ flex-basis:100%; margin:0; }
+@container (max-width: 700px){
+  .kit .ccard{ grid-template-columns:1fr; gap:var(--sp-4); }
+  .kit .ccard .stats{ grid-template-columns:repeat(3, 1fr); }
+}
+@container (max-width: 460px){
+  .kit .ccard{ padding:14px; }
+  .kit .ccard .cf .acts{ margin-left:0; width:100%; }
+  .kit .ccard .cf .acts .btn{ flex:1; justify-content:center; }
+}
+/* The "Add a device" button's + icon (page head). */
+.kit .btn .btn-ico{ display:flex; }
+
 /* ---------- /kit page frame (views/kit.js) ----------
    A 400px inline-size container: the same markup renders inside it so the
    container-query behaviour of later page compositions can be checked
@@ -184,4 +251,7 @@
 .kit .page-head[hidden], .kit .sechd[hidden], .kit .btn[hidden], .kit .pill[hidden], .kit .seg[hidden],
 .kit .tiles[hidden], .kit .tile[hidden], .kit .meter i[hidden], .kit .fcard[hidden], .kit .fg[hidden],
 .kit .field[hidden], .kit .field .lh[hidden], .kit .field label[hidden], .kit .gchip[hidden], .kit .badge[hidden], .kit .jr[hidden],
+.kit .ccards[hidden], .kit .ccard[hidden], .kit .ccard .z[hidden], .kit .ccard .ch[hidden], .kit .ccard .ico[hidden], .kit .ccard .pills[hidden],
+.kit .ccard .upd[hidden], .kit .ccard .upd-ico[hidden], .kit .ccard .upd b[hidden], .kit .ccard .now[hidden], .kit .ccard .now b[hidden],
+.kit .ccard .stats[hidden], .kit .ccard .agent[hidden], .kit .ccard .agent b[hidden], .kit .ccard .agent .ok-ico[hidden], .kit .ccard .cf[hidden], .kit .ccard .cf .acts[hidden], .kit .btn .btn-ico[hidden],
 .kit .kit-frame[hidden], .kit .kit-section[hidden], .kit .kit-row[hidden], .kit .kit-list[hidden], .kit.kit-page[hidden]{ display:none; }

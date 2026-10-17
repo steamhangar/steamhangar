@@ -145,7 +145,7 @@ test("MUTATION TARGET: a PC that is client and agent shows once, with the agent'
   assert.deepEqual(keys(s), ["agent:desk-pc", "addr:192.168.1.77"]);
   const a = card(s, "agent:desk-pc");
   assert.match(text(a, '[data-role="agent-presence"]'), /^last seen 5 min ago · agent 0\.1\.0$/);
-  assert.equal(text(a, '[data-role="connection"]'), "Agent online", "existing chip wording kept");
+  assert.equal(text(a, '[data-role="connection"]'), "Online", "presence pill (CLIENTS-4)");
   assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="agent-presence"]'), null, "an address has no agent line");
   assert.equal(text(s, '[data-role="clients-sub"]'), "2 clients · 1 connected");
 });
@@ -163,10 +163,16 @@ test("MUTATION TARGET: an agent the overview does not list gets its own card fro
   const s = await mount();
   await until(() => keys(s).length === 3, "three cards");
   const l = card(s, "agent:laptop");
-  assert.equal(text(l, '[data-role="connection"]'), "Agent offline");
+  assert.equal(text(l, '[data-role="connection"]'), "Offline");
   assert.match(text(l, '[data-role="agent-presence"]'), /^last seen 5 min ago · version not reported$/);
   assert.equal(text(l, '[data-role="loading-now"]'), "Loading now: \u2014", "no traffic data, a dash and no zero");
-  assert.equal(l.querySelector('[data-role="stats"]'), null);
+  // CLIENTS-4: the figures stay in place as dashes (never zeros); the
+  // installed count comes from the agent row.
+  const stat = (key) => l.querySelector('[data-role="stats"]').querySelectorAll("div").find((d) => d.getAttribute("data-stat") === key);
+  assert.equal(stat("loaded").querySelector(".v").textContent, "\u2014");
+  assert.equal(stat("hitrate").querySelector(".v").textContent, "\u2014");
+  assert.equal(stat("hitrate").querySelector(".meter"), null, "no meter without a rate");
+  assert.equal(l.querySelector('[data-role="recent"]'), null, "no recent chips without data");
 });
 
 test("with an old server (no overview) the agent PCs are still listed", async () => {
@@ -182,8 +188,12 @@ test("MUTATION TARGET: a bypass-suspected agent says so on its card, with the ca
   const s = await mount();
   await until(() => keys(s).length === 2, "cards");
   const a = card(s, "agent:desk-pc");
-  assert.match(text(a, '[data-role="bypass"]'), /^Bypassing the cache · 2 games reported · none of its downloads have reached the cache recently$/);
-  assert.match(a.querySelector(".hint").textContent, /does not necessarily mean anything is wrong/);
+  const health = a.querySelector('[data-role="agent-health"]');
+  assert.equal(text(health, "b"), "Bypassing the cache");
+  assert.match(text(a, '[data-role="bypass"]'), /^2 games reported · none of its downloads have reached the cache recently$/);
+  assert.match(text(a, '[data-role="bypass-hint"]'), /does not necessarily mean anything is wrong/);
+  assert.match(a.className, /\bwarn\b/, "the card border warns");
+  assert.equal(a.querySelector('[data-role="agent-presence"]'), null, "the bypass row replaces the healthy one");
   assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="bypass"]'), null);
 });
 
@@ -191,8 +201,8 @@ test("MUTATION TARGET: Remove on a card opens the shared confirm, sends one DELE
   const s = await mount();
   await until(() => keys(s).length === 2, "cards");
   const btn = card(s, "agent:desk-pc").querySelector('[data-role="remove-pc"]');
-  assert.equal(btn.textContent, "Remove");
-  assert.equal(btn.getAttribute("aria-label"), "Remove desk-pc");
+  assert.equal(btn.textContent, "Remove agent");
+  assert.equal(btn.getAttribute("aria-label"), "Remove agent desk-pc");
   assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="remove-pc"]'), null, "address cards have no Remove");
   click(btn);
   assert.equal(confirmIsOpen(), true);

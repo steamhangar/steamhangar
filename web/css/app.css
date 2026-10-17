@@ -1605,8 +1605,8 @@ body.onboarding .nav{ display:none; }
 /* ---------- WP D15c: range selector, Clients page, Downloads statistics ----------
    The range selector reuses `.segs` with the text-segment sizing Settings
    gives `.field > .segs` (WEB-FIX-3): never wraps a label, scrolls sideways
-   on a screen too narrow for all four. Client cards reuse `.jobcard`/
-   `.jobtop` and the `.pchip` presence chip. The statistics header is a
+   on a screen too narrow for all four (the Clients page uses the kit's
+   `.seg` instead, WP CLIENTS-4). The statistics header is a
    two-column tile grid on a phone, four columns from BP-M (below), and the
    throughput graph is inline SVG drawn by views/downloads.js. */
 .segs.rangesegs{ display:flex; width:max-content; max-width:100%; overflow-x:auto; scrollbar-width:none; margin:10px 0 4px; }
@@ -1616,39 +1616,18 @@ body.onboarding .nav{ display:none; }
 }
 .segs.rangesegs[hidden]{ display:none; }
 .cl-note{ text-align:left; }
-/* CLIENTS-2: header with the Add a device button, summary tiles, card grid. */
-.cl-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-.cl-tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:14px 0; }
-.cl-tiles[hidden]{ display:none; }
-.cl-tile{ min-width:0; padding:12px 14px; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line-soft); }
-.cl-tile .k{ font-size:10.5px; font-weight:600; letter-spacing:.7px; text-transform:uppercase; color:var(--dim-2); }
-.cl-tile .v{ margin-top:2px; font-size:22px; font-weight:500; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
-.cl-tile .n{ margin-top:1px; font-size:12px; color:var(--dim); }
-.cl-tile.warn{ border-color:var(--stale); }
-.cl-tile.warn .v{ color:var(--stale); }
-.clcard .cl-upd{ margin-top:10px; padding:10px 12px; border:1px solid var(--stale); border-radius:10px; background:var(--raised); display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
-.clcard .cl-upd strong{ color:var(--stale); }
-.clcard .cl-upd p{ margin:0; flex:1 1 220px; font-size:12px; color:var(--dim); overflow-wrap:anywhere; }
-.cl-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(min(440px, 100%), 1fr)); gap:14px; align-items:start; }
-.cl-list > p{ grid-column:1 / -1; }
-.cl-list > .cl-empty{ grid-column:1 / -1; }
+/* CLIENTS-4: the page head, tiles and the three-zone cards come from
+   css/kit.css (`.kit .ccard`, ADR-0028); only the empty state stays here. */
+.view-clients.kit{ display:grid; gap:var(--sp-4); align-content:start; }
+.view-clients.kit > .sechd{ margin-top:var(--sp-2); }
+.view-clients.kit > p{ margin:0; }
+.ccards > .cl-empty{ grid-column:1 / -1; }
 .cl-empty{ display:grid; justify-items:center; gap:10px; padding:22px 16px; border:1px dashed var(--line); border-radius:var(--r-m); background:var(--bg); }
 .cl-empty .hint{ margin:0; }
-.clcard{ margin-bottom:0; padding:16px 18px; border-radius:14px; }
-.cl-top{ align-items:center; }
-.cl-top .cl-info{ flex:1; }
-.cl-ico{ width:38px; height:38px; flex:none; border-radius:11px; display:grid; place-items:center; background:var(--raised); color:var(--accent); box-shadow:inset 0 0 0 1px var(--line); }
-.cl-ico svg{ width:20px; height:20px; }
-.clcard .cl-now{ margin-top:12px; padding:10px 12px; border-radius:10px; font-family:var(--ui); font-size:12.5px; color:var(--dim); border:1px dashed var(--line); }
-.clcard .cl-now.busy{ color:var(--accent); background:var(--accent-glow); border:1px solid transparent; }
-.clcard .cl-acts{ margin-top:12px; padding-top:12px; border-top:1px solid var(--line-soft); }
-.clcard .cl-line{ margin-top:4px; overflow-wrap:anywhere; }
-.clcard .jobtop .pchip{ margin-top:2px; }
-/* WP D15-NAMES: the card's Rename button, the rename dialog (its title
-   carries operator-chosen text that may be one long word) and the Delete
-   history confirm. `.dialog p` (0,1,1) would otherwise dim the error line,
-   and its three buttons wrap on a phone instead of overflowing. */
-.clcard .jobacts{ margin-top:9px; }
+/* WP D15-NAMES: the rename dialog (its title carries operator-chosen text
+   that may be one long word) and the Delete history confirm. `.dialog p`
+   (0,1,1) would otherwise dim the error line, and its three buttons wrap
+   on a phone instead of overflowing. */
 .cl-rename-dialog h3{ overflow-wrap:anywhere; }
 .cl-rename-dialog .field{ margin-bottom:6px; }
 .dialog .errline{ color:var(--danger); }
