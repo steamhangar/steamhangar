@@ -3608,6 +3608,15 @@ below carry their own later dates, item 12 is the current one).
       box in the rc19.3 block) says so, with a new ADR carrying the numbers;
       otherwise the item moves to rc21.
 
+    - [ ] **rc20.1** (patch, operator report on prod 2026-10-17)
+      - [ ] **DOWNLOADS-3** (web) History head "Delete…" clipped; History
+        unbounded (first 10, then "Show 20 more"); subline count ("20 in
+        history") disagrees with the list; History glyph words use library
+        vocabulary ("Current", "Not in use") instead of the job outcome;
+        empty graph area when idle (flat baseline + "No traffic in this
+        range").
+      - [ ] tag `v0.1.0-rc20.1` after main CI is green (operator's yes)
+
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
       the operator's rc20 visual check; no rc21 tag without the operator's yes)
