@@ -706,6 +706,9 @@ export function buildCard(game, ctx) {
     else onOpen(game.appid);
   });
   card.addEventListener("keydown", (e) => {
+    // Only the card itself: Enter/Space on the nested quick-action button
+    // bubbles here and must run that button's own action, not open the sheet.
+    if (e.target !== card) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (selecting) onToggle(game.appid);

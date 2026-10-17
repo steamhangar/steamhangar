@@ -169,6 +169,30 @@ test("MUTATION TARGET: CSS — the size badge sits top-left on the cover in mono
   assert.match(allRuleBodies(kit, ".kit .grid.list .card .cap .name, .kit .grid.list .card .cap .sz"), /display:none/);
 });
 
+test("MUTATION TARGET -- keyboard: Enter/Space on the status-line quick action runs the action and never opens the sheet (LIBRARY-2 review)", () => {
+  for (const key of ["Enter", " "]) {
+    const calls = [];
+    const card = buildCard(game(), ctx(undefined, {
+      onOpen: (id) => calls.push(["open", id]),
+      onAction: (id, type) => calls.push(["action", id, type]),
+    }));
+    const btn = card.querySelector(".stt button.icnact");
+    let prevented = false;
+    // fake-dom does not bubble: deliver the keydown the card sees when it
+    // bubbles up from the focused button.
+    card.dispatchEvent({ type: "keydown", key, target: btn, preventDefault() { prevented = true; } });
+    assert.equal(prevented, false, `${JSON.stringify(key)}: the button's own activation is not cancelled`);
+    // The browser then activates the button (click), which runs the action only.
+    btn.dispatchEvent({ type: "click", stopPropagation() {} });
+    assert.deepEqual(calls, [["action", 275850, "download"]], JSON.stringify(key));
+  }
+  // Enter on the card itself still opens the sheet.
+  const opened = [];
+  const card = buildCard(game(), ctx(undefined, { onOpen: (id) => opened.push(id) }));
+  card.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() {} });
+  assert.deepEqual(opened, [275850]);
+});
+
 // ---------------------------------------------------------------------
 // 2. Downloads badge centring + glyph geometry
 // ---------------------------------------------------------------------

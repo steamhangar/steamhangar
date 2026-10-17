@@ -923,7 +923,6 @@ export function buildDetailStatusRow(row, kind) {
   // WP CACHE-COMPLETE-1c: the card's overlay (completeness after UPD-6).
   const display = cardDisplay(row, kind, STATUS_LABEL);
   const pill = createPill({ kind: display.icon, text: display.word });
-  pill.classList.add("detail-statusrow");
   pill.dataset.text = display.text;
   // WP 4a.8 icon audit: the word right after the disc already says the
   // same thing visibly — hide the disc from assistive tech.

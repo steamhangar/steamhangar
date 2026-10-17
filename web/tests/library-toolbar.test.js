@@ -114,6 +114,15 @@ test("status line: ONE line holding the update text, the owned notice (the only 
   assert.equal(t.ownedText.hidden === true, false, "the live region itself is never hidden");
 });
 
+test("MUTATION TARGET -- css: one toolbar row at full width (zero-basis filters), a stacked status line in a narrow container", () => {
+  const kit = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(kit, /\.kit \.lib-filters\{ flex:1 1 0; \}/, "the chips wrap inside the left part, the tools stay on row 1");
+  const narrow = kit.slice(kit.indexOf("@container lib (max-width:560px)"));
+  assert.match(narrow, /\.kit \.lib-filters\{ flex-basis:100%; \}/);
+  assert.match(narrow, /\.kit \.lib-stat\{ flex-direction:column;/, "no wrapped line starts with a separator");
+  assert.match(narrow, /\.kit \.lib-stat > \*::before,\s*\.kit \.lib-stat > \*:not\(\[hidden\]\):not\(:empty\) ~ \*:not\(\[hidden\]\):not\(:empty\)::before\{ display:none; \}/, "matches the separator rule's specificity");
+});
+
 // ---------------------------------------------------------------------
 // Detail sheet anatomy (source pins)
 // ---------------------------------------------------------------------

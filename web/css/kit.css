@@ -719,6 +719,9 @@
 /* toolbar row: search + chips, then the tools; wraps to a second row */
 .kit .lib-bar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; min-width:0; }
 .kit .lib-filters{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; flex:1 1 auto; min-width:0; }
+/* A zero basis: the chips wrap inside the left part and the tools stay on
+   the first row (library.html); a narrow container gives it its own row. */
+.kit .lib-filters{ flex:1 1 0; }
 .kit .lib-search{
   flex:0 1 var(--search-w); min-width:180px; margin:0; height:38px; padding:0 12px;
   border-radius:10px; gap:8px; cursor:text;
@@ -858,6 +861,7 @@
 /* "+N content packages · N failed" wraps on a narrow card, never clips
    (TOOL-APPS-2c review, 360px): the warning is one nowrap unit. */
 .kit .card .pkgline{ display:flex; flex-wrap:wrap; gap:0 4px; min-width:0; font:400 var(--fs-2)/1.35 var(--ui); color:var(--dim-2); }
+.kit .card .pkgline .pkgn{ white-space:nowrap; }
 .kit .card .pkgline .pkgfail{ display:inline-flex; gap:4px; white-space:nowrap; color:var(--stale); }
 .kit .card .instbadge.warn{ color:var(--stale); }
 .kit .card .updbadge{ color:var(--stale); }
@@ -909,6 +913,12 @@
   .kit .lib-tools{ margin-left:0; }
   .kit .sortg select{ max-width:150px; }
   .kit .lib-tools .btn{ padding-inline:10px; }
+  /* The status line stacks: a "·" would start a wrapped line. */
+  .kit .lib-stat{ flex-direction:column; align-items:flex-start; }
+  /* Same selector as the separator rule above: its :not()s outweigh a
+     plain `> *::before`. */
+  .kit .lib-stat > *::before,
+  .kit .lib-stat > *:not([hidden]):not(:empty) ~ *:not([hidden]):not(:empty)::before{ display:none; }
 }
 
 /* bulk bar text follows the scale; the bar's geometry stays app.css's */
