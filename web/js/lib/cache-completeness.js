@@ -213,7 +213,8 @@ export function completenessLine(row) {
   // measured against must stay visible (WP MAP-FROM-MANIFEST-1).
   const amount = !expected ? `${present} on disk` : `${present} of ${expected} on disk`;
   const checked = row.cache_complete_checked_at ? ` · checked ${formatTimestamp(row.cache_complete_checked_at)}` : "";
-  return `${pct}% complete — ${amount}${checked}${unmappedNote(row)}`;
+  // The template stays byte-identical: the Android twin pins it.
+  return `${pct}% complete — ${amount}${checked}` + unmappedNote(row);
 }
 
 /** The group line under it for a group row with a known group figure, else
