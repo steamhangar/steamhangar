@@ -244,7 +244,9 @@ test("theme.css declares --w-sheet-l (the centred card's BP-L width), distinct f
   // picked 680 specifically within it) — this pin guards the RANGE staying
   // sane, not the exact number, so a deliberate future re-tune within the
   // approved band does not need to touch this test.
-  assert.ok(widthPx >= 680 && widthPx <= 760, `--w-sheet-l is ${widthPx}px, expected 680-760px (the operator-approved range)`);
+  // WP LIBRARY-2: docs/design/rc20/library.html's sheet is min(920px,100%),
+  // with a two-column Overview; the earlier 680-760px band was for one column.
+  assert.ok(widthPx >= 880 && widthPx <= 960, `--w-sheet-l is ${widthPx}px, expected about 920px (library.html)`);
   const wSheetMatch = /--w-sheet\s*:\s*(\d+)px/.exec(themeTop);
   assert.ok(wSheetMatch, "--w-sheet not found in theme.css's :root");
   assert.notEqual(widthPx, Number(wSheetMatch[1]), "--w-sheet-l must differ from --w-sheet, or the centred card and the drawer/every other sheet cannot have different BP-L widths");

@@ -91,25 +91,25 @@ test("safety net: html, body carry overflow-x:clip at the top level (never hidde
   assert.doesNotMatch(body, /overflow(-x)?:\s*hidden/);
 });
 
-test("root cause: the phone grid columns are minmax(0,1fr), so a nowrap card child cannot widen a track past the viewport", () => {
-  assert.match(ruleBody(app.topLevel, ".grid") ?? "", /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(ruleBody(app.topLevel, ".grid.cols3") ?? "", /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(ruleBody(app.topLevel, ".grid.list") ?? "", /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
-  assert.match(ruleBody(app.topLevel, ".card") ?? "", /min-width:\s*0\s*(;|$)/);
+// WP LIBRARY-2: the Library grid moved to css/kit.css. Every track is
+// minmax(min(100%, var(--tile-min)), 1fr) — the min(100%, …) floor keeps a
+// single column from exceeding a narrow container, and a card may shrink.
+const kitCss = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+test("root cause: the Library grid's tracks floor at min(100%, …) and a card may shrink, so a nowrap card child cannot widen the page", () => {
+  assert.match(ruleBody(kitCss, ".kit.view-library > .grid") ?? "", /minmax\(min\(100%, var\(--tile-min\)\), 1fr\)/);
+  assert.match(ruleBody(kitCss, ".kit.view-library > .grid.list") ?? "", /grid-template-columns:minmax\(0, 1fr\)/);
+  assert.match(ruleBody(kitCss, ".kit .card") ?? "", /min-width:0/);
 });
 
-// WP LIB-LIST-1 replaced the list row's flex line (where `.meta` needed
-// flex-shrink:1 + min-width:0) with a grid of fixed columns: the row can no
-// longer be pushed wider because its only content-sized track is the name's
-// minmax(0,1fr), and the name itself may shrink (min-width:0 + ellipsis).
-// The full column model is pinned in game-card-list-columns.test.js.
+// The list row's column model is pinned in game-card-list-columns.test.js.
 test("list layout: the row's flexible track is minmax(0,1fr) and the name may shrink, so nothing pushes the row wider", () => {
-  const card = allRuleBodies(app.topLevel, ".grid.list .card");
-  assert.match(card, /grid-template-columns:[^;]*minmax\(0,\s*1fr\)/);
+  const card = ruleBody(kitCss, ".kit .grid.list .card") ?? "";
+  assert.match(card, /grid-template-columns:44px minmax\(0, 1fr\)/);
   assert.doesNotMatch(card.match(/grid-template-columns:([^;]*)/)[1], /\bauto\b|max-content/, "no content-sized track");
-  const name = allRuleBodies(app.topLevel, ".grid.list .rowname");
-  assert.match(name, /min-width:\s*0/);
-  assert.match(name, /text-overflow:\s*ellipsis/);
+  const name = ruleBody(kitCss, ".kit .grid.list .card .rowname") ?? "";
+  assert.match(name, /min-width:0/);
+  assert.match(name, /text-overflow:ellipsis/);
 });
 
 test("flex text columns may shrink: .jobtop > div and .banner .body carry min-width:0", () => {

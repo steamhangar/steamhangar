@@ -104,8 +104,20 @@
  * still select). "Check updates" and "Check & update all cached games" are
  * one split button in `.lib-head` (the second is the caret menu's only
  * entry; without the primary the caret stays as the sole entry point).
- * `lib/disclosure.js` supplies the menu / popover behaviour. In-flow
- * children are `.lib-head`/`.lib-bar`/`.lib-status`/`.grid`/`.bulk`.
+ * `lib/disclosure.js` supplies the menu / popover behaviour.
+ *
+ * **WP LIBRARY-2 (rc20 rework, docs/design/rc20/library.html + kit).** The
+ * section carries `kit` and composes from css/kit.css; the head, toolbar row
+ * and status line are built by `components/library-toolbar.js`, this file
+ * wires and paints them. In-flow children are `.lib-head` (a `.page-head`),
+ * `.lib-bar`, `.lib-stat` (ONE status line: update check · owned-library
+ * notice · Reload), `.grid` and `.bulk`. The chips are kit `.fchip`s and
+ * wrap; the Filters button is always visible (a popover note says when no
+ * game has metadata); "Check updates" is always the split's primary half
+ * (loading until the status answers, hidden only on a vault-api without the
+ * route). The layout classes are "" / `compact` / `list` on `.grid`, plus
+ * `selecting` in select mode. The WEB-FIX-UPD-VIS and WP 4e.2 notes above
+ * describe earlier toolbar and grid CSS that is gone.
  *
  * **WP TOOL-APPS-2c (content packages, ADR-0022).** `state.games` is the
  * GROUPED list (`lib/content-groups.js` `groupGames`): a game with content
@@ -189,6 +201,13 @@ import {
   OWNED_STATUS,
 } from "../lib/owned-library.js";
 import { createDisclosure } from "../lib/disclosure.js";
+import {
+  SORT_ASC_SVG,
+  SORT_DESC_SVG,
+  buildLibraryToolbar,
+  paintChips,
+  paintFiltersButton as paintFiltersCount,
+} from "../components/library-toolbar.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import {
   expandSelection,
@@ -205,7 +224,7 @@ import { buildIntroNodes, buildPlanNodes, createDeleteConfirm } from "../compone
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const SORT_STORAGE_KEY = "steamvault.librarySort";
 const META_FILTER_STORAGE_KEY = "steamvault.libraryMetaFilter";
-const LAYOUT_CLASS = { grid2: "", grid3: "cols3", list: "list" };
+const LAYOUT_CLASS = { grid2: "", grid3: "compact", list: "list" };
 // D-3 (docs/WORKPACKAGES.md, user-approved 2026-08-18): this control ships
 // literal column-count wording ("Two columns"/"Three columns") since the
 // WP 4a.3 mockup port, which was true only as long as the grid itself was a
@@ -596,10 +615,15 @@ function paintUpdateCheck() {
   if (!mounted()) return;
   const { phase, status } = updateCheck.snapshot();
   const btn = els.checkUpdatesBtn;
-  const hidden = phase === UPDATE_PHASE.UNKNOWN || phase === UPDATE_PHASE.UNSUPPORTED;
+  // WP LIBRARY-2: the primary half is always shown; only a vault-api
+  // without the route (404) hides it. Until GET /v1/updates/status answers
+  // it shows as a loading, aria-disabled button.
+  const loading = phase === UPDATE_PHASE.UNKNOWN;
+  const hidden = phase === UPDATE_PHASE.UNSUPPORTED;
   btn.hidden = hidden;
+  els.checkSplit.classList.toggle("loading", loading);
   // Without the primary button the split's caret stays as the only way to
-  // "Check & update all cached games" (older vault-api, status unknown).
+  // "Check & update all cached games" (older vault-api).
   els.checkSplit.classList.toggle("solo", hidden);
   // WCAG 2.5.3: while solo the caret shows the word "Updates", so the
   // accessible name must contain it.
@@ -613,14 +637,25 @@ function paintUpdateCheck() {
   // in-flight guard ignores the click. Real `disabled` only while the oracle
   // is off (nothing to do here at all; the line below says why).
   btn.disabled = phase === UPDATE_PHASE.DISABLED;
-  btn.setAttribute("aria-disabled", String(busy));
+  btn.setAttribute("aria-disabled", String(busy || loading));
   btn.textContent = busy ? CHECK_UPDATES_BUSY_LABEL : CHECK_UPDATES_LABEL;
   const line = updateStatusLine(phase, status);
   if (els.updLine.textContent !== line) els.updLine.textContent = line;
   els.updLine.hidden = !line;
+  syncStatLine();
+}
+
+/** The one status line under the toolbar hides only when every part of it
+ * (update line, owned notice, its buttons) is empty or hidden. */
+function syncStatLine() {
+  const { statLine, updLine, ownedText, ownedSettingsBtn, ownedReloadBtn } = els;
+  statLine.hidden = updLine.hidden && !ownedText.textContent && ownedSettingsBtn.hidden && ownedReloadBtn.hidden;
 }
 
 async function onCheckUpdates() {
+  // Still loading the status (aria-disabled, never `disabled`, so focus
+  // stays): nothing to start yet.
+  if (updateCheck.snapshot().phase === UPDATE_PHASE.UNKNOWN) return;
   const res = await updateCheck.run();
   if (res.skipped) return;
   if (res.result === "disabled") {
@@ -644,20 +679,7 @@ function renderChips() {
   // stops carrying its field; never leave the grid filtered by a chip the
   // user can no longer see or press.
   if (!counts.some((c) => c.key === state.filterKey)) state.filterKey = "all";
-  els.chips.replaceChildren();
-  for (const c of counts) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip";
-    btn.dataset.f = c.key;
-    btn.setAttribute("aria-pressed", String(state.filterKey === c.key));
-    btn.appendChild(document.createTextNode(c.label + " "));
-    const n = document.createElement("span");
-    n.className = "n";
-    n.textContent = String(c.count);
-    btn.appendChild(n);
-    els.chips.appendChild(btn);
-  }
+  paintChips(els.chips, counts, state.filterKey);
 }
 
 function renderEmptyState() {
@@ -712,7 +734,8 @@ function renderGrid() {
     liveJobsByAppid,
   );
   state.visibleAppids = new Set(list.map((g) => g.appid));
-  els.grid.className = ("grid " + (LAYOUT_CLASS[state.layout] || "")).trim();
+  // `selecting` shows the pick circles (css/kit.css, Library block).
+  els.grid.className = ["grid", LAYOUT_CLASS[state.layout], state.selecting ? "selecting" : ""].filter(Boolean).join(" ");
   els.grid.replaceChildren();
 
   if (list.length === 0) {
@@ -738,7 +761,7 @@ function renderGrid() {
 
 function setButtonEnabled(btn, enabled, label) {
   btn.disabled = !enabled;
-  btn.classList.toggle("primary", enabled);
+  btn.classList.toggle("pri", enabled);
   btn.textContent = label;
 }
 
@@ -823,7 +846,7 @@ const NOTICE_BUTTON_LABEL = {
 function renderOwnedNotice() {
   const owned = ownedLibrary.current();
   const notice = ownedNotice(owned);
-  const { ownedNote, ownedText, ownedSettingsBtn, ownedReloadBtn } = els;
+  const { statLine, ownedText, ownedSettingsBtn, ownedReloadBtn } = els;
   // The nodes are built once per mount (buildSection) and only UPDATED
   // here — never replaced — so a focused "Reload" button keeps focus across
   // its own reload cycle. The live region is the text span alone, and its
@@ -832,10 +855,10 @@ function renderOwnedNotice() {
   const text = notice ? notice.text : "";
   // The span itself is NEVER hidden (an empty span renders nothing): a
   // screen reader may ignore a live region that becomes visible in the same
-  // render as its new text (e.g. loaded OK -> reload fails). Only the outer
-  // <p> is hidden.
+  // render as its new text (e.g. loaded OK -> reload fails). Only the whole status line
+  // is hidden, and only when every part of it is empty (syncStatLine).
   if (ownedText.textContent !== text) ownedText.textContent = text;
-  ownedNote.classList.toggle("warn", !!(notice && notice.warn));
+  statLine.classList.toggle("warn", !!(notice && notice.warn));
 
   const actions = notice ? notice.actions : owned.status === OWNED_STATUS.READY ? [NOTICE_ACTION.RELOAD] : [];
   ownedSettingsBtn.hidden = !actions.includes(NOTICE_ACTION.SETTINGS);
@@ -843,7 +866,7 @@ function renderOwnedNotice() {
   // aria-disabled, not `disabled`: a disabled button drops focus to <body>.
   // The click handler checks the loader state itself.
   ownedReloadBtn.setAttribute("aria-disabled", String(!!owned.loading));
-  ownedNote.hidden = !text && ownedSettingsBtn.hidden && ownedReloadBtn.hidden;
+  syncStatLine();
 }
 
 function noticeButton(action) {
@@ -901,11 +924,6 @@ function currentSort() {
   });
 }
 
-const SORT_ASC_SVG =
-  '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 16V4M5 9l5-5 5 5"/></svg>';
-const SORT_DESC_SVG =
-  '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 4v12M5 11l5 5 5-5"/></svg>';
-
 /** Paint the sort control from `currentSort()` (options, selection, toggle). */
 function renderSortControl() {
   const { sortSelect, sortDirBtn } = els;
@@ -954,20 +972,25 @@ function el(tag, cls, text) {
   return n;
 }
 
-/** Paint the metadata filter panel (hidden when no game has metadata). */
+/** Without metadata on any game the popover says so instead of offering
+ * filters that could only hide everything. */
+const NO_META_TEXT =
+  "No game in this library carries store metadata yet, so there is nothing to filter by.";
+
+/** Paint the metadata filter panel. The Filters button is always visible
+ * (WP LIBRARY-2): without metadata the popover holds one note instead of
+ * the controls, and the button counts 0. */
 function renderMetaPanel() {
   const panel = els.metaPanel;
   if (!panel) return;
   const available = metaAvailable(state.rawGames);
-  // The panel lives in the Filters popover (its own open/closed state is
-  // the disclosure's); only the whole control hides without metadata.
-  els.filtersWrap.hidden = !available;
+  paintFiltersButton();
   if (!available) {
-    els.filtersDisclosure.close();
-    panel.replaceChildren();
+    const note = el("p", "lib-meta-note", NO_META_TEXT);
+    note.dataset.role = "no-meta";
+    panel.replaceChildren(note);
     return;
   }
-  paintFiltersButton();
   // The panel is rebuilt on every change; keep keyboard focus on the same
   // control (the year inputs fire `change` on blur, so they are left alone).
   const focused = panel.contains(document.activeElement) ? document.activeElement : null;
@@ -984,7 +1007,7 @@ function renderMetaPanel() {
   cats.setAttribute("role", "group");
   cats.setAttribute("aria-label", FILTER_LABELS.category);
   for (const o of CATEGORY_OPTIONS) {
-    const b = el("button", "chip", o.label);
+    const b = el("button", "fchip", o.label);
     b.type = "button";
     b.dataset.cat = o.key;
     b.setAttribute("aria-pressed", String(f.categories.includes(o.key)));
@@ -1080,13 +1103,11 @@ function renderMetaPanel() {
   }
 }
 
-/** Filters button: label stays "Filters", the badge carries the count. */
+/** Filters button: label stays "Filters", the count is always shown (0
+ * included, WP LIBRARY-2). Without metadata nothing can be active. */
 function paintFiltersButton() {
-  const n = activeFilterCount(state.metaFilter);
-  els.filtersCount.textContent = n > 0 ? String(n) : "";
-  els.filtersCount.hidden = n === 0;
-  els.filtersBtn.classList.toggle("on", n > 0);
-  els.filtersBtn.setAttribute("aria-label", n > 0 ? `Filters, ${n} active` : "Filters");
+  const active = metaAvailable(state.rawGames) ? activeFilterCount(state.metaFilter) : 0;
+  paintFiltersCount(els, active, (n) => (n > 0 ? `Filters, ${n} active` : "Filters"));
 }
 
 function setSort(next) {
@@ -1282,224 +1303,50 @@ function reportDeleteResults(results) {
 }
 
 // ---------------------------------------------------------------------
-// Static DOM construction (rebuilt fresh on every mount — see mounted())
+// Static DOM construction (rebuilt fresh on every mount — see mounted());
+// the head, toolbar row and status line come from
+// components/library-toolbar.js, this file wires them.
 // ---------------------------------------------------------------------
-
-// Takes the label from `LAYOUT_LABEL[layoutKey]` itself (Opus review
-// nitpick, WP 4e.2 fix round) rather than a separately-passed `title`
-// string: the three call sites used to spell "Comfortable"/"Compact"/"List"
-// out a second time by hand, with nothing pinning the two copies equal — a
-// wording change to `LAYOUT_LABEL` (D-3's whole point) could drift from the
-// segmented control's own title/aria-label with no test catching it. One
-// source of truth removes the drift surface entirely.
-function segButton(layoutKey, svgMarkup) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.dataset.layout = layoutKey;
-  const title = LAYOUT_LABEL[layoutKey];
-  btn.title = title;
-  btn.setAttribute("aria-label", title);
-  btn.setAttribute("aria-pressed", String(state.layout === layoutKey));
-  // Static, non-interpolated decorative markup only (no user data ever
-  // flows through this helper) — same trust level as the literal SVGs
-  // already inline in index.html's nav.
-  btn.innerHTML = svgMarkup;
-  return btn;
-}
 
 function buildSection() {
   document.body.classList.toggle("selecting", state.selecting);
 
+  // `kit`: this page composes from css/kit.css (ADR-0028, WP LIBRARY-2).
   const section = document.createElement("section");
-  section.className = "view view-library";
+  section.className = "view view-library kit";
 
-  const head = document.createElement("div");
-  head.className = "lib-head";
-  const titles = document.createElement("div");
-  const h1 = document.createElement("h1");
-  h1.textContent = "Library";
-  const sub = document.createElement("span");
-  sub.className = "lib-sub";
-  titles.append(h1, sub);
-
-  const tools = document.createElement("div");
-  tools.className = "lib-tools";
-
-  const layoutSegs = document.createElement("div");
-  layoutSegs.className = "segs";
-  layoutSegs.setAttribute("role", "group");
-  layoutSegs.setAttribute("aria-label", "Library layout");
-  layoutSegs.append(
-    segButton(
-      "grid2",
-      '<svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor"><rect x="2" y="3" width="6" height="12" rx="1.5"/><rect x="10" y="3" width="6" height="12" rx="1.5"/></svg>',
-    ),
-    segButton(
-      "grid3",
-      '<svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor"><rect x="2" y="3" width="3.6" height="12" rx="1.2"/><rect x="7.2" y="3" width="3.6" height="12" rx="1.2"/><rect x="12.4" y="3" width="3.6" height="12" rx="1.2"/></svg>',
-    ),
-    segButton(
-      "list",
-      '<svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor"><rect x="2" y="3.4" width="14" height="2.6" rx="1.3"/><rect x="2" y="7.7" width="14" height="2.6" rx="1.3"/><rect x="2" y="12" width="14" height="2.6" rx="1.3"/></svg>',
-    ),
-  );
-
-  // WP LIBRARY-1: a labelled button replaces the permanent long-press hint
-  // under the grid (long-press / right-click on a card still select).
-  const selectBtn = document.createElement("button");
-  selectBtn.type = "button";
-  selectBtn.className = "btn sm lib-select";
-  selectBtn.title = "Select games";
-  selectBtn.setAttribute("aria-label", "Select games");
-  selectBtn.innerHTML =
-    '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="3.5"/><path d="m6.4 10.2 2.4 2.5 4.8-5"/></svg>';
-  selectBtn.append(document.createTextNode(" Select"));
-
-  // WP LIBRARY-1: the metadata filters live in a popover behind one button.
-  const filtersWrap = document.createElement("div");
-  filtersWrap.className = "lib-filtersbtn";
-  filtersWrap.hidden = true;
-  const filtersBtn = document.createElement("button");
-  filtersBtn.type = "button";
-  filtersBtn.className = "btn sm";
-  filtersBtn.setAttribute("aria-haspopup", "true");
-  filtersBtn.setAttribute("aria-label", "Filters");
-  filtersBtn.innerHTML =
-    '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 5h14M6 10h8M8.5 15h3"/></svg>';
-  filtersBtn.append(document.createTextNode(" Filters"));
-  const filtersCount = document.createElement("span");
-  filtersCount.className = "fcount";
-  filtersCount.setAttribute("aria-hidden", "true");
-  filtersCount.hidden = true;
-  filtersBtn.appendChild(filtersCount);
-  const metaPanel = document.createElement("div");
-  metaPanel.className = "lib-meta pop";
-  metaPanel.setAttribute("role", "group");
-  metaPanel.setAttribute("aria-label", "Metadata filters");
-  metaPanel.hidden = true;
-  filtersWrap.append(filtersBtn, metaPanel);
-  const filtersDisclosure = createDisclosure({ trigger: filtersBtn, panel: metaPanel });
-
-  // WP LIB-SORT: option select plus an ascending/descending toggle.
-  const sortWrap = document.createElement("div");
-  sortWrap.className = "lib-sort";
-  sortWrap.setAttribute("role", "group");
-  sortWrap.setAttribute("aria-label", "Sort library");
-  const sortSelect = document.createElement("select");
-  sortSelect.className = "lib-sort-sel";
-  sortSelect.setAttribute("aria-label", SORT_LABEL);
-  const sortDirBtn = document.createElement("button");
-  sortDirBtn.type = "button";
-  sortDirBtn.className = "iconbtn lib-sort-dir";
-  sortWrap.append(sortSelect, sortDirBtn);
-
-  tools.append(sortWrap, layoutSegs, filtersWrap, selectBtn);
-
-  // "Check & update all cached games" (Phase 4c, WP 4c-web) — a plain
-  // labeled button, not an icon (module header: the visible wording IS the
-  // honesty guarantee — "Check & update", never "Check" — so this cannot be
-  // reduced to a glyph + aria-label the way the icon buttons above are).
-  // WP WEB-FIX-UPD-VIS (user layout, 2026-10-13): both check buttons sit at
-  // the right end of the toolbar row (`.lib-bar`: search, chips, buttons),
-  // no longer in a full-width row of their own. "Check updates" is the
-  // primary (accent) button: it only asks, never downloads. "Check &
-  // update" keeps the neutral filled `.btn` look so the one that DOWNLOADS
-  // never reads as the default action.
-  const checkUpdateBtn = document.createElement("button");
-  checkUpdateBtn.type = "button";
-  checkUpdateBtn.dataset.action = "check-and-update";
-  const startsBusy = checkAndUpdateAction.isInFlight();
-  checkUpdateBtn.disabled = startsBusy;
-  checkUpdateBtn.textContent = startsBusy ? CHECK_UPDATE_BUSY_LABEL : CHECK_UPDATE_LABEL;
-  // WP UPD-2: "Check updates" (oracle only, no download), hidden until
-  // GET /v1/updates/status answered (paintUpdateCheck).
-  const checkUpdatesBtn = document.createElement("button");
-  checkUpdatesBtn.type = "button";
-  checkUpdatesBtn.className = "btn primary sm";
-  checkUpdatesBtn.dataset.action = "check-updates";
-  checkUpdatesBtn.textContent = CHECK_UPDATES_LABEL;
-  checkUpdatesBtn.hidden = true;
-  // WP LIBRARY-1: one split button in the header. The primary only asks;
-  // the one that DOWNLOADS ("Check & update all cached games", unchanged
-  // wording) is a menu entry behind the caret, never the default action.
-  checkUpdateBtn.className = "menuitem";
-  checkUpdateBtn.setAttribute("role", "menuitem");
-  const checkSplit = document.createElement("div");
-  checkSplit.className = "lib-split solo";
-  const splitMore = document.createElement("button");
-  splitMore.type = "button";
-  splitMore.className = "btn primary sm split-more";
-  splitMore.setAttribute("aria-haspopup", "menu");
-  // Starts solo (the primary is hidden until the status answers); see
-  // paintUpdateCheck for the label per state.
-  splitMore.setAttribute("aria-label", "Updates, more actions");
-  splitMore.title = "Updates, more actions";
-  const splitLbl = document.createElement("span");
-  splitLbl.className = "split-lbl";
-  splitLbl.textContent = "Updates";
-  const splitCaret = document.createElement("span");
-  splitCaret.className = "split-caret";
-  splitCaret.innerHTML =
-    '<svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg>';
-  splitMore.append(splitLbl, splitCaret);
-  const splitMenu = document.createElement("div");
-  splitMenu.className = "pop menu";
-  splitMenu.setAttribute("role", "menu");
-  splitMenu.setAttribute("aria-label", "Update actions");
-  splitMenu.appendChild(checkUpdateBtn);
-  checkSplit.append(checkUpdatesBtn, splitMore, splitMenu);
-  const splitDisclosure = createDisclosure({ trigger: splitMore, panel: splitMenu, menu: true });
-  head.append(titles, checkSplit);
-  // The status lines under the toolbar row (small text): the UPD-2 "Updates
-  // last checked …" line and the WP WEB-FEAT-1 owned-list notice.
-  const statusBlock = document.createElement("div");
-  statusBlock.className = "lib-status";
-  const updLine = document.createElement("p");
-  updLine.className = "lib-upd";
-  updLine.hidden = true;
-  statusBlock.appendChild(updLine);
-  // WP WEB-FEAT-1: the owned-list status line (and its Reload / Open
-  // Settings buttons).
-  const ownedNote = document.createElement("p");
-  ownedNote.className = "lib-owned";
-  ownedNote.hidden = true;
-  const ownedText = document.createElement("span");
-  ownedText.className = "lib-owned-text";
-  ownedText.setAttribute("role", "status");
+  // "Check & update all cached games" (Phase 4c, WP 4c-web): its visible
+  // wording IS the honesty guarantee ("Check & update", never "Check"), so
+  // it stays a labelled menu entry, never a glyph. "Check updates" (WP
+  // UPD-2, oracle only, never a download) is the primary half of the split
+  // button (WP LIBRARY-1); the entry that DOWNLOADS sits behind the caret.
   const ownedSettingsBtn = noticeButton(NOTICE_ACTION.SETTINGS);
   const ownedReloadBtn = noticeButton(NOTICE_ACTION.RELOAD);
-  ownedNote.append(ownedText, ownedSettingsBtn, ownedReloadBtn);
-  statusBlock.appendChild(ownedNote);
+  const startsBusy = checkAndUpdateAction.isInFlight();
+  const t = buildLibraryToolbar({
+    query: state.query,
+    layout: state.layout,
+    layoutLabels: LAYOUT_LABEL,
+    checkUpdatesLabel: CHECK_UPDATES_LABEL,
+    checkAndUpdateLabel: startsBusy ? CHECK_UPDATE_BUSY_LABEL : CHECK_UPDATE_LABEL,
+    settingsBtn: ownedSettingsBtn,
+    reloadBtn: ownedReloadBtn,
+  });
+  t.checkAndUpdateBtn.disabled = startsBusy;
+  // Until GET /v1/updates/status answers, the primary half shows as a
+  // loading, aria-disabled button (paintUpdateCheck), never caret-only.
+  t.checkUpdatesBtn.setAttribute("aria-disabled", "true");
+  t.split.classList.add("loading");
+  const splitDisclosure = createDisclosure({ trigger: t.more, panel: t.menu, menu: true });
 
-  const searchWrap = document.createElement("div");
-  searchWrap.className = "search";
-  const mag = document.createElement("span");
-  mag.className = "mag";
-  mag.setAttribute("aria-hidden", "true");
-  mag.innerHTML =
-    '<svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8.8" cy="8.8" r="5.6"/><path d="m13 13 4 4"/></svg>';
-  const searchInput = document.createElement("input");
-  searchInput.type = "text";
-  searchInput.id = "lib-q";
-  searchInput.inputMode = "search";
-  searchInput.placeholder = "Search your library";
-  searchInput.autocomplete = "off";
-  searchInput.spellcheck = false;
-  searchInput.setAttribute("aria-label", "Search library by title");
-  searchInput.value = state.query;
-  const qClear = document.createElement("button");
-  qClear.type = "button";
-  qClear.className = "qx";
-  qClear.setAttribute("aria-label", "Clear search");
-  qClear.innerHTML =
-    '<svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>';
-  searchWrap.append(mag, searchInput, qClear);
-  searchWrap.classList.toggle("filled", state.query.length > 0);
+  // The metadata filters live in a popover behind the always-visible
+  // Filters button (WP LIBRARY-1, LIBRARY-2).
+  const { filtersBtn, metaPanel } = t;
+  filtersBtn.setAttribute("aria-haspopup", "true");
+  metaPanel.setAttribute("aria-label", "Metadata filters");
+  const filtersDisclosure = createDisclosure({ trigger: filtersBtn, panel: metaPanel });
 
-  const chips = document.createElement("div");
-  chips.className = "chips";
-  chips.setAttribute("role", "group");
-  chips.setAttribute("aria-label", "Filter library");
+  t.sortSelect.setAttribute("aria-label", SORT_LABEL);
 
   const grid = document.createElement("div");
   grid.className = "grid";
@@ -1535,7 +1382,7 @@ function buildSection() {
   bulkSecondary.style.display = "none";
   const bulkPrimary = document.createElement("button");
   bulkPrimary.type = "button";
-  bulkPrimary.className = "btn primary sm";
+  bulkPrimary.className = "btn pri sm";
   bulkPrimary.textContent = "Download";
   bulkBtns.append(bulkDelete, bulkSecondary, bulkPrimary);
   bulkBar.append(bulkHead, bulkNote, bulkBtns);
@@ -1545,44 +1392,34 @@ function buildSection() {
   // block near the top of this file (WP 4a.8: it must be a `document.body`
   // sibling of `#app`, not a child of this per-mount `<section>`, or
   // marking `#app` inert would also make the dialog itself inert).
-  // WP WEB-FIX-UPD-VIS: one toolbar row — search and chips (`.lib-filters`)
-  // on the left, the two check buttons on the right; css/app.css wraps the
-  // buttons onto their own line when the row is too narrow. DOM order is
-  // the visual and Tab order.
-  const filters = document.createElement("div");
-  filters.className = "lib-filters";
-  filters.append(searchWrap, chips);
-  const bar = document.createElement("div");
-  bar.className = "lib-bar";
-  bar.append(filters, tools);
-
-  // Section child order: head, bar, status, grid, bulk.
-  section.append(head, bar, statusBlock, grid, bulkBar);
+  // Section child order: head, toolbar row, status line, grid, bulk bar.
+  // DOM order is the visual and Tab order.
+  section.append(t.head, t.bar, t.stat, grid, bulkBar);
 
   els = {
     metaPanel,
-    filtersWrap,
+    filtersWrap: t.filtersWrap,
     filtersBtn,
-    filtersCount,
+    filtersCount: t.filtersCount,
     filtersDisclosure,
-    checkSplit,
+    checkSplit: t.split,
     splitDisclosure,
-    sub,
-    ownedNote,
-    ownedText,
+    sub: t.sub,
+    statLine: t.stat,
+    ownedText: t.ownedText,
     ownedSettingsBtn,
     ownedReloadBtn,
-    layoutSegs,
-    sortSelect,
-    sortDirBtn,
-    selectBtn,
-    checkUpdateBtn,
-    checkUpdatesBtn,
-    updLine,
-    searchWrap,
-    searchInput,
-    qClear,
-    chips,
+    layoutSegs: t.layoutSegs,
+    sortSelect: t.sortSelect,
+    sortDirBtn: t.sortDirBtn,
+    selectBtn: t.selectBtn,
+    checkUpdateBtn: t.checkAndUpdateBtn,
+    checkUpdatesBtn: t.checkUpdatesBtn,
+    updLine: t.updLine,
+    searchWrap: t.searchWrap,
+    searchInput: t.searchInput,
+    qClear: t.qClear,
+    chips: t.chips,
     grid,
     bulkBar,
     bulkCount,
@@ -1593,6 +1430,9 @@ function buildSection() {
     bulkSecondary,
     bulkPrimary,
   };
+  const { searchInput, qClear, chips, layoutSegs, sortSelect, sortDirBtn, selectBtn } = els;
+  const checkUpdateBtn = els.checkUpdateBtn;
+  const checkUpdatesBtn = els.checkUpdatesBtn;
 
   // ---- static listeners (wired once per mount — see mounted()) ----
   searchInput.addEventListener("input", (e) => applySearch(e.target.value));
@@ -1605,7 +1445,7 @@ function buildSection() {
   qClear.addEventListener("click", clearSearch);
 
   chips.addEventListener("click", (e) => {
-    const btn = e.target.closest(".chip");
+    const btn = e.target.closest(".fchip");
     if (!btn) return;
     state.filterKey = btn.dataset.f;
     fullRender();

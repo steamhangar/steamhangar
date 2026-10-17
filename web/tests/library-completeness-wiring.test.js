@@ -103,7 +103,8 @@ const fullWord = (s, appid) => {
   const full = st.querySelector(".stfull");
   return full ? full.textContent : st.textContent;
 };
-const pillKind = (s, appid) => card(s, appid).querySelector(".cappill .sic").className;
+// WP LIBRARY-2: the card shows its kind as the status dot's tone (`tx-<kind>`).
+const pillKind = (s, appid) => card(s, appid).querySelector(".stt .dot").className;
 
 test("MUTATION TARGET -- a new figure on the next games poll rebuilds that card (Current -> Partially cached -> Current)", async () => {
   pathname = "/library";
@@ -113,24 +114,24 @@ test("MUTATION TARGET -- a new figure on the next games poll rebuilds that card 
   try {
     await until(() => s.querySelectorAll(".card").length >= 2, "cards on screen");
     assert.equal(fullWord(s, 10), "Current");
-    assert.match(pillKind(s, 10), /\bk-cached\b/);
+    assert.match(pillKind(s, 10), /\btx-cached\b/);
 
     server.games = [vaultGame(10, "Vault Ten", { cache_complete_pct: 61, cache_missing_chunks: 40 }), vaultGame(30, "Vault Thirty")];
     store.refreshNow();
     await until(() => fullWord(s, 10) === "Partially cached 61%", "partial word painted");
-    assert.match(pillKind(s, 10), /\bk-partial\b/);
+    assert.match(pillKind(s, 10), /\btx-partial\b/);
     assert.equal(card(s, 10).dataset.ck, "partial:61");
     assert.equal(fullWord(s, 30), "Current", "the other card is untouched");
 
     server.games = [vaultGame(10, "Vault Ten", { cache_complete_pct: null, cache_missing_chunks: null }), vaultGame(30, "Vault Thirty")];
     store.refreshNow();
     await until(() => fullWord(s, 10) === "Cached · not verified", "unknown painted");
-    assert.match(pillKind(s, 10), /\bk-unverified\b/);
+    assert.match(pillKind(s, 10), /\btx-unverified\b/);
 
     server.games = [vaultGame(10, "Vault Ten"), vaultGame(30, "Vault Thirty")];
     store.refreshNow();
     await until(() => fullWord(s, 10) === "Current", "back to Current");
-    assert.match(pillKind(s, 10), /\bk-cached\b/);
+    assert.match(pillKind(s, 10), /\btx-cached\b/);
   } finally {
     store.stop();
   }

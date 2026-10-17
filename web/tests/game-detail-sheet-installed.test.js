@@ -76,7 +76,7 @@ test("MUTATION TARGET -- render() appends buildInstalledSection(gameLike) into c
   assert.ok(body, "render() not found in game-detail-sheet.js — did it move or get renamed?");
   assert.match(
     body,
-    /const installedSection = buildInstalledSection\(gameLike\);\s*\n\s*if \(installedSection\) overview\.append\(installedSection\);/,
+    /const installedSection = buildInstalledSection\(gameLike\);\s*\n\s*if \(installedSection\) left\.append\(installedSection\);/,
     "render() no longer builds+appends the 'Installed on' section — the whole feature would silently disappear from the sheet",
   );
 });

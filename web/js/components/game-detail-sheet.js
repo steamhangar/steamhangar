@@ -68,9 +68,9 @@
  * and covered headlessly in web/tests/.
  *
  * **Header/hero art (WP 4h.3).** `components/header-art.js`'s
- * `buildHeaderArt(appid)` is appended once, first, in the loaded-detail
- * success branch of `render()` only (not the loading/error/not-tracked
- * states — nothing to show a hero for yet). That module owns the graceful-
+ * `buildHeaderArt(appid)` is appended into the hero band in the loaded-detail
+ * success branch of `render()` only (the loading/error/not-tracked states
+ * show the band's gradient alone). That module owns the graceful-
  * absence and no-layout-shift discipline; this file only decides WHEN to
  * build one (every full `render()`, same treatment `buildHeader()`'s mini
  * cover already gets — never touched by `patchVolatile()`, so a poll tick
@@ -96,13 +96,26 @@
  * group (the server's `group_size_bytes`) and a "Retry download"
  * button per failed package. The package rows' structure is part of the
  * structural key; their sizes are patched.
+ *
+ * **Anatomy (WP LIBRARY-2, docs/design/rc20/library.html + kit).** The sheet
+ * carries `kit game-detail` and is ~920px wide (`--w-sheet-l`). A permanent
+ * hero band (`.gd-hero`: the fallback-hue gradient, the header art from WP
+ * 4h.3 now layered over it instead of growing above the header) runs full
+ * bleed; an X button (`.gd-x`) closes the sheet from its top-right corner
+ * (the bottom "Close" button is gone). The header row `.gd-head` holds the
+ * mini cover overlapping the hero, the title, "App N" with the status pill
+ * (components/pill.js) and the actions `.gd-acts` (Verify, then the primary
+ * action). Overview is two columns: a 2x2 facts grid (Size / Last
+ * downloaded / Confirmed current / Cache), "Installed on" and About on the
+ * left, Content packages on the right. Depots and Maintenance are unchanged.
  */
 
 import { store } from "../store-singleton.js";
 import { api } from "../api.js";
 import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
 import { showToast } from "./toast.js";
-import { createStatusIcon, STATUS_LABEL } from "./status-icon.js";
+import { STATUS_LABEL } from "./status-icon.js";
+import { createPill } from "./pill.js";
 import { createSheetDialog } from "./sheet-dialog.js";
 import { buildHeaderArt } from "./header-art.js";
 import { onViewChange } from "../router.js";
@@ -252,18 +265,30 @@ let lastStructuralKey = null;
 // sheet-dialog.js's header for why this is a plain, static modifier class
 // and not a second state model.
 const dialog = createSheetDialog({ ariaLabel: "Game detail", variant: "center" });
+// WP LIBRARY-2: the sheet composes from css/kit.css (ADR-0028) and is
+// docs/design/rc20/library.html's detail sheet: ~920px wide
+// (`--w-sheet-l`), a permanent hero band, an X close button top-right
+// instead of a bottom "Close" button.
+dialog.sheet.classList.add("kit", "game-detail");
 
 const contentEl = document.createElement("div");
+contentEl.className = "gd";
 const gcSectionEl = document.createElement("div");
 const closeBtn = document.createElement("button");
 closeBtn.type = "button";
-closeBtn.className = "btn wide ghost";
-closeBtn.textContent = "Close";
+closeBtn.className = "gd-x";
+closeBtn.setAttribute("aria-label", "Close");
+closeBtn.title = "Close";
+closeBtn.innerHTML =
+  '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>';
 closeBtn.addEventListener("click", () => closeDetail());
 // `gcSectionEl` lives inside the Maintenance tab (render() places it); it is
 // a persistent element because the GC flow repaints it on its own.
 gcSectionEl.className = "detail-box";
-dialog.body.append(contentEl, closeBtn);
+dialog.body.append(contentEl);
+// Persistent and outside the scrolling body, so it stays reachable while
+// the sheet scrolls and in every state (loading, error, not tracked).
+dialog.sheet.appendChild(closeBtn);
 
 /** Selected tab of the open sheet; survives the structural re-renders a poll
  * tick can cause, reset to Overview on every open(). */
@@ -791,20 +816,49 @@ function computeStructuralKey() {
 // Rendering — full rebuild
 // ---------------------------------------------------------------------
 
-function confirmedCurrentText(lastPrefillAt, lastManifestCheck) {
+/** The "Confirmed current" fact's value (WP LIBRARY-2: the 2x2 facts grid
+ * carries the label, so the value is the time alone). Honest per
+ * lib/detail-wording.js: never confirmed reads "Not yet". */
+function confirmedCurrentValue(lastPrefillAt, lastManifestCheck) {
   const wording = confirmedCurrentWording(lastPrefillAt, lastManifestCheck);
-  if (wording === CONFIRMED_CURRENT_WORDING.NEVER_CONFIRMED) return "Not yet confirmed current.";
+  if (wording === CONFIRMED_CURRENT_WORDING.NEVER_CONFIRMED) return "Not yet";
   const when = formatTimestamp(lastManifestCheck);
   if (wording === CONFIRMED_CURRENT_WORDING.CONFIRMED_BEFORE_CACHE_CLEARED) {
-    return `Confirmed current at ${when} (before the cache was cleared).`;
+    return `${when} (before the cache was cleared)`;
   }
-  return `Confirmed current at ${when}.`;
+  return when;
+}
+
+/** The "Last downloaded" fact's value. */
+function lastDownloadedValue(lastPrefillAt) {
+  return lastPrefillAt ? formatTimestamp(lastPrefillAt) : "Never";
+}
+
+/** The "Size" fact's value. */
+function sizeValue(gameLike) {
+  return formatBytesGB(gameLike.size_bytes) || "Unknown";
+}
+
+/**
+ * The permanent hero band (WP LIBRARY-2): full bleed, a gradient from the
+ * game's fallback hues (the same pair its cover tile uses). render() layers
+ * the Steam header art over it once the game has loaded
+ * (components/header-art.js removes its own wrapper on failure, leaving the
+ * gradient).
+ */
+function buildHero() {
+  const { h1, h2 } = fallbackHues(state.appid);
+  const hero = document.createElement("div");
+  hero.className = "gd-hero";
+  hero.style.setProperty("--h1", String(h1));
+  hero.style.setProperty("--h2", String(h2));
+  return hero;
 }
 
 function buildMiniCover(appid, coverUrl, cachedUrl) {
   const { h1, h2 } = fallbackHues(appid);
   const cap = document.createElement("div");
-  cap.className = "cap";
+  cap.className = "cap gd-mini";
   cap.style.setProperty("--h1", String(h1));
   cap.style.setProperty("--h2", String(h2));
   const img = document.createElement("img");
@@ -818,9 +872,16 @@ function buildMiniCover(appid, coverUrl, cachedUrl) {
   return cap;
 }
 
+/**
+ * The header row under the hero (WP LIBRARY-2): the mini cover overlapping
+ * the hero, the title with "App N" and the status pill. render() appends
+ * the action group (Verify + the primary action) as its last child.
+ * @param {object} gameLike
+ * @param {object|undefined} liveJob
+ */
 function buildHeader(gameLike, liveJob) {
   const dhead = document.createElement("div");
-  dhead.className = "dhead";
+  dhead.className = "dhead gd-head";
   // WP API-FIX-5: the detail's server-resolved cover, else the list row's.
   // WP D10: plus vault-api's stored copy, same precedence.
   dhead.appendChild(
@@ -832,47 +893,42 @@ function buildHeader(gameLike, liveJob) {
   );
 
   const info = document.createElement("div");
+  info.className = "gd-id";
   const h2 = document.createElement("h2");
   // WP API-FIX-4: a tool app's name comes from the server's tool list.
   h2.textContent = sheetTitle(gameLike);
-  const appidLine = document.createElement("div");
+  const sub = document.createElement("div");
+  sub.className = "gd-sub";
+  const appidLine = document.createElement("span");
   appidLine.className = "appid";
   appidLine.textContent = `App ${state.appid}`;
-  info.append(h2, appidLine);
-
-  info.appendChild(buildDetailStatusRow(currentUpdateRow() || gameLike, dispKind(gameLike, liveJob)));
+  sub.append(appidLine, buildDetailStatusRow(currentUpdateRow() || gameLike, dispKind(gameLike, liveJob)));
+  info.append(h2, sub);
 
   dhead.appendChild(info);
   return dhead;
 }
 
 /**
- * The header's status icon and word. WP UPD-6 review fix: the same
- * "Update available" overlay as the Library card (orange refresh glyph,
- * `tx-stale` word) for a cached game whose row — the group row for a game
- * with packages — carries `update_available: true`. Exported for
- * web/tests/game-detail-sheet-update.test.js.
+ * The header's status pill (kit `.pill` via components/pill.js: the
+ * status-icon disc plus the word). WP UPD-6 review fix: the same "Update
+ * available" overlay as the Library card for a cached game whose row — the
+ * group row for a game with packages — carries `update_available: true`.
+ * Exported for web/tests/game-detail-sheet-update.test.js.
  * @param {object} row the game's row (or its group row)
  * @param {string} kind the game's dispKind
  * @returns {HTMLElement}
  */
 export function buildDetailStatusRow(row, kind) {
-  const statusRow = document.createElement("div");
-  statusRow.className = "detail-statusrow";
   // WP CACHE-COMPLETE-1c: the card's overlay (completeness after UPD-6).
   const display = cardDisplay(row, kind, STATUS_LABEL);
-  const statusIcon = createStatusIcon(display.icon, { size: "sm" });
-  // WP 4a.8 icon audit: the word right after this icon already says the
-  // same thing visibly — hide the icon's own sr-only label so it is not
-  // announced twice (same "avoid double announcement" posture as
-  // clients-sheet.js/notifications.js's status icons).
-  statusIcon.setAttribute("aria-hidden", "true");
-  statusRow.appendChild(statusIcon);
-  const word = document.createElement("span");
-  word.className = "tx-" + display.text;
-  word.textContent = display.word;
-  statusRow.appendChild(word);
-  return statusRow;
+  const pill = createPill({ kind: display.icon, text: display.word });
+  pill.dataset.text = display.text;
+  // WP 4a.8 icon audit: the word right after the disc already says the
+  // same thing visibly — hide the disc from assistive tech.
+  const icon = pill.querySelector(".sic");
+  if (icon) icon.setAttribute("aria-hidden", "true");
+  return pill;
 }
 
 /**
@@ -886,7 +942,7 @@ export function buildDetailStatusRow(row, kind) {
 export function buildUpdateNowButton(appids, onStart) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "btn primary sm detail-block";
+  btn.className = "btn pri";
   btn.dataset.role = "update-now";
   btn.textContent = UPDATE_NOW_LABEL;
   btn.dataset.appids = appids.join(",");
@@ -1031,35 +1087,50 @@ function syncUpdateDownloadedLine(el, gameLike) {
   el.hidden = !text;
 }
 
+/** One cell of the Overview's facts grid: an uppercase label and a value
+ * whose `data-role` patchVolatile writes. */
+function factCell(label, role, value) {
+  const cell = document.createElement("div");
+  cell.className = "gd-fact";
+  const k = document.createElement("div");
+  k.className = "k";
+  k.textContent = label;
+  const v = document.createElement("div");
+  v.className = "v";
+  v.dataset.role = role;
+  v.textContent = value;
+  cell.append(k, v);
+  return { cell, v };
+}
+
+/**
+ * The Overview's facts (WP LIBRARY-2): a 2x2 grid — Size, Last downloaded,
+ * Confirmed current, Cache — then the notes that only sometimes apply
+ * (damaged chunks, last update downloaded, the --force line) under it.
+ */
 function buildFactLines(gameLike) {
   const facts = document.createElement("div");
   facts.className = "facts detail-block";
+  const grid = document.createElement("div");
+  grid.className = "gd-facts";
+  facts.appendChild(grid);
 
-  const sizeLine = document.createElement("div");
-  sizeLine.dataset.role = "size";
-  sizeLine.textContent = formatBytesGB(gameLike.size_bytes) || "Size unknown";
-  facts.appendChild(sizeLine);
-
-  const lastDlLine = document.createElement("div");
-  lastDlLine.dataset.role = "lastdl";
-  lastDlLine.textContent = gameLike.last_prefill_at
-    ? `Last downloaded ${formatTimestamp(gameLike.last_prefill_at)}`
-    : "Never downloaded";
-  facts.appendChild(lastDlLine);
-
-  const confirmedLine = document.createElement("div");
-  confirmedLine.dataset.role = "confirmed";
-  confirmedLine.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
-  facts.appendChild(confirmedLine);
+  grid.appendChild(factCell("Size", "size", sizeValue(gameLike)).cell);
+  grid.appendChild(factCell("Last downloaded", "lastdl", lastDownloadedValue(gameLike.last_prefill_at)).cell);
+  grid.appendChild(
+    factCell("Confirmed current", "confirmed", confirmedCurrentValue(gameLike.last_prefill_at, gameLike.last_manifest_check))
+      .cell,
+  );
 
   // LIBRARY-DETAIL-1: the cache status stays visible on Overview (the Verify
-  // button lives in Maintenance). Distinct data-role from the Verify box's
-  // "complete-line" so neither copy shadows the other.
+  // button lives in Maintenance and the header). Distinct data-role from the
+  // Verify box's "complete-line" so neither copy shadows the other.
   if (showsCompletenessBlock(gameLike, currentGroup())) {
-    const cacheLine = document.createElement("div");
+    const { cell, v: cacheLine } = factCell("Cache", "cache-status-cell", "");
     cacheLine.dataset.role = "cache-status";
     cacheLine.textContent = completenessLine(gameLike);
-    facts.appendChild(cacheLine);
+    cacheLine.classList.add("long");
+    grid.appendChild(cell);
     if (isDamagedOnly(gameLike)) {
       const damaged = document.createElement("div");
       damaged.className = "tx-partial";
@@ -1252,7 +1323,7 @@ async function withButtonBusy(btn, fn) {
 function actionButton(label, variant, handler) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "btn sm" + (variant ? " " + variant : "");
+  btn.className = "btn" + (variant ? " " + variant : "");
   btn.textContent = label;
   btn.addEventListener("click", () => withButtonBusy(btn, handler));
   return btn;
@@ -1271,10 +1342,10 @@ async function runJobControl(action, successMessage) {
 function buildJobControlRow(job) {
   const actions = detailJobActions(job);
   const row = document.createElement("div");
-  row.className = "jobacts detail-block";
+  row.className = "jobacts";
   if (actions.has(DETAIL_JOB_ACTION.RESUME)) {
     row.appendChild(
-      actionButton("Resume", "primary", () => runJobControl(() => api.resumeJob(job.id), "Resuming — back in the queue")),
+      actionButton("Resume", "pri", () => runJobControl(() => api.resumeJob(job.id), "Resuming — back in the queue")),
     );
   }
   if (actions.has(DETAIL_JOB_ACTION.PAUSE)) {
@@ -1289,7 +1360,7 @@ function buildJobControlRow(job) {
 function buildDownloadButton(action) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "btn primary sm detail-block";
+  btn.className = "btn pri";
   btn.textContent = action.title;
   btn.addEventListener("click", () =>
     withButtonBusy(btn, async () => {
@@ -1592,20 +1663,22 @@ function render() {
     return;
   }
 
+  // WP LIBRARY-2: the hero band is permanent (gradient while loading, for
+  // an error and for an untracked app; header art over it once loaded).
   if (state.notTracked) {
-    contentEl.append(renderNotTracked());
+    contentEl.append(buildHero(), bodyWrap(renderNotTracked()));
     gcSectionEl.replaceChildren();
     lastStructuralKey = null;
     return;
   }
   if (state.loadError) {
-    contentEl.append(renderLoadError());
+    contentEl.append(buildHero(), bodyWrap(renderLoadError()));
     gcSectionEl.replaceChildren();
     lastStructuralKey = null;
     return;
   }
   if (!state.detail) {
-    contentEl.append(renderLoading());
+    contentEl.append(buildHero(), bodyWrap(renderLoading()));
     gcSectionEl.replaceChildren();
     lastStructuralKey = null;
     return;
@@ -1615,35 +1688,48 @@ function render() {
   const liveJob = findLiveJob(state.jobs, state.appid);
   const trackedJob = findTrackedJob(state.jobs, state.appid);
 
-  contentEl.append(buildHeaderArt(state.appid));
-  contentEl.append(buildHeader(gameLike, liveJob));
+  const hero = buildHero();
+  hero.append(buildHeaderArt(state.appid));
+  contentEl.append(hero);
+  const head = buildHeader(gameLike, liveJob);
+  contentEl.append(head);
 
-  // The primary action (job controls, download or update) stays above the
-  // tabs: it is about the game, not about one tab.
+  // The header row's actions (WP LIBRARY-2): Verify, then the primary
+  // action (job controls, download or update). They are about the game,
+  // not about one tab.
+  const acts = document.createElement("div");
+  acts.className = "gd-acts";
+  const headVerify = buildHeadVerifyButton(gameLike);
+  if (headVerify) acts.append(headVerify);
   const actions = buildPrimaryAction(gameLike, trackedJob);
-  if (actions) contentEl.append(actions);
+  if (actions) acts.append(actions);
+  if (acts.childNodes.length) head.append(acts);
 
-  // WP CARD-LAYOUT-1: everything about the GAME (store details, only when
-  // VAULT_STORE_DETAILS is on and the store knew the app) comes first on the
-  // Overview tab; everything about the HANGAR (cache facts, installed on,
-  // packages) follows. Absent block: order unchanged.
+  // Overview, two columns (WP LIBRARY-2, library.html): left the facts
+  // grid, "Installed on" and About (store details, only when
+  // VAULT_STORE_DETAILS is on and the store knew the app); right the
+  // content packages. One column when there are none, or in a narrow sheet.
   const overview = document.createElement("div");
-  overview.className = "detail-panel";
+  overview.className = "detail-panel gd-ov";
+  const left = document.createElement("div");
+  left.className = "gd-col";
+  const right = document.createElement("div");
+  right.className = "gd-col";
   const storeBlock = buildStoreBlock();
-  if (storeBlock) overview.append(storeBlock);
   const toolNote = buildToolAppNote(gameLike);
-  if (toolNote) overview.append(toolNote);
+  if (toolNote) left.append(toolNote);
   const notOwnedNote = buildNotOwnedNote(gameLike);
-  if (notOwnedNote) overview.append(notOwnedNote);
-  overview.append(buildFactLines(gameLike));
+  if (notOwnedNote) left.append(notOwnedNote);
+  left.append(buildFactLines(gameLike));
 
   const installedSection = buildInstalledSection(gameLike);
-  if (installedSection) overview.append(installedSection);
+  if (installedSection) left.append(installedSection);
+  if (storeBlock) left.append(buildAboutSection(storeBlock));
 
   // WP TOOL-APPS-2c: the game's content packages.
   const group = currentGroup();
   if (group) {
-    overview.append(
+    right.append(
       buildPackagesSection(group, {
         groupSizeBytes: group.group_size_bytes,
         ...packageJobLookups(),
@@ -1651,6 +1737,9 @@ function render() {
       }),
     );
   }
+  overview.append(left);
+  if (right.childNodes.length) overview.append(right);
+  else overview.classList.add("one");
 
   const depotsPanel = document.createElement("div");
   depotsPanel.className = "detail-panel";
@@ -1671,11 +1760,57 @@ function render() {
       activeTab = id;
     },
   });
-  contentEl.append(tabs.tablist, overview, depotsPanel, maintenance);
+  const body = document.createElement("div");
+  body.className = "gd-body";
+  body.append(overview, depotsPanel, maintenance);
+  contentEl.append(tabs.tablist, body);
 
   renderGcSection();
 
   lastStructuralKey = computeStructuralKey();
+}
+
+/** The padded body under the hero for the loading / error / not-tracked
+ * states. */
+function bodyWrap(child) {
+  const body = document.createElement("div");
+  body.className = "gd-body gd-state";
+  body.append(child);
+  return body;
+}
+
+/** The "About" block of the Overview's left column: the store details
+ * under a section label. */
+function buildAboutSection(storeBlock) {
+  const wrap = document.createElement("div");
+  wrap.className = "detail-block gd-about";
+  const heading = document.createElement("h4");
+  heading.className = "sec";
+  heading.textContent = "About";
+  wrap.append(heading, storeBlock);
+  return wrap;
+}
+
+/**
+ * WP LIBRARY-2: the header's "Verify" — the same forced prefill as the
+ * Maintenance tab's Verify box (`POST /v1/prefill/verify`), offered when
+ * that box offers it.
+ * @param {object} gameLike
+ * @returns {HTMLButtonElement | null}
+ */
+function buildHeadVerifyButton(gameLike) {
+  const ids = currentVerifyAppids();
+  if (!ids.length || !showsCompletenessBlock(gameLike, currentGroup())) return null;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn";
+  btn.dataset.role = "head-verify";
+  btn.dataset.appids = ids.join(",");
+  btn.textContent = VERIFY_LABEL;
+  btn.setAttribute("aria-label", verifyAriaLabel(sheetTitle(gameLike)));
+  btn.title = VERIFY_HINT;
+  btn.addEventListener("click", () => withButtonBusy(btn, () => startSheetVerify(ids)));
+  return btn;
 }
 
 /** Patch only the volatile TEXT fields a games/jobs poll tick can change
@@ -1689,17 +1824,13 @@ function patchVolatile() {
   if (!gameLike) return;
 
   const sizeEl = contentEl.querySelector('[data-role="size"]');
-  if (sizeEl) sizeEl.textContent = formatBytesGB(gameLike.size_bytes) || "Size unknown";
+  if (sizeEl) sizeEl.textContent = sizeValue(gameLike);
 
   const lastDlEl = contentEl.querySelector('[data-role="lastdl"]');
-  if (lastDlEl) {
-    lastDlEl.textContent = gameLike.last_prefill_at
-      ? `Last downloaded ${formatTimestamp(gameLike.last_prefill_at)}`
-      : "Never downloaded";
-  }
+  if (lastDlEl) lastDlEl.textContent = lastDownloadedValue(gameLike.last_prefill_at);
 
   const confirmedEl = contentEl.querySelector('[data-role="confirmed"]');
-  if (confirmedEl) confirmedEl.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
+  if (confirmedEl) confirmedEl.textContent = confirmedCurrentValue(gameLike.last_prefill_at, gameLike.last_manifest_check);
 
   const updateDownloadedEl = contentEl.querySelector('[data-role="updatedl"]');
   if (updateDownloadedEl) syncUpdateDownloadedLine(updateDownloadedEl, gameLike);

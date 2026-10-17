@@ -132,12 +132,14 @@ async function until(pred, label, timeoutMs = 2000) {
 }
 
 const subText = (s) => s.querySelector(".lib-sub").textContent;
+// WP LIBRARY-2: the notice shares ONE status line (`.lib-stat`) with the
+// update-check text; the line hides only when every part of it is empty.
 const noticeText = (s) => {
-  const p = s.querySelector("p.lib-owned");
-  const span = p && p.querySelector(".lib-owned-text");
+  const line = s.querySelector(".lib-stat");
+  const span = line && line.querySelector(".lib-owned-text");
   // Pinned on every read: the live-region span is never hidden itself.
-  assert.equal(span.hidden === true, false, "the live-region span must never be hidden; hide the outer <p> only");
-  return p && !p.hidden ? span.textContent : "";
+  assert.equal(span.hidden === true, false, "the live-region span must never be hidden; hide the whole line only");
+  return line && !line.hidden ? span.textContent : "";
 };
 const cardAppids = (s) => s.querySelectorAll(".card").map((c) => Number(c.dataset.appid));
 const card = (s, appid) => s.querySelector(`.card[data-appid="${appid}"]`);
@@ -180,9 +182,9 @@ test("an owned-only card shows 'Not cached' and has NO quick-action button; a va
   const forty = card(s, 40);
   assert.equal(forty.querySelector(".state").textContent, "Not cached");
   assert.equal(forty.querySelector(".name").textContent, "Owned Forty");
-  assert.equal(forty.querySelectorAll("button.cappill").length, 0, "no card quick action for an owned-only game");
+  assert.equal(forty.querySelectorAll("button.icnact").length, 0, "no card quick action for an owned-only game");
   assert.equal(forty.querySelectorAll("button.icnact").length, 0);
-  assert.equal(card(s, 20).querySelectorAll("button.cappill").length, 1, "vault-known not-cached card unchanged");
+  assert.equal(card(s, 20).querySelectorAll("button.icnact").length, 1, "vault-known not-cached card unchanged");
 });
 
 test("MUTATION PIN (no relay polling): poll ticks never re-fetch the owned list; only view open and Reload do", async () => {
@@ -248,21 +250,22 @@ test("detail-only download: opening an owned-only card offers 'Download to cache
   assert.deepEqual(server.prefillBodies.at(-1), { appids: [40] });
 });
 
-test("layout: the notice lives in .lib-status, under the toolbar row (WP WEB-FIX-UPD-VIS)", async () => {
+test("layout: the notice lives in the ONE status line under the toolbar row (WP LIBRARY-2)", async () => {
   const s = await openLibrary();
   assert.deepEqual(
     s.children.map((c) => c.className),
-    ["lib-head", "lib-bar", "lib-status", "grid", "bulk"],
+    ["page-head lib-head", "lib-bar", "lib-stat", "grid", "bulk"],
   );
-  const row = s.querySelector(".lib-status");
-  assert.equal(row.querySelectorAll("p.lib-owned").length, 1);
+  const row = s.querySelector(".lib-stat");
+  assert.equal(row.querySelectorAll(".lib-owned-text").length, 1);
+  assert.equal(row.querySelectorAll(".lib-upd").length, 1, "the update-check text shares the line");
 });
 
-test("css: .lib-owned wraps anywhere and sets no width (WP WEB-FIX-3 phone rules)", async () => {
+test("css: the status line wraps anywhere and sets no width (WP WEB-FIX-3 phone rules)", async () => {
   const { readFileSync } = await import("node:fs");
-  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const m = /(^|\})\s*\.lib-owned\s*\{([^}]*)\}/.exec(css);
-  assert.ok(m, ".lib-owned rule missing");
+  const css = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const m = /(^|\})\s*\.kit \.lib-stat\s*\{([^}]*)\}/.exec(css);
+  assert.ok(m, ".kit .lib-stat rule missing");
   assert.match(m[2], /overflow-wrap:\s*anywhere/);
   assert.match(m[2], /min-width:\s*0/);
   assert.doesNotMatch(m[2], /(^|[;\s])width:/);
@@ -272,7 +275,7 @@ test("the role=status notice is not rebuilt by an unrelated full render (a searc
   server.steamid = "";
   const s = await openLibrary();
   await until(() => /Settings/.test(noticeText(s)), "settings hint");
-  const note = s.querySelector("p.lib-owned");
+  const note = s.querySelector(".lib-stat");
   const textSpan = note.querySelector(".lib-owned-text");
   textSpan.firstChild.__marker = "kept";
   const search = s.querySelectorAll("input").find((i) => i.id === "lib-q");

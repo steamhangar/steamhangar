@@ -232,7 +232,7 @@
      smoothing mechanism (container queries, JS-computed floors, etc.) would
      be its own feature with its own failure modes, and the brief's scope is
      the auto-fill grid itself, not a de-sawtoothing layer on top of it. */
-  --tile-min:176px;
+  --tile-min:168px; /* WP LIBRARY-2: library.html's minmax(168px,1fr); Compact overrides it to 124px (css/kit.css) */
   --w-sheet:480px;  /* existing .sheet max-width, tokenized (WP 4a.7's hard-coded 480px) — the DRAWER variant's width (WP 4e.3's notifications/clients panels) and every other sheet below BP-L. Deliberately NOT widened for the drawer: it is an ambient side panel, not the primary reading surface, same reasoning the confirm dialogs (`.dialog`, 420px, untouched) stay narrow — "that is their job" (operator, WP 4e.3 fix round 2). */
   /* WP 4e.3 fix round 2 (operator decision, 2026-08-18): the game detail
      sheet's CENTRED CARD widens at BP-L — a dedicated token, not a literal
@@ -270,11 +270,16 @@
      PROSE elements themselves (a `max-width` on `.hint`/`.u2`/`.u3`/
      `.ohint` alone, independent of the card), not renegotiating this token
      — out of scope for this package, recorded here as the honest escape
-     hatch rather than pretended unnecessary. */
-  --w-sheet-l:680px;
-  --search-w:260px; /* Library search field width in the toolbar row from
-                        BP-M up (WP WEB-FIX-UPD-VIS: search, chips and the
-                        check buttons share one row; app.css `.lib-bar`).
+     hatch rather than pretended unnecessary.
+
+     **WP LIBRARY-2 (rc20 rework): 920px.** docs/design/rc20/library.html's
+     detail sheet is `width:min(920px,100%)` with a two-column Overview (facts
+     and About left, content packages right), so the measure argument above
+     now applies per column (~420px each), not to the whole card. */
+  --w-sheet-l:920px;
+  --search-w:260px; /* Library search field width in the toolbar row
+                        (WP LIBRARY-2: css/kit.css `.lib-search`; earlier
+                        WP WEB-FIX-UPD-VIS: app.css `.lib-bar`).
                         WP 4e.2 introduced it as a 420px cap for the old
                         BP-L "search chips" grid band. Below BP-M the field
                         takes its own full line instead. */

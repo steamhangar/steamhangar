@@ -94,7 +94,7 @@ async function until(pred, label, timeoutMs = 3000) {
     await tick(5);
   }
 }
-const chip = (s, key) => s.querySelector(`.chip[data-f="${key}"]`);
+const chip = (s, key) => s.querySelector(`.fchip[data-f="${key}"]`);
 const pressChip = (s, key) => {
   const el = chip(s, key);
   s.querySelector(".chips").dispatchEvent({ type: "click", target: { closest: () => el } });

@@ -24,15 +24,21 @@
  * used to patch) — `cardStructuralKey` is exported so library.js's tick
  * handler and this file can never disagree about what "structural" means.
  *
- * **Capsule pill ground (WP WEB-FIX-9).** The pill's dark ground is drawn
- * only when it carries a number (cached game); icon-only pills get the
- * `bare` class (see `pillClassName`) and show just the status disc. The
- * status word lives in the meta row under the cover, never in the pill.
+ * **Card anatomy (WP LIBRARY-2, docs/design/rc20/library.html).** The cover
+ * carries only the title and a size badge (`.sz`, a cached game's size;
+ * superseding the WEB-FIX-9 status pill and the "Never played" cover pill).
+ * Under the cover, `.meta` holds the status line `.stt` (a tone dot and the
+ * sentence-case status word, plus the card's quick action as a small
+ * status-icon button `.icnact` when `statusAction` offers one) and the
+ * sub-lines (`.pkgline`, `.updbadge`, `.instbadge`, `.playbadge`); the
+ * Compact layout hides the sub-lines, the List layout lays `.meta` out as
+ * columns (css/kit.css, Library block).
  *
  * **Nested-interactive-widget a11y (WP 4a.3 review nit, closed WP 4a.8).**
- * The card is `role="button"` yet contains two REAL nested `<button>`s (the
- * capsule pill and the meta-row icon, both only present when `statusAction`
- * returns something) — an ARIA authoring-practices grey area (a "button"
+ * The card is `role="button"` yet contains a REAL nested `<button>` (the
+ * status line's action icon, only present when `statusAction` returns
+ * something; LIBRARY-2 dropped the cover pill that used to be a second
+ * one) — an ARIA authoring-practices grey area (a "button"
  * widget is conventionally a leaf). The fix shipped here is NOT removing
  * the nesting (the pill/icon must stay independently focusable and
  * operable — a screen-reader user needs to reach "download this one game"
@@ -58,9 +64,8 @@
  * **"Update available" state (WP UPD-6, supersedes the UPD-2 badge on
  * cached cards).** `game.update_available === true` (WP UPD-1: a stale
  * oracle verdict on a game with cache content; a group row ORs it over its
- * members) turns a CACHED card's status into "Update available": the pill
- * and the list-layout meta icon draw the orange "stale" refresh glyph
- * instead of the green check, and the status word reads "Update available"
+ * members) turns a CACHED card's status into "Update available": the status
+ * dot turns orange instead of green, and the status word reads "Update available"
  * in `--stale` (lib/game-status.js `showsUpdateState`, `cardIconKind`,
  * `cardStatusWord`). User feedback on rc15: cards said both "Current" and
  * "Update". It is a DISPLAY overlay, not a status kind: `dispKind`/`data-dk`
@@ -73,8 +78,8 @@
  * **Cache completeness (WP CACHE-COMPLETE-1c).** A CACHED card without an
  * update shows the green check only at `cache_complete_pct` 100 (a group
  * card: `group_cache_complete_pct`); below 100 it reads "Partially cached
- * N%" with the orange half-disc, unknown reads "Cached · not verified" with
- * the neutral question glyph. Same DISPLAY-overlay shape as UPD-6 (dispKind
+ * N%" with an orange dot, unknown reads "Cached · not verified" with a
+ * neutral one. Same DISPLAY-overlay shape as UPD-6 (dispKind
  * stays `cached`); "Update available" wins. Precedence and wording:
  * lib/cache-completeness.js `cardDisplay`. The overlay is part of the card's
  * `data-ck`, which views/library.js compares like `data-dk`, so a changed
@@ -82,11 +87,9 @@
  * The two new words have a compact twin (`.stfull`/`.stcompact` inside
  * `.state`, CSS picks one per layout); every other word stays plain text.
  *
- * **"Never played" pill (WP WEB-FEAT-SUGGEST-2).** The Phase 4h panel's
- * "fully cached, never played" statement, moved onto the card: a second
- * pill right of the status pill on the cover (both inside `.capbadges`),
- * plus a `.playbadge` twin in the meta row that only the list layout shows
- * (its cover is too small for pills). Shown only for a CACHED card whose
+ * **"Never played" line (WP WEB-FEAT-SUGGEST-2, moved off the cover by WP
+ * LIBRARY-2).** The Phase 4h panel's "fully cached, never played"
+ * statement as a `.playbadge` sub-line in `.meta`. Shown only for a CACHED card whose
  * owned-list playtime is a real zero (`lib/decision-support.js`
  * `isNeverPlayedCached`; playtime reaches the app only with the operator's
  * ADR-0010 gate on). Plain text, no icon, `aria-hidden` — the card's
@@ -309,27 +312,22 @@ function neverPlayedNode(className, fullClass, compactClass) {
 }
 
 /**
- * Create or remove the "Never played" pill (in `.capbadges`, after the
- * status pill) and its list-layout twin (`.playbadge` in `.meta`). Plain
- * text nodes only — the same documented exception to `patchCardVolatile`'s
- * "no node created or removed" rule as `syncUpdateTag`; the status pill and
- * its icon are never touched.
+ * Create or remove the "Never played" sub-line (`.playbadge` in `.meta`;
+ * WP LIBRARY-2 dropped its cover pill twin). Plain text nodes only — the
+ * same documented exception to `patchCardVolatile`'s "no node created or
+ * removed" rule as `syncUpdateTag`; the status line is never touched.
  * @param {HTMLElement} cardEl
  * @param {object} game
  * @param {string} kind
  */
 function syncNeverPlayed(cardEl, game, kind) {
   const want = showsNeverPlayed(game, kind);
-  const badges = cardEl.querySelector(".capbadges");
   const metaEl = cardEl.querySelector(".meta");
-  const pill = badges ? badges.querySelector(".playpill") : null;
   const twin = metaEl ? metaEl.querySelector(".playbadge") : null;
   if (!want) {
-    if (pill) pill.remove();
     if (twin) twin.remove();
     return;
   }
-  if (badges && !pill) badges.appendChild(neverPlayedNode("playpill", "ppfull", "ppcompact"));
   if (metaEl && !twin) metaEl.appendChild(neverPlayedNode("playbadge", "pbfull", "pbcompact"));
 }
 
@@ -355,23 +353,10 @@ function syncNeverPlayed(cardEl, game, kind) {
  *   single source of truth for "did anything shape-relevant move".
  */
 export function patchCardVolatile(cardEl, game, kind) {
-  const pill = cardEl.querySelector(".cappill");
-  const newPillNum = pillNumberText(game, kind);
-  if (pill) {
-    let pv = pill.querySelector(".pv");
-    if (newPillNum) {
-      if (!pv) {
-        pv = document.createElement("span");
-        pv.className = "pv";
-        pill.appendChild(pv);
-      }
-      pv.textContent = newPillNum;
-    } else if (pv) {
-      pv.remove();
-    }
-    // WP WEB-FIX-9: the ground follows the number (see pillClassName).
-    pill.classList.toggle("bare", !newPillNum);
-  }
+  // WP LIBRARY-2: the cover's size badge follows the number (a plain text
+  // span, never the status line's icon).
+  const cap = cardEl.querySelector(".cap");
+  if (cap) syncSizeBadge(cap, pillNumberText(game, kind));
   const sizeEl = cardEl.querySelector(".meta .size");
   if (sizeEl) sizeEl.textContent = formatBytesGB(displaySizeBytes(game)) || "—";
   const metaEl = cardEl.querySelector(".meta");
@@ -469,74 +454,61 @@ function buildCover(game) {
   return cap;
 }
 
-function buildIcon(iconKind, { action, gameName }) {
-  const icon = createStatusIcon(iconKind);
-  if (!action) {
-    // No action -> a plain, non-focusable span (see createStatusIcon). The
-    // meta row always shows the SAME status word right next to this icon
-    // (the `.state` span in buildCard below) — mark the icon aria-hidden so
-    // its own built-in sr-only label is not announced a second time (same
-    // "avoid double announcement" posture as clients-sheet.js/
-    // notifications.js's status icons).
-    icon.setAttribute("aria-hidden", "true");
-    return icon;
+/**
+ * Create, update or remove the cover's size badge `.sz` (WP LIBRARY-2: the
+ * cover carries the size only, kit library.html `.sz`). The number is
+ * `pillNumberText`'s: a cached game's size, never a fabricated live figure
+ * (game-status.js Divergence 2).
+ * @param {HTMLElement} cap the card's `.cap`
+ * @param {string|null} num
+ */
+function syncSizeBadge(cap, num) {
+  let sz = cap.querySelector(".sz");
+  if (!num) {
+    if (sz) sz.remove();
+    return;
   }
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "icnact";
-  btn.title = action.title;
-  btn.setAttribute("aria-label", `${action.title} — ${gameName}`);
-  btn.appendChild(icon);
-  return btn;
+  if (!sz) {
+    sz = document.createElement("span");
+    sz.className = "sz";
+    sz.setAttribute("aria-hidden", "true");
+    cap.appendChild(sz);
+  }
+  sz.textContent = num;
 }
 
 /**
- * The pill's class list (WP WEB-FIX-9). The dark translucent ground exists
- * to carry the NUMBER legibly over any cover art (mockup round 6: "status
- * icon + the number ... over a dark translucent ground"). With no number
- * to print (every kind but a cached game, Divergence 2) that ground
- * collapsed to a small grey lozenge around the icon with an empty right
- * end, read live as "a grey ring with no status word" (user feedback on
- * rc9, 2026-10-04). Icon-only pills are therefore `bare`: the status disc
- * stands on the cover by itself (css/app.css `.cappill.bare`). The status
- * WORD stays in the meta row under the cover, not in the pill: the round-6
- * rule is that nothing on the card is said twice.
- * @param {boolean} wantsButton
- * @param {string|null} num pillNumberText's result
- * @returns {string}
+ * The status line `.stt`: a tone dot, the status word and, when the card
+ * offers a quick action (download, retry, pause, resume, check again), a
+ * small button carrying the status icon. The dot and the icon are
+ * `aria-hidden` — the visible word right next to them already says it.
+ * @param {{icon: string, text: string, word: string, compact: string}} display
+ * @param {{type: string, title: string, muted?: boolean} | null} action
+ * @param {string} gameName
+ * @returns {HTMLElement}
  */
-export function pillClassName(wantsButton, num) {
-  return "cappill" + (wantsButton ? " act" : "") + (num ? "" : " bare");
-}
-
-function buildPill(game, kind, action) {
-  const wantsButton = !!action;
-  const pill = document.createElement(wantsButton ? "button" : "span");
-  pill.className = pillClassName(wantsButton, pillNumberText(game, kind));
-  if (wantsButton) {
-    pill.type = "button";
-    pill.title = action.title;
-    pill.setAttribute("aria-label", `${action.title} — ${displayName(game)}`);
-    if (action.muted) pill.classList.add("muted");
+function buildStatusLine(display, action, gameName) {
+  const line = document.createElement("div");
+  line.className = "stt";
+  const dot = document.createElement("i");
+  dot.className = "dot tx-" + display.text;
+  dot.setAttribute("aria-hidden", "true");
+  line.appendChild(dot);
+  const state = document.createElement("span");
+  fillStateWord(state, display);
+  line.appendChild(state);
+  if (action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "icnact" + (action.muted ? " muted" : "");
+    btn.title = action.title;
+    btn.setAttribute("aria-label", `${action.title} — ${gameName}`);
+    const icon = createStatusIcon(display.icon);
+    icon.setAttribute("aria-hidden", "true");
+    btn.appendChild(icon);
+    line.appendChild(btn);
   }
-  // WP UPD-6: orange for an update; WP CACHE-COMPLETE-1c: completeness.
-  const icon = createStatusIcon(cardDisplay(game, kind, STATUS_LABEL).icon);
-  // The pill's icon is always redundant with the meta row's visible status
-  // word on the SAME card (round 6 gave every layout that word back) — hide
-  // it from assistive tech whether or not the pill itself is a button: a
-  // button's own aria-label already wins for ITS name, but the icon's
-  // sr-only text is still a distinct node a linear/browse-mode read would
-  // otherwise announce a second (or third) time.
-  icon.setAttribute("aria-hidden", "true");
-  pill.appendChild(icon);
-  const num = pillNumberText(game, kind);
-  if (num) {
-    const pv = document.createElement("span");
-    pv.className = "pv";
-    pv.textContent = num;
-    pill.appendChild(pv);
-  }
-  return pill;
+  return line;
 }
 
 /**
@@ -650,13 +622,8 @@ export function buildCard(game, ctx) {
 
   card.appendChild(buildCover(game));
   const cap = card.firstChild;
-  // WP WEB-FEAT-SUGGEST-2: the status pill sits in `.capbadges` (the
-  // positioned row on the cover, z-index:2 in CSS), so a second pill
-  // ("Never played", syncNeverPlayed below) can follow it to the right.
-  const badges = document.createElement("div");
-  badges.className = "capbadges";
-  badges.appendChild(buildPill(game, kind, action));
-  cap.appendChild(badges);
+  // WP LIBRARY-2: the cover carries the title and the size badge only.
+  syncSizeBadge(cap, pillNumberText(game, kind));
 
   const name = document.createElement("div");
   name.className = "name";
@@ -686,15 +653,11 @@ export function buildCard(game, ctx) {
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.appendChild(buildIcon(display.icon, { action, gameName: displayName(game) }));
-  const state = document.createElement("span");
-  fillStateWord(state, display);
-  meta.appendChild(state);
-  // Unlike the pill (which omits the number entirely rather than fabricate
-  // one — see pillNumberText), the list/meta size column always shows
-  // SOMETHING, using an explicit "—" for "nothing honest to print" (mockup
-  // parity: `gb(null)` returns "—" here, whereas `pillHTML`'s own
-  // `num?...:""` check is what actually hides it on the cover).
+  meta.appendChild(buildStatusLine(display, action, displayName(game)));
+  // Unlike the cover badge (which omits the number entirely rather than
+  // fabricate one — see pillNumberText), the list layout's size column
+  // always shows SOMETHING, using an explicit "—" for "nothing honest to
+  // print". The grid layouts hide this cell (the badge is on the cover).
   const size = document.createElement("span");
   size.className = "size";
   size.textContent = formatBytesGB(displaySizeBytes(game)) || "—";
@@ -704,7 +667,7 @@ export function buildCard(game, ctx) {
   syncUpdateTag(meta, game, kind); // WP UPD-2/UPD-6: `.updbadge` iff flagged and not said by the status word
   syncInstalledTag(meta, game); // WP AG-2: appends `.instbadge` iff installed_on is non-empty
   card.appendChild(meta);
-  syncNeverPlayed(card, game, kind); // WP WEB-FEAT-SUGGEST-2: needs `.capbadges` and `.meta` in place
+  syncNeverPlayed(card, game, kind); // WP WEB-FEAT-SUGGEST-2: needs `.meta` in place
 
   // ---- interaction wiring (mockup parity: long-press / right-click /
   // header select icon -> multi-select; a tap toggles selection while
@@ -743,6 +706,9 @@ export function buildCard(game, ctx) {
     else onOpen(game.appid);
   });
   card.addEventListener("keydown", (e) => {
+    // Only the card itself: Enter/Space on the nested quick-action button
+    // bubbles here and must run that button's own action, not open the sheet.
+    if (e.target !== card) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (selecting) onToggle(game.appid);
@@ -751,11 +717,11 @@ export function buildCard(game, ctx) {
   });
 
   if (action) {
-    // The pill/meta-icon action buttons must never let their click reach
-    // the card (which would open the detail view / toggle selection on
-    // top of firing the action) — mockup parity
+    // The status line's action button must never let its click reach the
+    // card (which would open the detail view / toggle selection on top of
+    // firing the action) — mockup parity
     // (`onclick="event.stopPropagation();..."`).
-    for (const el of card.querySelectorAll("button.cappill, button.icnact")) {
+    for (const el of card.querySelectorAll("button.icnact")) {
       el.addEventListener("mousedown", (e) => e.stopPropagation());
       el.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
       el.addEventListener("click", (e) => {

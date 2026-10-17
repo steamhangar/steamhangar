@@ -88,6 +88,7 @@ class CardInfoWebTwinTest {
         val css = read("../../web/css/app.css")
         assertTrue(css.contains("@media (min-width:600px){\n  .store-details:not(.store-nodesc){ display:grid;"))
         assertEquals(600, dev.steamvault.app.ui.detail.STORE_TWO_COLUMN_MIN_WIDTH_DP)
+        // Note (web LIBRARY-2): the web still builds the store block first but now appends "About" after the facts (two-column Overview); revisit in the rc21 Android parity work.
         val render = sheet.substring(sheet.indexOf("function render()"))
         assertTrue(render.indexOf("buildHeader(gameLike, liveJob)") < render.indexOf("buildStoreBlock()"))
         assertTrue(render.indexOf("buildStoreBlock()") < render.indexOf("buildFactLines(gameLike)"))

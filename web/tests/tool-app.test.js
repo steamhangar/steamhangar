@@ -210,8 +210,7 @@ test("MUTATION TARGET -- card: a tool app shows its name, the neutral word, no b
     assert.equal(state.classList.contains("tx-tool"), true);
     assert.equal(card.dataset.dk, "tool");
     assert.equal(card.classList.contains("tool"), true, "a tool app is shown muted, not hidden");
-    assert.equal(card.querySelector("button.cappill"), null, "no download/retry pill button");
-    assert.equal(card.querySelector("button.icnact"), null, "no download/retry icon button");
+    assert.ok(!card.querySelector("button.icnact"), "no download/retry icon button");
     assert.doesNotMatch(card.getAttribute("aria-label"), /Failed|Retry/);
     assert.match(card.getAttribute("aria-label"), /^Steamworks Common Redistributables — Steam tool package/);
     const badge = card.querySelector(".instbadge");
@@ -220,21 +219,18 @@ test("MUTATION TARGET -- card: a tool app shows its name, the neutral word, no b
     assert.equal(badge.querySelector(".ibfull").textContent, "Installed on gaming-pc");
   }));
 
-test("MUTATION TARGET -- card: both icons (pill and meta row) are the neutral notinuse dash", () =>
+test("MUTATION TARGET -- card: the status dot is the neutral tool tone, never a failure colour (WP LIBRARY-2: no icons on a tool card)", () =>
   withCard(({ buildCard }) => {
     const card = buildCard(redist(), ctx());
-    const icons = card.querySelectorAll(".sic");
-    assert.equal(icons.length, 2, "one icon in the pill, one in the meta row");
-    for (const icon of icons) {
-      assert.equal(icon.classList.contains("k-notinuse"), true, `expected k-notinuse, got ${icon.className}`);
-    }
+    assert.equal(card.querySelectorAll(".sic").length, 0, "no cover pill, no action: no status icon");
+    assert.equal(card.querySelector(".stt .dot").className, "dot tx-tool");
   }));
 
 test("card: an ordinary failed game is unchanged (Failed + Retry, not muted)", () =>
   withCard(({ buildCard }) => {
     const card = buildCard(game(), ctx());
     assert.equal(card.querySelector(".state").textContent, "Failed");
-    assert.ok(card.querySelector("button.cappill"));
+    assert.equal(card.querySelector("button.icnact").title, "Retry download");
     assert.equal(card.classList.contains("tool"), false);
   }));
 
@@ -286,7 +282,7 @@ function functionBody(src, signature) {
 test("MUTATION TARGET -- sheet wiring: render() appends the tool note; the download button stays behind statusAction", () => {
   const body = functionBody(detailJs, "function render() {");
   assert.ok(body, "render() not found in game-detail-sheet.js");
-  assert.match(body, /const toolNote = buildToolAppNote\(gameLike\);\s*\n\s*if \(toolNote\) overview\.append\(toolNote\);/);
+  assert.match(body, /const toolNote = buildToolAppNote\(gameLike\);\s*\n\s*if \(toolNote\) left\.append\(toolNote\);/);
   // The Download/Retry button is only built from statusAction, which is
   // null for a tool app (pinned above). LIBRARY-DETAIL-1: built in
   // buildPrimaryAction, which render() calls.
@@ -311,8 +307,7 @@ test("sheet wiring: the header uses the tool name, the dash glyph and the tool w
   const row = functionBody(detailJs, "export function buildDetailStatusRow(row, kind) {");
   assert.ok(row, "buildDetailStatusRow() not found");
   assert.match(row, /const display = cardDisplay\(row, kind, STATUS_LABEL\);/);
-  assert.match(row, /createStatusIcon\(display\.icon/);
-  assert.match(row, /word\.textContent = display\.word;/);
+  assert.match(row, /createPill\(\{ kind: display\.icon, text: display\.word \}\)/);
 });
 
 // ---------------------------------------------------------------------
@@ -364,15 +359,13 @@ test("MUTATION TARGET -- sheet wiring: the not-tracked view offers no download f
   assert.match(body.slice(gate, button), /return wrap;/);
 });
 
-test("MUTATION TARGET -- card: every status icon of a tool app is hidden from assistive tech (the visible word speaks)", () =>
+test("MUTATION TARGET -- card: the status dot is hidden from assistive tech (the visible word speaks)", () =>
   withCard(({ buildCard }) => {
     const card = buildCard(redist(), ctx());
-    const icons = card.querySelectorAll(".sic");
-    assert.equal(icons.length, 2);
-    for (const icon of icons) assert.equal(icon.getAttribute("aria-hidden"), "true");
+    assert.equal(card.querySelector(".stt .dot").getAttribute("aria-hidden"), "true");
   }));
 
 test("sheet wiring: the header icon is aria-hidden next to its word", () => {
   const body = functionBody(detailJs, "export function buildDetailStatusRow(row, kind) {");
-  assert.match(body, /statusIcon\.setAttribute\("aria-hidden", "true"\);/);
+  assert.match(body, /icon\.setAttribute\("aria-hidden", "true"\);/);
 });

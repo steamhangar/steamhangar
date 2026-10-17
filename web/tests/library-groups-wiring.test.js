@@ -206,9 +206,9 @@ test("one card per group: packages hidden from the grid, the line and the failed
   assert.equal(g.querySelector(".pkgline .pkgn").textContent, "+2 content packages");
   assert.equal(g.querySelector(".pkgline .pkgfail .pkgfailtext").textContent, "1 failed");
   assert.equal(g.dataset.dk, "cached");
-  const failedChip = s.querySelector('.chip[data-f="failed"] .n');
+  const failedChip = s.querySelector('.fchip[data-f="failed"] .n');
   assert.equal(failedChip.textContent, "1", "the Failed chip counts the group once");
-  assert.equal(s.querySelector('.chip[data-f="all"] .n').textContent, "2");
+  assert.equal(s.querySelector('.fchip[data-f="all"] .n').textContent, "2");
 });
 
 test("MUTATION PIN -- the group card shows the server's group_size_bytes (2.5 GiB, not the 3 GiB sum) without any per-member request", async () => {
@@ -258,7 +258,7 @@ test("MUTATION PIN (ADR-0022 §4) -- bulk download of a picked group card target
   const s = await openLibrary(2);
   card(s, 20).dispatchEvent({ type: "contextmenu", preventDefault() {} });
   await until(() => s.querySelector(".bulk").classList.contains("up"), "select mode");
-  const primary = s.querySelector(".bulkbtns .btn.primary");
+  const primary = s.querySelector(".bulkbtns .btn.pri");
   // Ungrouped, the three rows classify as: 20 cached, 21 cached, 22 failed -> retry.
   assert.equal(primary.disabled, false);
   assert.equal(primary.textContent, "Download 1 of 3");

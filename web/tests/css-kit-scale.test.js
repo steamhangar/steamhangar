@@ -49,7 +49,7 @@ const RAW_FONT_SHORTHAND = /(^|[^-\w])font\s*:\s*(?:[a-z0-9-]+\s+)*\d[\d.]*px(?:
  * 134). THIS NUMBER ONLY GOES DOWN: lower it in the same package that
  * migrates a page onto the kit's scale tokens; never raise it.
  */
-const APP_CSS_RAW_FONT_SIZE_PIN = 134;
+const APP_CSS_RAW_FONT_SIZE_PIN = 95;
 
 // ---------------------------------------------------------------------
 // (a) scale tokens and --dim-2

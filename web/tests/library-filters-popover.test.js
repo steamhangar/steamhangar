@@ -22,10 +22,15 @@ test("activeFilterCount counts each filter group once", () => {
 
 const src = readFileSync(new URL("../js/views/library.js", import.meta.url), "utf8");
 
-test("wiring: the Filters button is a disclosure over the metadata panel, hidden without metadata, torn down on view change", () => {
+test("wiring: the Filters button is a disclosure over the metadata panel, always visible (WP LIBRARY-2), torn down on view change", () => {
   assert.match(src, /createDisclosure\(\{ trigger: filtersBtn, panel: metaPanel \}\)/);
   assert.match(src, /filtersBtn\.setAttribute\("aria-haspopup", "true"\)/);
-  assert.match(src, /els\.filtersWrap\.hidden = !available/);
+  // WP LIBRARY-2: never hidden; without metadata the popover holds a note
+  // and the button counts 0.
+  assert.doesNotMatch(src, /filtersWrap\.hidden\s*=/);
+  const panel = src.slice(src.indexOf("function renderMetaPanel()"), src.indexOf("const cats = el("));
+  assert.match(panel, /if \(!available\) \{\s*const note = el\("p", "lib-meta-note", NO_META_TEXT\);[\s\S]*?panel\.replaceChildren\(note\);\s*return;/);
+  assert.match(src, /const active = metaAvailable\(state\.rawGames\) \? activeFilterCount\(state\.metaFilter\) : 0;/);
   assert.match(src, /els\?\.filtersDisclosure\.dispose\(\)/);
   assert.match(src, /els\?\.splitDisclosure\.dispose\(\)/);
   assert.match(src, /`Filters, \$\{n\} active`/, "the count reaches assistive tech");

@@ -154,12 +154,12 @@ test("availableGenres lists the ids in the data with labels", () => {
   assert.deepEqual(out.map((g) => g.label), ["Action", "Genre 999", "RPG"]);
 });
 
-test("wiring: library.js persists the filter in try/catch, hides the panel without meta, shows the note", () => {
+test("wiring: library.js persists the filter in try/catch, says so in the panel without meta, shows the note", () => {
   const src = readFileSync(new URL("../js/views/library.js", import.meta.url), "utf8");
   assert.match(src, /steamvault\.libraryMetaFilter/);
   const read = src.slice(src.indexOf("function readStoredMetaFilter"), src.indexOf("function writeStoredMetaFilter"));
   assert.match(read, /try \{[\s\S]*normalizeMetaFilter[\s\S]*\} catch/);
-  assert.match(src, /els\.filtersWrap\.hidden = !available/);
+  assert.match(src, /panel\.replaceChildren\(note\);/, "WP LIBRARY-2: no metadata -> a note in the popover, the button stays");
   assert.match(src, /if \(!metaAvailable\(state\.rawGames\)\) return \{ games: state\.games, unknownExcluded: 0 \}/);
   assert.match(src, /unknownNote\(metaFiltered\(\)\.unknownExcluded\)/);
   assert.match(src, /visibleGames\(metaFiltered\(\)\.games/);

@@ -68,23 +68,23 @@ test("MUTATION TARGET -- the size shown is the server's group_size_bytes (parent
   assert.equal(unknown.querySelector(".meta .size").textContent, "2.0 GB", "older server: the parent's own size");
   patchCardVolatile(unknown, group(2.4 * GIB), "cached");
   assert.equal(unknown.querySelector(".meta .size").textContent, "2.4 GB");
-  assert.equal(unknown.querySelector(".cappill .pv").textContent, "2.4 GB");
+  assert.equal(unknown.querySelector(".cap .sz").textContent, "2.4 GB");
   assert.match(unknown.getAttribute("aria-label"), /2\.4 GB — 2 content packages, 1 failed/);
 });
 
 test("MUTATION PIN (review, 360 px) -- the line wraps, never clips: no ellipsis/nowrap on .pkgline, the warning is one nowrap unit with its own separator", async () => {
   const { readFileSync } = await import("node:fs");
-  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const rule = (sel) => {
     const m = new RegExp(`(^|\\})\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css);
     assert.ok(m, `${sel} rule missing`);
     return m[2];
   };
-  const line = rule(".pkgline");
+  const line = rule(".kit .card .pkgline");
   assert.match(line, /flex-wrap:\s*wrap/);
   assert.doesNotMatch(line, /text-overflow|white-space:\s*nowrap|overflow:\s*hidden/);
   assert.match(line, /gap:/);
-  const fail = rule(".pkgline .pkgfail");
+  const fail = rule(".kit .card .pkgline .pkgfail");
   assert.match(fail, /white-space:\s*nowrap/);
   assert.match(fail, /gap:/);
   assert.doesNotMatch(fail, /text-overflow|overflow:\s*hidden/);

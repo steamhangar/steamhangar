@@ -57,25 +57,24 @@ test("MUTATION TARGET -- header: a flagged cached game reads 'Update available' 
   withFakeDom(({ buildDetailStatusRow }) => {
     const r = buildDetailStatusRow(row({ update_available: true }), "cached");
     assert.match(r.querySelector(".sic").className, /\bk-stale\b/);
-    const word = r.children[1];
-    assert.equal(word.textContent, "Update available");
-    assert.equal(word.className, "tx-stale");
+    assert.equal(r.textContent, "Update available");
+    assert.equal(r.dataset.text, "stale");
   }));
 
 test("header: no flag (or not cached) keeps the plain status", () =>
   withFakeDom(({ buildDetailStatusRow }) => {
     const plain = buildDetailStatusRow(row(), "cached");
-    assert.equal(plain.children[1].textContent, "Current");
+    assert.equal(plain.textContent, "Current");
     assert.match(plain.querySelector(".sic").className, /\bk-cached\b/);
     const failed = buildDetailStatusRow(row({ update_available: true, status: "error" }), "error");
-    assert.equal(failed.children[1].textContent, "Failed");
+    assert.equal(failed.textContent, "Failed");
   }));
 
 test("header: a tool app keeps the dash glyph and the tool word (even if flagged)", () =>
   withFakeDom(({ buildDetailStatusRow }) => {
     const r = buildDetailStatusRow(row({ appid: 228980, tool_app: true, update_available: true }), "tool");
     assert.match(r.querySelector(".sic").className, /\bk-notinuse\b/);
-    assert.equal(r.children[1].textContent, "Steam tool package");
+    assert.equal(r.textContent, "Steam tool package");
   }));
 
 test("header: a group row (flag on a package only) shows the update state, like the Library card", () =>
@@ -84,7 +83,7 @@ test("header: a group row (flag on a package only) shows the update state, like 
     const parent = row({ appid: 500, name: "Parent" });
     const pkg = row({ appid: 501, name: "Parent - Pack", parent_appid: 500, app_type: "dlc", update_available: true });
     const [group] = groupGames([parent, pkg]).rows;
-    assert.equal(buildDetailStatusRow(group, "cached").children[1].textContent, "Update available");
+    assert.equal(buildDetailStatusRow(group, "cached").textContent, "Update available");
   }));
 
 test("MUTATION TARGET -- 'Update now' button: label, primary, carries its app ids, runs onStart once per click", () =>
@@ -96,7 +95,7 @@ test("MUTATION TARGET -- 'Update now' button: label, primary, carries its app id
       return new Promise((r) => (release = r));
     });
     assert.equal(btn.textContent, "Update now");
-    assert.match(btn.className, /\bprimary\b/);
+    assert.match(btn.className, /\bpri\b/, "kit primary");
     assert.equal(btn.dataset.appids, "500,501");
     btn.dispatchEvent({ type: "click" });
     assert.equal(calls, 1);
@@ -111,9 +110,13 @@ test("MUTATION TARGET -- wiring: the header uses buildDetailStatusRow with the g
 });
 
 test("MUTATION TARGET -- wiring: render() offers 'Update now' when there is no job and no download action", () => {
-  // LIBRARY-DETAIL-1: the primary action row sits above the tabs and is
-  // built by buildPrimaryAction (job controls, download, then update).
-  assert.match(body("function render() {"), /const actions = buildPrimaryAction\(gameLike, trackedJob\);\s*if \(actions\) contentEl\.append\(actions\);/);
+  // LIBRARY-DETAIL-1: the primary action sits above the tabs and is built
+  // by buildPrimaryAction (job controls, download, then update); WP
+  // LIBRARY-2 moved it into the header row's action group, after Verify.
+  assert.match(
+    body("function render() {"),
+    /const actions = buildPrimaryAction\(gameLike, trackedJob\);\s*if \(actions\) acts\.append\(actions\);\s*if \(acts\.childNodes\.length\) head\.append\(acts\);/,
+  );
   const r = body("function buildPrimaryAction(gameLike, trackedJob) {");
   assert.match(
     r,

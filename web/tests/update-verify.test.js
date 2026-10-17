@@ -193,9 +193,12 @@ for (const [label, g, kind, word] of [
       const state = card.querySelector(".state");
       assert.equal(state.textContent, word);
       assert.equal(state.classList.contains(`tx-${kind}`), true);
+      // WP LIBRARY-2: one icon, in the status line's pause button; the dot
+      // carries the same kind as its tone.
       const icons = card.querySelectorAll(".sic");
-      assert.equal(icons.length, 2, "pill icon and meta-row icon");
+      assert.equal(icons.length, 1, "the status line's action icon only");
       for (const icon of icons) assert.equal(icon.classList.contains(`k-${kind}`), true, icon.className);
+      assert.equal(card.querySelector(".stt .dot").className, `dot tx-${kind}`);
       assert.match(card.getAttribute("aria-label"), new RegExp(` — ${word}`));
     }));
 }
@@ -215,9 +218,9 @@ test("card: the refresh glyph (.rot) is what an Updating/Verifying card draws", 
 test("card: a game whose live run is Updating keeps the pause action", () =>
   withCard(({ buildCard }) => {
     const card = buildCard(refresh(), ctx(job("running")));
-    const pill = card.querySelector("button.cappill");
-    assert.ok(pill, "pill is a button");
-    assert.equal(pill.title, "Pause download");
+    const act = card.querySelector("button.icnact");
+    assert.ok(act, "the status line offers the action");
+    assert.equal(act.title, "Pause download");
   }));
 
 // ---------------------------------------------------------------------
@@ -260,8 +263,9 @@ test("sheet wiring: the header and the structural key both take dispKind(gameLik
   assert.ok(row, "buildDetailStatusRow() not found");
   // WP CACHE-COMPLETE-1c: via cardDisplay (completeness after UPD-6).
   assert.match(row, /const display = cardDisplay\(row, kind, STATUS_LABEL\);/);
-  assert.match(row, /createStatusIcon\(display\.icon/);
-  assert.match(row, /word\.className = "tx-" \+ display\.text;/);
+  // WP LIBRARY-2: a kit pill (disc + word); the tone kind rides on data-text.
+  assert.match(row, /createPill\(\{ kind: display\.icon, text: display\.word \}\)/);
+  assert.match(row, /pill\.dataset\.text = display\.text;/);
   const key = functionBody(src, "function computeStructuralKey() {");
   assert.ok(key, "computeStructuralKey() not found");
   assert.match(key, /dispKind: dispKind\(gameLike, liveJob\)/, "a Downloading->Verifying flip rebuilds the header");
