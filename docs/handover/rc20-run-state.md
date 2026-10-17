@@ -13,10 +13,11 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 - ADD-DEVICE-2 (0a26cba, b6e01ea; branch wp/rc20-add-device-2b)
 - DOWNLOADS-2 (f72735f, d021c2a; branch wp/rc20-downloads-2b); twin hotfix aa34299
 - SETTINGS-2 (ee90a27, a05ca6a; branch wp/rc20-settings-2b)
+- LIBRARY-2 (c581eec, b8168d3)
 
 ## Running (2026-10-17, resumed 13:40 after a session-limit stop)
 
-- LIBRARY-2: coder on `wp/rc20-library-2`.
+- Web goldens: first record run via `wp/rc20-web-goldens` (all pages final).
 
 ## Next
 

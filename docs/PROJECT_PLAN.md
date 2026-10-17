@@ -3580,7 +3580,7 @@ below carry their own later dates, item 12 is the current one).
           grid; savebar sticky inside the right column, one row; Steam
           rows inline (input + buttons), status pill above; GC warning as a
           `.warn` box below the grid. Component `settings-field.js`.
-        - [ ] **LIBRARY-2** per `library.html` + kit: chips wrap at BP-L
+        - [x] **LIBRARY-2** (c581eec, b8168d3) per `library.html` + kit: chips wrap at BP-L
           (no clipped chips), Filters always visible, sort as one `.sortg`
           group, one status line (updates checked · Reload Steam library),
           card status as pill-less dot + sentence case 12px with 11.5px
