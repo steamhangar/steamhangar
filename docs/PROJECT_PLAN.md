@@ -3547,7 +3547,7 @@ below carry their own later dates, item 12 is the current one).
           outdated pill inside), "Devices" section label with the range seg
           on the right. Component `components/client-card.js` with its own
           test; `clients.js` only composes.
-        - [ ] **ADD-DEVICE-2** drawer per `clients.html`: header (h2,
+        - [x] **ADD-DEVICE-2** (0a26cba, b6e01ea) drawer per `clients.html`: header (h2,
           intro, tabs with icons), scrollable body, footer row (hint +
           Close); numbered steps `ol.steps`; one security notice as a tinted
           box; secret as a blurred `.code` block with Show + Copy side by

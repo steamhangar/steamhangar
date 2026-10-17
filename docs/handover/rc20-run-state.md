@@ -10,15 +10,15 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 - WEB-GOLDENS-1 (50b198b, 31d5eff); kit root fix 353b4f9; first web goldens record pending (wp/rc20-base-goldens failed on /kit before the fix)
 - TOKENS-SYNC-1 (061b4ce, c1a3eaf, Android golden 58eb2ee)
 - CLIENTS-4 (3751e12, 3a89818)
+- ADD-DEVICE-2 (0a26cba, b6e01ea; branch wp/rc20-add-device-2b)
 
 ## Running (2026-10-17, resumed 13:40 after a session-limit stop)
 
-- ADD-DEVICE-2: review PASS (56c2415), nits + rebase onto main in progress.
-- DOWNLOADS-2: coder on `wp/rc20-downloads-2`.
+- DOWNLOADS-2: review FAIL (A-D layout fixes), fixes + rebase in progress -> `wp/rc20-downloads-2b`.
+- SETTINGS-2: coder on `wp/rc20-settings-2`.
 
 ## Next
 
-1. SETTINGS-2
 2. LIBRARY-2
 3. MOBILE-1 (proposed, operator to confirm rc20 vs rc21): phone nav, sheets
    as bottom sheets, 44px touch targets, QR-pairing flow end to end; phone
