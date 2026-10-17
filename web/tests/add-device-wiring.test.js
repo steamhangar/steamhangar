@@ -277,8 +277,8 @@ test("browser — Show renders the #pair= link as copyable text", () => {
   );
 });
 
-test("MUTATION TARGET: closing the sheet (button, Escape, navigation) drops every revealed secret", async () => {
-  for (const closeBy of ["button", "escape", "navigation"]) {
+test("MUTATION TARGET: closing the sheet (button, Escape, scrim, navigation) drops every revealed secret", async () => {
+  for (const closeBy of ["button", "escape", "scrim", "navigation"]) {
     openAddDeviceSheet();
     click(showBtn("phone"));
     click(showBtn("browser"));
@@ -287,6 +287,7 @@ test("MUTATION TARGET: closing the sheet (button, Escape, navigation) drops ever
     assert.equal(secretInDom(), true, "shown");
     if (closeBy === "button") closeSheetIfOpen();
     else if (closeBy === "escape") dom.document.dispatchEvent(fakeKeyEvent("Escape"));
+    else if (closeBy === "scrim") click(sheet().parentNode); // a tap on the backdrop itself
     else navigateTo("library");
     assert.equal(sheetOpen(), false, `closed by ${closeBy}`);
     assert.equal(secretInDom(), false, `no secret after closing by ${closeBy}`);
@@ -902,7 +903,7 @@ test("MUTATION TARGET: numbered steps per tab (ol.steps, circle numbers 1..n, h3
     assert.deepEqual(stepNumbers(id), stepTitles(id).map((_, i) => String(i + 1)), `${id} numbering`);
     assert.equal(stepsOf(id).querySelector("span.n").getAttribute("aria-hidden"), "true", "the ol carries the order for assistive tech");
   }
-  assert.match(kitCss, /\.kit \.steps \.n\{[^}]*border-radius:50%/, "circle numbers");
+  assert.match(kitCss, /\.kit\.add-device \.steps \.n\{[^}]*border-radius:50%/, "circle numbers");
   assert.equal(panel("linux").querySelector('[data-role="agent-readme"]').href, "https://github.com/steamhangar/steamhangar/blob/main/agent/README.md");
 });
 
@@ -925,7 +926,7 @@ test("MUTATION TARGET: secret block — blurred stand-in until Show, Show + Copy
   assert.equal(mask.hidden, false);
   assert.equal(idleCopy("browser").disabled, true, "back to the idle Copy");
   assert.equal(secretInDom(), false);
-  assert.match(kitCss, /\.kit \.code\.hid\{[^}]*filter:blur\(/, "the stand-in is blurred");
+  assert.match(kitCss, /\.kit\.add-device \.code\.hid\{[^}]*filter:blur\(/, "the stand-in is blurred");
 });
 
 test("MUTATION TARGET: Windows — Show puts Copy command and Copy key next to the toggle; a tab switch takes them away", async () => {

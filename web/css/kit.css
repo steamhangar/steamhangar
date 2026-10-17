@@ -274,7 +274,7 @@
 }
 .kit .ad-tabs .tab{
   display:grid; justify-items:center; gap:3px; min-width:0; margin:0; padding:8px 4px;
-  border:0; border-radius:9px; background:none; color:var(--dim);
+  border:0; border-radius:var(--r-s); background:none; color:var(--dim);
   font:500 var(--fs-1)/1.2 var(--ui); text-align:center; cursor:pointer;
 }
 .kit .ad-tabs .tab svg{ width:18px; height:18px; }
@@ -294,7 +294,7 @@
 
 /* one security notice, tinted, with the triangle */
 .kit .ad-warn{
-  display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:10px;
+  display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:var(--r-m);
   background:color-mix(in srgb, var(--stale) 8%, var(--surface));
   border:1px solid color-mix(in srgb, var(--stale) 28%, var(--surface));
   font-size:var(--fs-2); line-height:1.45; color:var(--dim);
@@ -303,32 +303,32 @@
 .kit .ad-warn p{ margin:0; }
 
 /* OS pick box (opened without a tab) */
-.kit .ad-pick{ display:grid; gap:4px; padding:14px; background:var(--bg); border:1px dashed var(--line); border-radius:10px; }
+.kit .ad-pick{ display:grid; gap:4px; padding:14px; background:var(--bg); border:1px dashed var(--line); border-radius:var(--r-m); }
 .kit .ad-pick b{ font:500 var(--fs-3)/1.35 var(--ui); }
 .kit .ad-pick span{ font-size:var(--fs-2); line-height:1.45; color:var(--dim); }
 
 /* numbered steps */
-.kit .steps{ list-style:none; margin:0; padding:0; display:grid; gap:14px; }
-.kit .steps > li{ display:grid; grid-template-columns:24px minmax(0, 1fr); gap:10px; }
-.kit .steps .n{
+.kit.add-device .steps{ list-style:none; margin:0; padding:0; display:grid; gap:14px; }
+.kit.add-device .steps > li{ display:grid; grid-template-columns:24px minmax(0, 1fr); gap:10px; }
+.kit.add-device .steps .n{
   width:24px; height:24px; border-radius:50%; background:var(--raised-2); color:var(--accent);
   display:grid; place-items:center; font:700 var(--fs-2)/1 var(--ui);
 }
-.kit .steps > li > div{ display:grid; gap:var(--sp-2); align-content:start; min-width:0; }
-.kit .steps h3{ margin:2px 0 0; font:500 var(--fs-3)/1.35 var(--ui); }
+.kit.add-device .steps > li > div{ display:grid; gap:var(--sp-2); align-content:start; min-width:0; }
+.kit.add-device .steps h3{ margin:2px 0 0; font:500 var(--fs-3)/1.35 var(--ui); }
 .kit .ad-desc{ margin:0; font-size:var(--fs-2); line-height:1.45; color:var(--dim); }
-.kit .steps h3 + .ad-desc, .kit .steps h3 + .ad-slot{ margin-top:-6px; }
-.kit .pair-open{ color:var(--accent); font-weight:500; font-size:var(--fs-3); }
+.kit.add-device .steps h3 + .ad-desc, .kit.add-device .steps h3 + .ad-slot{ margin-top:-6px; }
+.kit.add-device .pair-open{ color:var(--accent); font-weight:500; font-size:var(--fs-3); text-decoration:none; }
 
 /* the secret: blurred stand-in, revealed code, Show + Copy side by side */
 .kit .ad-secret, .kit .pair-reveal, .kit .ad-qrmore, .kit .pair-download, .kit .ad-slot{ display:grid; gap:var(--sp-2); min-width:0; }
-.kit .code{
+.kit.add-device .code{
   display:block; box-sizing:border-box; width:100%; min-width:0; margin:0; padding:12px;
-  background:var(--bg); border:1px solid var(--line); border-radius:10px; color:var(--text);
+  background:var(--bg); border:1px solid var(--line); border-radius:var(--r-m); color:var(--text);
   font:400 var(--fs-2)/1.6 var(--mono); white-space:pre; overflow:auto; resize:vertical;
 }
-.kit input.code{ resize:none; }
-.kit .code.hid{ color:var(--dim); filter:blur(5px); user-select:none; overflow:hidden; resize:none; }
+.kit.add-device input.code{ resize:none; }
+.kit.add-device .code.hid{ color:var(--dim); filter:blur(5px); user-select:none; overflow:hidden; resize:none; }
 .kit .ad-acts{ display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2); }
 .kit .ad-copies{ display:contents; }
 .kit .pair-download .btn{ text-decoration:none; }
