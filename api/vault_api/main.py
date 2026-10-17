@@ -296,6 +296,26 @@ def log_build_info(build: BuildInfo) -> None:
         )
 
 
+def log_schema_version(db_path: str) -> None:
+    """VERSION-HEALTH-1: name the database schema version once at startup,
+    next to the build line, so a rollout check can read both from
+    ``docker logs`` without the API key. ``/v1/health`` stays a fixed body
+    (a version there is free fingerprinting, see its tests). Reads the
+    STORED version after ``init_db`` ran (not the code constant), so it is
+    what the file really holds. Fail-soft: it never blocks boot."""
+    log = logging.getLogger(__name__)
+    try:
+        conn = get_connection(db_path)
+        try:
+            (stored,) = conn.execute("SELECT version FROM schema_version").fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        log.warning("Could not read the database schema version at startup.", exc_info=True)
+        return
+    log.info("vault-api database schema version %s", stored)
+
+
 def startup_settings(settings: Settings) -> Settings:
     """D16b boot step: startup warnings, the core settings file, and the
     effective snapshot for the boot-time readers. Fail-soft: a DB problem
@@ -329,6 +349,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     log_build_info(build)
 
     init_db(settings.db_path)
+    log_schema_version(settings.db_path)
 
     # D16b (ADR-0009 addendum): the Settings values that are read once at
     # boot (log level, the webhook notifier's events and timeout) come from

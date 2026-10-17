@@ -3509,7 +3509,7 @@ below carry their own later dates, item 12 is the current one).
         the percentage says so instead of showing a clean figure.
       - [ ] **APP-NAMES-1** (api + web) package names for "Unknown app"
         entries (HELLDIVERS 2 content packages, roadmap D9).
-      - [ ] **VERSION-HEALTH-1** (api) version and schema readable without
+      - [x] **VERSION-HEALTH-1** (api) version and schema readable without
         the key (roadmap "VERSION-HEALTH-1"; `/v1/health` or a startup log
         line).
       - [ ] **CLIENT-ROW-1** (web + api if needed) "Client downloading" row on
