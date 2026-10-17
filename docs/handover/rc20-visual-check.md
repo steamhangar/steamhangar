@@ -97,6 +97,11 @@ tests only. This list is the browser check that closes rc20 (release gate in
       while a machine has cache traffic (CLIENT-ROW-1).
 - [ ] A game with depots mapped to no app reads "... not counted: N unmapped
       depot(s)" in the detail completeness line (UNMAPPED-FLAG-1).
+- [ ] The incomplete-game action button reads "Verify" (was "Complete now");
+      while Verifying, the status icon shows animated circular arrows, still
+      under prefers-reduced-motion (VERIFY-LABEL-1).
+- [ ] Unnamed content/DLC package rows read "Content package" instead of
+      "Unknown app"; real unknown apps keep "Unknown app" (APP-NAMES-1).
 
 ## Result
 
