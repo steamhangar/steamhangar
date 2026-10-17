@@ -59,6 +59,13 @@ import { pushModal, popModal } from "../lib/modal-stack.js";
  * finishes a close whose `transitionend` never arrived. */
 const CLOSE_FALLBACK_SLACK_MS = 100;
 
+/** Drag-down-to-close on the grab handle: a release past this distance (px),
+ * or a flick faster than the velocity below that has moved at least
+ * FLICK_MIN_PX, closes; anything less snaps back. */
+const DRAG_CLOSE_PX = 80;
+const FLICK_MIN_PX = 20;
+const FLICK_PX_PER_MS = 0.5;
+
 /** Longest duration+delay (ms) of the element's `transition-*` lists, or 0
  * when it cannot be measured (no `getComputedStyle`, e.g. the fake DOM) or no
  * transition runs (`transition: none`, reduced motion's ~0.001ms). */
@@ -122,6 +129,13 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
   /** Pending finish of a running close animation, or null. */
   let cancelClose = null;
   let closing = false;
+  let drag = null;
+
+  function resetDrag() {
+    drag = null;
+    sheet.style.transition = "";
+    sheet.style.transform = "";
+  }
 
   // `on` = displayed, `shown` = animated-in state (css/app.css "sheets"):
   // `shown` is added one frame after `on` so the transition has a start
@@ -133,11 +147,13 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
   function finishClose() {
     if (cancelClose) { cancelClose(); cancelClose = null; }
     closing = false;
+    resetDrag();
     backdrop.classList.remove("on");
   }
 
   function open() {
     if (cancelClose) finishClose();
+    resetDrag();
     invokerEl = document.activeElement;
     backdrop.classList.add("on");
     void backdrop.offsetWidth; // commit the hidden state before `shown` (no-op without layout)
@@ -151,6 +167,7 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
 
   function close() {
     if (!isOpen()) return;
+    resetDrag();
     // Modal-stack bookkeeping, onClose and focus return stay synchronous;
     // only the visual hide waits for the transition.
     closing = true;
@@ -174,6 +191,42 @@ export function createSheetDialog({ ariaLabel, variant, onClose }) {
     if (invokerEl && typeof invokerEl.focus === "function") invokerEl.focus();
     invokerEl = null;
   }
+
+  // Drag the grab handle down to dismiss (touch or pen; a mouse has the close button and Escape). Only the
+  // handle starts a drag, so the scrolling body is never affected; css sets
+  // `touch-action:none` on it so the browser does not claim the gesture.
+  // While dragging the sheet follows the finger with its transition off;
+  // on release the inline overrides are cleared so the normal CSS
+  // transition animates either the close or the snap back (reduced motion
+  // collapses both globally).
+  function dragEnd(event, cancelled) {
+    if (!drag || (event.pointerId !== undefined && event.pointerId !== drag.id)) return;
+    const { dy, startT } = drag;
+    resetDrag();
+    if (typeof grab.releasePointerCapture === "function") {
+      try { grab.releasePointerCapture(event.pointerId); } catch { /* capture already gone */ }
+    }
+    const elapsed = Math.max(1, (event.timeStamp ?? Date.now()) - startT);
+    const flick = dy >= FLICK_MIN_PX && dy / elapsed >= FLICK_PX_PER_MS;
+    if (!cancelled && (dy >= DRAG_CLOSE_PX || flick)) close();
+  }
+
+  grab.addEventListener("pointerdown", (event) => {
+    if (!isOpen() || drag || event.pointerType === "mouse" || (event.button !== undefined && event.button > 0)) return;
+    drag = { id: event.pointerId, startY: event.clientY, startT: event.timeStamp ?? Date.now(), dy: 0 };
+    if (typeof grab.setPointerCapture === "function") {
+      try { grab.setPointerCapture(event.pointerId); } catch { /* synthetic pointer */ }
+    }
+  });
+  grab.addEventListener("pointermove", (event) => {
+    if (!drag || closing || (event.pointerId !== undefined && event.pointerId !== drag.id)) return;
+    drag.dy = Math.max(0, event.clientY - drag.startY);
+    sheet.style.transition = "none";
+    sheet.style.transform = `translateY(${drag.dy}px)`;
+  });
+  grab.addEventListener("pointerup", (event) => dragEnd(event, false));
+  grab.addEventListener("pointercancel", (event) => dragEnd(event, true));
+  grab.addEventListener("lostpointercapture", (event) => dragEnd(event, true));
 
   // Tapping the backdrop itself (outside the sheet) dismisses it — the
   // real-DOM equivalent of the mockup's scrim-tap-to-close affordance.

@@ -29,6 +29,19 @@ function setup({ menu = false } = {}) {
   return { doc, trigger, panel, items, d, key, outside: doc.createElement("div") };
 }
 
+test("menu opens when querySelectorAll returns a NodeList without .filter (real browsers)", () => {
+  const { trigger, panel, d } = setup({ menu: true });
+  const real = panel.querySelectorAll.bind(panel);
+  panel.querySelectorAll = (sel) => {
+    const list = real(sel);
+    return { length: list.length, item: (i) => list[i], [Symbol.iterator]: () => list[Symbol.iterator]() };
+  };
+  trigger.dispatchEvent({ type: "click", target: trigger });
+  assert.equal(d.isOpen(), true);
+  assert.equal(panel.hidden, false);
+  assert.equal(trigger.getAttribute("aria-expanded"), "true");
+});
+
 test("starts closed: aria-expanded=false, panel hidden", () => {
   const { trigger, panel } = setup();
   assert.equal(trigger.getAttribute("aria-expanded"), "false");

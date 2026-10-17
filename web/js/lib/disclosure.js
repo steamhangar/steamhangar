@@ -30,7 +30,8 @@ export function createDisclosure({ trigger, panel, menu = false, doc = document,
   let isOpen = false;
 
   const items = () =>
-    panel.querySelectorAll('[role="menuitem"]').filter((n) => !n.hidden && n.getAttribute("aria-disabled") !== "true");
+    // Array.from: a real NodeList has no .filter (it threw on the first tap).
+    Array.from(panel.querySelectorAll('[role="menuitem"]')).filter((n) => !n.hidden && n.getAttribute("aria-disabled") !== "true");
 
   function focusItem(i) {
     const list = items();
