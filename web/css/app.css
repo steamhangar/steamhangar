@@ -135,7 +135,52 @@
 .lib-sub{
   display:block; font-size:11px; font-weight:500; color:var(--dim-2); letter-spacing:.3px;
 }
-.lib-tools{ display:flex; gap:4px; flex-wrap:nowrap; flex:none; align-items:center; }
+/* WP LIBRARY-1: the tools (sort, layout, Filters, Select) are the right half
+   of the toolbar row `.lib-bar`. Below BP-M they take a line of their own and
+   wrap rather than overflow; BP-M puts them at the row's right end. */
+.lib-tools{
+  display:flex; gap:6px; flex-wrap:wrap; flex:1 1 100%; min-width:0;
+  align-items:center; justify-content:flex-end;
+}
+.lib-tools .btn{ height:var(--tool-h); padding-top:0; padding-bottom:0; white-space:nowrap; gap:6px; }
+.lib-tools .btn.on{ background:var(--accent-glow); color:var(--accent); border-color:var(--accent); }
+.lib-tools .fcount{
+  min-width:16px; height:16px; padding:0 4px; border-radius:8px; display:inline-grid; place-items:center;
+  background:var(--accent); color:var(--accent-ink); font-size:10px; font-weight:700; line-height:1;
+}
+.lib-tools .fcount[hidden]{ display:none; }
+.lib-tools .iconbtn{ width:var(--tool-h); height:var(--tool-h); }
+.lib-filtersbtn{ position:static; }
+.lib-filtersbtn[hidden]{ display:none; }
+/* Popover / menu surface (WP LIBRARY-1): theme tokens only; the fade reuses
+   the dialog keyframes, and the global reduced-motion block in theme.css
+   collapses its duration. `.pop[hidden]` is re-declared because the display
+   rules below are author rules and would beat the UA `[hidden]`. */
+.pop{
+  position:absolute; z-index:30; top:calc(100% + 4px); right:0;
+  background:var(--raised-2); border:1px solid var(--line); border-radius:var(--r-l);
+  animation:dialog-fade var(--dur-fade) var(--ease-sheet);
+}
+.pop[hidden]{ display:none; }
+.lib-split{ position:relative; display:flex; align-items:stretch; flex:none; }
+.lib-split .btn{ height:var(--tool-h, 36px); padding-top:0; padding-bottom:0; white-space:nowrap; }
+.lib-split .btn[hidden]{ display:none; }
+.lib-split > .btn:first-child:not([hidden]){ border-top-right-radius:0; border-bottom-right-radius:0; }
+.lib-split .split-more{ gap:6px; }
+.lib-split > .btn:not([hidden]) + .split-more{
+  border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--accent-ink); padding-left:9px; padding-right:9px;
+}
+.lib-split:not(.solo) .split-lbl{ display:none; }
+.pop.menu{ min-width:100%; width:max-content; padding:4px; display:flex; flex-direction:column; }
+.pop.menu .menuitem{
+  text-align:left; padding:9px 12px; border-radius:var(--r-s); color:var(--text); font-size:12.5px;
+  background:transparent; border:0; cursor:pointer; white-space:normal;
+}
+.pop.menu .menuitem[hidden]{ display:none; }
+.pop.menu .menuitem:disabled{ opacity:.45; cursor:not-allowed; }
+@media (hover:hover) and (pointer:fine){
+  .pop.menu .menuitem:hover:not(:disabled){ background:var(--raised); }
+}
 /* WP LIB-SORT: option select + direction toggle left of the layout switch. */
 .lib-sort{ display:flex; align-items:center; gap:2px; margin-right:6px; min-width:0; }
 .lib-sort-sel{
@@ -143,11 +188,14 @@
   background:var(--raised); color:var(--text); border:1px solid var(--line);
   font:inherit; font-size:12px;
 }
-.lib-sort-dir{ font-size:15px; line-height:1; }
+.lib-sort-sel{ height:var(--tool-h, 32px); }
+.lib-sort-dir{ color:var(--text); }
 @media (max-width:400px){ .lib-sort-sel{ max-width:104px; } }
 /* WP D23: metadata filters (category chips, genre, rating, years). */
-.lib-meta{ display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:0 0 12px; }
+.lib-meta{ display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:0; }
 .lib-meta[hidden]{ display:none; }
+.lib-meta.pop{ padding:12px; width:min(340px, 100%); box-sizing:border-box; }
+.lib-meta.pop .lib-sort-sel{ height:32px; }
 .lib-meta-cats{ display:flex; flex-wrap:wrap; gap:7px; }
 .lib-meta-year{
   height:32px; width:92px; padding:0 8px; border-radius:10px;
@@ -347,6 +395,7 @@
      when even that minimum plus the buttons does not fit. */
 .lib-bar{
   --tool-h:40px;
+  position:relative; /* anchors the Filters popover (WP LIBRARY-1) */
   display:flex; flex-wrap:wrap; align-items:center;
   gap:10px 12px; margin-bottom:12px; min-width:0;
 }
@@ -362,8 +411,6 @@
 .lib-bar .chips{ flex:1 1 100%; min-width:0; margin:0; padding:2px; }
 .lib-bar .chip{ height:var(--tool-h); padding:0 12px; font-size:12px; }
 .lib-bar .chip:focus-visible{ outline-offset:-2px; }
-.lib-checkbtns{ flex:1 1 auto; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; min-width:0; }
-.lib-checkbtns .btn{ flex:1 1 auto; height:var(--tool-h); padding-top:0; padding-bottom:0; white-space:nowrap; }
 /* The status lines under the toolbar row (small text). `.lib-bar`'s 12px
    bottom margin is the gap to the grid when no line shows; a visible line
    tucks up under the row (-4px) and keeps 12px to whatever follows. */
@@ -557,6 +604,11 @@ button.cappill:active{ transform:scale(.93); }
    always builds — CSS alone decides which is visible (module header rule),
    base case shows the full wording everywhere. */
 .instbadge .ibcompact{ display:none; }
+/* WP LIBRARY-1: one status line per card. The update badge only exists when
+   the status word does not already say it, so it joins the status word on
+   its line instead of taking a second one; the installed-state and package
+   lines stay sub-lines under it. (List rows place it in their own grid.) */
+.meta .updbadge{ flex-basis:auto; margin-top:0; }
 /* "Update available" badge (WP UPD-2): same own-line shape as `.instbadge`
    above, in `--stale` like the mockup's "Update ready" state — the cached
    copy is valid, a newer manifest is upstream. Full word in grid2, the
@@ -1901,8 +1953,7 @@ body.onboarding .nav{ display:none; }
   .lib-filters{ flex-wrap:nowrap; }
   .lib-bar .search{ flex:0 1 var(--search-w); min-width:160px; }
   .lib-bar .chips{ flex:1 1 auto; }
-  .lib-checkbtns{ flex:0 0 auto; margin-left:auto; flex-wrap:nowrap; }
-  .lib-checkbtns .btn{ flex:none; }
+  .lib-tools{ flex:0 0 auto; margin-left:auto; flex-wrap:nowrap; }
   /* WP WEB-FIX-3: the pre-fix desktop values, unchanged from BP-M up. */
   .search input{ font-size:13px; }
   input.inp, .inp input{ font-size:12.5px; }

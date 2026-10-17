@@ -436,7 +436,7 @@ test(".lib-bar: one wrapping flex row, centre-aligned, one shared --tool-h heigh
   assert.match(bar, /flex-wrap:\s*wrap/, "the buttons must be able to wrap onto their own line");
   assert.match(bar, /align-items:\s*center/, "search, chips and buttons share one centre line");
   assert.match(bar, /--tool-h:\s*40px/);
-  for (const sel of [".lib-bar .search", ".lib-bar .chip", ".lib-checkbtns .btn"]) {
+  for (const sel of [".lib-bar .search", ".lib-bar .chip", ".lib-tools .btn"]) {
     const body = ruleBody(appTop, sel);
     assert.ok(body, `${sel} rule missing`);
     assert.match(body, /(^|[;\s])height:\s*var\(--tool-h\)/, `${sel} must be exactly --tool-h tall`);
@@ -446,16 +446,17 @@ test(".lib-bar: one wrapping flex row, centre-aligned, one shared --tool-h heigh
   assert.match(ruleBody(appTop, ".lib-bar .chips"), /padding:\s*2px\s*;/);
   assert.match(ruleBody(appTop, ".lib-filters"), /flex-wrap:\s*wrap/, "below BP-M: search on its own line, chips on the next");
   assert.match(ruleBody(appTop, ".lib-bar .search"), /flex:\s*1 1 100%/);
-  assert.match(ruleBody(appTop, ".lib-checkbtns"), /flex-wrap:\s*wrap/);
-  assert.match(ruleBody(appTop, ".lib-checkbtns .btn"), /white-space:\s*nowrap/);
+  assert.match(ruleBody(appTop, ".lib-tools"), /flex-wrap:\s*wrap/, "below BP-M the tools wrap onto their own line");
+  assert.match(ruleBody(appTop, ".lib-tools .btn"), /white-space:\s*nowrap/);
+  assert.match(bar, /position:\s*relative/, "the Filters popover anchors to the bar");
 });
 
-test("BP-M: search + chips on one line, search at --search-w, buttons pushed right and wrapping as one group", () => {
+test("BP-M: search + chips on one line, search at --search-w, tools pushed right as one group", () => {
   const block = findMediaBlock(720);
   assert.match(ruleBody(block.body, ".lib-bar") ?? "", /--tool-h:\s*36px/);
   assert.match(ruleBody(block.body, ".lib-filters") ?? "", /flex-wrap:\s*nowrap/);
   assert.match(ruleBody(block.body, ".lib-bar .search") ?? "", /flex:\s*0 1 var\(--search-w\)/);
-  const btns = ruleBody(block.body, ".lib-checkbtns") ?? "";
+  const btns = ruleBody(block.body, ".lib-tools") ?? "";
   assert.match(btns, /margin-left:\s*auto/, "a wrapped button group must sit at the right end");
   assert.match(btns, /flex:\s*0 0 auto/);
   assert.match(btns, /flex-wrap:\s*nowrap/);

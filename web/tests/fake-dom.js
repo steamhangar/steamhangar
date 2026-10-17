@@ -590,6 +590,7 @@ export function fakeKeyEvent(key) {
     get defaultPrevented() {
       return prevented;
     },
+    stopPropagation() {},
   };
 }
 
