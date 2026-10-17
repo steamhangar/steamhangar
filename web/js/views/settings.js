@@ -743,8 +743,31 @@ function buildExpertPanel(groups) {
   return panel;
 }
 
-/** The "Show expert settings" switch row under the nav; null without
- * expert rows. */
+/** Compact layout = below the width where the section nav becomes a sidebar
+ * (app.css `min-width:1000px`). No `matchMedia` (tests) = wide. */
+const COMPACT_QUERY = "(max-width: 999.98px)";
+let compactMql = null;
+let compactListening = false;
+
+function isCompactLayout() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  compactMql = compactMql || window.matchMedia(COMPACT_QUERY);
+  return compactMql.matches === true;
+}
+
+/** Wide: the switch row sits under the nav. Compact: it is the LAST item of
+ * the About section instead (never persistently visible). One DOM node, so
+ * state, ids and listeners stay single. */
+function placeExpertSwitch() {
+  const row = els.expertRow;
+  if (!row) return;
+  const aboutBody = aboutEls && aboutEls.panel ? aboutEls.panel.querySelector("div.sec-body") : null;
+  if (isCompactLayout() && aboutBody) aboutBody.append(row);
+  else if (els.navEl) els.navEl.append(row);
+}
+
+/** The "Show expert settings" switch row (under the nav, or in About when
+ * compact); null without expert rows. */
 function buildExpertSwitch(groups) {
   const all = EXPERT_GROUPS.flatMap((g) => groups[g.id]);
   if (all.length === 0) return null;
@@ -774,6 +797,7 @@ function buildExpertSwitch(groups) {
     if (item) item.hidden = !expertOn;
     if (!expertOn && activeSection === "expert") selectSection(DEFAULT_SECTION);
   });
+  els.expertRow = row;
   return row;
 }
 
@@ -804,7 +828,7 @@ function onNavKey(ev) {
 
 /** The section nav: one button per built panel (Expert only while the
  * switch is on), then the expert switch row. */
-function buildNav(switchRow) {
+function buildNav() {
   const nav = el("nav", "snav");
   nav.setAttribute("aria-label", "Settings sections");
   const list = el("div", "snav-list");
@@ -837,7 +861,7 @@ function buildNav(switchRow) {
     list.append(item);
   }
   nav.append(list);
-  if (switchRow) nav.append(switchRow);
+  els.navEl = nav;
   return nav;
 }
 
@@ -1469,6 +1493,8 @@ function resetPanelState() {
   els.navInfo = new Map();
   els.navItems = new Map();
   els.gcWarn = null;
+  els.expertRow = null;
+  els.navEl = null;
 }
 
 function fullRender() {
@@ -1534,7 +1560,14 @@ function fullRender() {
   if (expertPanel) main.append(expertPanel);
 
   const lay = el("div", "settings-lay");
-  lay.append(buildNav(buildExpertSwitch(placed.expert)), main);
+  buildExpertSwitch(placed.expert);
+  lay.append(buildNav(), main);
+  placeExpertSwitch();
+  // Re-place when the viewport crosses the breakpoint (one listener).
+  if (!compactListening && compactMql && compactMql.addEventListener) {
+    compactMql.addEventListener("change", () => { if (mounted()) placeExpertSwitch(); });
+    compactListening = true;
+  }
   els.body.append(lay);
   selectSection(els.panels.has(activeSection) ? activeSection : DEFAULT_SECTION);
 
