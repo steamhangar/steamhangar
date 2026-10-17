@@ -3694,6 +3694,11 @@ below carry their own later dates, item 12 is the current one).
         for up to 5 minutes after a vault-api restart (ring not filled yet);
         no test for a live answer with the feed ok but `active_clients`
         null or missing
+      - [ ] Android Downloads subline counts the plain job poll
+        (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
+        not the ranged History list it shows; same "N in history" bug the
+        web fixed in DOWNLOADS-3 (rc20.1). Port the web `history-paging.js`
+        count and the first-10 + "Show more" paging.
       - [ ] Android Downloads follows LIVE-DELAY-1 (default range live,
         `active_clients` in the live answer); the Kotlin twin test no longer
         pins the web default
