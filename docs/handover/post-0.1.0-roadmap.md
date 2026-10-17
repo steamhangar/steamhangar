@@ -146,6 +146,10 @@ Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
 question that is not answered in its session is listed here and removed
 once decided (the decision then lives in the item it belongs to).
 
+- **Downloads action name** (rc20 visual check): the Downloads button reads
+  "Complete now", the mockup says "Verify". Weg A keep "Complete now",
+  Weg B rename to "Verify" to match the mockup and the Verifying state word.
+  Recommendation: Weg B if the visual check finds the label confusing.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.

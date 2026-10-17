@@ -3476,6 +3476,10 @@ below carry their own later dates, item 12 is the current one).
         (.dialog-backdrop toggles .on directly; currently animates in only)
       - [ ] nit: Add-a-device tabs have no icons and the dialog has no
         numbered steps, unlike the mockup (`docs/design/rc20/`)
+      - [ ] nit (DOWNLOADS-1): the generic failure text could add "If it fails
+        again, check the log"
+      - [ ] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
+        theme.css) and a stale header comment in `library.js`
       - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
         page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
         after main CI is green
