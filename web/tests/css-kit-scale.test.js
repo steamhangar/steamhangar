@@ -129,7 +129,9 @@ test("kit.css: every selector starts with .kit (opt-in scope, nothing leaks into
     }
   }
   const atBlocks = headers.filter((h) => h.startsWith("@"));
-  for (const at of atBlocks) assert.match(at, /^@media/, `unexpected at-rule in kit.css: ${at}`);
+  // @container is allowed: ADR-0028 sizes page compositions with container
+  // queries, never with viewport breakpoints. Anything else is rejected.
+  for (const at of atBlocks) assert.match(at, /^@(media|container)/, `unexpected at-rule in kit.css: ${at}`);
 });
 
 // ---------------------------------------------------------------------

@@ -167,12 +167,14 @@
    A 400px inline-size container: the same markup renders inside it so the
    container-query behaviour of later page compositions can be checked
    next to the full-width rendering. */
-.kit .kit-frame{ container-type:inline-size; width:400px; max-width:100%; border:1px dashed var(--line); border-radius:var(--r-l); padding:var(--sp-3); }
+.kit .kit-frame{ container-type:inline-size; width:400px; max-width:100%; border:1px dashed var(--line); border-radius:var(--r-l); padding:var(--sp-3); display:grid; gap:var(--sp-6); }
 .kit .kit-section{ display:grid; gap:var(--sp-4); }
 .kit .kit-section > h2{ font-size:var(--fs-5); margin:0; padding-bottom:var(--sp-2); border-bottom:1px solid var(--line-soft); }
 .kit .kit-row{ display:flex; flex-wrap:wrap; gap:var(--sp-3); align-items:center; }
 .kit .kit-list{ display:grid; gap:var(--sp-2); }
-.kit .kit-page{ display:grid; gap:var(--sp-8); }
+/* The page root itself carries `.kit` (section.view-kit.kit.kit-page), so
+   this is a compound selector, not a descendant one. */
+.kit.kit-page{ display:grid; gap:var(--sp-8); }
 
 /* ---------- [hidden] guards ----------
    Every class above that carries an author `display` declaration would
@@ -181,5 +183,5 @@
    specificity. */
 .kit .page-head[hidden], .kit .sechd[hidden], .kit .btn[hidden], .kit .pill[hidden], .kit .seg[hidden],
 .kit .tiles[hidden], .kit .tile[hidden], .kit .meter i[hidden], .kit .fcard[hidden], .kit .fg[hidden],
-.kit .field[hidden], .kit .field .lh[hidden], .kit .gchip[hidden], .kit .badge[hidden], .kit .jr[hidden],
-.kit .kit-frame[hidden], .kit .kit-section[hidden], .kit .kit-row[hidden], .kit .kit-list[hidden]{ display:none; }
+.kit .field[hidden], .kit .field .lh[hidden], .kit .field label[hidden], .kit .gchip[hidden], .kit .badge[hidden], .kit .jr[hidden],
+.kit .kit-frame[hidden], .kit .kit-section[hidden], .kit .kit-row[hidden], .kit .kit-list[hidden], .kit.kit-page[hidden]{ display:none; }
