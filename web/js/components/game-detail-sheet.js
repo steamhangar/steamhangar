@@ -176,6 +176,8 @@ import { ownedLibrary } from "../owned-singleton.js";
 import { groupGames, groupHasCacheContent, isGroup } from "../lib/content-groups.js";
 import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
 import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "./group-delete-plan.js";
+import { buildIntroNodes, buildPlanNodes, createDeleteConfirm } from "./delete-confirm.js";
+import { createTabs } from "./tabs.js";
 import { buildPackagesSection, packagesStructuralKey, patchPackagesSection } from "./package-list.js";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
@@ -258,48 +260,24 @@ closeBtn.type = "button";
 closeBtn.className = "btn wide ghost";
 closeBtn.textContent = "Close";
 closeBtn.addEventListener("click", () => closeDetail());
-dialog.body.append(contentEl, gcSectionEl, closeBtn);
+// `gcSectionEl` lives inside the Maintenance tab (render() places it); it is
+// a persistent element because the GC flow repaints it on its own.
+gcSectionEl.className = "detail-box";
+dialog.body.append(contentEl, closeBtn);
+
+/** Selected tab of the open sheet; survives the structural re-renders a poll
+ * tick can cause, reset to Overview on every open(). */
+let activeTab = "overview";
 
 // ---------------------------------------------------------------------
-// Delete confirm — a second persistent overlay, reusing views/library.js's
-// own bulk-delete-confirm markup/CSS 1:1 (`.dialog-backdrop`/`.dialog`/
-// `.cflist`/`.cflabel`/`.cftotal`/`.cfsolo`) so single-game and bulk delete
-// never describe the same arithmetic two different ways.
+// Delete confirm — the shared components/delete-confirm.js (WP
+// LIBRARY-DETAIL-1; views/library.js uses the same component for the bulk
+// delete), a second persistent overlay on `document.body`. Single-game and
+// bulk delete describe the same arithmetic the same way because they render
+// it with the same builders.
 // ---------------------------------------------------------------------
 
-const deleteBackdrop = document.createElement("div");
-deleteBackdrop.className = "dialog-backdrop";
-const deleteDialogEl = document.createElement("div");
-deleteDialogEl.className = "dialog";
-deleteDialogEl.setAttribute("role", "alertdialog");
-deleteDialogEl.setAttribute("aria-modal", "true");
-deleteDialogEl.setAttribute("aria-label", "Confirm deletion");
-const dTitle = document.createElement("h3");
-dTitle.textContent = "Delete from cache?";
-const dText = document.createElement("p");
-const dNote = document.createElement("div");
-const dRow = document.createElement("div");
-dRow.className = "row";
-const dNo = document.createElement("button");
-dNo.type = "button";
-dNo.className = "btn ghost sm";
-dNo.textContent = "Keep";
-const dYes = document.createElement("button");
-dYes.type = "button";
-dYes.className = "btn danger sm";
-dYes.textContent = "Delete";
-dRow.append(dNo, dYes);
-deleteDialogEl.append(dTitle, dText, dNote, dRow);
-deleteBackdrop.appendChild(deleteDialogEl);
-document.body.appendChild(deleteBackdrop);
-
-dNo.addEventListener("click", closeDeleteConfirm);
-dYes.addEventListener("click", confirmDelete);
-
-/** Element to return focus to on close, captured fresh on every open() —
- * same pattern as `sheet-dialog.js`'s `invokerEl` (WP 4a.8: this dialog had
- * no focus management at all before this WP). */
-let deleteInvokerEl = null;
+const deleteConfirm = createDeleteConfirm({ onConfirm: confirmDelete, onClose: onDeleteConfirmClosed });
 
 /** WP TOOL-APPS-2c: the grouped-delete plan the dialog currently shows
  * (null for a plain delete), and a token so a superseded plan fetch drops
@@ -318,33 +296,23 @@ async function openGroupDeleteConfirm(notice) {
   const myGen = ++groupPlanGeneration;
   const appid = state.appid;
   pendingGroupPlan = null;
-  dText.textContent = "Calculating what this would free…";
-  dNote.replaceChildren();
-  dYes.disabled = true;
-  if (!deleteBackdrop.classList.contains("on")) {
-    deleteInvokerEl = document.activeElement;
-    deleteBackdrop.classList.add("on");
-    pushModal(deleteBackdrop, closeDeleteConfirm);
-    dNo.focus();
-  }
+  deleteConfirm.open();
   try {
     const plan = await api.deletePlan(appid);
     if (myGen !== groupPlanGeneration || state.appid !== appid) return;
     const gamesByAppid = namedGamesByAppid();
     const nameFor = (id, serverName) => appTitle(id, gamesByAppid.get(id)?.name || serverName);
     const block = buildGroupDeletePlan(plan, nameFor);
-    dText.textContent = groupDeleteIntro(block.subject, block.freedBytes);
+    deleteConfirm.setIntro(groupDeleteIntro(block.subject, block.freedBytes));
     const noticeEl = notice ? buildNotice(notice) : null;
-    if (noticeEl) dNote.appendChild(noticeEl);
-    dNote.appendChild(block.node);
+    deleteConfirm.setNote(noticeEl ? [noticeEl, block.node] : [block.node]);
     pendingGroupPlan = plan;
-    dYes.disabled = isPlanBlocked(plan);
+    deleteConfirm.setConfirmEnabled(!isPlanBlocked(plan));
     // Review fix (a11y): the re-confirm notice takes focus and is announced.
     if (noticeEl) noticeEl.focus();
   } catch (err) {
     if (myGen !== groupPlanGeneration) return;
-    dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
-    dYes.disabled = true;
+    deleteConfirm.showError(errorText(err));
   }
 }
 
@@ -355,19 +323,7 @@ function openDeleteConfirm() {
     return;
   }
   pendingGroupPlan = null;
-  dText.textContent = "Calculating what this would free…";
-  dNote.replaceChildren();
-  dYes.disabled = true;
-  deleteInvokerEl = document.activeElement;
-  deleteBackdrop.classList.add("on");
-  // WP 4a.8: also makes the sheet BEHIND this dialog inert; Escape routes
-  // through lib/modal-stack.js's single dispatcher (see its header) rather
-  // than a listener bound here directly — an independent one raced with the
-  // sheet's own and closed BOTH on one Escape press, found live.
-  pushModal(deleteBackdrop, closeDeleteConfirm);
-  // "Keep" (the non-destructive default) rather than "Delete" — the usual
-  // alertdialog convention of not defaulting focus onto the dangerous action.
-  dNo.focus();
+  deleteConfirm.open();
 
   const gamesByAppid = namedGamesByAppid();
   const activeJobAppids = activeJobAppidsFrom(state.jobs);
@@ -377,75 +333,20 @@ function openDeleteConfirm() {
     gamesByAppid,
     activeJobAppids,
   });
-  renderDeletePlan(plan, gamesByAppid);
-  dYes.disabled = false;
+  const name = state.detail?.name || state.name || UNKNOWN_APP_NAME;
+  deleteConfirm.setIntro(buildIntroNodes(name, plan));
+  deleteConfirm.setNote(buildPlanNodes(plan, gamesByAppid, namesFor));
+  deleteConfirm.setConfirmEnabled(true);
+}
+
+/** Runs on every close of the shared dialog (Keep, Escape, after a delete). */
+function onDeleteConfirmClosed() {
+  groupPlanGeneration++;
+  pendingGroupPlan = null;
 }
 
 function closeDeleteConfirm() {
-  groupPlanGeneration++;
-  pendingGroupPlan = null;
-  deleteBackdrop.classList.remove("on");
-  popModal(deleteBackdrop);
-  if (deleteInvokerEl && typeof deleteInvokerEl.focus === "function") deleteInvokerEl.focus();
-  deleteInvokerEl = null;
-}
-
-function renderDeletePlan(plan, gamesByAppid) {
-  const freedText = formatBytesGB(plan.freedBytes) || "0 GB";
-  const occupiedText = formatBytesGB(plan.occupiedBytes) || "0 GB";
-  const name = state.detail?.name || state.name || UNKNOWN_APP_NAME;
-  dText.textContent = `Deleting ${name} frees about ${freedText} of the ${occupiedText} it occupies.`;
-
-  dNote.replaceChildren();
-  if (plan.sharedRows.length === 0) {
-    const p = document.createElement("p");
-    p.className = "cfsolo";
-    p.textContent = `No shared depots — the full ${occupiedText} is freed.`;
-    dNote.appendChild(p);
-    return;
-  }
-
-  const label = document.createElement("p");
-  label.className = "cflabel";
-  label.textContent = `${plan.sharedRows.length} shared depot${plan.sharedRows.length > 1 ? "s" : ""}`;
-  dNote.appendChild(label);
-
-  const ul = document.createElement("ul");
-  ul.className = "cflist";
-  for (const row of plan.sharedRows) {
-    const li = document.createElement("li");
-    li.className = row.free ? "free" : "keep";
-    const did = document.createElement("span");
-    did.className = "did";
-    did.textContent = String(row.depotid);
-    const mk = document.createElement("span");
-    mk.className = "mk";
-    mk.textContent = row.free ? "freed" : "kept";
-    const dsz = document.createElement("span");
-    dsz.className = "dsz";
-    dsz.textContent = formatBytesGB(row.sizeBytes) || "—";
-    const why = document.createElement("span");
-    why.className = "why";
-    if (row.free) {
-      why.textContent = row.others.length
-        ? `no cached co-owner — ${namesFor(row.others, gamesByAppid)} ${row.others.length > 1 ? "are" : "is"} not cached`
-        : "every game mapping this depot is in this selection";
-    } else {
-      why.textContent = `${namesFor(row.holderAppids, gamesByAppid)} still cached`;
-    }
-    li.append(did, mk, dsz, why);
-    ul.appendChild(li);
-  }
-  dNote.appendChild(ul);
-
-  const total = document.createElement("p");
-  total.className = "cftotal";
-  const b1 = document.createElement("b");
-  b1.textContent = freedText;
-  const b2 = document.createElement("b");
-  b2.textContent = formatBytesGB(plan.keptBytes) || "0 GB";
-  total.append(b1, " freed · ", b2, " stays on disk");
-  dNote.appendChild(total);
+  deleteConfirm.close();
 }
 
 async function confirmDelete() {
@@ -454,8 +355,7 @@ async function confirmDelete() {
     await confirmGroupDelete(appid, pendingGroupPlan);
     return;
   }
-  dYes.disabled = true;
-  dNo.disabled = true;
+  deleteConfirm.setBusy(true);
   try {
     // Reports what the SERVER actually freed (`CacheDeletionOut.total_bytes_freed`),
     // never this dialog's preview plan — the server re-checks every depot's
@@ -470,28 +370,26 @@ async function confirmDelete() {
     closeDeleteConfirm();
     showToast(errorText(err), { warn: true });
   } finally {
-    dYes.disabled = false;
-    dNo.disabled = false;
+    deleteConfirm.setBusy(false);
   }
 }
 
 /** WP TOOL-APPS-2c: send the grouped delete with exactly the confirmed
  * members; on a 409 "members differ" fetch the plan again and ask again. */
 async function confirmGroupDelete(appid, plan) {
-  dYes.disabled = true;
-  dNo.disabled = true;
+  deleteConfirm.setBusy(true);
   try {
     const result = await api.deleteCacheWithPackages(appid, planMemberIds(plan));
-    dNo.disabled = false;
+    deleteConfirm.setBusy(false);
     closeDeleteConfirm();
     showToast(`Freed ${formatBytesGB(result.total_bytes_freed) || "0 GB"}`);
     store.refreshNow();
     closeDetail();
   } catch (err) {
-    dNo.disabled = false;
+    deleteConfirm.setBusy(false);
     if (isMembersMismatch(err)) {
       // Keep focus inside the dialog while the plan is fetched again.
-      dNo.focus();
+      deleteConfirm.focusKeep();
       store.refreshNow();
       await openGroupDeleteConfirm(MEMBERS_CHANGED_NOTICE);
       return;
@@ -572,6 +470,7 @@ export function openDetail(appid, name) {
   state.store = null;
   depotExpanded.clear();
   lastStructuralKey = null;
+  activeTab = "overview";
 
   render();
   dialog.open();
@@ -1153,6 +1052,23 @@ function buildFactLines(gameLike) {
   confirmedLine.textContent = confirmedCurrentText(gameLike.last_prefill_at, gameLike.last_manifest_check);
   facts.appendChild(confirmedLine);
 
+  // LIBRARY-DETAIL-1: the cache status stays visible on Overview (the Verify
+  // button lives in Maintenance). Distinct data-role from the Verify box's
+  // "complete-line" so neither copy shadows the other.
+  if (showsCompletenessBlock(gameLike, currentGroup())) {
+    const cacheLine = document.createElement("div");
+    cacheLine.dataset.role = "cache-status";
+    cacheLine.textContent = completenessLine(gameLike);
+    facts.appendChild(cacheLine);
+    if (isDamagedOnly(gameLike)) {
+      const damaged = document.createElement("div");
+      damaged.className = "tx-partial";
+      damaged.dataset.role = "cache-damaged";
+      damaged.textContent = DAMAGED_NOTE;
+      facts.appendChild(damaged);
+    }
+  }
+
   // WP WEB-FEAT-SUGGEST-2: the Phase 4h panel's "last changed N days ago",
   // moved here. Hidden (not absent) when there is no real observation, so
   // patchVolatile can fill it in place on a later tick.
@@ -1601,6 +1517,70 @@ function renderNotTracked() {
   return wrap;
 }
 
+/** The Download / Resume / Pause / Update-now row under the header, or null. */
+function buildPrimaryAction(gameLike, trackedJob) {
+  if (trackedJob) return buildJobControlRow(trackedJob);
+  const action = statusAction(gameLike, undefined, false);
+  if (action) return buildDownloadButton(action);
+  // WP UPD-6 review fix: a flagged cached game (or group) offers its update.
+  const updateAppids = currentUpdateAppids();
+  if (updateAppids.length) return buildUpdateNowButton(updateAppids, () => startSheetUpdate(updateAppids));
+  return null;
+}
+
+/** A titled box of the Maintenance tab. */
+function buildMaintenanceBox(title, children, { danger = false } = {}) {
+  const box = document.createElement("div");
+  box.className = danger ? "detail-box detail-box-danger" : "detail-box";
+  const h = document.createElement("h4");
+  h.className = "detail-box-title";
+  h.textContent = title;
+  box.append(h, ...children);
+  return box;
+}
+
+/**
+ * The Maintenance tab: Verify (the completeness block with its button),
+ * garbage collection, and the red "Delete from cache" zone. Boxes that do
+ * not apply to this game are left out; the GC box is the persistent
+ * `gcSectionEl` (empty and hidden when the game has no depots).
+ */
+function buildMaintenancePanel(gameLike, group) {
+  const panel = document.createElement("div");
+  panel.className = "detail-panel";
+  panel.dataset.role = "maintenance";
+
+  const verifyIds = currentVerifyAppids();
+  const completeness = buildCompletenessSection(
+    gameLike,
+    group,
+    verifyIds,
+    () => startSheetVerify(verifyIds),
+    sheetTitle(gameLike),
+  );
+  if (completeness) panel.append(buildMaintenanceBox("Verify", [completeness]));
+
+  panel.append(gcSectionEl);
+
+  // WP TOOL-APPS-2c: a game whose packages hold bytes can be deleted too.
+  const canDelete = hasVisibleCacheContent(gameLike) || (group && groupHasCacheContent(group));
+  if (canDelete) {
+    const text = document.createElement("p");
+    text.className = "hint";
+    text.textContent = "Removes this game's chunks from the vault. Depots another cached game still uses stay.";
+    panel.append(buildMaintenanceBox("Delete from cache", [text, buildDeleteButton()], { danger: true }));
+  }
+
+  if (!completeness && !canDelete && !(state.detail && state.detail.depots.length)) {
+    const none = document.createElement("p");
+    none.className = "hint";
+    none.dataset.role = "maintenance-empty";
+    none.textContent = "Nothing to maintain until this game has cached content.";
+    panel.append(none);
+  }
+  return panel;
+}
+
 /** Full rebuild of the sheet body from `state` — called on open(), once the
  * fetch settles, and whenever a games/jobs poll tick's structural key
  * changed (see the round-7 comparison in the store subscriptions below). */
@@ -1637,35 +1617,33 @@ function render() {
 
   contentEl.append(buildHeaderArt(state.appid));
   contentEl.append(buildHeader(gameLike, liveJob));
+
+  // The primary action (job controls, download or update) stays above the
+  // tabs: it is about the game, not about one tab.
+  const actions = buildPrimaryAction(gameLike, trackedJob);
+  if (actions) contentEl.append(actions);
+
   // WP CARD-LAYOUT-1: everything about the GAME (store details, only when
-  // VAULT_STORE_DETAILS is on and the store knew the app) comes directly
-  // under the header; everything about the HANGAR (cache facts, installed
-  // on, packages, depots, delete, GC) follows. Absent block: order unchanged.
+  // VAULT_STORE_DETAILS is on and the store knew the app) comes first on the
+  // Overview tab; everything about the HANGAR (cache facts, installed on,
+  // packages) follows. Absent block: order unchanged.
+  const overview = document.createElement("div");
+  overview.className = "detail-panel";
   const storeBlock = buildStoreBlock();
-  if (storeBlock) contentEl.append(storeBlock);
+  if (storeBlock) overview.append(storeBlock);
   const toolNote = buildToolAppNote(gameLike);
-  if (toolNote) contentEl.append(toolNote);
+  if (toolNote) overview.append(toolNote);
   const notOwnedNote = buildNotOwnedNote(gameLike);
-  if (notOwnedNote) contentEl.append(notOwnedNote);
-  contentEl.append(buildFactLines(gameLike));
-  // WP CACHE-COMPLETE-1c: completeness figure and "Verify".
-  const verifyIds = currentVerifyAppids();
-  const completeness = buildCompletenessSection(
-    gameLike,
-    currentGroup(),
-    verifyIds,
-    () => startSheetVerify(verifyIds),
-    sheetTitle(gameLike),
-  );
-  if (completeness) contentEl.append(completeness);
+  if (notOwnedNote) overview.append(notOwnedNote);
+  overview.append(buildFactLines(gameLike));
 
   const installedSection = buildInstalledSection(gameLike);
-  if (installedSection) contentEl.append(installedSection);
+  if (installedSection) overview.append(installedSection);
 
   // WP TOOL-APPS-2c: the game's content packages.
   const group = currentGroup();
   if (group) {
-    contentEl.append(
+    overview.append(
       buildPackagesSection(group, {
         groupSizeBytes: group.group_size_bytes,
         ...packageJobLookups(),
@@ -1674,24 +1652,26 @@ function render() {
     );
   }
 
-  if (trackedJob) {
-    contentEl.append(buildJobControlRow(trackedJob));
-  } else {
-    const action = statusAction(gameLike, undefined, false);
-    if (action) contentEl.append(buildDownloadButton(action));
-    else {
-      // WP UPD-6 review fix: a flagged cached game (or group) offers its update.
-      const updateAppids = currentUpdateAppids();
-      if (updateAppids.length) contentEl.append(buildUpdateNowButton(updateAppids, () => startSheetUpdate(updateAppids)));
-    }
-  }
+  const depotsPanel = document.createElement("div");
+  depotsPanel.className = "detail-panel";
+  depotsPanel.append(buildDepotsSection());
 
-  contentEl.append(buildDepotsSection());
+  const maintenance = buildMaintenancePanel(gameLike, group);
 
-  // WP TOOL-APPS-2c: a game whose packages hold bytes can be deleted too.
-  if (hasVisibleCacheContent(gameLike) || (group && groupHasCacheContent(group))) {
-    contentEl.append(buildDeleteButton());
-  }
+  const tabs = createTabs({
+    idPrefix: "detail",
+    label: "Game detail sections",
+    tabs: [
+      { id: "overview", label: "Overview", panel: overview },
+      { id: "depots", label: "Depots", panel: depotsPanel },
+      { id: "maintenance", label: "Maintenance", panel: maintenance },
+    ],
+    selected: activeTab,
+    onSelect: (id) => {
+      activeTab = id;
+    },
+  });
+  contentEl.append(tabs.tablist, overview, depotsPanel, maintenance);
 
   renderGcSection();
 
@@ -1729,6 +1709,8 @@ function patchVolatile() {
   // WP CACHE-COMPLETE-1c: the figures move without a structural change.
   const completeLineEl = contentEl.querySelector('[data-role="complete-line"]');
   if (completeLineEl) completeLineEl.textContent = completenessLine(gameLike);
+  const cacheStatusEl = contentEl.querySelector('[data-role="cache-status"]');
+  if (cacheStatusEl) cacheStatusEl.textContent = completenessLine(gameLike);
   const completeGroupEl = contentEl.querySelector('[data-role="complete-group"]');
   if (completeGroupEl) completeGroupEl.textContent = groupCompletenessLine(currentGroup()) || "";
 
@@ -1825,13 +1807,13 @@ function renderGcSection() {
   gcConfirmBackdrop.classList.toggle("on", showGcConfirm);
   gcConfirmWasOpen = showGcConfirm;
   // "Cancel" (the non-destructive default), not "Delete" — same convention
-  // as the delete-confirm dialog's `dNo.focus()`.
+  // as the delete-confirm dialog's "Keep" focus.
   if (openingGcConfirm) gcNo.focus();
 
   if (!state.detail || !state.detail.depots.length) return; // nothing to collect
 
   const heading = document.createElement("h4");
-  heading.className = "sec";
+  heading.className = "detail-box-title";
   heading.textContent = "Garbage collection";
   gcSectionEl.appendChild(heading);
 

@@ -1840,6 +1840,23 @@ body.onboarding .nav{ display:none; }
 .detail-statusrow{ display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px; }
 
 .detail-block{ margin-top:14px; }
+/* LIBRARY-DETAIL-1: Overview / Depots / Maintenance tabs of the detail sheet
+   (components/tabs.js; same keyboard model as the Add-a-device tabs). */
+.tabs{ display:flex; gap:4px; margin:16px 0 0; border-bottom:1px solid var(--line-soft); }
+.tab{
+  margin-bottom:-1px; padding:10px 14px; border:0; border-bottom:2px solid transparent; background:none;
+  color:var(--dim); font:inherit; font-size:13.5px; cursor:pointer;
+}
+.tab[aria-selected="true"]{ color:var(--accent); border-bottom-color:var(--accent); }
+.tab:focus-visible{ outline:2px solid var(--accent); outline-offset:-2px; }
+.detail-panel{ display:flex; flex-direction:column; gap:14px; padding-top:14px; }
+.detail-panel[hidden]{ display:none; }
+.detail-box{ display:flex; flex-direction:column; gap:10px; padding:14px 16px; background:var(--raised); border-radius:var(--r-m); }
+.detail-box:empty{ display:none; }
+.detail-box > .detail-block{ margin-top:0; }
+.detail-box-title{ margin:0; font-size:14px; font-weight:600; }
+.detail-box-danger{ background:none; border:1px solid rgba(255,111,111,.35); }
+.detail-box-danger .detail-block{ align-self:flex-start; }
 .store-desc{ margin:0 0 8px; font-size:12.5px; line-height:1.55; color:var(--text);
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer; }
 .store-desc.expanded{ display:block; overflow:visible; }

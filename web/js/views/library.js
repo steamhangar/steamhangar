@@ -188,7 +188,6 @@ import {
   NOTICE_ACTION,
   OWNED_STATUS,
 } from "../lib/owned-library.js";
-import { pushModal, popModal } from "../lib/modal-stack.js";
 import { createDisclosure } from "../lib/disclosure.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import {
@@ -201,6 +200,7 @@ import {
 } from "../lib/content-groups.js";
 import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE } from "../lib/group-delete.js";
 import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "../components/group-delete-plan.js";
+import { buildIntroNodes, buildPlanNodes, createDeleteConfirm } from "../components/delete-confirm.js";
 
 const LAYOUT_STORAGE_KEY = "steamvault.libraryLayout";
 const SORT_STORAGE_KEY = "steamvault.librarySort";
@@ -461,52 +461,14 @@ let pendingGroupPlans = new Map();
 let deletePlanGeneration = 0;
 
 // ---------------------------------------------------------------------
-// Bulk-delete confirm dialog — built ONCE at module load, appended
-// directly to `document.body` (a sibling of `#app`), NOT to the per-mount
-// `<section>` `buildSection()` rebuilds on every navigation.
-//
-// **WP 4a.8 bug found live, fixed here.** This dialog originally WAS built
-// inside `buildSection()` and appended as a child of the Library section —
-// itself inside `#app`. The first version of this WP's `pushModal`/`inert`
-// wiring (matching `components/game-detail-sheet.js`'s confirm dialogs,
-// which genuinely ARE `document.body`-level siblings of `#app`) marked
-// `#app` `inert` on open — which, for a dialog living INSIDE `#app`, made
-// the dialog itself (and its Keep/Delete buttons) unfocusable and
-// unclickable too (the confirm was completely unusable). Reproduced live in
-// the Browser pane: `document.activeElement` was `<body>`, not the "Keep"
-// button, and the dialog's own buttons were inert along with everything
-// else in `#app`. Moving construction here — matching
-// `game-detail-sheet.js`'s pattern exactly — is the fix: the dialog is now
-// a true `document.body` sibling of `#app`, so marking `#app` inert no
-// longer touches it.
+// Bulk-delete confirm dialog — the shared components/delete-confirm.js
+// (WP LIBRARY-DETAIL-1; the detail sheet uses the same component), created
+// ONCE at module load. Its backdrop is appended directly to `document.body`
+// (a sibling of `#app`), NOT to the per-mount `<section>` `buildSection()`
+// rebuilds on every navigation: `pushModal` marks `#app` inert, which would
+// make a dialog living inside it unfocusable (WP 4a.8 bug found live).
 // ---------------------------------------------------------------------
-const dialogBackdrop = document.createElement("div");
-dialogBackdrop.className = "dialog-backdrop";
-const dialogEl = document.createElement("div");
-dialogEl.className = "dialog";
-dialogEl.setAttribute("role", "alertdialog");
-dialogEl.setAttribute("aria-modal", "true");
-dialogEl.setAttribute("aria-label", "Confirm deletion");
-const dTitle = document.createElement("h3");
-const dText = document.createElement("p");
-const dNote = document.createElement("div");
-const dRow = document.createElement("div");
-dRow.className = "row";
-const dNo = document.createElement("button");
-dNo.type = "button";
-dNo.className = "btn ghost sm";
-dNo.textContent = "Keep";
-const dYes = document.createElement("button");
-dYes.type = "button";
-dYes.className = "btn danger sm";
-dYes.textContent = "Delete";
-dRow.append(dNo, dYes);
-dialogEl.append(dTitle, dText, dNote, dRow);
-dialogBackdrop.appendChild(dialogEl);
-document.body.appendChild(dialogBackdrop);
-
-dNo.addEventListener("click", closeDeleteConfirm);
-dYes.addEventListener("click", confirmDelete);
+const deleteConfirm = createDeleteConfirm({ onConfirm: confirmDelete, onClose: onDeleteConfirmClosed });
 
 // ---------------------------------------------------------------------
 // Selection mode
@@ -1152,93 +1114,10 @@ function setLayout(value, announce) {
 // ---------------------------------------------------------------------
 
 function renderDeletePlan(plan, ids, gamesByAppid) {
-  const freedText = formatBytesGB(plan.freedBytes) || "0 GB";
-  const occupiedText = formatBytesGB(plan.occupiedBytes) || "0 GB";
-
-  dText.replaceChildren();
-  if (ids.length > 1) {
-    dText.append(
-      "Deleting ",
-      strong(`${ids.length} games`),
-      " frees about ",
-      strong(freedText, "num"),
-      " of the ",
-      strong(occupiedText, "num"),
-      " they occupy.",
-    );
-  } else {
-    const name = gamesByAppid.get(ids[0])?.name || UNKNOWN_APP_NAME;
-    dText.append(
-      "Deleting ",
-      strong(name),
-      " frees about ",
-      strong(freedText, "num"),
-      " of the ",
-      strong(occupiedText, "num"),
-      " it occupies.",
-    );
-  }
-
-  dNote.replaceChildren();
-  if (plan.sharedRows.length === 0) {
-    const p = document.createElement("p");
-    p.className = "cfsolo";
-    p.textContent = `No shared depots — the full ${occupiedText} is freed.`;
-    dNote.appendChild(p);
-    return;
-  }
-
-  const label = document.createElement("p");
-  label.className = "cflabel";
-  label.textContent = `${plan.sharedRows.length} shared depot${plan.sharedRows.length > 1 ? "s" : ""}`;
-  dNote.appendChild(label);
-
-  const ul = document.createElement("ul");
-  ul.className = "cflist";
-  for (const row of plan.sharedRows) {
-    const li = document.createElement("li");
-    li.className = row.free ? "free" : "keep";
-    const did = document.createElement("span");
-    did.className = "did";
-    did.textContent = String(row.depotid);
-    const mk = document.createElement("span");
-    mk.className = "mk";
-    mk.textContent = row.free ? "freed" : "kept";
-    const dsz = document.createElement("span");
-    dsz.className = "dsz";
-    dsz.textContent = formatBytesGB(row.sizeBytes) || "—";
-    const why = document.createElement("span");
-    why.className = "why";
-    if (row.free) {
-      why.textContent = row.others.length
-        ? `no cached co-owner — ${namesFor(row.others, gamesByAppid)} ${row.others.length > 1 ? "are" : "is"} not cached`
-        : "every game mapping this depot is in this selection";
-    } else {
-      why.textContent = `${namesFor(row.holderAppids, gamesByAppid)} still cached`;
-    }
-    li.append(did, mk, dsz, why);
-    ul.appendChild(li);
-  }
-  dNote.appendChild(ul);
-
-  const total = document.createElement("p");
-  total.className = "cftotal";
-  total.append(strong(freedText), " freed · ", strong(formatBytesGB(plan.keptBytes) || "0 GB"), " stays on disk");
-  dNote.appendChild(total);
+  const subject = ids.length > 1 ? `${ids.length} games` : gamesByAppid.get(ids[0])?.name || UNKNOWN_APP_NAME;
+  deleteConfirm.setIntro(buildIntroNodes(subject, plan, { many: ids.length > 1 }));
+  deleteConfirm.setNote(buildPlanNodes(plan, gamesByAppid, namesFor));
 }
-
-function strong(text, extraClass) {
-  const b = document.createElement("b");
-  if (extraClass) b.className = extraClass;
-  b.textContent = text;
-  return b;
-}
-
-/** Element to return focus to when the delete-confirm dialog closes,
- * captured fresh on every open() — same pattern as `sheet-dialog.js`'s
- * `invokerEl` (WP 4a.8: this dialog had no focus management at all before
- * this WP: no Escape, no focus-on-open, no trap). */
-let deleteConfirmInvokerEl = null;
 
 async function openDeleteConfirm(ids, notice) {
   const myGen = ++deletePlanGeneration;
@@ -1247,20 +1126,9 @@ async function openDeleteConfirm(ids, notice) {
   // WP TOOL-APPS-2c: names from the raw rows (packages too).
   const gamesByAppid = rawByAppid();
   const groupIds = ids.filter((id) => isGroup(state.games.find((g) => g.appid === id)));
-  dTitle.textContent =
-    ids.length > 1 ? `Delete ${ids.length} games from cache?` : "Delete from cache?";
-  dText.textContent = "Calculating what this would free…";
-  dNote.replaceChildren();
-  dYes.disabled = true;
-  if (!dialogBackdrop.classList.contains("on")) {
-    deleteConfirmInvokerEl = document.activeElement;
-    dialogBackdrop.classList.add("on");
-    // WP 4a.8: #app goes inert while this is up; Escape routes through
-    // lib/modal-stack.js's single dispatcher (see its header) rather than a
-    // listener bound here directly.
-    pushModal(dialogBackdrop, closeDeleteConfirm);
-    dNo.focus(); // "Keep" — the non-destructive default gets initial focus
-  }
+  // Focus, modal stack and the inert background live in the shared
+  // component (components/delete-confirm.js).
+  deleteConfirm.open(ids.length > 1 ? `Delete ${ids.length} games from cache?` : "Delete from cache?");
 
   if (groupIds.length) {
     await openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice);
@@ -1277,10 +1145,9 @@ async function openDeleteConfirm(ids, notice) {
     );
     const plan = buildMultiPlan(ids, { details, mapping, gamesByAppid, activeJobAppids });
     renderDeletePlan(plan, ids, gamesByAppid);
-    dYes.disabled = false;
+    deleteConfirm.setConfirmEnabled(true);
   } catch (err) {
-    dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
-    dYes.disabled = true;
+    deleteConfirm.showError(errorText(err));
   }
 }
 
@@ -1310,57 +1177,58 @@ async function openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice
     if (myGen !== deletePlanGeneration) return;
     let freed = 0;
     let blocked = false;
-    dNote.replaceChildren();
+    let noteNodes = [];
     if (plain) {
       // The plain picks' multiPlan preview, as without groups, under a
       // heading naming them (review nit).
-      renderDeletePlan(plain, plainIds, gamesByAppid);
       freed += plain.freedBytes;
       const heading = document.createElement("p");
       heading.className = "cflabel";
       heading.dataset.role = "plain-heading";
       heading.textContent = namesFor(plainIds, gamesByAppid);
-      dNote.replaceChildren(heading, ...Array.from(dNote.childNodes));
+      noteNodes = [heading, ...buildPlanNodes(plain, gamesByAppid, namesFor)];
     }
     const noticeEl = notice ? buildNotice(notice) : null;
-    if (noticeEl) dNote.replaceChildren(noticeEl, ...Array.from(dNote.childNodes));
+    if (noticeEl) noteNodes = [noticeEl, ...noteNodes];
     const blocks = plans.map((plan) => buildGroupDeletePlan(plan, nameFor, { showSubject: ids.length > 1 }));
     for (const [i, block] of blocks.entries()) {
-      dNote.appendChild(block.node);
+      noteNodes.push(block.node);
       freed += block.freedBytes;
       blocked = blocked || block.blocked;
       pendingGroupPlans.set(groupIds[i], plans[i]);
     }
-    dText.textContent =
+    deleteConfirm.setNote(noteNodes);
+    deleteConfirm.setIntro(
       ids.length === 1
         ? groupDeleteIntro(blocks[0].subject, freed)
-        : `Deleting ${ids.length} games and their content packages frees about ${formatBytesGB(freed) || "0 GB"}.`;
-    dYes.disabled = blocked || plans.some(isPlanBlocked);
+        : `Deleting ${ids.length} games and their content packages frees about ${formatBytesGB(freed) || "0 GB"}.`,
+    );
+    deleteConfirm.setConfirmEnabled(!(blocked || plans.some(isPlanBlocked)));
     // Review fix (a11y): the re-confirm notice takes focus and is announced.
     if (noticeEl) noticeEl.focus();
   } catch (err) {
     if (myGen !== deletePlanGeneration) return;
-    dText.textContent = `Could not calculate the delete plan: ${errorText(err)}`;
-    dYes.disabled = true;
+    deleteConfirm.showError(errorText(err));
   }
 }
 
-function closeDeleteConfirm() {
+/** Runs on every close of the shared dialog (Keep, Escape, after a delete):
+ * drops the pending plans and invalidates an in-flight plan fetch. */
+function onDeleteConfirmClosed() {
   deletePlanGeneration++;
   pendingGroupPlans = new Map();
-  dialogBackdrop.classList.remove("on");
-  popModal(dialogBackdrop);
-  if (deleteConfirmInvokerEl && typeof deleteConfirmInvokerEl.focus === "function") deleteConfirmInvokerEl.focus();
-  deleteConfirmInvokerEl = null;
   pendingDeleteIds = null;
+}
+
+function closeDeleteConfirm() {
+  deleteConfirm.close();
 }
 
 async function confirmDelete() {
   const ids = pendingDeleteIds;
   if (!ids) return;
   const groupPlans = pendingGroupPlans;
-  dYes.disabled = true;
-  dNo.disabled = true;
+  deleteConfirm.setBusy(true);
   // WP TOOL-APPS-2c: a group card is deleted with exactly the members its
   // plan listed; every other pick as before.
   const results = await Promise.allSettled(
@@ -1368,15 +1236,14 @@ async function confirmDelete() {
       groupPlans.has(id) ? api.deleteCacheWithPackages(id, planMemberIds(groupPlans.get(id))) : api.deleteCache(id),
     ),
   );
-  dYes.disabled = false;
-  dNo.disabled = false;
+  deleteConfirm.setBusy(false);
   // A group whose package list changed since the preview (409, nothing
   // deleted for it): show its new plan and ask again.
   const changed = ids.filter((id, i) => results[i].status === "rejected" && isMembersMismatch(results[i].reason));
   if (changed.length) {
     // Keep focus inside the dialog while the plans are fetched again, and
     // drop the picks that were already deleted (review fixes).
-    dNo.focus();
+    deleteConfirm.focusKeep();
     ids.forEach((id, i) => {
       if (results[i].status === "fulfilled") state.picked.delete(id);
     });
@@ -1809,9 +1676,6 @@ function buildSection() {
   bulkDelete.addEventListener("click", () => {
     if (currentBulkDeleteIds.length) openDeleteConfirm(currentBulkDeleteIds);
   });
-
-  // dNo/dYes are wired ONCE at module load — see the module-level dialog
-  // construction block near the top of this file.
 
   return section;
 }

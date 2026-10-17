@@ -286,10 +286,13 @@ function functionBody(src, signature) {
 test("MUTATION TARGET -- sheet wiring: render() appends the tool note; the download button stays behind statusAction", () => {
   const body = functionBody(detailJs, "function render() {");
   assert.ok(body, "render() not found in game-detail-sheet.js");
-  assert.match(body, /const toolNote = buildToolAppNote\(gameLike\);\s*\n\s*if \(toolNote\) contentEl\.append\(toolNote\);/);
+  assert.match(body, /const toolNote = buildToolAppNote\(gameLike\);\s*\n\s*if \(toolNote\) overview\.append\(toolNote\);/);
   // The Download/Retry button is only built from statusAction, which is
-  // null for a tool app (pinned above).
-  assert.match(body, /const action = statusAction\(gameLike, undefined, false\);\s*\n\s*if \(action\) contentEl\.append\(buildDownloadButton\(action\)\);/);
+  // null for a tool app (pinned above). LIBRARY-DETAIL-1: built in
+  // buildPrimaryAction, which render() calls.
+  assert.match(body, /buildPrimaryAction\(gameLike, trackedJob\)/);
+  const primary = functionBody(detailJs, "function buildPrimaryAction(gameLike, trackedJob) {");
+  assert.match(primary, /const action = statusAction\(gameLike, undefined, false\);\s*\n\s*if \(action\) return buildDownloadButton\(action\);/);
 });
 
 test("sheet wiring: the header uses the tool name, the dash glyph and the tool word", () => {
