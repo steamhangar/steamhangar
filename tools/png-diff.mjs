@@ -19,8 +19,10 @@
 //
 // --missing decides what an actual PNG without a golden means: `fail`
 // (default) or `warn` (CI verify mode: the first run after a new page is
-// added has nothing to compare against, like the Android goldens). A golden
-// without an actual PNG always fails: it is stale or its page was not shot.
+// added has nothing to compare against, like the Android goldens). `warn`
+// covers wholly new pages only: a screenshot whose page already has goldens
+// at other widths is `partial` and fails. A golden without an actual PNG
+// always fails: it is stale or its page was not shot.
 // --github additionally prints workflow commands (::error / ::notice) and a
 // table into $GITHUB_STEP_SUMMARY when that variable is set.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -221,10 +223,14 @@ function listPngs(dir) {
     .sort();
 }
 
+/** Row statuses that always fail, whatever --missing says. */
+export const FAILING = new Set(["fail", "error", "stale", "partial"]);
+
 /**
  * Compare every PNG in `actualDir` with its namesake in `expectedDir`.
  * Returns `{ rows, ok }`; `rows` carry `status` of pass | fail | missing |
- * stale | error. Diff PNGs for failing pairs are written to `diffDir`.
+ * partial | stale | error. Diff PNGs for failing pairs are written to
+ * `diffDir`.
  */
 export function compareDirs(expectedDir, actualDir, diffDir, opts = {}) {
   const { threshold = 0.002, tolerance = 8, missing = "fail" } = opts;
@@ -232,9 +238,19 @@ export function compareDirs(expectedDir, actualDir, diffDir, opts = {}) {
   const actualNames = listPngs(actualDir);
   const rows = [];
   if (actualNames.length === 0) throw new Error(`no PNG files in ${actualDir}`);
+  // `<page>-` of `<page>-<width>.png`; null for names of another shape.
+  const pageOf = (name) => /^(.+)-\d+\.png$/.exec(name)?.[1] ?? null;
+  const goldenPages = new Set(expectedNames.map(pageOf).filter((p) => p !== null));
   for (const name of actualNames) {
     if (!expectedNames.includes(name)) {
-      rows.push({ name, status: "missing", detail: "no golden for this screenshot" });
+      // Under --missing warn only a wholly new page is a notice. A page that
+      // already has goldens at other widths is a broken record set (a new
+      // width, a lost file) and fails, or the gap would never close.
+      if (missing === "warn" && goldenPages.has(pageOf(name))) {
+        rows.push({ name, status: "partial", detail: "page has goldens at other widths but not this one" });
+      } else {
+        rows.push({ name, status: "missing", detail: "no golden for this screenshot" });
+      }
       continue;
     }
     try {
@@ -257,8 +273,7 @@ export function compareDirs(expectedDir, actualDir, diffDir, opts = {}) {
   for (const name of expectedNames) {
     if (!actualNames.includes(name)) rows.push({ name, status: "stale", detail: "golden exists but no screenshot was taken" });
   }
-  const failing = rows.filter((r) => r.status === "fail" || r.status === "error" || r.status === "stale"
-    || (r.status === "missing" && missing !== "warn"));
+  const failing = rows.filter((r) => FAILING.has(r.status) || (r.status === "missing" && missing !== "warn"));
   return { rows, ok: failing.length === 0 };
 }
 
@@ -337,7 +352,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const missingRows = result.rows.filter((r) => r.status === "missing");
   if (opts.github) {
     for (const r of result.rows) {
-      if (r.status === "fail" || r.status === "error" || r.status === "stale") {
+      if (FAILING.has(r.status) || (r.status === "missing" && opts.missing !== "warn")) {
         console.log(`::error title=Screenshot golden ${r.status}::${escapeMessage(`${r.name}: ${r.detail}`)}`);
       }
     }

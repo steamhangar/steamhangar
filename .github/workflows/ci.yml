@@ -275,6 +275,7 @@ jobs:
       - name: "goldens: install fonts and Chromium"
         # playwright-core 1.63.0 pins Chromium build 1243 (153.0.8010.12) --
         # the revision tools/README.md documents; bump both together.
+        # Version-pinned, not integrity-pinned; acceptable because this job is read-only.
         shell: bash
         run: |
           sudo apt-get update -q
@@ -808,6 +809,7 @@ jobs:
       - name: "goldens: install fonts and Chromium"
         # Identical to web-goldens' step: the recorded pixels must come from
         # the same Chromium build and the same fonts the verify job uses.
+        # Version-pinned, not integrity-pinned; acceptable because this job is read-only.
         shell: bash
         run: |
           sudo apt-get update -q

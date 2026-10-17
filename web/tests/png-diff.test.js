@@ -177,6 +177,40 @@ test("compareDirs: pass / fail / missing / stale per file, diff PNG only for fai
   assert.equal(compareDirs(expected, actual, diff, { missing: "fail" }).ok, false);
 });
 
+test("compareDirs: --missing warn tolerates a wholly new page but fails a page with goldens at other widths", () => {
+  const root = mkdtempSync(join(tmpdir(), "png-diff-test-"));
+  const expected = join(root, "expected");
+  const actual = join(root, "actual");
+  mkdirSync(expected);
+  mkdirSync(actual);
+  const png = encodePng(solid(4, 4, [1, 2, 3]));
+  writeFileSync(join(expected, "library-1400.png"), png);
+  writeFileSync(join(actual, "library-1400.png"), png);
+
+  // A wholly new page (kit before its first record run): notice only.
+  writeFileSync(join(actual, "kit-1400.png"), png);
+  writeFileSync(join(actual, "kit-400.png"), png);
+  const fresh = compareDirs(expected, actual, join(root, "diff"), { missing: "warn" });
+  assert.deepEqual(Object.fromEntries(fresh.rows.map((r) => [r.name, r.status])),
+    { "library-1400.png": "pass", "kit-1400.png": "missing", "kit-400.png": "missing" });
+  assert.equal(fresh.ok, true);
+
+  // A known page at a width with no golden: partial, a failure.
+  writeFileSync(join(actual, "library-400.png"), png);
+  const partial = compareDirs(expected, actual, join(root, "diff"), { missing: "warn" });
+  const byName = Object.fromEntries(partial.rows.map((r) => [r.name, r.status]));
+  assert.equal(byName["library-400.png"], "partial");
+  assert.equal(byName["kit-400.png"], "missing");
+  assert.equal(partial.ok, false);
+  // The page match is on the whole name: a "kit-ext" screenshot is not a kit width.
+  writeFileSync(join(expected, "kit-ext-1400.png"), png);
+  writeFileSync(join(actual, "kit-ext-1400.png"), png);
+  assert.equal(compareDirs(expected, actual, join(root, "diff"), { missing: "warn" }).rows
+    .find((r) => r.name === "kit-400.png").status, "missing");
+  assert.equal(compareDirs(expected, actual, join(root, "diff"), { missing: "fail" }).rows
+    .find((r) => r.name === "library-400.png").status, "missing", "--missing fail keeps plain missing (it fails anyway)");
+});
+
 test("compareDirs: an empty actual directory is an error, not a pass", () => {
   const root = mkdtempSync(join(tmpdir(), "png-diff-test-"));
   mkdirSync(join(root, "a"));

@@ -67,7 +67,9 @@ page exists only once UI-KIT-1 has landed); any other failure exits 1.
 `png-diff.mjs` flags: `--threshold 0.002` (fraction of differing pixels a
 pair may have), `--tolerance 8` (per-channel delta below which a pixel is
 "the same"), `--missing fail|warn` (a screenshot without a golden),
-`--github` (workflow-command annotations + step summary). A golden without
+`--github` (workflow-command annotations + step summary); `warn` covers
+wholly new pages only, a missing width of a known page is `partial` and
+fails. A golden without
 a screenshot always fails (stale). Different sizes always fail.
 
 Against the running dev instance instead of the static server, point
@@ -96,9 +98,13 @@ flow, mirrored from `android-goldens-record` / `android-goldens-push`:
    `-goldens` branch accepts **every** visual change its push renders; the
    guard is that review plus the normal CI run on the merge.
 
-On the regular `web / goldens` job a screenshot without a golden is a
-notice (the first run after a page is added), a golden without a
-screenshot, a size change or more than 0.2 % differing pixels is a failure;
+The verify job (`web / goldens`) never records: it only compares. On it a
+screenshot of a wholly new page without any golden is a notice (the first
+run after a page is added); a missing width of a page that has goldens at
+other widths (`partial`), a golden without a screenshot, a size change or
+more than 0.2 % differing pixels is a failure. Consequently `kit` (UI-KIT-1,
+now on main) is verified only after a `wp/<name>-goldens` record run that
+follows the UI-KIT-1 merge; until then each of its shots is a notice;
 `web-screenshots` (all PNGs) and `web-screenshots-diff` (failing pairs,
 differing pixels red, size overflow magenta) are the artifacts.
 

@@ -463,13 +463,25 @@ def test_commit_step_reports_unchanged_when_the_goldens_are_identical(tmp_path: 
 
 
 def _with_remote(tmp_path: Path) -> tuple[Path, Path, str]:
-    """A repo with a bare origin at the recorded commit, plus the bot commit."""
-    repo = _repo(tmp_path)
-    recorded = _git(repo, "rev-parse", "HEAD")
+    """The job's checkout plus a bare origin at the recorded commit.
+
+    As in CI (actions/checkout with `ref: github.sha`), the job side is a
+    `--depth 1` clone of a branch with real history behind the recorded
+    commit, so the push step's fetch, `merge-base --is-ancestor`, `git diff`
+    and rebase all run on a shallow repository.
+    """
+    src = _repo(tmp_path)
+    (src / "other.txt").write_text("second commit, so depth 1 truncates\n", encoding="utf-8")
+    _git(src, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", "recorded")
+    recorded = _git(src, "rev-parse", "HEAD")
     remote = tmp_path / "origin.git"
     subprocess.run([GIT, "init", "-q", "--bare", str(remote)], check=True)
-    _git(repo, "remote", "add", "origin", str(remote))
-    _git(repo, "push", "-q", "origin", "HEAD:refs/heads/wp/x-goldens")
+    _git(src, "push", "-q", str(remote), "HEAD:refs/heads/wp/x-goldens")
+    repo = tmp_path / "job"
+    subprocess.run([GIT, "clone", "-q", "--depth", "1", "-b", "wp/x-goldens", remote.as_uri(), str(repo)], check=True)
+    assert _git(repo, "rev-parse", "--is-shallow-repository") == "true"
+    assert _git(repo, "rev-list", "--count", "HEAD") == "1"
+    assert _git(repo, "rev-parse", "HEAD") == recorded
     _download(tmp_path, FULL_SET)
     assert _run_step(tmp_path, repo, VALIDATE)[0].returncode == 0
     assert _run_step(tmp_path, repo, COMMIT)[1] == {"changed": "true"}

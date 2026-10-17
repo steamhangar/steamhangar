@@ -3942,11 +3942,11 @@ The goldens themselves live in `goldens/<page>-<width>.png` (recorded by
 CI only; `tools/README.md`). Three test files cover the tooling without a
 browser:
 
-- `png-diff.test.js` (12): the dependency-free PNG codec (round trip, all
+- `png-diff.test.js` (13): the dependency-free PNG codec (round trip, all
   five filter types, grey / grey+alpha / palette expansion, CRC and
   bit-depth rejection) and the comparison (tolerance boundary, inclusive
   threshold, size mismatch, diff image colours, per-file pass / fail /
-  missing / stale, empty actual dir is an error, CLI validation) of
+  missing / partial / stale, empty actual dir is an error, CLI validation) of
   `tools/png-diff.mjs`.
 - `web-serve.test.js` (4): `tools/web-serve.mjs` serves index.html for `/`
   and exactly the router's `VIEWS` (deep links included), files with their
