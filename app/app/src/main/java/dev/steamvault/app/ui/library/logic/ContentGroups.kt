@@ -192,9 +192,9 @@ val APP_TYPE_LABEL: Map<String, String> = mapOf(
 const val PACKAGES_HEADING = "Content packages"
 const val PACKAGE_RETRY_LABEL = "Retry download"
 
-/** The full name of a package row: its own name, else "Unknown app". */
+/** The full name of a package row: its own name, else "Content package". */
 fun packageFullName(pkg: GameSummary): String =
-    pkg.name?.trim()?.takeIf { it.isNotEmpty() } ?: UNKNOWN_APP_NAME
+    pkg.name?.trim()?.takeIf { it.isNotEmpty() } ?: CONTENT_PACKAGE_NAME
 
 /** "Total with content packages: 2.5 GB", or null while unknown. */
 fun packagesTotalText(groupSizeBytes: Long?): String? =

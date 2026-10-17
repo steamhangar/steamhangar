@@ -26,7 +26,7 @@ import {
   NOT_OWNED_LIBRARY_NOTE,
 } from "../lib/game-status.js";
 import { formatBytesGB } from "../lib/format.js";
-import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
+import { CONTENT_PACKAGE_NAME } from "../lib/app-names.js";
 import { shortPackageName } from "../lib/content-groups.js";
 
 export const PACKAGES_HEADING = "Content packages";
@@ -44,9 +44,9 @@ export const APP_TYPE_LABEL = Object.freeze({
   demo: "Demo",
 });
 
-/** The full name of a package row: its own name, else "Unknown app". */
+/** The full name of a package row: its own name, else "Content package". */
 export function packageFullName(pkg) {
-  return typeof pkg?.name === "string" && pkg.name.trim() ? pkg.name.trim() : UNKNOWN_APP_NAME;
+  return typeof pkg?.name === "string" && pkg.name.trim() ? pkg.name.trim() : CONTENT_PACKAGE_NAME;
 }
 
 /** "Total with content packages: 2.5 GB", or null while unknown. */

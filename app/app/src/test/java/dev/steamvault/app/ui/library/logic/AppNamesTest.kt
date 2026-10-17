@@ -10,6 +10,7 @@ class AppNamesTest {
     @Test
     fun fallbackIsTheNeutralWebString() {
         assertEquals("Unknown app", UNKNOWN_APP_NAME)
+        assertEquals("Content package", CONTENT_PACKAGE_NAME)
         assertFalse(UNKNOWN_APP_NAME.any { it.isDigit() })
     }
 

@@ -11,3 +11,6 @@ package dev.steamvault.app.ui.library.logic
  * equality in `AppNamesTest` and the existing twin tests; keep both in sync.
  */
 const val UNKNOWN_APP_NAME = "Unknown app"
+
+/** Title of a package row nothing could name (web `CONTENT_PACKAGE_NAME`, APP-NAMES-1). */
+const val CONTENT_PACKAGE_NAME = "Content package"

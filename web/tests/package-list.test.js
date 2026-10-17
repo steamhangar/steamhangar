@@ -72,7 +72,7 @@ test("lists every package: short visible name, full name for title and screen re
   assert.equal(first.title, "HELLDIVERS™ 2 - Pack 11");
   assert.equal(first.querySelector(".pkgfacts").textContent, "App 11 · DLC · 0.3 GB · Installed on pc-a");
   assert.equal(first.querySelector(".pkgstate").textContent, "Current");
-  assert.equal(rows[2].querySelector(".pkgname").textContent, "Unknown app");
+  assert.equal(rows[2].querySelector(".pkgname").textContent, "Content package");
   assert.equal(rows[2].querySelector(".pkgfacts").textContent, "App 13");
 });
 
