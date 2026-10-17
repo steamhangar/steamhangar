@@ -3536,7 +3536,7 @@ below carry their own later dates, item 12 is the current one).
           are the contract, and a value changed on one side fails CI. The
           Compose anatomy (three-zone card, tiles, hero) stays the rc21
           Android follow-up; the kit page is its spec.
-        - [ ] **CLIENTS-4** (replaces the earlier CLIENTS-4 nit list) card
+        - [x] **CLIENTS-4** (replaces the earlier CLIENTS-4 nit list; 3751e12, 3a89818) card
           per `kit.html` "Clients card, three zones": zone 1 identity, pills
           (`Online`/`Offline`, `Agent outdated`), update box, agent health
           row; zone 2 "loading now" box or idle dashed box, three stats

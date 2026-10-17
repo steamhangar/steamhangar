@@ -9,11 +9,11 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 - UI-KIT-1 (07fde55, 1e82f57; merge 82f4849)
 - WEB-GOLDENS-1 (50b198b, 31d5eff); kit root fix 353b4f9; first web goldens record pending (wp/rc20-base-goldens failed on /kit before the fix)
 - TOKENS-SYNC-1 (061b4ce, c1a3eaf, Android golden 58eb2ee)
+- CLIENTS-4 (3751e12, 3a89818)
 
 ## Running (2026-10-17, resumed 13:40 after a session-limit stop)
 
-- CLIENTS-4: review PASS, fixes 3a89818; branch CI failed, cause being checked.
-- ADD-DEVICE-2: coder on `wp/rc20-add-device-2`.
+- ADD-DEVICE-2: review PASS (56c2415), nits + rebase onto main in progress.
 - DOWNLOADS-2: coder on `wp/rc20-downloads-2`.
 
 ## Next
