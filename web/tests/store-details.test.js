@@ -130,13 +130,21 @@ test("render() puts the store block directly under the header, before the cache 
   assert.ok(at("buildHeader(gameLike, liveJob)") > -1);
   assert.ok(at("buildHeader(gameLike, liveJob)") < at("buildStoreBlock()"));
   assert.ok(at("buildStoreBlock()") < at("buildFactLines(gameLike)"));
-  assert.ok(at("buildFactLines(gameLike)") < at("buildCompletenessSection("));
-  assert.ok(at("buildCompletenessSection(") < at("buildInstalledSection(gameLike)"));
+  // LIBRARY-DETAIL-1: the Overview tab (store block, facts, installed on,
+  // packages), then the Depots tab, then the Maintenance tab, then the GC
+  // section's own repaint.
+  assert.ok(at("buildFactLines(gameLike)") < at("buildInstalledSection(gameLike)"));
   assert.ok(at("buildInstalledSection(gameLike)") < at("buildPackagesSection("));
   assert.ok(at("buildPackagesSection(") < at("buildDepotsSection()"));
-  assert.ok(at("buildDepotsSection()") < at("buildDeleteButton()"));
-  assert.ok(at("buildDeleteButton()") < at("renderGcSection()"));
+  assert.ok(at("buildDepotsSection()") < at("buildMaintenancePanel("));
+  assert.ok(at("buildMaintenancePanel(") < at("renderGcSection()"));
   assert.equal(body.split("buildStoreBlock()").length - 1, 1);
+  // Maintenance: Verify, then GC, then the delete zone.
+  const m = sheetJs.slice(sheetJs.indexOf("function buildMaintenancePanel("), sheetJs.indexOf("/** Full rebuild of the sheet body"));
+  const mAt = (needle) => m.indexOf(needle);
+  assert.ok(mAt("buildCompletenessSection(") > -1);
+  assert.ok(mAt("buildCompletenessSection(") < mAt("gcSectionEl"));
+  assert.ok(mAt("gcSectionEl") < mAt("buildDeleteButton()"));
 });
 
 test("the store facts are a second column on wide screens and stack on narrow ones", () => {

@@ -170,7 +170,7 @@ test("wiring: the detail sheet deletes a game with packages through the plan, co
   assert.match(fn("function openDeleteConfirm() {"), /if \(currentGroup\(\)\) \{\s*openGroupDeleteConfirm\(\);\s*return;/);
   const open = fn("async function openGroupDeleteConfirm(notice) {");
   assert.match(open, /await api\.deletePlan\(appid\)/);
-  assert.match(open, /dYes\.disabled = isPlanBlocked\(plan\);/);
+  assert.match(open, /deleteConfirm\.setConfirmEnabled\(!isPlanBlocked\(plan\)\);/);
   const confirm = fn("async function confirmGroupDelete(appid, plan) {");
   assert.match(confirm, /api\.deleteCacheWithPackages\(appid, planMemberIds\(plan\)\)/);
   assert.match(confirm, /if \(isMembersMismatch\(err\)\) \{[\s\S]*openGroupDeleteConfirm\(MEMBERS_CHANGED_NOTICE\)/);
@@ -194,6 +194,6 @@ test("wiring (a11y): the detail sheet keeps focus in the dialog on a 409 and foc
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../js/components/game-detail-sheet.js", import.meta.url), "utf8");
   const body = (head) => src.slice(src.indexOf(head), src.indexOf("\n}\n", src.indexOf(head)));
-  assert.match(body("async function confirmGroupDelete(appid, plan) {"), /if \(isMembersMismatch\(err\)\) \{\s*\/\/[^\n]*\n\s*dNo\.focus\(\);/);
+  assert.match(body("async function confirmGroupDelete(appid, plan) {"), /if \(isMembersMismatch\(err\)\) \{\s*\/\/[^\n]*\n\s*deleteConfirm\.focusKeep\(\);/);
   assert.match(body("async function openGroupDeleteConfirm(notice) {"), /const noticeEl = notice \? buildNotice\(notice\) : null;[\s\S]*if \(noticeEl\) noticeEl\.focus\(\);/);
 });

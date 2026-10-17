@@ -3466,12 +3466,16 @@ below carry their own later dates, item 12 is the current one).
         games"; one status line per card. Long-press and right-click
         selection stay. Adapt `library-*.test.js`, `game-card*.test.js`,
         `css-bulk-bar-room.test.js`, `keyboard-pointer-model.test.js`.
-      - [ ] **LIBRARY-DETAIL-1** game detail sheet with tabs Overview /
+      - [x] **LIBRARY-DETAIL-1** game detail sheet with tabs Overview /
         Depots / Maintenance (Verify, GC check, red "Delete from cache"
         zone); the two duplicate delete-confirm dialogs (`library.js`,
         `game-detail-sheet.js`) become one shared component. Adapt
         `game-detail-sheet-*.test.js`, `css-overlay-geometry.test.js`,
         `dialog-wiring.test.js`.
+      - [ ] nit (LIBRARY-DETAIL-1): tab keyboard focus is lost on a structural
+        re-render of the detail sheet; `.detail-box-danger` hard-codes an rgba
+        (no `--danger-soft` token yet); optional `tabindex=0` on tabpanels;
+        move `add-device-sheet.js` onto `components/tabs.js`
       - [ ] nit: Exit animation for the nine confirm-dialog call sites
         (.dialog-backdrop toggles .on directly; currently animates in only)
       - [ ] nit: Add-a-device tabs have no icons and the dialog has no
@@ -3507,6 +3511,11 @@ below carry their own later dates, item 12 is the current one).
       - [ ] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
         in the completeness display: when depots of a game have no mapping
         the percentage says so instead of showing a clean figure.
+      - [ ] nit (UNMAPPED-FLAG-1, VERSION-HEALTH-1): `get_game` scans all of
+        `depot_manifests` for one appid (add `AND appid = ?`); library card
+        keeps the green check at 100% with unmapped depots and Android lacks
+        the note (Android parity package); VERSION-HEALTH-1 chose the startup
+        log line, `/v1/health` stays a fixed body (fingerprinting decision)
       - [ ] **APP-NAMES-1** (api + web) package names for "Unknown app"
         entries (HELLDIVERS 2 content packages, roadmap D9).
       - [x] **VERSION-HEALTH-1** (api) version and schema readable without
