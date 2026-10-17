@@ -204,21 +204,35 @@ export function heroModel({ throughput = null, rateCap = null, unsupported = fal
   };
 }
 
+/** WP DOWNLOADS-3: the centred note on an idle graph. */
+export const NO_TRAFFIC_TEXT = "No traffic in this range";
+
 /**
- * The graph for the selected range, or `null` (no answer for it yet, feed
- * off, or an all-zero series: a flat line on the floor shows nothing).
+ * The graph for the selected range, or `null` (no answer for it yet, or
+ * feed off). An answer without traffic (no points, or all zero) is an idle
+ * graph (WP DOWNLOADS-3): a flat baseline at 0, the axis, and the note
+ * {@link NO_TRAFFIC_TEXT}, instead of an empty box.
  * Pure.
  * @param {object | null | undefined} series
  * @param {string} range the range the user has selected
  * @param {{unsupported?: boolean, nowMs?: number}} [opts]
- * @returns {null | {line: string, area: string, label: string, axis: string[]}}
+ * @returns {null | {line: string, area: string | null, label: string, axis: string[], idle?: boolean, note?: string}}
  */
 export function graphModel(series, range, { unsupported = false, nowMs = Date.now() } = {}) {
   if (unsupported || !series || feedState(series) === "disabled" || series.range !== range) return null;
   // WP GRAPH-ZOOM: only the span that has data; the axis caption follows it.
   const shown = { ...series, points: trimSeries(series.points) };
   const geo = seriesGeometry(shown.points, { width: GRAPH_W, height: GRAPH_H });
-  if (!geo || geo.maxBytesPerSecond === 0) return null;
+  if (!geo || geo.maxBytesPerSecond === 0) {
+    return {
+      idle: true,
+      line: `M0 ${GRAPH_H} L${GRAPH_W} ${GRAPH_H}`,
+      area: null,
+      label: `${NO_TRAFFIC_TEXT}.`,
+      note: NO_TRAFFIC_TEXT,
+      axis: [seriesStartText(shown, nowMs), "now"],
+    };
+  }
   return {
     line: geo.line,
     area: geo.area,
@@ -355,11 +369,23 @@ export function createDownloadsHero({ range, onRangeChange }) {
     svg.dataset.role = "graph-svg";
     const grid = svgEl("g", { class: "grid" });
     for (const y of GRAPH_GRID) grid.appendChild(svgEl("line", { x1: 0, y1: y, x2: GRAPH_W, y2: y }));
-    svg.append(grid, svgEl("path", { class: "area", d: model.area }), svgEl("path", { class: "line", d: model.line }));
+    if (model.idle) {
+      svg.append(grid, svgEl("path", { class: "line base", d: model.line }));
+    } else {
+      svg.append(grid, svgEl("path", { class: "area", d: model.area }), svgEl("path", { class: "line", d: model.line }));
+    }
+    graph.classList.toggle("idle", !!model.idle);
     const axis = el("div", "ax");
     axis.setAttribute("aria-hidden", "true");
     for (const text of model.axis) axis.appendChild(el("span", null, text));
     graph.append(svg, axis);
+    if (model.idle) {
+      // The svg's accessible name already says it; the note is the visual.
+      const note = el("p", "gnote", model.note);
+      note.dataset.role = "graph-note";
+      note.setAttribute("aria-hidden", "true");
+      graph.appendChild(note);
+    }
   }
 
   /**
