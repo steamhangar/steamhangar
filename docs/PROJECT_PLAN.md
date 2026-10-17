@@ -3497,7 +3497,7 @@ below carry their own later dates, item 12 is the current one).
         no text below 11px; pills wrap the existing `status-icon.js` disc
         (shape first, word second, colour third; glyph box 60% of the disc;
         motion means "right now" and stays as is).
-        - [ ] **UI-KIT-1** (web, base, first) type scale `--fs-1..7`
+        - [x] **UI-KIT-1** (web, base, first; 07fde55, 1e82f57) type scale `--fs-1..7`
           (11/12/13/15/18/24/32) and spacing `--sp-1..8` (4px grid) in
           `theme.css`, `--dim-2` to #7A91A0; new `web/css/kit.css` with
           `.page-head`, `.tile` (value + `<small>` unit, caption, optional
