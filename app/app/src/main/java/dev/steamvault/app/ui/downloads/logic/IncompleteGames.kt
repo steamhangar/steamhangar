@@ -40,7 +40,7 @@ import dev.steamvault.app.ui.library.logic.partitionCachedPrefillOutcome
  */
 object IncompleteWording {
     const val HEADING = "Incomplete"
-    const val COMPLETE_NOW = "Complete now"
+    const val COMPLETE_NOW = "Verify"
     const val COMPLETE_ALL = "Complete all"
     const val NOTE_PREFIX = "These complete automatically in the schedule window "
     const val NOTHING_TO_COMPLETE = "Nothing to complete."

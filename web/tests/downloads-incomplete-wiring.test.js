@@ -158,8 +158,8 @@ test("MUTATION PIN: hidden while nothing is incomplete; shown with rows, figures
     assert.equal(heading(s), "Incomplete (3)");
     assert.deepEqual(rowNames(s), ["Aurora", "Broken Bits", "Zephyr Run"], "sorted; complete and flagged games are not listed");
     assert.equal(rowFor(s, 20).querySelector(".usize").textContent, "86%");
-    assert.equal(nowBtn(s, 20).textContent, "Complete now");
-    assert.equal(nowBtn(s, 20).getAttribute("aria-label"), "Complete now — Aurora");
+    assert.equal(nowBtn(s, 20).textContent, "Verify");
+    assert.equal(nowBtn(s, 20).getAttribute("aria-label"), "Verify — Aurora");
     assert.equal(nowBtn(s, 40), null, "MUTATION PIN: no Complete now for damaged-only");
     assert.equal(rowFor(s, 40).querySelector('[data-role="damaged-note"]').textContent, "Damaged chunks — SteamHangar can't repair these yet.");
     assert.equal(allBtn(s).textContent, "Complete all");
