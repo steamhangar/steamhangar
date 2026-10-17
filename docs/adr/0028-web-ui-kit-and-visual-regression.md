@@ -67,3 +67,9 @@ page could drift from its mockup without any test turning red.
   to fix in one sweep.
 - The Android twin's `Color.kt` still pins the old `--dim-2`; it follows in
   its own package.
+
+## Addendum: tokens contract (TOKENS-SYNC-1)
+
+`docs/design/tokens.json` and `docs/design/status-vocabulary.json` pin colours, scale, radii and the status vocabulary for web and Android; tests on both sides are the generator.
+`Color.kt`'s `Dim2` now matches the lifted #7A91A0, which settles the last consequence above.
+Android `Type.kt` is a Material ramp, not a mirror of `--fs-*`, and stays outside the contract until the rc21 Compose follow-up.

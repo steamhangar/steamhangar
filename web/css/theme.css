@@ -19,8 +19,8 @@
   --dim:#8AA1AD;
   /* WP UI-KIT-1: lifted from #63798A (3.8:1 on --surface, fails WCAG AA for
      11px captions) to #7A91A0 (5.0:1). Tertiary text and grips only. The
-     Android twin's Color.kt still carries the old value; it follows in its
-     own package. */
+     Android twin's Color.kt followed in WP TOKENS-SYNC-1; both are checked
+     against docs/design/tokens.json. */
   --dim-2:#7A91A0;
 
   --accent:#2ED9CE;

@@ -1,0 +1,16 @@
+[
+  { "kind": "cached", "word": "Current", "glyph": "check", "tone": "ok", "animated": false },
+  { "kind": "running", "word": "Downloading", "glyph": "download", "tone": "run", "animated": true },
+  { "kind": "updating", "word": "Updating", "glyph": "refresh", "tone": "run", "animated": true },
+  { "kind": "stale", "word": "Update ready", "glyph": "refresh", "tone": "acc", "animated": false },
+  { "kind": "none", "word": "Not cached", "glyph": "download", "tone": "none", "animated": false },
+  { "kind": "paused", "word": "Paused", "glyph": "pause", "tone": null, "animated": false },
+  { "kind": "verify", "word": "Verifying", "glyph": "refresh", "tone": "run", "animated": true },
+  { "kind": "error", "word": "Failed", "glyph": "bang", "tone": "danger", "animated": false },
+  { "kind": "warn", "word": "Warning", "glyph": "bang", "tone": "stale", "animated": false },
+  { "kind": "cancelled", "word": "Cancelled", "glyph": "stop", "tone": null, "animated": false },
+  { "kind": "unknown", "word": "Check", "glyph": "question", "tone": null, "animated": false },
+  { "kind": "notinuse", "word": "Not in use", "glyph": "dash", "tone": null, "animated": false },
+  { "kind": "partial", "word": "Partially cached", "glyph": "half", "tone": "none", "animated": false },
+  { "kind": "unverified", "word": "Not verified", "glyph": "question", "tone": "none", "animated": false }
+]

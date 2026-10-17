@@ -36,3 +36,14 @@ the four totals beside the graph and the page has three columns, pills wrap
 the `status-icon.js` disc instead of a dot, `--dim-2` is #7A91A0. The page
 mockups remain the reference for everything the kit does not show
 (drawer, Settings panels, Library toolbar and detail sheet).
+
+## Token and status contract (TOKENS-SYNC-1)
+
+`docs/design/tokens.json` (colours, type scale `fs`, spacing `sp`, radii `r`)
+and `docs/design/status-vocabulary.json` (kind, word, glyph, pill tone,
+animated) are the one source both frontends are checked against. There is no
+generator: `web/tests/design-tokens-contract.test.js` checks `theme.css`,
+`status-icon.js` and `pill.js`, and the Android `DesignTokensContractTest` and
+`StatusVocabularyContractTest` check `Color.kt`, `StatusKind`, `strings.xml`
+and the status-icon logic, so a value changed on one side only fails CI.
+Change a value in the JSON first, then on both sides.
