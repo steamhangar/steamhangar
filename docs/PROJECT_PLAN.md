@@ -3615,7 +3615,7 @@ below carry their own later dates, item 12 is the current one).
         vocabulary ("Current", "Not in use") instead of the job outcome;
         empty graph area when idle (flat baseline + "No traffic in this
         range").
-      - [ ] **GOLDENS-LOCAL-1** (tools + ci) local `dev.sh test-web-shots`
+      - [x] **GOLDENS-LOCAL-1** (977f1d4, e1b26f5, goldens 5d6672c; dev.sh line via Antrag A-20261017-03) (tools + ci) local `dev.sh test-web-shots`
         (Antrag A-20261017-01) fails on all 15 CI goldens with 0.3-0.8 %
         diff, only on glyph edges (Debian 12 FreeType vs. the Ubuntu runner).
         Deterministic font flags in web-shot + fontconfig, a text-tolerant
