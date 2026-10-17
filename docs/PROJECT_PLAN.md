@@ -3443,7 +3443,7 @@ below carry their own later dates, item 12 is the current one).
         keys, validation, risky-key confirm and wording stay. Adapt
         `settings-*.test.js`, `steam-*.test.js`, `about-view.test.js`,
         `css-settings-*.test.js`, `demo-data-settings.test.js`.
-      - [ ] **LIBRARY-1** one toolbar row: search, chips with counts, sort
+      - [x] **LIBRARY-1** one toolbar row: search, chips with counts, sort
         group (select + icon-only direction button with `aria-label` and
         `title`), layout control, Filters popover for the metadata filters,
         Select button (replaces the permanent long-press hint); split

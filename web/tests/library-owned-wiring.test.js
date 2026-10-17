@@ -252,7 +252,7 @@ test("layout: the notice lives in .lib-status, under the toolbar row (WP WEB-FIX
   const s = await openLibrary();
   assert.deepEqual(
     s.children.map((c) => c.className),
-    ["lib-head", "lib-bar", "lib-status", "grid", "hint", "bulk"],
+    ["lib-head", "lib-bar", "lib-status", "grid", "bulk"],
   );
   const row = s.querySelector(".lib-status");
   assert.equal(row.querySelectorAll("p.lib-owned").length, 1);

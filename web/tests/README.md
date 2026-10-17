@@ -3406,6 +3406,8 @@ Suite: **1382 tests, 1382 pass, 0 fail**.
 
 ### WP WEB-FIX-UPD-VIS — one Library toolbar row, visible check buttons, demo update check
 
+(LIBRARY-1 replaced `.lib-checkbtns` with the `.lib-split` button in the
+header and the `.lib-tools` group in `.lib-bar`; the text below is history.)
 User feedback and layout 2026-10-13: the check buttons read as a full-width
 text bar. The Library toolbar is now one row, `.lib-bar`: `.lib-filters`
 (search, then the chips) on the left, `.lib-checkbtns` on the right with
