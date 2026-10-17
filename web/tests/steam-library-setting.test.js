@@ -156,7 +156,7 @@ test("the Steam section shows a 'Steam library' block, pre-filled from the store
   server.steamid = STEAMID;
   server.source = "db";
   const s = await render();
-  const headings = s.querySelectorAll("h4.sec").map((h) => h.textContent);
+  const headings = s.querySelectorAll("div.fcard h3").map((h) => h.textContent);
   assert.ok(headings.includes("Steam library"));
   assert.equal(headings.includes("Library preview"), false);
   assert.equal(input(s).value, STEAMID);
@@ -225,7 +225,7 @@ test("MUTATION PIN: read-only settings: input stays ENABLED, Save/Reset hidden, 
   assert.equal(resetBtn(s).hidden, true);
   input(s).value = OTHER_STEAMID;
   server.previewIds = [];
-  await click(previewBtn(s), () => s.querySelectorAll("p.foot-note").some((p) => p.textContent === "1 games found."));
+  await click(previewBtn(s), () => s.querySelectorAll("p.hint").some((p) => p.textContent === "1 games found."));
   assert.deepEqual(server.previewIds, [OTHER_STEAMID], "Preview looked up the TYPED id");
   assert.equal(server.patchBodies.length, 0);
 });
@@ -242,7 +242,7 @@ test("Preview: 409 -> the shared no-key text, 422 -> the typed-id validation tex
   await click(previewBtn(s), () => errlines().includes("relay says no"));
   server.ownedStatus = 200;
   server.ownedGames = [];
-  await click(previewBtn(s), () => s.querySelectorAll("p.foot-note").some((p) => /probably private/.test(p.textContent)));
+  await click(previewBtn(s), () => s.querySelectorAll("p.hint").some((p) => /probably private/.test(p.textContent)));
   server.ownedGames = [{ appid: 40, name: "Owned Forty" }];
 });
 
