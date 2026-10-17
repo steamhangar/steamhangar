@@ -159,7 +159,7 @@ test("wiring: library.js persists the filter in try/catch, hides the panel witho
   assert.match(src, /steamvault\.libraryMetaFilter/);
   const read = src.slice(src.indexOf("function readStoredMetaFilter"), src.indexOf("function writeStoredMetaFilter"));
   assert.match(read, /try \{[\s\S]*normalizeMetaFilter[\s\S]*\} catch/);
-  assert.match(src, /panel\.hidden = !available/);
+  assert.match(src, /els\.filtersWrap\.hidden = !available/);
   assert.match(src, /if \(!metaAvailable\(state\.rawGames\)\) return \{ games: state\.games, unknownExcluded: 0 \}/);
   assert.match(src, /unknownNote\(metaFiltered\(\)\.unknownExcluded\)/);
   assert.match(src, /visibleGames\(metaFiltered\(\)\.games/);

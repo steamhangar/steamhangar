@@ -120,6 +120,20 @@ export function metaFilterActive(f) {
   );
 }
 
+/**
+ * How many filter groups are in force (categories, genre, rating, year range
+ * each count once) — the badge on the Library's Filters button. The
+ * include-unknown switch is a modifier, not a filter, and is not counted.
+ */
+export function activeFilterCount(f) {
+  return (
+    (f.categories.length > 0 ? 1 : 0) +
+    (f.genres.length > 0 ? 1 : 0) +
+    (f.minRating !== null ? 1 : 0) +
+    (f.yearFrom !== null || f.yearTo !== null ? 1 : 0)
+  );
+}
+
 /** `true` / `false` when the clause is decidable, `null` when unknown. */
 function clauses(game, f) {
   const m = game?.meta && typeof game.meta === "object" ? game.meta : null;

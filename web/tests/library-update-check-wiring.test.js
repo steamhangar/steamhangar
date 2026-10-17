@@ -193,14 +193,16 @@ test("UPD-1 vault-api: the button shows next to the unchanged 'Check & update' b
   server.statusQueue = [IDLE];
   const s = await openLibrary();
   await until(() => updBtn(s).hidden === false, "button shown after the status read");
-  const btns = s.querySelector(".lib-checkbtns").querySelectorAll("button").map((b) => b.textContent);
-  assert.deepEqual(btns, ["Check updates", "Check & update all cached games"]);
+  const btns = s.querySelector(".lib-split").querySelectorAll("button").map((b) => b.dataset.action ?? "more");
+  assert.deepEqual(btns, ["check-updates", "more", "check-and-update"]);
+  assert.equal(updBtn(s).textContent, "Check updates");
+  assert.equal(s.querySelector('[data-action="check-and-update"]').textContent, "Check & update all cached games");
   assert.equal(updBtn(s).disabled, false);
   assert.match(updLine(s).textContent, /^Updates last checked .* · manual checks only$/);
   assert.equal(updLine(s).hidden, false);
   assert.deepEqual(
     s.children.map((c) => c.className),
-    ["lib-head", "lib-bar", "lib-status", "grid", "hint", "bulk"],
+    ["lib-head", "lib-bar", "lib-status", "grid", "bulk"],
     "toolbar row, then the status lines (WP WEB-FIX-UPD-VIS)",
   );
   const statuses = s.querySelectorAll('[role="status"]').map((n) => n.className);
@@ -214,14 +216,22 @@ test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; '
   const s = await openLibrary();
   await until(() => updBtn(s).hidden === false, "button shown");
   const bar = s.querySelector(".lib-bar");
-  assert.deepEqual(bar.children.map((c) => c.className), ["lib-filters", "lib-checkbtns"]);
+  assert.deepEqual(bar.children.map((c) => c.className), ["lib-filters", "lib-tools"]);
   assert.deepEqual(bar.children[0].children.map((c) => c.className.split(" ")[0]), ["search", "chips"]);
-  const [first, second] = s.querySelector(".lib-checkbtns").children;
+  // WP LIBRARY-1: the check buttons are one split button in the header.
+  const split = s.querySelector(".lib-head").querySelector(".lib-split");
+  assert.ok(split, "split button lives in the header");
+  const [first, more, menu] = split.children;
   assert.equal(first.textContent, "Check updates");
   assert.deepEqual(first.className.split(" ").sort(), ["btn", "primary", "sm"], "MUTATION PIN: the check-only button is the primary one");
+  assert.equal(more.getAttribute("aria-haspopup"), "menu");
+  assert.equal(more.getAttribute("aria-expanded"), "false");
+  assert.equal(menu.hidden, true, "the downloading action is behind the caret");
+  const second = menu.children[0];
   assert.equal(second.textContent, "Check & update all cached games");
-  assert.deepEqual(second.className.split(" ").sort(), ["btn", "sm"], "MUTATION PIN: the downloading button is NOT primary and not a see-through ghost");
-  assert.equal(s.querySelector(".lib-status").children.map((c) => c.className).join(" "), "lib-upd lib-owned lib-meta");
+  assert.equal(second.getAttribute("role"), "menuitem");
+  assert.equal(second.className.includes("primary"), false, "MUTATION PIN: the downloading entry is never the primary action");
+  assert.equal(s.querySelector(".lib-status").children.map((c) => c.className).join(" "), "lib-upd lib-owned");
 });
 
 test("badge + 'Updates' chip from update_available; the chip filters the grid", async () => {
@@ -316,7 +326,7 @@ test("older vault-api (404, no update fields): no button, no line, no 'Updates' 
   assert.equal(updLine(s).hidden, true);
   assert.equal(chipKeys(s).includes("updates"), false);
   assert.equal(s.querySelectorAll(".updbadge").length, 0);
-  const oldBtn = s.querySelector(".lib-checkbtns").querySelectorAll("button").find((b) => b.textContent === "Check & update all cached games");
+  const oldBtn = s.querySelector('[data-action="check-and-update"]');
   assert.ok(oldBtn, "'Check & update all cached games' unchanged");
   assert.equal(oldBtn.hidden === true, false);
   server.mode = "ok";
@@ -341,4 +351,84 @@ test("an 'Updates' filter whose chip vanished (API downgrade) falls back to 'All
   );
   assert.equal(chip(s, "all").getAttribute("aria-pressed"), "true");
   server.mode = "ok";
+});
+
+// ---- WP LIBRARY-1: toolbar, split button, Select, per-card line ----
+
+test("LIBRARY-1: split caret opens the menu (aria-expanded), Escape closes; the primary stays the check-only button", async () => {
+  server.mode = "ok";
+  server.enabled = true;
+  server.statusQueue = [IDLE];
+  const s = await openLibrary();
+  await until(() => updBtn(s).hidden === false, "button shown");
+  const more = s.querySelector(".split-more");
+  const menu = s.querySelector(".lib-split .menu");
+  assert.equal(more.getAttribute("aria-label"), "More update actions");
+  assert.equal(more.title, "More update actions");
+  more.dispatchEvent({ type: "click", target: more });
+  assert.equal(menu.hidden, false);
+  assert.equal(more.getAttribute("aria-expanded"), "true");
+  assert.equal(dom.document.activeElement, menu.children[0], "first item focused");
+  dom.document.dispatchEvent({ type: "keydown", key: "Escape", preventDefault() {}, stopPropagation() {} });
+  assert.equal(menu.hidden, true);
+  assert.equal(dom.document.activeElement, more);
+  assert.equal(s.querySelector(".lib-split").classList.contains("solo"), false);
+});
+
+test("LIBRARY-1: without the primary (older vault-api) the caret stays as the only way to 'Check & update all'", async () => {
+  server.mode = "old";
+  const s = await openLibrary();
+  await tick(30);
+  assert.equal(updBtn(s).hidden, true);
+  assert.equal(s.querySelector(".lib-split").classList.contains("solo"), true);
+  assert.ok(s.querySelector(".split-more"), "caret still there");
+  const label = s.querySelector(".split-more").getAttribute("aria-label");
+  assert.match(label, /^Updates/, "WCAG 2.5.3: the name contains the visible word");
+  assert.ok(s.querySelector('.lib-split [data-action="check-and-update"]'));
+  server.mode = "ok";
+});
+
+test("LIBRARY-1: Select button is labelled, replaces the long-press hint, and toggles select mode", async () => {
+  server.mode = "ok";
+  const s = await openLibrary();
+  assert.equal(s.querySelectorAll(".hint").length, 0, "no permanent long-press hint");
+  const sel = s.querySelector(".lib-select");
+  assert.equal(sel.textContent.trim(), "Select");
+  assert.equal(sel.getAttribute("aria-label"), "Select games");
+  assert.equal(sel.title, "Select games");
+  sel.dispatchEvent({ type: "click", target: sel });
+  assert.equal(sel.classList.contains("on"), true);
+  sel.dispatchEvent({ type: "click", target: sel });
+  assert.equal(sel.classList.contains("on"), false);
+});
+
+test("LIBRARY-1: the sort direction button is icon-only with aria-label and title, and flips on click", async () => {
+  server.mode = "ok";
+  const s = await openLibrary();
+  const btn = s.querySelector(".lib-sort-dir");
+  assert.equal(btn.textContent, "", "no glyph text, an svg icon");
+  assert.equal(btn.children.length, 1, "one svg child");
+  const before = btn.getAttribute("aria-label");
+  assert.match(before, /^Sort direction: /);
+  assert.ok(btn.title && before.endsWith(btn.title));
+  btn.dispatchEvent({ type: "click", target: btn });
+  assert.notEqual(btn.getAttribute("aria-label"), before);
+  assert.ok(btn.getAttribute("aria-label").endsWith(btn.title));
+});
+
+test("LIBRARY-1: the tools live in the toolbar row in order sort, layout, filters, select", async () => {
+  server.mode = "ok";
+  const s = await openLibrary();
+  assert.deepEqual(
+    s.querySelector(".lib-tools").children.map((c) => c.className.split(" ")[0]),
+    ["lib-sort", "segs", "lib-filtersbtn", "btn"],
+  );
+});
+
+test("LIBRARY-1: css pins — update badge shares the status line, popover hidden guard, solo label", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(css, /\.meta \.updbadge\{\s*flex-basis:auto;/);
+  assert.match(css, /\.pop\[hidden\]\{\s*display:none;/);
+  assert.match(css, /\.lib-split:not\(\.solo\) \.split-lbl\{\s*display:none;/);
 });

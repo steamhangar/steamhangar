@@ -3438,7 +3438,7 @@ below carry their own later dates, item 12 is the current one).
         Linux-SteamOS) with a single security notice; secrets (API key,
         commands containing it) revealed on demand and copyable
         (`add-device-sheet.js`). Adapt `add-device-wiring.test.js`.
-      - [ ] **DOWNLOADS-1** declutter the header cards; two-column layout
+      - [x] **DOWNLOADS-1** declutter the header cards; two-column layout
         (Active and Queue left, History right, one column below 1000px);
         per-game Update and Verify buttons; Queue reordered by drag and drop
         only (no arrows); History differs between idle and active, rows
@@ -3458,7 +3458,7 @@ below carry their own later dates, item 12 is the current one).
         keys, validation, risky-key confirm and wording stay. Adapt
         `settings-*.test.js`, `steam-*.test.js`, `about-view.test.js`,
         `css-settings-*.test.js`, `demo-data-settings.test.js`.
-      - [ ] **LIBRARY-1** one toolbar row: search, chips with counts, sort
+      - [x] **LIBRARY-1** one toolbar row: search, chips with counts, sort
         group (select + icon-only direction button with `aria-label` and
         `title`), layout control, Filters popover for the metadata filters,
         Select button (replaces the permanent long-press hint); split
@@ -3476,6 +3476,10 @@ below carry their own later dates, item 12 is the current one).
         (.dialog-backdrop toggles .on directly; currently animates in only)
       - [ ] nit: Add-a-device tabs have no icons and the dialog has no
         numbered steps, unlike the mockup (`docs/design/rc20/`)
+      - [ ] nit (DOWNLOADS-1): the generic failure text could add "If it fails
+        again, check the log"
+      - [ ] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
+        theme.css) and a stale header comment in `library.js`
       - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
         page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
         after main CI is green

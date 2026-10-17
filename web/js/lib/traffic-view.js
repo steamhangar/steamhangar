@@ -515,6 +515,9 @@ export function seriesStartText(series, nowMs = Date.now()) {
   return fixed;
 }
 
+/** The speed line of a Verifying job card (WP DOWNLOADS-1, decided by the user). */
+export const VERIFY_SPEED_TEXT = "Verifying files, no download speed";
+
 /**
  * The line under a running job's card: its speed at the cache (WP D13
  * SPEED-1, measured per job by depot in `GET /v1/throughput`'s `jobs`).
@@ -522,9 +525,18 @@ export function seriesStartText(series, nowMs = Date.now()) {
  * job not listed, or the feed not `ok` (the header's note explains that).
  * @param {object | null | undefined} entry one `jobs[]` element
  * @param {string} state `feedState(...)` of the same answer
+ * @param {{verifying?: boolean}} [opts] the card is a Verifying run
  * @returns {string | null}
  */
-export function jobSpeedText(entry, state) {
+export function jobSpeedText(entry, state, { verifying = false } = {}) {
+  // WP DOWNLOADS-1 (VERIFY-SPEED-TEXT-1): a Verify run compares files and
+  // downloads nothing, so "not measured" would read as a fault. Without a
+  // measured speed the line says what is happening instead; a speed the
+  // server did measure still wins.
+  if (verifying) {
+    const measured = entry && state === "ok" && entry.bytes_per_second !== null && entry.bytes_per_second !== undefined;
+    if (!measured) return VERIFY_SPEED_TEXT;
+  }
   if (!entry || state !== "ok") return null;
   if (entry.bytes_per_second === null || entry.bytes_per_second === undefined) {
     if (entry.exclusive_depots !== 0) return null;

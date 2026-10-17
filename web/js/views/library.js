@@ -96,6 +96,17 @@
  * `.hint` (the WP 4e.2 note above describes the earlier six-child BP-L
  * grid, which is gone: the row lays itself out with flexbox).
  *
+ * **WP LIBRARY-1 (rc20 redesign).** The toolbar row is `.lib-bar`: search and
+ * chips (`.lib-filters`) on the left, `.lib-tools` on the right (sort select
+ * plus an icon-only direction button, layout segments, the Filters popover
+ * holding the metadata filters, and a labelled Select button that replaces
+ * the old permanent long-press hint; long-press / right-click on a card
+ * still select). "Check updates" and "Check & update all cached games" are
+ * one split button in `.lib-head` (the second is the caret menu's only
+ * entry; without the primary the caret stays as the sole entry point).
+ * `lib/disclosure.js` supplies the menu / popover behaviour. In-flow
+ * children are `.lib-head`/`.lib-bar`/`.lib-status`/`.grid`/`.bulk`.
+ *
  * **WP TOOL-APPS-2c (content packages, ADR-0022).** `state.games` is the
  * GROUPED list (`lib/content-groups.js` `groupGames`): a game with content
  * packages is one card, its packages are hidden from the grid and listed in
@@ -136,6 +147,7 @@ import {
   applyMetaFilter,
   availableGenres,
   metaFilterActive,
+  activeFilterCount,
   normalizeMetaFilter,
   unknownNote,
 } from "../lib/library-meta.js";
@@ -177,6 +189,7 @@ import {
   OWNED_STATUS,
 } from "../lib/owned-library.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
+import { createDisclosure } from "../lib/disclosure.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import {
   expandSelection,
@@ -623,6 +636,15 @@ function paintUpdateCheck() {
   const btn = els.checkUpdatesBtn;
   const hidden = phase === UPDATE_PHASE.UNKNOWN || phase === UPDATE_PHASE.UNSUPPORTED;
   btn.hidden = hidden;
+  // Without the primary button the split's caret stays as the only way to
+  // "Check & update all cached games" (older vault-api, status unknown).
+  els.checkSplit.classList.toggle("solo", hidden);
+  // WCAG 2.5.3: while solo the caret shows the word "Updates", so the
+  // accessible name must contain it.
+  const moreLabel = hidden ? "Updates, more actions" : "More update actions";
+  const more = els.checkSplit.querySelector(".split-more");
+  more.setAttribute("aria-label", moreLabel);
+  more.title = moreLabel;
   const busy = updateCheck.isBusy();
   // While busy: aria-disabled, never `disabled` — a disabled button drops
   // keyboard focus to <body> (LEARNINGS, WP WEB-FEAT-1); the runner's own
@@ -917,6 +939,11 @@ function currentSort() {
   });
 }
 
+const SORT_ASC_SVG =
+  '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 16V4M5 9l5-5 5 5"/></svg>';
+const SORT_DESC_SVG =
+  '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 4v12M5 11l5 5 5-5"/></svg>';
+
 /** Paint the sort control from `currentSort()` (options, selection, toggle). */
 function renderSortControl() {
   const { sortSelect, sortDirBtn } = els;
@@ -937,7 +964,7 @@ function renderSortControl() {
   sortSelect.value = cur.key;
   const labels = cur.key === SORT_KEY.NAME ? SORT_NAME_DIR_LABEL : SORT_DIR_LABEL;
   const text = labels[cur.dir];
-  sortDirBtn.textContent = cur.dir === SORT_DIR.ASC ? "\u2191" : "\u2193";
+  sortDirBtn.innerHTML = cur.dir === SORT_DIR.ASC ? SORT_ASC_SVG : SORT_DESC_SVG;
   sortDirBtn.title = text;
   sortDirBtn.setAttribute("aria-label", `${SORT_LABEL} direction: ${text}`);
 }
@@ -970,11 +997,23 @@ function renderMetaPanel() {
   const panel = els.metaPanel;
   if (!panel) return;
   const available = metaAvailable(state.rawGames);
-  panel.hidden = !available;
+  // The panel lives in the Filters popover (its own open/closed state is
+  // the disclosure's); only the whole control hides without metadata.
+  els.filtersWrap.hidden = !available;
   if (!available) {
+    els.filtersDisclosure.close();
     panel.replaceChildren();
     return;
   }
+  paintFiltersButton();
+  // The panel is rebuilt on every change; keep keyboard focus on the same
+  // control (the year inputs fire `change` on blur, so they are left alone).
+  const focused = panel.contains(document.activeElement) ? document.activeElement : null;
+  const focusKey = focused?.dataset?.cat
+    ? `[data-cat="${focused.dataset.cat}"]`
+    : focused?.dataset?.role && !focused.dataset.role.startsWith("year")
+      ? `[data-role="${focused.dataset.role}"]`
+      : null;
   const f = state.metaFilter;
   const apply = (patch) => setMetaFilter({ ...f, ...patch });
   const kids = [];
@@ -1070,6 +1109,22 @@ function renderMetaPanel() {
   kids.push(noteEl);
 
   panel.replaceChildren(...kids);
+  if (focused) {
+    const again = focusKey ? panel.querySelector(focusKey) : null;
+    // The Clear button disappears once it has done its job: hand focus to
+    // the popover trigger rather than dropping it to <body>.
+    if (again) again.focus();
+    else if (focused.dataset?.role === "clear-meta") els.filtersBtn.focus();
+  }
+}
+
+/** Filters button: label stays "Filters", the badge carries the count. */
+function paintFiltersButton() {
+  const n = activeFilterCount(state.metaFilter);
+  els.filtersCount.textContent = n > 0 ? String(n) : "";
+  els.filtersCount.hidden = n === 0;
+  els.filtersBtn.classList.toggle("on", n > 0);
+  els.filtersBtn.setAttribute("aria-label", n > 0 ? `Filters, ${n} active` : "Filters");
 }
 
 function setSort(next) {
@@ -1422,13 +1477,41 @@ function buildSection() {
     ),
   );
 
+  // WP LIBRARY-1: a labelled button replaces the permanent long-press hint
+  // under the grid (long-press / right-click on a card still select).
   const selectBtn = document.createElement("button");
   selectBtn.type = "button";
-  selectBtn.className = "iconbtn";
+  selectBtn.className = "btn sm lib-select";
   selectBtn.title = "Select games";
   selectBtn.setAttribute("aria-label", "Select games");
   selectBtn.innerHTML =
-    '<svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="2.5" width="15" height="15" rx="3.5"/><path d="m6.4 10.2 2.4 2.5 4.8-5"/></svg>';
+    '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="3.5"/><path d="m6.4 10.2 2.4 2.5 4.8-5"/></svg>';
+  selectBtn.append(document.createTextNode(" Select"));
+
+  // WP LIBRARY-1: the metadata filters live in a popover behind one button.
+  const filtersWrap = document.createElement("div");
+  filtersWrap.className = "lib-filtersbtn";
+  filtersWrap.hidden = true;
+  const filtersBtn = document.createElement("button");
+  filtersBtn.type = "button";
+  filtersBtn.className = "btn sm";
+  filtersBtn.setAttribute("aria-haspopup", "true");
+  filtersBtn.setAttribute("aria-label", "Filters");
+  filtersBtn.innerHTML =
+    '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 5h14M6 10h8M8.5 15h3"/></svg>';
+  filtersBtn.append(document.createTextNode(" Filters"));
+  const filtersCount = document.createElement("span");
+  filtersCount.className = "fcount";
+  filtersCount.setAttribute("aria-hidden", "true");
+  filtersCount.hidden = true;
+  filtersBtn.appendChild(filtersCount);
+  const metaPanel = document.createElement("div");
+  metaPanel.className = "lib-meta pop";
+  metaPanel.setAttribute("role", "group");
+  metaPanel.setAttribute("aria-label", "Metadata filters");
+  metaPanel.hidden = true;
+  filtersWrap.append(filtersBtn, metaPanel);
+  const filtersDisclosure = createDisclosure({ trigger: filtersBtn, panel: metaPanel });
 
   // WP LIB-SORT: option select plus an ascending/descending toggle.
   const sortWrap = document.createElement("div");
@@ -1443,8 +1526,7 @@ function buildSection() {
   sortDirBtn.className = "iconbtn lib-sort-dir";
   sortWrap.append(sortSelect, sortDirBtn);
 
-  tools.append(sortWrap, layoutSegs, selectBtn);
-  head.append(titles, tools);
+  tools.append(sortWrap, layoutSegs, filtersWrap, selectBtn);
 
   // "Check & update all cached games" (Phase 4c, WP 4c-web) — a plain
   // labeled button, not an icon (module header: the visible wording IS the
@@ -1458,7 +1540,6 @@ function buildSection() {
   // never reads as the default action.
   const checkUpdateBtn = document.createElement("button");
   checkUpdateBtn.type = "button";
-  checkUpdateBtn.className = "btn sm";
   checkUpdateBtn.dataset.action = "check-and-update";
   const startsBusy = checkAndUpdateAction.isInFlight();
   checkUpdateBtn.disabled = startsBusy;
@@ -1471,9 +1552,37 @@ function buildSection() {
   checkUpdatesBtn.dataset.action = "check-updates";
   checkUpdatesBtn.textContent = CHECK_UPDATES_LABEL;
   checkUpdatesBtn.hidden = true;
-  const checkBtns = document.createElement("div");
-  checkBtns.className = "lib-checkbtns";
-  checkBtns.append(checkUpdatesBtn, checkUpdateBtn);
+  // WP LIBRARY-1: one split button in the header. The primary only asks;
+  // the one that DOWNLOADS ("Check & update all cached games", unchanged
+  // wording) is a menu entry behind the caret, never the default action.
+  checkUpdateBtn.className = "menuitem";
+  checkUpdateBtn.setAttribute("role", "menuitem");
+  const checkSplit = document.createElement("div");
+  checkSplit.className = "lib-split solo";
+  const splitMore = document.createElement("button");
+  splitMore.type = "button";
+  splitMore.className = "btn primary sm split-more";
+  splitMore.setAttribute("aria-haspopup", "menu");
+  // Starts solo (the primary is hidden until the status answers); see
+  // paintUpdateCheck for the label per state.
+  splitMore.setAttribute("aria-label", "Updates, more actions");
+  splitMore.title = "Updates, more actions";
+  const splitLbl = document.createElement("span");
+  splitLbl.className = "split-lbl";
+  splitLbl.textContent = "Updates";
+  const splitCaret = document.createElement("span");
+  splitCaret.className = "split-caret";
+  splitCaret.innerHTML =
+    '<svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg>';
+  splitMore.append(splitLbl, splitCaret);
+  const splitMenu = document.createElement("div");
+  splitMenu.className = "pop menu";
+  splitMenu.setAttribute("role", "menu");
+  splitMenu.setAttribute("aria-label", "Update actions");
+  splitMenu.appendChild(checkUpdateBtn);
+  checkSplit.append(checkUpdatesBtn, splitMore, splitMenu);
+  const splitDisclosure = createDisclosure({ trigger: splitMore, panel: splitMenu, menu: true });
+  head.append(titles, checkSplit);
   // The status lines under the toolbar row (small text): the UPD-2 "Updates
   // last checked …" line and the WP WEB-FEAT-1 owned-list notice.
   const statusBlock = document.createElement("div");
@@ -1528,10 +1637,6 @@ function buildSection() {
   const grid = document.createElement("div");
   grid.className = "grid";
 
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.textContent = "Long-press (or right-click) a game to select several.";
-
   // ---- bulk bar ----
   const bulkBar = document.createElement("div");
   bulkBar.className = "bulk";
@@ -1582,22 +1687,19 @@ function buildSection() {
   filters.append(searchWrap, chips);
   const bar = document.createElement("div");
   bar.className = "lib-bar";
-  bar.append(filters, checkBtns);
+  bar.append(filters, tools);
 
-  // WP D23: metadata filters, hidden until some game carries metadata.
-  const metaPanel = document.createElement("div");
-  metaPanel.className = "lib-meta";
-  metaPanel.setAttribute("role", "group");
-  metaPanel.setAttribute("aria-label", "Metadata filters");
-  metaPanel.hidden = true;
-
-  // Lives inside the status block (under the toolbar row) so the section's
-  // child order stays head, bar, status, grid.
-  statusBlock.appendChild(metaPanel);
-  section.append(head, bar, statusBlock, grid, hint, bulkBar);
+  // Section child order: head, bar, status, grid, bulk.
+  section.append(head, bar, statusBlock, grid, bulkBar);
 
   els = {
     metaPanel,
+    filtersWrap,
+    filtersBtn,
+    filtersCount,
+    filtersDisclosure,
+    checkSplit,
+    splitDisclosure,
     sub,
     ownedNote,
     ownedText,
@@ -1928,6 +2030,9 @@ onViewChange((view) => {
   closeDeleteConfirm();
   // WP UPD-2: stop polling the update-check status off-view.
   updateCheck.detach();
+  // Open popovers hold document listeners while open: unbind them.
+  els?.filtersDisclosure.dispose();
+  els?.splitDisclosure.dispose();
   // Release the detached DOM tree — app.js's replaceChildren() already
   // detached it, but this module held its own reference in `sectionEl`
   // (mounted()'s isConnected check would already report false, this just

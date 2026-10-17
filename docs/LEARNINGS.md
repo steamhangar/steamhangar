@@ -1187,3 +1187,12 @@ These are not style preferences; each entry cost a review round to learn.
   mounts the Downloads view must set `globalThis.localStorage` itself:
   `readStoredStatsRange` reads that, not `window.localStorage`, so a fake
   window alone silently gets the default range.
+
+- **Nesting a view's blocks into wrapper columns breaks tests that read
+  `section.children` (DOWNLOADS-1, rc20).** Order pins must read the
+  wrapper's children (`.dl-col-main`), not the section's. A busy or
+  disable loop over "every button in a box" must also skip toggle buttons
+  added to that box (no `data-role` of the row actions), or the fold
+  toggle goes aria-disabled while a request is out. When the full run
+  reports a bare SIGKILL for one file, run it alone with
+  `node --test web/tests/<file>`: the per-test output names the hanging test.
