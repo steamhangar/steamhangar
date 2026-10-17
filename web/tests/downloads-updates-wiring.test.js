@@ -161,12 +161,13 @@ test("MUTATION PIN: lists the flagged games (name, size), heading count, between
     assert.equal(nowBtn(s, 10).getAttribute("aria-label"), "Update now — Aurora");
     assert.equal(allBtn(s).textContent, "Update all");
     assert.equal(allBtn(s).getAttribute("aria-label"), "Update all 2 games");
-    const order = s.children.map((c) => c.className || c.tagName);
+    const main = s.querySelector(".dl-col-main");
+    const order = main.children.map((c) => c.className || c.tagName);
     const at = order.indexOf("dl-updates");
-    assert.ok(at > 0, "in the section");
+    assert.ok(at > 0, "in the main column");
     // WP CACHE-COMPLETE-1c: the (here hidden) Incomplete section sits between.
-    assert.equal(s.children[at + 1].className, "dl-updates dl-incomplete", "directly above the Incomplete section");
-    assert.equal(s.children[at + 2].textContent.startsWith("Queue"), true, "then the Queue heading");
+    assert.equal(main.children[at + 1].className, "dl-updates dl-incomplete", "directly above the Incomplete section");
+    assert.equal(main.children[at + 2].textContent.startsWith("Queue"), true, "then the Queue heading");
 
     server.games = server.games.map((g) => ({ ...g, update_available: false }));
     store.refreshNow();
@@ -255,7 +256,7 @@ test("MUTATION PIN: 'Update all' sends every listed appid in one POST /v1/prefil
     assert.deepEqual(server.posts[0], { path: "/v1/prefill", body: { appids: [10, 30] } });
     await until(() => box(s).hidden === true, "all moved into the queue");
     assert.equal(toastText(), "2 queued for update");
-    const queueHeading = s.children.find((c) => c.tagName === "H4" && c.textContent.startsWith("Queue"));
+    const queueHeading = s.querySelector(".dl-col-main").children.find((c) => c.tagName === "H4" && c.textContent.startsWith("Queue"));
     assert.equal(dom.document.activeElement, queueHeading, "MUTATION PIN: section gone, focus on the Queue heading");
     assert.equal(queueHeading.tabIndex, -1, "focusable by script only");
   } finally {

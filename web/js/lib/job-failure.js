@@ -167,3 +167,37 @@ export function offersRetryFor(game) {
   // WP NOT-OWNED-2: also the kept-status flag (`not_owned: true`).
   return !isToolApp(game) && game?.status !== "not_owned" && game?.not_owned !== true;
 }
+
+/**
+ * WP DOWNLOADS-1: what a failed prefill row offers when no known hint
+ * applies (`jobFailureHint` is null): the failure line above the output and
+ * the same Retry rule as the hint blocks. The output stays visible, it IS
+ * the diagnosis here.
+ */
+export const GENERIC_FAILURE = Object.freeze({
+  title: "The download failed",
+  body: "No known cause matches this failure. The log below is what the server recorded.",
+  retry: "Press Retry to queue the game again.",
+});
+
+/**
+ * Whether a finished job is a failed prefill (the rows that get the generic
+ * failure block).
+ * @param {{type?: string, status?: string} | null | undefined} job
+ */
+export function isFailedPrefill(job) {
+  return !!job && job.type === "prefill" && job.status === "error";
+}
+
+/**
+ * Which Retry line a failed row shows: `"retry"` (button), `"newer"` (a newer
+ * job exists), `"tool"` (a Steam tool app: never retried).
+ * @param {{id: number, appid: number}} job
+ * @param {Array<{id: number, appid: number}>} jobs
+ * @param {object | undefined} game
+ * @returns {"retry" | "newer" | "tool"}
+ */
+export function retryOffer(job, jobs, game) {
+  if (!offersRetryFor(game)) return "tool";
+  return isNewestJobForApp(job, jobs) ? "retry" : "newer";
+}

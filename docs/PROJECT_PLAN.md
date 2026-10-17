@@ -3438,7 +3438,7 @@ below carry their own later dates, item 12 is the current one).
         Linux-SteamOS) with a single security notice; secrets (API key,
         commands containing it) revealed on demand and copyable
         (`add-device-sheet.js`). Adapt `add-device-wiring.test.js`.
-      - [ ] **DOWNLOADS-1** declutter the header cards; two-column layout
+      - [x] **DOWNLOADS-1** declutter the header cards; two-column layout
         (Active and Queue left, History right, one column below 1000px);
         per-game Update and Verify buttons; Queue reordered by drag and drop
         only (no arrows); History differs between idle and active, rows

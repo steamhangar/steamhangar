@@ -341,8 +341,11 @@ test("downloads wiring: nameFor uses vaultRowTitle; the hint block gates Retry o
   assert.ok(hint, "appendFailureHint() not found in downloads.js");
   assert.match(
     hint,
-    /if \(!offersRetryFor\(gamesByAppidMap\(\)\.get\(job\.appid\)\)\) \{[\s\S]*?box\.appendChild\(para\(TOOL_APP_NOTE\)\);\s*\n\s*\} else if \(isNewestJobForApp/,
+    /appendRetryOffer\(box, job, text\.retry\)/,
   );
+  const offer = functionBody(downloadsJs, "function appendRetryOffer(box, job, retryLine) {");
+  assert.ok(offer, "appendRetryOffer() not found in downloads.js");
+  assert.match(offer, /offer === "tool"[\s\S]*?TOOL_APP_NOTE/);
 });
 
 test("MUTATION TARGET -- sheet wiring: the not-tracked view offers no download for a tool app", () => {
