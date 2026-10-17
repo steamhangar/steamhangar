@@ -2194,6 +2194,10 @@ of the **current build** is there (`vault_api/cache_completeness.py`):
   the `size_bytes` rule.
 - **UI contract:** `null` while `size_bytes > 0` means "not known", never
   "complete" -- it must not render as the green check. Only 100 does.
+- **Unmapped depots (WP UNMAPPED-FLAG-1):** `cache_unmapped_depots` (int,
+  default 0; own row only, 0 without bytes on disk) counts depots with a
+  recorded manifest for the app, no `depot_app_map` row under any app and
+  bytes on disk. They are NOT in the figure; a UI says so when it is > 0.
 - **Groups (D9):** `group_cache_complete_pct` over the depots of the group
   members that currently have bytes on disk (own `size_bytes` > 0, the same
   members that add bytes to `group_size_bytes`), each depot/manifest once; a

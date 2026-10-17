@@ -3496,7 +3496,7 @@ below carry their own later dates, item 12 is the current one).
         `deletion.py` cache-root guards (size re-checked right before the
         delete), then queue a forced run; "Complete all" and automatic
         completion keep skipping such a game until repaired. Full review.
-      - [ ] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
+      - [x] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
         in the completeness display: when depots of a game have no mapping
         the percentage says so instead of showing a clean figure.
       - [ ] **APP-NAMES-1** (api + web) package names for "Unknown app"

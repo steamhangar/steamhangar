@@ -336,6 +336,11 @@ class GameSummary(BaseModel):
     # with 0 here is short only of wrong-size chunk files, which no current
     # action repairs (UIs do not offer "Complete now" for it).
     cache_missing_chunks: int | None = None
+    # WP UNMAPPED-FLAG-1: depots the game demonstrably uses (a recorded
+    # manifest) that have no mapping and so are NOT in the figure above, with
+    # bytes on disk. 0 = none (or nothing on disk). A UI says the figure does
+    # not cover the whole game when this is > 0.
+    cache_unmapped_depots: int = 0
     # Same figure over the whole group this row heads (D9): the depots of the
     # members that currently have bytes on disk (own size_bytes > 0, the same
     # members that add bytes to ``group_size_bytes``), each depot/manifest
@@ -507,6 +512,7 @@ class GameDetail(BaseModel):
     cache_present_bytes: int | None = None
     cache_complete_checked_at: str | None = None
     cache_missing_chunks: int | None = None
+    cache_unmapped_depots: int = 0
     group_cache_complete_pct: int | None = None
 
 
@@ -637,6 +643,9 @@ def list_games(
         children_by_parent = _children_by_parent(classifications)
         # WP CACHE-COMPLETE-1a: stored rows + current targets, bulk.
         completeness = cache_completeness.load_index(conn, base_settings)
+        unmapped = cache_completeness.unmapped_depot_counts(
+            conn, size_cache.get(cache_root).depot_bytes
+        )
         not_owned_set = jobs.not_owned_appids(conn)
         # WP D23: stored metadata and the filter's match set (indexed SQL).
         app_meta = library_meta.meta_by_appid(conn)
@@ -670,6 +679,9 @@ def list_games(
             completeness, row["appid"], app_depotids.get(row["appid"], []), size_bytes
         )
         completeness_fields = _completeness_fields(figure)
+        completeness_fields["cache_unmapped_depots"] = (
+            unmapped.get(row["appid"], 0) if size_bytes else 0
+        )
         if incomplete and not cache_completeness.is_incomplete(figure):
             continue
         if matching is not None and row["appid"] not in matching:
@@ -810,6 +822,8 @@ def get_game(
         detail_not_owned = appid in jobs.not_owned_appids(conn)
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
+    with open_db() as conn:
+        detail_unmapped = cache_completeness.unmapped_depot_counts(conn, depot_bytes).get(appid, 0)
 
     depots = [
         DepotEntry(
@@ -855,6 +869,7 @@ def get_game(
                 completeness, appid, group_depotids.get(appid, []), detail_size
             )
         ),
+        cache_unmapped_depots=detail_unmapped if detail_size else 0,
         group_cache_complete_pct=_group_completeness_pct(
             appid,
             classifications,
