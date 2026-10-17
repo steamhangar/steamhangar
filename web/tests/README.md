@@ -3954,3 +3954,26 @@ vault-core's apply state (`coreApplyLine`: pending / rejected with reason
   the 400px `.kit-frame`); `kit` is in router `VIEWS`.
 - Updated pins: `view-announcer.test.js` (five views, `kit: "UI kit"`),
   `css-layout-foundation.test.js` (`--dim-2:#7A91A0`).
+
+## WP WEB-GOLDENS-1 — screenshot goldens (tools/)
+
+The goldens themselves live in `goldens/<page>-<width>.png` (recorded by
+CI only; `tools/README.md`). Three test files cover the tooling without a
+browser:
+
+- `png-diff.test.js` (13): the dependency-free PNG codec (round trip, all
+  five filter types, grey / grey+alpha / palette expansion, CRC and
+  bit-depth rejection) and the comparison (tolerance boundary, inclusive
+  threshold, size mismatch, diff image colours, per-file pass / fail /
+  missing / partial / stale, empty actual dir is an error, CLI validation) of
+  `tools/png-diff.mjs`.
+- `web-serve.test.js` (4): `tools/web-serve.mjs` serves index.html for `/`
+  and exactly the router's `VIEWS` (deep links included), files with their
+  type, 404 for unknown routes, `/v1/*` and encoded traversal, 405 for
+  POST.
+- `web-shot-config.test.js` (6): `tools/web-shot.mjs`'s demo storage keys
+  are the app's own literals, default pages/widths (on single greppable
+  lines, which `ci.yml`'s push job relies on), the frozen-`Date` bootstrap
+  script run in a `vm` context, argument parsing, Chromium lookup, and
+  `tools/web-shot-fonts.conf` being well-formed XML with a Liberation alias
+  for every family in `theme.css`'s `--ui` / `--mono` stacks.
