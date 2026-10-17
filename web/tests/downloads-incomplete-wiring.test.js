@@ -114,7 +114,8 @@ async function until(pred, label, timeoutMs = 2000) {
 }
 const click = (el) => el.dispatchEvent({ type: "click" });
 const box = (s) => s.querySelector(".dl-incomplete");
-const heading = (s) => box(s).querySelector("h4.sec").textContent;
+// WP DOWNLOADS-2: the kit head is the label plus a count badge.
+const heading = (s) => `${box(s).querySelector("h2.sec").textContent} (${box(s).querySelector('[data-role="incomplete-count"]').textContent})`;
 const note = (s) => box(s).querySelector(".dl-updates-note");
 const rows = (s) => box(s).querySelectorAll(".urow");
 const rowNames = (s) => rows(s).map((r) => r.querySelector(".nm").textContent);
@@ -157,19 +158,17 @@ test("MUTATION PIN: hidden while nothing is incomplete; shown with rows, figures
     await until(() => box(s).hidden === false, "section shown");
     assert.equal(heading(s), "Incomplete (3)");
     assert.deepEqual(rowNames(s), ["Aurora", "Broken Bits", "Zephyr Run"], "sorted; complete and flagged games are not listed");
-    assert.equal(rowFor(s, 20).querySelector(".usize").textContent, "86%");
+    assert.equal(rowFor(s, 20).querySelector(".meta").textContent, "86% on disk");
     assert.equal(nowBtn(s, 20).textContent, "Verify");
     assert.equal(nowBtn(s, 20).getAttribute("aria-label"), "Verify — Aurora");
     assert.equal(nowBtn(s, 40), null, "MUTATION PIN: no Complete now for damaged-only");
     assert.equal(rowFor(s, 40).querySelector('[data-role="damaged-note"]').textContent, "Damaged chunks — SteamHangar can't repair these yet.");
-    assert.equal(allBtn(s).textContent, "Complete all");
-    assert.equal(allBtn(s).getAttribute("aria-label"), "Complete all 2 games", "counts only the completable rows");
+    assert.equal(allBtn(s).textContent, "Verify all");
+    assert.equal(allBtn(s).getAttribute("aria-label"), "Verify all 2 games", "counts only the completable rows");
 
-    const main = s.querySelector(".dl-col-main");
-    const order = main.children.map((c) => c.className || c.tagName);
-    const upd = order.indexOf("dl-updates");
-    assert.equal(order[upd + 1], "dl-updates dl-incomplete", "directly after Updates available");
-    assert.equal(main.children[upd + 2].textContent.startsWith("Queue"), true, "directly above the Queue heading");
+    // WP DOWNLOADS-2: the middle column, directly after Updates available.
+    const col = s.querySelector(".dl-col-attn");
+    assert.deepEqual(col.children.map((c) => c.className), ["blk dl-updates", "blk dl-incomplete"]);
 
     server.games = server.games.map((g) => ({ ...g, cache_complete_pct: 100, cache_missing_chunks: 0 }));
     store.refreshNow();
@@ -289,7 +288,7 @@ test("MUTATION PIN: focus survives a rebuild — the same row's button, then 'Co
     // A new figure for the other row rebuilds the section.
     server.games = [partial(20, "Aurora", 87, 2), partial(30, "Zephyr Run", 42, 7)];
     store.refreshNow();
-    await until(() => rowFor(s, 20).querySelector(".usize").textContent === "87%", "rebuilt");
+    await until(() => rowFor(s, 20).querySelector(".meta").textContent === "87% on disk", "rebuilt");
     assert.equal(document.activeElement?.dataset?.incompleteAppid, "30", "the same row's button");
     assert.equal(document.activeElement?.dataset?.role, "complete-now");
 

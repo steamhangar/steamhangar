@@ -141,7 +141,8 @@ async function until(pred, label, timeoutMs = 2000) {
 }
 const RELAY = "/v1/steam/owned-games";
 const historyNames = (s) => s.querySelectorAll(".hrow .nm").map((n) => n.textContent);
-const row = (s, jobId) => s.querySelector(`.hrow[data-jid="${jobId}"]`);
+// WP DOWNLOADS-2: one History item = the row button (.hrow) + its panel (.hpanel.log).
+const row = (s, jobId) => s.querySelector(`.hitem[data-jid="${jobId}"]`);
 async function pollTicks(n) {
   for (let i = 0; i < n; i++) {
     const before = count("/v1/games");

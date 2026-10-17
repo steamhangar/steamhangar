@@ -204,21 +204,20 @@ test("base .jobcard/.jobtop keep every pre-WP property value (the Active/Paused 
   assert.match(topBody, /justify-content:\s*space-between/, "the header row must still spread name/badge apart — this WP caps the COLUMN, not this row's own internal layout");
 });
 
-test("base .qrow keeps every pre-WP property value (the Queue row shape)", () => {
-  const body = ruleBody(appTop, ".qrow");
-  assert.ok(body, ".qrow rule not found at top level");
-  assert.match(body, /display:\s*flex/);
-  assert.match(body, /align-items:\s*center/);
-  assert.match(body, /border-radius:\s*var\(--r-m\)/);
-});
-
-test("base .hrow / .hrow > button keep every pre-WP property value (the History row shape)", () => {
-  const rowBody = ruleBody(appTop, ".hrow");
-  assert.ok(rowBody, ".hrow rule not found at top level");
-  assert.match(rowBody, /overflow:\s*hidden/);
-  const btnBody = ruleBody(appTop, ".hrow > button");
-  assert.ok(btnBody, ".hrow > button rule not found at top level");
-  assert.match(btnBody, /width:\s*100%/, "the toggle button must still fill its row's own width (100% of whatever container it sits in — unaffected by the OUTER column narrowing this WP adds)");
+test("WP DOWNLOADS-2: the Queue and History row shapes moved from app.css to kit.css (scoped under .kit)", () => {
+  // The old app.css rules are gone (no second copy that could tie or drift).
+  assert.equal(ruleBody(appTop, ".qrow"), null, "app.css still has a .qrow rule");
+  assert.equal(ruleBody(appTop, ".hrow"), null, "app.css still has a .hrow rule");
+  assert.equal(/\.hrow\b|\.qrow\b/.test(stripComments(appCss)), false, "app.css still styles .hrow/.qrow");
+  const kitCss = stripComments(readFileSync(path.join(webDir, "css", "kit.css"), "utf8"));
+  // Queue row = the kit attention row (.jr grid) + the grip/name lead.
+  assert.match(ruleBody(kitCss, ".kit .jr") ?? "", /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+72px/);
+  assert.match(ruleBody(kitCss, ".kit .qrow .qlead") ?? "", /display:\s*flex/);
+  // History row = a full-width button; its panel hangs under it.
+  const hrow = ruleBody(kitCss, ".kit .hrow") ?? "";
+  assert.match(hrow, /display:\s*flex/);
+  assert.match(hrow, /width:\s*100%/);
+  assert.match(ruleBody(kitCss, ".kit .hpanel") ?? "", /border-top:\s*0/);
 });
 
 test("base .field/.srow keep every pre-WP property value (the Settings form shape)", () => {

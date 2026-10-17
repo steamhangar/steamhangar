@@ -335,19 +335,23 @@ test("MUTATION TARGET -- downloads: no Retry for a tool app's failed job", () =>
 
 const downloadsJs = readFileSync(path.join(webDir, "js", "views", "downloads.js"), "utf8");
 
+const historyListJs = readFileSync(path.join(webDir, "js", "components", "history-list.js"), "utf8");
+
 test("downloads wiring: nameFor uses vaultRowTitle; the hint block gates Retry on offersRetryFor", () => {
   assert.match(
     functionBody(downloadsJs, "function nameFor(appid, gamesByAppid) {"),
     /vaultRowTitle\(appid, gamesByAppid\.get\(appid\)\)/,
   );
-  const hint = functionBody(downloadsJs, "function appendFailureHint(logEl, hintKind, job, st) {");
-  assert.ok(hint, "appendFailureHint() not found in downloads.js");
-  assert.match(
-    hint,
-    /appendRetryOffer\(box, job, text\.retry\)/,
-  );
-  const offer = functionBody(downloadsJs, "function appendRetryOffer(box, job, retryLine) {");
-  assert.ok(offer, "appendRetryOffer() not found in downloads.js");
+  // WP DOWNLOADS-2: the view decides the offer (retryOffer -> offersRetryFor)
+  // and components/history-list.js renders it.
+  const paint = functionBody(downloadsJs, "function paintExcerpt(itemEl, jobId) {");
+  assert.ok(paint, "paintExcerpt() not found in downloads.js");
+  assert.match(paint, /retryOffer\(job, state\.jobs, gamesByAppidMap\(\)\.get\(job\.appid\)\)/);
+  const panel = historyListJs.slice(historyListJs.indexOf("export function paintHistoryPanel("));
+  assert.ok(panel.length > 0, "paintHistoryPanel() not found in history-list.js");
+  assert.match(panel, /appendRetryOffer\(box, retry\.offer, text\.retry, retry\.make\)/);
+  const offer = functionBody(historyListJs, "function appendRetryOffer(box, offer, retryLine, makeRetry) {");
+  assert.ok(offer, "appendRetryOffer() not found in history-list.js");
   assert.match(offer, /offer === "tool"[\s\S]*?TOOL_APP_NOTE/);
 });
 

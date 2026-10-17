@@ -266,8 +266,9 @@ test("named pin: .nav-btn:hover (the pre-existing precedent this WP generalizes)
 // "previously missing" half) — each must exist AND be gated, not merely
 // exist unconditionally (which would silently re-introduce the sticky-hover
 // risk for a brand new rule).
+// (".hrow > button:hover" left app.css with WP DOWNLOADS-2: the History row
+// is kit.css's `.kit .hrow`, whose hover rule is gated there too.)
 for (const selector of [
-  ".hrow > button:hover",
   ".banner .acts button:hover",
   ".icnact:hover",
   ".card:hover .cap",
@@ -393,7 +394,6 @@ const FOCUS_CROSS_SECTION = [
   ".notif",
   ".segs button",
   ".depotwrap.sh .depot",
-  ".hrow > button",
   ".iconbtn",
   ".qx",
 ];
@@ -435,7 +435,9 @@ test("documented exception: .search input / .inp input suppress outline but thei
 // `overflow:hidden` ancestor, clipping the default OUTSIDE ring) each carry
 // their own inset override. Each asserted separately so deleting any ONE
 // fails by name, not merely a combined count.
-for (const selector of [".segs button:focus-visible", ".hrow > button:focus-visible", ".depotwrap.sh .depot:focus-visible"]) {
+// (".hrow > button:focus-visible" left with WP DOWNLOADS-2: the kit History
+// row is the button itself, with no clipping ancestor.)
+for (const selector of [".segs button:focus-visible", ".depotwrap.sh .depot:focus-visible"]) {
   test(`named pin: ${selector}{ outline-offset:-2px } exists (overflow-clipped ancestor fix)`, () => {
     const rule = allRules.find((r) => r.selector === selector);
     assert.ok(rule, `${selector} rule not found`);

@@ -96,7 +96,7 @@ async function mount() {
   store.start();
   const s = renderDownloads();
   dom.appRoot.replaceChildren(s);
-  await until(() => s.querySelector('.jobcard[data-jid="1"]') !== null, "jobs painted");
+  await until(() => s.querySelector('.job[data-jid="1"]') !== null, "jobs painted");
   return s;
 }
 
@@ -109,7 +109,10 @@ beforeEach(() => {
 test("MUTATION TARGET: the button opens an alertdialog with focus on Keep and the 30-day variant preselected", async () => {
   const s = await mount();
   const btn = role(s, "history-delete");
-  assert.equal(btn.textContent, "Delete history…");
+  // WP DOWNLOADS-2: the History head row is short ("Delete…"); the
+  // accessible name keeps the full words.
+  assert.equal(btn.textContent, "Delete…");
+  assert.equal(btn.getAttribute("aria-label"), "Delete history…");
   btn.focus();
   btn.dispatchEvent({ type: "click" });
   assert.equal(open(), true);
@@ -131,7 +134,7 @@ test("MUTATION TARGET: the button opens an alertdialog with focus on Keep and th
 
 test("MUTATION TARGET: choosing Everything renames the button and confirming sends scope=all, then refetches", async () => {
   const s = await mount();
-  await until(() => s.querySelectorAll(".hrow").length === 1, "history row");
+  await until(() => s.querySelectorAll(".hitem").length === 1, "history row");
   role(s, "history-delete").dispatchEvent({ type: "click" });
   radio("older-than-30d").checked = false;
   radio("all").checked = true;
@@ -144,7 +147,7 @@ test("MUTATION TARGET: choosing Everything renames the button and confirming sen
   assert.deepEqual(server.deletes, ["all"]);
   await until(() => server.historyFetches > fetchesBefore, "history refetched");
   await until(() => server.statsFetches > statsBefore, "statistics refetched");
-  await until(() => s.querySelectorAll(".hrow").length === 0, "deleted rows gone");
+  await until(() => s.querySelectorAll(".hitem").length === 0, "deleted rows gone");
 });
 
 test("MUTATION TARGET: the default variant sends scope=older-than-30d", async () => {
