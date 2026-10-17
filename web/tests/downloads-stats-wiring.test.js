@@ -189,7 +189,7 @@ test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four til
   assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s."); // stored range: 6 h (the default is live since LIVE-DELAY-1)
   assert.deepEqual(svg.children[0].children.map((l) => l.getAttribute("y1")), ["24", "48", "72"], "grid lines");
   assert.equal(svg.children[2].getAttribute("d"), "M0 96 L300 0 L600 48");
-  assert.equal(q(s, "stats-graph").querySelector(".ax").textContent, "6 h agopeak 10.0 MB/snow");
+  assert.equal(q(s, "stats-graph").querySelector(".ax").textContent, "6 h agohighest 10.0 MB/snow");
   await until(() => speed(s) !== null, "speed line");
   assert.equal(speed(s), "30.0 MB/s · 8.8 GB loaded so far");
   assert.equal(q(s, "stats-range").getAttribute("aria-label"), "Statistics range");

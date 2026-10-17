@@ -150,7 +150,7 @@ export function heroModel({ throughput = null, rateCap = null, unsupported = fal
   const t = throughput;
   let note;
   if (unsupported) note = FEED_TEXT.unsupported;
-  else if (error && !t) note = `Could not load the statistics: ${error}`;
+  else if (error && !t) note = `Could not load the statistics: ${error}`; // twin-pinned (TrafficWebTwinTest)
   else if (t) note = joinNotes(error ? refreshFailedText(error) : null, feedNote(t));
   else note = "Loading statistics…";
 
@@ -223,7 +223,10 @@ export function graphModel(series, range, { unsupported = false, nowMs = Date.no
     line: geo.line,
     area: geo.area,
     label: seriesLabel(series, geo.maxBytesPerSecond),
-    axis: [seriesStartText(shown, nowMs), `peak ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"],
+    // The axis keeps the established "highest" wording (the Android app
+    // says the same, pinned by TrafficWebTwinTest); the mini line's "Peak"
+    // is a separate figure.
+    axis: [seriesStartText(shown, nowMs), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"],
   };
 }
 
