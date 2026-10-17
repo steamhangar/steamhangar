@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { UNKNOWN_APP_NAME } from "../js/lib/app-names.js";
+import { CONTENT_PACKAGE_NAME, UNKNOWN_APP_NAME } from "../js/lib/app-names.js";
 import { appLabel, recentAppsText, loadingNowText } from "../js/lib/clients-page.js";
 import { gameDisplayName } from "../js/lib/game-status.js";
 import { appTitle } from "../js/lib/owned-library.js";
@@ -24,7 +24,7 @@ test("every title helper uses the fallback, with or without an app id", () => {
   assert.equal(gameDisplayName({ appid: 1465470, name: null }), UNKNOWN_APP_NAME);
   assert.equal(gameDisplayName(undefined), UNKNOWN_APP_NAME);
   assert.equal(appTitle(1962700, null, null), UNKNOWN_APP_NAME);
-  assert.equal(packageFullName({ appid: 7 }), UNKNOWN_APP_NAME);
+  assert.equal(packageFullName({ appid: 7 }), CONTENT_PACKAGE_NAME);
   const p = buildDepotPresentation({ depotid: 1, sizeBytes: 1, shared: true, others: [42], holderAppids: [] }, new Map(), false);
   assert.equal(p.coOwners[0].name, UNKNOWN_APP_NAME);
 });

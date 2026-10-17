@@ -150,17 +150,6 @@ once decided (the decision then lives in the item it belongs to).
   "Complete now", the mockup says "Verify". Weg A keep "Complete now",
   Weg B rename to "Verify" to match the mockup and the Verifying state word.
   Recommendation: Weg B if the visual check finds the label confusing.
-- **APP-NAMES-1 scope** (rc21, blocks the package): the entry names no name
-  source, and the coder found none that is allowed. HD2-style content
-  packages have no `apps.name`, the store answers without a name, and
-  ADR-0022 Q8 B forbids extra oracle requests for packages. Weg A: label
-  unnamed DLC packages "Content package" instead of "Unknown app" (web
-  only, touches Android twin pins and the ID-AUDIT single-fallback
-  decision). Weg B: harvest depot `name` of depots with a `dlcappid` from
-  the cached parent PICS answer (schema bump, needs a P1-style
-  measurement first, names may not equal package names). Weg C: send ACF
-  names from the agent (agent + report format + Android, not rc21-sized).
-  Recommendation: Weg A now, Weg B after a measurement.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
@@ -528,6 +517,8 @@ HD2's own PICS lists all 15 packages (`extended.listofdlc`, depot
 packages come from the cached parent's answer); Q7 A (dynamic tool
 classification for display only, the fixed list keeps stopping
 prefills).
+
+Decided 2026-10-17: Weg A for APP-NAMES-1 (rc21): unnamed content packages read "Content package" instead of "Unknown app" (web only; Weg B depot-name harvest stays a later option after a measurement).
 
 ## D10: COVER-CACHE-1, slow cover loading
 

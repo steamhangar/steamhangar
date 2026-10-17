@@ -9,3 +9,11 @@
  * The Android twin is `AppNames.kt` (`UNKNOWN_APP_NAME`); keep both in sync.
  */
 export const UNKNOWN_APP_NAME = "Unknown app";
+
+/**
+ * Title of a content/DLC package row nothing could name (APP-NAMES-1, decided
+ * 2026-10-17): such rows have no name source, so they read as what they are.
+ * Only package rows use it; a real unknown app keeps UNKNOWN_APP_NAME. The
+ * app id stays in the package facts line. Twin: `AppNames.kt`.
+ */
+export const CONTENT_PACKAGE_NAME = "Content package";
