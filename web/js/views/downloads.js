@@ -1299,7 +1299,10 @@ export function highlightJob(jobId) {
   if (jobId == null) return;
   getExcerptState(jobId).expanded = true;
   pendingHighlightJobId = jobId;
-  applyPendingHighlight();
+  // WP DOWNLOADS-3: a row beyond the first History page is paged in by
+  // renderHistory (which ends in applyPendingHighlight).
+  if (mounted()) renderHistory();
+  else applyPendingHighlight();
 }
 
 function applyPendingHighlight() {
@@ -1357,7 +1360,9 @@ function subtitleText(p) {
   if (p.paused.length) bits.push(`${p.paused.length} paused`);
   if (p.queued.length) bits.push(`${p.queued.length} queued`);
   if (!bits.length) {
-    return idleSubtitle({ loaded: history.loaded, count: historyRows().length, capped: isHistoryCapped(history.jobs.length) });
+    const capped = isHistoryCapped(history.jobs.length);
+    const count = historyRows().length;
+    return idleSubtitle({ loaded: history.loaded, count: capped ? Math.min(count, HISTORY_LIMIT) : count, capped });
   }
   return bits.join(" · ");
 }
@@ -1653,6 +1658,7 @@ async function confirmHistoryDelete() {
   closeHistoryDelete();
   showToast(historyDeletedText(result));
   history.jobs = [];
+  history.loaded = false; // no subline count from the store's 20-job poll meanwhile
   if (mounted()) renderHistory();
   loadHistory();
   trafficPoll.refresh();

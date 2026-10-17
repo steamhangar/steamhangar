@@ -77,7 +77,7 @@ globalThis.fetch = async (url) => {
 };
 
 const { store } = await import("../js/store-singleton.js");
-const { renderDownloads } = await import("../js/views/downloads.js");
+const { renderDownloads, highlightJob } = await import("../js/views/downloads.js");
 const { navigateTo } = await import("../js/router.js");
 const { createStatusIcon, STATUS_LABEL } = await import("../js/components/status-icon.js");
 const { createHistoryItem } = await import("../js/components/history-list.js");
@@ -223,6 +223,28 @@ test("MUTATION TARGET: the idle subline counts the History list for the range, n
   await until(() => sub(s).textContent === "Idle · 24 in history", "24h count");
   rangeBtn(s, "All").dispatchEvent({ type: "click" });
   await until(() => sub(s).textContent === "Idle · 127 in history", "All again");
+});
+
+test("MUTATION TARGET: a deep-linked row beyond the first page is paged in and expanded (remount, then highlightJob)", async () => {
+  server.jobs = finishedJobs(127);
+  let s = await mount();
+  await until(() => role(s, "history-more") && role(s, "history-more").getAttribute("aria-label") === "Show 20 more of 117", "history loaded");
+  s = await mount(); // a notification click remounts; history is already loaded
+  await until(() => rows(s).length === 10, "first page again");
+  const target = server.jobs[25]; // row 26
+  const proto = Object.getPrototypeOf(s);
+  const hadScroll = Object.hasOwn(proto, "scrollIntoView");
+  if (!hadScroll) proto.scrollIntoView = function scrollIntoView() {}; // fake-dom has no layout
+  try {
+    highlightJob(target.id);
+  } finally {
+    if (!hadScroll) delete proto.scrollIntoView;
+  }
+  const item = s.querySelector(`.hitem[data-jid="${target.id}"]`);
+  assert.ok(item, "row 26 is on screen");
+  assert.equal(item.querySelector(".hrow").getAttribute("aria-expanded"), "true");
+  assert.equal(rows(s).length, 30, "paged in by whole steps");
+  item.querySelector(".hrow").dispatchEvent({ type: "click" }); // collapse for later tests
 });
 
 test("MUTATION TARGET: a full fetch page ends with the 'Older entries are not shown' note and a '+' count", async () => {
