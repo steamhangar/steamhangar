@@ -15,18 +15,18 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 - SETTINGS-2 (ee90a27, a05ca6a; branch wp/rc20-settings-2b)
 - LIBRARY-2 (c581eec, b8168d3)
 
-## Running (2026-10-17, resumed 13:40 after a session-limit stop)
+## Running
 
-- Web goldens: first record run via `wp/rc20-web-goldens` (all pages final).
+- nothing. All rework packages are on main; web goldens recorded
+  (511b7c3, 15 PNGs); `dev.sh verify` 613/0 on a6111ae.
 
 ## Next
 
-2. LIBRARY-2
-3. MOBILE-1 (proposed, operator to confirm rc20 vs rc21): phone nav, sheets
-   as bottom sheets, 44px touch targets, QR-pairing flow end to end; phone
-   mockup from the kit first.
-4. rc20 docs, close: test-web, verify, goldens green, tag only with the
-   operator's yes.
+1. Tag `v0.1.0-rc20` after main CI is green — needs the operator's yes.
+2. Deploy Antrag after the tag (web-only release; no schema change, no
+   new env value in the rework; BOOT-RATE-1 and LIB-META-WINDOW-1 from
+   the first rc20 pass ride along).
+3. MOBILE-1 (operator to decide rc20.x or rc21).
 
 ## Rules for this run
 
