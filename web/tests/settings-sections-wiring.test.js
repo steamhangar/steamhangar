@@ -567,3 +567,37 @@ test("MUTATION TARGET: the Expert section shows vault-core's apply state (D16c c
   s = await mount();
   assert.equal(q(section(s, "expert"), "core-apply").textContent, "vault-core: a change is waiting to be applied.");
 });
+
+test("compact layout: the expert switch is the last item of About, not in the nav; same state and ids", async () => {
+  const handlers = [];
+  const mql = { matches: true, addEventListener: (_t, fn) => handlers.push(fn) };
+  window.matchMedia = () => mql;
+  try {
+    const s = await mount();
+    const about = section(s, "about");
+    const nav = s.querySelectorAll("nav")[0];
+    const sw = q(s, "expert-switch");
+    assert.ok(sw, "switch rendered");
+    assert.equal(nav.querySelectorAll("button").includes(sw), false, "not in the nav when compact");
+    const body = about.querySelector("div.sec-body");
+    const last = body.children[body.children.length - 1];
+    assert.ok(last.classList.contains("expert-switch"), "last child of the About body");
+    assert.ok(last.querySelectorAll("button").includes(sw));
+    assert.equal(s.querySelectorAll("button").filter((b) => b.getAttribute("data-role") === "expert-switch").length, 1);
+    const ids = s.querySelectorAll("span").map((x) => x.id).filter(Boolean);
+    assert.equal(ids.filter((i) => i === "settings-expert-switch-label").length, 1, "no duplicate id");
+    assert.equal(sw.getAttribute("aria-labelledby"), "settings-expert-switch-label");
+    assert.equal(sw.getAttribute("role"), "switch");
+    click(sw);
+    assert.equal(storage.get("steamvault.settingsExpert"), "1", "same storage key");
+    assert.equal(navItem(s, "expert").hidden, false);
+    // Crossing to the wide layout moves the same row under the nav.
+    mql.matches = false;
+    handlers.forEach((fn) => fn({ matches: false }));
+    assert.equal(nav.querySelectorAll("button").includes(sw), true, "wide: under the nav");
+    assert.equal(about.querySelectorAll("button").includes(sw), false);
+    assert.equal(sw.getAttribute("aria-checked"), "true", "state kept");
+  } finally {
+    delete window.matchMedia;
+  }
+});

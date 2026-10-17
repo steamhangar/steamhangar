@@ -2870,3 +2870,6 @@ body.onboarding .nav{ display:none; }
     border-radius:999px;
   }
 }
+
+/* Compact: the expert switch row lives at the end of the About section. */
+.settings-panel .sec-body > .expert-switch{ margin:18px 0 0; padding-top:14px; border-top:1px solid var(--line); }
