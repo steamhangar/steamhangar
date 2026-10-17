@@ -7,22 +7,23 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 ## Done (on main)
 
 - UI-KIT-1 (07fde55, 1e82f57; merge 82f4849)
-- WEB-GOLDENS-1 (50b198b, 31d5eff); baseline goldens recorded via `wp/rc20-base-goldens`
+- WEB-GOLDENS-1 (50b198b, 31d5eff); kit root fix 353b4f9; first web goldens record pending (wp/rc20-base-goldens failed on /kit before the fix)
+- TOKENS-SYNC-1 (061b4ce, c1a3eaf, Android golden 58eb2ee)
 
 ## Running (2026-10-17, resumed 13:40 after a session-limit stop)
 
-- TOKENS-SYNC-1: review PASS (061b4ce, c1a3eaf), waiting for branch CI.
-- CLIENTS-4: coder on `wp/rc20-clients-4` (screenshots mandatory).
+- CLIENTS-4: review PASS, fixes 3a89818; branch CI failed, cause being checked.
+- ADD-DEVICE-2: coder on `wp/rc20-add-device-2`.
+- DOWNLOADS-2: coder on `wp/rc20-downloads-2`.
 
 ## Next
 
-1. ADD-DEVICE-2 (after CLIENTS-4; the card's update button opens it)
-2. DOWNLOADS-2, SETTINGS-2 (parallel)
-3. LIBRARY-2
-4. MOBILE-1 (proposed, operator to confirm rc20 vs rc21): phone nav, sheets
+1. SETTINGS-2
+2. LIBRARY-2
+3. MOBILE-1 (proposed, operator to confirm rc20 vs rc21): phone nav, sheets
    as bottom sheets, 44px touch targets, QR-pairing flow end to end; phone
    mockup from the kit first.
-5. rc20 docs, close: test-web, verify, goldens green, tag only with the
+4. rc20 docs, close: test-web, verify, goldens green, tag only with the
    operator's yes.
 
 ## Rules for this run
@@ -39,3 +40,10 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 - Follow-ups after rc20 (agreed order): large demo fixture + empty/error
   states into kit and goldens; migration CI from every published schema
   (rc21); hit-path test (with the operator on prod); docs consolidation.
+
+## Notes
+
+- GitHub API polling without a token is limited to 60 requests per hour;
+  poll every 2-3 minutes, not every 30 s.
+- `wp/rc20-baseline-goldens` was pushed by mistake from a stale main
+  (9c10b33); harmless, left for the operator to delete.

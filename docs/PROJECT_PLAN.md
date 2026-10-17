@@ -3522,8 +3522,10 @@ below carry their own later dates, item 12 is the current one).
           tolerance, diff images as artifacts, annotation on failure).
           Local use: `dev.sh test-web-shots` against the dev instance.
           Reviewers of every later web package attach the screenshots.
-        - [ ] **TOKENS-SYNC-1** (web + app, after UI-KIT-1; user decision
-          2026-10-17) one source for design tokens: `docs/design/tokens.json`
+        - [x] **TOKENS-SYNC-1** (web + app, after UI-KIT-1; user decision
+          2026-10-17; 061b4ce, c1a3eaf, golden 58eb2ee; Type.kt deferred to the
+          rc21 Compose follow-up, sibling tests DesignTokensContractTest /
+          StatusVocabularyContractTest instead of extending the twin test) one source for design tokens: `docs/design/tokens.json`
           (colours incl. the new `--dim-2`, type scale `fs-1..7`, spacing
           `sp-1..8`, radii) and `docs/design/status-vocabulary.json` (kind,
           word, tone, glyph, animated). Web: a node test checks `theme.css`
