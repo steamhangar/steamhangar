@@ -11,11 +11,11 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
 - TOKENS-SYNC-1 (061b4ce, c1a3eaf, Android golden 58eb2ee)
 - CLIENTS-4 (3751e12, 3a89818)
 - ADD-DEVICE-2 (0a26cba, b6e01ea; branch wp/rc20-add-device-2b)
-- DOWNLOADS-2 (f72735f, d021c2a; branch wp/rc20-downloads-2b)
+- DOWNLOADS-2 (f72735f, d021c2a; branch wp/rc20-downloads-2b); twin hotfix aa34299
+- SETTINGS-2 (ee90a27, a05ca6a; branch wp/rc20-settings-2b)
 
 ## Running (2026-10-17, resumed 13:40 after a session-limit stop)
 
-- SETTINGS-2: coder on `wp/rc20-settings-2`.
 - LIBRARY-2: coder on `wp/rc20-library-2`.
 
 ## Next
@@ -43,6 +43,12 @@ Updated after every passed package. Plan: `docs/PROJECT_PLAN.md`, rc20 block,
   (rc21); hit-path test (with the operator on prod); docs consolidation.
 
 ## Notes
+
+- main CI red since the DOWNLOADS-2 merge (b7f23c1): Android TrafficWebTwinTest
+  reads literals from views/downloads.js that moved to downloads-hero.js, and
+  the axis label changed to "peak". Fixed by aa34299 (merged).
+  Rule for the rest of the run: every web package that moves or rewords
+  strings greps app/app/src/test for twin assertions on its files.
 
 - GitHub API polling without a token is limited to 60 requests per hour;
   poll every 2-3 minutes, not every 30 s.

@@ -3568,7 +3568,7 @@ below carry their own later dates, item 12 is the current one).
           (boxed log with max-height, titled failure hint, bordered
           command). Drop the `[data-state]` density switch. Components:
           `downloads-hero.js`, `job-row.js`, `history-list.js`.
-        - [ ] **SETTINGS-2** per `settings.html` + kit: flat nav items
+        - [x] **SETTINGS-2** (ee90a27, a05ca6a) per `settings.html` + kit: flat nav items
           (13px, state on the same line right, accent-glow selection),
           `.exp` expert row with the small switch; panels = h2 + p + one
           `.fcard` per group (Identity, Connection, Schedule, Garbage
