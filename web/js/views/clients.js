@@ -25,8 +25,15 @@
  *
  * **Add a device (D15, CLIENTS-2).** The header button opens
  * `components/add-device-sheet.js` (pairing and the agent install);
- * Settings keeps a pointer. Cards sit in an auto-fill grid under summary
- * tiles (`summaryTiles`, real figures only).
+ * Settings keeps a pointer.
+ *
+ * **UI kit (WP CLIENTS-4, ADR-0028).** The section carries `kit` and
+ * composes from css/kit.css: `.page-head`, four `.tile`s (`summaryTiles`:
+ * Connected, Loaded, Hit rate, Agents with the outdated pill), a `.sechd`
+ * ("Devices" + the range `.seg`) and the cards, one per row (operator
+ * decision 2026-10-17). A card is `components/client-card.js` rendering
+ * `clientCardModel`; this view composes, wires the actions and keeps the
+ * module state (range, remove errors, rename dialog).
  *
  * Polling: the overview is fetched while this view is on screen only
  * (`createViewPoll`, 30 s, the store's own loop machinery), and stopped on
@@ -71,32 +78,19 @@ import {
   renamedToastText,
   renameTitle,
 } from "../lib/client-names.js";
-import {
-  BYPASS_EXPLANATION,
-  UNREMOVABLE_SLASH_NOTE,
-  describeBypassClient,
-  isRemovableClientId,
-  presenceLine,
-} from "../lib/clients-view.js";
+import { createClientCard } from "../components/client-card.js";
+import { createPill } from "../components/pill.js";
 import { FEED_TEXT, feedNote, feedState, isRange, joinNotes, refreshFailedText } from "../lib/traffic-view.js";
 import {
   AGENTLESS_NOTE,
   NO_CLIENTS_TEXT,
-  clientKindText,
+  clientCardModel,
   clientName,
   clientsSummaryText,
-  connectionChip,
-  installedText,
   isAddressClient,
   isAgentClient,
-  isRunnerClient,
-  lastActiveText,
-  loadingNowText,
   mergeAgentData,
-  recentAppsText,
-  statsText,
-  outdatedAgentInfo,
-  outdatedAgentText,
+  outdatedAgentsPillText,
   summaryTiles,
 } from "../lib/clients-page.js";
 
@@ -182,117 +176,27 @@ function setRange(range) {
   poll.refresh();
 }
 
-function line(text, role) {
-  const node = el("div", "sm cl-line", text);
-  if (role) node.dataset.role = role;
-  return node;
-}
-
-const ICON_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
-const ICONS = {
-  agent: `<svg ${ICON_ATTRS}><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>`,
-  runner: `<svg ${ICON_ATTRS}><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg>`,
-  address: `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>`,
-};
-
+/** One card: the view-model of `lib/clients-page.js` rendered by
+ * `components/client-card.js`; this view only wires the actions. */
 function buildCard(client, range, nowMs) {
-  const card = el("div", "jobcard clcard");
-  card.dataset.clientKey = String(client.key);
-  card.dataset.kind = isAgentClient(client) ? "agent" : isRunnerClient(client) ? "runner" : "address";
   const agent = client.agent || null;
-  if (agent && agent.bypass_suspected) card.classList.add("bypass");
-
-  const top = el("div", "jobtop cl-top");
-  const ico = el("span", "cl-ico");
-  ico.setAttribute("aria-hidden", "true");
-  ico.innerHTML = ICONS[card.dataset.kind];
-  const info = el("div", "cl-info");
-  const title = el("div", "nm", clientName(client));
-  // Operator-chosen text: its own direction, never the page's.
-  title.setAttribute("dir", "auto");
-  info.append(title, line(clientKindText(client), "client-kind"));
-  const chip = connectionChip(client);
-  const chipEl = el("span", chip.cls);
-  chipEl.dataset.role = "connection";
-  const dot = el("span", "pdot");
-  dot.setAttribute("aria-hidden", "true");
-  chipEl.append(dot, el("span", null, chip.word));
-  top.append(ico, info, chipEl);
-  card.appendChild(top);
-
-  const nowLine = line(loadingNowText(client), "loading-now");
-  nowLine.classList.add("cl-now");
-  if (client.loading_now && client.loading_now.loading === true) nowLine.classList.add("busy");
-  card.appendChild(nowLine);
-  const installed = installedText(client);
-  if (installed) card.appendChild(line(installed, "installed"));
-  const stats = statsText(client, range);
-  if (stats) card.appendChild(line(stats, "stats"));
-  const recent = recentAppsText(client);
-  if (recent) card.appendChild(line(recent, "recent"));
-  card.appendChild(line(lastActiveText(client, nowMs), "last-active"));
-  const outdated = outdatedAgentInfo(client, serverVersion);
-  if (outdated) {
-    const upd = el("div", "cl-upd");
-    upd.dataset.role = "agent-outdated";
-    const btn = el("button", "btn ghost sm", "Update command");
-    btn.type = "button";
-    btn.dataset.role = "update-command";
-    btn.setAttribute("aria-label", `Update command for ${clientName(client)}`);
-    btn.addEventListener("click", () => openAddDeviceSheet({ tab: null }));
-    upd.append(el("strong", null, "Agent outdated"), el("p", null, outdatedAgentText(outdated)), btn);
-    card.appendChild(upd);
-  }
-  if (agent) {
-    // Server verdicts, read as sent (lib/clients-view.js): never recomputed.
-    card.appendChild(line(presenceLine(agent, nowMs), "agent-presence"));
-    if (agent.bypass_suspected) {
-      card.appendChild(line(`Bypassing the cache · ${describeBypassClient(agent)}`, "bypass"));
-      card.appendChild(el("p", "hint", BYPASS_EXPLANATION));
-    }
-  }
-  const removable = agent && isRemovableClientId(agent.client_id);
-  if (canRename(client) || removable) {
-    const acts = el("div", "jobacts cl-acts");
-    if (canRename(client)) {
-      const btn = el("button", "btn ghost sm", "Rename");
-      btn.type = "button";
-      btn.dataset.role = "rename-client";
-      // Every card has one: the accessible name says which (label-in-name).
-      btn.setAttribute("aria-label", renameTitle(clientName(client)));
-      btn.addEventListener("click", () => openRename(client));
-      acts.appendChild(btn);
-    }
-    if (removable) {
-      const rm = el("button", "btn ghost sm", "Remove");
-      rm.type = "button";
-      rm.dataset.role = "remove-pc";
-      rm.setAttribute("aria-label", `Remove ${agent.client_id}`);
-      rm.addEventListener("click", () => openRemove(agent.client_id));
-      acts.appendChild(rm);
-    }
-    card.appendChild(acts);
-  }
-  if (agent && !removable) {
-    const note = el("p", "foot-note", UNREMOVABLE_SLASH_NOTE);
-    note.dataset.role = "remove-unavailable";
-    card.appendChild(note);
-  }
-  if (agent) {
-    const message = removeErrors.get(agent.client_id);
-    const err = el("p", "errline", message || "");
-    err.dataset.role = "remove-error";
-    err.setAttribute("role", "alert");
-    err.hidden = !message;
-    card.appendChild(err);
-  }
-  return card;
+  const model = clientCardModel(client, {
+    range,
+    serverVersion,
+    nowMs,
+    removeError: agent ? removeErrors.get(agent.client_id) || null : null,
+  });
+  return createClientCard(model, {
+    onRename: () => openRename(client),
+    onRemove: () => openRemove(model.removeId),
+    onUpdateCommand: () => openAddDeviceSheet({ tab: null }),
+  });
 }
 
 function buildEmptyState() {
   const box = el("div", "cl-empty");
   box.dataset.role = "clients-empty";
-  const btn = el("button", "btn primary sm", "Add a device");
+  const btn = el("button", "btn pri sm", "Add a device");
   btn.type = "button";
   btn.dataset.role = "add-device-empty";
   btn.addEventListener("click", () => openAddDeviceSheet());
@@ -303,7 +207,7 @@ function buildEmptyState() {
 /** The button with `role` of the card with `key`, in the list as it is NOW. */
 function cardButton(key, role) {
   if (!els || key == null) return null;
-  const card = Array.from(els.list.querySelectorAll(".clcard")).find((c) => c.dataset.clientKey === key);
+  const card = Array.from(els.list.querySelectorAll(".ccard")).find((c) => c.dataset.clientKey === key);
   return card ? card.querySelector(`[data-role="${role}"]`) : null;
 }
 
@@ -336,12 +240,38 @@ function paintTiles(clients, range) {
   els.tiles.replaceChildren();
   const tiles = clients ? summaryTiles(clients, range, serverVersion) : [];
   for (const t of tiles) {
-    const tile = el("div", t.warn ? "cl-tile warn" : "cl-tile");
+    const tile = el("div", t.hi ? "tile hi" : "tile");
     tile.dataset.tile = t.key;
-    tile.append(el("div", "k", t.label), el("div", "v", t.value), el("div", "n", t.detail));
+    const v = el("div", "v", t.value);
+    if (t.unit) v.appendChild(el("small", null, t.unit));
+    tile.append(el("div", "k", t.label), v);
+    if (typeof t.meter === "number") {
+      const m = el("div", "meter");
+      const bar = el("i");
+      bar.style.setProperty("width", `${t.meter}%`);
+      m.appendChild(bar);
+      tile.appendChild(m);
+    }
+    const n = el("div", "n", t.detail);
+    if (t.outdated) {
+      const pill = createPill({ kind: "warn", text: outdatedAgentsPillText(t.outdated), tone: "stale" });
+      pill.dataset.role = "agents-outdated";
+      n.textContent = "";
+      n.appendChild(pill);
+    }
+    tile.appendChild(n);
     els.tiles.appendChild(tile);
   }
   els.tiles.hidden = !tiles.length;
+}
+
+/** The client key of the card holding `node`, or null. */
+function cardKeyOf(node) {
+  for (let n = node; n; n = n.parentNode) {
+    if (n.dataset && n.dataset.clientKey) return n.dataset.clientKey;
+    if (els && n === els.list) return null;
+  }
+  return null;
 }
 
 /** Repaint the note, the sub-line and the list from `state`. */
@@ -363,8 +293,7 @@ function paint() {
     active && active.dataset && (active.dataset.role === "rename-client" || active.dataset.role === "remove-pc") && els.list.contains(active)
       ? active.dataset.role
       : null;
-  const focusKey =
-    focusRole && active.parentNode && active.parentNode.parentNode ? active.parentNode.parentNode.dataset.clientKey : null;
+  const focusKey = focusRole ? cardKeyOf(active) : null;
   els.list.replaceChildren();
   const agentRows = agentSnapshot();
   if (state.unsupported) {
@@ -608,23 +537,30 @@ onViewChange((view) => {
   poll.stop();
 });
 
+const PLUS_ICON =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+
 export function renderClients() {
-  const section = el("section", "view view-clients");
-  const head = el("div", "dl-head cl-head");
+  // `kit`: this page composes from css/kit.css (ADR-0028, WP CLIENTS-4).
+  const section = el("section", "view view-clients kit");
+  const head = el("div", "page-head");
   const title = el("div");
   const h1 = el("h1", null, "Clients");
   h1.tabIndex = -1;
-  const sub = el("span", "dl-sub");
+  const sub = el("div", "sub");
   sub.dataset.role = "clients-sub";
   title.append(h1, sub);
-  const addBtn = el("button", "btn primary", "Add a device");
+  const addBtn = el("button", "btn pri");
   addBtn.type = "button";
   addBtn.dataset.role = "add-device";
   addBtn.setAttribute("aria-label", "Add a device");
+  const plus = el("span", "btn-ico");
+  plus.innerHTML = PLUS_ICON;
+  addBtn.append(plus, "Add a device");
   addBtn.addEventListener("click", () => openAddDeviceSheet());
   head.append(title, addBtn);
 
-  const tiles = el("section", "cl-tiles");
+  const tiles = el("section", "tiles cl-tiles");
   tiles.dataset.role = "clients-tiles";
   tiles.setAttribute("aria-label", "Summary");
   tiles.hidden = true;
@@ -635,18 +571,24 @@ export function renderClients() {
     onChange: setRange,
     role: "clients-range",
   });
+  // The kit's segmented control, not the legacy `.segs` (app.css).
+  range.el.className = "seg";
+  const sechd = el("div", "sechd");
+  sechd.append(el("span", "sec", "Devices"), range.el);
 
   const note = el("p", "hint cl-note");
   note.dataset.role = "clients-note";
   note.hidden = true;
-  const list = el("div", "cl-list");
+  // One card per row (operator decision 2026-10-17); the list is the
+  // container the cards' zone stacking queries (kit.css `.ccards`).
+  const list = el("div", "ccards");
   list.dataset.role = "clients-list";
   const agentlessNote = el("p", "foot-note", AGENTLESS_NOTE);
   agentlessNote.dataset.role = "agentless-note";
   agentlessNote.hidden = true;
 
   range.el.hidden = state.noFigures;
-  section.append(head, tiles, range.el, note, list, agentlessNote);
+  section.append(head, tiles, sechd, note, list, agentlessNote);
 
   els = { section, h1, sub, tiles, range: range.el, note, list, agentlessNote };
   paint();

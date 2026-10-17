@@ -249,9 +249,25 @@ test("--w-page (LAYOUT-1) is declared once, as 1400px, in theme.css and never re
   assert.ok(wall && /max-width:\s*var\(--w-wall\)/.test(wall), "Library/.view-root keeps --w-wall");
 });
 
-test("CLIENTS-2: the card list is an auto-fill grid with a ~440px minimum", () => {
-  const appCss = readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
-  const m = appCss.match(/\.cl-list\{([^}]*)\}/);
-  assert.ok(m, "no .cl-list rule");
-  assert.match(m[1], /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(min\(440px,\s*100%\),\s*1fr\)\)/);
+// CLIENTS-4 replaces CLIENTS-2's auto-fill card grid: one card per row
+// (operator decision 2026-10-17), three zones that stack by CONTAINER width.
+test("CLIENTS-4: one card per row; the card's three zones stack at 700px / tighten at 460px container width", () => {
+  const kitCss = stripComments(readFileSync(path.join(webDir, "css", "kit.css"), "utf8"));
+  assert.equal(/\.cl-list\s*\{/.test(stripComments(appCss)), false, "the CLIENTS-2 auto-fill .cl-list rule is gone");
+  const list = kitCss.match(/\.kit \.ccards\{([^}]*)\}/);
+  assert.ok(list, "no .kit .ccards rule");
+  assert.match(list[1], /container-type:\s*inline-size/, "the list is the container the zones query");
+  assert.match(list[1], /display:\s*grid/);
+  assert.equal(/grid-template-columns/.test(list[1]), false, "a single column: no auto-fill/auto-fit tracks");
+  const card = kitCss.match(/\.kit \.ccard\{([^}]*)\}/);
+  assert.ok(card, "no .kit .ccard rule");
+  assert.match(card[1], /grid-template-columns:\s*minmax\(260px,\s*1\.1fr\)\s*minmax\(220px,\s*1fr\)\s*minmax\(220px,\s*1fr\)/, "three zones per kit.html");
+  const c700 = kitCss.match(/@container \(max-width:\s*700px\)\{([\s\S]*?)\n\}/);
+  assert.ok(c700, "no 700px container query");
+  assert.match(c700[1], /\.kit \.ccard\{\s*grid-template-columns:\s*1fr;/, "zones stack below 700px");
+  const c460 = kitCss.match(/@container \(max-width:\s*460px\)\{([\s\S]*?)\n\}/);
+  assert.ok(c460, "no 460px container query");
+  assert.match(c460[1], /\.kit \.ccard \.cf \.acts\{[^}]*width:\s*100%/);
+  const kitMedia = splitMedia(kitCss).mediaBlocks.filter((b) => /\.ccard/.test(b.body));
+  assert.deepEqual(kitMedia, [], "no viewport media query for the card");
 });
