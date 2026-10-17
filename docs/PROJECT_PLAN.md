@@ -3608,7 +3608,7 @@ below carry their own later dates, item 12 is the current one).
       box in the rc19.3 block) says so, with a new ADR carrying the numbers;
       otherwise the item moves to rc21.
 
-    - [ ] **rc20.1** (patch, operator report on prod 2026-10-17)
+    - [x] **rc20.1** (patch, operator report on prod 2026-10-17)
       - [x] **DOWNLOADS-3** (95a012e, 6eb3979, goldens 92d9db9) (web) History head "Delete…" clipped; History
         unbounded (first 10, then "Show 20 more"); subline count ("20 in
         history") disagrees with the list; History glyph words use library
@@ -3620,7 +3620,7 @@ below carry their own later dates, item 12 is the current one).
         diff, only on glyph edges (Debian 12 FreeType vs. the Ubuntu runner).
         Deterministic font flags in web-shot + fontconfig, a text-tolerant
         png-diff mode for local runs, CI stays strict; goldens re-recorded.
-      - [ ] tag `v0.1.0-rc20.1` after main CI is green (operator's yes)
+      - [x] tag `v0.1.0-rc20.1` (fff08b9; verify 613/0, main CI green)
 
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
