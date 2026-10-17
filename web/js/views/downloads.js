@@ -22,8 +22,8 @@
  * `planJobsUpdate` decides, per `GET /v1/jobs` tick, whether anything
  * structural changed (any `status` transition anywhere -> full section
  * rebuild) or whether the only thing that moved is a running job's
- * `stop_request` (-> patch just that card's `.jobacts`/`.stopnote`, never
- * its `.badge .sic` status-icon subtree). See that module's header for why
+ * `stop_request` (-> patch just that card's action row and stop note, never
+ * its status pill's icon subtree). See that module's header for why
  * `stop_request` is the ONLY volatile field the real API has here — no
  * live byte progress exists to patch, unlike the mockup.
  *
@@ -56,7 +56,7 @@
  * (`paintBulkBar`), so a poll tick does not take focus from its buttons.
  *
  * **Statistics header, per-job speed, history filter (WP D15c, D13/D15).**
- * Under the bulk bar: current, average ("while loading") and peak speed,
+ * In the hero (since DOWNLOADS-2, see Layout below): current, average ("while loading") and peak speed,
  * GB loaded, hit rate, GB saved by the cache and active clients from
  * `GET /v1/throughput`, plus a small inline-SVG graph of
  * `GET /v1/throughput/series`, both for a 24 h / 7 days / 30 days / All
@@ -71,7 +71,7 @@
  * (the fresher copy wins) and filtered client-side by the same rule, so a
  * job that finishes while the view is open appears at once.
  *
- * **Updates available (WP UPD-6).** A section between Paused and Queue
+ * **Updates available (WP UPD-6).** A section (middle column since DOWNLOADS-2)
  * lists the games whose `update_available` is set and that have no active
  * job (`lib/updates-available.js` `pendingUpdates`), each with "Update now",
  * plus "Update all" and a note on whether they download by themselves
@@ -104,12 +104,23 @@
  * (finished jobs and the traffic statistics, `api/vault_api/history.py`)
  * are shown on this page, next to the History time filter they are
  * measured against; the Clients page only reads part of the statistics.
- * After a delete the history list, the statistics header and the store's
+ * After a delete the history list, the hero statistics and the store's
  * jobs are fetched again; a failure keeps the dialog open with the error.
  * Wording: `lib/history-delete.js`.
  *
- * Section order, top to bottom: heading, bulk bar, statistics header,
- * Active, Paused, Updates available, Incomplete, Queue, History.
+ * **Layout (WP DOWNLOADS-2, docs/design/rc20/kit.html "Downloads,
+ * width-aware").** The view root carries `kit` (css/kit.css, ADR-0028) and
+ * is its own inline-size container. Top to bottom: the page head (title,
+ * subline, Pause all / Resume all on the right), the hero
+ * (`components/downloads-hero.js`: speed, pill, limit + devices caption,
+ * graph, mini line, four tiles), then three equal columns: Active + Queue |
+ * Updates available + Incomplete | History. Container queries in kit.css
+ * fold them to two columns (History full width) below 1100px and one column
+ * at 760px; the middle column is left out while both of its lists are
+ * empty. Paused jobs fold into Active (their card carries Resume). Rows are
+ * built by `components/job-row.js` and `components/history-list.js`; this
+ * module keeps the data flow, polling and handlers.
+ *
  *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
@@ -122,39 +133,39 @@ import { createViewPoll, VIEW_POLL_MS } from "../store.js";
 import { api, getStoredApiKey, isDemoMode } from "../api.js";
 import { ERROR_KINDS } from "../errors.js";
 import { createRangeSegs } from "../components/range-segs.js";
+import { createDownloadsHero } from "../components/downloads-hero.js";
 import {
-  DASH,
-  FEED_TEXT,
+  createJobCard,
+  createAttentionRow,
+  createQueueRow,
+  ROW_UPDATE_LABEL,
+  ROW_VERIFY_LABEL,
+  ROW_REMOVE_LABEL,
+  UPDATE_ALL_LABEL,
+  VERIFY_ALL_LABEL,
+  verifyAllAriaLabel,
+} from "../components/job-row.js";
+import { createHistoryItem, setHistoryItemExpanded, paintHistoryPanel } from "../components/history-list.js";
+import {
   emptyHistoryText,
-  feedNote,
   feedState,
   filterJobsByRange,
-  formatSpeed,
   headerTiles,
-  clientDownloadingRow,
   rateCapLine,
   isRange,
   isStatsRange,
   readStoredStatsRange,
-  STATS_RANGES,
   LIVE_POLL_MS,
   LIVE_SUMMARY_MS,
   LIVE_SUMMARY_RANGE,
   liveSeries,
   mergeLive,
-  trimSeries,
   writeStoredStatsRange,
   jobSpeedText,
   JOB_SPEED_NOTE,
-  joinNotes,
   mergeJobLists,
-  refreshFailedText,
-  seriesGeometry,
-  seriesLabel,
-  seriesStartText,
 } from "../lib/traffic-view.js";
 import { showToast } from "../components/toast.js";
-import { createStatusIcon } from "../components/status-icon.js";
 import {
   partitionJobs,
   countPending,
@@ -166,25 +177,21 @@ import {
 } from "../lib/job-partition.js";
 import { planJobsUpdate } from "../lib/downloads-render-plan.js";
 import { reorderIds, keyTargetIndex, dropIndex, withQueuePositions } from "../lib/queue-reorder.js";
-import { selectExcerptDisplay, EXCERPT_STATE } from "../lib/log-excerpt.js";
+import { selectExcerptDisplay } from "../lib/log-excerpt.js";
 import { formatTimestamp, formatBytesGB } from "../lib/format.js";
 import {
   pendingUpdates,
-  updatesHeadingText,
   updateAllAriaLabel,
   updateNowAriaLabel,
   scheduleNote,
   summarizeUpdateStart,
   describeUpdateStartError,
   updatesListKey,
-  UPDATE_NOW_LABEL,
-  UPDATE_ALL_LABEL,
+  UPDATES_HEADING,
   STARTING_LABEL,
 } from "../lib/updates-available.js";
 import {
   pendingIncomplete,
-  incompleteHeadingText,
-  completeAllAriaLabel,
   completeNowAriaLabel,
   incompletePctText,
   incompleteScheduleNote,
@@ -192,18 +199,17 @@ import {
   isCompletable,
   summarizeVerifyStart,
   describeVerifyStartError,
-  COMPLETE_NOW_LABEL,
-  COMPLETE_ALL_LABEL,
+  INCOMPLETE_HEADING,
   DAMAGED_NOTE,
 } from "../lib/cache-completeness.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
 import { fillMissingNames, hasText, vaultRowTitle } from "../lib/owned-library.js";
-import { isToolApp, TOOL_APP_NOTE, KIND } from "../lib/game-status.js";
+import { isToolApp, KIND } from "../lib/game-status.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import { contentPackageFallbackTitle } from "../lib/content-groups.js";
-import { jobFailureHint, HINTS, NEWER_JOB_LINE, GENERIC_FAILURE, isFailedPrefill, retryOffer } from "../lib/job-failure.js";
+import { jobFailureHint, isFailedPrefill, retryOffer } from "../lib/job-failure.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import {
   HISTORY_DELETE_KEEPS,
@@ -257,8 +263,6 @@ function staticIcon(svgMarkup) {
 }
 const GRIP_SVG =
   '<svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="7" cy="4" r="1.5"/><circle cx="13" cy="4" r="1.5"/><circle cx="7" cy="10" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="7" cy="16" r="1.5"/><circle cx="13" cy="16" r="1.5"/></svg>';
-const CHEVRON_SVG =
-  '<svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7.5 4.5 6 5.5-6 5.5"/></svg>';
 
 // ---------------------------------------------------------------------
 // Module-level state. Persists across re-mounts (navigating away and back
@@ -277,7 +281,7 @@ const state = {
   settings: null,
 };
 
-/** WP D15c: the statistics header's last answer for `range`
+/** WP D15c: the hero statistics's last answer for `range`
  * (`{throughput, series}`), and the History filter's fetched rows. Module
  * state, so a re-mount keeps the chosen ranges. */
 const traffic = { range: readStoredStatsRange(), throughput: null, series: null, error: null, unsupported: false, noFigures: false };
@@ -609,36 +613,15 @@ let settingsGen = 0;
 
 const sizeOfRow = (g) => formatBytesGB(g.size_bytes);
 
-/** WP DOWNLOADS-1: the "Updates available" and "Incomplete" lists start
- * folded (their "all" button and the count stay in the head), like the
- * mockup's attention rows. Module state, so a rebuild or a re-mount keeps
- * what the user opened. */
-const attentionOpen = { updates: false, incomplete: false };
-
-function buildAttentionToggle(key, body) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "btn ghost sm attn-toggle";
-  btn.dataset.role = `${key}-toggle`;
-  btn.setAttribute("aria-controls", body.id);
-  btn.addEventListener("click", () => {
-    attentionOpen[key] = !attentionOpen[key];
-    syncAttention(key);
-  });
-  return btn;
-}
-
-/** Text, state and list visibility of one fold, from `attentionOpen`. */
-function syncAttention(key) {
-  if (!mounted()) return;
-  const toggle = key === "updates" ? els.updatesToggle : els.incompleteToggle;
-  const body = key === "updates" ? els.updatesBody : els.incompleteBody;
-  const heading = key === "updates" ? els.updatesHeading : els.incompleteHeading;
-  const open = attentionOpen[key];
-  body.hidden = !open;
-  toggle.textContent = open ? "Hide" : "Show";
-  toggle.setAttribute("aria-expanded", String(open));
-  toggle.setAttribute("aria-label", `${open ? "Hide" : "Show"} ${heading.textContent}`);
+/** WP DOWNLOADS-2: the middle column (Updates available + Incomplete) is
+ * left out while both lists are empty (no empty headings, user rule
+ * 2026-10-14); the columns grid then has two columns (kit.css
+ * `.cols3.no-attn`). */
+function syncAttentionColumn() {
+  if (!mounted() || !els.attnCol) return;
+  const empty = els.updates.hidden && els.incomplete.hidden;
+  els.attnCol.hidden = empty;
+  els.cols.classList.toggle("no-attn", empty);
 }
 
 async function loadSchedule() {
@@ -711,25 +694,12 @@ function updateButton(label, variant, ariaLabel, onClick) {
 }
 
 function buildUpdateRow(game, gamesByAppid) {
-  const row = document.createElement("div");
-  row.className = "urow";
-  row.dataset.updateAppid = String(game.appid);
   const title = nameFor(game.appid, gamesByAppid);
-  const nm = document.createElement("span");
-  nm.className = "nm";
-  nm.dataset.appid = String(game.appid); // patchNames keeps it current
-  nm.textContent = title;
-  const size = document.createElement("span");
-  size.className = "usize";
-  size.textContent = sizeOfRow(game) || "—";
-  const btn = updateButton(UPDATE_NOW_LABEL, "primary", updateNowAriaLabel(title), () =>
-    startUpdates([game.appid], game.appid),
-  );
+  const btn = updateButton(ROW_UPDATE_LABEL, "w72", updateNowAriaLabel(title), () => startUpdates([game.appid], game.appid));
   btn.dataset.role = "update-now";
   // Not `data-appid`: patchNames rewrites the text of every such node.
   btn.dataset.updateAppid = String(game.appid);
-  row.append(nm, size, btn);
-  return row;
+  return createAttentionRow({ appid: game.appid, title, meta: sizeOfRow(game) || "—", button: btn, dataKey: "updateAppid" });
 }
 
 /** Which update button `btn` is: `"all"`, its row's appid, or null. Reads
@@ -755,9 +725,9 @@ function paintUpdateBusy() {
   const busy = updatesInFlight !== null;
   for (const btn of els.updates.querySelectorAll("button")) {
     const role = btn.dataset.role;
-    if (role !== "update-all" && role !== "update-now") continue; // the show/hide toggle
+    if (role !== "update-all" && role !== "update-now") continue;
     const which = updateButtonId(btn);
-    const idle = role === "update-all" ? UPDATE_ALL_LABEL : UPDATE_NOW_LABEL;
+    const idle = role === "update-all" ? UPDATE_ALL_LABEL : ROW_UPDATE_LABEL;
     const label = updatesInFlight === which ? STARTING_LABEL : idle;
     if (btn.textContent !== label) btn.textContent = label;
     if (busy) btn.setAttribute("aria-disabled", "true");
@@ -787,9 +757,9 @@ function paintUpdates() {
   els.updatesKey = key;
   const hadFocus = focusedUpdateButton();
 
-  const { updates, updatesHeading, updatesNote, updatesActs, updatesBody } = els;
+  const { updates, updatesCount, updatesNote, updatesActs, updatesBody } = els;
   updates.hidden = rows.length === 0;
-  updatesHeading.textContent = updatesHeadingText(rows.length);
+  setBadge(updatesCount, rows.length);
   updatesNote.hidden = !note;
   updatesNote.textContent = note ?? "";
   updatesActs.replaceChildren();
@@ -806,7 +776,7 @@ function paintUpdates() {
     for (const g of rows) updatesBody.appendChild(buildUpdateRow(g, gamesByAppid));
   }
   paintUpdateBusy();
-  syncAttention("updates");
+  syncAttentionColumn();
 
   if (hadFocus === null) return;
   const same =
@@ -867,35 +837,24 @@ function completionButton(label, variant, ariaLabel, onClick) {
 }
 
 function buildIncompleteRow(game, gamesByAppid) {
-  const row = document.createElement("div");
-  row.className = "urow";
-  row.dataset.incompleteAppid = String(game.appid);
   const title = nameFor(game.appid, gamesByAppid);
-  const nm = document.createElement("span");
-  nm.className = "nm";
-  nm.dataset.appid = String(game.appid); // patchNames keeps it current
-  nm.textContent = title;
-  const pct = document.createElement("span");
-  pct.className = "usize";
-  pct.textContent = incompletePctText(game);
-  row.append(nm, pct);
+  let btn = null;
   if (isCompletable(game)) {
-    const btn = completionButton(COMPLETE_NOW_LABEL, "primary", completeNowAriaLabel(title), () =>
-      startCompletion([game.appid], game.appid),
-    );
+    btn = completionButton(ROW_VERIFY_LABEL, "w72", completeNowAriaLabel(title), () => startCompletion([game.appid], game.appid));
     btn.dataset.role = "complete-now";
     // Not `data-appid`: patchNames rewrites the text of every such node.
     btn.dataset.incompleteAppid = String(game.appid);
-    row.appendChild(btn);
-  } else {
-    // Short only of wrong-size chunks: nothing a forced run fixes.
-    const note = document.createElement("span");
-    note.className = "unote";
-    note.dataset.role = "damaged-note";
-    note.textContent = DAMAGED_NOTE;
-    row.appendChild(note);
   }
-  return row;
+  // Short only of wrong-size chunks: nothing a forced run fixes, so no
+  // button and the row says why.
+  return createAttentionRow({
+    appid: game.appid,
+    title,
+    meta: `${incompletePctText(game)} on disk`,
+    button: btn,
+    note: btn ? "" : DAMAGED_NOTE,
+    dataKey: "incompleteAppid",
+  });
 }
 
 /** Which completion button `btn` is: `"all"`, its row's appid, or null. */
@@ -916,9 +875,9 @@ function focusedCompletionButton() {
 function paintIncompleteBusy() {
   const busy = incompleteInFlight !== null;
   for (const btn of els.incomplete.querySelectorAll("button")) {
-    if (btn.dataset.role !== "complete-all" && btn.dataset.role !== "complete-now") continue; // the toggle
+    if (btn.dataset.role !== "complete-all" && btn.dataset.role !== "complete-now") continue;
     const which = completionButtonId(btn);
-    const idle = btn.dataset.role === "complete-all" ? COMPLETE_ALL_LABEL : COMPLETE_NOW_LABEL;
+    const idle = btn.dataset.role === "complete-all" ? VERIFY_ALL_LABEL : ROW_VERIFY_LABEL;
     const label = incompleteInFlight === which ? STARTING_LABEL : idle;
     if (btn.textContent !== label) btn.textContent = label;
     if (busy) btn.setAttribute("aria-disabled", "true");
@@ -944,16 +903,16 @@ function paintIncomplete() {
   els.incompleteKey = key;
   const hadFocus = focusedCompletionButton();
 
-  const { incomplete, incompleteHeading, incompleteNote, incompleteActs, incompleteBody } = els;
+  const { incomplete, incompleteCount, incompleteNote, incompleteActs, incompleteBody } = els;
   incomplete.hidden = rows.length === 0;
-  incompleteHeading.textContent = incompleteHeadingText(rows.length);
+  setBadge(incompleteCount, rows.length);
   incompleteNote.hidden = !note;
   incompleteNote.textContent = note ?? "";
   incompleteActs.replaceChildren();
   incompleteBody.replaceChildren();
   const completable = rows.filter(isCompletable).map((g) => g.appid);
   if (completable.length) {
-    const all = completionButton(COMPLETE_ALL_LABEL, "", completeAllAriaLabel(completable.length), () =>
+    const all = completionButton(VERIFY_ALL_LABEL, "", verifyAllAriaLabel(completable.length), () =>
       startCompletion(completable, "all"),
     );
     all.dataset.role = "complete-all";
@@ -961,7 +920,7 @@ function paintIncomplete() {
   }
   for (const g of rows) incompleteBody.appendChild(buildIncompleteRow(g, gamesByAppid));
   paintIncompleteBusy();
-  syncAttention("incomplete");
+  syncAttentionColumn();
 
   if (hadFocus === null) return;
   const same =
@@ -975,16 +934,21 @@ function paintIncomplete() {
 }
 
 // ---------------------------------------------------------------------
-// Job card (Active / Paused sections)
+// Job card (Active column; paused jobs fold in, WP DOWNLOADS-2)
 // ---------------------------------------------------------------------
 
-/** Rebuild ONLY `.jobacts` and `.stopnote` from `job`'s current control
- * fields — never touches `.jobtop`/`.badge`/its status-icon subtree, so
+/** The slot-release divergence, stated on a paused card itself — see
+ * js/lib/job-partition.js's module header for the full "why". */
+const HOLD_NOTE =
+  "Paused — this does not hold the worker slot. vault-api released it immediately, so another queued job may already be running. Resume puts this job back at the front of the queue.";
+
+/** Rebuild ONLY the card's action row and stop note from `job`'s current
+ * control fields — never touches the name or the status pill's icon, so
  * this is safe to call from the patch path (downloads-render-plan.js's
  * `patchStopRequest`) as well as from the initial build. */
 function paintJobActions(card, job) {
-  const acts = card.querySelector(".jobacts");
-  const stopNote = card.querySelector(".stopnote");
+  const acts = card.querySelector('[data-role="job-acts"]');
+  const stopNote = card.querySelector('[data-role="stop-note"]');
   if (!acts || !stopNote) return;
 
   const cancelling = job.status === "running" && job.stop_request === "cancel";
@@ -993,8 +957,8 @@ function paintJobActions(card, job) {
   acts.replaceChildren();
   if (job.status === "paused") {
     acts.append(
-      actionButton("Resume", "primary", () => onResume(job.id)),
-      actionButton("Cancel", "danger", () => onCancel(job.id)),
+      actionButton("Resume", "pri", () => onResume(job.id)),
+      actionButton("Cancel", "ghost danger", () => onCancel(job.id)),
     );
   } else if (job.status === "running") {
     if (job.type === "prefill") {
@@ -1002,9 +966,7 @@ function paintJobActions(card, job) {
       pauseBtn.disabled = pauseBtn.disabled || pausing || cancelling;
       acts.appendChild(pauseBtn);
     }
-    const cancelBtn = actionButton(cancelling ? "Cancelling…" : "Cancel", "danger", () =>
-      onCancel(job.id),
-    );
+    const cancelBtn = actionButton(cancelling ? "Cancelling…" : "Cancel", "ghost danger", () => onCancel(job.id));
     cancelBtn.disabled = cancelBtn.disabled || cancelling;
     acts.appendChild(cancelBtn);
   }
@@ -1024,77 +986,19 @@ function paintJobActions(card, job) {
 
 /**
  * @param {object} job JobSummary (status is "running" or "paused" here)
- * @param {"active"|"held"} mode
  * @param {Map<number, object>} gamesByAppid
  */
-function buildJobCard(job, mode, gamesByAppid) {
-  const card = document.createElement("div");
-  card.className = "jobcard " + mode;
-  card.dataset.jid = String(job.id);
-  // WP WEB-FEAT-6: the badge's kind (running/updating/verify/paused), read
-  // back by `jobCardKindsStale` when a games poll lands.
-  const kind = activeJobKind(job, gamesByAppid.get(job.appid));
-  card.dataset.dk = kind;
-
-  const top = document.createElement("div");
-  top.className = "jobtop";
-
-  const info = document.createElement("div");
-  const nm = document.createElement("div");
-  nm.className = "nm";
-  nm.dataset.appid = String(job.appid);
-  nm.textContent = nameFor(job.appid, gamesByAppid);
-  const sm = document.createElement("div");
-  sm.className = "sm";
-  sm.textContent = `job #${job.id} · appid ${job.appid}`;
-  info.append(nm, sm);
-
-  const badge = document.createElement("span");
-  badge.className = "badge tx-" + kind;
-  const badgeIcon = createStatusIcon(kind, { size: "sm" });
-  // WP 4a.8 icon audit: the word right after this icon already says the
-  // same thing visibly — hide the icon's own sr-only label so it is not
-  // announced twice (same posture as this file's own `buildHistoryRow`
-  // icon, and clients-sheet.js/notifications.js's status icons).
-  badgeIcon.setAttribute("aria-hidden", "true");
-  badge.appendChild(badgeIcon);
-  const word = document.createElement("span");
-  word.textContent = activeJobWord(job, gamesByAppid.get(job.appid));
-  badge.appendChild(word);
-
-  top.append(info, badge);
-  card.appendChild(top);
-
-  // WP D15c (D13 SPEED-1): the job's speed at the cache, painted by
-  // paintJobSpeeds() from the statistics poll; hidden until there is one.
-  if (mode === "active") {
-    const speed = document.createElement("p");
-    speed.className = "jobspeed";
-    speed.dataset.role = "job-speed";
-    speed.title = "Measured at the cache over the last few minutes, on this game's own depots.";
-    speed.hidden = true;
-    card.appendChild(speed);
-  }
-
-  if (mode === "held") {
-    // The slot-release divergence, stated on the card itself — see
-    // js/lib/job-partition.js's module header for the full "why".
-    const note = document.createElement("p");
-    note.className = "holdnote";
-    note.textContent =
-      "Paused — this does not hold the worker slot. vault-api released it immediately, so another queued job may already be running. Resume puts this job back at the front of the queue.";
-    card.appendChild(note);
-  }
-
-  const stopNote = document.createElement("p");
-  stopNote.className = "stopnote";
-  stopNote.hidden = true;
-  card.appendChild(stopNote);
-
-  const acts = document.createElement("div");
-  acts.className = "jobacts";
-  card.appendChild(acts);
-
+function buildJobCard(job, gamesByAppid) {
+  const game = gamesByAppid.get(job.appid);
+  const held = job.status === "paused";
+  const card = createJobCard({
+    job,
+    title: nameFor(job.appid, gamesByAppid),
+    kind: activeJobKind(job, game),
+    word: activeJobWord(job, game),
+    held,
+    holdNote: held ? HOLD_NOTE : "",
+  });
   paintJobActions(card, job);
   return card;
 }
@@ -1104,30 +1008,35 @@ function buildJobCard(job, mode, gamesByAppid) {
 // ---------------------------------------------------------------------
 
 function buildQueueRow(job, position, gamesByAppid, total = 1) {
-  const row = document.createElement("div");
-  row.className = "qrow";
-  row.dataset.jid = String(job.id);
-
-  const grip = staticIcon(GRIP_SVG);
+  const title = nameFor(job.appid, gamesByAppid);
   const gripWrap = document.createElement("span");
   gripWrap.className = "grip";
-  gripWrap.appendChild(grip);
+  gripWrap.dataset.jid = String(job.id);
+  gripWrap.appendChild(staticIcon(GRIP_SVG));
 
-  const nm = document.createElement("span");
-  nm.className = "nm";
-  nm.dataset.appid = String(job.appid);
-  nm.textContent = nameFor(job.appid, gamesByAppid);
+  const removeBtn = actionButton(ROW_REMOVE_LABEL, "ghost w72", () => onCancel(job.id));
+  removeBtn.setAttribute("aria-label", `Remove ${title} from the queue`);
+  removeBtn.dataset.role = "queue-remove";
+  const row = createQueueRow({
+    jobId: job.id,
+    appid: job.appid,
+    title,
+    size: formatBytesGB(gamesByAppid.get(job.appid)?.size_bytes) || "",
+    grip: gripWrap,
+    removeButton: removeBtn,
+  });
 
   // WP D20: the grip is the reorder handle (pointer drag, or focus + arrow
-  // keys). With one queued job, or while the connection is lost, there is
-  // nothing to move: it stays a plain icon and is not focusable.
+  // keys, QUEUE-KBD-KEEP). With one queued job, or while the connection is
+  // lost, there is nothing to move: it stays a plain icon and is not
+  // focusable.
   if (total > 1 && !isConnectionLost()) {
     gripWrap.className = "grip grip-live";
     gripWrap.setAttribute("role", "button");
     gripWrap.setAttribute("tabindex", "0");
     gripWrap.setAttribute(
       "aria-label",
-      `Reorder ${nm.textContent}, position ${position} of ${total}. Use the up and down arrow keys, Home or End.`,
+      `Reorder ${title}, position ${position} of ${total}. Use the up and down arrow keys, Home or End.`,
     );
     gripWrap.addEventListener("keydown", (e) => {
       const target = keyTargetIndex(e.key, position - 1, total);
@@ -1137,14 +1046,6 @@ function buildQueueRow(job, position, gamesByAppid, total = 1) {
     });
     gripWrap.addEventListener("pointerdown", (e) => startQueueDrag(e, row, job.id));
   }
-
-  const pos = document.createElement("span");
-  pos.className = "pos";
-  pos.textContent = `#${position}`;
-
-  const removeBtn = actionButton("Remove", "danger", () => onCancel(job.id));
-
-  row.append(gripWrap, nm, pos, removeBtn);
   return row;
 }
 
@@ -1162,13 +1063,12 @@ const reorder = { holds: 0, dirty: false };
 function focusedGripJid() {
   const active = document.activeElement;
   if (!active || !active.classList || !active.classList.contains("grip-live")) return null;
-  const row = active.parentNode;
-  return row && row.dataset && row.dataset.jid ? Number(row.dataset.jid) : null;
+  return active.dataset && active.dataset.jid ? Number(active.dataset.jid) : null;
 }
 
 function focusGrip(jobId) {
   if (!mounted()) return;
-  const grip = els.queueBody.querySelector(`.qrow[data-jid="${jobId}"] .grip`);
+  const grip = els.queueBody.querySelector(`.grip[data-jid="${jobId}"]`);
   if (grip && typeof grip.focus === "function") grip.focus();
 }
 
@@ -1264,127 +1164,44 @@ function startQueueDrag(e, row, jobId) {
 // History row (lazy log-excerpt fetch on expand)
 // ---------------------------------------------------------------------
 
-function paintExcerpt(rowEl, jobId) {
-  const logEl = rowEl.querySelector(".log");
-  if (!logEl) return;
+/** Fill an item's hanging panel from its excerpt state
+ * (components/history-list.js `paintHistoryPanel`). A failed prefill gets
+ * its known-cause hint (`lib/job-failure.js`, WP WEB-FIX-4) or the generic
+ * failure block (WP DOWNLOADS-1), both with the Retry offer: the button on
+ * the newest job of an app only (an older failed row would queue a second
+ * run of a game that already has a newer job), never for a Steam tool app
+ * (`POST /v1/prefill` answers 422, WP API-FIX-4). */
+function paintExcerpt(itemEl, jobId) {
+  const panel = itemEl.querySelector(".hpanel");
+  if (!panel) return;
   const st = getExcerptState(jobId);
   const display = selectExcerptDisplay(st);
-  logEl.replaceChildren();
-
-  if (display.state === EXCERPT_STATE.COLLAPSED) return;
-  if (display.state === EXCERPT_STATE.LOADING) {
-    const p = document.createElement("p");
-    p.className = "loading";
-    p.textContent = "Loading log…";
-    logEl.appendChild(p);
-    return;
-  }
-  if (display.state === EXCERPT_STATE.ERROR) {
-    const p = document.createElement("p");
-    p.className = "errmsg";
-    p.textContent = `Could not load the log: ${display.message}`;
-    logEl.appendChild(p);
-    return;
-  }
-  if (display.state === EXCERPT_STATE.EMPTY) {
-    const failed = findJobById(jobId);
-    if (isFailedPrefill(failed)) appendGenericFailure(logEl, failed);
-    const p = document.createElement("p");
-    p.className = "emptymsg";
-    p.textContent = "No log output for this job.";
-    logEl.appendChild(p);
-    return;
-  }
   const job = findJobById(jobId);
-  const hint = jobFailureHint(job, st.excerpt);
-  if (!hint && isFailedPrefill(job)) appendGenericFailure(logEl, job);
-  const outputParent = hint ? appendFailureHint(logEl, hint, job, st) : logEl;
-  if (display.truncated) {
-    const note = document.createElement("p");
-    note.className = "truncnote";
-    note.textContent = "Truncated — showing the last portion of the output.";
-    outputParent.appendChild(note);
-  }
-  const body = document.createElement("div");
-  body.textContent = display.lines.join("\n");
-  outputParent.appendChild(body);
-}
-
-/** WP WEB-FIX-4: a known failure's hint block ("Steam login missing",
- * "cannot find the cache"; text in lib/job-failure.js's HINTS), then a
- * closed `<details>` for the raw output. Returns the `<details>` the caller
- * puts the output into. Text only (textContent), no markup from the log.
- * Retry only on the newest prefill job for the app: an older failed row
- * would queue a second run of a game that already has a newer job. */
-function failPara(value, className) {
-  const p = document.createElement("p");
-  if (className) p.className = className;
-  p.textContent = value;
-  return p;
-}
-
-/** The Retry line of a failure block (WP WEB-FIX-4, WP DOWNLOADS-1): the
- * button on the newest job of an app, else why there is none. A tool app's
- * job is never retried (`POST /v1/prefill` answers 422, WP API-FIX-4), so
- * the block says why instead of offering the button. */
-function appendRetryOffer(box, job, retryLine) {
-  const offer = retryOffer(job, state.jobs, gamesByAppidMap().get(job.appid));
-  if (offer === "tool") {
-    box.appendChild(failPara(TOOL_APP_NOTE));
-  } else if (offer === "retry") {
-    box.appendChild(failPara(retryLine));
-    const acts = document.createElement("div");
-    acts.className = "jobacts";
-    const retry = actionButton("Retry", "primary", () => onRetry(job.appid));
-    retry.dataset.retryAppid = String(job.appid); // patchNames keeps the label current
-    retry.setAttribute("aria-label", `Retry ${nameFor(job.appid, gamesByAppidMap())}`);
-    acts.appendChild(retry);
-    box.appendChild(acts);
-  } else {
-    box.appendChild(failPara(NEWER_JOB_LINE));
-  }
-}
-
-/** WP DOWNLOADS-1: a failed prefill with no known cause still gets the
- * failure line and the Retry offer; its output follows unfolded (there the
- * output is the diagnosis). */
-function appendGenericFailure(logEl, job) {
-  const box = document.createElement("div");
-  box.className = "failhint";
-  box.dataset.hint = "generic";
-  box.append(failPara(GENERIC_FAILURE.title, "failhint-title"), failPara(GENERIC_FAILURE.body));
-  appendRetryOffer(box, job, GENERIC_FAILURE.retry);
-  logEl.appendChild(box);
-}
-
-function appendFailureHint(logEl, hintKind, job, st) {
-  const text = HINTS[hintKind];
-  const box = document.createElement("div");
-  box.className = "failhint";
-  box.dataset.hint = hintKind;
-  const para = failPara;
-  const code = document.createElement("code");
-  code.className = "cmd";
-  code.textContent = text.code;
-  box.append(para(text.title, "failhint-title"), para(text.body), para(text.codeIntro), code, para(text.after));
-  appendRetryOffer(box, job, text.retry);
-
-  const raw = document.createElement("details");
-  raw.className = "rawlog";
-  raw.open = !!st.rawOpen;
-  raw.addEventListener("toggle", () => {
-    st.rawOpen = raw.open;
+  const ready = st.excerpt !== undefined;
+  paintHistoryPanel(panel, {
+    display,
+    hint: ready && job ? jobFailureHint(job, st.excerpt) : null,
+    failed: isFailedPrefill(job),
+    retry: job
+      ? { offer: retryOffer(job, state.jobs, gamesByAppidMap().get(job.appid)), make: () => retryButton(job) }
+      : { offer: "newer", make: null },
+    rawOpen: st.rawOpen,
+    onRawToggle: (open) => {
+      st.rawOpen = open;
+    },
   });
-  const summary = document.createElement("summary");
-  summary.textContent = text.outputSummary;
-  raw.appendChild(summary);
+}
 
-  logEl.append(box, raw);
-  return raw;
+/** The failure block's Retry button (WP WEB-FIX-4). */
+function retryButton(job) {
+  const retry = actionButton("Retry", "pri", () => onRetry(job.appid));
+  retry.dataset.retryAppid = String(job.appid); // patchNames keeps the label current
+  retry.setAttribute("aria-label", `Retry ${nameFor(job.appid, gamesByAppidMap())}`);
+  return retry;
 }
 
 function historyRowNow(jobId) {
-  return mounted() ? els.historyBody.querySelector(`.hrow[data-jid="${jobId}"]`) : null;
+  return mounted() ? els.historyBody.querySelector(`.hitem[data-jid="${jobId}"]`) : null;
 }
 
 /** Lazily fetch `GET /v1/jobs/{id}` for its `log_excerpt`, exactly once per
@@ -1420,8 +1237,7 @@ async function toggleHistoryRow(jobId) {
   st.expanded = !st.expanded;
   const row = historyRowNow(jobId);
   if (row) {
-    row.classList.toggle("open", st.expanded);
-    row.querySelector("button").setAttribute("aria-expanded", String(st.expanded));
+    setHistoryItemExpanded(row, st.expanded);
     paintExcerpt(row, jobId);
   }
   if (st.expanded) await ensureExcerptLoaded(jobId, row);
@@ -1455,7 +1271,7 @@ let pendingHighlightJobId = null;
  * `scrollIntoView()` also scrolls an `overflow:hidden` app shell and shifts
  * every absolutely positioned surface with it — but this app's shell has no
  * such ancestor (`view-root`/`.app` are plain document flow, verified
- * against css/app.css: no `overflow:hidden` above `.hrow`), so the mockup's
+ * against css/app.css and css/kit.css: no `overflow:hidden` above `.hitem`), so the mockup's
  * specific failure mode does not apply here.
  *
  * **`behavior` is resolved per `prefers-reduced-motion` explicitly (WP
@@ -1481,9 +1297,8 @@ function applyPendingHighlight() {
   const row = historyRowNow(jobId);
   if (!row) return; // job not in the History section on this render yet — stays queued
   pendingHighlightJobId = null;
-  row.classList.add("open");
-  const toggle = row.querySelector("button");
-  if (toggle) toggle.setAttribute("aria-expanded", "true");
+  setHistoryItemExpanded(row, true);
+  const toggle = row.querySelector(".hrow");
   paintExcerpt(row, jobId);
   ensureExcerptLoaded(jobId, row);
   row.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
@@ -1491,59 +1306,24 @@ function applyPendingHighlight() {
 }
 
 function buildHistoryRow(job, gamesByAppid) {
-  const row = document.createElement("div");
-  row.className = "hrow";
-  row.dataset.jid = String(job.id);
   const st = getExcerptState(job.id);
-  if (st.expanded) row.classList.add("open");
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", String(st.expanded));
-
-  // jobIconKind reuses the "cached" glyph (a checkmark) for a DONE job —
-  // sharing the shape is right (both mean "succeeded"), but that kind's
-  // built-in screen-reader word from status-icon.js is "Current" (correct
-  // for a library card, misleading read out loud for a finished job here).
-  // The icon is made purely decorative and `.when` below (which already
-  // states "Done"/"Failed"/"Cancelled" as visible text) carries the real
-  // accessible word instead, so nothing is announced twice OR wrong.
-  const kind = jobIconKind(job); // "cached" | "error" | "cancelled"
-  const iconWrap = document.createElement("span");
-  iconWrap.setAttribute("aria-hidden", "true");
-  iconWrap.appendChild(createStatusIcon(kind, { size: "sm" }));
-  toggle.appendChild(iconWrap);
-
-  const info = document.createElement("span");
-  info.className = "hrow-info";
-  const nm = document.createElement("span");
-  nm.className = "nm";
-  nm.dataset.appid = String(job.appid);
-  nm.textContent = nameFor(job.appid, gamesByAppid);
-  const when = document.createElement("div");
-  when.className = "when";
-  when.textContent = `job #${job.id} · ${jobStatusWord(job)} · ${formatTimestamp(job.finished_at)}`;
-  info.append(nm, when);
-
-  const arrow = document.createElement("span");
-  arrow.className = "arrow";
-  arrow.appendChild(staticIcon(CHEVRON_SVG));
-
-  toggle.append(info, arrow);
-  toggle.addEventListener("click", () => toggleHistoryRow(job.id));
-
-  const log = document.createElement("div");
-  log.className = "log";
-
-  row.append(toggle, log);
-  paintExcerpt(row, job.id);
-  return row;
+  const item = createHistoryItem({
+    job,
+    title: nameFor(job.appid, gamesByAppid),
+    kind: jobIconKind(job), // "cached" | "error" | "cancelled"
+    meta: `job #${job.id} · ${jobStatusWord(job)} · ${formatTimestamp(job.finished_at)}`,
+    expanded: st.expanded,
+    onToggle: () => toggleHistoryRow(job.id),
+  });
+  paintExcerpt(item, job.id);
+  return item;
 }
 
 // ---------------------------------------------------------------------
 // Section rendering
 // ---------------------------------------------------------------------
 
+/** The kit's dashed empty box (kit.css `.empty`). */
 function emptyMessage(text) {
   const p = document.createElement("p");
   p.className = "empty";
@@ -1566,45 +1346,46 @@ function subtitleText(p) {
   return bits.join(" · ");
 }
 
+/** A section-head count badge; hidden at zero. */
+function setBadge(badge, n) {
+  badge.textContent = String(n);
+  badge.hidden = n === 0;
+}
+
 function fullRender() {
   if (!mounted()) return;
   const p = partitionJobs(state.jobs);
   const gamesByAppid = gamesByAppidMap();
 
   els.sub.textContent = subtitleText(p);
-  // WP DOWNLOADS-1: History differs idle vs active (css/app.css).
-  els.section.dataset.state = p.running.length || p.paused.length || p.queued.length ? "busy" : "idle";
   paintBulkBar();
 
+  // WP DOWNLOADS-2: paused jobs fold into Active, after the running one(s).
+  const active = [...p.running, ...p.paused];
+  setBadge(els.activeCount, active.length);
   els.activeBody.replaceChildren();
-  if (!p.running.length) {
+  if (!active.length) {
     els.activeBody.appendChild(emptyMessage("No download running. Start one from the Library."));
   } else {
-    for (const job of p.running) els.activeBody.appendChild(buildJobCard(job, "active", gamesByAppid));
+    for (const job of active) els.activeBody.appendChild(buildJobCard(job, gamesByAppid));
   }
 
-  const hasPaused = p.paused.length > 0;
-  els.pausedHeading.hidden = !hasPaused;
-  els.pausedBody.hidden = !hasPaused;
-  els.pausedBody.replaceChildren();
-  for (const job of p.paused) els.pausedBody.appendChild(buildJobCard(job, "held", gamesByAppid));
-
-  els.queueCount.textContent = String(p.queued.length);
+  setBadge(els.queueCount, p.queued.length);
   // WP D20: a rebuild must not drop keyboard focus from a reorder handle.
   const focusedJid = focusedGripJid();
   els.queueBody.replaceChildren();
   if (!p.queued.length) {
-    els.queueBody.appendChild(hintMessage("Nothing waiting."));
+    els.queueBody.appendChild(emptyMessage("Nothing waiting."));
     els.queueHint.textContent = "";
+    els.queueHint.hidden = true;
   } else {
     for (const job of p.queued) {
       els.queueBody.appendChild(buildQueueRow(job, queuePosition(p.queued, job.id), gamesByAppid, p.queued.length));
     }
+    els.queueHint.hidden = false;
     els.queueHint.textContent =
       "vault-api runs one job at a time, top of the list first. Drag a row by its handle, or focus the handle and use the arrow keys, to change the order." +
-      (hasPaused
-        ? " A paused job does not hold this queue back — the queue keeps draining."
-        : "");
+      (p.paused.length ? " A paused job does not hold this queue back — the queue keeps draining." : "");
   }
 
   if (focusedJid !== null) focusGrip(focusedJid);
@@ -1633,7 +1414,7 @@ function renderHistory(gamesByAppid = gamesByAppidMap()) {
   els.historyKey = historyKey(finished);
   els.historyBody.replaceChildren();
   if (!finished.length) {
-    els.historyBody.appendChild(hintMessage(emptyHistoryText(history.range)));
+    els.historyBody.appendChild(emptyMessage(emptyHistoryText(history.range)));
   } else {
     for (const job of finished) els.historyBody.appendChild(buildHistoryRow(job, gamesByAppid));
   }
@@ -1818,12 +1599,8 @@ histNo.addEventListener("click", () => {
 histYes.addEventListener("click", () => confirmHistoryDelete());
 
 // ---------------------------------------------------------------------
-// Statistics header (WP D15c)
+// Statistics: the hero (WP D15c, GRAPH-LIVE, LIVE-DELAY-1; DOWNLOADS-2)
 // ---------------------------------------------------------------------
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-const GRAPH_W = 300;
-const GRAPH_H = 60;
 
 /** Cached persisted 1 h summary of the live view (refreshed every 30 s). */
 const liveSummary = { at: 0, value: null };
@@ -1890,111 +1667,20 @@ function setStatsRange(range) {
   trafficPoll.refresh();
 }
 
-function svgEl(tag, attrs) {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
-  return node;
-}
-
-/** Repaint the note, the tiles and the graph from `traffic`. Nothing in
- * here is focusable, so rebuilding the tiles takes no focus. */
+/** Repaint the hero from `traffic` (components/downloads-hero.js). Nothing
+ * in it but the range buttons is focusable, so a repaint takes no focus. */
 function paintStats() {
-  if (!mounted() || !els.statsNote) return;
-  const t = traffic.throughput;
-  let note = null;
-  if (traffic.unsupported) note = FEED_TEXT.unsupported;
-  else if (traffic.error && !t) note = `Could not load the statistics: ${traffic.error}`;
-  else if (t) note = joinNotes(traffic.error ? refreshFailedText(traffic.error) : null, feedNote(t));
-  else note = "Loading statistics…";
-  els.statsNote.textContent = note || "";
-  els.statsNote.hidden = !note;
-  // No figures (feed disabled, or a server without the endpoints): no
-  // range to choose either, the note stands alone. While an answer is
-  // pending the last known verdict holds, so a range click never hides
-  // the control it came from.
-  els.statsRange.hidden = traffic.noFigures;
-
+  if (!mounted() || !els.hero) return;
   const cap = state.settings ? rateCapLine(state.settings, state.schedule, Date.now()) : null;
-  const tiles = traffic.unsupported ? null : headerTiles(t, cap);
-  els.statsGrid.replaceChildren();
-  els.statsGrid.hidden = !tiles;
-  for (const tile of tiles || []) {
-    const box = document.createElement("div");
-    box.className = "stat";
-    box.dataset.stat = tile.key;
-    box.title = tile.title;
-    const dt = document.createElement("dt");
-    dt.textContent = tile.label;
-    const dd = document.createElement("dd");
-    if (tile.value === DASH) {
-      const dash = document.createElement("span");
-      dash.setAttribute("aria-hidden", "true");
-      dash.textContent = DASH;
-      const sr = document.createElement("span");
-      sr.className = "sr-only";
-      sr.textContent = "Not available";
-      dd.append(dash, sr);
-    } else {
-      dd.textContent = tile.value;
-    }
-    if (tile.detail) {
-      const detail = document.createElement("span");
-      detail.className = "stat-detail";
-      detail.textContent = tile.detail;
-      dd.appendChild(detail);
-    }
-    if (tile.limit) {
-      const limit = document.createElement("span");
-      limit.className = "stat-detail";
-      limit.dataset.stat = "limit";
-      limit.textContent = tile.limit;
-      dd.appendChild(limit);
-    }
-    box.append(dt, dd);
-    els.statsGrid.appendChild(box);
-  }
-  paintGraph();
-  paintClientRow();
-}
-
-function paintGraph() {
-  const s = traffic.series;
-  const show = !traffic.unsupported && s && feedState(s) !== "disabled" && s.range === traffic.range;
-  // WP GRAPH-ZOOM: only the span that has data; the axis caption follows it.
-  const shown = show ? { ...s, points: trimSeries(s.points) } : null;
-  const geo = shown ? seriesGeometry(shown.points, { width: GRAPH_W, height: GRAPH_H }) : null;
-  els.graph.replaceChildren();
-  // An all-zero series is a flat line on the floor: nothing to show.
-  els.graph.hidden = !geo || geo.maxBytesPerSecond === 0;
-  if (els.graph.hidden) return;
-  const svg = svgEl("svg", {
-    viewBox: `0 0 ${GRAPH_W} ${GRAPH_H}`,
-    preserveAspectRatio: "none",
-    role: "img",
-    "aria-label": seriesLabel(s, geo.maxBytesPerSecond),
+  els.hero.paint({
+    throughput: traffic.throughput,
+    series: traffic.series,
+    range: traffic.range,
+    rateCap: cap,
+    unsupported: traffic.unsupported,
+    error: traffic.error,
+    noFigures: traffic.noFigures,
   });
-  svg.dataset.role = "graph-svg";
-  svg.append(svgEl("path", { class: "tg-area", d: geo.area }), svgEl("path", { class: "tg-line", d: geo.line }));
-  const axis = document.createElement("div");
-  axis.className = "tg-axis";
-  axis.setAttribute("aria-hidden", "true");
-  for (const text of [seriesStartText(shown), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"]) {
-    const span = document.createElement("span");
-    span.textContent = text;
-    axis.appendChild(span);
-  }
-  els.graph.append(svg, axis);
-}
-
-/** WP CLIENT-ROW-1: show or hide the "Client downloading" row. */
-function paintClientRow() {
-  if (!mounted() || !els.clientRow) return;
-  const t = traffic.throughput;
-  const row = !traffic.unsupported && t && t.range === traffic.range ? clientDownloadingRow(t) : null;
-  els.clientRow.hidden = !row;
-  els.clientRowLabel.textContent = row ? row.label : "";
-  els.clientRowDetail.textContent = row ? row.detail : "";
-  els.clientRow.title = row ? row.title : "";
 }
 
 /** Patch every running job card's speed line (text only). */
@@ -2003,7 +1689,7 @@ function paintJobSpeeds() {
   const t = traffic.throughput;
   const state = feedState(t);
   const entries = new Map(((t && t.jobs) || []).map((j) => [j.job_id, j]));
-  for (const card of els.activeBody.querySelectorAll(".jobcard")) {
+  for (const card of els.activeBody.querySelectorAll(".job")) {
     const line = card.querySelector('[data-role="job-speed"]');
     if (!line) continue;
     // WP DOWNLOADS-1: a Verifying card says so, with or without statistics.
@@ -2017,15 +1703,13 @@ function paintJobSpeeds() {
   }
 }
 
-/** Patch just the named jobs' `.jobacts`/`.stopnote` (their `stop_request`
- * changed, their `status` did not — downloads-render-plan.js's verdict).
- * Never touches a `.badge .sic` node. */
+/** Patch just the named jobs' action row and stop note (their
+ * `stop_request` changed, their `status` did not — downloads-render-plan.js's
+ * verdict). Never touches a pill's status-icon node. */
 function patchStopRequests(jobIds) {
   for (const jobId of jobIds) {
     const job = state.jobs.find((j) => j.id === jobId);
-    const card =
-      els.activeBody.querySelector(`.jobcard[data-jid="${jobId}"]`) ||
-      els.pausedBody.querySelector(`.jobcard[data-jid="${jobId}"]`);
+    const card = els.activeBody.querySelector(`.job[data-jid="${jobId}"]`);
     if (job && card) paintJobActions(card, job);
   }
   // A stop_request change moves a running job in or out of Pause all's set.
@@ -2044,6 +1728,12 @@ function patchNames() {
     const fresh = nameFor(appid, gamesByAppid);
     if (nm.textContent !== fresh) nm.textContent = fresh;
   }
+  // WP DOWNLOADS-2: queue rows show the game's size, which arrives with
+  // the games poll (often after the first jobs paint).
+  for (const sz of els.section.querySelectorAll("[data-size-appid]")) {
+    const fresh = formatBytesGB(gamesByAppid.get(Number(sz.dataset.sizeAppid))?.size_bytes) || "";
+    if (sz.textContent !== fresh) sz.textContent = fresh;
+  }
   // The failure hints' Retry buttons name the game too (aria-label).
   for (const btn of els.section.querySelectorAll("button[data-retry-appid]")) {
     const label = `Retry ${nameFor(Number(btn.dataset.retryAppid), gamesByAppid)}`;
@@ -2055,177 +1745,138 @@ function patchNames() {
 // Static DOM construction
 // ---------------------------------------------------------------------
 
-function sectionHeading(text) {
-  const h4 = document.createElement("h4");
-  h4.className = "sec";
-  h4.textContent = text;
-  return h4;
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** A kit section head: the uppercase label (an h2 for the outline) on the
+ * left, `right` (count badge, buttons) on the right. */
+function sectionHead(label, ...right) {
+  const head = el("div", "sechd");
+  const h2 = el("h2", "sec", label);
+  const acts = el("div", "hacts");
+  acts.append(...right);
+  head.append(h2, acts);
+  return { head, h2, acts };
+}
+
+function countBadge(role) {
+  const badge = el("span", "badge");
+  badge.dataset.role = role;
+  badge.hidden = true;
+  return badge;
+}
+
+function block(className, ...children) {
+  const blk = el("div", className ? `blk ${className}` : "blk");
+  blk.append(...children);
+  return blk;
 }
 
 function buildSection() {
-  const section = document.createElement("section");
-  section.className = "view view-downloads";
+  const section = el("section", "view view-downloads kit dl");
 
-  const head = document.createElement("div");
-  head.className = "dl-head";
-  const h1 = document.createElement("h1");
-  h1.textContent = "Downloads";
-  const sub = document.createElement("span");
-  sub.className = "dl-sub";
-  head.append(h1, sub);
+  // Page head: title + subline left, Pause all / Resume all right.
+  const head = el("div", "page-head");
+  const headText = el("div");
+  const h1 = el("h1", null, "Downloads");
+  const sub = el("div", "sub");
+  sub.dataset.role = "dl-sub";
+  headText.append(h1, sub);
 
   // WP WEB-FEAT-5: Pause all / Resume all + the scheduler note.
-  const bulkBar = document.createElement("div");
-  bulkBar.className = "dl-bulk";
+  const bulkBar = el("div", "dl-bulk");
   bulkBar.setAttribute("role", "group");
   bulkBar.setAttribute("aria-label", BULK.groupLabel);
   bulkBar.hidden = true;
-  const bulkActs = document.createElement("div");
-  bulkActs.className = "dl-bulk-acts";
+  const bulkActs = el("div", "dl-bulk-acts");
   const bulkPause = bulkButton(BULK.pauseAll, "", openPauseConfirm);
   bulkPause.dataset.role = "bulk-pause";
-  const bulkResume = bulkButton(BULK.resumeAll, "primary", () => runBulk("resume"));
+  const bulkResume = bulkButton(BULK.resumeAll, "pri", () => runBulk("resume"));
   bulkResume.dataset.role = "bulk-resume";
   bulkActs.append(bulkPause, bulkResume);
-  const bulkNote = document.createElement("p");
-  bulkNote.className = "dl-bulk-note";
-  bulkNote.textContent = BULK.schedulerNote;
+  const bulkNote = el("p", "hint dl-bulk-note", BULK.schedulerNote);
   bulkBar.append(bulkActs, bulkNote);
+  head.append(headText, bulkBar);
 
-  // WP D15c: the statistics header.
-  const stats = document.createElement("div");
-  stats.className = "dl-stats";
-  stats.setAttribute("role", "region");
-  stats.setAttribute("aria-label", "Download statistics");
-  stats.dataset.role = "dl-stats";
-  const statsRange = createRangeSegs({
-    label: "Statistics range",
-    value: traffic.range,
-    onChange: setStatsRange,
-    role: "stats-range",
-    ranges: STATS_RANGES,
-  });
-  const statsNote = hintMessage("");
-  statsNote.dataset.role = "stats-note";
-  statsNote.hidden = true;
-  const statsGrid = document.createElement("dl");
-  statsGrid.className = "statgrid";
-  statsGrid.dataset.role = "stats-grid";
-  statsGrid.hidden = true;
-  const graph = document.createElement("figure");
-  graph.className = "tgraph";
-  graph.dataset.role = "stats-graph";
-  graph.hidden = true;
-  statsRange.el.hidden = traffic.noFigures;
-  stats.append(statsRange.el, statsNote, statsGrid, graph);
+  // The hero (WP D15c statistics, DOWNLOADS-2 anatomy).
+  const hero = createDownloadsHero({ range: traffic.range, onRangeChange: setStatsRange });
 
-  // WP CLIENT-ROW-1: hidden (no heading either) until a machine downloads.
-  const clientRow = document.createElement("div");
-  clientRow.className = "dl-client-row";
-  clientRow.dataset.role = "client-row";
-  clientRow.hidden = true;
-  const clientRowLabel = document.createElement("strong");
-  const clientRowDetail = document.createElement("span");
-  clientRow.append(clientRowLabel, clientRowDetail);
+  // Column 1: Active (running + paused) and Queue.
+  const activeCount = countBadge("active-count");
+  const activeHead = sectionHead("Active", activeCount);
+  const activeBody = el("div", "rowlist");
+  activeBody.dataset.role = "active-list";
 
-  const activeHeading = sectionHeading("Active");
-  const activeBody = document.createElement("div");
+  const queueCount = countBadge("queue-count");
+  const queueHead = sectionHead("Queue", queueCount);
+  queueHead.h2.tabIndex = -1; // WP UPD-6: focus anchor when the updates section empties
+  const queueBody = el("div", "rowlist");
+  queueBody.dataset.role = "queue-list";
+  const queueHint = hintMessage("");
+  queueHint.hidden = true;
+  const col1 = el("div", "col");
+  col1.append(block("dl-active", activeHead.head, activeBody), block("dl-queue", queueHead.head, queueBody, queueHint));
 
-  const pausedHeading = sectionHeading("Paused");
-  const pausedBody = document.createElement("div");
-
-  // WP UPD-6: hidden until paintUpdates finds a flagged game.
-  const updates = document.createElement("div");
-  updates.className = "dl-updates";
-  updates.hidden = true;
-  const updatesHeading = sectionHeading("");
-  updatesHeading.id = "dl-updates-heading";
-  updates.setAttribute("role", "group");
-  updates.setAttribute("aria-labelledby", "dl-updates-heading");
+  // Column 2: Updates available and Incomplete (WP UPD-6, CACHE-COMPLETE-1c),
+  // each hidden until it has a game; the column is left out when both are.
+  const updatesCount = countBadge("updates-count");
+  const updatesActs = el("div", "dl-updates-acts");
+  const updatesHead = sectionHead(UPDATES_HEADING, updatesCount, updatesActs);
+  updatesHead.h2.id = "dl-updates-heading";
+  const updatesBody = el("div", "rowlist dl-updates-list");
+  updatesBody.id = "dl-updates-list";
   const updatesNote = hintMessage("");
   updatesNote.classList.add("dl-updates-note");
-  const updatesActs = document.createElement("div");
-  updatesActs.className = "dl-updates-acts";
-  const updatesBody = document.createElement("div");
-  updatesBody.className = "dl-updates-list";
-  updatesBody.id = "dl-updates-list";
-  const updatesToggle = buildAttentionToggle("updates", updatesBody);
-  updates.append(updatesHeading, updatesNote, updatesActs, updatesToggle, updatesBody);
+  const updates = block("dl-updates", updatesHead.head, updatesBody, updatesNote);
+  updates.hidden = true;
+  updates.setAttribute("role", "group");
+  updates.setAttribute("aria-labelledby", "dl-updates-heading");
 
-  // WP CACHE-COMPLETE-1c: hidden until paintIncomplete finds a game. Styled
-  // like the updates section (`.dl-updates`), found by `.dl-incomplete`.
-  const incomplete = document.createElement("div");
-  incomplete.className = "dl-updates dl-incomplete";
-  incomplete.hidden = true;
-  const incompleteHeading = sectionHeading("");
-  incompleteHeading.id = "dl-incomplete-heading";
-  incomplete.setAttribute("role", "group");
-  incomplete.setAttribute("aria-labelledby", "dl-incomplete-heading");
+  const incompleteCount = countBadge("incomplete-count");
+  const incompleteActs = el("div", "dl-updates-acts");
+  const incompleteHead = sectionHead(INCOMPLETE_HEADING, incompleteCount, incompleteActs);
+  incompleteHead.h2.id = "dl-incomplete-heading";
+  const incompleteBody = el("div", "rowlist dl-updates-list");
+  incompleteBody.id = "dl-incomplete-list";
   const incompleteNote = hintMessage("");
   incompleteNote.classList.add("dl-updates-note");
-  const incompleteActs = document.createElement("div");
-  incompleteActs.className = "dl-updates-acts";
-  const incompleteBody = document.createElement("div");
-  incompleteBody.className = "dl-updates-list";
-  incompleteBody.id = "dl-incomplete-list";
-  const incompleteToggle = buildAttentionToggle("incomplete", incompleteBody);
-  incomplete.append(incompleteHeading, incompleteNote, incompleteActs, incompleteToggle, incompleteBody);
+  const incomplete = block("dl-incomplete", incompleteHead.head, incompleteBody, incompleteNote);
+  incomplete.hidden = true;
+  incomplete.setAttribute("role", "group");
+  incomplete.setAttribute("aria-labelledby", "dl-incomplete-heading");
 
-  const queueHeading = document.createElement("h4");
-  queueHeading.className = "sec";
-  queueHeading.tabIndex = -1; // WP UPD-6: focus anchor when the updates section empties
-  queueHeading.append("Queue ");
-  const queueCount = document.createElement("span");
-  queueCount.className = "n";
-  queueHeading.appendChild(queueCount);
-  const queueBody = document.createElement("div");
-  const queueHint = hintMessage("");
+  const attnCol = el("div", "col dl-col-attn");
+  attnCol.hidden = true;
+  attnCol.append(updates, incomplete);
 
-  const historyHeading = sectionHeading("History");
-  // WP D15c: the History filter (its own range, default All).
+  // Column 3: History with its own range filter (WP D15c, default All) and
+  // "Delete…" (WP D15-NAMES) in one head row.
   const historyRange = createRangeSegs({
     label: "History range",
     value: history.range,
     onChange: setHistoryRange,
     role: "history-range",
+    className: "seg rangesegs",
   });
-  // WP D15-NAMES: "Delete history…" under the filter.
-  const historyActs = document.createElement("div");
-  historyActs.className = "jobacts dl-history-acts";
-  const historyDeleteBtn = document.createElement("button");
+  const historyDeleteBtn = el("button", "btn sm ghost", "Delete…");
   historyDeleteBtn.type = "button";
-  historyDeleteBtn.className = "btn ghost sm";
-  historyDeleteBtn.textContent = "Delete history…";
   historyDeleteBtn.dataset.role = "history-delete";
+  historyDeleteBtn.setAttribute("aria-label", "Delete history…");
   historyDeleteBtn.addEventListener("click", () => openHistoryDelete());
-  historyActs.appendChild(historyDeleteBtn);
-  const historyBody = document.createElement("div");
+  const historyHead = sectionHead("History", historyRange.el, historyDeleteBtn);
+  const historyBody = el("div", "rowlist");
+  historyBody.dataset.role = "history-list";
+  const col3 = el("div", "col dl-col-history");
+  col3.append(block("dl-history", historyHead.head, historyBody));
 
-  // WP DOWNLOADS-1: two columns from 1000px up (css/app.css `.dl-cols`):
-  // the work in progress on the left, the finished jobs on the right; one
-  // column below, in this DOM order.
-  const mainCol = document.createElement("div");
-  mainCol.className = "dl-col dl-col-main";
-  mainCol.append(
-    clientRow,
-    activeHeading,
-    activeBody,
-    pausedHeading,
-    pausedBody,
-    updates,
-    incomplete,
-    queueHeading,
-    queueBody,
-    queueHint,
-  );
-  const sideCol = document.createElement("div");
-  sideCol.className = "dl-col dl-col-side";
-  sideCol.append(historyHeading, historyRange.el, historyActs, historyBody);
-  const cols = document.createElement("div");
-  cols.className = "dl-cols";
-  cols.append(mainCol, sideCol);
+  const cols = el("div", "cols3 no-attn");
+  cols.append(col1, attnCol, col3);
 
-  section.append(head, bulkBar, stats, cols);
+  section.append(head, hero.el, cols);
 
   els = {
     section,
@@ -2233,36 +1884,29 @@ function buildSection() {
     bulkBar,
     bulkPause,
     bulkResume,
+    hero,
+    cols,
+    activeCount,
     activeBody,
-    pausedHeading,
-    pausedBody,
     queueCount,
     queueBody,
     queueHint,
     historyBody,
     historyDeleteBtn,
-    statsRange: statsRange.el,
-    statsNote,
-    statsGrid,
-    graph,
-    clientRow,
-    clientRowLabel,
-    clientRowDetail,
+    attnCol,
     updates,
-    updatesHeading,
+    updatesCount,
     updatesNote,
     updatesActs,
     updatesBody,
-    updatesToggle,
     updatesKey: null,
     incomplete,
-    incompleteHeading,
+    incompleteCount,
     incompleteNote,
     incompleteActs,
     incompleteBody,
-    incompleteToggle,
     incompleteKey: null,
-    queueHeading,
+    queueHeading: queueHead.h2,
   };
   return section;
 }
@@ -2302,7 +1946,7 @@ store.subscribe("jobs", ({ items, diff }) => {
 function jobCardKindsStale() {
   if (!mounted()) return false;
   const gamesByAppid = new Map(state.games.map((g) => [g.appid, g]));
-  for (const card of els.section.querySelectorAll(".jobcard")) {
+  for (const card of els.section.querySelectorAll(".job")) {
     const job = state.jobs.find((j) => j.id === Number(card.dataset.jid));
     if (job && card.dataset.dk !== activeJobKind(job, gamesByAppid.get(job.appid))) return true;
   }

@@ -154,9 +154,21 @@ test("BP-XL (min-width:1800px) does not touch --w-text or .view-downloads/.view-
 // alongside an existing max-width/margin pair.
 // ---------------------------------------------------------------------
 
-test("no cascade tie: .view-downloads is referenced exactly once in app.css (no pre-existing rule touches it at all)", () => {
+test("no cascade tie: .view-downloads is referenced exactly twice in app.css (the BP-L cap and the DOWNLOADS-2 BP-M wide page)", () => {
   const dlCount = (codeOnlyAll.match(/\.view-downloads\b/g) || []).length;
-  assert.equal(dlCount, 1, `".view-downloads" appears ${dlCount} times in theme.css+app.css — expected exactly 1 (this WP's own selector); a second occurrence means some other rule now also targets it and needs a deliberate cascade review`);
+  assert.equal(dlCount, 2, `".view-downloads" appears ${dlCount} times in theme.css+app.css — expected exactly 2 (the BP-L capped-column selector and the BP-M :has() rule of WP DOWNLOADS-2); a third occurrence means some other rule now also targets it and needs a deliberate cascade review`);
+});
+
+test("WP DOWNLOADS-2: at BP-M only Downloads leaves the 760px column (a deliberate LAYOUT-1 departure), via --w-page", () => {
+  const bpM = findMediaBlock(720);
+  assert.ok(bpM, "no bare min-width:720px block found");
+  const body = ruleBody(bpM.body, ".view-root:has(> .view-downloads)");
+  assert.ok(body, "no '.view-root:has(> .view-downloads){...}' rule in the BP-M block");
+  assert.match(body, /max-width:\s*var\(--w-page\)/);
+  // The rule names Downloads only: no other view is widened at BP-M.
+  const hasRules = [...bpM.body.matchAll(/([^{}]*:has\([^)]*\)[^{}]*)\{/g)].map((m) => m[1].trim());
+  assert.deepEqual(hasRules, [".view-root:has(> .view-downloads)"]);
+  assert.equal(/view-(settings|clients|library)/.test(bpM.body), false, "BP-M must not widen any other view");
 });
 
 test("no cascade tie: .view-settings' only OTHER reference is the pre-existing, unrelated h4.sec descendant rule — nothing else sets max-width/margin on the bare class", () => {
@@ -204,21 +216,20 @@ test("base .jobcard/.jobtop keep every pre-WP property value (the Active/Paused 
   assert.match(topBody, /justify-content:\s*space-between/, "the header row must still spread name/badge apart — this WP caps the COLUMN, not this row's own internal layout");
 });
 
-test("base .qrow keeps every pre-WP property value (the Queue row shape)", () => {
-  const body = ruleBody(appTop, ".qrow");
-  assert.ok(body, ".qrow rule not found at top level");
-  assert.match(body, /display:\s*flex/);
-  assert.match(body, /align-items:\s*center/);
-  assert.match(body, /border-radius:\s*var\(--r-m\)/);
-});
-
-test("base .hrow / .hrow > button keep every pre-WP property value (the History row shape)", () => {
-  const rowBody = ruleBody(appTop, ".hrow");
-  assert.ok(rowBody, ".hrow rule not found at top level");
-  assert.match(rowBody, /overflow:\s*hidden/);
-  const btnBody = ruleBody(appTop, ".hrow > button");
-  assert.ok(btnBody, ".hrow > button rule not found at top level");
-  assert.match(btnBody, /width:\s*100%/, "the toggle button must still fill its row's own width (100% of whatever container it sits in — unaffected by the OUTER column narrowing this WP adds)");
+test("WP DOWNLOADS-2: the Queue and History row shapes moved from app.css to kit.css (scoped under .kit)", () => {
+  // The old app.css rules are gone (no second copy that could tie or drift).
+  assert.equal(ruleBody(appTop, ".qrow"), null, "app.css still has a .qrow rule");
+  assert.equal(ruleBody(appTop, ".hrow"), null, "app.css still has a .hrow rule");
+  assert.equal(/\.hrow\b|\.qrow\b/.test(stripComments(appCss)), false, "app.css still styles .hrow/.qrow");
+  const kitCss = stripComments(readFileSync(path.join(webDir, "css", "kit.css"), "utf8"));
+  // Queue row = the kit attention row (.jr grid) + the grip/name lead.
+  assert.match(ruleBody(kitCss, ".kit .jr") ?? "", /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+72px/);
+  assert.match(ruleBody(kitCss, ".kit .qrow .qlead") ?? "", /display:\s*flex/);
+  // History row = a full-width button; its panel hangs under it.
+  const hrow = ruleBody(kitCss, ".kit .hrow") ?? "";
+  assert.match(hrow, /display:\s*flex/);
+  assert.match(hrow, /width:\s*100%/);
+  assert.match(ruleBody(kitCss, ".kit .hpanel") ?? "", /border-top:\s*0/);
 });
 
 test("base .field/.srow keep every pre-WP property value (the Settings form shape)", () => {

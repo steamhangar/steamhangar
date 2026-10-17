@@ -988,25 +988,17 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .hint{ font-size:11.5px; line-height:1.5; color:var(--dim-2); margin:14px 0 0; text-align:center; }
 
 /* ============================================================
-   Downloads view (WP 4a.5)
-   Active job(s) actually holding the one worker slot, paused jobs shown
-   HONESTLY as not holding it (see js/lib/job-partition.js's module header
-   for the slot-release divergence from the mockup), the FIFO queue, and
-   history with lazily-fetched log excerpts. Class names follow the mockup
-   (.jobcard/.jobtop/.jobacts/.holdnote/.qrow/.hrow/.log/h4.sec) where the
-   shell doesn't already own the name, same convention as the Library
-   view's .lib-head/.lib-sub.
+   Shared card and section pieces (WP 4a.5)
+   First written for the Downloads view, which moved onto the UI kit in
+   WP DOWNLOADS-2 (css/kit.css, "Downloads, width-aware"). What is left
+   here is still used elsewhere: the Clients page head (.dl-head/.dl-sub),
+   h4.sec section labels (Settings, sheets), the job-card shell
+   (.jobcard/.jobtop/.badge/.jobacts) of the Clients cards and the PCs
+   sheet.
    ============================================================ */
 .dl-head{ margin-bottom:2px; }
 .dl-head h1{ margin:0 0 2px; }
 .dl-sub{ display:block; font-size:11px; font-weight:500; color:var(--dim-2); letter-spacing:.3px; }
-/* WP WEB-FEAT-5: Pause all / Resume all under the heading, plus one note
-   line. The bar is [hidden]-toggled and display:flex, so it needs the
-   [hidden] guard (docs/LEARNINGS.md WP 4a.8). Buttons wrap at phone width. */
-.dl-bulk{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:10px 0 0; }
-.dl-bulk[hidden]{ display:none; }
-.dl-bulk-acts{ display:flex; flex-wrap:wrap; gap:8px; }
-.dl-bulk-note{ margin:0; flex:1 1 220px; min-width:0; font-size:11px; line-height:1.5; color:var(--dim-2); }
 
 h4.sec{
   margin:18px 0 8px; font-size:10.5px; font-weight:700;
@@ -1017,8 +1009,8 @@ h4.sec::after{ content:""; flex:1; height:1px; background:var(--line-soft); }
 h4.sec .n{ font-family:var(--mono); font-weight:400; letter-spacing:0; text-transform:none; }
 /* `h4.sec{ display:flex }` above has the same specificity as the UA
    `[hidden]{ display:none }` rule and would otherwise win by cascade order
-   (this stylesheet loads after the UA sheet) — the Paused section's
-   `.hidden` toggle (views/downloads.js) needs this to actually disappear. */
+   (this stylesheet loads after the UA sheet) — any `.hidden` toggle on an
+   h4.sec needs this to actually disappear. */
 h4.sec[hidden]{ display:none; }
 
 .jobcard{
@@ -1032,6 +1024,9 @@ h4.sec[hidden]{ display:none; }
 .jobtop > div{ min-width:0; } /* WP WEB-FIX-3: the name column may shrink beside the nowrap badge */
 .jobtop .sm{ font-size:11px; color:var(--dim-2); font-family:var(--mono); margin-top:2px; font-variant-numeric:tabular-nums; }
 .badge{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; flex:none; white-space:nowrap; }
+/* The Downloads count badges (kit `.badge`, WP DOWNLOADS-2) are hidden at
+   zero; css-hygiene's lint sees this display rule, so it gets the guard too. */
+.badge[hidden]{ display:none; }
 /* WP WEB-FIX-9: the Downloads job badge (icon + word, a direct child of
    .jobtop; the clients sheet wraps its badges in .pcs-badges instead)
    centres on the two-line name block beside it, the way the History rows
@@ -1040,108 +1035,9 @@ h4.sec[hidden]{ display:none; }
    block's middle, read on rc9 as "the pause symbol is shifted upward". */
 .jobtop > .badge{ align-self:center; }
 .jobacts{ display:flex; gap:8px; justify-content:flex-end; margin-top:11px; flex-wrap:wrap; }
-/* what pause/cancel actually cost the queue — stated, not hidden */
-.holdnote, .stopnote{
-  margin:10px 0 0; padding:7px 0 7px 9px; border-left:2px solid var(--line);
-  font-size:11px; line-height:1.5; color:var(--dim-2);
-}
-
-.qrow{
-  display:flex; align-items:center; gap:10px; padding:10px 11px;
-  background:var(--surface); border:1px solid var(--line-soft);
-  border-radius:var(--r-m); margin-bottom:7px;
-}
-.qrow .grip{ color:var(--dim-2); flex:none; display:grid; place-items:center; }
-/* WP D20: the grip is the reorder handle. touch-action:none keeps a touch
-   drag from scrolling the page; the row being dragged is lifted. */
-.qrow .grip-live{ cursor:grab; touch-action:none; padding:6px 4px; margin:-6px -4px; border-radius:var(--r-s, 6px); }
-@media (hover:hover) and (pointer:fine){
-  .qrow .grip-live:hover{ color:var(--text, inherit); }
-}
-.qrow .grip-live:focus-visible{ outline:2px solid var(--accent, currentColor); outline-offset:1px; }
-.qrow.dragging{ opacity:.85; box-shadow:0 4px 14px rgba(0,0,0,.35); position:relative; z-index:1; }
-.qrow.dragging .grip-live{ cursor:grabbing; }
-.qrow .nm{ font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.qrow .pos{ font-family:var(--mono); font-size:11px; color:var(--dim-2); flex:none; }
-
-/* WP UPD-6: "Updates available (N)" — rows like `.qrow` (name, size,
-   "Update now"), "Update all" and the schedule note above them. The note
-   is left-aligned (`.hint` centres). The size never wraps; the name takes
-   what is left and ellipsizes, so a 360 px row stays one line. */
-.dl-updates[hidden]{ display:none; }
-.dl-updates .dl-updates-note{ text-align:left; margin:0 0 9px; }
-.dl-updates-acts{ display:flex; flex-wrap:wrap; gap:8px; margin:0 0 9px; }
-.dl-updates-acts:empty{ display:none; }
-.urow{
-  display:flex; align-items:center; gap:10px; padding:8px 11px;
-  background:var(--surface); border:1px solid var(--line-soft);
-  border-radius:var(--r-m); margin-bottom:7px;
-}
-.urow .nm{ font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.urow .usize{ font-family:var(--mono); font-size:11px; color:var(--dim-2); flex:none; white-space:nowrap; }
-.urow .btn{ flex:none; }
-/* WP CACHE-COMPLETE-1c: the "Incomplete" row of a game short only of
-   damaged chunks says why it has no "Complete now" button. */
 /* WP CACHE-COMPLETE-1c: the detail sheet's Verify explanation, under the
    button (left-aligned like the facts; `.hint` centres). */
 .detail-verify-hint{ text-align:left; margin:6px 0 0; }
-.urow .unote{ flex:none; max-width:55%; font-size:11px; color:var(--dim-2); text-align:right; }
-
-.hrow{ border:1px solid var(--line-soft); background:var(--surface); border-radius:var(--r-m); margin-bottom:7px; overflow:hidden; }
-.hrow > button{
-  width:100%; display:flex; align-items:center; gap:10px; padding:11px 12px; text-align:left;
-}
-/* New affordance (WP 4e.4): the toggle button had no hover cue at all —
-   indistinguishable from static text until clicked. No equal-specificity
-   state sibling to collide with here (unlike `.iconbtn.on`/`.chip[aria-
-   pressed]`/etc. below), so placement relative to it is not load-bearing —
-   kept in place, right after the base rule, for the same "in-place, not a
-   trailing block" convention every hover rule in this file now follows. */
-@media (hover:hover) and (pointer:fine){
-  .hrow > button:hover{ background:var(--raised); }
-}
-/* `.hrow` clips its only child (`overflow:hidden` above) with no inset, and
-   that child IS the toggle button, flush edge to edge (`width:100%`, no
-   margin) — the first of three overflow-clip instances the WP 4e.4
-   pointer/keyboard audit found (see `.segs button`/`.depotwrap.sh .depot`
-   for the other two, same fix, same reasoning): the default OUTSIDE
-   `:focus-visible` ring is invisible here, clipped by the very row it
-   belongs to. */
-.hrow > button:focus-visible{ outline-offset:-2px; }
-.hrow-info{ flex:1; min-width:0; }
-.hrow .nm{ display:block; font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.hrow .when{ font-size:10.5px; color:var(--dim-2); font-family:var(--mono); margin-top:2px; }
-.hrow .arrow{ margin-left:auto; color:var(--dim-2); transition:transform .18s; flex:none; }
-.hrow.open .arrow{ transform:rotate(90deg); }
-.log{
-  display:none; padding:0 12px 12px;
-  font-family:var(--mono); font-size:10.5px; line-height:1.65; color:var(--dim);
-  white-space:pre-wrap; word-break:break-word;
-}
-.hrow.open .log{ display:block; }
-.log p{ margin:0 0 6px; }
-.log .loading, .log .errmsg, .log .emptymsg{ color:var(--dim-2); font-style:italic; }
-.log .truncnote{ color:var(--dim-2); }
-/* WP WEB-FIX-4: the hint block at the top of a known failure's row
-   ("Steam login missing", "cannot find the cache"; views/downloads.js). Prose in the UI font, not the
-   log's mono/pre-wrap; the command wraps inside its own box (phone width,
-   WEB-FIX-3 rules) instead of pushing the row wider. */
-.log .failhint{
-  font-family:var(--ui); font-size:12.5px; line-height:1.5; color:var(--text);
-  white-space:normal; min-width:0;
-  margin:0 0 10px; padding:9px 0 9px 10px; border-left:2px solid var(--danger);
-}
-.log .failhint p{ margin:0 0 7px; }
-.log .failhint-title{ font-weight:700; }
-.log .failhint .cmd{
-  display:block; max-width:100%; min-width:0; box-sizing:border-box;
-  margin:0 0 7px; padding:7px 9px; border-radius:var(--r-s);
-  background:var(--raised); font-family:var(--mono); font-size:11.5px;
-  white-space:pre-wrap; overflow-wrap:anywhere; user-select:all;
-}
-.log .failhint .jobacts{ justify-content:flex-start; margin-top:4px; }
-.log .rawlog > summary{ cursor:pointer; font-family:var(--ui); font-size:12px; color:var(--dim); white-space:normal; margin-bottom:6px; }
-
 .tx-cancelled{ color:var(--dim-2); }
 
 /* ============================================================
@@ -1606,9 +1502,8 @@ body.onboarding .nav{ display:none; }
    The range selector reuses `.segs` with the text-segment sizing Settings
    gives `.field > .segs` (WEB-FIX-3): never wraps a label, scrolls sideways
    on a screen too narrow for all four (the Clients page uses the kit's
-   `.seg` instead, WP CLIENTS-4). The statistics header is a
-   two-column tile grid on a phone, four columns from BP-M (below), and the
-   throughput graph is inline SVG drawn by views/downloads.js. */
+   `.seg` instead, WP CLIENTS-4). The Downloads statistics moved to the UI
+   kit's hero (css/kit.css, WP DOWNLOADS-2). */
 .segs.rangesegs{ display:flex; width:max-content; max-width:100%; overflow-x:auto; scrollbar-width:none; margin:10px 0 4px; }
 .segs.rangesegs button{
   width:auto; height:auto; min-height:32px; flex:none;
@@ -1632,62 +1527,10 @@ body.onboarding .nav{ display:none; }
 .cl-rename-dialog .field{ margin-bottom:6px; }
 .dialog .errline{ color:var(--danger); }
 .dialog .row{ flex-wrap:wrap; }
-.dl-history-acts{ justify-content:flex-start; margin:8px 0; }
 .hist-scope{ border:0; margin:0 0 10px; padding:0; min-width:0; }
 .hist-scope legend{ padding:0; margin:0 0 6px; font-size:12px; color:var(--dim); }
 .hist-scope .srow{ cursor:pointer; }
 .srow input[type="radio"]{ width:17px; height:17px; flex:none; accent-color:var(--accent); }
-.dl-stats{ margin:10px 0 2px; }
-.dl-stats .hint{ text-align:left; }
-.statgrid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin:8px 0 0; }
-.statgrid[hidden]{ display:none; }
-.stat{ min-width:0; padding:9px 11px; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line-soft); }
-.stat dt{ font-size:11px; font-weight:600; letter-spacing:.3px; color:var(--dim-2); }
-.stat dd{ margin:3px 0 0; font-family:var(--mono); font-size:15px; color:var(--text); overflow-wrap:anywhere; }
-.stat .stat-detail{ display:block; margin-top:2px; font-family:var(--ui); font-size:11px; color:var(--dim-2); }
-.tgraph{ margin:10px 0 0; }
-.tgraph[hidden]{ display:none; }
-.tgraph svg{ display:block; width:100%; height:72px; }
-.tgraph .tg-line{ fill:none; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; }
-.tgraph .tg-area{ fill:var(--accent-glow); stroke:none; }
-.tgraph .tg-axis{ display:flex; justify-content:space-between; gap:8px; margin-top:3px; font-size:10.5px; color:var(--dim-2); }
-.jobspeed{ margin:6px 0 0; font-family:var(--mono); font-size:12px; color:var(--dim); }
-
-/* DOWNLOADS-1 hero stats card: one surface card holds range, note, tiles and
-   graph. "Current speed" leads full width and large; the other tiles are
-   flat (no own border) in a four-column row, two columns on narrow screens. */
-.dl-stats{ background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-l); padding:16px 18px; margin:16px 0 10px; display:grid; gap:12px; min-width:0; }
-.dl-stats .statgrid{ grid-template-columns:repeat(2, minmax(0, 1fr)); margin:0; gap:10px 16px; }
-.dl-stats .stat{ background:none; border:0; border-radius:0; padding:0; }
-.dl-stats .stat[data-stat="current"]{ grid-column:1 / -1; padding:0 0 10px; border-bottom:1px solid var(--line-soft); }
-.dl-stats .stat[data-stat="current"] dd{ font-size:30px; letter-spacing:-1px; }
-.dl-stats .tgraph{ margin:0; }
-@media (min-width:620px){
-  .dl-stats .statgrid{ grid-template-columns:repeat(4, minmax(0, 1fr)); }
-}
-/* History idle vs busy: nothing running leaves room, so History gets roomy
-   rows; while work runs it turns compact so Active and Queue lead. */
-[data-state="idle"] .dl-col-side .hrow > button{ padding:14px 14px; }
-[data-state="idle"] .dl-col-side .hrow .nm{ font-size:14px; }
-[data-state="busy"] .dl-col-side .hrow{ margin-bottom:4px; }
-[data-state="busy"] .dl-col-side .hrow > button{ padding:7px 12px; }
-[data-state="busy"] .dl-col-side .hrow .when{ margin-top:0; }
-
-/* DOWNLOADS-1: two columns (Active + Queue | History), one column below 1000px */
-/* WP CLIENT-ROW-1: one quiet line above "Active", only while a machine loads. */
-.dl-client-row{ display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; margin:0 0 12px; padding:9px 12px; background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m); font-size:13px; }
-.dl-client-row[hidden]{ display:none; }
-.dl-client-row span{ color:var(--dim-2); }
-.dl-cols{ display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
-.dl-col-main, .dl-col-side{ min-width:0; }
-.attn-toggle{ display:flex; width:fit-content; margin:0 0 9px auto; }
-@media (min-width:1000px){
-  .dl-cols{ grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); }
-}
-@media (prefers-reduced-motion:reduce){
-  .dl-cols *{ transition:none; animation:none; }
-}
-
 /* WP PAIR-1: "Add a device" drawer (components/add-device-sheet.js). Its
    layout moved to the UI kit in WP ADD-DEVICE-2 (css/kit.css, "Add a device
    drawer"); only the copy fallback's textarea stays here, because it is
@@ -1954,6 +1797,13 @@ body.onboarding .nav{ display:none; }
    requiring horizontal scroll. */
 @media (min-width:720px){
   :root{ --w-text:760px; }
+  /* WP DOWNLOADS-2: deliberately departs from LAYOUT-1's "narrow
+     breakpoints unchanged" for Downloads only. Its page is width-aware
+     (kit.css @container rules: two columns from 760px, three from 1100px),
+     so the 760px reading column would always force one column below BP-L.
+     Downloads takes the wide page width here; every other view keeps
+     --w-text. */
+  .view-root:has(> .view-downloads){ max-width:var(--w-page); }
   /* WP WEB-FIX-UPD-VIS: the library toolbar row (see `.lib-bar` above).
      The chips no longer wrap here (they did from WP 4e.1 to WP UPD-2): a
      second chip line would leave the search field's centre line. */
@@ -1984,10 +1834,6 @@ body.onboarding .nav{ display:none; }
   .about-table thead th{ font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2); }
   .about-table td[data-label]::before{ content:none; }
   .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
-
-  /* WP D15c + TILE-INTERNET: the eight Downloads statistics tiles, two
-     rows of four (phones keep two columns, four rows). */
-  .statgrid{ grid-template-columns:repeat(4, minmax(0, 1fr)); }
 
   /* WP LIB-LIST-1: the list columns on ONE line (top-level list rules
      explain the model). The name takes all the slack; a group row's "+N

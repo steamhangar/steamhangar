@@ -141,7 +141,8 @@ async function until(pred, label, timeoutMs = 2000) {
 }
 const RELAY = "/v1/steam/owned-games";
 const historyNames = (s) => s.querySelectorAll(".hrow .nm").map((n) => n.textContent);
-const row = (s, jobId) => s.querySelector(`.hrow[data-jid="${jobId}"]`);
+// WP DOWNLOADS-2: one History item = the row button (.hrow) + its panel (.hpanel).
+const row = (s, jobId) => s.querySelector(`.hitem[data-jid="${jobId}"]`);
 async function pollTicks(n) {
   for (let i = 0; i < n; i++) {
     const before = count("/v1/games");
@@ -180,7 +181,7 @@ async function expand(s, jobId) {
   await until(() => row(s, jobId) !== null, `row for job ${jobId}`);
   const r = row(s, jobId);
   if (!r.classList.contains("open")) r.querySelector("button").dispatchEvent(fakeClickEvent());
-  await until(() => !/Loading log/.test(row(s, jobId).querySelector(".log").textContent) && row(s, jobId).querySelector(".log").children.length > 0, `log for job ${jobId}`);
+  await until(() => !/Loading log/.test(row(s, jobId).querySelector(".hpanel").textContent) && row(s, jobId).querySelector(".hpanel").children.length > 0, `log for job ${jobId}`);
   return row(s, jobId);
 }
 
@@ -236,7 +237,7 @@ test("not_logged_in: login block with the command at the top, raw output in a CL
     store.start();
     const s = renderDownloads();
     const r = await expand(s, 2);
-    const log = r.querySelector(".log");
+    const log = r.querySelector(".hpanel");
     assert.equal(log.children[0].className, "failhint", "the block comes FIRST");
     const hint = r.querySelector(".failhint");
     assert.equal(hint.dataset.hint, "not_logged_in");
@@ -326,13 +327,13 @@ test("another failure reason (DOWNLOADS-1): generic failure line and Retry, then
     const s = renderDownloads();
     await until(() => row(s, 3) !== null, "row for job 3");
     row(s, 3).querySelector("button").dispatchEvent(fakeClickEvent());
-    await until(() => /disk full/.test(row(s, 3).querySelector(".log").textContent), "exit_code output");
+    await until(() => /disk full/.test(row(s, 3).querySelector(".hpanel").textContent), "exit_code output");
     const r = row(s, 3);
     assert.equal(r.querySelector(".failhint").dataset.hint, "generic", "generic failure block for a plain exit_code failure");
     assert.match(r.querySelector(".failhint").textContent, /The download failed/);
     assert.equal(r.querySelector("details") === null, true, "no disclosure");
     assert.equal(r.querySelectorAll("button").length, 2, "the row toggle and Retry");
-    assert.match(r.querySelector(".log").textContent, /disk full/);
+    assert.match(r.querySelector(".hpanel").textContent, /disk full/);
   } finally {
     store.stop();
   }
@@ -346,7 +347,7 @@ test("public IP (exit_code + SteamPrefill's 'is resolving to a public IP'): cach
     const hint = r.querySelector(".failhint");
     assert.equal(hint === null, false, "a hint block");
     assert.equal(hint.dataset.hint, "public_ip");
-    assert.equal(r.querySelector(".log").children[0].className, "failhint", "the block comes FIRST");
+    assert.equal(r.querySelector(".hpanel").children[0].className, "failhint", "the block comes FIRST");
     const text = hint.textContent;
     assert.match(text, /cannot find the cache/);
     assert.match(text, /lancache\.steamcontent\.com resolves to a public address/);

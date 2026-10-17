@@ -216,9 +216,11 @@ test("the queue renders in the server's order and the old FIFO-only hint is gone
     await serve([3, 1, 2]);
     const section = renderDownloads();
     assert.deepEqual(rowIds(section), [3, 1, 2]);
+    // WP DOWNLOADS-2: no "#N" column (kit row: grip, name, size, Remove);
+    // the grip's accessible name carries the position.
     assert.deepEqual(
-      section.querySelectorAll(".qrow .pos").map((p) => p.textContent),
-      ["#1", "#2", "#3"],
+      section.querySelectorAll(".qrow .grip").map((g) => /position (\d+) of 3/.exec(g.getAttribute("aria-label"))[1]),
+      ["1", "2", "3"],
     );
     assert.equal(section.textContent.includes("not built yet"), false);
   } finally {

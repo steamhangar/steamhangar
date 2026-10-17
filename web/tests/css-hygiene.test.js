@@ -656,15 +656,28 @@ test("el.hidden ||=/??= and el.toggleAttribute?.(\"hidden\", ...) (optional chai
 // change gives it a different class; this test reads the real source and
 // asserts the mapping still holds, so drift fails loudly here instead of
 // silently under-covering the lint.
-test("sectionHeadingFactory's hardcoded ['sec'] mapping still matches the real sectionHeading() implementation", () => {
-  const downloadsJs = readFileSync(path.join(jsDir, "views", "downloads.js"), "utf8");
-  const fnMatch = /function sectionHeading\([^)]*\)\s*\{([\s\S]*?)\n\}/.exec(downloadsJs);
-  assert.ok(fnMatch, "sectionHeading() not found in downloads.js — did it move or get renamed?");
-  assert.match(
-    fnMatch[1],
-    /\.className\s*=\s*["']sec["']/,
-    "sectionHeading() no longer assigns className \"sec\" — update the hardcoded mapping in findHiddenToggledClasses above",
-  );
+test("sectionHeadingFactory's hardcoded ['sec'] mapping still matches every real sectionHeading() implementation", () => {
+  // WP DOWNLOADS-2 moved Downloads onto the UI kit and dropped its
+  // sectionHeading() helper. The pin now covers any file in web/js/: every
+  // definition must still assign "sec", and with no definition left there
+  // must be no caller either (a caller of a helper defined elsewhere would
+  // fall back to the hardcoded mapping unchecked).
+  const defs = [];
+  const callers = [];
+  for (const file of jsFiles) {
+    const text = readFileSync(file, "utf8");
+    const fnMatch = /function sectionHeading\([^)]*\)\s*\{([\s\S]*?)\n\}/.exec(text);
+    if (fnMatch) defs.push({ file, body: fnMatch[1] });
+    if (/\w+\s*=\s*sectionHeading\(/.test(text)) callers.push(file);
+  }
+  for (const def of defs) {
+    assert.match(
+      def.body,
+      /\.className\s*=\s*["']sec["']/,
+      `sectionHeading() in ${def.file} no longer assigns className "sec" — update the hardcoded mapping in findHiddenToggledClasses above`,
+    );
+  }
+  if (!defs.length) assert.deepEqual(callers, [], "sectionHeading() is called but defined nowhere in web/js/");
 });
 
 // ---------------------------------------------------------------------

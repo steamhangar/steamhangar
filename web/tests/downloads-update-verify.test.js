@@ -77,11 +77,11 @@ async function until(pred, label, timeoutMs = 2000) {
     await tick(5);
   }
 }
-const card = (s) => s.querySelector('.jobcard[data-jid="1"]');
-/** The visible word: the badge's second child (the first is the icon,
- * whose sr-only label would duplicate the word in textContent). */
-const word = (s) => card(s)?.querySelector(".badge").children[1].textContent ?? null;
-const iconClass = (s) => card(s)?.querySelector(".badge .sic").className ?? "";
+const card = (s) => s.querySelector('.job[data-jid="1"]');
+/** The visible word: the kit pill's text (WP DOWNLOADS-2; createPill drops
+ * the icon's sr-only fallback, so textContent is the word alone). */
+const word = (s) => card(s)?.querySelector('[data-role="job-pill"]').textContent ?? null;
+const iconClass = (s) => card(s)?.querySelector('[data-role="job-pill"] .sic').className ?? "";
 
 test("MUTATION PIN: Downloading before games -> Updating when games land -> Verifying when needs_force flips -> no rebuild on an unchanged poll", async () => {
   let release;
@@ -98,7 +98,7 @@ test("MUTATION PIN: Downloading before games -> Updating when games land -> Veri
     await until(() => word(s) === "Updating", "games subscription rebuilt the card");
     assert.match(iconClass(s), /\bk-updating\b/);
     assert.equal(card(s).dataset.dk, "updating");
-    assert.match(card(s).querySelector(".badge").className, /\btx-updating\b/);
+    assert.equal(card(s).querySelector('[data-role="job-pill"]').className, "pill run", "the run tone");
 
     server.games = [{ ...server.games[0], needs_force: true }];
     const before = count("/v1/games");
