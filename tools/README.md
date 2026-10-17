@@ -14,7 +14,7 @@ checked-in goldens in `web/tests/goldens/<page>-<width>.png`:
 | `web-serve.mjs` | serves `web/` like vault-api does (index.html for `/` and the router's views, files as files, 404 for everything else incl. `/v1/*`). Reads `VIEWS` from `web/js/router.js`, so an unshipped route is a 404 here too. |
 | `web-shot.mjs` | drives a Chromium binary over the DevTools protocol (Node's built-in WebSocket + fetch, no playwright package) and writes one full-page PNG per page and width. |
 | `png-diff.mjs` | compares two PNG directories pixel by pixel (own PNG codec on `node:zlib`), writes a diff PNG per failing pair, prints a table, exit 1 on failure. |
-| `web-shot-fonts.conf` | self-contained fontconfig: every family in `web/css/theme.css`'s font stacks maps to Liberation Sans / Mono with fixed hinting; it deliberately does not include the host's fontconfig. |
+| `web-shot-fonts.conf` | self-contained fontconfig: every family in `web/css/theme.css`'s font stacks maps to Liberation Sans / Mono, no other installed font is admitted, glyphs render unhinted with grey antialiasing; it deliberately does not include the host's fontconfig. |
 
 ### What makes the pixels reproducible
 
@@ -38,23 +38,80 @@ checked-in goldens in `web/tests/goldens/<page>-<width>.png`:
 - Same fonts everywhere: CI installs `fonts-liberation`; the tool points
   Chromium at `tools/web-shot-fonts.conf` (`FONTCONFIG_FILE`), so the
   host's own fontconfig (the devbox maps `sans-serif` to Liberation Mono)
-  cannot leak in. After editing the conf run
-  `FONTCONFIG_FILE=tools/web-shot-fonts.conf fc-match 'sans\-serif'` and
-  expect Liberation Sans -- fontconfig silently ignores a malformed file
+  cannot leak in. The conf admits only Liberation Sans, Serif and Mono
+  (`<selectfont>`): a runner has DejaVu, Noto and more, the devbox only
+  Liberation, and Chromium falls back per glyph -- CI drew the kit grip
+  (U+22EE) from a runner font, the devbox drew a missing-glyph box. For
+  the same reason Liberation Sans Narrow (in Debian 12's fonts-liberation
+  1.07, not on the runner) is rejected and the condensed stack maps to
+  Liberation Sans. Hinting is off (`hintnone`): it depends on the font
+  files' glyph programs and the FreeType build, which differ between the
+  devbox (Debian 12) and CI (Ubuntu 24.04). After editing the conf run
+  `FONTCONFIG_FILE=$PWD/tools/web-shot-fonts.conf fc-match 'sans\-serif'`
+  (absolute path: fontconfig looks a relative one up under /etc/fonts) and
+  expect Liberation Sans, and `fc-list : family` must print exactly the
+  three families -- fontconfig silently ignores a malformed file
   (XML forbids `--` inside a comment), and `fc-match` needs the hyphen
   escaped (it reads `a-b` as family `a`, size `b`; Chromium passes the CSS
   names verbatim).
+- No `--font-render-hinting`: build 1243's `chrome` binary does not have
+  the switch (only `chrome-headless-shell` does); with it, 0 pixels changed.
 
 Measured on the devbox (2026-10-17): two consecutive runs of the full set
 differ by 0 pixels.
+
+### Comparing a workstation's shots with CI's goldens (`--mode aa-tolerant`)
+
+Same Chromium build and same fonts are still not the same pixels on another
+OS: text rasterises with slightly different glyph-edge coverage. Measured
+2026-10-17 (devbox Debian 12 vs CI goldens, the conf before GOLDENS-LOCAL-1):
+all 15 pages failed strict with 0.30-0.84 % differing pixels, every one on
+a glyph edge, layout identical. `png-diff.mjs --mode aa-tolerant` excuses a
+differing pixel when it is rasterisation noise (details in the file
+header): its value is a blend of the other image's 3x3 neighbourhood in both
+directions, or both neighbourhoods are edges with the same local "ink"
+(mean within 24 per channel). Everything else still counts against
+`--threshold`. Excused pixels are yellow in the diff PNG, counted ones red.
+
+Measured with it (same day, against the then-current goldens):
+
+| local shots | strict | aa-tolerant |
+|---|---|---|
+| old conf (hinted, Narrow, fallback fonts) | 15 fail, 0.30-0.84 % | 15 pass, 0.02-0.11 % (rest: brand in Narrow, grip glyph) |
+| this conf (unhinted, Liberation only) | 15 fail, 0.74-2.41 % (goldens still hinted) | 15 pass, 0.001-0.06 % (rest: grip glyph) |
+| kit tiles shifted 4 px (downloads) | fail | fail, 0.47 / 0.60 % |
+
+Against an identical local baseline the tolerant mode keeps most of what
+strict sees: a 4-px tile shift 61-66 % of strict's pixels, a tile
+background change 90-92 %, a hidden element 100 %. Its blind spots:
+
+- a whole element moved by exactly 1 px (indistinguishable from an edge
+  drawn with other coverage);
+- a subtle colour change of thin text, e.g. `--dim` -> `--dim-2`: ~99 % of
+  its pixels are excused, because every pixel of a 1-2 px stem is an edge
+  and the local ink barely moves (pinned by a test in
+  `web/tests/png-diff.test.js`);
+- a mid-tone 1-px border that changed colour or moved by 1 px;
+- like strict, any change smaller than `--threshold` (one changed letter,
+  a hidden 16-px wordmark at 1000 px width).
+
+Only local runs against CI goldens use it. CI keeps `strict` (CI shots vs
+CI goldens are bit-identical) and is the authority: a local pass in this
+mode is a hint, not a verdict. The operator's local check:
+
+```
+node tools/png-diff.mjs --expected web/tests/goldens --actual <out> --diff <out>-diff --missing warn --mode aa-tolerant
+```
 
 ### Run it locally
 
 ```
 node tools/web-serve.mjs --port 8787 &
 node tools/web-shot.mjs --base http://127.0.0.1:8787 --out /tmp/web-shots
-node tools/png-diff.mjs --expected web/tests/goldens --actual /tmp/web-shots --diff /tmp/web-shots-diff
+node tools/png-diff.mjs --expected web/tests/goldens --actual /tmp/web-shots --diff /tmp/web-shots-diff --mode aa-tolerant
 ```
+
+(`--mode aa-tolerant` because the goldens come from CI, see below.)
 
 `web-shot.mjs` flags (all optional): `--base`, `--out`, `--widths 1400,1000,400`,
 `--pages library,clients,downloads,settings,kit`, `--chrome`, `--clock`,
@@ -67,6 +124,7 @@ page exists only once UI-KIT-1 has landed); any other failure exits 1.
 `png-diff.mjs` flags: `--threshold 0.002` (fraction of differing pixels a
 pair may have), `--tolerance 8` (per-channel delta below which a pixel is
 "the same"), `--missing fail|warn` (a screenshot without a golden),
+`--mode strict|aa-tolerant` (above; default `strict`),
 `--github` (workflow-command annotations + step summary); `warn` covers
 wholly new pages only, a missing width of a known page is `partial` and
 fails. A golden without

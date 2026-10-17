@@ -218,11 +218,151 @@ test("compareDirs: an empty actual directory is an error, not a pass", () => {
   assert.throws(() => compareDirs(join(root, "e"), join(root, "a"), join(root, "d")), /no PNG files/);
 });
 
+// --- WP GOLDENS-LOCAL-1: --mode aa-tolerant -------------------------------
+
+const BG = [12, 16, 22, 255];
+const INK = [230, 236, 240, 255];
+
+/**
+ * A "glyph": vertical stems drawn with grey coverage like a rasteriser does.
+ * Each stem covers [left, right) in fractional pixels over rows y0..y1, so
+ * a fractional `left` gives antialiased edge pixels.
+ */
+function glyphs(width, height, stems, { y0 = 4, y1 = height - 4, ink = INK } = {}) {
+  const image = solid(width, height, BG);
+  for (const [left, right] of stems) {
+    for (let x = Math.floor(left); x < Math.ceil(right); x += 1) {
+      const coverage = Math.max(0, Math.min(x + 1, right) - Math.max(x, left));
+      const px = BG.map((b, c) => (c === 3 ? 255 : Math.round(b + (ink[c] - b) * coverage)));
+      for (let y = y0; y < y1; y += 1) image.data.set(px, (y * width + x) * 4);
+    }
+  }
+  return image;
+}
+
+function box(image, x0, y0, w, h, rgba) {
+  const pixels = [];
+  for (let y = y0; y < y0 + h; y += 1) for (let x = x0; x < x0 + w; x += 1) pixels.push([x, y]);
+  return withPixels(image, pixels, rgba);
+}
+
+// Text-like strokes: a 1.4 px stem, a 2.2 px stem and a wide bar.
+const TEXT = [[5.3, 6.7], [10.1, 12.3], [16.6, 21.2], [26.5, 27.6]];
+const AA = { mode: "aa-tolerant", threshold: 0 };
+
+test("aa-tolerant: other glyph-edge coverage is excused, strict counts it", () => {
+  const golden = glyphs(40, 30, TEXT);
+  // Same strokes rasterised a third of a pixel to the right: every edge
+  // pixel gets another grey value, the layout is identical.
+  const local = glyphs(40, 30, TEXT.map(([l, r]) => [l + 0.35, r + 0.3]));
+  const strict = compareImages(golden, local, { threshold: 0 });
+  assert.ok(strict.differing > 50, `strict sees the edges (${strict.differing})`);
+  assert.equal(strict.pass, false);
+  const tolerant = compareImages(golden, local, AA);
+  assert.equal(tolerant.differing, 0);
+  assert.equal(tolerant.excused, strict.differing);
+  assert.equal(tolerant.pass, true);
+  // Excused pixels are yellow in the diff image, so they stay visible.
+  const firstExcused = tolerant.diff.data.findIndex((v, i) => i % 4 === 1 && v === 210);
+  assert.deepEqual([...tolerant.diff.data.subarray(firstExcused - 1, firstExcused + 3)], [255, 210, 0, 255]);
+});
+
+test("aa-tolerant: a whole-pixel glyph edge shift of 1 px passes", () => {
+  const golden = glyphs(40, 30, TEXT);
+  const shifted = glyphs(40, 30, TEXT.map(([l, r]) => [l + 1, r + 1]));
+  assert.equal(compareImages(golden, shifted, { threshold: 0 }).pass, false);
+  const result = compareImages(golden, shifted, AA);
+  assert.equal(result.differing, 0);
+  assert.equal(result.pass, true);
+});
+
+test("aa-tolerant: a box moved by 4 px fails", () => {
+  const page = solid(60, 40, BG);
+  const golden = box(page, 10, 10, 20, 16, [40, 60, 80, 255]);
+  const moved = box(page, 14, 10, 20, 16, [40, 60, 80, 255]);
+  const strict = compareImages(golden, moved);
+  assert.equal(strict.differing, 2 * 4 * 16); // the two 4-px strips
+  const result = compareImages(golden, moved, { mode: "aa-tolerant" });
+  assert.ok(result.differing >= 0.9 * strict.differing, `${result.differing} of ${strict.differing} still count`);
+  assert.equal(result.pass, false);
+  // The same box moved by 1 px is indistinguishable from an edge drawn with
+  // other coverage -- the documented blind spot of this mode.
+  const nudged = box(page, 11, 10, 20, 16, [40, 60, 80, 255]);
+  assert.equal(compareImages(golden, nudged, AA).pass, true);
+});
+
+test("aa-tolerant: a colour change fails across the whole area", () => {
+  const page = solid(60, 40, BG);
+  const golden = box(page, 10, 10, 20, 16, [40, 60, 80, 255]);
+  const recoloured = box(page, 10, 10, 20, 16, [40, 90, 80, 255]);
+  const result = compareImages(golden, recoloured, { mode: "aa-tolerant" });
+  // Only the outline ring touches the background (whose range then spans
+  // both colours), every inner pixel counts: 18 x 14.
+  assert.equal(result.differing, 18 * 14);
+  assert.equal(result.pass, false);
+  // Subtle but real: a shift of 12 per channel on a flat area still counts.
+  const subtle = box(page, 10, 10, 20, 16, [52, 72, 92, 255]);
+  assert.equal(compareImages(golden, subtle, { mode: "aa-tolerant" }).pass, false);
+});
+
+test("aa-tolerant: a missing element fails, and so does missing text", () => {
+  const page = solid(60, 40, BG);
+  const golden = box(page, 10, 10, 20, 16, [40, 60, 80, 255]);
+  assert.equal(compareImages(golden, page, { mode: "aa-tolerant" }).pass, false);
+  const text = glyphs(40, 30, TEXT);
+  const blank = solid(40, 30, BG);
+  const result = compareImages(text, blank, AA);
+  assert.ok(result.differing > 0);
+  assert.equal(result.pass, false);
+  // A missing stem next to a remaining one is still caught.
+  const oneLess = glyphs(40, 30, TEXT.slice(0, -1));
+  assert.equal(compareImages(text, oneLess, AA).pass, false);
+});
+
+test("aa-tolerant blind spot (documented): a subtle colour change of thin text is excused", () => {
+  // --dim #8AA1AD -> --dim-2 #7A91A0 on 1-2 px stems: every stem pixel is
+  // an edge pixel and the local ink moves by less than INK_TOLERANCE, so
+  // the mode cannot tell it from rasterisation noise. Strict sees it. If
+  // this test starts failing, update the blind-spot list in png-diff.mjs's
+  // header and tools/README.md.
+  const thin = [[5.3, 6.7], [10.1, 11.4], [26.5, 27.6]];
+  const dim = glyphs(40, 30, thin, { ink: [0x8a, 0xa1, 0xad, 255] });
+  const dim2 = glyphs(40, 30, thin, { ink: [0x7a, 0x91, 0xa0, 255] });
+  const strict = compareImages(dim, dim2, { threshold: 0 });
+  assert.ok(strict.differing > 0);
+  const tolerant = compareImages(dim, dim2, AA);
+  assert.equal(tolerant.differing, 0);
+  assert.equal(tolerant.pass, true);
+});
+
+test("aa-tolerant: sizes still have to match; unknown modes are rejected", () => {
+  const result = compareImages(solid(4, 4, BG), solid(4, 6, BG), { mode: "aa-tolerant" });
+  assert.equal(result.pass, false);
+  assert.throws(() => compareImages(solid(1, 1, BG), solid(1, 1, BG), { mode: "fuzzy" }), /unknown comparison mode/);
+});
+
+test("compareDirs: mode is passed through and the excused count is reported", () => {
+  const root = mkdtempSync(join(tmpdir(), "png-diff-test-"));
+  const expected = join(root, "expected");
+  const actual = join(root, "actual");
+  mkdirSync(expected);
+  mkdirSync(actual);
+  writeFileSync(join(expected, "kit-400.png"), encodePng(glyphs(40, 30, TEXT)));
+  writeFileSync(join(actual, "kit-400.png"), encodePng(glyphs(40, 30, TEXT.map(([l, r]) => [l + 0.35, r + 0.3]))));
+  assert.equal(compareDirs(expected, actual, join(root, "diff"), { threshold: 0 }).ok, false);
+  const tolerant = compareDirs(expected, actual, join(root, "diff2"), { threshold: 0, mode: "aa-tolerant" });
+  assert.equal(tolerant.ok, true);
+  assert.match(tolerant.rows[0].detail, /0\/1200 px differ .*, \d+ edge px ignored$/);
+});
+
 test("parseArgs: defaults and validation", () => {
   const opts = parseArgs(["--expected", "e", "--actual", "a"]);
   assert.equal(opts.threshold, 0.002);
   assert.equal(opts.tolerance, 8);
   assert.equal(opts.missing, "fail");
+  assert.equal(opts.mode, "strict");
+  assert.equal(parseArgs(["--expected", "e", "--actual", "a", "--mode", "aa-tolerant"]).mode, "aa-tolerant");
+  assert.throws(() => parseArgs(["--expected", "e", "--actual", "a", "--mode", "fuzzy"]), /--mode/);
   assert.equal(opts.github, false);
   assert.throws(() => parseArgs(["--actual", "a"]), /--expected/);
   assert.throws(() => parseArgs(["--expected", "e", "--actual", "a", "--threshold", "2"]), /--threshold/);

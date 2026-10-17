@@ -2,6 +2,7 @@
 // golden is reproducible, checked without launching Chromium.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -102,5 +103,48 @@ test("fontconfig file is well-formed XML and aliases every family of the stylesh
   for (const family of aliased) {
     const target = new RegExp(`<family>${family.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}</family><prefer><family>Liberation `);
     assert.match(FONTS_CONF, target, `${family} must map to a Liberation font`);
+  }
+});
+
+test("fontconfig file admits only Liberation Sans/Serif/Mono, every alias targets one of them, unhinted", () => {
+  // WP GOLDENS-LOCAL-1: per-glyph fallback to whatever else a host has
+  // installed (CI runner: DejaVu, Noto, ...; devbox: nothing) and Liberation
+  // Sans Narrow (Debian's fonts-liberation 1.07 only) made devbox and CI
+  // pixels differ beyond rasterisation.
+  const ADMITTED = ["Liberation Sans", "Liberation Serif", "Liberation Mono"];
+  const select = /<selectfont>([\s\S]*?)<\/selectfont>/.exec(FONTS_CONF)?.[1] ?? "";
+  const reject = /<rejectfont>([\s\S]*?)<\/rejectfont>/.exec(select)?.[1] ?? "";
+  // Patterns, not a `*` glob: a glob also matches the font directories and
+  // would reject every font (measured: fc-list printed nothing).
+  assert.match(reject, /<patelt name="scalable"><bool>true<\/bool><\/patelt>/);
+  assert.match(reject, /<patelt name="scalable"><bool>false<\/bool><\/patelt>/);
+  assert.doesNotMatch(reject, /<glob>/);
+  const accept = /<acceptfont>([\s\S]*?)<\/acceptfont>/.exec(select)?.[1] ?? "";
+  const accepted = [...accept.matchAll(/<patelt name="family"><string>([^<]+)<\/string>/g)].map((m) => m[1]);
+  assert.deepEqual(accepted.sort(), [...ADMITTED].sort());
+  for (const m of FONTS_CONF.matchAll(/<prefer><family>([^<]+)<\/family><\/prefer>/g)) {
+    assert.ok(ADMITTED.includes(m[1]), `alias target ${m[1]} is not admitted`);
+  }
+  assert.match(FONTS_CONF, /<edit name="hinting" mode="assign"><bool>false<\/bool><\/edit>/);
+  assert.match(FONTS_CONF, /<edit name="hintstyle" mode="assign"><const>hintnone<\/const><\/edit>/);
+  assert.match(FONTS_CONF, /<edit name="antialias" mode="assign"><bool>true<\/bool><\/edit>/);
+  assert.match(FONTS_CONF, /<edit name="rgba" mode="assign"><const>none<\/const><\/edit>/);
+  // Chromium's side of the same settings; --font-render-hinting is not a
+  // switch of build 1243's `chrome` binary (hinting lives in the conf).
+  for (const flag of ['"--disable-lcd-text"', '"--disable-font-subpixel-positioning"', '"--force-device-scale-factor=1"']) {
+    assert.ok(TOOL_SOURCE.includes(flag), `web-shot.mjs launches Chromium with ${flag}`);
+  }
+  assert.doesNotMatch(TOOL_SOURCE, /"--font-render-hinting/);
+});
+
+test("fontconfig file, loaded by fontconfig itself, lists only admitted families (skipped without fc-list)", (t) => {
+  const result = spawnSync("fc-list", [":", "family"], {
+    env: { ...process.env, FONTCONFIG_FILE: join(REPO, "tools", "web-shot-fonts.conf") }, encoding: "utf8",
+  });
+  if (result.error) { t.skip("fc-list not installed"); return; }
+  const families = new Set(result.stdout.split("\n").map((l) => l.trim()).filter(Boolean));
+  if (families.size === 0) { t.skip("no Liberation font installed on this host"); return; }
+  for (const family of families) {
+    assert.ok(["Liberation Sans", "Liberation Serif", "Liberation Mono"].includes(family), `unexpected family ${family}`);
   }
 });

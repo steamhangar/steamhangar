@@ -15,7 +15,8 @@
 //   - every request that leaves the served origin fails (Fetch domain), so
 //     cover art always shows its fallback tile instead of a CDN download;
 //   - one self-contained fontconfig (tools/web-shot-fonts.conf) that maps the
-//     stylesheet's families to Liberation Sans/Mono with fixed hinting.
+//     stylesheet's families to Liberation Sans/Mono, admits no other font,
+//     and renders unhinted with grey antialiasing.
 //
 // Usage (every flag optional; see DEFAULTS and tools/README.md):
 //   node tools/web-shot.mjs --base http://127.0.0.1:8787 --out shots \
@@ -188,6 +189,10 @@ async function launchChrome(opts, width, userDataDir) {
     "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
     "--remote-debugging-port=0", `--user-data-dir=${userDataDir}`,
     `--window-size=${width},${opts.viewportHeight}`, "--force-device-scale-factor=1",
+    // Grey antialiasing, glyphs on whole pixels. There is deliberately no
+    // --font-render-hinting: build 1243's `chrome` binary does not know the
+    // switch (only chrome-headless-shell does; measured 2026-10-17, no
+    // pixel changed with it), so hinting is set in web-shot-fonts.conf.
     "--force-color-profile=srgb", "--disable-lcd-text", "--disable-font-subpixel-positioning",
     `--lang=${opts.locale}`, "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-background-networking", "--disable-component-update",

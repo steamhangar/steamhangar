@@ -15,7 +15,29 @@
 // area outside the smaller image magenta.
 //
 //   node tools/png-diff.mjs --expected web/tests/goldens --actual shots \
-//     --diff diff [--threshold 0.002] [--tolerance 8] [--missing fail|warn] [--github]
+//     --diff diff [--threshold 0.002] [--tolerance 8] [--missing fail|warn] \
+//     [--mode strict|aa-tolerant] [--github]
+//
+// --mode strict (default, CI) counts every pixel beyond --tolerance.
+// --mode aa-tolerant is for comparing a workstation's shots with CI's
+// goldens: the same Chromium and fonts rasterise text with slightly
+// different glyph-edge coverage on another OS (devbox Debian 12 vs CI
+// Ubuntu 24.04: 0.3-0.8 % of all pixels, all of them on glyph edges). A
+// differing pixel is excused (drawn yellow in the diff, not counted) when
+// BOTH hold: the expected pixel lies, per channel, within the min..max of
+// the actual image's 3x3 neighbourhood (+-tolerance), and the actual pixel
+// within the expected image's 3x3 range. An edge drawn with other coverage
+// or moved by up to 1 px passes both tests; a box moved by more than 1 px,
+// a recoloured area or a missing element fails at least one of them on
+// every pixel away from its outline, and those still count against
+// --threshold. Blind spots of this mode (it trades them for passing on
+// another OS): a whole element moved by exactly 1 px; a subtle colour
+// change of thin text (--dim -> --dim-2: ~99 % of the pixels excused,
+// every stem pixel is an edge and its local ink barely moves); a mid-tone
+// 1-px border that changed colour or moved by 1 px; and, as in strict
+// mode, anything below --threshold. Only local runs against CI goldens use
+// it; CI compares CI shots with CI goldens in strict mode and stays the
+// authority.
 //
 // --missing decides what an actual PNG without a golden means: `fail`
 // (default) or `warn` (CI verify mode: the first run after a new page is
@@ -170,16 +192,76 @@ export function encodePng({ width, height, data }) {
 // Comparison
 // ---------------------------------------------------------------------------
 
+export const MODES = Object.freeze(["strict", "aa-tolerant"]);
+
+/** aa-tolerant: a 3x3 neighbourhood is an "edge" from this per-channel contrast on. */
+export const EDGE_CONTRAST = 48;
+/** aa-tolerant: largest per-channel difference of two edge neighbourhoods' means ("ink"). */
+export const INK_TOLERANCE = 24;
+
+/** Per-channel min, max and mean of the 3x3 neighbourhood of (x, y), clipped at the border. */
+function neighbourhood(img, x, y) {
+  const lo = [255, 255, 255, 255];
+  const hi = [0, 0, 0, 0];
+  const sum = [0, 0, 0, 0];
+  let n = 0;
+  for (let yy = Math.max(0, y - 1); yy <= Math.min(img.height - 1, y + 1); yy += 1) {
+    for (let xx = Math.max(0, x - 1); xx <= Math.min(img.width - 1, x + 1); xx += 1) {
+      const o = (yy * img.width + xx) * 4;
+      for (let c = 0; c < 4; c += 1) {
+        const v = img.data[o + c];
+        if (v < lo[c]) lo[c] = v;
+        if (v > hi[c]) hi[c] = v;
+        sum[c] += v;
+      }
+      n += 1;
+    }
+  }
+  return { lo, hi, mean: sum.map((s) => s / n) };
+}
+
+const inRange = (pixel, { lo, hi }, tolerance) =>
+  [0, 1, 2, 3].every((c) => pixel[c] >= lo[c] - tolerance && pixel[c] <= hi[c] + tolerance);
+const isEdge = ({ lo, hi }) => [0, 1, 2].some((c) => hi[c] - lo[c] >= EDGE_CONTRAST);
+
+/**
+ * aa-tolerant verdict for one differing pixel: true when the difference is
+ * rasterisation noise on a glyph (or other) edge. Two ways to qualify:
+ *   1. blend: each image's pixel lies, per channel, within the min..max of
+ *      the other image's 3x3 neighbourhood (+- tolerance) -- the edge pixel
+ *      got another coverage, or the edge moved by at most 1 px;
+ *   2. same ink: both neighbourhoods are edges (contrast >= EDGE_CONTRAST)
+ *      and their means differ by at most INK_TOLERANCE per channel -- a
+ *      thin stem whose coverage is spread over its pixels differently
+ *      (0.7 + 0.7 vs 0.35 + 1.0) keeps its local amount of ink.
+ * A flat area that changed colour, a missing element or a box moved by
+ * more than 1 px has a flat neighbourhood in one image (or a different
+ * colour in both) and fails both.
+ */
+export function isRasterNoise(expected, actual, x, y, tolerance) {
+  const e = (y * expected.width + x) * 4;
+  const a = (y * actual.width + x) * 4;
+  const ne = neighbourhood(expected, x, y);
+  const na = neighbourhood(actual, x, y);
+  if (inRange(expected.data.subarray(e, e + 4), na, tolerance) && inRange(actual.data.subarray(a, a + 4), ne, tolerance)) return true;
+  return isEdge(ne) && isEdge(na) && [0, 1, 2, 3].every((c) => Math.abs(ne.mean[c] - na.mean[c]) <= INK_TOLERANCE);
+}
+
 /**
  * Compare two decoded images. Returns `{ sameSize, total, differing,
- * fraction, pass, diff }` where `diff` is an RGBA image of the union size.
+ * excused, fraction, pass, diff }` where `diff` is an RGBA image of the
+ * union size. `mode` is "strict" (every pixel beyond `tolerance` counts) or
+ * "aa-tolerant" (a differing pixel that isRasterNoise() is excused --
+ * counted in `excused`, not in `differing`; see the file header).
  */
-export function compareImages(expected, actual, { threshold = 0.002, tolerance = 8 } = {}) {
+export function compareImages(expected, actual, { threshold = 0.002, tolerance = 8, mode = "strict" } = {}) {
+  if (!MODES.includes(mode)) throw new Error(`unknown comparison mode: ${mode}`);
   const width = Math.max(expected.width, actual.width);
   const height = Math.max(expected.height, actual.height);
   const sameSize = expected.width === actual.width && expected.height === actual.height;
   const diff = Buffer.alloc(width * height * 4);
   let differing = 0;
+  let excused = 0;
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const o = (y * width + x) * 4;
@@ -198,7 +280,11 @@ export function compareImages(expected, actual, { threshold = 0.002, tolerance =
         Math.abs(expected.data[e + 2] - actual.data[a + 2]),
         Math.abs(expected.data[e + 3] - actual.data[a + 3]),
       );
-      if (delta > tolerance) {
+      if (delta > tolerance && mode === "aa-tolerant" && sameSize && isRasterNoise(expected, actual, x, y, tolerance)) {
+        // Rasterisation noise: drawn yellow, not counted.
+        diff[o] = 255; diff[o + 1] = 210; diff[o + 2] = 0; diff[o + 3] = 255;
+        excused += 1;
+      } else if (delta > tolerance) {
         diff[o] = 255; diff[o + 1] = 0; diff[o + 2] = 0; diff[o + 3] = 255;
         differing += 1;
       } else {
@@ -210,7 +296,7 @@ export function compareImages(expected, actual, { threshold = 0.002, tolerance =
   }
   const total = width * height;
   const fraction = total === 0 ? 0 : differing / total;
-  return { sameSize, total, differing, fraction, pass: sameSize && fraction <= threshold, diff: { width, height, data: diff } };
+  return { sameSize, total, differing, excused, fraction, pass: sameSize && fraction <= threshold, diff: { width, height, data: diff } };
 }
 
 const PNG_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.png$/;
@@ -233,7 +319,7 @@ export const FAILING = new Set(["fail", "error", "stale", "partial"]);
  * `diffDir`.
  */
 export function compareDirs(expectedDir, actualDir, diffDir, opts = {}) {
-  const { threshold = 0.002, tolerance = 8, missing = "fail" } = opts;
+  const { threshold = 0.002, tolerance = 8, missing = "fail", mode = "strict" } = opts;
   const expectedNames = listPngs(expectedDir);
   const actualNames = listPngs(actualDir);
   const rows = [];
@@ -256,10 +342,11 @@ export function compareDirs(expectedDir, actualDir, diffDir, opts = {}) {
     try {
       const expected = decodePng(readFileSync(join(expectedDir, name)));
       const actual = decodePng(readFileSync(join(actualDir, name)));
-      const result = compareImages(expected, actual, { threshold, tolerance });
+      const result = compareImages(expected, actual, { threshold, tolerance, mode });
       const pct = (result.fraction * 100).toFixed(3);
       const sizes = `${expected.width}x${expected.height}` + (result.sameSize ? "" : ` vs ${actual.width}x${actual.height}`);
       let detail = `${sizes}, ${result.differing}/${result.total} px differ (${pct} %)`;
+      if (mode === "aa-tolerant") detail += `, ${result.excused} edge px ignored`;
       if (!result.sameSize) detail = `size differs: ${detail}`;
       if (!result.pass) {
         mkdirSync(diffDir, { recursive: true });
@@ -282,7 +369,7 @@ export function compareDirs(expectedDir, actualDir, diffDir, opts = {}) {
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const opts = { expected: null, actual: null, diff: "diff", threshold: 0.002, tolerance: 8, missing: "fail", github: false };
+  const opts = { expected: null, actual: null, diff: "diff", threshold: 0.002, tolerance: 8, missing: "fail", mode: "strict", github: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const take = () => {
@@ -298,6 +385,7 @@ export function parseArgs(argv) {
       case "--threshold": opts.threshold = Number(take()); break;
       case "--tolerance": opts.tolerance = Number(take()); break;
       case "--missing": opts.missing = take(); break;
+      case "--mode": opts.mode = take(); break;
       case "--github": opts.github = true; break;
       case "--help": case "-h": opts.help = true; break;
       default: throw new Error(`unknown argument: ${arg}`);
@@ -308,6 +396,7 @@ export function parseArgs(argv) {
   if (!(opts.threshold >= 0 && opts.threshold <= 1)) throw new Error("--threshold: fraction between 0 and 1");
   if (!(Number.isInteger(opts.tolerance) && opts.tolerance >= 0 && opts.tolerance <= 255)) throw new Error("--tolerance: integer 0..255");
   if (!["fail", "warn"].includes(opts.missing)) throw new Error("--missing: fail or warn");
+  if (!MODES.includes(opts.mode)) throw new Error(`--mode: ${MODES.join(" or ")}`);
   return opts;
 }
 
