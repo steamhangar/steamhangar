@@ -3516,7 +3516,8 @@ below carry their own later dates, item 12 is the current one).
         keeps the green check at 100% with unmapped depots and Android lacks
         the note (Android parity package); VERSION-HEALTH-1 chose the startup
         log line, `/v1/health` stays a fixed body (fingerprinting decision)
-      - [ ] **APP-NAMES-1** (api + web) package names for "Unknown app"
+      - [ ] **APP-NAMES-1** (api + web; blocked on the open decision "APP-NAMES-1
+        scope" in the roadmap, 2026-10-17) package names for "Unknown app"
         entries (HELLDIVERS 2 content packages, roadmap D9).
       - [x] **VERSION-HEALTH-1** (api) version and schema readable without
         the key (roadmap "VERSION-HEALTH-1"; `/v1/health` or a startup log
