@@ -3491,17 +3491,25 @@ below carry their own later dates, item 12 is the current one).
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
       the operator's rc20 visual check; no rc21 tag without the operator's yes)
-      - [ ] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
+      - [x] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
         wrong-size chunk files of an app's target manifests behind the
         `deletion.py` cache-root guards (size re-checked right before the
         delete), then queue a forced run; "Complete all" and automatic
         completion keep skipping such a game until repaired. Full review.
+        Done: `POST /v1/cache/{appid}/repair` (dry run by default, `execute:
+        true` deletes then queues the forced run; 409 on an active job of the
+        app or a depot co-owner, 422 above 2000 files); `vault_api/cache_repair.py`;
+        API only, no schema change, no new env value; UI (button on an
+        incomplete row with `cache_missing_chunks == 0`) is a follow-up.
+      - [ ] **CACHE-REPAIR-UI-1** (web + android) Repair button on incomplete
+        rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
+        counts, execute, show job).
       - [x] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
         in the completeness display: when depots of a game have no mapping
         the percentage says so instead of showing a clean figure.
       - [ ] **APP-NAMES-1** (api + web) package names for "Unknown app"
         entries (HELLDIVERS 2 content packages, roadmap D9).
-      - [ ] **VERSION-HEALTH-1** (api) version and schema readable without
+      - [x] **VERSION-HEALTH-1** (api) version and schema readable without
         the key (roadmap "VERSION-HEALTH-1"; `/v1/health` or a startup log
         line).
       - [ ] **CLIENT-ROW-1** (web + api if needed) "Client downloading" row on

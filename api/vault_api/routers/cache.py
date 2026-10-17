@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, StrictBool
 
-from vault_api import cache_completeness, deletion, group_delete, jobs
+from vault_api import cache_completeness, cache_repair, deletion, group_delete, jobs
 from vault_api.auth import require_api_key
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
 from vault_api.sizes import SizeCache, build_cache_summary
@@ -984,3 +984,180 @@ def create_gc_job(
         execute=execute,
         deduplicated=not created,
     )
+
+
+# --------------------------------------------------------------------------
+# Repair of wrong-size chunk files (WP CACHE-REPAIR-1)
+# --------------------------------------------------------------------------
+
+
+class RepairRequest(BaseModel):
+    """Body of ``POST /v1/cache/{appid}/repair``. Optional: omitting it is a
+    dry run, exactly like ``POST /v1/cache/{appid}/gc``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: A literal JSON ``true`` is the only way to delete (``StrictBool``).
+    execute: StrictBool = False
+
+
+class RepairDepotOut(BaseModel):
+    depotid: int
+    manifestid: str
+    damaged_chunks: int
+    damaged_bytes: int
+
+
+class RepairOut(BaseModel):
+    appid: int
+    #: ``"dry-run"`` or ``"execute"``.
+    mode: str
+    execute: bool
+    #: Wrong-size chunk files found in the app's target manifests' depots.
+    damaged_chunks: int
+    damaged_bytes: int
+    depots: list[RepairDepotOut]
+    #: Depots whose target manifest could not be read (never guessed at).
+    unreadable_depots: list[int]
+    #: The plan is larger than ``max_files``: refused, nothing deleted.
+    exceeds_cap: bool
+    max_files: int
+    #: Execute only: files actually deleted, and why others were left alone.
+    removed_chunks: int = 0
+    removed_bytes: int = 0
+    skipped: dict[str, int] = {}
+    #: Execute only: the forced prefill queued after the deletion
+    #: (``null`` when nothing was removed).
+    job_id: int | None = None
+    job_status: str | None = None
+    job_deduplicated: bool | None = None
+
+
+@router.post("/v1/cache/{appid}/repair", response_model=RepairOut)
+def repair_cached_app(
+    request: Request,
+    response: Response,
+    appid: int = Path(ge=1, description="Steam app id whose damaged chunks to repair"),
+    body: RepairRequest | None = None,
+    open_db: DbOpener = Depends(db_opener),
+    size_cache: SizeCache = Depends(get_size_cache),
+) -> RepairOut:
+    """Repair a game whose cache holds chunk files of the wrong size (WP
+    CACHE-REPAIR-1; they are what CACHE-COMPLETE-1a counts as damaged). A
+    forced prefill cannot fix them -- vault-core serves the existing file as a
+    HIT -- so the damaged files are deleted and a forced run is queued, which
+    misses on them and stores fresh copies. User-triggered only.
+
+    **Dry run by default.** No body or ``{"execute": false}``: ``200`` with
+    what would be deleted (counts per depot), nothing touched. ``{"execute":
+    true}`` (literal boolean): deletes, then queues the forced job, ``202``
+    (``200`` when nothing was damaged or removed: no-op, no job).
+
+    Order of decisions: ``404`` unknown app / no depot mappings; ``500`` the
+    cache-root guards refuse; nothing damaged: ``200`` no-op; ``409`` a
+    queued/running/paused job for the app, or for another app that maps one
+    of the damaged depots (also for dry runs, so the preview never promises
+    what execute would refuse); ``409`` the app's last prefill ended
+    ``not_owned`` (a forced run could not store fresh copies); more than
+    ``max_files`` damaged files: ``422`` on execute (``exceeds_cap: true`` in
+    the dry-run report), nothing deleted.
+
+    Only chunk files named in the app's current target manifests whose size
+    differs from the manifest's are candidates; each is re-checked right before
+    its unlink (``cache_repair.execute_repair``). Files behind a symlink, or
+    whose size matches or changed meanwhile, are left alone and counted in
+    ``skipped``.
+    """
+    execute = bool(body.execute) if body is not None else False
+    settings = request.app.state.settings
+    with open_db() as conn:
+        if conn.execute("SELECT 1 FROM apps WHERE appid = ?", (appid,)).fetchone() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unknown appid {appid} -- vault-api tracks no such app.",
+            )
+        if not deletion.load_mapping_rows(conn, appid):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"App {appid} has no depot mappings, so there is nothing to repair.",
+            )
+        try:
+            depot_root = deletion.resolve_depot_root(settings.cache_root)
+        except deletion.DeletionGuardError as exc:
+            logger.error("cache-repair appid=%s REFUSED (cache root guard): %s", appid, exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            ) from exc
+        plan = cache_repair.plan_repair(conn, settings, appid, depot_root=depot_root)
+
+        out = RepairOut(
+            appid=appid,
+            mode="execute" if execute else "dry-run",
+            execute=execute,
+            damaged_chunks=plan.damaged_count,
+            damaged_bytes=plan.damaged_bytes,
+            depots=[
+                RepairDepotOut(
+                    depotid=d.depotid,
+                    manifestid=d.manifestid,
+                    damaged_chunks=len(d.chunks),
+                    damaged_bytes=sum(c.found_size for c in d.chunks),
+                )
+                for d in plan.depots
+            ],
+            unreadable_depots=plan.unreadable_depots,
+            exceeds_cap=plan.exceeds_cap,
+            max_files=cache_repair.MAX_REPAIR_FILES,
+        )
+        if plan.damaged_count == 0:
+            return out
+
+        affected = cache_repair.apps_for_depots(conn, (d.depotid for d in plan.depots))
+        for owner in sorted(affected | {appid}):
+            active = jobs.active_job_for_app(conn, owner)
+            if active is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Job {active['id']} for app {owner} is {active['status']}; "
+                        "repairing chunk files under an active job would race it. "
+                        "Retry once it has finished (poll GET /v1/jobs/{id})."
+                    ),
+                )
+        if appid in jobs.not_owned_appids(conn):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "The last prefill of this app ended not_owned, so a forced run "
+                    "could not store fresh copies; nothing is deleted."
+                ),
+            )
+        if not execute:
+            return out
+        if plan.exceeds_cap:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"{plan.damaged_count} damaged chunk files exceed the repair cap of "
+                    f"{cache_repair.MAX_REPAIR_FILES}; nothing was deleted. That many "
+                    "mismatches point at a wrong target manifest or a broken cache."
+                ),
+            )
+
+        result = cache_repair.execute_repair(plan, depot_root)
+        out.removed_chunks = result.removed
+        out.removed_bytes = result.removed_bytes
+        out.skipped = result.skipped
+        if result.removed:
+            size_cache.invalidate()
+            try:
+                cache_completeness.remeasure_app(conn, settings, appid)
+            except Exception:  # noqa: BLE001 - the figure refreshes at the next check
+                logger.exception("cache-repair appid=%s: remeasure failed", appid)
+            deletion.set_needs_force(conn, [appid])
+            job, created = jobs.enqueue_prefill(conn, appid)
+            out.job_id = int(job["id"])  # type: ignore[arg-type]
+            out.job_status = str(job["status"])
+            out.job_deduplicated = not created
+            response.status_code = status.HTTP_202_ACCEPTED
+    return out
