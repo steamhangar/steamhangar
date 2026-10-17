@@ -3946,6 +3946,14 @@ vault-core's apply state (`coreApplyLine`: pending / rejected with reason
   migration); every kit.css selector starts with `.kit` (the opt-in
   scope); index.html links theme → kit → app; the pill disc rule
   (`--sz:16px`, 60% glyph box).
+- `design-tokens-contract.test.js` (11): `docs/design/tokens.json` equals
+  theme.css in both directions (opaque colours, `--accent-glow` rgba, the
+  `.sic` ink, `--fs-*`, `--sp-*`, `--r-*`; a colour token in hex, rgb/hsl
+  or color-mix form missing from the JSON fails); `docs/design/
+  status-vocabulary.json` equals STATUS_LABEL (order and words), KIND_GLYPH
+  (read from the source), DEFAULT_PILL_TONE and the `.sic.k-*` animation
+  rules (running, updating, verify). Twin of the Android
+  DesignTokensContractTest / StatusVocabularyContractTest (TOKENS-SYNC-1).
 - `kit-pill.test.js` (5, fake-dom): `createPill` renders
   `span.pill.TONE > span.sic.k-KIND + word`, drops the icon's sr-only word
   when a visible word is present (keeps it icon-only), default tone per

@@ -47,7 +47,7 @@ function customProperties(css) {
 }
 
 const props = customProperties(themeCss);
-const isColour = (value) => /^#[0-9a-f]{3,8}$/i.test(value) || /^rgba?\(/i.test(value);
+const isColour = (value) => /^#[0-9a-f]{3,8}$/i.test(value) || /^(rgba?|hsla?|color-mix)\(/i.test(value);
 
 function single(name) {
   const values = props.get(name);
