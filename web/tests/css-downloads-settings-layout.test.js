@@ -154,9 +154,21 @@ test("BP-XL (min-width:1800px) does not touch --w-text or .view-downloads/.view-
 // alongside an existing max-width/margin pair.
 // ---------------------------------------------------------------------
 
-test("no cascade tie: .view-downloads is referenced exactly once in app.css (no pre-existing rule touches it at all)", () => {
+test("no cascade tie: .view-downloads is referenced exactly twice in app.css (the BP-L cap and the DOWNLOADS-2 BP-M wide page)", () => {
   const dlCount = (codeOnlyAll.match(/\.view-downloads\b/g) || []).length;
-  assert.equal(dlCount, 1, `".view-downloads" appears ${dlCount} times in theme.css+app.css — expected exactly 1 (this WP's own selector); a second occurrence means some other rule now also targets it and needs a deliberate cascade review`);
+  assert.equal(dlCount, 2, `".view-downloads" appears ${dlCount} times in theme.css+app.css — expected exactly 2 (the BP-L capped-column selector and the BP-M :has() rule of WP DOWNLOADS-2); a third occurrence means some other rule now also targets it and needs a deliberate cascade review`);
+});
+
+test("WP DOWNLOADS-2: at BP-M only Downloads leaves the 760px column (a deliberate LAYOUT-1 departure), via --w-page", () => {
+  const bpM = findMediaBlock(720);
+  assert.ok(bpM, "no bare min-width:720px block found");
+  const body = ruleBody(bpM.body, ".view-root:has(> .view-downloads)");
+  assert.ok(body, "no '.view-root:has(> .view-downloads){...}' rule in the BP-M block");
+  assert.match(body, /max-width:\s*var\(--w-page\)/);
+  // The rule names Downloads only: no other view is widened at BP-M.
+  const hasRules = [...bpM.body.matchAll(/([^{}]*:has\([^)]*\)[^{}]*)\{/g)].map((m) => m[1].trim());
+  assert.deepEqual(hasRules, [".view-root:has(> .view-downloads)"]);
+  assert.equal(/view-(settings|clients|library)/.test(bpM.body), false, "BP-M must not widen any other view");
 });
 
 test("no cascade tie: .view-settings' only OTHER reference is the pre-existing, unrelated h4.sec descendant rule — nothing else sets max-width/margin on the bare class", () => {

@@ -1834,6 +1834,13 @@ body.onboarding .nav{ display:none; }
    requiring horizontal scroll. */
 @media (min-width:720px){
   :root{ --w-text:760px; }
+  /* WP DOWNLOADS-2: deliberately departs from LAYOUT-1's "narrow
+     breakpoints unchanged" for Downloads only. Its page is width-aware
+     (kit.css @container rules: two columns from 760px, three from 1100px),
+     so the 760px reading column would always force one column below BP-L.
+     Downloads takes the wide page width here; every other view keeps
+     --w-text. */
+  .view-root:has(> .view-downloads){ max-width:var(--w-page); }
   /* WP WEB-FIX-UPD-VIS: the library toolbar row (see `.lib-bar` above).
      The chips no longer wrap here (they did from WP 4e.1 to WP UPD-2): a
      second chip line would leave the search field's centre line. */

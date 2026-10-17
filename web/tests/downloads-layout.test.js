@@ -295,7 +295,34 @@ test("attention rows: open lists (no fold toggle), count badge and 'Update all' 
   }
 });
 
-test("CSS: the Downloads block in kit.css uses container queries at 1200/900/760/460, tokens only, and app.css lost the old rules", async () => {
+test("MUTATION PIN: both attention badges are visible with their row counts, and hide again at zero", async () => {
+  reset();
+  const incomplete = (appid, name, pct) => game(appid, name, { cache_complete_pct: pct, cache_missing_chunks: 3 });
+  server.games = [
+    game(10, "Aurora", { update_available: true }),
+    game(11, "Borealis", { update_available: true }),
+    incomplete(20, "Cirrus", 80),
+    incomplete(21, "Dune", 40),
+    incomplete(22, "Ember", 60),
+  ];
+  try {
+    const s = await open();
+    const updates = () => s.querySelector('[data-role="updates-count"]');
+    const inc = () => s.querySelector('[data-role="incomplete-count"]');
+    await until(() => updates().hidden === false && inc().hidden === false, "both badges shown");
+    assert.equal(updates().textContent, "2");
+    assert.equal(inc().textContent, "3");
+    server.games = [game(10, "Aurora", { update_available: true }), incomplete(20, "Cirrus", 80)];
+    store.refreshNow();
+    await until(() => updates().textContent === "1" && inc().textContent === "1", "counts follow the rows");
+    assert.equal(updates().hidden, false);
+    assert.equal(inc().hidden, false);
+  } finally {
+    store.stop();
+  }
+});
+
+test("CSS: the Downloads block in kit.css uses container queries at 1099/900/760/460, tokens only, and app.css lost the old rules", async () => {
   const { readFileSync } = await import("node:fs");
   const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
   const kit = strip(readFileSync(new URL("../css/kit.css", import.meta.url), "utf8"));
@@ -304,7 +331,7 @@ test("CSS: the Downloads block in kit.css uses container queries at 1200/900/760
   assert.ok(from > 0, "Downloads block found in kit.css");
   const block = kit.slice(from);
   assert.match(block, /\.kit\.dl\{[^}]*container-type:\s*inline-size/);
-  for (const w of [1200, 900, 760, 460]) assert.match(block, new RegExp(`@container \\(max-width:${w}px\\)`), `@container ${w}px`);
+  for (const w of [1099, 900, 760, 460]) assert.match(block, new RegExp(`@container \\(max-width:${w}px\\)`), `@container ${w}px`);
   assert.equal(/@media \((min|max)-width/.test(block), false, "no viewport breakpoints for the page composition");
   assert.match(block, /\.kit \.cols3\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(block, /\.kit \.graph svg\{[^}]*height:96px/);

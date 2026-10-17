@@ -86,8 +86,10 @@
 .kit .pill .sic svg{ width:60%; height:60%; }
 
 /* ---------- segmented control ---------- */
-.kit .seg{ display:inline-flex; gap:2px; padding:3px; background:var(--surface); border:1px solid var(--line-soft); border-radius:10px; }
-.kit .seg button{ font:500 var(--fs-2)/1 var(--ui); color:var(--dim); background:none; border:0; border-radius:7px; padding:7px 12px; cursor:pointer; }
+/* A seg never wraps a label onto a second row: it scrolls sideways in a
+   narrow container instead (same rule as app.css's `.segs.rangesegs`). */
+.kit .seg{ display:inline-flex; gap:2px; padding:3px; background:var(--surface); border:1px solid var(--line-soft); border-radius:10px; max-width:100%; min-width:0; overflow-x:auto; scrollbar-width:none; }
+.kit .seg button{ font:500 var(--fs-2)/1 var(--ui); color:var(--dim); background:none; border:0; border-radius:7px; padding:7px 12px; cursor:pointer; flex:none; white-space:nowrap; }
 .kit .seg button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); }
 
 /* ---------- tiles and meter ---------- */
@@ -263,7 +265,7 @@
    and docs/design/rc20/downloads.html (expanded History row, idle and
    empty states). The view root is `section.view-downloads.kit.dl` and is
    its own inline-size container, so the page folds with @container
-   queries on its own width, not the viewport: 1200px two columns (History
+   queries on its own width, not the viewport: below 1100px two columns (History
    full width), 900px hero stacks, 760px one column, 460px phone hero.
    Built by views/downloads.js with components/downloads-hero.js,
    components/job-row.js and components/history-list.js.
@@ -284,10 +286,6 @@
 }
 .kit .hero .hh{ grid-column:1 / -1; display:flex; justify-content:space-between; align-items:center; gap:var(--sp-3); flex-wrap:wrap; }
 .kit .hero .hh > .hint{ flex:1 0 100%; }
-/* Range segs never wrap a label onto a second row: they scroll sideways in
-   a narrow container instead (same rule as app.css's `.segs.rangesegs`). */
-.kit.dl .seg.rangesegs{ max-width:100%; min-width:0; overflow-x:auto; scrollbar-width:none; }
-.kit.dl .seg.rangesegs button{ flex:none; white-space:nowrap; }
 .kit .dl-history .sechd{ flex-wrap:wrap; }
 .kit .live{ display:grid; grid-template-columns:170px minmax(0, 1fr); gap:var(--sp-5); align-items:end; min-width:0; }
 .kit .live .lv{ min-width:0; }
@@ -387,7 +385,7 @@
 .kit .hpanel .loading, .kit .hpanel .errmsg, .kit .hpanel .emptymsg{ font-style:italic; }
 .kit .hpanel .truncnote{ font-size:var(--fs-2); }
 
-@container (max-width:1200px){
+@container (max-width:1099px){
   .kit .cols3{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
   .kit .cols3 > .col:last-child{ grid-column:1 / -1; }
   .kit .cols3.no-attn > .col:last-child{ grid-column:auto; }

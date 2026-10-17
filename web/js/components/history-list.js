@@ -84,7 +84,7 @@ export function createHistoryItem({ job, title, kind, meta, expanded, onToggle }
   row.append(icon, info, chev);
   row.addEventListener("click", () => onToggle());
 
-  const panel = el("div", "hpanel log");
+  const panel = el("div", "hpanel");
   panel.id = panelId;
   panel.hidden = !expanded;
 

@@ -22,8 +22,8 @@
  * `planJobsUpdate` decides, per `GET /v1/jobs` tick, whether anything
  * structural changed (any `status` transition anywhere -> full section
  * rebuild) or whether the only thing that moved is a running job's
- * `stop_request` (-> patch just that card's `.jobacts`/`.stopnote`, never
- * its `.badge .sic` status-icon subtree). See that module's header for why
+ * `stop_request` (-> patch just that card's action row and stop note, never
+ * its status pill's icon subtree). See that module's header for why
  * `stop_request` is the ONLY volatile field the real API has here — no
  * live byte progress exists to patch, unlike the mockup.
  *
@@ -104,7 +104,7 @@
  * (finished jobs and the traffic statistics, `api/vault_api/history.py`)
  * are shown on this page, next to the History time filter they are
  * measured against; the Clients page only reads part of the statistics.
- * After a delete the history list, the statistics header and the store's
+ * After a delete the history list, the hero statistics and the store's
  * jobs are fetched again; a failure keeps the dialog open with the error.
  * Wording: `lib/history-delete.js`.
  *
@@ -115,7 +115,7 @@
  * (`components/downloads-hero.js`: speed, pill, limit + devices caption,
  * graph, mini line, four tiles), then three equal columns: Active + Queue |
  * Updates available + Incomplete | History. Container queries in kit.css
- * fold them to two columns (History full width) at 1200px and one column
+ * fold them to two columns (History full width) below 1100px and one column
  * at 760px; the middle column is left out while both of its lists are
  * empty. Paused jobs fold into Active (their card carries Resume). Rows are
  * built by `components/job-row.js` and `components/history-list.js`; this
@@ -281,7 +281,7 @@ const state = {
   settings: null,
 };
 
-/** WP D15c: the statistics header's last answer for `range`
+/** WP D15c: the hero statistics's last answer for `range`
  * (`{throughput, series}`), and the History filter's fetched rows. Module
  * state, so a re-mount keeps the chosen ranges. */
 const traffic = { range: readStoredStatsRange(), throughput: null, series: null, error: null, unsupported: false, noFigures: false };
@@ -759,7 +759,7 @@ function paintUpdates() {
 
   const { updates, updatesCount, updatesNote, updatesActs, updatesBody } = els;
   updates.hidden = rows.length === 0;
-  updatesCount.textContent = String(rows.length);
+  setBadge(updatesCount, rows.length);
   updatesNote.hidden = !note;
   updatesNote.textContent = note ?? "";
   updatesActs.replaceChildren();
@@ -905,7 +905,7 @@ function paintIncomplete() {
 
   const { incomplete, incompleteCount, incompleteNote, incompleteActs, incompleteBody } = els;
   incomplete.hidden = rows.length === 0;
-  incompleteCount.textContent = String(rows.length);
+  setBadge(incompleteCount, rows.length);
   incompleteNote.hidden = !note;
   incompleteNote.textContent = note ?? "";
   incompleteActs.replaceChildren();
@@ -1271,7 +1271,7 @@ let pendingHighlightJobId = null;
  * `scrollIntoView()` also scrolls an `overflow:hidden` app shell and shifts
  * every absolutely positioned surface with it — but this app's shell has no
  * such ancestor (`view-root`/`.app` are plain document flow, verified
- * against css/app.css: no `overflow:hidden` above `.hrow`), so the mockup's
+ * against css/app.css and css/kit.css: no `overflow:hidden` above `.hitem`), so the mockup's
  * specific failure mode does not apply here.
  *
  * **`behavior` is resolved per `prefers-reduced-motion` explicitly (WP
