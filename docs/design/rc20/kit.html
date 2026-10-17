@@ -1,0 +1,448 @@
+<title>SteamHangar UI Kit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#0A1016; --surface:#111C24; --raised:#17252F; --raised-2:#1D303C;
+  --line:#24363F; --line-soft:#1B2A33;
+  --text:#E4EFF3; --dim:#8AA1AD; --dim-2:#7A91A0; --dim-2-old:#63798A;
+  --accent:#2ED9CE; --accent-ink:#04211F;
+  --ok:#57DD8A; --run:#F2CE5B; --stale:#F07B2E; --danger:#FF6F6F; --none:#8296A6;
+  --ui:Roboto,"Segoe UI",system-ui,sans-serif; --mono:"Roboto Mono",ui-monospace,Consolas,monospace;
+  /* proposed scale (UI-KIT-1) */
+  --fs-1:11px; --fs-2:12px; --fs-3:13px; --fs-4:15px; --fs-5:18px; --fs-6:24px; --fs-7:32px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-7:32px; --sp-8:48px;
+  --r-s:8px; --r-m:12px; --r-l:18px;
+  --w-page:1400px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:400 var(--fs-3)/1.45 var(--ui);padding-block:var(--sp-6);padding-inline:var(--sp-4)}
+.doc{max-width:var(--w-page);margin:0 auto;display:grid;gap:var(--sp-8)}
+h1{font-size:var(--fs-6);margin:0;letter-spacing:-.5px}
+.lead{color:var(--dim);margin:var(--sp-1) 0 0;max-width:70ch}
+.kit{display:grid;gap:var(--sp-4)}
+.kit>h2{font-size:var(--fs-5);margin:0;padding-bottom:var(--sp-2);border-bottom:1px solid var(--line-soft)}
+.kit>h2 small{font:var(--fs-2) var(--mono);color:var(--dim);margin-left:var(--sp-3)}
+.note{font-size:var(--fs-2);color:var(--dim);margin:0}
+.row{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center}
+.mono{font-family:var(--mono)}
+code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;border-radius:5px}
+
+/* ---------- primitives ---------- */
+.page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-4);flex-wrap:wrap}
+.page-head h1{font-size:var(--fs-6)}
+.page-head .sub{color:var(--dim);font-size:var(--fs-3);margin-top:2px}
+.sec{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.9px;text-transform:uppercase;color:var(--dim)}
+.sechd{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);min-height:34px}
+.btn{font:500 var(--fs-3)/1 var(--ui);color:var(--text);background:var(--raised);border:1px solid var(--line);border-radius:var(--r-s);padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn:hover{background:var(--raised-2)}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:700}
+.btn.ghost{background:transparent}
+.btn.sm{padding:6px 10px;font-size:var(--fs-2)}
+.btn.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line))}
+.btn.w72{width:72px;justify-content:center}
+.pill{display:inline-flex;align-items:center;gap:6px;font:500 var(--fs-2)/1 var(--ui);padding:5px 10px;border-radius:999px;background:var(--raised-2);color:var(--dim);white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.pill.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,var(--surface))}
+.pill.run{color:var(--run);background:color-mix(in srgb,var(--run) 14%,var(--surface))}
+.pill.run i{animation:pulse 1.4s ease-in-out infinite}
+.pill.acc{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.pill.stale{color:var(--stale);background:color-mix(in srgb,var(--stale) 14%,var(--surface))}
+.pill.danger{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,var(--surface))}
+@keyframes pulse{50%{opacity:.35}}
+/* status glyph disc = status-icon.js .sic (shape first, word second, colour third) */
+.sic{width:16px;height:16px;border-radius:50%;background:currentColor;display:inline-grid;place-items:center;flex:none;position:relative;overflow:hidden;clip-path:circle(50%)}
+.sic svg{width:10px;height:10px;display:block;overflow:visible;color:var(--accent-ink);fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.pill .sic{margin-left:-3px}
+.sic.k-running .dla{animation:dlfall 1.6s linear infinite}
+@keyframes dlfall{from{transform:translateY(0)}to{transform:translateY(32px)}}
+.sic.k-updating .rot,.sic.k-verify .rot{transform-box:fill-box;transform-origin:center;animation:turn 2.2s linear infinite}
+@keyframes turn{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.sic .dla,.sic .rot{animation:none}}
+.pill.none{color:var(--none)}
+
+@media (prefers-reduced-motion:reduce){.pill.run i{animation:none}}
+.seg{display:inline-flex;gap:2px;padding:3px;background:var(--surface);border:1px solid var(--line-soft);border-radius:10px}
+.seg button{font:500 var(--fs-2)/1 var(--ui);color:var(--dim);background:none;border:0;border-radius:7px;padding:7px 12px;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--raised-2);color:var(--text)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:var(--sp-3)}
+.tile{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:14px 16px;display:grid;gap:4px;align-content:start}
+.tile .k{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+.tile .v{font:500 22px/1.1 var(--ui);letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.tile .v small{font-size:var(--fs-2);color:var(--dim);margin-left:4px;letter-spacing:0}
+.tile .n{font-size:var(--fs-2);color:var(--dim)}
+.tile.hi{border-color:color-mix(in srgb,var(--stale) 55%,var(--line))}
+.meter{height:4px;border-radius:2px;background:var(--raised-2);overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--ok);border-radius:2px}
+.meter.acc i{background:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-l);padding:var(--sp-5)}
+.fcard{background:var(--surface);border:1px solid var(--line-soft);border-radius:14px;padding:18px 20px;display:grid;gap:var(--sp-4)}
+.fcard>h3{margin:0;font:500 var(--fs-1)/1 var(--ui);letter-spacing:.9px;text-transform:uppercase;color:var(--dim)}
+.fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px 28px}
+.field{display:grid;gap:7px}
+.field .lh{display:flex;align-items:center;gap:8px}
+.field label{font:500 var(--fs-3) var(--ui)}
+.ib{width:18px;height:18px;border-radius:50%;border:1px solid var(--line);color:var(--dim);font:500 11px/16px var(--mono);text-align:center;background:none;cursor:pointer;padding:0}
+.chip{margin-left:auto;font:400 var(--fs-1)/1 var(--ui);padding:4px 8px;border-radius:999px;background:var(--raised-2);color:var(--dim);white-space:nowrap}
+.chip.ch{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.chip.env{color:var(--dim)}
+.in{font:400 var(--fs-3) var(--ui);color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:9px 12px;width:100%}
+.in.num{font-family:var(--mono);max-width:160px}
+.in:disabled{color:var(--dim);background:var(--surface)}
+.hint{font-size:var(--fs-2);color:var(--dim)}
+.gchip{font:400 var(--fs-2)/1 var(--ui);color:var(--text);background:var(--raised);border:1px solid var(--line-soft);border-radius:999px;padding:6px 10px;white-space:nowrap}
+.gchip b{font:400 var(--fs-1) var(--mono);color:var(--dim);margin-left:6px}
+.gchip.more{color:var(--dim);border-style:dashed;background:none}
+.fchip{font:500 var(--fs-2)/1 var(--ui);color:var(--dim);background:var(--surface);border:1px solid var(--line-soft);border-radius:999px;padding:8px 12px;white-space:nowrap}
+.fchip b{font:400 var(--fs-1) var(--mono);margin-left:6px;color:var(--dim-2)}
+.fchip[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.scale{display:grid;gap:6px}
+.scale div{display:flex;align-items:baseline;gap:var(--sp-4)}
+.scale code{min-width:92px}
+.sw{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--sp-3)}
+.sw div{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:12px}
+.sw b{display:block;font-weight:500}
+.sw small{font:var(--fs-1) var(--mono);color:var(--dim)}
+.rowlist{display:grid;gap:8px}
+.jr{display:grid;grid-template-columns:1fr auto 72px;align-items:center;gap:var(--sp-3);background:var(--raised);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:10px 12px}
+.jr .nm{font-weight:500}
+.jr .meta{font:var(--fs-1) var(--mono);color:var(--dim)}
+.jr .sz{font:var(--fs-2) var(--mono);color:var(--dim)}
+.grip{color:var(--dim-2);cursor:grab;letter-spacing:-2px;user-select:none}
+
+/* ---------- container-query demo frames ---------- */
+.demo{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:var(--sp-5);align-items:start}
+.frame{container-type:inline-size;border:1px dashed var(--line);border-radius:var(--r-l);padding:var(--sp-3);position:relative}
+.frame::before{content:attr(data-w);position:absolute;top:-9px;left:14px;font:var(--fs-1) var(--mono);color:var(--dim);background:var(--bg);padding:0 6px}
+@media (max-width:1100px){.demo{grid-template-columns:1fr}}
+
+/* ---------- Clients card, three zones ---------- */
+.ccard{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-l);padding:18px 20px;display:grid;grid-template-columns:minmax(260px,1.1fr) minmax(220px,1fr) minmax(220px,1fr);gap:var(--sp-5) var(--sp-7)}
+.ccard.warn{border-color:color-mix(in srgb,var(--stale) 45%,var(--line))}
+.z{display:grid;gap:var(--sp-3);align-content:start;min-width:0}
+.ch{display:flex;gap:12px;align-items:center}
+.ico{width:38px;height:38px;border-radius:10px;background:var(--raised);display:grid;place-items:center;color:var(--accent);flex:none}
+.ch .nm{font:500 var(--fs-4)/1.2 var(--ui)}
+.ch .meta{font:var(--fs-1) var(--mono);color:var(--dim);margin-top:3px}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.upd{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;background:color-mix(in srgb,var(--stale) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--stale) 40%,var(--line));border-radius:var(--r-m);padding:10px 12px;font-size:var(--fs-2)}
+.upd svg{color:var(--stale);margin-top:2px}
+.upd b{display:block;font-weight:500;color:var(--text)}
+.upd span{color:var(--dim)}
+.upd .btn{grid-column:2;justify-self:start}
+.now{background:color-mix(in srgb,var(--accent) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line));border-radius:var(--r-m);padding:10px 12px;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.now b{display:block;font-weight:500}
+.now span{font-size:var(--fs-2);color:var(--dim)}
+.now .spd{font:500 var(--fs-4) var(--mono);color:var(--accent);white-space:nowrap}
+.now.idle{background:none;border-style:dashed;color:var(--dim);justify-content:center}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-3)}
+.stats .k{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+.stats .v{font:500 var(--fs-5)/1.1 var(--ui);margin-top:5px;font-variant-numeric:tabular-nums}
+.stats .v small{font-size:var(--fs-2);color:var(--dim);margin-left:3px}
+.agent{display:flex;gap:10px;align-items:center;font-size:var(--fs-2);color:var(--dim);background:var(--raised);border-radius:var(--r-s);padding:8px 10px}
+.agent b{color:var(--ok);font-weight:500;white-space:nowrap;flex:none}
+.agent span{min-width:0}
+.cf{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:var(--sp-3);font-size:var(--fs-2);color:var(--dim)}
+.cf .acts{display:flex;gap:8px;margin-left:auto}
+@container (max-width:700px){
+  .ccard{grid-template-columns:1fr;gap:var(--sp-4)}
+  .stats{grid-template-columns:repeat(3,1fr)}
+}
+@container (max-width:460px){
+  .ccard{padding:14px}
+  .cf .acts{margin-left:0;width:100%}
+  .cf .acts .btn{flex:1;justify-content:center}
+}
+
+/* ---------- Downloads, width-aware ---------- */
+.dl{display:grid;gap:var(--sp-5)}
+.hero{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-l);padding:18px 20px;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);gap:var(--sp-5)}
+.hero .hh{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+.live{display:grid;grid-template-columns:170px minmax(0,1fr);gap:var(--sp-5);align-items:end}
+.live .big{font:500 var(--fs-7)/1 var(--ui);letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.live .big small{font-size:var(--fs-3);color:var(--dim);margin-left:4px;letter-spacing:0}
+.live .cap{font-size:var(--fs-2);color:var(--dim);margin-top:8px}
+.graph{height:96px;position:relative}
+.graph svg{width:100%;height:100%;display:block}
+.graph .ax{display:flex;justify-content:space-between;font:var(--fs-1) var(--mono);color:var(--dim);margin-top:4px}
+.mini{grid-column:1;display:flex;gap:var(--sp-5);flex-wrap:wrap;font-size:var(--fs-2);color:var(--dim);border-top:1px solid var(--line-soft);padding-top:12px}
+.mini b{color:var(--text);font-weight:500}
+.hero .tiles{grid-column:2;grid-row:2/4;grid-template-columns:1fr 1fr;align-content:start}
+.hero .tile{background:var(--raised);border-color:transparent}
+.cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-7)}
+.col{display:grid;gap:var(--sp-5);align-content:start;min-width:0}
+.blk{display:grid;gap:10px}
+.empty{color:var(--dim);font-size:var(--fs-2);text-align:center;padding:18px;border:1px dashed var(--line);border-radius:var(--r-m)}
+.job{background:var(--raised);border:1px solid color-mix(in srgb,var(--run) 40%,var(--line));border-radius:var(--r-m);padding:12px 14px;display:grid;gap:10px}
+.job .t{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.job .nm{font-weight:500}
+.job .meta{font:var(--fs-1) var(--mono);color:var(--dim)}
+.bar{height:6px;border-radius:3px;background:var(--raised-2);overflow:hidden}
+.bar i{display:block;height:100%;width:62%;background:var(--accent)}
+.job .m2{display:flex;justify-content:space-between;font:var(--fs-2) var(--mono);color:var(--dim)}
+.job .acts{display:flex;gap:8px}
+.hrow{display:flex;align-items:center;gap:12px;background:var(--raised);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:12px 14px}
+.hrow .dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--mono);flex:none}
+.hrow .dot.ok{background:color-mix(in srgb,var(--ok) 18%,var(--surface));color:var(--ok)}
+.hrow .dot.bad{background:color-mix(in srgb,var(--danger) 18%,var(--surface));color:var(--danger)}
+.hrow .nm{font-weight:500}
+.hrow .meta{font:var(--fs-1) var(--mono);color:var(--dim);margin-top:2px}
+.hrow .chev{margin-left:auto;color:var(--dim)}
+.badge{font:500 var(--fs-1) var(--mono);background:var(--raised-2);color:var(--dim);border-radius:999px;padding:3px 8px}
+@container (max-width:1200px){.cols3{grid-template-columns:1fr 1fr}.cols3 .col:last-child{grid-column:1/-1}}
+@container (max-width:900px){.hero{grid-template-columns:1fr}.hero .tiles{grid-column:1;grid-row:auto;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}.mini{grid-column:1}}
+@container (max-width:760px){.cols3{grid-template-columns:1fr}.cols3 .col:last-child{grid-column:auto}}
+@container (max-width:460px){.live{grid-template-columns:1fr}.hero,.hero .tile{padding:14px}.hero .tiles{grid-template-columns:1fr 1fr}}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)}
+.cmp div{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:14px}
+.cmp .k{font:500 10px/1 var(--ui);letter-spacing:.8px;text-transform:uppercase}
+@media (max-width:700px){.cmp{grid-template-columns:1fr}}
+</style>
+
+<div class="doc">
+<header>
+  <h1>SteamHangar UI Kit</h1>
+  <p class="lead">Proposal for <code>web/css/kit.css</code> and the scale in <code>theme.css</code>. Everything below is the only building material the page packages may use. The two page sections (Clients card, Downloads) sit in a 1400 px and a 400 px container; the same markup adapts via container queries.</p>
+</header>
+
+<section class="kit">
+  <h2>Scale <small>--fs-1..7 · --sp-1..8</small></h2>
+  <div class="scale">
+    <div><code>--fs-1 11px</code><span style="font-size:var(--fs-1);color:var(--dim)">Captions, mono meta, chips. Never below this.</span></div>
+    <div><code>--fs-2 12px</code><span style="font-size:var(--fs-2)">Hints, pills, secondary lines</span></div>
+    <div><code>--fs-3 13px</code><span style="font-size:var(--fs-3)">Body text, labels, buttons</span></div>
+    <div><code>--fs-4 15px</code><span style="font-size:var(--fs-4);font-weight:500">Card titles, row names</span></div>
+    <div><code>--fs-5 18px</code><span style="font-size:var(--fs-5);font-weight:500">Section titles, card stats</span></div>
+    <div><code>--fs-6 24px</code><span style="font-size:var(--fs-6);font-weight:500">Page title</span></div>
+    <div><code>--fs-7 32px</code><span style="font-size:var(--fs-7);font-weight:500">Hero number</span></div>
+  </div>
+  <p class="note">Spacing on a 4 px grid: 4 · 8 · 12 · 16 · 20 · 24 · 32 · 48. Radii stay <code>--r-s 8</code>, <code>--r-m 12</code>, <code>--r-l 18</code>. A node test rejects new raw <code>font-size: Npx</code> in <code>app.css</code>.</p>
+</section>
+
+<section class="kit">
+  <h2>Contrast fix <small>--dim-2</small></h2>
+  <div class="cmp">
+    <div><span class="k" style="color:var(--dim-2-old)">Old #63798A · 3.8:1 on surface</span><p style="margin:8px 0 0;font-size:var(--fs-1);color:var(--dim-2-old)">Caption text at 11 px. Fails WCAG AA for text.</p></div>
+    <div><span class="k" style="color:var(--dim-2)">New #7A91A0 · 5.0:1 on surface</span><p style="margin:8px 0 0;font-size:var(--fs-1);color:var(--dim-2)">Caption text at 11 px. Passes AA. Used only for tertiary text and grips.</p></div>
+  </div>
+</section>
+
+<section class="kit">
+  <h2>Status vocabulary <small>status-icon.js → .pill</small></h2>
+  <div class="row">
+    <span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span>
+    <span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Current</span>
+    <span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span>
+    <span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span>
+    <span class="pill run"><span class="sic k-verify"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Verifying</span>
+    <span class="pill acc"><span class="sic "><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Update ready</span>
+    <span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span>
+    <span class="pill none"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M5 19.6h14"/></svg></span>Not cached</span>
+    <span class="pill none"><span class="sic "><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.6"/><path d="M12 5.4a6.6 6.6 0 0 0 0 13.2Z" fill="currentColor" stroke="none"/></svg></span>Partially cached</span>
+    <span class="pill none"><span class="sic "><svg viewBox="0 0 24 24"><path d="M9.1 9.2a2.9 2.9 0 1 1 4.3 2.6c-.9.5-1.4 1.1-1.4 2v.4"/><path d="M12 17.7v.02"/></svg></span>Not verified</span>
+    <span class="pill"><span class="sic "><svg viewBox="0 0 24 24"><path d="M9 7v10M15 7v10"/></svg></span>Paused</span>
+    <span class="pill"><span class="sic "><svg viewBox="0 0 24 24"><rect x="7.5" y="7.5" width="9" height="9" rx="1.5" fill="currentColor" stroke="none"/></svg></span>Cancelled</span>
+    <span class="pill danger"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Failed</span>
+    <span class="pill"><span class="sic "><svg viewBox="0 0 24 24"><path d="M7 12h10"/></svg></span>Idle</span>
+    <span class="pill"><span class="sic "><svg viewBox="0 0 24 24"><path d="M7 12h10"/></svg></span>Offline</span>
+  </div>
+  <p class="note">The pill wraps the existing <code>status-icon.js</code> disc: shape first, word second, colour third (colour-blind safe, mockup round 5). Motion stays what it is today and means "happening right now": the download arrows fall, Updating and Verifying turn; everything else is still. <code>prefers-reduced-motion</code> stops it. New in the pill: a tinted background so the state reads at card size. Disc rule: the glyph box is 60 % of the disc diameter (16 px disc, 10 px glyph), so at least 3 px of disc stays visible around every shape.</p>
+</section>
+
+<section class="kit">
+  <h2>Primitives</h2>
+  <div class="page-head">
+    <div><h1>Page title</h1><div class="sub">Subline in --dim, 13 px · counts and period</div></div>
+    <button class="btn pri">+ Primary action</button>
+  </div>
+  <div class="tiles">
+    <div class="tile"><div class="k">Connected</div><div class="v">2<small>of 2</small></div><div class="n">1 loading now</div></div>
+    <div class="tile"><div class="k">Loaded</div><div class="v">529<small>GB</small></div><div class="n">in 7 days</div></div>
+    <div class="tile"><div class="k">Hit rate</div><div class="v">77<small>%</small></div><div class="meter"><i style="width:77%"></i></div></div>
+    <div class="tile hi"><div class="k">Agents</div><div class="v">1<small>online</small></div><div class="n"><span class="pill stale" style="padding:3px 8px"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>1 outdated</span></div></div>
+  </div>
+  <div class="sechd"><span class="sec">Section label</span>
+    <div class="seg"><button>24 h</button><button aria-pressed="true">7 days</button><button>30 days</button><button>All</button></div>
+  </div>
+  <div class="row">
+    <button class="btn pri">Primary</button><button class="btn">Default</button><button class="btn ghost">Ghost</button><button class="btn sm">Small</button><button class="btn sm danger">Danger</button><button class="btn sm w72">Update</button><button class="btn sm w72">Verify</button>
+  </div>
+  <div class="row">
+    <button class="fchip" aria-pressed="true">Cached<b>22</b></button><button class="fchip">Not cached<b>417</b></button><button class="fchip">Updates<b>1</b></button>
+    <span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip more">+2 more</span>
+  </div>
+  <div class="fcard">
+    <h3>Field card · group title</h3>
+    <div class="fg">
+      <div class="field"><div class="lh"><label>Vault name</label><button class="ib" aria-label="Info">i</button><span class="chip ch">Changed here</span></div><input class="in" value="SteamVAULT"></div>
+      <div class="field"><div class="lh"><label>Rate limit</label><button class="ib" aria-label="Info">i</button><span class="chip">Default</span></div><input class="in num" value="16 MB/s"><div class="hint">Takes effect within a minute.</div></div>
+      <div class="field"><div class="lh"><label>Cache root</label><button class="ib" aria-label="Info">i</button><span class="chip env">From env</span></div><input class="in" value="/vault/cache" disabled></div>
+    </div>
+  </div>
+</section>
+
+<section class="kit">
+  <h2>Clients card · three zones <small>one per row</small></h2>
+  <div class="demo">
+    <div class="frame" data-w="1400 container">
+      <div class="ccard warn">
+        <div class="z">
+          <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+            <div><div class="nm">Desk PC</div><div class="meta">vault-agent · 192.168.10.102</div></div></div>
+          <div class="pills"><span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span><span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span></div>
+          <div class="upd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16"/></svg>
+            <div><b>Agent update available</b><span>Agent <code>0.1.0-rc18.1</code> · server <code>0.1.0-rc19.3</code>. New features reach this PC only after the update.</span></div>
+            <button class="btn sm">Show update command</button></div>
+          <div class="agent"><b>✓ Healthy</b><span>24 games reported · 42.8 GB served · 93 % hits · seen 8 min ago</span></div>
+        </div>
+        <div class="z">
+          <div class="now idle">Loading nothing right now</div>
+          <div class="stats">
+            <div><div class="k">Installed</div><div class="v">24<small>games</small></div></div>
+            <div><div class="k">Loaded</div><div class="v">38.2<small>GB</small></div></div>
+            <div><div class="k">Hit rate</div><div class="v">98<small>%</small></div><div class="meter"><i style="width:98%"></i></div></div>
+          </div>
+        </div>
+        <div class="z">
+          <span class="sec">Recently loaded</span>
+          <div class="pills"><span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip">The Riftbreaker<b>10.3 GB</b></span><span class="gchip">Dyson Sphere Program<b>1.7 GB</b></span><span class="gchip more">+2 more</span></div>
+        </div>
+        <div class="cf"><span>Last active 8 min ago · 1.4 GB not linked to a game</span><div class="acts"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div></div>
+      </div>
+      <div style="height:16px"></div>
+      <div class="ccard">
+        <div class="z">
+          <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="6" rx="2"/><rect x="3" y="13" width="18" height="6" rx="2"/></svg></div>
+            <div><div class="nm">Prefill runner</div><div class="meta">this server's prefill downloads · 172.16.12.1</div></div></div>
+          <div class="pills"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div>
+        </div>
+        <div class="z">
+          <div class="now"><div><b>HELLDIVERS™ 2</b><span>Loading into the cache</span></div><span class="spd">28.8 MB/s</span></div>
+          <div class="stats">
+            <div><div class="k">Loaded</div><div class="v">491<small>GB</small></div></div>
+            <div><div class="k">Hit rate</div><div class="v">77<small>%</small></div><div class="meter"><i style="width:77%"></i></div></div>
+            <div><div class="k">Unlinked</div><div class="v">17.0<small>GB</small></div></div>
+          </div>
+        </div>
+        <div class="z">
+          <span class="sec">Recently loaded</span>
+          <div class="pills"><span class="gchip">Assassin's Creed Black Flag Resynced<b>157 GB</b></span><span class="gchip">The Witcher 3<b>119 GB</b></span><span class="gchip">Enshrouded<b>86.6 GB</b></span><span class="gchip more">+7 more</span></div>
+        </div>
+        <div class="cf"><span>Last active 9 min ago</span></div>
+      </div>
+    </div>
+    <div class="frame" data-w="400 container">
+      <div class="ccard warn">
+        <div class="z">
+          <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+            <div><div class="nm">Desk PC</div><div class="meta">vault-agent · 192.168.10.102</div></div></div>
+          <div class="pills"><span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span><span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span></div>
+          <div class="upd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16"/></svg>
+            <div><b>Agent update available</b><span>Agent <code>0.1.0-rc18.1</code> · server <code>0.1.0-rc19.3</code>.</span></div>
+            <button class="btn sm">Show update command</button></div>
+        </div>
+        <div class="z">
+          <div class="now idle">Loading nothing right now</div>
+          <div class="stats">
+            <div><div class="k">Installed</div><div class="v">24<small>games</small></div></div>
+            <div><div class="k">Loaded</div><div class="v">38.2<small>GB</small></div></div>
+            <div><div class="k">Hit rate</div><div class="v">98<small>%</small></div><div class="meter"><i style="width:98%"></i></div></div>
+          </div>
+        </div>
+        <div class="z">
+          <span class="sec">Recently loaded</span>
+          <div class="pills"><span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip">The Riftbreaker<b>10.3 GB</b></span><span class="gchip more">+3 more</span></div>
+        </div>
+        <div class="cf"><span>Last active 8 min ago</span><div class="acts"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">Zone 1 identity and health, zone 2 activity and numbers, zone 3 recent games. Below 700 px the zones stack; the stats keep three columns down to 400 px. Removing the agent row or the update box removes nothing else.</p>
+</section>
+
+<section class="kit">
+  <h2>Downloads · width-aware <small>hero + 3 columns</small></h2>
+  <div class="demo">
+    <div class="frame" data-w="1400 container">
+      <div class="dl">
+        <div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><div class="row"><button class="btn">Pause all</button></div></div>
+        <div class="hero">
+          <div class="hh"><span class="sec">Speed</span><div class="seg"><button aria-pressed="true">Live</button><button>1 h</button><button>6 h</button><button>24 h</button><button>7 days</button><button>30 days</button><button>All</button></div></div>
+          <div class="live">
+            <div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div><div class="cap">Limit <b style="color:var(--text);font-weight:500">16 MB/s</b>, all day · 1 device loading</div></div>
+            <div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><g stroke="var(--line-soft)" stroke-width="1"><line x1="0" y1="24" x2="600" y2="24"/><line x1="0" y1="48" x2="600" y2="48"/><line x1="0" y1="72" x2="600" y2="72"/></g><path d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72" fill="none" stroke="var(--accent)" stroke-width="2"/><path d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 96 L0 96Z" fill="var(--accent)" opacity=".12"/></svg><div class="ax"><span>55 min ago</span><span>peak 104 MB/s</span><span>now</span></div></div>
+          </div>
+          <div class="mini"><span>Avg while loading <b>37.3 MB/s</b></span><span>Peak <b>104 MB/s</b></span><span>Prefill runner <b>23.1 GB</b> of it, cache <b>25.0 GB</b></span></div>
+          <div class="tiles">
+            <div class="tile"><div class="k">Served</div><div class="v">48.1<small>GB</small></div><div class="n">cache + prefill</div></div>
+            <div class="tile"><div class="k">From internet</div><div class="v">6<small>MB</small></div><div class="n">not in cache</div></div>
+            <div class="tile"><div class="k">Saved by cache</div><div class="v">25.0<small>GB</small></div><div class="n">instead of internet</div></div>
+            <div class="tile"><div class="k">Hit rate</div><div class="v">100<small>%</small></div><div class="meter"><i style="width:100%"></i></div></div>
+          </div>
+        </div>
+        <div class="cols3">
+          <div class="col">
+            <div class="blk"><div class="sechd"><span class="sec">Active</span><span class="badge">1</span></div>
+              <div class="job"><div class="t"><div><div class="nm">Driftwood Signal</div><div class="meta">job #900001 · appid 2010030</div></div><span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span></div><div class="bar"><i></i></div><div class="m2"><span>62 % · 8.8 of 14.2 GB</span><span>31.5 MB/s · 3 min left</span></div><div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost danger">Stop</button></div></div></div>
+            <div class="blk"><div class="sechd"><span class="sec">Queue</span><span class="badge">2</span></div>
+              <div class="rowlist">
+                <div class="jr"><div><span class="grip">⋮⋮</span> <span class="nm">Satisfactory</span></div><span class="sz">24.8 GB</span><button class="btn sm ghost w72">Remove</button></div>
+                <div class="jr"><div><span class="grip">⋮⋮</span> <span class="nm">Enshrouded</span></div><span class="sz">86.6 GB</span><button class="btn sm ghost w72">Remove</button></div>
+              </div><p class="hint" style="margin:0">Drag the handle to change the order.</p></div>
+          </div>
+          <div class="col">
+            <div class="blk"><div class="sechd"><span class="sec">Updates available</span><div class="row" style="gap:8px"><span class="badge">3</span><button class="btn sm">Update all</button></div></div>
+              <div class="rowlist">
+                <div class="jr"><div><div class="nm">HELLDIVERS™ 2</div><div class="meta">build 19 834 112 · 1.2 GB</div></div><span></span><button class="btn sm w72">Update</button></div>
+                <div class="jr"><div><div class="nm">Factorio</div><div class="meta">build 19 701 002 · 0.3 GB</div></div><span></span><button class="btn sm w72">Update</button></div>
+                <div class="jr"><div><div class="nm">No Man's Sky</div><div class="meta">build 19 822 990 · 4.1 GB</div></div><span></span><button class="btn sm w72">Update</button></div>
+              </div></div>
+            <div class="blk"><div class="sechd"><span class="sec">Incomplete</span><div class="row" style="gap:8px"><span class="badge">2</span><button class="btn sm">Verify all</button></div></div>
+              <div class="rowlist">
+                <div class="jr"><div><div class="nm">Aurora Cascade</div><div class="meta">86 % on disk · 0.6 GB missing</div></div><span></span><button class="btn sm w72">Verify</button></div>
+                <div class="jr"><div><div class="nm">Starfall Legion</div><div class="meta">99 % on disk · 1 package failed</div></div><span></span><button class="btn sm w72">Verify</button></div>
+              </div><p class="hint" style="margin:0">These complete automatically in the download window 03:00–07:00.</p></div>
+          </div>
+          <div class="col">
+            <div class="blk"><div class="sechd"><span class="sec">History</span><div class="row" style="gap:8px"><div class="seg"><button>24 h</button><button>7 d</button><button aria-pressed="true">All</button></div><button class="btn sm ghost">Delete…</button></div></div>
+              <div class="rowlist">
+                <div class="hrow"><span class="sic" style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><div><div class="nm">HELLDIVERS™ 2</div><div class="meta">job #191 · Garbage collected · 16.10.2026, 18:49</div></div><span class="chev">›</span></div>
+                <div class="hrow"><span class="sic" style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><div><div class="nm">HELLDIVERS™ 2</div><div class="meta">job #190 · Done · 16.10.2026, 18:49</div></div><span class="chev">›</span></div>
+                <div class="hrow"><span class="sic" style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><div><div class="nm">HELLDIVERS™ 2</div><div class="meta">job #189 · Failed · 16.10.2026, 18:28</div></div><span class="chev">›</span></div>
+                <div class="hrow"><span class="sic" style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><div><div class="nm">Sir, We Have an Orc Problem</div><div class="meta">job #188 · Done · 16.10.2026, 17:21</div></div><span class="chev">›</span></div>
+              </div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="frame" data-w="400 container">
+      <div class="dl">
+        <div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><button class="btn sm">Pause all</button></div>
+        <div class="hero">
+          <div class="hh"><span class="sec">Speed</span><div class="seg"><button aria-pressed="true">Live</button><button>6 h</button><button>7 d</button><button>All</button></div></div>
+          <div class="live">
+            <div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div></div>
+            <div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><path d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72" fill="none" stroke="var(--accent)" stroke-width="2"/><path d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 96 L0 96Z" fill="var(--accent)" opacity=".12"/></svg><div class="ax"><span>55 min</span><span>now</span></div></div>
+          </div>
+          <div class="mini"><span>Avg <b>37.3 MB/s</b></span><span>Peak <b>104 MB/s</b></span></div>
+          <div class="tiles">
+            <div class="tile"><div class="k">Served</div><div class="v">48.1<small>GB</small></div></div>
+            <div class="tile"><div class="k">Internet</div><div class="v">6<small>MB</small></div></div>
+            <div class="tile"><div class="k">Saved</div><div class="v">25.0<small>GB</small></div></div>
+            <div class="tile"><div class="k">Hit rate</div><div class="v">100<small>%</small></div><div class="meter"><i style="width:100%"></i></div></div>
+          </div>
+        </div>
+        <div class="cols3">
+          <div class="col"><div class="blk"><div class="sechd"><span class="sec">Active</span><span class="badge">1</span></div>
+            <div class="job"><div class="t"><div><div class="nm">Driftwood Signal</div><div class="meta">job #900001</div></div><span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span></div><div class="bar"><i></i></div><div class="m2"><span>62 % · 8.8 GB</span><span>31.5 MB/s</span></div><div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost danger">Stop</button></div></div></div></div>
+          <div class="col"><div class="blk"><div class="sechd"><span class="sec">Updates available</span><span class="badge">3</span></div>
+            <div class="rowlist"><div class="jr"><div><div class="nm">HELLDIVERS™ 2</div><div class="meta">1.2 GB</div></div><span></span><button class="btn sm w72">Update</button></div></div></div></div>
+          <div class="col"><div class="blk"><div class="sechd"><span class="sec">History</span><div class="seg"><button>24 h</button><button aria-pressed="true">All</button></div></div>
+            <div class="rowlist"><div class="hrow"><span class="sic" style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><div><div class="nm">HELLDIVERS™ 2</div><div class="meta">#189 · Failed · 18:28</div></div><span class="chev">›</span></div></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">The hero puts the four totals beside the graph instead of under it, so the first screen already shows everything. Below it three equal columns: what runs and waits, what needs attention (Updates and Incomplete with the same row anatomy and a 72 px button column), and History. 1200 px: two columns, History full width underneath. 760 px: one column.</p>
+</section>
+</div>

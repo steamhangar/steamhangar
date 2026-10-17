@@ -3484,9 +3484,104 @@ below carry their own later dates, item 12 is the current one).
         again, check the log"
       - [ ] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
         theme.css) and a stale header comment in `library.js`
-      - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
-        page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
-        after main CI is green
+      - [ ] **Rework after the operator's visual check (2026-10-17).** The
+        packages above shipped the structure of the mockups (columns, tabs,
+        nav, split button, drag queue) but not their anatomy: the page
+        title, tiles, pills, section labels, segs and field cards were
+        re-styled per page from the old primitives, so every page reads as
+        "old look, new layout". Root causes and remedies are the UI kit
+        (`docs/design/rc20/kit.html`, approved 2026-10-17) and web
+        screenshot goldens. Decisions: Clients cards one per row in three
+        zones; Downloads hero with the four totals beside the graph and
+        three columns below; `--dim-2` raised to about #7A91A0 (5:1) and
+        no text below 11px; pills wrap the existing `status-icon.js` disc
+        (shape first, word second, colour third; glyph box 60% of the disc;
+        motion means "right now" and stays as is).
+        - [ ] **UI-KIT-1** (web, base, first) type scale `--fs-1..7`
+          (11/12/13/15/18/24/32) and spacing `--sp-1..8` (4px grid) in
+          `theme.css`, `--dim-2` to #7A91A0; new `web/css/kit.css` with
+          `.page-head`, `.tile` (value + `<small>` unit, caption, optional
+          `.meter`), `.pill` (wraps `createStatusIcon`, tinted background,
+          ok/run/acc/stale/danger/none), `.sec` + `.sechd`, `.seg`, `.btn`
+          variants incl. `.w72`, `.fchip`/`.gchip`, `.fcard` + `.fg` +
+          `.field` (label, 18px (i), chip, control, hint). Components size
+          themselves with container queries, not viewport breakpoints.
+          Hidden route `/kit` (`router.js` + `_SPA_ROUTES`) renders every
+          primitive with demo data at full width and inside a 400px
+          container, from the real stylesheets. A node test rejects new raw
+          `font-size:Npx` outside `theme.css`/`kit.css` (allow-list of the
+          existing ones, shrinking). ADR-0028 "Web UI kit, scale and visual
+          regression". Reference: `docs/design/rc20/kit.html`.
+        - [ ] **WEB-GOLDENS-1** (ci + tools, parallel to UI-KIT-1)
+          `tools/web-shot.mjs` drives the Playwright Chromium over CDP (no
+          playwright npm dependency): demo mode via localStorage, pages
+          library/clients/downloads/settings/kit (+ one open sheet each
+          where cheap) at 1400/1000/400px, deterministic clock and reduced
+          motion, PNG per page. CI job `web / goldens` like the Android
+          goldens (`wp/*-goldens` record branch, verify mode with a pixel
+          tolerance, diff images as artifacts, annotation on failure).
+          Local use: `dev.sh test-web-shots` against the dev instance.
+          Reviewers of every later web package attach the screenshots.
+        - [ ] **CLIENTS-4** (replaces the earlier CLIENTS-4 nit list) card
+          per `kit.html` "Clients card, three zones": zone 1 identity, pills
+          (`Online`/`Offline`, `Agent outdated`), update box, agent health
+          row; zone 2 "loading now" box or idle dashed box, three stats
+          with meter; zone 3 recent games as `.gchip` with "+N more"; footer
+          with last-active text and actions. One card per row (operator
+          decision 2026-10-17), zones stack below 700px container width.
+          Tiles: fixed four (Connected, Loaded, Hit rate, Agents with the
+          outdated pill inside), "Devices" section label with the range seg
+          on the right. Component `components/client-card.js` with its own
+          test; `clients.js` only composes.
+        - [ ] **ADD-DEVICE-2** drawer per `clients.html`: header (h2,
+          intro, tabs with icons), scrollable body, footer row (hint +
+          Close); numbered steps `ol.steps`; one security notice as a tinted
+          box; secret as a blurred `.code` block with Show + Copy side by
+          side; Phone tab with two side-by-side QR boxes; OS pick panel as
+          a dashed box. Tabs on `components/tabs.js`.
+        - [ ] **DOWNLOADS-2** per `kit.html` "Downloads, width-aware":
+          page head with Pause all right; hero = label + range seg row,
+          big number + pill + limit caption, graph (96px, grid lines) in
+          the middle, four totals as 2x2 tiles on the right, mini line
+          (avg, peak, runner share) below; three equal columns (Active +
+          Queue | Updates available + Incomplete | History), two at 1200px
+          with History full width, one at 760px. Attention rows share the
+          `.jr` anatomy (name, meta, 72px button) with count badges and
+          "Update all"/"Verify all" in the section head; paused jobs fold
+          into Active; the client row moves into the hero caption; History
+          head one row (seg + Delete); expanded row as a hanging panel
+          (boxed log with max-height, titled failure hint, bordered
+          command). Drop the `[data-state]` density switch. Components:
+          `downloads-hero.js`, `job-row.js`, `history-list.js`.
+        - [ ] **SETTINGS-2** per `settings.html` + kit: flat nav items
+          (13px, state on the same line right, accent-glow selection),
+          `.exp` expert row with the small switch; panels = h2 + p + one
+          `.fcard` per group (Identity, Connection, Schedule, Garbage
+          collection, Webhook, Steam identity, Steam library, Bandwidth,
+          Housekeeping, Debug); fields per kit `.field`; hint behind (i)
+          holds the timing line only, help text moves to the field's
+          Settings help where it exists; env-pinned rows as disabled inputs
+          with the env note behind (i); webhook events as a `.checks`
+          grid; savebar sticky inside the right column, one row; Steam
+          rows inline (input + buttons), status pill above; GC warning as a
+          `.warn` box below the grid. Component `settings-field.js`.
+        - [ ] **LIBRARY-2** per `library.html` + kit: chips wrap at BP-L
+          (no clipped chips), Filters always visible, sort as one `.sortg`
+          group, one status line (updates checked · Reload Steam library),
+          card status as pill-less dot + sentence case 12px with 11.5px
+          sub-lines, size-only cover badge, sub-lines hidden in Compact,
+          grid gaps per mockup; detail sheet 920px with permanent hero band
+          + X close, overlapping mini cover, status pill, Verify + Update in
+          the header row, two-column Overview with a 2x2 facts grid, no
+          bottom Close button.
+        - [ ] **rc20 docs:** `docs/design/rc20/README.md` points to
+          `kit.html` as the primary reference; `rc20-visual-check.md` gets
+          the kit page and the goldens; LEARNINGS entries for "structure
+          is not anatomy", "mockup CSS must be the real CSS", "no visual
+          package without a rendered screenshot".
+      - [ ] close: `dev.sh test-web`, `dev.sh verify`, web goldens green,
+        browser check of every page at 1400 / 1000 / 400px, docs, LEARNINGS,
+        tag `v0.1.0-rc20` after main CI is green
     - [ ] **rc20.x (optional patch)**: new defaults for `VAULT_NGINX_AIO` /
       `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027,
       box in the rc19.3 block) says so, with a new ADR carrying the numbers;
