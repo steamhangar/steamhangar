@@ -37,6 +37,7 @@ SECOND_TEST_REL = "app/app/src/testDebug/java/dev/steamvault/app/ui/clients/Clie
 SCREENSHOT_ROOT_REL = "app/app/src/testDebug/java"
 RECORD = "android-goldens-record"
 PUSH = "android-goldens-push"
+WEB_PUSH = "web-goldens-push"  # WP WEB-GOLDENS-1; its own pins live in test_web_goldens_1_ci.py
 GOLDENS = "app/app/src/testDebug/screenshots"
 ARTIFACT = "app-screenshot-goldens"
 RECORD_ACTIONS = {"actions/checkout", "actions/setup-java", "actions/upload-artifact"}
@@ -112,13 +113,15 @@ def test_workflow_push_trigger_covers_the_goldens_branches() -> None:
     assert "wp/**" in on["push"]["branches"]
 
 
-def test_only_the_push_job_may_write_and_only_contents() -> None:
+def test_only_the_push_jobs_may_write_and_only_contents() -> None:
+    # WP WEB-GOLDENS-1 added the web twin (web-goldens-push, pinned in
+    # test_web_goldens_1_ci.py); it is the only other job allowed to write.
     wf = _workflow()
     assert wf["permissions"] == {"contents": "read"}
     assert _job(PUSH)["permissions"] == {"contents": "write"}
     assert _job(RECORD)["permissions"] == {"contents": "read"}
     for name, job in wf["jobs"].items():
-        if name != PUSH:
+        if name not in (PUSH, WEB_PUSH):
             assert "write" not in str(job.get("permissions", "")), f"{name} must not gain write permissions"
 
 
@@ -153,7 +156,7 @@ def test_only_the_push_step_references_the_token() -> None:
             text = _dump(s)
             if "GITHUB_TOKEN" in text or re.search(r"\$\{\{[^}]*secrets\.", text):
                 hits.append((job_name, s.get("name")))
-    assert hits == [(PUSH, "goldens: push to the same branch")]
+    assert hits == [(PUSH, "goldens: push to the same branch"), (WEB_PUSH, "goldens: push to the same branch")]
     assert _step(PUSH, "goldens: push to the same branch")["env"] == {"PUSH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
 
 
