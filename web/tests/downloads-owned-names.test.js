@@ -320,7 +320,7 @@ test("MUTATION PIN (newest only): an older failed job for an app with a newer pr
   }
 });
 
-test("another failure reason renders exactly as before: output straight in the log, no block, no details, no Retry", async () => {
+test("another failure reason (DOWNLOADS-1): generic failure line and Retry, then the output straight in the log, no details", async () => {
   try {
     store.start();
     const s = renderDownloads();
@@ -328,10 +328,11 @@ test("another failure reason renders exactly as before: output straight in the l
     row(s, 3).querySelector("button").dispatchEvent(fakeClickEvent());
     await until(() => /disk full/.test(row(s, 3).querySelector(".log").textContent), "exit_code output");
     const r = row(s, 3);
-    assert.equal(r.querySelector(".failhint") === null, true, "no hint block for a plain exit_code failure");
+    assert.equal(r.querySelector(".failhint").dataset.hint, "generic", "generic failure block for a plain exit_code failure");
+    assert.match(r.querySelector(".failhint").textContent, /The download failed/);
     assert.equal(r.querySelector("details") === null, true, "no disclosure");
-    assert.equal(r.querySelectorAll("button").length, 1, "only the row toggle");
-    assert.equal(r.querySelector(".log").textContent, EXIT_CODE_EXCERPT);
+    assert.equal(r.querySelectorAll("button").length, 2, "the row toggle and Retry");
+    assert.match(r.querySelector(".log").textContent, /disk full/);
   } finally {
     store.stop();
   }

@@ -3438,7 +3438,7 @@ below carry their own later dates, item 12 is the current one).
         Linux-SteamOS) with a single security notice; secrets (API key,
         commands containing it) revealed on demand and copyable
         (`add-device-sheet.js`). Adapt `add-device-wiring.test.js`.
-      - [ ] **DOWNLOADS-1** declutter the header cards; two-column layout
+      - [x] **DOWNLOADS-1** declutter the header cards; two-column layout
         (Active and Queue left, History right, one column below 1000px);
         per-game Update and Verify buttons; Queue reordered by drag and drop
         only (no arrows); History differs between idle and active, rows
@@ -3476,6 +3476,10 @@ below carry their own later dates, item 12 is the current one).
         (.dialog-backdrop toggles .on directly; currently animates in only)
       - [ ] nit: Add-a-device tabs have no icons and the dialog has no
         numbered steps, unlike the mockup (`docs/design/rc20/`)
+      - [ ] nit (DOWNLOADS-1): the generic failure text could add "If it fails
+        again, check the log"
+      - [ ] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
+        theme.css) and a stale header comment in `library.js`
       - [ ] close: `dev.sh test-web`, `dev.sh verify`, browser check of every
         page at 1400 / 1000 / 400px, docs, LEARNINGS, tag `v0.1.0-rc20`
         after main CI is green
@@ -3487,11 +3491,19 @@ below carry their own later dates, item 12 is the current one).
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
       the operator's rc20 visual check; no rc21 tag without the operator's yes)
-      - [ ] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
+      - [x] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
         wrong-size chunk files of an app's target manifests behind the
         `deletion.py` cache-root guards (size re-checked right before the
         delete), then queue a forced run; "Complete all" and automatic
         completion keep skipping such a game until repaired. Full review.
+        Done: `POST /v1/cache/{appid}/repair` (dry run by default, `execute:
+        true` deletes then queues the forced run; 409 on an active job of the
+        app or a depot co-owner, 422 above 2000 files); `vault_api/cache_repair.py`;
+        API only, no schema change, no new env value; UI (button on an
+        incomplete row with `cache_missing_chunks == 0`) is a follow-up.
+      - [ ] **CACHE-REPAIR-UI-1** (web + android) Repair button on incomplete
+        rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
+        counts, execute, show job).
       - [ ] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
         in the completeness display: when depots of a game have no mapping
         the percentage says so instead of showing a clean figure.

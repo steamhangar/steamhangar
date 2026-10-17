@@ -165,10 +165,11 @@ test("MUTATION PIN: hidden while nothing is incomplete; shown with rows, figures
     assert.equal(allBtn(s).textContent, "Complete all");
     assert.equal(allBtn(s).getAttribute("aria-label"), "Complete all 2 games", "counts only the completable rows");
 
-    const order = s.children.map((c) => c.className || c.tagName);
+    const main = s.querySelector(".dl-col-main");
+    const order = main.children.map((c) => c.className || c.tagName);
     const upd = order.indexOf("dl-updates");
     assert.equal(order[upd + 1], "dl-updates dl-incomplete", "directly after Updates available");
-    assert.equal(s.children[upd + 2].textContent.startsWith("Queue"), true, "directly above the Queue heading");
+    assert.equal(main.children[upd + 2].textContent.startsWith("Queue"), true, "directly above the Queue heading");
 
     server.games = server.games.map((g) => ({ ...g, cache_complete_pct: 100, cache_missing_chunks: 0 }));
     store.refreshNow();

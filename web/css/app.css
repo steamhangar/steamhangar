@@ -1660,6 +1660,37 @@ body.onboarding .nav{ display:none; }
 .tgraph .tg-axis{ display:flex; justify-content:space-between; gap:8px; margin-top:3px; font-size:10.5px; color:var(--dim-2); }
 .jobspeed{ margin:6px 0 0; font-family:var(--mono); font-size:12px; color:var(--dim); }
 
+/* DOWNLOADS-1 hero stats card: one surface card holds range, note, tiles and
+   graph. "Current speed" leads full width and large; the other tiles are
+   flat (no own border) in a four-column row, two columns on narrow screens. */
+.dl-stats{ background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-l); padding:16px 18px; margin:16px 0 10px; display:grid; gap:12px; min-width:0; }
+.dl-stats .statgrid{ grid-template-columns:repeat(2, minmax(0, 1fr)); margin:0; gap:10px 16px; }
+.dl-stats .stat{ background:none; border:0; border-radius:0; padding:0; }
+.dl-stats .stat[data-stat="current"]{ grid-column:1 / -1; padding:0 0 10px; border-bottom:1px solid var(--line-soft); }
+.dl-stats .stat[data-stat="current"] dd{ font-size:30px; letter-spacing:-1px; }
+.dl-stats .tgraph{ margin:0; }
+@media (min-width:620px){
+  .dl-stats .statgrid{ grid-template-columns:repeat(4, minmax(0, 1fr)); }
+}
+/* History idle vs busy: nothing running leaves room, so History gets roomy
+   rows; while work runs it turns compact so Active and Queue lead. */
+[data-state="idle"] .dl-col-side .hrow > button{ padding:14px 14px; }
+[data-state="idle"] .dl-col-side .hrow .nm{ font-size:14px; }
+[data-state="busy"] .dl-col-side .hrow{ margin-bottom:4px; }
+[data-state="busy"] .dl-col-side .hrow > button{ padding:7px 12px; }
+[data-state="busy"] .dl-col-side .hrow .when{ margin-top:0; }
+
+/* DOWNLOADS-1: two columns (Active + Queue | History), one column below 1000px */
+.dl-cols{ display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
+.dl-col-main, .dl-col-side{ min-width:0; }
+.attn-toggle{ display:flex; width:fit-content; margin:0 0 9px auto; }
+@media (min-width:1000px){
+  .dl-cols{ grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); }
+}
+@media (prefers-reduced-motion:reduce){
+  .dl-cols *{ transition:none; animation:none; }
+}
+
 /* WP PAIR-1: "Add a device" sheet (components/add-device-sheet.js). The QR
    code is always dark modules on a white plate (its quiet zone is part of
    the SVG), whatever the theme: scanners want dark-on-light. Sized to the
