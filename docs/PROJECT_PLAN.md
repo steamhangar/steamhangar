@@ -3508,7 +3508,7 @@ below carry their own later dates, item 12 is the current one).
       - [ ] **CACHE-REPAIR-UI-1** (web + android) Repair button on incomplete
         rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
         counts, execute, show job).
-      - [ ] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
+      - [x] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
         in the completeness display: when depots of a game have no mapping
         the percentage says so instead of showing a clean figure.
       - [ ] nit (UNMAPPED-FLAG-1, VERSION-HEALTH-1): `get_game` scans all of

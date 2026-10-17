@@ -1196,3 +1196,11 @@ These are not style preferences; each entry cost a review round to learn.
   toggle goes aria-disabled while a request is out. When the full run
   reports a bare SIGKILL for one file, run it alone with
   `node --test web/tests/<file>`: the per-test output names the hanging test.
+- **Android twin pins break on template edits, not only on renames.** Kotlin
+  `*WebTwinTest` files pin quoted template fragments of web JS byte for byte
+  (e.g. the `completenessLine` return template). Extending a pinned template
+  literal fails the Android CI job even when the output is a superset. Keep the
+  pinned literal untouched and append the new part outside it
+  (`` `...` + note ``); a source-grep review cannot catch this, only the
+  Android job can, so grep `app/app/src/test` for the exact literal before
+  editing a template.

@@ -172,6 +172,17 @@ export const VERIFY_HINT =
 export const DAMAGED_NOTE = "Damaged chunks — SteamHangar can't repair these yet.";
 export const UNKNOWN_LINE = "Completeness unknown — not measured for the current build.";
 
+/**
+ * WP UNMAPPED-FLAG-1: the honesty suffix for a known figure when the server
+ * reports `cache_unmapped_depots` > 0 (depots the game uses that have no
+ * mapping and are NOT in the percentage). `""` for 0, absent or malformed.
+ */
+export function unmappedNote(row) {
+  const n = row?.cache_unmapped_depots;
+  if (!Number.isInteger(n) || n <= 0) return "";
+  return ` · not counted: ${n} unmapped ${n === 1 ? "depot" : "depots"}`;
+}
+
 /** True for a row whose own figure is known, below 100 and short of no
  * missing chunk file: only wrong-size chunks, nothing a forced run fixes. */
 export function isDamagedOnly(row) {
@@ -202,7 +213,8 @@ export function completenessLine(row) {
   // measured against must stay visible (WP MAP-FROM-MANIFEST-1).
   const amount = !expected ? `${present} on disk` : `${present} of ${expected} on disk`;
   const checked = row.cache_complete_checked_at ? ` · checked ${formatTimestamp(row.cache_complete_checked_at)}` : "";
-  return `${pct}% complete — ${amount}${checked}`;
+  // The template stays byte-identical: the Android twin pins it.
+  return `${pct}% complete — ${amount}${checked}` + unmappedNote(row);
 }
 
 /** The group line under it for a group row with a known group figure, else

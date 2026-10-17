@@ -59,6 +59,17 @@ the map and is not counted until a prefill fills it.
 known", never "complete" -- it must not render as the green check. Only
 ``cache_complete_pct == 100`` earns it.
 
+## Unmapped depots (WP UNMAPPED-FLAG-1)
+
+The figure covers the mapped depots only (see "Which depots count"), so a
+depot the game demonstrably uses but that has no mapping silently drops out
+of the percentage. ``unmapped_depot_counts`` finds those: a depot with a
+``depot_manifests`` row recorded for the app (ingested from a manifest a
+prefill used), mapped to NO app in ``depot_app_map``, and with bytes on disk.
+The oracle's own depot list is deliberately not used (it carries every OS and
+language). The API reports the count as ``cache_unmapped_depots`` so the UIs
+can say the figure is not the whole game instead of showing a clean number.
+
 ## DLC groups (D9)
 
 ``group_cache_complete_pct`` aggregates the (app, depot) pairs of the group
@@ -691,6 +702,26 @@ def app_figure(
     if not size_bytes:
         return UNKNOWN
     return index.figure((appid, d) for d in depotids)
+
+
+def unmapped_depot_counts(
+    conn: sqlite3.Connection, depot_bytes: Mapping[int, int]
+) -> dict[int, int]:
+    """``{appid: n}`` for every app with ``n`` > 0 unmapped depots (module
+    header, "Unmapped depots"): recorded manifest for the app, no
+    ``depot_app_map`` row for the depot under any app, bytes on disk. One
+    statement for all apps."""
+    counts: dict[int, int] = {}
+    for row in conn.execute(
+        "SELECT appid, depotid FROM depot_manifests dm WHERE NOT EXISTS "
+        "(SELECT 1 FROM depot_app_map m WHERE m.depotid = dm.depotid)"
+    ):
+        appid = deletion.coerce_positive_id(row["appid"])
+        depotid = deletion.coerce_positive_id(row["depotid"])
+        if appid is None or depotid is None or depot_bytes.get(depotid, 0) <= 0:
+            continue
+        counts[appid] = counts.get(appid, 0) + 1
+    return counts
 
 
 def is_incomplete(figure: Completeness) -> bool:
