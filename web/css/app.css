@@ -1681,6 +1681,10 @@ body.onboarding .nav{ display:none; }
 [data-state="busy"] .dl-col-side .hrow .when{ margin-top:0; }
 
 /* DOWNLOADS-1: two columns (Active + Queue | History), one column below 1000px */
+/* WP CLIENT-ROW-1: one quiet line above "Active", only while a machine loads. */
+.dl-client-row{ display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; margin:0 0 12px; padding:9px 12px; background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m); font-size:13px; }
+.dl-client-row[hidden]{ display:none; }
+.dl-client-row span{ color:var(--dim-2); }
 .dl-cols{ display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
 .dl-col-main, .dl-col-side{ min-width:0; }
 .attn-toggle{ display:flex; width:fit-content; margin:0 0 9px auto; }
