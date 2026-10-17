@@ -3508,6 +3508,27 @@ below carry their own later dates, item 12 is the current one).
       - [ ] **CACHE-REPAIR-UI-1** (web + android) Repair button on incomplete
         rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
         counts, execute, show job).
+      - [x] **FIX-POP-HIDDEN-1** (web, rc20 visual check 2026-10-17) the
+        Updates split-button menu was always open because
+        `.pop.menu{display:flex}` beat `.pop[hidden]`; it overlapped the
+        search field and the caret appeared dead. Guard added plus a CSS pin
+        test. Also: Clients cards got icon tile, "now" box, card padding,
+        action footer, boxed update warning and an empty state box.
+      - [ ] **CLIENTS-4** (web) finish the Clients cards per
+        `docs/design/rc20/clients.html`: mono meta line and outdated pill in
+        the card head; update box tint, icon, versions in code, "Show update
+        command"; now box with subline and speed readout; stat grid
+        (Installed, Loaded, Hit rate with meter); Recent chips with "+N
+        more"; agent health row; footer with last active and unattributed GB;
+        summary tile details and range control.
+      - [ ] **CSS-HIDDEN-LINT-1** (web test) generalise the hidden-guard lint
+        in `css-hygiene.test.js`: fail when a later or higher-specificity rule
+        sets `display` on an element whose `[hidden]` guard it overrides
+        (`css-pop-hidden.test.js` covers only compound `.pop.<x>`).
+      - [ ] nit (FIX-POP-HIDDEN-1): `.pop` has no box-shadow and
+        `.pop.menu` min-width is 100% where the Library mockup shows 260px
+        plus shadow; dead `.cl-list > p` rule; the Clients empty state repeats
+        the "Add a device" accessible name.
       - [x] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
         in the completeness display: when depots of a game have no mapping
         the percentage says so instead of showing a clean figure.

@@ -66,6 +66,7 @@ const RUNNER = {
   name: null, name_addr: null, display_name: "Prefill runner",
 };
 function overview(range, state = "ok") {
+  if (state === "empty") return { event_feed: feed("ok"), range, tier: "1h", range_start: null, active_window_minutes: 15, clients: [] };
   if (state === "runner") {
     return { event_feed: feed("ok"), range, tier: "1h", range_start: null, active_window_minutes: 15, clients: [AGENT, RUNNER] };
   }
@@ -333,4 +334,23 @@ test("index.html: a Clients nav button right after Library", () => {
   const views = [...html.matchAll(/class="nav-btn" data-view="([a-z]+)"/g)].map((m) => m[1]);
   assert.deepEqual(views, ["library", "clients", "downloads", "settings"]);
   assert.match(html, /<span class="nav-lb">Clients<\/span>/);
+});
+
+test("empty instance: header, Add a device and an empty-state entry still render", async () => {
+  server.state = "empty";
+  const s = await mount();
+  await until(() => s.querySelector('[data-role="clients-empty"]'), "empty state");
+  assert.equal(text(s, "h1"), "Clients");
+  assert.equal(text(s, '[data-role="add-device"]'), "Add a device");
+  assert.equal(text(s, '[data-role="add-device-empty"]'), "Add a device");
+  assert.match(text(s, '[data-role="clients-empty"] .hint'), /^No clients to show\./);
+});
+
+test("device card carries the rc20 structure: icon, name, now box", async () => {
+  const s = await mount();
+  await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
+  const c = card(s, "agent:gaming-pc");
+  assert.ok(c.querySelector(".jobtop .cl-ico"), "icon in the header");
+  assert.ok(c.querySelector('[data-role="loading-now"].cl-now.busy'), "loading box is highlighted while loading");
+  assert.ok(!card(s, "addr:192.168.1.77").querySelector(".cl-now.busy"));
 });

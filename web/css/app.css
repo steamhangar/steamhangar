@@ -172,6 +172,7 @@
 }
 .lib-split:not(.solo) .split-lbl{ display:none; }
 .pop.menu{ min-width:100%; width:max-content; padding:4px; display:flex; flex-direction:column; }
+.pop.menu[hidden]{ display:none; }
 .pop.menu .menuitem{
   text-align:left; padding:9px 12px; border-radius:var(--r-s); color:var(--text); font-size:12.5px;
   background:transparent; border:0; cursor:pointer; white-space:normal;
@@ -1623,11 +1624,22 @@ body.onboarding .nav{ display:none; }
 .cl-tile .n{ margin-top:1px; font-size:12px; color:var(--dim); }
 .cl-tile.warn{ border-color:var(--stale); }
 .cl-tile.warn .v{ color:var(--stale); }
-.clcard .cl-upd{ margin-top:8px; padding:8px 10px; border-left:2px solid var(--stale); display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+.clcard .cl-upd{ margin-top:10px; padding:10px 12px; border:1px solid var(--stale); border-radius:10px; background:var(--raised); display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
 .clcard .cl-upd strong{ color:var(--stale); }
 .clcard .cl-upd p{ margin:0; flex:1 1 220px; font-size:12px; color:var(--dim); overflow-wrap:anywhere; }
 .cl-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(min(440px, 100%), 1fr)); gap:14px; align-items:start; }
 .cl-list > p{ grid-column:1 / -1; }
+.cl-list > .cl-empty{ grid-column:1 / -1; }
+.cl-empty{ display:grid; justify-items:center; gap:10px; padding:22px 16px; border:1px dashed var(--line); border-radius:var(--r-m); background:var(--bg); }
+.cl-empty .hint{ margin:0; }
+.clcard{ margin-bottom:0; padding:16px 18px; border-radius:14px; }
+.cl-top{ align-items:center; }
+.cl-top .cl-info{ flex:1; }
+.cl-ico{ width:38px; height:38px; flex:none; border-radius:11px; display:grid; place-items:center; background:var(--raised); color:var(--accent); box-shadow:inset 0 0 0 1px var(--line); }
+.cl-ico svg{ width:20px; height:20px; }
+.clcard .cl-now{ margin-top:12px; padding:10px 12px; border-radius:10px; font-family:var(--ui); font-size:12.5px; color:var(--dim); border:1px dashed var(--line); }
+.clcard .cl-now.busy{ color:var(--accent); background:var(--accent-glow); border:1px solid transparent; }
+.clcard .cl-acts{ margin-top:12px; padding-top:12px; border-top:1px solid var(--line-soft); }
 .clcard .cl-line{ margin-top:4px; overflow-wrap:anywhere; }
 .clcard .jobtop .pchip{ margin-top:2px; }
 /* WP D15-NAMES: the card's Rename button, the rename dialog (its title
