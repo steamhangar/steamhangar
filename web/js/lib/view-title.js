@@ -16,6 +16,8 @@ export const VIEW_TITLES = Object.freeze({
   clients: "Clients",
   downloads: "Downloads",
   settings: "Settings",
+  // WP UI-KIT-1: the hidden UI kit page (views/kit.js), URL-only.
+  kit: "UI kit",
 });
 
 /**

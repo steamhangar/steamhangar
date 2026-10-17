@@ -8,9 +8,14 @@
  * top-level view is ever added here, it MUST also be added to
  * `_SPA_ROUTES` in api/vault_api/webui.py, or a hard page load / deep link
  * to it will 404 instead of opening the app.
+ *
+ * `kit` (WP UI-KIT-1) is a hidden route: the UI kit page (views/kit.js)
+ * renders every primitive from the real stylesheets for visual checks and
+ * the screenshot goldens (WP WEB-GOLDENS-1). It has no nav-rail button on
+ * purpose; it is reached by URL only.
  */
 
-export const VIEWS = ["library", "clients", "downloads", "settings"];
+export const VIEWS = ["library", "clients", "downloads", "settings", "kit"];
 export const DEFAULT_VIEW = "library";
 
 function viewFromPath(pathname) {

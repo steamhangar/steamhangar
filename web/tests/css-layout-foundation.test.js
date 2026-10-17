@@ -748,9 +748,12 @@ test("BP-L's --w-wall cap binding status matches the current --rail-w — comput
 });
 
 test("no colour/font/radius :root token changed — every original hex/font/radius value from theme.css is still present verbatim", () => {
+  // WP UI-KIT-1 (ADR-0028) is the one deliberate change since this pin was
+  // written: --dim-2 moved from #63798A (3.8:1 on --surface) to #7A91A0
+  // (5.0:1, WCAG AA for 11px captions). Every other token is unchanged.
   const mustStillContain = [
     "--bg:#0A1016", "--surface:#111C24", "--raised:#17252F", "--raised-2:#1D303C",
-    "--line:#24363F", "--line-soft:#1B2A33", "--text:#E4EFF3", "--dim:#8AA1AD", "--dim-2:#63798A",
+    "--line:#24363F", "--line-soft:#1B2A33", "--text:#E4EFF3", "--dim:#8AA1AD", "--dim-2:#7A91A0",
     "--accent:#2ED9CE", "--accent-deep:#12A79F", "--accent-ink:#04211F",
     "--ok:#57DD8A", "--run:#F2CE5B", "--stale:#F07B2E", "--none:#8296A6", "--danger:#FF6F6F",
     "--r-s:8px", "--r-m:12px", "--r-l:18px", "--r-xl:26px",

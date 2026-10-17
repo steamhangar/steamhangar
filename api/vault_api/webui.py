@@ -34,6 +34,10 @@ markup / router in ``web/``.
 **WP D15c (user decision 2026-10-13).** Clients became its own page under
 Library, so ``clients`` is a view again; the PCs sheet stays for the bypass
 banner and the notifications.
+
+**WP UI-KIT-1.** ``kit`` is a hidden route (no nav button): the UI kit page
+renders every primitive of ``web/css/kit.css`` with demo data for visual
+checks and the screenshot goldens.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ logger = logging.getLogger(__name__)
 #: (tests/test_webui.py) parses both and asserts equality, so adding a view
 #: on only one side fails the suite instead of silently deep-linking to a
 #: 404 or leaving a nav button with no server-side route.
-_SPA_ROUTES = ("library", "clients", "downloads", "settings")
+_SPA_ROUTES = ("library", "clients", "downloads", "settings", "kit")
 
 #: The app shell itself always revalidates: a stale cached copy after a
 #: deploy is the one caching mistake worth actively avoiding here.

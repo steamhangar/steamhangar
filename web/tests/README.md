@@ -3935,3 +3935,22 @@ a wrapped docstring line read as a field). The Expert section shows
 vault-core's apply state (`coreApplyLine`: pending / rejected with reason
 / applied / none; no line before vault-core reported), pinned in
 `settings-sections-wiring.test.js` (+1) and `settings-layout.test.js` (+1).
+
+## WP UI-KIT-1 (2026-10-17) — UI kit, scale, hidden /kit page
+
+- `css-kit-scale.test.js` (8): theme.css defines `--fs-1..7` and
+  `--sp-1..8` once each with kit.html's values and `--dim-2:#7A91A0`;
+  kit.css has no raw px font size (font-size or `font:` shorthand) and no
+  hex/rgb colour; app.css's raw `font-size:Npx` count is pinned at 172 and
+  only goes down (a 40-wide honesty band forces lowering the pin after a
+  migration); every kit.css selector starts with `.kit` (the opt-in
+  scope); index.html links theme → kit → app; the pill disc rule
+  (`--sz:16px`, 60% glyph box).
+- `kit-pill.test.js` (5, fake-dom): `createPill` renders
+  `span.pill.TONE > span.sic.k-KIND + word`, drops the icon's sr-only word
+  when a visible word is present (keeps it icon-only), default tone per
+  kind covers every `STATUS_LABEL` kind; `renderKit` returns the `.kit`
+  root with the demo strings and every primitive twice (full width and in
+  the 400px `.kit-frame`); `kit` is in router `VIEWS`.
+- Updated pins: `view-announcer.test.js` (five views, `kit: "UI kit"`),
+  `css-layout-foundation.test.js` (`--dim-2:#7A91A0`).
