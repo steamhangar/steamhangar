@@ -157,19 +157,29 @@ user's yes, for a package that needs a production measurement). rc21 and rc22 ke
 freeze imposed). `1.0.0` criteria: ADR-0029 section 6 (accepted
 2026-10-18).
 
-- **AUTO-VERIFY-1 (decided 2026-10-18, Weg A + mode switch; rc21):**
-  goal: catch a game where only an update (delta) is cached while the
-  cache is assumed to hold the full game. The update check's disk
-  measurement already compares every chunk of the CURRENT manifest with
-  the files on disk, so a delta-only game reads "Partially cached" and the
-  window sweep completes it. Make that visible and switchable: Settings
-  checkbox "Complete cached games automatically" (default on) and a second
-  switch for the mode: "Missing chunks only" (default; forced run only for
-  games the disk check calls incomplete) or "Full" (forced run of every
-  cached game inside the download window, oldest "confirmed current"
-  first; costs hours of disk I/O, documented in the hint). The card and
-  sheet show the last disk check as the verified signal. Test: a game
-  with only a delta cached must read Partially cached and get completed.
+- **AUTO-VERIFY-1 (decided 2026-10-18, Weg A; rc21):** goal: catch a
+  game where only an update (delta) is cached while the cache is assumed
+  to hold the full game. The update check's disk measurement already
+  compares every chunk of the CURRENT manifest with the files on disk, so
+  a delta-only game reads "Partially cached" and the window sweep
+  completes it. Make that visible and switchable: Settings checkbox
+  "Complete cached games automatically" (default on; forced run only for
+  games the disk check calls incomplete). The card and sheet show the
+  last disk check as the verified signal. Test: a game with only a delta
+  cached must read Partially cached and get completed.
+- **AUTO-VERIFY-FULL-1 (deferred consideration, user 2026-10-18):** a
+  second switch "Missing chunks only" / "Full" (forced run of every
+  cached game in the download window, oldest "confirmed current" first)
+  was considered and taken out of AUTO-VERIFY-1. What Full would add: it
+  asks Steam itself which depots and chunks a game needs, so it covers
+  gaps in our own bookkeeping (wrong or missing depot mapping, unknown
+  manifests, as seen with HELLDIVERS 2 in GROUP-VERIFIED-1) and refreshes
+  "confirmed current". What it does not add: no corruption detection (a
+  HIT is served from disk unchecked), nothing extra for delta-only games
+  while the bookkeeping is right. Cost: reads the whole cache each night.
+  **Revisit when GROUP-VERIFIED-1 is closed:** if the depot mapping turns
+  out to be unreliable, add the switch (default off); if it is reliable,
+  drop the idea.
 
 ### v0.1.x: bug fixes only
 
