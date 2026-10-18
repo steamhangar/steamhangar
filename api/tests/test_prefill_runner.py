@@ -420,7 +420,7 @@ def test_apply_observed_mapping_replaces_within_the_app(conn) -> None:
     upsert_mapping(conn, depotid=441, appid=440, name="TF2")
     upsert_mapping(conn, depotid=999, appid=440, name=None)  # will go stale
 
-    change = prefill.apply_observed_mapping(conn, 440, {441, 442})
+    change = prefill.apply_observed_mapping(conn, 440, {441, 442}, manifest_named=set())
 
     depots = {
         row["depotid"]
@@ -439,7 +439,7 @@ def test_apply_observed_mapping_keeps_shared_depots_mapped_to_other_apps(conn) -
     upsert_mapping(conn, depotid=300, appid=730, name=None)
     upsert_mapping(conn, depotid=999, appid=440, name=None)
 
-    prefill.apply_observed_mapping(conn, 440, {300, 301})
+    prefill.apply_observed_mapping(conn, 440, {300, 301}, manifest_named=set())
 
     pairs = {
         (row["depotid"], row["appid"])
@@ -452,7 +452,7 @@ def test_apply_observed_mapping_keeps_shared_depots_mapped_to_other_apps(conn) -
 def test_apply_observed_mapping_leaves_everything_alone_when_nothing_observed(conn) -> None:
     upsert_mapping(conn, depotid=441, appid=440, name="TF2")
 
-    change = prefill.apply_observed_mapping(conn, 440, set())
+    change = prefill.apply_observed_mapping(conn, 440, set(), manifest_named=set())
 
     assert change.skipped_empty is True
     assert "left unchanged" in change.summary()
@@ -468,7 +468,7 @@ def test_apply_observed_mapping_leaves_everything_alone_when_nothing_observed(co
 
 
 def test_apply_observed_mapping_creates_the_app_row_for_a_new_title(conn) -> None:
-    prefill.apply_observed_mapping(conn, 12345, {1, 2})
+    prefill.apply_observed_mapping(conn, 12345, {1, 2}, manifest_named=set())
 
     row = conn.execute("SELECT appid FROM apps WHERE appid = 12345").fetchone()
     assert row is not None

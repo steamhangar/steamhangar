@@ -219,7 +219,7 @@ def test_ingest_skip_own_mapping_does_not_readd_a_depot_the_job_just_removed(
     conn = _conn(settings.db_path)
     try:
         upsert_mapping(conn, depotid=441, appid=440, name=None)
-        change = prefill.apply_observed_mapping(conn, 440, {442})
+        change = prefill.apply_observed_mapping(conn, 440, {442}, manifest_named=set())
         assert change.removed == {441}
         assert _owners(conn, 441) == set()
 

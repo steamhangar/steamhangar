@@ -1865,23 +1865,40 @@ function demoOwnFigure(g) {
   };
 }
 
-/** `group_cache_complete_pct` (D9): over the members with bytes on disk,
- * unknown when any of them is; null on a grouped row and with nothing on
+/** `group_cache_complete_pct` (D9) and `group_cache_unmeasured_*` (WP
+ * GROUP-VERIFIED-1): over the members with bytes on disk; the game itself is
+ * strict (unknown -> group unknown), a package with no figure is left out
+ * and reported as unmeasured; null on a grouped row and with nothing on
  * disk. Demo approximation: a depot shared inside the group is counted per
- * member (the real API counts it once). */
-function demoGroupPct(g) {
-  if (g.parent_appid != null) return null;
+ * member (the real API counts it once and lets a measured member cover it). */
+function demoGroupFields(g) {
+  const none = { group_cache_complete_pct: null, group_cache_unmeasured_depots: 0, group_cache_unmeasured_bytes: 0 };
+  if (g.parent_appid != null) return none;
   const members = [g, ...games.filter((c) => c.parent_appid === g.appid)].filter((m) => appSizeBytes(m.depots));
-  if (members.length === 0) return null;
+  if (members.length === 0) return none;
   let expected = 0;
   let present = 0;
+  let measured = 0;
+  let unmeasuredDepots = 0;
+  let unmeasuredBytes = 0;
   for (const m of members) {
     const f = demoOwnFigure(m);
-    if (!f) return null;
+    if (!f) {
+      if (m === g) return none;
+      unmeasuredDepots += m.depots.length;
+      unmeasuredBytes += appSizeBytes(m.depots) || 0;
+      continue;
+    }
+    measured += 1;
     expected += f.expected;
     present += f.present;
   }
-  return Math.floor((100 * present) / expected);
+  if (measured === 0) return none;
+  return {
+    group_cache_complete_pct: expected === 0 ? 100 : Math.floor((100 * present) / expected),
+    group_cache_unmeasured_depots: unmeasuredDepots,
+    group_cache_unmeasured_bytes: unmeasuredBytes,
+  };
 }
 
 function demoCompletenessFields(g) {
@@ -1892,7 +1909,7 @@ function demoCompletenessFields(g) {
     cache_present_bytes: f ? f.present : null,
     cache_complete_checked_at: f ? f.checkedAt : null,
     cache_missing_chunks: f ? f.missing : null,
-    group_cache_complete_pct: demoGroupPct(g),
+    ...demoGroupFields(g),
   };
 }
 

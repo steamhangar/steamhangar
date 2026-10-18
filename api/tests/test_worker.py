@@ -113,11 +113,18 @@ def test_successful_job_updates_job_app_status_and_mapping(
 def test_worker_replaces_stale_mapping_but_keeps_shared_depots(
     tmp_path: Path, bindir: Path, cache_root: Path
 ) -> None:
-    """ADR-0003 decision 3, through the full stack."""
+    """ADR-0003 decision 3, through the full stack. The temp cache exists and
+    holds no manifest naming 999, so the replace step may prune it (WP
+    GROUP-VERIFIED-1: without readable manifest evidence nothing is removed,
+    tests/test_group_verified.py)."""
     executable = stub_prefill.make_stub(
         bindir, cache_root=str(cache_root), depots_by_app={440: [300, 301]}
     )
-    app = create_app(make_settings(tmp_path, cache_root, executable))
+    temp_cache = tmp_path / "steamprefill-cache"
+    temp_cache.mkdir()
+    app = create_app(
+        make_settings(tmp_path, cache_root, executable, steamprefill_cache_dir=str(temp_cache))
+    )
 
     with TestClient(app) as client:
         # Pre-existing mapping: 300 shared with 730, 999 about to go stale.
@@ -202,7 +209,7 @@ def test_successful_job_invalidates_the_size_cache(
 # job-outcome wiring has to make: unparseable table (exit-code rule
 # unchanged), Updated==0 AND Up To Date==0 (-> 'error', not 'done'),
 # Up To Date>0 AND Updated==0 (-> 'done' + last_manifest_check), and the
-# normal Updated>0 case, each also checked for the new updated/up_to_date/
+# normal Updated>0 case (also stamps it since GROUP-VERIFIED-1), each also checked for the new updated/up_to_date/
 # summary_parse_ok fields on GET /v1/jobs/{id} and GET /v1/jobs (schema v4).
 
 _CLEAN_TABLE_UPDATED = (
@@ -472,13 +479,14 @@ def test_up_to_date_summary_is_done_and_touches_last_manifest_check(
     assert row["last_manifest_check"] == detail["last_manifest_check"]
 
 
-def test_updated_case_does_not_touch_last_manifest_check(
+def test_updated_case_stamps_last_manifest_check(
     tmp_path: Path, bindir: Path, cache_root: Path
 ) -> None:
-    """Only the exact Up To Date>0/Updated==0 shape earns last_manifest_check
-    -- a normal Updated>0 run must not set it (nothing confirmed "already
-    current" here, something actually changed). Checked via HTTP (WP 4c
-    surfaced the field) and directly against the database."""
+    """Operator decision 2026-10-18 (GROUP-VERIFIED-1, Weg A): an Updated>0
+    run also earns last_manifest_check -- it fetched the current manifests
+    and finished, so the cache is confirmed current. (Before, only the exact
+    Up To Date>0/Updated==0 shape did.) Checked via HTTP (WP 4c surfaced the
+    field) and directly against the database."""
     executable = stub_prefill.make_stub(
         bindir,
         cache_root=str(cache_root),
@@ -494,7 +502,7 @@ def test_updated_case_does_not_touch_last_manifest_check(
 
         detail = client.get("/v1/games/440", headers=AUTH).json()
         assert detail["last_prefill_at"] is not None
-        assert detail["last_manifest_check"] is None
+        assert detail["last_manifest_check"] is not None
 
     conn = get_connection(settings.db_path)
     try:
@@ -503,7 +511,7 @@ def test_updated_case_does_not_touch_last_manifest_check(
         ).fetchone()
     finally:
         conn.close()
-    assert row["last_manifest_check"] is None
+    assert row["last_manifest_check"] == detail["last_manifest_check"]
 
 
 # -- needs_force (WP 3.4, ADR-0006 decision 2) ------------------------------

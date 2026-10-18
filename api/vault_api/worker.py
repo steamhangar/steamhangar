@@ -593,7 +593,27 @@ class PrefillWorker:
 
                 after = prefill.scan_depots(self._settings.cache_root)
                 observed = prefill.diff_depots(before, after)
-                change = prefill.apply_observed_mapping(conn, appid, observed)
+                # WP GROUP-VERIFIED-1: the replace step keeps every unobserved
+                # depot the app's own manifests name (bytes on disk); ``None``
+                # (evidence unreadable) keeps every unobserved depot. Read only
+                # when the replace step will run, and never allowed to fail
+                # the job: a crash here degrades to "remove nothing".
+                manifest_named: set[int] | None = None
+                if observed:
+                    try:
+                        manifest_named = manifest_ingest.own_manifest_depots(
+                            self._job_settings(conn), appid
+                        )
+                    except Exception:  # noqa: BLE001 - the job already succeeded
+                        logger.exception(
+                            "Reading the manifest evidence for appid %s (job %s) "
+                            "failed; the depot mapping replace removes nothing.",
+                            appid, job_id,
+                        )
+                        manifest_named = None
+                change = prefill.apply_observed_mapping(
+                    conn, appid, observed, manifest_named=manifest_named
+                )
                 # The mapping line is appended after ingestion (below) so it
                 # can say what ingestion added; the order stays
                 # replace-within-app first, manifest mapping second (WP
@@ -635,17 +655,20 @@ class PrefillWorker:
                 self._recheck_update_verdict(conn, appid, summary, log_parts)
 
                 now = jobs.utcnow_iso()
-                # ADR-0006 "current as of <timestamp>" semantics: only this
-                # exact shape — nothing changed, but SteamPrefill DID confirm
-                # at least one already-current depot for this app — earns
-                # last_manifest_check. A parse failure or the updated>0 case
-                # both leave it untouched (None -> set_app_status skips it).
+                # ADR-0006 "current as of <timestamp>", widened by the
+                # operator's decision of 2026-10-18 (GROUP-VERIFIED-1, Weg A):
+                # every successful run whose readable summary shows the app
+                # was considered (Updated > 0 or Up To Date > 0) earns
+                # last_manifest_check -- an update run or a forced verify
+                # fetched the current manifests from Steam and finished.
+                # Failed, unowned (0/0), stopped and crashed runs never get
+                # here; an unreadable summary leaves it untouched (None ->
+                # set_app_status skips it): nothing says the app was
+                # considered.
                 last_manifest_check = (
                     now
                     if summary.parse_ok
-                    and summary.updated == 0
-                    and summary.up_to_date is not None
-                    and summary.up_to_date > 0
+                    and (summary.updated or 0) + (summary.up_to_date or 0) > 0
                     else None
                 )
 

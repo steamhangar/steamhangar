@@ -85,7 +85,7 @@ import sqlite3
 import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Iterable
+from typing import AbstractSet, Callable, Iterable
 
 from vault_api.config import (
     DEFAULT_PREFILL_MAX_THREADS,
@@ -688,7 +688,11 @@ def diff_depots(
 
 
 def apply_observed_mapping(
-    conn: sqlite3.Connection, appid: int, observed: set[int]
+    conn: sqlite3.Connection,
+    appid: int,
+    observed: set[int],
+    *,
+    manifest_named: AbstractSet[int] | None,
 ) -> "MappingChange":
     """Replace ``appid``'s depot mapping with ``observed`` (ADR-0003 decision 3).
 
@@ -698,6 +702,25 @@ def apply_observed_mapping(
       are NOT in ``observed`` are deleted, so a depot Steam reassigned away
       from this app stops being reported as its content (and stops blocking
       WP 1.6's deletion as a false "shared" depot).
+    - **...but never on partial evidence (WP GROUP-VERIFIED-1).** ``observed``
+      only holds depots this run WROTE bytes into. An update run writes only
+      the changed depots and a forced verify of a cached game writes almost
+      nothing, so "not observed" is not "not part of the app". A mapped depot
+      is therefore kept when ``manifest_named`` contains it: the app's own
+      manifest files name it and it has bytes in the cache
+      (``manifest_ingest.own_manifest_depots``, the same evidence manifest
+      ingestion maps from). ``manifest_named=None`` means that evidence could
+      not be read, and then nothing is removed at all. The argument is
+      keyword-only and has no default, so no caller can get the old
+      prune-everything-unobserved behaviour by omission; an empty set means
+      "evidence read, it names nothing". Measured trigger:
+      HELLDIVERS 2's forced verify (2026-10-18) wrote into 4 of its 11
+      depots and the replace dropped the other 7, the main depot included.
+      What is still removed: a mapped depot that no manifest of the app names
+      (or that has no bytes left). SteamPrefill's temp cache keeps every
+      manifest it ever fetched, so a depot Steam really moved to another app
+      stays mapped while its old ``.bin`` exists -- the fail-safe direction;
+      ``DELETE /v1/mapping/{depotid}/{appid}`` remains the correction path.
     - **Additive across apps.** Only rows for *this* ``appid`` are touched. A
       depot in ``observed`` that another app also maps keeps that other
       mapping — that is plan §4's shared-depot case (redistributables), and
@@ -722,7 +745,13 @@ def apply_observed_mapping(
         ).fetchall()
     }
 
-    stale = existing - observed
+    unobserved = existing - observed
+    if manifest_named is None:
+        # The manifest evidence could not be read: no removal at all.
+        protected = set(unobserved)
+    else:
+        protected = unobserved & set(manifest_named)
+    stale = unobserved - protected
     for depotid in sorted(stale):
         delete_mapping(conn, depotid=depotid, appid=appid)
 
@@ -734,6 +763,8 @@ def apply_observed_mapping(
         removed=stale,
         kept=observed & existing,
         skipped_empty=False,
+        protected=protected,
+        evidence_unreadable=manifest_named is None,
     )
 
 
@@ -746,6 +777,12 @@ class MappingChange:
     kept: set[int] = field(default_factory=set)
     #: True when nothing was observed and the mapping was left untouched.
     skipped_empty: bool = False
+    #: Mapped depots this run did not write to that were kept anyway (WP
+    #: GROUP-VERIFIED-1): named by the app's own manifests with bytes on disk,
+    #: or every unobserved one when that evidence was unreadable.
+    protected: set[int] = field(default_factory=set)
+    #: True when the manifest evidence could not be read (nothing removed).
+    evidence_unreadable: bool = False
 
     def summary(self, manifest_mapped: Iterable[int] = ()) -> str:
         """``manifest_mapped``: depots the same job's manifest ingestion
@@ -769,6 +806,13 @@ class MappingChange:
             f"added={sorted(self.added)} removed={sorted(self.removed)} "
             f"unchanged={sorted(self.kept)}"
         )
+        if self.protected:
+            reason = (
+                "the manifest evidence could not be read"
+                if self.evidence_unreadable
+                else "named by this app's manifests, bytes on disk"
+            )
+            text += f" kept_unobserved={sorted(self.protected)} ({reason})"
         if extra:
             text += f" (+ from manifests: {extra})"
         return text

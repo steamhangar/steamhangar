@@ -121,7 +121,14 @@ readiness gate.
 5. Symmetrically: an app that *does* have a ``depot_manifests`` row always
    counts, even if it has no cache content — a recorded manifest is a claim
    vault-api itself wrote down, and an unreadable claim is exactly the partial
-   knowledge the gate exists for.
+   knowledge the gate exists for. **This holds even when that app no longer
+   maps the depot (WP GROUP-VERIFIED-1):** ``plan_gc`` adds every app with a
+   ``depot_manifests`` row for the depot as a claimant, mapped or not. The
+   mapping can lose a row its manifest record still describes (a content
+   package's depot recorded under the app that downloaded it, or a replace
+   step on partial evidence); without this, GC for the remaining owner fell
+   back to an older cache-stored manifest and planned the current build's
+   chunks as orphans (pinned in tests/test_group_verified.py).
 
 **Sub-decision, flagged separately: a depot with ZERO counting apps is
 skipped, not emptied.** If every mapped app is excluded by the rule above,
@@ -876,10 +883,11 @@ def resolve_depot_chunkset(
                 for app in sorted(mapped_apps, key=lambda a: a.appid)
             ],
             note=(
-                f"{len(unreadable)} depot_app_map row(s) for this depot have an "
-                "unreadable app id, so the set of apps with a claim on it is "
-                "incomplete; nothing was planned for it. Repair the row with "
-                "DELETE /v1/mapping/{depotid}/{appid} or directly in the database."
+                f"{len(unreadable)} depot_app_map or depot_manifests row(s) for "
+                "this depot have an unreadable app id, so the set of apps with a "
+                "claim on it is incomplete; nothing was planned for it. Repair the "
+                "row with DELETE /v1/mapping/{depotid}/{appid} or directly in the "
+                "database."
             ),
         )
 
@@ -1371,7 +1379,10 @@ class GcInputs:
     #: ``{appid: has_content}`` (ADR-0003 addendum predicate). A missing key
     #: means "no apps row", which the planner reads as ``True`` — protected.
     content_states: dict[int, bool]
-    #: ``{(appid, depotid): raw manifestid}`` from ``depot_manifests``.
+    #: ``{(appid, depotid): raw manifestid}`` from ``depot_manifests``, for
+    #: every app that recorded one of the target app's depots -- also apps
+    #: that no longer map the depot, which ``plan_gc`` counts as claimants
+    #: (WP GROUP-VERIFIED-1).
     recorded_manifests: dict[tuple[int, int], object]
     #: WP 3.9: ``{depotid: [extra manifest ids]}``. Empty (the default) means
     #: "no extra keep-set protection", which is precisely the behaviour before
@@ -1442,6 +1453,32 @@ def plan_gc(
                     if owner is None
                     else inputs.recorded_manifests.get((owner, depotid))
                 ),
+            )
+        )
+
+    # WP GROUP-VERIFIED-1: a manifest vault-api recorded for one of these
+    # depots counts even when its app no longer maps the depot. The mapping
+    # can lose a row the manifest record still describes (the replace step on
+    # partial evidence, fixed in the same package, or a content-package depot
+    # whose record is kept under the app that downloaded it while only the
+    # package app maps it). Without this, GC for a remaining owner with no
+    # record of its own fell back to an OLDER cache-stored manifest and planned
+    # the current build's chunks as orphans. Such a record always counts (the
+    # module docstring's point 5): it adds its chunks to the keep set, or, when
+    # unreadable, skips the depot (readiness gate). Never fewer kept chunks.
+    mapped_owner_ids: dict[int, set[int]] = {
+        depotid: {app.appid for app in apps} for depotid, apps in depots_owners.items()
+    }
+    for (recorder, depotid), raw_manifestid in sorted(
+        inputs.recorded_manifests.items(), key=lambda item: item[0]
+    ):
+        if depotid not in own_depots or recorder in mapped_owner_ids.get(depotid, set()):
+            continue
+        depots_owners.setdefault(depotid, []).append(
+            MappedApp(
+                appid=recorder,
+                has_content=True,
+                recorded_manifestid=raw_manifestid,
             )
         )
 
@@ -1650,7 +1687,15 @@ def load_recorded_manifests(
     ).fetchall():
         owner = deletion.coerce_positive_id(row["appid"])
         depotid = deletion.coerce_positive_id(row["depotid"])
-        if owner is None or depotid is None:
+        if depotid is None:
+            continue
+        if owner is None:
+            # WP GROUP-VERIFIED-1 (review N2): a record whose app id cannot be
+            # read is still a claim on this depot. Keyed under app id 0, which
+            # ``plan_gc`` turns into a claimant ``resolve_depot_chunkset``
+            # refuses (STATUS_UNREADABLE_OWNER): the depot is skipped instead
+            # of the record silently disappearing.
+            recorded[(0, depotid)] = row["manifestid"]
             continue
         recorded[(owner, depotid)] = row["manifestid"]
     return recorded
