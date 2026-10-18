@@ -65,9 +65,9 @@ def get_cache_summary(
 ) -> CacheSummaryOut:
     """Total usage, top consumers, unmapped depots, free space (plan §6)."""
     # The snapshot is taken BEFORE the connection is opened (WP 1.6 carry-over
-    # fix #2 from the WP 1.5 review): a size-cache miss walks the whole depot/
-    # tree while holding SizeCache's lock, and there is no reason to hold an
-    # open SQLite connection across that.
+    # fix #2 from the WP 1.5 review): a call with no usable snapshot (first
+    # call, or right after an invalidation) waits for a whole depot/ walk, and
+    # there is no reason to hold an open SQLite connection across that.
     snapshot = size_cache.get(cache_root)
 
     with open_db() as conn:

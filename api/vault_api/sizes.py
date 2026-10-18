@@ -12,9 +12,10 @@ Three layers, each independently testable:
    already returned instead of a second round trip) — sharing it here means
    the size calculation gets the same speedup for free, and there is exactly
    one place that knows how to walk the depot tree, not two.
-2. ``SizeCache`` — the in-process TTL cache plan §3 asks for ("du ... cached").
-   Deliberately the simplest thing that works (plan §9): one lock, one cached
-   snapshot, no background thread, no extra table. Explicit invalidation
+2. ``SizeCache`` — the in-process cache plan §3 asks for ("du ... cached"):
+   one cached snapshot, no extra table, served stale-while-revalidate with at
+   most one background walk at a time (UI-COLD-CACHED-1; the original
+   walk-under-the-lock blocked requests on a cold disk). Explicit invalidation
    hooks (not polling) are exported for callers that know disk content just
    changed: the prefill worker calls ``invalidate()`` after a successful job
    (``vault_api/worker.py``), and WP 1.6's deletion endpoint will do the same.
@@ -33,7 +34,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,20 @@ def entry_is_link_like(entry: os.DirEntry) -> bool:
     return bool(is_junction is not None and is_junction())
 
 
-def walk_file_stats(path: str) -> Iterator[os.stat_result]:
+@dataclass
+class WalkCounts:
+    """Mutable tally a caller may pass into the walk (UI-COLD-CACHED-1).
+
+    ``dirs`` counts every directory the walk listed (the depot directories
+    themselves included). It exists so ``SizeCache`` can log what a recompute
+    cost: on a cold dentry cache the walk time scales with directory and
+    file count, and the next cold test needs both numbers to read the log.
+    """
+
+    dirs: int = 0
+
+
+def walk_file_stats(path: str, counts: WalkCounts | None = None) -> Iterator[os.stat_result]:
     """Recursively yield an ``os.stat_result`` for every regular file under ``path``.
 
     Uses ``os.scandir`` + ``DirEntry.stat()`` rather than ``os.walk`` +
@@ -126,24 +140,30 @@ def walk_file_stats(path: str) -> Iterator[os.stat_result]:
 
     A file or directory that vanishes mid-walk (vault-core is writing into
     this tree concurrently) is skipped rather than failing the whole scan.
+
+    ``counts``, when given, is incremented once per directory listed.
     """
     try:
         entries = list(os.scandir(path))
     except OSError:
         return
+    if counts is not None:
+        counts.dirs += 1
     for entry in entries:
         try:
             if entry_is_link_like(entry):
                 continue
             if entry.is_dir(follow_symlinks=False):
-                yield from walk_file_stats(entry.path)
+                yield from walk_file_stats(entry.path, counts)
             elif entry.is_file(follow_symlinks=False):
                 yield entry.stat()
         except OSError:
             continue
 
 
-def scan_depot_signatures(cache_root: str) -> dict[int, DepotSignature]:
+def scan_depot_signatures(
+    cache_root: str, counts: WalkCounts | None = None
+) -> dict[int, DepotSignature]:
     """Signature per depot directory under ``<cache_root>/depot/<depotid>/``.
 
     The signature is an aggregate, not a per-file listing: a real cache holds
@@ -207,7 +227,7 @@ def scan_depot_signatures(cache_root: str) -> dict[int, DepotSignature]:
         count = 0
         total_bytes = 0
         newest_mtime_ns = 0
-        for stat in walk_file_stats(entry.path):
+        for stat in walk_file_stats(entry.path, counts):
             count += 1
             total_bytes += stat.st_size
             newest_mtime_ns = max(newest_mtime_ns, stat.st_mtime_ns)
@@ -240,61 +260,253 @@ class SizeSnapshot:
     usage of ``depot/`` — the sum of every depot's bytes, each depot counted
     exactly once regardless of how many apps map it (contrast with per-app
     totals, which double-count shared depots on purpose — see
-    ``app_size_bytes``)."""
+    ``app_size_bytes``).
+
+    ``computed_at`` is the monotonic time the walk STARTED, so a snapshot's
+    age never understates how old its data can be."""
 
     computed_at: float
     depot_bytes: dict[int, int]
     total_bytes: int
 
 
+@dataclass(frozen=True)
+class DepotWalk:
+    """What one full walk of ``depot/`` found: the byte totals ``SizeCache``
+    serves, plus the counts it logs (UI-COLD-CACHED-1)."""
+
+    depot_bytes: dict[int, int]
+    file_count: int
+    dir_count: int
+
+
+def walk_depot_tree(cache_root: str) -> DepotWalk:
+    """The default walk behind ``SizeCache``: ``scan_depot_signatures`` with
+    the file and directory counts kept for the duration log."""
+    counts = WalkCounts()
+    signatures = scan_depot_signatures(cache_root, counts)
+    return DepotWalk(
+        depot_bytes={depotid: signature[1] for depotid, signature in signatures.items()},
+        file_count=sum(signature[0] for signature in signatures.values()),
+        dir_count=counts.dirs,
+    )
+
+
+class SizeWalkError(RuntimeError):
+    """Raised to a caller that had to wait for a walk (no usable snapshot) when
+    that walk failed. Callers that get a stale snapshot never see it."""
+
+
 class SizeCache:
-    """In-process TTL cache over one ``cache_root``'s depot byte totals.
+    """In-process cache over one ``cache_root``'s depot byte totals, served
+    stale-while-revalidate (UI-COLD-CACHED-1).
 
-    Deliberately the simplest thing that could work (plan §9): one lock, one
-    cached snapshot, no background thread, no second table. A cache miss (TTL
-    expired or never computed) walks the whole ``depot/`` tree once while
-    holding the lock, so every concurrent caller that arrives during that walk
-    waits for and then reuses the same fresh result instead of each re-walking
-    the tree — the lock doubles as request coalescing, which is a feature
-    here, not a downside (this is also what keeps it concurrency-safe under
-    parallel/cancelled requests: a cancelled HTTP request just stops waiting
-    on the lock, it can't corrupt or half-update the cached snapshot).
+    **Why not a plain TTL any more.** The first version walked the whole
+    ``depot/`` tree inside ``get()`` while holding the lock whenever the TTL
+    had expired. On a warm dentry cache that is sub-second; in the cold run of
+    2026-10-18 (host page cache and ZFS ARC dropped, a client downloading) the
+    walk competed with the download for the disks, every request needing sizes
+    queued behind the lock once a minute, and the Library showed no game as
+    cached while every request was a HIT. So now:
 
-    Invalidation is explicit, not polled: call ``invalidate()`` right after an
-    operation that changed what's on disk. ``vault_api/worker.py`` does this
-    after a successful prefill job; WP 1.6's deletion endpoint will do the
-    same — this method is exported for exactly that reuse.
+    - **Fresh snapshot** (younger than ``ttl_seconds``): returned as is.
+    - **Expired snapshot**: returned immediately, and exactly one background
+      recompute is started (single-flight: while a walk runs, further expired
+      reads start nothing). The next read after the walk sees new numbers.
+    - **No usable snapshot** (the very first call, a different ``cache_root``,
+      or after ``invalidate()``): the caller blocks until a walk that started
+      after that point has finished. Concurrent callers wait for the same
+      walk; they never start a second one. Blocking here, rather than
+      returning a "not ready" answer, keeps every API response unchanged: an
+      empty answer would read as "nothing cached", exactly the wrong picture
+      this package removes. The first call blocks once per process; the
+      web client already shows a loading state for a slow first fetch
+      (WEB-FIX-20.2).
+
+    **``invalidate()`` blocks the next read, on purpose.** It is called right
+    after the API itself changed the disk (a finished prefill job, a deletion,
+    a GC run, a repair), and the callers' contract is that the next read shows
+    the change: the deletion endpoint's response is followed by a Library
+    refresh that must not show the deleted game's old size as if it were
+    current, and a stale size right after "delete" looks like the deletion
+    failed. Serving the pre-change snapshot and refreshing in the background
+    would break that for one TTL window. ``invalidate()`` itself starts no
+    walk: the worker invalidates after every successful job, no-op ones
+    included, and an eager re-walk per job would walk the whole tree back to
+    back during a scheduled run, the very disk contention this package
+    removes. The walk starts when someone reads. A walk that was already
+    running when ``invalidate()`` was called started before the change; its
+    result is stored but never served, and the waiting reader starts a new
+    walk once it ends.
+
+    **Threading.** Every route calling ``get()`` is a sync ``def`` that FastAPI
+    runs in its threadpool, so a blocking ``get()`` never blocks the event
+    loop; only the cold first call and the read right after an invalidation
+    block at all. The walk always runs on its own daemon thread, at most one
+    at a time (bounded: no per-request threads). A cancelled request only
+    stops waiting; the walk finishes and stores its result under the lock, so
+    no state is ever half-updated. A walk that raises keeps the previous
+    snapshot (still served, still expired, so the next read tries again) and
+    logs the error; a caller blocked on that walk gets ``SizeWalkError``.
+
+    Each finished walk logs one INFO line with its duration and the depot,
+    directory and file counts, so the next cold test can measure it.
+
+    ``walk`` is injectable for tests (a fake slow walk driven by events);
+    production uses ``walk_depot_tree``.
     """
 
-    def __init__(self, ttl_seconds: float = DEFAULT_SIZE_CACHE_TTL_SECONDS) -> None:
+    def __init__(
+        self,
+        ttl_seconds: float = DEFAULT_SIZE_CACHE_TTL_SECONDS,
+        *,
+        walk: Callable[[str], DepotWalk] | None = None,
+    ) -> None:
         self._ttl = ttl_seconds
-        self._lock = threading.Lock()
+        self._walk = walk if walk is not None else walk_depot_tree
+        self._cond = threading.Condition()
         self._snapshot: SizeSnapshot | None = None
+        self._snapshot_root: str | None = None
+        self._snapshot_generation = -1
+        # Bumped by invalidate(); a snapshot is only usable when it was
+        # produced by a walk that started in the current generation.
+        self._generation = 0
+        self._walking = False
+        self._walk_root: str | None = None
+        self._walk_generation = -1
+        self._walks_finished = 0
+        # Outcome of the most recently finished walk: its error (None on
+        # success) and which (root, generation) it was for.
+        self._last_error: BaseException | None = None
+        self._last_walk_key: tuple[str, int] | None = None
 
     def get(self, cache_root: str, *, now: float | None = None) -> SizeSnapshot:
-        """Return a snapshot no older than ``ttl_seconds``, recomputing if stale.
+        """Return the cached snapshot; see the class docstring for when it
+        is stale and when this blocks.
 
         ``now`` is only ever overridden by tests (to exercise TTL expiry
         without a real sleep) — production callers always get the live clock.
         """
         current = time.monotonic() if now is None else now
-        with self._lock:
-            if self._snapshot is not None and (current - self._snapshot.computed_at) < self._ttl:
-                return self._snapshot
+        with self._cond:
+            seen_finished = self._walks_finished
+            while True:
+                snapshot = self._snapshot
+                if (
+                    snapshot is not None
+                    and self._snapshot_root == cache_root
+                    and self._snapshot_generation == self._generation
+                ):
+                    # `not (age < ttl)` rather than `age >= ttl`: same
+                    # freshness test as before, nan included.
+                    if not (current - snapshot.computed_at) < self._ttl:
+                        try:
+                            self._start_walk_locked(cache_root, current, reason="expired")
+                        except Exception:  # noqa: BLE001 - the stale answer is still good
+                            logger.exception("Could not start a background depot size walk")
+                    return snapshot
 
-            depot_bytes = scan_depot_dir_bytes(cache_root)
-            snapshot = SizeSnapshot(
-                computed_at=current,
-                depot_bytes=depot_bytes,
-                total_bytes=sum(depot_bytes.values()),
-            )
-            self._snapshot = snapshot
-            return snapshot
+                if not self._walking:
+                    if (
+                        self._walks_finished > seen_finished
+                        and self._last_error is not None
+                        and self._last_walk_key == (cache_root, self._generation)
+                    ):
+                        raise SizeWalkError(
+                            f"depot size walk of {cache_root} failed"
+                        ) from self._last_error
+                    if self._snapshot is None:
+                        reason = "first"
+                    elif self._snapshot_root != cache_root:
+                        reason = "root-changed"
+                    else:
+                        reason = "invalidated"
+                    # Raises (to this caller) if no thread can be started.
+                    self._start_walk_locked(cache_root, current, reason=reason)
+                # Either the walk we need is running, or another one (older
+                # generation or another root) is; its completion notifies us
+                # and the loop re-checks.
+                self._cond.wait()
 
     def invalidate(self) -> None:
-        """Drop the cached snapshot so the next ``get()`` recomputes from disk."""
-        with self._lock:
-            self._snapshot = None
+        """Mark the snapshot as pre-change: the next ``get()`` blocks until a
+        walk that started after this call has finished. Starts no walk
+        itself (see the class docstring)."""
+        with self._cond:
+            self._generation += 1
+
+    def wait_idle(self, timeout: float | None = None) -> bool:
+        """Block until no walk is running; ``False`` on timeout. For tests,
+        never on a request path."""
+        with self._cond:
+            return self._cond.wait_for(lambda: not self._walking, timeout)
+
+    def _start_walk_locked(self, cache_root: str, started_at: float, *, reason: str) -> None:
+        if self._walking:
+            return  # single-flight
+        self._walking = True
+        self._walk_root = cache_root
+        self._walk_generation = self._generation
+        try:
+            threading.Thread(
+                target=self._run_walk,
+                args=(cache_root, self._generation, started_at, reason),
+                name="size-cache-walk",
+                daemon=True,
+            ).start()
+        except BaseException:
+            # No thread means no completion to clear the flag or wake anyone:
+            # undo it and wake the other waiters (they re-check and try to
+            # start a walk themselves), or every later reader would hang.
+            self._walking = False
+            self._cond.notify_all()
+            raise
+
+    def _run_walk(self, cache_root: str, generation: int, started_at: float, reason: str) -> None:
+        clock_start = time.monotonic()
+        result: DepotWalk | None = None
+        error: BaseException | None = None
+        try:
+            result = self._walk(cache_root)
+        except BaseException as exc:  # noqa: BLE001 - must always release waiters
+            error = exc
+        duration = time.monotonic() - clock_start
+
+        with self._cond:
+            self._walking = False
+            self._walks_finished += 1
+            self._last_walk_key = (cache_root, generation)
+            if result is not None:
+                self._last_error = None
+                self._snapshot = SizeSnapshot(
+                    computed_at=started_at,
+                    depot_bytes=result.depot_bytes,
+                    total_bytes=sum(result.depot_bytes.values()),
+                )
+                self._snapshot_root = cache_root
+                self._snapshot_generation = generation
+                logger.info(
+                    "Depot size walk (%s) of %s took %.3f s: %d depots, %d dirs, %d files",
+                    reason,
+                    cache_root,
+                    duration,
+                    len(result.depot_bytes),
+                    result.dir_count,
+                    result.file_count,
+                )
+            else:
+                self._last_error = error
+                logger.error(
+                    "Depot size walk (%s) of %s failed after %.3f s; keeping the previous snapshot",
+                    reason,
+                    cache_root,
+                    duration,
+                    exc_info=error,
+                )
+            # If invalidate() arrived while this walk ran, its result is stored
+            # under the old generation and never served; a reader that needs
+            # the current generation starts the next walk itself.
+            self._cond.notify_all()
 
 
 # --------------------------------------------------------------------------
@@ -404,11 +616,10 @@ def build_cache_summary(
     connection.
 
     **Takes a ready ``SizeSnapshot``, not the ``SizeCache``** (WP 1.6
-    carry-over fix #2 from the WP 1.5 review): a cache miss walks the whole
-    ``depot/`` tree while holding ``SizeCache``'s lock, and doing that from
-    inside this function meant the caller's SQLite connection sat open — and
-    every other request waiting on that same lock sat behind a disk walk —
-    for the duration. The caller now takes the snapshot *before* opening its
+    carry-over fix #2 from the WP 1.5 review): a call with no usable
+    snapshot waits for a whole ``depot/`` walk, and doing that from inside
+    this function meant the caller's SQLite connection sat open for the
+    duration. The caller now takes the snapshot *before* opening its
     connection (``routers/cache.py``), which also makes this function purely
     a function of its inputs: no clock, no filesystem walk, no cache state.
     """
