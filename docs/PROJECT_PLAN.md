@@ -3624,14 +3624,14 @@ below carry their own later dates, item 12 is the current one).
         png-diff mode for local runs, CI stays strict; goldens re-recorded.
       - [x] tag `v0.1.0-rc20.1` (fff08b9; verify 613/0, main CI green)
 
-    - [ ] **rc20.2** (patch, operator report on prod 2026-10-18)
+    - [x] **rc20.2** (patch, operator report on prod 2026-10-18)
       - [x] **WEB-FIX-20.2** (8ad4ab4, 134997c, goldens 1bac461) plain
         "Delete" label; Clients fetched on mount and every 5 s while
         visible; loading states instead of "Cached 0" / "Unknown app" after
         a slow or failed first fetch, fast retries; hero "Throughput" with
         pill Serving / Downloading / Idle and a two-series graph (served
         from cache in green, from the internet in cyan).
-      - [ ] tag `v0.1.0-rc20.2` after main CI is green (operator's yes)
+      - [x] tag `v0.1.0-rc20.2` (3f78b1b; verify 613/0, main CI green)
 
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
