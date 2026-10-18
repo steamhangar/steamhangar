@@ -77,7 +77,7 @@ Duration runs from the first to the last depot request in the debug log.
 The heartbeat was probed every 5 s from a second container on the bridge
 network.
 
-| Run | Switches | State | Duration | Avg Mbit/s | p95 Mbit/s (10 s) | Per-request p50 | Heartbeat p50 / max |
+| Run | Switches | State | Duration | Avg Mbit/s | p95 Mbit/s (10 s) | Per-request p50 ¹ | Heartbeat p50 / max |
 |---|---|---|---|---|---|---|---|
 | 1 | none | cold | 16 min 09 s | 109 | 208 | 0.9 MB/s | 1.95 s / 7.58 s |
 | 2 | AIO=threads | cold | 2 min 23 s | 736 | 939 | 9.0 MB/s | 0.8 ms / 295 ms |
@@ -86,6 +86,16 @@ network.
 | 5 | AIO=threads | cold | 2 min 25 s | 726 | 923 | 8.3 MB/s | 0.8 ms / 41 ms |
 | 6 | AIO=threads | warm | 2 min 22 s | 741 | 941 | 14.4 MB/s | 0.8 ms / 3.4 ms |
 
+
+¹ Runs without AIO (1, 3, 4; blocking `sendfile`, cold): computed only
+from the large requests that nginx logged with `request_time` > 0. Most
+large requests logged 0.000 s because the blocked worker's cached clock
+did not advance (run 1: 12,459 of 12,847 requests >= 256 KiB, so the p50
+comes from 388 requests, 3 %). Those values are biased and not comparable
+with the AIO runs; use Duration and Avg Mbit/s instead. Reports before
+TP-REPORT-2 (rc21) counted only the timed requests as "above the size
+floor"; the shares of runs 3 and 4 were not re-derived (the copied logs
+hold several runs).
 Findings:
 
 - The hypothesis holds. Blocking `sendfile` on one worker serializes cold

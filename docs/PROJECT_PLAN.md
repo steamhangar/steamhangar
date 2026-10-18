@@ -3667,8 +3667,13 @@ below carry their own later dates, item 12 is the current one).
         failing (one ERROR per expired read, bounded by request rate);
         theoretical waiter starvation after a failed walk; the Thread.start
         test patches `threading` process-wide
-      - [ ] TP-REPORT-2 report nits: heartbeat blind spot, size-floor count
-        (roadmap)
+      - [x] TP-REPORT-2 report nits: heartbeat blind spot, size-floor count
+        (c71ae00): large = size floor + status, timed ones feed the
+        percentiles, warning when most are untimed, `--probe-log` for an
+        outside heartbeat probe; ADR-0027 footnote on the biased p50.
+      - [ ] nit (TP-REPORT-2 review): `parse_probe` accepts `nan`/`inf`/
+        negative values (core/tools/throughput-report.py:327-342, 365);
+        README probe example `date +%s.%N` needs a `%s` fallback.
 
     - [x] **rc20.1** (patch, operator report on prod 2026-10-17)
       - [x] **DOWNLOADS-3** (95a012e, 6eb3979, goldens 92d9db9) (web) History head "Delete…" clipped; History
