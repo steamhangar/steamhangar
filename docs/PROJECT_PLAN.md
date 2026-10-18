@@ -3806,6 +3806,11 @@ below carry their own later dates, item 12 is the current one).
         or unmeasurable packages count; show them, never hide bytes).
         On close: put the open question AUTO-VERIFY-FULL-1 (roadmap) to
         the operator with the finding on how reliable the mapping is.
+        Decided during the package (operator 2026-10-18): prod Auto-GC to
+        dry-run until rc21 (Antrag A-20261018-03); "Confirmed current" is
+        stamped after every successful run, incl. forced verifies.
+        Reviewer advice for AUTO-VERIFY-FULL-1: decide after one prod verify
+        of HD2 on rc21 shows `removed=[]` and 0 unmapped depots.
       - [ ] **AUTO-VERIFY-1** (api + web; decided 2026-10-18, Weg A)
         Settings checkbox "Complete cached games automatically" (default
         on; forced run only for games the disk check calls incomplete).
@@ -3814,6 +3819,19 @@ below carry their own later dates, item 12 is the current one).
         Test for exactly that. A "Full" mode switch was considered and
         deferred (AUTO-VERIFY-FULL-1, roadmap): decide it when
         GROUP-VERIFIED-1 is closed.
+      - [ ] **DELETE-CLAIMANT-1** (api; GROUP-VERIFIED-1 review S1, safety)
+        `DELETE /v1/cache/{appid}` (`routers/cache.py:514`,
+        `deletion.plan_deletion` / `load_co_owner_states`) decides only from
+        `depot_app_map`; while a game has lost its mapping rows (prod: HD2
+        package depots), deleting a package app removes a depot the game
+        needs. Count every app with a `depot_manifests` row for the depot as
+        a co-owner with content, mirroring the GC claimant rule. Until
+        rollout: after the rc21 deploy run one verify of 553850 (heals the
+        mapping); note in the rc21 rollout Antrag.
+      - [ ] Android follow-up GROUP-VERIFIED-1 (S2): show the group
+        "not measured: N package depots (X GB)" note; Android demo
+        `groupPct` (`DemoState.kt:169`) differs from the web demo's
+        `demoGroupFields` since GROUP-VERIFIED-1.
       - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
         have no hit/miss split for the prefill runner, so the Downloads graph
         counts all runner traffic as "from the internet" and a verifying
