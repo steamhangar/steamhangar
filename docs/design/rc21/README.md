@@ -7,7 +7,7 @@ a browser; it needs no server.
 
 | File | Content |
 |---|---|
-| `mobile.html` | Phone frames (390 px, the pairing flow at 400 px, one landscape frame at 844×390): touch targets under `pointer:coarse`, overflow cue on scrolling segs, bottom sheets (detail, confirm, History row), the QR pairing flow, safe-area insets, 200 % text. Ends with the proposed CSS, the proposed new values and the open questions. |
+| `mobile.html` | Phone frames (390 px, the pairing flow at 400 px, one landscape frame at 844×390): touch targets under `pointer:coarse`, overflow cue on scrolling segs, bottom sheets (detail, confirm, History row), the QR pairing flow, safe-area insets, 200 % text. Ends with the proposed CSS, the proposed new values and the operator's decisions. |
 
 ## Rules for using it
 
@@ -28,7 +28,20 @@ a browser; it needs no server.
 - Each frame's note names the CSS rule it implies; the "Proposed CSS"
   block collects them. It is the shape of the rules, not final code.
 
-## Status (2026-10-18)
+## Decisions (operator, 2026-10-18)
 
-Draft for review. The open questions at the end of the page (Q1-Q7) need
-the operator's decision before MOBILE-1b starts.
+Mockup approved with these decisions; they bind MOBILE-1b.
+
+- **Q1 Weg A:** coarse visuals grow to 38 px (`--ctl-h`), the hit area is
+  44 px (`--hit`) by an invisible `::after` extender.
+- **Q2 Weg B:** one shared scroll listener toggles `.at-start` / `.at-end`
+  on every `.scue` row (no scroll-driven animations).
+- **Q3:** all `.dialog` confirms become bottom sheets below 600 px.
+- **Q4 Weg A:** on phones a History row opens its panel in a bottom sheet.
+- **Q5:** on a narrow touch screen (`pointer:coarse` and the `addev`
+  container at 420 px or less) the Phone tab leads with a full-width
+  primary "Open on this phone"; the QR follows as "Pair another phone".
+  Desktop keeps the QR first.
+- **Q6:** accepted as is: no "paired" state in the drawer (needs per-device
+  keys, PAIR-2).
+- **Q7:** landscape nav with icon and label side by side, `--nav-h` 48 px.
