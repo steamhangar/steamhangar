@@ -3701,7 +3701,7 @@ below carry their own later dates, item 12 is the current one).
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
       the operator's rc20 visual check; no rc21 tag without the operator's yes)
-      - [ ] **MOBILE-1** (web, first package of rc21; user decision
+      - [x] **MOBILE-1** (web, first package of rc21; user decision
         2026-10-17) phone fine-tuning on top of the kit: 44px touch targets
         via `@media (pointer:coarse)` (segs, chips, (i), `.btn.sm`, card
         quick action); the QR pairing flow end to end at 400px; detail
@@ -3847,7 +3847,7 @@ below carry their own later dates, item 12 is the current one).
         Test for exactly that. A "Full" mode switch was considered and
         deferred (AUTO-VERIFY-FULL-1, roadmap): decide it when
         GROUP-VERIFIED-1 is closed.
-      - [ ] **DELETE-CLAIMANT-1** (api; GROUP-VERIFIED-1 review S1, safety)
+      - [x] **DELETE-CLAIMANT-1** (5f87277; api; GROUP-VERIFIED-1 review S1, safety)
         `DELETE /v1/cache/{appid}` (`routers/cache.py:514`,
         `deletion.plan_deletion` / `load_co_owner_states`) decides only from
         `depot_app_map`; while a game has lost its mapping rows (prod: HD2
@@ -3892,8 +3892,12 @@ below carry their own later dates, item 12 is the current one).
       - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
       - tuning defaults from the Sunday test, if not shipped in rc20.x
         (the rc20.x box moves here)
-      - [ ] runner retry on "Unable to detect Lancache server!", only if the
-        heartbeat log confirms the late-heartbeat hypothesis (ADR-0027)
+      - [ ] **RUNNER-RETRY-1** (runner/api; user decision 2026-10-18: build
+        it although AIO removed the cause — "error messages that never show
+        up do no harm") retry the prefill when SteamPrefill reports "Unable
+        to detect Lancache server!" (e.g. 3 attempts with a pause, then
+        fail with a clear job error); test with a simulated slow/failed
+        heartbeat.
       - [ ] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut

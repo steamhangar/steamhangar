@@ -286,6 +286,21 @@ rename.
 - **Entry:** v0.5.0 tagged.
 - **Exit:** release gate; then the public announcement (WP 5.6, user decision 2026-10-18: the announcement comes once schedules are in).
 
+### Before 1.0.0: fault simulation (user wish 2026-10-18)
+
+- **FAULT-SIM-1:** before `1.0.0`, simulate the failures the stack must
+  survive and check that each one is caught, reported honestly and
+  recovered from: Steam login missing or expired, Steam/CDN unreachable or
+  slow, upstream 503/timeouts, slow or blocked heartbeat ("Unable to
+  detect Lancache server!"), disk full / cache_root unwritable,
+  manifest archive unreadable, DB locked / corrupt WAL, vault-core or
+  vault-api restart mid-job, runner crash, agent offline / clock skew,
+  DNS bypass, wrong-size chunks. Output: a fault matrix (fault, how
+  simulated, expected behaviour, observed, fix ID), the fixes as packages,
+  and tests or verify steps that keep them simulated. Slot: to be set at
+  the planning of the minor before 1.0.0 (part of the 1.0.0 criteria
+  "operator-facing contract stable").
+
 ### v0.7.0 and later: beyond Steam and integrations (order not set)
 
 - **Goal:** more launchers and outside integrations, each when wanted.
