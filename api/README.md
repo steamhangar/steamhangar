@@ -1303,6 +1303,46 @@ future Steam Guard prompt variant is not.
 **vault-api never sees, stores, transmits or logs Steam credentials.** The
 session lives in SteamPrefill's own `Config/` directory next to the executable.
 
+### Retry when the cache is not detected (WP RUNNER-RETRY-1)
+
+SteamPrefill probes vault-core's `/lancache-heartbeat` before it downloads
+anything and throws `LancacheNotFoundException: Unable to detect Lancache
+server!` when no valid answer arrives in time. ADR-0027 measured that probe
+answered up to 7.6 s late during cold reads before `aio threads` became the
+default (ADR-0030). A late answer is a transient peak, so a run that fails
+with exactly that phrase (and a non-zero exit, reason `exit_code`) is run
+again: 3 attempts in total with a 15 s pause before each retry
+(`prefill.LANCACHE_RETRY_ATTEMPTS` / `LANCACHE_RETRY_PAUSE_SECONDS`,
+constants, no env knob). The same code runs in both modes
+(`prefill.run_prefill_with_retry`, called by the worker in subprocess mode and
+by `prefill_runner` in queue mode). The job log shows each step:
+
+```
+LancacheNotFoundException: Unable to detect Lancache server!
+[vault-api] Lancache not detected, retry 2 of 3 in 15 s.
+...
+[vault-api] Lancache not detected in any of 3 attempts; giving up. Check that vault-core is running and answers /lancache-heartbeat.
+[vault-api] Prefill failed (reason=exit_code); the depot mapping for this app was left unchanged.
+```
+
+- Nothing else is retried: other exit codes, the "resolving to a public IP"
+  variant of the same exception (a configuration error), not logged in,
+  timeouts, stops and successful runs end after one attempt.
+- If all attempts fail, the job fails exactly as before (`error`, reason
+  `exit_code`; the `Prefill failed` line stays last for the web).
+- Cancel, pause and shutdown are honoured during the pause on the usual 0.2 s
+  tick; the job ends `cancelled`, `paused` or `error` (reason `aborted`) and
+  no further attempt starts. A resumed job starts again at attempt 1. In
+  queue mode the runner's job heartbeat keeps running during the pause, so
+  the lease does not expire.
+- Side effects happen once: the depot mapping, manifest ingestion, the
+  summary table, `needs_force` and auto-GC are handled by the worker on the
+  one combined result, and the summary is read from the final attempt's
+  output only (`prefill.final_attempt_output`).
+- Each attempt gets the full `VAULT_PREFILL_TIMEOUT_SECONDS`; the failure
+  happens before any download starts, so a retried job takes only seconds
+  plus the pauses longer.
+
 ### Queue mode: the `prefill_runner` process (WP S-1, ADR-0012)
 
 Everything above this section describes `VAULT_PREFILL_MODE=subprocess` (the

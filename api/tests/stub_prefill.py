@@ -57,6 +57,12 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+LANCACHE_NOT_DETECTED_OUTPUT = (
+    "LancacheNotFoundException: Unable to detect Lancache server!\n"
+    "  at async Task<IPAddress> LancachePrefill.Common.LancacheIpResolver"
+    ".ResolveLancacheIpAsync(...)"
+)
+
 
 def log(message):
     sys.stdout.write(message + "\n")
@@ -88,6 +94,24 @@ def main():
     runs_path = os.path.join(HERE, "runs.jsonl")
     started = time.time()
     log("[stub] selected=%s stdin=%s" % (selected, stdin_state))
+
+    # WP RUNNER-RETRY-1: the first N invocations fail cache detection the
+    # way SteamPrefill does when its /lancache-heartbeat probe gets no valid
+    # answer in time (exception, non-zero exit); later ones run the mode.
+    lancache_fail_runs = control.get("lancache_fail_runs", 0)
+    if lancache_fail_runs:
+        counter_path = os.path.join(HERE, "lancache_failures.txt")
+        failures = 0
+        if os.path.exists(counter_path):
+            with open(counter_path, encoding="utf-8") as handle:
+                failures = int(handle.read() or "0")
+        if failures < lancache_fail_runs:
+            with open(counter_path, "w", encoding="utf-8") as handle:
+                handle.write(str(failures + 1))
+            log("[stub] Detecting Lancache server...")
+            log(LANCACHE_NOT_DETECTED_OUTPUT)
+            _record(runs_path, selected, started, 1)
+            return 1
 
     mode = control.get("mode", "success")
     sleep_seconds = control.get("sleep_seconds", 0)
@@ -221,6 +245,7 @@ def make_stub(
     manifest_bins: list[dict[str, object]] | None = None,
     summary_text: str | None = None,
     summary_bytes: bytes | None = None,
+    lancache_fail_runs: int = 0,
 ) -> str:
     """Create a fake SteamPrefill in ``directory``; returns the launcher path.
 
@@ -243,6 +268,11 @@ def make_stub(
     valid UTF-8, e.g. real single-byte OEM-codepage bytes for the decode-fix
     test. Neither given (both ``None``, the default) reproduces the exact
     pre-WP-3.3 stub output every other test in this module depends on.
+
+    ``lancache_fail_runs`` (WP RUNNER-RETRY-1): the first that many
+    invocations print SteamPrefill's "Unable to detect Lancache server!"
+    exception and exit 1; later invocations behave as ``mode`` says. The
+    count survives between runs in ``lancache_failures.txt`` next to the stub.
     """
     directory.mkdir(parents=True, exist_ok=True)
     script = directory / "steamprefill_stub.py"
@@ -258,6 +288,7 @@ def make_stub(
         "manifest_bins": _encode_manifest_bins(manifest_bins),
         "summary_text": summary_text,
         "summary_bytes_hex": summary_bytes.hex() if summary_bytes is not None else None,
+        "lancache_fail_runs": lancache_fail_runs,
     }
     (directory / CONTROL_FILENAME).write_text(
         json.dumps(control, indent=2), encoding="utf-8"
