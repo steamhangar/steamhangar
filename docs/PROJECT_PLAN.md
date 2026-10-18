@@ -3678,14 +3678,15 @@ below carry their own later dates, item 12 is the current one).
         search field and the caret appeared dead. Guard added plus a CSS pin
         test. Also: Clients cards got icon tile, "now" box, card padding,
         action footer, boxed update warning and an empty state box.
-      - [ ] **CLIENTS-4** (web) finish the Clients cards per
+      - [x] **CLIENTS-4** (done in the rc20 rework, 3751e12 / 3a89818) (web) finish the Clients cards per
         `docs/design/rc20/clients.html`: mono meta line and outdated pill in
         the card head; update box tint, icon, versions in code, "Show update
         command"; now box with subline and speed readout; stat grid
         (Installed, Loaded, Hit rate with meter); Recent chips with "+N
         more"; agent health row; footer with last active and unattributed GB;
         summary tile details and range control.
-      - [ ] **CSS-HIDDEN-LINT-1** (web test) generalise the hidden-guard lint
+      - [ ] **CSS-HIDDEN-LINT-1** (web test; partly done: since SETTINGS-2 the
+        hygiene check also reads kit.css) generalise the hidden-guard lint
         in `css-hygiene.test.js`: fail when a later or higher-specificity rule
         sets `display` on an element whose `[hidden]` guard it overrides
         (`css-pop-hidden.test.js` covers only compound `.pop.<x>`).
