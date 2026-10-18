@@ -89,11 +89,38 @@ Antrag filed and the rollout on the operator's stack checked.
   pin, regrow-without-idle-gap test); the open boxes of
   `docs/PROJECT_PLAN.md` §11 item 13 B (signed APK, standard-user check,
   real-device checks, rollout gates (h) and (i), release notes) and the
-  failed-jobs measurement (Subnautica, Timberborn, Hogwarts Legacy).
+  failed-jobs measurement (Subnautica, Timberborn, Hogwarts Legacy);
+  RELEASE-SPLIT-1 (below, decided 2026-10-18).
 - **Entry:** rc21 tagged.
 - **Exit:** release gate; every open item 13 B box ticked or explicitly
   moved by the user; measurements written up (inbox note or ADR addendum).
   Then tag **`v0.1.0` final**.
+
+- **RELEASE-SPLIT-1 (ci + api + clients; user decision 2026-10-18,
+  in rc22):** today every `v0.1.0-rcN` tag rebuilds and re-releases every
+  product with the same version, also an unchanged agent. The operator
+  wants a product released only when it changed, and its version to show
+  when that was. Decided: **separate tags and releases per product**
+  (options were: per-component version under one tag; display only;
+  separate tags). Scope for the package cut:
+  - tag prefixes, e.g. `server-v*` (vault-core, vault-api and web images,
+    which ship together), `agent-v*` (vault-agent binaries), `app-v*`
+    (Android APK); `publish.yml` triggers per prefix; a CI check fails a
+    release when a product's paths changed since its last tag without a
+    new tag of that product (or the reverse: a tag with no change).
+  - the vault-api image bakes the latest released agent files and APK
+    (downloaded from their releases, digest-pinned) instead of building
+    them in the same run (today DIST-1a, `agent-build` / `android-build`).
+  - compatibility: the Clients "version differs from the server" hint
+    (Weg A) compares against the bundled agent version, not the server
+    version; the server states a minimum agent and app version. This
+    pulls part of the v0.2.0 "Weg B for agents" forward; the OS report
+    stays in v0.2.0.
+  - About page and release notes list each product's version and the
+    date it last changed. New ADR (supersedes the single-version part of
+    VER-1).
+  - open for the cut: whether `v0.1.0` final is itself a `server-v0.1.0`
+    tag or a plain umbrella tag pointing at the three product versions.
 
 ### v0.1.x: bug fixes only
 

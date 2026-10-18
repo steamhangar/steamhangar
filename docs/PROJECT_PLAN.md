@@ -3616,7 +3616,8 @@ below carry their own later dates, item 12 is the current one).
       rc20.2 is taken, so the slot is rc20.3 or rc21: open decision
       AIO-DEFAULT-1 in the roadmap (Weg A code default + ADR, B prod `.env`
       only, C both, D measure more).
-      - [ ] AIO-DEFAULT-1 (decision pending)
+      - [ ] AIO-DEFAULT-1 (decided 2026-10-18: Weg B, prod `.env` via
+        Antrag A-20261018-02, code default in rc21)
       - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
         (user decision 2026-10-18); devbox watches the first verify run
       - [ ] UI-COLD-CACHED-1 check whether WEB-FIX-20.2 covers "no game
@@ -3768,6 +3769,15 @@ below carry their own later dates, item 12 is the current one).
         nginx counters, hit-path read)
       - [ ] NITS-AUDIT-1 small items (list in the roadmap; the GameHangar
         logo briefing goes to v0.2.0)
+      - [ ] **RELEASE-SPLIT-1** (ci + api + web/android; user decision
+        2026-10-18) separate tags and GitHub Releases per product
+        (`agent-v*`, `app-v*`, `server-v*` for the images); a product is
+        only released when its files changed, so its version shows when it
+        last changed. Needs: publish.yml split per tag prefix, the vault-api
+        image bakes the latest agent and APK release instead of building
+        them, the "version differs from the server" hint compares against
+        that bundled/minimum agent version, release notes and About show
+        each product's version. New ADR. Details in the roadmap.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test
