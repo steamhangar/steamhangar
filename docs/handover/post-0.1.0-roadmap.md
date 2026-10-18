@@ -1774,6 +1774,9 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   added loading states instead of "Cached 0" after a slow first fetch,
   which may already cover it. Check on rc20.2: `drop_caches`, then open
   Library during a download; also look at the walk duration.
+  Done in rc21 (2026-10-18): stale-while-revalidate in `SizeCache`, walk
+  duration logged at INFO ("Depot size walk ... took X s"); read that line
+  in the next cold test.
 - **TP-REPORT-2 (tools, nits):** `core/tools/throughput-report.py`
   - The heartbeat section shows `request_time` 0.0 ms even when an outside
     probe waits 2-7 s. The wait happens before nginx accepts the request,

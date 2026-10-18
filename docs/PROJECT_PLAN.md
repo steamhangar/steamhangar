@@ -3626,8 +3626,17 @@ below carry their own later dates, item 12 is the current one).
         Antrag A-20261018-02, code default in rc21)
       - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
         (user decision 2026-10-18); devbox watches the first verify run
-      - [ ] UI-COLD-CACHED-1 check whether WEB-FIX-20.2 covers "no game
-        cached" during a cold walk (roadmap)
+      - [ ] UI-COLD-CACHED-1 (rc21, api) `SizeCache` serves the expired
+        snapshot at once and refreshes in one background walk; only the
+        first read and the read after `invalidate()` wait; one INFO line per
+        walk with duration and counts. Web loading states of rc20.2 cover
+        the remaining first read (no web change). Branch
+        `wp/rc21-ui-cold-cached-1` 0a821c0, review PASS; check the walk
+        duration in the next cold test.
+      - [ ] nit (UI-COLD-CACHED-1 review): no backoff when walks keep
+        failing (one ERROR per expired read, bounded by request rate);
+        theoretical waiter starvation after a failed walk; the Thread.start
+        test patches `threading` process-wide
       - [ ] TP-REPORT-2 report nits: heartbeat blind spot, size-floor count
         (roadmap)
 
