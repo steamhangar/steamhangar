@@ -3883,6 +3883,13 @@ below carry their own later dates, item 12 is the current one).
         schema bump and an agent release; already-running agents report no
         OS until updated. Ships with the real installer (the installer part
         of D6, box above).
+      - [ ] **AGENT-PLATFORMS-1** (user wish 2026-10-18; roadmap D6)
+        installer and background agent beyond Windows: Linux desktop
+        (.deb/Flatpak/AUR, systemd user service), macOS (darwin builds,
+        .pkg/Homebrew, launchd, notarization cost decision), SteamOS on
+        Steam Deck (per-user install that survives OS updates, SD-card
+        libraries) and Steam Frame (arm64, check user services first).
+        Platform scope for 0.4.0 is an open decision at its cut.
       - [ ] **CLIENT-NAME-MAC-1** (roadmap D28, user wish 2026-10-14;
         pairs with the installer and the Weg B agent work): the agent
         reports its MAC, vault-api accepts `key_type = "mac"` (reserved

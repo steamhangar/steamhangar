@@ -201,8 +201,10 @@ rename.
   network changes.
 - **Packages:** Weg B for agents (agent reports its OS, API serves a
   minimum agent version) together with the real installer (the installer
-  part of D6); D28 CLIENT-NAME-MAC-1; D5 named, scoped API keys; D29
-  PAIR-2 (builds on D5).
+  part of D6); AGENT-PLATFORMS-1 (installer and agent for Windows, Linux,
+  macOS, SteamOS on Steam Deck and Steam Frame; scope per platform is an
+  open decision at the 0.4.0 cut, see D6); D28 CLIENT-NAME-MAC-1; D5
+  named, scoped API keys; D29 PAIR-2 (builds on D5).
 - **Entry:** v0.3.0 tagged; D6 open questions (service plus tray or
   tray-only, code signing) decided.
 - **Exit:** release gate, plus an install and a pairing on a real
@@ -539,6 +541,31 @@ API key is typed in by hand.
   accepting the warning. This is a cost decision for the user.
 - **Linux/SteamOS.** Flatpak, .deb or AUR, with a systemd user service
   instead of a timer.
+- **AGENT-PLATFORMS-1 (user wish 2026-10-18):** installer and background
+  agent per platform, not Windows only. Today the release ships plain
+  agent binaries for Windows and Linux amd64/arm64 plus the task scripts.
+  - Windows: MSI/Inno + winget (as above).
+  - Linux desktop: .deb, Flatpak or AUR; systemd user service; Steam paths
+    `~/.steam/steam` and the Flatpak Steam
+    (`~/.var/app/com.valvesoftware.Steam`).
+  - macOS: new `darwin/arm64` + `darwin/amd64` builds; .pkg or Homebrew
+    cask with a launchd user agent; Steam path
+    `~/Library/Application Support/Steam`; notarization needs an Apple
+    developer account (cost decision, like Windows code signing).
+  - SteamOS on Steam Deck: read-only root and OS updates that reset system
+    changes, so install per user under the home directory (no package
+    manager), systemd user service, Desktop Mode installer or a one-line
+    script; libraries on the SD card included; check that the service
+    survives SteamOS updates and Game Mode.
+  - SteamOS on Steam Frame (Valve's ARM headset): `linux/arm64`; check
+    whether it allows user services and Desktop Mode like the Deck before
+    promising it. Same check for other SteamOS devices.
+  - The agent reports OS and device type (part of "Weg B for agents") so
+    the Clients page and the Add a device tabs show the right install
+    path; the Linux / SteamOS tab exists already.
+  - Open decision (cut at v0.4.0 planning): all platforms in 0.4.0, or
+    Windows + Linux/SteamOS (Deck) in 0.4.0 and macOS / Steam Frame in a
+    later minor. Exit adds a real install per shipped platform.
 
 **Open decision.** Service plus tray, or tray-only:
 - A service runs without a logged-on user, can read every user's Steam
