@@ -132,7 +132,7 @@
  */
 
 import { store } from "../store-singleton.js";
-import { api } from "../api.js";
+import { api, getStoredApiKey, isDemoMode } from "../api.js";
 import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
 import { showToast } from "../components/toast.js";
 import { buildCard, cardCompletenessKey, cardStructuralKey, patchCardVolatile } from "../components/game-card.js";
@@ -338,6 +338,10 @@ const state = {
   // grouped package's appid to its parent's.
   rawGames: store.snapshot("games") || [],
   games: store.snapshot("games") || [],
+  // WP WEB-FIX-20.2: false until a `GET /v1/games` answer is in. Before
+  // that (first load, a failed fetch while vault-api restarts) the chips
+  // and the subtitle say "loading", never "0".
+  gamesKnown: Array.isArray(store.snapshot("games")),
   parentOf: new Map(),
   jobs: store.snapshot("jobs") || [],
   query: "",
@@ -673,8 +677,14 @@ async function onCheckUpdates() {
 // Rendering
 // ---------------------------------------------------------------------
 
+/** WP WEB-FIX-20.2: the chip count and subtitle while no games answer is in. */
+export const COUNT_LOADING_TEXT = "…";
+export const LIBRARY_LOADING_TEXT = "Loading library…";
+
 function renderChips() {
   const counts = chipCounts(metaFiltered().games, { query: state.query, liveJobsByAppid });
+  // WP WEB-FIX-20.2: an unknown count is not zero.
+  if (!state.gamesKnown) for (const c of counts) c.count = COUNT_LOADING_TEXT;
   // WP UPD-2: an optional chip (e.g. "Updates") can disappear when the API
   // stops carrying its field; never leave the grid filtered by a chip the
   // user can no longer see or press.
@@ -739,6 +749,14 @@ function renderGrid() {
   els.grid.replaceChildren();
 
   if (list.length === 0) {
+    if (!state.gamesKnown) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.dataset.role = "library-loading";
+      p.textContent = LIBRARY_LOADING_TEXT;
+      els.grid.appendChild(p);
+      return;
+    }
     els.grid.appendChild(renderEmptyState());
     return;
   }
@@ -831,6 +849,10 @@ function syncBulk() {
 function updateSubtitle() {
   // WP WEB-FEAT-1: "owned" only when the owned list really loaded — see
   // lib/owned-library.js's header for both wordings and the count choice.
+  if (!state.gamesKnown) {
+    els.sub.textContent = LIBRARY_LOADING_TEXT;
+    return;
+  }
   els.sub.textContent = librarySubtitle({
     games: state.games,
     liveJobsByAppid,
@@ -1684,11 +1706,16 @@ function applyGamesTick(diff) {
 store.subscribe("games", ({ items, diff }) => {
   if (!Array.isArray(items)) return; // {error} payload — nothing to render
   state.vaultGames = items;
+  const firstAnswer = !state.gamesKnown;
+  state.gamesKnown = true;
   // Re-merge with the owned list the loader already holds — a games tick
   // never re-fetches it (WP WEB-FEAT-1, no relay polling).
   remerge();
   if (!mounted()) return;
-  applyGamesTick(diff);
+  // The first answer replaces the loading state everywhere (chips,
+  // subtitle, grid), whatever the diff says.
+  if (firstAnswer) fullRender();
+  else applyGamesTick(diff);
 });
 
 store.subscribe("jobs", ({ items, diff }) => {
@@ -1759,6 +1786,9 @@ export function renderLibrary() {
   const section = buildSection();
   sectionEl = section;
   fullRender();
+  // WP WEB-FIX-20.2: games, jobs and the rail's cache summary as fresh as a
+  // page reload, not the last snapshot of the store's 15 s loops.
+  if (getStoredApiKey() || isDemoMode()) store.refresh("games", "jobs", "cache");
   // WP WEB-FEAT-1: the one "view open" fetch of the stored SteamID64 and its
   // owned list. The other caller of load() is the Reload button.
   ownedLibrary.load();

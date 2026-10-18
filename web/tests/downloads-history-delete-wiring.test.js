@@ -109,9 +109,10 @@ beforeEach(() => {
 test("MUTATION TARGET: the button opens an alertdialog with focus on Keep and the 30-day variant preselected", async () => {
   const s = await mount();
   const btn = role(s, "history-delete");
-  // WP DOWNLOADS-2: the History head row is short ("Delete…"); the
-  // accessible name keeps the full words.
-  assert.equal(btn.textContent, "Delete…");
+  // WP DOWNLOADS-2: the History head row is short; WP WEB-FIX-20.2: a plain
+  // "Delete" (the ellipsis read as cut-off text). The accessible name keeps
+  // the full words.
+  assert.equal(btn.textContent, "Delete");
   assert.equal(btn.getAttribute("aria-label"), "Delete history…");
   btn.focus();
   btn.dispatchEvent({ type: "click" });

@@ -17,7 +17,10 @@ import { createFakeDom } from "./fake-dom.js";
 const dom = createFakeDom();
 globalThis.document = dom.document;
 
-const { heroModel, graphModel, splitFigure, devicesLoading, createDownloadsHero, GRAPH_GRID, NO_TRAFFIC_TEXT } = await import("../js/components/downloads-hero.js");
+const {
+  heroModel, heroStatus, graphModel, splitGeometry, splitFigure, devicesLoading, createDownloadsHero, GRAPH_GRID, NO_TRAFFIC_TEXT,
+  HERO_LABEL, LEGEND_SERVED, LEGEND_INTERNET,
+} = await import("../js/components/downloads-hero.js");
 const { jobProgress, createJobCard, createAttentionRow, createQueueRow, verifyAllAriaLabel } = await import("../js/components/job-row.js");
 const { createHistoryItem, setHistoryItemExpanded, paintHistoryPanel, TRUNCATED_NOTE } = await import("../js/components/history-list.js");
 const { selectExcerptDisplay } = await import("../js/lib/log-excerpt.js");
@@ -26,14 +29,14 @@ const MIB = 1024 ** 2;
 const GIB = 1024 ** 3;
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString().replace(/\.\d{3}Z$/, "Z");
 
-function throughput({ state = "ok", current = 40 * MIB, clients = 2, runner = null } = {}) {
+function throughput({ state = "ok", current = 40 * MIB, runnerNow = 0, clients = 2, runner = null } = {}) {
   return {
     event_feed: { enabled: state !== "disabled", state, last_sweep_at: iso(60_000), sweep_interval_minutes: 5 },
     range: "6h",
     tier: "5m",
     bucket_seconds: 300,
     active_window_minutes: 15,
-    current: current === null ? null : { bytes_per_second: current, window_seconds: 480 },
+    current: current === null ? null : { bytes_per_second: current, runner_bytes_per_second: runnerNow, window_seconds: 480 },
     active_clients_now: clients,
     summary:
       state === "disabled"
@@ -79,7 +82,8 @@ test("MUTATION PIN: heroModel maps the figures onto the kit anatomy (big, pill, 
   assert.equal(m.note, null);
   const f = m.figures;
   assert.deepEqual([f.big.value, f.big.unit], ["40.0", "MB/s"]);
-  assert.deepEqual(f.status, { kind: "running", text: "Downloading" });
+  // WP WEB-FIX-20.2: client traffic only (no runner part) is serving.
+  assert.deepEqual(f.status, { kind: "cached", text: "Serving", tone: "ok" });
   assert.deepEqual(f.caption, ["Limit ", { b: "8 MB/s" }, ", all day", " · ", "2 devices loading"]);
   assert.deepEqual(f.mini.map((i) => i.key), ["average", "peak", "runner"]);
   assert.deepEqual(f.mini[2].parts, ["Prefill runner ", { b: "20.0 GB" }, " of it, ", { b: "5.0 GB" }, " from the cache"]);
@@ -92,11 +96,74 @@ test("MUTATION PIN: heroModel maps the figures onto the kit anatomy (big, pill, 
 });
 
 test("heroModel: an idle cache says Idle; an unknown current speed shows a dash and no pill", () => {
-  assert.deepEqual(heroModel({ throughput: throughput({ current: 0 }) }).figures.status, { kind: "notinuse", text: "Idle" });
+  assert.deepEqual(heroModel({ throughput: throughput({ current: 0 }) }).figures.status, { kind: "notinuse", text: "Idle", tone: null });
   const stale = heroModel({ throughput: throughput({ state: "stale", current: null }) });
   assert.equal(stale.figures.status, null);
   assert.equal(stale.figures.big.value, "—");
   assert.match(stale.note, /out of date/);
+});
+
+test("MUTATION PIN (WP WEB-FIX-20.2): heroStatus — runner traffic is Downloading, other traffic Serving, none Idle", () => {
+  assert.deepEqual(heroStatus({ bytes_per_second: 40 * MIB, runner_bytes_per_second: 0 }), { kind: "cached", text: "Serving", tone: "ok" });
+  assert.deepEqual(heroStatus({ bytes_per_second: 40 * MIB, runner_bytes_per_second: 6 * MIB }), { kind: "running", text: "Downloading", tone: "run" });
+  assert.deepEqual(heroStatus({ bytes_per_second: 6 * MIB, runner_bytes_per_second: 6 * MIB }), { kind: "running", text: "Downloading", tone: "run" });
+  assert.deepEqual(heroStatus({ bytes_per_second: 0, runner_bytes_per_second: 0 }), { kind: "notinuse", text: "Idle", tone: null });
+  // An older server without the runner part: traffic is still Serving.
+  assert.deepEqual(heroStatus({ bytes_per_second: 1 }), { kind: "cached", text: "Serving", tone: "ok" });
+  assert.equal(heroStatus(null), null);
+  assert.equal(heroStatus({ bytes_per_second: null }), null);
+  assert.equal(HERO_LABEL, "Throughput");
+});
+
+test("MUTATION PIN (WP WEB-FIX-20.2): splitGeometry stacks served-from-cache under from-the-internet, scaled to the total", () => {
+  // Totals 0, 10, 5 MB/s; hit shares 0, 1/2, 1 -> served 0, 5, 5.
+  const pts = [
+    { bytes_per_second: 0, bytes_served: 0, hit_bytes: 0 },
+    { bytes_per_second: 10 * MIB, bytes_served: 1000, hit_bytes: 500 },
+    { bytes_per_second: 5 * MIB, bytes_served: 400, hit_bytes: 400 },
+  ];
+  const g = splitGeometry(pts, { width: 600, height: 96 });
+  assert.equal(g.maxBytesPerSecond, 10 * MIB, "the scale is the total's");
+  assert.equal(g.internet.line, "M0 96 L300 0 L600 48", "the top line is the total");
+  assert.equal(g.served.line, "M0 96 L300 48 L600 48");
+  assert.equal(g.served.area, "M0 96 L300 48 L600 48 L600 96 L0 96 Z");
+  assert.equal(g.internet.area, "M0 96 L300 0 L600 48 L600 48 L300 48 L0 96 Z", "the band between total and served");
+  // A hit count above the served bytes never draws above the total.
+  assert.equal(splitGeometry([{ bytes_per_second: 2, bytes_served: 1, hit_bytes: 9 }], { width: 600, height: 96 }).served.line, "M0 0 L600 0");
+  // Fallback: any point without the split -> null.
+  assert.equal(splitGeometry([{ bytes_per_second: 1, bytes_served: 1, hit_bytes: 1 }, { bytes_per_second: 1 }], { width: 600, height: 96 }), null);
+  assert.equal(splitGeometry([], { width: 600, height: 96 }), null);
+});
+
+test("WP WEB-FIX-20.2: graphModel carries the split when the points have it, null (single line) when not; the axis keeps 'highest' of the total", () => {
+  const base = { event_feed: { state: "ok" }, range: "6h", bucket_seconds: 300, range_start: null };
+  const split = graphModel({ ...base, points: [{ t: iso(600_000), bytes_per_second: 10 * MIB, bytes_served: 10, hit_bytes: 4 }, { t: iso(300_000), bytes_per_second: 20 * MIB, bytes_served: 10, hit_bytes: 10 }] }, "6h");
+  assert.ok(split.split, "split present");
+  assert.equal(split.split.internet.line, split.line, "the top line equals the total line");
+  assert.equal(split.axis[1], "highest 20.0 MB/s");
+  const old = graphModel({ ...base, points: [{ t: iso(600_000), bytes_per_second: 10 * MIB }, { t: iso(300_000), bytes_per_second: 20 * MIB }] }, "6h");
+  assert.equal(old.split, null, "an older tier without hit/miss: no split");
+  assert.equal(old.axis[1], "highest 20.0 MB/s");
+});
+
+test("WP WEB-FIX-20.2: createDownloadsHero draws two series and a legend, or the single accent line without one", () => {
+  const hero = createDownloadsHero({ range: "6h", onRangeChange() {} });
+  const q = (role) => hero.el.querySelector(`[data-role="${role}"]`);
+  assert.equal(hero.el.querySelector(".sec").textContent, "Throughput");
+  const base = { event_feed: { state: "ok" }, range: "6h", bucket_seconds: 300, range_start: null };
+  const points = [{ t: iso(600_000), bytes_per_second: 10 * MIB, bytes_served: 10, hit_bytes: 4 }, { t: iso(300_000), bytes_per_second: 20 * MIB, bytes_served: 10, hit_bytes: 10 }];
+  const state = { throughput: throughput(), series: { ...base, points }, range: "6h", rateCap: null, unsupported: false, error: null, noFigures: false };
+  hero.paint(state);
+  const classes = q("stats-graph").querySelectorAll("path").map((p) => p.getAttribute("class"));
+  assert.deepEqual(classes, ["area net", "area srv", "line net", "line srv"], "served under internet, lines over fills");
+  const legend = q("graph-legend");
+  assert.equal(legend.textContent, `${LEGEND_SERVED}${LEGEND_INTERNET}`);
+  assert.equal(LEGEND_SERVED, "Served from cache");
+  assert.equal(LEGEND_INTERNET, "From the internet");
+  assert.deepEqual(legend.children.map((c) => c.className), ["srv", "net"]);
+  hero.paint({ ...state, series: { ...base, points: points.map(({ t, bytes_per_second }) => ({ t, bytes_per_second })) } });
+  assert.deepEqual(q("stats-graph").querySelectorAll("path").map((p) => p.getAttribute("class")), ["area", "line"], "fallback: the single total line");
+  assert.equal(q("graph-legend"), null, "no legend without a split");
 });
 
 test("heroModel: no figures before an answer, with the feed off, or for an old server", () => {
@@ -160,11 +227,15 @@ test("createDownloadsHero: paint fills the card; the pill is rebuilt only when i
   const state = { throughput: throughput(), series: null, range: "6h", rateCap: null, unsupported: false, error: null, noFigures: false };
   hero.paint(state);
   assert.equal(q("stats-current").textContent, "40.0MB/s");
-  assert.equal(q("stats-pill").textContent, "Downloading");
+  assert.equal(q("stats-pill").textContent, "Serving");
+  assert.equal(q("stats-pill").children[0].className, "pill ok", "Serving takes the green pill");
   const pill = q("stats-pill").children[0];
   pill.setAttribute("data-marker", "kept");
   hero.paint(state);
   assert.equal(q("stats-pill").children[0].getAttribute("data-marker"), "kept", "same kind: the animated pill stays");
+  hero.paint({ ...state, throughput: throughput({ runnerNow: 6 * MIB }) });
+  assert.equal(q("stats-pill").textContent, "Downloading");
+  assert.equal(q("stats-pill").children[0].className, "pill run");
   hero.paint({ ...state, throughput: throughput({ current: 0 }) });
   assert.equal(q("stats-pill").textContent, "Idle");
   assert.equal(q("stats-grid").querySelectorAll(".tile").length, 4);

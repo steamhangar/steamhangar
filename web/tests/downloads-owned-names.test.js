@@ -199,12 +199,14 @@ test("MUTATION PIN (title order + live names): no vault name -> owned name, pain
     const s = renderDownloads();
     await until(() => count(RELAY) === 1, "the one owned-list load started (held at the relay)");
     await until(() => historyNames(s).length === 4, "rows");
-    assert.deepEqual(historyNames(s), ["Vault Ten", "Unknown app", "Unknown app", "Unknown app"], "before the list lands");
+    // WP WEB-FIX-20.2: a name that may still arrive reads "Loading…", not
+    // "Unknown app"; "Unknown app" is for apps no source could name.
+    assert.deepEqual(historyNames(s), ["Vault Ten", "Loading…", "Loading…", "Loading…"], "before the list lands");
     // Job 2 (not_logged_in) expanded while the list is still held: its
-    // Retry label is painted with the fallback title first.
+    // Retry label is painted with the loading title first.
     await expand(s, 2);
     const retryLabel = () => retryButtons(row(s, 2))[0].getAttribute("aria-label");
-    assert.equal(retryLabel(), "Retry Unknown app", "label before the list lands");
+    assert.equal(retryLabel(), "Retry Loading…", "label before the list lands");
     const gamesCallsAtRelease = count("/v1/games");
     release();
     await until(() => historyNames(s).includes("Owned Twenty"), "owned name painted from the owned-list subscription");

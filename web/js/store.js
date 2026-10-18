@@ -95,6 +95,21 @@ export const DEFAULT_INTERVALS = Object.freeze({
 
 const JOB_ACTIVE_STATUSES = new Set(["queued", "running", "paused"]);
 
+/**
+ * WP WEB-FIX-20.2: the store loops' retry schedule after a failed poll when
+ * the caller passes no `backoffOptions`: 2.5 s, 5 s, 10 s, then the loop's
+ * own normal interval (`maxMs`), never longer. The generic backoff default
+ * (1 s doubling up to 30 s) left a games list that failed while vault-api
+ * restarted unanswered for up to 30 s, twice the 15 s poll it replaces.
+ * Pure.
+ * @param {number} intervalMs the loop's normal interval
+ * @returns {import("./backoff.js").BackoffOptions}
+ */
+export function storeRetryBackoff(intervalMs) {
+  return { baseMs: STORE_RETRY_BASE_MS, maxMs: Math.max(STORE_RETRY_BASE_MS, intervalMs) };
+}
+export const STORE_RETRY_BASE_MS = 2500;
+
 /** Pure: does this `GET /v1/jobs` snapshot contain a still-in-flight job? */
 export function hasActiveJob(jobs) {
   return Array.isArray(jobs) && jobs.some((j) => JOB_ACTIVE_STATUSES.has(j.status));
@@ -311,7 +326,7 @@ export function createPollingStore({
     fetcher: () => apiClient.jobs(),
     keyFn: (j) => j.id,
     getIntervalMs: (curr) => nextJobsIntervalMs(curr, intervals),
-    backoffOptions,
+    backoffOptions: backoffOptions ?? storeRetryBackoff(intervals.jobsSlowMs),
     onTick: ({ prev, curr, diff }) => {
       emit("jobs", { items: curr, diff });
       const events = diffJobsForNotifications(prev, curr);
@@ -324,7 +339,7 @@ export function createPollingStore({
     fetcher: () => apiClient.games(),
     keyFn: (g) => g.appid,
     getIntervalMs: () => intervals.gamesMs,
-    backoffOptions,
+    backoffOptions: backoffOptions ?? storeRetryBackoff(intervals.gamesMs),
     onTick: ({ prev, curr, diff }) => {
       emit("games", { items: curr, diff });
       const events = diffGamesForNotifications(prev, curr);
@@ -337,7 +352,7 @@ export function createPollingStore({
     fetcher: () => apiClient.clients(),
     keyFn: (c) => c.client_id,
     getIntervalMs: () => intervals.clientsMs,
-    backoffOptions,
+    backoffOptions: backoffOptions ?? storeRetryBackoff(intervals.clientsMs),
     onTick: ({ prev, curr, diff }) => {
       emit("clients", { items: curr, diff });
       const events = diffClientsForNotifications(prev, curr);
@@ -357,7 +372,7 @@ export function createPollingStore({
   const cacheLoop = new ResourceLoop({
     fetcher: () => apiClient.cacheSummary(),
     getIntervalMs: () => intervals.gamesMs,
-    backoffOptions,
+    backoffOptions: backoffOptions ?? storeRetryBackoff(intervals.gamesMs),
     onTick: ({ curr }) => emit("cache", { item: curr }),
     onError: (err) => emit("cache", { error: err }),
   });
@@ -393,6 +408,22 @@ export function createPollingStore({
     /** Force every loop to poll on its very next tick (e.g. pull-to-refresh). */
     refreshNow() {
       for (const loop of loops) loop.nudge();
+    },
+    /**
+     * WP WEB-FIX-20.2: poll only the named resources now (`"jobs"`,
+     * `"games"`, `"clients"`, `"cache"`). A view calls this on mount, so a
+     * client-side navigation shows data as fresh as a page reload instead
+     * of the last snapshot of a slow loop. Same coalescing nudge as
+     * `refreshNow` (a fetch in flight is followed by one more, never two
+     * timer chains), and a no-op for a stopped loop (onboarding, no key).
+     * @param {...string} kinds
+     */
+    refresh(...kinds) {
+      const byKind = { jobs: jobsLoop, games: gamesLoop, clients: clientsLoop, cache: cacheLoop };
+      for (const kind of kinds) {
+        if (!byKind[kind]) throw new RangeError(`Unknown resource: ${kind}`);
+        byKind[kind].nudge();
+      }
     },
     /**
      * Subscribe to a resource's ticks (`"jobs"|"games"|"clients"`, payload
