@@ -431,6 +431,12 @@ export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
     name_addr: null,
     display_name: "Prefill runner",
   });
+  // WP CLIENTS-LIVE-1: the live tier's view of the same state. The demo has
+  // one source of truth, so `live_now` equals `loading_now` (the screenshot
+  // goldens stay as they were).
+  for (const c of clients) {
+    c.live_now = c.loading_now ? { ...c.loading_now, apps: c.loading_now.apps.map((a) => ({ ...a })) } : null;
+  }
   // Server order: connected first, then newest last_active.
   clients.sort((a, b) => Number(b.connected === true) - Number(a.connected === true) || String(b.last_active).localeCompare(String(a.last_active)));
   return {
@@ -440,5 +446,9 @@ export function demoClientsOverview(range, ctx, nowMs = Date.now()) {
     range_start: demoSeries(range, nowMs, sinceMs).range_start,
     active_window_minutes: 15,
     clients,
+    live: {
+      live_since: isoSeconds(nowMs - 15 * 60_000),
+      current_window_seconds: 15 + Math.floor((nowMs % 5000) / 1000),
+    },
   };
 }

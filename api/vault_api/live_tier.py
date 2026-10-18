@@ -13,8 +13,8 @@ on its own cursor, for the graph only:
   entry), so a flood of distinct addresses cannot grow it. Lost on restart,
   never written to SQLite (no schema change, no extra writes).
 * **Watcher.** The log is tailed only while somebody polls the live endpoint
-  (``touch``): at most once per ``TAIL_INTERVAL_SECONDS`` (2 s) however many
-  clients poll, and not at all when nobody polled for
+  or the clients overview (``touch``, WP CLIENTS-LIVE-1): at most once per
+  ``TAIL_INTERVAL_SECONDS`` (2 s) however many clients poll, and not at all when nobody polled for
   ``WATCHER_WINDOW_SECONDS`` (30 s). There is no background thread, so an
   idle server does exactly what it did before. After an idle stretch the next
   poll reads the backlog (bounded per call) and buckets it by EVENT time, so
@@ -26,6 +26,12 @@ on its own cursor, for the graph only:
   sweep by up to one interval), else from the persisted 1-minute tier. Each
   point has exactly one source: nothing is summed across sources, so nothing
   is counted twice.
+* **Per address (WP CLIENTS-LIVE-1).** Next to the four counters a cell keeps
+  the served bytes per depot of each address (at most
+  ``MAX_DEPOTS_PER_ADDR_CELL``; the rest stays unattributed), so the Clients
+  page can name the game an address is loading without waiting for a sweep
+  (``addr_activity``). Only the current-speed window needs them, so they are
+  pruned after ``CURRENT_SECONDS`` plus the running cell.
 
 Known limits (honest, not bugs): the sweep truncates the log once it has
 caught up; lines that arrive between our last read and that truncation never
@@ -41,7 +47,7 @@ import logging
 import os
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from vault_api import event_sweep
@@ -80,6 +86,10 @@ CURRENT_SECONDS = 15
 #: running cell). Five minutes bridges the gaps between a client's chunks
 #: and keeps the number from flickering; the ring holds 15.
 ACTIVE_SECONDS = 5 * 60
+
+#: Depots kept per address and cell (WP CLIENTS-LIVE-1); bytes on further
+#: depots of that cell count as "not linked to one game".
+MAX_DEPOTS_PER_ADDR_CELL = 16
 
 #: Per-address counters, in this order.
 _REQ, _BYTES, _HIT, _MISS = range(4)
@@ -142,6 +152,8 @@ class LiveTier:
         self._lock = threading.Lock()
         #: cell start (epoch s) -> address -> [requests, bytes, hit, miss]
         self._cells: dict[int, dict[str, list[int]]] = {}
+        #: cell start -> address -> depot id -> served bytes (CLIENTS-LIVE-1)
+        self._depots: dict[int, dict[str, dict[int, int]]] = {}
         self._path: str | None = None
         self._cursor: int | None = None
         self._ino: int | None = None
@@ -194,7 +206,7 @@ class LiveTier:
 
     def _tail(self, path: str, now: datetime, epoch: float, gap: bool = False) -> int:
         if path != self._path:
-            self._cells.clear()
+            self._clear_cells()
             self._reset(path)
         try:
             fd = event_sweep.open_event_log(path, os.O_RDONLY)
@@ -215,7 +227,7 @@ class LiveTier:
                 # Idle gap: the sweep may have consumed and truncated the log
                 # (a regrown file can even be past the old cursor), so the old
                 # cursor means nothing. Start over, drop the stale cells.
-                self._cells.clear()
+                self._clear_cells()
                 self._cursor = max(0, size - self._max_backfill)
                 fresh = True
                 hole = True
@@ -302,7 +314,8 @@ class LiveTier:
         seen_epoch = min(_epoch(seen), epoch) if seen is not None else epoch
         if seen_epoch < epoch - self._ring_seconds:
             return None  # older than the ring: persisted already
-        cell = self._cells.setdefault(_floor(seen_epoch, CELL_SECONDS), {})
+        key = _floor(seen_epoch, CELL_SECONDS)
+        cell = self._cells.setdefault(key, {})
         addr = line.addr
         counters = cell.get(addr)
         if counters is None:
@@ -318,12 +331,24 @@ class LiveTier:
                 counters[_HIT] += line.bytes_sent
             elif line.cache_status == event_sweep.STATUS_MISS:
                 counters[_MISS] += line.bytes_sent
+            if line.depotid is not None and line.bytes_sent > 0 and addr != OVERFLOW_ADDR:
+                by_depot = self._depots.setdefault(key, {}).setdefault(addr, {})
+                if line.depotid in by_depot or len(by_depot) < MAX_DEPOTS_PER_ADDR_CELL:
+                    by_depot[line.depotid] = by_depot.get(line.depotid, 0) + line.bytes_sent
         return seen_epoch
+
+    def _clear_cells(self) -> None:
+        self._cells.clear()
+        self._depots.clear()
 
     def _prune(self, epoch: float) -> None:
         horizon = _floor(epoch - self._ring_seconds, CELL_SECONDS)
         for key in [k for k in self._cells if k < horizon]:
             del self._cells[key]
+        # Depots only feed the current-speed window (``addr_activity``).
+        depot_horizon = _floor(epoch - CURRENT_SECONDS - CELL_SECONDS, CELL_SECONDS)
+        for key in [k for k in self._depots if k < depot_horizon]:
+            del self._depots[key]
 
     # -- reading ----------------------------------------------------------
 
@@ -457,6 +482,46 @@ class LiveTier:
                     seen.add(addr)
         return len(seen)
 
+    def addr_activity(
+        self, now: datetime, is_runner: Callable[[str, str], bool]
+    ) -> tuple[dict[tuple[str, bool], "AddrActivity"], float]:
+        """Per address and side (runner or not): what it loads right now.
+
+        Keys are ``(address, is_runner)``: an address counts as the prefill
+        runner only in the cells its runner window covers, like everywhere
+        else. One window for everything: the last ``CURRENT_SECONDS`` plus the
+        running cell, the window of ``current`` (served bytes and bytes per
+        depot). The second value is that window's length in seconds. Only
+        addresses with served bytes in it are listed; the anonymous overflow
+        entry is not an address and is left out.
+        """
+        epoch = _epoch(now)
+        now_cell = _floor(epoch, CELL_SECONDS)
+        start = now_cell - CURRENT_SECONDS
+        with self._lock:
+            keys = range(start, now_cell + CELL_SECONDS, CELL_SECONDS)
+            cells = {
+                key: {addr: c[_BYTES] for addr, c in self._cells[key].items()}
+                for key in keys
+                if key in self._cells
+            }
+            depots = {
+                key: {addr: dict(d) for addr, d in self._depots[key].items()}
+                for key in keys
+                if key in self._depots
+            }
+        out: dict[tuple[str, bool], AddrActivity] = {}
+        for key, by_addr in cells.items():
+            iso = _iso(key)
+            for addr, served in by_addr.items():
+                if addr == OVERFLOW_ADDR or served <= 0:
+                    continue
+                entry = out.setdefault((addr, is_runner(addr, iso)), AddrActivity())
+                entry.bytes_served += served
+                for depotid, size in depots.get(key, {}).get(addr, {}).items():
+                    entry.depots[depotid] = entry.depots.get(depotid, 0) + size
+        return out, max(1.0, epoch - start)
+
     def covered_from(self) -> str | None:
         with self._lock:
             return _iso(int(self._covered_from)) if self._covered_from is not None else None
@@ -472,6 +537,16 @@ class PersistedMinute:
     runner: LiveTotals
     #: ``peak_bucket_bytes`` of the row (bytes in the minute).
     peak: int
+
+
+@dataclass
+class AddrActivity:
+    """One address's traffic in the current-speed window
+    (``LiveTier.addr_activity``)."""
+
+    bytes_served: int = 0
+    #: Served bytes per depot id (at most ``MAX_DEPOTS_PER_ADDR_CELL`` per cell).
+    depots: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
