@@ -3701,6 +3701,16 @@ below carry their own later dates, item 12 is the current one).
         for up to 5 minutes after a vault-api restart (ring not filled yet);
         no test for a live answer with the feed ok but `active_clients`
         null or missing
+      - [ ] **CLIENTS-LIVE-1** (api + web) the Clients "loading now" box and
+        speed come from the swept 5-minute window (`/v1/clients/overview`,
+        `traffic.current_window`), so they lag up to one sweep; serve them
+        per address from the live tier (like LIVE-DELAY-1 did for Downloads).
+        Found in rc20.2 (WEB-FIX-20.2 polls every 5 s, the data stays old).
+      - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
+        have no hit/miss split for the prefill runner, so the Downloads graph
+        counts all runner traffic as "from the internet" and a verifying
+        runner shows "Downloading"; add the runner split and use it for the
+        pill and the two-series graph (rc20.2).
       - [ ] Android Downloads subline counts the plain job poll
         (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
         not the ranged History list it shows; same "N in history" bug the
