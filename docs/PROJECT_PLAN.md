@@ -3767,6 +3767,21 @@ below carry their own later dates, item 12 is the current one).
         `traffic.current_window`), so they lag up to one sweep; serve them
         per address from the live tier (like LIVE-DELAY-1 did for Downloads).
         Found in rc20.2 (WEB-FIX-20.2 polls every 5 s, the data stays old).
+      - [ ] **GRAPH-RECENT-1** (api + web, decided 2026-10-18, Weg A; moved
+        from rc22 into rc21 the same day after a second operator report)
+        the Downloads 1 h / 6 h views (graph and header `current`) show the
+        minutes since the last event sweep: stitch the live tier in, as
+        `/v1/throughput/live` already does. Observed on dev: live graph
+        144 MB/s (forced verify reads from cache), 1 h view empty and
+        "Idle" until the next 5-minute sweep. Check first that the next
+        sweep fills the 1 h view (else it is a real bug). Second report
+        (operator screenshot, dev, 1 h range, idle): header "10.3 MB/s" with
+        pill "Downloading" while the subline says "Idle", the graph is flat
+        at 0 "now" and the only peak (68.6 MB/s, runner verify of jobs
+        #192/#193) is 9 min old: `current` and the pill come from the last
+        swept window, so they lag in both directions. Header and pill must
+        agree with the newest graph point; the pill's "Downloading" for
+        runner cache reads is RUNNER-SPLIT-1 (next package).
       - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
         have no hit/miss split for the prefill runner, so the Downloads graph
         counts all runner traffic as "from the internet" and a verifying
@@ -3822,13 +3837,6 @@ below carry their own later dates, item 12 is the current one).
         gate for release tags and the nightly CI. Per-section timestamps
         in the output; first measurement when the dev instance is free
         (`dev.sh verify` stops it). Note: `dev.sh` changes go via Antrag.
-      - [ ] **GRAPH-RECENT-1** (api + web, decided 2026-10-18, Weg A) the
-        Downloads 1 h / 6 h views (graph and header `current`) show the
-        minutes since the last event sweep: stitch the live tier in, as
-        `/v1/throughput/live` already does. Observed on dev: live graph
-        144 MB/s (forced verify reads from cache), 1 h view empty and
-        "Idle" until the next 5-minute sweep. Check first that the next
-        sweep fills the 1 h view (else it is a real bug).
       - [ ] **CARD-CORNERS-1** (web, open, needs the operator's screenshot)
         Library game card reportedly lacks rounded top corners with real
         covers; demo render (`dev.sh test-web-shots`) is fine. Candidate

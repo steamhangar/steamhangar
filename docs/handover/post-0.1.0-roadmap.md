@@ -73,6 +73,12 @@ Antrag filed and the rollout on the operator's stack checked.
   tuning defaults from the Sunday test if not shipped in rc20.x; runner
   retry on "Unable to detect Lancache server!" only if the heartbeat log
   supports the late-heartbeat hypothesis (ADR-0027).
+- **Added 2026-10-18:** GRAPH-RECENT-1 (planned for rc22 by the planning
+  session, moved into rc21 after a second operator report: the Downloads
+  header showed "10.3 MB/s Downloading" while idle, graph flat at 0; 1 h /
+  6 h views and header `current` include the minutes since the last sweep
+  via the live tier; decided Weg A). Details in `docs/PROJECT_PLAN.md`,
+  rc21 block.
 - **Entry:** rc20 tagged; Sunday test result known (for the tuning item).
 - **Exit:** release gate; Android screenshot goldens refreshed, incl. a
   night golden that really renders dark.
@@ -91,13 +97,10 @@ Antrag filed and the rollout on the operator's stack checked.
   real-device checks, rollout gates (h) and (i), release notes) and the
   failed-jobs measurement (Subnautica, Timberborn, Hogwarts Legacy);
   RELEASE-SPLIT-1 (below, decided 2026-10-18).
-- **Added 2026-10-18 (planning session; rc21 runs in another session,
-  so these ride in rc22):** VERIFY-FAST-1 (lean default
+- **Added 2026-10-18 (planning session):** VERIFY-FAST-1 (lean default
   `dev.sh verify`, `verify full` for tags and nightly; decided Weg A),
-  GRAPH-RECENT-1 (1 h / 6 h Downloads views include the minutes since the
-  last sweep via the live tier; decided Weg A), CARD-CORNERS-1 (Library
-  card corners with real covers, waiting for a screenshot). Details in
-  `docs/PROJECT_PLAN.md`, rc22 block.
+  CARD-CORNERS-1 (Library card corners with real covers, waiting for a
+  screenshot). Details in `docs/PROJECT_PLAN.md`, rc22 block.
 - **Entry:** rc21 tagged.
 - **Exit:** release gate; every open item 13 B box ticked or explicitly
   moved by the user; measurements written up (inbox note or ADR addendum).
