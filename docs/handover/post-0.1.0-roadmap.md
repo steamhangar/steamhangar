@@ -138,7 +138,8 @@ announcement (WP 5.6, r/selfhosted) is NOT made at 0.1.0**; it waits for
 
 - DUAL-STACK-1 after the line change (AAAA check, then stepwise cap raise
   with measurement).
-- Sunday cold-game test per ADR-0027 (feeds rc20.x / rc21).
+- Sunday cold-game test per ADR-0027 (feeds rc20.x / rc21); plan and
+  decisions in `docs/handover/cold-game-test-plan.md`.
 
 ## Open decisions (waiting for the user)
 

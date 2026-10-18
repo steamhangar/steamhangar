@@ -3333,7 +3333,9 @@ below carry their own later dates, item 12 is the current one).
       - [x] FIX-SHOT-1: stats graph caption reads the injected clock (goldens refreshed)
       - [x] tag `v0.1.0-rc19.3` after main CI is green (pushed on main d409f30)
       - [ ] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
-        WORKERS=2). Until it decides the worker tuning, keep the verify
+        WORKERS=2). Planned 2026-10-18 in
+        `docs/handover/cold-game-test-plan.md` (drop_caches eviction, one
+        test Antrag, runs A-B-C-A, decision rule fixed upfront). Until it decides the worker tuning, keep the verify
         window off: a verify over many games on cold data runs against the
         single nginx worker (VERIFY-COLD-1, audit 2026-10-16).
       - LIVE-DELAY-1 (client downloads show more than 1 min late on the
