@@ -3637,6 +3637,16 @@ below carry their own later dates, item 12 is the current one).
         verify run (Complete all / Verify on several large games) started
         by the operator AFTER his vacation; the devbox probes the heartbeat
         every 5 s, iostat partition lines and the duration.
+        Pre-measurement 2026-10-18 20:40-21:08 (prod rc20.2, AIO=threads,
+        Auto-GC dry-run; manual Verify of Enshrouded, AC Black Flag
+        Resynced, Gothic 1 Remake, Hogwarts Legacy done, No Man's Sky
+        stopped; cache partly warm, no drop_caches): heartbeat from outside
+        327 probes, all 200, p50 0.9 ms, p95 3.0 ms, max 9.1 ms (without AIO
+        on 2026-10-18: up to 7.6 s); the four data partitions read about
+        209 MB/s summed (p50, max 236 MB/s, incl. parity); about 238 GB in
+        ~25 min (approximate, job times not taken exactly). Every job: all
+        HIT, "0 depots observed", Auto-GC queued in dry-run mode (A-20261018-03
+        check done). Open for the full run: cold data, exact job durations.
       - [x] UI-COLD-CACHED-1 (rc21, api; 9b994ce) `SizeCache` serves the expired
         snapshot at once and refreshes in one background walk; only the
         first read and the read after `invalidate()` wait; one INFO line per
