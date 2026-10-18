@@ -3647,6 +3647,10 @@ below carry their own later dates, item 12 is the current one).
         the serving URL/port); pin a fixed URL in the case. Android
         Downloads note does not read `auto_complete_cached` yet (says
         "complete automatically" when off).
+        Also Android: the setting renders as a free-text field, not an
+        Off/On toggle (`SettingsScreen.kt:316-341` special-cases only
+        auto_gc, sweep_include_cached, webhook_events); Android demo
+        (`DemoState.kt` ~920, `scheduleOut()`) lacks `auto_complete_cached`.
       - [ ] nit (MOBILE-1b review): real "Download app" button state is in
         no golden (pairing cases render the demo note); no real-device
         check of safe-area insets yet.
