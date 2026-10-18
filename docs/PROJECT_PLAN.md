@@ -3629,7 +3629,14 @@ below carry their own later dates, item 12 is the current one).
         rc20.x), ADR-0030; verify 627/0. After the rc21 rollout: remove the
         prod `.env` line (Antrag).
       - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
-        (user decision 2026-10-18); devbox watches the first verify run
+        (user decision 2026-10-18); devbox watches the first verify run.
+        AIO is live on prod since 2026-10-18 12:40Z (A-20261018-02; idle
+        heartbeat from outside 5x 200 in 0.8-0.9 ms). Prod has
+        `VAULT_SCHEDULE_WINDOW=off` pinned in `.env`, so the window cannot
+        be switched in Settings. Decided 2026-10-18: Weg A, a manual
+        verify run (Complete all / Verify on several large games) started
+        by the operator AFTER his vacation; the devbox probes the heartbeat
+        every 5 s, iostat partition lines and the duration.
       - [x] UI-COLD-CACHED-1 (rc21, api; 9b994ce) `SizeCache` serves the expired
         snapshot at once and refreshes in one background walk; only the
         first read and the read after `invalidate()` wait; one INFO line per
