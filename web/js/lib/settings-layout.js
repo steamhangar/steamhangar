@@ -65,6 +65,7 @@ export const LAST_SWEEP_LABEL = "Last sweep";
 const NORMAL_PLACEMENT = Object.freeze({
   vault_name: "vault",
   schedule_window: "window",
+  auto_complete_cached: "window",
   auto_gc: "disk",
   event_log_rotate_bytes: "disk",
   webhook_url: "notify",
@@ -191,6 +192,15 @@ export const FIELD_META = Object.freeze({
       ["true", "On"],
     ],
     help: "When on, the sweep also refreshes every game that already has content on disk, not only games a PC agent reports as installed.",
+  },
+  auto_complete_cached: {
+    label: "Complete cached games automatically",
+    kind: "segs",
+    options: [
+      ["false", "Off"],
+      ["true", "On"],
+    ],
+    help: "Inside the download window, fetch the missing chunks of cached games the disk check found incomplete. Off: use Verify or Complete all.",
   },
   auto_gc: {
     label: "Auto-GC after a prefill",

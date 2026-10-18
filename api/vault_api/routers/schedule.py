@@ -101,6 +101,13 @@ class ScheduleOut(BaseModel):
     #: reclaimed", not merely "someone configured GC". A UI can render this
     #: as a banner without re-deriving the two settings' interaction itself.
     sweep_cached_gc_risk: bool
+    #: WP AUTO-VERIFY-1. Effective value of ``auto_complete_cached``/
+    #: ``VAULT_AUTO_COMPLETE_CACHED``: true iff a sweep (inside the window)
+    #: runs a forced prefill for every cached game the stored disk check calls
+    #: incomplete with missing chunks. Like ``sweep_include_cached``, the
+    #: value a sweep WOULD apply, not a promise one runs. Default true; a
+    #: UI says "manual only" for incomplete games when it is false.
+    auto_complete_cached: bool = True
 
 
 @router.get("/v1/schedule", response_model=ScheduleOut)
@@ -140,4 +147,5 @@ def get_schedule(
         next_eligible_at=scheduler_module.next_eligible_at(settings, state, now),
         sweep_include_cached=settings.sweep_include_cached,
         sweep_cached_gc_risk=scheduler_module.cached_sweep_gc_risk(settings),
+        auto_complete_cached=settings.auto_complete_cached,
     )

@@ -594,11 +594,13 @@ def test_no_editable_key_is_assigned_uncommented(which: str) -> None:
         f"{which}/.env.example assigns editable keys uncommented: {pinned}. "
         "Document them as `#KEY=<default>` instead (D16b, audit 3.7)."
     )
-    assert len(editable) == 29
+    # WP AUTO-VERIFY-1 added VAULT_AUTO_COMPLETE_CACHED (29 -> 30).
+    assert len(editable) == 30
 
 
 ENV_EXAMPLE_DEFAULT_PINS: dict[str, str] = {
     "VAULT_SWEEP_INCLUDE_CACHED": "true" if config.DEFAULT_SWEEP_INCLUDE_CACHED else "false",
+    "VAULT_AUTO_COMPLETE_CACHED": "true" if config.DEFAULT_AUTO_COMPLETE_CACHED else "false",
     "VAULT_AUTO_GC": str(config.DEFAULT_AUTO_GC),
     # WP CORE-FIX-2: deploy/.env.example's twin is pinned in
     # test_core_fix_2_max_threads.py.

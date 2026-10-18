@@ -733,8 +733,9 @@ def completion_appids(
 
     * **All incomplete cached games, not only sweep targets.** Completing is
       independent of ``sweep_include_cached`` and of the installed lists;
-      the window is the only gate (``maybe_sweep`` calls this only inside
-      it).
+      the window and ``auto_complete_cached`` (WP AUTO-VERIFY-1, default on)
+      are the only gates (``maybe_sweep`` calls this only inside the window
+      and only while the switch is on).
     * **Only missing chunks.** A game short only of chunk files with the wrong
       size is left out: the forced run serves those files from disk as HITs
       and cannot replace them, so forcing it every interval would replay the
@@ -805,9 +806,13 @@ def maybe_sweep(
     # chunks even when SteamPrefill's own bookkeeping calls it up to date.
     # Its own try: a failure here costs only the completion, never the sweep
     # (which is already claimed).
+    # WP AUTO-VERIFY-1: the operator's switch ("Complete cached games
+    # automatically", default on). Off, nothing is forced here; manual Verify
+    # and "Complete all" are separate routes and stay available.
     completing: tuple[int, ...] = ()
     try:
-        completing = completion_appids(conn, settings, depot_bytes)
+        if settings.auto_complete_cached:
+            completing = completion_appids(conn, settings, depot_bytes)
         if completing:
             deletion.set_needs_force(conn, completing)
     except Exception:

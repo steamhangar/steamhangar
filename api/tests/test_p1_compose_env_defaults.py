@@ -107,6 +107,8 @@ EXPECTED_DEFAULTS_VAULT_API: dict[str, str] = {
     # at runtime via PATCH /v1/settings (ADR-0009) -- this line adds an env
     # path, it does not remove that one.
     "VAULT_SWEEP_INCLUDE_CACHED": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
+    # WP AUTO-VERIFY-1: same shape and reason as VAULT_SWEEP_INCLUDE_CACHED.
+    "VAULT_AUTO_COMPLETE_CACHED": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     "VAULT_EVENT_LOG_PATH": "",  # config.py: Settings.event_log_path dataclass default "", feature-off sentinel
     "VAULT_EVENT_SWEEP_INTERVAL_MINUTES": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
     "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES": "",  # D16b: `${VAR-}`, default in config.py (D16B_DOCUMENTED_DEFAULTS)
@@ -296,6 +298,7 @@ D16B_EDITABLE_FORWARDED: dict[str, tuple[str, ...]] = {
         "VAULT_LOG_LEVEL", "VAULT_PREFILL_TIMEOUT_SECONDS", "VAULT_PREFILL_MAX_THREADS",
         "VAULT_AGENT_REPORT_KEEP", "VAULT_MANIFEST_KEEP", "VAULT_SCHEDULE_WINDOW",
         "VAULT_GC_GRACE_DAYS", "VAULT_AUTO_GC", "VAULT_SWEEP_INCLUDE_CACHED",
+        "VAULT_AUTO_COMPLETE_CACHED",
         "VAULT_EVENT_SWEEP_INTERVAL_MINUTES", "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES",
         "VAULT_MISS_TRIGGER_MAX_PER_SWEEP", "VAULT_BYPASS_WINDOW_DAYS",
         "VAULT_CLIENT_STATS_KEEP", "VAULT_MANIFEST_ORACLE_TIMEOUT",
@@ -328,6 +331,7 @@ D16B_DOCUMENTED_DEFAULTS: dict[str, tuple[str, str]] = {
     "VAULT_GC_GRACE_DAYS": ("14", "gc_grace_days"),
     "VAULT_AUTO_GC": ("execute", "auto_gc"),
     "VAULT_SWEEP_INCLUDE_CACHED": ("true", "sweep_include_cached"),
+    "VAULT_AUTO_COMPLETE_CACHED": ("true", "auto_complete_cached"),
     "VAULT_EVENT_SWEEP_INTERVAL_MINUTES": ("5", "event_sweep_interval_minutes"),
     "VAULT_MISS_TRIGGER_COOLDOWN_MINUTES": ("60", "miss_trigger_cooldown_minutes"),
     "VAULT_MISS_TRIGGER_MAX_PER_SWEEP": ("5", "miss_trigger_max_per_sweep"),
@@ -811,6 +815,8 @@ READONLY_REACHABLE_SETTINGS_VARS = (
     "VAULT_WEBHOOK_EVENTS",
     # WP API-FEAT-1.
     "VAULT_STEAM_LIBRARY_STEAMID",
+    # WP AUTO-VERIFY-1.
+    "VAULT_AUTO_COMPLETE_CACHED",
 )
 
 

@@ -1024,6 +1024,9 @@ const LOG_LEVELS = Object.freeze(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL
 // the surface used for screenshots, docs/LEARNINGS.md).
 export const CONFIG_DEFAULT_AUTO_GC = "execute";
 export const CONFIG_DEFAULT_SWEEP_INCLUDE_CACHED = true;
+// WP AUTO-VERIFY-1: config.py's DEFAULT_AUTO_COMPLETE_CACHED, same drift
+// guard (web/tests/demo-data-config-defaults.test.js).
+export const CONFIG_DEFAULT_AUTO_COMPLETE_CACHED = true;
 
 const MAX_INTERVAL_MINUTES = 527040;
 const MAX_DAYS = 3650;
@@ -1046,6 +1049,16 @@ function demoFloat(key, raw) {
     throw validationError(`'${key}': must be a positive number of seconds, got ${JSON.stringify(raw)}.`);
   }
   return Number(text);
+}
+
+function demoBool(key, raw) {
+  const text = raw.trim().toLowerCase();
+  if (BOOL_TRUE_SPELLINGS.includes(text)) return true;
+  if (BOOL_FALSE_SPELLINGS.includes(text)) return false;
+  throw validationError(
+    `'${key}' must be one of ${BOOL_TRUE_SPELLINGS.join(", ")} (true) or ` +
+      `${BOOL_FALSE_SPELLINGS.join(", ")} (false), case-insensitive. Got ${JSON.stringify(raw)}.`,
+  );
 }
 
 function demoCap(key, raw, max) {
@@ -1093,15 +1106,12 @@ const DEMO_SETTING_SPECS = [
   {
     key: "sweep_include_cached", env_var: "VAULT_SWEEP_INCLUDE_CACHED", applies: "next_sweep",
     default: CONFIG_DEFAULT_SWEEP_INCLUDE_CACHED, expert: true, grammar: "true/false (also yes/no, on/off, 1/0)",
-    parse: (key, raw) => {
-      const text = raw.trim().toLowerCase();
-      if (BOOL_TRUE_SPELLINGS.includes(text)) return true;
-      if (BOOL_FALSE_SPELLINGS.includes(text)) return false;
-      throw validationError(
-        `'${key}' must be one of ${BOOL_TRUE_SPELLINGS.join(", ")} (true) or ` +
-          `${BOOL_FALSE_SPELLINGS.join(", ")} (false), case-insensitive. Got ${JSON.stringify(raw)}.`,
-      );
-    },
+    parse: (key, raw) => demoBool(key, raw),
+  },
+  {
+    key: "auto_complete_cached", env_var: "VAULT_AUTO_COMPLETE_CACHED", applies: "next_sweep",
+    default: CONFIG_DEFAULT_AUTO_COMPLETE_CACHED, grammar: "true/false (also yes/no, on/off, 1/0)",
+    parse: (key, raw) => demoBool(key, raw),
   },
   {
     key: "auto_gc", env_var: "VAULT_AUTO_GC", applies: "immediately", default: CONFIG_DEFAULT_AUTO_GC,
@@ -1663,6 +1673,8 @@ function handleGetSchedule() {
     next_eligible_at: null,
     sweep_include_cached: sweepIncludeCached,
     sweep_cached_gc_risk: sweepIncludeCached && autoGc !== "execute",
+    // WP AUTO-VERIFY-1: live from the demo settings like the two above.
+    auto_complete_cached: effective.get("auto_complete_cached") !== false,
   };
 }
 

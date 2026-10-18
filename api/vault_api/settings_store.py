@@ -231,6 +231,15 @@ OVERRIDABLE_SPECS: dict[str, SettingSpec] = {
             grammar="true/false (also yes/no, on/off, 1/0)",
             expert=True,
         ),
+        # WP AUTO-VERIFY-1: the sweep's completion step (forced runs for
+        # cached games the disk check calls incomplete). Not expert: it sits
+        # next to the download window it depends on.
+        SettingSpec(
+            "auto_complete_cached", "VAULT_AUTO_COMPLETE_CACHED", "next_sweep", False,
+            config.DEFAULT_AUTO_COMPLETE_CACHED,
+            _non_blank(config.parse_strict_bool), _identity,
+            grammar="true/false (also yes/no, on/off, 1/0)",
+        ),
         SettingSpec(
             "auto_gc", "VAULT_AUTO_GC", "immediately", False, config.DEFAULT_AUTO_GC,
             _non_blank(config.parse_auto_gc), _identity,

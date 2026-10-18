@@ -241,9 +241,9 @@ function overridableSpecs() {
   });
 }
 
-test("sanity: the spec reader sees 29 editable keys incl. the risky core keys (proves it is not vacuous)", () => {
+test("sanity: the spec reader sees 30 editable keys incl. the risky core keys (proves it is not vacuous)", () => {
   const specs = overridableSpecs();
-  assert.equal(specs.length, 29, `read ${specs.length} specs — GRAMMAR drift if the API still has 29: widen overridableSpecs`);
+  assert.equal(specs.length, 30, `read ${specs.length} specs — GRAMMAR drift if the API still has 30: widen overridableSpecs`);
   assert.ok(specs.find((s) => s.key === "upstream_max_conns" && s.risky && s.expert && s.target === "core"));
   assert.ok(specs.find((s) => s.key === "log_level" && !s.risky && s.expert));
 });
