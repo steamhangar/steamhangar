@@ -3666,6 +3666,14 @@ below carry their own later dates, item 12 is the current one).
         savebar, landscape and 200% text; visible overflow cue on scrolling
         segs; goldens for one open sheet and dialog per page at 400px.
         Phone mockup from the kit first, operator approves.
+        - [x] MOBILE-1a mockup `docs/design/rc21/mobile.html` approved
+          2026-10-18 (decisions Q1-Q7 in the page and its README: 38px
+          visual + 44px hit, scroll-listener edge cue, all confirms as
+          bottom sheets below 600px, History row as a sheet, "Open on this
+          phone" first on narrow touch, no paired state in the drawer,
+          landscape nav icon+label). Fixes found by the mockup: toast covers
+          the nav, no `safe-area-inset-top`, `.sheet` 88vh -> 88dvh.
+        - [ ] MOBILE-1b implementation (web CSS + scroll listener, goldens)
       - [x] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
         wrong-size chunk files of an app's target manifests behind the
         `deletion.py` cache-root guards (size re-checked right before the
@@ -3721,6 +3729,10 @@ below carry their own later dates, item 12 is the current one).
         DOWNLOADS-1; shown only while a client downloads, no empty heading).
         Web only: `clientDownloadingRow` in `lib/traffic-view.js` over
         `active_clients_now` (live ring via `mergeLive`).
+      - [ ] nit (MOBILE-1a): tests still use the operator's real VLAN as
+        sample data (`api/tests/test_d15_runner.py:622` 192.168.10.15,
+        `CoverArtTest.kt:131` and `GameCardModelTest.kt:227` 192.168.10.20);
+        switch to 192.168.1.x (Kotlin part with the Android packages)
       - [ ] nit (rc20 reviews): CLIENTS-3 `tab:null` wiring check is a regex
         over source (use a spy); `getSettings` call on Clients has no guard
         against a detached view; tile wording "Version differs from the
