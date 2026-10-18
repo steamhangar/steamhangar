@@ -91,3 +91,12 @@ on warm hits) is checked separately before any default change.
 - The rc19.3 box in `docs/PROJECT_PLAN.md` gets ticked.
 - VERIFY-COLD-1 is decided: verify window on with the chosen worker
   setting, or it stays off.
+
+## Outcome (2026-10-18)
+
+Run on production with six runs: A-B-C-A, plus AIO cold repeated and AIO warm
+(operator's decision during run 4). Numbers and findings are in ADR-0027,
+section "Measurement 2026-10-18". AIO qualifies, WORKERS=2 does not. How AIO
+goes live is open decision AIO-DEFAULT-1 in the roadmap. VERIFY-COLD-1: the
+verify window goes back on after AIO is live. Production was rolled back
+to both switches unset.

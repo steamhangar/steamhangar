@@ -54,7 +54,10 @@ Antrag filed and the rollout on the operator's stack checked.
 - **rc20.x (optional patch):** new defaults for `VAULT_NGINX_AIO` /
   `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027) says
   so; a default change needs a new ADR with the numbers. Otherwise this
-  moves to rc21.
+  moves to rc21. Test done 2026-10-18 (ADR-0027 "Measurement
+  2026-10-18"): AIO qualifies, WORKERS=2 does not. rc20.2 is already taken
+  (WEB-FIX-20.2), so the next patch slot is rc20.3. Slot and form are the
+  open decision AIO-DEFAULT-1.
 
 ### rc21: Android parity and cache health
 
@@ -158,10 +161,28 @@ once decided (the decision then lives in the item it belongs to).
 - **D17 cache path** (v0.4.0+): Weg A extend vault-core, Weg B a lancache
   sidecar behind vault-core, or a mix; the 2026-10-15 assessment favours
   Weg B or the mix. See D17.
-- **Tuning defaults** (rc20.x / rc21): whether `VAULT_NGINX_AIO` /
-  `VAULT_NGINX_WORKERS` become defaults; decided by the Sunday test.
+- **AIO-DEFAULT-1** (rc20.3 / rc21, measured 2026-10-18): how
+  `VAULT_NGINX_AIO=threads` goes live. The cold-game test passed it on
+  every criterion: 2 min 23 s / 2 min 25 s cold against 11 min 23 s to
+  16 min 09 s baseline, link-limited at about 940 Mbit/s p95, heartbeat
+  max 41-295 ms against 3-7.6 s. Options:
+  - Weg A: a code default in rc20.3 with a new ADR (render default
+    `threads`, `off` opts out, tests, README, and the flag-off
+    byte-identity check in verify reworked).
+  - Weg B: only the production `.env` via Antrag now, and the code
+    default with rc21.
+  - Weg C: both, B now and A in rc20.3; the `.env` line goes after the
+    rc20.3 rollout.
+  - Weg D: measure more first (another game, a second client, CPU of the
+    nginx process alone).
+  Recommendation: A or C. The user asked for the roadmap entry first
+  (2026-10-18); not decided yet. `VAULT_NGINX_WORKERS=2` gets no default:
+  no gain over the faster baseline, heartbeat stays at about 1-3 s.
 - **Runner retry** on "Unable to detect Lancache server!" (rc21): only if
-  the heartbeat evidence supports it.
+  the heartbeat evidence supports it. Evidence of 2026-10-18: without AIO,
+  a heartbeat probe from outside took up to 7.6 s during a cold download.
+  With AIO it stayed at or below 0.3 s. Once AIO is live, a retry is
+  probably not needed; decide after AIO-DEFAULT-1.
 
 Decided 2026-10-16 (removed from the list above): VERIFY-SPEED-TEXT-1 reads
 "Verifying files, no download speed" (DOWNLOADS-1); LIVE-DELAY-1 Weg A
@@ -1629,9 +1650,36 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   ADR-0021 "Consequences and honest limits".
 - **VERIFY-COLD-1 (operator):** a verify over many games on cold data runs
   against the single nginx worker. Keep the verify window off until the
-  worker tuning (ADR-0027 Sunday test) decides.
+  worker tuning (ADR-0027 Sunday test) decides. Decided 2026-10-18 (user):
+  the verify window goes back on once `VAULT_NGINX_AIO=threads` is active
+  on production (AIO-DEFAULT-1). The devbox watches the first verify run
+  (heartbeat probe, disk, duration).
+- **UI-COLD-CACHED-1 (web/api, check):** during cold run 1 (2026-10-18,
+  right after `drop_caches`) the operator saw no game marked as cached,
+  although every request was a HIT. Likely mechanism: the API's depot walk
+  (`api/vault_api/sizes.py` `SizeCache`, 60 s TTL) is very slow on a cold
+  dentry cache while the disks serve a download. WEB-FIX-20.2 (rc20.2)
+  added loading states instead of "Cached 0" after a slow first fetch,
+  which may already cover it. Check on rc20.2: `drop_caches`, then open
+  Library during a download; also look at the walk duration.
+- **TP-REPORT-2 (tools, nits):** `core/tools/throughput-report.py`
+  - The heartbeat section shows `request_time` 0.0 ms even when an outside
+    probe waits 2-7 s. The wait happens before nginx accepts the request,
+    so the log cannot see it. The report should say so, or measure from
+    outside.
+  - The "requests above the size floor" count looks inconsistent: run 1
+    had 388 of 29,854 above 256 KB while the bytes_sent p50 was 182 KB
+    and the p90 1 MB. Check how the floor is applied.
+- **BASELINE-SPREAD-1 (measurement, knowledge):** the two cold baselines
+  of 2026-10-18 differed by 42 % (16 min 09 s vs 11 min 23 s), with the
+  same eviction and the same client. The two AIO runs differed by 1.4 %.
+  Cause unknown (ZFS metadata or prefetch state, other host load). Repeat
+  baselines in future tuning tests; one baseline is not enough.
 - **HIT-PATH-1 (measurement):** the server-to-client HIT throughput (~91
-  Mbit/s seen) has only an idle baseline. Missing: iperf3 LAN baseline,
+  Mbit/s seen) has only an idle baseline. Partly answered 2026-10-18:
+  with AIO the hit path reached 726-741 Mbit/s average and about 940 Mbit/s
+  p95, both cold and warm (link-limited); without AIO, cold hits stopped at
+  109-154 Mbit/s. Missing: iperf3 LAN baseline,
   nginx counters during a hit, and the hit-path read of an already cached
   game (DIAG-SESSION in the rc19 block).
 - **VERSION-HEALTH-1 (api):** `/v1/health` returns only a status and

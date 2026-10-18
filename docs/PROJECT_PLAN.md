@@ -3332,8 +3332,11 @@ below carry their own later dates, item 12 is the current one).
         `not_owned_appids` (additive, no schema bump)
       - [x] FIX-SHOT-1: stats graph caption reads the injected clock (goldens refreshed)
       - [x] tag `v0.1.0-rc19.3` after main CI is green (pushed on main d409f30)
-      - [ ] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
-        WORKERS=2). Planned 2026-10-18 in
+      - [x] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
+        WORKERS=2). Done 2026-10-18, 6 runs, results in ADR-0027
+        "Measurement 2026-10-18". AIO qualifies, WORKERS=2 does not. The
+        verify window goes back on after AIO is live on prod (user decision
+        2026-10-18). Planned 2026-10-18 in
         `docs/handover/cold-game-test-plan.md` (drop_caches eviction, one
         test Antrag, runs A-B-C-A, decision rule fixed upfront). Until it decides the worker tuning, keep the verify
         window off: a verify over many games on cold data runs against the
@@ -3608,7 +3611,18 @@ below carry their own later dates, item 12 is the current one).
     - [ ] **rc20.x (optional patch)**: new defaults for `VAULT_NGINX_AIO` /
       `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027,
       box in the rc19.3 block) says so, with a new ADR carrying the numbers;
-      otherwise the item moves to rc21.
+      otherwise the item moves to rc21. Test 2026-10-18: AIO qualifies
+      (about 5-7 times faster cold, link-limited), WORKERS=2 gets no default.
+      rc20.2 is taken, so the slot is rc20.3 or rc21: open decision
+      AIO-DEFAULT-1 in the roadmap (Weg A code default + ADR, B prod `.env`
+      only, C both, D measure more).
+      - [ ] AIO-DEFAULT-1 (decision pending)
+      - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
+        (user decision 2026-10-18); devbox watches the first verify run
+      - [ ] UI-COLD-CACHED-1 check whether WEB-FIX-20.2 covers "no game
+        cached" during a cold walk (roadmap)
+      - [ ] TP-REPORT-2 report nits: heartbeat blind spot, size-floor count
+        (roadmap)
 
     - [x] **rc20.1** (patch, operator report on prod 2026-10-17)
       - [x] **DOWNLOADS-3** (95a012e, 6eb3979, goldens 92d9db9) (web) History head "Delete…" clipped; History

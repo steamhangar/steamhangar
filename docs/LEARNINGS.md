@@ -1205,6 +1205,28 @@ These are not style preferences; each entry cost a review round to learn.
   Android job can, so grep `app/app/src/test` for the exact literal before
   editing a template.
 
+## 2026-10-18 - cold-game test (ADR-0027 measurement)
+
+- `echo 3 > /proc/sys/vm/drop_caches` on the host empties the ZFS ARC
+  (OpenZFS 2.3, `zfs_arc_shrinker_limit=0`): 20-30 GB down to 1-2 GB. That
+  makes repeatable cold runs of the same game possible. Prove "cold" with
+  disk reads during the run, not with the ARC size alone.
+- A heartbeat that waits for a blocked nginx worker shows `request_time`
+  0 ms in nginx's own log: the wait happens before the request is read.
+  Measure heartbeat latency from outside, e.g. curl from a second
+  container.
+- One baseline is not enough: two identical cold baselines differed by 42 %,
+  while two AIO runs differed by 1.4 %. Plan at least two baselines (A-B-C-A).
+- Copy the throughput debug log only after the download has finished and
+  into a new folder per run. An early copy holds only the `# start` line, and
+  `cp -r` into an existing folder nests it. Rotation keeps at most 64 MiB, so
+  copy after every run.
+- Exact download duration = first to last `tp1` line of the client in the
+  run's `# start` segment (msec field). A recreate per run gives each run its
+  own segment.
+- busybox `iostat` (diag container): the whole-disk counters wrap around;
+  only the partition lines are usable.
+
 ## 2026-10-17 — rc20 rework (UI-KIT-1, WEB-GOLDENS-1, TOKENS-SYNC-1, CLIENTS-4, ADD-DEVICE-2, DOWNLOADS-2, SETTINGS-2, LIBRARY-2)
 
 - **Structure is not anatomy.** The first rc20 pass shipped every mockup's
