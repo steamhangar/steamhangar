@@ -1,6 +1,6 @@
 # ADR-0029: Version numbering and release candidates
 
-Status: Accepted (sections 1-4); section 5 proposed, open decision VERSION-1.0
+Status: Accepted
 
 Date: 2026-10-18
 
@@ -45,7 +45,7 @@ went into the next rc instead of the next version.
 4. **Patch (`0.X.Y`) = fixes only** on a released minor: no features, no
    schema bump unless the fix itself needs one.
 
-5. **Major (`1.0.0`), proposed, not decided:** `1.0.0` is tagged when
+5. **Major (`1.0.0`, accepted 2026-10-18):** `1.0.0` is tagged when
    (a) the product is publicly announced under its final name, (b) the
    operator-facing contract is declared stable and documented (`/v1` API,
    compose file and env keys, volume layout, agent and app pairing),
@@ -61,13 +61,23 @@ went into the next rc instead of the next version.
 The former v0.2.0 block (GameHangar, privacy, schedules, agents) and
 the later blocks are re-cut into small minors:
 
-- 0.2.0 rename to GameHangar (D18 incl. logo)
+- 0.2.0 rename to GameHangar (D18 incl. logo) and LAUNCHER-PREP-1
+  (launcher-neutral game identity in API, schema and apps)
 - 0.3.0 privacy mode (D22) and the store night fill (LIBRARY-META-1d)
 - 0.4.0 agents and devices (Weg B for agents with the installer, D28,
   D29, D5)
 - 0.5.0 Steam accounts (D2, D3)
 - 0.6.0 schedules (D8), then the public announcement (WP 5.6)
 - 0.7.0 and later: beyond Steam and integrations
+
+A database change alone is not a breaking change: the schema is
+internal and migrates on start. What breaks is the operator- and
+client-facing contract. The one known contract risk ahead is the game
+identity (today the numeric Steam app id in `/v1` and both apps), which
+other launchers do not share. LAUNCHER-PREP-1 settles it before `1.0.0`,
+riding on the 0.2.0 rename where the Android app has to be reinstalled
+anyway, so D17 multi-launcher can ship as a 1.x minor instead of
+`2.0.0`.
 
 The announcement comes once schedules are in (0.6.0), so every public
 user starts on the final name with privacy mode, the real agent

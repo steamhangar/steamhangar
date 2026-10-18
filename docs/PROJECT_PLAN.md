@@ -3366,7 +3366,7 @@ below carry their own later dates, item 12 is the current one).
     - rc22 release hardening: D7 `:443` + TLS default, CAP-503-LOOP-1,
       HIT-PATH-1, NITS-AUDIT-1, remaining nits, the open B boxes; then
       `v0.1.0` final; v0.1.x bug fixes only, no public announcement yet
-    - v0.2.0 rename: D18 incl. logo
+    - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6
       part), D28, D5, D29
@@ -3797,12 +3797,18 @@ below carry their own later dates, item 12 is the current one).
     - **v0.1.x:** bug fixes only. The public announcement (WP 5.6,
       r/selfhosted) is NOT made at 0.1.0; it waits for 0.6.0 (ADR-0029).
 
-    - [ ] **v0.2.0 — rename to GameHangar** (re-cut 2026-10-18,
+    - [ ] **v0.2.0 — rename to GameHangar, launcher-neutral identity** (re-cut 2026-10-18,
       ADR-0029; packages cut in the version's planning session; entry:
       `v0.1.0` final and the D18 org decision)
       - [ ] **D18 RENAME-2** SteamHangar -> GameHangar (user decision
         2026-10-16: before the announcement; GitHub org choice A/B/C
         still open), incl. the GameHangar logo and header briefing
+      - [ ] **LAUNCHER-PREP-1** (user decision 2026-10-18, Weg A):
+        per-launcher measurements (D17 checklist), ADR for a
+        launcher-neutral game identity (launcher plus id), cache
+        namespace and single front door; then API, schema (`launcher`,
+        default `steam`) and both apps on that identity, so D17 later
+        ships as a 1.x minor without a contract break (ADR-0029)
       - [ ] close: release gate, migration from 0.1.x tested (volumes,
         `applicationId`, image namespace)
 
@@ -3840,7 +3846,8 @@ below carry their own later dates, item 12 is the current one).
       public announcement (WP 5.6).
 
     - [ ] **v0.7.0 and later — beyond Steam and integrations** (order not
-      set): D17 multi-launcher (needs D18), D4 IPv6 and
+      set): D17 multi-launcher (needs D18 and LAUNCHER-PREP-1; a 1.x
+      minor after `1.0.0`, ADR-0029), D4 IPv6 and
       the DUAL-STACK-1 follow-ups, Phase 6 external integrations, the iOS
       app, and the old post-v1 backlog moved from `docs/WORKPACKAGES.md`
       on 2026-10-16: D25 TSNET-1 embedded tailscale (requirement A6), D26

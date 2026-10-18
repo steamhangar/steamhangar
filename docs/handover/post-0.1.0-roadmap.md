@@ -131,8 +131,8 @@ list is written here before its first package starts; new ideas go to a
 later minor unless the user pulls them in; `rc1` of a minor is feature
 freeze (fixes only), and at `rc4` the scope goes back to the user; a
 patch (`0.X.Y`) is fixes only. rc21 and rc22 keep their scope (Weg C, no
-freeze imposed). `1.0.0` criteria are proposed in ADR-0029 section 5
-(open decision VERSION-1.0).
+freeze imposed). `1.0.0` criteria: ADR-0029 section 5 (accepted
+2026-10-18).
 
 ### v0.1.x: bug fixes only
 
@@ -141,13 +141,24 @@ announcement (WP 5.6, r/selfhosted) is NOT made at 0.1.0**; it waits for
 0.6.0 (ADR-0029), so no public user ever has to migrate through the
 rename.
 
-### v0.2.0: rename to GameHangar
+### v0.2.0: rename to GameHangar and launcher-neutral identity
 
 - **Goal:** the product carries its final name before anything else
   ships, so no later user migrates through the rename.
 - **Packages (to be cut in the version's planning session):** D18
   RENAME-2 (user decision 2026-10-16; GitHub org choice A/B/C in D18
   still open), incl. the GameHangar logo and header briefing.
+- **LAUNCHER-PREP-1** (user decision 2026-10-18, Weg A; prepares D17
+  before `1.0.0`): first the per-launcher measurements from the D17
+  checklist (ports, DNS names, `Range` headers during a real download);
+  then one ADR for a launcher-neutral game identity (launcher plus id,
+  ids not assumed numeric), the cache namespace rule (D17 "Prepare
+  earlier" 3) and the single front door (item 1, already decided); then
+  the API, schema (`launcher` dimension, default `steam`) and both apps
+  move to that identity. Ships with the rename because the Android
+  `applicationId` changes there anyway, so the app break costs no extra
+  reinstall. Goal: D17 itself becomes a 1.x minor without a contract
+  break, not `2.0.0`.
 - **Entry:** `v0.1.0` final tagged; D18 org decision taken.
 - **Exit:** release gate; migration from 0.1.x (volumes,
   `applicationId`, image namespace) tested on the operator's stack.
@@ -198,7 +209,8 @@ rename.
 ### v0.7.0 and later: beyond Steam and integrations (order not set)
 
 - **Goal:** more launchers and outside integrations, each when wanted.
-- **Items:** D17 multi-launcher (needs D18); D4 IPv6 and DUAL-STACK-1
+- **Items:** D17 multi-launcher (needs D18 and LAUNCHER-PREP-1;
+  planned as a 1.x minor after `1.0.0`, ADR-0029); D4 IPv6 and DUAL-STACK-1
   follow-ups; D25 TSNET-1; D26 NOTIFY-CURSOR-1; D27 DEPOT-GRACE-1; Phase 6
   external integrations; iOS app.
 - **Entry / exit:** set when a version is planned.
@@ -216,17 +228,6 @@ Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
 question that is not answered in its session is listed here and removed
 once decided (the decision then lives in the item it belongs to).
 
-- **VERSION-1.0** (user question 2026-10-18 "when does the first
-  number grow?"): the `1.0.0` criteria proposed in ADR-0029 section 5
-  (public, stable operator contract, tested migrations, one minor without
-  a breaking change). Recommendation: accept them as written.
-  Follow-up question (user, 2026-10-18): D17 multi-launcher as `2.0.0`.
-  Under SemVer a major is a breaking change, not a big feature; D17 is
-  expected to break the contract anyway (game identity becomes launcher
-  plus id in API, schema and apps; cache layout and DNS names per
-  launcher). Recommendation: plan D17 as `2.0.0` and collect the
-  breaking changes it needs there; the 1.x line between `1.0.0` and
-  D17 takes D4, D25, D26, D27, Phase 6 and the iOS app.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
@@ -829,7 +830,8 @@ single front door (see below).
 
 ### Decisions (user, 2026-10-15)
 
-- **Timing:** roadmap, not before v0.2.
+- **Timing:** roadmap, not before v0.2. Since 2026-10-18 (ADR-0029):
+  LAUNCHER-PREP-1 in v0.2.0, D17 itself a 1.x minor after `1.0.0`.
 - **One front door:** vault-core stays the only listener on the vault
   address for :80 and :443 and dispatches by Host/SNI; a later lancache
   sidecar sits behind it, never on its own address. The global connection
@@ -875,9 +877,11 @@ These do not need D17 to start; they keep the door open.
    new launcher gets a short measurement first (ports, DNS names, Range
    headers); EA app and GOG are expected to fail this test, Rockstar and
    Riot are listed in lancache's `cache-domains` (unverified).
-6. **No provider column yet.** A `provider` dimension in the database is
-   an additive migration (default `steam`) when it is needed. Do not
-   build it ahead of time.
+6. **Provider dimension with 0.2.0.** Was "no provider column yet"
+   (2026-10-15). Superseded 2026-10-18 (user, Weg A): the database
+   change alone would be additive, but the game identity in `/v1` and
+   both apps would not, so LAUNCHER-PREP-1 moves API, schema and apps to
+   a launcher-neutral identity with the 0.2.0 rename, before `1.0.0`.
 
 ### Before the ADR (checklist)
 
