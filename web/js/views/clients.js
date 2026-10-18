@@ -36,9 +36,16 @@
  * module state (range, remove errors, rename dialog).
  *
  * Polling: the overview is fetched while this view is on screen only
- * (`createViewPoll`, 30 s, the store's own loop machinery), and stopped on
- * navigation. The agent data follows the store's `clients` ticks. The list
- * is rebuilt per answer or tick.
+ * (`createViewPoll`, the store's own loop machinery), and stopped on
+ * navigation. WP WEB-FIX-20.2: every mount fetches the overview AND the
+ * store's `GET /v1/clients` at once (`store.refresh`), and while the page
+ * is visible both are refreshed every {@link CLIENTS_POLL_MS} (5 s), so a
+ * client that started loading shows up without a page reload. A hidden tab
+ * parks the poll (no requests); leaving the view stops it. The "Loading
+ * now" box itself can be no newer than the server's last event-log sweep
+ * (`loading_now` is computed over the swept window, see
+ * api/vault_api/routers/traffic.py); the poll picks a new sweep up within
+ * 5 s instead of 30 s. The list is rebuilt per answer or tick.
  *
  * **Rename (WP D15-NAMES).** Every card whose row carries a `name_addr`
  * has a "Rename" button. It opens a small dialog (the `.dialog-backdrop`/
@@ -58,7 +65,7 @@
  */
 
 import { store } from "../store-singleton.js";
-import { createViewPoll, VIEW_POLL_MS } from "../store.js";
+import { createViewPoll } from "../store.js";
 import { api, getStoredApiKey, isDemoMode } from "../api.js";
 import { ERROR_KINDS } from "../errors.js";
 import { onViewChange } from "../router.js";
@@ -139,9 +146,17 @@ function hiddenRemoved(id, nowMs = Date.now()) {
  * `onViewChange` nulling this is the whole staleness signal). */
 let els = null;
 
+/** WP WEB-FIX-20.2: the Clients page's refresh cadence while it is visible. */
+export const CLIENTS_POLL_MS = 5000;
+
 const poll = createViewPoll({
-  fetcher: () => api.clientsOverview(state.range),
-  intervalMs: VIEW_POLL_MS,
+  fetcher: () => {
+    // The agent data (presence, bypass verdict) on the same cadence: a
+    // nudge of the store's own loop, coalesced while one is in flight.
+    store.refresh("clients");
+    return api.clientsOverview(state.range);
+  },
+  intervalMs: CLIENTS_POLL_MS,
   onTick: (data) => {
     // An answer for a range the user has since left: the refresh the range
     // change asked for is already queued behind it.
@@ -596,6 +611,8 @@ export function renderClients() {
   // demo mode means the onboarding overlay is up and every request would
   // be a 401.
   if (getStoredApiKey() || isDemoMode()) {
+    // WP WEB-FIX-20.2: the overview AND the agent snapshot now, not on the
+    // store's next 20 s tick (the fetcher nudges the store loop).
     poll.start();
     poll.refresh();
     api.getSettings().then(

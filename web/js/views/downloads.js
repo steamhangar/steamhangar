@@ -209,6 +209,7 @@ import { fillMissingNames, hasText, vaultRowTitle } from "../lib/owned-library.j
 import { isToolApp, KIND } from "../lib/game-status.js";
 import { ownedLibrary } from "../owned-singleton.js";
 import { contentPackageFallbackTitle } from "../lib/content-groups.js";
+import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
 import { jobFailureHint, isFailedPrefill, retryOffer } from "../lib/job-failure.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import {
@@ -361,8 +362,17 @@ function nameFor(appid, gamesByAppid) {
     if (grouped) return grouped;
   }
   // WP API-FIX-4: vaultRowTitle adds the Steam tool app's server-sent name.
-  return vaultRowTitle(appid, gamesByAppid.get(appid));
+  const title = vaultRowTitle(appid, gamesByAppid.get(appid));
+  // WP WEB-FIX-20.2: no name YET is not an unknown app. Until the first
+  // games answer is in, or while the owned list may still arrive (its first
+  // load, or a retry after a vault-api restart), say so; patchNames swaps
+  // the real title in when the data lands.
+  if (title === UNKNOWN_APP_NAME && (!state.gamesKnown || ownedLibrary.pending())) return NAME_LOADING_TEXT;
+  return title;
 }
+
+/** WP WEB-FIX-20.2: a title whose name source has not answered yet. */
+export const NAME_LOADING_TEXT = "Loading…";
 
 /** WP WEB-FIX-4: start the one owned-list load this view may start (see
  * the module header) when a job on screen has no vault name. */
@@ -371,7 +381,12 @@ function maybeLoadOwnedNames() {
   const named = new Set(
     state.games.filter((g) => hasText(g.name) || (isToolApp(g) && hasText(g.tool_app_name))).map((g) => g.appid),
   );
-  if (state.jobs.some((j) => !named.has(j.appid))) ownedLibrary.loadIfNeverLoaded();
+  // WP WEB-FIX-20.2: the History's deep rows (`?range=` fetch) too, not
+  // only the store's newest jobs: an older owned-only job read "Unknown
+  // app" because nothing ever started the owned-list load for it.
+  if (state.jobs.some((j) => !named.has(j.appid)) || history.jobs.some((j) => !named.has(j.appid))) {
+    ownedLibrary.loadIfNeverLoaded();
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -1501,6 +1516,7 @@ async function loadHistory() {
   const firstAnswer = !history.loaded;
   history.loaded = true;
   if (!mounted()) return;
+  maybeLoadOwnedNames(); // WP WEB-FIX-20.2: deep rows may need owned names
   if (historyKey(historyRows()) !== els.historyKey) renderHistory();
   else if (firstAnswer) paintSubtitle();
 }
@@ -1925,7 +1941,7 @@ function buildSection() {
   attnCol.append(updates, incomplete);
 
   // Column 3: History with its own range filter (WP D15c, default All) and
-  // "Delete…" (WP D15-NAMES) in one head row.
+  // "Delete" (WP D15-NAMES) in one head row.
   const historyRange = createRangeSegs({
     label: "History range",
     value: history.range,
@@ -1933,7 +1949,9 @@ function buildSection() {
     role: "history-range",
     className: "seg rangesegs",
   });
-  const historyDeleteBtn = el("button", "btn sm ghost", "Delete…");
+  // WP WEB-FIX-20.2: a plain "Delete" (the ellipsis read as cut-off text);
+  // the accessible name keeps the full words, the dialog picks the scope.
+  const historyDeleteBtn = el("button", "btn sm ghost", "Delete");
   historyDeleteBtn.type = "button";
   historyDeleteBtn.dataset.role = "history-delete";
   historyDeleteBtn.setAttribute("aria-label", "Delete history…");
@@ -2080,6 +2098,9 @@ export function renderDownloads() {
   // Same gate as the store's loops (store-singleton.js): no key and no
   // demo mode means the onboarding overlay is up.
   if (getStoredApiKey() || isDemoMode()) {
+    // WP WEB-FIX-20.2: jobs and names as fresh as a page reload, not the
+    // last snapshot of the store's 15 s loops.
+    store.refresh("jobs", "games");
     trafficPoll.start();
     trafficPoll.refresh();
     loadHistory();

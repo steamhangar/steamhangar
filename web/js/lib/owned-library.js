@@ -468,3 +468,70 @@ export function createOwnedLibraryLoader({ apiClient, onChange }) {
     current: () => state,
   };
 }
+
+/**
+ * WP WEB-FIX-20.2: the short retries after a transient owned-list failure
+ * (a vault-api restart: the settings read or the relay call failed without
+ * an answer, or with a 5xx). Bounded on purpose: the relay hits Steam, so
+ * nothing polls it; after the last retry the Library's Reload is the retry,
+ * as before.
+ */
+export const OWNED_RETRY_DELAYS_MS = Object.freeze([2000, 5000, 10000]);
+
+/**
+ * Is this loader state a failure worth retrying by itself? A network error
+ * (no status) or a server error (5xx). A 4xx (409 no Steam key, 422 bad
+ * SteamID64, 403 private profile) is a configuration answer: retrying
+ * cannot change it.
+ * @param {{status: string, errorStatus: number | null}} state
+ * @returns {boolean}
+ */
+export function isTransientOwnedError(state) {
+  if (!state || state.status !== OWNED_STATUS.ERROR) return false;
+  const s = state.errorStatus;
+  return s === null || s === undefined || (typeof s === "number" && s >= 500);
+}
+
+/**
+ * The retry schedule around one loader (WP WEB-FIX-20.2). `settled(state)`
+ * is called on every loader state change: a transient failure arms the next
+ * delay of {@link OWNED_RETRY_DELAYS_MS}; a success, a configuration answer
+ * or a manual `load()` (`reset()`) clears the schedule. `pending` is true
+ * while a retry is armed, so a surface can show "Loading…" instead of a
+ * fallback title that is only missing because of the failure.
+ * @param {{load: () => unknown, delays?: readonly number[],
+ *   setTimer?: (fn: () => void, ms: number) => unknown, clearTimer?: (id: unknown) => void}} options
+ */
+export function createOwnedRetry({ load, delays = OWNED_RETRY_DELAYS_MS, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let attempt = 0;
+  let timer = null;
+  function cancel() {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+  }
+  return {
+    settled(state) {
+      if (!state || state.loading) return;
+      if (!isTransientOwnedError(state)) {
+        attempt = 0;
+        cancel();
+        return;
+      }
+      if (timer !== null || attempt >= delays.length) return;
+      const delay = delays[attempt];
+      attempt += 1;
+      timer = setTimer(() => {
+        timer = null;
+        load();
+      }, delay);
+    },
+    /** A load not started by this schedule (the Library, Reload). */
+    reset() {
+      attempt = 0;
+      cancel();
+    },
+    get pending() {
+      return timer !== null;
+    },
+  };
+}

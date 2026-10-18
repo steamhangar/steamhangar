@@ -173,7 +173,8 @@ test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four til
   await until(() => q(s, "stats-caption").textContent.includes("Limit 8 MB/s"), "cap line");
   assert.equal(q(s, "stats-current").textContent, "40.0MB/s");
   assert.match(q(s, "stats-current").title, /^Everything the cache served over the last 5-10 minutes/);
-  assert.equal(q(s, "stats-pill").textContent, "Downloading");
+  // WP WEB-FIX-20.2: client traffic (no runner part in `current`) is serving.
+  assert.equal(q(s, "stats-pill").textContent, "Serving");
   assert.equal(q(s, "stats-caption").textContent, "Limit 8 MB/s, all day · 2 devices loading");
   assert.equal(q(s, "stats-caption").querySelector("b").textContent, "8 MB/s", "the limit value in bold");
   assert.equal(q(s, "stats-mini").textContent, "Avg while loading 50.0 MB/sPeak 100 MB/s");
@@ -188,7 +189,10 @@ test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four til
   assert.equal(svg.getAttribute("viewBox"), "0 0 600 96");
   assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s."); // stored range: 6 h (the default is live since LIVE-DELAY-1)
   assert.deepEqual(svg.children[0].children.map((l) => l.getAttribute("y1")), ["24", "48", "72"], "grid lines");
-  assert.equal(svg.children[2].getAttribute("d"), "M0 96 L300 0 L600 48");
+  // WP WEB-FIX-20.2: the points carry the hit/miss split, so two series;
+  // the internet band's top line is the total.
+  const total = svg.children.find((c) => c.getAttribute("class") === "line net");
+  assert.equal(total.getAttribute("d"), "M0 96 L300 0 L600 48");
   assert.equal(q(s, "stats-graph").querySelector(".ax").textContent, "6 h agohighest 10.0 MB/snow");
   await until(() => speed(s) !== null, "speed line");
   assert.equal(speed(s), "30.0 MB/s · 8.8 GB loaded so far");

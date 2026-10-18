@@ -418,6 +418,14 @@
 .kit .graph .grid line{ stroke:var(--line-soft); stroke-width:1; vector-effect:non-scaling-stroke; }
 .kit .graph .line{ fill:none; stroke:var(--accent); stroke-width:2; vector-effect:non-scaling-stroke; }
 .kit .graph .area{ fill:var(--accent); opacity:.12; stroke:none; }
+/* two series (WP WEB-FIX-20.2): served from the cache in --ok under the
+   internet band in accent; a small legend under the axis */
+.kit .graph .line.srv{ stroke:var(--ok); }
+.kit .graph .area.srv{ fill:var(--ok); opacity:.16; }
+.kit .graph .glegend{ display:flex; flex-wrap:wrap; gap:var(--sp-1) var(--sp-4); font-size:var(--fs-1); color:var(--dim); margin-top:var(--sp-1); }
+.kit .graph .glegend span{ display:inline-flex; align-items:center; gap:6px; }
+.kit .graph .glegend i{ width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none; }
+.kit .graph .glegend .srv i{ background:var(--ok); }
 .kit .graph .ax{ display:flex; justify-content:space-between; gap:var(--sp-2); font:var(--fs-1) var(--mono); color:var(--dim); margin-top:4px; }
 .kit .mini{
   grid-column:1; display:flex; gap:var(--sp-2) var(--sp-5); flex-wrap:wrap; font-size:var(--fs-2); color:var(--dim);
@@ -539,7 +547,8 @@
 .kit .rowlist[hidden], .kit .sechd .hacts[hidden], .kit .dl-updates-acts[hidden], .kit .job[hidden], .kit .bar[hidden],
 .kit .job .t[hidden], .kit .job .acts[hidden], .kit .qrow .qlead[hidden], .kit .qrow .grip[hidden], .kit .hitem[hidden],
 .kit .hrow[hidden], .kit .hpanel[hidden], .kit .hpanel .failhint[hidden], .kit .hpanel .acts[hidden], .kit .hpanel .cmd[hidden],
-.kit .hrow .chev[hidden], .kit .hrow .hinfo[hidden], .kit .hrow .hic[hidden], .kit .graph .gnote[hidden]{ display:none; }
+.kit .hrow .chev[hidden], .kit .hrow .hinfo[hidden], .kit .hrow .hic[hidden], .kit .graph .gnote[hidden],
+.kit .graph .glegend[hidden], .kit .graph .glegend span[hidden]{ display:none; }
 
 /* ---------- Settings page (WP SETTINGS-2) ----------
    Ported from docs/design/rc20/settings.html onto the kit primitives above;

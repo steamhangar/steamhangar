@@ -2,12 +2,16 @@
  * Downloads hero (WP DOWNLOADS-2, docs/design/rc20/kit.html "Downloads,
  * width-aware"): one surface card with
  *
- *   - a head row: the "Speed" section label and the statistics range seg;
+ *   - a head row: the "Throughput" section label (WP WEB-FIX-20.2, was
+ *     "Speed") and the statistics range seg;
  *   - the live block: the current speed as the big number, a status pill
- *     (Downloading / Idle), and one caption line with the upstream limit and
- *     how many devices are loading (the former "Client downloading" row,
- *     WP CLIENT-ROW-1, folded in here);
- *   - the throughput graph (96px, grid lines) beside it;
+ *     (Serving / Downloading / Idle, see `heroStatus`), and one caption
+ *     line with the upstream limit and how many devices are loading (the
+ *     former "Client downloading" row, WP CLIENT-ROW-1, folded in here);
+ *   - the throughput graph (96px, grid lines) beside it: WP WEB-FIX-20.2
+ *     stacks "served from the cache" (green, `--ok`) under "from the
+ *     internet" (accent) with a small legend, when the points carry the
+ *     hit/miss split (`splitGeometry`); otherwise the single total line;
  *   - a mini line under it: average while loading, peak, the prefill
  *     runner's share;
  *   - the four totals as 2x2 kit tiles on the right (Served, From internet,
@@ -63,9 +67,49 @@ export const HERO_TILES = Object.freeze([
   Object.freeze({ key: "hit-rate", label: "Hit rate", caption: null }),
 ]);
 
-/** The status pill words (kit.html: "Downloading", mockup idle: "Idle"). */
+/** The status pill words (kit.html: "Downloading", mockup idle: "Idle";
+ * WP WEB-FIX-20.2: "Serving"). */
 export const PILL_DOWNLOADING = "Downloading";
+export const PILL_SERVING = "Serving";
 export const PILL_IDLE = "Idle";
+
+/** The hero's section label (WP WEB-FIX-20.2, was "Speed"). */
+export const HERO_LABEL = "Throughput";
+
+/**
+ * The hero's status pill from `current` (WP WEB-FIX-20.2). From the
+ * hangar's view a client pulling from the cache is SERVING, not
+ * downloading; the hangar itself downloads only while its prefill runner
+ * pulls content in (`current.runner_bytes_per_second > 0`, the runner's
+ * part of the current speed, on both `/v1/throughput` and the live
+ * endpoint). So:
+ *
+ *   - runner traffic -> "Downloading" (`running`, `.pill.run`);
+ *   - any other traffic -> "Serving";
+ *   - none -> "Idle" (`notinuse`, neutral);
+ *   - no current figure -> no pill.
+ *
+ * "Serving" is no status kind of its own: docs/design/status-vocabulary.json
+ * is a contract the Android `StatusKind` enum must cover kind for kind
+ * (TOKENS-SYNC-1), so it reuses `cached` (check glyph, `ok` tone: green,
+ * the graph's "served from cache" colour) with its own word.
+ *
+ * The current figure has no runner hit/miss split, so a runner that only
+ * verifies (reads cached chunks) also reads "Downloading".
+ * Pure.
+ * @param {object | null | undefined} current
+ * @returns {null | {kind: string, text: string, tone: string | null}}
+ */
+export function heroStatus(current) {
+  const bps = current ? current.bytes_per_second : null;
+  if (typeof bps !== "number" || !Number.isFinite(bps) || bps < 0) return null;
+  const runner = current.runner_bytes_per_second;
+  if (typeof runner === "number" && Number.isFinite(runner) && runner > 0) {
+    return { kind: "running", text: PILL_DOWNLOADING, tone: "run" };
+  }
+  if (bps > 0) return { kind: "cached", text: PILL_SERVING, tone: "ok" };
+  return { kind: "notinuse", text: PILL_IDLE, tone: null };
+}
 
 /**
  * A formatted figure split into the number and its unit, the kit's
@@ -140,7 +184,7 @@ function tooltip(tile) {
  * @param {{throughput?: object|null, rateCap?: string|null, unsupported?: boolean, error?: string|null}} state
  * @returns {{note: string|null, figures: null | {
  *   big: {value: string, unit: string, title: string},
- *   status: null | {kind: string, text: string},
+ *   status: null | {kind: string, text: string, tone: string | null},
  *   caption: Array<string|{b: string}>, captionTitle: string,
  *   mini: Array<{key: string, parts: Array<string|{b: string}>, title: string}>,
  *   tiles: Array<{key: string, label: string, caption: string|null, value: string, unit: string, title: string, meter: number|null}>
@@ -160,11 +204,7 @@ export function heroModel({ throughput = null, rateCap = null, unsupported = fal
   const summary = t.summary || {};
 
   const current = byKey.get("current");
-  const bps = t.current ? t.current.bytes_per_second : null;
-  let status = null;
-  if (typeof bps === "number" && Number.isFinite(bps) && bps >= 0) {
-    status = bps > 0 ? { kind: "running", text: PILL_DOWNLOADING } : { kind: "notinuse", text: PILL_IDLE };
-  }
+  const status = heroStatus(t.current);
 
   const devices = devicesLoading(t);
   const caption = [];
@@ -204,6 +244,54 @@ export function heroModel({ throughput = null, rateCap = null, unsupported = fal
   };
 }
 
+/** WP WEB-FIX-20.2: the graph legend's words. */
+export const LEGEND_SERVED = "Served from cache";
+export const LEGEND_INTERNET = "From the internet";
+
+/**
+ * WP WEB-FIX-20.2: the stacked two-series geometry. Per point the total
+ * speed (`bytes_per_second`, everything the cache served) splits by its
+ * `hit_bytes` share of `bytes_served`: that part was served from the cache
+ * (clients' hits), the rest came from the internet (clients' misses and
+ * the prefill runner, whose points carry no hit/miss split of their own).
+ * The internet band sits on top, so the top line is the total and the
+ * scale (and the axis's "highest") is the total's.
+ *
+ * `null` when any point lacks the split (an older server's tiers): the
+ * graph then draws the single total line. Coordinates as `seriesGeometry`.
+ * Pure.
+ * @param {Array<{bytes_per_second: number, bytes_served?: number, hit_bytes?: number}>} points
+ * @param {{width: number, height: number}} box
+ * @returns {null | {served: {line: string, area: string}, internet: {line: string, area: string}, maxBytesPerSecond: number}}
+ */
+export function splitGeometry(points, { width, height }) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  const num = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  if (!points.every((p) => p && num(p.bytes_served) && num(p.hit_bytes))) return null;
+  const totals = points.map((p) => (num(p.bytes_per_second) ? p.bytes_per_second : 0));
+  const served = points.map((p, i) => (p.bytes_served > 0 ? totals[i] * Math.min(1, p.hit_bytes / p.bytes_served) : 0));
+  const max = Math.max(...totals);
+  const round = (v) => Math.round(v * 10) / 10;
+  const n = points.length;
+  const xs = n === 1 ? [0, width] : totals.map((_, i) => (i / (n - 1)) * width);
+  const pick = (vals) => (n === 1 ? [vals[0], vals[0]] : vals);
+  const y = (v) => (max > 0 ? height - (v / max) * height : height);
+  const pts = (vals) => pick(vals).map((v, i) => `${round(xs[i])} ${round(y(v))}`);
+  const servedPts = pts(served);
+  const totalPts = pts(totals);
+  const servedLine = "M" + servedPts.join(" L");
+  const totalLine = "M" + totalPts.join(" L");
+  const first = round(xs[0]);
+  const last = round(xs[xs.length - 1]);
+  return {
+    served: { line: servedLine, area: `${servedLine} L${last} ${height} L${first} ${height} Z` },
+    // The band between the total and the served line: along the top, back
+    // along the served line.
+    internet: { line: totalLine, area: `${totalLine} L${servedPts.slice().reverse().join(" L")} Z` },
+    maxBytesPerSecond: max,
+  };
+}
+
 /** WP DOWNLOADS-3: the centred note on an idle graph. */
 export const NO_TRAFFIC_TEXT = "No traffic in this range";
 
@@ -216,7 +304,8 @@ export const NO_TRAFFIC_TEXT = "No traffic in this range";
  * @param {object | null | undefined} series
  * @param {string} range the range the user has selected
  * @param {{unsupported?: boolean, nowMs?: number}} [opts]
- * @returns {null | {line: string, area: string | null, label: string, axis: string[], idle?: boolean, note?: string}}
+ * @returns {null | {line: string, area: string | null, label: string, axis: string[], idle?: boolean, note?: string,
+ *   split?: null | {served: {line: string, area: string}, internet: {line: string, area: string}}}}
  */
 export function graphModel(series, range, { unsupported = false, nowMs = Date.now() } = {}) {
   if (unsupported || !series || feedState(series) === "disabled" || series.range !== range) return null;
@@ -233,9 +322,13 @@ export function graphModel(series, range, { unsupported = false, nowMs = Date.no
       axis: [seriesStartText(shown, nowMs), "now"],
     };
   }
+  const split = splitGeometry(shown.points, { width: GRAPH_W, height: GRAPH_H });
   return {
     line: geo.line,
     area: geo.area,
+    // WP WEB-FIX-20.2: served-from-cache under from-the-internet, or null
+    // (no hit/miss split in the points: the single total line).
+    split: split ? { served: split.served, internet: split.internet } : null,
     label: seriesLabel(series, geo.maxBytesPerSecond),
     // The axis keeps the established "highest" wording (the Android app
     // says the same, pinned by TrafficWebTwinTest); the mini line's "Peak"
@@ -316,7 +409,7 @@ export function createDownloadsHero({ range, onRangeChange }) {
   root.dataset.role = "dl-stats";
 
   const head = el("div", "hh");
-  const label = el("span", "sec", "Speed");
+  const label = el("span", "sec", HERO_LABEL);
   const seg = createRangeSegs({
     label: "Statistics range",
     value: range,
@@ -371,6 +464,16 @@ export function createDownloadsHero({ range, onRangeChange }) {
     for (const y of GRAPH_GRID) grid.appendChild(svgEl("line", { x1: 0, y1: y, x2: GRAPH_W, y2: y }));
     if (model.idle) {
       svg.append(grid, svgEl("path", { class: "line base", d: model.line }));
+    } else if (model.split) {
+      // Served at the bottom, the internet band on top; lines over fills.
+      const { served, internet } = model.split;
+      svg.append(
+        grid,
+        svgEl("path", { class: "area net", d: internet.area }),
+        svgEl("path", { class: "area srv", d: served.area }),
+        svgEl("path", { class: "line net", d: internet.line }),
+        svgEl("path", { class: "line srv", d: served.line }),
+      );
     } else {
       svg.append(grid, svgEl("path", { class: "area", d: model.area }), svgEl("path", { class: "line", d: model.line }));
     }
@@ -379,6 +482,18 @@ export function createDownloadsHero({ range, onRangeChange }) {
     axis.setAttribute("aria-hidden", "true");
     for (const text of model.axis) axis.appendChild(el("span", null, text));
     graph.append(svg, axis);
+    if (!model.idle && model.split) {
+      const legend = el("div", "glegend");
+      legend.dataset.role = "graph-legend";
+      for (const [cls, text] of [["srv", LEGEND_SERVED], ["net", LEGEND_INTERNET]]) {
+        const item = el("span", cls);
+        const dot = el("i");
+        dot.setAttribute("aria-hidden", "true");
+        item.append(dot, text);
+        legend.appendChild(item);
+      }
+      graph.appendChild(legend);
+    }
     if (model.idle) {
       // The svg's accessible name already says it; the note is the visual.
       const note = el("p", "gnote", model.note);
@@ -428,7 +543,7 @@ export function createDownloadsHero({ range, onRangeChange }) {
     const kind = f.status ? f.status.kind : "";
     if (pillSlot.dataset.kind !== kind) {
       pillSlot.replaceChildren();
-      if (f.status) pillSlot.appendChild(createPill({ kind: f.status.kind, text: f.status.text, tone: f.status.kind === "running" ? "run" : null }));
+      if (f.status) pillSlot.appendChild(createPill({ kind: f.status.kind, text: f.status.text, tone: f.status.tone }));
       pillSlot.dataset.kind = kind;
     }
     pillSlot.hidden = !f.status;
