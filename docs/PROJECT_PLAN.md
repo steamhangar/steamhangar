@@ -3834,7 +3834,7 @@ below carry their own later dates, item 12 is the current one).
         stamped after every successful run, incl. forced verifies.
         Reviewer advice for AUTO-VERIFY-FULL-1: decide after one prod verify
         of HD2 on rc21 shows `removed=[]` and 0 unmapped depots.
-      - [ ] **AUTO-VERIFY-1** (api + web; decided 2026-10-18, Weg A)
+      - [x] **AUTO-VERIFY-1** (e9ad10d; api + web; decided 2026-10-18, Weg A)
         Settings checkbox "Complete cached games automatically" (default
         on; forced run only for games the disk check calls incomplete).
         Goal: a game with only an update delta cached is detected (disk
