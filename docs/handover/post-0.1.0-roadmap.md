@@ -563,6 +563,17 @@ API key is typed in by hand.
   - The agent reports OS and device type (part of "Weg B for agents") so
     the Clients page and the Add a device tabs show the right install
     path; the Linux / SteamOS tab exists already.
+  - Signing costs (rough figures from 2026-10-18, verify at the cut):
+    Windows unsigned is free but SmartScreen warns; Azure Trusted Signing
+    about USD 10/month if the publisher qualifies (eligibility for
+    individuals is limited by country); OV certificate about USD 200-400
+    per year plus a hardware token or cloud HSM; EV more and no longer
+    buys instant SmartScreen reputation; winget and the Microsoft Store
+    listing are free. macOS: Apple Developer Program USD/EUR 99 per year
+    for a Developer ID and notarization; without it Gatekeeper blocks a
+    downloaded .pkg; a Homebrew tap formula that builds the Go agent
+    from source with a `brew services` launchd entry needs no notarization
+    (free path for a CLI agent; a tray app would need the paid account).
   - Open decision (cut at v0.4.0 planning): all platforms in 0.4.0, or
     Windows + Linux/SteamOS (Deck) in 0.4.0 and macOS / Steam Frame in a
     later minor. Exit adds a real install per shipped platform.
