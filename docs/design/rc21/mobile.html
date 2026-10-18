@@ -1,0 +1,1093 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SteamHangar Phone Mockup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  /* token values copied from web/css/theme.css (same as rc20/kit.html) */
+  --bg:#0A1016; --surface:#111C24; --raised:#17252F; --raised-2:#1D303C;
+  --line:#24363F; --line-soft:#1B2A33;
+  --text:#E4EFF3; --dim:#8AA1AD; --dim-2:#7A91A0;
+  --accent:#2ED9CE; --accent-ink:#04211F; --accent-glow:rgba(46,217,206,.16);
+  --ok:#57DD8A; --run:#F2CE5B; --stale:#F07B2E; --danger:#FF6F6F; --none:#8296A6;
+  --ui:Roboto,"Segoe UI",system-ui,sans-serif; --mono:"Roboto Mono",ui-monospace,Consolas,monospace;
+  --fs-1:11px; --fs-2:12px; --fs-3:13px; --fs-4:15px; --fs-5:18px; --fs-6:24px; --fs-7:32px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-7:32px; --sp-8:48px;
+  --r-s:8px; --r-m:12px; --r-l:18px; --r-xl:26px;
+  --gutter:16px; --nav-h:64px;
+  /* proposed (see "Proposed new values") */
+  --hit:44px; --ctl-h:38px;
+  /* mockup-only: annotation colour for overlays, never shipped */
+  --anno:#FF5FD2;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:400 var(--fs-3)/1.45 var(--ui);padding:var(--sp-6) var(--sp-7)}
+.doc{display:grid;gap:var(--sp-8)}
+header h1{font-size:var(--fs-6);margin:0;letter-spacing:-.5px}
+header h1 small{font:var(--fs-2) var(--mono);color:var(--dim);margin-left:var(--sp-3);letter-spacing:0}
+.lead{color:var(--dim);margin:var(--sp-1) 0 0;max-width:110ch}
+.toc{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-3)}
+.toc a{font:400 var(--fs-2)/1 var(--ui);color:var(--text);background:var(--raised);border:1px solid var(--line-soft);border-radius:999px;padding:6px 10px;text-decoration:none}
+.kit-s{display:grid;gap:var(--sp-4)}
+.kit-s>h2{font-size:var(--fs-5);margin:0;padding-bottom:var(--sp-2);border-bottom:1px solid var(--line-soft)}
+.kit-s>h2 small{font:var(--fs-2) var(--mono);color:var(--dim);margin-left:var(--sp-3)}
+.note{font-size:var(--fs-3);color:var(--dim);margin:0;max-width:130ch}
+code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 5px;border-radius:5px;color:var(--text)}
+.phs{display:flex;flex-wrap:wrap;gap:var(--sp-8) var(--sp-7);align-items:flex-start}
+.ph{margin:0;display:grid;gap:var(--sp-2);width:max-content}
+.flabel{display:flex;gap:var(--sp-2);align-items:baseline;font:500 var(--fs-3)/1.3 var(--ui)}
+.flabel b{font:500 var(--fs-1)/1 var(--mono);color:var(--accent-ink);background:var(--accent);padding:3px 6px;border-radius:5px}
+.fnote{contain:inline-size;margin:0;font-size:var(--fs-2);line-height:1.5;color:var(--dim)}
+.fnote code{font-size:var(--fs-1)}
+.tapkey{display:inline-block;width:12px;height:12px;border-radius:4px;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--anno);vertical-align:middle;margin:0 6px}
+
+/* ---------- device ---------- */
+.dev{width:calc(var(--w) + 16px);height:calc(var(--h) + 16px);padding:8px;border-radius:54px;background:var(--raised);box-shadow:0 0 0 1px var(--line),0 30px 60px -30px rgba(0,0,0,.8)}
+.scr{position:relative;width:var(--w);height:var(--h);border-radius:46px;overflow:hidden;background:var(--bg);display:flex;flex-direction:column;container-type:inline-size;
+  --sat:47px; --sab:34px; --sal:0px; --sar:0px}
+.scr.land{--sat:0px; --sab:21px; --sal:47px; --sar:47px}
+.sbar{flex:none;height:var(--sat);display:flex;align-items:center;justify-content:space-between;padding:8px 26px 0 36px;font:600 15px/1 var(--ui)}
+.sbi{display:flex;gap:6px;align-items:center}
+.isl{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:122px;height:35px;border-radius:20px;background:#000;z-index:90}
+.isl.v{top:50%;left:11px;transform:translateY(-50%);width:35px;height:122px}
+.home{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:var(--text);z-index:90}
+.land .home{bottom:6px;width:180px}
+.app{flex:1;min-height:0;overflow:hidden;padding:var(--sp-4) max(var(--gutter),var(--sar)) var(--sp-4) max(var(--gutter),var(--sal));display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4);align-content:start}
+
+/* bottom nav (app.css values) */
+.nav{flex:none;position:relative;z-index:20;display:grid;grid-template-columns:repeat(4,1fr);background:rgba(13,21,27,.96);border-top:1px solid var(--line-soft);
+  padding:7px max(6px,var(--sar)) calc(9px + var(--sab)) max(6px,var(--sal))}
+.nav-btn{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--dim-2);padding:6px 2px;background:none;border:0;font:inherit;min-width:0}
+.nav-ic{display:flex}
+.nav-lb{font-size:10px;font-weight:600;letter-spacing:.3px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-btn[aria-current=page]{color:var(--accent)}
+.nav-pip{position:absolute;top:1px;right:calc(50% - 20px);min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:var(--run);color:#20180a;font:700 9.5px/15px var(--mono);display:grid;place-items:center}
+.nav.land{padding-top:5px}
+.nav.land .nav-btn{flex-direction:row;justify-content:center;gap:var(--sp-2);padding:4px 2px}
+.nav.land .nav-lb{font-size:var(--fs-2)}
+.nav.land .nav-pip{position:static;order:3}
+
+/* safe-area annotation bands */
+.sa{position:absolute;z-index:95;pointer-events:none;display:flex;align-items:center;
+  background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--anno) 34%,transparent) 0 3px,transparent 3px 9px)}
+.sa span{font:500 var(--fs-1)/1 var(--mono);color:var(--anno);background:var(--bg);border:1px solid var(--anno);border-radius:4px;padding:2px 6px;white-space:nowrap}
+.sa-top{top:0;left:0;right:0;height:var(--sat)}
+.sa-top span{position:absolute;top:calc(100% + 1px);left:50%;transform:translateX(-50%)}
+.sa-bot{bottom:0;left:0;right:0;height:var(--sab);padding-left:8px}
+.sa-left{top:0;bottom:0;left:0;width:var(--sal);justify-content:center}
+.sa-right{top:0;bottom:0;right:0;width:var(--sar);justify-content:center}
+.sa-left span,.sa-right span{writing-mode:vertical-rl;padding:6px 2px}
+.sa-botl{left:0;right:0;bottom:0;height:var(--sab);padding-left:calc(var(--sal) + 8px)}
+
+/* ---------- kit primitives (values from web/css/kit.css) ---------- */
+.page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-3) var(--sp-4);flex-wrap:wrap}
+.page-head h1{font-size:var(--fs-6);margin:0;letter-spacing:-.5px;line-height:1.15}
+.page-head .sub{color:var(--dim);font-size:var(--fs-3);margin-top:2px}
+.sec{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.9px;text-transform:uppercase;color:var(--dim)}
+.sechd{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);min-height:34px}
+.btn{font:500 var(--fs-3)/1 var(--ui);color:var(--text);background:var(--raised);border:1px solid var(--line);border-radius:var(--r-s);padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;text-decoration:none}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:700}
+.btn.ghost{background:transparent}
+.btn.sm{padding:6px 10px;font-size:var(--fs-2)}
+.btn.danger{background:transparent;color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line))}
+.btn-ico{display:flex}
+.btn.wide{width:100%;justify-content:center}
+.btn.grow{flex:1;justify-content:center}
+.tapped{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--anno)}
+.pill{display:inline-flex;align-items:center;gap:6px;font:500 var(--fs-2)/1 var(--ui);padding:5px 10px;border-radius:999px;background:var(--raised-2);color:var(--dim);white-space:nowrap}
+.pill.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,var(--surface))}
+.pill.run{color:var(--run);background:color-mix(in srgb,var(--run) 14%,var(--surface))}
+.pill.acc{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.pill.stale{color:var(--stale);background:color-mix(in srgb,var(--stale) 14%,var(--surface))}
+.pill.danger{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,var(--surface))}
+.sic{width:16px;height:16px;border-radius:50%;background:currentColor;display:inline-grid;place-items:center;flex:none;position:relative;overflow:hidden;clip-path:circle(50%)}
+.sic svg{width:10px;height:10px;display:block;overflow:visible;color:var(--accent-ink);fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.pill .sic{margin-left:-3px}
+.seg{display:inline-flex;gap:2px;padding:3px;background:var(--surface);border:1px solid var(--line-soft);border-radius:10px;max-width:100%;min-width:0;overflow:hidden}
+.seg button{font:500 var(--fs-2)/1 var(--ui);color:var(--dim);background:none;border:0;border-radius:7px;padding:7px 12px;flex:none;white-space:nowrap}
+.seg button[aria-pressed=true]{background:var(--raised-2);color:var(--text)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11em),1fr));gap:var(--sp-3)}
+.tile{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:14px 16px;display:grid;gap:4px;align-content:start;min-width:0}
+.tile .k{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim);overflow-wrap:anywhere}
+.tile .v{font:500 var(--fs-6)/1.1 var(--ui);letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.tile .v small{font-size:var(--fs-2);color:var(--dim);margin-left:4px;letter-spacing:0}
+.tile .n{font-size:var(--fs-2);color:var(--dim)}
+.meter{height:4px;border-radius:2px;background:var(--raised-2);overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--ok);border-radius:2px}
+.fchip{font:500 var(--fs-2)/1 var(--ui);color:var(--dim);background:var(--surface);border:1px solid var(--line-soft);border-radius:999px;padding:8px 12px;white-space:nowrap;display:inline-flex;align-items:center}
+.fchip b{font:400 var(--fs-1) var(--mono);margin-left:3px;color:var(--dim-2);font-variant-numeric:tabular-nums}
+.fchip[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.fchip[aria-pressed=true] b{color:var(--accent)}
+.gchip{display:inline-block;font:400 var(--fs-2)/1 var(--ui);color:var(--text);background:var(--raised);border:1px solid var(--line-soft);border-radius:999px;padding:6px 10px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.gchip b{font:400 var(--fs-1) var(--mono);color:var(--dim);margin-left:6px}
+.gchip.more{color:var(--dim);border-style:dashed;background:none}
+.badge{display:inline-block;font:500 var(--fs-1) var(--mono);background:var(--raised-2);color:var(--dim);border-radius:999px;padding:3px 8px}
+.hint{font-size:var(--fs-2);line-height:1.45;color:var(--dim);margin:0}
+.row6{display:flex;gap:6px;flex-wrap:wrap}
+.blk{display:grid;gap:10px;min-width:0}
+.rowlist{display:grid;gap:var(--sp-2);min-width:0}
+
+/* field card */
+.fcard{background:var(--surface);border:1px solid var(--line-soft);border-radius:14px;padding:var(--sp-4) 14px;display:grid;gap:var(--sp-4)}
+.fcard>h3{margin:0;font:500 var(--fs-1)/1 var(--ui);letter-spacing:.9px;text-transform:uppercase;color:var(--dim)}
+.fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px 28px}
+.field{display:grid;gap:7px;min-width:0}
+.field .lh{display:flex;align-items:center;gap:8px}
+.field label{font:500 var(--fs-3) var(--ui)}
+.ib{width:18px;height:18px;border-radius:50%;border:1px solid var(--line);color:var(--dim);font:500 var(--fs-1)/16px var(--mono);text-align:center;background:none;padding:0;flex:none}
+.chip{margin-left:auto;font:400 var(--fs-1)/1 var(--ui);padding:4px 8px;border-radius:999px;background:var(--raised-2);color:var(--dim);white-space:nowrap}
+.chip.ch{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.in{font:400 var(--fs-3) var(--ui);color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:9px 12px;width:100%}
+.in.mono{font-family:var(--mono);max-width:160px}
+.in[aria-disabled=true]{color:var(--dim);background:var(--surface)}
+.snav-list{display:flex;gap:2px;overflow:hidden;min-width:0}
+.snav-item{flex:none;background:none;border:0;border-radius:10px;padding:10px var(--sp-3);font:400 var(--fs-3)/1.3 var(--ui);color:var(--dim);white-space:nowrap}
+.snav-item[aria-current=true]{background:var(--accent-glow);color:var(--accent)}
+.ph2 h2{margin:0;font:600 var(--fs-5)/1.3 var(--ui);letter-spacing:-.3px}
+.ph2 p{margin:3px 0 0;color:var(--dim);font-size:var(--fs-3)}
+.savebar{position:absolute;left:var(--gutter);right:var(--gutter);bottom:calc(var(--nav-h) + var(--sp-4) + var(--sab));z-index:30;
+  display:flex;align-items:center;justify-content:flex-end;gap:10px var(--sp-3);flex-wrap:wrap;background:var(--raised-2);border:1px solid var(--line);border-radius:14px;padding:10px var(--sp-3);box-shadow:0 10px 30px color-mix(in srgb,var(--bg) 80%,transparent)}
+.savebar .m{flex-basis:100%;display:flex;align-items:center;gap:var(--sp-2)}
+.savebar .btn{flex:1;justify-content:center}
+.savebar-msg{margin:0;font:500 var(--fs-3)/1.35 var(--ui)}
+.dotr{width:7px;height:7px;border-radius:50%;background:var(--run);flex:none}
+
+/* Clients card (kit.css, container rules at <=460) */
+.ccard{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-l);padding:14px;display:grid;grid-template-columns:1fr;gap:var(--sp-4);min-width:0}
+.ccard.warn{border-color:color-mix(in srgb,var(--stale) 45%,var(--line))}
+.z{display:grid;gap:var(--sp-3);align-content:start;min-width:0}
+.ch{display:flex;gap:12px;align-items:center;min-width:0}
+.ico{width:38px;height:38px;border-radius:10px;background:var(--raised);display:grid;place-items:center;color:var(--accent);flex:none}
+.ch .nm{font:500 var(--fs-4)/1.2 var(--ui);overflow-wrap:anywhere}
+.ch .meta{font:var(--fs-1) var(--mono);color:var(--dim);margin-top:3px;overflow-wrap:anywhere}
+.pills{display:flex;gap:6px;flex-wrap:wrap;min-width:0}
+.upd{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;background:color-mix(in srgb,var(--stale) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--stale) 40%,var(--line));border-radius:var(--r-m);padding:10px 12px;font-size:var(--fs-2)}
+.upd svg{color:var(--stale);margin-top:2px}
+.upd b{display:block;font-weight:500}
+.upd span{color:var(--dim);overflow-wrap:anywhere}
+.upd .btn{grid-column:2;justify-self:start;white-space:normal;text-align:left;line-height:1.2}
+.now{border-radius:var(--r-m);padding:10px 12px;display:flex;justify-content:center;border:1px dashed color-mix(in srgb,var(--accent) 30%,var(--line));color:var(--dim);font-size:var(--fs-2)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6.5em),1fr));gap:var(--sp-3)}
+.stats .k{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+.stats .v{font:500 var(--fs-5)/1.1 var(--ui);margin-top:5px;font-variant-numeric:tabular-nums}
+.stats .v small{font-size:var(--fs-2);color:var(--dim);margin-left:3px}
+.cf{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:var(--sp-3);font-size:var(--fs-2);color:var(--dim)}
+.cf .acts{display:flex;gap:8px;width:100%;flex-wrap:wrap}
+.cf .acts .btn{flex:1;justify-content:center}
+
+/* Downloads (kit.css <=460) */
+.hero{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-l);padding:14px;display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4);min-width:0}
+.hero>*{min-width:0}
+.hero .hh{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+.hero .hh .seg{flex:1 1 100%}
+.live{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4);align-items:end;min-width:0}
+.hero.land .live{grid-template-columns:170px minmax(0,1fr);gap:var(--sp-5)}
+.live .big{font:500 var(--fs-7)/1 var(--ui);letter-spacing:-1px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.live .big small{font-size:var(--fs-3);color:var(--dim);margin-left:4px;letter-spacing:0}
+.graph{position:relative;min-width:0}
+.graph svg{width:100%;height:96px;display:block}
+.graph .line{fill:none;stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke}
+.graph .area{fill:var(--accent);opacity:.12;stroke:none}
+.graph .line.srv{stroke:var(--ok)}
+.graph .area.srv{fill:var(--ok);opacity:.16}
+.graph .ax{display:flex;justify-content:space-between;font:var(--fs-1) var(--mono);color:var(--dim);margin-top:4px}
+.graph .glegend{display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-4);font-size:var(--fs-1);color:var(--dim);margin-top:var(--sp-1)}
+.graph .glegend span{display:inline-flex;align-items:center;gap:6px}
+.graph .glegend i{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.graph .glegend .srv i{background:var(--ok)}
+.hero .tiles{grid-template-columns:1fr 1fr}
+.hero .tile{background:var(--raised);border-color:transparent;padding:14px}
+.job{background:var(--raised);border:1px solid color-mix(in srgb,var(--run) 40%,var(--line));border-radius:var(--r-m);padding:12px 14px;display:grid;gap:10px}
+.job .t{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.job .nm{font-weight:500}
+.job .meta{font:var(--fs-1) var(--mono);color:var(--dim)}
+.bar{height:6px;border-radius:3px;background:var(--raised-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.job .m2{display:flex;justify-content:space-between;gap:8px;font:var(--fs-2) var(--mono);color:var(--dim)}
+.job .acts{display:flex;gap:var(--sp-2);flex-wrap:wrap}
+.dl-history .sechd{flex-wrap:wrap;row-gap:var(--sp-2)}
+.dl-history .hacts{display:flex;align-items:center;gap:var(--sp-2);flex:1 0 100%;justify-content:space-between}
+.hrow{display:flex;align-items:center;gap:12px;width:100%;min-width:0;margin:0;text-align:left;font:inherit;color:var(--text);background:var(--raised);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:12px 14px}
+.hinfo{display:grid;flex:1;min-width:0}
+.hrow .nm{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hrow .meta{font:var(--fs-1) var(--mono);color:var(--dim);margin-top:2px}
+.hrow .chev{margin-left:auto;color:var(--dim);flex:none}
+
+/* Library (kit.css, lib container <=560) */
+.lib-head{align-items:flex-end}
+.lib-split{display:inline-flex;flex:none}
+.lib-split>.btn:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+.lib-split .split-more{border-top-left-radius:0;border-bottom-left-radius:0;padding-inline:9px;border-left:1px solid color-mix(in srgb,var(--accent-ink) 35%,var(--accent))}
+.lib-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;min-width:0}
+.lib-search{flex:1 1 100%;height:38px;padding:0 12px;border-radius:10px;gap:8px;display:flex;align-items:center;background:var(--surface);border:1px solid var(--line);color:var(--dim)}
+.lib-search .ico{display:flex;color:var(--dim-2)}
+.lib-chips{display:flex;flex-wrap:nowrap;gap:6px;overflow:hidden;flex:1 1 100%;min-width:0}
+.lib-chips .fchip{flex:none}
+.lib-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.lib-tools .btn{height:38px;padding-inline:10px}
+.sortg{display:inline-flex;align-items:stretch;height:38px;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sortg .sel{display:flex;align-items:center;padding:0 10px 0 12px;font:400 var(--fs-3) var(--ui)}
+.sortg button{display:grid;place-items:center;width:40px;background:none;border:0;border-left:1px solid var(--line);color:var(--dim);padding:0}
+.segi{display:inline-flex;gap:2px;padding:2px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.segi button{display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:var(--r-s);background:none;color:var(--dim);padding:0}
+.segi button[aria-pressed=true]{background:var(--raised-2);color:var(--text)}
+.lib-stat{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-3);color:var(--dim)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr));gap:22px 16px}
+.card{position:relative;display:grid;gap:8px;align-content:start;min-width:0}
+.cap{position:relative;aspect-ratio:2/3;border-radius:var(--r-m);overflow:hidden;box-shadow:0 0 0 1px var(--line);
+  background:radial-gradient(120% 70% at 22% -6%,hsl(var(--h1) 62% 42%),transparent 62%),linear-gradient(158deg,hsl(var(--h1) 46% 26%),hsl(var(--h2) 66% 8%))}
+.cap .art,.cap .scrim{position:absolute;inset:0}
+.cap.p0 .art{background:linear-gradient(112deg,transparent 38%,hsl(var(--h1) 90% 62% / .34) 39%,hsl(var(--h1) 90% 62% / .34) 46%,transparent 47%)}
+.cap.p1 .art{background:radial-gradient(120% 62% at 50% 112%,hsl(var(--h2) 92% 58% / .5),transparent 62%)}
+.cap.p2 .art{background:linear-gradient(180deg,transparent 52%,hsl(var(--h1) 85% 55% / .3) 52.6%,transparent 54%),radial-gradient(80% 40% at 50% 55%,hsl(var(--h2) 95% 62% / .35),transparent 70%)}
+.cap.p3 .art{background:radial-gradient(90% 70% at 8% 6%,hsl(var(--h1) 95% 60% / .48),transparent 58%)}
+.cap .scrim{background:linear-gradient(transparent 55%,color-mix(in srgb,var(--bg) 85%,transparent))}
+.cap .name{position:absolute;left:10px;right:10px;bottom:10px;z-index:1;font:700 var(--fs-3)/1.15 var(--ui);letter-spacing:.2px;text-transform:uppercase;text-wrap:balance}
+.cap .sz{position:absolute;top:8px;left:8px;z-index:1;padding:3px 9px;border-radius:999px;background:color-mix(in srgb,var(--bg) 72%,transparent);font:500 var(--fs-1)/1.3 var(--mono)}
+.card .meta{display:grid;gap:3px;padding-inline:2px;min-width:0}
+.stt{display:flex;align-items:center;gap:6px;min-width:0;font:400 var(--fs-2)/1.35 var(--ui);color:var(--dim)}
+.stt .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.stt .state{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stt .state.tx-stale{color:var(--stale)}
+.icnact{margin:-2px 0 -2px auto;flex:none;display:grid;place-items:center;width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:50%;background:var(--surface)}
+.instbadge{display:block;min-width:0;font:400 var(--fs-2)/1.35 var(--ui);color:var(--dim-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- overflow cue (proposal) ---------- */
+.scue{--cue-l:0px;--cue-r:var(--sp-7);
+  -webkit-mask-image:linear-gradient(to right,transparent,#000 var(--cue-l),#000 calc(100% - var(--cue-r)),transparent);
+  mask-image:linear-gradient(to right,transparent,#000 var(--cue-l),#000 calc(100% - var(--cue-r)),transparent)}
+.scue.mid{--cue-l:var(--sp-7)}
+.scue.end{--cue-l:var(--sp-7);--cue-r:0px;justify-content:flex-end}
+.scue.fits{-webkit-mask-image:none;mask-image:none}
+/* static stand-in for a scroll position */
+.scue.mid>:first-child{margin-left:-150px}
+
+/* ---------- touch targets (proposal; the mockup fakes pointer:coarse with .coarse) ---------- */
+:is(.coarse,.sp-c.fine) :is(.seg button,.fchip,.btn,.ib,.icnact,.gd-x,.segi button,.sortg button,.tab,.pair-open){position:relative}
+:is(.coarse,.sp-c.fine) :where(.seg button,.fchip,.btn,.ib,.icnact,.gd-x,.segi button,.sortg button,.tab,.pair-open)::after{
+  content:"";position:absolute;left:0;right:0;top:calc(50% - var(--hit) / 2);bottom:calc(50% - var(--hit) / 2);pointer-events:none}
+:is(.coarse,.sp-c.fine) :is(.ib,.icnact,.gd-x)::after{left:calc(50% - var(--hit) / 2);right:calc(50% - var(--hit) / 2)}
+.coarse :is(.seg button,.fchip,.btn,.segi button){min-height:var(--ctl-h)}
+.coarse .seg button{padding-inline:14px}
+.coarse .btn.sm{padding-inline:12px}
+.coarse .segi button{width:var(--ctl-h);height:var(--ctl-h)}
+.coarse .ib{width:var(--sp-6);height:var(--sp-6);line-height:22px}
+.coarse .icnact{width:var(--sp-6);height:var(--sp-6)}
+.coarse .gd-x{width:var(--ctl-h);height:var(--ctl-h)}
+.coarse .field .lh{min-height:var(--hit)}
+.coarse .lib-chips{padding:3px 0;margin:-3px 0}
+.coarse .pair-open{display:inline-flex;align-items:center;min-height:var(--ctl-h)}
+/* annotation */
+.hitviz :is(.seg button,.fchip,.btn,.ib,.icnact,.gd-x,.segi button,.sortg button,.tab,.pair-open)::after{outline:1px dashed var(--anno);outline-offset:-1px}
+.hitviz.coarse :is(.seg button,.fchip,.btn,.ib,.icnact,.gd-x,.segi button,.sortg button,.tab,.pair-open)::after{background:color-mix(in srgb,var(--anno) 14%,transparent)}
+
+/* specimen board */
+.board{width:780px;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-l);padding:var(--sp-2) var(--sp-5) var(--sp-4)}
+.sp-row{display:grid;grid-template-columns:130px 1fr 1fr;gap:var(--sp-4);align-items:center;padding:18px 0;border-top:1px solid var(--line-soft)}
+.sp-row.sp-h{border-top:0;padding:10px 0;font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+.sp-l{font-size:var(--fs-3)}
+.sp-l small{color:var(--dim);font-size:var(--fs-1)}
+.sp-c{display:grid;gap:10px;justify-items:start;padding:6px 0}
+.sp-c .field{width:100%}
+.sp-c .stt{width:150px}
+.sp-m{font:400 var(--fs-1) var(--mono);color:var(--dim)}
+.sp-c.coarse .sp-m{color:var(--anno)}
+.sp-key{margin:var(--sp-3) 0 0;font-size:var(--fs-2);color:var(--dim);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.k-dash,.k-fill{display:inline-block;width:14px;height:14px;border:1px dashed var(--anno)}
+.k-fill{background:color-mix(in srgb,var(--anno) 14%,transparent);margin-left:10px}
+
+/* ---------- sheets (proposal for phone widths) ---------- */
+.scrim{position:absolute;inset:0;z-index:40;background:rgba(3,7,10,.62)}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:41;max-height:88%;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-bottom:0;border-radius:var(--r-xl) var(--r-xl) 0 0;box-shadow:0 -18px 40px -12px rgba(0,0,0,.7);overflow:hidden}
+.sheet.tall{height:88%}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 2px;flex:none;position:relative}
+.sheet.gd .grab{position:absolute;top:0;left:0;right:0;z-index:5;margin:9px auto 0;background:color-mix(in srgb,var(--text) 45%,transparent)}
+.sbody{flex:1;min-height:0;overflow:hidden;padding:10px 18px 22px}
+.sfoot{flex:none;display:flex;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4) calc(var(--sp-3) + var(--sab));border-top:1px solid var(--line-soft);background:var(--surface)}
+.sfoot .btn{justify-content:center}
+.sheet.confirm .sfoot{flex-direction:column}
+/* game detail */
+.sheet.gd .sbody{padding:0}
+.gd-x{position:absolute;top:12px;right:12px;z-index:6;display:grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:10px;color:var(--text);background:color-mix(in srgb,var(--bg) 60%,transparent)}
+.gd-x.static{position:relative;top:auto;right:auto;margin-left:auto;flex:none;align-self:flex-start}
+.gd-hero{position:relative;height:140px;background:linear-gradient(160deg,hsl(var(--h1) 55% 38%),hsl(var(--h2) 50% 14%))}
+.gd-hero::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 40%,var(--surface))}
+.gd-head{position:relative;z-index:1;display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--sp-4);margin:-52px 0 0;padding:0 var(--sp-4)}
+.gd-mini{width:78px;flex:none;aspect-ratio:2/3;border-radius:9px;box-shadow:0 0 0 1px var(--line);background:linear-gradient(158deg,hsl(var(--h1) 46% 26%),hsl(var(--h2) 66% 8%))}
+.gd-mini.sm{width:40px;border-radius:6px}
+.gd-id{flex:1 1 200px;min-width:0;display:grid;gap:6px;padding-bottom:4px}
+.gd-id h2{margin:0;font:700 var(--fs-5)/1.15 var(--ui);letter-spacing:-.4px}
+.gd-sub{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.gd-sub .appid{font:400 var(--fs-2) var(--mono);color:var(--dim-2)}
+.stick{position:relative;z-index:2;background:var(--surface)}
+.stick.compact{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-5) var(--sp-4) var(--sp-2);flex:none}
+.stick.compact .gd-id{flex:1 1 auto;padding:0}
+.stick.compact .gd-id h2{font-size:var(--fs-4)}
+.stick2{flex:none;background:var(--surface);box-shadow:0 6px 12px -8px rgba(0,0,0,.7)}
+.gd-tabs{display:flex;gap:4px;padding:0 var(--sp-3);border-bottom:1px solid var(--line-soft);overflow:hidden}
+.stick .gd-tabs{margin-top:18px}
+.tab{margin:0 0 -1px;padding:10px 14px;border:0;border-bottom:2px solid transparent;background:none;color:var(--dim);font:400 var(--fs-3) var(--ui);flex:none;white-space:nowrap}
+.tab[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+.gd-body{padding:var(--sp-5) var(--sp-4) var(--sp-6);display:grid;gap:var(--sp-5)}
+.gd-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.gd-fact .k{font:500 var(--fs-1)/1.2 var(--ui);letter-spacing:.6px;text-transform:uppercase;color:var(--dim-2)}
+.gd-fact .v{margin-top:2px;font:500 var(--fs-4)/1.3 var(--ui)}
+.irow2{display:grid;gap:2px;background:var(--raised);border-radius:10px;padding:10px 12px}
+.irow2 b{font:500 var(--fs-3) var(--ui)}
+.irow2 span{font:var(--fs-1) var(--mono);color:var(--dim)}
+.gd-body .hint{font-size:var(--fs-3);line-height:1.55}
+/* confirm */
+.sh-t{margin:8px 0 10px;font:500 var(--fs-5)/1.25 var(--ui)}
+.sh-p{margin:0 0 12px;font-size:var(--fs-3);line-height:1.5;color:var(--dim)}
+.hist-scope{border:0;margin:0 0 12px;padding:0;min-width:0;display:grid;gap:var(--sp-2)}
+.hist-scope legend{margin-bottom:var(--sp-2);padding:0}
+.srow{display:flex;align-items:center;gap:11px;padding:12px;border:1px solid var(--line-soft);background:var(--raised);border-radius:var(--r-m)}
+.srow.on{border-color:var(--accent)}
+.srow .grow{flex:1;min-width:0}
+.srow .ttl{display:block;font-weight:500}
+.srow .desc{display:block;font-size:var(--fs-2);color:var(--dim);line-height:1.45;margin-top:3px}
+.radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--dim-2);flex:none;display:grid;place-items:center}
+.radio.on{border-color:var(--accent)}
+.radio.on::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent)}
+/* history sheet */
+.hs-head{display:flex;gap:12px;align-items:center;padding:6px 0 12px;border-bottom:1px solid var(--line-soft)}
+.hs-head .nm{font:500 var(--fs-4)/1.25 var(--ui)}
+.hs-head .meta{font:var(--fs-1) var(--mono);color:var(--dim);margin-top:2px}
+.hpanel{display:grid;gap:10px;padding-top:12px;font-size:var(--fs-3)}
+.hpanel p{margin:0;color:var(--dim);line-height:1.5}
+.failhint{display:grid;gap:10px}
+.failhint-title{font-weight:500}
+.cmd{display:block;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:8px 10px;font:var(--fs-2) var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.hpanel summary{color:var(--dim);font-size:var(--fs-2)}
+.logbox{margin:var(--sp-2) 0 0;background:var(--bg);border:1px solid var(--line-soft);border-radius:var(--r-s);padding:10px 12px;font:var(--fs-2)/1.55 var(--mono);color:var(--dim);white-space:pre-wrap;max-height:160px;overflow:hidden}
+/* add a device */
+.sheet.ad .sbody{padding:0}
+.ad-head{flex:none;padding:var(--sp-4) var(--sp-5) var(--sp-3);border-bottom:1px solid var(--line-soft)}
+.ad-head h2{margin:0;font:500 var(--fs-5)/1.2 var(--ui);letter-spacing:-.3px}
+.ad-intro{margin:3px 0 14px;font-size:var(--fs-3)}
+.ad-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:4px;background:var(--bg);border:1px solid var(--line-soft);border-radius:var(--r-m)}
+.ad-tabs .tab{display:grid;justify-items:center;align-content:center;gap:3px;min-width:0;padding:8px 4px;border:0;border-radius:var(--r-s);margin:0;font:500 var(--fs-1)/1.2 var(--ui);white-space:normal;text-align:center}
+.ad-tabs .tab svg{width:18px;height:18px}
+.ad-tabs .tab[aria-selected=true]{background:var(--raised-2);color:var(--accent)}
+.ad-scroll{padding:var(--sp-4) var(--sp-5);display:grid;gap:14px;align-content:start}
+.ad-warn{display:flex;gap:10px;align-items:flex-start;background:color-mix(in srgb,var(--stale) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--stale) 40%,var(--line));border-radius:var(--r-m);padding:10px 12px;font-size:var(--fs-2);line-height:1.45}
+.ad-warn svg{width:16px;height:16px;color:var(--stale);flex:none;margin-top:1px}
+.ad-warn p{margin:0}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.steps>li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px}
+.steps .n{width:24px;height:24px;border-radius:50%;background:var(--raised-2);color:var(--accent);display:grid;place-items:center;font:500 var(--fs-2)/1 var(--mono)}
+.steps>li>div{display:grid;gap:var(--sp-2);min-width:0}
+.steps h3{margin:2px 0 0;font:500 var(--fs-3)/1.35 var(--ui)}
+.ad-desc{margin:0;font-size:var(--fs-2);line-height:1.45;color:var(--dim)}
+.ad-dl{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+.ad-other{display:grid;justify-items:center;gap:var(--sp-3);border-top:1px solid var(--line-soft);padding-top:var(--sp-4)}
+.ad-other>.sec{justify-self:stretch;margin:0}
+.ad-qrbox{display:grid;grid-template-columns:200px;gap:var(--sp-3);justify-content:center}
+.ad-qrmask,.qrwrap{width:200px;height:200px;border-radius:var(--r-m);overflow:hidden;display:block}
+.qr{width:200px;height:200px;display:block}
+.ad-qrmask .qr{filter:blur(9px);opacity:.55}
+.ad-qrside{display:grid;gap:var(--sp-2);width:200px;justify-items:stretch;text-align:center}
+.ad-qrside .btn{justify-content:center}
+.ad-qrmore{display:grid;gap:var(--sp-2);justify-self:stretch}
+.ad-open-here{margin-top:var(--sp-1)}
+.code{font:var(--fs-2) var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:9px 12px;overflow-wrap:anywhere}
+.ad-acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-4)}
+.pair-open{color:var(--accent);font-weight:500;font-size:var(--fs-3);text-decoration:none}
+.sfoot.ad-foot{justify-content:space-between;align-items:center;gap:var(--sp-3)}
+.sfoot.ad-foot .hint{flex:1;min-width:0}
+/* toast (theme.css values, proposed position) */
+.toast{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + var(--sp-4) + var(--sab));z-index:50;width:max-content;min-width:220px;max-width:calc(100% - 32px);
+  background:var(--raised-2);border:1px solid var(--line);border-radius:11px;padding:11px 13px;font-size:12.5px;display:flex;align-items:center;gap:9px;box-shadow:0 12px 26px -10px rgba(0,0,0,.8)}
+.toast-key{width:3px;align-self:stretch;border-radius:2px;background:var(--accent);flex:none}
+.toast.ghost{bottom:16px;z-index:60;background:none;border:1px dashed var(--anno);color:var(--anno);box-shadow:none;font:var(--fs-1) var(--mono);min-width:0}
+
+/* ---------- 200 % text: every --fs-* doubled ---------- */
+.t200{--fs-1:22px;--fs-2:24px;--fs-3:26px;--fs-4:30px;--fs-5:36px;--fs-6:48px;--fs-7:64px}
+.t200 .nav-lb{font-size:20px}
+.t200 .app{font-size:var(--fs-3)}
+
+/* ---------- summary blocks ---------- */
+.rules{margin:0;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:var(--sp-4) var(--sp-5);font:var(--fs-2)/1.6 var(--mono);color:var(--text);white-space:pre-wrap;max-width:1300px}
+.vt{border-collapse:collapse;max-width:1300px;font-size:var(--fs-3)}
+.vt th{text-align:left;font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim);padding:8px 12px;border-bottom:1px solid var(--line)}
+.vt td{padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top;color:var(--dim)}
+.vt td:first-child{white-space:nowrap}
+.vt .new{color:var(--run);font-weight:500}
+.qs{margin:0;padding-left:20px;display:grid;gap:10px;max-width:130ch;color:var(--dim)}
+.qs b{color:var(--text);font-weight:500}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.ad-qrside .hint{margin-inline:-60px}
+
+</style>
+<div class="doc">
+<header>
+  <h1>SteamHangar on a phone <small>MOBILE-1a · rc21 · design only</small></h1>
+  <p class="lead">Phone fine-tuning on top of the rc20 kit (<code>docs/design/rc20/kit.html</code>, <code>web/css/kit.css</code>). Frames are 390&nbsp;px (iPhone 15) and 400&nbsp;px for the pairing flow, one landscape frame at 844×390. Everything uses the kit's class names and the token values of <code>theme.css</code>; the few new values are listed at the end. Each frame's note names the CSS rule it implies. Sample data is illustrative; copy comes from <code>web/js</code>.</p>
+  <nav class="toc"><a href="#touch">1 · Touch targets</a><a href="#scroll">2 · Scrolling segs with an overflow cue</a><a href="#sheets">3 · Bottom sheets</a><a href="#pair">4 · QR pairing at 400 px</a><a href="#safe">5 · Safe-area insets</a><a href="#text">6 · 200 % text and landscape</a><a href="#css">Proposed CSS</a><a href="#values">New values</a><a href="#questions">Decisions</a></nav>
+</header>
+<section class="kit-s" id="touch"><h2>1 · Touch targets <small>@media (pointer:coarse)</small></h2>
+<p class="note">Every control below 44&nbsp;px gets a 44&nbsp;px hit area on touch screens. The visual grows only to the existing 38&nbsp;px toolbar height (<code>.lib-tools .btn</code>, <code>.sortg</code>), the rest is an invisible extender, so the phone layout keeps its density. Mouse users see no change: the rules sit in <code>@media (pointer:coarse)</code>, the complement of the existing <code>(hover:hover) and (pointer:fine)</code> blocks. Frames 1b–1d show the coarse sizes on real pages with the hit areas tinted.</p>
+<div class="phs">
+
+<figure class="ph" id="f1a">
+  <figcaption class="flabel"><b>1a</b>Specimen · fine pointer vs <code>pointer:coarse</code></figcaption>
+  <div class="board">
+    <div class="sp-row sp-h"><div class="sp-l"></div><div>fine (mouse) · today</div><div>coarse (touch) · proposed</div></div>
+    <div class="sp-row"><div class="sp-l"><code>.seg button</code></div><div class="sp-c hitviz fine"><div class="seg"><button>24 h</button><button aria-pressed="true">7 days</button><button>30 days</button><button>All</button></div><span class="sp-m">26px · hit 26</span></div><div class="sp-c hitviz coarse"><div class="seg"><button>24 h</button><button aria-pressed="true">7 days</button><button>30 days</button><button>All</button></div><span class="sp-m">38px · hit 44</span></div></div><div class="sp-row"><div class="sp-l"><code>.fchip</code></div><div class="sp-c hitviz fine"><div class="row6"><button class="fchip" aria-pressed="true">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button></div><span class="sp-m">30px · hit 30</span></div><div class="sp-c hitviz coarse"><div class="row6"><button class="fchip" aria-pressed="true">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button></div><span class="sp-m">38px · hit 44</span></div></div><div class="sp-row"><div class="sp-l"><code>.ib</code> (i)</div><div class="sp-c hitviz fine"><div class="field"><div class="lh"><label>Rate limit</label><button class="ib">i</button><span class="chip">Default</span></div></div><span class="sp-m">18px · hit 18</span></div><div class="sp-c hitviz coarse"><div class="field"><div class="lh"><label>Rate limit</label><button class="ib">i</button><span class="chip">Default</span></div></div><span class="sp-m">24px · hit 44×44</span></div></div><div class="sp-row"><div class="sp-l"><code>.btn.sm</code></div><div class="sp-c hitviz fine"><div class="row6"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div><span class="sp-m">26px · hit 26</span></div><div class="sp-c hitviz coarse"><div class="row6"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div><span class="sp-m">38px · hit 44</span></div></div><div class="sp-row"><div class="sp-l"><code>.icnact</code><br><small>card quick action</small></div><div class="sp-c hitviz fine"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="sp-m">22px · hit 22</span></div><div class="sp-c hitviz coarse"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="sp-m">24px · hit 44×44</span></div></div>
+    <p class="sp-key"><i class="k-dash"></i> dashed box = 44&nbsp;px reference &nbsp; <i class="k-fill"></i> tinted = actual hit area (the <code>::after</code> extender)</p>
+  </div>
+  <p class="fnote">One extender for all five: <code>position:relative</code> + <code>::after{top:calc(50% - var(--hit)/2);bottom:calc(50% - var(--hit)/2)}</code>; square controls also get the same left/right. Visual height <code>38px</code> (the existing toolbar control height), hit area <code>44px</code>, neighbours never overlap because row gaps stay ≥ 6px.</p>
+</figure>
+
+<figure class="ph" id="f1b">
+  <figcaption class="flabel"><b>1b</b>Settings · (i) and field chips</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse hitviz">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Settings</h1><div class="sub">Vault · SteamVAULT</div></div></div>
+<div class="snav-list scue"><button class="snav-item" aria-current="true">Vault &amp; connection</button><button class="snav-item">Download window</button><button class="snav-item">Disk &amp; cleanup</button><button class="snav-item">Notifications</button></div>
+<div class="ph2"><h2>Vault &amp; connection</h2><p>Name of this vault and the account it is connected to.</p></div>
+<div class="fcard"><h3>Vault</h3><div class="fg">
+  <div class="field"><div class="lh"><label>Vault name</label><button class="ib" aria-label="Info">i</button><span class="chip">Default</span></div><div class="in">SteamVAULT</div></div>
+  <div class="field"><div class="lh"><label>Download window</label><button class="ib" aria-label="Info">i</button><span class="chip ch">Changed here</span></div><div class="in mono">03:00–07:00</div><div class="hint">Takes effect within a minute.</div></div>
+  <div class="field"><div class="lh"><label>Cache root</label><button class="ib" aria-label="Info">i</button><span class="chip env">From env</span></div><div class="in" aria-disabled="true">/vault/cache</div></div>
+</div></div>
+<div class="fcard"><h3>Sweep</h3><div class="fg">
+  <div class="field"><div class="lh"><label>Sweep interval (minutes)</label><button class="ib" aria-label="Info">i</button><span class="chip">Default</span></div><div class="in mono">60</div></div>
+</div></div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.ib</code> 24 px visual, 44×44 hit; the label row grows to 44 px (<code>.field .lh{min-height:var(--hit)}</code>) so two (i) never share a row edge. The section strip scrolls with the same edge cue as 2a.</p>
+</figure>
+
+<figure class="ph" id="f1c">
+  <figcaption class="flabel"><b>1c</b>Library · filter chips and card quick action</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse hitviz">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head lib-head"><div><h1>Library</h1><div class="sub">439 games · 22 cached</div></div>
+<div class="lib-split"><button class="btn pri sm">Check updates</button><button class="btn pri sm split-more" aria-label="More update actions"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button></div></div>
+<div class="lib-bar"><label class="lib-search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span><span class="ph-text">Search your library</span></label><div class="lib-chips scue" data-scroll="start"><button class="fchip" aria-pressed="true">All <b>439</b></button><button class="fchip">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button><button class="fchip">Installed, not cached <b>3</b></button><button class="fchip">Downloading <b>1</b></button><button class="fchip">Failed <b>1</b></button><button class="fchip">Updates <b>1</b></button></div><div class="lib-tools">
+  <div class="sortg"><span class="sel">Name</span><button aria-label="Sort direction"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 4v16m0 0-4-4m4 4 4-4M16 20V4m0 0-4 4m4-4 4 4"/></svg></button></div>
+  <div class="segi"><button aria-pressed="true" aria-label="Grid"><svg width="16" height="16" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></button><button aria-label="List"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button></div>
+  <button class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filters</button>
+</div></div>
+<div class="lib-stat"><span>Showing 439 of 439</span><span>22 cached · 1 update ready</span></div>
+<div class="grid"><div class="card"><div class="cap p0" style="--h1:28;--h2:210"><div class="art"></div><div class="scrim"></div><span class="sz">24.8 GB</span><span class="name">Satisfactory</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact" aria-label="Update now"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p1" style="--h1:150;--h2:260"><div class="art"></div><div class="scrim"></div><span class="sz">10.3 GB</span><span class="name">The Riftbreaker</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p2" style="--h1:200;--h2:280"><div class="art"></div><div class="scrim"></div><span class="sz">86.6 GB</span><span class="name">Enshrouded</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--run)"></span><span class="state">Downloading 62 %</span></div><span class="instbadge">Not installed</span></div></div><div class="card"><div class="cap p3" style="--h1:20;--h2:340"><div class="art"></div><div class="scrim"></div><span class="sz">0.3 GB</span><span class="name">Factorio</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on 2 PCs</span></div></div></div></div>
+      <nav class="nav"><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.fchip</code> 38 px, <code>.icnact</code> 24 px with a 44×44 hit that overlaps the card's own tap area: the action wins (it is on top), the card opens everywhere else. <code>.segi</code> / <code>.sortg</code> buttons go to 38 px.</p>
+</figure>
+
+<figure class="ph" id="f1d">
+  <figcaption class="flabel"><b>1d</b>Clients · range seg and <code>.btn.sm</code></figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse hitviz">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Clients</h1><div class="sub">2 devices · 1 loading now</div></div>
+<button class="btn pri sm"><span class="btn-ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Add a device</button></div><div class="tiles">
+<div class="tile"><div class="k">Connected</div><div class="v">2<small>of 2</small></div><div class="n">1 loading now</div></div>
+<div class="tile"><div class="k">Loaded</div><div class="v">529<small>GB</small></div><div class="n">in 7 days</div></div>
+</div><div class="sechd"><span class="sec">Devices</span><div class="seg"><button>24 h</button><button aria-pressed="true">7 days</button><button>30 days</button><button>All</button></div></div><div class="ccard warn">
+  <div class="z">
+    <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><div><div class="nm">Desk PC</div><div class="meta">vault-agent · 192.168.1.20</div></div></div>
+    <div class="pills"><span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span><span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span></div>
+    <div class="upd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16"/></svg><div><b>Agent update available</b><span>Agent <code>0.1.0-rc18.1</code> · server <code>0.1.0-rc19.3</code>.</span></div><button class="btn sm">Show update command</button></div>
+  </div>
+  <div class="z">
+    <div class="now idle">Loading nothing right now</div>
+    <div class="stats">
+      <div><div class="k">Installed</div><div class="v">24<small>games</small></div></div>
+      <div><div class="k">Loaded</div><div class="v">38.2<small>GB</small></div></div>
+      <div><div class="k">Hit rate</div><div class="v">98<small>%</small></div><div class="meter"><i style="width:98%"></i></div></div>
+    </div>
+  </div>
+  <div class="z"><span class="sec">Recently loaded</span>
+    <div class="pills"><span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip">The Riftbreaker<b>10.3 GB</b></span><span class="gchip more">+3 more</span></div></div>
+  <div class="cf"><span>Last active 8 min ago</span><div class="acts"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div></div>
+</div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.seg button{min-height:38px}</code>: with the seg's 3 px padding the hit area fills the whole 44 px pill. <code>.btn.sm</code> 38 px; the card footer buttons already split the width at 460 px.</p>
+</figure>
+</div></section><section class="kit-s" id="scroll"><h2>2 · Scrolling segs with an overflow cue <small>mask-image edge fade</small></h2>
+<p class="note">A seg never wraps (kit rule), so on a phone the seven Downloads ranges and the seven Library chips scroll sideways. Today nothing says so. Proposal: a 32&nbsp;px (<code>--sp-7</code>) edge fade on the side that has more, and the row is laid out so the last visible item is cut, never flush with the edge. The pressed item is scrolled into view on load (<code>scrollIntoView({inline:"nearest"})</code>).</p>
+<div class="phs">
+
+<figure class="ph" id="f2a">
+  <figcaption class="flabel"><b>2a</b>Downloads · range seg at the start</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><button class="btn sm">Pause all</button></div>
+<div class="hero">
+  <div class="hh"><span class="sec">Throughput</span><div class="seg scue"><button aria-pressed="true">Live</button><button>1 h</button><button>6 h</button><button>24 h</button><button>7 days</button><button>30 days</button><button>All</button></div></div>
+  <div class="live"><div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div></div><div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><path class="area net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 79 L580 78 L530 53 L470 50 L420 72 L360 71 L330 36 L300 43 L230 69 L170 71 L120 89 L60 88 L0 90 Z"/><path class="area srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79 L600 96 L0 96 Z"/><path class="line net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72"/><path class="line srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79"/></svg><div class="ax"><span>55 min ago</span><span>now</span></div><div class="glegend"><span class="srv"><i></i>Served from cache</span><span class="net"><i></i>From the internet</span></div></div></div>
+  <div class="tiles"><div class="tile"><div class="k">Served</div><div class="v">48.1<small>GB</small></div></div><div class="tile"><div class="k">Internet</div><div class="v">6<small>MB</small></div></div></div>
+</div>
+<div class="blk"><div class="sechd"><span class="sec">Active</span><span class="badge">1</span></div>
+<div class="job"><div class="t"><div><div class="nm">Driftwood Signal</div><div class="meta">job #900001</div></div><span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span></div><div class="bar"><i style="width:62%"></i></div><div class="m2"><span>62 % · 8.8 of 14.2 GB</span><span>31.5 MB/s</span></div><div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost danger">Stop</button></div></div></div>
+<div class="blk dl-history"><div class="sechd"><span class="sec">History</span><div class="hacts"><div class="seg"><button>24 h</button><button>7 days</button><button aria-pressed="true">All</button></div><button class="btn sm ghost">Delete…</button></div></div>
+<div class="rowlist">
+<button class="hrow"><span class="sic " style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><span class="hinfo"><span class="nm">HELLDIVERS™ 2</span><span class="meta">job #189 · Failed · 16.10.2026, 18:28</span></span><span class="chev">›</span></button>
+<button class="hrow"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><span class="hinfo"><span class="nm">Sir, We Have an Orc Problem</span><span class="meta">job #188 · Done · 16.10.2026, 17:21</span></span><span class="chev">›</span></button>
+</div></div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn" aria-current="page"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.seg.scue</code>: right fade only (<code>mask-image:linear-gradient(to right,#000 calc(100% - var(--sp-7)),transparent)</code>). The seg takes the full row (<code>.hero .hh .seg{flex:1 1 100%}</code>) so the last visible range is cut.</p>
+</figure>
+
+<figure class="ph" id="f2b">
+  <figcaption class="flabel"><b>2b</b>Library · chips scrolled to the middle</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head lib-head"><div><h1>Library</h1><div class="sub">439 games · 22 cached</div></div>
+<div class="lib-split"><button class="btn pri sm">Check updates</button><button class="btn pri sm split-more" aria-label="More update actions"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button></div></div>
+<div class="lib-bar"><label class="lib-search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span><span class="ph-text">Search your library</span></label><div class="lib-chips scue mid" data-scroll="mid"><button class="fchip">All <b>439</b></button><button class="fchip">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button><button class="fchip">Installed, not cached <b>3</b></button><button class="fchip" aria-pressed="true">Downloading <b>1</b></button><button class="fchip">Failed <b>1</b></button><button class="fchip">Updates <b>1</b></button></div><div class="lib-tools">
+  <div class="sortg"><span class="sel">Name</span><button aria-label="Sort direction"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 4v16m0 0-4-4m4 4 4-4M16 20V4m0 0-4 4m4-4 4 4"/></svg></button></div>
+  <div class="segi"><button aria-pressed="true" aria-label="Grid"><svg width="16" height="16" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></button><button aria-label="List"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button></div>
+  <button class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filters</button>
+</div></div>
+<div class="lib-stat"><span>Showing 439 of 439</span><span>22 cached · 1 update ready</span></div>
+<div class="grid"><div class="card"><div class="cap p0" style="--h1:28;--h2:210"><div class="art"></div><div class="scrim"></div><span class="sz">24.8 GB</span><span class="name">Satisfactory</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact" aria-label="Update now"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p1" style="--h1:150;--h2:260"><div class="art"></div><div class="scrim"></div><span class="sz">10.3 GB</span><span class="name">The Riftbreaker</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p2" style="--h1:200;--h2:280"><div class="art"></div><div class="scrim"></div><span class="sz">86.6 GB</span><span class="name">Enshrouded</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--run)"></span><span class="state">Downloading 62 %</span></div><span class="instbadge">Not installed</span></div></div><div class="card"><div class="cap p3" style="--h1:20;--h2:340"><div class="art"></div><div class="scrim"></div><span class="sz">0.3 GB</span><span class="name">Factorio</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on 2 PCs</span></div></div></div></div>
+      <nav class="nav"><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">Both edges fade while the row is neither at the start nor at the end. Same class on <code>.lib-chips</code>, <code>.snav-list</code> and the detail-sheet tabs (3b).</p>
+</figure>
+
+<figure class="ph" id="f2c">
+  <figcaption class="flabel"><b>2c</b>Downloads · range seg at the end</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><button class="btn sm">Pause all</button></div>
+<div class="hero">
+  <div class="hh"><span class="sec">Throughput</span><div class="seg scue end"><button>Live</button><button>1 h</button><button>6 h</button><button>24 h</button><button>7 days</button><button aria-pressed="true">30 days</button><button>All</button></div></div>
+  <div class="live"><div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div></div><div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><path class="area net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 79 L580 78 L530 53 L470 50 L420 72 L360 71 L330 36 L300 43 L230 69 L170 71 L120 89 L60 88 L0 90 Z"/><path class="area srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79 L600 96 L0 96 Z"/><path class="line net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72"/><path class="line srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79"/></svg><div class="ax"><span>55 min ago</span><span>now</span></div><div class="glegend"><span class="srv"><i></i>Served from cache</span><span class="net"><i></i>From the internet</span></div></div></div>
+  <div class="tiles"><div class="tile"><div class="k">Served</div><div class="v">48.1<small>GB</small></div></div><div class="tile"><div class="k">Internet</div><div class="v">6<small>MB</small></div></div></div>
+</div>
+<div class="blk"><div class="sechd"><span class="sec">Active</span><span class="badge">1</span></div>
+<div class="job"><div class="t"><div><div class="nm">Driftwood Signal</div><div class="meta">job #900001</div></div><span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span></div><div class="bar"><i style="width:62%"></i></div><div class="m2"><span>62 % · 8.8 of 14.2 GB</span><span>31.5 MB/s</span></div><div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost danger">Stop</button></div></div></div>
+<div class="blk dl-history"><div class="sechd"><span class="sec">History</span><div class="hacts"><div class="seg"><button>24 h</button><button>7 days</button><button aria-pressed="true">All</button></div><button class="btn sm ghost">Delete…</button></div></div>
+<div class="rowlist">
+<button class="hrow"><span class="sic " style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><span class="hinfo"><span class="nm">HELLDIVERS™ 2</span><span class="meta">job #189 · Failed · 16.10.2026, 18:28</span></span><span class="chev">›</span></button>
+<button class="hrow"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><span class="hinfo"><span class="nm">Sir, We Have an Orc Problem</span><span class="meta">job #188 · Done · 16.10.2026, 17:21</span></span><span class="chev">›</span></button>
+</div></div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn" aria-current="page"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">At the end only the left edge fades. Which edge fades is set by one shared scroll listener toggling <code>.at-start</code>/<code>.at-end</code> (decision Q2).</p>
+</figure>
+</div></section><section class="kit-s" id="sheets"><h2>3 · Bottom sheets <small>.sheet on a phone</small></h2>
+<p class="note">Below <code>--w-sheet</code> every sheet is a bottom sheet: full width, top radius <code>--r-xl</code>, grab handle, max height 88&nbsp;% of the dynamic viewport. Header and tabs stay put, only the body scrolls, the action row sits on the safe area. The centred <code>.dialog</code> confirms become bottom sheets too, with the safe choice nearest to the thumb.</p>
+<div class="phs">
+
+<figure class="ph" id="f3a">
+  <figcaption class="flabel"><b>3a</b>Library · game detail sheet, just opened</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head lib-head"><div><h1>Library</h1><div class="sub">439 games · 22 cached</div></div>
+<div class="lib-split"><button class="btn pri sm">Check updates</button><button class="btn pri sm split-more" aria-label="More update actions"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button></div></div>
+<div class="lib-bar"><label class="lib-search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span><span class="ph-text">Search your library</span></label><div class="lib-chips scue" data-scroll="start"><button class="fchip" aria-pressed="true">All <b>439</b></button><button class="fchip">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button><button class="fchip">Installed, not cached <b>3</b></button><button class="fchip">Downloading <b>1</b></button><button class="fchip">Failed <b>1</b></button><button class="fchip">Updates <b>1</b></button></div><div class="lib-tools">
+  <div class="sortg"><span class="sel">Name</span><button aria-label="Sort direction"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 4v16m0 0-4-4m4 4 4-4M16 20V4m0 0-4 4m4-4 4 4"/></svg></button></div>
+  <div class="segi"><button aria-pressed="true" aria-label="Grid"><svg width="16" height="16" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></button><button aria-label="List"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button></div>
+  <button class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filters</button>
+</div></div>
+<div class="lib-stat"><span>Showing 439 of 439</span><span>22 cached · 1 update ready</span></div>
+<div class="grid"><div class="card"><div class="cap p0" style="--h1:28;--h2:210"><div class="art"></div><div class="scrim"></div><span class="sz">24.8 GB</span><span class="name">Satisfactory</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact" aria-label="Update now"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p1" style="--h1:150;--h2:260"><div class="art"></div><div class="scrim"></div><span class="sz">10.3 GB</span><span class="name">The Riftbreaker</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p2" style="--h1:200;--h2:280"><div class="art"></div><div class="scrim"></div><span class="sz">86.6 GB</span><span class="name">Enshrouded</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--run)"></span><span class="state">Downloading 62 %</span></div><span class="instbadge">Not installed</span></div></div><div class="card"><div class="cap p3" style="--h1:20;--h2:340"><div class="art"></div><div class="scrim"></div><span class="sz">0.3 GB</span><span class="name">Factorio</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on 2 PCs</span></div></div></div></div>
+      <nav class="nav"><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="scrim"></div><div class="sheet gd"><div class="grab"></div><button class="gd-x" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="sbody"><div class="gd-hero" style="--h1:28;--h2:210"></div><div class="gd-head"><div class="gd-mini" style="--h1:28;--h2:210"></div><div class="gd-id"><h2>Satisfactory</h2><div class="gd-sub"><span class="appid">App 526870</span><span class="pill acc"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Update ready</span></div></div></div><div class="stick"><div class="gd-tabs scue fits"><button class="tab" aria-selected="true">Overview</button><button class="tab">Depots</button><button class="tab">Maintenance</button></div></div><div class="gd-body"><div class="gd-facts">
+<div class="gd-fact"><div class="k">Size</div><div class="v">24.8 GB</div></div>
+<div class="gd-fact"><div class="k">Last downloaded</div><div class="v">16.10.2026, 18:49</div></div>
+<div class="gd-fact"><div class="k">Confirmed current</div><div class="v">Not yet</div></div>
+<div class="gd-fact"><div class="k">Cache</div><div class="v">Complete</div></div>
+</div><div class="blk"><span class="sec">Installed on</span>
+<div class="irow2"><b>Desk PC</b><span>build 19 702 118 · seen 8 min ago</span></div>
+<div class="irow2"><b>Living room PC</b><span>build 19 702 118 · seen 2 days ago</span></div></div><div class="blk"><span class="sec">About</span><p class="hint">Satisfactory is a first-person open-world factory building game with a dash of exploration and combat.</p><div class="pills"><span class="gchip">Coffee Stain Studios</span><span class="gchip">2024</span><span class="gchip">Simulation</span></div></div></div></div><div class="sfoot"><button class="btn">Verify</button><button class="btn pri grow">Update now</button></div></div>
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.sheet.gd</code>: hero, cover and title as in LIBRARY-2; the tabs row is <code>position:sticky;top:0</code> inside <code>.sheet .body</code>. Actions move from the header to a sticky footer (<code>.sfoot</code>) above the home indicator.</p>
+</figure>
+
+<figure class="ph" id="f3b">
+  <figcaption class="flabel"><b>3b</b>Library · detail sheet, scrolled</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head lib-head"><div><h1>Library</h1><div class="sub">439 games · 22 cached</div></div>
+<div class="lib-split"><button class="btn pri sm">Check updates</button><button class="btn pri sm split-more" aria-label="More update actions"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button></div></div>
+<div class="lib-bar"><label class="lib-search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span><span class="ph-text">Search your library</span></label><div class="lib-chips scue" data-scroll="start"><button class="fchip" aria-pressed="true">All <b>439</b></button><button class="fchip">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button><button class="fchip">Installed, not cached <b>3</b></button><button class="fchip">Downloading <b>1</b></button><button class="fchip">Failed <b>1</b></button><button class="fchip">Updates <b>1</b></button></div><div class="lib-tools">
+  <div class="sortg"><span class="sel">Name</span><button aria-label="Sort direction"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 4v16m0 0-4-4m4 4 4-4M16 20V4m0 0-4 4m4-4 4 4"/></svg></button></div>
+  <div class="segi"><button aria-pressed="true" aria-label="Grid"><svg width="16" height="16" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></button><button aria-label="List"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button></div>
+  <button class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filters</button>
+</div></div>
+<div class="lib-stat"><span>Showing 439 of 439</span><span>22 cached · 1 update ready</span></div>
+<div class="grid"><div class="card"><div class="cap p0" style="--h1:28;--h2:210"><div class="art"></div><div class="scrim"></div><span class="sz">24.8 GB</span><span class="name">Satisfactory</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact" aria-label="Update now"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p1" style="--h1:150;--h2:260"><div class="art"></div><div class="scrim"></div><span class="sz">10.3 GB</span><span class="name">The Riftbreaker</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p2" style="--h1:200;--h2:280"><div class="art"></div><div class="scrim"></div><span class="sz">86.6 GB</span><span class="name">Enshrouded</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--run)"></span><span class="state">Downloading 62 %</span></div><span class="instbadge">Not installed</span></div></div><div class="card"><div class="cap p3" style="--h1:20;--h2:340"><div class="art"></div><div class="scrim"></div><span class="sz">0.3 GB</span><span class="name">Factorio</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on 2 PCs</span></div></div></div></div>
+      <nav class="nav"><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="scrim"></div><div class="sheet gd tall"><div class="grab"></div><div class="stick compact"><div class="gd-mini sm" style="--h1:28;--h2:210"></div><div class="gd-id"><h2>Satisfactory</h2><div class="gd-sub"><span class="appid">App 526870</span><span class="pill acc"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Update ready</span></div></div><button class="gd-x static" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div><div class="stick2"><div class="gd-tabs scue fits"><button class="tab" aria-selected="true">Overview</button><button class="tab">Depots</button><button class="tab">Maintenance</button></div></div><div class="sbody"><div class="gd-body"><div class="gd-facts">
+<div class="gd-fact"><div class="k">Size</div><div class="v">24.8 GB</div></div>
+<div class="gd-fact"><div class="k">Last downloaded</div><div class="v">16.10.2026, 18:49</div></div>
+<div class="gd-fact"><div class="k">Confirmed current</div><div class="v">Not yet</div></div>
+<div class="gd-fact"><div class="k">Cache</div><div class="v">Complete</div></div>
+</div><div class="blk"><span class="sec">Installed on</span>
+<div class="irow2"><b>Desk PC</b><span>build 19 702 118 · seen 8 min ago</span></div>
+<div class="irow2"><b>Living room PC</b><span>build 19 702 118 · seen 2 days ago</span></div></div><div class="blk"><span class="sec">About</span><p class="hint">Satisfactory is a first-person open-world factory building game with a dash of exploration and combat.</p><div class="pills"><span class="gchip">Coffee Stain Studios</span><span class="gchip">2024</span><span class="gchip">Simulation</span></div></div><div class="blk"><span class="sec">Expected size</span><p class="hint">An expectation from the public Steam branch, not a measurement.</p></div></div></div><div class="sfoot"><button class="btn">Verify</button><button class="btn pri grow">Update now</button></div></div>
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">After the hero scrolls away a compact header (40 px cover, title, pill, X) sticks above the tabs; the tab strip gets the 2b cue only when it overflows (<code>.fits</code> drops the mask; at 200 % text it does). Grab handle hit area 44 px tall.</p>
+</figure>
+
+<figure class="ph" id="f3c">
+  <figcaption class="flabel"><b>3c</b>Downloads · &quot;Delete history?&quot; as a bottom sheet</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><button class="btn sm">Pause all</button></div>
+<div class="hero">
+  <div class="hh"><span class="sec">Throughput</span><div class="seg scue"><button aria-pressed="true">Live</button><button>1 h</button><button>6 h</button><button>24 h</button><button>7 days</button><button>30 days</button><button>All</button></div></div>
+  <div class="live"><div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div></div><div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><path class="area net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 79 L580 78 L530 53 L470 50 L420 72 L360 71 L330 36 L300 43 L230 69 L170 71 L120 89 L60 88 L0 90 Z"/><path class="area srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79 L600 96 L0 96 Z"/><path class="line net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72"/><path class="line srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79"/></svg><div class="ax"><span>55 min ago</span><span>now</span></div><div class="glegend"><span class="srv"><i></i>Served from cache</span><span class="net"><i></i>From the internet</span></div></div></div>
+  <div class="tiles"><div class="tile"><div class="k">Served</div><div class="v">48.1<small>GB</small></div></div><div class="tile"><div class="k">Internet</div><div class="v">6<small>MB</small></div></div></div>
+</div>
+<div class="blk"><div class="sechd"><span class="sec">Active</span><span class="badge">1</span></div>
+<div class="job"><div class="t"><div><div class="nm">Driftwood Signal</div><div class="meta">job #900001</div></div><span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span></div><div class="bar"><i style="width:62%"></i></div><div class="m2"><span>62 % · 8.8 of 14.2 GB</span><span>31.5 MB/s</span></div><div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost danger">Stop</button></div></div></div>
+<div class="blk dl-history"><div class="sechd"><span class="sec">History</span><div class="hacts"><div class="seg"><button>24 h</button><button>7 days</button><button aria-pressed="true">All</button></div><button class="btn sm ghost">Delete…</button></div></div>
+<div class="rowlist">
+<button class="hrow"><span class="sic " style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><span class="hinfo"><span class="nm">HELLDIVERS™ 2</span><span class="meta">job #189 · Failed · 16.10.2026, 18:28</span></span><span class="chev">›</span></button>
+<button class="hrow"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><span class="hinfo"><span class="nm">Sir, We Have an Orc Problem</span><span class="meta">job #188 · Done · 16.10.2026, 17:21</span></span><span class="chev">›</span></button>
+</div></div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn" aria-current="page"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="scrim"></div><div class="sheet confirm"><div class="grab"></div><div class="sbody"><h3 class="sh-t">Delete history?</h3>
+<p class="sh-p">Deletes finished downloads (done, failed, cancelled) with their logs, and the traffic statistics behind the speed figures, the graph and the numbers on the Clients page.</p>
+<fieldset class="hist-scope"><legend class="sec">What to delete</legend>
+<label class="srow on"><span class="radio on"></span><span class="grow"><span class="ttl">Older than 30 days</span><span class="desc">Finished downloads and traffic statistics from before the last 30 days.</span></span></label>
+<label class="srow"><span class="radio"></span><span class="grow"><span class="ttl">Everything</span><span class="desc">All finished downloads and all traffic statistics. Speed, graph and client figures start again from zero.</span></span></label></fieldset>
+<p class="sh-p">Kept: cached games, running, queued and paused downloads, PCs and client names. This cannot be undone.</p></div><div class="sfoot"><button class="btn danger wide">Delete older than 30 days</button><button class="btn wide">Keep</button></div></div>
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.dialog</code> → <code>.sheet.confirm</code> below 600 px: same text and radios, buttons full width and stacked, <b>Keep</b> last (nearest the thumb, initial focus). Swipe down = Keep.</p>
+</figure>
+
+<figure class="ph" id="f3d">
+  <figcaption class="flabel"><b>3d</b>Downloads · expanded History row as a sheet</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><button class="btn sm">Pause all</button></div>
+<div class="hero">
+  <div class="hh"><span class="sec">Throughput</span><div class="seg scue"><button aria-pressed="true">Live</button><button>1 h</button><button>6 h</button><button>24 h</button><button>7 days</button><button>30 days</button><button>All</button></div></div>
+  <div class="live"><div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div></div><div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><path class="area net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 79 L580 78 L530 53 L470 50 L420 72 L360 71 L330 36 L300 43 L230 69 L170 71 L120 89 L60 88 L0 90 Z"/><path class="area srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79 L600 96 L0 96 Z"/><path class="line net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72"/><path class="line srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79"/></svg><div class="ax"><span>55 min ago</span><span>now</span></div><div class="glegend"><span class="srv"><i></i>Served from cache</span><span class="net"><i></i>From the internet</span></div></div></div>
+  <div class="tiles"><div class="tile"><div class="k">Served</div><div class="v">48.1<small>GB</small></div></div><div class="tile"><div class="k">Internet</div><div class="v">6<small>MB</small></div></div></div>
+</div>
+<div class="blk"><div class="sechd"><span class="sec">Active</span><span class="badge">1</span></div>
+<div class="job"><div class="t"><div><div class="nm">Driftwood Signal</div><div class="meta">job #900001</div></div><span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span></div><div class="bar"><i style="width:62%"></i></div><div class="m2"><span>62 % · 8.8 of 14.2 GB</span><span>31.5 MB/s</span></div><div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost danger">Stop</button></div></div></div>
+<div class="blk dl-history"><div class="sechd"><span class="sec">History</span><div class="hacts"><div class="seg"><button>24 h</button><button>7 days</button><button aria-pressed="true">All</button></div><button class="btn sm ghost">Delete…</button></div></div>
+<div class="rowlist">
+<button class="hrow"><span class="sic " style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><span class="hinfo"><span class="nm">HELLDIVERS™ 2</span><span class="meta">job #189 · Failed · 16.10.2026, 18:28</span></span><span class="chev">›</span></button>
+<button class="hrow"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><span class="hinfo"><span class="nm">Sir, We Have an Orc Problem</span><span class="meta">job #188 · Done · 16.10.2026, 17:21</span></span><span class="chev">›</span></button>
+</div></div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn" aria-current="page"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="scrim"></div><div class="sheet hist"><div class="grab"></div><div class="sbody"><div class="hs-head"><span class="sic " style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><div><div class="nm">HELLDIVERS™ 2</div><div class="meta">job #189 · Failed · 16.10.2026, 18:28</div></div></div>
+<div class="hpanel"><div class="failhint"><span class="failhint-title">Steam login missing</span>
+<p>SteamPrefill on the server has no Steam session yet. It needs a one-time interactive login on the server. vault-api never sees or stores your Steam credentials.</p>
+<p>In the folder with SteamHangar's compose.yaml (deploy/ by default), run:</p>
+<code class="cmd">docker compose exec -it vault-runner /opt/steamprefill/SteamPrefill select-apps</code>
+<p>Enter your account name, password and Steam Guard code, then exit the app selector.</p>
+<p>Then press Retry.</p></div>
+<details open><summary>Show the full SteamPrefill output</summary><pre class="logbox">[18:28:02] Loading apps…
+[18:28:03] Error: not logged in.
+[18:28:03] Run select-apps once to log in.</pre></details></div></div><div class="sfoot"><button class="btn pri grow">Retry</button></div></div>
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">On a phone the <code>.hpanel</code> opens in a sheet instead of under the row: the row's icon, name and meta become the sheet header; the log box keeps <code>max-height:160px</code> and scrolls; Retry sits in the footer.</p>
+</figure>
+</div></section><section class="kit-s" id="pair"><h2>4 · QR pairing at 400 px <small>Clients → Add a device</small></h2>
+<p class="note">The drawer from ADD-DEVICE-2 as a full-height bottom sheet at 400&nbsp;px. The QR stacks above its buttons (the existing <code>@container addev (max-width:420px)</code> rule) and grows to 200&nbsp;px so a second phone can scan it from arm's length. Taps marked <span class="tapkey"></span>.</p>
+<div class="phs">
+
+<figure class="ph" id="f4a">
+  <figcaption class="flabel"><b>4a</b>Clients · tap &quot;Add a device&quot;</figcaption>
+  <div class="dev" style="--w:400px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Clients</h1><div class="sub">2 devices · 1 loading now</div></div>
+<button class="btn pri sm tapped"><span class="btn-ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Add a device</button></div><div class="tiles">
+<div class="tile"><div class="k">Connected</div><div class="v">2<small>of 2</small></div><div class="n">1 loading now</div></div>
+<div class="tile"><div class="k">Loaded</div><div class="v">529<small>GB</small></div><div class="n">in 7 days</div></div>
+</div><div class="sechd"><span class="sec">Devices</span><div class="seg"><button>24 h</button><button aria-pressed="true">7 days</button><button>30 days</button><button>All</button></div></div><div class="ccard warn">
+  <div class="z">
+    <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><div><div class="nm">Desk PC</div><div class="meta">vault-agent · 192.168.1.20</div></div></div>
+    <div class="pills"><span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span><span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span></div>
+    <div class="upd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16"/></svg><div><b>Agent update available</b><span>Agent <code>0.1.0-rc18.1</code> · server <code>0.1.0-rc19.3</code>.</span></div><button class="btn sm">Show update command</button></div>
+  </div>
+  <div class="z">
+    <div class="now idle">Loading nothing right now</div>
+    <div class="stats">
+      <div><div class="k">Installed</div><div class="v">24<small>games</small></div></div>
+      <div><div class="k">Loaded</div><div class="v">38.2<small>GB</small></div></div>
+      <div><div class="k">Hit rate</div><div class="v">98<small>%</small></div><div class="meter"><i style="width:98%"></i></div></div>
+    </div>
+  </div>
+  <div class="z"><span class="sec">Recently loaded</span>
+    <div class="pills"><span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip">The Riftbreaker<b>10.3 GB</b></span><span class="gchip more">+3 more</span></div></div>
+  <div class="cf"><span>Last active 8 min ago</span><div class="acts"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div></div>
+</div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">Unchanged page; the button is <code>.btn.pri.sm</code> and gets the coarse 38/44 sizes from section 1.</p>
+</figure>
+
+<figure class="ph" id="f4b">
+  <figcaption class="flabel"><b>4b</b>Add a device · Phone tab on a phone, code hidden</figcaption>
+  <div class="dev" style="--w:400px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Clients</h1><div class="sub">2 devices · 1 loading now</div></div>
+<button class="btn pri sm"><span class="btn-ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Add a device</button></div><div class="tiles">
+<div class="tile"><div class="k">Connected</div><div class="v">2<small>of 2</small></div><div class="n">1 loading now</div></div>
+<div class="tile"><div class="k">Loaded</div><div class="v">529<small>GB</small></div><div class="n">in 7 days</div></div>
+</div><div class="sechd"><span class="sec">Devices</span><div class="seg"><button>24 h</button><button aria-pressed="true">7 days</button><button>30 days</button><button>All</button></div></div><div class="ccard warn">
+  <div class="z">
+    <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><div><div class="nm">Desk PC</div><div class="meta">vault-agent · 192.168.1.20</div></div></div>
+    <div class="pills"><span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span><span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span></div>
+    <div class="upd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16"/></svg><div><b>Agent update available</b><span>Agent <code>0.1.0-rc18.1</code> · server <code>0.1.0-rc19.3</code>.</span></div><button class="btn sm">Show update command</button></div>
+  </div>
+  <div class="z">
+    <div class="now idle">Loading nothing right now</div>
+    <div class="stats">
+      <div><div class="k">Installed</div><div class="v">24<small>games</small></div></div>
+      <div><div class="k">Loaded</div><div class="v">38.2<small>GB</small></div></div>
+      <div><div class="k">Hit rate</div><div class="v">98<small>%</small></div><div class="meter"><i style="width:98%"></i></div></div>
+    </div>
+  </div>
+  <div class="z"><span class="sec">Recently loaded</span>
+    <div class="pills"><span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip">The Riftbreaker<b>10.3 GB</b></span><span class="gchip more">+3 more</span></div></div>
+  <div class="cf"><span>Last active 8 min ago</span><div class="acts"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div></div>
+</div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="scrim"></div><div class="sheet ad tall"><div class="grab"></div><div class="ad-head stick"><h2>Add a device</h2><p class="hint ad-intro">Set up a phone, another browser or a PC with this hangar's address and API key, without typing them.</p><div class="ad-tabs"><button class="tab" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>Phone</button><button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>Browser</button><button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Windows</button><button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6l5 5-5 5M12 18h8"/></svg>Linux / SteamOS</button></div></div><div class="sbody"><div class="ad-scroll" style="margin-top:-190px"><div class="ad-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l10 18H2zM12 10v5M12 18h.01"/></svg><p>Anyone who sees this can control your hangar. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync.</p></div><ol class="steps"><li><span class="n">1</span><div><h3>Install the app</h3><div class="ad-dl"><a class="btn pri">Download app</a><p class="hint">Android app · 38.4 MB</p></div></div></li><li><span class="n">2</span><div><h3>Pair the app</h3><p class="ad-desc">Open the app and scan the pairing code. The app then knows this hangar's address and API key.</p><a class="btn pri wide ad-open-here">Open on this phone</a></div></li></ol><div class="ad-other"><h3 class="sec">Pair another phone</h3><div class="ad-qrbox"><div class="ad-qrmask"><svg class="qr" viewBox="-2 -2 33 33" shape-rendering="crispEdges"><rect x="-2" y="-2" width="33" height="33" fill="#fff"/><path d="M0 0h7v1h-7zM8 0h2v1h-2zM11 0h1v1h-1zM13 0h2v1h-2zM16 0h5v1h-5zM22 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM9 1h2v1h-2zM14 1h1v1h-1zM16 1h1v1h-1zM18 1h3v1h-3zM22 1h1v1h-1zM28 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h1v1h-1zM10 2h1v1h-1zM13 2h1v1h-1zM15 2h3v1h-3zM19 2h2v1h-2zM22 2h1v1h-1zM24 2h3v1h-3zM28 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM9 3h2v1h-2zM13 3h1v1h-1zM18 3h1v1h-1zM20 3h1v1h-1zM22 3h1v1h-1zM24 3h3v1h-3zM28 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM8 4h1v1h-1zM10 4h1v1h-1zM12 4h1v1h-1zM17 4h1v1h-1zM22 4h1v1h-1zM24 4h3v1h-3zM28 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h1v1h-1zM11 5h1v1h-1zM13 5h1v1h-1zM18 5h2v1h-2zM22 5h1v1h-1zM28 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h7v1h-7zM8 7h5v1h-5zM14 7h3v1h-3zM18 7h2v1h-2zM3 8h4v1h-4zM9 8h4v1h-4zM15 8h4v1h-4zM25 8h1v1h-1zM1 9h3v1h-3zM5 9h1v1h-1zM7 9h10v1h-10zM19 9h5v1h-5zM26 9h1v1h-1zM28 9h1v1h-1zM0 10h3v1h-3zM4 10h3v1h-3zM9 10h1v1h-1zM11 10h1v1h-1zM16 10h3v1h-3zM22 10h2v1h-2zM1 11h1v1h-1zM3 11h3v1h-3zM7 11h2v1h-2zM11 11h1v1h-1zM15 11h5v1h-5zM23 11h1v1h-1zM26 11h1v1h-1zM2 12h2v1h-2zM5 12h2v1h-2zM9 12h2v1h-2zM13 12h3v1h-3zM18 12h1v1h-1zM22 12h1v1h-1zM24 12h2v1h-2zM1 13h1v1h-1zM4 13h2v1h-2zM7 13h2v1h-2zM10 13h3v1h-3zM14 13h2v1h-2zM18 13h1v1h-1zM23 13h4v1h-4zM28 13h1v1h-1zM0 14h1v1h-1zM3 14h1v1h-1zM6 14h1v1h-1zM8 14h1v1h-1zM10 14h2v1h-2zM17 14h1v1h-1zM22 14h1v1h-1zM24 14h1v1h-1zM0 15h1v1h-1zM4 15h2v1h-2zM7 15h4v1h-4zM14 15h1v1h-1zM17 15h1v1h-1zM20 15h1v1h-1zM22 15h1v1h-1zM26 15h2v1h-2zM0 16h3v1h-3zM4 16h1v1h-1zM6 16h4v1h-4zM12 16h1v1h-1zM16 16h3v1h-3zM20 16h3v1h-3zM25 16h2v1h-2zM1 17h2v1h-2zM4 17h2v1h-2zM10 17h1v1h-1zM12 17h1v1h-1zM14 17h2v1h-2zM18 17h2v1h-2zM21 17h7v1h-7zM0 18h1v1h-1zM2 18h6v1h-6zM10 18h2v1h-2zM13 18h1v1h-1zM15 18h1v1h-1zM18 18h6v1h-6zM27 18h1v1h-1zM2 19h4v1h-4zM7 19h1v1h-1zM9 19h3v1h-3zM15 19h4v1h-4zM22 19h5v1h-5zM1 20h1v1h-1zM3 20h6v1h-6zM10 20h1v1h-1zM12 20h7v1h-7zM20 20h1v1h-1zM22 20h3v1h-3zM10 21h2v1h-2zM13 21h1v1h-1zM16 21h1v1h-1zM18 21h1v1h-1zM22 21h1v1h-1zM27 21h1v1h-1zM0 22h7v1h-7zM16 22h10v1h-10zM0 23h1v1h-1zM6 23h1v1h-1zM11 23h1v1h-1zM17 23h1v1h-1zM19 23h3v1h-3zM23 23h1v1h-1zM27 23h2v1h-2zM0 24h1v1h-1zM2 24h3v1h-3zM6 24h1v1h-1zM12 24h3v1h-3zM16 24h1v1h-1zM18 24h3v1h-3zM24 24h1v1h-1zM26 24h3v1h-3zM0 25h1v1h-1zM2 25h3v1h-3zM6 25h1v1h-1zM9 25h1v1h-1zM12 25h2v1h-2zM16 25h3v1h-3zM20 25h1v1h-1zM22 25h1v1h-1zM25 25h1v1h-1zM0 26h1v1h-1zM2 26h3v1h-3zM6 26h1v1h-1zM9 26h1v1h-1zM12 26h2v1h-2zM15 26h5v1h-5zM21 26h1v1h-1zM24 26h1v1h-1zM28 26h1v1h-1zM0 27h1v1h-1zM6 27h1v1h-1zM8 27h2v1h-2zM12 27h5v1h-5zM18 27h1v1h-1zM20 27h2v1h-2zM23 27h2v1h-2zM0 28h7v1h-7zM12 28h1v1h-1zM14 28h1v1h-1zM17 28h2v1h-2zM20 28h4v1h-4zM26 28h1v1h-1zM28 28h1v1h-1z" fill="#000"/></svg></div><div class="ad-qrside"><button class="btn tapped">Show pairing QR code</button><p class="hint">The code is only visible while you show it.</p></div></div></div></div></div><div class="sfoot ad-foot"><p class="hint">A PC with vault-agent appears under Clients after its first report.</p><button class="btn">Close</button></div></div>
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">Narrow touch screen (<code>@media (pointer:coarse)</code> + <code>@container addev (max-width:420px)</code>): step 2 leads with a full-width primary &quot;Open on this phone&quot;; it needs no Show, the key never appears on screen. &quot;Pair another phone&quot; follows: blurred stand-in, Show button and hint on one centre axis (<code>.ad-other{justify-items:center}</code>). Desktop keeps the QR first.</p>
+</figure>
+
+<figure class="ph" id="f4c">
+  <figcaption class="flabel"><b>4c</b>Add a device · another phone, QR shown</figcaption>
+  <div class="dev" style="--w:400px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Clients</h1><div class="sub">2 devices · 1 loading now</div></div>
+<button class="btn pri sm"><span class="btn-ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Add a device</button></div><div class="tiles">
+<div class="tile"><div class="k">Connected</div><div class="v">2<small>of 2</small></div><div class="n">1 loading now</div></div>
+<div class="tile"><div class="k">Loaded</div><div class="v">529<small>GB</small></div><div class="n">in 7 days</div></div>
+</div><div class="sechd"><span class="sec">Devices</span><div class="seg"><button>24 h</button><button aria-pressed="true">7 days</button><button>30 days</button><button>All</button></div></div><div class="ccard warn">
+  <div class="z">
+    <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><div><div class="nm">Desk PC</div><div class="meta">vault-agent · 192.168.1.20</div></div></div>
+    <div class="pills"><span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span><span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span></div>
+    <div class="upd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16"/></svg><div><b>Agent update available</b><span>Agent <code>0.1.0-rc18.1</code> · server <code>0.1.0-rc19.3</code>.</span></div><button class="btn sm">Show update command</button></div>
+  </div>
+  <div class="z">
+    <div class="now idle">Loading nothing right now</div>
+    <div class="stats">
+      <div><div class="k">Installed</div><div class="v">24<small>games</small></div></div>
+      <div><div class="k">Loaded</div><div class="v">38.2<small>GB</small></div></div>
+      <div><div class="k">Hit rate</div><div class="v">98<small>%</small></div><div class="meter"><i style="width:98%"></i></div></div>
+    </div>
+  </div>
+  <div class="z"><span class="sec">Recently loaded</span>
+    <div class="pills"><span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip">The Riftbreaker<b>10.3 GB</b></span><span class="gchip more">+3 more</span></div></div>
+  <div class="cf"><span>Last active 8 min ago</span><div class="acts"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div></div>
+</div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="scrim"></div><div class="sheet ad tall"><div class="grab"></div><div class="ad-head stick"><h2>Add a device</h2><p class="hint ad-intro">Set up a phone, another browser or a PC with this hangar's address and API key, without typing them.</p><div class="ad-tabs"><button class="tab" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>Phone</button><button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>Browser</button><button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Windows</button><button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6l5 5-5 5M12 18h8"/></svg>Linux / SteamOS</button></div></div><div class="sbody"><div class="ad-scroll" style="margin-top:-322px"><div class="ad-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l10 18H2zM12 10v5M12 18h.01"/></svg><p>Anyone who sees this can control your hangar. Only show it on your own screen; copied text can also end up in clipboard history or cloud clipboard sync.</p></div><ol class="steps"><li><span class="n">1</span><div><h3>Install the app</h3><div class="ad-dl"><a class="btn pri">Download app</a><p class="hint">Android app · 38.4 MB</p></div></div></li><li><span class="n">2</span><div><h3>Pair the app</h3><p class="ad-desc">Open the app and scan the pairing code. The app then knows this hangar's address and API key.</p><a class="btn pri wide ad-open-here">Open on this phone</a></div></li></ol><div class="ad-other"><h3 class="sec">Pair another phone</h3><div class="ad-qrbox"><div class="qrwrap"><svg class="qr" viewBox="-2 -2 33 33" shape-rendering="crispEdges"><rect x="-2" y="-2" width="33" height="33" fill="#fff"/><path d="M0 0h7v1h-7zM8 0h2v1h-2zM11 0h1v1h-1zM13 0h2v1h-2zM16 0h5v1h-5zM22 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM9 1h2v1h-2zM14 1h1v1h-1zM16 1h1v1h-1zM18 1h3v1h-3zM22 1h1v1h-1zM28 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h1v1h-1zM10 2h1v1h-1zM13 2h1v1h-1zM15 2h3v1h-3zM19 2h2v1h-2zM22 2h1v1h-1zM24 2h3v1h-3zM28 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM9 3h2v1h-2zM13 3h1v1h-1zM18 3h1v1h-1zM20 3h1v1h-1zM22 3h1v1h-1zM24 3h3v1h-3zM28 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM8 4h1v1h-1zM10 4h1v1h-1zM12 4h1v1h-1zM17 4h1v1h-1zM22 4h1v1h-1zM24 4h3v1h-3zM28 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h1v1h-1zM11 5h1v1h-1zM13 5h1v1h-1zM18 5h2v1h-2zM22 5h1v1h-1zM28 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h7v1h-7zM8 7h5v1h-5zM14 7h3v1h-3zM18 7h2v1h-2zM3 8h4v1h-4zM9 8h4v1h-4zM15 8h4v1h-4zM25 8h1v1h-1zM1 9h3v1h-3zM5 9h1v1h-1zM7 9h10v1h-10zM19 9h5v1h-5zM26 9h1v1h-1zM28 9h1v1h-1zM0 10h3v1h-3zM4 10h3v1h-3zM9 10h1v1h-1zM11 10h1v1h-1zM16 10h3v1h-3zM22 10h2v1h-2zM1 11h1v1h-1zM3 11h3v1h-3zM7 11h2v1h-2zM11 11h1v1h-1zM15 11h5v1h-5zM23 11h1v1h-1zM26 11h1v1h-1zM2 12h2v1h-2zM5 12h2v1h-2zM9 12h2v1h-2zM13 12h3v1h-3zM18 12h1v1h-1zM22 12h1v1h-1zM24 12h2v1h-2zM1 13h1v1h-1zM4 13h2v1h-2zM7 13h2v1h-2zM10 13h3v1h-3zM14 13h2v1h-2zM18 13h1v1h-1zM23 13h4v1h-4zM28 13h1v1h-1zM0 14h1v1h-1zM3 14h1v1h-1zM6 14h1v1h-1zM8 14h1v1h-1zM10 14h2v1h-2zM17 14h1v1h-1zM22 14h1v1h-1zM24 14h1v1h-1zM0 15h1v1h-1zM4 15h2v1h-2zM7 15h4v1h-4zM14 15h1v1h-1zM17 15h1v1h-1zM20 15h1v1h-1zM22 15h1v1h-1zM26 15h2v1h-2zM0 16h3v1h-3zM4 16h1v1h-1zM6 16h4v1h-4zM12 16h1v1h-1zM16 16h3v1h-3zM20 16h3v1h-3zM25 16h2v1h-2zM1 17h2v1h-2zM4 17h2v1h-2zM10 17h1v1h-1zM12 17h1v1h-1zM14 17h2v1h-2zM18 17h2v1h-2zM21 17h7v1h-7zM0 18h1v1h-1zM2 18h6v1h-6zM10 18h2v1h-2zM13 18h1v1h-1zM15 18h1v1h-1zM18 18h6v1h-6zM27 18h1v1h-1zM2 19h4v1h-4zM7 19h1v1h-1zM9 19h3v1h-3zM15 19h4v1h-4zM22 19h5v1h-5zM1 20h1v1h-1zM3 20h6v1h-6zM10 20h1v1h-1zM12 20h7v1h-7zM20 20h1v1h-1zM22 20h3v1h-3zM10 21h2v1h-2zM13 21h1v1h-1zM16 21h1v1h-1zM18 21h1v1h-1zM22 21h1v1h-1zM27 21h1v1h-1zM0 22h7v1h-7zM16 22h10v1h-10zM0 23h1v1h-1zM6 23h1v1h-1zM11 23h1v1h-1zM17 23h1v1h-1zM19 23h3v1h-3zM23 23h1v1h-1zM27 23h2v1h-2zM0 24h1v1h-1zM2 24h3v1h-3zM6 24h1v1h-1zM12 24h3v1h-3zM16 24h1v1h-1zM18 24h3v1h-3zM24 24h1v1h-1zM26 24h3v1h-3zM0 25h1v1h-1zM2 25h3v1h-3zM6 25h1v1h-1zM9 25h1v1h-1zM12 25h2v1h-2zM16 25h3v1h-3zM20 25h1v1h-1zM22 25h1v1h-1zM25 25h1v1h-1zM0 26h1v1h-1zM2 26h3v1h-3zM6 26h1v1h-1zM9 26h1v1h-1zM12 26h2v1h-2zM15 26h5v1h-5zM21 26h1v1h-1zM24 26h1v1h-1zM28 26h1v1h-1zM0 27h1v1h-1zM6 27h1v1h-1zM8 27h2v1h-2zM12 27h5v1h-5zM18 27h1v1h-1zM20 27h2v1h-2zM23 27h2v1h-2zM0 28h7v1h-7zM12 28h1v1h-1zM14 28h1v1h-1zM17 28h2v1h-2zM20 28h4v1h-4zM26 28h1v1h-1zM28 28h1v1h-1z" fill="#000"/></svg></div><div class="ad-qrside"><button class="btn">Hide</button><p class="hint">The code is only visible while you show it.</p></div></div><div class="ad-qrmore"><p class="hint">Scan it with the phone, or open the link on a phone that already has the SteamHangar app.</p><div class="code">steamhangar://pair?u=http%3A%2F%2Fhangar.lan&amp;k=••••••••••••</div><div class="ad-acts"><button class="btn ghost">Copy link</button></div></div></div></div></div><div class="sfoot ad-foot"><p class="hint">A PC with vault-agent appears under Clients after its first report.</p><button class="btn">Close</button></div></div>
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">Scrolled to &quot;Pair another phone&quot; after Show: QR 200 px on white with a quiet zone, Hide and hint centred under it, then the link field and &quot;Copy link&quot;. The code leaves the DOM on Hide, tab change and close (unchanged).</p>
+</figure>
+
+<figure class="ph" id="f4d">
+  <figcaption class="flabel"><b>4d</b>The paired browser · success</figcaption>
+  <div class="dev" style="--w:400px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head lib-head"><div><h1>Library</h1><div class="sub">439 games · 22 cached</div></div>
+<div class="lib-split"><button class="btn pri sm">Check updates</button><button class="btn pri sm split-more" aria-label="More update actions"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button></div></div>
+<div class="lib-bar"><label class="lib-search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span><span class="ph-text">Search your library</span></label><div class="lib-chips scue" data-scroll="start"><button class="fchip" aria-pressed="true">All <b>439</b></button><button class="fchip">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button><button class="fchip">Installed, not cached <b>3</b></button><button class="fchip">Downloading <b>1</b></button><button class="fchip">Failed <b>1</b></button><button class="fchip">Updates <b>1</b></button></div><div class="lib-tools">
+  <div class="sortg"><span class="sel">Name</span><button aria-label="Sort direction"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 4v16m0 0-4-4m4 4 4-4M16 20V4m0 0-4 4m4-4 4 4"/></svg></button></div>
+  <div class="segi"><button aria-pressed="true" aria-label="Grid"><svg width="16" height="16" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></button><button aria-label="List"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button></div>
+  <button class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filters</button>
+</div></div>
+<div class="lib-stat"><span>Showing 439 of 439</span><span>22 cached · 1 update ready</span></div>
+<div class="grid"><div class="card"><div class="cap p0" style="--h1:28;--h2:210"><div class="art"></div><div class="scrim"></div><span class="sz">24.8 GB</span><span class="name">Satisfactory</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact" aria-label="Update now"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p1" style="--h1:150;--h2:260"><div class="art"></div><div class="scrim"></div><span class="sz">10.3 GB</span><span class="name">The Riftbreaker</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p2" style="--h1:200;--h2:280"><div class="art"></div><div class="scrim"></div><span class="sz">86.6 GB</span><span class="name">Enshrouded</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--run)"></span><span class="state">Downloading 62 %</span></div><span class="instbadge">Not installed</span></div></div><div class="card"><div class="cap p3" style="--h1:20;--h2:340"><div class="art"></div><div class="scrim"></div><span class="sz">0.3 GB</span><span class="name">Factorio</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on 2 PCs</span></div></div></div></div>
+      <nav class="nav"><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="toast ghost"><span class="toast-text">today: bottom:16px</span></div><div class="toast"><i class="toast-key"></i><span class="toast-text">Paired. This browser is now connected to the hangar.</span></div>
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">The receiving side (Browser tab link opened on the phone): toast &quot;Paired. This browser is now connected to the hangar.&quot; It sits above the nav: <code>.toast{bottom:calc(var(--nav-h) + var(--sp-4) + env(safe-area-inset-bottom))}</code>; today it is at 16 px and covers the nav.</p>
+</figure>
+</div></section><section class="kit-s" id="safe"><h2>5 · Safe-area insets <small>env(safe-area-inset-*)</small></h2>
+<p class="note"><code>index.html</code> already sets <code>viewport-fit=cover</code>, so the page runs under the status bar and the home indicator. The bottom nav and the bulk bar already add <code>env(safe-area-inset-bottom)</code>; the top inset is not handled yet. Hatched bands = the insets of an iPhone 15 (47 / 34&nbsp;px).</p>
+<div class="phs">
+
+<figure class="ph" id="f5a">
+  <figcaption class="flabel"><b>5a</b>Library · status bar and bottom nav</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr ">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head lib-head"><div><h1>Library</h1><div class="sub">439 games · 22 cached</div></div>
+<div class="lib-split"><button class="btn pri sm">Check updates</button><button class="btn pri sm split-more" aria-label="More update actions"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button></div></div>
+<div class="lib-bar"><label class="lib-search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></span><span class="ph-text">Search your library</span></label><div class="lib-chips scue" data-scroll="start"><button class="fchip" aria-pressed="true">All <b>439</b></button><button class="fchip">Cached <b>22</b></button><button class="fchip">Not cached <b>417</b></button><button class="fchip">Installed, not cached <b>3</b></button><button class="fchip">Downloading <b>1</b></button><button class="fchip">Failed <b>1</b></button><button class="fchip">Updates <b>1</b></button></div><div class="lib-tools">
+  <div class="sortg"><span class="sel">Name</span><button aria-label="Sort direction"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 4v16m0 0-4-4m4 4 4-4M16 20V4m0 0-4 4m4-4 4 4"/></svg></button></div>
+  <div class="segi"><button aria-pressed="true" aria-label="Grid"><svg width="16" height="16" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></button><button aria-label="List"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button></div>
+  <button class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filters</button>
+</div></div>
+<div class="lib-stat"><span>Showing 439 of 439</span><span>22 cached · 1 update ready</span></div>
+<div class="grid"><div class="card"><div class="cap p0" style="--h1:28;--h2:210"><div class="art"></div><div class="scrim"></div><span class="sz">24.8 GB</span><span class="name">Satisfactory</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--accent)"></span><span class="state">Update ready</span><button class="icnact" aria-label="Update now"><span class="sic k-updating" style="color:var(--accent)"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p1" style="--h1:150;--h2:260"><div class="art"></div><div class="scrim"></div><span class="sz">10.3 GB</span><span class="name">The Riftbreaker</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on Desk PC</span></div></div><div class="card"><div class="cap p2" style="--h1:200;--h2:280"><div class="art"></div><div class="scrim"></div><span class="sz">86.6 GB</span><span class="name">Enshrouded</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--run)"></span><span class="state">Downloading 62 %</span></div><span class="instbadge">Not installed</span></div></div><div class="card"><div class="cap p3" style="--h1:20;--h2:340"><div class="art"></div><div class="scrim"></div><span class="sz">0.3 GB</span><span class="name">Factorio</span></div><div class="meta"><div class="stt"><span class="dot" style="color:var(--ok)"></span><span class="state">Current</span><button class="icnact" aria-label="Verify"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span></button></div><span class="instbadge">Installed on 2 PCs</span></div></div></div></div>
+      <nav class="nav"><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      <div class="sa sa-top"><span>env(safe-area-inset-top) · 47px</span></div><div class="sa sa-bot"><span>inset-bottom 34</span></div>
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">New: <code>body{padding-top:env(safe-area-inset-top)}</code> (0 in a normal browser tab, 47 px in a home-screen app). Existing: <code>.nav{padding-bottom:calc(9px + env(safe-area-inset-bottom))}</code>, the icons stay above the home indicator.</p>
+</figure>
+
+<figure class="ph" id="f5b">
+  <figcaption class="flabel"><b>5b</b>Settings · savebar above nav and home indicator</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Settings</h1><div class="sub">Vault · SteamVAULT</div></div></div>
+<div class="snav-list scue"><button class="snav-item" aria-current="true">Vault &amp; connection</button><button class="snav-item">Download window</button><button class="snav-item">Disk &amp; cleanup</button><button class="snav-item">Notifications</button></div>
+<div class="ph2"><h2>Vault &amp; connection</h2><p>Name of this vault and the account it is connected to.</p></div>
+<div class="fcard"><h3>Vault</h3><div class="fg">
+  <div class="field"><div class="lh"><label>Vault name</label><button class="ib" aria-label="Info">i</button><span class="chip ch">Changed here</span></div><div class="in">SteamVAULT Attic</div></div>
+  <div class="field"><div class="lh"><label>Download window</label><button class="ib" aria-label="Info">i</button><span class="chip ch">Changed here</span></div><div class="in mono">03:00–07:00</div><div class="hint">Takes effect within a minute.</div></div>
+  <div class="field"><div class="lh"><label>Cache root</label><button class="ib" aria-label="Info">i</button><span class="chip env">From env</span></div><div class="in" aria-disabled="true">/vault/cache</div></div>
+</div></div>
+<div class="fcard"><h3>Sweep</h3><div class="fg">
+  <div class="field"><div class="lh"><label>Sweep interval (minutes)</label><button class="ib" aria-label="Info">i</button><span class="chip">Default</span></div><div class="in mono">60</div></div>
+</div></div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="savebar"><div class="m"><span class="dotr"></span><p class="savebar-msg">Unsaved changes</p></div><button class="btn">Discard</button><button class="btn pri">Save</button></div>
+      <div class="sa sa-top"><span>env(safe-area-inset-top) · 47px</span></div><div class="sa sa-bot"><span>inset-bottom 34</span></div>
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">Existing and correct: <code>.savebar{bottom:calc(var(--nav-h) + var(--sp-4) + env(safe-area-inset-bottom))}</code>. At ≤460 px the buttons split the row; each is 44 px on coarse.</p>
+</figure>
+
+<figure class="ph" id="f5c">
+  <figcaption class="flabel"><b>5c</b>Sheet footer on the safe area</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><button class="btn sm">Pause all</button></div>
+<div class="hero">
+  <div class="hh"><span class="sec">Throughput</span><div class="seg scue"><button aria-pressed="true">Live</button><button>1 h</button><button>6 h</button><button>24 h</button><button>7 days</button><button>30 days</button><button>All</button></div></div>
+  <div class="live"><div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div></div><div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><path class="area net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 79 L580 78 L530 53 L470 50 L420 72 L360 71 L330 36 L300 43 L230 69 L170 71 L120 89 L60 88 L0 90 Z"/><path class="area srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79 L600 96 L0 96 Z"/><path class="line net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72"/><path class="line srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79"/></svg><div class="ax"><span>55 min ago</span><span>now</span></div><div class="glegend"><span class="srv"><i></i>Served from cache</span><span class="net"><i></i>From the internet</span></div></div></div>
+  <div class="tiles"><div class="tile"><div class="k">Served</div><div class="v">48.1<small>GB</small></div></div><div class="tile"><div class="k">Internet</div><div class="v">6<small>MB</small></div></div></div>
+</div>
+<div class="blk"><div class="sechd"><span class="sec">Active</span><span class="badge">1</span></div>
+<div class="job"><div class="t"><div><div class="nm">Driftwood Signal</div><div class="meta">job #900001</div></div><span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span></div><div class="bar"><i style="width:62%"></i></div><div class="m2"><span>62 % · 8.8 of 14.2 GB</span><span>31.5 MB/s</span></div><div class="acts"><button class="btn sm">Pause</button><button class="btn sm ghost danger">Stop</button></div></div></div>
+<div class="blk dl-history"><div class="sechd"><span class="sec">History</span><div class="hacts"><div class="seg"><button>24 h</button><button>7 days</button><button aria-pressed="true">All</button></div><button class="btn sm ghost">Delete…</button></div></div>
+<div class="rowlist">
+<button class="hrow"><span class="sic " style="color:var(--danger)"><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span><span class="hinfo"><span class="nm">HELLDIVERS™ 2</span><span class="meta">job #189 · Failed · 16.10.2026, 18:28</span></span><span class="chev">›</span></button>
+<button class="hrow"><span class="sic " style="color:var(--ok)"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span><span class="hinfo"><span class="nm">Sir, We Have an Orc Problem</span><span class="meta">job #188 · Done · 16.10.2026, 17:21</span></span><span class="chev">›</span></button>
+</div></div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn" aria-current="page"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="scrim"></div><div class="sheet confirm"><div class="grab"></div><div class="sbody"><h3 class="sh-t">Delete history?</h3>
+<p class="sh-p">Deletes finished downloads (done, failed, cancelled) with their logs, and the traffic statistics behind the speed figures, the graph and the numbers on the Clients page.</p>
+<fieldset class="hist-scope"><legend class="sec">What to delete</legend>
+<label class="srow on"><span class="radio on"></span><span class="grow"><span class="ttl">Older than 30 days</span><span class="desc">Finished downloads and traffic statistics from before the last 30 days.</span></span></label>
+<label class="srow"><span class="radio"></span><span class="grow"><span class="ttl">Everything</span><span class="desc">All finished downloads and all traffic statistics. Speed, graph and client figures start again from zero.</span></span></label></fieldset>
+<p class="sh-p">Kept: cached games, running, queued and paused downloads, PCs and client names. This cannot be undone.</p></div><div class="sfoot"><button class="btn danger wide">Delete older than 30 days</button><button class="btn wide">Keep</button></div></div>
+      <div class="sa sa-top"><span>env(safe-area-inset-top) · 47px</span></div><div class="sa sa-bot"><span>inset-bottom 34</span></div>
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.sheet .sfoot{padding-bottom:calc(var(--sp-3) + env(safe-area-inset-bottom))}</code>: the sheet covers the nav, so its own footer carries the inset. Same for <code>.sheet .body</code> when a sheet has no footer.</p>
+</figure>
+</div></section><section class="kit-s" id="text"><h2>6 · 200 % text and landscape <small>intrinsic sizing</small></h2>
+<p class="note">Android's font-size setting and browser text zoom scale every <code>--fs-*</code> token. The frame below doubles them. Nothing may clip: stats fall back to fewer columns by an <code>em</code> minimum, buttons wrap, the nav label ellipsizes.</p>
+<div class="phs">
+
+<figure class="ph" id="f6a">
+  <figcaption class="flabel"><b>6a</b>Clients card · 200 % text</figcaption>
+  <div class="dev" style="--w:390px;--h:844px">
+    <div class="scr t200 coarse">
+      <div class="sbar"><span class="clock">9:41</span><i class="isl"></i><span class="sbi"><svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3" opacity=".5"/><rect x="2" y="2" width="18" height="8" rx="1.6" fill="currentColor" stroke="none"/><path d="M23.5 4v4" stroke-linecap="round"/></svg></span></div>
+      <div class="app"><div class="page-head"><div><h1>Clients</h1></div></div><div class="ccard warn">
+  <div class="z">
+    <div class="ch"><div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><div><div class="nm">Desk PC</div><div class="meta">vault-agent · 192.168.1.20</div></div></div>
+    <div class="pills"><span class="pill ok"><span class="sic "><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>Online</span><span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span></div>
+    <div class="upd"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16"/></svg><div><b>Agent update available</b><span>Agent <code>0.1.0-rc18.1</code> · server <code>0.1.0-rc19.3</code>.</span></div><button class="btn sm">Show update command</button></div>
+  </div>
+  <div class="z">
+    <div class="now idle">Loading nothing right now</div>
+    <div class="stats">
+      <div><div class="k">Installed</div><div class="v">24<small>games</small></div></div>
+      <div><div class="k">Loaded</div><div class="v">38.2<small>GB</small></div></div>
+      <div><div class="k">Hit rate</div><div class="v">98<small>%</small></div><div class="meter"><i style="width:98%"></i></div></div>
+    </div>
+  </div>
+  <div class="z"><span class="sec">Recently loaded</span>
+    <div class="pills"><span class="gchip">Satisfactory<b>24.8 GB</b></span><span class="gchip">The Riftbreaker<b>10.3 GB</b></span><span class="gchip more">+3 more</span></div></div>
+  <div class="cf"><span>Last active 8 min ago</span><div class="acts"><button class="btn sm">Rename</button><button class="btn sm ghost">Remove agent</button></div></div>
+</div></div>
+      <nav class="nav"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn" aria-current="page"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      
+      
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote"><code>.ccard .stats{grid-template-columns:repeat(auto-fit,minmax(min(100%,6.5em),1fr))}</code>: three columns at 100 %, one at 200 %; <code>.tiles</code> the same with <code>11em</code>. Long buttons in the update box wrap (<code>white-space:normal</code>). <code>.nav-lb{max-width:100%;overflow:hidden;text-overflow:ellipsis}</code>.</p>
+</figure>
+
+<figure class="ph" id="f6b">
+  <figcaption class="flabel"><b>6b</b>Downloads · landscape 844×390, notch left</figcaption>
+  <div class="dev land" style="--w:844px;--h:390px">
+    <div class="scr land">
+      <i class="isl v"></i>
+      <div class="app"><div class="page-head"><div><h1>Downloads</h1><div class="sub">1 running · 20 in history</div></div><button class="btn sm">Pause all</button></div>
+<div class="hero land">
+  <div class="hh"><span class="sec">Throughput</span><div class="seg scue"><button aria-pressed="true">Live</button><button>1 h</button><button>6 h</button><button>24 h</button><button>7 days</button><button>30 days</button><button>All</button></div></div>
+  <div class="live"><div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div></div><div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><path class="area net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 79 L580 78 L530 53 L470 50 L420 72 L360 71 L330 36 L300 43 L230 69 L170 71 L120 89 L60 88 L0 90 Z"/><path class="area srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79 L600 96 L0 96 Z"/><path class="line net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72"/><path class="line srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79"/></svg><div class="ax"><span>55 min ago</span><span>now</span></div><div class="glegend"><span class="srv"><i></i>Served from cache</span><span class="net"><i></i>From the internet</span></div></div></div>
+</div></div>
+      <nav class="nav land"><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.6" y="2.6" width="7" height="7" rx="1.8"/><rect x="12.4" y="2.6" width="7" height="7" rx="1.8"/><rect x="2.6" y="12.4" width="7" height="7" rx="1.8"/><rect x="12.4" y="12.4" width="7" height="7" rx="1.8"/></svg></span><span class="nav-lb">Library</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.6" y="3.4" width="16.8" height="11" rx="1.8"/><path d="M8 18.6h6M11 14.4v4.2"/></svg></span><span class="nav-lb">Clients</span></button><button class="nav-btn" aria-current="page"><span class="nav-pip">1</span><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 2.8v11.4"/><path d="m6.4 9.8 4.6 4.6 4.6-4.6"/><path d="M3.4 18.6h15.2"/></svg></span><span class="nav-lb">Downloads</span></button><button class="nav-btn"><span class="nav-ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="5.9"/><circle cx="11" cy="11" r="2.5"/><path d="M11 5.1V2.9M11 19.1v-2.2M16.9 11h2.2M2.9 11h2.2"/><path d="m15.17 6.83 1.56-1.56M5.27 16.73l1.56-1.56M15.17 15.17l1.56 1.56M5.27 5.27l1.56 1.56"/></svg></span><span class="nav-lb">Settings</span></button></nav>
+      <div class="sa sa-left"><span>inset-left · 47px</span></div><div class="sa sa-right"><span>inset-right · 47px</span></div><div class="sa sa-botl"><span>inset-bottom · 21px</span></div>
+      <i class="home"></i>
+    </div>
+  </div>
+  <p class="fnote">Gutters become <code>max(var(--gutter), env(safe-area-inset-left|right))</code> on the view root and the nav. With <code>(orientation:landscape) and (max-height:500px)</code> the nav puts icon and label side by side: <code>--nav-h</code> 64 → 48 px, the page keeps 280 px of height instead of 250.</p>
+</figure>
+</div></section>
+<section class="kit-s" id="css"><h2>Proposed CSS <small>summary for MOBILE-1b</small></h2>
+<p class="note">Not final code: the shape of the rules the frames imply, so the implementation is mostly CSS. Names follow kit.css / app.css; the mockup itself fakes <code>pointer:coarse</code> with a <code>.coarse</code> class and the insets with fixed numbers.</p>
+<pre class="rules">/* web/css/theme.css */
+--hit:44px;                 /* NEW: minimum touch target (WCAG 2.5.5 / HIG / Material 48dp ≈ 44 css px) */
+--ctl-h:38px;               /* NEW name for an existing literal: .lib-tools .btn, .sortg, .lib-search height */
+
+/* web/css/kit.css — touch targets (section 1) */
+@media (pointer:coarse){
+  .kit :is(.seg button,.fchip,.btn,.ib,.icnact,.gd-x,.segi button,.sortg button,.tab,.pair-open){ position:relative; }
+  .kit :where(.seg button,.fchip,.btn,.ib,.icnact,.gd-x,.segi button,.sortg button,.tab,.pair-open)::after{
+    content:""; position:absolute; left:0; right:0;
+    top:calc(50% - var(--hit) / 2); bottom:calc(50% - var(--hit) / 2);
+  }
+  .kit :is(.ib,.icnact,.gd-x)::after{ left:calc(50% - var(--hit) / 2); right:calc(50% - var(--hit) / 2); }
+  .kit .seg button, .kit .fchip, .kit .btn, .kit .btn.sm, .kit .segi button{ min-height:var(--ctl-h); }
+  .kit .fchip{ display:inline-flex; align-items:center; }
+  .kit .ib{ width:var(--sp-6); height:var(--sp-6); line-height:22px; }
+  .kit .icnact{ width:var(--sp-6); height:var(--sp-6); }
+  .kit .field .lh{ min-height:var(--hit); }
+  .kit .lib-chips{ padding-block:3px; margin-block:-3px; }   /* a scroll container clips the extender */
+  .kit .pair-open{ display:inline-flex; align-items:center; min-height:var(--ctl-h); }
+  /* Q5: on a narrow touch screen the phone pairs itself first, the QR is for another phone */
+  @container addev (max-width:420px){
+    .kit .ad-open-here{ display:flex; }                 /* hidden elsewhere: .kit .ad-open-here{display:none} */
+    .kit .ad-other{ display:grid; justify-items:center; gap:var(--sp-3); border-top:1px solid var(--line-soft); padding-top:var(--sp-4); }
+    .kit .ad-qrbox{ grid-template-columns:200px; justify-content:center; }
+    .kit .ad-qrbox .pair-qr, .kit .ad-qrmask{ width:200px; height:200px; }
+    .kit .ad-qrside{ grid-column:1; align-items:stretch; text-align:center; }
+  }
+  .kit .sheet .grab::before{ inset:-20px -60px -20px; }   /* 44 px tall */
+}
+
+/* overflow cue (section 2) — on .seg, .lib-chips, .snav-list, sheet tabs */
+.kit .scue{ --cue-l:0px; --cue-r:var(--sp-7);
+  mask-image:linear-gradient(to right, transparent, #000 var(--cue-l), #000 calc(100% - var(--cue-r)), transparent); }
+.kit .scue.at-end{ --cue-l:var(--sp-7); --cue-r:0px; }
+.kit .scue:not(.at-start):not(.at-end){ --cue-l:var(--sp-7); }
+.kit .scue.fits{ mask-image:none; }
+
+/* bottom sheets (section 3) — below --w-sheet */
+.sheet{ max-height:88dvh; }                       /* was 88vh: dvh follows the collapsing URL bar */
+.sheet .body .stick{ position:sticky; top:0; z-index:2; background:var(--surface); }
+.sheet .sfoot{ display:flex; gap:var(--sp-2); padding:var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line-soft); background:var(--surface); }
+@media (max-width:600px){ .dialog-backdrop{ align-items:flex-end; padding:0; }
+  .dialog{ max-width:none; border-radius:var(--r-xl) var(--r-xl) 0 0; padding-bottom:calc(16px + env(safe-area-inset-bottom)); } }
+
+/* safe area (section 5) and landscape (6b) */
+body{ padding-top:env(safe-area-inset-top); }
+.view-root, .nav{ padding-left:max(var(--gutter), env(safe-area-inset-left)); padding-right:max(var(--gutter), env(safe-area-inset-right)); }
+.toast{ bottom:calc(var(--nav-h) + var(--sp-4) + env(safe-area-inset-bottom)); }
+@media (orientation:landscape) and (max-height:500px){
+  :root{ --nav-h:48px; }
+  .nav-btn{ flex-direction:row; justify-content:center; gap:var(--sp-2); }
+}
+
+/* 200 % text (section 6) */
+.kit .ccard .stats{ grid-template-columns:repeat(auto-fit, minmax(min(100%, 6.5em), 1fr)); }
+.kit .tiles{ grid-template-columns:repeat(auto-fit, minmax(min(100%, 11em), 1fr)); }   /* 140px today = 10.8em */
+.kit .ccard .upd .btn{ white-space:normal; text-align:left; line-height:1.2; }
+.nav-btn .nav-lb{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }</pre></section>
+<section class="kit-s" id="values"><h2>Proposed new values</h2><table class="vt">
+<tr><th>Value</th><th>Where</th><th>Status</th><th>Why</th></tr>
+<tr><td><code>--hit: 44px</code></td><td>theme.css</td><td><b class="new">new token</b></td><td>Minimum touch target. Only read inside <code>@media (pointer:coarse)</code> and the sheet grab.</td></tr>
+<tr><td><code>--ctl-h: 38px</code></td><td>theme.css</td><td><b class="new">new name</b>, value exists</td><td>Coarse visual height of segs, chips and buttons; today a literal in <code>.lib-tools .btn</code>, <code>.sortg</code>, <code>.lib-search</code>.</td></tr>
+<tr><td><code>88dvh</code></td><td>app.css <code>.sheet</code></td><td><b class="new">unit change</b></td><td>Replaces <code>88vh</code>: on mobile browsers <code>vh</code> includes the hidden URL bar, the sheet top went under it.</td></tr>
+<tr><td><code>--nav-h: 48px</code></td><td>app.css, landscape only</td><td><b class="new">new breakpoint value</b> (= <code>--sp-8</code>)</td><td>Short landscape screens: icon and label side by side.</td></tr>
+<tr><td><code>6.5em</code></td><td>kit.css <code>.ccard .stats</code></td><td><b class="new">new literal</b></td><td>Text-relative column minimum: 3 columns at 100 %, 1 at 200 %.</td></tr>
+<tr><td><code>11em</code></td><td>kit.css <code>.tiles</code></td><td><b class="new">new literal</b></td><td>Replaces <code>140px</code> (≈ 10.8em at 13 px): two summary tiles at 100 %, one at 200 %.</td></tr>
+<tr><td><code>200px</code> QR</td><td>kit.css <code>.ad-qrbox</code> in <code>addev ≤ 420px</code></td><td><b class="new">new literal</b></td><td>164 px is fine beside buttons on a desktop; stacked on a phone it can use the width, and a bigger code scans from further away.</td></tr>
+<tr><td><code>--sp-7</code> fade, <code>--r-xl</code>, <code>rgba(3,7,10,.62)</code> scrim, <code>--sp-6</code> (i)</td><td>—</td><td>existing</td><td>Reused as they are.</td></tr>
+<tr><td><code>#000</code> island, bezel <code>--raised</code>, annotation <code>#FF5FD2</code></td><td>this mockup only</td><td>not for production</td><td>Device drawing and the dashed 44 px overlays.</td></tr>
+</table></section>
+<section class="kit-s" id="questions"><h2>Decisions <small>operator, 2026-10-18</small></h2><ol class="qs">
+<li><b>Q1 Coarse visual size: Weg A.</b> Visuals grow to 38 px (<code>--ctl-h</code>), the hit area is 44 px (<code>--hit</code>) by an invisible <code>::after</code> extender.</li>
+<li><b>Q2 Which edge fades: Weg B.</b> A small shared scroll listener toggles <code>.at-start</code>/<code>.at-end</code> on every <code>.scue</code> (works in every browser, one unit test).</li>
+<li><b>Q3 Confirms:</b> all <code>.dialog</code> confirms become bottom sheets below 600 px (one rule in app.css).</li>
+<li><b>Q4 History row: Weg A.</b> On phones a tap opens the row's panel in a bottom sheet (3d).</li>
+<li><b>Q5 Pairing on the same phone:</b> on a narrow touch screen the Phone tab leads with a full-width primary &quot;Open on this phone&quot;; the QR follows as &quot;Pair another phone&quot; (4b, 4c). Desktop keeps the QR first.</li>
+<li><b>Q6 Pairing success:</b> accepted as is. No &quot;paired&quot; state in the drawer; that needs per-device keys (PAIR-2).</li>
+<li><b>Q7 Landscape nav:</b> icon and label side by side, <code>--nav-h</code> 48 px (6b).</li>
+</ol></section>
+</div>
+</html>
