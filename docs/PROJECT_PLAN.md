@@ -3800,7 +3800,7 @@ below carry their own later dates, item 12 is the current one).
         swept window, so they lag in both directions. Header and pill must
         agree with the newest graph point; the pill's "Downloading" for
         runner cache reads is RUNNER-SPLIT-1 (next package).
-      - [ ] **GROUP-VERIFIED-1** (api + web; operator report 2026-10-18,
+      - [x] **GROUP-VERIFIED-1** (499fd5f; api + web; operator report 2026-10-18,
         prod) HELLDIVERS 2 stays "Cached · not verified" (grey) after a
         successful forced verify (job #193, 23.11 GiB, all HIT), although
         its own figure is "100% complete, not counted: 1 unmapped depot".
