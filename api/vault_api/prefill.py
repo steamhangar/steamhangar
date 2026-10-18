@@ -500,6 +500,221 @@ def run_prefill(
             logger.warning("Could not remove temporary prefill log %s", log_path)
 
 
+# --------------------------------------------------------------------------
+# Retry on "Unable to detect Lancache server!" (WP RUNNER-RETRY-1)
+# --------------------------------------------------------------------------
+
+#: SteamPrefill's exact text when its ``/lancache-heartbeat`` probe to the
+#: cache got no valid answer in time (``LancacheNotFoundException``,
+#: poc/steamprefill/PROTOCOL.md "Troubleshooting"). Case-sensitive and
+#: narrow on purpose: the same exception type also carries "Lancache server
+#: is resolving to a public IP", a configuration error a retry cannot fix
+#: (LEARNINGS, WP WEB-FIX-4), so the exception name is not matched.
+LANCACHE_NOT_DETECTED_PHRASE = "Unable to detect Lancache server!"
+
+#: Attempts in total (the first run plus two retries). ADR-0027 measured a
+#: heartbeat answered up to 7.6 s late during a cold download before
+#: ``aio threads`` became the default (ADR-0030); a late answer is a
+#: transient load peak, so a couple of spaced retries cover it, and a cache
+#: that is really unreachable still fails within about a minute. Operator
+#: decision 2026-10-18: retry although AIO removed the measured cause.
+#: A constant, not an env knob: the runner's other retry bounds
+#: (``prefill_runner.RESULT_WRITE_ATTEMPTS``) are constants too.
+LANCACHE_RETRY_ATTEMPTS = 3
+
+#: Pause before each retry. Long enough for a cold-read peak on the cache
+#: to pass (ADR-0027: heartbeat maximum 7.6 s), short enough that a job
+#: whose cache is really gone fails in well under a minute. Pause and stop
+#: requests are honoured during the wait (``_wait_before_retry``).
+LANCACHE_RETRY_PAUSE_SECONDS = 15.0
+
+#: The job-log line written before each retry. ``final_attempt_output``
+#: splits on it, so its shape is load-bearing.
+_RETRY_LINE_RE = re.compile(
+    r"^\[vault-api\] Lancache not detected, retry [0-9]+ of [0-9]+ in ",
+    re.MULTILINE,
+)
+
+
+def lancache_not_detected(result: PrefillResult) -> bool:
+    """True when ``result`` is SteamPrefill's heartbeat failure, the only
+    outcome ``run_prefill_with_retry`` retries.
+
+    SteamPrefill throws the exception and exits non-zero, which
+    ``run_prefill`` records as ``exit_code``. Every other reason (timeout,
+    not logged in, setup, an operator stop, a shutdown) and every successful
+    exit is final, even if the phrase appears somewhere in the output.
+    """
+    return (
+        not result.success
+        and result.failure_reason == "exit_code"
+        and LANCACHE_NOT_DETECTED_PHRASE in result.output
+    )
+
+
+def final_attempt_output(output: str) -> str:
+    """The part of a (possibly retried) run's output that the LAST attempt
+    wrote: everything after the last retry line, or ``output`` unchanged
+    when the run was not retried.
+
+    The worker parses SteamPrefill's summary table and the cause phrases of
+    a ``prefill_failed`` run from this part only, so text from a failed
+    earlier attempt can never decide the job's outcome (WP RUNNER-RETRY-1:
+    only the final attempt counts).
+    """
+    last = None
+    for last in _RETRY_LINE_RE.finditer(output):
+        pass
+    if last is None:
+        return output
+    newline = output.find("\n", last.end())
+    return "" if newline < 0 else output[newline + 1 :]
+
+
+def _format_seconds(seconds: float) -> str:
+    return f"{seconds:g}"
+
+
+def _wait_before_retry(
+    pause_seconds: float,
+    should_abort: Callable[[], bool] | None,
+    stop_request: Callable[[], str | None] | None,
+) -> str | None:
+    """Sleep ``pause_seconds`` on the same 0.2 s tick ``_wait_for_process``
+    uses, polling both callbacks with the same priority (shutdown first).
+
+    Returns ``'aborted'``, ``'cancelled'`` or ``'paused'`` when the wait was
+    cut short, else ``None``. Polling ``stop_request`` also keeps the queue
+    runner's job heartbeat alive, which it piggybacks on that callback, so
+    the lease does not expire during the pause. A callback that raises
+    propagates unchanged; no child process is running here to reap.
+    """
+    deadline = time.monotonic() + pause_seconds
+    while True:
+        if should_abort is not None and should_abort():
+            return "aborted"
+        if stop_request is not None:
+            reason = _STOP_REASONS.get(stop_request() or "")
+            if reason is not None:
+                return reason
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(_POLL_INTERVAL_SECONDS, remaining))
+
+
+def run_prefill_with_retry(
+    appid: int,
+    steamprefill_path: str,
+    timeout_seconds: int,
+    should_abort: Callable[[], bool] | None = None,
+    use_force: bool = True,
+    stop_request: Callable[[], str | None] | None = None,
+    abort_reason: str = ABORT_REASON_VAULT_API,
+    max_threads: int = DEFAULT_PREFILL_MAX_THREADS,
+    *,
+    attempts: int | None = None,
+    pause_seconds: float | None = None,
+) -> PrefillResult:
+    """``run_prefill``, retried when SteamPrefill could not detect the cache
+    (WP RUNNER-RETRY-1). Both production callers use this: vault-api's
+    worker in subprocess mode and ``prefill_runner`` in queue mode.
+
+    - Only ``lancache_not_detected`` results are retried, up to ``attempts``
+      runs in total with ``pause_seconds`` between them (``None``: the
+      ``LANCACHE_RETRY_*`` constants). Any other outcome
+      ends the loop at once and is returned as it is.
+    - Before each retry the job log gets ``[vault-api] Lancache not
+      detected, retry 2 of 3 in 15 s.``; when the last attempt fails the
+      same way, a closing line says so, and the job then fails exactly like
+      before (``exit_code``; the worker's ``Prefill failed (reason=...)``
+      line stays the last line the web reads).
+    - A shutdown, cancel or pause during the wait ends the loop without
+      another attempt and returns ``aborted``/``cancelled``/``paused``, which
+      the worker records the way it records a stop during a run.
+    - The returned ``output`` holds every attempt in order, separated by the
+      retry lines, so the operator sees each failure. Nothing here touches
+      the database or the cache: the mapping, manifest ingestion, summary
+      parsing and auto-GC run once, in the worker, on this one result, and
+      the summary is read from ``final_attempt_output`` only.
+    - Each attempt gets the full ``timeout_seconds``. The heartbeat failure
+      happens before any download starts, so a retried job takes only a few
+      probe timeouts plus the pauses longer than a single run.
+    """
+    # Resolved at call time, so a test can shorten the module constants.
+    if attempts is None:
+        attempts = LANCACHE_RETRY_ATTEMPTS
+    if pause_seconds is None:
+        pause_seconds = LANCACHE_RETRY_PAUSE_SECONDS
+    if attempts < 1:
+        raise ValueError(f"attempts must be >= 1, got {attempts!r}")
+    earlier: list[str] = []
+    attempt = 1
+    while True:
+        result = run_prefill(
+            appid=appid,
+            steamprefill_path=steamprefill_path,
+            timeout_seconds=timeout_seconds,
+            should_abort=should_abort,
+            use_force=use_force,
+            stop_request=stop_request,
+            abort_reason=abort_reason,
+            max_threads=max_threads,
+        )
+        if not lancache_not_detected(result):
+            break
+        if attempt >= attempts:
+            if attempts > 1:
+                result = PrefillResult(
+                    result.success, result.failure_reason, result.exit_code,
+                    result.output
+                    + f"\n[vault-api] Lancache not detected in any of {attempts} "
+                    "attempts; giving up. Check that vault-core is running and "
+                    "answers /lancache-heartbeat.",
+                )
+            break
+
+        attempt += 1
+        line = (
+            f"[vault-api] Lancache not detected, retry {attempt} of {attempts} "
+            f"in {_format_seconds(pause_seconds)} s."
+        )
+        logger.warning(
+            "Prefill of appid %s: SteamPrefill could not detect the cache; "
+            "retry %d of %d in %s s.",
+            appid, attempt, attempts, _format_seconds(pause_seconds),
+        )
+        earlier.append(result.output + "\n" + line)
+
+        stopped = _wait_before_retry(pause_seconds, should_abort, stop_request)
+        if stopped is not None:
+            if stopped == "aborted":
+                note = f"[vault-api] Aborted: {abort_reason}."
+            elif stopped == FAILURE_PAUSED:
+                note = (
+                    f"[vault-api] Paused on request before retry {attempt}; no "
+                    "further SteamPrefill attempt was started. Resuming re-runs "
+                    "the prefill from the first attempt."
+                )
+            else:
+                note = (
+                    f"[vault-api] Cancelled on request before retry {attempt}; "
+                    "no further SteamPrefill attempt was started."
+                )
+            logger.info(
+                "Prefill of appid %s: %s during the retry pause; no further "
+                "attempt.", appid, stopped,
+            )
+            return PrefillResult(False, stopped, None, "\n".join(earlier) + "\n" + note)
+
+    if not earlier:
+        return result
+    return PrefillResult(
+        result.success, result.failure_reason, result.exit_code,
+        "\n".join(earlier) + "\n" + result.output,
+    )
+
+
 def _wait_for_process(
     process: "subprocess.Popen[str]",
     timeout_seconds: int,

@@ -276,7 +276,9 @@ class PrefillRunner:
             job_settings.prefill_timeout_seconds,
         )
 
-        result = prefill.run_prefill(
+        # WP RUNNER-RETRY-1: retried on "Unable to detect Lancache server!";
+        # the stop/heartbeat callback keeps running during the pause.
+        result = prefill.run_prefill_with_retry(
             appid=appid,
             steamprefill_path=self._settings.steamprefill_path,
             timeout_seconds=job_settings.prefill_timeout_seconds,

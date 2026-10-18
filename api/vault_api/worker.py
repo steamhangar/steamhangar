@@ -326,7 +326,9 @@ class PrefillWorker:
                 runner_mark.announce(conn, "vault-api")
                 # D16b: prefill threads/timeout apply to the next job.
                 job_settings = self._job_settings(conn)
-                result = prefill.run_prefill(
+                # WP RUNNER-RETRY-1: retried on "Unable to detect Lancache
+                # server!"; still ONE result, finalized once below.
+                result = prefill.run_prefill_with_retry(
                     appid=appid,
                     steamprefill_path=self._settings.steamprefill_path,
                     timeout_seconds=job_settings.prefill_timeout_seconds,
@@ -495,7 +497,11 @@ class PrefillWorker:
                 # unowned app exits 0 with a "Prefilled 0 apps" /
                 # Updated=0, Up To Date=0 summary (the WP 1.7 job-outcome
                 # trap this whole package closes).
-                summary = prefill_summary.parse_summary(result.output)
+                # WP RUNNER-RETRY-1: only the final attempt of a retried
+                # run counts, so the table is read from its part alone.
+                summary = prefill_summary.parse_summary(
+                    prefill.final_attempt_output(result.output)
+                )
                 # WP API-FIX-3: SteamPrefill's own table says the app FAILED
                 # (a Failed column with a count above zero, or one that
                 # could not be read). Checked before the 0/0 "not
@@ -816,7 +822,9 @@ class PrefillWorker:
         shape the web reads (web/js/lib/job-failure.js) and adds what failed
         and the likely cause.
         """
-        detail = prefill.prefill_failed_detail(summary.failed, result.output)
+        detail = prefill.prefill_failed_detail(
+            summary.failed, prefill.final_attempt_output(result.output)
+        )
         log_parts.append(
             f"[vault-api] Prefill failed (reason={prefill.FAILURE_PREFILL_FAILED}): "
             f"{detail}. The depot mapping and manifest state for this app were "
