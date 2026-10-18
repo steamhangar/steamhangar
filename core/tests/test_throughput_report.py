@@ -149,7 +149,9 @@ class HeartbeatTests(unittest.TestCase):
         self.assertIn("lines: 5", out)
         self.assertIn("max 1800.0 ms", out)
         self.assertIn("status 499 (client gave up): 1", out)
-        first = out.splitlines()[4]   # largest bucket first
+        self.assertIn("nginx-side time only", out.splitlines()[2])  # right under the numbers
+        self.assertIn("ADR-0027", out)
+        first = out.splitlines()[5]   # largest bucket first
         self.assertIn("heartbeat max 1800.0 ms", first)
         self.assertIn("small requests max 1700.0 ms (n=1)", first)
         self.assertEqual(len([l for l in out.splitlines() if "Z  heartbeat max" in l]), 3)
@@ -185,6 +187,92 @@ class HeartbeatTests(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 self.assertEqual(tpr.main([path]), 0)
             self.assertIn("lines: 5", buf.getvalue())
+
+
+class SizeFloorTests(unittest.TestCase):
+    """TP-REPORT-2 regression: cold run 1 (2026-10-18) printed "388 requests above
+    the size floor" of 29,854 while bytes_sent p90 was 1 MB. 12,459 large requests
+    had request_time 0.000 (nginx's cached clock did not advance while the blocked
+    worker served them) and the rt > 0 filter dropped them from the count."""
+
+    @staticmethod
+    def log():
+        lines = ["# start x"]
+        t = 1760000000.0
+        for i in range(60):          # small, below the floor
+            lines.append(tp(f"{t + i * 0.5:.3f}", "192.0.2.10", "200", 180000, "0.000", str(i % 8 + 1)))
+        for i in range(36):          # large, served within one event-loop pass: rt 0.000
+            lines.append(tp(f"{t + i * 0.8:.3f}", "192.0.2.10", "200", 1048576, "0.000", str(i % 8 + 1)))
+        for i in range(4):           # large and timed
+            lines.append(tp(f"{t + 30 + i:.3f}", "192.0.2.10", "200", 1048576, "1.000", str(i % 8 + 1)))
+        lines.append(tp(f"{t + 40:.3f}", "192.0.2.10", "200", 262144, "0.000"))   # exactly 256 KiB: counts
+        lines.append(tp(f"{t + 41:.3f}", "192.0.2.10", "200", 262143, "0.500"))   # one byte below: does not
+        return lines
+
+    def test_zero_time_requests_still_count_above_the_floor(self):
+        reqs, _, bad = tpr.parse(self.log())
+        self.assertEqual(bad, 0)
+        a = tpr.analyse(reqs, 1000, 256)
+        self.assertEqual(a["big_n"], 41)    # 36 + 4 + the 256 KiB one; the old code said 4
+        self.assertEqual(a["timed_n"], 4)
+        self.assertAlmostEqual(a["per_req_p50"], 8.388608, places=3)   # 1 MiB in 1 s
+        text = " ".join(a["verdicts"])
+        self.assertIn("37 of 41 large requests", text)
+        self.assertIn("request_time 0.000", text)
+        self.assertIn("4 timed large requests", text)   # sample check uses the timed count
+        out = tpr.render("192.0.2.10", a)
+        self.assertIn("41 requests >= 256 KiB, 4 with request_time > 0, 37 at 0.000 s excluded", out)
+
+    def test_no_warning_when_all_large_requests_are_timed(self):
+        by, _, _ = load()
+        a = tpr.analyse(by["192.0.2.20"], 1000, 256)
+        self.assertEqual(a["big_n"], a["timed_n"])
+        self.assertFalse(any("request_time 0.000" in v for v in a["verdicts"]), a["verdicts"])
+        self.assertNotIn("excluded", tpr.render("192.0.2.20", a))
+
+
+class ProbeLogTests(unittest.TestCase):
+    PROBES = [
+        "# outside probe, curl -w '%{time_total} %{http_code}'",
+        "1760000000.10 0.0011 200",
+        "1760000005.12 2.512 200",
+        "2025-10-09T08:53:30Z 7.580 200",
+        "2025-10-09T08:53:35+00:00 0.250",
+        "1760000020.00 10.001 000",
+        "garbage",
+        "1760000025.00 notanumber 200",
+    ]
+
+    def test_parse_probe_accepts_epoch_and_iso(self):
+        probes, bad = tpr.parse_probe(self.PROBES)
+        self.assertEqual((len(probes), bad), (5, 2))
+        self.assertEqual(probes[2][0], 1760000010.0)
+        self.assertEqual(probes[3][2], "")
+
+    def test_probe_section_numbers(self):
+        out = tpr.probe_section(*tpr.parse_probe(self.PROBES))
+        self.assertIn("== Heartbeat (outside probe) ==", out)
+        self.assertIn("probes: 5", out)
+        self.assertIn("max 10001.0 ms", out)
+        self.assertIn(">= 1 s: 3", out)
+        self.assertIn("non-200 / failed (000): 1", out)
+        self.assertIn("2 malformed", out)
+        self.assertIn("2025-10-09T08:53:30Z  7580.0 ms (http 200)", out)
+        self.assertIn("no usable probe lines", tpr.probe_section([], 0))
+
+    def test_main_with_probe_log(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            probe = os.path.join(d, "probe.txt")
+            pathlib.Path(probe).write_text("\n".join(self.PROBES) + "\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(tpr.main(["--probe-log", probe, str(FIXTURE)]), 0)
+            self.assertIn("== Heartbeat (outside probe) ==", buf.getvalue())
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                tpr.main([str(FIXTURE)])
+            self.assertNotIn("outside probe", buf.getvalue())
 
 
 if __name__ == "__main__":
