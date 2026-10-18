@@ -138,7 +138,7 @@ freeze imposed). `1.0.0` criteria are proposed in ADR-0029 section 5
 
 No features, no schema bump unless a fix needs one. **The public
 announcement (WP 5.6, r/selfhosted) is NOT made at 0.1.0**; it waits for
-0.5.0 (ADR-0029), so no public user ever has to migrate through the
+0.6.0 (ADR-0029), so no public user ever has to migrate through the
 rename.
 
 ### v0.2.0: rename to GameHangar
@@ -174,26 +174,26 @@ rename.
 - **Exit:** release gate, plus an install and a pairing on a real
   Windows PC with a standard user.
 
-### v0.5.0: Steam accounts, then the public announcement
+### v0.5.0: Steam accounts
 
 - **Goal:** Steam login without a terminal and several Steam accounts
-  per household; then the product goes public.
+  per household.
 - **Packages:** D2 QR login, D3 several accounts. Not cut yet.
 - **Entry:** v0.4.0 tagged; the package cut is redone against the
   current schema and the 11 open user questions (D2 1-5, D3 1-6) are
   settled; the ADR drafts 0018/0019 live on unmerged branches (see the
   state note under D2).
 - **Exit:** release gate, plus a real QR login and a prefill per account
-  on the operator's stack; then the public announcement (WP 5.6, user
-  decision 2026-10-18: with the second-to-last themed minor).
+  on the operator's stack.
 
-### v0.6.0: schedules
+### v0.6.0: schedules, then the public announcement
 
-- **Goal:** real schedules for prefill and updates.
+- **Goal:** real schedules for prefill and updates; then the product
+  goes public.
 - **Packages:** D8 SCHED-FEAT-1 weekday schedules and several windows
   per day, incl. rate per window.
 - **Entry:** v0.5.0 tagged.
-- **Exit:** release gate.
+- **Exit:** release gate; then the public announcement (WP 5.6, user decision 2026-10-18: the announcement comes once schedules are in).
 
 ### v0.7.0 and later: beyond Steam and integrations (order not set)
 
@@ -220,6 +220,13 @@ once decided (the decision then lives in the item it belongs to).
   number grow?"): the `1.0.0` criteria proposed in ADR-0029 section 5
   (public, stable operator contract, tested migrations, one minor without
   a breaking change). Recommendation: accept them as written.
+  Follow-up question (user, 2026-10-18): D17 multi-launcher as `2.0.0`.
+  Under SemVer a major is a breaking change, not a big feature; D17 is
+  expected to break the contract anyway (game identity becomes launcher
+  plus id in API, schema and apps; cache layout and DNS names per
+  launcher). Recommendation: plan D17 as `2.0.0` and collect the
+  breaking changes it needs there; the 1.x line between `1.0.0` and
+  D17 takes D4, D25, D26, D27, Phase 6 and the iOS app.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
@@ -853,7 +860,7 @@ These do not need D17 to start; they keep the door open.
    change to stay safe. Size reporting must not assume `depot/` is the
    whole cache.
 4. **Name before public release.** Decided: GameHangar (D18). It must
-   land before the public announcement (v0.5.0 since ADR-0029; the rename
+   land before the public announcement (v0.6.0 since ADR-0029; the rename
    itself is v0.2.0, see Release plan), not
    after.
    Component names are already neutral (`vault-core`, `vault-api`, ...).
@@ -890,7 +897,7 @@ These do not need D17 to start; they keep the door open.
 
 User decision 2026-10-15: the product is renamed to GameHangar, because
 D17 makes it more than a Steam cache. Timing (user decision 2026-10-16):
-with v0.2.0, before the public announcement (v0.5.0 since ADR-0029,
+with v0.2.0, before the public announcement (v0.6.0 since ADR-0029,
 see "Release plan"); it
 does not depend on D17 being built. Model: ADR-0013 (SteamVault ->
 SteamHangar), which lists what a rename touches and how volumes are

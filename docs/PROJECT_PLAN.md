@@ -2299,8 +2299,8 @@ surface (playtime and last-played now flow through the API response).
       See §11 item 6.
 - [ ] Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
       frame as a complement/alternative, not a "LanCache killer").
-      Waits for v0.5.0 (user decision 2026-10-16: after the D18 rename;
-      re-cut 2026-10-18, ADR-0029: with the second-to-last themed minor).
+      Waits for v0.6.0 (user decision 2026-10-16: after the D18 rename;
+      2026-10-18, ADR-0029: once schedules are in).
 
 ### Phase 6 — External Integrations (post-release, user decision 2026-08-10)
 
@@ -3370,9 +3370,8 @@ below carry their own later dates, item 12 is the current one).
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6
       part), D28, D5, D29
-    - v0.5.0 Steam accounts: D2, D3 (after a new package cut); then the
-      public announcement (WP 5.6)
-    - v0.6.0 schedules: D8
+    - v0.5.0 Steam accounts: D2, D3 (after a new package cut)
+    - v0.6.0 schedules: D8; then the public announcement (WP 5.6)
     - v0.7.0+: D17, D4 / DUAL-STACK-1 follow-ups, D25, D26, D27, Phase 6,
       iOS app
     - operator items: DUAL-STACK-1, Sunday cold-game test
@@ -3796,7 +3795,7 @@ below carry their own later dates, item 12 is the current one).
       - [ ] close: release gate, every open B box ticked or moved by the
         user, measurements written up; then tag **`v0.1.0` final**
     - **v0.1.x:** bug fixes only. The public announcement (WP 5.6,
-      r/selfhosted) is NOT made at 0.1.0; it waits for 0.5.0 (ADR-0029).
+      r/selfhosted) is NOT made at 0.1.0; it waits for 0.6.0 (ADR-0029).
 
     - [ ] **v0.2.0 — rename to GameHangar** (re-cut 2026-10-18,
       ADR-0029; packages cut in the version's planning session; entry:
@@ -3829,16 +3828,16 @@ below carry their own later dates, item 12 is the current one).
       - [ ] close: release gate, install and pairing on a real Windows PC
         with a standard user
 
-    - [ ] **v0.5.0 — Steam accounts, then the announcement**: D2 QR login
+    - [ ] **v0.5.0 — Steam accounts**: D2 QR login
       and D3 several accounts (boxes above). Entry: the package cut is
       redone against the current schema and the 11 open user questions
       (D2 1-5, D3 1-6) are settled; the ADR drafts 0018/0019 live on
       unmerged branches. Exit: release gate, plus a real QR login and a
-      prefill per account on the operator's stack; then the public
-      announcement (WP 5.6).
+      prefill per account on the operator's stack.
 
-    - [ ] **v0.6.0 — schedules**: D8 schedules incl. rate per window (box
-      D8 above). Exit: release gate.
+    - [ ] **v0.6.0 — schedules, then the announcement**: D8 schedules
+      incl. rate per window (box D8 above). Exit: release gate; then the
+      public announcement (WP 5.6).
 
     - [ ] **v0.7.0 and later — beyond Steam and integrations** (order not
       set): D17 multi-launcher (needs D18), D4 IPv6 and

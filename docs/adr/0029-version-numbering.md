@@ -65,13 +65,13 @@ the later blocks are re-cut into small minors:
 - 0.3.0 privacy mode (D22) and the store night fill (LIBRARY-META-1d)
 - 0.4.0 agents and devices (Weg B for agents with the installer, D28,
   D29, D5)
-- 0.5.0 Steam accounts (D2, D3), then the public announcement (WP 5.6)
-- 0.6.0 schedules (D8)
+- 0.5.0 Steam accounts (D2, D3)
+- 0.6.0 schedules (D8), then the public announcement (WP 5.6)
 - 0.7.0 and later: beyond Steam and integrations
 
-The announcement comes with the second-to-last themed minor (0.5.0),
-so every public user starts on the final name with privacy mode, the
-real agent install and Steam accounts in place.
+The announcement comes once schedules are in (0.6.0), so every public
+user starts on the final name with privacy mode, the real agent
+install, Steam accounts and schedules in place.
 
 ## Consequences
 
