@@ -4740,6 +4740,8 @@ than the ring come from the persisted 1-minute tier; every point has one
 source (`live` or `persisted`), so nothing is counted twice. `current` is the
 last 15-20 s, split into total and prefill-runner speed. With the event feed
 disabled, `current` is null and `points` empty. No schema change.
+`GET /v1/clients/overview` (WP CLIENTS-LIVE-1) reads the same ring and arms
+the watcher too, so the log is tailed while either page is open.
 
 ### `GET /v1/throughput/series?range=24h`
 
@@ -4822,6 +4824,20 @@ the summary figure of the same range.
   feed disabled.
 - **`loading_now`** uses the same window as `/v1/throughput`'s `current`;
   `null` unless the feed is `ok`; `loading: false` with zero speed when idle.
+- **`live_now`** (WP CLIENTS-LIVE-1, optional, rc21) has the shape of
+  `loading_now` but is read from the live ring of `/v1/throughput/live`
+  (seconds old instead of up to one sweep), per address and mapped to the
+  same entry. One window for all of it, the last 15-20 s (`current` of
+  `/v1/throughput/live`, `live.current_window_seconds`): `loading` = served
+  bytes in it, `bytes_per_second` over it, `apps` = the games with bytes in
+  it, biggest first, each with its own speed. A client that paused for
+  longer is not loading; its games stay in `recent_apps`. It works without
+  any sweep (`never-swept`, `stale`); `null` only with the feed disabled.
+  The answer carries `"live": {"live_since", "current_window_seconds"}`,
+  `null` with the feed disabled. Calling the overview arms the live watcher
+  (the log is tailed at most every 2 s while anything polls, see
+  `/v1/throughput/live`). An address that no sweep has recorded yet is not
+  listed (the list itself still comes from the persisted tiers).
 - **`recent_apps`**: top 10 apps by bytes in the range. Depot → app through
   `depot_app_map` at read time; a depot mapped to no app or to several (a
   shared redistributable) cannot say which game pulled it, and its bytes are

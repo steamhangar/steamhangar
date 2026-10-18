@@ -41,11 +41,14 @@
  * store's `GET /v1/clients` at once (`store.refresh`), and while the page
  * is visible both are refreshed every {@link CLIENTS_POLL_MS} (5 s), so a
  * client that started loading shows up without a page reload. A hidden tab
- * parks the poll (no requests); leaving the view stops it. The "Loading
- * now" box itself can be no newer than the server's last event-log sweep
- * (`loading_now` is computed over the swept window, see
- * api/vault_api/routers/traffic.py); the poll picks a new sweep up within
- * 5 s instead of 30 s. The list is rebuilt per answer or tick.
+ * parks the poll (no requests); leaving the view stops it. WP
+ * CLIENTS-LIVE-1: the "Loading now" box, its speed, the "Downloading" pill
+ * and the "N loading now" tile read each row's `live_now` (the server's live
+ * tier, seconds old; `currentLoading` in lib/clients-page.js), so a 5 s
+ * poll shows a 5 s old state; a server before rc21 sends only the swept
+ * `loading_now` (up to one event-log sweep old), which is the fallback.
+ * Polling the overview also keeps the server's live tier tailing. The list
+ * is rebuilt per answer or tick.
  *
  * **Rename (WP D15-NAMES).** Every card whose row carries a `name_addr`
  * has a "Rename" button. It opens a small dialog (the `.dialog-backdrop`/

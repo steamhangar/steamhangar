@@ -16,6 +16,12 @@ fills from vault-core's event log:
   in-memory live tier (``vault_api/live_tier.py``). Polling it is what makes
   the server tail the event log every ~2 s (only while somebody polls).
 
+WP CLIENTS-LIVE-1: the clients overview polls the live tier too. Each entry
+carries ``live_now`` (the shape of ``loading_now``, read from the ring per
+address instead of the swept window, over the current-speed window only) and
+the answer a ``live`` block; both null when the feed is disabled.
+``loading_now`` keeps its swept meaning for older clients.
+
 All three take ``range`` = ``24h`` | ``7d`` | ``30d`` | ``all``; the two
 throughput endpoints also take ``1h`` | ``6h`` (GRAPH-ZOOM). The range picks
 the tier (``1h``/``6h`` -> 1-minute rows, ``24h`` -> 5-minute rows,
@@ -82,6 +88,7 @@ Auth is attached at the router level.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -345,6 +352,24 @@ class ClientActivityOut(BaseModel):
     #: WP D15-NAMES: ``name`` when set (an explicit name wins), else the
     #: agent's client_id, else the address.
     display_name: str
+    #: WP CLIENTS-LIVE-1: ``loading_now`` from the live tier (seconds old,
+    #: not a sweep). ONE window for all of it, the last
+    #: ``live.current_window_seconds`` (the live "Current speed" window):
+    #: ``loading`` = served bytes on the client's addresses in it,
+    #: ``bytes_per_second`` over it, ``apps`` = the games with bytes in it,
+    #: each with its speed. A client that paused longer than that window is
+    #: not loading (its games stay in ``recent_apps``). Null when the feed
+    #: is disabled; absent from servers before rc21.
+    live_now: LoadingNowOut | None = None
+
+
+class ClientsLiveOut(BaseModel):
+    """How fresh the entries' ``live_now`` is (WP CLIENTS-LIVE-1)."""
+
+    #: Minutes from here on are fully in the ring (``/v1/throughput/live``).
+    live_since: str | None
+    #: The window of ``live_now``, seconds (15 s plus the running 5 s cell).
+    current_window_seconds: int
 
 
 class ClientsOverviewOut(BaseModel):
@@ -354,6 +379,8 @@ class ClientsOverviewOut(BaseModel):
     range_start: str | None
     active_window_minutes: int
     clients: list[ClientActivityOut]
+    #: WP CLIENTS-LIVE-1: null when the feed is disabled.
+    live: ClientsLiveOut | None = None
 
 
 # --------------------------------------------------------------------------
@@ -675,14 +702,24 @@ class LiveOut(BaseModel):
     points: list[LivePointOut]
 
 
+def _runner_test(
+    windows: tuple[runner_identity.RunnerWindow, ...],
+) -> Callable[[str, str], bool]:
+    """``is_runner(addr, bucket_iso)`` for the live tier's reads."""
+
+    def is_runner(addr: str, bucket_iso: str) -> bool:
+        return any(w.addr == addr and w.start <= bucket_iso < w.end for w in windows)
+
+    return is_runner
+
+
 def _live_points(
     conn: sqlite3.Connection,
     tier: live_tier.LiveTier,
     now: datetime,
     windows: tuple[runner_identity.RunnerWindow, ...],
 ) -> tuple[list[live_tier.LivePoint], live_tier.LiveCurrent, int]:
-    def is_runner(addr: str, bucket_iso: str) -> bool:
-        return any(w.addr == addr and w.start <= bucket_iso < w.end for w in windows)
+    is_runner = _runner_test(windows)
 
     def persisted(start: int, end: int) -> dict[int, live_tier.PersistedMinute]:
         first = traffic.to_utc_iso(datetime.fromtimestamp(start, tz=timezone.utc))
@@ -818,12 +855,20 @@ def get_clients_overview(
             conn, traffic.runner_scope(windows), spec, window, now, minutes,
             listing_since, feed_on,
         )
+        # WP CLIENTS-LIVE-1: the live tier, polled like /v1/throughput/live.
+        ring = _read_ring(request, settings, windows) if feed_on else None
         depots = {
             d
             for side in (side_clients, side_runner)
             for per in (*side.recent.values(), *side.current.values())
             for d in per
         }
+        if ring is not None:
+            depots |= {
+                d
+                for entry in ring.activity.values()
+                for d in entry.depots
+            }
         depot_owners = traffic.depot_owners(conn, depots)
         app_ids = {a for apps in depot_owners.values() if len(apps) == 1 for a in apps}
         names = traffic.app_names(
@@ -853,6 +898,33 @@ def get_clients_overview(
                 for app in attribution.apps
             ],
             unattributed_bytes_per_second=max(0, total - attributed) / window.seconds,
+        )
+
+    def live_loading(runner: bool, addrs: list[str]) -> LoadingNowOut | None:
+        """``live_now`` (``ClientActivityOut``) of the entry with ``addrs``."""
+        if ring is None:
+            return None
+        parts = [ring.activity[(a, runner)] for a in addrs if (a, runner) in ring.activity]
+        seconds = ring.current_seconds
+        total = sum(p.bytes_served for p in parts)
+        merged: dict[int, tuple[int, str]] = {}
+        for part in parts:
+            for depotid, size in part.depots.items():
+                merged[depotid] = (merged.get(depotid, (0, ""))[0] + size, "")
+        attribution = traffic.attribute(merged, depot_owners)
+        attributed = sum(app.bytes_served for app in attribution.apps)
+        return LoadingNowOut(
+            loading=total > 0,
+            bytes_per_second=total / seconds,
+            apps=[
+                LoadingAppOut(
+                    appid=app.appid,
+                    name=names.get(app.appid),
+                    bytes_per_second=app.bytes_served / seconds,
+                )
+                for app in attribution.apps
+            ],
+            unattributed_bytes_per_second=max(0, total - attributed) / seconds,
         )
 
     def recent_apps(
@@ -926,6 +998,7 @@ def get_clients_overview(
                 name=named.name,
                 name_addr=named.name_addr,
                 display_name=named.display_name,
+                live_now=live_loading(False, addrs),
             )
         )
 
@@ -954,6 +1027,7 @@ def get_clients_overview(
                 name=named.name,
                 name_addr=named.name_addr,
                 display_name=named.display_name,
+                live_now=live_loading(False, [addr]),
             )
         )
 
@@ -988,6 +1062,7 @@ def get_clients_overview(
                 name=None,
                 name_addr=None,
                 display_name=runner_identity.DISPLAY_NAME,
+                live_now=live_loading(True, runner_addrs),
             )
         )
 
@@ -999,7 +1074,38 @@ def get_clients_overview(
         range_start=spec.start,
         active_window_minutes=minutes,
         clients=clients,
+        live=(
+            ClientsLiveOut(
+                live_since=ring.live_since,
+                current_window_seconds=int(round(ring.current_seconds)),
+            )
+            if ring is not None
+            else None
+        ),
     )
+
+
+@dataclass
+class _Ring:
+    """The live tier as one clients-overview request reads it."""
+
+    activity: dict[tuple[str, bool], live_tier.AddrActivity]
+    current_seconds: float
+    live_since: str | None
+
+
+def _read_ring(
+    request: Request,
+    settings: Settings,
+    windows: tuple[runner_identity.RunnerWindow, ...],
+) -> _Ring:
+    """Arm and tail the live tier, then read it per address (CLIENTS-LIVE-1)."""
+    tier: live_tier.LiveTier = request.app.state.live_tier
+    now = tier.clock()
+    tier.touch(now)
+    tier.refresh(settings.event_log_path, now)
+    activity, seconds = tier.addr_activity(now, _runner_test(windows))
+    return _Ring(activity=activity, current_seconds=seconds, live_since=tier.covered_from())
 
 
 @dataclass

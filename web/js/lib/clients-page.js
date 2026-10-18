@@ -31,6 +31,10 @@
  *  - "Installed" exists for agent clients only (`installed_app_count`).
  *  - A `null` the server sent (feed not `ok`) shows the dash; a real zero
  *    prints.
+ *  - "Loading now" (the card's now box, the pill's "Downloading", the
+ *    "N loading now" tile) reads `currentLoading`: the server's live
+ *    `live_now` (WP CLIENTS-LIVE-1, seconds old), else the swept
+ *    `loading_now` (servers before rc21, or no live data for the row).
  */
 
 import { formatAgo } from "./format.js";
@@ -99,6 +103,19 @@ export function connectionChip(client) {
   return { word: "No current data", cls: "pchip pchip-unknown" };
 }
 
+/**
+ * What a client is loading now (WP CLIENTS-LIVE-1): `live_now` from the
+ * server's live tier when it sent one, else the swept `loading_now` (up to
+ * one event-log sweep old). Same shape either way; `null` = no current data.
+ * @param {object} client
+ * @returns {object | null}
+ */
+export function currentLoading(client) {
+  if (!client) return null;
+  if (client.live_now) return client.live_now;
+  return client.loading_now || null;
+}
+
 /** Name of an app in a list: the server's name, else the neutral "Unknown app" (never a bare id). */
 export function appLabel(app) {
   return typeof app.name === "string" && app.name.trim() ? app.name : UNKNOWN_APP_NAME;
@@ -110,7 +127,7 @@ export function appLabel(app) {
  * @returns {string}
  */
 export function loadingNowText(client) {
-  const now = client.loading_now;
+  const now = currentLoading(client);
   if (!now) return `Loading now: ${DASH}`;
   if (!now.loading) return "Loading now: nothing";
   const speed = formatSpeed(now.bytes_per_second) || DASH;
@@ -245,7 +262,10 @@ export function summaryTiles(clients, range, serverVersion) {
   const list = Array.isArray(clients) ? clients : [];
   const tiles = [];
   const connected = list.filter((c) => c.connected === true).length;
-  const loading = list.filter((c) => c.loading_now && c.loading_now.loading === true).length;
+  const loading = list.filter((c) => {
+    const now = currentLoading(c);
+    return !!now && now.loading === true;
+  }).length;
   tiles.push({
     key: "connected",
     label: "Connected",
@@ -396,6 +416,7 @@ export function mergeAgentData(overviewClients, agentClients) {
       installed_app_count: Number.isInteger(a.app_count) ? a.app_count : null,
       stats: null,
       loading_now: null,
+      live_now: null,
       recent_apps: null,
       recent_unattributed_bytes: null,
       name: a.name ?? null,
@@ -422,7 +443,8 @@ export function mergeAgentData(overviewClients, agentClients) {
  * @returns {{kind: string, text: string, tone?: string | null}}
  */
 export function connectionPill(client) {
-  if (!isAgentClient(client) && client.loading_now && client.loading_now.loading === true) {
+  const now = currentLoading(client);
+  if (!isAgentClient(client) && now && now.loading === true) {
     return { kind: "running", text: "Downloading" };
   }
   let on = client.connected;
@@ -445,7 +467,7 @@ export const NOW_UNKNOWN_TEXT = `Loading now: ${DASH}`;
  * @returns {{loading: true, title: string, sub: string, speed: string} | {loading: false, text: string}}
  */
 export function nowBox(client) {
-  const now = client.loading_now;
+  const now = currentLoading(client);
   if (!now) return { loading: false, text: NOW_UNKNOWN_TEXT };
   if (!now.loading) return { loading: false, text: IDLE_TEXT };
   const apps = Array.isArray(now.apps) ? now.apps.map(appLabel) : [];
