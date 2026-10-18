@@ -3963,6 +3963,11 @@ below carry their own later dates, item 12 is the current one).
         suggest deleting cached games no reporting client has installed
         any more (grace period, offline clients don't count), with the
         space it frees; never automatic.
+      - [ ] **CACHE-MAX-1** (user decision 2026-10-18, Weg B; roadmap)
+        optional maximum cache size: above it no new games and no storing
+        of misses for uncached depots (pass-through), updates of cached
+        games keep running and storing, UI warning with cleanup
+        suggestions, never deletes on its own.
       - [ ] **CLIENT-NAME-MAC-1** (roadmap D28, user wish 2026-10-14;
         pairs with the installer and the Weg B agent work): the agent
         reports its MAC, vault-api accepts `key_type = "mac"` (reserved

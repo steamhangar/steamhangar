@@ -244,6 +244,26 @@ rename.
   client (agent reports keep snapshots; check retention
   `VAULT_AGENT_REPORT_KEEP`) and must not count a client that simply went
   offline. Fits 0.4.0 (agents and devices); the user may pull it earlier.
+- **CACHE-MAX-1 (user decision 2026-10-18, Weg B, 0.4.0 with
+  CLEANUP-SUGGEST-1):** optional maximum cache size (blank = no limit).
+  vault-core uses `proxy_store` (ADR-0001): nothing is evicted on its own
+  and there is no nginx `max_size`, so the limit is ours. At or above the
+  limit:
+  - **Updates keep running** (user: one of the main features): the update
+    sweep, update runs and client-driven updates of games already in the
+    cache still store their new chunks; GC (execute) reclaims the
+    superseded ones afterwards.
+  - Paused: prefills of games not yet cached (manual start asks for an
+    explicit override), the miss trigger for uncached games.
+  - vault-core stores no new MISS for depots that are not in the cache
+    yet; it only passes them through (clients still download, just
+    uncached). Misses for depots already cached are stored (updates).
+  - UI: warning with the current size vs the limit and the
+    CLEANUP-SUGGEST-1 candidates with the space each frees.
+  - Never deletes on its own. Open for the cut: how vault-core learns
+    "over limit" and "known depot" cheaply (flag file written by
+    vault-api, map of cached depot ids), and a hysteresis so it does not
+    flap at the edge.
 
 ### v0.5.0: Steam accounts
 
