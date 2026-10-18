@@ -307,6 +307,19 @@ DEFAULT_AUTO_GC = AUTO_GC_EXECUTE
 #: ``GET /v1/schedule`` surfaces it).
 DEFAULT_SWEEP_INCLUDE_CACHED = True
 
+#: WP AUTO-VERIFY-1 (operator decision 2026-10-18, Weg A).
+#: ``VAULT_AUTO_COMPLETE_CACHED`` -- may the scheduled sweep run a forced
+#: prefill for every cached game the stored disk check calls incomplete with
+#: missing chunks (``scheduler.completion_appids``, WP CACHE-COMPLETE-1b)?
+#: ON by default: that was the only behaviour before this switch existed.
+#: Off, the sweep never forces a game for completeness; "Verify" and
+#: "Complete all" (``POST /v1/prefill/verify``/``incomplete``) still work, and
+#: the disk check itself still runs (it is part of the update check). A forced
+#: run requests the full chunk list of the current build, but only chunks
+#: missing from the cache are downloaded (present ones are cache HITs).
+#: DB-overridable (``settings_store``), env wins (D16b).
+DEFAULT_AUTO_COMPLETE_CACHED = True
+
 
 # --------------------------------------------------------------------------
 # WP 3.11 — the cache-event sweep (ADR-0008). OFF by default: the whole
@@ -1371,6 +1384,10 @@ class Settings:
     # "Sweep target set" for the full write-up, including the auto-GC
     # coupling this setting deliberately does not hide.
     sweep_include_cached: bool = DEFAULT_SWEEP_INCLUDE_CACHED
+    # WP AUTO-VERIFY-1. The sweep's completion step (forced runs for cached
+    # games the disk check calls incomplete) -- see
+    # DEFAULT_AUTO_COMPLETE_CACHED above.
+    auto_complete_cached: bool = DEFAULT_AUTO_COMPLETE_CACHED
     # WP 3.11 (ADR-0008). Path to vault-core's structured cache-event log.
     # EMPTY = the whole feature is off: no sweeping, no statistics tables
     # growing, no miss trigger. This is the one enable switch.
@@ -1775,6 +1792,10 @@ class Settings:
             # and for how an operator opts back out).
             sweep_include_cached=_env_bool(
                 "VAULT_SWEEP_INCLUDE_CACHED", DEFAULT_SWEEP_INCLUDE_CACHED
+            ),
+            # WP AUTO-VERIFY-1. Blank/unset = on (DEFAULT_AUTO_COMPLETE_CACHED).
+            auto_complete_cached=_env_bool(
+                "VAULT_AUTO_COMPLETE_CACHED", DEFAULT_AUTO_COMPLETE_CACHED
             ),
             # WP 3.11 (ADR-0008). Blank/unset = the whole cache-event feature
             # stays off. The path itself is NOT validated here beyond

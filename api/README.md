@@ -2329,10 +2329,19 @@ window, and without a window it is manual only. Inside the window,
 (`scheduler.completion_appids`), and enqueues it together with the sweep
 targets, so those runs complete the game; the log names them. Rules:
 
+- **Switch: "Complete cached games automatically"** (WP AUTO-VERIFY-1,
+  operator decision 2026-10-18). Settings key `auto_complete_cached`, env
+  `VAULT_AUTO_COMPLETE_CACHED` (env wins and shows read-only), default
+  `true`, applies `next_sweep`. Off: the sweep never forces a game for
+  completeness and logs nothing about it; the disk check still runs with the
+  update check, the figures and the incomplete list stay, and "Verify" /
+  "Complete now" / "Complete all" (`POST /v1/prefill/verify`,
+  `POST /v1/prefill/incomplete`) still work. `GET /v1/schedule` reports the
+  effective value as `auto_complete_cached`.
 - **All incomplete cached games** (user decision 2026-10-14), not only sweep
   targets: a game completes in the window whether or not a PC reports it
-  installed and whether `VAULT_SWEEP_INCLUDE_CACHED` is on. The window is
-  the only gate. `GET /v1/schedule`'s `last_sweep_targets` counts the
+  installed and whether `VAULT_SWEEP_INCLUDE_CACHED` is on. The window and
+  the switch above are the only gates. `GET /v1/schedule`'s `last_sweep_targets` counts the
   targets plus these games.
 - **Stored figures.** The sweep reads the figures the latest update check
   (or a post-job re-measure) stored; it does not measure. The check runs on
@@ -2349,6 +2358,17 @@ targets, so those runs complete the game; the log names them. Rules:
 - **Known limit:** a game whose missing chunks a forced run does not fetch
   (for example a mapped depot SteamPrefill no longer selects) is forced
   again on every sweep while it stays incomplete.
+- **Delta-only games are caught** (WP AUTO-VERIFY-1 test
+  `test_auto_verify_1.py`). A game whose cache holds only the chunks an
+  update changed (manifest N+1 recorded, the unchanged chunks never cached or
+  gone) is measured against every chunk of N+1 in every mapped depot, also the
+  depots the update did not touch; leftover chunks of the old build that N+1
+  does not list count for nothing. It reads "Partially cached" and the sweep
+  completes it while the switch is on. The disk check is the "verified"
+  signal: the detail sheet shows "checked <time>" next to the figure. Limit:
+  if any mapped depot's target manifest cannot be read (never archived and
+  not stored in the cache), the whole figure is unknown ("Cached · not
+  verified") and nothing is auto-completed; "Verify" still works.
 
 **Damaged chunks (wrong size) are NOT replaced.** 1a counts a chunk file
 whose size differs from the manifest's `cb_compressed` as damaged. A forced
@@ -4193,7 +4213,8 @@ exists for). It shares nothing with the worker but the database file; WAL plus
   "last_sweep_enqueued": 3,       // NEW jobs only (dedupe hits not counted)
   "next_eligible_at": "2026-08-06T11:00:00Z", // estimate; interval then window
   "sweep_include_cached": true,   // WP 4d — effective value, additive field. Default `true` since WP SWEEP-1 (ADR-0014)
-  "sweep_cached_gc_risk": false   // WP 4d — cached mode on AND auto_gc != 'execute'. `false` here because auto_gc also defaults to 'execute' (paired, ADR-0014)
+  "sweep_cached_gc_risk": false,  // WP 4d — cached mode on AND auto_gc != 'execute'. `false` here because auto_gc also defaults to 'execute' (paired, ADR-0014)
+  "auto_complete_cached": true    // WP AUTO-VERIFY-1 — effective value; false = incomplete games are completed only by hand
 }
 ```
 
@@ -7680,6 +7701,7 @@ the fallback above.
 | `schedule_client_stale_days` | `VAULT_SCHEDULE_CLIENT_STALE_DAYS` | `next_sweep` | Same tick-loop resolution |
 | `auto_gc` | `VAULT_AUTO_GC` | `immediately` | `worker.py`'s `_maybe_queue_auto_gc` resolves `effective_settings` using the connection the just-finished job is already on, so the very next completed prefill sees a changed value |
 | `sweep_include_cached` | `VAULT_SWEEP_INCLUDE_CACHED` | `next_sweep` | Same tick-loop resolution as the other `schedule_*` keys — see "Sweep target set — installed PLUS cached" above (WP 4d) |
+| `auto_complete_cached` | `VAULT_AUTO_COMPLETE_CACHED` | `next_sweep` | WP AUTO-VERIFY-1. "Complete cached games automatically", default `true`. Same tick-loop resolution; gates the sweep's completion step only (see "Verify and complete" above). Same bool grammar and string-only PATCH rule as `sweep_include_cached` |
 | `webhook_url` | `VAULT_WEBHOOK_URL` | `restart-required` | See "The honest gap" below |
 | `webhook_events` | `VAULT_WEBHOOK_EVENTS` | `restart-required` | Same as `webhook_url` |
 | `steam_library_steamid` | `VAULT_STEAM_LIBRARY_STEAMID` | `immediately` | WP API-FEAT-1 (ADR-0016 freeze exception). Nothing in vault-api caches it: the web library (WP WEB-FEAT-1) and, later, the app read it per request from `GET /v1/settings`, so every device shows the same account. Returned as a JSON **string** (17 digits exceed JavaScript's safe-integer range); `PATCH` accepts it only as a JSON string too: a JSON number gets `422`, since a JavaScript sender may already have rounded it and the API cannot tell. Same grammar as the env var (`steam_relay.valid_steamid64`). Not secret, not redacted |

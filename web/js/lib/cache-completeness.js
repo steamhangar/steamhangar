@@ -276,6 +276,8 @@ export function verifyAppids(members) {
 // ---------------------------------------------------------------------
 
 export const INCOMPLETE_HEADING = "Incomplete";
+/** WP AUTO-VERIFY-1: the note while automatic completion is switched off. */
+export const AUTO_COMPLETE_OFF_NOTE = "Manual only — automatic completion is off in Settings.";
 export const COMPLETE_NOW_LABEL = "Verify";
 export const COMPLETE_ALL_LABEL = "Complete all";
 
@@ -341,13 +343,19 @@ export function incompletePctText(row) {
  * (user decision 2026-10-14), so `sweep_include_cached` plays no part.
  * Rows short only of damaged chunks are never completed automatically; their
  * own row note says so. `null` while the schedule is not known.
- * @param {{enabled?: unknown, window?: unknown} | null | undefined} schedule
+ * WP AUTO-VERIFY-1: with `auto_complete_cached: false` (Settings "Complete
+ * cached games automatically" off) nothing completes on its own:
+ * {@link AUTO_COMPLETE_OFF_NOTE}.
+ * @param {{enabled?: unknown, window?: unknown, auto_complete_cached?: unknown} | null | undefined} schedule
  * @returns {string | null}
  */
 export function incompleteScheduleNote(schedule) {
   if (!schedule || typeof schedule !== "object") return null;
   const hasWindow = schedule.enabled === true && typeof schedule.window === "string" && schedule.window.trim();
   if (!hasWindow) return MANUAL_ONLY_NOTE;
+  // WP AUTO-VERIFY-1: only an explicit false (an older server omits the
+  // field and always completed in the window).
+  if (schedule.auto_complete_cached === false) return AUTO_COMPLETE_OFF_NOTE;
   return `These complete automatically in the schedule window ${formatWindow(schedule.window)}.`;
 }
 

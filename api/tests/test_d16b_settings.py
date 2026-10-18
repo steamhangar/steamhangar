@@ -281,6 +281,8 @@ def test_expert_flags_follow_the_d16a_sign_off() -> None:
         "schedule_window", "auto_gc", "vault_name", "steam_library_steamid",
         "bypass_window_days", "webhook_events", "webhook_timeout_seconds",
         "event_log_rotate_bytes",
+        # WP AUTO-VERIFY-1 (operator decision 2026-10-18): next to the window.
+        "auto_complete_cached",
     }
 
 
@@ -445,7 +447,7 @@ def test_get_rows_carry_the_expert_fields(core_client: TestClient) -> None:
     assert threads["effective"] == 8
     keys = [row["key"] for row in body["settings"] if not row["env_only"]]
     assert keys == list(settings_store.OVERRIDABLE_SPECS)
-    assert len(keys) == 29
+    assert len(keys) == 30  # WP AUTO-VERIFY-1: +auto_complete_cached
 
 
 # -- G10 ----------------------------------------------------------------------
@@ -711,6 +713,7 @@ def test_boot_log_level_comes_from_settings(tmp_path: Path) -> None:
 _SAMPLES = {
     "vault_name": "x", "schedule_window": "22:00-06:00", "schedule_interval_minutes": "99",
     "schedule_client_stale_days": "9", "sweep_include_cached": "false", "auto_gc": "off",
+    "auto_complete_cached": "false",
     "gc_grace_days": "1", "manifest_keep": "7", "agent_report_keep": "9",
     "client_stats_keep": "9", "event_sweep_interval_minutes": "9",
     "miss_trigger_cooldown_minutes": "9", "miss_trigger_max_per_sweep": "9",

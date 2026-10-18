@@ -574,6 +574,10 @@ services:
       # addendum), so a value set here pins the key; `${VAR-}` leaves it to
       # Settings, else config.py's default `true`.
       VAULT_SWEEP_INCLUDE_CACHED: ${VAULT_SWEEP_INCLUDE_CACHED-}
+      # WP AUTO-VERIFY-1: "Complete cached games automatically" (default
+      # true in config.py). Forwarded for the same VAULT_SETTINGS_READONLY
+      # reason as the key above; `${VAR-}` leaves it to Settings.
+      VAULT_AUTO_COMPLETE_CACHED: ${VAULT_AUTO_COMPLETE_CACHED-}
       # How many archived manifest .bin files prune_archive keeps PER DEPOT
       # (WP 3.2, api/README.md "Manifest archive"). Default matches
       # config.py's own built-in default byte-for-byte.

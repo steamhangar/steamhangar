@@ -60,6 +60,7 @@ object SettingsLayout {
     private val NORMAL_PLACEMENT: Map<String, String> = linkedMapOf(
         "vault_name" to "vault",
         "schedule_window" to "window",
+        "auto_complete_cached" to "window",
         "auto_gc" to "disk",
         "event_log_rotate_bytes" to "disk",
         "webhook_url" to "notify",
@@ -98,6 +99,7 @@ object SettingsLayout {
         "schedule_interval_minutes" to FieldMeta("Sweep interval (minutes)", "Minutes between two scheduled sweeps inside the download window."),
         "schedule_client_stale_days" to FieldMeta("Client staleness (days)", "Installed-games reports older than this are ignored by the sweep."),
         "sweep_include_cached" to FieldMeta("Include cached games in the sweep", "When on, the sweep also refreshes every game that already has content on disk, not only games a PC agent reports as installed.", listOf("false" to "Off", "true" to "On")),
+        "auto_complete_cached" to FieldMeta("Complete cached games automatically", "Inside the download window, fetch the missing chunks of cached games the disk check found incomplete. Off: use Verify or Complete all.", listOf("false" to "Off", "true" to "On")),
         "auto_gc" to FieldMeta("Auto-GC after a prefill", "Garbage collection after each prefill. Dry run only reports what it would delete; Execute deletes chunks no game references any more, once the GC grace period has passed.", listOf("off" to "Off", "dry-run" to "Dry run", "execute" to "Execute")),
         "gc_grace_days" to FieldMeta("GC grace period (days)", "Unreferenced chunks stay protected this many days before GC may delete them."),
         "manifest_keep" to FieldMeta("Manifests kept per depot", "Archived manifests kept per depot."),

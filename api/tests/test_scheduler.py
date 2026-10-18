@@ -1358,6 +1358,8 @@ def test_schedule_endpoint_reports_config_and_last_sweep(tmp_path: Path) -> None
         # `sweep_cached_gc_risk` (on AND NOT executing) stays `False`.
         "sweep_include_cached": True,
         "sweep_cached_gc_risk": False,
+        # WP AUTO-VERIFY-1: the dataclass default, on.
+        "auto_complete_cached": True,
     }
 
 
