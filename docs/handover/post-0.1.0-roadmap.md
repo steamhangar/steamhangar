@@ -249,6 +249,28 @@ rename.
 
 ## Open decisions (waiting for the user)
 
+- **AUTO-VERIFY-1** (asked 2026-10-18): a nightly / daily automatic verify
+  as a checkbox, default on if it has no downside. Today: every update
+  check (default every 180 min) measures every cached game's chunk files
+  on disk against the current manifests (cheap, no game data read), and
+  the sweep inside the download window already runs forced only for games
+  with missing chunks (CACHE-COMPLETE-1b). A forced "Verify" re-requests
+  every chunk through nginx; a HIT is served from disk without a content
+  check, so it adds no corruption detection over the disk check and
+  cannot replace wrong-size files. Options:
+  - Weg A: no full nightly verify; make the existing auto-complete visible
+    as a Settings checkbox (default on) and show the last disk check per
+    game ("checked 18.10., 16:26") as the "verified" signal.
+  - Weg B: A plus a rolling verify with a nightly byte budget (oldest
+    "confirmed current" first, inside the download window), checkbox
+    default off.
+  - Weg C: full verify of every cached game nightly, default on (reads the
+    whole cache every night: hours of disk I/O, ARC eviction, competes
+    with clients; no corruption check gained).
+  Recommendation: A (B only if "confirmed current" freshness matters).
+  Note: VERIFY-FAST-1 ("light verify") is the test-stack check
+  (`dev.sh verify`), not a game verify.
+
 Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
 question that is not answered in its session is listed here and removed
 once decided (the decision then lives in the item it belongs to).
