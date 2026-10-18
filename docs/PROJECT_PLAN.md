@@ -3899,12 +3899,17 @@ below carry their own later dates, item 12 is the current one).
       - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
       - tuning defaults from the Sunday test, if not shipped in rc20.x
         (the rc20.x box moves here)
-      - [ ] **RUNNER-RETRY-1** (runner/api; user decision 2026-10-18: build
+      - [x] **RUNNER-RETRY-1** (98b99b9; runner/api; user decision 2026-10-18: build
         it although AIO removed the cause — "error messages that never show
         up do no harm") retry the prefill when SteamPrefill reports "Unable
         to detect Lancache server!" (e.g. 3 attempts with a pause, then
         fail with a clear job error); test with a simulated slow/failed
         heartbeat.
+      - [ ] nit (RUNNER-RETRY-1 review): `runner_mark.announce` runs once
+        before attempt 1, a successful retry may run unmarked
+        (prefill.py:611, worker.py:326); runner_identity.py docstring
+        "at most VAULT_PREFILL_TIMEOUT_SECONDS" is now up to 3x plus pauses;
+        stub_prefill `lancache_failures.txt` counter never reset.
       - [ ] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
