@@ -21,10 +21,14 @@ For the next rc21 session. Read this, then the rc21 block in
   manifest-named depots, group figure, "Confirmed current" after every
   successful run), AUTO-VERIFY-1, TP-REPORT-2, CLIENTS-LIVE-1,
   DELETE-CLAIMANT-1, RUNNER-RETRY-1. No rc21 tag yet.
-- In progress at handover: **GRAPH-RECENT-1 + LOADING-NOW-1** (coder,
-  branch `wp/rc21-graph-recent-1`, worktree `/mnt/ssd_pool/app_data/devbox/work/wt-graph-recent-1`,
-  maybe unfinished/uncommitted). Continue it with a fresh coder on the same
-  worktree, then review, CI, merge.
+- Not started in code: **GRAPH-RECENT-1 + LOADING-NOW-1**. A coder ran
+  from 20:23 but was stopped by the environment without writing anything;
+  the worktree `/mnt/ssd_pool/app_data/devbox/work/wt-graph-recent-1`
+  (branch `wp/rc21-graph-recent-1`, at d8dd3bd) is clean. Start a fresh
+  coder there (rebase onto main first); the brief is the GRAPH-RECENT-1 /
+  LOADING-NOW-1 boxes in the plan. Operator evidence: the Downloads page
+  showed "0 MB/s Idle" + "No traffic in this range" while a verify job was
+  running (2026-10-18 20:40).
 - VERIFY-COLD-1: a manual verify run of 5 large games on prod was measured
   on 2026-10-18 evening (result in the roadmap entry VERIFY-COLD-1 /
   PROJECT_PLAN box). The planned full observation (Weg A, manual) is after
@@ -32,7 +36,7 @@ For the next rc21 session. Read this, then the rc21 block in
 
 ## Next (rc21 order)
 
-1. Finish GRAPH-RECENT-1 + LOADING-NOW-1, then RUNNER-SPLIT-1 (same files:
+1. GRAPH-RECENT-1 + LOADING-NOW-1 (fresh start), then RUNNER-SPLIT-1 (same files:
    `api/vault_api/routers/traffic.py`, `live_tier.py`, Downloads hero).
 2. CACHE-REPAIR-UI-1 (web part), CSS-HIDDEN-LINT-1 plus the nit bundle of
    the rc21 block (FLAKY-DEMO-24H-1, flaky clients-merged-card wiring test,
