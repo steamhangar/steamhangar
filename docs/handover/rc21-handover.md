@@ -10,9 +10,12 @@ Read this, then the rc21 block in `docs/PROJECT_PLAN.md`, then
   Schema 33. `VAULT_DEBUG_THROUGHPUT=1`; `VAULT_NGINX_AIO` /
   `VAULT_NGINX_WORKERS` blank again after the cold-game test.
 - Cold-game test done (ADR-0027 "Measurement 2026-10-18"): `AIO=threads`
-  about 5-7x faster on cold reads, link-limited; `WORKERS=2` no gain. The
-  operator still decides **AIO-DEFAULT-1** (code default vs. prod `.env`);
-  VERIFY-COLD-1 follows once AIO is live.
+  about 5-7x faster on cold reads, link-limited; `WORKERS=2` no gain.
+  **AIO-DEFAULT-1 decided: Weg B** — production `.env` gets
+  `VAULT_NGINX_AIO=threads` via Antrag A-20261018-02; rc21 ships the code
+  default (new ADR, tests, verify's flag-off check reworked) and the `.env`
+  line is removed after the rc21 rollout. VERIFY-COLD-1 follows once AIO is
+  live.
 - Tags: rc20 (648bc6d), rc20.1 (fff08b9), rc20.2 (3f78b1b). main CI green.
 - The web UI is built on the UI kit (ADR-0028): `web/css/kit.css`, scale
   tokens in `theme.css`, the hidden `/kit` page, every kit rule scoped under
@@ -51,7 +54,7 @@ Read this, then the rc21 block in `docs/PROJECT_PLAN.md`, then
 2. Web/API packages: CACHE-REPAIR-UI-1, CLIENTS-LIVE-1, RUNNER-SPLIT-1,
    CSS-HIDDEN-LINT-1 (rest), the rc20 review nits.
 3. From the operator's cold-start test (roadmap, 2026-10-18):
-   AIO-DEFAULT-1 (operator decision first), UI-COLD-CACHED-1 (check whether rc20.2's loading states cover it; the
+   AIO code default (AIO-DEFAULT-1 Weg B, second half), UI-COLD-CACHED-1 (check whether rc20.2's loading states cover it; the
    API side, the depot walk in `api/vault_api/sizes.py` `SizeCache`, blocks
    every request on a cold dentry cache — serve the stale snapshot while
    recomputing), VERIFY-COLD-1, TP-REPORT-2. Read those roadmap entries; the
