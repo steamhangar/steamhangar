@@ -3862,6 +3862,12 @@ below carry their own later dates, item 12 is the current one).
         "not measured: N package depots (X GB)" note; Android demo
         `groupPct` (`DemoState.kt:169`) differs from the web demo's
         `demoGroupFields` since GROUP-VERIFIED-1.
+      - [ ] **LOADING-NOW-1** (web + api; CLIENTS-LIVE-1 review) the
+        Downloads "Loading now" tile (`active_clients_now`, 5-min window,
+        `web/js/lib/traffic-view.js:308-315`) uses a different window than
+        the Clients page after CLIENTS-LIVE-1 (loading = bytes in the speed
+        window); align both, one window for "loading" and speed. Do with
+        GRAPH-RECENT-1.
       - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
         have no hit/miss split for the prefill runner, so the Downloads graph
         counts all runner traffic as "from the internet" and a verifying
