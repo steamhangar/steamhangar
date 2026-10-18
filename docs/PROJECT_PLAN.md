@@ -3633,6 +3633,11 @@ below carry their own later dates, item 12 is the current one).
         the remaining first read (no web change). Branch
         `wp/rc21-ui-cold-cached-1` 0a821c0, review PASS; check the walk
         duration in the next cold test.
+      - [ ] **FLAKY-DEMO-24H-1** (web test) `web/tests/demo-data-traffic.test.js:105`
+        computes the 24 h cutoff after the demo request, so a seed job
+        finishing right at the boundary flips in/out (CI failure on
+        wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
+        the clock or take the cutoff from the same `now` the demo uses.
       - [ ] nit (UI-COLD-CACHED-1 review): no backoff when walks keep
         failing (one ERROR per expired read, bounded by request rate);
         theoretical waiter starvation after a failed walk; the Thread.start
@@ -3797,16 +3802,14 @@ below carry their own later dates, item 12 is the current one).
       - [ ] NITS-AUDIT-1 small items (list in the roadmap; the GameHangar
         logo briefing goes to v0.2.0)
       - [ ] **RELEASE-SPLIT-1** (ci + api + web/android; user decision
-        2026-10-18) separate tags and GitHub Releases per product
-        (`agent-v*`, `app-v*`, `server-v*` for the images); a product is
-        only released when its files changed, so its version shows when it
-        last changed. Needs: publish.yml split per tag prefix, the vault-api
-        image bakes the latest agent and APK release instead of building
-        them, the "version differs from the server" hint compares against
-        that bundled/minimum agent version, release notes and About show
-        each product's version. New ADR. Own version lines for agent and
-        app, tagged retroactively (decided 2026-10-18, mapping in the
-        roadmap). Details in the roadmap.
+        2026-10-18, revised the same day) one product version (ADR-0029);
+        each component (server, agent, app) carries the product version in
+        which it last changed and is only rebuilt when it changed; the
+        vault-api image bakes the recorded agent/APK artifacts; the update
+        hint compares against the bundled agent version (minimum version,
+        alias list for the identical rc18-rc20.2 agent builds); About and
+        release notes show each component's version. New ADR. Details in
+        the roadmap.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test

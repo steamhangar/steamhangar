@@ -96,54 +96,39 @@ Antrag filed and the rollout on the operator's stack checked.
   moved by the user; measurements written up (inbox note or ADR addendum).
   Then tag **`v0.1.0` final**.
 
-- **RELEASE-SPLIT-1 (ci + api + clients; user decision 2026-10-18,
+- **RELEASE-SPLIT-1 (ci + api + clients; user decisions 2026-10-18,
   in rc22):** today every `v0.1.0-rcN` tag rebuilds and re-releases every
-  product with the same version, also an unchanged agent. The operator
-  wants a product released only when it changed, and its version to show
-  when that was. Decided: **separate tags and releases per product**
-  (options were: per-component version under one tag; display only;
-  separate tags). Scope for the package cut:
-  - tag prefixes, e.g. `server-v*` (vault-core, vault-api and web images,
-    which ship together), `agent-v*` (vault-agent binaries), `app-v*`
-    (Android APK); `publish.yml` triggers per prefix; a CI check fails a
-    release when a product's paths changed since its last tag without a
-    new tag of that product (or the reverse: a tag with no change).
-  - the vault-api image bakes the latest released agent files and APK
-    (downloaded from their releases, digest-pinned) instead of building
-    them in the same run (today DIST-1a, `agent-build` / `android-build`).
-  - compatibility: the Clients "version differs from the server" hint
-    (Weg A) compares against the bundled agent version, not the server
-    version; the server states a minimum agent and app version. This
-    pulls part of the v0.4.0 "Weg B for agents" forward; the OS report
-    stays in v0.4.0.
-  - About page and release notes list each product's version and the
-    date it last changed. New ADR (supersedes the single-version part of
-    VER-1).
-  - open for the cut: whether `v0.1.0` final is itself a `server-v0.1.0`
-    tag or a plain umbrella tag pointing at the three product versions.
-  - **History, own numbering (user decision 2026-10-18):** agent and app
-    get their own version line, tagged retroactively on the commits where
-    their shipped files last changed (measured from git: product source
-    without tests, goldens and READMEs, between consecutive `v*` tags).
-    Proposed mapping, confirmed at the package cut:
-    - agent (`agent/`, without `_test.go`): `agent-v0.1.0` = rc1,
-      `0.2.0` = rc9, `0.3.0` = rc10, `0.4.0` = rc13, `0.5.0` = rc17
-      (current; rc18 to rc20.2 re-released identical code 7 times).
-    - app (`app/app/src/main`, gradle files): `app-v0.1.0` = rc1, `0.2.0`
-      = rc10, `0.3.0` = rc12, `0.4.0` = rc13, `0.5.0` = rc14, `0.6.0` =
-      rc15, `0.7.0` = rc16, `0.8.0` = rc17, `0.9.0` = rc19, `0.9.1` =
-      rc19.2, `0.9.2` = rc19.3, `0.10.0` = rc20 (unchanged in rc11, rc18,
-      rc18.1, rc20.1, rc20.2).
-    - server (vault-core, vault-api with web, vault-dns, vault-proxy):
-      changed in every rc, keeps the `v0.1.0-rcN` line; vault-dns changed
-      only in rc9, vault-proxy in rc3, rc9, rc14, rc15, rc19 (they stay
-      part of the server release).
-    - running devices report the old strings (`0.1.0-rc17` ... `0.1.0-rc20.2`
-      for agent 0.5.0); the API keeps a mapping table so the Clients hint
-      shows the new number and no false "update available".
-    - push the retro tags BEFORE the new per-prefix `publish.yml` lands,
-      so no old commit is rebuilt; pushing non-`v*` tags needs the
-      operator's yes at that time.
+  product with the same version, also an unchanged agent (agent code
+  unchanged since rc17, re-released in rc18 to rc20.2; app unchanged in
+  rc11, rc18, rc18.1, rc20.1, rc20.2). The operator wants a component
+  released only when it changed, and its version to show when that was.
+  **Decided (revised the same day, replaces "separate tags" and "own
+  numbering"): one product version** per ADR-0029 (`v0.X.Y(-rcN)` tags
+  only). Each component (server = vault-core, vault-api with web,
+  vault-dns, vault-proxy; agent; Android app) carries the product version
+  in which it last changed. Components therefore drift apart naturally
+  and correctly, e.g. agent `1.2.0` next to server `1.5.0` when the agent
+  last changed in 1.2.0; an agent-only fix ships as a product patch
+  (`1.5.1`) and only the agent becomes `1.5.1`.
+  Scope for the package cut:
+  - a component manifest in the repo (paths per component) and a CI check
+    at release time: a component whose paths changed since its recorded
+    version gets the new version and is rebuilt; an unchanged one keeps
+    its version and its existing artifact (not rebuilt, not re-uploaded).
+  - the vault-api image bakes the agent files and APK of their recorded
+    versions (fetched from the release that built them, digest-pinned)
+    instead of building them in the same run (today DIST-1a).
+  - the Clients "version differs from the server" hint compares against
+    the bundled agent version, not the server version; the server states
+    a minimum agent and app version (pulls that part of the v0.4.0 "Weg B
+    for agents" forward; the OS report stays in v0.4.0). A small alias
+    list maps the identical agent builds `0.1.0-rc18` ... `0.1.0-rc20.2`
+    to `0.1.0-rc17`.
+  - About page and release notes list each component with its version and
+    "unchanged since ..." where it applies. New ADR (supersedes the
+    single-version part of VER-1, extends ADR-0029).
+  - history: no retro tags; the analysis above goes into the ADR as a
+    table.
 
 ### Version rules (ADR-0029, user decisions 2026-10-18)
 
@@ -281,8 +266,9 @@ once decided (the decision then lives in the item it belongs to).
     rc20.3 rollout.
   - Weg D: measure more first (another game, a second client, CPU of the
     nginx process alone).
-  Recommendation: A or C. The user asked for the roadmap entry first
-  (2026-10-18); not decided yet. `VAULT_NGINX_WORKERS=2` gets no default:
+  Recommendation was A or C; decided B (see the head of this entry).
+  Code default done in rc21 (AIO-DEFAULT-1b, ADR-0030; opt-out
+  `VAULT_NGINX_AIO=off`). `VAULT_NGINX_WORKERS=2` gets no default:
   no gain over the faster baseline, heartbeat stays at about 1-3 s.
 - **Runner retry** on "Unable to detect Lancache server!" (rc21): only if
   the heartbeat evidence supports it. Evidence of 2026-10-18: without AIO,
