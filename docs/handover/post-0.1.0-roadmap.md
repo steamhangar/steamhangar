@@ -161,7 +161,7 @@ once decided (the decision then lives in the item it belongs to).
 - **D17 cache path** (v0.4.0+): Weg A extend vault-core, Weg B a lancache
   sidecar behind vault-core, or a mix; the 2026-10-15 assessment favours
   Weg B or the mix. See D17.
-- **AIO-DEFAULT-1** (rc20.3 / rc21, measured 2026-10-18): how
+- **AIO-DEFAULT-1** (decided 2026-10-18 by the operator: **Weg B** — production `.env` now via Antrag A-20261018-02, the code default with rc21 and then the `.env` line goes; rc20.3 not needed) (measured 2026-10-18): how
   `VAULT_NGINX_AIO=threads` goes live. The cold-game test passed it on
   every criterion: 2 min 23 s / 2 min 25 s cold against 11 min 23 s to
   16 min 09 s baseline, link-limited at about 940 Mbit/s p95, heartbeat
