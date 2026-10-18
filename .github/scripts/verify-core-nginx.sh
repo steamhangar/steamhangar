@@ -486,16 +486,22 @@ render_and_test() {
                 grep -q "tcpinfo_rtt" "$conf" || { echo "FAIL: log_format lacks tcpinfo_rtt"; status=1; }
             fi
 
-            # --- WP TUNE-1a: the opt-in tuning switches ------------------------
-            # Unset (the default): the shipped lines stay. Set: the rendered
-            # config carries the lines, and nginx -t above accepted them.
-            if [ -n "$VAULT_NGINX_AIO" ]; then
-                grep -qx "    aio threads;" "$conf" || { echo "FAIL: VAULT_NGINX_AIO=$VAULT_NGINX_AIO but no aio threads line"; status=1; }
+            # --- WP TUNE-1a / AIO-DEFAULT-1b: the tuning switches ---------------
+            # VAULT_NGINX_AIO unset/empty/threads: `aio threads;` + `sendfile
+            # off;` (the default since rc21, ADR-0030), and nginx -t above
+            # accepted them. `off` (the opt-out): no aio, the shipped
+            # `sendfile on;` stays. WORKERS unset: the shipped line stays.
+            if [ "$VAULT_NGINX_AIO" != off ]; then
+                [ "$(grep -cx "    aio threads;" "$conf")" = 1 ] || { echo "FAIL: VAULT_NGINX_AIO=[$VAULT_NGINX_AIO] (default threads) but not exactly one aio threads line"; status=1; }
                 grep -qx "    sendfile      off;" "$conf" || { echo "FAIL: aio threads but sendfile is not off"; status=1; }
                 ! grep -qx "    sendfile      on;" "$conf" || { echo "FAIL: sendfile on survived"; status=1; }
+                grep -q "31-vault-debug-throughput.sh: VAULT_NGINX_AIO=.*aio threads;. added to http" /tmp/entrypoint.log \
+                    || { echo "FAIL: 31- did not log the aio threads render"; status=1; }
             else
-                ! grep -qE "^[[:space:]]*aio[[:space:]]" "$conf" || { echo "FAIL: aio set while VAULT_NGINX_AIO is unset"; status=1; }
-                grep -qx "    sendfile      on;" "$conf" || { echo "FAIL: shipped sendfile on line missing"; status=1; }
+                ! grep -qE "^[[:space:]]*aio[[:space:]]" "$conf" || { echo "FAIL: aio set while VAULT_NGINX_AIO=off"; status=1; }
+                grep -qx "    sendfile      on;" "$conf" || { echo "FAIL: shipped sendfile on line missing with VAULT_NGINX_AIO=off"; status=1; }
+                grep -q "31-vault-debug-throughput.sh: VAULT_NGINX_AIO=off: no aio" /tmp/entrypoint.log \
+                    || { echo "FAIL: 31- did not log the AIO opt-out"; status=1; }
             fi
             if [ -n "$VAULT_NGINX_WORKERS" ]; then
                 grep -qx "worker_processes  $VAULT_NGINX_WORKERS;" "$conf" || { echo "FAIL: worker_processes  $VAULT_NGINX_WORKERS; not rendered"; status=1; }
@@ -1107,10 +1113,15 @@ render_and_test "cache-event log ON" "/vault/logs/event.log" 3
 # off and on (two independent features, one config).
 DEBUG_TP=1 DEBUG_TP_EXPECT=3 render_and_test "throughput debug ON" "" 0
 DEBUG_TP=1 DEBUG_TP_EXPECT=3 render_and_test "throughput debug ON, event log ON" "/vault/logs/event.log" 3
-# WP TUNE-1a: the opt-in tuning switches through the real entrypoint, with
-# the debug flag off (they are independent of it): nginx -t accepts the
-# render, which carries aio threads, sendfile off and worker_processes 2.
+# WP TUNE-1a: the tuning switches through the real entrypoint, with the
+# debug flag off (they are independent of it): nginx -t accepts the render,
+# which carries aio threads, sendfile off and worker_processes 2. Every other
+# scenario runs with VAULT_NGINX_AIO empty, i.e. the rc21 default (aio
+# threads, ADR-0030), checked in each of them.
 TUNE_AIO=threads TUNE_WORKERS=2 render_and_test "tuning AIO=threads WORKERS=2" "" 0
+# WP AIO-DEFAULT-1b: the opt-out renders the pre-rc21 config (no aio,
+# sendfile on) and still passes nginx -t and the preflight.
+TUNE_AIO=off render_and_test "tuning AIO=off (opt-out of the rc21 default)" "" 0
 # Bad values stop the boot in hook 31.
 render_must_fail "bad VAULT_NGINX_AIO" "" 31-vault-debug-throughput.sh "" "" -e VAULT_NGINX_AIO=on
 render_must_fail "bad VAULT_NGINX_WORKERS" "" 31-vault-debug-throughput.sh "" "" -e VAULT_NGINX_WORKERS=17

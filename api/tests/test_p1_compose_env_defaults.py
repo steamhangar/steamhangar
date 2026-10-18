@@ -256,7 +256,9 @@ EXPECTED_DEFAULTS_VAULT_CORE: dict[str, str] = {
     "VAULT_DEBUG_THROUGHPUT": "",
     "VAULT_DEBUG_THROUGHPUT_MAX_MB": "",
     "VAULT_DEBUG_THROUGHPUT_MAX_DAYS": "",
-    # WP TUNE-1a: opt-in nginx tuning switches, `-` form, blank = off.
+    # WP TUNE-1a: nginx tuning switches, `-` form. Blank AIO = the hook's
+    # default `threads` since rc21 (ADR-0030, `off` opts out); blank
+    # WORKERS = the template's worker_processes 1.
     "VAULT_NGINX_AIO": "",
     "VAULT_NGINX_WORKERS": "",
     # WP CORE-FIX-3 (ADR-0020): the HTTPS passthrough switch, default on.
