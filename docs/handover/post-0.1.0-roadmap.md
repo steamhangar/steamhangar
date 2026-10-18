@@ -114,54 +114,93 @@ Antrag filed and the rollout on the operator's stack checked.
   - compatibility: the Clients "version differs from the server" hint
     (Weg A) compares against the bundled agent version, not the server
     version; the server states a minimum agent and app version. This
-    pulls part of the v0.2.0 "Weg B for agents" forward; the OS report
-    stays in v0.2.0.
+    pulls part of the v0.4.0 "Weg B for agents" forward; the OS report
+    stays in v0.4.0.
   - About page and release notes list each product's version and the
     date it last changed. New ADR (supersedes the single-version part of
     VER-1).
   - open for the cut: whether `v0.1.0` final is itself a `server-v0.1.0`
     tag or a plain umbrella tag pointing at the three product versions.
 
+### Version rules (ADR-0029, user decisions 2026-10-18)
+
+The `0.1.0-rc` series grew from "release candidate" into a feature
+build per rc (rc13-rc20 added features and schema v17 to v33). From
+0.2.0 on: a minor (`0.X.0`) is one themed feature set whose package
+list is written here before its first package starts; new ideas go to a
+later minor unless the user pulls them in; `rc1` of a minor is feature
+freeze (fixes only), and at `rc4` the scope goes back to the user; a
+patch (`0.X.Y`) is fixes only. rc21 and rc22 keep their scope (Weg C, no
+freeze imposed). `1.0.0` criteria are proposed in ADR-0029 section 5
+(open decision VERSION-1.0).
+
 ### v0.1.x: bug fixes only
 
 No features, no schema bump unless a fix needs one. **The public
 announcement (WP 5.6, r/selfhosted) is NOT made at 0.1.0**; it waits for
-0.2.0, so no public user ever has to migrate through the rename.
+0.5.0 (ADR-0029), so no public user ever has to migrate through the
+rename.
 
-### v0.2.0: GameHangar, privacy, schedules, agents
+### v0.2.0: rename to GameHangar
 
-- **Goal:** the product goes public under its final name with a privacy
-  mode, real schedules and a proper agent install.
+- **Goal:** the product carries its final name before anything else
+  ships, so no later user migrates through the rename.
 - **Packages (to be cut in the version's planning session):** D18
-  rename to GameHangar (user decision 2026-10-16: with 0.2.0; GitHub org
-  choice A/B/C in D18 still open), incl. the GameHangar logo and header
-  briefing; D22 privacy mode (ADR-0023 draft), then LIBRARY-META-1d store
-  night fill on top of it; D8 schedules incl. rate per window; Weg B for
-  agents (agent reports its OS, API serves a minimum agent version)
-  together with the real installer (the installer part of D6); D28
-  CLIENT-NAME-MAC-1; D29 PAIR-2; D5 named, scoped API keys (D29 builds on
-  it).
+  RENAME-2 (user decision 2026-10-16; GitHub org choice A/B/C in D18
+  still open), incl. the GameHangar logo and header briefing.
 - **Entry:** `v0.1.0` final tagged; D18 org decision taken.
-- **Exit:** release gate; migration from 0.1.x (volumes, `applicationId`,
-  image namespace) tested; then the public announcement (WP 5.6).
+- **Exit:** release gate; migration from 0.1.x (volumes,
+  `applicationId`, image namespace) tested on the operator's stack.
 
-### v0.3.0: Steam accounts
+### v0.3.0: privacy
 
-- **Goal:** Steam login without a terminal, and several Steam accounts
-  per household.
+- **Goal:** one privacy mode instead of many switches, and the store
+  data that depends on it.
+- **Packages:** D22 privacy mode (ADR-0023 draft), then LIBRARY-META-1d
+  store night fill on top of it.
+- **Entry:** v0.2.0 tagged; D21 privacy review result available.
+- **Exit:** release gate.
+
+### v0.4.0: agents and devices
+
+- **Goal:** a proper agent install and client identity that survives
+  network changes.
+- **Packages:** Weg B for agents (agent reports its OS, API serves a
+  minimum agent version) together with the real installer (the installer
+  part of D6); D28 CLIENT-NAME-MAC-1; D5 named, scoped API keys; D29
+  PAIR-2 (builds on D5).
+- **Entry:** v0.3.0 tagged; D6 open questions (service plus tray or
+  tray-only, code signing) decided.
+- **Exit:** release gate, plus an install and a pairing on a real
+  Windows PC with a standard user.
+
+### v0.5.0: Steam accounts, then the public announcement
+
+- **Goal:** Steam login without a terminal and several Steam accounts
+  per household; then the product goes public.
 - **Packages:** D2 QR login, D3 several accounts. Not cut yet.
-- **Entry:** the package cut is redone against the current schema and the
-  11 open user questions (D2 1-5, D3 1-6) are settled; the ADR drafts
-  0018/0019 live on unmerged branches (see the state note under D2).
+- **Entry:** v0.4.0 tagged; the package cut is redone against the
+  current schema and the 11 open user questions (D2 1-5, D3 1-6) are
+  settled; the ADR drafts 0018/0019 live on unmerged branches (see the
+  state note under D2).
 - **Exit:** release gate, plus a real QR login and a prefill per account
-  on the operator's stack.
+  on the operator's stack; then the public announcement (WP 5.6, user
+  decision 2026-10-18: with the second-to-last themed minor).
 
-### v0.4.0 and later: beyond Steam and integrations (order not set)
+### v0.6.0: schedules
+
+- **Goal:** real schedules for prefill and updates.
+- **Packages:** D8 SCHED-FEAT-1 weekday schedules and several windows
+  per day, incl. rate per window.
+- **Entry:** v0.5.0 tagged.
+- **Exit:** release gate.
+
+### v0.7.0 and later: beyond Steam and integrations (order not set)
 
 - **Goal:** more launchers and outside integrations, each when wanted.
-- **Items:** D17 multi-launcher (needs D18; user: not before v0.2); D4
-  IPv6 and DUAL-STACK-1 follow-ups; D25 TSNET-1; D26 NOTIFY-CURSOR-1; D27
-  DEPOT-GRACE-1; Phase 6 external integrations; iOS app.
+- **Items:** D17 multi-launcher (needs D18); D4 IPv6 and DUAL-STACK-1
+  follow-ups; D25 TSNET-1; D26 NOTIFY-CURSOR-1; D27 DEPOT-GRACE-1; Phase 6
+  external integrations; iOS app.
 - **Entry / exit:** set when a version is planned.
 
 ### Operator items (independent of versions)
@@ -177,15 +216,19 @@ Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
 question that is not answered in its session is listed here and removed
 once decided (the decision then lives in the item it belongs to).
 
+- **VERSION-1.0** (user question 2026-10-18 "when does the first
+  number grow?"): the `1.0.0` criteria proposed in ADR-0029 section 5
+  (public, stable operator contract, tested migrations, one minor without
+  a breaking change). Recommendation: accept them as written.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
-- **D2/D3 questions** (v0.3.0): D2 1-5 and D3 1-6 from the ADR drafts on
+- **D2/D3 questions** (v0.5.0): D2 1-5 and D3 1-6 from the ADR drafts on
   `wp/docs-adr-post-0.1.0-d1-d3`; settle them in the D2/D3 planning session.
 - **D6 desktop client**: service plus tray, or tray-only; and code signing
   as a cost decision (paid OV/EV certificate, Store/winget signing, or
   accept the SmartScreen warning). See D6.
-- **D17 cache path** (v0.4.0+): Weg A extend vault-core, Weg B a lancache
+- **D17 cache path** (v0.7.0+): Weg A extend vault-core, Weg B a lancache
   sidecar behind vault-core, or a mix; the 2026-10-15 assessment favours
   Weg B or the mix. See D17.
 - **AIO-DEFAULT-1** (decided 2026-10-18 by the operator: **Weg B** — production `.env` now via Antrag A-20261018-02, the code default with rc21 and then the `.env` line goes; rc20.3 not needed) (measured 2026-10-18): how
@@ -680,7 +723,8 @@ tooltips instead of text walls. Order: Wave 2, before D15.
 
 ## D17: MULTI-LAUNCHER-1, cache more launchers than Steam ("GameHangar")
 
-Roadmap only, **not before v0.2** (user decision 2026-10-15). No work
+Roadmap only, **not before v0.2** (user decision 2026-10-15; since
+ADR-0029 planned for v0.7.0 or later). No work
 package exists yet. This section keeps the plan readable months later:
 why it came up, what was measured, what the code does today, which
 options exist and what should be prepared earlier so the later step stays
@@ -809,7 +853,8 @@ These do not need D17 to start; they keep the door open.
    change to stay safe. Size reporting must not assume `depot/` is the
    whole cache.
 4. **Name before public release.** Decided: GameHangar (D18). It must
-   land before the public announcement (v0.2.0, see Release plan), not
+   land before the public announcement (v0.5.0 since ADR-0029; the rename
+   itself is v0.2.0, see Release plan), not
    after.
    Component names are already neutral (`vault-core`, `vault-api`, ...).
    What a rename touches: GitHub org and repo, `ghcr.io/steamhangar/*`,
@@ -845,7 +890,8 @@ These do not need D17 to start; they keep the door open.
 
 User decision 2026-10-15: the product is renamed to GameHangar, because
 D17 makes it more than a Steam cache. Timing (user decision 2026-10-16):
-with v0.2.0, before the public announcement (see "Release plan"); it
+with v0.2.0, before the public announcement (v0.5.0 since ADR-0029,
+see "Release plan"); it
 does not depend on D17 being built. Model: ADR-0013 (SteamVault ->
 SteamHangar), which lists what a rename touches and how volumes are
 carried over.
@@ -1522,7 +1568,7 @@ D1, D3 (incl. device/account note per game), D2, D4, D5, D6.
 **Superseded (2026-10-16)** by "Release plan (user decisions 2026-10-16)"
 near the top of this file; kept for the record. Items 1, 3 and 5 are
 done (DOCS-FIX-3, D1, D7 apart from the `:443` measurement); D2/D3 are
-v0.3.0, D8 is v0.2.0.
+v0.5.0, D8 is v0.6.0 (re-cut 2026-10-18, ADR-0029).
 
 1. DOCS-FIX-3 lands before `v0.1.0` (it is in item 13 B).
 2. Write the ADR drafts for D1, D2 and D3, review them, and settle the
@@ -1631,7 +1677,7 @@ field; old servers and old agents keep working, as in AGENT-ADDR-1).
 vault-api accepts `key_type = "mac"`, which is reserved today and answered
 with 422 (`api/vault_api/client_names.py`), and resolves a name by MAC
 before IP, so a named PC keeps its name after a DHCP change. Agentless
-clients stay IP-keyed. Pairs well with the installer and the v0.2.0 agent
+clients stay IP-keyed. Pairs well with the installer and the v0.4.0 agent
 work (agent reports its OS). Dependencies: an agent release. Schedule:
 after rc20. State: open.
 

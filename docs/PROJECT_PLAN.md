@@ -2299,7 +2299,8 @@ surface (playtime and last-played now flow through the API response).
       See §11 item 6.
 - [ ] Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
       frame as a complement/alternative, not a "LanCache killer").
-      Waits for v0.2.0 (user decision 2026-10-16, after the D18 rename).
+      Waits for v0.5.0 (user decision 2026-10-16: after the D18 rename;
+      re-cut 2026-10-18, ADR-0029: with the second-to-last themed minor).
 
 ### Phase 6 — External Integrations (post-release, user decision 2026-08-10)
 
@@ -3349,7 +3350,9 @@ below carry their own later dates, item 12 is the current one).
     below are grouped by version; theme, goal, entry and exit criterion
     per version are in `docs/handover/post-0.1.0-roadmap.md`, section
     "Release plan (user decisions 2026-10-16)". Packages of rc21, rc22 and
-    v0.2.0 are cut in each version's planning session.
+    later minors are cut in each version's planning session. Version
+    rules from 0.2.0 on (minor = themed set fixed upfront, rc = feature
+    freeze, patch = fixes only): ADR-0029 (user decisions 2026-10-18).
     - rc20 web redesign: LAYOUT-1, SHEET-MOTION-1, CLIENTS-1..3,
       ADD-DEVICE-1, DOWNLOADS-1 (with VERIFY-SPEED-TEXT-1, QUEUE-KBD-KEEP),
       SETTINGS-1, LIBRARY-1, LIBRARY-DETAIL-1, LIVE-DELAY-1 (before
@@ -3363,16 +3366,20 @@ below carry their own later dates, item 12 is the current one).
     - rc22 release hardening: D7 `:443` + TLS default, CAP-503-LOOP-1,
       HIT-PATH-1, NITS-AUDIT-1, remaining nits, the open B boxes; then
       `v0.1.0` final; v0.1.x bug fixes only, no public announcement yet
-    - v0.2.0 GameHangar, privacy, schedules, agents: D18, D22 then
-      LIBRARY-META-1d, D8, Weg B for agents with the installer (D6 part),
-      D28, D29, D5; public announcement (WP 5.6)
-    - v0.3.0 Steam accounts: D2, D3 (after a new package cut)
-    - v0.4.0+: D17, D4 / DUAL-STACK-1 follow-ups, D25, D26, D27, Phase 6,
+    - v0.2.0 rename: D18 incl. logo
+    - v0.3.0 privacy: D22 then LIBRARY-META-1d
+    - v0.4.0 agents and devices: Weg B for agents with the installer (D6
+      part), D28, D5, D29
+    - v0.5.0 Steam accounts: D2, D3 (after a new package cut); then the
+      public announcement (WP 5.6)
+    - v0.6.0 schedules: D8
+    - v0.7.0+: D17, D4 / DUAL-STACK-1 follow-ups, D25, D26, D27, Phase 6,
       iOS app
     - operator items: DUAL-STACK-1, Sunday cold-game test
 
     The former "rc20 candidates" block (2026-10-16) is split into these
-    version blocks; nothing was dropped. D22 moved to v0.2.0; the Clients /
+    version blocks; nothing was dropped. D22 moved to v0.2.0 (v0.3.0 since
+    ADR-0029); the Clients /
     Add-a-device redesign is CLIENTS-1..3 and ADD-DEVICE-1 in rc20;
     VERIFY-SPEED-TEXT-1 is decided inside DOWNLOADS-1; D20 shipped in rc19
     (its nits are in rc22); DUAL-STACK-1 is an operator item.
@@ -3789,17 +3796,23 @@ below carry their own later dates, item 12 is the current one).
       - [ ] close: release gate, every open B box ticked or moved by the
         user, measurements written up; then tag **`v0.1.0` final**
     - **v0.1.x:** bug fixes only. The public announcement (WP 5.6,
-      r/selfhosted) is NOT made at 0.1.0; it waits for 0.2.0.
+      r/selfhosted) is NOT made at 0.1.0; it waits for 0.5.0 (ADR-0029).
 
-    - [ ] **v0.2.0 — GameHangar, privacy, schedules, agents** (packages to
-      be cut in the version's planning session; entry: `v0.1.0` final and
-      the D18 org decision)
+    - [ ] **v0.2.0 — rename to GameHangar** (re-cut 2026-10-18,
+      ADR-0029; packages cut in the version's planning session; entry:
+      `v0.1.0` final and the D18 org decision)
       - [ ] **D18 RENAME-2** SteamHangar -> GameHangar (user decision
-        2026-10-16: with 0.2.0, before the announcement; GitHub org choice
-        A/B/C still open), incl. the GameHangar logo and header briefing
+        2026-10-16: before the announcement; GitHub org choice A/B/C
+        still open), incl. the GameHangar logo and header briefing
+      - [ ] close: release gate, migration from 0.1.x tested (volumes,
+        `applicationId`, image namespace)
+
+    - [ ] **v0.3.0 — privacy**
       - [ ] **D22** privacy mode (ADR-0023 draft), then
         **LIBRARY-META-1d** store night fill on top of it
-      - D8 schedules incl. rate per window (box D8 above)
+      - [ ] close: release gate
+
+    - [ ] **v0.4.0 — agents and devices** (entry: D6 questions decided)
       - [ ] **Weg B for agents** (decided 2026-10-16, with the
         installer): the agent reports its OS, the API stores it, and the
         Clients page opens the matching tab; the API serves a minimum agent
@@ -3811,21 +3824,24 @@ below carry their own later dates, item 12 is the current one).
         pairs with the installer and the Weg B agent work): the agent
         reports its MAC, vault-api accepts `key_type = "mac"` (reserved
         today, answered with 422), so client names survive DHCP changes.
-      - D29 PAIR-2 and D5 named, scoped API keys (boxes above; D29 builds
+      - D5 named, scoped API keys and D29 PAIR-2 (boxes above; D29 builds
         on D5)
-      - [ ] close: release gate, migration from 0.1.x tested (volumes,
-        `applicationId`, image namespace), then the public announcement
-        (WP 5.6)
+      - [ ] close: release gate, install and pairing on a real Windows PC
+        with a standard user
 
-    - [ ] **v0.3.0 — Steam accounts**: D2 QR login and D3 several accounts
-      (boxes above). Entry: the package cut is redone against the current
-      schema and the 11 open user questions (D2 1-5, D3 1-6) are settled;
-      the ADR drafts 0018/0019 live on unmerged branches. Exit: release
-      gate, plus a real QR login and a prefill per account on the
-      operator's stack.
+    - [ ] **v0.5.0 — Steam accounts, then the announcement**: D2 QR login
+      and D3 several accounts (boxes above). Entry: the package cut is
+      redone against the current schema and the 11 open user questions
+      (D2 1-5, D3 1-6) are settled; the ADR drafts 0018/0019 live on
+      unmerged branches. Exit: release gate, plus a real QR login and a
+      prefill per account on the operator's stack; then the public
+      announcement (WP 5.6).
 
-    - [ ] **v0.4.0 and later — beyond Steam and integrations** (order not
-      set): D17 multi-launcher (needs D18; not before v0.2), D4 IPv6 and
+    - [ ] **v0.6.0 — schedules**: D8 schedules incl. rate per window (box
+      D8 above). Exit: release gate.
+
+    - [ ] **v0.7.0 and later — beyond Steam and integrations** (order not
+      set): D17 multi-launcher (needs D18), D4 IPv6 and
       the DUAL-STACK-1 follow-ups, Phase 6 external integrations, the iOS
       app, and the old post-v1 backlog moved from `docs/WORKPACKAGES.md`
       on 2026-10-16: D25 TSNET-1 embedded tailscale (requirement A6), D26
