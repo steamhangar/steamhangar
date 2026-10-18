@@ -1666,6 +1666,20 @@ inherited one, so the normal `vault` log is restated next to it (both lines
 carry the marker, so the flag-off render is unchanged); the response (200,
 `X-LanCache-Processed-By`) is untouched. The `tp1` parser never sees these
 lines (it checks the tag); the report prints them in a "Heartbeat" section.
+These are nginx-side times only: while the single worker is blocked (cold
+reads with blocking `sendfile`), a heartbeat waits before nginx reads it, and
+its `request_time` stays ~0 ms although the client waited seconds (cold-game
+test 2026-10-18, ADR-0027). The section says so next to the numbers. Measure
+from outside and pass the result with `--probe-log FILE`, one line per probe,
+`<epoch or ISO-8601 time> <time_total s> [<http code>]`:
+
+```
+while sleep 5; do echo "$(date +%s.%N) $(curl -s -o /dev/null \
+  -w '%{time_total} %{http_code}' http://<vault-core>/lancache-heartbeat)"; done
+```
+
+The report then adds a "Heartbeat (outside probe)" section (p50/p95/max,
+probes >= 1 s and >= 100 ms, non-200 or failed `000`, the slowest three).
 
 **Analyse:**
 
@@ -1676,7 +1690,11 @@ cat /vault/logs/throughput-debug/throughput.*.log /vault/logs/throughput-debug/t
 
 Per client it prints total MB, minutes covered, aggregate Mbit/s per 10 s
 bucket (average and p95; the partial first and last bucket are dropped),
-per-request throughput percentiles (requests >= 256 KB, `--min-request-kb`),
+per-request throughput percentiles (200/206 requests >= 256 KiB,
+`--min-request-kb`; requests logged with `request_time` 0.000 count as large
+but cannot give a rate, so the line names how many were excluded, and a
+verdict warns when that is half or more: nginx's cached clock did not advance
+while a blocked worker served them, TP-REPORT-2),
 maximum concurrent connections, requests per connection, rtt/cwnd medians,
 the HIT/MISS share and a plain-English verdict list. The verdicts are
 heuristics that name the first thing to look at (few streams but fast ones,
