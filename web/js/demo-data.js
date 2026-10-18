@@ -2377,7 +2377,12 @@ function groupDeletePlan(appid, withPackages) {
   for (const [depotid, { size, owners }] of [...depotOwners.entries()].sort((a, b) => a[0] - b[0])) {
     const outside = games.filter((g) => !memberIds.has(g.appid) && g.depots.some((d) => d.depotid === depotid));
     if (outside.some(hasCacheContent)) {
-      skippedShared.push({ depotid, shared_with: outside.map((g) => g.appid) });
+      // The demo model has no manifest records, so a kept depot is always
+      // kept for a mapped co-owner (API WP DELETE-CLAIMANT-1 field parity).
+      skippedShared.push({
+        depotid, shared_with: outside.map((g) => g.appid),
+        reason: "co_owner_has_content", recorded_only: [],
+      });
     } else {
       deleteDepots.push({ depotid, size_bytes: size, owners, shared_with_uncached: outside.map((g) => g.appid) });
     }
@@ -2896,7 +2901,7 @@ export async function demoRequest(method, path, { body, params } = {}) {
 
     // Mirrors api/vault_api/routers/cache.py's CacheDeletionOut exactly:
     //   deleted_depots:  {depotid, size_bytes_freed, shared_with_uncached}
-    //   skipped_shared:  {depotid, shared_with}
+    //   skipped_shared:  {depotid, shared_with, reason, recorded_only}
     //   failed:          {depotid, error}   (never populated here — this
     //                     demo model has no filesystem to fail against)
     //
@@ -2922,7 +2927,10 @@ export async function demoRequest(method, path, { body, params } = {}) {
       const others = otherOwners(appid, depot.depotid);
       const cachedOthers = others.filter(hasCacheContent);
       if (cachedOthers.length > 0) {
-        skippedShared.push({ depotid: depot.depotid, shared_with: others.map((g) => g.appid) });
+        skippedShared.push({
+          depotid: depot.depotid, shared_with: others.map((g) => g.appid),
+          reason: "co_owner_has_content", recorded_only: [],
+        });
         continue;
       }
       deletedDepots.push({

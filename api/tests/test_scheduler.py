@@ -528,7 +528,7 @@ def test_cached_appids_excludes_an_app_whose_only_surviving_content_is_shared(
         {"depotid": 441, "size_bytes_freed": 1, "shared_with_uncached": []}
     ]
     assert delete_response["skipped_shared"] == [
-        {"depotid": 300, "shared_with": [730]}
+        {"depotid": 300, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}
     ]
     assert (cache_root / "depot" / "441").exists() is False
     assert (cache_root / "depot" / "300").exists()  # shared, protected, survives

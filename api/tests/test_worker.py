@@ -688,8 +688,8 @@ def test_a_deletion_racing_a_slow_job_does_not_get_its_needs_force_clobbered(
         racing_job_id: list[int] = []
         real_plan_deletion = deletion_module.plan_deletion
 
-        def plan_then_enqueue_the_racing_job(rows, appid, co_owner_states=None):  # type: ignore[no-untyped-def]
-            plan = real_plan_deletion(rows, appid, co_owner_states)
+        def plan_then_enqueue_the_racing_job(rows, appid, co_owner_states=None, **kwargs):  # type: ignore[no-untyped-def]
+            plan = real_plan_deletion(rows, appid, co_owner_states, **kwargs)
 
             # Enqueued here: strictly AFTER the endpoint's own active-job
             # check (already passed by the time plan_deletion runs) and

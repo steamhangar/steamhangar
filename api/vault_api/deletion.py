@@ -604,6 +604,17 @@ def as_delete_set(target: "int | DeleteSet") -> DeleteSet:
     return DeleteSet(target, frozenset({target}))
 
 
+#: Why a depot was kept (``SharedDepot.reason``, the API's
+#: ``skipped_shared[].reason``). One value per protecting cause, checked in
+#: this order: an unreadable owner/claimant row protects unconditionally; a
+#: MAPPED co-owner with content is the plan §4 case; otherwise the depot is
+#: kept only because an app that does not map it holds a recorded manifest
+#: for it (WP DELETE-CLAIMANT-1).
+KEEP_REASON_UNREADABLE_OWNER = "unreadable_owner"
+KEEP_REASON_CO_OWNER_CONTENT = "co_owner_has_content"
+KEEP_REASON_RECORDED_MANIFEST = "recorded_manifest"
+
+
 @dataclass(frozen=True)
 class SharedDepot:
     """A depot that is NOT deleted because a co-owner currently has cache
@@ -612,7 +623,15 @@ class SharedDepot:
     depotid: int
     #: The other app ids that map this depot (plan §4: "2 depots shared with
     #: game Y, not deleted" — the ids are what makes that report actionable).
+    #: Since WP DELETE-CLAIMANT-1 this includes apps that only hold a
+    #: ``depot_manifests`` record for the depot (listed again in
+    #: ``recorded_only``).
     shared_with: list[int]
+    #: One of the ``KEEP_REASON_*`` values above.
+    reason: str = KEEP_REASON_CO_OWNER_CONTENT
+    #: The subset of ``shared_with`` that claims the depot through a recorded
+    #: manifest only, with no mapping row (WP DELETE-CLAIMANT-1).
+    recorded_only: list[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -644,6 +663,10 @@ class CoOwner:
 
     appid: int
     has_content: bool
+    #: True when this app claims the depot only through a ``depot_manifests``
+    #: record, with no mapping row (WP DELETE-CLAIMANT-1). Reporting only:
+    #: such an owner protects exactly like a mapped one.
+    via_record: bool = False
 
 
 @dataclass(frozen=True)
@@ -694,6 +717,7 @@ def plan_deletion(
     rows: Iterable[Sequence[object]],
     appid: "int | DeleteSet",
     co_owner_states: Mapping[int, bool] | None = None,
+    claimants: Iterable[Sequence[object]] = (),
 ) -> DeletionPlan:
     """Split ``appid``'s mapped depots into exclusive / remnant / shared / unusable.
 
@@ -727,11 +751,29 @@ def plan_deletion(
     Only when a depot has at least one readable co-owner and **every one** of
     them maps to ``has_content=False`` is it classified as ``remnant``
     (deletable last-remnant) rather than ``shared`` (protected).
+
+    **Recorded claimants (WP DELETE-CLAIMANT-1, mirroring GC's claimant rule
+    from WP GROUP-VERIFIED-1).** ``claimants`` are raw ``(depotid, appid)``
+    pairs from ``depot_manifests`` (``load_manifest_claimants``). Every app
+    outside the delete set with a recorded manifest for one of the set's
+    depots is a co-owner of that depot, **mapped or not**: the mapping can
+    lose a row the record still describes (prod: a game's content-package
+    depots mapped only to their package apps), and judging from
+    ``depot_app_map`` alone made such a depot "exclusive" to the package and
+    removed a directory the game still uses. A recorded-only co-owner is
+    judged with the same ``co_owner_states`` predicate as a mapped one, so a
+    verifiably uncached recorder still lets the depot go as a last remnant
+    (the all-referrers-gone escape). A record with an unreadable app id
+    protects unconditionally, like an unreadable mapping row. A record with an
+    unreadable depot id cannot be tied to a depot and is ignored (the mapping
+    row, not the record, is what puts a depot into this plan). Claimants only
+    ever ADD protection: they never make a depot part of the plan.
     """
     delete_set = as_delete_set(appid)
     states: Mapping[int, bool] = co_owner_states or {}
     own: set[int] = set()
     others: dict[int, set[int]] = {}
+    recorded_only: dict[int, set[int]] = {}
     unreadable_owner: set[int] = set()
     unusable: list[FailedDepot] = []
 
@@ -753,6 +795,22 @@ def plan_deletion(
         else:
             others.setdefault(depotid, set()).add(owner)
 
+    # Second pass, after every mapping row is known: a recorded claimant only
+    # matters for a depot this delete set maps, and is "recorded only" when no
+    # mapping row already names it as an owner.
+    for row in claimants:
+        depotid = coerce_positive_id(row[0])
+        if depotid is None or depotid not in own:
+            continue
+        owner = coerce_positive_id(row[1])
+        if owner is None:
+            unreadable_owner.add(depotid)
+            continue
+        if owner in delete_set.members or owner in others.get(depotid, set()):
+            continue
+        others.setdefault(depotid, set()).add(owner)
+        recorded_only.setdefault(depotid, set()).add(owner)
+
     exclusive = sorted(
         depotid
         for depotid in own
@@ -767,7 +825,12 @@ def plan_deletion(
             # never eligible to become a remnant, no matter what the readable
             # others' states say.
             shared.append(
-                SharedDepot(depotid=depotid, shared_with=sorted(others.get(depotid, ())))
+                SharedDepot(
+                    depotid=depotid,
+                    shared_with=sorted(others.get(depotid, ())),
+                    reason=KEEP_REASON_UNREADABLE_OWNER,
+                    recorded_only=sorted(recorded_only.get(depotid, ())),
+                )
             )
             continue
 
@@ -775,9 +838,29 @@ def plan_deletion(
         if all(not states.get(owner, True) for owner in owner_ids):
             remnant.append(RemnantDepot(depotid=depotid, shared_with_uncached=owner_ids))
         else:
-            shared.append(SharedDepot(depotid=depotid, shared_with=owner_ids))
+            record_ids = recorded_only.get(depotid, set())
+            shared.append(
+                SharedDepot(
+                    depotid=depotid,
+                    shared_with=owner_ids,
+                    reason=keep_reason(
+                        (states.get(owner, True), owner in record_ids)
+                        for owner in owner_ids
+                    ),
+                    recorded_only=sorted(record_ids),
+                )
+            )
 
     return DeletionPlan(exclusive=exclusive, remnant=remnant, shared=shared, unusable=unusable)
+
+
+def keep_reason(owners: Iterable[tuple[bool, bool]]) -> str:
+    """``KEEP_REASON_*`` for a protected depot whose co-owners are all
+    readable, from ``(has_content, via_record)`` per co-owner. Shared by the
+    plan and the execute-time recheck so both report the same reason."""
+    if any(has_content and not via_record for has_content, via_record in owners):
+        return KEEP_REASON_CO_OWNER_CONTENT
+    return KEEP_REASON_RECORDED_MANIFEST
 
 
 # --------------------------------------------------------------------------
@@ -938,7 +1021,20 @@ def delete_app_depots(
                     appid, depotid, owner_ids,
                 )
                 late_shared.append(
-                    SharedDepot(depotid=depotid, shared_with=owner_ids)
+                    SharedDepot(
+                        depotid=depotid,
+                        shared_with=owner_ids,
+                        reason=(
+                            KEEP_REASON_UNREADABLE_OWNER
+                            if any(co.appid <= 0 for co in owners)
+                            else keep_reason(
+                                (co.has_content, co.via_record) for co in owners
+                            )
+                        ),
+                        recorded_only=sorted(
+                            co.appid for co in owners if co.via_record and co.appid > 0
+                        ),
+                    )
                 )
                 continue
             # Every co-owner is verifiably uncached right now -> last
@@ -1024,8 +1120,10 @@ def log_kept_depots(appid: int, shared: Sequence[SharedDepot]) -> None:
     """Audit-log every depot that was deliberately NOT deleted (plan §4)."""
     for depot in shared:
         logger.info(
-            "cache-delete appid=%s depot=%s KEPT: shared with app(s) %s",
-            appid, depot.depotid, depot.shared_with or "(unreadable mapping row)",
+            "cache-delete appid=%s depot=%s KEPT (%s): shared with app(s) %s%s",
+            appid, depot.depotid, depot.reason,
+            depot.shared_with or "(unreadable mapping or manifest row)",
+            f", recorded only by {depot.recorded_only}" if depot.recorded_only else "",
         )
 
 
@@ -1084,42 +1182,94 @@ def load_co_owners(
     ``CoOwner(appid=0, has_content=True)`` rather than dropped: the caller
     must treat "somebody unreadable owns this" as protected, never as free to
     delete — the same convention the pre-addendum code used for owner ``0``.
+
+    **Recorded claimants (WP DELETE-CLAIMANT-1).** Owners are the apps that
+    map the depot **plus** every app with a ``depot_manifests`` row for it,
+    mapped or not — the same rule ``plan_deletion`` applies to
+    ``load_manifest_claimants``'s rows, re-read here fresh like the mapping.
+    A recorded-only owner carries ``via_record=True`` (reporting only); its
+    ``has_content`` is the same predicate, and an unreadable record app id is
+    owner ``0`` like an unreadable mapping row. The ``depot_manifests`` half
+    is served by ``idx_depot_manifests_depotid``.
     """
     rows = conn.execute(
         f"""
         SELECT
-            dam.appid AS owner_appid,
+            o.owner_appid AS owner_appid,
+            o.via_record AS via_record,
             ap.status AS status,
             ap.last_prefill_at AS last_prefill_at,
             EXISTS (
                 SELECT 1 FROM jobs j
-                WHERE j.appid = dam.appid AND j.status IN ({_ACTIVE_JOB_PLACEHOLDERS})
+                WHERE j.appid = o.owner_appid AND j.status IN ({_ACTIVE_JOB_PLACEHOLDERS})
             ) AS has_active_job
-        FROM depot_app_map dam
-        LEFT JOIN apps ap ON ap.appid = dam.appid
-        WHERE dam.depotid = ?
+        FROM (
+            SELECT appid AS owner_appid, 0 AS via_record
+            FROM depot_app_map WHERE depotid = ?
+            UNION ALL
+            SELECT appid AS owner_appid, 1 AS via_record
+            FROM depot_manifests WHERE depotid = ?
+        ) o
+        LEFT JOIN apps ap ON ap.appid = o.owner_appid
         """,
-        (*jobs.ACTIVE_STATUSES, depotid),
+        (*jobs.ACTIVE_STATUSES, depotid, depotid),
     ).fetchall()
 
     delete_set = as_delete_set(appid)
     owners: dict[int, bool] = {}
+    #: Owner ids named by at least one MAPPING row (not "recorded only").
+    mapped: set[int] = set()
     for row in rows:
         owner = coerce_positive_id(row["owner_appid"])
         if owner is None:
             owners[0] = True
+            mapped.add(0)
             continue
         if owner in delete_set.members:
             continue
+        if not row["via_record"]:
+            mapped.add(owner)
         has_content = _has_cache_content(
             row["status"], row["last_prefill_at"], row["has_active_job"]
         )
-        # If the same (poisoned-elsewhere-aside) owner id somehow appears
-        # twice, protect wins — content-having is sticky, not overwritten by
-        # a later uncached row for the same appid (shouldn't happen given the
-        # (depotid, appid) primary key, but this stays correct if it did).
+        # The same owner id appears twice when it both maps and records the
+        # depot: protect wins — content-having is sticky, not overwritten by a
+        # later uncached row for the same appid (both rows carry the same
+        # apps join, so they agree anyway; this stays correct if they did not).
         owners[owner] = owners.get(owner, False) or has_content
-    return [CoOwner(appid=aid, has_content=has_content) for aid, has_content in sorted(owners.items())]
+    return [
+        CoOwner(appid=aid, has_content=has_content, via_record=aid not in mapped)
+        for aid, has_content in sorted(owners.items())
+    ]
+
+
+def load_manifest_claimants(
+    conn: sqlite3.Connection, appid: "int | DeleteSet"
+) -> list[tuple[object, object]]:
+    """``(depotid, appid)`` for every ``depot_manifests`` row of a depot that
+    ``appid`` (any member, for a ``DeleteSet``) maps — the recorded claimants
+    ``plan_deletion`` counts as co-owners (WP DELETE-CLAIMANT-1).
+
+    Same depot scope as ``load_mapping_rows`` (the identical subquery), and
+    values come back **raw** for the same reason: ``plan_deletion`` coerces,
+    so a poisoned record app id becomes "unreadable owner, protect" there
+    rather than an exception here. Members' own records are returned too;
+    the planner skips them.
+    """
+    members = sorted(as_delete_set(appid).members)
+    placeholders = ",".join("?" for _ in members)
+    return [
+        (row["depotid"], row["appid"])
+        for row in conn.execute(
+            f"""
+            SELECT depotid, appid FROM depot_manifests
+            WHERE depotid IN (
+                SELECT depotid FROM depot_app_map WHERE appid IN ({placeholders})
+            )
+            """,
+            members,
+        ).fetchall()
+    ]
 
 
 def other_owner_ids(rows: Iterable[Sequence[object]], appid: "int | DeleteSet") -> set[int]:
@@ -1246,6 +1396,41 @@ def load_all_mapping_rows_with_owner_state(
     ]
 
 
+def load_all_manifest_claimants_with_owner_state(
+    conn: sqlite3.Connection,
+) -> list[tuple[object, object, object, object, object]]:
+    """Every ``depot_manifests`` row as raw ``(depotid, appid, status,
+    last_prefill_at, has_active_job)`` — the recorded-claimant counterpart of
+    ``load_all_mapping_rows_with_owner_state`` (WP DELETE-CLAIMANT-1), same
+    join shape, one statement for the whole table, values uncoerced."""
+    rows = conn.execute(
+        f"""
+        SELECT
+            dm.depotid AS depotid,
+            dm.appid AS appid,
+            ap.status AS status,
+            ap.last_prefill_at AS last_prefill_at,
+            EXISTS (
+                SELECT 1 FROM jobs j
+                WHERE j.appid = dm.appid AND j.status IN ({_ACTIVE_JOB_PLACEHOLDERS})
+            ) AS has_active_job
+        FROM depot_manifests dm
+        LEFT JOIN apps ap ON ap.appid = dm.appid
+        """,
+        (*jobs.ACTIVE_STATUSES,),
+    ).fetchall()
+    return [
+        (
+            row["depotid"],
+            row["appid"],
+            row["status"],
+            row["last_prefill_at"],
+            row["has_active_job"],
+        )
+        for row in rows
+    ]
+
+
 def appids_with_cache_content(
     conn: sqlite3.Connection, depot_bytes: Mapping[int, int]
 ) -> set[int]:
@@ -1291,9 +1476,10 @@ def appids_with_cache_content(
     has content, so the deleted app stays excluded.
 
     **How the single bulk read replaces per-app queries.**
-    ``load_all_mapping_rows_with_owner_state`` above is the ONLY SQL
+    ``load_all_mapping_rows_with_owner_state`` above is the only mapping
     statement this function issues, regardless of how many apps or depots
-    exist. WP 4d's original per-app shape (``load_mapping_rows`` called once
+    exist; the recorded-claimant read below is the one other (WP
+    DELETE-CLAIMANT-1), so the count stays constant at two. WP 4d's original per-app shape (``load_mapping_rows`` called once
     per candidate app, plus the initial ``SELECT DISTINCT appid`` to build
     the candidate list) cost 301 statements / 143 ms / a measured 100.7x row-
     amplification on ITS OWN 300-app fixture (a different topology from
@@ -1329,6 +1515,14 @@ def appids_with_cache_content(
     scanning strategy, only the classification of the result is now shared.
     Membership in ``depot_bytes``, not a ``> 0`` check, decides "has bytes on
     disk" — the same convention both pre-existing callers used.
+
+    **Recorded claimants (WP DELETE-CLAIMANT-1).** Each app's slice is planned
+    with the same ``claimants=`` ``DELETE /v1/cache/{appid}`` passes, read in
+    one more bulk statement (``load_all_manifest_claimants_with_owner_state``).
+    Without it, a package app whose depot a deletion KEPT for the recording
+    game still looked like the depot's exclusive owner with bytes on disk, and
+    the sweep and ``POST /v1/prefill/cached`` re-queued the package right
+    after its deletion (the WP 4d B1 class).
     """
     if not depot_bytes:
         return set()
@@ -1362,12 +1556,34 @@ def appids_with_cache_content(
         owner_state[owner] = _has_cache_content(status, last_prefill_at, has_active_job)
         own_depot_keys.setdefault(owner, set()).add(raw_depotid)
 
+    #: {coerced depotid: [(raw depotid, raw appid)]} from depot_manifests.
+    #: Recorders' own states join owner_state (a recorder that maps nothing
+    #: would otherwise be missing, which reads as "has content").
+    claimant_groups: dict[int, list[tuple[object, object]]] = {}
+    for raw_depotid, raw_appid, status, last_prefill_at, has_active_job in (
+        load_all_manifest_claimants_with_owner_state(conn)
+    ):
+        depotid = coerce_positive_id(raw_depotid)
+        if depotid is None:
+            continue
+        claimant_groups.setdefault(depotid, []).append((raw_depotid, raw_appid))
+        owner = coerce_positive_id(raw_appid)
+        if owner is not None:
+            owner_state[owner] = _has_cache_content(status, last_prefill_at, has_active_job)
+
     result: set[int] = set()
     for appid, depot_keys in own_depot_keys.items():
         rows_for_appid = [
             row for depotid_key in depot_keys for row in depot_groups[depotid_key]
         ]
-        plan = plan_deletion(rows_for_appid, appid, owner_state)
+        claimants_for_appid = [
+            row
+            for depotid in {coerce_positive_id(key) for key in depot_keys} - {None}
+            for row in claimant_groups.get(depotid, ())  # type: ignore[arg-type]
+        ]
+        plan = plan_deletion(
+            rows_for_appid, appid, owner_state, claimants=claimants_for_appid
+        )
         candidate_depotids = set(plan.exclusive) | {r.depotid for r in plan.remnant}
         if any(depotid in depot_bytes for depotid in candidate_depotids):
             result.add(appid)

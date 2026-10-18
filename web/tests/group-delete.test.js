@@ -151,8 +151,14 @@ test("demo: Starfall Legion's plan lists its three packages; a stale member list
 test("demo: the plain delete without the parameter is unchanged (skips the depot a cached package still uses)", async () => {
   resetDemoData();
   try {
+    const plan = await demoRequest("GET", "/v1/cache/2010080/delete-plan");
+    assert.deepEqual(plan.skipped_shared, [
+      { depotid: 2010089, shared_with: [2010082], reason: "co_owner_has_content", recorded_only: [] },
+    ]);
     const out = await demoRequest("DELETE", "/v1/cache/2010080");
-    assert.deepEqual(out.skipped_shared, [{ depotid: 2010089, shared_with: [2010082] }]);
+    assert.deepEqual(out.skipped_shared, [
+      { depotid: 2010089, shared_with: [2010082], reason: "co_owner_has_content", recorded_only: [] },
+    ]);
     assert.equal("with_packages" in out, false);
   } finally {
     resetDemoData();

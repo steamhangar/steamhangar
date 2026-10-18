@@ -412,12 +412,19 @@ def test_one_shared_membership_definition(monkeypatch) -> None:
         CREATE TABLE depot_app_map (depotid INTEGER, appid INTEGER);
         CREATE TABLE apps (appid INTEGER PRIMARY KEY, status TEXT, last_prefill_at TEXT);
         CREATE TABLE jobs (id INTEGER, appid INTEGER, status TEXT);
+        CREATE TABLE depot_manifests (appid INTEGER, depotid INTEGER);
         INSERT INTO depot_app_map VALUES (10, 1), (10, 2), (20, 2), (40, 5);
         INSERT INTO apps VALUES (1, 'done', 'x'), (2, 'done', 'x');
+        INSERT INTO depot_manifests VALUES (2, 10), (1, 20), (5, 40);
         """
     )
     assert deletion.load_co_owners(conn, 10, 1) == []
+    assert deletion.load_co_owners(conn, 20, 1) == []
     assert sorted(deletion.load_mapping_rows(conn, 1)) == [(10, 1), (10, 2), (20, 2)]
+    # WP DELETE-CLAIMANT-1: the recorded claimants use the same scope, and a
+    # member's record never protects the set's own depot.
+    assert sorted(deletion.load_manifest_claimants(conn, 1)) == [(10, 2), (20, 1)]
+    assert deletion.plan_deletion(rows, 1, {3: True}, claimants=[(20, 1)]).exclusive == [10, 20]
 
 
 def test_members_do_not_protect_each_other_in_the_plan() -> None:

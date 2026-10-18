@@ -273,7 +273,7 @@ def test_a_deleted_app_whose_only_surviving_content_is_a_shared_protected_depot_
     assert body["deleted_depots"] == [
         {"depotid": 441, "size_bytes_freed": 32, "shared_with_uncached": []}
     ]
-    assert body["skipped_shared"] == [{"depotid": 300, "shared_with": [730]}]
+    assert body["skipped_shared"] == [{"depotid": 300, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}]
 
     response = client.post("/v1/prefill/cached", headers=AUTH)
     assert response.status_code == 202, response.text
@@ -434,9 +434,10 @@ def test_selecting_cached_apps_is_not_a_per_app_query(client: TestClient) -> Non
 
         assert selected == list(range(100_000, 100_000 + app_count))
         # The whole point: a constant number of statements, regardless of
-        # app_count: the selection itself plus the not-owned lookup (WP
-        # NOT-OWNED-1), never one per app.
-        assert len(statements) == 2, statements
+        # app_count: the mapping read, the recorded-claimant read (WP
+        # DELETE-CLAIMANT-1) and the not-owned lookup (WP NOT-OWNED-1),
+        # never one per app.
+        assert len(statements) == 3, statements
     finally:
         conn.close()
 
