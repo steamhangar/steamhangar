@@ -3853,7 +3853,9 @@ below carry their own later dates, item 12 is the current one).
         `depot_app_map`; while a game has lost its mapping rows (prod: HD2
         package depots), deleting a package app removes a depot the game
         needs. Count every app with a `depot_manifests` row for the depot as
-        a co-owner with content, mirroring the GC claimant rule. Until
+        a co-owner, judged with the has-content predicate (an uncached
+        recorder → last remnant + needs_force, WP 3.6), mirroring the GC
+        claimant rule. Until
         rollout: after the rc21 deploy run one verify of 553850 (heals the
         mapping); note in the rc21 rollout Antrag.
       - [ ] Android follow-up GROUP-VERIFIED-1 (S2): show the group
