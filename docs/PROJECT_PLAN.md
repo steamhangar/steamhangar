@@ -3954,6 +3954,10 @@ below carry their own later dates, item 12 is the current one).
         Steam Deck (per-user install that survives OS updates, SD-card
         libraries) and Steam Frame (arm64, check user services first).
         Platform scope for 0.4.0 is an open decision at its cut.
+      - [ ] **CLEANUP-SUGGEST-1** (user wish 2026-10-18; roadmap 0.4.0)
+        suggest deleting cached games no reporting client has installed
+        any more (grace period, offline clients don't count), with the
+        space it frees; never automatic.
       - [ ] **CLIENT-NAME-MAC-1** (roadmap D28, user wish 2026-10-14;
         pairs with the installer and the Weg B agent work): the agent
         reports its MAC, vault-api accepts `key_type = "mac"` (reserved

@@ -233,6 +233,17 @@ rename.
   tray-only, code signing) decided.
 - **Exit:** release gate, plus an install and a pairing on a real
   Windows PC with a standard user.
+- **CLEANUP-SUGGEST-1 (user wish 2026-10-18, proposed for 0.4.0):** a
+  cached game that a client reported as installed and that no client
+  reports any more (uninstalled everywhere, for longer than a grace period,
+  e.g. 30 days, and only counting agents that are still reporting) is
+  offered for release: Library filter / Downloads hint "No longer installed
+  on any PC: 43 GB, frees 31 GB" (the ADR-0003 shared-depot figure from
+  the Phase 4h decision support), one-click delete behind the usual
+  confirm. Suggestion only, never automatic. Needs the install history per
+  client (agent reports keep snapshots; check retention
+  `VAULT_AGENT_REPORT_KEEP`) and must not count a client that simply went
+  offline. Fits 0.4.0 (agents and devices); the user may pull it earlier.
 
 ### v0.5.0: Steam accounts
 
