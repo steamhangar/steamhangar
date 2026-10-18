@@ -3642,6 +3642,14 @@ below carry their own later dates, item 12 is the current one).
         finishing right at the boundary flips in/out (CI failure on
         wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
         the clock or take the cutoff from the same `now` the demo uses.
+      - [ ] nit (MOBILE-1b review): real "Download app" button state is in
+        no golden (pairing cases render the demo note); no real-device
+        check of safe-area insets yet.
+      - [ ] nit (GROUP-VERIFIED-1 review): `routers/games.py:175-185`
+        comment and api/README.md (~646, event-sweep section ~4470) still
+        describe the old `last_manifest_check` rule; flaky
+        `web/tests/clients-merged-card-wiring.test.js:103-108` (2 s wall
+        clock under full-suite load: wait for the event or raise it).
       - [ ] nit (MOBILE-1b review): Library toolbar at 1000 px puts the
         search (180 px) and the chips in a narrow left column under the
         title (on main already, not changed by MOBILE-1b); check against
@@ -3695,7 +3703,13 @@ below carry their own later dates, item 12 is the current one).
           phone" first on narrow touch, no paired state in the drawer,
           landscape nav icon+label). Fixes found by the mockup: toast covers
           the nav, no `safe-area-inset-top`, `.sheet` 88vh -> 88dvh.
-        - [ ] MOBILE-1b implementation (web CSS + scroll listener, goldens)
+        - [x] MOBILE-1b implementation (6d81a61, goldens 0a28553, merge
+          d4bf7ae): touch targets 38/44, `.scue` overflow cue, bottom sheets
+          and confirm sheets below 600px, History row sheet on phones,
+          pairing with "Open on this phone" and the reveal overlay on the
+          QR stand-in, safe area + landscape nav, 200 % text (minmax(0,1fr)
+          grids; 8.75em / 6em minimums), sheet top corners clipped.
+          CARD-CORNERS-1 not reproduced with a real cover image.
       - [x] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
         wrong-size chunk files of an app's target manifests behind the
         `deletion.py` cache-root guards (size re-checked right before the
