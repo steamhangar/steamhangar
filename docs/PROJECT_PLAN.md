@@ -3782,6 +3782,24 @@ below carry their own later dates, item 12 is the current one).
         swept window, so they lag in both directions. Header and pill must
         agree with the newest graph point; the pill's "Downloading" for
         runner cache reads is RUNNER-SPLIT-1 (next package).
+      - [ ] **GROUP-VERIFIED-1** (api + web; operator report 2026-10-18,
+        prod) HELLDIVERS 2 stays "Cached · not verified" (grey) after a
+        successful forced verify (job #193, 23.11 GiB, all HIT), although
+        its own figure is "100% complete, not counted: 1 unmapped depot".
+        Read from code (not measured): the card is a D9 group card and
+        `group_cache_complete_pct` (`routers/games.py` ~377,
+        `CompletenessIndex.figure`) is unknown as soon as ONE member pair
+        has no OK row; the 8 content packages ("Not part of your
+        library", 0.2-0.3 GB each on disk) are probably never measured, so
+        the group can never turn green. To check on prod data first: which
+        pairs are unknown and why. Also check the run log: the depot
+        mapping replace dropped 553851 (main depot?) and 7 package depots
+        from app 553850 while manifest ingestion recorded all 11, and
+        auto-GC (execute) ran right after (job #195): prove that GC cannot
+        delete chunks of a depot that just lost its mapping, and explain
+        the "1 unmapped depot". Fix so a verified group reads "Current"
+        when every member it can measure is at 100 % (decide how unowned
+        or unmeasurable packages count; show them, never hide bytes).
       - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
         have no hit/miss split for the prefill runner, so the Downloads graph
         counts all runner traffic as "from the internet" and a verifying
