@@ -191,6 +191,7 @@ import { isMembersMismatch, isPlanBlocked, planMemberIds, MEMBERS_CHANGED_NOTICE
 import { buildGroupDeletePlan, buildNotice, groupDeleteIntro } from "./group-delete-plan.js";
 import { buildIntroNodes, buildPlanNodes, createDeleteConfirm } from "./delete-confirm.js";
 import { createTabs } from "./tabs.js";
+import { watchScrollCue } from "../lib/scroll-cue.js";
 import { buildPackagesSection, packagesStructuralKey, patchPackagesSection } from "./package-list.js";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
@@ -289,6 +290,53 @@ dialog.body.append(contentEl);
 // Persistent and outside the scrolling body, so it stays reachable while
 // the sheet scrolls and in every state (loading, error, not tracked).
 dialog.sheet.appendChild(closeBtn);
+
+// WP MOBILE-1b (docs/design/rc21/mobile.html 3a/3b): below the sheet
+// breakpoint (BP-L) the sheet is a bottom sheet. Its actions move from the
+// header into a footer above the home indicator, and once the header has
+// scrolled away a compact header (cover, title, pill) is laid over the top
+// of the sheet with the tabs sticking under it (css/kit.css). The compact
+// header repeats what the scrolled-away header said, so it is hidden from
+// assistive technology; the X keeps its own place and name.
+const BOTTOM_SHEET_QUERY = "(max-width:1023px)";
+/** Height of the compact header, kit.css `--gd-compact-h`. */
+const COMPACT_HEADER_PX = 64;
+const compactEl = document.createElement("div");
+compactEl.className = "gd-compact";
+compactEl.setAttribute("aria-hidden", "true");
+const footEl = document.createElement("div");
+footEl.className = "sfoot gd-foot";
+footEl.hidden = true;
+dialog.sheet.append(compactEl, footEl);
+
+/** True while the sheet is a bottom sheet (no `matchMedia`, e.g. the test
+ * DOM: the desktop layout, actions in the header). */
+function isBottomSheet() {
+  const mm = globalThis.window && globalThis.window.matchMedia;
+  return typeof mm === "function" && mm.call(globalThis.window, BOTTOM_SHEET_QUERY).matches;
+}
+
+/** Compact header on once the header row has scrolled under it. */
+function paintCompact() {
+  const head = contentEl.querySelector(".gd-head");
+  let on = false;
+  if (head && isBottomSheet() && compactEl.childNodes.length && typeof head.getBoundingClientRect === "function") {
+    const top = dialog.body.getBoundingClientRect().top;
+    on = head.getBoundingClientRect().bottom <= top + COMPACT_HEADER_PX;
+  }
+  dialog.sheet.classList.toggle("compact", on);
+}
+dialog.body.addEventListener("scroll", paintCompact, { passive: true });
+{
+  const mm = globalThis.window && globalThis.window.matchMedia;
+  const query = typeof mm === "function" ? mm.call(globalThis.window, BOTTOM_SHEET_QUERY) : null;
+  // Rotating a tablet across the breakpoint moves the actions.
+  if (query && typeof query.addEventListener === "function") {
+    query.addEventListener("change", () => {
+      if (dialog.isOpen()) render();
+    });
+  }
+}
 
 /** Selected tab of the open sheet; survives the structural re-renders a poll
  * tick can cause, reset to Overview on every open(). */
@@ -1657,6 +1705,10 @@ function buildMaintenancePanel(gameLike, group) {
  * changed (see the round-7 comparison in the store subscriptions below). */
 function render() {
   contentEl.replaceChildren();
+  compactEl.replaceChildren();
+  footEl.replaceChildren();
+  footEl.hidden = true;
+  dialog.sheet.classList.remove("has-foot", "compact");
 
   if (!state.appid) {
     gcSectionEl.replaceChildren();
@@ -1703,7 +1755,15 @@ function render() {
   if (headVerify) acts.append(headVerify);
   const actions = buildPrimaryAction(gameLike, trackedJob);
   if (actions) acts.append(actions);
-  if (acts.childNodes.length) head.append(acts);
+  // WP MOBILE-1b: as a bottom sheet the actions sit in the footer.
+  if (acts.childNodes.length && isBottomSheet()) {
+    footEl.append(acts);
+    footEl.hidden = false;
+    dialog.sheet.classList.add("has-foot");
+  } else if (acts.childNodes.length) {
+    head.append(acts);
+  }
+  buildCompactHeader(gameLike, liveJob);
 
   // Overview, two columns (WP LIBRARY-2, library.html): left the facts
   // grid, "Installed on" and About (store details, only when
@@ -1764,10 +1824,33 @@ function render() {
   body.className = "gd-body";
   body.append(overview, depotsPanel, maintenance);
   contentEl.append(tabs.tablist, body);
+  // WP MOBILE-1b: the strip scrolls sideways when it overflows (200 % text).
+  watchScrollCue(tabs.tablist);
+  paintCompact();
 
   renderGcSection();
 
   lastStructuralKey = computeStructuralKey();
+}
+
+/** WP MOBILE-1b: the compact header's content (40px cover, title, pill),
+ * shown by kit.css once the header row has scrolled away. */
+function buildCompactHeader(gameLike, liveJob) {
+  const cover = buildMiniCover(
+    state.appid,
+    state.detail?.cover_url ?? gameLike?.cover_url,
+    state.detail?.cover_cached_url ?? gameLike?.cover_cached_url,
+  );
+  const id = document.createElement("div");
+  id.className = "gd-cid";
+  const title = document.createElement("div");
+  title.className = "gd-ct";
+  title.textContent = sheetTitle(gameLike);
+  const sub = document.createElement("div");
+  sub.className = "gd-sub";
+  sub.append(buildDetailStatusRow(currentUpdateRow() || gameLike, dispKind(gameLike, liveJob)));
+  id.append(title, sub);
+  compactEl.append(cover, id);
 }
 
 /** The padded body under the hero for the loading / error / not-tracked

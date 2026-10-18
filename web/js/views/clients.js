@@ -587,9 +587,9 @@ export function renderClients() {
     value: state.range,
     onChange: setRange,
     role: "clients-range",
+    // The kit's segmented control, not the legacy `.segs` (app.css).
+    className: "seg",
   });
-  // The kit's segmented control, not the legacy `.segs` (app.css).
-  range.el.className = "seg";
   const sechd = el("div", "sechd");
   sechd.append(el("span", "sec", "Devices"), range.el);
 

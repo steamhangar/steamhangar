@@ -594,7 +594,8 @@ test("compact layout: at a container width of 760px or less the expert switch is
     disconnect() {}
   };
   const resize = (width) => {
-    const o = observers.at(-1);
+    // The view's own observer, not the shared overflow-cue one (WP MOBILE-1b).
+    const o = observers.filter((x) => !(x.target && x.target.classList && x.target.classList.contains("scue"))).at(-1);
     o.cb([{ target: o.target, contentRect: { width } }]);
   };
   try {

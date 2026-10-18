@@ -146,6 +146,7 @@ import {
   verifyAllAriaLabel,
 } from "../components/job-row.js";
 import { createHistoryItem, setHistoryItemExpanded, paintHistoryPanel } from "../components/history-list.js";
+import { createSheetDialog } from "../components/sheet-dialog.js";
 import {
   emptyHistoryText,
   feedState,
@@ -1199,7 +1200,12 @@ function startQueueDrag(e, row, jobId) {
 function paintExcerpt(itemEl, jobId) {
   const panel = itemEl.querySelector(".hpanel");
   if (!panel) return;
-  const st = getExcerptState(jobId);
+  paintExcerptInto(panel, jobId, getExcerptState(jobId));
+}
+
+/** `paintExcerpt` for any panel: the row's own, or the History sheet's
+ * (which passes its excerpt state as expanded). */
+function paintExcerptInto(panel, jobId, st) {
   const display = selectExcerptDisplay(st);
   const job = findJobById(jobId);
   const ready = st.excerpt !== undefined;
@@ -1254,10 +1260,99 @@ async function ensureExcerptLoaded(jobId, row) {
     // trusting the captured reference.
     const liveRow = historyRowNow(jobId);
     if (liveRow) paintExcerpt(liveRow, jobId);
+    if (histSheetJob === jobId) paintHistorySheet();
   }
 }
 
+// ---------------------------------------------------------------------
+// History row in a bottom sheet on a phone (WP MOBILE-1b, decision Q4
+// Weg A, docs/design/rc21/mobile.html 3d). Below 600px a tap on a row
+// opens its panel in a sheet instead of under the row: the row's icon,
+// name and meta are the header, the panel is painted by the same
+// `paintHistoryPanel`, Retry moves into the footer. Wider screens keep the
+// hanging panel. The sheet is named by the row's game; Escape, a tap on
+// the scrim, a drag on the grab handle and Close dismiss it, focus returns
+// to the row (sheet-dialog.js).
+// ---------------------------------------------------------------------
+
+const HISTORY_SHEET_QUERY = "(max-width:599px)";
+/** Job id the History sheet shows, or null while it is closed. */
+let histSheetJob = null;
+const histSheet = createSheetDialog({
+  ariaLabel: "History",
+  onClose: () => {
+    const jobId = histSheetJob;
+    histSheetJob = null;
+    // sheet-dialog.js returns focus to the row that opened the sheet, but a
+    // poll may have rebuilt the list meanwhile (a detached row takes no
+    // focus): after that, re-query the live row by its job id.
+    queueMicrotask(() => {
+      const live = jobId == null ? null : historyRowNow(jobId);
+      const row = live && live.querySelector(".hrow");
+      if (row && document.activeElement !== row && typeof row.focus === "function") row.focus();
+    });
+  },
+});
+histSheet.sheet.classList.add("kit", "hist-sheet");
+const histSheetHead = document.createElement("div");
+histSheetHead.className = "hs-head";
+const histSheetPanel = document.createElement("div");
+histSheetPanel.className = "hpanel";
+histSheetPanel.dataset.role = "history-sheet-panel";
+histSheet.body.append(histSheetHead, histSheetPanel);
+const histSheetFoot = document.createElement("div");
+histSheetFoot.className = "sfoot";
+const histSheetClose = document.createElement("button");
+histSheetClose.type = "button";
+histSheetClose.className = "btn";
+histSheetClose.textContent = "Close";
+histSheetClose.addEventListener("click", () => histSheet.close());
+const histSheetRetry = document.createElement("span");
+histSheetRetry.className = "hs-retry"; // display:contents (kit.css): Retry sits in the footer row
+histSheetFoot.append(histSheetClose, histSheetRetry);
+histSheet.sheet.append(histSheetFoot);
+
+/** True on a phone-wide screen (no `matchMedia`, e.g. the test DOM: the
+ * hanging panel, as before). */
+function historyInSheet() {
+  const mm = globalThis.window && globalThis.window.matchMedia;
+  return typeof mm === "function" && mm.call(globalThis.window, HISTORY_SHEET_QUERY).matches;
+}
+
+function paintHistorySheet() {
+  if (histSheetJob == null) return;
+  const st = getExcerptState(histSheetJob);
+  paintExcerptInto(histSheetPanel, histSheetJob, { ...st, expanded: true });
+  histSheetPanel.hidden = false;
+  // Retry (the failure block's `.acts`) moves into the footer.
+  const acts = histSheetPanel.querySelector(".failhint .acts");
+  histSheetRetry.replaceChildren(...(acts ? [...acts.childNodes] : []));
+  if (acts) acts.remove();
+}
+
+function openHistorySheet(jobId) {
+  const item = historyRowNow(jobId);
+  const row = item && item.querySelector(".hrow");
+  histSheetHead.replaceChildren(
+    ...[".hic", ".hinfo"].map((sel) => (row ? row.querySelector(sel) : null)).filter(Boolean).map((n) => n.cloneNode(true)),
+  );
+  const name = row && row.querySelector(".nm");
+  histSheet.sheet.setAttribute("aria-label", (name && name.textContent) || "History");
+  histSheetJob = jobId;
+  // The fetch marks the state loading synchronously, so the first paint
+  // below already says "Loading log…" instead of "No log output".
+  ensureExcerptLoaded(jobId, item);
+  paintHistorySheet();
+  histSheet.open();
+}
+
+onViewChange(() => histSheet.close());
+
 async function toggleHistoryRow(jobId) {
+  if (historyInSheet()) {
+    openHistorySheet(jobId);
+    return;
+  }
   const st = getExcerptState(jobId);
   st.expanded = !st.expanded;
   const row = historyRowNow(jobId);
@@ -1345,6 +1440,16 @@ function buildHistoryRow(job, gamesByAppid) {
     onToggle: () => toggleHistoryRow(job.id),
   });
   paintExcerpt(item, job.id);
+  // WP MOBILE-1b (Q4): on a phone the row opens a dialog, not a panel
+  // under it, so it announces that instead of a stale "collapsed".
+  if (historyInSheet()) {
+    const row = item.querySelector(".hrow");
+    if (row) {
+      row.removeAttribute("aria-expanded");
+      row.removeAttribute("aria-controls");
+      row.setAttribute("aria-haspopup", "dialog");
+    }
+  }
   return item;
 }
 

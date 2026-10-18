@@ -10,6 +10,7 @@
  */
 
 import { RANGES, RANGE_LABELS } from "../lib/traffic-view.js";
+import { watchScrollCue } from "../lib/scroll-cue.js";
 
 /**
  * @param {{label: string, value: string, onChange: (range: string) => void, role?: string, ranges?: readonly string[], className?: string}} options
@@ -45,5 +46,8 @@ export function createRangeSegs({ label, value, onChange, role, ranges = RANGES,
     for (const btn of buttons) btn.setAttribute("aria-pressed", String(btn.dataset.range === range));
   }
   set(value);
+  // WP MOBILE-1b: the kit's `.seg` scrolls sideways in a narrow container;
+  // the overflow cue fades the edge with more ranges behind it.
+  if (/(^|\s)seg(\s|$)/.test(className)) watchScrollCue(group);
   return { el: group, set };
 }

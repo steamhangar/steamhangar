@@ -15,6 +15,8 @@
  * in the `.kit`-scoped Library block at the end of css/kit.css.
  */
 
+import { watchScrollCue } from "../lib/scroll-cue.js";
+
 const SEARCH_SVG =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>';
 const CLEAR_SVG =
@@ -129,6 +131,9 @@ function buildBar({ query, layout, layoutLabels }) {
   const chips = el("div", "chips lib-chips");
   chips.setAttribute("role", "group");
   chips.setAttribute("aria-label", "Filter library");
+  // WP MOBILE-1b: on a phone the chips scroll in one row (kit.css); the
+  // overflow cue fades the edge with more chips behind it.
+  watchScrollCue(chips);
 
   const filters = el("div", "lib-filters");
   filters.append(searchWrap, chips);

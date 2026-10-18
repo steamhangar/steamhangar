@@ -63,6 +63,16 @@
   --fs-1:11px; --fs-2:12px; --fs-3:13px; --fs-4:15px; --fs-5:18px; --fs-6:24px; --fs-7:32px;
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-7:32px; --sp-8:48px;
 
+  /* Touch targets (WP MOBILE-1b, docs/design/rc21/mobile.html, decision
+     Q1 Weg A). --hit is the minimum hit area on a touch screen (WCAG 2.5.5,
+     HIG, Material's 48dp); --ctl-h the visual height segs, chips and
+     buttons grow to under `@media (pointer:coarse)`, the remaining 6px come
+     from an invisible ::after extender (css/kit.css "touch targets").
+     --ctl-h is also the toolbar control height the Library already used as
+     a literal. Web-only: the Android app sizes its own touch targets
+     (docs/design/tokens.json "size"). */
+  --hit:44px; --ctl-h:38px;
+
   /* ---------- spatial tokens (WP 4e.1 — desktop layout foundation) ----------
      Purely dimensional; NOT colour/font/radius (those hexes above are the
      single source of truth for the Android side's VaultColors, literal-pinned
@@ -441,9 +451,11 @@ a{ color:var(--accent); }
 /* ---------- toast ----------
    Pinned near the bottom of the viewport, auto-dismissing (mockup round 7:
    "sits where the bulk bar sits" — this WP has no bulk bar yet, so it
-   simply sits 16px above the bottom edge). */
+   simply sits 16px above the bottom edge). WP MOBILE-1b: it sits above
+   the bottom nav and the home indicator (--nav-h is 0 at BP-L, where this
+   is the old 16px again); at 16px it covered the nav on a phone. */
 .toast{
-  position:fixed; left:50%; bottom:16px; z-index:100;
+  position:fixed; left:50%; bottom:calc(var(--nav-h) + var(--sp-4) + env(safe-area-inset-bottom, 0px)); z-index:100;
   transform:translate(-50%, 20px);
   /* WP WEB-FIX-3: 100%, not 100vw — a fixed box's percentage resolves
      against the viewport WITHOUT the scrollbar, 100vw includes it. */

@@ -223,7 +223,9 @@ test("createDownloadsHero: an idle series paints the grid, a baseline, the axis 
 test("createDownloadsHero: paint fills the card; the pill is rebuilt only when its kind changes", () => {
   const hero = createDownloadsHero({ range: "6h", onRangeChange() {} });
   const q = (role) => hero.el.querySelector(`[data-role="${role}"]`);
-  assert.equal(hero.rangeEl.className, "seg rangesegs");
+  // WP MOBILE-1b: the kit seg also carries the overflow cue (scue + its state).
+  assert.equal(hero.rangeEl.className.replace(/ scue( fits| at-start| at-end)*$/, ""), "seg rangesegs");
+  assert.ok(hero.rangeEl.classList.contains("scue"), "overflow cue wired");
   const state = { throughput: throughput(), series: null, range: "6h", rateCap: null, unsupported: false, error: null, noFigures: false };
   hero.paint(state);
   assert.equal(q("stats-current").textContent, "40.0MB/s");

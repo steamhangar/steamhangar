@@ -18,9 +18,17 @@
 //     stylesheet's families to Liberation Sans/Mono, admits no other font,
 //     and renders unhinted with grey antialiasing.
 //
+// Besides one full-page shot per page and width, the tool shoots CASES
+// (WP MOBILE-1b): one page at one width with an overlay opened by a setup
+// script (a sheet or a confirm), captured at the viewport size, with touch
+// emulation on so `@media (pointer:coarse)` applies (headless Chromium has
+// no pointer at all: `(pointer:fine)` and `(pointer:coarse)` are both
+// false for the page shots). See CASES below.
+//
 // Usage (every flag optional; see DEFAULTS and tools/README.md):
 //   node tools/web-shot.mjs --base http://127.0.0.1:8787 --out shots \
-//     --widths 1400,1000,400 --pages library,clients,downloads,settings,kit
+//     --widths 1400,1000,400 --pages library,clients,downloads,settings,kit \
+//     --cases library-detail-400,clients-pair-400   (or --cases none)
 // Exit status: 0 when every requested page that the server serves was
 // captured at every width; a page the server answers with 404 is skipped
 // with a warning (UI-KIT-1 adds /kit in a parallel package); any other
@@ -36,12 +44,99 @@ import { fileURLToPath } from "node:url";
 // them to validate the recorded artifact (api/tests/test_web_goldens_1_ci.py).
 export const DEFAULT_PAGES = ["library", "clients", "downloads", "settings", "kit"];
 export const DEFAULT_WIDTHS = [1400, 1000, 400];
+// The same job validates case shots: `<case>.png` for each name on this line.
+export const DEFAULT_CASES = ["library-detail-400", "downloads-delete-400", "downloads-row-400", "clients-pair-400", "clients-pair-shown-400", "settings-savebar-400"];
+
+/**
+ * Overlay cases (WP MOBILE-1b). Each: the page to load, the width (the
+ * name ends in it), `touch` (CDP touch emulation: `pointer:coarse`), a
+ * `setup` script evaluated after the page has rendered, and a `ready`
+ * expression polled until it is truthy. Captured at width x viewportHeight
+ * (an overlay is fixed to the viewport, a full-page shot would only grow
+ * the scrim).
+ *
+ * clients-pair-400 needs the Add-a-device options, which demo mode hides
+ * (nothing to share): its setup stores a stand-in key and turns demo mode
+ * off only for the synchronous click, so the sheet opens with its options
+ * while every poll stays in demo mode. The sheet's GET /v1/dist is answered
+ * from the demo fixture (DIST_FROM_DEMO), so step 1 shows the normal app
+ * download. clients-pair-400 never shows the key;
+ * clients-pair-shown-400 taps the stand-in (the operator's reveal overlay)
+ * and shows the QR of the stand-in key, never a real one.
+ */
+/** The pairing cases turn demo mode off for one click, so the sheet's
+ * GET /v1/dist would reach the static server (404, an error line in the
+ * shot). This answers exactly that request from the demo fixture instead. */
+const DIST_FROM_DEMO = `{
+      const { demoRequest } = await import("/js/demo-data.js");
+      const realFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : String(input), location.href); // api.js passes a URL object
+        if (url.pathname === "/v1/dist") {
+          return new Response(JSON.stringify(await demoRequest("GET", "/v1/dist")), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return realFetch(input, init);
+      };
+    }`;
+/** Ready once step 1 shows the normal app download (never the error). */
+const PAIR_READY = `(() => { const s = document.querySelector('.sheet-backdrop.shown .add-device');
+  const d = s && s.querySelector('[data-role="app-download"]');
+  return !!d && !d.querySelector('[data-role="app-download-error"]') && /Android app ·/.test(d.textContent); })()`;
+
+export const CASES = Object.freeze({
+  "library-detail-400": {
+    page: "library", width: 400, touch: true,
+    setup: `document.querySelector(".kit.view-library .grid .card").click()`,
+    ready: `!!document.querySelector(".sheet-backdrop.shown .game-detail .gd-body:not(.gd-state)")`,
+  },
+  "downloads-delete-400": {
+    page: "downloads", width: 400, touch: true,
+    setup: `document.querySelector('[data-role="history-delete"]').click()`,
+    ready: `!!document.querySelector('.dialog-backdrop.on [data-role="history-delete-confirm"]')`,
+  },
+  "downloads-row-400": {
+    page: "downloads", width: 400, touch: true,
+    setup: `(document.querySelector(".hitem .hrow .sic.k-error")?.closest(".hrow") || document.querySelector(".hitem .hrow")).click()`,
+    ready: `(() => { const p = document.querySelector('.sheet-backdrop.shown [data-role="history-sheet-panel"]'); return !!p && !p.querySelector(".loading"); })()`,
+  },
+  "clients-pair-400": {
+    page: "clients", width: 400, touch: true,
+    setup: `(async () => {
+      ${DIST_FROM_DEMO}
+      localStorage.setItem("steamvault.apiKey", "web-shot-stand-in-key");
+      localStorage.setItem("steamvault.demoMode", "0");
+      try { document.querySelector('[data-role="add-device"]').click(); }
+      finally { localStorage.setItem("steamvault.demoMode", "1"); }
+    })()`,
+    ready: PAIR_READY,
+  },
+  "clients-pair-shown-400": {
+    page: "clients", width: 400, touch: true,
+    setup: `(async () => {
+      ${DIST_FROM_DEMO}
+      localStorage.setItem("steamvault.apiKey", "web-shot-stand-in-key");
+      localStorage.setItem("steamvault.demoMode", "0");
+      try {
+        document.querySelector('[data-role="add-device"]').click();
+        document.querySelector('[data-role="show-phone-cover"]').click();
+      } finally { localStorage.setItem("steamvault.demoMode", "1"); }
+      document.querySelector('.add-device [data-role="pair-qr"]')?.scrollIntoView({ block: "center" });
+    })()`,
+    ready: `${PAIR_READY} && !!document.querySelector('.sheet-backdrop.shown .add-device [data-role="pair-qr"]')`,
+  },
+  "settings-savebar-400": {
+    page: "settings", width: 400, touch: true,
+    setup: `document.querySelector('.view-settings .settings-main .seg button[aria-pressed="false"]:not(:disabled)').click()`,
+    ready: `!!document.querySelector(".view-settings .savebar:not([hidden])")`,
+  },
+});
 
 export const DEFAULTS = Object.freeze({
   base: "http://127.0.0.1:8787",
   out: "web-shots",
   widths: DEFAULT_WIDTHS,
   pages: DEFAULT_PAGES,
+  cases: DEFAULT_CASES,
   chrome: null, // resolved by findChrome()
   reducedMotion: true,
   hideScrollbars: true,
@@ -99,6 +194,11 @@ export function parseArgs(argv) {
       case "--chrome": opts.chrome = take(); break;
       case "--widths": opts.widths = take().split(",").map((w) => Number(w.trim())); break;
       case "--pages": opts.pages = take().split(",").map((p) => p.trim()).filter(Boolean); break;
+      case "--cases": {
+        const v = take().trim();
+        opts.cases = v === "none" ? [] : v.split(",").map((c) => c.trim()).filter(Boolean);
+        break;
+      }
       case "--wait-selector": opts.waitSelector = take(); break;
       case "--timeout": opts.timeoutMs = Number(take()); break;
       case "--settle": opts.settleMs = Number(take()); break;
@@ -116,6 +216,9 @@ export function parseArgs(argv) {
   }
   if (!opts.pages.length || opts.pages.some((p) => !/^[a-z][a-z0-9-]*$/.test(p))) {
     throw new Error("--pages: comma-separated lower-case names");
+  }
+  for (const name of opts.cases) {
+    if (!CASES[name]) throw new Error(`--cases: unknown case ${name} (known: ${Object.keys(CASES).join(", ")})`);
   }
   if (Number.isNaN(Date.parse(opts.clock))) throw new Error("--clock: ISO-8601 timestamp");
   for (const key of ["timeoutMs", "settleMs", "maxHeight"]) {
@@ -229,12 +332,14 @@ async function launchChrome(opts, width, userDataDir) {
   return { child, cdp: new Cdp(ws), ws, stderrText: () => stderr };
 }
 
-async function preparePage(cdp, opts, width) {
+async function preparePage(cdp, opts, width, { touch = false } = {}) {
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width, height: opts.viewportHeight, deviceScaleFactor: 1, mobile: width < 700,
   });
+  // Touch emulation makes `(pointer:coarse)` and `(hover:none)` match.
+  if (touch) await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   await cdp.send("Emulation.setTimezoneOverride", { timezoneId: opts.timezone });
   await cdp.send("Emulation.setLocaleOverride", { locale: opts.locale });
   await cdp.send("Emulation.setEmulatedMedia", {
@@ -300,6 +405,50 @@ async function capture(cdp, opts, width, url) {
   return { png: Buffer.from(data, "base64"), height };
 }
 
+/** One overlay case: load the page, run its setup, wait until it is ready,
+ * capture the viewport (not the full page). */
+async function captureCase(cdp, opts, spec, url) {
+  await cdp.send("Page.navigate", { url });
+  await waitFor(cdp, `document.readyState === "complete"`, opts.timeoutMs, "load");
+  await waitFor(cdp, `document.querySelector(${JSON.stringify(opts.waitSelector)}) !== null`, opts.timeoutMs,
+    `selector ${opts.waitSelector}`);
+  await waitFor(cdp, `document.fonts.status === "loaded"`, opts.timeoutMs, "fonts");
+  await sleep(opts.settleMs);
+  await cdp.evaluate(spec.setup);
+  await waitFor(cdp, spec.ready, opts.timeoutMs, "the case's overlay");
+  // Only images on screen: a lazy image below the viewport or in a hidden
+  // box (the detail sheet's compact header) never starts loading.
+  await waitFor(cdp, `Array.from(document.images).every((i) => i.complete || !i.getClientRects().length
+    || i.getBoundingClientRect().top >= innerHeight)`, opts.timeoutMs, "images");
+  await sleep(opts.settleMs);
+  await cdp.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))");
+  const { data } = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
+  return { png: Buffer.from(data, "base64"), height: opts.viewportHeight };
+}
+
+/** Stop a launched browser and remove its profile directory. */
+async function stopChrome(chrome, userDataDir, log) {
+  if (chrome) {
+    try { chrome.ws.close(); } catch { /* already closed */ }
+    const exited = new Promise((r) => chrome.child.once("exit", r));
+    chrome.child.kill("SIGTERM");
+    if (await Promise.race([exited.then(() => true), sleep(5000).then(() => false)]) === false) {
+      chrome.child.kill("SIGKILL");
+      await exited;
+    }
+  }
+  // Chrome's helper processes can still be flushing the profile for a
+  // moment after the main process exits; retry briefly, then warn.
+  for (let attempt = 0; existsSync(userDataDir); attempt += 1) {
+    try {
+      rmSync(userDataDir, { recursive: true, force: true });
+    } catch (err) {
+      if (attempt >= 20) { log.warn(`warning: could not remove ${userDataDir}: ${err.message}`); break; }
+      await sleep(250);
+    }
+  }
+}
+
 /** HTTP status the server gives a page path; a 404 means "skip this page". */
 async function probe(base, page) {
   const res = await fetch(`${base}/${page}`, { method: "GET", redirect: "manual" });
@@ -348,25 +497,31 @@ export async function run(opts, log = console) {
       failures.push(`width ${width}: ${err.message}`);
       log.error(`error: width ${width}: ${err.message}`);
     } finally {
-      if (chrome) {
-        try { chrome.ws.close(); } catch { /* already closed */ }
-        const exited = new Promise((r) => chrome.child.once("exit", r));
-        chrome.child.kill("SIGTERM");
-        if (await Promise.race([exited.then(() => true), sleep(5000).then(() => false)]) === false) {
-          chrome.child.kill("SIGKILL");
-          await exited;
-        }
-      }
-      // Chrome's helper processes can still be flushing the profile for a
-      // moment after the main process exits; retry briefly, then warn.
-      for (let attempt = 0; existsSync(userDataDir); attempt += 1) {
-        try {
-          rmSync(userDataDir, { recursive: true, force: true });
-        } catch (err) {
-          if (attempt >= 20) { log.warn(`warning: could not remove ${userDataDir}: ${err.message}`); break; }
-          await sleep(250);
-        }
-      }
+      await stopChrome(chrome, userDataDir, log);
+    }
+  }
+  // Overlay cases: one browser per case (touch emulation is per target and
+  // must be on before the page loads).
+  for (const name of opts.cases) {
+    const spec = CASES[name];
+    if (!served.includes(spec.page)) {
+      if (!skipped.includes(spec.page)) log.warn(`warning: case ${name} skipped (page ${spec.page} not requested)`);
+      continue;
+    }
+    const userDataDir = mkdtempSync(join(tmpdir(), "web-shot-"));
+    let chrome;
+    try {
+      chrome = await launchChrome(opts, spec.width, userDataDir);
+      await preparePage(chrome.cdp, opts, spec.width, { touch: spec.touch });
+      const { png, height } = await captureCase(chrome.cdp, opts, spec, `${opts.base}/${spec.page}`);
+      writeFileSync(join(opts.out, `${name}.png`), png);
+      written.push(`${name}.png`);
+      log.log(`${name}.png  ${spec.width}x${height}`);
+    } catch (err) {
+      failures.push(`${name}.png: ${err.message}`);
+      log.error(`error: ${name}.png: ${err.message}`);
+    } finally {
+      await stopChrome(chrome, userDataDir, log);
     }
   }
   return { written, skipped, failures };

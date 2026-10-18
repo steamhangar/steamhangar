@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import vm from "node:vm";
 
-import { DEFAULTS, DEFAULT_PAGES, DEFAULT_WIDTHS, DEMO_STORAGE, bootstrapScript, findChrome, parseArgs } from "../../tools/web-shot.mjs";
+import { CASES, DEFAULTS, DEFAULT_CASES, DEFAULT_PAGES, DEFAULT_WIDTHS, DEMO_STORAGE, bootstrapScript, findChrome, parseArgs } from "../../tools/web-shot.mjs";
 import { readViews } from "../../tools/web-serve.mjs";
 import { STATS_RANGES, STATS_RANGE_KEY } from "../js/lib/traffic-view.js";
 import { DESKTOP_SITE_HINT_STORAGE_KEY } from "../js/lib/desktop-site-hint.js";
@@ -147,4 +147,25 @@ test("fontconfig file, loaded by fontconfig itself, lists only admitted families
   for (const family of families) {
     assert.ok(["Liberation Sans", "Liberation Serif", "Liberation Mono"].includes(family), `unexpected family ${family}`);
   }
+});
+
+test("overlay cases (MOBILE-1b): one greppable line, every case defined, named <page>-<what>-<width>, never a page/width name", () => {
+  assert.match(TOOL_SOURCE, /^export const DEFAULT_CASES = \[("[a-z0-9-]+", )*"[a-z0-9-]+"\];$/m);
+  assert.deepEqual(Object.keys(CASES).sort(), [...DEFAULT_CASES].sort());
+  const pageNames = new Set(DEFAULT_PAGES.flatMap((p) => DEFAULT_WIDTHS.map((w) => `${p}-${w}`)));
+  for (const name of DEFAULT_CASES) {
+    const spec = CASES[name];
+    assert.match(name, /^[a-z-]+-[0-9]+$/, name);
+    assert.ok(DEFAULT_PAGES.includes(spec.page), `${name}: page ${spec.page}`);
+    assert.ok(name.startsWith(`${spec.page}-`) && name.endsWith(`-${spec.width}`), `${name}: page and width in the name`);
+    assert.ok(DEFAULT_WIDTHS.includes(spec.width), `${name}: width`);
+    assert.ok(!pageNames.has(name), `${name} collides with a page shot`);
+    assert.equal(typeof spec.setup, "string");
+    assert.equal(typeof spec.ready, "string");
+    assert.equal(spec.touch, true, `${name}: the phone cases run with pointer:coarse`);
+  }
+  assert.deepEqual(parseArgs([]).cases, DEFAULT_CASES);
+  assert.deepEqual(parseArgs(["--cases", "none"]).cases, []);
+  assert.deepEqual(parseArgs(["--cases", "library-detail-400"]).cases, ["library-detail-400"]);
+  assert.throws(() => parseArgs(["--cases", "nope-400"]), /unknown case/);
 });

@@ -305,6 +305,7 @@ def _git(repo: Path, *args: str) -> str:
 
 PAGES = ["library", "kit"]
 WIDTHS = [1400, 400]
+CASES = ["library-detail-400"]
 ANDROID_GOLDENS = "app/app/src/testDebug/screenshots"
 
 
@@ -315,7 +316,8 @@ def _repo(tmp_path: Path) -> Path:
     pages = ", ".join(f'"{p}"' for p in PAGES)
     widths = ", ".join(str(w) for w in WIDTHS)
     tool.write_text(
-        f"// stub\nexport const DEFAULT_PAGES = [{pages}];\nexport const DEFAULT_WIDTHS = [{widths}];\n",
+        f"// stub\nexport const DEFAULT_PAGES = [{pages}];\nexport const DEFAULT_WIDTHS = [{widths}];\n"
+        f'export const DEFAULT_CASES = [{", ".join(chr(34) + c + chr(34) for c in CASES)}];\n',
         encoding="utf-8",
     )
     (repo / GOLDENS).mkdir(parents=True)
@@ -414,6 +416,28 @@ def test_validation_rejects_everything_else_and_leaves_the_tree_alone(
     assert reason in p.stdout, p.stdout
     assert sorted(f.name for f in (repo / GOLDENS).iterdir()) == ["README.md", "gone-1400.png", "library-1400.png"]
     assert (repo / GOLDENS / "library-1400.png").read_bytes() == PNG + b"old"
+
+
+@needs_tools
+def test_validation_accepts_declared_overlay_cases_without_counting_them_as_a_page_width(tmp_path: Path) -> None:
+    # WP MOBILE-1b: `library-detail-400.png` is a case, not a fourth width of
+    # `library`; the per-page width count ignores it.
+    repo = _repo(tmp_path)
+    case = {"library-detail-400.png": PNG + b"case"}
+    _download(tmp_path, {**FULL_SET, **case})
+    p, _, _ = _run_step(tmp_path, repo, VALIDATE)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert (repo / GOLDENS / "library-detail-400.png").read_bytes() == case["library-detail-400.png"]
+
+
+@needs_tools
+@pytest.mark.parametrize("name", ["library-sheet-400.png", "library-detail-1400.png"])
+def test_validation_rejects_an_undeclared_case(tmp_path: Path, name: str) -> None:
+    repo = _repo(tmp_path)
+    _download(tmp_path, {**FULL_SET, name: PNG + b"x"})
+    p, _, _ = _run_step(tmp_path, repo, VALIDATE)
+    assert p.returncode != 0
+    assert "not a page/width or case" in p.stdout, p.stdout
 
 
 @needs_tools

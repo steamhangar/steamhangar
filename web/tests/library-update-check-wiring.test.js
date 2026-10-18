@@ -241,7 +241,9 @@ test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; '
   await until(() => updBtn(s).hidden === false, "button shown");
   const bar = s.querySelector(".lib-bar");
   assert.deepEqual(bar.children.map((c) => c.className), ["lib-filters", "lib-tools"]);
-  assert.deepEqual(bar.children[0].children.map((c) => c.className), ["search lib-search", "chips lib-chips"]);
+  // WP MOBILE-1b: the chip row also carries the overflow cue (scue + its state).
+  assert.deepEqual(bar.children[0].children.map((c) => c.className.replace(/ scue( fits| at-start| at-end)*$/, "")), ["search lib-search", "chips lib-chips"]);
+  assert.ok(bar.children[0].children[1].classList.contains("scue"), "overflow cue wired");
   // WP LIBRARY-1: the check buttons are one split button in the header.
   const split = s.querySelector(".lib-head").querySelector(".lib-split");
   assert.ok(split, "split button lives in the header");

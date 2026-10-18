@@ -339,8 +339,11 @@ test("downloads wiring: nameFor uses vaultRowTitle; the hint block gates Retry o
   );
   // WP DOWNLOADS-2: the view decides the offer (retryOffer -> offersRetryFor)
   // and components/history-list.js renders it.
-  const paint = functionBody(downloadsJs, "function paintExcerpt(itemEl, jobId) {");
-  assert.ok(paint, "paintExcerpt() not found in downloads.js");
+  // WP MOBILE-1b: paintExcerpt delegates to paintExcerptInto (the row's
+  // panel or the phone's History sheet).
+  assert.match(functionBody(downloadsJs, "function paintExcerpt(itemEl, jobId) {"), /paintExcerptInto\(panel, jobId, getExcerptState\(jobId\)\)/);
+  const paint = functionBody(downloadsJs, "function paintExcerptInto(panel, jobId, st) {");
+  assert.ok(paint, "paintExcerptInto() not found in downloads.js");
   assert.match(paint, /retryOffer\(job, state\.jobs, gamesByAppidMap\(\)\.get\(job\.appid\)\)/);
   const panel = historyListJs.slice(historyListJs.indexOf("export function paintHistoryPanel("));
   assert.ok(panel.length > 0, "paintHistoryPanel() not found in history-list.js");

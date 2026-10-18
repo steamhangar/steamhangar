@@ -115,7 +115,8 @@ test("MUTATION TARGET -- wiring: render() offers 'Update now' when there is no j
   // LIBRARY-2 moved it into the header row's action group, after Verify.
   assert.match(
     body("function render() {"),
-    /const actions = buildPrimaryAction\(gameLike, trackedJob\);\s*if \(actions\) acts\.append\(actions\);\s*if \(acts\.childNodes\.length\) head\.append\(acts\);/,
+    // WP MOBILE-1b: as a bottom sheet the group goes to the footer instead.
+    /const actions = buildPrimaryAction\(gameLike, trackedJob\);\s*if \(actions\) acts\.append\(actions\);[\s\S]*?if \(acts\.childNodes\.length && isBottomSheet\(\)\) \{\s*footEl\.append\(acts\);[\s\S]*?\} else if \(acts\.childNodes\.length\) \{\s*head\.append\(acts\);/,
   );
   const r = body("function buildPrimaryAction(gameLike, trackedJob) {");
   assert.match(

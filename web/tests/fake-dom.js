@@ -437,6 +437,20 @@ class FakeElement {
   // WP 4h.3 (header-art.test.js): components/header-art.js calls
   // `wrap.remove()` on an image load failure, real DOM's `Element.remove()`
   // — added here per this file's own "grows just far enough" policy.
+  // WP MOBILE-1b (history-sheet-phone.test.js): views/downloads.js copies
+  // the History row's icon and name block into the phone sheet's header.
+  // Tag, classes, attributes (dataset included) and own text; children only
+  // when `deep`, as in a real DOM. Listeners are not copied (nor are they
+  // by a browser).
+  cloneNode(deep = false) {
+    const copy = new FakeElement(this.tagName === "#TEXT" ? "#text" : this.tagName.toLowerCase());
+    copy._ownerDoc = this._ownerDoc;
+    copy._classes = new Set(this._classes);
+    for (const [k, v] of this._attrs) copy._attrs.set(k, v);
+    if (this._text !== undefined) copy._text = this._text;
+    if (deep) for (const c of this.childNodes) copy.appendChild(c.cloneNode(true));
+    return copy;
+  }
   remove() {
     if (!this.parentNode) return;
     const idx = this.parentNode.childNodes.indexOf(this);

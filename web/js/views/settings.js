@@ -73,6 +73,7 @@ import { showToast } from "../components/toast.js";
 import { confirmRiskyChange } from "../components/risky-confirm.js";
 import { createSettingsField, createInfoDisclosure, createFieldChip } from "../components/settings-field.js";
 import { createPill } from "../components/pill.js";
+import { watchScrollCue } from "../lib/scroll-cue.js";
 import { openOnboarding } from "../onboarding.js";
 import { buildSettingsPatch } from "../lib/settings-diff.js";
 import {
@@ -741,6 +742,9 @@ function buildNav() {
     list.append(item);
   }
   nav.append(list);
+  // WP MOBILE-1b: at 760px or narrower the list is a sideways strip
+  // (kit.css); the overflow cue fades the edge with more sections.
+  watchScrollCue(list);
   els.navEl = nav;
   return nav;
 }
