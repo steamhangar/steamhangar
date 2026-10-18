@@ -118,8 +118,19 @@ class SkippedSharedDepotOut(BaseModel):
     #: ADR-0003 addendum: a depot only appears here when AT LEAST ONE of these
     #: owners currently has cache content. A shared depot whose every co-owner
     #: is uncached is no longer reported here — see ``deleted_depots``'s
-    #: ``shared_with_uncached`` for that case instead.
+    #: ``shared_with_uncached`` for that case instead. Since WP
+    #: DELETE-CLAIMANT-1 an app counts as an owner here when it maps the
+    #: depot OR holds a recorded manifest for it (``recorded_only``).
     shared_with: list[int]
+    #: Why the depot was kept: ``co_owner_has_content`` (a mapped co-owner
+    #: has cache content), ``recorded_manifest`` (kept only because an app
+    #: that does not map the depot has a recorded manifest for it and counts
+    #: as having content) or ``unreadable_owner`` (a mapping or manifest row
+    #: with an unreadable app id: unknown ownership protects).
+    reason: str
+    #: Subset of ``shared_with`` that claims the depot only through a
+    #: recorded manifest (``depot_manifests``), with no mapping row.
+    recorded_only: list[int] = []
 
 
 class FailedDepotOut(BaseModel):
@@ -267,11 +278,13 @@ def _load_delete_request(
 ) -> tuple[
     group_delete.GroupSelection,
     list[tuple[object, object]],
+    list[tuple[object, object]],
     dict[int, bool],
     list[tuple[int, dict[str, object]]],
 ]:
     """Everything a delete or its plan reads, in one connection: the delete
-    set, the mapping rows of every member's depots, the outside co-owners'
+    set, the mapping rows of every member's depots, the recorded manifest
+    claimants of those depots (WP DELETE-CLAIMANT-1), the outside co-owners'
     content state and every member's in-flight job. Raises the two ``404``s.
     Shared by ``DELETE /v1/cache/{appid}`` and its ``delete-plan`` preview,
     so the preview and the deletion read the same inputs."""
@@ -314,8 +327,12 @@ def _load_delete_request(
         # connection as the mapping read, so plan_deletion below can stay a
         # pure function over plain data. Co-owners are apps OUTSIDE the
         # delete set (WP TOOL-APPS-2b: members never protect each other).
+        # WP DELETE-CLAIMANT-1: apps with a recorded manifest for one of
+        # these depots are co-owners too, mapped or not (the GC claimant rule
+        # of WP GROUP-VERIFIED-1), so their content state is read as well.
+        claimants = deletion.load_manifest_claimants(conn, _target(delete_set))
         co_owner_states = deletion.load_co_owner_states(
-            conn, deletion.other_owner_ids(rows, _target(delete_set))
+            conn, deletion.other_owner_ids([*rows, *claimants], _target(delete_set))
         )
 
         active_jobs: list[tuple[int, dict[str, object]]] = []
@@ -323,7 +340,7 @@ def _load_delete_request(
             job = jobs.active_job_for_app(conn, member)
             if job is not None:
                 active_jobs.append((member, job))
-    return selection, rows, co_owner_states, active_jobs
+    return selection, rows, claimants, co_owner_states, active_jobs
 
 
 def _target(delete_set: deletion.DeleteSet) -> "int | deletion.DeleteSet":
@@ -447,7 +464,7 @@ def delete_cached_app(
     """
     with_packages = _parse_with_packages(with_packages_raw)
     confirmed = _parse_members(members_raw, with_packages=with_packages)
-    selection, rows, co_owner_states, active_jobs = _load_delete_request(
+    selection, rows, claimants, co_owner_states, active_jobs = _load_delete_request(
         open_db, appid, with_packages=with_packages,
         oracle_enabled=_oracle_enabled(request),
     )
@@ -511,7 +528,9 @@ def delete_cached_app(
             ),
         )
 
-    plan = deletion.plan_deletion(rows, _target(delete_set), co_owner_states)
+    plan = deletion.plan_deletion(
+        rows, _target(delete_set), co_owner_states, claimants=claimants
+    )
 
     try:
         depot_root = deletion.resolve_depot_root(cache_root)
@@ -694,7 +713,10 @@ def delete_cached_app(
             for d in deleted
         ],
         skipped_shared=[
-            SkippedSharedDepotOut(depotid=s.depotid, shared_with=s.shared_with)
+            SkippedSharedDepotOut(
+                depotid=s.depotid, shared_with=s.shared_with, reason=s.reason,
+                recorded_only=s.recorded_only,
+            )
             for s in skipped_shared
         ],
         failed=[FailedDepotOut(depotid=f.depotid, error=f.error) for f in failed],
@@ -785,12 +807,14 @@ def plan_cached_app_deletion(
     an in-flight job is reported in ``blocked_by`` instead of a ``409``.
     """
     with_packages = _parse_with_packages(with_packages_raw)
-    selection, rows, co_owner_states, active_jobs = _load_delete_request(
+    selection, rows, claimants, co_owner_states, active_jobs = _load_delete_request(
         open_db, appid, with_packages=with_packages,
         oracle_enabled=_oracle_enabled(request),
     )
     delete_set = selection.delete_set
-    plan = deletion.plan_deletion(rows, _target(delete_set), co_owner_states)
+    plan = deletion.plan_deletion(
+        rows, _target(delete_set), co_owner_states, claimants=claimants
+    )
     depot_bytes = size_cache.get(cache_root).depot_bytes
     member_depots = _member_depots(rows, delete_set.members)
     remnants = {depot.depotid: depot.shared_with_uncached for depot in plan.remnant}
@@ -820,7 +844,10 @@ def plan_cached_app_deletion(
         kept_children=_kept_children_out(selection),
         delete_depots=planned,
         skipped_shared=[
-            SkippedSharedDepotOut(depotid=s.depotid, shared_with=s.shared_with)
+            SkippedSharedDepotOut(
+                depotid=s.depotid, shared_with=s.shared_with, reason=s.reason,
+                recorded_only=s.recorded_only,
+            )
             for s in plan.shared
         ],
         unusable=[FailedDepotOut(depotid=f.depotid, error=f.error) for f in plan.unusable],

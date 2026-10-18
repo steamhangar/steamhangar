@@ -925,7 +925,7 @@ delete removes:
      ],
      "kept_children": [{"appid": 4000001, "name": null, "app_type": "game", "reason": "not_a_package_type"}],
      "delete_depots": [{"depotid": 553851, "size_bytes": 1000, "owners": [553850], "shared_with_uncached": []}],
-     "skipped_shared": [{"depotid": 553853, "shared_with": [4000001]}],
+     "skipped_shared": [{"depotid": 553853, "shared_with": [4000001], "reason": "co_owner_has_content", "recorded_only": []}],
      "unusable": [], "total_bytes": 1000, "blocked_by": []
    }
    ```
@@ -1015,7 +1015,10 @@ section for the measured before/after). Disk truth comes from the same
 already share (so a request right after either of those costs nothing extra
 within the TTL); mapping/sharing truth comes from a single bulk read of the
 entire `depot_app_map` table, joined with every owner's lifecycle state in
-one statement — never a per-app or per-depot query
+one statement, plus one bulk read of `depot_manifests` for the recorded
+claimants (WP DELETE-CLAIMANT-1: a package whose depot a deletion kept for
+the recording game is not "cached" through that depot) — never a per-app or
+per-depot query
 (`vault_api/routers/jobs.py::_select_appids_with_cache_content` delegates to
 `deletion.appids_with_cache_content`, statement-count-pinned at 500 apps in
 `tests/test_prefill_cached.py`; see "Sweep target set" for the measured
@@ -2469,6 +2472,10 @@ now means "protected", see next bullet.)
   below) — a depot whose co-owner state changed in between (became shared, or
   a co-owner gained content or a job) is kept and reported in `skipped_shared`
   with its fresh owner list.
+- **An app with a recorded manifest for the depot is a co-owner too, mapped or
+  not** (WP DELETE-CLAIMANT-1, see "Recorded manifests count as co-owners"
+  below). Every `skipped_shared` entry carries a `reason` and a
+  `recorded_only` list.
 - **A depot that is already gone** counts as `deleted` with
   `size_bytes_freed: 0` rather than as an error: the endpoint is idempotent, so a
   repeated `DELETE` (or a racing second one) answers `200` with zeros instead of
@@ -2618,6 +2625,52 @@ decided this was shared" to work around.
 content a client is actively using gets deleted because vault-api's tracked
 state hadn't caught up yet): a re-download, never corruption — the same
 honest limit ADR-0007's garbage collection accepts.
+
+### Recorded manifests count as co-owners (WP DELETE-CLAIMANT-1)
+
+**The problem this closes.** Co-owners used to be read from `depot_app_map`
+only. A game can lose mapping rows its `depot_manifests` record still
+describes (prod: HELLDIVERS 2's content-package depots, mapped only to their
+package apps while the game's prefill recorded their manifests). Deleting one
+package app then planned such a depot as exclusive and removed the whole depot
+directory the game still uses.
+
+**The rule (same as GC's claimant rule, WP GROUP-VERIFIED-1).** For every
+depot the delete set maps, every app outside the set that has a
+`depot_manifests` row for the depot counts as a co-owner, mapped or not:
+
+- it is judged with the same "has cache content" predicate as a mapped
+  co-owner (no `apps` row, a non-idle status, a `last_prefill_at` or an
+  active job protect). A verifiably uncached recorder therefore does not block
+  the depot forever: the depot goes as a last cached remnant and the recorder
+  gets `needs_force = 1`, exactly like a mapped co-owner;
+- a record whose app id is unreadable protects unconditionally, like an
+  unreadable mapping row;
+- a record with an unreadable depot id is ignored: records only ever add
+  protection, they never put a depot into a deletion;
+- members of a grouped delete do not protect each other through their
+  records either.
+
+Both halves apply: the plan (`deletion.load_manifest_claimants` +
+`deletion.plan_deletion(..., claimants=...)`, so the `delete-plan` dry run
+shows the same result) and the execute-time recheck right before each removal
+(`deletion.load_co_owners` reads mapping rows and records).
+
+**Reporting.** `skipped_shared[]` entries (in the deletion and in the
+`delete-plan` preview) carry:
+
+| Field | Meaning |
+|---|---|
+| `shared_with` | every other app that maps the depot or has a recorded manifest for it |
+| `recorded_only` | the subset that only has a recorded manifest, no mapping row |
+| `reason` | `co_owner_has_content` (a mapping co-owner has content), `recorded_manifest` (kept only because of a recorded-only co-owner), `unreadable_owner` (a mapping or manifest row with an unreadable app id) |
+
+`DELETE /v1/cache/{appid}` is the only path that removes whole depot
+directories (`deletion.remove_depot_dir_settling` has one caller,
+`deletion.delete_app_depots`). GC and `POST /v1/cache/{appid}/repair` remove
+single files through `deletion.remove_file_settling`; GC already applies this
+rule, and repair only unlinks chunk files whose size is wrong for the
+manifest.
 
 ### The mapping rows are KEPT (decision)
 

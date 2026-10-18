@@ -70,6 +70,9 @@ test("a depot still cached by another game is SKIPPED, not deleted (ADR-0003)", 
 
   const skipped = result.skipped_shared.find((s) => s.depotid === SHARED_DEPOT);
   assert.deepEqual(skipped.shared_with, [FROSTLINE]);
+  // API parity (WP DELETE-CLAIMANT-1): every kept depot carries its reason.
+  assert.equal(skipped.reason, "co_owner_has_content");
+  assert.deepEqual(skipped.recorded_only, []);
 
   // Bytes: only the exclusive depot's 800_000_000 is freed — NOT the
   // shared depot's 300_000_000 (the bug billed both as freed).

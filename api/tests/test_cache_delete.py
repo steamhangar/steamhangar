@@ -934,7 +934,8 @@ def test_appids_with_cache_content_is_one_statement_regardless_of_app_count(
     exercised directly against the shared function itself (the route is now
     a thin wrapper around this one) — mutating either the join query or the
     per-app reconstruction loop back into a per-app query fails this by
-    name.
+    name. (The name predates WP DELETE-CLAIMANT-1, which added one constant
+    bulk read of ``depot_manifests``: the pin is now two statements.)
 
     N5 (reviewer nitpick, 2026-08-18 review round): includes ONE small shared
     cluster (two apps mutually sharing one depot) alongside the 200 exclusive
@@ -971,7 +972,9 @@ def test_appids_with_cache_content_is_one_statement_regardless_of_app_count(
             conn.set_trace_callback(None)
 
         assert result == {5000 + i for i in range(200)} | {5900, 5901}
-        assert len(statements) == 1, statements
+        # The mapping read plus the recorded-claimant read (WP
+        # DELETE-CLAIMANT-1); constant, never one per app.
+        assert len(statements) == 2, statements
     finally:
         conn.close()
 
@@ -1160,7 +1163,7 @@ def test_delete_keeps_a_shared_depot_and_reports_the_other_appids(
     assert first["deleted_depots"] == [
         {"depotid": 441, "size_bytes_freed": 10, "shared_with_uncached": []}
     ]
-    assert first["skipped_shared"] == [{"depotid": 900, "shared_with": [570, 730]}]
+    assert first["skipped_shared"] == [{"depotid": 900, "shared_with": [570, 730], "reason": "co_owner_has_content", "recorded_only": []}]
     assert first["total_bytes_freed"] == 10
     assert (cache_root / "depot" / "900").exists(), "shared depot was deleted!"
 
@@ -1170,7 +1173,7 @@ def test_delete_keeps_a_shared_depot_and_reports_the_other_appids(
     # protected.
     second = client.delete("/v1/cache/730", headers=AUTH).json()
     assert second["deleted_depots"] == []
-    assert second["skipped_shared"] == [{"depotid": 900, "shared_with": [440, 570]}]
+    assert second["skipped_shared"] == [{"depotid": 900, "shared_with": [440, 570], "reason": "co_owner_has_content", "recorded_only": []}]
     assert second["total_bytes_freed"] == 0
     assert (cache_root / "depot" / "900" / "chunk" / "aa").read_bytes() == b"1" * 50
 
@@ -1229,7 +1232,7 @@ def test_delete_keeps_a_shared_depot_protected_when_one_co_owner_is_cached_and_l
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["deleted_depots"] == []
-    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730]}]
+    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}]
     assert (cache_root / "depot" / "900").exists(), "protected depot must survive"
     assert _app_row(settings, 730)["needs_force"] == 0, "protected co-owner untouched"
 
@@ -1257,7 +1260,7 @@ def test_delete_protects_a_remnant_candidate_when_its_only_co_owner_has_a_non_id
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["deleted_depots"] == []
-    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730]}]
+    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}]
     assert (cache_root / "depot" / "900").exists()
 
 
@@ -1282,7 +1285,7 @@ def test_delete_three_way_share_deletes_only_once_every_co_owner_is_uncached(
     assert first_body["deleted_depots"] == []
     # shared_with names EVERY other tracked owner (unchanged semantics), even
     # though only 570 is the one actually keeping the depot protected here.
-    assert first_body["skipped_shared"] == [{"depotid": 900, "shared_with": [570, 730]}]
+    assert first_body["skipped_shared"] == [{"depotid": 900, "shared_with": [570, 730], "reason": "co_owner_has_content", "recorded_only": []}]
     assert (cache_root / "depot" / "900").exists()
     assert _app_row(settings, 730)["needs_force"] == 0
     assert _app_row(settings, 570)["needs_force"] == 0
@@ -1334,7 +1337,7 @@ def test_delete_protects_a_depot_whose_co_owner_has_no_apps_row_at_all(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["deleted_depots"] == []
-    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730]}]
+    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}]
     assert (cache_root / "depot" / "900").exists()
 
 
@@ -1364,7 +1367,7 @@ def test_delete_protects_a_depot_with_a_poisoned_co_owner_row_end_to_end(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["deleted_depots"] == []
-    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": []}]
+    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [], "reason": "unreadable_owner", "recorded_only": []}]
     assert (cache_root / "depot" / "900").exists()
 
 
@@ -1526,8 +1529,8 @@ def test_a_remnant_depot_that_gains_a_content_having_co_owner_before_removal_sur
 
     real_plan_deletion = deletion.plan_deletion
 
-    def plan_then_730_gets_prefilled(rows, appid, co_owner_states=None):  # type: ignore[no-untyped-def]
-        plan = real_plan_deletion(rows, appid, co_owner_states)
+    def plan_then_730_gets_prefilled(rows, appid, co_owner_states=None, **kwargs):  # type: ignore[no-untyped-def]
+        plan = real_plan_deletion(rows, appid, co_owner_states, **kwargs)
         assert any(r.depotid == 900 for r in plan.remnant), (
             "precondition: 900 is a deletable remnant at plan time"
         )
@@ -1544,7 +1547,7 @@ def test_a_remnant_depot_that_gains_a_content_having_co_owner_before_removal_sur
     assert body["deleted_depots"] == [
         {"depotid": 441, "size_bytes_freed": 10, "shared_with_uncached": []}
     ]
-    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730]}]
+    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}]
     assert (cache_root / "depot" / "900" / "chunk" / "aa").read_bytes() == b"1" * 50, (
         "another game's content was deleted through a stale remnant plan"
     )
@@ -1697,7 +1700,7 @@ def test_delete_does_not_touch_needs_force_when_everything_is_shared_and_protect
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["deleted_depots"] == []
-    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730]}]
+    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}]
     assert body["failed"] == []
     assert _app_row(settings, 440)["needs_force"] == 0
 
@@ -2019,8 +2022,8 @@ def test_a_depot_that_becomes_shared_between_plan_and_removal_survives(
 
     real_plan_deletion = deletion.plan_deletion
 
-    def plan_then_someone_else_maps_900(rows, appid, co_owner_states=None):  # type: ignore[no-untyped-def]
-        plan = real_plan_deletion(rows, appid, co_owner_states)
+    def plan_then_someone_else_maps_900(rows, appid, co_owner_states=None, **kwargs):  # type: ignore[no-untyped-def]
+        plan = real_plan_deletion(rows, appid, co_owner_states, **kwargs)
         assert 900 in plan.exclusive, "precondition: 900 is exclusive at plan time"
         # The racing write lands here: after the plan, before any removal.
         # 730 is given real content (status='done' + last_prefill_at) so this
@@ -2050,7 +2053,7 @@ def test_a_depot_that_becomes_shared_between_plan_and_removal_survives(
     assert body["deleted_depots"] == [
         {"depotid": 441, "size_bytes_freed": 10, "shared_with_uncached": []}
     ]
-    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730]}], (
+    assert body["skipped_shared"] == [{"depotid": 900, "shared_with": [730], "reason": "co_owner_has_content", "recorded_only": []}], (
         "the depot that became shared must be reported as skipped, with the "
         "fresh owner list"
     )
