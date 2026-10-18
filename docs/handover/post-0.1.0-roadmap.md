@@ -153,8 +153,13 @@ build per rc (rc13-rc20 added features and schema v17 to v33). From
 list is written here before its first package starts; new ideas go to a
 later minor unless the user pulls them in; `rc1` of a minor is feature
 freeze (fixes only), and at `rc4` the scope goes back to the user; a
-patch (`0.X.Y`) is fixes only. rc21 and rc22 keep their scope (Weg C, no
-freeze imposed). `1.0.0` criteria: ADR-0029 section 5 (accepted
+patch (`0.X.Y`) is fixes only. Inside a minor (Weg A, 2026-10-18): the
+package cut happens once in the minor's first session, grouped into 2-3
+milestones; packages merge to `main` one by one as before; after each
+milestone the dev instance is rebuilt for the user's check; production
+gets no tag before `rc1` (a production tag in between only with the
+user's yes, for a package that needs a production measurement). rc21 and rc22 keep their scope (Weg C, no
+freeze imposed). `1.0.0` criteria: ADR-0029 section 6 (accepted
 2026-10-18).
 
 ### v0.1.x: bug fixes only

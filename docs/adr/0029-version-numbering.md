@@ -42,10 +42,22 @@ went into the next rc instead of the next version.
    and puts the scope back to the user (cut, move or continue) before an
    `rc5`.
 
-4. **Patch (`0.X.Y`) = fixes only** on a released minor: no features, no
+4. **Work inside a minor (user, 2026-10-18, Weg A).** The package cut
+   happens once, in the minor's first session, not ahead for all
+   minors. It groups the packages into 2-3 milestones. Every package
+   still runs coder, reviewer, branch CI and merge to `main` on its own.
+   After each milestone the dev instance is rebuilt and the user checks
+   it (browser, APK); production gets no tag before `rc1`. A production
+   tag in between needs the user's yes and only serves a package that
+   needs a production measurement. Reason: the release chain per tag
+   (full CI incl. Android and goldens, deploy Antrag, rollout check, the
+   usual `.1`/`.2` follow-up) was the largest cost of the 0.1.0 series
+   (21 tags in 18 days); one chain per minor saves the session limit.
+
+5. **Patch (`0.X.Y`) = fixes only** on a released minor: no features, no
    schema bump unless the fix itself needs one.
 
-5. **Major (`1.0.0`, accepted 2026-10-18):** `1.0.0` is tagged when
+6. **Major (`1.0.0`, accepted 2026-10-18):** `1.0.0` is tagged when
    (a) the product is publicly announced under its final name, (b) the
    operator-facing contract is declared stable and documented (`/v1` API,
    compose file and env keys, volume layout, agent and app pairing),
