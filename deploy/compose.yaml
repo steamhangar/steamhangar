@@ -264,11 +264,11 @@ services:
       VAULT_DEBUG_THROUGHPUT: ${VAULT_DEBUG_THROUGHPUT-}
       VAULT_DEBUG_THROUGHPUT_MAX_MB: ${VAULT_DEBUG_THROUGHPUT_MAX_MB-}
       VAULT_DEBUG_THROUGHPUT_MAX_DAYS: ${VAULT_DEBUG_THROUGHPUT_MAX_DAYS-}
-      # WP TUNE-1a: opt-in nginx throughput experiments, both OFF by default
-      # (blank/unset = the shipped config, byte for byte). VAULT_NGINX_AIO:
-      # `threads` adds `aio threads;` and switches
-      # `sendfile on` to `sendfile off` (thread-pool reads, one extra copy). VAULT_NGINX_WORKERS: `auto` or 1..16
-      # (shipped: 1). Anything else stops the boot. Needs a restart.
+      # WP TUNE-1a: nginx throughput switches. VAULT_NGINX_AIO: blank/unset or
+      # `threads` = `aio threads;` with `sendfile off` (the default since rc21,
+      # ADR-0030; thread-pool reads, one extra copy); `off` opts out (the
+      # pre-rc21 config, sendfile on). VAULT_NGINX_WORKERS: `auto` or 1..16
+      # (blank: shipped 1). Anything else stops the boot. Needs a restart.
       VAULT_NGINX_AIO: ${VAULT_NGINX_AIO-}
       VAULT_NGINX_WORKERS: ${VAULT_NGINX_WORKERS-}
       # Read here only for that floor check (the prefill threads of vault-api

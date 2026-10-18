@@ -22,22 +22,26 @@
 #   VAULT_DEBUG_THROUGHPUT_MAX_DAYS  ON only. Rotated files older than this are
 #                                    deleted, 1..30, default 3.
 #
-# Same file, second job (WP TUNE-1a): two OPT-IN nginx throughput switches that
-# are independent of the debug flag (they also work with it off). They exist
-# to test whether the cold-read throughput (HDD, ~300 Mbit/s) is limited by
-# the single worker blocking on disk reads. Both default OFF, and with both
-# unset this hook does not touch the config for them at all, so the render is
-# byte-identical to the one without the feature.
-#   VAULT_NGINX_AIO       unset, empty, off -> nothing. `threads` -> adds
-#                         `aio threads;` to the http block AND switches
-#                         `sendfile on;` to `sendfile off;`. Both are needed:
-#                         with sendfile on, nginx uses aio only for files >=
-#                         directio (default off), so aio alone would change
-#                         nothing. With sendfile off, file reads go through
-#                         the thread pool and the page cache (no directio),
-#                         at the price of one extra copy. Anything else
-#                         stops the boot; so does a missing/duplicated
-#                         sendfile line.
+# Same file, second job (WP TUNE-1a, default changed by WP AIO-DEFAULT-1b,
+# ADR-0030): two nginx throughput switches that are independent of the debug
+# flag (they also work with it off). TUNE-1a shipped both as opt-in to test
+# whether cold-read throughput (HDD, ~300 Mbit/s) is limited by the single
+# worker blocking on disk reads. The cold-game test of 2026-10-18 proved it
+# for AIO (ADR-0027 "Measurement 2026-10-18"), so since rc21 `aio threads` is
+# the DEFAULT; VAULT_NGINX_WORKERS stays opt-in.
+#   VAULT_NGINX_AIO       unset, empty, threads -> adds `aio threads;` to the
+#                         http block AND switches `sendfile on;` to
+#                         `sendfile off;` (the default since rc21). Both are
+#                         needed: with sendfile on, nginx uses aio only for
+#                         files >= directio (default off), so aio alone would
+#                         change nothing. With sendfile off, file reads go
+#                         through the thread pool and the page cache (no
+#                         directio), at the price of one extra copy.
+#                         `off` -> the opt-out: nothing is added and sendfile
+#                         stays on, so the render is byte-identical to the
+#                         pre-rc21 default render. Anything else stops the
+#                         boot (fail closed); so does a missing/duplicated
+#                         sendfile line or an existing aio line.
 #   VAULT_NGINX_WORKERS   unset, empty -> `worker_processes 1;` as in the
 #                         template. `auto` or a whole number 1..16 -> that
 #                         value. Anything else stops the boot. Rate cap and
@@ -167,13 +171,17 @@ fi
 
 [ -f "$CONF" ] || die "$CONF does not exist -- expected to run after envsubst rendering."
 
-# --- opt-in nginx tuning (WP TUNE-1a), independent of the debug flag ---------
+# --- nginx tuning (WP TUNE-1a; AIO default since rc21, ADR-0030) -------------
+# Independent of the debug flag. Unset/empty VAULT_NGINX_AIO means the default
+# `threads`; `off` is the explicit opt-out (pre-rc21 render, sendfile on).
 aio_raw="${VAULT_NGINX_AIO:-}"
 case "$aio_raw" in
-    ""|off) AIO=off ;;
-    threads) AIO=threads ;;
+    "") AIO=threads; AIO_SRC="unset (default)" ;;
+    threads) AIO=threads; AIO_SRC="threads" ;;
+    off) AIO=off; AIO_SRC="off" ;;
     *) die "VAULT_NGINX_AIO='$(printf '%s' "$aio_raw" | tr -c 'A-Za-z0-9._-' '?')' is not one of
-  threads (adds 'aio threads;') or off/empty (default, nothing added). Lowercase only. Refusing to start." ;;
+  threads or empty (the default: adds 'aio threads;' and switches sendfile off) or
+  off (opt-out: nothing added, sendfile stays on). Lowercase only. Refusing to start." ;;
 esac
 workers_raw="${VAULT_NGINX_WORKERS:-}"
 case "$workers_raw" in
@@ -184,11 +192,13 @@ esac
 if [ "$AIO" = threads ]; then
     [ "$(grep -cE '^[[:space:]]*aio[[:space:]]' "$CONF" || true)" = 0 ] || die "$CONF already has an aio directive; refusing to add a second one."
     [ "$(grep -c '^http {$' "$CONF" || true)" = 1 ] || die "expected exactly one 'http {' line in $CONF to add 'aio threads;' after."
-    [ "$(grep -c '^    sendfile      on;$' "$CONF" || true)" = 1 ] || die "expected exactly one '    sendfile      on;' line in $CONF to switch off for VAULT_NGINX_AIO=threads."
+    [ "$(grep -c '^    sendfile      on;$' "$CONF" || true)" = 1 ] || die "expected exactly one '    sendfile      on;' line in $CONF to switch off for aio threads (VAULT_NGINX_AIO=$AIO_SRC; VAULT_NGINX_AIO=off opts out)."
     awk '{ if ($0 == "    sendfile      on;") print "    sendfile      off;"; else print } /^http \{$/ { print "    aio threads;" }' "$CONF" > "$CONF.tune.$$" \
         && cat "$CONF.tune.$$" > "$CONF" && rm -f "$CONF.tune.$$" || die "could not add aio threads to $CONF."
     [ "$(grep -c '^    sendfile      off;$' "$CONF" || true)" = 1 ] || die "could not switch sendfile off in $CONF."
-    log "VAULT_NGINX_AIO=threads: 'aio threads;' added to http and 'sendfile on' switched to 'sendfile off' (reads go through the thread pool and page cache; one extra copy, more CPU)."
+    log "VAULT_NGINX_AIO=$AIO_SRC: 'aio threads;' added to http and 'sendfile on' switched to 'sendfile off' (reads go through the thread pool and page cache; one extra copy). Opt out with VAULT_NGINX_AIO=off."
+else
+    log "VAULT_NGINX_AIO=off: no aio, 'sendfile on' kept (the pre-rc21 render)."
 fi
 if [ -n "$WORKERS" ]; then
     [ "$(grep -c '^worker_processes  1;$' "$CONF" || true)" = 1 ] || die "expected exactly one 'worker_processes  1;' line in $CONF."

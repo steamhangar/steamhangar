@@ -1364,6 +1364,16 @@ health=$(curl -s --max-time 10 "$CORE_URL/health")
 say "    $health"
 assert_eq "ok" "$(printf '%s' "$health" | tr -d '\n')" "GET /health returns ok"
 
+step "5a2. WP AIO-DEFAULT-1b (ADR-0030): the shipped .env (VAULT_NGINX_AIO blank) runs with aio threads"
+say 'Since rc21 a blank VAULT_NGINX_AIO renders `aio threads;` with sendfile off,'
+say 'so every cache test below (5e MISS -> HIT, byte-identical bodies) runs on'
+say 'the thread-pool read path. The opt-out render is checked in 8g.'
+aio_live=$(dc exec -T vault-core sh -c "grep -cx '    aio threads;' /etc/nginx/nginx.conf; grep -cx '    sendfile      off;' /etc/nginx/nginx.conf; grep -cx '    sendfile      on;' /etc/nginx/nginx.conf" 2>/dev/null | tr -d '\r' | tr '\n' ' ')
+assert_eq "1 1 0 " "$aio_live" "the running vault-core config has one 'aio threads;', 'sendfile off;' and no 'sendfile on;' (aio/off/on counts)"
+aio_live_log=$(dc logs --no-color vault-core 2>&1 | grep -F '31-vault-debug-throughput.sh: VAULT_NGINX_AIO=' | tail -n 1)
+say "    $aio_live_log"
+assert_contains "$aio_live_log" "VAULT_NGINX_AIO=unset (default): 'aio threads;' added to http" "vault-core's log names the AIO default on start"
+
 step "5b. LanCache heartbeat (ADR-0001 req 1 -- SteamPrefill refuses to prefill without it)"
 hb=$(curl -s -D - -o /dev/null --max-time 10 "$CORE_URL/lancache-heartbeat")
 # printf '%s\n', not '%s': command substitution strips the trailing newline, and
@@ -2542,6 +2552,57 @@ tlscap_refused "VAULT_TLS_CLIENT_MAX_CONNS='0'" "VAULT_TLS_CLIENT_MAX_CONNS=0" -
 tlscap_refused "VAULT_TLS_MAX_CONNS='lots'" "VAULT_TLS_MAX_CONNS=lots" -e VAULT_TLS_MAX_CONNS=lots
 tlscap_refused "is above VAULT_TLS_MAX_CONNS=100" "per-client 200 above total 100" \
     -e VAULT_TLS_CLIENT_MAX_CONNS=200 -e VAULT_TLS_MAX_CONNS=100
+
+step "8g. WP AIO-DEFAULT-1b (ADR-0030): aio threads is the default, VAULT_NGINX_AIO=off restores the pre-rc21 render"
+say 'Through the REAL entrypoint chain of the built image (nginx -T, no network):'
+say 'unset and `threads` render `aio threads;` + `sendfile off;`; `off` renders'
+say 'no aio and `sendfile on;`, and the two configs differ in exactly those'
+say 'lines; an unknown value stops the boot in hook 31 (fail closed).'
+# aio_conf <docker -e args...>: the entrypoint log and nginx -T output,
+# then exit=<rc>.
+aio_conf() {
+    docker run --rm --network none -v "$PROJECT-scratch:/vault" "$@" \
+        "ghcr.io/steamhangar/vault-core:$TAG" nginx -T -p /vault -c /etc/nginx/nginx.conf 2>&1
+    echo "exit=$?"
+}
+# aio_rendered <docker -e args...>: the rendered /etc/nginx/nginx.conf alone,
+# read back after the same entrypoint chain (not cut out of the nginx -T dump:
+# its stderr interleaves with the dump, so a cut-out is not byte-exact).
+aio_rendered() {
+    docker run --rm --network none -v "$PROJECT-scratch:/vault" --entrypoint sh "$@" \
+        "ghcr.io/steamhangar/vault-core:$TAG" -c \
+        '/docker-entrypoint.sh nginx -t -p /vault -c /etc/nginx/nginx.conf >/dev/null 2>&1 && cat /etc/nginx/nginx.conf'
+}
+aio_default=$(aio_conf)
+aio_threads=$(aio_conf -e VAULT_NGINX_AIO=threads)
+aio_off=$(aio_conf -e VAULT_NGINX_AIO=off)
+aio_rendered > "$work/aio-default.conf" || bad "8g: could not read back the default render"
+aio_rendered -e VAULT_NGINX_AIO=threads > "$work/aio-threads.conf" || bad "8g: could not read back the VAULT_NGINX_AIO=threads render"
+aio_rendered -e VAULT_NGINX_AIO=off > "$work/aio-off.conf" || bad "8g: could not read back the VAULT_NGINX_AIO=off render"
+printf '%s\n' "$aio_default" "$aio_off" | grep -E 'VAULT_NGINX_AIO|exit=' | sed 's/^/    /'
+assert_contains "$aio_default" "exit=0" "unset VAULT_NGINX_AIO: nginx -T passes"
+assert_eq "1" "$(grep -cx '    aio threads;' "$work/aio-default.conf")" "unset VAULT_NGINX_AIO renders exactly one 'aio threads;'"
+assert_eq "1" "$(grep -cx '    sendfile      off;' "$work/aio-default.conf")" "...with 'sendfile off;'"
+assert_eq "0" "$(grep -cx '    sendfile      on;' "$work/aio-default.conf")" "...and no 'sendfile on;'"
+assert_contains "$aio_threads" "exit=0" "VAULT_NGINX_AIO=threads: nginx -T passes"
+if [ -s "$work/aio-default.conf" ] && cmp -s "$work/aio-threads.conf" "$work/aio-default.conf"; then
+    ok "VAULT_NGINX_AIO=threads renders the same nginx.conf as unset"
+else
+    bad "VAULT_NGINX_AIO=threads renders a different nginx.conf than unset"
+fi
+assert_contains "$aio_off" "exit=0" "VAULT_NGINX_AIO=off: nginx -T passes"
+assert_eq "0" "$(grep -cE '^[[:space:]]*aio[[:space:]]' "$work/aio-off.conf")" "VAULT_NGINX_AIO=off renders no aio directive"
+assert_eq "1" "$(grep -cx '    sendfile      on;' "$work/aio-off.conf")" "...and keeps the shipped 'sendfile on;'"
+aio_expect=$(awk '{ if ($0 == "    sendfile      on;") print "    sendfile      off;"; else print } /^http \{$/ { print "    aio threads;" }' "$work/aio-off.conf")
+if [ -s "$work/aio-off.conf" ] && [ "$aio_expect" = "$(cat "$work/aio-default.conf")" ]; then
+    ok "the default render is the opt-out render plus 'aio threads;' and 'sendfile off;', nothing else"
+else
+    bad "the default and opt-out renders differ in more than the two AIO lines: $(diff "$work/aio-off.conf" "$work/aio-default.conf" | head -5 | tr '\n' ' ')"
+fi
+aio_bad=$(aio_conf -e VAULT_NGINX_AIO=on)
+printf '%s\n' "$aio_bad" | grep -E 'FATAL|exit=' | head -2 | sed 's/^/    /'
+assert_contains "$aio_bad" "31-vault-debug-throughput.sh: FATAL: VAULT_NGINX_AIO='on'" "VAULT_NGINX_AIO=on is refused by the hook, naming the value"
+assert_not_contains "$aio_bad" "exit=0" "...and the boot stops"
 
 # =============================================================================
 section "9. Dedicated cache mount: VAULT_CACHE_PATH bind mode, live (WP DEPLOY-FIX-3)"

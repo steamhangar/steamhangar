@@ -48,7 +48,9 @@ RENDERED="nginx.conf vault-upstream-rate.conf vault-upstream-pool.conf vault-ups
 mkdir -p "$work/hooks" "$work/bin" "$work/etc" "$work/logs"
 cat > "$work/hooks/20-envsubst-on-templates.sh" <<'EOF'
 #!/bin/sh
-printf 'log_format vault_event x;\n# staged %s\n' "$VAULT_UPSTREAM_RATE" > "$NGINX_ENVSUBST_OUTPUT_DIR/nginx.conf"
+# The real 31- hook runs on this render: since rc21 (ADR-0030) it adds
+# `aio threads;` by default and needs one `http {` and one sendfile line.
+printf 'log_format vault_event x;\n# staged %s\nhttp {\n    sendfile      on;\n}\n' "$VAULT_UPSTREAM_RATE" > "$NGINX_ENVSUBST_OUTPUT_DIR/nginx.conf"
 EOF
 for h in 25-vault-eventlog.sh 26-vault-tls-passthrough.sh 40-vault-preflight.sh; do
     printf '#!/bin/sh\nexit 0\n' > "$work/hooks/$h"

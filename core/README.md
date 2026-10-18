@@ -1754,34 +1754,53 @@ explicit scope boundary (this work package touches `core/` only):
   `25-vault-eventlog.sh` hook (no Docker available in this work package's
   environment at the time; since closed -- see "Since closed" above).
 
-### Throughput tuning switches (WP TUNE-1a, opt-in, default OFF)
+### Throughput tuning switches (WP TUNE-1a; AIO default since rc21)
 
-Two experiments for the cold-read question (~300 Mbit/s from a cold HDD cache
-vs ~880 Mbit/s warm, with one nginx worker blocking on disk reads). Both are
-read by `docker/31-vault-debug-throughput.sh` at start, work with the debug log
-on or off, and with both unset the rendered config is byte-identical to a
-build without them. A bad value stops the boot.
+Two switches for the cold-read question (~300 Mbit/s from a cold HDD cache vs
+~880 Mbit/s warm, with one nginx worker blocking on disk reads). Both are read
+by `docker/31-vault-debug-throughput.sh` at start and work with the debug log
+on or off. A bad value stops the boot (fail closed).
+
+Since rc21 `aio threads` is the **default** (WP AIO-DEFAULT-1b,
+`docs/adr/0030-aio-threads-default.md`): the cold-game test of 2026-10-18
+measured cold reads about 5-7 times faster (4.7-6.8x, ADR-0030), limited by
+the 1 Gbit/s link, and the heartbeat maximum at 41-295 ms instead of 3-7.6 s
+(ADR-0027 "Measurement 2026-10-18"). `VAULT_NGINX_WORKERS` brought no gain in that test and stays
+opt-in.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `VAULT_NGINX_AIO` | off | `threads` adds `aio threads;` and switches `sendfile on` to `off`; unset/empty/`off` = nothing |
+| `VAULT_NGINX_AIO` | `threads` (unset/empty) | unset/empty/`threads` adds `aio threads;` and switches `sendfile on` to `off`; `off` opts out and renders the pre-rc21 config (no aio, `sendfile on`), byte for byte |
 | `VAULT_NGINX_WORKERS` | unset (`worker_processes 1`) | `auto` or a whole number 1..16 sets `worker_processes` |
 
 The debug startup line (`# start ...`) shows the effective `aio` and
-`worker_processes`; with more than one worker it adds a `workers_note`.
+`worker_processes`; with more than one worker it adds a `workers_note`. The
+container log names the AIO choice on every start
+(`31-vault-debug-throughput.sh: VAULT_NGINX_AIO=...`).
 
-**What `VAULT_NGINX_AIO=threads` does.** It adds `aio threads;` to the `http`
+**What the AIO default does.** It adds `aio threads;` to the `http`
 block AND switches `sendfile on;` to `sendfile off;` (the hook stops the boot
-if the sendfile line is not found exactly once). Both are needed: with
+if the sendfile line is not found exactly once or an `aio` line already
+exists). Both are needed: with
 `sendfile on`, nginx uses AIO only for files at least as large as `directio`,
 which defaults to `off`, so `aio threads` alone would change nothing. With
 sendfile off, cache file reads are done by the thread pool instead of blocking
 the single worker in `sendfile()`, and they still go through the kernel page
 cache / ARC (no `directio`, so the warm path keeps its caching). The price is
 one extra copy (kernel to nginx buffer to socket) and therefore more CPU per
-Mbit/s than sendfile; expect higher CPU use on warm hits, which is what the
-experiment has to weigh against the cold-read gain. The startup line shows
-`sendfile=off aio=threads`. Unset/empty/`off` leaves the config byte-identical.
+Mbit/s than sendfile. The 2026-10-18 warm run showed no measurable host CPU
+increase; the nginx process CPU alone was not measured. The startup line shows
+`sendfile=off aio=threads`.
+
+**Opting out.** Set `VAULT_NGINX_AIO=off` and recreate `vault-core`. The
+rendered config is then byte-identical to the pre-rc21 default (`sendfile
+on`, no `aio`); nothing else changes, no data or schema is touched. Use it if
+a host shows higher CPU use than the read gain is worth, or to compare.
+
+**Upgrading from rc20.x.** A `.env` that already carries
+`VAULT_NGINX_AIO=threads` renders the same config as the new default; the
+line can be removed after the rc21 rollout. A `.env` with `VAULT_NGINX_AIO=off`
+or a blank value: `off` keeps the old render, blank now means `threads`.
 
 **More than one worker: what stays aggregate, what does not.**
 - The 16 MB/s style upstream cap (`VAULT_UPSTREAM_RATE`): `proxy_limit_rate`

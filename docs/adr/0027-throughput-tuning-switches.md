@@ -1,6 +1,7 @@
 # ADR-0027: Throughput tuning switches and heartbeat diagnostics
 
-Status: Accepted
+Status: Accepted; superseded in part by ADR-0030 (the `VAULT_NGINX_AIO`
+default is `threads` since rc21; `off` opts out)
 
 Date: 2026-10-16
 
@@ -110,3 +111,8 @@ default is the open decision AIO-DEFAULT-1 in
 `docs/handover/post-0.1.0-roadmap.md`. A default change still needs a new
 ADR. Production runs with both switches unset again; the test was rolled
 back on 2026-10-18.
+
+Superseded in part by ADR-0030 (decided 2026-10-18, Weg B): from rc21 an
+unset `VAULT_NGINX_AIO` renders `aio threads;` with `sendfile off;`, and
+`VAULT_NGINX_AIO=off` restores the render described in this ADR. The
+`VAULT_NGINX_WORKERS` default is unchanged.
