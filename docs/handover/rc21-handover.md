@@ -37,9 +37,11 @@ For the next rc21 session. Read this, then the rc21 block in
 2. CACHE-REPAIR-UI-1 (web part), CSS-HIDDEN-LINT-1 plus the nit bundle of
    the rc21 block (FLAKY-DEMO-24H-1, flaky clients-merged-card wiring test,
    review nits of every package above).
-3. Android only after the operator's rc20 visual check (he can now also
-   look at the phone layout of MOBILE-1b on a rebuilt dev instance). The
-   Android follow-ups collected today are boxes in the rc21 block.
+3. Android: the operator's rc20 visual check PASSED (2026-10-18), so the
+   Android packages of the rc21 block are unblocked (parity with the rc20
+   redesign incl. the MOBILE-1b phone behaviour, DOWNLOADS-3 history twin,
+   LIVE-DELAY-1 follow-up, ANDROID-GAPS-1, APP-NIGHT-GOLDEN-1 and the
+   follow-ups collected today). Android builds only in GitHub CI.
 4. Close: release gate, `dev.sh verify`, tag `v0.1.0-rc21` only with the
    operator's yes; rollout Antrag incl. removing `VAULT_NGINX_AIO`, setting
    `VAULT_AUTO_GC=execute`, then one verify of HELLDIVERS 2 (553850): the

@@ -3717,7 +3717,8 @@ below carry their own later dates, item 12 is the current one).
 
     - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
       and API packages first, Android packages and golden images only after
-      the operator's rc20 visual check; no rc21 tag without the operator's yes)
+      the operator's rc20 visual check; no rc21 tag without the operator's yes;
+      rc20 visual check PASSED, operator 2026-10-18: Android packages unblocked)
       - [x] **MOBILE-1** (web, first package of rc21; user decision
         2026-10-17) phone fine-tuning on top of the kit: 44px touch targets
         via `@media (pointer:coarse)` (segs, chips, (i), `.btn.sm`, card
