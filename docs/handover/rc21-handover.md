@@ -1,76 +1,75 @@
-# rc21 handover (2026-10-18)
+# rc21 handover (updated 2026-10-18 evening)
 
-Written at the end of the rc20 session for the session that builds rc21.
-Read this, then the rc21 block in `docs/PROJECT_PLAN.md`, then
-`docs/LEARNINGS.md` (section "2026-10-17 — rc20 rework").
+For the next rc21 session. Read this, then the rc21 block in
+`docs/PROJECT_PLAN.md` (every open box and nit is there), `docs/LEARNINGS.md`
+(sections 2026-10-17 and 2026-10-18) and the roadmap's "Version rules"
+(ADR-0029). The operator is on vacation after 2026-10-18; ZEUS may be off.
 
 ## Where things stand
 
-- Production runs **v0.1.0-rc20.2** (3f78b1b), rolled out 2026-10-18.
-  Schema 33. `VAULT_DEBUG_THROUGHPUT=1`; `VAULT_NGINX_AIO` /
-  `VAULT_NGINX_WORKERS` blank again after the cold-game test.
-- Cold-game test done (ADR-0027 "Measurement 2026-10-18"): `AIO=threads`
-  about 5-7x faster on cold reads, link-limited; `WORKERS=2` no gain.
-  **AIO-DEFAULT-1 decided: Weg B** — production `.env` gets
-  `VAULT_NGINX_AIO=threads` via Antrag A-20261018-02; rc21 ships the code
-  default (new ADR, tests, verify's flag-off check reworked) and the `.env`
-  line is removed after the rc21 rollout. VERIFY-COLD-1 follows once AIO is
-  live.
-- Tags: rc20 (648bc6d), rc20.1 (fff08b9), rc20.2 (3f78b1b). main CI green.
-- The web UI is built on the UI kit (ADR-0028): `web/css/kit.css`, scale
-  tokens in `theme.css`, the hidden `/kit` page, every kit rule scoped under
-  `.kit`. Design spec: `docs/design/rc20/kit.html` (must match kit.css),
-  page mockups next to it. Design tokens and the status vocabulary are a
-  contract checked by web and Android tests (`docs/design/tokens.json`,
-  `docs/design/status-vocabulary.json`).
-- Web screenshot goldens run in CI (`web / goldens`, strict). Re-record by
-  pushing the branch as `wp/<name>-goldens`; the bot commits the PNGs; merge
-  that branch. Locally: `dev.sh test-web-shots [out]` (tolerant mode, all 15
-  pass on main as of 2026-10-18).
+- Production runs **v0.1.0-rc20.2** (3f78b1b), schema 33, with two `.env`
+  overrides set by Antrag:
+  - `VAULT_NGINX_AIO=threads` (A-20261018-02, live since 12:40Z): remove
+    after the rc21 rollout, rc21 ships it as the code default (ADR-0030).
+  - `VAULT_AUTO_GC=dry-run` (A-20261018-03, until rc21): GC hole fixed in
+    GROUP-VERIFIED-1; the rc21 rollout Antrag sets it back to `execute`.
+  - Until rc21 is live: no "Delete" of single HELLDIVERS 2 content
+    packages (DELETE-CLAIMANT-1 is not deployed yet).
+- rc21 packages on main (each coder → reviewer PASS → branch CI → merge):
+  MOBILE-1 (1a mockup + 1b phone fine-tuning, goldens), AIO-DEFAULT-1b,
+  UI-COLD-CACHED-1, GROUP-VERIFIED-1 (GC claimant fix, mapping keeps
+  manifest-named depots, group figure, "Confirmed current" after every
+  successful run), AUTO-VERIFY-1, TP-REPORT-2, CLIENTS-LIVE-1,
+  DELETE-CLAIMANT-1, RUNNER-RETRY-1. No rc21 tag yet.
+- In progress at handover: **GRAPH-RECENT-1 + LOADING-NOW-1** (coder,
+  branch `wp/rc21-graph-recent-1`, worktree `/mnt/ssd_pool/app_data/devbox/work/wt-graph-recent-1`,
+  maybe unfinished/uncommitted). Continue it with a fresh coder on the same
+  worktree, then review, CI, merge.
+- VERIFY-COLD-1: a manual verify run of 5 large games on prod was measured
+  on 2026-10-18 evening (result in the roadmap entry VERIFY-COLD-1 /
+  PROJECT_PLAN box). The planned full observation (Weg A, manual) is after
+  the operator's vacation.
 
-## How to work (proven in rc20)
+## Next (rc21 order)
 
-- Coder then reviewer per package; max 3 agents; resume agents with
-  SendMessage instead of respawning; branch names `wp/rc21-<id>`. No
-  force-push: a rebased branch gets a new name (`-b`).
-- Every visual package proves itself with rendered screenshots at 1400 /
-  1000 / 400 (tools/web-shot.mjs with tools/web-shot-fonts.conf); reviewers
-  look at them. DOM tests alone shipped the wrong look once.
-- Any web change that moves or rewords strings: grep `app/app/src/test` for
-  twin pins on the touched files first (DOWNLOADS-2 turned main red).
-- kit.css is appended to by many packages: merge in a fixed order, rebase
-  the next branch after each merge, keep all blocks.
-- Poll GitHub's API at most every 2-3 minutes (60 requests/hour per ZEUS IP,
-  unauthenticated).
-- The orchestrator writes no production code; docs, plan ticks, merges,
-  tags (with the operator's yes) and Antraege are the orchestrator's.
+1. Finish GRAPH-RECENT-1 + LOADING-NOW-1, then RUNNER-SPLIT-1 (same files:
+   `api/vault_api/routers/traffic.py`, `live_tier.py`, Downloads hero).
+2. CACHE-REPAIR-UI-1 (web part), CSS-HIDDEN-LINT-1 plus the nit bundle of
+   the rc21 block (FLAKY-DEMO-24H-1, flaky clients-merged-card wiring test,
+   review nits of every package above).
+3. Android only after the operator's rc20 visual check (he can now also
+   look at the phone layout of MOBILE-1b on a rebuilt dev instance). The
+   Android follow-ups collected today are boxes in the rc21 block.
+4. Close: release gate, `dev.sh verify`, tag `v0.1.0-rc21` only with the
+   operator's yes; rollout Antrag incl. removing `VAULT_NGINX_AIO`, setting
+   `VAULT_AUTO_GC=execute`, then one verify of HELLDIVERS 2 (553850): the
+   log must show `removed=[]` and 0 unmapped depots; with that, put the
+   open question AUTO-VERIFY-FULL-1 to the operator.
 
-## rc21: what is next (plan block "rc21 — Android parity and cache health")
+## Decided today (details in the plan / roadmap)
 
-1. **MOBILE-1** first: build a phone mockup from the kit (touch targets via
-   `@media (pointer:coarse)`, sheets as bottom sheets, QR pairing flow,
-   safe-area insets, visible overflow on scrolling segs) and get the
-   operator's approval before coding.
-2. Web/API packages: CACHE-REPAIR-UI-1, CLIENTS-LIVE-1, RUNNER-SPLIT-1,
-   CSS-HIDDEN-LINT-1 (rest), the rc20 review nits.
-3. From the operator's cold-start test (roadmap, 2026-10-18):
-   AIO code default (AIO-DEFAULT-1 Weg B, second half), UI-COLD-CACHED-1 (check whether rc20.2's loading states cover it; the
-   API side, the depot walk in `api/vault_api/sizes.py` `SizeCache`, blocks
-   every request on a cold dentry cache — serve the stale snapshot while
-   recomputing), VERIFY-COLD-1, TP-REPORT-2. Read those roadmap entries; the
-   cold-start session owns their measurements.
-4. Android: parity with the rc20 redesign (the `/kit` page and kit.html are
-   the spec), the history-count twin of DOWNLOADS-3, LIVE-DELAY-1 follow-up,
-   ANDROID-GAPS-1, APP-NIGHT-GOLDEN-1. Android builds only in GitHub CI.
-5. Close: release gate, tag `v0.1.0-rc21` only with the operator's yes.
+- RELEASE-SPLIT-1 (rc22): one product version (ADR-0029); each component
+  carries the version in which it last changed, unchanged ones are not
+  rebuilt.
+- AUTO-VERIFY-1 Weg A (done); AUTO-VERIFY-FULL-1 deferred to after the
+  GROUP-VERIFIED-1 prod check.
+- RUNNER-RETRY-1 built (done). FAULT-SIM-1 before 1.0.0.
+- 0.4.0: AGENT-PLATFORMS-1 (Linux, macOS, Steam Deck, Steam Frame;
+  signing costs noted), CLEANUP-SUGGEST-1, CACHE-MAX-1 (Weg B, updates
+  keep running).
+- rc22: VERIFY-FAST-1, CARD-CORNERS-1 (not reproduced with a real cover;
+  needs a screenshot of an affected card).
 
-## Open items outside the repo
+## How to work (unchanged, plus today's lessons)
 
-- Antrag numbering: two files carry A-20261018-01 (cold-game test and the
-  rc20.2 rollout). Before numbering a new Antrag, list the day's files in
-  `/vault-inbox/antraege/` and `erledigt/`.
-
-- Stray branch `wp/rc20-baseline-goldens` (stale, harmless) for the operator
-  to delete; the devbox may not delete remote branches.
-- `.env.bak_pre-rc20` on ZEUS kept as the rollback for rc20; the operator
-  decides when to delete it.
+- Max 3 agents. Resume agents with SendMessage; if the harness says an
+  agent was "stopped by the user", it was not the operator (three times
+  today): check the worktree, tell him, continue with a fresh agent.
+- Rebase an unpushed branch onto main before its review when main moved
+  (several packages touched `cache-completeness.js`, `demo-data.js`,
+  `api/README.md`).
+- Bot golden commits do not trigger CI; the run on the branch head before
+  the bot commit is the gate. Merge the `-goldens` branch via a named ref
+  (`git fetch origin <b>:refs/remotes/origin/<b>`), `git pull` overwrites
+  FETCH_HEAD.
+- GitHub API polling every 2.5-3 min (scratchpad `ci.sh` pattern).
