@@ -33,6 +33,7 @@ import {
   shadowNote,
 } from "../lib/settings-layout.js";
 import { appliesText, canReset, effectiveAsInputValue } from "../lib/settings-presentation.js";
+import { watchScrollCue } from "../lib/scroll-cue.js";
 
 /** Keys whose control spans both grid columns (rc20 settings.html `.f.w`). */
 const WIDE_KEYS = new Set(["webhook_url"]);
@@ -125,6 +126,7 @@ function segControl(entry, meta, labelId, readonly, draftValue, onDraft) {
   const seg = el("div", "seg");
   seg.setAttribute("role", "group");
   seg.setAttribute("aria-labelledby", labelId);
+  watchScrollCue(seg); // WP MOBILE-1b: overflow cue when it scrolls
   const buttons = [];
   const press = (value) => {
     for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.value === value));

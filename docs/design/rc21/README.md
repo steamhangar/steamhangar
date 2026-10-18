@@ -40,8 +40,9 @@ Mockup approved with these decisions; they bind MOBILE-1b.
 - **Q4 Weg A:** on phones a History row opens its panel in a bottom sheet.
 - **Q5:** on a narrow touch screen (`pointer:coarse` and the `addev`
   container at 420 px or less) the Phone tab leads with a full-width
-  primary "Open on this phone"; the QR follows as "Pair another phone".
-  Desktop keeps the QR first.
+  primary "Open on this phone"; the QR follows as "Pair another phone",
+  with a reveal overlay on the stand-in (the blurred code itself is the
+  Show button; operator 2026-10-18). Desktop keeps the QR first.
 - **Q6:** accepted as is: no "paired" state in the drawer (needs per-device
   keys, PAIR-2).
 - **Q7:** landscape nav with icon and label side by side, `--nav-h` 48 px.

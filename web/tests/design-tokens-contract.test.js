@@ -109,6 +109,17 @@ for (const [group, prefix] of [["fs", "fs-"], ["sp", "sp-"], ["r", "r-"]]) {
   });
 }
 
+// WP MOBILE-1b: the web-only touch-target sizes. Android's
+// DesignTokensContractTest reads only the colour groups, so this group
+// needs no Kotlin twin (Compose sizes its own touch targets).
+test("tokens.json size (web-only) equals theme.css --hit / --ctl-h, both directions", () => {
+  assert.deepEqual(tokens.size, { hit: 44, "ctl-h": 38 });
+  for (const [key, value] of Object.entries(tokens.size)) {
+    assert.equal(px(single(key)), value, `--${key}`);
+  }
+  assert.ok(px(single("hit")) > px(single("ctl-h")), "the hit area is larger than the visual control");
+});
+
 test("tokens.json literal scale values (kit.html)", () => {
   assert.deepEqual(Object.values(tokens.fs), [11, 12, 13, 15, 18, 24, 32]);
   assert.deepEqual(Object.values(tokens.sp), [4, 8, 12, 16, 20, 24, 32, 48]);

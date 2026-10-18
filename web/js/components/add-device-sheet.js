@@ -212,10 +212,17 @@ function makeOption({ id, showLabel, mask, build, copies = true }) {
     slot.dataset.role = `copies-${id}`;
     slot.append(idleCopyButton());
   }
-  const option = { id, panel, toggle, reveal, mask, copies: slot, showLabel, build, shown: false };
+  // `covers`: extra Show controls that only exist while the secret is
+  // hidden (the phone's reveal overlay on the stand-in, WP MOBILE-1b).
+  const option = { id, panel, toggle, reveal, mask, copies: slot, showLabel, build, shown: false, covers: [] };
   toggle.addEventListener("click", () => {
-    if (option.shown) hideOption(option);
-    else showOption(option);
+    if (option.shown) {
+      hideOption(option);
+      // On a narrow touch screen "Hide" itself disappears with the code
+      // (kit.css shows the stand-in's overlay instead): focus follows to
+      // the overlay rather than being dropped (WP MOBILE-1b).
+      focusRenderedCover(option);
+    } else showOption(option);
   });
   options.push(option);
   return option;
@@ -236,6 +243,16 @@ function setCopies(option, buttons) {
   if (option.copies) option.copies.replaceChildren(...buttons);
 }
 
+/** Focus the first cover of `option` that is rendered (has a box). */
+function focusRenderedCover(option) {
+  for (const cover of option.covers) {
+    if (typeof cover.getClientRects === "function" && cover.getClientRects().length > 0) {
+      cover.focus();
+      return;
+    }
+  }
+}
+
 function showOption(option) {
   const key = getStoredApiKey();
   if (isDemoMode() || !isUsableKey(key)) return; // the sheet shows the note instead
@@ -243,6 +260,7 @@ function showOption(option) {
   option.reveal.replaceChildren();
   setCopies(option, []);
   option.mask.hidden = true;
+  for (const cover of option.covers) cover.hidden = true;
   option.build(option.reveal, key, option);
   option.reveal.hidden = false;
   option.toggle.textContent = "Hide";
@@ -256,6 +274,7 @@ function hideOption(option) {
   option.reveal.hidden = true;
   setCopies(option, [idleCopyButton()]);
   option.mask.hidden = false;
+  for (const cover of option.covers) cover.hidden = false;
   option.toggle.textContent = option.showLabel;
   option.toggle.setAttribute("aria-expanded", "false");
 }
@@ -390,20 +409,73 @@ function buildPhone(reveal, key) {
 }
 
 const phoneOption = makeOption({ id: "phone", showLabel: "Show pairing QR code", mask: qrMask(), build: buildPhone, copies: false });
+
+/**
+ * "Open on this phone" without "Show" (WP MOBILE-1b, decision Q5): on a
+ * narrow touch screen the phone that shows this page pairs ITSELF first
+ * (css/kit.css shows the button only there). The pairing link is built in
+ * the click handler and handed straight to the browser: it never sits in
+ * the DOM (no href, no text), so the "the key leaves the DOM on Hide, tab
+ * change and close" rule needs nothing new. The same checks as "Show": no
+ * key in demo mode or without a stored key, and a key the app would
+ * refuse gets the note instead of a link.
+ */
+function openPairingHere() {
+  const key = getStoredApiKey();
+  if (isDemoMode() || !isUsableKey(key)) return;
+  if (!isAppPairableKey(key)) {
+    showToast(APP_KEY_UNSUPPORTED_TEXT, { warn: true, duration: 6000 });
+    return;
+  }
+  openExternal(buildAppPairUri(apiBaseUrl(window.location), key));
+}
+
+/** Navigate to the app's pairing URI (a custom scheme; the OS hands it to
+ * the app). A seam for web/tests/add-device-wiring.test.js. */
+let openExternal = (uri) => window.location.assign(uri);
+export function setOpenExternalForTests(fn) {
+  openExternal = fn;
+}
+
+const openHere = el("button", "btn pri ad-open-here", "Open on this phone");
+openHere.type = "button";
+openHere.dataset.role = "pair-open-here";
+openHere.addEventListener("click", () => openPairingHere());
+
 // Step 1's home of the app download (it moves to the demo block in demo mode).
 const phoneInstallSlot = el("div", "ad-slot");
 {
-  const box = el("div", "ad-qrbox");
+  const box = el("div", "ad-qrbox ad-pairbox");
   const side = el("div", "ad-qrside");
   side.append(phoneOption.toggle, el("p", "hint", "The code is only visible while you show it."));
-  box.append(phoneOption.mask, phoneOption.reveal, side);
+  // Operator change 2026-10-18 (MOBILE-1b, decision Q5): on a narrow touch
+  // screen the blurred stand-in itself is the Show button (kit.css shows
+  // it only there and hides the plain toggle while the code is hidden).
+  // The stand-in stays the harmless fake image; nothing secret is in the
+  // DOM until the tap. Focus moves to the toggle ("Hide") afterwards,
+  // since the overlay leaves with the stand-in.
+  const cover = el("button", "ad-qrreveal");
+  cover.type = "button";
+  cover.dataset.role = "show-phone-cover";
+  cover.setAttribute("aria-controls", phoneOption.reveal.id);
+  cover.append(el("span", "ad-qrreveal-l", phoneOption.showLabel));
+  cover.addEventListener("click", () => {
+    showOption(phoneOption);
+    if (phoneOption.shown) phoneOption.toggle.focus();
+  });
+  phoneOption.covers.push(cover);
+  box.append(phoneOption.mask, cover, phoneOption.reveal, side);
+  // On a narrow touch screen the QR is for ANOTHER phone (its own block
+  // under the step); elsewhere the wrapper and its heading take no room.
+  const other = el("div", "ad-other");
+  other.append(el("h4", "sec ad-other-t", "Pair another phone"), box); // a sub-heading of step 2
   phoneOption.panel.append(
     stepList([
       { title: "Install the app", extra: [phoneInstallSlot] },
       {
         title: "Pair the app",
         desc: "Open the app and scan the pairing code. The app then knows this hangar's address and API key.",
-        extra: [box],
+        extra: [openHere, other],
       },
     ]),
   );

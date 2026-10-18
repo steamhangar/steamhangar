@@ -287,7 +287,10 @@ test("MUTATION TARGET: the kit page frame: page head, the four fixed tiles, Devi
   const sechd = s.querySelector(".sechd");
   assert.equal(text(sechd, ".sec"), "Devices");
   assert.ok(sechd.querySelector('[data-role="clients-range"]'), "the range seg sits in the Devices header");
-  assert.equal(sechd.querySelector('[data-role="clients-range"]').className, "seg");
+  // WP MOBILE-1b: the kit seg also carries the overflow cue (scue + its state).
+  const rangeSeg = sechd.querySelector('[data-role="clients-range"]');
+  assert.equal(rangeSeg.className.replace(/ scue( fits| at-start| at-end)*$/, ""), "seg");
+  assert.ok(rangeSeg.classList.contains("scue"), "overflow cue wired");
   assert.equal(s.querySelector('[data-role="clients-list"]').className, "ccards", "one column, not the auto-fill grid");
 });
 

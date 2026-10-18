@@ -93,7 +93,12 @@
 .kit .seg button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); }
 
 /* ---------- tiles and meter ---------- */
-.kit .tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap:var(--sp-3); }
+/* A text-relative minimum (WP MOBILE-1b, docs/design/rc21/mobile.html 6a):
+   two tiles side by side on a phone at 100 % text, one per row at 200 %.
+   8.75em, not the mockup's 11em: the tiles sit in 16px text (the mockup
+   assumed 13px), where 8.75em is exactly the old 140px, so nothing moves
+   at 100 % text. */
+.kit .tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 8.75em), 1fr)); gap:var(--sp-3); }
 .kit .tile{
   background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-m);
   padding:14px 16px; display:grid; gap:4px; align-content:start; min-width:0;
@@ -183,7 +188,7 @@
   display:grid; grid-template-columns:minmax(260px, 1.1fr) minmax(220px, 1fr) minmax(220px, 1fr); gap:var(--sp-5) var(--sp-7);
 }
 .kit .ccard.warn{ border-color:color-mix(in srgb, var(--stale) 45%, var(--line)); }
-.kit .ccard .z{ display:grid; gap:var(--sp-3); align-content:start; min-width:0; }
+.kit .ccard .z{ display:grid; grid-template-columns:minmax(0, 1fr); gap:var(--sp-3); align-content:start; min-width:0; } /* minmax: 200 % text (MOBILE-1b) */
 .kit .ccard .ch{ display:flex; gap:12px; align-items:center; min-width:0; }
 .kit .ccard .ch .id{ min-width:0; }
 .kit .ccard .ico{ width:38px; height:38px; border-radius:10px; background:var(--raised); display:grid; place-items:center; color:var(--accent); flex:none; }
@@ -198,7 +203,8 @@
 .kit .ccard .upd-ico{ color:var(--stale); margin-top:2px; display:flex; }
 .kit .ccard .upd b{ display:block; font-weight:500; color:var(--text); }
 .kit .ccard .upd span{ color:var(--dim); overflow-wrap:anywhere; }
-.kit .ccard .upd .btn{ grid-column:2; justify-self:start; }
+/* A long label wraps instead of overflowing the box (200 % text). */
+.kit .ccard .upd .btn{ grid-column:2; justify-self:start; white-space:normal; text-align:left; line-height:1.2; }
 .kit .ccard .now{
   background:color-mix(in srgb, var(--accent) 8%, var(--surface)); border:1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   border-radius:var(--r-m); padding:10px 12px; display:flex; justify-content:space-between; gap:10px; align-items:center;
@@ -228,10 +234,16 @@
 .kit .ccard .cf > p{ flex-basis:100%; margin:0; }
 @container (max-width: 700px){
   .kit .ccard{ grid-template-columns:1fr; gap:var(--sp-4); }
-  .kit .ccard .stats{ grid-template-columns:repeat(3, 1fr); }
 }
 @container (max-width: 460px){
   .kit .ccard{ padding:14px; }
+  /* A text-relative minimum on a phone card (WP MOBILE-1b, mobile.html
+     6a): three columns at 100 % text, one at 200 % instead of three
+     squeezed ones. 6em, not the mockup's 6.5em: the stats sit in 16px
+     text (the mockup assumed 13px), where 6.5em (104px) drops to two
+     columns on a 390px phone (328px of card); 6em is 96px at 100 % and
+     192px at 200 %, one column. Wider cards keep the plain three columns. */
+  .kit .ccard .stats{ grid-template-columns:repeat(auto-fit, minmax(min(100%, 6em), 1fr)); }
   .kit .ccard .cf .acts{ margin-left:0; width:100%; }
   .kit .ccard .cf .acts .btn{ flex:1; justify-content:center; }
 }
@@ -439,7 +451,7 @@
 .kit .cols3{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:var(--sp-7); align-items:start; }
 .kit .cols3.no-attn{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
 .kit .col{ display:grid; gap:var(--sp-5); align-content:start; min-width:0; }
-.kit .blk{ display:grid; gap:10px; min-width:0; }
+.kit .blk{ display:grid; grid-template-columns:minmax(0, 1fr); gap:10px; min-width:0; } /* minmax: 200 % text (MOBILE-1b) */
 .kit .rowlist{ display:grid; gap:var(--sp-2); min-width:0; }
 .kit .sechd .hacts{ display:flex; align-items:center; justify-content:flex-end; gap:var(--sp-2); flex-wrap:wrap; min-width:0; }
 .kit .dl-updates-acts{ display:flex; gap:var(--sp-2); }
@@ -746,7 +758,7 @@
    the first row (library.html); a narrow container gives it its own row. */
 .kit .lib-filters{ flex:1 1 0; }
 .kit .lib-search{
-  flex:0 1 var(--search-w); min-width:180px; margin:0; height:38px; padding:0 12px;
+  flex:0 1 var(--search-w); min-width:180px; margin:0; height:var(--ctl-h); padding:0 12px;
   border-radius:10px; gap:8px; cursor:text;
 }
 .kit .lib-search .ico{ display:flex; color:var(--dim-2); }
@@ -756,14 +768,14 @@
 .kit .lib-chips .fchip b{ font-variant-numeric:tabular-nums; margin-left:3px; } /* plus the space in the label: the a11y name reads "Cached 22" */
 .kit .lib-chips .fchip[aria-pressed="true"] b{ color:var(--accent); }
 .kit .lib-tools{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-left:auto; }
-.kit .lib-tools .btn{ height:38px; }
+.kit .lib-tools .btn{ height:var(--ctl-h); }
 .kit .lib-tools .ico{ display:flex; }
 .kit .lib-tools .btn.on{ color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .kit .fcount{ font:400 var(--fs-1) var(--mono); color:var(--dim-2); margin-left:2px; }
 .kit .btn.on .fcount{ color:var(--accent); }
 
 /* sort: one fused box, select + icon-only direction button */
-.kit .sortg{ display:inline-flex; align-items:stretch; height:38px; background:var(--surface); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.kit .sortg{ display:inline-flex; align-items:stretch; height:var(--ctl-h); background:var(--surface); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
 .kit .sortg:focus-within{ border-color:var(--accent); }
 .kit .sortg select{ background:none; border:0; outline:0; padding:0 8px 0 12px; font:400 var(--fs-3) var(--ui); color:var(--text); min-width:0; max-width:190px; cursor:pointer; }
 .kit .sortg select option{ background:var(--raised-2); color:var(--text); }
@@ -884,7 +896,7 @@
 /* "+N content packages · N failed" wraps on a narrow card, never clips
    (TOOL-APPS-2c review, 360px): the warning is one nowrap unit. */
 .kit .card .pkgline{ display:flex; flex-wrap:wrap; gap:0 4px; min-width:0; font:400 var(--fs-2)/1.35 var(--ui); color:var(--dim-2); }
-.kit .card .pkgline .pkgn{ white-space:nowrap; }
+.kit .card .pkgline .pkgn{ white-space:normal; } /* a flex item moves to the next line whole; it only wraps inside when it is wider than the card (200 % text, MOBILE-1b) */
 .kit .card .pkgline .pkgfail{ display:inline-flex; gap:4px; white-space:nowrap; color:var(--stale); }
 .kit .card .instbadge.warn{ color:var(--stale); }
 .kit .card .updbadge{ color:var(--stale); }
@@ -1054,3 +1066,193 @@
 .kit .gd-x[hidden], .kit .gd-head[hidden], .kit .gd-id[hidden], .kit .gd-sub[hidden], .kit .gd-acts[hidden],
 .kit .gd-acts .jobacts[hidden], .kit .gd-body[hidden], .kit .gd-ov[hidden], .kit .gd-col[hidden], .kit.game-detail .facts[hidden],
 .kit .gd-facts[hidden], .kit.game-detail h4.sec[hidden], .kit.game-detail .detail-panel[hidden]{ display:none; }
+
+/* ============================================================
+   Phone fine-tuning (WP MOBILE-1b)
+   docs/design/rc21/mobile.html and its operator decisions (Q1-Q7,
+   2026-10-18). Touch sizes apply only under `@media (pointer:coarse)`, so
+   a mouse keeps the rc20 geometry (and the CI screenshots, which run
+   without a pointer, keep theirs). The shell's part (safe area, confirm
+   dialogs as bottom sheets, landscape nav) is at the end of app.css.
+   ============================================================ */
+
+/* ---------- overflow cue (decision Q2 Weg B) ----------
+   `.scue` rows scroll sideways; lib/scroll-cue.js sets `.fits` (nothing to
+   scroll), `.at-start` / `.at-end`, and the mask fades the edge(s) behind
+   which more items sit. The mask only reads the alpha channel, so the
+   gradient's colour token is irrelevant. */
+.kit .scue{
+  --cue-l:0px; --cue-r:var(--sp-7);
+  -webkit-mask-image:linear-gradient(to right, transparent, var(--bg) var(--cue-l), var(--bg) calc(100% - var(--cue-r)), transparent);
+  mask-image:linear-gradient(to right, transparent, var(--bg) var(--cue-l), var(--bg) calc(100% - var(--cue-r)), transparent);
+}
+.kit .scue.at-end{ --cue-l:var(--sp-7); --cue-r:0px; }
+.kit .scue:not(.at-start):not(.at-end){ --cue-l:var(--sp-7); }
+.kit .scue.fits{ -webkit-mask-image:none; mask-image:none; }
+
+/* The detail sheet's tab strip scrolls sideways instead of wrapping (at
+   200 % text it overflows). The 1px rule moves from the border to an
+   inset shadow (same pixels): a scroll container would clip the tab's
+   underline where it overlapped the border. */
+.kit.game-detail .tabs{ overflow-x:auto; scrollbar-width:none; border-bottom:0; box-shadow:inset 0 -1px 0 var(--line-soft); }
+.kit.game-detail .tabs::-webkit-scrollbar{ display:none; }
+.kit.game-detail .tab{ margin-bottom:0; flex:none; white-space:nowrap; }
+
+/* Operator fix (sheet corners, rc21 dev check 2026-10-18): the hero band
+   `.gd-hero` and its header art have square corners and sit in the
+   scrolling body, which did not clip to the sheet's rounded top, so they
+   painted over it. The body takes the sheet's radii (top only for a
+   bottom sheet, all four for the centred card at BP-L) and, being the
+   scroll container, clips its content to them. Not `overflow:clip` on the
+   sheet: that would also cut the grab handle's hit area above the edge.
+   The sticky tabs (they stick inside this body) and the X with its focus
+   ring (a child of the sheet, not of the body) are unaffected. */
+.kit.game-detail .body{ border-radius:inherit; }
+
+/* ---------- detail sheet below the sheet breakpoint (section 3) ----------
+   Below BP-L the detail sheet is a bottom sheet: the tab strip sticks to
+   the top of the scrolling body; once the header has scrolled away a
+   compact header (cover, title, pill; the X stays where it is) is laid
+   over the top and the tabs stick under it; the actions sit in a footer
+   (components/game-detail-sheet.js moves them there). */
+.kit .gd-compact{ display:none; }
+.kit.game-detail .gd-foot{ gap:var(--sp-2); }
+.kit.game-detail .gd-foot .gd-acts{ display:flex; flex:1 1 auto; flex-wrap:nowrap; gap:var(--sp-2); padding:0; min-width:0; }
+.kit.game-detail .gd-foot .jobacts{ display:flex; flex:1 1 auto; gap:var(--sp-2); margin:0; min-width:0; }
+.kit.game-detail .gd-foot .btn{ justify-content:center; }
+.kit.game-detail .gd-foot .btn.pri, .kit.game-detail .gd-foot .jobacts .btn, .kit.game-detail .gd-foot .gd-acts > .btn:only-child{ flex:1 1 auto; }
+@media (max-width:1023px){
+  .kit.game-detail{ --gd-compact-h:64px; }
+  .kit.game-detail .tabs{ position:sticky; top:0; z-index:2; background:var(--surface); transition:top var(--dur-fade) var(--ease-sheet); }
+  .kit.game-detail.compact .tabs{ top:var(--gd-compact-h); }
+  .kit.game-detail.compact .gd-compact{
+    position:absolute; top:0; left:0; right:0; z-index:3; height:var(--gd-compact-h);
+    display:flex; align-items:center; gap:var(--sp-3); padding:0 60px 0 var(--sp-4);
+    background:var(--surface); border-bottom:1px solid var(--line-soft);
+    border-top-left-radius:var(--r-xl); border-top-right-radius:var(--r-xl);
+  }
+  .kit.game-detail.compact .grab{ z-index:4; }
+  .kit .gd-compact .gd-mini{ width:40px; height:40px; flex:none; border-radius:var(--r-s); box-shadow:0 0 0 1px var(--line); overflow:hidden; }
+  .kit .gd-compact .gd-cid{ display:grid; gap:3px; min-width:0; }
+  .kit .gd-compact .gd-ct{ font:500 var(--fs-4)/1.2 var(--ui); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .kit.game-detail.has-foot .gd-body{ padding-bottom:var(--sp-5); }
+  .kit.game-detail:not(.has-foot) .gd-body{ padding-bottom:calc(var(--sp-6) + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ---------- History row in a sheet on a phone (decision Q4 Weg A) ----------
+   views/downloads.js opens the row's panel in a bottom sheet below 600px:
+   the row's icon, name and meta are the sheet's header, the log keeps its
+   160px box, Retry sits in the footer. */
+.kit.hist-sheet .body{ display:grid; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4) var(--sp-4); }
+.kit .hs-head{ display:flex; align-items:center; gap:var(--sp-3); padding-bottom:var(--sp-3); border-bottom:1px solid var(--line-soft); min-width:0; }
+.kit .hs-head .hic{ display:grid; flex:none; }
+.kit .hs-head .hinfo{ display:grid; min-width:0; }
+.kit .hs-head .nm{ font:500 var(--fs-4)/1.3 var(--ui); overflow-wrap:anywhere; }
+.kit .hs-head .meta{ font:var(--fs-1) var(--mono); color:var(--dim); margin-top:2px; overflow-wrap:anywhere; }
+.kit.hist-sheet .hpanel{ background:none; border:0; border-radius:0; padding:0; }
+.kit.hist-sheet .hs-retry{ display:contents; }
+.kit.hist-sheet .sfoot .btn{ flex:1 1 0; justify-content:center; }
+
+/* Pairing (decision Q5, the touch rules below): outside a narrow touch
+   screen there is no "Open on this phone" button and no "Pair another
+   phone" heading, and the wrapper takes no box of its own, so the QR box
+   sits in step 2 exactly as in ADD-DEVICE-2. */
+.kit .ad-open-here{ display:none; }
+.kit .ad-other{ display:contents; }
+.kit .ad-other-t{ display:none; }
+.kit .ad-qrreveal{ display:none; }
+
+/* ---------- touch targets (section 1, decision Q1 Weg A) ----------
+   Visuals grow to --ctl-h (38px); the hit area is --hit (44px) by an
+   invisible ::after extender centred on the control. Neighbours never
+   overlap: every row gap stays >= 6px. Scroll containers keep the
+   extenders inside their padding box (`.seg` has 3px padding, the phone
+   chip row gets 3px below) or the control itself is 44px tall. */
+@media (pointer:coarse){
+  .kit .seg button, .kit .fchip, .kit .btn, .kit .ib, .kit .stt .icnact, .kit .segi button,
+  .kit .sortg button, .kit .tab, .kit .pair-open{ position:relative; }
+  .kit .seg button::after, .kit .fchip::after, .kit .btn::after, .kit .ib::after, .kit .stt .icnact::after,
+  .kit .gd-x::after, .kit .segi button::after, .kit .sortg button::after, .kit .tab::after, .kit .pair-open::after{
+    content:""; position:absolute; left:0; right:0;
+    top:calc(50% - var(--hit) / 2); bottom:calc(50% - var(--hit) / 2);
+  }
+  .kit .ib::after, .kit .stt .icnact::after, .kit .gd-x::after{ left:calc(50% - var(--hit) / 2); right:calc(50% - var(--hit) / 2); }
+  .kit .seg button, .kit .fchip, .kit .btn, .kit .btn.sm, .kit .segi button{ min-height:var(--ctl-h); }
+  .kit .seg button{ min-width:var(--hit); } /* "All" was 37px wide */
+  .kit .fchip{ display:inline-flex; align-items:center; }
+  .kit .segi button{ width:var(--ctl-h); height:var(--ctl-h); }
+  .kit .sortg{ overflow:visible; }
+  .kit .ib{ width:var(--sp-6); height:var(--sp-6); line-height:22px; }
+  .kit .stt .icnact{ width:var(--sp-6); height:var(--sp-6); }
+  .kit .field .lh{ min-height:var(--hit); }
+  .kit .lib-chips{ padding-block:3px; margin-block:-3px; }
+  .kit .pair-open{ display:inline-flex; align-items:center; min-height:var(--ctl-h); }
+  /* The detail sheet's tabs sit in a scroll container: 44px tall
+     themselves instead of an extender it would clip. */
+  .kit.game-detail .tab{ min-height:var(--hit); }
+
+  /* Found by a hit-test audit at 400px (elementFromPoint at the centre
+     +-22px): the search field, the sort box, the split button's caret,
+     text-link buttons and disclosure summaries were below 44px. The sort
+     select is transparent: its box grows to 44px around the 38px visual
+     box, the box itself stays 38px. */
+  .kit .lib-search, .kit .linkbtn, .kit details > summary{ position:relative; }
+  .kit .lib-search::after, .kit .linkbtn::after, .kit details > summary::after{
+    content:""; position:absolute; left:0; right:0;
+    top:calc(50% - var(--hit) / 2); bottom:calc(50% - var(--hit) / 2);
+  }
+  .kit .sortg select{ align-self:center; height:var(--hit); }
+  .kit .sortg button::after, .kit .split-more::after{ left:calc(50% - var(--hit) / 2); right:calc(50% - var(--hit) / 2); }
+  /* The Settings section strip scrolls on a phone (@container settings
+     760px): 38px items, the extender kept inside the strip's padding. */
+  .kit.view-settings .snav-item{ position:relative; min-height:var(--ctl-h); }
+  .kit.view-settings .snav-item::after{
+    content:""; position:absolute; left:0; right:0;
+    top:calc(50% - var(--hit) / 2); bottom:calc(50% - var(--hit) / 2);
+  }
+  .kit.view-settings .snav-list{ padding-top:3px; margin-top:-3px; }
+
+  /* Decision Q5: on a narrow touch screen the phone pairs itself first
+     ("Open on this phone", full width), the QR follows for another phone:
+     200px, Show/Hide and the hint on one centre axis, then the link field
+     and Copy link. Desktop keeps the QR first (the rules after this block
+     hide the button and the heading). The app-download QR is left out on
+     the phone itself: the button downloads, nothing to scan. */
+  @container addev (max-width:420px){
+    .kit .ad-open-here{ display:flex; width:100%; justify-content:center; }
+    .kit .ad-other{
+      display:grid; gap:var(--sp-3); margin:var(--sp-2) 0 0 calc(-1 * (24px + 10px));
+      border-top:1px solid var(--line-soft); padding-top:var(--sp-4);
+    }
+    .kit .ad-other-t{ display:block; margin:0; }
+    .kit .ad-other-t::after{ content:none; } /* app.css h4.sec draws a rule after the label */
+    .kit .ad-pairbox{ grid-template-columns:minmax(0, 1fr); justify-items:center; }
+    .kit .ad-pairbox .pair-qr, .kit .ad-pairbox .ad-qrmask{ width:200px; height:200px; }
+    .kit .ad-pairbox .ad-qrside{ grid-column:1; grid-row:2; justify-self:stretch; align-items:center; text-align:center; }
+    .kit .ad-pairbox .ad-qrside > .btn{ min-width:200px; justify-content:center; }
+    .kit .ad-pairbox .ad-qrside > .hint{ text-align:center; }
+    .kit .ad-pairbox .ad-qrmore{ justify-self:stretch; }
+    .kit .ad-pairbox .ad-qrmore .pair-open{ display:none; }
+    /* Operator change 2026-10-18: the stand-in is the Show button; the
+       plain toggle only appears as "Hide" once the code is shown. */
+    .kit .ad-pairbox .ad-qrreveal{
+      grid-column:1; grid-row:1; z-index:1; width:200px; height:200px; padding:0;
+      display:grid; place-items:center; border:0; border-radius:var(--r-m); background:none; cursor:pointer;
+    }
+    .kit .ad-pairbox .ad-qrreveal:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+    .kit .ad-qrreveal-l{
+      font:500 var(--fs-3)/1.2 var(--ui); color:var(--text); padding:10px 16px; border-radius:999px;
+      background:color-mix(in srgb, var(--bg) 78%, transparent); border:1px solid var(--line);
+    }
+    .kit .ad-pairbox .ad-qrside > .btn[aria-expanded="false"]{ display:none; }
+    .kit .pair-download > .ad-desc, .kit .pair-download .ad-qrbox > .pair-qr{ display:none; }
+    .kit .pair-download .ad-qrside{ grid-row:1; }
+  }
+}
+/* The safe area under the Add-a-device footer (0 on a desktop). */
+.kit .ad-foot{ padding-bottom:calc(14px + env(safe-area-inset-bottom, 0px)); }
+
+/* [hidden] guards for the display-styled classes of this block. */
+.kit .gd-compact[hidden], .kit.game-detail .gd-foot .gd-acts[hidden], .kit.game-detail .gd-foot .jobacts[hidden],
+.kit .hs-head[hidden], .kit .hs-head .hic[hidden], .kit .hs-head .hinfo[hidden],
+.kit .ad-open-here[hidden], .kit .ad-other[hidden], .kit .ad-other-t[hidden], .kit .ad-pairbox .ad-qrreveal[hidden]{ display:none; }

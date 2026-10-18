@@ -329,7 +329,10 @@ test("CSS: the Downloads block in kit.css uses container queries at 1099/900/760
   const app = strip(readFileSync(new URL("../css/app.css", import.meta.url), "utf8"));
   const from = kit.indexOf(".kit.dl{");
   assert.ok(from > 0, "Downloads block found in kit.css");
-  const block = kit.slice(from);
+  // Up to the phone block (WP MOBILE-1b, starts with the overflow cue),
+  // which has its own viewport rules.
+  const to = kit.indexOf(".kit .scue{");
+  const block = to > from ? kit.slice(from, to) : kit.slice(from);
   assert.match(block, /\.kit\.dl\{[^}]*container-type:\s*inline-size/);
   for (const w of [1099, 900, 760, 460]) assert.match(block, new RegExp(`@container \\(max-width:${w}px\\)`), `@container ${w}px`);
   assert.equal(/@media \((min|max)-width/.test(block), false, "no viewport breakpoints for the page composition");

@@ -153,7 +153,7 @@ globalThis.fetch = async (url) => {
 
 const { store } = await import("../js/store-singleton.js");
 const { renderClients } = await import("../js/views/clients.js");
-const { openAddDeviceSheet } = await import("../js/components/add-device-sheet.js");
+const { openAddDeviceSheet, setOpenExternalForTests } = await import("../js/components/add-device-sheet.js");
 const { confirmPairReplace } = await import("../js/components/pair-confirm.js");
 const { resetModalStack } = await import("../js/lib/modal-stack.js");
 const { navigateTo } = await import("../js/router.js");
@@ -264,6 +264,57 @@ test("MUTATION TARGET: phone — Show renders the QR (SVG, role=img) and the exa
   assert.equal(reveal("phone").childNodes.length, 0);
   assert.equal(showBtn("phone").textContent, "Show pairing QR code");
   assert.equal(secretInDom(), false, "Hide takes the secret out of the DOM");
+});
+
+test("MUTATION TARGET (MOBILE-1b, Q5): 'Open on this phone' carries no key in the DOM and builds the pairing URI only on the tap", () => {
+  const opened = [];
+  setOpenExternalForTests((uri) => opened.push(uri));
+  openAddDeviceSheet();
+  const btn = q("pair-open-here");
+  assert.equal(btn.tagName, "BUTTON");
+  assert.equal(btn.textContent, "Open on this phone");
+  assert.equal(btn.getAttribute("href"), null);
+  assert.equal(secretInDom(), false, "the button holds no key");
+  click(btn);
+  assert.deepEqual(opened, [`steamhangar://pair?v=1&url=${encodeURIComponent(ORIGIN)}&key=${encodeURIComponent(KEY)}`]);
+  assert.equal(secretInDom(), false, "nothing secret was left in the DOM by the tap");
+  assert.equal(reveal("phone").hidden, true, "the QR stays hidden");
+  // Demo mode: no key to share, the tap does nothing.
+  storage.set("steamvault.demoMode", "1");
+  click(btn);
+  assert.equal(opened.length, 1);
+  storage.delete("steamvault.demoMode");
+  setOpenExternalForTests(() => {});
+});
+
+test("MUTATION TARGET (operator change 2026-10-18): the stand-in's reveal overlay shows the QR, leaves with the stand-in and comes back on Hide", () => {
+  openAddDeviceSheet();
+  const cover = q("show-phone-cover");
+  assert.equal(cover.tagName, "BUTTON");
+  assert.equal(cover.textContent, "Show pairing QR code");
+  assert.equal(cover.getAttribute("aria-controls"), reveal("phone").id);
+  assert.equal(cover.getAttribute("aria-expanded"), null, "no stale expanded state: the overlay leaves when the code shows");
+  assert.equal(cover.hidden, false);
+  assert.equal(secretInDom(), false);
+  click(cover);
+  assert.ok(reveal("phone").querySelector('[data-role="pair-qr"]'), "QR shown in place");
+  assert.equal(cover.hidden, true, "the overlay leaves with the stand-in");
+  assert.equal(showBtn("phone").textContent, "Hide");
+  assert.equal(dom.document.activeElement, showBtn("phone"), "focus moves to Hide");
+  click(showBtn("phone"));
+  assert.equal(cover.hidden, false);
+  assert.equal(secretInDom(), false, "Hide takes the secret out of the DOM");
+  // On a narrow touch screen Hide disappears with the code (kit.css): focus
+  // goes to the rendered overlay. Elsewhere (no box) it stays on the toggle.
+  cover.getClientRects = () => [{ width: 200, height: 200 }];
+  click(cover);
+  click(showBtn("phone"));
+  assert.equal(dom.document.activeElement, cover, "focus follows to the rendered overlay after Hide");
+  cover.getClientRects = () => [];
+  click(cover);
+  click(showBtn("phone"));
+  assert.notEqual(dom.document.activeElement, cover, "an overlay without a box (desktop) never takes focus");
+  delete cover.getClientRects;
 });
 
 test("browser — Show renders the #pair= link as copyable text", () => {

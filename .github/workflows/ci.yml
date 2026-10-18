@@ -903,20 +903,22 @@ jobs:
           pages="$({ grep -E '^export const DEFAULT_PAGES = \[[^]]+\];$' "$tool" || true; } | grep -oE '"[a-z-]+"' | tr -d '"' || true)"
           widths="$({ grep -E '^export const DEFAULT_WIDTHS = \[[^]]+\];$' "$tool" || true; } | grep -oE '[0-9]+' || true)"
           { [ -n "$pages" ] && [ -n "$widths" ]; } || fail "cannot read DEFAULT_PAGES / DEFAULT_WIDTHS from $tool"
+          # Overlay cases (WP MOBILE-1b): one file each, `<case>.png`; optional line.
+          cases="$({ grep -E '^export const DEFAULT_CASES = \[[^]]+\];$' "$tool" || true; } | grep -oE '"[a-z0-9-]+"' | tr -d '"' || true)"
           nwidths="$(printf '%s\n' "$widths" | wc -l | tr -d ' ')"
-          allowed="$(for p in $pages; do for w in $widths; do echo "$p-$w.png"; done; done | sort)"
+          allowed="$({ for p in $pages; do for w in $widths; do echo "$p-$w.png"; done; done; for c in $cases; do echo "$c.png"; done; } | sort)"
           { [ -d "$dl" ] && [ ! -L "$dl" ]; } || fail "no downloaded goldens"
           actual="$(find "$dl" -mindepth 1 -printf '%P\n' | sort)"
           [ -n "$actual" ] || fail "the artifact is empty"
           while IFS= read -r f; do
             printf '%s' "$f" | grep -Eq '^[a-z-]+-[0-9]+\.png$' || fail "unexpected name in the artifact: ${f}"
-            printf '%s\n' "$allowed" | grep -qxF "$f" || fail "not a page/width ${tool} records: ${f}"
+            printf '%s\n' "$allowed" | grep -qxF "$f" || fail "not a page/width or case ${tool} records: ${f}"
             { [ -f "$dl/$f" ] && [ ! -L "$dl/$f" ]; } || fail "not a regular file: ${f}"
             sig="$(head -c 8 "$dl/$f" | od -An -tx1 | tr -d ' \n')"
             [ "$sig" = "89504e470d0a1a0a" ] || fail "not a PNG: ${f}"
           done <<< "$actual"
           for p in $pages; do
-            have="$(printf '%s\n' "$actual" | grep -c "^${p}-" || true)"
+            have="$(printf '%s\n' "$actual" | grep -cE "^${p}-[0-9]+\.png$" || true)"
             { [ "$have" -eq 0 ] || [ "$have" -eq "$nwidths" ]; } || fail "page ${p}: ${have} of ${nwidths} widths recorded"
           done
           mkdir -p "$goldens"

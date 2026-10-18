@@ -114,7 +114,7 @@ node tools/png-diff.mjs --expected web/tests/goldens --actual /tmp/web-shots --d
 (`--mode aa-tolerant` because the goldens come from CI, see below.)
 
 `web-shot.mjs` flags (all optional): `--base`, `--out`, `--widths 1400,1000,400`,
-`--pages library,clients,downloads,settings,kit`, `--chrome`, `--clock`,
+`--pages library,clients,downloads,settings,kit`, `--cases <names>|none`, `--chrome`, `--clock`,
 `--timezone`, `--locale`, `--wait-selector "#view-root .view"`, `--timeout`
 (ms), `--settle` (ms), `--max-height`, `--fonts-conf`, and the booleans
 `--[no-]reduced-motion`, `--[no-]hide-scrollbars`, `--[no-]block-offsite`.
@@ -134,6 +134,25 @@ Against the running dev instance instead of the static server, point
 `--base` at it; demo mode is set by the tool, the instance's data is not
 touched. Those pixels are for eyeballing only -- goldens come from CI.
 
+### Overlay cases (WP MOBILE-1b)
+
+Besides one full-page shot per page and width, the tool shoots the cases in
+`CASES` / `DEFAULT_CASES` (`tools/web-shot.mjs`): one page at one width with
+a sheet or confirm opened by a setup script, saved as `<case>.png` (for
+example `library-detail-400.png`) and captured at the viewport size
+(`width x 900`), because an overlay is fixed to the viewport. Cases run with
+CDP touch emulation (`Emulation.setTouchEmulationEnabled`), so
+`@media (pointer:coarse)` applies: headless Chromium reports no pointer at
+all for the page shots (`(pointer:fine)` and `(pointer:coarse)` are both
+false; measured 2026-10-18), which is why the touch sizes never reach the
+page goldens. `clients-pair-400` turns demo mode off only for the click that
+opens "Add a device" (demo mode hides the pairing options), answers
+that sheet's `GET /v1/dist` from the demo fixture and stores a
+stand-in key; `clients-pair-shown-400` also taps the stand-in (reveal
+overlay) and shows the QR of that stand-in key, never a real one. The push job below
+accepts `<case>.png` for every name on the one-line `DEFAULT_CASES`; a case
+is one file, not a width of its page. `--cases none` skips them.
+
 ### Goldens: recorded by CI, never committed from a workstation
 
 Only CI's pixels are canonical (same reason as the Android goldens in
@@ -147,7 +166,8 @@ flow, mirrored from `android-goldens-record` / `android-goldens-push`:
 3. `web-goldens-push` (the only web job with a write token; runs no node,
    no npx, no repository script) validates the artifact -- names must be
    `<page>-<width>.png` for the `DEFAULT_PAGES` / `DEFAULT_WIDTHS` lines in
-   `tools/web-shot.mjs`, every width of a recorded page present, real PNGs
+   `tools/web-shot.mjs` or `<case>.png` for its `DEFAULT_CASES` line, every
+   width of a recorded page present, real PNGs
    -- commits them as github-actions[bot] and pushes to the same branch.
    It runs after `android-goldens-push` and rebases over that job's commit
    if Android goldens are all that moved; any other movement of the branch
