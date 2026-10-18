@@ -121,6 +121,29 @@ Antrag filed and the rollout on the operator's stack checked.
     VER-1).
   - open for the cut: whether `v0.1.0` final is itself a `server-v0.1.0`
     tag or a plain umbrella tag pointing at the three product versions.
+  - **History, own numbering (user decision 2026-10-18):** agent and app
+    get their own version line, tagged retroactively on the commits where
+    their shipped files last changed (measured from git: product source
+    without tests, goldens and READMEs, between consecutive `v*` tags).
+    Proposed mapping, confirmed at the package cut:
+    - agent (`agent/`, without `_test.go`): `agent-v0.1.0` = rc1,
+      `0.2.0` = rc9, `0.3.0` = rc10, `0.4.0` = rc13, `0.5.0` = rc17
+      (current; rc18 to rc20.2 re-released identical code 7 times).
+    - app (`app/app/src/main`, gradle files): `app-v0.1.0` = rc1, `0.2.0`
+      = rc10, `0.3.0` = rc12, `0.4.0` = rc13, `0.5.0` = rc14, `0.6.0` =
+      rc15, `0.7.0` = rc16, `0.8.0` = rc17, `0.9.0` = rc19, `0.9.1` =
+      rc19.2, `0.9.2` = rc19.3, `0.10.0` = rc20 (unchanged in rc11, rc18,
+      rc18.1, rc20.1, rc20.2).
+    - server (vault-core, vault-api with web, vault-dns, vault-proxy):
+      changed in every rc, keeps the `v0.1.0-rcN` line; vault-dns changed
+      only in rc9, vault-proxy in rc3, rc9, rc14, rc15, rc19 (they stay
+      part of the server release).
+    - running devices report the old strings (`0.1.0-rc17` ... `0.1.0-rc20.2`
+      for agent 0.5.0); the API keeps a mapping table so the Clients hint
+      shows the new number and no false "update available".
+    - push the retro tags BEFORE the new per-prefix `publish.yml` lands,
+      so no old commit is rebuilt; pushing non-`v*` tags needs the
+      operator's yes at that time.
 
 ### Version rules (ADR-0029, user decisions 2026-10-18)
 

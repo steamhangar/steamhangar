@@ -3783,7 +3783,9 @@ below carry their own later dates, item 12 is the current one).
         image bakes the latest agent and APK release instead of building
         them, the "version differs from the server" hint compares against
         that bundled/minimum agent version, release notes and About show
-        each product's version. New ADR. Details in the roadmap.
+        each product's version. New ADR. Own version lines for agent and
+        app, tagged retroactively (decided 2026-10-18, mapping in the
+        roadmap). Details in the roadmap.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test
