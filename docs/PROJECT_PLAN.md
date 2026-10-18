@@ -3642,6 +3642,10 @@ below carry their own later dates, item 12 is the current one).
         finishing right at the boundary flips in/out (CI failure on
         wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
         the clock or take the cutoff from the same `now` the demo uses.
+      - [ ] nit (MOBILE-1b review): Library toolbar at 1000 px puts the
+        search (180 px) and the chips in a narrow left column under the
+        title (on main already, not changed by MOBILE-1b); check against
+        the kit layout.
       - [ ] nit (UI-COLD-CACHED-1 review): no backoff when walks keep
         failing (one ERROR per expired read, bounded by request rate);
         theoretical waiter starvation after a failed walk; the Thread.start
