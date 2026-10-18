@@ -3794,7 +3794,7 @@ below carry their own later dates, item 12 is the current one).
         for up to 5 minutes after a vault-api restart (ring not filled yet);
         no test for a live answer with the feed ok but `active_clients`
         null or missing
-      - [ ] **CLIENTS-LIVE-1** (api + web) the Clients "loading now" box and
+      - [x] **CLIENTS-LIVE-1** (7856c4e; `live_now` per client: loading, speed and apps from one ~20 s window; Android still reads `loading_now`) (api + web) the Clients "loading now" box and
         speed come from the swept 5-minute window (`/v1/clients/overview`,
         `traffic.current_window`), so they lag up to one sweep; serve them
         per address from the live tier (like LIVE-DELAY-1 did for Downloads).
