@@ -3642,6 +3642,11 @@ below carry their own later dates, item 12 is the current one).
         finishing right at the boundary flips in/out (CI failure on
         wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
         the clock or take the cutoff from the same `now` the demo uses.
+      - [ ] nit (AUTO-VERIFY-1): local `dev.sh test-web-shots` fails
+        `clients-pair-shown-400` at 0.42 % inside the QR (the case encodes
+        the serving URL/port); pin a fixed URL in the case. Android
+        Downloads note does not read `auto_complete_cached` yet (says
+        "complete automatically" when off).
       - [ ] nit (MOBILE-1b review): real "Download app" button state is in
         no golden (pairing cases render the demo note); no real-device
         check of safe-area insets yet.
