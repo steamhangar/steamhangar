@@ -3622,8 +3622,12 @@ below carry their own later dates, item 12 is the current one).
       rc20.2 is taken, so the slot is rc20.3 or rc21: open decision
       AIO-DEFAULT-1 in the roadmap (Weg A code default + ADR, B prod `.env`
       only, C both, D measure more).
-      - [ ] AIO-DEFAULT-1 (decided 2026-10-18: Weg B, prod `.env` via
+      - [x] AIO-DEFAULT-1 (decided 2026-10-18: Weg B, prod `.env` via
         Antrag A-20261018-02, code default in rc21)
+      - [x] AIO-DEFAULT-1b (rc21, core; 729d48c) `aio threads` + sendfile off
+        is the default, `VAULT_NGINX_AIO=off` opts out (byte-identical to
+        rc20.x), ADR-0030; verify 627/0. After the rc21 rollout: remove the
+        prod `.env` line (Antrag).
       - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
         (user decision 2026-10-18); devbox watches the first verify run
       - [x] UI-COLD-CACHED-1 (rc21, api; 9b994ce) `SizeCache` serves the expired
