@@ -256,6 +256,9 @@ export const LEGEND_INTERNET = "From the internet";
  * the prefill runner, whose points carry no hit/miss split of their own).
  * The internet band sits on top, so the top line is the total and the
  * scale (and the axis's "highest") is the total's.
+ * Known gap: the series' `hit_bytes` counts clients only, so the runner's
+ * cache hits (e.g. during a verify) land in the "from the internet" band
+ * until the API exposes a runner hit/miss split (roadmap RUNNER-SPLIT-1).
  *
  * `null` when any point lacks the split (an older server's tiers): the
  * graph then draws the single total line. Coordinates as `seriesGeometry`.

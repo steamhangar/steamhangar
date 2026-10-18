@@ -153,6 +153,8 @@ const poll = createViewPoll({
   fetcher: () => {
     // The agent data (presence, bypass verdict) on the same cadence: a
     // nudge of the store's own loop, coalesced while one is in flight.
+    // Accepted: this nudge bypasses the store loop's backoff while vault-api
+    // fails (at most one request per 5 s, and only while the page is visible).
     store.refresh("clients");
     return api.clientsOverview(state.range);
   },
