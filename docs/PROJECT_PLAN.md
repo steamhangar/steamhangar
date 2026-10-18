@@ -3626,7 +3626,7 @@ below carry their own later dates, item 12 is the current one).
         Antrag A-20261018-02, code default in rc21)
       - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
         (user decision 2026-10-18); devbox watches the first verify run
-      - [ ] UI-COLD-CACHED-1 (rc21, api) `SizeCache` serves the expired
+      - [x] UI-COLD-CACHED-1 (rc21, api; 9b994ce) `SizeCache` serves the expired
         snapshot at once and refreshes in one background walk; only the
         first read and the read after `invalidate()` wait; one INFO line per
         walk with duration and counts. Web loading states of rc20.2 cover
