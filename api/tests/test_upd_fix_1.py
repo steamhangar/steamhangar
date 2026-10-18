@@ -360,7 +360,7 @@ def test_a_later_update_of_a_depot_the_last_run_did_not_touch_still_flags(
         upsert_mapping(conn, depot_b, APPID, None)
         _record(conn, NEWEST, "2026-10-14T19:39:10Z", depot=depot_a)
         _record(conn, OLD, "2026-10-14T19:39:10Z", depot=depot_b)
-        apply_observed_mapping(conn, APPID, {depot_a})
+        apply_observed_mapping(conn, APPID, {depot_a}, manifest_named=set())
         assert [
             row["depotid"]
             for row in conn.execute("SELECT depotid FROM depot_app_map WHERE appid = ?", (APPID,))

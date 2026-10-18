@@ -255,19 +255,15 @@ def ingest_after_prefill(
       **durable** record of "which app this depot's manifest said it belongs
       to", written fresh on every ingest of the ORIGINAL app and never
       touched by any OTHER app's prefill job. It does NOT have the flicker --
-      but as of WP API-FIX-2 nothing reads it for attribution: the shipped
-      GC (``vault_api/gc.py::load_gc_inputs`` -> ``deletion.load_mapping_rows``
-      and ``deletion.other_owner_ids``) derives co-owners from
-      ``depot_app_map`` only, and ``gc.load_recorded_manifests`` reads
-      ``depot_manifests`` for manifest IDs, never for ``containing_appid``.
-      Consequence: while a co-owner's additive row is flickered out, GC for
-      the other app cannot see that co-owner and may delete chunks the
-      co-owner still needs. That is a re-download for the co-owner's next
-      prefill, never data loss -- exactly the bound ADR-0007 sets for every
-      GC mistake -- and the row comes back on the original app's next
-      ingest. Making GC read ``containing_appid`` is the obvious follow-up;
-      it is not what ships today, and this docstring says so rather than
-      describing the intended design as the implemented one.
+      GC does not read ``containing_appid``, but since WP GROUP-VERIFIED-1
+      it no longer needs the mapping row to see a claimant: ``gc.plan_gc``
+      counts every app with a ``depot_manifests`` row for a depot as a
+      claimant, mapped or not (``gc.load_recorded_manifests`` loads the rows
+      of every app for the target app's depots). So the app that recorded a
+      manifest -- here the ORIGINAL app, whose rows this function writes --
+      keeps its chunks in the keep set even while its mapping row is
+      flickered out. A co-owner that never recorded a manifest of its own is
+      still seen through ``depot_app_map`` only.
     """
     cache_dir = settings.steamprefill_cache_dir
     scan = _scan_bin_files(cache_dir, prefix=f"{appid}_")
@@ -395,6 +391,40 @@ def ingest_after_prefill(
         superseded=superseded,
         mapped_own=mapped_own,
     )
+
+
+def own_manifest_depots(settings: Settings, appid: int) -> set[int] | None:
+    """Depots this app's own manifests name and that have bytes in the cache
+    (WP GROUP-VERIFIED-1), or ``None`` when that cannot be judged.
+
+    "Own manifests" are the well-named ``{appid}_*.bin`` files in
+    SteamPrefill's temp cache -- the files ``ingest_after_prefill`` records
+    and step 5b maps from, so this is exactly the evidence step 5b uses to map
+    a depot to the app. Filename parse only (no payload read): it is a
+    protection signal, and a file whose payload fails to parse still says
+    SteamPrefill fetched that depot for this app.
+
+    The worker passes the result to ``prefill.apply_observed_mapping`` as the
+    depots its replace step must NOT remove: a forced verify that serves
+    almost everything as a HIT writes new bytes into only a few depots, and
+    replace-semantics on that partial observation removed the main depot and
+    six content-package depots of a real game (HELLDIVERS 2, 2026-10-18).
+
+    ``None`` (temp cache or depot root not readable): the worker cannot tell
+    a depot that left the app from one that was merely not written to, so it
+    removes nothing.
+    """
+    scan = _scan_bin_files(settings.steamprefill_cache_dir, prefix=f"{appid}_")
+    if scan is None:
+        return None
+    depot_root = _resolve_depot_root_or_none(settings)
+    if depot_root is None:
+        return None
+    return {
+        depotid
+        for (original_appid, depotid) in scan.groups
+        if original_appid == appid and _depot_has_bytes(depot_root, depotid)
+    }
 
 
 def _resolve_depot_root_or_none(settings: Settings) -> str | None:
@@ -737,11 +767,12 @@ def remove_orphan_depot_manifests(
     """WP MAP-DRIFT-1: delete ``depot_manifests`` rows nothing needs any more.
 
     A row is an orphan only when BOTH hold: no ``depot_app_map`` row names its
-    depot (for any app), and the depot has no bytes on disk. A partial update
-    replaces an app's mapping with the depots that got new bytes
-    (``apply_observed_mapping``), so an untouched depot drops out of the map
-    while its cached bytes and its recorded manifest still matter -- the
-    bytes-on-disk test keeps exactly those rows. Whenever the disk cannot be
+    depot (for any app), and the depot has no bytes on disk. A depot can drop
+    out of the map while its cached bytes and recorded manifest still matter
+    (before WP GROUP-VERIFIED-1 every partial update did that through
+    ``apply_observed_mapping``; it now keeps depots the app's manifests name,
+    but a hand-deleted row or a reassigned depot still leaves one behind) --
+    the bytes-on-disk test keeps exactly those rows. Whenever the disk cannot be
     judged (cache root unresolved, directory unreadable) the row is kept.
 
     Runs on every start, no stamp: a second pass finds nothing. One SELECT for

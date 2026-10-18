@@ -1280,7 +1280,10 @@ def test_load_content_states_batches_beyond_the_sqlite_parameter_limit(conn) -> 
     assert all(value is False for value in states.values())
 
 
-def test_load_recorded_manifests_skips_poisoned_rows(conn) -> None:
+def test_load_recorded_manifests_keeps_a_poisoned_app_id_as_a_claim(conn) -> None:
+    """WP GROUP-VERIFIED-1 review N2: a row whose app id cannot be read is
+    kept under app id 0, so ``plan_gc`` skips the depot
+    (STATUS_UNREADABLE_OWNER) instead of the claim silently disappearing."""
     from vault_api.mapping import upsert_mapping
 
     upsert_mapping(conn, depotid=441, appid=440, name="TF2")
@@ -1292,7 +1295,7 @@ def test_load_recorded_manifests_skips_poisoned_rows(conn) -> None:
     )
     conn.commit()
 
-    assert gc.load_recorded_manifests(conn, 440) == {}
+    assert gc.load_recorded_manifests(conn, 440) == {(0, 441): "900"}
 
 
 # ==========================================================================

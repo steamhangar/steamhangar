@@ -347,6 +347,15 @@ class GameSummary(BaseModel):
     # counted once; a member with nothing on disk is skipped. Null for a row
     # grouped under a parent, like ``group_size_bytes``.
     group_cache_complete_pct: int | None = None
+    # WP GROUP-VERIFIED-1: content-package depots of the group that the
+    # figure above does NOT cover because they cannot be measured at all (no
+    # current target, or no_target/manifest_unavailable; typically an unowned
+    # package whose manifest is recorded under the game only), and their
+    # bytes on disk. Any other unmeasured package pair keeps the figure null. 0 whenever the group figure is null or
+    # the row heads no group. A UI shows them next to the figure; they are
+    # never counted as complete.
+    group_cache_unmeasured_depots: int = 0
+    group_cache_unmeasured_bytes: int = 0
     # Stored library metadata (WP D23), null = unknown.
     meta: GameMeta | None = None
 
@@ -365,7 +374,7 @@ def _completeness_fields(figure: cache_completeness.Completeness) -> dict[str, o
     }
 
 
-def _group_completeness_pct(
+def _group_completeness_fields(
     appid: int,
     classifications: dict[int, app_classification.Classification],
     children_by_parent: dict[int, list[int]],
@@ -373,21 +382,26 @@ def _group_completeness_pct(
     index: cache_completeness.CompletenessIndex,
     group_size: int | None,
     depot_bytes: dict[int, int],
-) -> int | None:
-    """``group_cache_complete_pct`` for one row (same grouping as
-    ``_group_size_bytes``). Only members whose own ``size_bytes`` is > 0
-    count (CACHE-COMPLETE-1a review): a member with nothing on disk must not
-    contribute its last stored rows."""
+) -> dict[str, object]:
+    """``group_cache_complete_pct`` and ``group_cache_unmeasured_*`` for one
+    row (same grouping as ``_group_size_bytes``). Only members whose own
+    ``size_bytes`` is > 0 count (CACHE-COMPLETE-1a review): a member with
+    nothing on disk must not contribute its last stored rows. The rule for
+    unmeasurable package pairs is ``cache_completeness.group_figure``'s."""
     own = classifications.get(appid)
     if (own is not None and own.parent_appid is not None) or not group_size:
-        return None
-    members = [
-        m
+        return {"group_cache_complete_pct": None}
+    members = {
+        m: app_depotids.get(m, [])
         for m in (appid, *children_by_parent.get(appid, []))
         if app_size_bytes(app_depotids.get(m, []), depot_bytes)
-    ]
-    pairs = [(m, d) for m in members for d in app_depotids.get(m, [])]
-    return index.figure(pairs).pct
+    }
+    group = cache_completeness.group_figure(index, appid, members, depot_bytes)
+    return {
+        "group_cache_complete_pct": group.figure.pct,
+        "group_cache_unmeasured_depots": group.unmeasured_depots,
+        "group_cache_unmeasured_bytes": group.unmeasured_bytes,
+    }
 
 
 def _children_by_parent(
@@ -514,6 +528,9 @@ class GameDetail(BaseModel):
     cache_missing_chunks: int | None = None
     cache_unmapped_depots: int = 0
     group_cache_complete_pct: int | None = None
+    # See GameSummary.group_cache_unmeasured_* (WP GROUP-VERIFIED-1).
+    group_cache_unmeasured_depots: int = 0
+    group_cache_unmeasured_bytes: int = 0
 
 
 @router.get("/v1/games", response_model=list[GameSummary])
@@ -714,7 +731,7 @@ def list_games(
                 **_classification_fields(classifications.get(row["appid"])),
                 group_size_bytes=group_size,
                 **completeness_fields,
-                group_cache_complete_pct=_group_completeness_pct(
+                **_group_completeness_fields(
                     row["appid"],
                     classifications,
                     children_by_parent,
@@ -870,7 +887,7 @@ def get_game(
             )
         ),
         cache_unmapped_depots=detail_unmapped if detail_size else 0,
-        group_cache_complete_pct=_group_completeness_pct(
+        **_group_completeness_fields(
             appid,
             classifications,
             children_by_parent,

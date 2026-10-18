@@ -350,9 +350,10 @@ def set_app_status(
     ``last_prefill_at`` is only written when given — a failed run must not
     claim the app was prefilled. ``last_manifest_check`` (WP 3.3, ADR-0006
     "current as of <timestamp>" semantics) is likewise only written when
-    given — the worker passes it exactly when SteamPrefill's summary reported
-    ``Up To Date > 0 AND Updated == 0`` for this run, i.e. a non-forced-run
-    style confirmation that the app is current as of now.
+    given — the worker passes it when a successful run's summary was readable
+    and reported ``Updated > 0`` or ``Up To Date > 0`` (operator decision
+    2026-10-18, GROUP-VERIFIED-1: an update run or forced verify that
+    finished also confirms the app current as of now).
 
     Deliberately has **no** ``needs_force`` parameter (schema v5, WP 3.4,
     ADR-0006 decision 2) — see ``clear_needs_force_if_unchanged`` below for

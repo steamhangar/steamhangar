@@ -787,6 +787,8 @@ def test_cancelling_a_running_prefill_terminates_it_and_finalizes_honestly(
 
         # apps.status: not 'running' (nothing is), not 'error' (nothing failed).
         assert app_status(client, 440) == "idle"
+        # A stopped run never confirms the app current (GROUP-VERIFIED-1).
+        assert client.get("/v1/games/440", headers=AUTH).json()["last_manifest_check"] is None
 
         # A partial run is no evidence: the mapping was not rewritten.
         assert client.get("/v1/mapping", headers=AUTH).json() == []

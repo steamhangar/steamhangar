@@ -1502,7 +1502,7 @@ is the authoritative list of which outcomes set it:
 | `0` | failed (`parse_ok=False`), no Failed column | — | `done` (exit-code rule, unchanged) | `done` | set | untouched |
 | `0` | ok | `0` / `0`, no Failed column or Failed `0` | **`not_owned`** (WP NOT-OWNED-1) — "SteamPrefill did not consider this app — is it owned by the logged-in account?" | `not_owned`; an app that holds cache bytes or was prefilled before keeps `done` (WP NOT-OWNED-2) | untouched | untouched |
 | `0` | ok | `0` / `>0` | `done` | `done` | set | **set** (ADR-0006 "current as of \<timestamp\>") |
-| `0` | ok | `>0` / anything | `done` | `done` | set | untouched |
+| `0` | ok | `>0` / anything | `done` | `done` | set | **set** (operator decision 2026-10-18, GROUP-VERIFIED-1: an update run or a forced verify fetched the current manifests and finished, so the cache is confirmed current) |
 
 **The Failed column (WP API-FIX-3).** SteamPrefill also exits 0 when it
 fails an app; the table then has a third column, `Updated | Up To Date |
@@ -1697,6 +1697,18 @@ around the run, not by parsing SteamPrefill's output:
      observed are deleted, so a depot Steam reassigned away from the app stops
      being reported as its content (and stops blocking WP 1.6's deletion as a
      false "shared" depot).
+   - **...never on partial evidence (WP GROUP-VERIFIED-1):** "not observed"
+     only means this run wrote no bytes there. An update writes only the
+     changed depots, and a forced verify of a cached game writes almost
+     nothing (HELLDIVERS 2, 2026-10-18: 4 of 11 depots written, the other 7
+     incl. the main depot were removed). So an unobserved depot is kept when
+     one of the app's own `{appid}_*.bin` manifest files in SteamPrefill's
+     temp cache names it and it has bytes on disk (the same evidence manifest
+     ingestion maps from); when that temp cache cannot be read, nothing is
+     removed. The job log lists such depots as `kept_unobserved=[...]`.
+     Because the temp cache keeps every manifest it ever fetched, a depot
+     Steam really moved to another app stays mapped while its old `.bin`
+     exists; `DELETE /v1/mapping/{depotid}/{appid}` corrects that.
    - **Additive across apps:** only rows for *this* appid are touched. An
      observed depot that another app also maps keeps that mapping — plan §4's
      shared-depot case (redistributables); both apps keep reporting it as
@@ -2202,7 +2214,20 @@ of the **current build** is there (`vault_api/cache_completeness.py`):
 - **Groups (D9):** `group_cache_complete_pct` over the depots of the group
   members that currently have bytes on disk (own `size_bytes` > 0, the same
   members that add bytes to `group_size_bytes`), each depot/manifest once; a
-  member with nothing on disk is skipped. `null` on a grouped row.
+  member with nothing on disk is skipped. `null` on a grouped row. The game's
+  own depots are strict (one unknown makes the group `null`); a
+  content-package depot that cannot be measured at all -- no current
+  target, or a row for the current target saying `no_target` /
+  `manifest_unavailable` -- and is not measured under another member
+  (typically an unowned package whose manifest is recorded under the game
+  only) is left out of the percentage and counted in
+  `group_cache_unmeasured_depots` / `group_cache_unmeasured_bytes` (ints,
+  default 0, 0 whenever the group figure is `null`; WP GROUP-VERIFIED-1). A
+  package depot measured under another member (the game maps it too) is
+  covered by that measurement. Any other unmeasured package pair (a target
+  but no row yet, a row for an older target, `unreadable_cache`) keeps the
+  group `null`, as before. A UI shows unmeasured depots next to the figure;
+  they are never counted as complete.
 - **When:** every update check (UPD-5 cadence, scheduled and
   `POST /v1/updates/check`) measures the games it selected after the oracle
   refresh -- local disk reads only -- stores one row per (app, depot) in
@@ -5228,6 +5253,17 @@ neither contributes chunks nor blocks the depot.
 4. Symmetrically, an app that **does** have a `depot_manifests` row always
    counts even without cache content: a recorded manifest is a claim vault-api
    itself wrote down, and an unreadable claim is exactly what the gate is for.
+   This includes an app that no longer maps the depot (WP GROUP-VERIFIED-1):
+   every app with a `depot_manifests` row for the depot is a claimant, mapped
+   or not. Otherwise a content-package depot recorded under the game that
+   downloaded it, but mapped only to the package app, was planned against the
+   package's older cache-stored manifest, and the current build's chunks
+   became orphans. The claim lasts as long as the `depot_manifests` row
+   does: a recorder that no longer maps the depot keeps its manifest's
+   chunks in the keep set (a bounded, safe leak; MAP-DRIFT-1's orphan
+   cleanup removes the row only once no app maps the depot and it has no
+   bytes). A record whose app id cannot be read skips the depot
+   (`skipped_unreadable_owner`), like an unreadable mapping row.
 
 **Sub-decision:** a depot where *every* mapped app is excluded is **skipped**
 (`skipped_no_counting_apps`), not emptied. The exclusion rule exists so an

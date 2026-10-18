@@ -30,6 +30,19 @@ the affected depot could never be deleted by WP 1.6's cache deletion.
    re-adds a depot the same job's replace step removed; a hand-deleted row
    reappears on the next run while `.bin` and bytes remain.
 
+   Note (GROUP-VERIFIED-1, 2026-10-18): "observed" means "this run wrote bytes
+   there", which is the whole app only on a first fill. An update writes only
+   the changed depots and a forced verify of a cached game almost nothing, so
+   the replace step removed the main depot and six content-package depots of
+   HELLDIVERS 2 on a successful verify. The replace step therefore keeps an
+   unobserved depot that the app's own `.bin` manifests name and that has
+   bytes on disk, and removes nothing when that evidence cannot be read. The
+   authoritative set is now "observed bytes plus the app's own manifests".
+   Pruning a depot Steam really reassigned now waits until its `.bin` is gone
+   (SteamPrefill keeps them), or happens via decision 2; accepted, because a
+   stale extra row costs a little size accounting, while a lost row hid bytes
+   from completeness and GC's keep-set logic.
+
 ## Addendum (2026-08-06): last-remnant shared depots are deletable
 
 ### Problem

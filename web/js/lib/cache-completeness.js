@@ -217,12 +217,28 @@ export function completenessLine(row) {
   return `${pct}% complete — ${amount}${checked}` + unmappedNote(row);
 }
 
+/**
+ * WP GROUP-VERIFIED-1: the honesty suffix for a known group figure when the
+ * server reports `group_cache_unmeasured_depots` > 0 — content-package depots
+ * with no usable measurement (typically an unowned package), left OUT of the
+ * group percentage and never counted as complete. Their bytes stay visible.
+ * `""` for 0, absent or malformed.
+ */
+export function unmeasuredNote(row) {
+  const n = row?.group_cache_unmeasured_depots;
+  if (!Number.isInteger(n) || n <= 0) return "";
+  const bytes = formatBytesGB(row.group_cache_unmeasured_bytes);
+  const size = bytes ? ` (${bytes})` : "";
+  return ` · not measured: ${n} package ${n === 1 ? "depot" : "depots"}${size}`;
+}
+
 /** The group line under it for a group row with a known group figure, else
  * null: "With content packages: 75% complete". */
 export function groupCompletenessLine(row) {
   if (!isGroup(row)) return null;
   const pct = knownPct(row.group_cache_complete_pct);
-  return pct === null ? null : `With content packages: ${pct}% complete`;
+  // The template stays byte-identical (Android twin pin); the note is appended.
+  return pct === null ? null : `With content packages: ${pct}% complete` + unmeasuredNote(row);
 }
 
 /**

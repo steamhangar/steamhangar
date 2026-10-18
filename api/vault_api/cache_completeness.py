@@ -78,6 +78,17 @@ same members that contribute bytes to ``group_size_bytes`` -- each
 (depot, manifest) counted once. A member with nothing on disk is skipped, so
 a deleted DLC's last stored rows cannot keep a group at 100 %.
 
+``group_figure`` (WP GROUP-VERIFIED-1): the head game's pairs are strict (one
+unknown makes the group unknown), but a content-package pair that cannot be
+measured -- typically an unowned package whose manifest is recorded under the
+head app only, so the package's own pair has no target -- no longer makes the
+whole group unknown. It is covered when the same depot is measured under
+another member, else -- only when it has no target or its current-target row
+says ``no_target``/``manifest_unavailable`` -- reported as unmeasured (count
+and bytes) next to the figure, never counted as complete. A stale or missing
+row, or an unreadable cache, keeps the group unknown. Before this rule
+HELLDIVERS 2 stayed "not verified" forever after a successful verify.
+
 ## When it runs, and how stale it can be
 
 - Every update check (``update_check.UpdateCheckRunner._run``, UPD-5 cadence,
@@ -613,6 +624,35 @@ class CompletenessIndex:
     rows: Mapping[tuple[int, int], DepotCompleteness]
     targets: Mapping[tuple[int, int], str | None]
 
+    def measured(self, pair: tuple[int, int]) -> bool:
+        """True when the pair has a usable stored row for its CURRENT target."""
+        row = self.rows.get(pair)
+        target = self.targets.get(pair)
+        return not (
+            row is None
+            or row.status != STATUS_OK
+            or target is None
+            or row.manifestid != target
+            or row.expected_bytes is None
+            or row.present_bytes is None
+        )
+
+    def unmeasurable(self, pair: tuple[int, int]) -> bool:
+        """True when the pair cannot be measured at all (WP
+        GROUP-VERIFIED-1): no current target, or a row for the current target
+        that found no target or no readable manifest. A pair with a target but
+        no row, a row for an older target, or an unreadable cache is NOT
+        unmeasurable -- it is unknown."""
+        target = self.targets.get(pair)
+        if target is None:
+            return True
+        row = self.rows.get(pair)
+        return (
+            row is not None
+            and row.manifestid == target
+            and row.status in (STATUS_NO_TARGET, STATUS_MANIFEST_UNAVAILABLE)
+        )
+
     def figure(self, pairs: Iterable[tuple[int, int]]) -> Completeness:
         """Aggregate (app, depot) pairs; unknown if any pair is unknown."""
         seen: set[tuple[int, str]] = set()
@@ -623,25 +663,20 @@ class CompletenessIndex:
         any_pair = False
         for pair in pairs:
             any_pair = True
-            row = self.rows.get(pair)
-            target = self.targets.get(pair)
-            if (
-                row is None
-                or row.status != STATUS_OK
-                or target is None
-                or row.manifestid != target
-                or row.expected_bytes is None
-                or row.present_bytes is None
-            ):
+            if not self.measured(pair):
                 return UNKNOWN
+            row = self.rows[pair]
+            target = self.targets[pair]
+            row_expected = row.expected_bytes or 0  # not None: measured()
+            row_present = row.present_bytes or 0
             if oldest is None or row.checked_at < oldest:
                 oldest = row.checked_at
             key = (row.depotid, target)
             if key in seen:
                 continue
             seen.add(key)
-            expected += max(0, row.expected_bytes)
-            present += max(0, min(row.present_bytes, row.expected_bytes))
+            expected += max(0, row_expected)
+            present += max(0, min(row_present, row_expected))
             if missing is not None:
                 missing = None if row.missing_chunks is None else missing + max(
                     0, row.missing_chunks
@@ -656,6 +691,83 @@ class CompletenessIndex:
             checked_at=oldest,
             missing_chunks=missing,
         )
+
+
+@dataclass(frozen=True)
+class GroupCompleteness:
+    """A D9 group's figure plus what it does not cover (WP GROUP-VERIFIED-1)."""
+
+    figure: Completeness = UNKNOWN
+    #: Content-package depots with no usable measurement under any group
+    #: member, left out of ``figure``. 0 whenever ``figure`` is unknown.
+    unmeasured_depots: int = 0
+    #: Their bytes on disk (each depot once).
+    unmeasured_bytes: int = 0
+
+
+def group_figure(
+    index: CompletenessIndex,
+    head: int,
+    member_depots: Mapping[int, Sequence[int]],
+    depot_bytes: Mapping[int, int],
+) -> GroupCompleteness:
+    """The figure of the group ``head`` heads (WP GROUP-VERIFIED-1).
+
+    ``member_depots``: ``{member appid: its mapped depots}`` for the members
+    that count (bytes on disk), ``head`` included when it has bytes.
+
+    The rule:
+
+    - **The head game is strict**, exactly like its own figure: one of its
+      pairs without a usable row makes the group unknown. A group must never
+      read "Current" on its packages alone while the game itself is unknown.
+    - **A content-package pair** counts when it is measured. When it is not,
+      but the same depot is measured under another group member (a package
+      depot the head's own prefill downloaded is mapped to both), it is
+      covered by that measurement.
+    - Otherwise it is **unmeasured** ONLY when it cannot be measured at all
+      (``unmeasurable``): no current target, or a row for the current target
+      that says ``no_target`` / ``manifest_unavailable``. Such a depot is left
+      out of the percentage and reported in ``unmeasured_depots``/``_bytes``,
+      never counted as complete. Typical case: a package the account does not
+      own, whose manifest is recorded under the head app only, so the
+      package's own (app, depot) pair has no target.
+    - Every other unmeasured package pair keeps the group **unknown**, as
+      before: a target but no row yet, a row for an older target (a package
+      measured on an old build could otherwise hide its gap behind "Current"),
+      or ``unreadable_cache``.
+    - Unknown when nothing is measured at all -- also when the head itself
+      is absent from ``member_depots`` (no bytes on disk) and no package pair
+      is measured; with the head absent, measured packages alone give the
+      figure.
+    """
+    head_pairs = [(head, d) for d in member_depots.get(head, ())]
+    if any(not index.measured(pair) for pair in head_pairs):
+        return GroupCompleteness()
+    measured_pairs: list[tuple[int, int]] = list(head_pairs)
+    open_pairs: list[tuple[int, int]] = []
+    for member, depots in member_depots.items():
+        if member == head:
+            continue
+        for depotid in depots:
+            pair = (member, depotid)
+            (measured_pairs if index.measured(pair) else open_pairs).append(pair)
+    covered = {depotid for _, depotid in measured_pairs}
+    unmeasured: set[int] = set()
+    for pair in open_pairs:
+        if pair[1] in covered:
+            continue
+        if not index.unmeasurable(pair):
+            return GroupCompleteness()
+        unmeasured.add(pair[1])
+    figure = index.figure(measured_pairs)
+    if figure.pct is None:
+        return GroupCompleteness()
+    return GroupCompleteness(
+        figure=figure,
+        unmeasured_depots=len(unmeasured),
+        unmeasured_bytes=sum(max(0, depot_bytes.get(d, 0)) for d in unmeasured),
+    )
 
 
 def load_index(
