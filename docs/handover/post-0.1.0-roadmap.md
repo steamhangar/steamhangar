@@ -157,6 +157,20 @@ user's yes, for a package that needs a production measurement). rc21 and rc22 ke
 freeze imposed). `1.0.0` criteria: ADR-0029 section 6 (accepted
 2026-10-18).
 
+- **AUTO-VERIFY-1 (decided 2026-10-18, Weg A + mode switch; rc21):**
+  goal: catch a game where only an update (delta) is cached while the
+  cache is assumed to hold the full game. The update check's disk
+  measurement already compares every chunk of the CURRENT manifest with
+  the files on disk, so a delta-only game reads "Partially cached" and the
+  window sweep completes it. Make that visible and switchable: Settings
+  checkbox "Complete cached games automatically" (default on) and a second
+  switch for the mode: "Missing chunks only" (default; forced run only for
+  games the disk check calls incomplete) or "Full" (forced run of every
+  cached game inside the download window, oldest "confirmed current"
+  first; costs hours of disk I/O, documented in the hint). The card and
+  sheet show the last disk check as the verified signal. Test: a game
+  with only a delta cached must read Partially cached and get completed.
+
 ### v0.1.x: bug fixes only
 
 No features, no schema bump unless a fix needs one. **The public
@@ -249,27 +263,6 @@ rename.
 
 ## Open decisions (waiting for the user)
 
-- **AUTO-VERIFY-1** (asked 2026-10-18): a nightly / daily automatic verify
-  as a checkbox, default on if it has no downside. Today: every update
-  check (default every 180 min) measures every cached game's chunk files
-  on disk against the current manifests (cheap, no game data read), and
-  the sweep inside the download window already runs forced only for games
-  with missing chunks (CACHE-COMPLETE-1b). A forced "Verify" re-requests
-  every chunk through nginx; a HIT is served from disk without a content
-  check, so it adds no corruption detection over the disk check and
-  cannot replace wrong-size files. Options:
-  - Weg A: no full nightly verify; make the existing auto-complete visible
-    as a Settings checkbox (default on) and show the last disk check per
-    game ("checked 18.10., 16:26") as the "verified" signal.
-  - Weg B: A plus a rolling verify with a nightly byte budget (oldest
-    "confirmed current" first, inside the download window), checkbox
-    default off.
-  - Weg C: full verify of every cached game nightly, default on (reads the
-    whole cache every night: hours of disk I/O, ARC eviction, competes
-    with clients; no corruption check gained).
-  Recommendation: A (B only if "confirmed current" freshness matters).
-  Note: VERIFY-FAST-1 ("light verify") is the test-stack check
-  (`dev.sh verify`), not a game verify.
 
 Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
 question that is not answered in its session is listed here and removed

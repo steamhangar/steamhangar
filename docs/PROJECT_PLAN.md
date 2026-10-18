@@ -3800,6 +3800,13 @@ below carry their own later dates, item 12 is the current one).
         the "1 unmapped depot". Fix so a verified group reads "Current"
         when every member it can measure is at 100 % (decide how unowned
         or unmeasurable packages count; show them, never hide bytes).
+      - [ ] **AUTO-VERIFY-1** (api + web; decided 2026-10-18, Weg A + mode
+        switch) Settings: "Complete cached games automatically" (default
+        on) plus mode "Missing chunks only" (default) / "Full" (forced run
+        of every cached game in the download window). Goal: a game with
+        only an update delta cached is detected (disk check vs the current
+        manifest -> Partially cached) and completed. Test for exactly that.
+        Details in the roadmap.
       - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
         have no hit/miss split for the prefill runner, so the Downloads graph
         counts all runner traffic as "from the internet" and a verifying
