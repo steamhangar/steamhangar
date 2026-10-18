@@ -304,12 +304,13 @@ def create_cached_prefill_jobs(
     is roughly 2.5 minutes of serial Steam logins on the single worker —
     that belongs in the Jobs view, never behind a spinner on this endpoint).
     But the *selection* step's `size_cache.get(cache_root)` above can itself
-    pay for a full `depot/` walk while holding `SizeCache`'s lock — a
-    pre-existing cost shared with `GET /v1/cache/summary` and `GET
-    /v1/games`, not something new here. `VAULT_SIZE_CACHE_TTL` defaults to
-    60 s, and `worker.py` invalidates the cache after every successful
-    prefill job — so a second call to this route while the queue it just
-    filled is still draining can pay a fresh cold walk again. Warm, on SSD,
+    wait for a full `depot/` walk — a cost shared with `GET /v1/cache/summary`
+    and `GET /v1/games`, not something new here. Since UI-COLD-CACHED-1 an
+    expired snapshot is served at once and refreshed in the background; only
+    the first call and the first read after an invalidation wait. `worker.py`
+    invalidates the cache after every successful prefill job (and starts the
+    re-walk right then) — so a second call to this route while the queue it
+    just filled is still draining can still wait for part of a walk. Warm, on SSD,
     this is sub-second even at hundreds of thousands of files (measured
     1.76 µs/file); cold and seek-bound on a spinning-disk target it is
     plausibly tens of seconds. Clients should use the same timeout they
@@ -349,8 +350,8 @@ def create_cached_prefill_jobs(
     # GET /v1/cache/summary and GET /v1/games use (deps.get_size_cache) — one
     # walk serves every concurrent caller within the TTL, this route included.
     # Taken before opening the connection (same reasoning as routers/cache.py):
-    # a cache miss here walks the whole depot/ tree while holding SizeCache's
-    # lock, and there is no reason to hold an open SQLite connection across it.
+    # a call with no usable snapshot waits for a whole depot/ walk, and there
+    # is no reason to hold an open SQLite connection across it.
     depot_bytes = size_cache.get(cache_root).depot_bytes
 
     with open_db() as conn:

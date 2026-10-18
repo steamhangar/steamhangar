@@ -186,7 +186,13 @@ def test_size_cache_recomputes_only_after_ttl_expires(tmp_path: Path) -> None:
     cache_root = tmp_path / "cache"
     _write(cache_root / "depot" / "441" / "chunk" / "a", b"1234")
 
-    cache = SizeCache(ttl_seconds=10.0)
+    walks: list[str] = []
+
+    def counting_walk(root: str) -> sizes.DepotWalk:
+        walks.append(root)
+        return sizes.walk_depot_tree(root)
+
+    cache = SizeCache(ttl_seconds=10.0, walk=counting_walk)
     first = cache.get(str(cache_root), now=0.0)
     assert first.depot_bytes == {441: 4}
 
@@ -196,11 +202,21 @@ def test_size_cache_recomputes_only_after_ttl_expires(tmp_path: Path) -> None:
     still_cached = cache.get(str(cache_root), now=5.0)
     assert still_cached is first
     assert still_cached.depot_bytes == {441: 4}
+    # A fresh snapshot starts no walk, not even in the background.
+    assert cache.wait_idle(timeout=5.0)
+    assert cache.get(str(cache_root), now=5.5) is first
+    assert cache.wait_idle(timeout=5.0)
+    assert len(walks) == 1
 
-    # TTL expired -> recompute, now sees the new file.
+    # TTL expired -> the stale snapshot is served at once (UI-COLD-CACHED-1)
+    # and a background recompute starts; once it is done, the new file shows.
     after_ttl = cache.get(str(cache_root), now=10.001)
-    assert after_ttl is not first
-    assert after_ttl.depot_bytes == {441: 4, 442: 1}
+    assert after_ttl is first
+    assert cache.wait_idle(timeout=5.0)
+    refreshed = cache.get(str(cache_root), now=10.002)
+    assert refreshed is not first
+    assert len(walks) == 2
+    assert refreshed.depot_bytes == {441: 4, 442: 1}
 
 
 def test_size_cache_invalidate_forces_a_recompute_regardless_of_ttl(
