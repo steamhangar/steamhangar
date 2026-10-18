@@ -73,6 +73,12 @@ Antrag filed and the rollout on the operator's stack checked.
   tuning defaults from the Sunday test if not shipped in rc20.x; runner
   retry on "Unable to detect Lancache server!" only if the heartbeat log
   supports the late-heartbeat hypothesis (ADR-0027).
+- **Added 2026-10-18 (planning session):** VERIFY-FAST-1 (lean default
+  `dev.sh verify`, `verify full` for tags and nightly; decided Weg A),
+  GRAPH-RECENT-1 (1 h / 6 h Downloads views include the minutes since the
+  last sweep via the live tier; decided Weg A), CARD-CORNERS-1 (Library
+  card corners with real covers, waiting for a screenshot). Details in
+  `docs/PROJECT_PLAN.md`, rc21 block.
 - **Entry:** rc20 tagged; Sunday test result known (for the tuning item).
 - **Exit:** release gate; Android screenshot goldens refreshed, incl. a
   night golden that really renders dark.

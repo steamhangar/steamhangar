@@ -3642,6 +3642,26 @@ below carry their own later dates, item 12 is the current one).
         finishing right at the boundary flips in/out (CI failure on
         wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
         the clock or take the cutoff from the same `now` the demo uses.
+      - [ ] **VERIFY-FAST-1** (deploy/tests + devbox, decided 2026-10-18,
+        Weg A) `verify-stack.sh` gets section selection (`VERIFY_SECTIONS`);
+        `dev.sh verify` defaults to a lean set (1 config drift, 3 compose
+        rendering, 8 fail-fast guards, one stack start with 5a-5d and
+        6a-6e, no CDN steps), `verify full` runs everything and stays the
+        gate for release tags and the nightly CI. Per-section timestamps
+        in the output; first measurement when the dev instance is free
+        (`dev.sh verify` stops it). Note: `dev.sh` changes go via Antrag.
+      - [ ] **GRAPH-RECENT-1** (api + web, decided 2026-10-18, Weg A) the
+        Downloads 1 h / 6 h views (graph and header `current`) show the
+        minutes since the last event sweep: stitch the live tier in, as
+        `/v1/throughput/live` already does. Observed on dev: live graph
+        144 MB/s (forced verify reads from cache), 1 h view empty and
+        "Idle" until the next 5-minute sweep. Check first that the next
+        sweep fills the 1 h view (else it is a real bug).
+      - [ ] **CARD-CORNERS-1** (web, open, needs the operator's screenshot)
+        Library game card reportedly lacks rounded top corners with real
+        covers; demo render (`dev.sh test-web-shots`) is fine. Candidate
+        fix: `border-radius: inherit` on `img.cover` plus `isolation:isolate`
+        on `.cap` (`web/css/kit.css:817`).
       - [ ] nit (UI-COLD-CACHED-1 review): no backoff when walks keep
         failing (one ERROR per expired read, bounded by request rate);
         theoretical waiter starvation after a failed walk; the Thread.start
