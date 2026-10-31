@@ -3944,7 +3944,7 @@ below carry their own later dates, item 12 is the current one).
       - Android package cut (orchestrator, 2026-10-31, operator's yes to run
         rc21 incl. Android): each package builds and tests only in GitHub CI
         (push `wp/*`, app goldens via a `wp/<name>-goldens` branch).
-        - [ ] **ANDROID-DL-1** Downloads data path: default range live and
+        - [x] **ANDROID-DL-1** (96e526e + goldens f27f4c8) Downloads data path: default range live and
           `active_clients` from the live answer (LIVE-DELAY-1 follow-up), the
           `now` block for header/pill/"Loading now" on every range
           (GRAPH-RECENT-1, LOADING-NOW-1), runner split with the "Verifying"
@@ -3952,6 +3952,14 @@ below carry their own later dates, item 12 is the current one).
           watcher window 60 s, the subline/History count and first-10 +
           "Show more" paging (DOWNLOADS-3 twin). Closes the two Android
           Downloads boxes below.
+        - [ ] nit (ANDROID-DL-1 review): `ClientsScreenshotTest.kt:96`
+          `heightDp = 640` cuts the 360dp/font130 Downloads golden through the
+          axis captions and hides the legend (raise to ~760 with the next app
+          goldens round, ANDROID-DL-2); Kotlin `splitGeometry` always draws
+          the split (fields default to 0) where the web falls back to one
+          line; TalkBack focus stays on "Show N more" (web moves it to the
+          first new row); the two graph fills are hard to tell apart in the
+          night golden (REDESIGN-1b); import order in `DownloadsStats.kt`.
         - [ ] **ANDROID-DL-2** (after NOW-LOADING-1 is on main) the
           "Loading now" source rows (twin of `loadingNowModel`), the Repair
           flow (CACHE-REPAIR-UI-1 twin) and the GROUP-VERIFIED-1 S2 group
@@ -3989,12 +3997,12 @@ below carry their own later dates, item 12 is the current one).
         `agent_reports` at the 3 s live rate; device count counts addresses
         while rows group by agent ("2 devices loading", one row); demo job
         card shows 31.5 MB/s (swept window) next to a 6.4 MB/s runner row.
-      - [ ] Android Downloads subline counts the plain job poll
+      - [x] (ANDROID-DL-1) Android Downloads subline counts the plain job poll
         (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
         not the ranged History list it shows; same "N in history" bug the
         web fixed in DOWNLOADS-3 (rc20.1). Port the web `history-paging.js`
         count and the first-10 + "Show more" paging.
-      - [ ] Android Downloads follows LIVE-DELAY-1 (default range live,
+      - [x] (ANDROID-DL-1) Android Downloads follows LIVE-DELAY-1 (default range live,
         `active_clients` in the live answer); the Kotlin twin test no longer
         pins the web default
       - [ ] Android follow-up of the rc20 redesign: Clients cards, Add a
