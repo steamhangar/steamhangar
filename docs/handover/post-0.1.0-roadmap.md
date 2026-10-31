@@ -332,6 +332,14 @@ once decided (the decision then lives in the item it belongs to).
   (recommended): sweep them to `10.0.0.x` (still RFC1918) in one test-only
   package; Weg B: keep them as generic examples and only keep the
   operator's server VLAN out.
+- **ANDROID-ADD-DEVICE-1** (found 2026-10-31 in ANDROID-REDESIGN-1a; rc21
+  ships without it): the Android app has no "Add a device" flow to
+  restyle (no pairing link, QR, install command, /v1/dist client or secret
+  reveal gate). Weg A: build it as its own packages (twins of
+  pair-link.js, qr-encode.js, agent-install.js; reveal gate with
+  FLAG_SECURE, sensitive clipboard) because it hands out the API key from
+  the phone; Weg B (coder's and orchestrator's recommendation): drop it
+  from Android parity, device setup stays on the web.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.

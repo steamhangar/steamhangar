@@ -11,6 +11,7 @@ import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.StoreDetailsOut
 import dev.steamvault.app.repo.CardInfoRepository
 import dev.steamvault.app.repo.CacheRepository
+import dev.steamvault.app.ui.downloads.RepairFlow
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
@@ -148,6 +149,32 @@ class DetailController(
         toast = null
     }
 
+    /** WP ANDROID-DL-2: the sheet's "Repair" flow (`ui/downloads/RepairFlow.kt`,
+     * shared with the Downloads rows); reset on [close]. */
+    val repair = RepairFlow(cacheRepository)
+
+    /** WP ANDROID-DL-2: the sheet's Repair dry run is in flight (the button
+     * is disabled and reads "Checking…"). */
+    var repairInFlight by mutableStateOf(false)
+        private set
+
+    /**
+     * WP ANDROID-DL-2 (twin of web `startSheetRepair`): "Repair" from the
+     * sheet -- the dry run, then the shared dialog. [onLibraryChanged]
+     * re-reads games and jobs after an answer that changed them.
+     */
+    fun startRepair(scope: CoroutineScope, appid: Int, title: String, onLibraryChanged: () -> Unit) {
+        if (repairInFlight) return
+        repairInFlight = true
+        scope.launch {
+            try {
+                repair.start(appid, title, onToast = { toast = it }, onRefresh = { onLibraryChanged() })
+            } finally {
+                repairInFlight = false
+            }
+        }
+    }
+
     // ---- open/close -------------------------------------------------------
 
     /**
@@ -267,6 +294,9 @@ class DetailController(
         showDeleteConfirm = false
         groupDelete = GroupDeleteUiState.Hidden
         gcState = GcFlowState.Idle
+        // WP ANDROID-DL-2 (web `closeRepair` on sheet close): the dialog goes
+        // with the sheet; an execute already sent still finishes on the server.
+        repair.reset()
     }
 
     // ---- download / job control --------------------------------------------

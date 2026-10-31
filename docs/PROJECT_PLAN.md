@@ -3755,7 +3755,7 @@ below carry their own later dates, item 12 is the current one).
       - [x] **CACHE-REPAIR-UI-1** web part (6e21a89; Downloads "Incomplete" row, detail sheet Maintenance tab and header; dry run -> confirm with per-depot counts -> execute -> "Show job"; per-flow token against late answers) (web + android) Repair button on incomplete
         rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
         counts, execute, show job).
-      - [ ] CACHE-REPAIR-UI-1 Android twin: strings and templates exported
+      - [x] (ANDROID-DL-2) CACHE-REPAIR-UI-1 Android twin: strings and templates exported
         from `web/js/lib/cache-repair.js`; drop the `DAMAGED_NOTE` pin in
         `CacheCompletenessWebTwinTest.kt` when adopting the new note
       - [ ] nit (CACHE-REPAIR-UI-1 review): the sheet's Repair buttons use
@@ -3892,7 +3892,7 @@ below carry their own later dates, item 12 is the current one).
         claimant rule. Until
         rollout: after the rc21 deploy run one verify of 553850 (heals the
         mapping); note in the rc21 rollout Antrag.
-      - [ ] Android follow-up GROUP-VERIFIED-1 (S2): show the group
+      - [x] (ANDROID-DL-2) Android follow-up GROUP-VERIFIED-1 (S2): show the group
         "not measured: N package depots (X GB)" note; Android demo
         `groupPct` (`DemoState.kt:169`) differs from the web demo's
         `demoGroupFields` since GROUP-VERIFIED-1.
@@ -3960,7 +3960,7 @@ below carry their own later dates, item 12 is the current one).
           line; TalkBack focus stays on "Show N more" (web moves it to the
           first new row); the two graph fills are hard to tell apart in the
           night golden (REDESIGN-1b); import order in `DownloadsStats.kt`.
-        - [ ] **ANDROID-DL-2** (after NOW-LOADING-1 is on main) the
+        - [x] **ANDROID-DL-2** (6c582af + goldens ee1c40c, review fixes c2dd930/48393af; also closes the ANDROID-DL-1 golden-height nit and moves focus after "Show more") (after NOW-LOADING-1 is on main) the
           "Loading now" source rows (twin of `loadingNowModel`), the Repair
           flow (CACHE-REPAIR-UI-1 twin) and the GROUP-VERIFIED-1 S2 group
           note incl. the demo `groupPct` alignment.
@@ -3975,11 +3975,42 @@ below carry their own later dates, item 12 is the current one).
           current step-1 fields, not the verified ones; no Remove on the
           Clients page cards (web has it, REDESIGN-1a); demo Delete history
           does not zero the synthetic traffic like the web demo's "since" cut.
+        - [ ] nit (ANDROID-DL-2 review): focus after "Show more" goes to a
+          wrapper Box (input focus; TalkBack accessibility focus may not
+          follow, check on a device); "Show job" only scrolls, no focus;
+          Repair only in the sheet's completeness block (web also in header
+          and Maintenance tab, REDESIGN-1b); a flow reset during execute only
+          re-reads (inherited from the web).
         - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
-          Clients cards and Add a device tabs.
-        - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
-          tabs, Settings section nav, Downloads layout, sheet motion where it
-          fits Material.
+          Clients cards (Add a device tabs not built: the app has no such
+          flow; open decision ANDROID-ADD-DEVICE-1 in the roadmap).
+        - [x] **ANDROID-REDESIGN-1b** (bab33ac + fixups, goldens 590a34d) part 2: Library toolbar and detail
+          tabs (Overview / Depots / Maintenance, Repair in the header and the
+          Maintenance tab), sheet motion where it fits Material, distinct
+          Downloads graph fills. (Split 2026-10-31: Settings nav and the
+          Downloads layout moved to 1c.)
+        - [ ] nit (ANDROID-REDESIGN-1b review): `DETAIL_TABS_TAG` unused
+          (use it in the 1c sheet screenshot test or drop it); the Overview
+          "Cache" fact lacks `groupCompletenessLine` (group figure only on
+          Maintenance); the graph grew 72 -> 88dp; accepted deviations to note
+          in rc20-visual-check.md so the device check does not flag them:
+          Filters only with metadata, store details first on Overview
+          (CARD-LAYOUT-1 pin); `strings.xml:210` hint `http://192.168.1.50:8080`
+          belongs to SAMPLE-IP-1.
+        - [ ] **ANDROID-REDESIGN-1c** part 3: Settings section nav (one
+          panel at a time behind a scrolling section strip, expert switch at
+          the end of About, nav labels from web `SECTIONS.nav` as a separate
+          Kotlin map, rewrite of `SettingsD16WiringTest`, drop the "PCs and
+          devices / Open Clients" row per the rc20 visual check) and the
+          Downloads layout (web hero: big number + pill + limit, graph, four
+          totals 2x2 via a twin model; then Active / Queue / History order
+          and spacing).
+          Also the two REDESIGN-1b review should-fixes (before the rc21 tag):
+          a rendered check of the open detail sheet (capture the sheet content
+          composable directly, three goldens Overview / Depots / Maintenance
+          at 360dp font130 from a demo game with packages and a
+          Repair-eligible state) and one Library golden with metadata so the
+          Filters button renders.
         - [x] **APP-NIGHT-GOLDEN-1** closed as works-as-designed (2026-10-31,
           reviewer-confirmed): the app is single-dark-theme on purpose
           (`Theme.kt`, no `values-night/`, mockup NOTES.md:117, app README);

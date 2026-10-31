@@ -30,9 +30,11 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
 import dev.steamvault.app.net.error.VaultApiError
@@ -62,6 +64,8 @@ import dev.steamvault.app.ui.traffic.logic.HeroStatus
 import dev.steamvault.app.ui.traffic.logic.heroStatus
 import dev.steamvault.app.ui.traffic.logic.LEGEND_INTERNET
 import dev.steamvault.app.ui.traffic.logic.LEGEND_SERVED
+import dev.steamvault.app.ui.traffic.logic.LoadingNowModel
+import dev.steamvault.app.ui.traffic.logic.loadingNowModel
 import dev.steamvault.app.ui.traffic.logic.splitGeometry
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
@@ -223,6 +227,8 @@ fun DownloadsStatsHeader(
     val tiles = if (poll.unsupported) null else headerTiles(throughput, rateCap)
     // WP ANDROID-DL-1 (web `heroModel`): the pill shows only with figures.
     val status = if (tiles != null) heroStatus(throughput?.current) else null
+    // WP ANDROID-DL-2 (web NOW-LOADING-1): what is loading, under the pill.
+    val loadingNow = if (tiles != null) loadingNowModel(throughput) else null
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // No figures (feed disabled, old server): no range to choose either.
         if (!poll.noFigures) {
@@ -245,6 +251,7 @@ fun DownloadsStatsHeader(
             )
         }
         if (status != null) StatusPill(status)
+        if (loadingNow != null) LoadingNowBlock(loadingNow)
         if (tiles != null) StatTiles(tiles)
         ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported, nowMs = nowMs)
     }
@@ -264,6 +271,38 @@ private fun StatusPill(status: HeroStatus) {
     ) {
         StatusIcon(kind = status.kind, size = StatusIconSize.SMALL)
         Text(status.text, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 4.dp))
+    }
+}
+
+/**
+ * WP ANDROID-DL-2 (web hero `stats-loading-now`, NOW-LOADING-1): "Loading
+ * now", one row per source of the traffic in the live window -- name in
+ * bold, what it loads under it, its speed on the right. Absent while nothing
+ * loads ([loadingNowModel] is `null`), so there is never an empty heading.
+ * The label is a heading; each row is one TalkBack stop that reads name,
+ * detail and speed.
+ */
+@Composable
+private fun LoadingNowBlock(model: LoadingNowModel) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            model.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.semantics { heading() },
+        )
+        for (row in model.rows) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(row.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(row.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(row.speed, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
     }
 }
 
@@ -320,6 +359,10 @@ private fun GraphLegend() {
     }
 }
 
+/** Fill opacities of the split graph's two bands (WP ANDROID-REDESIGN-1b). */
+internal const val SERVED_FILL_ALPHA = 0.34f
+internal const val INTERNET_FILL_ALPHA = 0.10f
+
 private const val GRAPH_W = 300f
 private const val GRAPH_H = 60f
 
@@ -344,7 +387,7 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp)
+                .height(88.dp)
                 .semantics {
                     contentDescription = label
                     role = Role.Image
@@ -381,8 +424,12 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
                     lineTo(split.xs.first() * sx, size.height)
                     close()
                 }
-                drawPath(internetArea, color = VaultColors.AccentGlow)
-                drawPath(servedArea, color = VaultColors.StatusOk.copy(alpha = 0.16f))
+                // WP ANDROID-REDESIGN-1b (ANDROID-DL-1 review nit): the web's
+                // 0.12/0.16 fills blend into one dark band on a phone; a
+                // stronger served fill and a fainter internet fill keep the
+                // two bands apart (the lines keep the web colours).
+                drawPath(internetArea, color = VaultColors.Accent.copy(alpha = INTERNET_FILL_ALPHA))
+                drawPath(servedArea, color = VaultColors.StatusOk.copy(alpha = SERVED_FILL_ALPHA))
                 drawPath(totalLine, color = VaultColors.Accent, style = stroke)
                 drawPath(servedLine, color = VaultColors.StatusOk, style = stroke)
             }

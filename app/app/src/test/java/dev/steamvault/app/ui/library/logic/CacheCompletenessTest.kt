@@ -224,4 +224,19 @@ class CacheCompletenessTest {
         assertEquals(emptyList<Int>(), verifyAppids(emptyList()))
         assertEquals("Verify — Aurora", verifySpokenLabel("Aurora"))
     }
+
+    /** WP ANDROID-DL-2 (GROUP-VERIFIED-1 S2, web `unmeasuredNote`). */
+    @Test
+    fun `group line names the unmeasured package depots and their bytes`() {
+        val base = row(appid = 500, groupPct = 100)
+        val eight = base.copy(group_cache_unmeasured_depots = 8, group_cache_unmeasured_bytes = (2.1 * gb).toLong())
+        assertEquals("With content packages: 100% complete · not measured: 8 package depots (2.1 GB)", groupCompletenessLine(eight, isGroup = true))
+        val one = base.copy(group_cache_unmeasured_depots = 1, group_cache_unmeasured_bytes = (0.3 * gb).toLong())
+        assertEquals(" · not measured: 1 package depot (0.3 GB)", unmeasuredNote(one))
+        // Bytes unknown or zero: the count alone, never "(0.0 GB)".
+        assertEquals(" · not measured: 2 package depots", unmeasuredNote(base.copy(group_cache_unmeasured_depots = 2)))
+        assertEquals("", unmeasuredNote(base))
+        assertEquals("", unmeasuredNote(base.copy(group_cache_unmeasured_depots = -1)))
+        assertEquals("With content packages: 100% complete", groupCompletenessLine(base, isGroup = true))
+    }
 }

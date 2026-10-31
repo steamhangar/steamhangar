@@ -70,7 +70,8 @@ class CacheComplete1cWiringTest {
         assertCalledFrom(incomplete, "val completable = rows.filter { it.completable }.map { it.appid }", "IncompleteHeader")
         assertCalledFrom(incomplete, "onClick = { onCompleteAll(completable) }", "IncompleteHeader")
         assertCalledFrom(incomplete, "if (model.completable)", "IncompleteRow")
-        assertCalledFrom(incomplete, "text = CompletenessWording.DAMAGED_NOTE", "IncompleteRow")
+        // WP ANDROID-DL-2: the damaged-only note is the repair note now.
+        assertCalledFrom(incomplete, "text = model.note,", "IncompleteRow")
         val controller = stripComments(read("$base/ui/downloads/DownloadsController.kt"))
         assertTrue(
             "completion must use POST /v1/prefill/verify",
@@ -95,7 +96,7 @@ class CacheComplete1cWiringTest {
         assertCalledFrom(sheet, "verifyIds = verifyAppids(listOf(gameSummary) + packages)", "LoadedDetailBody")
         assertCalledFrom(sheet, "onVerify = { ids -> controller.startVerify(scope, ids) }", "LoadedDetailBody")
         assertCalledFrom(sheet, "text = completenessLine(game)", "CompletenessSection")
-        assertCalledFrom(sheet, "if (isDamagedOnly(game))", "CompletenessSection")
+        assertCalledFrom(sheet, "val repairNote = repairNoteFor(game)", "CompletenessSection")
         assertCalledFrom(sheet, "verifySpokenLabel(title)", "CompletenessSection")
         assertCalledFrom(sheet, "text = CompletenessWording.VERIFY_HINT", "CompletenessSection")
         assertCalledFrom(sheet, "val overlay = completenessOverlay(row, kind, isGroup)", "DetailHeader")

@@ -73,4 +73,56 @@ class DownloadsHeroWebTwinTest {
             ),
         )
     }
+
+    /** WP ANDROID-DL-2: the "Loading now" block's words and rules (NOW-LOADING-1). */
+    @Test
+    fun `loading now words`() {
+        assertFragments(
+            listOf(
+                "export const LOADING_NOW_LABEL = \"$LOADING_NOW_LABEL\";",
+                "export const LOADING_UNATTRIBUTED = \"$LOADING_UNATTRIBUTED\";",
+                "export const LOADING_NEW_DEVICE = \"$LOADING_NEW_DEVICE\";",
+                "export const LOADING_NO_JOB = \"$LOADING_NO_JOB\";",
+                "return names.length ? names.join(\", \") : \"$LOADING_NO_GAME\";",
+                "if (hit >= total) return \"$LOADING_FROM_CACHE\";",
+                "if (hit <= 0 && miss > 0) return \"$LOADING_FROM_INTERNET\";",
+                "return `\${Math.round((hit / total) * 100)}% $LOADING_FROM_CACHE`;",
+                "if (job && job.stop_request === \"cancel\") parts.push(\"$LOADING_CANCEL_REQUESTED\");",
+                "else if (job && job.stop_request === \"pause\") parts.push(\"$LOADING_PAUSE_REQUESTED\");",
+                "src.name : \"$LOADING_RUNNER_NAME\", detail: parts.join(\" · \"), speed });",
+                "name: LOADING_UNATTRIBUTED, detail: \"$LOADING_UNATTRIBUTED_DETAIL\", speed });",
+            ),
+        )
+    }
+
+    @Test
+    fun `loadingNowModel rules`() {
+        assertFragments(
+            listOf(
+                "if (!throughput || feedState(throughput) !== \"ok\") return null;",
+                "const sources = throughput.loading_sources;",
+                "if (!Array.isArray(sources) || sources.length === 0) return null;",
+                "const speed = formatSpeed(src.bytes_per_second) || DASH;",
+                "if (Number.isInteger(job.job_id)) parts.push(`job #\${job.job_id}`);",
+                "if (Array.isArray(src.apps) && src.apps.length) parts.push(gamesText(src.apps));",
+                "parts.push(src.phase === \"verify\" ? PILL_VERIFYING : PILL_DOWNLOADING);",
+                "const known = src.known !== false;",
+                "const name = known && typeof src.name === \"string\" && src.name ? src.name : LOADING_NEW_DEVICE;",
+                "if (!known && addresses.length) parts.push(addresses.join(\", \"));",
+                "if (total <= 0) return null;",
+                "return rows.length ? { label: LOADING_NOW_LABEL, rows } : null;",
+                // The block shows only with figures (heroModel's figures), from the merged answer.
+                "loadingNow: loadingNowModel(t),",
+            ),
+        )
+        // WP NOW-LOADING-1: the rows travel through the merges like the web's.
+        val js = File("../../web/js/lib/traffic-view.js").readText(Charsets.UTF_8)
+        for (f in listOf(
+            "const merged = { ...summary, range: \"live\", live: false, loading_sources: null };",
+            "if (Array.isArray(live.loading_sources)) merged.loading_sources = live.loading_sources;",
+            "if (Array.isArray(now.loading_sources)) merged.loading_sources = now.loading_sources;",
+        )) {
+            if (!js.contains(f)) fail("VALUE DRIFT: lib/traffic-view.js no longer contains \"$f\" -- update mergeLive / mergeNow (TrafficView.kt).")
+        }
+    }
 }

@@ -30,8 +30,8 @@ import dev.steamvault.app.ui.library.logic.partitionCachedPrefillOutcome
  * the rows "Complete now" is offered for, never the server's own selection
  * (`POST /v1/prefill/incomplete` ignores jobs and update flags, so it could
  * force games this list does not show). A row short only of wrong-size
- * chunks gets no "Complete now" and says so instead
- * ([dev.steamvault.app.ui.library.logic.CompletenessWording.DAMAGED_NOTE]).
+ * chunks gets no "Complete now"; WP ANDROID-DL-2 offers "Repair" there
+ * ([dev.steamvault.app.ui.library.logic.showsRepair], `repairNoteFor`).
  *
  * **Schedule note.** Completion is a download, so it follows the update
  * rules (README "Automatic completion"): nothing outside the window, manual

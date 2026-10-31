@@ -9,7 +9,8 @@ import java.io.File
 /**
  * Twin pin for WP CACHE-COMPLETE-1c: every literal of [CompletenessWording]
  * and [IncompleteWording] must still be in `web/js/lib/cache-completeness.js`
- * (same pattern as `UpdatesAvailableWebTwinTest`). VALUE drift -> update
+ * (same pattern as `UpdatesAvailableWebTwinTest`). WP ANDROID-DL-2 retired
+ * the `DAMAGED_NOTE` pin: the app shows `repairNoteFor` (CacheRepairWebTwinTest). VALUE drift -> update
  * CacheCompleteness.kt / IncompleteGames.kt; GRAMMAR drift (the web changed
  * the string form) -> adjust this test.
  */
@@ -26,7 +27,6 @@ class CacheCompletenessWebTwinTest {
         CompletenessWording.UNVERIFIED_COMPACT_WORD,
         CompletenessWording.VERIFY_LABEL,
         CompletenessWording.VERIFY_HINT,
-        CompletenessWording.DAMAGED_NOTE,
         CompletenessWording.UNKNOWN_LINE,
         CompletenessWording.ZERO_GB,
         IncompleteWording.HEADING,
@@ -55,6 +55,11 @@ class CacheCompletenessWebTwinTest {
         "`\${present}${CompletenessWording.OF}\${expected}${CompletenessWording.ON_DISK}`",
         "`${CompletenessWording.CHECKED}\${formatTimestamp(",
         "`${CompletenessWording.GROUP_LINE_PREFIX}\${pct}${CompletenessWording.GROUP_LINE_SUFFIX}`",
+        // WP ANDROID-DL-2 (GROUP-VERIFIED-1 S2): the unmeasured note appended to the group line.
+        "`${CompletenessWording.GROUP_LINE_PREFIX}\${pct}${CompletenessWording.GROUP_LINE_SUFFIX}` + unmeasuredNote(row)",
+        "return `${CompletenessWording.UNMEASURED_PREFIX}\${n}${CompletenessWording.UNMEASURED_PACKAGE}\${n === 1 ? \"depot\" : \"depots\"}\${size}`;",
+        "const size = bytes ? ` (\${bytes})` : \"\";",
+        "if (!Number.isInteger(n) || n <= 0) return \"\";",
         "`\${VERIFY_LABEL}${CompletenessWording.DASH}\${title}`",
         "`\${COMPLETE_NOW_LABEL} — \${title}`",
         "`\${COMPLETE_ALL_LABEL} \${count} \${count === 1 ? \"game\" : \"games\"}`",
