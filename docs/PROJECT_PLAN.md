@@ -3817,7 +3817,7 @@ below carry their own later dates, item 12 is the current one).
         `traffic.current_window`), so they lag up to one sweep; serve them
         per address from the live tier (like LIVE-DELAY-1 did for Downloads).
         Found in rc20.2 (WEB-FIX-20.2 polls every 5 s, the data stays old).
-      - [ ] **GRAPH-RECENT-1** (api + web, decided 2026-10-18, Weg A; moved
+      - [x] **GRAPH-RECENT-1** (ad5a7b3; 1h/6h/24h series stitched from the live ring via `prefer_ring`, `now` block on `/v1/throughput` drives header/pill/"Loading now" on every range) (api + web, decided 2026-10-18, Weg A; moved
         from rc22 into rc21 the same day after a second operator report)
         the Downloads 1 h / 6 h views (graph and header `current`) show the
         minutes since the last event sweep: stitch the live tier in, as
@@ -3880,12 +3880,24 @@ below carry their own later dates, item 12 is the current one).
         "not measured: N package depots (X GB)" note; Android demo
         `groupPct` (`DemoState.kt:169`) differs from the web demo's
         `demoGroupFields` since GROUP-VERIFIED-1.
-      - [ ] **LOADING-NOW-1** (web + api; CLIENTS-LIVE-1 review) the
+      - [x] **LOADING-NOW-1** (ad5a7b3; `active_clients` = addresses served bytes in the ~20 s speed window, `active_window_seconds`) (web + api; CLIENTS-LIVE-1 review) the
         Downloads "Loading now" tile (`active_clients_now`, 5-min window,
         `web/js/lib/traffic-view.js:308-315`) uses a different window than
         the Clients page after CLIENTS-LIVE-1 (loading = bytes in the speed
         window); align both, one window for "loading" and speed. Do with
         GRAPH-RECENT-1.
+      - [ ] nit (GRAPH-RECENT-1 review): the newest, still-open bucket is
+        divided by the full bucket length, so early in a minute it draws far
+        below the header speed (N1, handed to RUNNER-SPLIT-1); summary tiles
+        (served, average, peak, hit rate) and job-card speeds stay swept, so
+        the graph's newest point can briefly exceed "Peak"; Android demo
+        `watcher_window_seconds = 30` vs web 60 (`DemoTraffic.kt:210`) and
+        Android ignores the new `now` block (header and "Loading now" still
+        lag there: Android Downloads follow-up); a brand-new PC loading
+        before its first sweep counts in "Loading now" but has no Clients
+        card yet; runner traffic counts as client traffic in the ring until
+        a sweep extends the runner's address window on a new UTC day
+        (relevant for NOW-LOADING-1).
       - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
         have no hit/miss split for the prefill runner, so the Downloads graph
         counts all runner traffic as "from the internet" and a verifying

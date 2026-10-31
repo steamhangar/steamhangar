@@ -1269,3 +1269,23 @@ These are not style preferences; each entry cost a review round to learn.
   shared by everything on ZEUS.** Polling CI every 30 s for several
   branches burned it in minutes. Poll every 2-3 minutes and only one run
   at a time.
+
+## 2026-10-31 — rc21 (GRAPH-RECENT-1, LOADING-NOW-1)
+
+- **Never trust a "coverage" claim when merging two tiers of the same
+  counter.** A log tailer that started on a just-rotated file assumed it
+  held the whole 15-minute ring and showed already-swept minutes as 0.
+  Per bucket, take the larger of the two sources (each is a subset of the
+  truth) and never add them (`live_tier.prefer_ring`).
+- **A watcher/keep-alive window must be clearly longer than every
+  poller's interval.** 30 s against the web's 30 s poll restarted the
+  tailer on every poll; 60 s keeps it incremental.
+- **Test trap for 1h/6h ranges:** they fall back to the 5-minute tier
+  until `traffic_1m_since` is at or before the range start; tests with a
+  single fresh sweep must backdate it.
+- **Runner tests need a HIT line.** A runner split tested with MISS only
+  never exercises the hit-side subtraction; the operator's verify case is
+  all HIT.
+- **Rerunning a flaky branch CI without `gh` or a token:** push the same
+  commit to a second `wp/` branch name (`git push origin <sha>:refs/heads/wp/<name>-ci2`);
+  GitHub starts a fresh run on the same sha. No force push needed.
