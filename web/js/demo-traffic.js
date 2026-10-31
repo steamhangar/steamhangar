@@ -110,6 +110,10 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
       miss_bytes: clients - hit,
       requests: Math.round(clients / (1.4 * MIB)),
       runner_bytes: runner,
+      // WP RUNNER-SPLIT-1: golden-neutral, the demo runner downloads (all
+      // MISS), so the graph's two bands and the pill read as before rc21.
+      runner_hit_bytes: 0,
+      runner_miss_bytes: runner,
       bytes_per_second: bps,
       peak_bytes_per_second: t.bucket <= 300 ? bps : Math.round(bps * 1.35),
       // WP GRAPH-RECENT-1: the server stitches the ring into the newest 1- and
@@ -158,6 +162,9 @@ export function demoLive(nowMs = Date.now(), sinceMs = null) {
       miss_bytes: clients - hit,
       requests: Math.round(clients / (1.4 * MIB)),
       runner_bytes: runner,
+      // WP RUNNER-SPLIT-1: golden-neutral, as in demoSeries.
+      runner_hit_bytes: 0,
+      runner_miss_bytes: runner,
       bytes_per_second: bps,
       peak_bytes_per_second: bps,
     };
@@ -175,6 +182,8 @@ export function demoLive(nowMs = Date.now(), sinceMs = null) {
     current: {
       bytes_per_second: bps,
       runner_bytes_per_second: bps * 0.1,
+      runner_hit_bytes_per_second: 0,
+      runner_miss_bytes_per_second: bps * 0.1,
       window_start: isoSeconds(nowMs - windowSeconds * 1000),
       window_end: isoSeconds(nowMs),
       window_seconds: windowSeconds,
@@ -269,6 +278,8 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
       window_end: isoSeconds(end),
       window_seconds: windowSeconds,
       runner_bytes_per_second: runnerBps(jobs),
+      runner_hit_bytes_per_second: 0,
+      runner_miss_bytes_per_second: runnerBps(jobs),
     },
     active_clients_now: 2,
     runner_active_now: jobs.length > 0,
@@ -280,6 +291,8 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
       current: {
         bytes_per_second: currentBps(jobs),
         runner_bytes_per_second: runnerBps(jobs),
+        runner_hit_bytes_per_second: 0,
+        runner_miss_bytes_per_second: runnerBps(jobs),
         window_start: isoSeconds(nowMs - nowSeconds * 1000),
         window_end: isoSeconds(nowMs),
         window_seconds: nowSeconds,

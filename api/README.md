@@ -4790,6 +4790,13 @@ before it was recorded, so "all" starts there.
   `VAULT_EVENT_SWEEP_INTERVAL_MINUTES` and nginx flushes every 5 s. `null`
   unless `event_feed.state` is `ok`. `bytes_per_second` is ALL traffic, the
   prefill runner included; `runner_bytes_per_second` is the runner's part.
+  WP RUNNER-SPLIT-1 (rc21, additive): `runner_hit_bytes_per_second` (the
+  runner read chunks the cache already had, e.g. a verify) and
+  `runner_miss_bytes_per_second` (fetched from the internet: the prefill
+  downloads) split it by cache status; BYPASS is in neither. The live
+  `current` (`now.current`, `/v1/throughput/live`) carries the same two.
+  The web's pill reads "Downloading" only for runner traffic that is not a
+  HIT, and "Verifying" for a runner that only reads from the cache.
 - **`active_clients_now`**: addresses with a line within
   `active_window_minutes` (2 x sweep interval + 5 = 15 by default), the
   prefill runner not counted; `runner_active_now` says whether the runner
@@ -4869,13 +4876,20 @@ Oldest first, zero-filled up to the bucket "now" falls in (288 points for
 Like the summary: `bytes_served` and the speeds include the prefill runner,
 `hit_bytes`, `miss_bytes` and `requests` are clients only, and
 `runner_bytes` is the runner's share; summed over the points each equals
-the summary figure of the same range.
+the summary figure of the same range. WP RUNNER-SPLIT-1 (rc21, additive):
+`runner_hit_bytes` / `runner_miss_bytes` split `runner_bytes` by cache
+status (sums equal `summary.prefill_runner.hit_bytes` / `miss_bytes`), on
+the live points too; the graph's "served from cache" band is
+`hit_bytes + runner_hit_bytes`, the rest is "from the internet".
 
 WP GRAPH-RECENT-1 (rc21): for the 1- and 5-minute tiers (`1h`, `6h`,
 `24h`) and a feed that is `ok`, the newest buckets the live ring reaches
 (15 minutes) come from the ring when it holds more of them than the swept
 tier, so the graph shows the minutes since the last sweep. Such a point has
-`source: "live"` (else `"persisted"`) and is its own peak. These buckets are
+`source: "live"` (else `"persisted"`) and is its own peak. The running
+bucket from the ring divides by the seconds elapsed in it (at least 1), not
+by the bucket length (WP RUNNER-SPLIT-1), so early in a minute the newest
+point is not far below the header speed. These buckets are
 not yet in the summary, so the sums equal the summary only up to the last
 sweep. Calling the endpoint arms the live watcher.
 
