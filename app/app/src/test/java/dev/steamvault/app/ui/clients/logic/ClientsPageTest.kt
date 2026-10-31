@@ -112,10 +112,11 @@ class ClientsPageTest {
         assertTrue(showAgentlessNote(listOf(agent, runner, address)))
         // Counted like the web counts it (every overview entry).
         assertEquals("2 clients · 2 connected", clientsSummaryText(listOf(agent, runner)))
-        val card = buildClientCardModel(runner, "24h", now)
+        val card = clientCardView(MergedClient(runner, null), "24h", null, now)
         assertEquals("Prefill runner", card.name)
-        assertEquals("This server's prefill downloads · 172.18.0.1", card.kindText)
-        assertNull(card.installed)
+        assertEquals("This server's prefill downloads · 172.18.0.1", card.meta)
+        assertEquals(ClientKind.RUNNER, card.kind)
+        assertEquals(listOf("loaded", "hitrate", "unlinked"), card.stats.map { it.key })
     }
 
     @Test
@@ -177,13 +178,20 @@ class ClientsPageTest {
     }
 
     @Test
-    fun `the card model collects every line, the address card has no installed line`() {
-        val card = buildClientCardModel(address, "24h", now)
+    fun `the card model, the address card has no installed figure`() {
+        val card = clientCardView(MergedClient(address, null), "24h", null, now)
         assertEquals("10.0.0.9", card.name)
-        assertNull(card.installed)
-        assertNull(card.stats)
+        assertEquals(listOf("loaded", "hitrate", "unlinked"), card.stats.map { it.key })
         assertEquals("Last active: never", card.lastActive)
-        assertEquals("12 games installed", buildClientCardModel(agent, "24h", now).installed)
+        val agentCard = clientCardView(MergedClient(agent, null), "24h", null, now)
+        assertEquals(CardStat("installed", "Installed", "12", "games"), agentCard.stats.first())
+    }
+
+    @Test
+    fun `loading now prefers live_now over the swept loading_now`() {
+        val live = LoadingNowOut(loading = true, bytes_per_second = 4.5 * mib)
+        assertEquals("Loading now: 4.5 MB/s · content not linked to one game", loadingNowText(agent.copy(live_now = live)))
+        assertEquals("Loading now: nothing", loadingNowText(agent.copy(live_now = LoadingNowOut(loading = false))))
     }
 
     @Test

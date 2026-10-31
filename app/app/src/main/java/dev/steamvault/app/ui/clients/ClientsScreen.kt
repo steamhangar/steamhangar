@@ -1,19 +1,15 @@
 package dev.steamvault.app.ui.clients
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -21,22 +17,26 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -45,19 +45,25 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import dev.steamvault.app.R
+import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.repo.ClientsRepository
+import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.clients.logic.AGENTLESS_NOTE
 import dev.steamvault.app.ui.clients.logic.COULD_NOT_LOAD_CLIENTS
-import dev.steamvault.app.ui.clients.logic.ClientCardModel
-import dev.steamvault.app.ui.clients.logic.ConnectionLook
+import dev.steamvault.app.ui.clients.logic.DEVICES_HEADING
 import dev.steamvault.app.ui.clients.logic.LOADING_CLIENTS_TEXT
 import dev.steamvault.app.ui.clients.logic.NO_CLIENTS_TEXT
-import dev.steamvault.app.ui.clients.logic.buildClientCardModel
+import dev.steamvault.app.ui.clients.logic.REMOVED_HIDE_MS
+import dev.steamvault.app.ui.clients.logic.clientCardView
 import dev.steamvault.app.ui.clients.logic.clientsHaveFigures
 import dev.steamvault.app.ui.clients.logic.clientsSummaryText
+import dev.steamvault.app.ui.clients.logic.hiddenRemoved
+import dev.steamvault.app.ui.clients.logic.isAgentClient
+import dev.steamvault.app.ui.clients.logic.mergeAgentData
 import dev.steamvault.app.ui.clients.logic.showAgentlessNote
+import dev.steamvault.app.ui.clients.logic.summaryTiles
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.theme.VaultColors
 import dev.steamvault.app.ui.traffic.RangeChips
@@ -86,8 +92,18 @@ fun clientsOverviewPoll(repository: TrafficRepository, initialRange: String = "7
  * event log. Per client: connected or not, what is loading now, installed
  * games (agent PCs only), what was loaded recently, bytes and hit rate for
  * the selected range, and when it was last active. Wording and the
- * honest-state rules live in `ui/clients/logic/ClientsPage.kt` and
- * `ui/traffic/logic/TrafficView.kt`.
+ * honest-state rules live in `ui/clients/logic/ClientsPage.kt`,
+ * `ui/clients/logic/ClientCard.kt` and `ui/traffic/logic/TrafficView.kt`.
+ *
+ * **rc20 look (WP ANDROID-REDESIGN-1a, web CLIENTS-1..4).** One card per
+ * device: the agent rows of `GET /v1/clients` ([clientsController]'s
+ * snapshot, polled while this page is STARTED) join the overview row of the
+ * same `client_id` ([mergeAgentData]). Four summary tiles, the "Devices"
+ * label with the range chips, then the cards (`ClientCardViews.kt`) with
+ * Rename and "Remove agent" in the footer. Remove reuses the PCs sheet's
+ * controller and confirm ([RemovePcConfirm]); a removed PC stays hidden
+ * for [REMOVED_HIDE_MS] until the overview has caught up. The outdated
+ * check reads `server_version` from [settingsRepository] once per visit.
  *
  * **A nav destination, not a sheet (user decision 2026-10-13, D15).** The
  * PCs sheet (`ClientsSheet.kt`, presence/version/bypass per agent) stays,
@@ -108,6 +124,10 @@ fun ClientsScreen(
     clock: () -> Long = { System.currentTimeMillis() },
     /** WP ANDROID-GAPS-1: where Rename stores names; `null` = no Rename. */
     clientsRepository: ClientsRepository? = null,
+    /** WP ANDROID-REDESIGN-1a: agent rows and Remove; `null` = overview only. */
+    clientsController: ClientsController? = null,
+    /** WP ANDROID-REDESIGN-1a: `server_version` for the outdated check. */
+    settingsRepository: SettingsRepository? = null,
 ) {
     val scope = rememberCoroutineScope()
     val poll = remember(trafficRepository) { clientsOverviewPoll(trafficRepository, ranges.clients) }
@@ -118,6 +138,20 @@ fun ClientsScreen(
             poll.pollForever()
         }
     }
+    if (clientsController != null) {
+        LaunchedEffect(lifecycleOwner, clientsController) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                clientsController.pollForPage()
+            }
+        }
+        // A successful Remove: re-read the overview at once (web poll.refresh()).
+        val removedAt = clientsController.removedAt
+        LaunchedEffect(removedAt) {
+            if (removedAt.isNotEmpty()) poll.refreshOnce()
+        }
+    }
+    var serverVersion by remember(settingsRepository) { mutableStateOf<String?>(null) }
+    LaunchedEffect(settingsRepository) { serverVersion = readServerVersion(settingsRepository) }
     val data = poll.data
 
     Scaffold(
@@ -138,11 +172,20 @@ fun ClientsScreen(
             )
         },
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { renameFlow?.let { RenameNotice(it) } },
+        snackbarHost = { PageNotices(renameFlow, clientsController) },
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             if (demoMode) DemoModeBanner()
-            ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock, renameFlow = renameFlow)
+            ClientsBody(
+                poll = poll,
+                scope = scope,
+                ranges = ranges,
+                onManagePcs = onManagePcs,
+                clock = clock,
+                renameFlow = renameFlow,
+                controller = clientsController,
+                serverVersion = serverVersion,
+            )
         }
     }
     if (renameFlow != null) {
@@ -152,6 +195,19 @@ fun ClientsScreen(
             displayNameAfter = { key -> trafficRepository.clientsOverview(poll.range).clients.firstOrNull { it.key == key }?.display_name },
             onChanged = { poll.refreshOnce() },
         )
+    }
+    // The card's "Remove agent" confirm; the PCs sheet shows its own while open.
+    if (clientsController != null && !clientsController.isOpen) RemovePcConfirm(clientsController, scope)
+}
+
+/** `server_version` of `GET /v1/settings`, or `null` (no repository, an
+ * error, or a server that does not send it: then nothing warns). */
+private suspend fun readServerVersion(settingsRepository: SettingsRepository?): String? {
+    if (settingsRepository == null) return null
+    return try {
+        settingsRepository.get().server_version
+    } catch (_: VaultApiError) {
+        null
     }
 }
 
@@ -163,6 +219,8 @@ private fun ClientsBody(
     onManagePcs: () -> Unit,
     clock: () -> Long,
     renameFlow: ClientRenameFlow?,
+    controller: ClientsController?,
+    serverVersion: String?,
 ) {
     val data = poll.data
     // WP D15d review: "Last active 4 min ago" and the stale-feed note are
@@ -185,19 +243,31 @@ private fun ClientsBody(
         loadingText = null,
         nowMs = nowMs,
     )
-    val cards = remember(data, nowMs) {
-        data?.clients.orEmpty().map { buildClientCardModel(it, data?.range ?: poll.range, nowMs) }
+    val agentRows = controller?.clients
+    val removedAt = controller?.removedAt.orEmpty()
+    val removeErrors = controller?.removeErrors.orEmpty()
+    // web paint(): the overview rows (a just-removed PC hidden), merged with the agent rows.
+    val merged = remember(data, agentRows, removedAt, nowMs) {
+        val rows = data?.clients.orEmpty().filter { !(isAgentClient(it) && hiddenRemoved(it.client_id, removedAt, nowMs)) }
+        mergeAgentData(rows, agentRows)
     }
+    val range = data?.range ?: poll.range
+    val cards = remember(merged, range, serverVersion, nowMs, removeErrors) {
+        merged.map { clientCardView(it, range, serverVersion, nowMs, it.agent?.let { a -> removeErrors[a.client_id] }) }
+    }
+    val tiles = remember(merged, range, serverVersion) { if (merged.isEmpty()) emptyList() else summaryTiles(merged, range, serverVersion) }
     val rangeLabel = stringResource(R.string.traffic_range_statistics)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // No statistics (feed disabled, old server): no range selector either.
-        if (!poll.noFigures) {
-            item(key = "range") {
+        if (!poll.unsupported && tiles.isNotEmpty()) {
+            item(key = "tiles") { SummaryTiles(tiles) }
+        }
+        item(key = "devices") {
+            DevicesHead(showRange = !poll.noFigures) {
                 RangeChips(
                     label = rangeLabel,
                     selected = poll.range,
@@ -214,10 +284,14 @@ private fun ClientsBody(
         if (!poll.unsupported) {
             when {
                 data == null -> if (poll.error == null) item(key = "loading") { HintLine(LOADING_CLIENTS_TEXT) }
-                cards.isEmpty() -> item(key = "empty") { HintLine(NO_CLIENTS_TEXT) }
+                cards.isEmpty() -> item(key = "empty") { EmptyState() }
                 else -> items(cards, key = { "client-${it.key}" }) { card ->
-                    val client = data?.clients?.firstOrNull { it.key == card.key }
-                    ClientCard(card, onRename = if (renameFlow != null && client != null) { { renameFlow.open(client) } } else null)
+                    val client = merged.firstOrNull { it.client.key == card.key }?.client
+                    ClientCard(
+                        card,
+                        onRename = if (renameFlow != null && client != null) { { renameFlow.open(client) } } else null,
+                        onRemove = if (controller != null && card.removeId != null) { { controller.requestRemove(card.removeId) } } else null,
+                    )
                 }
             }
             if (data != null && showAgentlessNote(data.clients)) {
@@ -226,6 +300,46 @@ private fun ClientsBody(
         }
         item(key = "manage") { ManagePcsSection(onManagePcs) }
     }
+}
+
+/** "DEVICES" with the range chips on the right (kit `.tool`); the chips
+ * wrap under the label where the row is too narrow. No statistics (feed
+ * disabled, old server): no range selector either. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DevicesHead(showRange: Boolean, chips: @Composable () -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SectionLabel(DEVICES_HEADING, Modifier.align(Alignment.CenterVertically).padding(end = 12.dp).semantics { heading() })
+        if (showRange) chips()
+    }
+}
+
+/** Empty list (web `.cl-empty`): the honest sentence in a dashed box. The
+ * web's "Add a device" button has no app twin yet. */
+@Composable
+private fun EmptyState() {
+    Text(
+        text = NO_CLIENTS_TEXT,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val w = 1.dp.toPx()
+                drawRoundRect(
+                    color = VaultColors.Line,
+                    topLeft = Offset(w / 2, w / 2),
+                    size = Size(size.width - w, size.height - w),
+                    cornerRadius = CornerRadius(14.dp.toPx()),
+                    style = Stroke(width = w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))),
+                )
+            }
+            .padding(16.dp),
+    )
 }
 
 /** The status/feed note; a polite live region, so a refresh failure or a
@@ -243,68 +357,6 @@ private fun NoteLine(text: String) {
 @Composable
 private fun HintLine(text: String) {
     Text(text = text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-/**
- * One client. The card merges its descendants, so TalkBack reads it as one
- * item in visual order (name, kind, connection, lines). The connection
- * dot is decoration (web `aria-hidden`); its word carries the meaning.
- */
-@Composable
-private fun ClientCard(model: ClientCardModel, onRename: (() -> Unit)? = null) {
-    Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(model.name, style = MaterialTheme.typography.bodyLarge)
-                    CardLine(model.kindText)
-                }
-                ConnectionChipView(word = model.chip.word, look = model.chip.look)
-            }
-            CardLine(model.loadingNow)
-            model.installed?.let { CardLine(it) }
-            model.stats?.let { CardLine(it) }
-            model.recent?.let { CardLine(it) }
-            CardLine(model.lastActive)
-            if (model.rename && onRename != null) RenameButton(model.name, onRename)
-        }
-    }
-}
-
-/**
- * WP ANDROID-GAPS-1 (web D15-NAMES): the card's Rename action. A button is
- * its own TalkBack stop inside the merged card and reads "Rename <name>"
- * (web: the button text plus the card's name).
- */
-@Composable
-private fun RenameButton(name: String, onRename: () -> Unit) {
-    val label = stringResource(R.string.clients_rename_button_cd, name)
-    TextButton(onClick = onRename, modifier = Modifier.semantics { contentDescription = label }) {
-        Text(stringResource(R.string.clients_rename_button))
-    }
-}
-
-@Composable
-private fun CardLine(text: String) {
-    Text(text = text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-private fun dotColor(look: ConnectionLook): Color = when (look) {
-    ConnectionLook.ON -> VaultColors.StatusOk
-    ConnectionLook.OFF -> VaultColors.StatusNone
-    ConnectionLook.UNKNOWN -> VaultColors.Dim2
-}
-
-@Composable
-private fun ConnectionChipView(word: String, look: ConnectionLook) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
-        Box(modifier = Modifier.size(8.dp).background(dotColor(look), CircleShape))
-        Text(word, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 6.dp))
-    }
 }
 
 /**
@@ -331,6 +383,18 @@ private fun ManagePcsSection(onManagePcs: () -> Unit) {
     }
 }
 
+/** The page's notes: the rename note, else the card Remove's
+ * "<id> removed from the list." (shown here only while the PCs sheet is
+ * closed; the sheet shows its own). */
+@Composable
+private fun PageNotices(renameFlow: ClientRenameFlow?, controller: ClientsController?) {
+    if (renameFlow?.notice != null) {
+        RenameNotice(renameFlow)
+        return
+    }
+    if (controller != null && !controller.isOpen) RemoveNotice(controller)
+}
+
 /** WP ANDROID-GAPS-1: "Renamed to ..." / "Name removed ..." (web: the
  * toast), read out when it appears. */
 @Composable
@@ -339,6 +403,17 @@ private fun RenameNotice(flow: ClientRenameFlow) {
     LaunchedEffect(message) {
         delay(NOTICE_MS)
         flow.notice = null
+    }
+    Snackbar(modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite }) { Text(message) }
+}
+
+/** WP ANDROID-REDESIGN-1a: the card Remove's success note (web: the toast). */
+@Composable
+private fun RemoveNotice(controller: ClientsController) {
+    val message = controller.removeNotice ?: return
+    LaunchedEffect(message) {
+        delay(NOTICE_MS)
+        controller.clearRemoveNotice()
     }
     Snackbar(modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite }) { Text(message) }
 }

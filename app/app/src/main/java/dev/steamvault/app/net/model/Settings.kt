@@ -67,6 +67,10 @@ data class SettingsOut(
     val readonly: Boolean,
     val settings: List<SettingInfoOut> = emptyList(),
     val core_apply: CoreApplyOut? = null,
+    /** WP 4e.7: the server's own version (`GET /v1/settings`); read by the
+     * Clients page's outdated-agent check (WP ANDROID-REDESIGN-1a, web
+     * CLIENTS-3). `null` from a server that does not send it. */
+    val server_version: String? = null,
 )
 
 /** Pure: a settings [JsonElement] as a `String`, or `null` for JSON null / a non-scalar. */

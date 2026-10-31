@@ -108,10 +108,12 @@ fun ClientsSheet(controller: ClientsController, demoMode: Boolean = false) {
  * [AlertDialog] above the sheet. It names the PC, says what is deleted and
  * that a still-running agent lists the PC again (`ClientRemove.kt`'s
  * verbatim web wording). "Keep" is the dismiss action; back and the scrim
- * do the same, and all three wait while the request runs.
+ * do the same, and all three wait while the request runs. Also composed by
+ * the Clients page for the card's "Remove agent" (WP ANDROID-REDESIGN-1a)
+ * while this sheet is closed, so the two never show it twice.
  */
 @Composable
-private fun RemovePcConfirm(controller: ClientsController, scope: CoroutineScope) {
+internal fun RemovePcConfirm(controller: ClientsController, scope: CoroutineScope) {
     val clientId = controller.removeTarget ?: return
     val busy = controller.removeBusy
     AlertDialog(

@@ -291,6 +291,10 @@ data class ClientActivityOut(
     val installed_app_count: Int? = null,
     val stats: ClientStatsOut? = null,
     val loading_now: LoadingNowOut? = null,
+    /** WP CLIENTS-LIVE-1 (rc21): what the client loads now, from the
+     * server's live tier (seconds old); same shape as [loading_now], which
+     * stays the fallback (older server, no live data for the row). */
+    val live_now: LoadingNowOut? = null,
     val recent_apps: List<RecentAppOut>? = null,
     val recent_unattributed_bytes: Long? = null,
     /** WP D15-NAMES: the operator-set name, `null` when none. */

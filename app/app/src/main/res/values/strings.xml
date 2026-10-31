@@ -818,6 +818,10 @@
     <string name="clients_remove_keep">Keep</string>
     <string name="clients_rename_button">Rename</string>
     <string name="clients_rename_button_cd">Rename %1$s</string>
+    <!-- WP ANDROID-REDESIGN-1a (web CLIENTS-4 client-card.js): Remove on the
+         Clients page card, "Remove agent" with the PC's id for TalkBack. -->
+    <string name="clients_remove_agent_button">Remove agent</string>
+    <string name="clients_remove_agent_button_cd">Remove agent %1$s</string>
     <string name="clients_rename_label">Name</string>
     <string name="clients_rename_save">Save</string>
     <string name="clients_rename_saving">Saving…</string>

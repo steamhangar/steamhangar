@@ -18,7 +18,9 @@ import dev.steamvault.app.ui.traffic.logic.formatTrafficBytes
  * `web/js/lib/clients-page.js` (WP D15c), one card per entry of
  * `GET /v1/clients/overview` (WP D15b): agent PCs, agentless addresses and
  * the server's own prefill runner (WP D15-RUNNER, `kind: "runner"`).
- * Pure: `ui/clients/ClientsScreen.kt` draws the cards from these strings.
+ * Pure. Since WP ANDROID-REDESIGN-1a the card itself is `ClientCard.kt`'s
+ * [ClientCardView] (web CLIENTS-1..4); the one-line texts here stay the
+ * wording reference, as on the web.
  *
  * **Verbatim-port exception (app/README.md "String resources").** Every
  * user-visible literal is the web module's own, pinned by string equality
@@ -112,7 +114,7 @@ private fun RecentAppOut.label() = appLabel(appid, name)
 
 /** "Loading now" line. */
 fun loadingNowText(client: ClientActivityOut): String {
-    val now = client.loading_now ?: return "Loading now: $DASH"
+    val now = currentLoading(client) ?: return "Loading now: $DASH"
     if (!now.loading) return "Loading now: nothing"
     val speed = formatSpeed(now.bytes_per_second) ?: DASH
     val apps = now.apps.map { it.label() }
@@ -184,33 +186,3 @@ fun clientsHaveFigures(overview: ClientsOverviewOut): Boolean = feedState(overvi
 /** The note under the list shows while any card is an agentless address
  * (the prefill runner is not one). */
 fun showAgentlessNote(clients: List<ClientActivityOut>): Boolean = clients.any { isAddressClient(it) }
-
-/** Everything one card shows, in order; `null` lines are left out. */
-data class ClientCardModel(
-    val key: String,
-    val name: String,
-    val kindText: String,
-    val chip: ConnectionChip,
-    val loadingNow: String,
-    val installed: String?,
-    val stats: String?,
-    val recent: String?,
-    val lastActive: String,
-    /** WP ANDROID-GAPS-1: the card offers Rename ([canRename], web
-     * `clientCardModel`'s `rename`). */
-    val rename: Boolean = false,
-)
-
-fun buildClientCardModel(client: ClientActivityOut, range: String, nowMs: Long = System.currentTimeMillis()): ClientCardModel =
-    ClientCardModel(
-        key = client.key,
-        name = clientName(client),
-        kindText = clientKindText(client),
-        chip = connectionChip(client),
-        loadingNow = loadingNowText(client),
-        installed = installedText(client),
-        stats = statsText(client, range),
-        recent = recentAppsText(client),
-        lastActive = lastActiveText(client, nowMs),
-        rename = canRename(client),
-    )

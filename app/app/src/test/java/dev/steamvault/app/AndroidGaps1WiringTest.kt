@@ -61,6 +61,7 @@ class AndroidGaps1WiringTest {
     private val main = "$base/MainActivity.kt"
     private val sheet = "$base/ui/clients/ClientsSheet.kt"
     private val clientsScreen = "$base/ui/clients/ClientsScreen.kt"
+    private val cardViews = "$base/ui/clients/ClientCardViews.kt"
     private val rename = "$base/ui/clients/ClientRenameDialog.kt"
     private val downloads = "$base/ui/downloads/DownloadsScreen.kt"
     private val historyDialog = "$base/ui/downloads/HistoryDeleteDialog.kt"
@@ -87,8 +88,11 @@ class AndroidGaps1WiringTest {
         assertCalledFrom(clientsScreen, "ClientRenameFlow(it)", "ClientsScreen")
         assertCalledFrom(clientsScreen, "ClientRenameDialog(", "ClientsScreen")
         assertCalledFrom(clientsScreen, "renameFlow.open(client)", "ClientsBody")
-        assertCalledFrom(clientsScreen, "if (model.rename && onRename != null) RenameButton(model.name, onRename)", "ClientCard")
-        assertCalledFrom(clientsScreen, "RenameNotice(it)", "ClientsScreen")
+        // WP ANDROID-REDESIGN-1a: the card moved to ClientCardViews.kt; Rename sits in its footer row.
+        assertCalledFrom(cardViews, "if (showRename) RenameButton(model.name, onRename!!)", "CardFooter")
+        assertCalledFrom(cardViews, "val showRename = model.rename && onRename != null", "CardFooter")
+        assertCalledFrom(clientsScreen, "PageNotices(renameFlow, clientsController)", "ClientsScreen")
+        assertCalledFrom(clientsScreen, "RenameNotice(renameFlow)", "PageNotices")
         assertCalledFrom(rename, "scope.launch { flow.save(onChanged) }", "ClientRenameDialog")
         assertCalledFrom(rename, "scope.launch { flow.clear(displayNameAfter, onChanged) }", "ClientRenameDialog")
         assertCalledFrom(rename, "if (hasCustomName(client)) {", "ClientRenameDialog")

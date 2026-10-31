@@ -580,7 +580,8 @@ class MainActivity : ComponentActivity() {
     /** WP D15d: the Clients page (`GET /v1/clients/overview`). Its "Manage
      * PCs" button opens the PCs sheet hoisted at this level
      * ([clientsControllerState]), the same sheet a bypass notification
-     * opens. */
+     * opens. WP ANDROID-REDESIGN-1a: the same controller feeds the page's
+     * agent rows and the card's Remove; settings give `server_version`. */
     @Composable
     private fun ClientsDestinationContent() {
         val demo = demoState
@@ -591,6 +592,8 @@ class MainActivity : ComponentActivity() {
                 onManagePcs = { clientsControllerState?.open(lifecycleScope) },
                 demoMode = true,
                 clientsRepository = remember(demo) { DemoClientsRepository(demo) },
+                clientsController = clientsControllerState,
+                settingsRepository = remember(demo) { DemoSettingsRepository(demo) },
             )
             return
         }
@@ -605,6 +608,8 @@ class MainActivity : ComponentActivity() {
             onManagePcs = { clientsControllerState?.open(lifecycleScope) },
             demoMode = false,
             clientsRepository = remember(client) { VaultClientsRepository(client) },
+            clientsController = clientsControllerState,
+            settingsRepository = remember(client) { VaultSettingsRepository(client) },
         )
     }
 

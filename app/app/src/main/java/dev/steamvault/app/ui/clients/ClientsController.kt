@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 class ClientsController(
     private val clientsRepository: ClientsRepository,
     private val strings: ClientsStrings,
+    private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
     var isOpen by mutableStateOf(false)
         private set
@@ -143,8 +144,34 @@ class ClientsController(
         }
         removeErrors = removeErrors - clientId
         clients = clients.filter { it.client_id != clientId }
+        removedAt = removedAt + (clientId to clock())
         removeNotice = removedToastText(clientId)
         refreshOnce()
+    }
+
+    /** WP ANDROID-REDESIGN-1a (web `removedIds`): client_id -> time of a
+     * successful remove. The Clients page hides that PC's overview row for
+     * [REMOVED_HIDE_MS] ([hiddenRemoved]) until the overview has caught up;
+     * an agent that reports again is listed again after that. */
+    var removedAt by mutableStateOf<Map<String, Long>>(emptyMap())
+        private set
+
+    /** The page's snackbar read the remove note: drop it. */
+    fun clearRemoveNotice() {
+        removeNotice = null
+    }
+
+    /**
+     * WP ANDROID-REDESIGN-1a: the Clients page merges these agent rows into
+     * its cards (web: the store's `GET /v1/clients` snapshot, polled at the
+     * same [PollingIntervals.CLIENTS_MS]). Runs only while the page is
+     * STARTED (`ClientsScreen.kt`'s `repeatOnLifecycle`); first fetch at once.
+     */
+    suspend fun pollForPage() {
+        while (true) {
+            refreshOnce()
+            delay(PollingIntervals.CLIENTS_MS)
+        }
     }
 
     suspend fun refreshOnce() {
