@@ -464,7 +464,7 @@ private fun LibraryToolbar(
             )
             if (filters != null) {
                 val spoken = if (filters.activeCount > 0) {
-                    stringResource(R.string.library_filters_active, filters.activeCount)
+                    pluralStringResource(R.plurals.library_filters_active, filters.activeCount, filters.activeCount)
                 } else {
                     stringResource(R.string.library_filters_button)
                 }

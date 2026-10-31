@@ -82,7 +82,10 @@
     <!-- WP ANDROID-REDESIGN-1b (web LIBRARY-2): the split button's menu, the Filters button. -->
     <string name="library_more_update_actions">More update actions</string>
     <string name="library_filters_button">Filters</string>
-    <string name="library_filters_active">Filters, %1$d active</string>
+    <plurals name="library_filters_active">
+        <item quantity="one">Filters, %1$d active</item>
+        <item quantity="other">Filters, %1$d active</item>
+    </plurals>
     <string name="library_filters_expanded">expanded</string>
     <string name="library_filters_collapsed">collapsed</string>
     <string name="library_check_updates_button_busy">Checking…</string>
