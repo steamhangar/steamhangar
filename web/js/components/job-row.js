@@ -122,9 +122,10 @@ export function createJobCard({ job, title, kind, word, held = false, holdNote =
 
 /**
  * One attention row (Updates available, Incomplete): name over a mono meta
- * line, an empty middle column, the 72px button. A row without a button
- * (`button: null`, e.g. a game short only of damaged chunks) shows `note`
- * under the meta instead.
+ * line, an empty middle column, the 72px button. A non-empty `note` shows
+ * under the meta, with or without a button (WP CACHE-REPAIR-UI-1: a game
+ * short only of damaged chunks has "Repair" and says why it is not Verify;
+ * without a repair, the note alone says why there is no button).
  *
  * @param {{appid: number, title: string, meta: string, button: HTMLElement|null, note?: string, dataKey: string}} options
  *   `dataKey` names the row's data attribute (`updateAppid` / `incompleteAppid`).
@@ -135,7 +136,7 @@ export function createAttentionRow({ appid, title, meta, button, note = "", data
   row.dataset[dataKey] = String(appid);
   const info = el("div");
   info.append(nameNode(appid, title), el("div", "meta", meta));
-  if (!button && note) {
+  if (note) {
     const n = el("div", "unote", note);
     n.dataset.role = "damaged-note";
     info.appendChild(n);

@@ -91,8 +91,10 @@
  * schedule note (`incompleteScheduleNote`:
  * completed automatically in the window, or manual only). A game short only
  * of damaged (wrong-size) chunks has no "Complete now" — a forced run
- * cannot fix it — and says so in its row; "Complete all" is offered only
- * while at least one row can be completed. Like every Downloads section
+ * cannot fix it — but "Repair" (WP CACHE-REPAIR-UI-1,
+ * `components/repair-flow.js`: dry run, confirm with the counts, execute,
+ * "Show job" scrolls to the queued job here) and a note saying why;
+ * "Complete all" is offered only while at least one row can be completed. Like every Downloads section
  * since UPD-6 (user rule 2026-10-14) it is rendered only with at least one
  * entry, and rebuilt only when its content changes.
  *
@@ -202,8 +204,9 @@ import {
   summarizeVerifyStart,
   describeVerifyStartError,
   INCOMPLETE_HEADING,
-  DAMAGED_NOTE,
 } from "../lib/cache-completeness.js";
+import { showsRepair, repairNoteFor, repairAriaLabel, REPAIR_LABEL, REPAIR_CHECKING_LABEL } from "../lib/cache-repair.js";
+import { startRepair, closeRepair } from "../components/repair-flow.js";
 import { onViewChange } from "../router.js";
 import { isConnectionLost, onConnectionChange } from "../connection-status.js";
 import { OFFLINE_CONTROL_TITLE } from "../lib/connection-watch.js";
@@ -863,6 +866,34 @@ function completionButton(label, variant, ariaLabel, onClick) {
   return btn;
 }
 
+/**
+ * WP CACHE-REPAIR-UI-1: "Repair" on a row short only of wrong-size chunks
+ * (components/repair-flow.js). The row's button reads "Checking…" while the
+ * dry run is in flight; the dialog takes over from there, and its "Show
+ * job" lands on the queued job in this view (`highlightJob`).
+ */
+async function startRowRepair(appid, title) {
+  if (incompleteInFlight !== null) return;
+  incompleteInFlight = repairButtonKey(appid);
+  paintIncomplete();
+  try {
+    await startRepair({
+      appid,
+      title,
+      onShowJob: (jobId) => highlightJob(jobId),
+      // After a repair the row (and its button) is gone; the job is queued.
+      focusFallback: () => (mounted() ? els.queueHeading : null),
+    });
+  } finally {
+    incompleteInFlight = null;
+    paintIncomplete();
+  }
+}
+
+function repairButtonKey(appid) {
+  return `repair:${appid}`;
+}
+
 function buildIncompleteRow(game, gamesByAppid) {
   const title = nameFor(game.appid, gamesByAppid);
   let btn = null;
@@ -871,24 +902,31 @@ function buildIncompleteRow(game, gamesByAppid) {
     btn.dataset.role = "complete-now";
     // Not `data-appid`: patchNames rewrites the text of every such node.
     btn.dataset.incompleteAppid = String(game.appid);
+  } else if (showsRepair(game, state.jobs)) {
+    // Short only of wrong-size chunks: a forced run cannot fix them, a
+    // repair can (WP CACHE-REPAIR-UI-1). The note says why it is not Verify.
+    btn = completionButton(REPAIR_LABEL, "w72", repairAriaLabel(title), () => startRowRepair(game.appid, title));
+    btn.dataset.role = "repair";
+    btn.dataset.incompleteAppid = String(game.appid);
   }
-  // Short only of wrong-size chunks: nothing a forced run fixes, so no
-  // button and the row says why.
   return createAttentionRow({
     appid: game.appid,
     title,
     meta: `${incompletePctText(game)} on disk`,
     button: btn,
-    note: btn ? "" : DAMAGED_NOTE,
+    // "" for a completable row; the repair note, or why there is no repair.
+    note: repairNoteFor(game),
     dataKey: "incompleteAppid",
   });
 }
 
-/** Which completion button `btn` is: `"all"`, its row's appid, or null. */
+/** Which completion button `btn` is: `"all"`, its row's appid, the repair
+ * key of its row, or null. */
 function completionButtonId(btn) {
   if (!btn || !btn.dataset) return null;
   if (btn.dataset.role === "complete-all") return "all";
   if (btn.dataset.role === "complete-now" && btn.dataset.incompleteAppid) return Number(btn.dataset.incompleteAppid);
+  if (btn.dataset.role === "repair" && btn.dataset.incompleteAppid) return repairButtonKey(Number(btn.dataset.incompleteAppid));
   return null;
 }
 
@@ -902,10 +940,12 @@ function focusedCompletionButton() {
 function paintIncompleteBusy() {
   const busy = incompleteInFlight !== null;
   for (const btn of els.incomplete.querySelectorAll("button")) {
-    if (btn.dataset.role !== "complete-all" && btn.dataset.role !== "complete-now") continue;
+    const role = btn.dataset.role;
+    if (role !== "complete-all" && role !== "complete-now" && role !== "repair") continue;
     const which = completionButtonId(btn);
-    const idle = btn.dataset.role === "complete-all" ? VERIFY_ALL_LABEL : ROW_VERIFY_LABEL;
-    const label = incompleteInFlight === which ? STARTING_LABEL : idle;
+    const idle = role === "complete-all" ? VERIFY_ALL_LABEL : role === "repair" ? REPAIR_LABEL : ROW_VERIFY_LABEL;
+    const busyLabel = role === "repair" ? REPAIR_CHECKING_LABEL : STARTING_LABEL;
+    const label = incompleteInFlight === which ? busyLabel : idle;
     if (btn.textContent !== label) btn.textContent = label;
     if (busy) btn.setAttribute("aria-disabled", "true");
     else btn.removeAttribute("aria-disabled");
@@ -922,7 +962,12 @@ function paintIncomplete() {
   const titleOf = (g) => nameFor(g.appid, gamesByAppid);
   const rows = state.gamesKnown ? pendingIncomplete(state.games, state.jobs, titleOf) : [];
   const note = incompleteScheduleNote(state.schedule);
-  const key = [incompleteListKey(rows, titleOf), note ?? "", String(isConnectionLost())].join("\u0000");
+  const key = [
+    incompleteListKey(rows, titleOf),
+    rows.map(repairNoteFor).join("|"), // WP CACHE-REPAIR-UI-1: not owned -> no Repair
+    note ?? "",
+    String(isConnectionLost()),
+  ].join("\u0000");
   if (els.incompleteKey === key) {
     paintIncompleteBusy();
     return;
@@ -953,7 +998,7 @@ function paintIncomplete() {
   const same =
     hadFocus === "all"
       ? incompleteActs.querySelector('[data-role="complete-all"]')
-      : Array.from(incompleteBody.querySelectorAll('[data-role="complete-now"]')).find(
+      : Array.from(incompleteBody.querySelectorAll('[data-role="complete-now"], [data-role="repair"]')).find(
           (b) => completionButtonId(b) === hadFocus,
         );
   const target = same || incompleteActs.querySelector('[data-role="complete-all"]') || els.queueHeading;
@@ -1384,7 +1429,9 @@ let pendingHighlightJobId = null;
  * destination for both a finished and a failed job's notification (see
  * `lib/notification-log.js`'s `navigationTargetFor`). Safe to call
  * regardless of whether Downloads is currently mounted or whether the job
- * has reached the history bucket in `state.jobs` yet.
+ * has reached the history bucket in `state.jobs` yet. WP CACHE-REPAIR-UI-1:
+ * a job that is still queued or running ("Show job" after a repair) is
+ * scrolled to and focused in Queue or Active instead.
  *
  * Unlike the mockup's `openNote()` (docs/design/vault-app-mockup-NOTES.md
  * round 6), this uses `scrollIntoView()` directly rather than manually
@@ -1407,7 +1454,8 @@ let pendingHighlightJobId = null;
  */
 export function highlightJob(jobId) {
   if (jobId == null) return;
-  getExcerptState(jobId).expanded = true;
+  // The History row is expanded in applyPendingHighlight, once it is known
+  // to be a History row (WP CACHE-REPAIR-UI-1: a live job is not expanded).
   pendingHighlightJobId = jobId;
   // WP DOWNLOADS-3: a row beyond the first History page is paged in by
   // renderHistory (which ends in applyPendingHighlight).
@@ -1415,12 +1463,40 @@ export function highlightJob(jobId) {
   else applyPendingHighlight();
 }
 
+/** WP CACHE-REPAIR-UI-1: the job's card in Active or its Queue row, or
+ * null. A job that has not finished yet is shown there, not in History. */
+function liveJobRowNow(jobId) {
+  if (!mounted()) return null;
+  return (
+    els.activeBody.querySelector(`.job[data-jid="${jobId}"]`) ||
+    els.queueBody.querySelector(`.qrow[data-jid="${jobId}"]`)
+  );
+}
+
 function applyPendingHighlight() {
   if (pendingHighlightJobId == null) return;
   const jobId = pendingHighlightJobId;
+  // WP CACHE-REPAIR-UI-1 ("Show job" after a repair): a queued or running
+  // job is scrolled to where it is now and takes focus — the Queue row's
+  // live reorder handle (it names the game), else the row itself
+  // (tabindex -1: focusable by script only, not a new tab stop).
+  const live = liveJobRowNow(jobId);
+  if (live) {
+    pendingHighlightJobId = null;
+    live.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
+    const grip = live.querySelector(".grip-live");
+    if (grip) {
+      grip.focus();
+    } else {
+      if (!live.hasAttribute("tabindex")) live.setAttribute("tabindex", "-1");
+      live.focus();
+    }
+    return;
+  }
   const row = historyRowNow(jobId);
   if (!row) return; // job not in the History section on this render yet — stays queued
   pendingHighlightJobId = null;
+  getExcerptState(jobId).expanded = true;
   setHistoryItemExpanded(row, true);
   const toggle = row.querySelector(".hrow");
   paintExcerpt(row, jobId);
@@ -1534,6 +1610,9 @@ function fullRender() {
   }
 
   if (focusedJid !== null) focusGrip(focusedJid);
+  // WP CACHE-REPAIR-UI-1: a "Show job" that arrived before its job was on
+  // screen lands as soon as Active/Queue show it, not later in History.
+  applyPendingHighlight();
 
   maybeLoadOwnedNames();
 
@@ -2183,6 +2262,7 @@ onViewChange((view) => {
   // The history confirm belongs to this page; an in-flight delete still
   // finishes and refreshes the store.
   closeHistoryDelete({ restoreFocus: false });
+  closeRepair(); // WP CACHE-REPAIR-UI-1: its dialog would strand #app inert
   sectionEl = null;
   trafficPoll.stop();
 });
