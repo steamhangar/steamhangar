@@ -106,6 +106,28 @@ internal fun ChevronDownGlyph(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * WP ANDROID-POLISH-1: the Filters button's funnel (web `.btn` "Filters"
+ * as an icon + count at phone width, so the control row stays one line).
+ */
+@Composable
+internal fun FiltersGlyph(modifier: Modifier = Modifier) {
+    val color = LocalContentColor.current
+    Canvas(modifier.size(GLYPH_SIZE)) {
+        val s = this.size.minDimension / 24f
+        val p = Path().apply {
+            moveTo(4f * s, 5f * s)
+            lineTo(20f * s, 5f * s)
+            lineTo(14f * s, 12.5f * s)
+            lineTo(14f * s, 19f * s)
+            lineTo(10f * s, 17f * s)
+            lineTo(10f * s, 12.5f * s)
+            close()
+        }
+        drawPath(p, color, style = stroke(s))
+    }
+}
+
 /** Select mode: a rounded square with a check (on) or without (off). */
 @Composable
 internal fun SelectGlyph(on: Boolean, modifier: Modifier = Modifier) {

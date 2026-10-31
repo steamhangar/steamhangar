@@ -15,6 +15,8 @@ import dev.steamvault.app.ui.settings.logic.canSaveLibrarySteamId
 import dev.steamvault.app.ui.theme.VaultColors
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -149,7 +151,8 @@ fun SettingsScreen(
             val placed = controller.settingsResponse?.settings?.let { SettingsLayout.placeEntries(it) }
             val sections = visibleSections(placed, controller.expertOn)
             val current = controller.section.takeIf { it in sections } ?: SettingsLayout.DEFAULT_SECTION
-            SettingsSectionStrip(sections = sections, selected = current, onSelect = { controller.selectSection(it) })
+            val dirty = controller.dirtyDots
+            SettingsSectionStrip(sections = sections, selected = current, dirty = dirty.sections, onSelect = { controller.selectSection(it) })
             // A new panel starts at its top.
             val scroll = key(current) { rememberScrollState() }
             Column(
@@ -173,7 +176,7 @@ fun SettingsScreen(
                         // Web compact layout: the switch row is the LAST item of About.
                         if (placed != null && placed.expert.values.any { it.isNotEmpty() }) {
                             HorizontalDivider()
-                            ExpertSwitchRow(controller.expertOn) { on -> controller.setExpert(on) }
+                            ExpertSwitchRow(controller.expertOn, dirty = dirty.expertSwitch) { on -> controller.setExpert(on) }
                         }
                     }
                     else -> {
@@ -221,10 +224,12 @@ private fun visibleSections(placed: PlacedSettings?, expertOn: Boolean): List<St
 /**
  * The section strip (web `nav.snav` in its compact form): one tab per panel,
  * labels from [SettingsLayout.navLabel], sliding sideways when they do not
- * fit. TalkBack reads each as a selected / not selected tab.
+ * fit. TalkBack reads each as a selected / not selected tab. WP
+ * ANDROID-POLISH-1: a tab in [dirty] carries the unsaved-changes dot, read
+ * as "(unsaved changes)" after its label (web `.snav-item .dot`).
  */
 @Composable
-private fun SettingsSectionStrip(sections: List<String>, selected: String, onSelect: (String) -> Unit) {
+private fun SettingsSectionStrip(sections: List<String>, selected: String, dirty: Set<String>, onSelect: (String) -> Unit) {
     val index = sections.indexOf(selected).coerceAtLeast(0)
     ScrollableTabRow(
         selectedTabIndex = index,
@@ -236,7 +241,12 @@ private fun SettingsSectionStrip(sections: List<String>, selected: String, onSel
             Tab(
                 selected = id == selected,
                 onClick = { onSelect(id) },
-                text = { Text(SettingsLayout.navLabel(id), maxLines = 1, softWrap = false) },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(SettingsLayout.navLabel(id), maxLines = 1, softWrap = false)
+                        if (id in dirty) UnsavedDot(stringResource(R.string.settings_section_unsaved))
+                    }
+                },
                 selectedContentColor = MaterialTheme.colorScheme.primary,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -246,6 +256,20 @@ private fun SettingsSectionStrip(sections: List<String>, selected: String, onSel
 
 /** Test tag of the section strip. */
 internal const val SETTINGS_STRIP_TAG = "settings-section-strip"
+
+/**
+ * The unsaved-changes dot (web `.view-settings .dot`: 7px, `--run`), spoken
+ * as [spoken]. Merged into its tab's description; standalone on the switch row.
+ */
+@Composable
+private fun UnsavedDot(spoken: String) {
+    Box(
+        modifier = Modifier
+            .size(7.dp)
+            .background(VaultColors.StatusRun, CircleShape)
+            .semantics { contentDescription = spoken },
+    )
+}
 
 /** A panel's title (a heading) and its blurb (web `h2.sec-title` + `.blurb`). */
 @Composable
@@ -467,12 +491,14 @@ private fun FieldCard(title: String?, content: @Composable ColumnScope.() -> Uni
     }
 }
 
+/** The "Show expert settings" row; [dirty] adds the unsaved dot while expert drafts exist (web `.exp .dot`). */
 @Composable
-private fun ExpertSwitchRow(on: Boolean, onChange: (Boolean) -> Unit) {
+private fun ExpertSwitchRow(on: Boolean, dirty: Boolean, onChange: (Boolean) -> Unit) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Switch(checked = on, onCheckedChange = onChange)
             Text(stringResource(R.string.settings_expert_switch))
+            if (dirty) UnsavedDot(stringResource(R.string.settings_expert_unsaved))
         }
         Text(
             stringResource(R.string.settings_expert_hint),

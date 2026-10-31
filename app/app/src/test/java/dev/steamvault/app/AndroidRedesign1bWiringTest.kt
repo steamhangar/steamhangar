@@ -135,6 +135,9 @@ class AndroidRedesign1bWiringTest {
         assertCalledFrom(library, "SortRow(", "LibraryToolbar")
         assertCalledFrom(library, "LayoutToggle(", "LibraryToolbar")
         assertCalledFrom(library, "onClick = filters.onToggle,", "LibraryToolbar")
+        // WP ANDROID-POLISH-1: funnel + count below the 58 dp button minimum, one control row.
+        assertCalledFrom(library, "FiltersGlyph()", "LibraryToolbar")
+        assertCalledFrom(library, ".widthIn(min = FILTERS_MIN_WIDTH)", "LibraryToolbar")
         assertCalledFrom(library, "SelectGlyph(", "LibraryToolbar")
         assertCalledFrom(library, "SortDirectionGlyph(descending = active.dir == SortDirection.DESC)", "SortRow")
         assertCalledFrom(library, "label = { LayoutGlyph(option.layout) },", "LayoutToggle")
