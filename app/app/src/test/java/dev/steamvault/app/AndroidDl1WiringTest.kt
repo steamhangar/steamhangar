@@ -84,8 +84,8 @@ class AndroidDl1WiringTest {
 
     @Test
     fun `MUTATION PIN -- the header draws the status pill from the merged current, only with figures`() {
-        assertCalledFrom(stats, "val status = if (tiles != null) heroStatus(throughput?.current) else null", "DownloadsStatsHeader")
-        assertCalledFrom(stats, "if (status != null) StatusPill(status)", "DownloadsStatsHeader")
+        assertCalledFrom(stats, "val hero = heroFigures(throughput, rateCap, poll.unsupported)", "DownloadsStatsHeader")
+        assertCalledFrom(stats, "if (hero.status != null) StatusPill(hero.status)", "HeroLive")
         assertCalledFrom(stats, "StatusIcon(kind = status.kind, size = StatusIconSize.SMALL)", "StatusPill")
         assertCalledFrom(stats, "Text(status.text,", "StatusPill")
         assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = status.text }", "StatusPill")

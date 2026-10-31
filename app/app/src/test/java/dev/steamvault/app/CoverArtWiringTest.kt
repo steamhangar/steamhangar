@@ -40,7 +40,7 @@ class CoverArtWiringTest {
         val text = source(detailSheet)
         val start = text.indexOf("private fun gameSummaryFrom(")
         check(start >= 0) { "expected to find gameSummaryFrom in GameDetailSheet.kt" }
-        val end = text.indexOf("private fun GameDetailSheetBody(", start)
+        val end = text.indexOf("internal fun GameDetailSheetBody(", start)
         check(end > start) { "expected GameDetailSheetBody to follow gameSummaryFrom" }
         assertTrue(
             "gameSummaryFrom() must copy cover_url = detail.cover_url",
@@ -58,7 +58,7 @@ class CoverArtWiringTest {
             text.substring(start).contains("cachedCoverUrl = vaultCoverUrl(appid, detail?.cover_cached_url)"),
         )
         val summaryStart = text.indexOf("private fun gameSummaryFrom(")
-        val summaryEnd = text.indexOf("private fun GameDetailSheetBody(", summaryStart)
+        val summaryEnd = text.indexOf("internal fun GameDetailSheetBody(", summaryStart)
         assertTrue(
             "gameSummaryFrom() must copy cover_cached_url = detail.cover_cached_url",
             text.substring(summaryStart, summaryEnd).contains("cover_cached_url = detail.cover_cached_url"),

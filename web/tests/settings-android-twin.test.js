@@ -36,6 +36,13 @@ test("risk texts, section titles and expert groups match", () => {
   }
 });
 
+test("WP ANDROID-REDESIGN-1c: the section strip labels and panel blurbs match SECTIONS.nav / .blurb", () => {
+  for (const s of SECTIONS) {
+    assert.ok(kt.includes(`${q(s.id)} to ${q(s.nav)}`), `nav label ${s.id}: Kotlin NAV_LABELS differs from web SECTIONS.nav`);
+    assert.ok(kt.includes(`${q(s.id)} to ${q(s.blurb)}`), `blurb ${s.id}: Kotlin BLURBS differs from web SECTIONS.blurb`);
+  }
+});
+
 test("D16 neutral naming holds in the Android twin too", () => {
   const m = kt.match(/"upstream_rate" to FieldMeta\([^\n]*/)[0];
   assert.match(m, /Upstream \(WAN\) rate cap/);

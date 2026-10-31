@@ -127,8 +127,13 @@ class SettingsController(
 
     // ---- D16: sections, expert switch, risky confirm, apply line ------------
 
-    /** Sections the user opened or closed (stored per device); the rest use the default. */
-    private var openOverrides by mutableStateOf(readOpenOverrides())
+    /**
+     * WP ANDROID-REDESIGN-1c (web SETTINGS-1/2 section nav): the one panel
+     * on screen. Per screen visit, not remembered (web `activeSection`);
+     * drafts live in [drafts], so switching panels never loses one.
+     */
+    var section by mutableStateOf(SettingsLayout.DEFAULT_SECTION)
+        private set
 
     /** The "Show expert settings" switch (stored per device). */
     var expertOn by mutableStateOf(viewPrefs.getExpert())
@@ -145,27 +150,18 @@ class SettingsController(
     /** vault-core's apply state as one line, or `null` before it has reported. */
     val coreApplyLine: CoreApplyLine? get() = SettingsLayout.coreApplyLine(settingsResponse?.core_apply)
 
-    private fun readOpenOverrides(): Map<String, Boolean> {
-        val result = LinkedHashMap<String, Boolean>()
-        for (section in SettingsLayout.SECTIONS) {
-            val stored = viewPrefs.getSectionOpen(section.id)
-            if (stored != null) result[section.id] = stored
-        }
-        return result
+    /** Show the panel [id]; "expert" only while the switch is on. */
+    fun selectSection(id: String) {
+        if (SettingsLayout.SECTIONS.none { it.id == id }) return
+        if (id == EXPERT_SECTION && !expertOn) return
+        section = id
     }
 
-    /** Expert groups show open once the switch is on (like the web); the user can still collapse them. */
-    fun isSectionOpen(id: String): Boolean =
-        openOverrides[id] ?: (id in SettingsLayout.DEFAULT_OPEN || id.startsWith("expert_"))
-
-    fun setSectionOpen(id: String, open: Boolean) {
-        openOverrides = openOverrides + (id to open)
-        viewPrefs.setSectionOpen(id, open)
-    }
-
+    /** The switch; turning it off while Expert is shown goes back to the first panel (web). */
     fun setExpert(on: Boolean) {
         expertOn = on
         viewPrefs.setExpert(on)
+        if (!on && section == EXPERT_SECTION) section = SettingsLayout.DEFAULT_SECTION
     }
 
     var identityState by mutableStateOf(identityRepository.state())
@@ -520,3 +516,6 @@ class SettingsController(
 /** Why the "Steam library" block's Save/Reset said no (worded in
  * `SettingsScreen.kt` from strings.xml). */
 enum class LibraryIdMessage { ABSENT, ENV_ONLY, READONLY, INVALID, SERVER }
+
+/** The Expert section's id (shown only while the switch is on). */
+internal const val EXPERT_SECTION = "expert"

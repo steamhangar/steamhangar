@@ -14,6 +14,16 @@ import dev.steamvault.app.ui.settings.logic.canResetLibrarySteamId
 import dev.steamvault.app.ui.settings.logic.canSaveLibrarySteamId
 import dev.steamvault.app.ui.theme.VaultColors
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.runtime.key
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
+import dev.steamvault.app.ui.settings.logic.PlacedSettings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.IconButton
@@ -86,6 +96,19 @@ import kotlinx.coroutines.launch
  * previous placeholder (bare [dev.steamvault.app.ui.identity.IdentityScreen]).
  * Three sections mirror [SettingsController]'s three independent surfaces --
  * see that class's kdoc.
+ *
+ * WP ANDROID-REDESIGN-1c (web SETTINGS-1/2, docs/design/rc20/settings.html at
+ * phone width): ONE panel at a time behind a scrolling section strip
+ * ([SettingsSectionStrip], web `nav.snav` as a strip at 760 px or less).
+ * Panels in web order: Vault & connection (the vault form section, then the
+ * Connection actions), Download window, Disk & cleanup, Notifications (the
+ * webhook form, then this device's notification permission), Other settings
+ * (only with such rows), Steam (identity, library SteamID64), About (the
+ * component table, then the expert switch at its end, as the web's compact
+ * layout puts it) and Expert settings (only while the switch is on). Each
+ * panel is its title + blurb ([SettingsLayout.BLURBS]) and its content;
+ * drafts live in the controller, so switching panels never loses one. The
+ * old "PCs and devices / Open Clients" pointer is gone (rc20 visual check).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,7 +118,6 @@ fun SettingsScreen(
     onReconnectClick: () -> Unit,
     onDisconnected: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
-    onOpenClientsClick: () -> Unit,
     demoMode: Boolean,
 ) {
     val scope = rememberCoroutineScope()
@@ -124,37 +146,115 @@ fun SettingsScreen(
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             RiskyConfirmDialog(controller, scope)
             if (demoMode) DemoModeBanner()
+            val placed = controller.settingsResponse?.settings?.let { SettingsLayout.placeEntries(it) }
+            val sections = visibleSections(placed, controller.expertOn)
+            val current = controller.section.takeIf { it in sections } ?: SettingsLayout.DEFAULT_SECTION
+            SettingsSectionStrip(sections = sections, selected = current, onSelect = { controller.selectSection(it) })
+            // A new panel starts at its top.
+            val scroll = key(current) { rememberScrollState() }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scroll)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                when {
-                    controller.loading -> Text(stringResource(R.string.settings_loading))
-                    controller.loadError != null ->
-                        Text(
-                            stringResource(R.string.settings_load_error, controller.loadError.orEmpty()),
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    else -> SettingsForm(controller)
+                PanelHeading(current)
+                when (current) {
+                    "steam" -> {
+                        SteamIdentitySection(controller, scope, onSignInSteamClick, demoMode)
+                        if (!controller.loading && controller.loadError == null) {
+                            HorizontalDivider()
+                            SteamLibraryBlock(controller, scope, demoMode)
+                        }
+                    }
+                    "about" -> {
+                        AboutSection(controller, scope)
+                        // Web compact layout: the switch row is the LAST item of About.
+                        if (placed != null && placed.expert.values.any { it.isNotEmpty() }) {
+                            HorizontalDivider()
+                            ExpertSwitchRow(controller.expertOn) { on -> controller.setExpert(on) }
+                        }
+                    }
+                    else -> {
+                        when {
+                            controller.loading -> Text(stringResource(R.string.settings_loading))
+                            controller.loadError != null ->
+                                Text(
+                                    stringResource(R.string.settings_load_error, controller.loadError.orEmpty()),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            else -> SettingsForm(controller, current)
+                        }
+                        if (current == "vault") {
+                            HorizontalDivider()
+                            ConnectionSection(controller, onReconnectClick, onDisconnected, demoMode)
+                        }
+                        if (current == "notify") {
+                            HorizontalDivider()
+                            NotificationsSection(onRequestNotificationPermission)
+                        }
+                    }
                 }
-
-                HorizontalDivider()
-                SteamIdentitySection(controller, scope, onSignInSteamClick, demoMode)
-                if (!controller.loading && controller.loadError == null) {
-                    SteamLibraryBlock(controller, scope, demoMode)
-                }
-                HorizontalDivider()
-                NotificationsSection(onRequestNotificationPermission)
-                HorizontalDivider()
-                ClientsSection(onOpenClientsClick)
-                HorizontalDivider()
-                ConnectionSection(controller, onReconnectClick, onDisconnected, demoMode)
-                HorizontalDivider()
-                AboutSection(controller, scope)
             }
+        }
+    }
+}
+
+/**
+ * The panels the strip offers, in web order (twin of web `buildNav`, which
+ * lists only built panels): Vault, Notifications, Steam and About always
+ * (each has Android-side content of its own); Download window, Disk and
+ * Other only with rows; Expert only while the switch is on and expert rows
+ * exist. Before the settings answer (or after it failed) the form-only
+ * panels are left out.
+ */
+private fun visibleSections(placed: PlacedSettings?, expertOn: Boolean): List<String> =
+    SettingsLayout.SECTIONS.map { it.id }.filter { id ->
+        when (id) {
+            "vault", "notify", "steam", "about" -> true
+            EXPERT_SECTION -> expertOn && placed != null && placed.expert.values.any { it.isNotEmpty() }
+            else -> !placed?.sections?.get(id).isNullOrEmpty()
+        }
+    }
+
+/**
+ * The section strip (web `nav.snav` in its compact form): one tab per panel,
+ * labels from [SettingsLayout.navLabel], sliding sideways when they do not
+ * fit. TalkBack reads each as a selected / not selected tab.
+ */
+@Composable
+private fun SettingsSectionStrip(sections: List<String>, selected: String, onSelect: (String) -> Unit) {
+    val index = sections.indexOf(selected).coerceAtLeast(0)
+    ScrollableTabRow(
+        selectedTabIndex = index,
+        edgePadding = 8.dp,
+        containerColor = Color.Transparent,
+        modifier = Modifier.fillMaxWidth().testTag(SETTINGS_STRIP_TAG),
+    ) {
+        for (id in sections) {
+            Tab(
+                selected = id == selected,
+                onClick = { onSelect(id) },
+                text = { Text(SettingsLayout.navLabel(id), maxLines = 1, softWrap = false) },
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Test tag of the section strip. */
+internal const val SETTINGS_STRIP_TAG = "settings-section-strip"
+
+/** A panel's title (a heading) and its blurb (web `h2.sec-title` + `.blurb`). */
+@Composable
+private fun PanelHeading(id: String) {
+    val title = SettingsLayout.SECTIONS.firstOrNull { it.id == id }?.title ?: id
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+        SettingsLayout.BLURBS[id]?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -223,7 +323,7 @@ private fun SettingsSaveBar(controller: SettingsController, scope: kotlinx.corou
  */
 @Composable
 private fun NotificationsSection(onRequestNotificationPermission: () -> Unit) {
-    Text(stringResource(R.string.settings_section_notifications), style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.settings_section_notifications), style = MaterialTheme.typography.titleSmall)
     Text(
         stringResource(R.string.settings_notifications_desc),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -235,36 +335,17 @@ private fun NotificationsSection(onRequestNotificationPermission: () -> Unit) {
 }
 
 // ---------------------------------------------------------------------
-// PCs (agents) pointer (WP D15d; WP 4b.10 before)
-// ---------------------------------------------------------------------
-
-/**
- * WP D15d: managing PCs moved to the Clients page (`ui/clients/ClientsScreen.kt`,
- * a nav destination since D15), like web `settings.js`'s "PCs (agents)"
- * pointer. Settings keeps this short pointer so the old way there still
- * leads somewhere; [onOpenClientsClick] switches to the Clients
- * destination (`MainActivity`). Before D15d this button opened the PCs
- * sheet directly.
- */
-@Composable
-private fun ClientsSection(onOpenClientsClick: () -> Unit) {
-    Text(stringResource(R.string.settings_section_clients), style = MaterialTheme.typography.titleMedium)
-    Text(
-        stringResource(R.string.settings_clients_desc),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        style = MaterialTheme.typography.bodySmall,
-    )
-    OutlinedButton(onClick = onOpenClientsClick) {
-        Text(stringResource(R.string.settings_clients_open_button))
-    }
-}
-
-// ---------------------------------------------------------------------
 // GET/PATCH /v1/settings form
 // ---------------------------------------------------------------------
 
+/**
+ * The settings form of ONE panel ([sectionId]): a form section's rows in one
+ * field card (web `.fcard`, `CARD_TITLES`), or, for "expert", one card per
+ * expert group with its title. Read-only banner and vault-core's apply line
+ * stay on top of every form panel.
+ */
 @Composable
-private fun SettingsForm(controller: SettingsController) {
+private fun SettingsForm(controller: SettingsController, sectionId: String) {
     val response = controller.settingsResponse ?: return
     val placed = SettingsLayout.placeEntries(response.settings)
     val entriesByKey = response.settings.associateBy { it.key }
@@ -284,68 +365,62 @@ private fun SettingsForm(controller: SettingsController) {
         )
     }
 
-    // D16: the normal sections, then the expert block (a switch, and the
-    // expert groups only while it is on). Titles, labels and notes come from
-    // SettingsLayout (twin of the web's settings-layout.js).
+    // D16: titles, labels and notes come from SettingsLayout (twin of the
+    // web's settings-layout.js); WP ANDROID-REDESIGN-1c: only this panel's
+    // blocks, the expert groups only on the Expert panel (shown only while
+    // the switch is on, see visibleSections).
     val blocks = ArrayList<SettingsBlock>()
-    for (section in SettingsLayout.SECTIONS) {
-        if (!section.form || section.id == "expert") continue
-        val rows = placed.sections[section.id].orEmpty()
-        if (rows.isNotEmpty()) blocks.add(SettingsBlock(section.id, section.title, rows))
-    }
-    // The switch is its own always-visible row, outside any collapsible block.
-    blocks.add(SettingsBlock(EXPERT_SWITCH_ID, "", emptyList()))
-    if (controller.expertOn) {
-        for (group in SettingsLayout.EXPERT_GROUPS) {
-            val rows = placed.expert[group.id].orEmpty()
-            if (rows.isNotEmpty()) blocks.add(SettingsBlock("expert_" + group.id, group.title, rows))
+    if (sectionId == EXPERT_SECTION) {
+        if (controller.expertOn) {
+            for (group in SettingsLayout.EXPERT_GROUPS) {
+                val rows = placed.expert[group.id].orEmpty()
+                if (rows.isNotEmpty()) blocks.add(SettingsBlock("expert_" + group.id, group.title, rows))
+            }
         }
+    } else {
+        val rows = placed.sections[sectionId].orEmpty()
+        if (rows.isNotEmpty()) blocks.add(SettingsBlock(sectionId, null, rows))
     }
 
     for (block in blocks) {
-        if (block.id == EXPERT_SWITCH_ID) {
-            ExpertSwitchRow(controller.expertOn) { on -> controller.setExpert(on) }
-            continue
-        }
-        val open = controller.isSectionOpen(block.id)
-        SettingsSectionHeader(block.title, open) { controller.setSectionOpen(block.id, !open) }
-        if (!open) continue
-        for (entry in block.rows) {
-            if (SettingsLayout.isPinned(entry)) {
-                PinnedSettingRow(entry)
-            } else if (entry.key == "auto_gc") {
-                AutoGcField(entry, controller.drafts["auto_gc"], response.readonly) { v ->
-                    controller.setDraft("auto_gc", SettingDraft.Text(v))
+        FieldCard(block.title) {
+            for (entry in block.rows) {
+                if (SettingsLayout.isPinned(entry)) {
+                    PinnedSettingRow(entry)
+                } else if (entry.key == "auto_gc") {
+                    AutoGcField(entry, controller.drafts["auto_gc"], response.readonly) { v ->
+                        controller.setDraft("auto_gc", SettingDraft.Text(v))
+                    }
+                } else if (entry.key == "sweep_include_cached") {
+                    SweepIncludeCachedField(
+                        entry = entry,
+                        draft = controller.drafts["sweep_include_cached"],
+                        readonly = response.readonly,
+                        onSelect = { v -> controller.setDraft("sweep_include_cached", SettingDraft.Text(v)) },
+                        onReset = { controller.resetDraft("sweep_include_cached") },
+                    )
+                } else if (entry.key == "webhook_events") {
+                    WebhookEventsField(entry, controller.drafts["webhook_events"], response.readonly) { v ->
+                        controller.setDraft("webhook_events", SettingDraft.EventsList(v))
+                    }
+                } else {
+                    val key = entry.key
+                    SettingTextField(
+                        entry = entry,
+                        draft = controller.drafts[key],
+                        label = SettingsLayout.fieldMeta(key).label,
+                        placeholder = SettingsLayout.placeholder(key),
+                        hint = SettingsLayout.offHint(key),
+                        readonly = response.readonly,
+                        onValueChange = { v -> controller.setDraft(key, SettingDraft.Text(v)) },
+                        onReset = { controller.resetDraft(key) },
+                    )
                 }
-            } else if (entry.key == "sweep_include_cached") {
-                SweepIncludeCachedField(
-                    entry = entry,
-                    draft = controller.drafts["sweep_include_cached"],
-                    readonly = response.readonly,
-                    onSelect = { v -> controller.setDraft("sweep_include_cached", SettingDraft.Text(v)) },
-                    onReset = { controller.resetDraft("sweep_include_cached") },
-                )
-            } else if (entry.key == "webhook_events") {
-                WebhookEventsField(entry, controller.drafts["webhook_events"], response.readonly) { v ->
-                    controller.setDraft("webhook_events", SettingDraft.EventsList(v))
-                }
-            } else {
-                val key = entry.key
-                SettingTextField(
-                    entry = entry,
-                    draft = controller.drafts[key],
-                    label = SettingsLayout.fieldMeta(key).label,
-                    placeholder = SettingsLayout.placeholder(key),
-                    hint = SettingsLayout.offHint(key),
-                    readonly = response.readonly,
-                    onValueChange = { v -> controller.setDraft(key, SettingDraft.Text(v)) },
-                    onReset = { controller.resetDraft(key) },
-                )
+                SettingHelpRow(entry)
             }
-            SettingHelpRow(entry)
-        }
-        if (block.id == "window" && entriesByKey.containsKey("schedule_window")) {
-            SweepStatusBlock(controller.schedule)
+            if (block.id == "window" && entriesByKey.containsKey("schedule_window")) {
+                SweepStatusBlock(controller.schedule)
+            }
         }
     }
 
@@ -371,30 +446,24 @@ private fun captionFor(entry: SettingInfoOut): String {
     return stringResource(R.string.settings_caption, source, applies)
 }
 
-/** One collapsible block of the form: a section or an expert group. */
-private const val EXPERT_SWITCH_ID = "expert_switch"
+/** One field card of the form: a section's rows, or an expert group with its [title]. */
+private data class SettingsBlock(val id: String, val title: String?, val rows: List<SettingInfoOut>)
 
-private data class SettingsBlock(val id: String, val title: String, val rows: List<SettingInfoOut>)
-
+/** A field card (web `.fcard`): surface, rounded, its rows spaced; [title] on top when set. */
 @Composable
-private fun SettingsSectionHeader(title: String, open: Boolean, onToggle: () -> Unit) {
-    val description = if (open) {
-        stringResource(R.string.settings_section_open, title)
-    } else {
-        stringResource(R.string.settings_section_closed, title)
-    }
-    TextButton(
-        onClick = onToggle,
-        modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
+private fun FieldCard(title: String?, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(VaultColors.Surface, RoundedCornerShape(12.dp))
+            .border(1.dp, VaultColors.LineSoft, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(if (open) "-" else "+", style = MaterialTheme.typography.titleMedium)
+        if (title != null) {
+            Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         }
+        content()
     }
 }
 
@@ -695,7 +764,7 @@ private fun SteamIdentitySection(
     onSignInSteamClick: () -> Unit,
     demoMode: Boolean,
 ) {
-    Text(stringResource(R.string.settings_section_steam), style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.settings_section_steam), style = MaterialTheme.typography.titleSmall)
 
     if (demoMode) {
         Text(
@@ -894,7 +963,6 @@ private fun LibraryPreviewResult(preview: LibraryPreview?, error: LibraryLookupE
  */
 @Composable
 private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutines.CoroutineScope) {
-    Text(stringResource(R.string.settings_section_about), style = MaterialTheme.typography.titleMedium)
     when {
         controller.aboutFailure == AboutLoadFailure.TOO_OLD -> Text(
             stringResource(R.string.settings_about_too_old),
@@ -1050,7 +1118,7 @@ private fun ConnectionSection(
     demoMode: Boolean,
 ) {
     var showDisconnectConfirm by remember { mutableStateOf(false) }
-    Text(stringResource(R.string.settings_section_connection), style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.settings_section_connection), style = MaterialTheme.typography.titleSmall)
 
     // WP APP-DEMO: reuses the SAME Reconnect/Disconnect actions below rather
     // than adding a dedicated "exit demo mode" control (WP brief constraint

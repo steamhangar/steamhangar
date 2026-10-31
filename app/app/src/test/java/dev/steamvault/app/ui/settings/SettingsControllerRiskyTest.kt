@@ -142,19 +142,30 @@ class SettingsControllerRiskyTest {
         assertNull(c.saveError)
     }
 
+    /** WP ANDROID-REDESIGN-1c: one panel at a time, chosen per visit (web
+     * `activeSection`); only the expert switch is remembered. */
     @Test
-    fun `sections and the expert switch are remembered`() {
+    fun `the selected panel is per visit, the expert switch is remembered`() {
         val demo = DemoState.fresh()
         val prefs = InMemorySettingsViewPreferences()
         val first = controller(RiskyRepo(DemoSettingsRepository(demo)), demo, prefs)
-        assertTrue("the vault section is open by default", first.isSectionOpen("vault"))
+        assertEquals("Vault & connection first", "vault", first.section)
         assertFalse(first.expertOn)
-        assertTrue("expert groups are open by default", first.isSectionOpen("expert_bandwidth"))
-        assertFalse("other sections are closed by default", first.isSectionOpen("disk"))
-        first.setSectionOpen("vault", false)
+        first.selectSection("expert")
+        assertEquals("no Expert panel while the switch is off", "vault", first.section)
+        first.selectSection("no-such-section")
+        assertEquals("vault", first.section)
+        first.selectSection("disk")
+        assertEquals("disk", first.section)
         first.setExpert(true)
+        first.selectSection("expert")
+        assertEquals("expert", first.section)
+        first.setExpert(false)
+        assertEquals("switching it off leaves the Expert panel", "vault", first.section)
+        first.setExpert(true)
+        first.selectSection("about")
         val second = controller(RiskyRepo(DemoSettingsRepository(demo)), demo, prefs)
-        assertFalse(second.isSectionOpen("vault"))
+        assertEquals("a new visit starts on the first panel", "vault", second.section)
         assertTrue(second.expertOn)
     }
 }
