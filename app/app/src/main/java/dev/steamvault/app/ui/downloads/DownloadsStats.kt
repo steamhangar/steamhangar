@@ -469,7 +469,6 @@ private fun HeroTileView(tile: HeroTile, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.labelSmall,
             letterSpacing = 0.8.sp,
             color = VaultColors.Dim,
-            maxLines = 1,
         )
         Text(
             buildAnnotatedString {
