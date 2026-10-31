@@ -11,6 +11,7 @@ import dev.steamvault.app.net.model.RunnerTrafficOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
 import dev.steamvault.app.net.model.SummaryOut
+import dev.steamvault.app.net.model.ThroughputNowOut
 import dev.steamvault.app.net.model.ThroughputOut
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -381,7 +382,7 @@ class TrafficViewTest {
         assertEquals(listOf("Live", "1 h", "6 h", "24 h", "7 days", "30 days", "All"), STATS_RANGES.map { RANGE_LABELS.getValue(it) })
         assertEquals("in the last hour", RANGE_PHRASES.getValue("1h"))
         assertEquals("in the last 6 hours", RANGE_PHRASES.getValue("6h"))
-        assertEquals("6h", DEFAULT_STATS_RANGE)
+        assertEquals("live", DEFAULT_STATS_RANGE)
         assertTrue(isStatsRange("1h"))
         assertFalse(isStatsRange("1y"))
         assertFalse(isRange("1h"))
@@ -394,12 +395,12 @@ class TrafficViewTest {
         LivePointOut(t = t, bucket_seconds = bucket, bytes_per_second = bps, bytes_served = (bps * bucket).toLong())
 
     @Test
-    fun `WP GRAPH-LIVE -- Live is the first range, the default stays 6 h, Clients and History do not get it`() {
+    fun `WP GRAPH-LIVE -- Live is the first range and the default (ANDROID-DL-1), Clients and History do not get it`() {
         assertEquals("live", STATS_RANGES.first())
         assertEquals("Live", RANGE_LABELS.getValue("live"))
         assertEquals("in the last hour", RANGE_PHRASES.getValue("live"))
         assertEquals("live", LIVE_RANGE)
-        assertEquals("6h", DEFAULT_STATS_RANGE)
+        assertEquals("live", DEFAULT_STATS_RANGE)
         assertTrue(isStatsRange("live"))
         assertFalse(isRange("live"))
         assertFalse(TRAFFIC_RANGES.contains("live"))
@@ -477,5 +478,110 @@ class TrafficViewTest {
         val stale = mergeLive(summary, LiveOut(event_feed = feed("stale"), current = LiveCurrentOut(bytes_per_second = 1.0)))
         assertFalse(stale.live)
         assertEquals(summary.current, stale.current)
+    }
+
+    // ---- WP ANDROID-DL-1: one "now" on every range ------------------------
+
+    private fun nowBlock(bps: Double, clients: Int? = 3, runnerActive: Boolean? = true, window: Int? = 17) = ThroughputNowOut(
+        current = LiveCurrentOut(
+            bytes_per_second = bps,
+            runner_bytes_per_second = 1 * mib,
+            window_start = "2026-10-14T11:59:43Z",
+            window_end = "2026-10-14T12:00:00Z",
+            window_seconds = window,
+            runner_hit_bytes_per_second = 1 * mib,
+            runner_miss_bytes_per_second = 0.0,
+        ),
+        active_clients = clients,
+        runner_active = runnerActive,
+        window_seconds = window,
+        live_since = "2026-10-14T11:45:00Z",
+    )
+
+    @Test
+    fun `MUTATION TARGET -- mergeNow takes speed, runner flag and Loading now from the now block`() {
+        val swept = throughput("ok", range = "1h").copy(runner_active_now = false, now = nowBlock(12 * mib))
+        val merged = mergeNow(swept)
+        assertEquals("1h", merged.range)
+        assertTrue(merged.live)
+        assertEquals(12 * mib, merged.current!!.bytes_per_second, 0.0)
+        assertEquals(1 * mib, merged.current!!.runner_hit_bytes_per_second!!, 0.0)
+        assertEquals(3, merged.active_clients_now)
+        assertEquals(17, merged.active_window_seconds)
+        assertEquals(true, merged.runner_active_now)
+        assertEquals(swept.summary, merged.summary)
+        val tiles = headerTiles(merged)!!
+        assertEquals("12.0 MB/s", tiles.first { it.key == "current" }.value)
+        assertEquals(
+            "all traffic incl. prefill runner, last 17 s · 1.0 MB/s by the prefill runner",
+            tiles.first { it.key == "current" }.detail,
+        )
+        val clients = tiles.first { it.key == "clients" }
+        assertEquals("3", clients.value)
+        assertEquals("machines the cache served in the last 17 s", clients.detail)
+    }
+
+    @Test
+    fun `mergeNow leaves the answer alone without a now block, without its current, or with the feed not ok`() {
+        val plain = throughput("ok", range = "6h")
+        assertEquals(plain, mergeNow(plain))
+        val noCurrent = plain.copy(now = ThroughputNowOut(current = null, active_clients = 5))
+        assertEquals(noCurrent, mergeNow(noCurrent))
+        val stale = throughput("stale", range = "6h").copy(now = nowBlock(12 * mib))
+        assertEquals(stale, mergeNow(stale))
+        // The swept wording stays for an answer without `now` (a server before rc21).
+        val clients = headerTiles(mergeNow(plain))!!.first { it.key == "clients" }
+        assertEquals("machines with cache traffic in the last 15 min", clients.detail)
+    }
+
+    @Test
+    fun `mergeNow keeps the swept count and runner flag when the now block lacks them`() {
+        val swept = throughput("ok", range = "1h").copy(runner_active_now = false, now = nowBlock(12 * mib, clients = null, runnerActive = null))
+        val merged = mergeNow(swept)
+        assertEquals(12 * mib, merged.current!!.bytes_per_second, 0.0)
+        assertEquals(2, merged.active_clients_now)
+        assertNull(merged.active_window_seconds)
+        assertEquals(false, merged.runner_active_now)
+    }
+
+    @Test
+    fun `LIVE-DELAY-1 -- mergeLive takes Loading now from the live answer over its window`() {
+        val summary = throughput("ok", range = "1h")
+        val live = LiveOut(
+            event_feed = feed("ok"),
+            current = LiveCurrentOut(bytes_per_second = 10 * mib, window_seconds = 18, runner_hit_bytes_per_second = 0.0),
+            active_clients = 5,
+            active_window_seconds = 18,
+            active_window_minutes = 1,
+        )
+        val merged = mergeLive(summary, live)
+        assertEquals(5, merged.active_clients_now)
+        assertEquals(18, merged.active_window_seconds)
+        assertEquals(1, merged.active_window_minutes)
+        assertEquals(0.0, merged.current!!.runner_hit_bytes_per_second!!, 0.0)
+        assertEquals("machines the cache served in the last 18 s", headerTiles(merged)!!.first { it.key == "clients" }.detail)
+    }
+
+    @Test
+    fun `LIVE-DELAY-1 -- a live answer without active_clients (older server) keeps the summary's count`() {
+        val summary = throughput("ok", range = "1h")
+        val live = LiveOut(event_feed = feed("ok"), current = LiveCurrentOut(bytes_per_second = 10 * mib, window_seconds = 18))
+        val merged = mergeLive(summary, live)
+        assertTrue(merged.live)
+        assertEquals(2, merged.active_clients_now)
+        assertNull(merged.active_window_seconds)
+        assertEquals("machines with cache traffic in the last 15 min", headerTiles(merged)!!.first { it.key == "clients" }.detail)
+        // An rc20 server sends only the deprecated minutes next to the count: no seconds window then.
+        val rc20 = mergeLive(summary, live.copy(active_clients = 4, active_window_minutes = 5))
+        assertEquals(4, rc20.active_clients_now)
+        assertNull(rc20.active_window_seconds)
+        assertEquals("machines with cache traffic in the last 5 min", headerTiles(rc20)!!.first { it.key == "clients" }.detail)
+    }
+
+    @Test
+    fun `activeWindowSeconds ignores a missing or non-positive window`() {
+        assertNull(activeWindowSeconds(null))
+        assertNull(activeWindowSeconds(throughput("ok").copy(active_window_seconds = 0)))
+        assertEquals(17, activeWindowSeconds(throughput("ok").copy(active_window_seconds = 17)))
     }
 }

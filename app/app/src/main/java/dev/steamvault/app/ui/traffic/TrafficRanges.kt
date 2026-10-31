@@ -15,9 +15,10 @@ class TrafficRanges {
     /** Clients page, web `views/clients.js` default. */
     var clients: String = "7d"
 
-    /** Downloads statistics header, web `traffic.range` default (6 h, WP
-     * GRAPH-ZOOM). Kept for the Activity's lifetime like the other ranges;
-     * the web additionally remembers it per browser. */
+    /** Downloads statistics header, web `traffic.range` default (live, WP
+     * LIVE-DELAY-1; Android since ANDROID-DL-1). Kept for the Activity's
+     * lifetime like the other ranges; the web additionally remembers it per
+     * browser. */
     var statistics: String = DEFAULT_STATS_RANGE
 
     /** Downloads history filter, web `history.range` default. */

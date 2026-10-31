@@ -102,6 +102,8 @@ class TrafficWebTwinTest {
                 "`\${scope} · \${runner} by the prefill runner`",
                 "`clients only, runner excluded (runner: \${rate})`",
                 "machines with cache traffic in the last \${windowMinutes} min",
+                // WP LOADING-NOW-1 (ANDROID-DL-1): a live count's window in seconds.
+                "machines the cache served in the last \${windowSeconds} s",
             ),
         )
     }
@@ -126,7 +128,29 @@ class TrafficWebTwinTest {
             ),
         )
         assertQuoted("api.js", listOf("/v1/throughput/live"))
-        // The web default is `live` since rc20 (LIVE-DELAY-1); the Android default follows in rc21.
+        // WP ANDROID-DL-1: the Android default follows the web's (LIVE-DELAY-1).
+        assertFragments("lib/traffic-view.js", listOf("export const DEFAULT_STATS_RANGE = \"$DEFAULT_STATS_RANGE\";"))
+    }
+
+    /** WP ANDROID-DL-1: the "now" merges read the same fields as the web's. */
+    @Test
+    fun `now merges`() {
+        assertFragments(
+            "lib/traffic-view.js",
+            listOf(
+                // mergeLive: "Loading now" from the ring, its window in seconds.
+                "if (Number.isInteger(live.active_clients)) {\n      merged.active_clients_now = live.active_clients;",
+                "merged.active_window_seconds = Number.isInteger(live.active_window_seconds) ? live.active_window_seconds : null;",
+                // mergeNow: the `now` block, only with an ok feed.
+                "if (!now || !now.current || feedState(throughput) !== \"ok\") return throughput;",
+                "const merged = { ...throughput, current: now.current, live: true };",
+                "merged.active_clients_now = now.active_clients;",
+                "merged.active_window_seconds = Number.isInteger(now.window_seconds) ? now.window_seconds : null;",
+                "if (typeof now.runner_active === \"boolean\") merged.runner_active_now = now.runner_active;",
+            ),
+        )
+        // The page merges every persisted range's answer with its `now` block.
+        assertFragments("views/downloads.js", listOf("return { range, throughput: mergeNow(throughput), series };"))
     }
 
     @Test

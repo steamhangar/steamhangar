@@ -1,6 +1,10 @@
 package dev.steamvault.app.ui.downloads
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
@@ -35,6 +40,10 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.repo.TrafficRepository
+import dev.steamvault.app.ui.downloads.logic.HISTORY_FIRST_PAGE
+import dev.steamvault.app.ui.downloads.logic.nextShown
+import dev.steamvault.app.ui.status.StatusIcon
+import dev.steamvault.app.ui.status.StatusIconSize
 import dev.steamvault.app.ui.theme.VaultColors
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
@@ -49,11 +58,17 @@ import dev.steamvault.app.ui.traffic.logic.StatTile
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
+import dev.steamvault.app.ui.traffic.logic.HeroStatus
+import dev.steamvault.app.ui.traffic.logic.heroStatus
+import dev.steamvault.app.ui.traffic.logic.LEGEND_INTERNET
+import dev.steamvault.app.ui.traffic.logic.LEGEND_SERVED
+import dev.steamvault.app.ui.traffic.logic.splitGeometry
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
 import dev.steamvault.app.ui.traffic.logic.liveSeries
 import dev.steamvault.app.ui.traffic.logic.mergeLive
+import dev.steamvault.app.ui.traffic.logic.mergeNow
 import dev.steamvault.app.ui.traffic.logic.pollNote
 import dev.steamvault.app.ui.traffic.logic.seriesHighestText
 import dev.steamvault.app.ui.traffic.logic.seriesLabel
@@ -72,9 +87,12 @@ import kotlinx.coroutines.launch
 /** One answer of the statistics poll: header figures and graph, same range. */
 data class StatsAnswer(val throughput: ThroughputOut, val series: SeriesOut)
 
-/** The header's poll, default range 6 h (web `traffic.range`). Figures
- * exist unless [headerTiles] has none (feed disabled). Accepts the 1 h and
- * 6 h ranges too (WP GRAPH-ZOOM). */
+/** The header's poll, default range live (web `traffic.range`, WP
+ * LIVE-DELAY-1). Figures exist unless [headerTiles] has none (feed
+ * disabled). Accepts the 1 h and 6 h ranges too (WP GRAPH-ZOOM). A
+ * persisted range's answer is merged with its `now` block ([mergeNow], WP
+ * GRAPH-RECENT-1), so speed, pill and "Loading now" are the live tier's on
+ * every range. */
 fun downloadsStatsPoll(
     repository: TrafficRepository,
     initialRange: String = DEFAULT_STATS_RANGE,
@@ -103,7 +121,7 @@ fun downloadsStatsPoll(
                 StatsAnswer(mergeLive(cached, live), liveSeries(live))
             } else {
                 summary = null
-                StatsAnswer(repository.throughput(range), repository.series(range))
+                StatsAnswer(mergeNow(repository.throughput(range)), repository.series(range))
             }
         },
         hasFigures = { headerTiles(it.throughput) != null },
@@ -134,11 +152,20 @@ fun jobSpeedLines(poll: TrafficPoll<StatsAnswer>): Map<Int, String> {
  * the same rule client-side (`filterJobsByRange`), so a job that finishes
  * while the screen is open appears at once. A failed fetch keeps the
  * poll's rows (the filter still applies to them).
+ *
+ * WP ANDROID-DL-1 (web DOWNLOADS-3): [shown] is how many rows are on screen
+ * (first page, then +20 per "Show more", `logic/HistoryPaging.kt`);
+ * [loaded] says the range fetch has answered at least once (a failure
+ * counts, as on the web), so the subline may count the list.
  */
 class HistoryFilter(private val repository: TrafficRepository, initialRange: String = "all") {
     var range by mutableStateOf(initialRange)
         private set
     var jobs by mutableStateOf<List<JobSummary>>(emptyList())
+        private set
+    var shown by mutableIntStateOf(HISTORY_FIRST_PAGE)
+        private set
+    var loaded by mutableStateOf(false)
         private set
     private var gen by mutableIntStateOf(0)
 
@@ -152,13 +179,21 @@ class HistoryFilter(private val repository: TrafficRepository, initialRange: Str
         }
         if (mine != gen) return // a newer range was chosen meanwhile
         jobs = items
+        loaded = true
     }
 
     fun selectRange(scope: CoroutineScope, newRange: String) {
         if (!isRange(newRange) || newRange == range) return
         range = newRange
         jobs = emptyList()
+        shown = HISTORY_FIRST_PAGE
+        loaded = false
         scope.launch { load() }
+    }
+
+    /** "Show N more": 20 more rows. */
+    fun showMore() {
+        shown = nextShown(shown)
     }
 }
 
@@ -186,6 +221,8 @@ fun DownloadsStatsHeader(
         loadingText = LOADING_STATISTICS_TEXT,
     )
     val tiles = if (poll.unsupported) null else headerTiles(throughput, rateCap)
+    // WP ANDROID-DL-1 (web `heroModel`): the pill shows only with figures.
+    val status = if (tiles != null) heroStatus(throughput?.current) else null
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // No figures (feed disabled, old server): no range to choose either.
         if (!poll.noFigures) {
@@ -207,8 +244,26 @@ fun DownloadsStatsHeader(
                 modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
+        if (status != null) StatusPill(status)
         if (tiles != null) StatTiles(tiles)
         ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported, nowMs = nowMs)
+    }
+}
+
+/**
+ * WP ANDROID-DL-1: the status pill (web hero `stats-pill`): Serving /
+ * Downloading / Verifying / Idle with its status icon. TalkBack reads the
+ * word once; the icon's own kind label ("Cached" for Serving) would
+ * contradict it.
+ */
+@Composable
+private fun StatusPill(status: HeroStatus) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.clearAndSetSemantics { contentDescription = status.text },
+    ) {
+        StatusIcon(kind = status.kind, size = StatusIconSize.SMALL)
+        Text(status.text, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 4.dp))
     }
 }
 
@@ -243,6 +298,28 @@ private fun StatTileView(tile: StatTile, modifier: Modifier = Modifier) {
     }
 }
 
+/** WP ANDROID-DL-1: the split graph's legend (web `graph-legend`), decoration
+ * like the axis captions. */
+@Composable
+private fun GraphLegend() {
+    Row(
+        modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        for ((color, text) in listOf(VaultColors.StatusOk to LEGEND_SERVED, VaultColors.Accent to LEGEND_INTERNET)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).background(color, CircleShape))
+                Text(
+                    text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+        }
+    }
+}
+
 private const val GRAPH_W = 300f
 private const val GRAPH_H = 60f
 
@@ -251,6 +328,10 @@ private const val GRAPH_H = 60f
  * oldest left. Shown only when [graphGeometryToShow] says so. The canvas
  * is an image named by [seriesLabel]; the captions under it are
  * decoration (web `aria-hidden`), the label already says the same.
+ *
+ * WP ANDROID-DL-1 (web WEB-FIX-20.2 + RUNNER-SPLIT-1): two stacked bands,
+ * "served from cache" (green, client HITs plus the runner's cache reads)
+ * under "from the internet" (accent), with a small legend ([splitGeometry]).
  */
 @Composable
 private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupported: Boolean, nowMs: () -> Long) {
@@ -258,6 +339,7 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
     val shown = series?.let { it.copy(points = trimSeries(it.points)) } ?: return
     val geo = graphGeometryToShow(shown, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return
     val label = seriesLabel(shown, geo.maxBytesPerSecond)
+    val split = splitGeometry(shown.points, GRAPH_W, GRAPH_H)
     Column(modifier = Modifier.fillMaxWidth()) {
         Canvas(
             modifier = Modifier
@@ -270,18 +352,40 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
         ) {
             val sx = size.width / GRAPH_W
             val sy = size.height / GRAPH_H
-            fun Path.trace() = geo.xs.forEachIndexed { i, x ->
-                if (i == 0) moveTo(x * sx, geo.ys[i] * sy) else lineTo(x * sx, geo.ys[i] * sy)
+            fun Path.trace(ys: List<Float>) = geo.xs.forEachIndexed { i, x ->
+                if (i == 0) moveTo(x * sx, ys[i] * sy) else lineTo(x * sx, ys[i] * sy)
             }
-            val line = Path().apply { trace() }
-            val area = Path().apply {
-                trace()
-                lineTo(geo.xs.last() * sx, size.height)
-                lineTo(geo.xs.first() * sx, size.height)
-                close()
+            val stroke = Stroke(width = 1.5.dp.toPx(), join = StrokeJoin.Round)
+            if (split == null) {
+                val line = Path().apply { trace(geo.ys) }
+                val area = Path().apply {
+                    trace(geo.ys)
+                    lineTo(geo.xs.last() * sx, size.height)
+                    lineTo(geo.xs.first() * sx, size.height)
+                    close()
+                }
+                drawPath(area, color = VaultColors.AccentGlow)
+                drawPath(line, color = VaultColors.Accent, style = stroke)
+            } else {
+                // Served at the bottom, the internet band on top; lines over fills.
+                val totalLine = Path().apply { trace(split.totalYs) }
+                val servedLine = Path().apply { trace(split.servedYs) }
+                val internetArea = Path().apply {
+                    trace(split.totalYs)
+                    for (i in split.xs.indices.reversed()) lineTo(split.xs[i] * sx, split.servedYs[i] * sy)
+                    close()
+                }
+                val servedArea = Path().apply {
+                    trace(split.servedYs)
+                    lineTo(split.xs.last() * sx, size.height)
+                    lineTo(split.xs.first() * sx, size.height)
+                    close()
+                }
+                drawPath(internetArea, color = VaultColors.AccentGlow)
+                drawPath(servedArea, color = VaultColors.StatusOk.copy(alpha = 0.16f))
+                drawPath(totalLine, color = VaultColors.Accent, style = stroke)
+                drawPath(servedLine, color = VaultColors.StatusOk, style = stroke)
             }
-            drawPath(area, color = VaultColors.AccentGlow)
-            drawPath(line, color = VaultColors.Accent, style = Stroke(width = 1.5.dp.toPx(), join = StrokeJoin.Round))
         }
         Row(
             modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
@@ -291,5 +395,6 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
                 Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (split != null) GraphLegend()
     }
 }
