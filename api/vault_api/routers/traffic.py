@@ -25,6 +25,13 @@ and 5-minute buckets (``1h``/``6h``/``24h``), so the graph shows the minutes
 since the last sweep and agrees with the header. The range's summary tiles
 (served, average, peak, hit rate) stay swept, as in the live view.
 
+WP NOW-LOADING-1: ``now.loading_sources`` (``/v1/throughput``) and
+``loading_sources`` (``/v1/throughput/live``, same rows) say WHAT loads in
+that window: one row per source -- the prefill runner with its running job
+(or none) and its phase (download / verify), each client as the Clients page
+names it with the games it loads, and the bytes no address explains. Speed,
+counts and rows come from one read of the ring (``LiveTier.now_view``).
+
 WP CLIENTS-LIVE-1: the clients overview polls the live tier too. Each entry
 carries ``live_now`` (the shape of ``loading_now``, read from the ring per
 address instead of the swept window, over the current-speed window only) and
@@ -262,6 +269,64 @@ class LiveCurrentOut(BaseModel):
     runner_miss_bytes_per_second: float = 0.0
 
 
+class LoadingJobOut(BaseModel):
+    """The prefill job the runner row belongs to (WP NOW-LOADING-1)."""
+
+    job_id: int
+    appid: int
+    name: str | None
+    #: ``cancel`` / ``pause`` while an operator's stop request waits for the
+    #: runner to end SteamPrefill (the job is still ``running`` until then);
+    #: null otherwise.
+    stop_request: str | None = None
+
+
+class LoadingSourceOut(BaseModel):
+    """One source of the traffic in the live "now" window (WP NOW-LOADING-1):
+    what is loading right now, and for whom.
+
+    ``runner``: the server's prefill runner (at most one row, all its
+    addresses together); ``job`` is the running prefill job, null when the
+    runner has traffic in the window but no prefill job is running (e.g. the
+    last lines of a job that just ended or was cancelled). ``client``: one
+    row per client as the Clients page lists it (an agent with all its
+    addresses, or one agentless address). ``unattributed``: served bytes in
+    the window that no address explains (more distinct addresses in one
+    5-second cell than the live tier keeps apart); no name, no games.
+    """
+
+    kind: Literal["runner", "client", "unattributed"]
+    #: The Clients overview's key: ``runner``, ``agent:<client_id>``,
+    #: ``addr:<address>``; ``unattributed`` for that row.
+    key: str
+    #: The Clients page's ``display_name`` ("Prefill runner" for the runner);
+    #: null for the unattributed row.
+    name: str | None
+    addresses: list[str]
+    #: False for an address the Clients page does not list yet (no agent, no
+    #: name, no swept traffic in the listing period): a new device loading
+    #: before its first sweep. True otherwise; an operator-named address is
+    #: known even without any swept traffic. Known gap: runner traffic before
+    #: the first sweep of a UTC day is outside every runner window yet and
+    #: shows as such a row with the runner's address (api/README.md).
+    known: bool = True
+    #: Served bytes per second over the window, and their HIT (from the
+    #: cache's disk) / MISS (from the internet) parts; BYPASS is in neither.
+    bytes_per_second: float
+    hit_bytes_per_second: float
+    miss_bytes_per_second: float
+    #: Games with bytes in the window (``depot_app_map``: exactly one mapped
+    #: app per depot), each with its speed, fastest first.
+    apps: list[LoadingAppOut]
+    #: Bytes per second on depots linked to no single game, or without one.
+    unattributed_bytes_per_second: float
+    #: Runner only: ``verify`` when every runner byte in the window was a
+    #: cache HIT (the pill's "Verifying" rule), else ``download``.
+    phase: Literal["download", "verify"] | None = None
+    #: Runner only: the running prefill job, or null (see above).
+    job: LoadingJobOut | None = None
+
+
 class ThroughputNowOut(BaseModel):
     """The page's "now" figures from the live tier (WP GRAPH-RECENT-1,
     LOADING-NOW-1): seconds old, not a sweep. One window for all of them,
@@ -277,6 +342,11 @@ class ThroughputNowOut(BaseModel):
     window_seconds: int
     #: Minutes from here on are fully in the ring (``/v1/throughput/live``).
     live_since: str | None
+    #: WP NOW-LOADING-1: what is loading in the window, one row per source
+    #: (runner first, then clients by speed, unattributed last); empty when
+    #: nothing loads. Same shape as ``/v1/throughput/live``'s field of the
+    #: same name. Absent before rc21.
+    loading_sources: list[LoadingSourceOut] | None = None
 
 
 class ThroughputOut(BaseModel):
@@ -665,7 +735,7 @@ def get_throughput(
     # The ring is read after the connection is closed: tailing the log never
     # holds SQLite open.
     if feed_on and window is not None:
-        now_out = _ring_now(ring, settings, now, windows)
+        now_out = _ring_now(ring, settings, now, windows, open_db)
     return ThroughputOut(
         event_feed=feed,
         range=range,
@@ -687,21 +757,169 @@ def _ring_now(
     settings: Settings,
     now: datetime,
     windows: tuple[runner_identity.RunnerWindow, ...],
+    open_db: DbOpener,
 ) -> ThroughputNowOut:
     """Arm and tail the live tier, then read the "now" figures from it."""
     ring.touch(now)
     ring.refresh(settings.event_log_path, now)
-    is_runner = _runner_test(windows)
-    current = ring.current(now, is_runner)
-    # One read of the window for both figures (same rule as the Clients page).
-    clients, runner = live_tier.loading_counts(ring.addr_activity(now, is_runner)[0])
+    # One read of the window for every figure (WP NOW-LOADING-1): speed,
+    # counts (the Clients page's rule) and the per-source rows agree.
+    view = ring.now_view(now, _runner_test(windows))
+    clients, runner = live_tier.loading_counts(view.activity)
     return ThroughputNowOut(
-        current=_live_current_out(current),
+        current=_live_current_out(view.current),
         active_clients=clients,
         runner_active=runner,
-        window_seconds=current.window_seconds,
+        window_seconds=view.current.window_seconds,
         live_since=ring.covered_from(),
+        loading_sources=_loading_sources(open_db, settings, view, now),
     )
+
+
+def _running_prefill_job(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """The running prefill job (one runner, so at most one in practice; the
+    oldest if a crash ever left two)."""
+    row: sqlite3.Row | None = conn.execute(
+        "SELECT id, appid, stop_request FROM jobs WHERE status = ? AND type = ? "
+        "ORDER BY id LIMIT 1",
+        (STATUS_RUNNING, JOB_TYPE_PREFILL),
+    ).fetchone()
+    return row
+
+
+def _loading_sources(
+    open_db: DbOpener,
+    settings: Settings,
+    view: live_tier.NowView,
+    now: datetime,
+) -> list[LoadingSourceOut]:
+    """WP NOW-LOADING-1: ``view`` as one row per source (``LoadingSourceOut``).
+
+    Names come from the same lookups the Clients overview uses
+    (``address_owners``, ``client_names``, ``depot_owners`` + ``attribute``,
+    ``app_names``). Nothing loads -> ``[]`` without touching SQLite, so an
+    idle poll costs what it did before.
+    """
+    seconds = view.seconds
+    # Overflow bytes can come without any listed address: a cell whose 64
+    # address slots went to requests without served bytes (heartbeats) and
+    # whose served bytes then fell into the overflow entry.
+    if not view.activity and view.overflow_bytes <= 0:
+        return []
+    runner_parts = [(a, e) for (a, r), e in view.activity.items() if r]
+    client_parts = {a: e for (a, r), e in view.activity.items() if not r}
+    listing_since = traffic.bucket_iso(
+        now - timedelta(days=ADDRESS_LISTING_DAYS), traffic.TIER_1H
+    )
+    with open_db() as conn:
+        depot_map = traffic.depot_owners(
+            conn, {d for entry in view.activity.values() for d in entry.depots}
+        )
+        job = _running_prefill_job(conn) if runner_parts else None
+        owners: dict[str, str] = {}
+        name_map: dict[str, str] = {}
+        listed: set[str] = set()
+        if client_parts:
+            owners = agent_reports.address_owners(conn, peer_hops.forwarding_hop_filter())
+            name_map = client_names.ip_names(conn)
+            listed = traffic.addrs_listed(
+                conn, [a for a in client_parts if a not in owners], listing_since
+            )
+        app_ids = {apps[0] for apps in depot_map.values() if len(apps) == 1}
+        if job is not None:
+            app_ids.add(int(job["appid"]))
+        names = traffic.app_names(
+            conn, app_ids, oracle_enabled=settings.manifest_oracle_enabled
+        )
+
+    def row(
+        kind: Literal["runner", "client"],
+        key: str,
+        name: str,
+        parts: list[tuple[str, live_tier.AddrActivity]],
+        known: bool = True,
+    ) -> LoadingSourceOut:
+        total = sum(e.bytes_served for _a, e in parts)
+        hit = sum(e.hit_bytes for _a, e in parts)
+        merged: dict[int, tuple[int, str]] = {}
+        for _addr, entry in parts:
+            for depotid, size in entry.depots.items():
+                merged[depotid] = (merged.get(depotid, (0, ""))[0] + size, "")
+        attribution = traffic.attribute(merged, depot_map)
+        attributed = sum(app.bytes_served for app in attribution.apps)
+        return LoadingSourceOut(
+            kind=kind,
+            key=key,
+            name=name,
+            addresses=sorted(a for a, _e in parts),
+            known=known,
+            bytes_per_second=total / seconds,
+            hit_bytes_per_second=hit / seconds,
+            miss_bytes_per_second=sum(e.miss_bytes for _a, e in parts) / seconds,
+            apps=[
+                LoadingAppOut(
+                    appid=app.appid,
+                    name=names.get(app.appid),
+                    bytes_per_second=app.bytes_served / seconds,
+                )
+                for app in attribution.apps
+            ],
+            unattributed_bytes_per_second=max(0, total - attributed) / seconds,
+            # The pill's rule (``heroStatus``): all runner bytes were HITs.
+            phase=("verify" if 0 < total <= hit else "download") if kind == "runner" else None,
+        )
+
+    out: list[LoadingSourceOut] = []
+    if runner_parts:
+        runner_row = row("runner", "runner", runner_identity.DISPLAY_NAME, runner_parts)
+        if job is not None:
+            appid = int(job["appid"])
+            stop = job["stop_request"]
+            runner_row.job = LoadingJobOut(
+                job_id=int(job["id"]),
+                appid=appid,
+                name=names.get(appid),
+                stop_request=str(stop) if stop is not None else None,
+            )
+        out.append(runner_row)
+
+    groups: dict[str, list[tuple[str, live_tier.AddrActivity]]] = {}
+    for addr, entry in client_parts.items():
+        owner = owners.get(addr)
+        groups.setdefault(f"agent:{owner}" if owner else f"addr:{addr}", []).append((addr, entry))
+    clients: list[LoadingSourceOut] = []
+    for key, parts in groups.items():
+        if key.startswith("agent:"):
+            client_id = key[len("agent:"):]
+            named = client_names.resolve_agent(name_map, owners, client_id)
+            clients.append(row("client", key, named.display_name, parts))
+        else:
+            addr = parts[0][0]
+            named = client_names.resolve_address(name_map, addr)
+            clients.append(
+                row(
+                    "client", key, named.display_name, parts,
+                    known=named.name is not None or addr in listed,
+                )
+            )
+    clients.sort(key=lambda item: (-item.bytes_per_second, item.key))
+    out.extend(clients)
+
+    if view.overflow_bytes > 0:
+        out.append(
+            LoadingSourceOut(
+                kind="unattributed",
+                key="unattributed",
+                name=None,
+                addresses=[],
+                bytes_per_second=view.overflow_bytes / seconds,
+                hit_bytes_per_second=view.overflow_hit_bytes / seconds,
+                miss_bytes_per_second=view.overflow_miss_bytes / seconds,
+                apps=[],
+                unattributed_bytes_per_second=view.overflow_bytes / seconds,
+            )
+        )
+    return out
 
 
 #: WP GRAPH-RECENT-1: the tiers whose newest buckets the ring can hold (a
@@ -867,6 +1085,9 @@ class LiveOut(BaseModel):
     #: Deprecated since rc21: the window rounded up to whole minutes (1);
     #: read ``active_window_seconds``.
     active_window_minutes: int = 1
+    #: WP NOW-LOADING-1: as ``/v1/throughput``'s ``now.loading_sources``
+    #: (the same window, the same rows). Null unless the feed is ``ok``.
+    loading_sources: list[LoadingSourceOut] | None = None
     #: Oldest first, zero-filled, ending with the running 5 s cell. Empty
     #: when the feed is disabled.
     points: list[LivePointOut]
@@ -888,7 +1109,7 @@ def _live_points(
     tier: live_tier.LiveTier,
     now: datetime,
     windows: tuple[runner_identity.RunnerWindow, ...],
-) -> tuple[list[live_tier.LivePoint], live_tier.LiveCurrent, int]:
+) -> tuple[list[live_tier.LivePoint], live_tier.NowView]:
     is_runner = _runner_test(windows)
 
     def persisted(start: int, end: int) -> dict[int, live_tier.PersistedMinute]:
@@ -911,11 +1132,9 @@ def _live_points(
             )
         return out
 
-    return (
-        tier.stitch(now, persisted, is_runner),
-        tier.current(now, is_runner),
-        tier.active_clients(now, is_runner),
-    )
+    # WP NOW-LOADING-1: speed, "loading now" and the per-source rows from
+    # one read of the window (``LiveTier.now_view``).
+    return tier.stitch(now, persisted, is_runner), tier.now_view(now, is_runner)
 
 
 def _live_current_out(current: live_tier.LiveCurrent) -> LiveCurrentOut:
@@ -963,15 +1182,23 @@ def get_throughput_live(
         tier.touch(now)
         tier.refresh(settings.event_log_path, now)
         windows = runner_identity.windows(conn)
-        points, current, active = _live_points(conn, tier, now, windows)
+        points, view = _live_points(conn, tier, now, windows)
+    current = view.current
+    # The per-source rows read SQLite again (names), after the connection
+    # above is closed; only with a fresh feed, like ``/v1/throughput``'s ``now``.
+    sources = (
+        _loading_sources(open_db, settings, view, now) if feed.state == "ok" else None
+    )
+    now_epoch = now.timestamp()
     return LiveOut(
         event_feed=feed,
         watcher_window_seconds=int(live_tier.WATCHER_WINDOW_SECONDS),
         live_since=tier.covered_from(),
         range_start=points[0].t if points else None,
-        active_clients=active,
+        active_clients=live_tier.loading_counts(view.activity)[0],
         active_window_seconds=current.window_seconds,
         current=_live_current_out(current),
+        loading_sources=sources,
         points=[
             LivePointOut(
                 t=p.t,
@@ -984,12 +1211,24 @@ def get_throughput_live(
                 runner_bytes=p.runner.bytes_served,
                 runner_hit_bytes=p.runner.hit_bytes,
                 runner_miss_bytes=p.runner.miss_bytes,
-                bytes_per_second=p.all_totals.bytes_served / p.bucket_seconds,
+                bytes_per_second=p.all_totals.bytes_served / _elapsed_seconds(p, now_epoch),
                 peak_bytes_per_second=p.peak_bytes_per_second,
             )
             for p in points
         ],
     )
+
+
+def _elapsed_seconds(point: live_tier.LivePoint, now_epoch: float) -> float:
+    """A live point's divisor: its bucket length, or for the running bucket
+    (``now_epoch`` inside it) the seconds elapsed in it, at least one, as
+    ``_series_point`` and ``LiveTier.current`` do (GRAPH-RECENT-1 nit N2)."""
+    # ``minute_epoch`` parses any of our UTC ISO stamps to epoch seconds
+    # (here a 5, 15 or 60 s bucket start), not only whole minutes.
+    start = live_tier.minute_epoch(point.t)
+    if start is not None and start <= now_epoch < start + point.bucket_seconds:
+        return max(1.0, now_epoch - start)
+    return float(point.bucket_seconds)
 
 
 @router.get("/v1/clients/overview", response_model=ClientsOverviewOut)

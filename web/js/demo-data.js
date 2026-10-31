@@ -730,6 +730,21 @@ function demoAgentName(client) {
   return resolvedName(addr ? clientNameMap.get(addr) : null, addr, client.client_id);
 }
 
+/**
+ * WP NOW-LOADING-1: what `demoLoadingSources` needs to name the sources:
+ * the running prefill job, the online agent (the Clients overview's
+ * loading agent) and the loading agentless address, named as on Clients.
+ */
+function demoLoadingCtx(running) {
+  const job = running[0] || null;
+  const agent = handleGetClients().find((a) => a.presence === "online") || null;
+  return {
+    runningJob: job ? { id: job.id, appid: job.appid, name: findGame(job.appid)?.name ?? null } : null,
+    agent: agent ? { client_id: agent.client_id, display_name: agent.display_name ?? agent.client_id, addr: agent.source_addrs[0] } : null,
+    address: { addr: "10.10.0.57", display_name: demoAddressName("10.10.0.57").display_name },
+  };
+}
+
 function demoAddressName(addr) {
   const canonical = demoCanonicalIp(addr);
   return resolvedName(canonical ? clientNameMap.get(canonical) : null, canonical, addr);
@@ -2683,7 +2698,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
 
   // WP GRAPH-LIVE: the stitched live series (no range parameter).
-  if (method === "GET" && path === "/v1/throughput/live") return demoLive(Date.now(), historySinceMs);
+  if (method === "GET" && path === "/v1/throughput/live") {
+    return demoLive(Date.now(), historySinceMs, demoLoadingCtx(jobs.filter((j) => j.status === "running" && j.type === "prefill")));
+  }
 
   // WP D15c: the traffic endpoints (WP D15b), from demo-traffic.js.
   if (method === "GET" && (path === "/v1/throughput" || path === "/v1/throughput/series" || path === "/v1/clients/overview")) {
@@ -2705,6 +2722,7 @@ export async function demoRequest(method, path, { body, params } = {}) {
         running.map((j) => ({ id: j.id, appid: j.appid, started_at: j.started_at, name: findGame(j.appid)?.name ?? null })),
         Date.now(),
         historySinceMs,
+        demoLoadingCtx(running),
       );
     }
     const installed = new Map();

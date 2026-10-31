@@ -8,6 +8,10 @@
  *     (Serving / Downloading / Verifying / Idle, see `heroStatus`), and one caption
  *     line with the upstream limit and how many devices are loading (the
  *     former "Client downloading" row, WP CLIENT-ROW-1, folded in here);
+ *   - WP NOW-LOADING-1: under them, "Loading now", one row per source of
+ *     the traffic in the same live window (the prefill runner with its job
+ *     and phase, each device with its games, unattributed traffic); left
+ *     out entirely while nothing loads (`loadingNowModel`);
  *   - the throughput graph (96px, grid lines) beside it: WP WEB-FIX-20.2
  *     stacks "served from the cache" (green, `--ok`) under "from the
  *     internet" (accent) with a small legend, when the points carry the
@@ -54,6 +58,7 @@ import {
   seriesStartText,
   trimSeries,
 } from "../lib/traffic-view.js";
+import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -172,6 +177,95 @@ export function devicesLoading(throughput) {
   return { text: `${n} ${n === 1 ? "device" : "devices"} loading`, title: `${row.detail}. ${row.title}` };
 }
 
+/** WP NOW-LOADING-1: the "Loading now" block's words. */
+export const LOADING_NOW_LABEL = "Loading now";
+export const LOADING_UNATTRIBUTED = "Unattributed traffic";
+export const LOADING_NEW_DEVICE = "New device";
+export const LOADING_NO_JOB = "No running job";
+
+/** An app's name in a row, never a bare id (the Clients page's rule). */
+function appName(app) {
+  return app && typeof app.name === "string" && app.name.trim() ? app.name : UNKNOWN_APP_NAME;
+}
+
+/** Games of a source as one phrase, or the Clients page's wording without one. */
+function gamesText(apps) {
+  const names = Array.isArray(apps) ? apps.map(appName) : [];
+  return names.length ? names.join(", ") : "content not linked to one game";
+}
+
+/** Where a device's bytes came from, from the row's HIT/MISS split. */
+function cacheWord(row) {
+  const total = rateOf(row.bytes_per_second) || 0;
+  const hit = rateOf(row.hit_bytes_per_second) || 0;
+  const miss = rateOf(row.miss_bytes_per_second) || 0;
+  if (total <= 0) return null;
+  if (hit >= total) return "from the cache";
+  if (hit <= 0 && miss > 0) return "from the internet";
+  if (hit <= 0) return null;
+  return `${Math.round((hit / total) * 100)}% from the cache`;
+}
+
+/**
+ * WP NOW-LOADING-1: the hero's "Loading now" block from the server's
+ * `loading_sources` (`now.loading_sources` via `mergeNow`, the live
+ * answer's via `mergeLive`): one row per source of the traffic in the live
+ * window, from the same read of the ring as the big number, the pill and
+ * the device count, so they agree:
+ *
+ *   - the prefill runner: its job's game ("No running job" when the runner
+ *     still has traffic in the window but no prefill job runs, e.g. right
+ *     after a cancel), the phase in the pill's words ("Downloading" /
+ *     "Verifying"), a pending stop request;
+ *   - each device, named as on the Clients page ("New device" plus its
+ *     address before the Clients page lists it), with its games and where
+ *     the bytes came from;
+ *   - "Unattributed traffic": bytes no device explains.
+ *
+ * `null` (no block, no empty heading) unless the feed is `ok` and at least
+ * one source loads. Pure.
+ * @param {object | null | undefined} throughput the merged answer
+ * @returns {null | {label: string, rows: Array<{key: string, kind: string, name: string, detail: string, speed: string}>}}
+ */
+export function loadingNowModel(throughput) {
+  if (!throughput || feedState(throughput) !== "ok") return null;
+  const sources = throughput.loading_sources;
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+  const rows = [];
+  for (const src of sources) {
+    if (!src || typeof src !== "object") continue;
+    const speed = formatSpeed(src.bytes_per_second) || DASH;
+    if (src.kind === "runner") {
+      const parts = [];
+      const job = src.job;
+      if (job && typeof job === "object") {
+        parts.push(appName(job));
+        if (Number.isInteger(job.job_id)) parts.push(`job #${job.job_id}`);
+      } else {
+        parts.push(LOADING_NO_JOB);
+        if (Array.isArray(src.apps) && src.apps.length) parts.push(gamesText(src.apps));
+      }
+      parts.push(src.phase === "verify" ? PILL_VERIFYING : PILL_DOWNLOADING);
+      if (job && job.stop_request === "cancel") parts.push("cancel requested");
+      else if (job && job.stop_request === "pause") parts.push("pause requested");
+      rows.push({ key: "runner", kind: "runner", name: typeof src.name === "string" && src.name ? src.name : "Prefill runner", detail: parts.join(" · "), speed });
+    } else if (src.kind === "client") {
+      const known = src.known !== false;
+      const addresses = Array.isArray(src.addresses) ? src.addresses : [];
+      const name = known && typeof src.name === "string" && src.name ? src.name : LOADING_NEW_DEVICE;
+      const parts = [];
+      if (!known && addresses.length) parts.push(addresses.join(", "));
+      parts.push(gamesText(src.apps));
+      const where = cacheWord(src);
+      if (where) parts.push(where);
+      rows.push({ key: String(src.key || name), kind: "client", name, detail: parts.join(" · "), speed });
+    } else if (src.kind === "unattributed") {
+      rows.push({ key: "unattributed", kind: "unattributed", name: LOADING_UNATTRIBUTED, detail: "more devices at once than the live view tells apart", speed });
+    }
+  }
+  return rows.length ? { label: LOADING_NOW_LABEL, rows } : null;
+}
+
 /** "Limit 8 MB/s, all day" -> parts with the speed in bold (kit caption). */
 function limitParts(rateCap) {
   const m = /^(Limit )(\S+ \S+?)(,.*)?$/.exec(rateCap);
@@ -208,6 +302,7 @@ function tooltip(tile) {
  *   big: {value: string, unit: string, title: string},
  *   status: null | {kind: string, text: string, tone: string | null},
  *   caption: Array<string|{b: string}>, captionTitle: string,
+ *   loadingNow: null | {label: string, rows: Array<{key: string, kind: string, name: string, detail: string, speed: string}>},
  *   mini: Array<{key: string, parts: Array<string|{b: string}>, title: string}>,
  *   tiles: Array<{key: string, label: string, caption: string|null, value: string, unit: string, title: string, meter: number|null}>
  * }}}
@@ -250,6 +345,7 @@ export function heroModel({ throughput = null, rateCap = null, unsupported = fal
       status,
       caption,
       captionTitle: devices ? devices.title : "",
+      loadingNow: loadingNowModel(t),
       mini,
       tiles: HERO_TILES.map((spec) => {
         const tile = byKey.get(spec.key);
@@ -462,7 +558,34 @@ export function createDownloadsHero({ range, onRangeChange }) {
   const graph = el("figure", "graph");
   graph.dataset.role = "stats-graph";
   graph.hidden = true;
-  live.append(left, graph);
+  // WP NOW-LOADING-1: spans the live block under the number and the graph,
+  // so a hidden block takes no grid row (the hero's layout is unchanged).
+  const loading = el("div", "lnow");
+  loading.dataset.role = "stats-loading-now";
+  loading.hidden = true;
+  const loadingLabel = el("div", "lk", LOADING_NOW_LABEL);
+  loadingLabel.setAttribute("aria-hidden", "true");
+  const loadingList = el("ul");
+  // list-style:none drops list semantics in some browsers: say it.
+  loadingList.setAttribute("role", "list");
+  loadingList.setAttribute("aria-label", LOADING_NOW_LABEL);
+  loading.append(loadingLabel, loadingList);
+  live.append(left, graph, loading);
+
+  function paintLoading(model) {
+    loadingList.replaceChildren();
+    loading.hidden = !model;
+    if (!model) return;
+    for (const row of model.rows) {
+      const li = el("li");
+      li.dataset.kind = row.kind;
+      li.dataset.key = row.key;
+      const text = el("div");
+      text.append(el("b", null, row.name), el("span", null, row.detail));
+      li.append(text, el("span", "spd", row.speed));
+      loadingList.appendChild(li);
+    }
+  }
 
   const mini = el("div", "mini");
   mini.dataset.role = "stats-mini";
@@ -560,6 +683,7 @@ export function createDownloadsHero({ range, onRangeChange }) {
       tiles.replaceChildren();
       pillSlot.replaceChildren();
       delete pillSlot.dataset.kind;
+      paintLoading(null);
       paintGraph(null);
       return;
     }
@@ -575,6 +699,7 @@ export function createDownloadsHero({ range, onRangeChange }) {
     fillParts(cap, f.caption);
     cap.title = f.captionTitle;
     cap.hidden = cap.textContent === "";
+    paintLoading(f.loadingNow);
     mini.replaceChildren();
     for (const item of f.mini) {
       const span = el("span");
