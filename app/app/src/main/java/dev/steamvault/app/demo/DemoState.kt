@@ -18,6 +18,7 @@ import dev.steamvault.app.net.model.PlannedDepotOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
+import dev.steamvault.app.net.model.HistoryDeleteOut
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
 import dev.steamvault.app.net.model.JobMoveOut
@@ -87,7 +88,7 @@ import java.time.Instant
 class DemoState private constructor(
     private val games: MutableList<DemoGame>,
     private val jobs: MutableList<DemoJob>,
-    private val clients: List<ClientOut>,
+    private var clients: List<ClientOut>,
     /** WP AG-3: `GET /v1/schedule`'s `last_sweep_at` fixture, computed once
      * at [fresh] time (not on every [scheduleOut] call) so it reads as a
      * stable "42 minutes ago" for the lifetime of one demo session, the
@@ -701,6 +702,67 @@ class DemoState private constructor(
     @Synchronized
     fun clientsOut(): List<ClientOut> = clients
 
+    /** Operator-set names by address (WP D15-NAMES; the server's
+     * `client_names`), seeded from [DEMO_CLIENT_NAMES]. */
+    private val clientNames: MutableMap<String, String> = DEMO_CLIENT_NAMES.toMutableMap()
+
+    /**
+     * `DELETE /v1/clients/{client_id}` (demo, WP ANDROID-GAPS-1; web
+     * `demo-data.js::handleDeleteClient`): the PC is gone from the list, and
+     * an id with nothing stored is the server's own 404. No agent runs in
+     * demo mode, so a removed PC stays removed for this demo session.
+     */
+    @Synchronized
+    fun removeClient(clientId: String) {
+        val before = clients.size
+        clients = clients.filter { it.client_id != clientId }
+        if (clients.size == before) {
+            throw VaultApiError.NotFound("no such client in the demo", 404, "Unknown client_id '$clientId'")
+        }
+    }
+
+    /** `PUT /v1/client-names/ip/{addr}` (demo): trimmed, 1-40 characters;
+     * the real server's full character rule is not repeated here. */
+    @Synchronized
+    fun setClientName(addr: String, name: String) {
+        val value = name.trim()
+        if (value.isEmpty() || value.codePointCount(0, value.length) > DEMO_MAX_NAME_LENGTH) {
+            throw VaultApiError.Validation("invalid name", 422, "Name must be 1-$DEMO_MAX_NAME_LENGTH characters after trimming.")
+        }
+        clientNames[addr] = value
+    }
+
+    /** `DELETE /v1/client-names/ip/{addr}` (demo): the server's own 404 when none is stored. */
+    @Synchronized
+    fun clearClientName(addr: String) {
+        if (clientNames.remove(addr) == null) {
+            throw VaultApiError.NotFound("no name stored in the demo", 404, "No name stored for '$addr'")
+        }
+    }
+
+    /**
+     * `DELETE /v1/history?scope=` (demo, web `demo-data.js::handleDeleteHistory`):
+     * finished jobs (done, error, cancelled) go, all of them or those
+     * finished more than 30 days ago. The demo's traffic figures are
+     * synthetic and not stored, so they do not change (0 rows).
+     */
+    @Synchronized
+    fun deleteHistory(scope: String): HistoryDeleteOut {
+        if (scope != "all" && scope != "older-than-30d") {
+            throw VaultApiError.Validation("invalid scope", 422, "scope must be one of all, older-than-30d")
+        }
+        val now = Instant.now()
+        val cutoff = if (scope == "all") null else now.minusSeconds(30 * 86_400L)
+        val before = jobs.size
+        jobs.removeAll { job ->
+            if (job.status !in TERMINAL_JOB_STATUSES) return@removeAll false
+            if (cutoff == null) return@removeAll true
+            val at = job.finishedAt ?: job.startedAt ?: job.createdAt
+            Instant.parse(at).isBefore(cutoff)
+        }
+        return HistoryDeleteOut(scope = scope, cutoff = cutoff?.toString(), jobs_deleted = before - jobs.size)
+    }
+
     // ---- traffic (WP D15d) ----------------------------------------------------
 
     /**
@@ -714,6 +776,7 @@ class DemoState private constructor(
         runningJobs = jobs.filter { it.status == STATUS_RUNNING }.map { it.toSummary() },
         games = listGameSummaries(),
         agents = clients,
+        names = clientNames.toMap(),
     )
 
     /** `GET /v1/jobs?range=` in demo mode: the newest [limit] jobs, without a
@@ -899,6 +962,12 @@ class DemoState private constructor(
         internal const val STATUS_PAUSED = "paused"
         internal const val STATUS_CANCELLED = "cancelled"
         private val ACTIVE_JOB_STATUSES = setOf(STATUS_RUNNING, STATUS_PAUSED, STATUS_QUEUED)
+
+        /** What "Delete history" removes (api/vault_api/history.py). */
+        private val TERMINAL_JOB_STATUSES = setOf(STATUS_DONE, STATUS_ERROR, STATUS_CANCELLED)
+
+        /** The server's `client_names.MAX_NAME_LENGTH`. */
+        private const val DEMO_MAX_NAME_LENGTH = 40
 
         /** The server's package types (api/README.md "Grouped delete"). */
         private val DEMO_PACKAGE_TYPES = setOf("dlc", "config", "music", "video", "demo")

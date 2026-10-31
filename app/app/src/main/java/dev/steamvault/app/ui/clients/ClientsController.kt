@@ -7,6 +7,11 @@ import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.polling.PollingIntervals
 import dev.steamvault.app.repo.ClientsRepository
+import dev.steamvault.app.ui.clients.logic.isClientAlreadyGone
+import dev.steamvault.app.ui.clients.logic.isRemovableClientId
+import dev.steamvault.app.ui.clients.logic.removeErrorText
+import dev.steamvault.app.ui.clients.logic.removedToastText
+import dev.steamvault.app.ui.clients.logic.requestErrorReason
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -62,6 +67,7 @@ class ClientsController(
      */
     fun open(scope: CoroutineScope) {
         isOpen = true
+        removeNotice = null
         scope.launch { refreshOnce() }
     }
 
@@ -72,6 +78,73 @@ class ClientsController(
      * dismiss request. */
     fun close() {
         isOpen = false
+        // A confirm left open stays with the sheet that showed it; a running
+        // request finishes and reports on the row (the flag stays set).
+        if (!removeBusy) removeTarget = null
+    }
+
+    // ---- Remove a PC (WP ANDROID-GAPS-1, web WEB-FEAT-4) -------------------
+
+    /** The PC the open confirm dialog is about; `null` = no dialog. */
+    var removeTarget by mutableStateOf<String?>(null)
+        private set
+
+    /** A remove request is running: the dialog's buttons and dismiss wait. */
+    var removeBusy by mutableStateOf(false)
+        private set
+
+    /** Inline error per client_id of the last failed remove (web
+     * `state.removeErrors`), shown on that row until the next attempt. */
+    var removeErrors by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+
+    /** "<id> removed from the list." after a success (web: the toast),
+     * shown as a polite live line in the sheet until it closes. */
+    var removeNotice by mutableStateOf<String?>(null)
+        private set
+
+    /** Opens the confirm for [clientId] (the row's Remove button). Ignored
+     * while a request runs or for an id the server's route cannot address. */
+    fun requestRemove(clientId: String) {
+        if (removeBusy || !isRemovableClientId(clientId)) return
+        removeErrors = removeErrors - clientId
+        removeNotice = null
+        removeTarget = clientId
+    }
+
+    /** "Keep", back or scrim: closes the confirm unless a request runs. */
+    fun cancelRemove() {
+        if (!removeBusy) removeTarget = null
+    }
+
+    /**
+     * "Remove" in the confirm: `DELETE /v1/clients/{client_id}`. A 204, or
+     * the handler's own 404 ("already gone", [isClientAlreadyGone]), drops
+     * the row at once and re-fetches the list (a still-running agent may
+     * list the PC again with its next report); any other failure keeps the
+     * row and shows the server's reason on it.
+     */
+    suspend fun confirmRemove() {
+        val clientId = removeTarget ?: return
+        if (removeBusy) return
+        removeBusy = true
+        var failure: VaultApiError? = null
+        try {
+            clientsRepository.remove(clientId)
+        } catch (e: VaultApiError) {
+            if (!isClientAlreadyGone(e)) failure = e
+        } finally {
+            removeBusy = false
+            removeTarget = null
+        }
+        if (failure != null) {
+            removeErrors = removeErrors + (clientId to removeErrorText(clientId, requestErrorReason(failure)))
+            return
+        }
+        removeErrors = removeErrors - clientId
+        clients = clients.filter { it.client_id != clientId }
+        removeNotice = removedToastText(clientId)
+        refreshOnce()
     }
 
     suspend fun refreshOnce() {

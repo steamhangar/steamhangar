@@ -8,6 +8,7 @@ import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
+import dev.steamvault.app.net.model.HistoryDeleteOut
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
 import dev.steamvault.app.net.model.JobMoveOut
@@ -28,6 +29,7 @@ import dev.steamvault.app.repo.AboutRepository
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.ClientsRepository
 import dev.steamvault.app.repo.GamesRepository
+import dev.steamvault.app.repo.HistoryRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.MappingRepository
 import dev.steamvault.app.repo.ScheduleRepository
@@ -86,6 +88,14 @@ class DemoCacheRepository(private val state: DemoState) : CacheRepository {
 
 class DemoClientsRepository(private val state: DemoState) : ClientsRepository {
     override suspend fun list(): List<ClientOut> = state.clientsOut()
+    override suspend fun remove(clientId: String) = state.removeClient(clientId)
+    override suspend fun setName(addr: String, name: String) = state.setClientName(addr, name)
+    override suspend fun clearName(addr: String) = state.clearClientName(addr)
+}
+
+/** WP ANDROID-GAPS-1: "Delete history" in demo mode -- see [DemoState.deleteHistory]. */
+class DemoHistoryRepository(private val state: DemoState) : HistoryRepository {
+    override suspend fun delete(scope: String): HistoryDeleteOut = state.deleteHistory(scope)
 }
 
 class DemoMappingRepository(private val state: DemoState) : MappingRepository {

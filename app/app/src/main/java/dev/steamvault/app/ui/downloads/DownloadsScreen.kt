@@ -57,6 +57,7 @@ import dev.steamvault.app.R
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
+import dev.steamvault.app.repo.HistoryRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
@@ -73,6 +74,7 @@ import dev.steamvault.app.ui.downloads.logic.ExcerptState
 import dev.steamvault.app.ui.downloads.logic.HISTORY_CAPPED_TEXT
 import dev.steamvault.app.ui.downloads.logic.HistoryPage
 import dev.steamvault.app.ui.downloads.logic.HistoryRowModel
+import dev.steamvault.app.ui.downloads.logic.historyDeletedText
 import dev.steamvault.app.ui.downloads.logic.historyPage
 import dev.steamvault.app.ui.downloads.logic.historySubtitle
 import dev.steamvault.app.ui.downloads.logic.isHistoryCapped
@@ -145,6 +147,8 @@ fun DownloadsScreen(
     demoMode: Boolean,
     scheduleRepository: ScheduleRepository? = null,
     settingsRepository: SettingsRepository? = null,
+    /** WP ANDROID-GAPS-1: "Delete history"; `null` = no Delete action. */
+    historyRepository: HistoryRepository? = null,
     cacheRepository: CacheRepository? = null,
     showJobRequest: Int? = null,
     onShowJobHandled: () -> Unit = {},
@@ -187,6 +191,7 @@ fun DownloadsScreen(
         }
     }
     LaunchedEffect(historyFilter) { historyFilter.load() }
+    val historyDelete = remember(historyRepository) { historyRepository?.let { HistoryDeleteFlow(it) } }
     val speedLines = jobSpeedLines(statsPoll)
 
     val gamesByAppid = remember(controller.games) { controller.games.associateBy { it.appid } }
@@ -309,6 +314,16 @@ fun DownloadsScreen(
             controller.repair?.let { flow ->
                 RepairDialog(flow, scope, onRefresh = controller::refreshAfterRepair, onShowJob = { showJobId = it })
             }
+            if (historyDelete != null) {
+                HistoryDeleteDialog(historyDelete, scope) { result ->
+                    controller.showNotice(historyDeletedText(result))
+                    // Jobs first: the History list merges the 20-job poll, so
+                    // deleted rows must leave it before the ranged list answers.
+                    controller.refreshJobsOnce()
+                    historyFilter.load()
+                    statsPoll.refreshOnce()
+                }
+            }
             DownloadsBody(
                 partition = partition,
                 activeModels = activeModels,
@@ -325,6 +340,7 @@ fun DownloadsScreen(
                 speedLines = speedLines,
                 historyFilter = historyFilter,
                 ranges = ranges,
+                historyDelete = historyDelete,
                 listState = listState,
             )
         }
@@ -348,6 +364,7 @@ private fun DownloadsBody(
     speedLines: Map<Int, String>,
     historyFilter: HistoryFilter,
     ranges: TrafficRanges,
+    historyDelete: HistoryDeleteFlow? = null,
     listState: LazyListState,
 ) {
     // WP ANDROID-DL-2 (ANDROID-DL-1 review nit, web DOWNLOADS-3): after
@@ -470,6 +487,7 @@ private fun DownloadsBody(
         }
 
         item(key = "history-heading") { SectionHeading(stringResource(R.string.downloads_section_history)) }
+        if (historyDelete != null) item(key = "history-delete") { HistoryDeleteButton(historyDelete) }
         item(key = "history-range") {
             RangeChips(
                 label = stringResource(R.string.traffic_range_history),

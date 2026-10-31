@@ -13,6 +13,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.GcRequest
 import dev.steamvault.app.net.model.HealthOut
+import dev.steamvault.app.net.model.HistoryDeleteOut
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
 import dev.steamvault.app.net.model.JobMoveOut
@@ -52,6 +53,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -273,6 +275,42 @@ class VaultApiClient(
 
     suspend fun clients(): List<ClientOut> = get("/v1/clients")
 
+    // ---- client management (WP ANDROID-GAPS-1; web api.js twins) ----------
+
+    /**
+     * `DELETE /v1/clients/{client_id}` (WP AG-1): `204`, or `404 "Unknown
+     * client_id ..."` when nothing is stored for that id. The id goes in as
+     * ONE encoded path segment (web `encodeURIComponent`); an id with "/"
+     * cannot be addressed by the server's route at all, so the UI never
+     * offers Remove for it (`ui/clients/logic/ClientRemove.kt`). OkHttp
+     * resolves a bare "." or ".." segment like a browser does: such an id
+     * reaches a different route and fails honestly, never as "removed".
+     */
+    suspend fun deleteClient(clientId: String) {
+        sendForText("DELETE", "/v1/clients/{client_id}", segmentUrl("/v1/clients", clientId), null)
+    }
+
+    /** `PUT /v1/client-names/ip/{addr}` (WP D15-NAMES), body `{"name": ...}`. */
+    suspend fun setClientName(addr: String, name: String) {
+        val body = VaultJson.encodeToString(JsonObject.serializer(), JsonObject(mapOf("name" to JsonPrimitive(name))))
+        sendForText("PUT", "/v1/client-names/ip/{addr}", segmentUrl("/v1/client-names/ip", addr), body.toRequestBody(JSON_MEDIA_TYPE))
+    }
+
+    /** `DELETE /v1/client-names/ip/{addr}`: `204`, or `404 "No name stored ..."`. */
+    suspend fun clearClientName(addr: String) {
+        sendForText("DELETE", "/v1/client-names/ip/{addr}", segmentUrl("/v1/client-names/ip", addr), null)
+    }
+
+    /** `DELETE /v1/history?scope=all|older-than-30d` (WP D15-NAMES). */
+    suspend fun deleteHistory(scope: String): HistoryDeleteOut {
+        val text = sendForText("DELETE", "/v1/history", resolve("/v1/history", mapOf("scope" to scope)), null)
+        return try {
+            VaultJson.decodeFromString<HistoryDeleteOut>(text)
+        } catch (e: SerializationException) {
+            throw VaultApiError.Unknown("DELETE /v1/history returned unparsable JSON", null, cause = e)
+        }
+    }
+
     // ---- traffic (WP D15b API, WP D15d app) ------------------------------
     // A server older than D15b answers 404 on all three; callers treat that
     // as "no statistics on this server" (`ui/traffic/TrafficPoll.kt`).
@@ -385,6 +423,34 @@ class VaultApiClient(
         val builder = baseUrl.newBuilder().encodedPath(path)
         for ((key, value) in params) builder.addQueryParameter(key, value)
         return builder.build()
+    }
+
+    /** [path] plus [segment] as one percent-encoded path segment. */
+    private fun segmentUrl(path: String, segment: String): HttpUrl =
+        baseUrl.newBuilder().encodedPath(path).addPathSegment(segment).build()
+
+    /**
+     * One request whose answer may be an empty `204` (the client-management
+     * routes above): same header and the same error mapping as [execute],
+     * but the body comes back as text instead of decoded, so "no content"
+     * is a success here. [label] is the route template used in messages.
+     */
+    private suspend fun sendForText(method: String, label: String, url: HttpUrl, body: RequestBody?): String {
+        val request = Request.Builder()
+            .url(url)
+            .header("X-Api-Key", apiKeyProvider())
+            .method(method, body)
+            .build()
+        val response = try {
+            withContext(Dispatchers.IO) { client.newCall(request).execute() }
+        } catch (e: IOException) {
+            throw VaultApiError.Network("$method $label failed: ${e.message ?: "network error"}", cause = e)
+        }
+        response.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw VaultApiError.forHttpStatus(resp.code, method, label, extractDetail(text))
+            return text
+        }
     }
 
     private suspend inline fun <reified T> get(

@@ -91,11 +91,11 @@ class D15dWiringTest {
     fun `MUTATION PIN -- the Clients screen polls, draws range, note, cards, agentless note and Manage PCs`() {
         assertCalledFrom(clients, "poll.pollForever()", "ClientsScreen")
         assertCalledFrom(clients, "clientsSummaryText(data.clients)", "ClientsScreen")
-        assertCalledFrom(clients, "ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock)", "ClientsScreen")
+        assertCalledFrom(clients, "ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock, renameFlow = renameFlow)", "ClientsScreen")
         assertCalledFrom(clients, "if (!poll.noFigures) {", "ClientsBody")
         assertCalledFrom(clients, "poll.selectRange(scope, it)", "ClientsBody")
         assertCalledFrom(clients, "item(key = \"note\") { NoteLine(note) }", "ClientsBody")
-        assertCalledFrom(clients, "ClientCard(it)", "ClientsBody")
+        assertCalledFrom(clients, "ClientCard(card, onRename = ", "ClientsBody")
         assertCalledFrom(clients, "buildClientCardModel(", "ClientsBody")
         assertCalledFrom(clients, "showAgentlessNote(data.clients)", "ClientsBody")
         assertCalledFrom(clients, "ManagePcsSection(onManagePcs)", "ClientsBody")
