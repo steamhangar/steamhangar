@@ -4,6 +4,7 @@ import dev.steamvault.app.net.model.CurrentOut
 import dev.steamvault.app.net.model.EventFeedOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.JobThroughputOut
+import dev.steamvault.app.net.model.LiveCurrentOut
 import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
@@ -33,6 +34,13 @@ import java.util.Locale
  * values are `null` and show the dash, the note says why. `ok`: everything
  * shown. A dash always stands for a `null` the server sent; a real `0`
  * prints as a number.
+ *
+ * **One "now" (WP GRAPH-RECENT-1 + LOADING-NOW-1, web twin since
+ * ANDROID-DL-1).** "Current speed", the status pill ([heroStatus]) and
+ * "Loading now" read the live tier on every range: the live view through
+ * [mergeLive], the persisted ranges through [mergeNow] (the server's `now`
+ * block). All three share one window, the live current-speed window
+ * (`active_window_seconds`).
  */
 
 /** The four ranges every traffic endpoint and the jobs filter accept. */
@@ -46,12 +54,14 @@ val TRAFFIC_RANGES: List<String> = listOf("24h", "7d", "30d", "all")
 val STATS_RANGES: List<String> = listOf("live", "1h", "6h", "24h", "7d", "30d", "all")
 
 /** WP GRAPH-LIVE: the first statistics range, answered by
- * `GET /v1/throughput/live` (5 s points, polled every few seconds). It is
- * never the default and never a Clients / History range. */
+ * `GET /v1/throughput/live` (5 s points, polled every few seconds). Never a
+ * Clients / History range. */
 const val LIVE_RANGE = "live"
 
-/** The Downloads statistics range when none was chosen yet. */
-const val DEFAULT_STATS_RANGE = "6h"
+/** The Downloads statistics range when none was chosen yet: `live` (web
+ * `DEFAULT_STATS_RANGE`, WP LIVE-DELAY-1; Android since ANDROID-DL-1). Every
+ * other range reads tiers the event sweep fills, up to ~6 min late. */
+const val DEFAULT_STATS_RANGE = "live"
 
 /** Segmented-control labels, for every range of [STATS_RANGES]. */
 val RANGE_LABELS: Map<String, String> = mapOf(
@@ -230,6 +240,8 @@ fun headerTiles(throughput: ThroughputOut?, rateCap: String? = null): List<StatT
         StatTile(key, label, value ?: DASH, detail, limit)
     val inRange = summary?.active_clients
     val windowMinutes = throughput.active_window_minutes ?: 15
+    // WP LOADING-NOW-1: a count read from the live tier is over the current-speed window (seconds).
+    val windowSeconds = activeWindowSeconds(throughput)
     return listOf(
         tile("current", "Current speed", formatSpeed(throughput.current?.bytes_per_second), currentDetail(throughput), rateCap),
         tile("average", "Average while loading", formatSpeed(summary?.average_bytes_per_second)),
@@ -244,10 +256,23 @@ fun headerTiles(throughput: ThroughputOut?, rateCap: String? = null): List<StatT
             "clients",
             "Loading now",
             throughput.active_clients_now?.toString(),
-            "machines with cache traffic in the last $windowMinutes min",
+            if (windowSeconds != null) {
+                "machines the cache served in the last $windowSeconds s"
+            } else {
+                "machines with cache traffic in the last $windowMinutes min"
+            },
         ),
     )
 }
+
+/**
+ * WP LOADING-NOW-1 (web `activeWindowSeconds`): the window of
+ * `active_clients_now` in seconds when it was read from the live tier
+ * ([mergeLive] / [mergeNow] set it), else `null` (the swept count's window
+ * is `active_window_minutes`).
+ */
+fun activeWindowSeconds(throughput: ThroughputOut?): Int? =
+    throughput?.active_window_seconds?.takeIf { it > 0 }
 
 /** Detail line of "Current speed": scope and window, plus the runner's part. */
 fun currentDetail(throughput: ThroughputOut): String {
@@ -445,6 +470,9 @@ fun liveSeries(live: LiveOut): SeriesOut {
             runner_bytes = p.runner_bytes,
             bytes_per_second = p.bytes_per_second,
             peak_bytes_per_second = p.peak_bytes_per_second,
+            // WP RUNNER-SPLIT-1: the graph's served-from-cache band.
+            runner_hit_bytes = p.runner_hit_bytes,
+            runner_miss_bytes = p.runner_miss_bytes,
         )
         val repeat = maxOf(1, jsRound((if (p.bucket_seconds > 0) p.bucket_seconds else 5) / 5.0).toInt())
         repeat(repeat) { points.add(point) }
@@ -459,25 +487,57 @@ fun liveSeries(live: LiveOut): SeriesOut {
     )
 }
 
+/** A live-tier `current` (live endpoint or `now` block) in the header's shape. */
+private fun LiveCurrentOut.asCurrent(): CurrentOut = CurrentOut(
+    bytes_per_second = bytes_per_second,
+    window_start = window_start,
+    window_end = window_end,
+    window_seconds = window_seconds,
+    runner_bytes_per_second = runner_bytes_per_second,
+    // WP RUNNER-SPLIT-1: the pill's verify-vs-download decision.
+    runner_hit_bytes_per_second = runner_hit_bytes_per_second,
+    runner_miss_bytes_per_second = runner_miss_bytes_per_second,
+)
+
 /**
  * The header's figures for the live view (web `mergeLive`): the persisted
- * 1 h [summary] with "Current speed" taken from the live tier when the live
- * feed is `ok`.
+ * 1 h [summary] with "Current speed" and "Loading now" taken from the live
+ * tier when the live feed is `ok` (WP LIVE-DELAY-1: the persisted count lags
+ * a sweep). An answer without `active_clients` (an older server) keeps the
+ * summary's count.
  */
 fun mergeLive(summary: ThroughputOut, live: LiveOut): ThroughputOut {
     val current = live.current
     val merged = summary.copy(range = LIVE_RANGE, live = false)
     if (current == null || feedState(live.event_feed) != FeedState.OK) return merged
-    return merged.copy(
-        live = true,
-        current = CurrentOut(
-            bytes_per_second = current.bytes_per_second,
-            window_start = current.window_start,
-            window_end = current.window_end,
-            window_seconds = current.window_seconds,
-            runner_bytes_per_second = current.runner_bytes_per_second,
-        ),
+    val withCurrent = merged.copy(live = true, current = current.asCurrent())
+    val clients = live.active_clients ?: return withCurrent
+    return withCurrent.copy(
+        active_clients_now = clients,
+        active_window_minutes = live.active_window_minutes ?: withCurrent.active_window_minutes,
+        // WP LOADING-NOW-1: the count's window is the current-speed window.
+        active_window_seconds = live.active_window_seconds,
     )
+}
+
+/**
+ * WP GRAPH-RECENT-1 + LOADING-NOW-1 (web `mergeNow`): a persisted range's
+ * answer (`GET /v1/throughput?range=1h|6h|...`) with "Current speed", the
+ * pill's runner figure and "Loading now" taken from its `now` block (the
+ * live tier, one window) instead of the last sweep, so the header agrees
+ * with the graph's newest point. Unchanged without a `now` block (feed not
+ * `ok`, a server before rc21). Pure.
+ */
+fun mergeNow(throughput: ThroughputOut): ThroughputOut {
+    val now = throughput.now ?: return throughput
+    val current = now.current ?: return throughput
+    if (feedState(throughput.event_feed) != FeedState.OK) return throughput
+    var merged = throughput.copy(current = current.asCurrent(), live = true)
+    now.active_clients?.let { clients ->
+        merged = merged.copy(active_clients_now = clients, active_window_seconds = now.window_seconds)
+    }
+    now.runner_active?.let { merged = merged.copy(runner_active_now = it) }
+    return merged
 }
 
 // ---------------------------------------------------------------------

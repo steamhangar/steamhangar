@@ -137,7 +137,69 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
  * 5 minutes, then 1-minute points up to an hour), with a deterministic wavy
  * rate so the demo graph moves.
  */
-export function demoLive(nowMs = Date.now(), sinceMs = null) {
+/**
+ * WP NOW-LOADING-1: the demo's "what is loading now" rows
+ * (`LoadingSourceOut`), from the same figures as the answer's `current`
+ * and device count, so the hero shows the invariant: the rows add up to the
+ * big number, the runner row matches the pill (all MISS: "Downloading")
+ * and names the running demo job ("No running job" when none runs but the
+ * runner still has traffic), and there are as many device rows as "N
+ * devices loading" says (2: the online agent on the running game, mostly
+ * from the cache, and the agentless 10.10.0.57 with content not linked to
+ * one game, as on its Clients card). `ctx` null -> `[]` (no block).
+ * @param {number} totalBps the answer's current bytes_per_second
+ * @param {number} runnerBps the runner's part of it (all MISS)
+ * @param {null | {runningJob: null | {id: number, appid: number, name: string|null},
+ *   agent: null | {client_id: string, display_name: string, addr: string},
+ *   address: {addr: string, display_name: string}}} ctx
+ * @returns {Array<object>}
+ */
+export function demoLoadingSources(totalBps, runnerBps, ctx) {
+  if (!ctx || !(totalBps > 0)) return [];
+  const rows = [];
+  const job = ctx.runningJob || null;
+  const game = job ? [{ appid: job.appid, name: job.name ?? null }] : [];
+  if (runnerBps > 0) {
+    rows.push({
+      kind: "runner",
+      key: "runner",
+      name: "Prefill runner",
+      addresses: ["172.18.0.1"],
+      known: true,
+      bytes_per_second: runnerBps,
+      hit_bytes_per_second: 0,
+      miss_bytes_per_second: runnerBps,
+      apps: game.map((g) => ({ ...g, bytes_per_second: runnerBps })),
+      unattributed_bytes_per_second: job ? 0 : runnerBps,
+      phase: "download",
+      job: job ? { job_id: job.id, appid: job.appid, name: job.name ?? null, stop_request: null } : null,
+    });
+  }
+  const clientBps = Math.max(0, totalBps - runnerBps);
+  const addrBps = Math.min(4.5 * MIB, clientBps * 0.25);
+  const agentBps = clientBps - addrBps;
+  const client = (key, name, addr, bps, hitShare, apps) => ({
+    kind: "client",
+    key,
+    name,
+    addresses: [addr],
+    known: true,
+    bytes_per_second: bps,
+    hit_bytes_per_second: bps * hitShare,
+    miss_bytes_per_second: bps * (1 - hitShare),
+    apps: apps.map((g) => ({ ...g, bytes_per_second: bps })),
+    unattributed_bytes_per_second: apps.length ? 0 : bps,
+    phase: null,
+    job: null,
+  });
+  const devices = [];
+  if (ctx.agent && agentBps > 0) devices.push(client(`agent:${ctx.agent.client_id}`, ctx.agent.display_name, ctx.agent.addr, agentBps, 0.81, game));
+  if (addrBps > 0) devices.push(client(`addr:${ctx.address.addr}`, ctx.address.display_name, ctx.address.addr, addrBps, 0.92, []));
+  devices.sort((a, b) => b.bytes_per_second - a.bytes_per_second);
+  return [...rows, ...devices];
+}
+
+export function demoLive(nowMs = Date.now(), sinceMs = null, loadingCtx = null) {
   const fineStart = floorTo(nowMs, 15) - 45_000;
   const mediumStart = floorTo(fineStart, 60) - 180_000;
   const coarseStart = mediumStart - 3_240_000;
@@ -192,6 +254,8 @@ export function demoLive(nowMs = Date.now(), sinceMs = null) {
     // WP LOADING-NOW-1: "Loading now" counts over the current-speed window.
     active_window_seconds: windowSeconds,
     active_window_minutes: 1,
+    // WP NOW-LOADING-1: the same figures as `current`, one row per source.
+    loading_sources: demoLoadingSources(bps, bps * 0.1, loadingCtx),
     points,
   };
 }
@@ -247,7 +311,7 @@ function summaryFor(range, nowMs, sinceMs) {
 
 /** `GET /v1/throughput` (demo). `runningJobs`: `[{id, appid, started_at,
  * name}]`; each gets a speed while the workshop PC loads it. */
-export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs = null) {
+export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs = null, loadingCtx = null) {
   const t = tierFor(range);
   const f = feed(nowMs, sinceMs);
   const end = Date.parse(f.last_sweep_at);
@@ -301,6 +365,8 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
       runner_active: jobs.length > 0,
       window_seconds: nowSeconds,
       live_since: isoSeconds(nowMs - 15 * 60_000),
+      // WP NOW-LOADING-1: the same figures as `now.current`, one row per source.
+      loading_sources: demoLoadingSources(currentBps(jobs), runnerBps(jobs), loadingCtx),
     },
   };
 }

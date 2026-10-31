@@ -21,6 +21,11 @@
  * breakpoint block, is exactly the kind of specificity workaround that makes
  * later overrides unpredictable, so it is banned outright.
  *
+ * The third lint (CSS-HIDDEN-LINT-1, at the end of this file) checks that
+ * every existing `[hidden]` guard still WINS: no later or more specific
+ * `display` rule on the same element may override it without a guard of
+ * its own (theme.css, kit.css and app.css in their <link> order).
+ *
  * **Scope, stated honestly.** The display/hidden cross-reference below is a
  * real static analysis, not a hand-typed list of the three known offenders —
  * it re-derives both sides (which classes are display-styled, which classes
@@ -956,4 +961,281 @@ test("no `!important` appears anywhere except inside the prefers-reduced-motion 
 
 test("sanity: the reduced-motion block itself still contains !important (proves the allow-list branch is reachable, not vacuous)", () => {
   assert.ok(/prefers-reduced-motion[\s\S]*?!important/.test(stripComments(themeCss)));
+});
+
+// ---------------------------------------------------------------------
+// Lint 3 (CSS-HIDDEN-LINT-1): no rule may override an existing [hidden]
+// guard without a guard of its own.
+//
+// Lint 1 asks "does a display-styled, hidden-toggled class HAVE a guard".
+// This lint asks the next question: "does the guard still WIN". A guard
+// `X[hidden]{display:none}` loses to any rule that sets `display` on the
+// same element with higher specificity, or with equal specificity later in
+// the cascade (theme.css, kit.css, app.css: the <link> order of index.html,
+// then source order). That is how `.pop.menu{display:flex}` beat
+// `.pop[hidden]` and left the Library "Updates" menu always open
+// (css-pop-hidden.test.js pins only that compound `.pop.<x>` shape).
+//
+// Matching, stated honestly (a heuristic, not a selector engine):
+//   - a guard G is RELEVANT to a display rule R when R's last compound
+//     carries every class, id and attribute of G's last compound (minus
+//     `[hidden]`), the tags do not conflict (a tag-only guard needs the
+//     tag), and every class of G's ancestor compounds appears in R's
+//     ancestors; a page scope `.kit.<page>` counts as `.kit`, because the
+//     page root carries both classes (same rule as kitScopedGuardCovers);
+//   - R is a VIOLATION when it beats at least one relevant guard and no
+//     relevant guard beats R (a guard for R itself, e.g. `R[hidden]`,
+//     always beats R: one more attribute selector);
+//   - rules with `display:none`, rules mentioning `[hidden]` (guards and
+//     `:not([hidden])` rules) and pseudo-element rules are never R.
+//   Rules inside @media/@supports/@container count: a guard that loses at
+//   one width is still broken there.
+// ---------------------------------------------------------------------
+
+/** Split a selector list at top-level commas (not inside `:is(a, b)`). */
+function splitSelectorList(text) {
+  const parts = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  parts.push(cur);
+  return parts.map((s) => s.trim().replace(/\s+/g, " ")).filter(Boolean);
+}
+
+/**
+ * Every style rule of `sources` (`[{file, text}]`, in cascade order) as
+ * `{selector, body, file, order, media}`, one entry per selector of a list,
+ * recursing into @media/@supports/@container and skipping other at-rules.
+ */
+function cascadeRules(sources) {
+  const out = [];
+  for (const { file, text } of sources) {
+    const css = stripComments(text);
+    const parse = (start, end, media) => {
+      let j = start;
+      while (j < end) {
+        while (j < end && /\s/.test(css[j])) j++;
+        if (j >= end) break;
+        const brace = css.indexOf("{", j);
+        if (brace === -1 || brace >= end) break;
+        const header = css.slice(j, brace).trim();
+        let depth = 1;
+        let k = brace + 1;
+        while (depth > 0 && k < end) {
+          if (css[k] === "{") depth++;
+          else if (css[k] === "}") depth--;
+          k++;
+        }
+        const body = css.slice(brace + 1, k - 1);
+        if (/^@(media|supports|container)\b/.test(header)) parse(brace + 1, k - 1, header);
+        else if (!header.startsWith("@")) {
+          for (const selector of splitSelectorList(header)) out.push({ selector, body, file, order: out.length, media });
+        }
+        j = k;
+      }
+    };
+    parse(0, css.length, null);
+  }
+  return out;
+}
+
+/** One compound selector (`h4.sec[hidden]:first-child`) as token lists. */
+function parseCompound(text) {
+  const t = { tag: null, ids: [], classes: [], attrs: [], pseudos: [], pseudoElement: false };
+  const re = /(::?[\w-]+(?:\((?:[^()]|\([^()]*\))*\))?)|(#[\w-]+)|(\.[\w-]+)|(\[[^\]]*\])|(\*)|([a-zA-Z][\w-]*)/g;
+  for (const m of text.matchAll(re)) {
+    if (m[1]) {
+      if (m[1].startsWith("::")) t.pseudoElement = true;
+      else t.pseudos.push(m[1]);
+    } else if (m[2]) t.ids.push(m[2]);
+    else if (m[3]) t.classes.push(m[3].slice(1));
+    else if (m[4]) t.attrs.push(m[4].replace(/\s/g, ""));
+    else if (m[6]) t.tag = m[6].toLowerCase();
+  }
+  return t;
+}
+
+/** A complex selector as its compounds, left to right (combinators dropped). */
+function parseComplex(selector) {
+  const compounds = [];
+  let cur = "";
+  let paren = 0;
+  let bracket = 0;
+  for (const ch of selector.replace(/\s*([>+~])\s*/g, " $1 ")) {
+    if (ch === "(") paren++;
+    if (ch === ")") paren--;
+    if (ch === "[") bracket++;
+    if (ch === "]") bracket--;
+    if (ch === " " && paren === 0 && bracket === 0) {
+      if (cur) compounds.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur) compounds.push(cur);
+  return compounds.filter((c) => !/^[>+~]$/.test(c)).map(parseCompound);
+}
+
+function compareSpecificity(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+/** Selectors Level 4 specificity [ids, classes+attrs+pseudo-classes, types]. */
+function specificity(selector) {
+  const s = [0, 0, 0];
+  for (const c of parseComplex(selector)) {
+    s[0] += c.ids.length;
+    s[1] += c.classes.length + c.attrs.length;
+    s[2] += (c.tag ? 1 : 0) + (c.pseudoElement ? 1 : 0);
+    for (const p of c.pseudos) {
+      const m = /^:([\w-]+)(?:\((.*)\))?$/.exec(p);
+      if (m && m[1] === "where") continue;
+      if (m && ["not", "is", "has"].includes(m[1]) && m[2]) {
+        let best = [0, 0, 0];
+        for (const arg of splitSelectorList(m[2])) {
+          const sa = specificity(arg);
+          if (compareSpecificity(sa, best) > 0) best = sa;
+        }
+        for (let i = 0; i < 3; i++) s[i] += best[i];
+      } else s[1] += 1;
+    }
+  }
+  return s;
+}
+
+const HIDDEN_ATTR = "[hidden]";
+
+function guardIsRelevant(guard, rule) {
+  const g = guard.compounds.at(-1);
+  const r = rule.compounds.at(-1);
+  if (!g.classes.every((c) => r.classes.includes(c))) return false;
+  if (!g.ids.every((i) => r.ids.includes(i))) return false;
+  if (!g.attrs.filter((a) => a !== HIDDEN_ATTR).every((a) => r.attrs.includes(a))) return false;
+  if (g.tag && r.tag && g.tag !== r.tag) return false;
+  if (g.tag && !r.tag && !g.classes.length && !g.ids.length) return false;
+  const ruleAncestors = rule.compounds.slice(0, -1);
+  const ruleAncestorClasses = new Set(ruleAncestors.flatMap((c) => c.classes));
+  const guardAncestors = guard.compounds.slice(0, -1);
+  for (let i = 0; i < guardAncestors.length; i++) {
+    const ga = guardAncestors[i];
+    const classes = i === 0 && ga.classes.includes("kit") ? ["kit"] : ga.classes;
+    for (const c of classes) if (!ruleAncestorClasses.has(c)) return false;
+    if (ga.tag && !ruleAncestors.some((c) => c.tag === ga.tag)) return false;
+  }
+  return true;
+}
+
+/** Does `a` win the cascade over `b` for the same element (same origin)? */
+function beats(a, b) {
+  const d = compareSpecificity(a.spec, b.spec);
+  return d > 0 || (d === 0 && a.order > b.order);
+}
+
+/**
+ * @param {{file: string, text: string}[]} sources in cascade order
+ * @returns {{violations: string[], coveredOverrides: string[]}}
+ *   `coveredOverrides` lists rules that beat a guard but have their own
+ *   (proves the analysis sees real overrides, not vacuously nothing).
+ */
+function findOverriddenHiddenGuards(sources) {
+  const rules = cascadeRules(sources).map((r) => ({ ...r, compounds: parseComplex(r.selector), spec: specificity(r.selector) }));
+  const guards = rules.filter((r) => {
+    const last = r.compounds.at(-1);
+    return /display\s*:\s*none\b/.test(r.body) && last.attrs.includes(HIDDEN_ATTR) && !last.pseudoElement;
+  });
+  const displayRules = rules.filter(
+    (r) =>
+      /(^|[;\s])display\s*:/.test(r.body) &&
+      !/display\s*:\s*none\b/.test(r.body) &&
+      !r.selector.includes(HIDDEN_ATTR) &&
+      !r.compounds.at(-1).pseudoElement,
+  );
+  const violations = [];
+  const coveredOverrides = [];
+  for (const rule of displayRules) {
+    const relevant = guards.filter((g) => guardIsRelevant(g, rule));
+    const beaten = relevant.filter((g) => beats(rule, g));
+    if (!beaten.length) continue;
+    const where = `${rule.file}: ${rule.selector}${rule.media ? ` (in ${rule.media})` : ""}`;
+    if (relevant.some((g) => beats(g, rule))) coveredOverrides.push(where);
+    else violations.push(`${where} overrides ${beaten.map((g) => `${g.selector} (${g.file})`).join(", ")}; add ${rule.selector}[hidden]{ display:none; }`);
+  }
+  return { violations, coveredOverrides };
+}
+
+// The <link> order of index.html: theme, kit, app (kit before app on purpose).
+const cascadeSources = [
+  { file: "css/theme.css", text: themeCss },
+  { file: "css/kit.css", text: kitCss },
+  { file: "css/app.css", text: appCss },
+];
+
+test("the stylesheet order this lint assumes matches index.html", () => {
+  const order = [...indexHtml.matchAll(/<link rel="stylesheet" href="\/(css\/[\w-]+\.css)">/g)].map((m) => m[1]);
+  assert.deepEqual(order, cascadeSources.map((s) => s.file));
+});
+
+test("MUTATION TARGET: no later or more specific display rule overrides a [hidden] guard without its own guard (theme + kit + app)", () => {
+  const { violations } = findOverriddenHiddenGuards(cascadeSources);
+  assert.deepEqual(violations, [], `display rule(s) that beat a [hidden] guard:\n${violations.join("\n")}`);
+});
+
+test("sanity: the real tree has overrides the lint sees as covered (.pop.menu by .pop.menu[hidden]), so it is not vacuous", () => {
+  const { coveredOverrides } = findOverriddenHiddenGuards(cascadeSources);
+  assert.ok(coveredOverrides.includes("css/app.css: .pop.menu"), `covered: ${coveredOverrides.join(" | ")}`);
+  assert.ok(coveredOverrides.length >= 5, `only ${coveredOverrides.length} covered overrides found: parsing regressed?`);
+});
+
+test("lint 3 catches the old .pop.menu pattern: equal specificity, declared later than .pop[hidden]", () => {
+  const css = ".pop{ display:block; }\n.pop[hidden]{ display:none; }\n.pop.menu{ display:flex; }\n";
+  const { violations } = findOverriddenHiddenGuards([{ file: "fixture.css", text: css }]);
+  assert.equal(violations.length, 1, violations.join("\n"));
+  assert.match(violations[0], /^fixture\.css: \.pop\.menu overrides \.pop\[hidden\]/);
+  const fixed = findOverriddenHiddenGuards([{ file: "fixture.css", text: `${css}.pop.menu[hidden]{ display:none; }\n` }]);
+  assert.deepEqual(fixed.violations, [], "the guard for the compound fixes it");
+});
+
+test("lint 3 catches a higher-specificity rule declared BEFORE the guard, and one inside @media", () => {
+  const css = [
+    ".kit .bar .btn{ display:inline-flex; }",
+    ".btn[hidden]{ display:none; }",
+    "@media (max-width:600px){ .kit .x .tile.on{ display:grid; } }",
+    ".kit .tile[hidden]{ display:none; }",
+    ".kit .tile.on{ display:grid; }", // (0,3,0), later than the (0,3,0) guard: also a violation
+  ].join("\n");
+  const { violations } = findOverriddenHiddenGuards([{ file: "f.css", text: css }]);
+  assert.equal(violations.length, 3, violations.join("\n"));
+  assert.match(violations[0], /^f\.css: \.kit \.bar \.btn overrides \.btn\[hidden\]/);
+  assert.match(violations[1], /^f\.css: \.kit \.x \.tile\.on \(in @media \(max-width:600px\)\) overrides \.kit \.tile\[hidden\]/);
+  assert.match(violations[2], /^f\.css: \.kit \.tile\.on overrides/);
+});
+
+test("lint 3 leaves alone: lower specificity, display:none, :not([hidden]), unrelated classes, an earlier equal rule", () => {
+  const css = [
+    ".pop.menu{ display:flex; }", // equal specificity but EARLIER than the guard below
+    ".pop[hidden]{ display:none; }",
+    ".btn[hidden]{ display:none; }",
+    ".btn{ display:inline-flex; }", // lower specificity
+    ".kit .x .btn{ display:none; }", // display:none never un-hides
+    ".kit .x .btn:not([hidden]){ display:flex; }", // never matches a hidden element
+    ".kit .x .chip{ display:flex; }", // another class
+    ".kit .x .btn::before{ display:block; }", // pseudo-element
+  ].join("\n");
+  assert.deepEqual(findOverriddenHiddenGuards([{ file: "f.css", text: css }]).violations, []);
+});
+
+test("lint 3 is wired to the real tree: a rule planted in app.css is reported", () => {
+  const planted = cascadeSources.map((s) =>
+    s.file === "css/app.css" ? { ...s, text: `${s.text}\n.kit .lib-bar .btn.planted{ display:flex; }\n` } : s,
+  );
+  const hits = findOverriddenHiddenGuards(planted).violations.filter((v) => v.includes(".planted"));
+  assert.equal(hits.length, 1, hits.join("\n"));
+  assert.match(hits[0], /^css\/app\.css: \.kit \.lib-bar \.btn\.planted overrides .*\.btn\[hidden\] \(css\/app\.css\)/);
 });

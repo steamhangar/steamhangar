@@ -162,6 +162,17 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;borde
 .live .big{font:500 var(--fs-7)/1 var(--ui);letter-spacing:-1px;font-variant-numeric:tabular-nums}
 .live .big small{font-size:var(--fs-3);color:var(--dim);margin-left:4px;letter-spacing:0}
 .live .cap{font-size:var(--fs-2);color:var(--dim);margin-top:8px}
+/* "Loading now" (WP NOW-LOADING-1): web/css/kit.css .kit .live .lnow, same values */
+.live .lnow{grid-column:1/-1;display:grid;gap:var(--sp-2);min-width:0}
+.live .lnow .lk{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+.live .lnow ul{list-style:none;margin:0;padding:0;display:grid;gap:6px;min-width:0}
+.live .lnow li{background:color-mix(in srgb,var(--accent) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line));border-radius:var(--r-m);padding:8px 12px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 10px;align-items:center;min-width:0}
+.live .lnow li>div{min-width:0;flex:1 1 12ch}
+.live .lnow li b{display:block;font-weight:500;overflow-wrap:anywhere}
+.live .lnow li span{font-size:var(--fs-2);color:var(--dim);overflow-wrap:anywhere}
+.live .lnow li .spd{font:500 var(--fs-3) var(--mono);color:var(--accent);white-space:nowrap}
+.live .lnow li[data-kind="unattributed"]{background:none;border-style:dashed}
+.live .lnow li[data-kind="unattributed"] .spd{color:var(--dim)}
 .graph{position:relative}
 .graph svg{width:100%;height:96px;display:block}
 /* two series (WP WEB-FIX-20.2, same values as web/css/kit.css) */
@@ -380,6 +391,7 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;borde
           <div class="live">
             <div><div class="big">38.2<small>MB/s</small></div><div style="margin-top:8px"><span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span></div><div class="cap">Limit <b style="color:var(--text);font-weight:500">16 MB/s</b>, all day · 1 device loading</div></div>
             <div class="graph"><svg viewBox="0 0 600 96" preserveAspectRatio="none"><g stroke="var(--line-soft)" stroke-width="1"><line x1="0" y1="24" x2="600" y2="24"/><line x1="0" y1="48" x2="600" y2="48"/><line x1="0" y1="72" x2="600" y2="72"/></g><path class="area net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72 L600 79 L580 78 L530 53 L470 50 L420 72 L360 71 L330 36 L300 43 L230 69 L170 71 L120 89 L60 88 L0 90 Z"/><path class="area srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79 L600 96 L0 96 Z"/><path class="line net" d="M0 88 L60 84 L120 86 L170 60 L230 58 L300 20 L330 10 L360 60 L420 62 L470 30 L530 34 L580 70 L600 72"/><path class="line srv" d="M0 90 L60 88 L120 89 L170 71 L230 69 L300 43 L330 36 L360 71 L420 72 L470 50 L530 53 L580 78 L600 79"/></svg><div class="ax"><span>55 min ago</span><span>peak 104 MB/s</span><span>now</span></div><div class="glegend"><span class="srv"><i></i>Served from cache</span><span class="net"><i></i>From the internet</span></div></div>
+            <div class="lnow"><div class="lk" aria-hidden="true">Loading now</div><ul role="list" aria-label="Loading now"><li data-kind="runner"><div><b>Prefill runner</b><span>Driftwood Signal · job #900001 · Downloading</span></div><span class="spd">31.5 MB/s</span></li><li data-kind="client"><div><b>Gaming PC</b><span>Satisfactory · from the cache</span></div><span class="spd">6.7 MB/s</span></li></ul></div>
           </div>
           <div class="mini"><span>Avg while loading <b>37.3 MB/s</b></span><span>Peak <b>104 MB/s</b></span><span>Prefill runner <b>23.1 GB</b> of it, cache <b>25.0 GB</b></span></div>
           <div class="tiles">

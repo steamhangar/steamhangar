@@ -121,7 +121,10 @@ const { resetModalStack } = await import("../js/lib/modal-stack.js");
 after(() => store.stop());
 
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
-async function until(pred, label, timeoutMs = 2000) {
+// Every wait polls for a condition, so the deadline only bounds a real hang.
+// 2 s was within reach of full-suite load on CI (one unreproduced 2-failure
+// flake on 2026-10-31); 10 s keeps a hang visible without failing a slow run.
+async function until(pred, label, timeoutMs = 10_000) {
   const start = Date.now();
   while (!pred()) {
     if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for: ${label}`);
@@ -326,7 +329,7 @@ test("MUTATION TARGET: after a remove, a tick equal to the previous list (agent 
     server.getGate = null;
     release();
   }
-  await until(() => rowIds().length === 3, "the server's list wins on the next tick", 3000);
+  await until(() => rowIds().length === 3, "the server's list wins on the next tick");
   assert.deepEqual(rowIds(), ["desk-pc", "retired-pc", "lab/pc-1"]);
 });
 

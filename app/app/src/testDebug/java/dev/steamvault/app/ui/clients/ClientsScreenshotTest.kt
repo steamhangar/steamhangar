@@ -120,7 +120,8 @@ class ClientsScreenshotTest {
                     }
                     Page.STATS -> Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
                         val scope = rememberCoroutineScope()
-                        val poll = remember { downloadsStatsPoll(repo, nowMs = { NOW }) }
+                        // A persisted range, so the graph is the 1-minute tier (the default is live).
+                        val poll = remember { downloadsStatsPoll(repo, "6h", nowMs = { NOW }) }
                         LaunchedEffect(poll) { poll.refreshOnce() }
                         Box(Modifier.statusBarsPadding().padding(12.dp)) { DownloadsStatsHeader(poll, scope, nowMs = { NOW }) }
                     }
@@ -157,9 +158,12 @@ class ClientsScreenshotTest {
         for (label in listOf("Current speed", "Average while loading", "Peak speed", "Served (cache + prefill)", "Loaded from the internet", "Hit rate", "Saved by the cache", "Loading now")) {
             composeRule.onNode(hasContentDescription("$label: ", substring = true)).assertExists()
         }
-        // WP GRAPH-ZOOM: a fresh TrafficRanges opens on 6 h, the 1-minute tier.
+        // WP GRAPH-ZOOM: the 6 h range reads the 1-minute tier.
         val graph = composeRule.onNode(hasContentDescription("Average speed per minute in the last 6 hours.", substring = true))
         graph.assertExists()
+        // WP ANDROID-DL-1: the pill from the `now` block (the demo runner downloads).
+        // (The split graph's legend is decoration without semantics, like the axis; the golden shows it.)
+        composeRule.onNode(hasContentDescription("Downloading")).assertExists()
         assertTrue(composeRule.onAllNodes(hasContentDescription("Not available", substring = true)).fetchSemanticsNodes().isEmpty())
     }
 

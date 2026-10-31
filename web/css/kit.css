@@ -419,6 +419,22 @@
 .kit .live .hpill{ margin-top:var(--sp-2); }
 .kit .live .hcap{ font-size:var(--fs-2); color:var(--dim); margin-top:var(--sp-2); line-height:1.45; overflow-wrap:anywhere; }
 .kit .live .hcap b{ color:var(--text); font-weight:500; }
+/* "Loading now" (WP NOW-LOADING-1): one row per source under the number and
+   the graph, the Clients card's "now" row anatomy; the unattributed row is
+   neutral. Spans the live grid, so the hidden block takes no row. */
+.kit .live .lnow{ grid-column:1 / -1; display:grid; gap:var(--sp-2); min-width:0; }
+.kit .live .lnow .lk{ font:500 var(--fs-1)/1 var(--ui); letter-spacing:.8px; text-transform:uppercase; color:var(--dim); }
+.kit .live .lnow ul{ list-style:none; margin:0; padding:0; display:grid; gap:6px; min-width:0; }
+.kit .live .lnow li{
+  background:color-mix(in srgb, var(--accent) 8%, var(--surface)); border:1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius:var(--r-m); padding:8px 12px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:2px 10px; align-items:center; min-width:0;
+}
+.kit .live .lnow li > div{ min-width:0; flex:1 1 12ch; }
+.kit .live .lnow li b{ display:block; font-weight:500; overflow-wrap:anywhere; }
+.kit .live .lnow li span{ font-size:var(--fs-2); color:var(--dim); overflow-wrap:anywhere; }
+.kit .live .lnow li .spd{ font:500 var(--fs-3) var(--mono); color:var(--accent); white-space:nowrap; }
+.kit .live .lnow li[data-kind="unattributed"]{ background:none; border-style:dashed; }
+.kit .live .lnow li[data-kind="unattributed"] .spd{ color:var(--dim); }
 .kit .graph{ margin:0; min-width:0; position:relative; }
 /* idle graph (WP DOWNLOADS-3): flat baseline at 0 + a centred dim note */
 .kit .graph .line.base{ stroke:var(--line); }
@@ -555,7 +571,7 @@
 /* [hidden] guards for the display-styled Downloads classes above (same
    reason as the guard list before this block). */
 .kit.dl[hidden], .kit .dl-bulk[hidden], .kit .dl-bulk-acts[hidden], .kit .hero[hidden], .kit .hero .hh[hidden],
-.kit .live[hidden], .kit .graph[hidden], .kit .mini[hidden], .kit .cols3[hidden], .kit .col[hidden], .kit .blk[hidden],
+.kit .live[hidden], .kit .live .lnow[hidden], .kit .graph[hidden], .kit .mini[hidden], .kit .cols3[hidden], .kit .col[hidden], .kit .blk[hidden],
 .kit .rowlist[hidden], .kit .sechd .hacts[hidden], .kit .dl-updates-acts[hidden], .kit .job[hidden], .kit .bar[hidden],
 .kit .job .t[hidden], .kit .job .acts[hidden], .kit .qrow .qlead[hidden], .kit .qrow .grip[hidden], .kit .hitem[hidden],
 .kit .hrow[hidden], .kit .hpanel[hidden], .kit .hpanel .failhint[hidden], .kit .hpanel .acts[hidden], .kit .hpanel .cmd[hidden],
@@ -1059,7 +1075,7 @@
 .kit .lib-chips[hidden], .kit .lib-chips .fchip[hidden], .kit .lib-tools[hidden], .kit .lib-tools .ico[hidden],
 .kit .sortg[hidden], .kit .sortg button[hidden], .kit .segi[hidden], .kit .segi button[hidden], .kit .lib-filtersbtn[hidden],
 .kit .lib-meta.pop[hidden], .kit .lib-meta-cats[hidden], .kit .lib-meta-unk[hidden], .kit .lib-stat[hidden],
-.kit .grid[hidden], .kit .card[hidden], .kit .card .pick[hidden], .kit .card .rowname[hidden], .kit .card .meta[hidden],
+.kit .grid[hidden], .kit .card[hidden], .kit .card .pick[hidden], .kit .grid.selecting .card .pick[hidden], .kit .card .rowname[hidden], .kit .card .meta[hidden],
 .kit .stt[hidden], .kit .stt .icnact[hidden], .kit .card .meta .size[hidden], .kit .card .pkgline[hidden],
 .kit .card .pkgfail[hidden], .kit .card .updbadge[hidden], .kit .card .instbadge[hidden], .kit .card .playbadge[hidden],
 .kit .grid.list .card .rowname[hidden], .kit .grid.list .card .meta[hidden], .kit .grid.list .card .meta .size[hidden],
@@ -1253,6 +1269,6 @@
 .kit .ad-foot{ padding-bottom:calc(14px + env(safe-area-inset-bottom, 0px)); }
 
 /* [hidden] guards for the display-styled classes of this block. */
-.kit .gd-compact[hidden], .kit.game-detail .gd-foot .gd-acts[hidden], .kit.game-detail .gd-foot .jobacts[hidden],
+.kit .gd-compact[hidden], .kit.game-detail.compact .gd-compact[hidden], .kit.game-detail .gd-foot .gd-acts[hidden], .kit.game-detail .gd-foot .jobacts[hidden],
 .kit .hs-head[hidden], .kit .hs-head .hic[hidden], .kit .hs-head .hinfo[hidden],
 .kit .ad-open-here[hidden], .kit .ad-other[hidden], .kit .ad-other-t[hidden], .kit .ad-pairbox .ad-qrreveal[hidden]{ display:none; }

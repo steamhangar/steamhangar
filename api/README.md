@@ -4811,6 +4811,45 @@ before it was recorded, so "all" starts there.
   Calling the endpoint arms the live watcher. `null` unless the feed is
   `ok`; the swept `current`/`active_clients_now`/`runner_active_now` stay
   for older clients. The web takes `now` over the swept figures.
+- **`now.loading_sources`** (WP NOW-LOADING-1, rc21, additive): what is
+  loading in that same window, one row per source, from the same read of
+  the ring as the figures above (empty list when nothing loads):
+
+  ```json
+  [{"kind": "runner", "key": "runner", "name": "Prefill runner",
+    "addresses": ["172.20.0.5"], "known": true,
+    "bytes_per_second": 31457280.0, "hit_bytes_per_second": 0.0,
+    "miss_bytes_per_second": 31457280.0,
+    "apps": [{"appid": 275850, "name": "No Man's Sky", "bytes_per_second": 31457280.0}],
+    "unattributed_bytes_per_second": 0.0, "phase": "download",
+    "job": {"job_id": 200, "appid": 275850, "name": "No Man's Sky", "stop_request": null}},
+   {"kind": "client", "key": "agent:gaming-pc", "name": "Gaming PC",
+    "addresses": ["192.168.1.20"], "known": true, "bytes_per_second": 12582912.0,
+    "hit_bytes_per_second": 12582912.0, "miss_bytes_per_second": 0.0,
+    "apps": [...], "unattributed_bytes_per_second": 0.0, "phase": null, "job": null},
+   {"kind": "unattributed", "key": "unattributed", "name": null, "addresses": [], ...}]
+  ```
+
+  `runner`: the prefill runner, at most one row; `phase` is `verify` when
+  every runner byte in the window was a cache HIT (the pill's "Verifying"
+  rule), else `download`; `job` is the running prefill job (its
+  `stop_request` is `cancel`/`pause` while a stop waits for the runner), or
+  `null` when the runner has traffic but no prefill job runs (the last
+  lines of a job that just ended or was cancelled stay in the window for up
+  to ~20 s). `client`: one row per client, keyed and named as on the
+  Clients page (`agent:<id>` with all its addresses, or `addr:<address>`);
+  `known: false` marks an address the Clients page does not list yet (no
+  agent, no name, no swept traffic in 30 days); a named address counts as
+  known even without any traffic. Known gap: the prefill runner is told
+  apart by its runner window, which a sweep extends (see "How long an
+  address stays the runner"). Runner traffic before the first sweep of a
+  UTC day (a new runner period, or a runner on a new address) is not yet
+  inside a window, so it shows as a client row, typically "New device"
+  with the runner's address, until that sweep has run. Games come from
+  `depot_app_map` (exactly one app per depot); bytes on other depots are
+  `unattributed_bytes_per_second`. `unattributed`: served bytes no address
+  explains (more than 64 addresses in one 5 s cell). Runner first, then
+  clients fastest first, the unattributed row last.
 - **`summary`** over the range. `bytes_served` is **everything** the cache
   served, the prefill runner included (the real load on the cache and the
   line; average and peak speed use it too). Every client figure leaves the
@@ -4853,7 +4892,11 @@ source (`live` or `persisted`), so nothing is counted twice. `current` is the
 last 15-20 s, split into total and prefill-runner speed. `active_clients`
 (WP LOADING-NOW-1, rc21) counts the client addresses that were served bytes
 in that same window (`active_window_seconds`; before rc21: any line in 5
-minutes); `active_window_minutes` is deprecated (1). With the event feed
+minutes); `active_window_minutes` is deprecated (1). `loading_sources`
+(WP NOW-LOADING-1, rc21) carries the same rows as `/v1/throughput`'s
+`now.loading_sources`, `null` unless the feed is `ok`. Since rc21 the
+running 5 s point divides by the seconds elapsed in it (at least 1), not by
+5, like the persisted ranges' running bucket. With the event feed
 disabled, `current` is null and `points` empty. No schema change.
 `GET /v1/clients/overview` (WP CLIENTS-LIVE-1) and `GET /v1/throughput` /
 `/v1/throughput/series` (WP GRAPH-RECENT-1) read the same ring and arm the

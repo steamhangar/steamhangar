@@ -13,6 +13,8 @@ import dev.steamvault.app.ui.traffic.logic.TRAFFIC_RANGES
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
+import dev.steamvault.app.ui.traffic.logic.heroStatus
+import dev.steamvault.app.ui.traffic.logic.mergeNow
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
 import dev.steamvault.app.ui.traffic.logic.seriesStartText
 import dev.steamvault.app.ui.traffic.logic.trimSeries
@@ -176,5 +178,33 @@ class DemoTrafficTest {
         }
         assertEquals(before, state.trafficSnapshot().runningJobs.map { it.id })
         assertTrue(repo.jobHistory("all", 200).isNotEmpty())
+    }
+
+    @Test
+    fun `ANDROID-DL-1 -- the demo matches the web demo's rc21 fields (watcher 60 s, now block, runner split, live count)`() = runTest {
+        val now = Instant.parse("2026-10-14T19:30:07Z").toEpochMilli()
+        val live = demoLive(now)
+        assertEquals("web demo-traffic.js: watcher_window_seconds 60", 60, live.watcher_window_seconds)
+        assertEquals(2, live.active_clients)
+        assertEquals(live.current!!.window_seconds, live.active_window_seconds)
+        assertEquals(1, live.active_window_minutes)
+        assertEquals(0.0, live.current!!.runner_hit_bytes_per_second!!, 0.0)
+        assertTrue(live.points.all { it.runner_hit_bytes == 0L && it.runner_miss_bytes == it.runner_bytes })
+        val state = DemoState.fresh()
+        val repo = DemoTrafficRepository(state)
+        for (range in PERSISTED_STATS_RANGES) {
+            val t = repo.throughput(range)
+            val block = t.now
+            assertNotNull("$range: the now block", block)
+            assertEquals(2, block!!.active_clients)
+            assertEquals(block.window_seconds, block.current!!.window_seconds)
+            assertTrue(block.window_seconds!! in 15..19)
+            assertEquals(t.runner_active_now, block.runner_active)
+            assertEquals(0.0, t.current!!.runner_hit_bytes_per_second!!, 0.0)
+            assertTrue(repo.series(range).points.all { it.runner_hit_bytes == 0L && it.runner_miss_bytes == it.runner_bytes })
+            // The demo runner downloads while the demo job runs: the pill says so on every range.
+            assertEquals("Downloading", heroStatus(mergeNow(t).current)!!.text)
+            assertEquals("machines the cache served in the last ${block.window_seconds} s", headerTiles(mergeNow(t))!!.first { it.key == "clients" }.detail)
+        }
     }
 }

@@ -46,7 +46,10 @@ on its own cursor, for the graph only:
 * **One "now" window (WP LOADING-NOW-1).** "Current speed", "Loading now"
   (``active_clients``) and the Clients page's ``live_now`` all read the same
   window: the last ``CURRENT_SECONDS`` plus the running cell. An address is
-  loading when it was served bytes in it.
+  loading when it was served bytes in it. WP NOW-LOADING-1: ``now_view``
+  reads that window once for the speed, the per-address activity (with its
+  HIT/MISS split) and the bytes no address explains, so the Downloads
+  "Loading now" rows, the pill and the device count come from one read.
 
 Known limits (honest, not bugs): the sweep truncates the log once it has
 caught up; lines that arrive between our last read and that truncation never
@@ -479,32 +482,7 @@ class LiveTier:
 
     def current(self, now: datetime, is_runner: Callable[[str, str], bool]) -> "LiveCurrent":
         """Speed over the last ``CURRENT_SECONDS`` plus the running cell."""
-        epoch = _epoch(now)
-        cells, _covered = self._copy()
-        now_cell = _floor(epoch, CELL_SECONDS)
-        start = now_cell - CURRENT_SECONDS
-        total = 0
-        runner = [0, 0, 0, 0]
-        for key in range(start, now_cell + CELL_SECONDS, CELL_SECONDS):
-            by_addr = cells.get(key)
-            if not by_addr:
-                continue
-            iso = _iso(key)
-            for addr, c in by_addr.items():
-                total += c[_BYTES]
-                if addr != OVERFLOW_ADDR and is_runner(addr, iso):
-                    for i in range(4):
-                        runner[i] += c[i]
-        seconds = max(1.0, epoch - start)
-        return LiveCurrent(
-            bytes_per_second=total / seconds,
-            runner_bytes_per_second=runner[_BYTES] / seconds,
-            window_start=_iso(start),
-            window_end=to_utc_iso(now),
-            window_seconds=int(round(seconds)),
-            runner_hit_bytes_per_second=runner[_HIT] / seconds,
-            runner_miss_bytes_per_second=runner[_MISS] / seconds,
-        )
+        return self.now_view(now, is_runner).current
 
     def buckets(
         self,
@@ -555,13 +533,23 @@ class LiveTier:
         addresses with served bytes in it are listed; the anonymous overflow
         entry is not an address and is left out.
         """
+        view = self.now_view(now, is_runner)
+        return view.activity, view.seconds
+
+    def now_view(self, now: datetime, is_runner: Callable[[str, str], bool]) -> "NowView":
+        """Everything the "now" window holds, from ONE read of the ring
+        (WP NOW-LOADING-1): the current speed, the per-address activity and
+        the bytes no address explains (the overflow entry). Reading them in
+        one go means a tail between two reads can never make the speed, the
+        "Loading now" count and the per-source rows disagree.
+        """
         epoch = _epoch(now)
         now_cell = _floor(epoch, CELL_SECONDS)
         start = now_cell - CURRENT_SECONDS
         with self._lock:
             keys = range(start, now_cell + CELL_SECONDS, CELL_SECONDS)
             cells = {
-                key: {addr: c[_BYTES] for addr, c in self._cells[key].items()}
+                key: {addr: tuple(c) for addr, c in self._cells[key].items()}
                 for key in keys
                 if key in self._cells
             }
@@ -570,17 +558,48 @@ class LiveTier:
                 for key in keys
                 if key in self._depots
             }
-        out: dict[tuple[str, bool], AddrActivity] = {}
+        total = 0
+        runner = [0, 0, 0, 0]
+        overflow = [0, 0, 0, 0]
+        activity: dict[tuple[str, bool], AddrActivity] = {}
         for key, by_addr in cells.items():
             iso = _iso(key)
-            for addr, served in by_addr.items():
-                if addr == OVERFLOW_ADDR or served <= 0:
+            for addr, c in by_addr.items():
+                total += c[_BYTES]
+                if addr == OVERFLOW_ADDR:
+                    for i in range(4):
+                        overflow[i] += c[i]
                     continue
-                entry = out.setdefault((addr, is_runner(addr, iso)), AddrActivity())
-                entry.bytes_served += served
+                side = is_runner(addr, iso)
+                if side:
+                    for i in range(4):
+                        runner[i] += c[i]
+                if c[_BYTES] <= 0:
+                    continue
+                entry = activity.setdefault((addr, side), AddrActivity())
+                entry.bytes_served += c[_BYTES]
+                entry.hit_bytes += c[_HIT]
+                entry.miss_bytes += c[_MISS]
                 for depotid, size in depots.get(key, {}).get(addr, {}).items():
                     entry.depots[depotid] = entry.depots.get(depotid, 0) + size
-        return out, max(1.0, epoch - start)
+        seconds = max(1.0, epoch - start)
+        current = LiveCurrent(
+            bytes_per_second=total / seconds,
+            runner_bytes_per_second=runner[_BYTES] / seconds,
+            window_start=_iso(start),
+            window_end=to_utc_iso(now),
+            window_seconds=int(round(seconds)),
+            runner_hit_bytes_per_second=runner[_HIT] / seconds,
+            runner_miss_bytes_per_second=runner[_MISS] / seconds,
+        )
+        return NowView(
+            current=current,
+            activity=activity,
+            overflow_bytes=overflow[_BYTES],
+            overflow_hit_bytes=overflow[_HIT],
+            overflow_miss_bytes=overflow[_MISS],
+            seconds=seconds,
+        )
 
     def covered_from(self) -> str | None:
         with self._lock:
@@ -622,6 +641,11 @@ class AddrActivity:
     bytes_served: int = 0
     #: Served bytes per depot id (at most ``MAX_DEPOTS_PER_ADDR_CELL`` per cell).
     depots: dict[int, int] = field(default_factory=dict)
+    #: WP NOW-LOADING-1: the served bytes split by cache status (HIT = from
+    #: the cache's disk, MISS = fetched from the internet); BYPASS is in
+    #: neither, so ``hit + miss <= bytes_served``.
+    hit_bytes: int = 0
+    miss_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -637,6 +661,23 @@ class LiveCurrent:
     #: so ``hit + miss <= runner_bytes_per_second``.
     runner_hit_bytes_per_second: float = 0.0
     runner_miss_bytes_per_second: float = 0.0
+
+
+@dataclass(frozen=True)
+class NowView:
+    """One read of the "now" window (``LiveTier.now_view``, WP NOW-LOADING-1)."""
+
+    current: LiveCurrent
+    #: As ``LiveTier.addr_activity``.
+    activity: dict[tuple[str, bool], AddrActivity]
+    #: Served bytes of the anonymous overflow entry: traffic in the window
+    #: that no address explains (``MAX_ADDRS_PER_CELL`` was exceeded).
+    overflow_bytes: int
+    #: Its HIT / MISS parts.
+    overflow_hit_bytes: int
+    overflow_miss_bytes: int
+    #: The window's length in seconds (at least 1).
+    seconds: float
 
 
 def minute_epoch(iso: str) -> int | None:

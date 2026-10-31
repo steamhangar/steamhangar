@@ -102,7 +102,7 @@ class AndroidGaps1WiringTest {
         assertCalledFrom(downloads, "HistoryDeleteFlow(it)", "DownloadsScreen")
         assertCalledFrom(downloads, "HistoryDeleteDialog(historyDelete, scope)", "DownloadsScreen")
         assertCalledFrom(downloads, "controller.showNotice(historyDeletedText(result))", "DownloadsScreen")
-        assertCalledFrom(downloads, "historyFilter.load()\n                    controller.refreshJobsOnce()\n                    statsPoll.refreshOnce()", "DownloadsScreen")
+        assertCalledFrom(downloads, "controller.refreshJobsOnce()\n                    historyFilter.load()\n                    statsPoll.refreshOnce()", "DownloadsScreen")
         assertCalledFrom(downloads, "HistoryDeleteButton(historyDelete)", "DownloadsBody")
         assertCalledFrom(historyDialog, "flow.confirm()", "HistoryDeleteDialog")
         assertCalledFrom(historyDialog, "for (option in HISTORY_DELETE_OPTIONS)", "HistoryDeleteDialog")

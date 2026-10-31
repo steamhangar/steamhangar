@@ -907,6 +907,29 @@ def addrs_seen_since(
     return {str(row["client_addr"]) for row in rows}
 
 
+def addrs_listed(
+    conn: sqlite3.Connection, addrs: Iterable[str], since: str
+) -> set[str]:
+    """Which of ``addrs`` have a line in the hourly tier from ``since`` on
+    (``addrs_seen_since`` for a few given addresses, by primary key; WP
+    NOW-LOADING-1: the Clients page lists exactly those agentless
+    addresses)."""
+    wanted = sorted(set(addrs))
+    found: set[str] = set()
+    for offset in range(0, len(wanted), 500):
+        chunk = wanted[offset : offset + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+            f"""
+            SELECT DISTINCT client_addr FROM client_traffic
+            WHERE tier = '1h' AND client_addr IN ({placeholders}) AND bucket_at >= ?
+            """,
+            (*chunk, since),
+        ):
+            found.add(str(row["client_addr"]))
+    return found
+
+
 def depot_bytes(
     conn: sqlite3.Connection, tier: str, start: str, scope: Scope = ALL
 ) -> dict[str, dict[int, tuple[int, str]]]:

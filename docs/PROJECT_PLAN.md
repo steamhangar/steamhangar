@@ -3654,7 +3654,7 @@ below carry their own later dates, item 12 is the current one).
         the remaining first read (no web change). Branch
         `wp/rc21-ui-cold-cached-1` 0a821c0, review PASS; check the walk
         duration in the next cold test.
-      - [ ] **FLAKY-DEMO-24H-1** (web test) `web/tests/demo-data-traffic.test.js:105`
+      - [x] **FLAKY-DEMO-24H-1** (bb75706, TEST-HYGIENE-1; Date frozen via mock.timers; the clients-merged-card flake was state left by the Remove test in `views/clients.js` `removedIds`, fixed by waiting for the store snapshot) (web test) `web/tests/demo-data-traffic.test.js:105`
         computes the 24 h cutoff after the demo request, so a seed job
         finishing right at the boundary flips in/out (CI failure on
         wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
@@ -3775,11 +3775,20 @@ below carry their own later dates, item 12 is the current one).
         (Installed, Loaded, Hit rate with meter); Recent chips with "+N
         more"; agent health row; footer with last active and unattributed GB;
         summary tile details and range control.
-      - [ ] **CSS-HIDDEN-LINT-1** (web test; partly done: since SETTINGS-2 the
+      - [x] **CSS-HIDDEN-LINT-1** (bb75706, TEST-HYGIENE-1; Lint 3 in css-hygiene.test.js found and guarded 2 real overrides in kit.css) (web test; partly done: since SETTINGS-2 the
         hygiene check also reads kit.css) generalise the hidden-guard lint
         in `css-hygiene.test.js`: fail when a later or higher-specificity rule
         sets `display` on an element whose `[hidden]` guard it overrides
         (`css-pop-hidden.test.js` covers only compound `.pop.<x>`).
+      - [ ] nit (TEST-HYGIENE-1 review): Lint 3 blind spots (guard
+        ancestors must all appear in the rule's ancestors, so
+        `.kit .grid.selecting .pick` vs `.kit .card .pick[hidden]` is not
+        flagged; `.kit.<page>` treated as `.kit`) should be stated in the
+        lint header; ten web test files still use `until(..., 2000)`
+        (clients-live, clients-view-wiring, clients-nav-refresh,
+        clients-rename-wiring, steam-library-setting, onboarding-steamid,
+        downloads-names-loading, downloads-layout, downloads-updates-wiring,
+        downloads-owned-preloaded).
       - [ ] nit (FIX-POP-HIDDEN-1): `.pop` has no box-shadow and
         `.pop.menu` min-width is 100% where the Library mockup shows 260px
         plus shadow; dead `.cl-list > p` rule; the Clients empty state repeats
@@ -3918,7 +3927,7 @@ below carry their own later dates, item 12 is the current one).
         says the runner was 60 % HIT while its points say 0 % (kept for
         golden stability). Android: read the runner split, add the
         "Verifying" pill and count runner HITs as cache in the graph.
-      - [ ] **NOW-LOADING-1** (api + web; operator report 2026-10-31, prod
+      - [x] **NOW-LOADING-1** (f8b7754 + goldens bba31e7; `now.loading_sources` / live `loading_sources`: runner row with job and phase or "No running job", client rows with games, "Unattributed traffic"; one ring snapshot `LiveTier.now_view`; live 5 s point divided by elapsed seconds) (api + web; operator report 2026-10-31, prod
         rc20.2, decided the same day: rc21, scope "game + source") the
         Downloads page never says WHAT is loading: the pill, "no device
         loading" and the runner GB are counts only. Add a "Loading now"
@@ -3935,7 +3944,7 @@ below carry their own later dates, item 12 is the current one).
       - Android package cut (orchestrator, 2026-10-31, operator's yes to run
         rc21 incl. Android): each package builds and tests only in GitHub CI
         (push `wp/*`, app goldens via a `wp/<name>-goldens` branch).
-        - [ ] **ANDROID-DL-1** Downloads data path: default range live and
+        - [x] **ANDROID-DL-1** (96e526e + goldens f27f4c8) Downloads data path: default range live and
           `active_clients` from the live answer (LIVE-DELAY-1 follow-up), the
           `now` block for header/pill/"Loading now" on every range
           (GRAPH-RECENT-1, LOADING-NOW-1), runner split with the "Verifying"
@@ -3943,6 +3952,14 @@ below carry their own later dates, item 12 is the current one).
           watcher window 60 s, the subline/History count and first-10 +
           "Show more" paging (DOWNLOADS-3 twin). Closes the two Android
           Downloads boxes below.
+        - [ ] nit (ANDROID-DL-1 review): `ClientsScreenshotTest.kt:96`
+          `heightDp = 640` cuts the 360dp/font130 Downloads golden through the
+          axis captions and hides the legend (raise to ~760 with the next app
+          goldens round, ANDROID-DL-2); Kotlin `splitGeometry` always draws
+          the split (fields default to 0) where the web falls back to one
+          line; TalkBack focus stays on "Show N more" (web moves it to the
+          first new row); the two graph fills are hard to tell apart in the
+          night golden (REDESIGN-1b); import order in `DownloadsStats.kt`.
         - [ ] **ANDROID-DL-2** (after NOW-LOADING-1 is on main) the
           "Loading now" source rows (twin of `loadingNowModel`), the Repair
           flow (CACHE-REPAIR-UI-1 twin) and the GROUP-VERIFIED-1 S2 group
@@ -3954,14 +3971,38 @@ below carry their own later dates, item 12 is the current one).
         - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
           tabs, Settings section nav, Downloads layout, sheet motion where it
           fits Material.
-        - [ ] **APP-NIGHT-GOLDEN-1** (box below) plus the MOBILE-1a nit
-          (test sample IPs to 192.168.1.x in Kotlin).
-      - [ ] Android Downloads subline counts the plain job poll
+        - [x] **APP-NIGHT-GOLDEN-1** closed as works-as-designed (2026-10-31,
+          reviewer-confirmed): the app is single-dark-theme on purpose
+          (`Theme.kt`, no `values-night/`, mockup NOTES.md:117, app README);
+          the night qualifier is applied and the byte-identical night golden
+          is the intended guard against a theme that starts reading the
+          system setting. The MOBILE-1a sample-address nit rides along
+          (10.0.0.x; 192.168.1.0/24 is not neutral either).
+        - [ ] nit (APP-NIGHT-GOLDEN-1 review): a blind golden refresh would
+          silently accept a changed night shot; add a test asserting the
+          night shot equals its notnight twin pixel for pixel.
+      - Cancel question (NOW-LOADING-1, answered from code, reviewer-checked;
+        no prod measurement): a cancelled job's SteamPrefill does not keep
+        loading. `cancel_job` only sets `stop_request` (jobs.py ~894-990);
+        the runner polls it every 0.2 s (prefill.py:122, prefill_runner.py
+        ~215-251) and stops the child with SIGTERM, then SIGKILL after 5 s
+        (prefill.py ~750-781); the job reads "cancelled" only after the
+        process is reaped (prefill_runner.py ~281-298, worker.py ~376-383,
+        ~918-921). The operator's screenshot (pill "Downloading", ACTIVE
+        empty) was log flush (5 s, nginx.conf.template:671) plus window lag,
+        on rc20.2 the swept 5-minute pill.
+      - [ ] nit (NOW-LOADING-1 review): `addrs_listed` ignores the
+        clients/runner scope (an address listed only under the runner card
+        counts as known on the client side); each loading poll reads all of
+        `agent_reports` at the 3 s live rate; device count counts addresses
+        while rows group by agent ("2 devices loading", one row); demo job
+        card shows 31.5 MB/s (swept window) next to a 6.4 MB/s runner row.
+      - [x] (ANDROID-DL-1) Android Downloads subline counts the plain job poll
         (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
         not the ranged History list it shows; same "N in history" bug the
         web fixed in DOWNLOADS-3 (rc20.1). Port the web `history-paging.js`
         count and the first-10 + "Show more" paging.
-      - [ ] Android Downloads follows LIVE-DELAY-1 (default range live,
+      - [x] (ANDROID-DL-1) Android Downloads follows LIVE-DELAY-1 (default range live,
         `active_clients` in the live answer); the Kotlin twin test no longer
         pins the web default
       - [ ] Android follow-up of the rc20 redesign: Clients cards, Add a
@@ -3972,7 +4013,7 @@ below carry their own later dates, item 12 is the current one).
         its animated circular arrows
       - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
         rename and Delete history in the app
-      - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
+      - [x] APP-NIGHT-GOLDEN-1 night golden identical to the day golden (works as designed, see the Android package cut above)
       - tuning defaults from the Sunday test, if not shipped in rc20.x
         (the rc20.x box moves here)
       - [x] **RUNNER-RETRY-1** (98b99b9; runner/api; user decision 2026-10-18: build

@@ -19,6 +19,7 @@ import dev.steamvault.app.net.model.RunnerTrafficOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
 import dev.steamvault.app.net.model.SummaryOut
+import dev.steamvault.app.net.model.ThroughputNowOut
 import dev.steamvault.app.net.model.ThroughputOut
 import java.time.Instant
 import kotlin.math.PI
@@ -45,6 +46,13 @@ import kotlin.math.sin
  * hit and miss bytes are the clients' share only, and the summary carries
  * `client_bytes_served` and `prefill_runner` (bytes_served =
  * client_bytes_served + runner bytes).
+ *
+ * WP ANDROID-DL-1 (web demo, rc21): the runner split fields
+ * (`runner_hit_bytes`/`runner_miss_bytes` on points, `*_per_second` on
+ * every `current`) say the demo runner downloads (all MISS), the live
+ * answer carries `active_clients` over its current-speed window, and
+ * `GET /v1/throughput` carries the `now` block (GRAPH-RECENT-1), so the
+ * pill reads "Downloading" while the demo job runs, as on the web.
  *
  * WP D15-NAMES: client rows carry the server's name fields (`name`,
  * `name_addr`, `display_name`). Names are stored per address
@@ -154,6 +162,9 @@ fun demoSeries(range: String, nowMs: Long): SeriesOut {
             runner_bytes = runner,
             bytes_per_second = bps,
             peak_bytes_per_second = if (t.bucket <= 300) bps else (bps * 1.35).roundToLong().toDouble(),
+            // WP RUNNER-SPLIT-1 (web demo): the demo runner downloads, all MISS.
+            runner_hit_bytes = 0L,
+            runner_miss_bytes = runner,
         )
     }
     return SeriesOut(
@@ -202,6 +213,8 @@ fun demoLive(nowMs: Long): LiveOut {
             runner_bytes = runner,
             bytes_per_second = bps,
             peak_bytes_per_second = bps,
+            runner_hit_bytes = 0L,
+            runner_miss_bytes = runner,
         )
     }
     val recent = points.takeLast(4)
@@ -211,7 +224,8 @@ fun demoLive(nowMs: Long): LiveOut {
         event_feed = feed(nowMs),
         range = "live",
         tier = "live",
-        watcher_window_seconds = 30,
+        // Web demo: longer than every poller's interval (LEARNINGS rc21).
+        watcher_window_seconds = 60,
         live_since = iso(nowMs - 15 * 60_000L),
         range_start = points.first().t,
         current = LiveCurrentOut(
@@ -220,7 +234,13 @@ fun demoLive(nowMs: Long): LiveOut {
             window_start = iso(nowMs - windowSeconds * 1000L),
             window_end = iso(nowMs),
             window_seconds = windowSeconds,
+            runner_hit_bytes_per_second = 0.0,
+            runner_miss_bytes_per_second = bps * 0.1,
         ),
+        active_clients = 2,
+        // WP LOADING-NOW-1: "Loading now" counts over the current-speed window.
+        active_window_seconds = windowSeconds,
+        active_window_minutes = 1,
         points = points,
     )
 }
@@ -283,6 +303,7 @@ fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): T
     val f = feed(nowMs)
     val end = nowMs - 60_000L
     val windowSeconds = 300 + Math.floorMod(end / 1000L, 300L).toInt()
+    val nowSeconds = 15 + (Math.floorMod(nowMs, 5000L) / 1000L).toInt()
     val jobs = snapshot.runningJobs.map { j ->
         JobThroughputOut(
             job_id = j.id,
@@ -295,6 +316,8 @@ fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): T
             mapped_depots = 1,
         )
     }
+    val currentBps = if (jobs.isNotEmpty()) 38.2 * MIB else 2.1 * MIB
+    val runnerBps = if (jobs.isNotEmpty()) 6.4 * MIB else 0.0
     return ThroughputOut(
         event_feed = f,
         range = knownRange(range, "24h"),
@@ -303,16 +326,35 @@ fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): T
         range_start = demoSeries(range, nowMs).range_start,
         active_window_minutes = 15,
         current = CurrentOut(
-            bytes_per_second = if (jobs.isNotEmpty()) 38.2 * MIB else 2.1 * MIB,
+            bytes_per_second = currentBps,
             window_start = iso(end - windowSeconds * 1000L),
             window_end = iso(end),
             window_seconds = windowSeconds,
-            runner_bytes_per_second = if (jobs.isNotEmpty()) 6.4 * MIB else 0.0,
+            runner_bytes_per_second = runnerBps,
+            runner_hit_bytes_per_second = 0.0,
+            runner_miss_bytes_per_second = runnerBps,
         ),
         active_clients_now = 2,
         runner_active_now = jobs.isNotEmpty(),
         summary = summaryFor(range, nowMs),
         jobs = jobs,
+        // WP GRAPH-RECENT-1 / LOADING-NOW-1: the "now" figures from the live
+        // tier. The demo's steady download reads the same speed either way.
+        now = ThroughputNowOut(
+            current = LiveCurrentOut(
+                bytes_per_second = currentBps,
+                runner_bytes_per_second = runnerBps,
+                window_start = iso(nowMs - nowSeconds * 1000L),
+                window_end = iso(nowMs),
+                window_seconds = nowSeconds,
+                runner_hit_bytes_per_second = 0.0,
+                runner_miss_bytes_per_second = runnerBps,
+            ),
+            active_clients = 2,
+            runner_active = jobs.isNotEmpty(),
+            window_seconds = nowSeconds,
+            live_since = iso(nowMs - 15 * 60_000L),
+        ),
     )
 }
 

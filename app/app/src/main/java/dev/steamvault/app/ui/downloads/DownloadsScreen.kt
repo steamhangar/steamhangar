@@ -63,8 +63,15 @@ import dev.steamvault.app.ui.traffic.logic.mergeJobLists
 import dev.steamvault.app.ui.traffic.logic.rateCapLine
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.downloads.logic.ExcerptState
+import dev.steamvault.app.ui.downloads.logic.HISTORY_CAPPED_TEXT
+import dev.steamvault.app.ui.downloads.logic.HistoryPage
 import dev.steamvault.app.ui.downloads.logic.HistoryRowModel
 import dev.steamvault.app.ui.downloads.logic.historyDeletedText
+import dev.steamvault.app.ui.downloads.logic.historyPage
+import dev.steamvault.app.ui.downloads.logic.historySubtitle
+import dev.steamvault.app.ui.downloads.logic.isHistoryCapped
+import dev.steamvault.app.ui.downloads.logic.showMoreLabel
+import dev.steamvault.app.ui.downloads.logic.showMoreText
 import dev.steamvault.app.ui.downloads.logic.JobCardModel
 import dev.steamvault.app.ui.downloads.logic.PartitionedJobs
 import dev.steamvault.app.ui.downloads.logic.QueueMove
@@ -214,10 +221,17 @@ fun DownloadsScreen(
     // WP D15d: the History list for the chosen range -- the newest jobs
     // merged with the `?range=` fetch, filtered by the server's own rule.
     val historyJobs = remember(controller.jobs, historyFilter.jobs) { mergeJobLists(controller.jobs, historyFilter.jobs) }
-    val historyModels = remember(historyJobs, historyFilter.range, gamesByAppid, ownedNames) {
+    val finishedJobs = remember(historyJobs, historyFilter.range) {
         partitionJobs(filterJobsByRange(historyJobs, historyFilter.range)).history
-            .map { buildHistoryRowModel(it, gamesByAppid, ownedNames) }
     }
+    // WP ANDROID-DL-1 (web DOWNLOADS-3): the first 10 rows, then 20 more per
+    // "Show more"; the capped note once every row of a full fetch is shown.
+    val historyPaging = historyPage(finishedJobs.size, historyFilter.shown, capped = isHistoryCapped(historyFilter.jobs.size))
+    val historyModels = remember(finishedJobs, historyPaging.visible, gamesByAppid, ownedNames) {
+        finishedJobs.take(historyPaging.visible).map { buildHistoryRowModel(it, gamesByAppid, ownedNames) }
+    }
+    // The idle subline counts the ranged History list, not the 20-job poll.
+    val idleLine = historySubtitle(historyFilter.loaded, finishedJobs.size, historyFilter.jobs.size)
 
     Scaffold(
         topBar = {
@@ -226,7 +240,7 @@ fun DownloadsScreen(
                     Column {
                         Text(stringResource(R.string.downloads_title))
                         Text(
-                            text = downloadsSubtitle(partition),
+                            text = downloadsSubtitle(partition, idleLine),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -259,8 +273,10 @@ fun DownloadsScreen(
             if (historyDelete != null) {
                 HistoryDeleteDialog(historyDelete, scope) { result ->
                     controller.showNotice(historyDeletedText(result))
-                    historyFilter.load()
+                    // Jobs first: the History list merges the 20-job poll, so
+                    // deleted rows must leave it before the ranged list answers.
                     controller.refreshJobsOnce()
+                    historyFilter.load()
                     statsPoll.refreshOnce()
                 }
             }
@@ -272,6 +288,7 @@ fun DownloadsScreen(
                 incompleteRows = incompleteRows,
                 queueModels = queueModels,
                 historyModels = historyModels,
+                historyPaging = historyPaging,
                 historyJobs = historyJobs,
                 controller = controller,
                 scope = scope,
@@ -294,6 +311,7 @@ private fun DownloadsBody(
     incompleteRows: List<IncompleteRowModel>,
     queueModels: List<QueueRowModel>,
     historyModels: List<HistoryRowModel>,
+    historyPaging: HistoryPage,
     historyJobs: List<JobSummary>,
     controller: DownloadsController,
     scope: CoroutineScope,
@@ -427,15 +445,27 @@ private fun DownloadsBody(
             items(historyModels, key = { "history-${it.jobId}" }) { model ->
                 HistoryRow(model = model, historyJobs = historyJobs, controller = controller, scope = scope)
             }
+            if (historyPaging.next > 0) {
+                item(key = "history-more") {
+                    val moreLabel = showMoreLabel(historyPaging.next, historyPaging.remaining)
+                    TextButton(
+                        onClick = { historyFilter.showMore() },
+                        modifier = Modifier.semantics { contentDescription = moreLabel },
+                    ) { Text(showMoreText(historyPaging.next)) }
+                }
+            } else if (historyPaging.capped) {
+                item(key = "history-capped") { EmptyLine(HISTORY_CAPPED_TEXT) }
+            }
         }
     }
 }
 
 /** Mirrors `web/js/views/downloads.js::subtitleText`: the non-empty
- * running/paused/queued counts joined with " · ", or "Idle · N in history"
- * when nothing is in flight. */
+ * running/paused/queued counts joined with " · ", or [idleLine] ("Idle ·
+ * N in history" over the ranged History list, `historySubtitle`) when
+ * nothing is in flight. */
 @Composable
-private fun downloadsSubtitle(partition: PartitionedJobs): String {
+private fun downloadsSubtitle(partition: PartitionedJobs, idleLine: String): String {
     val bits = buildList {
         if (partition.running.isNotEmpty()) {
             add(pluralStringResource(R.plurals.downloads_count_running, partition.running.size, partition.running.size))
@@ -447,11 +477,7 @@ private fun downloadsSubtitle(partition: PartitionedJobs): String {
             add(pluralStringResource(R.plurals.downloads_count_queued, partition.queued.size, partition.queued.size))
         }
     }
-    return if (bits.isEmpty()) {
-        pluralStringResource(R.plurals.downloads_idle_history, partition.history.size, partition.history.size)
-    } else {
-        bits.joinToString(" · ")
-    }
+    return if (bits.isEmpty()) idleLine else bits.joinToString(" · ")
 }
 
 @Composable

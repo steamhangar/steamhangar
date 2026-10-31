@@ -163,7 +163,7 @@ class TrafficPollTest {
             hasFigures = { true },
             isValidRange = ::isStatsRange,
         )
-        assertEquals("6h", stats.range)
+        assertEquals("live", stats.range)
         stats.selectRange(this, "1h")
         testScheduler.advanceUntilIdle()
         assertEquals("1h", stats.range)

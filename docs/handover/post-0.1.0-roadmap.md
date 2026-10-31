@@ -324,6 +324,14 @@ Kept current per the roadmap rule in `CLAUDE.md`: every Weg A / Weg B
 question that is not answered in its session is listed here and removed
 once decided (the decision then lives in the item it belongs to).
 
+
+- **SAMPLE-IP-1** (found 2026-10-31, rc22 NITS-AUDIT-1 candidate): about 45
+  files in app/, web/tests, agent/, api/tests, dns/ and docs/design use
+  `192.168.1.x` as a generic home-LAN example. It is the most common router
+  default, but it is also the operator's management/BMC subnet. Weg A
+  (recommended): sweep them to `10.0.0.x` (still RFC1918) in one test-only
+  package; Weg B: keep them as generic examples and only keep the
+  operator's server VLAN out.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
@@ -1862,10 +1870,10 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   rename and Delete history are missing in the app. The rc17 follow-ups
   ("app parity gaps") and "Before v0.1.0" list parts of this; this entry
   is the single record.
-- **APP-NIGHT-GOLDEN-1 (app, CI):** `library_411dp_font100_night.png` is
-  byte-identical to the day golden, so the dark theme is probably not
-  applied in the screenshot test. Make the night profile render dark, then
-  refresh the golden.
+- **APP-NIGHT-GOLDEN-1 (app, CI): closed 2026-10-31, works as designed.**
+  The night golden is byte-identical to the day golden because the app is
+  single-dark-theme on purpose; the identical shot is the guard (see the
+  rc21 block in `docs/PROJECT_PLAN.md`).
 - **CAP-503-LOOP-1 (measurement):** on 2026-10-10, with the 4m upstream
   rate and the global cap 16 on `:80` combined, vault-core rejected about
   14k-21k requests per minute with 503 and the clients retried at once;
