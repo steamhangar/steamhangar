@@ -100,7 +100,8 @@ internal fun SectionLabel(text: String, modifier: Modifier = Modifier) {
         text = text.uppercase(),
         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.8.sp, fontWeight = FontWeight.Medium),
         color = VaultColors.Dim2,
-        modifier = modifier,
+        // TalkBack reads the original casing (web: CSS uppercase), review N1.
+        modifier = modifier.semantics { contentDescription = text },
     )
 }
 
@@ -472,7 +473,9 @@ private fun CardFooter(model: ClientCardView, onRename: (() -> Unit)?, onRemove:
                 text = model.removeError,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+                // Its own node inside the merged card (review S3), so the
+                // live region is announced on its own.
+                modifier = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
             )
         }
     }

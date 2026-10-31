@@ -70,12 +70,12 @@ class AndroidRedesign1aWiringTest {
             "the agent poll must be the body of repeatOnLifecycle(STARTED)",
             Regex("""repeatOnLifecycle\(Lifecycle\.State\.STARTED\)\s*\{\s*clientsController\.pollForPage\(\)\s*\}""").containsMatchIn(code),
         )
-        assertCalledFrom(screen, "mergeAgentData(rows, agentRows)", "ClientsBody")
-        assertCalledFrom(screen, "hiddenRemoved(it.client_id, removedAt, nowMs)", "ClientsBody")
+        assertCalledFrom(screen, "visibleClients(data?.clients.orEmpty(), agentRows, removedAt, nowMs)", "ClientsScreen")
+        assertCalledFrom(screen, "merged = merged,", "ClientsScreen")
         assertCalledFrom(screen, "if (removedAt.isNotEmpty()) poll.refreshOnce()", "ClientsScreen")
         assertCalledFrom(screen, "serverVersion = readServerVersion(settingsRepository)", "ClientsScreen")
         assertCalledFrom(screen, "settingsRepository.get().server_version", "readServerVersion")
-        assertCalledFrom(controller, "removedAt = removedAt + (clientId to clock())", "confirmRemove")
+        assertCalledFrom(controller, "removedAt = removedAt.filterValues { now - it <= REMOVED_HIDE_MS } + (clientId to now)", "confirmRemove")
         assertCalledFrom(controller, "refreshOnce()\n            delay(PollingIntervals.CLIENTS_MS)", "pollForPage")
     }
 
@@ -108,9 +108,10 @@ class AndroidRedesign1aWiringTest {
         assertCalledFrom(screen, "controller.clearRemoveNotice()", "RemoveNotice")
         assertCalledFrom(views, "if (showRemove) RemoveAgentButton(model.removeId!!, onRemove!!)", "CardFooter")
         assertCalledFrom(views, "if (model.removeBlocked) HintText(UNREMOVABLE_SLASH_NOTE)", "CardFooter")
-        assertCalledFrom(views, "liveRegion = LiveRegionMode.Assertive", "CardFooter")
+        assertCalledFrom(views, "Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive }", "CardFooter")
         assertCalledFrom(views, "stringResource(R.string.clients_remove_agent_button_cd, clientId)", "RemoveAgentButton")
         assertCalledFrom(views, "semantics { contentDescription = label }", "RenameButton")
+        assertCalledFrom(views, "modifier = modifier.semantics { contentDescription = text },", "SectionLabel")
         val code = stripComments(read(main))
         assertEquals("real and demo Clients pages get the hoisted controller", 2, Regex("""clientsController = clientsControllerState,""").findAll(code).count())
         assertCalledFrom(main, "settingsRepository = remember(client) { VaultSettingsRepository(client) },\n        )", "ClientsDestinationContent")

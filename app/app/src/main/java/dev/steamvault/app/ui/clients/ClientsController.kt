@@ -7,6 +7,7 @@ import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.polling.PollingIntervals
 import dev.steamvault.app.repo.ClientsRepository
+import dev.steamvault.app.ui.clients.logic.REMOVED_HIDE_MS
 import dev.steamvault.app.ui.clients.logic.isClientAlreadyGone
 import dev.steamvault.app.ui.clients.logic.isRemovableClientId
 import dev.steamvault.app.ui.clients.logic.removeErrorText
@@ -144,7 +145,9 @@ class ClientsController(
         }
         removeErrors = removeErrors - clientId
         clients = clients.filter { it.client_id != clientId }
-        removedAt = removedAt + (clientId to clock())
+        val now = clock()
+        // Expired entries hide nothing any more (review N5): drop them.
+        removedAt = removedAt.filterValues { now - it <= REMOVED_HIDE_MS } + (clientId to now)
         removeNotice = removedToastText(clientId)
         refreshOnce()
     }
@@ -152,7 +155,8 @@ class ClientsController(
     /** WP ANDROID-REDESIGN-1a (web `removedIds`): client_id -> time of a
      * successful remove. The Clients page hides that PC's overview row for
      * [REMOVED_HIDE_MS] ([hiddenRemoved]) until the overview has caught up;
-     * an agent that reports again is listed again after that. */
+     * an agent that reports again is listed again after that. Entries older
+     * than that are dropped at the next remove. */
     var removedAt by mutableStateOf<Map<String, Long>>(emptyMap())
         private set
 

@@ -291,4 +291,21 @@ class ClientCardTest {
         assertEquals(30_000L, REMOVED_HIDE_MS)
         assertEquals("Devices", DEVICES_HEADING)
     }
+
+    @Test
+    fun `MUTATION TARGET -- a just-removed PC is hidden on the overview AND the agent side (review S2)`() {
+        val removed = mapOf("desk-pc" to now)
+        val agent = agentRow()
+        // Overview already caught up (row gone), agent snapshot not yet: no agent-only card.
+        assertEquals(listOf("runner"), visibleClients(listOf(runnerClient), listOf(agent), removed, now).map { it.client.key })
+        // Agent snapshot caught up, overview not yet: no stale overview card.
+        assertEquals(listOf("runner"), visibleClients(listOf(agentClient, runnerClient), emptyList(), removed, now).map { it.client.key })
+        // After the window the PC shows again (an agent that re-reports).
+        assertEquals(
+            listOf("agent:desk-pc", "runner"),
+            visibleClients(listOf(agentClient, runnerClient), listOf(agent), removed, now + 30_001L).map { it.client.key },
+        )
+        // No agent answer yet stays null (cards as the overview sent them).
+        assertEquals(listOf(null), visibleClients(listOf(agentClient), null, emptyMap(), now).map { it.agent })
+    }
 }

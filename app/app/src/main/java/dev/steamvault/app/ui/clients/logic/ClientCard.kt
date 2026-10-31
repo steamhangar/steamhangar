@@ -90,6 +90,24 @@ fun mergeAgentData(overviewClients: List<ClientActivityOut>, agentClients: List<
     return merged
 }
 
+/**
+ * The Clients page's cards (web `paint()`): a PC removed less than
+ * [REMOVED_HIDE_MS] ago is hidden from the overview rows AND from the agent
+ * rows (web `hiddenRemoved` / `agentSnapshot`), then the two are merged.
+ * MUTATION TARGET (review S2: the agent side alone would bring the PC back
+ * as an agent-only card).
+ */
+fun visibleClients(
+    overviewClients: List<ClientActivityOut>,
+    agentClients: List<ClientOut>?,
+    removedAt: Map<String, Long>,
+    nowMs: Long,
+): List<MergedClient> {
+    val rows = overviewClients.filter { !(isAgentClient(it) && hiddenRemoved(it.client_id, removedAt, nowMs)) }
+    val agents = agentClients?.filter { !hiddenRemoved(it.client_id, removedAt, nowMs) }
+    return mergeAgentData(rows, agents)
+}
+
 // ---- versions (web agent-install.js `isReleaseVersion`, CLIENTS-3) --------
 
 private val RELEASE_VERSION = Regex("^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:\\.[0-9A-Za-z]+)*)?$")

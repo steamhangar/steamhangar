@@ -96,7 +96,7 @@ class D15dWiringTest {
     @Test
     fun `MUTATION PIN -- the Clients screen polls, draws range, note, cards, agentless note and Manage PCs`() {
         assertCalledFrom(clients, "poll.pollForever()", "ClientsScreen")
-        assertCalledFrom(clients, "clientsSummaryText(data.clients)", "ClientsScreen")
+        assertCalledFrom(clients, "clientsSummaryText(merged.map { it.client })", "ClientsScreen")
         assertCalledFrom(clients, "ClientsBody(", "ClientsScreen")
         assertCalledFrom(clients, "DevicesHead(showRange = !poll.noFigures) {", "ClientsBody")
         assertCalledFrom(clients, "if (showRange) chips()", "DevicesHead")
@@ -198,9 +198,10 @@ class D15dWiringTest {
         assertCalledFrom(downloads, "ranges.history = historyFilter.range", "DownloadsBody")
         assertCalledFrom(stats, "onRangeChosen(poll.range)", "DownloadsStatsHeader")
         assertTrue("MainActivity holds one TrafficRanges", stripComments(read(main)).contains("private val trafficRanges = TrafficRanges()"))
-        assertCalledFrom(clients, "delay(NOW_TICK_MS)", "ClientsBody")
-        assertCalledFrom(clients, "remember(data, agentRows, removedAt, nowMs)", "ClientsBody")
-        assertCalledFrom(clients, "nowMs = nowMs,", "ClientsBody")
+        assertCalledFrom(clients, "delay(NOW_TICK_MS)", "ClientsScreen")
+        assertCalledFrom(clients, "remember(data, agentRows, removedAt, nowMs)", "ClientsScreen")
+        assertCalledFrom(clients, "nowMs = nowMs,", "ClientsScreen")
+        assertCalledFrom(clients, "loadingText = null,\n        nowMs = nowMs,", "ClientsBody")
     }
 
     @Test

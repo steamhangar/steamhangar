@@ -59,9 +59,8 @@ import dev.steamvault.app.ui.clients.logic.REMOVED_HIDE_MS
 import dev.steamvault.app.ui.clients.logic.clientCardView
 import dev.steamvault.app.ui.clients.logic.clientsHaveFigures
 import dev.steamvault.app.ui.clients.logic.clientsSummaryText
-import dev.steamvault.app.ui.clients.logic.hiddenRemoved
-import dev.steamvault.app.ui.clients.logic.isAgentClient
-import dev.steamvault.app.ui.clients.logic.mergeAgentData
+import dev.steamvault.app.ui.clients.logic.MergedClient
+import dev.steamvault.app.ui.clients.logic.visibleClients
 import dev.steamvault.app.ui.clients.logic.showAgentlessNote
 import dev.steamvault.app.ui.clients.logic.summaryTiles
 import dev.steamvault.app.ui.demo.DemoModeBanner
@@ -153,6 +152,24 @@ fun ClientsScreen(
     var serverVersion by remember(settingsRepository) { mutableStateOf<String?>(null) }
     LaunchedEffect(settingsRepository) { serverVersion = readServerVersion(settingsRepository) }
     val data = poll.data
+    // WP D15d review: "Last active 4 min ago" and the stale-feed note are
+    // relative to now; a minute tick (and every answer) keeps them current.
+    val currentClock by rememberUpdatedState(clock)
+    var nowMs by remember { mutableLongStateOf(clock()) }
+    LaunchedEffect(data) { nowMs = currentClock() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(NOW_TICK_MS)
+            nowMs = currentClock()
+        }
+    }
+    // web paint(): the cards of the page -- overview rows merged with the agent
+    // rows, a just-removed PC hidden on both sides. The sub-line counts them too.
+    val agentRows = clientsController?.clients
+    val removedAt = clientsController?.removedAt.orEmpty()
+    val merged = remember(data, agentRows, removedAt, nowMs) {
+        visibleClients(data?.clients.orEmpty(), agentRows, removedAt, nowMs)
+    }
 
     Scaffold(
         topBar = {
@@ -162,7 +179,7 @@ fun ClientsScreen(
                         Text(stringResource(R.string.clients_page_title))
                         if (data != null && !poll.unsupported) {
                             Text(
-                                text = clientsSummaryText(data.clients),
+                                text = clientsSummaryText(merged.map { it.client }),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -181,7 +198,8 @@ fun ClientsScreen(
                 scope = scope,
                 ranges = ranges,
                 onManagePcs = onManagePcs,
-                clock = clock,
+                nowMs = nowMs,
+                merged = merged,
                 renameFlow = renameFlow,
                 controller = clientsController,
                 serverVersion = serverVersion,
@@ -217,23 +235,13 @@ private fun ClientsBody(
     scope: CoroutineScope,
     ranges: TrafficRanges,
     onManagePcs: () -> Unit,
-    clock: () -> Long,
+    nowMs: Long,
+    merged: List<MergedClient>,
     renameFlow: ClientRenameFlow?,
     controller: ClientsController?,
     serverVersion: String?,
 ) {
     val data = poll.data
-    // WP D15d review: "Last active 4 min ago" and the stale-feed note are
-    // relative to now; a minute tick (and every answer) keeps them current.
-    val currentClock by rememberUpdatedState(clock)
-    var nowMs by remember { mutableLongStateOf(clock()) }
-    LaunchedEffect(data) { nowMs = currentClock() }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(NOW_TICK_MS)
-            nowMs = currentClock()
-        }
-    }
     val note = pollNote(
         unsupported = poll.unsupported,
         error = poll.error,
@@ -243,14 +251,7 @@ private fun ClientsBody(
         loadingText = null,
         nowMs = nowMs,
     )
-    val agentRows = controller?.clients
-    val removedAt = controller?.removedAt.orEmpty()
     val removeErrors = controller?.removeErrors.orEmpty()
-    // web paint(): the overview rows (a just-removed PC hidden), merged with the agent rows.
-    val merged = remember(data, agentRows, removedAt, nowMs) {
-        val rows = data?.clients.orEmpty().filter { !(isAgentClient(it) && hiddenRemoved(it.client_id, removedAt, nowMs)) }
-        mergeAgentData(rows, agentRows)
-    }
     val range = data?.range ?: poll.range
     val cards = remember(merged, range, serverVersion, nowMs, removeErrors) {
         merged.map { clientCardView(it, range, serverVersion, nowMs, it.agent?.let { a -> removeErrors[a.client_id] }) }

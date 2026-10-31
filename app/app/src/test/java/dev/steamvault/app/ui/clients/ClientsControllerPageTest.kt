@@ -65,4 +65,18 @@ class ClientsControllerPageTest {
         c.clearRemoveNotice()
         assertNull(c.removeNotice)
     }
+
+    @Test
+    fun `expired remove times are dropped at the next remove (review N5)`() = runTest {
+        val repo = FakeClientsRepository(listOf(pc("a"), pc("b")))
+        var t = 1_000L
+        val c = ClientsController(repo, Strings, clock = { t })
+        c.refreshOnce()
+        c.requestRemove("a")
+        c.confirmRemove()
+        t += 30_001L
+        c.requestRemove("b")
+        c.confirmRemove()
+        assertEquals(mapOf("b" to 31_001L), c.removedAt)
+    }
 }
