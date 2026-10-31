@@ -12,26 +12,41 @@ on its own cursor, for the graph only:
   cells x ``MAX_ADDRS_PER_CELL`` addresses (overflow folds into one anonymous
   entry), so a flood of distinct addresses cannot grow it. Lost on restart,
   never written to SQLite (no schema change, no extra writes).
-* **Watcher.** The log is tailed only while somebody polls the live endpoint
-  or the clients overview (``touch``, WP CLIENTS-LIVE-1): at most once per
-  ``TAIL_INTERVAL_SECONDS`` (2 s) however many clients poll, and not at all when nobody polled for
-  ``WATCHER_WINDOW_SECONDS`` (30 s). There is no background thread, so an
-  idle server does exactly what it did before. After an idle stretch the next
+* **Watcher.** The log is tailed only while somebody polls the live endpoint,
+  the clients overview (``touch``, WP CLIENTS-LIVE-1) or the Downloads
+  throughput endpoints (WP GRAPH-RECENT-1): at most once per
+  ``TAIL_INTERVAL_SECONDS`` (2 s) however many clients poll, and not at all
+  when nobody polled for ``WATCHER_WINDOW_SECONDS`` (60 s: twice the web's
+  30 s poll of the persisted ranges, so that poll keeps the tailer reading
+  incrementally instead of restarting it every time). There is no background
+  thread, so an idle server does exactly what it did before. After an idle stretch the next
   poll reads the backlog (bounded per call) and buckets it by EVENT time, so
   nothing the file still holds is lost to the graph.
 * **Stitching.** ``stitch`` returns one series: 5 s points for the last
   minute, 15 s points up to 5 minutes back, then 1-minute points up to an
-  hour back. A 1-minute point comes from the ring when the ring has covered
-  that whole minute since the tailer started (the persisted row would lag the
-  sweep by up to one interval), else from the persisted 1-minute tier. Each
-  point has exactly one source: nothing is summed across sources, so nothing
-  is counted twice.
+  hour back. A 1-minute point comes from whichever source holds more of
+  that minute (``prefer_ring``, WP GRAPH-RECENT-1): the ring for the minutes
+  since the last sweep (the persisted row lags it by up to one interval),
+  the persisted tier for minutes the ring never read whole (before the
+  tailer started, a rotation, a skipped backlog). Each source only ever holds
+  a part of the truth, so the larger part is the better one. Each point has
+  exactly one source: nothing is summed across sources, so nothing is
+  counted twice. ``buckets`` gives the same ring totals per 1- or 5-minute
+  bucket for the persisted ranges' series (the 1 h / 6 h / 24 h graphs show
+  the minutes since the last sweep), judged by the same rule. (Before rc21 a
+  minute the ring claimed to cover came from the ring alone; a tailer that
+  started on a freshly rotated file claimed the whole ring and showed the
+  rotated-away minutes as zero.)
 * **Per address (WP CLIENTS-LIVE-1).** Next to the four counters a cell keeps
   the served bytes per depot of each address (at most
   ``MAX_DEPOTS_PER_ADDR_CELL``; the rest stays unattributed), so the Clients
   page can name the game an address is loading without waiting for a sweep
   (``addr_activity``). Only the current-speed window needs them, so they are
   pruned after ``CURRENT_SECONDS`` plus the running cell.
+* **One "now" window (WP LOADING-NOW-1).** "Current speed", "Loading now"
+  (``active_clients``) and the Clients page's ``live_now`` all read the same
+  window: the last ``CURRENT_SECONDS`` plus the running cell. An address is
+  loading when it was served bytes in it.
 
 Known limits (honest, not bugs): the sweep truncates the log once it has
 caught up; lines that arrive between our last read and that truncation never
@@ -65,7 +80,9 @@ MAX_ADDRS_PER_CELL = 64
 OVERFLOW_ADDR = ""
 
 TAIL_INTERVAL_SECONDS = 2.0
-WATCHER_WINDOW_SECONDS = 30.0
+#: WP GRAPH-RECENT-1: 60 s (was 30 s), so the persisted ranges' 30 s poll
+#: keeps the watcher armed (module docstring).
+WATCHER_WINDOW_SECONDS = 60.0
 #: One read call never takes more than this (the sweep's own batch size)...
 MAX_READ_BYTES = event_sweep.MAX_BATCH_BYTES
 #: ...and one refresh at most this many calls; a larger backlog is skipped to
@@ -80,12 +97,10 @@ MEDIUM_SECONDS = 5 * 60
 TOTAL_SECONDS = 60 * 60
 MEDIUM_BUCKET = 15
 COARSE_BUCKET = 60
-#: The "Current speed" window: this many seconds plus the running cell.
+#: The "Current speed" window: this many seconds plus the running cell. Since
+#: WP LOADING-NOW-1 also the "Loading now" window (``active_clients``), as on
+#: the Clients page (``addr_activity``): one window for speed and loading.
 CURRENT_SECONDS = 15
-#: "Loading now": client addresses with traffic in this many seconds (plus the
-#: running cell). Five minutes bridges the gaps between a client's chunks
-#: and keeps the number from flickering; the ring holds 15.
-ACTIVE_SECONDS = 5 * 60
 
 #: Depots kept per address and cell (WP CLIENTS-LIVE-1); bytes on further
 #: depots of that cell count as "not linked to one game".
@@ -128,6 +143,51 @@ def _epoch(moment: datetime) -> float:
 
 def _iso(epoch: int) -> str:
     return to_utc_iso(datetime.fromtimestamp(epoch, tz=UTC))
+
+
+def _ring_totals(
+    cells: dict[int, dict[str, tuple[int, ...]]],
+    start: int,
+    end: int,
+    is_runner: Callable[[str, str], bool],
+) -> tuple[LiveTotals, LiveTotals, int]:
+    """Ring totals over ``[start, end)``: all, the runner's part, largest cell."""
+    all_t = [0, 0, 0, 0]
+    run_t = [0, 0, 0, 0]
+    peak = 0
+    for key in range(_floor(start, CELL_SECONDS), end, CELL_SECONDS):
+        by_addr = cells.get(key)
+        if not by_addr:
+            continue
+        cell_bytes = 0
+        iso = _iso(key)
+        for addr, c in by_addr.items():
+            cell_bytes += c[_BYTES]
+            for i in range(4):
+                all_t[i] += c[i]
+            if addr != OVERFLOW_ADDR and is_runner(addr, iso):
+                for i in range(4):
+                    run_t[i] += c[i]
+        peak = max(peak, cell_bytes)
+    return LiveTotals(*all_t), LiveTotals(*run_t), peak
+
+
+def prefer_ring(ring: LiveTotals, persisted: LiveTotals | None) -> bool:
+    """Whether a bucket's point comes from the ring rather than the persisted
+    tier (WP GRAPH-RECENT-1).
+
+    Each source may hold only a part of a bucket: the persisted tier the
+    lines the sweep has read, the ring the lines the tailer has read (it may
+    have started mid-way, on a rotated file, or skipped a backlog). Each part
+    is a subset of the truth, so the larger part is the better answer, and
+    taking ONE of them never counts a line twice. Compared by served bytes,
+    then requests; an equal non-empty ring wins (same figures, fresher
+    source), an empty ring never does.
+    """
+    have = persisted or LiveTotals()
+    if ring.bytes_served == 0 and ring.requests == 0:
+        return False
+    return (ring.bytes_served, ring.requests) >= (have.bytes_served, have.requests)
 
 
 class LiveTier:
@@ -374,28 +434,10 @@ class LiveTier:
         whether an address's traffic in that bucket is the prefill runner's.
         """
         epoch = _epoch(now)
-        cells, covered_from = self._copy()
+        cells, _covered_from = self._copy()
 
         def totals(start: int, end: int) -> tuple[LiveTotals, LiveTotals, int]:
-            """Ring totals over [start, end): all, runner, largest cell."""
-            all_t = [0, 0, 0, 0]
-            run_t = [0, 0, 0, 0]
-            peak = 0
-            for key in range(_floor(start, CELL_SECONDS), end, CELL_SECONDS):
-                by_addr = cells.get(key)
-                if not by_addr:
-                    continue
-                cell_bytes = 0
-                iso = _iso(key)
-                for addr, c in by_addr.items():
-                    cell_bytes += c[_BYTES]
-                    for i in range(4):
-                        all_t[i] += c[i]
-                    if addr != OVERFLOW_ADDR and is_runner(addr, iso):
-                        for i in range(4):
-                            run_t[i] += c[i]
-                peak = max(peak, cell_bytes)
-            return LiveTotals(*all_t), LiveTotals(*run_t), peak
+            return _ring_totals(cells, start, end, is_runner)
 
         points: list[LivePoint] = []
         now_cell = _floor(epoch, CELL_SECONDS)
@@ -403,17 +445,16 @@ class LiveTier:
         medium_start = _floor(fine_start, 60) - (MEDIUM_SECONDS - FINE_SECONDS - 60)
         coarse_start = medium_start - (TOTAL_SECONDS - MEDIUM_SECONDS) + 60
 
-        # 1-minute region: ring where it covers the whole minute, else persisted.
+        # 1-minute region: the source that holds more of the minute.
         rows = persisted(coarse_start, medium_start)
-        ring_floor = _floor(epoch - self._ring_seconds, 60) + 60
         for minute in range(coarse_start, medium_start, COARSE_BUCKET):
-            if covered_from is not None and minute >= covered_from and minute >= ring_floor:
-                all_t, run_t, peak = totals(minute, minute + COARSE_BUCKET)
+            row = rows.get(minute)
+            all_t, run_t, peak = totals(minute, minute + COARSE_BUCKET)
+            if prefer_ring(all_t, row.all if row is not None else None):
                 points.append(
                     LivePoint(_iso(minute), COARSE_BUCKET, "live", all_t, run_t, peak / CELL_SECONDS)
                 )
                 continue
-            row = rows.get(minute)
             if row is None:
                 points.append(LivePoint(_iso(minute), COARSE_BUCKET, "persisted", LiveTotals(), LiveTotals(), 0.0))
             else:
@@ -462,25 +503,41 @@ class LiveTier:
             window_seconds=int(round(seconds)),
         )
 
-    def active_clients(self, now: datetime, is_runner: Callable[[str, str], bool]) -> int:
-        """Distinct client addresses with traffic in the last ``ACTIVE_SECONDS``.
+    def buckets(
+        self,
+        now: datetime,
+        bucket_seconds: int,
+        is_runner: Callable[[str, str], bool],
+    ) -> dict[int, "RingBucket"]:
+        """Ring totals per ``bucket_seconds`` bucket (60 or 300) the ring reaches.
 
-        The prefill runner is not counted; the anonymous overflow entry is not
-        an address. Best effort, like the rest of the ring: it only knows what
-        the tailer has read since ``covered_from``.
+        WP GRAPH-RECENT-1: the persisted ranges' series stitch these in with
+        ``prefer_ring``. Keys are bucket starts (epoch s), from the oldest
+        bucket that still ends inside the ring up to the running one.
         """
-        now_cell = _floor(_epoch(now), CELL_SECONDS)
-        cells, _covered = self._copy()
-        seen: set[str] = set()
-        for key in range(now_cell - ACTIVE_SECONDS, now_cell + CELL_SECONDS, CELL_SECONDS):
-            by_addr = cells.get(key)
-            if not by_addr:
-                continue
-            iso = _iso(key)
-            for addr, c in by_addr.items():
-                if addr != OVERFLOW_ADDR and c[_REQ] > 0 and not is_runner(addr, iso):
-                    seen.add(addr)
-        return len(seen)
+        epoch = _epoch(now)
+        cells, _covered_from = self._copy()
+        first = _floor(epoch - self._ring_seconds, bucket_seconds)
+        out: dict[int, RingBucket] = {}
+        for start in range(first, _floor(epoch, bucket_seconds) + 1, bucket_seconds):
+            all_t, run_t, _peak = _ring_totals(cells, start, start + bucket_seconds, is_runner)
+            out[start] = RingBucket(all=all_t, runner=run_t)
+        return out
+
+    def active_clients(self, now: datetime, is_runner: Callable[[str, str], bool]) -> int:
+        """Client addresses loading now: served bytes in the "now" window.
+
+        WP LOADING-NOW-1: the window of ``current`` and of the Clients page's
+        ``live_now`` (``addr_activity``, whose rule this is), so "Loading now"
+        and "Current speed" can never disagree. The prefill runner is not
+        counted; the anonymous overflow entry is not an address. Best effort,
+        like the rest of the ring.
+        """
+        return loading_counts(self.addr_activity(now, is_runner)[0])[0]
+
+    def runner_active(self, now: datetime, is_runner: Callable[[str, str], bool]) -> bool:
+        """The prefill runner was served bytes in the "now" window."""
+        return loading_counts(self.addr_activity(now, is_runner)[0])[1]
 
     def addr_activity(
         self, now: datetime, is_runner: Callable[[str, str], bool]
@@ -537,6 +594,21 @@ class PersistedMinute:
     runner: LiveTotals
     #: ``peak_bucket_bytes`` of the row (bytes in the minute).
     peak: int
+
+
+def loading_counts(activity: dict[tuple[str, bool], "AddrActivity"]) -> tuple[int, bool]:
+    """From one ``addr_activity`` read: client addresses loading now (the
+    runner not counted) and whether the runner is loading (WP LOADING-NOW-1)."""
+    clients = {addr for addr, runner in activity if not runner}
+    return len(clients), any(runner for _addr, runner in activity)
+
+
+@dataclass(frozen=True)
+class RingBucket:
+    """One persisted-range bucket as the ring holds it (``LiveTier.buckets``)."""
+
+    all: LiveTotals
+    runner: LiveTotals
 
 
 @dataclass

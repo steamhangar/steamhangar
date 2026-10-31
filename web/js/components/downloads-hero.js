@@ -18,7 +18,11 @@
  *     Saved by cache, Hit rate with a meter).
  *
  * Data: the same `GET /v1/throughput` (+ `/series`, or the live endpoint
- * merged by `mergeLive`) answer the old statistics header read. Every
+ * merged by `mergeLive`) answer the old statistics header read. WP
+ * GRAPH-RECENT-1 + LOADING-NOW-1: on every range the big number, the pill
+ * and the device count are the live tier's "now" (`mergeLive` /
+ * `mergeNow`, one window), and the graph's newest buckets come from the
+ * same ring, so the three agree with the newest graph point. Every
  * figure, title and honest-state rule comes from `lib/traffic-view.js`
  * (`headerTiles`, `feedNote`, `seriesGeometry` ...); this module only maps
  * them onto the kit anatomy. `heroModel` and `graphModel` are pure (tested
@@ -81,8 +85,8 @@ export const HERO_LABEL = "Throughput";
  * hangar's view a client pulling from the cache is SERVING, not
  * downloading; the hangar itself downloads only while its prefill runner
  * pulls content in (`current.runner_bytes_per_second > 0`, the runner's
- * part of the current speed, on both `/v1/throughput` and the live
- * endpoint). So:
+ * part of the current speed: the live tier's on every range since WP
+ * GRAPH-RECENT-1, the swept window's only from an older server). So:
  *
  *   - runner traffic -> "Downloading" (`running`, `.pill.run`);
  *   - any other traffic -> "Serving";

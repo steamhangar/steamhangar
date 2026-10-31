@@ -161,6 +161,7 @@ import {
   LIVE_SUMMARY_RANGE,
   liveSeries,
   mergeLive,
+  mergeNow,
   writeStoredStatsRange,
   jobSpeedText,
   JOB_SPEED_NOTE,
@@ -1814,7 +1815,9 @@ const trafficPoll = createViewPoll({
     const range = traffic.range;
     if (range === "live") return fetchLive();
     const [throughput, series] = await Promise.all([api.throughput(range), api.throughputSeries(range)]);
-    return { range, throughput, series };
+    // WP GRAPH-RECENT-1: speed, pill and "Loading now" from the live tier,
+    // like the graph's newest buckets (the server stitches those in).
+    return { range, throughput: mergeNow(throughput), series };
   },
   // WP GRAPH-LIVE: fast only in the live view; the loop already parks
   // while the tab is hidden.

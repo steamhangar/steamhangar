@@ -675,7 +675,7 @@ route, see "Auth").
 | GET    | `/v1/schedule`                     | Scheduler config + last-sweep bookkeeping: `{enabled, window, overnight, interval_minutes, client_stale_days, server_timezone, last_sweep_at, last_sweep_targets, last_sweep_enqueued, next_eligible_at}`. **Read-only itself** — the window/interval/staleness values are now writable through `PATCH /v1/settings` (settings-API work package, ADR-0009; see "Persisted settings" below), this endpoint just reports the currently EFFECTIVE configuration, override included |
 | GET    | `/v1/stats`                        | Cache-event sweep config + bookkeeping (WP 3.11): `{event_feed_enabled, sweep_interval_minutes, miss_trigger_enabled, miss_trigger_cooldown_minutes, miss_trigger_max_per_sweep, bypass_window_days, cursor_offset, first_sweep_at, last_sweep_at, last_rotated_at, lines_read_total, lines_skipped_total, last_lines, last_skipped, last_enqueued, last_dropped_by_cap, truncate_denied_count, last_truncate_denied_at, oversized_skips_total, last_oversized_at, rotations_detected_total, last_rotation_detected_at, traffic_since, top_unmapped_depots[]}` (the three before the list: WP D15b). **Read-only.** Three counters are alerts: `lines_skipped_total` climbing means a format disagreement, `truncate_denied_count` climbing means the log is growing unbounded, and any non-zero `oversized_skips_total` means bytes were discarded because something wrote a newline-free region longer than a read batch. See "Cache-event sweep" below |
 | GET    | `/v1/throughput`                   | WP D15b (D13 SPEED-1): Downloads header numbers from the traffic tiers. `?range=24h` (default) `|7d|30d|all`. `{event_feed, range, tier, bucket_seconds, range_start, active_window_minutes, current, active_clients_now, summary, jobs[]}`; traffic fields are `null` with the event feed off. See "Clients overview and throughput (WP D15b)" below |
-| GET    | `/v1/throughput/live`              | WP GRAPH-LIVE: one stitched series (5 s points for the last minute, 15 s up to 5 minutes, then the persisted 1-minute tier up to an hour) plus a 15-20 s "current speed". Request-driven: while a client polls it, the access log is tailed at most every 2 s into an in-memory ring (never persisted, lost on restart); 30 s after the last poll tailing stops. |
+| GET    | `/v1/throughput/live`              | WP GRAPH-LIVE: one stitched series (5 s points for the last minute, 15 s up to 5 minutes, then the persisted 1-minute tier up to an hour) plus a 15-20 s "current speed". Request-driven: while a client polls it, the access log is tailed at most every 2 s into an in-memory ring (never persisted, lost on restart); 60 s after the last poll tailing stops. |
 | GET    | `/v1/throughput/series`            | WP D15b: server-wide traffic per bucket for graphs, zero-filled, oldest first. `?range=` as above (24h: 288 x 5 min, 7d: 168 x 1 h, 30d: 720 x 1 h, all: daily from the first recorded day) |
 | GET    | `/v1/clients/overview`             | WP D15b: agent clients merged with every event-log address (agentless machines too): connected, installed (agents), loading now, recently loaded apps, per-range stats. `?range=7d` (default) `|24h|30d|all`. `GET /v1/clients` is unchanged WP D15-NAMES adds `name`, `name_addr`, `display_name` per client. |
 | GET    | `/v1/client-names`                 | WP D15-NAMES: every stored client name, `[{key_type, key, name, updated_at}]`. See "Client names" |
@@ -4794,6 +4794,16 @@ before it was recorded, so "all" starts there.
   `active_window_minutes` (2 x sweep interval + 5 = 15 by default), the
   prefill runner not counted; `runner_active_now` says whether the runner
   loaded within that window (WP D15-RUNNER, `null` unless the feed is `ok`).
+- **`now`** (WP GRAPH-RECENT-1 + LOADING-NOW-1, rc21): the same three
+  figures read from the live tier instead of the last sweep, all over ONE
+  window, the live "current speed" window (`window_seconds`, 15 s plus the
+  running 5 s cell; the window of the Clients page's `live_now`):
+  `current` (shape of `/v1/throughput/live`'s `current`), `active_clients`
+  (client addresses that were served bytes in it, the runner not counted),
+  `runner_active` (the runner was served bytes in it) and `live_since`.
+  Calling the endpoint arms the live watcher. `null` unless the feed is
+  `ok`; the swept `current`/`active_clients_now`/`runner_active_now` stay
+  for older clients. The web takes `now` over the swept figures.
 - **`summary`** over the range. `bytes_served` is **everything** the cache
   served, the prefill runner included (the real load on the cache and the
   line; average and peak speed use it too). Every client figure leaves the
@@ -4826,15 +4836,21 @@ before it was recorded, so "all" starts there.
 ### `GET /v1/throughput/live`
 
 WP GRAPH-LIVE. No parameters, same auth as the other `/v1` routes. Each call
-marks a "watcher" (active for 30 s) and reads new access-log lines into an
-in-memory ring of 5 s cells (900 s, at most 64 addresses per cell), at most
-every 2 s. Idle cost is zero: with no poller nothing is tailed. Points older
-than the ring come from the persisted 1-minute tier; every point has one
+marks a "watcher" (active for 60 s since rc21, was 30 s, so the 30 s poll
+of the persisted ranges keeps it armed) and reads new access-log lines into
+an in-memory ring of 5 s cells (900 s, at most 64 addresses per cell), at
+most every 2 s. Idle cost is zero: with no poller nothing is tailed. Each
+1-minute point comes from whichever source holds more of the minute (the
+ring, or the persisted 1-minute tier the sweep fills); every point has one
 source (`live` or `persisted`), so nothing is counted twice. `current` is the
-last 15-20 s, split into total and prefill-runner speed. With the event feed
+last 15-20 s, split into total and prefill-runner speed. `active_clients`
+(WP LOADING-NOW-1, rc21) counts the client addresses that were served bytes
+in that same window (`active_window_seconds`; before rc21: any line in 5
+minutes); `active_window_minutes` is deprecated (1). With the event feed
 disabled, `current` is null and `points` empty. No schema change.
-`GET /v1/clients/overview` (WP CLIENTS-LIVE-1) reads the same ring and arms
-the watcher too, so the log is tailed while either page is open.
+`GET /v1/clients/overview` (WP CLIENTS-LIVE-1) and `GET /v1/throughput` /
+`/v1/throughput/series` (WP GRAPH-RECENT-1) read the same ring and arm the
+watcher too, so the log is tailed while either page is open.
 
 ### `GET /v1/throughput/series?range=24h`
 
@@ -4854,6 +4870,14 @@ Like the summary: `bytes_served` and the speeds include the prefill runner,
 `hit_bytes`, `miss_bytes` and `requests` are clients only, and
 `runner_bytes` is the runner's share; summed over the points each equals
 the summary figure of the same range.
+
+WP GRAPH-RECENT-1 (rc21): for the 1- and 5-minute tiers (`1h`, `6h`,
+`24h`) and a feed that is `ok`, the newest buckets the live ring reaches
+(15 minutes) come from the ring when it holds more of them than the swept
+tier, so the graph shows the minutes since the last sweep. Such a point has
+`source: "live"` (else `"persisted"`) and is its own peak. These buckets are
+not yet in the summary, so the sums equal the summary only up to the last
+sweep. Calling the endpoint arms the live watcher.
 
 ### `GET /v1/clients/overview?range=7d`
 

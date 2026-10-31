@@ -112,6 +112,9 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
       runner_bytes: runner,
       bytes_per_second: bps,
       peak_bytes_per_second: t.bucket <= 300 ? bps : Math.round(bps * 1.35),
+      // WP GRAPH-RECENT-1: the server stitches the ring into the newest 1- and
+      // 5-minute buckets; the demo's graph is synthetic, all of it "swept".
+      source: "persisted",
     });
   }
   return {
@@ -166,7 +169,7 @@ export function demoLive(nowMs = Date.now(), sinceMs = null) {
     event_feed: feed(nowMs, sinceMs),
     range: "live",
     tier: "live",
-    watcher_window_seconds: 30,
+    watcher_window_seconds: 60,
     live_since: isoSeconds(nowMs - 15 * 60_000),
     range_start: points[0].t,
     current: {
@@ -177,7 +180,9 @@ export function demoLive(nowMs = Date.now(), sinceMs = null) {
       window_seconds: windowSeconds,
     },
     active_clients: 2,
-    active_window_minutes: 5,
+    // WP LOADING-NOW-1: "Loading now" counts over the current-speed window.
+    active_window_seconds: windowSeconds,
+    active_window_minutes: 1,
     points,
   };
 }
@@ -238,6 +243,9 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
   const f = feed(nowMs, sinceMs);
   const end = Date.parse(f.last_sweep_at);
   const windowSeconds = 300 + (Math.floor(end / 1000) % 300);
+  const nowSeconds = 15 + Math.floor((nowMs % 5000) / 1000);
+  const currentBps = (jobs) => (jobs.length ? 38.2 * MIB : 2.1 * MIB);
+  const runnerBps = (jobs) => (jobs.length ? 6.4 * MIB : 0);
   const jobs = runningJobs.map((j) => ({
     job_id: j.id,
     appid: j.appid,
@@ -256,16 +264,31 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
     range_start: demoSeries(range, nowMs, sinceMs).range_start,
     active_window_minutes: 15,
     current: {
-      bytes_per_second: jobs.length ? 38.2 * MIB : 2.1 * MIB,
+      bytes_per_second: currentBps(jobs),
       window_start: isoSeconds(end - windowSeconds * 1000),
       window_end: isoSeconds(end),
       window_seconds: windowSeconds,
-      runner_bytes_per_second: jobs.length ? 6.4 * MIB : 0,
+      runner_bytes_per_second: runnerBps(jobs),
     },
     active_clients_now: 2,
     runner_active_now: jobs.length > 0,
     summary: summaryFor(range, nowMs, sinceMs),
     jobs,
+    // WP GRAPH-RECENT-1 / LOADING-NOW-1: the "now" figures from the live
+    // tier. The demo's steady download reads the same speed either way.
+    now: {
+      current: {
+        bytes_per_second: currentBps(jobs),
+        runner_bytes_per_second: runnerBps(jobs),
+        window_start: isoSeconds(nowMs - nowSeconds * 1000),
+        window_end: isoSeconds(nowMs),
+        window_seconds: nowSeconds,
+      },
+      active_clients: 2,
+      runner_active: jobs.length > 0,
+      window_seconds: nowSeconds,
+      live_since: isoSeconds(nowMs - 15 * 60_000),
+    },
   };
 }
 

@@ -387,23 +387,36 @@ def test_current_speed_reads_the_last_seconds_and_splits_the_runner(tmp_path: Pa
     assert current.runner_bytes_per_second == pytest.approx(3000 / 17)
 
 
-def test_active_clients_counts_distinct_addresses_in_five_minutes_without_the_runner(tmp_path: Path) -> None:
+def test_active_clients_counts_addresses_served_in_the_current_window_without_the_runner(tmp_path: Path) -> None:
+    # WP LOADING-NOW-1: "Loading now" reads the "Current speed" window (15 s
+    # plus the running cell, 17 s at NOW), the window of the Clients page's
+    # live_now -- no longer five minutes of any traffic.
     log = tmp_path / "event.log"
     write_log(
         log,
         line(2, 1000, addr="10.0.0.5"),
         line(3, 1000, addr="10.0.0.5"),  # same machine: counted once
-        line(200, 1000, addr="10.0.0.6"),  # inside 5 minutes
-        line(400, 1000, addr="10.0.0.7"),  # outside 5 minutes
+        line(16, 1000, addr="10.0.0.6"),  # inside the 17 s window
+        line(18, 1000, addr="10.0.0.7"),  # just outside it
+        line(200, 1000, addr="10.0.0.8"),  # inside the old 5 minutes: not loading now
+        line(1, 0, addr="10.0.0.10").replace("\t200", "\t404"),  # a request, no bytes served
         line(4, 3000, addr="10.0.0.9"),  # the runner
     )
     tier, clock = tier_at()
     tier.touch(clock())
     tier.refresh(str(log), clock())
-    assert tier.active_clients(clock(), lambda addr, _iso: addr == "10.0.0.9") == 2
+    runner = lambda addr, _iso: addr == "10.0.0.9"  # noqa: E731
+    assert tier.current(clock(), runner).window_seconds == 17
+    assert tier.active_clients(clock(), runner) == 2
+    assert tier.runner_active(clock(), runner) is True
     assert tier.active_clients(clock(), never_runner) == 3
-    clock.advance(400)
+    assert tier.runner_active(clock(), never_runner) is False
+    # Same answer as the Clients page's per-address rule.
+    activity, _seconds = tier.addr_activity(clock(), runner)
+    assert {addr for addr, is_run in activity if not is_run} == {"10.0.0.5", "10.0.0.6"}
+    clock.advance(20)
     assert tier.active_clients(clock(), never_runner) == 0
+    assert tier.runner_active(clock(), runner) is False
 
 
 def test_concurrent_polls_and_reads_do_not_corrupt_the_ring(tmp_path: Path) -> None:
@@ -479,7 +492,7 @@ def test_polling_tails_the_log_and_returns_the_stitched_series(served, tmp_path:
     body = client.get("/v1/throughput/live", headers=AUTH).json()
     assert body["range"] == "live" and body["tier"] == "live"
     assert body["event_feed"]["state"] == "never-swept"
-    assert body["watcher_window_seconds"] == 30
+    assert body["watcher_window_seconds"] == 60
     sizes = [p["bucket_seconds"] for p in body["points"]]
     assert sizes == sorted(sizes, reverse=True) and set(sizes) == {60, 15, 5}
     assert sum(p["bytes_served"] for p in body["points"]) == 4000
@@ -493,7 +506,8 @@ def test_polling_tails_the_log_and_returns_the_stitched_series(served, tmp_path:
     assert body["range_start"] == body["points"][0]["t"]
     # The runner (10.0.0.9) is not a client: one machine is loading.
     assert body["active_clients"] == 1
-    assert body["active_window_minutes"] == 5
+    assert body["active_window_seconds"] == 17 == body["current"]["window_seconds"]
+    assert body["active_window_minutes"] == 1
 
     # A second poll within 2 s does not re-read; new lines show after 2 s.
     append_log(tmp_path / "event.log", line(0, 500, now=clock()))
