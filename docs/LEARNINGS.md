@@ -1294,3 +1294,15 @@ These are not style preferences; each entry cost a review round to learn.
   otherwise the test passes or fails by time of day.
 - **Optional split fields need a "field missing" fallback and a test that
   strips them** and expects the old output (older server, Android twin).
+- **Async UI flows need a per-flow token.** A dialog flow guarded only by
+  its state kind ("CHECKING") accepts a late answer of an earlier, closed
+  flow for another game; tie every answer to the flow that sent it
+  (CACHE-REPAIR-UI-1 review).
+- **A local aa-tolerant golden pass does not prove goldens unchanged.**
+  To prove 0 px, `git archive` the base into the scratchpad, serve both
+  with `tools/web-serve.mjs` on two ports, shoot both and compare with
+  `png-diff --mode strict`.
+- **`pkill -f <pattern>` in the same Bash call can kill that call's own
+  shell** (its command line contains the pattern, exit 144); kill by PID.
+- **Tests importing `store-singleton.js` with a stored key need
+  `after(() => store.stop())`**, else the node test process never exits.

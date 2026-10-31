@@ -3752,9 +3752,16 @@ below carry their own later dates, item 12 is the current one).
         app or a depot co-owner, 422 above 2000 files); `vault_api/cache_repair.py`;
         API only, no schema change, no new env value; UI (button on an
         incomplete row with `cache_missing_chunks == 0`) is a follow-up.
-      - [ ] **CACHE-REPAIR-UI-1** (web + android) Repair button on incomplete
+      - [x] **CACHE-REPAIR-UI-1** web part (6e21a89; Downloads "Incomplete" row, detail sheet Maintenance tab and header; dry run -> confirm with per-depot counts -> execute -> "Show job"; per-flow token against late answers) (web + android) Repair button on incomplete
         rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
         counts, execute, show job).
+      - [ ] CACHE-REPAIR-UI-1 Android twin: strings and templates exported
+        from `web/js/lib/cache-repair.js`; drop the `DAMAGED_NOTE` pin in
+        `CacheCompletenessWebTwinTest.kt` when adopting the new note
+      - [ ] nit (CACHE-REPAIR-UI-1 review): the sheet's Repair buttons use
+        `withButtonBusy` (`disabled`, no "Checking…") unlike the Downloads row
+        (aria-disabled + "Checking…"); demo route has no `not_owned` 409
+        branch; a flow closed during execute only re-reads the store, no toast
       - [x] **FIX-POP-HIDDEN-1** (web, rc20 visual check 2026-10-17) the
         Updates split-button menu was always open because
         `.pop.menu{display:flex}` beat `.pop[hidden]`; it overlapped the
