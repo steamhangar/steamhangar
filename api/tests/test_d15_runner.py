@@ -619,7 +619,7 @@ def test_default_candidates_are_steamprefills_list_then_the_hostname() -> None:
     "address,private",
     [
         ("10.1.2.3", True), ("172.16.0.1", True), ("172.31.255.255", True),
-        ("192.168.10.15", True), ("127.0.0.1", True),
+        ("192.168.1.15", True), ("127.0.0.1", True),
         ("172.32.0.1", False), ("100.64.0.1", False), ("169.254.1.1", False),
         ("8.8.8.8", False), ("::1", False), ("fd00::1", False), ("nonsense", False),
     ],
