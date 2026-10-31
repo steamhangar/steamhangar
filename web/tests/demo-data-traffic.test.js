@@ -11,7 +11,7 @@
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
-import { test, beforeEach } from "node:test";
+import { test, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -92,7 +92,14 @@ test("demo traffic routes refuse an unknown range like the server (422)", async 
   await assert.rejects(demoRequest("GET", "/v1/jobs", { params: { range: "1y" } }), (e) => e.kind === "validation");
 });
 
-test("MUTATION TARGET: demo /v1/jobs?range= keeps in-flight jobs, filters finished ones by age, and does not advance the simulation", async () => {
+test("MUTATION TARGET: demo /v1/jobs?range= keeps in-flight jobs, filters finished ones by age, and does not advance the simulation", async (t) => {
+  // FLAKY-DEMO-24H-1: the demo computes its 24 h cutoff from Date.now() at
+  // request time, this test computed its own one after the request; a seed
+  // job finishing right at the boundary landed on different sides. Freeze
+  // the clock (Date only, timers stay real) so both use the same `now`.
+  mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  t.after(() => mock.timers.reset());
+  resetDemoData(); // seed against the frozen clock too
   const all = await demoRequest("GET", "/v1/jobs", { params: { limit: 50, range: "all" } });
   const running = all.find((j) => j.status === "running");
   assert.ok(running, "seed has a running job");
