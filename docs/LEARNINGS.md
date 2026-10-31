@@ -1306,3 +1306,15 @@ These are not style preferences; each entry cost a review round to learn.
   shell** (its command line contains the pattern, exit 144); kill by PID.
 - **Tests importing `store-singleton.js` with a stored key need
   `after(() => store.stop())`**, else the node test process never exits.
+- **Read every "now" figure of one answer from a single ring snapshot**
+  (`LiveTier.now_view`), so a tail between two reads cannot make rows,
+  speed and device count disagree.
+- **A hidden block inside a hero grid must span an existing grid cell**
+  (`grid-column:1/-1` inside the cell); a new grid row adds a gap even when
+  hidden and changes goldens.
+- **A new visible block needs demo data that shows it**, or no golden ever
+  renders it; the demo must show the product's invariants (pill
+  "Downloading" implies a source row).
+- **Golden refresh = push the head to `wp/<name>-goldens`**; the bot
+  commits there, then fast-forward the normal branch to the bot commit and
+  push it for the verifying run (the bot commit itself starts no run).

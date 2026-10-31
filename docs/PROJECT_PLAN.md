@@ -3918,7 +3918,7 @@ below carry their own later dates, item 12 is the current one).
         says the runner was 60 % HIT while its points say 0 % (kept for
         golden stability). Android: read the runner split, add the
         "Verifying" pill and count runner HITs as cache in the graph.
-      - [ ] **NOW-LOADING-1** (api + web; operator report 2026-10-31, prod
+      - [x] **NOW-LOADING-1** (f8b7754 + goldens bba31e7; `now.loading_sources` / live `loading_sources`: runner row with job and phase or "No running job", client rows with games, "Unattributed traffic"; one ring snapshot `LiveTier.now_view`; live 5 s point divided by elapsed seconds) (api + web; operator report 2026-10-31, prod
         rc20.2, decided the same day: rc21, scope "game + source") the
         Downloads page never says WHAT is loading: the pill, "no device
         loading" and the runner GB are counts only. Add a "Loading now"
@@ -3956,6 +3956,22 @@ below carry their own later dates, item 12 is the current one).
           fits Material.
         - [ ] **APP-NIGHT-GOLDEN-1** (box below) plus the MOBILE-1a nit
           (test sample IPs to 192.168.1.x in Kotlin).
+      - Cancel question (NOW-LOADING-1, answered from code, reviewer-checked;
+        no prod measurement): a cancelled job's SteamPrefill does not keep
+        loading. `cancel_job` only sets `stop_request` (jobs.py ~894-990);
+        the runner polls it every 0.2 s (prefill.py:122, prefill_runner.py
+        ~215-251) and stops the child with SIGTERM, then SIGKILL after 5 s
+        (prefill.py ~750-781); the job reads "cancelled" only after the
+        process is reaped (prefill_runner.py ~281-298, worker.py ~376-383,
+        ~918-921). The operator's screenshot (pill "Downloading", ACTIVE
+        empty) was log flush (5 s, nginx.conf.template:671) plus window lag,
+        on rc20.2 the swept 5-minute pill.
+      - [ ] nit (NOW-LOADING-1 review): `addrs_listed` ignores the
+        clients/runner scope (an address listed only under the runner card
+        counts as known on the client side); each loading poll reads all of
+        `agent_reports` at the 3 s live rate; device count counts addresses
+        while rows group by agent ("2 devices loading", one row); demo job
+        card shows 31.5 MB/s (swept window) next to a 6.4 MB/s runner row.
       - [ ] Android Downloads subline counts the plain job poll
         (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
         not the ranged History list it shows; same "N in history" bug the
