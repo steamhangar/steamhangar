@@ -364,6 +364,13 @@ Decided 2026-10-16 (removed from the list above): VERIFY-SPEED-TEXT-1 reads
 (default range live, `active_clients` in `/v1/throughput/live`); the
 "Client downloading" row is in rc21 (CLIENT-ROW-1, after DOWNLOADS-1).
 
+Decided 2026-10-31: the Downloads page names what is loading now
+(NOW-LOADING-1, rc21, after GRAPH-RECENT-1 and RUNNER-SPLIT-1): one row
+per source, runner job with game and phase, each client with name, games
+and speed, unexplained traffic as "Unattributed traffic". Includes the
+check whether a cancelled job's runner keeps loading (operator screenshot:
+pill "Downloading", ACTIVE empty, right after cancelling job #200).
+
 Decided 2026-10-17: Verify, Verifying with animated circular arrows
 (VERIFY-LABEL-1, rc21).
 

@@ -3891,6 +3891,20 @@ below carry their own later dates, item 12 is the current one).
         counts all runner traffic as "from the internet" and a verifying
         runner shows "Downloading"; add the runner split and use it for the
         pill and the two-series graph (rc20.2).
+      - [ ] **NOW-LOADING-1** (api + web; operator report 2026-10-31, prod
+        rc20.2, decided the same day: rc21, scope "game + source") the
+        Downloads page never says WHAT is loading: the pill, "no device
+        loading" and the runner GB are counts only. Add a "Loading now"
+        block in the hero with one row per source: the runner job (game,
+        phase download/verify, speed) and each client (name, game(s) from
+        `live_now.apps`, speed); traffic no source explains reads
+        "Unattributed traffic" instead of being hidden. Screenshot case to
+        explain first: pill "Downloading" (runner bytes > 0) with ACTIVE
+        empty, right after job #200 (No Man's Sky) was cancelled at
+        21:07:18 — prove whether this is live-ring lag or a runner that
+        keeps loading after cancel (the latter is a bug of its own). Build
+        on GRAPH-RECENT-1 and RUNNER-SPLIT-1 (same data path, one window
+        for "loading" and speed); Android parity with the Android packages.
       - [ ] Android Downloads subline counts the plain job poll
         (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
         not the ranged History list it shows; same "N in history" bug the
