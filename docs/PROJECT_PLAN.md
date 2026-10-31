@@ -3982,7 +3982,8 @@ below carry their own later dates, item 12 is the current one).
           and Maintenance tab, REDESIGN-1b); a flow reset during execute only
           re-reads (inherited from the web).
         - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
-          Clients cards and Add a device tabs.
+          Clients cards (Add a device tabs not built: the app has no such
+          flow; open decision ANDROID-ADD-DEVICE-1 in the roadmap).
         - [x] **ANDROID-REDESIGN-1b** (bab33ac + fixups, goldens 590a34d) part 2: Library toolbar and detail
           tabs (Overview / Depots / Maintenance, Repair in the header and the
           Maintenance tab), sheet motion where it fits Material, distinct
