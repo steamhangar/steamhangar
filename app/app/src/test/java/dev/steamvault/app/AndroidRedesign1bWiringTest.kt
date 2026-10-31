@@ -100,7 +100,9 @@ class AndroidRedesign1bWiringTest {
         assertCalledFrom(sheet, "onHeadRepair = { controller.startRepair(scope, appid, title, onLibraryChanged) },", "LoadedDetailBody")
         assertCalledFrom(sheet, "if (headRepair) {", "HeadActionsRow")
         assertCalledFrom(sheet, "onClick = onHeadRepair,", "HeadActionsRow")
-        assertCalledFrom(sheet, "onClick = { onVerify(verifyIds) },", "HeadActionsRow")
+        // Not `onClick = { onVerify(verifyIds) }`: CompletenessSection has the
+        // same line; the header's Verify is the one gated on verifyInFlight.
+        assertCalledFrom(sheet, "enabled = !verifyInFlight,", "HeadActionsRow")
         assertCalledFrom(sheet, "        primary()", "HeadActionsRow")
         val code = stripComments(read(sheet))
         assertEquals(
