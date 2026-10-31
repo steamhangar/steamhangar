@@ -95,7 +95,7 @@ class ClientsScreenshotTest {
      * note and Manage PCs) in one tall shot, to compare with the rc20 design. */
     @Test
     fun clients_411dp_font100_night_full() =
-        shoot("clients_411dp_font100_night_full", widthDp = 411, heightDp = 3000, fontScale = 1.0f, page = Page.CLIENTS)
+        shoot("clients_411dp_font100_night_full", widthDp = 411, heightDp = FULL_PAGE_DP, fontScale = 1.0f, page = Page.CLIENTS)
 
     @Test
     fun downloads_stats_411dp_font100_night() =
@@ -145,17 +145,22 @@ class ClientsScreenshotTest {
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
         // After the capture, so a failing check still leaves the image.
         when (page) {
-            Page.CLIENTS -> assertClientsPage()
+            Page.CLIENTS -> assertClientsPage(wholePage = heightDp >= FULL_PAGE_DP)
             Page.STATS -> assertStatsHeader()
         }
     }
 
-    private fun assertClientsPage() {
+    /** [wholePage]: the tall shot composes every card; the phone-height
+     * shots show the tiles and the first card only (the lazy list does not
+     * compose cards below the viewport). */
+    private fun assertClientsPage(wholePage: Boolean) {
         // The answer arrived: cards of both kinds are on screen.
         composeRule.onNode(hasText("vault-agent · 10.0.0.42", substring = true), useUnmergedTree = true).assertExists()
         // WP D15-RUNNER: the prefill runner is its own card (second: connected,
         // as recent as the online PC) and counts like the web counts it.
-        composeRule.onNode(hasText("This server's prefill downloads · 172.18.0.1"), useUnmergedTree = true).assertExists()
+        if (wholePage) {
+            composeRule.onNode(hasText("This server's prefill downloads · 172.18.0.1"), useUnmergedTree = true).assertExists()
+        }
         composeRule.onNode(hasText("5 clients · 3 connected"), useUnmergedTree = true).assertExists()
         // WP ANDROID-GAPS-1: every card with a name_addr offers Rename (the runner has none).
         val renames = composeRule.onAllNodes(hasContentDescription("Rename ", substring = true)).fetchSemanticsNodes()
@@ -217,6 +222,9 @@ class ClientsScreenshotTest {
     }
 
     private companion object {
+        /** Height of the whole-page shot (WP ANDROID-REDESIGN-1a). */
+        const val FULL_PAGE_DP = 3000
+
         /** An evening (UTC), so the demo's daily rhythm draws a real graph. */
         val NOW: Long = Instant.parse("2026-10-14T19:30:00Z").toEpochMilli()
 
