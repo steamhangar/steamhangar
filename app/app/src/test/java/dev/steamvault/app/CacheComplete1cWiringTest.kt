@@ -51,16 +51,17 @@ class CacheComplete1cWiringTest {
     private val sheet = "$base/ui/detail/GameDetailSheet.kt"
 
     @Test
-    fun `MUTATION PIN -- Downloads lists the incomplete games after Updates available and before the queue, only when non-empty`() {
+    fun `MUTATION PIN -- Downloads lists the incomplete games after Updates available and before History, only when non-empty`() {
         assertCalledFrom(downloads, "pendingIncomplete(controller.games, controller.jobs)", "DownloadsScreen")
         assertCalledFrom(downloads, "if (incompleteRows.isNotEmpty())", "DownloadsBody")
         assertCalledFrom(downloads, "incompleteScheduleNote(controller.schedule)", "DownloadsBody")
         val code = stripComments(read(downloads))
         val updates = code.indexOf("updates-heading")
         val inc = code.indexOf("incomplete-heading")
-        val queue = code.indexOf("queue-heading")
+        val history = code.indexOf("history-heading")
         assertTrue("Incomplete must sit after Updates available", updates in 0 until inc)
-        assertTrue("Incomplete must sit before the Queue", inc in 0 until queue)
+        // WP ANDROID-REDESIGN-1c: the web's middle column sits between Queue and History.
+        assertTrue("Incomplete must sit before History", inc in 0 until history)
     }
 
     @Test
@@ -103,7 +104,7 @@ class CacheComplete1cWiringTest {
         assertCalledFrom(sheet, "StatusIcon(kind = cardIconKind(row, kind, isGroup)", "DetailHeader")
         val code = stripComments(read(sheet))
         val start = code.indexOf("private fun gameSummaryFrom(")
-        val end = code.indexOf("private fun GameDetailSheetBody(", start)
+        val end = code.indexOf("internal fun GameDetailSheetBody(", start)
         assertTrue("gameSummaryFrom must copy the completeness figure", code.substring(start, end).contains("cache_complete_pct = detail.cache_complete_pct"))
     }
 

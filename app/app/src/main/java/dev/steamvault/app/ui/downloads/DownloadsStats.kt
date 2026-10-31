@@ -1,6 +1,28 @@
 package dev.steamvault.app.ui.downloads
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.sp
+import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.traffic.logic.HERO_LABEL
+import dev.steamvault.app.ui.traffic.logic.HeroFigures
+import dev.steamvault.app.ui.traffic.logic.HeroMini
+import dev.steamvault.app.ui.traffic.logic.HeroPart
+import dev.steamvault.app.ui.traffic.logic.HeroTile
+import dev.steamvault.app.ui.traffic.logic.LOADING_KIND_UNATTRIBUTED
+import dev.steamvault.app.ui.traffic.logic.heroFigures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -12,7 +34,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -56,12 +78,10 @@ import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_MS
 import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_RANGE
 import dev.steamvault.app.ui.traffic.logic.SERIES_END_TEXT
 import dev.steamvault.app.ui.traffic.logic.STATS_RANGES
-import dev.steamvault.app.ui.traffic.logic.StatTile
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
 import dev.steamvault.app.ui.traffic.logic.HeroStatus
-import dev.steamvault.app.ui.traffic.logic.heroStatus
 import dev.steamvault.app.ui.traffic.logic.LEGEND_INTERNET
 import dev.steamvault.app.ui.traffic.logic.LEGEND_SERVED
 import dev.steamvault.app.ui.traffic.logic.LoadingNowModel
@@ -78,7 +98,6 @@ import dev.steamvault.app.ui.traffic.logic.seriesHighestText
 import dev.steamvault.app.ui.traffic.logic.seriesLabel
 import dev.steamvault.app.ui.traffic.logic.seriesStartText
 import dev.steamvault.app.ui.traffic.logic.trimSeries
-import dev.steamvault.app.ui.traffic.logic.tileDescription
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -202,9 +221,14 @@ class HistoryFilter(private val repository: TrafficRepository, initialRange: Str
 }
 
 /**
- * The header under the bulk bar: range chips (hidden without figures), the
- * note, the eight figures in a two-column grid, and the graph. Nothing in
- * here is focusable but the chips.
+ * The Downloads hero (WP ANDROID-REDESIGN-1c, twin of web
+ * `components/downloads-hero.js` at one column, docs/design/rc20/
+ * downloads.html): one surface card with the "Throughput" label and the
+ * range chips (hidden without figures), the note, the big current speed
+ * with the status pill, the caption (limit + devices loading), "Loading
+ * now", the graph, the mini line (average, peak, the runner's share) and
+ * the four totals 2x2 ([HERO_TILES]). Figures and words come from
+ * [heroFigures]; nothing in here is focusable but the chips.
  */
 @Composable
 fun DownloadsStatsHeader(
@@ -224,12 +248,19 @@ fun DownloadsStatsHeader(
         couldNotLoad = COULD_NOT_LOAD_STATISTICS,
         loadingText = LOADING_STATISTICS_TEXT,
     )
-    val tiles = if (poll.unsupported) null else headerTiles(throughput, rateCap)
-    // WP ANDROID-DL-1 (web `heroModel`): the pill shows only with figures.
-    val status = if (tiles != null) heroStatus(throughput?.current) else null
-    // WP ANDROID-DL-2 (web NOW-LOADING-1): what is loading, under the pill.
-    val loadingNow = if (tiles != null) loadingNowModel(throughput) else null
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Web `heroModel`: no figures before an answer, with the feed off or for an old server.
+    val hero = heroFigures(throughput, rateCap, poll.unsupported)
+    // WP ANDROID-DL-2 (web NOW-LOADING-1): what is loading, under the number.
+    val loadingNow = if (hero != null) loadingNowModel(throughput) else null
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(VaultColors.Surface, RoundedCornerShape(16.dp))
+            .border(1.dp, VaultColors.LineSoft, RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionLabel(HERO_LABEL)
         // No figures (feed disabled, old server): no range to choose either.
         if (!poll.noFigures) {
             RangeChips(
@@ -250,89 +281,216 @@ fun DownloadsStatsHeader(
                 modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
-        if (status != null) StatusPill(status)
+        if (hero != null) HeroLive(hero)
         if (loadingNow != null) LoadingNowBlock(loadingNow)
-        if (tiles != null) StatTiles(tiles)
         ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported, nowMs = nowMs)
+        if (hero != null) {
+            HeroMiniLine(hero.mini)
+            HeroTiles(hero.tiles)
+        }
+    }
+}
+
+/** The kit's uppercase section label (web `.sec`), a heading for TalkBack. */
+@Composable
+internal fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.9.sp,
+        color = VaultColors.Dim,
+        modifier = modifier.semantics { heading() },
+    )
+}
+
+/**
+ * The live block (web `.live .lv`): the current speed as the big number
+ * with its unit, the status pill beside it, and the caption line (the
+ * limit in bold, how many devices load). TalkBack reads the number as the
+ * "Current speed" figure and the caption as the limit and "Loading now".
+ */
+@Composable
+private fun HeroLive(hero: HeroFigures) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = buildAnnotatedString {
+                    append(hero.big.value)
+                    if (hero.big.unit.isNotEmpty()) {
+                        withStyle(SpanStyle(fontSize = 16.sp, color = VaultColors.Dim, fontWeight = FontWeight.Normal)) {
+                            append(" " + hero.big.unit)
+                        }
+                    }
+                },
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = (-1).sp,
+                maxLines = 1,
+                modifier = Modifier.clearAndSetSemantics { contentDescription = hero.bigDescription },
+            )
+            if (hero.status != null) StatusPill(hero.status)
+        }
+        val caption = hero.captionDescription
+        if (hero.caption.isNotEmpty() && caption != null) {
+            Text(
+                text = partsText(hero.caption),
+                style = MaterialTheme.typography.bodySmall,
+                color = VaultColors.Dim,
+                modifier = Modifier.clearAndSetSemantics { contentDescription = caption },
+            )
+        }
+    }
+}
+
+/** Parts with their bold runs in the text colour (web `fillParts` + `.hcap b`). */
+private fun partsText(parts: List<HeroPart>): AnnotatedString = buildAnnotatedString {
+    for (part in parts) {
+        if (part.bold) {
+            withStyle(SpanStyle(color = VaultColors.Text, fontWeight = FontWeight.Medium)) { append(part.text) }
+        } else {
+            append(part.text)
+        }
     }
 }
 
 /**
- * WP ANDROID-DL-1: the status pill (web hero `stats-pill`): Serving /
- * Downloading / Verifying / Idle with its status icon. TalkBack reads the
- * word once; the icon's own kind label ("Cached" for Serving) would
- * contradict it.
+ * WP ANDROID-DL-1: the status pill (web hero `stats-pill`, kit `.pill`):
+ * Serving / Downloading / Verifying / Idle with its status icon on a
+ * tinted capsule. TalkBack reads the word once; the icon's own kind label
+ * ("Cached" for Serving) would contradict it.
  */
 @Composable
 private fun StatusPill(status: HeroStatus) {
+    val tone = when (status.kind) {
+        StatusKind.CACHED -> VaultColors.StatusOk
+        StatusKind.RUNNING, StatusKind.VERIFY -> VaultColors.StatusRun
+        else -> VaultColors.Dim
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.clearAndSetSemantics { contentDescription = status.text },
+        modifier = Modifier
+            .background(if (tone == VaultColors.Dim) VaultColors.Raised2 else tone.copy(alpha = 0.14f), RoundedCornerShape(percent = 50))
+            .padding(start = 4.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)
+            .clearAndSetSemantics { contentDescription = status.text },
     ) {
         StatusIcon(kind = status.kind, size = StatusIconSize.SMALL)
-        Text(status.text, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 4.dp))
+        Text(status.text, style = MaterialTheme.typography.labelMedium, color = tone, modifier = Modifier.padding(start = 6.dp))
     }
 }
 
 /**
  * WP ANDROID-DL-2 (web hero `stats-loading-now`, NOW-LOADING-1): "Loading
  * now", one row per source of the traffic in the live window -- name in
- * bold, what it loads under it, its speed on the right. Absent while nothing
- * loads ([loadingNowModel] is `null`), so there is never an empty heading.
- * The label is a heading; each row is one TalkBack stop that reads name,
- * detail and speed.
+ * bold, what it loads under it, its speed on the right, on the kit's
+ * accent-tinted row (the unattributed row dashed-neutral there, plain here).
+ * Absent while nothing loads ([loadingNowModel] is `null`), so there is
+ * never an empty heading. The label is a heading; each row is one TalkBack
+ * stop that reads name, detail and speed.
  */
 @Composable
 private fun LoadingNowBlock(model: LoadingNowModel) {
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            model.label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.semantics { heading() },
-        )
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionLabel(model.label, Modifier)
         for (row in model.rows) {
+            val attributed = row.kind != LOADING_KIND_UNATTRIBUTED
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (attributed) VaultColors.Accent.copy(alpha = 0.08f) else Color.Transparent, RoundedCornerShape(12.dp))
+                    .border(1.dp, if (attributed) VaultColors.Accent.copy(alpha = 0.30f) else VaultColors.Line, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .semantics(mergeDescendants = true) {},
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(row.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                     Text(row.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(row.speed, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 8.dp))
+                Text(row.speed, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace,
+                    color = if (attributed) VaultColors.Accent else VaultColors.Dim,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
         }
     }
 }
 
+/** The mini line (web `.mini`): average, peak and the runner's share over a hairline. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatTiles(tiles: List<StatTile>) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun HeroMiniLine(items: List<HeroMini>) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = VaultColors.LineSoft)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            for (item in items) {
+                Text(
+                    partsText(item.parts),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VaultColors.Dim,
+                    modifier = Modifier.clearAndSetSemantics { contentDescription = item.description },
+                )
+            }
+        }
+    }
+}
+
+/** The four totals, 2x2 (web `.hero .tiles` at one column). */
+@Composable
+private fun HeroTiles(tiles: List<HeroTile>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for (pair in tiles.chunked(2)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                for (tile in pair) StatTileView(tile, Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                for (tile in pair) HeroTileView(tile, Modifier.weight(1f).fillMaxHeight())
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
 }
 
-/** One figure. TalkBack reads [tileDescription] ("Peak speed: 40.0 MB/s";
- * the dash as "Not available") instead of the visual parts. */
+/** One kit tile (`.hero .tile`): label, value with its small unit, then the
+ * caption or, on the hit rate, the meter. TalkBack reads the figure's
+ * [tileDescription] ("Hit rate: 83%, clients only, ..."). */
 @Composable
-private fun StatTileView(tile: StatTile, modifier: Modifier = Modifier) {
-    val description = tileDescription(tile)
-    Card(modifier = modifier.clearAndSetSemantics { contentDescription = description }) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Text(tile.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(tile.value, style = MaterialTheme.typography.titleMedium)
-            tile.detail?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun HeroTileView(tile: HeroTile, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .background(VaultColors.Raised, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .clearAndSetSemantics { contentDescription = tile.description },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            tile.label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            letterSpacing = 0.8.sp,
+            color = VaultColors.Dim,
+            maxLines = 1,
+        )
+        Text(
+            buildAnnotatedString {
+                append(tile.figure.value)
+                if (tile.figure.unit.isNotEmpty()) {
+                    withStyle(SpanStyle(fontSize = 12.sp, color = VaultColors.Dim, fontWeight = FontWeight.Normal)) {
+                        append(" " + tile.figure.unit)
+                    }
+                }
+            },
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+        )
+        val meter = tile.meter
+        if (meter != null) {
+            Box(Modifier.fillMaxWidth().padding(top = 2.dp).height(4.dp).background(VaultColors.Raised2, RoundedCornerShape(2.dp))) {
+                Box(Modifier.fillMaxWidth(meter).height(4.dp).background(VaultColors.StatusOk, RoundedCornerShape(2.dp)))
             }
-            tile.limit?.let { // WP RATE-TILE
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        } else if (tile.caption != null) {
+            Text(tile.caption, style = MaterialTheme.typography.labelSmall, color = VaultColors.Dim)
         }
     }
 }
@@ -364,6 +522,9 @@ internal const val SERVED_FILL_ALPHA = 0.34f
 internal const val INTERNET_FILL_ALPHA = 0.10f
 
 private const val GRAPH_W = 300f
+
+/** The kit graph's grid lines (web `GRAPH_GRID` 24/48/72 of 96). */
+private val GRAPH_GRID_FRACTIONS = listOf(0.25f, 0.5f, 0.75f)
 private const val GRAPH_H = 60f
 
 /**
@@ -399,6 +560,11 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
                 if (i == 0) moveTo(x * sx, ys[i] * sy) else lineTo(x * sx, ys[i] * sy)
             }
             val stroke = Stroke(width = 1.5.dp.toPx(), join = StrokeJoin.Round)
+            // WP ANDROID-REDESIGN-1c (kit `.graph .grid`): hairlines at a quarter, half and three quarters.
+            for (f in GRAPH_GRID_FRACTIONS) {
+                val y = size.height * f
+                drawLine(VaultColors.LineSoft, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+            }
             if (split == null) {
                 val line = Path().apply { trace(geo.ys) }
                 val area = Path().apply {

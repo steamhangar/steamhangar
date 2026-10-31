@@ -55,7 +55,7 @@ class AndroidDl2WiringTest {
 
     @Test
     fun `MUTATION PIN -- the header draws the Loading now rows from the merged answer, only with figures`() {
-        assertCalledFrom(stats, "val loadingNow = if (tiles != null) loadingNowModel(throughput) else null", "DownloadsStatsHeader")
+        assertCalledFrom(stats, "val loadingNow = if (hero != null) loadingNowModel(throughput) else null", "DownloadsStatsHeader")
         assertCalledFrom(stats, "if (loadingNow != null) LoadingNowBlock(loadingNow)", "DownloadsStatsHeader")
         assertCalledFrom(stats, "for (row in model.rows)", "LoadingNowBlock")
         assertCalledFrom(stats, "Text(row.name,", "LoadingNowBlock")

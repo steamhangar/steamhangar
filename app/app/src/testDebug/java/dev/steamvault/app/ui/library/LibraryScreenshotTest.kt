@@ -160,6 +160,11 @@ class LibraryScreenshotTest {
     fun library_800dp_font100_list() =
         shoot("library_800dp_font100_list", TABLET_800, layout = LibraryLayout.LIST)
 
+    // WP ANDROID-REDESIGN-1c (REDESIGN-1b review): games with store metadata,
+    // so the toolbar shows the Filters button (it stays above the chips).
+    @Test
+    fun library_411dp_font100_meta() = shoot("library_411dp_font100_meta", PIXEL_411, withMeta = true)
+
     private fun shoot(
         name: String,
         screen: ScreenSize,
@@ -167,6 +172,7 @@ class LibraryScreenshotTest {
         night: Boolean = false,
         layout: LibraryLayout = LibraryLayout.GRID_2,
         expectedBadgeText: String? = null,
+        withMeta: Boolean = false,
     ) {
         // The rule already launched the host activity with the @Config
         // defaults; apply this profile and recreate it so the new
@@ -179,7 +185,7 @@ class LibraryScreenshotTest {
         composeRule.runOnUiThread { composeRule.activity.enableEdgeToEdge() }
 
         composeRule.setContent {
-            SteamVaultTheme { AppShell(layout) }
+            SteamVaultTheme { AppShell(layout, withMeta) }
         }
         composeRule.waitForIdle()
         simulateSystemBars()
@@ -192,6 +198,9 @@ class LibraryScreenshotTest {
         // After the capture, so a failing check still leaves the image.
         assertLayout()
         assertCardContents(layout, expectedBadgeText)
+        // The Filters button shows only with metadata (spoken "Filters" while none is set).
+        val filters = composeRule.onAllNodes(hasContentDescription(FILTERS_DESCRIPTION)).fetchSemanticsNodes().size
+        assertEquals("Filters buttons (metadata ${if (withMeta) "present" else "absent"})", if (withMeta) 1 else 0, filters)
     }
 
     /**
@@ -509,7 +518,7 @@ class LibraryScreenshotTest {
     /** `MainActivity.setContent`'s main shell ([MainShell], shared since
      * WP D12) with Library selected. */
     @Composable
-    private fun AppShell(layout: LibraryLayout) {
+    private fun AppShell(layout: LibraryLayout, withMeta: Boolean) {
         val fixtures = LibraryScreenshotFixtures
         val ownedLibrary = remember {
             OwnedLibraryController(
@@ -531,7 +540,7 @@ class LibraryScreenshotTest {
             onSelect = {},
         ) {
             LibraryScreen(
-                gamesRepository = remember { FixedGamesRepository(fixtures.vaultGames) },
+                gamesRepository = remember { FixedGamesRepository(if (withMeta) fixtures.vaultGamesWithMeta else fixtures.vaultGames) },
                 jobsRepository = remember { FixedJobsRepository(fixtures.jobs) },
                 mappingRepository = remember { EmptyMappingRepository() },
                 cacheRepository = remember { UnusedCacheRepository() },
@@ -596,6 +605,9 @@ class LibraryScreenshotTest {
         const val UPDATE_BADGE_FULL = "Update available"
         const val UPDATE_BADGE_SHORT = "Update"
 
+        /** `R.string.library_filters_button`, the button's spoken label with no filter set. */
+        const val FILTERS_DESCRIPTION = "Filters"
+
         /** `R.string.library_layout_grid2`. */
         const val LAYOUT_GRID2_DESCRIPTION = "2-column grid"
 
@@ -627,7 +639,7 @@ private class RegisterHostActivityRule : TestRule {
  * `awaitStableFallbackTiles` relies on Coil running this interceptor on
  * the Main dispatcher (Robolectric's paused looper), so `waitForIdle`
  * covers it; a loader with its own `interceptorDispatcher` would break that. */
-private object OfflineImageLoader {
+internal object OfflineImageLoader {
     fun create(app: Application): ImageLoader = ImageLoader.Builder(app)
         .components {
             add(

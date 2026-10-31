@@ -55,29 +55,45 @@ class SettingsD16WiringTest {
 
     @Test
     fun `MUTATION PIN -- each Settings row piece is called from the composable that owns it`() {
-        assertCalledFrom("ExpertSwitchRow(", "SettingsForm")
+        assertCalledFrom("ExpertSwitchRow(controller.expertOn)", "SettingsScreen")
+        assertCalledFrom("SettingsSectionStrip(sections = sections", "SettingsScreen")
+        assertCalledFrom("SettingsForm(controller, current)", "SettingsScreen")
         assertCalledFrom("PinnedSettingRow(entry)", "SettingsForm")
         assertCalledFrom("SettingHelpRow(entry)", "SettingsForm")
-        assertCalledFrom("SettingsSectionHeader(", "SettingsForm")
+        assertCalledFrom("FieldCard(block.title)", "SettingsForm")
         assertCalledFrom("RiskyConfirmDialog(controller, scope)", "SettingsScreen")
         assertCalledFrom("controller.confirmRisky()", "RiskyConfirmDialog")
         assertCalledFrom("controller.cancelRisky()", "RiskyConfirmDialog")
     }
 
+    /** WP ANDROID-REDESIGN-1c: one panel at a time behind the strip; the
+     * strip's labels are the web's `SECTIONS.nav` (SettingsLayout.NAV_LABELS). */
     @Test
-    fun `MUTATION PIN -- the expert switch is outside the collapsible blocks`() {
+    fun `MUTATION PIN -- the strip selects one panel through the controller, with the web nav labels`() {
         val text = code(screen)
-        val start = text.indexOf("private fun SettingsForm(")
-        val end = text.indexOf("private fun captionFor(", start)
-        val body = text.substring(start, end)
-        val gate = body.indexOf("if (block.id == EXPERT_SWITCH_ID)")
-        val switchCall = body.indexOf("ExpertSwitchRow(")
-        val open = body.indexOf("controller.isSectionOpen(block.id)")
-        assertTrue("the switch is rendered before any open-state check", gate >= 0 && switchCall > gate && open > switchCall)
+        assertCalledFrom("onSelect = { controller.selectSection(it) }", "SettingsScreen")
+        assertCalledFrom("visibleSections(placed, controller.expertOn)", "SettingsScreen")
+        assertCalledFrom("SettingsLayout.navLabel(id)", "SettingsSectionStrip")
+        assertCalledFrom("onClick = { onSelect(id) },", "SettingsSectionStrip")
+        assertCalledFrom("PanelHeading(current)", "SettingsScreen")
+        assertTrue("the old collapsible blocks are gone", !text.contains("isSectionOpen") && !text.contains("setSectionOpen"))
+        assertTrue("no Open Clients pointer (rc20 visual check)", !text.contains("ClientsSection(") && !text.contains("settings_clients_open_button"))
     }
 
     @Test
-    fun `MUTATION PIN -- the form is driven by SettingsLayout, with the expert switch and the apply line`() {
+    fun `MUTATION PIN -- the expert switch is the last item of the About panel`() {
+        val text = code(screen)
+        val start = text.indexOf("\"about\" -> {")
+        check(start >= 0) { "expected an About branch in SettingsScreen" }
+        val about = text.indexOf("AboutSection(controller, scope)", start)
+        val switch = text.indexOf("ExpertSwitchRow(controller.expertOn)", start)
+        val next = text.indexOf("else -> {", start)
+        assertTrue("About first, then the switch, both inside the About branch", about in (start + 1) until switch && switch < next)
+        assertEquals("one switch only", 1, Regex("ExpertSwitchRow\\(controller").findAll(text).count())
+    }
+
+    @Test
+    fun `MUTATION PIN -- the form is driven by SettingsLayout, per panel, with the apply line`() {
         val text = code(screen)
         val start = text.indexOf("private fun SettingsForm(")
         val end = text.indexOf("private fun captionFor(", start)
@@ -85,9 +101,9 @@ class SettingsD16WiringTest {
         val body = text.substring(start, end)
         assertTrue(body.contains("SettingsLayout.placeEntries(response.settings)"))
         assertTrue(body.contains("controller.coreApplyLine"))
+        assertTrue(body.contains("if (sectionId == EXPERT_SECTION)"))
         assertTrue(body.contains("if (controller.expertOn)"))
-        assertTrue(body.contains("controller.isSectionOpen(block.id)"))
-        assertTrue(body.contains("controller.setSectionOpen(block.id, !open)"))
+        assertTrue(body.contains("placed.sections[sectionId].orEmpty()"))
         assertTrue("env-wins rows are plain text", body.contains("if (SettingsLayout.isPinned(entry))") && body.contains("PinnedSettingRow(entry)"))
         assertTrue("every row has its (i)", body.contains("SettingHelpRow(entry)"))
     }

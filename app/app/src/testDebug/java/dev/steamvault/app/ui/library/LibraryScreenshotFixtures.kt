@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.library
 
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.GameDetail
+import dev.steamvault.app.net.model.GameMeta
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.JobControlOut
@@ -129,6 +130,20 @@ internal object LibraryScreenshotFixtures {
             last_prefill_at = PREFILLED_AT, depot_count = 1, size_bytes = 1_200_000_000,
         ),
     )
+
+    /**
+     * WP ANDROID-REDESIGN-1c: the same library with store metadata on a few
+     * games (`GameSummary.meta`), so the toolbar's Filters button renders
+     * (`metaAvailable`). Cards and chips are unchanged: no filter is set.
+     */
+    val vaultGamesWithMeta: List<GameSummary> = vaultGames.map { game ->
+        when (game.appid) {
+            1_000_010 -> game.copy(meta = GameMeta(single_player = true, multiplayer = true, coop = true, genres = listOf(1, 3), review_percent = 91, release_year = 2021))
+            1_000_020 -> game.copy(meta = GameMeta(single_player = true, genres = listOf(25), review_percent = 78, release_year = 2016))
+            1_000_025 -> game.copy(meta = GameMeta(single_player = true, vr = false, genres = listOf(28), review_percent = 64, release_year = 2023))
+            else -> game
+        }
+    }
 
     val jobs: List<JobSummary> = listOf(
         JobSummary(id = 41, appid = 1_000_030, type = "prefill", status = "running", created_at = JOB_CREATED_AT, started_at = JOB_CREATED_AT),

@@ -137,7 +137,7 @@ class Ag3WiringTest {
         val text = stripComments(read("src/main/java/dev/steamvault/app/ui/detail/GameDetailSheet.kt"))
         val start = text.indexOf("private fun gameSummaryFrom(")
         check(start >= 0) { "expected to find gameSummaryFrom in GameDetailSheet.kt" }
-        val end = text.indexOf("private fun GameDetailSheetBody(", start)
+        val end = text.indexOf("internal fun GameDetailSheetBody(", start)
         check(end > start) { "expected GameDetailSheetBody to follow gameSummaryFrom in GameDetailSheet.kt" }
         val body = text.substring(start, end)
 

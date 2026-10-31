@@ -4,6 +4,7 @@ import dev.steamvault.app.net.model.CurrentOut
 import dev.steamvault.app.net.model.LoadingAppOut
 import dev.steamvault.app.net.model.LoadingSourceOut
 import dev.steamvault.app.net.model.SeriesPointOut
+import dev.steamvault.app.net.model.SummaryOut
 import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.ui.library.logic.UNKNOWN_APP_NAME
 import dev.steamvault.app.ui.status.StatusKind
@@ -224,4 +225,143 @@ fun loadingNowModel(throughput: ThroughputOut?): LoadingNowModel? {
         }
     }
     return if (rows.isNotEmpty()) LoadingNowModel(LOADING_NOW_LABEL, rows) else null
+}
+
+// ---------------------------------------------------------------------
+// The hero's anatomy (WP ANDROID-REDESIGN-1c, twin of web `heroModel`)
+// ---------------------------------------------------------------------
+
+/** The hero's section label (web `HERO_LABEL`). */
+const val HERO_LABEL = "Throughput"
+
+/** One of the four hero tiles: which [headerTiles] figure, its kit label and caption (web `HERO_TILES`). */
+data class HeroTileSpec(val key: String, val label: String, val caption: String?)
+
+/** The four totals, 2x2 (web `HERO_TILES`, pinned by `DownloadsHeroWebTwinTest`). */
+val HERO_TILES: List<HeroTileSpec> = listOf(
+    HeroTileSpec("loaded", "Served", "cache + prefill"),
+    HeroTileSpec("internet", "From internet", "not in cache"),
+    HeroTileSpec("saved", "Saved by cache", "instead of internet"),
+    HeroTileSpec("hit-rate", "Hit rate", null),
+)
+
+/** A formatted figure as number + unit (web `splitFigure`); the dash keeps no unit. */
+data class HeroFigure(val value: String, val unit: String)
+
+fun splitFigure(text: String?): HeroFigure {
+    if (text.isNullOrEmpty() || text == DASH) return HeroFigure(DASH, "")
+    if (text.endsWith("%")) return HeroFigure(text.dropLast(1), "%")
+    val i = text.lastIndexOf(' ')
+    return if (i > 0) HeroFigure(text.substring(0, i), text.substring(i + 1)) else HeroFigure(text, "")
+}
+
+/** A run of text; [bold] marks the kit's `<b>` figures. */
+data class HeroPart(val text: String, val bold: Boolean = false)
+
+/** "N devices loading" (web `devicesLoading`): only with a fresh feed and a known count; zero reads "no device loading". */
+fun devicesLoadingText(throughput: ThroughputOut?): String? {
+    if (throughput == null || feedState(throughput.event_feed) != FeedState.OK) return null
+    val n = throughput.active_clients_now ?: return null
+    if (n < 0) return null
+    if (n == 0) return "no device loading"
+    return "$n ${if (n == 1) "device" else "devices"} loading"
+}
+
+private val LIMIT_RE = Regex("^(Limit )(\\S+ \\S+?)(,.*)?$")
+
+/** "Limit 8 MB/s, all day" -> parts with the speed in bold (web `limitParts`). */
+fun limitParts(rateCap: String): List<HeroPart> {
+    val m = LIMIT_RE.find(rateCap) ?: return listOf(HeroPart(rateCap))
+    return listOf(HeroPart(m.groupValues[1]), HeroPart(m.groupValues[2], bold = true), HeroPart(m.groupValues[3]))
+}
+
+/** The runner's share for the mini line (web `runnerParts`), `null` when the server sent none. */
+fun runnerParts(summary: SummaryOut?): List<HeroPart>? {
+    val runner = summary?.prefill_runner ?: return null
+    if (runner.bytes_served <= 0) return null
+    val size = formatTrafficBytes(runner.bytes_served) ?: return null
+    val cached = if (runner.hit_bytes > 0) formatTrafficBytes(runner.hit_bytes) else null
+    return if (cached != null) {
+        listOf(HeroPart("Prefill runner "), HeroPart(size, bold = true), HeroPart(" of it, "), HeroPart(cached, bold = true), HeroPart(" from the cache"))
+    } else {
+        listOf(HeroPart("Prefill runner "), HeroPart(size, bold = true), HeroPart(" of it"))
+    }
+}
+
+/** One item of the mini line; [description] is what TalkBack reads. */
+data class HeroMini(val key: String, val parts: List<HeroPart>, val description: String)
+
+/** One hero tile; [meter] (0..1) only on the hit rate with a value. */
+data class HeroTile(
+    val key: String,
+    val label: String,
+    val caption: String?,
+    val figure: HeroFigure,
+    val description: String,
+    val meter: Float?,
+)
+
+/**
+ * Everything the hero shows below its note (web `heroModel().figures`):
+ * the big number with the status pill, the caption (limit + devices
+ * loading), the mini line (average, peak, the runner's share) and the four
+ * tiles. `null` without figures ([headerTiles] `null`: no answer yet, feed
+ * disabled; or [unsupported]). TalkBack keeps the established figure words:
+ * each piece reads its [headerTiles] tile ([tileDescription], "Peak speed:
+ * 40.0 MB/s"), the devices caption the "Loading now" tile's.
+ */
+data class HeroFigures(
+    val big: HeroFigure,
+    val bigDescription: String,
+    val status: HeroStatus?,
+    val caption: List<HeroPart>,
+    val captionDescription: String?,
+    val mini: List<HeroMini>,
+    val tiles: List<HeroTile>,
+)
+
+fun heroFigures(throughput: ThroughputOut?, rateCap: String?, unsupported: Boolean = false): HeroFigures? {
+    if (unsupported) return null
+    val tiles = headerTiles(throughput, rateCap) ?: return null
+    val t = throughput ?: return null
+    val byKey = tiles.associateBy { it.key }
+    val current = byKey.getValue("current")
+    val devices = devicesLoadingText(t)
+    val caption = ArrayList<HeroPart>()
+    if (rateCap != null) caption.addAll(limitParts(rateCap))
+    if (devices != null) {
+        if (caption.isNotEmpty()) caption.add(HeroPart(" · "))
+        caption.add(HeroPart(devices))
+    }
+    val captionDescription = listOfNotNull(
+        rateCap,
+        if (devices != null) tileDescription(byKey.getValue("clients")) else null,
+    ).joinToString(". ").ifEmpty { null }
+    val average = byKey.getValue("average")
+    val peak = byKey.getValue("peak")
+    val mini = ArrayList<HeroMini>()
+    mini.add(HeroMini("average", listOf(HeroPart("Avg while loading "), HeroPart(average.value, bold = true)), tileDescription(average)))
+    mini.add(HeroMini("peak", listOf(HeroPart("Peak "), HeroPart(peak.value, bold = true)), tileDescription(peak)))
+    runnerParts(t.summary)?.let { parts -> mini.add(HeroMini("runner", parts, parts.joinToString("") { it.text })) }
+    val rate = t.summary?.byte_hit_rate
+    val meter = if (rate != null && rate.isFinite() && rate >= 0.0) minOf(rate, 1.0).toFloat() else null
+    return HeroFigures(
+        big = splitFigure(current.value),
+        bigDescription = tileDescription(current),
+        status = heroStatus(t.current),
+        caption = caption,
+        captionDescription = captionDescription,
+        mini = mini,
+        tiles = HERO_TILES.map { spec ->
+            val tile = byKey.getValue(spec.key)
+            HeroTile(
+                key = spec.key,
+                label = spec.label,
+                caption = spec.caption,
+                figure = splitFigure(tile.value),
+                description = tileDescription(tile),
+                meter = if (spec.key == "hit-rate" && tile.value != DASH) meter else null,
+            )
+        },
+    )
 }

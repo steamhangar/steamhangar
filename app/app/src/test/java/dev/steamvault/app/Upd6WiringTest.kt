@@ -49,14 +49,16 @@ class Upd6WiringTest {
     private val row = "$base/ui/library/GameListRow.kt"
 
     @Test
-    fun `MUTATION PIN -- Downloads lists the pending updates, only when there are any, before the queue`() {
+    fun `MUTATION PIN -- Downloads lists the pending updates, only when there are any, after the queue`() {
         assertCalledFrom(downloads, "pendingUpdates(controller.games, controller.jobs)", "DownloadsScreen")
         assertCalledFrom(downloads, "controller.loadSchedule()", "DownloadsScreen")
         assertCalledFrom(downloads, "if (updateRows.isNotEmpty())", "DownloadsBody")
         assertCalledFrom(downloads, "scheduleNote(controller.schedule)", "DownloadsBody")
         val code = stripComments(read(downloads))
-        assertTrue("the section must sit before the Queue heading", code.indexOf("updates-heading") in 0 until code.indexOf("queue-heading"))
-        assertTrue("the section must sit after Paused", code.indexOf("paused-heading") in 0 until code.indexOf("updates-heading"))
+        // WP ANDROID-REDESIGN-1c (web DOWNLOADS-2 at one column): Active and
+        // Queue first, then Updates available, then History.
+        assertTrue("the section must sit after the Queue heading", code.indexOf("queue-heading") in 0 until code.indexOf("updates-heading"))
+        assertTrue("the section must sit before History", code.indexOf("updates-heading") in 0 until code.indexOf("history-heading"))
     }
 
     @Test
