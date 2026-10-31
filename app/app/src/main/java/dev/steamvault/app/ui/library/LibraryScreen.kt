@@ -415,8 +415,9 @@ fun LibraryScreen(
  * the Library toolbar in Material terms. The web's one wrapping row
  * (search, chips with counts, sort select + icon-only direction button,
  * layout segments, Filters, Select) becomes, at phone width: the search
- * field, the chips ([chips], a sideways strip), then one wrapping row of
- * controls. Spoken labels stay what they were.
+ * field, one wrapping row of controls, then the chips ([chips], a sideways
+ * strip) right above the cards they filter. Spoken labels stay what they
+ * were.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -446,12 +447,10 @@ private fun LibraryToolbar(
                 }
             },
         )
-        Spacer(Modifier.height(6.dp))
-        chips()
         FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             SortRow(
                 active = activeSort,
@@ -461,7 +460,7 @@ private fun LibraryToolbar(
             LayoutToggle(
                 current = controller.layout,
                 onSelect = { controller.selectLayout(it) },
-                modifier = Modifier.align(Alignment.CenterVertically),
+                modifier = Modifier.align(Alignment.CenterVertically).width(LAYOUT_TOGGLE_WIDTH),
             )
             if (filters != null) {
                 val spoken = if (filters.activeCount > 0) {
@@ -509,8 +508,14 @@ private fun LibraryToolbar(
                 )
             }
         }
+        // The chips last, right above the cards they filter.
+        chips()
     }
 }
+
+/** Three 44 dp icon segments: with the sort pair and Select the control row
+ * fits one line at 360 dp and font scale 1.0 (WP ANDROID-REDESIGN-1b). */
+private val LAYOUT_TOGGLE_WIDTH = 132.dp
 
 /** The Filters button's state (WP ANDROID-REDESIGN-1b), `null` without metadata. */
 private data class FiltersButtonState(val open: Boolean, val activeCount: Int, val onToggle: () -> Unit)
@@ -532,11 +537,15 @@ private fun SortRow(active: LibrarySort, keys: List<LibrarySortKey>, onSelect: (
     val directionLabel = LibrarySortWording.directionLabel(active)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box {
+            // Web `.sortg select`: the visible text is the option, the
+            // spoken label says what it is ("Sort: Name").
+            val sortDescription = "${LibrarySortWording.SORT_LABEL}: ${active.key.label}"
             OutlinedButton(
                 onClick = { menuOpen = true },
                 contentPadding = PaddingValues(start = 14.dp, end = 8.dp),
+                modifier = Modifier.semantics { contentDescription = sortDescription },
             ) {
-                Text("${LibrarySortWording.SORT_LABEL}: ${active.key.label}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(active.key.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 ChevronDownGlyph(Modifier.padding(start = 2.dp))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
