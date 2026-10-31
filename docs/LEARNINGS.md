@@ -1353,3 +1353,11 @@ These are not style preferences; each entry cost a review round to learn.
 - **Cross-flow late-answer tests need a gate per call** (a fake repository
   that holds each request until released): start A, reset, start B,
   release A in each of B's states.
+- **`LibraryScreenshotTest` requires cards to start at most 32dp below the
+  chips**: the chips stay the last toolbar row; anything new goes above.
+- **AGP lint `PluralsCandidate` fires on "%1$d <word>"**, even for an
+  adjective; use `<plurals>` for any count string.
+- **Robolectric root capture does not include a `ModalBottomSheet` dialog
+  window**: screenshot the sheet content composable directly.
+- **One goldens branch per attempt** (`-r2-goldens`, ...) avoids force
+  pushes when the record run fails before the bot commits.

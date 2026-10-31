@@ -3983,11 +3983,19 @@ below carry their own later dates, item 12 is the current one).
           re-reads (inherited from the web).
         - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
           Clients cards and Add a device tabs.
-        - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
+        - [x] **ANDROID-REDESIGN-1b** (bab33ac + fixups, goldens 590a34d) part 2: Library toolbar and detail
           tabs (Overview / Depots / Maintenance, Repair in the header and the
           Maintenance tab), sheet motion where it fits Material, distinct
           Downloads graph fills. (Split 2026-10-31: Settings nav and the
           Downloads layout moved to 1c.)
+        - [ ] nit (ANDROID-REDESIGN-1b review): `DETAIL_TABS_TAG` unused
+          (use it in the 1c sheet screenshot test or drop it); the Overview
+          "Cache" fact lacks `groupCompletenessLine` (group figure only on
+          Maintenance); the graph grew 72 -> 88dp; accepted deviations to note
+          in rc20-visual-check.md so the device check does not flag them:
+          Filters only with metadata, store details first on Overview
+          (CARD-LAYOUT-1 pin); `strings.xml:210` hint `http://192.168.1.50:8080`
+          belongs to SAMPLE-IP-1.
         - [ ] **ANDROID-REDESIGN-1c** part 3: Settings section nav (one
           panel at a time behind a scrolling section strip, expert switch at
           the end of About, nav labels from web `SECTIONS.nav` as a separate
@@ -3996,6 +4004,12 @@ below carry their own later dates, item 12 is the current one).
           Downloads layout (web hero: big number + pill + limit, graph, four
           totals 2x2 via a twin model; then Active / Queue / History order
           and spacing).
+          Also the two REDESIGN-1b review should-fixes (before the rc21 tag):
+          a rendered check of the open detail sheet (capture the sheet content
+          composable directly, three goldens Overview / Depots / Maintenance
+          at 360dp font130 from a demo game with packages and a
+          Repair-eligible state) and one Library golden with metadata so the
+          Filters button renders.
         - [x] **APP-NIGHT-GOLDEN-1** closed as works-as-designed (2026-10-31,
           reviewer-confirmed): the app is single-dark-theme on purpose
           (`Theme.kt`, no `values-night/`, mockup NOTES.md:117, app README);
