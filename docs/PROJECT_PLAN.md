@@ -3898,11 +3898,19 @@ below carry their own later dates, item 12 is the current one).
         card yet; runner traffic counts as client traffic in the ring until
         a sweep extends the runner's address window on a new UTC day
         (relevant for NOW-LOADING-1).
-      - [ ] **RUNNER-SPLIT-1** (api + web) the throughput series and `current`
+      - [x] **RUNNER-SPLIT-1** (f306f40; additive `runner_hit_bytes`/`runner_miss_bytes` on points, `*_per_second` on `current`/`now`/live; pill "Verifying" for an all-HIT runner via the existing `verify` kind; GRAPH-RECENT-1 nit N1 fixed for the series) (api + web) the throughput series and `current`
         have no hit/miss split for the prefill runner, so the Downloads graph
         counts all runner traffic as "from the internet" and a verifying
         runner shows "Downloading"; add the runner split and use it for the
         pill and the two-series graph (rc20.2).
+      - [ ] nit (RUNNER-SPLIT-1 review): redundant `when is not None` in
+        `_series_point` (traffic.py ~748); `/v1/throughput/live` still divides
+        its running 5/15/60 s point by the full bucket length (N1 fixed only
+        for the series); a running ring bucket that only partly covers its
+        bucket (api restarted mid-bucket) still reads too low; demo summary
+        says the runner was 60 % HIT while its points say 0 % (kept for
+        golden stability). Android: read the runner split, add the
+        "Verifying" pill and count runner HITs as cache in the graph.
       - [ ] **NOW-LOADING-1** (api + web; operator report 2026-10-31, prod
         rc20.2, decided the same day: rc21, scope "game + source") the
         Downloads page never says WHAT is loading: the pill, "no device

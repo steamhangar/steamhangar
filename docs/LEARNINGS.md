@@ -1289,3 +1289,8 @@ These are not style preferences; each entry cost a review round to learn.
 - **Rerunning a flaky branch CI without `gh` or a token:** push the same
   commit to a second `wp/` branch name (`git push origin <sha>:refs/heads/wp/<name>-ci2`);
   GitHub starts a fresh run on the same sha. No force push needed.
+- **A rate test on the real clock must treat the running bucket
+  separately** once its divisor depends on "now" (RUNNER-SPLIT-1, N1):
+  otherwise the test passes or fails by time of day.
+- **Optional split fields need a "field missing" fallback and a test that
+  strips them** and expects the old output (older server, Android twin).
