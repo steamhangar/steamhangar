@@ -1,5 +1,17 @@
 package dev.steamvault.app.ui.detail
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -119,6 +131,7 @@ import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The game detail sheet (WP 4b.6 brief): cover/name/status, sizes, the
@@ -236,9 +249,13 @@ fun GameDetailSheet(
         flow = controller.repair,
         scope = scope,
         onRefresh = { onLibraryChanged() },
+        // WP ANDROID-REDESIGN-1b (sheet motion): the sheet slides down
+        // first, like a scrim tap or back gesture, then the screen switches.
         onShowJob = { jobId ->
-            controller.close()
-            onShowJob(jobId)
+            scope.launch { sheetState.hide() }.invokeOnCompletion {
+                controller.close()
+                onShowJob(jobId)
+            }
         },
     )
 }
@@ -323,6 +340,10 @@ private fun GameDetailSheetBody(
         val isGroup = remember(games, appid) { groupGames(games).packagesByParent.containsKey(appid) }
         DetailHeader(appid = appid, name = name, detail = controller.detail, jobs = jobs, isGroup = isGroup, updateRow = updateRow)
         Spacer(Modifier.height(12.dp))
+        // WP ANDROID-REDESIGN-1b (web LIBRARY-2 tabs): Overview / Depots /
+        // Maintenance; every open starts on Overview (web resets `activeTab`
+        // in open()), a rotation keeps the choice.
+        var tab by rememberSaveable(appid) { mutableStateOf(DetailTab.OVERVIEW) }
 
         when {
             controller.notTracked -> NotTrackedBody(controller = controller, scope = scope)
@@ -343,6 +364,8 @@ private fun GameDetailSheetBody(
                 jobs = jobs,
                 scope = scope,
                 onLibraryChanged = onLibraryChanged,
+                tab = tab,
+                onTab = { tab = it },
             )
         }
 
@@ -380,13 +403,25 @@ private fun DetailHeader(
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.semantics(mergeDescendants = true) { heading() },
             )
+            // WP ANDROID-REDESIGN-1b (web `.gd-sub`): "App N" in the dim mono
+            // caption, then the status as a pill (kit `.pill`).
+            Text(
+                text = stringResource(R.string.detail_app_id, appid),
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                color = VaultColors.Dim2,
+                modifier = Modifier.padding(top = 2.dp),
+            )
             if (detail != null) {
                 // WP WEB-FEAT-6 review: no queued job in the header state.
                 val liveJob = headerLiveJob(jobs, appid)
                 val kind = dispKind(gameSummaryFrom(detail), liveJob)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .background(VaultColors.Raised2, RoundedCornerShape(percent = 50))
+                        .padding(start = 4.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
                 ) {
                     // WP API-FIX-4: a tool app without a live job reads
                     // "Steam tool package" (from the kind, not the flag).
@@ -420,6 +455,7 @@ private fun DetailHeader(
                     text = formatBytesGB(detail.size_bytes) ?: stringResource(R.string.detail_depot_size_unknown),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
         }
@@ -459,6 +495,8 @@ private fun LoadedDetailBody(
     jobs: List<JobSummary>,
     scope: CoroutineScope,
     onLibraryChanged: () -> Unit,
+    tab: DetailTab,
+    onTab: (DetailTab) -> Unit,
 ) {
     val gameSummary = remember(games, detail) {
         games.firstOrNull { it.appid == appid } ?: gameSummaryFrom(detail)
@@ -466,196 +504,256 @@ private fun LoadedDetailBody(
     // WP TOOL-APPS-2d: this game's content packages (the same grouping the
     // Library uses), empty for a game without any.
     val packages = remember(games, appid) { groupGames(games).packagesOf(appid) }
+    val verifyIds = verifyAppids(listOf(gameSummary) + packages)
+    val completenessShown = showsCompletenessBlock(gameSummary, packages)
 
-    // ---- the GAME block, directly under the header (WP CARD-LAYOUT-1) -------------
-    // Store details (WP D19-1c) first, then everything about the hangar below;
-    // absent when the lookup is off or unavailable (web render()).
-    controller.store?.let { StoreDetailsBlock(it) }
-
-    // ---- Steam tool app note (WP API-FIX-4) -----------------------------------
-    // Where a game offers Download/Retry, a tool app says why it has none
-    // (web buildToolAppNote). statusAction is null for it, so no button below.
-    if (isToolApp(gameSummary)) {
-        Text(
-            text = TOOL_APP_NOTE,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-    }
-
-    // ---- last download / confirmed current ---------------------------------
-    Text(
-        text = detail.last_prefill_at?.let { stringResource(R.string.detail_last_download, it) }
-            ?: stringResource(R.string.detail_never_downloaded),
-        style = MaterialTheme.typography.bodySmall,
-    )
-    Text(
-        text = when (confirmedCurrentWording(detail.last_prefill_at, detail.last_manifest_check)) {
-            ConfirmedCurrentWording.NEVER_CONFIRMED -> stringResource(R.string.detail_not_confirmed_current)
-            ConfirmedCurrentWording.CONFIRMED ->
-                stringResource(R.string.detail_confirmed_current, detail.last_manifest_check!!)
-            ConfirmedCurrentWording.CONFIRMED_BEFORE_CACHE_CLEARED ->
-                stringResource(R.string.detail_confirmed_current_before_cleared, detail.last_manifest_check!!)
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    if (detail.needs_force && !detail.tool_app) { // WP API-FIX-4: no "next download" for a tool app
-        Text(
-            text = stringResource(R.string.detail_needs_force_note),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-    }
-
-    // ---- cache completeness (WP CACHE-COMPLETE-1c) -----------------------------
-    if (showsCompletenessBlock(gameSummary, packages)) {
-        CompletenessSection(
-            game = gameSummary,
-            groupRow = if (packages.isNotEmpty()) groupGames(games).rows.firstOrNull { it.appid == appid } else null,
-            verifyIds = verifyAppids(listOf(gameSummary) + packages),
-            title = title,
-            inFlight = controller.verifyInFlight,
-            onVerify = { ids -> controller.startVerify(scope, ids) },
-            // WP ANDROID-DL-2: "Repair" for a game short only of wrong-size chunks.
-            showsRepair = showsRepair(gameSummary, jobs),
-            repairInFlight = controller.repairInFlight,
-            onRepair = { controller.startRepair(scope, appid, title, onLibraryChanged) },
-        )
-    }
-
-    // ---- installed-state (WP AG-3) -------------------------------------------
-    val installedBadge = installedBadgeFor(gameSummary)
-    installedBadgeText(installedBadge, includeTimestamp = true)?.let { text ->
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-    }
-    if (installedBadge is InstalledBadge.InstalledNotCached) {
-        // The explicit statement the whole `installed_on` field exists for:
-        // a game a gaming PC currently has installed, which this vault is
-        // NOT protecting (api/README.md "Installed state per app").
-        Text(
-            text = stringResource(R.string.detail_installed_not_cached_warning, installedBadge.display.primaryClientId),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-    }
-
-    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-    // ---- job control / download trigger -------------------------------------
+    // ---- header actions (WP ANDROID-REDESIGN-1b, web `.gd-acts`) -------------
+    // Verify, Repair, then the primary action: they are about the game, not
+    // about one tab, so they sit above the tab row on every tab.
     val trackedJob = findTrackedJob(jobs, appid)
-    if (trackedJob != null) {
-        JobControlRow(
-            job = trackedJob,
-            onPause = { controller.pauseJob(scope, trackedJob.id) },
-            onResume = { controller.resumeJob(scope, trackedJob.id) },
-            onCancel = { controller.cancelJob(scope, trackedJob.id) },
-        )
-    } else {
-        val action = statusAction(gameSummary, null, selecting = false)
-        if (action != null) {
-            val labelRes = if (action.type == StatusActionType.RETRY) {
-                R.string.detail_action_retry
-            } else if (action.type == StatusActionType.CHECK_AGAIN) {
-                R.string.detail_action_check_again
-            } else {
-                R.string.detail_action_download
-            }
-            Button(onClick = { controller.startDownload(scope) }) {
-                Text(stringResource(labelRes))
-            }
+    HeadActionsRow(
+        title = title,
+        verifyIds = if (completenessShown) verifyIds else emptyList(),
+        verifyInFlight = controller.verifyInFlight,
+        onVerify = { ids -> controller.startVerify(scope, ids) },
+        headRepair = completenessShown && showsRepair(gameSummary, jobs),
+        repairInFlight = controller.repairInFlight,
+        onHeadRepair = { controller.startRepair(scope, appid, title, onLibraryChanged) },
+    ) {
+        // ---- job control / download trigger ---------------------------------
+        if (trackedJob != null) {
+            JobControlRow(
+                job = trackedJob,
+                onPause = { controller.pauseJob(scope, trackedJob.id) },
+                onResume = { controller.resumeJob(scope, trackedJob.id) },
+                onCancel = { controller.cancelJob(scope, trackedJob.id) },
+            )
         } else {
-            // WP UPD-6 review fix (web `buildUpdateNowButton`): a flagged
-            // cached game (or group) offers its update.
-            val updateAppids = sheetUpdateAppids(listOf(gameSummary) + packages, jobs)
-            if (updateAppids.isNotEmpty()) {
-                Button(
-                    onClick = { controller.startUpdate(scope, updateAppids, games) },
-                    enabled = !controller.updateInFlight,
-                ) {
-                    Text(if (controller.updateInFlight) UpdatesWording.STARTING else UpdatesWording.UPDATE_NOW)
+            val action = statusAction(gameSummary, null, selecting = false)
+            if (action != null) {
+                val labelRes = if (action.type == StatusActionType.RETRY) {
+                    R.string.detail_action_retry
+                } else if (action.type == StatusActionType.CHECK_AGAIN) {
+                    R.string.detail_action_check_again
+                } else {
+                    R.string.detail_action_download
+                }
+                Button(onClick = { controller.startDownload(scope) }) {
+                    Text(stringResource(labelRes))
+                }
+            } else {
+                // WP UPD-6 review fix (web `buildUpdateNowButton`): a flagged
+                // cached game (or group) offers its update.
+                val updateAppids = sheetUpdateAppids(listOf(gameSummary) + packages, jobs)
+                if (updateAppids.isNotEmpty()) {
+                    Button(
+                        onClick = { controller.startUpdate(scope, updateAppids, games) },
+                        enabled = !controller.updateInFlight,
+                    ) {
+                        Text(if (controller.updateInFlight) UpdatesWording.STARTING else UpdatesWording.UPDATE_NOW)
+                    }
                 }
             }
         }
     }
 
-    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+    DetailTabRow(selected = tab, onSelect = onTab)
+    Spacer(Modifier.height(12.dp))
 
-    // ---- content packages (WP TOOL-APPS-2d) ------------------------------------
-    if (packages.isNotEmpty()) {
-        PackagesSection(
-            parentName = gameSummary.name,
-            groupSizeBytes = gameSummary.group_size_bytes,
-            packages = packages,
-            jobs = jobs,
-            retrying = controller.retryingAppids,
-            onRetry = { pkg -> controller.retryPackage(scope, pkg.appid, onLibraryChanged) },
-        )
-        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-    }
+    when (tab) {
+        DetailTab.OVERVIEW -> {
+            // ---- the GAME block, first on Overview (WP CARD-LAYOUT-1) ------------
+            // Store details (WP D19-1c) first, then everything about the hangar
+            // below; absent when the lookup is off or unavailable (web render()).
+            controller.store?.let { StoreDetailsBlock(it) }
 
-    // ---- depots ---------------------------------------------------------------
-    if (detail.depots.isEmpty()) {
-        // WP D19: the oracle's EXPECTED depots stand in for "unknown" until the
-        // first download maps the observed ones (web buildDepotsSection).
-        val expected = controller.preview?.takeIf { showsExpectedBlock(it, detail) }
-        if (expected != null) {
-            Text(text = stringResource(R.string.detail_depots_heading), style = MaterialTheme.typography.titleSmall)
-            ExpectedDepotsBlock(expected)
-        } else {
-            Text(
-                text = stringResource(R.string.detail_depots_unknown),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    } else {
-        val gamesByAppid = remember(games) { games.associateBy { it.appid } }
-        val activeAppids = remember(jobs) { activeJobAppids(jobs) }
-        val plan = remember(detail, controller.mapping, gamesByAppid, activeAppids) {
-            buildMultiPlan(listOf(appid), listOf(detail), controller.mapping, gamesByAppid, activeAppids)
-        }
-        val thisAppIsHolder = remember(gameSummary, activeAppids) {
-            hasProtectedCacheContent(gameSummary, appid in activeAppids)
-        }
-        val presentations = remember(plan, gamesByAppid, thisAppIsHolder) {
-            plan.rows.map { buildDepotPresentation(it, gamesByAppid, thisAppIsHolder) }
-        }
-        Text(text = stringResource(R.string.detail_depots_heading), style = MaterialTheme.typography.titleSmall)
-        for (row in presentations) {
-            DepotRow(row)
-        }
-    }
+            // ---- Steam tool app note (WP API-FIX-4) -------------------------------
+            // Where a game offers Download/Retry, a tool app says why it has none
+            // (web buildToolAppNote). statusAction is null for it, so no button.
+            if (isToolApp(gameSummary)) {
+                Text(
+                    text = TOOL_APP_NOTE,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
 
-    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            // ---- facts (web LIBRARY-2 `.gd-facts`) -------------------------------
+            DetailBox {
+                Text(
+                    text = detail.last_prefill_at?.let { stringResource(R.string.detail_last_download, it) }
+                        ?: stringResource(R.string.detail_never_downloaded),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = when (confirmedCurrentWording(detail.last_prefill_at, detail.last_manifest_check)) {
+                        ConfirmedCurrentWording.NEVER_CONFIRMED -> stringResource(R.string.detail_not_confirmed_current)
+                        ConfirmedCurrentWording.CONFIRMED ->
+                            stringResource(R.string.detail_confirmed_current, detail.last_manifest_check!!)
+                        ConfirmedCurrentWording.CONFIRMED_BEFORE_CACHE_CLEARED ->
+                            stringResource(R.string.detail_confirmed_current_before_cleared, detail.last_manifest_check!!)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (detail.needs_force && !detail.tool_app) { // WP API-FIX-4: no "next download" for a tool app
+                    Text(
+                        text = stringResource(R.string.detail_needs_force_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                // LIBRARY-DETAIL-1 (web "Cache" fact): the cache status stays
+                // visible on Overview; Verify and Repair live in Maintenance and
+                // in the header actions.
+                if (completenessShown) {
+                    Text(
+                        text = completenessLine(gameSummary),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    val damaged = repairNoteFor(gameSummary)
+                    if (damaged.isNotEmpty()) {
+                        Text(text = damaged, style = MaterialTheme.typography.bodySmall, color = VaultColors.StatusStale)
+                    }
+                }
+            }
 
-    // ---- delete -----------------------------------------------------------------
-    // WP TOOL-APPS-2d: a game with content packages is deleted with them
-    // (the server's plan lists every app first), also when only a package
-    // holds bytes.
-    if (packages.isNotEmpty() && groupHasCacheContent(gameSummary, packages)) {
-        OutlinedButton(onClick = { controller.openGroupDeleteConfirm(scope) }) {
-            Text(stringResource(R.string.detail_action_delete))
-        }
-        Spacer(Modifier.height(8.dp))
-    } else if (hasVisibleCacheContent(gameSummary)) {
-        OutlinedButton(onClick = { controller.openDeleteConfirm() }) {
-            Text(stringResource(R.string.detail_action_delete))
-        }
-        Spacer(Modifier.height(8.dp))
-    }
+            // ---- installed-state (WP AG-3) ---------------------------------------
+            val installedBadge = installedBadgeFor(gameSummary)
+            installedBadgeText(installedBadge, includeTimestamp = true)?.let { text ->
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            if (installedBadge is InstalledBadge.InstalledNotCached) {
+                // The explicit statement the whole `installed_on` field exists for:
+                // a game a gaming PC currently has installed, which this vault is
+                // NOT protecting (api/README.md "Installed state per app").
+                Text(
+                    text = stringResource(R.string.detail_installed_not_cached_warning, installedBadge.display.primaryClientId),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
 
-    // ---- garbage collection -------------------------------------------------------
-    if (detail.depots.isNotEmpty()) {
-        GcSection(controller = controller, scope = scope)
+            // ---- content packages (WP TOOL-APPS-2d) ------------------------------
+            if (packages.isNotEmpty()) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                PackagesSection(
+                    parentName = gameSummary.name,
+                    groupSizeBytes = gameSummary.group_size_bytes,
+                    packages = packages,
+                    jobs = jobs,
+                    retrying = controller.retryingAppids,
+                    onRetry = { pkg -> controller.retryPackage(scope, pkg.appid, onLibraryChanged) },
+                )
+            }
+        }
+
+        DetailTab.DEPOTS -> {
+            if (detail.depots.isEmpty()) {
+                // WP D19: the oracle's EXPECTED depots stand in for "unknown" until
+                // the first download maps the observed ones (web buildDepotsSection).
+                val expected = controller.preview?.takeIf { showsExpectedBlock(it, detail) }
+                if (expected != null) {
+                    Text(text = stringResource(R.string.detail_depots_heading), style = MaterialTheme.typography.titleSmall)
+                    ExpectedDepotsBlock(expected)
+                } else {
+                    Text(
+                        text = stringResource(R.string.detail_depots_unknown),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                val gamesByAppid = remember(games) { games.associateBy { it.appid } }
+                val activeAppids = remember(jobs) { activeJobAppids(jobs) }
+                val plan = remember(detail, controller.mapping, gamesByAppid, activeAppids) {
+                    buildMultiPlan(listOf(appid), listOf(detail), controller.mapping, gamesByAppid, activeAppids)
+                }
+                val thisAppIsHolder = remember(gameSummary, activeAppids) {
+                    hasProtectedCacheContent(gameSummary, appid in activeAppids)
+                }
+                val presentations = remember(plan, gamesByAppid, thisAppIsHolder) {
+                    plan.rows.map { buildDepotPresentation(it, gamesByAppid, thisAppIsHolder) }
+                }
+                Text(text = stringResource(R.string.detail_depots_heading), style = MaterialTheme.typography.titleSmall)
+                for (row in presentations) {
+                    DepotRow(row)
+                }
+            }
+        }
+
+        DetailTab.MAINTENANCE -> {
+            // Web `buildMaintenancePanel`: Verify (with Repair), garbage
+            // collection, then the red "Delete from cache" zone; boxes that do
+            // not apply are left out.
+            var anyBox = false
+            // ---- cache completeness (WP CACHE-COMPLETE-1c) ---------------------
+            if (showsCompletenessBlock(gameSummary, packages)) {
+                anyBox = true
+                DetailBox(title = CompletenessWording.VERIFY_LABEL) {
+                    CompletenessSection(
+                        game = gameSummary,
+                        groupRow = if (packages.isNotEmpty()) groupGames(games).rows.firstOrNull { it.appid == appid } else null,
+                        verifyIds = verifyAppids(listOf(gameSummary) + packages),
+                        title = title,
+                        inFlight = controller.verifyInFlight,
+                        onVerify = { ids -> controller.startVerify(scope, ids) },
+                        // WP ANDROID-DL-2: "Repair" for a game short only of wrong-size chunks.
+                        showsRepair = showsRepair(gameSummary, jobs),
+                        repairInFlight = controller.repairInFlight,
+                        onRepair = { controller.startRepair(scope, appid, title, onLibraryChanged) },
+                    )
+                }
+            }
+
+            // ---- garbage collection ---------------------------------------------
+            if (detail.depots.isNotEmpty()) {
+                anyBox = true
+                DetailBox { GcSection(controller = controller, scope = scope) }
+            }
+
+            // ---- delete -----------------------------------------------------------
+            // WP TOOL-APPS-2d: a game with content packages is deleted with them
+            // (the server's plan lists every app first), also when only a package
+            // holds bytes.
+            val groupDelete = packages.isNotEmpty() && groupHasCacheContent(gameSummary, packages)
+            if (groupDelete || hasVisibleCacheContent(gameSummary)) {
+                anyBox = true
+                DetailBox(title = stringResource(R.string.detail_action_delete), danger = true) {
+                    Text(
+                        text = stringResource(R.string.detail_delete_zone_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (groupDelete) controller.openGroupDeleteConfirm(scope) else controller.openDeleteConfirm()
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = VaultColors.StatusDanger),
+                        border = BorderStroke(1.dp, VaultColors.StatusDanger.copy(alpha = 0.6f)),
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        Text(stringResource(R.string.detail_action_delete))
+                    }
+                }
+            }
+            if (!anyBox) {
+                Text(
+                    text = stringResource(R.string.detail_maintenance_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -743,6 +841,122 @@ private fun CompletenessSection(
 
 /** Test tag of the detail sheet's completeness line. */
 internal const val DETAIL_COMPLETE_LINE_TAG = "detail-complete-line"
+
+/** WP ANDROID-REDESIGN-1b: the sheet's tabs (web LIBRARY-2 `createTabs`). */
+internal enum class DetailTab { OVERVIEW, DEPOTS, MAINTENANCE }
+
+/** Test tag of the detail sheet's tab row. */
+internal const val DETAIL_TABS_TAG = "detail-tabs"
+
+/**
+ * WP ANDROID-REDESIGN-1b: Overview / Depots / Maintenance as a Material tab
+ * row. Scrollable (MOBILE-1 "scrolling tabs"): at 200 % text the three
+ * labels slide sideways instead of wrapping.
+ */
+@Composable
+private fun DetailTabRow(selected: DetailTab, onSelect: (DetailTab) -> Unit) {
+    val labels = listOf(
+        DetailTab.OVERVIEW to stringResource(R.string.detail_tab_overview),
+        DetailTab.DEPOTS to stringResource(R.string.detail_tab_depots),
+        DetailTab.MAINTENANCE to stringResource(R.string.detail_tab_maintenance),
+    )
+    ScrollableTabRow(
+        selectedTabIndex = selected.ordinal,
+        edgePadding = 0.dp,
+        containerColor = Color.Transparent,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag(DETAIL_TABS_TAG),
+    ) {
+        for ((tab, label) in labels) {
+            Tab(
+                selected = tab == selected,
+                onClick = { onSelect(tab) },
+                text = { Text(label, maxLines = 1, softWrap = false) },
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * A titled box of the sheet (web `.detail-box`, `.detail-box-danger` for the
+ * red "Delete from cache" zone).
+ */
+@Composable
+private fun DetailBox(
+    title: String? = null,
+    danger: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .background(if (danger) VaultColors.StatusDanger.copy(alpha = 0.06f) else VaultColors.Raised, shape)
+            .border(1.dp, if (danger) VaultColors.StatusDanger.copy(alpha = 0.45f) else VaultColors.Line, shape)
+            .padding(12.dp),
+    ) {
+        if (title != null) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (danger) VaultColors.StatusDanger else Color.Unspecified,
+                modifier = Modifier.padding(bottom = 4.dp).semantics { heading() },
+            )
+        }
+        content()
+    }
+}
+
+/**
+ * WP ANDROID-REDESIGN-1b (web `.gd-acts`: `buildHeadVerifyButton`,
+ * `buildHeadRepairButton`, then the primary action): the header's actions,
+ * shown above the tabs on every tab. Verify only where the Maintenance tab's
+ * Verify box offers it ([verifyIds] empty otherwise), Repair where that box
+ * offers Repair; both run the same flows as the box. [primary] is the job
+ * control row, the download or the update button.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HeadActionsRow(
+    title: String,
+    verifyIds: List<Int>,
+    verifyInFlight: Boolean,
+    onVerify: (List<Int>) -> Unit,
+    headRepair: Boolean,
+    repairInFlight: Boolean,
+    onHeadRepair: () -> Unit,
+    primary: @Composable () -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (verifyIds.isNotEmpty()) {
+            val spoken = if (verifyInFlight) UpdatesWording.STARTING else verifySpokenLabel(title)
+            OutlinedButton(
+                onClick = { onVerify(verifyIds) },
+                enabled = !verifyInFlight,
+                modifier = Modifier.semantics { contentDescription = spoken },
+            ) {
+                Text(if (verifyInFlight) UpdatesWording.STARTING else CompletenessWording.VERIFY_LABEL)
+            }
+        }
+        if (headRepair) {
+            val spoken = if (repairInFlight) RepairWording.CHECKING_LABEL else repairSpokenLabel(title)
+            OutlinedButton(
+                onClick = onHeadRepair,
+                enabled = !repairInFlight,
+                modifier = Modifier.semantics { contentDescription = spoken },
+            ) {
+                Text(if (repairInFlight) RepairWording.CHECKING_LABEL else RepairWording.LABEL)
+            }
+        }
+        primary()
+    }
+}
 
 @Composable
 private fun JobControlRow(

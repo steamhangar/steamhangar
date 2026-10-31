@@ -58,11 +58,6 @@
     <string name="library_layout_grid2">2-column grid</string>
     <string name="library_layout_grid3">3-column grid</string>
     <string name="library_layout_list">List</string>
-    <!-- WP D12: the visible segment labels; the full names above stay the
-         spoken label (contentDescription). Short so the toggle stays on one
-         line at 360 dp and font scale 1.3. -->
-    <string name="library_layout_grid2_short">2 col</string>
-    <string name="library_layout_grid3_short">3 col</string>
     <string name="library_empty_no_filter">Nothing here with this filter.</string>
     <string name="library_empty_query">No game in your library matches \"%1$s\".</string>
     <string name="library_empty_query_filtered">No game in your library matches \"%1$s\" with this filter.</string>
@@ -84,6 +79,15 @@
          whether cached games have a newer build, downloads nothing. The
          "Check & update" button above stays. Lives in the top app bar. -->
     <string name="library_check_updates_button">Check updates</string>
+    <!-- WP ANDROID-REDESIGN-1b (web LIBRARY-2): the split button's menu, the Filters button. -->
+    <string name="library_more_update_actions">More update actions</string>
+    <string name="library_filters_button">Filters</string>
+    <plurals name="library_filters_active">
+        <item quantity="one">Filters, %1$d active</item>
+        <item quantity="other">Filters, %1$d active</item>
+    </plurals>
+    <string name="library_filters_expanded">expanded</string>
+    <string name="library_filters_collapsed">collapsed</string>
     <string name="library_check_updates_button_busy">Checking…</string>
     <!-- Shown (disabled) when GET /v1/updates/status says enabled=false. -->
     <string name="library_check_updates_button_off">Update checks off</string>
@@ -554,6 +558,14 @@
     <string name="detail_action_retry">Retry download</string>
     <string name="detail_action_check_again">Check again</string>
     <string name="detail_action_delete">Delete from cache</string>
+    <!-- WP ANDROID-REDESIGN-1b (web LIBRARY-2 / LIBRARY-DETAIL-1): header
+         caption, tabs and the Maintenance tab's texts (web game-detail-sheet.js). -->
+    <string name="detail_app_id">App %1$d</string>
+    <string name="detail_tab_overview">Overview</string>
+    <string name="detail_tab_depots">Depots</string>
+    <string name="detail_tab_maintenance">Maintenance</string>
+    <string name="detail_delete_zone_hint">Removes this game\'s chunks from the vault. Depots another cached game still uses stay.</string>
+    <string name="detail_maintenance_empty">Nothing to maintain until this game has cached content.</string>
 
     <!-- Depot sharing wording (docs/design/vault-app-mockup-NOTES.md rounds
          3-5: "shared", "shared · sole holder", the co-owner expander's

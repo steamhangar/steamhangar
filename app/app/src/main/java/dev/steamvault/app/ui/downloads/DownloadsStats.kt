@@ -359,6 +359,10 @@ private fun GraphLegend() {
     }
 }
 
+/** Fill opacities of the split graph's two bands (WP ANDROID-REDESIGN-1b). */
+internal const val SERVED_FILL_ALPHA = 0.34f
+internal const val INTERNET_FILL_ALPHA = 0.10f
+
 private const val GRAPH_W = 300f
 private const val GRAPH_H = 60f
 
@@ -383,7 +387,7 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp)
+                .height(88.dp)
                 .semantics {
                     contentDescription = label
                     role = Role.Image
@@ -420,8 +424,12 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
                     lineTo(split.xs.first() * sx, size.height)
                     close()
                 }
-                drawPath(internetArea, color = VaultColors.AccentGlow)
-                drawPath(servedArea, color = VaultColors.StatusOk.copy(alpha = 0.16f))
+                // WP ANDROID-REDESIGN-1b (ANDROID-DL-1 review nit): the web's
+                // 0.12/0.16 fills blend into one dark band on a phone; a
+                // stronger served fill and a fainter internet fill keep the
+                // two bands apart (the lines keep the web colours).
+                drawPath(internetArea, color = VaultColors.Accent.copy(alpha = INTERNET_FILL_ALPHA))
+                drawPath(servedArea, color = VaultColors.StatusOk.copy(alpha = SERVED_FILL_ALPHA))
                 drawPath(totalLine, color = VaultColors.Accent, style = stroke)
                 drawPath(servedLine, color = VaultColors.StatusOk, style = stroke)
             }
