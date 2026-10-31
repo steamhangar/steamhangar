@@ -128,7 +128,7 @@ class CoverArtTest {
 
     @Test
     fun `vaultCoverUrl accepts an absolute http(s) URL ending in the path for this appid`() {
-        val lan = "http://192.168.1.20:8080/v1/covers/440/$sig"
+        val lan = "http://10.0.0.20:8080/v1/covers/440/$sig"
         assertEquals(lan, vaultCoverUrl(440, lan))
         val tls = "https://vault.example/v1/covers/440/$sig"
         assertEquals(tls, vaultCoverUrl(440, tls))

@@ -224,7 +224,7 @@ class GameCardModelTest {
     @Test
     fun `WP D10 -- cachedCoverUrl carries the vault's stored copy, coverUrl stays the CDN cover`() {
         val sig = "0123456789abcdef0123456789abcdef"
-        val vault = "http://192.168.1.20:8080/v1/covers/570/$sig"
+        val vault = "http://10.0.0.20:8080/v1/covers/570/$sig"
         val model = buildGameCardModel(
             runningGame(appid = 570).copy(cover_cached_url = vault),
             null,
