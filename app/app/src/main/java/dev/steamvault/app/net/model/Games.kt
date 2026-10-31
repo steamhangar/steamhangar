@@ -97,6 +97,13 @@ data class GameSummary(
      * group's members with bytes on disk; null on a grouped row, when
      * unknown, and on an older server. */
     val group_cache_complete_pct: Int? = null,
+    /** WP GROUP-VERIFIED-1: content-package depots of the group with no
+     * usable measurement, left OUT of [group_cache_complete_pct] and never
+     * counted as complete; 0 whenever the group figure is null, and from an
+     * older server. */
+    val group_cache_unmeasured_depots: Int = 0,
+    /** WP GROUP-VERIFIED-1: the bytes on disk of those depots. */
+    val group_cache_unmeasured_bytes: Long = 0,
     /** WP D23 LIBRARY-META-1b: stored library metadata, null = unknown (never
      * fetched; the nightly fill is off by default) and on a server from
      * before D23, which sends no field. */
@@ -181,4 +188,7 @@ data class GameDetail(
     val cache_complete_checked_at: String? = null,
     val cache_missing_chunks: Int? = null,
     val group_cache_complete_pct: Int? = null,
+    /** See [GameSummary.group_cache_unmeasured_depots] (WP GROUP-VERIFIED-1). */
+    val group_cache_unmeasured_depots: Int = 0,
+    val group_cache_unmeasured_bytes: Long = 0,
 )

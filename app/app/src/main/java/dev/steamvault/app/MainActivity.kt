@@ -250,6 +250,16 @@ class MainActivity : ComponentActivity() {
      * before WP 4b.8's WorkManager wiring lands. */
     private var pendingJobsSnapshot by mutableStateOf<List<JobSummary>>(emptyList())
 
+    /** WP ANDROID-DL-2: a job the Downloads screen scrolls to once it opens
+     * (the detail sheet's "Show job" after a repair); cleared by Downloads. */
+    private var pendingShowJobId by mutableStateOf<Int?>(null)
+
+    /** WP ANDROID-DL-2 (web: `navigateTo("downloads")` + `highlightJob`). */
+    private fun showJobOnDownloads(jobId: Int) {
+        pendingShowJobId = jobId
+        destination = Destination.DOWNLOADS
+    }
+
     /** WP D15d review: the ranges chosen on Clients and Downloads, kept
      * across tab switches (see [TrafficRanges]). */
     private val trafficRanges = TrafficRanges()
@@ -514,6 +524,7 @@ class MainActivity : ComponentActivity() {
                 onJobsSnapshot = { pendingJobsSnapshot = it },
                 onOpenSettings = { destination = Destination.SETTINGS },
                 demoMode = true,
+                onShowJob = ::showJobOnDownloads,
             )
             return
         }
@@ -534,6 +545,7 @@ class MainActivity : ComponentActivity() {
             onJobsSnapshot = { pendingJobsSnapshot = it },
             onOpenSettings = { destination = Destination.SETTINGS },
             demoMode = false,
+            onShowJob = ::showJobOnDownloads,
         )
     }
 
@@ -552,6 +564,9 @@ class MainActivity : ComponentActivity() {
                 demoMode = true,
                 scheduleRepository = remember(demo) { DemoScheduleRepository(demo) },
                 settingsRepository = remember(demo) { DemoSettingsRepository(demo) },
+                cacheRepository = remember(demo) { DemoCacheRepository(demo) },
+                showJobRequest = pendingShowJobId,
+                onShowJobHandled = { pendingShowJobId = null },
             )
             return
         }
@@ -570,6 +585,9 @@ class MainActivity : ComponentActivity() {
             demoMode = false,
             scheduleRepository = remember(client) { VaultScheduleRepository(client) },
             settingsRepository = remember(client) { VaultSettingsRepository(client) },
+            cacheRepository = remember(client) { VaultCacheRepository(client) },
+            showJobRequest = pendingShowJobId,
+            onShowJobHandled = { pendingShowJobId = null },
         )
     }
 

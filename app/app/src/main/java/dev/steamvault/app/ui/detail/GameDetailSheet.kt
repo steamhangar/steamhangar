@@ -84,7 +84,11 @@ import dev.steamvault.app.ui.library.logic.CompletenessWording
 import dev.steamvault.app.ui.library.logic.completenessLine
 import dev.steamvault.app.ui.library.logic.completenessOverlay
 import dev.steamvault.app.ui.library.logic.groupCompletenessLine
-import dev.steamvault.app.ui.library.logic.isDamagedOnly
+import dev.steamvault.app.ui.library.logic.RepairWording
+import dev.steamvault.app.ui.library.logic.repairNoteFor
+import dev.steamvault.app.ui.library.logic.repairSpokenLabel
+import dev.steamvault.app.ui.library.logic.showsRepair
+import dev.steamvault.app.ui.downloads.RepairDialog
 import dev.steamvault.app.ui.library.logic.showsCompletenessBlock
 import dev.steamvault.app.ui.library.logic.verifyAppids
 import dev.steamvault.app.ui.library.logic.verifySpokenLabel
@@ -160,6 +164,7 @@ fun GameDetailSheet(
     scope: CoroutineScope,
     onLibraryChanged: () -> Unit,
     demoMode: Boolean,
+    onShowJob: (Int) -> Unit = {},
 ) {
     val appid = controller.openAppid ?: return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -224,6 +229,18 @@ fun GameDetailSheet(
             onDismiss = { controller.dismissGcExecuteConfirm() },
         )
     }
+
+    // WP ANDROID-DL-2 (web `startSheetRepair`): the Repair dialog; "Show job"
+    // closes the sheet and goes to the job on Downloads.
+    RepairDialog(
+        flow = controller.repair,
+        scope = scope,
+        onRefresh = { onLibraryChanged() },
+        onShowJob = { jobId ->
+            controller.close()
+            onShowJob(jobId)
+        },
+    )
 }
 
 /** Appids with a prefill job that is queued/running/paused right now --
@@ -263,6 +280,8 @@ private fun gameSummaryFrom(detail: GameDetail): GameSummary = GameSummary(
     cache_complete_checked_at = detail.cache_complete_checked_at,
     cache_missing_chunks = detail.cache_missing_chunks,
     group_cache_complete_pct = detail.group_cache_complete_pct,
+    group_cache_unmeasured_depots = detail.group_cache_unmeasured_depots,
+    group_cache_unmeasured_bytes = detail.group_cache_unmeasured_bytes,
 )
 
 @Composable
@@ -500,6 +519,10 @@ private fun LoadedDetailBody(
             title = title,
             inFlight = controller.verifyInFlight,
             onVerify = { ids -> controller.startVerify(scope, ids) },
+            // WP ANDROID-DL-2: "Repair" for a game short only of wrong-size chunks.
+            showsRepair = showsRepair(gameSummary, jobs),
+            repairInFlight = controller.repairInFlight,
+            onRepair = { controller.startRepair(scope, appid, title, onLibraryChanged) },
         )
     }
 
@@ -654,6 +677,9 @@ private fun CompletenessSection(
     title: String,
     inFlight: Boolean,
     onVerify: (List<Int>) -> Unit,
+    showsRepair: Boolean = false,
+    repairInFlight: Boolean = false,
+    onRepair: () -> Unit = {},
 ) {
     Column(modifier = Modifier.padding(top = 6.dp)) {
         Text(
@@ -668,11 +694,31 @@ private fun CompletenessSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (isDamagedOnly(game)) {
+        // WP ANDROID-DL-2 (web `repairNoteFor`): why this game offers Repair
+        // and not Verify, or why it cannot be repaired.
+        val repairNote = repairNoteFor(game)
+        if (repairNote.isNotEmpty()) {
             Text(
-                text = CompletenessWording.DAMAGED_NOTE,
+                text = repairNote,
                 style = MaterialTheme.typography.bodySmall,
                 color = VaultColors.StatusStale,
+            )
+        }
+        if (showsRepair) {
+            val spoken = if (repairInFlight) RepairWording.CHECKING_LABEL else repairSpokenLabel(title)
+            OutlinedButton(
+                onClick = onRepair,
+                enabled = !repairInFlight,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .semantics { contentDescription = spoken },
+            ) {
+                Text(if (repairInFlight) RepairWording.CHECKING_LABEL else RepairWording.LABEL)
+            }
+            Text(
+                text = RepairWording.HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (verifyIds.isNotEmpty()) {

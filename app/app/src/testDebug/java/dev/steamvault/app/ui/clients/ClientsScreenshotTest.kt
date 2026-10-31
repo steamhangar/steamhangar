@@ -67,6 +67,8 @@ import org.robolectric.annotation.GraphicsMode
  * snapshot and a FIXED clock ([NOW], an evening, so the graph has a
  * shape), so every pixel is reproducible; the demo banner is shown as in
  * demo mode. Profiles: 411 dp at font 1.0 and 360 dp at font 1.3, dark.
+ * WP ANDROID-DL-2: the statistics shots are tall enough for the "Loading
+ * now" rows, the graph's axis captions and its legend (ANDROID-DL-1 review).
  * The Clients page is rendered in the real [MainShell], which also proves
  * the four bottom-nav labels stay on one line at 360 dp / 1.3.
  */
@@ -89,11 +91,11 @@ class ClientsScreenshotTest {
 
     @Test
     fun downloads_stats_411dp_font100_night() =
-        shoot("downloads_stats_411dp_font100_night", widthDp = 411, heightDp = 560, fontScale = 1.0f, page = Page.STATS)
+        shoot("downloads_stats_411dp_font100_night", widthDp = 411, heightDp = 720, fontScale = 1.0f, page = Page.STATS)
 
     @Test
     fun downloads_stats_360dp_font130_night() =
-        shoot("downloads_stats_360dp_font130_night", widthDp = 360, heightDp = 640, fontScale = 1.3f, page = Page.STATS)
+        shoot("downloads_stats_360dp_font130_night", widthDp = 360, heightDp = 900, fontScale = 1.3f, page = Page.STATS)
 
     private enum class Page { CLIENTS, STATS }
 
@@ -159,6 +161,11 @@ class ClientsScreenshotTest {
         // WP ANDROID-DL-1: the pill from the `now` block (the demo runner downloads).
         // (The split graph's legend is decoration without semantics, like the axis; the golden shows it.)
         composeRule.onNode(hasContentDescription("Downloading")).assertExists()
+        // WP ANDROID-DL-2 (NOW-LOADING-1): the "Loading now" rows name the
+        // runner's job, the online PC and the loading address.
+        composeRule.onNode(hasText("Wrenfield Static · job #901 · Downloading"), useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasText("demo-livingroom-pc"), useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasText("10.0.0.61"), useUnmergedTree = true).assertExists()
         assertTrue(composeRule.onAllNodes(hasContentDescription("Not available", substring = true)).fetchSemanticsNodes().isEmpty())
     }
 
@@ -166,7 +173,7 @@ class ClientsScreenshotTest {
     private class FixedTrafficRepository : TrafficRepository {
         override suspend fun throughput(range: String): ThroughputOut = demoThroughput(range, SNAPSHOT, NOW)
         override suspend fun series(range: String): SeriesOut = demoSeries(range, NOW)
-        override suspend fun throughputLive(): LiveOut = demoLive(NOW)
+        override suspend fun throughputLive(): LiveOut = demoLive(NOW, SNAPSHOT)
         override suspend fun clientsOverview(range: String): ClientsOverviewOut = demoClientsOverview(range, SNAPSHOT, NOW)
         override suspend fun jobHistory(range: String, limit: Int): List<JobSummary> = emptyList()
     }

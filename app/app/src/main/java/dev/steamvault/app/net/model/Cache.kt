@@ -154,3 +154,45 @@ data class GcJobRef(
     val execute: Boolean,
     val deduplicated: Boolean,
 )
+
+/** Body of `POST /v1/cache/{appid}/repair` -- `RepairRequest`. Sent only for
+ * the execute ([execute] = true); the dry run sends no body (WP
+ * ANDROID-DL-2, web `api.repairCache`). */
+@Serializable
+data class RepairRequest(val execute: Boolean)
+
+/** One depot of a repair report -- `RepairDepotOut` (WP CACHE-REPAIR-1). */
+@Serializable
+data class RepairDepotOut(
+    val depotid: Int,
+    val manifestid: String? = null,
+    val damaged_chunks: Int = 0,
+    val damaged_bytes: Long = 0,
+)
+
+/**
+ * `POST /v1/cache/{appid}/repair` -- `vault_api/routers/cache.py::RepairOut`
+ * (WP CACHE-REPAIR-1): the dry run's plan, or what an execute deleted and
+ * the forced prefill it queued ([job_id] `null` when nothing was removed).
+ */
+@Serializable
+data class RepairOut(
+    val appid: Int,
+    /** `dry-run` or `execute`. */
+    val mode: String = "dry-run",
+    val execute: Boolean = false,
+    val damaged_chunks: Int = 0,
+    val damaged_bytes: Long = 0,
+    val depots: List<RepairDepotOut> = emptyList(),
+    /** Depots whose target manifest could not be read (never guessed at). */
+    val unreadable_depots: List<Int> = emptyList(),
+    /** The plan is larger than [max_files]: refused, nothing deleted. */
+    val exceeds_cap: Boolean = false,
+    val max_files: Int = 2000,
+    val removed_chunks: Int = 0,
+    val removed_bytes: Long = 0,
+    val skipped: Map<String, Int> = emptyMap(),
+    val job_id: Int? = null,
+    val job_status: String? = null,
+    val job_deduplicated: Boolean? = null,
+)

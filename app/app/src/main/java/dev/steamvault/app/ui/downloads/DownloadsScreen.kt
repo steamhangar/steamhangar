@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,7 +36,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +55,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import dev.steamvault.app.R
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
@@ -119,6 +127,11 @@ import kotlinx.coroutines.delay
  *   the speed line under a running job, and the History range filter.
  * @param scheduleRepository WP UPD-6: `GET /v1/schedule` for the "Updates
  *   available" section's note (read once per visit); `null` = no note.
+ * @param cacheRepository WP ANDROID-DL-2: "Repair" on the "Incomplete" rows
+ *   (`RepairFlow.kt`); `null` = no Repair button.
+ * @param showJobRequest WP ANDROID-DL-2: a job to scroll to once it is on
+ *   screen (the detail sheet's "Show job" after a repair);
+ *   [onShowJobHandled] is called once it is taken over.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,11 +145,21 @@ fun DownloadsScreen(
     demoMode: Boolean,
     scheduleRepository: ScheduleRepository? = null,
     settingsRepository: SettingsRepository? = null,
+    cacheRepository: CacheRepository? = null,
+    showJobRequest: Int? = null,
+    onShowJobHandled: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val resources = LocalContext.current.resources
     val controller = remember {
-        DownloadsController(jobsRepository, gamesRepository, AndroidDownloadsStrings(resources), scheduleRepository, settingsRepository)
+        DownloadsController(
+            jobsRepository,
+            gamesRepository,
+            AndroidDownloadsStrings(resources),
+            scheduleRepository,
+            settingsRepository,
+            cacheRepository,
+        )
     }
     LaunchedEffect(controller) { controller.loadSchedule() } // WP UPD-6
     LaunchedEffect(controller) { controller.loadRateCap() } // WP RATE-TILE
@@ -210,7 +233,7 @@ fun DownloadsScreen(
             emptyList()
         } else {
             pendingIncomplete(controller.games, controller.jobs) { nameFor(it.appid, gamesByAppid, ownedNames) }
-                .map { g -> incompleteRowModel(g, nameFor(g.appid, gamesByAppid, ownedNames)) }
+                .map { g -> incompleteRowModel(g, nameFor(g.appid, gamesByAppid, ownedNames), controller.jobs) }
         }
     }
     // WP D15d: the History list for the chosen range -- the newest jobs
@@ -227,6 +250,24 @@ fun DownloadsScreen(
     }
     // The idle subline counts the ranged History list, not the 20-job poll.
     val idleLine = historySubtitle(historyFilter.loaded, finishedJobs.size, historyFilter.jobs.size)
+
+    // WP ANDROID-DL-2 (web `highlightJob`): "Show job" after a repair, from
+    // this screen's dialog or the detail sheet, scrolls to the job's card in
+    // Active / Paused or its Queue row once a jobs poll has it.
+    val listState = rememberLazyListState()
+    var showJobId by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(showJobRequest) {
+        if (showJobRequest != null) {
+            showJobId = showJobRequest
+            onShowJobHandled()
+        }
+    }
+    LaunchedEffect(showJobId) {
+        val id = showJobId ?: return@LaunchedEffect
+        controller.refreshJobsOnce()
+        listState.scrollToJob(id)
+        showJobId = null
+    }
 
     Scaffold(
         topBar = {
@@ -265,6 +306,9 @@ fun DownloadsScreen(
                 )
             }
             PauseAllDialog(controller, scope)
+            controller.repair?.let { flow ->
+                RepairDialog(flow, scope, onRefresh = controller::refreshAfterRepair, onShowJob = { showJobId = it })
+            }
             DownloadsBody(
                 partition = partition,
                 activeModels = activeModels,
@@ -281,6 +325,7 @@ fun DownloadsScreen(
                 speedLines = speedLines,
                 historyFilter = historyFilter,
                 ranges = ranges,
+                listState = listState,
             )
         }
     }
@@ -303,8 +348,21 @@ private fun DownloadsBody(
     speedLines: Map<Int, String>,
     historyFilter: HistoryFilter,
     ranges: TrafficRanges,
+    listState: LazyListState,
 ) {
+    // WP ANDROID-DL-2 (ANDROID-DL-1 review nit, web DOWNLOADS-3): after
+    // "Show N more" focus moves to the first new row, not back to the top.
+    val firstNewRow = remember { FocusRequester() }
+    var focusRowAt by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(focusRowAt, historyModels.size) {
+        val at = focusRowAt ?: return@LaunchedEffect
+        if (historyModels.size > at) {
+            focusFirstNewRow(firstNewRow)
+            focusRowAt = null
+        }
+    }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -379,6 +437,7 @@ private fun DownloadsBody(
                     model = row,
                     inFlight = controller.incompleteInFlight,
                     onCompleteNow = { controller.startCompletion(scope, listOf(row.appid), row.appid) },
+                    onRepair = { controller.startRepair(scope, row.appid, row.name) },
                 )
             }
         }
@@ -424,14 +483,19 @@ private fun DownloadsBody(
         if (historyModels.isEmpty()) {
             item(key = "history-empty") { EmptyLine(emptyHistoryText(historyFilter.range)) }
         } else {
-            items(historyModels, key = { "history-${it.jobId}" }) { model ->
-                HistoryRow(model = model, historyJobs = historyJobs, controller = controller, scope = scope)
+            itemsIndexed(historyModels, key = { _, m -> "history-${m.jobId}" }) { index, model ->
+                Box(if (index == focusRowAt) Modifier.focusRequester(firstNewRow) else Modifier) {
+                    HistoryRow(model = model, historyJobs = historyJobs, controller = controller, scope = scope)
+                }
             }
             if (historyPaging.next > 0) {
                 item(key = "history-more") {
                     val moreLabel = showMoreLabel(historyPaging.next, historyPaging.remaining)
                     TextButton(
-                        onClick = { historyFilter.showMore() },
+                        onClick = {
+                            focusRowAt = historyPaging.visible
+                            historyFilter.showMore()
+                        },
                         modifier = Modifier.semantics { contentDescription = moreLabel },
                     ) { Text(showMoreText(historyPaging.next)) }
                 }

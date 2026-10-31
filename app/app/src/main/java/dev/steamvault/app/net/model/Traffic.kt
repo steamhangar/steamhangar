@@ -129,6 +129,10 @@ data class ThroughputOut(
      * seconds (the current-speed window). `null` = the swept count, whose
      * window is [active_window_minutes]. */
     val active_window_seconds: Int? = null,
+    /** WP NOW-LOADING-1: set by the app (never on the wire) from the live
+     * tier's `loading_sources` (`mergeLive` / `mergeNow`); `null` = no
+     * "Loading now" rows (no live answer, feed not `ok`, older server). */
+    val loading_sources: List<LoadingSourceOut>? = null,
 )
 
 /**
@@ -145,6 +149,44 @@ data class ThroughputNowOut(
     val runner_active: Boolean? = null,
     val window_seconds: Int? = null,
     val live_since: String? = null,
+    /** WP NOW-LOADING-1: what is loading in [window_seconds], one row per
+     * source (runner first, then clients fastest first, unattributed
+     * last); `null` from a server before NOW-LOADING-1. */
+    val loading_sources: List<LoadingSourceOut>? = null,
+)
+
+/**
+ * WP NOW-LOADING-1: one source of the traffic in the live window
+ * (`now.loading_sources` / the live answer's `loading_sources`, api/README.md
+ * "`now.loading_sources`"). [kind] is `runner`, `client` or `unattributed`;
+ * [known] `false` marks an address the Clients page does not list yet
+ * (`null` = known, the web's `known !== false`); [phase] (`download` |
+ * `verify`) and [job] are the runner row's only.
+ */
+@Serializable
+data class LoadingSourceOut(
+    val kind: String = "",
+    val key: String? = null,
+    val name: String? = null,
+    val addresses: List<String> = emptyList(),
+    val known: Boolean? = null,
+    val bytes_per_second: Double? = null,
+    val hit_bytes_per_second: Double? = null,
+    val miss_bytes_per_second: Double? = null,
+    val apps: List<LoadingAppOut> = emptyList(),
+    val unattributed_bytes_per_second: Double? = null,
+    val phase: String? = null,
+    val job: LoadingJobOut? = null,
+)
+
+/** WP NOW-LOADING-1: the running prefill job of a runner row;
+ * [stop_request] is `cancel` / `pause` while a stop waits for the runner. */
+@Serializable
+data class LoadingJobOut(
+    val job_id: Int? = null,
+    val appid: Int? = null,
+    val name: String? = null,
+    val stop_request: String? = null,
 )
 
 @Serializable
@@ -236,6 +278,10 @@ data class LiveOut(
      * rc20 server, which sends only this one. */
     val active_window_minutes: Int? = null,
     val points: List<LivePointOut> = emptyList(),
+    /** WP NOW-LOADING-1: the same rows as `now.loading_sources` on
+     * `GET /v1/throughput`; `null` unless the feed is `ok`, or from an older
+     * server. */
+    val loading_sources: List<LoadingSourceOut>? = null,
 )
 
 @Serializable

@@ -4,6 +4,7 @@ import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GcJobRef
+import dev.steamvault.app.net.model.RepairOut
 
 /**
  * Suspend-based repository over `DELETE /v1/cache/{appid}` (WP 4b.4 brief:
@@ -34,6 +35,14 @@ interface CacheRepository {
      * exactly [members] (the plan's member ids, parent included). */
     suspend fun deleteWithPackages(appid: Int, members: List<Int>): CacheDeletionOut =
         throw UnsupportedOperationException("deleteWithPackages is not implemented by this repository")
+
+    /** WP ANDROID-DL-2: `POST /v1/cache/{appid}/repair`. [execute] `false`
+     * (the default, the server's own) is the dry run; `true` deletes. Never
+     * call this with `true` except from [dev.steamvault.app.ui.library.logic.RepairFlowState.Executing],
+     * reached only through the confirm after a dry run (`CacheRepair.kt`).
+     * Defaulted so a test double that never repairs needs no body. */
+    suspend fun repair(appid: Int, execute: Boolean = false): RepairOut =
+        throw UnsupportedOperationException("repair is not implemented by this repository")
 }
 
 class VaultCacheRepository(private val client: VaultApiClient) : CacheRepository {
@@ -42,4 +51,5 @@ class VaultCacheRepository(private val client: VaultApiClient) : CacheRepository
     override suspend fun deletePlan(appid: Int): DeletePlanOut = client.deletePlan(appid)
     override suspend fun deleteWithPackages(appid: Int, members: List<Int>): CacheDeletionOut =
         client.deleteCacheWithPackages(appid, members)
+    override suspend fun repair(appid: Int, execute: Boolean): RepairOut = client.repairCache(appid, execute)
 }
