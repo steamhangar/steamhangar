@@ -3964,8 +3964,17 @@ below carry their own later dates, item 12 is the current one).
           "Loading now" source rows (twin of `loadingNowModel`), the Repair
           flow (CACHE-REPAIR-UI-1 twin) and the GROUP-VERIFIED-1 S2 group
           note incl. the demo `groupPct` alignment.
-        - [ ] **ANDROID-GAPS-1** (box below) Remove PC, SteamID in
+        - [x] **ANDROID-GAPS-1** (3769c48 + goldens bcf0c40, fix fadfb7b/dd7f5df: Finish waits for a running SteamID lookup and save) (box below) Remove PC, SteamID in
           onboarding, client rename, Delete history.
+        - [ ] nit (ANDROID-GAPS-1 review): the Rename button leaves an empty
+          band at the bottom of nameable Clients cards (`ClientsScreen.kt:273`,
+          REDESIGN-1a); busy dialog buttons are not visually disabled (guards
+          exist); `startLibraryLookup` guard could also check
+          `lookupJob?.isActive`; leaving onboarding via Cancel/Demo or an
+          activity recreate still cancels a running lookup; Look up uses the
+          current step-1 fields, not the verified ones; no Remove on the
+          Clients page cards (web has it, REDESIGN-1a); demo Delete history
+          does not zero the synthetic traffic like the web demo's "since" cut.
         - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
           Clients cards and Add a device tabs.
         - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
@@ -4011,7 +4020,7 @@ below carry their own later dates, item 12 is the current one).
       - [x] **VERIFY-LABEL-1** (web; roadmap "Decided 2026-10-17") the Downloads
         button "Complete now" is renamed "Verify"; the Verifying state keeps
         its animated circular arrows
-      - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
+      - [x] (ANDROID-GAPS-1) ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
         rename and Delete history in the app
       - [x] APP-NIGHT-GOLDEN-1 night golden identical to the day golden (works as designed, see the Android package cut above)
       - tuning defaults from the Sunday test, if not shipped in rc20.x

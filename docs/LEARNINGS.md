@@ -1337,3 +1337,13 @@ These are not style preferences; each entry cost a review round to learn.
 - **A goldens-branch bot run records every frontend's goldens**: an
   Android-only package fast-forwards only to the bot commit for its own
   platform, never to unrelated web golden commits.
+- **A Compose dialog that closes itself on success cancels its own
+  `rememberCoroutineScope`**: run follow-up work (re-fetch) on the screen's
+  scope. Navigation after async work must come after a `join()` of that
+  work in the same coroutine (ANDROID-GAPS-1 Finish).
+- **No `runTest(UnconfinedTestDispatcher())` with MockWebServer calls**:
+  after `withContext(IO)` the body can continue on the IO thread and state
+  checks race (seen only in testReleaseUnitTest); use the standard
+  scheduler plus `runCurrent()`.
+- **`VaultApiClient.execute` treats an empty body as an error**; 204
+  routes need the text helper (`sendForText`).
