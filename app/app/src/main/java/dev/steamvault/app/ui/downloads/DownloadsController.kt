@@ -204,6 +204,10 @@ class DownloadsController(
         toastMs = TOAST_MS
     }
 
+    /** WP ANDROID-GAPS-1: a note from a flow outside this controller
+     * ("Delete history"), shown through the same toast. */
+    fun showNotice(text: String) = showToast(text)
+
     // ---- job control ----------------------------------------------------
 
     fun pause(scope: CoroutineScope, jobId: Int) = runControl(scope, jobId) {

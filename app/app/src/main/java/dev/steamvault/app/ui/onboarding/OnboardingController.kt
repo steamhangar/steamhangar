@@ -4,6 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.VaultApiClient
+import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.net.model.SettingsOut
+import dev.steamvault.app.net.steam.SteamId64
 import dev.steamvault.app.net.connection.ConnectionCheckResult
 import dev.steamvault.app.net.connection.checkVaultConnection
 import dev.steamvault.app.net.profile.CleartextNotAllowedException
@@ -16,11 +19,19 @@ import dev.steamvault.app.repo.SteamIdentityState
 import dev.steamvault.app.repo.SteamLoginResult
 import dev.steamvault.app.storage.CredentialStore
 import dev.steamvault.app.storage.ProfileKind
+import dev.steamvault.app.ui.library.logic.steamIdFromSettings
 import dev.steamvault.app.ui.onboarding.logic.FIRST_ONBOARDING_STEP
 import dev.steamvault.app.ui.onboarding.logic.OnboardingStep
 import dev.steamvault.app.ui.onboarding.logic.canAdvanceOnboardingStep
 import dev.steamvault.app.ui.onboarding.logic.nextOnboardingStep
 import dev.steamvault.app.ui.onboarding.logic.previousOnboardingStep
+import dev.steamvault.app.ui.settings.LibraryIdMessage
+import dev.steamvault.app.ui.settings.logic.LibraryLookupError
+import dev.steamvault.app.ui.settings.logic.LibraryPreview
+import dev.steamvault.app.ui.settings.logic.LibrarySteamIdSavePlan
+import dev.steamvault.app.ui.settings.logic.PREVIEW_LIMIT
+import dev.steamvault.app.ui.settings.logic.describeLookupError
+import dev.steamvault.app.ui.settings.logic.planLibrarySteamIdSave
 
 /** Which connectivity profile the user picked in step 1 -- see `net/profile/ConnectivityProfile.kt`. */
 enum class ConnectivityProfileChoice { SYSTEM_VPN, PUBLIC_DOMAIN }
@@ -30,6 +41,18 @@ enum class ConnectivityProfileChoice { SYSTEM_VPN, PUBLIC_DOMAIN }
  * account" from Settings does, and can be dismissed leaving it untouched
  * (same distinction `web/js/onboarding.js`'s `mode` makes). */
 enum class OnboardingMode { FIRST_RUN, RECONNECT }
+
+/**
+ * Whether step 2's Look up stored the SteamID64 as the vault's library id
+ * (WP ANDROID-GAPS-1, web WEB-FEAT-2's save note).
+ */
+sealed class LibrarySaveNote {
+    data class Saved(val steamId: String) : LibrarySaveNote()
+
+    /** Not stored: [reason] picks the sentence; [detail] is the server's
+     * own words ([LibraryIdMessage.SERVER], or the 422 detail). */
+    data class NotSaved(val reason: LibraryIdMessage, val detail: String? = null) : LibrarySaveNote()
+}
 
 /**
  * Everything the onboarding flow needs (WP 4b.7 brief) -- same thin-glue
@@ -79,6 +102,25 @@ class OnboardingController(
     var loginError by mutableStateOf<String?>(null)
         private set
 
+    // ---- Step 2: the vault's library SteamID64 (WP ANDROID-GAPS-1) --------
+
+    /** The SteamID64 field: pre-filled from the stored setting after a
+     * verified test, else from this device's Steam sign-in; never over
+     * something already typed. */
+    var libraryIdInput by mutableStateOf("")
+    var libraryLookupBusy by mutableStateOf(false)
+        private set
+    var libraryLookup by mutableStateOf<LibraryPreview?>(null)
+        private set
+    var libraryLookupError by mutableStateOf<LibraryLookupError?>(null)
+        private set
+    var librarySave by mutableStateOf<LibrarySaveNote?>(null)
+        private set
+
+    /** The settings answer of the last SUCCESSFUL connection check (not
+     * Compose state: only read to pre-fill [libraryIdInput]). */
+    private var lastVerifiedSettings: SettingsOut? = null
+
     val canAdvance: Boolean get() = canAdvanceOnboardingStep(step, tested)
 
     /** Reconnect can bail out with the existing connection untouched; a
@@ -114,6 +156,12 @@ class OnboardingController(
         connectionOk = false
         identityState = identityRepository.state()
         loginError = null
+        libraryIdInput = ""
+        libraryLookupBusy = false
+        libraryLookup = null
+        libraryLookupError = null
+        librarySave = null
+        lastVerifiedSettings = null
     }
 
     fun next() {
@@ -156,6 +204,7 @@ class OnboardingController(
                 tested = true
                 connectionOk = true
                 connectionMessage = strings.connectionOk()
+                prefillLibraryId()
             } else {
                 connectionMessage = failure
             }
@@ -172,8 +221,10 @@ class OnboardingController(
      * (health, then the authenticated settings call that actually proves
      * the key).
      *
-     * Touches NO controller state, so a failed pairing attempt never
-     * clobbers what the user has typed into step 1.
+     * Touches no visible controller state, so a failed pairing attempt
+     * never clobbers what the user has typed into step 1. The one thing it
+     * keeps is the settings answer of a SUCCESSFUL check (private, used only
+     * to pre-fill step 2's SteamID64, WP ANDROID-GAPS-1).
      *
      * @return `null` on success, else the user-facing failure message.
      */
@@ -182,7 +233,10 @@ class OnboardingController(
         val key = apiKey.trim()
         if (key.isEmpty()) return strings.enterApiKeyFirst()
         val client = buildClient(profile) { key }
-        return when (val outcome = checkVaultConnection(health = { client.health() }, settings = { client.settings() })) {
+        // The settings answer is kept (not shown) only to pre-fill step 2's
+        // SteamID64 after a success; step-1 fields stay untouched.
+        val check = checkVaultConnection(health = { client.health() }, settings = { client.settings().also { lastVerifiedSettings = it } })
+        return when (val outcome = check) {
             is ConnectionCheckResult.Success -> null
             is ConnectionCheckResult.Failure -> strings.connectionFailure(outcome.reason)
         }
@@ -203,6 +257,7 @@ class OnboardingController(
         tested = true
         connectionOk = true
         connectionMessage = strings.connectionOk()
+        prefillLibraryId()
         step = nextOnboardingStep(OnboardingStep.CONNECT, tested = true)
     }
 
@@ -222,6 +277,7 @@ class OnboardingController(
             is SteamLoginResult.Success -> {
                 identityState = identityRepository.state()
                 loginError = null
+                prefillLibraryId()
             }
             is SteamLoginResult.Failure -> {
                 identityState = identityRepository.state()
@@ -233,6 +289,92 @@ class OnboardingController(
     fun signOutSteam() {
         identityRepository.signOut()
         identityState = identityRepository.state()
+    }
+
+    /** Fills an EMPTY SteamID64 field: the vault's stored library id first
+     * (web: "the stored library id, never over something already typed"),
+     * else this device's own Steam sign-in. Filling saves nothing. */
+    private fun prefillLibraryId() {
+        if (libraryIdInput.isNotBlank()) return
+        val stored = steamIdFromSettings(lastVerifiedSettings)
+        libraryIdInput = stored.ifEmpty { identityState.steamId64.orEmpty() }
+    }
+
+    /**
+     * Step 2's "Look up" (web onboarding WEB-FEAT-2): checks the typed
+     * SteamID64 with the vault's Steam relay (game count, first names,
+     * persona), and when the relay answered, STORES it as the vault's
+     * library SteamID64 (`steam_library_steamid`) through the same plan as
+     * Settings' Save ([planLibrarySteamIdSave]: a JSON string, only a real
+     * change is sent). A failed lookup saves nothing; 0 games (a private
+     * profile) still saves, since the id is valid. Read-only, env-only or a
+     * server without the setting: the lookup still shows, and the note says
+     * the id was not saved. Uses step 1's verified connection; nothing of
+     * the connection itself is persisted here ([finish] does that).
+     */
+    suspend fun lookupLibrarySteamId() {
+        if (libraryLookupBusy) return
+        librarySave = null
+        val steamId = SteamId64.validate(libraryIdInput.trim())
+        if (steamId == null) {
+            libraryLookup = null
+            libraryLookupError = LibraryLookupError.InvalidSteamId
+            return
+        }
+        val profile = buildProfile(profileChoice, baseUrlText) ?: return
+        val key = apiKeyText.trim()
+        if (!tested || key.isEmpty()) return
+        val client = buildClient(profile) { key }
+        libraryLookupBusy = true
+        try {
+            val owned = try {
+                client.steamOwnedGames(steamId)
+            } catch (e: VaultApiError) {
+                // Nothing is saved for a lookup the relay refused.
+                libraryLookup = null
+                libraryLookupError = describeLookupError(e)
+                return
+            }
+            val persona = try {
+                client.steamPlayerSummaries(steamId).players.firstOrNull { it.steamid == steamId }?.personaname
+            } catch (_: VaultApiError) {
+                null
+            }
+            libraryLookup = LibraryPreview(
+                gameCount = owned.game_count,
+                previewNames = owned.games.take(PREVIEW_LIMIT).map { it.name },
+                personaName = persona?.takeIf { it.isNotBlank() },
+            )
+            libraryLookupError = null
+            librarySave = saveLibrarySteamId(client, steamId)
+        } finally {
+            libraryLookupBusy = false
+        }
+    }
+
+    /** Fresh `GET /v1/settings`, then the shared save plan. */
+    private suspend fun saveLibrarySteamId(client: VaultApiClient, steamId: String): LibrarySaveNote {
+        val settings = try {
+            client.settings()
+        } catch (e: VaultApiError) {
+            return LibrarySaveNote.NotSaved(LibraryIdMessage.SERVER, e.detail ?: e.message)
+        }
+        return when (val plan = planLibrarySteamIdSave(settings, steamId)) {
+            LibrarySteamIdSavePlan.Absent -> LibrarySaveNote.NotSaved(LibraryIdMessage.ABSENT)
+            LibrarySteamIdSavePlan.EnvOnly -> LibrarySaveNote.NotSaved(LibraryIdMessage.ENV_ONLY)
+            LibrarySteamIdSavePlan.Readonly -> LibrarySaveNote.NotSaved(LibraryIdMessage.READONLY)
+            LibrarySteamIdSavePlan.Invalid -> LibrarySaveNote.NotSaved(LibraryIdMessage.INVALID)
+            LibrarySteamIdSavePlan.Unchanged -> LibrarySaveNote.Saved(steamId)
+            is LibrarySteamIdSavePlan.Patch -> try {
+                client.patchSettings(plan.body)
+                LibrarySaveNote.Saved(steamId)
+            } catch (e: VaultApiError) {
+                LibrarySaveNote.NotSaved(
+                    if (e.status == 422) LibraryIdMessage.INVALID else LibraryIdMessage.SERVER,
+                    e.detail ?: e.message,
+                )
+            }
+        }
     }
 
     // ---- Step 3: finish -------------------------------------------------------

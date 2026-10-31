@@ -4012,11 +4012,11 @@ and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
   at larger font scales the longest label may draw a few dp into its
   neighbours' padding. Not measured beyond 1.3.
 - **Manage PCs parity gap vs web.** The web's Clients page has "Add a
-  device" (pairing QR and the agent install command) and a Remove button
-  per PC in its PCs sheet. The app has neither: "Manage PCs" opens the
-  read-only PCs sheet (presence, last report, version, bypass state), and
-  the app's `ClientsRepository` has no delete. Closing that gap is its own
-  package.
+  device" (pairing QR and the agent install command). The app does not:
+  "Manage PCs" opens the PCs sheet (presence, last report, version,
+  bypass state), which has a Remove button per PC since WP ANDROID-GAPS-1
+  (see "Client management, Delete history and the onboarding SteamID64"
+  below).
 - **Client names and the prefill runner (APP-17n, web D15-NAMES and
   D15-RUNNER).** The card title is the server's `display_name`; a named
   agent's line reads "vault-agent on <PC name> · <address>", a named
@@ -4024,8 +4024,8 @@ and `GET /v1/jobs?range=` (`repo/TrafficRepository.kt`).
   its own card ("Prefill runner", "This server's prefill downloads ·
   <address>"), never raises the agentless note, and its share of
   "Loaded" shows as "<size> by the prefill runner". Renaming and
-  "Delete history" are web-only for now (a parity gap like Manage PCs);
-  the demo names one agent and shows the runner.
+  "Delete history" came with WP ANDROID-GAPS-1 (section below); the demo
+  names one agent and shows the runner.
 
 Tests: `TrafficViewTest`, `ClientsPageTest`, `TrafficPollTest`,
 `TrafficApiTest`, `DemoTrafficTest`, the web twin `TrafficWebTwinTest`, and
@@ -4033,6 +4033,68 @@ the wiring pins in `D15dWiringTest`. Screenshots (APP-TEST-2):
 `ClientsScreenshotTest` renders the Clients page in the real shell and the
 Downloads statistics header, from the demo's traffic builders over a fixed
 snapshot and clock, at 411 dp / font 1.0 and 360 dp / font 1.3, dark.
+
+## Client management, Delete history and the onboarding SteamID64 (WP ANDROID-GAPS-1)
+
+Four web features the app lacked, with the web's safety and words. Every
+sentence of the dialogs is a verbatim port (app/README "String resources",
+narrow exception) in `ui/clients/logic/ClientRemove.kt`,
+`ui/clients/logic/ClientNames.kt` and `ui/downloads/logic/HistoryDelete.kt`;
+button labels are `strings.xml` resources. `ClientGapsWebTwinTest` reads
+the web sources (`clients-view.js`, `clients-sheet.js`, `client-names.js`,
+`views/clients.js`, `history-delete.js`, `views/downloads.js`,
+`onboarding.js`) and fails on drift; the web literals are never edited
+for it.
+
+- **Remove a PC** (web WEB-FEAT-4): a Remove button per row of the PCs
+  sheet (TalkBack: "Remove <id>"), an `AlertDialog` that names the PC,
+  says what is deleted and that a still-running agent lists the PC again,
+  with "Keep" as the dismiss. `DELETE /v1/clients/{client_id}` with the id
+  as one encoded path segment; the handler's own 404 ("Unknown
+  client_id") counts as removed, any other failure stays on the row
+  (announced). An id with "/" gets the web's note instead of the button.
+  State in `ClientsController` (`requestRemove`/`confirmRemove`).
+- **Rename** (web D15-NAMES): a Rename button on every Clients card whose
+  row has a `name_addr` (never the prefill runner). The dialog checks the
+  name locally with the server's rule (trim, 1-40 code points, no
+  control/format/separator characters, one visible character), then
+  `PUT /v1/client-names/ip/{name_addr}`; "Remove name" (only when a name
+  is set) sends `DELETE`, its own 404 counts as cleared, and the note
+  names what the card shows now from a fresh overview answer. Failures
+  keep the dialog open. `ClientRenameFlow` in `ClientRenameDialog.kt`.
+- **Delete history** (web D15-NAMES): a "Delete" action under the
+  History heading (TalkBack: "Delete history…"), a dialog with the two
+  variants as a radio group, the safe "Older than 30 days" preselected on
+  every open, and the destructive button named after the variant.
+  `DELETE /v1/history?scope=`; afterwards the note, then history, jobs and
+  statistics are re-read. `HistoryDeleteFlow` in `HistoryDeleteDialog.kt`,
+  kept out of the Downloads data path.
+- **Onboarding stores the SteamID64** (web WEB-FEAT-2): step 2 has "Your
+  Steam library" with a SteamID64 field, pre-filled (never over typed
+  text) from the stored setting after the verified test, else from this
+  device's Steam sign-in. "Look up" asks the vault's relay (game count,
+  first names, persona) and only an answered lookup is saved, through the
+  same `planLibrarySteamIdSave` as Settings' Save (a JSON string, only a
+  real change is sent). The note says "Saved ..." or "Not saved: <reason>
+  The lookup above still worked." (read-only vault, env-only setting,
+  server without the setting, server error).
+
+All dialogs take the SCREEN's coroutine scope: a dialog leaves
+composition the moment its request succeeds, and the re-fetch after it
+must not be cancelled with it. While a request runs, "Keep"/"Cancel",
+back and the scrim wait.
+
+Demo mode (`DemoState`): Remove drops the demo PC, Rename changes the
+names the Clients page shows (`DemoTrafficSnapshot.names`), Delete history
+removes finished demo jobs; the synthetic traffic figures stay as they
+are (they are not stored, unlike the web demo's "since" cut).
+
+Tests: `ClientRemoveTest`, `ClientNamesTest`, `HistoryDeleteTest`,
+`ClientsControllerRemoveTest`, `ClientRenameFlowTest`,
+`HistoryDeleteFlowTest`, `OnboardingLibraryIdTest`, `ClientGapsApiTest`
+(MockWebServer), `DemoClientGapsTest`, the twin `ClientGapsWebTwinTest`
+and the wiring pins in `AndroidGaps1WiringTest`. The Clients goldens show
+the Rename buttons; the PCs sheet and the dialogs have no screenshot.
 
 ## Fixed list columns and cache completeness (APP-17b: LIB-LIST-1, CACHE-COMPLETE-1c)
 

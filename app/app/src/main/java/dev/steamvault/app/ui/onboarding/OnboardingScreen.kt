@@ -30,7 +30,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -38,6 +43,9 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
 import dev.steamvault.app.ui.onboarding.logic.OnboardingStep
 import dev.steamvault.app.ui.onboarding.logic.onboardingProgressPercent
+import dev.steamvault.app.ui.settings.LibraryIdMessage
+import dev.steamvault.app.ui.settings.logic.LibraryLookupError
+import dev.steamvault.app.ui.settings.logic.LibraryPreview
 import kotlinx.coroutines.launch
 
 /**
@@ -319,6 +327,112 @@ private fun SteamStep(
         )
         OutlinedButton(onClick = { controller.signOutSteam() }) {
             Text(stringResource(R.string.identity_sign_out))
+        }
+    }
+
+    LibrarySteamIdSection(controller, scope)
+}
+
+/**
+ * WP ANDROID-GAPS-1 (web onboarding WEB-FEAT-2): "Your Steam library" --
+ * the vault's library SteamID64. "Look up" checks it with the vault's
+ * relay and stores it for the whole vault (every device and the web UI
+ * then list this account's games); the note under it says whether that
+ * happened. Optional like the rest of this step.
+ */
+@Composable
+private fun LibrarySteamIdSection(controller: OnboardingController, scope: kotlinx.coroutines.CoroutineScope) {
+    Text(
+        stringResource(R.string.onboarding_library_heading),
+        style = MaterialTheme.typography.titleSmall,
+        modifier = Modifier.padding(top = 8.dp).semantics { heading() },
+    )
+    val hint = stringResource(R.string.onboarding_library_id_hint)
+    OutlinedTextField(
+        value = controller.libraryIdInput,
+        onValueChange = { controller.libraryIdInput = it },
+        label = { Text(stringResource(R.string.onboarding_library_id_label)) },
+        placeholder = { Text(LIBRARY_ID_PLACEHOLDER) },
+        supportingText = { Text(hint) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedButton(onClick = { scope.launch { controller.lookupLibrarySteamId() } }) {
+        Text(
+            stringResource(
+                if (controller.libraryLookupBusy) R.string.onboarding_library_lookup_busy else R.string.onboarding_library_lookup,
+            ),
+        )
+    }
+    LookupResult(controller.libraryLookup, controller.libraryLookupError)
+    controller.librarySave?.let { note ->
+        Text(
+            text = saveNoteText(note),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (note is LibrarySaveNote.Saved) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+}
+
+/** Web's placeholder for this field (a fictional, well-formed SteamID64). */
+private const val LIBRARY_ID_PLACEHOLDER = "76561198042117903"
+
+@Composable
+private fun saveNoteText(note: LibrarySaveNote): String = when (note) {
+    is LibrarySaveNote.Saved -> stringResource(R.string.onboarding_library_saved, note.steamId)
+    is LibrarySaveNote.NotSaved -> {
+        val base = when (note.reason) {
+            LibraryIdMessage.ABSENT -> stringResource(R.string.settings_library_id_absent)
+            LibraryIdMessage.ENV_ONLY -> stringResource(R.string.settings_library_id_env_only)
+            LibraryIdMessage.READONLY -> stringResource(R.string.settings_library_id_readonly)
+            LibraryIdMessage.INVALID -> stringResource(R.string.settings_library_id_invalid)
+            LibraryIdMessage.SERVER -> note.detail.orEmpty().ifEmpty { "Request failed." }
+        }
+        val withDetail = if (note.reason == LibraryIdMessage.INVALID && !note.detail.isNullOrEmpty()) "$base (${note.detail})" else base
+        // Web onboarding: the reason always ends a sentence before the tail.
+        val reason = if (withDetail.endsWith(".") || withDetail.endsWith("!") || withDetail.endsWith("?")) withDetail else "$withDetail."
+        stringResource(R.string.onboarding_library_not_saved, reason)
+    }
+}
+
+/** The lookup's answer (same wording as Settings' Preview): persona, game
+ * count, the private-profile hint at 0 games, the first names; or why the
+ * lookup failed. */
+@Composable
+private fun LookupResult(preview: LibraryPreview?, error: LibraryLookupError?) {
+    if (error != null) {
+        Text(
+            when (error) {
+                LibraryLookupError.NoRelayKey -> stringResource(R.string.settings_library_id_no_relay_key)
+                LibraryLookupError.InvalidSteamId -> stringResource(R.string.settings_library_id_invalid)
+                is LibraryLookupError.Failed -> error.detail
+            },
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        return
+    }
+    if (preview == null) return
+    Column(modifier = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
+        preview.personaName?.let {
+            Text(stringResource(R.string.settings_library_id_preview_persona, it), style = MaterialTheme.typography.bodySmall)
+        }
+        Text(
+            pluralStringResource(R.plurals.settings_library_id_preview_count, preview.gameCount, preview.gameCount),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (preview.gameCount == 0) {
+            Text(
+                stringResource(R.string.settings_library_id_preview_private),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        for (name in preview.previewNames) {
+            Text("• $name", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

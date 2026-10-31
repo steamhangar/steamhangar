@@ -49,6 +49,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import dev.steamvault.app.R
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.repo.GamesRepository
+import dev.steamvault.app.repo.HistoryRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
@@ -63,6 +64,7 @@ import dev.steamvault.app.ui.traffic.logic.rateCapLine
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.downloads.logic.ExcerptState
 import dev.steamvault.app.ui.downloads.logic.HistoryRowModel
+import dev.steamvault.app.ui.downloads.logic.historyDeletedText
 import dev.steamvault.app.ui.downloads.logic.JobCardModel
 import dev.steamvault.app.ui.downloads.logic.PartitionedJobs
 import dev.steamvault.app.ui.downloads.logic.QueueMove
@@ -125,6 +127,8 @@ fun DownloadsScreen(
     demoMode: Boolean,
     scheduleRepository: ScheduleRepository? = null,
     settingsRepository: SettingsRepository? = null,
+    /** WP ANDROID-GAPS-1: "Delete history"; `null` = no Delete action. */
+    historyRepository: HistoryRepository? = null,
 ) {
     val scope = rememberCoroutineScope()
     val resources = LocalContext.current.resources
@@ -157,6 +161,7 @@ fun DownloadsScreen(
         }
     }
     LaunchedEffect(historyFilter) { historyFilter.load() }
+    val historyDelete = remember(historyRepository) { historyRepository?.let { HistoryDeleteFlow(it) } }
     val speedLines = jobSpeedLines(statsPoll)
 
     val gamesByAppid = remember(controller.games) { controller.games.associateBy { it.appid } }
@@ -251,6 +256,14 @@ fun DownloadsScreen(
                 )
             }
             PauseAllDialog(controller, scope)
+            if (historyDelete != null) {
+                HistoryDeleteDialog(historyDelete, scope) { result ->
+                    controller.showNotice(historyDeletedText(result))
+                    historyFilter.load()
+                    controller.refreshJobsOnce()
+                    statsPoll.refreshOnce()
+                }
+            }
             DownloadsBody(
                 partition = partition,
                 activeModels = activeModels,
@@ -266,6 +279,7 @@ fun DownloadsScreen(
                 speedLines = speedLines,
                 historyFilter = historyFilter,
                 ranges = ranges,
+                historyDelete = historyDelete,
             )
         }
     }
@@ -287,6 +301,7 @@ private fun DownloadsBody(
     speedLines: Map<Int, String>,
     historyFilter: HistoryFilter,
     ranges: TrafficRanges,
+    historyDelete: HistoryDeleteFlow? = null,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -395,6 +410,7 @@ private fun DownloadsBody(
         }
 
         item(key = "history-heading") { SectionHeading(stringResource(R.string.downloads_section_history)) }
+        if (historyDelete != null) item(key = "history-delete") { HistoryDeleteButton(historyDelete) }
         item(key = "history-range") {
             RangeChips(
                 label = stringResource(R.string.traffic_range_history),

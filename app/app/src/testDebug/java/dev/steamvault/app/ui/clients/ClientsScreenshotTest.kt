@@ -32,6 +32,7 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.ThroughputOut
+import dev.steamvault.app.repo.ClientsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.downloads.DownloadsStatsHeader
 import dev.steamvault.app.ui.downloads.downloadsStatsPoll
@@ -114,6 +115,7 @@ class ClientsScreenshotTest {
                             onManagePcs = {},
                             demoMode = true,
                             clock = { NOW },
+                            clientsRepository = NoWriteClientsRepository,
                         )
                     }
                     Page.STATS -> Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
@@ -141,6 +143,9 @@ class ClientsScreenshotTest {
         // as recent as the online PC) and counts like the web counts it.
         composeRule.onNode(hasText("This server's prefill downloads · 172.18.0.1"), useUnmergedTree = true).assertExists()
         composeRule.onNode(hasText("5 clients · 3 connected"), useUnmergedTree = true).assertExists()
+        // WP ANDROID-GAPS-1: every card with a name_addr offers Rename (the runner has none).
+        val renames = composeRule.onAllNodes(hasContentDescription("Rename ", substring = true)).fetchSemanticsNodes()
+        assertTrue("expected Rename on the nameable cards, found ${renames.size}", renames.isNotEmpty())
         // Review item: with four items every nav label is ONE line -- the
         // long "Downloads" is as tall as the short "Settings".
         val downloads = composeRule.onNode(hasText("Downloads"), useUnmergedTree = true).fetchSemanticsNode().size.height
@@ -165,6 +170,14 @@ class ClientsScreenshotTest {
         override suspend fun throughputLive(): LiveOut = demoLive(NOW)
         override suspend fun clientsOverview(range: String): ClientsOverviewOut = demoClientsOverview(range, SNAPSHOT, NOW)
         override suspend fun jobHistory(range: String, limit: Int): List<JobSummary> = emptyList()
+    }
+
+    /** Rename is drawn but never used in a screenshot. */
+    private object NoWriteClientsRepository : ClientsRepository {
+        override suspend fun list(): List<ClientOut> = emptyList()
+        override suspend fun remove(clientId: String) = error("not used in screenshots")
+        override suspend fun setName(addr: String, name: String) = error("not used in screenshots")
+        override suspend fun clearName(addr: String) = error("not used in screenshots")
     }
 
     private companion object {

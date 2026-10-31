@@ -19,7 +19,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -43,6 +46,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import dev.steamvault.app.R
 import dev.steamvault.app.net.model.ClientsOverviewOut
+import dev.steamvault.app.repo.ClientsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.clients.logic.AGENTLESS_NOTE
 import dev.steamvault.app.ui.clients.logic.COULD_NOT_LOAD_CLIENTS
@@ -65,6 +69,10 @@ import kotlinx.coroutines.delay
 
 /** How often relative times ("4 min ago") on the Clients page refresh. */
 private const val NOW_TICK_MS = 60_000L
+
+/** How long a rename note stays (a little longer than web's 2.6 s toast,
+ * so TalkBack finishes reading it). */
+private const val NOTICE_MS = 4_000L
 
 /** The Clients page's poll: `GET /v1/clients/overview`, starting at the
  * range chosen last ([TrafficRanges.clients], default 7 days like web). */
@@ -98,9 +106,12 @@ fun ClientsScreen(
     onManagePcs: () -> Unit,
     demoMode: Boolean,
     clock: () -> Long = { System.currentTimeMillis() },
+    /** WP ANDROID-GAPS-1: where Rename stores names; `null` = no Rename. */
+    clientsRepository: ClientsRepository? = null,
 ) {
     val scope = rememberCoroutineScope()
     val poll = remember(trafficRepository) { clientsOverviewPoll(trafficRepository, ranges.clients) }
+    val renameFlow = remember(clientsRepository) { clientsRepository?.let { ClientRenameFlow(it) } }
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, poll) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -127,11 +138,20 @@ fun ClientsScreen(
             )
         },
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { renameFlow?.let { RenameNotice(it) } },
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             if (demoMode) DemoModeBanner()
-            ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock)
+            ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock, renameFlow = renameFlow)
         }
+    }
+    if (renameFlow != null) {
+        ClientRenameDialog(
+            flow = renameFlow,
+            scope = scope,
+            displayNameAfter = { key -> trafficRepository.clientsOverview(poll.range).clients.firstOrNull { it.key == key }?.display_name },
+            onChanged = { poll.refreshOnce() },
+        )
     }
 }
 
@@ -142,6 +162,7 @@ private fun ClientsBody(
     ranges: TrafficRanges,
     onManagePcs: () -> Unit,
     clock: () -> Long,
+    renameFlow: ClientRenameFlow?,
 ) {
     val data = poll.data
     // WP D15d review: "Last active 4 min ago" and the stale-feed note are
@@ -194,7 +215,10 @@ private fun ClientsBody(
             when {
                 data == null -> if (poll.error == null) item(key = "loading") { HintLine(LOADING_CLIENTS_TEXT) }
                 cards.isEmpty() -> item(key = "empty") { HintLine(NO_CLIENTS_TEXT) }
-                else -> items(cards, key = { "client-${it.key}" }) { ClientCard(it) }
+                else -> items(cards, key = { "client-${it.key}" }) { card ->
+                    val client = data?.clients?.firstOrNull { it.key == card.key }
+                    ClientCard(card, onRename = if (renameFlow != null && client != null) { { renameFlow.open(client) } } else null)
+                }
             }
             if (data != null && showAgentlessNote(data.clients)) {
                 item(key = "agentless") { HintLine(AGENTLESS_NOTE) }
@@ -227,7 +251,7 @@ private fun HintLine(text: String) {
  * dot is decoration (web `aria-hidden`); its word carries the meaning.
  */
 @Composable
-private fun ClientCard(model: ClientCardModel) {
+private fun ClientCard(model: ClientCardModel, onRename: (() -> Unit)? = null) {
     Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(
@@ -246,7 +270,21 @@ private fun ClientCard(model: ClientCardModel) {
             model.stats?.let { CardLine(it) }
             model.recent?.let { CardLine(it) }
             CardLine(model.lastActive)
+            if (model.rename && onRename != null) RenameButton(model.name, onRename)
         }
+    }
+}
+
+/**
+ * WP ANDROID-GAPS-1 (web D15-NAMES): the card's Rename action. A button is
+ * its own TalkBack stop inside the merged card and reads "Rename <name>"
+ * (web: the button text plus the card's name).
+ */
+@Composable
+private fun RenameButton(name: String, onRename: () -> Unit) {
+    val label = stringResource(R.string.clients_rename_button_cd, name)
+    TextButton(onClick = onRename, modifier = Modifier.semantics { contentDescription = label }) {
+        Text(stringResource(R.string.clients_rename_button))
     }
 }
 
@@ -291,4 +329,16 @@ private fun ManagePcsSection(onManagePcs: () -> Unit) {
         )
         OutlinedButton(onClick = onManagePcs) { Text(stringResource(R.string.clients_manage_button)) }
     }
+}
+
+/** WP ANDROID-GAPS-1: "Renamed to ..." / "Name removed ..." (web: the
+ * toast), read out when it appears. */
+@Composable
+private fun RenameNotice(flow: ClientRenameFlow) {
+    val message = flow.notice ?: return
+    LaunchedEffect(message) {
+        delay(NOTICE_MS)
+        flow.notice = null
+    }
+    Snackbar(modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite }) { Text(message) }
 }

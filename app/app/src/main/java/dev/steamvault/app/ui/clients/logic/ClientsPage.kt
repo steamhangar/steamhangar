@@ -36,7 +36,7 @@ import dev.steamvault.app.ui.traffic.logic.formatTrafficBytes
  *  - The prefill runner is the server itself downloading; its title is the
  *    server's `display_name` ("Prefill runner") and the line under it says
  *    so. It is not an agentless machine, so it does not raise the agentless
- *    note. Renaming (and its runner exclusion) is web-only for now.
+ *    note. It cannot be renamed (the server sends no `name_addr`).
  *  - "Installed" exists for agent clients only (`installed_app_count`).
  *  - A `null` the server sent (feed not `ok`) shows the dash; a real zero
  *    prints.
@@ -196,6 +196,9 @@ data class ClientCardModel(
     val stats: String?,
     val recent: String?,
     val lastActive: String,
+    /** WP ANDROID-GAPS-1: the card offers Rename ([canRename], web
+     * `clientCardModel`'s `rename`). */
+    val rename: Boolean = false,
 )
 
 fun buildClientCardModel(client: ClientActivityOut, range: String, nowMs: Long = System.currentTimeMillis()): ClientCardModel =
@@ -209,4 +212,5 @@ fun buildClientCardModel(client: ClientActivityOut, range: String, nowMs: Long =
         stats = statsText(client, range),
         recent = recentAppsText(client),
         lastActive = lastActiveText(client, nowMs),
+        rename = canRename(client),
     )

@@ -809,4 +809,34 @@
     <string name="clients_last_seen_unknown">last seen: not reported</string>
     <string name="clients_agent_version">agent %1$s</string>
     <string name="clients_agent_version_unknown">version not reported</string>
+
+    <!-- WP ANDROID-GAPS-1: Remove PC (PCs sheet), Rename (Clients page),
+         Delete history (Downloads), SteamID64 in onboarding. Button labels
+         are the web's (twin-pinned in ClientGapsWebTwinTest); the dialog
+         sentences are verbatim web ports in ui/*/logic (ClientRemove.kt,
+         ClientNames.kt, HistoryDelete.kt). -->
+    <string name="clients_remove_button">Remove</string>
+    <string name="clients_remove_button_cd">Remove %1$s</string>
+    <string name="clients_remove_confirm">Remove</string>
+    <string name="clients_remove_busy">Removing…</string>
+    <string name="clients_remove_keep">Keep</string>
+    <string name="clients_rename_button">Rename</string>
+    <string name="clients_rename_button_cd">Rename %1$s</string>
+    <string name="clients_rename_label">Name</string>
+    <string name="clients_rename_save">Save</string>
+    <string name="clients_rename_saving">Saving…</string>
+    <string name="clients_rename_clear">Remove name</string>
+    <string name="clients_rename_clearing">Removing…</string>
+    <string name="clients_rename_cancel">Cancel</string>
+    <string name="downloads_history_delete_button">Delete</string>
+    <string name="downloads_history_delete_button_cd">Delete history…</string>
+    <string name="downloads_history_delete_keep">Keep</string>
+    <string name="downloads_history_delete_busy">Deleting…</string>
+    <string name="onboarding_library_heading">Your Steam library</string>
+    <string name="onboarding_library_id_label">SteamID64</string>
+    <string name="onboarding_library_id_hint">Look up checks this SteamID64 and saves it, so the Library lists every game it owns.</string>
+    <string name="onboarding_library_lookup">Look up</string>
+    <string name="onboarding_library_lookup_busy">Looking up…</string>
+    <string name="onboarding_library_saved">Saved %1$s — your library will show the games this SteamID64 owns.</string>
+    <string name="onboarding_library_not_saved">Not saved: %1$s The lookup above still worked.</string>
 </resources>

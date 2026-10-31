@@ -10,34 +10,47 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import dev.steamvault.app.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import dev.steamvault.app.ui.clients.logic.ClientPresence
 import dev.steamvault.app.ui.clients.logic.ClientPresenceView
 import dev.steamvault.app.ui.clients.logic.ClientRowModel
+import dev.steamvault.app.ui.clients.logic.REMOVE_REREGISTER_TEXT
+import dev.steamvault.app.ui.clients.logic.REMOVE_WHAT_TEXT
+import dev.steamvault.app.ui.clients.logic.UNREMOVABLE_SLASH_NOTE
 import dev.steamvault.app.ui.clients.logic.buildClientRowModel
 import dev.steamvault.app.ui.clients.logic.formatAgo
+import dev.steamvault.app.ui.clients.logic.isRemovableClientId
 import dev.steamvault.app.ui.clients.logic.partitionClients
+import dev.steamvault.app.ui.clients.logic.removeConfirmTitle
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.library.logic.formatBytesGB
 import dev.steamvault.app.ui.status.StatusIcon
@@ -84,6 +97,45 @@ fun ClientsSheet(controller: ClientsController, demoMode: Boolean = false) {
         if (demoMode) DemoModeBanner()
         ClientsSheetBody(controller)
     }
+    // The sheet's scope, not the dialog's: the dialog leaves composition when
+    // the request ends, and the list re-fetch after a success must outlive it.
+    val scope = rememberCoroutineScope()
+    RemovePcConfirm(controller, scope)
+}
+
+/**
+ * WP ANDROID-GAPS-1 (web WEB-FEAT-4): the Remove confirm, an
+ * [AlertDialog] above the sheet. It names the PC, says what is deleted and
+ * that a still-running agent lists the PC again (`ClientRemove.kt`'s
+ * verbatim web wording). "Keep" is the dismiss action; back and the scrim
+ * do the same, and all three wait while the request runs.
+ */
+@Composable
+private fun RemovePcConfirm(controller: ClientsController, scope: CoroutineScope) {
+    val clientId = controller.removeTarget ?: return
+    val busy = controller.removeBusy
+    AlertDialog(
+        onDismissRequest = { controller.cancelRemove() },
+        title = { Text(removeConfirmTitle(clientId)) },
+        text = {
+            Column {
+                Text(REMOVE_WHAT_TEXT, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(REMOVE_REREGISTER_TEXT, style = MaterialTheme.typography.bodyMedium)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { scope.launch { controller.confirmRemove() } }) {
+                Text(
+                    stringResource(if (busy) R.string.clients_remove_busy else R.string.clients_remove_confirm),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { controller.cancelRemove() }) { Text(stringResource(R.string.clients_remove_keep)) }
+        },
+    )
 }
 
 @Composable
@@ -106,6 +158,16 @@ private fun ClientsSheetBody(controller: ClientsController) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
+
+        // WP ANDROID-GAPS-1: "<id> removed from the list." (web: a toast).
+        controller.removeNotice?.let { notice ->
+            Text(
+                text = notice,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Spacer(Modifier.height(8.dp))
+        }
 
         controller.loadError?.let { error ->
             Text(
@@ -135,7 +197,11 @@ private fun ClientsSheetBody(controller: ClientsController) {
             SectionHeading(stringResource(R.string.clients_section_bypassing))
             for (client in partition.bypassing) {
                 key(client.client_id) {
-                    ClientRow(model = remember(client) { buildClientRowModel(client) })
+                    ClientRow(
+                        model = remember(client) { buildClientRowModel(client) },
+                        removeError = controller.removeErrors[client.client_id],
+                        onRemove = { controller.requestRemove(client.client_id) },
+                    )
                 }
             }
         }
@@ -144,7 +210,11 @@ private fun ClientsSheetBody(controller: ClientsController) {
             SectionHeading(stringResource(R.string.clients_section_healthy))
             for (client in partition.healthy) {
                 key(client.client_id) {
-                    ClientRow(model = remember(client) { buildClientRowModel(client) })
+                    ClientRow(
+                        model = remember(client) { buildClientRowModel(client) },
+                        removeError = controller.removeErrors[client.client_id],
+                        onRemove = { controller.requestRemove(client.client_id) },
+                    )
                 }
             }
         }
@@ -167,7 +237,7 @@ private fun SectionHeading(text: String) {
  * of a client-side busy flag.
  */
 @Composable
-private fun ClientRow(model: ClientRowModel) {
+private fun ClientRow(model: ClientRowModel, removeError: String?, onRemove: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -223,7 +293,43 @@ private fun ClientRow(model: ClientRowModel) {
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
+
+            RemoveAction(clientId = model.clientId, removeError = removeError, onRemove = onRemove)
         }
+    }
+}
+
+/**
+ * WP ANDROID-GAPS-1 (web WEB-FEAT-4): the row's Remove button (TalkBack
+ * reads "Remove <id>", web's aria-label), or, for an id the server's route
+ * cannot address, the note saying why; under it the inline error of a
+ * failed remove, announced when it appears (web role=alert).
+ */
+@Composable
+private fun RemoveAction(clientId: String, removeError: String?, onRemove: () -> Unit) {
+    if (isRemovableClientId(clientId)) {
+        val label = stringResource(R.string.clients_remove_button_cd, clientId)
+        TextButton(
+            onClick = onRemove,
+            modifier = Modifier.padding(top = 4.dp).semantics { contentDescription = label },
+        ) {
+            Text(stringResource(R.string.clients_remove_button))
+        }
+    } else {
+        Text(
+            text = UNREMOVABLE_SLASH_NOTE,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+    if (!removeError.isNullOrEmpty()) {
+        Text(
+            text = removeError,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
     }
 }
 
