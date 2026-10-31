@@ -9,7 +9,6 @@ import dev.steamvault.app.storage.InMemoryCredentialStore
 import dev.steamvault.app.ui.settings.LibraryIdMessage
 import dev.steamvault.app.ui.settings.logic.LibraryLookupError
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -173,7 +172,7 @@ class OnboardingLibraryIdTest {
     }
 
     @Test
-    fun `MUTATION PIN -- Finish waits for a running Look up and its save before persisting`() = runTest(UnconfinedTestDispatcher()) {
+    fun `MUTATION PIN -- Finish waits for a running Look up and its save before persisting`() = runTest {
         val store = InMemoryCredentialStore()
         val c = OnboardingController(store, Identity(), Strings())
         c.start(OnboardingMode.FIRST_RUN)
@@ -192,7 +191,11 @@ class OnboardingLibraryIdTest {
         server.enqueue(MockResponse().setBody(settingsJson("")))
         server.enqueue(MockResponse().setBody(settingsJson(STORED)))
         c.startLibraryLookup(this)
-        assertTrue(c.libraryLookupBusy)
+        // Run the lookup up to its first network wait (deterministic: the
+        // answer is dispatched back to this test's scheduler, not run here).
+        testScheduler.runCurrent()
+        assertTrue("the lookup must be running when Finish is tapped", c.libraryLookupBusy)
+        assertNull(c.librarySave)
 
         c.finishAfterPendingLookup()
 
@@ -203,7 +206,7 @@ class OnboardingLibraryIdTest {
     }
 
     @Test
-    fun `start does not clear the busy flag of a running lookup`() = runTest(UnconfinedTestDispatcher()) {
+    fun `start does not clear the busy flag of a running lookup`() = runTest {
         val c = tested()
         c.libraryIdInput = STORED
         server.enqueue(
@@ -212,11 +215,12 @@ class OnboardingLibraryIdTest {
         server.enqueue(MockResponse().setBody("""{"configured":true,"players":[]}"""))
         server.enqueue(MockResponse().setBody(settingsJson(STORED)))
         c.startLibraryLookup(this)
-        assertTrue(c.libraryLookupBusy)
+        testScheduler.runCurrent()
+        assertTrue("the lookup must be running", c.libraryLookupBusy)
         c.start(OnboardingMode.RECONNECT)
-        assertTrue(c.libraryLookupBusy)
+        assertTrue("start() cleared the busy flag of a running lookup", c.libraryLookupBusy)
         c.finishAfterPendingLookup()
-        assertTrue(!c.libraryLookupBusy)
+        assertTrue("the finished lookup clears its busy flag", !c.libraryLookupBusy)
     }
 
     private companion object {
