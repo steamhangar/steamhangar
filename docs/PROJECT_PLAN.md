@@ -3963,8 +3963,16 @@ below carry their own later dates, item 12 is the current one).
         - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
           tabs, Settings section nav, Downloads layout, sheet motion where it
           fits Material.
-        - [ ] **APP-NIGHT-GOLDEN-1** (box below) plus the MOBILE-1a nit
-          (test sample IPs to 192.168.1.x in Kotlin).
+        - [x] **APP-NIGHT-GOLDEN-1** closed as works-as-designed (2026-10-31,
+          reviewer-confirmed): the app is single-dark-theme on purpose
+          (`Theme.kt`, no `values-night/`, mockup NOTES.md:117, app README);
+          the night qualifier is applied and the byte-identical night golden
+          is the intended guard against a theme that starts reading the
+          system setting. The MOBILE-1a sample-address nit rides along
+          (10.0.0.x; 192.168.1.0/24 is not neutral either).
+        - [ ] nit (APP-NIGHT-GOLDEN-1 review): a blind golden refresh would
+          silently accept a changed night shot; add a test asserting the
+          night shot equals its notnight twin pixel for pixel.
       - Cancel question (NOW-LOADING-1, answered from code, reviewer-checked;
         no prod measurement): a cancelled job's SteamPrefill does not keep
         loading. `cancel_job` only sets `stop_request` (jobs.py ~894-990);
@@ -3997,7 +4005,7 @@ below carry their own later dates, item 12 is the current one).
         its animated circular arrows
       - [ ] ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
         rename and Delete history in the app
-      - [ ] APP-NIGHT-GOLDEN-1 night golden identical to the day golden
+      - [x] APP-NIGHT-GOLDEN-1 night golden identical to the day golden (works as designed, see the Android package cut above)
       - tuning defaults from the Sunday test, if not shipped in rc20.x
         (the rc20.x box moves here)
       - [x] **RUNNER-RETRY-1** (98b99b9; runner/api; user decision 2026-10-18: build

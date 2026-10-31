@@ -1328,3 +1328,12 @@ These are not style preferences; each entry cost a review round to learn.
 - **A `[hidden]` guard must also win**: a state class (`.selecting`,
   `.compact`) or a page-scoped kit rule that sets `display`, also inside
   @media, needs its own `<sel>[hidden]` guard (Lint 3 checks this).
+- **Check a "golden X equals golden Y" finding against the test KDoc and
+  README first**: the identical night golden was the intended guard of a
+  single-dark-theme app, not a bug (APP-NIGHT-GOLDEN-1).
+- **Sample addresses in tests: 10.0.0.x.** The operator's server VLAN and
+  his management subnet 192.168.1.0/24 are both ZEUS data; grep before
+  committing.
+- **A goldens-branch bot run records every frontend's goldens**: an
+  Android-only package fast-forwards only to the bot commit for its own
+  platform, never to unrelated web golden commits.
