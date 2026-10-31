@@ -1361,3 +1361,17 @@ These are not style preferences; each entry cost a review round to learn.
   window**: screenshot the sheet content composable directly.
 - **One goldens branch per attempt** (`-r2-goldens`, ...) avoids force
   pushes when the record run fails before the bot commits.
+- **Pin tests use `indexOf("private fun X(")` as range end markers**:
+  changing a function's visibility breaks them; grep before changing it.
+- **Keep the old TalkBack figure descriptions on a reshaped UI**
+  (`tileDescription`), so content-description asserts survive a redesign.
+- **Screenshot tests on demo data must pin every timestamp field**
+  (`Instant.now()` in fixtures: last_prefill_at, last_manifest_check,
+  update_checked_at, cache_complete_checked_at, installed_on.reported_at).
+- **The first goldens run of a package that adds shots is red on
+  `test_every_shot_has_a_checked_in_golden`** until the bot commit lands;
+  judge that round by the app record job.
+- **Labels in 2x2 tiles at 360dp / font 1.3 must wrap**, not `maxLines=1`
+  ("SAVED BY CACHE" clipped silently; only the golden showed it).
+- **Assert lower LazyColumn items only in a tall shot**: items below the
+  viewport are never composed and `assertExists` fails.

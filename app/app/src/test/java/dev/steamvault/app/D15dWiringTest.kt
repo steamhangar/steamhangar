@@ -83,9 +83,14 @@ class D15dWiringTest {
         assertCalledFrom(main, "onManagePcs = { clientsControllerState?.open(lifecycleScope) }", "ClientsDestinationContent")
     }
 
+    /** WP ANDROID-REDESIGN-1c (rc20 visual check): the D15d pointer row
+     * "PCs (agents) / Open Clients" is gone from Settings, like on the web. */
     @Test
-    fun `MUTATION PIN -- Settings points to the Clients page`() {
-        assertCalledFrom(main, "onOpenClientsClick = { destination = Destination.CLIENTS }", "SettingsDestinationContent")
+    fun `MUTATION PIN -- Settings has no Open Clients pointer any more`() {
+        val settings = stripComments(read("$base/ui/settings/SettingsScreen.kt"))
+        assertTrue("Settings still takes onOpenClientsClick", !settings.contains("onOpenClientsClick"))
+        assertTrue("Settings still has a Clients pointer section", !settings.contains("ClientsSection("))
+        assertTrue("MainActivity still wires onOpenClientsClick", !stripComments(read(main)).contains("onOpenClientsClick"))
     }
 
     @Test
@@ -156,11 +161,11 @@ class D15dWiringTest {
     @Test
     fun `MUTATION PIN -- the statistics header hides the range without figures and draws tiles and graph`() {
         assertCalledFrom(stats, "if (!poll.noFigures) {", "DownloadsStatsHeader")
-        assertCalledFrom(stats, "if (tiles != null) StatTiles(tiles)", "DownloadsStatsHeader")
+        assertCalledFrom(stats, "HeroTiles(hero.tiles)", "DownloadsStatsHeader")
         assertCalledFrom(stats, "ThroughputGraph(series = answer?.series, selectedRange = poll.range, unsupported = poll.unsupported, nowMs = nowMs)", "DownloadsStatsHeader")
-        assertCalledFrom(stats, "headerTiles(throughput, rateCap)", "DownloadsStatsHeader")
-        assertCalledFrom(stats, "StatTileView(tile, Modifier.weight(1f))", "StatTiles")
-        assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = description }", "StatTileView")
+        assertCalledFrom(stats, "heroFigures(throughput, rateCap, poll.unsupported)", "DownloadsStatsHeader")
+        assertCalledFrom(stats, "HeroTileView(tile, Modifier.weight(1f).fillMaxHeight())", "HeroTiles")
+        assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = tile.description }", "HeroTileView")
         // WP GRAPH-ZOOM: the graph draws the trimmed series, and its caption follows it.
         assertCalledFrom(stats, "series?.let { it.copy(points = trimSeries(it.points)) } ?: return", "ThroughputGraph")
         assertCalledFrom(stats, "graphGeometryToShow(shown, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return", "ThroughputGraph")

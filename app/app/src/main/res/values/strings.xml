@@ -283,7 +283,7 @@
 
     <string name="settings_section_connection">Connection</string>
     <string name="settings_section_steam">Steam identity</string>
-    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_section_notifications">Notifications on this phone</string>
 
     <string name="settings_auto_gc_label">Auto-GC after a prefill</string>
     <string name="settings_auto_gc_off">Off</string>
@@ -314,8 +314,6 @@
     <string name="settings_expert_hint">Expert settings are for tuning and debugging. The defaults are fine for most vaults.</string>
     <string name="settings_help_show">Explain %1$s</string>
     <string name="settings_help_hide">Hide explanation of %1$s</string>
-    <string name="settings_section_open">Collapse %1$s</string>
-    <string name="settings_section_closed">Expand %1$s</string>
     <string name="settings_risky_title">Confirm risky settings</string>
     <string name="settings_risky_intro">These changes can break downloads. Apply them?</string>
     <string name="settings_risky_line">%1$s: %2$s to %3$s</string>
@@ -439,8 +437,7 @@
          error fallback). -->
     <string name="downloads_title">Downloads</string>
     <string name="downloads_section_active">Active</string>
-    <string name="downloads_section_paused">Paused</string>
-    <string name="downloads_section_queue">Queue %1$d</string>
+    <string name="downloads_section_queue">Queue</string>
     <string name="downloads_section_history">History</string>
     <string name="downloads_active_empty">No download running. Start one from the Library.</string>
     <string name="downloads_queue_empty">Nothing waiting.</string>
@@ -684,13 +681,6 @@
          per section" despite clients-view.js's own comment claiming so). -->
     <string name="clients_bypass_note">none of its downloads have reached the cache recently</string>
 
-    <!-- Settings' pointer (WP D15d, twin of web settings.js "PCs (agents)"):
-         managing PCs moved to the Clients page; Settings keeps a short
-         pointer so the old way there still leads somewhere. -->
-    <string name="settings_section_clients">PCs (agents)</string>
-    <string name="settings_clients_desc">Managing PCs is on the Clients page now.</string>
-    <string name="settings_clients_open_button">Open Clients</string>
-
     <!-- Clients page (WP D15d, twin of web views/clients.js). The texts
          computed from server data are verbatim ports in
          ui/clients/logic/ClientsPage.kt and ui/traffic/logic/TrafficView.kt;
@@ -776,7 +766,6 @@
          vault-dns N/A, explanations behind a per-row (i) button. Words are
          the web's (web/js/lib/about-view.js), pinned both ways:
          AboutCrossFrontendContractTest + web/tests/about-android-twin.test.js. -->
-    <string name="settings_section_about">About</string>
     <string name="settings_about_loading">Loading component versions…</string>
     <string name="settings_about_too_old">This server is older than this app and does not report component versions. Update the server to see them here.</string>
     <string name="settings_about_error">Could not load component versions: %1$s</string>

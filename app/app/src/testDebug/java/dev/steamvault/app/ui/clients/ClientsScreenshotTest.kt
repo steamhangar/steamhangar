@@ -72,7 +72,8 @@ import org.robolectric.annotation.GraphicsMode
  * shape), so every pixel is reproducible; the demo banner is shown as in
  * demo mode. Profiles: 411 dp at font 1.0 and 360 dp at font 1.3, dark.
  * WP ANDROID-DL-2: the statistics shots are tall enough for the "Loading
- * now" rows, the graph's axis captions and its legend (ANDROID-DL-1 review).
+ * now" rows, the graph's axis captions and its legend (ANDROID-DL-1 review);
+ * WP ANDROID-REDESIGN-1c: and for the hero's mini line and four tiles.
  * The Clients page is rendered in the real [MainShell], which also proves
  * the four bottom-nav labels stay on one line at 360 dp / 1.3.
  */
@@ -101,11 +102,11 @@ class ClientsScreenshotTest {
 
     @Test
     fun downloads_stats_411dp_font100_night() =
-        shoot("downloads_stats_411dp_font100_night", widthDp = 411, heightDp = 720, fontScale = 1.0f, page = Page.STATS)
+        shoot("downloads_stats_411dp_font100_night", widthDp = 411, heightDp = 1000, fontScale = 1.0f, page = Page.STATS)
 
     @Test
     fun downloads_stats_360dp_font130_night() =
-        shoot("downloads_stats_360dp_font130_night", widthDp = 360, heightDp = 900, fontScale = 1.3f, page = Page.STATS)
+        shoot("downloads_stats_360dp_font130_night", widthDp = 360, heightDp = 1250, fontScale = 1.3f, page = Page.STATS)
 
     private enum class Page { CLIENTS, STATS }
 

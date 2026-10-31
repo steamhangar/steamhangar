@@ -652,8 +652,6 @@ class MainActivity : ComponentActivity() {
                 openOnboarding(OnboardingMode.FIRST_RUN)
             },
             onRequestNotificationPermission = { requestNotificationPermission() },
-            // WP D15d: managing PCs moved to the Clients page.
-            onOpenClientsClick = { destination = Destination.CLIENTS },
             demoMode = demoState != null,
         )
     }

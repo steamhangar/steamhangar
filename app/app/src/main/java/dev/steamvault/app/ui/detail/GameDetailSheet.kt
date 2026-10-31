@@ -301,14 +301,23 @@ private fun gameSummaryFrom(detail: GameDetail): GameSummary = GameSummary(
     group_cache_unmeasured_bytes = detail.group_cache_unmeasured_bytes,
 )
 
+/**
+ * The sheet's content (header, tabs, the chosen tab): what [GameDetailSheet]
+ * shows inside its `ModalBottomSheet`. Internal (WP ANDROID-REDESIGN-1c, the
+ * REDESIGN-1b review): Robolectric's root capture does not include the
+ * sheet's dialog window, so `DetailSheetScreenshotTest` renders this
+ * composable directly; [initialTab] lets it shoot each tab. The sheet itself
+ * always opens on Overview.
+ */
 @Composable
-private fun GameDetailSheetBody(
+internal fun GameDetailSheetBody(
     controller: DetailController,
     appid: Int,
     games: List<GameSummary>,
     jobs: List<JobSummary>,
     scope: CoroutineScope,
     onLibraryChanged: () -> Unit,
+    initialTab: DetailTab = DetailTab.OVERVIEW,
 ) {
     val name = controller.detail?.name?.takeIf { it.isNotBlank() }
         // WP API-FIX-4: a Steam tool app's name comes from the server's list.
@@ -343,7 +352,7 @@ private fun GameDetailSheetBody(
         // WP ANDROID-REDESIGN-1b (web LIBRARY-2 tabs): Overview / Depots /
         // Maintenance; every open starts on Overview (web resets `activeTab`
         // in open()), a rotation keeps the choice.
-        var tab by rememberSaveable(appid) { mutableStateOf(DetailTab.OVERVIEW) }
+        var tab by rememberSaveable(appid) { mutableStateOf(initialTab) }
 
         when {
             controller.notTracked -> NotTrackedBody(controller = controller, scope = scope)
@@ -614,6 +623,17 @@ private fun LoadedDetailBody(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 4.dp),
                     )
+                    // WP ANDROID-REDESIGN-1c (REDESIGN-1b review nit): the
+                    // group's figure under the game's own, as on Maintenance.
+                    val groupRow = if (packages.isNotEmpty()) groupGames(games).rows.firstOrNull { it.appid == appid } else null
+                    groupCompletenessLine(groupRow, isGroup = groupRow != null)?.let { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag(DETAIL_OVERVIEW_GROUP_LINE_TAG),
+                        )
+                    }
                     val damaged = repairNoteFor(gameSummary)
                     if (damaged.isNotEmpty()) {
                         Text(text = damaged, style = MaterialTheme.typography.bodySmall, color = VaultColors.StatusStale)
@@ -841,6 +861,9 @@ private fun CompletenessSection(
 
 /** Test tag of the detail sheet's completeness line. */
 internal const val DETAIL_COMPLETE_LINE_TAG = "detail-complete-line"
+
+/** Test tag of the group figure in the Overview "Cache" fact. */
+internal const val DETAIL_OVERVIEW_GROUP_LINE_TAG = "detail-overview-group-line"
 
 /** WP ANDROID-REDESIGN-1b: the sheet's tabs (web LIBRARY-2 `createTabs`). */
 internal enum class DetailTab { OVERVIEW, DEPOTS, MAINTENANCE }

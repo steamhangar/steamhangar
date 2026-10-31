@@ -68,7 +68,9 @@ class AndroidRedesign1bWiringTest {
     @Test
     fun `MUTATION PIN -- the loaded sheet draws the tab row and renders one tab at a time`() {
         assertCalledFrom(sheet, "DetailTabRow(selected = tab, onSelect = onTab)", "LoadedDetailBody")
-        assertCalledFrom(sheet, "var tab by rememberSaveable(appid) { mutableStateOf(DetailTab.OVERVIEW) }", "GameDetailSheetBody")
+        assertCalledFrom(sheet, "var tab by rememberSaveable(appid) { mutableStateOf(initialTab) }", "GameDetailSheetBody")
+        // WP ANDROID-REDESIGN-1c: the sheet opens on Overview; only the screenshot test passes another tab.
+        assertCalledFrom(sheet, "initialTab: DetailTab = DetailTab.OVERVIEW,", "GameDetailSheetBody")
         assertCalledFrom(sheet, "onTab = { tab = it },", "GameDetailSheetBody")
         assertCalledFrom(sheet, "selectedTabIndex = selected.ordinal,", "DetailTabRow")
         assertCalledFrom(sheet, "onClick = { onSelect(tab) },", "DetailTabRow")

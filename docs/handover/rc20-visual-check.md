@@ -123,6 +123,24 @@ tests only. This list is the browser check that closes rc20 (release gate in
       400 px container; compare with `docs/design/rc20/kit.html`.
 - [ ] Web goldens: CI job `web / goldens` green on main.
 
+## Android rc21: accepted deviations (not bugs)
+
+Reviewed in ANDROID-REDESIGN-1a/1b/1c (2026-10-31); a device check should
+not report these:
+
+- Library: the Filters button appears only when games have metadata and
+  folds the metadata panel inline (web: always visible, popover).
+- Detail sheet: no hero band, header art or close button (drag handle,
+  scrim and back close it); Verify / Repair / primary action sit under the
+  header, not in a footer; Overview is one column with store details first
+  (CARD-LAYOUT-1 pin).
+- Downloads: graph 88dp; the four totals sit inside the hero card; the
+  unattributed "Loading now" row has a plain border.
+- Settings: no per-section dirty dots yet (ANDROID-POLISH-1 adds them).
+- Clients: "Manage PCs" stays on the page (only way into the PCs sheet);
+  no "Show update command" and no "Add a device" (open decision
+  ANDROID-ADD-DEVICE-1).
+
 ## Result
 
 Note per page: pass / issue (with width and a short description). Findings go

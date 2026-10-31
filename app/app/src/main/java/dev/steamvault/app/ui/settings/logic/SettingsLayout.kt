@@ -54,8 +54,39 @@ object SettingsLayout {
         SettingsSectionDef("expert", "Expert settings", true),
     )
 
-    /** Open by default: the first section only. */
-    val DEFAULT_OPEN: Set<String> = setOf("vault")
+    /** The section shown first (web `DEFAULT_SECTION`). */
+    const val DEFAULT_SECTION: String = "vault"
+
+    /**
+     * WP ANDROID-REDESIGN-1c: the section strip's labels (web `SECTIONS[].nav`)
+     * and each panel's blurb under its title (web `SECTIONS[].blurb`). Kept
+     * apart from [SECTIONS], whose `SettingsSectionDef(...)` literal the web
+     * twin test pins as it is; the same test pins these two maps.
+     */
+    val NAV_LABELS: Map<String, String> = linkedMapOf(
+        "vault" to "Vault & connection",
+        "window" to "Download window",
+        "disk" to "Disk & cleanup",
+        "notify" to "Notifications",
+        "other" to "Other settings",
+        "steam" to "Steam",
+        "about" to "About",
+        "expert" to "Expert settings",
+    )
+
+    val BLURBS: Map<String, String> = linkedMapOf(
+        "vault" to "Name of this vault and the account it is connected to.",
+        "window" to "When the scheduled sweep may start downloads.",
+        "disk" to "What happens to old chunks after a prefill.",
+        "notify" to "Webhook calls for job and cache events.",
+        "other" to "Settings without a named place on this page.",
+        "steam" to "Identity used to list the games you own.",
+        "about" to "Component versions and their status.",
+        "expert" to "Bandwidth, housekeeping and debug. Changing connection caps asks for confirmation.",
+    )
+
+    /** The strip label of [id] (its title when the map has none). */
+    fun navLabel(id: String): String = NAV_LABELS[id] ?: SECTIONS.firstOrNull { it.id == id }?.title ?: id
 
     private val NORMAL_PLACEMENT: Map<String, String> = linkedMapOf(
         "vault_name" to "vault",

@@ -1,6 +1,9 @@
 package dev.steamvault.app.ui.downloads
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import dev.steamvault.app.ui.theme.VaultColors
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.font.FontFamily
@@ -378,6 +381,12 @@ private fun DownloadsBody(
             focusRowAt = null
         }
     }
+    // WP ANDROID-REDESIGN-1c (web DOWNLOADS-2 at one column, docs/design/
+    // rc20/downloads.html): the bulk bar, the hero, then Active (running and
+    // paused jobs, a paused card carries Resume) and Queue, then Updates
+    // available and Incomplete (only when non-empty), then History with its
+    // range and Delete. Kit section heads (uppercase label, count badge);
+    // 8 dp between rows plus 12 dp above each head (web 20 px between blocks).
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -389,8 +398,11 @@ private fun DownloadsBody(
             val rateCap = rateCapLine(controller.settings, controller.schedule, System.currentTimeMillis())
             DownloadsStatsHeader(statsPoll, scope, rateCap, onRangeChosen = { ranges.statistics = it })
         }
-        item(key = "active-heading") { SectionHeading(stringResource(R.string.downloads_section_active)) }
-        if (activeModels.isEmpty()) {
+
+        // ---- Active: running, then paused (web folds Paused into Active) ----
+        val activeCount = activeModels.size + pausedModels.size
+        item(key = "active-heading") { SectionHead(stringResource(R.string.downloads_section_active), activeCount) }
+        if (activeCount == 0) {
             item(key = "active-empty") { EmptyLine(stringResource(R.string.downloads_active_empty)) }
         } else {
             items(activeModels, key = { "active-${it.jobId}" }) { model ->
@@ -403,10 +415,6 @@ private fun DownloadsBody(
                     onCancel = { controller.cancel(scope, model.jobId) },
                 )
             }
-        }
-
-        if (pausedModels.isNotEmpty()) {
-            item(key = "paused-heading") { SectionHeading(stringResource(R.string.downloads_section_paused)) }
             items(pausedModels, key = { "paused-${it.jobId}" }) { model ->
                 JobCard(
                     model = model,
@@ -419,7 +427,36 @@ private fun DownloadsBody(
             }
         }
 
-        // WP UPD-6: between Paused and Queue (web order), only when non-empty.
+        // ---- Queue ---------------------------------------------------------
+        item(key = "queue-heading") {
+            SectionHead(stringResource(R.string.downloads_section_queue), queueModels.size)
+        }
+        if (queueModels.isEmpty()) {
+            item(key = "queue-empty") { EmptyLine(stringResource(R.string.downloads_queue_empty)) }
+        } else {
+            items(queueModels, key = { "queue-${it.jobId}" }) { model ->
+                QueueRow(
+                    model = model,
+                    total = queueModels.size,
+                    busy = model.jobId in controller.busyJobIds,
+                    moveBusy = controller.moveInFlight,
+                    onMove = { move -> controller.moveQueued(scope, model.jobId, move) },
+                    onRemove = { controller.cancel(scope, model.jobId) },
+                )
+            }
+            item(key = "queue-hint") {
+                val base = stringResource(R.string.downloads_queue_hint_base)
+                val hint = if (partition.paused.isNotEmpty()) {
+                    base + " " + stringResource(R.string.downloads_queue_hint_paused_suffix)
+                } else {
+                    base
+                }
+                Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        // WP UPD-6: "Updates available", only when non-empty (web: the
+        // middle column, after Active + Queue at one column).
         if (updateRows.isNotEmpty()) {
             item(key = "updates-heading") {
                 UpdatesHeader(
@@ -459,35 +496,12 @@ private fun DownloadsBody(
             }
         }
 
-        item(key = "queue-heading") {
-            SectionHeading(stringResource(R.string.downloads_section_queue, queueModels.size))
-        }
-        if (queueModels.isEmpty()) {
-            item(key = "queue-empty") { EmptyLine(stringResource(R.string.downloads_queue_empty)) }
-        } else {
-            items(queueModels, key = { "queue-${it.jobId}" }) { model ->
-                QueueRow(
-                    model = model,
-                    total = queueModels.size,
-                    busy = model.jobId in controller.busyJobIds,
-                    moveBusy = controller.moveInFlight,
-                    onMove = { move -> controller.moveQueued(scope, model.jobId, move) },
-                    onRemove = { controller.cancel(scope, model.jobId) },
-                )
-            }
-            item(key = "queue-hint") {
-                val base = stringResource(R.string.downloads_queue_hint_base)
-                val hint = if (partition.paused.isNotEmpty()) {
-                    base + " " + stringResource(R.string.downloads_queue_hint_paused_suffix)
-                } else {
-                    base
-                }
-                Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // ---- History: label + Delete in one head row, then its range -------
+        item(key = "history-heading") {
+            SectionHead(stringResource(R.string.downloads_section_history)) {
+                if (historyDelete != null) HistoryDeleteButton(historyDelete)
             }
         }
-
-        item(key = "history-heading") { SectionHeading(stringResource(R.string.downloads_section_history)) }
-        if (historyDelete != null) item(key = "history-delete") { HistoryDeleteButton(historyDelete) }
         item(key = "history-range") {
             RangeChips(
                 label = stringResource(R.string.traffic_range_history),
@@ -544,9 +558,32 @@ private fun downloadsSubtitle(partition: PartitionedJobs, idleLine: String): Str
     return if (bits.isEmpty()) idleLine else bits.joinToString(" · ")
 }
 
+/**
+ * A kit section head (web `.sechd`): the uppercase label (a heading) with an
+ * optional count badge, and [actions] on the right (History's Delete).
+ */
 @Composable
-private fun SectionHeading(text: String) {
-    Text(text = text, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+private fun SectionHead(text: String, count: Int? = null, actions: (@Composable () -> Unit)? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 34.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionLabel(text)
+        if (count != null && count > 0) {
+            Text(
+                count.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = VaultColors.Dim,
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .background(VaultColors.Raised2, RoundedCornerShape(percent = 50))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+        if (actions != null) {
+            Box(Modifier.weight(1f)) { actions() }
+        }
+    }
 }
 
 @Composable

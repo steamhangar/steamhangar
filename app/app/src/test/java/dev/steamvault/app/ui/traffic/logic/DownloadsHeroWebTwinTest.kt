@@ -125,4 +125,31 @@ class DownloadsHeroWebTwinTest {
             if (!js.contains(f)) fail("VALUE DRIFT: lib/traffic-view.js no longer contains \"$f\" -- update mergeLive / mergeNow (TrafficView.kt).")
         }
     }
+
+    /** WP ANDROID-REDESIGN-1c: the hero's anatomy (`heroModel`): label, the
+     * four tiles, the figure split, the caption and the mini line. */
+    @Test
+    fun `hero anatomy words and rules`() {
+        val tiles = HERO_TILES.joinToString(",\n  ") { t ->
+            "Object.freeze({ key: \"${t.key}\", label: \"${t.label}\", caption: ${t.caption?.let { "\"$it\"" } ?: "null"} })"
+        }
+        assertFragments(
+            listOf(
+                "export const HERO_LABEL = \"$HERO_LABEL\";",
+                "export const HERO_TILES = Object.freeze([\n  $tiles,\n]);",
+                "if (text === null || text === undefined || text === \"\" || text === DASH) return { value: DASH, unit: \"\" };",
+                "if (s.endsWith(\"%\")) return { value: s.slice(0, -1), unit: \"%\" };",
+                "return i > 0 ? { value: s.slice(0, i), unit: s.slice(i + 1) } : { value: s, unit: \"\" };",
+                "if (!throughput || feedState(throughput) !== \"ok\") return null;",
+                "text: \"no device loading\",",
+                "return { text: `\${n} \${n === 1 ? \"device\" : \"devices\"} loading`, title: `\${row.detail}. \${row.title}` };",
+                "const m = /^(Limit )(\\S+ \\S+?)(,.*)?$/.exec(rateCap);",
+                "return cached ? [\"Prefill runner \", { b: size }, \" of it, \", { b: cached }, \" from the cache\"] : [\"Prefill runner \", { b: size }, \" of it\"];",
+                "if (devices) caption.push(...(caption.length ? [\" · \"] : []), devices.text);",
+                "{ key: \"average\", parts: [\"Avg while loading \", { b: byKey.get(\"average\").value }], title: byKey.get(\"average\").title },",
+                "{ key: \"peak\", parts: [\"Peak \", { b: byKey.get(\"peak\").value }], title: byKey.get(\"peak\").title },",
+                "meter: spec.key === \"hit-rate\" && tile.value !== DASH ? meter : null,",
+            ),
+        )
+    }
 }
