@@ -1347,3 +1347,9 @@ These are not style preferences; each entry cost a review round to learn.
   scheduler plus `runCurrent()`.
 - **`VaultApiClient.execute` treats an empty body as an error**; 204
   routes need the text helper (`sendForText`).
+- **A source-scan pin counting a named argument (`execute = true`) also
+  hits helpers with the same argument name**: anchor pins on the receiver
+  call (`repository.repair(...)`).
+- **Cross-flow late-answer tests need a gate per call** (a fake repository
+  that holds each request until released): start A, reset, start B,
+  release A in each of B's states.

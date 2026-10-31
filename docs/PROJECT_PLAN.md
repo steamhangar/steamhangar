@@ -3755,7 +3755,7 @@ below carry their own later dates, item 12 is the current one).
       - [x] **CACHE-REPAIR-UI-1** web part (6e21a89; Downloads "Incomplete" row, detail sheet Maintenance tab and header; dry run -> confirm with per-depot counts -> execute -> "Show job"; per-flow token against late answers) (web + android) Repair button on incomplete
         rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
         counts, execute, show job).
-      - [ ] CACHE-REPAIR-UI-1 Android twin: strings and templates exported
+      - [x] (ANDROID-DL-2) CACHE-REPAIR-UI-1 Android twin: strings and templates exported
         from `web/js/lib/cache-repair.js`; drop the `DAMAGED_NOTE` pin in
         `CacheCompletenessWebTwinTest.kt` when adopting the new note
       - [ ] nit (CACHE-REPAIR-UI-1 review): the sheet's Repair buttons use
@@ -3892,7 +3892,7 @@ below carry their own later dates, item 12 is the current one).
         claimant rule. Until
         rollout: after the rc21 deploy run one verify of 553850 (heals the
         mapping); note in the rc21 rollout Antrag.
-      - [ ] Android follow-up GROUP-VERIFIED-1 (S2): show the group
+      - [x] (ANDROID-DL-2) Android follow-up GROUP-VERIFIED-1 (S2): show the group
         "not measured: N package depots (X GB)" note; Android demo
         `groupPct` (`DemoState.kt:169`) differs from the web demo's
         `demoGroupFields` since GROUP-VERIFIED-1.
@@ -3960,7 +3960,7 @@ below carry their own later dates, item 12 is the current one).
           line; TalkBack focus stays on "Show N more" (web moves it to the
           first new row); the two graph fills are hard to tell apart in the
           night golden (REDESIGN-1b); import order in `DownloadsStats.kt`.
-        - [ ] **ANDROID-DL-2** (after NOW-LOADING-1 is on main) the
+        - [x] **ANDROID-DL-2** (6c582af + goldens ee1c40c, review fixes c2dd930/48393af; also closes the ANDROID-DL-1 golden-height nit and moves focus after "Show more") (after NOW-LOADING-1 is on main) the
           "Loading now" source rows (twin of `loadingNowModel`), the Repair
           flow (CACHE-REPAIR-UI-1 twin) and the GROUP-VERIFIED-1 S2 group
           note incl. the demo `groupPct` alignment.
@@ -3975,6 +3975,12 @@ below carry their own later dates, item 12 is the current one).
           current step-1 fields, not the verified ones; no Remove on the
           Clients page cards (web has it, REDESIGN-1a); demo Delete history
           does not zero the synthetic traffic like the web demo's "since" cut.
+        - [ ] nit (ANDROID-DL-2 review): focus after "Show more" goes to a
+          wrapper Box (input focus; TalkBack accessibility focus may not
+          follow, check on a device); "Show job" only scrolls, no focus;
+          Repair only in the sheet's completeness block (web also in header
+          and Maintenance tab, REDESIGN-1b); a flow reset during execute only
+          re-reads (inherited from the web).
         - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
           Clients cards and Add a device tabs.
         - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
