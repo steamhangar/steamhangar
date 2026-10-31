@@ -29,6 +29,7 @@ import dev.steamvault.app.demo.DemoAboutRepository
 import dev.steamvault.app.demo.DemoCacheRepository
 import dev.steamvault.app.demo.DemoClientsRepository
 import dev.steamvault.app.demo.DemoGamesRepository
+import dev.steamvault.app.demo.DemoHistoryRepository
 import dev.steamvault.app.demo.DemoJobsRepository
 import dev.steamvault.app.demo.DemoMappingRepository
 import dev.steamvault.app.demo.DemoScheduleRepository
@@ -53,6 +54,7 @@ import dev.steamvault.app.repo.VaultCacheRepository
 import dev.steamvault.app.repo.VaultCardInfoRepository
 import dev.steamvault.app.repo.VaultClientsRepository
 import dev.steamvault.app.repo.VaultGamesRepository
+import dev.steamvault.app.repo.VaultHistoryRepository
 import dev.steamvault.app.repo.VaultJobsRepository
 import dev.steamvault.app.repo.VaultMappingRepository
 import dev.steamvault.app.repo.VaultScheduleRepository
@@ -552,6 +554,7 @@ class MainActivity : ComponentActivity() {
                 demoMode = true,
                 scheduleRepository = remember(demo) { DemoScheduleRepository(demo) },
                 settingsRepository = remember(demo) { DemoSettingsRepository(demo) },
+                historyRepository = remember(demo) { DemoHistoryRepository(demo) },
             )
             return
         }
@@ -570,6 +573,7 @@ class MainActivity : ComponentActivity() {
             demoMode = false,
             scheduleRepository = remember(client) { VaultScheduleRepository(client) },
             settingsRepository = remember(client) { VaultSettingsRepository(client) },
+            historyRepository = remember(client) { VaultHistoryRepository(client) },
         )
     }
 
@@ -586,6 +590,7 @@ class MainActivity : ComponentActivity() {
                 ranges = trafficRanges,
                 onManagePcs = { clientsControllerState?.open(lifecycleScope) },
                 demoMode = true,
+                clientsRepository = remember(demo) { DemoClientsRepository(demo) },
             )
             return
         }
@@ -599,6 +604,7 @@ class MainActivity : ComponentActivity() {
             ranges = trafficRanges,
             onManagePcs = { clientsControllerState?.open(lifecycleScope) },
             demoMode = false,
+            clientsRepository = remember(client) { VaultClientsRepository(client) },
         )
     }
 

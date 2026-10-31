@@ -296,7 +296,7 @@ data class ClientActivityOut(
     /** WP D15-NAMES: the operator-set name, `null` when none. */
     val name: String? = null,
     /** WP D15-NAMES: the address a rename writes to; `null` = cannot be
-     * named. Read by nothing in the app yet (renaming is web-only). */
+     * named. Rename writes here (WP ANDROID-GAPS-1). */
     val name_addr: String? = null,
     /** WP D15-NAMES: [name] when set, else the agent's client_id, else the
      * address. `null` from a server older than D15-NAMES. */

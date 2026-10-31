@@ -57,8 +57,9 @@ import kotlin.math.sin
  * WP D15-NAMES: client rows carry the server's name fields (`name`,
  * `name_addr`, `display_name`). Names are stored per address
  * ([DEMO_CLIENT_NAMES]); the demo names one agent so the Clients page shows
- * an operator-set title with "vault-agent on <PC name>" under it. Renaming
- * and "Delete history" are web-only, so the demo has no way to change them.
+ * an operator-set title with "vault-agent on <PC name>" under it. The
+ * demo's Rename and "Delete history" (WP ANDROID-GAPS-1) change the names
+ * and the job list in [DemoState]; the synthetic figures stay as they are.
  */
 
 /** The demo state [DemoTrafficRepository] reads, taken in one lock. */
@@ -66,6 +67,9 @@ data class DemoTrafficSnapshot(
     val runningJobs: List<JobSummary>,
     val games: List<GameSummary>,
     val agents: List<ClientOut>,
+    /** Operator-set names by address; the demo's Rename changes them
+     * (WP ANDROID-GAPS-1). */
+    val names: Map<String, String> = DEMO_CLIENT_NAMES,
 )
 
 /** Operator-set names by address (WP D15-NAMES; the server's
@@ -377,8 +381,8 @@ private val IDLE = LoadingNowOut(loading = false, bytes_per_second = 0.0, apps =
  * be named), [fallback] being its title without an operator-set name. */
 private data class DemoName(val name: String?, val nameAddr: String?, val displayName: String)
 
-private fun demoName(addr: String?, fallback: String): DemoName {
-    val name = addr?.let { DEMO_CLIENT_NAMES[it] }
+private fun demoName(addr: String?, fallback: String, names: Map<String, String>): DemoName {
+    val name = addr?.let { names[it] }
     return DemoName(name, addr, name ?: fallback)
 }
 
@@ -404,7 +408,7 @@ fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Lon
         val lastCache = if (online) iso(nowMs - 60_000L) else a.last_seen_in_cache_log
         val lastActive = listOfNotNull(lastCache, a.last_reported_at).maxOrNull()
         val addresses = a.source_addrs.take(1)
-        val names = demoName(addresses.firstOrNull(), a.client_id)
+        val names = demoName(addresses.firstOrNull(), a.client_id, snapshot.names)
         ClientActivityOut(
             key = "agent:${a.client_id}",
             kind = "agent",
@@ -444,8 +448,8 @@ fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Lon
             display_name = names.displayName,
         )
     }.toMutableList()
-    val loading = demoName("10.0.0.61", "10.0.0.61")
-    val old = demoName("10.0.0.63", "10.0.0.63")
+    val loading = demoName("10.0.0.61", "10.0.0.61", snapshot.names)
+    val old = demoName("10.0.0.63", "10.0.0.63", snapshot.names)
     // Two agentless addresses: a machine loading right now, and one last
     // active days ago (still listed: seen within 30 days).
     clients.add(
