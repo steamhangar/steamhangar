@@ -484,7 +484,7 @@ class LiveTier:
         now_cell = _floor(epoch, CELL_SECONDS)
         start = now_cell - CURRENT_SECONDS
         total = 0
-        runner = 0
+        runner = [0, 0, 0, 0]
         for key in range(start, now_cell + CELL_SECONDS, CELL_SECONDS):
             by_addr = cells.get(key)
             if not by_addr:
@@ -493,14 +493,17 @@ class LiveTier:
             for addr, c in by_addr.items():
                 total += c[_BYTES]
                 if addr != OVERFLOW_ADDR and is_runner(addr, iso):
-                    runner += c[_BYTES]
+                    for i in range(4):
+                        runner[i] += c[i]
         seconds = max(1.0, epoch - start)
         return LiveCurrent(
             bytes_per_second=total / seconds,
-            runner_bytes_per_second=runner / seconds,
+            runner_bytes_per_second=runner[_BYTES] / seconds,
             window_start=_iso(start),
             window_end=to_utc_iso(now),
             window_seconds=int(round(seconds)),
+            runner_hit_bytes_per_second=runner[_HIT] / seconds,
+            runner_miss_bytes_per_second=runner[_MISS] / seconds,
         )
 
     def buckets(
@@ -628,6 +631,12 @@ class LiveCurrent:
     window_start: str
     window_end: str
     window_seconds: int
+    #: WP RUNNER-SPLIT-1: the runner's part split by cache status. HIT = it
+    #: read chunks the cache already had (a verify), MISS = the cache fetched
+    #: them from upstream (the prefill itself). BYPASS bytes are in neither,
+    #: so ``hit + miss <= runner_bytes_per_second``.
+    runner_hit_bytes_per_second: float = 0.0
+    runner_miss_bytes_per_second: float = 0.0
 
 
 def minute_epoch(iso: str) -> int | None:

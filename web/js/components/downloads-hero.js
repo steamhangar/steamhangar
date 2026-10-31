@@ -5,7 +5,7 @@
  *   - a head row: the "Throughput" section label (WP WEB-FIX-20.2, was
  *     "Speed") and the statistics range seg;
  *   - the live block: the current speed as the big number, a status pill
- *     (Serving / Downloading / Idle, see `heroStatus`), and one caption
+ *     (Serving / Downloading / Verifying / Idle, see `heroStatus`), and one caption
  *     line with the upstream limit and how many devices are loading (the
  *     former "Client downloading" row, WP CLIENT-ROW-1, folded in here);
  *   - the throughput graph (96px, grid lines) beside it: WP WEB-FIX-20.2
@@ -72,10 +72,17 @@ export const HERO_TILES = Object.freeze([
 ]);
 
 /** The status pill words (kit.html: "Downloading", mockup idle: "Idle";
- * WP WEB-FIX-20.2: "Serving"). */
+ * WP WEB-FIX-20.2: "Serving"; WP RUNNER-SPLIT-1: "Verifying", the verify
+ * kind's own word, as the job card's "Verifying files, no download speed"). */
 export const PILL_DOWNLOADING = "Downloading";
 export const PILL_SERVING = "Serving";
+export const PILL_VERIFYING = "Verifying";
 export const PILL_IDLE = "Idle";
+
+/** A finite, non-negative number, else `null`. */
+function rateOf(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
 
 /** The hero's section label (WP WEB-FIX-20.2, was "Speed"). */
 export const HERO_LABEL = "Throughput";
@@ -84,22 +91,30 @@ export const HERO_LABEL = "Throughput";
  * The hero's status pill from `current` (WP WEB-FIX-20.2). From the
  * hangar's view a client pulling from the cache is SERVING, not
  * downloading; the hangar itself downloads only while its prefill runner
- * pulls content in (`current.runner_bytes_per_second > 0`, the runner's
- * part of the current speed: the live tier's on every range since WP
- * GRAPH-RECENT-1, the swept window's only from an older server). So:
+ * pulls content in from the internet. `current.runner_bytes_per_second`
+ * is the runner's part of the current speed (the live tier's on every range
+ * since WP GRAPH-RECENT-1, the swept window's only from an older server);
+ * WP RUNNER-SPLIT-1 splits it: `runner_hit_bytes_per_second` is what the
+ * runner read from the cache (a verify), everything else of the runner's
+ * part (MISS, and BYPASS, which is in neither split figure) came from the
+ * internet. So:
  *
- *   - runner traffic -> "Downloading" (`running`, `.pill.run`);
+ *   - runner traffic that is not all cache HITs -> "Downloading"
+ *     (`running`, `.pill.run`);
+ *   - runner traffic that is all HITs -> "Verifying" (`verify`, `run`):
+ *     the runner checks files and downloads nothing;
  *   - any other traffic -> "Serving";
  *   - none -> "Idle" (`notinuse`, neutral);
  *   - no current figure -> no pill.
  *
+ * An older server without `runner_hit_bytes_per_second` gives no split: its
+ * runner traffic reads "Downloading", as before rc21.
+ *
  * "Serving" is no status kind of its own: docs/design/status-vocabulary.json
  * is a contract the Android `StatusKind` enum must cover kind for kind
  * (TOKENS-SYNC-1), so it reuses `cached` (check glyph, `ok` tone: green,
- * the graph's "served from cache" colour) with its own word.
- *
- * The current figure has no runner hit/miss split, so a runner that only
- * verifies (reads cached chunks) also reads "Downloading".
+ * the graph's "served from cache" colour) with its own word. "Verifying"
+ * is the existing `verify` kind with its own word, no new kind either.
  * Pure.
  * @param {object | null | undefined} current
  * @returns {null | {kind: string, text: string, tone: string | null}}
@@ -107,8 +122,11 @@ export const HERO_LABEL = "Throughput";
 export function heroStatus(current) {
   const bps = current ? current.bytes_per_second : null;
   if (typeof bps !== "number" || !Number.isFinite(bps) || bps < 0) return null;
-  const runner = current.runner_bytes_per_second;
-  if (typeof runner === "number" && Number.isFinite(runner) && runner > 0) {
+  const runner = rateOf(current.runner_bytes_per_second);
+  if (runner !== null && runner > 0) {
+    // Same window, same divisor on the server: equal bytes give equal rates.
+    const hit = rateOf(current.runner_hit_bytes_per_second);
+    if (hit !== null && hit > 0 && hit >= runner) return { kind: "verify", text: PILL_VERIFYING, tone: "run" };
     return { kind: "running", text: PILL_DOWNLOADING, tone: "run" };
   }
   if (bps > 0) return { kind: "cached", text: PILL_SERVING, tone: "ok" };
@@ -255,19 +273,18 @@ export const LEGEND_INTERNET = "From the internet";
 /**
  * WP WEB-FIX-20.2: the stacked two-series geometry. Per point the total
  * speed (`bytes_per_second`, everything the cache served) splits by its
- * `hit_bytes` share of `bytes_served`: that part was served from the cache
- * (clients' hits), the rest came from the internet (clients' misses and
- * the prefill runner, whose points carry no hit/miss split of their own).
- * The internet band sits on top, so the top line is the total and the
- * scale (and the axis's "highest") is the total's.
- * Known gap: the series' `hit_bytes` counts clients only, so the runner's
- * cache hits (e.g. during a verify) land in the "from the internet" band
- * until the API exposes a runner hit/miss split (roadmap RUNNER-SPLIT-1).
+ * cache share of `bytes_served`: `hit_bytes` (clients' hits) plus, since WP
+ * RUNNER-SPLIT-1, `runner_hit_bytes` (the prefill runner's reads from the
+ * cache, e.g. a verify) was served from the cache; the rest (clients' and
+ * the runner's misses, bypasses) came from the internet. The internet band
+ * sits on top, so the top line is the total and the scale (and the axis's
+ * "highest") is the total's. A point without `runner_hit_bytes` (a server
+ * before rc21) counts all runner traffic as from the internet, as before.
  *
  * `null` when any point lacks the split (an older server's tiers): the
  * graph then draws the single total line. Coordinates as `seriesGeometry`.
  * Pure.
- * @param {Array<{bytes_per_second: number, bytes_served?: number, hit_bytes?: number}>} points
+ * @param {Array<{bytes_per_second: number, bytes_served?: number, hit_bytes?: number, runner_hit_bytes?: number}>} points
  * @param {{width: number, height: number}} box
  * @returns {null | {served: {line: string, area: string}, internet: {line: string, area: string}, maxBytesPerSecond: number}}
  */
@@ -276,7 +293,8 @@ export function splitGeometry(points, { width, height }) {
   const num = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
   if (!points.every((p) => p && num(p.bytes_served) && num(p.hit_bytes))) return null;
   const totals = points.map((p) => (num(p.bytes_per_second) ? p.bytes_per_second : 0));
-  const served = points.map((p, i) => (p.bytes_served > 0 ? totals[i] * Math.min(1, p.hit_bytes / p.bytes_served) : 0));
+  const cacheBytes = (p) => p.hit_bytes + (num(p.runner_hit_bytes) ? p.runner_hit_bytes : 0);
+  const served = points.map((p, i) => (p.bytes_served > 0 ? totals[i] * Math.min(1, cacheBytes(p) / p.bytes_served) : 0));
   const max = Math.max(...totals);
   const round = (v) => Math.round(v * 10) / 10;
   const n = points.length;

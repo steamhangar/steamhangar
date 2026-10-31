@@ -86,6 +86,11 @@ and kept apart everywhere a figure describes CLIENTS:
   itself, not a client missing the cache. The runner's own share is
   ``summary.prefill_runner`` and the series' ``runner_bytes``, so
   ``bytes_served == client_bytes_served + prefill_runner.bytes_served``.
+  WP RUNNER-SPLIT-1: the series points (both tiers and the live ring) carry
+  ``runner_hit_bytes``/``runner_miss_bytes`` and every ``current`` the
+  ``runner_hit``/``runner_miss_bytes_per_second``, so the graph can count a
+  verifying runner's HITs as "served from cache" and the pill can tell a
+  runner that downloads from one that only verifies. Additive fields only.
 * ``/v1/clients/overview``: one ``kind: "runner"`` entry ("Prefill runner")
   carries every runner row; agent and address entries carry only the rest.
   Each traffic row is in exactly one entry, so the entries' ``stats`` add up
@@ -167,6 +172,12 @@ class CurrentOut(BaseModel):
     #: WP METRIC-AUDIT: the prefill runner's part of ``bytes_per_second``
     #: (the latter is ALL traffic, runner included).
     runner_bytes_per_second: float
+    #: WP RUNNER-SPLIT-1: the runner's part split by cache status: HIT bytes
+    #: (chunks the cache already had, e.g. a verify) and MISS bytes (fetched
+    #: from upstream: the prefill downloads). BYPASS is in neither, so
+    #: hit + miss <= ``runner_bytes_per_second``. Absent before rc21.
+    runner_hit_bytes_per_second: float = 0.0
+    runner_miss_bytes_per_second: float = 0.0
 
 
 class RunnerTrafficOut(BaseModel):
@@ -246,6 +257,9 @@ class LiveCurrentOut(BaseModel):
     window_start: str
     window_end: str
     window_seconds: int
+    #: WP RUNNER-SPLIT-1: as in ``CurrentOut``, from the ring.
+    runner_hit_bytes_per_second: float = 0.0
+    runner_miss_bytes_per_second: float = 0.0
 
 
 class ThroughputNowOut(BaseModel):
@@ -299,7 +313,10 @@ class SeriesPointOut(BaseModel):
     requests: int
     #: WP D15-RUNNER: the prefill runner's bytes in the bucket.
     runner_bytes: int
-    #: bytes_served / bucket_seconds (the bucket's wall-clock average).
+    #: bytes_served / bucket_seconds (the bucket's wall-clock average). WP
+    #: RUNNER-SPLIT-1 (GRAPH-RECENT-1 nit N1): the running bucket, when it
+    #: comes from the ring, divides by the seconds elapsed in it instead, so
+    #: early in a bucket the newest point is not far below the header speed.
     bytes_per_second: float
     #: Largest 5-minute total inside the bucket / 300 s (the 1-minute tier's
     #: rows are their own peak: bytes / 60 s).
@@ -308,6 +325,12 @@ class SeriesPointOut(BaseModel):
     #: in-memory ring, for a newest bucket the sweep has not fully read yet;
     #: such a bucket is its own peak).
     source: Literal["persisted", "live"] = "persisted"
+    #: WP RUNNER-SPLIT-1: ``runner_bytes`` split by cache status (HIT = read
+    #: from the cache, e.g. a verify; MISS = fetched from the internet). The
+    #: graph's "served from cache" is ``hit_bytes + runner_hit_bytes``.
+    #: BYPASS is in neither. Absent before rc21.
+    runner_hit_bytes: int = 0
+    runner_miss_bytes: int = 0
 
 
 class SeriesOut(BaseModel):
@@ -621,16 +644,18 @@ def get_throughput(
                 spec.tier,
             )
             if window is not None:
+                runner_window = traffic.scoped_totals(
+                    conn, traffic.TIER_5M, window.start, runner
+                )
                 current = CurrentOut(
                     bytes_per_second=traffic.server_bytes_since(conn, window.start)
                     / window.seconds,
                     window_start=window.start,
                     window_end=window.end,
                     window_seconds=window.seconds,
-                    runner_bytes_per_second=traffic.scoped_totals(
-                        conn, traffic.TIER_5M, window.start, runner
-                    ).bytes_served
-                    / window.seconds,
+                    runner_bytes_per_second=runner_window.bytes_served / window.seconds,
+                    runner_hit_bytes_per_second=runner_window.hit_bytes / window.seconds,
+                    runner_miss_bytes_per_second=runner_window.miss_bytes / window.seconds,
                 )
                 active_now = len(traffic.active_addrs(conn, now, minutes, clients))
                 runner_now = bool(traffic.active_addrs(conn, now, minutes, runner))
@@ -702,21 +727,29 @@ def _series_point(
     runner_part: traffic.Totals,
     spec: traffic.RangeSpec,
     ring: dict[int, live_tier.RingBucket],
+    now_epoch: float | None = None,
 ) -> SeriesPointOut:
     """One graph point: the swept bucket, or the ring's where the ring holds
     more of it (``live_tier.prefer_ring``, WP GRAPH-RECENT-1).
 
     One source per point, never a sum, so nothing is counted twice. A ring
     bucket is its own peak (bytes / bucket length, as a 1-minute row is).
+    The running ring bucket (``now_epoch`` inside it) holds only the seconds
+    elapsed so far, so its rate divides by those (WP RUNNER-SPLIT-1, nit N1
+    of GRAPH-RECENT-1), at least one second, as ``LiveTier.current`` does.
+    WP RUNNER-SPLIT-1: both sources carry the runner's HIT / MISS bytes.
     """
     when = live_tier.minute_epoch(point.bucket_at) if ring else None
     bucket = ring.get(when) if when is not None else None
     swept = live_tier.LiveTotals(
         requests=point.totals.requests, bytes_served=point.totals.bytes_served
     )
-    if bucket is not None and live_tier.prefer_ring(bucket.all, swept):
+    if when is not None and bucket is not None and live_tier.prefer_ring(bucket.all, swept):
         whole, run = bucket.all, bucket.runner
-        rate = whole.bytes_served / spec.bucket_seconds
+        seconds: float = spec.bucket_seconds
+        if now_epoch is not None and when <= now_epoch < when + spec.bucket_seconds:
+            seconds = max(1.0, now_epoch - when)
+        rate = whole.bytes_served / seconds
         return SeriesPointOut(
             t=point.bucket_at,
             bytes_served=whole.bytes_served,
@@ -724,6 +757,8 @@ def _series_point(
             miss_bytes=whole.miss_bytes - run.miss_bytes,
             requests=whole.requests - run.requests,
             runner_bytes=run.bytes_served,
+            runner_hit_bytes=run.hit_bytes,
+            runner_miss_bytes=run.miss_bytes,
             bytes_per_second=rate,
             peak_bytes_per_second=rate,
             source="live",
@@ -736,6 +771,8 @@ def _series_point(
         miss_bytes=clients.miss_bytes,
         requests=clients.requests,
         runner_bytes=runner_part.bytes_served,
+        runner_hit_bytes=runner_part.hit_bytes,
+        runner_miss_bytes=runner_part.miss_bytes,
         bytes_per_second=point.totals.bytes_served / spec.bucket_seconds,
         peak_bytes_per_second=point.peak_bucket_bytes / traffic.peak_unit_seconds(spec.tier),
     )
@@ -770,6 +807,7 @@ def get_throughput_series(
         else {}
     )
     empty = traffic.Totals()
+    now_epoch = now.timestamp()
     return SeriesOut(
         event_feed=feed,
         range=range,
@@ -777,7 +815,9 @@ def get_throughput_series(
         bucket_seconds=spec.bucket_seconds,
         range_start=spec.start,
         points=[
-            _series_point(point, runner_rows.get(point.bucket_at, empty), spec, ring_rows)
+            _series_point(
+                point, runner_rows.get(point.bucket_at, empty), spec, ring_rows, now_epoch
+            )
             for point in points
         ],
     )
@@ -797,6 +837,9 @@ class LivePointOut(BaseModel):
     runner_bytes: int
     bytes_per_second: float
     peak_bytes_per_second: float
+    #: WP RUNNER-SPLIT-1: as in ``SeriesPointOut``.
+    runner_hit_bytes: int = 0
+    runner_miss_bytes: int = 0
 
 
 class LiveOut(BaseModel):
@@ -882,6 +925,8 @@ def _live_current_out(current: live_tier.LiveCurrent) -> LiveCurrentOut:
         window_start=current.window_start,
         window_end=current.window_end,
         window_seconds=current.window_seconds,
+        runner_hit_bytes_per_second=current.runner_hit_bytes_per_second,
+        runner_miss_bytes_per_second=current.runner_miss_bytes_per_second,
     )
 
 
@@ -937,6 +982,8 @@ def get_throughput_live(
                 miss_bytes=p.all_totals.miss_bytes - p.runner.miss_bytes,
                 requests=p.all_totals.requests - p.runner.requests,
                 runner_bytes=p.runner.bytes_served,
+                runner_hit_bytes=p.runner.hit_bytes,
+                runner_miss_bytes=p.runner.miss_bytes,
                 bytes_per_second=p.all_totals.bytes_served / p.bucket_seconds,
                 peak_bytes_per_second=p.peak_bytes_per_second,
             )

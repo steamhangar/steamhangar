@@ -263,6 +263,13 @@ def test_the_24h_series_is_zero_filled_5_minute_buckets_ending_now(feed) -> None
     assert sum(1 for p in points if p["bytes_served"] == 0) >= 286
     busy = [p for p in points if p["bytes_served"]]
     for point in busy:
+        if point is points[-1] and point["source"] == "live":
+            # WP RUNNER-SPLIT-1 (GRAPH-RECENT-1 nit N1): the running bucket,
+            # stitched from the ring, divides by its elapsed seconds (wall
+            # clock here, so only the bounds are fixed): 1 s .. 300 s.
+            assert point["bytes_served"] / 300 <= point["bytes_per_second"] <= point["bytes_served"]
+            assert point["peak_bytes_per_second"] == pytest.approx(point["bytes_per_second"])
+            continue
         assert point["bytes_per_second"] == pytest.approx(point["bytes_served"] / 300)
         assert point["peak_bytes_per_second"] == pytest.approx(point["bytes_served"] / 300)
 
