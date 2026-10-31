@@ -1318,3 +1318,13 @@ These are not style preferences; each entry cost a review round to learn.
 - **Golden refresh = push the head to `wp/<name>-goldens`**; the bot
   commits there, then fast-forward the normal branch to the bot commit and
   push it for the verifying run (the bot commit itself starts no run).
+- **"timed out waiting for X" followed by a null in the next test is
+  usually state left behind, not the clock.** Look for module state that
+  only clears on an event arriving while the view is mounted (Clients
+  `removedIds`); end the test on that event instead of raising timeouts.
+- **A demo item exactly on a range boundary makes a second `Date.now()`
+  a race**: freeze only Date (`mock.timers.enable({apis:["Date"]})`) and
+  reseed under the frozen clock.
+- **A `[hidden]` guard must also win**: a state class (`.selecting`,
+  `.compact`) or a page-scoped kit rule that sets `display`, also inside
+  @media, needs its own `<sel>[hidden]` guard (Lint 3 checks this).

@@ -3654,7 +3654,7 @@ below carry their own later dates, item 12 is the current one).
         the remaining first read (no web change). Branch
         `wp/rc21-ui-cold-cached-1` 0a821c0, review PASS; check the walk
         duration in the next cold test.
-      - [ ] **FLAKY-DEMO-24H-1** (web test) `web/tests/demo-data-traffic.test.js:105`
+      - [x] **FLAKY-DEMO-24H-1** (bb75706, TEST-HYGIENE-1; Date frozen via mock.timers; the clients-merged-card flake was state left by the Remove test in `views/clients.js` `removedIds`, fixed by waiting for the store snapshot) (web test) `web/tests/demo-data-traffic.test.js:105`
         computes the 24 h cutoff after the demo request, so a seed job
         finishing right at the boundary flips in/out (CI failure on
         wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
@@ -3775,11 +3775,20 @@ below carry their own later dates, item 12 is the current one).
         (Installed, Loaded, Hit rate with meter); Recent chips with "+N
         more"; agent health row; footer with last active and unattributed GB;
         summary tile details and range control.
-      - [ ] **CSS-HIDDEN-LINT-1** (web test; partly done: since SETTINGS-2 the
+      - [x] **CSS-HIDDEN-LINT-1** (bb75706, TEST-HYGIENE-1; Lint 3 in css-hygiene.test.js found and guarded 2 real overrides in kit.css) (web test; partly done: since SETTINGS-2 the
         hygiene check also reads kit.css) generalise the hidden-guard lint
         in `css-hygiene.test.js`: fail when a later or higher-specificity rule
         sets `display` on an element whose `[hidden]` guard it overrides
         (`css-pop-hidden.test.js` covers only compound `.pop.<x>`).
+      - [ ] nit (TEST-HYGIENE-1 review): Lint 3 blind spots (guard
+        ancestors must all appear in the rule's ancestors, so
+        `.kit .grid.selecting .pick` vs `.kit .card .pick[hidden]` is not
+        flagged; `.kit.<page>` treated as `.kit`) should be stated in the
+        lint header; ten web test files still use `until(..., 2000)`
+        (clients-live, clients-view-wiring, clients-nav-refresh,
+        clients-rename-wiring, steam-library-setting, onboarding-steamid,
+        downloads-names-loading, downloads-layout, downloads-updates-wiring,
+        downloads-owned-preloaded).
       - [ ] nit (FIX-POP-HIDDEN-1): `.pop` has no box-shadow and
         `.pop.menu` min-width is 100% where the Library mockup shows 260px
         plus shadow; dead `.cl-list > p` rule; the Clients empty state repeats
