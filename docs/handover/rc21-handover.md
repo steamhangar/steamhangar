@@ -34,6 +34,23 @@ For the next rc21 session. Read this, then the rc21 block in
   PROJECT_PLAN box). The planned full observation (Weg A, manual) is after
   the operator's vacation.
 
+## Operator decisions 2026-10-31 (operator unreachable afterwards)
+
+- Run the whole rc21 block autonomously: every package coder -> reviewer
+  PASS -> push `wp/*` -> merge to main after green branch CI; Android
+  packages included; at most 3 agents at a time.
+- Tag `v0.1.0-rc21` is allowed without asking again once every rc21
+  package has PASSED, all suites, `dev.sh verify` and the branch CI are
+  green. Then write the rollout Antrag (remove `VAULT_NGINX_AIO`,
+  `VAULT_AUTO_GC=execute`, HELLDIVERS 2 verify with `removed=[]`); the
+  prod rollout itself stays with the operator.
+- GRAPH-RECENT-1: the 24h graph is stitched with live minutes too, and the
+  header speed, pill and "Loading now" come from the live ring on every
+  range (coder decisions confirmed).
+- NOW-LOADING-1: read-only prod measurement with `dev.sh diag` allowed to
+  settle whether a cancelled job's runner keeps loading; result as inbox
+  note, nothing on prod is started, cancelled or changed.
+
 ## Next (rc21 order)
 
 1. GRAPH-RECENT-1 + LOADING-NOW-1 (fresh start), then RUNNER-SPLIT-1 (same files:
